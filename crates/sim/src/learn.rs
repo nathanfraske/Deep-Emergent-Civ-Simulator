@@ -525,6 +525,51 @@ pub fn feature_observations(
         .collect()
 }
 
+/// The valence observation a being makes of a perceived BEING-SIGNAL (perception-substrate arc, slice 3, the
+/// receiver-side valence learner core): the being correlates the signal, keyed by [`feature_subject`] on the
+/// sense channel and discriminated bucket it perceived, with its own interoceptive harm bit, minting one
+/// weight-of-evidence observation toward [`HARMS`] or [`BENIGN`]. It is the EXACT observation the being
+/// already makes for an environmental feature ([`feature_observations`]); the being-signal is fed through the
+/// identical learner, never branched on as "a being", so a signal's valence emerges receiver-side from the
+/// receiver's own correlated outcomes and is never stamped at the emitter. A being learns another's alarm
+/// call means harm because perceiving it correlated with its own reserves falling, exactly as it learns salty
+/// ground harms it. Pure and OFF the run path (no live caller): the being-percept keystone consumes it, so
+/// this is byte-neutral by construction. The (channel, bucket) come from the sensorium-gated magnitude
+/// percept ([`crate::perception_percept::MagnitudePercept`]); the harm bit is the being's own
+/// [`crate::homeostasis::is_harm_tick`] read; the weight is the existing learner's observation weight scaled
+/// by the being's plasticity.
+///
+/// RESERVED derive targets, surfaced with basis, deferred by the gate to their own builds (this core reuses
+/// the existing learner and reserves them, so it moves no pin):
+/// - The evidence WEIGHT's two likelihoods are the existing reserved `p_harm_given_harms`/`p_harm_given_benign`
+///   (never the fixed dev 0.9/0.1). The per-being, per-(channel, bucket) form (the weight-of-evidence of
+///   `P(harm-bit | feature harms)` and `P(harm-bit | benign)` estimated from the being's own
+///   [`civsim_physics::laws::harm_class`] dose-response crossed with its reserve-delta noise distribution) is
+///   the deepest derive target, a build shared with the affordance composer, framed and sequenced separately.
+/// - The harm bit's NOISE FLOOR is a flat authored scalar today; deriving it per-axis from
+///   [`crate::homeostasis::DerivedDrain`], and making the outcome per-axis, is a LIVE-learner behaviour change
+///   (it moves the pins), reserved for the keystone or its own stated-hash piece.
+/// - The correlation is SAME-TICK: the harm path carries no eligibility trace. The reward pole's
+///   `eligibility_decay` on the harm path, which credits a LAGGED co-occurrence (the predator-approach-then-harm
+///   alarm cue, load-bearing for the predation payoff), is a live behaviour change reserved for the keystone.
+/// - REFERENTIAL meaning (a signal predicting harm elsewhere or to another, not the receiver's own harm) is a
+///   flagged open limit: the outcome the learner correlates against is the receiver's own reserve fall.
+pub fn being_signal_observation(
+    channel: u16,
+    bucket: i64,
+    harm: bool,
+    plasticity: Fixed,
+    calib: &HarmLearningCalib,
+) -> FeatureObservation {
+    let base = calib.observation_weight();
+    let weight = base.checked_mul(plasticity).unwrap_or(base);
+    FeatureObservation {
+        subject: feature_subject(channel, bucket),
+        toward: if harm { HARMS } else { BENIGN },
+        weight,
+    }
+}
+
 /// The REWARD observations a being makes this tick (ideation / experiential-discovery arc, piece 1, slice 1a
 /// in its degenerate single-tick form): one per PRESENT feature of the cell it stands on (a channel whose
 /// amount is positive), toward `REWARDS` if it felt a supra-recovery reserve RISE this tick and `NEUTRAL`
@@ -814,6 +859,63 @@ mod tests {
         assert_eq!(benign[0].subject, harm[0].subject);
         // A cell with no present feature yields nothing to correlate.
         assert!(feature_observations(true, &[Fixed::ZERO], Fixed::ONE, &calib).is_empty());
+    }
+
+    #[test]
+    fn a_being_signal_earns_a_valence_observation_pointed_by_the_harm_bit() {
+        // Slice 3 core: a perceived being-signal (channel, bucket) correlated with the being's own harm bit
+        // mints one observation toward HARMS on a harm tick, BENIGN otherwise, on its own subject.
+        let calib = HarmLearningCalib::dev_default();
+        let harm = being_signal_observation(2, 7, true, Fixed::ONE, &calib);
+        assert_eq!(harm.toward, HARMS, "a harm tick points toward HARMS");
+        assert_eq!(
+            harm.subject,
+            feature_subject(2, 7),
+            "keyed on channel and bucket"
+        );
+        assert!(harm.weight > Fixed::ZERO, "positive evidence weight");
+        let benign = being_signal_observation(2, 7, false, Fixed::ONE, &calib);
+        assert_eq!(
+            benign.toward, BENIGN,
+            "a harm-free tick points toward BENIGN"
+        );
+        assert_eq!(
+            benign.subject, harm.subject,
+            "the same signal is the same subject"
+        );
+    }
+
+    #[test]
+    fn a_being_signal_is_learned_identically_to_an_environmental_feature() {
+        // The being-signal is fed through the exact same learner: for the same channel, bucket, harm bit,
+        // and plasticity, the observation matches what the environmental learner mints, so no "communication"
+        // path is special-cased and the valence emerges receiver-side from correlation alone.
+        let calib = HarmLearningCalib::dev_default();
+        // An environmental feature whose amount buckets to a known bucket on channel 0.
+        let amount = Fixed::from_int(2);
+        let bucket = feature_bucket(amount, calib.feature_granularity);
+        let env = feature_observations(true, &[amount], Fixed::ONE, &calib);
+        let sig = being_signal_observation(0, bucket, true, Fixed::ONE, &calib);
+        assert_eq!(sig.subject, env[0].subject, "same subject minting");
+        assert_eq!(sig.toward, env[0].toward, "same valence direction");
+        assert_eq!(
+            sig.weight, env[0].weight,
+            "same evidence weight (the shared reserved likelihoods)"
+        );
+    }
+
+    #[test]
+    fn the_being_signal_weight_scales_by_plasticity() {
+        // The weight is the existing learner's observation weight scaled by the being's plasticity (a
+        // keener learner extracts more evidence per observation), reusing the reserved likelihoods.
+        let calib = HarmLearningCalib::dev_default();
+        let base = being_signal_observation(1, 3, true, Fixed::ONE, &calib);
+        let keen = being_signal_observation(1, 3, true, Fixed::from_int(2), &calib);
+        assert_eq!(base.weight, calib.observation_weight());
+        assert!(
+            keen.weight > base.weight,
+            "a higher plasticity extracts more evidence"
+        );
     }
 
     #[test]
