@@ -309,9 +309,10 @@ pub struct EnvironFields {
     /// would (the min over a singleton). Not folded into `state_hash` like `producer`/`fertility`: its
     /// effect enters through the `capacity` the extract beat shapes.
     producer_source: Vec<Vec<u16>>,
-    /// The standing-food COMPOSITION of the producer on each cell (chemistry arc, T3): the fixed
-    /// per-unit-biomass nutrient simplex (summing to one) a producer's food carries, seeded once from the
-    /// biosphere ([`crate::genesis::WorldGenesis::producer_compositions`]) and normalised here. `None` where
+    /// The standing-food COMPOSITION of the producer on each cell (chemistry arc, T3; magnitudes CORRECTED-T3):
+    /// the fixed per-unit-biomass axis vector a producer's food carries at its REAL magnitudes (no longer a
+    /// sum-to-one simplex, so an energy-dense plant feeds more than a woody one), seeded once from the
+    /// biosphere ([`crate::genesis::WorldGenesis::producer_compositions`]). `None` where
     /// no producer composition is seeded, in which case the standing food is the single `bio.energy_density`
     /// class exactly as before (byte-identical). Where `Some`, `regrow_supply` writes each food axis's supply
     /// as the logistic biomass VOLUME times that axis's density, and reads the remaining volume back as the
@@ -319,14 +320,54 @@ pub struct EnvironFields {
     /// plant and the composition stays a single scalar stock (never N independent stocks). Not folded into
     /// `state_hash`: its effect enters through the food supplies it shapes, which the [`ResourceField`] folds.
     producer_food: Vec<Option<BTreeMap<String, Fixed>>>,
+    /// The WORLD-DECLARED located scalar energy fields keyed by field-kind id (Arc 5, the data-defined field
+    /// set): the intrinsic per-cell scalar an alien source reads through [`AbioticField::DataScalar`] (a
+    /// chemosynthetic redox potential, a geothermal flux, a mana field). Each is a [`ScalarField`] on the same
+    /// grid, read (and, if the binding depletes, drawn down) through the SAME point mechanism as water, so a new
+    /// energy field is a data row plus a binding, never a code change (Principle 8, 11). EMPTY on every Terran
+    /// world (which uses only the intrinsic light/water/soil backings), so both its extract path and its hash
+    /// fold are byte-identical to the pre-Arc-5 run. Folded into `state_hash` in id order after salt: an empty
+    /// collection folds NOTHING (byte-neutral), while a world that declares and depletes an alien field folds it,
+    /// so divergence in it is caught exactly as water and salt are.
+    data_fields: BTreeMap<u16, ScalarField>,
+    /// The world's DATA sky for the diurnal insolation drive (day-night arc), or `None` when the cycle is
+    /// UNARMED. Opt-in like the living scenario: while `None` the `light` field keeps the static build-time
+    /// latitude map, so a run that never arms the cycle is byte-identical and the four determinism pins hold;
+    /// while `Some`, [`Self::step`] recomputes the light each tick from the sun-angle law over this sky.
+    sky: Option<DiurnalSky>,
+    /// The private diurnal PHASE COUNTER: the number of environ steps since arming, advanced once per tick in
+    /// the insolation step. It is FIREWALLED, never exposed to the percept or any behavioural substrate, so a
+    /// diurnal rhythm can only reach a being through the cycling light and temperature MAGNITUDES it perceives
+    /// and never by reading the clock (the steering line: entrainment emerges, it is not templated). Not folded
+    /// into the state hash: its effect enters through the light field, which drives the hashed productivity
+    /// capacity; on an unarmed run it never advances, so the pins hold.
+    diurnal_tick: u64,
+    /// The per-cell SOLAR-FORCING BASELINE temperature the diurnal drive computes each armed tick (the
+    /// radiative-equilibrium temperature of the absorbed insolation plus the world's back-radiation floor,
+    /// day-night arc, night-floor form (2)). The runner copies it into the temperature `Field`'s relaxation
+    /// baseline, and the field's existing relaxation-plus-diffusion produces the emergent surface swing and
+    /// thermal lag. EMPTY when the cycle is unarmed (no copy happens, the field baseline stands, byte-identical).
+    solar_baseline: Vec<Fixed>,
+    /// The per-cell THERMAL-INERTIA FACTOR the diurnal drive computes each armed tick (follow-on 2): the ratio
+    /// of the dry substrate's volumetric heat capacity to the cell's own, blended from the cell's real water
+    /// fraction and freeze state ([`SurfaceThermal::inertia_factor`]). The runner copies it into the temperature
+    /// `Field`, whose relaxation-plus-diffusion step scales by it, so a water-laden cell lags and swings less
+    /// than dry land (the ocean effect), emergent from the cell's own water content. A dry cell reads one, so
+    /// its dynamics are unchanged. EMPTY when the cycle is unarmed (the field's inertia stays absent, and its
+    /// step is byte-identical to the uniform pre-follow-on kernel).
+    solar_inertia: Vec<Fixed>,
 }
 
-/// Which run FIELD an abiotic source reads: the field IDENTITY, named explicitly so a source binds to the
-/// field it actually draws on, never a variant that conflates identity with depletion behaviour (FINDING-1).
-/// Whether the source DEPLETES the field is separate data ([`AbioticBinding::depletes`]), so a renewable
-/// light-flux and a finite water-stock are the SAME mechanism with different data, and (with Arc 5's
-/// data-defined field set) an alien source, geothermal or a redox gradient or a mana field, is a new field
-/// handle plus the environ field it reads rather than a rewrite of the extract dispatch (Principle 11).
+/// The VALUE BACKING of an abiotic source: which located field its available energy is read from (decoupled
+/// from the READ-SHAPE, [`ReadShape`], that says HOW the draw is derived, and from whether it DEPLETES,
+/// [`AbioticBinding::depletes`], so a renewable light-flux and a finite water-stock are the SAME mechanism with
+/// different data, FINDING-1). The three named members are the engine's INTRINSIC floor subsystems, each a
+/// per-cell located quantity stepped by a fixed physics stencil (light, hydrology, soil nutrient); they are a
+/// bounded engine set, documented implemented-not-exhaustive (an environment-owned nodal or graph-keyed backing
+/// would be a bounded-Rust addition), never asserted closed. [`AbioticField::DataScalar`] is the OPEN arm that
+/// realizes Arc 5's data-defined field set (Principle 8, 11): a world-declared located scalar (a chemosynthetic,
+/// geothermal, or mana energy field) is a `ScalarField` row in [`EnvironFields::data_fields`] plus a binding
+/// naming its id, never a new enum variant, so the alien is a DATA ROW rather than a rewrite of the dispatch.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum AbioticField {
     /// The LIGHT field (the latitude-light rate). Renewable by default (a world sets `depletes` if it models
@@ -336,6 +377,86 @@ pub enum AbioticField {
     Water,
     /// The located SOIL-NUTRIENT field, read and drawn by class.
     Soil,
+    /// A WORLD-DECLARED located scalar field (Arc 5): the intrinsic per-cell scalar the world adds to
+    /// [`EnvironFields::data_fields`] under this id, read and (if it depletes) drawn down through the SAME point
+    /// mechanism as water. The OPEN membership: a chemosynthetic, geothermal, or mana source is this data row
+    /// plus a binding, no new enum variant (Principle 8, 11). A source whose available draw is a between-quantity
+    /// DIFFERENCE (a redox donor/acceptor) or a between-cell GRADIENT still reads scalar field(s), not a new
+    /// backing kind, but through a different [`ReadShape`] operator; the difference case ALSO needs the binding
+    /// to name more than one field (an ordered field/role list), a binding-arity extension the later segment
+    /// adds alongside the `ReadShape::Difference` variant. Segment 1 provisions the single-field point read.
+    DataScalar(u16),
+}
+
+/// The SPATIAL READ-SHAPE of an abiotic source (Arc 5): HOW its available draw is derived from the located
+/// field(s) its binding names, decoupled from the value BACKING ([`AbioticField`]). The section-10 blind panel
+/// identified this as the real generalization axis: the pre-Arc-5 dispatch read the value AT the producer's own
+/// cell and thereby AUTHORED point-locality as the definition of a supply, foreclosing a source whose energy is
+/// a between-quantity difference (a redox chemolithotroph draws on a donor/acceptor potential DIFFERENCE, not a
+/// value at one cell) or a between-cell gradient. Here a point read is ONE operator among a data-selected set,
+/// never the definition of a supply. Each variant is a fixed-Rust physics operator (the mechanism, the same
+/// class the field stencils already use); which one a source uses is data (Principle 11). Segment 1 implements
+/// `Point` only (the byte-neutral Earth read); the difference and gradient operators are the following segments.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum ReadShape {
+    /// The value AT the producer's own cell (the point read of the backing). The Earth default, byte-identical
+    /// to the pre-Arc-5 match.
+    #[default]
+    Point,
+}
+
+/// A redox source's yield DERIVATION from the floor (Arc 5 segment 3, the depth-independent CORE): the biomass a
+/// chemolithotroph fixes per unit stock DERIVES from the galvanic EMF of its electron-donor/electron-acceptor
+/// couple, rather than a world-declared raw conversion. The two STANDARD POTENTIALS are floor data (the substances'
+/// own `chem.standard_potential`, the authored physics floor, P9-legal); the EMF is the floor law
+/// [`civsim_physics::laws::battery_emf`] (`E_acceptor - E_donor`, the galvanic cell EMF), clamped at zero AT
+/// STANDARD CONCENTRATIONS (a couple whose STANDARD EMF is non-positive releases no free energy and powers no life
+/// in the standard state); the yield is that EMF times the RESERVED [`AbioticSourceRegistry::emf_to_biomass`]
+/// coupling. So a redox source's conversion is neither the soil-derived global nor a fabricated per-source number:
+/// it is DERIVED from the floor and the couple (Principle 6, 11), and any redox chemistry (Terran vent
+/// sulfide/oxygen, an alien couple) is a data row of two potentials.
+///
+/// DEPTH EXTENSION, FLAGGED not wired (the owner's standard-EMF-versus-Nernst ruling): this CORE uses the STANDARD
+/// EMF, the base BOTH depths share. Full-Nernst adds a concentration adjustment to the EMF, the reaction quotient
+/// `Q` formed from the donor/acceptor `DataScalar` field CONCENTRATIONS times the thermal factor `RT/nF`, a clean
+/// parameterized add-on around this same core (a `nernst`-adjusted EMF replacing the standard EMF in the yield),
+/// not built until the owner rules the depth. HONEST LIMIT of the standard-EMF core: the zero-clamp reads
+/// spontaneity at the STANDARD state, so a couple that is standard-non-spontaneous but concentration-driven
+/// spontaneous (or the reverse) is judged only by its standard EMF until the Nernst extension re-evaluates it at
+/// the actual field concentrations; and the reserved coupling folds the per-couple electron count `n` (from
+/// `dG = -n*F*EMF`) into one registry-global, so two couples differing only in `n` share a yield-per-volt until a
+/// per-couple `n` (a couple-data refinement) is added. Both are the owner's yield-model-depth call, surfaced.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct RedoxEmf {
+    /// The electron DONOR's (reductant's) standard reduction potential (floor `chem.standard_potential`).
+    pub donor_potential: Fixed,
+    /// The electron ACCEPTOR's (oxidant's) standard reduction potential (floor `chem.standard_potential`).
+    pub acceptor_potential: Fixed,
+    /// The NERNST concentration term (the depth extension, now built): the couple's CARRIER CHARGE `q = n*e`
+    /// (Coulombs, on the `elec.charge` floor axis, a per-couple datum), the electrons the reaction transfers
+    /// times the elementary charge. ZERO is the OPT-OUT: at `q = 0` the Nernst reduces to the standard EMF
+    /// (`nernst_emf` returns `standard_emf`), so a couple that declares no carrier charge keeps the
+    /// concentration-INDEPENDENT standard behaviour and is byte-identical. A world arms the concentration
+    /// dependence by declaring `q > 0` (via [`AbioticSourceRegistry::set_source_nernst`]). RESERVED.
+    pub carrier_charge: Fixed,
+    /// The ACCEPTOR's concentration field (its located stock), read at the cell for the Nernst activity. `None`
+    /// reads unit acceptor activity (an abundant/buffered acceptor), reproducing the standard EMF's implicit
+    /// unit-activity acceptor. The DONOR activity is the source's own bound stock field (the fuel that
+    /// depletes). Data (Principle 11): a world names which field carries the acceptor.
+    pub acceptor_field: Option<AbioticField>,
+    /// The activity COEFFICIENTS (dimensionless) for the donor and acceptor, the gamma of the Nernst activity
+    /// `a = gamma * concentration` (a data-defined activity registry, non-Terran override). ONE is the ideal
+    /// reference (`a = concentration`), the byte-neutral default. RESERVED per couple.
+    pub gamma_donor: Fixed,
+    /// The acceptor's activity coefficient (see [`Self::gamma_donor`]).
+    pub gamma_acceptor: Fixed,
+    /// The temperature COEFFICIENT of the standard potential `dE0/dT` (V/K), the couple's reaction-entropy
+    /// term, and the reference temperature `t_ref` (K) it is measured at, so `E0(T)` shifts with the cell
+    /// temperature (`standard_potential_at_temperature`). ZERO `de0_dt` is the temperature-independent default.
+    /// RESERVED per couple.
+    pub de0_dt: Fixed,
+    /// The reference temperature the standard potential and `dE0/dT` are measured at (K). See [`Self::de0_dt`].
+    pub t_ref: Fixed,
 }
 
 /// One AVAILABILITY BAND on an abiotic source (chemistry arc, Arc 5 T1): the source is present in a region
@@ -362,12 +483,43 @@ pub struct AbioticAvailability {
     pub bands: Vec<AxisBand>,
 }
 
+/// The per-source-class KINETICS of a redox uptake (the reversible-Michaelis-Menten draw, phase-2 increment 2):
+/// the catalytic turnover `kcat`, the half-saturation stock `Km`, the Hill cooperativity `h`, and the composition
+/// CLASS whose amount is the being's catalyst tissue (so `Vmax = kcat * catalyst`). A high-affinity oligotroph and
+/// a low-affinity copiotroph are data rows, not one authored kinetics. The catalyst class is DATA (Principle 11):
+/// it defaults to `bio.protein` (enzymes are proteins, Principle 4's causal-primitive-plus-correlating-proxy), but
+/// a world names its own, so a silicon or mineral-catalyst alien whose catalyst is NOT protein is a data row. The
+/// admit-alien catalyst AXIS (a first-class catalyst datum rather than a borrowed composition class) is coupled to
+/// R-SOURCE-VECTOR (the shared source-vector substrate), flagged there, not baked here.
+#[derive(Clone, Debug)]
+pub struct RedoxKinetics {
+    /// The catalytic turnover `kcat` (per tick), the maximum specific uptake per unit catalyst tissue. RESERVED,
+    /// basis the enzyme's turnover number. `Vmax = kcat * catalyst_tissue`, the emergent-throughput architecture
+    /// (no authored efficiency scalar; the throughput derives from the being's own catalyst amount).
+    pub kcat: Fixed,
+    /// The half-saturation stock `Km` (in the source's stock units): the substrate at which the uptake is half of
+    /// `Vmax`. RESERVED, basis the transporter's affinity for the source class it draws.
+    pub km: Fixed,
+    /// The Hill cooperativity exponent `h` (dimensionless): 1 the plain Monod, above 1 cooperative uptake.
+    /// RESERVED, basis the couple's cooperativity (1 unless the uptake is known cooperative).
+    pub hill: Fixed,
+    /// The producer-composition CLASS whose amount is the catalyst tissue (`Vmax = kcat * producer_food[class]`).
+    /// DATA: `bio.protein` by default (the protein-fraction proxy), a world names its own for an alien catalyst.
+    pub catalyst_class: String,
+}
+
 /// The data-defined binding of one abiotic source id to the run field it reads, whether it depletes that
 /// field, and the physics-floor class it supplies. Membership is data; a world's own sources are its own rows.
 #[derive(Clone, Debug)]
 pub struct AbioticBinding {
-    /// The run field this source reads (the field identity, decoupled from the depletion behaviour below).
+    /// The value backing this source reads (which located field, decoupled from the depletion behaviour below
+    /// and from the read-shape). See [`AbioticField`].
     pub field: AbioticField,
+    /// HOW the available draw is derived from the backing (Arc 5): a point read of the value at the producer's
+    /// cell, or (later segments) a between-quantity difference or a between-cell gradient. Decoupled from the
+    /// backing so a source's spatial shape is the world's data, not baked into the read. Defaults to
+    /// [`ReadShape::Point`], the byte-neutral Earth read. See [`ReadShape`].
+    pub read_shape: ReadShape,
     /// Whether drawing on this source DEPLETES its field's stock (a finite stock) or leaves it untouched (a
     /// renewable flux). Decoupled from the field so the flux-versus-stock choice is the world's data, not the
     /// engine's per-variant assumption (FINDING-1): a world can declare a renewable nutrient spring (Soil,
@@ -380,6 +532,40 @@ pub struct AbioticBinding {
     /// Where in a region this source is PRESENT (Arc 5 T1): the availability rule over the region's env axes.
     /// Empty (the default) means always present, so a source inserted without a rule keeps the old behaviour.
     pub availability: AbioticAvailability,
+    /// PER-SOURCE stock-to-biomass CONVERSION (Arc 5 segment 2): the biomass a unit of THIS field's stock
+    /// supports, the cap conversion the extract beat applies in Pass 1. `None` falls back to the registry-global
+    /// [`AbioticSourceRegistry::biomass_per_stock`], so a source that does not set it keeps the old behaviour
+    /// (byte-neutral). Decoupled per-source because a joule of redox free energy and a mole of soil nutrient are
+    /// dimensionally incommensurable: one global (whose basis is a SOIL fertility scale) cannot honestly convert
+    /// both (the section-10 panel finding). RESERVED per source, surfaced not fabricated: a world sets it, or for
+    /// a redox source it DERIVES from the floor `law.battery_emf` yield (segment 3, gated on the owner's
+    /// EMF-to-biomass coupling); the basis is that field's own floor units. HONEST LIMIT (opt-out, not yet
+    /// closed): an ALIEN `DataScalar` source that OMITS its conversion silently borrows the soil-derived global,
+    /// re-applying the incommensurable Terran scale it is meant to escape. The seam is closed only when the source
+    /// declares its own conversion (here) or segment 3 derives it from the floor; a future segment may REQUIRE an
+    /// alien source to declare or derive rather than defaulting to soil, which stays byte-neutral (no Earth source
+    /// is a `DataScalar`).
+    pub biomass_per_stock: Option<Fixed>,
+    /// PER-SOURCE STOICHIOMETRIC drawdown (Arc 5 segment 2): the units of THIS field's stock CONSUMED per unit
+    /// of supported biomass, the amount Pass 2 draws down. `None` falls back to the reciprocal of the effective
+    /// conversion (`draw_biomass / biomass_per_stock`), today's implicit 1:1 behaviour (byte-neutral). Decoupled
+    /// per-source because a real redox reaction consumes its reactants in a reaction-specific ratio, not 1:1
+    /// (the section-10 panel finding): a producer closing on a donor AND an acceptor (each its own source id,
+    /// Liebig-min co-limited by segment 1) draws each down by its OWN coefficient. RESERVED per source with the
+    /// same basis as the conversion; `Some(0)` models a catalyst (enabling but not consumed).
+    pub stock_per_biomass: Option<Fixed>,
+    /// A redox source's yield DERIVATION from the floor (Arc 5 segment 3): when `Some`, this source's stock-to-
+    /// biomass conversion is DERIVED from the couple's galvanic EMF times the reserved coupling (see [`RedoxEmf`]),
+    /// taking precedence over the per-source [`Self::biomass_per_stock`] and the registry-global, so a redox
+    /// source's power is neither soil-borrowed nor fabricated but read from the floor. `None` (every Terran source)
+    /// keeps the segment-2 behaviour, so the run is byte-identical.
+    pub redox_emf: Option<RedoxEmf>,
+    /// The reversible-Michaelis-Menten uptake KINETICS (phase-2 increment 2): when `Some` on an armed redox
+    /// source, the pass-2 draw is the [`civsim_physics::laws::reversible_uptake_flux`] (Hill-saturating, driven by
+    /// the Nernst EMF, `min(v, S)` conserved, `Vmax = kcat * catalyst tissue`) rather than the capacity-
+    /// proportional draw. `None` (every Terran source and every unarmed redox source) keeps the segment-2 draw,
+    /// so the run is byte-identical. See [`RedoxKinetics`].
+    pub kinetics: Option<RedoxKinetics>,
 }
 
 /// The abiotic-source binding registry (Principle 11): the extract mechanism is fixed Rust; the membership
@@ -389,15 +575,38 @@ pub struct AbioticBinding {
 pub struct AbioticSourceRegistry {
     bindings: BTreeMap<u16, AbioticBinding>,
     /// RESERVED (surfaced, not set): the standing biomass a unit of drawn located stock supports. Basis: the
-    /// reciprocal of the soil `fertility_scale`, so biomass fixed reconciles with the mass decay returns.
+    /// reciprocal of the soil `fertility_scale`, so biomass fixed reconciles with the mass decay returns. This is
+    /// the FALLBACK default (Arc 5 segment 2): a source that declares its own [`AbioticBinding::biomass_per_stock`]
+    /// converts on its own terms; only a source with `None` borrows this global, so a Terran world is byte-neutral.
     pub biomass_per_stock: Fixed,
     /// RESERVED: the fraction of the supported biomass a producer sequesters from its stock per tick. Basis:
     /// the nutrient turnover the standing biomass holds; set so a grazed cell depletes over a plausible span.
+    /// HONEST LIMIT (Arc 5 segment 2 scope): this per-tick TURNOVER fraction stays registry-global even after the
+    /// stock conversion and the stoichiometric drawdown became per-source, so two heterogeneous fields on one
+    /// world share one turnover rate; a per-source turnover is a later refinement, not built.
     pub draw_fraction: Fixed,
     /// RESERVED: the located stock a physical WEATHERING source (rock to nutrient) deposits per producer cell
     /// per tick, the bootstrap that seeds a bare soil before any corpse decomposes. Basis: the rock-weathering
     /// release rate the material data implies; set so a virgin world greens slowly.
     pub weathering_rate: Fixed,
+    /// RESERVED (Arc 5 segment 3, the EMF-to-biomass coupling, surfaced not fabricated, the OWNER's value): the
+    /// biomass a redox source supports per unit of galvanic EMF (volt) of its couple, the conversion from the
+    /// floor free-energy the couple releases to the biomass it fixes. Basis: a thermodynamic-efficiency bound
+    /// (`dG = -n * F * EMF`, so biomass-per-volt folds the electrons transferred `n`, the Faraday constant `F`,
+    /// and the fraction of free energy captured as biomass). Defaults to a fail-loud sentinel (zero): a redox
+    /// source's derived conversion REFUSES to run while it is unset (asserting, never silently starving), exactly
+    /// the sentinel discipline `biomass_per_stock` follows. A world with no redox source never reads it, so it
+    /// stays reserved and every Terran run is byte-identical.
+    pub emf_to_biomass: Fixed,
+    /// RESERVED (the Nernst thermal factor, surfaced not fabricated): the BOLTZMANN constant `k_B` (J/K), read
+    /// as a calibration value rather than a floor-toml axis (option B, so this does not grow the floor or race
+    /// the concurrent floor-reconciliation sweep). It sets the per-particle thermal factor `k_B*T/q` of the
+    /// Nernst EMF. Basis: the CODATA value `1.380649e-23 J/K`, scaled to the engine units. Defaults to the
+    /// fail-loud sentinel (zero): while it is unset, an ARMED Nernst source (carrier charge above zero) refuses
+    /// to run rather than fabricating a thermal factor; an unarmed or non-redox source never reads it, so every
+    /// Terran run stays byte-identical. The graduation of `k_B` to a proper floor fundamental (with `R` and
+    /// sigma re-derived from it) is the flagged floor-reconciliation follow-on, not this arc.
+    pub boltzmann_k: Fixed,
 }
 
 impl AbioticSourceRegistry {
@@ -425,15 +634,264 @@ impl AbioticSourceRegistry {
         class: &str,
         availability: AbioticAvailability,
     ) {
+        self.insert_shaped(id, field, ReadShape::Point, depletes, class, availability);
+    }
+
+    /// Bind a source id with an explicit READ-SHAPE (Arc 5): the general inserter [`Self::insert`] and
+    /// [`Self::insert_available`] delegate here with [`ReadShape::Point`] (the byte-neutral Earth read); a
+    /// source whose available draw is a between-quantity difference or a between-cell gradient passes its own
+    /// shape, so the spatial operator is the world's data (Principle 11), never baked into the extract dispatch.
+    pub fn insert_shaped(
+        &mut self,
+        id: u16,
+        field: AbioticField,
+        read_shape: ReadShape,
+        depletes: bool,
+        class: &str,
+        availability: AbioticAvailability,
+    ) {
         self.bindings.insert(
             id,
             AbioticBinding {
                 field,
+                read_shape,
                 depletes,
                 class: class.to_string(),
                 availability,
+                biomass_per_stock: None,
+                stock_per_biomass: None,
+                redox_emf: None,
+                kinetics: None,
             },
         );
+    }
+
+    /// Set the PER-SOURCE stock-to-biomass conversion and/or stoichiometric drawdown of an already-bound source
+    /// (Arc 5 segment 2). `None` on either leaves that dimension at the registry-global fallback (byte-neutral).
+    /// This is how a world declares that a mana or redox field converts and depletes on its OWN terms rather than
+    /// borrowing the soil-derived global: a joule of redox free energy and a mole of soil nutrient are
+    /// dimensionally incommensurable (Principle 11). A no-op if the id is unbound. FAILS LOUD at config time on a
+    /// per-source conversion of zero (a field that supports zero biomass per unit stock is a config error that
+    /// would silently starve the producer, exactly the sentinel the global assert guards; `stock_per_biomass` of
+    /// zero is NOT an error, it is the legitimate catalyst case, enabling but not consumed).
+    pub fn set_source_conversion(
+        &mut self,
+        id: u16,
+        biomass_per_stock: Option<Fixed>,
+        stock_per_biomass: Option<Fixed>,
+    ) {
+        if let Some(v) = biomass_per_stock {
+            assert!(
+                v > Fixed::ZERO,
+                "abiotic source {id}: a per-source biomass_per_stock must be positive (zero would silently \
+                 starve the producer); leave it None to use the registry-global fallback"
+            );
+        }
+        if let Some(b) = self.bindings.get_mut(&id) {
+            b.biomass_per_stock = biomass_per_stock;
+            b.stock_per_biomass = stock_per_biomass;
+        }
+    }
+
+    /// Declare a source's yield as a REDOX DERIVATION from the floor (Arc 5 segment 3): its stock-to-biomass
+    /// conversion is computed from the couple's galvanic EMF (the two floor standard potentials) times the reserved
+    /// [`Self::emf_to_biomass`] coupling, rather than a declared raw number (see [`RedoxEmf`]). A no-op if the id is
+    /// unbound. The couple's potentials are floor data; the coupling is the owner's reserved value, so the yield is
+    /// derived, never fabricated.
+    pub fn set_source_redox(&mut self, id: u16, donor_potential: Fixed, acceptor_potential: Fixed) {
+        if let Some(b) = self.bindings.get_mut(&id) {
+            b.redox_emf = Some(RedoxEmf {
+                donor_potential,
+                acceptor_potential,
+                // The Nernst concentration term is OPT-OUT by default: q = 0 reduces to the standard EMF, so a
+                // source armed only via this setter keeps the concentration-independent standard behaviour and
+                // is byte-identical. Ideal activity coefficients, no temperature coefficient.
+                carrier_charge: Fixed::ZERO,
+                acceptor_field: None,
+                gamma_donor: Fixed::ONE,
+                gamma_acceptor: Fixed::ONE,
+                de0_dt: Fixed::ZERO,
+                t_ref: Fixed::ZERO,
+            });
+        }
+    }
+
+    /// Arm the NERNST concentration dependence on an already-redox source (the depth extension): the couple's
+    /// carrier charge `q = n*e` (on `elec.charge`), the field carrying the ACCEPTOR concentration (`None` for a
+    /// unit-activity buffered acceptor), the donor/acceptor activity coefficients (gamma, `ONE` ideal), and the
+    /// standard-potential temperature coefficient `dE0/dT` with its reference temperature. With `q > 0` the
+    /// source's yield reads the couple's ACTUAL located concentrations, so its drive falls as the couple
+    /// depletes and crosses zero at its own equilibrium; `q = 0` (the default) is the standard EMF. A no-op if
+    /// the id is unbound or not a redox source (arm [`Self::set_source_redox`] first). All data (Principle 11).
+    #[allow(clippy::too_many_arguments)]
+    pub fn set_source_nernst(
+        &mut self,
+        id: u16,
+        carrier_charge: Fixed,
+        acceptor_field: Option<AbioticField>,
+        gamma_donor: Fixed,
+        gamma_acceptor: Fixed,
+        de0_dt: Fixed,
+        t_ref: Fixed,
+    ) {
+        if let Some(b) = self.bindings.get_mut(&id) {
+            if let Some(rx) = b.redox_emf.as_mut() {
+                rx.carrier_charge = carrier_charge;
+                rx.acceptor_field = acceptor_field;
+                rx.gamma_donor = gamma_donor;
+                rx.gamma_acceptor = gamma_acceptor;
+                rx.de0_dt = de0_dt;
+                rx.t_ref = t_ref;
+            }
+        }
+    }
+
+    /// Arm the reversible-Michaelis-Menten uptake KINETICS on a source (phase-2 increment 2): the catalytic
+    /// turnover `kcat`, the half-saturation `km`, the Hill exponent `hill`, and the producer-composition class
+    /// whose amount is the catalyst tissue (`Vmax = kcat * producer_food[catalyst_class]`, default `bio.protein`).
+    /// With this set on an armed redox source, its pass-2 draw is the reversible flux; unset, the draw is the
+    /// segment-2 capacity-proportional draw (byte-identical). A no-op if the id is unbound. All data (Principle 11).
+    pub fn set_source_kinetics(
+        &mut self,
+        id: u16,
+        kcat: Fixed,
+        km: Fixed,
+        hill: Fixed,
+        catalyst_class: &str,
+    ) {
+        if let Some(b) = self.bindings.get_mut(&id) {
+            b.kinetics = Some(RedoxKinetics {
+                kcat,
+                km,
+                hill,
+                catalyst_class: catalyst_class.to_string(),
+            });
+        }
+    }
+
+    /// The stock-to-biomass conversion a binding uses, resolving the Arc-5 precedence (segment 3 over 2 over the
+    /// global): a REDOX source DERIVES it from the couple's galvanic EMF ([`civsim_physics::laws::battery_emf`],
+    /// `E_acceptor - E_donor`, clamped at zero so a non-spontaneous couple powers no life) times the RESERVED
+    /// `emf_to_biomass` coupling, failing loud if that coupling is unset (the sentinel discipline, never silently
+    /// starving); otherwise the per-source [`AbioticBinding::biomass_per_stock`] if set, else the registry-global.
+    /// Byte-neutral for Earth (no redox source, no per-source override, so the global is returned unchanged).
+    fn effective_conversion(&self, binding: &AbioticBinding) -> Fixed {
+        if let Some(rx) = &binding.redox_emf {
+            assert!(
+                self.emf_to_biomass > Fixed::ZERO,
+                "redox source: emf_to_biomass coupling reserved value is unset (would starve every redox producer)"
+            );
+            let emf = laws::battery_emf(rx.acceptor_potential, rx.donor_potential).max(Fixed::ZERO);
+            return emf.checked_mul(self.emf_to_biomass).unwrap_or(Fixed::MAX);
+        }
+        binding.biomass_per_stock.unwrap_or(self.biomass_per_stock)
+    }
+
+    /// Set the reserved Boltzmann constant `k_B` the Nernst thermal factor reads (option B: a calibration value,
+    /// not a floor axis). A world that arms a Nernst redox source sets it from CODATA; a Terran world leaves it
+    /// at the fail-loud sentinel and never reads it.
+    pub fn set_boltzmann_k(&mut self, k: Fixed) {
+        self.boltzmann_k = k;
+    }
+
+    /// The NERNST-adjusted redox stock-to-biomass conversion at a cell (the concentration-dependent depth
+    /// extension): for an ARMED redox source (carrier charge above zero) it returns `Some(bps)` computed from
+    /// the couple's ACTUAL activities through [`civsim_physics::laws::nernst_emf`], so the drive FALLS as the
+    /// couple depletes and crosses zero at its own equilibrium, clamped at zero and times `emf_to_biomass`. The
+    /// activities are the raw donor and acceptor concentrations at the cell each times its `gamma`; the standard
+    /// potential first shifts with the cell temperature (`dE0/dT`). Returns `None` for a non-redox source or an
+    /// UNARMED redox source (carrier charge zero), whose conversion stays the standard [`Self::effective_conversion`]
+    /// (byte-identical). Fails loud if `emf_to_biomass` or `k_B` is unset while armed (the sentinel discipline).
+    fn redox_conversion_at(
+        &self,
+        binding: &AbioticBinding,
+        donor_conc: Fixed,
+        acceptor_conc: Fixed,
+        temperature: Fixed,
+    ) -> Option<Fixed> {
+        let emf = self.redox_nernst_emf(binding, donor_conc, acceptor_conc, temperature)?;
+        Some(emf.checked_mul(self.emf_to_biomass).unwrap_or(Fixed::MAX))
+    }
+
+    /// The clamped NERNST EMF (volts) of an ARMED redox source at a cell, the shared drive both the pass-1 yield
+    /// ([`Self::redox_conversion_at`]) and the pass-2 reversible-flux draw ([`Self::redox_draw_flux`]) read: the
+    /// standard potential shifted for temperature (`dE0/dT`), corrected for the couple's ACTUAL activities (raw
+    /// concentrations times `gamma`), clamped at zero (no life below its own equilibrium). Returns `None` for a
+    /// non-redox or UNARMED redox source (carrier charge zero). Fails loud if `emf_to_biomass` or `k_B` is unset
+    /// while armed (the sentinel discipline).
+    fn redox_nernst_emf(
+        &self,
+        binding: &AbioticBinding,
+        donor_conc: Fixed,
+        acceptor_conc: Fixed,
+        temperature: Fixed,
+    ) -> Option<Fixed> {
+        let rx = binding.redox_emf.as_ref()?;
+        if rx.carrier_charge <= Fixed::ZERO {
+            return None; // unarmed: the standard concentration-independent EMF via effective_conversion
+        }
+        assert!(
+            self.emf_to_biomass > Fixed::ZERO,
+            "redox source: emf_to_biomass coupling reserved value is unset (would starve every redox producer)"
+        );
+        assert!(
+            self.boltzmann_k > Fixed::ZERO,
+            "Nernst redox source: boltzmann_k reserved value is unset (would fabricate the thermal factor)"
+        );
+        let a_donor = rx.gamma_donor.checked_mul(donor_conc).unwrap_or(donor_conc);
+        let a_acceptor = rx
+            .gamma_acceptor
+            .checked_mul(acceptor_conc)
+            .unwrap_or(acceptor_conc);
+        // E0(T), then the Nernst concentration correction, clamped at zero (no life below equilibrium).
+        let e0_t = laws::standard_potential_at_temperature(
+            laws::battery_emf(rx.acceptor_potential, rx.donor_potential),
+            rx.de0_dt,
+            temperature,
+            rx.t_ref,
+        );
+        Some(
+            laws::nernst_emf(
+                e0_t,
+                a_donor,
+                a_acceptor,
+                self.boltzmann_k,
+                temperature,
+                rx.carrier_charge,
+            )
+            .max(Fixed::ZERO),
+        )
+    }
+
+    /// The pass-2 reversible-Michaelis-Menten uptake DRAW of an armed redox source WITH kinetics (phase-2
+    /// increment 2): the [`civsim_physics::laws::reversible_uptake_flux`] over the source's own stock, driven by
+    /// the couple's Nernst EMF, with `Vmax = kcat * catalyst_tissue` (the emergent throughput, no authored
+    /// efficiency scalar), the Hill saturation, and the structural `min(v, S)` conservation clamp. Returns `None`
+    /// for a source that is non-redox, unarmed, or carries no kinetics, whose draw stays the segment-2
+    /// capacity-proportional draw (byte-identical). `catalyst_tissue` is the being's catalyst amount (its
+    /// `catalyst_class` composition), read by the caller from the producer at the cell.
+    fn redox_draw_flux(
+        &self,
+        binding: &AbioticBinding,
+        stock: Fixed,
+        acceptor_conc: Fixed,
+        temperature: Fixed,
+        catalyst_tissue: Fixed,
+    ) -> Option<Fixed> {
+        let kin = binding.kinetics.as_ref()?;
+        let rx = binding.redox_emf.as_ref()?;
+        let emf = self.redox_nernst_emf(binding, stock, acceptor_conc, temperature)?;
+        let vmax = kin.kcat.checked_mul(catalyst_tissue).unwrap_or(Fixed::ZERO);
+        Some(laws::reversible_uptake_flux(
+            stock,
+            vmax,
+            kin.km,
+            kin.hill,
+            emf,
+            self.boltzmann_k,
+            temperature,
+            rx.carrier_charge,
+        ))
     }
 
     /// A labelled DEVELOPMENT FIXTURE reproducing the Earth abiotic triad exactly (Arc 5 T1), so a canonical
@@ -548,7 +1006,146 @@ impl EnvironFields {
             producer: vec![Fixed::ZERO; n],
             producer_source: vec![Vec::new(); n],
             producer_food: vec![None; n],
+            data_fields: BTreeMap::new(),
+            sky: None,
+            diurnal_tick: 0,
+            solar_baseline: Vec::new(),
+            solar_inertia: Vec::new(),
         }
+    }
+
+    /// Arm the DIURNAL insolation cycle (day-night arc, opt-in) with the world's data sky, so [`Self::step`]
+    /// recomputes the `light` field each tick from the sun-angle law instead of holding the static latitude map.
+    /// Unarmed (the default) the light stays static and the run is byte-identical, so the determinism pins hold;
+    /// this is armed only by a scenario that wants the cycle, like the living world. The phase counter restarts
+    /// at zero on arming (a deterministic per-scenario dawn), never read by any behavioural substrate.
+    pub fn arm_diurnal(&mut self, sky: DiurnalSky) {
+        self.sky = Some(sky);
+        self.diurnal_tick = 0;
+    }
+
+    /// Recompute the `light` field from the diurnal sun-angle law (day-night arc), advancing the private phase
+    /// counter one tick. A no-op when the cycle is unarmed (`sky` is `None`), so an unarmed run never touches the
+    /// light and is byte-identical. The phase is the counter modulo the sidereal rotation period, the orbital
+    /// phase the counter modulo the orbital period, and each cell's light is [`insolation_at`] over the world's
+    /// star-list. Deterministic (a pure fold over the counter and the cell coordinate), so it replays.
+    fn step_insolation(&mut self, temp: &Field) {
+        let Some(sky) = self.sky.clone() else {
+            return; // the cycle is unarmed: the static latitude light stands, byte-identical.
+        };
+        let (w, h) = (self.width, self.height);
+        let diurnal_phase = Fixed::from_ratio(
+            (self.diurnal_tick % sky.rotation_period_ticks) as i64,
+            sky.rotation_period_ticks as i64,
+        );
+        let orbital_phase = Fixed::from_ratio(
+            (self.diurnal_tick % sky.orbital_period_ticks) as i64,
+            sky.orbital_period_ticks as i64,
+        );
+        let n = (w.max(0) as usize) * (h.max(0) as usize);
+        if self.solar_baseline.len() != n {
+            self.solar_baseline = vec![Fixed::ZERO; n];
+        }
+        if self.solar_inertia.len() != n {
+            self.solar_inertia = vec![Fixed::ONE; n];
+        }
+        for y in 0..h {
+            for x in 0..w {
+                let i = self.idx(x, y);
+                let insol = insolation_at(x, y, w, h, diurnal_phase, orbital_phase, &sky);
+                self.light[i] = insol;
+                // The heat baseline (night-floor form (2)): the absorbed irradiance is the normalised daylit
+                // insolation scaled to physical watts by the stellar constant, plus the world's back-radiation
+                // floor so the night side relaxes toward a retained temperature (airless zero, Earth mild,
+                // Venus high) rather than absolute zero. The radiative-equilibrium law returns the surface
+                // temperature of that absorbed flux; the field's relaxation-plus-diffusion then produces the
+                // emergent swing and lag. The emissivity stays uniform (the per-material radiative
+                // differentiation is per-cell ALBEDO, a separate flagged follow-on on the floor law).
+                let absorbed = insol
+                    .checked_mul(sky.solar_constant)
+                    .unwrap_or(Fixed::MAX)
+                    .saturating_add(sky.back_radiation);
+                self.solar_baseline[i] = civsim_physics::laws::radiative_equilibrium(
+                    absorbed,
+                    sky.emissivity,
+                    sky.sigma,
+                    sky.t_max,
+                );
+                // The per-material THERMAL INERTIA (follow-on 2): the cell's own soil moisture and standing-water
+                // depth, with its current temperature (the freeze read), blend the substrate with water or ice,
+                // and the factor (one for bone-dry land, below one for damp or water-laden cells) scales how fast
+                // the field relaxes and diffuses, so a water-laden cell lags and swings less than dry land. A dry
+                // cell reads one, so its dynamics are unchanged. The frozen state reads the field's current
+                // temperature, a one-tick lag the deterministic replay preserves.
+                self.solar_inertia[i] = sky.surface.inertia_factor(
+                    self.water.at(x, y),
+                    self.moisture[i],
+                    temp.at(x, y),
+                );
+            }
+        }
+        self.diurnal_tick = self.diurnal_tick.saturating_add(1);
+    }
+
+    /// Whether the diurnal insolation cycle is armed (day-night arc), so the runner knows to copy
+    /// [`Self::solar_baseline_at`] into the temperature field's relaxation baseline each tick.
+    pub fn is_diurnal_armed(&self) -> bool {
+        self.sky.is_some()
+    }
+
+    /// Copy the armed diurnal SOLAR BASELINE into the temperature field's relaxation baseline (day-night arc,
+    /// the heat coupling). A no-op when the cycle is unarmed, so an unarmed run leaves the field's baseline
+    /// untouched and is byte-identical. Called by the runner each tick after [`Self::step`] has computed the
+    /// baseline, keeping the runner edit to one line; the field then relaxes toward the cycling baseline and the
+    /// diurnal swing and thermal lag emerge from its own relaxation-plus-diffusion (bounded by the maximum
+    /// principle), never authored here.
+    pub fn apply_diurnal_baseline(&self, field: &mut Field) {
+        if !self.is_diurnal_armed() {
+            return;
+        }
+        for y in 0..self.height {
+            for x in 0..self.width {
+                field.set_baseline_at(x, y, self.solar_baseline_at(x, y));
+            }
+        }
+    }
+
+    /// The per-cell solar-forcing baseline TEMPERATURE the armed diurnal drive computed this tick (day-night
+    /// arc), for the runner to copy into the temperature field's relaxation baseline. Reads zero for an
+    /// off-grid cell or an unarmed run (the field baseline then stands unchanged).
+    pub fn solar_baseline_at(&self, x: i32, y: i32) -> Fixed {
+        if x < 0 || y < 0 || x >= self.width || y >= self.height {
+            return Fixed::ZERO;
+        }
+        self.solar_baseline
+            .get(self.idx(x, y))
+            .copied()
+            .unwrap_or(Fixed::ZERO)
+    }
+
+    /// Copy the armed diurnal per-cell THERMAL-INERTIA factor into the temperature field (follow-on 2), so the
+    /// field's relaxation-plus-diffusion step scales by it and a water-laden cell lags and swings less than dry
+    /// land. A no-op when the cycle is unarmed (the field's inertia stays absent and its step is byte-identical
+    /// to the uniform pre-follow-on kernel). Called by the runner each tick after [`Self::step`], the sibling of
+    /// [`Self::apply_diurnal_baseline`]; a dry cell's factor is one, so only water-laden cells change.
+    pub fn apply_diurnal_inertia(&self, field: &mut Field) {
+        if !self.is_diurnal_armed() {
+            return;
+        }
+        field.set_inertia_from(&self.solar_inertia);
+    }
+
+    /// The per-cell thermal-inertia factor the armed diurnal drive computed this tick (follow-on 2): one for
+    /// dry land, below one for a water-laden cell (slower, lagging). Reads one for an off-grid cell or an
+    /// unarmed run (no slowing, the byte-neutral baseline).
+    pub fn solar_inertia_at(&self, x: i32, y: i32) -> Fixed {
+        if x < 0 || y < 0 || x >= self.width || y >= self.height {
+            return Fixed::ONE;
+        }
+        self.solar_inertia
+            .get(self.idx(x, y))
+            .copied()
+            .unwrap_or(Fixed::ONE)
     }
 
     #[inline]
@@ -626,6 +1223,7 @@ impl EnvironFields {
     /// is the runner's diffused [`Field`], sized to the same grid. The standing stock itself is regrown
     /// and grazed through [`Self::regrow_supply`] against this capacity, not here.
     pub fn step(&mut self, temp: &Field, calib: &EnvironCalib) {
+        self.step_insolation(temp);
         self.step_hydrology(temp, calib);
         self.step_salinity(calib);
         self.step_productivity(temp, calib);
@@ -823,12 +1421,23 @@ impl EnvironFields {
     }
 
     /// Seed the standing-food COMPOSITION of each producer cell from the biosphere (chemistry arc, T3, once at
-    /// world build), normalising the given per-unit-biomass axis vector to a NUTRIENT SIMPLEX (the food axes
-    /// summing to one) so the standing food is the producer's own chemistry scaled by the logistic biomass
-    /// volume. The environmental axes regrow writes itself (water, salinity) are EXCLUDED, so the food
-    /// composition never fights the hydrology write. A composition with no positive food axis seeds nothing
-    /// (the cell keeps the single energy-density default, byte-identical). Off-grid cells dropped; last
-    /// occupant wins on a shared cell. See [`Self::producer_food`].
+    /// world build), carrying the given per-unit-biomass axis vector at its REAL per-axis MAGNITUDES (CORRECTED-T3,
+    /// owner-ruled): the food is NOT normalised to a sum-to-one simplex, so a plant's food value reflects how much
+    /// its own substances actually carry (an energy-dense fruit feeds more per unit biomass than a woody stem),
+    /// rather than every plant reading equally nutritious. A blind panel (verified against source) caught that the
+    /// prior simplex authored a flat 1/total nutrition, and that collapsing instead to a plant-side gross
+    /// energy-density scalar would author digestibility = 1 for every consumer: so the FULL de-normalised VECTOR is
+    /// carried, and the per-consumer usable value EMERGES downstream in [`crate::physiology::physical_intake`],
+    /// which folds this real content against the CONSUMER's own assimilation and trophic efficiency through the
+    /// SAME `bio.energy_density` reserve bridge (keyed on no axis identity, so a mana-fed or silicon being is a
+    /// data row). No fresh UNITS anchor is minted: the existing reserve bridge converts the magnitude, so energy is
+    /// conserved across the eat step. This is the food-value MECHANISM (the units question), distinct from the
+    /// biosphere-BALANCE calibration the `worldbuild.rs` T3 owner-gate still holds (whether the grazers THRIVE on
+    /// these real food values, which the balance work tunes; this foundation makes the value real, it does not
+    /// claim the world thrives). The environmental axes regrow writes itself (water, salinity) are EXCLUDED,
+    /// so the food never fights the hydrology write. A composition with no positive food axis seeds nothing (the
+    /// cell keeps the single energy-density default, byte-identical). Off-grid cells dropped; last occupant wins on
+    /// a shared cell. See [`Self::producer_food`].
     pub fn set_producer_food(&mut self, cells: &[(Coord3, BTreeMap<String, Fixed>)]) {
         for f in self.producer_food.iter_mut() {
             *f = None;
@@ -838,25 +1447,40 @@ impl EnvironFields {
                 continue;
             }
             let is_food = |a: &str| a != WATER_FRACTION && a != SALINITY;
-            let total = comp
+            // Carry the real per-axis magnitudes (no division by the total): the plant's own chemistry at full
+            // scale, so its food value is what it is materially made of, not a flattened ratio.
+            let food_vec: BTreeMap<String, Fixed> = comp
                 .iter()
                 .filter(|(a, v)| is_food(a) && **v > Fixed::ZERO)
-                .fold(Fixed::ZERO, |acc, (_, v)| acc.saturating_add(*v));
-            if total <= Fixed::ZERO {
+                .map(|(a, v)| (a.clone(), *v))
+                .collect();
+            if food_vec.is_empty() {
                 continue; // no positive food axis: keep the energy-density default
             }
-            let simplex: BTreeMap<String, Fixed> = comp
-                .iter()
-                .filter(|(a, v)| is_food(a) && **v > Fixed::ZERO)
-                .map(|(a, v)| (a.clone(), v.checked_div(total).unwrap_or(Fixed::ZERO)))
-                .filter(|(_, v)| *v > Fixed::ZERO)
-                .collect();
-            if simplex.is_empty() {
-                continue;
-            }
             let i = self.idx(cell.x, cell.y);
-            self.producer_food[i] = Some(simplex);
+            self.producer_food[i] = Some(food_vec);
         }
+    }
+
+    /// Declare (or replace) a world's located SCALAR energy field under a field-kind id (Arc 5, the data-defined
+    /// field set): the data-row path an [`AbioticField::DataScalar`] binding reads. An alien source (a
+    /// chemosynthetic redox potential, a geothermal flux, a mana field) is this call plus a binding, never a new
+    /// enum variant (Principle 8, 11). The field must match the environ extent. Seeded at world build (or stepped
+    /// by the world's own stencil); read and depleted through the same point mechanism as water. Idempotent on
+    /// re-seed. A Terran world calls this never, so its `data_fields` stays empty and its run is byte-identical.
+    pub fn set_data_field(&mut self, id: u16, field: ScalarField) {
+        assert_eq!(
+            field.dims(),
+            (self.width, self.height),
+            "a data energy field matches the environ extent"
+        );
+        self.data_fields.insert(id, field);
+    }
+
+    /// The value of a world-declared located energy field at a cell (Arc 5), or `None` if the world declared no
+    /// field under this id. A pure read for the field reader and tests; mutates nothing.
+    pub fn data_field_at(&self, id: u16, x: i32, y: i32) -> Option<Fixed> {
+        self.data_fields.get(&id).map(|f| f.at(x, y))
     }
 
     /// The producer EXTRACT-DEPLETE beat (the closed nutrient cycle): each producer draws its food from the
@@ -872,6 +1496,7 @@ impl EnvironFields {
         &mut self,
         soil: &mut SoilNutrientField,
         registry: &AbioticSourceRegistry,
+        temp: &Field,
     ) {
         // Fail loud on an unset reserved conversion rather than silently capping every producer to zero.
         assert!(
@@ -900,21 +1525,63 @@ impl EnvironFields {
                     let binding = registry.binding(id).unwrap_or_else(|| {
                         panic!("nutrient cycle: producer source id {id} has no registry binding")
                     });
-                    let supply = match binding.field {
-                        AbioticField::Light => self.light[i],
-                        AbioticField::Soil => {
-                            // The rock-to-nutrient WEATHERING bootstrap seeds the soil stock (soil-specific;
-                            // a general per-field replenishment handle is Arc 5).
-                            if registry.weathering_rate > Fixed::ZERO {
-                                soil.deposit(coord, &binding.class, registry.weathering_rate);
+                    // The available draw of this source at the cell, derived from its backing under its
+                    // READ-SHAPE (Arc 5). Segment 1 implements the POINT read (the value at the producer's own
+                    // cell); the difference and gradient operators are the following segments. For the Earth
+                    // backings under Point this is byte-identical to the pre-Arc-5 match.
+                    let supply = match binding.read_shape {
+                        ReadShape::Point => match binding.field {
+                            AbioticField::Light => self.light[i],
+                            AbioticField::Soil => {
+                                // The rock-to-nutrient WEATHERING bootstrap seeds the soil stock (soil-specific;
+                                // a general per-field replenishment handle is Arc 5).
+                                if registry.weathering_rate > Fixed::ZERO {
+                                    soil.deposit(coord, &binding.class, registry.weathering_rate);
+                                }
+                                soil.mass(coord, &binding.class)
                             }
-                            soil.mass(coord, &binding.class)
-                        }
-                        AbioticField::Water => self.water.at(x, y),
+                            AbioticField::Water => self.water.at(x, y),
+                            // A world-declared located scalar (mana, geothermal, a redox potential): read its
+                            // per-cell value. A binding to a field the world never declared is a config error:
+                            // fail loud (matching the unbound-source-id panic) rather than silently starve.
+                            AbioticField::DataScalar(fid) => self
+                                .data_fields
+                                .get(&fid)
+                                .unwrap_or_else(|| {
+                                    panic!(
+                                        "nutrient cycle: producer source binds DataScalar field {fid} but the world declared no such field"
+                                    )
+                                })
+                                .at(x, y),
+                        },
                     };
-                    let supported = supply
-                        .checked_mul(registry.biomass_per_stock)
-                        .unwrap_or(Fixed::MAX);
+                    // The stock-to-biomass conversion resolves the Arc-5 precedence (the Nernst redox derivation
+                    // over the segment-2 per-source value over the registry-global; byte-neutral for Earth, which
+                    // declares none of the first two): an ARMED Nernst redox source reads its couple's ACTUAL
+                    // concentrations at the cell (donor = this source's own supply, acceptor = its named field or
+                    // unit activity, the cell temperature driving the k_B*T/q factor and the dE0/dT shift), so its
+                    // yield FALLS as the couple depletes and crosses zero at its own equilibrium; an unarmed redox
+                    // source uses the standard concentration-independent EMF, a per-source override its own rate,
+                    // else the soil-derived global (each byte-identical to before).
+                    let bps = {
+                        let temperature = temp.at(x, y);
+                        let acceptor_conc =
+                            match binding.redox_emf.as_ref().and_then(|rx| rx.acceptor_field) {
+                                Some(AbioticField::Light) => self.light[i],
+                                Some(AbioticField::Water) => self.water.at(x, y),
+                                Some(AbioticField::Soil) => soil.mass(coord, &binding.class),
+                                Some(AbioticField::DataScalar(fid)) => self
+                                    .data_fields
+                                    .get(&fid)
+                                    .map(|f| f.at(x, y))
+                                    .unwrap_or(Fixed::ONE),
+                                None => Fixed::ONE, // a buffered/abundant acceptor: unit activity (the standard case)
+                            };
+                        registry
+                            .redox_conversion_at(binding, supply, acceptor_conc, temperature)
+                            .unwrap_or_else(|| registry.effective_conversion(binding))
+                    };
+                    let supported = supply.checked_mul(bps).unwrap_or(Fixed::MAX);
                     if supported < min_supported {
                         min_supported = supported;
                     }
@@ -939,9 +1606,76 @@ impl EnvironFields {
                     let draw_biomass = self.capacity.cells[i]
                         .checked_mul(registry.draw_fraction)
                         .unwrap_or(Fixed::ZERO);
-                    let draw_amt = draw_biomass
-                        .checked_div(registry.biomass_per_stock)
-                        .unwrap_or(Fixed::ZERO);
+                    // The stock DRAWN per unit biomass is per-source STOICHIOMETRY (Arc 5 segment 2): a redox
+                    // reaction consumes its reactants in a reaction-specific ratio, not 1:1, so a producer
+                    // closing on a donor and an acceptor (each its own source id, Liebig-min co-limited) draws
+                    // each by its OWN coefficient. `None` falls back to the reciprocal of this source's effective
+                    // conversion (draw_biomass / bps, the same segment-3-or-2-or-global conversion Pass 1 capped
+                    // by), today's implicit 1:1 draw (byte-identical for Earth).
+                    // The reversible-flux DRAW (increment 2): an armed redox source WITH kinetics draws its own
+                    // uptake flux (Hill-saturating, driven by the couple's Nernst EMF, Vmax = kcat * the being's
+                    // catalyst tissue, min(v, S) conserved) over its own stock, so a depleting couple's draw
+                    // saturates and falls with the drive. Any other source (non-redox, unarmed, or no kinetics)
+                    // keeps the segment-2 capacity-proportional draw exactly (byte-identical). The catalyst tissue
+                    // is the producer's own composition amount for the kinetics' named class (default bio.protein,
+                    // a per-source datum so an alien names its own catalyst class; the fuller catalyst axis is the
+                    // flagged R-SOURCE-VECTOR follow-on). The per-couple clamp (the Nernst EMF zeroed below the
+                    // couple's own equilibrium) is the correct form for these INDEPENDENT couples; the net-across-a-
+                    // thermodynamically-coupled-set clamp is a follow-on for when shared-intermediate coupling is
+                    // modelled (there is no coupling substrate yet).
+                    let draw_amt = {
+                        let temperature = temp.at(x, y);
+                        let acceptor_conc =
+                            match binding.redox_emf.as_ref().and_then(|rx| rx.acceptor_field) {
+                                Some(AbioticField::Light) => self.light[i],
+                                Some(AbioticField::Water) => self.water.at(x, y),
+                                Some(AbioticField::Soil) => soil.mass(coord, &binding.class),
+                                Some(AbioticField::DataScalar(fid)) => self
+                                    .data_fields
+                                    .get(&fid)
+                                    .map(|f| f.at(x, y))
+                                    .unwrap_or(Fixed::ONE),
+                                None => Fixed::ONE,
+                            };
+                        let stock = match binding.field {
+                            AbioticField::Light => Fixed::ZERO,
+                            AbioticField::Soil => soil.mass(coord, &binding.class),
+                            AbioticField::Water => self.water.at(x, y),
+                            AbioticField::DataScalar(fid) => self
+                                .data_fields
+                                .get(&fid)
+                                .map(|f| f.at(x, y))
+                                .unwrap_or(Fixed::ZERO),
+                        };
+                        let catalyst_tissue = binding
+                            .kinetics
+                            .as_ref()
+                            .map(|kin| {
+                                self.producer_food[i]
+                                    .as_ref()
+                                    .and_then(|f| f.get(&kin.catalyst_class).copied())
+                                    .unwrap_or(Fixed::ZERO)
+                            })
+                            .unwrap_or(Fixed::ZERO);
+                        match registry.redox_draw_flux(
+                            binding,
+                            stock,
+                            acceptor_conc,
+                            temperature,
+                            catalyst_tissue,
+                        ) {
+                            Some(flux) => flux,
+                            None => {
+                                let bps = registry.effective_conversion(binding);
+                                match binding.stock_per_biomass {
+                                    Some(spb) => {
+                                        draw_biomass.checked_mul(spb).unwrap_or(Fixed::ZERO)
+                                    }
+                                    None => draw_biomass.checked_div(bps).unwrap_or(Fixed::ZERO),
+                                }
+                            }
+                        }
+                    };
                     match binding.field {
                         AbioticField::Light => {} // light has no located stock to deplete
                         AbioticField::Soil => {
@@ -949,6 +1683,22 @@ impl EnvironFields {
                         }
                         AbioticField::Water => {
                             self.water.take(x, y, draw_amt);
+                        }
+                        // A world-declared located scalar depletes through the same point draw as water. An
+                        // undeclared field FAILS LOUD here exactly as the Pass-1 read does (Pass 1 has already
+                        // panicked on it, so this is unreachable, but the symmetry removes the asymmetric silent
+                        // no-op the audit flagged: if the two passes ever decouple, a missing draw fails loud
+                        // rather than silently starving the ledger). A renewable source never enters this loop
+                        // (guarded by `depletes` above).
+                        AbioticField::DataScalar(fid) => {
+                            self.data_fields
+                                .get_mut(&fid)
+                                .unwrap_or_else(|| {
+                                    panic!(
+                                        "nutrient cycle: producer source binds DataScalar field {fid} but the world declared no such field"
+                                    )
+                                })
+                                .take(x, y, draw_amt);
                         }
                     }
                 }
@@ -1036,6 +1786,18 @@ impl EnvironFields {
                 // The producer's fixed food composition on this cell (T3), if the biosphere seeded one; where
                 // none, the food is the single energy-density class exactly as before.
                 let food = self.producer_food[self.idx(x, y)].as_ref();
+                // CORRECTED-T3: mark, PER CLASS, which of this cell's nutrient classes carry a real producer
+                // composition (their supply is already the physical content at the plant's own per-substance
+                // density), so the forage INGEST eats each at `content = supply` rather than double-scaling through
+                // the food_energy_density anchor. The marked set is exactly the producer_food axes: it EXCLUDES the
+                // water mirror and the salinity dose written below, so those non-composition axes keep the anchor on
+                // a producer cell just as on a bare cell (a per-cell flag would wrongly strip the anchor off the
+                // water axis, the §9 correctness lens's catch). A cell with no producer_food marks nothing
+                // (byte-identical for a run that seeds no producer food, so the four tracked pins hold).
+                match food {
+                    Some(fc) => resource.set_real_composition(coord, fc.keys().cloned()),
+                    None => resource.set_real_composition(coord, std::iter::empty()),
+                }
                 let comp = resource.composition_mut(coord);
                 // The standing food VOLUME read back: with a producer composition, the remaining volume is the
                 // Liebig MINIMUM over its axes of supply/density (a grazer that ate one axis has shrunk the
@@ -1086,6 +1848,13 @@ impl EnvironFields {
         self.water.hash_into(h);
         self.capacity.hash_into(h);
         self.salt.hash_into(h);
+        // The world-declared located energy fields (Arc 5), folded in id order (BTreeMap iterates sorted) after
+        // salt. An EMPTY collection (every Terran world) folds nothing, so the Earth hash is byte-identical; a
+        // world that declares a data field folds it, so divergence in a depleted alien stock is caught exactly
+        // as water and salt are. No count prefix is written, so an empty collection contributes zero bytes.
+        for f in self.data_fields.values() {
+            f.hash_into(h);
+        }
     }
 }
 
@@ -1145,6 +1914,287 @@ fn latitude_light(y: i32, height: i32) -> Fixed {
     }
     let dist = (y - mid).abs();
     (Fixed::ONE - Fixed::from_ratio(dist as i64, mid as i64)).clamp(Fixed::ZERO, Fixed::ONE)
+}
+
+/// A world's DATA sky for the diurnal insolation drive (Arc, day-night). One entry per star, plus the world's
+/// axial tilt and its rotation and orbital cadences in ticks. The default is the ZERO-OBLIQUITY SINGLE-STAR
+/// REFERENCE world (one star of unit luminosity, tilt 0), NOT Mirror: Mirror is Earth at its real 23.4-degree
+/// obliquity (real seasons on top of day-night), a data-row override that sets `obliquity` and per-star data.
+/// A tidally-locked, high-obliquity, or binary-star world is likewise a data row (Principles 8, 11). The
+/// membership is data and grows with the world; the sun-angle law is fixed Rust.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Star {
+    /// The star's radiant flux delivered to the world (its luminosity attenuated by the inverse-square of its
+    /// orbital distance), the L_s in the insolation sum. RESERVED, owner-set from real astronomical data; the
+    /// reference world uses unit flux so the daylit peak is 1.
+    pub luminosity: Fixed,
+    /// The star's own orbital-phase offset in `[0, 1)`, so a binary or trinary system's suns rise and set on
+    /// their own cadences rather than sharing one world phase. Zero for the single-star reference.
+    pub phase_offset: Fixed,
+}
+
+/// The world's SURFACE-MATERIAL thermal data for the per-material heat effect (day-night arc, follow-on 2):
+/// the volumetric heat capacities (`rho * c_p`, the `mat.density * therm.specific_heat` floor product) of the
+/// three surface thermal materials a cell blends by its REAL state, and the water freezing temperature. Fixed
+/// Rust mechanism, data membership (Principle 11): the mechanism blends and derives the per-cell thermal
+/// inertia, these values are per-world data. The membership is deliberately the three the cell's own state can
+/// distinguish without a lookup: the dry SUBSTRATE, standing WATER, and its frozen form ICE, blended by the
+/// cell's water fraction and freeze state (the derive-from-real-state form the gate ruled). The full per-cell
+/// lithology (rock versus sand versus clay varying the dry substrate) is a separate flagged substrate arc
+/// (the geodynamics per-column lithology field), not faked here.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SurfaceThermal {
+    /// The dry substrate's volumetric heat capacity `rho * c_p` (J/(m^3*K)). The REFERENCE material: a
+    /// bone-dry cell reads exactly this, so its inertia factor is one and its heat dynamics are unchanged.
+    /// RESERVED, owner-set from the floor `mat.density * therm.specific_heat` of the world's default dry
+    /// surface material (dev fixture: dry mineral soil, ~1.2e6, CRC soil-property tables).
+    pub substrate: Fixed,
+    /// Standing WATER's volumetric heat capacity `rho * c_p` (J/(m^3*K)). Larger than the substrate, so a
+    /// water-laden cell (an ocean or a filled basin) has a higher thermal inertia and lags: the ocean's small
+    /// diurnal swing versus dry land's large one, emergent from the cell's own water content. RESERVED, from
+    /// the floor water profile (dev fixture: ~4.182e6, water rho 1000 * c_p 4182, CRC).
+    pub water: Fixed,
+    /// ICE's volumetric heat capacity `rho * c_p` (J/(m^3*K)), read for a cell whose water has frozen (its
+    /// temperature is below `freeze_temp`), so a frozen surface lags by ice's inertia rather than water's.
+    /// RESERVED, from the floor ice profile (dev fixture: ~1.919e6, ice rho 917 * c_p 2093, CRC).
+    pub ice: Fixed,
+    /// The water FREEZING temperature (K): below it a cell's standing water is ice (the [`therm.melting_temperature`]
+    /// floor phase boundary, read as data, not an authored branch). RESERVED, from the floor water melting point
+    /// (dev fixture: 273.15 K, Mirror's real value).
+    pub freeze_temp: Fixed,
+    /// The standing-water depth at which a cell reads HALF water inertia, the half-saturation of the water
+    /// fraction `w = depth / (depth + water_reference)` (a Michaelis saturation, the same shape the salinity
+    /// dilution uses): a dry cell (no standing water) is all substrate, a deep basin or ocean saturates toward
+    /// all water. RESERVED, owner-set against the hydrology's standing-water depth scale (the depth marking a
+    /// water-dominated cell); dev fixture at unit depth. Its own value, not the salinity dilution reference (a
+    /// different quantity), so the thermal fraction keys off its own basis.
+    pub water_reference: Fixed,
+}
+
+impl SurfaceThermal {
+    /// The LABELLED dev-fixture surface thermal materials (Earth-like), the reserved values surfaced for the
+    /// owner, not decided here: the dry-soil, water, and ice volumetric heat capacities, the water freezing
+    /// point, and the standing-water half-saturation depth. A calibrated world reads the heat capacities from
+    /// the floor `mat.density * therm.specific_heat` per material; an alien world (a methane ocean, an ammonia
+    /// crust) is a data row.
+    pub fn dev_fixture() -> SurfaceThermal {
+        SurfaceThermal {
+            substrate: Fixed::from_int(1_200_000),
+            water: Fixed::from_int(4_182_000),
+            ice: Fixed::from_int(1_919_000),
+            freeze_temp: Fixed::from_ratio(27315, 100),
+            water_reference: Fixed::ONE,
+        }
+    }
+
+    /// The per-cell THERMAL INERTIA FACTOR (day-night arc, follow-on 2): the ratio of the dry substrate's
+    /// volumetric heat capacity to the cell's own, `substrate / c_cell`, where the cell's heat capacity blends
+    /// the substrate with its water (or ice, when frozen) by the cell's water FRACTION,
+    /// `c_cell = (1 - w) * substrate + w * c_liquid`. The fraction combines the cell's TWO real water signals:
+    /// its worldgen soil MOISTURE (`[0, 1]`, damp soil already holds thermal mass) and the Michaelis saturation
+    /// of its standing-water DEPTH (`depth / (depth + water_reference)`, a lake or ocean over the top),
+    /// `w = moisture + (1 - moisture) * standing`, so standing water saturates the remaining dry fraction: dry
+    /// desert reads near zero (all substrate), damp soil lags, and a filled basin saturates toward all water. A
+    /// bone-dry cell (`moisture = 0`, no standing water) reads exactly one, so scaling its heat dynamics by this
+    /// factor leaves them unchanged; a water-laden cell reads below one, so its relaxation and diffusion slow
+    /// and it lags and swings less (the ocean and damp-soil effect), emergent from the cell's real water content
+    /// and temperature and the floor material data, no authored lookup. The factor is clamped at one (a dry cell
+    /// is the fastest, the lowest heat capacity, which the material ordering guarantees and which also holds the
+    /// diffusion stencil inside its stability bound). A pure fixed-point function of the cell's own state; the
+    /// freeze read keys off the material's floor melting temperature, so a frozen surface lags by ice, never by
+    /// a label (Principles 3, 8, 9).
+    pub fn inertia_factor(&self, water_depth: Fixed, moisture: Fixed, cell_temp: Fixed) -> Fixed {
+        // The standing-water saturation, the Michaelis fraction of the depth, in `[0, 1)`.
+        let depth = water_depth.max(Fixed::ZERO);
+        let denom = depth.saturating_add(self.water_reference);
+        let standing = if denom > Fixed::ZERO {
+            depth.div(denom).clamp(Fixed::ZERO, Fixed::ONE)
+        } else {
+            Fixed::ZERO
+        };
+        // The combined water fraction: soil moisture, with standing water saturating the remaining dry
+        // fraction. A bone-dry cell (no moisture, no standing water) is zero, so its factor is exactly one.
+        let moist = moisture.clamp(Fixed::ZERO, Fixed::ONE);
+        let w = moist
+            .saturating_add(
+                (Fixed::ONE - moist)
+                    .checked_mul(standing)
+                    .unwrap_or(standing),
+            )
+            .clamp(Fixed::ZERO, Fixed::ONE);
+        let c_liquid = if cell_temp < self.freeze_temp {
+            self.ice
+        } else {
+            self.water
+        };
+        let dry = Fixed::ONE - w;
+        let c_cell = dry
+            .checked_mul(self.substrate)
+            .unwrap_or(self.substrate)
+            .saturating_add(w.checked_mul(c_liquid).unwrap_or(c_liquid));
+        if c_cell <= Fixed::ZERO {
+            return Fixed::ONE; // a degenerate zero heat capacity: no slowing (the substrate-absence convention).
+        }
+        self.substrate.div(c_cell).min(Fixed::ONE)
+    }
+}
+
+/// The world's DATA sky: the star-list and the orbital geometry the diurnal insolation reads. Fixed Rust law,
+/// data membership; the default is the zero-obliquity single-star reference world.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DiurnalSky {
+    /// Ticks per SIDEREAL rotation (one spin against the fixed stars), the diurnal phase period.
+    pub rotation_period_ticks: u64,
+    /// Ticks per orbit, so the SYNODIC (solar) day derives from the sidereal spin minus the orbital advance,
+    /// and the tidally-locked case (rotation equals orbit) comes out as a permanent day face.
+    pub orbital_period_ticks: u64,
+    /// The world's axial tilt in radians; 0 is the reference world (no seasons, poles dark). The declination
+    /// derives from this and the orbital phase, so a tilted world gets seasons and polar day/night as data.
+    pub obliquity: Fixed,
+    /// The data star-list. One unit-luminosity star at zero phase offset is the single-star reference.
+    pub stars: Vec<Star>,
+    /// The physical stellar flux scale (W/m^2) that turns the normalised daylit insolation into an absorbed
+    /// irradiance for the radiative surface-temperature baseline, so the heat path reads physical watts while
+    /// the light path stays the normalised `[0, 1]` productivity signal. RESERVED, owner-set from the real
+    /// stellar constant (Mirror = Earth's ~1361 W/m^2 solar constant).
+    pub solar_constant: Fixed,
+    /// The per-world atmospheric BACK-RADIATION (downwelling longwave) floor (W/m^2), the night-side irradiance
+    /// a surface still absorbs when the star is down, so the night baseline is `radiative_eq(back_radiation)`
+    /// rather than absolute zero and the Moon-Earth-Venus diurnal-swing spectrum EMERGES from this one datum
+    /// (airless 0, Earth mild, thick-atmosphere high). RESERVED, owner-set (Mirror = Earth's real downwelling
+    /// longwave). The full derivation from the atmosphere's greenhouse optical depth is the flagged follow-on.
+    pub back_radiation: Fixed,
+    /// The surface EMISSIVITY the radiative-equilibrium baseline reads. INTERIM uniform (a flagged
+    /// uniform-absorption limit): the per-material emissivity from the floor `opt.emissivity` (so ice, rock,
+    /// water, and an alien crust equilibrate and lag differently) is the named immediate follow-on.
+    pub emissivity: Fixed,
+    /// The Stefan-Boltzmann constant sigma the radiative-equilibrium law reads (a physics-floor universal
+    /// constant, `metabolism.stefan_boltzmann`), and the temperature representability cap `t_max` the kernel
+    /// clamps to.
+    pub sigma: Fixed,
+    /// The representability cap the radiative-equilibrium kernel clamps its output temperature to.
+    pub t_max: Fixed,
+    /// The world's SURFACE-MATERIAL thermal data (follow-on 2): the volumetric heat capacities the per-cell
+    /// thermal-inertia factor blends by a cell's real water fraction and freeze state, so ice, water, and dry
+    /// substrate lag and swing differently. Per-world data; the reference uses the dev fixture.
+    pub surface: SurfaceThermal,
+}
+
+impl DiurnalSky {
+    /// The zero-obliquity SINGLE-STAR REFERENCE world (not Mirror): one unit-luminosity star, no tilt. A clean
+    /// pure-diurnal cycle. `rotation_period_ticks` is the day length in ticks (from the world's own rotation
+    /// period through the seconds-to-ticks bridge); `orbital_period_ticks` its year.
+    pub fn reference(rotation_period_ticks: u64, orbital_period_ticks: u64) -> DiurnalSky {
+        DiurnalSky {
+            rotation_period_ticks: rotation_period_ticks.max(1),
+            orbital_period_ticks: orbital_period_ticks.max(1),
+            obliquity: Fixed::ZERO,
+            stars: vec![Star {
+                luminosity: Fixed::ONE,
+                phase_offset: Fixed::ZERO,
+            }],
+            // LABELLED DEV FIXTURES (Earth-like), the reserved heat values surfaced for the owner, not decided
+            // here: the solar constant (W/m^2), a mild atmospheric back-radiation floor, a uniform surface
+            // emissivity (the per-material floor read is the follow-on), the Stefan-Boltzmann sigma, and a
+            // representability cap. Mirror sets these to Earth's real values; an airless world sets
+            // back_radiation to zero for a Moon-like plunge.
+            solar_constant: Fixed::from_int(1361),
+            back_radiation: Fixed::from_int(300),
+            emissivity: Fixed::from_ratio(95, 100),
+            sigma: Fixed::from_ratio(567, 10_000_000_000),
+            t_max: Fixed::from_int(500),
+            surface: SurfaceThermal::dev_fixture(),
+        }
+    }
+
+    /// The MIRROR world's sky: Earth's real single sun and, above all, Earth's real axial tilt, so REAL
+    /// SEASONS ride on top of the day-night cycle through the declination term already in the sun-angle law.
+    /// Identical to `reference` except the obliquity is set to Earth's measured 23.44 degrees (0.4091 rad):
+    /// the tilt that gives the sub-solar latitude its yearly swing, midnight sun and polar night at the poles,
+    /// and the summer/winter insolation contrast at mid-latitudes. This is per-world DATA (Principle 11,
+    /// the locked per-world-outcome rule): Mirror carries Earth's real value, an alien world sets its own,
+    /// and nothing is authored globally. The heat parameters remain the labelled Earth-like dev fixtures the
+    /// reference uses, reserved for the owner's calibration; the per-material emissivity/thermal-inertia read
+    /// is the sibling follow-on. `rotation_period_ticks` is Mirror's day, `orbital_period_ticks` its year.
+    pub fn mirror(rotation_period_ticks: u64, orbital_period_ticks: u64) -> DiurnalSky {
+        DiurnalSky {
+            // Earth's real obliquity, 23.44 degrees = 0.4091 radians. Per-world data, not a global author:
+            // this is Mirror's measured tilt, surfaced for the owner as the reserved world datum.
+            obliquity: Fixed::from_ratio(4091, 10_000),
+            ..DiurnalSky::reference(rotation_period_ticks, orbital_period_ticks)
+        }
+    }
+}
+
+/// The instantaneous insolation at a cell (day-night sun-angle law): the sum over the world's data star-list of
+/// each star's flux times the clamped cosine of the sun's zenith angle,
+/// `insolation = sum_s L_s * max(0, cos theta_s)`, with
+/// `cos theta_s = sin(lat) sin(decl) + cos(lat) cos(decl) cos(hour)` (the standard solar-zenith geometry). The
+/// latitude derives from the row (equator 0, poles +/- pi/2), the hour angle is the SYNODIC solar angle
+/// `2*pi*(phase + longitude - orbital_phase + star_offset)` from the per-cell longitude (the column) and the
+/// diurnal and orbital phases (so a tidally-locked world's day face is fixed), and the declination
+/// `obliquity * sin(2*pi*orbital_phase)` gives seasons and polar day/night from the world's tilt. At the
+/// zero-obliquity single-star reference this reduces to `cos(lat) cos(hour)`: a clean day-night swing that is
+/// correctly dark at the poles (no tilt, the sun never clears the horizon there). A pure function of the cell,
+/// the phases, and the world's own sky data (Principles 8, 9: no label, no authored outcome); deterministic
+/// fixed-point CORDIC trig.
+fn insolation_at(
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+    diurnal_phase: Fixed,
+    orbital_phase: Fixed,
+    sky: &DiurnalSky,
+) -> Fixed {
+    let mid = height / 2;
+    if mid <= 0 || width <= 0 {
+        // A degenerate strip has no latitude structure: read the summed daylit flux so a test fixture is lit.
+        return sky
+            .stars
+            .iter()
+            .fold(Fixed::ZERO, |a, s| a.saturating_add(s.luminosity));
+    }
+    // Latitude in [-pi/2, pi/2]: the equator row (mid) is 0, the poles are +/- pi/2.
+    let lat = Fixed::from_ratio((mid - y) as i64, mid as i64)
+        .checked_mul(Fixed::HALF_PI)
+        .unwrap_or(Fixed::ZERO);
+    let longitude = Fixed::from_ratio(x as i64, width as i64); // [0, 1) around the world
+    let two_pi = Fixed::PI.saturating_add(Fixed::PI);
+    // The declination from the world's tilt and its orbital position (0 at the reference world).
+    let decl = sky
+        .obliquity
+        .checked_mul(
+            two_pi
+                .checked_mul(orbital_phase)
+                .unwrap_or(Fixed::ZERO)
+                .sin(),
+        )
+        .unwrap_or(Fixed::ZERO);
+    let (sin_lat, cos_lat) = lat.sin_cos();
+    let (sin_decl, cos_decl) = decl.sin_cos();
+    let mut total = Fixed::ZERO;
+    for star in &sky.stars {
+        // The synodic (solar) hour angle: the sidereal diurnal phase plus the cell's longitude, minus the
+        // orbital advance (so successive noons track the star, not the fixed stars), plus the star's own offset.
+        let hour_frac = diurnal_phase
+            .saturating_add(longitude)
+            .saturating_add(star.phase_offset)
+            - orbital_phase;
+        let hour = two_pi.checked_mul(hour_frac).unwrap_or(Fixed::ZERO);
+        // cos(zenith) = sin(lat)sin(decl) + cos(lat)cos(decl)cos(hour).
+        let term_pole = sin_lat.checked_mul(sin_decl).unwrap_or(Fixed::ZERO);
+        let term_day = cos_lat
+            .checked_mul(cos_decl)
+            .unwrap_or(Fixed::ZERO)
+            .checked_mul(hour.cos())
+            .unwrap_or(Fixed::ZERO);
+        let cos_zenith = term_pole.saturating_add(term_day);
+        // max(0, cos zenith): the night side (sun below the horizon) delivers no flux.
+        let lit = cos_zenith.max(Fixed::ZERO);
+        total = total.saturating_add(star.luminosity.checked_mul(lit).unwrap_or(Fixed::ZERO));
+    }
+    total
 }
 
 /// Precompute each cell's downhill routing target: the index of the strictly-lowest of its four
@@ -1208,6 +2258,11 @@ mod tests {
             producer: vec![Fixed::ZERO; elev_tenths.len()],
             producer_source: vec![Vec::new(); elev_tenths.len()],
             producer_food: vec![None; elev_tenths.len()],
+            data_fields: BTreeMap::new(),
+            sky: None,
+            diurnal_tick: 0,
+            solar_baseline: Vec::new(),
+            solar_inertia: Vec::new(),
         }
     }
 
@@ -1246,6 +2301,184 @@ mod tests {
         assert!(
             latitude_light(1, 5) > latitude_light(0, 5),
             "light rises toward the equator"
+        );
+    }
+
+    #[test]
+    fn the_sun_angle_law_swings_day_to_night_at_the_equator_and_leaves_the_poles_dark() {
+        // The zero-obliquity single-star reference sky: one unit star, no tilt, a 100-tick day.
+        let sky = DiurnalSky::reference(100, 36500);
+        let (w, h) = (10, 5); // equator row is y=2 (mid); poles are y=0 and y=4.
+        let orbital = Fixed::ZERO; // one day is a negligible slice of the year; hold the orbital phase.
+                                   // At the equator, column x=0, diurnal phase 0 puts the sun overhead (hour angle 0): full flux ~1.
+        let noon = insolation_at(0, 2, w, h, Fixed::ZERO, orbital, &sky);
+        assert!(
+            noon > Fixed::from_ratio(9, 10),
+            "the equator at local noon is fully lit, got {noon:?}"
+        );
+        // Half a rotation later the same cell faces away (hour angle pi): the night side reads zero.
+        let midnight = insolation_at(0, 2, w, h, Fixed::from_ratio(1, 2), orbital, &sky);
+        assert_eq!(
+            midnight,
+            Fixed::ZERO,
+            "the equator at local midnight is dark, got {midnight:?}"
+        );
+        // Dawn/dusk (quarter turn, hour angle pi/2) is the terminator: near zero, below noon.
+        let dusk = insolation_at(0, 2, w, h, Fixed::from_ratio(1, 4), orbital, &sky);
+        assert!(
+            dusk < noon && dusk <= Fixed::from_ratio(1, 100),
+            "the terminator is dim, got {dusk:?}"
+        );
+        // A pole under zero obliquity never clears the horizon: dark at every phase (physically correct here).
+        // cos(pi/2) is a sub-part-per-billion fixed-point CORDIC residual rather than exact zero, so the pole is
+        // negligibly (not bit-exactly) lit; bound it rather than assert an exact zero the trig cannot deliver.
+        let eps = Fixed::from_ratio(1, 1_000_000);
+        for p in [0, 1, 2, 3] {
+            let pole = insolation_at(0, 0, w, h, Fixed::from_ratio(p, 4), orbital, &sky);
+            assert!(
+                pole < eps,
+                "a zero-tilt pole is dark at phase {p}/4, got {pole:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_mirror_tilt_rides_real_seasons_on_the_day_night_cycle() {
+        // Mirror's sky carries Earth's real 23.44-degree tilt, so the declination term swings the sub-solar
+        // latitude across the year and REAL SEASONS emerge on top of the day-night cycle. Contrast it with the
+        // zero-tilt reference at the same orbital phase: the tilt is the only difference, so any pole effect is
+        // the season and not the day. North pole is y=0, south pole is y=h-1 (lat = (mid - y)/mid * pi/2).
+        let mirror = DiurnalSky::mirror(100, 36500);
+        let flat = DiurnalSky::reference(100, 36500);
+        let (w, h) = (10, 5); // equator row y=2 (mid); north pole y=0, south pole y=4.
+
+        // Northern summer solstice: orbital phase 1/4 puts sin(2*pi*phase)=1, declination = +obliquity, so the
+        // sub-solar point is at +23.44 latitude and the NORTH POLE sees MIDNIGHT SUN: lit at every hour of the
+        // rotation. The zero-tilt pole at the same phase stays dark (no season without tilt).
+        let summer = Fixed::from_ratio(1, 4);
+        for p in [0, 1, 2, 3] {
+            let phase = Fixed::from_ratio(p, 4);
+            let north_mirror = insolation_at(0, 0, w, h, phase, summer, &mirror);
+            let north_flat = insolation_at(0, 0, w, h, phase, summer, &flat);
+            assert!(
+                north_mirror > Fixed::from_ratio(3, 10),
+                "the tilted north pole has midnight sun at the summer solstice, phase {p}/4, got {north_mirror:?}"
+            );
+            let eps = Fixed::from_ratio(1, 1_000_000);
+            assert!(
+                north_flat < eps,
+                "the zero-tilt pole stays dark at the same phase {p}/4, got {north_flat:?}"
+            );
+        }
+
+        // Half a year on (orbital phase 3/4, sin = -1), the declination flips to -obliquity: the north pole is
+        // in POLAR NIGHT (dark at every hour) while the south pole now takes the midnight sun. Seasons reverse.
+        let winter = Fixed::from_ratio(3, 4);
+        for p in [0, 1, 2, 3] {
+            let phase = Fixed::from_ratio(p, 4);
+            let north = insolation_at(0, 0, w, h, phase, winter, &mirror);
+            assert_eq!(
+                north,
+                Fixed::ZERO,
+                "the tilted north pole is in polar night half a year later, phase {p}/4, got {north:?}"
+            );
+        }
+        let south_winter = insolation_at(0, 4, w, h, Fixed::ZERO, winter, &mirror);
+        assert!(
+            south_winter > Fixed::from_ratio(3, 10),
+            "the opposite pole takes the midnight sun when the seasons reverse, got {south_winter:?}"
+        );
+
+        // The season does not abolish the day: at the equator the diurnal swing still runs through the tilt.
+        // Local noon is the SYNODIC angle (diurnal phase = orbital phase, hour angle 0), midnight half a turn on.
+        let equator_noon = insolation_at(0, 2, w, h, summer, summer, &mirror);
+        let equator_midnight = insolation_at(
+            0,
+            2,
+            w,
+            h,
+            summer.saturating_add(Fixed::from_ratio(1, 2)),
+            summer,
+            &mirror,
+        );
+        assert!(
+            equator_noon > equator_midnight,
+            "the day-night swing survives the season at the equator ({equator_noon:?} vs {equator_midnight:?})"
+        );
+    }
+
+    #[test]
+    fn the_armed_diurnal_cycle_warms_the_day_baseline_and_holds_a_night_floor_above_absolute_zero()
+    {
+        // Arm the reference sky and step one tick, then read the solar-forcing baseline the runner would copy
+        // into the temperature field. The equator at dawn (tick 0, hour angle 0) is fully daylit, so its
+        // baseline is the radiative-equilibrium temperature of the full stellar flux plus back-radiation; a
+        // dark cell (a zero-tilt pole) reads the radiative-equilibrium of the back-radiation floor alone, which
+        // is well above absolute zero (the night-floor form (2), never 0 K).
+        let map = a_map(0x5A1A17);
+        let mut e = EnvironFields::from_map(&map);
+        let h = e.height;
+        e.arm_diurnal(DiurnalSky::reference(100, 36500));
+        let temp = Field::from_map(&map);
+        let calib = EnvironCalib::dev_fixture();
+        e.step(&temp, &calib);
+        let mid = h / 2;
+        let day = e.solar_baseline_at(0, mid); // equator, local noon at tick 0
+        let night = e.solar_baseline_at(0, 0); // a zero-tilt pole: no direct sun, back-radiation only
+        assert!(
+            day > Fixed::from_int(250),
+            "the daylit baseline is a warm surface temperature (K), got {day:?}"
+        );
+        assert!(
+            night > Fixed::from_int(50),
+            "the dark-side baseline holds a back-radiation floor well above absolute zero, got {night:?}"
+        );
+        assert!(
+            day > night,
+            "the daylit side is warmer than the dark side ({day:?} vs {night:?})"
+        );
+    }
+
+    #[test]
+    fn surface_thermal_inertia_makes_water_lag_and_freezing_shifts_to_ice() {
+        // The per-material thermal inertia (follow-on 2): a DRY cell reads exactly one, so its heat dynamics
+        // are unchanged (the byte-neutral baseline); a WATER-laden cell reads below one, so it lags; and a
+        // frozen cell reads ice's inertia (a smaller heat capacity than liquid water), so it lags LESS than the
+        // same cell unfrozen. All emergent from the cell's own water depth and temperature, no label.
+        let s = SurfaceThermal::dev_fixture();
+        let warm = Fixed::from_int(300); // above freezing: standing water is liquid
+        let cold = Fixed::from_int(260); // below 273.15 K: the water is ice
+        let deep = Fixed::from_int(50); // a deep basin or ocean, far past the half-saturation depth
+        let dry_soil = Fixed::ZERO; // no soil moisture
+        let full_soil = Fixed::ONE; // saturated soil
+
+        let dry = s.inertia_factor(Fixed::ZERO, dry_soil, warm);
+        assert_eq!(
+            dry,
+            Fixed::ONE,
+            "a bone-dry cell reads exactly one (its dynamics are unchanged), got {dry:?}"
+        );
+        // Soil moisture alone (no standing water) already lags: damp soil holds thermal mass.
+        let damp = s.inertia_factor(Fixed::ZERO, Fixed::from_ratio(1, 2), warm);
+        assert!(
+            damp < dry,
+            "damp soil lags below dry land even with no standing water (damp {damp:?}, dry {dry:?})"
+        );
+        let wet = s.inertia_factor(deep, full_soil, warm);
+        assert!(
+            wet < damp,
+            "a water-laden cell lags more than merely damp soil (water {wet:?}, damp {damp:?})"
+        );
+        let frozen = s.inertia_factor(deep, full_soil, cold);
+        assert!(
+            wet < frozen && frozen < Fixed::ONE,
+            "ice's smaller heat capacity lags less than liquid water but still more than dry land (liquid {wet:?}, ice {frozen:?})"
+        );
+        // Monotone in soil moisture: more moisture, more inertia, more lag.
+        let a_little = s.inertia_factor(Fixed::ZERO, Fixed::from_ratio(1, 4), warm);
+        assert!(
+            damp < a_little && a_little < Fixed::ONE,
+            "more soil moisture lags more (quarter-moist {a_little:?}, half-moist {damp:?})"
         );
     }
 
@@ -1570,6 +2803,83 @@ mod tests {
     }
 
     #[test]
+    fn a_more_energy_dense_plant_carries_more_food_value_corrected_t3() {
+        // CORRECTED-T3 (owner-ruled, blind-panel-verified): the standing food carries the plant's REAL
+        // composition magnitude, not a sum-to-one simplex, so an energy-dense plant feeds more per unit biomass
+        // than a poor one. Two cells with the SAME producer biomass (hence the same capacity and regrown volume)
+        // are seeded with single-axis energy-density compositions of DIFFERENT magnitude (2.0 vs 0.5); the food
+        // supply tracks the magnitude ratio (4:1), where the old simplex would have flattened BOTH to 1.0 (every
+        // plant equally nutritious). The per-consumer assimilation still emerges later in physical_intake.
+        let map = a_map(0xF00D53);
+        let temp = Field::from_map(&map);
+        let calib = EnvironCalib::dev_fixture();
+        let rich = Coord3::ground(1, 1);
+        let poor = Coord3::ground(2, 1);
+        let mut e = EnvironFields::from_map(&map);
+        // The same biomass at both cells, so their capacity (and thus regrown volume) is identical.
+        e.set_producer(&[(rich, Fixed::from_int(1)), (poor, Fixed::from_int(1))]);
+        // Single-axis energy-density foods of different magnitude. Under the old simplex both would normalise to
+        // {energy_density: 1.0} and read identically; de-normalised they keep 2.0 and 0.5.
+        let rich_comp: BTreeMap<String, Fixed> = [(ENERGY_DENSITY.to_string(), Fixed::from_int(2))]
+            .into_iter()
+            .collect();
+        let poor_comp: BTreeMap<String, Fixed> =
+            [(ENERGY_DENSITY.to_string(), Fixed::from_ratio(1, 2))]
+                .into_iter()
+                .collect();
+        e.set_producer_food(&[(rich, rich_comp), (poor, poor_comp)]);
+        let mut resource = ResourceField::new();
+        for _ in 0..30 {
+            e.step(&temp, &calib);
+            e.regrow_supply(&mut resource, &calib);
+        }
+        let rich_food = resource.supply(rich, ENERGY_DENSITY);
+        let poor_food = resource.supply(poor, ENERGY_DENSITY);
+        assert!(
+            rich_food > Fixed::ZERO && poor_food > Fixed::ZERO,
+            "both plants carry some food"
+        );
+        // The KEY proof: the energy-dense plant feeds STRICTLY MORE. Under the old simplex both single-axis foods
+        // normalised to {energy_density: 1.0} and these would be EQUAL (the flat nutrition the fix removes); with
+        // the real magnitudes carried, rich (2.0) clearly outfeeds poor (0.5). Both cells share one capacity
+        // (cap 1, asserted below), so the difference is the composition magnitude, nothing else.
+        assert_eq!(
+            e.capacity_at(rich.x, rich.y),
+            e.capacity_at(poor.x, poor.y),
+            "the two cells share one productivity capacity, so only the food magnitude can differ"
+        );
+        assert!(
+            rich_food > poor_food.checked_mul(Fixed::from_int(3)).unwrap(),
+            "the energy-dense plant feeds far more (about 4x) than the poor one: the real magnitude is preserved, \
+             where the old simplex would have made them EQUAL. rich={rich_food:?} poor={poor_food:?}"
+        );
+        // And the ratio tracks the 4:1 density ratio to within fixed-point rounding (the logistic regrowth over
+        // many ticks accrues a sub-part-per-billion drift, so this is a bounded near-equality, not exact).
+        let four_poor = poor_food.checked_mul(Fixed::from_int(4)).unwrap();
+        let drift = (rich_food - four_poor).abs();
+        assert!(
+            drift < Fixed::from_ratio(1, 1_000_000),
+            "the food tracks the 4:1 magnitude ratio within fixed-point rounding: rich={rich_food:?} \
+             4*poor={four_poor:?} drift={drift:?}"
+        );
+        // END TO END: the differentiated supply reaches the CONSUMER's reserve differentiated. Feed each food
+        // to the SAME consumer (identical assimilation, trophic efficiency, body mass, storage density, and
+        // ample room) through the real `physiology::physical_intake` fold: the energy-dense plant banks strictly
+        // more reserve, so the magnitude is not re-flattened between the environ write and the being's reserve.
+        let one = Fixed::from_int(1);
+        let room = Fixed::from_int(1000); // ample, so intake is bounded by the food, not the reserve room
+        let (_, rich_gain) =
+            crate::physiology::physical_intake(rich_food, one, one, one, one, room);
+        let (_, poor_gain) =
+            crate::physiology::physical_intake(poor_food, one, one, one, one, room);
+        assert!(
+            rich_gain > poor_gain,
+            "the energy-dense plant fills the consumer's reserve MORE through physical_intake (the magnitude \
+             survives to the being, not re-flattened): rich_gain={rich_gain:?} poor_gain={poor_gain:?}"
+        );
+    }
+
+    #[test]
     fn decomposed_soil_fertility_lifts_productivity_where_soil_is_the_limiting_factor() {
         // Material-substrate item 8 slice C2 (the matter cycle closes into the food web): the nutrient the
         // matter cycle deposits into the soil raises a cell's productivity where soil is the limiting Liebig
@@ -1738,7 +3048,14 @@ mod tests {
             e.step(&temp, &calib); // sets the pre-cap capacity from the producer biomass
             let mut soil = SoilNutrientField::new();
             soil.deposit(cell, "nutrient", scarce);
-            e.extract_producers(&mut soil, &reg);
+            {
+                let tf = Field::new(
+                    e.width,
+                    e.height,
+                    vec![Fixed::from_int(300); (e.width * e.height) as usize],
+                );
+                e.extract_producers(&mut soil, &reg, &tf)
+            };
             e.capacity_at(cell.x, cell.y)
         };
         let flux_only = run(vec![0]);
@@ -1760,6 +3077,749 @@ mod tests {
         assert!(
             flux_then_soil < flux_only,
             "adding a scarcer source can only lower the ceiling, never raise it above the flux-only cap"
+        );
+    }
+
+    #[test]
+    fn a_world_declared_energy_field_is_a_pure_data_row_that_caps_and_depletes() {
+        // Arc 5 segment 1 (the OPEN arm): a producer draws energy from a WORLD-DECLARED located scalar field
+        // (AbioticField::DataScalar), the alien-as-data proof. No light, water, or soil is involved; the source
+        // is a `ScalarField` the world seeded plus a binding naming its id, zero new Rust. Two claims: (1) the
+        // declared field's per-cell value CAPS the producer's productivity through the same Liebig math (point
+        // read-shape); (2) a depleting binding DRAWS THE FIELD DOWN, so a heavily-worked cell exhausts its alien
+        // stock exactly as it would water. This is a chemosynthetic/geothermal/mana energy source as a data row.
+        let map = a_map(0x0A11E7);
+        let temp = Field::from_map(&map);
+        let calib = EnvironCalib::dev_fixture();
+        let cell = Coord3::ground(1, 1);
+        let field_id: u16 = 7; // an opaque field-kind id, not one of the Earth backings
+        let source_id: u16 = 42; // the evolved source id the producer closes on
+
+        // The registry: one source (id 42) bound to the world's declared scalar field (id 7), depleting. No
+        // light/water/soil binding exists at all, so nothing Earth-shaped can leak into the result.
+        let mut reg = AbioticSourceRegistry::default();
+        reg.insert(source_id, AbioticField::DataScalar(field_id), true, "");
+        reg.biomass_per_stock = Fixed::from_int(4);
+        reg.draw_fraction = Fixed::from_ratio(1, 2); // a heavy draw so depletion is visible in one beat
+        reg.weathering_rate = Fixed::ZERO; // no soil bootstrap; the alien field is the only supply
+
+        // A helper: seed a producer with a large biomass (so the pre-cap capacity is high and the alien field is
+        // what binds), declare the energy field at the given uniform level, run the extract beat once, and
+        // return (capped capacity, remaining field value) at the cell.
+        let run = |field_level: Fixed| -> (Fixed, Fixed) {
+            let mut e = EnvironFields::from_map(&map);
+            let (w, h) = e.dims();
+            e.set_producer(&[(cell, Fixed::from_int(1000))]);
+            e.set_producer_source(&[(cell, vec![source_id])]);
+            e.set_data_field(field_id, ScalarField::uniform(w, h, field_level));
+            e.step(&temp, &calib); // sets the pre-cap capacity from the producer biomass
+            let mut soil = SoilNutrientField::new();
+            {
+                let tf = Field::new(
+                    e.width,
+                    e.height,
+                    vec![Fixed::from_int(300); (e.width * e.height) as usize],
+                );
+                e.extract_producers(&mut soil, &reg, &tf)
+            };
+            (
+                e.capacity_at(cell.x, cell.y),
+                e.data_field_at(field_id, cell.x, cell.y).unwrap(),
+            )
+        };
+
+        let scarce = Fixed::from_ratio(1, 10);
+        let abundant = Fixed::from_int(2);
+        let (cap_scarce, remain_scarce) = run(scarce);
+        let (cap_abundant, _remain_abundant) = run(abundant);
+
+        // (1) The declared field caps the productivity: a scarcer field supports less biomass, exactly as a
+        // scarce water or soil stock would, through the same `supply * biomass_per_stock` Liebig math.
+        assert!(
+            cap_scarce > Fixed::ZERO,
+            "the alien field supports some biomass"
+        );
+        assert_eq!(
+            cap_scarce,
+            scarce.checked_mul(reg.biomass_per_stock).unwrap(),
+            "the world-declared field's value caps the productivity (point read-shape, Liebig math)"
+        );
+        assert!(
+            cap_abundant > cap_scarce,
+            "more of the declared field supports more biomass: {cap_abundant:?} > {cap_scarce:?}"
+        );
+        // (2) The depleting binding drew the alien field DOWN at the worked cell (it started at `scarce`).
+        assert!(
+            remain_scarce < scarce,
+            "a depleting source draws the world-declared field down, so a worked cell exhausts its alien \
+             stock: {remain_scarce:?} < {scarce:?}"
+        );
+    }
+
+    #[test]
+    fn an_empty_data_field_collection_folds_nothing_so_the_earth_hash_is_unchanged() {
+        // Byte-neutrality guard for Arc 5 segment 1: the data_fields collection folds into `state_hash` only its
+        // members, with no count prefix, so an EMPTY collection (every Terran world) contributes zero bytes and
+        // the hash is identical to a stack that carries no such field at all. Declaring one field then changes
+        // the hash (the fold is real), proving the empty case is a true no-op rather than an accidental omission.
+        let map = a_map(0xE0F0);
+        let calib = EnvironCalib::dev_fixture();
+        let temp = Field::from_map(&map);
+        let mut e = EnvironFields::from_map(&map);
+        for _ in 0..8 {
+            e.step(&temp, &calib);
+        }
+        // (1) The DIRECT empty-neutrality proof: the full `hash_into` (which folds the empty data_fields) equals a
+        // manual fold of ONLY the pre-Arc-5 dynamic fields (water, capacity, salt) in the same order. So the
+        // empty collection contributed ZERO bytes, and the Earth hash is byte-identical to the pre-change fold,
+        // not merely "the fold is observable". (The four run_world pins prove this end-to-end; this pins it here.)
+        let full = {
+            let mut h = StateHasher::new();
+            e.hash_into(&mut h);
+            h.finish()
+        };
+        let pre_arc5 = {
+            let mut h = StateHasher::new();
+            e.water.hash_into(&mut h);
+            e.capacity.hash_into(&mut h);
+            e.salt.hash_into(&mut h);
+            h.finish()
+        };
+        assert_eq!(
+            full, pre_arc5,
+            "an empty data_fields collection folds NOTHING: the Arc-5 hash equals the pre-Arc-5 water+capacity+salt \
+             fold byte for byte (no count prefix, zero bytes for the empty case)"
+        );
+        // (2) And the fold is REAL: declaring one field changes the hash, so the empty no-op is a guarantee, not
+        // an omission that would silently hide divergence in a depleted alien stock.
+        let with_field = {
+            let mut e2 = EnvironFields::from_map(&map);
+            let (w, h_) = e2.dims();
+            e2.set_data_field(3, ScalarField::uniform(w, h_, Fixed::from_int(1)));
+            for _ in 0..8 {
+                e2.step(&temp, &calib);
+            }
+            let mut h = StateHasher::new();
+            e2.hash_into(&mut h);
+            h.finish()
+        };
+        assert_ne!(
+            full, with_field,
+            "a declared data field folds into the hash (so a depleted alien stock cannot pass replay while \
+             hiding divergence)"
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "declared no such field")]
+    fn a_producer_bound_to_an_undeclared_energy_field_fails_loud() {
+        // Arc 5 segment 1 fail-loud guarantee: a producer whose evolved source binds an AbioticField::DataScalar
+        // the world never declared is a config error, and the extract read pass PANICS naming the field, rather
+        // than silently reading zero and starving the producer (which would mask a broken world spec). Mirrors
+        // the unbound-source-id panic. This exercises the guarantee the audit flagged as untested.
+        let map = a_map(0xBAD1);
+        let temp = Field::from_map(&map);
+        let calib = EnvironCalib::dev_fixture();
+        let cell = Coord3::ground(1, 1);
+        let mut reg = AbioticSourceRegistry::default();
+        reg.insert(5, AbioticField::DataScalar(99), false, ""); // field 99 is never declared
+        reg.biomass_per_stock = Fixed::from_int(4);
+        reg.draw_fraction = Fixed::ZERO;
+        reg.weathering_rate = Fixed::ZERO;
+        let mut e = EnvironFields::from_map(&map);
+        e.set_producer(&[(cell, Fixed::from_int(10))]);
+        e.set_producer_source(&[(cell, vec![5])]);
+        e.step(&temp, &calib);
+        let mut soil = SoilNutrientField::new();
+        {
+            let tf = Field::new(
+                e.width,
+                e.height,
+                vec![Fixed::from_int(300); (e.width * e.height) as usize],
+            );
+            e.extract_producers(&mut soil, &reg, &tf)
+        }; // panics: field 99 was never declared
+    }
+
+    #[test]
+    fn a_source_converts_stock_to_biomass_by_its_own_per_source_rate_not_the_global() {
+        // Arc 5 segment 2 (per-source conversion): the stock-to-biomass conversion is PER-SOURCE, so a world
+        // declares that its alien field converts on its own terms rather than borrowing the soil-derived global
+        // (a joule of redox free energy and a mole of soil nutrient are incommensurable). Two runs on the SAME
+        // field value differ only in the source's per-source biomass_per_stock, and the capped productivity
+        // tracks the per-source rate, not the registry-global.
+        let map = a_map(0xC0FFEE);
+        let temp = Field::from_map(&map);
+        let calib = EnvironCalib::dev_fixture();
+        let cell = Coord3::ground(1, 1);
+        let field_id: u16 = 7;
+        let source_id: u16 = 3;
+        let field_level = Fixed::from_ratio(1, 4);
+
+        let run = |per_source_bps: Option<Fixed>| -> Fixed {
+            let mut reg = AbioticSourceRegistry::default();
+            reg.insert(source_id, AbioticField::DataScalar(field_id), false, "");
+            reg.biomass_per_stock = Fixed::from_int(4); // the registry-global (the fallback)
+            reg.draw_fraction = Fixed::ZERO; // isolate the cap from the draw
+            reg.weathering_rate = Fixed::ZERO;
+            reg.set_source_conversion(source_id, per_source_bps, None);
+            let mut e = EnvironFields::from_map(&map);
+            let (w, h) = e.dims();
+            e.set_producer(&[(cell, Fixed::from_int(1000))]);
+            e.set_producer_source(&[(cell, vec![source_id])]);
+            e.set_data_field(field_id, ScalarField::uniform(w, h, field_level));
+            e.step(&temp, &calib);
+            let mut soil = SoilNutrientField::new();
+            {
+                let tf = Field::new(
+                    e.width,
+                    e.height,
+                    vec![Fixed::from_int(300); (e.width * e.height) as usize],
+                );
+                e.extract_producers(&mut soil, &reg, &tf)
+            };
+            e.capacity_at(cell.x, cell.y)
+        };
+
+        // None: the source uses the registry-global (4), so the cap is field_level * 4.
+        let global_cap = run(None);
+        assert_eq!(
+            global_cap,
+            field_level.checked_mul(Fixed::from_int(4)).unwrap(),
+            "with no per-source rate the source falls back to the registry-global conversion (byte-neutral)"
+        );
+        // A per-source rate of 10 (its OWN floor units) caps at field_level * 10, NOT the global 4: the
+        // conversion is per-source, so the incommensurable-global seam is closed.
+        let per_source_cap = run(Some(Fixed::from_int(10)));
+        assert_eq!(
+            per_source_cap,
+            field_level.checked_mul(Fixed::from_int(10)).unwrap(),
+            "the source converts by its OWN per-source rate, not the soil-derived registry-global"
+        );
+        assert!(
+            per_source_cap > global_cap,
+            "the per-source rate overrides the global: {per_source_cap:?} > {global_cap:?}"
+        );
+    }
+
+    #[test]
+    fn the_draw_uses_the_per_source_conversion_not_the_global_when_no_stoichiometry_is_set() {
+        // Arc 5 segment 2 (Pass-2 coverage the audit flagged): when a source sets a per-source conversion but NO
+        // stoichiometric coefficient, the deplete draw falls back to the reciprocal of THAT source's conversion
+        // (draw_biomass / per_source_bps), not the registry-global. Proven by drawing a field down and checking
+        // the removed amount equals draw_biomass / per_source_bps, which differs from draw_biomass / global.
+        let map = a_map(0xD3A);
+        let temp = Field::from_map(&map);
+        let calib = EnvironCalib::dev_fixture();
+        let cell = Coord3::ground(1, 1);
+        let field_id: u16 = 8;
+        let source_id: u16 = 4;
+        let field_level = Fixed::from_ratio(1, 2);
+        let per_source_bps = Fixed::from_int(10);
+        let global_bps = Fixed::from_int(4);
+        let draw_fraction = Fixed::from_ratio(1, 2);
+
+        let mut reg = AbioticSourceRegistry::default();
+        reg.insert(source_id, AbioticField::DataScalar(field_id), true, "");
+        reg.biomass_per_stock = global_bps;
+        reg.draw_fraction = draw_fraction;
+        reg.weathering_rate = Fixed::ZERO;
+        reg.set_source_conversion(source_id, Some(per_source_bps), None); // per-source bps, None stoich
+
+        let mut e = EnvironFields::from_map(&map);
+        let (w, h) = e.dims();
+        e.set_producer(&[(cell, Fixed::from_int(1000))]);
+        e.set_producer_source(&[(cell, vec![source_id])]);
+        e.set_data_field(field_id, ScalarField::uniform(w, h, field_level));
+        e.step(&temp, &calib);
+        let mut soil = SoilNutrientField::new();
+        {
+            let tf = Field::new(
+                e.width,
+                e.height,
+                vec![Fixed::from_int(300); (e.width * e.height) as usize],
+            );
+            e.extract_producers(&mut soil, &reg, &tf)
+        };
+
+        let cap = e.capacity_at(cell.x, cell.y); // = field_level * per_source_bps
+        let draw_biomass = cap.checked_mul(draw_fraction).unwrap();
+        let drawn = field_level - e.data_field_at(field_id, cell.x, cell.y).unwrap();
+        assert_eq!(
+            drawn,
+            draw_biomass.checked_div(per_source_bps).unwrap(),
+            "the None-stoichiometry draw uses THIS source's per-source conversion (draw_biomass / per_source_bps)"
+        );
+        assert_ne!(
+            drawn,
+            draw_biomass.checked_div(global_bps).unwrap(),
+            "the draw does NOT use the registry-global conversion (that was the untested Pass-2 branch)"
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "must be positive")]
+    fn a_zero_per_source_conversion_fails_loud_rather_than_silently_starving() {
+        // Arc 5 segment 2 fail-loud (the audit's asymmetry finding): a per-source biomass_per_stock of zero is a
+        // config error that would silently cap every producer on it to zero biomass, so set_source_conversion
+        // panics at config time, symmetric with the registry-global's own unset guard. (A zero stock_per_biomass
+        // is NOT an error, it is the catalyst case, tested separately by its absence of a panic here.)
+        let mut reg = AbioticSourceRegistry::default();
+        reg.insert(1, AbioticField::DataScalar(5), true, "");
+        reg.set_source_conversion(1, Some(Fixed::ZERO), None); // panics: zero conversion
+    }
+
+    #[test]
+    fn a_redox_source_derives_its_yield_from_the_floor_emf_not_a_declared_number() {
+        // Arc 5 segment 3 (the depth-independent floor-EMF core): a chemolithotroph's stock-to-biomass conversion
+        // DERIVES from the galvanic EMF of its couple (the two floor standard potentials, through the floor law
+        // battery_emf = E_acceptor - E_donor) times the reserved emf_to_biomass coupling, rather than a declared
+        // raw number or the soil-derived global. Proof: the capped productivity equals supply * (EMF * coupling),
+        // matching the floor law exactly, and differs from what the registry-global conversion would give.
+        let map = a_map(0x5EDD00);
+        let temp = Field::from_map(&map);
+        let calib = EnvironCalib::dev_fixture();
+        let cell = Coord3::ground(1, 1);
+        let field_id: u16 = 20;
+        let source_id: u16 = 200;
+        let field_level = Fixed::from_ratio(1, 2);
+        // A spontaneous couple: acceptor (oxidant) above donor (reductant), so EMF > 0.
+        let donor_potential = Fixed::from_ratio(2, 10);
+        let acceptor_potential = Fixed::from_ratio(8, 10);
+        let coupling = Fixed::from_int(2); // the reserved EMF-to-biomass value (a dev-fixture, owner's in canon)
+
+        let mut reg = AbioticSourceRegistry::default();
+        reg.insert(source_id, AbioticField::DataScalar(field_id), false, "");
+        reg.biomass_per_stock = Fixed::from_int(4); // the global the redox derivation must OVERRIDE
+        reg.draw_fraction = Fixed::ZERO;
+        reg.weathering_rate = Fixed::ZERO;
+        reg.emf_to_biomass = coupling;
+        reg.set_source_redox(source_id, donor_potential, acceptor_potential);
+
+        let mut e = EnvironFields::from_map(&map);
+        let (w, h) = e.dims();
+        e.set_producer(&[(cell, Fixed::from_int(1000))]);
+        e.set_producer_source(&[(cell, vec![source_id])]);
+        e.set_data_field(field_id, ScalarField::uniform(w, h, field_level));
+        e.step(&temp, &calib);
+        let mut soil = SoilNutrientField::new();
+        {
+            let tf = Field::new(
+                e.width,
+                e.height,
+                vec![Fixed::from_int(300); (e.width * e.height) as usize],
+            );
+            e.extract_producers(&mut soil, &reg, &tf)
+        };
+
+        let emf = civsim_physics::laws::battery_emf(acceptor_potential, donor_potential); // = 0.6
+        let derived_yield = emf.checked_mul(coupling).unwrap();
+        let cap = e.capacity_at(cell.x, cell.y);
+        assert_eq!(
+            cap,
+            field_level.checked_mul(derived_yield).unwrap(),
+            "the redox source's productivity derives from the floor EMF (E_acceptor - E_donor) times the coupling"
+        );
+        assert_ne!(
+            cap,
+            field_level.checked_mul(Fixed::from_int(4)).unwrap(),
+            "the derivation OVERRIDES the registry-global conversion (the yield is read from the floor, not declared)"
+        );
+    }
+
+    #[test]
+    fn a_nernst_armed_redox_source_yield_falls_as_the_couple_depletes() {
+        // The concentration-dependent depth extension (the corrected Nernst): an ARMED redox source (carrier
+        // charge above zero) reads its couple's ACTUAL donor concentration, so BELOW the standard state
+        // (activity under one) its per-unit yield is LOWER than the concentration-independent standard EMF, and
+        // AT unit activity it reduces EXACTLY to the standard EMF. This is the fix for the standard-EMF defect:
+        // a depleting couple's drive falls rather than reading spontaneity forever.
+        let map = a_map(0x5EDD00);
+        let calib = EnvironCalib::dev_fixture();
+        let cell = Coord3::ground(1, 1);
+        let field_id: u16 = 20;
+        let source_id: u16 = 200;
+        let donor = Fixed::from_ratio(2, 10);
+        let acceptor = Fixed::from_ratio(8, 10);
+        let coupling = Fixed::from_int(2);
+        let kb = Fixed::from_ratio(257, 10_000); // k_B*T/q ~ 0.0257 at unit T and unit carrier charge
+
+        let run = |stock: Fixed, armed: bool| -> Fixed {
+            let mut reg = AbioticSourceRegistry::default();
+            reg.insert(source_id, AbioticField::DataScalar(field_id), false, "");
+            reg.biomass_per_stock = Fixed::from_int(4);
+            reg.draw_fraction = Fixed::ZERO;
+            reg.weathering_rate = Fixed::ZERO;
+            reg.emf_to_biomass = coupling;
+            reg.set_source_redox(source_id, donor, acceptor);
+            if armed {
+                reg.set_boltzmann_k(kb);
+                // q = 1, ideal gamma, no temperature coefficient: the donor is the source's own stock, the
+                // acceptor buffered at unit activity, so only the donor concentration shifts the EMF here.
+                reg.set_source_nernst(
+                    source_id,
+                    Fixed::ONE,
+                    None,
+                    Fixed::ONE,
+                    Fixed::ONE,
+                    Fixed::ZERO,
+                    Fixed::ZERO,
+                );
+            }
+            let mut e = EnvironFields::from_map(&map);
+            let (w, h) = e.dims();
+            e.set_producer(&[(cell, Fixed::from_int(1000))]);
+            e.set_producer_source(&[(cell, vec![source_id])]);
+            e.set_data_field(field_id, ScalarField::uniform(w, h, stock));
+            let temp = Field::from_map(&map);
+            e.step(&temp, &calib);
+            let mut soil = SoilNutrientField::new();
+            // A unit-temperature field so the thermal factor k_B*T/q equals kb exactly.
+            let tf = Field::new(
+                e.width,
+                e.height,
+                vec![Fixed::ONE; (e.width * e.height) as usize],
+            );
+            e.extract_producers(&mut soil, &reg, &tf);
+            e.capacity_at(cell.x, cell.y)
+        };
+
+        // At unit donor activity (stock = 1) the Nernst reduces exactly to the standard EMF: identical yield.
+        assert_eq!(
+            run(Fixed::ONE, true),
+            run(Fixed::ONE, false),
+            "at unit activity the armed Nernst yield equals the standard-EMF yield (reduces exactly)"
+        );
+        // Below the standard state (stock = 1/2, activity < 1) the armed drive FALLS below the standard EMF.
+        let low_armed = run(Fixed::from_ratio(1, 2), true);
+        let low_std = run(Fixed::from_ratio(1, 2), false);
+        assert!(
+            low_armed < low_std && low_armed > Fixed::ZERO,
+            "a depleting couple's Nernst yield falls below the standard EMF but still powers some life \
+             (armed {low_armed:?}, standard {low_std:?})"
+        );
+    }
+
+    #[test]
+    fn a_nernst_redox_source_with_kinetics_draws_the_reversible_flux_from_its_catalyst_tissue() {
+        // Phase-2 increment 2: an armed redox source WITH kinetics draws the reversible-Michaelis-Menten uptake
+        // flux, Vmax = kcat * the being's OWN catalyst tissue (its named composition class), min(v, S) conserved.
+        // A producer WITH catalyst tissue draws its stock down; one WITHOUT (no catalyst, Vmax = 0) draws nothing;
+        // the draw never exceeds the present stock (the conservation clamp).
+        let map = a_map(0x5EDD02);
+        let calib = EnvironCalib::dev_fixture();
+        let cell = Coord3::ground(1, 1);
+        let field_id: u16 = 21;
+        let source_id: u16 = 201;
+        let donor = Fixed::from_ratio(2, 10);
+        let acceptor = Fixed::from_ratio(8, 10);
+
+        let run = |stock: Fixed, protein: Option<Fixed>| -> Fixed {
+            let mut reg = AbioticSourceRegistry::default();
+            reg.insert(source_id, AbioticField::DataScalar(field_id), true, ""); // depletes: pass 2 draws it
+            reg.biomass_per_stock = Fixed::from_int(4);
+            reg.draw_fraction = Fixed::from_ratio(1, 2);
+            reg.weathering_rate = Fixed::ZERO;
+            reg.emf_to_biomass = Fixed::from_int(2);
+            reg.set_boltzmann_k(Fixed::from_ratio(257, 10_000));
+            reg.set_source_redox(source_id, donor, acceptor);
+            reg.set_source_nernst(
+                source_id,
+                Fixed::ONE,
+                None,
+                Fixed::ONE,
+                Fixed::ONE,
+                Fixed::ZERO,
+                Fixed::ZERO,
+            );
+            reg.set_source_kinetics(
+                source_id,
+                Fixed::from_int(4),
+                Fixed::ONE,
+                Fixed::ONE,
+                "bio.protein",
+            );
+            let mut e = EnvironFields::from_map(&map);
+            let (w, h) = e.dims();
+            e.set_producer(&[(cell, Fixed::from_int(1000))]);
+            e.set_producer_source(&[(cell, vec![source_id])]);
+            if let Some(p) = protein {
+                let mut comp = BTreeMap::new();
+                comp.insert("bio.protein".to_string(), p);
+                e.set_producer_food(&[(cell, comp)]);
+            }
+            e.set_data_field(field_id, ScalarField::uniform(w, h, stock));
+            let temp = Field::from_map(&map);
+            e.step(&temp, &calib);
+            let mut soil = SoilNutrientField::new();
+            let tf = Field::new(
+                e.width,
+                e.height,
+                vec![Fixed::ONE; (e.width * e.height) as usize],
+            );
+            e.extract_producers(&mut soil, &reg, &tf);
+            stock - e.data_field_at(field_id, cell.x, cell.y).unwrap() // the amount drawn
+        };
+
+        // A producer WITH catalyst tissue draws the flux; one WITHOUT draws nothing (Vmax = kcat * 0 = 0).
+        let drawn_with = run(Fixed::from_int(10), Some(Fixed::from_ratio(1, 2)));
+        let drawn_without = run(Fixed::from_int(10), None);
+        assert!(
+            drawn_with > Fixed::ZERO,
+            "a producer with catalyst tissue draws the reversible flux, got {drawn_with:?}"
+        );
+        assert_eq!(
+            drawn_without,
+            Fixed::ZERO,
+            "a producer with no catalyst tissue draws nothing (its Vmax is zero), got {drawn_without:?}"
+        );
+
+        // Conservation: with a tiny stock the draw never exceeds it (the structural min(v, S) clamp).
+        let tiny = Fixed::from_ratio(1, 1000);
+        let drawn_tiny = run(tiny, Some(Fixed::from_ratio(1, 2)));
+        assert!(
+            drawn_tiny <= tiny && drawn_tiny > Fixed::ZERO,
+            "the flux draws some but never more than the present stock (drawn {drawn_tiny:?}, stock {tiny:?})"
+        );
+    }
+
+    #[test]
+    fn a_redox_derivation_takes_precedence_over_a_per_source_conversion() {
+        // Arc 5 segment 3 precedence: when a source carries BOTH a redox couple AND a per-source biomass_per_stock
+        // (segment 2), the redox derivation wins, so the couple's floor EMF sets the yield, not the declared
+        // per-source number. Proven by setting a per-source conversion that would give a DIFFERENT cap and showing
+        // the realised cap is the EMF-derived one, not the per-source one (and not the global).
+        let map = a_map(0x9E11);
+        let temp = Field::from_map(&map);
+        let calib = EnvironCalib::dev_fixture();
+        let cell = Coord3::ground(1, 1);
+        let field_id: u16 = 22;
+        let source_id: u16 = 202;
+        let field_level = Fixed::from_ratio(1, 2);
+        let donor_potential = Fixed::from_ratio(2, 10);
+        let acceptor_potential = Fixed::from_ratio(8, 10);
+        let coupling = Fixed::from_int(2);
+        let per_source_bps = Fixed::from_int(7); // a DIFFERENT per-source value the redox must override
+
+        let mut reg = AbioticSourceRegistry::default();
+        reg.insert(source_id, AbioticField::DataScalar(field_id), false, "");
+        reg.biomass_per_stock = Fixed::from_int(4);
+        reg.draw_fraction = Fixed::ZERO;
+        reg.weathering_rate = Fixed::ZERO;
+        reg.emf_to_biomass = coupling;
+        reg.set_source_conversion(source_id, Some(per_source_bps), None); // segment-2 per-source value
+        reg.set_source_redox(source_id, donor_potential, acceptor_potential); // segment-3 derivation
+
+        let mut e = EnvironFields::from_map(&map);
+        let (w, h) = e.dims();
+        e.set_producer(&[(cell, Fixed::from_int(1000))]);
+        e.set_producer_source(&[(cell, vec![source_id])]);
+        e.set_data_field(field_id, ScalarField::uniform(w, h, field_level));
+        e.step(&temp, &calib);
+        let mut soil = SoilNutrientField::new();
+        {
+            let tf = Field::new(
+                e.width,
+                e.height,
+                vec![Fixed::from_int(300); (e.width * e.height) as usize],
+            );
+            e.extract_producers(&mut soil, &reg, &tf)
+        };
+
+        let emf = civsim_physics::laws::battery_emf(acceptor_potential, donor_potential); // 0.6
+        let cap = e.capacity_at(cell.x, cell.y);
+        assert_eq!(
+            cap,
+            field_level.checked_mul(emf.checked_mul(coupling).unwrap()).unwrap(),
+            "the redox derivation takes precedence: the cap is EMF-derived, not the per-source conversion"
+        );
+        assert_ne!(
+            cap,
+            field_level.checked_mul(per_source_bps).unwrap(),
+            "the per-source conversion (segment 2) is OVERRIDDEN by the redox derivation (segment 3)"
+        );
+    }
+
+    #[test]
+    fn a_standard_non_spontaneous_redox_couple_powers_no_life() {
+        // Arc 5 segment 3: a couple whose acceptor is not above its donor releases no free energy at the STANDARD
+        // state (standard EMF <= 0), so the yield clamps to zero and supports no biomass, emergent from the floor
+        // law rather than an authored gate. Covers both the strictly-negative case AND the EMF == 0 boundary
+        // (acceptor == donor), and a positive control (acceptor above donor yields biomass). The STANDARD-state
+        // reading is the core's honest limit: the Nernst extension (flagged, not wired) would re-judge spontaneity
+        // at the actual field concentrations, so a standard-non-spontaneous couple could turn spontaneous there.
+        let map = a_map(0xDEAD00);
+        let temp = Field::from_map(&map);
+        let calib = EnvironCalib::dev_fixture();
+        let cell = Coord3::ground(1, 1);
+        let field_id: u16 = 21;
+        let source_id: u16 = 201;
+        let coupling = Fixed::from_int(2);
+
+        // Cap at `cell` for a couple with the given donor/acceptor standard potentials, all else fixed.
+        let cap_for = |donor: Fixed, acceptor: Fixed| -> Fixed {
+            let mut reg = AbioticSourceRegistry::default();
+            reg.insert(source_id, AbioticField::DataScalar(field_id), false, "");
+            reg.biomass_per_stock = Fixed::from_int(4);
+            reg.draw_fraction = Fixed::ZERO;
+            reg.weathering_rate = Fixed::ZERO;
+            reg.emf_to_biomass = coupling;
+            reg.set_source_redox(source_id, donor, acceptor);
+            let mut e = EnvironFields::from_map(&map);
+            let (w, h) = e.dims();
+            e.set_producer(&[(cell, Fixed::from_int(1000))]);
+            e.set_producer_source(&[(cell, vec![source_id])]);
+            e.set_data_field(field_id, ScalarField::uniform(w, h, Fixed::from_int(1)));
+            e.step(&temp, &calib);
+            let mut soil = SoilNutrientField::new();
+            {
+                let tf = Field::new(
+                    e.width,
+                    e.height,
+                    vec![Fixed::from_int(300); (e.width * e.height) as usize],
+                );
+                e.extract_producers(&mut soil, &reg, &tf)
+            };
+            e.capacity_at(cell.x, cell.y)
+        };
+
+        // Strictly negative standard EMF (acceptor 0.2 below donor 0.8): no biomass.
+        assert_eq!(
+            cap_for(Fixed::from_ratio(8, 10), Fixed::from_ratio(2, 10)),
+            Fixed::ZERO,
+            "a standard-non-spontaneous couple (acceptor below donor) supports no biomass"
+        );
+        // The EMF == 0 boundary (acceptor == donor): the clamp includes zero, still no biomass.
+        assert_eq!(
+            cap_for(Fixed::from_ratio(5, 10), Fixed::from_ratio(5, 10)),
+            Fixed::ZERO,
+            "the zero-EMF boundary (acceptor == donor) also supports no biomass (the clamp includes zero)"
+        );
+        // Positive control: a spontaneous couple (acceptor 0.8 above donor 0.2) DOES support biomass, so the zero
+        // above is the couple's non-spontaneity, not a dead test.
+        assert!(
+            cap_for(Fixed::from_ratio(2, 10), Fixed::from_ratio(8, 10)) > Fixed::ZERO,
+            "a spontaneous couple (acceptor above donor) supports biomass: the zero result isolates non-spontaneity"
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "emf_to_biomass coupling reserved value is unset")]
+    fn a_redox_source_fails_loud_when_the_coupling_is_unset() {
+        // Arc 5 segment 3 reserved-value discipline: the EMF-to-biomass coupling is the OWNER's value, surfaced not
+        // fabricated. A redox derivation with the coupling at its fail-loud sentinel (zero, the default) REFUSES to
+        // run rather than silently starving every redox producer, exactly as the global conversion's guard does.
+        let map = a_map(0xC0DE00);
+        let temp = Field::from_map(&map);
+        let calib = EnvironCalib::dev_fixture();
+        let cell = Coord3::ground(1, 1);
+        let mut reg = AbioticSourceRegistry::default();
+        reg.insert(9, AbioticField::DataScalar(30), false, "");
+        reg.biomass_per_stock = Fixed::from_int(4);
+        reg.set_source_redox(9, Fixed::from_ratio(2, 10), Fixed::from_ratio(8, 10));
+        // reg.emf_to_biomass left at the default sentinel (zero): the derivation must fail loud.
+        let mut e = EnvironFields::from_map(&map);
+        let (w, h) = e.dims();
+        e.set_producer(&[(cell, Fixed::from_int(10))]);
+        e.set_producer_source(&[(cell, vec![9])]);
+        e.set_data_field(30, ScalarField::uniform(w, h, Fixed::from_int(1)));
+        e.step(&temp, &calib);
+        let mut soil = SoilNutrientField::new();
+        {
+            let tf = Field::new(
+                e.width,
+                e.height,
+                vec![Fixed::from_int(300); (e.width * e.height) as usize],
+            );
+            e.extract_producers(&mut soil, &reg, &tf)
+        }; // panics: coupling unset
+    }
+
+    #[test]
+    fn a_donor_and_acceptor_are_co_limited_and_drawn_by_their_own_stoichiometry() {
+        // Arc 5 segment 2 (per-source stoichiometry) composed with segment 1's Liebig co-limitation: a redox
+        // chemolithotroph closes on a reduced DONOR field AND an oxidized ACCEPTOR field, each its OWN source id.
+        // Two claims: (1) CO-LIMITATION is already delivered by the Liebig-minimum over the source set (the cap
+        // is bound by the scarcer reactant, segment 1); (2) each reactant is DRAWN DOWN by its OWN stoichiometric
+        // coefficient, not a shared 1:1 amount, so a reaction that consumes twice as much donor as acceptor is a
+        // pure data row (no bespoke difference operator; the redox character is co-limitation + per-source data).
+        let map = a_map(0x5ED0C0);
+        let temp = Field::from_map(&map);
+        let calib = EnvironCalib::dev_fixture();
+        let cell = Coord3::ground(1, 1);
+        let donor_field: u16 = 10;
+        let acceptor_field: u16 = 11;
+        let donor_src: u16 = 100;
+        let acceptor_src: u16 = 101;
+
+        let mut reg = AbioticSourceRegistry::default();
+        reg.insert(donor_src, AbioticField::DataScalar(donor_field), true, "");
+        reg.insert(
+            acceptor_src,
+            AbioticField::DataScalar(acceptor_field),
+            true,
+            "",
+        );
+        reg.biomass_per_stock = Fixed::from_int(2);
+        reg.draw_fraction = Fixed::from_ratio(1, 2); // a visible per-tick draw
+        reg.weathering_rate = Fixed::ZERO;
+        // The donor is consumed at twice the acceptor's stoichiometric rate (2:1), each its own per-source data.
+        let donor_stoich = Fixed::from_int(1);
+        let acceptor_stoich = Fixed::from_ratio(1, 2);
+        reg.set_source_conversion(donor_src, None, Some(donor_stoich));
+        reg.set_source_conversion(acceptor_src, None, Some(acceptor_stoich));
+
+        // The acceptor is the SCARCER reactant, so it should bind the productivity (co-limitation).
+        let donor_level = Fixed::from_int(2);
+        let acceptor_level = Fixed::from_ratio(1, 2);
+        let mut e = EnvironFields::from_map(&map);
+        let (w, h) = e.dims();
+        e.set_producer(&[(cell, Fixed::from_int(1000))]);
+        e.set_producer_source(&[(cell, vec![donor_src, acceptor_src])]);
+        e.set_data_field(donor_field, ScalarField::uniform(w, h, donor_level));
+        e.set_data_field(acceptor_field, ScalarField::uniform(w, h, acceptor_level));
+        e.step(&temp, &calib);
+        let mut soil = SoilNutrientField::new();
+        {
+            let tf = Field::new(
+                e.width,
+                e.height,
+                vec![Fixed::from_int(300); (e.width * e.height) as usize],
+            );
+            e.extract_producers(&mut soil, &reg, &tf)
+        };
+
+        // (1) Co-limitation: the cap is the SCARCER (acceptor) supported biomass, not the donor's.
+        let cap = e.capacity_at(cell.x, cell.y);
+        assert_eq!(
+            cap,
+            acceptor_level.checked_mul(reg.biomass_per_stock).unwrap(),
+            "the scarcer reactant (acceptor) binds the productivity: the Liebig minimum co-limits (segment 1)"
+        );
+        assert!(
+            cap < donor_level.checked_mul(reg.biomass_per_stock).unwrap(),
+            "the abundant donor alone would support more; co-limitation holds it to the acceptor"
+        );
+        // (2) Per-source stoichiometry: each reactant drawn by capacity*draw_fraction*its_own_stoich.
+        let draw_biomass = cap.checked_mul(reg.draw_fraction).unwrap();
+        let donor_remaining = e.data_field_at(donor_field, cell.x, cell.y).unwrap();
+        let acceptor_remaining = e.data_field_at(acceptor_field, cell.x, cell.y).unwrap();
+        assert_eq!(
+            donor_remaining,
+            donor_level - draw_biomass.checked_mul(donor_stoich).unwrap(),
+            "the donor is drawn down by its OWN stoichiometric coefficient"
+        );
+        assert_eq!(
+            acceptor_remaining,
+            acceptor_level - draw_biomass.checked_mul(acceptor_stoich).unwrap(),
+            "the acceptor is drawn down by its OWN coefficient (2:1 vs the donor, not a shared 1:1 amount)"
+        );
+        let donor_drawn = donor_level - donor_remaining;
+        let acceptor_drawn = acceptor_level - acceptor_remaining;
+        assert_eq!(
+            donor_drawn,
+            acceptor_drawn.checked_mul(Fixed::from_int(2)).unwrap(),
+            "the donor is consumed at twice the acceptor's rate: reaction-specific stoichiometry, a data row"
         );
     }
 

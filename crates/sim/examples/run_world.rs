@@ -1612,6 +1612,89 @@ fn snapshot(
         ),
         None => println!("  physiology: no embodied bodies  |  births {births}  deaths {deaths}"),
     }
+    // Day-night arc: when the diurnal cycle is armed, show the surface temperature swing across the equator
+    // (the coolest night-side cell versus the warmest day-side cell in the middle row) so the day-night heating
+    // is watchable in the readout. Silent when the cycle is unarmed.
+    if runner
+        .environ()
+        .map(|e| e.is_diurnal_armed())
+        .unwrap_or(false)
+    {
+        let f = runner.field();
+        let (fw, fh) = (f.width(), f.height());
+        let mid = fh / 2;
+        let mut lo = f64::INFINITY;
+        let mut hi = f64::NEG_INFINITY;
+        for x in 0..fw {
+            let t = f.at(x, mid).to_f64_lossy();
+            lo = lo.min(t);
+            hi = hi.max(t);
+        }
+        if lo.is_finite() && hi.is_finite() {
+            println!(
+                "  day-night surface (equator, K): night-side {lo:.1}  day-side {hi:.1}  swing {:.1}",
+                hi - lo
+            );
+        }
+        // Mirror's real tilt gives the world a latitude structure: the poles run colder than the equator, and
+        // as the orbital phase advances across the year the warmer pole reverses (the season). Read the mean
+        // surface temperature of each pole row against the equator so the tilt's effect is watchable.
+        if fh >= 3 {
+            let row_mean = |y: i32| -> f64 {
+                let s: f64 = (0..fw).map(|x| f.at(x, y).to_f64_lossy()).sum();
+                s / fw as f64
+            };
+            let (north, equator, south) = (row_mean(0), row_mean(mid), row_mean(fh - 1));
+            println!(
+                "  seasonal latitude (mean K): north-pole {north:.1}  equator {equator:.1}  south-pole {south:.1}"
+            );
+        }
+        // Per-material thermal inertia (follow-on 2): a cell's own water content sets how fast it heats and
+        // cools, so wetter cells lag while drier land swings. To isolate the day-night lag from the pole-to-
+        // equator latitude gradient, restrict to a NARROW EQUATORIAL BAND (near-constant latitude), split its
+        // cells at the midpoint of the observed inertia range into a DRIER half (higher factor) and a WETTER
+        // half (lower factor), and show each half's day-night temperature spread. At one latitude the spread is
+        // the day-night swing, so the wetter surface's smaller swing versus drier land's larger swing is
+        // watchable, the ocean effect. Silent when the band has no inertia contrast to show.
+        if let Some(env) = runner.environ() {
+            let band = (fh / 8).max(1); // a few rows either side of the equator: near-constant latitude
+            let (y0, y1) = ((mid - band).max(0), (mid + band).min(fh - 1));
+            let (mut imin, mut imax) = (f64::INFINITY, f64::NEG_INFINITY);
+            for y in y0..=y1 {
+                for x in 0..fw {
+                    let inr = env.solar_inertia_at(x, y).to_f64_lossy();
+                    imin = imin.min(inr);
+                    imax = imax.max(inr);
+                }
+            }
+            if imax > imin {
+                let thresh = 0.5 * (imin + imax);
+                let (mut dry_lo, mut dry_hi) = (f64::INFINITY, f64::NEG_INFINITY);
+                let (mut wet_lo, mut wet_hi) = (f64::INFINITY, f64::NEG_INFINITY);
+                let mut wet_n = 0u32;
+                for y in y0..=y1 {
+                    for x in 0..fw {
+                        let t = f.at(x, y).to_f64_lossy();
+                        if env.solar_inertia_at(x, y).to_f64_lossy() <= thresh {
+                            wet_lo = wet_lo.min(t);
+                            wet_hi = wet_hi.max(t);
+                            wet_n += 1;
+                        } else {
+                            dry_lo = dry_lo.min(t);
+                            dry_hi = dry_hi.max(t);
+                        }
+                    }
+                }
+                if wet_n > 0 && dry_hi.is_finite() && wet_hi.is_finite() {
+                    println!(
+                        "  thermal inertia (equatorial band): drier-land swing {:.1} K vs wetter swing {:.1} K over {wet_n} wetter cells (wetter lags, swings less)",
+                        dry_hi - dry_lo,
+                        wet_hi - wet_lo
+                    );
+                }
+            }
+        }
+    }
     if !death_cause.is_empty() {
         let parts: Vec<String> = death_cause
             .iter()
@@ -2221,6 +2304,15 @@ fn main() {
             let comps = living.producer_compositions();
             if let Some(env) = runner.environ_mut() {
                 env.set_producer_food(&comps);
+                // Day-night arc (arc 2): arm the diurnal insolation cycle so the light and surface temperature
+                // sweep day to night, and any rhythm a being keeps emerges from selection over those cycling
+                // physical fields, never from an authored clock. A short 128-tick "day" makes the cycle visible
+                // over the run. This is the MIRROR sky: Earth's real single sun at its real 23.44-degree axial
+                // tilt, so REAL SEASONS ride on top of the day-night through the declination term (a year is
+                // 128*365 ticks; the sub-solar latitude, and with it the poles' warmth, swings across it). The
+                // tilt is Mirror's per-world datum, not a global author. Opt-in and byte-neutral off, so the
+                // four tracked determinism pins hold; only this armed scenario cycles.
+                env.arm_diurnal(civsim_sim::environ::DiurnalSky::mirror(128, 128 * 365));
             }
             runner.set_matter_cycle(MatterCycleCalib::dev_fixture());
             runner.set_decomposer(DecomposerDriverRegistry::dev_fixture());
