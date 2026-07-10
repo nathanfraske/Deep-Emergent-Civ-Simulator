@@ -1066,6 +1066,14 @@ pub fn is_creature(id: StableId) -> bool {
 /// bit 61) and from a founder's small sequential mind id (asserted at spawn).
 pub const PREDATOR_ID_BIT: u64 = 1 << 61;
 
+/// Whether a walker id is an AUTHORED PREDATOR (the reserved predator sub-bit within the creature namespace).
+/// The creature reproduction/behaviour-selection arc (step 2) reads this to keep the authored predator OUT of
+/// the emergent breeding pool: the predator is an environmental GIVEN, not a modeled lineage that reproduces
+/// or is selected as prey, so its authored always-strike disposition must never enter the gene pool.
+pub fn is_predator(id: StableId) -> bool {
+    id.0 & PREDATOR_ID_BIT != 0
+}
+
 pub struct Embodiment {
     walkers: Vec<Walker>,
     thermal: BTreeMap<StableId, BeingThermal>,
