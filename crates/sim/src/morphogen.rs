@@ -55,6 +55,8 @@ use crate::anatomy::{BodyPlan, Part, Temperament};
 use crate::genome::{
     Channel, DominanceMode, GeneDef, GeneEffect, GeneId, GeneSet, Genome, MorphogenParamId,
 };
+use crate::insult;
+use civsim_physics::laws;
 
 /// One geometry or material axis a grown segment carries, with the floor range the expressed fraction
 /// maps into. The id is a floor axis id (`mech.contact_area`, `mat.yield_strength`, `opt.refractive_index`,
@@ -203,6 +205,12 @@ pub struct Segment {
     pub geometry: BTreeMap<String, Fixed>,
     /// The segment's material on the mechanical and optical axes, keyed by axis id, sorted.
     pub material: BTreeMap<String, Fixed>,
+    /// The segment's accumulated aging damage as a NORMALIZED FRACTION of its own failure tolerance
+    /// (R-AGING (c), the first-passage accumulator), in `[0, ONE]`. Zero at growth; advanced each tick
+    /// by the load-grounded net damage (insult minus funded repair, normalized once by the tolerance)
+    /// where the run arms aging. The fraction store keeps a wound-style additive accumulation exact (no
+    /// energy round-trip); its per-tick advance lives in the run loop, this field is the state it writes.
+    pub damage: Fixed,
 }
 
 impl Segment {
@@ -214,6 +222,34 @@ impl Segment {
     /// The segment's value on a material axis, or zero if it carries none.
     pub fn mat(&self, axis: &str) -> Fixed {
         self.material.get(axis).copied().unwrap_or(Fixed::ZERO)
+    }
+
+    /// This segment's own failure-energy tolerance (the Griffith product `fracture_energy * crack_area`,
+    /// in Joules), read from its own grown data: `mat.fracture_energy` (J/m^2) times its cross-sectional
+    /// `mech.contact_area` (m^2), the same product the wound and strike fracture tests measure delivered
+    /// energy against. A segment that carries no fracture-energy datum reads a zero tolerance: it has no
+    /// failure reserve to age against, the absence convention that keeps aging OPT-IN and data-driven
+    /// (Principle 11), so a race arms aging by growing tissue that declares a fracture energy, and an
+    /// alien whose failure mode is non-mechanical declares its own failure energy on the same axis.
+    pub fn failure_tolerance(&self) -> Fixed {
+        self.mat("mat.fracture_energy")
+            .checked_mul(self.geo("mech.contact_area"))
+            .unwrap_or(Fixed::ZERO)
+    }
+
+    /// This segment's derived structural integrity in `[0, ONE]`: one minus its accumulated normalized
+    /// damage fraction. A segment with no failure tolerance (no fracture-energy datum) reads full
+    /// integrity ONE whatever its stored value: it has no aging coupling (the absence convention), NOT a
+    /// failed part, the inverse of `insult::derive_integrity`'s zero-tolerance-is-already-failed
+    /// convention, so a body whose segments declare no fracture energy keeps full capability and the run
+    /// stays byte-identical until a race arms aging.
+    pub fn integrity(&self) -> Fixed {
+        if self.failure_tolerance() <= Fixed::ZERO {
+            return Fixed::ONE;
+        }
+        Fixed::from_bits(
+            Fixed::ONE.to_bits() - self.damage.clamp(Fixed::ZERO, Fixed::ONE).to_bits(),
+        )
     }
 }
 
@@ -299,6 +335,138 @@ impl Structure {
             best = best.max(self.max_capability(def.id, fns, refs, caps));
         }
         best
+    }
+
+    /// The whole-body viability with per-segment AGING applied (R-AGING (c) route (i), the first-passage
+    /// death path): each segment's capability on a function law is scaled by that segment's own derived
+    /// integrity before the body takes the greatest, so a body worn down by accumulated damage reads a
+    /// falling viability and dies through the SAME reserve-floor cull as an inert one, with no vital-part
+    /// predicate (Principle 8: death stays the emergent cull, never a morphology gate). Identical to
+    /// [`Structure::whole_body_viability`] when no segment has accrued damage, because a full-integrity
+    /// segment scales its capability by ONE (an exact fixed-point identity), so a run with no aging armed
+    /// (every segment at zero damage, or carrying no fracture-energy tolerance) reads a byte-identical
+    /// viability.
+    pub fn whole_body_viability_aged(
+        &self,
+        fns: &FunctionLawRegistry,
+        refs: &CapabilityRefs,
+        caps: &CapabilityCaps,
+    ) -> Fixed {
+        let mut best = Fixed::ZERO;
+        for def in fns.defs() {
+            for i in 0..self.segments.len() {
+                let cap = self.segment_capabilities(i, fns, refs, caps).score(def.id);
+                let aged = cap.checked_mul(self.segments[i].integrity()).unwrap_or(cap);
+                best = best.max(aged);
+            }
+        }
+        best
+    }
+
+    /// The whole-body EXTENSIVE maintenance demand (Joules per tick, R-AGING (c) slice 2): the total
+    /// repair energy the body would spend to renew every segment's failure reserve at its own turnover
+    /// rate this tick, `Σ over segments of turnover_rate * failure_tolerance`. Extensive by construction
+    /// (it sums over the whole grown body), so a larger body carries a proportionally larger maintenance
+    /// bill: the demand side of the funding gate whose balance against the being's own (mass-neutral)
+    /// energy budget lets whatever size-longevity relation emerges be the OUTPUT, never a written law. A
+    /// segment with no failure tolerance or no turnover datum contributes nothing (the absence
+    /// convention).
+    pub fn maintenance_demand(&self) -> Fixed {
+        let mut demand = Fixed::ZERO;
+        for seg in &self.segments {
+            let tol = seg.failure_tolerance();
+            if tol <= Fixed::ZERO {
+                continue;
+            }
+            let term = seg
+                .mat("mat.turnover_rate")
+                .checked_mul(tol)
+                .unwrap_or(Fixed::ZERO);
+            demand = demand.saturating_add(term);
+        }
+        demand
+    }
+
+    /// Advance every segment's aging damage one tick (R-AGING (c) route (i), the first-passage accrual).
+    /// For each segment carrying a failure tolerance: the abrasive Archard WEAR energy from the being's own
+    /// locomotor load (`force`, sliding `distance`) against the segment's OWN material, commensurated from
+    /// the wear law's kilojoule scale to the segment's Joule failure scale (the `* 1000` the strike path
+    /// uses to compare delivered energy against `fracture_energy * crack_area`), MINUS the funded
+    /// tissue-turnover REPAIR (`turnover_rate * tolerance * funded_fraction`), the net normalized ONCE by
+    /// the segment's own tolerance and added to its damage fraction, floored at zero. The conversion from a
+    /// turnover rate to a repaired energy and from an accumulated energy to a damage fraction both go
+    /// through the segment's own failure energy, so no free per-segment constant enters. A segment with no
+    /// failure tolerance is skipped (the absence convention), so a body whose tissue declares no fracture
+    /// energy does not age and the run stays byte-identical. Whatever size-longevity relation emerges is
+    /// the OUTPUT: no term is justified by the aging theory it encodes.
+    ///
+    /// MODELING ASSUMPTIONS, flagged for owner and gate review (not authored values), two of them:
+    /// (1) the wear insult drives every load-bearing segment with the WHOLE-BODY locomotor force and
+    /// distance, letting each segment's own material and tolerance govern how much it wears and how near
+    /// failure that carries it, rather than partitioning the force across the segment graph by an authored
+    /// load-path model (a per-segment load partition read from the grown mechanics is a refinement; this
+    /// whole-body drive avoids authoring a distribution). (2) The ONLY aging insult wired this slice is the
+    /// LOCOMOTOR-mechanical Archard wear (force from muscle, distance from ground slide), so a non-locomoting
+    /// or sessile body reads zero distance, accrues no wear, and does not age through THIS insult; the
+    /// thermal, chemical, and metabolic/oxidative kernels (each on its own grounded floor physics) are what
+    /// will age a non-mechanical-failure or sessile being on its own terms, a future-insult gap, not a
+    /// motility-longevity law authored here. A being that declares no fracture-energy tolerance never ages
+    /// (the absence convention), so both cases stay clean data rows.
+    #[allow(clippy::too_many_arguments)]
+    pub fn accrue_aging(
+        &mut self,
+        force: Fixed,
+        distance: Fixed,
+        coefficient_scale: Fixed,
+        funded_fraction: Fixed,
+        wear_max: Fixed,
+        energy_max: Fixed,
+    ) {
+        for seg in &mut self.segments {
+            let tol = seg.failure_tolerance();
+            if tol <= Fixed::ZERO {
+                continue; // no failure reserve to age against: no aging coupling (absence convention)
+            }
+            // The Archard wear energy from this segment's own tribological material against the load, on the
+            // floor's kilojoule cut-work scale. `laws::wear_energy` is ALREADY commensurate with the failure
+            // tolerance (`fracture_energy * crack_area`, the same kJ scale, its `C_VOL` bridge lands it there
+            // with no free per-insult weight), so no conversion factor is applied: wear, repair, and the
+            // tolerance all sit on one currency. A segment with no defined indentation hardness has no
+            // Archard wear mode (`laws::wear` would abrade a zero-hardness material without bound); the
+            // absence convention skips the wear insult for it rather than reading an unset material as
+            // instant destruction.
+            let wear = if seg.mat("mat.indentation_hardness") > Fixed::ZERO {
+                laws::wear_energy(
+                    seg.mat("mat.wear_coefficient"),
+                    coefficient_scale,
+                    force,
+                    distance,
+                    seg.mat("mat.indentation_hardness"),
+                    seg.mat("mat.specific_cut_energy"),
+                    wear_max,
+                    energy_max,
+                )
+            } else {
+                Fixed::ZERO
+            };
+            let repair = insult::repair_energy(seg.mat("mat.turnover_rate"), tol, funded_fraction);
+            let net = insult::net_damage_delta(wear, repair); // signed, common kJ currency
+                                                              // Normalize once by the segment's own tolerance. An unrepresentable ratio (a catastrophic net
+                                                              // wear against a tiny tolerance) saturates SIGN-AWARE toward full damage for a positive net and
+                                                              // toward zero for a negative one, matching `derive_integrity`'s None-is-full-damage convention
+                                                              // rather than silently zeroing a fragile part's fastest failure.
+            let frac_delta = net.checked_div(tol).unwrap_or(if net.to_bits() >= 0 {
+                Fixed::ONE
+            } else {
+                Fixed::ZERO
+            });
+            // Advance the damage fraction, clamped to [0, ONE] so the stored accumulator stays a clean
+            // fraction (integrity() also clamps on read; keeping the store in range means a part driven past
+            // failure and later over-funded recovers cleanly rather than climbing down from an unbounded value).
+            let advanced =
+                Fixed::from_bits(seg.damage.to_bits().saturating_add(frac_delta.to_bits()));
+            seg.damage = advanced.clamp(Fixed::ZERO, Fixed::ONE);
+        }
     }
 
     /// The development-weighted SUM of a grown body's tissue composition on an axis (emergent-anatomy Step 3,
@@ -581,6 +749,7 @@ pub fn grow(program: &MorphogenProgram, params: &[Fixed], seed: u64, id: StableI
         depth: 0,
         geometry,
         material,
+        damage: Fixed::ZERO,
     }];
 
     let branch = branch_count(program, params);
@@ -650,6 +819,7 @@ fn grow_child(
         depth: gen + 1,
         geometry,
         material: parent.material.clone(),
+        damage: Fixed::ZERO,
     }
 }
 
@@ -919,6 +1089,290 @@ mod tests {
             inert.whole_body_viability(&fns, &refs, &caps),
             Fixed::ZERO,
             "inert matter reads no viable function and falls through the viability floor"
+        );
+    }
+
+    #[test]
+    fn segment_failure_tolerance_and_integrity_absence_and_damage() {
+        // R-AGING (c): a segment's failure tolerance is the Griffith product of its own fracture energy
+        // and cross-sectional area, and its integrity is one minus its accumulated damage fraction. The
+        // absence convention is load-bearing: a segment with no fracture-energy datum has no aging
+        // coupling and reads full integrity whatever its stored value (NOT a failed part), so aging is
+        // opt-in and byte-neutral until a race grows tissue that declares a fracture energy.
+        let seg = |fe: Option<Fixed>, area: Fixed, damage: Fixed| {
+            let mut material = BTreeMap::new();
+            if let Some(fe) = fe {
+                material.insert("mat.fracture_energy".to_string(), fe);
+            }
+            let mut geometry = BTreeMap::new();
+            geometry.insert("mech.contact_area".to_string(), area);
+            Segment {
+                parent: None,
+                depth: 0,
+                geometry,
+                material,
+                damage,
+            }
+        };
+        // No fracture-energy datum: zero tolerance, full integrity even with a stored damage value.
+        let bare = seg(None, Fixed::from_ratio(1, 2), Fixed::from_ratio(1, 2));
+        assert_eq!(bare.failure_tolerance(), Fixed::ZERO);
+        assert_eq!(
+            bare.integrity(),
+            Fixed::ONE,
+            "no tolerance means no aging coupling, not a failed part"
+        );
+        // A tolerance-bearing segment: fracture_energy 2 times area 0.5 gives tolerance 1.0.
+        let armed = seg(
+            Some(Fixed::from_int(2)),
+            Fixed::from_ratio(1, 2),
+            Fixed::ZERO,
+        );
+        assert_eq!(armed.failure_tolerance(), Fixed::ONE);
+        assert_eq!(
+            armed.integrity(),
+            Fixed::ONE,
+            "zero damage reads full integrity"
+        );
+        let worn = seg(
+            Some(Fixed::from_int(2)),
+            Fixed::from_ratio(1, 2),
+            Fixed::from_ratio(1, 4),
+        );
+        assert_eq!(
+            worn.integrity(),
+            Fixed::from_ratio(3, 4),
+            "integrity is one minus the damage fraction"
+        );
+        let dead = seg(
+            Some(Fixed::from_int(2)),
+            Fixed::from_ratio(1, 2),
+            Fixed::from_ratio(3, 2),
+        );
+        assert_eq!(
+            dead.integrity(),
+            Fixed::ZERO,
+            "damage past the tolerance clamps integrity to zero"
+        );
+    }
+
+    #[test]
+    fn aged_viability_is_identical_at_zero_damage_and_falls_to_the_floor_when_worn() {
+        // R-AGING (c) route (i): the aged viability equals the un-aged viability when no segment has
+        // accrued damage (the byte-neutrality guarantee: a full-integrity segment scales its capability
+        // by an exact ONE), and a body worn to full damage reads a zero viability and dies through the
+        // same reserve-floor cull as inert matter, with no vital-part predicate.
+        let program = MorphogenProgram::dev_default();
+        let fns = FunctionLawRegistry::dev_seed();
+        let refs = CapabilityRefs::dev_refs();
+        let caps = caps();
+        let mut limb = grow(
+            &program,
+            &params(&program, &[(0, "1"), (1, "0.5"), (2, "0.4"), (9, "0.75")]),
+            0x1,
+            StableId(1),
+        );
+        let v = limb.whole_body_viability(&fns, &refs, &caps);
+        assert!(v > Fixed::ZERO);
+        assert_eq!(
+            limb.whole_body_viability_aged(&fns, &refs, &caps),
+            v,
+            "aged viability is byte-identical to un-aged at zero damage"
+        );
+        // Arm aging on every segment (a positive tolerance) and wear each to full damage.
+        for s in &mut limb.segments {
+            s.material
+                .insert("mat.fracture_energy".to_string(), Fixed::from_int(2));
+            s.geometry
+                .entry("mech.contact_area".to_string())
+                .or_insert(Fixed::from_ratio(1, 2));
+            s.damage = Fixed::ONE;
+        }
+        assert_eq!(
+            limb.whole_body_viability_aged(&fns, &refs, &caps),
+            Fixed::ZERO,
+            "a fully-worn body reads no viable function and falls through the cull"
+        );
+    }
+
+    #[test]
+    fn aging_accrual_wears_a_loaded_body_and_repair_offsets_it() {
+        // R-AGING (c) route (i), the accrual: a load-bearing segment carrying a failure tolerance and a
+        // wear material accrues damage under a locomotor load with no funded repair (wear with nothing to
+        // offset it), so its integrity falls; a segment whose funded turnover repair meets or exceeds the
+        // wear accrues no net damage (the first-passage balance); and a segment with no fracture-energy
+        // tolerance is skipped entirely (the absence convention, the byte-neutrality guarantee).
+        let make = |fe: Option<Fixed>, turnover: Fixed| {
+            let mut geometry = BTreeMap::new();
+            geometry.insert("mech.contact_area".to_string(), Fixed::from_ratio(1, 2));
+            let mut material = BTreeMap::new();
+            if let Some(fe) = fe {
+                material.insert("mat.fracture_energy".to_string(), fe);
+            }
+            material.insert("mat.wear_coefficient".to_string(), Fixed::ONE);
+            material.insert("mat.indentation_hardness".to_string(), Fixed::ONE);
+            material.insert("mat.specific_cut_energy".to_string(), Fixed::ONE);
+            material.insert("mat.turnover_rate".to_string(), turnover);
+            Segment {
+                parent: None,
+                depth: 0,
+                geometry,
+                material,
+                damage: Fixed::ZERO,
+            }
+        };
+        let force = Fixed::from_int(10);
+        let distance = Fixed::from_ratio(1, 10);
+        let scale = Fixed::ONE;
+        let wear_max = Fixed::from_int(1_000_000);
+        let energy_max = Fixed::from_int(1_000_000_000);
+
+        // Wear with no funded repair: damage rises, integrity falls.
+        let mut wearing = Structure {
+            segments: vec![make(Some(Fixed::from_int(2)), Fixed::ZERO)],
+        };
+        wearing.accrue_aging(force, distance, scale, Fixed::ZERO, wear_max, energy_max);
+        assert!(
+            wearing.segments[0].damage > Fixed::ZERO,
+            "a loaded body wears"
+        );
+        assert!(
+            wearing.segments[0].integrity() < Fixed::ONE,
+            "wear lowers derived integrity"
+        );
+
+        // A tolerance-less segment is skipped: no accrual, byte-neutral.
+        let mut inert = Structure {
+            segments: vec![make(None, Fixed::ZERO)],
+        };
+        inert.accrue_aging(force, distance, scale, Fixed::ZERO, wear_max, energy_max);
+        assert_eq!(
+            inert.segments[0].damage,
+            Fixed::ZERO,
+            "no fracture-energy tolerance means no aging coupling"
+        );
+
+        // Funded turnover repair OFFSETS the wear: the same load accrues strictly less net damage when
+        // the tissue funds its own maintenance than when it does not (repair is capped at the whole
+        // failure reserve per tick, so a heavy single-tick load is not fully cancelled, which is correct:
+        // a catastrophic load destroys regardless of repair).
+        let mut maintained = Structure {
+            segments: vec![make(Some(Fixed::from_int(2)), Fixed::from_int(1_000_000))],
+        };
+        maintained.accrue_aging(force, distance, scale, Fixed::ONE, wear_max, energy_max);
+        assert!(
+            maintained.segments[0].damage < wearing.segments[0].damage,
+            "funded repair accrues strictly less damage than the unrepaired body under the same load"
+        );
+
+        // The extensive maintenance demand sums turnover * tolerance over the segments.
+        let demand_body = Structure {
+            segments: vec![make(Some(Fixed::from_int(2)), Fixed::from_ratio(1, 4))],
+        };
+        // tolerance = 2 * 0.5 = 1.0; demand = turnover(0.25) * tolerance(1.0) = 0.25.
+        assert_eq!(demand_body.maintenance_demand(), Fixed::from_ratio(1, 4));
+    }
+
+    #[test]
+    fn aging_overflow_saturates_toward_failure_not_immortality() {
+        // R-AGING (c) correctness (audit finding): a catastrophic net wear against a tiny failure tolerance
+        // makes the normalizing division unrepresentable; it must saturate SIGN-AWARE toward FULL damage
+        // (the fragile part fails fastest), matching derive_integrity's convention, never silently zero the
+        // accrual and make the most-worn part immortal by a fixed-point range accident.
+        let mut geometry = BTreeMap::new();
+        geometry.insert("mech.contact_area".to_string(), Fixed::from_ratio(1, 10));
+        let mut material = BTreeMap::new();
+        // A small (but representable) tolerance against a heavy load, a large wear coefficient, and a soft
+        // material, so the wear energy saturates and wear / tolerance overflows the representable range.
+        material.insert("mat.fracture_energy".to_string(), Fixed::ONE);
+        material.insert("mat.wear_coefficient".to_string(), Fixed::from_int(1000));
+        material.insert(
+            "mat.indentation_hardness".to_string(),
+            Fixed::from_ratio(1, 1000),
+        );
+        material.insert("mat.specific_cut_energy".to_string(), Fixed::from_int(1000));
+        material.insert("mat.turnover_rate".to_string(), Fixed::ZERO);
+        let mut s = Structure {
+            segments: vec![Segment {
+                parent: None,
+                depth: 0,
+                geometry,
+                material,
+                damage: Fixed::ZERO,
+            }],
+        };
+        assert!(
+            s.segments[0].failure_tolerance() > Fixed::ZERO,
+            "the segment is aging-armed"
+        );
+        s.accrue_aging(
+            Fixed::from_int(1000),
+            Fixed::from_int(1000),
+            Fixed::ONE,
+            Fixed::ZERO,
+            Fixed::from_int(1_000_000),
+            Fixed::from_int(1_000_000_000),
+        );
+        assert_eq!(
+            s.segments[0].integrity(),
+            Fixed::ZERO,
+            "an overwhelming wear against a tiny tolerance reaches first passage, not immortality"
+        );
+    }
+
+    #[test]
+    fn aging_reaches_first_passage_and_the_longevity_relation_is_an_output() {
+        // R-AGING (c) FUNCTIONAL CHECK: a loaded body accrues damage tick by tick until its damage
+        // crosses its own failure tolerance (first passage: integrity reaches zero), and a body with a
+        // greater failure tolerance takes more ticks to reach it. What this checks precisely: the
+        // first-passage TIME is a pure OUTPUT of the tolerance-versus-wear balance (monotone in the
+        // segment's own tolerance under a fixed load), with no authored lifespan or size-to-duration law in
+        // the accrual; the time falls out of the arithmetic. It does NOT exercise a full size-covariance (a
+        // body scaling area and load together), which the gate's functional check on a grown race covers;
+        // here only the tolerance varies. The magnitudes are test fixtures spacing the passage over many
+        // ticks; the real per-tissue wear and tolerance are the owner's reserved data.
+        let run_to_first_passage = |fracture_energy: Fixed| -> u32 {
+            let mut geometry = BTreeMap::new();
+            geometry.insert("mech.contact_area".to_string(), Fixed::ONE);
+            let mut material = BTreeMap::new();
+            material.insert("mat.fracture_energy".to_string(), fracture_energy);
+            material.insert("mat.wear_coefficient".to_string(), Fixed::ONE);
+            material.insert("mat.indentation_hardness".to_string(), Fixed::ONE);
+            material.insert("mat.specific_cut_energy".to_string(), Fixed::ONE);
+            material.insert("mat.turnover_rate".to_string(), Fixed::ZERO);
+            let mut s = Structure {
+                segments: vec![Segment {
+                    parent: None,
+                    depth: 0,
+                    geometry,
+                    material,
+                    damage: Fixed::ZERO,
+                }],
+            };
+            let mut ticks = 0u32;
+            while s.segments[0].integrity() > Fixed::ZERO && ticks < 500_000 {
+                s.accrue_aging(
+                    Fixed::from_int(10),
+                    Fixed::from_int(10),
+                    Fixed::ONE,
+                    Fixed::ZERO,
+                    Fixed::from_int(1_000_000),
+                    Fixed::from_int(1_000_000_000),
+                );
+                ticks += 1;
+            }
+            ticks
+        };
+        let short = run_to_first_passage(Fixed::from_int(1_000_000));
+        let long = run_to_first_passage(Fixed::from_int(2_000_000));
+        assert!(
+            short > 1 && short < 500_000,
+            "a loaded body reaches first passage over many ticks (got {short})"
+        );
+        assert!(
+            long > short,
+            "a tougher body lives longer: the longevity relation is an emergent output, never authored \
+             (short {short}, long {long})"
         );
     }
 
