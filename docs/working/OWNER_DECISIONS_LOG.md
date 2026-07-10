@@ -226,6 +226,34 @@ controller (the keystone being-percept gradient plus a founder-zero freely-signe
 nothing reads a species, role, or relatedness. Couples to Agent B's run-path damage state (sequence with B).
 Posted to the gate on #117 (comment 4932785384) for its ruling before any strike code.
 
+GATE RULED 2026-07-10 (on #117): framing SIGNED OFF, build it. The gate verified all four seams at source
+itself (seam 2 at body.rs:1077/912 and laws.rs:337; seam 3 at body.rs:205-213; seam 4 at locomotion.rs:512/521;
+seam 1 sharpened against runner.rs:5545-5556). Corrections 1-3 adopted with two precisions. SEAM 1 death path
+made exact (the cross-arc coupling): no new reserve mechanic; the wound writes Agent B's `Segment.damage`,
+`whole_body_viability_aged` reads it, the INTEGRITY axis reflects it (runner.rs:5551-5556 sets INTEGRITY to
+`whole_body_viability` over the struck Structure), and the ONE unified cull (`is_alive` over every axis then
+`reconcile_lifecycle`, no morphology predicate, P8) removes the being when any axis floors; the strike is the
+fast-increment sibling of B's slow aging accrual on the SAME `Segment.damage -> whole_body_viability_aged ->
+INTEGRITY -> unified cull` chain (a vital-Segment wound floors INTEGRITY fast, a non-vital one degrades slower).
+SEAM 3 pushed to a DESCRIPTION not a dispatch: the physical quantity is pressure = delivered energy / contact
+area against the struck Segment's own material strength, and CUT/PIERCE/BLUNT/BURN are labels for regions of
+that continuum, never a per-part selector (derive the mode from geometry if the floor law needs one, never pass
+it in). SEAM 4 scope RULED to the HONEST FIRST CUT: one strike primitive over the run-path Structure's Segments
+(reads whatever Segments occupy the cell, computes the wound from the floor laws against the Segment's own
+material, writes `Segment.damage`, identical for terrain/matter/being), NOT routed through `body::Body`/`apply_insult`
+(which stay for their uses); the deep `body::Body`-to-Structure unification is its own arc sequenced with the
+plant-as-a-body / composition arcs, and the bridge is flagged as the named limit, do NOT fold it in here. UNITS:
+write `Segment.damage` in B's exact accrual convention (delivered energy commensurate with `failure_tolerance =
+fracture_energy * contact_area`, the units B's slice-3 section-9 hardened by removing the erroneous `* 1000`), so
+a discrete strike is a large one-tick increment to the same fraction accumulator, one currency, no double-count.
+SEQUENCING: build everything that does NOT touch the accumulator NOW (the contact-energy-transfer law, the
+geometry-derived contact area, the strike affordance off founder-zero, the controller consumption) against the
+Structure/Segment surface already on main; hold ONLY the final `Segment.damage` write until the gate lands B's
+#113 (which puts `Segment.damage` + `whole_body_viability_aged` on main) and clears the damage-write onto the
+merged accumulator, so Agent A does not branch against an unmerged surface. Acknowledged on #117 (comment
+4932824584) with the build order. Building on `claude/hunt-kill-strike` (#117), each step frame-blind-clean and
+posted for the gate's review, section-9 lens audit over the arc before the accumulator write.
+
 FRAMED being-percept keystone (the payoff arc: wire the percept live so predation and fleeing emerge),
 2026-07-10 (Agent A, PENDING gate ruling). Framed blind before any code. The section-11 input-bias smoke test
 (strongest model, fail-closed) BLOCKED my construction four times, each a real source-verified seam on a
