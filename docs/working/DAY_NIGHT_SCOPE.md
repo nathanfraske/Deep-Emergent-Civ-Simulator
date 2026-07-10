@@ -55,3 +55,51 @@ steering line to hold, and the reason to frame the arc blind before code.
 Frame the arc blind (section-11 smoke then section-10 panel) on the design statement (the diurnal phase, the insolation
 extension, the heat coupling, and the tick-threading choice), surface it and the A-coordination question to the gate,
 then build byte-neutral or report. No code until the framing clears and the tick-plumbing surface is agreed with A.
+
+## Blind framing result (section-10 panel, cleared the section-11 smoke on round 2): surfaced for the gate
+
+The framing panel (five lenses, behind a section-11 smoke test) confirmed the steering line holds in principle
+(insolation and heat are physical-floor growth, the phase counter withheld from the percept, no diurnal behaviour
+authored) but caught that the naive diurnal wiring bakes several Terran-geometry assumptions and physics gaps. The
+load-bearing findings are verified against source or by astronomy; they turn "mostly wiring" into a real physics-design
+decision with a scope fork for the gate and owner.
+
+Steering (the crux, both fixable and adoptable). Seam (a): the phase counter and tick must be AFFIRMATIVELY firewalled
+from the percept and every behavioural substrate (a private field or separate module or explicit exclusion), not merely
+"not exposed": an un-firewalled clock adjacent to the percept is a latent authoring channel (a substrate could branch
+on phase to template nocturnality). Seam (b): the pre-existing hydrology and productivity consumers were authored
+against a STATIC light field and now read a CYCLING one, so each authored threshold in them must be re-audited: a
+continuous physical response that cycles is fine, a hard threshold that gates an outcome on the now-cycling value
+authors a clock and must be found and fixed before this ships.
+
+Physics and Terran-geometry seams (verified against source or astronomy). The day-night cycle is on the SYNODIC
+(star-relative) period, not the sidereal `rotation_period_seconds` alone: the solar day combines rotation and orbit,
+and using rotation alone makes the tidally-locked case (rotation equals orbit, so no day-night) come out wrong. The
+multiplicative decomposition (`latitude_light(y,h)` times a phase/longitude diurnal factor) equals cos(lat)cos(hour),
+which is correct ONLY for zero axial tilt; real insolation is cos(zenith) = sin(lat)sin(declination) +
+cos(lat)cos(declination)cos(hour), which does not factor, so the multiplicative form cannot carry seasons or the polar
+midnight-sun/polar-night, and `latitude_light`'s hardwired zero at the poles makes the poles permanently dark under any
+diurnal factor. The static fallback for a tidally-locked or non-rotating world reuses the row-only `latitude_light`,
+which has NO longitude term and so cannot represent the fixed day-face and night-face that DEFINE tidal lock. The
+normalized [0,1] insolation is fed as `absorbed_irradiance` into `radiative_equilibrium` with NO stellar-luminosity or
+orbital-distance scaling, so every world radiates from the same irradiance regardless of its star and distance.
+Emissivity is a per-MATERIAL surface property (rock, water, ice, vegetation, an alien crust), not the single
+world-level constant the statement reserved beside sigma (sigma is a legitimate universal floor constant, emissivity is
+not). The design hardcodes a SINGLE light source ("the sun's height", singular) with no data field for the number or
+arrangement of sources (a binary-star world). And `t_max`, a parameter the kernel already takes, was left unclassified.
+
+Determinism guards to specify (verified as real). Guard `ticks_per_rotation` against zero (divide-by-zero) and one (the
+phase collapses to a constant), and note that `ticks_from_seconds` truncation aliases nearby rotation periods to one
+discrete `ticks_per_rotation`; fix the field-step order of the light recompute, the heat coupling, and the
+hydrology/productivity reads; specify the self-counter's initialization when the environ is armed mid-run (offset from
+tick zero), so the phase is deterministic; and bound the counter width. The `rotation_period` zero sentinel is
+physically inverted (zero is infinitely-fast rotation, not non-rotating): use an explicit absent/None for the
+non-rotating case.
+
+The scope fork for the gate and owner. The panel makes clear that a correct diurnal insolation is a physics SUBSTRATE,
+not a one-line wire: the minimal honest form (rotation-only, zero-tilt, single-sun, no luminosity scaling) is the
+cos(lat)cos(hour) special case, defensible as an explicit floor-limited interim IF its Terran assumptions are declared
+and the tidal-lock/poles/luminosity cases are handled or flagged, not silently baked. The complete form (synodic
+period, cos(zenith) with declination from per-world obliquity and orbital phase, per-material emissivity, stellar
+luminosity and orbital distance, a data-defined light-source set) is the true substrate, a larger build. This is the
+gate and owner's scope call. Surfaced, not decided; no code until the gate rules the scope.
