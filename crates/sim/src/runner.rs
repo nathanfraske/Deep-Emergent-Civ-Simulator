@@ -1059,6 +1059,21 @@ pub fn is_creature(id: StableId) -> bool {
     id.0 & CREATURE_ID_TAG != 0
 }
 
+/// The reserved sub-bit that marks an AUTHORED PREDATOR walker id within the creature namespace
+/// (predation-integration slice). A predator carries [`CREATURE_ID_TAG`] too (so it is mind-less and
+/// retired only on death, like any creature), plus this bit, so its id is provably disjoint from a
+/// biosphere creature's (`occ.id.0 | CREATURE_ID_TAG`, whose small sequential `occ.id.0` never reaches
+/// bit 61) and from a founder's small sequential mind id (asserted at spawn).
+pub const PREDATOR_ID_BIT: u64 = 1 << 61;
+
+/// Whether a walker id is an AUTHORED PREDATOR (the reserved predator sub-bit within the creature namespace).
+/// The creature reproduction/behaviour-selection arc (step 2) reads this to keep the authored predator OUT of
+/// the emergent breeding pool: the predator is an environmental GIVEN, not a modeled lineage that reproduces
+/// or is selected as prey, so its authored always-strike disposition must never enter the gene pool.
+pub fn is_predator(id: StableId) -> bool {
+    id.0 & PREDATOR_ID_BIT != 0
+}
+
 pub struct Embodiment {
     walkers: Vec<Walker>,
     thermal: BTreeMap<StableId, BeingThermal>,
@@ -1149,6 +1164,18 @@ pub struct Embodiment {
     /// world's declared per-species/per-world datum (matching the founder path, which also defers to declared
     /// data); deriving it per creature from its sensory anatomy is a shared follow-on that upgrades both paths.
     creature_being_percept: bool,
+    /// The ids of AUTHORED PREDATORS: stationary ambush hazards the predation-integration slice spawns as the
+    /// environmental GIVEN a prey adapts to (fork i, gate-ruled). A predator is a mind-less `Walker` with a
+    /// PIERCE body and an always-STRIKE controller, so it wounds any prey co-located with it through the
+    /// existing `strike_occupant` and the one INTEGRITY cull; it is NON-METABOLIZING (its anatomy-derived drain
+    /// is forced to zero below, so it neither forages nor starves, a fixed hazard like a heat source, not a
+    /// modeled survivor). Its disposition is the authored P9 given; the PREY's flee/hunt sign stays founder-zero
+    /// and its adaptation is the emergent outcome once the selection substrate lands. Empty by default, so every
+    /// existing scenario (the four canonical pins and plain `full`) is byte-identical; only `full --creatures`
+    /// populates it. A being's presence here is read ONLY to zero its metabolism (it is the authored given), never
+    /// to decide any behaviour: WHO it strikes is the occupant-agnostic `strike_occupant`, keyed on co-location
+    /// and geometry, never on this set (Principle 8).
+    predators: BTreeSet<StableId>,
     /// Whether the being re-earns a reward belief from the perceived composition of what it ATE this tick
     /// (social-learning arc, piece 1, nutrition learning). FALSE by default, so the ingested-matter reward
     /// credit never fires and every run hash is unchanged; the world-build opts in
@@ -1367,6 +1394,7 @@ impl Embodiment {
             being_percept: false,
             being_field: None,
             creature_being_percept: false,
+            predators: BTreeSet::new(),
             nutrition_learning: false,
             place_reward_learning: true,
             observe_and_imitate: false,
@@ -2536,19 +2564,25 @@ impl Embodiment {
         };
         let row = row.clone();
         // The energy the blow delivers, off the being's OWN apparatus: the greatest ACTUATOR WORK among its
-        // grown Structure Segments. For each, the actuating force (its strength stress over its cross-section,
-        // read off the axes the channel's row DECLARES, data-defined per Principle 11) over its own grown stroke
-        // distance, dispatched by the row's kernel to the actuator-work law (force times stroke, the delivered
-        // energy directly, retiring the world-global swing speed). A wielded inert tool carries no actuator of
-        // its own (its strength is not a muscle), so it delivers no work here; its reach-extending contribution
-        // to the stroke is the flagged future derived coupling. Reads only the part's own physics, never a race
-        // or role. Scoped so the acting walker's borrow ends before the target search.
-        let (coord, delivered_energy) = {
+        // grown Structure Segments (main's stroke-rate substrate, retiring the world-global swing speed). For
+        // each, the actuating force (its strength stress over its cross-section, read off the axes the channel's
+        // row DECLARES, data-defined per Principle 11) over its own grown stroke distance, dispatched by the
+        // row's kernel to the actuator-work law (force times stroke, the delivered energy directly). A wielded
+        // inert tool carries no actuator of its own (its strength is not a muscle), so it delivers no work here;
+        // its reach-extending contribution to the stroke is the flagged future derived coupling. The delivering
+        // part's own CONTACT AREA travels with it: the striker-side contact patch the blow lands over (its grown
+        // delivery segment's presented area). It is the coarse wound branch's contact area (a striker-target
+        // contact property, keyed on the striker's own geometry, never the target's whole-body surface, so a
+        // high-surface low-cross-section target is not spuriously unwoundable); the fine per-segment path keeps
+        // reading the struck segment's own area. Reads only the part's own physics, never a race or role. Scoped
+        // so the acting walker's borrow ends before the target search.
+        let (coord, delivered_energy, acting_contact_area) = {
             let Some(w) = self.walkers.iter().find(|w| w.id == walker_id) else {
                 return Fixed::ZERO;
             };
             let coord = w.coord();
             let mut delivered = Fixed::ZERO;
+            let mut acting_contact_area = Fixed::ZERO;
             if let Some(structure) = w.structure.as_ref() {
                 for seg in &structure.segments {
                     let (force, stroke) =
@@ -2556,10 +2590,11 @@ impl Embodiment {
                     let work = resolve_transfer(&row, force, stroke, params.energy_max);
                     if work > delivered {
                         delivered = work;
+                        acting_contact_area = presented_contact_area(seg);
                     }
                 }
             }
-            (coord, delivered)
+            (coord, delivered, acting_contact_area)
         };
         if delivered_energy <= Fixed::ZERO {
             return Fixed::ZERO; // no actuating part with strength and stroke: no blow (the absence convention)
@@ -2574,64 +2609,103 @@ impl Embodiment {
         else {
             return Fixed::ZERO; // nothing co-located to strike
         };
-        // The struck Segment INDEX: the target's LARGEST-PRESENTED (greatest `mech.contact_area`), the
-        // derive-first proxy for where a blind blow lands. Reads geometry, never `failure_tolerance`. The first
-        // segment of the greatest area wins (strictly-greater updates keep the earlier on a tie), deterministic.
-        let struck_idx = {
-            let Some(structure) = self.walkers[target_idx].structure.as_ref() else {
-                // The target presents no run-path Segments (the deep `body::Body`-to-Structure bridge is the
-                // flagged separate arc): nothing to wound here.
-                return Fixed::ZERO;
-            };
-            let mut best: Option<usize> = None;
-            let mut best_area = Fixed::ZERO;
-            for (i, seg) in structure.segments.iter().enumerate() {
-                let area = presented_contact_area(seg);
-                if best.is_none() || area > best_area {
-                    best_area = area;
-                    best = Some(i);
+        // ONE wound law, reading the TARGET's body GRANULARITY as data (predation-integration slice, the
+        // whole-body branch of the unified wound law): a target that carries a grown Structure is wounded
+        // per-Segment (the fine path, unchanged); a CATALOG target (no Structure) is wounded on the WHOLE body.
+        // Both feed the same `wound_fraction` law over the same three inputs (delivered energy, a contact area,
+        // a material fracture-energy); only the source of the contact area and fracture-energy differs by
+        // granularity, and the wound lands on the state that granularity presents (a Segment's damage, or the
+        // being's own whole-body damage). A big tough target takes a small wound either way (armor emerges).
+        match self.walkers[target_idx].structure.is_some() {
+            true => {
+                // FINE path: the struck Segment is the target's LARGEST-PRESENTED (greatest presented area), the
+                // derive-first proxy for where a blind blow lands (reads geometry, never `failure_tolerance`).
+                let struck_idx = {
+                    let structure = self.walkers[target_idx]
+                        .structure
+                        .as_ref()
+                        .expect("structure present (matched above)");
+                    let mut best: Option<usize> = None;
+                    let mut best_area = Fixed::ZERO;
+                    for (i, seg) in structure.segments.iter().enumerate() {
+                        let area = presented_contact_area(seg);
+                        if best.is_none() || area > best_area {
+                            best_area = area;
+                            best = Some(i);
+                        }
+                    }
+                    match best {
+                        Some(i) => i,
+                        None => return Fixed::ZERO, // a Structure with no Segments
+                    }
+                };
+                // The wound: the fraction of the struck segment's OWN `failure_tolerance = fracture_energy *
+                // presented contact area` (its Griffith reserve) the delivered energy reaches, added to that
+                // segment's normalized damage exactly as `Structure::accrue_aging`, so wounds and aging compose
+                // on ONE accumulator; `whole_body_viability_aged` reads the segment's integrity, the INTEGRITY
+                // axis reflects it, and the one unified cull removes the being when it floors (Principle 8).
+                let wound = {
+                    let struck = &self.walkers[target_idx]
+                        .structure
+                        .as_ref()
+                        .expect("structure present (matched above)")
+                        .segments[struck_idx];
+                    wound_fraction(
+                        delivered_energy,
+                        presented_contact_area(struck),
+                        struck.mat(FRACTURE_ENERGY_AXIS),
+                        params.energy_max,
+                    )
+                };
+                let struck = &mut self.walkers[target_idx]
+                    .structure
+                    .as_mut()
+                    .expect("structure present (matched above)")
+                    .segments[struck_idx];
+                struck.damage =
+                    Fixed::from_bits(struck.damage.to_bits().saturating_add(wound.to_bits()))
+                        .clamp(Fixed::ZERO, Fixed::ONE);
+                wound
+            }
+            false => {
+                // COARSE (whole-body) path for a CATALOG target: the wound is the SAME law over the STRIKER's own
+                // delivery-part contact area (a striker-target contact property, not the target's whole-body
+                // surface, so a high-surface low-cross-section body is not spuriously unwoundable) and the
+                // target's OUTERMOST tissue's `mat.fracture_energy` (the covering is the first material a
+                // whole-body blow meets), read from the target's own body plan via `organs.coverings`. A body
+                // whose covering carries NO fracture-energy (a fluid, plasma, or mana body with no
+                // fracture-bearing material) returns NO wound and routes lethality through its own reserves: the
+                // law degrades to data-absent, never a forced universal fracture death (admit-the-alien).
+                let target = &self.walkers[target_idx];
+                let outer_fracture_energy = self
+                    .organs
+                    .coverings
+                    .get(target.body.covering.kind as usize)
+                    .map(|k| k.mat(FRACTURE_ENERGY_AXIS))
+                    .unwrap_or(Fixed::ZERO);
+                if outer_fracture_energy <= Fixed::ZERO {
+                    return Fixed::ZERO; // no fracture-bearing outer material: not woundable by this law
                 }
+                let wound = wound_fraction(
+                    delivered_energy,
+                    acting_contact_area,
+                    outer_fracture_energy,
+                    params.energy_max,
+                );
+                // Accrue to the being's OWN whole-body damage. Its whole-body integrity is one minus this,
+                // written into the INTEGRITY axis by the metabolism step, so the SAME one unified cull removes it
+                // when it floors: one currency, one death path, no new death mechanic (Principle 8).
+                let target = &mut self.walkers[target_idx];
+                target.whole_body_damage = Fixed::from_bits(
+                    target
+                        .whole_body_damage
+                        .to_bits()
+                        .saturating_add(wound.to_bits()),
+                )
+                .clamp(Fixed::ZERO, Fixed::ONE);
+                wound
             }
-            match best {
-                Some(i) => i,
-                None => return Fixed::ZERO, // a Structure with no Segments
-            }
-        };
-        // The wound in Agent B's EXACT accrual convention: the fraction of the struck segment's OWN
-        // `failure_tolerance = fracture_energy * mech.contact_area` (its Griffith reserve, the same product
-        // `Segment::failure_tolerance` and `accrue_aging` use) the delivered energy reaches, NO `* 1000`, so a
-        // strike is a large one-tick increment on the SAME currency aging accrues by. A big tough segment (a
-        // large tolerance) takes a small wound, armor emerging; the acting part's concentration (the
-        // pierce-versus-blunt sub-cell wound shape) is the flagged follow-on coupled to the spatial-body-layout
-        // arc. Computed under an immutable borrow that ends before the write.
-        let wound = {
-            let struck = &self.walkers[target_idx]
-                .structure
-                .as_ref()
-                .expect("structure present (checked above)")
-                .segments[struck_idx];
-            wound_fraction(
-                delivered_energy,
-                presented_contact_area(struck),
-                struck.mat(FRACTURE_ENERGY_AXIS),
-                params.energy_max,
-            )
-        };
-        // WRITE Agent B's `Segment.damage` accumulator (piece 4, the sequencing hold now cleared): add the wound
-        // fraction to the struck segment's normalized damage, saturating on the bits then clamping to `[0, ONE]`,
-        // exactly as `Structure::accrue_aging` advances aging damage, so wounds and aging compose on ONE
-        // accumulator with no double-count. `whole_body_viability_aged` reads the segment's `integrity()` (one
-        // minus this damage), the INTEGRITY axis reflects it, and the ONE unified cull removes the being when any
-        // axis floors: one currency, one death path, no morphology predicate (Principle 8). Armed only for a
-        // STRIKE-deciding body, so no run_world scenario reaches it (byte-neutral).
-        let struck = &mut self.walkers[target_idx]
-            .structure
-            .as_mut()
-            .expect("structure present (checked above)")
-            .segments[struck_idx];
-        struck.damage = Fixed::from_bits(struck.damage.to_bits().saturating_add(wound.to_bits()))
-            .clamp(Fixed::ZERO, Fixed::ONE);
-        wound
+        }
     }
 
     /// Enact a being's decided GEOPHAGE (material-substrate arc, cascade item 4, INGEST-FOR-COMPOSITION):
@@ -5918,6 +5992,28 @@ impl Runner {
                         .par_iter()
                         .with_min_len(PAR_MIN_LEN)
                         .map(|w| {
+                            // An authored predator is NON-METABOLIZING (the environmental given, fork i): its
+                            // anatomy-derived drain is forced to zero on every axis, so its reserves never fall
+                            // and it never starves through the same `metabolize_derived` path every being uses,
+                            // no special death-path branch. It neither forages nor sustains on its kills (that
+                            // is the flagged follow-on); it is a fixed hazard, not a modeled survivor.
+                            if emb.predators.contains(&w.id) {
+                                let zero: BTreeMap<HomeostaticAxisId, DerivedDrain> = emb
+                                    .homeo
+                                    .axes
+                                    .iter()
+                                    .map(|a| {
+                                        (
+                                            a.id,
+                                            DerivedDrain {
+                                                base: Fixed::ZERO,
+                                                exertion: Fixed::ZERO,
+                                            },
+                                        )
+                                    })
+                                    .collect();
+                                return (w.id, zero);
+                            }
                             let ambient = self.body_temp.get(&w.id).copied();
                             let setpoint = emb.thermal.get(&w.id).map(|b| b.setpoint);
                             let (ambient, setpoint) = match (ambient, setpoint) {
@@ -5950,6 +6046,15 @@ impl Runner {
         // (1) Physics to physiology: the comfort-band map turns each being's core temperature into its
         // temperature reserve, per being from its own reserved band. No behaviour, no RNG.
         for w in emb.walkers.iter_mut() {
+            // An authored PREDATOR is a NON-METABOLIZING environmental given (a fixed hazard like a heat
+            // source): it maintains its own temperature and does not freeze, so its comfort reserve stays full
+            // and it is never thermally culled (the drain guard above zeros only its metabolic drain, not this
+            // thermal set; without this exemption a stationary predator's body temperature drifts to the cold
+            // field and its TEMPERATURE reserve floors within a few ticks, culling the "persistent hazard").
+            if is_predator(w.id) {
+                w.homeostasis.set_level(TEMPERATURE, Fixed::ONE);
+                continue;
+            }
             if let (Some(&bt), Some(band)) = (self.body_temp.get(&w.id), emb.thermal.get(&w.id)) {
                 w.homeostasis
                     .set_level(TEMPERATURE, comfort_fraction(bt, band));
@@ -6034,9 +6139,21 @@ impl Runner {
                 }
             }
             for w in emb.walkers.iter_mut() {
-                if let Some(s) = w.structure.as_ref() {
-                    let viability = s.whole_body_viability_aged(&fns, refs, caps);
-                    w.homeostasis.set_level(INTEGRITY, viability);
+                match w.structure.as_ref() {
+                    // A GROWN body reads its per-segment aged viability (the fine path).
+                    Some(s) => {
+                        let viability = s.whole_body_viability_aged(&fns, refs, caps);
+                        w.homeostasis.set_level(INTEGRITY, viability);
+                    }
+                    // A CATALOG body reads its WHOLE-BODY integrity, one minus its accumulated whole-body wound
+                    // damage (predation-integration slice, the coarse branch of the unified wound law). At zero
+                    // damage this is ONE (full, so an unstruck being is byte-neutral); at full damage it floors
+                    // and the SAME one unified INTEGRITY cull removes it, no new death path (Principle 8).
+                    None => {
+                        let viability =
+                            (Fixed::ONE - w.whole_body_damage).clamp(Fixed::ZERO, Fixed::ONE);
+                        w.homeostasis.set_level(INTEGRITY, viability);
+                    }
                 }
             }
         }
@@ -6361,6 +6478,19 @@ impl Runner {
             .unwrap_or(0)
     }
 
+    /// The cell of the first living biosphere CREATURE (id order, excluding an authored predator), if any
+    /// (predation-integration slice). The world-build places the authored ambush predator HERE so it is a
+    /// hazard IN the inhabited region that strikes a co-located prey, rather than off in an empty cell
+    /// the prey never reach: an environmental-given placement, not authoring which prey adapts. A pure read.
+    pub fn first_creature_coord(&self) -> Option<Coord3> {
+        self.embodiment.as_ref().and_then(|e| {
+            e.walkers
+                .iter()
+                .find(|w| w.alive && is_creature(w.id) && !is_predator(w.id))
+                .map(|w| w.coord())
+        })
+    }
+
     /// The shared controller layout the embodiment's walkers express against (Arc 7), if an embodiment is
     /// installed. A creature's forage controller MUST be built against this exact layout (not a freshly
     /// derived one) or it would express at the wrong width, landing its forage weights on the wrong inputs.
@@ -6485,6 +6615,139 @@ impl Runner {
             self.index.place(OccupantId::being(cid), coord);
         }
         count
+    }
+
+    /// Spawn one AUTHORED PREDATOR: a stationary ambush hazard, the environmental GIVEN the predation-integration
+    /// slice adds so a prey's flee-sign becomes a real selectable pressure (fork i, gate-ruled). The predator is a
+    /// mind-less `Walker` carrying `body` (which MUST read a positive PIERCE capability, or STRIKE is never
+    /// afforded and there is no hazard to spawn) and an always-STRIKE controller expressed against the
+    /// embodiment's OWN widened layout: every weight is zero except a positive bias on the STRIKE activation, so
+    /// [`Controller::decide`] issues STRIKE every tick (it is the only positive activation, so it beats the zero
+    /// MOVE/INGEST/GEOPHAGE and the predator never moves, a fixed ambush). Each tick it DECIDES STRIKE and calls
+    /// the existing [`Embodiment::strike_occupant`], which wounds a co-located being through the one INTEGRITY
+    /// cull; nothing reads a species, role, or relatedness (Principle 8). The wound law reads the TARGET's body
+    /// granularity as DATA (the catalog-compatible wound, fork 2): a fine target (a grown Structure) is wounded
+    /// per-Segment, and a CATALOG target (`structure` is `None`, as the biosphere creatures currently are) is
+    /// wounded on its whole body against its outermost covering's `mat.fracture_energy`, accrued to
+    /// [`Walker::whole_body_damage`] and routed through the same unified INTEGRITY cull. The predator itself
+    /// carries a minimal FINE delivery Structure (below), so its own strike delivers a real mass and contact
+    /// area rather than a no-op. It is registered in the `predators` set so its metabolism is
+    /// forced to zero (NON-METABOLIZING: it neither forages nor starves, the authored given). It EMITS a
+    /// being-signal like any warm walker, which is REQUIRED for the prey's being-directed weight to select against
+    /// it (a signalless hazard could not, since that weight keys on the emitted signal). Deterministic: an
+    /// authored controller (no RNG), a fixed id and coord, and a thermal band read off a representative founder.
+    /// Returns the predator's id, or `None` if no embodiment is installed or the layout affords no STRIKE
+    /// (surfaced rather than silently spawning an inert hazard). Only `full --creatures` calls this.
+    pub fn spawn_predator(&mut self, coord: Coord3, body: BodyPlan) -> Option<StableId> {
+        let (homeo, organs, layout, thermal) = self.embodiment.as_ref().map(|e| {
+            (
+                e.homeo.clone(),
+                e.organs.clone(),
+                e.layout.clone(),
+                e.thermal.values().next().copied().unwrap_or(BeingThermal {
+                    setpoint: Fixed::ZERO,
+                    half_band: Fixed::ONE,
+                    initial_temp: Fixed::ZERO,
+                }),
+            )
+        })?;
+        // The always-STRIKE controller: a single positive bias on the STRIKE activation output, every other
+        // weight zero. The STRIKE output base is read from the layout (never hardcoded, Principle 11); `None`
+        // means the layout affords no STRIKE, so there is no hazard to spawn. For the reaction norm the weight
+        // feeding output `o` from input `i` is `o * n_in + i`, and the bias input is the last slot.
+        let strike_base = layout.output_base(STRIKE)?;
+        let n_in = layout.n_in();
+        let bias = n_in - 1;
+        let mut weights = vec![Fixed::ZERO; layout.weight_count()];
+        weights[strike_base * n_in + bias] = Fixed::ONE;
+        let controller = Controller::from_weights(n_in, layout.n_out(), layout.hidden(), weights);
+        // A collision-free id in the predator sub-namespace, asserted disjoint from founders and existing
+        // walkers (the disjoint-namespace invariant, mirroring `spawn_creatures`).
+        let founders: BTreeSet<StableId> = self
+            .world
+            .as_ref()
+            .map(|w| w.being_ids().into_iter().collect())
+            .unwrap_or_default();
+        let existing: BTreeSet<StableId> = self
+            .embodiment
+            .as_ref()
+            .map(|e| e.walkers.iter().map(|w| w.id).collect())
+            .unwrap_or_default();
+        let mut k = 0u64;
+        let pid = loop {
+            let cand = StableId(CREATURE_ID_TAG | PREDATOR_ID_BIT | k);
+            if !founders.contains(&cand) && !existing.contains(&cand) {
+                break cand;
+            }
+            k += 1;
+        };
+        let homeostasis = crate::homeostasis::Homeostasis::new(&homeo, &body, &organs);
+        let physiology = Physiology::dev_for_registry(&homeo);
+        // The authored predator's minimal FINE body (fork i): ONE delivery Segment that (a) affords STRIKE by
+        // its OWN physics (a small, concentrated `mech.contact_area` and a hard `mat.indentation_hardness`
+        // read the PIERCE capability, the same small-area-hard-material physics a tooth reads, never a tag,
+        // Principle 8), and (b) carries the ACTUATOR axes the stroke-rate substrate reads so it delivers a REAL
+        // blow (a non-zero actuator work `F d`) rather than a no-op. Under the stroke-rate model the delivered
+        // energy is the segment's own strength stress over its cross-section (force), promoted to newtons, times
+        // its grown stroke: the delivery segment carries `mat.fracture_strength` (the actuating strength), and
+        // `mech.cross_section_area` and `mech.stroke_length` (the actuator geometry), read by
+        // [`Self::acting_force_and_stroke`] via the channel row's declared axes. Values grounded off the floor's
+        // own dev fixtures, the predator being the authored environmental given: `mech.contact_area` 0.0000001
+        // and `mat.indentation_hardness` 3000 off the `anatomy.rs` teeth, `mat.fracture_energy` 8 off `body.rs`
+        // bone, and the actuator axes within the `morphogen.rs` dev-fixture ranges (`mat.fracture_strength` in
+        // [0,200] MPa, `mech.cross_section_area` in [5e-8, 1e-2], `mech.stroke_length` in [1e-2, 1]) at
+        // strong-predator representative values. The blow MAGNITUDE is a reserved calibration lever (the same
+        // "how hard does a strike land" tuning the stroke-rate substrate reserves, gate-set interim); its
+        // one-shot lethality against an unarmored catalog prey follows from the sharp-tooth CONTACT GEOMETRY (a
+        // tiny contact area concentrates even a modest blow past the covering's Griffith tolerance), tunable via
+        // the covering fracture-energy (tougher armor), the contact area (a blunter strike), or the actuator
+        // work, all data. `mech.mass` is kept as a real physical property (exertion, locomotion) though the
+        // strike no longer reads it.
+        let delivery = {
+            let mut geometry = BTreeMap::new();
+            geometry.insert("mech.mass".to_string(), Fixed::ONE);
+            geometry.insert(
+                "mech.contact_area".to_string(),
+                Fixed::from_decimal_str("0.0000001").expect("tooth contact-area literal"),
+            );
+            geometry.insert(
+                "mech.cross_section_area".to_string(),
+                Fixed::from_decimal_str("0.001").expect("actuator cross-section literal"),
+            );
+            geometry.insert(
+                "mech.stroke_length".to_string(),
+                Fixed::from_decimal_str("0.3").expect("actuator stroke literal"),
+            );
+            let mut material = BTreeMap::new();
+            material.insert(
+                "mat.indentation_hardness".to_string(),
+                Fixed::from_int(3000),
+            );
+            material.insert("mat.fracture_energy".to_string(), Fixed::from_int(8));
+            material.insert("mat.fracture_strength".to_string(), Fixed::from_int(150));
+            crate::morphogen::Segment {
+                parent: None,
+                depth: 0,
+                geometry,
+                material,
+                damage: Fixed::ZERO,
+            }
+        };
+        let walker = Walker::new(pid, coord, body, homeostasis, physiology, controller)
+            .with_structure(crate::morphogen::Structure {
+                segments: vec![delivery],
+            });
+        if let Some(emb) = self.embodiment.as_mut() {
+            emb.thermal.insert(pid, thermal);
+            emb.walkers.push(walker);
+            emb.predators.insert(pid);
+        }
+        // Seed the predator's body temperature to its comfort set point so it EMITS a being-signal like any
+        // warm walker (the section-9 finding): the prey must PERCEIVE the predator's signal to evolve avoidance
+        // (step 2), and emission reads `body_temp`. Without this the predator is thermally invisible.
+        self.body_temp.insert(pid, thermal.initial_temp);
+        self.index.place(OccupantId::being(pid), coord);
+        Some(pid)
     }
 
     fn reconcile_lifecycle(&mut self) {
@@ -7404,6 +7667,119 @@ source = "test"
         );
     }
 
+    #[test]
+    fn the_composed_predator_geophage_registry_preserves_move_and_ingest_and_adds_strike() {
+        // Byte-neutrality crux (predation-integration slice): STRIKE's affordance id sorts AFTER INGEST, so
+        // adding it must NOT move MOVE's or INGEST's output bases, nor the input width (STRIKE adds OUTPUTS,
+        // not inputs). The founder forage seeds key on those bases, so if they held the widened layout only
+        // grows the zero-weight vector and `full --creatures` re-pins byte-neutrally in behaviour.
+        use crate::homeostasis::{HomeostaticAxisDef, HomeostaticRegistry, INGEST, MOVE};
+        let reg = HomeostaticRegistry {
+            axes: vec![HomeostaticAxisDef {
+                id: TEMPERATURE,
+                name: "temperature".to_string(),
+                backing_component: None,
+                capacity_per_mass: Fixed::ONE,
+                base_drain: Fixed::ZERO,
+                exertion_drain: Fixed::ZERO,
+                death_floor: Fixed::ZERO,
+                draw_set: Vec::new(),
+            }],
+        };
+        let geo = Embodiment::new(
+            reg.clone(),
+            AffordanceRegistry::dev_geophage(),
+            LocomotionParams::dev_default(),
+            0,
+            1,
+        )
+        .layout()
+        .clone();
+        let pred = Embodiment::new(
+            reg,
+            AffordanceRegistry::dev_predator_geophage(),
+            LocomotionParams::dev_default(),
+            0,
+            1,
+        )
+        .layout()
+        .clone();
+        assert_eq!(
+            pred.output_base(MOVE),
+            geo.output_base(MOVE),
+            "MOVE base held"
+        );
+        assert_eq!(
+            pred.output_base(INGEST),
+            geo.output_base(INGEST),
+            "INGEST base held"
+        );
+        assert_eq!(
+            pred.n_in(),
+            geo.n_in(),
+            "input width unchanged (STRIKE adds outputs, not inputs)"
+        );
+        assert!(
+            pred.output_base(STRIKE).is_some(),
+            "the composed registry affords STRIKE"
+        );
+        assert!(
+            pred.output_base(GEOPHAGE).is_some(),
+            "and still affords GEOPHAGE"
+        );
+        assert!(
+            geo.output_base(STRIKE).is_none(),
+            "the base geophage registry affords no STRIKE"
+        );
+    }
+
+    #[test]
+    fn an_always_strike_predator_controller_issues_strike_not_move() {
+        // The predator's authored controller (built exactly as `spawn_predator` builds it): a single positive
+        // bias on the STRIKE activation, every other weight zero, so it decides STRIKE every tick and never
+        // moves (a fixed ambush). This pins the winner-take-all logic the stationary hazard depends on.
+        use crate::homeostasis::{HomeostaticAxisDef, HomeostaticRegistry};
+        let reg = HomeostaticRegistry {
+            axes: vec![HomeostaticAxisDef {
+                id: TEMPERATURE,
+                name: "temperature".to_string(),
+                backing_component: None,
+                capacity_per_mass: Fixed::ONE,
+                base_drain: Fixed::ZERO,
+                exertion_drain: Fixed::ZERO,
+                death_floor: Fixed::ZERO,
+                draw_set: Vec::new(),
+            }],
+        };
+        let layout = Embodiment::new(
+            reg,
+            AffordanceRegistry::dev_predator_geophage(),
+            LocomotionParams::dev_default(),
+            0,
+            1,
+        )
+        .layout()
+        .clone();
+        let strike_base = layout.output_base(STRIKE).unwrap();
+        let n_in = layout.n_in();
+        let mut weights = vec![Fixed::ZERO; layout.weight_count()];
+        weights[strike_base * n_in + (n_in - 1)] = Fixed::ONE;
+        let ctrl = Controller::from_weights(n_in, layout.n_out(), layout.hidden(), weights);
+        // A neutral input (all zero) with the always-on bias in the last slot: the predator strikes regardless
+        // of what it perceives, so its decision does not depend on any percept.
+        let mut input = vec![Fixed::ZERO; n_in];
+        input[n_in - 1] = Fixed::ONE;
+        let (out, _h) = ctrl.evaluate(&input, &[]);
+        let afforded = layout.affordance_ids();
+        let decision = layout
+            .decide(&out, &afforded)
+            .expect("the body affords something");
+        assert_eq!(
+            decision.affordance, STRIKE,
+            "the always-strike predator issues STRIKE, never MOVE"
+        );
+    }
+
     /// A labelled thermal band fixture (not owner canon): a set point and half-range.
     fn band() -> BeingThermal {
         BeingThermal {
@@ -7663,6 +8039,177 @@ source = "test"
             Fixed::ZERO,
             "no co-located being to strike delivers no wound"
         );
+    }
+
+    #[test]
+    fn an_authored_predator_wounds_a_co_located_catalog_prey_on_its_whole_body() {
+        // The COARSE (whole-body) branch of the unified wound law (predation-integration slice), driven with
+        // the REAL composition the earlier no-op barrier hid: a fine-bodied striker (a delivery Segment) against
+        // a CATALOG prey (no Structure). The wound reads the STRIKER's own delivery-part contact area and the
+        // prey's OUTERMOST covering fracture-energy, accruing to the prey's `whole_body_damage`. A covering with
+        // NO fracture-energy is not woundable (admit-the-alien: data-absent, no forced fracture death).
+        use crate::anatomy::{BodyPlan, Part, Temperament};
+        use crate::contact_transfer::ContactTransferRegistry;
+        use crate::homeostasis::{HomeostaticAxisDef, HomeostaticRegistry};
+        use crate::material::StrikeParams;
+        use crate::morphogen::{Segment, Structure};
+
+        let reg = HomeostaticRegistry {
+            axes: vec![HomeostaticAxisDef {
+                id: TEMPERATURE,
+                name: "temperature".to_string(),
+                backing_component: None,
+                capacity_per_mass: Fixed::ONE,
+                base_drain: Fixed::ZERO,
+                exertion_drain: Fixed::ZERO,
+                death_floor: Fixed::ZERO,
+                draw_set: Vec::new(),
+            }],
+        };
+        // A catalog body; `covering.kind` selects the outermost material from `emb.organs` (dev_default, whose
+        // coverings carry `mat.fracture_energy`). kind 0 is bare hide (fracture-energy 3); an out-of-range kind
+        // carries none (the alien no-wound case).
+        let bp = |covering_kind: u16| BodyPlan {
+            body_mass: Fixed::from_ratio(1, 2),
+            encephalization: Fixed::from_ratio(1, 2),
+            diet_breadth: Fixed::from_ratio(1, 2),
+            weapons: vec![],
+            covering: Part {
+                kind: covering_kind,
+                development: Fixed::from_ratio(1, 2),
+            },
+            senses: vec![],
+            locomotion: vec![1],
+            organs: vec![],
+            temperament: Temperament {
+                boldness: Fixed::from_ratio(1, 2),
+                exploration: Fixed::from_ratio(1, 2),
+                activity: Fixed::from_ratio(1, 2),
+                sociability: Fixed::from_ratio(1, 2),
+                aggression: Fixed::from_ratio(1, 4),
+            },
+        };
+        // The predator's fine delivery body: a small, hard, sharp Segment carrying the actuator axes the
+        // stroke-rate substrate reads (`mat.fracture_strength`, `mech.cross_section_area`, `mech.stroke_length`)
+        // so `acting_force_and_stroke` yields a non-zero `F d` blow, plus the sharp contact geometry
+        // (`mech.contact_area`, `mat.indentation_hardness`) and its own fracture-energy. Mirrors
+        // `spawn_predator`'s delivery segment.
+        let delivery = || {
+            let mut geometry = BTreeMap::new();
+            geometry.insert("mech.mass".to_string(), Fixed::ONE);
+            geometry.insert(
+                "mech.contact_area".to_string(),
+                Fixed::from_decimal_str("0.0000001").unwrap(),
+            );
+            geometry.insert(
+                "mech.cross_section_area".to_string(),
+                Fixed::from_decimal_str("0.001").unwrap(),
+            );
+            geometry.insert(
+                "mech.stroke_length".to_string(),
+                Fixed::from_decimal_str("0.3").unwrap(),
+            );
+            let mut material = BTreeMap::new();
+            material.insert(
+                "mat.indentation_hardness".to_string(),
+                Fixed::from_int(3000),
+            );
+            material.insert("mat.fracture_energy".to_string(), Fixed::from_int(8));
+            material.insert("mat.fracture_strength".to_string(), Fixed::from_int(150));
+            Structure {
+                segments: vec![Segment {
+                    parent: None,
+                    depth: 0,
+                    geometry,
+                    material,
+                    damage: Fixed::ZERO,
+                }],
+            }
+        };
+        let coord = Coord3::ground(2, 2);
+        let mk = |id: u64, covering_kind: u16, structure: Option<Structure>| {
+            let mut w = Walker::new(
+                StableId(id),
+                coord,
+                bp(covering_kind),
+                Homeostasis::from_mass(&reg, Fixed::ONE),
+                Physiology::dev_for_registry(&reg),
+                Controller::zeros(
+                    &Embodiment::new(
+                        reg.clone(),
+                        AffordanceRegistry::dev_predator_geophage(),
+                        LocomotionParams::dev_default(),
+                        0,
+                        1,
+                    )
+                    .layout()
+                    .clone(),
+                ),
+            );
+            if let Some(s) = structure {
+                w = w.with_structure(s);
+            }
+            w
+        };
+
+        // Case 1: a fracture-covered catalog prey IS wounded on the whole body.
+        {
+            let mut emb = Embodiment::new(
+                reg.clone(),
+                AffordanceRegistry::dev_predator_geophage(),
+                LocomotionParams::dev_default(),
+                0,
+                0x9E,
+            );
+            emb.set_strike(StrikeParams::dev_fixture());
+            emb.set_contact_transfer(ContactTransferRegistry::dev_terran());
+            emb.add(mk(1, 0, Some(delivery())), band());
+            emb.add(mk(2, 0, None), band());
+            let wound = emb.strike_occupant(StableId(1));
+            assert!(
+                wound > Fixed::ZERO,
+                "the predator delivered a whole-body wound to the catalog prey"
+            );
+            let prey = emb.walkers().iter().find(|w| w.id == StableId(2)).unwrap();
+            assert!(
+                prey.whole_body_damage > Fixed::ZERO,
+                "the catalog prey accrued whole-body damage"
+            );
+            let striker = emb.walkers().iter().find(|w| w.id == StableId(1)).unwrap();
+            assert_eq!(
+                striker.whole_body_damage,
+                Fixed::ZERO,
+                "the striker itself is unharmed"
+            );
+        }
+
+        // Case 2 (admit-the-alien): a catalog prey whose covering carries NO fracture-energy (an out-of-range
+        // covering kind) is not woundable by this law, so the strike returns zero and accrues no damage.
+        {
+            let mut emb = Embodiment::new(
+                reg.clone(),
+                AffordanceRegistry::dev_predator_geophage(),
+                LocomotionParams::dev_default(),
+                0,
+                0x9E,
+            );
+            emb.set_strike(StrikeParams::dev_fixture());
+            emb.set_contact_transfer(ContactTransferRegistry::dev_terran());
+            emb.add(mk(1, 0, Some(delivery())), band());
+            emb.add(mk(2, 250, None), band()); // covering kind 250: out of range, no fracture-energy
+            let wound = emb.strike_occupant(StableId(1));
+            assert_eq!(
+                wound,
+                Fixed::ZERO,
+                "a fracture-less (alien) covering returns no wound; lethality routes through reserves"
+            );
+            let prey = emb.walkers().iter().find(|w| w.id == StableId(2)).unwrap();
+            assert_eq!(
+                prey.whole_body_damage,
+                Fixed::ZERO,
+                "and the alien prey accrues no whole-body damage from this law"
+            );
+        }
     }
 
     #[test]
