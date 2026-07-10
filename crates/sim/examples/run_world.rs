@@ -268,10 +268,17 @@ fn dawn_layout(cfg: &Config) -> ControllerLayout {
             AffordanceRegistry::dev_default(),
         )
     };
-    ControllerLayout::with_percepts(
+    // The being-percept keystone (step 6, the live wire): every non-living scenario arms being-percept, so
+    // a being perceives the other beings whose thermal signal reaches it and can steer toward or away from
+    // them through its founder-zero freely-signed weight (predation and fleeing emerge). The layout MUST
+    // carry the being block here so the forage taxis seeds (a flat `o * n_in + i` weight index) stay aligned
+    // with the being-inclusive embodiment layout `build_dawn_runner` expresses against; `living` keeps its
+    // separate recurrent no-percept layout (the early return above) and does not arm the feature.
+    ControllerLayout::with_percepts_and_being(
         &homeostatic,
         &affordances,
         &PerceptRegistry::from_tolerances(&ToleranceRegistry::dev_salinity()),
+        !cfg.living,
         0,
     )
 }
@@ -1066,6 +1073,7 @@ fn resolve_medium(
     manifest: &CalibrationManifest,
     medium: &Option<String>,
     structure: &Option<String>,
+    being_percept: bool,
 ) -> ScenarioResolution {
     // The declared structure resolves independently of the manifest (it is a registry name, not a
     // reserved dial), so carry it through both the primary and the neutral-fallback resolution, and the
@@ -1084,18 +1092,29 @@ fn resolve_medium(
         .as_deref()
         .map(|s| format!("structure = \"{s}\"\n"))
         .unwrap_or_default();
+    // The being-percept keystone (step 6, the live wire): arm the feature so build_dawn_runner gives each
+    // embodied founder the being-directed perception. The [features] table follows the [scenario] table's
+    // keys, so it goes after the structure line. Matched by dawn_layout's being block above, so the seeded
+    // controller and the run embodiment stay aligned.
+    let features_line = if being_percept {
+        "[features]\nbeing_percept = true\n"
+    } else {
+        ""
+    };
     let toml = match medium {
-        Some(m) => {
-            format!("[scenario]\nid = \"run\"\nname = \"Run\"\nmedium = \"{m}\"\n{structure_line}")
+        Some(m) => format!(
+            "[scenario]\nid = \"run\"\nname = \"Run\"\nmedium = \"{m}\"\n{structure_line}{features_line}"
+        ),
+        None => {
+            format!("[scenario]\nid = \"run\"\nname = \"Run\"\n{structure_line}{features_line}")
         }
-        None => format!("[scenario]\nid = \"run\"\nname = \"Run\"\n{structure_line}"),
     };
     let scenario = Scenario::from_toml_str(&toml).expect("the inline scenario parses");
     scenario.resolve(manifest).unwrap_or_else(|_| {
         // The medium did not resolve against the dev-fixtures manifest; drop to the neutral air default
-        // but keep the declared structure.
+        // but keep the declared structure and the being-percept feature.
         Scenario::from_toml_str(&format!(
-            "[scenario]\nid = \"run\"\nname = \"Run\"\n{structure_line}"
+            "[scenario]\nid = \"run\"\nname = \"Run\"\n{structure_line}{features_line}"
         ))
         .unwrap()
         .resolve(manifest)
@@ -1854,7 +1873,9 @@ fn main() {
     let cfg = parse_config();
     let manifest = manifest();
     let channels = channels();
-    let resolution = resolve_medium(&manifest, &cfg.medium, &cfg.structure);
+    // Every non-living scenario arms being-percept (the keystone live wire), matched by dawn_layout's being
+    // block; living keeps its separate recurrent no-percept layout and does not arm it.
+    let resolution = resolve_medium(&manifest, &cfg.medium, &cfg.structure, !cfg.living);
 
     // A generated world large enough that the founding bands land on distinct cells. Grid size is
     // overridable for profiling sweeps (CIVSIM_W / CIVSIM_H); it defaults to the fixture size. The founding
