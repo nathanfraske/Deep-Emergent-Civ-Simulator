@@ -424,6 +424,20 @@ impl Field {
         }
     }
 
+    /// Set one cell's relaxation BASELINE (the solar-and-biome forcing target the field relaxes toward),
+    /// additive API for the day-night arc: the diurnal insolation writes each cell's baseline per tick, and the
+    /// existing relaxation-plus-diffusion produces the emergent surface-temperature swing and its thermal lag
+    /// (bounded by the maximum principle). Only the baseline (the target) is set; the current `temp` is left to
+    /// relax toward it, so the lag emerges rather than being written. An off-grid cell is ignored. Unused unless
+    /// a run arms the diurnal cycle, so the field is byte-identical when the cycle is unarmed.
+    pub fn set_baseline_at(&mut self, x: i32, y: i32, baseline: Fixed) {
+        if x < 0 || y < 0 || x >= self.width || y >= self.height {
+            return;
+        }
+        let i = (y * self.width + x) as usize;
+        self.baseline[i] = baseline;
+    }
+
     /// The field seeded from a generated map's per-tile temperatures, mapping the worldgen's NORMALISED
     /// `[0, 1]` temperature axis to the ABSOLUTE temperature the physics reads: `T = mean + range *
     /// (normalised - 1/2)`. This is the temperature-to-Kelvin calibration (derive-vs-author, Principle 6):
