@@ -58,12 +58,56 @@ pub struct ReservedValue {
     pub set_date: String,
     /// A pointer back to the mechanism (design part, record, audit section).
     pub source: String,
+    /// The three-way-test category (AGENTIC_ADDENDUM section 9): `fundamental`, `per_world`, `derivable`,
+    /// or `defect`. Empty during migration, read as `Category::Unclassified`. ADDITIVE: an absent field
+    /// does not break an in-flight entry, but a NON-EMPTY value that is not one of the four fails loud (a
+    /// mislabel fails the build), so once the per-entry sweep lands every entry is born categorized.
+    #[serde(default)]
+    pub category: String,
+}
+
+/// The three-way-test category of a reserved value (AGENTIC_ADDENDUM section 9, the fundamental-constants
+/// floor), machine-checked so every entry is born categorized rather than sitting in an ambiguous manifest.
+/// The fourth DEFECT state records a value that fits none of the three legitimate categories (a global
+/// authored magnitude that is a bug in the derivation), so it is FLAGGED rather than laundered into a
+/// legitimate category. UNCLASSIFIED is the additive-migration default for an entry that has not yet
+/// declared its category.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Category {
+    /// (1) A fundamental universal constant on the small closed fundamentals list (c, k_B, h, e, eps_0, N_A).
+    Fundamental,
+    /// (2) A per-world / per-substance / per-race datum read from the world's own data.
+    PerWorld,
+    /// (3) Derivable from (1) and (2); never stored as its own number once its substrate lands.
+    Derivable,
+    /// A value that fits none of the three: a defect (a bug in the derivation), flagged not laundered.
+    Defect,
+    /// Not yet declared: the additive-migration default for an absent or empty category field.
+    Unclassified,
 }
 
 impl ReservedValue {
     /// Whether this entry has graduated from reserved to set with a non-empty value.
     pub fn is_set(&self) -> bool {
         self.status == "set" && !self.value.trim().is_empty()
+    }
+
+    /// This entry's three-way-test category. An empty field reads UNCLASSIFIED (the migration default); a
+    /// non-empty field that is not one of the four known values fails loud (a mislabel fails the build).
+    pub fn category(&self) -> Result<Category, CalibrationError> {
+        match self.category.trim() {
+            "" => Ok(Category::Unclassified),
+            "fundamental" => Ok(Category::Fundamental),
+            "per_world" => Ok(Category::PerWorld),
+            "derivable" => Ok(Category::Derivable),
+            "defect" => Ok(Category::Defect),
+            other => Err(CalibrationError::BadValue {
+                id: self.id.clone(),
+                detail: format!(
+                    "unknown category '{other}', expected fundamental, per_world, derivable, or defect"
+                ),
+            }),
+        }
     }
 }
 
@@ -179,6 +223,21 @@ impl CalibrationManifest {
     /// Every entry, in file order.
     pub fn entries(&self) -> impl Iterator<Item = &ReservedValue> + '_ {
         self.order.iter().map(move |id| &self.values[id])
+    }
+
+    /// The born-categorized gate (AGENTIC_ADDENDUM section 9): parse every entry's three-way-test category,
+    /// failing loud on the FIRST non-empty value that is not one of the four known categories, so a mislabel
+    /// fails the build. Returns the ids still UNCLASSIFIED (an empty category field), the migration remainder
+    /// the per-entry sweep closes; an empty return means every entry is born categorized. This is ADDITIVE:
+    /// an absent field is tolerated as UNCLASSIFIED and never errors, only an invalid one does.
+    pub fn validate_categories(&self) -> Result<Vec<&str>, CalibrationError> {
+        let mut unclassified = Vec::new();
+        for id in &self.order {
+            if self.values[id].category()? == Category::Unclassified {
+                unclassified.push(id.as_str());
+            }
+        }
+        Ok(unclassified)
     }
 
     /// The ids still reserved, in file order: the standing review queue that CI and
@@ -514,6 +573,103 @@ source = "test fixture"
         assert_eq!(conf["conformity"], conf["prestige"]);
         assert!(m.require_fixed("axiom.calcification_brittleness").is_err());
         assert!(m.require_fixed("axiom.fission_threshold").is_err());
+    }
+
+    #[test]
+    fn the_real_manifest_has_no_invalid_category_the_born_categorized_gate() {
+        // The born-categorized CI gate (AGENTIC_ADDENDUM section 9): every entry in the real manifest carries
+        // a valid three-way-test category or none (UNCLASSIFIED during migration). A mislabel (a non-empty
+        // category that is not one of the four) fails validate_categories, so it fails the build. During
+        // migration some entries may still be UNCLASSIFIED (the per-entry sweep closes that remainder); the
+        // gate here is that none is INVALID.
+        let m = CalibrationManifest::load(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../calibration/reserved.toml"
+        ))
+        .unwrap();
+        let unclassified = m.validate_categories().expect(
+            "every category string in the real manifest must be valid (a mislabel fails the build)",
+        );
+        assert!(unclassified.len() <= m.len());
+    }
+
+    #[test]
+    fn an_unknown_category_fails_loud_so_a_mislabel_fails_the_build() {
+        let bad = r#"
+[[reserved]]
+id = "sample.x"
+basis = "b"
+status = "reserved"
+source = "s"
+category = "sometimes"
+"#;
+        let m = CalibrationManifest::from_toml_str(bad).unwrap();
+        assert!(matches!(
+            m.validate_categories(),
+            Err(CalibrationError::BadValue { .. })
+        ));
+    }
+
+    #[test]
+    fn the_four_categories_parse_and_an_absent_one_is_unclassified() {
+        let toml = r#"
+[[reserved]]
+id = "a.fundamental"
+basis = "b"
+status = "reserved"
+source = "s"
+category = "fundamental"
+
+[[reserved]]
+id = "a.per_world"
+basis = "b"
+status = "reserved"
+source = "s"
+category = "per_world"
+
+[[reserved]]
+id = "a.derivable"
+basis = "b"
+status = "reserved"
+source = "s"
+category = "derivable"
+
+[[reserved]]
+id = "a.defect"
+basis = "b"
+status = "reserved"
+source = "s"
+category = "defect"
+
+[[reserved]]
+id = "a.absent"
+basis = "b"
+status = "reserved"
+source = "s"
+"#;
+        let m = CalibrationManifest::from_toml_str(toml).unwrap();
+        assert_eq!(
+            m.get("a.fundamental").unwrap().category().unwrap(),
+            Category::Fundamental
+        );
+        assert_eq!(
+            m.get("a.per_world").unwrap().category().unwrap(),
+            Category::PerWorld
+        );
+        assert_eq!(
+            m.get("a.derivable").unwrap().category().unwrap(),
+            Category::Derivable
+        );
+        assert_eq!(
+            m.get("a.defect").unwrap().category().unwrap(),
+            Category::Defect
+        );
+        assert_eq!(
+            m.get("a.absent").unwrap().category().unwrap(),
+            Category::Unclassified
+        );
+        // The absent one is the only UNCLASSIFIED; the four declared are born categorized.
+        assert_eq!(m.validate_categories().unwrap(), vec!["a.absent"]);
     }
 
     #[test]
