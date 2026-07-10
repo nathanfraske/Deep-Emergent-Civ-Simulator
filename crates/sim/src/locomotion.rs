@@ -74,7 +74,7 @@ use crate::edibility::{Composition, FloorCaps, Physiology};
 use crate::homeostasis::{
     AffordanceId, AffordanceRegistry, DerivedDrain, Homeostasis, HomeostaticAxisId,
     HomeostaticRegistry, ReserveMemory, CONDITION, CRAFT, DIG, EXTRACT, GEOPHAGE, GRASP, INGEST,
-    MOVE, RELEASE, SHELTER,
+    MOVE, RELEASE, SHELTER, STRIKE,
 };
 use crate::learn::{EligibilityTrace, SequenceStep};
 use crate::material::{MaterialField, SubstanceMix, WieldedTool};
@@ -1315,22 +1315,25 @@ pub fn step_with_field_dirs<T: Terrain>(
                         // whether or not the being ingests, so exposure harms a being that only passes
                         // through a toxic cell.
                     }
-                    GRASP | EXTRACT | GEOPHAGE | CRAFT | DIG | RELEASE | SHELTER => {
+                    GRASP | EXTRACT | GEOPHAGE | CRAFT | DIG | RELEASE | SHELTER | STRIKE => {
                         // The evolved decision to act on matter (material-substrate arc): GRASP picks loose
                         // matter up (item 3, the driver), EXTRACT breaks bonded matter loose in a fracture
                         // contest and takes it (item 4), GEOPHAGE eats the matter underfoot for a reserve that
                         // needs it (item 4, INGEST-FOR-COMPOSITION), CRAFT shapes the carried matter into a
                         // wielded tool (item 4, knapping), DIG and RELEASE lower and raise the terrain (item 5),
                         // SHELTER sets the carried load down overhead as a roof (item 7, the overhead-deposit
-                        // technique). Each records its decided affordance and activation
-                        // for the embodiment's post-step enactment pass, which owns the material field, the
-                        // carried load, and the registry this function cannot reach
-                        // ([`crate::runner::Embodiment::grasp_underfoot`],
+                        // technique), STRIKE wounds the Segments occupying the cell with the acting part's
+                        // delivered energy (hunt-kill strike arc, the emergent predation payoff). Each records
+                        // its decided affordance and activation for the embodiment's post-step enactment pass,
+                        // which owns the material field, the carried load, and the registry this function cannot
+                        // reach ([`crate::runner::Embodiment::grasp_underfoot`],
                         // [`crate::runner::Embodiment::extract_underfoot`]). Recorded rather than enacted here,
                         // so the decision stays where the evolved controller makes it while the physics stays
                         // where the matter lives. A blank controller expresses zero for these weights, so this
                         // arm never fires for it (the activation would not clear the wins-the-decision bar);
-                        // only a being whose weight selection has lifted off zero acts.
+                        // only a being whose weight selection has lifted off zero acts. STRIKE is afforded only
+                        // by a body that grows a part reading the PIERCE capability, so a world with no such
+                        // body (every run_world scenario) never decides it and is byte-identical.
                         deferred_actions.insert(w.id, (d.affordance, d.activation));
                     }
                     _ => {} // an affordance the engine has no enactment for yet: idle

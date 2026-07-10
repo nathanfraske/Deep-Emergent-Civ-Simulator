@@ -70,6 +70,8 @@ pub mod calibration;
 pub mod census;
 pub mod clock;
 pub mod conservation;
+pub mod contact_transfer;
+pub mod contact_wound;
 pub mod controller;
 pub mod conviction_experience;
 pub mod conviction_percept;

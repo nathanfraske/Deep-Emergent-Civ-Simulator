@@ -186,30 +186,40 @@ pub fn being_signal_subject(channel: u16, bucket: i64) -> StableId {
 /// reserved-high landmark ids), exactly as the feature band does. So two beings that execute the SAME
 /// affordance-typed sequence mint the IDENTICAL subject, and a gossiped belief about it does not diverge.
 const SEQUENCE_SUBJECT_BASE: u64 = (1 << 62) | (1 << 61);
-/// The most sequence steps packed into one subject. A longer sequence truncates to its first steps (the
-/// honest first-cut bound; a wider or hashed key is the refinement if discovered actions grow past this).
+/// The packed-vs-hashed marker WITHIN the sequence band (R-DEEPTECH-COMPOSE hybrid belief-subject key):
+/// bit 60. Clear = the EXACT widened pack (the common case, collision-free); set = the HASH-on-overflow
+/// sub-band (a rare beyond-envelope sequence). Both keep bit 61 set (the sequence-band marker), so they stay
+/// disjoint from Agent A's being-signal band (`(1 << 62) | (1 << 60)`, bit 61 clear) and the feature band
+/// (bit 62 only): the four bands partition the `{60, 61}` pair under bit 62 (feature 00, being-signal 01,
+/// sequence-exact 10, sequence-hash 11), collision-free and below the reserved-high landmark ids (bit 63).
+const SEQ_HASH_MARKER: u64 = 1 << 60;
+/// The most sequence steps the EXACT pack holds. A longer sequence mints via the hash sub-band, so an
+/// arbitrary conjunction is still representable (the composer's need) with no truncation, never the old
+/// prefix-truncation bound.
 const SEQ_MAX_STEPS: usize = 4;
-/// The bit width of each packed step field (the primitive id, the target-affordance bucket, the param
-/// bucket). A field value wider than this clamps to the field maximum (the honest bound; the reserved
-/// quantization keeps the buckets small, so the clamp does not bite in practice).
-///
-/// FLAGGED BOUND (deep audit, social-learning arc piece 3): four bits caps EACH field at 16 distinct
-/// values, so the belief-subject packing distinguishes at most 16 PRIMITIVES, 16 target CHANNELS, and 16
-/// target-VALUE buckets; anything above saturates to 15 and MERGES with its neighbours (an over-merge, not a
-/// mask, since the clamp is applied identically at write and read). This is currently LATENT: the affordance
-/// alphabet is 10 primitives (ids 0..9), the demonstrations perceive one or two channels, and hard-vs-soft
-/// needs two value buckets, all well under 16. It WILL bite as the affordance set grows (arc 3, the made
-/// world, adds tool-use and composition primitives), at which point distinct primitives above 15 would share
-/// one reward belief even in the non-granular default. The refinement is the owner's call and is NOT
-/// byte-neutral (widening the field or hashing changes every existing belief subject), so it is surfaced
-/// here rather than changed: widen `SEQ_FIELD_BITS` (a `u32` step is already 12 bits, with room to grow the
-/// primitive field to the affordance `u16`), or mint the subject by a collision-resistant hash of the full
-/// step, before the primitive alphabet crosses 16.
-const SEQ_FIELD_BITS: u32 = 4;
-/// The bit width of one packed step (its three fields).
-const SEQ_STEP_BITS: u32 = SEQ_FIELD_BITS * 3;
-/// The mask for one packed field.
-const SEQ_FIELD_MASK: u64 = (1 << SEQ_FIELD_BITS) - 1;
+/// The exact-pack field widths. These are an ENGINE ENCODING-CAPACITY budget, NOT a value the owner sets:
+/// the hash sub-band preserves the subject's identity and determinism at ANY width (two beings executing the
+/// same sequence mint the identical subject regardless), so the widths steer only which sequences take the
+/// exact path versus the hash path, never which affordances share a belief nor any emergent outcome, and
+/// there is no physics-floor basis for a bit count. They are chosen, with a rationale: the PRIMITIVE field is
+/// widened most (6 bits, 64 primitives) because it is the one that bites as the made-world affordance
+/// alphabet grows past the old 4-bit / 16-value cap the FLAGGED BOUND named; the target-affordance and param
+/// buckets take 3 bits (8 buckets each), NARROWER than the old uniform 4-bit / 16-value field, because the
+/// exact tier only needs to cover the common few-channel, coarse-bucket case and the hash sub-band covers the
+/// rest FULLY and deterministically (a rich-sensorium being's many-channel or fine-discrimination steps hash,
+/// never lossily merge). Four steps of `SEQ_STEP_BITS` (12) plus a 3-bit count is 51 bits, inside the 60-bit
+/// sequence-band envelope with headroom. Widening the exact tier later is a perf/exposure tuning (one more
+/// re-pin), not a world call.
+const SEQ_PRIMITIVE_BITS: u32 = 6;
+const SEQ_TARGET_BITS: u32 = 3;
+const SEQ_PARAM_BITS: u32 = 3;
+/// The bit width of one packed step (its three fields) and each field's exact-pack maximum.
+const SEQ_STEP_BITS: u32 = SEQ_PRIMITIVE_BITS + SEQ_TARGET_BITS + SEQ_PARAM_BITS;
+const SEQ_PRIMITIVE_MAX: u64 = (1 << SEQ_PRIMITIVE_BITS) - 1;
+const SEQ_TARGET_MAX: u64 = (1 << SEQ_TARGET_BITS) - 1;
+const SEQ_PARAM_MAX: u64 = (1 << SEQ_PARAM_BITS) - 1;
+/// The hash sub-band payload mask: the low 60 bits (0..=59), below bit 60's marker.
+const SEQ_HASH_PAYLOAD_MASK: u64 = SEQ_HASH_MARKER - 1;
 
 /// One step of an executed primitive sequence (ideation arc, piece 1, slice 1b): the PRIMITIVE the being
 /// enacted (an affordance id), the quantized TARGET-AFFORDANCE bucket of the matter it acted on (the raw
@@ -232,24 +242,66 @@ pub struct SequenceStep {
 /// the sibling of [`feature_subject`]. Two beings that execute the SAME sequence of primitives against the
 /// SAME affordance-and-param kinds mint the IDENTICAL subject (so a belief that "grasp(sharp),
 /// actuate(fracturable) pays off" generalises across matter of the same kind and gossips without
-/// diverging); a different primitive, target kind, param kind, or ORDER is a different subject. Each field
-/// is clamped into [`SEQ_FIELD_BITS`] and the sequence into [`SEQ_MAX_STEPS`] (the honest bounds), so the
-/// pack never overflows the band, and the step COUNT is packed above the steps so a prefix is not confused
-/// with the full sequence.
+/// diverging); a different primitive, target kind, param kind, or ORDER is a different subject. The hybrid
+/// key packs a sequence WITHIN the envelope (at most [`SEQ_MAX_STEPS`] steps, each field within its widened
+/// width) EXACTLY, with no clamping and no over-merge, and routes any sequence beyond it to the hash
+/// sub-band ([`sequence_subject_hashed`]) instead of truncating or merging it, so the pack never overflows
+/// the band and no distinct sequence is silently conflated. The step COUNT is packed above the steps so a
+/// prefix is not confused with the full sequence.
 pub fn sequence_subject(steps: &[SequenceStep]) -> StableId {
-    let n = steps.len().min(SEQ_MAX_STEPS);
+    // The hybrid key: a sequence WITHIN the envelope (at most SEQ_MAX_STEPS steps, every field within its
+    // widened width) mints the EXACT pack (bit 60 clear), collision-free; any sequence BEYOND the envelope
+    // (more steps, or a field value past its width) mints via the hash sub-band (bit 60 set), so an
+    // arbitrary conjunction is still representable without the common-case collision a pure hash would incur.
+    // A negative target/param bucket clamps to zero (a bucket is non-negative) and is not itself overflow.
+    let over_envelope = steps.len() > SEQ_MAX_STEPS
+        || steps.iter().any(|s| {
+            (s.primitive as u64) > SEQ_PRIMITIVE_MAX
+                || (s.target_bucket.max(0) as u64) > SEQ_TARGET_MAX
+                || (s.param_bucket.max(0) as u64) > SEQ_PARAM_MAX
+        });
+    if over_envelope {
+        return sequence_subject_hashed(steps);
+    }
+    let n = steps.len();
     let mut payload: u64 = 0;
-    for (i, step) in steps.iter().take(SEQ_MAX_STEPS).enumerate() {
-        let primitive = (step.primitive as u64).min(SEQ_FIELD_MASK);
-        let target = (step.target_bucket.max(0) as u64).min(SEQ_FIELD_MASK);
-        let param = (step.param_bucket.max(0) as u64).min(SEQ_FIELD_MASK);
-        let packed_step = primitive | (target << SEQ_FIELD_BITS) | (param << (SEQ_FIELD_BITS * 2));
+    for (i, step) in steps.iter().enumerate() {
+        // Every field is within its width here (the envelope check above guarantees it).
+        let primitive = step.primitive as u64;
+        let target = step.target_bucket.max(0) as u64;
+        let param = step.param_bucket.max(0) as u64;
+        let packed_step = primitive
+            | (target << SEQ_PRIMITIVE_BITS)
+            | (param << (SEQ_PRIMITIVE_BITS + SEQ_TARGET_BITS));
         payload |= packed_step << (i as u32 * SEQ_STEP_BITS);
     }
-    // The step count, packed above the four step fields (bits 48..), so a 2-step prefix of a 3-step
-    // sequence mints a different subject than the 3-step sequence itself.
+    // The step count, packed above the step fields (bits 48..), so a 2-step prefix of a 3-step sequence
+    // mints a different subject than the 3-step sequence itself.
     payload |= (n as u64) << (SEQ_MAX_STEPS as u32 * SEQ_STEP_BITS);
     StableId(SEQUENCE_SUBJECT_BASE | payload)
+}
+
+/// The HASH sub-band of the sequence-subject band (the hybrid key's overflow path): a beyond-envelope
+/// sequence (more than [`SEQ_MAX_STEPS`] steps, or a field past its widened width) mints its subject by a
+/// canonical RNG-free [`StateHasher`] digest of the FULL step sequence, folded into the low 60 payload bits
+/// and marked by bit 60 (`SEQ_HASH_MARKER`), so an arbitrary conjunction is representable. Any collision is
+/// confined to this rare overflow (a birthday collision in `2^60`), never the common in-envelope case, which
+/// is exact. Deterministic (`StateHasher` is RNG-free, Principle 3): the same sequence hashes identically
+/// wherever recomputed, so a gossiped belief about an over-envelope action does not diverge.
+fn sequence_subject_hashed(steps: &[SequenceStep]) -> StableId {
+    let mut h = StateHasher::new();
+    h.write_u64(steps.len() as u64);
+    for step in steps {
+        // Clamp the non-negative buckets exactly as the exact-pack path and the over-envelope detector do
+        // (`target_bucket.max(0)`), so the two branches agree on the "a negative bucket is the zero bucket"
+        // convention: an over-envelope sequence with a negative bucket mints the same subject the same
+        // sequence with a zero bucket would, matching the exact tier and the sibling feature band.
+        h.write_u32(step.primitive as u32);
+        h.write_i64(step.target_bucket.max(0));
+        h.write_i64(step.param_bucket.max(0));
+    }
+    let payload = (h.finish() as u64) & SEQ_HASH_PAYLOAD_MASK;
+    StableId(SEQUENCE_SUBJECT_BASE | SEQ_HASH_MARKER | payload)
 }
 
 /// The belief subject one executed step keys on, at the caller's GRANULARITY (social-learning arc, piece 3,
@@ -2074,7 +2126,7 @@ mod tests {
         // a different subject.
         assert_eq!(sequence_subject(&seq), s);
         assert_ne!(sequence_subject(&[step(3, 1, 0), step(5, 2, 1)]), s); // different primitive
-        assert_ne!(sequence_subject(&[step(3, 9, 0), step(4, 2, 1)]), s); // different target kind
+        assert_ne!(sequence_subject(&[step(3, 6, 0), step(4, 2, 1)]), s); // different target kind (in-envelope)
         assert_ne!(sequence_subject(&[step(4, 2, 1), step(3, 1, 0)]), s); // reversed order
         assert_ne!(sequence_subject(&[step(3, 1, 0)]), s); // a prefix is not the whole sequence
                                                            // Disjoint from the feature band: a sequence subject (bit 61 set) never equals a feature subject
@@ -2090,6 +2142,93 @@ mod tests {
                 assert_ne!(s.0, feature_subject(ch, bk).0);
             }
         }
+    }
+
+    #[test]
+    fn the_hybrid_key_dissolves_the_cap_in_envelope_and_hashes_on_overflow() {
+        // R-DEEPTECH-COMPOSE hybrid belief-subject key: the exact widened pack distinguishes every primitive
+        // within its widened field (dissolving the old 16-value cap, so 20 and 21 no longer over-merge), and
+        // a beyond-envelope sequence (more steps, or a field past its width) mints via the hash sub-band (bit
+        // 60), disjoint from the exact pack (bit 60 clear), from Agent A's being-signal band (bit 61 clear),
+        // and from the feature band, so an arbitrary conjunction is representable without the common-case
+        // collision a pure hash would incur, and it stays deterministic.
+        let step = |p: u16, t: i64, q: i64| SequenceStep {
+            primitive: p,
+            target_bucket: t,
+            param_bucket: q,
+        };
+        // In-envelope: the widened primitive field distinguishes ids the old 4-bit cap merged.
+        let a = sequence_subject(&[step(20, 1, 0)]);
+        let b = sequence_subject(&[step(21, 1, 0)]);
+        assert_ne!(
+            a, b,
+            "primitives 20 and 21 mint distinct subjects (the cap is dissolved)"
+        );
+        // Both in-envelope subjects are EXACT (bit 60 clear).
+        assert_eq!(a.0 & SEQ_HASH_MARKER, 0);
+        assert_eq!(b.0 & SEQ_HASH_MARKER, 0);
+        // Over-envelope by STEP COUNT: five steps exceed SEQ_MAX_STEPS, so it hashes (bit 60 set).
+        let long = [
+            step(1, 0, 0),
+            step(2, 0, 0),
+            step(3, 0, 0),
+            step(4, 0, 0),
+            step(5, 0, 0),
+        ];
+        let h = sequence_subject(&long);
+        assert_eq!(
+            h.0 & SEQ_HASH_MARKER,
+            SEQ_HASH_MARKER,
+            "an over-length sequence hashes"
+        );
+        // Over-envelope by FIELD WIDTH: a primitive past the 6-bit width hashes.
+        let wide = sequence_subject(&[step(1000, 0, 0)]);
+        assert_eq!(
+            wide.0 & SEQ_HASH_MARKER,
+            SEQ_HASH_MARKER,
+            "a too-wide field hashes"
+        );
+        // The other two width disjuncts of the envelope check, exercised so no field's overflow branch is
+        // untested: a target bucket past the 3-bit width, and a param bucket past the 3-bit width, each
+        // hashes. These are the fields the widening narrowed most (three bits), so their overflow is the
+        // one most reached in practice.
+        let wide_target = sequence_subject(&[step(1, SEQ_TARGET_MAX as i64 + 1, 0)]);
+        assert_eq!(
+            wide_target.0 & SEQ_HASH_MARKER,
+            SEQ_HASH_MARKER,
+            "a target bucket past its width hashes"
+        );
+        let wide_param = sequence_subject(&[step(1, 0, SEQ_PARAM_MAX as i64 + 1)]);
+        assert_eq!(
+            wide_param.0 & SEQ_HASH_MARKER,
+            SEQ_HASH_MARKER,
+            "a param bucket past its width hashes"
+        );
+        // A field exactly AT its width stays exact (the boundary is inclusive), so the hash path is entered
+        // only past the envelope, never one step early.
+        let at_edge = sequence_subject(&[step(
+            SEQ_PRIMITIVE_MAX as u16,
+            SEQ_TARGET_MAX as i64,
+            SEQ_PARAM_MAX as i64,
+        )]);
+        assert_eq!(
+            at_edge.0 & SEQ_HASH_MARKER,
+            0,
+            "every field exactly at its width still packs exactly"
+        );
+        // The hash sub-band stays in the sequence band (bits 62 and 61 set) and below the landmark ids.
+        assert_eq!(h.0 & SEQUENCE_SUBJECT_BASE, SEQUENCE_SUBJECT_BASE);
+        assert!(h.0 < 1u64 << 63);
+        // Disjoint from Agent A's being-signal band (bits 62+60, bit 61 clear): the hash sets bit 61.
+        assert_ne!(
+            h.0 & (1u64 << 61),
+            0,
+            "the sequence-hash band sets bit 61, being-signal leaves it clear"
+        );
+        // Deterministic: the same over-envelope sequence hashes to the same subject.
+        assert_eq!(sequence_subject(&long), h);
+        // Disjoint from the exact pack: an in-envelope and an over-envelope sequence never collide.
+        assert_ne!(h, a);
     }
 
     #[test]

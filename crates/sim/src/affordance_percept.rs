@@ -39,8 +39,8 @@
 //! into the controller alongside the feature and appetitive blocks.
 
 use civsim_compose::{
-    derive_capabilities, CapabilityCaps, CapabilityKernel, CapabilityRefs, FunctionLawId,
-    FunctionLawRegistry,
+    derive_capabilities, CapabilityCaps, CapabilityKernel, CapabilityRefs, CompositionNode,
+    FunctionLawId, FunctionLawRegistry, IntentRef, NodeBody, PortVector,
 };
 use civsim_core::Fixed;
 use civsim_physics::PhysicsRegistry;
@@ -505,6 +505,70 @@ impl SingleAxisTransduction {
             }
         }
     }
+
+    /// The canonical serialization of this transduction: the domain's stable, deterministic byte form,
+    /// the input a `civsim_compose::NodeBody::Transduction` content-addresses. Fixed field order (the
+    /// target axis, then the reference, then the kernel), every string length-prefixed (a u32
+    /// little-endian byte count) so no two distinct transductions can share a byte stream, every enum a
+    /// fixed discriminant byte read from the type here rather than from `#[repr]` (so a variant reorder
+    /// cannot silently shift an id). There is no map or set in a transduction, so there is no
+    /// iteration-order dependence: the bytes are a pure function of the field values, and identical
+    /// transductions serialize identically on every machine and across runs, the same stability
+    /// discipline `state_hash` holds. `compose` never parses these bytes; it folds them whole into the
+    /// content id, so a distinct sensor mints a distinct design.
+    pub fn canonical_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        write_canonical_str(&mut bytes, &self.target_axis);
+        match &self.reference {
+            ReferenceSource::PerceiverBodyAxis(axis) => {
+                bytes.push(REF_TAG_PERCEIVER_BODY_AXIS);
+                write_canonical_str(&mut bytes, axis);
+            }
+            ReferenceSource::FloorConstant(id) => {
+                bytes.push(REF_TAG_FLOOR_CONSTANT);
+                write_canonical_str(&mut bytes, id);
+            }
+        }
+        match self.kernel {
+            TransductionKernel::ReferenceOverAxis => bytes.push(KERNEL_TAG_REFERENCE_OVER_AXIS),
+        }
+        bytes
+    }
+
+    /// This transduction as a content-addressed `civsim_compose` node: an opaque tag-3 leaf carrying its
+    /// canonical bytes, so a distinct sensor mints a distinct design id and can be promoted, folded, and
+    /// selected through discovery like any other node. The leaf is the SUBSTRATE for a multi-axis
+    /// affordance (a `compose` tree of these leaves); the bundling itself is the Tier-C emergent step the
+    /// discovery loop performs under selection, not authored here (see the module note above). The
+    /// `intent` is opaque provenance (never folded into the id); the leaf declares no
+    /// interface ports and no scalar params, so the content id is a pure function of the canonical bytes.
+    pub fn to_composition_node(&self, intent: IntentRef) -> CompositionNode {
+        CompositionNode::new(
+            intent,
+            NodeBody::Transduction {
+                canonical: self.canonical_bytes(),
+            },
+            PortVector::from_slots(Vec::new()),
+            Vec::new(),
+        )
+    }
+}
+
+/// Canonical serialization discriminant for [`ReferenceSource::PerceiverBodyAxis`].
+const REF_TAG_PERCEIVER_BODY_AXIS: u8 = 0;
+/// Canonical serialization discriminant for [`ReferenceSource::FloorConstant`].
+const REF_TAG_FLOOR_CONSTANT: u8 = 1;
+/// Canonical serialization discriminant for [`TransductionKernel::ReferenceOverAxis`].
+const KERNEL_TAG_REFERENCE_OVER_AXIS: u8 = 0;
+
+/// Append a length-prefixed UTF-8 string to a canonical byte buffer: a u64 little-endian byte count, then
+/// the bytes. The prefix disambiguates field boundaries, so no two distinct field sequences collide. The
+/// count is u64 (never u32), so the "no two distinct transductions share a byte stream" property holds for
+/// any string a machine can hold, with no >4 GiB truncation caveat; it matches the u64 length prefix
+/// `civsim_compose::NodeBody::Transduction` folds the whole serialization under.
+fn write_canonical_str(out: &mut Vec<u8>, s: &str) {
+    out.extend_from_slice(&(s.len() as u64).to_le_bytes());
+    out.extend_from_slice(s.as_bytes());
 }
 
 /// The transduction registry: which single-axis transductions a world's beings run, in canonical order, the
@@ -1149,5 +1213,85 @@ values = [
             Fixed::from_ratio(1, 2),
             "compressive: floor reference 5 over strength 10 is one half"
         );
+    }
+
+    fn td(target: &str, reference: ReferenceSource) -> SingleAxisTransduction {
+        SingleAxisTransduction {
+            target_axis: target.to_string(),
+            reference,
+            kernel: TransductionKernel::ReferenceOverAxis,
+        }
+    }
+
+    #[test]
+    fn canonical_bytes_are_stable_and_mint_a_stable_node_id() {
+        // The stability contract the composer leaf rests on: an identical transduction serializes to the
+        // identical bytes, and those bytes mint the identical content id, on every construction.
+        let a = td(
+            "mat.fracture_strength",
+            ReferenceSource::PerceiverBodyAxis("body.delivered_stress".to_string()),
+        );
+        let b = td(
+            "mat.fracture_strength",
+            ReferenceSource::PerceiverBodyAxis("body.delivered_stress".to_string()),
+        );
+        assert_eq!(a.canonical_bytes(), b.canonical_bytes());
+        assert_eq!(
+            a.to_composition_node(IntentRef(0)).content_id(),
+            b.to_composition_node(IntentRef(0)).content_id(),
+        );
+    }
+
+    #[test]
+    fn the_intent_is_opaque_provenance_and_never_shifts_the_content_id() {
+        // The tag-3 leaf keeps the pure-content, intent-omitted contract: two nodes for the same
+        // transduction reached from different intents deduplicate to one design.
+        let t = td(
+            "mat.fracture_strength",
+            ReferenceSource::FloorConstant("floor.reference_stress".to_string()),
+        );
+        assert_eq!(
+            t.to_composition_node(IntentRef(1)).content_id(),
+            t.to_composition_node(IntentRef(999)).content_id(),
+        );
+    }
+
+    #[test]
+    fn a_different_field_mints_a_different_node_and_the_reference_kind_disambiguates() {
+        // Distinctness across every field, and the discriminant guard: the SAME id string under a body
+        // axis versus a floor constant is two different sensors, so the reference kind must separate them.
+        let base = td(
+            "mat.fracture_strength",
+            ReferenceSource::PerceiverBodyAxis("x".to_string()),
+        );
+        let other_axis = td(
+            "mat.compressive_strength",
+            ReferenceSource::PerceiverBodyAxis("x".to_string()),
+        );
+        let other_ref_id = td(
+            "mat.fracture_strength",
+            ReferenceSource::PerceiverBodyAxis("y".to_string()),
+        );
+        let other_ref_kind = td(
+            "mat.fracture_strength",
+            ReferenceSource::FloorConstant("x".to_string()),
+        );
+        let id = |t: &SingleAxisTransduction| t.to_composition_node(IntentRef(0)).content_id();
+        assert_ne!(id(&base), id(&other_axis), "different target axis");
+        assert_ne!(id(&base), id(&other_ref_id), "different reference id");
+        assert_ne!(
+            id(&base),
+            id(&other_ref_kind),
+            "same id string, different reference kind, is a different sensor"
+        );
+    }
+
+    #[test]
+    fn the_length_prefix_stops_a_field_boundary_collision() {
+        // Without the length prefix, moving a character across the target/reference boundary would leave
+        // the concatenation unchanged. The prefix makes ("ab", "c") and ("a", "bc") distinct sensors.
+        let split_one = td("ab", ReferenceSource::PerceiverBodyAxis("c".to_string()));
+        let split_two = td("a", ReferenceSource::PerceiverBodyAxis("bc".to_string()));
+        assert_ne!(split_one.canonical_bytes(), split_two.canonical_bytes());
     }
 }
