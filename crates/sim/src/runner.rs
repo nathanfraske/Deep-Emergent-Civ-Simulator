@@ -88,7 +88,7 @@ use crate::affordance_percept::{
 use crate::anatomy::{BodyPlan, BodyPlanRegistry};
 use crate::axiom::AxiomAxisId;
 use crate::calibration::{CalibrationError, CalibrationManifest};
-use crate::contact_transfer::{resolve_transfer, ContactTransferRegistry};
+use crate::contact_transfer::{resolve_delivered_energy, ContactTransferRegistry};
 use crate::contact_wound::{presented_contact_area, wound_fraction, FRACTURE_ENERGY_AXIS};
 use crate::controller::{Controller, ControllerLayout};
 use crate::conviction_experience::FeltConvictionCalib;
@@ -2342,40 +2342,6 @@ impl Embodiment {
         freed
     }
 
-    /// The actuating FORCE and STROKE the ACTING SYSTEM brings to a strike on `row`'s channel. For a BARE
-    /// strike (step 1, byte-neutral) this reads the acting Segment's OWN grown body: the force is its strength
-    /// stress (`row.strength_axis`) over its cross-section (`row.cross_section_axis`), an N, and the stroke is its
-    /// own grown `mech.stroke_length` (`row.stroke_axis`), the distance the force acts over. Both are per-body
-    /// grown data, so the delivered actuator work (`F d`) carries no world-global swing speed and no free mass
-    /// term (the stroke-rate substrate).
-    ///
-    /// Factored as ONE read over the acting SYSTEM so the DERIVED TOOL-GEOMETRY mass-payoff (the arc's follow-on
-    /// (b), the honest "heavier or longer tool hits harder") drops in ADDITIVELY here, coupled to the
-    /// wielded-tool / made-world path: a longer wielded tool extends the effective `stroke` and a heavier one the
-    /// sustainable `force`, an additive read on the SAME `F d` law and the same stroke-distance axis, never a
-    /// re-foundation. The substrate is shaped to admit it (the do-not-forbid-the-follow-on discipline); the free
-    /// tool-mass term the old form carried is not restored, the founded coupling is. `cap` is the representability
-    /// ceiling an unrepresentable force saturates to.
-    fn acting_force_and_stroke(
-        seg: &crate::morphogen::Segment,
-        row: &crate::contact_transfer::ContactTransfer,
-        cap: Fixed,
-    ) -> (Fixed, Fixed) {
-        // The force in NEWTONS: the acting material's strength stress over its cross-section, promoted from the
-        // megapascal strength scale to newtons by the floor's `stress_force` (its C_PA bridge), so the actuator
-        // work below lands on the joule scale the Griffith resistance is on.
-        let force = laws::stress_force(
-            seg.mat(&row.strength_axis),
-            seg.geo(&row.cross_section_axis),
-            cap,
-        );
-        let stroke = seg.geo(&row.stroke_axis);
-        // Follow-on (b), the derived tool-geometry mass-payoff: when a tool is wielded, add its stroke extension
-        // to `stroke` and its sustainable-force contribution to `force` HERE (an additive read on the same law),
-        // coupled to the wielded-tool path. Bare-limb reads only for step 1 (byte-neutral).
-        (force, stroke)
-    }
-
     /// Enact a being's decided percussion STRIKE (the made-world arc, tool-use, Section G): swing at the matter
     /// underfoot and fracture it with the blow's energy. The delivered energy is the WIELDER's own ACTUATOR WORK
     /// (its greatest strength-over-cross-section force, promoted to newtons by [`laws::stress_force`], over its
@@ -2427,9 +2393,17 @@ impl Embodiment {
             let mut delivered = Fixed::ZERO;
             if let Some(structure) = w.structure.as_ref() {
                 for seg in &structure.segments {
-                    let (force, stroke) =
-                        Self::acting_force_and_stroke(seg, &row, params.energy_max);
-                    let work = resolve_transfer(&row, force, stroke, params.energy_max);
+                    // The delivered mechanical energy from this acting Segment's OWN grown axes, resolved by the
+                    // run-all-gate-to-zero kernel set (Kinetic today, the actuator work `F d`). Reads the axis ids
+                    // the row declares through the Segment's geo/mat accessors, so the resolve keys on the being's
+                    // own body. The tool-geometry follow-on (b) wraps these accessors at this caller (which holds
+                    // the wielded tool) to add the tool's stroke on the stroke axis, an additive read on the same law.
+                    let work = resolve_delivered_energy(
+                        &|a| seg.geo(a),
+                        &|a| seg.mat(a),
+                        &row,
+                        params.energy_max,
+                    );
                     if work > delivered {
                         delivered = work;
                     }
@@ -2485,7 +2459,8 @@ impl Embodiment {
     /// so nothing reads a species, role, or relatedness (Principle 8), and the primitive reads whatever Segments
     /// occupy the cell, the occupant-agnostic form.
     ///
-    /// The delivered energy is [`crate::contact_transfer::resolve_transfer`] (piece 1) over the acting part's own
+    /// The delivered energy is [`crate::contact_transfer::resolve_delivered_energy`] (piece 1, the stroke-rate
+    /// step-2 run-all-gate-to-zero resolve) over the acting part's own
     /// ACTUATOR WORK: the greatest, among the being's grown Segments, of its strength-over-cross-section force
     /// (promoted to newtons by [`laws::stress_force`], read off the axes the channel's row DECLARES) times its
     /// own grown `mech.stroke_length` (`F d`), dispatched by the registered channel's kernel, so the delivered
@@ -2528,7 +2503,7 @@ impl Embodiment {
             return Fixed::ZERO; // strike unarmed: no swing kinematics
         };
         // The channel the strike delivers through: the first registered contact-transfer row, whose kernel
-        // drives resolve_transfer. An empty registry declares no channel, so no strike fires (the opt-in
+        // drives resolve_delivered_energy. An empty registry declares no channel, so no strike fires (the opt-in
         // absence). The per-part channel SELECTION (an acting part choosing among several channels by its own
         // data) is the flagged follow-on; the first cut delivers through the world's registered channel.
         let Some((_, row)) = self.contact_transfer.iter().next() else {
@@ -2551,9 +2526,17 @@ impl Embodiment {
             let mut delivered = Fixed::ZERO;
             if let Some(structure) = w.structure.as_ref() {
                 for seg in &structure.segments {
-                    let (force, stroke) =
-                        Self::acting_force_and_stroke(seg, &row, params.energy_max);
-                    let work = resolve_transfer(&row, force, stroke, params.energy_max);
+                    // The delivered mechanical energy from this acting Segment's OWN grown axes, resolved by the
+                    // run-all-gate-to-zero kernel set (Kinetic today, the actuator work `F d`). Reads the axis ids
+                    // the row declares through the Segment's geo/mat accessors, so the resolve keys on the being's
+                    // own body. The tool-geometry follow-on (b) wraps these accessors at this caller (which holds
+                    // the wielded tool) to add the tool's stroke on the stroke axis, an additive read on the same law.
+                    let work = resolve_delivered_energy(
+                        &|a| seg.geo(a),
+                        &|a| seg.mat(a),
+                        &row,
+                        params.energy_max,
+                    );
                     if work > delivered {
                         delivered = work;
                     }
@@ -7416,7 +7399,9 @@ source = "test"
     #[test]
     fn a_strike_wounds_the_targets_largest_presented_segment_by_geometry_not_weak_point() {
         use crate::anatomy::{Part, Temperament};
-        use crate::contact_transfer::{resolve_transfer, ContactTransferRegistry, DEV_KINETIC};
+        use crate::contact_transfer::{
+            resolve_delivered_energy, ContactTransferRegistry, DEV_KINETIC,
+        };
         use crate::contact_wound::wound_fraction;
         use crate::homeostasis::HomeostaticAxisDef;
         use crate::material::StrikeParams;
@@ -7544,9 +7529,24 @@ source = "test"
             .clone();
         // The striker delivers its actuator work: force = 200 MPa strength over a 1e-6 m^2 cross-section, promoted
         // by the stress_force megapascal-to-newton bridge, is 200 N; over its 1 m stroke, 200 J (the mass a part
-        // carries no longer enters the delivered energy).
-        let force = laws::stress_force(Fixed::from_int(200), Fixed::from_ratio(1, 1_000_000), cap);
-        let energy = resolve_transfer(&row, force, Fixed::from_int(1), cap);
+        // carries no longer enters the delivered energy). Read through the run-all-gate-to-zero resolve over the
+        // acting part's own grown axes, the same substrate the strike wire runs.
+        let strength = Fixed::from_int(200);
+        let cross_section = Fixed::from_ratio(1, 1_000_000);
+        let stroke = Fixed::from_int(1);
+        let geo = |a: &str| match a {
+            "mech.cross_section_area" => cross_section,
+            "mech.stroke_length" => stroke,
+            _ => Fixed::ZERO,
+        };
+        let mat = |a: &str| {
+            if a == "mat.fracture_strength" {
+                strength
+            } else {
+                Fixed::ZERO
+            }
+        };
+        let energy = resolve_delivered_energy(&geo, &mat, &row, cap);
         let expected = wound_fraction(energy, big_area, big_tough_fe, cap);
         assert_eq!(
             wound, expected,

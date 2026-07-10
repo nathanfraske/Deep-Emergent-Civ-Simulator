@@ -153,30 +153,67 @@ pub const DEV_KINETIC: ContactChannelId = ContactChannelId(1);
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct ContactChannelId(pub u16);
 
-/// Resolve the energy an acting part delivers on a channel's [`ContactTransfer`] row, dispatching the transfer
-/// law by the row's kernel id, never by channel identity (the harden-to-registry contract, so adding a kernel
-/// or a channel is a match-arm or data change, never a channel-identity branch). Pure and off the run path (no
-/// live caller): the hunt-kill strike wire consumes it, so this is byte-neutral by construction.
+/// Resolve the mechanical energy an acting part delivers on a channel's [`ContactTransfer`] row from the
+/// part's OWN grown axes, read through the `geo` and `mat` accessors (an axis id to its grown value, the same
+/// closure form [`civsim_compose::derive_capabilities`] reads a part's function through, so this stays a pure
+/// law dispatch with no body-representation dependency). Off the run path (the strike wire is opt-in and no
+/// pinned scenario arms it), so byte-neutral by construction.
 ///
-/// The delivery inputs are PARAMETERS the caller derives from the acting part's OWN body: `actuator_force` is
-/// the actuating force (the part's strength stress over its cross-section, read off the row's `strength_axis`
-/// and `cross_section_axis`) and `stroke_distance` is the distance the force acts over (the part's own grown
-/// `mech.stroke_length`, read off the row's `stroke_axis`). The kinetic kernel is
-/// [`civsim_physics::laws::actuator_work`] of those (force times distance, the delivered energy directly); a
-/// future non-kinetic kernel reads its own channel-appropriate inputs. `energy_max` is the physics-floor
-/// representability cap the law saturates at. Keying on the part's own strength, cross-section, and stroke, a
-/// stronger, thicker, or longer-stroked part delivers more energy, never a per-species constant and never a
-/// world-global swing speed (admit-the-alien: a massless energy-being would carry a different channel and
-/// kernel, a data row).
-pub fn resolve_transfer(
+/// RUN-ALL-GATE-TO-ZERO (the stroke-rate step-2 substrate, gate-signed-off, owner-decisions R15): the delivered
+/// mechanical energy is resolved over the registered delivered-energy kernel set (exactly one today,
+/// [`TransferKernel::Kinetic`], dispatched below), each kernel contributing the energy its own grounded floor
+/// law delivers and reading ZERO where the part carries none of that law's axes (the absence convention). So
+/// which law contributes DERIVES from the part's continuous grown physics, never a grown categorical
+/// actuation-kind selector and never an authored threshold:
+/// a rigid lever, an elastic recoil, and a hydraulic jet differ only in which continuous axes are nonzero, an
+/// emergent DESCRIPTION of where a part lands in axis space, mirroring how the capability laws already emerge by
+/// physics not a tag. Today the kernel set is exactly [`TransferKernel::Kinetic`], the ACTUATOR WORK `F d`
+/// (strength stress over cross-section, the acting distance the grown stroke), the rigid limit; a new grounded
+/// delivered-energy law (an elastic-recoil `1/2 k x^2`, a hydraulic `integral P dV`) is a new kernel gated on
+/// its own axes. `energy_max` is the floor representability cap each law saturates at.
+///
+/// AGGREGATION across kernels is a single-kernel identity today and is DEFERRED to the slice that lands the
+/// second kernel: summing the per-kernel energies would double-count where they share an energy source (a
+/// spring's stored elastic energy IS the muscle work that loaded it), so the cross-kernel combine (a max over
+/// the dominant delivery mechanism, or a partition that avoids the shared-source double-count) is settled with
+/// the gate when kernel two lands, not pre-authored here. With one kernel the aggregate is that kernel's energy.
+///
+/// The DERIVED TOOL-GEOMETRY follow-on (the arc's flagged additive payoff (b), a longer wielded tool extends the
+/// effective stroke and a heavier one the sustainable force) drops in at the CALLER, which holds the wielded
+/// tool: the caller augments the `geo`/`mat` closure it passes (a wrapped accessor that adds the tool's stroke
+/// on the stroke axis), an additive read on the SAME `F d` law and the same axis, never a re-foundation here.
+pub fn resolve_delivered_energy(
+    geo: &dyn Fn(&str) -> Fixed,
+    mat: &dyn Fn(&str) -> Fixed,
     row: &ContactTransfer,
-    actuator_force: Fixed,
-    stroke_distance: Fixed,
     energy_max: Fixed,
 ) -> Fixed {
+    // Run-all-gate-to-zero over the registered delivered-energy kernels. One kernel today, so the aggregate is
+    // its energy; a new kernel adds a gated term here and the cross-kernel combine is settled with the gate then.
     match row.kernel {
-        TransferKernel::Kinetic => laws::actuator_work(actuator_force, stroke_distance, energy_max),
+        TransferKernel::Kinetic => kinetic_delivered_energy(geo, mat, row, energy_max),
     }
+}
+
+/// The KINETIC (rigid-actuator) delivered-energy law: the actuator work `F d`, where the force is the acting
+/// part's strength stress (`row.strength_axis`) over its cross-section (`row.cross_section_axis`) promoted to
+/// newtons by the floor's [`laws::stress_force`] (its megapascal-to-newton bridge), and the distance is the
+/// part's own grown stroke (`row.stroke_axis`). The rigid limit of the run-all-gate-to-zero set: a part with no
+/// strength or no stroke delivers zero (the absence convention, [`laws::actuator_work`] returns zero), so this
+/// kernel self-gates. Reads only the part's own grown axes, no per-species constant and no world-global swing
+/// speed (admit-the-alien: an actuator on a different physics carries a different kernel gated on its own axes).
+fn kinetic_delivered_energy(
+    geo: &dyn Fn(&str) -> Fixed,
+    mat: &dyn Fn(&str) -> Fixed,
+    row: &ContactTransfer,
+    energy_max: Fixed,
+) -> Fixed {
+    let force = laws::stress_force(
+        mat(&row.strength_axis),
+        geo(&row.cross_section_axis),
+        energy_max,
+    );
+    laws::actuator_work(force, geo(&row.stroke_axis), energy_max)
 }
 
 #[cfg(test)]
@@ -247,19 +284,44 @@ mod tests {
         assert_eq!(reg.get(DEV_KINETIC).unwrap().stroke_axis, "second");
     }
 
+    /// A part's grown-axis accessors for the kinetic kernel: a strength stress on `mat.fracture_strength`, a
+    /// cross-section on `mech.cross_section_area`, and a stroke on `mech.stroke_length`; every other axis reads
+    /// zero (the absence convention). The cross-section is on the 1e-6 m^2 scale that keeps a 200 MPa strength a
+    /// modest newton force through the floor's megapascal-to-newton bridge, well under the representability cap.
+    fn part_axes(
+        strength: Fixed,
+        cross_section: Fixed,
+        stroke: Fixed,
+    ) -> (impl Fn(&str) -> Fixed, impl Fn(&str) -> Fixed) {
+        let geo = move |a: &str| match a {
+            "mech.cross_section_area" => cross_section,
+            "mech.stroke_length" => stroke,
+            _ => Fixed::ZERO,
+        };
+        let mat = move |a: &str| match a {
+            "mat.fracture_strength" => strength,
+            _ => Fixed::ZERO,
+        };
+        (geo, mat)
+    }
+
     #[test]
-    fn kinetic_resolve_is_the_actuator_work_of_the_parts_force_and_stroke() {
+    fn kinetic_resolve_is_the_actuator_work_of_the_parts_own_axes() {
         let row = ContactTransferRegistry::dev_terran()
             .get(DEV_KINETIC)
             .expect("kinetic row")
             .clone();
         let cap = Fixed::from_int(1_000_000);
-        let force = Fixed::from_int(2);
-        let stroke = Fixed::from_int(3);
-        // The resolve dispatches the Kinetic kernel to the floor actuator-work law over the given force and
-        // stroke: the substrate adds no arithmetic of its own, it selects the law.
+        let strength = Fixed::from_int(200); // MPa
+        let cross_section = Fixed::from_ratio(1, 1_000_000); // m^2
+        let stroke = Fixed::from_int(1); // m
+        let (geo, mat) = part_axes(strength, cross_section, stroke);
+        // The resolve reads the part's axes and dispatches the Kinetic kernel to the floor laws: the actuating
+        // force is the strength stress over the cross-section (`stress_force`, its megapascal-to-newton bridge),
+        // and the delivered energy the actuator work of that force over the stroke. It adds no arithmetic of its own.
+        let force = laws::stress_force(strength, cross_section, cap);
         assert_eq!(
-            resolve_transfer(&row, force, stroke, cap),
+            resolve_delivered_energy(&geo, &mat, &row, cap),
             laws::actuator_work(force, stroke, cap),
         );
     }
@@ -271,22 +333,32 @@ mod tests {
             .expect("kinetic row")
             .clone();
         let cap = Fixed::from_int(1_000_000);
-        let base = resolve_transfer(&row, Fixed::from_int(2), Fixed::from_int(3), cap);
-        // A greater actuating force delivers more energy (linear in force), keyed on the part's own strength and
-        // cross-section.
-        let stronger = resolve_transfer(&row, Fixed::from_int(4), Fixed::from_int(3), cap);
+        let m = |n: i32| Fixed::from_ratio(n as i64, 1_000_000); // cross-section on the m^2 scale
+        let deliver = |strength: Fixed, cross_section: Fixed, stroke: Fixed| {
+            let (geo, mat) = part_axes(strength, cross_section, stroke);
+            resolve_delivered_energy(&geo, &mat, &row, cap)
+        };
+        let base = deliver(Fixed::from_int(200), m(1), Fixed::from_int(1)); // 200 N over 1 m: 200 J
+                                                                            // A greater actuating strength delivers more energy (linear in force), keyed on the part's own material.
+        let stronger = deliver(Fixed::from_int(400), m(1), Fixed::from_int(1));
         // A longer stroke delivers more energy (linear in distance), keyed on the part's own grown geometry.
-        let longer = resolve_transfer(&row, Fixed::from_int(2), Fixed::from_int(6), cap);
+        let longer = deliver(Fixed::from_int(200), m(1), Fixed::from_int(2));
         assert!(stronger > base && longer > base && base > Fixed::ZERO);
-        // A zero-strength actuator delivers no blow (the absence convention).
+        // The kernel self-gates: a part with no strength, no cross-section, or no stroke delivers no blow (the
+        // absence convention, so a part that grew none of the kinetic axes contributes zero, run-all-gate-to-zero).
+        assert_eq!(deliver(Fixed::ZERO, m(1), Fixed::from_int(1)), Fixed::ZERO);
         assert_eq!(
-            resolve_transfer(&row, Fixed::ZERO, Fixed::from_int(3), cap),
+            deliver(Fixed::from_int(200), Fixed::ZERO, Fixed::from_int(1)),
+            Fixed::ZERO
+        );
+        assert_eq!(
+            deliver(Fixed::from_int(200), m(1), Fixed::ZERO),
             Fixed::ZERO
         );
         // Deterministic: identical inputs give the identical bit-exact energy (Principle 3).
         assert_eq!(
             base,
-            resolve_transfer(&row, Fixed::from_int(2), Fixed::from_int(3), cap)
+            deliver(Fixed::from_int(200), m(1), Fixed::from_int(1))
         );
     }
 }
