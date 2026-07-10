@@ -958,6 +958,9 @@ pub fn step<T: Terrain>(
         // No conviction percept on the field-less fixture path (the layout carries no conviction block here),
         // so the controller's conviction input, if any, reads zero.
         &BTreeMap::new(),
+        // No being-directed percept on the field-less fixture path (the layout carries no being block here),
+        // so the controller's being input, if any, reads zero.
+        &BTreeMap::new(),
         // The field-less fixture path enacts no grasp (it carries no material field); the sink is
         // discarded, so a decided grasp on this path is inert.
         &mut BTreeMap::new(),
@@ -1020,6 +1023,14 @@ pub fn step_with_field_dirs<T: Terrain>(
     // block), so the input is byte-identical to before the block existed. Only an evolved conviction weight
     // turns a stance into a behaviour bias, so a conviction-biased behaviour emerges rather than being authored.
     conviction: &BTreeMap<StableId, Vec<Fixed>>,
+    // Each being's unit being-directed percept (the being-percept keystone, step 6): four components, the unit
+    // direction AWAY from perceived believed-harm emitters (avoidance dx, dy) and TOWARD perceived
+    // believed-reward ones (attraction dx, dy), computed by the runner from what the being perceived and its
+    // learned beliefs, written into the controller's being block. Empty (a being absent from the map, or an
+    // empty map) when the being-percept feature is off (the layout carries no being block), so the input is
+    // byte-identical to before the block existed. Only an evolved FREELY-SIGNED weight turns the direction into
+    // approach (predation) or avoidance (fleeing), so the approach/avoid sign emerges rather than being authored.
+    being: &BTreeMap<StableId, Vec<Fixed>>,
     deferred_actions: &mut BTreeMap<StableId, (AffordanceId, Fixed)>,
 ) -> usize {
     walkers.sort_by_key(|w| w.id);
@@ -1124,6 +1135,12 @@ pub fn step_with_field_dirs<T: Terrain>(
         // conviction weight turns a stance into a behaviour bias, so a conviction-biased behaviour emerges.
         let empty_conviction: Vec<Fixed> = Vec::new();
         let convict = conviction.get(&w.id).unwrap_or(&empty_conviction);
+        // The being's own BEING-DIRECTED percept for this tick (the being-percept keystone, step 6): its unit
+        // avoidance and attraction directions over the beings it perceived, computed by the runner and written
+        // into the controller's being block. Empty when the being-percept feature is off (the layout carries no
+        // being block), so the input is byte-identical to before the block existed.
+        let empty_being: Vec<Fixed> = Vec::new();
+        let being_dirs = being.get(&w.id).unwrap_or(&empty_being);
         let input = layout.build_input_full_with_conviction(
             &w.homeostasis,
             &here_axes,
@@ -1134,7 +1151,7 @@ pub fn step_with_field_dirs<T: Terrain>(
             &material,
             attract,
             convict,
-            &[],
+            being_dirs,
         );
         let (out, new_hidden) = w.controller.evaluate(&input, &w.hidden);
         w.hidden = new_hidden;
@@ -1991,6 +2008,7 @@ mod tests {
                     &BTreeMap::new(), // no appetitive block on the fixture path
                     &BTreeMap::new(), // no attraction block on the fixture path
                     &BTreeMap::new(), // no conviction block on the fixture path
+                    &BTreeMap::new(), // no being block on the fixture path
                     &mut BTreeMap::new(),
                 );
             }
@@ -2073,6 +2091,7 @@ mod tests {
                     &std::collections::BTreeMap::new(), // no appetitive block on the fixture path
                     &std::collections::BTreeMap::new(), // no attraction block on the fixture path
                     &std::collections::BTreeMap::new(), // no conviction block on the fixture path
+                    &std::collections::BTreeMap::new(), // no being block on the fixture path
                     &mut std::collections::BTreeMap::new(),
                 );
             }
@@ -2165,6 +2184,7 @@ mod tests {
                     &std::collections::BTreeMap::new(), // no appetitive block on the fixture path
                     &std::collections::BTreeMap::new(), // no attraction block on the fixture path
                     &std::collections::BTreeMap::new(), // no conviction block on the fixture path
+                    &std::collections::BTreeMap::new(), // no being block on the fixture path
                     &mut std::collections::BTreeMap::new(),
                 );
             }
@@ -2412,6 +2432,7 @@ mod tests {
             &std::collections::BTreeMap::new(), // no appetitive block on the fixture path
             &std::collections::BTreeMap::new(), // no attraction block on the fixture path
             &std::collections::BTreeMap::new(), // no conviction block on the fixture path
+            &std::collections::BTreeMap::new(), // no being block on the fixture path
             &mut std::collections::BTreeMap::new(),
         );
 
@@ -2537,6 +2558,7 @@ mod tests {
                     &std::collections::BTreeMap::new(), // no appetitive block on the fixture path
                     &std::collections::BTreeMap::new(), // no attraction block on the fixture path
                     &std::collections::BTreeMap::new(), // no conviction block on the fixture path
+                    &std::collections::BTreeMap::new(), // no being block on the fixture path
                     &mut std::collections::BTreeMap::new(),
                 );
                 if !ws[0].alive {
@@ -2658,6 +2680,7 @@ mod tests {
                     &std::collections::BTreeMap::new(), // no appetitive block on the fixture path
                     &std::collections::BTreeMap::new(), // no attraction block on the fixture path
                     &std::collections::BTreeMap::new(), // no conviction block on the fixture path
+                    &std::collections::BTreeMap::new(), // no being block on the fixture path
                     &mut std::collections::BTreeMap::new(),
                 );
             }
@@ -2758,6 +2781,7 @@ mod tests {
                     &std::collections::BTreeMap::new(), // no appetitive block on the fixture path
                     &std::collections::BTreeMap::new(), // no attraction block on the fixture path
                     &std::collections::BTreeMap::new(), // no conviction block on the fixture path
+                    &std::collections::BTreeMap::new(), // no being block on the fixture path
                     &mut std::collections::BTreeMap::new(),
                 );
             }

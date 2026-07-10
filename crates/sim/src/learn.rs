@@ -36,11 +36,14 @@
 //! me" emerges from the correlation over selection (Principles 8, 9).
 
 use civsim_core::{Fixed, StableId, StateHasher};
+use civsim_physics::laws::{DiscriminationLaw, ResponseLaw};
 use civsim_world::Coord3;
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::perception_percept::{sense, ChannelTransduction};
-use crate::perception_reach::Reach;
+use crate::perception_reach::{
+    ChannelReach, ChannelReachRegistry, Reach, ReachBounds, DEV_OPTICAL,
+};
 
 use crate::agent::Mind;
 use crate::calibration::{CalibrationError, CalibrationManifest};
@@ -50,6 +53,7 @@ use crate::locomotion::ResourceField;
 use crate::material::MaterialField;
 use crate::material_percept::MaterialPerceptRegistry;
 use crate::percept::{feature_bucket, PerceptRegistry};
+use crate::sensorium::SenseChannelId;
 
 /// The generic attribute every experientially-learned feature belief is ABOUT: "does standing on this
 /// feature harm me". One attribute for all features (the feature identity lives in the subject), a
@@ -678,10 +682,32 @@ pub fn being_signal_reward_observation(
     plasticity: Fixed,
     calib: &RewardLearningCalib,
 ) -> FeatureObservation {
+    being_signal_reward_for(
+        being_signal_subject(channel, bucket),
+        reward,
+        plasticity,
+        calib,
+    )
+}
+
+/// The being-signal REWARD observation for an ALREADY-PERCEIVED subject (the being-percept keystone, step 6,
+/// the live-wire reward pole): the subject-taking core of [`being_signal_reward_observation`], for the run
+/// path where the perceiver already holds the [`being_signal_subject`] it formed via
+/// [`perceive_being_signal`] rather than the raw channel and bucket. It mints a reward belief on that subject
+/// toward `REWARDS` on a reward tick and `NEUTRAL` otherwise, weighted by the reserved reward observation
+/// weight scaled by the being's plasticity, the reward-frame sibling of the harm-frame [`observation_toward`]
+/// (which is hardwired to `HARMS`/`BENIGN`), reusing the existing reward likelihoods, never a fabricated
+/// weight.
+pub fn being_signal_reward_for(
+    subject: StableId,
+    reward: bool,
+    plasticity: Fixed,
+    calib: &RewardLearningCalib,
+) -> FeatureObservation {
     let base = calib.observation_weight();
     let weight = base.checked_mul(plasticity).unwrap_or(base);
     FeatureObservation {
-        subject: being_signal_subject(channel, bucket),
+        subject,
         toward: if reward { REWARDS } else { NEUTRAL },
         weight,
     }
@@ -800,6 +826,107 @@ pub fn being_attraction_gradient(
     params: &InferenceParams,
 ) -> (Fixed, Fixed) {
     being_directed_gradient(mind, here, perceived, REWARD_ATTR, REWARDS, true, params)
+}
+
+/// The being-percept feature's run-path configuration (the being-percept keystone, step 6, the live wire):
+/// everything the perceive phase needs to run the being-directed perception and learning for one world. The
+/// SUBSTRATE bindings are labelled dev fixtures and floor data (the sense channel a being emits and is
+/// perceived on, its reach binding, the perceiver's transduction, the physics reach caps, and the sensorium
+/// activation cap), and the two RESERVED values are the owner's, surfaced with basis and read fail-loud from
+/// the manifest at the feature arming, never fabricated (Principle 11): the emission coupling coefficient
+/// (`physiology::being_signal_emission`'s lever) and the harm eligibility-trace decay lambda. A world that
+/// does not arm being-percept carries `None` and is byte-identical.
+///
+/// Honest limit (flagged, not a defect): the substrate bindings are labelled fixtures for the payoff, not
+/// per-being anatomy-derived. The perceiver transduction is a single world-global fixture rather than each
+/// being's own [`crate::perception_percept::derive_optical_transduction`] over its evolved eye, and the
+/// channel and reach binding are the dev-fixture optical pair. Deriving the transduction per being from its
+/// anatomy (slice 2's reserved-sense-params kernel) and binding the channel from the world's sensorium data
+/// is the flagged follow-on; the reserved emission coupling and eligibility lag are the owner's calibration
+/// the payoff needs first.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BeingPerceptField {
+    /// The sense channel a being emits on and is perceived on (the thermal/optical channel today; a
+    /// non-optical channel is the flagged alien follow-on the receiver reserves fail-loud).
+    pub channel: SenseChannelId,
+    /// The channel's reach binding: the spreading law and the medium absorption axis the signal attenuates by
+    /// along the path, so occlusion emerges from the strata rather than an authored line-of-sight rule.
+    pub row: ChannelReach,
+    /// The perceiver's transduction on the channel: its response law and gain, its discrimination law and
+    /// step, and its detection threshold (the sole perceptibility gate, slice 2's condition 3).
+    pub transduction: ChannelTransduction,
+    /// The physics reach caps: the geometric sphere coefficient for the derived dimensionality, the irradiance
+    /// cap the spread saturates at, and the optical-depth cap the medium attenuation saturates at (the
+    /// occlusion limit). Engine-mechanics representability bounds, not owner values.
+    pub bounds: ReachBounds,
+    /// The sensorium activation cap the transduced percept saturates at. Engine-mechanics.
+    pub activation_max: Fixed,
+    /// RESERVED (fail-loud from the manifest at the feature arming): the per-being emission coupling
+    /// coefficient the emitter's [`crate::physiology::being_signal_emission`] scales its blackbody radiant
+    /// flux by. Basis: the body's covering emissivity times its radiating area, folded into one lever until a
+    /// per-body material-and-area vector exists on the run path to split it (the gate-ruled follow-on).
+    pub emission_coefficient: Fixed,
+    /// RESERVED (fail-loud from the manifest at the feature arming): the temporal-difference lambda the
+    /// being-signal HARM eligibility trace decays by each tick. Basis: the interoceptive lag between
+    /// perceiving a being-signal (a predator approaching) and the harm that follows; the harm sibling of the
+    /// reward pole's `reward.eligibility_decay`, set relative to it. In (0, 1).
+    pub harm_eligibility_decay: Fixed,
+}
+
+impl BeingPerceptField {
+    /// A labelled DEVELOPMENT FIXTURE, not owner data: the dev optical channel and its reach binding, a linear
+    /// perceiver transduction with a modest gain, a small detection threshold, and a unit discrimination step,
+    /// the D=3 physics reach caps (the sphere coefficient `4*pi` derived from `Fixed::PI`, not a truncated
+    /// literal), and the two reserved values at their dev-fixture defaults. The real substrate is the world's
+    /// data and the reserved values are the owner's; this stands up the harness and test paths.
+    pub fn dev_fixture() -> BeingPerceptField {
+        let row = ChannelReachRegistry::dev_terran()
+            .get(DEV_OPTICAL)
+            .expect("the dev optical reach row is present")
+            .clone();
+        let sphere_coeff = Fixed::from_int(4)
+            .checked_mul(Fixed::PI)
+            .expect("4*pi is representable");
+        BeingPerceptField {
+            channel: DEV_OPTICAL,
+            row,
+            transduction: ChannelTransduction {
+                response: ResponseLaw::Linear,
+                gain: Fixed::ONE,
+                shape: Fixed::ZERO,
+                discrimination: DiscriminationLaw::AbsoluteStep,
+                step: Fixed::ONE,
+                threshold: Fixed::from_ratio(1, 1_000_000),
+            },
+            bounds: ReachBounds {
+                sphere_coeff,
+                irrad_max: Fixed::from_int(1_000_000),
+                tau_max: Fixed::from_int(1_000),
+            },
+            activation_max: Fixed::from_int(1_000_000),
+            emission_coefficient: Fixed::from_ratio(1, 2),
+            harm_eligibility_decay: Fixed::from_ratio(1, 2),
+        }
+    }
+
+    /// The being-percept field read at the feature arming: the labelled fixture substrate bindings with the
+    /// two RESERVED values read fail-loud from the manifest (Principle 11). A world that arms being-percept
+    /// under `Profile::Calibrated` refuses while either reserved value is unset rather than fabricating one,
+    /// exactly the gated-feature-calib pattern the reward and conviction learners follow (the value refuses AT
+    /// the feature arming, not at an earlier always-on gate).
+    pub fn from_manifest(m: &CalibrationManifest) -> Result<BeingPerceptField, CalibrationError> {
+        let mut field = BeingPerceptField::dev_fixture();
+        field.emission_coefficient = m.require_fixed("being_percept.emission_coefficient")?;
+        field.harm_eligibility_decay = m.require_fixed("harm.eligibility_decay")?;
+        Ok(field)
+    }
+
+    /// The channel id as the 16-bit channel field the being-signal subject packs (the subject band's channel
+    /// slot). The dev optical channel is `1`, well within the field; a world whose channel id exceeds the
+    /// field is the reserved widened-pack the gate ruled to Agent B's hybrid encoding.
+    pub fn channel_u16(&self) -> u16 {
+        self.channel.0 as u16
+    }
 }
 
 /// The REWARD observations a being makes this tick (ideation / experiential-discovery arc, piece 1, slice 1a
