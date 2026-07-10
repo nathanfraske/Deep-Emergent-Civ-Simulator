@@ -2068,9 +2068,9 @@ pub struct DiurnalSky {
     /// uniform-absorption limit): the per-material emissivity from the floor `opt.emissivity` (so ice, rock,
     /// water, and an alien crust equilibrate and lag differently) is the named immediate follow-on.
     pub emissivity: Fixed,
-    /// The Stefan-Boltzmann constant sigma the radiative-equilibrium law reads (a physics-floor universal
-    /// constant, `metabolism.stefan_boltzmann`), and the temperature representability cap `t_max` the kernel
-    /// clamps to.
+    /// The Stefan-Boltzmann constant sigma the radiative-equilibrium law reads, a universal physical constant
+    /// DERIVED from the CODATA fundamentals ([`crate::physiology::derived_stefan_boltzmann`]), the same in
+    /// every world (not a per-world reserved dev fixture).
     pub sigma: Fixed,
     /// The representability cap the radiative-equilibrium kernel clamps its output temperature to.
     pub t_max: Fixed,
@@ -2095,13 +2095,13 @@ impl DiurnalSky {
             }],
             // LABELLED DEV FIXTURES (Earth-like), the reserved heat values surfaced for the owner, not decided
             // here: the solar constant (W/m^2), a mild atmospheric back-radiation floor, a uniform surface
-            // emissivity (the per-material floor read is the follow-on), the Stefan-Boltzmann sigma, and a
-            // representability cap. Mirror sets these to Earth's real values; an airless world sets
-            // back_radiation to zero for a Moon-like plunge.
+            // emissivity (the per-material floor read is the follow-on), and a representability cap. Mirror
+            // sets these to Earth's real values; an airless world sets back_radiation to zero for a Moon-like
+            // plunge. Sigma is NOT among them: it DERIVES from the CODATA fundamentals, universal, not reserved.
             solar_constant: Fixed::from_int(1361),
             back_radiation: Fixed::from_int(300),
             emissivity: Fixed::from_ratio(95, 100),
-            sigma: Fixed::from_ratio(567, 10_000_000_000),
+            sigma: crate::physiology::derived_stefan_boltzmann(),
             t_max: Fixed::from_int(500),
             surface: SurfaceThermal::dev_fixture(),
         }

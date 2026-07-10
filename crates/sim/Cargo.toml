@@ -23,6 +23,10 @@ civsim-compose = { path = "../compose" }
 # depends only on core (and serde/toml), so the simulation sits on the spatial substrate
 # without pulling in a GPU or ECS stack.
 civsim-world = { path = "../world" }
+# The absolute unit system and the deterministic composite-constant compute (design Part 55, R-UNITS-PIN):
+# the Stefan-Boltzmann sigma DERIVES from the fundamentals here rather than being an authored decimal.
+# units depends only on core, so it adds no heavy or fast-moving dependency and reaches no float.
+civsim-units = { path = "../units" }
 # serde and toml are mature, stable crates (not the fast-moving GPU/ECS stack of
 # design Part 61), used only to parse the calibration manifest and the data-driven
 # substrate definitions. No floating point reaches canonical state through them.

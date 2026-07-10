@@ -98,26 +98,72 @@ pub fn compute_composite_at_scale(
         }
     };
     let computed = evaluate_formula(composite.formula, &resolve)?;
+    // Cross-check the parsed-and-evaluated formula against the stored reference, keyed off the REFERENCE's
+    // own precision (its unit-in-the-last-place), not the derived scale: the stored decimal resolves no
+    // finer than its significant figures, so a fixed one-ULP-at-scale tolerance would falsely fail at a fine
+    // scale where the derived value out-resolves the reference. A genuine formula/value divergence exceeds
+    // the reference ULP by orders of magnitude; a correct derivation sits within half a reference ULP.
     let reference = BigRat::from_decimal_str(composite.value)?;
-    let computed_bits = computed.round_to_scale(scale_bits).ok_or_else(|| {
+    let reference_ulp = BigRat::decimal_ulp(composite.value)?;
+    let divergence = computed.sub(&reference).abs();
+    if divergence.cmp_rat(&reference_ulp) == std::cmp::Ordering::Greater {
+        return Err(format!(
+            "composite '{}' cross-check FAILED: formula '{}' computes a value more than one reference unit-in-the-last-place from the stored reference value '{}'; the formula string and the recorded value have diverged",
+            composite.symbol, composite.formula, composite.value
+        ));
+    }
+    computed.round_to_scale(scale_bits).ok_or_else(|| {
         format!(
             "composite '{}' overflows fixed-point scale {}",
             composite.symbol, scale_bits
         )
-    })?;
-    let reference_bits = reference.round_to_scale(scale_bits).ok_or_else(|| {
-        format!(
-            "reference value for composite '{}' overflows fixed-point scale {}",
-            composite.symbol, scale_bits
-        )
-    })?;
-    if (computed_bits - reference_bits).abs() > 1 {
-        return Err(format!(
-            "composite '{}' cross-check FAILED: formula '{}' computes {} at scale {}, but the stored reference value '{}' is {}; the formula string and the recorded value have diverged",
-            composite.symbol, composite.formula, computed_bits, scale_bits, composite.value, reference_bits
-        ));
-    }
-    Ok(computed_bits)
+    })
+}
+
+/// The per-quantity fixed-point scale a composite is stored at, derived from the composite's own magnitude
+/// bracket and the caller's global significance target and guard (the R-UNITS-PIN reserved knobs), through
+/// the crate's [`crate::derive_scale_bits`]. The magnitude bracket is read from the composite's known value
+/// (its order of magnitude), so the scale is a function of the quantity's own data plus the two reserved
+/// knobs, never an independent per-composite dial.
+pub fn composite_scale_bits(
+    composite: &Composite,
+    sig_target: u32,
+    guard: u32,
+    canonical_scale: u32,
+) -> Result<u32, String> {
+    let value = BigRat::from_decimal_str(composite.value)?;
+    let lg = value.floor_log2() as i32;
+    Ok(crate::derive_scale_bits(lg, lg, sig_target, guard, canonical_scale).scale_bits)
+}
+
+/// The working precision (decimal digits) to compute a transcendental to so the composite's exact value is
+/// correct when rounded to `scale_bits`. Derived, not authored: a value of magnitude `2^magnitude_log2`
+/// rounded to `scale_bits` needs about `(scale_bits + magnitude_log2) * log10(2)` significant decimal
+/// digits, and a fixed guard covers the series-truncation error and the integer-power amplification, so the
+/// precision follows from the scale rather than being a free knob. Computed in integers (no float).
+pub fn working_digits_for_scale(scale_bits: u32, magnitude_log2: i64) -> u32 {
+    const GUARD_DIGITS: i64 = 20;
+    let net = scale_bits as i64 + magnitude_log2;
+    let significant = if net > 0 { (net * 301) / 1000 } else { 0 };
+    (significant + GUARD_DIGITS).max(1) as u32
+}
+
+/// Derive a composite's value as a fixed-point magnitude at its OWN canonical scale (the
+/// [`composite_scale_bits`] scale), evaluating the formula exactly, computing any transcendental to the
+/// derived working precision, rounding ONCE, and running the fail-loud cross-check against the stored
+/// reference. The caller projects this to whatever narrower scale it consumes at. `sig_target` and `guard`
+/// are the global reserved knobs; `canonical_scale` is the substrate's default fixed-point scale.
+pub fn derived_composite_bits(
+    composite: &Composite,
+    sig_target: u32,
+    guard: u32,
+    canonical_scale: u32,
+) -> Result<(i128, u32), String> {
+    let scale_bits = composite_scale_bits(composite, sig_target, guard, canonical_scale)?;
+    let value = BigRat::from_decimal_str(composite.value)?;
+    let working = working_digits_for_scale(scale_bits, value.floor_log2());
+    let bits = compute_composite_at_scale(composite, working, scale_bits)?;
+    Ok((bits, scale_bits))
 }
 
 /// `arctan(1/x) * scale` as an integer-valued rational, summing the alternating series
@@ -427,6 +473,15 @@ mod tests {
     }
 
     #[test]
+    fn cross_check_passes_at_a_fine_scale_beyond_reference_precision() {
+        use crate::fundamentals::STEFAN_BOLTZMANN;
+        // The reference decimal carries ~10 significant figures; at a fine scale (62 bits) the derived value
+        // out-resolves it, but the reference-precision-keyed cross-check must still PASS (a scale-coupled
+        // one-ULP tolerance would falsely fail here). Regression guard for the section-9 finding.
+        assert!(compute_composite_at_scale(&STEFAN_BOLTZMANN, 45, 62).is_ok());
+    }
+
+    #[test]
     fn cross_check_fails_loud_on_a_diverged_formula() {
         // A composite whose formula does NOT compute its stored reference value must FAIL, not emit a number.
         let bogus = Composite {
@@ -444,6 +499,29 @@ mod tests {
             err.contains("cross-check FAILED"),
             "unexpected error: {err}"
         );
+    }
+
+    #[test]
+    fn derived_composite_bits_scale_and_q32_projection() {
+        use crate::fundamentals::STEFAN_BOLTZMANN;
+        use crate::rescale_bits;
+        // Global reserved knobs (dev-fixture values): significance target 30 bits, guard 1.
+        let (bits, scale) = derived_composite_bits(&STEFAN_BOLTZMANN, 30, 1, 32).unwrap();
+        // sigma's magnitude is ~2^-25, so with sig_target 30 the derived scale is 55.
+        assert_eq!(scale, 55);
+        // Projected once more to the sim's Q32.32 consumption scale, sigma is 244 x 2^-32.
+        let q32 = rescale_bits(bits as i64, scale, 32).unwrap();
+        assert_eq!(q32, 244);
+    }
+
+    #[test]
+    fn derived_working_precision_agrees_with_far_higher_precision() {
+        use crate::fundamentals::STEFAN_BOLTZMANN;
+        // The auto-derived working precision reproduces the value a much higher precision gives, at the
+        // derived scale, so the derived precision is sufficient (not a fabricated cutoff).
+        let (bits, scale) = derived_composite_bits(&STEFAN_BOLTZMANN, 30, 1, 32).unwrap();
+        let high = compute_composite_at_scale(&STEFAN_BOLTZMANN, 90, scale).unwrap();
+        assert_eq!(bits, high);
     }
 
     #[test]

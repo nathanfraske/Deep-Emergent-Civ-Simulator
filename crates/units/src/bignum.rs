@@ -375,7 +375,13 @@ impl BigRat {
                 }
             }
         }
-        let mag = q.to_u128()? as i128;
+        // Fit the magnitude in a non-negative i128 before applying the sign, so a value in
+        // [2^127, 2^128) reports out of range rather than wrapping to a negative i128.
+        let mag_u = q.to_u128()?;
+        if mag_u > i128::MAX as u128 {
+            return None;
+        }
+        let mag = mag_u as i128;
         Some(if self.neg { -mag } else { mag })
     }
 
@@ -392,6 +398,49 @@ impl BigRat {
             "floor_log2 argument underflows the 2^-256 bracket"
         );
         q.bit_len() as i64 - 1 - K as i64
+    }
+
+    /// The place value of a decimal string's last significant digit (its unit in the last place), as an
+    /// exact rational: `10^(exp10 - fractional_digits)`. This is the precision the decimal actually carries,
+    /// so a cross-check against a stored reference can key its tolerance off the reference's own precision
+    /// rather than an arbitrary fixed-point scale (a 10-significant-figure CODATA decimal resolves no finer
+    /// than this, whatever scale the derived value is rounded to).
+    pub fn decimal_ulp(s: &str) -> Result<BigRat, String> {
+        let s = s.trim();
+        if s.is_empty() {
+            return Err("empty value".to_string());
+        }
+        let (mantissa, exp10) = match s.split_once(['e', 'E']) {
+            Some((m, e)) => (
+                m,
+                e.trim()
+                    .parse::<i64>()
+                    .map_err(|_| format!("bad exponent in {s}"))?,
+            ),
+            None => (s, 0i64),
+        };
+        let body = mantissa
+            .strip_prefix('-')
+            .or_else(|| mantissa.strip_prefix('+'))
+            .unwrap_or(mantissa);
+        let frac_len = match body.split_once('.') {
+            Some((_, f)) => f.len() as i64,
+            None => 0,
+        };
+        let net_exp = exp10 - frac_len;
+        if net_exp >= 0 {
+            Ok(BigRat::new(
+                false,
+                BigUint::ten_pow(net_exp as u32),
+                BigUint::from_u64(1),
+            ))
+        } else {
+            Ok(BigRat::new(
+                false,
+                BigUint::from_u64(1),
+                BigUint::ten_pow((-net_exp) as u32),
+            ))
+        }
     }
 
     /// Parse a decimal string (optionally in scientific notation, e.g. `1.380649e-23` or `299792458`)
@@ -563,6 +612,33 @@ mod tests {
                 .cmp_rat(&BigRat::from_i64(3).div(&BigRat::from_i64(8))),
             Ordering::Equal
         ); // 3/8
+    }
+
+    #[test]
+    fn decimal_ulp_is_the_last_place_value() {
+        // "5.670374419e-8" has 9 fractional mantissa digits and exponent -8, so its ULP is 10^-17.
+        let u = BigRat::decimal_ulp("5.670374419e-8").unwrap();
+        let expect = BigRat::new(false, BigUint::from_u64(1), BigUint::ten_pow(17));
+        assert_eq!(u.cmp_rat(&expect), Ordering::Equal);
+        // A plain integer resolves to units.
+        assert_eq!(
+            BigRat::decimal_ulp("299792458")
+                .unwrap()
+                .cmp_rat(&BigRat::from_i64(1)),
+            Ordering::Equal
+        );
+        // A positive-exponent form: "1.36e3" resolves to 10^1 (last digit is the tens place).
+        let u = BigRat::decimal_ulp("1.36e3").unwrap();
+        assert_eq!(u.cmp_rat(&BigRat::from_i64(10)), Ordering::Equal);
+    }
+
+    #[test]
+    fn round_to_scale_reports_out_of_range_instead_of_wrapping() {
+        // A magnitude in [2^127, 2^128) must return None (fits u128 but not a non-negative i128), never a
+        // wrapped negative. Build ~2^127 at scale 0 by a big integer over one.
+        let big_num = BigUint::from_u64(1).shl_bits(127);
+        let v = BigRat::new(false, big_num, BigUint::from_u64(1));
+        assert_eq!(v.round_to_scale(0), None);
     }
 
     #[test]
