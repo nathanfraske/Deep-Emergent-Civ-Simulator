@@ -13,8 +13,15 @@ export const meta = {
   phases: [{ title: 'Blind critique', detail: 'independent panelists, same statement, no shared context, no leaked conclusion' }],
 }
 
-const STATEMENT = (args && args.statement) || '(no statement provided in args.statement)'
-const MECHANISM = (args && args.mechanismFacts) || '(no neutral mechanism facts provided in args.mechanismFacts)'
+// The harness may deliver `args` as a JSON STRING rather than a parsed object; normalize either way so the
+// statement and neutral mechanism facts actually reach the panelists (a silent empty packet critiques nothing).
+let A = args
+if (typeof A === 'string') {
+  try { A = JSON.parse(A) } catch (e) { A = {} }
+}
+
+const STATEMENT = (A && A.statement) || '(no statement provided in args.statement)'
+const MECHANISM = (A && A.mechanismFacts) || '(no neutral mechanism facts provided in args.mechanismFacts)'
 
 const PACKET = `
 You are one of several independent reviewers, each working ALONE. You cannot see the others and there is no
