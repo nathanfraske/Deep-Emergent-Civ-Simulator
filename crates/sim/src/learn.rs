@@ -622,6 +622,37 @@ pub fn being_signal_observation(
     observation_toward(being_signal_subject(channel, bucket), harm, weight)
 }
 
+/// The LAGGED-credit harm observations a being makes on a harm tick (the being-percept keystone, step 4, the
+/// harm-path eligibility trace): one being-signal harm observation per subject still remembered in the
+/// perceiver's harm-eligibility [`EligibilityTrace`], each toward `HARMS` on a harm tick and `BENIGN`
+/// otherwise, weighted by the reserved harm observation weight scaled by the being's plasticity AND the
+/// subject's decayed eligibility. So a being-signal perceived several ticks BEFORE the harm still earns
+/// partial credit, falling with the ticks since it was perceived (the trace's decay), which is what lets a
+/// predator-approach cue perceived at a distance be credited to the harm that follows: the lagged distal
+/// association the same-tick [`being_signal_observation`] cannot form, load-bearing for the predation payoff.
+/// The trace is the perceiver's OWN (recording the being-signals it perceived); the harm bit is its own
+/// [`crate::homeostasis::is_harm_tick`]; nothing reads a species, trophic role, or being-hood. Pure and OFF
+/// the run path (no live caller): the keystone's live wire (step 6) records each perceived being-signal into
+/// the harm-eligibility trace, decays it each tick by the reserved harm eligibility latency, and calls this
+/// on the being's harm bit, so this is byte-neutral by construction. The environmental-feature harm path
+/// ([`feature_observations`]) is UNCHANGED and stays same-tick: only the being-signal path carries the trace.
+pub fn being_signal_trace_observations(
+    trace: &EligibilityTrace,
+    harm: bool,
+    plasticity: Fixed,
+    calib: &HarmLearningCalib,
+) -> Vec<FeatureObservation> {
+    let base = calib.observation_weight();
+    let weight = base.checked_mul(plasticity).unwrap_or(base);
+    trace
+        .entries()
+        .map(|(&subject, &eligibility)| {
+            let credited = weight.checked_mul(eligibility).unwrap_or(Fixed::ZERO);
+            observation_toward(subject, harm, credited)
+        })
+        .collect()
+}
+
 /// The REWARD-frame counterpart of [`being_signal_observation`] (the being-percept keystone, step 2, the
 /// PREDATION pole's learner): a being correlates a perceived being-signal, keyed by its sense `channel` and
 /// discriminated `bucket`, with its OWN reward bit that tick ([`crate::homeostasis::is_reward_tick`], whether
@@ -1306,6 +1337,60 @@ mod tests {
             by,
             Fixed::ZERO,
             "no north-south component for a due-east emitter"
+        );
+    }
+
+    #[test]
+    fn the_harm_eligibility_trace_credits_each_remembered_subject_by_its_decayed_eligibility() {
+        let calib = HarmLearningCalib::dev_default();
+        let recent = being_signal_subject(3, 1);
+        let older = being_signal_subject(3, 2);
+        let mut trace = EligibilityTrace::new();
+        trace.record(older); // perceived first
+        trace.decay(Fixed::from_ratio(1, 2)); // and one tick older now, decayed to 1/2
+        trace.record(recent); // perceived this tick, full eligibility one
+        let base = calib.observation_weight();
+        // On a HARM tick, each remembered being-signal earns a harm observation weighted by base times its
+        // decayed eligibility: the just-perceived signal earns full credit, the distal one less, so a
+        // predator-approach cue perceived a tick before the harm is still credited (the lagged association).
+        let obs = being_signal_trace_observations(&trace, true, Fixed::ONE, &calib);
+        assert_eq!(obs.len(), 2, "one observation per remembered being-signal");
+        assert!(
+            obs.iter().all(|o| o.toward == HARMS),
+            "a harm tick credits toward HARMS"
+        );
+        let recent_obs = obs
+            .iter()
+            .find(|o| o.subject == recent)
+            .expect("recent credited");
+        let older_obs = obs
+            .iter()
+            .find(|o| o.subject == older)
+            .expect("older credited");
+        assert_eq!(
+            recent_obs.weight, base,
+            "the just-perceived signal earns full credit"
+        );
+        assert_eq!(
+            older_obs.weight,
+            base.checked_mul(Fixed::from_ratio(1, 2)).unwrap(),
+            "the distal signal earns decayed credit"
+        );
+        assert!(
+            older_obs.weight < recent_obs.weight,
+            "a more distal perception earns less credit"
+        );
+        // On a harm-free tick the same subjects are credited toward BENIGN.
+        let benign = being_signal_trace_observations(&trace, false, Fixed::ONE, &calib);
+        assert!(
+            benign.iter().all(|o| o.toward == BENIGN),
+            "a harm-free tick credits toward BENIGN"
+        );
+        // An empty trace credits nothing (the byte-neutral opt-out state).
+        assert!(
+            being_signal_trace_observations(&EligibilityTrace::new(), true, Fixed::ONE, &calib)
+                .is_empty(),
+            "an empty trace credits nothing"
         );
     }
 
