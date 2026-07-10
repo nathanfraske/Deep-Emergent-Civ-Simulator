@@ -744,3 +744,18 @@ values = [
   { axis = "therm.conductivity", value = "0.17" },
   { axis = "therm.oxidiser_demand", value = "1.2" },
 ]
+
+# The stroke-rate / limb-biomechanics substrate axis (declared here at the file end so its insertion shifts no
+# existing axis or substance line the registry doc references). Grown per-segment by the body-development
+# program (the staged step-1b increment); read per-body by the strike as the distance the actuating force acts
+# over in one blow.
+[[axis]]
+id = "mech.stroke_length"
+measures = "the distance an actuating force acts over in one stroke, the reach of a power stroke, grown independently of the segment length so the acting-distance-to-length ratio is per-body data rather than a fixed one"
+unit = "m"
+dimension = "length"
+scale = "m"
+tier = 0
+range_lo = "0.001"
+range_hi = "100"
+real = "the work-energy relation, work equals force times distance (Meriam and Kraige, Engineering Mechanics: Dynamics)"

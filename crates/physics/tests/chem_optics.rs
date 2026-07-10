@@ -33,11 +33,11 @@ fn the_chem_optics_floor_loads_onto_the_mechanical_and_fluids_floors() {
     let mut reg = PhysicsRegistry::load(data_path("mechanical_floor.toml")).unwrap();
     reg.extend(data_path("fluids_floor.toml")).unwrap();
     reg.extend(data_path("chem_optics_floor.toml")).unwrap();
-    // 38 mech + 21 fluids + 14 chem/optics axes; 20 + 18 + 11 laws; 2 + 2 + 0 substances.
-    // (fluids gained fluid.moisture_content, Arc 5 T4, the terrain-wetness floor identity.)
+    // 39 mech + 21 fluids + 14 chem/optics axes; 20 + 18 + 11 laws; 2 + 2 + 0 substances.
+    // (mech gained mech.stroke_length, the stroke-rate substrate axis; fluids gained fluid.moisture_content.)
     assert_eq!(
         reg.axis_count(),
-        73,
+        74,
         "the mechanical, fluids, and chem/optics axes"
     );
     assert_eq!(reg.law_count(), 50, "the wave-1 and wave-2 laws");

@@ -1559,15 +1559,20 @@ values = [
 }
 
 #[test]
-fn a_heavy_struck_tool_shatters_rock_a_light_one_of_the_same_shape_cannot_the_mass_payoff() {
-    // The made-world arc, tool-use, Section G, the MASS payoff: a percussion STRIKE swings the wielded tool,
-    // and its kinetic energy (1/2 m v^2 over the tool's own MASS = density times retained volume) fractures
-    // matter whose Griffith energy the blow exceeds. So a HEAVY tool shatters a brittle rock a LIGHT one of the
-    // IDENTICAL shape (same contact area, same volume, same swing) cannot, because it carries more mass into
-    // the same blow, the payoff of the tool carrying its own mass. The two tools differ ONLY in their material
-    // density, so the divergence is the mass, derived, never a per-tool table.
+fn a_miners_actuator_work_fractures_rock_and_a_stronger_actuator_shatters_where_a_weaker_one_cannot(
+) {
+    // The made-world arc, tool-use, Section G, the STROKE-RATE substrate: a percussion STRIKE delivers the
+    // MINER's own ACTUATOR WORK (its strength stress over its cross-section, over its grown stroke, F d), and
+    // that energy fractures matter whose Griffith energy the blow exceeds. The tool CONCENTRATES the blow (its
+    // contact area) but no longer carries the energy: a STRONG-actuator miner shatters a brittle rock a WEAK one
+    // cannot, the payoff derived from the miner's own body, and two tools of DIFFERENT mass but the same shape
+    // shatter identically, the free tool-mass term dropped (the gate-ruled feel-change-for-correctness; the
+    // founded tool-geometry coupling is the arc's flagged follow-on (b)).
+    use civsim_sim::contact_transfer::ContactTransferRegistry;
     use civsim_sim::material::{MaterialField, StrikeParams, WieldedTool};
+    use civsim_sim::morphogen::{Segment, Structure};
     use civsim_sim::physiology::MUSCLE_STRENGTH;
+    use std::collections::BTreeMap;
 
     // A brittle rock: a Griffith fracture energy (1e6 J/m^2) that the heavy blow's delivered energy (400 J over
     // the 1e-4 struck face, so 100 J of resistance) beats but the light blow's (40 J) does not. Two tool
@@ -1634,9 +1639,9 @@ values = [
 "#;
 
     let cell = Coord3::ground(2, 2);
-    // Both tools: identical shape (a 1e-4 struck face, a 1e-3 stock), differing ONLY in substance density. The
-    // iron tool's mass is 8 kg, the pumice tool's 0.8 kg; the same 10 m/s swing delivers 400 J vs 40 J, and the
-    // rock's 100 J Griffith resistance sits between them.
+    // Both tools: identical shape (a 1e-4 struck face), differing ONLY in substance density (iron dense, pumice
+    // light). Under the actuator-work law the tool's mass no longer enters the delivered energy; only its
+    // contact area concentrates the blow (here identical), so the two tools fracture identically.
     let tool = |substance: &str| WieldedTool {
         contact_area: Fixed::from_ratio(1, 10_000),
         volume: Fixed::from_ratio(1, 1_000),
@@ -1644,7 +1649,34 @@ values = [
         substance: substance.to_string(),
     };
 
-    let build = |substance: &str, arm_strike: bool| -> Runner {
+    // The miner's ACTUATOR: a grown Segment whose strength over its cross-section (the force) over its stroke is
+    // the delivered energy (`F d`). A strong actuator (200) delivers 200 over the tool's 1e-4 face, beating the
+    // rock's 100 Griffith resistance (fracture_energy 1e6 over the 1e-4 face); a weak one (50) delivers 50 and
+    // does not. Grown per-body geometry, not a world-global swing speed.
+    let actuator = |strength: Fixed| {
+        let mut geometry = BTreeMap::new();
+        // A 1e-6 m^2 cross-section: a 200 MPa strong actuator is a 200 N force (the stress_force megapascal-to-
+        // newton bridge) over the 1 m stroke = 200 J, above the rock's 100 J resistance; a 50 MPa weak one is
+        // 50 J, below it.
+        geometry.insert(
+            "mech.cross_section_area".to_string(),
+            Fixed::from_ratio(1, 1_000_000),
+        );
+        geometry.insert("mech.stroke_length".to_string(), Fixed::ONE);
+        let mut material = BTreeMap::new();
+        material.insert("mat.fracture_strength".to_string(), strength);
+        Structure {
+            segments: vec![Segment {
+                parent: None,
+                depth: 0,
+                geometry,
+                material,
+                damage: Fixed::ZERO,
+            }],
+        }
+    };
+
+    let build = |substance: &str, strength: Fixed, arm_strike: bool| -> Runner {
         let (mut organs, fat) = energy_registry();
         let muscle = organs.organs.len() as u16;
         organs.organs.push(OrganKindDef {
@@ -1669,7 +1701,8 @@ values = [
             &reg,
             &organs,
             controller,
-        );
+        )
+        .with_structure(actuator(strength));
         walker.wielded = Some(tool(substance));
         emb.add(walker, band(305));
         let mut field = MaterialField::new();
@@ -1691,6 +1724,7 @@ values = [
         ));
         if arm_strike {
             emb.set_strike(StrikeParams::dev_fixture());
+            emb.set_contact_transfer(ContactTransferRegistry::dev_terran());
         }
         Runner::with_embodiment(uniform_field(10, 10, Fixed::from_int(305)), calib(), emb)
     };
@@ -1698,32 +1732,44 @@ values = [
     let carried_rock =
         |r: &Runner| -> Fixed { r.embodiment().unwrap().walkers()[0].carried.volume("rock") };
 
-    // The HEAVY (iron) tool shatters the rock: its blow's energy beats the rock's Griffith resistance.
-    let mut heavy = build("iron", true);
-    heavy
+    // A STRONG-actuator miner shatters the rock: its actuator work (200 over the 1e-4 face) beats the rock's
+    // 100 Griffith resistance. The energy is the MINER's own, derived from its grown body.
+    let mut strong = build("iron", Fixed::from_int(200), true);
+    strong
         .embodiment_mut()
         .unwrap()
         .strike_underfoot(StableId(1));
     assert!(
-        carried_rock(&heavy) > Fixed::ZERO,
-        "a heavy tool's blow shatters the rock and frees it"
+        carried_rock(&strong) > Fixed::ZERO,
+        "a strong actuator's blow shatters the rock and frees it"
     );
 
-    // The LIGHT (pumice) tool of the IDENTICAL shape and swing does NOT: it carries less mass into the same
-    // blow, so its energy falls below the rock's Griffith resistance. The ONLY difference is the mass.
-    let mut light = build("pumice", true);
-    light
+    // A WEAK-actuator miner of the SAME tool does NOT: its actuator work (50) falls below the rock's resistance.
+    // The difference is the MINER's own strength, derived from its body, never the tool's mass.
+    let mut weak = build("iron", Fixed::from_int(50), true);
+    weak.embodiment_mut().unwrap().strike_underfoot(StableId(1));
+    assert_eq!(
+        carried_rock(&weak),
+        Fixed::ZERO,
+        "a weak actuator cannot shatter the rock: the difference is the miner's strength, not the tool's mass"
+    );
+
+    // MASS-INDEPENDENCE: the same strong miner with a LIGHT (pumice) tool of the same shape shatters IDENTICALLY
+    // to the heavy (iron) one. The tool's mass no longer enters the delivered energy (the free mass term
+    // dropped, the gate-ruled feel-change-for-correctness); only its contact area (here identical) concentrates
+    // the blow.
+    let mut light_tool = build("pumice", Fixed::from_int(200), true);
+    light_tool
         .embodiment_mut()
         .unwrap()
         .strike_underfoot(StableId(1));
-    assert_eq!(
-        carried_rock(&light),
-        Fixed::ZERO,
-        "a light tool of the same shape cannot shatter the rock: the difference is the mass"
+    assert!(
+        carried_rock(&light_tool) > Fixed::ZERO,
+        "a light tool shatters the rock just as the heavy one does: the tool's mass no longer carries the energy"
     );
 
-    // OPT-OUT: the same heavy tool on an unarmed world strikes nothing (byte-neutral opt-in).
-    let mut unarmed = build("iron", false);
+    // OPT-OUT: the same strong miner on an unarmed world (no strike params, no transfer registry) strikes nothing.
+    let mut unarmed = build("iron", Fixed::from_int(200), false);
     unarmed
         .embodiment_mut()
         .unwrap()

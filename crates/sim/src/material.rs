@@ -375,29 +375,27 @@ impl WearParams {
     }
 }
 
-/// The reserved parameters of a percussion STRIKE (the made-world arc, tool-use, Section G, the mass payoff).
-/// The mechanism is fixed Rust: a swung tool delivers a kinetic energy ([`civsim_physics::laws::kinetic_energy`],
-/// `1/2 m v^2` over the tool's own mass) that fractures matter whose Griffith energy the blow exceeds
-/// ([`civsim_physics::laws::fracture_onset`]'s energy limb). These are the owner's numbers, surfaced with a
-/// basis, never fabricated (Principle 11).
+/// The reserved parameters of a percussion STRIKE (the made-world arc, tool-use, Section G). The mechanism is
+/// fixed Rust: the acting being's greatest ACTUATOR WORK ([`civsim_physics::laws::actuator_work`], its strength
+/// over its cross-section times its own grown stroke, `F d`) is the delivered energy, which fractures matter
+/// whose Griffith energy the blow exceeds ([`civsim_physics::laws::fracture_onset`]'s energy limb). The
+/// per-being swing speed the delivered energy once rode on is retired: `F`, the cross-section, and the stroke
+/// are read from the acting part's own grown body, so no world-global swing speed remains (the stroke-rate
+/// substrate). Only the representability ceiling stays a reserved number, surfaced with a basis, never
+/// fabricated (Principle 11).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct StrikeParams {
-    /// The characteristic SWING SPEED (m/s) of one muscle-driven blow, the velocity the tool's mass carries
-    /// into the target. RESERVED. Basis: the tip speed a being reaches swinging a hand tool (a mining blow, a
-    /// knapping strike), a kinematics datum set from the being's limb-length and stroke rate; the kinetic
-    /// energy is proportional to its square. Surfaced for the owner, never invented.
-    pub swing_velocity: Fixed,
-    /// The physics energy ceiling the kinetic-energy law saturates at, a representability cap (not a
+    /// The physics energy ceiling the actuator-work law saturates at, a representability cap (not a
     /// behavioural quantity) bounding a single blow's delivered energy to the fixed-point range.
     pub energy_max: Fixed,
 }
 
 impl StrikeParams {
-    /// A labelled DEVELOPMENT FIXTURE: a hand-swing speed and the representability ceiling. Not owner canon; a
-    /// stand-in so the strike step can run until the owner sets the swing speed against its basis.
+    /// A labelled DEVELOPMENT FIXTURE: the representability ceiling. Not owner canon; a stand-in so the strike
+    /// step can run. The delivered energy is now derived from the acting part's own strength, cross-section, and
+    /// grown stroke, so no swing-speed stand-in remains.
     pub fn dev_fixture() -> StrikeParams {
         StrikeParams {
-            swing_velocity: Fixed::from_int(10),
             energy_max: Fixed::from_int(1_000_000),
         }
     }
