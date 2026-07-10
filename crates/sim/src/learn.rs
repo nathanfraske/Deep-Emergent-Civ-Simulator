@@ -494,6 +494,19 @@ pub struct FeatureObservation {
     pub weight: Fixed,
 }
 
+/// Mint one observation on a belief subject: the SHARED minting the environmental-feature learner and the
+/// being-signal learner both call, so a being-signal is minted by the IDENTICAL code path (not a copy),
+/// and the no-special-casing property (Principle 8) holds structurally, not by two inline duplicates
+/// staying in sync. The direction is `HARMS` on a harm tick and `BENIGN` otherwise; nothing but the subject,
+/// the felt sign, and the weight enters.
+fn observation_toward(subject: StableId, harm: bool, weight: Fixed) -> FeatureObservation {
+    FeatureObservation {
+        subject,
+        toward: if harm { HARMS } else { BENIGN },
+        weight,
+    }
+}
+
 /// The observations a being makes this tick: one per PRESENT feature of the cell it stands on
 /// (a channel whose amount is positive), toward `HARMS` if it felt harm this tick and `BENIGN`
 /// otherwise, each weighted by the reserved observation weight scaled by the being's belief plasticity
@@ -509,18 +522,13 @@ pub fn feature_observations(
 ) -> Vec<FeatureObservation> {
     let base = calib.observation_weight();
     let weight = base.checked_mul(plasticity).unwrap_or(base);
-    let toward = if harm { HARMS } else { BENIGN };
     features
         .iter()
         .enumerate()
         .filter(|(_, &amount)| amount > Fixed::ZERO)
         .map(|(channel, &amount)| {
             let bucket = feature_bucket(amount, calib.feature_granularity);
-            FeatureObservation {
-                subject: feature_subject(channel as u16, bucket),
-                toward,
-                weight,
-            }
+            observation_toward(feature_subject(channel as u16, bucket), harm, weight)
         })
         .collect()
 }
@@ -528,27 +536,45 @@ pub fn feature_observations(
 /// The valence observation a being makes of a perceived BEING-SIGNAL (perception-substrate arc, slice 3, the
 /// receiver-side valence learner core): the being correlates the signal, keyed by [`feature_subject`] on the
 /// sense channel and discriminated bucket it perceived, with its own interoceptive harm bit, minting one
-/// weight-of-evidence observation toward [`HARMS`] or [`BENIGN`]. It is the EXACT observation the being
-/// already makes for an environmental feature ([`feature_observations`]); the being-signal is fed through the
-/// identical learner, never branched on as "a being", so a signal's valence emerges receiver-side from the
-/// receiver's own correlated outcomes and is never stamped at the emitter. A being learns another's alarm
-/// call means harm because perceiving it correlated with its own reserves falling, exactly as it learns salty
-/// ground harms it. Pure and OFF the run path (no live caller): the being-percept keystone consumes it, so
-/// this is byte-neutral by construction. The (channel, bucket) come from the sensorium-gated magnitude
-/// percept ([`crate::perception_percept::MagnitudePercept`]); the harm bit is the being's own
+/// weight-of-evidence observation toward [`HARMS`] or [`BENIGN`] through the SHARED [`observation_toward`]
+/// minting the environmental-feature learner also uses. The being-signal is never branched on as "a being",
+/// so a signal's valence emerges receiver-side from the receiver's own correlated outcomes and is never
+/// stamped at the emitter. A being learns another's alarm call means harm because perceiving it correlated
+/// with its own reserves falling, exactly as it learns salty ground harms it. Pure and OFF the run path (no
+/// live caller): the being-percept keystone consumes it, so this is byte-neutral by construction. The
+/// (channel, bucket) come from the sensorium-gated magnitude percept
+/// ([`crate::perception_percept::MagnitudePercept`]); the harm bit is the being's own
 /// [`crate::homeostasis::is_harm_tick`] read; the weight is the existing learner's observation weight scaled
 /// by the being's plasticity.
 ///
-/// RESERVED derive targets, surfaced with basis, deferred by the gate to their own builds (this core reuses
-/// the existing learner and reserves them, so it moves no pin):
+/// Scope of "identical": the MINTING is shared and bit-identical for a given (channel, bucket, harm,
+/// weight). PRESENCE is NOT this core's job: [`feature_observations`] filters absent features (nothing to
+/// correlate), whereas this core mints for whatever (channel, bucket) it is handed, delegating presence to
+/// the upstream percept gate ([`crate::perception_percept::sense`] returns `None` below the being's detection
+/// threshold, so silence and absence do not reach here). The keystone that wires this must pass only a
+/// present, above-threshold percept.
+///
+/// RESERVED derive targets and keystone-wiring seams, surfaced with basis, deferred by the gate to their own
+/// builds (this core reuses the existing learner and reserves them, so it moves no pin):
+/// - SUBJECT NAMESPACE (a keystone-wiring seam, section-9 catch): this mints into the SAME `feature_subject`
+///   band with NO channel-base offset, so a being-signal on sense channel c aliases the environmental biology
+///   feature at index c under the same `HARM_ATTR`, silently merging two distinct HARM beliefs. Environmental
+///   material features already avoid this by offsetting through [`MATERIAL_FEATURE_CHANNEL_BASE`]; the keystone
+///   must offset the being-signal into its OWN disjoint band the same way. Whether a `SenseChannelId` fits the
+///   16-bit channel field, and the offset itself, is the owner-held belief-subject packing decision
+///   (`SEQ_FIELD_BITS` / the belief-subject hash the gate surfaced), so it is flagged here, not decided.
 /// - The evidence WEIGHT's two likelihoods are the existing reserved `p_harm_given_harms`/`p_harm_given_benign`
-///   (never the fixed dev 0.9/0.1). The per-being, per-(channel, bucket) form (the weight-of-evidence of
-///   `P(harm-bit | feature harms)` and `P(harm-bit | benign)` estimated from the being's own
-///   [`civsim_physics::laws::harm_class`] dose-response crossed with its reserve-delta noise distribution) is
-///   the deepest derive target, a build shared with the affordance composer, framed and sequenced separately.
+///   (never the fixed dev 0.9/0.1). Their per-being derived form is the deepest derive target, a build shared
+///   with the affordance composer, framed and sequenced separately. Basis, corrected by the section-9 catch:
+///   a being-signal is a harm PREDICTOR, not a harm CAUSE (the predator harms, not the alarm call), so its
+///   likelihood is NOT a dose-response of the signal (the signal has no dose): it is the receiver's own
+///   EMPIRICAL co-occurrence reliability, the base rate the evidence engine already accumulates. The
+///   [`civsim_physics::laws::harm_class`] dose-response crossed with the reserve-delta noise distribution is
+///   the basis for an environmental harm-CAUSE's detection reliability, a distinct case.
 /// - The harm bit's NOISE FLOOR is a flat authored scalar today; deriving it per-axis from
-///   [`crate::homeostasis::DerivedDrain`], and making the outcome per-axis, is a LIVE-learner behaviour change
-///   (it moves the pins), reserved for the keystone or its own stated-hash piece.
+///   [`crate::homeostasis::DerivedDrain`], and making the outcome per-axis (so a signal harmful on one reserve
+///   and beneficial on another, and an alien with heterogeneous reserves, are distinguished), is a
+///   LIVE-learner behaviour change (it moves the pins), reserved for the keystone or its own stated-hash piece.
 /// - The correlation is SAME-TICK: the harm path carries no eligibility trace. The reward pole's
 ///   `eligibility_decay` on the harm path, which credits a LAGGED co-occurrence (the predator-approach-then-harm
 ///   alarm cue, load-bearing for the predation payoff), is a live behaviour change reserved for the keystone.
@@ -563,11 +589,7 @@ pub fn being_signal_observation(
 ) -> FeatureObservation {
     let base = calib.observation_weight();
     let weight = base.checked_mul(plasticity).unwrap_or(base);
-    FeatureObservation {
-        subject: feature_subject(channel, bucket),
-        toward: if harm { HARMS } else { BENIGN },
-        weight,
-    }
+    observation_toward(feature_subject(channel, bucket), harm, weight)
 }
 
 /// The REWARD observations a being makes this tick (ideation / experiential-discovery arc, piece 1, slice 1a
