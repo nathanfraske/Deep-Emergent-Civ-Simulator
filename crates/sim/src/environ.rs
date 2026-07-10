@@ -309,9 +309,10 @@ pub struct EnvironFields {
     /// would (the min over a singleton). Not folded into `state_hash` like `producer`/`fertility`: its
     /// effect enters through the `capacity` the extract beat shapes.
     producer_source: Vec<Vec<u16>>,
-    /// The standing-food COMPOSITION of the producer on each cell (chemistry arc, T3): the fixed
-    /// per-unit-biomass nutrient simplex (summing to one) a producer's food carries, seeded once from the
-    /// biosphere ([`crate::genesis::WorldGenesis::producer_compositions`]) and normalised here. `None` where
+    /// The standing-food COMPOSITION of the producer on each cell (chemistry arc, T3; magnitudes CORRECTED-T3):
+    /// the fixed per-unit-biomass axis vector a producer's food carries at its REAL magnitudes (no longer a
+    /// sum-to-one simplex, so an energy-dense plant feeds more than a woody one), seeded once from the
+    /// biosphere ([`crate::genesis::WorldGenesis::producer_compositions`]). `None` where
     /// no producer composition is seeded, in which case the standing food is the single `bio.energy_density`
     /// class exactly as before (byte-identical). Where `Some`, `regrow_supply` writes each food axis's supply
     /// as the logistic biomass VOLUME times that axis's density, and reads the remaining volume back as the
@@ -1020,12 +1021,23 @@ impl EnvironFields {
     }
 
     /// Seed the standing-food COMPOSITION of each producer cell from the biosphere (chemistry arc, T3, once at
-    /// world build), normalising the given per-unit-biomass axis vector to a NUTRIENT SIMPLEX (the food axes
-    /// summing to one) so the standing food is the producer's own chemistry scaled by the logistic biomass
-    /// volume. The environmental axes regrow writes itself (water, salinity) are EXCLUDED, so the food
-    /// composition never fights the hydrology write. A composition with no positive food axis seeds nothing
-    /// (the cell keeps the single energy-density default, byte-identical). Off-grid cells dropped; last
-    /// occupant wins on a shared cell. See [`Self::producer_food`].
+    /// world build), carrying the given per-unit-biomass axis vector at its REAL per-axis MAGNITUDES (CORRECTED-T3,
+    /// owner-ruled): the food is NOT normalised to a sum-to-one simplex, so a plant's food value reflects how much
+    /// its own substances actually carry (an energy-dense fruit feeds more per unit biomass than a woody stem),
+    /// rather than every plant reading equally nutritious. A blind panel (verified against source) caught that the
+    /// prior simplex authored a flat 1/total nutrition, and that collapsing instead to a plant-side gross
+    /// energy-density scalar would author digestibility = 1 for every consumer: so the FULL de-normalised VECTOR is
+    /// carried, and the per-consumer usable value EMERGES downstream in [`crate::physiology::physical_intake`],
+    /// which folds this real content against the CONSUMER's own assimilation and trophic efficiency through the
+    /// SAME `bio.energy_density` reserve bridge (keyed on no axis identity, so a mana-fed or silicon being is a
+    /// data row). No fresh UNITS anchor is minted: the existing reserve bridge converts the magnitude, so energy is
+    /// conserved across the eat step. This is the food-value MECHANISM (the units question), distinct from the
+    /// biosphere-BALANCE calibration the `worldbuild.rs` T3 owner-gate still holds (whether the grazers THRIVE on
+    /// these real food values, which the balance work tunes; this foundation makes the value real, it does not
+    /// claim the world thrives). The environmental axes regrow writes itself (water, salinity) are EXCLUDED,
+    /// so the food never fights the hydrology write. A composition with no positive food axis seeds nothing (the
+    /// cell keeps the single energy-density default, byte-identical). Off-grid cells dropped; last occupant wins on
+    /// a shared cell. See [`Self::producer_food`].
     pub fn set_producer_food(&mut self, cells: &[(Coord3, BTreeMap<String, Fixed>)]) {
         for f in self.producer_food.iter_mut() {
             *f = None;
@@ -1035,24 +1047,18 @@ impl EnvironFields {
                 continue;
             }
             let is_food = |a: &str| a != WATER_FRACTION && a != SALINITY;
-            let total = comp
+            // Carry the real per-axis magnitudes (no division by the total): the plant's own chemistry at full
+            // scale, so its food value is what it is materially made of, not a flattened ratio.
+            let food_vec: BTreeMap<String, Fixed> = comp
                 .iter()
                 .filter(|(a, v)| is_food(a) && **v > Fixed::ZERO)
-                .fold(Fixed::ZERO, |acc, (_, v)| acc.saturating_add(*v));
-            if total <= Fixed::ZERO {
+                .map(|(a, v)| (a.clone(), *v))
+                .collect();
+            if food_vec.is_empty() {
                 continue; // no positive food axis: keep the energy-density default
             }
-            let simplex: BTreeMap<String, Fixed> = comp
-                .iter()
-                .filter(|(a, v)| is_food(a) && **v > Fixed::ZERO)
-                .map(|(a, v)| (a.clone(), v.checked_div(total).unwrap_or(Fixed::ZERO)))
-                .filter(|(_, v)| *v > Fixed::ZERO)
-                .collect();
-            if simplex.is_empty() {
-                continue;
-            }
             let i = self.idx(cell.x, cell.y);
-            self.producer_food[i] = Some(simplex);
+            self.producer_food[i] = Some(food_vec);
         }
     }
 
@@ -1837,6 +1843,83 @@ mod tests {
             energy1,
             protein1.checked_mul(Fixed::from_ratio(3, 2)).unwrap(),
             "the food axes stay in the fixed composition ratio after grazing (one volume stock, not N)"
+        );
+    }
+
+    #[test]
+    fn a_more_energy_dense_plant_carries_more_food_value_corrected_t3() {
+        // CORRECTED-T3 (owner-ruled, blind-panel-verified): the standing food carries the plant's REAL
+        // composition magnitude, not a sum-to-one simplex, so an energy-dense plant feeds more per unit biomass
+        // than a poor one. Two cells with the SAME producer biomass (hence the same capacity and regrown volume)
+        // are seeded with single-axis energy-density compositions of DIFFERENT magnitude (2.0 vs 0.5); the food
+        // supply tracks the magnitude ratio (4:1), where the old simplex would have flattened BOTH to 1.0 (every
+        // plant equally nutritious). The per-consumer assimilation still emerges later in physical_intake.
+        let map = a_map(0xF00D53);
+        let temp = Field::from_map(&map);
+        let calib = EnvironCalib::dev_fixture();
+        let rich = Coord3::ground(1, 1);
+        let poor = Coord3::ground(2, 1);
+        let mut e = EnvironFields::from_map(&map);
+        // The same biomass at both cells, so their capacity (and thus regrown volume) is identical.
+        e.set_producer(&[(rich, Fixed::from_int(1)), (poor, Fixed::from_int(1))]);
+        // Single-axis energy-density foods of different magnitude. Under the old simplex both would normalise to
+        // {energy_density: 1.0} and read identically; de-normalised they keep 2.0 and 0.5.
+        let rich_comp: BTreeMap<String, Fixed> = [(ENERGY_DENSITY.to_string(), Fixed::from_int(2))]
+            .into_iter()
+            .collect();
+        let poor_comp: BTreeMap<String, Fixed> =
+            [(ENERGY_DENSITY.to_string(), Fixed::from_ratio(1, 2))]
+                .into_iter()
+                .collect();
+        e.set_producer_food(&[(rich, rich_comp), (poor, poor_comp)]);
+        let mut resource = ResourceField::new();
+        for _ in 0..30 {
+            e.step(&temp, &calib);
+            e.regrow_supply(&mut resource, &calib);
+        }
+        let rich_food = resource.supply(rich, ENERGY_DENSITY);
+        let poor_food = resource.supply(poor, ENERGY_DENSITY);
+        assert!(
+            rich_food > Fixed::ZERO && poor_food > Fixed::ZERO,
+            "both plants carry some food"
+        );
+        // The KEY proof: the energy-dense plant feeds STRICTLY MORE. Under the old simplex both single-axis foods
+        // normalised to {energy_density: 1.0} and these would be EQUAL (the flat nutrition the fix removes); with
+        // the real magnitudes carried, rich (2.0) clearly outfeeds poor (0.5). Both cells share one capacity
+        // (cap 1, asserted below), so the difference is the composition magnitude, nothing else.
+        assert_eq!(
+            e.capacity_at(rich.x, rich.y),
+            e.capacity_at(poor.x, poor.y),
+            "the two cells share one productivity capacity, so only the food magnitude can differ"
+        );
+        assert!(
+            rich_food > poor_food.checked_mul(Fixed::from_int(3)).unwrap(),
+            "the energy-dense plant feeds far more (about 4x) than the poor one: the real magnitude is preserved, \
+             where the old simplex would have made them EQUAL. rich={rich_food:?} poor={poor_food:?}"
+        );
+        // And the ratio tracks the 4:1 density ratio to within fixed-point rounding (the logistic regrowth over
+        // many ticks accrues a sub-part-per-billion drift, so this is a bounded near-equality, not exact).
+        let four_poor = poor_food.checked_mul(Fixed::from_int(4)).unwrap();
+        let drift = (rich_food - four_poor).abs();
+        assert!(
+            drift < Fixed::from_ratio(1, 1_000_000),
+            "the food tracks the 4:1 magnitude ratio within fixed-point rounding: rich={rich_food:?} \
+             4*poor={four_poor:?} drift={drift:?}"
+        );
+        // END TO END: the differentiated supply reaches the CONSUMER's reserve differentiated. Feed each food
+        // to the SAME consumer (identical assimilation, trophic efficiency, body mass, storage density, and
+        // ample room) through the real `physiology::physical_intake` fold: the energy-dense plant banks strictly
+        // more reserve, so the magnitude is not re-flattened between the environ write and the being's reserve.
+        let one = Fixed::from_int(1);
+        let room = Fixed::from_int(1000); // ample, so intake is bounded by the food, not the reserve room
+        let (_, rich_gain) =
+            crate::physiology::physical_intake(rich_food, one, one, one, one, room);
+        let (_, poor_gain) =
+            crate::physiology::physical_intake(poor_food, one, one, one, one, room);
+        assert!(
+            rich_gain > poor_gain,
+            "the energy-dense plant fills the consumer's reserve MORE through physical_intake (the magnitude \
+             survives to the being, not re-flattened): rich_gain={rich_gain:?} poor_gain={poor_gain:?}"
         );
     }
 
