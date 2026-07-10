@@ -2489,13 +2489,17 @@ impl Embodiment {
     ///
     /// FLAGGED FOLLOW-ONS:
     /// (1) the DELIVERED-ENERGY seam (the world-global `swing_velocity`) is RESOLVED by this stroke-rate substrate:
-    /// the delivered energy is now the acting part's own actuator work `F d`, force and stroke read per-body. Two
-    /// staged pieces remain of this arc: growing `mech.stroke_length` and `mech.cross_section_area` in the
-    /// body-development program so grown bodies deliver a non-zero blow, and the per-segment actuation-kind axis
-    /// plus kernel dispatch for a non-rigid (whip, jet, hydrostat) striker;
+    /// the delivered energy is now the acting part's own actuator work `F d`, force and stroke read per-body.
+    /// Step 1b (growing `mech.cross_section_area` and `mech.stroke_length` so grown bodies deliver a non-zero blow)
+    /// is MERGED. Step 2 (in progress, gate-signed-off, owner-decisions R15) generalizes a NON-RIGID striker (an
+    /// elastic recoil, a hydraulic jet) through the run-all-gate-to-zero delivered-energy kernel set
+    /// ([`crate::contact_transfer::resolve_delivered_energy`]), each kernel gated on the part's own continuous grown
+    /// axes, so a non-rigid striker is an emergent DESCRIPTION of which axes are nonzero, NOT a grown categorical
+    /// actuation-kind selector (that shape was rejected by the frame-blind as the template case);
     /// (2) the tool-geometry mass-payoff (a heavier or longer wielded tool affording a longer stroke or higher
-    /// sustainable force) is the owner-ruled additive follow-on (b), dropping into the `acting_force_and_stroke`
-    /// seam over the SAME `F d` law, coupled to the wielded-tool path;
+    /// sustainable force) is the owner-ruled additive follow-on (b), dropping in at the CALLER (which holds the
+    /// wielded tool) by wrapping the `geo`/`mat` accessors it passes to `resolve_delivered_energy` to add the
+    /// tool's stroke on the stroke axis, an additive read over the SAME `F d` law, coupled to the wielded-tool path;
     /// (3) an area-weighted stochastic scatter over co-located targets and their Segments, and true aim geometry,
     /// coupled to the spatial-body-layout arc.
     pub fn strike_occupant(&mut self, walker_id: StableId) -> Fixed {

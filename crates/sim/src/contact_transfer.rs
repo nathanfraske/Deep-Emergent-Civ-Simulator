@@ -30,9 +30,11 @@
 //! What a kernel READS is the acting part's own data. The kinetic kernel reads the part's actuating force (its
 //! strength stress over its cross-section) and its stroke distance (its own grown `mech.stroke_length`), so a
 //! stronger, thicker, or longer-stroked part delivers more energy, keyed on the being's own body, never a
-//! per-species number and never a world-global swing speed. The caller derives the force and stroke from the
-//! axes the row declares and passes them (as [`crate::perception_reach::resolve_reach`] takes the emitted power
-//! as a parameter), so this substrate stays a pure law dispatch with no body-representation dependency.
+//! per-species number and never a world-global swing speed. The resolve reads those grown values through the
+//! `geo`/`mat` ACCESSOR closures the caller passes (an axis id to its grown value, the same closure form
+//! [`civsim_compose::derive_capabilities`] reads a part's function through) and derives the force and stroke
+//! itself, so the substrate stays a pure law dispatch keyed on axis-id strings with no dependency on the body's
+//! representation type (it reads axis-id-to-value closures, never a concrete body struct).
 
 use std::collections::BTreeMap;
 
