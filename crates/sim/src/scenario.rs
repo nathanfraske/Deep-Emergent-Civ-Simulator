@@ -155,6 +155,15 @@ pub struct ScenarioFeatures {
     /// only when the world builds an embodiment; a disembodied world ignores it.
     #[serde(default)]
     pub tools: bool,
+    /// Arm the BEING-PERCEPT feature on the embodiment (the being-percept keystone, step 6): each being
+    /// perceives the other beings whose own thermal emission reaches it above its own detection threshold and
+    /// senses the direction toward believed-rewarding emitters and away from believed-harmful ones, so
+    /// predation and fleeing can emerge through the controller's founder-zero freely-signed weight. Read only
+    /// when the world builds an embodiment with a physiology (the emission reads the being's body heat); a
+    /// disembodied world ignores it. Reads the reserved emission coupling and harm eligibility decay fail-loud
+    /// from the manifest at the feature arming.
+    #[serde(default)]
+    pub being_percept: bool,
 }
 
 /// A parsed scenario: the data-of-record for a test world.
