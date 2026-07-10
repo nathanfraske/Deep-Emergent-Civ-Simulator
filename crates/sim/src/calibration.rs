@@ -576,12 +576,14 @@ source = "test fixture"
     }
 
     #[test]
-    fn the_real_manifest_has_no_invalid_category_the_born_categorized_gate() {
+    fn the_real_manifest_is_fully_born_categorized() {
         // The born-categorized CI gate (AGENTIC_ADDENDUM section 9): every entry in the real manifest carries
-        // a valid three-way-test category or none (UNCLASSIFIED during migration). A mislabel (a non-empty
-        // category that is not one of the four) fails validate_categories, so it fails the build. During
-        // migration some entries may still be UNCLASSIFIED (the per-entry sweep closes that remainder); the
-        // gate here is that none is INVALID.
+        // a VALID three-way-test category (a mislabel, a non-empty value that is not one of the four, fails
+        // validate_categories, so it fails the build) AND a NON-EMPTY one (the per-entry census sweep has
+        // landed, so no entry is UNCLASSIFIED). The mechanism itself stays additive: an absent field loads as
+        // UNCLASSIFIED without erroring, so an in-flight #120/#123 entry does not panic at load. This CI gate
+        // is what makes "every entry born categorized" real: it catches a dropped `category` field or a
+        // reverted sweep that the additive loader would otherwise tolerate silently.
         let m = CalibrationManifest::load(concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/../../calibration/reserved.toml"
@@ -590,7 +592,10 @@ source = "test fixture"
         let unclassified = m.validate_categories().expect(
             "every category string in the real manifest must be valid (a mislabel fails the build)",
         );
-        assert!(unclassified.len() <= m.len());
+        assert!(
+            unclassified.is_empty(),
+            "every entry must be born categorized; these are still UNCLASSIFIED: {unclassified:?}"
+        );
     }
 
     #[test]
