@@ -185,11 +185,79 @@ impl StatedQuantity {
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize)]
 pub struct UnitId(pub u32);
 
+/// A provenance kind's identity: an interned id into the open [`ProvenanceKindRegistry`].
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize)]
+pub struct ProvenanceKindId(pub u32);
+
+/// The open, data-driven set of kinds a unit's provenance can be. The membership is data, not a
+/// closed Rust enum, so a culture can coin a unit from anything: a forearm, a stride, a seed, a
+/// vessel, a celestial cycle, or, for an alien people, a mana tide's reach or a redox front's
+/// advance, each a data row rather than a code change. This is the substrate treatment the value,
+/// semantic, institution-function, and access-channel registries already carry, applied to unit
+/// provenance so the emic layer admits the alien as data (the input-audit catch). The mechanism is
+/// fixed; the kinds are the world's data.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct ProvenanceKindRegistry {
+    names: Vec<String>,
+}
+
+impl ProvenanceKindRegistry {
+    /// An empty registry.
+    pub fn new() -> ProvenanceKindRegistry {
+        ProvenanceKindRegistry::default()
+    }
+
+    /// Register a provenance kind by name, returning its ordered id. A repeat of an existing name
+    /// returns the existing id rather than duplicating, so the set stays canonical.
+    pub fn register(&mut self, name: &str) -> ProvenanceKindId {
+        if let Some(id) = self.id_of(name) {
+            return id;
+        }
+        let id = self.names.len() as u32;
+        self.names.push(name.to_string());
+        ProvenanceKindId(id)
+    }
+
+    /// The name of a provenance kind.
+    pub fn name_of(&self, id: ProvenanceKindId) -> Option<&str> {
+        self.names.get(id.0 as usize).map(|s| s.as_str())
+    }
+
+    /// The id of a provenance kind by name.
+    pub fn id_of(&self, name: &str) -> Option<ProvenanceKindId> {
+        self.names
+            .iter()
+            .position(|n| n == name)
+            .map(|i| ProvenanceKindId(i as u32))
+    }
+
+    /// The number of registered kinds.
+    pub fn len(&self) -> usize {
+        self.names.len()
+    }
+
+    /// Whether the registry is empty.
+    pub fn is_empty(&self) -> bool {
+        self.names.is_empty()
+    }
+}
+
+/// What a people derived a unit from: an open provenance-kind id and a free descriptor of the
+/// specific referent (which forearm, which star's cycle, which vessel). The kind is drawn from the
+/// open [`ProvenanceKindRegistry`], never a closed enum, so an origin the crate never anticipated
+/// is a data row. The referent is the culture's own descriptor of the concrete thing.
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub struct UnitOrigin {
+    /// The kind of thing the unit came from, an id into the open provenance registry.
+    pub kind: ProvenanceKindId,
+    /// The specific referent, the culture's own descriptor (free data).
+    pub referent: String,
+}
+
 /// One of a culture's own named units: its dimension (the built data-driven exponent vector, not a
-/// closed dimension enum), its exact-rational conversion to the absolute base, and the name the
-/// people gave it. The unit's provenance (what the people derived it from) is added in the
-/// open-provenance hardening, so this struct stays the emic layer's data row, not an authored
-/// taxonomy of unit kinds.
+/// closed dimension enum), its exact-rational conversion to the absolute base, the name the people
+/// gave it, and its open provenance (what they derived it from). The struct stays the emic layer's
+/// data row, not an authored taxonomy of unit kinds.
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct EmicUnit {
     /// The dimension this unit measures, as the crate's canonical exponent vector.
@@ -198,6 +266,8 @@ pub struct EmicUnit {
     pub factor: UnitFactor,
     /// The culture's own name for the unit.
     pub name: String,
+    /// What the people derived the unit from, an open provenance reference.
+    pub origin: UnitOrigin,
 }
 
 /// A culture's measurement system: the ordered store of its own units. Units are held in
@@ -413,6 +483,10 @@ mod tests {
             dimension: crate::Dimension::base(0),
             factor: UnitFactor::new(num, den).unwrap(),
             name: name.to_string(),
+            origin: UnitOrigin {
+                kind: ProvenanceKindId(0),
+                referent: "a forearm".to_string(),
+            },
         }
     }
 
@@ -479,5 +553,38 @@ mod tests {
         let mut ms = MeasurementSystem::new();
         ms.register(unit("cubit", 4572, 10000));
         ms.register(unit("cubit", 1, 2));
+    }
+
+    #[test]
+    fn the_provenance_registry_is_open_and_admits_the_alien() {
+        // A Terran people coins a length from a forearm and a time from a moon's cycle; an alien
+        // people coins a length from a mana tide's reach. All three are registered kinds, data rows
+        // in the same open registry, not code the crate had to anticipate. That is the seam the
+        // input-audit caught: provenance is data, so the alien is a data row.
+        let mut reg = ProvenanceKindRegistry::new();
+        let forearm = reg.register("body-part");
+        let moon = reg.register("celestial-cycle");
+        let mana = reg.register("mana-tide"); // an origin the crate never enumerated
+        assert_eq!(reg.len(), 3);
+        assert_ne!(forearm, mana);
+        // Registering an existing kind returns the existing id, so the set stays canonical.
+        assert_eq!(reg.register("body-part"), forearm);
+        assert_eq!(reg.len(), 3);
+        assert_eq!(reg.name_of(moon), Some("celestial-cycle"));
+
+        // A unit coined from the alien origin is an ordinary EmicUnit, no special case.
+        let mut ms = MeasurementSystem::new();
+        let tide_span = EmicUnit {
+            dimension: crate::Dimension::base(0),
+            factor: UnitFactor::new(7, 3).unwrap(),
+            name: "tide-span".to_string(),
+            origin: UnitOrigin {
+                kind: mana,
+                referent: "the third mana tide".to_string(),
+            },
+        };
+        let id = ms.register(tide_span);
+        assert_eq!(ms.get(id).unwrap().origin.kind, mana);
+        assert_eq!(ms.get(id).unwrap().origin.referent, "the third mana tide");
     }
 }
