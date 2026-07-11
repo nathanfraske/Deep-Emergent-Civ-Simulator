@@ -195,7 +195,10 @@ impl AffordancePerceptKind {
                         .unwrap_or(Fixed::ZERO)
                 };
                 let caps = CapabilityCaps::derive(reg);
-                CapabilityKernel::Pierce.capability(&geo, &mat, &refs.capability, &caps)
+                // Pierce reads its hardcoded contract axes, so it ignores the data-declared axis bindings (only
+                // the IMPACT kernel reads them, the delivery-path parallel); empty bindings are the read-hardcoded
+                // default and keep this direct call byte-identical.
+                CapabilityKernel::Pierce.capability(&geo, &mat, &refs.capability, &caps, &[], &[])
             }
         }
     }
@@ -263,10 +266,14 @@ pub fn tool_capability(
 ) -> Fixed {
     let fns = FunctionLawRegistry::dev_seed();
     let contact_area = tool.contact_area;
-    // The tool's MASS is the extensive datum (its retained volume times its substance density) that a
-    // percussion IMPACT read needs and the registry's intensive axes cannot supply; exposed to the capability
-    // dispatch as `mech.mass` (the made-world arc, the tool-geometry expansion, GATE 2), so a HEAVY tool reads
-    // an impact a light one does not, by physics. Derived, never stored.
+    // The tool's MASS is the extensive datum (its retained volume times its substance density), exposed to the
+    // capability dispatch as `mech.mass`. FLAGGED PRE-EXISTING SEAM (a section-9 catch, stroke-rate step 2): this
+    // was the input the old mass-based IMPACT read, but stroke-rate STEP 1 retired that and made the IMPACT kernel
+    // read the actuator's `mech.cross_section_area`/`mech.stroke_length` instead, which this closure does NOT
+    // expose, so `mech.mass` is now read by no capability kernel and this `mass` is DEAD. Kept (not removed) with
+    // the seam flagged on [`crate::homeostasis::POUND`]: the fix is to gate a tool's percussion on the WIELDER's
+    // delivered energy concentrated over the tool's contact area, not the tool's own (absent) actuator, a design
+    // ruling owed to the gate. Removing the dead read is deferred to that fix so this slice stays scoped.
     let mass = tool.mass(reg);
     let geo = |axis: &str| {
         if axis == AXIS_CONTACT_AREA {

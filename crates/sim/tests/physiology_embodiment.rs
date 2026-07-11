@@ -5062,13 +5062,6 @@ value = "100"
 unit = "kg"
 source = "test"
 [[reserved]]
-id = "metabolism.stefan_boltzmann"
-basis = "fixture"
-status = "set"
-value = "0.0000000567"
-unit = "sigma"
-source = "test"
-[[reserved]]
 id = "metabolism.respiration_transfer_coefficient"
 basis = "fixture"
 status = "set"

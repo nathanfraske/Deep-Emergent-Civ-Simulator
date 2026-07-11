@@ -36,10 +36,19 @@
 //! What this crate deliberately does not contain: any base dimension, any quantity,
 //! or any scale. Those are the authored physics catalogue and the owner's reserved
 //! values; the tests use a small fixture catalogue, clearly marked as a fixture and
-//! not the authored set.
+//! not the authored set. The one exception is the [`fundamentals`] module: the closed
+//! table of CODATA fundamental constants, which ARE the one authored universal layer
+//! the value-authoring line permits (distinct from any owner or per-world value).
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+
+pub mod bignum;
+pub mod compute;
+pub mod fundamentals;
+pub mod guard;
+pub mod plan;
+pub mod tier2;
 
 /// An exponent on a base dimension. Small signed integer; real physical dimensions
 /// stay well within this range.
@@ -333,8 +342,9 @@ impl AbsoluteQuantity {
 }
 
 /// Integer division rounded to nearest, ties to even, for a positive divisor. The
-/// same rule the canonical quantizer uses, so rescaling is deterministic.
-fn idiv_round_half_even(num: i128, den: i128) -> i128 {
+/// same rule the canonical quantizer uses, so rescaling is deterministic. Shared with the
+/// Tier-2 scaled arithmetic (`crate::tier2`), which rounds ONCE per result through it.
+pub(crate) fn idiv_round_half_even(num: i128, den: i128) -> i128 {
     debug_assert!(den > 0);
     let q = num.div_euclid(den);
     let r = num.rem_euclid(den);

@@ -134,23 +134,90 @@ pub struct MetabolicAnchors {
     /// The kilograms a body carries at `body_mass = 1` (the normalized-trait-to-kilograms bridge). An
     /// R-UNITS-PIN bridge, NOT derivable. RESERVED owner anchor.
     pub body_mass_kg_scale: Fixed,
-    /// The Stefan-Boltzmann constant sigma (W/(m^2*K^4)), a universal physical constant passed like the
-    /// other physics constants the radiant law reads. RESERVED (a CODATA constant, an authored
-    /// Principle-9 physics affordance).
+    /// The Stefan-Boltzmann constant sigma (W/(m^2*K^4)), a universal physical constant. DERIVED from the
+    /// CODATA fundamentals ([`derived_stefan_boltzmann`]), not an authored decimal and not a reserved
+    /// manifest value: the same in every profile, computed once at load.
     pub sigma: Fixed,
+    /// The same Stefan-Boltzmann sigma at its FULL derived scale (the fine `(bits, scale)`), which the Tier-2
+    /// radiant heat-loss lift consumes so sigma enters at full precision rather than the Q32.32 truncation
+    /// [`sigma`](Self::sigma) carries. Derived from the same fundamentals, never authored.
+    pub sigma_fine_bits: i64,
+    pub sigma_fine_scale: u32,
+}
+
+/// The global significance target and guard for the composite-constant fixed-point scale derivation
+/// (R-UNITS-PIN). They set the INTERMEDIATE per-quantity scale a composite is derived at. At the shipped
+/// values (30, 1) the value the sim consumes (sigma at Q32.32) is invariant to them, locked by the test
+/// `derived_stefan_boltzmann_is_the_expected_q32_bits`; they are fixed-point REPRESENTATION knobs (the family
+/// of the canonical `FRAC_BITS`), not world values. The invariance is NOT universal, though: an extreme
+/// retune (a large guard, or a significance target that drives the intermediate scale below the canonical
+/// bits) can perturb the consumed value, so a retune MUST re-verify the four run_world pins rather than
+/// treat these as inconsequential. Surfaced for the owner (reserved-with-basis in the decisions log). Basis:
+/// resolve a CODATA composite's ~10 significant figures. NOW LIVE (the previously-flagged follow-on is
+/// realized, R-UNITS-PIN slice 4): [`derived_stefan_boltzmann_fine`] consumes sigma at its fine scale in the
+/// Tier-2 radiant lift, so these knobs set how many significant bits of sigma reach the radiant term (the
+/// fine-scale sigma differs from the old Q32.32 value, ~0.19% at body temperatures). They still sit inside the
+/// Principle-11 representation exemption (they set how precisely the exact derived sigma is stored, not WHAT
+/// sigma is), and the four pins were re-verified byte-neutral after the lift because that fidelity change
+/// stays below the downstream discretization; a retune MUST re-verify the pins, now doubly so.
+const COMPOSITE_SIG_TARGET: u32 = 30;
+const COMPOSITE_GUARD_BITS: u32 = 1;
+
+/// The Stefan-Boltzmann constant sigma DERIVED from the fundamentals, never an authored decimal: the
+/// units-crate composite compute evaluates `2*pi^5*k_B^4/(15*h^3*c^2)` EXACTLY as a rational (pi by a
+/// deterministic series, no float) and rounds ONCE to sigma's derived scale, and this projects it to the
+/// sim's Q32.32 `Fixed`. A one-time, float-free, deterministic load computation, so it perturbs no canonical
+/// result; every sigma anchor reads this one derivation. Memoized because the value is a pure constant.
+pub fn derived_stefan_boltzmann() -> Fixed {
+    use std::sync::OnceLock;
+    static SIGMA: OnceLock<Fixed> = OnceLock::new();
+    *SIGMA.get_or_init(|| {
+        let (bits, scale) = derived_stefan_boltzmann_fine();
+        let q32 = civsim_units::rescale_bits(bits, scale, Fixed::FRAC_BITS)
+            .expect("sigma rescale to Q32.32 must not overflow");
+        Fixed::from_bits(q32)
+    })
+}
+
+/// The Stefan-Boltzmann sigma at its FULL derived scale, the fine `(bits, scale)` pair the units composite
+/// compute produces BEFORE the Q32.32 projection [`derived_stefan_boltzmann`] applies. This is the value the
+/// Tier-2 radiant lift ([`civsim_physics::laws::radiant_emission_tier2`]) consumes, so sigma enters the
+/// radiant heat-loss term at its ~31-bit mantissa rather than the roughly eight-bit Q32.32 truncation. A
+/// pure, float-free, memoized load constant, the same derivation [`derived_stefan_boltzmann`] reads.
+pub fn derived_stefan_boltzmann_fine() -> (i64, u32) {
+    use std::sync::OnceLock;
+    static SIGMA_FINE: OnceLock<(i64, u32)> = OnceLock::new();
+    *SIGMA_FINE.get_or_init(|| {
+        let (bits, scale) = civsim_units::compute::derived_composite_bits(
+            &civsim_units::fundamentals::STEFAN_BOLTZMANN,
+            COMPOSITE_SIG_TARGET,
+            COMPOSITE_GUARD_BITS,
+            Fixed::FRAC_BITS,
+        )
+        .expect("the Stefan-Boltzmann sigma must derive from the fundamentals");
+        (
+            i64::try_from(bits).expect("sigma at its derived scale fits i64"),
+            scale,
+        )
+    })
 }
 
 impl MetabolicAnchors {
     /// The anchors read from the calibration manifest, fail-loud if any is still reserved (Principle 11,
     /// the reserved-value discipline). This is the sanctioned way to obtain the anchors on a canonical
-    /// run; there is no default, so an unset value refuses to run rather than fabricating a number.
+    /// run; there is no default, so an unset value refuses to run rather than fabricating a number. Sigma is
+    /// no longer read here: it DERIVES from the fundamentals ([`derived_stefan_boltzmann`]), the same in
+    /// every profile, so it is never a reserved manifest value.
     pub fn from_manifest(
         manifest: &CalibrationManifest,
     ) -> Result<MetabolicAnchors, CalibrationError> {
+        let (sigma_fine_bits, sigma_fine_scale) = derived_stefan_boltzmann_fine();
         Ok(MetabolicAnchors {
             kleiber_a: manifest.require_fixed("metabolism.kleiber_coefficient")?,
             body_mass_kg_scale: manifest.require_fixed("metabolism.body_mass_kg_scale")?,
-            sigma: manifest.require_fixed("metabolism.stefan_boltzmann")?,
+            sigma: derived_stefan_boltzmann(),
+            sigma_fine_bits,
+            sigma_fine_scale,
         })
     }
 
@@ -161,10 +228,13 @@ impl MetabolicAnchors {
     /// ([`crate::medium::MediumField::convective_at`]). For tests and examples only; a canonical run reads
     /// [`MetabolicAnchors::from_manifest`].
     pub fn dev_fixture() -> MetabolicAnchors {
+        let (sigma_fine_bits, sigma_fine_scale) = derived_stefan_boltzmann_fine();
         MetabolicAnchors {
             kleiber_a: Fixed::from_ratio(1, 100),
             body_mass_kg_scale: Fixed::from_int(100),
-            sigma: Fixed::from_ratio(567, 10_000_000_000),
+            sigma: derived_stefan_boltzmann(),
+            sigma_fine_bits,
+            sigma_fine_scale,
         }
     }
 }
@@ -438,13 +508,23 @@ pub fn covering_emissivity(plan: &BodyPlan, registry: &BodyPlanRegistry) -> Fixe
 /// [`FLUX_MAX`] representability cap applies to the final emission, matching the ruled
 /// `radiant_emission(body_temp) * coefficient` (emissivity is that law's linear scale, so folding the
 /// coefficient into it is that product with the cap correctly on the result). Pure and RNG-free.
-pub fn being_signal_emission(body_temp: Fixed, coefficient: Fixed, sigma: Fixed) -> Fixed {
-    laws::radiant_emission(
+pub fn being_signal_emission(
+    body_temp: Fixed,
+    coefficient: Fixed,
+    sigma_bits: i64,
+    sigma_scale: u32,
+) -> Fixed {
+    // Sigma at its full derived scale (the Tier-2 lift, R-UNITS-PIN slice 4): the perceived thermal signal
+    // `sigma * body_temp^4 * coefficient` now carries sigma at full precision instead of the Q32.32 truncation,
+    // its `sigma * body_temp^4` term computed in one wide accumulator and rounded once. `t_cold` is zero (the
+    // absolute radiance), so this signal is non-zero for any warm body and IS surfaced on the pinned paths.
+    laws::radiant_emission_tier2(
         coefficient,
         Fixed::ONE,
         body_temp,
         Fixed::ZERO,
-        sigma,
+        sigma_bits,
+        sigma_scale,
         FLUX_MAX,
     )
 }
@@ -512,7 +592,8 @@ pub fn base_drain_from(
         setpoint,
         ambient_temp,
         emissivity,
-        anchors.sigma,
+        anchors.sigma_fine_bits,
+        anchors.sigma_fine_scale,
         FLUX_MAX,
     );
     // The reserve's energy-storing mass: the anatomy-derived reserve capacity scaled to the body's
@@ -732,22 +813,22 @@ mod tests {
         // The emitter side of the being-percept keystone: a being's perceptible signal is its own thermal
         // self-emission (Stefan-Boltzmann off its body temperature) times a reserved coupling coefficient,
         // so it keys on the being's OWN temperature, never a per-species signature.
-        let sigma = MetabolicAnchors::dev_fixture().sigma;
+        let (sigma_bits, sigma_scale) = derived_stefan_boltzmann_fine();
         let coeff = Fixed::from_ratio(1, 2);
 
         // A body at absolute zero emits nothing: no thermal signal to perceive (a cold ambusher, a corpse
         // that has cooled to ambient-zero). The signal is the being's own radiance, so zero temperature is
         // zero emission.
         assert_eq!(
-            being_signal_emission(Fixed::ZERO, coeff, sigma),
+            being_signal_emission(Fixed::ZERO, coeff, sigma_bits, sigma_scale),
             Fixed::ZERO,
             "a body at absolute zero emits no thermal signal"
         );
 
         // A warmer body emits a stronger signal than a cooler one (the T^4 dependence): a warm predator is
         // more perceptible than a cool one, and this divergence is temperature alone, no label.
-        let cool = being_signal_emission(Fixed::from_int(280), coeff, sigma);
-        let warm = being_signal_emission(Fixed::from_int(310), coeff, sigma);
+        let cool = being_signal_emission(Fixed::from_int(280), coeff, sigma_bits, sigma_scale);
+        let warm = being_signal_emission(Fixed::from_int(310), coeff, sigma_bits, sigma_scale);
         assert!(
             warm > cool && cool > Fixed::ZERO,
             "a warmer body emits a stronger thermal signal (T^4 dependence)"
@@ -757,8 +838,18 @@ mod tests {
         // same temperature (monotone in the coefficient), so the reserved value means what its basis says.
         // Monotone rather than exact-double because a half-scale fixed-point multiply truncates by up to one
         // ULP; the lever's DIRECTION is the load-bearing property, not bit-exact linearity.
-        let quarter = being_signal_emission(Fixed::from_int(300), Fixed::from_ratio(1, 4), sigma);
-        let half = being_signal_emission(Fixed::from_int(300), Fixed::from_ratio(1, 2), sigma);
+        let quarter = being_signal_emission(
+            Fixed::from_int(300),
+            Fixed::from_ratio(1, 4),
+            sigma_bits,
+            sigma_scale,
+        );
+        let half = being_signal_emission(
+            Fixed::from_int(300),
+            Fixed::from_ratio(1, 2),
+            sigma_bits,
+            sigma_scale,
+        );
         assert!(
             half > quarter && quarter > Fixed::ZERO,
             "a larger reserved coefficient yields a stronger emission (the coupling lever)"
@@ -767,8 +858,8 @@ mod tests {
         // Deterministic: identical inputs give the identical bit-exact emission (Principle 3), the run path's
         // requirement for a reproducible perceive phase.
         assert_eq!(
-            being_signal_emission(Fixed::from_int(305), coeff, sigma),
-            being_signal_emission(Fixed::from_int(305), coeff, sigma),
+            being_signal_emission(Fixed::from_int(305), coeff, sigma_bits, sigma_scale),
+            being_signal_emission(Fixed::from_int(305), coeff, sigma_bits, sigma_scale),
             "the emission is a pure deterministic read of temperature and the coefficient"
         );
     }
@@ -1430,17 +1521,13 @@ status = "set"
 value = "100"
 unit = "kg"
 source = "test"
-[[reserved]]
-id = "metabolism.stefan_boltzmann"
-basis = "fixture"
-status = "set"
-value = "0.0000000567"
-unit = "sigma"
-source = "test"
 "#;
         let m = CalibrationManifest::from_toml_str(set).unwrap();
         let a = MetabolicAnchors::from_manifest(&m).unwrap();
         assert_eq!(a.body_mass_kg_scale, Fixed::from_int(100));
+        // Sigma is no longer a manifest key: it DERIVES from the fundamentals regardless of the
+        // profile, so from_manifest reads no stefan_boltzmann key and returns the derived value.
+        assert_eq!(a.sigma, derived_stefan_boltzmann());
         // The shipped anchors are reserved (empty), so a from_manifest read fails loud rather than
         // fabricating a number.
         let reserved = set.replace(
@@ -1452,6 +1539,15 @@ source = "test"
             MetabolicAnchors::from_manifest(&mr).unwrap_err(),
             CalibrationError::Reserved("metabolism.kleiber_coefficient".to_string()),
         );
+    }
+
+    #[test]
+    fn derived_stefan_boltzmann_is_the_expected_q32_bits() {
+        // Lock the CONSUMED sigma to its Q32.32 bits (244 x 2^-32), the round-half-even nearest of the true
+        // CODATA sigma. Sigma folds into the metabolic drain (base_drain_from's radiant term) and thus into
+        // the four run_world pins, so any change here (a compute change, or a retune of the representation
+        // knobs that perturbs the consumed value) FAILS this test loudly rather than silently moving a pin.
+        assert_eq!(derived_stefan_boltzmann(), Fixed::from_bits(244));
     }
 
     #[test]

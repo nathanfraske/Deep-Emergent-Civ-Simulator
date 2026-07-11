@@ -951,7 +951,7 @@ status = "reserved"
 value = ""
 unit = "practitioners"
 source = "Parts 20, 23, 25 transmission; Part 41 compose.transmission_stability; crates/sim/src/transmission.rs"
-category = "derivable"
+category = "per_world"
 
 # --- R-TIER-CONSIST: tier consistency (Part 54, record 62.9) ---
 
@@ -1367,7 +1367,7 @@ category = "per_world"
 
 [[reserved]]
 id = "physiology.base_metabolic_drain"
-basis = "DERIVE (R-METABOLIZE, derive audit): the resting per-tick energy drain is no longer an authored per-axis fraction. It DERIVES through physiology::derive_base_drain (crates/sim/src/physiology.rs) as the Kleiber basal rate laws::basal_metabolic_rate(a*mass^0.75, the exact two-sqrt fixed-point identity) plus the thermoregulatory heat loss laws::resting_heat_loss (convective_flux + radiant_emission over the whole-body convective surface), bridged to a fraction of the reserve's stored energy by laws::metabolic_drain_fraction. So two bodies diverge in resting drain from their mass, tissue, medium, and temperature alone, not a hardcoded number. The reserved inputs are the metabolism.* owner anchors below (the Kleiber coefficient, the kilogram bridge, the medium coefficient, the emissivity, and sigma); the drain fraction itself is a derived read, kept a fail-loud DERIVE sentinel rather than an authored value."
+basis = "DERIVE (R-METABOLIZE, derive audit): the resting per-tick energy drain is no longer an authored per-axis fraction. It DERIVES through physiology::derive_base_drain (crates/sim/src/physiology.rs) as the Kleiber basal rate laws::basal_metabolic_rate(a*mass^0.75, the exact two-sqrt fixed-point identity) plus the thermoregulatory heat loss laws::resting_heat_loss (convective_flux + radiant_emission over the whole-body convective surface), bridged to a fraction of the reserve's stored energy by laws::metabolic_drain_fraction. So two bodies diverge in resting drain from their mass, tissue, medium, and temperature alone, not a hardcoded number. The reserved inputs are the metabolism.* owner anchors below (the Kleiber coefficient and the kilogram bridge); the medium coefficient, the emissivity, and sigma each DERIVE (sigma from the CODATA fundamentals, units / R-UNITS-PIN), not reserved. The drain fraction itself is a derived read, kept a fail-loud DERIVE sentinel rather than an authored value."
 status = "reserved"
 value = ""
 unit = "fraction_of_capacity_per_tick"
@@ -1511,17 +1511,6 @@ source = "Part 8, Part 54; crates/sim/src/evolve.rs"
 category = "per_world"
 
 [[reserved]]
-id = "behavior.selection_generations"
-basis = "the number of generations behaviour is allowed to adapt before the dawn; set equal to the pre-dawn radiation depth (biosphere.predawn_generations = 40) for consistency, so adaptation depth tracks the deep-time radiation the biosphere already runs, rather than an independent figure"
-status = "set"
-value = "40"
-set_by = "Nathan M. Fraske"
-set_date = "2026-07-03"
-unit = "generations"
-source = "Part 8, Part 25; crates/sim/src/evolve.rs"
-category = "per_world"
-
-[[reserved]]
 id = "behavior.episode_ticks"
 basis = "the length in ticks of a homeostatic-survival scoring episode; long enough that a viable controller's survival separates from an unviable one under the metabolic timescale, against the evaluation budget (a proxy-versus-episode length on the Part 54 significance gradient)"
 status = "set"
@@ -1531,6 +1520,14 @@ set_date = "2026-07-03"
 unit = "ticks"
 source = "Part 8, Part 54; crates/sim/src/evolve.rs"
 category = "per_world"
+
+# RETIRED (units-arc bridge, derive-vs-author, Principle 6): `behavior.selection_generations` (the generations
+# behaviour adapts before the dawn) now DERIVES from `biosphere.predawn_generations`: its own basis declared
+# it set equal to the pre-dawn radiation depth so adaptation depth tracks the deep-time radiation the
+# biosphere already runs, so `EvolveParams::from_manifest_and_layout` reads predawn_generations rather than a
+# duplicate key (crates/sim/src/evolve.rs). Byte-neutral (run_world uses EvolveParams::dev_default not the
+# manifest path, and both keys were 40); the derive also makes adaptation depth now track a scenario that
+# dials predawn_generations high (Europa), which the static duplicate would not have. Same pattern as saturation_t_ref.
 
 # --- The body arc: R-BUILD-PHYS, R-WOUND, R-FLUID (Part 35; record 62.20; docs/working/BODY_ARC_SCOPE.md) ---
 
@@ -1708,7 +1705,7 @@ category = "per_world"
 
 [[reserved]]
 id = "field.body_exchange"
-basis = "DERIVE per being on the canonical path (R-METABOLIZE): the body-to-environment convective coupling per tick DERIVES as h*A/(m*c) through physiology::derive_body_exchange_rate (crates/sim/src/physiology.rs), where h is the medium convective coefficient (metabolism.medium_convective_coefficient below), A the whole-body convective surface (bio.convective_surface), and m*c the body's thermal mass (body mass in kg times whole-body therm.specific_heat), so a high-surface, low-thermal-mass body couples fast and a compact dense one slowly, from the physics alone. This scalar is retained ONLY as the labelled-fixture FieldCalib.exchange override for a being placed without a body (Runner::set_body_exchange_rate supplies the derived rate otherwise); a canonical run derives the rate, and this stays a fail-loud fixture-fallback sentinel"
+basis = "DERIVE per being on the canonical path (R-METABOLIZE): the body-to-environment convective coupling per tick DERIVES as h*A/(m*c) through physiology::derive_body_exchange_rate (crates/sim/src/physiology.rs), where h is the medium convective coefficient (metabolism.medium_convective_coefficient below), A the whole-body convective surface (bio.convective_surface), and m*c the body's thermal mass (body mass in kg times whole-body therm.specific_heat), so a high-surface, low-thermal-mass body couples fast and a compact dense one slowly, from the physics alone. This scalar is retained ONLY as the labelled-fixture FieldCalib.exchange override for a being placed without a body (Runner::set_body_exchange_rate supplies the derived rate otherwise); a canonical run derives the rate. CORRECTION (census, source-verified at runner.rs:5182): this scalar is NOT a fail-loud sentinel; it is the ACTIVELY-READ fallback rate for a being placed without a body (body_exchange_rate.get(id).unwrap_or(calib.exchange)). Whether a bodyless being should reach the exchange path at all, and whether this fallback should become a per-world datum a world owns, is a design follow-on"
 status = "set"
 set_by = "Owner Mirror sign-off 2026-07-09 (remainder delegated under the derive-gate)"
 set_date = "2026-07-09"
@@ -1718,12 +1715,12 @@ source = "canonical runner field layer (crates/sim/src/runner.rs); crates/sim/sr
 category = "derivable"
 
 # --- R-METABOLIZE: the owner anchors the derived resting metabolism and body-to-medium exchange need.
-# The anchors read by MetabolicAnchors::from_manifest are the Kleiber coefficient a, the normalized
-# body-mass-to-kilograms bridge, and the Stefan-Boltzmann constant. Two surface properties the radiant
-# and convective terms once carried as anchors now DERIVE from the being's own data (derive-vs-author,
-# Principle 6): the radiant-surface emissivity from its covering (opt.emissivity) and the medium
-# convective coefficient h from its medium (medium.{air,water} convective_coefficient), both retired here
-# (see the RETIRED notes below). Each surviving anchor is surfaced fail-loud rather than fabricated; the
+# The anchors read by MetabolicAnchors::from_manifest are the Kleiber coefficient a and the normalized
+# body-mass-to-kilograms bridge. Three properties the radiant and convective terms once carried as anchors
+# now DERIVE rather than being reserved (derive-vs-author, Principle 6): the radiant-surface emissivity from
+# its covering (opt.emissivity), the medium convective coefficient h from its medium (medium.{air,water}
+# convective_coefficient), and the Stefan-Boltzmann sigma from the CODATA fundamentals (units / R-UNITS-PIN,
+# crates/units/src/compute.rs; sigma is no longer a manifest key), all retired here (see the RETIRED notes below). Each surviving anchor is surfaced fail-loud rather than fabricated; the
 # kernels are fixed Rust (crates/physics/src/laws.rs basal_metabolic_rate, resting_heat_loss,
 # metabolic_drain_fraction), these are the owner's to set. Read together by
 # MetabolicAnchors::from_manifest (crates/sim/src/physiology.rs). ---
@@ -1760,17 +1757,6 @@ category = "per_world"
 # (physiology::covering_emissivity, per-race / per-covering differentiable) rather than a global manifest
 # scalar, so there is no reserved value here to set: it derives. The real per-covering emissivities
 # (bare skin ~0.98, fur or scales lower) are covering-material world/race DATA, not a calibration constant.
-
-[[reserved]]
-id = "metabolism.stefan_boltzmann"
-basis = "the Stefan-Boltzmann constant sigma = 5.670374e-8 W/(m^2*K^4), the universal proportionality of the radiant heat-loss law (law.radiant_emission). A CODATA physical constant, not an owner taste value, surfaced fail-loud (an authored Principle-9 physics affordance) rather than hardcoded inline; the same value the other radiant-law callers pass"
-status = "set"
-value = "0.0000000567037441"
-set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
-set_date = "2026-07-09"
-unit = "watt_per_m2_kelvin4"
-source = "Part 41 optics floor; crates/sim/src/physiology.rs; laws::radiant_emission, resting_heat_loss"
-category = "derivable"
 
 [[reserved]]
 id = "metabolism.respiration_transfer_coefficient"
@@ -1816,7 +1802,7 @@ category = "per_world"
 
 [[reserved]]
 id = "physiology.thermal_setpoint"
-basis = "the race's homeostatic core-temperature set point (Part 20 physiology), per race; recommended about 310 K (mammalian) for a temperate race; reserved"
+basis = "the race's homeostatic core-temperature set point (Part 20 physiology), per race; recommended about 310 K (mammalian) for a temperate race; reserved. PER-RACE RELOCATION OWED (Arc-4): it doubles as a per-world dial (category per_world), but is read as a GLOBAL scalar applied to every race with no RaceId branch (worldbuild.rs:553), structurally like the relocated gossip.trust_baseline; the per-race thermal relocation is deferred to Arc-4"
 status = "set"
 value = "310"
 set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
@@ -1845,7 +1831,7 @@ category = "per_world"
 
 [[reserved]]
 id = "physiology.thermal_half_band"
-basis = "the survivable half-range around the set point (Part 20 death conditions), per race; a body outside setpoint plus or minus half_band dies; a temperate-mammal thermoneutral half-width. OWNER RESOLUTION (Mirror sign-off): the fixed 8 K band does NOT prevent heat/cold attunement over generations, because attunement emerges through EVOLVABLE BODY MORPHOLOGY (covering, mass, surface area, genome-derived, driving the thermal coupling per the physics floor: Bergmann and Allen), not by changing the band; a drift-able genome SETPOINT (for ectothermy/torpor) is flagged as a later substrate option. So 8 K is authored as a per-race disposition, with attunement derived from the already-modelled morphology"
+basis = "the survivable half-range around the set point (Part 20 death conditions), per race; a body outside setpoint plus or minus half_band dies; a temperate-mammal thermoneutral half-width. OWNER RESOLUTION (Mirror sign-off): the fixed 8 K band does NOT prevent heat/cold attunement over generations, because attunement emerges through EVOLVABLE BODY MORPHOLOGY (covering, mass, surface area, genome-derived, driving the thermal coupling per the physics floor: Bergmann and Allen), not by changing the band; a drift-able genome SETPOINT (for ectothermy/torpor) is flagged as a later substrate option. So 8 K is authored as a per-race disposition, with attunement derived from the already-modelled morphology. PER-RACE RELOCATION OWED (Arc-4): it doubles as a per-world dial (category per_world), but is read as a GLOBAL scalar with no RaceId branch (worldbuild.rs:554), structurally like the relocated gossip.trust_baseline; the per-race thermal relocation is deferred to Arc-4"
 status = "set"
 value = "8"
 set_by = "Owner Mirror sign-off 2026-07-09 (docs/working/MIRROR_SIGNOFF_DECISIONS.md)"
@@ -2322,7 +2308,7 @@ category = "per_world"
 
 [[reserved]]
 id = "productivity.soil_requirement"
-basis = "the soil-nutrient supply a cell needs for full producer productivity, the Liebig denominator for the soil factor. Set from the soil nutrients a unit of the world's producer biomass needs; the step-4 soil-nutrient field refines the supply side Derive-vs-author: the Liebig denominator for the soil factor of the COARSE abstract climate-productivity model; a pre-differentiation scaffold matched to soil_baseline so bare soil is non-limiting until the matter-cycle fertility field differentiates; not a floor axis, reversible"
+basis = "the soil-nutrient supply a cell needs for full producer productivity, the Liebig denominator for the soil factor. Set from the soil nutrients a unit of the world's producer biomass needs; the step-4 soil-nutrient field refines the supply side Derive-vs-author: the Liebig denominator for the soil factor of the COARSE abstract climate-productivity model; a pre-differentiation scaffold, and the ANCHOR that the retired soil_baseline is now derived to equal (so bare soil is non-limiting at baseline) until the matter-cycle fertility field differentiates; not a floor axis, reversible"
 status = "set"
 value = "1"
 set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
@@ -2331,16 +2317,12 @@ unit = "soil_nutrient"
 source = "base-level liveliness step 2 productivity (soil field in step 4); crates/sim/src/environ.rs; laws::net_nutrition"
 category = "per_world"
 
-[[reserved]]
-id = "productivity.soil_baseline"
-basis = "the uniform soil-nutrient supply every cell carries until the step-4 soil-nutrient field derives a per-cell value, a placeholder supply so productivity is not soil-limited before soil exists. Retired when the soil field lands Derive-vs-author: the uniform soil-nutrient supply every cell carries before the matter-cycle adds per-cell fertility; MUST equal soil_requirement so soil never limits at baseline; an engine scaffold of the coarse model, not a floor axis, reversible"
-status = "set"
-value = "1"
-set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
-set_date = "2026-07-09"
-unit = "soil_nutrient"
-source = "base-level liveliness step 2 productivity (retired at step 4); crates/sim/src/environ.rs"
-category = "per_world"
+# RETIRED (units-arc bridge, derive-vs-author, Principle 6): `productivity.soil_baseline` (the uniform soil
+# supply every cell carries at baseline, before the matter-cycle fertility field differentiates) now DERIVES
+# from `productivity.soil_requirement`: its own basis declared it MUST equal soil_requirement so bare soil is
+# exactly non-limiting, so `EnvironCalib::from_manifest` reads soil_requirement for it rather than a duplicate
+# key (crates/sim/src/environ.rs). Byte-neutral (the soil Liebig satisfaction saturates to one for any
+# baseline >= requirement, so the four pins hold). The same derive-from-sibling pattern as saturation_t_ref.
 
 [[reserved]]
 id = "hydrology.max_water_depth"

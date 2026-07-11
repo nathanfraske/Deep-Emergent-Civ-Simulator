@@ -303,13 +303,6 @@ source = "dev fixture for the dawn embodiment; crates/sim/src/physiology.rs Meta
 # being's covering `opt.emissivity` (physiology::covering_emissivity). The dev coverings carry 0.95 (the
 # retired fixture value) in crates/sim/src/anatomy.rs, so the dev radiant term is byte-identical.
 
-[[reserved]]
-id = "metabolism.stefan_boltzmann"
-basis = "FIXTURE placeholder mirroring MetabolicAnchors::dev_fixture; the Stefan-Boltzmann constant of the radiant heat-loss law (the physical CODATA value)"
-status = "set"
-value = "0.0000000567"
-unit = "stefan_boltzmann"
-source = "dev fixture for the dawn embodiment; crates/sim/src/physiology.rs MetabolicAnchors"
 
 [[reserved]]
 id = "physiology.thermal_setpoint"
@@ -454,14 +447,6 @@ id = "productivity.soil_requirement"
 basis = "FIXTURE placeholder; the soil-nutrient supply a cell needs for full producer productivity (the step-4 soil field refines it)"
 status = "set"
 value = "0.5"
-unit = "soil_nutrient"
-source = "dev fixture for base-level liveliness step 2 productivity; crates/sim/src/environ.rs"
-
-[[reserved]]
-id = "productivity.soil_baseline"
-basis = "FIXTURE placeholder; the uniform soil-nutrient supply until the step-4 soil field lands"
-status = "set"
-value = "1"
 unit = "soil_nutrient"
 source = "dev fixture for base-level liveliness step 2 productivity; crates/sim/src/environ.rs"
 

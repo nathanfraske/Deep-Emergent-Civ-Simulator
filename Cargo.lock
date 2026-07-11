@@ -358,6 +358,7 @@ dependencies = [
  "civsim-core",
  "civsim-gpu",
  "civsim-physics",
+ "civsim-units",
  "civsim-world",
  "rayon",
  "serde",
