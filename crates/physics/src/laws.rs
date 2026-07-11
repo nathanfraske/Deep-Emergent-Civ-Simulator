@@ -1606,6 +1606,104 @@ pub fn lennard_jones_from_critical_point(t_c: Fixed, p_c: Fixed) -> (Fixed, Fixe
     (sigma, epsilon_over_kb)
 }
 
+/// The Neufeld collision integral `Omega_D(T*)` for Lennard-Jones (12-6) diffusion, the reduced-temperature
+/// correlation UNIVERSAL to the potential itself (Neufeld, Janzen, Aziz 1972), never a fluid fit:
+/// `Omega_D = A/(T*)^B + C/exp(D*T*) + E/exp(F*T*) + G/exp(H*T*)`, the eight constants fixed by the LJ
+/// potential. `t_star = k_B*T / epsilon_AB` is the reduced temperature (thermal energy over the pair's well
+/// depth). Returns near unity for the physical T* range (about 1 to 3). A non-positive `t_star` yields one, a
+/// safe neutral for the downstream division.
+pub fn neufeld_collision_integral(t_star: Fixed) -> Fixed {
+    if t_star <= ZERO {
+        return Fixed::ONE;
+    }
+    let a = Fixed::from_ratio(106_036, 100_000);
+    let b = Fixed::from_ratio(15_610, 100_000);
+    let c = Fixed::from_ratio(19_300, 100_000);
+    let d = Fixed::from_ratio(47_635, 100_000);
+    let e = Fixed::from_ratio(103_587, 100_000);
+    let f = Fixed::from_ratio(152_996, 100_000);
+    let g = Fixed::from_ratio(176_474, 100_000);
+    let h = Fixed::from_ratio(389_411, 100_000);
+    let term1 = a.checked_div(t_star.powf(b)).unwrap_or(ZERO);
+    let term2 = c
+        .checked_div(d.checked_mul(t_star).unwrap_or(Fixed::MAX).exp())
+        .unwrap_or(ZERO);
+    let term3 = e
+        .checked_div(f.checked_mul(t_star).unwrap_or(Fixed::MAX).exp())
+        .unwrap_or(ZERO);
+    let term4 = g
+        .checked_div(h.checked_mul(t_star).unwrap_or(Fixed::MAX).exp())
+        .unwrap_or(ZERO);
+    Fixed::saturating_sum([term1, term2, term3, term4])
+}
+
+/// The Chapman-Enskog binary gas diffusivity `D_AB` (m^2/s) for a dilute gas pair from kinetic theory:
+/// `D_AB = K * sqrt(T^3 * (1/M_A + 1/M_B)) / (P * sigma_AB^2 * Omega_D)`. The constant `K = 1.8583e-7` is the
+/// classical CGS coefficient `0.0018583` (itself folded from `k_B` and `N_A`) times the cm^2-to-m^2 factor
+/// `1e-4`, so the output is directly in m^2/s (the raw `k_B`/`N_A` fold underflows Q32.32, so the constant is
+/// carried at the m^2/s-per-(K^(3/2), g/mol, atm, angstrom^2) scale). `sigma_ab` is the combined collision
+/// diameter (angstrom, the arithmetic mean of the pair), `omega_d` the Neufeld collision integral at the
+/// pair's reduced temperature, `pressure_atm` the ambient pressure (atmospheres), `m_a`/`m_b` the molar masses
+/// (g/mol). A non-positive input yields zero. HONEST LIMIT: the LJ pair upstream is corresponding-states, so a
+/// polar pair (water in air) reads a bounded (order tens of percent) deviation from the tabulated `D_v`,
+/// carried straight rather than tuned.
+pub fn chapman_enskog_diffusivity(
+    temperature: Fixed,
+    m_a: Fixed,
+    m_b: Fixed,
+    pressure_atm: Fixed,
+    sigma_ab: Fixed,
+    omega_d: Fixed,
+) -> Fixed {
+    if temperature <= ZERO
+        || m_a <= ZERO
+        || m_b <= ZERO
+        || pressure_atm <= ZERO
+        || sigma_ab <= ZERO
+        || omega_d <= ZERO
+    {
+        return ZERO;
+    }
+    let k = Fixed::from_ratio(18_583, 100_000_000_000);
+    let inv_m_a = match Fixed::ONE.checked_div(m_a) {
+        Some(x) => x,
+        None => return ZERO,
+    };
+    let inv_m_b = match Fixed::ONE.checked_div(m_b) {
+        Some(x) => x,
+        None => return ZERO,
+    };
+    let inv_m = inv_m_a.saturating_add(inv_m_b);
+    let t2 = match temperature.checked_mul(temperature) {
+        Some(x) => x,
+        None => return Fixed::MAX,
+    };
+    let t3 = match t2.checked_mul(temperature) {
+        Some(x) => x,
+        None => return Fixed::MAX,
+    };
+    let radicand = match t3.checked_mul(inv_m) {
+        Some(x) => x,
+        None => return Fixed::MAX,
+    };
+    let num = match k.checked_mul(radicand.sqrt()) {
+        Some(x) => x,
+        None => return Fixed::MAX,
+    };
+    let sigma2 = match sigma_ab.checked_mul(sigma_ab) {
+        Some(x) => x,
+        None => return Fixed::MAX,
+    };
+    let den = match pressure_atm
+        .checked_mul(sigma2)
+        .and_then(|x| x.checked_mul(omega_d))
+    {
+        Some(x) => x,
+        None => return Fixed::MAX,
+    };
+    num.checked_div(den).unwrap_or(Fixed::MAX)
+}
+
 /// Evaporation mass flux E = (a + b*|u|)*(e_s - e_a) (kg/(m^2*s)), the Dalton bulk aerodynamic proxy.
 /// Returns the evaporation source when the vapour-pressure deficit is positive; a non-positive deficit
 /// is the condensation case and reads zero here (the sink is the caller's sign-flipped difference).
@@ -4092,6 +4190,61 @@ mod tests {
         // A degenerate zero critical pressure yields zero, no division by zero.
         let (sigma_z, _) = lennard_jones_from_critical_point(Fixed::from_int(300), ZERO);
         assert_eq!(sigma_z, ZERO, "a zero critical pressure yields zero sigma");
+    }
+
+    #[test]
+    fn the_water_vapour_diffusivity_derives_through_the_full_chain() {
+        // The whole D_v chain, only critical points authored: water (647.1 K, 22.06e6 Pa) and air (132.5 K,
+        // 3.77e6 Pa) -> LJ pairs (TGS) -> combine (arithmetic-mean sigma, geometric-mean epsilon) -> reduced
+        // temperature T* -> Neufeld Omega_D -> Chapman-Enskog D_AB. At 288 K, 1 atm this lands near 1.7e-5
+        // m^2/s, about a fifth below the 2.42e-5 tabulated value because corresponding states approximates
+        // polar water, the flagged honest deviation carried straight, never tuned. Integer-only assertions.
+        let (sigma_w, eps_w) = lennard_jones_from_critical_point(
+            Fixed::from_ratio(6471, 10),
+            Fixed::from_int(22_060_000),
+        );
+        let (sigma_a, eps_a) = lennard_jones_from_critical_point(
+            Fixed::from_ratio(1325, 10),
+            Fixed::from_int(3_770_000),
+        );
+        let sigma_ab = sigma_w
+            .saturating_add(sigma_a)
+            .checked_div(Fixed::from_int(2))
+            .unwrap();
+        let eps_ab = eps_w.checked_mul(eps_a).unwrap().sqrt();
+        let t = Fixed::from_int(288);
+        let t_star = t.checked_div(eps_ab).unwrap();
+        let omega = neufeld_collision_integral(t_star);
+        // Omega_D sits near unity in the physical reduced-temperature range.
+        assert!(
+            omega > Fixed::from_ratio(9, 10) && omega < Fixed::from_ratio(20, 10),
+            "the Neufeld collision integral is order unity at T* near 1.3"
+        );
+        let d_v = chapman_enskog_diffusivity(
+            t,
+            Fixed::from_int(18),
+            Fixed::from_int(29),
+            Fixed::ONE,
+            sigma_ab,
+            omega,
+        );
+        assert!(
+            d_v > Fixed::from_ratio(14, 1_000_000) && d_v < Fixed::from_ratio(21, 1_000_000),
+            "D_v derives to ~1.7e-5 m^2/s through the full critical-point chain"
+        );
+        // A degenerate zero collision integral yields zero, no division by zero.
+        assert_eq!(
+            chapman_enskog_diffusivity(
+                t,
+                Fixed::from_int(18),
+                Fixed::from_int(29),
+                Fixed::ONE,
+                sigma_ab,
+                ZERO
+            ),
+            ZERO,
+            "a zero collision integral yields zero diffusivity"
+        );
     }
 
     // --- Hardening: temperature/potential differences saturate rather than panic ---
