@@ -1911,7 +1911,11 @@ mod tests {
         use crate::perceivable_feature::PerceivableFeatureRegistry;
         let homeo_reg = HomeostaticRegistry::dev_grazer();
         // One channel, two buckets: the block adds 2 buckets * 2 (dx, dy) = 4 slots after the being block.
-        let features = PerceivableFeatureRegistry::from_channels(&[("opt.emissivity", 2)]);
+        let features = PerceivableFeatureRegistry::from_channels(&[(
+            "opt.emissivity",
+            2,
+            Fixed::from_ratio(1, 2),
+        )]);
         let l =
             ControllerLayout::with_percepts_appetitive_material_attraction_conviction_and_being_features(
                 &homeo_reg,

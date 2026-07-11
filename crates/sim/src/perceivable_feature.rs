@@ -56,6 +56,7 @@
 //! of the emitter's body plan and the registry (Principle 3).
 
 use civsim_core::Fixed;
+use civsim_physics::laws::DiscriminationLaw;
 
 use crate::anatomy::{BodyPlan, BodyPlanRegistry};
 use crate::physiology::surface_optical_axis;
@@ -80,14 +81,42 @@ pub struct PerceivableFeatureDef {
     /// The number of DISCRIMINATION BUCKETS the shared controller layout carries for this channel: the count
     /// of fixed toward-direction slots a perceiver's per-bucket response weights key on. The controller layout
     /// is shared across the whole population, so this count is a per-CHANNEL layout constant, not a per-being
-    /// quantity: a perceiver's own just-noticeable-difference maps a perceived feature-value into one of these
-    /// buckets (a coarser-JND being effectively collapses adjacent buckets, reading a wider band as one), while
-    /// the layout keeps this fixed number of slots. RESERVED, per_world, surfaced with basis when a world arms
-    /// a channel, never fabricated: its basis is the axis's floor value range divided by the finest JND the
-    /// world's perceivers resolve on that axis, a granularity/representability bound (enough buckets that the
-    /// finest discriminator's distinguishable levels each get a slot). Zero buckets means the channel is read
-    /// but carries no controller response slots.
+    /// quantity: a perceiver discriminates a perceived feature-value into one of these buckets by its own
+    /// resolution ([`Self::step`]), the higher buckets simply staying zero for a value that never reaches them,
+    /// while the layout keeps this fixed number of slots. RESERVED, per_world, surfaced with basis when a world
+    /// arms a channel, never fabricated: its basis is the axis's floor value range divided by [`Self::step`], a
+    /// granularity/representability bound (enough buckets to hold the axis's range at the declared resolution).
+    /// Zero buckets means the channel is read but carries no controller response slots.
     pub buckets: u16,
+    /// The discrimination STEP (the just-noticeable difference) at which a perceiver resolves this channel's
+    /// feature value into a bucket: bucket index = floor(value / step), clamped into `[0, buckets)`. This is
+    /// the perceiver's own sensory resolution, NOT a global grid: it is world-declared per-species data today
+    /// (the same honest interim the being-percept field's single transduction uses), so an alien world sets its
+    /// own step and deriving it per creature from the creature's own sensory anatomy is the flagged shared
+    /// follow-on (the being-percept path carries the identical limit). RESERVED, per_world, surfaced with basis:
+    /// its basis is the finest difference in the axis value a perceiver can tell apart (a perceptual JND, or the
+    /// axis's floor measurement resolution). Must be positive; a non-positive step yields no discrimination.
+    pub step: Fixed,
+}
+
+impl PerceivableFeatureDef {
+    /// The discrimination bucket a perceived feature `value` falls in for this channel: the canonical
+    /// [`civsim_physics::laws::discriminate`] under an absolute step (`to_int(value / step)`) clamped into
+    /// `[0, buckets)`, or `None` when the channel carries no buckets or a non-positive step (no discrimination).
+    /// A negative value clamps to bucket 0 (an optical fraction is non-negative, the same non-negative clamp the
+    /// being-signal subject uses). The bucket keys on the perceiver's own resolution ([`Self::step`]) through
+    /// the same discrimination law the being-percept transduction uses, never a global grid; a value beyond the
+    /// top bucket's range saturates at the top bucket, the honest representability limit of a fixed-width layout.
+    /// Pure and RNG-free.
+    pub fn bucket(&self, value: Fixed) -> Option<usize> {
+        if self.buckets == 0 || self.step <= Fixed::ZERO {
+            return None;
+        }
+        let raw =
+            civsim_physics::laws::discriminate(value, DiscriminationLaw::AbsoluteStep, self.step);
+        let idx = raw.max(0) as usize;
+        Some(idx.min(self.buckets as usize - 1))
+    }
 }
 
 /// The set of emitter optical properties a world's perceivers can sense on a being-signal, data-defined and
@@ -109,19 +138,20 @@ impl PerceivableFeatureRegistry {
         }
     }
 
-    /// A registry over an explicit ordered list of (floor optical axis id, discrimination bucket count) pairs,
-    /// ids assigned by position (0, 1, ...). The order is the canonical channel order; a world declares the
-    /// single-axis properties its perceivers can sense, and each channel's shared-layout bucket count, as data.
-    /// Each entry is ONE axis: to sense several, list several, never fold them. The bucket count is per_world
-    /// reserved-with-basis (see [`PerceivableFeatureDef::buckets`]).
-    pub fn from_channels(channels: &[(&str, u16)]) -> PerceivableFeatureRegistry {
+    /// A registry over an explicit ordered list of (floor optical axis id, bucket count, discrimination step)
+    /// tuples, ids assigned by position (0, 1, ...). The order is the canonical channel order; a world declares
+    /// the single-axis properties its perceivers can sense, each channel's shared-layout bucket count, and each
+    /// channel's discrimination step, as data. Each entry is ONE axis: to sense several, list several, never
+    /// fold them. The bucket count and step are per_world reserved-with-basis (see [`PerceivableFeatureDef`]).
+    pub fn from_channels(channels: &[(&str, u16, Fixed)]) -> PerceivableFeatureRegistry {
         let channels = channels
             .iter()
             .enumerate()
-            .map(|(i, &(axis, buckets))| PerceivableFeatureDef {
+            .map(|(i, &(axis, buckets, step))| PerceivableFeatureDef {
                 id: PerceivableFeatureId(i as u16),
                 axis: axis.to_string(),
                 buckets,
+                step,
             })
             .collect();
         PerceivableFeatureRegistry { channels }
@@ -228,13 +258,19 @@ mod tests {
     #[test]
     fn it_reads_each_declared_axis_directly_in_canonical_order_no_composite() {
         let (bodyplan, plan) = emitter_with_optics();
+        let quarter = Fixed::from_ratio(1, 4);
         let reg = PerceivableFeatureRegistry::from_channels(&[
-            ("opt.emissivity", 4),
-            ("opt.refractive_index", 4),
+            ("opt.emissivity", 4, quarter),
+            ("opt.refractive_index", 4, quarter),
         ]);
         assert_eq!(reg.len(), 2);
         // Two channels, four buckets each, a (dx, dy) pair per bucket: the layout adds 2 * 4 * 2 = 16 slots.
         assert_eq!(reg.layout_width(), 16);
+        // The bucket keys on the channel's step: with step 1/4 over [0, 1], value 0.9 lands in bucket 3
+        // (floor(0.9 / 0.25) = 3), and a value past the top saturates at bucket 3 (buckets - 1).
+        assert_eq!(reg.channels()[0].bucket(Fixed::from_ratio(9, 10)), Some(3));
+        assert_eq!(reg.channels()[0].bucket(Fixed::from_int(5)), Some(3));
+        assert_eq!(reg.channels()[0].bucket(Fixed::ZERO), Some(0));
         // The vector follows registry (declaration) order, each entry the raw direct read of that ONE axis:
         // emissivity 0.9 then refractive index 1.5, side by side, never folded into one signature scalar.
         assert_eq!(
@@ -247,8 +283,11 @@ mod tests {
     fn an_axis_the_surface_does_not_declare_reads_zero_and_admits_the_alien() {
         let (bodyplan, plan) = emitter_with_optics();
         // A channel on an axis the covering does not carry reads ZERO (the feature is absent, not defaulted).
-        let reg =
-            PerceivableFeatureRegistry::from_channels(&[("opt.emissivity", 4), ("opt.albedo", 4)]);
+        let quarter = Fixed::from_ratio(1, 4);
+        let reg = PerceivableFeatureRegistry::from_channels(&[
+            ("opt.emissivity", 4, quarter),
+            ("opt.albedo", 4, quarter),
+        ]);
         assert_eq!(
             reg.read_emitter(&plan, &bodyplan),
             vec![Fixed::from_ratio(9, 10), Fixed::ZERO]
