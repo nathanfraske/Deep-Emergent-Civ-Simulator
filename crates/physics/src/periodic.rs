@@ -92,6 +92,16 @@ pub enum PeriodicError {
     UnknownElement(String),
     /// A molar-mass accumulation overflowed fixed-point.
     Overflow(String),
+    /// The VSEPR rotational-class derivation cannot resolve a molecule from the formula and the table alone
+    /// (a hypervalent or electron-rich centre, an odd-electron radical, an ambiguous or homonuclear central
+    /// atom, or a d/f-block centre). It fails loud here rather than return a wrong geometry; the molecule is
+    /// a VSEPR misfit carried by the per-substance override the wiring consults first.
+    VseprUnresolved {
+        /// The formula that could not be resolved, for the diagnostic.
+        formula: String,
+        /// Why the neutral-octet VSEPR model did not close.
+        detail: String,
+    },
 }
 
 impl fmt::Display for PeriodicError {
@@ -117,6 +127,10 @@ impl fmt::Display for PeriodicError {
                 )
             }
             PeriodicError::Overflow(m) => write!(f, "molar-mass accumulation overflowed: {m}"),
+            PeriodicError::VseprUnresolved { formula, detail } => write!(
+                f,
+                "the VSEPR rotational class of '{formula}' is not table-derivable ({detail}); it needs a per-substance override"
+            ),
         }
     }
 }
@@ -230,6 +244,160 @@ impl PeriodicTable {
         }
         self.molar_mass(&map)
     }
+
+    /// The molecular rotational degrees of freedom `f_rot` (0, 2, or 3), DERIVED from a volatile's formula
+    /// and the periodic table by VSEPR, so no molecular-geometry datum is authored and an alien volatile is a
+    /// data row (Principle 11). This retires the per-substance geometry/`f_rot` datum: it is the input the
+    /// Kirchhoff heat-capacity slope reads (`laws::kirchhoff_delta_cp_over_r`, `c_p(gas)/R = (5 + f_rot)/2`).
+    ///
+    /// The rule keys on the atom count and the central atom's VSEPR electron geometry:
+    /// - a monatomic species has no rotational mode that stores energy classically (`f_rot = 0`);
+    /// - any diatomic is collinear by definition, a linear rotor (`f_rot = 2`);
+    /// - a polyatomic is LINEAR only in the AX2E0 case (a bare-central triatomic: exactly two bonded ligands
+    ///   and no lone pair on the central atom, so all three nuclei are collinear), giving `f_rot = 2`; every
+    ///   other polyatomic is a nonlinear rotor (`f_rot = 3`).
+    ///
+    /// The central atom's lone-pair count follows the neutral octet/duet rule: with the molecule's total
+    /// valence electrons `TVE` and the electrons `2` (period-1 duet) or `8` (octet) each atom needs to fill
+    /// its shell, the shared bonding pairs are `(need - TVE)/2`, and for a bare-central triatomic every bond
+    /// is central-to-ligand, so the central lone pairs are `(V_central - shared_pairs)/2` with `V_central`
+    /// the main-group valence-electron count read from Z by shell filling. A molecule the neutral-octet model
+    /// cannot resolve to a clean non-negative integer lone-pair count is a VSEPR misfit
+    /// ([`PeriodicError::VseprUnresolved`]): it fails loud and is carried by the per-substance override the
+    /// wiring consults first, empty for every re-pin volatile (water 3, CO2 2, N2/O2/CO 2, CH4 3, NH3 3, a
+    /// noble gas 0). The known documented limit of the single-central model is a LINEAR multi-heavy-centre
+    /// chain (acetylene HCCH and the like): it reads as nonlinear here and is an override row when it arises.
+    pub fn rotational_dof(&self, formula: &BTreeMap<String, u32>) -> Result<u8, PeriodicError> {
+        let atom_count: u32 = formula.values().copied().sum();
+        match atom_count {
+            0 => Err(PeriodicError::VseprUnresolved {
+                formula: format_formula(formula),
+                detail: "an empty formula has no molecular geometry".to_string(),
+            }),
+            1 => Ok(0),
+            2 => Ok(2),
+            3 => self.triatomic_rotational_dof(formula),
+            // AX_n with three or more ligand domains is never collinear (the AX2E0 case needs exactly two),
+            // so the single-central model reads nonlinear; a linear multi-heavy-centre chain is the override.
+            _ => Ok(3),
+        }
+    }
+
+    /// A convenience form of [`PeriodicTable::rotational_dof`] over a slice of `(symbol, count)` pairs, so a
+    /// caller need not build a map for a literal formula (`&[("H", 2), ("O", 1)]`). Duplicate symbols add.
+    pub fn rotational_dof_of(&self, formula: &[(&str, u32)]) -> Result<u8, PeriodicError> {
+        let mut map: BTreeMap<String, u32> = BTreeMap::new();
+        for (symbol, count) in formula {
+            *map.entry((*symbol).to_string()).or_insert(0) += count;
+        }
+        self.rotational_dof(&map)
+    }
+
+    /// The triatomic case of [`PeriodicTable::rotational_dof`]: identify the bare central atom (the single
+    /// element present exactly once, the hub of an AX2), then read its lone-pair count from the neutral
+    /// octet/duet model and report linear (`f_rot = 2`, AX2E0, no lone pair) or nonlinear (`f_rot = 3`). A
+    /// homonuclear triatomic (no count-1 element), an ABC triatomic (three count-1 elements), a non-main-
+    /// group centre, or a molecule the neutral model cannot close is a misfit for the override.
+    fn triatomic_rotational_dof(
+        &self,
+        formula: &BTreeMap<String, u32>,
+    ) -> Result<u8, PeriodicError> {
+        let singletons: Vec<&String> = formula
+            .iter()
+            .filter(|(_, &count)| count == 1)
+            .map(|(symbol, _)| symbol)
+            .collect();
+        if singletons.len() != 1 {
+            return Err(PeriodicError::VseprUnresolved {
+                formula: format_formula(formula),
+                detail: "no single table-derivable central atom (a homonuclear or ABC triatomic)"
+                    .to_string(),
+            });
+        }
+        let central_symbol = singletons[0];
+        let central = self
+            .element(central_symbol)
+            .ok_or_else(|| PeriodicError::UnknownElement(central_symbol.clone()))?;
+        let v_central =
+            main_group_valence(central.z).ok_or_else(|| PeriodicError::VseprUnresolved {
+                formula: format_formula(formula),
+                detail: format!(
+                    "central '{central_symbol}' (Z={}) has no shell-filling main-group valence",
+                    central.z
+                ),
+            })?;
+        // The molecule's total valence electrons, and the electrons every atom's shell needs (duet for a
+        // period-1 atom, octet otherwise). The shared bonding pairs complete every shell.
+        let mut tve: u32 = 0;
+        let mut need: u32 = 0;
+        for (symbol, &count) in formula {
+            let element = self
+                .element(symbol)
+                .ok_or_else(|| PeriodicError::UnknownElement(symbol.clone()))?;
+            let v =
+                main_group_valence(element.z).ok_or_else(|| PeriodicError::VseprUnresolved {
+                    formula: format_formula(formula),
+                    detail: format!("'{symbol}' (Z={}) has no main-group valence", element.z),
+                })?;
+            tve += (v as u32) * count;
+            need += if element.z <= 2 { 2 } else { 8 } * count;
+        }
+        if need < tve || !(need - tve).is_multiple_of(2) {
+            return Err(PeriodicError::VseprUnresolved {
+                formula: format_formula(formula),
+                detail: "the neutral octet/duet model does not close (a hypervalent centre)"
+                    .to_string(),
+            });
+        }
+        // For a bare-central triatomic every bond is central-to-ligand, so the central atom contributes one
+        // electron per shared pair; its lone pairs are `(V_central - shared_pairs)/2`.
+        let shared_pairs = (need - tve) / 2;
+        let v = v_central as u32;
+        if v < shared_pairs || !(v - shared_pairs).is_multiple_of(2) {
+            return Err(PeriodicError::VseprUnresolved {
+                formula: format_formula(formula),
+                detail: "the central lone-pair count is not a clean non-negative integer (an \
+                         odd-electron or hypervalent centre)"
+                    .to_string(),
+            });
+        }
+        let central_lone_pairs = (v - shared_pairs) / 2;
+        // Linear (AX2E0) only when the central atom carries no lone pair; otherwise bent (nonlinear).
+        Ok(if central_lone_pairs == 0 { 2 } else { 3 })
+    }
+}
+
+/// The main-group valence-electron count (the s+p count, 1 through 8) read from an atomic number Z by
+/// noble-gas-core shell filling: periodic-table STRUCTURE, not an authored physics value. `None` for a
+/// d-block or f-block centre or a period-6/7 heavy, which the VSEPR derivation routes to the override rather
+/// than guess. Covers hydrogen through xenon, every element a simple volatile is built from.
+fn main_group_valence(z: u8) -> Option<u8> {
+    match z {
+        1 => Some(1),            // H
+        2 => Some(2),            // He (a filled 1s duet)
+        3..=10 => Some(z - 2),   // Li..Ne: 1..8
+        11..=18 => Some(z - 10), // Na..Ar: 1..8
+        19..=20 => Some(z - 18), // K, Ca: 1, 2
+        21..=30 => None,         // Sc..Zn: the 3d block, an override centre
+        31..=36 => Some(z - 28), // Ga..Kr: 3..8
+        37..=38 => Some(z - 36), // Rb, Sr: 1, 2
+        39..=48 => None,         // Y..Cd: the 4d block, an override centre
+        49..=54 => Some(z - 46), // In..Xe: 3..8
+        _ => None,               // period 6 and 7 (the f-block and beyond): an override centre
+    }
+}
+
+/// Render a formula map as a compact `H2O`-style string for a diagnostic (sorted-symbol order, a count of
+/// one elided). Determinism is not at stake here (it feeds only an error message), but the walk is canonical.
+fn format_formula(formula: &BTreeMap<String, u32>) -> String {
+    let mut s = String::new();
+    for (symbol, &count) in formula {
+        s.push_str(symbol);
+        if count != 1 {
+            s.push_str(&count.to_string());
+        }
+    }
+    s
 }
 
 // The TOML-facing schema. Values are decimal strings parsed to Fixed by integer arithmetic, so no floating
@@ -351,6 +519,46 @@ mod tests {
         assert_eq!(t.element("H").map(|e| e.z), Some(1));
         assert_eq!(t.element("U").map(|e| e.z), Some(92));
         assert!(t.element("Xx").is_none());
+    }
+
+    #[test]
+    fn rotational_dof_derives_from_the_formula_and_the_table() {
+        let t = table();
+        // Monatomic (a noble gas): no rotational mode stores energy classically.
+        assert_eq!(t.rotational_dof_of(&[("He", 1)]).unwrap(), 0);
+        assert_eq!(t.rotational_dof_of(&[("Ne", 1)]).unwrap(), 0);
+        assert_eq!(t.rotational_dof_of(&[("Ar", 1)]).unwrap(), 0);
+        // Diatomic: a linear rotor by definition (homonuclear or heteronuclear).
+        assert_eq!(t.rotational_dof_of(&[("N", 2)]).unwrap(), 2);
+        assert_eq!(t.rotational_dof_of(&[("O", 2)]).unwrap(), 2);
+        assert_eq!(t.rotational_dof_of(&[("C", 1), ("O", 1)]).unwrap(), 2); // carbon monoxide
+                                                                            // Linear triatomic (AX2E0): the central carbon carries no lone pair.
+        assert_eq!(t.rotational_dof_of(&[("C", 1), ("O", 2)]).unwrap(), 2); // carbon dioxide
+                                                                            // Bent triatomic (AX2E2): the central oxygen carries two lone pairs -> the anchor `f_rot = 3`.
+        assert_eq!(t.rotational_dof_of(&[("H", 2), ("O", 1)]).unwrap(), 3); // water
+                                                                            // Polyatomic (four or more atoms): a nonlinear rotor.
+        assert_eq!(t.rotational_dof_of(&[("N", 1), ("H", 3)]).unwrap(), 3); // ammonia
+        assert_eq!(t.rotational_dof_of(&[("C", 1), ("H", 4)]).unwrap(), 3); // methane
+    }
+
+    #[test]
+    fn rotational_dof_fails_loud_on_vsepr_misfits_for_the_override() {
+        let t = table();
+        // A homonuclear triatomic (ozone) has no single table-derivable central atom.
+        assert!(matches!(
+            t.rotational_dof_of(&[("O", 3)]),
+            Err(PeriodicError::VseprUnresolved { .. })
+        ));
+        // An empty formula is degenerate.
+        assert!(matches!(
+            t.rotational_dof_of(&[]),
+            Err(PeriodicError::VseprUnresolved { .. })
+        ));
+        // A formula naming an element outside the table fails loud as unknown.
+        assert!(matches!(
+            t.rotational_dof_of(&[("Xx", 1), ("O", 2)]),
+            Err(PeriodicError::UnknownElement(_))
+        ));
     }
 
     #[test]
