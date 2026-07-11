@@ -2042,6 +2042,89 @@ pub fn radiative_equilibrium(
     t2.sqrt().min(t_max)
 }
 
+/// The bounded-bisection step count the implicit surface balance takes: enough for the `[0, t_max]`
+/// temperature bracket to collapse below the Q32.32 resolution over the physical temperature range, so the
+/// root is the exact fixed-point solution and any count at or above the collapse threshold gives the identical
+/// result. A solver convergence bound (a category-c engine constant, independent of world content), not a
+/// tunable in the path of world content.
+const SURFACE_BALANCE_ITERS: u32 = 64;
+
+/// The implicit SURFACE-ENERGY BALANCE: the surface temperature T (K) solving
+/// `absorbed = emissivity*sigma*T^4 + h*(T - t_air) + q_latent`, the shortwave absorbed at the surface set
+/// against radiative emission, sensible (convective) exchange with the reference air temperature `t_air`, and
+/// the latent (evaporative) cooling flux `q_latent`. [`radiative_equilibrium`] keeps only the radiative loss
+/// and runs hot; this closes the turbulent terms so the surface temperature emerges from the full balance.
+/// `f(T) = absorbed - emissivity*sigma*T^4 - h*(T - t_air) - q_latent` is strictly decreasing in T (both the
+/// quartic and the sensible slope fall with T), so the root is unique and found by BOUNDED BISECTION over
+/// `[0, t_max]` with a fixed [`SURFACE_BALANCE_ITERS`] count, deterministic and bit-reproducible with no
+/// linearization error. With `h = 0` and `q_latent = 0` (no turbulent loss) it returns [`radiative_equilibrium`]
+/// EXACTLY (the closed form), the byte-neutral limit. A non-positive absorbed flux reads zero; a balance the cap
+/// cannot satisfy reads `t_max`. The sensible term is signed (`sat_sub`), so a surface below the air temperature
+/// gains heat rather than losing it, no authored one-way preference. The emitted quartic matches
+/// [`radiant_emission`]'s interleaved order (`sigma*t*t*t*t*emissivity`), and an overrun of it or of the
+/// sensible term routes by its sign, so the bisection bracket still narrows monotonically.
+pub fn surface_balance_temperature(
+    absorbed: Fixed,
+    emissivity: Fixed,
+    sigma: Fixed,
+    t_max: Fixed,
+    h: Fixed,
+    t_air: Fixed,
+    q_latent: Fixed,
+) -> Fixed {
+    if absorbed <= ZERO {
+        return ZERO;
+    }
+    // No turbulent loss: the exact closed-form radiative equilibrium, the byte-neutral limit.
+    if h == ZERO && q_latent == ZERO {
+        return radiative_equilibrium(absorbed, emissivity, sigma, t_max);
+    }
+    let two = Fixed::from_int(2);
+    // Whether the total surface loss at T stays below the absorbed flux, i.e. f(T) > 0 so the balance
+    // temperature is higher. Strictly decreasing in T, so this flips from true to false exactly once.
+    let losses_below_absorbed = |t: Fixed| -> bool {
+        let emitted = sigma
+            .checked_mul(t)
+            .and_then(|x| x.checked_mul(t))
+            .and_then(|x| x.checked_mul(t))
+            .and_then(|x| x.checked_mul(t))
+            .and_then(|x| x.checked_mul(emissivity));
+        let emitted = match emitted {
+            Some(e) => e,
+            None => return false, // emission overran representability: loss exceeds absorbed here
+        };
+        let dt = sat_sub(t, t_air);
+        let sensible = match h.checked_mul(dt) {
+            Some(s) => s,
+            // |sensible| overran: a surface far below t_air is a huge gain (loss below absorbed), far above a huge loss
+            None => return dt < ZERO,
+        };
+        let losses = emitted.saturating_add(sensible).saturating_add(q_latent);
+        losses < absorbed
+    };
+    // Bracket guards: strong latent or sensible cooling can push the balance to zero; an absorbed flux the cap
+    // cannot emit pins the surface at t_max.
+    if !losses_below_absorbed(ZERO) {
+        return ZERO;
+    }
+    if losses_below_absorbed(t_max) {
+        return t_max;
+    }
+    let mut lo = ZERO;
+    let mut hi = t_max;
+    let mut i = 0;
+    while i < SURFACE_BALANCE_ITERS {
+        let mid = lo.saturating_add(sat_sub(hi, lo).checked_div(two).unwrap_or(ZERO));
+        if losses_below_absorbed(mid) {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+        i += 1;
+    }
+    lo.saturating_add(sat_sub(hi, lo).checked_div(two).unwrap_or(ZERO))
+}
+
 // === Metabolism (R-METABOLIZE): resting metabolic power and the drain bridge ===
 //
 // The resting-metabolism kernels that free the authored base_metabolic_drain, exertion_drain_coupling,
@@ -3626,6 +3709,132 @@ mod tests {
         assert!(
             t > Fixed::from_int(1200) && t < Fixed::from_int(1700),
             "equilibrium temperature = {t:?} should be ~1450 K, not the cap"
+        );
+    }
+
+    #[test]
+    fn surface_balance_reduces_to_radiative_equilibrium_with_no_turbulent_loss() {
+        // The byte-neutral limit the gate required: with no sensible (h = 0) and no latent (q_latent = 0)
+        // cooling, the implicit balance returns the closed-form radiative equilibrium EXACTLY, and the air
+        // temperature is irrelevant in that limit (it is read only through the sensible term).
+        let sigma = Fixed::from_ratio(567, 10_000_000_000); // 5.67e-8
+        let t_max = Fixed::from_int(100_000);
+        for &absorbed in &[
+            Fixed::from_int(200),
+            Fixed::from_int(1000),
+            Fixed::from_int(1361),
+        ] {
+            for &emissivity in &[
+                Fixed::from_ratio(4, 1000),
+                Fixed::from_ratio(9, 10),
+                Fixed::ONE,
+            ] {
+                let closed = radiative_equilibrium(absorbed, emissivity, sigma, t_max);
+                for &t_air in &[ZERO, Fixed::from_int(250), Fixed::from_int(9_999)] {
+                    let balanced = surface_balance_temperature(
+                        absorbed, emissivity, sigma, t_max, ZERO, t_air, ZERO,
+                    );
+                    assert_eq!(
+                        balanced, closed,
+                        "no turbulent loss must reduce to radiative_equilibrium exactly (t_air irrelevant)"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn surface_turbulent_cooling_lowers_the_temperature_below_the_radiative_only_balance() {
+        // Adding sensible and latent cooling lowers the surface temperature below the radiative-only
+        // equilibrium (the Mirror hot bias this arc closes, in miniature).
+        let sigma = Fixed::from_ratio(567, 10_000_000_000);
+        let t_max = Fixed::from_int(100_000);
+        let absorbed = Fixed::from_int(1000);
+        let emissivity = Fixed::from_ratio(9, 10);
+        let rad_only = radiative_equilibrium(absorbed, emissivity, sigma, t_max);
+        let balanced = surface_balance_temperature(
+            absorbed,
+            emissivity,
+            sigma,
+            t_max,
+            Fixed::from_int(10),  // h, a still-air convective coefficient
+            Fixed::from_int(250), // an independent reference air temperature
+            Fixed::from_int(100), // a latent cooling flux
+        );
+        assert!(
+            balanced < rad_only,
+            "turbulent cooling must lower the balance: balanced {balanced:?} < radiative-only {rad_only:?}"
+        );
+        assert!(
+            balanced > Fixed::from_int(250),
+            "the balance stays above the air reference it exchanges with: {balanced:?}"
+        );
+    }
+
+    #[test]
+    fn surface_balance_non_positive_absorbed_reads_zero() {
+        let sigma = Fixed::from_ratio(567, 10_000_000_000);
+        let t_max = Fixed::from_int(100_000);
+        for &absorbed in &[ZERO, Fixed::from_int(-5)] {
+            let t = surface_balance_temperature(
+                absorbed,
+                Fixed::from_ratio(9, 10),
+                sigma,
+                t_max,
+                Fixed::from_int(10),
+                Fixed::from_int(250),
+                Fixed::from_int(100),
+            );
+            assert_eq!(t, ZERO, "no absorbed flux is no temperature");
+        }
+    }
+
+    #[test]
+    fn surface_balance_overwhelming_absorbed_reads_the_cap() {
+        // An absorbed flux the cap temperature cannot emit even with the turbulent terms pins the surface
+        // at t_max, the same cap semantics as radiative_equilibrium.
+        let sigma = Fixed::from_ratio(567, 10_000_000_000);
+        let t_max = Fixed::from_int(1000);
+        let t = surface_balance_temperature(
+            Fixed::from_int(1_000_000_000),
+            Fixed::from_ratio(9, 10),
+            sigma,
+            t_max,
+            Fixed::from_int(10),
+            Fixed::from_int(250),
+            Fixed::from_int(100),
+        );
+        assert_eq!(t, t_max, "an unbalanceable absorbed flux reads the cap");
+    }
+
+    #[test]
+    fn surface_stronger_convective_cooling_gives_a_lower_temperature() {
+        let sigma = Fixed::from_ratio(567, 10_000_000_000);
+        let t_max = Fixed::from_int(100_000);
+        let absorbed = Fixed::from_int(1000);
+        let emissivity = Fixed::from_ratio(9, 10);
+        let t_air = Fixed::from_int(250);
+        let weak = surface_balance_temperature(
+            absorbed,
+            emissivity,
+            sigma,
+            t_max,
+            Fixed::from_int(5),
+            t_air,
+            ZERO,
+        );
+        let strong = surface_balance_temperature(
+            absorbed,
+            emissivity,
+            sigma,
+            t_max,
+            Fixed::from_int(50),
+            t_air,
+            ZERO,
+        );
+        assert!(
+            strong < weak,
+            "a larger convective coefficient cools the surface more: strong {strong:?} < weak {weak:?}"
         );
     }
 

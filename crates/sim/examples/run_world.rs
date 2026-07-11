@@ -1765,6 +1765,21 @@ fn snapshot(
                 "  seasonal latitude (mean K): north-pole {north:.1}  equator {equator:.1}  south-pole {south:.1}"
             );
         }
+        // The GLOBAL MEAN surface temperature (the AREA mean over every cell), the whole-world diagnostic the
+        // surface-energy-balance arc reports against Earth's ~288 K global mean. A pure read for the readout, no
+        // state change, so it is off the `state_hash` and every pin holds.
+        {
+            let mut total = 0.0_f64;
+            for y in 0..fh {
+                for x in 0..fw {
+                    total += f.at(x, y).to_f64_lossy();
+                }
+            }
+            let cells = (fw as f64) * (fh as f64);
+            if cells > 0.0 {
+                println!("  global mean surface (K): {:.1}", total / cells);
+            }
+        }
         // Per-material thermal inertia (follow-on 2): a cell's own water content sets how fast it heats and
         // cools, so wetter cells lag while drier land swings. To isolate the day-night lag from the pole-to-
         // equator latitude gradient, restrict to a NARROW EQUATORIAL BAND (near-constant latitude), split its
@@ -2066,6 +2081,35 @@ fn divergence_comparison(w: &World, bands: &[Band]) -> Option<String> {
     }
 
     (!parts.is_empty()).then(|| parts.join("  "))
+}
+
+/// The surface turbulent-cooling data for the diurnal balance, read from the world's own physics: the air medium's
+/// convective coefficient `h` (the sensible-flux coefficient, the same per-medium lumped datum the metabolism reads)
+/// from the manifest, and the surface latent heat `L_vap` from the floor substance water's `therm.latent_heat`
+/// (stored kJ/kg, scaled to J/kg so `Q_latent = E * L_vap` is a W/m^2 flux). Both are DATA read, not authored; an
+/// alien world with a different air or volatile carries its own values, so the surface cooling derives from the
+/// world's own substance physics.
+fn derive_surface_cooling(manifest: &CalibrationManifest) -> civsim_sim::environ::SurfaceCooling {
+    let air = manifest
+        .require_map("medium.air")
+        .expect("the mirror manifest carries the air medium profile");
+    let convective_h = air
+        .get("convective_coefficient")
+        .copied()
+        .expect("the air medium carries a convective coefficient");
+    let floor = PhysicsRegistry::ground().expect("the embedded ground physics floor loads");
+    let latent_kj_per_kg = floor
+        .substance("water")
+        .and_then(|s| s.vector.get("therm.latent_heat").copied())
+        .expect("water carries its latent heat of vaporization in the floor");
+    // kJ/kg to J/kg, so E [kg/(m^2*s)] * L_vap [J/kg] is a W/m^2 flux comparable to the absorbed irradiance.
+    let latent_heat = latent_kj_per_kg
+        .checked_mul(Fixed::from_int(1000))
+        .unwrap_or(Fixed::MAX);
+    civsim_sim::environ::SurfaceCooling {
+        convective_h,
+        latent_heat,
+    }
 }
 
 // --- the run ---
@@ -2513,6 +2557,12 @@ fn main() {
                 // tilt is Mirror's per-world datum, not a global author. Opt-in and byte-neutral off, so the
                 // four tracked determinism pins hold; only this armed scenario cycles.
                 env.arm_diurnal(civsim_sim::environ::DiurnalSky::mirror(128, 128 * 365));
+                // Surface turbulent cooling (surface-energy-balance arc): arm the latent and sensible loss so the
+                // surface temperature emerges from the FULL balance rather than radiation alone (closing the hot
+                // bias). `h` is the air medium's convective coefficient and `L_vap` is water's latent heat of
+                // vaporization from the floor substance, both world DATA read not authored. This re-pins `living`,
+                // a stated re-pin whose reason is the added latent and sensible surface cooling.
+                env.arm_surface_cooling(derive_surface_cooling(&manifest));
             }
             runner.set_matter_cycle(MatterCycleCalib::dev_fixture());
             runner.set_decomposer(DecomposerDriverRegistry::dev_fixture());
