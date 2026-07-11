@@ -1811,6 +1811,81 @@ impl VolatileSaturationCurve {
     }
 }
 
+/// The virtual-density buoyancy `delta_rho/rho` driving free convection at an evaporating surface, DERIVED per
+/// cell from the local state as the sum of a THERMAL and a COMPOSITIONAL part (no fixed constant). Thermal:
+/// `delta_T / T` (the ideal-gas `beta = 1/T` times the surface-minus-air temperature difference). Compositional:
+/// `(M_air - M_water)/M_air * (e_s - e_a)/p` (humid air is lighter than dry, the local vapour deficit over the
+/// ambient pressure). `delta_t` is the surface-minus-air temperature difference, `t` the temperature,
+/// `m_air`/`m_water` the molar masses, `e_s`/`e_a` the saturation and ambient vapour pressures (same unit), `p`
+/// the ambient pressure (the same unit as `e`, so the ratio is dimensionless). A non-positive `t`, `m_air`, or
+/// `p` drops the ill-defined term rather than dividing by zero. The result can be negative (stable stratification
+/// suppresses convection); the free-convection kernel treats a non-positive buoyancy as no convection.
+pub fn virtual_density_buoyancy(
+    delta_t: Fixed,
+    t: Fixed,
+    m_air: Fixed,
+    m_water: Fixed,
+    e_s: Fixed,
+    e_a: Fixed,
+    p: Fixed,
+) -> Fixed {
+    let thermal = if t > ZERO {
+        delta_t.checked_div(t).unwrap_or(ZERO)
+    } else {
+        ZERO
+    };
+    let compositional = if m_air > ZERO && p > ZERO {
+        let mass_frac = (m_air - m_water).checked_div(m_air).unwrap_or(ZERO);
+        let vapour_frac = (e_s - e_a).checked_div(p).unwrap_or(ZERO);
+        mass_frac.checked_mul(vapour_frac).unwrap_or(ZERO)
+    } else {
+        ZERO
+    };
+    thermal + compositional
+}
+
+/// The still-air evaporation coefficient `a_still` (the multiplier on the vapour-pressure deficit in pascals that
+/// gives the evaporative mass flux in kg/(m^2 s)), DERIVED from turbulent free-convection mass transfer with the
+/// length scale CANCELLED. The turbulent Sherwood `Sh = C*Ra^(1/3)` over a Rayleigh number `Ra ~ L^3` cancels the
+/// length `L` (`Sh = h_m*L/D_v`), leaving the mass-transfer velocity `h_m = C*D_v*(g*(delta_rho/rho)/(nu*D_v))^(1/3)`
+/// and `a_still = h_m/(R_v*T)`. `c` is the universal turbulent closure constant (McAdams/Incropera, a turbulent-
+/// transport residue, the same class as the Watson and Neufeld constants), `d_v` the vapour diffusivity (m^2/s),
+/// `g` gravity, `buoyancy` the virtual-density `delta_rho/rho`, `nu` the kinematic viscosity (m^2/s), `r_v` the
+/// specific gas constant, `t` the temperature. The cube root is factored as `D_v^(2/3)*(g*buoyancy/nu)^(1/3)` to
+/// keep the fixed-point intermediates in range (the raw `nu*D_v ~ 3e-10` underflows Q32.32). A non-positive
+/// buoyancy (stable air, no free convection) or any degenerate input yields zero; an overflow saturates.
+pub fn free_convection_a_still(
+    c: Fixed,
+    d_v: Fixed,
+    g: Fixed,
+    buoyancy: Fixed,
+    nu: Fixed,
+    r_v: Fixed,
+    t: Fixed,
+) -> Fixed {
+    if buoyancy <= ZERO || d_v <= ZERO || nu <= ZERO || r_v <= ZERO || t <= ZERO {
+        return ZERO;
+    }
+    let d_v_two_thirds = d_v.powf(Fixed::from_ratio(2, 3));
+    let ra_core = match g.checked_mul(buoyancy).and_then(|x| x.checked_div(nu)) {
+        Some(x) => x,
+        None => return ZERO,
+    };
+    let ra_core_cube_root = ra_core.powf(Fixed::from_ratio(1, 3));
+    let h_m = match c
+        .checked_mul(d_v_two_thirds)
+        .and_then(|x| x.checked_mul(ra_core_cube_root))
+    {
+        Some(x) => x,
+        None => return Fixed::MAX,
+    };
+    let rt = match r_v.checked_mul(t) {
+        Some(x) => x,
+        None => return ZERO,
+    };
+    h_m.checked_div(rt).unwrap_or(ZERO)
+}
+
 /// The Lennard-Jones collision diameter `sigma` (angstrom) and the potential well depth `epsilon/k_B` (kelvin)
 /// DERIVED from a substance's measured CRITICAL POINT (`t_c` in K, `p_c` in Pa) through the corresponding-
 /// states relation fixed by the LJ potential's OWN reduced critical point (`T_c* = k_B*T_c/epsilon = 1.312`,
@@ -4669,6 +4744,89 @@ mod tests {
             curve.latent_heat(Fixed::from_int(700)),
             ZERO,
             "no latent heat above the critical point"
+        );
+    }
+
+    #[test]
+    fn the_evaporation_a_still_derives_from_free_convection() {
+        // The virtual-density buoyancy sums a thermal and a compositional part per cell, no fixed constant.
+        // Warm humid Mirror surface (delta_T 2 K over 288 K, vapour deficit ~500 Pa over 101325 Pa ambient,
+        // M_air 28.97, M_water 18.015): thermal 2/288 ~0.0069, compositional (10.955/28.97)*(528/101325) ~0.0020.
+        let m_air = Fixed::from_ratio(2897, 100);
+        let m_water = Fixed::from_ratio(18015, 1000);
+        let buoy = virtual_density_buoyancy(
+            Fixed::from_int(2),
+            Fixed::from_int(288),
+            m_air,
+            m_water,
+            Fixed::from_int(1768),
+            Fixed::from_int(1240),
+            Fixed::from_int(101_325),
+        );
+        assert!(
+            buoy > Fixed::from_ratio(5, 1000) && buoy < Fixed::from_ratio(15, 1000),
+            "the combined buoyancy derives to ~0.009 for a warm humid surface"
+        );
+        // A drier ambient raises the compositional buoyancy.
+        let buoy_drier = virtual_density_buoyancy(
+            Fixed::from_int(2),
+            Fixed::from_int(288),
+            m_air,
+            m_water,
+            Fixed::from_int(1768),
+            Fixed::from_int(400),
+            Fixed::from_int(101_325),
+        );
+        assert!(
+            buoy_drier > buoy,
+            "a drier ambient raises the compositional buoyancy"
+        );
+        // A strongly cold surface with little deficit is stably stratified (negative buoyancy).
+        let buoy_stable = virtual_density_buoyancy(
+            Fixed::from_int(-10),
+            Fixed::from_int(288),
+            m_air,
+            m_water,
+            Fixed::from_int(1768),
+            Fixed::from_int(1700),
+            Fixed::from_int(101_325),
+        );
+        assert!(
+            buoy_stable < ZERO,
+            "a cold surface with little vapour deficit is stably stratified"
+        );
+
+        // a_still derives from the length-free free-convection mass transfer. Water at 288 K (D_v 2.42e-5,
+        // g 9.81, buoyancy ~0.009, nu 1.5e-5, R_v 461.5, C 0.14) lands a small positive coefficient ~1.6e-8 s/m.
+        let d_v = Fixed::from_ratio(242, 10_000_000);
+        let nu = Fixed::from_ratio(15, 1_000_000);
+        let r_v = Fixed::from_ratio(4615, 10);
+        let c = Fixed::from_ratio(14, 100);
+        let g = Fixed::from_ratio(981, 100);
+        let a_still = free_convection_a_still(c, d_v, g, buoy, nu, r_v, Fixed::from_int(288));
+        assert!(
+            a_still > ZERO && a_still < Fixed::from_ratio(1, 1_000_000),
+            "a_still is a small positive coefficient (order 1e-8 s/m), not the 0.1 placeholder"
+        );
+        // Stronger buoyancy drives faster convection, a larger a_still.
+        let a_still_stronger = free_convection_a_still(
+            c,
+            d_v,
+            g,
+            buoy.saturating_add(buoy),
+            nu,
+            r_v,
+            Fixed::from_int(288),
+        );
+        assert!(
+            a_still_stronger > a_still,
+            "stronger buoyancy raises a_still"
+        );
+        // Stable air (non-positive buoyancy) yields no free-convection evaporation, not a panic.
+        assert_eq!(
+            free_convection_a_still(c, d_v, g, ZERO, nu, r_v, Fixed::from_int(288)),
+            ZERO,
+            "stable air yields no free-convection evaporation"
         );
     }
 
