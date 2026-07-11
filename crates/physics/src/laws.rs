@@ -372,6 +372,56 @@ pub fn actuator_work(force: Fixed, distance: Fixed, energy_max: Fixed) -> Fixed 
     }
 }
 
+/// The elastic-recoil delivered energy (J), the elastic analog of the rigid actuator work [`actuator_work`]: the
+/// elastic STRAIN ENERGY a springy actuator stores up to yield and releases in a recoil blow (a whip tip, a
+/// trap-jaw latch, a ballistic spring). It is the MODULUS OF RESILIENCE `yield^2 / (2 E)` (the elastic
+/// strain-energy density up to yield, the area under the linear elastic stress-strain curve; Gere and Timoshenko,
+/// Mechanics of Materials) times the strained VOLUME, on the joule scale `F d` and the Griffith fracture energy
+/// are on, so the run-all-gate-to-zero delivered-energy set (the stroke-rate step-2 substrate) combines it with
+/// the rigid `F d` on one currency.
+///
+/// `yield_strength` and `elastic_modulus` are the material's `mat.yield_strength` and `mat.elastic_modulus`, both
+/// MEGAPASCAL-stored (`stored = Pa / 1e6`), so `yield^2 / (2 E)` carries one net megapascal (a stress, an energy
+/// density on the MJ/m^3 scale): applying the SAME `C_PA` megapascal-to-pascal bridge [`stress_force`] lands it on
+/// J/m^3, and the `volume` product on Joules, with no new constant. `volume` is the strained elastic-element
+/// volume (m^3), the actuator's own grown geometry. `energy_max` bounds the representable energy. A part with no
+/// yield strength, no elastic modulus, or no volume stores no elastic energy and reads ZERO (the absence
+/// convention): a rigid or fluid actuator self-gates, so the elastic kernel contributes nothing until a world
+/// grows a springy tissue. The conversion efficiency is one, a lossless floor idealization (the same
+/// energy-conservation ceiling [`actuator_work`] makes); a per-material hysteresis-damping derating is the
+/// disclosed, physics-derivable refinement, not an authored world value.
+pub fn elastic_recoil_energy(
+    yield_strength: Fixed,
+    elastic_modulus: Fixed,
+    volume: Fixed,
+    energy_max: Fixed,
+) -> Fixed {
+    if yield_strength <= ZERO || elastic_modulus <= ZERO || volume <= ZERO {
+        return ZERO;
+    }
+    // The modulus of resilience `yield^2 / (2 E)`, the elastic strain-energy density up to yield (a stress, MJ/m^3
+    // in the megapascal-stored scale). Each step guards its overflow to the representability ceiling, never wraps.
+    let two_e = match elastic_modulus.checked_mul(Fixed::from_int(2)) {
+        Some(v) => v,
+        None => return energy_max,
+    };
+    let resilience = match yield_strength
+        .checked_mul(yield_strength)
+        .and_then(|y2| y2.checked_div(two_e))
+    {
+        Some(v) => v,
+        None => return energy_max,
+    };
+    // `resilience[MPa] * C_PA` lands on J/m^3, `* volume` on J (the same bridge `stress_force` applies).
+    match resilience
+        .checked_mul(C_PA)
+        .and_then(|density| density.checked_mul(volume))
+    {
+        Some(e) => e.min(energy_max),
+        None => energy_max,
+    }
+}
+
 /// Delivered kinetic energy on the kilojoule scale. The half is applied before the
 /// mass-velocity-squared product and the scale bridge is applied before the squared
 /// velocity, so a representable energy is never pre-saturated (the wave-1 fix); the
@@ -3819,5 +3869,55 @@ mod tests {
             capped <= tiny_stock,
             "the flux never exceeds the present stock (flux {capped:?}, stock {tiny_stock:?})"
         );
+    }
+
+    #[test]
+    fn elastic_recoil_energy_is_the_resilience_times_volume_and_gates_on_absent_material() {
+        // The stroke-rate step-2 elastic kernel law: the delivered recoil energy is the modulus of resilience
+        // `yield^2 / (2 E)` (the elastic strain-energy density up to yield) times the strained volume, on the
+        // joule scale `F d` is on. Values chosen so the fixed-point arithmetic is exact: yield 200 MPa, modulus
+        // 2000 MPa, so resilience = 200^2 / (2*2000) = 40000/4000 = 10 (MPa = MJ/m^3); `* C_PA` (1e6) = 1e7 J/m^3;
+        // `* volume` 1 m^3 = 1e7 J, under a 1e8 cap.
+        let cap = Fixed::from_int(100_000_000);
+        let yield_s = Fixed::from_int(200);
+        let modulus = Fixed::from_int(2000);
+        let volume = Fixed::ONE;
+        let e = elastic_recoil_energy(yield_s, modulus, volume, cap);
+        assert_eq!(
+            e,
+            Fixed::from_int(10_000_000),
+            "resilience yield^2/(2E) times C_PA times volume, on the joule scale"
+        );
+        // A stiffer material of the same yield stores LESS recoil energy (resilience falls as the modulus rises).
+        let stiff = elastic_recoil_energy(yield_s, Fixed::from_int(20000), volume, cap);
+        assert!(
+            stiff < e && stiff > ZERO,
+            "a stiffer spring of the same yield stores less recoil energy (stiff {stiff:?} vs {e:?})"
+        );
+        // A higher-yield material of the same modulus stores MORE (resilience rises with yield squared).
+        let tougher = elastic_recoil_energy(Fixed::from_int(400), modulus, volume, cap);
+        assert!(
+            tougher > e,
+            "a higher-yield spring stores more recoil energy (tougher {tougher:?} vs {e:?})"
+        );
+        // The absence convention: no yield, no modulus, or no volume stores no elastic energy, so a rigid or
+        // fluid actuator self-gates and the elastic kernel contributes nothing until a world grows a springy tissue.
+        assert_eq!(
+            elastic_recoil_energy(ZERO, modulus, volume, cap),
+            ZERO,
+            "no yield strength: no recoil"
+        );
+        assert_eq!(
+            elastic_recoil_energy(yield_s, ZERO, volume, cap),
+            ZERO,
+            "no elastic modulus: no recoil"
+        );
+        assert_eq!(
+            elastic_recoil_energy(yield_s, modulus, ZERO, cap),
+            ZERO,
+            "no strained volume: no recoil"
+        );
+        // Deterministic (Principle 3).
+        assert_eq!(e, elastic_recoil_energy(yield_s, modulus, volume, cap));
     }
 }

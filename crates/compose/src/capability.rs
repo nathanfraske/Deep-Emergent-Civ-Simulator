@@ -141,19 +141,36 @@ impl CapabilityKernel {
             CapabilityKernel::Refract => &["opt.refractive_index"],
             CapabilityKernel::Shear => &["mat.shear_strength", "mat.yield_strength"],
             CapabilityKernel::Crush => &["mat.compressive_strength"],
-            CapabilityKernel::Impact => &["mat.fracture_strength"],
+            // The rigid actuating strength (entry 0), the elastic path's yield strength (1) and elastic modulus
+            // (2), and the hydraulic path's driving pressure (3): the IMPACT grade reads the same
+            // run-all-gate-to-zero MAX the delivery path resolves over the mechanical family, so the grade and the
+            // delivery stay in lockstep (the gate's slice-3 ruling). A part that grows no yield, modulus, or driving
+            // pressure reads zero elastic and hydraulic terms and grades on the rigid `F d` alone (byte-neutral at
+            // the rigid limit).
+            CapabilityKernel::Impact => &[
+                "mat.fracture_strength",
+                "mat.yield_strength",
+                "mat.elastic_modulus",
+                "fluid.driving_pressure",
+            ],
         }
     }
 
     /// The dimensionless capability in `[0, 1]` the part's geometry and material yield for this function
     /// against the reserved references. A pure fixed-point read: no float, no id, no RNG, so a capability
     /// is a deterministic function of the grown physics and the reserved references.
+    /// `geometry_axes` and `material_axes` are the law's DATA-declared axis-id bindings (from its
+    /// [`FunctionLawDef`] row). The IMPACT kernel reads its axes from them (the grade-path parallel of the
+    /// delivery-path contact-transfer row); the other kernels read their hardcoded contract and ignore the
+    /// lists (the flagged follow-on lifts them the same way).
     pub fn capability(
         self,
         geo: &dyn Fn(&str) -> Fixed,
         mat: &dyn Fn(&str) -> Fixed,
         refs: &CapabilityRefs,
         caps: &CapabilityCaps,
+        geometry_axes: &[String],
+        material_axes: &[String],
     ) -> Fixed {
         match self {
             CapabilityKernel::Pierce => pierce(geo, mat, refs, caps),
@@ -161,7 +178,7 @@ impl CapabilityKernel {
             CapabilityKernel::Refract => refract(mat, refs),
             CapabilityKernel::Shear => shear(geo, mat, refs, caps),
             CapabilityKernel::Crush => crush(geo, mat, refs, caps),
-            CapabilityKernel::Impact => impact(geo, mat, refs),
+            CapabilityKernel::Impact => impact(geo, mat, refs, geometry_axes, material_axes),
         }
     }
 }
@@ -381,28 +398,73 @@ fn crush(
     )
 }
 
-/// The IMPACT read: is the part a percussion tool, and how good a one, from its ACTUATOR WORK (the made-world
-/// arc, Section G). The part's actuating force (its strength stress `mat.fracture_strength` over its
-/// cross-section `mech.cross_section_area`, an N) over its own grown stroke `mech.stroke_length` is the energy
-/// it delivers ([`laws::actuator_work`], `F d`, a J); if that clears the reserved reference strike energy (on
-/// the same joule scale) the part strikes, graded above the threshold. A STRONG, thick, long-stroked part reads
-/// a high impact where a weak or short-stroked one reads none, the distinction derived from the part's own body
-/// rather than a world-global swing speed. A part with no actuating strength or no stroke reads zero.
+/// The IMPACT read: is the part a percussion tool, and how good a one, from its delivered mechanical energy (the
+/// made-world arc, Section G; the stroke-rate step-2 substrate). The delivered energy is the run-all-gate-to-zero
+/// MAX over the shared-source mechanical family: the RIGID actuator work (its strength stress `mat.fracture_strength`
+/// over its cross-section `mech.cross_section_area`, an N, over its own grown stroke `mech.stroke_length`,
+/// [`laws::actuator_work`], `F d`) and the ELASTIC recoil (the modulus of resilience of its yield strength
+/// `mat.yield_strength` and elastic modulus `mat.elastic_modulus` over the swept volume `cross_section * stroke`,
+/// [`laws::elastic_recoil_energy`]), and the HYDRAULIC pressure-over-volume work (its `fluid.driving_pressure` over
+/// the piston cross-section, over its stroke, `P dV = F d`, which composes from the same [`laws::stress_force`] and
+/// [`laws::actuator_work`], no new law). This is the SAME aggregate the delivery path resolves
+/// ([`civsim_sim::contact_transfer::resolve_delivered_energy`]), so the grade and the delivery stay in LOCKSTEP
+/// (the gate's slice-3 ruling): a springy or hydraulic actuator is graded on its recoil or pressure work, not
+/// mis-graded as rigid-only. If the delivered energy clears the reserved reference strike energy the part strikes,
+/// graded above the threshold. A STRONG, thick, long-stroked part, a SPRINGY one, or a HYDRAULIC one reads a high
+/// impact where a weak, short-stroked, non-springy, non-fluid one reads none, derived from the part's own body
+/// rather than a world-global swing speed. A part with none of a rigid actuator, a springy tissue, or a working
+/// fluid reads zero.
 fn impact(
     geo: &dyn Fn(&str) -> Fixed,
     mat: &dyn Fn(&str) -> Fixed,
     refs: &CapabilityRefs,
+    geometry_axes: &[String],
+    material_axes: &[String],
 ) -> Fixed {
-    // The actuating force in newtons (strength stress over cross-section, promoted by the megapascal-to-newton
-    // bridge), then the actuator work over the grown stroke. Passing the force through `actuator_work` rather
-    // than short-circuiting on overflow keeps the stroke guard live: a part with no grown stroke reads zero even
-    // when its force would overflow (a representability corner, not a full-impact ceiling).
-    let force = laws::stress_force(
-        mat("mat.fracture_strength"),
-        geo("mech.cross_section_area"),
-        ENERGY_GUARD,
-    );
-    let delivered = laws::actuator_work(force, geo("mech.stroke_length"), ENERGY_GUARD);
+    // The actuating-strength, cross-section, and stroke axes are read from the law's DATA-declared bindings (the
+    // grade-path parallel of the delivery-path contact-transfer row), so an alien actuator names its own axes on
+    // both paths in lockstep: the rigid strength is material-axis 0, the cross-section geometry-axis 0, the stroke
+    // geometry-axis 1, and the elastic path's yield strength material-axis 1 and elastic modulus material-axis 2
+    // (the order the kernel's contract declares them, [`CapabilityKernel::material_axes`]). A binding that names no
+    // such axis reads zero through the accessor, so the part self-gates (the absence convention), never a hardcoded
+    // id and never a fabricated blow.
+    //
+    // POSITIONAL-CONTRACT CAVEAT (a section-9 alien-lens catch, flagged for the gate-deferred named-vs-positional
+    // unification): these axes are read by POSITION, so an alien binding MUST list them in the declared order
+    // [strength, yield, modulus, driving_pressure] and supply a zero-reading placeholder (or an axis it grows zero)
+    // at each slot it lacks, NEVER omit one. A binding that omits an absent leading axis (e.g. a purely-springy
+    // actuator writing [yield_id, modulus_id]) is mis-read positionally, yield landing in the strength slot and
+    // fabricating a rigid blow. The delivery-path row uses NAMED fields (`yield_axis`, `elastic_modulus_axis`,
+    // `pressure_axis`) and is immune; unifying the grade path to named fields is the gate-deferred follow-on (fold
+    // into lifting the other five kernels' bindings), which this slice's extension to four positional material axes
+    // makes more pointed.
+    let strength = material_axes.first().map(|a| mat(a)).unwrap_or(Fixed::ZERO);
+    let cross_section = geometry_axes.first().map(|a| geo(a)).unwrap_or(Fixed::ZERO);
+    let stroke = geometry_axes.get(1).map(|a| geo(a)).unwrap_or(Fixed::ZERO);
+    // The RIGID path: the actuating force in newtons (strength stress over cross-section, promoted by the
+    // megapascal-to-newton bridge), then the actuator work over the grown stroke. Passing the force through
+    // `actuator_work` rather than short-circuiting on overflow keeps the stroke guard live: a part with no grown
+    // stroke reads zero even when its force would overflow (a representability corner, not a full-impact ceiling).
+    let force = laws::stress_force(strength, cross_section, ENERGY_GUARD);
+    let rigid = laws::actuator_work(force, stroke, ENERGY_GUARD);
+    // The ELASTIC path: the recoil energy of the springy tissue (yield strength, elastic modulus) over the swept
+    // volume (cross-section times stroke, the two geometry axes reused, no new axis). Self-gates to zero on a part
+    // with no yield or no modulus, so a rigid-limit part reads exactly the rigid `F d` (byte-neutral). The swept
+    // volume is a PROXY for the elastic element's own volume, the reserved-with-basis refinement noted on the row.
+    let yield_strength = material_axes.get(1).map(|a| mat(a)).unwrap_or(Fixed::ZERO);
+    let elastic_modulus = material_axes.get(2).map(|a| mat(a)).unwrap_or(Fixed::ZERO);
+    let volume = cross_section.checked_mul(stroke).unwrap_or(ENERGY_GUARD);
+    let elastic =
+        laws::elastic_recoil_energy(yield_strength, elastic_modulus, volume, ENERGY_GUARD);
+    // The HYDRAULIC path: the pressure-over-volume work `P dV` = `F d` of a working-fluid actuator, which COMPOSES
+    // from the same two laws the rigid path uses (the driving pressure over the piston cross-section is the force),
+    // no new law. Self-gates to zero on a part with no driving pressure, so a non-fluid part is unaffected.
+    let driving_pressure = material_axes.get(3).map(|a| mat(a)).unwrap_or(Fixed::ZERO);
+    let hydraulic_force = laws::stress_force(driving_pressure, cross_section, ENERGY_GUARD);
+    let hydraulic = laws::actuator_work(hydraulic_force, stroke, ENERGY_GUARD);
+    // The MAX over the shared-source mechanical family (alternative paths for one metabolic source; SUM would
+    // double-count), the same aggregate the delivery path resolves.
+    let delivered = rigid.max(elastic).max(hydraulic);
     normalize(
         sat_sub(delivered, refs.reference_strike_energy),
         refs.reference_strike_energy,
@@ -558,6 +620,45 @@ pub struct FunctionLawDef {
     pub name: String,
     /// The kernel it computes.
     pub kernel: CapabilityKernel,
+    /// The physics-floor GEOMETRY axis ids the law's kernel reads, as DATA (Principle 11): the grade-path
+    /// parallel of the delivery-path contact-transfer row (which carries its `cross_section_axis`/`stroke_axis`
+    /// on the row), so an alien actuator names its own axes on BOTH the capability grade and the delivered-energy
+    /// paths, in lockstep, never a rewrite of one while the other is data. The IMPACT kernel reads its
+    /// cross-section (entry 0) and stroke (entry 1) from here; the other kernels still read their hardcoded
+    /// default contract (a flagged follow-on to lift them the same way), so a def whose binding equals
+    /// `kernel.geometry_axes()`, as [`FunctionLawDef::new`] populates it, reads byte-identically.
+    pub geometry_axes: Vec<String>,
+    /// The physics-floor MATERIAL axis ids the law's kernel reads, as DATA, the material sibling of
+    /// [`Self::geometry_axes`]. The IMPACT kernel reads its actuating-strength axis from the first entry.
+    pub material_axes: Vec<String>,
+}
+
+impl FunctionLawDef {
+    /// A law entry whose axis bindings are the kernel's own declared contract, the byte-neutral default: the
+    /// data-carried axis ids equal [`CapabilityKernel::geometry_axes`] / [`CapabilityKernel::material_axes`], so
+    /// a def built this way reads exactly as the hardcoded kernel did. An alien registry overrides the axis ids
+    /// by constructing the def with its own lists (the harden-to-registry contract, Principle 11).
+    pub fn new(
+        id: FunctionLawId,
+        name: impl Into<String>,
+        kernel: CapabilityKernel,
+    ) -> FunctionLawDef {
+        FunctionLawDef {
+            id,
+            name: name.into(),
+            kernel,
+            geometry_axes: kernel
+                .geometry_axes()
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
+            material_axes: kernel
+                .material_axes()
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
+        }
+    }
 }
 
 /// The function-law catalogue. Ordered by id so every walk is deterministic. The structure is fixed
@@ -619,36 +720,38 @@ impl FunctionLawRegistry {
     /// aerodynamic, insulation, chemoreception, and respiration laws.
     pub fn dev_seed() -> Self {
         let mut reg = FunctionLawRegistry::new();
-        reg.insert(FunctionLawDef {
-            id: FunctionLawRegistry::ID_PIERCE,
-            name: "pierce".to_string(),
-            kernel: CapabilityKernel::Pierce,
-        });
-        reg.insert(FunctionLawDef {
-            id: FunctionLawRegistry::ID_LOCOMOTE,
-            name: "locomote".to_string(),
-            kernel: CapabilityKernel::Locomote,
-        });
-        reg.insert(FunctionLawDef {
-            id: FunctionLawRegistry::ID_REFRACT,
-            name: "refract".to_string(),
-            kernel: CapabilityKernel::Refract,
-        });
-        reg.insert(FunctionLawDef {
-            id: FunctionLawRegistry::ID_SHEAR,
-            name: "shear".to_string(),
-            kernel: CapabilityKernel::Shear,
-        });
-        reg.insert(FunctionLawDef {
-            id: FunctionLawRegistry::ID_CRUSH,
-            name: "crush".to_string(),
-            kernel: CapabilityKernel::Crush,
-        });
-        reg.insert(FunctionLawDef {
-            id: FunctionLawRegistry::ID_IMPACT,
-            name: "impact".to_string(),
-            kernel: CapabilityKernel::Impact,
-        });
+        // Each law's axis bindings default to its kernel's own contract (`FunctionLawDef::new`), so the IMPACT
+        // read (now off the data bindings, the delivery-path parallel) is byte-identical to the hardcoded form.
+        reg.insert(FunctionLawDef::new(
+            FunctionLawRegistry::ID_PIERCE,
+            "pierce",
+            CapabilityKernel::Pierce,
+        ));
+        reg.insert(FunctionLawDef::new(
+            FunctionLawRegistry::ID_LOCOMOTE,
+            "locomote",
+            CapabilityKernel::Locomote,
+        ));
+        reg.insert(FunctionLawDef::new(
+            FunctionLawRegistry::ID_REFRACT,
+            "refract",
+            CapabilityKernel::Refract,
+        ));
+        reg.insert(FunctionLawDef::new(
+            FunctionLawRegistry::ID_SHEAR,
+            "shear",
+            CapabilityKernel::Shear,
+        ));
+        reg.insert(FunctionLawDef::new(
+            FunctionLawRegistry::ID_CRUSH,
+            "crush",
+            CapabilityKernel::Crush,
+        ));
+        reg.insert(FunctionLawDef::new(
+            FunctionLawRegistry::ID_IMPACT,
+            "impact",
+            CapabilityKernel::Impact,
+        ));
         reg
     }
 }
@@ -699,7 +802,11 @@ pub fn derive_capabilities(
 ) -> CapabilityVector {
     let mut scores = BTreeMap::new();
     for def in fns.defs() {
-        scores.insert(def.id.0, def.kernel.capability(geo, mat, refs, caps));
+        scores.insert(
+            def.id.0,
+            def.kernel
+                .capability(geo, mat, refs, caps, &def.geometry_axes, &def.material_axes),
+        );
     }
     CapabilityVector { scores }
 }
@@ -926,6 +1033,210 @@ mod tests {
                 .score(FunctionLawRegistry::ID_IMPACT),
             Fixed::ZERO,
             "a part with no grown stroke delivers no blow"
+        );
+    }
+
+    #[test]
+    fn impact_reads_its_axis_ids_from_the_data_binding_so_an_alien_actuator_names_its_own_axes() {
+        // Slice 2's core value (Principle 11, admit-the-alien): the IMPACT grade reads its strength, cross-section,
+        // and stroke off the law's DATA-declared bindings, not hardcoded ids, so an alien actuator that names its
+        // own axes is honored on the grade path exactly as on the delivery-path row. This is the adversarial probe
+        // the byte-neutral tests cannot be: reverting impact() to the old hardcoded ids would flip both the
+        // canonical-reads-zero and the alien-reads-positive assertions below.
+        let refs = CapabilityRefs::dev_refs(); // reference strike energy 100 J
+        let caps = test_caps();
+        // A being that carries its actuating physics on ALIEN axis ids, not the Terran mech.*/mat.* the kernel
+        // used to hardcode; the canonical Terran axes carry nothing.
+        let geo = geo_of(
+            [("alien.cross_section", "0.000001"), ("alien.reach", "1")]
+                .into_iter()
+                .collect(),
+        );
+        let mat = mat_of([("alien.strength", "200")].into_iter().collect());
+
+        // The canonical Terran binding (`FunctionLawDef::new`, the byte-neutral default) reads ZERO off this alien
+        // body: its values are not on `mech.cross_section_area` / `mech.stroke_length` / `mat.fracture_strength`.
+        let canonical = FunctionLawDef::new(
+            FunctionLawRegistry::ID_IMPACT,
+            "impact",
+            CapabilityKernel::Impact,
+        );
+        assert_eq!(
+            canonical.kernel.capability(
+                &geo,
+                &mat,
+                &refs,
+                &caps,
+                &canonical.geometry_axes,
+                &canonical.material_axes,
+            ),
+            Fixed::ZERO,
+            "the canonical Terran binding reads nothing off an alien body's own axes (the grade is not hardcoded)"
+        );
+
+        // The SAME kernel with an ALIEN binding (the law's row naming the being's own axes as data) reads a
+        // positive impact from them: strength 200 MPa over a 1e-6 m^2 cross-section is 200 N, over a 1 m reach
+        // 200 J, above the 100 J reference. The grade follows the DATA, not a hardcoded id.
+        let alien = FunctionLawDef {
+            id: FunctionLawRegistry::ID_IMPACT,
+            name: "impact".to_string(),
+            kernel: CapabilityKernel::Impact,
+            geometry_axes: vec!["alien.cross_section".to_string(), "alien.reach".to_string()],
+            material_axes: vec!["alien.strength".to_string()],
+        };
+        assert!(
+            alien.kernel.capability(
+                &geo,
+                &mat,
+                &refs,
+                &caps,
+                &alien.geometry_axes,
+                &alien.material_axes,
+            ) > Fixed::ZERO,
+            "an alien actuator that names its own axes is honored on the grade path (the data binding is read)"
+        );
+
+        // A binding that names no stroke axis (only a cross-section entry) self-gates to zero, even with the
+        // strength and cross-section present: the absence convention, no fabricated blow, no index panic.
+        let no_stroke = FunctionLawDef {
+            id: FunctionLawRegistry::ID_IMPACT,
+            name: "impact".to_string(),
+            kernel: CapabilityKernel::Impact,
+            geometry_axes: vec!["alien.cross_section".to_string()],
+            material_axes: vec!["alien.strength".to_string()],
+        };
+        assert_eq!(
+            no_stroke.kernel.capability(
+                &geo,
+                &mat,
+                &refs,
+                &caps,
+                &no_stroke.geometry_axes,
+                &no_stroke.material_axes,
+            ),
+            Fixed::ZERO,
+            "a binding naming no stroke axis self-gates to zero (the absence convention)"
+        );
+    }
+
+    #[test]
+    fn a_springy_impact_binding_grades_on_its_recoil_and_the_grade_is_the_max_of_the_two_paths() {
+        // Slice-3b grade-delivery lockstep (the gate's slice-3 ruling iv): the IMPACT grade reads the same
+        // run-all-gate-to-zero MAX(rigid F d, elastic recoil) the delivery path resolves, so a springy actuator is
+        // graded on its recoil, not mis-graded as rigid-only. The ADVERSARIAL PROBE: a springy alien binding (no
+        // rigid strength) grades POSITIVE off its recoil, which a kinetic-only grade would read as zero (the
+        // mutation this catches), and it names its OWN axes as data (admit-the-alien).
+        let refs = CapabilityRefs::dev_refs(); // reference strike energy 100 J
+        let caps = test_caps();
+        // A springy body on its OWN axis ids: a yield/modulus tissue over a swept volume of 2e-5 m^3 (cross-section
+        // 2e-5 m^2 over a 1 m stroke) stores resilience 200^2/(2*2000)=10 (MPa) * C_PA * 2e-5 = 200 J of recoil,
+        // above the 100 J reference; it carries NO rigid actuating strength.
+        let springy_geo = geo_of(
+            [("alien.cross_section", "0.00002"), ("alien.stroke", "1")]
+                .into_iter()
+                .collect(),
+        );
+        let springy_mat = mat_of(
+            [("alien.yield", "200"), ("alien.modulus", "2000")]
+                .into_iter()
+                .collect(),
+        ); // no alien.strength: the rigid path self-gates
+        let springy = FunctionLawDef {
+            id: FunctionLawRegistry::ID_IMPACT,
+            name: "impact".to_string(),
+            kernel: CapabilityKernel::Impact,
+            geometry_axes: vec![
+                "alien.cross_section".to_string(),
+                "alien.stroke".to_string(),
+            ],
+            material_axes: vec![
+                "alien.strength".to_string(),
+                "alien.yield".to_string(),
+                "alien.modulus".to_string(),
+            ],
+        };
+        let grade = |g: &dyn Fn(&str) -> Fixed, m: &dyn Fn(&str) -> Fixed| {
+            springy.kernel.capability(
+                g,
+                m,
+                &refs,
+                &caps,
+                &springy.geometry_axes,
+                &springy.material_axes,
+            )
+        };
+        let springy_grade = grade(&springy_geo, &springy_mat);
+        assert!(
+            springy_grade > Fixed::ZERO,
+            "a springy actuator grades on its elastic recoil (a kinetic-only grade reads zero here): {springy_grade:?}"
+        );
+        // The SAME binding on a body with NO springy tissue and no rigid strength reads zero: both members
+        // self-gate, so no grade is fabricated.
+        let bare_mat = mat_of(BTreeMap::new());
+        assert_eq!(
+            grade(&springy_geo, &bare_mat),
+            Fixed::ZERO,
+            "no rigid strength and no springy tissue: no impact (the absence convention on both paths)"
+        );
+        // A RIGID body on the same binding (a rigid strength, no yield or modulus) still grades on its `F d`, the
+        // elastic term self-gating to zero (byte-neutral at the rigid limit).
+        let rigid_mat = mat_of([("alien.strength", "200")].into_iter().collect());
+        assert!(
+            grade(&springy_geo, &rigid_mat) > Fixed::ZERO,
+            "a rigid actuator still grades on its F d, the elastic member self-gating"
+        );
+    }
+
+    #[test]
+    fn a_hydraulic_impact_binding_grades_on_its_pressure_work_which_composes_from_the_rigid_laws() {
+        // Slice-4 grade-delivery lockstep: the IMPACT grade reads the same run-all-gate-to-zero MAX the delivery
+        // path resolves, now including the HYDRAULIC pressure work `P dV = F d` (composed from stress_force +
+        // actuator_work off the driving pressure, no new law). The ADVERSARIAL PROBE: a hydraulic alien binding
+        // (no rigid strength, no springy tissue, only a driving pressure) grades POSITIVE off its pressure work,
+        // which a rigid-only grade reads as zero, naming its OWN axes as data (admit-the-alien).
+        let refs = CapabilityRefs::dev_refs(); // reference strike energy 100 J
+        let caps = test_caps();
+        // A hydraulic body on its OWN axis ids: a driving pressure 100 MPa (the floor's declared upper end, in
+        // range) over a 2e-6 m^2 piston cross-section is 200 N, over a 1 m stroke 200 J, above the 100 J reference;
+        // no rigid strength, no springy tissue.
+        let hydraulic_geo = geo_of(
+            [("alien.piston", "0.000002"), ("alien.stroke", "1")]
+                .into_iter()
+                .collect(),
+        );
+        let hydraulic_mat = mat_of([("alien.pressure", "100")].into_iter().collect());
+        let binding = FunctionLawDef {
+            id: FunctionLawRegistry::ID_IMPACT,
+            name: "impact".to_string(),
+            kernel: CapabilityKernel::Impact,
+            geometry_axes: vec!["alien.piston".to_string(), "alien.stroke".to_string()],
+            material_axes: vec![
+                "alien.strength".to_string(),
+                "alien.yield".to_string(),
+                "alien.modulus".to_string(),
+                "alien.pressure".to_string(),
+            ],
+        };
+        let grade = |g: &dyn Fn(&str) -> Fixed, m: &dyn Fn(&str) -> Fixed| {
+            binding.kernel.capability(
+                g,
+                m,
+                &refs,
+                &caps,
+                &binding.geometry_axes,
+                &binding.material_axes,
+            )
+        };
+        assert!(
+            grade(&hydraulic_geo, &hydraulic_mat) > Fixed::ZERO,
+            "a hydraulic actuator grades on its pressure work (a rigid-only grade reads zero here): {:?}",
+            grade(&hydraulic_geo, &hydraulic_mat)
+        );
+        // A body with no driving pressure (and no strength or tissue) reads zero: the hydraulic member self-gates.
+        assert_eq!(
+            grade(&hydraulic_geo, &mat_of(BTreeMap::new())),
+            Fixed::ZERO,
+            "no driving pressure, no strength, no tissue: no impact (the hydraulic member self-gates)"
         );
     }
 
