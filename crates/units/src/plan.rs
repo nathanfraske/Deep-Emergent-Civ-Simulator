@@ -478,9 +478,14 @@ mod tests {
         )
     }
 
-    /// The flagship radiant law `sigma * (T_hot^4 - T_cold^4) * emissivity * area` as a left-leaning `LawExpr`
-    /// where every `Mul` folds one scalar `Input` leaf (sigma, emissivity, area) into the difference-of-quartics
-    /// chain. Input ids: 0 sigma, 1 T_hot, 2 T_cold, 3 emissivity, 4 area.
+    /// The full radiant law `sigma * (T_hot^4 - T_cold^4) * emissivity * area` folded ENTIRELY into one wide
+    /// `LawExpr` chain (every `Mul` folds a scalar `Input` leaf: sigma, emissivity, area), to exercise the
+    /// evaluator's generality on a demanding five-factor fold. Note this is NOT the shipped production shape:
+    /// `laws::radiant_emission_tier2` evaluates only the three-factor `sigma * (T_hot^4 - T_cold^4)` in the wide
+    /// accumulator and applies `* emissivity * area` as a Q32.32 tail, precisely so temperatures can stay at the
+    /// canonical scale 32 without the i256 overflow this fuller fold hits (hence the scale-24 temperatures
+    /// below). The shipped composition is covered end to end in `crates/physics/tests/chem_optics.rs`. Input
+    /// ids: 0 sigma, 1 T_hot, 2 T_cold, 3 emissivity, 4 area.
     fn radiant_expr() -> LawExpr {
         let diff = LawExpr::Sub(
             boxed(LawExpr::Powi(boxed(LawExpr::Input(1)), 4)),

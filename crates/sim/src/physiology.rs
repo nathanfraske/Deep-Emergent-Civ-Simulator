@@ -153,8 +153,13 @@ pub struct MetabolicAnchors {
 /// retune (a large guard, or a significance target that drives the intermediate scale below the canonical
 /// bits) can perturb the consumed value, so a retune MUST re-verify the four run_world pins rather than
 /// treat these as inconsequential. Surfaced for the owner (reserved-with-basis in the decisions log). Basis:
-/// resolve a CODATA composite's ~10 significant figures. Both become fully live only when a composite is
-/// consumed at its fine scale (the flagged follow-on).
+/// resolve a CODATA composite's ~10 significant figures. NOW LIVE (the previously-flagged follow-on is
+/// realized, R-UNITS-PIN slice 4): [`derived_stefan_boltzmann_fine`] consumes sigma at its fine scale in the
+/// Tier-2 radiant lift, so these knobs set how many significant bits of sigma reach the radiant term (the
+/// fine-scale sigma differs from the old Q32.32 value, ~0.19% at body temperatures). They still sit inside the
+/// Principle-11 representation exemption (they set how precisely the exact derived sigma is stored, not WHAT
+/// sigma is), and the four pins were re-verified byte-neutral after the lift because that fidelity change
+/// stays below the downstream discretization; a retune MUST re-verify the pins, now doubly so.
 const COMPOSITE_SIG_TARGET: u32 = 30;
 const COMPOSITE_GUARD_BITS: u32 = 1;
 

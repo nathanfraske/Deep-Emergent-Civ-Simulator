@@ -1658,7 +1658,9 @@ pub fn radiant_emission(
 /// net radiant power then scales by emissivity and area in Q32.32, exactly as `radiant_emission` does (both
 /// are O(1)-range factors the canonical fixed-point holds without loss), and the same [`FLUX_MAX`] cap
 /// applies. A surface cooler than its surroundings (`t_hot < t_cold`) emits nothing net, and a plasma-hot
-/// surface whose net term overruns the Q32.32 range routes to the cap, both matching `radiant_emission`.
+/// surface whose net term overruns the Q32.32 range routes to the cap, both the same zero-branch and
+/// representability-cap semantics as `radiant_emission` (a directional match on the caps, which sit well above
+/// physiological temperatures, not a bit-identical threshold with the interleaved form).
 ///
 /// The wide accumulator holds the whole envelope: `sigma * T^4` at the planner's scales reaches about 210
 /// bits (the gate's hardware validation), inside i256, and only the final round to Q32.32 can overflow i64
