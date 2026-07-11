@@ -1654,6 +1654,25 @@ pub fn saturation_vapor_pressure_rk(
     (a - b_over_t + power_term).exp()
 }
 
+/// The Kirchhoff temperature-dependent latent heat `L(T) = L_ref + delta_cp*(T - T_ref)`, the linear form over a
+/// phase's mid-range, with `delta_cp = (delta_cp/R)*R` the molecular-structure slope from
+/// `kirchhoff_delta_cp_over_r`. It gives the vaporization latent heat at any temperature, and (through Hess's law
+/// `L_sub = L_vap + L_fus`, a plain sum) it supplies the sublimation latent heat that anchors the sublimation
+/// branch below the triple point. `l_ref` is the latent heat measured at `t_ref`, `delta_cp_over_r` the
+/// dimensionless slope, `r` the molar gas constant. Linear and total; an overflow saturates. The linear form is a
+/// mid-range approximation and must not be extrapolated past about `0.75*T_c` (the Watson regime).
+pub fn kirchhoff_latent_heat(
+    l_ref: Fixed,
+    delta_cp_over_r: Fixed,
+    r: Fixed,
+    t: Fixed,
+    t_ref: Fixed,
+) -> Fixed {
+    let delta_cp = delta_cp_over_r.checked_mul(r).unwrap_or(Fixed::MAX);
+    let term = delta_cp.checked_mul(t - t_ref).unwrap_or(Fixed::MAX);
+    l_ref.saturating_add(term)
+}
+
 /// The Lennard-Jones collision diameter `sigma` (angstrom) and the potential well depth `epsilon/k_B` (kelvin)
 /// DERIVED from a substance's measured CRITICAL POINT (`t_c` in K, `p_c` in Pa) through the corresponding-
 /// states relation fixed by the LJ potential's OWN reduced critical point (`T_c* = k_B*T_c/epsilon = 1.312`,
@@ -4308,6 +4327,66 @@ mod tests {
             saturation_vapor_pressure_rk(ZERO, a, b, dcp_over_r),
             ZERO,
             "a non-positive temperature yields zero"
+        );
+    }
+
+    #[test]
+    fn the_sublimation_branch_joins_the_vaporization_curve_at_the_triple_point() {
+        // Below the triple point the vapour is in equilibrium with ICE, so the SUBLIMATION latent heat governs:
+        // L_sub = L_vap + L_fus (Hess's law). The branch is the SAME Rankine-Kirchhoff kernel anchored at the
+        // DERIVED (T_triple, P_triple), where P_triple is the vaporization curve at T_triple (continuity, no
+        // gap), with delta_cp_sub reusing the Dulong-Petit solid heat capacity (equal to the liquid's, the
+        // flagged roughness). Water fixtures (held for the hunt): L_fus ~ 6.01 kJ/mol, T_triple ~ 273.16 K. The
+        // branch tracks the ice saturation pressure within the same +4% Kirchhoff residual (~107 Pa at 253 K
+        // versus the ~103 Pa reference). Integer-only assertions.
+        let t_b = Fixed::from_ratio(37315, 100);
+        let l_b = Fixed::from_int(40660);
+        let r = Fixed::from_ratio(8_314_462_618, 1_000_000_000);
+        let p_ref = Fixed::from_ratio(101_325, 1_000_000);
+        let t_triple = Fixed::from_ratio(27316, 100);
+        let l_fus = Fixed::from_int(6010);
+        let dcp_over_r = kirchhoff_delta_cp_over_r(Fixed::from_int(3), Fixed::from_int(3)); // -5
+                                                                                            // The vaporization curve gives the DERIVED triple-point pressure (~638 Pa, section 1).
+        let (a_vap, b_vap) = rankine_kirchhoff_constants(t_b, l_b, dcp_over_r, r, p_ref);
+        let p_triple = saturation_vapor_pressure_rk(t_triple, a_vap, b_vap, dcp_over_r);
+        // L_vap at the triple point (Kirchhoff), then L_sub = L_vap + L_fus (Hess).
+        let l_vap_triple = kirchhoff_latent_heat(l_b, dcp_over_r, r, t_triple, t_b);
+        assert!(
+            l_vap_triple > Fixed::from_int(44000) && l_vap_triple < Fixed::from_int(45600),
+            "L_vap(T_triple) derives to ~44817 J/mol from the Kirchhoff form"
+        );
+        let l_sub_triple = l_vap_triple.saturating_add(l_fus);
+        assert!(
+            l_sub_triple > l_vap_triple,
+            "L_sub exceeds L_vap by L_fus (subliming costs fusion plus vaporization, Hess)"
+        );
+        // The sublimation constants REUSE the same kernel, anchored at the derived (T_triple, P_triple).
+        let (a_sub, b_sub) =
+            rankine_kirchhoff_constants(t_triple, l_sub_triple, dcp_over_r, r, p_triple);
+        // Continuity: the sublimation branch reads P_triple at the triple point (the two branches join, no gap),
+        // within the exp(ln) round-trip tolerance.
+        let p_sub_at_triple = saturation_vapor_pressure_rk(t_triple, a_sub, b_sub, dcp_over_r);
+        let gap = if p_sub_at_triple > p_triple {
+            p_sub_at_triple - p_triple
+        } else {
+            p_triple - p_sub_at_triple
+        };
+        assert!(
+            gap < Fixed::from_ratio(1, 100_000),
+            "the sublimation branch joins the vaporization curve at the triple point, no gap"
+        );
+        // A sub-freezing cell (253.15 K, -20 C): ice saturation ~107 Pa = ~1.07e-4 MPa (+4% above the ~103 Pa
+        // reference, the same Kirchhoff residual carried straight).
+        let p_sub_cold =
+            saturation_vapor_pressure_rk(Fixed::from_ratio(25315, 100), a_sub, b_sub, dcp_over_r);
+        assert!(
+            p_sub_cold > Fixed::from_ratio(9, 100_000) && p_sub_cold < Fixed::from_ratio(12, 100_000),
+            "the sublimation branch reads ~107 Pa at 253 K, the ice saturation within the Kirchhoff residual"
+        );
+        // Colder is drier: the sublimation pressure falls below the triple point.
+        assert!(
+            p_sub_cold < p_triple,
+            "the sublimation pressure falls below the triple point going colder"
         );
     }
 
