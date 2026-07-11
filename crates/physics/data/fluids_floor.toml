@@ -508,4 +508,9 @@ values = [
   { axis = "fluid.dynamic_viscosity", value = "0.001" },
   { axis = "fluid.bulk_modulus", value = "2200" },
   { axis = "fluid.surface_tension", value = "0.0728" },
+  # Latent heat of VAPORIZATION at 20C (CRC), consistent with this substance's 20C characterization. The generic
+  # therm.latent_heat axis spans a substance's phase transitions (fusion 334 to metal vaporization ~1e4); water
+  # carries its vaporization value here, the surface energy balance's evaporative cooling reads it. A distinct
+  # latent-heat-of-fusion axis (for the melt) is the deeper substrate follow-on for a world that needs both.
+  { axis = "therm.latent_heat", value = "2454" },
 ]
