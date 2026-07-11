@@ -239,7 +239,9 @@ impl ContactTransferRegistry {
                 TransferKernel::Kinetic,
                 CapabilityKernel::Impact.default_binding(),
             )
-            .expect("the IMPACT default binding carries every mechanical-family role by construction"),
+            .expect(
+                "the IMPACT default binding carries every mechanical-family role by construction",
+            ),
         );
         reg
     }
@@ -494,12 +496,20 @@ mod tests {
     fn the_registry_walks_in_canonical_channel_id_order() {
         let mut reg = ContactTransferRegistry::empty();
         reg.insert(
-            ContactTransfer::new(ContactChannelId(2), TransferKernel::Kinetic, tagged_binding("a"))
-                .expect("a full mechanical binding validates"),
+            ContactTransfer::new(
+                ContactChannelId(2),
+                TransferKernel::Kinetic,
+                tagged_binding("a"),
+            )
+            .expect("a full mechanical binding validates"),
         );
         reg.insert(
-            ContactTransfer::new(ContactChannelId(1), TransferKernel::Kinetic, tagged_binding("b"))
-                .expect("a full mechanical binding validates"),
+            ContactTransfer::new(
+                ContactChannelId(1),
+                TransferKernel::Kinetic,
+                tagged_binding("b"),
+            )
+            .expect("a full mechanical binding validates"),
         );
         let ids: Vec<u16> = reg.iter().map(|(c, _)| c.0).collect();
         assert_eq!(ids, vec![1, 2], "canonical ascending channel id order");
@@ -509,12 +519,20 @@ mod tests {
     fn a_later_insert_replaces_a_row_keyed_by_channel() {
         let mut reg = ContactTransferRegistry::empty();
         reg.insert(
-            ContactTransfer::new(DEV_KINETIC, TransferKernel::Kinetic, tagged_binding("first"))
-                .expect("a full mechanical binding validates"),
+            ContactTransfer::new(
+                DEV_KINETIC,
+                TransferKernel::Kinetic,
+                tagged_binding("first"),
+            )
+            .expect("a full mechanical binding validates"),
         );
         reg.insert(
-            ContactTransfer::new(DEV_KINETIC, TransferKernel::Kinetic, tagged_binding("second"))
-                .expect("a full mechanical binding validates"),
+            ContactTransfer::new(
+                DEV_KINETIC,
+                TransferKernel::Kinetic,
+                tagged_binding("second"),
+            )
+            .expect("a full mechanical binding validates"),
         );
         assert_eq!(reg.iter().count(), 1, "one row per channel id");
         assert_eq!(
