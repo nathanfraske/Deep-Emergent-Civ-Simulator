@@ -36,10 +36,10 @@ fn the_chem_optics_floor_loads_onto_the_mechanical_and_fluids_floors() {
     // 39 mech + 24 fluids + 17 chem/optics axes; 20 + 18 + 11 laws; 2 + 2 + 0 substances.
     // (mech gained mech.stroke_length, the stroke-rate substrate axis; fluids gained fluid.moisture_content
     // and the three critical-point axes chem.critical_{temperature,pressure} + chem.acentric_factor for the
-    // transport-property derivations; chem/optics gained opt.emissivity.band_0..2 for step 2b.)
+    // transport-property derivations, plus the four volatile primitives for the saturation curve; chem/optics gained opt.emissivity.band_0..2 for step 2b.)
     assert_eq!(
         reg.axis_count(),
-        80,
+        84,
         "the mechanical, fluids, and chem/optics axes"
     );
     assert_eq!(reg.law_count(), 50, "the wave-1 and wave-2 laws");

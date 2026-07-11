@@ -36,10 +36,10 @@ fn the_fluids_floor_loads_onto_the_mechanical_floor() {
     // 39 mechanical + 24 fluids axes; 20 + 18 laws; 2 + 2 substances (the three acoustic
     // channel-physics axes and the acoustic_absorption and tube_resonance laws are the 2026-07-03 add;
     // fluid.moisture_content, the terrain-wetness floor identity, is the Arc 5 T4 add; the three critical-point
-    // axes chem.critical_{temperature,pressure} + chem.acentric_factor feed the transport-property derivations).
+    // axes chem.critical_{temperature,pressure} + chem.acentric_factor feed the transport-property derivations; plus the four volatile primitives chem.boiling_point / vaporization_enthalpy / fusion_enthalpy / triple_point_temperature for the saturation curve).
     assert_eq!(
         reg.axis_count(),
-        63,
+        67,
         "the mechanical and fluids axes together"
     );
     assert_eq!(reg.law_count(), 39, "the wave-1 and wave-2 fluid laws");

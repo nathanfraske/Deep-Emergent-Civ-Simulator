@@ -59,6 +59,56 @@ range_lo = "-1"
 range_hi = "2"
 real = "Poling, Prausnitz and O'Connell (water 0.344, air 0.035, argon 0)"
 
+# The volatile-thermodynamics primitives (design VOLATILE_THERMODYNAMICS_DESIGN_ANCHOR). A measured volatile's
+# saturation curve derives from these four alone; everything else (delta_cp, the Rankine-Kirchhoff constants, the
+# triple-point pressure) is theorem. The two latent heats are per MOLE (the first per-mole axes in the floor;
+# mole is a dimensionless count, so the dimension is plain energy, the unit carries the /mol, matching how
+# R = N_A*k_B carries J/K). The curve reads L in molar units against the molar R, so the mole cancels.
+
+[[axis]]
+id = "chem.boiling_point"
+measures = "the normal boiling point T_b, the temperature at which the saturation vapour pressure reaches one standard atmosphere (the in-regime anchor of the Rankine-Kirchhoff saturation curve)"
+unit = "K"
+dimension = "temperature"
+scale = "K"
+tier = 0
+range_lo = "1"
+range_hi = "10000"
+real = "NIST Chemistry WebBook / CRC Handbook normal boiling points (water 373.15, ethanol 351.4, ammonia 239.8)"
+
+[[axis]]
+id = "chem.vaporization_enthalpy"
+measures = "the molar enthalpy of vaporization L_b at the normal boiling point (the boiling-point latent heat, the saturation curve's energy primitive; per mole, mole a dimensionless count)"
+unit = "kJ/mol"
+dimension = "2,1,-2,0"
+scale = "kJ/mol"
+tier = 0
+range_lo = "1"
+range_hi = "1000"
+real = "NIST Chemistry WebBook / CRC Handbook enthalpy of vaporization at T_b (water 40.66, ethanol 38.6, ammonia 23.4)"
+
+[[axis]]
+id = "chem.fusion_enthalpy"
+measures = "the molar enthalpy of fusion L_fus (the solid-liquid enthalpy gap Dulong-Petit discards; adds to L_vap by Hess's law for the sublimation branch; per mole)"
+unit = "kJ/mol"
+dimension = "2,1,-2,0"
+scale = "kJ/mol"
+tier = 0
+range_lo = "0.1"
+range_hi = "1000"
+real = "NIST Chemistry WebBook / CRC Handbook enthalpy of fusion (water 6.01, ethanol 4.9, ammonia 5.66)"
+
+[[axis]]
+id = "chem.triple_point_temperature"
+measures = "the triple-point temperature T_triple, the solid-liquid-gas coexistence temperature (the low-temperature regime boundary between the sublimation and mid-range branches)"
+unit = "K"
+dimension = "temperature"
+scale = "K"
+tier = 0
+range_lo = "1"
+range_hi = "10000"
+real = "NIST / CRC triple-point temperatures (water 273.16, exact under the pre-2019 Kelvin definition; CO2 216.6; ammonia 195.4)"
+
 # --- Fluid axes ---
 
 [[axis]]
@@ -563,4 +613,12 @@ values = [
   { axis = "chem.critical_temperature", value = "647.1" },
   { axis = "chem.critical_pressure", value = "22.06" },
   { axis = "chem.acentric_factor", value = "0.344" },
+  # The volatile-thermodynamics primitives (the four measured observables the saturation curve derives from,
+  # each hunter-cleared as irreducible). T_b and L_b anchor the mid-range Rankine-Kirchhoff curve; L_fus adds to
+  # L_vap by Hess for the sublimation branch; T_triple is the low-temperature regime boundary. Held (unread)
+  # until the wiring slice retires the affine tangent and therm.latent_heat for the derived molar L(T).
+  { axis = "chem.boiling_point", value = "373.15" },
+  { axis = "chem.vaporization_enthalpy", value = "40.66" },
+  { axis = "chem.fusion_enthalpy", value = "6.01" },
+  { axis = "chem.triple_point_temperature", value = "273.16" },
 ]
