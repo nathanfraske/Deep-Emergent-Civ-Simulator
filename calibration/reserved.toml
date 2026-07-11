@@ -2231,7 +2231,7 @@ category = "per_world"
 
 [[reserved]]
 id = "hydrology.evaporation_still"
-basis = "the still-air Dalton evaporation transfer coefficient a in E = (a + b|u|)(e_s - e_a) (laws::evaporation_rate), the base evaporation rate per unit vapour-pressure deficit with no wind. Set from the world's still-air mass-transfer coefficient"
+basis = "the still-air Dalton evaporation transfer coefficient a in E = (a + b|u|)(e_s - e_a) (laws::evaporation_rate), the base evaporation rate per unit vapour-pressure deficit with no wind. Set from the world's still-air mass-transfer coefficient. CITATION (surface-energy-balance arc): the real basis is the Penman (1948) / Brutsaert bulk-aerodynamic still-air mass-transfer coefficient, the aerodynamic-term intercept of the Penman combination equation, converted to this model's units (E in kg/(m^2*s), the vapour-pressure deficit e_s - e_a in MPa from laws::saturation_vapor_pressure), computed independently of any target temperature. FLAGGED to the owner to confirm the value (currently 0.1) against that cited coefficient in the model's units, alongside the NPP figure and the water therm.latent_heat vaporization value the surface balance now reads; the reported living surface temperature is the honest output of whatever a is set, never tuned to hit 288 K"
 status = "set"
 set_by = "Owner Mirror sign-off 2026-07-09 (remainder delegated under the derive-gate)"
 set_date = "2026-07-09"

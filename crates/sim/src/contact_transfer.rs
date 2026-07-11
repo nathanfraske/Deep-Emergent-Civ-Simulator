@@ -27,17 +27,29 @@
 //! kernel on the floor), never by editing a `match channel { Kinetic => ..., Electrical => ... }`. Kinetic
 //! is the first (Terran, mass-bearing) instance; the law-set is small, fixed, and extensible.
 //!
-//! What a kernel READS is the acting part's own data. The kinetic kernel reads the part's actuating force (its
-//! strength stress over its cross-section) and its stroke distance (its own grown `mech.stroke_length`), so a
-//! stronger, thicker, or longer-stroked part delivers more energy, keyed on the being's own body, never a
+//! What a kernel READS is the acting part's own data, addressed BY ROLE NAME through the SINGLE-SOURCE
+//! [`civsim_compose::AxisBinding`] (a role-name to floor-axis-id map). The kinetic kernel reads the part's actuating
+//! force (its `actuating_strength` role over its `cross_section` role) and its stroke distance (its `stroke` role),
+//! so a stronger, thicker, or longer-stroked part delivers more energy, keyed on the being's own body, never a
 //! per-species number and never a world-global swing speed. The resolve reads those grown values through the
 //! `geo`/`mat` ACCESSOR closures the caller passes (an axis id to its grown value, the same closure form
 //! [`civsim_compose::derive_capabilities`] reads a part's function through) and derives the force and stroke
-//! itself, so the substrate stays a pure law dispatch keyed on axis-id strings with no dependency on the body's
-//! representation type (it reads axis-id-to-value closures, never a concrete body struct).
+//! itself, so the substrate stays a pure law dispatch with no dependency on the body's representation type (it
+//! reads axis-id-to-value closures, never a concrete body struct).
+//!
+//! The binding is the grade law's OWN binding, read directly: the grade-binding unification (the gate's #129
+//! arc, owner-decisions R15) put both the capability GRADE path ([`civsim_compose::FunctionLawDef`]) and this
+//! delivery path on ONE shared [`civsim_compose::AxisBinding`] type, and Slice C made it a SINGLE SOURCE. A
+//! delivery row does not own a binding copy; it names the `grade_law` whose binding it shares
+//! ([`ContactTransfer::grade_law`], the mechanical family names IMPACT), and [`resolve_delivered_energy`] reads
+//! that one binding (fetched from the grade registry by the caller). So an alien actuation names its own axes once,
+//! in the grade law's binding, and the grade and the delivery read the SAME map: a role-to-axis mapping desync is
+//! impossible by construction, never two copies that could diverge. A dangling `grade_law` is a fail-loud load
+//! error at [`ContactTransferRegistry::validate`].
 
 use std::collections::BTreeMap;
 
+use civsim_compose::{AxisBinding, FunctionLawId, FunctionLawRegistry};
 use civsim_core::Fixed;
 use civsim_physics::laws;
 
@@ -92,61 +104,63 @@ pub enum TransferKernel {
     Hydraulic,
 }
 
-/// One contact channel's transfer binding as data: the law its energy delivers by (dispatched by this kernel
-/// id, never by channel identity) and the physics-floor axes the kinetic (actuator-work) kernel reads the
-/// acting part's actuating force and stroke from. Every field is data (Principle 11); the resolve is fixed Rust
-/// that consumes derived inputs. The axes are floor axis id strings, the same string-keyed floor reference the
-/// reach and percept substrates use, so the floor stays the one authored place.
+/// One contact channel's transfer binding as data: the law FAMILY its energy delivers by (dispatched by this
+/// kernel id, never by channel identity) and a REFERENCE to the grade law whose [`AxisBinding`] the delivery
+/// kernels read the acting part's axes from BY ROLE NAME. Every field is data (Principle 11); the resolve is
+/// fixed Rust that consumes derived inputs.
+///
+/// SLICE C of the grade-binding unification made the binding a SINGLE SOURCE: the delivery row does NOT own a
+/// binding copy, it names the `grade_law` whose binding it shares (the mechanical family names IMPACT), and
+/// [`resolve_delivered_energy`] reads that ONE binding (fetched from the grade registry by the caller). So a
+/// grade/delivery role-to-axis MAPPING desync is impossible by CONSTRUCTION: there is one map, not two copies
+/// that could diverge, retiring the "equal by convention" fragility the earlier slices left. The referenced grade
+/// law's binding was validated at its own construction ([`civsim_compose::FunctionLawDef::with_binding`]), so the
+/// delivery inherits a validated binding; a dangling `grade_law` (not in the grade registry) is a fail-loud load
+/// error at the wire boundary ([`ContactTransferRegistry::validate`]), the real "missing key at load".
+///
+/// What the shared binding names: the rigid path reads `actuating_strength` (the strength stress), `cross_section`
+/// (the load-bearing area, so the actuating force is the stress over the area, an N), and `stroke` (the distance
+/// the force acts over, the actuator work `F d`); the elastic path reads `yield_strength`, `elastic_modulus`, and
+/// the swept strained VOLUME `cross_section * stroke` (the two geometry roles reused, a PROXY for the elastic
+/// element's own volume; a dedicated `mech.elastic_element_volume` axis is the reserved-with-basis refinement);
+/// the hydraulic path reads `driving_pressure` over `cross_section` (reused as the piston area) over `stroke`. An
+/// alien actuator names its own axis id per role in the grade law's binding (Principle 11); a role a part does not
+/// grow reads zero (the absence convention), so a rigid actuator (no yield, no modulus, no driving pressure) reads
+/// exactly the rigid `F d` and the elastic and hydraulic paths self-gate.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ContactTransfer {
     /// The contact channel this row binds.
     pub channel: ContactChannelId,
-    /// The transfer law the channel delivers by (dispatched by this id, never by channel identity).
+    /// The transfer-law FAMILY the channel delivers by (dispatched by this id, never by channel identity). The
+    /// mechanical family runs the run-all-gate-to-zero MAX over {rigid, elastic, hydraulic}.
     pub kernel: TransferKernel,
-    /// The physics-floor MATERIAL axis id the acting part's actuating STRESS is read from (its strength per unit
-    /// cross-section). Named as DATA so the caller reads the axis the row declares rather than a hardcoded field
-    /// id (Principle 11): a Terran actuator names `mat.fracture_strength` (the axis the physiology already reads
-    /// as muscle strength), an alien actuator its own strength axis. The caller multiplies this stress by the
-    /// cross-section axis below to form the actuating force.
-    pub strength_axis: String,
-    /// The physics-floor GEOMETRY axis id the acting part's load-bearing CROSS-SECTION is read from. The
-    /// actuating force is the strength (above) over this area (`mat.fracture_strength * mech.cross_section_area`,
-    /// an N). Named as data so an alien body names its own force geometry.
-    pub cross_section_axis: String,
-    /// The physics-floor GEOMETRY axis id the acting part's STROKE distance is read from (the distance the
-    /// actuating force acts over, the acting part's own grown `mech.stroke_length`). The delivered energy is the
-    /// actuator work, force times this stroke ([`civsim_physics::laws::actuator_work`]). Grown independently of
-    /// the segment length so the acting-distance-to-length ratio is per-body data, never a fixed one (the
-    /// value-authoring fix). Named as data so an alien actuator names its own stroke geometry. The elastic path
-    /// also reuses this axis (with `cross_section_axis`) as the swept strained VOLUME (see `yield_axis`).
-    pub stroke_axis: String,
-    /// The physics-floor MATERIAL axis id the acting part's YIELD STRENGTH is read from, the elastic path's first
-    /// material input (the stress up to which the actuator stores elastic strain energy). Named as DATA, the
-    /// elastic sibling of `strength_axis`, so a springy alien binding names its own yield axis (Principle 11): a
-    /// Terran springy tissue names `mat.yield_strength`. A part with no yield strength stores no elastic energy and
-    /// the elastic path self-gates to zero (the absence convention), so a rigid actuator reads exactly the rigid
-    /// `F d`.
-    pub yield_axis: String,
-    /// The physics-floor MATERIAL axis id the acting part's ELASTIC MODULUS is read from, the elastic path's second
-    /// material input (the stiffness `E` in the modulus of resilience `yield^2 / (2 E)`). Named as data so an alien
-    /// names its own stiffness axis. The strained VOLUME the elastic energy density integrates over is the SWEPT
-    /// actuator volume `cross_section_axis * stroke_axis` (the two geometry axes the rigid path already reads,
-    /// reused with no new axis, the gate's slice-3 ruling). That swept volume is a PROXY for the elastic element's
-    /// own volume, exact only where they correlate; a dedicated `mech.elastic_element_volume` floor axis read
-    /// directly is the reserved-with-basis REFINEMENT for a world whose element volume diverges from its sweep,
-    /// surfaced not authored, not built now.
-    pub elastic_modulus_axis: String,
-    /// The physics-floor pressure axis id the acting part's HYDRAULIC DRIVING PRESSURE is read from (the working
-    /// fluid's imposed pressure, a Terran actuator names `fluid.driving_pressure`). Named as DATA so a hydrostat
-    /// alien names its own pressure axis (Principle 11). The hydraulic delivered energy `integral P dV` COMPOSES
-    /// from the existing laws with no new kernel: for an incompressible fluid at constant pressure it is the
-    /// actuator work of the force `P A`, this pressure over the piston cross-section (`cross_section_axis`, reused
-    /// as the piston area) promoted to newtons by [`civsim_physics::laws::stress_force`], over the stroke
-    /// (`stroke_axis`). A part with no driving pressure delivers no hydraulic blow and this path self-gates to
-    /// zero (the absence convention), so a non-fluid actuator reads exactly the rigid `F d`. Reusing the piston
-    /// cross-section is a PROXY (a dedicated `fluid.channel_radius`-derived piston area is the reserved-with-basis
-    /// refinement); the COMPRESSIBLE gas-expansion case is the flagged future kernel (see [`TransferKernel::Hydraulic`]).
-    pub pressure_axis: String,
+    /// The grade law whose [`AxisBinding`] this delivery SHARES, the single source of the role-to-axis mapping.
+    /// The mechanical family names [`civsim_compose::FunctionLawRegistry::ID_IMPACT`] (the delivery family and the
+    /// IMPACT grade are the one shared-metabolic-source mechanical family, the gate's lockstep ruling,
+    /// owner-decisions R15). [`resolve_delivered_energy`] reads the referenced grade law's binding, so the delivery
+    /// and the grade cannot map a role to two different axes: there is one map, and a grade/delivery desync is a
+    /// type impossibility rather than a convention. A dangling reference (a `grade_law` not in the grade registry)
+    /// is a fail-loud load error at [`ContactTransferRegistry::validate`].
+    pub grade_law: FunctionLawId,
+}
+
+impl ContactTransfer {
+    /// Build a transfer row referencing the grade law whose binding it shares. Infallible: the row names a
+    /// `grade_law`, and whether that id resolves in the grade registry is checked at the wire boundary
+    /// ([`ContactTransferRegistry::validate`]), where the grade registry is available. The referenced grade law's
+    /// binding was validated at ITS construction, so the delivery inherits a validated binding: there is no second
+    /// binding to validate here.
+    pub fn new(
+        channel: ContactChannelId,
+        kernel: TransferKernel,
+        grade_law: FunctionLawId,
+    ) -> ContactTransfer {
+        ContactTransfer {
+            channel,
+            kernel,
+            grade_law,
+        }
+    }
 }
 
 /// The set of contact-transfer bindings a world runs, keyed by [`ContactChannelId`] in canonical (ascending)
@@ -190,31 +204,42 @@ impl ContactTransferRegistry {
         self.channels.is_empty()
     }
 
+    /// Validate every row's grade-law REFERENCE against the grade registry at LOAD: each row's `grade_law` must
+    /// resolve in `grade_laws`, else the first offending channel is returned. The referenced grade law's binding
+    /// was validated at its own construction ([`civsim_compose::FunctionLawDef::with_binding`]), so a resolved
+    /// reference inherits a validated binding; a dangling reference is the fail-loud load error that makes a
+    /// grade/delivery mapping desync impossible (there is no second binding to diverge, only a reference that must
+    /// resolve). The walk is in canonical channel-id order, so the first-reported offender is deterministic. This
+    /// is the wire-boundary check [`crate::runner::Embodiment::set_contact_transfer`] runs against the Embodiment's
+    /// grade registry.
+    pub fn validate(&self, grade_laws: &FunctionLawRegistry) -> Result<(), String> {
+        for (channel, row) in self.channels.iter() {
+            if grade_laws.get(row.grade_law).is_none() {
+                return Err(format!(
+                    "contact channel {}: grade_law {:?} is not in the grade registry",
+                    channel.0, row.grade_law
+                ));
+            }
+        }
+        Ok(())
+    }
+
     /// A labelled DEVELOPMENT FIXTURE: the one contact channel the physics floor already carries a law for, a
-    /// kinetic (actuator-work) channel that reads the acting part's actuating force off `mat.fracture_strength`
-    /// over `mech.cross_section_area` and its stroke off the grown `mech.stroke_length`. Not owner data; the
-    /// minimum a contact resolve needs to exercise the actuator-work law. The real channel set is the world's
-    /// data, and non-kinetic channels are the flagged floor extension.
+    /// kinetic (actuator-work) channel that SHARES the IMPACT grade law's binding by naming
+    /// [`FunctionLawRegistry::ID_IMPACT`] as its `grade_law`. The delivery reads the IMPACT grade's own binding
+    /// (`actuating_strength` to `mat.fracture_strength`, `cross_section` to `mech.cross_section_area`, `stroke` to
+    /// `mech.stroke_length`, `yield_strength` to `mat.yield_strength`, `elastic_modulus` to `mat.elastic_modulus`,
+    /// `driving_pressure` to `fluid.driving_pressure`, the byte-neutral default), so grade and delivery read from
+    /// ONE map and a mapping desync is impossible by construction. Not owner data; the minimum a contact resolve
+    /// needs to exercise the mechanical family. The real channel set is the world's data, and a source-independent
+    /// or non-mechanical channel is the flagged floor extension.
     pub fn dev_terran() -> ContactTransferRegistry {
         let mut reg = ContactTransferRegistry::empty();
-        reg.insert(ContactTransfer {
-            channel: DEV_KINETIC,
-            kernel: TransferKernel::Kinetic,
-            // The Terran actuator: strength stress over cross-section is the force, the grown stroke length the
-            // distance it acts over. A body names its own strength, cross-section, and stroke axes.
-            strength_axis: "mat.fracture_strength".to_string(),
-            cross_section_axis: "mech.cross_section_area".to_string(),
-            stroke_axis: "mech.stroke_length".to_string(),
-            // The Terran springy tissue: the elastic path reads yield strength and elastic modulus off the floor's
-            // own material axes and the swept volume off the (shared) cross-section and stroke geometry. A rigid
-            // Terran actuator grows no yield or modulus, so the elastic path reads zero and the rigid `F d` stands.
-            yield_axis: "mat.yield_strength".to_string(),
-            elastic_modulus_axis: "mat.elastic_modulus".to_string(),
-            // The Terran working fluid: the hydraulic path reads the driving pressure off the floor's own fluid
-            // axis (over the shared cross-section as the piston area, over the shared stroke). A Terran actuator
-            // with no working fluid grows no driving pressure, so the hydraulic path reads zero.
-            pressure_axis: "fluid.driving_pressure".to_string(),
-        });
+        reg.insert(ContactTransfer::new(
+            DEV_KINETIC,
+            TransferKernel::Kinetic,
+            FunctionLawRegistry::ID_IMPACT,
+        ));
         reg
     }
 }
@@ -287,6 +312,7 @@ pub fn resolve_delivered_energy(
     geo: &dyn Fn(&str) -> Fixed,
     mat: &dyn Fn(&str) -> Fixed,
     row: &ContactTransfer,
+    binding: &AxisBinding,
     energy_max: Fixed,
 ) -> Fixed {
     // The channel's kernel names its delivery FAMILY (its representative member); the resolve runs the whole
@@ -294,47 +320,49 @@ pub fn resolve_delivered_energy(
     // axes, never this tag. Today the three members are the one shared-metabolic-source mechanical family, so the
     // resolve is MAX over the rigid `F d`, the elastic recoil, and the hydraulic `P dV`. A future independent-reserve
     // variant would fall outside this arm and fail to compile until its additive cross-family combine is chosen (the
-    // flagged coupling).
+    // flagged coupling). The `binding` is the SINGLE SOURCE the caller fetched from the grade registry by the row's
+    // `grade_law` (Slice C), so grade and delivery read the same map by construction.
     match row.kernel {
         TransferKernel::Kinetic | TransferKernel::ElasticRecoil | TransferKernel::Hydraulic => {
-            let rigid = kinetic_delivered_energy(geo, mat, row, energy_max);
-            let elastic = elastic_recoil_delivered_energy(geo, mat, row, energy_max);
-            let hydraulic = hydraulic_delivered_energy(geo, mat, row, energy_max);
+            let rigid = kinetic_delivered_energy(geo, mat, binding, energy_max);
+            let elastic = elastic_recoil_delivered_energy(geo, mat, binding, energy_max);
+            let hydraulic = hydraulic_delivered_energy(geo, mat, binding, energy_max);
             rigid.max(elastic).max(hydraulic)
         }
     }
 }
 
 /// The KINETIC (rigid-actuator) delivered-energy law: the actuator work `F d`, where the force is the acting
-/// part's strength stress (`row.strength_axis`) over its cross-section (`row.cross_section_axis`) promoted to
-/// newtons by the floor's [`laws::stress_force`] (its megapascal-to-newton bridge), and the distance is the
-/// part's own grown stroke (`row.stroke_axis`). The rigid limit of the run-all-gate-to-zero set: a part with no
-/// strength or no stroke delivers zero (the absence convention, [`laws::actuator_work`] returns zero), so this
-/// kernel self-gates. Reads only the part's own grown axes, no per-species constant and no world-global swing
-/// speed (admit-the-alien: an actuator on a different physics carries a different kernel gated on its own axes).
+/// part's strength stress (the `actuating_strength` role) over its cross-section (the `cross_section` role)
+/// promoted to newtons by the floor's [`laws::stress_force`] (its megapascal-to-newton bridge), and the distance
+/// is the part's own grown stroke (the `stroke` role). The rigid limit of the run-all-gate-to-zero set: a part
+/// with no strength or no stroke delivers zero (the absence convention, [`laws::actuator_work`] returns zero), so
+/// this kernel self-gates. Reads its inputs by ROLE NAME through the row's [`AxisBinding`], no per-species constant
+/// and no world-global swing speed (admit-the-alien: an actuator on a different physics names its own axis id per
+/// role, a data row not a rewrite).
 fn kinetic_delivered_energy(
     geo: &dyn Fn(&str) -> Fixed,
     mat: &dyn Fn(&str) -> Fixed,
-    row: &ContactTransfer,
+    binding: &AxisBinding,
     energy_max: Fixed,
 ) -> Fixed {
     let force = laws::stress_force(
-        mat(&row.strength_axis),
-        geo(&row.cross_section_axis),
+        binding.read(geo, mat, "actuating_strength"),
+        binding.read(geo, mat, "cross_section"),
         energy_max,
     );
-    laws::actuator_work(force, geo(&row.stroke_axis), energy_max)
+    laws::actuator_work(force, binding.read(geo, mat, "stroke"), energy_max)
 }
 
 /// The ELASTIC-RECOIL delivered-energy law (the elastic member of the shared-source mechanical family): the
 /// elastic strain energy a springy actuator stores up to yield and releases in a recoil blow,
-/// [`laws::elastic_recoil_energy`] of the part's yield strength (`row.yield_axis`), elastic modulus
-/// (`row.elastic_modulus_axis`), and strained VOLUME. The volume is the SWEPT actuator volume
-/// `cross_section_axis * stroke_axis` (the two geometry axes the rigid path already reads, reused with no new
-/// axis, the gate's slice-3 ruling). A part with no yield strength or no elastic modulus (a rigid or fluid
+/// [`laws::elastic_recoil_energy`] of the part's yield strength (the `yield_strength` role), elastic modulus
+/// (the `elastic_modulus` role), and strained VOLUME. The volume is the SWEPT actuator volume
+/// `cross_section * stroke` (the two geometry roles the rigid path already reads, reused with no new
+/// role, the gate's slice-3 ruling). A part with no yield strength or no elastic modulus (a rigid or fluid
 /// actuator) stores no elastic energy and reads zero (the absence convention, [`laws::elastic_recoil_energy`]
-/// gates), so the elastic member self-gates and the mechanical MAX falls back to the rigid `F d`. Reads only the
-/// part's own grown axes named as data on the row (admit-the-alien: a springy binding names its own axes).
+/// gates), so the elastic member self-gates and the mechanical MAX falls back to the rigid `F d`. Reads its inputs
+/// by ROLE NAME through the row's [`AxisBinding`] (admit-the-alien: a springy binding names its own axes).
 ///
 /// The swept volume is a PROXY for the elastic element's own volume, exact only where they correlate (the gate's
 /// slice-3 limit ON RECORD); the dedicated `mech.elastic_element_volume` floor axis read directly is the
@@ -342,19 +370,20 @@ fn kinetic_delivered_energy(
 fn elastic_recoil_delivered_energy(
     geo: &dyn Fn(&str) -> Fixed,
     mat: &dyn Fn(&str) -> Fixed,
-    row: &ContactTransfer,
+    binding: &AxisBinding,
     energy_max: Fixed,
 ) -> Fixed {
-    // The swept strained volume, the two rigid-path geometry axes reused. A volume beyond the representable range
+    // The swept strained volume, the two rigid-path geometry roles reused. A volume beyond the representable range
     // saturates to `energy_max` as a numeric sentinel; the law gates on the material first (no yield or modulus
     // reads zero however large the volume), and re-caps a present-material product at `energy_max`, so the sentinel
     // never fabricates energy for a rigid actuator.
-    let volume = geo(&row.cross_section_axis)
-        .checked_mul(geo(&row.stroke_axis))
+    let volume = binding
+        .read(geo, mat, "cross_section")
+        .checked_mul(binding.read(geo, mat, "stroke"))
         .unwrap_or(energy_max);
     laws::elastic_recoil_energy(
-        mat(&row.yield_axis),
-        mat(&row.elastic_modulus_axis),
+        binding.read(geo, mat, "yield_strength"),
+        binding.read(geo, mat, "elastic_modulus"),
         volume,
         energy_max,
     )
@@ -364,13 +393,13 @@ fn elastic_recoil_delivered_energy(
 /// pressure-over-volume-change work `integral P dV` of a working-fluid actuator. For an incompressible fluid at a
 /// constant driving pressure this COMPOSES from the existing floor laws with NO new kernel: `P dV = P (A d) = (P A)
 /// d = F d`, so the delivered energy is [`laws::actuator_work`] of the force `F = P A`, where the piston force is
-/// the part's `row.pressure_axis` driving pressure over its cross-section (`row.cross_section_axis`, reused as the
-/// piston area) promoted to newtons by [`laws::stress_force`] (the driving pressure is megapascal-stored, so the
-/// same megapascal-to-newton bridge the rigid strength uses applies), over the stroke (`row.stroke_axis`). This is
-/// the SAME two laws the rigid [`kinetic_delivered_energy`] uses, keyed on the FLUID driving pressure rather than a
+/// the part's `driving_pressure` role over its cross-section (the `cross_section` role, reused as the piston area)
+/// promoted to newtons by [`laws::stress_force`] (the driving pressure is megapascal-stored, so the same
+/// megapascal-to-newton bridge the rigid strength uses applies), over the stroke (the `stroke` role). This is the
+/// SAME two laws the rigid [`kinetic_delivered_energy`] uses, keyed on the FLUID driving pressure rather than a
 /// solid strength, so a hydrostat actuator is a data row, not a new law. A part with no driving pressure delivers
 /// zero (the absence convention, [`laws::stress_force`] returns zero force), so this member self-gates and the
-/// mechanical MAX falls back to the rigid `F d`. Reads only the part's own grown axes named as data on the row.
+/// mechanical MAX falls back to the rigid `F d`. Reads its inputs by ROLE NAME through the row's [`AxisBinding`].
 ///
 /// Reusing the piston cross-section is a PROXY for the fluid's own channel cross-section, exact where they
 /// correlate; a dedicated `fluid.channel_radius`-derived piston area is the reserved-with-basis REFINEMENT. The
@@ -380,7 +409,7 @@ fn elastic_recoil_delivered_energy(
 fn hydraulic_delivered_energy(
     geo: &dyn Fn(&str) -> Fixed,
     mat: &dyn Fn(&str) -> Fixed,
-    row: &ContactTransfer,
+    binding: &AxisBinding,
     energy_max: Fixed,
 ) -> Fixed {
     // The hydraulic piston force: the driving pressure over the piston cross-section, promoted to newtons by the
@@ -388,11 +417,11 @@ fn hydraulic_delivered_energy(
     // material strength). Then the actuator work over the stroke. A part with no driving pressure reads a zero
     // force and so a zero blow (the absence convention), so a non-fluid actuator self-gates.
     let force = laws::stress_force(
-        mat(&row.pressure_axis),
-        geo(&row.cross_section_axis),
+        binding.read(geo, mat, "driving_pressure"),
+        binding.read(geo, mat, "cross_section"),
         energy_max,
     );
-    laws::actuator_work(force, geo(&row.stroke_axis), energy_max)
+    laws::actuator_work(force, binding.read(geo, mat, "stroke"), energy_max)
 }
 
 #[cfg(test)]
@@ -406,48 +435,61 @@ mod tests {
         assert!(reg.get(DEV_KINETIC).is_none());
     }
 
+    /// The IMPACT grade law's binding, the SINGLE SOURCE the delivery reads (Slice C): the dev grade registry's
+    /// `ID_IMPACT` binding, exactly what the strike wire fetches by a row's `grade_law`. Both the grade and the
+    /// delivery read this one value, so there is no second copy that could diverge.
+    fn grade_binding() -> AxisBinding {
+        FunctionLawRegistry::dev_seed()
+            .get(FunctionLawRegistry::ID_IMPACT)
+            .expect("the dev grade registry carries the IMPACT law")
+            .binding
+            .clone()
+    }
+
     #[test]
-    fn a_transfer_is_looked_up_by_id_and_carries_its_law_and_axes_as_data() {
+    fn a_transfer_is_looked_up_by_id_and_names_its_grade_law() {
         let reg = ContactTransferRegistry::dev_terran();
         // Dispatch is by channel id into the registry, then by the row's kernel id: never a code branch on
         // channel identity.
         let kinetic = reg.get(DEV_KINETIC).expect("kinetic row present");
         assert_eq!(kinetic.kernel, TransferKernel::Kinetic);
-        // The Terran kinetic channel names the strength, cross-section, and stroke axes the strike wire reads
-        // the actuating force and stroke off, and the yield and modulus axes the elastic path reads, all data
-        // (Principle 11).
-        assert_eq!(kinetic.strength_axis, "mat.fracture_strength");
-        assert_eq!(kinetic.cross_section_axis, "mech.cross_section_area");
-        assert_eq!(kinetic.stroke_axis, "mech.stroke_length");
-        assert_eq!(kinetic.yield_axis, "mat.yield_strength");
-        assert_eq!(kinetic.elastic_modulus_axis, "mat.elastic_modulus");
-        assert_eq!(kinetic.pressure_axis, "fluid.driving_pressure");
+        // The delivery row does not own a binding: it NAMES the grade law whose binding it shares (the single
+        // source, Slice C), the IMPACT grade for the mechanical family.
+        assert_eq!(kinetic.grade_law, FunctionLawRegistry::ID_IMPACT);
+        // And that referenced grade law's binding maps each mechanical role to its floor axis (the one map both
+        // paths read); the delivery reads exactly this, never a second copy.
+        let binding = grade_binding();
+        assert_eq!(
+            binding.axis("actuating_strength"),
+            Some("mat.fracture_strength")
+        );
+        assert_eq!(
+            binding.axis("cross_section"),
+            Some("mech.cross_section_area")
+        );
+        assert_eq!(binding.axis("stroke"), Some("mech.stroke_length"));
+        assert_eq!(binding.axis("yield_strength"), Some("mat.yield_strength"));
+        assert_eq!(binding.axis("elastic_modulus"), Some("mat.elastic_modulus"));
+        assert_eq!(
+            binding.axis("driving_pressure"),
+            Some("fluid.driving_pressure")
+        );
         assert!(reg.get(ContactChannelId(99)).is_none());
     }
 
     #[test]
     fn the_registry_walks_in_canonical_channel_id_order() {
         let mut reg = ContactTransferRegistry::empty();
-        reg.insert(ContactTransfer {
-            channel: ContactChannelId(2),
-            kernel: TransferKernel::Kinetic,
-            strength_axis: "a".to_string(),
-            cross_section_axis: "a".to_string(),
-            stroke_axis: "a".to_string(),
-            yield_axis: "a".to_string(),
-            elastic_modulus_axis: "a".to_string(),
-            pressure_axis: "a".to_string(),
-        });
-        reg.insert(ContactTransfer {
-            channel: ContactChannelId(1),
-            kernel: TransferKernel::Kinetic,
-            strength_axis: "b".to_string(),
-            cross_section_axis: "b".to_string(),
-            stroke_axis: "b".to_string(),
-            yield_axis: "b".to_string(),
-            elastic_modulus_axis: "b".to_string(),
-            pressure_axis: "b".to_string(),
-        });
+        reg.insert(ContactTransfer::new(
+            ContactChannelId(2),
+            TransferKernel::Kinetic,
+            FunctionLawRegistry::ID_IMPACT,
+        ));
+        reg.insert(ContactTransfer::new(
+            ContactChannelId(1),
+            TransferKernel::Kinetic,
+            FunctionLawRegistry::ID_IMPACT,
+        ));
         let ids: Vec<u16> = reg.iter().map(|(c, _)| c.0).collect();
         assert_eq!(ids, vec![1, 2], "canonical ascending channel id order");
     }
@@ -455,28 +497,23 @@ mod tests {
     #[test]
     fn a_later_insert_replaces_a_row_keyed_by_channel() {
         let mut reg = ContactTransferRegistry::empty();
-        reg.insert(ContactTransfer {
-            channel: DEV_KINETIC,
-            kernel: TransferKernel::Kinetic,
-            strength_axis: "first".to_string(),
-            cross_section_axis: "first".to_string(),
-            stroke_axis: "first".to_string(),
-            yield_axis: "first".to_string(),
-            elastic_modulus_axis: "first".to_string(),
-            pressure_axis: "first".to_string(),
-        });
-        reg.insert(ContactTransfer {
-            channel: DEV_KINETIC,
-            kernel: TransferKernel::Kinetic,
-            strength_axis: "second".to_string(),
-            cross_section_axis: "second".to_string(),
-            stroke_axis: "second".to_string(),
-            yield_axis: "second".to_string(),
-            elastic_modulus_axis: "second".to_string(),
-            pressure_axis: "second".to_string(),
-        });
+        reg.insert(ContactTransfer::new(
+            DEV_KINETIC,
+            TransferKernel::Kinetic,
+            FunctionLawRegistry::ID_IMPACT,
+        ));
+        // A second insert on the same channel replaces the first; the differing kernel tag proves it is the later
+        // row that survives.
+        reg.insert(ContactTransfer::new(
+            DEV_KINETIC,
+            TransferKernel::ElasticRecoil,
+            FunctionLawRegistry::ID_IMPACT,
+        ));
         assert_eq!(reg.iter().count(), 1, "one row per channel id");
-        assert_eq!(reg.get(DEV_KINETIC).unwrap().stroke_axis, "second");
+        assert_eq!(
+            reg.get(DEV_KINETIC).unwrap().kernel,
+            TransferKernel::ElasticRecoil
+        );
     }
 
     /// A part's grown-axis accessors for the kinetic kernel: a strength stress on `mat.fracture_strength`, a
@@ -506,6 +543,7 @@ mod tests {
             .get(DEV_KINETIC)
             .expect("kinetic row")
             .clone();
+        let binding = grade_binding();
         let cap = Fixed::from_int(1_000_000);
         let strength = Fixed::from_int(200); // MPa
         let cross_section = Fixed::from_ratio(1, 1_000_000); // m^2
@@ -516,7 +554,7 @@ mod tests {
         // and the delivered energy the actuator work of that force over the stroke. It adds no arithmetic of its own.
         let force = laws::stress_force(strength, cross_section, cap);
         assert_eq!(
-            resolve_delivered_energy(&geo, &mat, &row, cap),
+            resolve_delivered_energy(&geo, &mat, &row, &binding, cap),
             laws::actuator_work(force, stroke, cap),
         );
     }
@@ -527,11 +565,12 @@ mod tests {
             .get(DEV_KINETIC)
             .expect("kinetic row")
             .clone();
+        let binding = grade_binding();
         let cap = Fixed::from_int(1_000_000);
         let m = |n: i32| Fixed::from_ratio(n as i64, 1_000_000); // cross-section on the m^2 scale
         let deliver = |strength: Fixed, cross_section: Fixed, stroke: Fixed| {
             let (geo, mat) = part_axes(strength, cross_section, stroke);
-            resolve_delivered_energy(&geo, &mat, &row, cap)
+            resolve_delivered_energy(&geo, &mat, &row, &binding, cap)
         };
         let base = deliver(Fixed::from_int(200), m(1), Fixed::from_int(1)); // 200 N over 1 m: 200 J
                                                                             // A greater actuating strength delivers more energy (linear in force), keyed on the part's own material.
@@ -592,11 +631,12 @@ mod tests {
             .get(DEV_KINETIC)
             .expect("kinetic row")
             .clone();
+        let binding = grade_binding();
         let cap = Fixed::from_int(1_000_000);
         let m = |n: i32| Fixed::from_ratio(n as i64, 1_000_000); // cross-section on the m^2 scale
         let deliver = |strength: Fixed, yield_s: Fixed, modulus: Fixed| {
             let (geo, mat) = full_part_axes(strength, m(1), Fixed::from_int(1), yield_s, modulus);
-            resolve_delivered_energy(&geo, &mat, &row, cap)
+            resolve_delivered_energy(&geo, &mat, &row, &binding, cap)
         };
         // A RIGID part (strength 200 MPa, no yield or modulus): the elastic path self-gates to zero, so the resolve
         // is EXACTLY the rigid `F d` (byte-neutral at the rigid limit). Cross-checked against the kinetic-only
@@ -605,7 +645,7 @@ mod tests {
         let (kgeo, kmat) = part_axes(Fixed::from_int(200), m(1), Fixed::from_int(1));
         assert_eq!(
             rigid_only,
-            resolve_delivered_energy(&kgeo, &kmat, &row, cap),
+            resolve_delivered_energy(&kgeo, &kmat, &row, &binding, cap),
             "a part with no yield or modulus reads exactly the rigid F d (the elastic member self-gates)"
         );
         let expected_rigid = laws::actuator_work(
@@ -677,6 +717,7 @@ mod tests {
             .get(DEV_KINETIC)
             .expect("kinetic row")
             .clone();
+        let binding = grade_binding();
         let cap = Fixed::from_int(1_000_000);
         let m = |n: i32| Fixed::from_ratio(n as i64, 1_000_000); // cross-section on the m^2 scale
                                                                  // A fluid part: a driving pressure on `fluid.driving_pressure`, a piston cross-section and a stroke, and
@@ -692,7 +733,7 @@ mod tests {
             "fluid.driving_pressure" => Fixed::from_int(50),
             _ => Fixed::ZERO,
         };
-        let delivered = resolve_delivered_energy(&fluid_geo, &fluid_mat, &row, cap);
+        let delivered = resolve_delivered_energy(&fluid_geo, &fluid_mat, &row, &binding, cap);
         // FIRST-PRINCIPLES physics check (non-tautological): the hydraulic blow equals the integral `P dV` computed
         // DIRECTLY as pressure (in pascals) times the swept volume, with no reference to the stress_force/actuator_work
         // composition. 50 MPa = 50e6 Pa over a swept volume 1e-6 m^2 * 1 m = 1e-6 m^3 is 50 J. This proves the
@@ -723,74 +764,79 @@ mod tests {
             _ => Fixed::ZERO,
         };
         assert!(
-            resolve_delivered_energy(&fluid_geo, &stronger_mat, &row, cap) > delivered,
+            resolve_delivered_energy(&fluid_geo, &stronger_mat, &row, &binding, cap) > delivered,
             "a higher driving pressure delivers more hydraulic energy"
         );
         // No driving pressure: the hydraulic member self-gates, so a non-fluid actuator reads zero from it.
         let dry_mat = |_: &str| Fixed::ZERO;
         assert_eq!(
-            resolve_delivered_energy(&fluid_geo, &dry_mat, &row, cap),
+            resolve_delivered_energy(&fluid_geo, &dry_mat, &row, &binding, cap),
             Fixed::ZERO,
             "no driving pressure, no strength, no tissue: no blow (run-all-gate-to-zero)"
         );
         // Deterministic (Principle 3).
         assert_eq!(
             delivered,
-            resolve_delivered_energy(&fluid_geo, &fluid_mat, &row, cap)
+            resolve_delivered_energy(&fluid_geo, &fluid_mat, &row, &binding, cap)
         );
     }
 
     #[test]
-    fn the_impact_grade_binding_and_the_delivery_row_name_the_same_axes_in_lockstep() {
-        // The grade/delivery LOCKSTEP the gate ruled (slice-3 ruling iv), PINNED by a test (a section-9
-        // correctness/steering-lens catch: the two paths coincide only BY CONSTRUCTION today, the grade path
-        // binding its axes POSITIONALLY (`FunctionLawDef` Vec order) and the delivery path by NAMED fields
-        // (`ContactTransfer`), with nothing in code linking them, so a reorder of either could silently desync the
-        // grade from the delivery with no compile error). This test fails if the IMPACT kernel's positional axis
-        // contract or the canonical delivery row's named axes drift apart, so the by-convention lockstep is no
-        // longer untested. The role map: grade `material_axes` [strength, yield, modulus, driving_pressure] and
-        // `geometry_axes` [cross_section, stroke] must name the delivery row's `strength_axis` / `yield_axis` /
-        // `elastic_modulus_axis` / `pressure_axis` / `cross_section_axis` / `stroke_axis`. The full named-vs-positional
-        // UNIFICATION (so the lockstep is mechanically enforced, not test-pinned) stays the gate-deferred follow-on.
-        use civsim_compose::{CapabilityKernel, FunctionLawDef, FunctionLawRegistry};
-        let grade = FunctionLawDef::new(
-            FunctionLawRegistry::ID_IMPACT,
-            "impact",
-            CapabilityKernel::Impact,
+    fn the_delivery_reads_the_grade_laws_binding_as_the_one_source() {
+        // Slice C, the structural single source: the delivery row does NOT own a binding, it names the grade law
+        // whose binding it shares, and the resolve reads THAT binding. So there is one map, and a grade/delivery
+        // mapping desync is impossible by construction (no second copy exists to diverge). This test reads the
+        // delivered energy through the grade registry's own IMPACT binding, the exact value the strike wire fetches.
+        let reg = ContactTransferRegistry::dev_terran();
+        let row = reg.get(DEV_KINETIC).expect("kinetic row").clone();
+        assert_eq!(row.grade_law, FunctionLawRegistry::ID_IMPACT);
+        // The grade registry is the SINGLE SOURCE; the delivery resolve reads its IMPACT binding by the row's
+        // grade_law, exactly as `Embodiment::strike_*` does.
+        let grade_laws = FunctionLawRegistry::dev_seed();
+        let binding = &grade_laws
+            .get(row.grade_law)
+            .expect("the row's grade_law resolves in the grade registry")
+            .binding;
+        let cap = Fixed::from_int(1_000_000);
+        let (geo, mat) = part_axes(
+            Fixed::from_int(200),
+            Fixed::from_ratio(1, 1_000_000),
+            Fixed::from_int(1),
         );
-        let row = ContactTransferRegistry::dev_terran()
-            .get(DEV_KINETIC)
-            .expect("kinetic row")
-            .clone();
+        // The blow the shared binding yields is the actuator work of the part's own axes read through the grade
+        // law's map, 200 N over 1 m: no per-path binding, one source.
+        let force = laws::stress_force(Fixed::from_int(200), Fixed::from_ratio(1, 1_000_000), cap);
         assert_eq!(
-            grade.material_axes.first().map(String::as_str),
-            Some(row.strength_axis.as_str()),
-            "grade strength axis (material_axes[0]) matches the delivery row strength_axis"
+            resolve_delivered_energy(&geo, &mat, &row, binding, cap),
+            laws::actuator_work(force, Fixed::from_int(1), cap),
+            "the delivery reads the grade law's binding directly (the single source)"
         );
-        assert_eq!(
-            grade.geometry_axes.first().map(String::as_str),
-            Some(row.cross_section_axis.as_str()),
-            "grade cross-section axis (geometry_axes[0]) matches the delivery row cross_section_axis"
-        );
-        assert_eq!(
-            grade.geometry_axes.get(1).map(String::as_str),
-            Some(row.stroke_axis.as_str()),
-            "grade stroke axis (geometry_axes[1]) matches the delivery row stroke_axis"
-        );
-        assert_eq!(
-            grade.material_axes.get(1).map(String::as_str),
-            Some(row.yield_axis.as_str()),
-            "grade yield axis (material_axes[1]) matches the delivery row yield_axis"
-        );
-        assert_eq!(
-            grade.material_axes.get(2).map(String::as_str),
-            Some(row.elastic_modulus_axis.as_str()),
-            "grade modulus axis (material_axes[2]) matches the delivery row elastic_modulus_axis"
-        );
-        assert_eq!(
-            grade.material_axes.get(3).map(String::as_str),
-            Some(row.pressure_axis.as_str()),
-            "grade driving-pressure axis (material_axes[3]) matches the delivery row pressure_axis"
+    }
+
+    #[test]
+    fn a_dangling_grade_law_reference_fails_loud_at_registry_validate() {
+        // Slice C fail-loud load error: a delivery row naming a grade_law that is NOT in the grade registry is a
+        // dangling reference, caught at the wire boundary (`Embodiment::set_contact_transfer` runs this validate).
+        // With no second binding to diverge, the only load failure is an unresolved reference, so the grade/delivery
+        // lockstep is a load-time impossibility rather than a runtime misread.
+        let grade_laws = FunctionLawRegistry::dev_seed();
+        // The canonical fixture validates clean: its grade_law (IMPACT) resolves.
+        assert!(ContactTransferRegistry::dev_terran()
+            .validate(&grade_laws)
+            .is_ok());
+        // A row naming a grade law id absent from the registry fails validate, naming the offending channel.
+        let mut reg = ContactTransferRegistry::empty();
+        reg.insert(ContactTransfer::new(
+            DEV_KINETIC,
+            TransferKernel::Kinetic,
+            FunctionLawId(9999),
+        ));
+        let err = reg
+            .validate(&grade_laws)
+            .expect_err("a dangling grade_law reference fails validate");
+        assert!(
+            err.contains("grade_law") && err.contains(&DEV_KINETIC.0.to_string()),
+            "the validate error names the offending channel and its dangling reference: {err}"
         );
     }
 }

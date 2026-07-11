@@ -195,10 +195,16 @@ impl AffordancePerceptKind {
                         .unwrap_or(Fixed::ZERO)
                 };
                 let caps = CapabilityCaps::derive(reg);
-                // Pierce reads its hardcoded contract axes, so it ignores the data-declared axis bindings (only
-                // the IMPACT kernel reads them, the delivery-path parallel); empty bindings are the read-hardcoded
-                // default and keep this direct call byte-identical.
-                CapabilityKernel::Pierce.capability(&geo, &mat, &refs.capability, &caps, &[], &[])
+                // Pierce reads its inputs by role name from its DATA-declared axis binding; the kernel's own
+                // byte-neutral default binding maps those roles to the Terran floor axes it read before the
+                // grade-binding unification, so this direct call stays byte-identical.
+                CapabilityKernel::Pierce.capability(
+                    &geo,
+                    &mat,
+                    &refs.capability,
+                    &caps,
+                    &CapabilityKernel::Pierce.default_binding(),
+                )
             }
         }
     }
