@@ -1479,17 +1479,6 @@ source = "Part 8, Part 54; crates/sim/src/evolve.rs"
 category = "per_world"
 
 [[reserved]]
-id = "behavior.selection_generations"
-basis = "the number of generations behaviour is allowed to adapt before the dawn; set equal to the pre-dawn radiation depth (biosphere.predawn_generations = 40) for consistency, so adaptation depth tracks the deep-time radiation the biosphere already runs, rather than an independent figure"
-status = "set"
-value = "40"
-set_by = "Nathan M. Fraske"
-set_date = "2026-07-03"
-unit = "generations"
-source = "Part 8, Part 25; crates/sim/src/evolve.rs"
-category = "per_world"
-
-[[reserved]]
 id = "behavior.episode_ticks"
 basis = "the length in ticks of a homeostatic-survival scoring episode; long enough that a viable controller's survival separates from an unviable one under the metabolic timescale, against the evaluation budget (a proxy-versus-episode length on the Part 54 significance gradient)"
 status = "set"
@@ -1499,6 +1488,14 @@ set_date = "2026-07-03"
 unit = "ticks"
 source = "Part 8, Part 54; crates/sim/src/evolve.rs"
 category = "per_world"
+
+# RETIRED (units-arc bridge, derive-vs-author, Principle 6): `behavior.selection_generations` (the generations
+# behaviour adapts before the dawn) now DERIVES from `biosphere.predawn_generations`: its own basis declared
+# it set equal to the pre-dawn radiation depth so adaptation depth tracks the deep-time radiation the
+# biosphere already runs, so `EvolveParams::from_manifest_and_layout` reads predawn_generations rather than a
+# duplicate key (crates/sim/src/evolve.rs). Byte-neutral (run_world uses EvolveParams::dev_default not the
+# manifest path, and both keys were 40); the derive also makes adaptation depth now track a scenario that
+# dials predawn_generations high (Europa), which the static duplicate would not have. Same pattern as saturation_t_ref.
 
 # --- The body arc: R-BUILD-PHYS, R-WOUND, R-FLUID (Part 35; record 62.20; docs/working/BODY_ARC_SCOPE.md) ---
 
@@ -2270,7 +2267,7 @@ category = "per_world"
 
 [[reserved]]
 id = "productivity.soil_requirement"
-basis = "the soil-nutrient supply a cell needs for full producer productivity, the Liebig denominator for the soil factor. Set from the soil nutrients a unit of the world's producer biomass needs; the step-4 soil-nutrient field refines the supply side Derive-vs-author: the Liebig denominator for the soil factor of the COARSE abstract climate-productivity model; a pre-differentiation scaffold matched to soil_baseline so bare soil is non-limiting until the matter-cycle fertility field differentiates; not a floor axis, reversible"
+basis = "the soil-nutrient supply a cell needs for full producer productivity, the Liebig denominator for the soil factor. Set from the soil nutrients a unit of the world's producer biomass needs; the step-4 soil-nutrient field refines the supply side Derive-vs-author: the Liebig denominator for the soil factor of the COARSE abstract climate-productivity model; a pre-differentiation scaffold, and the ANCHOR that the retired soil_baseline is now derived to equal (so bare soil is non-limiting at baseline) until the matter-cycle fertility field differentiates; not a floor axis, reversible"
 status = "set"
 value = "1"
 set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
@@ -2279,16 +2276,12 @@ unit = "soil_nutrient"
 source = "base-level liveliness step 2 productivity (soil field in step 4); crates/sim/src/environ.rs; laws::net_nutrition"
 category = "per_world"
 
-[[reserved]]
-id = "productivity.soil_baseline"
-basis = "the uniform soil-nutrient supply every cell carries until the step-4 soil-nutrient field derives a per-cell value, a placeholder supply so productivity is not soil-limited before soil exists. Retired when the soil field lands Derive-vs-author: the uniform soil-nutrient supply every cell carries before the matter-cycle adds per-cell fertility; MUST equal soil_requirement so soil never limits at baseline; an engine scaffold of the coarse model, not a floor axis, reversible"
-status = "set"
-value = "1"
-set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
-set_date = "2026-07-09"
-unit = "soil_nutrient"
-source = "base-level liveliness step 2 productivity (retired at step 4); crates/sim/src/environ.rs"
-category = "per_world"
+# RETIRED (units-arc bridge, derive-vs-author, Principle 6): `productivity.soil_baseline` (the uniform soil
+# supply every cell carries at baseline, before the matter-cycle fertility field differentiates) now DERIVES
+# from `productivity.soil_requirement`: its own basis declared it MUST equal soil_requirement so bare soil is
+# exactly non-limiting, so `EnvironCalib::from_manifest` reads soil_requirement for it rather than a duplicate
+# key (crates/sim/src/environ.rs). Byte-neutral (the soil Liebig satisfaction saturates to one for any
+# baseline >= requirement, so the four pins hold). The same derive-from-sibling pattern as saturation_t_ref.
 
 [[reserved]]
 id = "hydrology.max_water_depth"
