@@ -2029,17 +2029,30 @@ pub fn basal_metabolic_rate(mass: Fixed, coeff_a: Fixed, rate_max: Fixed) -> Fix
 /// emissivity, sigma), and takes no identity, so a hot body in a cold medium and its temperature mirror
 /// diverge from temperature alone (Principle 9). Capped at the reserved flux limit; a body at the medium
 /// temperature loses nothing (equilibrium).
+#[allow(clippy::too_many_arguments)]
 pub fn resting_heat_loss(
     h: Fixed,
     area: Fixed,
     body_temp: Fixed,
     medium_temp: Fixed,
     emissivity: Fixed,
-    sigma: Fixed,
+    sigma_bits: i64,
+    sigma_scale: u32,
     flux_max: Fixed,
 ) -> Fixed {
     let convective = convective_flux(h, area, body_temp, medium_temp, flux_max);
-    let radiant = radiant_emission(emissivity, area, body_temp, medium_temp, sigma, flux_max);
+    // The radiant term takes sigma at its full derived scale (the Tier-2 lift, R-UNITS-PIN slice 4): sigma
+    // enters at full precision instead of the Q32.32 truncation, its precision-critical `sigma*(T_hot^4 -
+    // T_cold^4)` computed in one wide accumulator and rounded once.
+    let radiant = radiant_emission_tier2(
+        emissivity,
+        area,
+        body_temp,
+        medium_temp,
+        sigma_bits,
+        sigma_scale,
+        flux_max,
+    );
     Fixed::saturating_sum([convective, radiant]).min(flux_max)
 }
 
@@ -3211,19 +3224,43 @@ mod tests {
         let body = Fixed::from_int(310);
         let medium = Fixed::from_int(280);
         let emissivity = Fixed::from_ratio(95, 100);
-        let sigma = Fixed::from_ratio(567, 10_000_000_000); // 5.67e-8
+        // Sigma at a fine scale (5.67e-8 at scale 55), the value the Tier-2 radiant term consumes.
+        let sigma_scale = 55u32;
+        let sigma_bits = civsim_units::bignum::BigRat::from_decimal_str("0.0000000567")
+            .unwrap()
+            .round_to_scale(sigma_scale)
+            .unwrap() as i64;
         let big = cap(1_000_000_000);
         let convective = convective_flux(h, area, body, medium, big);
-        let radiant = radiant_emission(emissivity, area, body, medium, sigma, big);
+        let radiant =
+            radiant_emission_tier2(emissivity, area, body, medium, sigma_bits, sigma_scale, big);
         let want = Fixed::saturating_sum([convective, radiant]).min(big);
         assert_eq!(
-            resting_heat_loss(h, area, body, medium, emissivity, sigma, big),
+            resting_heat_loss(
+                h,
+                area,
+                body,
+                medium,
+                emissivity,
+                sigma_bits,
+                sigma_scale,
+                big
+            ),
             want,
-            "resting loss = convective_flux + radiant_emission over the area"
+            "resting loss = convective_flux + the Tier-2 radiant term over the area"
         );
         // A body at the medium temperature loses nothing.
         assert_eq!(
-            resting_heat_loss(h, area, body, body, emissivity, sigma, big),
+            resting_heat_loss(
+                h,
+                area,
+                body,
+                body,
+                emissivity,
+                sigma_bits,
+                sigma_scale,
+                big
+            ),
             ZERO,
             "no gradient, no loss (equilibrium)"
         );

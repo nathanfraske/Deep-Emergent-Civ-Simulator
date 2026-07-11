@@ -138,6 +138,11 @@ pub struct MetabolicAnchors {
     /// CODATA fundamentals ([`derived_stefan_boltzmann`]), not an authored decimal and not a reserved
     /// manifest value: the same in every profile, computed once at load.
     pub sigma: Fixed,
+    /// The same Stefan-Boltzmann sigma at its FULL derived scale (the fine `(bits, scale)`), which the Tier-2
+    /// radiant heat-loss lift consumes so sigma enters at full precision rather than the Q32.32 truncation
+    /// [`sigma`](Self::sigma) carries. Derived from the same fundamentals, never authored.
+    pub sigma_fine_bits: i64,
+    pub sigma_fine_scale: u32,
 }
 
 /// The global significance target and guard for the composite-constant fixed-point scale derivation
@@ -162,6 +167,22 @@ pub fn derived_stefan_boltzmann() -> Fixed {
     use std::sync::OnceLock;
     static SIGMA: OnceLock<Fixed> = OnceLock::new();
     *SIGMA.get_or_init(|| {
+        let (bits, scale) = derived_stefan_boltzmann_fine();
+        let q32 = civsim_units::rescale_bits(bits, scale, Fixed::FRAC_BITS)
+            .expect("sigma rescale to Q32.32 must not overflow");
+        Fixed::from_bits(q32)
+    })
+}
+
+/// The Stefan-Boltzmann sigma at its FULL derived scale, the fine `(bits, scale)` pair the units composite
+/// compute produces BEFORE the Q32.32 projection [`derived_stefan_boltzmann`] applies. This is the value the
+/// Tier-2 radiant lift ([`civsim_physics::laws::radiant_emission_tier2`]) consumes, so sigma enters the
+/// radiant heat-loss term at its ~31-bit mantissa rather than the roughly eight-bit Q32.32 truncation. A
+/// pure, float-free, memoized load constant, the same derivation [`derived_stefan_boltzmann`] reads.
+pub fn derived_stefan_boltzmann_fine() -> (i64, u32) {
+    use std::sync::OnceLock;
+    static SIGMA_FINE: OnceLock<(i64, u32)> = OnceLock::new();
+    *SIGMA_FINE.get_or_init(|| {
         let (bits, scale) = civsim_units::compute::derived_composite_bits(
             &civsim_units::fundamentals::STEFAN_BOLTZMANN,
             COMPOSITE_SIG_TARGET,
@@ -169,13 +190,10 @@ pub fn derived_stefan_boltzmann() -> Fixed {
             Fixed::FRAC_BITS,
         )
         .expect("the Stefan-Boltzmann sigma must derive from the fundamentals");
-        let q32 = civsim_units::rescale_bits(
+        (
             i64::try_from(bits).expect("sigma at its derived scale fits i64"),
             scale,
-            Fixed::FRAC_BITS,
         )
-        .expect("sigma rescale to Q32.32 must not overflow");
-        Fixed::from_bits(q32)
     })
 }
 
@@ -188,10 +206,13 @@ impl MetabolicAnchors {
     pub fn from_manifest(
         manifest: &CalibrationManifest,
     ) -> Result<MetabolicAnchors, CalibrationError> {
+        let (sigma_fine_bits, sigma_fine_scale) = derived_stefan_boltzmann_fine();
         Ok(MetabolicAnchors {
             kleiber_a: manifest.require_fixed("metabolism.kleiber_coefficient")?,
             body_mass_kg_scale: manifest.require_fixed("metabolism.body_mass_kg_scale")?,
             sigma: derived_stefan_boltzmann(),
+            sigma_fine_bits,
+            sigma_fine_scale,
         })
     }
 
@@ -202,10 +223,13 @@ impl MetabolicAnchors {
     /// ([`crate::medium::MediumField::convective_at`]). For tests and examples only; a canonical run reads
     /// [`MetabolicAnchors::from_manifest`].
     pub fn dev_fixture() -> MetabolicAnchors {
+        let (sigma_fine_bits, sigma_fine_scale) = derived_stefan_boltzmann_fine();
         MetabolicAnchors {
             kleiber_a: Fixed::from_ratio(1, 100),
             body_mass_kg_scale: Fixed::from_int(100),
             sigma: derived_stefan_boltzmann(),
+            sigma_fine_bits,
+            sigma_fine_scale,
         }
     }
 }
@@ -539,7 +563,8 @@ pub fn base_drain_from(
         setpoint,
         ambient_temp,
         emissivity,
-        anchors.sigma,
+        anchors.sigma_fine_bits,
+        anchors.sigma_fine_scale,
         FLUX_MAX,
     );
     // The reserve's energy-storing mass: the anatomy-derived reserve capacity scaled to the body's
