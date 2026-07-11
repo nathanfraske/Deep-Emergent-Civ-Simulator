@@ -1673,6 +1673,33 @@ pub fn kirchhoff_latent_heat(
     l_ref.saturating_add(term)
 }
 
+/// The near-critical latent heat `L(T) = L_ref * ((T_c - T)/(T_c - T_ref))^0.38` (the Watson correlation), the
+/// third regime of the volatile cascade. Unlike the linear Kirchhoff form (which extrapolates to an unphysical
+/// non-zero latent heat past the critical point), the Watson form correctly VANISHES at `T_c` where liquid and
+/// gas become indistinguishable. The exponent `0.38` is a UNIVERSAL corresponding-states constant of the reduced
+/// latent heat, never an Earth-fluid fit (the same status as the Neufeld constants and the Tee-Gotoh-Stewart
+/// `1.312`). `l_ref` and `t_ref` are a mid-range anchor (the boiling point works, since `T_b < 0.75*T_c`), `t_c`
+/// the critical temperature reused from the critical point, `t` the query temperature. At or above `t_c` there is
+/// no liquid, so it yields zero; a degenerate reference at or above `t_c` yields zero (no division by zero). This
+/// governs above about `0.75*T_c`, a regime a temperate surface never reaches; the switch temperature is an
+/// engine-accuracy boundary (derived from where the cheaper linear form's error crosses tolerance, or a reserved
+/// tuneable with that basis), resolved in the wiring, never a hardcoded constant here.
+pub fn watson_latent_heat(l_ref: Fixed, t_ref: Fixed, t_c: Fixed, t: Fixed) -> Fixed {
+    if t >= t_c {
+        return ZERO;
+    }
+    let denom = t_c - t_ref;
+    if denom <= ZERO {
+        return ZERO;
+    }
+    let ratio = match (t_c - t).checked_div(denom) {
+        Some(r) => r,
+        None => return ZERO,
+    };
+    let factor = ratio.powf(Fixed::from_ratio(38, 100));
+    l_ref.checked_mul(factor).unwrap_or(Fixed::MAX)
+}
+
 /// The Lennard-Jones collision diameter `sigma` (angstrom) and the potential well depth `epsilon/k_B` (kelvin)
 /// DERIVED from a substance's measured CRITICAL POINT (`t_c` in K, `p_c` in Pa) through the corresponding-
 /// states relation fixed by the LJ potential's OWN reduced critical point (`T_c* = k_B*T_c/epsilon = 1.312`,
@@ -4387,6 +4414,60 @@ mod tests {
         assert!(
             p_sub_cold < p_triple,
             "the sublimation pressure falls below the triple point going colder"
+        );
+    }
+
+    #[test]
+    fn the_watson_branch_vanishes_at_the_critical_point() {
+        // The near-critical regime: L(T) = L_ref*((T_c - T)/(T_c - T_ref))^0.38 (Watson), which VANISHES at T_c
+        // where the linear Kirchhoff form is unphysical (it would still read ~29 kJ/mol there). The 0.38 is a
+        // universal corresponding-states constant. Water fixtures: L_b, T_b, T_c (reused from the critical
+        // point). Validated against steam-table L_vap: ~33 kJ/mol at 0.75*T_c (reference ~33.5), ~23.5 at
+        // 0.9*T_c (reference ~23.4), tracking within ~2% while the linear form runs 7% high and worsening.
+        // Integer-only assertions; bounds absorb the fixed-point powf error.
+        let l_b = Fixed::from_int(40660);
+        let t_b = Fixed::from_ratio(37315, 100);
+        let t_c = Fixed::from_ratio(6471, 10); // 647.1 K
+                                               // Continuity with the mid-range at the anchor: L(T_b) = L_b.
+        let l_at_tb = watson_latent_heat(l_b, t_b, t_c, t_b);
+        let gap = if l_at_tb > l_b {
+            l_at_tb - l_b
+        } else {
+            l_b - l_at_tb
+        };
+        assert!(
+            gap < Fixed::from_int(60),
+            "Watson L(T_b) = L_b, continuous with the mid-range anchor"
+        );
+        // Vanishes at and above the critical point (no liquid).
+        assert_eq!(
+            watson_latent_heat(l_b, t_b, t_c, t_c),
+            ZERO,
+            "L vanishes at T_c"
+        );
+        assert_eq!(
+            watson_latent_heat(l_b, t_b, t_c, t_c + Fixed::from_int(10)),
+            ZERO,
+            "no liquid above T_c"
+        );
+        // At 0.9*T_c (582.4 K), L ~ 23.5 kJ/mol (steam-table reference ~23.4).
+        let l_hot = watson_latent_heat(l_b, t_b, t_c, Fixed::from_ratio(5824, 10));
+        assert!(
+            l_hot > Fixed::from_int(22000) && l_hot < Fixed::from_int(25000),
+            "L derives to ~23.5 kJ/mol at 0.9*T_c, the Watson vanishing captured"
+        );
+        // Monotone decreasing toward the critical point, and below L_b (past the anchor).
+        let l_warm = watson_latent_heat(l_b, t_b, t_c, Fixed::from_int(500));
+        let l_hotter = watson_latent_heat(l_b, t_b, t_c, Fixed::from_int(600));
+        assert!(
+            l_hotter < l_warm && l_warm < l_b,
+            "L falls monotonically toward T_c"
+        );
+        // Degenerate: a reference at the critical point yields zero, no division by zero.
+        assert_eq!(
+            watson_latent_heat(l_b, t_c, t_c, t_b),
+            ZERO,
+            "a reference at T_c is degenerate, yields zero"
         );
     }
 
