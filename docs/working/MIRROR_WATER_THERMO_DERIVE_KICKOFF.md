@@ -1,0 +1,29 @@
+# Mirror water thermo-transport derivation: retire two authored values (arc kickoff)
+
+This is the design-first kickoff for the next arc the gate queued while #141 (the hydrology evaporation units-bug fix) is held for the owner's confirmation. It opens the comms bridge to the gate so the channel never drops, and it scopes the arc. No code lands until the gate gates the grounded design, which follows on this PR.
+
+The owner ruled derive-first on the two thermodynamic terms the hydrology arc carried as reserved: the surface latent heat of vaporization `L_vap` and the still-air Dalton mass-transfer coefficient `a_still` (with its wind term `b_wind`). Both should DERIVE from the floor now, so neither stays a reserved owner value. This arc builds those two derivations and retires the two authored values.
+
+## Part 1: derive L_vap from the saturation-vapour curve
+
+The floor already carries the affine Clausius-Clapeyron tangent (`laws::saturation_vapor_pressure(slope, t_ref, e_ref, es_cap)`). Clausius-Clapeyron relates the curve slope to the latent heat: `de_s/dT = L_vap * e_s / (R_v * T^2)`, so at the reference point `L_vap = slope * R_v * t_ref^2 / e_ref`, with `R_v = R_universal / M_water` (the universal gas constant over water's molar mass). The design will derive `L_vap` ONCE from the curve the floor already holds and have every current consumer read the one derived value, so the separately-authored `therm.latent_heat` substance datum (populated in #139) is retired and no value is authored twice.
+
+The grounding to prove before I endorse this form: (a) that `R_universal` is present as a floor fundamental constant and `M_water` is present as a substance datum, or, if `M_water` is absent, that adding it is a cited substance datum rather than an authored `L_vap`; (b) the exact set of consumers that must re-read the derived `L_vap` (the surface latent-cooling term, the physiology water-loss `1/L_vap` ratio, and the curve slope's own consistency), each named at its site. The honest caveat the design will state: the affine tangent yields the constant-L value at the tangent point, self-consistent with the curve's own linearization, so the derivation introduces no new error; the exact exponential curve stays deferred to its existing flag (the saturation law already notes this).
+
+## Part 2: derive a_still and b_wind from vapour diffusivity and the boundary layer
+
+The owner's read is the physics: still air is the wind-zero limit, so `a_still` is the molecular-diffusion-plus-free-convection mass-transfer coefficient rather than a free scalar. The design will derive it as the still-air Sherwood transport (`a_still` from vapour diffusivity over the boundary-layer length, enhanced by free convection through the Rayleigh number over moist-air buoyancy), with `b_wind` the forced-convection term (Sherwood from the Reynolds number). This retires the placeholder `hydrology.evaporation_still = 0.1` that the #141 fix exposed as load-bearing.
+
+The one missing substrate piece, to confirm at source and add if absent: water-vapour molecular diffusivity in air is not yet a floor axis (only `laws::thermal_diffusivity` exists, for heat). The design will add it as a cited per-fluid transport property (a real datum for water vapour in air at standard conditions, sourced), kept alien-general as a fluid datum keyed on the medium rather than water-only, so an alien atmosphere reads its own diffusivity as a data row. The design will unify this with the pending full derivation of the sensible-heat coefficient `h` from the boundary-layer relation (flagged in the surface-energy work): the heat-mass transfer analogy (Chilton-Colburn) derives both the sensible-heat `h` and the evaporative `a_still` from the same boundary-layer primitive, so the arc builds the one transport substrate and both coefficients fall out of it.
+
+## Substrate-first and discipline
+
+Before adding the vapour-diffusivity axis, the physics floor registry (`docs/working/PHYSICS_FLOOR_REGISTRY.md`) is read and it is proven in writing that no existing transport axis already carries it; the new axis carries its derivation or floor-datum registration so the registry billboard stays current. A missing substrate is "add the cited datum", never "author the coefficient". Both derivations key off floor and substance data (Principle 11), no authored number survives. I will audit the derivation forms and the cited data against source (Prime Directive 2) rather than transcribe them, as I did on the surface-energy `L_vap` source.
+
+## Byte-neutrality and pins
+
+This is a STATED re-pin, not byte-neutral: deriving `L_vap` and `a_still` replaces the placeholder `evaporation_still = 0.1` and the authored `latent_heat`, so the surface re-lands (toward 288 K from the current 272.8 K overshoot) and `living` re-pins with the derivation as the stated reason. The four canonical pins hold only if the diurnal surface path stays opt-in; the design will PROVE that the canonical scenarios do not run the armed surface-cooling and evaporation terms, rather than assume it, and will enumerate exactly which pins move with each old-to-new value and its reason, never tuned to a target. The honest surface temperature the derivation lands is reported plainly, whatever it is.
+
+## What follows on this PR
+
+The grounded design: the two derivation forms written at their sites, the new vapour-diffusivity floor axis with its citation, the floor-data presence proof for `R_v` (and `M_water` if added), and the named list of consumers that re-read the derived `L_vap`, posted for the gate's design-gate before any code. Section-9 is run once by me per slice (the standing cost directive), and the gate audits.
