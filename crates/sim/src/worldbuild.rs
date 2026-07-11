@@ -144,6 +144,12 @@ pub struct EmbodimentGenesis {
     /// The controller hidden width (zero is the reaction-norm controller; a positive width is the
     /// recurrent graduation).
     pub controller_hidden: usize,
+    /// The RESOURCE-FEATURE registry (the foraging arc): the channels a being senses on the resource field
+    /// (a cell's identity-blind matter content), armed before the founder controllers are expressed so the
+    /// gene block is sized against the layout that carries the resource-feature block. EMPTY (the default)
+    /// leaves the layout unchanged and the run byte-identical (opt-in), so only a scenario that declares
+    /// resource channels grows the controller.
+    pub resource_features: crate::perceivable_feature::PerceivableFeatureRegistry,
     /// The submerged medium id a cell below the reserved submersion elevation holds (for example
     /// `"medium.water"`), the manifest profile the per-cell medium field folds into a water cell.
     pub submerged_medium_id: String,
@@ -593,6 +599,16 @@ fn assemble_dawn_embodiment(
     if being_percept {
         emb.set_being_field(Some(BeingPerceptField::from_manifest(manifest)?));
         emb.set_being_percept(true);
+    }
+    // Arm the RESOURCE-FEATURE registry (the foraging arc), when the scenario declares it: a being senses the
+    // identity-blind matter content of the cells around it, so foraging and dispersal can emerge through the
+    // controller's founder-zero freely-signed per-bucket weights. This MUST precede the layout clone below,
+    // exactly like `set_percepts` and the being-percept arming above, because it rebuilds the controller layout
+    // to carry the resource-feature block and the founder controllers are expressed against `layout`: a layout
+    // cloned before this call would express them at the wrong width. A scenario that declares no resource
+    // features leaves the layout unchanged and the run byte-identical.
+    if !genesis.resource_features.is_empty() {
+        emb.set_resource_features(genesis.resource_features.clone());
     }
     let layout = emb.layout().clone();
     // The per-band spawn map the lifecycle pairing reads to place a newborn at its band's frozen dawn

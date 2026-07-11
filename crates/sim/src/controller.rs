@@ -252,6 +252,32 @@ impl ControllerLayout {
         ControllerLayout::with_percepts(homeo, afford, &PerceptRegistry::empty(), hidden)
     }
 
+    /// Build a layout that carries ONLY the RESOURCE-FEATURE block over the axis blocks (the foraging arc): all
+    /// other percept blocks empty, so it is exactly [`ControllerLayout::new`]'s layout plus the resource-feature
+    /// block. This is the `living` scenario's foraging layout, and it is built through the SAME full builder the
+    /// embodiment's `rebuild_layout` uses, so the founder gene block a caller sizes against this matches the
+    /// armed embodiment layout bit-for-bit (an EMPTY registry yields exactly `new`'s layout).
+    pub fn with_resource_features(
+        homeo: &HomeostaticRegistry,
+        afford: &AffordanceRegistry,
+        resource_features: &PerceivableFeatureRegistry,
+        hidden: usize,
+    ) -> ControllerLayout {
+        Self::with_percepts_appetitive_material_attraction_conviction_being_and_resource_features(
+            homeo,
+            afford,
+            &PerceptRegistry::empty(),
+            false,
+            &MaterialPerceptRegistry::empty(),
+            false,
+            &ConvictionPerceptRegistry::empty(),
+            false,
+            &PerceivableFeatureRegistry::empty(),
+            resource_features,
+            hidden,
+        )
+    }
+
     /// Build a layout that also feeds a block of raw perceived-feature channels, one per class the
     /// percept registry declares (harm-learning arc slice a). The feature block sits between the
     /// per-axis blocks and the bias, so the per-axis input bases ([`axis_input_base`]) and the

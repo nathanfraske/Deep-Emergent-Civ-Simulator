@@ -245,6 +245,7 @@ fn aging_peoples(fracture_energy: Fixed) -> DawnPeoples {
             organs: BodyPlanRegistry::dev_default(),
             tolerances: Default::default(),
             controller_hidden: 0,
+            resource_features: civsim_sim::perceivable_feature::PerceivableFeatureRegistry::empty(),
             submerged_medium_id: "medium.water".to_string(),
             emergent_medium_id: "medium.air".to_string(),
         }),
