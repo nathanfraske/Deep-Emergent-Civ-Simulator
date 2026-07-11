@@ -140,7 +140,10 @@ pub struct ContactTransfer {
     /// alien actuator names its own axis id per role (Principle 11); a role a part does not grow reads zero (the
     /// absence convention), so a rigid actuator (no yield, no modulus, no driving pressure) reads exactly the rigid
     /// `F d` and the elastic and hydraulic paths self-gate. The role SET this must carry is
-    /// [`ContactTransfer::mechanical_family_roles`] (the IMPACT grade's role set), validated at construction.
+    /// [`ContactTransfer::mechanical_family_roles`] (the IMPACT grade's role set). Build a row through
+    /// [`ContactTransfer::new`], or run [`ContactTransferRegistry::validate`] over a hand-assembled registry, so an
+    /// unbound role is a fail-loud load error rather than a silent self-gating zero (this field is public for the
+    /// direct-assembly-then-validate path; a struct-literal build skips the constructor's check).
     pub binding: AxisBinding,
 }
 
