@@ -1357,6 +1357,19 @@ pub struct Embodiment {
     /// freely-signed per-bucket weight, set by selection, turns a feature-bucket's direction into approach or
     /// flight, so the disposition emerges (Principle 9), keyed on the emitter's own surface datum, never a kind.
     being_features: PerceivableFeatureRegistry,
+    /// The RESOURCE-FEATURE registry (the foraging arc): the open, data-defined set of channels a perceiver
+    /// senses on the RESOURCE FIELD (the cells around it), each reading the cell's IDENTITY-BLIND matter
+    /// content ([`crate::locomotion::ResourceField::cell_content`]) discriminated into buckets by the
+    /// perceiver's own resolution, reusing the exact [`PerceivableFeatureRegistry`] machinery the being-feature
+    /// block uses (the gate's reframe: extend the registry to the resource field, no parallel percept). EMPTY
+    /// by default, so the controller carries no resource-feature block and every run hash is unchanged (opt-in).
+    /// When a world declares channels ([`Embodiment::set_resource_features`]), the layout grows the
+    /// resource-feature block and each creature's per-(channel, bucket) toward-direction over the cells it
+    /// senses is written into it, so foraging (approach a content-bucket) and dispersal (move when depleted and
+    /// nothing is sensed, keyed on the reserve-state input the being already reads) EMERGE from selection over
+    /// the creature's own heritable freely-signed per-bucket weights, never authored: nothing reads which
+    /// substance is food (Principle 8).
+    resource_features: PerceivableFeatureRegistry,
     /// The in-run creature reproduction and behaviour-selection substrate (creature-selection step 2, fork 2a):
     /// `None` (the default) leaves creatures non-reproducing and byte-identical; `Some` arms the mint-time
     /// perturbation and the reproduction beat, so a creature population turns over and its whole controller is
@@ -1598,6 +1611,7 @@ impl Embodiment {
             being_field: None,
             creature_being_percept: false,
             being_features: PerceivableFeatureRegistry::empty(),
+            resource_features: PerceivableFeatureRegistry::empty(),
             creature_selection: None,
             creature_offspring_count: 0,
             predators: BTreeSet::new(),
@@ -1720,6 +1734,18 @@ impl Embodiment {
     /// differently to two same-strength emitters that differ in a surface optical feature.
     pub fn set_being_features(&mut self, registry: PerceivableFeatureRegistry) {
         self.being_features = registry;
+        self.rebuild_layout();
+    }
+
+    /// Install the RESOURCE-FEATURE registry (the foraging arc): the open set of channels a perceiver senses on
+    /// the RESOURCE FIELD, each reading a cell's IDENTITY-BLIND matter content
+    /// ([`crate::locomotion::ResourceField::cell_content`]) discriminated into buckets. Rebuilds the controller
+    /// layout so it carries the resource-feature block (two toward-direction slots per bucket per channel); an
+    /// EMPTY registry (the default) leaves the layout and every run hash unchanged (opt-in). Each creature's
+    /// per-(channel, bucket) toward-direction over the cells it senses is then written into the block each tick,
+    /// so foraging and dispersal emerge from selection over the creature's own freely-signed per-bucket weights.
+    pub fn set_resource_features(&mut self, registry: PerceivableFeatureRegistry) {
+        self.resource_features = registry;
         self.rebuild_layout();
     }
 
@@ -1875,7 +1901,7 @@ impl Embodiment {
     /// setting one preserves the others.
     fn rebuild_layout(&mut self) {
         self.layout =
-            ControllerLayout::with_percepts_appetitive_material_attraction_conviction_and_being_features(
+            ControllerLayout::with_percepts_appetitive_material_attraction_conviction_being_and_resource_features(
                 &self.homeo,
                 &self.afford,
                 &self.percepts,
@@ -1885,6 +1911,7 @@ impl Embodiment {
                 &self.conviction_percepts,
                 self.being_percept,
                 &self.being_features,
+                &self.resource_features,
                 self.layout.hidden(),
             );
     }
@@ -5996,6 +6023,11 @@ impl Runner {
         // floor arc): filled below only where the perceivable-feature registry is armed; EMPTY otherwise, so the
         // controller carries no being-feature input and every run hash is unchanged (opt-in, byte-neutral).
         let mut being_feature_map: BTreeMap<StableId, Vec<Fixed>> = BTreeMap::new();
+        // The foraging arc: each creature's per-(channel, bucket) toward-direction over the CELLS it senses,
+        // discriminated by their identity-blind matter content; filled below only where the resource-feature
+        // registry is armed; EMPTY otherwise, so the controller carries no resource-feature input and every run
+        // hash is unchanged (opt-in, byte-neutral).
+        let mut resource_feature_map: BTreeMap<StableId, Vec<Fixed>> = BTreeMap::new();
         // Creatures-react arc (mechanism B3, the live wire): a MIND-LESS creature (a `Walker` absent from the
         // mind registry) runs the BELIEF-FREE being-directed percept. Gated on the creature feature AND the
         // being-percept substrate (which built the being block the creature's controller reuses and installed
@@ -6175,6 +6207,80 @@ impl Runner {
             }
         }
         self.perceived_beings = perceived_beings;
+        // The foraging arc: the RESOURCE-FEATURE pass (a SEPARATE gated pass, not tied to the being-percept
+        // field, so it runs wherever a world arms the resource-feature registry). Each mind-less creature senses
+        // the CELLS within its perception range, reads each cell's IDENTITY-BLIND matter content
+        // (`ResourceField::cell_content`, the sum of every class's amount, never a per-class read), discriminates
+        // the content into a bucket by its own resolution, and accumulates the toward-direction per
+        // (channel, bucket) over those cells ([`creature_being_feature_directions`], the exact machinery the
+        // being-feature block uses, reused per the gate's reframe). The per-cell pull magnitude is the cell's
+        // own content, so a richer, nearer cell pulls harder; the direction cancels in a symmetric surround (no
+        // gradient, so the being disperses on its reserve-state input rather than being pulled). Only the
+        // creature's OWN heritable freely-signed per-bucket weight, set by selection, turns a content-bucket's
+        // direction into approach (foraging), so foraging emerges (Principle 8), never a "move toward food" rule.
+        // EMPTY registry -> this pass does nothing and the run is byte-identical (opt-in). Deterministic: pure
+        // reads keyed by w.id drawing no RNG, an order-free BTreeMap collect, bit-identical at any thread count.
+        // HONEST LIMIT (shared with the being-feature path): the perception range is the locomotion sense range
+        // and the discrimination step is world-declared, not yet derived per creature from its own sensorium
+        // anatomy (the flagged shared follow-on).
+        if let Some(emb) = self.embodiment.as_ref() {
+            if !emb.resource_features.is_empty() {
+                let world_opt = self.world.as_ref();
+                let range = emb.params.sense_range;
+                let n_ch = emb.resource_features.len();
+                let creature_resource_dirs: BTreeMap<StableId, Vec<Fixed>> = emb
+                    .walkers
+                    .par_iter()
+                    .with_min_len(PAR_MIN_LEN)
+                    .filter_map(|w| {
+                        if !w.alive {
+                            return None;
+                        }
+                        // The founder tier is handled by its own belief-keyed percepts; the resource-feature
+                        // block is the mind-less creature tier (the same split the being-feature pass uses).
+                        if world_opt.is_some_and(|world| world.mind(w.id).is_some()) {
+                            return None;
+                        }
+                        let here = w.coord();
+                        let mut perceived: Vec<(Coord3, Fixed, Vec<Fixed>)> = Vec::new();
+                        for dy in -range..=range {
+                            for dx in -range..=range {
+                                if dx == 0 && dy == 0 {
+                                    continue; // the cell underfoot carries no toward-direction
+                                }
+                                let cell = Coord3::ground(here.x + dx as i32, here.y + dy as i32);
+                                let content = emb.resources.cell_content(cell);
+                                if content <= Fixed::ZERO {
+                                    continue; // no matter sensed here (the absence convention)
+                                }
+                                // Each channel reads the identity-blind cell content. A per-axis fold that would
+                                // differentiate channels awaits the food becoming a foldable substance mix (the
+                                // flagged follow-on); today the meaningful case is one content channel.
+                                let feats = vec![content; n_ch];
+                                perceived.push((cell, content, feats));
+                            }
+                        }
+                        if perceived.is_empty() {
+                            return None;
+                        }
+                        let block = creature_being_feature_directions(
+                            here,
+                            &perceived,
+                            &emb.resource_features,
+                        );
+                        // Keep only a non-zero block (a creature with no net per-bucket pull reads the
+                        // founder-zero default), the same gate the being-feature pass uses.
+                        if block.iter().all(|&c| c == Fixed::ZERO) {
+                            return None;
+                        }
+                        Some((w.id, block))
+                    })
+                    .collect();
+                for (id, block) in creature_resource_dirs {
+                    resource_feature_map.insert(id, block);
+                }
+            }
+        }
         // (0b'') Belief to hypothesis, the DISCOVERY proposal (ideation / experiential-discovery arc, piece 2,
         // slice 2c): each being samples a candidate action from its binding graph, the generic cartesian of
         // its afforded primitives and the affordance-typed targets it perceives over the matter underfoot and
@@ -6570,6 +6676,7 @@ impl Runner {
             &conviction,
             &being,
             &being_feature_map,
+            &resource_feature_map,
             &mut deferred_actions,
         );
         // (2a') Record each being's DISCOVERY proposal (ideation arc, piece 2, slice 2c): the candidate

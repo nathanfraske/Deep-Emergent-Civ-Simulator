@@ -213,8 +213,22 @@ pub struct ControllerLayout {
     /// emitter's own surface optical datum discriminated by the perceiver's own resolution, never a species,
     /// kind, or emitter-kind label.
     n_being_feature: usize,
+    /// The width of the RESOURCE-FEATURE input block (the foraging arc): two components (a toward-direction
+    /// `dx, dy`) per discrimination bucket per resource-feature channel
+    /// ([`crate::perceivable_feature::PerceivableFeatureRegistry::layout_width`]), else zero. It reuses the
+    /// exact perceivable-feature machinery the being-feature block uses, but the perceiver reads the
+    /// IDENTITY-BLIND aggregate matter content of the CELLS it senses (the resource field) rather than an
+    /// emitter's surface optical datum, so a `(channel, bucket)` pair carries the unit direction toward the
+    /// perceived cells whose content falls in that bucket. A founder expresses zero for the resource-feature
+    /// weights, and each per-bucket weight is FREELY SIGNED, so whether a perceiver moves toward or away from
+    /// a content-bucket's cells (foraging, dispersal) EMERGES from selection (Principle 8): nothing here reads
+    /// which substance is food. The block sits AFTER the being-feature block and before the bias, so every
+    /// earlier base and the bias-as-last convention hold unchanged. Zero for an empty registry yields an input
+    /// vector, weight count, and genome expression identical to a world without it, so it is OPT-IN and
+    /// hash-neutral by default, the same discipline as the earlier blocks.
+    n_resource_feature: usize,
     /// The number of inputs (`INPUTS_PER_AXIS * axes + n_features + n_appetitive + n_material + n_attraction +
-    /// n_conviction + n_being + n_being_feature + 1` for the bias).
+    /// n_conviction + n_being + n_being_feature + n_resource_feature + 1` for the bias).
     n_in: usize,
     /// The number of outputs (the sum of the affordances' slot counts).
     n_out: usize,
@@ -440,6 +454,47 @@ impl ControllerLayout {
         being_features: &PerceivableFeatureRegistry,
         hidden: usize,
     ) -> ControllerLayout {
+        Self::with_percepts_appetitive_material_attraction_conviction_being_and_resource_features(
+            homeo,
+            afford,
+            percept,
+            appetitive,
+            material,
+            attraction,
+            conviction,
+            being,
+            being_features,
+            &PerceivableFeatureRegistry::empty(),
+            hidden,
+        )
+    }
+
+    /// As [`with_percepts_appetitive_material_attraction_conviction_and_being_features`], plus the
+    /// RESOURCE-FEATURE input block (the foraging arc): the discrimination-bucket toward-directions of the
+    /// IDENTITY-BLIND matter content of the CELLS a perceiver senses. It reuses the same
+    /// [`PerceivableFeatureRegistry`] machinery the being-feature block uses (the gate's reframe: extend the
+    /// registry to the resource field, no parallel percept), but the read is a cell's
+    /// [`crate::locomotion::ResourceField::cell_content`], never an emitter's surface. The block sits AFTER the
+    /// being-feature block and before the bias, so every earlier base and the bias-as-last convention hold
+    /// unchanged. Its width is [`PerceivableFeatureRegistry::layout_width`], so an EMPTY registry yields exactly
+    /// the being-features layout (`n_resource_feature` zero), an input vector, weight count, and genome
+    /// expression identical to a world without it: the resource feature is opt-in and hash-neutral by default. A
+    /// founder expresses zero for the resource-feature weights, and each per-bucket weight is FREELY SIGNED, so
+    /// foraging (approach a content-bucket) and its absence emerge from selection (Principle 8), never authored.
+    #[allow(clippy::too_many_arguments)]
+    pub fn with_percepts_appetitive_material_attraction_conviction_being_and_resource_features(
+        homeo: &HomeostaticRegistry,
+        afford: &AffordanceRegistry,
+        percept: &PerceptRegistry,
+        appetitive: bool,
+        material: &MaterialPerceptRegistry,
+        attraction: bool,
+        conviction: &ConvictionPerceptRegistry,
+        being: bool,
+        being_features: &PerceivableFeatureRegistry,
+        resource_features: &PerceivableFeatureRegistry,
+        hidden: usize,
+    ) -> ControllerLayout {
         let axes: Vec<HomeostaticAxisId> = homeo.axes.iter().map(|a| a.id).collect();
         let n_features = percept.len();
         let n_material = material.len();
@@ -454,6 +509,9 @@ impl ControllerLayout {
         // The being-FEATURE block: two components (a toward-direction dx, dy) per discrimination bucket per
         // perceivable-feature channel, or none when the world declares no perceivable features (step 2b).
         let n_being_feature = being_features.layout_width();
+        // The RESOURCE-FEATURE block (the foraging arc): the same width shape as the being-feature block,
+        // over the resource-field registry. Zero for an empty registry (the opt-in default).
+        let n_resource_feature = resource_features.layout_width();
         let mut defs: Vec<&crate::homeostasis::AffordanceDef> = afford.affordances.iter().collect();
         defs.sort_by_key(|d| d.id);
         // One appetitive channel per affordance (aligned to the output slots below), or none when the
@@ -467,6 +525,7 @@ impl ControllerLayout {
             + n_conviction
             + n_being
             + n_being_feature
+            + n_resource_feature
             + 1;
         let mut outputs = Vec::with_capacity(defs.len());
         let mut base = 0usize;
@@ -489,6 +548,7 @@ impl ControllerLayout {
             n_conviction,
             n_being,
             n_being_feature,
+            n_resource_feature,
             n_in,
             n_out,
             hidden,
@@ -640,6 +700,19 @@ impl ControllerLayout {
     /// widths set.
     pub fn being_feature_input_base(&self) -> usize {
         self.being_input_base() + self.n_being
+    }
+
+    /// The width of the RESOURCE-FEATURE input block (two per discrimination bucket per resource-feature
+    /// channel, else zero; the foraging arc).
+    pub fn n_resource_feature(&self) -> usize {
+        self.n_resource_feature
+    }
+
+    /// The input-vector index where the RESOURCE-FEATURE block begins: after the being-feature block, before
+    /// the bias. A caller writing the resource-feature directions reads this so it never hardcodes the block's
+    /// position, which the earlier block widths set.
+    pub fn resource_feature_input_base(&self) -> usize {
+        self.being_feature_input_base() + self.n_being_feature
     }
 
     /// The affordance ids this layout's outputs (and, when enabled, its appetitive channels) are indexed by,
@@ -859,6 +932,47 @@ impl ControllerLayout {
         being: &[Fixed],
         being_features: &[Fixed],
     ) -> Vec<Fixed> {
+        self.build_input_full_with_conviction_being_and_resource_features(
+            homeo,
+            here,
+            source_dirs,
+            signed,
+            features,
+            appetitive,
+            material,
+            attraction,
+            conviction,
+            being,
+            being_features,
+            &[],
+        )
+    }
+
+    /// As [`build_input_full_with_conviction_and_being_features`], plus the RESOURCE-FEATURE block (the
+    /// foraging arc): each `(channel, bucket)` toward-direction over the perceived CELLS whose identity-blind
+    /// content falls in that bucket, written into the resource-feature block ([`resource_feature_input_base`]
+    /// onward). `resource_features` is the runner's per-perceiver discrimination of the sensed cells'
+    /// [`crate::locomotion::ResourceField::cell_content`] into buckets; a shorter slice leaves the unfilled
+    /// slots zero (clean degrade), and an empty slice with `n_resource_feature` zero is byte-identical to
+    /// [`build_input_full_with_conviction_and_being_features`] before the block existed, so an opted-out world
+    /// is unchanged. A pure read; the controller, not this builder, decides how each content-bucket direction
+    /// moves behaviour, so foraging and dispersal emerge from selection (Principle 8).
+    #[allow(clippy::too_many_arguments)]
+    pub fn build_input_full_with_conviction_being_and_resource_features(
+        &self,
+        homeo: &Homeostasis,
+        here: &BTreeSet<HomeostaticAxisId>,
+        source_dirs: &BTreeMap<HomeostaticAxisId, (Fixed, Fixed)>,
+        signed: &BTreeMap<HomeostaticAxisId, Fixed>,
+        features: &[Fixed],
+        appetitive: &[Fixed],
+        material: &[Fixed],
+        attraction: &[Fixed],
+        conviction: &[Fixed],
+        being: &[Fixed],
+        being_features: &[Fixed],
+        resource_features: &[Fixed],
+    ) -> Vec<Fixed> {
         let mut v = vec![Fixed::ZERO; self.n_in];
         for (a, &axis) in self.axes.iter().enumerate() {
             v[INPUTS_PER_AXIS * a] = homeo.level(axis);
@@ -900,6 +1014,14 @@ impl ControllerLayout {
         let bfbase = self.being_feature_input_base();
         for (k, &bf) in being_features.iter().enumerate().take(self.n_being_feature) {
             v[bfbase + k] = bf;
+        }
+        let rfbase = self.resource_feature_input_base();
+        for (k, &rf) in resource_features
+            .iter()
+            .enumerate()
+            .take(self.n_resource_feature)
+        {
+            v[rfbase + k] = rf;
         }
         v[self.n_in - 1] = Fixed::ONE; // the bias input, always the last slot
         v
