@@ -26,6 +26,7 @@
 //! artifact once Tier 2 lowers that epsilon). The result is a fixed per-node plan, so the per-tick evaluation
 //! is a fixed deterministic integer function.
 
+use crate::tier2::WideAccum;
 use crate::{derive_scale_bits, DerivedScale};
 
 /// A quantity's declared magnitude envelope: the floor-base-2 logarithms of its largest and smallest bound
@@ -204,6 +205,62 @@ pub fn plan(
             // ln maps a positive value to roughly [-a few, a few]; a small bounded interval.
             Ok(node(-8, 8, pa.wide_bits, sig_target, guard))
         }
+    }
+}
+
+/// Evaluate a `LawExpr` to a single scaled mantissa at `output_scale`, computing the WHOLE chain in one
+/// [`WideAccum`] and rounding ONCE at the end (the single-round-per-chain discipline the slice-1 measurement
+/// showed exact to the arbitrary-precision oracle). `input` resolves each `Input(q)` to its `(bits, scale)`
+/// value. Returns `None` on a wide-accumulator overflow, an `Add`/`Sub` whose two sub-chains land at
+/// different running scales, or a node kind this evaluator does not yet handle.
+///
+/// The supported shape is the multiplicative chain with a difference-of-powers core that the flagship radiant
+/// law `sigma * (T_hot^4 - T_cold^4) * emissivity * area` needs: `Input`, `Powi`, `Add`/`Sub` of equal-scale
+/// chains, and `Mul` where at least ONE operand is an `Input` leaf that folds into the other side's chain as a
+/// scalar (the wide accumulator multiplies a scalar mantissa in, not another wide chain). A `Mul` of two
+/// non-leaf chains, and the `Const`/`Div`/`Ln`/`Isqrt` node kinds inside a chain, return `None` here: each is
+/// added when a lifted law first needs it (its own slice extension), rather than authored speculatively.
+pub fn evaluate(
+    expr: &LawExpr,
+    input: &dyn Fn(u32) -> (i64, u32),
+    output_scale: u32,
+) -> Option<i64> {
+    eval_accum(expr, input)?.round_to_scale(output_scale)
+}
+
+/// Whether a node is an `Input` leaf whose `(bits, scale)` value folds into a chain as a scalar multiply.
+fn leaf_value(expr: &LawExpr, input: &dyn Fn(u32) -> (i64, u32)) -> Option<(i64, u32)> {
+    match expr {
+        LawExpr::Input(q) => Some(input(*q)),
+        _ => None,
+    }
+}
+
+fn eval_accum(expr: &LawExpr, input: &dyn Fn(u32) -> (i64, u32)) -> Option<WideAccum> {
+    match expr {
+        LawExpr::Input(q) => {
+            let (bits, scale) = input(*q);
+            Some(WideAccum::new(bits, scale))
+        }
+        LawExpr::Powi(a, n) => {
+            let (bits, scale) = leaf_value(a, input)?;
+            WideAccum::power(bits, scale, *n)
+        }
+        LawExpr::Mul(a, b) => {
+            // Fold whichever side is a scalar `Input` leaf into the other side's chain. The wide accumulator
+            // multiplies a scalar mantissa in, so a Mul of two non-leaf chains is unsupported here (None).
+            if let Some((bits, scale)) = leaf_value(b, input) {
+                eval_accum(a, input)?.mul(bits, scale)
+            } else if let Some((bits, scale)) = leaf_value(a, input) {
+                eval_accum(b, input)?.mul(bits, scale)
+            } else {
+                None
+            }
+        }
+        LawExpr::Add(a, b) => eval_accum(a, input)?.add(&eval_accum(b, input)?),
+        LawExpr::Sub(a, b) => eval_accum(a, input)?.sub(&eval_accum(b, input)?),
+        // Const (needs a value binding), Div, Ln, and Isqrt inside a chain are added per lifted law.
+        _ => None,
     }
 }
 
@@ -404,6 +461,120 @@ mod tests {
             p.scale_bits > CANONICAL_SCALE,
             "sigma should derive a finer scale, got {}",
             p.scale_bits
+        );
+    }
+
+    // ---- slice 4a: the evaluator over the flagship radiant law, byte-neutral (no run-path wire) ----
+
+    use crate::bignum::{BigRat, BigUint};
+    use civsim_core::Fixed;
+
+    /// The exact rational value of a scaled mantissa `bits / 2^scale`.
+    fn scaled_rat(bits: i64, scale: u32) -> BigRat {
+        BigRat::new(
+            bits < 0,
+            BigUint::from_u64(bits.unsigned_abs()),
+            BigUint::from_u64(2).pow(scale),
+        )
+    }
+
+    /// The flagship radiant law `sigma * (T_hot^4 - T_cold^4) * emissivity * area` as a left-leaning `LawExpr`
+    /// where every `Mul` folds one scalar `Input` leaf (sigma, emissivity, area) into the difference-of-quartics
+    /// chain. Input ids: 0 sigma, 1 T_hot, 2 T_cold, 3 emissivity, 4 area.
+    fn radiant_expr() -> LawExpr {
+        let diff = LawExpr::Sub(
+            boxed(LawExpr::Powi(boxed(LawExpr::Input(1)), 4)),
+            boxed(LawExpr::Powi(boxed(LawExpr::Input(2)), 4)),
+        );
+        LawExpr::Mul(
+            boxed(LawExpr::Mul(
+                boxed(LawExpr::Mul(boxed(diff), boxed(LawExpr::Input(0)))),
+                boxed(LawExpr::Input(3)),
+            )),
+            boxed(LawExpr::Input(4)),
+        )
+    }
+
+    /// The exact rational the radiant law evaluates to for the given scaled inputs.
+    fn radiant_oracle(vals: &[(i64, u32); 5]) -> BigRat {
+        let t_hot = scaled_rat(vals[1].0, vals[1].1);
+        let t_cold = scaled_rat(vals[2].0, vals[2].1);
+        let hot4 = t_hot.mul(&t_hot).mul(&t_hot).mul(&t_hot);
+        let cold4 = t_cold.mul(&t_cold).mul(&t_cold).mul(&t_cold);
+        hot4.sub(&cold4)
+            .mul(&scaled_rat(vals[0].0, vals[0].1))
+            .mul(&scaled_rat(vals[3].0, vals[3].1))
+            .mul(&scaled_rat(vals[4].0, vals[4].1))
+    }
+
+    #[test]
+    fn the_radiant_law_evaluates_exactly_to_the_bigrat_oracle() {
+        // sigma at its fine scale 55, temperatures/emissivity/area at Q32.32. A forge (T_hot ~ 1200 K) losing
+        // heat to a 300 K room. Every input a scalar leaf but the difference-of-quartics chain.
+        let sigma_fine = BigRat::from_decimal_str("0.00000005670374419")
+            .unwrap()
+            .round_to_scale(55)
+            .unwrap() as i64;
+        // The scales here are what the slice-2 planner would derive to keep the single-round chain inside the
+        // i256 accumulator (sigma at its fine 55, the temperatures at 24 so the quartic does not overrun 255
+        // bits); a raw all-Q32.32 chain overflows, which is why the planner sizes per law.
+        let vals: [(i64, u32); 5] = [
+            (sigma_fine, 55),
+            (1200i64 << 24, 24),                      // T_hot 1200 K
+            (300i64 << 24, 24),                       // T_cold 300 K
+            (Fixed::from_ratio(9, 10).to_bits(), 32), // emissivity 0.9
+            (Fixed::from_ratio(1, 20).to_bits(), 32), // area 0.05 m^2
+        ];
+        let out_scale = 32u32; // deliver the flux back at Q32.32 for the drain
+        let got = evaluate(&radiant_expr(), &|q| vals[q as usize], out_scale)
+            .expect("the radiant chain fits the wide accumulator");
+        let want = radiant_oracle(&vals).round_to_scale(out_scale).unwrap() as i64;
+        assert_eq!(
+            got, want,
+            "the single-round chain is exact to the rational oracle"
+        );
+    }
+
+    #[test]
+    fn sigma_at_a_fine_scale_reaches_the_result_where_the_q32_truncation_does_not() {
+        // The lift's whole point: sigma's precision survives into the flux. Evaluate the law twice, once with
+        // sigma at its fine scale (its full ~31-bit mantissa) and once with sigma truncated to Q32.32 (244 raw,
+        // the ~8-bit value the hand-written law carries today), and show the two results DIFFER at the output,
+        // each matching its OWN sigma's exact oracle. So the finer sigma is not lost in the arithmetic.
+        let sigma_fine = BigRat::from_decimal_str("0.00000005670374419")
+            .unwrap()
+            .round_to_scale(55)
+            .unwrap() as i64;
+        let base = |sigma: (i64, u32)| -> [(i64, u32); 5] {
+            [
+                sigma,
+                (1200i64 << 24, 24),
+                (300i64 << 24, 24),
+                (Fixed::ONE.to_bits(), 32), // emissivity 1 (isolate sigma)
+                (Fixed::ONE.to_bits(), 32), // area 1
+            ]
+        };
+        let out_scale = 32u32;
+        let fine_vals = base((sigma_fine, 55));
+        let trunc_vals = base((244, 32)); // sigma as Q32.32, the current truncation
+        let fine = evaluate(&radiant_expr(), &|q| fine_vals[q as usize], out_scale).unwrap();
+        let trunc = evaluate(&radiant_expr(), &|q| trunc_vals[q as usize], out_scale).unwrap();
+        assert_ne!(
+            fine, trunc,
+            "the fine sigma and the Q32.32 truncation give different flux, so sigma's precision reaches the result"
+        );
+        // Each matches its own sigma's exact oracle (the evaluator is exact for both).
+        assert_eq!(
+            fine,
+            radiant_oracle(&fine_vals)
+                .round_to_scale(out_scale)
+                .unwrap() as i64
+        );
+        assert_eq!(
+            trunc,
+            radiant_oracle(&trunc_vals)
+                .round_to_scale(out_scale)
+                .unwrap() as i64
         );
     }
 }
