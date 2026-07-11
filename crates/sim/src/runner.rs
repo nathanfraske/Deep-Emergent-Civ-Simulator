@@ -1081,12 +1081,13 @@ pub fn is_predator(id: StableId) -> bool {
 /// (whose small `occ.id.0` never reaches bit 60), and the authored predator's `PREDATOR_ID_BIT` (bit 61).
 pub const OFFSPRING_ID_BIT: u64 = 1 << 60;
 
-/// A deterministic symmetric zero-mean deviation in `[-spread, +spread)` for a creature's controller weight
+/// A deterministic bounded deviation in the half-open `[-spread, +spread)` for a creature's controller weight
 /// `k`, keyed on the being id, the tick, and the weight index (creature-selection step 2, the mint-time and
-/// inheritance perturbation). Mirrors the founder developmental-offset draw: `unit_fixed` lies in `[0, ONE)`
-/// and the symmetric map is a pure function of the seed, the being, the tick, and the weight index, so it
-/// replays bit for bit. Keyed on `Phase::CREATURE_REPRO` and a creature id (disjoint from every founder id),
-/// so it never collides with a founder draw.
+/// inheritance perturbation). Mirrors the founder developmental-offset draw: `unit_fixed` lies in `[0, ONE)`,
+/// so `2u - 1` is zero-mean to within one fixed-point ULP (an exact `-1/2^32` bias, sub-resolution and with no
+/// determinism, correctness, or steering consequence), and the map is a pure function of the seed, the being,
+/// the tick, and the weight index, so it replays bit for bit. Keyed on `Phase::CREATURE_REPRO` and a creature
+/// id (disjoint from every founder id), so it never collides with a founder draw.
 fn creature_weight_deviation(seed: u64, id: StableId, tick: u64, k: usize, spread: Fixed) -> Fixed {
     let unit = DrawKey::entity(id.0, tick, Phase::CREATURE_REPRO)
         .rng(seed)
@@ -1123,6 +1124,14 @@ fn breed_offspring(
             let (_, _, ctrl_b, _, _) = &eligible[pair[1]];
             let count = *offspring_count;
             *offspring_count += 1;
+            // The offspring counter must stay within the OFFSPRING_ID_BIT band so an offspring id never
+            // aliases the predator's PREDATOR_ID_BIT (1<<61) or a spawned creature's `occ.id.0 | tag`. Asserted
+            // at runtime for parity with the sibling spawn paths (spawn_creatures / spawn_predator), though
+            // reaching it would need ~2^60 offspring, unreachable in a run.
+            debug_assert!(
+                count < OFFSPRING_ID_BIT,
+                "creature offspring counter overflowed its id band"
+            );
             let child = StableId(CREATURE_ID_TAG | OFFSPRING_ID_BIT | count);
             let child_ctrl = ctrl_a.midparent(ctrl_b, |k| {
                 creature_weight_deviation(seed, child, clock, k, params.offspring_mutation_spread)
@@ -6960,8 +6969,10 @@ impl Runner {
             .walkers
             .iter()
             .filter(|w| {
+                // The STRUCTURAL predicate stands alone (no id-tag read): only a modeled-lineage creature
+                // carries a heritable controller, so `carries_lineage` already excludes the founders and the
+                // authored predator (neither is given a lineage), keyed on what the being IS, never its id.
                 w.alive
-                    && is_creature(w.id)
                     && w.carries_lineage()
                     && w.homeostasis.level(energy_axis) >= params.reproduction_eligibility_reserve
             })
@@ -12944,6 +12955,95 @@ values = [
         assert!(
             breed_offspring(&apart, &params, seed, clock, &reg, &organs, &mut c2).is_empty(),
             "two eligible creatures in different cells do not pair"
+        );
+    }
+
+    #[test]
+    fn the_reproduction_beat_fires_end_to_end_through_a_real_step() {
+        // The end-to-end wrapper proof (creature-selection step 2): a real runner, the creature_selection
+        // substrate armed, stepped to a life-cadence beat, mints an offspring from two co-located eligible
+        // creatures through the actual `reproduce_creatures` path (the cadence gate, the energy-axis eligibility
+        // filter, the snapshot-before-mint, and the install), not just the extracted `breed_offspring` core.
+        let reg = repro_reg();
+        let mut emb = Embodiment::new(
+            reg.clone(),
+            AffordanceRegistry::dev_default(),
+            LocomotionParams::dev_default(),
+            0,
+            0x5A17,
+        );
+        // Eligibility floored at zero so any living creature qualifies (removing sensitivity to one step's
+        // metabolic drain); the mechanism under test is the beat, not the threshold (that is covered above).
+        emb.set_creature_selection(Some(CreatureSelectionParams {
+            mint_perturbation_spread: Fixed::ZERO,
+            reproduction_eligibility_reserve: Fixed::ZERO,
+            offspring_mutation_spread: Fixed::from_decimal_str("0.02").unwrap(),
+        }));
+        let layout = emb.layout().clone();
+        // Two BLANK-controller creatures co-located at one cell: a blank controller issues no positive
+        // activation, so they do not move and stay co-located through the step. Each carries its controller as
+        // heritable lineage (a modeled-lineage creature).
+        let blank = Controller::zeros(&layout);
+        let here = Coord3::ground(4, 4);
+        for k in 1u64..=2 {
+            emb.add(
+                Walker::new(
+                    StableId(CREATURE_ID_TAG | k),
+                    here,
+                    repro_body(),
+                    Homeostasis::from_mass(&reg, Fixed::ONE),
+                    Physiology::dev_for_registry(&reg),
+                    blank.clone(),
+                )
+                .with_lineage(blank.clone()),
+                BeingThermal {
+                    setpoint: Fixed::from_int(37),
+                    half_band: Fixed::from_int(10),
+                    initial_temp: Fixed::from_int(37),
+                },
+            );
+        }
+        let params = crate::InferenceParams {
+            clamp: Fixed::from_int(50),
+            commit_threshold: Fixed::from_int(3),
+            margin: Fixed::from_int(1),
+        };
+        // A minimal world with a life cadence of one tick, so the very first step lands on a cadence beat and
+        // fires the reproduction beat.
+        let mut world = World::new(params, params, crate::AccessWeights::from_pairs([]));
+        world.set_life_cadence(1);
+        let field = Field::new(8, 8, vec![Fixed::from_int(37); 64]);
+        let mut runner = Runner::with_world_and_embodiment(field, calib(), world, emb);
+
+        let before = runner.embodiment().unwrap().walkers().len();
+        runner.step();
+        let after = runner.embodiment().unwrap();
+        assert!(
+            after.walkers().len() > before,
+            "the reproduction beat minted at least one offspring through a real step"
+        );
+        // The minted offspring is a lineage-carrying creature in the disjoint offspring sub-namespace, at the
+        // parents' cell, distinct from the two founders and never a predator.
+        let offspring: Vec<_> = after
+            .walkers()
+            .iter()
+            .filter(|w| w.id.0 & OFFSPRING_ID_BIT != 0)
+            .collect();
+        assert_eq!(
+            offspring.len(),
+            1,
+            "one co-located eligible pair mints exactly one offspring"
+        );
+        let child = offspring[0];
+        assert!(is_creature(child.id) && !is_predator(child.id));
+        assert!(
+            child.carries_lineage(),
+            "the offspring carries its own heritable lineage"
+        );
+        assert_eq!(
+            child.coord(),
+            here,
+            "the offspring is minted at the parents' cell"
         );
     }
 }
