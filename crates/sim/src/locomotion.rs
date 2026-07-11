@@ -450,6 +450,19 @@ impl ResourceField {
             .unwrap_or(Fixed::ZERO)
     }
 
+    /// The IDENTITY-BLIND total substance content of a tile: the cell's whole
+    /// [`Composition::total_content`] (every class's amount, nutrient and toxin alike), or zero for an
+    /// off-grid or unwritten tile. This is the CLASS-FREE aggregate the forage percept reads (the
+    /// foraging arc, the gate's amendment 1): a perceiver senses "how much matter is here", never a
+    /// per-class `supply(class)` read that gates on a world-chosen substance identity, so which substances
+    /// fill its reserves stays a SELECTED correlation, never authored. Keyed off the tile's composition
+    /// alone, no race or kind id (Principle 9). Pure read of hashed state.
+    pub fn cell_content(&self, coord: Coord3) -> Fixed {
+        self.composition(coord)
+            .map(|c| c.total_content())
+            .unwrap_or(Fixed::ZERO)
+    }
+
     /// Remove up to `want` of one nutrient class from a tile's standing supply, returning what was
     /// removed (never more than is present, never negative), the grazing draw the ingest arm
     /// makes on the living resource loop (base-level liveliness step 3). A depleted tile feeds the next
@@ -1041,6 +1054,9 @@ pub fn step<T: Terrain>(
         // No being-FEATURE percept on the field-less fixture path (the layout carries no being-feature block
         // here), so the controller's being-feature input, if any, reads zero (step 2b).
         &BTreeMap::new(),
+        // No RESOURCE-FEATURE percept on the field-less fixture path (the layout carries no resource-feature
+        // block here), so the controller's resource-feature input, if any, reads zero (the foraging arc).
+        &BTreeMap::new(),
         // The field-less fixture path enacts no grasp (it carries no material field); the sink is
         // discarded, so a decided grasp on this path is inert.
         &mut BTreeMap::new(),
@@ -1199,6 +1215,13 @@ pub fn step_with_field_dirs<T: Terrain>(
     // byte-identical to before the block existed. Only an evolved FREELY-SIGNED per-bucket weight turns a
     // feature-bucket's direction into approach or flight, so the disposition emerges rather than being authored.
     being_features: &BTreeMap<StableId, Vec<Fixed>>,
+    // Each mind-less creature's resource-FEATURE percept (the foraging arc): the per-(channel, bucket)
+    // toward-direction over the CELLS it senses, discriminated by their identity-blind matter content, written
+    // into the controller's resource-feature block. Empty (a being absent, or an empty map) when the world
+    // declares no resource features (the layout carries no resource-feature block), so the input is
+    // byte-identical to before the block existed. Only an evolved FREELY-SIGNED per-bucket weight turns a
+    // content-bucket's direction into approach, so foraging emerges rather than being authored.
+    resource_features: &BTreeMap<StableId, Vec<Fixed>>,
     deferred_actions: &mut BTreeMap<StableId, (AffordanceId, Fixed)>,
 ) -> usize {
     walkers.sort_by_key(|w| w.id);
@@ -1315,7 +1338,14 @@ pub fn step_with_field_dirs<T: Terrain>(
         // byte-identical to before the block existed.
         let empty_being_features: Vec<Fixed> = Vec::new();
         let being_feature_dirs = being_features.get(&w.id).unwrap_or(&empty_being_features);
-        let input = layout.build_input_full_with_conviction_and_being_features(
+        // The RESOURCE-FEATURE block for this tick (the foraging arc): the creature's per-(channel, bucket)
+        // toward-directions over the cells it senses, discriminated by their identity-blind content. Empty when
+        // the world declares no resource features (the layout carries no block), so byte-identical to before.
+        let empty_resource_features: Vec<Fixed> = Vec::new();
+        let resource_feature_dirs = resource_features
+            .get(&w.id)
+            .unwrap_or(&empty_resource_features);
+        let input = layout.build_input_full_with_conviction_being_and_resource_features(
             &w.homeostasis,
             &here_axes,
             &dirs,
@@ -1327,6 +1357,7 @@ pub fn step_with_field_dirs<T: Terrain>(
             convict,
             being_dirs,
             being_feature_dirs,
+            resource_feature_dirs,
         );
         let (out, new_hidden) = w.controller.evaluate(&input, &w.hidden);
         w.hidden = new_hidden;
@@ -2238,6 +2269,7 @@ mod tests {
                     &BTreeMap::new(), // no conviction block on the fixture path
                     &BTreeMap::new(),
                     &BTreeMap::new(), // no being + being-feature blocks (step 2b)
+                    &BTreeMap::new(), // no resource-feature block (foraging arc)
                     &mut BTreeMap::new(),
                 );
             }
@@ -2322,6 +2354,7 @@ mod tests {
                     &std::collections::BTreeMap::new(), // no conviction block on the fixture path
                     &std::collections::BTreeMap::new(),
                     &std::collections::BTreeMap::new(), // no being + being-feature blocks (step 2b)
+                    &std::collections::BTreeMap::new(), // no resource-feature block (foraging arc)
                     &mut std::collections::BTreeMap::new(),
                 );
             }
@@ -2416,6 +2449,7 @@ mod tests {
                     &std::collections::BTreeMap::new(), // no conviction block on the fixture path
                     &std::collections::BTreeMap::new(),
                     &std::collections::BTreeMap::new(), // no being + being-feature blocks (step 2b)
+                    &std::collections::BTreeMap::new(), // no resource-feature block (foraging arc)
                     &mut std::collections::BTreeMap::new(),
                 );
             }
@@ -2925,6 +2959,7 @@ mod tests {
             &std::collections::BTreeMap::new(), // no conviction block on the fixture path
             &std::collections::BTreeMap::new(),
             &std::collections::BTreeMap::new(), // no being + being-feature blocks (step 2b)
+            &std::collections::BTreeMap::new(), // no resource-feature block (foraging arc)
             &mut std::collections::BTreeMap::new(),
         );
 
@@ -3053,6 +3088,7 @@ mod tests {
                     &std::collections::BTreeMap::new(), // no conviction block on the fixture path
                     &std::collections::BTreeMap::new(),
                     &std::collections::BTreeMap::new(), // no being + being-feature blocks (step 2b)
+                    &std::collections::BTreeMap::new(), // no resource-feature block (foraging arc)
                     &mut std::collections::BTreeMap::new(),
                 );
                 if !ws[0].alive {
@@ -3176,6 +3212,7 @@ mod tests {
                     &std::collections::BTreeMap::new(), // no conviction block on the fixture path
                     &std::collections::BTreeMap::new(),
                     &std::collections::BTreeMap::new(), // no being + being-feature blocks (step 2b)
+                    &std::collections::BTreeMap::new(), // no resource-feature block (foraging arc)
                     &mut std::collections::BTreeMap::new(),
                 );
             }
@@ -3278,6 +3315,7 @@ mod tests {
                     &std::collections::BTreeMap::new(), // no conviction block on the fixture path
                     &std::collections::BTreeMap::new(),
                     &std::collections::BTreeMap::new(), // no being + being-feature blocks (step 2b)
+                    &std::collections::BTreeMap::new(), // no resource-feature block (foraging arc)
                     &mut std::collections::BTreeMap::new(),
                 );
             }

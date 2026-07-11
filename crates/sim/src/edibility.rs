@@ -169,6 +169,22 @@ impl Composition {
     pub fn nutrient_total(&self) -> Fixed {
         Fixed::saturating_sum(self.nutrients.values().copied())
     }
+
+    /// The cell's TOTAL substance content: the sum of every class's amount, nutrient and toxin alike
+    /// ([`Self::nutrient`] plus [`Self::toxin`] over all classes present). This is the CLASS-FREE,
+    /// IDENTITY-BLIND, VALENCE-BLIND aggregate the forage percept reads (creature-selection foraging arc,
+    /// the gate's amendment 1): the physical "how much matter is here", never a per-class `sensed(class)`
+    /// lookup that would gate the read on a world-chosen substance IDENTITY (the class-set authoring the
+    /// owner ruled out). Two cells of equal total content but different substances read IDENTICALLY, so
+    /// substance identity never gates the read, only the physical quantity does; which substances are food
+    /// and which are poison stays a LEARNED/SELECTED correlation with felt outcome, never authored here
+    /// (Principle 8, the same valence-blindness [`Self::sensed`] already follows per class). Pure and
+    /// RNG-free, an order-free saturating sum of hashed state.
+    pub fn total_content(&self) -> Fixed {
+        let nutrients = Fixed::saturating_sum(self.nutrients.values().copied());
+        let toxins = Fixed::saturating_sum(self.toxins.values().copied());
+        nutrients.saturating_add(toxins)
+    }
 }
 
 /// A consumer's physiology over the floor's relation kinds, each keyed by biology-floor class id:
@@ -433,6 +449,32 @@ mod tests {
             Composition::genesis(0xED1B, 4, &nut, &tox),
             "a different species differs"
         );
+    }
+
+    #[test]
+    fn total_content_is_identity_blind_and_valence_blind() {
+        // The forage percept's aggregate (the gate's amendment 1): two cells of equal TOTAL content but
+        // entirely different substances read IDENTICALLY, so substance identity never gates the read.
+        // Power-of-two fractions so the fixed-point sums are exact and the equality is bit-clean.
+        let a = comp(&[("bio.starch", f(1, 4)), ("bio.oil", f(1, 4))], &[]);
+        let b = comp(&[("bio.chitin", f(1, 8)), ("bio.sugar", f(3, 8))], &[]);
+        assert_eq!(a.total_content(), f(1, 2));
+        assert_eq!(
+            a.total_content(),
+            b.total_content(),
+            "equal total, different classes: the read is identity-blind"
+        );
+        // Valence-blind: a toxin class contributes to the total exactly as a nutrient of the same amount,
+        // so the being senses "how much matter", never the floor's food/poison filing (learned by outcome).
+        let nutritious = comp(&[("bio.starch", f(1, 2))], &[]);
+        let toxic = comp(&[("bio.starch", f(1, 4))], &[("bio.alkaloid", f(1, 4))]);
+        assert_eq!(
+            nutritious.total_content(),
+            toxic.total_content(),
+            "equal total across the valence split reads identically"
+        );
+        // An empty cell reads zero (the absence convention).
+        assert_eq!(comp(&[], &[]).total_content(), Fixed::ZERO);
     }
 
     #[test]
