@@ -127,6 +127,7 @@ const FRAC_MAX: Fixed = Fixed::ONE;
 /// the manifest, never fabricated (Principle 11). The kernels are fixed Rust; these are the owner's to
 /// set. Read on a canonical run through [`MetabolicAnchors::from_manifest`]; the dev fixture is a
 /// labelled test stand-in.
+// @derives: a being's metabolic rate, energy drain, and heat loss <- Kleiber's law P = a * m^(3/4) over the body's own mass (kleiber_a and body_mass_kg_scale are per-race anchors, sigma is a universal constant); the rate is NOT authored, it derives from the being's body. Water loss derives from 1/L_vap (latent heat of vaporization) x metabolic power (physiology water-loss coupling, landed with the Mirror water arc).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct MetabolicAnchors {
     /// The Kleiber coefficient `a` in `P = a * m^(3/4)` (W per kg^(3/4)). RESERVED owner anchor.
