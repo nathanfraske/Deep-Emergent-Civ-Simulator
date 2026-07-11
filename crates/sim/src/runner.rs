@@ -13529,4 +13529,142 @@ values = [
              the pass discriminates the real coverings by their band_1 emissivity"
         );
     }
+
+    /// A mind-less creature at (2, 8) whose controller wants to MOVE and steers its heading from ONE
+    /// resource-feature bucket's toward-direction (`weight_bucket`), with a single resource cell of matter
+    /// `cell_content` placed three cells due EAST, stepped through a real runner with the resource-feature
+    /// substrate armed (one content channel, step 0.05, 20 buckets). Returns the run's state hash. The whole
+    /// point: the runner's resource-feature pass must READ the cell's identity-blind content, discriminate it
+    /// into a bucket, and steer the perceiver only when that bucket matches the weighted one.
+    fn resource_feature_step_hash(cell_content: Fixed, weight_bucket: Option<usize>) -> u128 {
+        use crate::homeostasis::{HomeostaticAxisDef, HomeostaticRegistry};
+        use crate::medium::MediumField;
+        use crate::perceivable_feature::PerceivableFeatureRegistry;
+        let homeo = HomeostaticRegistry {
+            axes: vec![
+                HomeostaticAxisDef {
+                    id: ENERGY,
+                    name: "energy".to_string(),
+                    backing_component: Some(crate::physiology::ENERGY_DENSITY.to_string()),
+                    capacity_per_mass: Fixed::ONE,
+                    base_drain: Fixed::ZERO,
+                    exertion_drain: Fixed::ZERO,
+                    death_floor: Fixed::from_int(-1000),
+                    draw_set: Vec::new(),
+                },
+                HomeostaticAxisDef {
+                    id: TEMPERATURE,
+                    name: "temperature".to_string(),
+                    backing_component: None,
+                    capacity_per_mass: Fixed::ONE,
+                    base_drain: Fixed::ZERO,
+                    exertion_drain: Fixed::ZERO,
+                    death_floor: Fixed::from_int(-1000),
+                    draw_set: Vec::new(),
+                },
+            ],
+        };
+        let organs = BodyPlanRegistry::dev_default();
+        let mut emb = Embodiment::new(
+            homeo.clone(),
+            AffordanceRegistry::dev_default(),
+            LocomotionParams::dev_default(),
+            0,
+            0xF04A,
+        );
+        emb.set_physiology(EmbodiedPhysiology::dev_fixture(
+            organs.clone(),
+            MediumField::uniform(
+                16,
+                16,
+                Fixed::ONE,
+                Fixed::ONE,
+                Fixed::ONE,
+                Fixed::from_int(37),
+            ),
+        ));
+        // One resource-feature channel over the cell content, step 0.05, 20 buckets (0.9 -> bucket 18,
+        // 0.3 -> bucket 6). The axis string is a label; the read is the identity-blind cell content.
+        emb.set_resource_features(PerceivableFeatureRegistry::from_channels(&[(
+            "resource.content",
+            20,
+            Fixed::from_ratio(1, 20),
+        )]));
+        let layout = emb.layout().clone();
+        let n_in = layout.n_in();
+        let move_base = layout
+            .output_base(crate::homeostasis::MOVE)
+            .expect("the body affords MOVE");
+        let rf = layout.resource_feature_input_base();
+        let mut w = vec![Fixed::ZERO; layout.weight_count()];
+        w[move_base * n_in + (n_in - 1)] = Fixed::ONE; // MOVE activation from the bias
+        if let Some(b) = weight_bucket {
+            w[(move_base + 1) * n_in + (rf + 2 * b)] = Fixed::from_int(8); // heading dx from the bucket
+            w[(move_base + 2) * n_in + (rf + 2 * b + 1)] = Fixed::from_int(8); // heading dy
+        }
+        let perceiver_ctrl =
+            Controller::from_weights(layout.n_in(), layout.n_out(), layout.hidden(), w);
+        let thermal = || BeingThermal {
+            setpoint: Fixed::from_int(310),
+            half_band: Fixed::from_int(30),
+            initial_temp: Fixed::from_int(310),
+        };
+        emb.add(
+            Walker::new(
+                StableId(CREATURE_ID_TAG | 1),
+                Coord3::ground(2, 8),
+                repro_body(),
+                Homeostasis::from_mass(&homeo, Fixed::ONE),
+                Physiology::dev_for_registry(&homeo),
+                perceiver_ctrl,
+            ),
+            thermal(),
+        );
+        // The resource cell: matter content `cell_content` on one nutrient class, three cells due EAST (within
+        // the sense range of 4). The identity-blind `cell_content` read sums it, so the class id is irrelevant.
+        emb.resources_mut()
+            .composition_mut(Coord3::ground(5, 8))
+            .set_nutrient("bio.energy_density", cell_content);
+        let params = crate::InferenceParams {
+            clamp: Fixed::from_int(50),
+            commit_threshold: Fixed::from_int(3),
+            margin: Fixed::from_int(1),
+        };
+        let world = World::new(params, params, crate::AccessWeights::from_pairs([]));
+        let field = Field::new(16, 16, vec![Fixed::from_int(37); 256]);
+        let mut runner = Runner::with_world_and_embodiment(field, calib(), world, emb);
+        for _ in 0..30 {
+            runner.step();
+        }
+        runner.state_hash()
+    }
+
+    #[test]
+    fn the_resource_feature_wire_fires_end_to_end_and_discriminates_content() {
+        // The anti-confirmation-bias end-to-end proof (the foraging arc): a REAL runner, the resource-feature
+        // registry armed, stepped, drives the whole run-path glue the isolated unit tests skip: the
+        // perceive-phase gated pass reads each sensed cell's identity-blind content (`cell_content`),
+        // discriminates it into a bucket, and threads the resource-feature block into the controller so a
+        // per-bucket weight steers the creature toward that content-bucket's cells (foraging).
+        // THE WIRE FIRES: a cell of content 0.9 falls in bucket 18; a perceiver WEIGHTED on bucket 18 is
+        // steered toward it, so the run differs from the SAME perceiver with NO resource-feature weight. If the
+        // runner pass never read the cell or never threaded the block into the controller, these would match.
+        let rich_weighted = resource_feature_step_hash(Fixed::from_ratio(9, 10), Some(18));
+        let rich_unweighted = resource_feature_step_hash(Fixed::from_ratio(9, 10), None);
+        assert_ne!(
+            rich_weighted, rich_unweighted,
+            "the runner resource-feature pass read the cell's content, binned 0.9 into bucket 18, and threaded \
+             the block into the controller so the bucket-18 weight steered the perceiver (foraging fires)"
+        );
+        // IT DISCRIMINATES CONTENT: a cell of content 0.3 falls in bucket 6, NOT the weighted bucket 18, so
+        // weighting bucket 18 changes nothing (the pass binned the two contents into different buckets; had it
+        // ignored the content or binned both alike, this would differ too).
+        let lean_weighted = resource_feature_step_hash(Fixed::from_ratio(3, 10), Some(18));
+        let lean_unweighted = resource_feature_step_hash(Fixed::from_ratio(3, 10), None);
+        assert_eq!(
+            lean_weighted, lean_unweighted,
+            "a cell of content 0.3 falls in bucket 6, not the weighted bucket 18, so the perceiver is unmoved: \
+             the pass discriminates cells by their identity-blind content"
+        );
+    }
 }
