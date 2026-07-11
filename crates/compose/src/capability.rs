@@ -183,43 +183,6 @@ pub enum CapabilityKernel {
 }
 
 impl CapabilityKernel {
-    /// The geometry axes this kernel reads, documenting its input surface. The read itself gates on axis
-    /// PRESENCE through the zero-for-absent accessor (a part carrying no contact area reads zero area and
-    /// so zero capability), so this list is the declared contract, not a runtime guard.
-    pub fn geometry_axes(self) -> &'static [&'static str] {
-        match self {
-            CapabilityKernel::Pierce => &["mech.contact_area"],
-            CapabilityKernel::Locomote => &["mech.section_modulus", "mech.arm_length"],
-            CapabilityKernel::Refract => &[],
-            CapabilityKernel::Shear => &["mech.contact_area"],
-            CapabilityKernel::Crush => &["mech.contact_area"],
-            CapabilityKernel::Impact => &["mech.cross_section_area", "mech.stroke_length"],
-        }
-    }
-
-    /// The material axes this kernel reads.
-    pub fn material_axes(self) -> &'static [&'static str] {
-        match self {
-            CapabilityKernel::Pierce => &["mat.indentation_hardness"],
-            CapabilityKernel::Locomote => &["mat.yield_strength"],
-            CapabilityKernel::Refract => &["opt.refractive_index"],
-            CapabilityKernel::Shear => &["mat.shear_strength", "mat.yield_strength"],
-            CapabilityKernel::Crush => &["mat.compressive_strength"],
-            // The rigid actuating strength (entry 0), the elastic path's yield strength (1) and elastic modulus
-            // (2), and the hydraulic path's driving pressure (3): the IMPACT grade reads the same
-            // run-all-gate-to-zero MAX the delivery path resolves over the mechanical family, so the grade and the
-            // delivery stay in lockstep (the gate's slice-3 ruling). A part that grows no yield, modulus, or driving
-            // pressure reads zero elastic and hydraulic terms and grades on the rigid `F d` alone (byte-neutral at
-            // the rigid limit).
-            CapabilityKernel::Impact => &[
-                "mat.fracture_strength",
-                "mat.yield_strength",
-                "mat.elastic_modulus",
-                "fluid.driving_pressure",
-            ],
-        }
-    }
-
     /// The ROLE NAMES this kernel reads, its semantic input surface: each role is a slot the kernel's physics
     /// fills from whichever floor axis the [`AxisBinding`] maps it to. A role name is stable across worlds (an
     /// alien remaps a role to its own axis id, never renames the role), so both the grade and the delivery paths
@@ -283,28 +246,41 @@ impl CapabilityKernel {
     /// The dimensionless capability in `[0, 1]` the part's geometry and material yield for this function
     /// against the reserved references. A pure fixed-point read: no float, no id, no RNG, so a capability
     /// is a deterministic function of the grown physics and the reserved references.
-    /// `geometry_axes` and `material_axes` are the law's DATA-declared axis-id bindings (from its
-    /// [`FunctionLawDef`] row). The IMPACT kernel reads its axes from them (the grade-path parallel of the
-    /// delivery-path contact-transfer row); the other kernels read their hardcoded contract and ignore the
-    /// lists (the flagged follow-on lifts them the same way).
+    /// `binding` is the law's DATA-declared [`AxisBinding`] (from its [`FunctionLawDef`] row): ALL SIX kernels now
+    /// read their inputs by ROLE NAME through it (the grade-path parallel of the delivery-path contact-transfer
+    /// row), so an alien actuator names its own axes on both paths in lockstep and a role the binding does not
+    /// carry is a fail-loud load error, never a positional silent-shift or a hardcoded id.
     pub fn capability(
         self,
         geo: &dyn Fn(&str) -> Fixed,
         mat: &dyn Fn(&str) -> Fixed,
         refs: &CapabilityRefs,
         caps: &CapabilityCaps,
-        geometry_axes: &[String],
-        material_axes: &[String],
+        binding: &AxisBinding,
     ) -> Fixed {
         match self {
-            CapabilityKernel::Pierce => pierce(geo, mat, refs, caps),
-            CapabilityKernel::Locomote => locomote(geo, mat, refs, caps),
-            CapabilityKernel::Refract => refract(mat, refs),
-            CapabilityKernel::Shear => shear(geo, mat, refs, caps),
-            CapabilityKernel::Crush => crush(geo, mat, refs, caps),
-            CapabilityKernel::Impact => impact(geo, mat, refs, geometry_axes, material_axes),
+            CapabilityKernel::Pierce => pierce(geo, mat, refs, caps, binding),
+            CapabilityKernel::Locomote => locomote(geo, mat, refs, caps, binding),
+            CapabilityKernel::Refract => refract(mat, refs, binding),
+            CapabilityKernel::Shear => shear(geo, mat, refs, caps, binding),
+            CapabilityKernel::Crush => crush(geo, mat, refs, caps, binding),
+            CapabilityKernel::Impact => impact(geo, mat, refs, binding),
         }
     }
+}
+
+/// Read a ROLE's floor-axis value through the GEOMETRY accessor (the role names a geometry quantity: a
+/// cross-section, a stroke, a section modulus). An unbound role reads zero (the absence convention); a
+/// load-validated binding always carries a kernel's required roles, so a required role never reads zero for
+/// absence, only for a genuinely zero-grown axis.
+fn role_geo(geo: &dyn Fn(&str) -> Fixed, binding: &AxisBinding, role: &str) -> Fixed {
+    binding.axis(role).map(geo).unwrap_or(Fixed::ZERO)
+}
+
+/// Read a ROLE's floor-axis value through the MATERIAL accessor (the role names a material quantity: a strength,
+/// a hardness, a modulus, a driving pressure). The material sibling of [`role_geo`].
+fn role_mat(mat: &dyn Fn(&str) -> Fixed, binding: &AxisBinding, role: &str) -> Fixed {
+    binding.axis(role).map(mat).unwrap_or(Fixed::ZERO)
 }
 
 /// The LOCOMOTE read: is the part a load-bearing limb, and how strong a one, from its geometry and material.
@@ -313,10 +289,11 @@ fn locomote(
     mat: &dyn Fn(&str) -> Fixed,
     refs: &CapabilityRefs,
     caps: &CapabilityCaps,
+    binding: &AxisBinding,
 ) -> Fixed {
-    let section_modulus = geo("mech.section_modulus");
-    let arm_length = geo("mech.arm_length");
-    let yield_strength = mat("mat.yield_strength");
+    let section_modulus = role_geo(geo, binding, "section_modulus");
+    let arm_length = role_geo(geo, binding, "arm_length");
+    let yield_strength = role_mat(mat, binding, "yield_strength");
     if section_modulus <= Fixed::ZERO || yield_strength <= Fixed::ZERO {
         return Fixed::ZERO; // no section to bear a load, or no strength: not a limb
     }
@@ -340,8 +317,8 @@ fn locomote(
 
 /// The REFRACT read: is the tissue an optical transducer (an eye), from its refractive index against the
 /// medium. Material-only (a lens is a material property); no geometry axis is read.
-fn refract(mat: &dyn Fn(&str) -> Fixed, refs: &CapabilityRefs) -> Fixed {
-    let n2 = mat("opt.refractive_index");
+fn refract(mat: &dyn Fn(&str) -> Fixed, refs: &CapabilityRefs, binding: &AxisBinding) -> Fixed {
+    let n2 = role_mat(mat, binding, "refractive_index");
     if n2 <= Fixed::ZERO {
         return Fixed::ZERO; // no optical tissue: not an eye
     }
@@ -361,8 +338,9 @@ fn pierce(
     mat: &dyn Fn(&str) -> Fixed,
     refs: &CapabilityRefs,
     caps: &CapabilityCaps,
+    binding: &AxisBinding,
 ) -> Fixed {
-    let contact_area = geo("mech.contact_area");
+    let contact_area = role_geo(geo, binding, "contact_area");
     if contact_area <= Fixed::ZERO {
         return Fixed::ZERO; // no tip, no contact: not a weapon
     }
@@ -370,7 +348,7 @@ fn pierce(
     // material: a part cannot sustain a contact pressure above its own indentation hardness before it
     // plastically blunts, so a soft point caps out low and cannot exceed a hard target's resistance.
     let applied = laws::contact_pressure(refs.reference_strike_force, contact_area, caps.pressure);
-    let hardness = mat("mat.indentation_hardness");
+    let hardness = role_mat(mat, binding, "indentation_hardness");
     let effective = if hardness > Fixed::ZERO {
         applied.min(hardness)
     } else {
@@ -452,13 +430,14 @@ fn shear(
     mat: &dyn Fn(&str) -> Fixed,
     refs: &CapabilityRefs,
     caps: &CapabilityCaps,
+    binding: &AxisBinding,
 ) -> Fixed {
-    let contact_area = geo("mech.contact_area");
+    let contact_area = role_geo(geo, binding, "contact_area");
     if contact_area <= Fixed::ZERO {
         return Fixed::ZERO; // no edge, no contact: nothing to shear with
     }
-    let shear_strength = mat("mat.shear_strength");
-    let yield_strength = mat("mat.yield_strength");
+    let shear_strength = role_mat(mat, binding, "shear_strength");
+    let yield_strength = role_mat(mat, binding, "yield_strength");
     let independent = if shear_strength > Fixed::ZERO {
         Some(shear_strength)
     } else {
@@ -501,12 +480,13 @@ fn crush(
     mat: &dyn Fn(&str) -> Fixed,
     refs: &CapabilityRefs,
     caps: &CapabilityCaps,
+    binding: &AxisBinding,
 ) -> Fixed {
-    let contact_area = geo("mech.contact_area");
+    let contact_area = role_geo(geo, binding, "contact_area");
     if contact_area <= Fixed::ZERO {
         return Fixed::ZERO; // no face, no contact: nothing to crush with
     }
-    let compressive_strength = mat("mat.compressive_strength");
+    let compressive_strength = role_mat(mat, binding, "compressive_strength");
     // The applied compressive stress the reference force imposes over the face, self-limited at the part's
     // own compressive strength (a part that would carry more than it withstands crushes itself first). A part
     // with no compressive strength (zero) delivers no crushing stress.
@@ -542,29 +522,16 @@ fn impact(
     geo: &dyn Fn(&str) -> Fixed,
     mat: &dyn Fn(&str) -> Fixed,
     refs: &CapabilityRefs,
-    geometry_axes: &[String],
-    material_axes: &[String],
+    binding: &AxisBinding,
 ) -> Fixed {
-    // The actuating-strength, cross-section, and stroke axes are read from the law's DATA-declared bindings (the
-    // grade-path parallel of the delivery-path contact-transfer row), so an alien actuator names its own axes on
-    // both paths in lockstep: the rigid strength is material-axis 0, the cross-section geometry-axis 0, the stroke
-    // geometry-axis 1, and the elastic path's yield strength material-axis 1 and elastic modulus material-axis 2
-    // (the order the kernel's contract declares them, [`CapabilityKernel::material_axes`]). A binding that names no
-    // such axis reads zero through the accessor, so the part self-gates (the absence convention), never a hardcoded
-    // id and never a fabricated blow.
-    //
-    // POSITIONAL-CONTRACT CAVEAT (a section-9 alien-lens catch, flagged for the gate-deferred named-vs-positional
-    // unification): these axes are read by POSITION, so an alien binding MUST list them in the declared order
-    // [strength, yield, modulus, driving_pressure] and supply a zero-reading placeholder (or an axis it grows zero)
-    // at each slot it lacks, NEVER omit one. A binding that omits an absent leading axis (e.g. a purely-springy
-    // actuator writing [yield_id, modulus_id]) is mis-read positionally, yield landing in the strength slot and
-    // fabricating a rigid blow. The delivery-path row uses NAMED fields (`yield_axis`, `elastic_modulus_axis`,
-    // `pressure_axis`) and is immune; unifying the grade path to named fields is the gate-deferred follow-on (fold
-    // into lifting the other five kernels' bindings), which this slice's extension to four positional material axes
-    // makes more pointed.
-    let strength = material_axes.first().map(|a| mat(a)).unwrap_or(Fixed::ZERO);
-    let cross_section = geometry_axes.first().map(|a| geo(a)).unwrap_or(Fixed::ZERO);
-    let stroke = geometry_axes.get(1).map(|a| geo(a)).unwrap_or(Fixed::ZERO);
+    // Each input is read by ROLE NAME from the shared [`AxisBinding`] (the grade-path parallel of the delivery-path
+    // contact-transfer row), so an alien actuator names its own axes on both paths in lockstep. There is no
+    // positional slot to mis-read: a springy binding that carries no rigid strength maps `actuating_strength` to an
+    // axis it grows zero (or omits the role, which the load-time role validation catches), so the rigid path
+    // self-gates to zero and the elastic recoil stands, never a yield mis-read into the strength slot.
+    let strength = role_mat(mat, binding, "actuating_strength");
+    let cross_section = role_geo(geo, binding, "cross_section");
+    let stroke = role_geo(geo, binding, "stroke");
     // The RIGID path: the actuating force in newtons (strength stress over cross-section, promoted by the
     // megapascal-to-newton bridge), then the actuator work over the grown stroke. Passing the force through
     // `actuator_work` rather than short-circuiting on overflow keeps the stroke guard live: a part with no grown
@@ -575,15 +542,15 @@ fn impact(
     // volume (cross-section times stroke, the two geometry axes reused, no new axis). Self-gates to zero on a part
     // with no yield or no modulus, so a rigid-limit part reads exactly the rigid `F d` (byte-neutral). The swept
     // volume is a PROXY for the elastic element's own volume, the reserved-with-basis refinement noted on the row.
-    let yield_strength = material_axes.get(1).map(|a| mat(a)).unwrap_or(Fixed::ZERO);
-    let elastic_modulus = material_axes.get(2).map(|a| mat(a)).unwrap_or(Fixed::ZERO);
+    let yield_strength = role_mat(mat, binding, "yield_strength");
+    let elastic_modulus = role_mat(mat, binding, "elastic_modulus");
     let volume = cross_section.checked_mul(stroke).unwrap_or(ENERGY_GUARD);
     let elastic =
         laws::elastic_recoil_energy(yield_strength, elastic_modulus, volume, ENERGY_GUARD);
     // The HYDRAULIC path: the pressure-over-volume work `P dV` = `F d` of a working-fluid actuator, which COMPOSES
     // from the same two laws the rigid path uses (the driving pressure over the piston cross-section is the force),
     // no new law. Self-gates to zero on a part with no driving pressure, so a non-fluid part is unaffected.
-    let driving_pressure = material_axes.get(3).map(|a| mat(a)).unwrap_or(Fixed::ZERO);
+    let driving_pressure = role_mat(mat, binding, "driving_pressure");
     let hydraulic_force = laws::stress_force(driving_pressure, cross_section, ENERGY_GUARD);
     let hydraulic = laws::actuator_work(hydraulic_force, stroke, ENERGY_GUARD);
     // The MAX over the shared-source mechanical family (alternative paths for one metabolic source; SUM would
@@ -744,24 +711,21 @@ pub struct FunctionLawDef {
     pub name: String,
     /// The kernel it computes.
     pub kernel: CapabilityKernel,
-    /// The physics-floor GEOMETRY axis ids the law's kernel reads, as DATA (Principle 11): the grade-path
-    /// parallel of the delivery-path contact-transfer row (which carries its `cross_section_axis`/`stroke_axis`
-    /// on the row), so an alien actuator names its own axes on BOTH the capability grade and the delivered-energy
-    /// paths, in lockstep, never a rewrite of one while the other is data. The IMPACT kernel reads its
-    /// cross-section (entry 0) and stroke (entry 1) from here; the other kernels still read their hardcoded
-    /// default contract (a flagged follow-on to lift them the same way), so a def whose binding equals
-    /// `kernel.geometry_axes()`, as [`FunctionLawDef::new`] populates it, reads byte-identically.
-    pub geometry_axes: Vec<String>,
-    /// The physics-floor MATERIAL axis ids the law's kernel reads, as DATA, the material sibling of
-    /// [`Self::geometry_axes`]. The IMPACT kernel reads its actuating-strength axis from the first entry.
-    pub material_axes: Vec<String>,
+    /// The DATA-DEFINED [`AxisBinding`]: a role-name to floor-axis-id map the kernel reads its inputs from BY ROLE
+    /// NAME, the shared type both the grade path (this row) and the delivery path (`contact_transfer`'s row)
+    /// reference, so an alien actuator names its own axes on both paths in lockstep, never a positional slot a
+    /// missing axis silently shifts. [`FunctionLawDef::new`] populates it from the kernel's byte-neutral default
+    /// ([`CapabilityKernel::default_binding`], each role mapped to the Terran floor axis it reads today); an alien
+    /// registry supplies its own with [`FunctionLawDef::with_binding`], validated at construction so a missing role
+    /// is a load error.
+    pub binding: AxisBinding,
 }
 
 impl FunctionLawDef {
-    /// A law entry whose axis bindings are the kernel's own declared contract, the byte-neutral default: the
-    /// data-carried axis ids equal [`CapabilityKernel::geometry_axes`] / [`CapabilityKernel::material_axes`], so
-    /// a def built this way reads exactly as the hardcoded kernel did. An alien registry overrides the axis ids
-    /// by constructing the def with its own lists (the harden-to-registry contract, Principle 11).
+    /// A law entry whose binding is the kernel's own BYTE-NEUTRAL default (each role mapped to the Terran floor
+    /// axis it reads today, [`CapabilityKernel::default_binding`]), so a def built this way reads exactly as the
+    /// pre-unification kernel did. The default always carries the kernel's required roles, so its validation
+    /// cannot fail (asserted by a test); this constructor stays infallible for the common Terran path.
     pub fn new(
         id: FunctionLawId,
         name: impl Into<String>,
@@ -771,17 +735,27 @@ impl FunctionLawDef {
             id,
             name: name.into(),
             kernel,
-            geometry_axes: kernel
-                .geometry_axes()
-                .iter()
-                .map(|s| s.to_string())
-                .collect(),
-            material_axes: kernel
-                .material_axes()
-                .iter()
-                .map(|s| s.to_string())
-                .collect(),
+            binding: kernel.default_binding(),
         }
+    }
+
+    /// A law entry with an ALIEN binding, VALIDATED at construction: the binding must carry every role the kernel
+    /// needs ([`CapabilityKernel::roles`]), else this returns the missing-role error (fail-loud at LOAD, the
+    /// mechanism that retires the positional silent-shift and enforces the grade-to-delivery lockstep). An alien
+    /// names its own axis id per role, so a photosynthetic or hydrostat actuator is a data row, not a rewrite.
+    pub fn with_binding(
+        id: FunctionLawId,
+        name: impl Into<String>,
+        kernel: CapabilityKernel,
+        binding: AxisBinding,
+    ) -> Result<FunctionLawDef, String> {
+        binding.validate_roles(kernel.roles())?;
+        Ok(FunctionLawDef {
+            id,
+            name: name.into(),
+            kernel,
+            binding,
+        })
     }
 }
 
@@ -928,8 +902,7 @@ pub fn derive_capabilities(
     for def in fns.defs() {
         scores.insert(
             def.id.0,
-            def.kernel
-                .capability(geo, mat, refs, caps, &def.geometry_axes, &def.material_axes),
+            def.kernel.capability(geo, mat, refs, caps, &def.binding),
         );
     }
     CapabilityVector { scores }
@@ -1169,8 +1142,8 @@ mod tests {
         // canonical-reads-zero and the alien-reads-positive assertions below.
         let refs = CapabilityRefs::dev_refs(); // reference strike energy 100 J
         let caps = test_caps();
-        // A being that carries its actuating physics on ALIEN axis ids, not the Terran mech.*/mat.* the kernel
-        // used to hardcode; the canonical Terran axes carry nothing.
+        // A being that carries its actuating physics on ALIEN axis ids, not the Terran mech.*/mat.* the default
+        // binding maps to; the canonical Terran axes carry nothing.
         let geo = geo_of(
             [("alien.cross_section", "0.000001"), ("alien.reach", "1")]
                 .into_iter()
@@ -1179,67 +1152,90 @@ mod tests {
         let mat = mat_of([("alien.strength", "200")].into_iter().collect());
 
         // The canonical Terran binding (`FunctionLawDef::new`, the byte-neutral default) reads ZERO off this alien
-        // body: its values are not on `mech.cross_section_area` / `mech.stroke_length` / `mat.fracture_strength`.
+        // body: its roles map to `mech.cross_section_area` / `mech.stroke_length` / `mat.fracture_strength`, which
+        // the alien does not carry.
         let canonical = FunctionLawDef::new(
             FunctionLawRegistry::ID_IMPACT,
             "impact",
             CapabilityKernel::Impact,
         );
         assert_eq!(
-            canonical.kernel.capability(
-                &geo,
-                &mat,
-                &refs,
-                &caps,
-                &canonical.geometry_axes,
-                &canonical.material_axes,
-            ),
+            canonical
+                .kernel
+                .capability(&geo, &mat, &refs, &caps, &canonical.binding),
             Fixed::ZERO,
             "the canonical Terran binding reads nothing off an alien body's own axes (the grade is not hardcoded)"
         );
 
-        // The SAME kernel with an ALIEN binding (the law's row naming the being's own axes as data) reads a
-        // positive impact from them: strength 200 MPa over a 1e-6 m^2 cross-section is 200 N, over a 1 m reach
-        // 200 J, above the 100 J reference. The grade follows the DATA, not a hardcoded id.
-        let alien = FunctionLawDef {
-            id: FunctionLawRegistry::ID_IMPACT,
-            name: "impact".to_string(),
-            kernel: CapabilityKernel::Impact,
-            geometry_axes: vec!["alien.cross_section".to_string(), "alien.reach".to_string()],
-            material_axes: vec!["alien.strength".to_string()],
-        };
+        // The SAME kernel with an ALIEN binding (the law's row mapping each role to the being's own axis) reads a
+        // positive impact: strength 200 MPa over a 1e-6 m^2 cross-section is 200 N, over a 1 m reach 200 J, above the
+        // 100 J reference. The elastic and hydraulic roles map to axes the alien grows zero, so only the rigid path
+        // fires. VALIDATED at construction (every IMPACT role is bound).
+        let alien = FunctionLawDef::with_binding(
+            FunctionLawRegistry::ID_IMPACT,
+            "impact",
+            CapabilityKernel::Impact,
+            AxisBinding::from_pairs([
+                ("actuating_strength", "alien.strength"),
+                ("cross_section", "alien.cross_section"),
+                ("stroke", "alien.reach"),
+                ("yield_strength", "alien.yield"),
+                ("elastic_modulus", "alien.modulus"),
+                ("driving_pressure", "alien.pressure"),
+            ]),
+        )
+        .expect("the alien IMPACT binding carries every role");
         assert!(
-            alien.kernel.capability(
-                &geo,
-                &mat,
-                &refs,
-                &caps,
-                &alien.geometry_axes,
-                &alien.material_axes,
-            ) > Fixed::ZERO,
+            alien
+                .kernel
+                .capability(&geo, &mat, &refs, &caps, &alien.binding)
+                > Fixed::ZERO,
             "an alien actuator that names its own axes is honored on the grade path (the data binding is read)"
         );
 
-        // A binding that names no stroke axis (only a cross-section entry) self-gates to zero, even with the
-        // strength and cross-section present: the absence convention, no fabricated blow, no index panic.
-        let no_stroke = FunctionLawDef {
-            id: FunctionLawRegistry::ID_IMPACT,
-            name: "impact".to_string(),
-            kernel: CapabilityKernel::Impact,
-            geometry_axes: vec!["alien.cross_section".to_string()],
-            material_axes: vec!["alien.strength".to_string()],
-        };
+        // A binding whose STROKE role maps to an axis the alien grows zero self-gates to zero (the absence
+        // convention), even with strength and cross-section present: no fabricated blow.
+        let no_stroke = FunctionLawDef::with_binding(
+            FunctionLawRegistry::ID_IMPACT,
+            "impact",
+            CapabilityKernel::Impact,
+            AxisBinding::from_pairs([
+                ("actuating_strength", "alien.strength"),
+                ("cross_section", "alien.cross_section"),
+                ("stroke", "alien.nostroke"),
+                ("yield_strength", "alien.yield"),
+                ("elastic_modulus", "alien.modulus"),
+                ("driving_pressure", "alien.pressure"),
+            ]),
+        )
+        .expect("the binding carries every role");
         assert_eq!(
-            no_stroke.kernel.capability(
-                &geo,
-                &mat,
-                &refs,
-                &caps,
-                &no_stroke.geometry_axes,
-                &no_stroke.material_axes,
-            ),
+            no_stroke
+                .kernel
+                .capability(&geo, &mat, &refs, &caps, &no_stroke.binding),
             Fixed::ZERO,
-            "a binding naming no stroke axis self-gates to zero (the absence convention)"
+            "a binding whose stroke role maps to an unread axis self-gates to zero (the absence convention)"
+        );
+
+        // THE ARC'S POINT (the alien-feasibility fix): a binding MISSING a required role is a fail-loud LOAD error,
+        // not a silent positional mis-read. A springy alien that OMITS `actuating_strength` cannot slide its yield
+        // into the strength slot and fabricate a rigid blow (the pre-unification positional defect); it fails
+        // validation at construction.
+        let missing = FunctionLawDef::with_binding(
+            FunctionLawRegistry::ID_IMPACT,
+            "impact",
+            CapabilityKernel::Impact,
+            AxisBinding::from_pairs([
+                ("cross_section", "alien.cross_section"),
+                ("stroke", "alien.reach"),
+                ("yield_strength", "alien.yield"),
+                ("elastic_modulus", "alien.modulus"),
+                ("driving_pressure", "alien.pressure"),
+            ]),
+        );
+        assert!(
+            missing.is_err(),
+            "a binding missing the required actuating_strength role fails validation at load, never a silent mis-read"
         );
     }
 
@@ -1265,29 +1261,24 @@ mod tests {
                 .into_iter()
                 .collect(),
         ); // no alien.strength: the rigid path self-gates
-        let springy = FunctionLawDef {
-            id: FunctionLawRegistry::ID_IMPACT,
-            name: "impact".to_string(),
-            kernel: CapabilityKernel::Impact,
-            geometry_axes: vec![
-                "alien.cross_section".to_string(),
-                "alien.stroke".to_string(),
-            ],
-            material_axes: vec![
-                "alien.strength".to_string(),
-                "alien.yield".to_string(),
-                "alien.modulus".to_string(),
-            ],
-        };
+        let springy = FunctionLawDef::with_binding(
+            FunctionLawRegistry::ID_IMPACT,
+            "impact",
+            CapabilityKernel::Impact,
+            AxisBinding::from_pairs([
+                ("actuating_strength", "alien.strength"),
+                ("cross_section", "alien.cross_section"),
+                ("stroke", "alien.stroke"),
+                ("yield_strength", "alien.yield"),
+                ("elastic_modulus", "alien.modulus"),
+                ("driving_pressure", "alien.pressure"),
+            ]),
+        )
+        .expect("the springy IMPACT binding carries every role");
         let grade = |g: &dyn Fn(&str) -> Fixed, m: &dyn Fn(&str) -> Fixed| {
-            springy.kernel.capability(
-                g,
-                m,
-                &refs,
-                &caps,
-                &springy.geometry_axes,
-                &springy.material_axes,
-            )
+            springy
+                .kernel
+                .capability(g, m, &refs, &caps, &springy.binding)
         };
         let springy_grade = grade(&springy_geo, &springy_mat);
         assert!(
@@ -1329,27 +1320,22 @@ mod tests {
                 .collect(),
         );
         let hydraulic_mat = mat_of([("alien.pressure", "100")].into_iter().collect());
-        let binding = FunctionLawDef {
-            id: FunctionLawRegistry::ID_IMPACT,
-            name: "impact".to_string(),
-            kernel: CapabilityKernel::Impact,
-            geometry_axes: vec!["alien.piston".to_string(), "alien.stroke".to_string()],
-            material_axes: vec![
-                "alien.strength".to_string(),
-                "alien.yield".to_string(),
-                "alien.modulus".to_string(),
-                "alien.pressure".to_string(),
-            ],
-        };
+        let law = FunctionLawDef::with_binding(
+            FunctionLawRegistry::ID_IMPACT,
+            "impact",
+            CapabilityKernel::Impact,
+            AxisBinding::from_pairs([
+                ("actuating_strength", "alien.strength"),
+                ("cross_section", "alien.piston"),
+                ("stroke", "alien.stroke"),
+                ("yield_strength", "alien.yield"),
+                ("elastic_modulus", "alien.modulus"),
+                ("driving_pressure", "alien.pressure"),
+            ]),
+        )
+        .expect("the hydraulic IMPACT binding carries every role");
         let grade = |g: &dyn Fn(&str) -> Fixed, m: &dyn Fn(&str) -> Fixed| {
-            binding.kernel.capability(
-                g,
-                m,
-                &refs,
-                &caps,
-                &binding.geometry_axes,
-                &binding.material_axes,
-            )
+            law.kernel.capability(g, m, &refs, &caps, &law.binding)
         };
         assert!(
             grade(&hydraulic_geo, &hydraulic_mat) > Fixed::ZERO,
@@ -1362,6 +1348,35 @@ mod tests {
             Fixed::ZERO,
             "no driving pressure, no strength, no tissue: no impact (the hydraulic member self-gates)"
         );
+    }
+
+    #[test]
+    fn every_kernel_default_binding_carries_its_required_roles_so_new_cannot_fail() {
+        // The invariant that keeps `FunctionLawDef::new` infallible while `with_binding` validates: each kernel's
+        // byte-neutral `default_binding` must bind every role the kernel reads, and it must bind ONLY those roles
+        // (no stray mapping), so the default is exactly the kernel's role contract. If a future kernel's roles and
+        // default_binding drift apart, this fails rather than shipping a def whose default silently omits a role.
+        for kernel in [
+            CapabilityKernel::Pierce,
+            CapabilityKernel::Locomote,
+            CapabilityKernel::Refract,
+            CapabilityKernel::Shear,
+            CapabilityKernel::Crush,
+            CapabilityKernel::Impact,
+        ] {
+            let binding = kernel.default_binding();
+            assert!(
+                binding.validate_roles(kernel.roles()).is_ok(),
+                "{kernel:?} default_binding is missing a required role"
+            );
+            let bound: std::collections::BTreeSet<&str> = binding.pairs().map(|(r, _)| r).collect();
+            let required: std::collections::BTreeSet<&str> =
+                kernel.roles().iter().copied().collect();
+            assert_eq!(
+                bound, required,
+                "{kernel:?} default_binding binds exactly its role set, no stray or missing role"
+            );
+        }
     }
 
     #[test]
