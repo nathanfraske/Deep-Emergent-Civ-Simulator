@@ -46,6 +46,7 @@ use std::collections::HashMap;
 pub mod bignum;
 pub mod compute;
 pub mod fundamentals;
+pub mod guard;
 pub mod plan;
 pub mod tier2;
 
