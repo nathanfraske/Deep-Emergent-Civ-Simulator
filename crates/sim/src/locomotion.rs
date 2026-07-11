@@ -450,6 +450,19 @@ impl ResourceField {
             .unwrap_or(Fixed::ZERO)
     }
 
+    /// The IDENTITY-BLIND total substance content of a tile: the cell's whole
+    /// [`Composition::total_content`] (every class's amount, nutrient and toxin alike), or zero for an
+    /// off-grid or unwritten tile. This is the CLASS-FREE aggregate the forage percept reads (the
+    /// foraging arc, the gate's amendment 1): a perceiver senses "how much matter is here", never a
+    /// per-class `supply(class)` read that gates on a world-chosen substance identity, so which substances
+    /// fill its reserves stays a SELECTED correlation, never authored. Keyed off the tile's composition
+    /// alone, no race or kind id (Principle 9). Pure read of hashed state.
+    pub fn cell_content(&self, coord: Coord3) -> Fixed {
+        self.composition(coord)
+            .map(|c| c.total_content())
+            .unwrap_or(Fixed::ZERO)
+    }
+
     /// Remove up to `want` of one nutrient class from a tile's standing supply, returning what was
     /// removed (never more than is present, never negative), the grazing draw the ingest arm
     /// makes on the living resource loop (base-level liveliness step 3). A depleted tile feeds the next
