@@ -46,6 +46,9 @@ use std::collections::HashMap;
 pub mod bignum;
 pub mod compute;
 pub mod fundamentals;
+pub mod guard;
+pub mod plan;
+pub mod tier2;
 
 /// An exponent on a base dimension. Small signed integer; real physical dimensions
 /// stay well within this range.
@@ -339,8 +342,9 @@ impl AbsoluteQuantity {
 }
 
 /// Integer division rounded to nearest, ties to even, for a positive divisor. The
-/// same rule the canonical quantizer uses, so rescaling is deterministic.
-fn idiv_round_half_even(num: i128, den: i128) -> i128 {
+/// same rule the canonical quantizer uses, so rescaling is deterministic. Shared with the
+/// Tier-2 scaled arithmetic (`crate::tier2`), which rounds ONCE per result through it.
+pub(crate) fn idiv_round_half_even(num: i128, den: i128) -> i128 {
     debug_assert!(den > 0);
     let q = num.div_euclid(den);
     let r = num.rem_euclid(den);
