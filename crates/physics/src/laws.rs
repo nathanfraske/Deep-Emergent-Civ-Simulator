@@ -225,9 +225,17 @@ pub fn contact_pressure(force: Fixed, contact_area: Fixed, p_max: Fixed) -> Fixe
     // The divisor's zero-boundary is a declared physical-limit-at-zero (R-UNITS-PIN floor invariant, the
     // slice-3 backstop): a zero contact area is the concentrated point load, which reads the material's
     // maximum pressure `p_max`, a physical limit rather than a value riding the storage epsilon.
-    // `guarded_checked_div` returns `p_max` at that boundary and keeps the law's own overflow cap on `None`,
-    // byte-neutral with the prior explicit `if den == ZERO { p_max }` guard (a physical area makes `den >= 0`,
-    // so `den <= ZERO` there is exactly `den == ZERO`).
+    // `guarded_checked_div` returns `p_max` at that boundary and keeps the law's own overflow cap on `None`.
+    // The wiring is byte-neutral on the PHYSICAL DOMAIN: a contact area is a non-negative physical quantity, so
+    // `den = contact_area * C_PA >= 0` and `den <= ZERO` there is exactly the prior `den == ZERO` guard. That
+    // domain invariant, which the byte-neutrality rests on, is now code-enforced rather than only asserted in
+    // prose (a mis-declared negative area fails loud in debug rather than silently reading `p_max`); off the
+    // physical domain the cap is a fail-safe, not the prior negative pressure.
+    debug_assert!(
+        den >= ZERO,
+        "contact_pressure: a contact area is a non-negative physical quantity; the floor-invariant wiring's \
+         byte-neutrality rests on it"
+    );
     match civsim_units::guard::guarded_checked_div(
         force,
         den,
@@ -879,8 +887,14 @@ pub fn sensible_rise(mass: Fixed, specific_heat: Fixed, energy: Fixed, rise_max:
     };
     // The divisor's zero-boundary is a declared physical-limit-at-zero (the floor invariant, slice-3 backstop):
     // a zero thermal capacity (a massless body) takes the maximum temperature swing `rise_max`, a physical
-    // limit rather than the storage epsilon. Byte-neutral (`capacity = mass*specific_heat >= 0`, so the
-    // boundary is `== ZERO`); the law keeps its overflow cap on `None`.
+    // limit rather than the storage epsilon; the law keeps its overflow cap on `None`. Byte-neutral on the
+    // PHYSICAL DOMAIN: `capacity = mass * specific_heat >= 0`, so `capacity <= ZERO` is exactly the prior
+    // `capacity == ZERO` guard. That invariant is code-enforced below rather than only asserted in prose.
+    debug_assert!(
+        capacity >= ZERO,
+        "sensible_rise: a thermal capacity (mass * specific_heat) is non-negative; the floor-invariant \
+         wiring's byte-neutrality rests on it"
+    );
     match civsim_units::guard::guarded_checked_div(
         energy,
         capacity,
