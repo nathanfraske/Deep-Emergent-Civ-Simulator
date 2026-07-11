@@ -317,36 +317,36 @@ Two kinds, kept distinct: a DECLARED law is a `[[law]]` block in the floor data 
 - `carnot_limit` (crates/physics/src/laws.rs:1586): Ideal Carnot efficiency eta = 1 - Tc/Th, the maximum thermodynamic efficiency (the ideal end of
 - `dissolution` (crates/physics/src/laws.rs:1600): Dissolution leach fraction: the fraction of a solute extracted into a solvent, its solute affinity
 - `radiant_emission` (crates/physics/src/laws.rs:1615): Radiant heat exchange j = emissivity*sigma*(T_hot^4 - T_cold^4) (W), Stefan-Boltzmann, absorbing
-- `radiant_emission_tier2` [direct] (crates/physics/src/laws.rs:1669): The Tier-2 radiant heat exchange (R-UNITS-PIN slice 4): the same Stefan-Boltzmann law as
-- `wien_peak` (crates/physics/src/laws.rs:1716): Wien peak wavelength lambda = b/T (m), grounding colour-from-temperature (a hot forge glows). Zero
-- `inverse_square_falloff` (crates/physics/src/laws.rs:1726): Inverse-square irradiance E = P/(4*pi*r^2) (W/m^2), the geometric-spreading half of a stimulus's
-- `geometric_spread` [direct] (crates/physics/src/laws.rs:1761): General geometric spreading `E = power / (sphere_coeff * distance^(D-1))`, the
-- `transduce` [direct] (crates/physics/src/laws.rs:1829): Transduce a received magnitude into an internal activation through a being's own monotone response law,
-- `discriminate` [direct] (crates/physics/src/laws.rs:1881): Quantize a transduced activation into a discrete perceptual bucket through a being's own discrimination
-- `interface_split` (crates/physics/src/laws.rs:1911): Split an incident radiant flux at an interface into (reflected, absorbed, transmitted), each a
-- `optical_depth` (crates/physics/src/laws.rs:1938): Optical depth tau = alpha*path (dimensionless), the medium-attenuation half of a stimulus's reach;
-- `refractive_contrast` (crates/physics/src/laws.rs:1947): Refractive contrast n2/n1 and whether total internal reflection is possible (n1 > n2), a measured
-- `radiative_equilibrium` (crates/physics/src/laws.rs:1962): Radiative-equilibrium temperature T_eq = (E_abs/(emissivity*sigma))^(1/4) (K), the inverse of the
-- `basal_metabolic_rate` [direct] (crates/physics/src/laws.rs:2007): Basal (resting) metabolic rate P = a * m^(3/4) (W), Kleiber's law over body mass. The 3/4 exponent
-- `resting_heat_loss` [direct] (crates/physics/src/laws.rs:2033): The resting thermoregulatory heat-loss power (W): the order-independent saturating sum of the Newton
-- `metabolic_drain_fraction` [direct] (crates/physics/src/laws.rs:2067): Bridge a resting metabolic power (W) to a fraction of the energy reserve drained per tick. The
-- `coulomb_force` (crates/physics/src/laws.rs:2109): Coulomb force F = k*|q1|*|q2|/r^2 (N), with the attractive/repulsive condition tracked separately
-- `ohm_voltage` (crates/physics/src/laws.rs:2153): Ohm's law V = I*R (V), reported as a non-negative magnitude over [0, V_MAX] (the resistance is a
-- `circuit_current` (crates/physics/src/laws.rs:2162): Circuit current I = emf / r_total (A), a magnitude; a zero total resistance is a short (the cap).
-- `power_dissipation` (crates/physics/src/laws.rs:2173): Joule power P = I*V (W), the dissipated power (which feeds `law.sensible_heat`, so a wire heats).
-- `capacitor_energy` (crates/physics/src/laws.rs:2183): Capacitor stored energy U = (1/2) C V^2 (J). The capacitance is halved first and each product is
-- `battery_emf` (crates/physics/src/laws.rs:2200): Galvanic cell EMF = E_cathode - E_anode (V), signed, from the volt-promoted electrode potentials;
-- `standard_potential_at_temperature` [direct] (crates/physics/src/laws.rs:2209): The standard cell potential at the cell TEMPERATURE (V): `E0(T) = E0_ref + (dE0/dT) * (T - T_ref)`, the
-- `nernst_emf` [direct] (crates/physics/src/laws.rs:2234): The NERNST-adjusted galvanic EMF (V): the (temperature-adjusted) standard cell EMF corrected for the
-- `reversible_uptake_flux` [direct] (crates/physics/src/laws.rs:2286): The reversible MICHAELIS-MENTEN uptake flux (per tick, in the source's stock units): the substrate-
-- `resistance` (crates/physics/src/laws.rs:2342): Element resistance R = rho*L/A (Ohm), the measured geometric consequence of the material and shape;
-- `solenoid_field` (crates/physics/src/laws.rs:2360): Solenoid field B = mu_0 * mu_r * n * I (T), with mu_0 applied early so the large relative
-- `flux_linkage` (crates/physics/src/laws.rs:2389): Flux linkage Phi = B*A (Wb), the resident magnetic-flux state `law.faraday_emf` differentiates.
-- `motor_force` (crates/physics/src/laws.rs:2397): Force on a current-carrying conductor F = B*I*L (N), the motor, relay, and telegraph-sounder force.
-- `lorentz_force` (crates/physics/src/laws.rs:2409): Lorentz force on a moving charge F = |q|*v*B (N).
-- `dipole_torque` (crates/physics/src/laws.rs:2422): Magnetic dipole maximum torque tau = m*B (N*m); the sin(theta) angular factor is deferred, so this
-- `faraday_emf` (crates/physics/src/laws.rs:2431): Faraday induced EMF = -N * dPhi/DT (V), signed by Lenz's law, the per-tick flux delta. The caller
-- `inductive_emf` (crates/physics/src/laws.rs:2455): Inductive EMF = -L * dI/DT (V), signed; the self back-EMF, or the mutual step-up with
-- `inductor_energy` (crates/physics/src/laws.rs:2479): Inductor stored energy U = (1/2) L I^2 (J), the magnetic dual of the capacitor energy. The
-- `parse_cost` [direct] (crates/physics/src/laws.rs:2514): The dependency-integration parse cost of holding a linearization domain in working memory
-- `harmony_tilt` [direct] (crates/physics/src/laws.rs:2548): The multiplicative harmony tilt a cost reduction earns: `exp(cost_reduction / temperature)`, the
+- `radiant_emission_tier2` [direct] (crates/physics/src/laws.rs:1671): The Tier-2 radiant heat exchange (R-UNITS-PIN slice 4): the same Stefan-Boltzmann law as
+- `wien_peak` (crates/physics/src/laws.rs:1718): Wien peak wavelength lambda = b/T (m), grounding colour-from-temperature (a hot forge glows). Zero
+- `inverse_square_falloff` (crates/physics/src/laws.rs:1728): Inverse-square irradiance E = P/(4*pi*r^2) (W/m^2), the geometric-spreading half of a stimulus's
+- `geometric_spread` [direct] (crates/physics/src/laws.rs:1763): General geometric spreading `E = power / (sphere_coeff * distance^(D-1))`, the
+- `transduce` [direct] (crates/physics/src/laws.rs:1831): Transduce a received magnitude into an internal activation through a being's own monotone response law,
+- `discriminate` [direct] (crates/physics/src/laws.rs:1883): Quantize a transduced activation into a discrete perceptual bucket through a being's own discrimination
+- `interface_split` (crates/physics/src/laws.rs:1913): Split an incident radiant flux at an interface into (reflected, absorbed, transmitted), each a
+- `optical_depth` (crates/physics/src/laws.rs:1940): Optical depth tau = alpha*path (dimensionless), the medium-attenuation half of a stimulus's reach;
+- `refractive_contrast` (crates/physics/src/laws.rs:1949): Refractive contrast n2/n1 and whether total internal reflection is possible (n1 > n2), a measured
+- `radiative_equilibrium` (crates/physics/src/laws.rs:1964): Radiative-equilibrium temperature T_eq = (E_abs/(emissivity*sigma))^(1/4) (K), the inverse of the
+- `basal_metabolic_rate` [direct] (crates/physics/src/laws.rs:2009): Basal (resting) metabolic rate P = a * m^(3/4) (W), Kleiber's law over body mass. The 3/4 exponent
+- `resting_heat_loss` [direct] (crates/physics/src/laws.rs:2035): The resting thermoregulatory heat-loss power (W): the order-independent saturating sum of the Newton
+- `metabolic_drain_fraction` [direct] (crates/physics/src/laws.rs:2069): Bridge a resting metabolic power (W) to a fraction of the energy reserve drained per tick. The
+- `coulomb_force` (crates/physics/src/laws.rs:2111): Coulomb force F = k*|q1|*|q2|/r^2 (N), with the attractive/repulsive condition tracked separately
+- `ohm_voltage` (crates/physics/src/laws.rs:2155): Ohm's law V = I*R (V), reported as a non-negative magnitude over [0, V_MAX] (the resistance is a
+- `circuit_current` (crates/physics/src/laws.rs:2164): Circuit current I = emf / r_total (A), a magnitude; a zero total resistance is a short (the cap).
+- `power_dissipation` (crates/physics/src/laws.rs:2175): Joule power P = I*V (W), the dissipated power (which feeds `law.sensible_heat`, so a wire heats).
+- `capacitor_energy` (crates/physics/src/laws.rs:2185): Capacitor stored energy U = (1/2) C V^2 (J). The capacitance is halved first and each product is
+- `battery_emf` (crates/physics/src/laws.rs:2202): Galvanic cell EMF = E_cathode - E_anode (V), signed, from the volt-promoted electrode potentials;
+- `standard_potential_at_temperature` [direct] (crates/physics/src/laws.rs:2211): The standard cell potential at the cell TEMPERATURE (V): `E0(T) = E0_ref + (dE0/dT) * (T - T_ref)`, the
+- `nernst_emf` [direct] (crates/physics/src/laws.rs:2236): The NERNST-adjusted galvanic EMF (V): the (temperature-adjusted) standard cell EMF corrected for the
+- `reversible_uptake_flux` [direct] (crates/physics/src/laws.rs:2288): The reversible MICHAELIS-MENTEN uptake flux (per tick, in the source's stock units): the substrate-
+- `resistance` (crates/physics/src/laws.rs:2344): Element resistance R = rho*L/A (Ohm), the measured geometric consequence of the material and shape;
+- `solenoid_field` (crates/physics/src/laws.rs:2362): Solenoid field B = mu_0 * mu_r * n * I (T), with mu_0 applied early so the large relative
+- `flux_linkage` (crates/physics/src/laws.rs:2391): Flux linkage Phi = B*A (Wb), the resident magnetic-flux state `law.faraday_emf` differentiates.
+- `motor_force` (crates/physics/src/laws.rs:2399): Force on a current-carrying conductor F = B*I*L (N), the motor, relay, and telegraph-sounder force.
+- `lorentz_force` (crates/physics/src/laws.rs:2411): Lorentz force on a moving charge F = |q|*v*B (N).
+- `dipole_torque` (crates/physics/src/laws.rs:2424): Magnetic dipole maximum torque tau = m*B (N*m); the sin(theta) angular factor is deferred, so this
+- `faraday_emf` (crates/physics/src/laws.rs:2433): Faraday induced EMF = -N * dPhi/DT (V), signed by Lenz's law, the per-tick flux delta. The caller
+- `inductive_emf` (crates/physics/src/laws.rs:2457): Inductive EMF = -L * dI/DT (V), signed; the self back-EMF, or the mutual step-up with
+- `inductor_energy` (crates/physics/src/laws.rs:2481): Inductor stored energy U = (1/2) L I^2 (J), the magnetic dual of the capacitor energy. The
+- `parse_cost` [direct] (crates/physics/src/laws.rs:2516): The dependency-integration parse cost of holding a linearization domain in working memory
+- `harmony_tilt` [direct] (crates/physics/src/laws.rs:2550): The multiplicative harmony tilt a cost reduction earns: `exp(cost_reduction / temperature)`, the
