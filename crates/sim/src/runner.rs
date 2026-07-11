@@ -1502,6 +1502,14 @@ pub struct Embodiment {
     /// itself afforded only by a PIERCE-bearing body, so no run_world scenario reaches the strike at all.
     /// Populated by the world-build ([`Embodiment::set_contact_transfer`]).
     contact_transfer: ContactTransferRegistry,
+    /// The capability GRADE registry, the SINGLE SOURCE of the role-to-axis bindings the strike delivery reads
+    /// (grade-binding unification, Slice C). A contact row names the `grade_law` whose binding it shares, and the
+    /// strike wire reads that grade law's binding from here, so grade and delivery cannot map a role to two
+    /// different axes. STATIC CONFIG, not dynamic state: it never enters `state_hash`. Defaults to
+    /// [`FunctionLawRegistry::dev_seed`], whose IMPACT binding equals the pre-Slice-C delivery binding, so the
+    /// read is byte-identical. [`Embodiment::set_contact_transfer`] validates every contact row's `grade_law`
+    /// resolves here, so a dangling reference is a fail-loud load error.
+    function_laws: FunctionLawRegistry,
     /// The byproduct an enacted bite leaves behind (the physical-trace cultural-persistence substrate, the
     /// lifetime/demography keystone, pillar 2, trace slice B): a map from an eaten substance id to the
     /// (byproduct substance id, deposit fraction) it deposits into the cell it was eaten at. When a being's
@@ -1617,6 +1625,7 @@ impl Embodiment {
             breakage: false,
             strike: None,
             contact_transfer: ContactTransferRegistry::empty(),
+            function_laws: FunctionLawRegistry::dev_seed(),
             byproducts: BTreeMap::new(),
             earthwork: EarthworkField::new(),
             fire: FireField::new(),
@@ -2114,7 +2123,15 @@ impl Embodiment {
     /// arc): the channels a world runs and the physics-floor transfer kernel each delivers by. Opt-in; without it
     /// (the empty default) a strike finds no channel and delivers no wound, so every existing scenario is
     /// byte-identical. Kinetic is the first (Terran) channel; a non-kinetic contact attack is a data row.
+    ///
+    /// VALIDATES the grade-law references at LOAD (grade-binding unification, Slice C): every row's `grade_law`
+    /// must resolve in the Embodiment's grade registry ([`Self::function_laws`]), so the delivery reads a real
+    /// (already-validated) grade binding. A dangling reference panics here, the fail-loud load error that makes a
+    /// grade/delivery mapping desync a load-time impossibility rather than a silent misread.
     pub fn set_contact_transfer(&mut self, registry: ContactTransferRegistry) {
+        registry
+            .validate(&self.function_laws)
+            .expect("every contact-transfer row's grade_law resolves in the grade registry");
         self.contact_transfer = registry;
     }
 
@@ -2632,6 +2649,15 @@ impl Embodiment {
             return Fixed::ZERO;
         };
         let row = row.clone();
+        // The SINGLE-SOURCE binding (grade-binding unification, Slice C): the delivery reads the grade law's own
+        // binding, named by the row's `grade_law`, so grade and delivery cannot map a role to two different axes.
+        // `set_contact_transfer` validated the reference resolves, so this cannot dangle.
+        let binding = self
+            .function_laws
+            .get(row.grade_law)
+            .expect("the contact row's grade_law resolves in the grade registry")
+            .binding
+            .clone();
         let Some(w) = self.walkers.iter().find(|w| w.id == walker_id) else {
             return Fixed::ZERO;
         };
@@ -2660,6 +2686,7 @@ impl Embodiment {
                         &|a| seg.geo(a),
                         &|a| seg.mat(a),
                         &row,
+                        &binding,
                         params.energy_max,
                     );
                     if work > delivered {
@@ -2772,6 +2799,15 @@ impl Embodiment {
             return Fixed::ZERO;
         };
         let row = row.clone();
+        // The SINGLE-SOURCE binding (grade-binding unification, Slice C): the delivery reads the grade law's own
+        // binding, named by the row's `grade_law`, so grade and delivery cannot map a role to two different axes.
+        // `set_contact_transfer` validated the reference resolves, so this cannot dangle.
+        let binding = self
+            .function_laws
+            .get(row.grade_law)
+            .expect("the contact row's grade_law resolves in the grade registry")
+            .binding
+            .clone();
         // The energy the blow delivers, off the being's OWN apparatus: the greatest ACTUATOR WORK among its
         // grown Structure Segments (main's stroke-rate substrate, retiring the world-global swing speed). For
         // each, the actuating force (its strength stress over its cross-section, read off the axes the channel's
@@ -2803,6 +2839,7 @@ impl Embodiment {
                         &|a| seg.geo(a),
                         &|a| seg.mat(a),
                         &row,
+                        &binding,
                         params.energy_max,
                     );
                     if work > delivered {
@@ -8396,7 +8433,11 @@ source = "test"
                 Fixed::ZERO
             }
         };
-        let energy = resolve_delivered_energy(&geo, &mat, &row, cap);
+        // The single-source binding (Slice C): the delivery reads the grade law named by the row, exactly as the
+        // strike wire fetches it from the Embodiment's grade registry.
+        let grade_laws = FunctionLawRegistry::dev_seed();
+        let binding = &grade_laws.get(row.grade_law).unwrap().binding;
+        let energy = resolve_delivered_energy(&geo, &mat, &row, binding, cap);
         let expected = wound_fraction(energy, big_area, big_tough_fe, cap);
         assert_eq!(
             wound, expected,

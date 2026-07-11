@@ -51,17 +51,15 @@ pub struct FunctionLawId(pub u32);
 /// `actuating_strength`, `driving_pressure`) to the physics-floor AXIS ID that fills it. The role SET is data and
 /// EXTENSIBLE (a world grows a new role by adding a map entry, never a new struct field and never a new positional
 /// slot), the harden-to-registry sibling of the value substrate (Part 21), the semantic substrate (Part 33), and
-/// the institution-function substrate (Part 36). Both the capability GRADE path ([`FunctionLawDef`]) and the
-/// delivered-energy DELIVERY path (`contact_transfer`'s row) reference this ONE type, so an alien actuation names
-/// its own axes on both paths by role NAME, never a positional slot that a missing axis silently shifts (the
+/// the institution-function substrate (Part 36). The capability GRADE path ([`FunctionLawDef`]) OWNS one of these,
+/// and the delivered-energy DELIVERY path (`contact_transfer`'s row) READS IT DIRECTLY by naming the grade law it
+/// shares (Slice C, the single source), so an alien actuation names its own axes ONCE, in the grade law's binding,
+/// and both paths read the SAME map, never a positional slot that a missing axis silently shifts (the
 /// alien-feasibility defect this retires: a springy binding omitting the rigid-strength slot read its yield into
-/// the strength slot and fabricated a rigid blow). A kernel declares the roles it needs
+/// the strength slot and fabricated a rigid blow) and never a second copy that could diverge (a grade/delivery
+/// mapping desync is impossible by construction). A kernel declares the roles it needs
 /// ([`CapabilityKernel::roles`]); [`AxisBinding::validate_roles`] fails loud at load when a required role is
-/// unbound, so the shared ROLE SET is mechanically enforced rather than a positional read of the wrong axis. Two
-/// SEPARATELY-authored bindings (the grade path's and the delivery path's) can still map a shared role to two
-/// different axes and pass both role-set checks; [`AxisBinding::agrees_on`] verifies that role-to-axis MAPPING
-/// agreement, and a delivery row reading the grade law's own binding directly (one referenced map, no second copy)
-/// is the flagged single-source form that would make the mapping lockstep structural.
+/// unbound, so the shared ROLE SET is mechanically enforced rather than a positional read of the wrong axis.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct AxisBinding {
     roles: BTreeMap<String, String>,
@@ -102,34 +100,13 @@ impl AxisBinding {
     /// Validate that every role in `required` is bound; return the first unbound role as an error. Fail-loud at
     /// LOAD (a kernel that needs a role the binding does not carry is a defect, never a silent zero read at run
     /// time), the mechanism that retires the positional silent-shift and enforces the shared ROLE SET across the
-    /// grade and delivery paths. This checks a single binding's role SET; use [`AxisBinding::agrees_on`] to check
-    /// that two bindings agree on the role-to-axis MAPPING.
+    /// grade and delivery paths (both read this ONE binding after Slice C, so the role-to-axis MAPPING cannot
+    /// diverge; only its presence needs checking).
     pub fn validate_roles(&self, required: &[&str]) -> Result<(), String> {
         for &role in required {
             if !self.roles.contains_key(role) {
                 return Err(format!(
                     "axis binding is missing the required role '{role}'"
-                ));
-            }
-        }
-        Ok(())
-    }
-
-    /// Verify that this binding and `other` map every role in `roles` to the SAME axis id, returning the first
-    /// disagreeing role as an error. Where [`AxisBinding::validate_roles`] checks that ONE binding carries a role
-    /// set, this checks that TWO bindings (the grade path's and the delivery path's) AGREE on the role-to-axis
-    /// mapping, so a world that authors them separately can assert the grade-to-delivery lockstep at load rather
-    /// than trust that both were built from the same default. A role unbound in either binding counts as a
-    /// disagreement (validate presence with [`AxisBinding::validate_roles`] first). The STRUCTURAL form, a delivery
-    /// row reading the grade law's binding directly so there is one map and no second copy that can disagree, is
-    /// the flagged single-source follow-on this check stands in for meanwhile.
-    pub fn agrees_on(&self, other: &AxisBinding, roles: &[&str]) -> Result<(), String> {
-        for &role in roles {
-            if self.axis(role) != other.axis(role) {
-                return Err(format!(
-                    "axis bindings disagree on role '{role}': {:?} vs {:?}",
-                    self.axis(role),
-                    other.axis(role)
                 ));
             }
         }
