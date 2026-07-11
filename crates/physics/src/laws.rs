@@ -1648,6 +1648,69 @@ pub fn radiant_emission(
     }
 }
 
+/// The Tier-2 radiant heat exchange (R-UNITS-PIN slice 4): the same Stefan-Boltzmann law as
+/// [`radiant_emission`], but with sigma entering at its FULL derived precision (a fine `(bits, scale)` pair
+/// from the fundamentals) instead of the roughly eight-significant-bit Q32.32 truncation `radiant_emission`
+/// carries (`244 x 2^-32`). The precision-critical term `sigma * (T_hot^4 - T_cold^4)` is computed in ONE
+/// wide accumulator (the slice-1 `WideAccum`, i256): the two quartics are formed and subtracted EXACTLY (the
+/// difference-of-quartics cancellation is lossless, unlike forming each quartic in Q32.32 and subtracting the
+/// two rounded values), sigma multiplies in at its fine scale, and the chain rounds ONCE to Q32.32. That
+/// net radiant power then scales by emissivity and area in Q32.32, exactly as `radiant_emission` does (both
+/// are O(1)-range factors the canonical fixed-point holds without loss), and the same [`FLUX_MAX`] cap
+/// applies. A surface cooler than its surroundings (`t_hot < t_cold`) emits nothing net, and a plasma-hot
+/// surface whose net term overruns the Q32.32 range routes to the cap, both matching `radiant_emission`.
+///
+/// The wide accumulator holds the whole envelope: `sigma * T^4` at the planner's scales reaches about 210
+/// bits (the gate's hardware validation), inside i256, and only the final round to Q32.32 can overflow i64
+/// (the plasma cap). Keeping emissivity and area as a Q32.32 tail rather than folding them into the wide
+/// chain is deliberate: the full `sigma * T^4 * emissivity * area` at Q32.32 scales would exceed i256, and
+/// coarsening the inputs to fit would trade their precision for sigma's, so the lift isolates sigma's
+/// correction to the term that carries it. Deterministic and float-free (the wide path is integer-only).
+pub fn radiant_emission_tier2(
+    emissivity: Fixed,
+    area: Fixed,
+    t_hot: Fixed,
+    t_cold: Fixed,
+    sigma_bits: i64,
+    sigma_scale: u32,
+    flux_max: Fixed,
+) -> Fixed {
+    use civsim_units::plan::{evaluate, LawExpr};
+    // sigma * (T_hot^4 - T_cold^4): input 0 sigma (fine scale), 1 T_hot, 2 T_cold (Q32.32). Sigma folds into
+    // the difference-of-quartics chain as a scalar leaf (the wide accumulator multiplies a scalar mantissa in).
+    let expr = LawExpr::Mul(
+        Box::new(LawExpr::Sub(
+            Box::new(LawExpr::Powi(Box::new(LawExpr::Input(1)), 4)),
+            Box::new(LawExpr::Powi(Box::new(LawExpr::Input(2)), 4)),
+        )),
+        Box::new(LawExpr::Input(0)),
+    );
+    let net = match evaluate(
+        &expr,
+        &|q| match q {
+            0 => (sigma_bits, sigma_scale),
+            1 => (t_hot.to_bits(), Fixed::FRAC_BITS),
+            _ => (t_cold.to_bits(), Fixed::FRAC_BITS),
+        },
+        Fixed::FRAC_BITS,
+    ) {
+        // The net radiant power at Q32.32; an i64 overflow (a plasma-hot surface) routes to the cap.
+        Some(bits) => Fixed::from_bits(bits),
+        None => return flux_max,
+    };
+    if net <= ZERO {
+        // Cooler than the surroundings: no net emission (the `e_hot < e_cold` branch of `radiant_emission`).
+        return ZERO;
+    }
+    match net
+        .checked_mul(emissivity)
+        .and_then(|x| x.checked_mul(area))
+    {
+        Some(q) => q.min(flux_max),
+        None => flux_max,
+    }
+}
+
 /// Wien peak wavelength lambda = b/T (m), grounding colour-from-temperature (a hot forge glows). Zero
 /// temperature reads the long-wavelength cap.
 pub fn wien_peak(temperature: Fixed, wien_b: Fixed, wavelength_max: Fixed) -> Fixed {

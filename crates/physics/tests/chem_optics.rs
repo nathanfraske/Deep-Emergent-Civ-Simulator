@@ -201,6 +201,93 @@ fn radiant_emission_rises_steeply_with_temperature_and_caps_at_plasma() {
 }
 
 #[test]
+fn radiant_emission_tier2_matches_the_exact_cancellation_oracle_and_reflects_sigma_precision() {
+    use civsim_units::bignum::{BigRat, BigUint};
+    let scaled_rat = |bits: i64, scale: u32| {
+        BigRat::new(
+            bits < 0,
+            BigUint::from_u64(bits.unsigned_abs()),
+            BigUint::from_u64(2).pow(scale),
+        )
+    };
+    // Sigma at a fine scale (its full mantissa), the temperatures at Q32.32, a being shedding heat.
+    let sigma_scale = 55u32;
+    let sigma_fine = BigRat::from_decimal_str("0.00000005670374419")
+        .unwrap()
+        .round_to_scale(sigma_scale)
+        .unwrap() as i64;
+    let emissivity = f(9, 10); // 0.9
+    let area = f(3, 2); // 1.5 m^2
+    let t_hot = Fixed::from_int(310);
+    let t_cold = Fixed::from_int(287);
+    let flux = Fixed::from_int(2_000_000_000);
+
+    let got = laws::radiant_emission_tier2(
+        emissivity,
+        area,
+        t_hot,
+        t_cold,
+        sigma_fine,
+        sigma_scale,
+        flux,
+    );
+
+    // Oracle: the wide term net = sigma*(T_hot^4 - T_cold^4) rounded ONCE to Q32.32 (the exact-cancellation
+    // difference-of-quartics), then *emissivity*area in Q32.32 exactly as the function does.
+    let th = scaled_rat(t_hot.to_bits(), Fixed::FRAC_BITS);
+    let tc = scaled_rat(t_cold.to_bits(), Fixed::FRAC_BITS);
+    let hot4 = th.mul(&th).mul(&th).mul(&th);
+    let cold4 = tc.mul(&tc).mul(&tc).mul(&tc);
+    let net_rat = hot4.sub(&cold4).mul(&scaled_rat(sigma_fine, sigma_scale));
+    let net = Fixed::from_bits(net_rat.round_to_scale(Fixed::FRAC_BITS).unwrap() as i64);
+    let want = net
+        .checked_mul(emissivity)
+        .and_then(|x| x.checked_mul(area))
+        .unwrap()
+        .min(flux);
+    assert_eq!(
+        got, want,
+        "tier2 radiant equals the exact-cancellation oracle"
+    );
+
+    // A surface cooler than its surroundings emits nothing net (matching radiant_emission).
+    assert_eq!(
+        laws::radiant_emission_tier2(
+            emissivity,
+            area,
+            t_cold,
+            t_hot,
+            sigma_fine,
+            sigma_scale,
+            flux
+        ),
+        Fixed::ZERO
+    );
+
+    // Sigma's precision reaches the result: the fine sigma and the Q32.32 truncation (244 raw at scale 32,
+    // what radiant_emission carries) give a different flux at these body temperatures.
+    let trunc = laws::radiant_emission_tier2(emissivity, area, t_hot, t_cold, 244, 32, flux);
+    assert_ne!(
+        got, trunc,
+        "the full-precision sigma and the 244 x 2^-32 truncation differ at the flux, so the lift changes the value"
+    );
+
+    // A plasma temperature still routes to the cap (the net term overruns Q32.32 -> flux_max).
+    assert_eq!(
+        laws::radiant_emission_tier2(
+            Fixed::ONE,
+            area,
+            Fixed::from_int(30000),
+            t_cold,
+            sigma_fine,
+            sigma_scale,
+            flux
+        ),
+        flux
+    );
+}
+
+#[test]
 fn radiative_equilibrium_sets_a_temperature_by_the_nested_square_roots() {
     let sigma = Fixed::from_ratio(567, 10_000_000_000);
     let t_max = Fixed::from_int(100000);
