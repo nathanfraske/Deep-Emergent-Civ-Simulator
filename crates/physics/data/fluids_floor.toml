@@ -595,6 +595,11 @@ values = [
 
 [[substance]]
 id = "water"
+# The molecular identity (the volatile-thermodynamics arc): the molar mass and atom count derive from the formula
+# plus the periodic table (never an authored molar mass). An irreducible layer-2 identity datum, cited: NIST / CRC
+# (water is H2O). The rotational class for the gas heat capacity is held pending the derivation hunt (likely VSEPR
+# from the formula plus the periodic-table valence counts).
+formula = "H2O"
 participates_in = ["law.hydrostatic_pressure", "law.buoyant_force", "law.poiseuille_flow", "law.speed_of_sound", "law.laplace_pressure", "law.acoustic_absorption", "law.tube_resonance"]
 real = "CRC (liquid water at 20C)"
 values = [

@@ -43,6 +43,7 @@ fn subst(id: &str, v: &[(&str, i64)]) -> Substance {
         id: id.to_string(),
         vector,
         participates_in: vec!["law.contact_pressure".to_string()],
+        formula: String::new(),
         provenance: Provenance::RealWithSource("test".to_string()),
     }
 }
@@ -90,6 +91,7 @@ fn substance_identity_is_assembly_order_independent() {
         id: "x".to_string(),
         vector: reversed,
         participates_in: vec!["law.contact_pressure".to_string()],
+        formula: String::new(),
         provenance: Provenance::RealWithSource("test".to_string()),
     };
     assert_eq!(a.content_id(), b.content_id());
