@@ -249,7 +249,7 @@ mod tests {
     #[test]
     fn guarded_checked_div_returns_the_limit_at_zero_the_quotient_above_it_and_none_on_overflow() {
         let cap = f(999); // the law's zero-boundary limit and output cap
-        // At and below the zero-boundary, Some(limit).
+                          // At and below the zero-boundary, Some(limit).
         assert_eq!(
             guarded_checked_div(f(12), Fixed::ZERO, ZeroGuard::LimitAtZero(cap)),
             Some(cap)
