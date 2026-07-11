@@ -1574,6 +1574,86 @@ pub fn saturation_slope_from_latent_heat(
     num.checked_div(den).unwrap_or(Fixed::MAX)
 }
 
+/// The dimensionless Kirchhoff slope `delta_cp/R = (c_p(gas) - c_p(liquid))/R`, the temperature-dependence of a
+/// volatile's latent heat DERIVED from its own molecular structure, so no energy value is authored and an alien
+/// volatile is a data row. The gas side is equipartition (`c_p(gas)/R = (5 + f_rot)/2`, folding `C_p = C_v + R`
+/// over three translational and `f_rot` rotational degrees of freedom, the vibrational modes frozen out at
+/// surface temperatures, a flagged refinement), and the liquid side is Dulong-Petit (`c_p(liquid)/R = 3*n_atoms`,
+/// three quadratic modes per atom). Water vapour is a nonlinear triatomic (`f_rot = 3`, three atoms), so
+/// `delta_cp/R = 4 - 9 = -5`, the anchor's `T^(-5)`. A linear or monatomic volatile reads a half-integer; the
+/// mechanism is fixed, the structure is data. Only the ratio `delta_cp/R` is needed downstream (it sets both the
+/// `B` constant and the power-law exponent), so `R` never enters here.
+pub fn kirchhoff_delta_cp_over_r(gas_rotational_dof: Fixed, atom_count: Fixed) -> Fixed {
+    let cp_gas = match (Fixed::from_int(5) + gas_rotational_dof).checked_div(Fixed::from_int(2)) {
+        Some(x) => x,
+        None => return ZERO,
+    };
+    let cp_liquid = Fixed::from_int(3)
+        .checked_mul(atom_count)
+        .unwrap_or(Fixed::MAX);
+    cp_gas - cp_liquid
+}
+
+/// The Rankine-Kirchhoff integration constants `(A, B)` of a volatile's mid-range saturation curve
+/// `ln P = A - B/T + (delta_cp/R)*ln T`, DERIVED from the measured primitives with no authored coefficient. `B`
+/// is `L_b/R - (delta_cp/R)*T_b` (in kelvin, the "L extrapolated to T=0" over R), and `A` is fixed by the one
+/// in-regime reference point `(T_b, P_ref)` that IS the definition of the boiling point:
+/// `A = ln(P_ref) + B/T_b - (delta_cp/R)*ln(T_b)`. `t_b` is the boiling point, `l_b` its molar latent heat,
+/// `delta_cp_over_r` the dimensionless Kirchhoff slope, `r` the molar gas constant, and `p_ref` the matched
+/// reference pressure (1 standard atmosphere for water's 373.15 K, expressed in the unit the curve should read).
+/// A non-positive `r`, `t_b`, or `p_ref` (a degenerate substance) yields `(ZERO, ZERO)`; an overflow saturates.
+pub fn rankine_kirchhoff_constants(
+    t_b: Fixed,
+    l_b: Fixed,
+    delta_cp_over_r: Fixed,
+    r: Fixed,
+    p_ref: Fixed,
+) -> (Fixed, Fixed) {
+    if r <= ZERO || t_b <= ZERO || p_ref <= ZERO {
+        return (ZERO, ZERO);
+    }
+    let l_over_r = match l_b.checked_div(r) {
+        Some(x) => x,
+        None => return (ZERO, ZERO),
+    };
+    let dcp_tb = delta_cp_over_r.checked_mul(t_b).unwrap_or(Fixed::MAX);
+    let b = l_over_r - dcp_tb;
+    let b_over_tb = match b.checked_div(t_b) {
+        Some(x) => x,
+        None => return (ZERO, b),
+    };
+    let dcp_ln_tb = delta_cp_over_r.checked_mul(t_b.ln()).unwrap_or(Fixed::MAX);
+    let a = p_ref.ln() + b_over_tb - dcp_ln_tb;
+    (a, b)
+}
+
+/// The exact Rankine-Kirchhoff saturation vapour pressure `P_sat(T) = exp(A - B/T + (delta_cp/R)*ln T)`, the
+/// mid-range volatile curve that replaces the affine tangent (`saturation_vapor_pressure`), computed integer-only
+/// through the pinned `Fixed::ln`/`exp` (deterministic, canonical-path safe). `a` and `b` come from
+/// `rankine_kirchhoff_constants` and `delta_cp_over_r` from `kirchhoff_delta_cp_over_r`. The net exponent is
+/// small in the surface range (about -6 to -7 for water), inside `Fixed::exp`'s representable window; taking the
+/// single exponential of the whole net exponent avoids the overflow that `exp(A)` alone (about `exp(45)` for
+/// water) would hit. A non-positive temperature yields zero, and an out-of-window exponent saturates through
+/// `exp`, matching the surrounding laws' fail-safe branches. Reads the pressure in whatever unit `p_ref` anchored.
+pub fn saturation_vapor_pressure_rk(
+    temperature: Fixed,
+    a: Fixed,
+    b: Fixed,
+    delta_cp_over_r: Fixed,
+) -> Fixed {
+    if temperature <= ZERO {
+        return ZERO;
+    }
+    let b_over_t = match b.checked_div(temperature) {
+        Some(x) => x,
+        None => return ZERO,
+    };
+    let power_term = delta_cp_over_r
+        .checked_mul(temperature.ln())
+        .unwrap_or(Fixed::MAX);
+    (a - b_over_t + power_term).exp()
+}
+
 /// The Lennard-Jones collision diameter `sigma` (angstrom) and the potential well depth `epsilon/k_B` (kelvin)
 /// DERIVED from a substance's measured CRITICAL POINT (`t_c` in K, `p_c` in Pa) through the corresponding-
 /// states relation fixed by the LJ potential's OWN reduced critical point (`T_c* = k_B*T_c/epsilon = 1.312`,
@@ -4153,6 +4233,81 @@ mod tests {
             saturation_slope_from_latent_heat(latent_heat, t_ref, e_ref, ZERO),
             ZERO,
             "a zero specific gas constant yields zero, no division by zero"
+        );
+    }
+
+    #[test]
+    fn the_rankine_kirchhoff_curve_reproduces_water_saturation() {
+        // The exact three-regime mid-range curve from the volatile-thermodynamics anchor. Water's measured
+        // primitives are test fixtures here (not floor data yet, held for the derivation-hunt): T_b = 373.15 K,
+        // L_b = 40.66 kJ/mol, R = 8.314462618 J/(mol K), P_ref = 0.101325 MPa (1 standard atmosphere, the
+        // matched pair with T_b). delta_cp/R = -5 derives from water's structure. The curve reproduces the
+        // triple point (~638 Pa, +4% above 611.66), the world mean (~1768 Pa, +4% above 1705.6), and 1 atm at
+        // boiling exactly, the smooth Kirchhoff residual reported straight. Integer-only assertions (the
+        // canonical kernel module admits no float, steering.rs); bounds absorb the fixed-point ln/exp error.
+        let t_b = Fixed::from_ratio(37315, 100);
+        let l_b = Fixed::from_int(40660);
+        let r = Fixed::from_ratio(8_314_462_618, 1_000_000_000);
+        let p_ref = Fixed::from_ratio(101_325, 1_000_000);
+        // delta_cp/R from the molecular structure: nonlinear triatomic (f_rot = 3, three atoms) -> -5.
+        let dcp_over_r = kirchhoff_delta_cp_over_r(Fixed::from_int(3), Fixed::from_int(3));
+        assert_eq!(
+            dcp_over_r,
+            Fixed::from_int(-5),
+            "water's Kirchhoff slope derives to -5R from its structure"
+        );
+        // A linear volatile (f_rot = 2, two atoms) reads a half-integer, -5/2, the alien-general path.
+        let dcp_linear = kirchhoff_delta_cp_over_r(Fixed::from_int(2), Fixed::from_int(2));
+        assert_eq!(
+            dcp_linear,
+            Fixed::from_ratio(-5, 2),
+            "a diatomic volatile reads -5/2 R, a data row"
+        );
+        let (a, b) = rankine_kirchhoff_constants(t_b, l_b, dcp_over_r, r, p_ref);
+        // B ~ 6756 K and A ~ 45.43 (MPa-anchored), both derived from the primitives.
+        assert!(
+            b > Fixed::from_int(6740) && b < Fixed::from_int(6772),
+            "B derives to ~6756 K"
+        );
+        assert!(
+            a > Fixed::from_int(45) && a < Fixed::from_int(46),
+            "A derives to ~45.43 (MPa-anchored)"
+        );
+        // The boiling point reads 1 atm by construction (the exp(ln) round-trip within tolerance).
+        let p_boil = saturation_vapor_pressure_rk(t_b, a, b, dcp_over_r);
+        assert!(
+            p_boil > Fixed::from_ratio(1007, 10_000) && p_boil < Fixed::from_ratio(1020, 10_000),
+            "P_sat(T_b) reads ~0.101325 MPa (1 atm) by construction"
+        );
+        // Triple point 273.16 K: ~638 Pa = ~6.38e-4 MPa (the +4% Kirchhoff residual above 611.66 Pa).
+        let p_triple =
+            saturation_vapor_pressure_rk(Fixed::from_ratio(27316, 100), a, b, dcp_over_r);
+        assert!(
+            p_triple > Fixed::from_ratio(60, 100_000) && p_triple < Fixed::from_ratio(66, 100_000),
+            "P_sat(triple) derives to ~638 Pa, the derived P_triple the sublimation branch anchors to"
+        );
+        // World mean 288.15 K: ~1768 Pa = ~1.768e-3 MPa (+4% above 1705.6 Pa).
+        let p_mean = saturation_vapor_pressure_rk(Fixed::from_ratio(28815, 100), a, b, dcp_over_r);
+        assert!(
+            p_mean > Fixed::from_ratio(170, 100_000) && p_mean < Fixed::from_ratio(182, 100_000),
+            "P_sat(world mean) derives to ~1768 Pa"
+        );
+        // A real saturation curve rises monotonically with temperature.
+        assert!(
+            p_triple < p_mean && p_mean < p_boil,
+            "saturation pressure rises with temperature"
+        );
+        // A degenerate substance (zero gas constant) yields (ZERO, ZERO), no division by zero.
+        assert_eq!(
+            rankine_kirchhoff_constants(t_b, l_b, dcp_over_r, ZERO, p_ref),
+            (ZERO, ZERO),
+            "a zero gas constant yields zero constants, no division by zero"
+        );
+        // A non-positive temperature yields zero pressure, not a panic.
+        assert_eq!(
+            saturation_vapor_pressure_rk(ZERO, a, b, dcp_over_r),
+            ZERO,
+            "a non-positive temperature yields zero"
         );
     }
 

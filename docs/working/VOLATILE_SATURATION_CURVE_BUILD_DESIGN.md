@@ -38,19 +38,21 @@ section 2. Substituting and splitting the numerator into a constant part and a `
 
 The power-law factor is `T^(delta_cp/R)`, exactly `T^(-5)` for water, as the anchor states.
 
-**Worked numbers for water (all derived from the anchor's primitives, checked):** `T_b = 373.15 K`,
-`L_b = 40660 J/mol`, `delta_cp = -5R = -41.572 J/(mol K)`, `R = 8.314462618`, `P_ref = 0.101325 MPa`. Then
-`B = (40660 - (-41.572)(373.15))/8.314463 = 56172.6/8.314463 = 6756.4 K`, and (anchoring `A` so the curve reads
-MPa directly) `A = ln(0.101325) + 6756.4/373.15 + 5*ln(373.15) = -2.2890 + 18.1065 + 29.6099 = 45.4274`.
+**Worked numbers for water (all derived from the anchor's primitives, checked with full-precision `R`):**
+`T_b = 373.15 K`, `L_b = 40660 J/mol`, `delta_cp = -5R = -41.572 J/(mol K)`, `R = 8.314462618`,
+`P_ref = 0.101325 MPa` (the matched 1-atm pair with `T_b`, never IUPAC's 1 bar / 372.76 K). Then
+`B = (40660 - (-41.572)(373.15))/8.314463 = 56172 / 8.314463 = 6756.0 K`, and (anchoring `A` so the curve reads
+MPa directly) `A = ln(0.101325) + 6756.0/373.15 + 5*ln(373.15) = -2.2890 + 18.1054 + 29.6099 = 45.4263`.
 
-**Validation of the mid-range curve at three points (derived versus reference, straight):**
-- `T = 273.16 K` (triple point): `ln P = 45.4274 - 24.7343 - 5*5.6101 = -7.3574`, `P = 637.9 Pa`. Reference
-  611.66 Pa: `+4.3%`.
-- `T = 288.15 K` (world mean): `ln P = 45.4274 - 23.4477 - 5*5.66353 = -6.3380`, `P = 1763.8 Pa`. Reference
-  1704 Pa: `+3.5%`.
+**Validation of the mid-range curve across the surface range (derived versus steam-table reference, straight),
+verified by a full-precision cross-check:**
+- `T = 273.16 K` (triple point): `P = 637.9 Pa`. Reference 611.66 Pa: `+4.3%`.
+- `T = 288.15 K` (world mean): `P = 1768.3 Pa`. Reference 1705.6 Pa: `+3.7%`.
 - `T = 373.15 K` (boiling): reads `0.101325 MPa` exactly, by construction of `A`.
+- The deviation runs a smooth, monotonic `+4.3%` at the triple point down to `+2.5%` at 45 C, always positive,
+  no blow-up: the well-behaved Kirchhoff residual, not a point coincidence.
 
-The uniform `+3` to `+4%` bias is the Kirchhoff-form residual the anchor predicts (about 4%, down from the
+The `+2.5` to `+4.3%` bias is the Kirchhoff-form residual the anchor predicts (about 4%, down from the
 constant-L 10%), an honest limit reported straight, never tuned. The derived triple-point pressure (638 Pa) is
 the value the sublimation branch anchors to, so the regimes join continuously (section 3).
 
@@ -71,9 +73,11 @@ kinetic and potential). Water has three atoms, so `c_p(liquid) = 9R`.
 **So `delta_cp = 4R - 9R = -5R` for water** (about `-41.6 J/(mol K)` against the measured `-41.6`), derived from
 the rotational class (nonlinear) and the atom count (three), both per-substance structural data. A diatomic
 alien volatile would take `C_p(gas) = 7/2 R` and `c_p(liquid) = 6R`, so `delta_cp = -5/2 R`; the mechanism is
-fixed, the structure is data. `delta_cp/R` is always a half-integer (an integer when the rotational degrees of
-freedom are even), so the power-law factor is `T^(-5)` for water and a half-integer power in general, which the
-`(delta_cp/R)*ln T` term evaluates uniformly through `Fixed::ln` and `Fixed::exp` for any substance.
+fixed, the structure is data. `delta_cp/R` is a half-integer in general and an integer when the rotational
+degrees of freedom are ODD (a nonlinear molecule, water's own `-5` case: gas `C_p/R = (5 + f_rot)/2` is integer
+when `f_rot` is odd), so the power-law factor is `T^(-5)` for water and a half-integer power for a linear or
+monatomic volatile, which the `(delta_cp/R)*ln T` term evaluates uniformly through `Fixed::ln` and `Fixed::exp`
+for any substance.
 
 ## 3. The three regimes and their continuity
 
@@ -106,10 +110,15 @@ flag it and propose building it last, after the load-bearing mid range and the s
 
 **The regime boundaries.** `T_triple` is a measured per-substance primitive (the solid-liquid-gas coexistence
 temperature, 273.16 K for water), and it is the physical switch between the sublimation and mid-range branches.
-The upper boundary `0.75*T_c` is an ACCURACY boundary, not a world-content value: it selects which of two
-derived latent-heat forms applies, chosen where the linear Kirchhoff extrapolation error crosses tolerance, the
-standard reduced temperature at which the Watson relation is applied. It biases no outcome (both forms are
-derived); it is an engine-accuracy switch. I surface it for the gate rather than treat it as free.
+The upper boundary at reduced temperature about `0.75` is an ACCURACY boundary, not a fundamental constant and
+not a per-world datum: it selects which of two DERIVED latent-heat forms applies, both forms give a continuous
+`P_sat`, and a temperate surface never reaches it (`0.75*T_c = 485 K` for water), so it biases no Mirror outcome.
+Under the three-way test it is therefore either DERIVED, from the reduced temperature where the linear-Kirchhoff
+extrapolation error of `L(T)` first exceeds the validation tolerance (computable once the tolerance is set), or
+carried as a RESERVED engine-accuracy tuneable with exactly that basis (a performance and accuracy bound, the
+crossover of the cheaper linear form's error past tolerance), never as a fixed physical value. I recommend the
+derived form (compute the crossover), with the reserved tuneable as the fallback, and surface it to the gate and
+the owner rather than hardcode `0.75`.
 
 ## 4. The value inventory (for the derivation-hunter)
 
@@ -135,6 +144,8 @@ DERIVED (no authored value, computed at runtime):
 - `A`, `B`, the Rankine-Kirchhoff integration constants, from `T_b`, `L_b`, `delta_cp`, `R`, `P_ref` (section 1).
 - `P_triple`, the triple-point pressure, from the mid-range curve at `T_triple` (section 3).
 - The Watson exponent `0.38`, a universal correlation constant of the relation (not a substance fit).
+- The upper regime boundary (reduced temperature about `0.75`), either derived from the linear-Kirchhoff
+  error-crossing or carried as a reserved engine-accuracy tuneable with that basis (section 3), never hardcoded.
 
 DEFINED unit / floor-fundamental questions (for the gate):
 - `P_ref = 1 standard atmosphere = 101325 Pa`, a defined unit constant (the definition of the boiling point),
@@ -199,6 +210,7 @@ of state validates any other measured volatile. The deviation is a reported hone
 - The vibrational (Einstein) contribution to the gas heat capacity is dropped at surface temperatures, a
   flagged refinement that matters for hot regimes.
 - The near-critical Watson branch is never reached at a temperate surface; its saturation-pressure integration
-  is deferred (no elementary form) and flagged.
+  is deferred (no elementary form) and flagged. The Watson exponent `0.38` is the universal corresponding-states
+  default; it is weakly substance-dependent only at high accuracy, a flagged refinement, not a per-substance fit.
 - Vapour non-ideality (a compressibility factor on the vapour volume) is the anchor's flagged rung, derivable
   from the same intermolecular parameters the D_v chain uses, built when wanted.
