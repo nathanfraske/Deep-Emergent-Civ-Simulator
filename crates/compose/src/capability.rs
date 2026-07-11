@@ -47,6 +47,54 @@ use std::collections::BTreeMap;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct FunctionLawId(pub u32);
 
+/// The accessor a role's axis is read through: a GEOMETRY quantity (a length, area, or volume, the body's SHAPE)
+/// reads the geometry store, everything else (a stress, pressure, modulus, index, the body's MATERIAL nature) the
+/// material store. The class is a fixed property of the semantic ROLE ([`accessor_class`]), part of the kernel
+/// mechanism exactly as the role NAME is, so it is not world-authorable data and cannot be authored into a
+/// contradiction (the gate's Slice-C condition 2, the value-authoring line). Both the grade and the delivery kernels
+/// read a role through the ONE shared [`AxisBinding::read`], which dispatches on this class, so a role is read
+/// through the same accessor on both paths and cannot be classed geometry on one and material on the other. The
+/// physics check is [`AxisBinding::validate_dimensions`], which fails loud if a role's bound axis has a dimension
+/// inconsistent with the role's class.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AccessorClass {
+    /// A shape quantity (length, area, volume): read through the geometry accessor.
+    Geometry,
+    /// A material quantity (stress, pressure, modulus, dimensionless index): read through the material accessor.
+    Material,
+}
+
+impl AccessorClass {
+    /// The accessor a DIMENSION reads through: a length, area, or volume names the body's shape (geometry); every
+    /// other dimension names its material nature (material). Used by [`AxisBinding::validate_dimensions`] to check a
+    /// role's fixed class against its bound axis's actual dimension, so a role bound to a wrong-dimension axis is a
+    /// fail-loud load error rather than a silent misread.
+    pub fn from_dimension(dim: Dimension) -> AccessorClass {
+        if dim == Dimension::LENGTH || dim == Dimension::AREA || dim == Dimension::VOLUME {
+            AccessorClass::Geometry
+        } else {
+            AccessorClass::Material
+        }
+    }
+}
+
+/// The accessor class of a semantic ROLE, declared ONCE here for every kernel role rather than restated in each
+/// kernel body: a shape role (a contact area, a cross-section, a stroke or arm length, a section modulus) reads the
+/// geometry accessor, and everything else (a strength, hardness, yield, shear or compressive strength, modulus,
+/// refractive index, driving pressure) the material accessor. This is fixed mechanism, like the role NAME, so a
+/// world cannot author it into a contradiction; a new geometry role added to a future kernel is listed here, and
+/// [`AxisBinding::validate_dimensions`] catches any role whose class disagrees with its bound axis's dimension.
+/// Deriving the class purely from a world's declared axis dimension, so no fixed list is needed at all, is the
+/// north-star follow-on where the registry dependence earns its place.
+pub fn accessor_class(role: &str) -> AccessorClass {
+    match role {
+        "contact_area" | "cross_section" | "stroke" | "arm_length" | "section_modulus" => {
+            AccessorClass::Geometry
+        }
+        _ => AccessorClass::Material,
+    }
+}
+
 /// A DATA-DEFINED axis binding: a map from a kernel's ROLE NAME (the semantic slot a law reads, `contact_area`,
 /// `actuating_strength`, `driving_pressure`) to the physics-floor AXIS ID that fills it. The role SET is data and
 /// EXTENSIBLE (a world grows a new role by adding a map entry, never a new struct field and never a new positional
@@ -74,7 +122,9 @@ impl AxisBinding {
     }
 
     /// Build a binding from role-name / axis-id pairs (the canonical construction, used by the kernel defaults and
-    /// by a world declaring its own axes).
+    /// by a world declaring its own axes). The accessor class is a fixed property of the role ([`accessor_class`]),
+    /// so no registry is consulted here; the physics consistency of a bound axis is checked by
+    /// [`AxisBinding::validate_dimensions`] where a registry is available.
     pub fn from_pairs<R: Into<String>, A: Into<String>>(
         pairs: impl IntoIterator<Item = (R, A)>,
     ) -> AxisBinding {
@@ -90,6 +140,25 @@ impl AxisBinding {
     /// kernel reading an unbound role reads zero through its accessor, never a fabricated value).
     pub fn axis(&self, role: &str) -> Option<&str> {
         self.roles.get(role).map(String::as_str)
+    }
+
+    /// Read a role's grown value through the accessor its class selects ([`accessor_class`]): a geometry role
+    /// through `geo`, a material role through `mat`. This is the ONE read both the grade kernels and the delivery
+    /// kernels use, so a role is read through the same accessor on both paths (the class is declared once, never
+    /// restated per kernel body). An unbound role reads zero (the absence convention), never a fabricated value.
+    pub fn read(
+        &self,
+        geo: &dyn Fn(&str) -> Fixed,
+        mat: &dyn Fn(&str) -> Fixed,
+        role: &str,
+    ) -> Fixed {
+        match self.axis(role) {
+            Some(axis) => match accessor_class(role) {
+                AccessorClass::Geometry => geo(axis),
+                AccessorClass::Material => mat(axis),
+            },
+            None => Fixed::ZERO,
+        }
     }
 
     /// The bound (role, axis) pairs, in canonical (sorted role) order, so any walk is reproducible.
@@ -108,6 +177,28 @@ impl AxisBinding {
                 return Err(format!(
                     "axis binding is missing the required role '{role}'"
                 ));
+            }
+        }
+        Ok(())
+    }
+
+    /// The PHYSICS check for the accessor class (the gate's Slice-C condition 2, validated-against-dimension
+    /// branch): for every bound role whose axis `reg` declares, fail loud if the role's fixed class
+    /// ([`accessor_class`]) disagrees with the accessor the axis's actual DIMENSION would read through
+    /// ([`AccessorClass::from_dimension`]). This catches a role bound to a wrong-dimension axis (a geometry role
+    /// bound to a pressure axis, say) at load rather than as a silent misread. An axis `reg` does not declare is
+    /// skipped (this registry cannot judge it); a world validates against the registry that declares its own axes.
+    pub fn validate_dimensions(&self, reg: &PhysicsRegistry) -> Result<(), String> {
+        for (role, axis) in self.pairs() {
+            if let Some(quantity) = reg.axis(axis) {
+                let by_dimension = AccessorClass::from_dimension(quantity.dimension);
+                if by_dimension != accessor_class(role) {
+                    return Err(format!(
+                        "role '{role}' is {:?} but its bound axis '{axis}' has a {:?} dimension",
+                        accessor_class(role),
+                        by_dimension
+                    ));
+                }
             }
         }
         Ok(())
@@ -266,26 +357,12 @@ impl CapabilityKernel {
         match self {
             CapabilityKernel::Pierce => pierce(geo, mat, refs, caps, binding),
             CapabilityKernel::Locomote => locomote(geo, mat, refs, caps, binding),
-            CapabilityKernel::Refract => refract(mat, refs, binding),
+            CapabilityKernel::Refract => refract(geo, mat, refs, binding),
             CapabilityKernel::Shear => shear(geo, mat, refs, caps, binding),
             CapabilityKernel::Crush => crush(geo, mat, refs, caps, binding),
             CapabilityKernel::Impact => impact(geo, mat, refs, binding),
         }
     }
-}
-
-/// Read a ROLE's floor-axis value through the GEOMETRY accessor (the role names a geometry quantity: a
-/// cross-section, a stroke, a section modulus). An unbound role reads zero (the absence convention); a
-/// load-validated binding always carries a kernel's required roles, so a required role never reads zero for
-/// absence, only for an axis the part grew to zero.
-fn role_geo(geo: &dyn Fn(&str) -> Fixed, binding: &AxisBinding, role: &str) -> Fixed {
-    binding.axis(role).map(geo).unwrap_or(Fixed::ZERO)
-}
-
-/// Read a ROLE's floor-axis value through the MATERIAL accessor (the role names a material quantity: a strength,
-/// a hardness, a modulus, a driving pressure). The material sibling of [`role_geo`].
-fn role_mat(mat: &dyn Fn(&str) -> Fixed, binding: &AxisBinding, role: &str) -> Fixed {
-    binding.axis(role).map(mat).unwrap_or(Fixed::ZERO)
 }
 
 /// The LOCOMOTE read: is the part a load-bearing limb, and how strong a one, from its geometry and material.
@@ -296,9 +373,9 @@ fn locomote(
     caps: &CapabilityCaps,
     binding: &AxisBinding,
 ) -> Fixed {
-    let section_modulus = role_geo(geo, binding, "section_modulus");
-    let arm_length = role_geo(geo, binding, "arm_length");
-    let yield_strength = role_mat(mat, binding, "yield_strength");
+    let section_modulus = binding.read(geo, mat, "section_modulus");
+    let arm_length = binding.read(geo, mat, "arm_length");
+    let yield_strength = binding.read(geo, mat, "yield_strength");
     if section_modulus <= Fixed::ZERO || yield_strength <= Fixed::ZERO {
         return Fixed::ZERO; // no section to bear a load, or no strength: not a limb
     }
@@ -321,9 +398,15 @@ fn locomote(
 }
 
 /// The REFRACT read: is the tissue an optical transducer (an eye), from its refractive index against the
-/// medium. Material-only (a lens is a material property); no geometry axis is read.
-fn refract(mat: &dyn Fn(&str) -> Fixed, refs: &CapabilityRefs, binding: &AxisBinding) -> Fixed {
-    let n2 = role_mat(mat, binding, "refractive_index");
+/// medium. The refractive index is a material property, so the binding's DERIVED class reads it through `mat`;
+/// `geo` is passed for the shared [`AxisBinding::read`] dispatch and is not exercised by this kernel's roles.
+fn refract(
+    geo: &dyn Fn(&str) -> Fixed,
+    mat: &dyn Fn(&str) -> Fixed,
+    refs: &CapabilityRefs,
+    binding: &AxisBinding,
+) -> Fixed {
+    let n2 = binding.read(geo, mat, "refractive_index");
     if n2 <= Fixed::ZERO {
         return Fixed::ZERO; // no optical tissue: not an eye
     }
@@ -345,7 +428,7 @@ fn pierce(
     caps: &CapabilityCaps,
     binding: &AxisBinding,
 ) -> Fixed {
-    let contact_area = role_geo(geo, binding, "contact_area");
+    let contact_area = binding.read(geo, mat, "contact_area");
     if contact_area <= Fixed::ZERO {
         return Fixed::ZERO; // no tip, no contact: not a weapon
     }
@@ -353,7 +436,7 @@ fn pierce(
     // material: a part cannot sustain a contact pressure above its own indentation hardness before it
     // plastically blunts, so a soft point caps out low and cannot exceed a hard target's resistance.
     let applied = laws::contact_pressure(refs.reference_strike_force, contact_area, caps.pressure);
-    let hardness = role_mat(mat, binding, "indentation_hardness");
+    let hardness = binding.read(geo, mat, "indentation_hardness");
     let effective = if hardness > Fixed::ZERO {
         applied.min(hardness)
     } else {
@@ -437,12 +520,12 @@ fn shear(
     caps: &CapabilityCaps,
     binding: &AxisBinding,
 ) -> Fixed {
-    let contact_area = role_geo(geo, binding, "contact_area");
+    let contact_area = binding.read(geo, mat, "contact_area");
     if contact_area <= Fixed::ZERO {
         return Fixed::ZERO; // no edge, no contact: nothing to shear with
     }
-    let shear_strength = role_mat(mat, binding, "shear_strength");
-    let yield_strength = role_mat(mat, binding, "yield_strength");
+    let shear_strength = binding.read(geo, mat, "shear_strength");
+    let yield_strength = binding.read(geo, mat, "yield_strength");
     let independent = if shear_strength > Fixed::ZERO {
         Some(shear_strength)
     } else {
@@ -487,11 +570,11 @@ fn crush(
     caps: &CapabilityCaps,
     binding: &AxisBinding,
 ) -> Fixed {
-    let contact_area = role_geo(geo, binding, "contact_area");
+    let contact_area = binding.read(geo, mat, "contact_area");
     if contact_area <= Fixed::ZERO {
         return Fixed::ZERO; // no face, no contact: nothing to crush with
     }
-    let compressive_strength = role_mat(mat, binding, "compressive_strength");
+    let compressive_strength = binding.read(geo, mat, "compressive_strength");
     // The applied compressive stress the reference force imposes over the face, self-limited at the part's
     // own compressive strength (a part that would carry more than it withstands crushes itself first). A part
     // with no compressive strength (zero) delivers no crushing stress.
@@ -534,9 +617,9 @@ fn impact(
     // positional slot to mis-read: a springy binding that carries no rigid strength maps `actuating_strength` to an
     // axis it grows zero (or omits the role, which the load-time role validation catches), so the rigid path
     // self-gates to zero and the elastic recoil stands, never a yield mis-read into the strength slot.
-    let strength = role_mat(mat, binding, "actuating_strength");
-    let cross_section = role_geo(geo, binding, "cross_section");
-    let stroke = role_geo(geo, binding, "stroke");
+    let strength = binding.read(geo, mat, "actuating_strength");
+    let cross_section = binding.read(geo, mat, "cross_section");
+    let stroke = binding.read(geo, mat, "stroke");
     // The RIGID path: the actuating force in newtons (strength stress over cross-section, promoted by the
     // megapascal-to-newton bridge), then the actuator work over the grown stroke. Passing the force through
     // `actuator_work` rather than short-circuiting on overflow keeps the stroke guard live: a part with no grown
@@ -547,15 +630,15 @@ fn impact(
     // volume (cross-section times stroke, the two geometry axes reused, no new axis). Self-gates to zero on a part
     // with no yield or no modulus, so a rigid-limit part reads exactly the rigid `F d` (byte-neutral). The swept
     // volume is a PROXY for the elastic element's own volume, the reserved-with-basis refinement noted on the row.
-    let yield_strength = role_mat(mat, binding, "yield_strength");
-    let elastic_modulus = role_mat(mat, binding, "elastic_modulus");
+    let yield_strength = binding.read(geo, mat, "yield_strength");
+    let elastic_modulus = binding.read(geo, mat, "elastic_modulus");
     let volume = cross_section.checked_mul(stroke).unwrap_or(ENERGY_GUARD);
     let elastic =
         laws::elastic_recoil_energy(yield_strength, elastic_modulus, volume, ENERGY_GUARD);
     // The HYDRAULIC path: the pressure-over-volume work `P dV` = `F d` of a working-fluid actuator, which COMPOSES
     // from the same two laws the rigid path uses (the driving pressure over the piston cross-section is the force),
     // no new law. Self-gates to zero on a part with no driving pressure, so a non-fluid part is unaffected.
-    let driving_pressure = role_mat(mat, binding, "driving_pressure");
+    let driving_pressure = binding.read(geo, mat, "driving_pressure");
     let hydraulic_force = laws::stress_force(driving_pressure, cross_section, ENERGY_GUARD);
     let hydraulic = laws::actuator_work(hydraulic_force, stroke, ENERGY_GUARD);
     // The MAX over the shared-source mechanical family (alternative paths for one metabolic source; SUM would
@@ -944,6 +1027,75 @@ mod tests {
             pressure: dec("150000"),
             depth: dec("100"),
         }
+    }
+
+    #[test]
+    fn the_accessor_class_is_a_fixed_role_property_and_validate_dimensions_catches_a_mismatch() {
+        // Slice C2 (the lighter form the gate adopted): the geo-vs-material accessor class is a fixed property of
+        // the semantic ROLE, declared once in `accessor_class`, so both the grade and delivery kernels read a role
+        // through the same accessor (the class is not restated per kernel body, closing condition 2's seam) and a
+        // world cannot author it into a contradiction (it is fixed mechanism, not binding data).
+        for r in [
+            "cross_section",
+            "stroke",
+            "contact_area",
+            "section_modulus",
+            "arm_length",
+        ] {
+            assert_eq!(
+                accessor_class(r),
+                AccessorClass::Geometry,
+                "{r} is a shape role"
+            );
+        }
+        for r in [
+            "actuating_strength",
+            "driving_pressure",
+            "yield_strength",
+            "elastic_modulus",
+            "refractive_index",
+            "indentation_hardness",
+            "shear_strength",
+            "compressive_strength",
+        ] {
+            assert_eq!(
+                accessor_class(r),
+                AccessorClass::Material,
+                "{r} is a material role"
+            );
+        }
+
+        // The PHYSICS check (validated-against-dimension, condition 2): every default binding's roles agree with
+        // their bound axes' actual floor dimensions, so no role is classed against its axis's real dimension.
+        let ground = PhysicsRegistry::ground().expect("the ground floor loads");
+        for kernel in [
+            CapabilityKernel::Pierce,
+            CapabilityKernel::Locomote,
+            CapabilityKernel::Refract,
+            CapabilityKernel::Shear,
+            CapabilityKernel::Crush,
+            CapabilityKernel::Impact,
+        ] {
+            assert!(
+                kernel
+                    .default_binding()
+                    .validate_dimensions(&ground)
+                    .is_ok(),
+                "the {kernel:?} default binding's roles agree with their axes' dimensions"
+            );
+        }
+
+        // A binding that binds a GEOMETRY role (cross_section) to a PRESSURE axis (mat.yield_strength) is a
+        // role-vs-dimension contradiction: validate_dimensions fails loud, naming the role. This is the misread the
+        // fixed-role class plus the dimension validation catches at load, the gate's condition-2 branch.
+        let wrong = AxisBinding::from_pairs([("cross_section", "mat.yield_strength")]);
+        let err = wrong
+            .validate_dimensions(&ground)
+            .expect_err("a geometry role bound to a pressure axis is a load error");
+        assert!(
+            err.contains("cross_section"),
+            "the validate error names the contradicting role: {err}"
+        );
     }
 
     #[test]

@@ -332,20 +332,6 @@ pub fn resolve_delivered_energy(
     }
 }
 
-/// Read a ROLE's floor-axis value through the GEOMETRY accessor (the role names a geometry quantity: a
-/// cross-section, a stroke). An unbound role reads zero (the absence convention); a load-validated row always
-/// carries the mechanical-family roles, so a required role never reads zero for absence, only for an axis the
-/// part grew to zero. The delivery-path sibling of `civsim_compose`'s `role_geo`.
-fn role_geo(geo: &dyn Fn(&str) -> Fixed, binding: &AxisBinding, role: &str) -> Fixed {
-    binding.axis(role).map(geo).unwrap_or(Fixed::ZERO)
-}
-
-/// Read a ROLE's floor-axis value through the MATERIAL accessor (the role names a material quantity: a strength,
-/// a yield, a modulus, a driving pressure). The material sibling of [`role_geo`].
-fn role_mat(mat: &dyn Fn(&str) -> Fixed, binding: &AxisBinding, role: &str) -> Fixed {
-    binding.axis(role).map(mat).unwrap_or(Fixed::ZERO)
-}
-
 /// The KINETIC (rigid-actuator) delivered-energy law: the actuator work `F d`, where the force is the acting
 /// part's strength stress (the `actuating_strength` role) over its cross-section (the `cross_section` role)
 /// promoted to newtons by the floor's [`laws::stress_force`] (its megapascal-to-newton bridge), and the distance
@@ -361,11 +347,11 @@ fn kinetic_delivered_energy(
     energy_max: Fixed,
 ) -> Fixed {
     let force = laws::stress_force(
-        role_mat(mat, binding, "actuating_strength"),
-        role_geo(geo, binding, "cross_section"),
+        binding.read(geo, mat, "actuating_strength"),
+        binding.read(geo, mat, "cross_section"),
         energy_max,
     );
-    laws::actuator_work(force, role_geo(geo, binding, "stroke"), energy_max)
+    laws::actuator_work(force, binding.read(geo, mat, "stroke"), energy_max)
 }
 
 /// The ELASTIC-RECOIL delivered-energy law (the elastic member of the shared-source mechanical family): the
@@ -391,12 +377,13 @@ fn elastic_recoil_delivered_energy(
     // saturates to `energy_max` as a numeric sentinel; the law gates on the material first (no yield or modulus
     // reads zero however large the volume), and re-caps a present-material product at `energy_max`, so the sentinel
     // never fabricates energy for a rigid actuator.
-    let volume = role_geo(geo, binding, "cross_section")
-        .checked_mul(role_geo(geo, binding, "stroke"))
+    let volume = binding
+        .read(geo, mat, "cross_section")
+        .checked_mul(binding.read(geo, mat, "stroke"))
         .unwrap_or(energy_max);
     laws::elastic_recoil_energy(
-        role_mat(mat, binding, "yield_strength"),
-        role_mat(mat, binding, "elastic_modulus"),
+        binding.read(geo, mat, "yield_strength"),
+        binding.read(geo, mat, "elastic_modulus"),
         volume,
         energy_max,
     )
@@ -430,11 +417,11 @@ fn hydraulic_delivered_energy(
     // material strength). Then the actuator work over the stroke. A part with no driving pressure reads a zero
     // force and so a zero blow (the absence convention), so a non-fluid actuator self-gates.
     let force = laws::stress_force(
-        role_mat(mat, binding, "driving_pressure"),
-        role_geo(geo, binding, "cross_section"),
+        binding.read(geo, mat, "driving_pressure"),
+        binding.read(geo, mat, "cross_section"),
         energy_max,
     );
-    laws::actuator_work(force, role_geo(geo, binding, "stroke"), energy_max)
+    laws::actuator_work(force, binding.read(geo, mat, "stroke"), energy_max)
 }
 
 #[cfg(test)]
