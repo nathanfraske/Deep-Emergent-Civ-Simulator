@@ -1311,6 +1311,7 @@ impl EnvironFields {
     /// clamped non-negative), then route a fraction downhill to the precomputed lowest neighbour,
     /// double-buffered so the advection is order-independent and conservative (a cell keeps what it does
     /// not send; a basin sends nothing).
+    // @derives: local water presence, rainfall, evaporation, runoff <- Clausius-Clapeyron saturation(local temperature) + Dalton evaporation + condensation where moisture exceeds saturation + downhill routing to the lowest neighbour. Water is NOT authored per cell; it falls out of temperature and terrain.
     fn step_hydrology(&mut self, temp: &Field, calib: &EnvironCalib) {
         let (w, h) = (self.width, self.height);
         let n = (w as usize) * (h as usize);
@@ -1721,6 +1722,7 @@ impl EnvironFields {
     /// so a fertilised cell grows more where soil is the limiting factor and the matter cycle closes into
     /// the food web. With no matter cycle armed the fertility is zero and the soil supply is the plain
     /// baseline, so the productivity (and its hash) is unchanged.
+    // @derives: per-cell biomass productivity / carrying capacity <- Liebig minimum over (water, light, temperature, soil); soil = soil_baseline + matter-cycle fertility. Productivity is NOT authored per cell; it derives from local conditions. Residual to derive: soil_baseline should read from the per-column lithology mineral floor rather than a flat scalar.
     fn step_productivity(&mut self, temp: &Field, calib: &EnvironCalib) {
         let (w, h) = (self.width, self.height);
         for y in 0..h {
