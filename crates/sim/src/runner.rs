@@ -14006,7 +14006,6 @@ values = [
     /// zero-mean and freely-signed and whose population mean moves only if selection moves it.
     fn matter_arena(gradient: bool, generations: u64, verbose: bool) -> (Fixed, usize, usize) {
         use crate::homeostasis::{HomeostaticAxisDef, HomeostaticRegistry};
-        use crate::medium::MediumField;
         use crate::perceivable_feature::PerceivableFeatureRegistry;
         let homeo = HomeostaticRegistry {
             axes: vec![
@@ -14152,9 +14151,9 @@ values = [
             }
             let mut sum = Fixed::ZERO;
             for w in &live {
-                sum = sum
-                    + w.controller
-                        .weight((move_base + 1) * n_in + (rf + 2 * bucket));
+                sum += w
+                    .controller
+                    .weight((move_base + 1) * n_in + (rf + 2 * bucket));
             }
             (sum.div(Fixed::from_int(live.len() as i32)), live.len())
         };
