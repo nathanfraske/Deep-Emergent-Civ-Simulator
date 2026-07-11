@@ -222,10 +222,17 @@ pub fn contact_pressure(force: Fixed, contact_area: Fixed, p_max: Fixed) -> Fixe
         // zero, not the maximum-pressure cap (which is the zero-area extreme just below).
         None => return ZERO,
     };
-    if den == ZERO {
-        return p_max;
-    }
-    match force.checked_div(den) {
+    // The divisor's zero-boundary is a declared physical-limit-at-zero (R-UNITS-PIN floor invariant, the
+    // slice-3 backstop): a zero contact area is the concentrated point load, which reads the material's
+    // maximum pressure `p_max`, a physical limit rather than a value riding the storage epsilon.
+    // `guarded_checked_div` returns `p_max` at that boundary and keeps the law's own overflow cap on `None`,
+    // byte-neutral with the prior explicit `if den == ZERO { p_max }` guard (a physical area makes `den >= 0`,
+    // so `den <= ZERO` there is exactly `den == ZERO`).
+    match civsim_units::guard::guarded_checked_div(
+        force,
+        den,
+        civsim_units::guard::ZeroGuard::LimitAtZero(p_max),
+    ) {
         Some(p) => p.min(p_max),
         None => p_max,
     }
@@ -870,10 +877,15 @@ pub fn sensible_rise(mass: Fixed, specific_heat: Fixed, energy: Fixed, rise_max:
         Some(c) => c,
         None => return ZERO,
     };
-    if capacity == ZERO {
-        return rise_max;
-    }
-    match energy.checked_div(capacity) {
+    // The divisor's zero-boundary is a declared physical-limit-at-zero (the floor invariant, slice-3 backstop):
+    // a zero thermal capacity (a massless body) takes the maximum temperature swing `rise_max`, a physical
+    // limit rather than the storage epsilon. Byte-neutral (`capacity = mass*specific_heat >= 0`, so the
+    // boundary is `== ZERO`); the law keeps its overflow cap on `None`.
+    match civsim_units::guard::guarded_checked_div(
+        energy,
+        capacity,
+        civsim_units::guard::ZeroGuard::LimitAtZero(rise_max),
+    ) {
         Some(dt) => dt.min(rise_max),
         None => rise_max,
     }
@@ -1746,10 +1758,15 @@ pub fn inverse_square_falloff(
         Some(x) => x,
         None => return ZERO,
     };
-    if denom == ZERO {
-        return irrad_max;
-    }
-    match power.checked_div(denom) {
+    // The divisor's zero-boundary is a declared physical-limit-at-zero (the floor invariant, slice-3 backstop):
+    // a zero distance (the source at the point) reads the irradiance cap `irrad_max`, a physical limit rather
+    // than the storage epsilon. Byte-neutral (`denom = 4*pi*r^2 >= 0`, so the boundary is `== ZERO`); the law
+    // keeps its overflow cap on `None`.
+    match civsim_units::guard::guarded_checked_div(
+        power,
+        denom,
+        civsim_units::guard::ZeroGuard::LimitAtZero(irrad_max),
+    ) {
         Some(e) => e.min(irrad_max),
         None => irrad_max,
     }

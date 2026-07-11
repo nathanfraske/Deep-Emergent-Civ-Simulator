@@ -73,6 +73,29 @@ pub fn guarded_div(num: Fixed, den: Fixed, guard: ZeroGuard) -> Fixed {
     }
 }
 
+/// A CHECKED guarded divide, for a hand-threaded law that carries BOTH a zero-boundary declaration AND its
+/// own output representability cap (the `contact_pressure` family: an explicit `if den == ZERO { cap }` then a
+/// `checked_div ... None => cap` for the overflow). It returns `Some(limit)` at the declared zero-boundary
+/// (`LimitAtZero`) or the clamped exact quotient (`Floor`), `Some(quotient)` for an in-range divide, and
+/// `None` when the quotient overflows the `i64` range, so the CALLER applies its own output cap on `None`
+/// exactly as before. This is the divide's counterpart to [`guarded_div`] (which uses a raw wrapping divide,
+/// correct for a law with no output cap, like a difference-divisor): the zero-boundary is the declared physical
+/// limit (the slice-3 backstop) while the law keeps its overflow cap, so the wiring is byte-neutral.
+/// Deterministic and float-free.
+#[inline]
+pub fn guarded_checked_div(num: Fixed, den: Fixed, guard: ZeroGuard) -> Option<Fixed> {
+    match guard {
+        ZeroGuard::Floor(floor) => num.checked_div(clamp_to_floor(den, floor)),
+        ZeroGuard::LimitAtZero(limit) => {
+            if den <= Fixed::ZERO {
+                Some(limit)
+            } else {
+                num.checked_div(den)
+            }
+        }
+    }
+}
+
 /// The natural logarithm of `arg` under a mandatory zero-boundary declaration, so a hand-threaded law's log
 /// carries the floor invariant. Under [`ZeroGuard::Floor`] the argument is clamped up to the declared floor
 /// before the log (`ln` never sees a non-positive argument riding the epsilon, so it never returns its
@@ -221,5 +244,36 @@ mod tests {
         );
         let x = f(5);
         assert_eq!(guarded_ln(x, ZeroGuard::LimitAtZero(limit)), x.ln());
+    }
+
+    #[test]
+    fn guarded_checked_div_returns_the_limit_at_zero_the_quotient_above_it_and_none_on_overflow() {
+        let cap = f(999); // the law's zero-boundary limit and output cap
+        // At and below the zero-boundary, Some(limit).
+        assert_eq!(
+            guarded_checked_div(f(12), Fixed::ZERO, ZeroGuard::LimitAtZero(cap)),
+            Some(cap)
+        );
+        assert_eq!(
+            guarded_checked_div(f(12), f(-1), ZeroGuard::LimitAtZero(cap)),
+            Some(cap)
+        );
+        // Above it, the exact checked quotient.
+        assert_eq!(
+            guarded_checked_div(f(12), f(4), ZeroGuard::LimitAtZero(cap)),
+            f(12).checked_div(f(4))
+        );
+        // An overflowing quotient returns None, so the caller applies its own cap (a huge numerator over a
+        // tiny positive divisor exceeds the i64 range).
+        assert_eq!(
+            guarded_checked_div(Fixed::MAX, Fixed::from_bits(1), ZeroGuard::LimitAtZero(cap)),
+            None
+        );
+        // Floor clamps the divisor up before the checked divide, so a sub-floor divisor never rides the epsilon.
+        let floor = Fixed::from_ratio(1, 100);
+        assert_eq!(
+            guarded_checked_div(f(1), Fixed::from_bits(3), ZeroGuard::Floor(floor)),
+            f(1).checked_div(floor)
+        );
     }
 }
