@@ -1574,6 +1574,38 @@ pub fn saturation_slope_from_latent_heat(
     num.checked_div(den).unwrap_or(Fixed::MAX)
 }
 
+/// The Lennard-Jones collision diameter `sigma` (angstrom) and the potential well depth `epsilon/k_B` (kelvin)
+/// DERIVED from a substance's measured CRITICAL POINT (`t_c` in K, `p_c` in Pa) through the corresponding-
+/// states relation fixed by the LJ potential's OWN reduced critical point (`T_c* = k_B*T_c/epsilon = 1.312`,
+/// `P_c* = P_c*sigma^3/epsilon = 0.128`), universal constants of the potential itself, never a fit to any
+/// fluid (Tee-Gotoh-Stewart corresponding states). `epsilon/k_B = T_c / 1.312`, and
+/// `sigma = C_sigma * (T_c/P_c)^(1/3)` where `C_sigma = 1e10 * (0.128 * k_B / 1.312)^(1/3) ~ 110.45` angstrom
+/// per (K/Pa)^(1/3) is FOLDED from the Boltzmann constant and the reduced critical point at the angstrom scale
+/// (k_B ~ 1e-23 underflows Q32.32, so the fold is done once at the cited scale, the same treatment the
+/// Chapman-Enskog leading constant needs). Only the critical point is authored; the LJ pair is a derived
+/// intermediate, so an alien gas is a data row. HONEST LIMIT: corresponding states treats the fluid as a
+/// simple LJ sphere, so a strongly polar fluid (water) deviates from its best-fit LJ pair by a bounded amount,
+/// a flagged approximation carried into `D_v`. A non-positive `p_c` or `t_c` yields zero.
+pub fn lennard_jones_from_critical_point(t_c: Fixed, p_c: Fixed) -> (Fixed, Fixed) {
+    if p_c <= ZERO || t_c <= ZERO {
+        return (ZERO, ZERO);
+    }
+    // epsilon/k_B = T_c / 1.312 (kelvin), the LJ reduced critical temperature.
+    let epsilon_over_kb = t_c
+        .checked_div(Fixed::from_ratio(1312, 1000))
+        .unwrap_or(ZERO);
+    // sigma = C_sigma * (T_c/P_c)^(1/3) (angstrom). T_c/P_c is small (order 1e-5 K/Pa), its cube root is
+    // order 0.03, and C_sigma ~ 110.45 lifts it to the angstrom scale, all representable in Q32.32.
+    let ratio = match t_c.checked_div(p_c) {
+        Some(r) => r,
+        None => return (ZERO, epsilon_over_kb),
+    };
+    let cube_root = ratio.powf(Fixed::from_ratio(1, 3));
+    let c_sigma = Fixed::from_ratio(11045, 100);
+    let sigma = c_sigma.checked_mul(cube_root).unwrap_or(Fixed::MAX);
+    (sigma, epsilon_over_kb)
+}
+
 /// Evaporation mass flux E = (a + b*|u|)*(e_s - e_a) (kg/(m^2*s)), the Dalton bulk aerodynamic proxy.
 /// Returns the evaporation source when the vapour-pressure deficit is positive; a non-positive deficit
 /// is the condensation case and reads zero here (the sink is the caller's sign-flipped difference).
@@ -4024,6 +4056,42 @@ mod tests {
             ZERO,
             "a zero specific gas constant yields zero, no division by zero"
         );
+    }
+
+    #[test]
+    fn the_lennard_jones_pair_derives_from_the_critical_point() {
+        // Corresponding states from the LJ reduced critical point (universal 1.312, 0.128). Water
+        // (T_c = 647.1 K, P_c = 22.06e6 Pa) derives epsilon/k_B ~ 493 K and sigma ~ 3.4 angstrom; air
+        // (T_c = 132.5 K, P_c = 3.77e6 Pa) derives epsilon/k_B ~ 101 K and sigma ~ 3.6 angstrom. Integer-only
+        // assertions with loose bounds absorbing the fixed-point cube-root (powf) error.
+        let (sigma_w, eps_w) = lennard_jones_from_critical_point(
+            Fixed::from_ratio(6471, 10),
+            Fixed::from_int(22_060_000),
+        );
+        assert!(
+            eps_w > Fixed::from_int(485) && eps_w < Fixed::from_int(500),
+            "water epsilon/k_B derives to ~493 K from its critical temperature"
+        );
+        assert!(
+            sigma_w > Fixed::from_ratio(32, 10) && sigma_w < Fixed::from_ratio(36, 10),
+            "water sigma derives to ~3.4 angstrom from its critical point"
+        );
+        let (sigma_a, eps_a) = lennard_jones_from_critical_point(
+            Fixed::from_ratio(1325, 10),
+            Fixed::from_int(3_770_000),
+        );
+        assert!(
+            eps_a > Fixed::from_int(95) && eps_a < Fixed::from_int(107),
+            "air epsilon/k_B derives to ~101 K from its critical temperature"
+        );
+        // Air's higher T_c/P_c ratio gives a larger collision diameter than water, monotone in the ratio.
+        assert!(
+            sigma_a > sigma_w,
+            "air's larger T_c/P_c gives a larger sigma than water"
+        );
+        // A degenerate zero critical pressure yields zero, no division by zero.
+        let (sigma_z, _) = lennard_jones_from_critical_point(Fixed::from_int(300), ZERO);
+        assert_eq!(sigma_z, ZERO, "a zero critical pressure yields zero sigma");
     }
 
     // --- Hardening: temperature/potential differences saturate rather than panic ---
