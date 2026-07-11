@@ -49,9 +49,10 @@ pub struct FunctionLawId(pub u32);
 
 /// The accessor a role's axis is read through: a GEOMETRY quantity (a length, area, or volume, the body's SHAPE)
 /// reads the geometry store, everything else (a stress, pressure, modulus, index, the body's MATERIAL nature) the
-/// material store. The class is a fixed property of the semantic ROLE ([`accessor_class`]), part of the kernel
-/// mechanism exactly as the role NAME is, so it is not world-authorable data and cannot be authored into a
-/// contradiction (the gate's Slice-C condition 2, the value-authoring line). Both the grade and the delivery kernels
+/// material store. The class is DERIVED from the role's declared dimension ([`role_dimension`]) through
+/// [`accessor_class`], part of the kernel mechanism exactly as the role NAME is, so it is not world-authorable data
+/// and cannot contradict that dimension (the gate's Slice-C condition 2, the value-authoring line). Both the grade
+/// and the delivery kernels
 /// read a role through the ONE shared [`AxisBinding::read`], which dispatches on this class, so a role is read
 /// through the same accessor on both paths and cannot be classed geometry on one and material on the other. The
 /// physics check is [`AxisBinding::validate_dimensions`]: it fails loud if a role's bound axis has a dimension
@@ -80,22 +81,48 @@ impl AccessorClass {
     }
 }
 
-/// The accessor class of a semantic ROLE, declared ONCE here for every kernel role rather than restated in each
-/// kernel body: a shape role (a contact area, a cross-section, a stroke or arm length, a section modulus) reads the
-/// geometry accessor, and everything else (a strength, hardness, yield, shear or compressive strength, modulus,
-/// refractive index, driving pressure) the material accessor. This is fixed mechanism, like the role NAME, so a
-/// world cannot author it into a contradiction; a new geometry role added to a future kernel is listed here, and
-/// [`AxisBinding::validate_dimensions`] (run at the world-build against its registry, and over the default bindings
-/// in the compose test suite) catches any role whose class disagrees with its bound axis's dimension. Deriving the
-/// class purely from a world's declared axis dimension, so no fixed list is needed at all, is the north-star
-/// follow-on where the registry dependence earns its place.
+/// The expected physical DIMENSION of a semantic ROLE, declared ONCE here for every kernel role: the KIND of
+/// quantity the role reads (a contact area or cross-section is an AREA, a stroke or arm length a LENGTH, a section
+/// modulus a VOLUME, a yield, shear, compressive, or actuating strength, an indentation hardness, an elastic modulus,
+/// or a driving pressure a PRESSURE, a refractive index DIMENSIONLESS), read from the role's own kernel physics
+/// rather than chosen as a number. This is the role-intent datum, fixed mechanism like the role NAME, so a world
+/// cannot author it into a contradiction. `None` is an undeclared role (a world-added binding entry no kernel yet
+/// reads): it carries no intent to check, so it reads through the material accessor by the absence convention and is
+/// skipped by [`AxisBinding::validate_dimensions`]. A new kernel role declares its kind here alongside the role in
+/// the kernel's math. Deriving the kind purely from a world's declared axis dimension at read time, so no role-intent
+/// table is needed at all, is the north-star follow-on that re-introduces the read-time registry dependence and still
+/// cannot recover the irreducible role-to-axis mapping.
+pub fn role_dimension(role: &str) -> Option<Dimension> {
+    let dim = match role {
+        "contact_area" | "cross_section" => Dimension::AREA,
+        "stroke" | "arm_length" => Dimension::LENGTH,
+        "section_modulus" => Dimension::VOLUME,
+        "actuating_strength"
+        | "driving_pressure"
+        | "yield_strength"
+        | "shear_strength"
+        | "compressive_strength"
+        | "indentation_hardness"
+        | "elastic_modulus" => Dimension::PRESSURE,
+        "refractive_index" => Dimension::DIMENSIONLESS,
+        _ => return None,
+    };
+    Some(dim)
+}
+
+/// The accessor class of a semantic ROLE, DERIVED from its declared expected dimension ([`role_dimension`]) rather
+/// than a hand-typed list: a shape kind (length, area, volume) reads the geometry accessor, every other kind (a
+/// stress, pressure, modulus, dimensionless index) the material accessor. Because the class is a function of the
+/// role's declared dimension, it cannot contradict that dimension, and a world cannot author it into a contradiction
+/// (the role's kind is fixed mechanism). An undeclared role (`role_dimension` is `None`) reads through the material
+/// accessor, the absence convention (matching the pre-derivation default). The physics check
+/// [`AxisBinding::validate_dimensions`] compares the role's declared dimension EXACTLY against its bound axis's actual
+/// dimension, run at the world-build against its registry and over the default bindings in the compose test suite,
+/// never an always-on runtime net.
 pub fn accessor_class(role: &str) -> AccessorClass {
-    match role {
-        "contact_area" | "cross_section" | "stroke" | "arm_length" | "section_modulus" => {
-            AccessorClass::Geometry
-        }
-        _ => AccessorClass::Material,
-    }
+    role_dimension(role)
+        .map(AccessorClass::from_dimension)
+        .unwrap_or(AccessorClass::Material)
 }
 
 /// A DATA-DEFINED axis binding: a map from a kernel's ROLE NAME (the semantic slot a law reads, `contact_area`,
@@ -1030,6 +1057,53 @@ mod tests {
             pressure: dec("150000"),
             depth: dec("100"),
         }
+    }
+
+    #[test]
+    fn role_dimension_declares_each_role_and_the_accessor_class_derives_from_it() {
+        // The role-intent datum: each kernel role declares its expected physical KIND, read from the role's own
+        // physics (a contact area is an AREA, a yield strength a PRESSURE), and the geo-vs-material accessor class
+        // DERIVES from that declaration rather than a hand-typed list. This proves the derivation is byte-neutral: for
+        // every one of the 13 roles the derived class equals the pre-arc class (Geometry for the shape kinds, Material
+        // for the rest), so `AxisBinding::read` dispatches identically.
+        let geometry = [
+            ("contact_area", Dimension::AREA),
+            ("cross_section", Dimension::AREA),
+            ("stroke", Dimension::LENGTH),
+            ("arm_length", Dimension::LENGTH),
+            ("section_modulus", Dimension::VOLUME),
+        ];
+        for (role, dim) in geometry {
+            assert_eq!(role_dimension(role), Some(dim), "{role} declares its kind");
+            assert_eq!(
+                accessor_class(role),
+                AccessorClass::Geometry,
+                "{role} derives to the geometry accessor"
+            );
+        }
+        let material = [
+            ("actuating_strength", Dimension::PRESSURE),
+            ("driving_pressure", Dimension::PRESSURE),
+            ("yield_strength", Dimension::PRESSURE),
+            ("shear_strength", Dimension::PRESSURE),
+            ("compressive_strength", Dimension::PRESSURE),
+            ("indentation_hardness", Dimension::PRESSURE),
+            ("elastic_modulus", Dimension::PRESSURE),
+            ("refractive_index", Dimension::DIMENSIONLESS),
+        ];
+        for (role, dim) in material {
+            assert_eq!(role_dimension(role), Some(dim), "{role} declares its kind");
+            assert_eq!(
+                accessor_class(role),
+                AccessorClass::Material,
+                "{role} derives to the material accessor"
+            );
+        }
+
+        // An undeclared role (no kernel reads it) carries no intent: `role_dimension` is `None` and the class falls
+        // to Material, the absence convention that matches the pre-derivation `_ => Material` default.
+        assert_eq!(role_dimension("not_a_role"), None);
+        assert_eq!(accessor_class("not_a_role"), AccessorClass::Material);
     }
 
     #[test]
