@@ -67,6 +67,7 @@ use crate::homeostasis::{
     HomeostaticRegistry,
 };
 use crate::material_percept::MaterialPerceptRegistry;
+use crate::perceivable_feature::PerceivableFeatureRegistry;
 use crate::percept::PerceptRegistry;
 
 /// Minus one, the low clamp of the activation.
@@ -198,8 +199,22 @@ pub struct ControllerLayout {
     /// so whether a being approaches or avoids a perceived emitter emerges from selection (Principle 9): a
     /// negative weight inverts the direction, so approach-to-a-harm (a parasite, a scavenger) is reachable.
     n_being: usize,
+    /// The width of the being-FEATURE input block (creature-selection step 2b, the percept kind-feature floor
+    /// arc): two components (a toward-direction `dx, dy`) per discrimination bucket per perceivable-feature
+    /// channel ([`crate::perceivable_feature::PerceivableFeatureRegistry::layout_width`]), else zero. Each
+    /// `(channel, bucket)` pair carries the unit direction toward the perceived emitters whose optical feature
+    /// on that channel falls in that bucket, so a perceiver's heritable freely-signed weight on the pair can
+    /// move it toward or away from that bucket's emitters. Zero yields an input vector, weight count, and genome
+    /// expression identical to a world without it, so it is OPT-IN and hash-neutral by default, the same
+    /// discipline as the earlier blocks. The block sits AFTER the being block and before the bias, so every
+    /// earlier base and the bias-as-last convention hold unchanged. A founder expresses zero for the
+    /// being-feature weights, so a feature moves no behaviour until selection lifts a weight off zero: whether a
+    /// perceiver flees or approaches the emitters in a feature-bucket EMERGES (Principle 9). Keys on the
+    /// emitter's own surface optical datum discriminated by the perceiver's own resolution, never a species,
+    /// kind, or emitter-kind label.
+    n_being_feature: usize,
     /// The number of inputs (`INPUTS_PER_AXIS * axes + n_features + n_appetitive + n_material + n_attraction +
-    /// n_conviction + n_being + 1` for the bias).
+    /// n_conviction + n_being + n_being_feature + 1` for the bias).
     n_in: usize,
     /// The number of outputs (the sum of the affordances' slot counts).
     n_out: usize,
@@ -385,6 +400,46 @@ impl ControllerLayout {
         being: bool,
         hidden: usize,
     ) -> ControllerLayout {
+        Self::with_percepts_appetitive_material_attraction_conviction_and_being_features(
+            homeo,
+            afford,
+            percept,
+            appetitive,
+            material,
+            attraction,
+            conviction,
+            being,
+            &PerceivableFeatureRegistry::empty(),
+            hidden,
+        )
+    }
+
+    /// As [`with_percepts_appetitive_material_attraction_and_conviction`], plus the being-FEATURE input block
+    /// (creature-selection step 2b, the percept kind-feature floor arc): the discrimination-bucket toward
+    /// directions of the emitter optical features a world's perceivers can sense on a being-signal beyond its
+    /// strength scalar. The block sits AFTER the being block and before the bias, so every earlier base and the
+    /// bias-as-last convention hold unchanged. Its width is [`PerceivableFeatureRegistry::layout_width`] (two
+    /// slots, a `(dx, dy)` toward-direction pair, per discrimination bucket per channel), so an EMPTY registry
+    /// yields exactly [`with_percepts_appetitive_material_attraction_and_conviction`]'s layout (`n_being_feature`
+    /// zero), an input vector, weight count, and genome expression identical to a world without it: the
+    /// perceivable feature is opt-in and hash-neutral by default, the same discipline as the earlier blocks. A
+    /// founder expresses zero for the being-feature weights, and each per-bucket weight is FREELY SIGNED, so
+    /// whether a perceiver moves toward or away from the emitters in a given feature-bucket emerges from
+    /// selection (Principle 9): fleeing one emitter kind and approaching another becomes reachable once a
+    /// strength-independent optical feature separates them, which strength alone cannot.
+    #[allow(clippy::too_many_arguments)]
+    pub fn with_percepts_appetitive_material_attraction_conviction_and_being_features(
+        homeo: &HomeostaticRegistry,
+        afford: &AffordanceRegistry,
+        percept: &PerceptRegistry,
+        appetitive: bool,
+        material: &MaterialPerceptRegistry,
+        attraction: bool,
+        conviction: &ConvictionPerceptRegistry,
+        being: bool,
+        being_features: &PerceivableFeatureRegistry,
+        hidden: usize,
+    ) -> ControllerLayout {
         let axes: Vec<HomeostaticAxisId> = homeo.axes.iter().map(|a| a.id).collect();
         let n_features = percept.len();
         let n_material = material.len();
@@ -396,6 +451,9 @@ impl ControllerLayout {
         // The being-directed block is four components (the being-avoidance direction dx, dy and the
         // being-attraction direction dx, dy), or none when the world does not enable the being-percept.
         let n_being = if being { 4 } else { 0 };
+        // The being-FEATURE block: two components (a toward-direction dx, dy) per discrimination bucket per
+        // perceivable-feature channel, or none when the world declares no perceivable features (step 2b).
+        let n_being_feature = being_features.layout_width();
         let mut defs: Vec<&crate::homeostasis::AffordanceDef> = afford.affordances.iter().collect();
         defs.sort_by_key(|d| d.id);
         // One appetitive channel per affordance (aligned to the output slots below), or none when the
@@ -408,6 +466,7 @@ impl ControllerLayout {
             + n_attraction
             + n_conviction
             + n_being
+            + n_being_feature
             + 1;
         let mut outputs = Vec::with_capacity(defs.len());
         let mut base = 0usize;
@@ -429,6 +488,7 @@ impl ControllerLayout {
             n_attraction,
             n_conviction,
             n_being,
+            n_being_feature,
             n_in,
             n_out,
             hidden,
@@ -566,6 +626,20 @@ impl ControllerLayout {
             + self.n_material
             + self.n_attraction
             + self.n_conviction
+    }
+
+    /// The width of the being-FEATURE input block (two per discrimination bucket per perceivable-feature
+    /// channel, else zero; creature-selection step 2b).
+    pub fn n_being_feature(&self) -> usize {
+        self.n_being_feature
+    }
+
+    /// The input-vector index where the being-FEATURE block begins: after the per-axis blocks and the feature,
+    /// appetitive, material, attraction, conviction, and being blocks, before the bias. A caller writing the
+    /// being-feature directions reads this so it never hardcodes the block's position, which the earlier block
+    /// widths set.
+    pub fn being_feature_input_base(&self) -> usize {
+        self.being_input_base() + self.n_being
     }
 
     /// The affordance ids this layout's outputs (and, when enabled, its appetitive channels) are indexed by,
@@ -747,6 +821,44 @@ impl ControllerLayout {
         conviction: &[Fixed],
         being: &[Fixed],
     ) -> Vec<Fixed> {
+        self.build_input_full_with_conviction_and_being_features(
+            homeo,
+            here,
+            source_dirs,
+            signed,
+            features,
+            appetitive,
+            material,
+            attraction,
+            conviction,
+            being,
+            &[],
+        )
+    }
+
+    /// As [`build_input_full_with_conviction`], plus the being-FEATURE block (creature-selection step 2b): each
+    /// `(channel, bucket)` toward-direction written into the being-feature block ([`being_feature_input_base`]
+    /// onward, in the registry's channel-then-bucket order). `being_features` is the runner's per-perceiver
+    /// discrimination of the perceived emitters' optical features into buckets, each bucket carrying the unit
+    /// toward-direction over its emitters; a shorter slice leaves the unfilled slots zero (clean degrade), and
+    /// an empty slice with `n_being_feature` zero is byte-identical to [`build_input_full_with_conviction`]
+    /// before the being-feature block existed, so an opted-out world is unchanged. A pure read; the controller,
+    /// not this builder, decides how each feature-bucket direction moves behaviour (Principle 9).
+    #[allow(clippy::too_many_arguments)]
+    pub fn build_input_full_with_conviction_and_being_features(
+        &self,
+        homeo: &Homeostasis,
+        here: &BTreeSet<HomeostaticAxisId>,
+        source_dirs: &BTreeMap<HomeostaticAxisId, (Fixed, Fixed)>,
+        signed: &BTreeMap<HomeostaticAxisId, Fixed>,
+        features: &[Fixed],
+        appetitive: &[Fixed],
+        material: &[Fixed],
+        attraction: &[Fixed],
+        conviction: &[Fixed],
+        being: &[Fixed],
+        being_features: &[Fixed],
+    ) -> Vec<Fixed> {
         let mut v = vec![Fixed::ZERO; self.n_in];
         for (a, &axis) in self.axes.iter().enumerate() {
             v[INPUTS_PER_AXIS * a] = homeo.level(axis);
@@ -784,6 +896,10 @@ impl ControllerLayout {
         let bbase = self.being_input_base();
         for (k, &b) in being.iter().enumerate().take(self.n_being) {
             v[bbase + k] = b;
+        }
+        let bfbase = self.being_feature_input_base();
+        for (k, &bf) in being_features.iter().enumerate().take(self.n_being_feature) {
+            v[bfbase + k] = bf;
         }
         v[self.n_in - 1] = Fixed::ONE; // the bias input, always the last slot
         v
@@ -1062,6 +1178,60 @@ impl Controller {
     /// expresses the pre-adapted controller (`crate::genome::append_controller_block`).
     pub fn weights(&self) -> &[Fixed] {
         &self.weights
+    }
+
+    /// A copy of this controller with each weight `k` offset by `deviation(k)` (creature-selection step 2,
+    /// the mint-time and inheritance perturbation). The caller supplies a DETERMINISTIC per-weight deviation
+    /// (a seed-keyed bounded zero-mean draw), so the result is a pure function of the parent and the draw and
+    /// replays bit for bit; the offset is saturating so it can never overflow the weight.
+    pub fn perturbed(&self, mut deviation: impl FnMut(usize) -> Fixed) -> Controller {
+        let weights = self
+            .weights
+            .iter()
+            .enumerate()
+            .map(|(k, w)| Fixed::from_bits(w.to_bits().saturating_add(deviation(k).to_bits())))
+            .collect();
+        Controller {
+            n_in: self.n_in,
+            n_out: self.n_out,
+            hidden: self.hidden,
+            weights,
+        }
+    }
+
+    /// The MIDPARENT blend of two controllers of the same schema (creature-selection step 2, the offspring
+    /// controller under the reproduction beat): each weight is the average of the two parents' weights plus a
+    /// deterministic per-weight `deviation(k)`. The general inheritance primitive, no reading of a trait, kind,
+    /// or relatedness, so an offspring resembles both parents and drifts by the bounded perturbation, the sign
+    /// of any weight emerging from which lineages out-reproduce (Principle 8). Both controllers are minted
+    /// against the shared embodiment layout, so their schemas always match; a mismatch is a bug. Saturating;
+    /// a pure function of the parents and the draw.
+    pub fn midparent(
+        &self,
+        other: &Controller,
+        mut deviation: impl FnMut(usize) -> Fixed,
+    ) -> Controller {
+        assert_eq!(
+            (self.n_in, self.n_out, self.hidden),
+            (other.n_in, other.n_out, other.hidden),
+            "midparent controllers must share the schema"
+        );
+        let weights = self
+            .weights
+            .iter()
+            .zip(other.weights.iter())
+            .enumerate()
+            .map(|(k, (a, b))| {
+                let avg = a.to_bits().saturating_add(b.to_bits()) / 2;
+                Fixed::from_bits(avg.saturating_add(deviation(k).to_bits()))
+            })
+            .collect();
+        Controller {
+            n_in: self.n_in,
+            n_out: self.n_out,
+            hidden: self.hidden,
+            weights,
+        }
     }
 
     /// A fresh zero hidden state of the right width (empty for a reaction norm), the state a being
@@ -1696,6 +1866,126 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn an_empty_being_feature_registry_leaves_the_layout_byte_identical() {
+        // The byte-neutral opt-in guarantee (step 2b): a layout built with an EMPTY perceivable-feature
+        // registry is bit-for-bit the same shape (inputs and weights) as the plain being layout, so a world
+        // that declares no perceivable features grows the controller not at all.
+        use crate::perceivable_feature::PerceivableFeatureRegistry;
+        let homeo_reg = HomeostaticRegistry::dev_grazer();
+        let afford = AffordanceRegistry::dev_default();
+        let being = ControllerLayout::with_percepts_and_being(
+            &homeo_reg,
+            &afford,
+            &PerceptRegistry::empty(),
+            true,
+            0,
+        );
+        let with_empty =
+            ControllerLayout::with_percepts_appetitive_material_attraction_conviction_and_being_features(
+                &homeo_reg,
+                &afford,
+                &PerceptRegistry::empty(),
+                false,
+                &MaterialPerceptRegistry::empty(),
+                false,
+                &ConvictionPerceptRegistry::empty(),
+                true,
+                &PerceivableFeatureRegistry::empty(),
+                0,
+            );
+        assert_eq!(with_empty.n_being_feature(), 0);
+        assert_eq!(with_empty.n_in(), being.n_in());
+        assert_eq!(with_empty.weight_count(), being.weight_count());
+    }
+
+    #[test]
+    fn a_being_feature_bucket_weight_steers_the_move_heading_by_its_sign() {
+        // Step 2b, the per-bucket heritable-sign response: an armed perceivable-feature channel adds, per
+        // discrimination bucket, a (dx, dy) toward-direction slot; a heritable FREELY-SIGNED weight on a
+        // bucket's slots turns the perceiver toward (positive) or away (negative) from that bucket's emitters,
+        // so fleeing one feature-bucket and approaching another emerges from selection (Principle 9). This
+        // proves the block is placed after the being block and that a per-bucket weight moves the heading.
+        use crate::perceivable_feature::PerceivableFeatureRegistry;
+        let homeo_reg = HomeostaticRegistry::dev_grazer();
+        // One channel, two buckets: the block adds 2 buckets * 2 (dx, dy) = 4 slots after the being block.
+        let features = PerceivableFeatureRegistry::from_channels(&[(
+            "opt.emissivity",
+            2,
+            Fixed::from_ratio(1, 2),
+        )]);
+        let l =
+            ControllerLayout::with_percepts_appetitive_material_attraction_conviction_and_being_features(
+                &homeo_reg,
+                &AffordanceRegistry::dev_default(),
+                &PerceptRegistry::empty(),
+                false,
+                &MaterialPerceptRegistry::empty(),
+                false,
+                &ConvictionPerceptRegistry::empty(),
+                true,
+                &features,
+                0,
+            );
+        // The being-feature block begins right after the four-slot being block, and grows n_in by 4.
+        assert_eq!(l.n_being_feature(), 4);
+        assert_eq!(
+            l.being_feature_input_base(),
+            l.being_input_base() + l.n_being()
+        );
+        let n_in = l.n_in();
+        let bfbase = l.being_feature_input_base();
+        // Steer the MOVE heading (outputs 1, 2) from BUCKET 1's (dx, dy) pair (slots bfbase+2, bfbase+3).
+        let build = |gain: Fixed| -> Controller {
+            let mut w = vec![Fixed::ZERO; l.weight_count()];
+            w[n_in - 1] = Fixed::ONE; // MOVE activation from the bias
+            w[n_in + (bfbase + 2)] = gain; // MOVE heading dx follows bucket 1's toward-dx
+            w[2 * n_in + (bfbase + 3)] = gain; // MOVE heading dy follows bucket 1's toward-dy
+            Controller::from_weights(l.n_in(), l.n_out(), l.hidden(), w)
+        };
+        let homeo = Homeostasis::from_mass(&homeo_reg, Fixed::ONE);
+        // An emitter whose feature falls in BUCKET 1 lies due EAST: bucket 1's toward pair points east. Bucket
+        // 0 (slots bfbase+0, bfbase+1) is empty. The being block (bbase..bbase+4) is also empty here.
+        let mut being_features = vec![Fixed::ZERO; l.n_being_feature()];
+        being_features[2] = Fixed::ONE; // bucket 1 dx = +1 (east)
+        being_features[3] = Fixed::ZERO; // bucket 1 dy = 0
+        let input = l.build_input_full_with_conviction_and_being_features(
+            &homeo,
+            &BTreeSet::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],
+            &[Fixed::ZERO, Fixed::ZERO, Fixed::ZERO, Fixed::ZERO],
+            &being_features,
+        );
+        // A POSITIVE weight on bucket 1 steers TOWARD the east emitter (approach).
+        let (out_pos, _) = build(Fixed::from_int(4)).evaluate(&input, &[]);
+        let (hx_pos, _) = l
+            .decide(&out_pos, &[MOVE, INGEST])
+            .expect("affords MOVE")
+            .heading
+            .expect("MOVE carries a heading");
+        assert!(
+            hx_pos > Fixed::ZERO,
+            "a positive bucket-1 weight steers TOWARD the emitter in that feature-bucket"
+        );
+        // A NEGATIVE weight on the SAME bucket steers AWAY (west, fleeing): only the sign differs.
+        let (out_neg, _) = build(Fixed::from_int(-4)).evaluate(&input, &[]);
+        let (hx_neg, _) = l
+            .decide(&out_neg, &[MOVE, INGEST])
+            .expect("affords MOVE")
+            .heading
+            .expect("MOVE carries a heading");
+        assert!(
+            hx_neg < Fixed::ZERO,
+            "a negative bucket-1 weight steers AWAY (fleeing) from the same feature-bucket emitter"
+        );
     }
 
     #[test]

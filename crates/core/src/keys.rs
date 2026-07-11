@@ -178,6 +178,14 @@ impl Phase {
     /// on a counter: exploration tries the untried, deliberation exploits the best-believed, and a being's
     /// two heritable drives are drawn independently so selection can tune each.
     pub const DELIBERATE: Phase = Phase(0x1E);
+    /// A creature reproduction/behaviour-selection draw (creature-selection step 2): the bounded, mean-zero
+    /// per-weight controller perturbation applied when a creature is MINTED (the bootstrap variance seed that
+    /// breaks the founder-zero deadlock) and when an OFFSPRING is bred (the inheritance mutation on the
+    /// midparent blend). Keyed on the being's id (a creature id, disjoint from every founder id) and the tick,
+    /// with the weight index as the per-draw counter, so each creature's per-weight deviations are distinct and
+    /// the whole substrate replays bit for bit. Distinct from DEVELOPMENT (the founder expression offset) and
+    /// MATE_CHOICE so the creature draws never collide with a founder's on a counter.
+    pub const CREATURE_REPRO: Phase = Phase(0x1F);
 }
 
 /// The sentinel for a coordinate that does not apply to a draw (the degrade rule). An

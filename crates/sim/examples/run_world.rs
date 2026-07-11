@@ -67,7 +67,7 @@ use civsim_sim::material::{MaterialField, MatterCycleCalib, StrikeParams};
 use civsim_sim::percept::PerceptRegistry;
 use civsim_sim::physiology::{ENERGY_DENSITY, SALINITY};
 use civsim_sim::planning::plan_toward;
-use civsim_sim::runner::{ReproductiveVigorCalib, Runner};
+use civsim_sim::runner::{CreatureSelectionParams, ReproductiveVigorCalib, Runner};
 use civsim_sim::scenario::{Scenario, ScenarioResolution};
 use civsim_sim::sensorium::SenseChannelId;
 use civsim_sim::tom::AccessChannelRegistry;
@@ -1195,6 +1195,61 @@ fn manifest() -> CalibrationManifest {
     CalibrationManifest::load(path).expect("the dev-fixtures profile loads")
 }
 
+/// The MIRROR profile: a faithful copy of dev-fixtures with ONLY the Earth-cited metabolic-and-tissue
+/// ENERGY SCALE changed (kleiber 3.4, body_mass 70, Atwater tissue energy densities), loaded ONLY on the
+/// Mirror/living path (the same per-world scoping [`civsim_sim::environ::DiurnalSky::mirror`] uses for the
+/// tilt and insolation). Every non-Mirror scenario loads [`manifest`] (dev-fixtures), so the four canonical
+/// pins never read these values and hold bit-identical by construction. The energy scale is the biosphere-
+/// balance calibration: it fixes the founders' starvation collapse because their reserve joules, on the real
+/// Atwater scale, are deep relative to their real Kleiber power. INTERIM, owner-gated (calibration/profiles/
+/// mirror.toml carries the basis and Earth citation for each value).
+fn mirror_manifest() -> CalibrationManifest {
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../calibration/profiles/mirror.toml"
+    );
+    CalibrationManifest::load(path).expect("the mirror profile loads")
+}
+
+/// The Mirror organ registry: the dev-default organs with the three energy-bearing tissues'
+/// `bio.energy_density` overridden from the Mirror manifest's Earth-cited Atwater values (adipose,
+/// glycogen, lean), read fail-loud (Principle 11, never fabricated inline). The registry mechanism and the
+/// organ KINDS are unchanged (dev_default); only the per-tissue energy-density VALUE moves to the real kJ/g
+/// scale. Body-plan sampling and biosphere survival scoring key on organ KIND ids, never on
+/// `bio.energy_density` (verified: [`civsim_sim::anatomy::sample_body_plan`] picks organ kinds, the
+/// biome-fit closure reads niches), so swapping this registry onto the generated living world changes ONLY
+/// the food-content and reserve-energy read-out, never which species survive. Water-store (energy density
+/// zero) and muscle (no energy tissue) are unchanged; the fantasy mana-sac is absent from grounded Mirror.
+fn mirror_organs(manifest: &CalibrationManifest) -> BodyPlanRegistry {
+    let adipose = manifest
+        .require_fixed("biology.tissue_energy_density.adipose")
+        .expect("mirror profile carries the adipose energy density");
+    let glycogen = manifest
+        .require_fixed("biology.tissue_energy_density.glycogen")
+        .expect("mirror profile carries the glycogen energy density");
+    let lean = manifest
+        .require_fixed("biology.tissue_energy_density.lean")
+        .expect("mirror profile carries the lean energy density");
+    let mut reg = BodyPlanRegistry::dev_default();
+    for organ in reg.organs.iter_mut() {
+        // Key on the organ NAME (a legibility handle) so the mapping is explicit and robust to id order;
+        // set only the energy-density component, leaving water fraction and every other axis as dev_default.
+        let ed = match organ.name.as_str() {
+            "fat-body" => Some(adipose),
+            "glycogen-store" => Some(glycogen),
+            "generalist-viscera" => Some(lean),
+            _ => None, // water-store (0), muscle (none), mana-sac (fantasy, absent from Mirror): unchanged
+        };
+        if let Some(value) = ed {
+            organ
+                .composition
+                .components
+                .insert(ENERGY_DENSITY.to_string(), value);
+        }
+    }
+    reg
+}
+
 fn channels() -> AccessChannelRegistry {
     AccessChannelRegistry::from_toml_str(
         "[[channels]]\nid = 1\nname = \"witnessed\"\nmargin_steps = 1\n\
@@ -2017,7 +2072,16 @@ fn divergence_comparison(w: &World, bands: &[Band]) -> Option<String> {
 
 fn main() {
     let cfg = parse_config();
-    let manifest = manifest();
+    // The Mirror/living path loads the Earth-calibrated ENERGY SCALE (mirror.toml: kleiber, body_mass, and
+    // the Atwater tissue energy densities), the same per-world scoping DiurnalSky::mirror uses for the tilt;
+    // every other scenario loads the dev-fixtures placeholders, so the four canonical pins are unchanged by
+    // construction. This is the biosphere-balance calibration, NOT byte-neutral for `living` (it fixes the
+    // founders' starvation): the living run's state_hash is expected to move.
+    let manifest = if cfg.living {
+        mirror_manifest()
+    } else {
+        manifest()
+    };
     let channels = channels();
     // Every non-living scenario arms being-percept (the keystone live wire), matched by dawn_layout's being
     // block; living keeps its separate recurrent no-percept layout and does not arm it.
@@ -2046,6 +2110,17 @@ fn main() {
     let map = TileMap::generate(cfg.seed, topo, &structure.biomes, &structure.worldgen);
 
     let mut peoples = assemble_peoples(&cfg);
+    // The Mirror/living founders carry the Earth energy scale: override their organ registry's tissue
+    // energy densities to the Atwater values (mirror.toml, read fail-loud). This scales the founders' reserve
+    // capacity (energy joules stored) and their derived Kleiber drain onto the real scale together, which is
+    // what deepens the reserve relative to the metabolic power and eliminates the placeholder-scale
+    // starvation. Living-scoped, so the four canonical pins keep the dev_default organs untouched.
+    if cfg.living {
+        let organs = mirror_organs(&manifest);
+        if let Some(emb) = peoples.embodiment.as_mut() {
+            emb.organs = organs;
+        }
+    }
     // Grow the living biosphere sized to the run grid and seed it into the peoples (the biosphere-into-run
     // arc, `--scenario full` and `--scenario living`). genesis is a pure function of the seed and builds the
     // SAME map internally (TileMap::generate with cfg.seed over the same grid and dev-default biomes/
@@ -2053,7 +2128,7 @@ fn main() {
     // occupants seed the food field in build_dawn_runner, so the founders forage over real located plants,
     // not a uniform number.
     if cfg.full || cfg.living {
-        let living = genesis(
+        let mut living = genesis(
             cfg.seed,
             &GenesisParams {
                 width: gw,
@@ -2065,6 +2140,16 @@ fn main() {
             &civsim_sim::environ::AbioticSourceRegistry::earth_dev(),
             None,
         );
+        // Mirror/living ONLY: swap the biosphere's body-plan registry to the Earth-scaled organs, so the
+        // producers' standing food carries its real Atwater energy content (the intake side, matched to the
+        // founders' Earth-scaled reserve). This is safe to apply AFTER genesis because the surviving species
+        // and their organ kinds were already fixed by the biome-fit closure, which never reads
+        // bio.energy_density (only organ KIND ids); the swap changes only the composition-vector read-out
+        // (producer food and the living hash), never which species live. `full` keeps dev_default (untouched
+        // pin), so this is gated on cfg.living alone.
+        if cfg.living {
+            living.registry = mirror_organs(&manifest);
+        }
         let producers = living.producer_biomass(Fixed::ONE);
         println!(
             "  BIOSPHERE SEEDED (opt-in): {} surviving species across {} regions, {} located occupants, of \
@@ -2299,6 +2384,27 @@ fn main() {
                         let ctrl_genes = controller_gene_set(&layout);
                         let ctrl_pool = GenePool::new(SchemeId(0), cfg.pool_ne, freqs)
                             .with_additive(effects, GaussApprox::SumOfUniforms { k: 12 });
+                        // Arm the in-run creature reproduction and behaviour-selection substrate (step 2, fork
+                        // 2a) BEFORE spawning creatures, so each creature is MINTED with the bounded controller
+                        // perturbation (the bootstrap variance seed that breaks the founder-zero deadlock), and
+                        // co-located reserve-eligible creatures then breed each cadence, so the WHOLE creature
+                        // controller is selected in the populated world (the SOLO loci, forage and metabolism,
+                        // become selectable in-run; the being-directed flee/hunt weights stay latent until the 2b
+                        // percept-feature floor arc, the frame-blind's blocking dependency). Labelled DEV FIXTURES
+                        // standing up the reserved `creature_selection.*` slots: mint spread 0.05 lifts a
+                        // founder-zero weight off zero without saturating the activation clamp of one; eligibility
+                        // reserve 0.5 marks a well-fed forager; offspring spread 0.02 is set equal to
+                        // `reproduction.mutation_spread`. Behaviour-changing: it re-pins `full --creatures`.
+                        if let Some(emb) = runner.embodiment_mut() {
+                            emb.set_creature_selection(Some(CreatureSelectionParams {
+                                mint_perturbation_spread: Fixed::from_decimal_str("0.05")
+                                    .expect("mint perturbation spread literal"),
+                                reproduction_eligibility_reserve: Fixed::from_decimal_str("0.5")
+                                    .expect("reproduction eligibility literal"),
+                                offspring_mutation_spread: Fixed::from_decimal_str("0.02")
+                                    .expect("offspring mutation spread literal"),
+                            }));
+                        }
                         let n = runner.spawn_creatures(living, &ctrl_genes, &ctrl_pool, 2);
                         // Creatures-react arc (mechanism B3, the LIVE WIRE): arm the mind-less creature
                         // being-directed percept, so each spawned creature perceives the beings whose signal

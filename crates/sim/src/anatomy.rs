@@ -332,48 +332,113 @@ impl BodyPlanRegistry {
             // the per-covering-to-tissue ANALOGUE MAPPING (which tissue a covering resembles), the owner's to
             // confirm; the magnitude is the analogue tissue's own floor value. Byte-neutral: nothing reads it
             // until the coarse wound branch, armed only in `full --creatures`.
+            // Each covering also carries its per-band SPECTRAL emissivity (`opt.emissivity.band_0..2`, the chem/
+            // optics floor axes; creature-selection step 2b, the owner-ruled FLEEING carrier): the emissivity the
+            // material radiates at in each thermal-IR band. A real surface is not grey, so its per-band values
+            // differ from its broadband one and, crucially, DIFFER BY MATERIAL: a near-blackbody organic covering
+            // radiates a high, nearly-flat spectrum, while a keratin/mineral covering radiates a lower, band-
+            // structured one. So two beings at the same temperature and the same BROADBAND emissivity (hence the
+            // same total signal strength) still differ in spectral SHAPE when their surface materials differ, a
+            // strength-independent optical feature a perceiver can key a heritable weight on (the sensing
+            // mechanism reads these off the emitter's own surface, `crate::perceivable_feature`). The values are
+            // LABELLED DEV FIXTURES, grounded in real spectral-emissivity data and averaging the broadband 0.95
+            // (so `covering_emissivity` and the radiant term are byte-identical): the organic profile is
+            // (0.95, 0.96, 0.94), nearly flat; the keratin/mineral profile is (0.99, 0.88, 0.98), a mid-band dip.
+            // Each is the covering MATERIAL's own datum (never keyed to a trophic role: the spectral shape is a
+            // property of the material, and any covering-to-kind correlation EMERGES through shared heritable
+            // causes and selection, Principle 8, never an authored kind-separator). The per-band VALUES are
+            // per_world RESERVED-with-basis (calibration/reserved.toml, basis: the material's real spectral
+            // emissivity); the dev fixtures here stand up the demonstration. BYTE-NEUTRALITY holds because the
+            // per-band axes are SEPARATE floor axes that nothing reads until a world arms a perceivable-feature
+            // channel on one, and the broadband `opt.emissivity` (the strength/radiant lever) is left at 0.95
+            // unchanged: the per-band values are chosen to AVERAGE 0.95 for physical consistency (a grey-body
+            // sanity check), NOT because that average is what keeps the run byte-identical. Deriving the broadband
+            // as the spectral integral of the per-band axes (rather than carrying it as an independent axis) is a
+            // floor-consistency follow-on, deferred so the strength channel stays byte-identical this arc.
             coverings: kinds(&[
                 (
                     "bare hide",
                     false,
                     &[],
-                    &[("opt.emissivity", "0.95"), ("mat.fracture_energy", "3")],
+                    &[
+                        ("opt.emissivity", "0.95"),
+                        ("mat.fracture_energy", "3"),
+                        ("opt.emissivity.band_0", "0.95"),
+                        ("opt.emissivity.band_1", "0.96"),
+                        ("opt.emissivity.band_2", "0.94"),
+                    ],
                 ),
                 (
                     "fur",
                     false,
                     &[],
-                    &[("opt.emissivity", "0.95"), ("mat.fracture_energy", "3")],
+                    &[
+                        ("opt.emissivity", "0.95"),
+                        ("mat.fracture_energy", "3"),
+                        ("opt.emissivity.band_0", "0.95"),
+                        ("opt.emissivity.band_1", "0.96"),
+                        ("opt.emissivity.band_2", "0.94"),
+                    ],
                 ),
                 (
                     "feathers",
                     false,
                     &[],
-                    &[("opt.emissivity", "0.95"), ("mat.fracture_energy", "3")],
+                    &[
+                        ("opt.emissivity", "0.95"),
+                        ("mat.fracture_energy", "3"),
+                        ("opt.emissivity.band_0", "0.95"),
+                        ("opt.emissivity.band_1", "0.96"),
+                        ("opt.emissivity.band_2", "0.94"),
+                    ],
                 ),
                 (
                     "scales",
                     false,
                     &[],
-                    &[("opt.emissivity", "0.95"), ("mat.fracture_energy", "3")],
+                    &[
+                        ("opt.emissivity", "0.95"),
+                        ("mat.fracture_energy", "3"),
+                        ("opt.emissivity.band_0", "0.95"),
+                        ("opt.emissivity.band_1", "0.96"),
+                        ("opt.emissivity.band_2", "0.94"),
+                    ],
                 ),
                 (
                     "chitin carapace",
                     false,
                     &[],
-                    &[("opt.emissivity", "0.95"), ("mat.fracture_energy", "8")],
+                    &[
+                        ("opt.emissivity", "0.95"),
+                        ("mat.fracture_energy", "8"),
+                        ("opt.emissivity.band_0", "0.99"),
+                        ("opt.emissivity.band_1", "0.88"),
+                        ("opt.emissivity.band_2", "0.98"),
+                    ],
                 ),
                 (
                     "bony plates",
                     false,
                     &[],
-                    &[("opt.emissivity", "0.95"), ("mat.fracture_energy", "8")],
+                    &[
+                        ("opt.emissivity", "0.95"),
+                        ("mat.fracture_energy", "8"),
+                        ("opt.emissivity.band_0", "0.99"),
+                        ("opt.emissivity.band_1", "0.88"),
+                        ("opt.emissivity.band_2", "0.98"),
+                    ],
                 ),
                 (
                     "shell",
                     false,
                     &[],
-                    &[("opt.emissivity", "0.95"), ("mat.fracture_energy", "8")],
+                    &[
+                        ("opt.emissivity", "0.95"),
+                        ("mat.fracture_energy", "8"),
+                        ("opt.emissivity.band_0", "0.99"),
+                        ("opt.emissivity.band_1", "0.88"),
+                        ("opt.emissivity.band_2", "0.98"),
+                    ],
                 ),
                 // Magical (placeholder mechanical form until the thaumic track derives their function): a soft
                 // ward reads hide, a stone-skin reads bone, so a magically-covered being is still woundable.
@@ -381,19 +446,37 @@ impl BodyPlanRegistry {
                     "mana-ward",
                     true,
                     &[],
-                    &[("opt.emissivity", "0.95"), ("mat.fracture_energy", "3")],
+                    &[
+                        ("opt.emissivity", "0.95"),
+                        ("mat.fracture_energy", "3"),
+                        ("opt.emissivity.band_0", "0.95"),
+                        ("opt.emissivity.band_1", "0.96"),
+                        ("opt.emissivity.band_2", "0.94"),
+                    ],
                 ),
                 (
                     "stone-skin",
                     true,
                     &[],
-                    &[("opt.emissivity", "0.95"), ("mat.fracture_energy", "8")],
+                    &[
+                        ("opt.emissivity", "0.95"),
+                        ("mat.fracture_energy", "8"),
+                        ("opt.emissivity.band_0", "0.99"),
+                        ("opt.emissivity.band_1", "0.88"),
+                        ("opt.emissivity.band_2", "0.98"),
+                    ],
                 ),
                 (
                     "phase-hide",
                     true,
                     &[],
-                    &[("opt.emissivity", "0.95"), ("mat.fracture_energy", "3")],
+                    &[
+                        ("opt.emissivity", "0.95"),
+                        ("mat.fracture_energy", "3"),
+                        ("opt.emissivity.band_0", "0.95"),
+                        ("opt.emissivity.band_1", "0.96"),
+                        ("opt.emissivity.band_2", "0.94"),
+                    ],
                 ),
             ]),
             // Senses carry crude optical material (a refractive index) so an optical sense's SIGHT function

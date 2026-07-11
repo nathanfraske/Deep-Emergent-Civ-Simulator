@@ -115,6 +115,29 @@ def parse_laws_rs(path):
     return kernels
 
 
+def scan_derives(root):
+    """Scan every .rs under crates/ for `// @derives:` markers, the deriving-substrate index.
+
+    A marker sits at a derivation entry point (a subsystem that produces a world quantity from the
+    floor and the situation) and reads `// @derives: <quantity> <- <from these substrate inputs>`.
+    The generator emits every marker with its file:line, so the deriving half of the substrate map
+    (orbital mechanics, hydrology, metabolism, the matter cycle, the time-space anchors: everything
+    OUTSIDE crates/physics) is on the billboard and the stop-gate keeps it never-stale, exactly as
+    it does the authored floor. Returns [(rel, line, text)] sorted by (file, line) for deterministic
+    output. This is the derive-FROM list: an agent about to author a value checks here first, and a
+    quantity found here is a defect to author because a substrate already derives it."""
+    out = []
+    for path in sorted(glob.glob(os.path.join(root, "crates/**/*.rs"), recursive=True)):
+        rel = os.path.relpath(path, root)
+        with open(path, encoding="utf-8") as fh:
+            for i, ln in enumerate(fh):
+                m = re.search(r"//\s*@derives:\s*(.*\S)", ln)
+                if m:
+                    out.append((rel, i + 1, m.group(1).strip()))
+    out.sort(key=lambda t: (t[0], t[1]))
+    return out
+
+
 def render_entries(body, rel, entries):
     for aid, line, unit, measures in entries:
         u = f" [{unit}]" if unit else ""
@@ -133,20 +156,27 @@ def main():
     declared_kernels = {k for _, _, _, lw in parsed for _, _, k in lw if k}
     n_kernels = len(laws_rs)
     n_direct = sum(1 for name, _, _ in laws_rs if name not in declared_kernels)
+    derives = scan_derives(ROOT)
+    n_derives = len(derives)
 
     body = []
-    body.append("# Physics floor registry (the authored places; everything else must derive)")
+    body.append("# Physics substrate registry (what you may author, and what you must derive FROM)")
     body.append("")
     body.append(
-        "This is the canonical, actual-truth map of the physics substrate: every ABSOLUTE physics-floor "
-        "value (the ONLY legitimate authoring places under Principle 9 and the value-authoring line: the "
-        "material and quantity AXES and the universal law constants), AND every floor LAW with its "
-        "file:line so this doubles as the \"where do I look for this law\" index. The derive-vs-author rule "
-        "it makes concrete: a value in the path of world content that is on the axis/constant lists may be "
-        "READ (authoring it there is legitimate); a value that is NOT must DERIVE from the floor and the "
-        "situation, never be authored. Per-world and per-race DATA (a world's orbital period, a race's "
-        "Kleiber normalization, a control set point) is a separate authored category, the \"datum the "
-        "engine models no deeper\"; it lives in calibration/reserved.toml with its own basis and is not "
+        "This is the canonical, actual-truth map of the physics substrate, in two halves. The FLOOR half "
+        "is every ABSOLUTE physics-floor value (the ONLY legitimate authoring places under Principle 9 and "
+        "the value-authoring line: the material and quantity AXES and the universal law constants), plus "
+        "every floor LAW with its file:line so this doubles as the \"where do I look for this law\" index. "
+        "The DERIVING-SUBSTRATE half (the section right below the constants) is every subsystem OUTSIDE the "
+        "physics crate that derives a world quantity from the floor and the situation: orbital mechanics, "
+        "the hydrology cycle, productivity, metabolism, the matter cycle, the time-space anchors. The "
+        "derive-vs-author rule it makes concrete: a value on the axis/constant lists may be READ "
+        "(authoring it there is legitimate); a value that is NOT must DERIVE, and the deriving-substrate "
+        "list is where you look for the substrate that derives it BEFORE you ever author a number. If a "
+        "quantity you were about to author appears in the deriving-substrate list, authoring it is a "
+        "defect. Per-world and per-race DATA (a world's orbital period once it is read from the orbit, a "
+        "race's Kleiber normalization, a control set point) is a separate authored category, the \"datum "
+        "the engine models no deeper\"; it lives in calibration/reserved.toml with its own basis and is not "
         "this floor."
     )
     body.append("")
@@ -161,11 +191,15 @@ def main():
     )
     body.append("")
     body.append(
-        "The lists below are GENERATED from `crates/physics/data/*.toml` and `" + LAWS_RS_REL + "` by "
-        "`scripts/gen_floor_registry.py`, with each entry's `file:line`, so they never drift. Do NOT "
-        "edit this file by hand: change the floor data or add the law kernel, then run the generator (the "
-        "floor-registry stop-gate regenerates and blocks if this file is stale). To ADD a floor axis, or "
-        "a new law kernel, is a deliberate act; the diff to this registry is the record of it."
+        "The lists below are GENERATED from `crates/physics/data/*.toml`, `" + LAWS_RS_REL + "`, and every "
+        "`// @derives:` marker across `crates/**/*.rs` by `scripts/gen_floor_registry.py`, with each "
+        "entry's `file:line`, so they never drift. Do NOT edit this file by hand: change the floor data, "
+        "add the law kernel, or place the `// @derives:` marker at the deriving subsystem, then run the "
+        "generator (the floor-registry stop-gate regenerates and blocks if this file is stale). To ADD a "
+        "floor axis, a law kernel, or a deriving substrate is a deliberate act; the diff to this registry "
+        "is the record of it. When you build a new subsystem that derives a world quantity, mark it with "
+        "`// @derives: <quantity> <- <from these inputs>` so it lands on this billboard and no future "
+        "agent authors from the ether what your subsystem already derives."
     )
     body.append("")
     body.append("## Universal law constants (the authored constant floor)")
@@ -173,6 +207,29 @@ def main():
     for name, value, where in UNIVERSAL:
         body.append(f"- **{name}** = {value} ({where})")
     body.append("")
+    body.append("## Deriving substrates (check here BEFORE authoring: what the world derives, and where)")
+    body.append("")
+    body.append(
+        f"The {n_derives} deriving subsystems below live OUTSIDE the authored floor. Each produces a "
+        "world quantity from the floor and the situation, so its output must never be authored: if the "
+        "value you need appears here, read or extend the subsystem, do not set a number. This is the "
+        "list that stops `1 year = 365 days` from being authored when orbital mechanics already derives "
+        "it. Generated from the `// @derives:` markers in the code; a subsystem missing its marker is a "
+        "gap in this map, so mark every derivation entry point."
+    )
+    body.append("")
+    if derives:
+        cur = None
+        for rel, line, text in derives:
+            if rel != cur:
+                body.append(f"### `{rel}`")
+                body.append("")
+                cur = rel
+            body.append(f"- {text} (`{rel}:{line}`)")
+        body.append("")
+    else:
+        body.append("_No `// @derives:` markers found yet. Place them at each deriving subsystem._")
+        body.append("")
     body.append("## Material and quantity floor axes (the floor proper)")
     body.append("")
     for rel, axes, _, _ in parsed:
@@ -224,7 +281,8 @@ def main():
         fh.write("\n".join(body).rstrip() + "\n")
     print(
         f"wrote {os.path.relpath(OUT, ROOT)}: {n_axes} axes, {n_sub} substances, "
-        f"{n_law} declared laws, {n_kernels} laws.rs kernels ({n_direct} direct)"
+        f"{n_law} declared laws, {n_kernels} laws.rs kernels ({n_direct} direct), "
+        f"{n_derives} deriving substrates"
     )
 
 

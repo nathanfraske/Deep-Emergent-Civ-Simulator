@@ -142,6 +142,7 @@ pub struct ConditionAxis {
 /// A DECOMPOSER-DRIVER row: a data binding of one [`DecomposerKernelId`] to its reserved parameters,
 /// keyed by name (the accepted [`crate::trace::TransformKind`] shape). A registry is a sequence of these
 /// rows, and a cell's decomposition activity is the clamped saturating sum of their contributions.
+// @derives: soil-nutrient recovery (the matter cycle corpse -> decompose -> soil -> productivity) <- local conditions (moisture, oxygen, warmth via a Liebig minimum) x the standing decomposer biomass. Decomposition is NOT universally good and NOT an authored recovery time: it is condition-gated and life-gated, so an anaerobic or decomposer-poor world recovers differently (the axis set is data, not the hardcoded moisture-oxygen-warmth triad).
 #[derive(Clone, Debug)]
 pub struct DecomposerDriver {
     /// The kernel this row's contribution dispatches to.

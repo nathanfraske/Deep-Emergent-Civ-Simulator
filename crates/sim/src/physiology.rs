@@ -127,6 +127,7 @@ const FRAC_MAX: Fixed = Fixed::ONE;
 /// the manifest, never fabricated (Principle 11). The kernels are fixed Rust; these are the owner's to
 /// set. Read on a canonical run through [`MetabolicAnchors::from_manifest`]; the dev fixture is a
 /// labelled test stand-in.
+// @derives: a being's metabolic rate, energy drain, and heat loss <- Kleiber's law P = a * m^(3/4) over the body's own mass (kleiber_a and body_mass_kg_scale are per-race anchors, sigma is a universal constant); the rate is NOT authored, it derives from the being's body. Water loss derives from 1/L_vap (latent heat of vaporization) x metabolic power (physiology water-loss coupling, landed with the Mirror water arc).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct MetabolicAnchors {
     /// The Kleiber coefficient `a` in `P = a * m^(3/4)` (W per kg^(3/4)). RESERVED owner anchor.
@@ -355,6 +356,31 @@ pub fn whole_body_energy_density(plan: &BodyPlan, organs: &BodyPlanRegistry) -> 
     weighted.checked_div(total_dev).unwrap_or(Fixed::ZERO)
 }
 
+/// A being's whole-body water density: the development-weighted average over its organs of their
+/// `bio.water_fraction` composition, the hydration reserve's per-unit water content the water-loss bridge
+/// multiplies by the reserve capacity to reach the stored water mass. The water sibling of
+/// [`whole_body_energy_density`], read on the same floor axis ([`WATER_FRACTION`]); a body with no
+/// water-bearing tissue reads zero. Order-independent.
+pub fn whole_body_water_density(plan: &BodyPlan, organs: &BodyPlanRegistry) -> Fixed {
+    let mut weighted = Fixed::ZERO;
+    let mut total_dev = Fixed::ZERO;
+    for organ in &plan.organs {
+        let d = organs
+            .organ_composition(organ.kind)
+            .map(|comp| comp.component(WATER_FRACTION))
+            .unwrap_or(Fixed::ZERO);
+        if d > Fixed::ZERO {
+            let contribution = organ.development.checked_mul(d).unwrap_or(Fixed::ZERO);
+            weighted = weighted.saturating_add(contribution);
+            total_dev = total_dev.saturating_add(organ.development);
+        }
+    }
+    if total_dev <= Fixed::ZERO {
+        return Fixed::ZERO;
+    }
+    weighted.checked_div(total_dev).unwrap_or(Fixed::ZERO)
+}
+
 /// A being's whole-body COMPOSITION VECTOR: its value on the UNION of every floor axis any of its parts
 /// declares, each a development-weighted mean over the parts that carry it, generalizing
 /// [`whole_body_energy_density`] and [`crate::medium::body_density`] from one named axis to all of them. This
@@ -459,22 +485,36 @@ pub fn body_mass_kg(plan: &BodyPlan, anchors: &MetabolicAnchors) -> Fixed {
         .unwrap_or(Fixed::ZERO)
 }
 
-/// A being's radiating-surface emissivity: the `opt.emissivity` its covering material declares, or ZERO if
-/// the covering carries none (the substrate absence convention, so an alien body whose covering declares no
-/// emissivity radiates nothing rather than converging on a hidden terran default; Principle 9). The radiant
-/// thermoregulatory term reads THIS rather than a global manifest scalar, so the emissivity is the being's
-/// OWN covering-material datum (the chem/optics floor axis [`OPT_EMISSIVITY`]), per-race differentiable and
-/// read from the same covering the corpse deposit carries, not a duplicate constant (derive-vs-author,
-/// Principle 6; the retired `metabolism.surface_emissivity` duplicated this floor axis). The covering is
-/// resolved by `plan.covering.kind` against the registry coverings, the same way
-/// [`whole_body_composition_vector`] does.
-pub fn covering_emissivity(plan: &BodyPlan, registry: &BodyPlanRegistry) -> Fixed {
+/// A being's radiating-surface value on ONE optical floor axis: the value its covering material declares on
+/// the axis `axis` (`opt.emissivity`, `opt.refractive_index`, `opt.albedo`, whatever the chem/optics floor
+/// declares), or ZERO if the covering (or the being) carries none (the substrate absence convention). This is
+/// the general surface-keyed DIRECT read of a SINGLE floor optical axis: it reads exactly one axis, never a
+/// composite of several (a composite would be an authored value in the world-content path, the value-authoring
+/// line; combination across axes belongs to selection over per-axis weights, never a fold here), and it keys on
+/// the being's OWN surface material (its covering, resolved by `plan.covering.kind` against the registry
+/// coverings, the same way [`covering_emissivity`] and [`whole_body_composition_vector`] do), so a being whose
+/// covering declares no value for the axis, or has no covering at all, reads ZERO and simply carries no feature
+/// on that axis rather than a synthesized default (admit-the-alien: the alien is a data row, Principle 9). The
+/// perceivable-feature substrate ([`crate::perceivable_feature::PerceivableFeatureRegistry`]) reads this per
+/// declared channel. Pure and RNG-free.
+pub fn surface_optical_axis(plan: &BodyPlan, registry: &BodyPlanRegistry, axis: &str) -> Fixed {
     registry
         .coverings
         .iter()
         .find(|k| k.id == plan.covering.kind)
-        .map(|cov| cov.mat(OPT_EMISSIVITY))
+        .map(|cov| cov.mat(axis))
         .unwrap_or(Fixed::ZERO)
+}
+
+/// A being's radiating-surface emissivity: its surface value on the `opt.emissivity` optical floor axis
+/// ([`OPT_EMISSIVITY`]), the [`surface_optical_axis`] read on that one axis, or ZERO if the covering carries
+/// none (the substrate absence convention, so an alien body whose covering declares no emissivity radiates
+/// nothing rather than converging on a hidden terran default; Principle 9). The radiant thermoregulatory term
+/// reads THIS rather than a global manifest scalar, so the emissivity is the being's OWN covering-material datum,
+/// per-race differentiable and read from the same covering the corpse deposit carries, not a duplicate constant
+/// (derive-vs-author, Principle 6; the retired `metabolism.surface_emissivity` duplicated this floor axis).
+pub fn covering_emissivity(plan: &BodyPlan, registry: &BodyPlanRegistry) -> Fixed {
+    surface_optical_axis(plan, registry, OPT_EMISSIVITY)
 }
 
 /// The perceptible optical SIGNAL power a being emits from its own body heat (the being-percept keystone,
@@ -720,6 +760,83 @@ pub fn derive_exertion_coupling(
         tick,
         FRAC_MAX,
     )
+}
+
+/// The DERIVED physiological WATER-loss drain, retiring the authored flat `base_drain` on the water axis
+/// (the R-METABOLIZE water sibling of [`base_drain_from`] / [`derive_exertion_coupling`]). Real endotherm
+/// water loss is dominated by RESPIRATORY loss (water vapour in exhaled breath, whose rate is set by
+/// ventilation, itself proportional to metabolic rate) and by EVAPORATIVE thermoregulatory loss (sweating
+/// or panting to shed the thermoregulatory heat load, evaporating water to carry off that heat). Both scale
+/// with metabolic POWER: the respiratory term with the whole resting power (ventilation tracks metabolism),
+/// the evaporative term with the heat that must be shed. So the water loss DERIVES as `water_flux =
+/// water_per_power * metabolic_power`, the resting power `basal + thermoregulatory_heat_loss` for the base
+/// term and the work power for the exertion term, each bridged to a fraction of the hydration reserve by the
+/// SAME size-scaled reserve bridge the energy drain uses (the reserve's stored water is `water_capacity *
+/// body_mass * water_density`). Keyed on the body's own mass, tissue, surface, and medium, never a race id
+/// or a flat rate: a larger or hotter-working body in a drier, hotter medium loses proportionally more
+/// water, from the physics alone (Principle 9). `water_per_power` is the reserved owner anchor (grams of
+/// water lost per joule of metabolism, the respiratory-plus-evaporative water cost of energy), surfaced with
+/// its basis, never fabricated. Returns `(base_fraction, exertion_fraction)` per tick, the derived siblings
+/// of the authored [`crate::homeostasis::HomeostaticAxisDef::base_drain`] / `exertion_drain` on the water
+/// axis. Pure and RNG-free.
+#[allow(clippy::too_many_arguments)]
+pub fn derive_water_loss(
+    plan: &BodyPlan,
+    water_capacity: Fixed,
+    water_density: Fixed,
+    surface: Fixed,
+    emissivity: Fixed,
+    ambient_temp: Fixed,
+    setpoint: Fixed,
+    medium_h: Fixed,
+    force: Fixed,
+    velocity: Fixed,
+    water_per_power: Fixed,
+    tick: Fixed,
+    anchors: &MetabolicAnchors,
+) -> (Fixed, Fixed) {
+    let mass_kg = body_mass_kg(plan, anchors);
+    let basal = laws::basal_metabolic_rate(mass_kg, anchors.kleiber_a, RATE_MAX);
+    // At rest the body holds its set point; the thermoregulatory heat it sheds is the evaporative water
+    // driver (sweating/panting), so the resting water power is the whole resting metabolic power.
+    let heat_loss = laws::resting_heat_loss(
+        medium_h,
+        surface,
+        setpoint,
+        ambient_temp,
+        emissivity,
+        anchors.sigma_fine_bits,
+        anchors.sigma_fine_scale,
+        FLUX_MAX,
+    );
+    let resting_power = basal.saturating_add(heat_loss);
+    let work_power = laws::power_watts(force, velocity, POWER_MAX);
+    // The hydration reserve's water-storing mass, the same size-scaled bridge the energy drain uses: the
+    // anatomy-derived water capacity scaled to the body's physical mass, so the bridge to stored water mass
+    // scales with size. The water flux (per_power * metabolic power) enters as the `basal` slot of the
+    // shared fraction bridge with a zero second term, so `fraction = water_flux * tick / stored_water`.
+    let reserve_mass = water_capacity.checked_mul(mass_kg).unwrap_or(Fixed::ZERO);
+    let base_flux = resting_power
+        .checked_mul(water_per_power)
+        .unwrap_or(FLUX_MAX);
+    let work_flux = work_power.checked_mul(water_per_power).unwrap_or(FLUX_MAX);
+    let base = laws::metabolic_drain_fraction(
+        base_flux,
+        Fixed::ZERO,
+        reserve_mass,
+        water_density,
+        tick,
+        FRAC_MAX,
+    );
+    let exertion = laws::metabolic_drain_fraction(
+        work_flux,
+        Fixed::ZERO,
+        reserve_mass,
+        water_density,
+        tick,
+        FRAC_MAX,
+    );
+    (base, exertion)
 }
 
 /// The derived body-to-medium thermal coupling rate per tick: `h * A / (m * c)`, the discrete
@@ -1047,6 +1164,55 @@ mod tests {
             composition: TissueComposition::from_pairs(&[(ENERGY_DENSITY, Fixed::ONE)]),
         });
         (reg, skin, flesh, fat)
+    }
+
+    #[test]
+    fn surface_optical_axis_reads_one_axis_and_is_zero_for_absent() {
+        use crate::anatomy::KindDef;
+        let (mut reg, _skin, _flesh, _fat) = registry();
+        // A covering carrying two optical axes with distinct values (a labelled fixture, not owner canon).
+        let cov = reg.coverings.len() as u16;
+        let mut material = std::collections::BTreeMap::new();
+        material.insert(OPT_EMISSIVITY.to_string(), Fixed::from_ratio(9, 10));
+        material.insert("opt.refractive_index".to_string(), Fixed::from_ratio(3, 2));
+        reg.coverings.push(KindDef {
+            id: cov,
+            name: "test-hide".to_string(),
+            fantasy: false,
+            geometry: std::collections::BTreeMap::new(),
+            material,
+        });
+        let mut plan = body((1, 1), vec![]);
+        plan.covering = Part {
+            kind: cov,
+            development: Fixed::ONE,
+        };
+        // It reads exactly ONE axis, not a composite: each declared axis returns its own value.
+        assert_eq!(
+            surface_optical_axis(&plan, &reg, OPT_EMISSIVITY),
+            Fixed::from_ratio(9, 10)
+        );
+        assert_eq!(
+            surface_optical_axis(&plan, &reg, "opt.refractive_index"),
+            Fixed::from_ratio(3, 2)
+        );
+        // An axis the covering does not declare reads ZERO (graceful absence, the feature is simply absent).
+        assert_eq!(surface_optical_axis(&plan, &reg, "opt.albedo"), Fixed::ZERO);
+        // `covering_emissivity` is the same read on the emissivity axis (the delegation is byte-identical).
+        assert_eq!(
+            covering_emissivity(&plan, &reg),
+            surface_optical_axis(&plan, &reg, OPT_EMISSIVITY)
+        );
+        // A being whose covering kind is not in the registry (an alien with no covering-row) reads ZERO on
+        // every axis: it carries no feature rather than a synthesized default, so the alien stays a data row.
+        plan.covering = Part {
+            kind: 60000,
+            development: Fixed::ONE,
+        };
+        assert_eq!(
+            surface_optical_axis(&plan, &reg, OPT_EMISSIVITY),
+            Fixed::ZERO
+        );
     }
 
     #[test]

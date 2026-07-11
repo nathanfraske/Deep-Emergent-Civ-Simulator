@@ -106,10 +106,11 @@ use crate::homeostasis::{
 use crate::learn::{
     appetitive_salience, attraction_gradient, avoidance_gradient, being_attraction_gradient,
     being_avoidance_gradient, being_signal_reward_for, being_signal_trace_observations,
-    builtin_reachable_relations, creature_being_direction, feature_observations,
-    perceive_being_magnitude, perceive_being_signal, reward_observations, sequence_subject,
-    step_belief_subject, BeingPerceptField, HarmLearningCalib, RewardLearningCalib, SequenceStep,
-    BENIGN, HARMS, HARM_ATTR, MATERIAL_FEATURE_CHANNEL_BASE, NEUTRAL, REWARDS, REWARD_ATTR,
+    builtin_reachable_relations, creature_being_direction, creature_being_feature_directions,
+    feature_observations, perceive_being_magnitude, perceive_being_signal, reward_observations,
+    sequence_subject, step_belief_subject, BeingPerceptField, HarmLearningCalib,
+    RewardLearningCalib, SequenceStep, BENIGN, HARMS, HARM_ATTR, MATERIAL_FEATURE_CHANNEL_BASE,
+    NEUTRAL, REWARDS, REWARD_ATTR,
 };
 use crate::located::{LocationIndex, OccupantId};
 use crate::locomotion::{self, LocomotionParams, ResourceField, Terrain, Walker};
@@ -121,6 +122,7 @@ use crate::material::{
 use crate::material_percept::MaterialPerceptRegistry;
 use crate::medium;
 use crate::morphogen::{express_program, grow, Structure};
+use crate::perceivable_feature::PerceivableFeatureRegistry;
 use crate::percept::PerceptRegistry;
 use crate::perception_reach::{received_reach, resolve_reach};
 use crate::physiology::{
@@ -773,6 +775,14 @@ pub struct EmbodiedPhysiology {
     respiration_transfer_k: Fixed,
     /// The base tick length in seconds the drain derivation integrates over (`time.base_tick_seconds`).
     tick_seconds: Fixed,
+    /// The reserved water-loss-per-metabolic-power anchor (`metabolism.water_loss_per_power`, grams of water
+    /// lost per joule of metabolism), when the world declares it: the respiratory-plus-evaporative water cost
+    /// of metabolism the DERIVED water drain ([`physiology::derive_water_loss`]) reads to replace the authored
+    /// flat water `base_drain`. `None` when the manifest carries no such key (the dev-fixtures profile and
+    /// every scenario that loads it, so the WATER axis keeps its authored drain and the run is byte-identical);
+    /// `Some` on a world (Mirror) whose profile sets it, so the water drain DERIVES from the being's own
+    /// metabolic power exactly as the energy drain does. An opt-in per-world datum, never a global author.
+    water_loss_per_power: Option<Fixed>,
 }
 
 impl EmbodiedPhysiology {
@@ -802,6 +812,14 @@ impl EmbodiedPhysiology {
             respiration_transfer_k: manifest
                 .require_fixed("metabolism.respiration_transfer_coefficient")?,
             tick_seconds: manifest.require_fixed("time.base_tick_seconds")?,
+            // Opt-in per-world: only a profile that DECLARES the water-loss anchor (Mirror) arms the derived
+            // water drain; a profile without the key (dev-fixtures) reads None and the WATER axis keeps its
+            // authored drain, byte-identical. Read fail-loud only when present, so a set key must parse.
+            water_loss_per_power: if manifest.is_set("metabolism.water_loss_per_power") {
+                Some(manifest.require_fixed("metabolism.water_loss_per_power")?)
+            } else {
+                None
+            },
         })
     }
 
@@ -820,6 +838,8 @@ impl EmbodiedPhysiology {
             medium,
             respiration_transfer_k: Fixed::ONE,
             tick_seconds: Fixed::ONE,
+            // The labelled fixture keeps the authored water drain (None), so tests are unchanged.
+            water_loss_per_power: None,
         }
     }
 }
@@ -993,6 +1013,62 @@ fn being_derived_drains(
                 &phys.anchors,
             );
             DerivedDrain { base, exertion }
+        } else if phys.water_loss_per_power.is_some()
+            && axis.backing_component.as_deref() == Some(physiology::WATER_FRACTION)
+        {
+            // DERIVED WATER DRAIN (R-METABOLIZE water sibling, opt-in per-world): retire the authored flat
+            // water rate. Respiratory-plus-evaporative water loss scales with metabolic power, so it derives
+            // from the body exactly as the energy drain does, reading the SAME body-level physical quantities
+            // (surface, covering emissivity, occupied-medium h, muscle force, ground velocity) against the
+            // live ambient and set point. Armed only when the world's profile declares the water-loss anchor
+            // (Mirror), so every authored-drain scenario reads None and this branch never runs, staying
+            // byte-identical. A larger, hotter-working body in a drier, hotter medium loses proportionally
+            // more water, from the physics alone (Principle 9), never a flat rate or a race id.
+            let water_cap = w.homeostasis.capacity(axis.id);
+            let (surface, force, water_density) = match &w.structure {
+                Some(s) => (
+                    s.composition_sum(physiology::CONVECTIVE_SURFACE),
+                    s.composition_sum(physiology::MUSCLE_STRENGTH)
+                        .checked_mul(physiology::body_mass_kg(&w.body, &phys.anchors))
+                        .unwrap_or(Fixed::ZERO),
+                    s.composition_mean(physiology::WATER_FRACTION),
+                ),
+                None => (
+                    physiology::whole_body_surface(&w.body, &phys.organs),
+                    physiology::whole_body_muscle_force(&w.body, &phys.organs, &phys.anchors),
+                    physiology::whole_body_water_density(&w.body, &phys.organs),
+                ),
+            };
+            let emissivity = physiology::covering_emissivity(&w.body, &phys.organs);
+            let medium_cell = w.coord();
+            let medium_h = phys.medium.convective_at(medium_cell.x, medium_cell.y);
+            let velocity = match &w.structure {
+                Some(s) => locomotion::locomotion_speed_structure(
+                    s,
+                    w.body.temperament.activity,
+                    Fixed::ONE,
+                    &emb.params,
+                ),
+                None => {
+                    locomotion::locomotion_speed(&w.body, &phys.organs, Fixed::ONE, &emb.params)
+                }
+            };
+            let (base, exertion) = physiology::derive_water_loss(
+                &w.body,
+                water_cap,
+                water_density,
+                surface,
+                emissivity,
+                ambient,
+                setpoint,
+                medium_h,
+                force,
+                velocity,
+                phys.water_loss_per_power.unwrap(),
+                phys.tick_seconds,
+                &phys.anchors,
+            );
+            DerivedDrain { base, exertion }
         } else {
             DerivedDrain {
                 base: axis.base_drain,
@@ -1067,11 +1143,115 @@ pub fn is_creature(id: StableId) -> bool {
 pub const PREDATOR_ID_BIT: u64 = 1 << 61;
 
 /// Whether a walker id is an AUTHORED PREDATOR (the reserved predator sub-bit within the creature namespace).
-/// The creature reproduction/behaviour-selection arc (step 2) reads this to keep the authored predator OUT of
-/// the emergent breeding pool: the predator is an environmental GIVEN, not a modeled lineage that reproduces
-/// or is selected as prey, so its authored always-strike disposition must never enter the gene pool.
+/// The predator carries an authored controller but no heritable `lineage`, so the STRUCTURAL pairing predicate
+/// ([`Walker::carries_lineage`]) already excludes it from the creature breeding pool; this id bit remains the
+/// disjoint-namespace marker (so a spawned predator never collides with a biosphere creature or an offspring).
 pub fn is_predator(id: StableId) -> bool {
     id.0 & PREDATOR_ID_BIT != 0
+}
+
+/// The reserved sub-bit that marks a creature OFFSPRING bred in-run by the reproduction beat (creature-selection
+/// step 2), within the creature namespace. An offspring carries [`CREATURE_ID_TAG`] (so it is a mind-less
+/// creature, retired only on its own death) plus this bit and a monotonic per-run counter, so its id is
+/// provably disjoint from a founder's small sequential id, a spawned biosphere creature's `occ.id.0 | tag`
+/// (whose small `occ.id.0` never reaches bit 60), and the authored predator's `PREDATOR_ID_BIT` (bit 61).
+pub const OFFSPRING_ID_BIT: u64 = 1 << 60;
+
+/// A deterministic bounded deviation in the half-open `[-spread, +spread)` for a creature's controller weight
+/// `k`, keyed on the being id, the tick, and the weight index (creature-selection step 2, the mint-time and
+/// inheritance perturbation). Mirrors the founder developmental-offset draw: `unit_fixed` lies in `[0, ONE)`,
+/// so `2u - 1` is zero-mean to within one fixed-point ULP (an exact `-1/2^32` bias, sub-resolution and with no
+/// determinism, correctness, or steering consequence), and the map is a pure function of the seed, the being,
+/// the tick, and the weight index, so it replays bit for bit. Keyed on `Phase::CREATURE_REPRO` and a creature
+/// id (disjoint from every founder id), so it never collides with a founder draw.
+fn creature_weight_deviation(seed: u64, id: StableId, tick: u64, k: usize, spread: Fixed) -> Fixed {
+    let unit = DrawKey::entity(id.0, tick, Phase::CREATURE_REPRO)
+        .rng(seed)
+        .unit_fixed(k as u64);
+    (Fixed::from_int(2).mul(unit) - Fixed::ONE).mul(spread)
+}
+
+/// Breed the next creature generation from the eligible parents (creature-selection step 2, the PURE core of
+/// the reproduction beat, extracted so the mechanism is unit-testable without a full runner). The parents are
+/// grouped by cell (CO-LOCATION, the spatial proximity proxy) in canonical order, paired consecutively within
+/// each cell (an unpaired leftover does not breed), and one offspring is minted per pair whose controller is
+/// the parents' MIDPARENT blend plus a bounded seed-keyed perturbation, at the parents' cell with a fresh
+/// disjoint id (`CREATURE_ID_TAG | OFFSPRING_ID_BIT | count`). It reads no trait, kind, relatedness, or id tag.
+/// Pure and deterministic: for a fixed eligible list, seed, tick, and counter it returns the same offspring,
+/// advancing `offspring_count` by the number minted. The caller filters the eligible list (living creatures
+/// carrying heritable lineage, own reserve eligible), so the authored predator (no lineage) never appears here.
+fn breed_offspring(
+    eligible: &[(StableId, Coord3, Controller, BodyPlan, Physiology)],
+    params: &CreatureSelectionParams,
+    seed: u64,
+    clock: u64,
+    homeo: &HomeostaticRegistry,
+    organs: &BodyPlanRegistry,
+    offspring_count: &mut u64,
+) -> Vec<(StableId, Coord3, Walker)> {
+    let mut by_cell: BTreeMap<Coord3, Vec<usize>> = BTreeMap::new();
+    for (i, (_, coord, ..)) in eligible.iter().enumerate() {
+        by_cell.entry(*coord).or_default().push(i);
+    }
+    let mut built: Vec<(StableId, Coord3, Walker)> = Vec::new();
+    for (coord, idxs) in &by_cell {
+        for pair in idxs.chunks_exact(2) {
+            let (_, _, ctrl_a, body_a, phys_a) = &eligible[pair[0]];
+            let (_, _, ctrl_b, _, _) = &eligible[pair[1]];
+            let count = *offspring_count;
+            *offspring_count += 1;
+            // The offspring counter must stay within the OFFSPRING_ID_BIT band so an offspring id never
+            // aliases the predator's PREDATOR_ID_BIT (1<<61) or a spawned creature's `occ.id.0 | tag`. Asserted
+            // at runtime for parity with the sibling spawn paths (spawn_creatures / spawn_predator), though
+            // reaching it would need ~2^60 offspring, unreachable in a run.
+            debug_assert!(
+                count < OFFSPRING_ID_BIT,
+                "creature offspring counter overflowed its id band"
+            );
+            let child = StableId(CREATURE_ID_TAG | OFFSPRING_ID_BIT | count);
+            let child_ctrl = ctrl_a.midparent(ctrl_b, |k| {
+                creature_weight_deviation(seed, child, clock, k, params.offspring_mutation_spread)
+            });
+            let homeostasis = crate::homeostasis::Homeostasis::new(homeo, body_a, organs);
+            let walker = Walker::new(
+                child,
+                *coord,
+                body_a.clone(),
+                homeostasis,
+                phys_a.clone(),
+                child_ctrl.clone(),
+            )
+            .with_lineage(child_ctrl);
+            built.push((child, *coord, walker));
+        }
+    }
+    built
+}
+
+/// The reserved calibrations the in-run creature reproduction and behaviour-selection substrate reads
+/// (creature-selection step 2, fork 2a, gate-signed-off). `None` on an embodiment leaves creatures
+/// non-reproducing and byte-identical (the substrate is opt-in); `Some` arms the unified in-run selection.
+/// The three spreads and the eligibility reserve are RESERVED values surfaced with their basis, never
+/// fabricated (the dev harness stands up labelled fixtures; the manifest carries the reserved entries).
+#[derive(Clone, Copy, Debug)]
+pub struct CreatureSelectionParams {
+    /// The bounded half-width of the zero-mean per-weight deviation applied to each MINTED creature's
+    /// controller, so the founding creature generation is not identical-founder-zero and can move and
+    /// co-locate (the bootstrap variance seed that breaks the zero-init deadlock, retiring the offline
+    /// empty-arena scorer's role). Basis: the deviation that lifts a founder-zero weight off zero enough to
+    /// drive movement without saturating the controller's activation clamp, sibling to
+    /// `reproduction.mutation_spread`.
+    pub mint_perturbation_spread: Fixed,
+    /// The own-reserve level above which a creature is eligible to reproduce in a cycle: a creature whose
+    /// energy reserve is at or above this can afford an offspring. Basis: the reserve fraction that marks a
+    /// well-fed being (an energy-cost proxy for reproductive fitness, the creature analogue of the founder
+    /// `reproductive_vigor` own-reserve gate), so a better forager out-reproduces, keyed on the being's OWN
+    /// reserve, never a trait or kind.
+    pub reproduction_eligibility_reserve: Fixed,
+    /// The bounded half-width of the zero-mean per-weight deviation added to an offspring's midparent
+    /// controller blend (the inheritance mutation). Basis: the drift the transmission subsystem already uses,
+    /// set equal to `reproduction.mutation_spread` for consistency.
+    pub offspring_mutation_spread: Fixed,
 }
 
 pub struct Embodiment {
@@ -1164,6 +1344,29 @@ pub struct Embodiment {
     /// world's declared per-species/per-world datum (matching the founder path, which also defers to declared
     /// data); deriving it per creature from its sensory anatomy is a shared follow-on that upgrades both paths.
     creature_being_percept: bool,
+    /// The perceivable-FEATURE registry (creature-selection step 2b, the percept kind-feature floor arc): the
+    /// open, data-defined set of emitter surface optical axes a perceiver senses on a being-signal beyond its
+    /// strength scalar, each a DIRECT single-axis read discriminated into buckets by the perceiver's own
+    /// resolution ([`crate::perceivable_feature::PerceivableFeatureRegistry`]). EMPTY by default, so the
+    /// controller carries no being-feature block, the creature being-feature wire produces nothing, and every
+    /// run hash is unchanged (opt-in, the emergent-anatomy pattern). When a world declares channels
+    /// ([`Embodiment::set_being_features`]), the layout grows the being-feature block and, where the creature
+    /// being-percept is armed, each mind-less creature's per-(channel, bucket) toward-direction is written into
+    /// it, so a creature can respond differently to two same-strength emitters that differ in a surface optical
+    /// feature (the strength-independent separation FLEEING needs). Only the creature's OWN heritable
+    /// freely-signed per-bucket weight, set by selection, turns a feature-bucket's direction into approach or
+    /// flight, so the disposition emerges (Principle 9), keyed on the emitter's own surface datum, never a kind.
+    being_features: PerceivableFeatureRegistry,
+    /// The in-run creature reproduction and behaviour-selection substrate (creature-selection step 2, fork 2a):
+    /// `None` (the default) leaves creatures non-reproducing and byte-identical; `Some` arms the mint-time
+    /// perturbation and the reproduction beat, so a creature population turns over and its whole controller is
+    /// selected in the populated world (the correct single-loop architecture, replacing the offline empty-arena
+    /// scorer). Opt-in and hash-neutral by default.
+    creature_selection: Option<CreatureSelectionParams>,
+    /// The monotonic count of creature OFFSPRING bred in-run by the reproduction beat (creature-selection step
+    /// 2), the source of each offspring's disjoint id (`CREATURE_ID_TAG | OFFSPRING_ID_BIT | count`). Only ever
+    /// advanced when the substrate is armed, so an unarmed run keeps it zero and mints no offspring.
+    creature_offspring_count: u64,
     /// The ids of AUTHORED PREDATORS: stationary ambush hazards the predation-integration slice spawns as the
     /// environmental GIVEN a prey adapts to (fork i, gate-ruled). A predator is a mind-less `Walker` with a
     /// PIERCE body and an always-STRIKE controller, so it wounds any prey co-located with it through the
@@ -1394,6 +1597,9 @@ impl Embodiment {
             being_percept: false,
             being_field: None,
             creature_being_percept: false,
+            being_features: PerceivableFeatureRegistry::empty(),
+            creature_selection: None,
+            creature_offspring_count: 0,
             predators: BTreeSet::new(),
             nutrition_learning: false,
             place_reward_learning: true,
@@ -1503,6 +1709,28 @@ impl Embodiment {
     /// reaction is pure selection on the raw percept.
     pub fn set_creature_being_percept(&mut self, enabled: bool) {
         self.creature_being_percept = enabled;
+    }
+
+    /// Install the perceivable-FEATURE registry (creature-selection step 2b, the percept kind-feature floor arc):
+    /// the open set of emitter surface optical axes a perceiver senses on a being-signal beyond its strength
+    /// scalar. Rebuilds the controller layout so it carries the being-feature block (two toward-direction slots
+    /// per discrimination bucket per channel); an EMPTY registry (the default) leaves the layout and every run
+    /// hash unchanged (opt-in). Where the creature being-percept is also armed, each mind-less creature's
+    /// per-(channel, bucket) toward-direction is then written into the block each tick, so a creature can respond
+    /// differently to two same-strength emitters that differ in a surface optical feature.
+    pub fn set_being_features(&mut self, registry: PerceivableFeatureRegistry) {
+        self.being_features = registry;
+        self.rebuild_layout();
+    }
+
+    /// Arm (or disarm) the in-run creature reproduction and behaviour-selection substrate (creature-selection
+    /// step 2, fork 2a). `Some(params)` mints each creature with a bounded zero-mean controller perturbation
+    /// (the bootstrap variance seed) and runs the reproduction beat each life cadence, so co-located
+    /// reserve-eligible creatures that carry heritable lineage produce offspring whose controllers are the
+    /// parents' midparent blend plus a bounded perturbation, and the whole creature controller is selected in
+    /// the populated world. `None` (the default) leaves creatures non-reproducing and the run byte-identical.
+    pub fn set_creature_selection(&mut self, params: Option<CreatureSelectionParams>) {
+        self.creature_selection = params;
     }
 
     /// Enable (or disable) NUTRITION learning (social-learning arc, piece 1): when true, and the runner's
@@ -1646,17 +1874,19 @@ impl Embodiment {
     /// [`set_material_percepts`], [`set_attraction`], and [`set_conviction_percepts`], so the flags compose:
     /// setting one preserves the others.
     fn rebuild_layout(&mut self) {
-        self.layout = ControllerLayout::with_percepts_appetitive_material_attraction_and_conviction(
-            &self.homeo,
-            &self.afford,
-            &self.percepts,
-            self.appetitive,
-            &self.material_percepts,
-            self.attraction,
-            &self.conviction_percepts,
-            self.being_percept,
-            self.layout.hidden(),
-        );
+        self.layout =
+            ControllerLayout::with_percepts_appetitive_material_attraction_conviction_and_being_features(
+                &self.homeo,
+                &self.afford,
+                &self.percepts,
+                self.appetitive,
+                &self.material_percepts,
+                self.attraction,
+                &self.conviction_percepts,
+                self.being_percept,
+                &self.being_features,
+                self.layout.hidden(),
+            );
     }
 
     /// Install the organ registry an affordance and the ground speed are derived against (emergent-anatomy
@@ -4523,6 +4753,10 @@ impl Runner {
             }
         }
         self.reconcile_lifecycle();
+        // The in-run creature reproduction beat runs after the cull, among the survivors, on a life-cadence beat
+        // (a no-op unless the creature-selection substrate is armed). Both tick entry points call it identically
+        // so they stay bit-identical (real-world unification).
+        self.reproduce_creatures();
         self.clock += 1;
     }
 
@@ -5386,6 +5620,10 @@ impl Runner {
         // state (worker-count independent), so both tick entry points reconcile identically and stay
         // bit-identical (real-world unification, step 3c).
         self.reconcile_lifecycle();
+        // The in-run creature reproduction beat runs after the cull, among the survivors, on a life-cadence beat
+        // (a no-op unless the creature-selection substrate is armed). Both tick entry points call it identically
+        // so they stay bit-identical (real-world unification).
+        self.reproduce_creatures();
         self.clock += 1;
     }
 
@@ -5754,6 +5992,10 @@ impl Runner {
             }
             _ => (BTreeMap::new(), BTreeMap::new()),
         };
+        // The CREATURE being-FEATURE block per perceiver (creature-selection step 2b, the percept kind-feature
+        // floor arc): filled below only where the perceivable-feature registry is armed; EMPTY otherwise, so the
+        // controller carries no being-feature input and every run hash is unchanged (opt-in, byte-neutral).
+        let mut being_feature_map: BTreeMap<StableId, Vec<Fixed>> = BTreeMap::new();
         // Creatures-react arc (mechanism B3, the live wire): a MIND-LESS creature (a `Walker` absent from the
         // mind registry) runs the BELIEF-FREE being-directed percept. Gated on the creature feature AND the
         // being-percept substrate (which built the being block the creature's controller reuses and installed
@@ -5844,6 +6086,91 @@ impl Runner {
                     .collect();
                 for (id, dir) in creature_dirs {
                     being.insert(id, dir);
+                }
+                // The CREATURE being-FEATURE block (step 2b): a SEPARATE gated pass so the pin-critical
+                // magnitude-only `creature_dirs` above stays byte-untouched. Runs only where the world armed a
+                // perceivable-feature registry, so an unarmed world does nothing here and is byte-identical. Each
+                // mind-less creature discriminates the beings it perceives by their surface optical feature: it
+                // reads each perceived emitter's per-channel surface axis (`read_emitter` off the emitter's own
+                // body, the same `covering_emissivity(&w.body, &phys.organs)` per-being read the emission uses),
+                // bins it by the perceiver's own resolution, and accumulates the toward-direction per
+                // (channel, bucket) ([`creature_being_feature_directions`]). Only the creature's OWN heritable
+                // freely-signed per-bucket weight, set by selection, turns a feature-bucket's direction into
+                // approach or flight, so the disposition emerges (Principle 9), keyed on the emitter's own surface
+                // datum, never a kind.
+                if !emb.being_features.is_empty() {
+                    let bodyplan = &phys.organs;
+                    let creature_feature_dirs: BTreeMap<StableId, Vec<Fixed>> = emb
+                        .walkers
+                        .par_iter()
+                        .with_min_len(PAR_MIN_LEN)
+                        .filter_map(|w| {
+                            if world.mind(w.id).is_some() {
+                                return None; // a founder learns valence; the feature block is the creature tier
+                            }
+                            let here = w.coord();
+                            let mut perceived: Vec<(Coord3, Fixed, Vec<Fixed>)> = Vec::new();
+                            for other in &emb.walkers {
+                                if other.id == w.id {
+                                    continue;
+                                }
+                                let src = other.coord();
+                                let body_temp =
+                                    body_temps.get(&other.id).copied().unwrap_or(Fixed::ZERO);
+                                let emission = physiology::being_signal_emission(
+                                    body_temp,
+                                    field.emission_coefficient,
+                                    sigma_bits,
+                                    sigma_scale,
+                                );
+                                if emission <= Fixed::ZERO {
+                                    continue;
+                                }
+                                let reach = match registry_opt {
+                                    Some(reg) => resolve_reach(
+                                        &field.row,
+                                        emission,
+                                        src,
+                                        here,
+                                        &emb.material,
+                                        reg,
+                                        field.bounds,
+                                    ),
+                                    None => received_reach(emission, src, here, field.bounds, &[]),
+                                };
+                                if let Some(magnitude) = perceive_being_magnitude(
+                                    reach,
+                                    &field.transduction,
+                                    field.activation_max,
+                                ) {
+                                    // The emitter's per-channel surface optical feature (a DIRECT single-axis
+                                    // read off the emitter's OWN surface, ZERO where it declares none), rides the
+                                    // signal only for an emitter this creature already perceives (cleared the
+                                    // threshold), so a feature is discriminated only on a detectable emitter.
+                                    let feats =
+                                        emb.being_features.read_emitter(&other.body, bodyplan);
+                                    perceived.push((src, magnitude, feats));
+                                }
+                            }
+                            if perceived.is_empty() {
+                                return None;
+                            }
+                            let block = creature_being_feature_directions(
+                                here,
+                                &perceived,
+                                &emb.being_features,
+                            );
+                            // Keep only a non-zero block (a creature with no net per-bucket pull reads the
+                            // founder-zero default), the same gate the magnitude branch uses.
+                            if block.iter().all(|&c| c == Fixed::ZERO) {
+                                return None;
+                            }
+                            Some((w.id, block))
+                        })
+                        .collect();
+                    for (id, block) in creature_feature_dirs {
+                        being_feature_map.insert(id, block);
+                    }
                 }
             }
         }
@@ -6242,6 +6569,7 @@ impl Runner {
             &attraction,
             &conviction,
             &being,
+            &being_feature_map,
             &mut deferred_actions,
         );
         // (2a') Record each being's DISCOVERY proposal (ideation arc, piece 2, slice 2c): the candidate
@@ -6510,21 +6838,24 @@ impl Runner {
         ploidy: usize,
     ) -> usize {
         use crate::biosphere::SourceRef;
-        let Some((homeo, organs, layout, seed, thermal)) = self.embodiment.as_ref().map(|e| {
-            (
-                e.homeo.clone(),
-                e.organs.clone(),
-                e.layout.clone(),
-                e.seed,
-                // Creatures are born into the same comfort band the founders carry (a shared physical band in
-                // the dev world), read off a representative founder; a default centres it if none exist yet.
-                e.thermal.values().next().copied().unwrap_or(BeingThermal {
-                    setpoint: Fixed::ZERO,
-                    half_band: Fixed::ONE,
-                    initial_temp: Fixed::ZERO,
-                }),
-            )
-        }) else {
+        let Some((homeo, organs, layout, seed, creature_sel, thermal)) =
+            self.embodiment.as_ref().map(|e| {
+                (
+                    e.homeo.clone(),
+                    e.organs.clone(),
+                    e.layout.clone(),
+                    e.seed,
+                    e.creature_selection,
+                    // Creatures are born into the same comfort band the founders carry (a shared physical band in
+                    // the dev world), read off a representative founder; a default centres it if none exist yet.
+                    e.thermal.values().next().copied().unwrap_or(BeingThermal {
+                        setpoint: Fixed::ZERO,
+                        half_band: Fixed::ONE,
+                        initial_temp: Fixed::ZERO,
+                    }),
+                )
+            })
+        else {
             return 0;
         };
         let founders: BTreeSet<StableId> = self
@@ -6587,8 +6918,32 @@ impl Runner {
                 );
                 let physiology = Physiology::dev_for_registry(&homeo);
                 let genome = ctrl_pool.promote(seed, cid.0, ploidy);
-                let controller = Controller::express(ctrl_genes, &genome, &layout);
-                let mut walker = Walker::new(cid, coord, body, homeostasis, physiology, controller);
+                let expressed = Controller::express(ctrl_genes, &genome, &layout);
+                // Mint-time perturbation (creature-selection step 2, the bootstrap variance seed): when the
+                // substrate is armed, offset each controller weight by a bounded zero-mean seed-keyed draw so the
+                // founding creature generation is NOT identical-founder-zero and can move and co-locate (breaking
+                // the zero-init deadlock, taking over the offline scorer's role of supplying initial variance).
+                // Unarmed, the controller is the pure genome expression, so the run stays byte-identical.
+                let controller = match creature_sel {
+                    Some(p) => expressed.perturbed(|k| {
+                        creature_weight_deviation(seed, cid, 0, k, p.mint_perturbation_spread)
+                    }),
+                    None => expressed,
+                };
+                // A creature is a MODELED-LINEAGE member: it carries its controller as its heritable reproductive
+                // material (creature-selection step 2), so the reproduction beat can blend two parents' controllers
+                // into an offspring. Structurally distinct from the authored predator, which carries an authored
+                // controller but no `lineage` and so cannot reproduce. Byte-neutral when unarmed: `lineage` is not
+                // folded into `state_hash` and nothing reads it until the reproduction beat is armed.
+                let mut walker = Walker::new(
+                    cid,
+                    coord,
+                    body,
+                    homeostasis,
+                    physiology,
+                    controller.clone(),
+                )
+                .with_lineage(controller);
                 if let Some(s) = structure {
                     walker = walker.with_structure(s);
                 }
@@ -6741,6 +7096,115 @@ impl Runner {
         self.body_temp.insert(pid, thermal.initial_temp);
         self.index.place(OccupantId::being(pid), coord);
         Some(pid)
+    }
+
+    /// The in-run creature reproduction and behaviour-selection beat (creature-selection step 2, fork 2a,
+    /// gate-signed-off). On a life-cadence beat, when the substrate is armed, co-located reserve-eligible
+    /// creatures that carry heritable lineage pair and produce an offspring whose controller is the parents'
+    /// MIDPARENT blend plus a bounded zero-mean perturbation, so the WHOLE creature controller is selected in
+    /// the populated world: a well-fed forager (a high own energy reserve) out-reproduces, and a hazard-struck
+    /// creature dies (via the existing INTEGRITY cull in `reconcile_lifecycle`) and leaves no descendants, so
+    /// which weights spread falls out of which situations each creature meets, never an authored fitness term.
+    /// The pairing predicate is STRUCTURAL (`carries_lineage`, both carry a heritable controller) and keyed on
+    /// spatial CO-LOCATION (the same-cell proximity proxy), never a trait, kind, relatedness, or an id tag, so
+    /// the authored predator (which carries no lineage) is excluded for the same reason it cannot adapt.
+    /// Eligibility keys on the creature's OWN energy reserve found by its backing component (admit-the-alien),
+    /// never a hardcoded axis. Deterministic: the offspring id is a monotonic run counter in a disjoint
+    /// sub-namespace, the perturbation is seed-keyed, and the beat walks id-sorted parents and canonical cells,
+    /// so it replays bit for bit. A no-op unless armed AND on a cadence beat, so an unarmed or off-cadence run
+    /// is byte-identical.
+    fn reproduce_creatures(&mut self) {
+        let Some(params) = self.embodiment.as_ref().and_then(|e| e.creature_selection) else {
+            return;
+        };
+        let Some(world) = self.world.as_ref() else {
+            return;
+        };
+        let cadence = world.life_cadence_ticks();
+        let clock = world.clock();
+        if clock == 0 || cadence == 0 || !clock.is_multiple_of(cadence) {
+            return;
+        }
+        let emb = self.embodiment.as_ref().unwrap();
+        let seed = emb.seed;
+        let homeo = emb.homeo.clone();
+        let organs = emb.organs.clone();
+        let thermal = emb
+            .thermal
+            .values()
+            .next()
+            .copied()
+            .unwrap_or(BeingThermal {
+                setpoint: Fixed::ZERO,
+                half_band: Fixed::ONE,
+                initial_temp: Fixed::ZERO,
+            });
+        // The being's OWN energy-backing axis (admit-the-alien: found by its backing component, not a hardcoded
+        // id, the same read the metabolism uses). No energy-backed reserve means no eligibility read is possible.
+        let Some(energy_axis) = homeo
+            .axes
+            .iter()
+            .find(|a| a.backing_component.as_deref() == Some(crate::physiology::ENERGY_DENSITY))
+            .map(|a| a.id)
+        else {
+            return;
+        };
+        // Snapshot eligible parents (living creatures carrying heritable lineage whose OWN energy reserve is at
+        // or above the eligibility threshold), owning their body/physiology/controller so the mint borrows
+        // nothing from `self`. Sorted by id for a deterministic pairing order.
+        let mut eligible: Vec<(StableId, Coord3, Controller, BodyPlan, Physiology)> = emb
+            .walkers
+            .iter()
+            .filter(|w| {
+                // The STRUCTURAL predicate stands alone (no id-tag read): only a modeled-lineage creature
+                // carries a heritable controller, so `carries_lineage` already excludes the founders and the
+                // authored predator (neither is given a lineage), keyed on what the being IS, never its id.
+                w.alive
+                    && w.carries_lineage()
+                    && w.homeostasis.level(energy_axis) >= params.reproduction_eligibility_reserve
+            })
+            .filter_map(|w| {
+                w.lineage.as_ref().map(|l| {
+                    (
+                        w.id,
+                        w.coord(),
+                        l.clone(),
+                        w.body.clone(),
+                        w.physiology.clone(),
+                    )
+                })
+            })
+            .collect();
+        eligible.sort_by_key(|(id, ..)| *id);
+        // Mint the offspring (the pure, deterministic core, extracted so it is unit-testable), advancing the
+        // embodiment's monotonic offspring counter.
+        let mut offspring_count = self
+            .embodiment
+            .as_ref()
+            .map(|e| e.creature_offspring_count)
+            .unwrap_or(0);
+        let built = breed_offspring(
+            &eligible,
+            &params,
+            seed,
+            clock,
+            &homeo,
+            &organs,
+            &mut offspring_count,
+        );
+        if let Some(e) = self.embodiment.as_mut() {
+            e.creature_offspring_count = offspring_count;
+        }
+        // Install the offspring (thermal band, walker, located index) in canonical mint order.
+        if let Some(emb) = self.embodiment.as_mut() {
+            for (cid, _, walker) in &built {
+                emb.thermal.insert(*cid, thermal);
+                emb.walkers.push(walker.clone());
+            }
+        }
+        for (cid, coord, _) in &built {
+            self.index.place(OccupantId::being(*cid), *coord);
+        }
     }
 
     fn reconcile_lifecycle(&mut self) {
@@ -12478,6 +12942,484 @@ values = [
             world.mind(naive).unwrap().belief(subject, HARM_ATTR, &bp),
             Some(HARMS),
             "the learned belief rode the shipped gossip to the co-located naive being by presence"
+        );
+    }
+
+    // The minimal creature fixtures for the reproduction-beat tests (creature-selection step 2).
+    fn repro_reg() -> crate::homeostasis::HomeostaticRegistry {
+        use crate::homeostasis::{HomeostaticAxisDef, HomeostaticRegistry};
+        HomeostaticRegistry {
+            axes: vec![
+                HomeostaticAxisDef {
+                    id: ENERGY,
+                    name: "energy".to_string(),
+                    backing_component: Some(crate::physiology::ENERGY_DENSITY.to_string()),
+                    capacity_per_mass: Fixed::ONE,
+                    base_drain: Fixed::ZERO,
+                    exertion_drain: Fixed::ZERO,
+                    death_floor: Fixed::ZERO,
+                    draw_set: Vec::new(),
+                },
+                HomeostaticAxisDef {
+                    id: TEMPERATURE,
+                    name: "temperature".to_string(),
+                    backing_component: None,
+                    capacity_per_mass: Fixed::ONE,
+                    base_drain: Fixed::ZERO,
+                    exertion_drain: Fixed::ZERO,
+                    death_floor: Fixed::ZERO,
+                    draw_set: Vec::new(),
+                },
+            ],
+        }
+    }
+
+    fn repro_body() -> BodyPlan {
+        BodyPlan {
+            body_mass: Fixed::from_ratio(1, 2),
+            encephalization: Fixed::from_ratio(1, 2),
+            diet_breadth: Fixed::from_ratio(1, 2),
+            weapons: vec![],
+            covering: crate::anatomy::Part {
+                kind: 0,
+                development: Fixed::from_ratio(1, 2),
+            },
+            senses: vec![],
+            locomotion: vec![1],
+            organs: vec![],
+            temperament: crate::anatomy::Temperament {
+                boldness: Fixed::from_ratio(1, 2),
+                exploration: Fixed::from_ratio(1, 2),
+                activity: Fixed::from_ratio(1, 2),
+                sociability: Fixed::from_ratio(1, 2),
+                aggression: Fixed::from_ratio(1, 4),
+            },
+        }
+    }
+
+    fn repro_params() -> CreatureSelectionParams {
+        CreatureSelectionParams {
+            mint_perturbation_spread: Fixed::from_decimal_str("0.05").unwrap(),
+            reproduction_eligibility_reserve: Fixed::from_ratio(1, 2),
+            offspring_mutation_spread: Fixed::from_decimal_str("0.02").unwrap(),
+        }
+    }
+
+    #[test]
+    fn carries_lineage_is_the_structural_pairing_predicate() {
+        let reg = repro_reg();
+        let layout = Embodiment::new(
+            reg.clone(),
+            AffordanceRegistry::dev_default(),
+            LocomotionParams::dev_default(),
+            0,
+            1,
+        )
+        .layout()
+        .clone();
+        let ctrl = Controller::zeros(&layout);
+        let mk = |id: u64, lineage: bool| {
+            let mut w = Walker::new(
+                StableId(id),
+                Coord3::ground(0, 0),
+                repro_body(),
+                Homeostasis::from_mass(&reg, Fixed::ONE),
+                Physiology::dev_for_registry(&reg),
+                ctrl.clone(),
+            );
+            if lineage {
+                w = w.with_lineage(ctrl.clone());
+            }
+            w
+        };
+        // A modeled-lineage creature carrying a heritable controller can pair; a being with none (a founder
+        // body, the authored predator) cannot, and the predicate reads what the being CARRIES, never its id.
+        assert!(mk(CREATURE_ID_TAG | 1, true).carries_lineage());
+        assert!(!mk(CREATURE_ID_TAG | PREDATOR_ID_BIT, false).carries_lineage());
+        assert!(!mk(7, false).carries_lineage());
+    }
+
+    #[test]
+    fn breed_offspring_mints_a_midparent_blend_from_co_located_parents_and_replays() {
+        let reg = repro_reg();
+        let organs = BodyPlanRegistry::dev_default();
+        let layout = Embodiment::new(
+            reg.clone(),
+            AffordanceRegistry::dev_default(),
+            LocomotionParams::dev_default(),
+            0,
+            1,
+        )
+        .layout()
+        .clone();
+        let (n_in, n_out, hidden) = (layout.n_in(), layout.n_out(), layout.hidden());
+        // Parent A carries a full first weight, parent B a zero first weight; every other weight is zero for
+        // both, so the midparent of weight 0 is exactly one half (plus the bounded inheritance perturbation).
+        let mut wa = vec![Fixed::ZERO; layout.weight_count()];
+        wa[0] = Fixed::ONE;
+        let ctrl_a = Controller::from_weights(n_in, n_out, hidden, wa);
+        let ctrl_b = Controller::zeros(&layout);
+        let phys = Physiology::dev_for_registry(&reg);
+        let params = repro_params();
+        let (seed, clock) = (0x5EED, 6u64);
+
+        // Two eligible parents CO-LOCATED at one cell.
+        let here = Coord3::ground(3, 3);
+        let eligible = vec![
+            (
+                StableId(CREATURE_ID_TAG | 1),
+                here,
+                ctrl_a.clone(),
+                repro_body(),
+                phys.clone(),
+            ),
+            (
+                StableId(CREATURE_ID_TAG | 2),
+                here,
+                ctrl_b.clone(),
+                repro_body(),
+                phys.clone(),
+            ),
+        ];
+        let mut count = 0u64;
+        let built = breed_offspring(&eligible, &params, seed, clock, &reg, &organs, &mut count);
+        assert_eq!(
+            built.len(),
+            1,
+            "one co-located eligible pair mints one offspring"
+        );
+        assert_eq!(count, 1, "the offspring counter advanced by one");
+        let (cid, coord, walker) = &built[0];
+        assert_eq!(
+            cid.0,
+            CREATURE_ID_TAG | OFFSPRING_ID_BIT,
+            "offspring id in the disjoint sub-namespace"
+        );
+        assert!(
+            is_creature(*cid) && !is_predator(*cid),
+            "an offspring is a creature, not a predator"
+        );
+        assert_eq!(*coord, here, "the offspring is minted at the parents' cell");
+        assert!(
+            walker.carries_lineage(),
+            "an offspring carries its own heritable lineage"
+        );
+        // The midparent blend: weight 0 is one half of (ONE, ZERO) within the bounded inheritance perturbation;
+        // weight 1 (both parents zero) stays within that same bound of zero.
+        let half = Fixed::from_ratio(1, 2);
+        let bound = params.offspring_mutation_spread;
+        let w0 = walker.controller.weight(0);
+        assert!(
+            (w0 - half).abs() <= bound,
+            "offspring weight 0 is the midparent one-half within the perturbation bound"
+        );
+        assert!(
+            walker.controller.weight(1).abs() <= bound,
+            "offspring weight 1 (both parents zero) stays within the perturbation bound"
+        );
+        // Determinism: the same inputs and a fresh counter reproduce the identical offspring controller.
+        let mut count2 = 0u64;
+        let built2 = breed_offspring(&eligible, &params, seed, clock, &reg, &organs, &mut count2);
+        assert_eq!(
+            built2[0].2.controller, walker.controller,
+            "the beat replays bit for bit"
+        );
+
+        // A lone eligible creature (no co-located partner) does not reproduce.
+        let solo = vec![(
+            StableId(CREATURE_ID_TAG | 1),
+            here,
+            ctrl_a.clone(),
+            repro_body(),
+            phys.clone(),
+        )];
+        let mut c = 0u64;
+        assert!(
+            breed_offspring(&solo, &params, seed, clock, &reg, &organs, &mut c).is_empty(),
+            "an unpaired eligible creature does not breed"
+        );
+        // Two eligible creatures in DIFFERENT cells do not reproduce (co-location is required).
+        let apart = vec![
+            (
+                StableId(CREATURE_ID_TAG | 1),
+                here,
+                ctrl_a.clone(),
+                repro_body(),
+                phys.clone(),
+            ),
+            (
+                StableId(CREATURE_ID_TAG | 2),
+                Coord3::ground(5, 5),
+                ctrl_b.clone(),
+                repro_body(),
+                phys.clone(),
+            ),
+        ];
+        let mut c2 = 0u64;
+        assert!(
+            breed_offspring(&apart, &params, seed, clock, &reg, &organs, &mut c2).is_empty(),
+            "two eligible creatures in different cells do not pair"
+        );
+    }
+
+    #[test]
+    fn the_reproduction_beat_fires_end_to_end_through_a_real_step() {
+        // The end-to-end wrapper proof (creature-selection step 2): a real runner, the creature_selection
+        // substrate armed, stepped to a life-cadence beat, mints an offspring from two co-located eligible
+        // creatures through the actual `reproduce_creatures` path (the cadence gate, the energy-axis eligibility
+        // filter, the snapshot-before-mint, and the install), not just the extracted `breed_offspring` core.
+        let reg = repro_reg();
+        let mut emb = Embodiment::new(
+            reg.clone(),
+            AffordanceRegistry::dev_default(),
+            LocomotionParams::dev_default(),
+            0,
+            0x5A17,
+        );
+        // Eligibility floored at zero so any living creature qualifies (removing sensitivity to one step's
+        // metabolic drain); the mechanism under test is the beat, not the threshold (that is covered above).
+        emb.set_creature_selection(Some(CreatureSelectionParams {
+            mint_perturbation_spread: Fixed::ZERO,
+            reproduction_eligibility_reserve: Fixed::ZERO,
+            offspring_mutation_spread: Fixed::from_decimal_str("0.02").unwrap(),
+        }));
+        let layout = emb.layout().clone();
+        // Two BLANK-controller creatures co-located at one cell: a blank controller issues no positive
+        // activation, so they do not move and stay co-located through the step. Each carries its controller as
+        // heritable lineage (a modeled-lineage creature).
+        let blank = Controller::zeros(&layout);
+        let here = Coord3::ground(4, 4);
+        for k in 1u64..=2 {
+            emb.add(
+                Walker::new(
+                    StableId(CREATURE_ID_TAG | k),
+                    here,
+                    repro_body(),
+                    Homeostasis::from_mass(&reg, Fixed::ONE),
+                    Physiology::dev_for_registry(&reg),
+                    blank.clone(),
+                )
+                .with_lineage(blank.clone()),
+                BeingThermal {
+                    setpoint: Fixed::from_int(37),
+                    half_band: Fixed::from_int(10),
+                    initial_temp: Fixed::from_int(37),
+                },
+            );
+        }
+        let params = crate::InferenceParams {
+            clamp: Fixed::from_int(50),
+            commit_threshold: Fixed::from_int(3),
+            margin: Fixed::from_int(1),
+        };
+        // A minimal world with a life cadence of one tick, so the very first step lands on a cadence beat and
+        // fires the reproduction beat.
+        let mut world = World::new(params, params, crate::AccessWeights::from_pairs([]));
+        world.set_life_cadence(1);
+        let field = Field::new(8, 8, vec![Fixed::from_int(37); 64]);
+        let mut runner = Runner::with_world_and_embodiment(field, calib(), world, emb);
+
+        let before = runner.embodiment().unwrap().walkers().len();
+        runner.step();
+        let after = runner.embodiment().unwrap();
+        assert!(
+            after.walkers().len() > before,
+            "the reproduction beat minted at least one offspring through a real step"
+        );
+        // The minted offspring is a lineage-carrying creature in the disjoint offspring sub-namespace, at the
+        // parents' cell, distinct from the two founders and never a predator.
+        let offspring: Vec<_> = after
+            .walkers()
+            .iter()
+            .filter(|w| w.id.0 & OFFSPRING_ID_BIT != 0)
+            .collect();
+        assert_eq!(
+            offspring.len(),
+            1,
+            "one co-located eligible pair mints exactly one offspring"
+        );
+        let child = offspring[0];
+        assert!(is_creature(child.id) && !is_predator(child.id));
+        assert!(
+            child.carries_lineage(),
+            "the offspring carries its own heritable lineage"
+        );
+        assert_eq!(
+            child.coord(),
+            here,
+            "the offspring is minted at the parents' cell"
+        );
+    }
+
+    /// A mind-less creature at `perceiver_at` wearing bare hide, whose controller wants to MOVE and steers its
+    /// heading from ONE being-feature bucket's toward-direction (the `weight_bucket` slot), and a blank-controller
+    /// EMITTER at `emitter_at` wearing covering `emitter_covering`, stepped once through a real runner with the
+    /// being-feature substrate armed on `opt.emissivity.band_1`. Returns the perceiver's x-displacement. The whole
+    /// point: the runner's being-feature pass must READ the emitter's real covering, discriminate its band_1
+    /// emissivity into a bucket, and steer the perceiver only when that bucket matches the weighted one.
+    fn being_feature_step_dx(emitter_covering: u16, weight_bucket: Option<usize>) -> u128 {
+        use crate::homeostasis::{HomeostaticAxisDef, HomeostaticRegistry};
+        use crate::medium::MediumField;
+        use crate::perceivable_feature::PerceivableFeatureRegistry;
+        // A local homeo registry with a deeply-negative ENERGY death floor, so the organ-less test creatures
+        // survive the one step under the armed physiology/metabolism (the being-feature wire, not survival, is
+        // the mechanism under test; starvation is covered elsewhere).
+        let homeo = HomeostaticRegistry {
+            axes: vec![
+                HomeostaticAxisDef {
+                    id: ENERGY,
+                    name: "energy".to_string(),
+                    backing_component: Some(crate::physiology::ENERGY_DENSITY.to_string()),
+                    capacity_per_mass: Fixed::ONE,
+                    base_drain: Fixed::ZERO,
+                    exertion_drain: Fixed::ZERO,
+                    death_floor: Fixed::from_int(-1000),
+                    draw_set: Vec::new(),
+                },
+                HomeostaticAxisDef {
+                    id: TEMPERATURE,
+                    name: "temperature".to_string(),
+                    backing_component: None,
+                    capacity_per_mass: Fixed::ONE,
+                    base_drain: Fixed::ZERO,
+                    exertion_drain: Fixed::ZERO,
+                    death_floor: Fixed::from_int(-1000),
+                    draw_set: Vec::new(),
+                },
+            ],
+        };
+        let organs = BodyPlanRegistry::dev_default();
+        let mut emb = Embodiment::new(
+            homeo.clone(),
+            AffordanceRegistry::dev_default(),
+            LocomotionParams::dev_default(),
+            0,
+            0x2B1D,
+        );
+        emb.set_physiology(EmbodiedPhysiology::dev_fixture(
+            organs.clone(),
+            MediumField::uniform(
+                16,
+                16,
+                Fixed::ONE,
+                Fixed::ONE,
+                Fixed::ONE,
+                Fixed::from_int(37),
+            ),
+        ));
+        emb.set_being_field(Some(BeingPerceptField::dev_fixture()));
+        emb.set_being_percept(true);
+        emb.set_creature_being_percept(true);
+        // One channel on band_1 (organic 0.96 -> bucket 19, mineral 0.88 -> bucket 17), step 0.05, 20 buckets.
+        emb.set_being_features(PerceivableFeatureRegistry::from_channels(&[(
+            "opt.emissivity.band_1",
+            20,
+            Fixed::from_ratio(1, 20),
+        )]));
+        let layout = emb.layout().clone();
+        let n_in = layout.n_in();
+        let move_base = layout
+            .output_base(crate::homeostasis::MOVE)
+            .expect("the body affords MOVE");
+        let bf = layout.being_feature_input_base();
+        // The perceiver wants to MOVE (activation from bias) and steers its MOVE heading from ONE feature
+        // bucket's (dx, dy) toward-direction. A weight for output `o` from input `i` sits at `o * n_in + i`.
+        let mut w = vec![Fixed::ZERO; layout.weight_count()];
+        w[move_base * n_in + (n_in - 1)] = Fixed::ONE; // MOVE activation from the bias
+        if let Some(b) = weight_bucket {
+            w[(move_base + 1) * n_in + (bf + 2 * b)] = Fixed::from_int(8); // heading dx from the bucket
+            w[(move_base + 2) * n_in + (bf + 2 * b + 1)] = Fixed::from_int(8); // heading dy
+        }
+        let perceiver_ctrl =
+            Controller::from_weights(layout.n_in(), layout.n_out(), layout.hidden(), w);
+        let blank = Controller::zeros(&layout);
+        // A warm body at ~310 K (~37 C): body_temp is absolute (Kelvin), so 310 gives a strong thermal
+        // self-emission the perceiver senses well above threshold (37 K would be near-frozen, a negligible
+        // signal that leaves the being-feature block below the heading epsilon).
+        let thermal = || BeingThermal {
+            setpoint: Fixed::from_int(310),
+            half_band: Fixed::from_int(30),
+            initial_temp: Fixed::from_int(310),
+        };
+        let body_with_covering = |kind: u16| {
+            let mut b = repro_body();
+            b.covering = crate::anatomy::Part {
+                kind,
+                development: Fixed::from_ratio(1, 2),
+            };
+            b
+        };
+        // The PERCEIVER (mind-less creature) at the origin, bare hide (kind 0); its covering is irrelevant, only
+        // the emitter's is read.
+        emb.add(
+            Walker::new(
+                StableId(CREATURE_ID_TAG | 1),
+                Coord3::ground(2, 8),
+                body_with_covering(0),
+                Homeostasis::from_mass(&homeo, Fixed::ONE),
+                Physiology::dev_for_registry(&homeo),
+                perceiver_ctrl,
+            ),
+            thermal(),
+        );
+        // The EMITTER (mind-less, blank controller so it stays put) several cells due EAST, wearing the covering
+        // under test; it emits a being-signal from its body_temp that the perceiver senses.
+        emb.add(
+            Walker::new(
+                StableId(CREATURE_ID_TAG | 2),
+                Coord3::ground(5, 8),
+                body_with_covering(emitter_covering),
+                Homeostasis::from_mass(&homeo, Fixed::ONE),
+                Physiology::dev_for_registry(&homeo),
+                blank,
+            ),
+            thermal(),
+        );
+        let params = crate::InferenceParams {
+            clamp: Fixed::from_int(50),
+            commit_threshold: Fixed::from_int(3),
+            margin: Fixed::from_int(1),
+        };
+        let world = World::new(params, params, crate::AccessWeights::from_pairs([]));
+        let field = Field::new(16, 16, vec![Fixed::from_int(37); 256]);
+        let mut runner = Runner::with_world_and_embodiment(field, calib(), world, emb);
+        // Step several times so a sub-cell per-tick heading accumulates; the state hash captures any movement
+        // (whole-cell or sub-cell) the being-feature block drives.
+        for _ in 0..30 {
+            runner.step();
+        }
+        runner.state_hash()
+    }
+
+    #[test]
+    fn the_being_feature_wire_fires_end_to_end_and_discriminates_real_coverings() {
+        // The anti-confirmation-bias end-to-end proof (creature-selection step 2b): a REAL runner, the
+        // perceivable-feature registry armed, stepped once, drives the whole run-path glue that the isolated
+        // unit tests skip: the perceive-phase gated pass reads each perceived emitter's REAL covering
+        // (`read_emitter` over `spawn`ed bodies), discriminates its band_1 spectral emissivity into a bucket, and
+        // threads the being-feature block into the controller so a per-bucket weight steers the creature. It also
+        // closes the isolated-input gap: the discrimination runs over the coverings the codebase really ships
+        // (organic band_1 0.96 -> bucket 19, keratin/mineral band_1 0.88 -> bucket 17), not hand-fed values.
+        // THE WIRE FIRES: a MINERAL emitter's band_1 0.88 falls in bucket 17; a perceiver WEIGHTED on bucket 17
+        // is steered, so the run differs from the SAME perceiver with NO being-feature weight. If the runner
+        // pass never read the emitter's covering or never threaded the block into the controller, these would
+        // match.
+        let mineral_weighted = being_feature_step_dx(6, Some(17));
+        let mineral_unweighted = being_feature_step_dx(6, None);
+        assert_ne!(
+            mineral_weighted, mineral_unweighted,
+            "the runner being-feature pass read the mineral emitter's covering, binned band_1 0.88 into bucket \
+             17, and threaded the block into the controller so the bucket-17 weight steered the perceiver"
+        );
+        // IT DISCRIMINATES REAL COVERINGS: an ORGANIC emitter's band_1 0.96 falls in bucket 19, NOT the weighted
+        // bucket 17, so weighting bucket 17 changes nothing (the pass binned the two real coverings differently;
+        // had it ignored the covering or binned both alike, this would differ too).
+        let organic_weighted = being_feature_step_dx(0, Some(17));
+        let organic_unweighted = being_feature_step_dx(0, None);
+        assert_eq!(
+            organic_weighted, organic_unweighted,
+            "an organic emitter falls in bucket 19, not the weighted bucket 17, so the perceiver is unmoved: \
+             the pass discriminates the real coverings by their band_1 emissivity"
         );
     }
 }
