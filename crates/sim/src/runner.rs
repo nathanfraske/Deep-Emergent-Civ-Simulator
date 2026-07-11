@@ -2135,6 +2135,32 @@ impl Embodiment {
         self.contact_transfer = registry;
     }
 
+    /// Install the capability GRADE registry the strike DELIVERY reads its role-to-axis binding from (grade-binding
+    /// unification, Slice C): a contact row names the `grade_law` whose binding it shares, and the strike wire reads
+    /// that grade law's binding from here. Defaults to [`FunctionLawRegistry::dev_seed`]; a WORLD installs its own
+    /// grade laws (an alien actuator naming its own axes) through this setter, so an alien delivery binding is a
+    /// DATA row, never a rewrite (Prime Directive 7, the alien-install lever the pre-Slice-C per-row binding
+    /// carried). STATIC CONFIG, off `state_hash`.
+    ///
+    /// Call this BEFORE [`Self::set_contact_transfer`] (which validates every row's `grade_law` resolves here).
+    /// Where a material registry is installed ([`Self::set_material_registry`]), this VALIDATES each grade law's
+    /// binding against it ([`civsim_compose::AxisBinding::validate_dimensions`]), so a role bound to a
+    /// wrong-dimension axis (a geometry role on a pressure axis) is a fail-loud LOAD error: the accessor-class
+    /// physics check, live at the boundary where the floor's dimensions are available.
+    pub fn set_function_laws(&mut self, registry: FunctionLawRegistry) {
+        if let Some(reg) = self.material_registry.as_ref() {
+            for def in registry.defs() {
+                def.binding.validate_dimensions(reg).unwrap_or_else(|e| {
+                    panic!(
+                        "grade law '{}' binds a role against its axis's dimension: {e}",
+                        def.name
+                    )
+                });
+            }
+        }
+        self.function_laws = registry;
+    }
+
     /// Break a being's WIELDED tool if the reaction stress of its own working force exceeds the tool
     /// material's fracture strength, OR if the tool's slender body buckles under that axial force (the
     /// made-world arc, tool-use, Section E, with the tool-geometry expansion). The tool's working edge carries
@@ -8281,6 +8307,107 @@ source = "test"
             half_band: Fixed::from_int(8),
             initial_temp: Fixed::from_int(37),
         }
+    }
+
+    #[test]
+    fn set_function_laws_installs_an_alien_grade_registry_and_wires_the_dimension_check() {
+        use crate::homeostasis::{HomeostaticAxisDef, HomeostaticRegistry};
+        use civsim_compose::{AxisBinding, CapabilityKernel, FunctionLawDef, FunctionLawRegistry};
+        // Grade-binding Slice C, section-9 catch (Prime Directive 7, the alien-install lever): a world installs its
+        // OWN grade registry through set_function_laws, so an alien actuator's delivery binding is a DATA row
+        // reachable at the runner level, not frozen to the Terran dev_seed the constructor defaults to.
+        let mut emb = Embodiment::new(
+            HomeostaticRegistry {
+                axes: vec![HomeostaticAxisDef {
+                    id: TEMPERATURE,
+                    name: "temperature".to_string(),
+                    backing_component: None,
+                    capacity_per_mass: Fixed::ONE,
+                    base_drain: Fixed::ZERO,
+                    exertion_drain: Fixed::ZERO,
+                    death_floor: Fixed::ZERO,
+                    draw_set: Vec::new(),
+                }],
+            },
+            AffordanceRegistry::dev_predator(),
+            LocomotionParams::dev_default(),
+            0,
+            0xA11E,
+        );
+        // An ALIEN grade registry: an IMPACT law binding the actuating-strength role to the alien's OWN axis id.
+        // The install succeeds (the lever restored); the delivery would read these axes.
+        let alien = AxisBinding::from_pairs([
+            ("actuating_strength", "alien.strength"),
+            ("cross_section", "mech.cross_section_area"),
+            ("stroke", "mech.stroke_length"),
+            ("yield_strength", "mat.yield_strength"),
+            ("elastic_modulus", "mat.elastic_modulus"),
+            ("driving_pressure", "fluid.driving_pressure"),
+        ]);
+        let mut alien_reg = FunctionLawRegistry::new();
+        alien_reg.insert(
+            FunctionLawDef::with_binding(
+                FunctionLawRegistry::ID_IMPACT,
+                "impact",
+                CapabilityKernel::Impact,
+                alien,
+            )
+            .expect("the alien binding carries every IMPACT role"),
+        );
+        emb.set_function_laws(alien_reg);
+        // With a material registry installed, set_function_laws is the LIVE accessor-class physics check: the
+        // self-consistent dev_seed defaults install clean (the wiring the section-9 flagged as test-only is now
+        // exercised at a real load boundary).
+        emb.set_material_registry(PhysicsRegistry::ground().expect("the ground floor loads"));
+        emb.set_function_laws(FunctionLawRegistry::dev_seed());
+    }
+
+    #[test]
+    #[should_panic(expected = "against its axis's dimension")]
+    fn set_function_laws_panics_on_a_role_bound_to_a_wrong_dimension_axis() {
+        use crate::homeostasis::{HomeostaticAxisDef, HomeostaticRegistry};
+        use civsim_compose::{AxisBinding, CapabilityKernel, FunctionLawDef, FunctionLawRegistry};
+        // The WIRED physics check (section-9 catch, the gate's condition 2): with a material registry present,
+        // installing a grade law that binds a GEOMETRY role (cross_section) to a PRESSURE axis (mat.yield_strength)
+        // is a fail-loud LOAD error, not a silent misread through the wrong accessor.
+        let mut emb = Embodiment::new(
+            HomeostaticRegistry {
+                axes: vec![HomeostaticAxisDef {
+                    id: TEMPERATURE,
+                    name: "temperature".to_string(),
+                    backing_component: None,
+                    capacity_per_mass: Fixed::ONE,
+                    base_drain: Fixed::ZERO,
+                    exertion_drain: Fixed::ZERO,
+                    death_floor: Fixed::ZERO,
+                    draw_set: Vec::new(),
+                }],
+            },
+            AffordanceRegistry::dev_predator(),
+            LocomotionParams::dev_default(),
+            0,
+            0xBAD,
+        );
+        emb.set_material_registry(PhysicsRegistry::ground().expect("the ground floor loads"));
+        let bad = AxisBinding::from_pairs([
+            ("actuating_strength", "mat.fracture_strength"),
+            ("cross_section", "mat.yield_strength"), // a geometry role on a PRESSURE axis: the contradiction
+            ("stroke", "mech.stroke_length"),
+            ("yield_strength", "mat.yield_strength"),
+            ("elastic_modulus", "mat.elastic_modulus"),
+            ("driving_pressure", "fluid.driving_pressure"),
+        ]);
+        let mut reg = FunctionLawRegistry::new();
+        reg.insert(
+            FunctionLawDef::with_binding(
+                FunctionLawRegistry::ID_IMPACT,
+                "impact",
+                CapabilityKernel::Impact,
+                bad,
+            )
+            .expect("the role set is complete"),
+        );
+        emb.set_function_laws(reg);
     }
 
     #[test]

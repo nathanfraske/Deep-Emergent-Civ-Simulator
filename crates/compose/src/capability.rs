@@ -54,8 +54,10 @@ pub struct FunctionLawId(pub u32);
 /// contradiction (the gate's Slice-C condition 2, the value-authoring line). Both the grade and the delivery kernels
 /// read a role through the ONE shared [`AxisBinding::read`], which dispatches on this class, so a role is read
 /// through the same accessor on both paths and cannot be classed geometry on one and material on the other. The
-/// physics check is [`AxisBinding::validate_dimensions`], which fails loud if a role's bound axis has a dimension
-/// inconsistent with the role's class.
+/// physics check is [`AxisBinding::validate_dimensions`]: it fails loud if a role's bound axis has a dimension
+/// inconsistent with the role's class, run against a registry where one is available (the world-build calls it
+/// through `civsim_sim::Embodiment::set_function_laws` when a material registry is installed, and the default
+/// kernel bindings are checked against the ground floor in the compose test suite), never an always-on runtime net.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AccessorClass {
     /// A shape quantity (length, area, volume): read through the geometry accessor.
@@ -83,9 +85,10 @@ impl AccessorClass {
 /// geometry accessor, and everything else (a strength, hardness, yield, shear or compressive strength, modulus,
 /// refractive index, driving pressure) the material accessor. This is fixed mechanism, like the role NAME, so a
 /// world cannot author it into a contradiction; a new geometry role added to a future kernel is listed here, and
-/// [`AxisBinding::validate_dimensions`] catches any role whose class disagrees with its bound axis's dimension.
-/// Deriving the class purely from a world's declared axis dimension, so no fixed list is needed at all, is the
-/// north-star follow-on where the registry dependence earns its place.
+/// [`AxisBinding::validate_dimensions`] (run at the world-build against its registry, and over the default bindings
+/// in the compose test suite) catches any role whose class disagrees with its bound axis's dimension. Deriving the
+/// class purely from a world's declared axis dimension, so no fixed list is needed at all, is the north-star
+/// follow-on where the registry dependence earns its place.
 pub fn accessor_class(role: &str) -> AccessorClass {
     match role {
         "contact_area" | "cross_section" | "stroke" | "arm_length" | "section_modulus" => {
