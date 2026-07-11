@@ -49,13 +49,14 @@ pub struct FunctionLawId(pub u32);
 
 /// The accessor a role's axis is read through: a GEOMETRY quantity (a length, area, or volume, the body's SHAPE)
 /// reads the geometry store, everything else (a stress, pressure, modulus, index, the body's MATERIAL nature) the
-/// material store. The class is a fixed property of the semantic ROLE ([`accessor_class`]), part of the kernel
-/// mechanism exactly as the role NAME is, so it is not world-authorable data and cannot be authored into a
-/// contradiction (the gate's Slice-C condition 2, the value-authoring line). Both the grade and the delivery kernels
-/// read a role through the ONE shared [`AxisBinding::read`], which dispatches on this class, so a role is read
+/// material store. The class is DERIVED from the role's declared dimension ([`role_dimension`]) through
+/// [`accessor_class`], part of the kernel mechanism exactly as the role NAME is, so it is not world-authorable data
+/// and cannot contradict that dimension (the gate's Slice-C condition 2, the value-authoring line). Both the grade
+/// and the delivery kernels read a role through the ONE shared [`AxisBinding::read`], which dispatches on this class,
+/// so a role is read
 /// through the same accessor on both paths and cannot be classed geometry on one and material on the other. The
-/// physics check is [`AxisBinding::validate_dimensions`]: it fails loud if a role's bound axis has a dimension
-/// inconsistent with the role's class, run against a registry where one is available (the world-build calls it
+/// physics check is [`AxisBinding::validate_dimensions`]: it fails loud if a role's bound axis's dimension does not
+/// EXACTLY match the role's declared dimension, run against a registry where one is available (the world-build calls it
 /// through `civsim_sim::Embodiment::set_function_laws` when a material registry is installed, and the default
 /// kernel bindings are checked against the ground floor in the compose test suite), never an always-on runtime net.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -80,22 +81,48 @@ impl AccessorClass {
     }
 }
 
-/// The accessor class of a semantic ROLE, declared ONCE here for every kernel role rather than restated in each
-/// kernel body: a shape role (a contact area, a cross-section, a stroke or arm length, a section modulus) reads the
-/// geometry accessor, and everything else (a strength, hardness, yield, shear or compressive strength, modulus,
-/// refractive index, driving pressure) the material accessor. This is fixed mechanism, like the role NAME, so a
-/// world cannot author it into a contradiction; a new geometry role added to a future kernel is listed here, and
-/// [`AxisBinding::validate_dimensions`] (run at the world-build against its registry, and over the default bindings
-/// in the compose test suite) catches any role whose class disagrees with its bound axis's dimension. Deriving the
-/// class purely from a world's declared axis dimension, so no fixed list is needed at all, is the north-star
-/// follow-on where the registry dependence earns its place.
+/// The expected physical DIMENSION of a semantic ROLE, declared ONCE here for every kernel role: the KIND of
+/// quantity the role reads (a contact area or cross-section is an AREA, a stroke or arm length a LENGTH, a section
+/// modulus a VOLUME, a yield, shear, compressive, or actuating strength, an indentation hardness, an elastic modulus,
+/// or a driving pressure a PRESSURE, a refractive index DIMENSIONLESS), read from the role's own kernel physics
+/// rather than chosen as a number. This is the role-intent datum, fixed mechanism like the role NAME, so a world
+/// cannot author it into a contradiction. `None` is an undeclared role (a world-added binding entry no kernel yet
+/// reads): it carries no intent to check, so it reads through the material accessor by the absence convention and is
+/// skipped by [`AxisBinding::validate_dimensions`]. A new kernel role declares its kind here alongside the role in
+/// the kernel's math. Deriving the kind purely from a world's declared axis dimension at read time, so no role-intent
+/// table is needed at all, is the north-star follow-on that re-introduces the read-time registry dependence and still
+/// cannot recover the irreducible role-to-axis mapping.
+pub fn role_dimension(role: &str) -> Option<Dimension> {
+    let dim = match role {
+        "contact_area" | "cross_section" => Dimension::AREA,
+        "stroke" | "arm_length" => Dimension::LENGTH,
+        "section_modulus" => Dimension::VOLUME,
+        "actuating_strength"
+        | "driving_pressure"
+        | "yield_strength"
+        | "shear_strength"
+        | "compressive_strength"
+        | "indentation_hardness"
+        | "elastic_modulus" => Dimension::PRESSURE,
+        "refractive_index" => Dimension::DIMENSIONLESS,
+        _ => return None,
+    };
+    Some(dim)
+}
+
+/// The accessor class of a semantic ROLE, DERIVED from its declared expected dimension ([`role_dimension`]) rather
+/// than a hand-typed list: a shape kind (length, area, volume) reads the geometry accessor, every other kind (a
+/// stress, pressure, modulus, dimensionless index) the material accessor. Because the class is a function of the
+/// role's declared dimension, it cannot contradict that dimension, and a world cannot author it into a contradiction
+/// (the role's kind is fixed mechanism). An undeclared role (`role_dimension` is `None`) reads through the material
+/// accessor, the absence convention (matching the pre-derivation default). The physics check
+/// [`AxisBinding::validate_dimensions`] compares the role's declared dimension EXACTLY against its bound axis's actual
+/// dimension, run at the world-build against its registry and over the default bindings in the compose test suite,
+/// never an always-on runtime net.
 pub fn accessor_class(role: &str) -> AccessorClass {
-    match role {
-        "contact_area" | "cross_section" | "stroke" | "arm_length" | "section_modulus" => {
-            AccessorClass::Geometry
-        }
-        _ => AccessorClass::Material,
-    }
+    role_dimension(role)
+        .map(AccessorClass::from_dimension)
+        .unwrap_or(AccessorClass::Material)
 }
 
 /// A DATA-DEFINED axis binding: a map from a kernel's ROLE NAME (the semantic slot a law reads, `contact_area`,
@@ -185,21 +212,21 @@ impl AxisBinding {
         Ok(())
     }
 
-    /// The PHYSICS check for the accessor class (the gate's Slice-C condition 2, validated-against-dimension
-    /// branch): for every bound role whose axis `reg` declares, fail loud if the role's fixed class
-    /// ([`accessor_class`]) disagrees with the accessor the axis's actual DIMENSION would read through
-    /// ([`AccessorClass::from_dimension`]). This catches a role bound to a wrong-dimension axis (a geometry role
-    /// bound to a pressure axis, say) at load rather than as a silent misread. An axis `reg` does not declare is
-    /// skipped (this registry cannot judge it); a world validates against the registry that declares its own axes.
+    /// The PHYSICS check (the gate's Slice-C condition 2, tightened to an EXACT-dimension match): for every bound
+    /// role whose kind is declared ([`role_dimension`]) and whose axis `reg` declares, fail loud if the role's
+    /// EXPECTED dimension does not EXACTLY match its bound axis's actual dimension. This is stricter than the
+    /// geometry-versus-material bucket the accessor class turns on: a role expecting an AREA bound to a VOLUME axis is
+    /// a load error, though both bucket to the geometry accessor. It catches a role bound to a wrong-dimension axis at
+    /// load rather than as a silent misread. A role with no declared kind (`role_dimension` is `None`, a world-added
+    /// binding entry no kernel reads) is skipped, as is an axis `reg` does not declare (this registry cannot judge
+    /// it); a world validates against the registry that declares its own axes.
     pub fn validate_dimensions(&self, reg: &PhysicsRegistry) -> Result<(), String> {
         for (role, axis) in self.pairs() {
-            if let Some(quantity) = reg.axis(axis) {
-                let by_dimension = AccessorClass::from_dimension(quantity.dimension);
-                if by_dimension != accessor_class(role) {
+            if let (Some(expected), Some(quantity)) = (role_dimension(role), reg.axis(axis)) {
+                if quantity.dimension != expected {
                     return Err(format!(
-                        "role '{role}' is {:?} but its bound axis '{axis}' has a {:?} dimension",
-                        accessor_class(role),
-                        by_dimension
+                        "role '{role}' expects a {expected:?} dimension but its bound axis '{axis}' has {:?}",
+                        quantity.dimension
                     ));
                 }
             }
@@ -1033,43 +1060,57 @@ mod tests {
     }
 
     #[test]
-    fn the_accessor_class_is_a_fixed_role_property_and_validate_dimensions_catches_a_mismatch() {
-        // Slice C2 (the lighter form the gate adopted): the geo-vs-material accessor class is a fixed property of
-        // the semantic ROLE, declared once in `accessor_class`, so both the grade and delivery kernels read a role
-        // through the same accessor (the class is not restated per kernel body, closing condition 2's seam) and a
-        // world cannot author it into a contradiction (it is fixed mechanism, not binding data).
-        for r in [
-            "cross_section",
-            "stroke",
-            "contact_area",
-            "section_modulus",
-            "arm_length",
-        ] {
+    fn role_dimension_declares_each_role_and_the_accessor_class_derives_from_it() {
+        // The role-intent datum: each kernel role declares its expected physical KIND, read from the role's own
+        // physics (a contact area is an AREA, a yield strength a PRESSURE), and the geo-vs-material accessor class
+        // DERIVES from that declaration rather than a hand-typed list. This proves the derivation is byte-neutral: for
+        // every one of the 13 roles the derived class equals the pre-arc class (Geometry for the shape kinds, Material
+        // for the rest), so `AxisBinding::read` dispatches identically.
+        let geometry = [
+            ("contact_area", Dimension::AREA),
+            ("cross_section", Dimension::AREA),
+            ("stroke", Dimension::LENGTH),
+            ("arm_length", Dimension::LENGTH),
+            ("section_modulus", Dimension::VOLUME),
+        ];
+        for (role, dim) in geometry {
+            assert_eq!(role_dimension(role), Some(dim), "{role} declares its kind");
             assert_eq!(
-                accessor_class(r),
+                accessor_class(role),
                 AccessorClass::Geometry,
-                "{r} is a shape role"
+                "{role} derives to the geometry accessor"
             );
         }
-        for r in [
-            "actuating_strength",
-            "driving_pressure",
-            "yield_strength",
-            "elastic_modulus",
-            "refractive_index",
-            "indentation_hardness",
-            "shear_strength",
-            "compressive_strength",
-        ] {
+        let material = [
+            ("actuating_strength", Dimension::PRESSURE),
+            ("driving_pressure", Dimension::PRESSURE),
+            ("yield_strength", Dimension::PRESSURE),
+            ("shear_strength", Dimension::PRESSURE),
+            ("compressive_strength", Dimension::PRESSURE),
+            ("indentation_hardness", Dimension::PRESSURE),
+            ("elastic_modulus", Dimension::PRESSURE),
+            ("refractive_index", Dimension::DIMENSIONLESS),
+        ];
+        for (role, dim) in material {
+            assert_eq!(role_dimension(role), Some(dim), "{role} declares its kind");
             assert_eq!(
-                accessor_class(r),
+                accessor_class(role),
                 AccessorClass::Material,
-                "{r} is a material role"
+                "{role} derives to the material accessor"
             );
         }
 
-        // The PHYSICS check (validated-against-dimension, condition 2): every default binding's roles agree with
-        // their bound axes' actual floor dimensions, so no role is classed against its axis's real dimension.
+        // An undeclared role (no kernel reads it) carries no intent: `role_dimension` is `None` and the class falls
+        // to Material, the absence convention that matches the pre-derivation `_ => Material` default.
+        assert_eq!(role_dimension("not_a_role"), None);
+        assert_eq!(accessor_class("not_a_role"), AccessorClass::Material);
+    }
+
+    #[test]
+    fn validate_dimensions_passes_the_defaults_and_catches_a_wrong_dimension_bind_exactly() {
+        // The tightened PHYSICS check (condition 2, exact-dimension match): every default binding's roles match their
+        // bound axes' actual floor dimensions EXACTLY, so the tightening is byte-neutral on the defaults, no new
+        // failure where the geometry-versus-material bucket passed.
         let ground = PhysicsRegistry::ground().expect("the ground floor loads");
         for kernel in [
             CapabilityKernel::Pierce,
@@ -1084,19 +1125,36 @@ mod tests {
                     .default_binding()
                     .validate_dimensions(&ground)
                     .is_ok(),
-                "the {kernel:?} default binding's roles agree with their axes' dimensions"
+                "the {kernel:?} default binding's roles match their axes' dimensions exactly"
             );
         }
 
-        // A binding that binds a GEOMETRY role (cross_section) to a PRESSURE axis (mat.yield_strength) is a
-        // role-vs-dimension contradiction: validate_dimensions fails loud, naming the role. This is the misread the
-        // fixed-role class plus the dimension validation catches at load, the gate's condition-2 branch.
-        let wrong = AxisBinding::from_pairs([("cross_section", "mat.yield_strength")]);
-        let err = wrong
+        // A GEOMETRY role (cross_section, an AREA) bound to a PRESSURE axis (mat.yield_strength) is a wrong-dimension
+        // bind: validate_dimensions fails loud, naming the role. This case the geometry-versus-material bucket already
+        // caught (AREA is geometry, PRESSURE is material); the exact match keeps catching it.
+        let wrong_class = AxisBinding::from_pairs([("cross_section", "mat.yield_strength")]);
+        let err = wrong_class
             .validate_dimensions(&ground)
-            .expect_err("a geometry role bound to a pressure axis is a load error");
+            .expect_err("an area role bound to a pressure axis is a load error");
         assert!(
             err.contains("cross_section"),
+            "the validate error names the contradicting role: {err}"
+        );
+
+        // The ADDED protection: an AREA role (contact_area) bound to a VOLUME axis (mech.section_modulus) is now a
+        // load error, though the geometry-versus-material bucket would PASS it, because both AREA and VOLUME bucket to
+        // the geometry accessor. The exact-dimension match is stricter than the bucket the accessor class turns on.
+        assert_eq!(
+            AccessorClass::from_dimension(Dimension::AREA),
+            AccessorClass::from_dimension(Dimension::VOLUME),
+            "AREA and VOLUME both bucket to geometry, so the class-bucket check cannot tell them apart"
+        );
+        let wrong_dimension = AxisBinding::from_pairs([("contact_area", "mech.section_modulus")]);
+        let err = wrong_dimension.validate_dimensions(&ground).expect_err(
+            "an area role bound to a volume axis is a load error under the exact match",
+        );
+        assert!(
+            err.contains("contact_area"),
             "the validate error names the contradicting role: {err}"
         );
     }
