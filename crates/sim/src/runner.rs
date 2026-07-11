@@ -13165,4 +13165,176 @@ values = [
             "the offspring is minted at the parents' cell"
         );
     }
+
+    /// A mind-less creature at `perceiver_at` wearing bare hide, whose controller wants to MOVE and steers its
+    /// heading from ONE being-feature bucket's toward-direction (the `weight_bucket` slot), and a blank-controller
+    /// EMITTER at `emitter_at` wearing covering `emitter_covering`, stepped once through a real runner with the
+    /// being-feature substrate armed on `opt.emissivity.band_1`. Returns the perceiver's x-displacement. The whole
+    /// point: the runner's being-feature pass must READ the emitter's real covering, discriminate its band_1
+    /// emissivity into a bucket, and steer the perceiver only when that bucket matches the weighted one.
+    fn being_feature_step_dx(emitter_covering: u16, weight_bucket: Option<usize>) -> u128 {
+        use crate::homeostasis::{HomeostaticAxisDef, HomeostaticRegistry};
+        use crate::medium::MediumField;
+        use crate::perceivable_feature::PerceivableFeatureRegistry;
+        // A local homeo registry with a deeply-negative ENERGY death floor, so the organ-less test creatures
+        // survive the one step under the armed physiology/metabolism (the being-feature wire, not survival, is
+        // the mechanism under test; starvation is covered elsewhere).
+        let homeo = HomeostaticRegistry {
+            axes: vec![
+                HomeostaticAxisDef {
+                    id: ENERGY,
+                    name: "energy".to_string(),
+                    backing_component: Some(crate::physiology::ENERGY_DENSITY.to_string()),
+                    capacity_per_mass: Fixed::ONE,
+                    base_drain: Fixed::ZERO,
+                    exertion_drain: Fixed::ZERO,
+                    death_floor: Fixed::from_int(-1000),
+                    draw_set: Vec::new(),
+                },
+                HomeostaticAxisDef {
+                    id: TEMPERATURE,
+                    name: "temperature".to_string(),
+                    backing_component: None,
+                    capacity_per_mass: Fixed::ONE,
+                    base_drain: Fixed::ZERO,
+                    exertion_drain: Fixed::ZERO,
+                    death_floor: Fixed::from_int(-1000),
+                    draw_set: Vec::new(),
+                },
+            ],
+        };
+        let organs = BodyPlanRegistry::dev_default();
+        let mut emb = Embodiment::new(
+            homeo.clone(),
+            AffordanceRegistry::dev_default(),
+            LocomotionParams::dev_default(),
+            0,
+            0x2B1D,
+        );
+        emb.set_physiology(EmbodiedPhysiology::dev_fixture(
+            organs.clone(),
+            MediumField::uniform(
+                16,
+                16,
+                Fixed::ONE,
+                Fixed::ONE,
+                Fixed::ONE,
+                Fixed::from_int(37),
+            ),
+        ));
+        emb.set_being_field(Some(BeingPerceptField::dev_fixture()));
+        emb.set_being_percept(true);
+        emb.set_creature_being_percept(true);
+        // One channel on band_1 (organic 0.96 -> bucket 19, mineral 0.88 -> bucket 17), step 0.05, 20 buckets.
+        emb.set_being_features(PerceivableFeatureRegistry::from_channels(&[(
+            "opt.emissivity.band_1",
+            20,
+            Fixed::from_ratio(1, 20),
+        )]));
+        let layout = emb.layout().clone();
+        let n_in = layout.n_in();
+        let move_base = layout
+            .output_base(crate::homeostasis::MOVE)
+            .expect("the body affords MOVE");
+        let bf = layout.being_feature_input_base();
+        // The perceiver wants to MOVE (activation from bias) and steers its MOVE heading from ONE feature
+        // bucket's (dx, dy) toward-direction. A weight for output `o` from input `i` sits at `o * n_in + i`.
+        let mut w = vec![Fixed::ZERO; layout.weight_count()];
+        w[move_base * n_in + (n_in - 1)] = Fixed::ONE; // MOVE activation from the bias
+        if let Some(b) = weight_bucket {
+            w[(move_base + 1) * n_in + (bf + 2 * b)] = Fixed::from_int(8); // heading dx from the bucket
+            w[(move_base + 2) * n_in + (bf + 2 * b + 1)] = Fixed::from_int(8); // heading dy
+        }
+        let perceiver_ctrl =
+            Controller::from_weights(layout.n_in(), layout.n_out(), layout.hidden(), w);
+        let blank = Controller::zeros(&layout);
+        // A warm body at ~310 K (~37 C): body_temp is absolute (Kelvin), so 310 gives a strong thermal
+        // self-emission the perceiver senses well above threshold (37 K would be near-frozen, a negligible
+        // signal that leaves the being-feature block below the heading epsilon).
+        let thermal = || BeingThermal {
+            setpoint: Fixed::from_int(310),
+            half_band: Fixed::from_int(30),
+            initial_temp: Fixed::from_int(310),
+        };
+        let body_with_covering = |kind: u16| {
+            let mut b = repro_body();
+            b.covering = crate::anatomy::Part {
+                kind,
+                development: Fixed::from_ratio(1, 2),
+            };
+            b
+        };
+        // The PERCEIVER (mind-less creature) at the origin, bare hide (kind 0); its covering is irrelevant, only
+        // the emitter's is read.
+        emb.add(
+            Walker::new(
+                StableId(CREATURE_ID_TAG | 1),
+                Coord3::ground(2, 8),
+                body_with_covering(0),
+                Homeostasis::from_mass(&homeo, Fixed::ONE),
+                Physiology::dev_for_registry(&homeo),
+                perceiver_ctrl,
+            ),
+            thermal(),
+        );
+        // The EMITTER (mind-less, blank controller so it stays put) several cells due EAST, wearing the covering
+        // under test; it emits a being-signal from its body_temp that the perceiver senses.
+        emb.add(
+            Walker::new(
+                StableId(CREATURE_ID_TAG | 2),
+                Coord3::ground(5, 8),
+                body_with_covering(emitter_covering),
+                Homeostasis::from_mass(&homeo, Fixed::ONE),
+                Physiology::dev_for_registry(&homeo),
+                blank,
+            ),
+            thermal(),
+        );
+        let params = crate::InferenceParams {
+            clamp: Fixed::from_int(50),
+            commit_threshold: Fixed::from_int(3),
+            margin: Fixed::from_int(1),
+        };
+        let world = World::new(params, params, crate::AccessWeights::from_pairs([]));
+        let field = Field::new(16, 16, vec![Fixed::from_int(37); 256]);
+        let mut runner = Runner::with_world_and_embodiment(field, calib(), world, emb);
+        // Step several times so a sub-cell per-tick heading accumulates; the state hash captures any movement
+        // (whole-cell or sub-cell) the being-feature block drives.
+        for _ in 0..30 {
+            runner.step();
+        }
+        runner.state_hash()
+    }
+
+    #[test]
+    fn the_being_feature_wire_fires_end_to_end_and_discriminates_real_coverings() {
+        // The anti-confirmation-bias end-to-end proof (creature-selection step 2b): a REAL runner, the
+        // perceivable-feature registry armed, stepped once, drives the whole run-path glue that the isolated
+        // unit tests skip: the perceive-phase gated pass reads each perceived emitter's REAL covering
+        // (`read_emitter` over `spawn`ed bodies), discriminates its band_1 spectral emissivity into a bucket, and
+        // threads the being-feature block into the controller so a per-bucket weight steers the creature. It also
+        // closes the isolated-input gap: the discrimination runs over the coverings the codebase really ships
+        // (organic band_1 0.96 -> bucket 19, keratin/mineral band_1 0.88 -> bucket 17), not hand-fed values.
+        // THE WIRE FIRES: a MINERAL emitter's band_1 0.88 falls in bucket 17; a perceiver WEIGHTED on bucket 17
+        // is steered, so the run differs from the SAME perceiver with NO being-feature weight. If the runner
+        // pass never read the emitter's covering or never threaded the block into the controller, these would
+        // match.
+        let mineral_weighted = being_feature_step_dx(6, Some(17));
+        let mineral_unweighted = being_feature_step_dx(6, None);
+        assert_ne!(
+            mineral_weighted, mineral_unweighted,
+            "the runner being-feature pass read the mineral emitter's covering, binned band_1 0.88 into bucket \
+             17, and threaded the block into the controller so the bucket-17 weight steered the perceiver"
+        );
+        // IT DISCRIMINATES REAL COVERINGS: an ORGANIC emitter's band_1 0.96 falls in bucket 19, NOT the weighted
+        // bucket 17, so weighting bucket 17 changes nothing (the pass binned the two real coverings differently;
+        // had it ignored the covering or binned both alike, this would differ too).
+        let organic_weighted = being_feature_step_dx(0, Some(17));
+        let organic_unweighted = being_feature_step_dx(0, None);
+        assert_eq!(
+            organic_weighted, organic_unweighted,
+            "an organic emitter falls in bucket 19, not the weighted bucket 17, so the perceiver is unmoved: \
+             the pass discriminates the real coverings by their band_1 emissivity"
+        );
+    }
 }

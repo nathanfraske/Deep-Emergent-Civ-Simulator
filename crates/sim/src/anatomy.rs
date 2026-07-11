@@ -348,8 +348,13 @@ impl BodyPlanRegistry {
             // property of the material, and any covering-to-kind correlation EMERGES through shared heritable
             // causes and selection, Principle 8, never an authored kind-separator). The per-band VALUES are
             // per_world RESERVED-with-basis (calibration/reserved.toml, basis: the material's real spectral
-            // emissivity); the dev fixtures here stand up the demonstration. Byte-neutral: nothing reads the
-            // per-band axes until a world arms a perceivable-feature channel on one.
+            // emissivity); the dev fixtures here stand up the demonstration. BYTE-NEUTRALITY holds because the
+            // per-band axes are SEPARATE floor axes that nothing reads until a world arms a perceivable-feature
+            // channel on one, and the broadband `opt.emissivity` (the strength/radiant lever) is left at 0.95
+            // unchanged: the per-band values are chosen to AVERAGE 0.95 for physical consistency (a grey-body
+            // sanity check), NOT because that average is what keeps the run byte-identical. Deriving the broadband
+            // as the spectral integral of the per-band axes (rather than carrying it as an independent axis) is a
+            // floor-consistency follow-on, deferred so the strength channel stays byte-identical this arc.
             coverings: kinds(&[
                 (
                     "bare hide",

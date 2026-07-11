@@ -1026,10 +1026,15 @@ fn clamp_toward_to_unit_disc(dx: Fixed, dy: Fixed) -> (Fixed, Fixed) {
 /// own surface optical datum and the creature's own resolution, never on the emitter's species, kind, trophic
 /// role, relatedness, or being-hood. Unlike the magnitude-only [`creature_being_direction`], two same-magnitude
 /// emitters of different optical feature now land in different buckets, so the creature can move toward one and
-/// away from the other: the strength-independent separation the arc's fleeing payoff needs. Its honest limit:
-/// the discrimination step is world-declared per-species data today (per-creature-derived resolution is the
-/// flagged shared follow-on the being-percept path also carries). Pure and RNG-free; no valence, no belief, no
-/// category.
+/// away from the other: the strength-independent separation the arc's fleeing payoff needs. Its honest limits,
+/// all flagged follow-ons rather than defects: (1) the discrimination step is world-declared per-species data
+/// today (per-creature-derived resolution is the flagged shared follow-on the being-percept path also carries);
+/// (2) the feature reads the emitter's COVERING surface, so a coveringless or self-luminous being (which still
+/// emits a magnitude) reads the feature ABSENT (the graceful-absence data row, admit-the-alien) until the
+/// covering-else-body-surface fallback the gate ruled is wired (a body carries a covering slot today, so this is
+/// latent); (3) the perceiver discriminates the optical feature whether or not its own body carries an optical
+/// sense, the SAME per-creature sensory-derivation limit the being-percept magnitude path carries, a shared
+/// substrate upgrade. Pure and RNG-free; no valence, no belief, no category.
 pub fn creature_being_feature_directions(
     here: Coord3,
     perceived: &[(Coord3, Fixed, Vec<Fixed>)],
@@ -1056,16 +1061,20 @@ pub fn creature_being_feature_directions(
             };
             // The magnitude-scaled unit toward-direction, the same per-emitter contribution
             // `creature_being_direction` forms (the perceived magnitude is the sole distance factor; the reach
-            // already attenuated it with distance). Skip a co-located or overflow-far emitter exactly as there.
-            let ex = pos.x as i64 - here.x as i64;
-            let ey = pos.y as i64 - here.y as i64;
+            // already attenuated it with distance). Skip a co-located or overflow-far emitter. The deltas and
+            // their sum-of-squares are formed in i128 so the square cannot overflow for a separation spanning
+            // the full i32 coordinate range (an emitter that far never clears the reach threshold to be
+            // perceived, so this is a defensive guard, not a reachable path; i128 keeps it correct rather than
+            // panicking or wrapping, and agrees byte-for-byte with the i64 form for every reachable separation).
+            let ex = pos.x as i128 - here.x as i128;
+            let ey = pos.y as i128 - here.y as i128;
             let d2i = ex * ex + ey * ey;
-            if d2i == 0 || d2i > i32::MAX as i64 {
+            if d2i == 0 || d2i > i32::MAX as i128 {
                 continue;
             }
-            let dist = Fixed::from_int(d2i as i32).sqrt();
-            let contribute = |num: i64| -> Fixed {
-                Fixed::from_int(num as i32)
+            let dist = Fixed::from_int(d2i as i32).sqrt(); // d2i <= i32::MAX after the guard, so the cast is exact
+            let contribute = |num: i128| -> Fixed {
+                Fixed::from_int(num as i32) // |num| <= sqrt(i32::MAX) < i32::MAX after the guard, so exact
                     .checked_div(dist)
                     .and_then(|unit| unit.checked_mul(*magnitude))
                     .unwrap_or(Fixed::ZERO)
