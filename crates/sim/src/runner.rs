@@ -6293,7 +6293,8 @@ impl Runner {
         // The foraging arc: the RESOURCE-FEATURE pass (a SEPARATE gated pass, not tied to the being-percept
         // field, so it runs wherever a world arms the resource-feature registry). Each mind-less creature senses
         // the CELLS within its perception range, reads each cell's IDENTITY-BLIND matter content
-        // (`ResourceField::cell_content`, the sum of every class's amount, never a per-class read), discriminates
+        // (the union of `ResourceField::cell_content` and `TissueField::cell_content`, the sum of every class's
+        // amount over both the producer field and any located corpse, never a per-class read), discriminates
         // the content into a bucket by its own resolution, and accumulates the toward-direction per
         // (channel, bucket) over those cells ([`creature_being_feature_directions`], the exact machinery the
         // being-feature block uses, reused per the gate's reframe). The per-cell pull magnitude is the cell's
@@ -6332,7 +6333,20 @@ impl Runner {
                                     continue; // the cell underfoot carries no toward-direction
                                 }
                                 let cell = Coord3::ground(here.x + dx as i32, here.y + dy as i32);
-                                let content = emb.resources.cell_content(cell);
+                                // The IDENTITY-BLIND matter UNION (creature-selection-loop slice 2, the gate's
+                                // refined-(a) ruling): the cell's total intakeable matter is the producer field
+                                // (`ResourceField`) PLUS the located organism tissue (`TissueField`, a corpse), so
+                                // a being is drawn to a corpse exactly as to a plant. A read-only union: the two
+                                // pools are each still EATEN once through their own intake path (the forage INGEST
+                                // over `ResourceField`, the whole-body bite over `TissueField`), never double-fed.
+                                // The trophic mode stays the being's own (a carnivore assimilates the corpse, a
+                                // herbivore little), so a matter channel this identity-blind gives a NET
+                                // approach-matter disposition; discriminating matter-I-can-use from matter-I-cannot
+                                // is the per-feature (2b) channel, the flagged follow-on.
+                                let content = emb
+                                    .resources
+                                    .cell_content(cell)
+                                    .saturating_add(emb.tissue.cell_content(cell));
                                 if content <= Fixed::ZERO {
                                     continue; // no matter sensed here (the absence convention)
                                 }
@@ -13802,7 +13816,11 @@ values = [
     /// substrate armed (one content channel, step 0.05, 20 buckets). Returns the run's state hash. The whole
     /// point: the runner's resource-feature pass must READ the cell's identity-blind content, discriminate it
     /// into a bucket, and steer the perceiver only when that bucket matches the weighted one.
-    fn resource_feature_step_hash(cell_content: Fixed, weight_bucket: Option<usize>) -> u128 {
+    fn resource_feature_step_hash(
+        cell_content: Fixed,
+        weight_bucket: Option<usize>,
+        via_tissue: bool,
+    ) -> u128 {
         use crate::homeostasis::{HomeostaticAxisDef, HomeostaticRegistry};
         use crate::medium::MediumField;
         use crate::perceivable_feature::PerceivableFeatureRegistry;
@@ -13886,11 +13904,23 @@ values = [
             ),
             thermal(),
         );
-        // The resource cell: matter content `cell_content` on one nutrient class, three cells due EAST (within
-        // the sense range of 4). The identity-blind `cell_content` read sums it, so the class id is irrelevant.
-        emb.resources_mut()
-            .composition_mut(Coord3::ground(5, 8))
-            .set_nutrient("bio.energy_density", cell_content);
+        // The matter cell: content `cell_content` on one class, three cells due EAST (within the sense range of
+        // 4). The identity-blind read sums it, so the class id is irrelevant. Placed either as producer resource
+        // (`ResourceField`) or, when `via_tissue`, as located organism TISSUE (a corpse in `TissueField`): the
+        // percept union reads both, so a tissue-only cell must steer the perceiver exactly as a resource cell.
+        if via_tissue {
+            let comp: std::collections::BTreeMap<String, Fixed> =
+                [("bio.energy_density".to_string(), cell_content)]
+                    .into_iter()
+                    .collect();
+            let mut tissue = crate::material::TissueField::new();
+            tissue.deposit(Coord3::ground(5, 8), comp, Fixed::ONE);
+            emb.set_tissue(tissue);
+        } else {
+            emb.resources_mut()
+                .composition_mut(Coord3::ground(5, 8))
+                .set_nutrient("bio.energy_density", cell_content);
+        }
         let params = crate::InferenceParams {
             clamp: Fixed::from_int(50),
             commit_threshold: Fixed::from_int(3),
@@ -13915,8 +13945,8 @@ values = [
         // THE WIRE FIRES: a cell of content 0.9 falls in bucket 18; a perceiver WEIGHTED on bucket 18 is
         // steered toward it, so the run differs from the SAME perceiver with NO resource-feature weight. If the
         // runner pass never read the cell or never threaded the block into the controller, these would match.
-        let rich_weighted = resource_feature_step_hash(Fixed::from_ratio(9, 10), Some(18));
-        let rich_unweighted = resource_feature_step_hash(Fixed::from_ratio(9, 10), None);
+        let rich_weighted = resource_feature_step_hash(Fixed::from_ratio(9, 10), Some(18), false);
+        let rich_unweighted = resource_feature_step_hash(Fixed::from_ratio(9, 10), None, false);
         assert_ne!(
             rich_weighted, rich_unweighted,
             "the runner resource-feature pass read the cell's content, binned 0.9 into bucket 18, and threaded \
@@ -13925,12 +13955,43 @@ values = [
         // IT DISCRIMINATES CONTENT: a cell of content 0.3 falls in bucket 6, NOT the weighted bucket 18, so
         // weighting bucket 18 changes nothing (the pass binned the two contents into different buckets; had it
         // ignored the content or binned both alike, this would differ too).
-        let lean_weighted = resource_feature_step_hash(Fixed::from_ratio(3, 10), Some(18));
-        let lean_unweighted = resource_feature_step_hash(Fixed::from_ratio(3, 10), None);
+        let lean_weighted = resource_feature_step_hash(Fixed::from_ratio(3, 10), Some(18), false);
+        let lean_unweighted = resource_feature_step_hash(Fixed::from_ratio(3, 10), None, false);
         assert_eq!(
             lean_weighted, lean_unweighted,
             "a cell of content 0.3 falls in bucket 6, not the weighted bucket 18, so the perceiver is unmoved: \
              the pass discriminates cells by their identity-blind content"
+        );
+    }
+
+    #[test]
+    fn the_percept_union_reads_a_corpse_in_the_tissue_field() {
+        // Slice 2, the identity-blind matter UNION (the gate's refined-(a) ruling): the SAME content placed as
+        // located organism tissue (a corpse in `TissueField`) rather than producer resource must steer the
+        // perceiver, proving the resource-density percept reads the union of `ResourceField` and `TissueField`,
+        // so a being is drawn to a corpse exactly as to a plant. THE WIRE FIRES from tissue: a corpse of content
+        // 0.9 bins to bucket 18, and a bucket-18-weighted perceiver is steered toward it, differing from the same
+        // perceiver with no weight. If the union did not read `TissueField`, the corpse would be invisible and
+        // these would match. (The full state hash cannot be compared against the resource-sourced run because the
+        // populated field is hashed, so a tissue run and a resource run differ in the field itself; the
+        // load-bearing proof is that the tissue-sourced content steers at all.)
+        let corpse_weighted = resource_feature_step_hash(Fixed::from_ratio(9, 10), Some(18), true);
+        let corpse_unweighted = resource_feature_step_hash(Fixed::from_ratio(9, 10), None, true);
+        assert_ne!(
+            corpse_weighted, corpse_unweighted,
+            "a corpse (tissue) of content 0.9 binned to bucket 18 steers a bucket-18 perceiver: the percept union \
+             read the TissueField, so a being is drawn to a corpse as to a plant"
+        );
+        // IT DISCRIMINATES a tissue cell too: a corpse of content 0.3 falls in bucket 6, not the weighted bucket
+        // 18, so the perceiver is unmoved (the union bins tissue content by the same resolution as resource).
+        let lean_corpse_weighted =
+            resource_feature_step_hash(Fixed::from_ratio(3, 10), Some(18), true);
+        let lean_corpse_unweighted =
+            resource_feature_step_hash(Fixed::from_ratio(3, 10), None, true);
+        assert_eq!(
+            lean_corpse_weighted, lean_corpse_unweighted,
+            "a corpse of content 0.3 falls in bucket 6, not the weighted bucket 18, so the perceiver is unmoved: \
+             the union discriminates tissue content by its identity-blind magnitude"
         );
     }
 }

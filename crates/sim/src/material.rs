@@ -1282,6 +1282,28 @@ impl TissueField {
         total
     }
 
+    /// The IDENTITY-BLIND, valence-blind total matter mass located at a cell (the tissue analogue of
+    /// [`crate::locomotion::ResourceField::cell_content`], so the resource-density percept can union the two
+    /// matter pools and a being is drawn to a corpse exactly as to a plant, per the creature-selection-loop
+    /// slice-2 ruling). The sum over parcels of `volume * sum-of-composition-densities`, which equals
+    /// [`Self::axis_supply`] summed over every axis: a body's total mass across all substances it carries, read
+    /// without inspecting which substances they are. Zero where no body lies. A pure read: it moves no matter,
+    /// so the two intake paths (the forage INGEST over [`crate::locomotion::ResourceField`] and the whole-body
+    /// bite over this field) each still eat their own pool once, with no double-count.
+    pub fn cell_content(&self, cell: Coord3) -> Fixed {
+        let Some(parcels) = self.cells.get(&cell) else {
+            return Fixed::ZERO;
+        };
+        let mut total = Fixed::ZERO;
+        for (key, &volume) in parcels {
+            let density_sum = key
+                .iter()
+                .fold(Fixed::ZERO, |acc, (_, v)| acc.saturating_add(*v));
+            total = total.saturating_add(volume.checked_mul(density_sum).unwrap_or(Fixed::MAX));
+        }
+        total
+    }
+
     /// Rot every parcel by a fraction of its volume, returning per parcel the (cell, its own COMPOSITION, mass
     /// removed) for the soil deposit (the tissue -> soil RETURN leg of the nutrient cycle): the located body
     /// matter is fed back to the soil the producers draw, re-materialised into the soil by the body's OWN
@@ -1624,6 +1646,41 @@ mod tests {
             h2.finish(),
             "deposit order does not change the fold"
         );
+    }
+
+    #[test]
+    fn tissue_cell_content_is_the_identity_blind_total_matter_mass() {
+        // The percept-union read (creature-selection-loop slice 2): the cell's total matter mass, summed over
+        // every substance a corpse carries, without inspecting which substances they are. It equals
+        // `axis_supply` summed over all axes, so a being senses a corpse by its total mass exactly as it senses
+        // a plant patch by its total content.
+        let cell = Coord3::ground(2, 3);
+        let mut field = TissueField::new();
+        assert_eq!(field.cell_content(cell), Fixed::ZERO, "no body, no content");
+        // A two-substance corpse (one axis a structural material, one a metabolic store) and a distinct
+        // single-substance parcel: the read must not privilege either axis, so it sums all of them.
+        let soft: BTreeMap<String, Fixed> = [
+            ("mat.fracture_strength".to_string(), Fixed::from_int(3)),
+            ("bio.energy_density".to_string(), Fixed::from_int(5)),
+        ]
+        .into_iter()
+        .collect();
+        let hard: BTreeMap<String, Fixed> =
+            [("mat.fracture_strength".to_string(), Fixed::from_int(30))]
+                .into_iter()
+                .collect();
+        field.deposit(cell, soft.clone(), Fixed::from_int(2));
+        field.deposit(cell, soft, Fixed::from_int(1)); // same content, accumulates to volume 3
+        field.deposit(cell, hard, Fixed::from_int(4));
+        // soft: volume 3 * (3 + 5) = 24; hard: volume 4 * 30 = 120; total 144.
+        assert_eq!(field.cell_content(cell), Fixed::from_int(144));
+        // The union read agrees with `axis_supply` summed over every axis present (the identity-blind identity).
+        let by_axis = field
+            .axis_supply(cell, "mat.fracture_strength")
+            .saturating_add(field.axis_supply(cell, "bio.energy_density"));
+        assert_eq!(field.cell_content(cell), by_axis);
+        // A never-touched cell stays zero, so an unarmed or corpse-free scenario adds nothing to the union.
+        assert_eq!(field.cell_content(Coord3::ground(9, 9)), Fixed::ZERO);
     }
 
     /// A minimal mechanical floor: the two axes the material layer reads, and three substances that
