@@ -3991,19 +3991,21 @@ mod tests {
     #[test]
     fn the_saturation_slope_derives_from_the_calorimetric_latent_heat() {
         // The non-circular direction (the derivation-hunt's inversion): the calorimetric latent heat is the
-        // measured primitive and the curve slope derives from it plus one reference vapour point. For water
-        // anchored at its triple point (e_ref = 611.657 Pa = 6.11657e-4 MPa at T_ref = 273.16 K), with
-        // L = 2.454e6 J/kg (therm.latent_heat) and R_v ~ 461.5 J/(kg K), slope = L*e_ref/(R_v*T_ref^2) lands
-        // near 4.36e-5 MPa/K, the physical Clausius-Clapeyron sensitivity there.
+        // measured primitive and the curve slope derives from it plus one reference vapour point. The gate
+        // ruled the reference anchored at the WORLD-MEAN temperature (where the surface physics needs the
+        // tangent accurate), not the triple point (a convex-curve extrapolation that underestimates e_s at
+        // the surface). At T_ref ~ 288 K, e_ref = e_s(288 K) ~ 1.7e-3 MPa (steam tables), with L = 2.454e6
+        // J/kg (therm.latent_heat) and R_v ~ 461.5 J/(kg K), slope = L*e_ref/(R_v*T_ref^2) lands near
+        // 1.09e-4 MPa/K, the physical Clausius-Clapeyron sensitivity at the surface.
         // Integer-only assertions (the canonical kernel module admits no float, steering.rs).
         let latent_heat = Fixed::from_int(2_454_000);
-        let t_ref = Fixed::from_ratio(27316, 100);
-        let e_ref = Fixed::from_ratio(611657, 1_000_000_000);
+        let t_ref = Fixed::from_int(288);
+        let e_ref = Fixed::from_ratio(17, 10_000);
         let r_vapor = Fixed::from_ratio(923, 2);
         let slope = saturation_slope_from_latent_heat(latent_heat, t_ref, e_ref, r_vapor);
         assert!(
-            slope > Fixed::from_ratio(43, 1_000_000) && slope < Fixed::from_ratio(44, 1_000_000),
-            "the slope derives to ~4.36e-5 MPa/K from the calorimetric latent heat"
+            slope > Fixed::from_ratio(10, 100_000) && slope < Fixed::from_ratio(12, 100_000),
+            "the slope derives to ~1.09e-4 MPa/K from the calorimetric latent heat at the world-mean anchor"
         );
         // A larger latent heat implies a steeper saturation curve, monotonic in L.
         let steeper = saturation_slope_from_latent_heat(
