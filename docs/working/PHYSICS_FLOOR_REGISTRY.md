@@ -295,85 +295,85 @@ Two kinds, kept distinct: a DECLARED law is a `[[law]]` block in the floor data 
 - `net_harm` (crates/physics/src/laws.rs:161): Net harm: the order-independent saturating sum of the per-class harms, capped.
 - `edibility` (crates/physics/src/laws.rs:191): Compute the edibility tuple from the measured nutrition and harm and the aggregate
 - `contact_pressure` (crates/physics/src/laws.rs:218): Contact pressure in megapascals: force over the bearing area, brought to the MPa
-- `cut_penetrate` (crates/physics/src/laws.rs:239): Cut or penetration depth, capped at the artifact reach. Gated on the contact pressure
-- `bend_stress` (crates/physics/src/laws.rs:270): Bending stress (MPa) and the collapse margin (collapse when the margin is below
-- `axial_stress` (crates/physics/src/laws.rs:293): Axial stress (MPa) and the collapse margin: force over cross-section.
-- `fracture_onset` (crates/physics/src/laws.rs:317): The dual fracture criterion: a stress margin against the fracture strength and an
-- `stress_force` [direct] (crates/physics/src/laws.rs:340): The force a material STRESS raises over a bearing AREA, in newtons (the megapascal-to-newton bridge). A
-- `actuator_work` [direct] (crates/physics/src/laws.rs:365): The actuator-work law (the stroke-rate / limb-biomechanics substrate). The kinetic energy a mass-bearing
-- `elastic_recoil_energy` [direct] (crates/physics/src/laws.rs:393): The elastic-recoil delivered energy (J), the elastic analog of the rigid actuator work [`actuator_work`]: the
-- `kinetic_energy` (crates/physics/src/laws.rs:429): Delivered kinetic energy on the kilojoule scale. The half is applied before the
-- `impulse` (crates/physics/src/laws.rs:454): Reduced-mass impulse `mu * v * (1 + e)`, where the reduced mass `m1 / (1 + m1/m2)` is
-- `lever` (crates/physics/src/laws.rs:504): The lever law. Mechanical advantage is the arm ratio computed directly, then the
-- `friction` (crates/physics/src/laws.rs:557): Coulomb friction and mechanical efficiency. Efficiency is the standard transmitted
-- `reach` (crates/physics/src/laws.rs:602): Reach: the additive geometric extent of an implement's segments, by the
-- `weight` (crates/physics/src/laws.rs:609): Weight: the load force from mass and the shared gravitational acceleration (`F = m
-- `power` (crates/physics/src/laws.rs:618): Mechanical power on the kilowatt scale: force times velocity, the bridge applied
-- `power_watts` [direct] (crates/physics/src/laws.rs:633): Mechanical power on the WATT scale: force times velocity with no kilowatt bridge, the
-- `euler_buckle` (crates/physics/src/laws.rs:646): The Euler critical buckling load. The slenderness square is guarded before it is
-- `shear` (crates/physics/src/laws.rs:688): Shear (or torsional) stress and the margin against the shear strength. An anisotropic
-- `wear` (crates/physics/src/laws.rs:720): Archard worn volume: `K F s / H`, with the wear coefficient carried at its own scale
-- `wear_energy` [direct] (crates/physics/src/laws.rs:777): Energy (kilojoule scale) to abrade the Archard worn volume away, so a wear insult accrues in the
-- `conduction` (crates/physics/src/laws.rs:815): Steady conductive heat flux by Fourier's law, reassociated so the only multiply that
-- `sensible_energy` (crates/physics/src/laws.rs:842): The sensible-heat energy to effect a temperature change: `m c dT`.
-- `sensible_rise` (crates/physics/src/laws.rs:868): The temperature rise from a delivered energy: `Q / (m c)`. An overflowed heat
-- `thermal_diffusivity` [direct] (crates/physics/src/laws.rs:892): The thermal diffusivity of a medium, `alpha = k / (rho * c)` (m^2/s): the conductivity `k` over
-- `phase_change_energy` (crates/physics/src/laws.rs:914): The combined sensible-plus-latent energy of a phase transition, combined by an
-- `combustion` (crates/physics/src/laws.rs:969): Combustion: the released energy gated on the ignition crossing, with the limiting
-- `thermal_stress` (crates/physics/src/laws.rs:1016): Constrained thermal stress and the fracture crossing. The reducing constraint is
-- `hydrostatic_pressure` (crates/physics/src/laws.rs:1078): Hydrostatic pressure P = rho*g*h (MPa). The megapascal bridge is applied before the depth multiply
-- `buoyant_force` (crates/physics/src/laws.rs:1098): Buoyant force F = rho*g*V (N), Archimedes. The float-versus-sink comparison to the weight is the
-- `dynamic_pressure` (crates/physics/src/laws.rs:1112): Dynamic (stagnation) pressure q = (1/2) rho v^2 (MPa). The half and the MPa bridge are applied to
-- `drag_force` (crates/physics/src/laws.rs:1170): Drag force (1/2) Cd rho A v^2 (N).
-- `aerodynamic_lift` (crates/physics/src/laws.rs:1182): Aerodynamic lift (1/2) Cl rho A v^2 (N), the reduced-order lumped-coefficient lift that floors a
-- `reynolds_number` (crates/physics/src/laws.rs:1195): Reynolds number Re = rho*|v|*L/mu (dimensionless), a laminar/turbulent regime gate. The transition
-- `laplace_pressure` (crates/physics/src/laws.rs:1229): Young-Laplace curvature pressure dP = 2*gamma/r (MPa). Zero radius reads the cap (infinite
-- `compressibility` (crates/physics/src/laws.rs:1248): Volumetric strain dV/V = dP/K (dimensionless). Zero bulk modulus reads the cap. No product.
-- `convective_flux` (crates/physics/src/laws.rs:1257): Newton convective cooling q = h*A*|T_hot - T_cold| (W), the body arc's convective exchange. The
-- `membrane_gas_flux` (crates/physics/src/laws.rs:1280): Fick's-law membrane gas exchange in the mass-transfer (Sherwood) form: J = k*A*(c_medium -
-- `poiseuille_flow` (crates/physics/src/laws.rs:1309): Hagen-Poiseuille laminar flow Q = pi*dP*r^4/(8*mu*L) (m^3/s). The driving pressure is bridged to
-- `speed_of_sound` (crates/physics/src/laws.rs:1349): Speed of sound c = sqrt(K/rho) (m/s). The modulus stays on the megapascal scale and the pascal
-- `acoustic_absorption` (crates/physics/src/laws.rs:1374): Stokes thermoviscous sound absorption alpha = reference * f^2 (1/m), the frequency-squared law that
-- `tube_resonance` (crates/physics/src/laws.rs:1399): Quarter-wave closed-open tube resonance f_n = (2n-1)*c/(4L) (Hz), the source-filter formant law (an
-- `ideal_gas_density` (crates/physics/src/laws.rs:1432): Ideal-gas density rho = P/(R_s*T) (kg/m^3), the coupling that lets the temperature field drive the
-- `thermal_buoyancy` (crates/physics/src/laws.rs:1465): Boussinesq natural-convection acceleration a = g*(T_parcel - T_ambient)/T_ambient (m/s^2), signed
-- `saturation_vapor_pressure` (crates/physics/src/laws.rs:1494): Saturation vapour pressure e_s = e_ref + slope*(T - T_ref) (MPa), the affine tangent to the
-- `evaporation_rate` (crates/physics/src/laws.rs:1518): Evaporation mass flux E = (a + b*|u|)*(e_s - e_a) (kg/(m^2*s)), the Dalton bulk aerodynamic proxy.
-- `reaction` (crates/physics/src/laws.rs:1549): Reaction enthalpy delta_h = sum(product formation enthalpies) - sum(reactants) per kg, and whether
-- `corrosion` (crates/physics/src/laws.rs:1565): Corrosion driving margin (a rate proxy): the oxidiser-minus-material potential, times the
-- `carnot_limit` (crates/physics/src/laws.rs:1593): Ideal Carnot efficiency eta = 1 - Tc/Th, the maximum thermodynamic efficiency (the ideal end of
-- `dissolution` (crates/physics/src/laws.rs:1607): Dissolution leach fraction: the fraction of a solute extracted into a solvent, its solute affinity
-- `radiant_emission` (crates/physics/src/laws.rs:1622): Radiant heat exchange j = emissivity*sigma*(T_hot^4 - T_cold^4) (W), Stefan-Boltzmann, absorbing
-- `radiant_emission_tier2` [direct] (crates/physics/src/laws.rs:1678): The Tier-2 radiant heat exchange (R-UNITS-PIN slice 4): the same Stefan-Boltzmann law as
-- `wien_peak` (crates/physics/src/laws.rs:1725): Wien peak wavelength lambda = b/T (m), grounding colour-from-temperature (a hot forge glows). Zero
-- `inverse_square_falloff` (crates/physics/src/laws.rs:1735): Inverse-square irradiance E = P/(4*pi*r^2) (W/m^2), the geometric-spreading half of a stimulus's
-- `geometric_spread` [direct] (crates/physics/src/laws.rs:1770): General geometric spreading `E = power / (sphere_coeff * distance^(D-1))`, the
-- `transduce` [direct] (crates/physics/src/laws.rs:1838): Transduce a received magnitude into an internal activation through a being's own monotone response law,
-- `discriminate` [direct] (crates/physics/src/laws.rs:1905): Quantize a transduced activation into a discrete perceptual bucket through a being's own discrimination
-- `interface_split` (crates/physics/src/laws.rs:1935): Split an incident radiant flux at an interface into (reflected, absorbed, transmitted), each a
-- `optical_depth` (crates/physics/src/laws.rs:1962): Optical depth tau = alpha*path (dimensionless), the medium-attenuation half of a stimulus's reach;
-- `refractive_contrast` (crates/physics/src/laws.rs:1971): Refractive contrast n2/n1 and whether total internal reflection is possible (n1 > n2), a measured
-- `radiative_equilibrium` (crates/physics/src/laws.rs:1986): Radiative-equilibrium temperature T_eq = (E_abs/(emissivity*sigma))^(1/4) (K), the inverse of the
-- `basal_metabolic_rate` [direct] (crates/physics/src/laws.rs:2031): Basal (resting) metabolic rate P = a * m^(3/4) (W), Kleiber's law over body mass. The 3/4 exponent
-- `resting_heat_loss` [direct] (crates/physics/src/laws.rs:2057): The resting thermoregulatory heat-loss power (W): the order-independent saturating sum of the Newton
-- `metabolic_drain_fraction` [direct] (crates/physics/src/laws.rs:2091): Bridge a resting metabolic power (W) to a fraction of the energy reserve drained per tick. The
-- `coulomb_force` (crates/physics/src/laws.rs:2133): Coulomb force F = k*|q1|*|q2|/r^2 (N), with the attractive/repulsive condition tracked separately
-- `ohm_voltage` (crates/physics/src/laws.rs:2177): Ohm's law V = I*R (V), reported as a non-negative magnitude over [0, V_MAX] (the resistance is a
-- `circuit_current` (crates/physics/src/laws.rs:2186): Circuit current I = emf / r_total (A), a magnitude; a zero total resistance is a short (the cap).
-- `power_dissipation` (crates/physics/src/laws.rs:2197): Joule power P = I*V (W), the dissipated power (which feeds `law.sensible_heat`, so a wire heats).
-- `capacitor_energy` (crates/physics/src/laws.rs:2207): Capacitor stored energy U = (1/2) C V^2 (J). The capacitance is halved first and each product is
-- `battery_emf` (crates/physics/src/laws.rs:2224): Galvanic cell EMF = E_cathode - E_anode (V), signed, from the volt-promoted electrode potentials;
-- `standard_potential_at_temperature` [direct] (crates/physics/src/laws.rs:2233): The standard cell potential at the cell TEMPERATURE (V): `E0(T) = E0_ref + (dE0/dT) * (T - T_ref)`, the
-- `nernst_emf` [direct] (crates/physics/src/laws.rs:2258): The NERNST-adjusted galvanic EMF (V): the (temperature-adjusted) standard cell EMF corrected for the
-- `reversible_uptake_flux` [direct] (crates/physics/src/laws.rs:2310): The reversible MICHAELIS-MENTEN uptake flux (per tick, in the source's stock units): the substrate-
-- `resistance` (crates/physics/src/laws.rs:2366): Element resistance R = rho*L/A (Ohm), the measured geometric consequence of the material and shape;
-- `solenoid_field` (crates/physics/src/laws.rs:2384): Solenoid field B = mu_0 * mu_r * n * I (T), with mu_0 applied early so the large relative
-- `flux_linkage` (crates/physics/src/laws.rs:2413): Flux linkage Phi = B*A (Wb), the resident magnetic-flux state `law.faraday_emf` differentiates.
-- `motor_force` (crates/physics/src/laws.rs:2421): Force on a current-carrying conductor F = B*I*L (N), the motor, relay, and telegraph-sounder force.
-- `lorentz_force` (crates/physics/src/laws.rs:2433): Lorentz force on a moving charge F = |q|*v*B (N).
-- `dipole_torque` (crates/physics/src/laws.rs:2446): Magnetic dipole maximum torque tau = m*B (N*m); the sin(theta) angular factor is deferred, so this
-- `faraday_emf` (crates/physics/src/laws.rs:2455): Faraday induced EMF = -N * dPhi/DT (V), signed by Lenz's law, the per-tick flux delta. The caller
-- `inductive_emf` (crates/physics/src/laws.rs:2479): Inductive EMF = -L * dI/DT (V), signed; the self back-EMF, or the mutual step-up with
-- `inductor_energy` (crates/physics/src/laws.rs:2503): Inductor stored energy U = (1/2) L I^2 (J), the magnetic dual of the capacitor energy. The
-- `parse_cost` [direct] (crates/physics/src/laws.rs:2538): The dependency-integration parse cost of holding a linearization domain in working memory
-- `harmony_tilt` [direct] (crates/physics/src/laws.rs:2572): The multiplicative harmony tilt a cost reduction earns: `exp(cost_reduction / temperature)`, the
+- `cut_penetrate` (crates/physics/src/laws.rs:246): Cut or penetration depth, capped at the artifact reach. Gated on the contact pressure
+- `bend_stress` (crates/physics/src/laws.rs:277): Bending stress (MPa) and the collapse margin (collapse when the margin is below
+- `axial_stress` (crates/physics/src/laws.rs:300): Axial stress (MPa) and the collapse margin: force over cross-section.
+- `fracture_onset` (crates/physics/src/laws.rs:324): The dual fracture criterion: a stress margin against the fracture strength and an
+- `stress_force` [direct] (crates/physics/src/laws.rs:347): The force a material STRESS raises over a bearing AREA, in newtons (the megapascal-to-newton bridge). A
+- `actuator_work` [direct] (crates/physics/src/laws.rs:372): The actuator-work law (the stroke-rate / limb-biomechanics substrate). The kinetic energy a mass-bearing
+- `elastic_recoil_energy` [direct] (crates/physics/src/laws.rs:400): The elastic-recoil delivered energy (J), the elastic analog of the rigid actuator work [`actuator_work`]: the
+- `kinetic_energy` (crates/physics/src/laws.rs:436): Delivered kinetic energy on the kilojoule scale. The half is applied before the
+- `impulse` (crates/physics/src/laws.rs:461): Reduced-mass impulse `mu * v * (1 + e)`, where the reduced mass `m1 / (1 + m1/m2)` is
+- `lever` (crates/physics/src/laws.rs:511): The lever law. Mechanical advantage is the arm ratio computed directly, then the
+- `friction` (crates/physics/src/laws.rs:564): Coulomb friction and mechanical efficiency. Efficiency is the standard transmitted
+- `reach` (crates/physics/src/laws.rs:609): Reach: the additive geometric extent of an implement's segments, by the
+- `weight` (crates/physics/src/laws.rs:616): Weight: the load force from mass and the shared gravitational acceleration (`F = m
+- `power` (crates/physics/src/laws.rs:625): Mechanical power on the kilowatt scale: force times velocity, the bridge applied
+- `power_watts` [direct] (crates/physics/src/laws.rs:640): Mechanical power on the WATT scale: force times velocity with no kilowatt bridge, the
+- `euler_buckle` (crates/physics/src/laws.rs:653): The Euler critical buckling load. The slenderness square is guarded before it is
+- `shear` (crates/physics/src/laws.rs:695): Shear (or torsional) stress and the margin against the shear strength. An anisotropic
+- `wear` (crates/physics/src/laws.rs:727): Archard worn volume: `K F s / H`, with the wear coefficient carried at its own scale
+- `wear_energy` [direct] (crates/physics/src/laws.rs:784): Energy (kilojoule scale) to abrade the Archard worn volume away, so a wear insult accrues in the
+- `conduction` (crates/physics/src/laws.rs:822): Steady conductive heat flux by Fourier's law, reassociated so the only multiply that
+- `sensible_energy` (crates/physics/src/laws.rs:849): The sensible-heat energy to effect a temperature change: `m c dT`.
+- `sensible_rise` (crates/physics/src/laws.rs:875): The temperature rise from a delivered energy: `Q / (m c)`. An overflowed heat
+- `thermal_diffusivity` [direct] (crates/physics/src/laws.rs:904): The thermal diffusivity of a medium, `alpha = k / (rho * c)` (m^2/s): the conductivity `k` over
+- `phase_change_energy` (crates/physics/src/laws.rs:926): The combined sensible-plus-latent energy of a phase transition, combined by an
+- `combustion` (crates/physics/src/laws.rs:981): Combustion: the released energy gated on the ignition crossing, with the limiting
+- `thermal_stress` (crates/physics/src/laws.rs:1028): Constrained thermal stress and the fracture crossing. The reducing constraint is
+- `hydrostatic_pressure` (crates/physics/src/laws.rs:1090): Hydrostatic pressure P = rho*g*h (MPa). The megapascal bridge is applied before the depth multiply
+- `buoyant_force` (crates/physics/src/laws.rs:1110): Buoyant force F = rho*g*V (N), Archimedes. The float-versus-sink comparison to the weight is the
+- `dynamic_pressure` (crates/physics/src/laws.rs:1124): Dynamic (stagnation) pressure q = (1/2) rho v^2 (MPa). The half and the MPa bridge are applied to
+- `drag_force` (crates/physics/src/laws.rs:1182): Drag force (1/2) Cd rho A v^2 (N).
+- `aerodynamic_lift` (crates/physics/src/laws.rs:1194): Aerodynamic lift (1/2) Cl rho A v^2 (N), the reduced-order lumped-coefficient lift that floors a
+- `reynolds_number` (crates/physics/src/laws.rs:1207): Reynolds number Re = rho*|v|*L/mu (dimensionless), a laminar/turbulent regime gate. The transition
+- `laplace_pressure` (crates/physics/src/laws.rs:1241): Young-Laplace curvature pressure dP = 2*gamma/r (MPa). Zero radius reads the cap (infinite
+- `compressibility` (crates/physics/src/laws.rs:1260): Volumetric strain dV/V = dP/K (dimensionless). Zero bulk modulus reads the cap. No product.
+- `convective_flux` (crates/physics/src/laws.rs:1269): Newton convective cooling q = h*A*|T_hot - T_cold| (W), the body arc's convective exchange. The
+- `membrane_gas_flux` (crates/physics/src/laws.rs:1292): Fick's-law membrane gas exchange in the mass-transfer (Sherwood) form: J = k*A*(c_medium -
+- `poiseuille_flow` (crates/physics/src/laws.rs:1321): Hagen-Poiseuille laminar flow Q = pi*dP*r^4/(8*mu*L) (m^3/s). The driving pressure is bridged to
+- `speed_of_sound` (crates/physics/src/laws.rs:1361): Speed of sound c = sqrt(K/rho) (m/s). The modulus stays on the megapascal scale and the pascal
+- `acoustic_absorption` (crates/physics/src/laws.rs:1386): Stokes thermoviscous sound absorption alpha = reference * f^2 (1/m), the frequency-squared law that
+- `tube_resonance` (crates/physics/src/laws.rs:1411): Quarter-wave closed-open tube resonance f_n = (2n-1)*c/(4L) (Hz), the source-filter formant law (an
+- `ideal_gas_density` (crates/physics/src/laws.rs:1444): Ideal-gas density rho = P/(R_s*T) (kg/m^3), the coupling that lets the temperature field drive the
+- `thermal_buoyancy` (crates/physics/src/laws.rs:1477): Boussinesq natural-convection acceleration a = g*(T_parcel - T_ambient)/T_ambient (m/s^2), signed
+- `saturation_vapor_pressure` (crates/physics/src/laws.rs:1506): Saturation vapour pressure e_s = e_ref + slope*(T - T_ref) (MPa), the affine tangent to the
+- `evaporation_rate` (crates/physics/src/laws.rs:1530): Evaporation mass flux E = (a + b*|u|)*(e_s - e_a) (kg/(m^2*s)), the Dalton bulk aerodynamic proxy.
+- `reaction` (crates/physics/src/laws.rs:1561): Reaction enthalpy delta_h = sum(product formation enthalpies) - sum(reactants) per kg, and whether
+- `corrosion` (crates/physics/src/laws.rs:1577): Corrosion driving margin (a rate proxy): the oxidiser-minus-material potential, times the
+- `carnot_limit` (crates/physics/src/laws.rs:1605): Ideal Carnot efficiency eta = 1 - Tc/Th, the maximum thermodynamic efficiency (the ideal end of
+- `dissolution` (crates/physics/src/laws.rs:1619): Dissolution leach fraction: the fraction of a solute extracted into a solvent, its solute affinity
+- `radiant_emission` (crates/physics/src/laws.rs:1634): Radiant heat exchange j = emissivity*sigma*(T_hot^4 - T_cold^4) (W), Stefan-Boltzmann, absorbing
+- `radiant_emission_tier2` [direct] (crates/physics/src/laws.rs:1690): The Tier-2 radiant heat exchange (R-UNITS-PIN slice 4): the same Stefan-Boltzmann law as
+- `wien_peak` (crates/physics/src/laws.rs:1737): Wien peak wavelength lambda = b/T (m), grounding colour-from-temperature (a hot forge glows). Zero
+- `inverse_square_falloff` (crates/physics/src/laws.rs:1747): Inverse-square irradiance E = P/(4*pi*r^2) (W/m^2), the geometric-spreading half of a stimulus's
+- `geometric_spread` [direct] (crates/physics/src/laws.rs:1787): General geometric spreading `E = power / (sphere_coeff * distance^(D-1))`, the
+- `transduce` [direct] (crates/physics/src/laws.rs:1855): Transduce a received magnitude into an internal activation through a being's own monotone response law,
+- `discriminate` [direct] (crates/physics/src/laws.rs:1922): Quantize a transduced activation into a discrete perceptual bucket through a being's own discrimination
+- `interface_split` (crates/physics/src/laws.rs:1952): Split an incident radiant flux at an interface into (reflected, absorbed, transmitted), each a
+- `optical_depth` (crates/physics/src/laws.rs:1979): Optical depth tau = alpha*path (dimensionless), the medium-attenuation half of a stimulus's reach;
+- `refractive_contrast` (crates/physics/src/laws.rs:1988): Refractive contrast n2/n1 and whether total internal reflection is possible (n1 > n2), a measured
+- `radiative_equilibrium` (crates/physics/src/laws.rs:2003): Radiative-equilibrium temperature T_eq = (E_abs/(emissivity*sigma))^(1/4) (K), the inverse of the
+- `basal_metabolic_rate` [direct] (crates/physics/src/laws.rs:2048): Basal (resting) metabolic rate P = a * m^(3/4) (W), Kleiber's law over body mass. The 3/4 exponent
+- `resting_heat_loss` [direct] (crates/physics/src/laws.rs:2074): The resting thermoregulatory heat-loss power (W): the order-independent saturating sum of the Newton
+- `metabolic_drain_fraction` [direct] (crates/physics/src/laws.rs:2108): Bridge a resting metabolic power (W) to a fraction of the energy reserve drained per tick. The
+- `coulomb_force` (crates/physics/src/laws.rs:2150): Coulomb force F = k*|q1|*|q2|/r^2 (N), with the attractive/repulsive condition tracked separately
+- `ohm_voltage` (crates/physics/src/laws.rs:2194): Ohm's law V = I*R (V), reported as a non-negative magnitude over [0, V_MAX] (the resistance is a
+- `circuit_current` (crates/physics/src/laws.rs:2203): Circuit current I = emf / r_total (A), a magnitude; a zero total resistance is a short (the cap).
+- `power_dissipation` (crates/physics/src/laws.rs:2214): Joule power P = I*V (W), the dissipated power (which feeds `law.sensible_heat`, so a wire heats).
+- `capacitor_energy` (crates/physics/src/laws.rs:2224): Capacitor stored energy U = (1/2) C V^2 (J). The capacitance is halved first and each product is
+- `battery_emf` (crates/physics/src/laws.rs:2241): Galvanic cell EMF = E_cathode - E_anode (V), signed, from the volt-promoted electrode potentials;
+- `standard_potential_at_temperature` [direct] (crates/physics/src/laws.rs:2250): The standard cell potential at the cell TEMPERATURE (V): `E0(T) = E0_ref + (dE0/dT) * (T - T_ref)`, the
+- `nernst_emf` [direct] (crates/physics/src/laws.rs:2275): The NERNST-adjusted galvanic EMF (V): the (temperature-adjusted) standard cell EMF corrected for the
+- `reversible_uptake_flux` [direct] (crates/physics/src/laws.rs:2327): The reversible MICHAELIS-MENTEN uptake flux (per tick, in the source's stock units): the substrate-
+- `resistance` (crates/physics/src/laws.rs:2383): Element resistance R = rho*L/A (Ohm), the measured geometric consequence of the material and shape;
+- `solenoid_field` (crates/physics/src/laws.rs:2401): Solenoid field B = mu_0 * mu_r * n * I (T), with mu_0 applied early so the large relative
+- `flux_linkage` (crates/physics/src/laws.rs:2430): Flux linkage Phi = B*A (Wb), the resident magnetic-flux state `law.faraday_emf` differentiates.
+- `motor_force` (crates/physics/src/laws.rs:2438): Force on a current-carrying conductor F = B*I*L (N), the motor, relay, and telegraph-sounder force.
+- `lorentz_force` (crates/physics/src/laws.rs:2450): Lorentz force on a moving charge F = |q|*v*B (N).
+- `dipole_torque` (crates/physics/src/laws.rs:2463): Magnetic dipole maximum torque tau = m*B (N*m); the sin(theta) angular factor is deferred, so this
+- `faraday_emf` (crates/physics/src/laws.rs:2472): Faraday induced EMF = -N * dPhi/DT (V), signed by Lenz's law, the per-tick flux delta. The caller
+- `inductive_emf` (crates/physics/src/laws.rs:2496): Inductive EMF = -L * dI/DT (V), signed; the self back-EMF, or the mutual step-up with
+- `inductor_energy` (crates/physics/src/laws.rs:2520): Inductor stored energy U = (1/2) L I^2 (J), the magnetic dual of the capacitor energy. The
+- `parse_cost` [direct] (crates/physics/src/laws.rs:2555): The dependency-integration parse cost of holding a linearization domain in working memory
+- `harmony_tilt` [direct] (crates/physics/src/laws.rs:2589): The multiplicative harmony tilt a cost reduction earns: `exp(cost_reduction / temperature)`, the
