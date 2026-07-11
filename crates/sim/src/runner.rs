@@ -106,10 +106,11 @@ use crate::homeostasis::{
 use crate::learn::{
     appetitive_salience, attraction_gradient, avoidance_gradient, being_attraction_gradient,
     being_avoidance_gradient, being_signal_reward_for, being_signal_trace_observations,
-    builtin_reachable_relations, creature_being_direction, feature_observations,
-    perceive_being_magnitude, perceive_being_signal, reward_observations, sequence_subject,
-    step_belief_subject, BeingPerceptField, HarmLearningCalib, RewardLearningCalib, SequenceStep,
-    BENIGN, HARMS, HARM_ATTR, MATERIAL_FEATURE_CHANNEL_BASE, NEUTRAL, REWARDS, REWARD_ATTR,
+    builtin_reachable_relations, creature_being_direction, creature_being_feature_directions,
+    feature_observations, perceive_being_magnitude, perceive_being_signal, reward_observations,
+    sequence_subject, step_belief_subject, BeingPerceptField, HarmLearningCalib,
+    RewardLearningCalib, SequenceStep, BENIGN, HARMS, HARM_ATTR, MATERIAL_FEATURE_CHANNEL_BASE,
+    NEUTRAL, REWARDS, REWARD_ATTR,
 };
 use crate::located::{LocationIndex, OccupantId};
 use crate::locomotion::{self, LocomotionParams, ResourceField, Terrain, Walker};
@@ -121,6 +122,7 @@ use crate::material::{
 use crate::material_percept::MaterialPerceptRegistry;
 use crate::medium;
 use crate::morphogen::{express_program, grow, Structure};
+use crate::perceivable_feature::PerceivableFeatureRegistry;
 use crate::percept::PerceptRegistry;
 use crate::perception_reach::{received_reach, resolve_reach};
 use crate::physiology::{
@@ -1268,6 +1270,19 @@ pub struct Embodiment {
     /// world's declared per-species/per-world datum (matching the founder path, which also defers to declared
     /// data); deriving it per creature from its sensory anatomy is a shared follow-on that upgrades both paths.
     creature_being_percept: bool,
+    /// The perceivable-FEATURE registry (creature-selection step 2b, the percept kind-feature floor arc): the
+    /// open, data-defined set of emitter surface optical axes a perceiver senses on a being-signal beyond its
+    /// strength scalar, each a DIRECT single-axis read discriminated into buckets by the perceiver's own
+    /// resolution ([`crate::perceivable_feature::PerceivableFeatureRegistry`]). EMPTY by default, so the
+    /// controller carries no being-feature block, the creature being-feature wire produces nothing, and every
+    /// run hash is unchanged (opt-in, the emergent-anatomy pattern). When a world declares channels
+    /// ([`Embodiment::set_being_features`]), the layout grows the being-feature block and, where the creature
+    /// being-percept is armed, each mind-less creature's per-(channel, bucket) toward-direction is written into
+    /// it, so a creature can respond differently to two same-strength emitters that differ in a surface optical
+    /// feature (the strength-independent separation FLEEING needs). Only the creature's OWN heritable
+    /// freely-signed per-bucket weight, set by selection, turns a feature-bucket's direction into approach or
+    /// flight, so the disposition emerges (Principle 9), keyed on the emitter's own surface datum, never a kind.
+    being_features: PerceivableFeatureRegistry,
     /// The in-run creature reproduction and behaviour-selection substrate (creature-selection step 2, fork 2a):
     /// `None` (the default) leaves creatures non-reproducing and byte-identical; `Some` arms the mint-time
     /// perturbation and the reproduction beat, so a creature population turns over and its whole controller is
@@ -1508,6 +1523,7 @@ impl Embodiment {
             being_percept: false,
             being_field: None,
             creature_being_percept: false,
+            being_features: PerceivableFeatureRegistry::empty(),
             creature_selection: None,
             creature_offspring_count: 0,
             predators: BTreeSet::new(),
@@ -1619,6 +1635,18 @@ impl Embodiment {
     /// reaction is pure selection on the raw percept.
     pub fn set_creature_being_percept(&mut self, enabled: bool) {
         self.creature_being_percept = enabled;
+    }
+
+    /// Install the perceivable-FEATURE registry (creature-selection step 2b, the percept kind-feature floor arc):
+    /// the open set of emitter surface optical axes a perceiver senses on a being-signal beyond its strength
+    /// scalar. Rebuilds the controller layout so it carries the being-feature block (two toward-direction slots
+    /// per discrimination bucket per channel); an EMPTY registry (the default) leaves the layout and every run
+    /// hash unchanged (opt-in). Where the creature being-percept is also armed, each mind-less creature's
+    /// per-(channel, bucket) toward-direction is then written into the block each tick, so a creature can respond
+    /// differently to two same-strength emitters that differ in a surface optical feature.
+    pub fn set_being_features(&mut self, registry: PerceivableFeatureRegistry) {
+        self.being_features = registry;
+        self.rebuild_layout();
     }
 
     /// Arm (or disarm) the in-run creature reproduction and behaviour-selection substrate (creature-selection
@@ -1772,17 +1800,19 @@ impl Embodiment {
     /// [`set_material_percepts`], [`set_attraction`], and [`set_conviction_percepts`], so the flags compose:
     /// setting one preserves the others.
     fn rebuild_layout(&mut self) {
-        self.layout = ControllerLayout::with_percepts_appetitive_material_attraction_and_conviction(
-            &self.homeo,
-            &self.afford,
-            &self.percepts,
-            self.appetitive,
-            &self.material_percepts,
-            self.attraction,
-            &self.conviction_percepts,
-            self.being_percept,
-            self.layout.hidden(),
-        );
+        self.layout =
+            ControllerLayout::with_percepts_appetitive_material_attraction_conviction_and_being_features(
+                &self.homeo,
+                &self.afford,
+                &self.percepts,
+                self.appetitive,
+                &self.material_percepts,
+                self.attraction,
+                &self.conviction_percepts,
+                self.being_percept,
+                &self.being_features,
+                self.layout.hidden(),
+            );
     }
 
     /// Install the organ registry an affordance and the ground speed are derived against (emergent-anatomy
@@ -5897,6 +5927,10 @@ impl Runner {
             }
             _ => (BTreeMap::new(), BTreeMap::new()),
         };
+        // The CREATURE being-FEATURE block per perceiver (creature-selection step 2b, the percept kind-feature
+        // floor arc): filled below only where the perceivable-feature registry is armed; EMPTY otherwise, so the
+        // controller carries no being-feature input and every run hash is unchanged (opt-in, byte-neutral).
+        let mut being_feature_map: BTreeMap<StableId, Vec<Fixed>> = BTreeMap::new();
         // Creatures-react arc (mechanism B3, the live wire): a MIND-LESS creature (a `Walker` absent from the
         // mind registry) runs the BELIEF-FREE being-directed percept. Gated on the creature feature AND the
         // being-percept substrate (which built the being block the creature's controller reuses and installed
@@ -5985,6 +6019,90 @@ impl Runner {
                     .collect();
                 for (id, dir) in creature_dirs {
                     being.insert(id, dir);
+                }
+                // The CREATURE being-FEATURE block (step 2b): a SEPARATE gated pass so the pin-critical
+                // magnitude-only `creature_dirs` above stays byte-untouched. Runs only where the world armed a
+                // perceivable-feature registry, so an unarmed world does nothing here and is byte-identical. Each
+                // mind-less creature discriminates the beings it perceives by their surface optical feature: it
+                // reads each perceived emitter's per-channel surface axis (`read_emitter` off the emitter's own
+                // body, the same `covering_emissivity(&w.body, &phys.organs)` per-being read the emission uses),
+                // bins it by the perceiver's own resolution, and accumulates the toward-direction per
+                // (channel, bucket) ([`creature_being_feature_directions`]). Only the creature's OWN heritable
+                // freely-signed per-bucket weight, set by selection, turns a feature-bucket's direction into
+                // approach or flight, so the disposition emerges (Principle 9), keyed on the emitter's own surface
+                // datum, never a kind.
+                if !emb.being_features.is_empty() {
+                    let bodyplan = &phys.organs;
+                    let creature_feature_dirs: BTreeMap<StableId, Vec<Fixed>> = emb
+                        .walkers
+                        .par_iter()
+                        .with_min_len(PAR_MIN_LEN)
+                        .filter_map(|w| {
+                            if world.mind(w.id).is_some() {
+                                return None; // a founder learns valence; the feature block is the creature tier
+                            }
+                            let here = w.coord();
+                            let mut perceived: Vec<(Coord3, Fixed, Vec<Fixed>)> = Vec::new();
+                            for other in &emb.walkers {
+                                if other.id == w.id {
+                                    continue;
+                                }
+                                let src = other.coord();
+                                let body_temp =
+                                    body_temps.get(&other.id).copied().unwrap_or(Fixed::ZERO);
+                                let emission = physiology::being_signal_emission(
+                                    body_temp,
+                                    field.emission_coefficient,
+                                    sigma,
+                                );
+                                if emission <= Fixed::ZERO {
+                                    continue;
+                                }
+                                let reach = match registry_opt {
+                                    Some(reg) => resolve_reach(
+                                        &field.row,
+                                        emission,
+                                        src,
+                                        here,
+                                        &emb.material,
+                                        reg,
+                                        field.bounds,
+                                    ),
+                                    None => received_reach(emission, src, here, field.bounds, &[]),
+                                };
+                                if let Some(magnitude) = perceive_being_magnitude(
+                                    reach,
+                                    &field.transduction,
+                                    field.activation_max,
+                                ) {
+                                    // The emitter's per-channel surface optical feature (a DIRECT single-axis
+                                    // read off the emitter's OWN surface, ZERO where it declares none), rides the
+                                    // signal only for an emitter this creature already perceives (cleared the
+                                    // threshold), so a feature is discriminated only on a detectable emitter.
+                                    let feats =
+                                        emb.being_features.read_emitter(&other.body, bodyplan);
+                                    perceived.push((src, magnitude, feats));
+                                }
+                            }
+                            if perceived.is_empty() {
+                                return None;
+                            }
+                            let block = creature_being_feature_directions(
+                                here,
+                                &perceived,
+                                &emb.being_features,
+                            );
+                            // Keep only a non-zero block (a creature with no net per-bucket pull reads the
+                            // founder-zero default), the same gate the magnitude branch uses.
+                            if block.iter().all(|&c| c == Fixed::ZERO) {
+                                return None;
+                            }
+                            Some((w.id, block))
+                        })
+                        .collect();
+                    for (id, block) in creature_feature_dirs {
+                        being_feature_map.insert(id, block);
+                    }
                 }
             }
         }
@@ -6383,6 +6501,7 @@ impl Runner {
             &attraction,
             &conviction,
             &being,
+            &being_feature_map,
             &mut deferred_actions,
         );
         // (2a') Record each being's DISCOVERY proposal (ideation arc, piece 2, slice 2c): the candidate

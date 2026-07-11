@@ -1037,6 +1037,9 @@ pub fn step<T: Terrain>(
         // No being-directed percept on the field-less fixture path (the layout carries no being block here),
         // so the controller's being input, if any, reads zero.
         &BTreeMap::new(),
+        // No being-FEATURE percept on the field-less fixture path (the layout carries no being-feature block
+        // here), so the controller's being-feature input, if any, reads zero (step 2b).
+        &BTreeMap::new(),
         // The field-less fixture path enacts no grasp (it carries no material field); the sink is
         // discarded, so a decided grasp on this path is inert.
         &mut BTreeMap::new(),
@@ -1188,6 +1191,13 @@ pub fn step_with_field_dirs<T: Terrain>(
     // byte-identical to before the block existed. Only an evolved FREELY-SIGNED weight turns the direction into
     // approach (predation) or avoidance (fleeing), so the approach/avoid sign emerges rather than being authored.
     being: &BTreeMap<StableId, Vec<Fixed>>,
+    // Each mind-less creature's being-FEATURE percept (creature-selection step 2b): the per-(channel, bucket)
+    // toward-direction over the emitters it perceives, discriminated by their surface optical feature, written
+    // into the controller's being-feature block. Empty (a being absent from the map, or an empty map) when the
+    // world declares no perceivable features (the layout carries no being-feature block), so the input is
+    // byte-identical to before the block existed. Only an evolved FREELY-SIGNED per-bucket weight turns a
+    // feature-bucket's direction into approach or flight, so the disposition emerges rather than being authored.
+    being_features: &BTreeMap<StableId, Vec<Fixed>>,
     deferred_actions: &mut BTreeMap<StableId, (AffordanceId, Fixed)>,
 ) -> usize {
     walkers.sort_by_key(|w| w.id);
@@ -1298,7 +1308,13 @@ pub fn step_with_field_dirs<T: Terrain>(
         // being block), so the input is byte-identical to before the block existed.
         let empty_being: Vec<Fixed> = Vec::new();
         let being_dirs = being.get(&w.id).unwrap_or(&empty_being);
-        let input = layout.build_input_full_with_conviction(
+        // The being-FEATURE block for this tick (step 2b): the creature's per-(channel, bucket) toward-directions
+        // over the emitters it perceives, discriminated by their surface optical feature. Empty when the world
+        // declares no perceivable features (the layout carries no being-feature block), so the input is
+        // byte-identical to before the block existed.
+        let empty_being_features: Vec<Fixed> = Vec::new();
+        let being_feature_dirs = being_features.get(&w.id).unwrap_or(&empty_being_features);
+        let input = layout.build_input_full_with_conviction_and_being_features(
             &w.homeostasis,
             &here_axes,
             &dirs,
@@ -1309,6 +1325,7 @@ pub fn step_with_field_dirs<T: Terrain>(
             attract,
             convict,
             being_dirs,
+            being_feature_dirs,
         );
         let (out, new_hidden) = w.controller.evaluate(&input, &w.hidden);
         w.hidden = new_hidden;
@@ -2218,7 +2235,8 @@ mod tests {
                     &BTreeMap::new(), // no appetitive block on the fixture path
                     &BTreeMap::new(), // no attraction block on the fixture path
                     &BTreeMap::new(), // no conviction block on the fixture path
-                    &BTreeMap::new(), // no being block on the fixture path
+                    &BTreeMap::new(),
+                    &BTreeMap::new(), // no being + being-feature blocks (step 2b)
                     &mut BTreeMap::new(),
                 );
             }
@@ -2301,7 +2319,8 @@ mod tests {
                     &std::collections::BTreeMap::new(), // no appetitive block on the fixture path
                     &std::collections::BTreeMap::new(), // no attraction block on the fixture path
                     &std::collections::BTreeMap::new(), // no conviction block on the fixture path
-                    &std::collections::BTreeMap::new(), // no being block on the fixture path
+                    &std::collections::BTreeMap::new(),
+                    &std::collections::BTreeMap::new(), // no being + being-feature blocks (step 2b)
                     &mut std::collections::BTreeMap::new(),
                 );
             }
@@ -2394,7 +2413,8 @@ mod tests {
                     &std::collections::BTreeMap::new(), // no appetitive block on the fixture path
                     &std::collections::BTreeMap::new(), // no attraction block on the fixture path
                     &std::collections::BTreeMap::new(), // no conviction block on the fixture path
-                    &std::collections::BTreeMap::new(), // no being block on the fixture path
+                    &std::collections::BTreeMap::new(),
+                    &std::collections::BTreeMap::new(), // no being + being-feature blocks (step 2b)
                     &mut std::collections::BTreeMap::new(),
                 );
             }
@@ -2902,7 +2922,8 @@ mod tests {
             &std::collections::BTreeMap::new(), // no appetitive block on the fixture path
             &std::collections::BTreeMap::new(), // no attraction block on the fixture path
             &std::collections::BTreeMap::new(), // no conviction block on the fixture path
-            &std::collections::BTreeMap::new(), // no being block on the fixture path
+            &std::collections::BTreeMap::new(),
+            &std::collections::BTreeMap::new(), // no being + being-feature blocks (step 2b)
             &mut std::collections::BTreeMap::new(),
         );
 
@@ -3029,7 +3050,8 @@ mod tests {
                     &std::collections::BTreeMap::new(), // no appetitive block on the fixture path
                     &std::collections::BTreeMap::new(), // no attraction block on the fixture path
                     &std::collections::BTreeMap::new(), // no conviction block on the fixture path
-                    &std::collections::BTreeMap::new(), // no being block on the fixture path
+                    &std::collections::BTreeMap::new(),
+                    &std::collections::BTreeMap::new(), // no being + being-feature blocks (step 2b)
                     &mut std::collections::BTreeMap::new(),
                 );
                 if !ws[0].alive {
@@ -3151,7 +3173,8 @@ mod tests {
                     &std::collections::BTreeMap::new(), // no appetitive block on the fixture path
                     &std::collections::BTreeMap::new(), // no attraction block on the fixture path
                     &std::collections::BTreeMap::new(), // no conviction block on the fixture path
-                    &std::collections::BTreeMap::new(), // no being block on the fixture path
+                    &std::collections::BTreeMap::new(),
+                    &std::collections::BTreeMap::new(), // no being + being-feature blocks (step 2b)
                     &mut std::collections::BTreeMap::new(),
                 );
             }
@@ -3252,7 +3275,8 @@ mod tests {
                     &std::collections::BTreeMap::new(), // no appetitive block on the fixture path
                     &std::collections::BTreeMap::new(), // no attraction block on the fixture path
                     &std::collections::BTreeMap::new(), // no conviction block on the fixture path
-                    &std::collections::BTreeMap::new(), // no being block on the fixture path
+                    &std::collections::BTreeMap::new(),
+                    &std::collections::BTreeMap::new(), // no being + being-feature blocks (step 2b)
                     &mut std::collections::BTreeMap::new(),
                 );
             }
