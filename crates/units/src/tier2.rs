@@ -32,11 +32,13 @@
 //! chain in a wide accumulator and round once at the end, maximum precision and exact to the arbitrary-precision
 //! oracle, the default for the quartics because the measurement showed it exact) over round-per-OPERATION
 //! (round each intermediate to stay in `i128` at a small stated precision loss). The load-time planner (a later
-//! slice) sizes each law's accumulator from its measured exponent interval. This slice builds the `i128` ops
-//! and their exact contract; a single-op result that would exceed `i128` returns `None`, and the wide
-//! (i256, the eight-sub-limb widening) accumulator and chain evaluator land behind the same interface next.
+//! slice) sizes each law's accumulator from its measured exponent interval. This slice builds both: the
+//! `i128` single-op path (a result that would exceed `i128` returns `None`), and the wide [`WideAccum`], a
+//! single-round chain over the eight-sub-limb [`I256`] so the flagship `sigma * T^4` computes at full
+//! precision, both proven exact against the arbitrary-precision `BigRat` oracle.
 
 use crate::idiv_round_half_even;
+use std::cmp::Ordering;
 
 /// Round `value` to the nearest multiple of `2^shift` and divide it out, ties to even. For `shift == 0`
 /// this is the identity. `value` may be negative; the euclidean rounding in [`idiv_round_half_even`] carries
@@ -183,6 +185,260 @@ fn sum_signed(a: i64, s_a: u32, b: i64, s_b: u32, s_r: u32, subtract: bool) -> O
             .filter(|v| (v >> (s_r - common)) == sum)?
     };
     fit_i64(scaled)
+}
+
+// ---- the wide (i256) intermediate and the single-round chain evaluator ----
+
+/// A signed 256-bit integer: a sign and four little-endian `u64` magnitude limbs. This is the eight-sub-limb
+/// wide intermediate the gate's hardware validation showed the flagship `sigma * T^4` needs (its single-round
+/// accumulator reaches about 210 bits, over `i128`). An operation that would exceed 256 magnitude bits returns
+/// `None`, the signal to widen further or replan the scales. Integer-only, so bit-identical on every machine.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+struct I256 {
+    neg: bool,
+    mag: [u64; 4],
+}
+
+impl I256 {
+    fn zero() -> Self {
+        I256 {
+            neg: false,
+            mag: [0; 4],
+        }
+    }
+
+    fn from_i64(v: i64) -> Self {
+        I256 {
+            neg: v < 0,
+            mag: [v.unsigned_abs(), 0, 0, 0],
+        }
+    }
+
+    fn is_zero(&self) -> bool {
+        self.mag == [0u64; 4]
+    }
+
+    fn cmp_mag(a: &[u64; 4], b: &[u64; 4]) -> Ordering {
+        for i in (0..4).rev() {
+            if a[i] != b[i] {
+                return a[i].cmp(&b[i]);
+            }
+        }
+        Ordering::Equal
+    }
+
+    /// Multiply by a signed `i64`, `None` on 256-bit overflow. Schoolbook multiply of the magnitude by a
+    /// single `u64` limb.
+    fn mul_i64(&self, v: i64) -> Option<I256> {
+        if v == 0 || self.is_zero() {
+            return Some(I256::zero());
+        }
+        let m = v.unsigned_abs();
+        let mut out = [0u64; 4];
+        let mut carry: u128 = 0;
+        for (i, out_limb) in out.iter_mut().enumerate() {
+            let cur = (self.mag[i] as u128) * (m as u128) + carry;
+            *out_limb = cur as u64;
+            carry = cur >> 64;
+        }
+        if carry != 0 {
+            return None;
+        }
+        Some(I256 {
+            neg: self.neg ^ (v < 0),
+            mag: out,
+        })
+    }
+
+    /// Signed sum, `None` on 256-bit overflow.
+    fn add(&self, other: &I256) -> Option<I256> {
+        if self.neg == other.neg {
+            let mut out = [0u64; 4];
+            let mut carry: u128 = 0;
+            for (i, out_limb) in out.iter_mut().enumerate() {
+                let cur = self.mag[i] as u128 + other.mag[i] as u128 + carry;
+                *out_limb = cur as u64;
+                carry = cur >> 64;
+            }
+            if carry != 0 {
+                return None;
+            }
+            Some(I256 {
+                neg: self.neg,
+                mag: out,
+            })
+        } else {
+            let (neg, big, small) = match I256::cmp_mag(&self.mag, &other.mag) {
+                Ordering::Equal => return Some(I256::zero()),
+                Ordering::Greater => (self.neg, &self.mag, &other.mag),
+                Ordering::Less => (other.neg, &other.mag, &self.mag),
+            };
+            let mut out = [0u64; 4];
+            let mut borrow: i128 = 0;
+            for (i, out_limb) in out.iter_mut().enumerate() {
+                let cur = big[i] as i128 - small[i] as i128 - borrow;
+                if cur < 0 {
+                    *out_limb = (cur + (1i128 << 64)) as u64;
+                    borrow = 1;
+                } else {
+                    *out_limb = cur as u64;
+                    borrow = 0;
+                }
+            }
+            Some(I256 { neg, mag: out })
+        }
+    }
+
+    fn negate(&self) -> I256 {
+        if self.is_zero() {
+            *self
+        } else {
+            I256 {
+                neg: !self.neg,
+                mag: self.mag,
+            }
+        }
+    }
+
+    fn sub(&self, other: &I256) -> Option<I256> {
+        self.add(&other.negate())
+    }
+
+    fn test_bit(mag: &[u64; 4], i: u32) -> bool {
+        (mag[(i / 64) as usize] >> (i % 64)) & 1 == 1
+    }
+
+    fn shr_mag(mag: &[u64; 4], shift: u32) -> [u64; 4] {
+        let limb = (shift / 64) as usize;
+        let bit = shift % 64;
+        let mut out = [0u64; 4];
+        let mut i = 0;
+        while i + limb < 4 {
+            let mut v = mag[i + limb] >> bit;
+            if bit > 0 && i + limb + 1 < 4 {
+                v |= mag[i + limb + 1] << (64 - bit);
+            }
+            out[i] = v;
+            i += 1;
+        }
+        out
+    }
+
+    fn any_bit_below(mag: &[u64; 4], bits: u32) -> bool {
+        (0..bits).any(|i| I256::test_bit(mag, i))
+    }
+
+    /// Round the value right by `shift` bits, ties to even, and return the signed magnitude as an `i128`
+    /// (the mantissa fits `i128`), or `None` if the rounded magnitude exceeds `i128`.
+    fn round_shr(&self, shift: u32) -> Option<i128> {
+        let mut q = I256::shr_mag(&self.mag, shift);
+        if shift > 0 {
+            let round_bit = I256::test_bit(&self.mag, shift - 1);
+            if round_bit {
+                let sticky = I256::any_bit_below(&self.mag, shift - 1);
+                let q_odd = q[0] & 1 == 1;
+                if sticky || q_odd {
+                    // q += 1
+                    let mut carry = 1u128;
+                    for limb in q.iter_mut() {
+                        let cur = *limb as u128 + carry;
+                        *limb = cur as u64;
+                        carry = cur >> 64;
+                        if carry == 0 {
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        if q[2] != 0 || q[3] != 0 {
+            return None;
+        }
+        let mag = (q[0] as u128) | ((q[1] as u128) << 64);
+        if mag > i128::MAX as u128 {
+            return None;
+        }
+        Some(if self.neg {
+            -(mag as i128)
+        } else {
+            mag as i128
+        })
+    }
+}
+
+/// A single-round chain accumulator: a wide (`i256`) value at a running scale. Multiply scaled mantissas in,
+/// combine sub-chains with `sub` (the difference-of-quartics), then round ONCE to the output scale. This is
+/// the single-round-per-chain form the gate's measurement showed exact to the arbitrary-precision oracle:
+/// `k` and every factor enter at full scale, the chain accumulates in the wide intermediate, and the only
+/// rounding is the single terminal one.
+#[derive(Clone, Copy, Debug)]
+pub struct WideAccum {
+    value: I256,
+    scale: u32,
+}
+
+impl WideAccum {
+    /// Start a chain from a scaled mantissa.
+    pub fn new(bits: i64, scale: u32) -> Self {
+        WideAccum {
+            value: I256::from_i64(bits),
+            scale,
+        }
+    }
+
+    /// Multiply another scaled mantissa into the chain; the running scale accumulates. `None` on i256 overflow.
+    pub fn mul(&self, bits: i64, scale: u32) -> Option<WideAccum> {
+        Some(WideAccum {
+            value: self.value.mul_i64(bits)?,
+            scale: self.scale + scale,
+        })
+    }
+
+    /// The integer power of a single scaled mantissa: `bits^exp` at scale `exp*scale`, by repeated multiply in
+    /// the wide accumulator. `exp == 0` is the dimensionless one at scale zero.
+    pub fn power(bits: i64, scale: u32, exp: u32) -> Option<WideAccum> {
+        if exp == 0 {
+            return Some(WideAccum::new(1, 0));
+        }
+        let mut acc = WideAccum::new(bits, scale);
+        for _ in 1..exp {
+            acc = acc.mul(bits, scale)?;
+        }
+        Some(acc)
+    }
+
+    /// Subtract another chain AT THE SAME running scale (the difference-of-quartics case). `None` if the scales
+    /// differ (the planner keeps the two sub-chains at one scale) or on overflow.
+    pub fn sub(&self, other: &WideAccum) -> Option<WideAccum> {
+        if self.scale != other.scale {
+            return None;
+        }
+        Some(WideAccum {
+            value: self.value.sub(&other.value)?,
+            scale: self.scale,
+        })
+    }
+
+    /// Add another chain at the same running scale. `None` if the scales differ or on overflow.
+    pub fn add(&self, other: &WideAccum) -> Option<WideAccum> {
+        if self.scale != other.scale {
+            return None;
+        }
+        Some(WideAccum {
+            value: self.value.add(&other.value)?,
+            scale: self.scale,
+        })
+    }
+
+    /// Round the accumulated chain ONCE to the output scale, ties to even, returning the `i64` mantissa. The
+    /// output scale must not exceed the running scale (the chain is finer than its result); `None` otherwise,
+    /// or if the rounded mantissa does not fit `i64`.
+    pub fn round_to_scale(&self, target: u32) -> Option<i64> {
+        if target > self.scale {
+            return None;
+        }
+        fit_i64(self.value.round_shr(self.scale - target)?)
+    }
 }
 
 #[cfg(test)]
@@ -361,6 +617,100 @@ mod tests {
         let root2 = isqrt(16 << s, s, s).unwrap(); // sqrt(16) = 4 at scale s
         let root4 = isqrt(root2, s, s).unwrap(); // sqrt(4) = 2 at scale s
         assert_eq!(root4, 2 << s);
+    }
+
+    /// The exact rational of a product-of-powers chain, for the wide-accumulator oracle.
+    fn chain_rat(factors: &[(i64, u32, u32)]) -> BigRat {
+        let mut acc = BigRat::from_i64(1);
+        for &(bits, scale, exp) in factors {
+            let f = as_rat(bits, scale);
+            for _ in 0..exp {
+                acc = acc.mul(&f);
+            }
+        }
+        acc
+    }
+
+    #[test]
+    fn wide_chain_sigma_t4_matches_the_exact_oracle() {
+        // The flagship radiant chain sigma * T^4 in the single-round wide accumulator, versus the exact
+        // rational rounded once. sigma near its scale-55 mantissa, T near 288 K at scale 20.
+        let (sigma, s_sigma) = (2_042_913_741i64, 55u32);
+        let (t, s_t) = (288i64 << 20, 20u32);
+        let s_out = 32u32;
+        let chain = WideAccum::power(t, s_t, 4)
+            .unwrap()
+            .mul(sigma, s_sigma)
+            .unwrap();
+        let got = chain.round_to_scale(s_out).unwrap();
+        let want = chain_rat(&[(sigma, s_sigma, 1), (t, s_t, 4)])
+            .round_to_scale(s_out)
+            .unwrap() as i64;
+        assert_eq!(got, want);
+    }
+
+    #[test]
+    fn wide_difference_of_quartics_matches_the_exact_oracle() {
+        // sigma * (T_hot^4 - T_cold^4): the cancellation is exact in the wide integer, rounded once.
+        let (sigma, s_sigma) = (2_042_913_741i64, 55u32);
+        let (t_hot, t_cold, s_t) = (310i64 << 18, 280i64 << 18, 18u32);
+        let s_out = 30u32;
+        let diff = WideAccum::power(t_hot, s_t, 4)
+            .unwrap()
+            .sub(&WideAccum::power(t_cold, s_t, 4).unwrap())
+            .unwrap();
+        let got = diff
+            .mul(sigma, s_sigma)
+            .unwrap()
+            .round_to_scale(s_out)
+            .unwrap();
+        let exact = chain_rat(&[(t_hot, s_t, 4)])
+            .sub(&chain_rat(&[(t_cold, s_t, 4)]))
+            .mul(&as_rat(sigma, s_sigma));
+        assert_eq!(got, exact.round_to_scale(s_out).unwrap() as i64);
+    }
+
+    #[test]
+    fn wide_chain_swept_grid_matches_the_oracle() {
+        // A deterministic sweep of small chains (products of powers), each exact to the rational oracle.
+        let mants = [2i64, 3, 5, -7, 129, -4096];
+        let scales = [0u32, 8, 20];
+        for &a in &mants {
+            for &b in &mants {
+                for &sa in &scales {
+                    for &sb in &scales {
+                        let s_out = 16u32;
+                        // chain = a@sa * (b@sb)^3
+                        if let Some(chain) = WideAccum::new(a, sa)
+                            .mul(b, sb)
+                            .and_then(|w| w.mul(b, sb))
+                            .and_then(|w| w.mul(b, sb))
+                        {
+                            if let Some(got) = chain.round_to_scale(s_out) {
+                                let want = chain_rat(&[(a, sa, 1), (b, sb, 3)])
+                                    .round_to_scale(s_out)
+                                    .unwrap() as i64;
+                                assert_eq!(got, want, "chain {a}@{sa} * ({b}@{sb})^3 -> {s_out}");
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn wide_chain_needs_more_than_i128_but_fits_i256() {
+        // A quartic that overflows i128 (so the single-op mul path would return None) computes in the wide
+        // accumulator: a ~40-bit mantissa to the 4th is ~160 bits, past i128's 127.
+        let (t, s_t) = ((1i64 << 40) + 12345, 32u32);
+        let chain = WideAccum::power(t, s_t, 4).unwrap();
+        let got = chain.round_to_scale(20).unwrap();
+        let want = chain_rat(&[(t, s_t, 4)]).round_to_scale(20).unwrap() as i64;
+        assert_eq!(got, want);
+        // t^2 keeping the full product at scale 2*s_t exceeds i64, so the single-op i128 mul returns the
+        // widen signal there (it cannot carry the un-rounded quartic that the wide accumulator holds).
+        assert_eq!(mul(t, s_t, t, s_t, 2 * s_t), None);
     }
 
     // Guard the oracle helper itself against a stale comparison path.
