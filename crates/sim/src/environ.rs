@@ -362,6 +362,35 @@ pub struct EnvironFields {
     /// its dynamics are unchanged. EMPTY when the cycle is unarmed (the field's inertia stays absent, and its
     /// step is byte-identical to the uniform pre-follow-on kernel).
     solar_inertia: Vec<Fixed>,
+    /// The per-cell EVAPORATION mass flux the hydrology step computed LAST tick (kg/(m^2*s)), stored so the
+    /// diurnal surface balance can read it as the latent cooling flux one tick later. `step_insolation` runs
+    /// before `step_hydrology`, so the current-tick flux is not yet available; the one-tick lag (the same lag the
+    /// thermal-inertia freeze-read already carries) is invisible under the field's relaxation timescale, and the
+    /// deterministic replay preserves it. EMPTY until the hydrology step has run once (the balance then reads zero
+    /// latent cooling, the honest first-tick transient), and read only when surface cooling is armed, so it is
+    /// byte-neutral on an unarmed run.
+    evaporation: Vec<Fixed>,
+    /// The world's SURFACE TURBULENT-COOLING data, or `None` when it is UNARMED (the default). While `None`, the
+    /// diurnal surface balance keeps only its radiative loss (the pre-arc `radiative_equilibrium`, reached exactly
+    /// through the `h = 0, q_latent = 0` short-circuit of [`civsim_physics::laws::surface_balance_temperature`]),
+    /// so a run that never arms it is byte-identical and the pins hold. While `Some`, the balance adds the sensible
+    /// and latent surface cooling, so the surface temperature emerges from the full turbulent balance rather than
+    /// running hot on radiation alone. Armed by a scenario (the living world) that supplies its air medium's
+    /// convective coefficient and latent heat.
+    surface_cooling: Option<SurfaceCooling>,
+}
+
+/// The SURFACE TURBULENT-COOLING data a world supplies to arm the diurnal surface balance's latent and sensible
+/// terms: the air medium's convective coefficient `h` (the sensible flux `h*(T - T_air)`, `fluid.convective_coefficient`)
+/// and the latent heat of vaporization `L_vap` (the latent flux `E * L_vap`, the cited `1/metabolism.water_loss_per_joule`).
+/// Both are world DATA read from the floor and the manifest, never authored here; `None` on `EnvironFields` leaves the
+/// balance radiative-only and byte-identical (Principle 11).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SurfaceCooling {
+    /// The air medium's convective heat-transfer coefficient `h` (W/(m^2*K)), `fluid.convective_coefficient`.
+    pub convective_h: Fixed,
+    /// The latent heat of vaporization `L_vap` (J/kg), the cited `1/metabolism.water_loss_per_joule`.
+    pub latent_heat: Fixed,
 }
 
 /// The VALUE BACKING of an abiotic source: which located field its available energy is read from (decoupled
@@ -1017,6 +1046,8 @@ impl EnvironFields {
             diurnal_tick: 0,
             solar_baseline: Vec::new(),
             solar_inertia: Vec::new(),
+            evaporation: Vec::new(),
+            surface_cooling: None,
         }
     }
 
@@ -1028,6 +1059,16 @@ impl EnvironFields {
     pub fn arm_diurnal(&mut self, sky: DiurnalSky) {
         self.sky = Some(sky);
         self.diurnal_tick = 0;
+    }
+
+    /// Arm the SURFACE TURBULENT COOLING of the diurnal balance (opt-in) with the world's air convective
+    /// coefficient and latent heat, so the surface temperature emerges from the full balance (radiative plus
+    /// sensible plus latent) instead of running hot on radiation alone. Unarmed (the default) the balance is
+    /// radiative-only and byte-identical, so the pins hold; a scenario that wants the turbulent cooling (the living
+    /// world) calls this. Independent of [`Self::arm_diurnal`]: the cooling terms only reach the baseline while the
+    /// diurnal cycle is also armed (the balance runs in `step_insolation`), so arming this without the sky is inert.
+    pub fn arm_surface_cooling(&mut self, cooling: SurfaceCooling) {
+        self.surface_cooling = Some(cooling);
     }
 
     /// Recompute the `light` field from the diurnal sun-angle law (day-night arc), advancing the private phase
@@ -1076,11 +1117,36 @@ impl EnvironFields {
                     .checked_mul(solar_absorbed_fraction)
                     .unwrap_or(Fixed::MAX)
                     .saturating_add(sky.back_radiation);
-                self.solar_baseline[i] = civsim_physics::laws::radiative_equilibrium(
+                // The surface energy balance: the absorbed flux set against radiative emission and, when surface
+                // turbulent cooling is armed, the sensible loss to the air reference and the latent loss from last
+                // tick's evaporation. Unarmed (`surface_cooling` None) the sensible and latent terms are zero, so
+                // `surface_balance_temperature` returns the same `radiative_equilibrium` as before, byte-identical.
+                // The air reference `T_air = (absorbed/sigma)^(1/4)` is the effective radiating temperature of the
+                // same absorbed flux (emissivity one, Option A), independent of the surface it exchanges with; the
+                // latent flux reads the PREVIOUS tick's evaporation (this step runs before `step_hydrology`), a
+                // one-tick lag invisible under the field's relaxation.
+                let (cooling_h, t_air, q_latent) = match &self.surface_cooling {
+                    Some(sc) => {
+                        let t_air = civsim_physics::laws::radiative_equilibrium(
+                            absorbed,
+                            Fixed::ONE,
+                            sky.sigma,
+                            sky.t_max,
+                        );
+                        let e_prev = self.evaporation.get(i).copied().unwrap_or(Fixed::ZERO);
+                        let q_latent = e_prev.checked_mul(sc.latent_heat).unwrap_or(Fixed::MAX);
+                        (sc.convective_h, t_air, q_latent)
+                    }
+                    None => (Fixed::ZERO, Fixed::ZERO, Fixed::ZERO),
+                };
+                self.solar_baseline[i] = civsim_physics::laws::surface_balance_temperature(
                     absorbed,
                     sky.emissivity,
                     sky.sigma,
                     sky.t_max,
+                    cooling_h,
+                    t_air,
+                    q_latent,
                 );
                 // The per-material THERMAL INERTIA (follow-on 2): the cell's own soil moisture and standing-water
                 // depth, with its current temperature (the freeze read), blend the substrate with water or ice,
@@ -1322,6 +1388,11 @@ impl EnvironFields {
         let n = (w as usize) * (h as usize);
         // (1) Precipitation and evaporation, pointwise into a sourced buffer.
         let mut sourced = vec![Fixed::ZERO; n];
+        // Store this tick's evaporation flux per cell so the diurnal surface balance can read it NEXT tick as the
+        // latent cooling flux (the one-tick lag; `step_insolation` runs before this step). Sized on first use.
+        if self.evaporation.len() != n {
+            self.evaporation = vec![Fixed::ZERO; n];
+        }
         for y in 0..h {
             for x in 0..w {
                 let i = self.idx(x, y);
@@ -1350,6 +1421,7 @@ impl EnvironFields {
                     calib.evap_b_wind,
                     calib.evap_max,
                 );
+                self.evaporation[i] = evap;
                 let after = (self.water.cells[i].saturating_add(precip) - evap).max(Fixed::ZERO);
                 sourced[i] = after;
             }
@@ -2296,6 +2368,8 @@ mod tests {
             diurnal_tick: 0,
             solar_baseline: Vec::new(),
             solar_inertia: Vec::new(),
+            evaporation: Vec::new(),
+            surface_cooling: None,
         }
     }
 
@@ -2478,6 +2552,41 @@ mod tests {
         assert!(
             day > night,
             "the daylit side is warmer than the dark side ({day:?} vs {night:?})"
+        );
+    }
+
+    #[test]
+    fn armed_surface_cooling_lowers_the_daylit_baseline_below_the_radiative_only_balance() {
+        // Slice 2: with surface turbulent cooling ARMED, the diurnal balance adds the sensible loss to the
+        // effective-radiating-temperature air reference (and, after a tick, the latent loss), so the daylit
+        // baseline is cooler than the radiative-only balance an unarmed run keeps. Unarmed is byte-identical to
+        // the pre-arc `radiative_equilibrium` (the diurnal test above exercises that path through the short
+        // circuit); this shows the armed terms bite. The reference sky's emissivity is 0.95, so the surface sits
+        // above the effective radiating temperature and the sensible term cools it.
+        let map = a_map(0x5A1A17);
+        let sky = DiurnalSky::reference(100, 36500);
+        let temp = Field::from_map(&map);
+        let calib = EnvironCalib::dev_fixture();
+        let mut bare = EnvironFields::from_map(&map);
+        bare.arm_diurnal(sky.clone());
+        bare.step(&temp, &calib);
+        let mut cooled = EnvironFields::from_map(&map);
+        cooled.arm_diurnal(sky);
+        cooled.arm_surface_cooling(SurfaceCooling {
+            convective_h: Fixed::from_int(30),
+            latent_heat: Fixed::from_int(2_400_000),
+        });
+        cooled.step(&temp, &calib);
+        let mid = bare.height / 2;
+        let day_bare = bare.solar_baseline_at(0, mid);
+        let day_cooled = cooled.solar_baseline_at(0, mid);
+        assert!(
+            day_cooled < day_bare,
+            "armed surface cooling lowers the daylit baseline: cooled {day_cooled:?} < radiative-only {day_bare:?}"
+        );
+        assert!(
+            day_cooled > Fixed::from_int(250),
+            "the cooled baseline is still a warm surface temperature, not collapsed: {day_cooled:?}"
         );
     }
 
