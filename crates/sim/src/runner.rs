@@ -13994,4 +13994,248 @@ values = [
              the union discriminates tissue content by its identity-blind magnitude"
         );
     }
+
+    /// Slice 4 arena: run the IN-RUN creature-selection loop over generations in a stated non-shipped survival
+    /// regime, returning the population-mean APPROACH weight (the resource-density heading weight toward the
+    /// food bucket) at the end, plus the living count and the bred-offspring count. Under `gradient`, food lies
+    /// only in an eastern patch, so a being's survival depends on its own approach weight carrying it there
+    /// (differential survival, the selection); without `gradient` food is uniform everywhere, so every being
+    /// survives regardless of its weight (the held control, no gradient to select on). The regime removes ONLY
+    /// the starvation confound relative to the shipped run (a slow drain and refillable food so a being that
+    /// reaches food lives to the reproduction beat); it authors nothing about approach, whose sign is seeded
+    /// zero-mean and freely-signed and whose population mean moves only if selection moves it.
+    fn matter_arena(gradient: bool, generations: u64, verbose: bool) -> (Fixed, usize, usize) {
+        use crate::homeostasis::{HomeostaticAxisDef, HomeostaticRegistry};
+        use crate::medium::MediumField;
+        use crate::perceivable_feature::PerceivableFeatureRegistry;
+        let homeo = HomeostaticRegistry {
+            axes: vec![
+                HomeostaticAxisDef {
+                    id: ENERGY,
+                    name: "energy".to_string(),
+                    backing_component: Some(crate::physiology::ENERGY_DENSITY.to_string()),
+                    // A slow flat drain (a fixed fraction of capacity per tick, no physiology metabolism), so a
+                    // being has time to travel to food before it starves. Death at empty (floor zero), so failing
+                    // to reach food is lethal (the fitness gradient), never a soft penalty.
+                    capacity_per_mass: Fixed::ONE,
+                    base_drain: Fixed::from_ratio(1, 16),
+                    exertion_drain: Fixed::ZERO,
+                    death_floor: Fixed::ZERO,
+                    draw_set: Vec::new(),
+                },
+                HomeostaticAxisDef {
+                    id: TEMPERATURE,
+                    name: "temperature".to_string(),
+                    backing_component: None,
+                    capacity_per_mass: Fixed::ONE,
+                    base_drain: Fixed::ZERO,
+                    exertion_drain: Fixed::ZERO,
+                    death_floor: Fixed::from_int(-1000),
+                    draw_set: Vec::new(),
+                },
+            ],
+        };
+        let organs = BodyPlanRegistry::dev_default();
+        let mut emb = Embodiment::new(
+            homeo.clone(),
+            AffordanceRegistry::dev_default(),
+            LocomotionParams::dev_default(),
+            0,
+            0x5EED_4A4A,
+        );
+        // No embodiment physiology: the drain is the axis's own flat `base_drain` (no Kleiber metabolism to
+        // dominate the regime), and INGEST refills through the pre-grounding satisfaction path (the being's own
+        // `Physiology` still supplies assimilation and requirement). This keeps the survival regime controllable,
+        // the point of a stated non-shipped experiment: isolate the fitness variable (reaching food).
+        let _ = &organs;
+        emb.set_resource_features(PerceivableFeatureRegistry::from_channels(&[(
+            "resource.content",
+            20,
+            Fixed::from_ratio(1, 20),
+        )]));
+        emb.set_creature_selection(Some(CreatureSelectionParams {
+            mint_perturbation_spread: Fixed::from_decimal_str("0.05").unwrap(),
+            reproduction_eligibility_reserve: Fixed::from_ratio(1, 2),
+            offspring_mutation_spread: Fixed::from_decimal_str("0.02").unwrap(),
+        }));
+        let layout = emb.layout().clone();
+        let n_in = layout.n_in();
+        let move_base = layout.output_base(crate::homeostasis::MOVE).unwrap();
+        let ingest_base = layout.output_base(crate::homeostasis::INGEST).unwrap();
+        let rf = layout.resource_feature_input_base();
+        let bias = n_in - 1;
+        // The energy axis's per-axis input block carries a "source underfoot" slot (base+1), the standard forage
+        // percept the founders read. INGEST fires from it (eat when food is underfoot) and MOVE is suppressed by
+        // it (stop to eat), so a being that arrives on food EATS rather than wandering off, the BASELINE metabolic
+        // behaviour common to every being. The SELECTED trait is separate: the MOVE HEADING, taken from the
+        // RESOURCE-DENSITY percept alone (never the axis source direction), so how a being FINDS food is set by its
+        // own freely-signed resource-density weight and nothing else, and survival depends on that weight.
+        let energy_here = layout.axis_input_base(ENERGY).unwrap() + 1;
+        // The food content 0.9 discriminates into bucket 18 (0.9 / 0.05); the approach weight is the MOVE heading
+        // weight on that bucket's toward-direction percept slots.
+        let bucket = 18usize;
+        let approach_weights = |sign: i64| -> Vec<Fixed> {
+            let mut w = vec![Fixed::ZERO; layout.weight_count()];
+            w[move_base * n_in + bias] = Fixed::ONE; // MOVE activation from the bias (wants to move when off food)
+            w[move_base * n_in + energy_here] = Fixed::from_int(-2); // suppress MOVE when food is underfoot
+            w[ingest_base * n_in + energy_here] = Fixed::from_int(8); // INGEST when food is underfoot (baseline eat)
+                                                                      // The SELECTED trait: a freely-signed heading weight on the bucket-18 toward-direction. Positive heads
+                                                                      // toward the food bucket (approach), negative heads away (avoid). Seeded symmetric below (zero mean).
+            let strength = Fixed::from_int(8 * sign as i32);
+            w[(move_base + 1) * n_in + (rf + 2 * bucket)] = strength; // dx-heading from the bucket dx percept
+            w[(move_base + 2) * n_in + (rf + 2 * bucket + 1)] = strength; // dy-heading from the bucket dy percept
+            w
+        };
+        let thermal = || BeingThermal {
+            setpoint: Fixed::from_int(310),
+            half_band: Fixed::from_int(30),
+            initial_temp: Fixed::from_int(310),
+        };
+        // Seed a symmetric founder population co-located at the western start cell: half APPROACH (+8), half AVOID
+        // (-8). The mean approach weight is exactly zero at the start (no authored bias); selection alone can move
+        // it. Each carries its own controller as heritable lineage so the beat can breed it.
+        let start = Coord3::ground(6, 12);
+        let n_founders = 12u64;
+        for k in 0..n_founders {
+            let sign: i64 = if k % 2 == 0 { 1 } else { -1 };
+            let ctrl = Controller::from_weights(
+                n_in,
+                layout.n_out(),
+                layout.hidden(),
+                approach_weights(sign),
+            );
+            emb.add(
+                Walker::new(
+                    StableId(CREATURE_ID_TAG | (k + 1)),
+                    start,
+                    repro_body(),
+                    Homeostasis::from_mass(&homeo, Fixed::ONE),
+                    Physiology::dev_for_registry(&homeo),
+                    ctrl.clone(),
+                )
+                .with_lineage(ctrl),
+                thermal(),
+            );
+        }
+        let params = crate::InferenceParams {
+            clamp: Fixed::from_int(50),
+            commit_threshold: Fixed::from_int(3),
+            margin: Fixed::from_int(1),
+        };
+        let cadence = 6u64;
+        let mut world = World::new(params, params, crate::AccessWeights::from_pairs([]));
+        world.set_life_cadence(cadence);
+        // The food field: a patch in the eastern half under `gradient` (a being must approach it to eat), or
+        // uniform everywhere in the control (every being always eats, so the approach weight confers no survival
+        // edge). Content 0.9 either way, so the discrimination bucket is the same; only the SPATIAL layout differs.
+        // Re-applied every tick (below) so the standing supply INGEST depletes is replenished, a stable gradient
+        // rather than a food source that runs out (the environment, not the being, is held fixed).
+        let set_food = |res: &mut ResourceField| {
+            for y in 0..24i32 {
+                for x in 0..24i32 {
+                    let feed = if gradient { x >= 10 } else { true };
+                    if feed {
+                        res.composition_mut(Coord3::ground(x, y))
+                            .set_nutrient("bio.energy_density", Fixed::from_ratio(9, 10));
+                    }
+                }
+            }
+        };
+        set_food(emb.resources_mut());
+        let field = Field::new(24, 24, vec![Fixed::from_int(310); 24 * 24]);
+        let mut runner = Runner::with_world_and_embodiment(field, calib(), world, emb);
+        let mean_approach = |r: &Runner| -> (Fixed, usize) {
+            let emb = r.embodiment().unwrap();
+            let live: Vec<&Walker> = emb.walkers().iter().filter(|w| w.alive).collect();
+            if live.is_empty() {
+                return (Fixed::ZERO, 0);
+            }
+            let mut sum = Fixed::ZERO;
+            for w in &live {
+                sum = sum
+                    + w.controller
+                        .weight((move_base + 1) * n_in + (rf + 2 * bucket));
+            }
+            (sum.div(Fixed::from_int(live.len() as i32)), live.len())
+        };
+        let (start_mean, start_n) = mean_approach(&runner);
+        if verbose {
+            println!(
+                "gradient={gradient} start: n={start_n} mean_approach={:.3}",
+                start_mean.to_f64_lossy()
+            );
+        }
+        let mut offspring = 0usize;
+        for g in 0..generations {
+            for _t in 0..cadence {
+                // Re-apply the food each tick so the standing supply INGEST depletes is replenished (a stable
+                // environment, held fixed while the population evolves).
+                set_food(runner.embodiment_mut().unwrap().resources_mut());
+                runner.step();
+            }
+            let emb = runner.embodiment().unwrap();
+            offspring = emb
+                .walkers()
+                .iter()
+                .filter(|w| w.id.0 & OFFSPRING_ID_BIT != 0)
+                .count();
+            if verbose {
+                let (m, n) = mean_approach(&runner);
+                println!(
+                    "gradient={gradient} gen {}: living={n} offspring={offspring} mean_approach={:.3}",
+                    g + 1,
+                    m.to_f64_lossy()
+                );
+            }
+        }
+        let (final_mean, final_n) = mean_approach(&runner);
+        (final_mean, final_n, offspring)
+    }
+
+    #[test]
+    fn slice4_matter_channel_selection_moves_the_weight_only_under_the_gradient() {
+        // Slice 4, the instrumented mechanism proof (the gate's option (i), a stated non-shipped regime): under a
+        // spatial food gradient the population-mean resource-density APPROACH weight moves OFF its seeded zero
+        // toward approach, because beings whose weight carried them to food survived to the reproduction beat and
+        // bred while those that wandered off starved (selection). In the matched HELD CONTROL (uniform food, no
+        // gradient) the same regime leaves the mean at zero, because survival no longer depends on the weight. The
+        // contrast is the proof that SELECTION moved it, not the regime. Nothing about approach is authored: the
+        // seed is symmetric zero-mean and freely-signed.
+        let (grad_mean, _grad_n, grad_off) = matter_arena(true, 8, false);
+        let (ctrl_mean, _ctrl_n, _ctrl_off) = matter_arena(false, 8, false);
+        // The founder mean approach weight is exactly zero (a symmetric +8 / -8 seed). Under the gradient the
+        // population mean is driven strongly toward the +8 approach pole: the lineages whose weight carried them
+        // east to the food survived to the reproduction beat and bred, the westward-weighted lineages starved.
+        assert!(
+            grad_mean > Fixed::from_int(4),
+            "under the food gradient selection drove the mean approach weight strongly positive (toward the +8 \
+             approach pole), off its zero seed: got {}",
+            grad_mean.to_f64_lossy()
+        );
+        // The HELD CONTROL (uniform food, no spatial gradient): the SAME regime, seed, drain, and beat, but
+        // survival no longer depends on the approach weight, so the mean stays near its zero seed. The contrast is
+        // the proof that SELECTION moved the weight, not the regime or an authored bias.
+        assert!(
+            ctrl_mean.abs() < Fixed::from_int(2),
+            "without a gradient the mean approach weight stayed near its zero seed: got {}",
+            ctrl_mean.to_f64_lossy()
+        );
+        assert!(
+            grad_mean > ctrl_mean + Fixed::from_int(3),
+            "the gradient run's approach weight far exceeds the no-gradient control ({} vs {})",
+            grad_mean.to_f64_lossy(),
+            ctrl_mean.to_f64_lossy()
+        );
+        // Selection climbed through the reproduction beat, not by founder survival alone: offspring were minted.
+        assert!(
+            grad_off > 0,
+            "the reproduction beat minted offspring under the gradient"
+        );
+        // Determinism (Principle 3): the whole seeded experiment replays bit-for-bit.
+        let (grad_mean2, _, _) = matter_arena(true, 8, false);
+        assert_eq!(
+            grad_mean, grad_mean2,
+            "the selection experiment is deterministic"
+        );
+    }
 }
