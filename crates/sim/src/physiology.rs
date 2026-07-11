@@ -389,22 +389,36 @@ pub fn body_mass_kg(plan: &BodyPlan, anchors: &MetabolicAnchors) -> Fixed {
         .unwrap_or(Fixed::ZERO)
 }
 
-/// A being's radiating-surface emissivity: the `opt.emissivity` its covering material declares, or ZERO if
-/// the covering carries none (the substrate absence convention, so an alien body whose covering declares no
-/// emissivity radiates nothing rather than converging on a hidden terran default; Principle 9). The radiant
-/// thermoregulatory term reads THIS rather than a global manifest scalar, so the emissivity is the being's
-/// OWN covering-material datum (the chem/optics floor axis [`OPT_EMISSIVITY`]), per-race differentiable and
-/// read from the same covering the corpse deposit carries, not a duplicate constant (derive-vs-author,
-/// Principle 6; the retired `metabolism.surface_emissivity` duplicated this floor axis). The covering is
-/// resolved by `plan.covering.kind` against the registry coverings, the same way
-/// [`whole_body_composition_vector`] does.
-pub fn covering_emissivity(plan: &BodyPlan, registry: &BodyPlanRegistry) -> Fixed {
+/// A being's radiating-surface value on ONE optical floor axis: the value its covering material declares on
+/// the axis `axis` (`opt.emissivity`, `opt.refractive_index`, `opt.albedo`, whatever the chem/optics floor
+/// declares), or ZERO if the covering (or the being) carries none (the substrate absence convention). This is
+/// the general surface-keyed DIRECT read of a SINGLE floor optical axis: it reads exactly one axis, never a
+/// composite of several (a composite would be an authored value in the world-content path, the value-authoring
+/// line; combination across axes belongs to selection over per-axis weights, never a fold here), and it keys on
+/// the being's OWN surface material (its covering, resolved by `plan.covering.kind` against the registry
+/// coverings, the same way [`covering_emissivity`] and [`whole_body_composition_vector`] do), so a being whose
+/// covering declares no value for the axis, or has no covering at all, reads ZERO and simply carries no feature
+/// on that axis rather than a synthesized default (admit-the-alien: the alien is a data row, Principle 9). The
+/// perceivable-feature substrate ([`crate::perceivable_feature::PerceivableFeatureRegistry`]) reads this per
+/// declared channel. Pure and RNG-free.
+pub fn surface_optical_axis(plan: &BodyPlan, registry: &BodyPlanRegistry, axis: &str) -> Fixed {
     registry
         .coverings
         .iter()
         .find(|k| k.id == plan.covering.kind)
-        .map(|cov| cov.mat(OPT_EMISSIVITY))
+        .map(|cov| cov.mat(axis))
         .unwrap_or(Fixed::ZERO)
+}
+
+/// A being's radiating-surface emissivity: its surface value on the `opt.emissivity` optical floor axis
+/// ([`OPT_EMISSIVITY`]), the [`surface_optical_axis`] read on that one axis, or ZERO if the covering carries
+/// none (the substrate absence convention, so an alien body whose covering declares no emissivity radiates
+/// nothing rather than converging on a hidden terran default; Principle 9). The radiant thermoregulatory term
+/// reads THIS rather than a global manifest scalar, so the emissivity is the being's OWN covering-material datum,
+/// per-race differentiable and read from the same covering the corpse deposit carries, not a duplicate constant
+/// (derive-vs-author, Principle 6; the retired `metabolism.surface_emissivity` duplicated this floor axis).
+pub fn covering_emissivity(plan: &BodyPlan, registry: &BodyPlanRegistry) -> Fixed {
+    surface_optical_axis(plan, registry, OPT_EMISSIVITY)
 }
 
 /// The perceptible optical SIGNAL power a being emits from its own body heat (the being-percept keystone,
@@ -956,6 +970,55 @@ mod tests {
             composition: TissueComposition::from_pairs(&[(ENERGY_DENSITY, Fixed::ONE)]),
         });
         (reg, skin, flesh, fat)
+    }
+
+    #[test]
+    fn surface_optical_axis_reads_one_axis_and_is_zero_for_absent() {
+        use crate::anatomy::KindDef;
+        let (mut reg, _skin, _flesh, _fat) = registry();
+        // A covering carrying two optical axes with distinct values (a labelled fixture, not owner canon).
+        let cov = reg.coverings.len() as u16;
+        let mut material = std::collections::BTreeMap::new();
+        material.insert(OPT_EMISSIVITY.to_string(), Fixed::from_ratio(9, 10));
+        material.insert("opt.refractive_index".to_string(), Fixed::from_ratio(3, 2));
+        reg.coverings.push(KindDef {
+            id: cov,
+            name: "test-hide".to_string(),
+            fantasy: false,
+            geometry: std::collections::BTreeMap::new(),
+            material,
+        });
+        let mut plan = body((1, 1), vec![]);
+        plan.covering = Part {
+            kind: cov,
+            development: Fixed::ONE,
+        };
+        // It reads exactly ONE axis, not a composite: each declared axis returns its own value.
+        assert_eq!(
+            surface_optical_axis(&plan, &reg, OPT_EMISSIVITY),
+            Fixed::from_ratio(9, 10)
+        );
+        assert_eq!(
+            surface_optical_axis(&plan, &reg, "opt.refractive_index"),
+            Fixed::from_ratio(3, 2)
+        );
+        // An axis the covering does not declare reads ZERO (graceful absence, the feature is simply absent).
+        assert_eq!(surface_optical_axis(&plan, &reg, "opt.albedo"), Fixed::ZERO);
+        // `covering_emissivity` is the same read on the emissivity axis (the delegation is byte-identical).
+        assert_eq!(
+            covering_emissivity(&plan, &reg),
+            surface_optical_axis(&plan, &reg, OPT_EMISSIVITY)
+        );
+        // A being whose covering kind is not in the registry (an alien with no covering-row) reads ZERO on
+        // every axis: it carries no feature rather than a synthesized default, so the alien stays a data row.
+        plan.covering = Part {
+            kind: 60000,
+            development: Fixed::ONE,
+        };
+        assert_eq!(
+            surface_optical_axis(&plan, &reg, OPT_EMISSIVITY),
+            Fixed::ZERO
+        );
     }
 
     #[test]
