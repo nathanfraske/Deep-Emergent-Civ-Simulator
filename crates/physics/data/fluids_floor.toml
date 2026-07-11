@@ -20,6 +20,45 @@ range_lo = "1"
 range_hi = "100000"
 real = "the K envelope from cryogenic to stellar/forge; grounds the wave-1 conduction and combustion temperature inputs"
 
+# --- Critical-point axes (the measured phase-behaviour primitives the transport-property derivations read) ---
+# The critical point (T_c, P_c) and the acentric factor are directly-observed substance constants, not derivable
+# without the many-body Hamiltonian, so they are the hunt-cleared irreducible primitives from which the
+# Lennard-Jones pair (and hence the Chapman-Enskog diffusivity) DERIVES by corresponding states. Only these are
+# authored; an alien gas is a data row carrying its own critical point.
+
+[[axis]]
+id = "chem.critical_temperature"
+measures = "the critical temperature T_c, the phase-behaviour endpoint above which no liquid-vapour distinction exists (the corresponding-states anchor the LJ well depth derives from)"
+unit = "K"
+dimension = "temperature"
+scale = "K"
+tier = 0
+range_lo = "1"
+range_hi = "100000"
+real = "Poling, Prausnitz and O'Connell, The Properties of Gases and Liquids (water 647.1, air pseudo-critical 132.5, helium 5.2)"
+
+[[axis]]
+id = "chem.critical_pressure"
+measures = "the critical pressure P_c at the critical point (the second corresponding-states anchor, for the LJ collision diameter)"
+unit = "MPa"
+dimension = "pressure"
+scale = "MPa"
+tier = 0
+range_lo = "0.01"
+range_hi = "1000"
+real = "Poling, Prausnitz and O'Connell (water 22.06, air 3.77, helium 0.227)"
+
+[[axis]]
+id = "chem.acentric_factor"
+measures = "Pitzer's acentric factor omega, the deviation of the vapour-pressure curve from the simple-fluid spherical reference (an equation-of-state and polarity input)"
+unit = "1"
+dimension = "dimensionless"
+scale = "1"
+tier = 0
+range_lo = "-1"
+range_hi = "2"
+real = "Poling, Prausnitz and O'Connell (water 0.344, air 0.035, argon 0)"
+
 # --- Fluid axes ---
 
 [[axis]]
@@ -497,6 +536,11 @@ values = [
   { axis = "mat.density", value = "1.225" },
   { axis = "fluid.dynamic_viscosity", value = "0.0000178" },
   { axis = "fluid.bulk_modulus", value = "0.142" },
+  # Pseudo-critical point and acentric factor of dry air (Poling, Prausnitz and O'Connell), the second
+  # substance the Chapman-Enskog vapour-in-air diffusivity reads for its LJ pair.
+  { axis = "chem.critical_temperature", value = "132.5" },
+  { axis = "chem.critical_pressure", value = "3.77" },
+  { axis = "chem.acentric_factor", value = "0.035" },
 ]
 
 [[substance]]
@@ -513,4 +557,10 @@ values = [
   # carries its vaporization value here, the surface energy balance's evaporative cooling reads it. A distinct
   # latent-heat-of-fusion axis (for the melt) is the deeper substrate follow-on for a world that needs both.
   { axis = "therm.latent_heat", value = "2454" },
+  # Critical point and acentric factor (Poling, Prausnitz and O'Connell), the corresponding-states primitives
+  # the Chapman-Enskog vapour diffusivity derives its LJ pair from. The polar acentric factor (0.344) is the
+  # datum a Stockmayer/Brokaw polar correction would key on (the owner's polarity decision), not yet consumed.
+  { axis = "chem.critical_temperature", value = "647.1" },
+  { axis = "chem.critical_pressure", value = "22.06" },
+  { axis = "chem.acentric_factor", value = "0.344" },
 ]

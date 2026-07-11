@@ -38,10 +38,11 @@ fn full_registry() -> PhysicsRegistry {
 #[test]
 fn the_em_floor_loads_onto_the_earlier_floors() {
     let reg = full_registry();
-    // 39 mech + 21 fluids + 17 chem/optics + 14 em axes; 21 + 18 + 11 + 15 laws; 2 + 2 + 0 + 2 subs.
-    // (fluids gained fluid.moisture_content, Arc 5 T4, the terrain-wetness floor identity; chem/optics gained
-    // opt.emissivity.band_0..2, the per-band spectral emissivity axes for step 2b.)
-    assert_eq!(reg.axis_count(), 91, "the four floors' axes together");
+    // 39 mech + 24 fluids + 17 chem/optics + 14 em axes; 21 + 18 + 11 + 15 laws; 2 + 2 + 0 + 2 subs.
+    // (fluids gained fluid.moisture_content, Arc 5 T4, the terrain-wetness floor identity, plus the three
+    // critical-point axes chem.critical_{temperature,pressure} + chem.acentric_factor for the transport-property
+    // derivations; chem/optics gained opt.emissivity.band_0..2, the per-band spectral emissivity axes for 2b.)
+    assert_eq!(reg.axis_count(), 94, "the four floors' axes together");
     assert_eq!(reg.law_count(), 65, "the four floors' laws together");
     assert_eq!(
         reg.substance_count(),
