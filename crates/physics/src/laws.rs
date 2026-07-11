@@ -1456,8 +1456,15 @@ pub fn ideal_gas_density(
 }
 
 /// Boussinesq natural-convection acceleration a = g*(T_parcel - T_ambient)/T_ambient (m/s^2), signed
-/// up when the parcel is warmer, using the ideal-gas 1/T thermal expansion. Zero ambient reads zero.
+/// up when the parcel is warmer, using the ideal-gas 1/T thermal expansion. The `1/T_ambient` divisor's
+/// floor DERIVES from the physics, not an owner value (the R-UNITS-PIN floor invariant): T_ambient is an
+/// ABSOLUTE temperature, so `T_ambient > 0` is the third-law physical floor (absolute zero is unreachable),
+/// which is why the divide by T_ambient is safe below without riding the storage epsilon. A non-positive
+/// T_ambient is non-physical, and the ZERO it returns is the ABSENCE convention (no ambient medium, no
+/// buoyant coupling), a declared physical-limit-at-zero rather than a fabricated substitute.
 pub fn thermal_buoyancy(t_parcel: Fixed, t_ambient: Fixed, gravity: Fixed, a_max: Fixed) -> Fixed {
+    // The declared physical-limit-at-zero: the third-law floor is T_ambient > 0, so a non-positive absolute
+    // temperature is off the physical domain and reads the absence convention (no buoyancy).
     if t_ambient <= ZERO {
         return ZERO;
     }
@@ -1849,7 +1856,22 @@ pub fn transduce(
                 Some(x) => x,
                 None => return activation_max,
             };
-            match (Fixed::ONE + scaled).ln().checked_mul(gain) {
+            // The Fechner argument `1 + shape*magnitude` stays above zero by the law's own DOMAIN, derived
+            // from the physics rather than set: `magnitude > 0` (guarded above) and `shape >= 0` (the
+            // monotone-compressive contract, "monotone shapes only" per this law's doc), so the argument is at
+            // or above one. That derived floor, not the storage epsilon, bounds the log (Principle 10, the
+            // R-UNITS-PIN floor invariant): `guarded_ln` clamps the argument up to the derived floor ONE, so it
+            // is byte-neutral on the contract (the argument is already >= 1, so the clamp is a no-op and the log
+            // is exact) and fail-safe if a mis-declared negative shape ever drove the argument below the domain,
+            // rather than the silent `ln(arg<=0) -> Fixed::MIN` sentinel it rode before. No value is authored:
+            // the floor is the physics of the compressive law.
+            let arg = Fixed::ONE + scaled;
+            match civsim_units::guard::guarded_ln(
+                arg,
+                civsim_units::guard::ZeroGuard::Floor(Fixed::ONE),
+            )
+            .checked_mul(gain)
+            {
                 Some(a) => a,
                 None => activation_max,
             }
