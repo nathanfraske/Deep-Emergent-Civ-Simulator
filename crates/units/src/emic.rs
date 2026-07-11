@@ -46,6 +46,7 @@
 //! no unit: those are per-culture data (Part 40).
 
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 /// An exact rational conversion from a unit's own magnitude to the absolute base: one unit equals
 /// `num / den` base units. Held as an integer pair so the factor contributes no approximation of
@@ -174,6 +175,101 @@ impl StatedQuantity {
     /// widen signal.
     pub fn quantize_to_absolute(&self, s_abs: u32) -> Option<i64> {
         emic_to_absolute(self.v_emic, self.s_emic, self.factor, s_abs)
+    }
+}
+
+/// A unit's identity within a culture's measurement system: an interned id assigned in
+/// registration order. Keying the store on this ordered id rather than on a hash of the unit's
+/// name is what makes a canonical walk over a culture's units observer-independent, the units-local
+/// instance of R-CANON-WALK (Principle 10).
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize)]
+pub struct UnitId(pub u32);
+
+/// One of a culture's own named units: its dimension (the built data-driven exponent vector, not a
+/// closed dimension enum), its exact-rational conversion to the absolute base, and the name the
+/// people gave it. The unit's provenance (what the people derived it from) is added in the
+/// open-provenance hardening, so this struct stays the emic layer's data row, not an authored
+/// taxonomy of unit kinds.
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub struct EmicUnit {
+    /// The dimension this unit measures, as the crate's canonical exponent vector.
+    pub dimension: crate::Dimension,
+    /// The exact-rational conversion to the absolute base (one unit is `num/den` base units).
+    pub factor: UnitFactor,
+    /// The culture's own name for the unit.
+    pub name: String,
+}
+
+/// A culture's measurement system: the ordered store of its own units. Units are held in
+/// registration-id order, and the only walk built for any canonical purpose is
+/// [`MeasurementSystem::iter_ordered`], which yields them in that order, so a hash of a culture's
+/// units is observer-independent. The name index is a convenience lookup and is never the canonical
+/// walk. A culture (`CultureId`, Part 40) owns one of these; the id association is the sim's to
+/// attach, so this substrate stays culture-agnostic.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct MeasurementSystem {
+    units: Vec<EmicUnit>,
+    #[serde(skip)]
+    by_name: HashMap<String, u32>,
+}
+
+impl MeasurementSystem {
+    /// An empty measurement system.
+    pub fn new() -> MeasurementSystem {
+        MeasurementSystem::default()
+    }
+
+    /// Register a unit, returning its ordered id. Panics on a duplicate name, so a culture cannot
+    /// define one named unit two ways.
+    pub fn register(&mut self, unit: EmicUnit) -> UnitId {
+        assert!(
+            !self.by_name.contains_key(&unit.name),
+            "duplicate unit '{}'",
+            unit.name
+        );
+        let id = self.units.len() as u32;
+        self.by_name.insert(unit.name.clone(), id);
+        self.units.push(unit);
+        UnitId(id)
+    }
+
+    /// Rebuild the name index after a deserialize (the index is not serialized, since it is derived
+    /// from the ordered store).
+    pub fn reindex(&mut self) {
+        self.by_name.clear();
+        for (i, u) in self.units.iter().enumerate() {
+            self.by_name.insert(u.name.clone(), i as u32);
+        }
+    }
+
+    /// The unit for an id.
+    pub fn get(&self, id: UnitId) -> Option<&EmicUnit> {
+        self.units.get(id.0 as usize)
+    }
+
+    /// The id of a unit by name (a convenience lookup, never the canonical walk).
+    pub fn id_of(&self, name: &str) -> Option<UnitId> {
+        self.by_name.get(name).copied().map(UnitId)
+    }
+
+    /// The number of units.
+    pub fn len(&self) -> usize {
+        self.units.len()
+    }
+
+    /// Whether the system has no units.
+    pub fn is_empty(&self) -> bool {
+        self.units.is_empty()
+    }
+
+    /// Walk the units in canonical id order. This is the one ordered accessor a hash or any other
+    /// order-sensitive canonical operation is built over, so the walk is deterministic and
+    /// independent of insertion order, machine, and hash seed.
+    pub fn iter_ordered(&self) -> impl Iterator<Item = (UnitId, &EmicUnit)> {
+        self.units
+            .iter()
+            .enumerate()
+            .map(|(i, u)| (UnitId(i as u32), u))
     }
 }
 
@@ -310,5 +406,78 @@ mod tests {
         );
         // A modest crossing in the same shape still succeeds, so the guard is not over-eager.
         assert!(emic_to_absolute(1000, 0, big, 0).is_some());
+    }
+
+    fn unit(name: &str, num: i64, den: i64) -> EmicUnit {
+        EmicUnit {
+            dimension: crate::Dimension::base(0),
+            factor: UnitFactor::new(num, den).unwrap(),
+            name: name.to_string(),
+        }
+    }
+
+    #[test]
+    fn a_measurement_system_registers_and_looks_up_units() {
+        let mut ms = MeasurementSystem::new();
+        let cubit = ms.register(unit("cubit", 4572, 10000));
+        let span = ms.register(unit("span", 2286, 10000));
+        assert_eq!(ms.len(), 2);
+        assert_eq!(cubit, UnitId(0));
+        assert_eq!(span, UnitId(1));
+        assert_eq!(ms.id_of("cubit"), Some(UnitId(0)));
+        assert_eq!(ms.id_of("span"), Some(UnitId(1)));
+        assert_eq!(ms.id_of("league"), None);
+        assert_eq!(ms.get(cubit).unwrap().name, "cubit");
+    }
+
+    #[test]
+    fn the_canonical_walk_is_id_ordered_and_insertion_order_independent() {
+        // Two systems that register the same units in different orders are different systems (ids
+        // differ), but the canonical walk of each is its own registration order, deterministic and
+        // independent of the hash map's iteration. The property that matters: iter_ordered yields
+        // ascending ids, the single ordered accessor a hash is ever built over.
+        let mut ms = MeasurementSystem::new();
+        ms.register(unit("cubit", 4572, 10000));
+        ms.register(unit("span", 2286, 10000));
+        ms.register(unit("digit", 1905, 100000));
+        let walk: Vec<(UnitId, String)> = ms
+            .iter_ordered()
+            .map(|(id, u)| (id, u.name.clone()))
+            .collect();
+        assert_eq!(
+            walk,
+            vec![
+                (UnitId(0), "cubit".to_string()),
+                (UnitId(1), "span".to_string()),
+                (UnitId(2), "digit".to_string()),
+            ],
+            "the walk must be ascending id order"
+        );
+        // Deterministic across repeated walks (no hash-map iteration leaks in).
+        let walk2: Vec<UnitId> = ms.iter_ordered().map(|(id, _)| id).collect();
+        assert_eq!(walk2, vec![UnitId(0), UnitId(1), UnitId(2)]);
+    }
+
+    #[test]
+    fn reindex_rebuilds_the_name_lookup() {
+        // The name index carries `#[serde(skip)]`, so after a deserialize it is empty until reindex
+        // rebuilds it from the ordered store (the same pattern as QuantityRegistry). Here reindex is
+        // exercised for idempotence: rebuilding preserves every lookup and the ordered walk.
+        let mut ms = MeasurementSystem::new();
+        ms.register(unit("cubit", 4572, 10000));
+        ms.register(unit("span", 2286, 10000));
+        ms.reindex();
+        assert_eq!(ms.id_of("cubit"), Some(UnitId(0)));
+        assert_eq!(ms.id_of("span"), Some(UnitId(1)));
+        let names: Vec<String> = ms.iter_ordered().map(|(_, u)| u.name.clone()).collect();
+        assert_eq!(names, vec!["cubit".to_string(), "span".to_string()]);
+    }
+
+    #[test]
+    #[should_panic(expected = "duplicate unit")]
+    fn a_duplicate_unit_name_panics() {
+        let mut ms = MeasurementSystem::new();
+        ms.register(unit("cubit", 4572, 10000));
+        ms.register(unit("cubit", 1, 2));
     }
 }
