@@ -1765,6 +1765,21 @@ fn snapshot(
                 "  seasonal latitude (mean K): north-pole {north:.1}  equator {equator:.1}  south-pole {south:.1}"
             );
         }
+        // The GLOBAL MEAN surface temperature (the AREA mean over every cell), the whole-world diagnostic the
+        // surface-energy-balance arc reports against Earth's ~288 K global mean. A pure read for the readout, no
+        // state change, so it is off the `state_hash` and every pin holds.
+        {
+            let mut total = 0.0_f64;
+            for y in 0..fh {
+                for x in 0..fw {
+                    total += f.at(x, y).to_f64_lossy();
+                }
+            }
+            let cells = (fw as f64) * (fh as f64);
+            if cells > 0.0 {
+                println!("  global mean surface (K): {:.1}", total / cells);
+            }
+        }
         // Per-material thermal inertia (follow-on 2): a cell's own water content sets how fast it heats and
         // cools, so wetter cells lag while drier land swings. To isolate the day-night lag from the pole-to-
         // equator latitude gradient, restrict to a NARROW EQUATORIAL BAND (near-constant latitude), split its
