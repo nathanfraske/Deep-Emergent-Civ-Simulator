@@ -237,6 +237,20 @@ pub struct PlaybackDriver {
     /// Ticks the chosen speed asked for beyond the per-frame budget, accumulated. This is the
     /// honest temporal-LOD signal (Part 32): a non-zero debt means fine stepping cannot keep pace
     /// at this speed and coarse stepping would be needed to fast-forward cheaply.
+    ///
+    /// CONTENTION-LOD-INVARIANCE FLAG (owner-flagged, check this BEFORE building coarse stepping
+    /// here): when coarse temporal-LOD stepping is built, resource-contention resolution MUST stay
+    /// LOD-invariant (Principle 10: the canonical outcome may not depend on whether a region is
+    /// fine- or coarse-stepped). The FIELD-DRAW mode is safe unconditionally, since the proportional
+    /// split equals the depletion integral over the interval, so a coarse step and a fine step agree
+    /// exactly. The FIRST-COME mode (discrete grabbable items resolved by physical arrival order) is
+    /// the OPEN one: it stays invariant only if the arrival-time ordering is computed the same at
+    /// both resolutions, and arrival time is a function of each agent's trajectory over the interval,
+    /// which a coarse step only approximates. So before trusting first-come across the LOD boundary,
+    /// verify (an advisor consult against the concrete solver) that the arrival-time and trajectory
+    /// computation is itself LOD-invariant. Grounding: the contention-resolver design (the
+    /// apportionment-contention record; field-draw proportional split versus first-come-by-arrival,
+    /// mode derived from the resource's physical type).
     lod_debt: u64,
 }
 

@@ -451,14 +451,6 @@ unit = "soil_nutrient"
 source = "dev fixture for base-level liveliness step 2 productivity; crates/sim/src/environ.rs"
 
 [[reserved]]
-id = "productivity.soil_baseline"
-basis = "FIXTURE placeholder; the uniform soil-nutrient supply until the step-4 soil field lands"
-status = "set"
-value = "1"
-unit = "soil_nutrient"
-source = "dev fixture for base-level liveliness step 2 productivity; crates/sim/src/environ.rs"
-
-[[reserved]]
 id = "hydrology.max_water_depth"
 basis = "FIXTURE placeholder; the basin holding capacity, the maximum standing water a cell retains so a basin fills to a lake rather than growing without bound"
 status = "set"

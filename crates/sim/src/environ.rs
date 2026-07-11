@@ -205,7 +205,12 @@ impl EnvironCalib {
             light_req: m.require_fixed("productivity.light_requirement")?,
             temp_req: m.require_fixed("productivity.temperature_requirement")?,
             soil_req: m.require_fixed("productivity.soil_requirement")?,
-            soil_baseline: m.require_fixed("productivity.soil_baseline")?,
+            // The uniform baseline soil supply DERIVES from the soil requirement rather than a duplicate
+            // reserved scalar: its basis declares it MUST equal `soil_requirement` so bare soil is exactly
+            // non-limiting at baseline (soil / requirement = 1), before the matter-cycle fertility field
+            // differentiates the supply per cell (derive-vs-author, Principle 6; the same pattern as the
+            // retired `hydrology.saturation_t_ref` twin). The field stays overridable for the fertility test.
+            soil_baseline: m.require_fixed("productivity.soil_requirement")?,
             regen_rate: m.require_fixed("productivity.regen_rate")?,
             colonization: m.require_fixed("productivity.colonization")?,
             salt_weathering: m.require_fixed("salinity.weathering_rate")?,
@@ -234,7 +239,8 @@ impl EnvironCalib {
             light_req: Fixed::from_ratio(1, 2),
             temp_req: Fixed::from_ratio(1, 2),
             soil_req: Fixed::from_ratio(1, 2),
-            soil_baseline: Fixed::from_int(1),
+            // Equals soil_req (the invariant: bare soil is exactly non-limiting at baseline).
+            soil_baseline: Fixed::from_ratio(1, 2),
             regen_rate: Fixed::from_ratio(1, 4),
             colonization: Fixed::from_ratio(1, 20),
             salt_weathering: Fixed::from_ratio(1, 100),
@@ -2284,6 +2290,15 @@ mod tests {
             &BiomeSet::dev_default(),
             &WorldgenParams::dev_default(),
         )
+    }
+
+    #[test]
+    fn baseline_soil_equals_the_soil_requirement_the_derived_invariant() {
+        // soil_baseline DERIVES from soil_requirement (its basis: MUST equal it so bare soil is exactly
+        // non-limiting at baseline). The manifest path reads soil_requirement for both; this locks the same
+        // invariant on the code dev-fixture path, so the two cannot drift apart.
+        let f = EnvironCalib::dev_fixture();
+        assert_eq!(f.soil_baseline, f.soil_req);
     }
 
     #[test]

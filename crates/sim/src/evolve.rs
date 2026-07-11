@@ -192,9 +192,9 @@ impl EvolveParams {
     /// Read the controller-evolution parameters from the calibration manifest and derive the three
     /// scalings from the layout (design Part 8, Principle 11). The two new reserved fractions
     /// (`behavior.controller_target_mutations`, `behavior.controller_mutation_step_fraction`) and the
-    /// three budgets (`behavior.selection_pop_size`, `behavior.selection_generations`,
-    /// `behavior.episode_ticks`) are read fail-loud, so a build cannot run controller evolution on an
-    /// unset value. The Gaussian shape is the world's stamped `genome.gauss_approx`, supplied by the
+    /// two budgets (`behavior.selection_pop_size`, `behavior.episode_ticks`) are read fail-loud, so a
+    /// build cannot run controller evolution on an unset value; the generations budget DERIVES from the
+    /// pre-dawn radiation depth (`biosphere.predawn_generations`), which its basis declares it equals. The Gaussian shape is the world's stamped `genome.gauss_approx`, supplied by the
     /// caller rather than re-read here. The old `behavior.controller_init_spread`,
     /// `controller_mutation_rate`, and `controller_mutation_step` are retired: those three now derive
     /// through [`EvolveParams::from_layout`] and are no longer read.
@@ -207,8 +207,13 @@ impl EvolveParams {
         let mutation_step_fraction =
             manifest.require_fixed("behavior.controller_mutation_step_fraction")?;
         let pop_size = manifest.require_i64("behavior.selection_pop_size")?.max(0) as usize;
+        // The generations behaviour is allowed to adapt before the dawn DERIVES from the pre-dawn
+        // radiation depth the biosphere already runs (`biosphere.predawn_generations`), rather than a
+        // duplicate reserved scalar: its basis declares it equal to that depth for consistency, so it is
+        // read from the sibling (derive-vs-author, Principle 6; the same pattern as the retired
+        // `hydrology.saturation_t_ref` twin).
         let generations = manifest
-            .require_i64("behavior.selection_generations")?
+            .require_i64("biosphere.predawn_generations")?
             .max(0) as u32;
         let episode_ticks = manifest.require_i64("behavior.episode_ticks")?.max(0) as u32;
         Ok(EvolveParams::from_layout(
@@ -1443,7 +1448,7 @@ status = "set"
 value = "32"
 source = "t"
 [[reserved]]
-id = "behavior.selection_generations"
+id = "biosphere.predawn_generations"
 basis = "b"
 status = "set"
 value = "40"
@@ -1469,6 +1474,8 @@ source = "t"
         let m2 = CalibrationManifest::from_toml_str(&set).unwrap();
         let p = EvolveParams::from_manifest_and_layout(&m2, &layout, gauss).unwrap();
         assert_eq!(p.pop_size, 32);
+        // The generations budget DERIVES from biosphere.predawn_generations (40), not its own retired key.
+        assert_eq!(p.generations, 40);
         assert_eq!(
             p.mutation_rate,
             Fixed::from_int(1).div(Fixed::from_int(layout.weight_count() as i32)),
