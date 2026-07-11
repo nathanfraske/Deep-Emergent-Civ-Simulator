@@ -23,12 +23,18 @@
 //! The result scale is fixed by the load-time scale planner (a later slice), never chosen at runtime, so each
 //! operation is a fixed deterministic integer function of its inputs.
 //!
-//! Intermediate width: a single multiply of two `i64` mantissas fits `i128` (at most 126 magnitude bits), so
-//! the common case is native `i128`. An operation whose intermediate would exceed `i128` (a chain of powers,
-//! or a divide whose numerator shift plus mantissa exceeds 127 bits) returns `None` from the `i128` path,
-//! the planner's signal to route that node through the wider intermediate (the i256 / bignum path, a later
-//! slice sized on the gate's hardware-validation survey). This slice builds the `i128` path and its exact
-//! contract; the wide path lands parameterized behind the same interface.
+//! Intermediate width, sized PER-LAW by measurement (the gate's hardware validation, not `i128` by default):
+//! a single multiply of two `i64` mantissas fits `i128` (at most 126 magnitude bits), but a CHAIN rounded
+//! ONCE at the end needs far more. The flagship radiant law `sigma * T^4` reaches about a 210-bit accumulator
+//! at the planner's derived scales, which exceeds `i128`'s 127-bit signed magnitude, so i256 is a FIRST-CLASS
+//! width for chained laws, not an edge case; the quarter-power divide sits about five bits inside `i128` and
+//! tips over on a wider envelope. The design choice, made explicit: single-round-PER-CHAIN (evaluate the whole
+//! chain in a wide accumulator and round once at the end, maximum precision and exact to the arbitrary-precision
+//! oracle, the default for the quartics because the measurement showed it exact) over round-per-OPERATION
+//! (round each intermediate to stay in `i128` at a small stated precision loss). The load-time planner (a later
+//! slice) sizes each law's accumulator from its measured exponent interval. This slice builds the `i128` ops
+//! and their exact contract; a single-op result that would exceed `i128` returns `None`, and the wide
+//! (i256, the eight-sub-limb widening) accumulator and chain evaluator land behind the same interface next.
 
 use crate::idiv_round_half_even;
 
@@ -109,6 +115,54 @@ pub fn add(a: i64, s_a: u32, b: i64, s_b: u32, s_r: u32) -> Option<i64> {
 /// Subtract `b` from `a`, otherwise identical to [`add`].
 pub fn sub(a: i64, s_a: u32, b: i64, s_b: u32, s_r: u32) -> Option<i64> {
     sum_signed(a, s_a, b, s_b, s_r, true)
+}
+
+/// Floor of the integer square root of a non-negative `u128`, by the classic digit-by-digit method (no
+/// division, deterministic, bit-identical everywhere).
+fn floor_isqrt(n: u128) -> u128 {
+    if n == 0 {
+        return 0;
+    }
+    // Start `bit` at the largest even power of two not exceeding `n` (a power of four).
+    let mut bit: u128 = 1u128 << ((127 - n.leading_zeros()) & !1);
+    let mut num = n;
+    let mut res: u128 = 0;
+    while bit != 0 {
+        if num >= res + bit {
+            num -= res + bit;
+            res = (res >> 1) + bit;
+        } else {
+            res >>= 1;
+        }
+        bit >>= 2;
+    }
+    res
+}
+
+/// Scale-aware square root, rounded to nearest: the square root of `bits` at scale `s_in`, delivered at scale
+/// `s_out`. Since `sqrt(bits/2^s_in) * 2^s_out = sqrt(bits * 2^(2*s_out - s_in))`, it is one integer square
+/// root over a shifted argument. The quarter-power consumer `(P/(c*K))^(1/4)` is two of these, avoiding a
+/// transcendental. Requires `bits >= 0`; returns `None` on a negative argument, a non-negative-shift the
+/// planner did not provide (result scale too coarse, widen `s_out`), or an argument that exceeds the
+/// intermediate (widen signal).
+pub fn isqrt(bits: i64, s_in: u32, s_out: u32) -> Option<i64> {
+    if bits < 0 {
+        return None;
+    }
+    let shift = 2 * s_out as i64 - s_in as i64;
+    if shift < 0 {
+        // The result scale is too coarse to hold the root at integer precision; the planner picks a finer
+        // s_out. Signalled rather than silently truncated.
+        return None;
+    }
+    let arg = (bits as u128)
+        .checked_shl(shift as u32)
+        .filter(|v| (v >> shift as u32) == bits as u128)?;
+    let r = floor_isqrt(arg);
+    // Round to nearest: step up when the argument is past the midpoint r^2 + r (no exact tie occurs for an
+    // integer argument and a half-integer root).
+    let rounded = if arg - r * r > r { r + 1 } else { r };
+    fit_i64(rounded as i128)
 }
 
 fn sum_signed(a: i64, s_a: u32, b: i64, s_b: u32, s_r: u32, subtract: bool) -> Option<i64> {
@@ -243,6 +297,70 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn floor_isqrt_brackets_the_root() {
+        for n in [
+            0u128,
+            1,
+            2,
+            3,
+            4,
+            8,
+            15,
+            16,
+            17,
+            99,
+            100,
+            1_000_000,
+            u128::from(u64::MAX),
+        ] {
+            let r = floor_isqrt(n);
+            assert!(r * r <= n, "floor_isqrt({n}) = {r}, r^2 > n");
+            assert!(
+                (r + 1).checked_mul(r + 1).is_none_or(|sq| sq > n),
+                "floor_isqrt({n}) too small"
+            );
+        }
+    }
+
+    #[test]
+    fn isqrt_is_scale_aware_and_rounds_to_nearest() {
+        // sqrt(4) = 2, at any equal in/out scale.
+        assert_eq!(isqrt(4 << 20, 20, 20), Some(2 << 20));
+        // sqrt(2) at scale 32: round(1.41421356 * 2^32) = 6074001000.5 -> compute the oracle by hand below.
+        // Oracle: for value = bits/2^s_in, expected = nearest integer to sqrt(value) * 2^s_out
+        //       = nearest integer to sqrt(bits * 2^(2*s_out - s_in)).
+        let oracle = |bits: i64, s_in: u32, s_out: u32| -> i64 {
+            let arg = (bits as u128) << (2 * s_out - s_in);
+            let r = floor_isqrt(arg);
+            (if arg - r * r > r { r + 1 } else { r }) as i64
+        };
+        for (bits, s_in, s_out) in [
+            (2i64, 0u32, 16u32),
+            (5_670_374, 20, 24),
+            (1, 0, 30),
+            (123_456_789, 12, 20),
+        ] {
+            assert_eq!(
+                isqrt(bits, s_in, s_out),
+                Some(oracle(bits, s_in, s_out)),
+                "isqrt({bits}@{s_in} -> {s_out})"
+            );
+        }
+        // A negative argument or a too-coarse result scale is a widen signal, not a wrong value.
+        assert_eq!(isqrt(-1, 0, 0), None);
+        assert_eq!(isqrt(4, 40, 0), None); // 2*0 - 40 < 0
+    }
+
+    #[test]
+    fn two_isqrts_make_a_quarter_power() {
+        // (16)^(1/4) = 2: sqrt(sqrt(16)). Carry a fine scale through the intermediate.
+        let s = 24u32;
+        let root2 = isqrt(16 << s, s, s).unwrap(); // sqrt(16) = 4 at scale s
+        let root4 = isqrt(root2, s, s).unwrap(); // sqrt(4) = 2 at scale s
+        assert_eq!(root4, 2 << s);
     }
 
     // Guard the oracle helper itself against a stale comparison path.
