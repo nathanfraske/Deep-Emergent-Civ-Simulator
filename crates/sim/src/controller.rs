@@ -325,6 +325,38 @@ impl ControllerLayout {
         )
     }
 
+    /// As [`with_percepts_and_being`], plus the RESOURCE-FEATURE input block (the creature-selection loop,
+    /// slice 3): the percept-and-being layout that ALSO carries the resource-density percept, so a being both
+    /// perceives other beings (the being block) and senses the identity-blind matter content of the cells
+    /// around it (the resource-feature block, the slice-2 union of the producer field and any located corpse).
+    /// The seeding side (`run_world`'s `dawn_layout`) builds this so the founder gene block is sized against the
+    /// SAME width the run embodiment expresses against once it arms both the being-percept and the resource
+    /// features, or the seeded weights land in the wrong slots. Delegates to the full builder with only the
+    /// being and resource-feature blocks enabled; an EMPTY `resource_features` is exactly
+    /// [`with_percepts_and_being`] (`n_resource_feature` zero), so this is opt-in and hash-neutral by default.
+    pub fn with_percepts_being_and_resource_features(
+        homeo: &HomeostaticRegistry,
+        afford: &AffordanceRegistry,
+        percept: &PerceptRegistry,
+        being: bool,
+        resource_features: &PerceivableFeatureRegistry,
+        hidden: usize,
+    ) -> ControllerLayout {
+        Self::with_percepts_appetitive_material_attraction_conviction_being_and_resource_features(
+            homeo,
+            afford,
+            percept,
+            false,
+            &MaterialPerceptRegistry::empty(),
+            false,
+            &ConvictionPerceptRegistry::empty(),
+            being,
+            &PerceivableFeatureRegistry::empty(),
+            resource_features,
+            hidden,
+        )
+    }
+
     /// Build a layout that also feeds an APPETITIVE belief block, one channel per affordance in canonical
     /// id order (ideation / experiential-discovery arc, piece 1, the belief-to-behaviour feedback). The
     /// block sits AFTER the feature block and before the bias, so the per-axis input bases
