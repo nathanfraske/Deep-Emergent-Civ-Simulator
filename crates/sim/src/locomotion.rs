@@ -717,6 +717,13 @@ pub struct Walker {
     /// arms observe-and-imitate; empty otherwise, so it folds nothing into `state_hash` (opt-in default) and
     /// leaves an opted-out run byte-identical. Folded (in sorted id order) only when non-empty.
     pub observed_actions: BTreeSet<u16>,
+    /// The being's currently-held RUN-AND-TUMBLE heading (the derived-taxis survival floor): the unit heading
+    /// the always-on motility floor persists on during a "run" and redraws on a "tumble". `None` until the floor
+    /// is armed and the being first re-orients, so a being in a world with the floor OFF folds nothing into
+    /// `state_hash` (opt-in, hash-neutral by default), exactly like `reserve_memory`. New per-being dynamic
+    /// state: it is held across ticks (the floor persists the heading while the being's reserve rises and
+    /// redraws it when the reserve falls), so it is canonical state folded when armed.
+    pub taxis_heading: Option<(Fixed, Fixed)>,
     /// Whether the being is alive. A being whose reserve falls through its floor dies and stops.
     pub alive: bool,
 }
@@ -761,6 +768,7 @@ impl Walker {
             deliberation: Fixed::ZERO,
             social_learning: Fixed::ZERO,
             observed_actions: BTreeSet::new(),
+            taxis_heading: None,
             alive: true,
         }
     }
@@ -1060,6 +1068,7 @@ pub fn step<T: Terrain>(
         // The field-less fixture path enacts no grasp (it carries no material field); the sink is
         // discarded, so a decided grasp on this path is inert.
         &mut BTreeMap::new(),
+        None, // derived-taxis floor off on this path (byte-identical)
     )
 }
 
@@ -1166,6 +1175,110 @@ pub fn draw_feeder_set(
     }
 }
 
+/// The reserved calibration the DERIVED-TAXIS run-and-tumble survival floor reads. Both are RESERVED values,
+/// surfaced with their basis and read from the manifest at the floor arming, never fabricated (Principle 11).
+#[derive(Clone, Copy, Debug)]
+pub struct DerivedTaxisParams {
+    /// The RESTING tumble probability: the rate at which a being re-orients when its felt reserve change is
+    /// zero (a flat field, no gradient). Basis: the reciprocal of the resting run length, the same search
+    /// cadence the fixed-period explore uses (`1 / explore_persistence`), so a floor being with no gradient
+    /// searches at the cadence a controller-driven explorer does; a probability in `[0, 1]`.
+    pub resting_tumble_rate: Fixed,
+    /// The reserve-swing SENSITIVITY: how strongly a unit of felt reserve derivative shifts the tumble rate
+    /// away from its resting value (a rising reserve lowers it, a falling one raises it). Basis: the
+    /// reserve-swing scale over which a being should commit to (or abandon) a heading, set so an ordinary
+    /// metabolic rise or fall meaningfully moves the tumble rate without saturating the probability.
+    pub reserve_sensitivity: Fixed,
+}
+
+/// The being's own interoceptive REWARD SIGNAL for the run-and-tumble floor: the summed signed change across
+/// its DECLARED, backed (depletable metabolic) reserves since the last tick, read from its reserve memory
+/// BEFORE this tick re-snapshots it, so it is LAST tick's completed net change (a one-tick temporal
+/// difference, the past the floor reinforces). Keyed on the being's own reserve axes
+/// (`backing_component.is_some()`), never a hardcoded energy id, so a redox, mana-field, or silicon metabolism
+/// reads its own signal (admit-the-alien). Positive when the being's reserves rose last tick (its heading is
+/// feeding it), negative when they fell. The derived regulated axes (integrity, temperature) are excluded:
+/// they are a health band, not a metabolic reserve the walk should chase.
+fn taxis_reward_signal(
+    mem: &ReserveMemory,
+    state: &Homeostasis,
+    reg: &HomeostaticRegistry,
+) -> Fixed {
+    let mut sum = Fixed::ZERO;
+    for axis in &reg.axes {
+        if axis.backing_component.is_some() {
+            sum = sum.saturating_add(mem.delta(axis.id, state));
+        }
+    }
+    sum
+}
+
+/// The DERIVED-TAXIS run-and-tumble floor step (the survival floor beneath the controller): move one step under
+/// an always-on biased random walk whose TUMBLE (re-orientation) probability is a continuous function of the
+/// being's own reward signal. When the reserve ROSE last tick (reward positive) the tumble probability falls
+/// below its resting rate, so the being PERSISTS on its held heading (a run); when it FELL (reward negative)
+/// the probability rises, so the being RE-ORIENTS (a tumble). The bias direction is never authored: it emerges
+/// because a being that persists while its reserve rises walks up any gradient that feeds that reserve, exactly
+/// the run-and-tumble chemotaxis; the polarity (rising lowers the tumble rate) is the death-floor-grounded
+/// reward sign (a rising reserve is physically further from the hard cull) times the reinforcement primitive
+/// (persist while rewarded), both derived, never a modeling choice. On a tumble (or with no held heading yet)
+/// it redraws one of the eight unit headings keyed on the being and tick under `Phase::TUMBLE`, rotating
+/// deterministically past a blocked direction like [`explore`]. Returns whether it moved.
+fn run_and_tumble<T: Terrain>(
+    w: &mut Walker,
+    terrain: &T,
+    speed: Fixed,
+    seed: u64,
+    tick: u64,
+    reward: Fixed,
+    tp: &DerivedTaxisParams,
+) -> bool {
+    if speed <= Fixed::ZERO {
+        return false;
+    }
+    // The tumble probability: the resting rate shifted DOWN by a rising reserve and UP by a falling one, a
+    // CONTINUOUS coupling to the reward (never a switch at a threshold value), clamped to a probability.
+    let shift = tp
+        .reserve_sensitivity
+        .checked_mul(reward)
+        .unwrap_or(Fixed::ZERO);
+    let p_tumble = (tp.resting_tumble_rate - shift).clamp(Fixed::ZERO, Fixed::ONE);
+    // The tumble decision draws on slot 0; the heading redraw on slot 1, so the two never collide on a counter.
+    let draw = DrawKey::entity(w.id.0, tick, Phase::TUMBLE)
+        .slot(0)
+        .rng(seed)
+        .unit_fixed(0);
+    let tumble = draw < p_tumble;
+    if tumble || w.taxis_heading.is_none() {
+        let base = DrawKey::entity(w.id.0, tick, Phase::TUMBLE)
+            .slot(1)
+            .rng(seed)
+            .range_u32(0, 8);
+        let dirs = headings();
+        // Take the first passable direction from the drawn one, rotating deterministically, so a tumble against
+        // a wall still lands a valid heading rather than stalling.
+        let mut chosen = None;
+        for k in 0..8u32 {
+            let (dx, dy) = dirs[((base + k) % 8) as usize];
+            let nx = w.x + dx.mul(speed);
+            let ny = w.y + dy.mul(speed);
+            let ncoord = Coord3::ground(floor_i32(nx), floor_i32(ny));
+            if terrain.passable(ncoord, &w.body) {
+                chosen = Some((dx, dy));
+                break;
+            }
+        }
+        match chosen {
+            Some(h) => w.taxis_heading = Some(h),
+            None => return false, // hemmed in on every side: hold the old heading, no move
+        }
+    }
+    match w.taxis_heading {
+        Some((hx, hy)) => walk_dir(w, hx, hy, speed, terrain),
+        None => false,
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn step_with_field_dirs<T: Terrain>(
     walkers: &mut [Walker],
@@ -1223,6 +1336,11 @@ pub fn step_with_field_dirs<T: Terrain>(
     // content-bucket's direction into approach, so foraging emerges rather than being authored.
     resource_features: &BTreeMap<StableId, Vec<Fixed>>,
     deferred_actions: &mut BTreeMap<StableId, (AffordanceId, Fixed)>,
+    // The DERIVED-TAXIS survival floor calibration (the run-and-tumble motility floor beneath the controller).
+    // `None` (the default) leaves the floor OFF: no being runs the biased random walk, no `taxis_heading` is
+    // ever set, and every run is byte-identical. `Some` arms it, so a being not steered by a controller MOVE
+    // heading this tick re-orients stochastically at a rate modulated by its own reserve derivative.
+    taxis: Option<DerivedTaxisParams>,
 ) -> usize {
     walkers.sort_by_key(|w| w.id);
     let mut moved = 0usize;
@@ -1245,7 +1363,19 @@ pub fn step_with_field_dirs<T: Terrain>(
         // the reward learner is armed. Opt-in on both sides: a run that declares no percepts and arms no
         // reward learner carries an empty trace, takes no snapshot, and folds an empty memory into
         // state_hash, so it stays bit-identical. A pure canonical-order snapshot drawing no randomness.
-        if !percepts.is_empty() || !material_percepts.is_empty() || !w.eligibility_trace.is_empty()
+        // The DERIVED-TAXIS reward signal is read HERE, before the tick re-snapshots the reserve memory: with
+        // the snapshot taken at the top of each armed tick, `delta` now reads `this-tick-start` minus
+        // `last-tick-start`, which equals LAST tick's completed net reserve change (the past the run-and-tumble
+        // floor reinforces). Zero when the floor is off or on the first armed tick (no prior snapshot), the
+        // clean degrade. Captured before the snapshot below overwrites the previous levels.
+        let taxis_reward = match taxis {
+            Some(_) => taxis_reward_signal(&w.reserve_memory, &w.homeostasis, homeo),
+            None => Fixed::ZERO,
+        };
+        if !percepts.is_empty()
+            || !material_percepts.is_empty()
+            || !w.eligibility_trace.is_empty()
+            || taxis.is_some()
         {
             w.reserve_memory.snapshot(homeo, &w.homeostasis);
         }
@@ -1386,8 +1516,17 @@ pub fn step_with_field_dirs<T: Terrain>(
         });
 
         let mut exertion = Fixed::ZERO;
+        // The DERIVED-TAXIS floor runs as the FALLBACK beneath the controller: on by default when armed, and
+        // turned OFF where the controller steers or acts (a MOVE with a real heading, or any non-MOVE
+        // deliberate action). A MOVE with no heading leaves it on (the run-and-tumble replaces the blind
+        // explore), and a being that decides nothing (a founder-zero controller, the extinction wall) leaves it
+        // on. Off entirely when unarmed (`taxis` is `None`), so an opted-out run never runs the floor.
+        let mut floor_run = taxis.is_some();
         if let Some(d) = decision {
             if d.activation > Fixed::ZERO {
+                if !matches!(d.affordance, MOVE) {
+                    floor_run = false; // a deliberate non-MOVE controller action pre-empts the floor
+                }
                 match d.affordance {
                     MOVE => {
                         let cost = terrain.cost(here);
@@ -1411,7 +1550,14 @@ pub fn step_with_field_dirs<T: Terrain>(
                             let (hx, hy) = d.heading.unwrap_or((Fixed::ZERO, Fixed::ZERO));
                             let mag2 = hx.mul(hx) + hy.mul(hy);
                             let did = if mag2 > HEADING_EPS {
+                                // A controller MOVE heading steers the being: the derived-taxis floor is off
+                                // where the controller supplies a heading (the floor is its fallback).
+                                floor_run = false;
                                 walk_dir(w, hx, hy, speed, terrain)
+                            } else if taxis.is_some() {
+                                // It wants to move but has no known gradient: the derived-taxis floor's
+                                // run-and-tumble takes over below, so do not also fixed-period explore here.
+                                false
                             } else {
                                 // It wants to move but has no known gradient: it explores.
                                 explore(w, terrain, speed, p, seed, tick)
@@ -1592,6 +1738,29 @@ pub fn step_with_field_dirs<T: Terrain>(
                         deferred_actions.insert(w.id, (d.affordance, d.activation));
                     }
                     _ => {} // an affordance the engine has no enactment for yet: idle
+                }
+            }
+        }
+
+        // The DERIVED-TAXIS survival floor (the run-and-tumble motility floor beneath the controller): when
+        // armed and the controller did not steer or act this tick, the being takes one biased-random-walk step
+        // whose tumble rate is a continuous function of its own reserve derivative, so a founder-zero being
+        // still seeks up any reserve-feeding gradient (the extinction-wall floor). Off entirely when unarmed
+        // (`floor_run` is false), so an opted-out run never enters here and stays byte-identical.
+        if floor_run {
+            if let Some(tp) = taxis {
+                let cost = terrain.cost(here);
+                let speed = match &w.structure {
+                    Some(s) => locomotion_speed_structure(s, w.body.temperament.activity, cost, p),
+                    None => locomotion_speed(&w.body, organs, cost, p),
+                };
+                let speed = match load_factors.get(&w.id) {
+                    Some(f) if *f > Fixed::ONE => speed.div(*f),
+                    _ => speed,
+                };
+                if run_and_tumble(w, terrain, speed, seed, tick, taxis_reward, &tp) {
+                    moved += 1;
+                    exertion = Fixed::ONE;
                 }
             }
         }
@@ -2271,6 +2440,7 @@ mod tests {
                     &BTreeMap::new(), // no being + being-feature blocks (step 2b)
                     &BTreeMap::new(), // no resource-feature block (foraging arc)
                     &mut BTreeMap::new(),
+                    None, // derived-taxis floor off on this path (byte-identical)
                 );
             }
             let (dx, dy) = (
@@ -2356,6 +2526,7 @@ mod tests {
                     &std::collections::BTreeMap::new(), // no being + being-feature blocks (step 2b)
                     &std::collections::BTreeMap::new(), // no resource-feature block (foraging arc)
                     &mut std::collections::BTreeMap::new(),
+                    None, // derived-taxis floor off on this path (byte-identical)
                 );
             }
             let (x, y) = (ws[0].x, ws[0].y);
@@ -2451,6 +2622,7 @@ mod tests {
                     &std::collections::BTreeMap::new(), // no being + being-feature blocks (step 2b)
                     &std::collections::BTreeMap::new(), // no resource-feature block (foraging arc)
                     &mut std::collections::BTreeMap::new(),
+                    None, // derived-taxis floor off on this path (byte-identical)
                 );
             }
             ws[0].coord()
@@ -2961,6 +3133,7 @@ mod tests {
             &std::collections::BTreeMap::new(), // no being + being-feature blocks (step 2b)
             &std::collections::BTreeMap::new(), // no resource-feature block (foraging arc)
             &mut std::collections::BTreeMap::new(),
+            None, // derived-taxis floor off on this path (byte-identical)
         );
 
         let after = field.supply(tile, WATER_CLASS);
@@ -3090,6 +3263,7 @@ mod tests {
                     &std::collections::BTreeMap::new(), // no being + being-feature blocks (step 2b)
                     &std::collections::BTreeMap::new(), // no resource-feature block (foraging arc)
                     &mut std::collections::BTreeMap::new(),
+                    None, // derived-taxis floor off on this path (byte-identical)
                 );
                 if !ws[0].alive {
                     break;
@@ -3214,6 +3388,7 @@ mod tests {
                     &std::collections::BTreeMap::new(), // no being + being-feature blocks (step 2b)
                     &std::collections::BTreeMap::new(), // no resource-feature block (foraging arc)
                     &mut std::collections::BTreeMap::new(),
+                    None, // derived-taxis floor off on this path (byte-identical)
                 );
             }
             // The delta since the start of the last tick: the net CONDITION change the salt harm drove.
@@ -3317,6 +3492,7 @@ mod tests {
                     &std::collections::BTreeMap::new(), // no being + being-feature blocks (step 2b)
                     &std::collections::BTreeMap::new(), // no resource-feature block (foraging arc)
                     &mut std::collections::BTreeMap::new(),
+                    None, // derived-taxis floor off on this path (byte-identical)
                 );
             }
             ws[0].x
