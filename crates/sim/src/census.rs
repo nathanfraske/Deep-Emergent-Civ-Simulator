@@ -123,12 +123,17 @@ fn ne_var_fx(n: u64, k_bar: Fixed, vk: Fixed) -> Fixed {
     let num = k_bar.mul(n_fx) - Fixed::ONE;
     let vk_over_kbar = vk.checked_div(k_bar).unwrap_or(Fixed::ZERO);
     let denom = k_bar - Fixed::ONE + vk_over_kbar;
-    if denom <= Fixed::ZERO {
-        // The equal-contribution degenerate case (k_bar == 1, Vk == 0) makes the variance effective
-        // size diverge; clamp it to the census size, a finite honest fallback rather than infinity.
-        return n_fx;
-    }
-    let ne = num.div(denom);
+    // A second difference-divisor: `denom = k_bar - 1 + vk/k_bar` is a difference that vanishes in the
+    // equal-contribution degenerate case (`k_bar == 1, Vk == 0`), where the variance effective size would
+    // diverge. The declared limit-on-the-difference is the census size `n_fx`, a finite honest limit rather
+    // than infinity, enforced by the slice-3 backstop; `guarded_div` returns `n_fx` at the `denom <= 0`
+    // boundary, byte-neutral with the prior explicit guard (`n_fx` is a positive census size, so the sign
+    // post-check below leaves it unchanged).
+    let ne = civsim_units::guard::guarded_div(
+        num,
+        denom,
+        civsim_units::guard::ZeroGuard::LimitAtZero(n_fx),
+    );
     if ne < Fixed::ZERO {
         Fixed::ZERO
     } else {
@@ -251,12 +256,18 @@ impl ReproductiveMoments {
                 Fixed::ZERO
             }
         };
+        // The Crow-Kimura `1/Ne = 1/Ne_sex + 1/Ne_var - 1/N` is a DIFFERENCE of positive reciprocal terms, so
+        // `recip` can reach zero or go negative with no single-quantity floor. The declared limit-on-the-
+        // difference (the R-UNITS-PIN floor invariant, slice-3 backstop) is `Ne = N`, the census size: the
+        // correct degenerate limit when the sex-ratio and variance corrections cancel the census term, derived
+        // from the population genetics, not fabricated. `guarded_div` enforces it, returning `n_fx` at the
+        // `recip <= 0` boundary, byte-neutral with the prior explicit branch.
         let recip = inv(ne_sex) + inv(ne_var) - inv(n_fx);
-        let ne = if recip > Fixed::ZERO {
-            Fixed::ONE.div(recip)
-        } else {
-            n_fx
-        };
+        let ne = civsim_units::guard::guarded_div(
+            Fixed::ONE,
+            recip,
+            civsim_units::guard::ZeroGuard::LimitAtZero(n_fx),
+        );
         let rounded = (ne + Fixed::from_ratio(1, 2)).to_int();
         let max = n.saturating_mul(2).min(i32::MAX as u64) as i32;
         rounded.clamp(1, max) as u32

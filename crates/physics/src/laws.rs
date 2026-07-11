@@ -222,10 +222,25 @@ pub fn contact_pressure(force: Fixed, contact_area: Fixed, p_max: Fixed) -> Fixe
         // zero, not the maximum-pressure cap (which is the zero-area extreme just below).
         None => return ZERO,
     };
-    if den == ZERO {
-        return p_max;
-    }
-    match force.checked_div(den) {
+    // The divisor's zero-boundary is a declared physical-limit-at-zero (R-UNITS-PIN floor invariant, the
+    // slice-3 backstop): a zero contact area is the concentrated point load, which reads the material's
+    // maximum pressure `p_max`, a physical limit rather than a value riding the storage epsilon.
+    // `guarded_checked_div` returns `p_max` at that boundary and keeps the law's own overflow cap on `None`.
+    // The wiring is byte-neutral on the PHYSICAL DOMAIN: a contact area is a non-negative physical quantity, so
+    // `den = contact_area * C_PA >= 0` and `den <= ZERO` there is exactly the prior `den == ZERO` guard. That
+    // domain invariant, which the byte-neutrality rests on, is now code-enforced rather than only asserted in
+    // prose (a mis-declared negative area fails loud in debug rather than silently reading `p_max`); off the
+    // physical domain the cap is a fail-safe, not the prior negative pressure.
+    debug_assert!(
+        den >= ZERO,
+        "contact_pressure: a contact area is a non-negative physical quantity; the floor-invariant wiring's \
+         byte-neutrality rests on it"
+    );
+    match civsim_units::guard::guarded_checked_div(
+        force,
+        den,
+        civsim_units::guard::ZeroGuard::LimitAtZero(p_max),
+    ) {
         Some(p) => p.min(p_max),
         None => p_max,
     }
@@ -870,10 +885,21 @@ pub fn sensible_rise(mass: Fixed, specific_heat: Fixed, energy: Fixed, rise_max:
         Some(c) => c,
         None => return ZERO,
     };
-    if capacity == ZERO {
-        return rise_max;
-    }
-    match energy.checked_div(capacity) {
+    // The divisor's zero-boundary is a declared physical-limit-at-zero (the floor invariant, slice-3 backstop):
+    // a zero thermal capacity (a massless body) takes the maximum temperature swing `rise_max`, a physical
+    // limit rather than the storage epsilon; the law keeps its overflow cap on `None`. Byte-neutral on the
+    // PHYSICAL DOMAIN: `capacity = mass * specific_heat >= 0`, so `capacity <= ZERO` is exactly the prior
+    // `capacity == ZERO` guard. That invariant is code-enforced below rather than only asserted in prose.
+    debug_assert!(
+        capacity >= ZERO,
+        "sensible_rise: a thermal capacity (mass * specific_heat) is non-negative; the floor-invariant \
+         wiring's byte-neutrality rests on it"
+    );
+    match civsim_units::guard::guarded_checked_div(
+        energy,
+        capacity,
+        civsim_units::guard::ZeroGuard::LimitAtZero(rise_max),
+    ) {
         Some(dt) => dt.min(rise_max),
         None => rise_max,
     }
@@ -1456,8 +1482,15 @@ pub fn ideal_gas_density(
 }
 
 /// Boussinesq natural-convection acceleration a = g*(T_parcel - T_ambient)/T_ambient (m/s^2), signed
-/// up when the parcel is warmer, using the ideal-gas 1/T thermal expansion. Zero ambient reads zero.
+/// up when the parcel is warmer, using the ideal-gas 1/T thermal expansion. The `1/T_ambient` divisor's
+/// floor DERIVES from the physics, not an owner value (the R-UNITS-PIN floor invariant): T_ambient is an
+/// ABSOLUTE temperature, so `T_ambient > 0` is the third-law physical floor (absolute zero is unreachable),
+/// which is why the divide by T_ambient is safe below without riding the storage epsilon. A non-positive
+/// T_ambient is non-physical, and the ZERO it returns is the ABSENCE convention (no ambient medium, no
+/// buoyant coupling), a declared physical-limit-at-zero rather than a fabricated substitute.
 pub fn thermal_buoyancy(t_parcel: Fixed, t_ambient: Fixed, gravity: Fixed, a_max: Fixed) -> Fixed {
+    // The declared physical-limit-at-zero: the third-law floor is T_ambient > 0, so a non-positive absolute
+    // temperature is off the physical domain and reads the absence convention (no buoyancy).
     if t_ambient <= ZERO {
         return ZERO;
     }
@@ -1739,10 +1772,15 @@ pub fn inverse_square_falloff(
         Some(x) => x,
         None => return ZERO,
     };
-    if denom == ZERO {
-        return irrad_max;
-    }
-    match power.checked_div(denom) {
+    // The divisor's zero-boundary is a declared physical-limit-at-zero (the floor invariant, slice-3 backstop):
+    // a zero distance (the source at the point) reads the irradiance cap `irrad_max`, a physical limit rather
+    // than the storage epsilon. Byte-neutral (`denom = 4*pi*r^2 >= 0`, so the boundary is `== ZERO`); the law
+    // keeps its overflow cap on `None`.
+    match civsim_units::guard::guarded_checked_div(
+        power,
+        denom,
+        civsim_units::guard::ZeroGuard::LimitAtZero(irrad_max),
+    ) {
         Some(e) => e.min(irrad_max),
         None => irrad_max,
     }
@@ -1849,7 +1887,22 @@ pub fn transduce(
                 Some(x) => x,
                 None => return activation_max,
             };
-            match (Fixed::ONE + scaled).ln().checked_mul(gain) {
+            // The Fechner argument `1 + shape*magnitude` stays above zero by the law's own DOMAIN, derived
+            // from the physics rather than set: `magnitude > 0` (guarded above) and `shape >= 0` (the
+            // monotone-compressive contract, "monotone shapes only" per this law's doc), so the argument is at
+            // or above one. That derived floor, not the storage epsilon, bounds the log (Principle 10, the
+            // R-UNITS-PIN floor invariant): `guarded_ln` clamps the argument up to the derived floor ONE, so it
+            // is byte-neutral on the contract (the argument is already >= 1, so the clamp is a no-op and the log
+            // is exact) and fail-safe if a mis-declared negative shape ever drove the argument below the domain,
+            // rather than the silent `ln(arg<=0) -> Fixed::MIN` sentinel it rode before. No value is authored:
+            // the floor is the physics of the compressive law.
+            let arg = Fixed::ONE + scaled;
+            match civsim_units::guard::guarded_ln(
+                arg,
+                civsim_units::guard::ZeroGuard::Floor(Fixed::ONE),
+            )
+            .checked_mul(gain)
+            {
                 Some(a) => a,
                 None => activation_max,
             }
