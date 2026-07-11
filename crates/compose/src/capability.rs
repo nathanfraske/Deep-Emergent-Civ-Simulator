@@ -272,7 +272,7 @@ impl CapabilityKernel {
 /// Read a ROLE's floor-axis value through the GEOMETRY accessor (the role names a geometry quantity: a
 /// cross-section, a stroke, a section modulus). An unbound role reads zero (the absence convention); a
 /// load-validated binding always carries a kernel's required roles, so a required role never reads zero for
-/// absence, only for a genuinely zero-grown axis.
+/// absence, only for an axis the part grew to zero.
 fn role_geo(geo: &dyn Fn(&str) -> Fixed, binding: &AxisBinding, role: &str) -> Fixed {
     binding.axis(role).map(geo).unwrap_or(Fixed::ZERO)
 }

@@ -59,8 +59,8 @@ pub mod promote;
 pub mod proxy;
 
 pub use capability::{
-    derive_capabilities, CapabilityCaps, CapabilityKernel, CapabilityRefs, CapabilityVector,
-    FunctionLawDef, FunctionLawId, FunctionLawRegistry,
+    derive_capabilities, AxisBinding, CapabilityCaps, CapabilityKernel, CapabilityRefs,
+    CapabilityVector, FunctionLawDef, FunctionLawId, FunctionLawRegistry,
 };
 pub use combinator::{CombinatorDef, CombinatorKernel, CombinatorKey, CombinatorRegistry};
 pub use eval::{
