@@ -42,12 +42,36 @@ use std::cmp::Ordering;
 
 /// Round `value` to the nearest multiple of `2^shift` and divide it out, ties to even. For `shift == 0`
 /// this is the identity. `value` may be negative; the euclidean rounding in [`idiv_round_half_even`] carries
-/// the sign correctly.
+/// the sign correctly. For `shift >= 127` the divisor `2^shift` is not a positive `i128` (`1i128 << 127` sets
+/// the sign bit, `>= 128` overflows and panics under the release `overflow-checks`), so the rounding is
+/// computed directly on the magnitude: `|value| <= 2^127`, so the quotient magnitude is 0 or 1 and a compare
+/// against the half-divisor `2^(shift-1)` decides it (ties to the even 0). This is the exact round-half-even
+/// value, matching the wide path and the `BigRat` oracle rather than declining, so a result that underflows
+/// the target scale rounds to the correct small mantissa instead of crashing.
 fn round_half_even_shr(value: i128, shift: u32) -> i128 {
     if shift == 0 {
-        value
+        return value;
+    }
+    if shift < 127 {
+        return idiv_round_half_even(value, 1i128 << shift);
+    }
+    let mag = value.unsigned_abs();
+    let half_exp = shift - 1; // >= 126
+    let rounded: i128 = if half_exp >= 128 {
+        // 2^(shift-1) exceeds u128, so |value| is always below the half-divisor: rounds to zero.
+        0
     } else {
-        idiv_round_half_even(value, 1i128 << shift)
+        let half = 1u128 << half_exp; // half_exp in [126, 127], fits u128
+        match mag.cmp(&half) {
+            Ordering::Greater => 1,
+            // Less, or an exact half tie (rounds to the even quotient, 0).
+            _ => 0,
+        }
+    };
+    if value < 0 {
+        -rounded
+    } else {
+        rounded
     }
 }
 
@@ -100,8 +124,12 @@ pub fn div(a: i64, s_a: u32, b: i64, s_b: u32, s_r: u32) -> Option<i64> {
             .checked_shl((-shift) as u32)
             .filter(|v| (v >> (-shift) as u32) == den)?;
     }
-    // round-half-to-even of num/den with both positive, then reapply the sign.
-    let q = idiv_round_half_even(num as i128, den as i128);
+    // round-half-to-even of num/den with both positive, then reapply the sign. The shift-aligned numerator or
+    // denominator can land in [2^127, 2^128), fitting u128 but not signed i128; a raw `as i128` cast would wrap
+    // negative and corrupt the divide, so fail loud to None (the widen signal) when either does not fit i128.
+    let num_i = i128::try_from(num).ok()?;
+    let den_i = i128::try_from(den).ok()?;
+    let q = idiv_round_half_even(num_i, den_i);
     let signed = if neg { -q } else { q };
     fit_i64(signed)
 }
@@ -526,6 +554,35 @@ mod tests {
         assert_eq!(div(1, 0, 2, 0, 0), Some(0));
         // mul: (1@1)*(1@1) = 0.25 to scale 0 is 0; (3@1)*(1@0)=1.5 to scale 0 -> 2 (even).
         assert_eq!(mul(3, 1, 1, 0, 0), Some(2));
+    }
+
+    #[test]
+    fn a_large_scale_delta_underflows_to_zero_without_panicking() {
+        // The gate's fuzz found round_half_even_shr panicked (release overflow-checks) or miscomputed at a
+        // scale delta of 127+, where 1i128 << shift is not a positive i128. Both must now round exactly.
+        // A net shift of 200 (s_a+s_b-s_r) underflows the result scale: the exact value is far below one ULP,
+        // so it rounds to zero rather than crashing.
+        assert_eq!(mul(1, 100, 1, 100, 0), Some(0));
+        // The gate's exact-verified shift==127 case: the old code read 1i128 << 127 as a negative divisor and
+        // returned Some(1); the exact round-half-even value is 0.
+        assert_eq!(
+            mul(5315962130996935763, 92, 2919668674121976043, 102, 67),
+            Some(0)
+        );
+        // add/sub share the helper: a coarse target scale with a 128+ net shift rounds, does not panic.
+        assert_eq!(add(1, 130, 1, 130, 0), Some(0));
+        assert_eq!(sub(1, 130, 1, 130, 0), Some(0));
+    }
+
+    #[test]
+    fn a_divide_whose_aligned_numerator_exceeds_signed_i128_declines_rather_than_wrapping() {
+        // The gate's exact-verified case: the shift-aligned numerator lands in [2^127, 2^128), fitting u128 but
+        // not signed i128. The old `num as i128` wrapped negative and returned Some(-2559781616330884959); the
+        // documented contract is None (the widen signal).
+        assert_eq!(
+            div(4403335111641285598, 27, 6005818356516761817, 61, 32),
+            None
+        );
     }
 
     #[test]
