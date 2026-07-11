@@ -52,6 +52,7 @@ use crate::homeostasis::AffordanceId;
 use crate::locomotion::ResourceField;
 use crate::material::MaterialField;
 use crate::material_percept::MaterialPerceptRegistry;
+use crate::perceivable_feature::PerceivableFeatureRegistry;
 use crate::percept::{feature_bucket, PerceptRegistry};
 use crate::sensorium::SenseChannelId;
 
@@ -982,6 +983,118 @@ pub fn creature_being_direction(here: Coord3, perceived: &[(Coord3, Fixed)]) -> 
     }
 }
 
+/// The unit-disc clamp shared by the creature-tier being-directed percepts (creature-selection step 2b): clamp
+/// a summed toward-vector's LENGTH to the unit disc, preserving direction (a per-component clamp would rotate a
+/// diagonal pull toward an axis), so a strong aggregate saturates at unit length and a weak one stays
+/// proportional, landing in the founder's `[-1, 1]` percept range. The identical arithmetic
+/// [`creature_being_direction`] uses inline; factored here for the per-bucket being-feature block. Pure.
+fn clamp_toward_to_unit_disc(dx: Fixed, dy: Fixed) -> (Fixed, Fixed) {
+    match (dx.checked_mul(dx), dy.checked_mul(dy)) {
+        (Some(x2), Some(y2)) => {
+            let len2 = x2.saturating_add(y2);
+            if len2 > Fixed::ONE {
+                let len = len2.sqrt(); // > ONE here, so the divide scales the vector down to unit length
+                (
+                    dx.checked_div(len).unwrap_or(Fixed::ZERO),
+                    dy.checked_div(len).unwrap_or(Fixed::ZERO),
+                )
+            } else {
+                (dx, dy)
+            }
+        }
+        _ => (
+            dx.clamp(-Fixed::ONE, Fixed::ONE),
+            dy.clamp(-Fixed::ONE, Fixed::ONE),
+        ),
+    }
+}
+
+/// The CREATURE-tier being-FEATURE percept (creature-selection step 2b, the per-bucket discrimination, the B2
+/// follow-on folded in): the controller being-FEATURE block a mind-less creature reads, discriminating the
+/// beings it perceives by the OPTICAL FEATURE each emits beyond its strength scalar. Over the perceived
+/// emitters (each an emitter position, the perceiver's own transduced MAGNITUDE for it, and the emitter's
+/// per-channel surface optical feature values, aligned to `registry`'s channels), for each armed channel this
+/// discriminates each emitter's feature value into a bucket by the perceiver's OWN resolution
+/// ([`crate::perceivable_feature::PerceivableFeatureDef::bucket`]) and accumulates that emitter's magnitude-
+/// scaled unit toward-direction into the bucket's `(dx, dy)` slot, then clamps each bucket's summed vector to
+/// the unit disc ([`clamp_toward_to_unit_disc`], the same length-clamp [`creature_being_direction`] uses). The
+/// result is [`crate::perceivable_feature::PerceivableFeatureRegistry::layout_width`] long, in the layout's
+/// channel-then-bucket order, written into the controller's being-feature block. It is a PERCEPT, not a
+/// heading: only the creature's OWN heritable FREELY-SIGNED weight per bucket, set by selection off
+/// founder-zero, turns a feature-bucket's direction into approach or flight, so which optical kinds a creature
+/// flees and which it approaches EMERGES rather than being authored (Principle 9), keyed only on the emitter's
+/// own surface optical datum and the creature's own resolution, never on the emitter's species, kind, trophic
+/// role, relatedness, or being-hood. Unlike the magnitude-only [`creature_being_direction`], two same-magnitude
+/// emitters of different optical feature now land in different buckets, so the creature can move toward one and
+/// away from the other: the strength-independent separation the arc's fleeing payoff needs. Its honest limits,
+/// all flagged follow-ons rather than defects: (1) the discrimination step is world-declared per-species data
+/// today (per-creature-derived resolution is the flagged shared follow-on the being-percept path also carries);
+/// (2) the feature reads the emitter's COVERING surface, so a coveringless or self-luminous being (which still
+/// emits a magnitude) reads the feature ABSENT (the graceful-absence data row, admit-the-alien) until the
+/// covering-else-body-surface fallback the gate ruled is wired (a body carries a covering slot today, so this is
+/// latent); (3) the perceiver discriminates the optical feature whether or not its own body carries an optical
+/// sense, the SAME per-creature sensory-derivation limit the being-percept magnitude path carries, a shared
+/// substrate upgrade. Pure and RNG-free; no valence, no belief, no category.
+pub fn creature_being_feature_directions(
+    here: Coord3,
+    perceived: &[(Coord3, Fixed, Vec<Fixed>)],
+    registry: &PerceivableFeatureRegistry,
+) -> Vec<Fixed> {
+    let mut block = vec![Fixed::ZERO; registry.layout_width()];
+    if block.is_empty() {
+        return block;
+    }
+    let mut channel_base = 0usize;
+    for ch in registry.channels() {
+        let n_slots = 2 * ch.buckets as usize;
+        for (pos, magnitude, feats) in perceived {
+            if *magnitude <= Fixed::ZERO {
+                continue; // sub-threshold or absent: no pull
+            }
+            let value = match feats.get(ch.id.0 as usize) {
+                Some(&v) => v,
+                None => continue, // this emitter carries no read for this channel (clean degrade)
+            };
+            let bucket = match ch.bucket(value) {
+                Some(b) => b,
+                None => continue, // the channel carries no buckets or no discrimination
+            };
+            // The magnitude-scaled unit toward-direction, the same per-emitter contribution
+            // `creature_being_direction` forms (the perceived magnitude is the sole distance factor; the reach
+            // already attenuated it with distance). Skip a co-located or overflow-far emitter. The deltas and
+            // their sum-of-squares are formed in i128 so the square cannot overflow for a separation spanning
+            // the full i32 coordinate range (an emitter that far never clears the reach threshold to be
+            // perceived, so this is a defensive guard, not a reachable path; i128 keeps it correct rather than
+            // panicking or wrapping, and agrees byte-for-byte with the i64 form for every reachable separation).
+            let ex = pos.x as i128 - here.x as i128;
+            let ey = pos.y as i128 - here.y as i128;
+            let d2i = ex * ex + ey * ey;
+            if d2i == 0 || d2i > i32::MAX as i128 {
+                continue;
+            }
+            let dist = Fixed::from_int(d2i as i32).sqrt(); // d2i <= i32::MAX after the guard, so the cast is exact
+            let contribute = |num: i128| -> Fixed {
+                Fixed::from_int(num as i32) // |num| <= sqrt(i32::MAX) < i32::MAX after the guard, so exact
+                    .checked_div(dist)
+                    .and_then(|unit| unit.checked_mul(*magnitude))
+                    .unwrap_or(Fixed::ZERO)
+            };
+            let slot = channel_base + 2 * bucket;
+            block[slot] = block[slot].saturating_add(contribute(ex));
+            block[slot + 1] = block[slot + 1].saturating_add(contribute(ey));
+        }
+        // Clamp each bucket's summed toward-vector to the unit disc, so the block lands in the `[-1, 1]` range.
+        for b in 0..ch.buckets as usize {
+            let slot = channel_base + 2 * b;
+            let (cx, cy) = clamp_toward_to_unit_disc(block[slot], block[slot + 1]);
+            block[slot] = cx;
+            block[slot + 1] = cy;
+        }
+        channel_base += n_slots;
+    }
+    block
+}
+
 /// The being-percept feature's run-path configuration (the being-percept keystone, step 6, the live wire):
 /// everything the perceive phase needs to run the being-directed perception and learning for one world. The
 /// SUBSTRATE bindings are labelled dev fixtures and floor data (the sense channel a being emits and is
@@ -1809,6 +1922,65 @@ mod tests {
             len2 <= Fixed::ONE,
             "the clamped length never exceeds the unit disc"
         );
+    }
+
+    #[test]
+    fn the_being_feature_block_separates_same_magnitude_emitters_by_their_optical_feature() {
+        // Step 2b, the keystone property the whole arc exists for: two emitters of the SAME perceived strength
+        // but DIFFERENT surface optical feature land in DIFFERENT discrimination buckets, so a creature's
+        // per-bucket freely-signed weights can move it TOWARD one and AWAY from the other, which the
+        // magnitude-only `creature_being_direction` (one shared weight) cannot. One channel, four buckets, step
+        // 1/4 over [0, 1].
+        use crate::perceivable_feature::PerceivableFeatureRegistry;
+        let reg = PerceivableFeatureRegistry::from_channels(&[(
+            "opt.emissivity",
+            4,
+            Fixed::from_ratio(1, 4),
+        )]);
+        assert_eq!(reg.layout_width(), 8); // 4 buckets * 2 (dx, dy)
+        let here = Coord3::ground(0, 0);
+        let east = Coord3::ground(4, 0);
+        let west = Coord3::ground(-4, 0);
+        let mag = Fixed::from_ratio(1, 4);
+        // Emitter A due EAST with a low emissivity (0.1 -> bucket 0); emitter B due WEST with a high emissivity
+        // (0.9 -> bucket 3). Same magnitude; only the optical feature differs.
+        let block = creature_being_feature_directions(
+            here,
+            &[
+                (east, mag, vec![Fixed::from_ratio(1, 10)]),
+                (west, mag, vec![Fixed::from_ratio(9, 10)]),
+            ],
+            &reg,
+        );
+        assert_eq!(block.len(), 8);
+        // Bucket 0's (dx, dy) at slots 0,1 points TOWARD the east emitter (positive x); bucket 3's at slots 6,7
+        // points TOWARD the west emitter (negative x). The two kinds occupy DIFFERENT slots, so a creature can
+        // weight them oppositely.
+        assert!(block[0] > Fixed::ZERO, "bucket 0 points east (toward A)");
+        assert_eq!(
+            block[1],
+            Fixed::ZERO,
+            "no north-south for a due-east emitter"
+        );
+        assert!(block[6] < Fixed::ZERO, "bucket 3 points west (toward B)");
+        assert_eq!(
+            block[7],
+            Fixed::ZERO,
+            "no north-south for a due-west emitter"
+        );
+        // Buckets 1 and 2 saw no emitter, so they stay zero (the founder-zero null for an unseen feature-band).
+        assert_eq!(
+            (block[2], block[3], block[4], block[5]),
+            (Fixed::ZERO, Fixed::ZERO, Fixed::ZERO, Fixed::ZERO),
+            "buckets with no perceived emitter carry no pull"
+        );
+        // An empty registry yields an empty block (the byte-neutral opt-out).
+        let empty = creature_being_feature_directions(
+            here,
+            &[(east, mag, vec![Fixed::from_ratio(1, 10)])],
+            &PerceivableFeatureRegistry::empty(),
+        );
+        assert!(empty.is_empty());
     }
 
     #[test]

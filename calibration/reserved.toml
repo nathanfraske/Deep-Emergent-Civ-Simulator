@@ -1162,6 +1162,38 @@ unit = "disposition_units_half_width"
 source = "Part 25, Part 28, R-REPRO; crates/sim/src/world.rs ReproductionParams / inherited_beliefs; real-world unification step 1"
 category = "per_world"
 
+# --- creature-selection step 2: the in-run creature reproduction and behaviour-selection substrate
+# (crates/sim/src/runner.rs CreatureSelectionParams, spawn_creatures mint perturbation, reproduce_creatures).
+# The mechanism is fixed Rust; these three magnitudes are the owner's to set. The dev harness (run_world
+# --creatures) stands up labelled dev fixtures inline; the manifest surfaces the reserved slots. ---
+
+[[reserved]]
+id = "creature_selection.mint_perturbation_spread"
+basis = "the half-width of the bounded mean-zero per-weight deviation applied to each MINTED creature's controller, so the founding creature generation is not identical-founder-zero and can move and co-locate (the bootstrap variance seed that breaks the zero-init deadlock, taking over the offline empty-arena scorer's role). Basis for deciding it: the deviation that lifts a founder-zero controller weight off zero enough to drive movement while staying well within the controller's own activation clamp of one (crates/sim/src/controller.rs), sibling to reproduction.mutation_spread; a larger spread moves the founding generation harder, a smaller one keeps it near-inert. Not a fabricated magnitude"
+status = "reserved"
+value = ""
+unit = "controller_weight_half_width"
+source = "creature-selection step 2 (#126); crates/sim/src/runner.rs spawn_creatures / CreatureSelectionParams; Part 8, Part 25"
+category = "per_world"
+
+[[reserved]]
+id = "creature_selection.reproduction_eligibility_reserve"
+basis = "the own-reserve level, on the creature's OWN energy-backing axis (found by backing component, admit-the-alien, never a hardcoded id), at or above which a creature is eligible to reproduce in a cycle, so a well-fed forager out-reproduces a poor one and selection spreads the eating lineage, keyed only on the being's own reserve. Basis for deciding it: the reserve fraction that marks a well-fed being (the level a healthy forager holds between meals), the creature analogue of the founder reproductive_vigor own-reserve gate; higher reserves the beat for the best-fed, lower admits more parents. An energy-cost proxy for reproductive fitness, not an authored fitness term"
+status = "reserved"
+value = ""
+unit = "reserve_fraction"
+source = "creature-selection step 2 (#126); crates/sim/src/runner.rs reproduce_creatures; Part 8, Part 20"
+category = "per_world"
+
+[[reserved]]
+id = "creature_selection.offspring_mutation_spread"
+basis = "the half-width of the bounded mean-zero per-weight deviation added to an offspring's midparent controller blend (the inheritance mutation, the drift a lineage's controller incurs each generation). Basis for deciding it: the same inheritance-deviation scale reproduction.mutation_spread already uses, set equal to it for consistency (one lever, not a second fabricated magnitude) so a creature offspring resembles its parents to the same degree a founder child does"
+status = "reserved"
+value = ""
+unit = "controller_weight_half_width"
+source = "creature-selection step 2 (#126); crates/sim/src/runner.rs reproduce_creatures / Controller::midparent; Part 25, R-REPRO"
+category = "per_world"
+
 [[reserved]]
 id = "genome.speciation_distance"
 basis = "the genetic distance at which two diverged pools are declared distinct species; set against the chosen distance measure so a cross stays fertile below it and fails above it (declared rather than scripted speciation; Coyne and Orr)"
@@ -1515,6 +1547,15 @@ status = "reserved"
 value = ""
 unit = "fracture_energy_j_per_m2"
 source = "predation-integration #120; crates/sim/src/anatomy.rs BodyPlanRegistry coverings; crates/sim/src/runner.rs strike_occupant coarse branch; Part 35, Part 41"
+category = "per_world"
+
+[[reserved]]
+id = "body.covering_spectral_emissivity"
+basis = "the per-band spectral emissivity per covering kind (dimensionless ratio in [0,1] per thermal-IR band, opt.emissivity.band_0..2 on the chem/optics floor; creature-selection step 2b, the owner-ruled FLEEING carrier): the emissivity the covering material radiates at in each band. A real surface is not grey, so its per-band values differ from its broadband one and differ BY MATERIAL, which is the whole point: two beings at equal temperature and equal broadband emissivity (equal total signal strength) differ in spectral SHAPE when their surface materials differ, the strength-independent optical feature a perceiver keys a heritable weight on so fleeing emerges. A per-substance datum (three-way-test category 2): each world's covering materials carry their own per-band emissivity as data, grounded in the material's real spectral emissivity; what is reserved for owner calibration is each covering kind's per-band profile. The dev fixtures average the broadband 0.95 so the radiant term and covering_emissivity stay byte-identical: an organic covering (bare hide, fur, feathers, scales, mana-ward, phase-hide) reads the near-flat (0.95, 0.96, 0.94) and a keratin/mineral covering (chitin carapace, bony plates, shell, stone-skin) the band-structured (0.99, 0.88, 0.98), grounded off organic-vs-mineral spectral emissivity (CRC/Incropera Table A.11 wavelength dependence). The spectral shape is a property of the material and is NEVER keyed to a trophic role: any covering-to-kind correlation emerges through shared heritable causes and selection (Principle 8). A covering with no thermal-emission material (a fluid, plasma, or mana body) carries none and its feature is simply absent (admit-the-alien)"
+status = "reserved"
+value = ""
+unit = "emissivity_ratio_per_band"
+source = "creature-selection step 2b #126; crates/sim/src/anatomy.rs BodyPlanRegistry coverings; crates/physics/data/chem_optics_floor.toml opt.emissivity.band_*; crates/sim/src/perceivable_feature.rs; Part 41"
 category = "per_world"
 
 [[reserved]]

@@ -104,6 +104,7 @@ pub mod material;
 pub mod material_percept;
 pub mod medium;
 pub mod morphogen;
+pub mod perceivable_feature;
 pub mod percept;
 pub mod perception_percept;
 pub mod perception_reach;

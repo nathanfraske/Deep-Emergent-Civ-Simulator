@@ -88,6 +88,51 @@ range_lo = "0"
 range_hi = "1"
 real = "CRC emissivity tables (Incropera Table A.11)"
 
+# Per-band (spectral) emissivity axes (creature-selection step 2b, the owner-ruled FLEEING carrier): the
+# emissivity a surface radiates at IN A GIVEN WAVELENGTH BAND, an open set of floor axes sibling to the
+# broadband opt.emissivity. A real surface is not grey: its emissivity varies with wavelength (Kirchhoff, per
+# band), so two bodies at the same temperature and the same BROADBAND emissivity (hence the same total thermal
+# signal strength) can still radiate a different spectral SHAPE when their surface materials differ. That shape
+# is a strength-independent optical feature a perceiver can key a heritable weight on, so fleeing one emitter
+# kind and approaching another can emerge from selection (the sensing mechanism reads these per-band axes off
+# the emitter's own surface exactly as it reads the broadband axis; crates/sim/src/perceivable_feature.rs). The
+# BAND SET is DATA and open (a world adds a band by adding an axis here plus per-covering values), and the
+# per-band VALUES a covering declares are per_world reserved-with-basis (calibration/reserved.toml), grounded in
+# real spectral-emissivity data; an alien with different bands, or none, is a data row (admit-the-alien). Three
+# dev bands stand up the demonstration; each is a dimensionless ratio in [0, 1] like the broadband axis.
+[[axis]]
+id = "opt.emissivity.band_0"
+measures = "spectral surface emissivity in band 0 (short-wave thermal IR), the per-band radiant-exchange fraction"
+unit = "ratio"
+dimension = "dimensionless"
+scale = "ratio"
+tier = 0
+range_lo = "0"
+range_hi = "1"
+real = "CRC/Incropera spectral emissivity tables (per-band, Table A.11 wavelength dependence)"
+
+[[axis]]
+id = "opt.emissivity.band_1"
+measures = "spectral surface emissivity in band 1 (mid-wave thermal IR), the per-band radiant-exchange fraction"
+unit = "ratio"
+dimension = "dimensionless"
+scale = "ratio"
+tier = 0
+range_lo = "0"
+range_hi = "1"
+real = "CRC/Incropera spectral emissivity tables (per-band, Table A.11 wavelength dependence)"
+
+[[axis]]
+id = "opt.emissivity.band_2"
+measures = "spectral surface emissivity in band 2 (long-wave thermal IR), the per-band radiant-exchange fraction"
+unit = "ratio"
+dimension = "dimensionless"
+scale = "ratio"
+tier = 0
+range_lo = "0"
+range_hi = "1"
+real = "CRC/Incropera spectral emissivity tables (per-band, Table A.11 wavelength dependence)"
+
 [[axis]]
 id = "opt.reflectance"
 measures = "broadband reflectance (albedo), the reflected fraction of incident flux"
