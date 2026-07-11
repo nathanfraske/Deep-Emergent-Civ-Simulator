@@ -173,8 +173,14 @@ const LIVING_HIDDEN: usize = 4;
 /// extinct verdict for the Mirror needs the owner's cited Earth-biome net-primary-productivity and energy-flux
 /// datum reconciled against the founder's metabolic draw, surfaced as the reserved owner datum, not this
 /// placeholder.
-fn living_resource_features(cfg: &Config) -> PerceivableFeatureRegistry {
-    if cfg.living {
+fn scenario_resource_features(cfg: &Config) -> PerceivableFeatureRegistry {
+    // Armed for `living` (the foraging arc) AND for `full --creatures` (the creature-selection loop, slice 3):
+    // a being senses the identity-blind matter content of the cells around it (the slice-2 UNION of the producer
+    // field and any located corpse), so foraging, dispersal, and scavenging can emerge through the controller's
+    // founder-zero freely-signed per-bucket weights. Every other scenario declares no channel (empty), so its
+    // layout and hash are unchanged (opt-in). The same one-content-channel shape serves both scenarios; the
+    // per-axis fold that would differentiate channels is the flagged follow-on.
+    if cfg.living || cfg.creatures {
         PerceivableFeatureRegistry::from_channels(&[(
             "resource.content",
             20,
@@ -243,7 +249,7 @@ fn dawn_layout(cfg: &Config) -> ControllerLayout {
         return ControllerLayout::with_resource_features(
             &HomeostaticRegistry::dev_grazer(),
             &AffordanceRegistry::dev_default(),
-            &living_resource_features(cfg),
+            &scenario_resource_features(cfg),
             LIVING_HIDDEN,
         );
     }
@@ -276,11 +282,19 @@ fn dawn_layout(cfg: &Config) -> ControllerLayout {
     // carry the being block here so the forage taxis seeds (a flat `o * n_in + i` weight index) stay aligned
     // with the being-inclusive embodiment layout `build_dawn_runner` expresses against; `living` keeps its
     // separate recurrent no-percept layout (the early return above) and does not arm the feature.
-    ControllerLayout::with_percepts_and_being(
+    // The creature-selection loop, slice 3: `full --creatures` also arms the RESOURCE-DENSITY percept, so a
+    // being senses the identity-blind matter content of the cells around it (the slice-2 union of the producer
+    // field and any corpse) and foraging plus scavenging can emerge from selection. The founder gene block is
+    // sized against this layout, so it MUST carry the same resource-feature block the embodiment arms via
+    // `scenario_resource_features` in `embodiment_genesis`, or the seeded weights land in the wrong slots. Every
+    // non-creature scenario gets an EMPTY resource registry here, so its layout is byte-identical to the prior
+    // `with_percepts_and_being` (`n_resource_feature` zero); only `full --creatures` widens and re-pins.
+    ControllerLayout::with_percepts_being_and_resource_features(
         &homeostatic,
         &affordances,
         &PerceptRegistry::from_tolerances(&ToleranceRegistry::dev_salinity()),
         !cfg.living,
+        &scenario_resource_features(cfg),
         0,
     )
 }
@@ -1051,10 +1065,11 @@ fn embodiment_genesis(cfg: &Config) -> EmbodimentGenesis {
         // Empty under `living` (the salinity percept is deferred there).
         tolerances,
         controller_hidden,
-        // The foraging arc: the `living` scenario arms the resource-feature percept (a cell's identity-blind
-        // matter content), so a founder-zero being learns to forage and disperse by selection. Every other
+        // The foraging arc + creature-selection loop slice 3: `living` and `full --creatures` arm the
+        // resource-feature percept (a cell's identity-blind matter content, the slice-2 union over producers and
+        // corpses), so a founder-zero being learns to forage, disperse, and scavenge by selection. Every other
         // scenario declares no resource channel (empty), so its layout and hash are unchanged (opt-in).
-        resource_features: living_resource_features(cfg),
+        resource_features: scenario_resource_features(cfg),
         submerged_medium_id: "medium.water".to_string(),
         emergent_medium_id: "medium.air".to_string(),
     }
@@ -2446,6 +2461,15 @@ fn main() {
                         // being-percept and its declared field are already armed above; this completes the
                         // creature's arming. Behaviour-changing: it re-pins the `full --creatures` baseline
                         // (a separate scenario, not one of the canonical four, which carry no creatures).
+                        // Creature-selection loop, slice 3 (the loop now LIVE): the resource-density percept is
+                        // armed for `full --creatures` too (via `scenario_resource_features` in the genesis, so
+                        // the founder and creature layouts both carry the block), so a being senses the
+                        // identity-blind matter content of the cells around it (the slice-2 union of the producer
+                        // field and any corpse) and is drawn to a carcass as to a plant; with the reproduction
+                        // beat above, foraging, scavenging, and the being-directed flee/hunt sign are all
+                        // selectable in-run. The observable reaction still awaits the biosphere-balance work
+                        // (creatures starve before the beat fires under the interim calibration), the carried
+                        // limit; the loop is correct-and-ready.
                         if let Some(emb) = runner.embodiment_mut() {
                             emb.set_creature_being_percept(true);
                             // Predation-integration slice (fork i): arm the strike stack, the swing kinematics
@@ -2469,8 +2493,11 @@ fn main() {
                         println!(
                             "  ARC 7: {n} biosphere creatures spawned as LIVING walker-agents (alive right \
                              now: {}); they perceive, forage, metabolize, REACT to nearby beings (creatures- \
-                             react B3: a magnitude-graded toward/away pull, the sign selected), and die on the \
-                             same loop as the founders; behaviour selection awaits the reproduction slice",
+                             react B3: a magnitude-graded toward/away pull, the sign selected), sense the \
+                             identity-blind matter content of nearby cells (the resource-density percept, drawn \
+                             to a corpse as to a plant), reproduce on the co-located reserve-eligible beat, and \
+                             die on the same loop as the founders; the WHOLE loop is armed, the observable \
+                             reaction awaiting the biosphere-balance calibration (the carried limit)",
                             runner.creature_count()
                         );
                         match predator {
@@ -2479,11 +2506,12 @@ fn main() {
                                  (fine delivery body, always-STRIKE, non-metabolizing, emits a being-signal), on \
                                  an inhabited cell so it wounds the co-located prey on the whole body through the \
                                  one INTEGRITY cull. The wound law is live and the mortality is real; the prey's \
-                                 founder-zero flee-sign is now a SELECTABLE pressure. HONEST LIMIT: sustained \
-                                 predation and the emergent flee-adaptation await BOTH the creature-selection \
-                                 substrate (next arc) AND the biosphere-balance calibration (creatures currently \
-                                 starve within a few ticks, the GATED metabolism balance), so in-run kills are \
-                                 few until creatures survive and reproduce"
+                                 founder-zero flee-sign is now a SELECTABLE pressure, and the creature-selection \
+                                 loop is armed (the reproduction beat plus the being-directed and resource- \
+                                 density percepts). HONEST LIMIT: the emergent flee-adaptation and sustained \
+                                 predation await the biosphere-balance calibration (creatures currently starve \
+                                 within a few ticks, the GATED metabolism balance), so in-run kills are few and \
+                                 selection does not visibly move a weight until creatures survive and reproduce"
                             ),
                             None => println!(
                                 "  PREDATION (fork i): predator NOT spawned (no embodiment or no STRIKE afforded)"
