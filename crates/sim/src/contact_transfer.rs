@@ -38,11 +38,14 @@
 //! reads axis-id-to-value closures, never a concrete body struct).
 //!
 //! The binding is the SAME type the capability GRADE path ([`civsim_compose::FunctionLawDef`]) carries: the
-//! grade-binding unification (the gate's #129 follow-on, owner-decisions R15) put both paths on ONE map so an
-//! alien actuation names its own axes on both by role NAME, never two positional orders a missing axis could
-//! silently shift apart. The delivery family reads the six mechanical roles the IMPACT grade declares, and the
-//! canonical fixture ([`ContactTransferRegistry::dev_terran`]) shares the grade's own default binding, so a
-//! desync is a fail-loud missing-role load error ([`ContactTransfer::new`]), not a silent divergence.
+//! grade-binding unification (the gate's #129 follow-on, owner-decisions R15) put both paths on one shared type so
+//! an alien actuation names its own axes on both by role NAME, never two positional orders a missing axis could
+//! silently shift apart. The delivery family reads the six mechanical roles the IMPACT grade declares, so both
+//! paths validate against the same role SET and a missing role is a fail-loud load error
+//! ([`ContactTransfer::new`]). The role-to-axis MAPPING is shared because the canonical fixture
+//! ([`ContactTransferRegistry::dev_terran`]) is built from the grade's own [`CapabilityKernel::default_binding`];
+//! making that mapping lockstep STRUCTURAL (the delivery reading the grade law's binding directly) is the flagged
+//! single-source follow-on, and [`civsim_compose::AxisBinding::agrees_on`] checks the agreement meanwhile.
 
 use std::collections::BTreeMap;
 
@@ -102,16 +105,22 @@ pub enum TransferKernel {
 }
 
 /// One contact channel's transfer binding as data: the law its energy delivers by (dispatched by this kernel
-/// id, never by channel identity) and the SHARED [`AxisBinding`] the delivery kernels read the acting part's
-/// actuating force, stroke, and material axes from BY ROLE NAME. Every field is data (Principle 11); the resolve
-/// is fixed Rust that consumes derived inputs. The binding is the SAME `civsim_compose::AxisBinding` type the
-/// capability GRADE path ([`civsim_compose::FunctionLawDef`]) carries, so an alien actuation names its own axes on
-/// both the grade and the delivery path from ONE map by role NAME, never two positional slot orders that a missing
-/// axis could silently shift apart. The delivery family reads the six mechanical roles the IMPACT grade declares
-/// ([`CapabilityKernel::Impact`]), so both validate against the SAME role set ([`ContactTransfer::new`] fails loud
-/// at load when a role is unbound), which mechanically enforces the grade-to-delivery lockstep: a desync is a
-/// missing-key load error, not a silent divergence. The floor axis ids the binding maps to are the same
-/// string-keyed floor reference the reach and percept substrates use, so the floor stays the one authored place.
+/// id, never by channel identity) and the [`AxisBinding`] the delivery kernels read the acting part's actuating
+/// force, stroke, and material axes from BY ROLE NAME. Every field is data (Principle 11); the resolve is fixed
+/// Rust that consumes derived inputs. The binding is the SAME `civsim_compose::AxisBinding` type the capability
+/// GRADE path ([`civsim_compose::FunctionLawDef`]) carries, so an alien actuation names its own axes on both the
+/// grade and the delivery path by role NAME through one shared type, never two positional slot orders that a
+/// missing axis could silently shift apart. The delivery family reads the six mechanical roles the IMPACT grade
+/// declares ([`CapabilityKernel::Impact`]), so both paths validate against the SAME role SET
+/// ([`ContactTransfer::new`] fails loud at load when a role is unbound): the shared ROLE SET is mechanically
+/// enforced. What is not yet STRUCTURAL is the role-to-axis MAPPING agreement across the two paths. The canonical
+/// fixtures share the mapping because both are built from the one [`CapabilityKernel::default_binding`], but a
+/// world that authors the grade binding and the delivery binding SEPARATELY could map a shared role to two
+/// different axes and pass both role-set validations; [`AxisBinding::agrees_on`] checks that agreement across
+/// bindings, and a delivery row reading the grade law's own binding directly (one referenced map, no second copy)
+/// is the flagged single-source follow-on that would make the mapping lockstep structural. The floor axis ids the
+/// binding maps to are the same string-keyed floor reference the reach and percept substrates use, so the floor
+/// stays the one authored place.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ContactTransfer {
     /// The contact channel this row binds.
@@ -149,9 +158,11 @@ impl ContactTransfer {
 
     /// Build a transfer row, VALIDATED at construction: the binding must carry every role the mechanical family
     /// reads ([`ContactTransfer::mechanical_family_roles`]), else this returns the missing-role error (fail-loud at
-    /// LOAD, the mechanism that retires the positional silent-shift and mechanically enforces the grade-to-delivery
-    /// lockstep, the delivery-path sibling of [`civsim_compose::FunctionLawDef::with_binding`]). An alien names its
-    /// own axis id per role, so a hydrostat or photosynthetic actuator is a data row, not a rewrite.
+    /// LOAD, the mechanism that retires the positional silent-shift and enforces the shared ROLE SET across the
+    /// grade and delivery paths, the delivery-path sibling of [`civsim_compose::FunctionLawDef::with_binding`]).
+    /// This validates the role SET, not the role-to-axis MAPPING agreement with the grade binding (that is
+    /// [`AxisBinding::agrees_on`], and the structural single-source form is the flagged follow-on). An alien names
+    /// its own axis id per role, so a hydrostat or photosynthetic actuator is a data row, not a rewrite.
     pub fn new(
         channel: ContactChannelId,
         kernel: TransferKernel,
@@ -226,11 +237,13 @@ impl ContactTransferRegistry {
     /// the SAME byte-neutral role-to-Terran-axis map the IMPACT capability grade uses (`actuating_strength` to
     /// `mat.fracture_strength`, `cross_section` to `mech.cross_section_area`, `stroke` to `mech.stroke_length`,
     /// `yield_strength` to `mat.yield_strength`, `elastic_modulus` to `mat.elastic_modulus`, `driving_pressure` to
-    /// `fluid.driving_pressure`). Sharing the grade's own default is what makes the lockstep IMPOSSIBLE to desync
-    /// here: the delivery row and the IMPACT grade read from one map, so no reorder or omission can drift them
-    /// apart. Not owner data; the minimum a contact resolve needs to exercise the mechanical family. The real
-    /// channel set is the world's data, and a source-independent or non-mechanical channel is the flagged floor
-    /// extension.
+    /// `fluid.driving_pressure`). Building BOTH this fixture and the IMPACT grade from the one
+    /// [`CapabilityKernel::Impact::default_binding`] is what keeps them in lockstep IN THIS FIXTURE: neither a
+    /// reorder nor an omission can drift them apart, because they are the same value. (A world that authored the
+    /// delivery and grade bindings SEPARATELY could still map a role to two axes; making that impossible rather than
+    /// merely conventional is the single-source follow-on, and [`AxisBinding::agrees_on`] checks it meanwhile.) Not
+    /// owner data; the minimum a contact resolve needs to exercise the mechanical family. The real channel set is
+    /// the world's data, and a source-independent or non-mechanical channel is the flagged floor extension.
     pub fn dev_terran() -> ContactTransferRegistry {
         let mut reg = ContactTransferRegistry::empty();
         reg.insert(
@@ -803,28 +816,49 @@ mod tests {
     }
 
     #[test]
-    fn the_delivery_row_and_the_impact_grade_share_one_binding_by_construction() {
-        // The grade/delivery LOCKSTEP the gate ruled (slice-3 ruling iv), now MECHANICALLY ENFORCED rather than
-        // pinned by a drift-test (slice B of the unification): the canonical delivery row is built from
-        // `CapabilityKernel::Impact.default_binding()`, the SAME map the IMPACT capability grade uses, so the two
-        // paths read from ONE binding and cannot desync. The retired slice-A test compared a positional grade
-        // contract against named delivery fields BY CONVENTION (a reorder could silently drift them); here the two
-        // are the SAME value, so equality is by construction, not a coincidence a test must guard.
+    fn the_canonical_delivery_row_shares_the_grade_binding_and_agrees_on_catches_a_divergence() {
+        // The grade/delivery LOCKSTEP the gate ruled (slice-3 ruling iv), and the HONEST scope of its enforcement
+        // after the unification (a section-9 confirmation-bias catch, verified at source): the CANONICAL delivery
+        // row is built from `CapabilityKernel::Impact.default_binding()`, the SAME value the IMPACT grade uses, so
+        // in the fixture the two are one binding and cannot desync. What is NOT structural is a general world that
+        // authors the two bindings SEPARATELY: the role-SET validation both paths run does NOT check the
+        // role-to-axis MAPPING agrees, so a divergent delivery binding passes `validate_roles` yet reads different
+        // physics than the grade. `AxisBinding::agrees_on` is the load-time check for that, standing in for the
+        // single-source follow-on (a delivery row reading the grade binding directly) until it is built.
         let grade_binding = CapabilityKernel::Impact.default_binding();
         let row = ContactTransferRegistry::dev_terran()
             .get(DEV_KINETIC)
             .expect("kinetic row")
             .clone();
-        assert_eq!(
-            row.binding, grade_binding,
-            "the delivery row and the IMPACT grade read from the one shared binding"
-        );
-        // And it carries every mechanical-family role (the delivery family reads the IMPACT grade's role set).
+        // The canonical fixture: the delivery binding IS the grade binding, so it agrees on every mechanical role.
+        assert_eq!(row.binding, grade_binding);
         assert!(
             row.binding
-                .validate_roles(ContactTransfer::mechanical_family_roles())
+                .agrees_on(&grade_binding, ContactTransfer::mechanical_family_roles())
                 .is_ok(),
-            "the shared binding carries every mechanical-family role"
+            "the canonical delivery row and the IMPACT grade agree on every role-to-axis mapping"
+        );
+        // The ADVERSARIAL case the old by-construction test could not cover: a delivery binding that carries the
+        // full role SET (so `validate_roles` and `ContactTransfer::new` both PASS) but maps `actuating_strength` to
+        // a DIFFERENT axis than the grade does. This is the silent grade/delivery desync the arc exists to prevent;
+        // `agrees_on` catches it and names the disagreeing role.
+        let divergent = AxisBinding::from_pairs([
+            ("actuating_strength", "mat.yield_strength"), // diverges: grade maps this to mat.fracture_strength
+            ("cross_section", "mech.cross_section_area"),
+            ("stroke", "mech.stroke_length"),
+            ("yield_strength", "mat.yield_strength"),
+            ("elastic_modulus", "mat.elastic_modulus"),
+            ("driving_pressure", "fluid.driving_pressure"),
+        ]);
+        let divergent_row = ContactTransfer::new(DEV_KINETIC, TransferKernel::Kinetic, divergent)
+            .expect("the divergent binding carries the full role set, so construction succeeds");
+        let err = divergent_row
+            .binding
+            .agrees_on(&grade_binding, ContactTransfer::mechanical_family_roles())
+            .expect_err("agrees_on catches the actuating_strength mapping divergence");
+        assert!(
+            err.contains("actuating_strength"),
+            "the disagreement error names the divergent role: {err}"
         );
     }
 
