@@ -773,6 +773,14 @@ pub struct EmbodiedPhysiology {
     respiration_transfer_k: Fixed,
     /// The base tick length in seconds the drain derivation integrates over (`time.base_tick_seconds`).
     tick_seconds: Fixed,
+    /// The reserved water-loss-per-metabolic-power anchor (`metabolism.water_loss_per_power`, grams of water
+    /// lost per joule of metabolism), when the world declares it: the respiratory-plus-evaporative water cost
+    /// of metabolism the DERIVED water drain ([`physiology::derive_water_loss`]) reads to replace the authored
+    /// flat water `base_drain`. `None` when the manifest carries no such key (the dev-fixtures profile and
+    /// every scenario that loads it, so the WATER axis keeps its authored drain and the run is byte-identical);
+    /// `Some` on a world (Mirror) whose profile sets it, so the water drain DERIVES from the being's own
+    /// metabolic power exactly as the energy drain does. An opt-in per-world datum, never a global author.
+    water_loss_per_power: Option<Fixed>,
 }
 
 impl EmbodiedPhysiology {
@@ -802,6 +810,14 @@ impl EmbodiedPhysiology {
             respiration_transfer_k: manifest
                 .require_fixed("metabolism.respiration_transfer_coefficient")?,
             tick_seconds: manifest.require_fixed("time.base_tick_seconds")?,
+            // Opt-in per-world: only a profile that DECLARES the water-loss anchor (Mirror) arms the derived
+            // water drain; a profile without the key (dev-fixtures) reads None and the WATER axis keeps its
+            // authored drain, byte-identical. Read fail-loud only when present, so a set key must parse.
+            water_loss_per_power: if manifest.is_set("metabolism.water_loss_per_power") {
+                Some(manifest.require_fixed("metabolism.water_loss_per_power")?)
+            } else {
+                None
+            },
         })
     }
 
@@ -820,6 +836,8 @@ impl EmbodiedPhysiology {
             medium,
             respiration_transfer_k: Fixed::ONE,
             tick_seconds: Fixed::ONE,
+            // The labelled fixture keeps the authored water drain (None), so tests are unchanged.
+            water_loss_per_power: None,
         }
     }
 }
@@ -989,6 +1007,62 @@ fn being_derived_drains(
                 energy_density,
                 force,
                 velocity,
+                phys.tick_seconds,
+                &phys.anchors,
+            );
+            DerivedDrain { base, exertion }
+        } else if phys.water_loss_per_power.is_some()
+            && axis.backing_component.as_deref() == Some(physiology::WATER_FRACTION)
+        {
+            // DERIVED WATER DRAIN (R-METABOLIZE water sibling, opt-in per-world): retire the authored flat
+            // water rate. Respiratory-plus-evaporative water loss scales with metabolic power, so it derives
+            // from the body exactly as the energy drain does, reading the SAME body-level physical quantities
+            // (surface, covering emissivity, occupied-medium h, muscle force, ground velocity) against the
+            // live ambient and set point. Armed only when the world's profile declares the water-loss anchor
+            // (Mirror), so every authored-drain scenario reads None and this branch never runs, staying
+            // byte-identical. A larger, hotter-working body in a drier, hotter medium loses proportionally
+            // more water, from the physics alone (Principle 9), never a flat rate or a race id.
+            let water_cap = w.homeostasis.capacity(axis.id);
+            let (surface, force, water_density) = match &w.structure {
+                Some(s) => (
+                    s.composition_sum(physiology::CONVECTIVE_SURFACE),
+                    s.composition_sum(physiology::MUSCLE_STRENGTH)
+                        .checked_mul(physiology::body_mass_kg(&w.body, &phys.anchors))
+                        .unwrap_or(Fixed::ZERO),
+                    s.composition_mean(physiology::WATER_FRACTION),
+                ),
+                None => (
+                    physiology::whole_body_surface(&w.body, &phys.organs),
+                    physiology::whole_body_muscle_force(&w.body, &phys.organs, &phys.anchors),
+                    physiology::whole_body_water_density(&w.body, &phys.organs),
+                ),
+            };
+            let emissivity = physiology::covering_emissivity(&w.body, &phys.organs);
+            let medium_cell = w.coord();
+            let medium_h = phys.medium.convective_at(medium_cell.x, medium_cell.y);
+            let velocity = match &w.structure {
+                Some(s) => locomotion::locomotion_speed_structure(
+                    s,
+                    w.body.temperament.activity,
+                    Fixed::ONE,
+                    &emb.params,
+                ),
+                None => {
+                    locomotion::locomotion_speed(&w.body, &phys.organs, Fixed::ONE, &emb.params)
+                }
+            };
+            let (base, exertion) = physiology::derive_water_loss(
+                &w.body,
+                water_cap,
+                water_density,
+                surface,
+                emissivity,
+                ambient,
+                setpoint,
+                medium_h,
+                force,
+                velocity,
+                phys.water_loss_per_power.unwrap(),
                 phys.tick_seconds,
                 &phys.anchors,
             );

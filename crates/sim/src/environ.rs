@@ -1061,14 +1061,19 @@ impl EnvironFields {
                 let insol = insolation_at(x, y, w, h, diurnal_phase, orbital_phase, &sky);
                 self.light[i] = insol;
                 // The heat baseline (night-floor form (2)): the absorbed irradiance is the normalised daylit
-                // insolation scaled to physical watts by the stellar constant, plus the world's back-radiation
-                // floor so the night side relaxes toward a retained temperature (airless zero, Earth mild,
-                // Venus high) rather than absolute zero. The radiative-equilibrium law returns the surface
-                // temperature of that absorbed flux; the field's relaxation-plus-diffusion then produces the
-                // emergent swing and lag. The emissivity stays uniform (the per-material radiative
-                // differentiation is per-cell ALBEDO, a separate flagged follow-on on the floor law).
+                // insolation scaled to physical watts by the stellar constant and REDUCED by the world's
+                // shortwave albedo (the reflected fraction is not absorbed), plus the world's back-radiation
+                // floor (longwave, not reflected) so the night side relaxes toward a retained temperature
+                // (airless zero, Earth mild, Venus high) rather than absolute zero. The radiative-equilibrium
+                // law returns the surface temperature of that absorbed flux; the field's relaxation-plus-
+                // diffusion then produces the emergent swing and lag. The albedo is the uniform planetary Bond
+                // value (per-world data, zero for the reference world so it stays byte-identical); the per-cell,
+                // per-material albedo from the floor `opt.reflectance` is the named follow-on.
+                let solar_absorbed_fraction = (Fixed::ONE - sky.albedo).max(Fixed::ZERO);
                 let absorbed = insol
                     .checked_mul(sky.solar_constant)
+                    .unwrap_or(Fixed::MAX)
+                    .checked_mul(solar_absorbed_fraction)
                     .unwrap_or(Fixed::MAX)
                     .saturating_add(sky.back_radiation);
                 self.solar_baseline[i] = civsim_physics::laws::radiative_equilibrium(
@@ -2072,6 +2077,17 @@ pub struct DiurnalSky {
     /// (airless 0, Earth mild, thick-atmosphere high). RESERVED, owner-set (Mirror = Earth's real downwelling
     /// longwave). The full derivation from the atmosphere's greenhouse optical depth is the flagged follow-on.
     pub back_radiation: Fixed,
+    /// The per-world SHORTWAVE ALBEDO (the planetary Bond albedo), the fraction of the incoming stellar flux
+    /// reflected rather than absorbed, so the absorbed solar term is `insolation * solar_constant * (1 -
+    /// albedo)` (the longwave back-radiation floor is unaffected, it is not reflected). Without it a bare
+    /// world absorbs the full stellar flux and equilibrates far too hot (a single-star world at 1361 W/m^2 with
+    /// no reflection sits ~23 K above Earth's mean); Earth's ~0.30 Bond albedo is what lands its equilibrium at
+    /// ~288 K. RESERVED per-world DATA (Principle 11): Mirror carries Earth's measured Bond albedo, an icy
+    /// world a higher one, a dark world near zero. The reference world sets it to ZERO (a bare blackbody), so a
+    /// world that does not declare an albedo is byte-identical to the pre-albedo baseline. The full per-cell,
+    /// per-material albedo (ice, ocean, desert reflecting differently, from the floor `opt.reflectance`) is the
+    /// named follow-on; this is the uniform planetary value.
+    pub albedo: Fixed,
     /// The surface EMISSIVITY the radiative-equilibrium baseline reads. INTERIM uniform (a flagged
     /// uniform-absorption limit): the per-material emissivity from the floor `opt.emissivity` (so ice, rock,
     /// water, and an alien crust equilibrate and lag differently) is the named immediate follow-on.
@@ -2108,6 +2124,9 @@ impl DiurnalSky {
             // plunge. Sigma is NOT among them: it DERIVES from the CODATA fundamentals, universal, not reserved.
             solar_constant: Fixed::from_int(1361),
             back_radiation: Fixed::from_int(300),
+            // The reference world is a bare blackbody (no reflection), so an unarmed-albedo world is
+            // byte-identical to the pre-albedo baseline. Mirror overrides this with Earth's Bond albedo.
+            albedo: Fixed::ZERO,
             emissivity: Fixed::from_ratio(95, 100),
             sigma: crate::physiology::derived_stefan_boltzmann(),
             t_max: Fixed::from_int(500),
@@ -2129,6 +2148,12 @@ impl DiurnalSky {
             // Earth's real obliquity, 23.44 degrees = 0.4091 radians. Per-world data, not a global author:
             // this is Mirror's measured tilt, surfaced for the owner as the reserved world datum.
             obliquity: Fixed::from_ratio(4091, 10_000),
+            // Earth's measured planetary Bond albedo, 0.306 (the fraction of incoming sunlight reflected;
+            // NASA Earth Fact Sheet, Bond albedo 0.306). Per-world data: this is what drops Mirror's absorbed
+            // solar flux to 0.694 of the incident and lands its radiative-equilibrium mean near Earth's real
+            // ~288 K instead of the ~311 K a bare (albedo-zero) world reaches. Surfaced for the owner as the
+            // reserved world datum, cited not fabricated.
+            albedo: Fixed::from_ratio(306, 1000),
             ..DiurnalSky::reference(rotation_period_ticks, orbital_period_ticks)
         }
     }

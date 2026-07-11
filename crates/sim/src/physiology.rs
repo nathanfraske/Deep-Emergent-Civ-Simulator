@@ -356,6 +356,31 @@ pub fn whole_body_energy_density(plan: &BodyPlan, organs: &BodyPlanRegistry) -> 
     weighted.checked_div(total_dev).unwrap_or(Fixed::ZERO)
 }
 
+/// A being's whole-body water density: the development-weighted average over its organs of their
+/// `bio.water_fraction` composition, the hydration reserve's per-unit water content the water-loss bridge
+/// multiplies by the reserve capacity to reach the stored water mass. The water sibling of
+/// [`whole_body_energy_density`], read on the same floor axis ([`WATER_FRACTION`]); a body with no
+/// water-bearing tissue reads zero. Order-independent.
+pub fn whole_body_water_density(plan: &BodyPlan, organs: &BodyPlanRegistry) -> Fixed {
+    let mut weighted = Fixed::ZERO;
+    let mut total_dev = Fixed::ZERO;
+    for organ in &plan.organs {
+        let d = organs
+            .organ_composition(organ.kind)
+            .map(|comp| comp.component(WATER_FRACTION))
+            .unwrap_or(Fixed::ZERO);
+        if d > Fixed::ZERO {
+            let contribution = organ.development.checked_mul(d).unwrap_or(Fixed::ZERO);
+            weighted = weighted.saturating_add(contribution);
+            total_dev = total_dev.saturating_add(organ.development);
+        }
+    }
+    if total_dev <= Fixed::ZERO {
+        return Fixed::ZERO;
+    }
+    weighted.checked_div(total_dev).unwrap_or(Fixed::ZERO)
+}
+
 /// A being's whole-body COMPOSITION VECTOR: its value on the UNION of every floor axis any of its parts
 /// declares, each a development-weighted mean over the parts that carry it, generalizing
 /// [`whole_body_energy_density`] and [`crate::medium::body_density`] from one named axis to all of them. This
@@ -721,6 +746,83 @@ pub fn derive_exertion_coupling(
         tick,
         FRAC_MAX,
     )
+}
+
+/// The DERIVED physiological WATER-loss drain, retiring the authored flat `base_drain` on the water axis
+/// (the R-METABOLIZE water sibling of [`base_drain_from`] / [`derive_exertion_coupling`]). Real endotherm
+/// water loss is dominated by RESPIRATORY loss (water vapour in exhaled breath, whose rate is set by
+/// ventilation, itself proportional to metabolic rate) and by EVAPORATIVE thermoregulatory loss (sweating
+/// or panting to shed the thermoregulatory heat load, evaporating water to carry off that heat). Both scale
+/// with metabolic POWER: the respiratory term with the whole resting power (ventilation tracks metabolism),
+/// the evaporative term with the heat that must be shed. So the water loss DERIVES as `water_flux =
+/// water_per_power * metabolic_power`, the resting power `basal + thermoregulatory_heat_loss` for the base
+/// term and the work power for the exertion term, each bridged to a fraction of the hydration reserve by the
+/// SAME size-scaled reserve bridge the energy drain uses (the reserve's stored water is `water_capacity *
+/// body_mass * water_density`). Keyed on the body's own mass, tissue, surface, and medium, never a race id
+/// or a flat rate: a larger or hotter-working body in a drier, hotter medium loses proportionally more
+/// water, from the physics alone (Principle 9). `water_per_power` is the reserved owner anchor (grams of
+/// water lost per joule of metabolism, the respiratory-plus-evaporative water cost of energy), surfaced with
+/// its basis, never fabricated. Returns `(base_fraction, exertion_fraction)` per tick, the derived siblings
+/// of the authored [`crate::homeostasis::HomeostaticAxisDef::base_drain`] / `exertion_drain` on the water
+/// axis. Pure and RNG-free.
+#[allow(clippy::too_many_arguments)]
+pub fn derive_water_loss(
+    plan: &BodyPlan,
+    water_capacity: Fixed,
+    water_density: Fixed,
+    surface: Fixed,
+    emissivity: Fixed,
+    ambient_temp: Fixed,
+    setpoint: Fixed,
+    medium_h: Fixed,
+    force: Fixed,
+    velocity: Fixed,
+    water_per_power: Fixed,
+    tick: Fixed,
+    anchors: &MetabolicAnchors,
+) -> (Fixed, Fixed) {
+    let mass_kg = body_mass_kg(plan, anchors);
+    let basal = laws::basal_metabolic_rate(mass_kg, anchors.kleiber_a, RATE_MAX);
+    // At rest the body holds its set point; the thermoregulatory heat it sheds is the evaporative water
+    // driver (sweating/panting), so the resting water power is the whole resting metabolic power.
+    let heat_loss = laws::resting_heat_loss(
+        medium_h,
+        surface,
+        setpoint,
+        ambient_temp,
+        emissivity,
+        anchors.sigma_fine_bits,
+        anchors.sigma_fine_scale,
+        FLUX_MAX,
+    );
+    let resting_power = basal.saturating_add(heat_loss);
+    let work_power = laws::power_watts(force, velocity, POWER_MAX);
+    // The hydration reserve's water-storing mass, the same size-scaled bridge the energy drain uses: the
+    // anatomy-derived water capacity scaled to the body's physical mass, so the bridge to stored water mass
+    // scales with size. The water flux (per_power * metabolic power) enters as the `basal` slot of the
+    // shared fraction bridge with a zero second term, so `fraction = water_flux * tick / stored_water`.
+    let reserve_mass = water_capacity.checked_mul(mass_kg).unwrap_or(Fixed::ZERO);
+    let base_flux = resting_power
+        .checked_mul(water_per_power)
+        .unwrap_or(FLUX_MAX);
+    let work_flux = work_power.checked_mul(water_per_power).unwrap_or(FLUX_MAX);
+    let base = laws::metabolic_drain_fraction(
+        base_flux,
+        Fixed::ZERO,
+        reserve_mass,
+        water_density,
+        tick,
+        FRAC_MAX,
+    );
+    let exertion = laws::metabolic_drain_fraction(
+        work_flux,
+        Fixed::ZERO,
+        reserve_mass,
+        water_density,
+        tick,
+        FRAC_MAX,
+    );
+    (base, exertion)
 }
 
 /// The derived body-to-medium thermal coupling rate per tick: `h * A / (m * c)`, the discrete

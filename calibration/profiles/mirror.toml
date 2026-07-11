@@ -1,0 +1,761 @@
+# ============================================================================
+# MIRROR PROFILE: the EARTH-CALIBRATED sibling of dev-fixtures. INTERIM, owner-gated.
+# ============================================================================
+#
+# This profile is a faithful copy of calibration/profiles/dev-fixtures.toml with
+# ONLY the metabolic-and-tissue ENERGY SCALE changed to real, Earth-cited values,
+# so the Mirror world (the `--scenario living` run, which already arms Earth's real
+# axial tilt and insolation through DiurnalSky::mirror) reads a coherent Earth
+# energy scale rather than the dev placeholder scale. Every other value here is
+# byte-identical to dev-fixtures, so the Mirror living world differs from the dev
+# living world ONLY in its energetics; the four canonical run_world pins
+# (default / full / discovery / viability) never load this profile, so they are
+# bit-identical by construction.
+#
+# The energy-scale entries below carry BOTH a basis (the reasoning) AND a
+# real-Earth citation (the measured quantity mirrored), per the reserved-value
+# discipline. They are INTERIM Mirror per-world calibrations surfaced for the
+# owner's sign-off, not owner canon: kleiber_coefficient and body_mass_kg_scale
+# mirror the already-reserved, cited entries in calibration/reserved.toml (the
+# latter owner-signed 2026-07-09); the three tissue energy densities are the
+# Atwater macronutrient gross energy densities. The ONE energy value that cannot
+# be Earth-derived (the physical area one ecology grid cell represents, which
+# would ground the standing-crop biomass in real NPP) is NOT set here: it is
+# flagged as an owner decision in the biosphere-balance report, not fabricated.
+#
+# A production run still uses Profile::Calibrated against reserved.toml (fail-loud
+# on any reserved value); this profile, like dev-fixtures, is a Development-profile
+# convenience so the Mirror biosphere can run and be validated end to end.
+
+# --- evidence engine (Part 9.10) ---
+
+[[reserved]]
+id = "evidence.log_odds_clamp"
+basis = "FIXTURE placeholder, not the owner's value"
+status = "set"
+value = "50"
+unit = "log_odds"
+source = "dev fixture for Part 9 evidence engine"
+
+[[reserved]]
+id = "evidence.commit_threshold"
+basis = "FIXTURE placeholder, not the owner's value"
+status = "set"
+value = "3"
+unit = "log_odds"
+source = "dev fixture for Part 9 evidence engine"
+
+[[reserved]]
+id = "evidence.runner_up_margin"
+basis = "FIXTURE placeholder, not the owner's value"
+status = "set"
+value = "1"
+unit = "log_odds"
+source = "dev fixture for Part 9 evidence engine"
+
+# --- recursive theory of mind (Part 37) ---
+
+[[reserved]]
+id = "tom.meta_log_odds_clamp"
+basis = "FIXTURE placeholder, not the owner's value"
+status = "set"
+value = "50"
+unit = "log_odds"
+source = "dev fixture for Part 37 theory of mind"
+
+[[reserved]]
+id = "tom.meta_commit_threshold"
+basis = "FIXTURE placeholder, not the owner's value"
+status = "set"
+value = "3"
+unit = "log_odds"
+source = "dev fixture for Part 37 theory of mind"
+
+[[reserved]]
+id = "tom.meta_runner_up_margin"
+basis = "FIXTURE placeholder, not the owner's value"
+status = "set"
+value = "2"
+unit = "log_odds"
+source = "dev fixture for Part 37 theory of mind"
+
+[[reserved]]
+id = "tom.access_weight.witnessed"
+basis = "FIXTURE placeholder; the hard constraint witnessed > told, said is honoured"
+status = "set"
+value = "4"
+unit = "log_odds"
+source = "dev fixture for Part 37 theory of mind"
+
+[[reserved]]
+id = "tom.access_weight.told"
+basis = "FIXTURE placeholder, not the owner's value"
+status = "set"
+value = "3"
+unit = "log_odds"
+source = "dev fixture for Part 37 theory of mind"
+
+[[reserved]]
+id = "tom.access_weight.said"
+basis = "FIXTURE placeholder, not the owner's value"
+status = "set"
+value = "2"
+unit = "log_odds"
+source = "dev fixture for Part 37 theory of mind"
+
+[[reserved]]
+id = "tom.access_weight.reachable"
+basis = "FIXTURE placeholder, not the owner's value"
+status = "set"
+value = "1"
+unit = "log_odds"
+source = "dev fixture for Part 37 theory of mind"
+
+[[reserved]]
+id = "tom.access_weight.absence"
+basis = "FIXTURE placeholder, not the owner's value"
+status = "set"
+value = "2"
+unit = "log_odds"
+source = "dev fixture for Part 37 theory of mind"
+
+[[reserved]]
+id = "tom.access_weight.denied"
+basis = "FIXTURE placeholder, not the owner's value"
+status = "set"
+value = "2"
+unit = "log_odds"
+source = "dev fixture for Part 37 theory of mind"
+
+# --- gossip and trust (Phase 4), FIXTURE placeholders ---
+
+[[reserved]]
+id = "gossip.told_weight"
+basis = "FIXTURE placeholder, not the owner's value"
+status = "set"
+value = "3"
+unit = "log_odds"
+source = "dev fixture for Part 9.5 gossip"
+
+[[reserved]]
+id = "gossip.trust_baseline"
+basis = "FIXTURE placeholder, not the owner's value"
+status = "set"
+value = "1"
+unit = "fraction"
+source = "dev fixture for Part 9.5 gossip"
+
+[[reserved]]
+id = "gossip.trust_penalty"
+basis = "FIXTURE placeholder, not the owner's value"
+status = "set"
+value = "0.5"
+unit = "fraction"
+source = "dev fixture for Part 9.5 gossip"
+
+# --- language (Phase 5), FIXTURE placeholder ---
+
+[[reserved]]
+id = "language.innovation_rate"
+basis = "FIXTURE placeholder, not the owner's value"
+status = "set"
+value = "0.05"
+unit = "probability"
+source = "dev fixture for Part 33 language"
+
+[[reserved]]
+id = "language.sound_change_rate"
+basis = "FIXTURE placeholder, not the owner's value; cranked high so drift is visible in a short demo run, far faster than a real language changes"
+status = "set"
+value = "1.0"
+unit = "probability"
+source = "dev fixture for Part 33.4 drift"
+
+# language.generation_ticks RETIRED (per-lineage drift cadence built, 2026-07-03): the drift cadence
+# now derives per lineage from the speaking race's maturity_years times the world's life_cadence_ticks
+# (world::drift_languages), so this global-generation fixture is no longer read. A demo shrinks the
+# life cadence and sets a small race maturity instead (see crates/sim/tests/drift.rs).
+
+# --- celestial and time (Parts 14.6, 20, 32) ---
+
+[[reserved]]
+id = "time.base_tick_seconds"
+basis = "FIXTURE placeholder, not the owner's value; one world-second per tick so a development world can derive its life cadence from an orbit through ticks_from_seconds"
+status = "set"
+value = "1"
+unit = "seconds_per_tick"
+source = "dev fixture for Part 14.6; crates/sim/src/clock.rs"
+
+[[reserved]]
+id = "world.orbital_period_seconds"
+basis = "FIXTURE placeholder, not the owner's per-world value; an Earth year in world-seconds (365 days of 86400 s) so a development world derives a concrete life cadence from its orbit through World::from_manifest. The owner's real per-world orbit is reserved fail-loud in calibration/reserved.toml; Earth is one option among many (OrbitalElements::dev_earth)"
+status = "set"
+value = "31536000"
+unit = "seconds_per_orbit"
+source = "dev fixture for Parts 14.6, 20; crates/sim/src/clock.rs"
+
+[[reserved]]
+id = "world.rotation_period_seconds"
+basis = "FIXTURE placeholder, not the owner's per-world value; an Earth day in world-seconds (86400 s) so a development world has a concrete rotation period. The owner's real per-world value is reserved fail-loud in calibration/reserved.toml"
+status = "set"
+value = "86400"
+unit = "seconds_per_rotation"
+source = "dev fixture for Parts 14.6, 32; crates/sim/src/clock.rs"
+
+# --- the world-build path (the production dawn->Runner assembly, worldbuild::build_dawn_runner) ---
+# These let a development world assemble a whole Runner from a resolved scenario: the field
+# calibration derives from the selected medium's k/(rho*c) (FieldCalib::from_resolution), and the
+# dawn evidence rings size from expressed memory (RingCapacityLaw::from_manifest). FIXTURE
+# placeholders, not owner canon; the reserved fail-loud entries live in calibration/reserved.toml.
+
+[[reserved]]
+id = "medium.air"
+basis = "FIXTURE placeholder, not the owner's value; the temperate-air medium profile, a require_map bundle of the medium Substance axes. Density, respirable content, toxicity, and in-medium exchange follow the reserved.toml recommended set; the thermal axes (conductivity 0.0262 W/m/K, specific_heat 1005 J/kg/K, density 1.2 kg/m^3) are Incropera and DeWitt dry air near 300 K, so field.diffusion derives from a real k/(rho*c) rather than a fabricated scalar. The convective_coefficient (h = 10 W/m^2/K, the fluid.convective_coefficient axis the metabolism reads at a being's cell) is a UNIFORM dev fixture equal to the retired metabolism.medium_convective_coefficient value, kept the same for air and water so the dev metabolism reads h = 10 everywhere and the change is byte-neutral; a real air h (~2 to 25) is owner data (reserved.toml)"
+status = "set"
+value = "density=1.2,respirable_content=9,toxicity=0,in_medium_exchange_rate=0.05,conductivity=0.0262,specific_heat=1005,convective_coefficient=10"
+unit = "medium_profile"
+source = "dev fixture for Part 5.4/5.5 field derivation; crates/sim/src/runner.rs derive_field_diffusion; crates/sim/src/medium.rs convective_at"
+
+[[reserved]]
+id = "medium.water"
+basis = "FIXTURE placeholder, not the owner's value; the liquid-water medium profile (Europa selects it). The dissolved-gas, toxicity, and immersion-coupling axes follow the reserved.toml recommended set; the thermal axes (conductivity 0.606 W/m/K, specific_heat 4186 J/kg/K, density 1000 kg/m^3) are Incropera and DeWitt liquid water near 300 K, so a water world's field.diffusion derives from water's real k/(rho*c) and conducts slower than air. The convective_coefficient (h = 10 W/m^2/K, the fluid.convective_coefficient axis the metabolism reads at a being's cell) is a UNIFORM dev fixture equal to the retired metabolism.medium_convective_coefficient value, kept the same for air and water so the dev metabolism reads h = 10 everywhere and the change is byte-neutral; a real water h (~50 to 1000+) is owner data (reserved.toml)"
+status = "set"
+value = "density=1000,respirable_content=0.3,toxicity=0,in_medium_exchange_rate=0.20,conductivity=0.606,specific_heat=4186,convective_coefficient=10"
+unit = "medium_profile"
+source = "dev fixture for Part 5.4/5.5 field derivation; crates/sim/src/runner.rs derive_field_diffusion; crates/sim/src/medium.rs convective_at"
+
+[[reserved]]
+id = "medium.submersion_elevation"
+basis = "FIXTURE placeholder, not the owner's value; the waterline set at the dev biome set's ocean-band top (0.40), so a cell below it is submerged (holds medium.water) and one at or above it is emergent (holds medium.air), making the submerged cells exactly the dev classifier's ocean cells. The owner sets a world's real sea level (calibration/reserved.toml); this dev value exercises the per-cell medium fold on the dev map"
+status = "set"
+value = "0.40"
+unit = "normalised_elevation"
+source = "dev fixture for R-MEDIUM per-cell medium; crates/sim/src/medium.rs MediumField::from_map, crates/world/src/terrain.rs ocean band"
+
+[[reserved]]
+id = "field.cell_size"
+basis = "FIXTURE placeholder, not the owner's value; a one-centimetre cell, chosen with the one-second base tick so the medium-derived diffusion coefficient stays representable in Q32.32 and below the four-neighbour stencil's 1/4 stability bound. A real map-scale cell underflows the coefficient at a one-second tick (the reserved field.cell_size and a coarser sub-step are where a map-scale diffusion rate comes from); this small cell exercises the derivation, not a map scale"
+status = "set"
+value = "0.01"
+unit = "metres_per_cell"
+source = "dev fixture for Part 5.4/5.5 field derivation; crates/sim/src/runner.rs derive_field_diffusion"
+
+[[reserved]]
+id = "field.relaxation"
+basis = "FIXTURE placeholder, not the owner's value; the per-tick rate a cell relaxes toward its solar-and-biome baseline, a slow forcing"
+status = "set"
+value = "0.01"
+unit = "ratio_per_tick"
+source = "dev fixture for Part 5.4/5.5 field layer; crates/sim/src/runner.rs"
+
+[[reserved]]
+id = "climate.mean_surface_temperature"
+basis = "MIRROR Earth calibration: Earth's real global mean surface temperature, the offset in the temperature-to-absolute mapping T = mean + range*(normalised - 1/2) (crates/sim/src/runner.rs Field::from_map_absolute) AND the saturation-curve reference temperature (hydrology.saturation_t_ref derives from this). Lifts the temperature field OUT of the normalised [0,1] regime into Kelvin, so it coheres with the Kelvin diurnal insolation (DiurnalSky::mirror) instead of leaving e_s pinned to its cap. 288 K = 15 C, the modern Earth global mean surface temperature"
+status = "set"
+value = "288"
+unit = "kelvin"
+source = "NASA GISS / NOAA global mean surface temperature ~288 K (15 C); crates/sim/src/runner.rs Field::from_map_absolute, crates/sim/src/environ.rs EnvironCalib saturation reference"
+category = "per_world"
+
+[[reserved]]
+id = "climate.latitude_temperature_range"
+basis = "MIRROR Earth calibration: Earth's real equator-to-pole surface temperature contrast, the amplitude in T = mean + range*(normalised - 1/2), so the seeded field spans a realistic Kelvin latitude gradient (equator ~311 K, pole ~265 K about the 288 K mean). Earth's annual-mean surface gradient runs from roughly 300 K in the deep tropics to ~254 K at the poles, a contrast near 46 K"
+status = "set"
+value = "46"
+unit = "kelvin"
+source = "Earth annual-mean surface temperature latitude gradient, tropics ~300 K to poles ~254 K (e.g. NCEP/NCAR reanalysis climatology); crates/sim/src/runner.rs Field::from_map_absolute"
+category = "per_world"
+
+[[reserved]]
+id = "field.body_exchange"
+basis = "FIXTURE placeholder, not the owner's value; the fixture-fallback body-to-environment convective coupling per tick for a being placed without a body (a canonical run derives the per-being rate through physiology::derive_body_exchange_rate)"
+status = "set"
+value = "0.1"
+unit = "ratio_per_tick"
+source = "dev fixture for Part 5.4/5.5 field layer; crates/sim/src/runner.rs"
+
+[[reserved]]
+id = "metabolism.respiration_transfer_coefficient"
+basis = "FIXTURE placeholder, not the owner's value; a unit Fick membrane gas-transfer coefficient k so the embodiment respiration coupling (medium::respire, EmbodiedPhysiology::from_manifest) resolves on the dev-fixtures profile. A real per-membrane permeability is the owner's to set (calibration/reserved.toml)"
+status = "set"
+value = "1"
+unit = "gas_transfer_coefficient"
+source = "dev fixture for R-MEDIUM respiration; crates/sim/src/runner.rs EmbodiedPhysiology"
+
+# --- the dawn embodiment metabolic anchors and thermal band (real-world unification step 3;
+# EmbodiedPhysiology::from_manifest via MetabolicAnchors, and the BeingThermal comfort band). The two
+# metabolic anchors carry MIRROR EARTH values (the same cited entries reserved.toml carries); the thermal
+# band below is unchanged from dev-fixtures. ---
+
+[[reserved]]
+id = "metabolism.kleiber_coefficient"
+basis = "MIRROR Earth calibration (mirrors the reserved.toml entry): the Kleiber coefficient a in the resting metabolic rate P = a*mass^(3/4) (W per kg^(3/4)). The 3/4 exponent is the baked universal physics affordance (West/Brown/Enquist fractal-network derivation, Principle 9); the coefficient is the per-world normalization of resting oxygen consumption at the reference mass, the mammalian anchor"
+status = "set"
+value = "3.4"
+unit = "watt_per_kg_three_quarter"
+source = "Kleiber 1932 (Hilgardia 6:315); Savage et al. 2004, 'The predominance of quarter-power scaling in biology' (Functional Ecology 18:257), the ~3.4 W/kg^(3/4) mammalian normalization; Part 20, Part 41; crates/sim/src/physiology.rs basal_metabolic_rate. Same value reserved+cited in calibration/reserved.toml (metabolism.kleiber_coefficient)"
+category = "per_world"
+
+[[reserved]]
+id = "metabolism.body_mass_kg_scale"
+basis = "MIRROR Earth calibration (mirrors the reserved.toml entry, owner-signed 2026-07-09): the kilograms a body carries at the normalized body_mass = 1 (the master size trait's trait-to-kilograms bridge, R-UNITS-PIN), pinning where the [0,1] body-mass trait lands on the physical kilogram scale the Kleiber law and thermal mass read. At body_mass 1/2 (the dev grazer) this gives a 35 kg mammal"
+status = "set"
+value = "70"
+unit = "kilograms_at_body_mass_one"
+source = "Part 25.14 body plan, R-UNITS-PIN; crates/sim/src/physiology.rs. Same value owner-signed in calibration/reserved.toml (metabolism.body_mass_kg_scale, Owner Mirror sign-off 2026-07-09, docs/working/MIRROR_SIGNOFF_DECISIONS.md)"
+category = "per_world"
+
+[[reserved]]
+id = "metabolism.water_loss_per_power"
+basis = "MIRROR Earth calibration: the respiratory-plus-evaporative WATER cost of metabolism (kg of water lost per joule of metabolic power), the anchor the DERIVED water drain (physiology::derive_water_loss) reads to retire the authored flat water base_drain. An endotherm sheds its metabolic heat load largely by evaporation (sweating, panting, respiratory), and evaporating water carries off the latent heat of vaporization, so the water evaporated per joule of heat shed is 1/L_vap. L_vap of water near body/surface temperature (~30 C) is ~2.43e6 J/kg, giving 1/L_vap = 4.1e-7 kg/J. This is the physical upper bound (all metabolic power dissipated evaporatively); respiratory-only insensible loss (~0.9 kg/day at ~90 W BMR = ~1.2e-7 kg/J) is lower, so the true blended value lies between and is the owner's to set. HONEST LIMIT: the absolute drain FRACTION rides the same R-UNITS-PIN reserve-to-physical bridge the energy drain does (the hydration reserve's stored-water units are the unresolved units pin); in the compressed dev-harness generation length this derived rate makes thirst effectively non-binding, which is the physically-correct result (a mammal does not dehydrate in seconds), so once armed the biosphere is energy-limited rather than thirst-limited"
+status = "set"
+value = "0.0000004"
+unit = "kg_water_per_joule"
+source = "latent heat of vaporization of water L_vap ~2.43e6 J/kg at ~30 C (standard steam tables / CRC Handbook); 1/L_vap = 4.1e-7 kg/J; crates/sim/src/physiology.rs derive_water_loss. Respiratory insensible-loss cross-check ~0.9 kg/day at ~90 W BMR (human physiology) ~1.2e-7 kg/J"
+category = "per_world"
+
+# RETIRED (Arc 2, derive-vs-author): `metabolism.medium_convective_coefficient` is gone; the metabolism now
+# reads the convective coefficient h from the being's own medium (the medium.{air,water}
+# convective_coefficient axis above, read at the being's cell via MediumField::convective_at), not a
+# duplicate global anchor. The dev media carry a uniform h = 10 (the retired fixture value), so the dev
+# metabolism reads h = 10 everywhere and the change is byte-identical. See crates/sim/src/physiology.rs and
+# crates/sim/src/runner.rs.
+
+# RETIRED (Arc 2, derive-vs-author): `metabolism.surface_emissivity` is gone; the radiant term reads the
+# being's covering `opt.emissivity` (physiology::covering_emissivity). The dev coverings carry 0.95 (the
+# retired fixture value) in crates/sim/src/anatomy.rs, so the dev radiant term is byte-identical.
+
+
+[[reserved]]
+id = "physiology.thermal_setpoint"
+basis = "FIXTURE placeholder, not the owner's value; the comfort-band set point a dawn founder thermoregulates toward (thirty-seven, the mammalian dev anchor the thermal-coupling tests use), so BeingThermal resolves on the dev-fixtures profile"
+status = "set"
+value = "37"
+unit = "temperature"
+source = "dev fixture for the dawn embodiment BeingThermal; crates/sim/src/runner.rs"
+
+[[reserved]]
+id = "physiology.thermal_half_band"
+basis = "FIXTURE placeholder, not the owner's value; the half-width of the survivable comfort band around the set point (eight, the dev anchor the thermal-coupling tests use)"
+status = "set"
+value = "8"
+unit = "temperature"
+source = "dev fixture for the dawn embodiment BeingThermal; crates/sim/src/runner.rs"
+
+# --- the dawn evidence ring (Part 28 axiom model, RingCapacityLaw::from_manifest) ---
+
+[[reserved]]
+id = "axiom.evidence_ring_curve"
+basis = "FIXTURE placeholder, not the owner's value; a linear memory-phenotype-to-ring-slots map (memory 0 -> 0 slots, memory 8 -> 16 slots), so a mindful founder carries a larger evidence ring than a forgetful one of the same race, keyed off expressed memory with no race branch. Parsed by require_curve as x=y points"
+status = "set"
+value = "0=0,8=16"
+unit = "curve"
+source = "dev fixture for Part 28 axiom model; crates/sim/src/axiom.rs RingCapacityLaw"
+
+[[reserved]]
+id = "axiom.evidence_ring_hard_cap"
+basis = "FIXTURE placeholder, not the owner's value; the state-hash and replay ceiling on the largest evidence ring any mind may carry, past which the curve is clamped regardless of expressed memory"
+status = "set"
+value = "32"
+unit = "count"
+source = "dev fixture for Part 28 axiom model; crates/sim/src/axiom.rs RingCapacityLaw"
+
+[[reserved]]
+id = "reproduction.mutation_spread"
+basis = "FIXTURE placeholder, not the owner's value; the bounded half-width both the belief-seed and the mate-preference inheritance draw around the midparent at birth (a single lever, world.rs inherited_beliefs). Two hundredths of a disposition unit, small enough that a child resembles its parents yet a lineage drifts, matching the reproduction unit test's labelled fixture"
+status = "set"
+value = "0.02"
+unit = "disposition_units_half_width"
+source = "dev fixture for Part 25/28 R-REPRO; crates/sim/src/world.rs ReproductionParams::from_manifest; real-world unification step 1"
+
+# --- base-level liveliness step 2: the environmental field stack (hydrology + primary productivity).
+# FIXTURE placeholders mirroring EnvironCalib::dev_fixture (crates/sim/src/environ.rs), not owner canon.
+# The reserved fail-loud entries live in calibration/reserved.toml. ---
+
+[[reserved]]
+id = "hydrology.saturation_slope"
+basis = "MIRROR Earth calibration (Clausius-Clapeyron tangent at 288 K, in moisture-index units): the affine slope d(e_s_index)/dT of the saturation curve at the reference temperature, so the Kelvin field's cold cells drop below the advected ambient vapour and rain. The saturation index e_s_index(T) = e_s(T)/e_s(T_source) is the local saturation vapour pressure as a fraction of the world's warm vapour-source saturation (the equatorial day-side, ~315 K), the same dimensionless scale the [0,1] worldgen moisture is read on. Its fractional slope is the Clausius-Clapeyron sensitivity beta = L/(Rv*T^2) times e_ref: at 288 K, beta = 2.5e6/(461.5*288^2) = 0.0653 per K, times e_ref 0.20 gives 0.0131 per K"
+status = "set"
+value = "0.0131"
+unit = "index_per_kelvin"
+source = "Clausius-Clapeyron relation, latent heat of vaporization L=2.5e6 J/kg, water vapour gas constant Rv=461.5 J/(kg*K) (standard thermodynamic constants); crates/sim/src/environ.rs, crates/physics/src/laws.rs saturation_vapor_pressure"
+category = "per_world"
+
+# RETIRED (Arc 2, derive-vs-author): `hydrology.saturation_t_ref` derives from
+# `climate.mean_surface_temperature` (now 288 K for Mirror). See crates/sim/src/environ.rs
+# EnvironCalib::from_manifest.
+
+[[reserved]]
+id = "hydrology.saturation_e_ref"
+basis = "MIRROR Earth calibration (Clausius-Clapeyron, in moisture-index units): the saturation index e_s_index at the reference temperature 288 K, i.e. e_s(288 K)/e_s(T_source) where T_source is the world's warm vapour source (the equatorial day-side, ~315 K where moisture=1 means saturated warm air). By Clausius-Clapeyron e_s(288 K)=1.70 kPa and e_s(315 K)=8.50 kPa, so e_ref = 1.70/8.50 = 0.20. This lands e_s in the same [0,1] band the [0,1] worldgen moisture (mean 0.43) sits in, so cool and mid cells cross saturation and rain while hot cells evaporate, a balanced cycle. The moisture-index-to-vapour-pressure interpretation (moisture=1 = saturation at the warm source) is a stated modeling choice surfaced for the owner, not a derived constant; the e_ref VALUE derives from Clausius-Clapeyron once that reference is fixed"
+status = "set"
+value = "0.20"
+unit = "saturation_index"
+source = "Clausius-Clapeyron saturation vapour pressures e_s(288 K)=1.70 kPa, e_s(315 K)=8.50 kPa (L=2.5e6 J/kg, Rv=461.5 J/(kg*K)); crates/sim/src/environ.rs"
+category = "per_world"
+
+[[reserved]]
+id = "hydrology.saturation_cap"
+basis = "MIRROR Earth calibration: the representability cap on the saturation index, set above the maximum e_s_index the field reaches. The warm-source reference (T_source ~315 K) has e_s_index = 1.0 by construction, and the day-side peak can push slightly past it, so a cap of 1.5 gives headroom without binding in the normal range"
+status = "set"
+value = "1.5"
+unit = "saturation_index"
+source = "derived headroom above the moisture-source saturation index (1.0); crates/sim/src/environ.rs"
+category = "per_world"
+
+[[reserved]]
+id = "hydrology.precipitation_rate"
+basis = "FIXTURE placeholder; the fraction of the moisture-over-saturation excess that condenses to standing water per tick"
+status = "set"
+value = "0.2"
+unit = "ratio_per_tick"
+source = "dev fixture for base-level liveliness step 2 hydrology; crates/sim/src/environ.rs"
+
+[[reserved]]
+id = "hydrology.evaporation_still"
+basis = "FIXTURE placeholder; the still-air Dalton evaporation coefficient a (laws::evaporation_rate)"
+status = "set"
+value = "0.1"
+unit = "evaporation_coefficient"
+source = "dev fixture for base-level liveliness step 2 hydrology; crates/sim/src/environ.rs"
+
+[[reserved]]
+id = "hydrology.evaporation_wind"
+basis = "FIXTURE placeholder; the wind Dalton evaporation coefficient b (zero this step, the wind field is step 4)"
+status = "set"
+value = "0"
+unit = "evaporation_coefficient"
+source = "dev fixture for base-level liveliness step 2 hydrology; crates/sim/src/environ.rs"
+
+[[reserved]]
+id = "hydrology.evaporation_cap"
+basis = "FIXTURE placeholder; the representability cap on the evaporation flux"
+status = "set"
+value = "1"
+unit = "evaporation_flux"
+source = "dev fixture for base-level liveliness step 2 hydrology; crates/sim/src/environ.rs"
+
+[[reserved]]
+id = "hydrology.routing_rate"
+basis = "FIXTURE placeholder; the fraction of a cell's water that flows to its lowest neighbour per tick, the downhill advection rate that pools water in basins"
+status = "set"
+value = "0.25"
+unit = "ratio_per_tick"
+source = "dev fixture for base-level liveliness step 2 hydrology; crates/sim/src/environ.rs"
+
+[[reserved]]
+id = "productivity.water_requirement"
+basis = "FIXTURE placeholder; the water supply a cell needs for full producer productivity (the Liebig satisfaction denominator for the water factor)"
+status = "set"
+value = "0.5"
+unit = "water_depth"
+source = "dev fixture for base-level liveliness step 2 productivity; crates/sim/src/environ.rs"
+
+[[reserved]]
+id = "productivity.light_requirement"
+basis = "FIXTURE placeholder; the latitude-light supply a cell needs for full producer productivity"
+status = "set"
+value = "0.5"
+unit = "light"
+source = "dev fixture for base-level liveliness step 2 productivity; crates/sim/src/environ.rs"
+
+[[reserved]]
+id = "productivity.temperature_requirement"
+basis = "FIXTURE placeholder; the temperature a cell needs for full producer productivity (warmth supports growth up to saturation)"
+status = "set"
+value = "0.5"
+unit = "temperature"
+source = "dev fixture for base-level liveliness step 2 productivity; crates/sim/src/environ.rs"
+
+[[reserved]]
+id = "productivity.soil_requirement"
+basis = "FIXTURE placeholder; the soil-nutrient supply a cell needs for full producer productivity (the step-4 soil field refines it)"
+status = "set"
+value = "0.5"
+unit = "soil_nutrient"
+source = "dev fixture for base-level liveliness step 2 productivity; crates/sim/src/environ.rs"
+
+[[reserved]]
+id = "hydrology.max_water_depth"
+basis = "FIXTURE placeholder; the basin holding capacity, the maximum standing water a cell retains so a basin fills to a lake rather than growing without bound"
+status = "set"
+value = "4"
+unit = "water_depth"
+source = "dev fixture for base-level liveliness step 2 hydrology; crates/sim/src/environ.rs"
+
+[[reserved]]
+id = "productivity.regen_rate"
+basis = "FIXTURE placeholder; the logistic regrowth rate the standing food stock regrows toward the productivity capacity each tick (with the trophic efficiency and the drain, it fixes the carrying capacity)"
+status = "set"
+value = "0.25"
+unit = "ratio_per_tick"
+source = "dev fixture for base-level liveliness step 3; crates/sim/src/environ.rs; crates/sim/src/stocks.rs"
+
+[[reserved]]
+id = "productivity.colonization"
+basis = "FIXTURE placeholder; the colonization propagule floor a viable-but-empty cell establishes so logistic regrowth can bootstrap from nothing (a dry-start world greens as water arrives)"
+status = "set"
+value = "0.05"
+unit = "producer_biomass"
+source = "dev fixture for base-level liveliness step 3; crates/sim/src/environ.rs"
+
+[[reserved]]
+id = "salinity.weathering_rate"
+basis = "FIXTURE placeholder; the salt mass a cell gains per tick as salt leaches from rock, the salinity field source that accumulates in endorheic basins"
+status = "set"
+value = "0.002"
+unit = "salt_mass_per_tick"
+source = "dev fixture for base-level liveliness step 4; crates/sim/src/environ.rs"
+
+[[reserved]]
+id = "salinity.salt_cap"
+basis = "FIXTURE placeholder; the maximum salt mass a cell retains, so an endorheic basin saturates rather than accumulating without bound"
+status = "set"
+value = "2"
+unit = "salt_mass"
+source = "dev fixture for base-level liveliness step 4; crates/sim/src/environ.rs"
+
+[[reserved]]
+id = "salinity.dose_scale"
+basis = "FIXTURE placeholder; the multiplier from salt concentration to the bio.salinity toxin dose the harm law reads"
+status = "set"
+value = "1"
+unit = "dose_per_concentration"
+source = "dev fixture for base-level liveliness step 4; crates/sim/src/environ.rs"
+
+[[reserved]]
+id = "salinity.reference_water"
+basis = "FIXTURE placeholder; the water added when forming the salinity concentration salt/(water + reference), the dilution scale so a genome-reachable tolerance can resist a dry flat"
+status = "set"
+value = "1"
+unit = "water_depth"
+source = "dev fixture for base-level liveliness step 4; crates/sim/src/environ.rs"
+
+[[reserved]]
+id = "belief.enculturation_stubbornness"
+basis = "FIXTURE placeholder; the conserved split between a being's own conviction and its band mean when the enculturation beat drifts an intrinsic axiom stance"
+status = "set"
+value = "0.5"
+unit = "ratio"
+source = "dev fixture for base-level liveliness step 5; crates/sim/src/worldbuild.rs"
+
+[[reserved]]
+id = "belief.diffusion_rate"
+basis = "FIXTURE placeholder; the per-tick rate a seeded aggregate belief pool advances its diffusion (an armed no-op until a belief pool is seeded)"
+status = "set"
+value = "0.4"
+unit = "ratio_per_tick"
+source = "dev fixture for base-level liveliness step 5; crates/sim/src/worldbuild.rs"
+
+[[reserved]]
+id = "harm.noise_floor"
+basis = "FIXTURE placeholder; the largest per-tick reserve fall a resting, unharmed body incurs (the resting base_drain scaled to the tick), so only a supra-drain fall registers as harm (the associative learner)"
+status = "set"
+value = "0.01"
+unit = "ratio_per_tick"
+source = "dev fixture for harm-learning slice b; crates/sim/src/learn.rs"
+
+[[reserved]]
+id = "harm.feature_granularity"
+basis = "FIXTURE placeholder; the quantization step that buckets a raw feature amount into a perceived kind (the sensorium per-class just-noticeable difference), coarse enough that a salt-flat dose range buckets into one or two kinds"
+status = "set"
+value = "1"
+unit = "dose"
+source = "dev fixture for harm-learning slice b; crates/sim/src/learn.rs"
+
+[[reserved]]
+id = "harm.p_harm_given_harms"
+basis = "FIXTURE placeholder; P(the harm signal fires | this feature harms me), the fraction of ticks a naive being on a harmful cell is worn faster than it heals (the dose-and-physics harm rate)"
+status = "set"
+value = "0.9"
+unit = "probability"
+source = "dev fixture for harm-learning slice b; crates/sim/src/learn.rs"
+
+[[reserved]]
+id = "harm.p_harm_given_benign"
+basis = "FIXTURE placeholder; P(the harm signal fires | this feature is benign), the false-attribution rate of a transient reserve dip unrelated to the feature"
+status = "set"
+value = "0.1"
+unit = "probability"
+source = "dev fixture for harm-learning slice b; crates/sim/src/learn.rs"
+
+[[reserved]]
+id = "promotion.stress_threshold"
+basis = "FIXTURE placeholder; the survival-margin level below which a being is in an arc and promoted to the individual dialogue tier (half a reserve, the generous default)"
+status = "set"
+value = "0.5"
+unit = "reserve_level"
+source = "dev fixture for base-level liveliness §4; crates/sim/src/runner.rs"
+
+[[reserved]]
+id = "promotion.budget"
+basis = "FIXTURE placeholder; the maximum beings promoted to the individual dialogue tier at once, a performance bound defaulting high so the aggregate tier absorbs the rest"
+status = "set"
+value = "64"
+unit = "count"
+source = "dev fixture for base-level liveliness §4; crates/sim/src/runner.rs"
+
+# --- the opt-in learners threaded onto the canonical build path (Arc 1 gap b): the appetitive reward
+# learner, the discovery sampler, and the felt-conviction learner read their calibration fail-loud from the
+# manifest, so a scenario that declares a feature arms it here rather than the run_world example arming a
+# dev_default post-hoc. Each fixture below carries the SAME magnitude its *::dev_default fixture uses, so a
+# Development from_manifest read reproduces that field exactly; the canonical reserved.toml entries stay
+# reserved (they fail loud under Calibrated, which maps Arc 2). ONE deliberate exception: DiscoveryCalib's
+# surprise_threshold is NOT a fixture here because from_manifest DERIVES it from reward.noise_floor (its own
+# basis), so a from_manifest DiscoveryCalib reads surprise_threshold = reward.noise_floor (0.01), which
+# differs from DiscoveryCalib::dev_default's standalone 0.5; every other field reproduces dev_default exactly.
+
+[[reserved]]
+id = "reward.noise_floor"
+basis = "FIXTURE placeholder; the per-tick reserve RISE below which a change is ordinary metabolic recovery, not reward (the reward learner, the sign-mirror of harm.noise_floor)"
+status = "set"
+value = "0.01"
+unit = "ratio_per_tick"
+source = "dev fixture for the ideation/discovery arc; crates/sim/src/learn.rs"
+
+[[reserved]]
+id = "reward.feature_granularity"
+basis = "FIXTURE placeholder; the quantization step that buckets a candidate's perceived feature into a kind, the same acuity the harm learner buckets on"
+status = "set"
+value = "1"
+unit = "dose"
+source = "dev fixture for the ideation/discovery arc; crates/sim/src/learn.rs"
+
+[[reserved]]
+id = "reward.p_reward_given_rewards"
+basis = "FIXTURE placeholder; P(the reward signal fires | this action pays off), the reward mirror of harm.p_harm_given_harms"
+status = "set"
+value = "0.9"
+unit = "probability"
+source = "dev fixture for the ideation/discovery arc; crates/sim/src/learn.rs"
+
+[[reserved]]
+id = "reward.p_reward_given_neutral"
+basis = "FIXTURE placeholder; P(the reward signal fires | this action is neutral), the false-attribution rate, the reward mirror of harm.p_harm_given_benign"
+status = "set"
+value = "0.1"
+unit = "probability"
+source = "dev fixture for the ideation/discovery arc; crates/sim/src/learn.rs"
+
+[[reserved]]
+id = "reward.eligibility_decay"
+basis = "FIXTURE placeholder; the temporal-difference lambda the reward eligibility trace decays by each tick, so a reserve rise felt some ticks after an action still credits it"
+status = "set"
+value = "0.5"
+unit = "ratio_per_tick"
+source = "dev fixture for the ideation/discovery arc; crates/sim/src/learn.rs"
+
+[[reserved]]
+id = "harm.eligibility_decay"
+basis = "FIXTURE placeholder; the temporal-difference lambda the being-signal harm eligibility trace decays by each tick, so a being-signal perceived some ticks before a harm still credits it (the predator-approach cue)"
+status = "set"
+value = "0.5"
+unit = "ratio_per_tick"
+source = "being-percept keystone step 6; crates/sim/src/learn.rs"
+
+[[reserved]]
+id = "being_percept.emission_coefficient"
+basis = "FIXTURE placeholder; the per-being emission coupling coefficient the emitter's thermal self-emission is scaled by (radiant_emission(body_temp) times this), the fraction of a being's blackbody radiant power that couples into the perceptible signal channel"
+status = "set"
+value = "0.5"
+unit = "dimensionless"
+source = "being-percept keystone step 6; crates/sim/src/physiology.rs; crates/sim/src/learn.rs"
+
+[[reserved]]
+id = "discovery.exploration_floor"
+basis = "FIXTURE placeholder; the baseline probability of trying a non-top-belief binding, so a being still explores when it already has a rewarded habit (the exploration-versus-exploitation floor)"
+status = "set"
+value = "0.25"
+unit = "weight_ratio"
+source = "dev fixture for the ideation/discovery arc; crates/sim/src/discovery.rs"
+
+[[reserved]]
+id = "discovery.surprise_gain"
+basis = "FIXTURE placeholder; the exploration variance gain, how much a unit of surprise lifts a being's effective exploration propensity above its heritable base (multiplicative, so founder-zero holds)"
+status = "set"
+value = "1"
+unit = "lift_ratio"
+source = "dev fixture for the ideation/discovery arc; crates/sim/src/discovery.rs"
+
+[[reserved]]
+id = "discovery.target_value_granularity"
+basis = "FIXTURE placeholder; the quantization step that buckets a candidate's perceived affordance value into a coarse kind, read only when a world arms granular beliefs"
+status = "set"
+value = "1"
+unit = "dose"
+source = "dev fixture for the ideation/discovery arc; crates/sim/src/discovery.rs"
+
+[[reserved]]
+id = "planning.depth_cap"
+basis = "FIXTURE placeholder; the maximum number of beliefs a being's deliberative plan considers toward a goal, a per-tick cognition budget"
+status = "set"
+value = "8"
+unit = "count"
+source = "dev fixture for the ideation/discovery arc; crates/sim/src/planning.rs"
+
+[[reserved]]
+id = "planning.hop_cap"
+basis = "FIXTURE placeholder; the longest inferential chain a being follows when it plans through its relational beliefs, a per-tick cognition budget"
+status = "set"
+value = "4"
+unit = "count"
+source = "dev fixture for the ideation/discovery arc; crates/sim/src/planning.rs"
+
+[[reserved]]
+id = "felt_conviction.retention"
+basis = "FIXTURE placeholder; the retention (leak) per felt event applied to each conviction-experience accumulator, so the record tracks recent lived valence and stays defeasible (~11-tick half-life, deliberately slower than the reward learner's action-eligibility decay)"
+status = "set"
+value = "0.9375"
+unit = "ratio_per_tick"
+source = "dev fixture for the experiential-conviction substrate; crates/sim/src/conviction_experience.rs"
+
+[[reserved]]
+id = "felt_conviction.move_threshold"
+basis = "FIXTURE placeholder; the entrenchment gate the felt drive must clear to move a conviction (the flat dev interim of the entrenchment-scaled gate)"
+status = "set"
+value = "0.01"
+unit = "stance_scale"
+source = "dev fixture for the experiential-conviction substrate; crates/sim/src/conviction_experience.rs"
+
+[[reserved]]
+id = "felt_conviction.move_plasticity"
+basis = "FIXTURE placeholder; the step scale of the felt-experience move, the fraction of the gap to the target pole closed per unit of cleared pressure (the dev interim of the belief-plasticity phenotype)"
+status = "set"
+value = "0.25"
+unit = "ratio"
+source = "dev fixture for the experiential-conviction substrate; crates/sim/src/conviction_experience.rs"
+
+# --- MIRROR tissue energy densities (biology floor bio.energy_density, in kJ/g): the real Atwater gross
+# energy densities of the three energy-bearing organ tissues, read by the Mirror organ registry
+# (run_world.rs mirror_organs) to replace the abstract dev-fixture placeholder fractions (fat-body 1.0,
+# glycogen-store 0.75, generalist-viscera 0.5) that were never on a real kJ/g scale. Only the Mirror/living
+# path reads these; the four canonical pins use the hardcoded dev_default registry, so they are untouched.
+# The Atwater general factor system: fat 9 kcal/g, carbohydrate 4 kcal/g, protein 4 kcal/g, at 4.184 kJ/kcal.
+# Water-store (0) and muscle (no energy tissue) are unchanged; mana-sac is fantasy and absent from Mirror. ---
+
+[[reserved]]
+id = "biology.tissue_energy_density.adipose"
+basis = "MIRROR Earth calibration: the gross energy density of adipose (fat-body) tissue, the being's dense energy store. 9 kcal/g * 4.184 kJ/kcal = 37.7 kJ/g, rounded to 37"
+status = "set"
+value = "37"
+unit = "kilojoule_per_gram"
+source = "Atwater general factor system, fat 9 kcal/g (Merrill & Watt 1955/1973, USDA Agriculture Handbook No. 74, 'Energy Value of Foods'); crates/sim/src/anatomy.rs fat-body organ bio.energy_density"
+category = "per_world"
+
+[[reserved]]
+id = "biology.tissue_energy_density.glycogen"
+basis = "MIRROR Earth calibration: the gross energy density of glycogen/carbohydrate (glycogen-store) tissue. 4 kcal/g * 4.184 kJ/kcal = 16.7 kJ/g, rounded to 17. The real carbohydrate-to-fat ratio 17/37 = 0.46, not the placeholder 0.75"
+status = "set"
+value = "17"
+unit = "kilojoule_per_gram"
+source = "Atwater general factor system, carbohydrate 4 kcal/g (Merrill & Watt 1955/1973, USDA Agriculture Handbook No. 74); crates/sim/src/anatomy.rs glycogen-store organ bio.energy_density"
+category = "per_world"
+
+[[reserved]]
+id = "biology.tissue_energy_density.lean"
+basis = "MIRROR Earth calibration: the gross energy density of lean (generalist-viscera) tissue, mostly protein and water. Protein 4 kcal/g * 4.184 = 16.7 kJ/g on a dry basis, diluted by a lean organ's ~75 percent water fraction to about 4 kJ/g whole-tissue"
+status = "set"
+value = "4"
+unit = "kilojoule_per_gram"
+source = "Atwater protein 4 kcal/g (Merrill & Watt 1955/1973, USDA Agriculture Handbook No. 74) diluted by USDA lean-tissue composition water fraction; crates/sim/src/anatomy.rs generalist-viscera organ bio.energy_density"
+category = "per_world"
