@@ -1538,39 +1538,40 @@ pub fn saturation_vapor_pressure(
     e_ref.saturating_add(term).clamp(ZERO, es_cap)
 }
 
-/// The latent heat of vaporization L_vap (J/kg) DERIVED from the saturation curve's own slope through the
-/// Clausius-Clapeyron relation `de_s/dT = L_vap * e_s / (R_v * T^2)`, rearranged at the reference point to
-/// `L_vap = R_v * T_ref^2 * (slope / e_ref)` where `slope = de_s/dT` and `e_ref = e_s(T_ref)` are the affine
-/// tangent's own coefficients (`saturation_vapor_pressure`). `R_v` is the substance's specific gas constant
-/// (the universal gas constant over its molar mass). This makes L_vap a CONSEQUENCE of the one measured
-/// saturation curve rather than a second independently-authored datum, dissolving the double-authoring: the
-/// curve is the single measured primitive, L_vap reads out of its slope. A zero or non-positive `e_ref` (a
-/// degenerate curve) yields zero, and an overflow saturates, matching the surrounding laws' fail-safe branches.
-pub fn latent_heat_from_clausius_clapeyron(
-    slope: Fixed,
+/// The saturation curve's affine-tangent SLOPE `de_s/dT` (MPa/K) DERIVED from the calorimetric latent heat of
+/// vaporization through the Clausius-Clapeyron relation `de_s/dT = L_vap * e_s / (R_v * T^2)`, evaluated at the
+/// reference point as `slope = L_vap * e_ref / (R_v * T_ref^2)`. The latent heat `L_vap` is the MEASURED
+/// primitive (calorimetry, the floor's `therm.latent_heat` axis, independent of the vapour curve), `e_ref` is a
+/// cited reference vapour pressure (a substance datum, e.g. water's triple point), and `R_v` is the substance's
+/// specific gas constant (the universal gas constant over its molar mass). This is the NON-CIRCULAR direction:
+/// the curve derives from an independently-measured latent heat plus one reference point, so no coefficient is
+/// authored twice. A zero or non-positive `r_vapor` or `t_ref` (a degenerate substance) yields zero, and an
+/// overflow saturates, matching the surrounding laws' fail-safe branches.
+pub fn saturation_slope_from_latent_heat(
+    latent_heat: Fixed,
     t_ref: Fixed,
     e_ref: Fixed,
     r_vapor: Fixed,
 ) -> Fixed {
-    if e_ref <= ZERO {
+    if r_vapor <= ZERO || t_ref <= ZERO {
         return ZERO;
     }
-    // Order chosen to keep every intermediate in Q32.32 range: R_v*T_ref^2 is order 1e7 for a Terran water
-    // world, then *slope (order 1e-4 MPa/K) lands near the deficit magnitude, then /e_ref (order 1e-3 MPa)
-    // recovers the J/kg latent heat. The MPa units of slope and e_ref cancel, leaving R_v*T^2 in J/kg.
+    // Order chosen to keep every intermediate in Q32.32 range: L_vap*e_ref is order 1e3 (J/kg times the
+    // reference MPa), R_v*T_ref^2 is order 1e7, and their ratio is the MPa/K slope near 1e-4. The J/kg of
+    // L_vap and the 1/(J/kg) of R_v*T^2/e_ref cancel, leaving the MPa/K per-kelvin sensitivity.
+    let num = match latent_heat.checked_mul(e_ref) {
+        Some(x) => x,
+        None => return Fixed::MAX,
+    };
     let t2 = match t_ref.checked_mul(t_ref) {
         Some(x) => x,
         None => return Fixed::MAX,
     };
-    let rt2 = match r_vapor.checked_mul(t2) {
+    let den = match r_vapor.checked_mul(t2) {
         Some(x) => x,
         None => return Fixed::MAX,
     };
-    let num = match rt2.checked_mul(slope) {
-        Some(x) => x,
-        None => return Fixed::MAX,
-    };
-    num.checked_div(e_ref).unwrap_or(Fixed::MAX)
+    num.checked_div(den).unwrap_or(Fixed::MAX)
 }
 
 /// Evaporation mass flux E = (a + b*|u|)*(e_s - e_a) (kg/(m^2*s)), the Dalton bulk aerodynamic proxy.
@@ -3988,35 +3989,38 @@ mod tests {
     }
 
     #[test]
-    fn latent_heat_derives_from_the_saturation_slope_by_clausius_clapeyron() {
-        // The physical saturation tangent for water near 15 C (288 K), in MPa: e_ref = e_s(288 K) ~ 1.705e-3
-        // MPa (Buck), slope = de_s/dT ~ 1.093e-4 MPa/K, with the water-vapour specific gas constant R_v ~
-        // 461.5 J/(kg K). Clausius-Clapeyron gives L_vap = R_v * T_ref^2 * slope / e_ref, which must recover
-        // the measured latent heat near 2.454e6 J/kg (the CRC 20 C datum), the cross-check that proves the
-        // curve and the retired therm.latent_heat are consistent rather than double-authored.
-        // Integer-only assertions (the canonical kernel module admits no float, steering.rs): the derived
-        // L_vap is bounded to a narrow J/kg window around 2.454e6, and the monotonicity is a Fixed compare.
-        let slope = Fixed::from_ratio(1093, 10_000_000);
-        let t_ref = Fixed::from_int(288);
-        let e_ref = Fixed::from_ratio(1705, 1_000_000);
+    fn the_saturation_slope_derives_from_the_calorimetric_latent_heat() {
+        // The non-circular direction (the derivation-hunt's inversion): the calorimetric latent heat is the
+        // measured primitive and the curve slope derives from it plus one reference vapour point. For water
+        // anchored at its triple point (e_ref = 611.657 Pa = 6.11657e-4 MPa at T_ref = 273.16 K), with
+        // L = 2.454e6 J/kg (therm.latent_heat) and R_v ~ 461.5 J/(kg K), slope = L*e_ref/(R_v*T_ref^2) lands
+        // near 4.36e-5 MPa/K, the physical Clausius-Clapeyron sensitivity there.
+        // Integer-only assertions (the canonical kernel module admits no float, steering.rs).
+        let latent_heat = Fixed::from_int(2_454_000);
+        let t_ref = Fixed::from_ratio(27316, 100);
+        let e_ref = Fixed::from_ratio(611657, 1_000_000_000);
         let r_vapor = Fixed::from_ratio(923, 2);
-        let l_vap = latent_heat_from_clausius_clapeyron(slope, t_ref, e_ref, r_vapor);
+        let slope = saturation_slope_from_latent_heat(latent_heat, t_ref, e_ref, r_vapor);
         assert!(
-            l_vap > Fixed::from_int(2_449_000) && l_vap < Fixed::from_int(2_459_000),
-            "L_vap derives to ~2.454e6 J/kg from the curve slope"
+            slope > Fixed::from_ratio(43, 1_000_000) && slope < Fixed::from_ratio(44, 1_000_000),
+            "the slope derives to ~4.36e-5 MPa/K from the calorimetric latent heat"
         );
-        // A steeper curve (larger slope) implies a larger latent heat, monotonic in the slope.
-        let steeper =
-            latent_heat_from_clausius_clapeyron(slope.saturating_add(slope), t_ref, e_ref, r_vapor);
+        // A larger latent heat implies a steeper saturation curve, monotonic in L.
+        let steeper = saturation_slope_from_latent_heat(
+            latent_heat.saturating_add(latent_heat),
+            t_ref,
+            e_ref,
+            r_vapor,
+        );
         assert!(
-            steeper > l_vap,
-            "a steeper saturation slope reads a larger L_vap"
+            steeper > slope,
+            "a larger latent heat reads a steeper saturation slope"
         );
-        // A degenerate zero-e_ref curve yields zero rather than dividing by zero.
+        // A degenerate zero specific-gas-constant substance yields zero rather than dividing by zero.
         assert_eq!(
-            latent_heat_from_clausius_clapeyron(slope, t_ref, ZERO, r_vapor),
+            saturation_slope_from_latent_heat(latent_heat, t_ref, e_ref, ZERO),
             ZERO,
-            "a zero reference saturation pressure yields zero, no division by zero"
+            "a zero specific gas constant yields zero, no division by zero"
         );
     }
 
