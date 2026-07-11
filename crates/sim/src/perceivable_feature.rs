@@ -77,6 +77,17 @@ pub struct PerceivableFeatureDef {
     pub id: PerceivableFeatureId,
     /// The single chem/optics floor optical axis this channel reads off the emitter's surface material.
     pub axis: String,
+    /// The number of DISCRIMINATION BUCKETS the shared controller layout carries for this channel: the count
+    /// of fixed toward-direction slots a perceiver's per-bucket response weights key on. The controller layout
+    /// is shared across the whole population, so this count is a per-CHANNEL layout constant, not a per-being
+    /// quantity: a perceiver's own just-noticeable-difference maps a perceived feature-value into one of these
+    /// buckets (a coarser-JND being effectively collapses adjacent buckets, reading a wider band as one), while
+    /// the layout keeps this fixed number of slots. RESERVED, per_world, surfaced with basis when a world arms
+    /// a channel, never fabricated: its basis is the axis's floor value range divided by the finest JND the
+    /// world's perceivers resolve on that axis, a granularity/representability bound (enough buckets that the
+    /// finest discriminator's distinguishable levels each get a slot). Zero buckets means the channel is read
+    /// but carries no controller response slots.
+    pub buckets: u16,
 }
 
 /// The set of emitter optical properties a world's perceivers can sense on a being-signal, data-defined and
@@ -98,16 +109,19 @@ impl PerceivableFeatureRegistry {
         }
     }
 
-    /// A registry over an explicit ordered list of floor optical axis ids, ids assigned by position
-    /// (0, 1, ...). The order is the canonical channel order; a world declares the single-axis properties its
-    /// perceivers can sense as data. Each entry is ONE axis: to sense several, list several, never fold them.
-    pub fn from_axes(axes: &[&str]) -> PerceivableFeatureRegistry {
-        let channels = axes
+    /// A registry over an explicit ordered list of (floor optical axis id, discrimination bucket count) pairs,
+    /// ids assigned by position (0, 1, ...). The order is the canonical channel order; a world declares the
+    /// single-axis properties its perceivers can sense, and each channel's shared-layout bucket count, as data.
+    /// Each entry is ONE axis: to sense several, list several, never fold them. The bucket count is per_world
+    /// reserved-with-basis (see [`PerceivableFeatureDef::buckets`]).
+    pub fn from_channels(channels: &[(&str, u16)]) -> PerceivableFeatureRegistry {
+        let channels = channels
             .iter()
             .enumerate()
-            .map(|(i, &axis)| PerceivableFeatureDef {
+            .map(|(i, &(axis, buckets))| PerceivableFeatureDef {
                 id: PerceivableFeatureId(i as u16),
                 axis: axis.to_string(),
+                buckets,
             })
             .collect();
         PerceivableFeatureRegistry { channels }
@@ -126,6 +140,17 @@ impl PerceivableFeatureRegistry {
     /// Whether the registry declares no channels (the opt-out: the controller grows no being-feature block).
     pub fn is_empty(&self) -> bool {
         self.channels.is_empty()
+    }
+
+    /// The width the controller's being-FEATURE input block adds: TWO slots (a toward-direction `(dx, dy)`
+    /// pair) per discrimination bucket per channel, summed over the channels. Each `(channel, bucket)` pair
+    /// carries the unit toward-direction over the perceived emitters whose feature on that channel falls in
+    /// that bucket, and the perceiver's heritable freely-signed weight on that pair sets its response sign, so
+    /// the toward-or-away disposition per feature-bucket emerges from selection (the B2 per-bucket
+    /// discrimination). ZERO for an empty registry, so the controller layout and every run hash are unchanged
+    /// (the opt-in default).
+    pub fn layout_width(&self) -> usize {
+        self.channels.iter().map(|c| 2 * c.buckets as usize).sum()
     }
 
     /// The raw emitter feature vector for the emitter whose body plan is `plan`: its surface value on each
@@ -191,6 +216,9 @@ mod tests {
         let reg = PerceivableFeatureRegistry::empty();
         assert!(reg.is_empty());
         assert_eq!(reg.len(), 0);
+        // The controller being-feature block is zero-width, so an opted-out world's layout and hash are
+        // unchanged (the byte-neutral opt-in default).
+        assert_eq!(reg.layout_width(), 0);
         // Even for an emitter carrying optical axes, an empty registry produces an empty feature vector, so the
         // controller grows no block and the run is bit-identical (the opt-in default).
         let (bodyplan, plan) = emitter_with_optics();
@@ -200,9 +228,13 @@ mod tests {
     #[test]
     fn it_reads_each_declared_axis_directly_in_canonical_order_no_composite() {
         let (bodyplan, plan) = emitter_with_optics();
-        let reg =
-            PerceivableFeatureRegistry::from_axes(&["opt.emissivity", "opt.refractive_index"]);
+        let reg = PerceivableFeatureRegistry::from_channels(&[
+            ("opt.emissivity", 4),
+            ("opt.refractive_index", 4),
+        ]);
         assert_eq!(reg.len(), 2);
+        // Two channels, four buckets each, a (dx, dy) pair per bucket: the layout adds 2 * 4 * 2 = 16 slots.
+        assert_eq!(reg.layout_width(), 16);
         // The vector follows registry (declaration) order, each entry the raw direct read of that ONE axis:
         // emissivity 0.9 then refractive index 1.5, side by side, never folded into one signature scalar.
         assert_eq!(
@@ -215,7 +247,8 @@ mod tests {
     fn an_axis_the_surface_does_not_declare_reads_zero_and_admits_the_alien() {
         let (bodyplan, plan) = emitter_with_optics();
         // A channel on an axis the covering does not carry reads ZERO (the feature is absent, not defaulted).
-        let reg = PerceivableFeatureRegistry::from_axes(&["opt.emissivity", "opt.albedo"]);
+        let reg =
+            PerceivableFeatureRegistry::from_channels(&[("opt.emissivity", 4), ("opt.albedo", 4)]);
         assert_eq!(
             reg.read_emitter(&plan, &bodyplan),
             vec![Fixed::from_ratio(9, 10), Fixed::ZERO]
