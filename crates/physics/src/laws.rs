@@ -1538,6 +1538,41 @@ pub fn saturation_vapor_pressure(
     e_ref.saturating_add(term).clamp(ZERO, es_cap)
 }
 
+/// The latent heat of vaporization L_vap (J/kg) DERIVED from the saturation curve's own slope through the
+/// Clausius-Clapeyron relation `de_s/dT = L_vap * e_s / (R_v * T^2)`, rearranged at the reference point to
+/// `L_vap = R_v * T_ref^2 * (slope / e_ref)` where `slope = de_s/dT` and `e_ref = e_s(T_ref)` are the affine
+/// tangent's own coefficients (`saturation_vapor_pressure`). `R_v` is the substance's specific gas constant
+/// (the universal gas constant over its molar mass). This makes L_vap a CONSEQUENCE of the one measured
+/// saturation curve rather than a second independently-authored datum, dissolving the double-authoring: the
+/// curve is the single measured primitive, L_vap reads out of its slope. A zero or non-positive `e_ref` (a
+/// degenerate curve) yields zero, and an overflow saturates, matching the surrounding laws' fail-safe branches.
+pub fn latent_heat_from_clausius_clapeyron(
+    slope: Fixed,
+    t_ref: Fixed,
+    e_ref: Fixed,
+    r_vapor: Fixed,
+) -> Fixed {
+    if e_ref <= ZERO {
+        return ZERO;
+    }
+    // Order chosen to keep every intermediate in Q32.32 range: R_v*T_ref^2 is order 1e7 for a Terran water
+    // world, then *slope (order 1e-4 MPa/K) lands near the deficit magnitude, then /e_ref (order 1e-3 MPa)
+    // recovers the J/kg latent heat. The MPa units of slope and e_ref cancel, leaving R_v*T^2 in J/kg.
+    let t2 = match t_ref.checked_mul(t_ref) {
+        Some(x) => x,
+        None => return Fixed::MAX,
+    };
+    let rt2 = match r_vapor.checked_mul(t2) {
+        Some(x) => x,
+        None => return Fixed::MAX,
+    };
+    let num = match rt2.checked_mul(slope) {
+        Some(x) => x,
+        None => return Fixed::MAX,
+    };
+    num.checked_div(e_ref).unwrap_or(Fixed::MAX)
+}
+
 /// Evaporation mass flux E = (a + b*|u|)*(e_s - e_a) (kg/(m^2*s)), the Dalton bulk aerodynamic proxy.
 /// Returns the evaporation source when the vapour-pressure deficit is positive; a non-positive deficit
 /// is the condensation case and reads zero here (the sink is the caller's sign-flipped difference).
@@ -3949,6 +3984,39 @@ mod tests {
             ),
             ZERO,
             "an out-of-domain negative flux clamps to the zero floor"
+        );
+    }
+
+    #[test]
+    fn latent_heat_derives_from_the_saturation_slope_by_clausius_clapeyron() {
+        // The physical saturation tangent for water near 15 C (288 K), in MPa: e_ref = e_s(288 K) ~ 1.705e-3
+        // MPa (Buck), slope = de_s/dT ~ 1.093e-4 MPa/K, with the water-vapour specific gas constant R_v ~
+        // 461.5 J/(kg K). Clausius-Clapeyron gives L_vap = R_v * T_ref^2 * slope / e_ref, which must recover
+        // the measured latent heat near 2.454e6 J/kg (the CRC 20 C datum), the cross-check that proves the
+        // curve and the retired therm.latent_heat are consistent rather than double-authored.
+        let slope = Fixed::from_ratio(1093, 10_000_000);
+        let t_ref = Fixed::from_int(288);
+        let e_ref = Fixed::from_ratio(1705, 1_000_000);
+        let r_vapor = Fixed::from_ratio(923, 2);
+        let l_vap =
+            latent_heat_from_clausius_clapeyron(slope, t_ref, e_ref, r_vapor).to_f64_lossy();
+        assert!(
+            (l_vap - 2.454e6).abs() < 5.0e3,
+            "L_vap derives to ~2.454e6 J/kg from the curve slope, got {l_vap}"
+        );
+        // A steeper curve (larger slope) implies a larger latent heat, monotonic in the slope.
+        let steeper =
+            latent_heat_from_clausius_clapeyron(slope.saturating_add(slope), t_ref, e_ref, r_vapor)
+                .to_f64_lossy();
+        assert!(
+            steeper > l_vap,
+            "a steeper saturation slope reads a larger L_vap"
+        );
+        // A degenerate zero-e_ref curve yields zero rather than dividing by zero.
+        assert_eq!(
+            latent_heat_from_clausius_clapeyron(slope, t_ref, ZERO, r_vapor),
+            ZERO,
+            "a zero reference saturation pressure yields zero, no division by zero"
         );
     }
 
