@@ -14699,4 +14699,355 @@ values = [
             "the corpse-intake experiment is deterministic"
         );
     }
+
+    /// The TWO-WAY-SORT arena (#150, the 2b per-feature discrimination proof): the mirror of #144, #146, and
+    /// #148 extended to TWO feature buckets read as a two-way sort. A perceiver keys on each perceived emitter's
+    /// own surface optical feature (`opt.emissivity.band_1` off its covering, `read_emitter`), binned by its own
+    /// resolution into a bucket, and steers its MOVE heading per (channel, bucket) through its OWN founder-zero
+    /// symmetric freely-signed per-bucket weight (`being_feature_input_base`). Two emitter types carry
+    /// DISTINGUISHING coverings and OPPOSITE fitness consequences: a WOUNDING predator (covering kind 4, chitin,
+    /// `band_1` 0.88 -> bucket 17) that culls a co-located perceiver through the one INTEGRITY cull, and a PREY
+    /// emitter (covering kind 0, bare hide, `band_1` 0.96 -> bucket 19) whose cell carries food, so co-locating
+    /// there refills the perceiver's energy and keeps it reproduction-eligible. Selection drives the two per-
+    /// bucket weights to OPPOSITE poles: the predator's bucket (17) to the AVOID pole (a perceiver that heads
+    /// toward it is wounded), the prey's bucket (19) to the APPROACH pole (a perceiver that heads toward it is
+    /// fed and breeds). `distinguishable` is the matched control: when false the predator ALSO wears covering
+    /// kind 0, so both emitter types fall in ONE bucket (19) and the sort collapses to a single net disposition
+    /// the perceiver cannot resolve into approach-one, avoid-the-other. Returns the population-mean prey-bucket
+    /// (19) weight, the mean predator-bucket (17) weight, and the surviving perceiver count. The feature is the
+    /// emitter's own covering datum, the discrimination the perceiver's own resolution, the weights founder-zero
+    /// symmetric; nothing about predator or prey identity is authored.
+    fn two_way_sort_arena(
+        distinguishable: bool,
+        generations: u64,
+        verbose: bool,
+    ) -> (Fixed, Fixed, usize) {
+        use crate::contact_transfer::ContactTransferRegistry;
+        use crate::homeostasis::{HomeostaticAxisDef, HomeostaticRegistry, INTEGRITY};
+        use crate::learn::BeingPerceptField;
+        use crate::material::StrikeParams;
+        use crate::medium::MediumField;
+        use crate::perceivable_feature::PerceivableFeatureRegistry;
+        let ax =
+            |id, name: &str, backing: Option<&str>, drain: Fixed, floor: i32| HomeostaticAxisDef {
+                id,
+                name: name.to_string(),
+                backing_component: backing.map(|s| s.to_string()),
+                capacity_per_mass: Fixed::ONE,
+                base_drain: drain,
+                exertion_drain: Fixed::ZERO,
+                death_floor: Fixed::from_int(floor),
+                draw_set: Vec::new(),
+            };
+        let homeo = HomeostaticRegistry {
+            axes: vec![
+                // ENERGY drains slowly but NEVER floors (death is only the predator's wound): the prey's food is
+                // the only refill, and refill is what keeps a perceiver above the reproduction-eligibility
+                // reserve, so APPROACHING the prey pays through breeding. TEMPERATURE never floors. INTEGRITY
+                // floors at zero, so the predator's whole-body wound is the ONLY death (APPROACHING the predator
+                // is lethal). Two opposite fitness consequences on two feature-distinguished emitters.
+                ax(
+                    ENERGY,
+                    "energy",
+                    Some(crate::physiology::ENERGY_DENSITY),
+                    Fixed::from_ratio(1, 12),
+                    -1000,
+                ),
+                ax(TEMPERATURE, "temperature", None, Fixed::ZERO, -1000),
+                ax(INTEGRITY, "integrity", None, Fixed::ZERO, 0),
+            ],
+        };
+        let organs = BodyPlanRegistry::dev_default();
+        let mut emb = Embodiment::new(
+            homeo.clone(),
+            AffordanceRegistry::dev_predator_geophage(),
+            LocomotionParams::dev_default(),
+            0,
+            0x2B_50_27_11,
+        );
+        // Physiology armed (the being-feature perceive pass reads the embodiment's organs for `read_emitter`,
+        // runner.rs:6217, and the perceive path is gated on physiology): the medium sits at the comfort set
+        // point so thermoregulation is cheap and the metabolic drain does not dominate the ENERGY axis's flat
+        // base drain.
+        emb.set_physiology(EmbodiedPhysiology::dev_fixture(
+            organs.clone(),
+            MediumField::uniform(
+                24,
+                24,
+                Fixed::ONE,
+                Fixed::ONE,
+                Fixed::ONE,
+                Fixed::from_int(310),
+            ),
+        ));
+        emb.set_strike(StrikeParams::dev_fixture());
+        emb.set_contact_transfer(ContactTransferRegistry::dev_terran());
+        emb.set_being_field(Some(BeingPerceptField::dev_fixture()));
+        emb.set_being_percept(true);
+        emb.set_creature_being_percept(true);
+        // The per-feature channel: one channel over the covering's `opt.emissivity.band_1` surface axis, 20
+        // buckets, step 0.05. A bare-hide covering (kind 0, band_1 0.96) discriminates into bucket 19; a chitin
+        // covering (kind 4, band_1 0.88) into bucket 17. The bucket boundaries are the ARENA's parameter (a
+        // reserved per-sensorium resolution when this channel is armed in a shipped scenario, flagged); here
+        // they set the two emitter types apart so the sort has a feature to key on.
+        emb.set_being_features(PerceivableFeatureRegistry::from_channels(&[(
+            "opt.emissivity.band_1",
+            20,
+            Fixed::from_ratio(1, 20),
+        )]));
+        emb.set_creature_selection(Some(CreatureSelectionParams {
+            mint_perturbation_spread: Fixed::from_decimal_str("0.05").unwrap(),
+            reproduction_eligibility_reserve: Fixed::from_ratio(7, 10),
+            offspring_mutation_spread: Fixed::from_decimal_str("0.02").unwrap(),
+        }));
+        let layout = emb.layout().clone();
+        let n_in = layout.n_in();
+        let move_base = layout.output_base(crate::homeostasis::MOVE).unwrap();
+        let ingest_base = layout.output_base(crate::homeostasis::INGEST).unwrap();
+        let bf = layout.being_feature_input_base();
+        let bias = n_in - 1;
+        let energy_here = layout.axis_input_base(ENERGY).unwrap() + 1;
+        // The two feature buckets the two emitter types fall in: prey (bare hide) -> 19, predator (chitin) -> 17.
+        let prey_bucket = 19usize;
+        let pred_bucket = 17usize;
+        // The SELECTED traits: the MOVE heading on the prey-bucket (dx, dy) and the predator-bucket (dx, dy)
+        // toward-directions. A positive weight heads toward that bucket's emitters, a negative away. Seeded
+        // symmetric zero-mean below (each founder carries one of the four sign combinations), so the population
+        // mean of each starts at zero and selection alone can move them; nothing about which bucket is approach
+        // versus avoid is authored. MOVE fires from the bias, and is suppressed and INGEST fired when food is
+        // underfoot (the baseline eat, common to every being), so a perceiver that reaches the prey's food EATS.
+        let sort_weights = |prey_sign: i64, pred_sign: i64| -> Vec<Fixed> {
+            let mut w = vec![Fixed::ZERO; layout.weight_count()];
+            w[move_base * n_in + bias] = Fixed::ONE; // MOVE activation from the bias (wants to move)
+            w[move_base * n_in + energy_here] = Fixed::from_int(-2); // stop moving when food is underfoot
+            w[ingest_base * n_in + energy_here] = Fixed::from_int(8); // eat when food is underfoot (baseline)
+            let ps = Fixed::from_int(8 * prey_sign as i32);
+            let ds = Fixed::from_int(8 * pred_sign as i32);
+            w[(move_base + 1) * n_in + (bf + 2 * prey_bucket)] = ps; // prey-bucket dx heading
+            w[(move_base + 2) * n_in + (bf + 2 * prey_bucket + 1)] = ps; // prey-bucket dy heading
+            w[(move_base + 1) * n_in + (bf + 2 * pred_bucket)] = ds; // predator-bucket dx heading
+            w[(move_base + 2) * n_in + (bf + 2 * pred_bucket + 1)] = ds; // predator-bucket dy heading
+            w
+        };
+        let thermal = || BeingThermal {
+            setpoint: Fixed::from_int(310),
+            half_band: Fixed::from_int(30),
+            initial_temp: Fixed::from_int(310),
+        };
+        // A perceiver body: bare hide (kind 0, its OWN covering is irrelevant, only an emitter's is read) plus a
+        // fat-body organ (kind 0) so a bred offspring gets a real ENERGY reserve (`Homeostasis::new` sizes it
+        // from the organs) and the adaptive lineage can compound, the #148 lesson.
+        let perceiver_body = || {
+            let mut b = repro_body();
+            b.covering = crate::anatomy::Part {
+                kind: 0,
+                development: Fixed::from_ratio(1, 2),
+            };
+            b.organs = vec![crate::anatomy::Part {
+                kind: 0,
+                development: Fixed::ONE,
+            }];
+            b
+        };
+        // A body wearing a chosen covering (for the two emitter types), no fat-body organ needed (they do not
+        // breed; they carry no heritable lineage, so `carries_lineage` excludes them from the beat).
+        let emitter_body = |covering: u16| {
+            let mut b = repro_body();
+            b.covering = crate::anatomy::Part {
+                kind: covering,
+                development: Fixed::from_ratio(1, 2),
+            };
+            b
+        };
+        // Seed the perceiver founders co-located at the centre, symmetric across the FOUR sign combinations of
+        // (prey-bucket weight, predator-bucket weight), so each per-bucket weight has population mean zero.
+        let start = Coord3::ground(12, 8);
+        let n_founders = 16u64;
+        for k in 0..n_founders {
+            let prey_sign: i64 = if k % 2 == 0 { 1 } else { -1 };
+            let pred_sign: i64 = if (k / 2) % 2 == 0 { 1 } else { -1 };
+            let ctrl = Controller::from_weights(
+                n_in,
+                layout.n_out(),
+                layout.hidden(),
+                sort_weights(prey_sign, pred_sign),
+            );
+            emb.add(
+                Walker::new(
+                    StableId(CREATURE_ID_TAG | (k + 1)),
+                    start,
+                    perceiver_body(),
+                    Homeostasis::from_mass(&homeo, Fixed::ONE),
+                    Physiology::dev_for_registry(&homeo),
+                    ctrl.clone(),
+                )
+                .with_lineage(ctrl),
+                thermal(),
+            );
+        }
+        // The PREY emitter (bare hide, kind 0 -> bucket 19), a blank-controller walker that stays put, placed
+        // WEST with food at its cell; approaching it (heading toward bucket 19) reaches the food.
+        let prey_cell = Coord3::ground(6, 8);
+        emb.add(
+            Walker::new(
+                StableId(CREATURE_ID_TAG | 900),
+                prey_cell,
+                emitter_body(0),
+                Homeostasis::from_mass(&homeo, Fixed::ONE),
+                Physiology::dev_for_registry(&homeo),
+                Controller::zeros(&layout),
+            ),
+            thermal(),
+        );
+        let params = crate::InferenceParams {
+            clamp: Fixed::from_int(50),
+            commit_threshold: Fixed::from_int(3),
+            margin: Fixed::from_int(1),
+        };
+        let cadence = 6u64;
+        let mut world = World::new(params, params, crate::AccessWeights::from_pairs([]));
+        world.set_life_cadence(cadence);
+        let field = Field::new(24, 24, vec![Fixed::from_int(310); 24 * 24]);
+        let mut runner = Runner::with_world_and_embodiment(field, calib(), world, emb);
+        // The PREDATOR (chitin, kind 4 -> bucket 17 when distinguishable, else bare hide kind 0 -> bucket 19 like
+        // the prey, the matched control), an emitting body that WOUNDS a co-located perceiver, placed EAST.
+        let pred_cell = Coord3::ground(13, 8);
+        let pred_covering: u16 = if distinguishable { 4 } else { 0 };
+        runner.spawn_predator(pred_cell, emitter_body(pred_covering));
+        // The prey's food: an energy patch at the prey emitter's cell, re-applied each tick so the standing
+        // supply the perceiver's INGEST depletes is replenished (a stable food source at the prey's location).
+        let set_food = |res: &mut ResourceField| {
+            res.composition_mut(prey_cell)
+                .set_nutrient("bio.energy_density", Fixed::from_ratio(9, 10));
+        };
+        set_food(runner.embodiment_mut().unwrap().resources_mut());
+        // Measure the population-mean prey-bucket and predator-bucket MOVE-heading weights over the surviving
+        // PERCEIVERS (exclude the predator and the stationary prey emitter, neither of which is a lineage-carrying
+        // perceiver: the predator has no lineage, and the prey emitter's id 900 is excluded explicitly).
+        let means = |r: &Runner| -> (Fixed, Fixed, usize) {
+            let emb = r.embodiment().unwrap();
+            let live: Vec<&Walker> = emb
+                .walkers()
+                .iter()
+                .filter(|w| w.alive && !is_predator(w.id) && w.id.0 != (CREATURE_ID_TAG | 900))
+                .collect();
+            if live.is_empty() {
+                return (Fixed::ZERO, Fixed::ZERO, 0);
+            }
+            let mut prey_sum = Fixed::ZERO;
+            let mut pred_sum = Fixed::ZERO;
+            for w in &live {
+                prey_sum += w
+                    .controller
+                    .weight((move_base + 1) * n_in + (bf + 2 * prey_bucket));
+                pred_sum += w
+                    .controller
+                    .weight((move_base + 1) * n_in + (bf + 2 * pred_bucket));
+            }
+            let n = Fixed::from_int(live.len() as i32);
+            (prey_sum.div(n), pred_sum.div(n), live.len())
+        };
+        let (p0, d0, n0) = means(&runner);
+        if verbose {
+            println!(
+                "distinguishable={distinguishable} start: n={n0} prey_b={:.3} pred_b={:.3}",
+                p0.to_f64_lossy(),
+                d0.to_f64_lossy()
+            );
+        }
+        for g in 0..generations {
+            for _t in 0..cadence {
+                set_food(runner.embodiment_mut().unwrap().resources_mut());
+                runner.step();
+            }
+            if verbose {
+                let (p, d, n) = means(&runner);
+                let off = runner
+                    .embodiment()
+                    .unwrap()
+                    .walkers()
+                    .iter()
+                    .filter(|w| w.id.0 & OFFSPRING_ID_BIT != 0)
+                    .count();
+                println!(
+                    "distinguishable={distinguishable} gen {}: n={n} off={off} prey_b={:.3} pred_b={:.3}",
+                    g + 1,
+                    p.to_f64_lossy(),
+                    d.to_f64_lossy()
+                );
+            }
+        }
+        means(&runner)
+    }
+
+    #[test]
+    fn per_feature_sort_emerges_only_when_the_emitters_are_distinguishable() {
+        // #150, the two-way-sort emergence proof (the mirror of #144/#146/#148 over TWO feature buckets). When
+        // the two emitter types carry DISTINGUISHING coverings, selection drives the perceiver's per-bucket
+        // weights to OPPOSITE poles: the prey's bucket (19) toward APPROACH (positive, a perceiver that heads
+        // there is fed and breeds) and the predator's bucket (17) toward AVOID (negative, a perceiver that heads
+        // there is wounded and dies), so a sharp emitter-specific sort emerges that the magnitude-only channel (a
+        // single net disposition over all emitters) cannot express. In the matched HELD CONTROL the predator
+        // wears the prey's covering, so both fall in ONE bucket and the sort collapses. The signs are measured
+        // against each bucket's fitness consequence; nothing about predator or prey identity is authored (the
+        // seed is symmetric zero-mean, the feature the emitter's own covering datum).
+        let (prey_b, pred_b, n) = two_way_sort_arena(true, 8, false);
+        let (ctrl_prey_b, ctrl_pred_b, _cn) = two_way_sort_arena(false, 8, false);
+        // The sort has OPPOSITE POLES: the prey bucket to the approach pole (positive, a perceiver drawn there
+        // is fed and breeds) and the predator bucket to the avoid pole (negative, a perceiver drawn there is
+        // wounded and dies), off their symmetric zero-mean seed. The magnitudes are modest, the two-bucket
+        // sibling of the #146 flee pole's modest avoidance: the approach and avoid pulls act on the SAME MOVE
+        // heading (the prey lies one way, the predator the other), so the two weights are coupled, and the
+        // stationary point-predator only culls the fraction that heads onto its cell, exactly the coupling and
+        // point-hazard limits #146 recorded. What is proven is the SIGN sort and its dependence on
+        // distinguishability, not a saturated magnitude.
+        assert!(
+            prey_b > Fixed::from_ratio(1, 4),
+            "the prey bucket was driven to the approach pole (positive): got {}",
+            prey_b.to_f64_lossy()
+        );
+        assert!(
+            pred_b < Fixed::from_ratio(-1, 12),
+            "the predator bucket was driven to the avoid pole (negative): got {}",
+            pred_b.to_f64_lossy()
+        );
+        // The SORT is the separation between the two bucket weights: clearly positive under distinguishable
+        // emitters (approach the prey bucket, avoid the predator bucket), and far smaller in the control where
+        // the two emitters share one bucket so the sort cannot form (the predator bucket is never populated, and
+        // the shared bucket carries the muddled magnitude net disposition).
+        let sort = prey_b - pred_b;
+        let ctrl_sort = ctrl_prey_b - ctrl_pred_b;
+        assert!(
+            sort > Fixed::from_ratio(2, 5),
+            "under distinguishable emitters the two-way sort is clear (prey_b - pred_b): got {}",
+            sort.to_f64_lossy()
+        );
+        assert!(
+            sort > ctrl_sort + Fixed::from_ratio(1, 5),
+            "the distinguishable sort exceeds the indistinguishable control by a clear margin ({} vs {})",
+            sort.to_f64_lossy(),
+            ctrl_sort.to_f64_lossy()
+        );
+        // The predator bucket is the discriminator: in the control the predator wears the prey's covering, so its
+        // bucket (17) is never populated and its weight stays at its zero seed, while under distinguishable
+        // emitters it is driven negative. That gap is the sort the per-feature channel adds over the magnitude
+        // proxy.
+        assert!(
+            pred_b < ctrl_pred_b - Fixed::from_ratio(1, 12),
+            "the predator bucket is driven to avoid only when the predator is perceptually distinct ({} vs {})",
+            pred_b.to_f64_lossy(),
+            ctrl_pred_b.to_f64_lossy()
+        );
+        assert!(
+            n > 0,
+            "perceivers survived under the distinguishable regime"
+        );
+        // Determinism (Principle 3): the whole seeded experiment replays bit-for-bit.
+        let (prey_b2, pred_b2, _) = two_way_sort_arena(true, 8, false);
+        assert_eq!(
+            (prey_b, pred_b),
+            (prey_b2, pred_b2),
+            "the two-way-sort experiment is deterministic"
+        );
+    }
 }
