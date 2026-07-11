@@ -1553,6 +1553,15 @@ source = "predation-integration #120; crates/sim/src/anatomy.rs BodyPlanRegistry
 category = "per_world"
 
 [[reserved]]
+id = "body.covering_spectral_emissivity"
+basis = "the per-band spectral emissivity per covering kind (dimensionless ratio in [0,1] per thermal-IR band, opt.emissivity.band_0..2 on the chem/optics floor; creature-selection step 2b, the owner-ruled FLEEING carrier): the emissivity the covering material radiates at in each band. A real surface is not grey, so its per-band values differ from its broadband one and differ BY MATERIAL, which is the whole point: two beings at equal temperature and equal broadband emissivity (equal total signal strength) differ in spectral SHAPE when their surface materials differ, the strength-independent optical feature a perceiver keys a heritable weight on so fleeing emerges. A per-substance datum (three-way-test category 2): each world's covering materials carry their own per-band emissivity as data, grounded in the material's real spectral emissivity; what is reserved for owner calibration is each covering kind's per-band profile. The dev fixtures average the broadband 0.95 so the radiant term and covering_emissivity stay byte-identical: an organic covering (bare hide, fur, feathers, scales, mana-ward, phase-hide) reads the near-flat (0.95, 0.96, 0.94) and a keratin/mineral covering (chitin carapace, bony plates, shell, stone-skin) the band-structured (0.99, 0.88, 0.98), grounded off organic-vs-mineral spectral emissivity (CRC/Incropera Table A.11 wavelength dependence). The spectral shape is a property of the material and is NEVER keyed to a trophic role: any covering-to-kind correlation emerges through shared heritable causes and selection (Principle 8). A covering with no thermal-emission material (a fluid, plasma, or mana body) carries none and its feature is simply absent (admit-the-alien)"
+status = "reserved"
+value = ""
+unit = "emissivity_ratio_per_band"
+source = "creature-selection step 2b #126; crates/sim/src/anatomy.rs BodyPlanRegistry coverings; crates/physics/data/chem_optics_floor.toml opt.emissivity.band_*; crates/sim/src/perceivable_feature.rs; Part 41"
+category = "per_world"
+
+[[reserved]]
 id = "body.damage_caps"
 basis = "the contact-pressure, delivered-energy, and stress caps the wound laws saturate to (MPa, floor energy, MPa); from the floor's own axis maxima, a representability bound rather than a realism one"
 status = "reserved"
