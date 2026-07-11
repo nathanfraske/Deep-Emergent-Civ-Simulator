@@ -47,6 +47,70 @@ use std::collections::BTreeMap;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct FunctionLawId(pub u32);
 
+/// A DATA-DEFINED axis binding: a map from a kernel's ROLE NAME (the semantic slot a law reads, `contact_area`,
+/// `actuating_strength`, `driving_pressure`) to the physics-floor AXIS ID that fills it. The role SET is data and
+/// EXTENSIBLE (a world grows a new role by adding a map entry, never a new struct field and never a new positional
+/// slot), the harden-to-registry sibling of the value substrate (Part 21), the semantic substrate (Part 33), and
+/// the institution-function substrate (Part 36). Both the capability GRADE path ([`FunctionLawDef`]) and the
+/// delivered-energy DELIVERY path (`contact_transfer`'s row) reference this ONE type, so an alien actuation names
+/// its own axes on both paths in lockstep by role NAME, never a positional slot that a missing axis silently
+/// shifts (the alien-feasibility defect this retires: a springy binding omitting the rigid-strength slot read its
+/// yield into the strength slot and fabricated a rigid blow). A kernel declares the roles it needs
+/// ([`CapabilityKernel::roles`]); [`AxisBinding::validate_roles`] fails loud at load when a required role is
+/// unbound, so a desync is a missing-key load error that mechanically enforces the lockstep rather than a
+/// positional read of the wrong axis.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct AxisBinding {
+    roles: BTreeMap<String, String>,
+}
+
+impl AxisBinding {
+    /// An empty binding (no role bound).
+    pub fn new() -> AxisBinding {
+        AxisBinding {
+            roles: BTreeMap::new(),
+        }
+    }
+
+    /// Build a binding from role-name / axis-id pairs (the canonical construction, used by the kernel defaults and
+    /// by a world declaring its own axes).
+    pub fn from_pairs<R: Into<String>, A: Into<String>>(
+        pairs: impl IntoIterator<Item = (R, A)>,
+    ) -> AxisBinding {
+        AxisBinding {
+            roles: pairs
+                .into_iter()
+                .map(|(r, a)| (r.into(), a.into()))
+                .collect(),
+        }
+    }
+
+    /// The physics-floor axis id bound to a role, or `None` if the role is unbound (the absence convention: a
+    /// kernel reading an unbound role reads zero through its accessor, never a fabricated value).
+    pub fn axis(&self, role: &str) -> Option<&str> {
+        self.roles.get(role).map(String::as_str)
+    }
+
+    /// The bound (role, axis) pairs, in canonical (sorted role) order, so any walk is reproducible.
+    pub fn pairs(&self) -> impl Iterator<Item = (&str, &str)> + '_ {
+        self.roles.iter().map(|(r, a)| (r.as_str(), a.as_str()))
+    }
+
+    /// Validate that every role in `required` is bound; return the first unbound role as an error. Fail-loud at
+    /// LOAD (a kernel that needs a role the binding does not carry is a defect, never a silent zero read at run
+    /// time), the mechanism that retires the positional silent-shift and enforces the grade-to-delivery lockstep.
+    pub fn validate_roles(&self, required: &[&str]) -> Result<(), String> {
+        for &role in required {
+            if !self.roles.contains_key(role) {
+                return Err(format!(
+                    "axis binding is missing the required role '{role}'"
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
 /// The closed set of function-class kernels, fixed Rust. Each reads a part's geometry and material
 /// through the physics floor and returns a dimensionless capability in `[0, 1]`: zero means the part
 /// cannot perform the function (its geometry or material does not clear the physics), one means it
@@ -154,6 +218,66 @@ impl CapabilityKernel {
                 "fluid.driving_pressure",
             ],
         }
+    }
+
+    /// The ROLE NAMES this kernel reads, its semantic input surface: each role is a slot the kernel's physics
+    /// fills from whichever floor axis the [`AxisBinding`] maps it to. A role name is stable across worlds (an
+    /// alien remaps a role to its own axis id, never renames the role), so both the grade and the delivery paths
+    /// look the kernel's inputs up by these names. [`CapabilityKernel::default_binding`] maps each role to the
+    /// Terran floor axis it reads today; a world overrides the mapping, never the role set of a fixed law.
+    pub fn roles(self) -> &'static [&'static str] {
+        match self {
+            CapabilityKernel::Pierce => &["contact_area", "indentation_hardness"],
+            CapabilityKernel::Locomote => &["section_modulus", "arm_length", "yield_strength"],
+            CapabilityKernel::Refract => &["refractive_index"],
+            CapabilityKernel::Shear => &["contact_area", "shear_strength", "yield_strength"],
+            CapabilityKernel::Crush => &["contact_area", "compressive_strength"],
+            CapabilityKernel::Impact => &[
+                "actuating_strength",
+                "cross_section",
+                "stroke",
+                "yield_strength",
+                "elastic_modulus",
+                "driving_pressure",
+            ],
+        }
+    }
+
+    /// The BYTE-NEUTRAL default binding: each of this kernel's [`roles`](Self::roles) mapped to the Terran floor
+    /// axis id it reads today, so a def built from this default reads exactly as the pre-unification hardcoded /
+    /// positional kernel did. An alien registry overrides the mapping by supplying its own binding (Principle 11).
+    /// The order matches the pre-unification `geometry_axes` / `material_axes` contract so the read is bit-identical.
+    pub fn default_binding(self) -> AxisBinding {
+        let pairs: &[(&str, &str)] = match self {
+            CapabilityKernel::Pierce => &[
+                ("contact_area", "mech.contact_area"),
+                ("indentation_hardness", "mat.indentation_hardness"),
+            ],
+            CapabilityKernel::Locomote => &[
+                ("section_modulus", "mech.section_modulus"),
+                ("arm_length", "mech.arm_length"),
+                ("yield_strength", "mat.yield_strength"),
+            ],
+            CapabilityKernel::Refract => &[("refractive_index", "opt.refractive_index")],
+            CapabilityKernel::Shear => &[
+                ("contact_area", "mech.contact_area"),
+                ("shear_strength", "mat.shear_strength"),
+                ("yield_strength", "mat.yield_strength"),
+            ],
+            CapabilityKernel::Crush => &[
+                ("contact_area", "mech.contact_area"),
+                ("compressive_strength", "mat.compressive_strength"),
+            ],
+            CapabilityKernel::Impact => &[
+                ("actuating_strength", "mat.fracture_strength"),
+                ("cross_section", "mech.cross_section_area"),
+                ("stroke", "mech.stroke_length"),
+                ("yield_strength", "mat.yield_strength"),
+                ("elastic_modulus", "mat.elastic_modulus"),
+                ("driving_pressure", "fluid.driving_pressure"),
+            ],
+        };
+        AxisBinding::from_pairs(pairs.iter().map(|&(r, a)| (r, a)))
     }
 
     /// The dimensionless capability in `[0, 1]` the part's geometry and material yield for this function
