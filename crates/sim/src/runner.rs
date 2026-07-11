@@ -14441,4 +14441,262 @@ values = [
             "the flee experiment is deterministic"
         );
     }
+
+    /// The CORPSE arena (#148, the predation-completion PAY-OFF proof): the mirror of the matter and flee
+    /// arenas on the GEOPHAGE INTAKE disposition. A corpse (an existing tissue deposit carrying an energy-
+    /// backing substance) is the ONLY energy source, and eating it requires the being to DECIDE GEOPHAGE (the
+    /// existing trophic-agnostic whole-body bite that credits the eater's reserves, runner.rs:3247, keyed on
+    /// the eater's own assimilation). A symmetric zero-mean seed on the GEOPHAGE-activation weight: half +8
+    /// (decide GEOPHAGE, eat) and half -8 (activation clamps to zero, do not eat). Selection is REPRODUCTIVE:
+    /// energy and temperature never floor (no starvation death, so both arms persist and the control's
+    /// undifferentiated weight is measurable), and only a being whose ENERGY stays at or above the eligibility
+    /// reserve breeds. The corpse is the only way to REFILL energy, so only a GEOPHAGE-positive being that
+    /// ASSIMILATES the corpse stays eligible and out-breeds one that does not. `assimilable` is the matched
+    /// control: when false the eater's assimilation is EMPTY, so the identical corpse pays zero and the intake
+    /// disposition confers no edge (the pay-off keys on the eater's OWN assimilation, admit-the-alien). Returns
+    /// the population-mean GEOPHAGE-activation weight, the living count, and the offspring count. The intake
+    /// path is EXISTING (the GEOPHAGE affordance output, the whole-body bite); the genuinely-new result over
+    /// the #144 approach proof is that the PAY-OFF (the corpse's own assimilable energy) selects the intake
+    /// disposition, not a re-run of approach with a corpse standing in for a plant.
+    fn corpse_arena(assimilable: bool, generations: u64, verbose: bool) -> (Fixed, usize, usize) {
+        use crate::homeostasis::{HomeostaticAxisDef, HomeostaticRegistry, GEOPHAGE};
+        let ax =
+            |id, name: &str, backing: Option<&str>, drain: Fixed, floor: i32| HomeostaticAxisDef {
+                id,
+                name: name.to_string(),
+                backing_component: backing.map(|s| s.to_string()),
+                capacity_per_mass: Fixed::ONE,
+                base_drain: drain,
+                exertion_drain: Fixed::ZERO,
+                death_floor: Fixed::from_int(floor),
+                draw_set: Vec::new(),
+            };
+        let homeo = HomeostaticRegistry {
+            axes: vec![
+                // ENERGY drains at a slow flat rate but NEVER floors (death_floor far below zero): starvation is
+                // not a cause of death, so both arms persist and the control's held weight is measurable. The
+                // corpse is the only way to REFILL it, and refill is what keeps a being above the reproduction-
+                // eligibility reserve, so the fitness variable is the PAY-OFF, never a lethal drain.
+                ax(
+                    ENERGY,
+                    "energy",
+                    Some(crate::physiology::ENERGY_DENSITY),
+                    Fixed::from_ratio(1, 8),
+                    -1000,
+                ),
+                ax(TEMPERATURE, "temperature", None, Fixed::ZERO, -1000),
+            ],
+        };
+        let organs = BodyPlanRegistry::dev_default();
+        let mut emb = Embodiment::new(
+            homeo.clone(),
+            AffordanceRegistry::dev_geophage(),
+            LocomotionParams::dev_default(),
+            0,
+            0xC0FF_EE00,
+        );
+        // No embodiment physiology: the drain is the axis's own flat `base_drain` (the matter-arena regime),
+        // and the whole-body bite reads the WALKER's own `physiology.assimilation`, not the embodiment's, so a
+        // corpse pays by the eater's own metabolism. GEOPHAGE is decided by the controller directly and enacted
+        // in the deferred-action pass (runner.rs:6917); it needs no percept, so perception stays unarmed.
+        let _ = &organs;
+        // Reproductive selection: a being must hold ENERGY at or above 3/4 of capacity to breed. Founders start
+        // full (occupancy 1); the 1/8-per-tick drain drops a non-eater below 3/4 within three ticks, so by the
+        // six-tick beat only a being that refilled from the corpse each tick is still eligible.
+        emb.set_creature_selection(Some(CreatureSelectionParams {
+            mint_perturbation_spread: Fixed::from_decimal_str("0.05").unwrap(),
+            reproduction_eligibility_reserve: Fixed::from_ratio(3, 4),
+            offspring_mutation_spread: Fixed::from_decimal_str("0.02").unwrap(),
+        }));
+        let layout = emb.layout().clone();
+        let n_in = layout.n_in();
+        let geophage_base = layout.output_base(GEOPHAGE).unwrap();
+        let bias = n_in - 1;
+        // The SELECTED trait: the GEOPHAGE ACTIVATION weight from the bias input. Positive decides GEOPHAGE (eat
+        // the corpse underfoot); negative clamps to zero at the decision (do not eat). MOVE and INGEST are left
+        // unseeded (activation zero, never win), so the being's ONLY heritable disposition is whether to intake,
+        // and nothing about eating a corpse is authored (the seed is symmetric zero-mean and freely-signed).
+        let intake_weights = |sign: i64| -> Vec<Fixed> {
+            let mut w = vec![Fixed::ZERO; layout.weight_count()];
+            w[geophage_base * n_in + bias] = Fixed::from_int(8 * sign as i32);
+            w
+        };
+        let thermal = || BeingThermal {
+            setpoint: Fixed::from_int(310),
+            half_band: Fixed::from_int(30),
+            initial_temp: Fixed::from_int(310),
+        };
+        // A body that bears a fat-body organ (kind 0, the `bio.energy_density`-backing tissue): this is what
+        // gives a bred OFFSPRING a real ENERGY reserve (`Homeostasis::new` sizes each reserve from the body's
+        // organ composition), so the intake-positive lineage can COMPOUND across generations rather than
+        // stalling on a zero-capacity offspring. The founders read the same capacity through `from_mass`, so a
+        // founder and its descendant hold the same reserve.
+        let corpse_body = || {
+            let mut b = repro_body();
+            b.organs = vec![crate::anatomy::Part {
+                kind: 0,
+                development: Fixed::ONE,
+            }];
+            b
+        };
+        // The eater's physiology is the ONLY difference between the arms: the treatment ASSIMILATES the corpse's
+        // energy substance (`dev_for_registry` sets assimilation one for each backed class), so the whole-body
+        // bite credits ENERGY; the control's assimilation is EMPTY, so the identical corpse pays zero. The
+        // pay-off keys on the eater's own assimilation (admit-the-alien): a non-assimilating lineage gains
+        // nothing from a corpse it cannot digest, exactly as an alien metabolism would.
+        let phys = || -> Physiology {
+            let mut p = Physiology::dev_for_registry(&homeo);
+            if !assimilable {
+                p.assimilation = BTreeMap::new();
+            }
+            p
+        };
+        let start = Coord3::ground(6, 8);
+        for k in 0..12u64 {
+            let sign: i64 = if k % 2 == 0 { 1 } else { -1 };
+            let ctrl = Controller::from_weights(
+                n_in,
+                layout.n_out(),
+                layout.hidden(),
+                intake_weights(sign),
+            );
+            emb.add(
+                Walker::new(
+                    StableId(CREATURE_ID_TAG | (k + 1)),
+                    start,
+                    corpse_body(),
+                    Homeostasis::from_mass(&homeo, Fixed::ONE),
+                    phys(),
+                    ctrl.clone(),
+                )
+                .with_lineage(ctrl),
+                thermal(),
+            );
+        }
+        let params = crate::InferenceParams {
+            clamp: Fixed::from_int(50),
+            commit_threshold: Fixed::from_int(3),
+            margin: Fixed::from_int(1),
+        };
+        let cadence = 6u64;
+        let mut world = World::new(params, params, crate::AccessWeights::from_pairs([]));
+        world.set_life_cadence(cadence);
+        let field = Field::new(24, 24, vec![Fixed::from_int(310); 24 * 24]);
+        let mut runner = Runner::with_world_and_embodiment(field, calib(), world, emb);
+        // The CORPSE: a tissue deposit of the energy-backing substance at the founders' cell, re-applied each
+        // tick so the bite that depletes it is replenished (a standing carcass held fixed while the population
+        // evolves, the tissue-field analogue of the matter arena's re-applied food). It is the EXISTING matter
+        // deposit eaten by the EXISTING trophic-agnostic whole-body bite; nothing about it is a "corpse" tag.
+        let deposit_corpse = |t: &mut crate::material::TissueField| {
+            let mut comp: BTreeMap<String, Fixed> = BTreeMap::new();
+            comp.insert(crate::physiology::ENERGY_DENSITY.to_string(), Fixed::ONE);
+            t.deposit(start, comp, Fixed::from_int(8));
+        };
+        deposit_corpse(runner.embodiment_mut().unwrap().tissue_mut());
+        let mean_intake = |r: &Runner| -> (Fixed, usize) {
+            let emb = r.embodiment().unwrap();
+            let live: Vec<&Walker> = emb.walkers().iter().filter(|w| w.alive).collect();
+            if live.is_empty() {
+                return (Fixed::ZERO, 0);
+            }
+            let mut sum = Fixed::ZERO;
+            for w in &live {
+                sum += w.controller.weight(geophage_base * n_in + bias);
+            }
+            (sum.div(Fixed::from_int(live.len() as i32)), live.len())
+        };
+        let (start_mean, start_n) = mean_intake(&runner);
+        if verbose {
+            println!(
+                "assimilable={assimilable} start: n={start_n} mean_intake={:.3}",
+                start_mean.to_f64_lossy()
+            );
+        }
+        let mut offspring = 0usize;
+        for g in 0..generations {
+            for _t in 0..cadence {
+                // Re-apply the corpse each tick so the standing tissue the bite depletes is replenished (a stable
+                // carcass, held fixed while the population evolves).
+                deposit_corpse(runner.embodiment_mut().unwrap().tissue_mut());
+                runner.step();
+            }
+            let emb = runner.embodiment().unwrap();
+            offspring = emb
+                .walkers()
+                .iter()
+                .filter(|w| w.id.0 & OFFSPRING_ID_BIT != 0)
+                .count();
+            if verbose {
+                let (m, n) = mean_intake(&runner);
+                println!(
+                    "assimilable={assimilable} gen {}: living={n} offspring={offspring} mean_intake={:.3}",
+                    g + 1,
+                    m.to_f64_lossy()
+                );
+            }
+        }
+        let (final_mean, final_n) = mean_intake(&runner);
+        (final_mean, final_n, offspring)
+    }
+
+    #[test]
+    fn corpse_intake_disposition_emerges_only_when_the_corpse_pays() {
+        // #148, the predation-completion PAY-OFF emergence proof (the mirror of the #144 approach proof, on the
+        // GEOPHAGE intake disposition rather than the MOVE-heading approach weight). A corpse is the only energy
+        // source; eating it requires the being to DECIDE GEOPHAGE (the existing whole-body bite). Under the
+        // treatment (the eater assimilates the corpse) selection drives the population-mean GEOPHAGE-activation
+        // weight OFF its seeded zero toward the intake pole: a being whose weight makes it eat refills its
+        // energy, stays above the reproduction-eligibility reserve, and out-breeds one that does not. In the
+        // matched HELD CONTROL (the eater assimilates nothing, so the identical corpse pays zero) the same
+        // regime leaves the mean at its zero seed, because no being can pay from the corpse and the intake
+        // disposition confers no reproductive edge. The contrast is the proof that the PAY-OFF (the corpse's own
+        // assimilable energy, keyed on the eater's own metabolism) selects the disposition, not the presence of
+        // tissue and not a re-run of #144 approach. Nothing about eating a corpse is authored: the seed is
+        // symmetric zero-mean and freely-signed, the corpse is the existing matter deposit, the intake the
+        // existing trophic-agnostic bite, the pay-off the corpse's own physics.
+        let (pay_mean, pay_n, pay_off) = corpse_arena(true, 8, false);
+        let (ctrl_mean, ctrl_n, _ctrl_off) = corpse_arena(false, 8, false);
+        // The founder mean intake weight is exactly zero (a symmetric +8 / -8 seed). When the corpse PAYS,
+        // selection drives the population mean toward the +8 intake pole: the lineages whose weight made them
+        // eat the corpse refilled their energy, stayed reproduction-eligible, and bred, so their intake-positive
+        // controllers came to dominate the population.
+        assert!(
+            pay_mean > Fixed::from_int(5),
+            "when the corpse pays, selection drove the mean intake weight strongly positive (toward the +8 \
+             intake pole), off its zero seed: got {}",
+            pay_mean.to_f64_lossy()
+        );
+        // The HELD CONTROL (the eater cannot assimilate the corpse): the SAME corpse, seed, drain, and beat, but
+        // the pay-off is absent, so survival-to-breed no longer depends on the intake weight and the mean stays
+        // near its zero seed. The contrast is the proof that the PAY-OFF moved the weight, not the tissue.
+        assert!(
+            ctrl_mean.abs() < Fixed::from_int(1),
+            "without a pay-off (a corpse the eater cannot assimilate) the mean intake weight stayed near its \
+             zero seed: got {}",
+            ctrl_mean.to_f64_lossy()
+        );
+        assert!(
+            pay_mean > ctrl_mean + Fixed::from_int(4),
+            "the paying-corpse run's intake weight far exceeds the non-assimilable control ({} vs {})",
+            pay_mean.to_f64_lossy(),
+            ctrl_mean.to_f64_lossy()
+        );
+        // Selection climbed through the reproduction beat, not by founder survival alone: offspring were minted
+        // when the corpse paid. The control keeps its founders (no death) but breeds none, so both populations
+        // persist and only the treatment's intake-positive lineage grows.
+        assert!(
+            pay_off > 0,
+            "the reproduction beat minted offspring when the corpse paid"
+        );
+        assert!(
+            pay_n > 0 && ctrl_n > 0,
+            "both arms persist (no starvation death): pay_n={pay_n} ctrl_n={ctrl_n}"
+        );
+        // Determinism (Principle 3): the whole seeded experiment replays bit-for-bit.
+        let (pay_mean2, _, _) = corpse_arena(true, 8, false);
+        assert_eq!(
+            pay_mean, pay_mean2,
+            "the corpse-intake experiment is deterministic"
+        );
+    }
 }
