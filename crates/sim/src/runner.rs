@@ -1171,6 +1171,26 @@ fn creature_weight_deviation(seed: u64, id: StableId, tick: u64, k: usize, sprea
     (Fixed::from_int(2).mul(unit) - Fixed::ONE).mul(spread)
 }
 
+/// Reproduction eligibility over the being's OWN declared reserve axes (creature-selection loop, amendment 2).
+/// A creature is eligible when it holds a surplus at or above `threshold` on EVERY one of its depletable
+/// reserve axes (`reserve_axes`, the backed metabolic stocks the caller collects from the being's registry;
+/// the derived regulated axes, integrity and temperature, are excluded because their occupancy is a band, not
+/// a surplus). `Homeostasis::level` is occupancy (amount over capacity, in `[0, ONE]`), so a single reserved
+/// threshold is comparable across every axis whatever its capacity. A being in deficit on ANY reserve is not
+/// eligible: it does not invest in offspring while short on a limiting stock. The `.all` is vacuously true for
+/// a being with no depletable reserve, the honest admit-the-alien read (there is no surplus to gate on; the
+/// structural predicates alive and lineage-carrying still bound it). Keyed on the being's own axes, never a
+/// hardcoded energy id, so a redox, mana-field, or silicon metabolism forms selection under its own reserves.
+fn reproduction_eligible(
+    homeostasis: &Homeostasis,
+    reserve_axes: &[HomeostaticAxisId],
+    threshold: Fixed,
+) -> bool {
+    reserve_axes
+        .iter()
+        .all(|&axis| homeostasis.level(axis) >= threshold)
+}
+
 /// Breed the next creature generation from the eligible parents (creature-selection step 2, the PURE core of
 /// the reproduction beat, extracted so the mechanism is unit-testable without a full runner). The parents are
 /// grouped by cell (CO-LOCATION, the spatial proximity proxy) in canonical order, paired consecutively within
@@ -7278,8 +7298,9 @@ impl Runner {
     /// The pairing predicate is STRUCTURAL (`carries_lineage`, both carry a heritable controller) and keyed on
     /// spatial CO-LOCATION (the same-cell proximity proxy), never a trait, kind, relatedness, or an id tag, so
     /// the authored predator (which carries no lineage) is excluded for the same reason it cannot adapt.
-    /// Eligibility keys on the creature's OWN energy reserve found by its backing component (admit-the-alien),
-    /// never a hardcoded axis. Deterministic: the offspring id is a monotonic run counter in a disjoint
+    /// Eligibility keys on surplus across the creature's OWN declared reserve axes (every depletable metabolic
+    /// stock it carries, found by backing component; admit-the-alien), never a hardcoded energy id. Deterministic:
+    /// the offspring id is a monotonic run counter in a disjoint
     /// sub-namespace, the perturbation is seed-keyed, and the beat walks id-sorted parents and canonical cells,
     /// so it replays bit for bit. A no-op unless armed AND on a cadence beat, so an unarmed or off-cadence run
     /// is byte-identical.
@@ -7309,18 +7330,22 @@ impl Runner {
                 half_band: Fixed::ONE,
                 initial_temp: Fixed::ZERO,
             });
-        // The being's OWN energy-backing axis (admit-the-alien: found by its backing component, not a hardcoded
-        // id, the same read the metabolism uses). No energy-backed reserve means no eligibility read is possible.
-        let Some(energy_axis) = homeo
+        // The being's OWN declared reserve axes (amendment 2, admit-the-alien): reproduction eligibility reads
+        // spare capacity across EVERY depletable metabolic reserve the being declares, keyed on what each axis
+        // IS (a backed, depletable stock, `backing_component.is_some()`), never a hardcoded energy id. A lineage
+        // whose limiting reserve is not energy, or which declares no energy reserve at all (a redox, mana-field,
+        // or silicon metabolism), forms selection under its own axes rather than being locked out of reproduction.
+        // The derived regulated axes (integrity, temperature; `backing_component == None`) are a health/band
+        // readout, not a surplus to invest, so they are excluded from the surplus gate. `level` is occupancy
+        // (amount over capacity, in [0, ONE]), so one reserved threshold is comparable across every axis.
+        let reserve_axes: Vec<HomeostaticAxisId> = homeo
             .axes
             .iter()
-            .find(|a| a.backing_component.as_deref() == Some(crate::physiology::ENERGY_DENSITY))
+            .filter(|a| a.backing_component.is_some())
             .map(|a| a.id)
-        else {
-            return;
-        };
-        // Snapshot eligible parents (living creatures carrying heritable lineage whose OWN energy reserve is at
-        // or above the eligibility threshold), owning their body/physiology/controller so the mint borrows
+            .collect();
+        // Snapshot eligible parents (living creatures carrying heritable lineage that hold a surplus across
+        // their OWN declared reserve axes), owning their body/physiology/controller so the mint borrows
         // nothing from `self`. Sorted by id for a deterministic pairing order.
         let mut eligible: Vec<(StableId, Coord3, Controller, BodyPlan, Physiology)> = emb
             .walkers
@@ -7329,9 +7354,14 @@ impl Runner {
                 // The STRUCTURAL predicate stands alone (no id-tag read): only a modeled-lineage creature
                 // carries a heritable controller, so `carries_lineage` already excludes the founders and the
                 // authored predator (neither is given a lineage), keyed on what the being IS, never its id.
+                // The surplus gate reads the being's own declared reserve axes (see `reproduction_eligible`).
                 w.alive
                     && w.carries_lineage()
-                    && w.homeostasis.level(energy_axis) >= params.reproduction_eligibility_reserve
+                    && reproduction_eligible(
+                        &w.homeostasis,
+                        &reserve_axes,
+                        params.reproduction_eligibility_reserve,
+                    )
             })
             .filter_map(|w| {
                 w.lineage.as_ref().map(|l| {
@@ -13247,6 +13277,74 @@ values = [
                 },
             ],
         }
+    }
+
+    #[test]
+    fn reproduction_eligibility_reads_the_beings_own_reserve_axes() {
+        // Amendment 2 (admit-the-alien): the surplus gate reads the being's OWN declared reserve axes, folding
+        // over EVERY depletable stock with the ALL semantics, never the single energy axis the old read keyed on.
+        use crate::homeostasis::{HomeostaticAxisDef, HomeostaticAxisId, HomeostaticRegistry};
+        let backed = |id: u16, name: &str, sub: &str| HomeostaticAxisDef {
+            id: HomeostaticAxisId(id),
+            name: name.to_string(),
+            backing_component: Some(sub.to_string()),
+            capacity_per_mass: Fixed::ONE,
+            base_drain: Fixed::ZERO,
+            exertion_drain: Fixed::ZERO,
+            death_floor: Fixed::ZERO,
+            draw_set: Vec::new(),
+        };
+        // Two BACKED reserves (a two-reserve metabolism) plus a derived regulated axis (temperature, unbacked).
+        let energy = HomeostaticAxisId(10);
+        let protein = HomeostaticAxisId(11);
+        let temp = HomeostaticAxisId(12);
+        let reg = HomeostaticRegistry {
+            axes: vec![
+                backed(10, "energy", "bio.energy_density"),
+                backed(11, "protein", "bio.protein_fraction"),
+                HomeostaticAxisDef {
+                    id: temp,
+                    name: "temperature".to_string(),
+                    backing_component: None,
+                    capacity_per_mass: Fixed::ONE,
+                    base_drain: Fixed::ZERO,
+                    exertion_drain: Fixed::ZERO,
+                    death_floor: Fixed::ZERO,
+                    draw_set: Vec::new(),
+                },
+            ],
+        };
+        // The caller collects only the BACKED reserve axes (the surplus gate; the derived band is excluded).
+        let reserve_axes: Vec<HomeostaticAxisId> = reg
+            .axes
+            .iter()
+            .filter(|a| a.backing_component.is_some())
+            .map(|a| a.id)
+            .collect();
+        assert_eq!(reserve_axes, vec![energy, protein]);
+        let threshold = Fixed::from_ratio(1, 2);
+        let high = Fixed::from_ratio(3, 4);
+        let low = Fixed::from_ratio(1, 4);
+
+        // Full on every backed reserve (from_mass starts full): eligible.
+        let mut h = Homeostasis::from_mass(&reg, Fixed::ONE);
+        assert!(reproduction_eligible(&h, &reserve_axes, threshold));
+
+        // In deficit on ONE backed reserve (protein below threshold): NOT eligible, even with energy in surplus.
+        // The old energy-only read would have wrongly passed this being.
+        h.set_level(energy, high);
+        h.set_level(protein, low);
+        assert!(!reproduction_eligible(&h, &reserve_axes, threshold));
+
+        // A starved derived band (temperature) does NOT block eligibility: it is not a reserve axis. Both backed
+        // reserves in surplus while temperature sits at `low` still reads eligible.
+        h.set_level(protein, high);
+        h.set_level(temp, low);
+        assert!(reproduction_eligible(&h, &reserve_axes, threshold));
+
+        // Admit-the-alien: a being with NO depletable reserve (empty reserve set) is vacuously eligible, subject
+        // only to the structural predicates the caller applies. The old read early-returned and locked it out.
+        assert!(reproduction_eligible(&h, &[], threshold));
     }
 
     fn repro_body() -> BodyPlan {
