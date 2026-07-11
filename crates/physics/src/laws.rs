@@ -1700,6 +1700,117 @@ pub fn watson_latent_heat(l_ref: Fixed, t_ref: Fixed, t_c: Fixed, t: Fixed) -> F
     l_ref.checked_mul(factor).unwrap_or(Fixed::MAX)
 }
 
+/// The three-regime volatile saturation curve, the composition of the mid-range Rankine-Kirchhoff, sublimation,
+/// and Watson kernels into one usable object DERIVED from a volatile's measured primitives. It holds the derived
+/// per-regime constants and selects the regime by temperature, so the hydrology wiring reads one object rather
+/// than re-deriving the constants each tick. It is a physics-derived calibration (the sim's `EnvironCalib` holds
+/// an instance at the wiring); everything here is theorem over the four measured primitives plus the molecular
+/// structure, so no value is authored and an alien volatile is a data row.
+#[derive(Clone, Copy, Debug)]
+pub struct VolatileSaturationCurve {
+    /// `delta_cp/R` from the molecular structure, the power-law exponent shared by both saturation branches.
+    pub delta_cp_over_r: Fixed,
+    /// The mid-range Rankine-Kirchhoff constants `(A, B)`, anchored at the boiling point `(T_b, 1 atm)`.
+    pub a_mid: Fixed,
+    pub b_mid: Fixed,
+    /// The sublimation-branch constants `(A, B)`, anchored at the DERIVED `(T_triple, P_triple)` (continuity).
+    pub a_sub: Fixed,
+    pub b_sub: Fixed,
+    /// The measured primitives the near-critical Watson branch and the latent-heat selection reuse.
+    pub l_b: Fixed,
+    pub l_fus: Fixed,
+    pub t_b: Fixed,
+    pub t_c: Fixed,
+    pub r: Fixed,
+    /// The triple-point temperature, the sublimation-to-mid-range regime boundary.
+    pub t_triple: Fixed,
+    /// The near-critical boundary (the mid-range-to-Watson switch). An ENGINE-ACCURACY value, not a fundamental:
+    /// the reduced temperature where the linear-Kirchhoff extrapolation error crosses tolerance. Carried here as
+    /// the reserved-with-basis `0.75*T_c` (at that reduced temperature the linear form runs about 7 percent high
+    /// against the Watson form's under 1 percent) pending the crossing derivation; never a hardcoded literal in
+    /// the content path, it is derived from `T_c` and the reserved tolerance.
+    pub near_critical_boundary: Fixed,
+}
+
+impl VolatileSaturationCurve {
+    /// Derive the whole three-regime curve from a volatile's measured primitives (`t_b`, `l_b`, `l_fus`,
+    /// `t_triple`, `t_c`), the molar gas constant `r`, and the molecular structure (`gas_rotational_dof`,
+    /// `atom_count`). The mid-range constants come from `rankine_kirchhoff_constants`; the derived triple-point
+    /// pressure `P_triple` (the mid-range curve at `t_triple`) and the Hess sublimation latent heat
+    /// `L_sub = L_vap(T_triple) + L_fus` anchor the sublimation constants, so the branches join with no gap.
+    #[allow(clippy::too_many_arguments)]
+    pub fn derive(
+        t_b: Fixed,
+        l_b: Fixed,
+        l_fus: Fixed,
+        t_triple: Fixed,
+        t_c: Fixed,
+        r: Fixed,
+        gas_rotational_dof: Fixed,
+        atom_count: Fixed,
+    ) -> Self {
+        let delta_cp_over_r = kirchhoff_delta_cp_over_r(gas_rotational_dof, atom_count);
+        // Mid-range, anchored at (T_b, 1 standard atmosphere in MPa) so the curve reads MPa.
+        let p_ref = Fixed::from_ratio(101_325, 1_000_000);
+        let (a_mid, b_mid) = rankine_kirchhoff_constants(t_b, l_b, delta_cp_over_r, r, p_ref);
+        // Sublimation, anchored at the DERIVED (T_triple, P_triple): P_triple is the mid-range curve at the
+        // triple point, and L_sub(T_triple) = L_vap(T_triple) + L_fus (Hess).
+        let p_triple = saturation_vapor_pressure_rk(t_triple, a_mid, b_mid, delta_cp_over_r);
+        let l_sub_triple =
+            kirchhoff_latent_heat(l_b, delta_cp_over_r, r, t_triple, t_b).saturating_add(l_fus);
+        let (a_sub, b_sub) =
+            rankine_kirchhoff_constants(t_triple, l_sub_triple, delta_cp_over_r, r, p_triple);
+        // The near-critical boundary: the reserved accuracy tolerance's crossing, 0.75*T_c pending the derivation.
+        let near_critical_boundary = t_c.checked_mul(Fixed::from_ratio(3, 4)).unwrap_or(t_c);
+        Self {
+            delta_cp_over_r,
+            a_mid,
+            b_mid,
+            a_sub,
+            b_sub,
+            l_b,
+            l_fus,
+            t_b,
+            t_c,
+            r,
+            t_triple,
+            near_critical_boundary,
+        }
+    }
+
+    /// The saturation vapour pressure at a temperature, selecting the regime: the sublimation branch below the
+    /// triple point, the mid-range Rankine-Kirchhoff curve at and above it. The near-critical saturation integral
+    /// has no closed form and a temperate surface never reaches it, so above the near-critical boundary this
+    /// returns the mid-range extrapolation (the L(T) there is the Watson form via [`Self::latent_heat`]).
+    pub fn saturation_pressure(&self, temperature: Fixed) -> Fixed {
+        if temperature < self.t_triple {
+            saturation_vapor_pressure_rk(temperature, self.a_sub, self.b_sub, self.delta_cp_over_r)
+        } else {
+            saturation_vapor_pressure_rk(temperature, self.a_mid, self.b_mid, self.delta_cp_over_r)
+        }
+    }
+
+    /// The latent heat at a temperature, selecting the three regimes: the sublimation `L_sub = L_vap + L_fus`
+    /// below the triple point, the linear Kirchhoff `L(T)` in the mid range, and the Watson form (vanishing at
+    /// `T_c`) above the near-critical boundary.
+    pub fn latent_heat(&self, temperature: Fixed) -> Fixed {
+        let l_vap = kirchhoff_latent_heat(
+            self.l_b,
+            self.delta_cp_over_r,
+            self.r,
+            temperature,
+            self.t_b,
+        );
+        if temperature < self.t_triple {
+            l_vap.saturating_add(self.l_fus)
+        } else if temperature <= self.near_critical_boundary {
+            l_vap
+        } else {
+            watson_latent_heat(self.l_b, self.t_b, self.t_c, temperature)
+        }
+    }
+}
+
 /// The Lennard-Jones collision diameter `sigma` (angstrom) and the potential well depth `epsilon/k_B` (kelvin)
 /// DERIVED from a substance's measured CRITICAL POINT (`t_c` in K, `p_c` in Pa) through the corresponding-
 /// states relation fixed by the LJ potential's OWN reduced critical point (`T_c* = k_B*T_c/epsilon = 1.312`,
@@ -4468,6 +4579,96 @@ mod tests {
             watson_latent_heat(l_b, t_c, t_c, t_b),
             ZERO,
             "a reference at T_c is degenerate, yields zero"
+        );
+    }
+
+    #[test]
+    fn the_volatile_saturation_curve_composes_the_three_regimes() {
+        // The whole three-regime curve derived from water's measured primitives as one object (the hydrology
+        // wiring reads this rather than re-deriving each tick). Fixtures held for the hunt: T_b 373.15 K,
+        // L_b 40.66 kJ/mol, L_fus 6.01 kJ/mol, T_triple 273.16 K, T_c 647.1 K, nonlinear triatomic.
+        let curve = VolatileSaturationCurve::derive(
+            Fixed::from_ratio(37315, 100),
+            Fixed::from_int(40660),
+            Fixed::from_int(6010),
+            Fixed::from_ratio(27316, 100),
+            Fixed::from_ratio(6471, 10),
+            Fixed::from_ratio(8_314_462_618, 1_000_000_000),
+            Fixed::from_int(3),
+            Fixed::from_int(3),
+        );
+        assert_eq!(
+            curve.delta_cp_over_r,
+            Fixed::from_int(-5),
+            "delta_cp/R = -5 for water from the structure"
+        );
+        // Saturation pressure selects the regime: mid-range at the world mean (~1768 Pa) and boiling (1 atm),
+        // the sublimation branch at a sub-freezing cell (~107 Pa at 253 K).
+        let p_mean = curve.saturation_pressure(Fixed::from_ratio(28815, 100));
+        assert!(
+            p_mean > Fixed::from_ratio(170, 100_000) && p_mean < Fixed::from_ratio(182, 100_000),
+            "mid-range ~1768 Pa at the world mean"
+        );
+        let p_boil = curve.saturation_pressure(Fixed::from_ratio(37315, 100));
+        assert!(
+            p_boil > Fixed::from_ratio(1007, 10_000) && p_boil < Fixed::from_ratio(1020, 10_000),
+            "1 atm at boiling"
+        );
+        let p_cold = curve.saturation_pressure(Fixed::from_ratio(25315, 100));
+        assert!(
+            p_cold > Fixed::from_ratio(9, 100_000) && p_cold < Fixed::from_ratio(12, 100_000),
+            "the sublimation branch reads ~107 Pa at 253 K"
+        );
+        // Continuity at the triple point: the two branches meet (within the exp(ln) round-trip tolerance).
+        let p_trip_mid = saturation_vapor_pressure_rk(
+            curve.t_triple,
+            curve.a_mid,
+            curve.b_mid,
+            curve.delta_cp_over_r,
+        );
+        let p_trip_sub = saturation_vapor_pressure_rk(
+            curve.t_triple,
+            curve.a_sub,
+            curve.b_sub,
+            curve.delta_cp_over_r,
+        );
+        let gap = if p_trip_mid > p_trip_sub {
+            p_trip_mid - p_trip_sub
+        } else {
+            p_trip_sub - p_trip_mid
+        };
+        assert!(
+            gap < Fixed::from_ratio(1, 100_000),
+            "the branches join at the triple point"
+        );
+        // Latent heat selects the three regimes: L_b at boiling (mid), L_sub > L_vap below the triple point,
+        // the Watson vanishing near the critical point, and zero above it.
+        let l_mid = curve.latent_heat(Fixed::from_ratio(37315, 100));
+        assert!(
+            l_mid > Fixed::from_int(40000) && l_mid < Fixed::from_int(41300),
+            "mid-range L(T_b) = L_b"
+        );
+        let l_sub = curve.latent_heat(Fixed::from_int(253));
+        let l_vap_253 = kirchhoff_latent_heat(
+            curve.l_b,
+            curve.delta_cp_over_r,
+            curve.r,
+            Fixed::from_int(253),
+            curve.t_b,
+        );
+        assert!(
+            l_sub > l_vap_253,
+            "sublimation L exceeds vaporization L by L_fus below the triple point"
+        );
+        let l_near_crit = curve.latent_heat(Fixed::from_int(640));
+        assert!(
+            l_near_crit > ZERO && l_near_crit < Fixed::from_int(15000),
+            "the Watson branch drives L well below L_b toward zero near T_c"
+        );
+        assert_eq!(
+            curve.latent_heat(Fixed::from_int(700)),
+            ZERO,
+            "no latent heat above the critical point"
         );
     }
 
