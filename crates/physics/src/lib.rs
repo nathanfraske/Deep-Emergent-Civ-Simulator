@@ -39,6 +39,7 @@
 
 pub mod graph;
 pub mod laws;
+pub mod periodic;
 pub mod quantities;
 pub mod scaled;
 
