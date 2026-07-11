@@ -489,13 +489,23 @@ pub fn covering_emissivity(plan: &BodyPlan, registry: &BodyPlanRegistry) -> Fixe
 /// [`FLUX_MAX`] representability cap applies to the final emission, matching the ruled
 /// `radiant_emission(body_temp) * coefficient` (emissivity is that law's linear scale, so folding the
 /// coefficient into it is that product with the cap correctly on the result). Pure and RNG-free.
-pub fn being_signal_emission(body_temp: Fixed, coefficient: Fixed, sigma: Fixed) -> Fixed {
-    laws::radiant_emission(
+pub fn being_signal_emission(
+    body_temp: Fixed,
+    coefficient: Fixed,
+    sigma_bits: i64,
+    sigma_scale: u32,
+) -> Fixed {
+    // Sigma at its full derived scale (the Tier-2 lift, R-UNITS-PIN slice 4): the perceived thermal signal
+    // `sigma * body_temp^4 * coefficient` now carries sigma at full precision instead of the Q32.32 truncation,
+    // its `sigma * body_temp^4` term computed in one wide accumulator and rounded once. `t_cold` is zero (the
+    // absolute radiance), so this signal is non-zero for any warm body and IS surfaced on the pinned paths.
+    laws::radiant_emission_tier2(
         coefficient,
         Fixed::ONE,
         body_temp,
         Fixed::ZERO,
-        sigma,
+        sigma_bits,
+        sigma_scale,
         FLUX_MAX,
     )
 }
@@ -784,22 +794,22 @@ mod tests {
         // The emitter side of the being-percept keystone: a being's perceptible signal is its own thermal
         // self-emission (Stefan-Boltzmann off its body temperature) times a reserved coupling coefficient,
         // so it keys on the being's OWN temperature, never a per-species signature.
-        let sigma = MetabolicAnchors::dev_fixture().sigma;
+        let (sigma_bits, sigma_scale) = derived_stefan_boltzmann_fine();
         let coeff = Fixed::from_ratio(1, 2);
 
         // A body at absolute zero emits nothing: no thermal signal to perceive (a cold ambusher, a corpse
         // that has cooled to ambient-zero). The signal is the being's own radiance, so zero temperature is
         // zero emission.
         assert_eq!(
-            being_signal_emission(Fixed::ZERO, coeff, sigma),
+            being_signal_emission(Fixed::ZERO, coeff, sigma_bits, sigma_scale),
             Fixed::ZERO,
             "a body at absolute zero emits no thermal signal"
         );
 
         // A warmer body emits a stronger signal than a cooler one (the T^4 dependence): a warm predator is
         // more perceptible than a cool one, and this divergence is temperature alone, no label.
-        let cool = being_signal_emission(Fixed::from_int(280), coeff, sigma);
-        let warm = being_signal_emission(Fixed::from_int(310), coeff, sigma);
+        let cool = being_signal_emission(Fixed::from_int(280), coeff, sigma_bits, sigma_scale);
+        let warm = being_signal_emission(Fixed::from_int(310), coeff, sigma_bits, sigma_scale);
         assert!(
             warm > cool && cool > Fixed::ZERO,
             "a warmer body emits a stronger thermal signal (T^4 dependence)"
@@ -809,8 +819,18 @@ mod tests {
         // same temperature (monotone in the coefficient), so the reserved value means what its basis says.
         // Monotone rather than exact-double because a half-scale fixed-point multiply truncates by up to one
         // ULP; the lever's DIRECTION is the load-bearing property, not bit-exact linearity.
-        let quarter = being_signal_emission(Fixed::from_int(300), Fixed::from_ratio(1, 4), sigma);
-        let half = being_signal_emission(Fixed::from_int(300), Fixed::from_ratio(1, 2), sigma);
+        let quarter = being_signal_emission(
+            Fixed::from_int(300),
+            Fixed::from_ratio(1, 4),
+            sigma_bits,
+            sigma_scale,
+        );
+        let half = being_signal_emission(
+            Fixed::from_int(300),
+            Fixed::from_ratio(1, 2),
+            sigma_bits,
+            sigma_scale,
+        );
         assert!(
             half > quarter && quarter > Fixed::ZERO,
             "a larger reserved coefficient yields a stronger emission (the coupling lever)"
@@ -819,8 +839,8 @@ mod tests {
         // Deterministic: identical inputs give the identical bit-exact emission (Principle 3), the run path's
         // requirement for a reproducible perceive phase.
         assert_eq!(
-            being_signal_emission(Fixed::from_int(305), coeff, sigma),
-            being_signal_emission(Fixed::from_int(305), coeff, sigma),
+            being_signal_emission(Fixed::from_int(305), coeff, sigma_bits, sigma_scale),
+            being_signal_emission(Fixed::from_int(305), coeff, sigma_bits, sigma_scale),
             "the emission is a pure deterministic read of temperature and the coefficient"
         );
     }

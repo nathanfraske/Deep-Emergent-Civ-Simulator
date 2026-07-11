@@ -5661,7 +5661,10 @@ impl Runner {
                 if emb.being_percept && emb.being_field.is_some() && emb.physiology.is_some() =>
             {
                 let field = emb.being_field.as_ref().unwrap();
-                let sigma = emb.physiology.as_ref().unwrap().anchors.sigma;
+                let (sigma_bits, sigma_scale) = {
+                    let a = &emb.physiology.as_ref().unwrap().anchors;
+                    (a.sigma_fine_bits, a.sigma_fine_scale)
+                };
                 let registry_opt = emb.material_registry.as_ref();
                 // Parallel (arc 4): each perceiver's perceived list and its two gradients are pure reads of the
                 // immutable population, its beliefs, and the body temperatures, keyed by w.id and drawing no
@@ -5684,7 +5687,8 @@ impl Runner {
                             let emission = physiology::being_signal_emission(
                                 body_temp,
                                 field.emission_coefficient,
-                                sigma,
+                                sigma_bits,
+                                sigma_scale,
                             );
                             if emission <= Fixed::ZERO {
                                 continue;
@@ -5775,7 +5779,8 @@ impl Runner {
                 emb.being_field.as_ref(),
                 emb.physiology.as_ref(),
             ) {
-                let sigma = phys.anchors.sigma;
+                let (sigma_bits, sigma_scale) =
+                    (phys.anchors.sigma_fine_bits, phys.anchors.sigma_fine_scale);
                 let registry_opt = emb.material_registry.as_ref();
                 let creature_dirs: BTreeMap<StableId, Vec<Fixed>> = emb
                     .walkers
@@ -5797,7 +5802,8 @@ impl Runner {
                             let emission = physiology::being_signal_emission(
                                 body_temp,
                                 field.emission_coefficient,
-                                sigma,
+                                sigma_bits,
+                                sigma_scale,
                             );
                             if emission <= Fixed::ZERO {
                                 continue;
