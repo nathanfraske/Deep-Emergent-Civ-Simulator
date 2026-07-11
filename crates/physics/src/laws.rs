@@ -3994,20 +3994,20 @@ mod tests {
         // 461.5 J/(kg K). Clausius-Clapeyron gives L_vap = R_v * T_ref^2 * slope / e_ref, which must recover
         // the measured latent heat near 2.454e6 J/kg (the CRC 20 C datum), the cross-check that proves the
         // curve and the retired therm.latent_heat are consistent rather than double-authored.
+        // Integer-only assertions (the canonical kernel module admits no float, steering.rs): the derived
+        // L_vap is bounded to a narrow J/kg window around 2.454e6, and the monotonicity is a Fixed compare.
         let slope = Fixed::from_ratio(1093, 10_000_000);
         let t_ref = Fixed::from_int(288);
         let e_ref = Fixed::from_ratio(1705, 1_000_000);
         let r_vapor = Fixed::from_ratio(923, 2);
-        let l_vap =
-            latent_heat_from_clausius_clapeyron(slope, t_ref, e_ref, r_vapor).to_f64_lossy();
+        let l_vap = latent_heat_from_clausius_clapeyron(slope, t_ref, e_ref, r_vapor);
         assert!(
-            (l_vap - 2.454e6).abs() < 5.0e3,
-            "L_vap derives to ~2.454e6 J/kg from the curve slope, got {l_vap}"
+            l_vap > Fixed::from_int(2_449_000) && l_vap < Fixed::from_int(2_459_000),
+            "L_vap derives to ~2.454e6 J/kg from the curve slope"
         );
         // A steeper curve (larger slope) implies a larger latent heat, monotonic in the slope.
         let steeper =
-            latent_heat_from_clausius_clapeyron(slope.saturating_add(slope), t_ref, e_ref, r_vapor)
-                .to_f64_lossy();
+            latent_heat_from_clausius_clapeyron(slope.saturating_add(slope), t_ref, e_ref, r_vapor);
         assert!(
             steeper > l_vap,
             "a steeper saturation slope reads a larger L_vap"
