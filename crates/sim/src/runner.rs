@@ -14237,4 +14237,208 @@ values = [
             "the selection experiment is deterministic"
         );
     }
+
+    /// The FLEE arena (#146, the being-channel threat-avoidance pole, the mirror of the matter arena): run the
+    /// in-run selection loop with the being-directed percept ARMED (physiology present so the perceive path
+    /// fires) and the authored, EMITTING predator as the fitness gradient. A symmetric zero-mean seed on the
+    /// being-signal ATTRACTION heading (half +8 toward the perceived emitter, half -8 away). Death is ONLY the
+    /// predator's whole-body wound through the one INTEGRITY cull (energy and temperature never floor), so the
+    /// predator, not starvation, is the isolated fitness variable. Returns the population-mean attraction weight
+    /// and the living count. Scoped to the MAGNITUDE proxy: a being sorts emitters by signal strength, so
+    /// avoiding the strong-emitting predator (which wounds) is favoured, never a "predator" identity read.
+    fn flee_arena(predator_present: bool, generations: u64, verbose: bool) -> (Fixed, usize) {
+        use crate::contact_transfer::ContactTransferRegistry;
+        use crate::homeostasis::{HomeostaticAxisDef, HomeostaticRegistry, INTEGRITY};
+        use crate::learn::BeingPerceptField;
+        use crate::material::StrikeParams;
+        use crate::medium::MediumField;
+        let ax = |id, name: &str, backing: Option<&str>, floor: i32| HomeostaticAxisDef {
+            id,
+            name: name.to_string(),
+            backing_component: backing.map(|s| s.to_string()),
+            capacity_per_mass: Fixed::ONE,
+            base_drain: Fixed::ZERO,
+            exertion_drain: Fixed::ZERO,
+            death_floor: Fixed::from_int(floor),
+            draw_set: Vec::new(),
+        };
+        let homeo = HomeostaticRegistry {
+            axes: vec![
+                // Energy and temperature NEVER floor (death_floor far below zero), so starvation and cold are not
+                // a cause of death; only the predator's wound culls (INTEGRITY floors at zero).
+                ax(
+                    ENERGY,
+                    "energy",
+                    Some(crate::physiology::ENERGY_DENSITY),
+                    -1000,
+                ),
+                ax(TEMPERATURE, "temperature", None, -1000),
+                ax(INTEGRITY, "integrity", None, 0),
+            ],
+        };
+        let organs = BodyPlanRegistry::dev_default();
+        let mut emb = Embodiment::new(
+            homeo.clone(),
+            AffordanceRegistry::dev_predator_geophage(),
+            LocomotionParams::dev_default(),
+            0,
+            0x14EE_2B1D,
+        );
+        // Physiology armed: the creature being-perceive block is gated on it (runner.rs:6134-6138); without it the
+        // prey would sense nothing (the #144 threat-arena omission). The field temperature equals the setpoint, so
+        // beings stay warm and emit a being-signal any perceiver reads.
+        emb.set_physiology(EmbodiedPhysiology::dev_fixture(
+            organs.clone(),
+            MediumField::uniform(
+                24,
+                24,
+                Fixed::ONE,
+                Fixed::ONE,
+                Fixed::ONE,
+                Fixed::from_int(310),
+            ),
+        ));
+        emb.set_strike(StrikeParams::dev_fixture());
+        emb.set_contact_transfer(ContactTransferRegistry::dev_terran());
+        emb.set_being_field(Some(BeingPerceptField::dev_fixture()));
+        emb.set_being_percept(true);
+        emb.set_creature_being_percept(true);
+        // Eligibility reserve zero: any living being is reproduction-eligible, so the beat fires for a co-located
+        // pair despite the metabolic drain (the fitness variable is the predator, not the reserve level).
+        emb.set_creature_selection(Some(CreatureSelectionParams {
+            mint_perturbation_spread: Fixed::from_decimal_str("0.05").unwrap(),
+            reproduction_eligibility_reserve: Fixed::ZERO,
+            offspring_mutation_spread: Fixed::from_decimal_str("0.02").unwrap(),
+        }));
+        let layout = emb.layout().clone();
+        let n_in = layout.n_in();
+        let move_base = layout.output_base(crate::homeostasis::MOVE).unwrap();
+        let being_base = layout.being_input_base();
+        let bias = n_in - 1;
+        // The SELECTED trait: the MOVE heading on the being-directed ATTRACTION pair (the toward-emitter direction
+        // `creature_being_direction` writes there). Positive heads toward the perceived emitter, negative away.
+        let attract_weights = |sign: i64| -> Vec<Fixed> {
+            let mut w = vec![Fixed::ZERO; layout.weight_count()];
+            w[move_base * n_in + bias] = Fixed::ONE; // MOVE activation from the bias
+            let s = Fixed::from_int(8 * sign as i32);
+            w[(move_base + 1) * n_in + (being_base + 2)] = s; // heading dx from the attraction dx
+            w[(move_base + 2) * n_in + (being_base + 3)] = s; // heading dy from the attraction dy
+            w
+        };
+        let thermal = || BeingThermal {
+            setpoint: Fixed::from_int(310),
+            half_band: Fixed::from_int(30),
+            initial_temp: Fixed::from_int(310),
+        };
+        let start = Coord3::ground(6, 8);
+        for k in 0..12u64 {
+            let sign: i64 = if k % 2 == 0 { 1 } else { -1 };
+            let ctrl = Controller::from_weights(
+                n_in,
+                layout.n_out(),
+                layout.hidden(),
+                attract_weights(sign),
+            );
+            emb.add(
+                Walker::new(
+                    StableId(CREATURE_ID_TAG | (k + 1)),
+                    start,
+                    repro_body(),
+                    Homeostasis::from_mass(&homeo, Fixed::ONE),
+                    Physiology::dev_for_registry(&homeo),
+                    ctrl.clone(),
+                )
+                .with_lineage(ctrl),
+                thermal(),
+            );
+        }
+        let params = crate::InferenceParams {
+            clamp: Fixed::from_int(50),
+            commit_threshold: Fixed::from_int(3),
+            margin: Fixed::from_int(1),
+        };
+        let mut world = World::new(params, params, crate::AccessWeights::from_pairs([]));
+        world.set_life_cadence(6);
+        let field = Field::new(24, 24, vec![Fixed::from_int(310); 24 * 24]);
+        let mut runner = Runner::with_world_and_embodiment(field, calib(), world, emb);
+        // The authored EMITTING predator (a warm body that WOUNDS co-located beings), placed on the prey cluster
+        // when present. A being carried TOWARD emitters clusters with the predator and is struck; one carried AWAY
+        // disperses and survives. Under the magnitude proxy the being sorts emitters by signal strength (never a
+        // "predator" identity); the predator's lethality is what makes a dispersing (avoid) weight pay.
+        if predator_present {
+            runner.spawn_predator(start, repro_body());
+        }
+        let mean_attract = |r: &Runner| -> (Fixed, usize) {
+            let emb = r.embodiment().unwrap();
+            let live: Vec<&Walker> = emb
+                .walkers()
+                .iter()
+                .filter(|w| w.alive && !is_predator(w.id))
+                .collect();
+            if live.is_empty() {
+                return (Fixed::ZERO, 0);
+            }
+            let mut sum = Fixed::ZERO;
+            for w in &live {
+                sum += w
+                    .controller
+                    .weight((move_base + 1) * n_in + (being_base + 2));
+            }
+            (sum.div(Fixed::from_int(live.len() as i32)), live.len())
+        };
+        for g in 0..generations {
+            for _ in 0..6 {
+                runner.step();
+            }
+            if verbose {
+                let (m, n) = mean_attract(&runner);
+                println!(
+                    "predator={predator_present} gen {}: living={n} mean_attract={:.3}",
+                    g + 1,
+                    m.to_f64_lossy()
+                );
+            }
+        }
+        mean_attract(&runner)
+    }
+
+    #[test]
+    fn flee_pole_emerges_only_under_the_predator() {
+        // #146, the being-channel THREAT-AVOIDANCE emergence proof (the mirror of the matter-channel approach
+        // proof), on the EXISTING substrate with perception armed (physiology present). The being-signal
+        // attraction weight is seeded symmetric and zero-mean; under the emitting, wounding predator the
+        // population mean is driven NEGATIVE (the avoidance pole): beings whose weight carried them away from the
+        // strong-emitting hazard survived the strike-to-death loop and bred, while those carried toward it were
+        // wounded. In the matched HELD CONTROL (no predator) the same regime leaves the mean at its zero seed. The
+        // contrast is the proof that SELECTION moved the weight, not the regime or an authored bias; nothing about
+        // approach-versus-flee is authored (the seed is symmetric), and the being keys on signal MAGNITUDE, never
+        // a predator identity. Scoped to the magnitude proxy: the shift is modest because the predator is one warm
+        // emitter among the prey cluster and a stationary point-hazard, so a clean, strong "avoid the predator"
+        // awaits the 2b per-feature discrimination (the flagged follow-on).
+        let (pred_mean, _pred_n) = flee_arena(true, 8, false);
+        let (safe_mean, _safe_n) = flee_arena(false, 8, false);
+        assert!(
+            pred_mean < Fixed::from_ratio(-3, 10),
+            "under the predator selection drove the mean attraction weight to the avoidance pole (negative), off \
+             its zero seed: got {}",
+            pred_mean.to_f64_lossy()
+        );
+        assert!(
+            safe_mean.abs() < Fixed::from_ratio(2, 10),
+            "without a predator the mean attraction weight stayed near its zero seed: got {}",
+            safe_mean.to_f64_lossy()
+        );
+        assert!(
+            pred_mean < safe_mean - Fixed::from_ratio(3, 10),
+            "the predator run's attraction weight is well below the no-predator control ({} vs {})",
+            pred_mean.to_f64_lossy(),
+            safe_mean.to_f64_lossy()
+        );
+        // Determinism (Principle 3): the whole seeded experiment replays bit-for-bit.
+        let (pred_mean2, _) = flee_arena(true, 8, false);
+        assert_eq!(
+            pred_mean, pred_mean2,
+            "the flee experiment is deterministic"
+        );
+    }
 }
