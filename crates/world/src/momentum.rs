@@ -348,6 +348,87 @@ fn body_gain(extra: &[BodyForce], cur: usize, nbr: usize) -> Fixed {
     gain
 }
 
+/// An isotropic fan under the unified law: a source sheds its mass as `azimuths` equal parcels launched at the
+/// same speed and elevation angle in evenly spaced azimuths (the maximum-entropy, unbiased direction prior),
+/// each integrated through the one law. Because the law is unified, ONE fan covers both regimes: a steep
+/// elevation angle flies a ballistic blanket, a grazing one runs out a surface blanket, and a mixed relief
+/// does both along different azimuths, from the same fan. The blanket is NOT authored; it EMERGES from the
+/// terrain shaping each parcel's path, so flat ground gives a symmetric ring and real relief breaks it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MomentumFan {
+    /// The launch speed, the same for every azimuth (isotropic launch).
+    pub speed: Fixed,
+    /// The elevation angle above the horizontal, the same for every azimuth. It selects the regime the fan
+    /// runs in without naming it: steep flies, grazing skims, and the terrain decides the rest.
+    pub elevation_angle: Fixed,
+    /// The number of evenly spaced launch azimuths. A RESOLUTION and determinism bound, not a physical value:
+    /// reserved-with-basis as the fewest azimuths at which the blanket's shape stops changing beyond the grid
+    /// resolution (a resolution-versus-cost bound), never fabricated.
+    pub azimuths: u32,
+}
+
+/// Fire an isotropic fan from `source` under gravity and Coulomb friction alone (the common case). A
+/// convenience wrapper over [`momentum_fan_with_forces`] with no extra body forces.
+pub fn momentum_fan(
+    width: usize,
+    height: usize,
+    elevation: &[Fixed],
+    source: usize,
+    fan: MomentumFan,
+    forces: MomentumForces,
+) -> Vec<crate::redistribute::Weighted> {
+    momentum_fan_with_forces(width, height, elevation, source, fan, forces, &[])
+}
+
+/// Fire an isotropic fan from `source` under the unified law and aggregate where the parcels come to rest into
+/// a canonical destination distribution the redistribution operator ([`crate::redistribute`]) credits. The
+/// azimuths are the evenly spaced angles `i * 2*pi / azimuths` from a fixed origin (deterministic fixed-point
+/// CORDIC, never an RNG), each parcel integrated through [`momentum_integrate_with_forces`], and the rest cells
+/// gathered in cell order into `(cell, count)` weights, so the whole fan is a pure function of its inputs,
+/// worker-invariant. Returns an empty distribution for a zero-azimuth fan.
+///
+/// The angular resolution is the CORDIC's in BOTH regimes, the unification's bonus: the integrator holds a
+/// sub-cell heading along the continuous azimuth and floors it to a cell (like the ballistic march), so a
+/// contact-regime fan resolves distinct azimuths rather than collapsing to the four axes the surface
+/// integrator's greedy 4-connected steps give ([`crate::runout::launch_fan`]'s stated limit). Gravity is the
+/// parameter [`MomentumForces::gravity`], so a world's own or derived gravity sets the blanket radius with no
+/// code change.
+pub fn momentum_fan_with_forces(
+    width: usize,
+    height: usize,
+    elevation: &[Fixed],
+    source: usize,
+    fan: MomentumFan,
+    forces: MomentumForces,
+    extra: &[BodyForce],
+) -> Vec<crate::redistribute::Weighted> {
+    use crate::redistribute::Weighted;
+    use std::collections::BTreeMap;
+    if fan.azimuths == 0 {
+        return Vec::new();
+    }
+    // 2*pi as the full turn the azimuths evenly divide; HALF_PI times four keeps it exact-in-Fixed.
+    let full_turn = Fixed::HALF_PI.mul(Fixed::from_int(4));
+    let count = Fixed::from_int(fan.azimuths as i32);
+    // An ordered map so the aggregation is canonical (cell order), never a hash-iteration leak.
+    let mut rests: BTreeMap<usize, u64> = BTreeMap::new();
+    for i in 0..fan.azimuths {
+        let phi = full_turn.mul(Fixed::from_int(i as i32)).div(count);
+        let launch = MomentumLaunch {
+            speed: fan.speed,
+            elevation_angle: fan.elevation_angle,
+            azimuth: phi,
+        };
+        let path =
+            momentum_integrate_with_forces(width, height, elevation, source, launch, forces, extra);
+        *rests.entry(path.rest).or_insert(0) += 1;
+    }
+    rests
+        .into_iter()
+        .map(|(dest, weight)| Weighted { dest, weight })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -703,5 +784,271 @@ mod tests {
         let a = momentum_integrate(w, h, &e, 15 * w + 15, l, f);
         let b = momentum_integrate(w, h, &e, 15 * w + 15, l, f);
         assert_eq!(a, b, "the same launch and terrain reproduce the same path");
+    }
+
+    // The east-west and north-south parcel counts of a fan's blanket around a source.
+    fn axis_counts(
+        dist: &[crate::redistribute::Weighted],
+        w: usize,
+        sx: usize,
+        sy: usize,
+    ) -> (u64, u64, u64, u64) {
+        let (mut east, mut west, mut north, mut south) = (0u64, 0u64, 0u64, 0u64);
+        for wt in dist {
+            let x = wt.dest % w;
+            let y = wt.dest / w;
+            if x > sx {
+                east += wt.weight;
+            }
+            if x < sx {
+                west += wt.weight;
+            }
+            if y > sy {
+                south += wt.weight;
+            }
+            if y < sy {
+                north += wt.weight;
+            }
+        }
+        (east, west, north, south)
+    }
+
+    #[test]
+    fn an_airborne_fan_spreads_near_symmetrically_with_true_angular_resolution_on_flat_ground() {
+        // Flat ground, source at the centre, a 16-azimuth fan at a steep angle (the airborne regime): every
+        // azimuth lands at its own cell, the parcel count is conserved, and the blanket is symmetric east-west
+        // and north-south to within one parcel (the residual a deterministic sub-cell floor-rounding artifact).
+        let (w, h) = (61usize, 61usize);
+        let flat = vec![Fixed::ZERO; w * h];
+        let (sx, sy) = (30usize, 30usize);
+        let source = sy * w + sx;
+        let fan = MomentumFan {
+            speed: Fixed::from_int(10),
+            elevation_angle: deg45(),
+            azimuths: 16,
+        };
+        let dist = momentum_fan(
+            w,
+            h,
+            &flat,
+            source,
+            fan,
+            m_forces(
+                Fixed::from_int(10),
+                Fixed::from_ratio(1, 2),
+                Fixed::ONE,
+                200,
+            ),
+        );
+        let total: u64 = dist.iter().map(|wt| wt.weight).sum();
+        assert_eq!(total, 16, "every launched parcel is accounted for");
+        assert!(
+            dist.len() >= 12,
+            "the airborne fan resolves distinct azimuths, not four axes (got {} cells)",
+            dist.len()
+        );
+        let (east, west, north, south) = axis_counts(&dist, w, sx, sy);
+        assert!(
+            east.abs_diff(west) <= 1 && north.abs_diff(south) <= 1,
+            "near-symmetric on flat ground (E{east} W{west} N{north} S{south})"
+        );
+    }
+
+    #[test]
+    fn a_contact_fan_resolves_more_azimuths_than_the_surface_four_axis_fan() {
+        // The unification's bonus, proven by contrast rather than asserted: a grazing (contact-regime) fan
+        // through the unified integrator holds each azimuth's continuous heading and floors it to a cell, so it
+        // resolves many distinct landing cells, where the surface integrator's greedy 4-connected launch fan
+        // collapses the same isotropic launch onto the four axes. Both run the SAME isotropic launch on the
+        // SAME flat ground, so the difference is the angular resolution alone.
+        let (w, h) = (61usize, 61usize);
+        let flat = vec![Fixed::ZERO; w * h];
+        let (sx, sy) = (30usize, 30usize);
+        let source = sy * w + sx;
+        let g = Fixed::from_int(10);
+        let mu = Fixed::from_ratio(1, 10);
+        let speed = Fixed::from_int(4); // grazing and slow enough to skim, far enough to resolve
+        let unified = momentum_fan(
+            w,
+            h,
+            &flat,
+            source,
+            MomentumFan {
+                speed,
+                elevation_angle: Fixed::ZERO, // grazing: the contact regime
+                azimuths: 16,
+            },
+            m_forces(g, mu, Fixed::ONE, 200),
+        );
+        // The surface launch fan with the matching isotropic launch (energy e0 = v^2/2, the same speed bias).
+        let e0 = smul(Fixed::from_ratio(1, 2), smul(speed, speed));
+        let surface = crate::runout::launch_fan(
+            w,
+            h,
+            &flat,
+            source,
+            crate::runout::LaunchFan {
+                energy: e0,
+                speed,
+                directions: 16,
+            },
+            RunoutForces {
+                gravity: g,
+                friction: mu,
+                cell_size: Fixed::ONE,
+                step_cap: 200,
+            },
+            &[],
+        );
+        let unified_total: u64 = unified.iter().map(|wt| wt.weight).sum();
+        assert_eq!(unified_total, 16, "the unified fan conserves the parcels");
+        assert!(
+            unified.len() >= 12,
+            "the contact fan resolves distinct azimuths (got {} cells)",
+            unified.len()
+        );
+        assert!(
+            unified.len() > surface.len(),
+            "the unified contact fan resolves more cells than the surface four-axis fan (unified {} vs surface {})",
+            unified.len(),
+            surface.len()
+        );
+        let (east, west, north, south) = axis_counts(&unified, w, sx, sy);
+        assert!(
+            east.abs_diff(west) <= 1 && north.abs_diff(south) <= 1,
+            "the contact blanket is near-symmetric on flat ground (E{east} W{west} N{north} S{south})"
+        );
+    }
+
+    #[test]
+    fn a_slope_breaks_the_fan_blanket() {
+        // On a ramp falling to the east, the downhill (east) parcels reach farther than the uphill (west) ones,
+        // so the blanket stretches east: the ring is broken by the terrain, not by an authored shape.
+        let (w, h) = (61usize, 41usize);
+        let ramp = east_downhill(w, h, Fixed::from_ratio(1, 4));
+        let (sx, sy) = (30usize, 20usize);
+        let source = sy * w + sx;
+        let fan = MomentumFan {
+            speed: Fixed::from_int(10),
+            elevation_angle: deg45(),
+            azimuths: 16,
+        };
+        let dist = momentum_fan(
+            w,
+            h,
+            &ramp,
+            source,
+            fan,
+            m_forces(
+                Fixed::from_int(10),
+                Fixed::from_ratio(1, 2),
+                Fixed::ONE,
+                300,
+            ),
+        );
+        let max_east = dist
+            .iter()
+            .map(|wt| wt.dest % w)
+            .filter(|&x| x > sx)
+            .map(|x| x - sx)
+            .max()
+            .unwrap_or(0);
+        let max_west = dist
+            .iter()
+            .map(|wt| wt.dest % w)
+            .filter(|&x| x < sx)
+            .map(|x| sx - x)
+            .max()
+            .unwrap_or(0);
+        assert!(
+            max_east > max_west,
+            "the terrain stretches the blanket downhill (east reach {max_east} > west reach {max_west})"
+        );
+    }
+
+    #[test]
+    fn the_fan_feeds_the_operator_a_conservative_blanket() {
+        use crate::redistribute::{redistribute, Redistribution};
+        let (w, h) = (41usize, 41usize);
+        let flat = vec![Fixed::ZERO; w * h];
+        let source = 20 * w + 20;
+        let fan = MomentumFan {
+            speed: Fixed::from_int(9),
+            elevation_angle: deg45(),
+            azimuths: 16,
+        };
+        let dist = momentum_fan(
+            w,
+            h,
+            &flat,
+            source,
+            fan,
+            m_forces(
+                Fixed::from_int(10),
+                Fixed::from_ratio(1, 2),
+                Fixed::ONE,
+                200,
+            ),
+        );
+        let mass = 4000;
+        let delta = redistribute(
+            w * h,
+            &[Redistribution {
+                source,
+                mass,
+                dests: dist,
+            }],
+        )
+        .unwrap();
+        assert_eq!(delta.iter().sum::<i64>(), 0, "the blanket conserves mass");
+        assert_eq!(delta[source], -mass, "the source shed its whole mass");
+    }
+
+    #[test]
+    fn the_fan_is_deterministic() {
+        let (w, h) = (41usize, 41usize);
+        let e: Vec<Fixed> = (0..w * h)
+            .map(|i| Fixed::from_int(((i * 3) % 7) as i32))
+            .collect();
+        let source = 20 * w + 20;
+        let fan = MomentumFan {
+            speed: Fixed::from_int(12),
+            elevation_angle: deg45(),
+            azimuths: 24,
+        };
+        let f = m_forces(
+            Fixed::from_int(9),
+            Fixed::from_ratio(1, 10),
+            Fixed::ONE,
+            300,
+        );
+        let a = momentum_fan(w, h, &e, source, fan, f);
+        let b = momentum_fan(w, h, &e, source, fan, f);
+        assert_eq!(a, b, "the same fan reproduces the same blanket");
+    }
+
+    #[test]
+    fn a_zero_azimuth_fan_is_empty() {
+        let (w, h) = (9usize, 9usize);
+        let flat = vec![Fixed::ZERO; w * h];
+        let fan = MomentumFan {
+            speed: Fixed::from_int(10),
+            elevation_angle: deg45(),
+            azimuths: 0,
+        };
+        assert!(momentum_fan(
+            w,
+            h,
+            &flat,
+            40,
+            fan,
+            m_forces(
+                Fixed::from_int(10),
+                Fixed::from_ratio(1, 10),
+                Fixed::ONE,
+                50
+            )
+        )
+        .is_empty());
     }
 }
