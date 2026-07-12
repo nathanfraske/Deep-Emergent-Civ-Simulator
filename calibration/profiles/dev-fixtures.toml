@@ -474,6 +474,50 @@ value = "0.05"
 unit = "producer_biomass"
 source = "dev fixture for base-level liveliness step 3; crates/sim/src/environ.rs"
 
+# --- the DERIVED photosynthesis productivity (#156): the measured per-producer constants the carbon-fixation
+# derivation reads, retiring the abstract-producer productivity.*_requirement half-saturation constants. Each is a
+# per-substance MEASURED datum (refutable in a lab without the simulator); the fixtures below are Earth-like C3
+# magnitudes pending the owner's per-producer calibration.
+[[reserved]]
+id = "photosynthesis.quantum_yield"
+basis = "the photosynthetic quantum yield, the fraction of incident radiant energy fixed as chemical energy at low light-limited irradiance (the light-response initial slope); measured maximum quantum efficiency of the producer's photosystem (Taiz and Zeiger). FIXTURE: a few percent for C3"
+status = "set"
+value = "0.05"
+unit = "fixed_energy_per_incident_energy"
+source = "dev fixture for the photosynthesis-to-productivity derivation #156; crates/sim/src/environ.rs carbon_fixation_rate"
+
+[[reserved]]
+id = "photosynthesis.light_saturation"
+basis = "the light-saturation irradiance where fixation stops rising with light (the enzyme/CO2-limited plateau begins), in the same flux units as insolation*solar_constant; measured C3 light-saturation, well below full sun (Taiz and Zeiger; Larcher)"
+status = "set"
+value = "300"
+unit = "watt_per_square_metre"
+source = "dev fixture for the photosynthesis-to-productivity derivation #156; crates/sim/src/environ.rs carbon_fixation_rate"
+
+[[reserved]]
+id = "photosynthesis.temperature_optimum"
+basis = "the carbon-fixing enzyme's thermal optimum where the fixation rate peaks (absolute temperature); measured optimum of the producer's carboxylating enzyme, about 298 K for temperate C3 (Berry and Bjorkman 1980)"
+status = "set"
+value = "298"
+unit = "kelvin"
+source = "dev fixture for the photosynthesis-to-productivity derivation #156; crates/sim/src/environ.rs carbon_fixation_rate"
+
+[[reserved]]
+id = "photosynthesis.temperature_breadth"
+basis = "the carbon-fixing enzyme's thermal breadth, the temperature departure from the optimum at which fixation falls to zero (the piecewise-linear tent half-width approximating the measured thermal-performance; the Johnson-Lewin form reserved for R-GPU-CANON-PIN); Berry and Bjorkman 1980, Larcher"
+status = "set"
+value = "30"
+unit = "kelvin"
+source = "dev fixture for the photosynthesis-to-productivity derivation #156; crates/sim/src/environ.rs carbon_fixation_rate"
+
+[[reserved]]
+id = "photosynthesis.water_use_efficiency"
+basis = "the water-use-efficiency coupling, the water a producer must transpire per unit fixation at its potential rate (turning the cell's evaporative demand into the water requirement, retiring productivity.water_requirement); measured transpiration efficiency (the water-use-efficiency literature)"
+status = "set"
+value = "1"
+unit = "transpiration_per_fixation"
+source = "dev fixture for the photosynthesis-to-productivity derivation #156; crates/sim/src/environ.rs carbon_fixation_rate"
+
 [[reserved]]
 id = "salinity.weathering_rate"
 basis = "FIXTURE placeholder; the salt mass a cell gains per tick as salt leaches from rock, the salinity field source that accumulates in endorheic basins"

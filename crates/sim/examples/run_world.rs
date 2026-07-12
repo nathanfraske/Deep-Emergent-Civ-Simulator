@@ -2580,8 +2580,30 @@ fn main() {
                 // vaporization from the floor substance, both world DATA read not authored. This re-pins `living`,
                 // a stated re-pin whose reason is the added latent and sensible surface cooling.
                 env.arm_surface_cooling(derive_surface_cooling(&manifest));
+                // The DERIVED PHOTOSYNTHESIS productivity (#156, the Mirror-standup arc): arm the carbon-fixation
+                // derivation so each cell's productivity DERIVES from photosynthesis (the light-response over the
+                // real insolation flux, the enzyme thermal-performance tent, the water-use-efficiency coupling to
+                // the evaporation flux, and the soil-nutrient limitation over the matter-cycle fertility) instead
+                // of the abstract-producer Liebig interim, and the food a grazer eats is the derived fixed-carbon
+                // energy. Retires the authored productivity.*_requirement and the flat soil_baseline on this path;
+                // the measured photosynthetic constants read fail-loud from the manifest. This re-pins `living`, a
+                // stated re-pin whose reason is the derived productivity replacing the authored Liebig interim.
+                env.arm_photosynthesis(
+                    civsim_sim::environ::PhotosynthesisCalib::from_manifest(&manifest)
+                        .expect("the dev-fixtures profile carries the photosynthesis.* constants"),
+                );
             }
             runner.set_matter_cycle(MatterCycleCalib::dev_fixture());
+            // The ABIOTIC mineral-weathering floor (#156, the matter-cycle completion): arm map-wide rock
+            // weathering so the soil is fertile from geology before any biomass (the owner's super-fertile
+            // marsh), breaking the soil-bootstrap deadlock that left the derived fixation identically zero
+            // (fertility 0 at dawn -> soil_factor 0 -> the photosynthesis constants inert). The base dissolution
+            // rate reads fail-loud from the manifest; the per-cell wetness scaling derives in weather_minerals.
+            runner.arm_mineral_weathering(
+                manifest
+                    .require_fixed("weathering.mineral_dissolution_rate")
+                    .expect("the mirror profile carries weathering.mineral_dissolution_rate"),
+            );
             runner.set_decomposer(DecomposerDriverRegistry::dev_fixture());
             runner.set_corpse_matter(true);
             // The DERIVED-TAXIS survival floor (#151/#152, slice 3): arm the run-and-tumble motility floor beneath

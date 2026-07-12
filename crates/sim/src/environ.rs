@@ -378,6 +378,15 @@ pub struct EnvironFields {
     /// running hot on radiation alone. Armed by a scenario (the living world) that supplies its air medium's
     /// convective coefficient and latent heat.
     surface_cooling: Option<SurfaceCooling>,
+    /// The world's PHOTOSYNTHESIS calibration, or `None` when it is UNARMED (the default). While `None`,
+    /// [`Self::step_productivity`] keeps the abstract-producer Liebig `biomass_from` path, so a run that never
+    /// arms it is byte-identical and the four determinism pins hold. While `Some` (and the diurnal sky is armed,
+    /// so the stellar-constant flux anchor is present), the per-cell productivity DERIVES from photosynthesis
+    /// ([`carbon_fixation_rate`]): the light-response over the real insolation flux, the carbon-fixing enzyme's
+    /// thermal-performance tent, the water-use-efficiency coupling to the evaporation flux, and the soil-nutrient
+    /// limitation over the matter-cycle fertility, retiring the authored `productivity.*_requirement` and the flat
+    /// `soil_baseline` on the armed path (the photosynthesis-to-productivity arc, #156). Armed by the living world.
+    photosynthesis: Option<PhotosynthesisCalib>,
 }
 
 /// The SURFACE TURBULENT-COOLING data a world supplies to arm the diurnal surface balance's latent and sensible
@@ -1048,7 +1057,19 @@ impl EnvironFields {
             solar_inertia: Vec::new(),
             evaporation: Vec::new(),
             surface_cooling: None,
+            photosynthesis: None,
         }
+    }
+
+    /// Arm the DERIVED PHOTOSYNTHESIS productivity (the photosynthesis-to-productivity arc, #156, opt-in) with the
+    /// world's producer photosynthesis calibration, so [`Self::step_productivity`] derives each cell's carbon-
+    /// fixation rate ([`carbon_fixation_rate`]) instead of the abstract-producer Liebig `biomass_from`. Unarmed
+    /// (the default) the productivity stays the Liebig interim and the run is byte-identical, so the four
+    /// determinism pins hold; a scenario that wants the real derivation (the living world) calls this AND
+    /// [`Self::arm_diurnal`] (the derivation reads the sky's stellar-constant flux anchor). Where the sky is
+    /// unarmed the derivation has no flux anchor, so the Liebig path stands (the clean degrade).
+    pub fn arm_photosynthesis(&mut self, photo: PhotosynthesisCalib) {
+        self.photosynthesis = Some(photo);
     }
 
     /// Arm the DIURNAL insolation cycle (day-night arc, opt-in) with the world's data sky, so [`Self::step`]
@@ -1487,6 +1508,46 @@ impl EnvironFields {
         }
     }
 
+    /// The ABIOTIC mineral-weathering floor (the matter-cycle completion, #156): rock dissolves to soil nutrient
+    /// MAP-WIDE at a rate that DERIVES from each cell's own WETNESS, times a reserved base mineral-dissolution
+    /// rate. Chemical weathering is hydrolysis, so it scales with the standing water a cell holds relative to its
+    /// basin capacity (`water / max_water_depth`, clamped): a WET marsh cell weathers strongly, a dry ridge
+    /// barely. The base rate is mineral-agnostic and reserved-with-basis, because the worldgen carries no
+    /// per-cell lithology to read the parent-rock composition from (the geology arc is the flagged follow-on);
+    /// the temperature (Arrhenius) coupling is likewise the deferred follow-on, like the thermal tent's `exp`, so
+    /// a warm marsh does not gate on it. So the soil is fertile from GEOLOGY before any biomass (primary
+    /// succession on weathered rock), and the biotic loop (plants grow, die, decompose back to soil) then
+    /// sustains it. Deposits the `bio.organic_residue` class the producer soil-draw and the fertility read both
+    /// key on. A legitimate out-of-ledger boundary source (rock into nutrient), run OUTSIDE the
+    /// `step_matter_cycle` conservation bracket (the decomposition legs stay conservative; runner.rs). Pure
+    /// deterministic fold in canonical row-major order (Principle 3); a zero base or zero basin capacity is a
+    /// no-op, so an unarmed run is byte-identical.
+    // @derives: abiotic mineral-weathering soil-nutrient supply (the matter-cycle completion, rock -> soil nutrient before any biomass) <- a reserved mineral-agnostic base dissolution rate x the cell's own WETNESS (standing water / basin capacity), the hydrolysis coupling; a wet marsh cell weathers strongly and a dry cell not at all. The base is reserved (no per-cell lithology exists to read the parent-rock composition from, the geology arc the follow-on) and the temperature-Arrhenius coupling is deferred, but the wetness scaling DERIVES from the water field, not authored per cell.
+    pub fn weather_minerals(
+        &self,
+        soil: &mut SoilNutrientField,
+        calib: &EnvironCalib,
+        base_rate: Fixed,
+        class: &str,
+    ) {
+        if base_rate <= Fixed::ZERO || calib.max_water_depth <= Fixed::ZERO {
+            return;
+        }
+        for y in 0..self.height {
+            for x in 0..self.width {
+                let wet = self
+                    .water
+                    .at(x, y)
+                    .div(calib.max_water_depth)
+                    .clamp(Fixed::ZERO, Fixed::ONE);
+                let rate = base_rate.checked_mul(wet).unwrap_or(Fixed::MAX);
+                if rate > Fixed::ZERO {
+                    soil.deposit(Coord3::ground(x, y), class, rate);
+                }
+            }
+        }
+    }
+
     /// Seed the located PRODUCER biomass from the living biosphere (the biosphere-into-run arc), once at
     /// world build. Overwrites (idempotent on re-seed); an off-grid cell is dropped. See [`Self::producer`].
     pub fn set_producer(&mut self, cells: &[(Coord3, Fixed)]) {
@@ -1813,28 +1874,65 @@ impl EnvironFields {
     /// so a fertilised cell grows more where soil is the limiting factor and the matter cycle closes into
     /// the food web. With no matter cycle armed the fertility is zero and the soil supply is the plain
     /// baseline, so the productivity (and its hash) is unchanged.
-    // @derives: per-cell biomass productivity / carrying capacity <- Liebig minimum over (water, light, temperature, soil); soil = soil_baseline + matter-cycle fertility. Productivity is NOT authored per cell; it derives from local conditions. Residual to derive: soil_baseline should read from the per-column lithology mineral floor rather than a flat scalar.
+    // @derives: per-cell biomass productivity / carrying capacity <- when photosynthesis is armed, the DERIVED carbon-fixation rate (carbon_fixation_rate: the light-response over the real insolation flux, the enzyme thermal tent, the water-use-efficiency coupling to evaporation, and the soil-nutrient limitation over matter-cycle fertility); unarmed, the abstract-producer Liebig minimum over (water, light, temperature, soil) with soil = soil_baseline + matter-cycle fertility (the interim the derivation retires). Productivity is NOT authored per cell.
     fn step_productivity(&mut self, temp: &Field, calib: &EnvironCalib) {
         let (w, h) = (self.width, self.height);
+        // The DERIVED photosynthesis path (armed, #156): read the calibration and the stellar-constant flux anchor
+        // out as owned Copy values BEFORE the loop, so the per-cell field reads do not hold a borrow of `self`
+        // across the `self.capacity.cells[i]` write. `None` unless BOTH the photosynthesis and the diurnal sky are
+        // armed (the derivation needs the flux anchor), so an unarmed run keeps the Liebig `biomass_from` path and
+        // stays byte-identical.
+        let derived = match (&self.photosynthesis, &self.sky) {
+            (Some(photo), Some(sky)) => Some((*photo, sky.solar_constant)),
+            _ => None,
+        };
         for y in 0..h {
             for x in 0..w {
                 let i = self.idx(x, y);
-                let soil = calib.soil_baseline.saturating_add(self.fertility[i]);
-                let climate = biomass_from(
-                    self.water.cells[i],
-                    self.light[i],
-                    temp.at(x, y),
-                    soil,
-                    calib,
-                );
-                // Where a real producer organism stands (biosphere-into-run), its located biomass is the food
-                // ceiling; elsewhere the abstract climate productivity is the baseline (the stand-in for
-                // unmodelled background vegetation). An all-zero producer (no biosphere seeded) takes the
-                // climate branch on every cell, so the capacity and its hash are byte-unchanged.
-                self.capacity.cells[i] = if self.producer[i] > Fixed::ZERO {
-                    self.producer[i]
-                } else {
-                    climate
+                let climate = match derived {
+                    // The armed derivation: the carbon-fixation rate over the real insolation flux (normalised
+                    // light times the stellar constant), the enzyme thermal tent, the water-use-efficiency
+                    // coupling to the evaporation flux, and the soil-nutrient limitation over the matter-cycle
+                    // fertility. Retires the flat `soil_baseline` (soil supply IS the fertility) and the authored
+                    // water/light/temperature requirements on this path.
+                    Some((photo, solar_constant)) => carbon_fixation_rate(
+                        self.light[i],
+                        solar_constant,
+                        temp.at(x, y),
+                        self.evaporation.get(i).copied().unwrap_or(Fixed::ZERO),
+                        self.water.cells[i],
+                        self.fertility[i],
+                        calib.soil_req,
+                        &photo,
+                    ),
+                    // The unarmed Liebig interim (byte-identical): the abstract-producer minimum over the four
+                    // satisfactions, the soil supply the flat baseline plus the matter-cycle fertility.
+                    None => biomass_from(
+                        self.water.cells[i],
+                        self.light[i],
+                        temp.at(x, y),
+                        calib.soil_baseline.saturating_add(self.fertility[i]),
+                        calib,
+                    ),
+                };
+                self.capacity.cells[i] = match derived {
+                    // ARMED: the derived carbon-fixation rate IS the productivity everywhere (the land's
+                    // photosynthetic potential), so a located producer's ENERGY derives from its own cell's
+                    // fixation like any cell; its nutrient COMPOSITION still rides `producer_food` /
+                    // `set_real_composition` in `regrow_supply`. The static `producer[i]` biomass is retired as
+                    // the energy source on this path (retiring the static-T3 energy the derivation replaces).
+                    Some(_) => climate,
+                    // UNARMED (byte-identical): where a real producer organism stands (biosphere-into-run), its
+                    // located biomass is the food ceiling; elsewhere the abstract climate productivity is the
+                    // baseline (the stand-in for unmodelled background vegetation). An all-zero producer takes
+                    // the climate branch on every cell, so the capacity and its hash are byte-unchanged.
+                    None => {
+                        if self.producer[i] > Fixed::ZERO {
+                            self.producer[i]
+                        } else {
+                            climate
+                        }
+                    }
                 };
             }
         }
@@ -1862,6 +1960,10 @@ impl EnvironFields {
     /// the same way as data. Walks canonical row-major order; a pure deterministic fold (Principle 3).
     pub fn regrow_supply(&self, resource: &mut ResourceField, calib: &EnvironCalib) {
         let (w, h) = (self.width, self.height);
+        // Whether the DERIVED photosynthesis productivity is armed (and the sky supplies the flux anchor): on the
+        // armed path the food capacity is an absolute fixed-energy value, so a bare cell's energy food is marked
+        // real (eaten at `content = supply`) rather than double-scaled through the `food_energy_density` anchor.
+        let photosynthesis_armed = self.photosynthesis.is_some() && self.sky.is_some();
         // Size the dense ground layer to the environ grid the first time (idempotent), so every per-cell
         // write below lands in an O(1) indexed slot rather than a BTreeMap tree descent.
         resource.set_dims(w, h);
@@ -1895,6 +1997,13 @@ impl EnvironFields {
                 // (byte-identical for a run that seeds no producer food, so the four tracked pins hold).
                 match food {
                     Some(fc) => resource.set_real_composition(coord, fc.keys().cloned()),
+                    // ARMED (the derived productivity, #156): a cell with no located producer still grows its food
+                    // toward the DERIVED carbon-fixation capacity, which is already an absolute fixed-energy value,
+                    // so mark its energy class real so the forage INGEST eats it at `content = supply` and does NOT
+                    // double-scale through the `food_energy_density` anchor (retiring that scalar on the armed
+                    // energy path; the water and salinity axes below stay unmarked and keep the anchor).
+                    None if photosynthesis_armed => resource
+                        .set_real_composition(coord, std::iter::once(ENERGY_DENSITY.to_string())),
                     None => resource.set_real_composition(coord, std::iter::empty()),
                 }
                 let comp = resource.composition_mut(coord);
@@ -1976,6 +2085,147 @@ pub fn biomass_from(
         (temperature, Fixed::ONE, Some(calib.temp_req)),
         (soil, Fixed::ONE, Some(calib.soil_req)),
     ])
+}
+
+/// The DERIVED photosynthesis calibration: the measured per-producer constants the carbon-fixation derivation
+/// reads (the photosynthesis-to-productivity arc, #156). Each is a per-substance MEASURED datum surfaced
+/// reserved-with-basis (Principle 11), refutable in a lab without this simulator, never an ecology knob; a
+/// different world's producer, or an evolved lineage, is a data row (admit-the-alien). These REPLACE the authored
+/// abstract-producer half-saturation constants (`productivity.water/light/temperature_requirement`).
+#[derive(Clone, Copy, Debug)]
+pub struct PhotosynthesisCalib {
+    /// The photosynthetic QUANTUM YIELD (the initial slope of the light-response curve): the fraction of
+    /// incident radiant energy fixed as chemical energy at low, light-limited irradiance. RESERVED. Basis: the
+    /// measured maximum quantum efficiency of the producer's photosystem (a C3 leaf fixes on the order of a few
+    /// percent of incident energy at low light; Taiz and Zeiger, Plant Physiology).
+    pub quantum_yield: Fixed,
+    /// The LIGHT-SATURATION IRRADIANCE (in the same physical flux units as `insolation * solar_constant`): the
+    /// irradiance at which fixation stops rising with light (the enzyme- or CO2-limited plateau begins).
+    /// RESERVED. Basis: the measured light-saturation point of the producer's photosynthesis, well below full sun
+    /// for C3 vegetation (Taiz and Zeiger; Larcher, Physiological Plant Ecology).
+    pub light_saturation: Fixed,
+    /// The carbon-fixing enzyme's THERMAL OPTIMUM (an absolute temperature): where the fixation rate peaks.
+    /// RESERVED. Basis: the measured optimum temperature of the producer's carboxylating enzyme (about 298 K for
+    /// temperate C3 vegetation; Berry and Bjorkman 1980, Annu. Rev. Plant Physiol.).
+    pub temp_optimum: Fixed,
+    /// The carbon-fixing enzyme's THERMAL BREADTH (the half-width of its thermal-performance curve): the
+    /// temperature departure from the optimum at which fixation falls to zero. RESERVED. Basis: the measured
+    /// thermal breadth of the producer's photosynthetic temperature response (Berry and Bjorkman 1980; Larcher).
+    /// The piecewise-linear TENT over (optimum, breadth) approximates the measured thermal-performance curve; the
+    /// exact Johnson-Lewin activation-times-deactivation form is reserved for when the `Fixed::exp` kernel is
+    /// canon-pinned (R-GPU-CANON-PIN), the flagged follow-on.
+    pub temp_breadth: Fixed,
+    /// The WATER-USE EFFICIENCY coupling (the water a producer must transpire per unit fixation at its potential
+    /// rate): the coefficient turning the cell's evaporative demand into the water requirement. RESERVED. Basis:
+    /// the measured transpiration efficiency of the producer (carbon fixed per water transpired; the water-use-
+    /// efficiency literature). The derived water requirement is `water_use_efficiency * evaporative_demand`,
+    /// retiring the flat `productivity.water_requirement`.
+    pub water_use_efficiency: Fixed,
+}
+
+impl PhotosynthesisCalib {
+    /// A LABELLED DEV FIXTURE standing up Earth-like C3 magnitudes for the tests and harness paths, not owner
+    /// values: a quantum yield of a twentieth (a few percent of incident energy fixed at low light), a light
+    /// saturation of 300 (well below the ~1361 stellar constant, so C3 saturates below full sun), a thermal
+    /// optimum of 298 K and a breadth of 30 K (the temperate-C3 photosynthetic temperature response), and a unit
+    /// water-use efficiency. The shipped values read from the manifest at arming; these only run in tests.
+    pub fn dev_fixture() -> PhotosynthesisCalib {
+        PhotosynthesisCalib {
+            quantum_yield: Fixed::from_ratio(1, 20),
+            light_saturation: Fixed::from_int(300),
+            temp_optimum: Fixed::from_int(298),
+            temp_breadth: Fixed::from_int(30),
+            water_use_efficiency: Fixed::ONE,
+        }
+    }
+
+    /// Read the photosynthesis calibration fail-loud from the manifest (Principle 11): each measured constant is
+    /// a reserved value that refuses to build while unset, never a silent default. The manifest home is the
+    /// `photosynthesis.*` keys, surfaced with their basis in the reserved manifest.
+    pub fn from_manifest(m: &CalibrationManifest) -> Result<PhotosynthesisCalib, CalibrationError> {
+        Ok(PhotosynthesisCalib {
+            quantum_yield: m.require_fixed("photosynthesis.quantum_yield")?,
+            light_saturation: m.require_fixed("photosynthesis.light_saturation")?,
+            temp_optimum: m.require_fixed("photosynthesis.temperature_optimum")?,
+            temp_breadth: m.require_fixed("photosynthesis.temperature_breadth")?,
+            water_use_efficiency: m.require_fixed("photosynthesis.water_use_efficiency")?,
+        })
+    }
+}
+
+/// The DERIVED per-cell CARBON-FIXATION RATE (net primary productivity), the photosynthesis substrate that
+/// RETIRES the authored Liebig `biomass_from`. It is the Liebig MINIMUM (the limiting factor sets the rate, the
+/// same min-fold the biome-fit uses) over four unit-interval factors, scaled by the light-saturated ABSOLUTE
+/// rate `p_max`. The rate `p_max` is the product of the quantum yield and the light saturation, so the absolute
+/// scale DERIVES from the stellar-constant flux anchor and the measured efficiency, with no owner net-primary-
+/// productivity number. The light factor is `I / (I + light_saturation)`, the saturating light limitation, with
+/// the real irradiance `I` the normalised insolation times the solar constant, so at low light the rate follows
+/// the quantum-yield slope and at high light it saturates to `p_max`. The temperature factor is the piecewise-
+/// linear TENT `max(0, 1 - |T - optimum| / breadth)` approximating the carbon-fixing enzyme's measured thermal-
+/// performance. The water factor is the water limitation whose requirement DERIVES from the evaporative demand
+/// and the measured water-use-efficiency, retiring the flat `productivity.water_requirement`. The soil factor is
+/// the nutrient limitation over the matter-cycle fertility, retiring the flat `soil_baseline` (the lithology-
+/// mineral derivation the follow-on). Every input is floor physics (the insolation flux, the surface temperature,
+/// the evaporative demand, the matter-cycle fertility) or a measured per-producer constant, so no free ecology
+/// knob enters.
+// @derives: per-cell carbon-fixation rate / net primary productivity <- the photosynthesis light-response
+//   (quantum yield x light-saturation over the real insolation flux = normalised light x the solar_constant
+//   floor-unit pin, itself derivable from L/(4 pi d^2)), the carbon-fixing enzyme thermal-performance tent
+//   (measured optimum, breadth), the water limitation (water-use-efficiency x evaporative demand), and the
+//   soil-nutrient limitation (matter-cycle fertility). Retires the authored productivity.*_requirement and the
+//   flat soil_baseline; the measured photosynthetic constants are reserved-with-basis.
+#[allow(clippy::too_many_arguments)]
+pub fn carbon_fixation_rate(
+    insolation_normalised: Fixed,
+    solar_constant: Fixed,
+    temperature: Fixed,
+    evaporative_demand: Fixed,
+    water_supply: Fixed,
+    soil_fertility: Fixed,
+    soil_requirement: Fixed,
+    photo: &PhotosynthesisCalib,
+) -> Fixed {
+    // The real irradiance: the normalised daylit insolation scaled by the stellar-constant flux anchor.
+    let irradiance = insolation_normalised
+        .checked_mul(solar_constant)
+        .unwrap_or(Fixed::MAX);
+    // The absolute light-saturated rate: the measured quantum yield times the light-saturation irradiance, so the
+    // absolute scale derives from the flux anchor and the measured efficiency (no owner NPP number).
+    let p_max = photo
+        .quantum_yield
+        .checked_mul(photo.light_saturation)
+        .unwrap_or(Fixed::MAX);
+    // light_fraction = I / (I + I_sat), the saturating light limitation in [0, 1].
+    let denom = irradiance.saturating_add(photo.light_saturation);
+    let light_fraction = if denom > Fixed::ZERO {
+        irradiance.div(denom).clamp(Fixed::ZERO, Fixed::ONE)
+    } else {
+        Fixed::ZERO
+    };
+    // temp_factor: the piecewise-linear tent over the enzyme optimum and breadth (a zero breadth reads a
+    // knife-edge, non-optimum temperatures fixing nothing).
+    let temp_factor = if photo.temp_breadth > Fixed::ZERO {
+        let dist = (temperature - photo.temp_optimum).abs();
+        (Fixed::ONE - dist.div(photo.temp_breadth)).clamp(Fixed::ZERO, Fixed::ONE)
+    } else if temperature == photo.temp_optimum {
+        Fixed::ONE
+    } else {
+        Fixed::ZERO
+    };
+    // water_factor: the water limitation, its requirement derived from the evaporative demand and the WUE.
+    let water_req = photo
+        .water_use_efficiency
+        .checked_mul(evaporative_demand)
+        .unwrap_or(Fixed::MAX);
+    let water_factor = laws::satisfaction(water_supply, Fixed::ONE, Some(water_req));
+    // soil_factor: the nutrient limitation over the matter-cycle fertility.
+    let soil_factor = laws::satisfaction(soil_fertility, Fixed::ONE, Some(soil_requirement));
+    // The Liebig minimum over the four factors, scaled by the absolute light-saturated rate.
+    let limiting = light_fraction
+        .min(temp_factor)
+        .min(water_factor)
+        .min(soil_factor);
+    p_max.checked_mul(limiting).unwrap_or(Fixed::ZERO)
 }
 
 /// The standing food VOLUME implied by a cell's food supplies and its fixed producer composition (T3): the
@@ -2384,6 +2634,7 @@ mod tests {
             solar_inertia: Vec::new(),
             evaporation: Vec::new(),
             surface_cooling: None,
+            photosynthesis: None,
         }
     }
 
@@ -2674,6 +2925,140 @@ mod tests {
             biomass_from(Fixed::ZERO, Fixed::ONE, Fixed::ONE, Fixed::ONE, &c),
             Fixed::ZERO,
             "a cell with no water grows nothing"
+        );
+    }
+
+    #[test]
+    fn carbon_fixation_derives_from_the_photosynthesis_physics_and_the_measured_constants() {
+        // The derived carbon-fixation rate (the photosynthesis-to-productivity arc, #156): productivity is a
+        // measured rate from the cell's own physical fields and the producer's measured enzyme data, not an
+        // authored per-cell number. Every assertion checks a physics behaviour, none a fitted magnitude.
+        let p = PhotosynthesisCalib::dev_fixture(); // C3-like: quantum yield 1/20, saturation 300, opt 298 K, breadth 30 K
+        let sun = Fixed::from_int(1361); // the stellar-constant flux anchor (Earth's measured solar constant)
+        let opt = Fixed::from_int(298); // the enzyme thermal optimum
+                                        // At the optimum temperature, well-watered and fertile, fixation RISES with insolation and SATURATES
+                                        // (the light-response curve): the increment from a tenth to a half of full sun exceeds the increment from
+                                        // a half to full sun, so the curve is concave, never linear.
+        let fix = |insol: Fixed, temp: Fixed, evap: Fixed, water: Fixed, soil: Fixed| {
+            carbon_fixation_rate(
+                insol,
+                sun,
+                temp,
+                evap,
+                water,
+                soil,
+                Fixed::from_ratio(1, 2),
+                &p,
+            )
+        };
+        let full = Fixed::ONE;
+        let ample = Fixed::from_int(10); // abundant water and soil supply, so light and temperature limit
+        let lo = fix(Fixed::from_ratio(1, 10), opt, Fixed::ZERO, ample, ample);
+        let mid = fix(Fixed::from_ratio(1, 2), opt, Fixed::ZERO, ample, ample);
+        let hi = fix(full, opt, Fixed::ZERO, ample, ample);
+        assert!(
+            lo < mid && mid < hi,
+            "fixation rises with insolation: {lo:?} {mid:?} {hi:?}"
+        );
+        assert!(
+            (mid - lo) > (hi - mid),
+            "the light-response saturates (concave), not linear: {lo:?} {mid:?} {hi:?}"
+        );
+        // The temperature TENT peaks at the enzyme optimum and falls away: the optimum fixes more than a cell 20 K
+        // colder, and a cell a full breadth (30 K) off the optimum fixes NOTHING (the tent floor).
+        let at_opt = fix(full, opt, Fixed::ZERO, ample, ample);
+        let cold = fix(full, Fixed::from_int(278), Fixed::ZERO, ample, ample);
+        let too_hot = fix(full, Fixed::from_int(328), Fixed::ZERO, ample, ample);
+        assert!(
+            cold < at_opt,
+            "the optimum fixes more than a colder cell: {cold:?} vs {at_opt:?}"
+        );
+        assert_eq!(
+            too_hot,
+            Fixed::ZERO,
+            "a cell a full thermal breadth past the optimum fixes nothing (the enzyme is out of band)"
+        );
+        // The WATER limitation: a higher evaporative demand raises the derived water requirement, so a cell with
+        // the same water supply but a drier atmosphere fixes LESS (the water-use-efficiency coupling), never a
+        // flat authored requirement.
+        let humid = fix(full, opt, Fixed::from_int(1), Fixed::ONE, ample);
+        let arid = fix(full, opt, Fixed::from_int(20), Fixed::ONE, ample);
+        assert!(
+            arid < humid,
+            "a drier atmosphere (higher evaporative demand) fixes less: {arid:?} vs {humid:?}"
+        );
+        // The SOIL-nutrient limitation over the matter-cycle fertility: a nutrient-poor cell fixes less than a
+        // fertile one (the Liebig soil factor, retiring the flat soil_baseline).
+        let poor = fix(full, opt, Fixed::ZERO, ample, Fixed::from_ratio(1, 10));
+        let fertile = fix(full, opt, Fixed::ZERO, ample, ample);
+        assert!(
+            poor < fertile,
+            "a nutrient-poor cell fixes less: {poor:?} vs {fertile:?}"
+        );
+        // Determinism (Principle 3): a pure function of its physical inputs, bit-identical on replay.
+        assert_eq!(
+            hi,
+            fix(full, opt, Fixed::ZERO, ample, ample),
+            "the derivation is deterministic"
+        );
+    }
+
+    #[test]
+    fn mineral_weathering_scales_soil_nutrient_by_cell_wetness() {
+        // The ABIOTIC weathering floor (#156, the matter-cycle completion): rock weathers to soil nutrient
+        // MAP-WIDE at a rate that DERIVES from each cell's own wetness (hydrolysis), so a wet marsh cell weathers
+        // strongly and a fully-dry cell not at all. This is what breaks the soil-bootstrap deadlock (fertility
+        // positive from geology before any biomass). A zero base is a no-op (byte-neutral off), and the fold is
+        // deterministic.
+        let map = a_map(0x5EED);
+        let temp = Field::from_map(&map);
+        let calib = EnvironCalib::dev_fixture();
+        let mut e = EnvironFields::from_map(&map);
+        for _ in 0..40 {
+            e.step(&temp, &calib); // accumulate water so some cells are wet and some stay dry
+        }
+        let (w, h) = e.dims();
+        let class = "bio.organic_residue";
+
+        // Zero base deposits nothing (the unarmed run is byte-identical).
+        let mut soil_off = SoilNutrientField::new();
+        e.weather_minerals(&mut soil_off, &calib, Fixed::ZERO, class);
+        assert_eq!(
+            soil_off.cell_totals().count(),
+            0,
+            "a zero weathering base deposits nothing (byte-neutral off)"
+        );
+
+        // Armed: a wet cell carries weathered nutrient, a fully-dry cell carries none (wetness-scaled).
+        let base = Fixed::from_int(100);
+        let mut soil = SoilNutrientField::new();
+        e.weather_minerals(&mut soil, &calib, base, class);
+        let wet = (0..h)
+            .flat_map(|y| (0..w).map(move |x| (x, y)))
+            .find(|&(x, y)| e.water_at(x, y) > Fixed::ZERO)
+            .expect("the wet world offers a wet cell to weather");
+        assert!(
+            soil.mass(Coord3::ground(wet.0, wet.1), class) > Fixed::ZERO,
+            "a wet cell weathers soil nutrient from geology"
+        );
+        if let Some((dx, dy)) = (0..h)
+            .flat_map(|y| (0..w).map(move |x| (x, y)))
+            .find(|&(x, y)| e.water_at(x, y) == Fixed::ZERO)
+        {
+            assert_eq!(
+                soil.mass(Coord3::ground(dx, dy), class),
+                Fixed::ZERO,
+                "a fully-dry cell weathers nothing (the hydrolysis coupling)"
+            );
+        }
+
+        // Deterministic: a second identical pass reproduces the wet cell's deposit exactly.
+        let mut soil2 = SoilNutrientField::new();
+        e.weather_minerals(&mut soil2, &calib, base, class);
+        assert_eq!(
+            soil.mass(Coord3::ground(wet.0, wet.1), class),
+            soil2.mass(Coord3::ground(wet.0, wet.1), class),
+            "weathering is a deterministic fold"
         );
     }
 

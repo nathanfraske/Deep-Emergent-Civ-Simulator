@@ -3716,6 +3716,11 @@ pub struct Runner {
     /// time and conserves the lost mass in the embodiment's decomposed-mass sink. Off the calibrated
     /// worldbuild path until a later slice wires it, exactly like the combustion and shelter calibs.
     matter_cycle: Option<MatterCycleCalib>,
+    /// The ABIOTIC mineral-weathering base rate (the matter-cycle completion, #156): when armed, rock weathers
+    /// map-wide into soil nutrient at this reserved base rate scaled by each cell's own wetness
+    /// ([`EnvironFields::weather_minerals`]), so the soil is fertile from geology before any biomass and a wet
+    /// marsh is richly fertile. `None` (every scenario but the armed living path) leaves the run byte-identical.
+    mineral_weathering: Option<Fixed>,
     /// The data-defined abiotic-source binding registry (opt-in, the biosphere extract-deplete cycle).
     abiotic_sources: Option<AbioticSourceRegistry>,
     /// The decomposer-driver registry (decomposition-as-emergence, Principle 8), armed opt-in beside the
@@ -3827,6 +3832,7 @@ impl Runner {
             combustion: None,
             shelter: None,
             matter_cycle: None,
+            mineral_weathering: None,
             abiotic_sources: None,
             decomposer: None,
             decomposer_stock: None,
@@ -3880,6 +3886,7 @@ impl Runner {
             combustion: None,
             shelter: None,
             matter_cycle: None,
+            mineral_weathering: None,
             abiotic_sources: None,
             decomposer: None,
             decomposer_stock: None,
@@ -3951,6 +3958,7 @@ impl Runner {
             combustion: None,
             shelter: None,
             matter_cycle: None,
+            mineral_weathering: None,
             abiotic_sources: None,
             decomposer: None,
             decomposer_stock: None,
@@ -4045,6 +4053,7 @@ impl Runner {
             combustion: None,
             shelter: None,
             matter_cycle: None,
+            mineral_weathering: None,
             abiotic_sources: None,
             decomposer: None,
             decomposer_stock: None,
@@ -4124,6 +4133,14 @@ impl Runner {
     /// path until a later slice wires it.
     pub fn set_matter_cycle(&mut self, calib: MatterCycleCalib) {
         self.matter_cycle = Some(calib);
+    }
+
+    /// Arm the ABIOTIC mineral-weathering floor (the matter-cycle completion, #156): rock weathers map-wide into
+    /// soil nutrient at `base_rate` scaled by each cell's wetness, so the soil is fertile from geology before any
+    /// biomass. Reserved base rate ([`EnvironFields::weather_minerals`]); off every scenario but the armed living
+    /// path, so an unarmed run is byte-identical.
+    pub fn arm_mineral_weathering(&mut self, base_rate: Fixed) {
+        self.mineral_weathering = Some(base_rate);
     }
 
     /// Arm the abiotic-source binding registry (opt-in, the biosphere extract-deplete cycle).
@@ -4377,8 +4394,21 @@ impl Runner {
                 // the matter cycle's deposited nutrient store, so a cell where a carcass rotted feeds its
                 // productivity soil factor. Only when the matter cycle is armed; otherwise the fertility stays
                 // zero and productivity reads the plain baseline, so the run is byte-identical (the opt-in).
-                if let (Some(mc), Some(emb)) = (self.matter_cycle, self.embodiment.as_ref()) {
-                    env.set_fertility_from(emb.soil(), mc.fertility_scale);
+                if let Some(emb) = self.embodiment.as_mut() {
+                    // The ABIOTIC mineral-weathering floor (#156, the matter-cycle completion): rock weathers
+                    // map-wide into the soil nutrient BEFORE the fertility read below, so a wet marsh cell is
+                    // fertile from geology from tick 0 (no biomass needed to bootstrap), the biotic decompose
+                    // loop then sustaining it. A legitimate out-of-ledger boundary source, before the
+                    // step_matter_cycle conservation bracket. Byte-identical when unarmed (None).
+                    if let Some(base) = self.mineral_weathering {
+                        env.weather_minerals(emb.soil_mut(), &calib, base, "bio.organic_residue");
+                    }
+                    // Slice C2 (the matter cycle closes into the food web): fill the per-cell soil fertility
+                    // from the matter cycle's deposited nutrient store (weathered rock plus decomposed
+                    // biomass), so a fertile cell feeds its productivity soil factor.
+                    if let Some(mc) = self.matter_cycle {
+                        env.set_fertility_from(emb.soil(), mc.fertility_scale);
+                    }
                 }
                 env.step(&self.field, &calib);
             }
