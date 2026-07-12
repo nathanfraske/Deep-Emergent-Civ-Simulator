@@ -1538,6 +1538,484 @@ pub fn saturation_vapor_pressure(
     e_ref.saturating_add(term).clamp(ZERO, es_cap)
 }
 
+/// The saturation curve's affine-tangent SLOPE `de_s/dT` (MPa/K) DERIVED from the calorimetric latent heat of
+/// vaporization through the Clausius-Clapeyron relation `de_s/dT = L_vap * e_s / (R_v * T^2)`, evaluated at the
+/// reference point as `slope = L_vap * e_ref / (R_v * T_ref^2)`. The latent heat `L_vap` is the MEASURED
+/// primitive (calorimetry, the floor's `therm.latent_heat` axis, independent of the vapour curve), `e_ref` is a
+/// cited reference vapour pressure (a substance datum, e.g. water's triple point), and `R_v` is the substance's
+/// specific gas constant (the universal gas constant over its molar mass). This is the NON-CIRCULAR direction:
+/// the curve derives from an independently-measured latent heat plus one reference point, so no coefficient is
+/// authored twice. A zero or non-positive `r_vapor` or `t_ref` (a degenerate substance) yields zero, and an
+/// overflow saturates, matching the surrounding laws' fail-safe branches.
+pub fn saturation_slope_from_latent_heat(
+    latent_heat: Fixed,
+    t_ref: Fixed,
+    e_ref: Fixed,
+    r_vapor: Fixed,
+) -> Fixed {
+    if r_vapor <= ZERO || t_ref <= ZERO {
+        return ZERO;
+    }
+    // Order chosen to keep every intermediate in Q32.32 range: L_vap*e_ref is order 1e3 (J/kg times the
+    // reference MPa), R_v*T_ref^2 is order 1e7, and their ratio is the MPa/K slope near 1e-4. The J/kg of
+    // L_vap and the 1/(J/kg) of R_v*T^2/e_ref cancel, leaving the MPa/K per-kelvin sensitivity.
+    let num = match latent_heat.checked_mul(e_ref) {
+        Some(x) => x,
+        None => return Fixed::MAX,
+    };
+    let t2 = match t_ref.checked_mul(t_ref) {
+        Some(x) => x,
+        None => return Fixed::MAX,
+    };
+    let den = match r_vapor.checked_mul(t2) {
+        Some(x) => x,
+        None => return Fixed::MAX,
+    };
+    num.checked_div(den).unwrap_or(Fixed::MAX)
+}
+
+/// The dimensionless Kirchhoff slope `delta_cp/R = (c_p(gas) - c_p(liquid))/R`, the temperature-dependence of a
+/// volatile's latent heat DERIVED from its own molecular structure, so no energy value is authored and an alien
+/// volatile is a data row. The gas side is equipartition (`c_p(gas)/R = (5 + f_rot)/2`, folding `C_p = C_v + R`
+/// over three translational and `f_rot` rotational degrees of freedom, the vibrational modes frozen out at
+/// surface temperatures, a flagged refinement), and the liquid side is Dulong-Petit (`c_p(liquid)/R = 3*n_atoms`,
+/// three quadratic modes per atom). Water vapour is a nonlinear triatomic (`f_rot = 3`, three atoms), so
+/// `delta_cp/R = 4 - 9 = -5`, the anchor's `T^(-5)`. A linear or monatomic volatile reads a half-integer; the
+/// mechanism is fixed, the structure is data. Only the ratio `delta_cp/R` is needed downstream (it sets both the
+/// `B` constant and the power-law exponent), so `R` never enters here.
+pub fn kirchhoff_delta_cp_over_r(gas_rotational_dof: Fixed, atom_count: Fixed) -> Fixed {
+    let cp_gas = match (Fixed::from_int(5) + gas_rotational_dof).checked_div(Fixed::from_int(2)) {
+        Some(x) => x,
+        None => return ZERO,
+    };
+    let cp_liquid = Fixed::from_int(3)
+        .checked_mul(atom_count)
+        .unwrap_or(Fixed::MAX);
+    cp_gas - cp_liquid
+}
+
+/// The Rankine-Kirchhoff integration constants `(A, B)` of a volatile's mid-range saturation curve
+/// `ln P = A - B/T + (delta_cp/R)*ln T`, DERIVED from the measured primitives with no authored coefficient. `B`
+/// is `L_b/R - (delta_cp/R)*T_b` (in kelvin, the "L extrapolated to T=0" over R), and `A` is fixed by the one
+/// in-regime reference point `(T_b, P_ref)` that IS the definition of the boiling point:
+/// `A = ln(P_ref) + B/T_b - (delta_cp/R)*ln(T_b)`. `t_b` is the boiling point, `l_b` its molar latent heat,
+/// `delta_cp_over_r` the dimensionless Kirchhoff slope, `r` the molar gas constant, and `p_ref` the matched
+/// reference pressure (1 standard atmosphere for water's 373.15 K, expressed in the unit the curve should read).
+/// A non-positive `r`, `t_b`, or `p_ref` (a degenerate substance) yields `(ZERO, ZERO)`; an overflow saturates.
+pub fn rankine_kirchhoff_constants(
+    t_b: Fixed,
+    l_b: Fixed,
+    delta_cp_over_r: Fixed,
+    r: Fixed,
+    p_ref: Fixed,
+) -> (Fixed, Fixed) {
+    if r <= ZERO || t_b <= ZERO || p_ref <= ZERO {
+        return (ZERO, ZERO);
+    }
+    let l_over_r = match l_b.checked_div(r) {
+        Some(x) => x,
+        None => return (ZERO, ZERO),
+    };
+    let dcp_tb = delta_cp_over_r.checked_mul(t_b).unwrap_or(Fixed::MAX);
+    let b = l_over_r - dcp_tb;
+    let b_over_tb = match b.checked_div(t_b) {
+        Some(x) => x,
+        None => return (ZERO, b),
+    };
+    let dcp_ln_tb = delta_cp_over_r.checked_mul(t_b.ln()).unwrap_or(Fixed::MAX);
+    let a = p_ref.ln() + b_over_tb - dcp_ln_tb;
+    (a, b)
+}
+
+/// The exact Rankine-Kirchhoff saturation vapour pressure `P_sat(T) = exp(A - B/T + (delta_cp/R)*ln T)`, the
+/// mid-range volatile curve that replaces the affine tangent (`saturation_vapor_pressure`), computed integer-only
+/// through the pinned `Fixed::ln`/`exp` (deterministic, canonical-path safe). `a` and `b` come from
+/// `rankine_kirchhoff_constants` and `delta_cp_over_r` from `kirchhoff_delta_cp_over_r`. The net exponent is
+/// small in the surface range (about -6 to -7 for water), inside `Fixed::exp`'s representable window; taking the
+/// single exponential of the whole net exponent avoids the overflow that `exp(A)` alone (about `exp(45)` for
+/// water) would hit. A non-positive temperature yields zero, and an out-of-window exponent saturates through
+/// `exp`, matching the surrounding laws' fail-safe branches. Reads the pressure in whatever unit `p_ref` anchored.
+pub fn saturation_vapor_pressure_rk(
+    temperature: Fixed,
+    a: Fixed,
+    b: Fixed,
+    delta_cp_over_r: Fixed,
+) -> Fixed {
+    if temperature <= ZERO {
+        return ZERO;
+    }
+    let b_over_t = match b.checked_div(temperature) {
+        Some(x) => x,
+        None => return ZERO,
+    };
+    let power_term = delta_cp_over_r
+        .checked_mul(temperature.ln())
+        .unwrap_or(Fixed::MAX);
+    (a - b_over_t + power_term).exp()
+}
+
+/// The Kirchhoff temperature-dependent latent heat `L(T) = L_ref + delta_cp*(T - T_ref)`, the linear form over a
+/// phase's mid-range, with `delta_cp = (delta_cp/R)*R` the molecular-structure slope from
+/// `kirchhoff_delta_cp_over_r`. It gives the vaporization latent heat at any temperature, and (through Hess's law
+/// `L_sub = L_vap + L_fus`, a plain sum) it supplies the sublimation latent heat that anchors the sublimation
+/// branch below the triple point. `l_ref` is the latent heat measured at `t_ref`, `delta_cp_over_r` the
+/// dimensionless slope, `r` the molar gas constant. Linear and total; an overflow saturates. The linear form is a
+/// mid-range approximation and must not be extrapolated past about `0.75*T_c` (the Watson regime).
+pub fn kirchhoff_latent_heat(
+    l_ref: Fixed,
+    delta_cp_over_r: Fixed,
+    r: Fixed,
+    t: Fixed,
+    t_ref: Fixed,
+) -> Fixed {
+    let delta_cp = delta_cp_over_r.checked_mul(r).unwrap_or(Fixed::MAX);
+    let term = delta_cp.checked_mul(t - t_ref).unwrap_or(Fixed::MAX);
+    l_ref.saturating_add(term)
+}
+
+/// The near-critical latent heat `L(T) = L_ref * ((T_c - T)/(T_c - T_ref))^0.38` (the Watson correlation), the
+/// third regime of the volatile cascade. Unlike the linear Kirchhoff form (which extrapolates to an unphysical
+/// non-zero latent heat past the critical point), the Watson form correctly VANISHES at `T_c` where liquid and
+/// gas become indistinguishable. The exponent `0.38` is a UNIVERSAL corresponding-states constant of the reduced
+/// latent heat, never an Earth-fluid fit (the same status as the Neufeld constants and the Tee-Gotoh-Stewart
+/// `1.312`). `l_ref` and `t_ref` are a mid-range anchor (the boiling point works, since `T_b < 0.75*T_c`), `t_c`
+/// the critical temperature reused from the critical point, `t` the query temperature. At or above `t_c` there is
+/// no liquid, so it yields zero; a degenerate reference at or above `t_c` yields zero (no division by zero). This
+/// governs above about `0.75*T_c`, a regime a temperate surface never reaches; the switch temperature is an
+/// engine-accuracy boundary (derived from where the cheaper linear form's error crosses tolerance, or a reserved
+/// tuneable with that basis), resolved in the wiring, never a hardcoded constant here.
+pub fn watson_latent_heat(l_ref: Fixed, t_ref: Fixed, t_c: Fixed, t: Fixed) -> Fixed {
+    if t >= t_c {
+        return ZERO;
+    }
+    let denom = t_c - t_ref;
+    if denom <= ZERO {
+        return ZERO;
+    }
+    let ratio = match (t_c - t).checked_div(denom) {
+        Some(r) => r,
+        None => return ZERO,
+    };
+    let factor = ratio.powf(Fixed::from_ratio(38, 100));
+    l_ref.checked_mul(factor).unwrap_or(Fixed::MAX)
+}
+
+/// The three-regime volatile saturation curve, the composition of the mid-range Rankine-Kirchhoff, sublimation,
+/// and Watson kernels into one usable object DERIVED from a volatile's measured primitives. It holds the derived
+/// per-regime constants and selects the regime by temperature, so the hydrology wiring reads one object rather
+/// than re-deriving the constants each tick. It is a physics-derived calibration (the sim's `EnvironCalib` holds
+/// an instance at the wiring); everything here is theorem over the four measured primitives plus the molecular
+/// structure, so no value is authored and an alien volatile is a data row.
+#[derive(Clone, Copy, Debug)]
+pub struct VolatileSaturationCurve {
+    /// `delta_cp/R` from the molecular structure, the power-law exponent shared by both saturation branches.
+    pub delta_cp_over_r: Fixed,
+    /// The mid-range Rankine-Kirchhoff constants `(A, B)`, anchored at the boiling point `(T_b, 1 atm)`.
+    pub a_mid: Fixed,
+    pub b_mid: Fixed,
+    /// The sublimation-branch constants `(A, B)`, anchored at the DERIVED `(T_triple, P_triple)` (continuity).
+    pub a_sub: Fixed,
+    pub b_sub: Fixed,
+    /// The measured primitives the near-critical Watson branch and the latent-heat selection reuse.
+    pub l_b: Fixed,
+    pub l_fus: Fixed,
+    pub t_b: Fixed,
+    pub t_c: Fixed,
+    pub r: Fixed,
+    /// The triple-point temperature, the sublimation-to-mid-range regime boundary.
+    pub t_triple: Fixed,
+    /// The near-critical boundary (the mid-range-to-Watson switch). An ENGINE-ACCURACY value, not a fundamental:
+    /// the reduced temperature where the linear-Kirchhoff extrapolation error crosses tolerance. Carried here as
+    /// the reserved-with-basis `0.75*T_c` (at that reduced temperature the linear form runs about 7 percent high
+    /// against the Watson form's under 1 percent) pending the crossing derivation; never a hardcoded literal in
+    /// the content path, it is derived from `T_c` and the reserved tolerance.
+    pub near_critical_boundary: Fixed,
+}
+
+impl VolatileSaturationCurve {
+    /// Derive the whole three-regime curve from a volatile's measured primitives (`t_b`, `l_b`, `l_fus`,
+    /// `t_triple`, `t_c`), the molar gas constant `r`, and the molecular structure (`gas_rotational_dof`,
+    /// `atom_count`). The mid-range constants come from `rankine_kirchhoff_constants`; the derived triple-point
+    /// pressure `P_triple` (the mid-range curve at `t_triple`) and the Hess sublimation latent heat
+    /// `L_sub = L_vap(T_triple) + L_fus` anchor the sublimation constants, so the branches join with no gap.
+    #[allow(clippy::too_many_arguments)]
+    pub fn derive(
+        t_b: Fixed,
+        l_b: Fixed,
+        l_fus: Fixed,
+        t_triple: Fixed,
+        t_c: Fixed,
+        r: Fixed,
+        gas_rotational_dof: Fixed,
+        atom_count: Fixed,
+    ) -> Self {
+        let delta_cp_over_r = kirchhoff_delta_cp_over_r(gas_rotational_dof, atom_count);
+        // Mid-range, anchored at (T_b, 1 standard atmosphere in MPa) so the curve reads MPa.
+        let p_ref = Fixed::from_ratio(101_325, 1_000_000);
+        let (a_mid, b_mid) = rankine_kirchhoff_constants(t_b, l_b, delta_cp_over_r, r, p_ref);
+        // Sublimation, anchored at the DERIVED (T_triple, P_triple): P_triple is the mid-range curve at the
+        // triple point, and L_sub(T_triple) = L_vap(T_triple) + L_fus (Hess).
+        let p_triple = saturation_vapor_pressure_rk(t_triple, a_mid, b_mid, delta_cp_over_r);
+        let l_sub_triple =
+            kirchhoff_latent_heat(l_b, delta_cp_over_r, r, t_triple, t_b).saturating_add(l_fus);
+        let (a_sub, b_sub) =
+            rankine_kirchhoff_constants(t_triple, l_sub_triple, delta_cp_over_r, r, p_triple);
+        // The near-critical boundary: the reserved accuracy tolerance's crossing, 0.75*T_c pending the derivation.
+        let near_critical_boundary = t_c.checked_mul(Fixed::from_ratio(3, 4)).unwrap_or(t_c);
+        Self {
+            delta_cp_over_r,
+            a_mid,
+            b_mid,
+            a_sub,
+            b_sub,
+            l_b,
+            l_fus,
+            t_b,
+            t_c,
+            r,
+            t_triple,
+            near_critical_boundary,
+        }
+    }
+
+    /// The saturation vapour pressure at a temperature, selecting the regime: the sublimation branch below the
+    /// triple point, the mid-range Rankine-Kirchhoff curve at and above it. The near-critical saturation integral
+    /// has no closed form and a temperate surface never reaches it, so above the near-critical boundary this
+    /// returns the mid-range extrapolation (the L(T) there is the Watson form via [`Self::latent_heat`]).
+    pub fn saturation_pressure(&self, temperature: Fixed) -> Fixed {
+        if temperature < self.t_triple {
+            saturation_vapor_pressure_rk(temperature, self.a_sub, self.b_sub, self.delta_cp_over_r)
+        } else {
+            saturation_vapor_pressure_rk(temperature, self.a_mid, self.b_mid, self.delta_cp_over_r)
+        }
+    }
+
+    /// The latent heat at a temperature, selecting the three regimes: the sublimation `L_sub = L_vap + L_fus`
+    /// below the triple point, the linear Kirchhoff `L(T)` in the mid range, and the Watson form (vanishing at
+    /// `T_c`) above the near-critical boundary.
+    pub fn latent_heat(&self, temperature: Fixed) -> Fixed {
+        let l_vap = kirchhoff_latent_heat(
+            self.l_b,
+            self.delta_cp_over_r,
+            self.r,
+            temperature,
+            self.t_b,
+        );
+        if temperature < self.t_triple {
+            l_vap.saturating_add(self.l_fus)
+        } else if temperature <= self.near_critical_boundary {
+            l_vap
+        } else {
+            watson_latent_heat(self.l_b, self.t_b, self.t_c, temperature)
+        }
+    }
+}
+
+/// The virtual-density buoyancy `delta_rho/rho` driving free convection at an evaporating surface, DERIVED per
+/// cell from the local state as the sum of a THERMAL and a COMPOSITIONAL part (no fixed constant). Thermal:
+/// `delta_T / T` (the ideal-gas `beta = 1/T` times the surface-minus-air temperature difference). Compositional:
+/// `(M_air - M_water)/M_air * (e_s - e_a)/p` (humid air is lighter than dry, the local vapour deficit over the
+/// ambient pressure). `delta_t` is the surface-minus-air temperature difference, `t` the temperature,
+/// `m_air`/`m_water` the molar masses, `e_s`/`e_a` the saturation and ambient vapour pressures (same unit), `p`
+/// the ambient pressure (the same unit as `e`, so the ratio is dimensionless). A non-positive `t`, `m_air`, or
+/// `p` drops the ill-defined term rather than dividing by zero. The result can be negative (stable stratification
+/// suppresses convection); the free-convection kernel treats a non-positive buoyancy as no convection.
+pub fn virtual_density_buoyancy(
+    delta_t: Fixed,
+    t: Fixed,
+    m_air: Fixed,
+    m_water: Fixed,
+    e_s: Fixed,
+    e_a: Fixed,
+    p: Fixed,
+) -> Fixed {
+    let thermal = if t > ZERO {
+        delta_t.checked_div(t).unwrap_or(ZERO)
+    } else {
+        ZERO
+    };
+    let compositional = if m_air > ZERO && p > ZERO {
+        let mass_frac = (m_air - m_water).checked_div(m_air).unwrap_or(ZERO);
+        let vapour_frac = (e_s - e_a).checked_div(p).unwrap_or(ZERO);
+        mass_frac.checked_mul(vapour_frac).unwrap_or(ZERO)
+    } else {
+        ZERO
+    };
+    thermal + compositional
+}
+
+/// The still-air evaporation coefficient `a_still` (the multiplier on the vapour-pressure deficit in pascals that
+/// gives the evaporative mass flux in kg/(m^2 s)), DERIVED from turbulent free-convection mass transfer with the
+/// length scale CANCELLED. The turbulent Sherwood `Sh = C*Ra^(1/3)` over a Rayleigh number `Ra ~ L^3` cancels the
+/// length `L` (`Sh = h_m*L/D_v`), leaving the mass-transfer velocity `h_m = C*D_v*(g*(delta_rho/rho)/(nu*D_v))^(1/3)`
+/// and `a_still = h_m/(R_v*T)`. `c` is the universal turbulent closure constant (McAdams/Incropera, a turbulent-
+/// transport residue, the same class as the Watson and Neufeld constants), `d_v` the vapour diffusivity (m^2/s),
+/// `g` gravity, `buoyancy` the virtual-density `delta_rho/rho`, `nu` the kinematic viscosity (m^2/s), `r_v` the
+/// specific gas constant, `t` the temperature. The cube root is factored as `D_v^(2/3)*(g*buoyancy/nu)^(1/3)` to
+/// keep the fixed-point intermediates in range (the raw `nu*D_v ~ 3e-10` underflows Q32.32). A non-positive
+/// buoyancy (stable air, no free convection) or any degenerate input yields zero; an overflow saturates.
+pub fn free_convection_a_still(
+    c: Fixed,
+    d_v: Fixed,
+    g: Fixed,
+    buoyancy: Fixed,
+    nu: Fixed,
+    r_v: Fixed,
+    t: Fixed,
+) -> Fixed {
+    if buoyancy <= ZERO || d_v <= ZERO || nu <= ZERO || r_v <= ZERO || t <= ZERO {
+        return ZERO;
+    }
+    let d_v_two_thirds = d_v.powf(Fixed::from_ratio(2, 3));
+    let ra_core = match g.checked_mul(buoyancy).and_then(|x| x.checked_div(nu)) {
+        Some(x) => x,
+        None => return ZERO,
+    };
+    let ra_core_cube_root = ra_core.powf(Fixed::from_ratio(1, 3));
+    let h_m = match c
+        .checked_mul(d_v_two_thirds)
+        .and_then(|x| x.checked_mul(ra_core_cube_root))
+    {
+        Some(x) => x,
+        None => return Fixed::MAX,
+    };
+    let rt = match r_v.checked_mul(t) {
+        Some(x) => x,
+        None => return ZERO,
+    };
+    h_m.checked_div(rt).unwrap_or(ZERO)
+}
+
+/// The Lennard-Jones collision diameter `sigma` (angstrom) and the potential well depth `epsilon/k_B` (kelvin)
+/// DERIVED from a substance's measured CRITICAL POINT (`t_c` in K, `p_c` in Pa) through the corresponding-
+/// states relation fixed by the LJ potential's OWN reduced critical point (`T_c* = k_B*T_c/epsilon = 1.312`,
+/// `P_c* = P_c*sigma^3/epsilon = 0.128`), universal constants of the potential itself, never a fit to any
+/// fluid (Tee-Gotoh-Stewart corresponding states). `epsilon/k_B = T_c / 1.312`, and
+/// `sigma = C_sigma * (T_c/P_c)^(1/3)` where `C_sigma = 1e10 * (0.128 * k_B / 1.312)^(1/3) ~ 110.45` angstrom
+/// per (K/Pa)^(1/3) is FOLDED from the Boltzmann constant and the reduced critical point at the angstrom scale
+/// (k_B ~ 1e-23 underflows Q32.32, so the fold is done once at the cited scale, the same treatment the
+/// Chapman-Enskog leading constant needs). Only the critical point is authored; the LJ pair is a derived
+/// intermediate, so an alien gas is a data row. HONEST LIMIT: corresponding states treats the fluid as a
+/// simple LJ sphere, so a strongly polar fluid (water) deviates from its best-fit LJ pair by a bounded amount,
+/// a flagged approximation carried into `D_v`. A non-positive `p_c` or `t_c` yields zero.
+pub fn lennard_jones_from_critical_point(t_c: Fixed, p_c: Fixed) -> (Fixed, Fixed) {
+    if p_c <= ZERO || t_c <= ZERO {
+        return (ZERO, ZERO);
+    }
+    // epsilon/k_B = T_c / 1.312 (kelvin), the LJ reduced critical temperature.
+    let epsilon_over_kb = t_c
+        .checked_div(Fixed::from_ratio(1312, 1000))
+        .unwrap_or(ZERO);
+    // sigma = C_sigma * (T_c/P_c)^(1/3) (angstrom). T_c/P_c is small (order 1e-5 K/Pa), its cube root is
+    // order 0.03, and C_sigma ~ 110.45 lifts it to the angstrom scale, all representable in Q32.32.
+    let ratio = match t_c.checked_div(p_c) {
+        Some(r) => r,
+        None => return (ZERO, epsilon_over_kb),
+    };
+    let cube_root = ratio.powf(Fixed::from_ratio(1, 3));
+    let c_sigma = Fixed::from_ratio(11045, 100);
+    let sigma = c_sigma.checked_mul(cube_root).unwrap_or(Fixed::MAX);
+    (sigma, epsilon_over_kb)
+}
+
+/// The Neufeld collision integral `Omega_D(T*)` for Lennard-Jones (12-6) diffusion, the reduced-temperature
+/// correlation UNIVERSAL to the potential itself (Neufeld, Janzen, Aziz 1972), never a fluid fit:
+/// `Omega_D = A/(T*)^B + C/exp(D*T*) + E/exp(F*T*) + G/exp(H*T*)`, the eight constants fixed by the LJ
+/// potential. `t_star = k_B*T / epsilon_AB` is the reduced temperature (thermal energy over the pair's well
+/// depth). Returns near unity for the physical T* range (about 1 to 3). A non-positive `t_star` yields one, a
+/// safe neutral for the downstream division.
+pub fn neufeld_collision_integral(t_star: Fixed) -> Fixed {
+    if t_star <= ZERO {
+        return Fixed::ONE;
+    }
+    let a = Fixed::from_ratio(106_036, 100_000);
+    let b = Fixed::from_ratio(15_610, 100_000);
+    let c = Fixed::from_ratio(19_300, 100_000);
+    let d = Fixed::from_ratio(47_635, 100_000);
+    let e = Fixed::from_ratio(103_587, 100_000);
+    let f = Fixed::from_ratio(152_996, 100_000);
+    let g = Fixed::from_ratio(176_474, 100_000);
+    let h = Fixed::from_ratio(389_411, 100_000);
+    let term1 = a.checked_div(t_star.powf(b)).unwrap_or(ZERO);
+    let term2 = c
+        .checked_div(d.checked_mul(t_star).unwrap_or(Fixed::MAX).exp())
+        .unwrap_or(ZERO);
+    let term3 = e
+        .checked_div(f.checked_mul(t_star).unwrap_or(Fixed::MAX).exp())
+        .unwrap_or(ZERO);
+    let term4 = g
+        .checked_div(h.checked_mul(t_star).unwrap_or(Fixed::MAX).exp())
+        .unwrap_or(ZERO);
+    Fixed::saturating_sum([term1, term2, term3, term4])
+}
+
+/// The Chapman-Enskog binary gas diffusivity `D_AB` (m^2/s) for a dilute gas pair from kinetic theory:
+/// `D_AB = K * sqrt(T^3 * (1/M_A + 1/M_B)) / (P * sigma_AB^2 * Omega_D)`. The constant `K = 1.8583e-7` is the
+/// classical CGS coefficient `0.0018583` (itself folded from `k_B` and `N_A`) times the cm^2-to-m^2 factor
+/// `1e-4`, so the output is directly in m^2/s (the raw `k_B`/`N_A` fold underflows Q32.32, so the constant is
+/// carried at the m^2/s-per-(K^(3/2), g/mol, atm, angstrom^2) scale). `sigma_ab` is the combined collision
+/// diameter (angstrom, the arithmetic mean of the pair), `omega_d` the Neufeld collision integral at the
+/// pair's reduced temperature, `pressure_atm` the ambient pressure (atmospheres), `m_a`/`m_b` the molar masses
+/// (g/mol). A non-positive input yields zero. HONEST LIMIT: the LJ pair upstream is corresponding-states, so a
+/// polar pair (water in air) reads a bounded (order tens of percent) deviation from the tabulated `D_v`,
+/// carried straight rather than tuned.
+pub fn chapman_enskog_diffusivity(
+    temperature: Fixed,
+    m_a: Fixed,
+    m_b: Fixed,
+    pressure_atm: Fixed,
+    sigma_ab: Fixed,
+    omega_d: Fixed,
+) -> Fixed {
+    if temperature <= ZERO
+        || m_a <= ZERO
+        || m_b <= ZERO
+        || pressure_atm <= ZERO
+        || sigma_ab <= ZERO
+        || omega_d <= ZERO
+    {
+        return ZERO;
+    }
+    let k = Fixed::from_ratio(18_583, 100_000_000_000);
+    let inv_m_a = match Fixed::ONE.checked_div(m_a) {
+        Some(x) => x,
+        None => return ZERO,
+    };
+    let inv_m_b = match Fixed::ONE.checked_div(m_b) {
+        Some(x) => x,
+        None => return ZERO,
+    };
+    let inv_m = inv_m_a.saturating_add(inv_m_b);
+    let t2 = match temperature.checked_mul(temperature) {
+        Some(x) => x,
+        None => return Fixed::MAX,
+    };
+    let t3 = match t2.checked_mul(temperature) {
+        Some(x) => x,
+        None => return Fixed::MAX,
+    };
+    let radicand = match t3.checked_mul(inv_m) {
+        Some(x) => x,
+        None => return Fixed::MAX,
+    };
+    let num = match k.checked_mul(radicand.sqrt()) {
+        Some(x) => x,
+        None => return Fixed::MAX,
+    };
+    let sigma2 = match sigma_ab.checked_mul(sigma_ab) {
+        Some(x) => x,
+        None => return Fixed::MAX,
+    };
+    let den = match pressure_atm
+        .checked_mul(sigma2)
+        .and_then(|x| x.checked_mul(omega_d))
+    {
+        Some(x) => x,
+        None => return Fixed::MAX,
+    };
+    num.checked_div(den).unwrap_or(Fixed::MAX)
+}
+
 /// Evaporation mass flux E = (a + b*|u|)*(e_s - e_a) (kg/(m^2*s)), the Dalton bulk aerodynamic proxy.
 /// Returns the evaporation source when the vapour-pressure deficit is positive; a non-positive deficit
 /// is the condensation case and reads zero here (the sink is the caller's sign-flipped difference).
@@ -3949,6 +4427,497 @@ mod tests {
             ),
             ZERO,
             "an out-of-domain negative flux clamps to the zero floor"
+        );
+    }
+
+    #[test]
+    fn the_saturation_slope_derives_from_the_calorimetric_latent_heat() {
+        // The non-circular direction (the derivation-hunt's inversion): the calorimetric latent heat is the
+        // measured primitive and the curve slope derives from it plus one reference vapour point. The gate
+        // ruled the reference anchored at the WORLD-MEAN temperature (where the surface physics needs the
+        // tangent accurate), not the triple point (a convex-curve extrapolation that underestimates e_s at
+        // the surface). At T_ref ~ 288 K, e_ref = e_s(288 K) ~ 1.7e-3 MPa (steam tables), with L = 2.454e6
+        // J/kg (therm.latent_heat) and R_v ~ 461.5 J/(kg K), slope = L*e_ref/(R_v*T_ref^2) lands near
+        // 1.09e-4 MPa/K, the physical Clausius-Clapeyron sensitivity at the surface.
+        // Integer-only assertions (the canonical kernel module admits no float, steering.rs).
+        let latent_heat = Fixed::from_int(2_454_000);
+        let t_ref = Fixed::from_int(288);
+        let e_ref = Fixed::from_ratio(17, 10_000);
+        let r_vapor = Fixed::from_ratio(923, 2);
+        let slope = saturation_slope_from_latent_heat(latent_heat, t_ref, e_ref, r_vapor);
+        assert!(
+            slope > Fixed::from_ratio(10, 100_000) && slope < Fixed::from_ratio(12, 100_000),
+            "the slope derives to ~1.09e-4 MPa/K from the calorimetric latent heat at the world-mean anchor"
+        );
+        // A larger latent heat implies a steeper saturation curve, monotonic in L.
+        let steeper = saturation_slope_from_latent_heat(
+            latent_heat.saturating_add(latent_heat),
+            t_ref,
+            e_ref,
+            r_vapor,
+        );
+        assert!(
+            steeper > slope,
+            "a larger latent heat reads a steeper saturation slope"
+        );
+        // A degenerate zero specific-gas-constant substance yields zero rather than dividing by zero.
+        assert_eq!(
+            saturation_slope_from_latent_heat(latent_heat, t_ref, e_ref, ZERO),
+            ZERO,
+            "a zero specific gas constant yields zero, no division by zero"
+        );
+    }
+
+    #[test]
+    fn the_rankine_kirchhoff_curve_reproduces_water_saturation() {
+        // The exact three-regime mid-range curve from the volatile-thermodynamics anchor. Water's measured
+        // primitives are test fixtures here (not floor data yet, held for the derivation-hunt): T_b = 373.15 K,
+        // L_b = 40.66 kJ/mol, R = 8.314462618 J/(mol K), P_ref = 0.101325 MPa (1 standard atmosphere, the
+        // matched pair with T_b). delta_cp/R = -5 derives from water's structure. The curve reproduces the
+        // triple point (~638 Pa, +4% above 611.66), the world mean (~1768 Pa, +4% above 1705.6), and 1 atm at
+        // boiling exactly, the smooth Kirchhoff residual reported straight. Integer-only assertions (the
+        // canonical kernel module admits no float, steering.rs); bounds absorb the fixed-point ln/exp error.
+        let t_b = Fixed::from_ratio(37315, 100);
+        let l_b = Fixed::from_int(40660);
+        let r = Fixed::from_ratio(8_314_462_618, 1_000_000_000);
+        let p_ref = Fixed::from_ratio(101_325, 1_000_000);
+        // delta_cp/R from the molecular structure: nonlinear triatomic (f_rot = 3, three atoms) -> -5.
+        let dcp_over_r = kirchhoff_delta_cp_over_r(Fixed::from_int(3), Fixed::from_int(3));
+        assert_eq!(
+            dcp_over_r,
+            Fixed::from_int(-5),
+            "water's Kirchhoff slope derives to -5R from its structure"
+        );
+        // A linear volatile (f_rot = 2, two atoms) reads a half-integer, -5/2, the alien-general path.
+        let dcp_linear = kirchhoff_delta_cp_over_r(Fixed::from_int(2), Fixed::from_int(2));
+        assert_eq!(
+            dcp_linear,
+            Fixed::from_ratio(-5, 2),
+            "a diatomic volatile reads -5/2 R, a data row"
+        );
+        let (a, b) = rankine_kirchhoff_constants(t_b, l_b, dcp_over_r, r, p_ref);
+        // B ~ 6756 K and A ~ 45.43 (MPa-anchored), both derived from the primitives.
+        assert!(
+            b > Fixed::from_int(6740) && b < Fixed::from_int(6772),
+            "B derives to ~6756 K"
+        );
+        assert!(
+            a > Fixed::from_int(45) && a < Fixed::from_int(46),
+            "A derives to ~45.43 (MPa-anchored)"
+        );
+        // The boiling point reads 1 atm by construction (the exp(ln) round-trip within tolerance).
+        let p_boil = saturation_vapor_pressure_rk(t_b, a, b, dcp_over_r);
+        assert!(
+            p_boil > Fixed::from_ratio(1007, 10_000) && p_boil < Fixed::from_ratio(1020, 10_000),
+            "P_sat(T_b) reads ~0.101325 MPa (1 atm) by construction"
+        );
+        // Triple point 273.16 K: ~638 Pa = ~6.38e-4 MPa (the +4% Kirchhoff residual above 611.66 Pa).
+        let p_triple =
+            saturation_vapor_pressure_rk(Fixed::from_ratio(27316, 100), a, b, dcp_over_r);
+        assert!(
+            p_triple > Fixed::from_ratio(60, 100_000) && p_triple < Fixed::from_ratio(66, 100_000),
+            "P_sat(triple) derives to ~638 Pa, the derived P_triple the sublimation branch anchors to"
+        );
+        // World mean 288.15 K: ~1768 Pa = ~1.768e-3 MPa (+4% above 1705.6 Pa).
+        let p_mean = saturation_vapor_pressure_rk(Fixed::from_ratio(28815, 100), a, b, dcp_over_r);
+        assert!(
+            p_mean > Fixed::from_ratio(170, 100_000) && p_mean < Fixed::from_ratio(182, 100_000),
+            "P_sat(world mean) derives to ~1768 Pa"
+        );
+        // A real saturation curve rises monotonically with temperature.
+        assert!(
+            p_triple < p_mean && p_mean < p_boil,
+            "saturation pressure rises with temperature"
+        );
+        // A degenerate substance (zero gas constant) yields (ZERO, ZERO), no division by zero.
+        assert_eq!(
+            rankine_kirchhoff_constants(t_b, l_b, dcp_over_r, ZERO, p_ref),
+            (ZERO, ZERO),
+            "a zero gas constant yields zero constants, no division by zero"
+        );
+        // A non-positive temperature yields zero pressure, not a panic.
+        assert_eq!(
+            saturation_vapor_pressure_rk(ZERO, a, b, dcp_over_r),
+            ZERO,
+            "a non-positive temperature yields zero"
+        );
+    }
+
+    #[test]
+    fn the_sublimation_branch_joins_the_vaporization_curve_at_the_triple_point() {
+        // Below the triple point the vapour is in equilibrium with ICE, so the SUBLIMATION latent heat governs:
+        // L_sub = L_vap + L_fus (Hess's law). The branch is the SAME Rankine-Kirchhoff kernel anchored at the
+        // DERIVED (T_triple, P_triple), where P_triple is the vaporization curve at T_triple (continuity, no
+        // gap), with delta_cp_sub reusing the Dulong-Petit solid heat capacity (equal to the liquid's, the
+        // flagged roughness). Water fixtures (held for the hunt): L_fus ~ 6.01 kJ/mol, T_triple ~ 273.16 K. The
+        // branch tracks the ice saturation pressure within the same +4% Kirchhoff residual (~107 Pa at 253 K
+        // versus the ~103 Pa reference). Integer-only assertions.
+        let t_b = Fixed::from_ratio(37315, 100);
+        let l_b = Fixed::from_int(40660);
+        let r = Fixed::from_ratio(8_314_462_618, 1_000_000_000);
+        let p_ref = Fixed::from_ratio(101_325, 1_000_000);
+        let t_triple = Fixed::from_ratio(27316, 100);
+        let l_fus = Fixed::from_int(6010);
+        let dcp_over_r = kirchhoff_delta_cp_over_r(Fixed::from_int(3), Fixed::from_int(3)); // -5
+                                                                                            // The vaporization curve gives the DERIVED triple-point pressure (~638 Pa, section 1).
+        let (a_vap, b_vap) = rankine_kirchhoff_constants(t_b, l_b, dcp_over_r, r, p_ref);
+        let p_triple = saturation_vapor_pressure_rk(t_triple, a_vap, b_vap, dcp_over_r);
+        // L_vap at the triple point (Kirchhoff), then L_sub = L_vap + L_fus (Hess).
+        let l_vap_triple = kirchhoff_latent_heat(l_b, dcp_over_r, r, t_triple, t_b);
+        assert!(
+            l_vap_triple > Fixed::from_int(44000) && l_vap_triple < Fixed::from_int(45600),
+            "L_vap(T_triple) derives to ~44817 J/mol from the Kirchhoff form"
+        );
+        let l_sub_triple = l_vap_triple.saturating_add(l_fus);
+        assert!(
+            l_sub_triple > l_vap_triple,
+            "L_sub exceeds L_vap by L_fus (subliming costs fusion plus vaporization, Hess)"
+        );
+        // The sublimation constants REUSE the same kernel, anchored at the derived (T_triple, P_triple).
+        let (a_sub, b_sub) =
+            rankine_kirchhoff_constants(t_triple, l_sub_triple, dcp_over_r, r, p_triple);
+        // Continuity: the sublimation branch reads P_triple at the triple point (the two branches join, no gap),
+        // within the exp(ln) round-trip tolerance.
+        let p_sub_at_triple = saturation_vapor_pressure_rk(t_triple, a_sub, b_sub, dcp_over_r);
+        let gap = if p_sub_at_triple > p_triple {
+            p_sub_at_triple - p_triple
+        } else {
+            p_triple - p_sub_at_triple
+        };
+        assert!(
+            gap < Fixed::from_ratio(1, 100_000),
+            "the sublimation branch joins the vaporization curve at the triple point, no gap"
+        );
+        // A sub-freezing cell (253.15 K, -20 C): ice saturation ~107 Pa = ~1.07e-4 MPa (+4% above the ~103 Pa
+        // reference, the same Kirchhoff residual carried straight).
+        let p_sub_cold =
+            saturation_vapor_pressure_rk(Fixed::from_ratio(25315, 100), a_sub, b_sub, dcp_over_r);
+        assert!(
+            p_sub_cold > Fixed::from_ratio(9, 100_000) && p_sub_cold < Fixed::from_ratio(12, 100_000),
+            "the sublimation branch reads ~107 Pa at 253 K, the ice saturation within the Kirchhoff residual"
+        );
+        // Colder is drier: the sublimation pressure falls below the triple point.
+        assert!(
+            p_sub_cold < p_triple,
+            "the sublimation pressure falls below the triple point going colder"
+        );
+    }
+
+    #[test]
+    fn the_watson_branch_vanishes_at_the_critical_point() {
+        // The near-critical regime: L(T) = L_ref*((T_c - T)/(T_c - T_ref))^0.38 (Watson), which VANISHES at T_c
+        // where the linear Kirchhoff form is unphysical (it would still read ~29 kJ/mol there). The 0.38 is a
+        // universal corresponding-states constant. Water fixtures: L_b, T_b, T_c (reused from the critical
+        // point). Validated against steam-table L_vap: ~33 kJ/mol at 0.75*T_c (reference ~33.5), ~23.5 at
+        // 0.9*T_c (reference ~23.4), tracking within ~2% while the linear form runs 7% high and worsening.
+        // Integer-only assertions; bounds absorb the fixed-point powf error.
+        let l_b = Fixed::from_int(40660);
+        let t_b = Fixed::from_ratio(37315, 100);
+        let t_c = Fixed::from_ratio(6471, 10); // 647.1 K
+                                               // Continuity with the mid-range at the anchor: L(T_b) = L_b.
+        let l_at_tb = watson_latent_heat(l_b, t_b, t_c, t_b);
+        let gap = if l_at_tb > l_b {
+            l_at_tb - l_b
+        } else {
+            l_b - l_at_tb
+        };
+        assert!(
+            gap < Fixed::from_int(60),
+            "Watson L(T_b) = L_b, continuous with the mid-range anchor"
+        );
+        // Vanishes at and above the critical point (no liquid).
+        assert_eq!(
+            watson_latent_heat(l_b, t_b, t_c, t_c),
+            ZERO,
+            "L vanishes at T_c"
+        );
+        assert_eq!(
+            watson_latent_heat(l_b, t_b, t_c, t_c + Fixed::from_int(10)),
+            ZERO,
+            "no liquid above T_c"
+        );
+        // At 0.9*T_c (582.4 K), L ~ 23.5 kJ/mol (steam-table reference ~23.4).
+        let l_hot = watson_latent_heat(l_b, t_b, t_c, Fixed::from_ratio(5824, 10));
+        assert!(
+            l_hot > Fixed::from_int(22000) && l_hot < Fixed::from_int(25000),
+            "L derives to ~23.5 kJ/mol at 0.9*T_c, the Watson vanishing captured"
+        );
+        // Monotone decreasing toward the critical point, and below L_b (past the anchor).
+        let l_warm = watson_latent_heat(l_b, t_b, t_c, Fixed::from_int(500));
+        let l_hotter = watson_latent_heat(l_b, t_b, t_c, Fixed::from_int(600));
+        assert!(
+            l_hotter < l_warm && l_warm < l_b,
+            "L falls monotonically toward T_c"
+        );
+        // Degenerate: a reference at the critical point yields zero, no division by zero.
+        assert_eq!(
+            watson_latent_heat(l_b, t_c, t_c, t_b),
+            ZERO,
+            "a reference at T_c is degenerate, yields zero"
+        );
+    }
+
+    #[test]
+    fn the_volatile_saturation_curve_composes_the_three_regimes() {
+        // The whole three-regime curve derived from water's measured primitives as one object (the hydrology
+        // wiring reads this rather than re-deriving each tick). Fixtures held for the hunt: T_b 373.15 K,
+        // L_b 40.66 kJ/mol, L_fus 6.01 kJ/mol, T_triple 273.16 K, T_c 647.1 K, nonlinear triatomic.
+        let curve = VolatileSaturationCurve::derive(
+            Fixed::from_ratio(37315, 100),
+            Fixed::from_int(40660),
+            Fixed::from_int(6010),
+            Fixed::from_ratio(27316, 100),
+            Fixed::from_ratio(6471, 10),
+            Fixed::from_ratio(8_314_462_618, 1_000_000_000),
+            Fixed::from_int(3),
+            Fixed::from_int(3),
+        );
+        assert_eq!(
+            curve.delta_cp_over_r,
+            Fixed::from_int(-5),
+            "delta_cp/R = -5 for water from the structure"
+        );
+        // Saturation pressure selects the regime: mid-range at the world mean (~1768 Pa) and boiling (1 atm),
+        // the sublimation branch at a sub-freezing cell (~107 Pa at 253 K).
+        let p_mean = curve.saturation_pressure(Fixed::from_ratio(28815, 100));
+        assert!(
+            p_mean > Fixed::from_ratio(170, 100_000) && p_mean < Fixed::from_ratio(182, 100_000),
+            "mid-range ~1768 Pa at the world mean"
+        );
+        let p_boil = curve.saturation_pressure(Fixed::from_ratio(37315, 100));
+        assert!(
+            p_boil > Fixed::from_ratio(1007, 10_000) && p_boil < Fixed::from_ratio(1020, 10_000),
+            "1 atm at boiling"
+        );
+        let p_cold = curve.saturation_pressure(Fixed::from_ratio(25315, 100));
+        assert!(
+            p_cold > Fixed::from_ratio(9, 100_000) && p_cold < Fixed::from_ratio(12, 100_000),
+            "the sublimation branch reads ~107 Pa at 253 K"
+        );
+        // Continuity at the triple point: the two branches meet (within the exp(ln) round-trip tolerance).
+        let p_trip_mid = saturation_vapor_pressure_rk(
+            curve.t_triple,
+            curve.a_mid,
+            curve.b_mid,
+            curve.delta_cp_over_r,
+        );
+        let p_trip_sub = saturation_vapor_pressure_rk(
+            curve.t_triple,
+            curve.a_sub,
+            curve.b_sub,
+            curve.delta_cp_over_r,
+        );
+        let gap = if p_trip_mid > p_trip_sub {
+            p_trip_mid - p_trip_sub
+        } else {
+            p_trip_sub - p_trip_mid
+        };
+        assert!(
+            gap < Fixed::from_ratio(1, 100_000),
+            "the branches join at the triple point"
+        );
+        // Latent heat selects the three regimes: L_b at boiling (mid), L_sub > L_vap below the triple point,
+        // the Watson vanishing near the critical point, and zero above it.
+        let l_mid = curve.latent_heat(Fixed::from_ratio(37315, 100));
+        assert!(
+            l_mid > Fixed::from_int(40000) && l_mid < Fixed::from_int(41300),
+            "mid-range L(T_b) = L_b"
+        );
+        let l_sub = curve.latent_heat(Fixed::from_int(253));
+        let l_vap_253 = kirchhoff_latent_heat(
+            curve.l_b,
+            curve.delta_cp_over_r,
+            curve.r,
+            Fixed::from_int(253),
+            curve.t_b,
+        );
+        assert!(
+            l_sub > l_vap_253,
+            "sublimation L exceeds vaporization L by L_fus below the triple point"
+        );
+        let l_near_crit = curve.latent_heat(Fixed::from_int(640));
+        assert!(
+            l_near_crit > ZERO && l_near_crit < Fixed::from_int(15000),
+            "the Watson branch drives L well below L_b toward zero near T_c"
+        );
+        assert_eq!(
+            curve.latent_heat(Fixed::from_int(700)),
+            ZERO,
+            "no latent heat above the critical point"
+        );
+    }
+
+    #[test]
+    fn the_evaporation_a_still_derives_from_free_convection() {
+        // The virtual-density buoyancy sums a thermal and a compositional part per cell, no fixed constant.
+        // Warm humid Mirror surface (delta_T 2 K over 288 K, vapour deficit ~500 Pa over 101325 Pa ambient,
+        // M_air 28.97, M_water 18.015): thermal 2/288 ~0.0069, compositional (10.955/28.97)*(528/101325) ~0.0020.
+        let m_air = Fixed::from_ratio(2897, 100);
+        let m_water = Fixed::from_ratio(18015, 1000);
+        let buoy = virtual_density_buoyancy(
+            Fixed::from_int(2),
+            Fixed::from_int(288),
+            m_air,
+            m_water,
+            Fixed::from_int(1768),
+            Fixed::from_int(1240),
+            Fixed::from_int(101_325),
+        );
+        assert!(
+            buoy > Fixed::from_ratio(5, 1000) && buoy < Fixed::from_ratio(15, 1000),
+            "the combined buoyancy derives to ~0.009 for a warm humid surface"
+        );
+        // A drier ambient raises the compositional buoyancy.
+        let buoy_drier = virtual_density_buoyancy(
+            Fixed::from_int(2),
+            Fixed::from_int(288),
+            m_air,
+            m_water,
+            Fixed::from_int(1768),
+            Fixed::from_int(400),
+            Fixed::from_int(101_325),
+        );
+        assert!(
+            buoy_drier > buoy,
+            "a drier ambient raises the compositional buoyancy"
+        );
+        // A strongly cold surface with little deficit is stably stratified (negative buoyancy).
+        let buoy_stable = virtual_density_buoyancy(
+            Fixed::from_int(-10),
+            Fixed::from_int(288),
+            m_air,
+            m_water,
+            Fixed::from_int(1768),
+            Fixed::from_int(1700),
+            Fixed::from_int(101_325),
+        );
+        assert!(
+            buoy_stable < ZERO,
+            "a cold surface with little vapour deficit is stably stratified"
+        );
+
+        // a_still derives from the length-free free-convection mass transfer. Water at 288 K (D_v 2.42e-5,
+        // g 9.81, buoyancy ~0.009, nu 1.5e-5, R_v 461.5, C 0.14) lands a small positive coefficient ~1.6e-8 s/m.
+        let d_v = Fixed::from_ratio(242, 10_000_000);
+        let nu = Fixed::from_ratio(15, 1_000_000);
+        let r_v = Fixed::from_ratio(4615, 10);
+        let c = Fixed::from_ratio(14, 100);
+        let g = Fixed::from_ratio(981, 100);
+        let a_still = free_convection_a_still(c, d_v, g, buoy, nu, r_v, Fixed::from_int(288));
+        assert!(
+            a_still > ZERO && a_still < Fixed::from_ratio(1, 1_000_000),
+            "a_still is a small positive coefficient (order 1e-8 s/m), not the 0.1 placeholder"
+        );
+        // Stronger buoyancy drives faster convection, a larger a_still.
+        let a_still_stronger = free_convection_a_still(
+            c,
+            d_v,
+            g,
+            buoy.saturating_add(buoy),
+            nu,
+            r_v,
+            Fixed::from_int(288),
+        );
+        assert!(
+            a_still_stronger > a_still,
+            "stronger buoyancy raises a_still"
+        );
+        // Stable air (non-positive buoyancy) yields no free-convection evaporation, not a panic.
+        assert_eq!(
+            free_convection_a_still(c, d_v, g, ZERO, nu, r_v, Fixed::from_int(288)),
+            ZERO,
+            "stable air yields no free-convection evaporation"
+        );
+    }
+
+    #[test]
+    fn the_lennard_jones_pair_derives_from_the_critical_point() {
+        // Corresponding states from the LJ reduced critical point (universal 1.312, 0.128). Water
+        // (T_c = 647.1 K, P_c = 22.06e6 Pa) derives epsilon/k_B ~ 493 K and sigma ~ 3.4 angstrom; air
+        // (T_c = 132.5 K, P_c = 3.77e6 Pa) derives epsilon/k_B ~ 101 K and sigma ~ 3.6 angstrom. Integer-only
+        // assertions with loose bounds absorbing the fixed-point cube-root (powf) error.
+        let (sigma_w, eps_w) = lennard_jones_from_critical_point(
+            Fixed::from_ratio(6471, 10),
+            Fixed::from_int(22_060_000),
+        );
+        assert!(
+            eps_w > Fixed::from_int(485) && eps_w < Fixed::from_int(500),
+            "water epsilon/k_B derives to ~493 K from its critical temperature"
+        );
+        assert!(
+            sigma_w > Fixed::from_ratio(32, 10) && sigma_w < Fixed::from_ratio(36, 10),
+            "water sigma derives to ~3.4 angstrom from its critical point"
+        );
+        let (sigma_a, eps_a) = lennard_jones_from_critical_point(
+            Fixed::from_ratio(1325, 10),
+            Fixed::from_int(3_770_000),
+        );
+        assert!(
+            eps_a > Fixed::from_int(95) && eps_a < Fixed::from_int(107),
+            "air epsilon/k_B derives to ~101 K from its critical temperature"
+        );
+        // Air's higher T_c/P_c ratio gives a larger collision diameter than water, monotone in the ratio.
+        assert!(
+            sigma_a > sigma_w,
+            "air's larger T_c/P_c gives a larger sigma than water"
+        );
+        // A degenerate zero critical pressure yields zero, no division by zero.
+        let (sigma_z, _) = lennard_jones_from_critical_point(Fixed::from_int(300), ZERO);
+        assert_eq!(sigma_z, ZERO, "a zero critical pressure yields zero sigma");
+    }
+
+    #[test]
+    fn the_water_vapour_diffusivity_derives_through_the_full_chain() {
+        // The whole D_v chain, only critical points authored: water (647.1 K, 22.06e6 Pa) and air (132.5 K,
+        // 3.77e6 Pa) -> LJ pairs (TGS) -> combine (arithmetic-mean sigma, geometric-mean epsilon) -> reduced
+        // temperature T* -> Neufeld Omega_D -> Chapman-Enskog D_AB. At 288 K, 1 atm this lands near 1.7e-5
+        // m^2/s, about a fifth below the 2.42e-5 tabulated value because corresponding states approximates
+        // polar water, the flagged honest deviation carried straight, never tuned. Integer-only assertions.
+        let (sigma_w, eps_w) = lennard_jones_from_critical_point(
+            Fixed::from_ratio(6471, 10),
+            Fixed::from_int(22_060_000),
+        );
+        let (sigma_a, eps_a) = lennard_jones_from_critical_point(
+            Fixed::from_ratio(1325, 10),
+            Fixed::from_int(3_770_000),
+        );
+        let sigma_ab = sigma_w
+            .saturating_add(sigma_a)
+            .checked_div(Fixed::from_int(2))
+            .unwrap();
+        let eps_ab = eps_w.checked_mul(eps_a).unwrap().sqrt();
+        let t = Fixed::from_int(288);
+        let t_star = t.checked_div(eps_ab).unwrap();
+        let omega = neufeld_collision_integral(t_star);
+        // Omega_D sits near unity in the physical reduced-temperature range.
+        assert!(
+            omega > Fixed::from_ratio(9, 10) && omega < Fixed::from_ratio(20, 10),
+            "the Neufeld collision integral is order unity at T* near 1.3"
+        );
+        let d_v = chapman_enskog_diffusivity(
+            t,
+            Fixed::from_int(18),
+            Fixed::from_int(29),
+            Fixed::ONE,
+            sigma_ab,
+            omega,
+        );
+        assert!(
+            d_v > Fixed::from_ratio(14, 1_000_000) && d_v < Fixed::from_ratio(21, 1_000_000),
+            "D_v derives to ~1.7e-5 m^2/s through the full critical-point chain"
+        );
+        // A degenerate zero collision integral yields zero, no division by zero.
+        assert_eq!(
+            chapman_enskog_diffusivity(
+                t,
+                Fixed::from_int(18),
+                Fixed::from_int(29),
+                Fixed::ONE,
+                sigma_ab,
+                ZERO
+            ),
+            ZERO,
+            "a zero collision integral yields zero diffusivity"
         );
     }
 
