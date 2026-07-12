@@ -131,3 +131,40 @@ as the matter gate was framed. No authored value: the gates are exact-`Fixed` ac
 with no tolerance, keyed on whatever reserves the being's physiology declares, so a photosynthetic,
 mana, or redox being is a data row (`physiology.rs`). Section-9 once by me per slice. This PR is the new
 bridge; #143 refreshes against main and merges as the accepted volatile substrate the moment this opens.
+
+## As built: Piece A (the clamp-drop diagnostic plus the local clamp forward-guards)
+
+The design-question 1 recommendation was refined by a grounding finding and the gate ruled the honest
+form. Grounding the reserve at source, `Stock::amount` (`stocks.rs`) is private and mutated at exactly
+four clamped sites (`step`, `deposit`, `take`, `set_capacity`), and every Homeostasis reserve path routes
+through them, so the reserve has no conservation partner within itself and cannot leak off-ledger: a
+`delta == recorded flows` closure assertion would pass tautologically, not as a leak-hunt with teeth like
+the matter cycle (which conserved a total across separate subsystems where a real leak was possible). So
+Piece A is two things, not a closure gate:
+
+- The clamp-drop DIAGNOSTIC: each `Stock` accumulates, in `#[cfg(debug_assertions)]` fields, the
+  satiation-cap overflow (deposit and regen overflow, and a capacity-decrease spill) and the
+  starvation-floor shortfall (a draw or take beyond what is present). `Homeostasis::clamp_drops` sums
+  them per being as `(satiation_waste, starvation_shortfall)`, the second lens on the founder starvation:
+  a starvation shortfall means the metabolic drain outran the reserve (the being could not gather
+  enough), while satiation waste means food arrived but the cap could not hold it (a capture or foraging
+  gap, not a food gap), so crossed with a survival sweep the two point at different causes.
+- The local clamp FORWARD-GUARDS: inside each mutation a `debug_assert` checks that the drop equals the
+  clamp boundary computed independently (regen overflow equals the excess over capacity, the drain and
+  take shortfalls equal the demand over what is present), so a future edit that makes a clamp drop energy
+  silently fails at the site.
+
+Built in `stocks.rs` (the instrumentation, the debug accessors, a manual `PartialEq`/`Eq` that ignores
+the diagnostic scratch so equality stays release-identical) and `homeostasis.rs` (the per-being
+`clamp_drops`/`reset_clamp_drops`). Byte-neutral: the fields and asserts are compiled out of release, so
+all five pins hold bit-exact (`40fe8a72`/`d05a6488`/`9a28f113`/`967b22bd`/`b62eb73d`). The local guards
+ran live across the whole debug sim suite (909 lib tests plus the integration suites, every being
+metabolism, forage, and adjust path) with no assertion firing, so on the current tree the reserve's only
+energy losses are the recorded clamp-drops and every clamp accounts every unit, the Piece-A analogue of
+the matter gate passing. The true energy-LEAK guard stays Piece B (intake-equals-loss), which has the
+food conservation partner, on B's Fork-4.
+
+Honest limit: the per-being `clamp_drops` accessor is the readout substrate, but a living-run readout of
+the satiation-versus-starvation ratio needs a per-tick capture BEFORE the cull, because the `living`
+founders go extinct so the end-of-run survivors carry no drops. That aggregation hook (a debug-only
+runner accumulator summed each tick before the death cull) is the next step, scoped not assumed.
