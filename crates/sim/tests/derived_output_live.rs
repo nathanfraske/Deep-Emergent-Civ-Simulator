@@ -16,7 +16,7 @@
 //!
 //! A retired-floor derivation is a derived value that replaced an authored floor. The constructor
 //! gate proves no such value is authored; this gate proves the derived replacement is alive. Its
-//! membership is the data-defined [`RetiredFloorDerivationRegistry`], one row per derivation, and
+//! membership is the data-defined [`DerivationRegistry`], one row per derivation, and
 //! each row is anchored to a source site by an `@derives[id]:` annotation. This test is the ratchet
 //! that keeps the registry and the annotations in step (the constructor-gate pattern): every
 //! annotated site must have a registry row, and every row must have its annotation at the site it
@@ -27,7 +27,7 @@
 //! slice; this slice locks the membership.
 
 use civsim_sim::calibration::CalibrationManifest;
-use civsim_sim::derive_gate::{coverage_report, Coverage, RetiredFloorDerivationRegistry};
+use civsim_sim::derive_gate::{coverage_report, Coverage, DerivationRegistry};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -118,7 +118,7 @@ fn scan_annotations(root: &Path) -> BTreeMap<String, String> {
 fn every_derives_annotation_has_a_registry_row_and_vice_versa() {
     let root = workspace_root();
     let annotations = scan_annotations(&root);
-    let registry = RetiredFloorDerivationRegistry::canonical();
+    let registry = DerivationRegistry::canonical();
 
     let annotated: std::collections::BTreeSet<&str> =
         annotations.keys().map(|s| s.as_str()).collect();
@@ -208,7 +208,7 @@ fn the_coverage_gate_fails_on_no_dead_derivation_and_prints_the_report() {
 fn the_cross_check_would_catch_a_new_unregistered_derivation() {
     // Self-test the ratchet: a synthetic annotation id that has no registry row must be detected by
     // the same set-difference the gate uses, proving the gate is not vacuous.
-    let registry = RetiredFloorDerivationRegistry::canonical();
+    let registry = DerivationRegistry::canonical();
     let registered: std::collections::BTreeSet<&str> = registry.ids().into_iter().collect();
     let synthetic = "a_new_unregistered_derivation";
     assert!(

@@ -121,7 +121,7 @@ def scan_derives(root):
     A marker sits at a derivation entry point (a subsystem that produces a world quantity from the
     floor and the situation) and reads `// @derives[<id>]: <quantity> <- <from these substrate
     inputs>`, or the bare `// @derives:` form. The optional `[<id>]` token is the machine handle the
-    derived-output-is-live gate keys its `RetiredFloorDerivation` registry to (task #43); it is
+    derived-output-is-live gate keys its `Derivation` registry to (tasks #43, #46); it is
     ignored here, so both forms land on the billboard.
     The generator emits every marker with its file:line, so the deriving half of the substrate map
     (orbital mechanics, hydrology, metabolism, the matter cycle, the time-space anchors: everything
