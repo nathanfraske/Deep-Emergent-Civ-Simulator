@@ -31,10 +31,13 @@
 //! cross-check (in the gate's test) asserts every annotated site has a row and every row a site,
 //! the ratchet the constructor gate already models.
 //!
-//! This slice carries the membership and the cross-check surface only. The site-local liveness
-//! probe (perturb the input, assert the derived output responds) is the next slice; a live-but-
-//! byte-neutral derivation whose effect lands in a downstream deadband is a coverage gap the
+//! The membership and its cross-check are the first surface. The site-local liveness probe (perturb
+//! the declared input, assert the derived output responds at its site) is the pass/fail gate below: a
+//! live-but-byte-neutral derivation whose effect lands in a downstream deadband is a coverage gap the
 //! separate coverage signal reports, never a liveness failure (the gate's ruling).
+
+use crate::calibration::CalibrationManifest;
+use civsim_core::Fixed;
 
 /// One retired-floor derivation: a derived value that replaced an authored floor, and the metadata
 /// the liveness gate reads to probe it. All fields are data, so a new derivation is a new row.
@@ -191,6 +194,123 @@ const CANONICAL: &[(&str, &str, &[&str], &str, &str)] = &[
     ),
 ];
 
+// --- The site-local liveness probe (task #43 slice 2): the pass/fail gate ---
+//
+// The registry above is the membership; this is the mechanism. For a wired derivation, the probe
+// evaluates the derived output at a fixed representative situation twice: once from the base
+// manifest, and once with the derivation's declared reserved input perturbed. A LIVE derivation's
+// output responds (the two readings differ); a DEAD one holds the same value regardless of its input,
+// the soil_baseline bug (a large sweep of the photosynthesis constants left the derived output, and so
+// the state hash, byte-identical). The gate keys on the SITE-LOCAL value, not a distant hash
+// consequence, so a live-but-byte-neutral derivation (its effect landing in a downstream deadband on
+// the pinned scenarios) is never mistaken for dead (the gate's ruling; that coverage gap is the
+// separate softer signal). The perturbation is a structural test factor, never a world value, and
+// never enters the sim: the gate is tooling that reads run state and authors nothing on the run path.
+
+/// The two site-local readings of a derived output: its value from the base manifest, and its value
+/// with the declared reserved input perturbed. The gate compares them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ProbeReading {
+    /// The derived output at the representative situation, base manifest.
+    pub baseline: Fixed,
+    /// The derived output at the same situation, with the declared input perturbed.
+    pub perturbed: Fixed,
+}
+
+/// The liveness verdict for one derivation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Liveness {
+    /// The derived output responded to its declared input: alive.
+    Live,
+    /// The derived output was identical under the perturbation: dead (the soil_baseline bug).
+    Dead,
+}
+
+/// The pass/fail rule: a reading whose two values differ is live; identical values are dead. Exact
+/// fixed-point equality (Principle 3), so a response of a single ULP already reads live and only a
+/// constant output reads dead.
+pub fn assess(reading: &ProbeReading) -> Liveness {
+    if reading.baseline == reading.perturbed {
+        Liveness::Dead
+    } else {
+        Liveness::Live
+    }
+}
+
+/// A site-local liveness probe: given the base manifest, it returns the two readings of one
+/// derivation's output. The closure owns the mapping from the derivation's declared reserved key to
+/// the kernel input it perturbs, so the mechanism ([`assess`]) stays derivation-agnostic. Returns an
+/// error string if the manifest cannot supply the derivation's constants (fail-loud, never a silent
+/// pass).
+pub type LivenessProbe = fn(&CalibrationManifest) -> Result<ProbeReading, String>;
+
+/// The wired probe for a registry id, or `None` where a derivation is registered (so the cross-check
+/// covers it) but its site-local probe is not yet wired. A `None` is an honest coverage gap in the
+/// probe wiring, reported as such, never a false [`Liveness::Dead`]. The flagship carbon-fixation case
+/// (the soil_baseline bug's own site) is wired; the remaining derivations' probes follow as data-plus-
+/// closure, each a kernel call reachable from this crate (the sim crate is downstream of core,
+/// physics, and world).
+pub fn liveness_probe(id: &str) -> Option<LivenessProbe> {
+    match id {
+        "carbon_fixation_rate" => Some(probe_carbon_fixation_rate),
+        _ => None,
+    }
+}
+
+/// The perturbation the site-local probes apply to a declared input: double it. A structural test
+/// factor (never a world value, never on the run path); for the site-local assertion the magnitude
+/// only has to move the output past its own ULP, which any non-degenerate factor does.
+const PROBE_PERTURBATION: i32 = 2;
+
+/// The flagship probe: the per-cell carbon-fixation rate must respond to `photosynthesis.light_saturation`.
+/// The situation is a fertile daylit cell (every non-light Liebig factor saturated), so the light term
+/// is limiting and the light-saturation constant reaches the derived rate; doubling it must move the
+/// output. This is the exact site of the soil_baseline bug: with the soil factor barren the same kernel
+/// goes dead (its output zero regardless of the constants), the case the slice's proof-of-fire test
+/// reproduces.
+fn probe_carbon_fixation_rate(m: &CalibrationManifest) -> Result<ProbeReading, String> {
+    use crate::environ::{carbon_fixation_rate, PhotosynthesisCalib};
+    let base = PhotosynthesisCalib::from_manifest(m)
+        .map_err(|e| format!("carbon_fixation_rate probe: {e}"))?;
+    // A representative daylit, fertile situation: full insolation under the Earth stellar constant
+    // (1361 W/m^2, the flux the derivation's own doc-comment cites), the temperature at the enzyme
+    // optimum, and water and soil supplied well past their requirements, so every non-light factor
+    // saturates and the light-saturation constant reaches the derived rate. Situation scaffolding for
+    // the two-point read; it never enters the sim.
+    let insolation = Fixed::ONE;
+    let solar_constant = Fixed::from_int(1361);
+    let temperature = base.temp_optimum;
+    let evaporative_demand = Fixed::ONE;
+    let water_supply = Fixed::from_int(1000);
+    let soil_fertility = Fixed::from_int(1000);
+    let soil_requirement = Fixed::ONE;
+    let read = |photo: &PhotosynthesisCalib| {
+        carbon_fixation_rate(
+            insolation,
+            solar_constant,
+            temperature,
+            evaporative_demand,
+            water_supply,
+            soil_fertility,
+            soil_requirement,
+            photo,
+        )
+    };
+    let baseline = read(&base);
+    let mut perturbed_calib = base;
+    perturbed_calib.light_saturation = base
+        .light_saturation
+        .checked_mul(Fixed::from_int(PROBE_PERTURBATION))
+        .ok_or_else(|| {
+            "carbon_fixation_rate probe: light_saturation perturbation overflowed".to_string()
+        })?;
+    let perturbed = read(&perturbed_calib);
+    Ok(ProbeReading {
+        baseline,
+        perturbed,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -243,5 +363,93 @@ mod tests {
             scenario: "full".to_string(),
             site: "z.rs".to_string(),
         });
+    }
+
+    // --- The site-local liveness probe (slice 2) ---
+
+    /// The base manifest the probes read: the labelled dev-fixtures profile, which carries the
+    /// photosynthesis constants set (not reserved). The probe never enters the sim, so a fixture
+    /// base is correct: it is tooling reading run state.
+    const DEV_FIXTURES: &str = include_str!("../../../calibration/profiles/dev-fixtures.toml");
+
+    fn base_manifest() -> CalibrationManifest {
+        CalibrationManifest::from_toml_str(DEV_FIXTURES).expect("dev-fixtures profile parses")
+    }
+
+    #[test]
+    fn every_wired_probe_id_is_a_registered_derivation() {
+        // A probe may only exist for an id the registry carries, so the cross-check that guards the
+        // membership also guards the probe wiring. (The reverse is allowed: a registered derivation
+        // whose probe is not yet wired is an honest coverage gap, a None, never a false Dead.)
+        let registry = RetiredFloorDerivationRegistry::canonical();
+        let ids = registry.ids();
+        for d in registry.iter() {
+            if liveness_probe(&d.id).is_some() {
+                assert!(
+                    ids.contains(&d.id.as_str()),
+                    "wired probe id '{}' is not a registered derivation",
+                    d.id
+                );
+            }
+        }
+        // The flagship is wired.
+        assert!(liveness_probe("carbon_fixation_rate").is_some());
+        // An unregistered id has no probe.
+        assert!(liveness_probe("not_a_derivation").is_none());
+    }
+
+    #[test]
+    fn the_flagship_carbon_fixation_probe_reads_live() {
+        // The live derivation: perturbing photosynthesis.light_saturation moves the derived rate at
+        // its site, so the probe reads Live. This is the pass side of the gate.
+        let m = base_manifest();
+        let probe = liveness_probe("carbon_fixation_rate").expect("the flagship probe is wired");
+        let reading =
+            probe(&m).expect("the fixture manifest supplies the photosynthesis constants");
+        assert_ne!(
+            reading.baseline, reading.perturbed,
+            "a live carbon-fixation rate must respond to its light-saturation input"
+        );
+        assert_eq!(assess(&reading), Liveness::Live);
+    }
+
+    #[test]
+    fn the_gate_fires_on_the_soil_baseline_dead_case() {
+        // The proof-of-fire: reproduce the exact soil_baseline dead output. With the soil factor
+        // barren (fertility zero, the soil-bootstrap deadlock the mineral-weathering arm was added to
+        // break), the Liebig minimum zeroes the derived rate regardless of the photosynthesis
+        // constants, so perturbing light_saturation moves nothing. assess must read Dead, catching the
+        // silent regression the constructor gate cannot see.
+        use crate::environ::{carbon_fixation_rate, PhotosynthesisCalib};
+        let m = base_manifest();
+        let base = PhotosynthesisCalib::from_manifest(&m).expect("photosynthesis constants set");
+        let barren_read = |photo: &PhotosynthesisCalib| {
+            carbon_fixation_rate(
+                Fixed::ONE,            // full insolation
+                Fixed::from_int(1361), // stellar constant
+                base.temp_optimum,     // optimal temperature
+                Fixed::ONE,            // small evaporative demand
+                Fixed::from_int(1000), // ample water
+                Fixed::ZERO,           // BARREN soil: the dead regime
+                Fixed::ONE,            // soil requirement
+                photo,
+            )
+        };
+        let mut doubled = base;
+        doubled.light_saturation = base.light_saturation.mul(Fixed::from_int(2));
+        let dead = ProbeReading {
+            baseline: barren_read(&base),
+            perturbed: barren_read(&doubled),
+        };
+        assert_eq!(
+            dead.baseline,
+            Fixed::ZERO,
+            "the barren regime fixes no carbon"
+        );
+        assert_eq!(
+            assess(&dead),
+            Liveness::Dead,
+            "a derived output constant under its input perturbation must read Dead"
+        );
     }
 }
