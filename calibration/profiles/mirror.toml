@@ -499,49 +499,51 @@ value = "0.05"
 unit = "producer_biomass"
 source = "dev fixture for base-level liveliness step 3; crates/sim/src/environ.rs"
 
-# --- the DERIVED photosynthesis productivity (#156, the Mirror-standup arc): the measured per-producer constants
-# the carbon-fixation derivation reads, retiring the abstract-producer productivity.*_requirement half-saturation
-# constants on the armed path. Earth-like C3 magnitudes; per-substance measured data (refutable in a lab), pending
-# the owner's per-producer calibration.
+# --- the DERIVED photosynthesis productivity (#156, the Mirror-standup arc): the measured Earth-C3 per-producer
+# constants the carbon-fixation derivation reads, OWNER-AUTHORIZED graduation from dev fixtures to sourced values
+# (PR #156). Each is converted into the derivation's OWN units (an energy fraction of incident total shortwave; a
+# total-shortwave W/m^2 flux; Kelvin; a linear-tent zero-crossing half-width; the evaporative-coupling coefficient),
+# the conversion arithmetic and citation shown in each basis. The absolute scale cross-checks: p_max =
+# quantum_yield * light_saturation = 0.0429 * 486 ~ 21 W/m^2, the real C3 light-saturated gross fixation rate.
 [[reserved]]
 id = "photosynthesis.quantum_yield"
-basis = "the photosynthetic quantum yield, the fraction of incident radiant energy fixed as chemical energy at low light-limited irradiance (the light-response initial slope); measured maximum quantum efficiency of the producer's photosystem (Taiz and Zeiger). FIXTURE: a few percent for C3"
+basis = "the photosynthetic quantum yield as the energy fraction of INCIDENT total-shortwave radiant energy fixed at the light-limited initial slope (p_max = quantum_yield * light_saturation). CONVERTED from the sourced molar yield 0.052 mol CO2 per mol absorbed PAR photon: * (470 kJ per mol CO2 fixed / 218 kJ per mol PAR photon) = 0.112 energy-per-absorbed-PAR, * 0.45 PAR fraction of shortwave * 0.85 canopy absorptance = 0.043. Owner-authorized; Ehleringer and Bjorkman 1977 for the molar yield, the glucose combustion enthalpy and PAR photon energy the conversion physics"
 status = "set"
-value = "0.05"
+value = "0.0429"
 unit = "fixed_energy_per_incident_energy"
-source = "dev fixture for the photosynthesis-to-productivity derivation #156; crates/sim/src/environ.rs carbon_fixation_rate"
+source = "owner-authorized Earth-C3 graduation, PR #156; Ehleringer and Bjorkman 1977, Plant Physiol; crates/sim/src/environ.rs carbon_fixation_rate"
 
 [[reserved]]
 id = "photosynthesis.light_saturation"
-basis = "the light-saturation irradiance where fixation stops rising with light (the enzyme/CO2-limited plateau begins), in the same flux units as insolation*solar_constant; measured C3 light-saturation, well below full sun (Taiz and Zeiger; Larcher)"
+basis = "the light-saturation irradiance in the derivation's total-shortwave flux units (the same units as insolation * solar_constant), where fixation stops rising with light. CONVERTED from the sourced 1000 micromol PAR m^-2 s^-1: / 4.57 micromol per J = 219 W/m^2 PAR, / 0.45 PAR fraction of shortwave = 486 W/m^2 total shortwave. Owner-authorized; Larcher 2003 for the C3 saturation, the PAR energy conversion the physics"
 status = "set"
-value = "300"
+value = "486.3"
 unit = "watt_per_square_metre"
-source = "dev fixture for the photosynthesis-to-productivity derivation #156; crates/sim/src/environ.rs carbon_fixation_rate"
+source = "owner-authorized Earth-C3 graduation, PR #156; Larcher 2003 / Plants in Action; crates/sim/src/environ.rs carbon_fixation_rate"
 
 [[reserved]]
 id = "photosynthesis.temperature_optimum"
-basis = "the carbon-fixing enzyme's thermal optimum where the fixation rate peaks (absolute temperature); measured optimum of the producer's carboxylating enzyme, about 298 K for temperate C3 (Berry and Bjorkman 1980)"
+basis = "the carbon-fixing enzyme's thermal optimum where net photosynthesis peaks, in KELVIN (the temperature field's units, freeze at 273.15 K). The sourced 25 C net-photosynthesis optimum = 298.15 K. Owner-authorized; Kumarathunge 2019, New Phytol"
 status = "set"
-value = "298"
+value = "298.15"
 unit = "kelvin"
-source = "dev fixture for the photosynthesis-to-productivity derivation #156; crates/sim/src/environ.rs carbon_fixation_rate"
+source = "owner-authorized Earth-C3 graduation, PR #156; Kumarathunge 2019, New Phytol; crates/sim/src/environ.rs carbon_fixation_rate"
 
 [[reserved]]
 id = "photosynthesis.temperature_breadth"
-basis = "the carbon-fixing enzyme's thermal breadth, the temperature departure from the optimum at which fixation falls to zero (the piecewise-linear tent half-width approximating the measured thermal-performance; the Johnson-Lewin form reserved for R-GPU-CANON-PIN); Berry and Bjorkman 1980, Larcher"
+basis = "the linear-tent zero-crossing half-width, the offset from the optimum at which the tent factor reaches ZERO (temp_factor = 1 - |T - Topt| / breadth). CONVERTED from the sourced Gaussian Omega = 17.5 C (the 1/e half-width) so the tent passes through 1/e exactly at Omega: breadth = 17.5 / (1 - 1/e) = 27.68 K. FLAGGED as the one under-pinned value (fit-or-lift reserved from June, Evans and Farquhar 2004; the Johnson-Lewin exp form reserved for R-GPU-CANON-PIN). Owner-authorized interim"
 status = "set"
-value = "30"
+value = "27.68"
 unit = "kelvin"
-source = "dev fixture for the photosynthesis-to-productivity derivation #156; crates/sim/src/environ.rs carbon_fixation_rate"
+source = "owner-authorized Earth-C3 interim, PR #156; June, Evans and Farquhar 2004, Funct Plant Biol; crates/sim/src/environ.rs carbon_fixation_rate"
 
 [[reserved]]
 id = "photosynthesis.water_use_efficiency"
-basis = "the water-use-efficiency coupling, the water a producer must transpire per unit fixation at its potential rate (turning the cell's evaporative demand into the water requirement, retiring productivity.water_requirement); measured transpiration efficiency (the water-use-efficiency literature)"
+basis = "the evaporative-coupling coefficient that turns a cell's evaporative demand into the producer's water requirement (water_req = water_use_efficiency * evaporative_demand, compared to water_supply). NOTE the units-reconciliation seam: the sourced agronomic WUE ~2 g CO2 per kg H2O (Lambers et al. 2008) is fixation-per-water, the INVERSE dimension of this coupling coefficient, so this is set to 2 as instructed but flagged, and water was shown NON-limiting in the #141 evaporation re-run so it is unlikely to bind. Owner-authorized interim; the clean transpiration-coupling derivation the follow-on"
 status = "set"
-value = "1"
+value = "2"
 unit = "transpiration_per_fixation"
-source = "dev fixture for the photosynthesis-to-productivity derivation #156; crates/sim/src/environ.rs carbon_fixation_rate"
+source = "owner-authorized Earth-C3 interim, PR #156; Lambers et al. 2008; crates/sim/src/environ.rs carbon_fixation_rate"
 
 [[reserved]]
 id = "salinity.weathering_rate"
