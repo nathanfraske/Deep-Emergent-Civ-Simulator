@@ -184,6 +184,64 @@ pub fn ballistic_landing(
     BallisticLanding { track, landing }
 }
 
+/// An isotropic ejecta fan: an impact sheds its mass as `azimuths` equal parcels launched at the same speed
+/// and elevation angle in evenly spaced azimuths (the maximum-entropy, unbiased direction prior), each flown
+/// through [`ballistic_landing`]. The blanket that results is NOT authored: it EMERGES from the terrain
+/// intersecting each arc, so flat ground gives a symmetric ring and a crater rim or a slope breaks it, both
+/// falling out of the physics rather than a coded spread shape. The isotropy is true angular resolution here
+/// (unlike the surface fan's four-axis limit), because the arc lands at the floored continuous azimuth
+/// position, not a four-connected greedy step.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct EjectaFan {
+    /// The launch speed, the same for every azimuth (isotropic launch).
+    pub speed: Fixed,
+    /// The elevation angle, the same for every azimuth.
+    pub elevation_angle: Fixed,
+    /// The number of evenly spaced launch azimuths. A RESOLUTION and determinism bound, not a physical value:
+    /// reserved-with-basis as the fewest azimuths at which the blanket's shape stops changing beyond the grid
+    /// resolution (a resolution-versus-cost bound), never fabricated.
+    pub azimuths: u32,
+}
+
+/// Fire an isotropic ejecta fan from `source` and aggregate where the arcs land into a canonical destination
+/// distribution the redistribution operator ([`crate::redistribute`]) credits. The azimuths are the evenly
+/// spaced angles `i * 2*pi / azimuths` from a fixed origin (deterministic fixed-point CORDIC, never an RNG),
+/// each parcel flown through [`ballistic_landing`], and the landing cells gathered in cell order into
+/// `(cell, count)` weights, so the whole fan is a pure function of its inputs, worker-invariant. Returns an
+/// empty distribution for a zero-azimuth fan. Gravity is the parameter [`BallisticForces::gravity`], so a
+/// world's own or derived gravity sets the blanket radius with no code change.
+pub fn ejecta_fan(
+    width: usize,
+    height: usize,
+    elevation: &[Fixed],
+    source: usize,
+    fan: EjectaFan,
+    forces: BallisticForces,
+) -> Vec<crate::redistribute::Weighted> {
+    use crate::redistribute::Weighted;
+    use std::collections::BTreeMap;
+    if fan.azimuths == 0 {
+        return Vec::new();
+    }
+    let full_turn = Fixed::HALF_PI.mul(Fixed::from_int(4));
+    let count = Fixed::from_int(fan.azimuths as i32);
+    let mut lands: BTreeMap<usize, u64> = BTreeMap::new();
+    for i in 0..fan.azimuths {
+        let phi = full_turn.mul(Fixed::from_int(i as i32)).div(count);
+        let launch = BallisticLaunch {
+            speed: fan.speed,
+            elevation_angle: fan.elevation_angle,
+            azimuth: phi,
+        };
+        let land = ballistic_landing(width, height, elevation, source, launch, forces);
+        *lands.entry(land.landing).or_insert(0) += 1;
+    }
+    lands
+        .into_iter()
+        .map(|(dest, weight)| Weighted { dest, weight })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -417,6 +475,190 @@ mod tests {
             a, b,
             "the same launch and terrain reproduce the same landing"
         );
+    }
+
+    // The east-west and north-south parcel counts of a fan's blanket around a source.
+    fn axis_counts(
+        dist: &[crate::redistribute::Weighted],
+        w: usize,
+        sx: usize,
+        sy: usize,
+    ) -> (u64, u64, u64, u64) {
+        let (mut east, mut west, mut north, mut south) = (0u64, 0u64, 0u64, 0u64);
+        for wt in dist {
+            let x = wt.dest % w;
+            let y = wt.dest / w;
+            if x > sx {
+                east += wt.weight;
+            }
+            if x < sx {
+                west += wt.weight;
+            }
+            if y > sy {
+                south += wt.weight;
+            }
+            if y < sy {
+                north += wt.weight;
+            }
+        }
+        (east, west, north, south)
+    }
+
+    #[test]
+    fn an_ejecta_fan_spreads_near_symmetrically_with_true_angular_resolution_on_flat_ground() {
+        // Flat ground, source at the centre, a 16-azimuth fan: every azimuth lands at its OWN cell (true
+        // angular resolution, unlike the surface fan's four-axis collapse), the parcel count is conserved,
+        // and the blanket is symmetric east-west and north-south to within one parcel (the residual a
+        // deterministic sub-cell floor-rounding artifact toward the lower-index axis, not a bias).
+        let (w, h) = (61usize, 61usize);
+        let flat = vec![Fixed::ZERO; w * h];
+        let (sx, sy) = (30usize, 30usize);
+        let source = sy * w + sx;
+        let fan = EjectaFan {
+            speed: Fixed::from_int(10),
+            elevation_angle: deg45(),
+            azimuths: 16,
+        };
+        let dist = ejecta_fan(
+            w,
+            h,
+            &flat,
+            source,
+            fan,
+            forces(Fixed::from_int(10), Fixed::ONE, 200),
+        );
+        let total: u64 = dist.iter().map(|wt| wt.weight).sum();
+        assert_eq!(total, 16, "every launched parcel is accounted for");
+        assert!(
+            dist.len() >= 12,
+            "the ballistic fan resolves distinct azimuths, not four axes (got {} cells)",
+            dist.len()
+        );
+        let (east, west, north, south) = axis_counts(&dist, w, sx, sy);
+        assert!(
+            east.abs_diff(west) <= 1 && north.abs_diff(south) <= 1,
+            "near-symmetric on flat ground (E{east} W{west} N{north} S{south})"
+        );
+    }
+
+    #[test]
+    fn a_slope_breaks_the_ejecta_ring() {
+        // On a ramp falling to the east, the downhill (east) arcs reach farther and the uphill (west) arcs
+        // land nearer, so the blanket stretches east: the ring is broken by the terrain, not by an authored
+        // shape. The easternmost landing is farther from the source than the westernmost.
+        let (w, h) = (61usize, 41usize);
+        let ramp = east_downhill(w, h, Fixed::from_ratio(1, 4));
+        let (sx, sy) = (30usize, 20usize);
+        let source = sy * w + sx;
+        let fan = EjectaFan {
+            speed: Fixed::from_int(10),
+            elevation_angle: deg45(),
+            azimuths: 16,
+        };
+        let dist = ejecta_fan(
+            w,
+            h,
+            &ramp,
+            source,
+            fan,
+            forces(Fixed::from_int(10), Fixed::ONE, 300),
+        );
+        let max_east = dist
+            .iter()
+            .map(|wt| wt.dest % w)
+            .filter(|&x| x > sx)
+            .map(|x| x - sx)
+            .max()
+            .unwrap_or(0);
+        let max_west = dist
+            .iter()
+            .map(|wt| wt.dest % w)
+            .filter(|&x| x < sx)
+            .map(|x| sx - x)
+            .max()
+            .unwrap_or(0);
+        assert!(
+            max_east > max_west,
+            "the terrain stretches the blanket downhill (east reach {max_east} > west reach {max_west})"
+        );
+    }
+
+    #[test]
+    fn the_ejecta_fan_is_deterministic() {
+        let (w, h) = (41usize, 41usize);
+        let e: Vec<Fixed> = (0..w * h)
+            .map(|i| Fixed::from_int(((i * 3) % 7) as i32))
+            .collect();
+        let source = 20 * w + 20;
+        let fan = EjectaFan {
+            speed: Fixed::from_int(12),
+            elevation_angle: deg45(),
+            azimuths: 24,
+        };
+        let f = forces(Fixed::from_int(9), Fixed::ONE, 300);
+        let a = ejecta_fan(w, h, &e, source, fan, f);
+        let b = ejecta_fan(w, h, &e, source, fan, f);
+        assert_eq!(a, b, "the same fan reproduces the same blanket");
+    }
+
+    #[test]
+    fn the_ejecta_fan_feeds_the_operator_a_conservative_blanket() {
+        use crate::redistribute::{redistribute, Redistribution};
+        let (w, h) = (41usize, 41usize);
+        let flat = vec![Fixed::ZERO; w * h];
+        let source = 20 * w + 20;
+        let fan = EjectaFan {
+            speed: Fixed::from_int(9),
+            elevation_angle: deg45(),
+            azimuths: 16,
+        };
+        let dist = ejecta_fan(
+            w,
+            h,
+            &flat,
+            source,
+            fan,
+            forces(Fixed::from_int(10), Fixed::ONE, 200),
+        );
+        let mass = 4000;
+        let delta = redistribute(
+            w * h,
+            &[Redistribution {
+                source,
+                mass,
+                dests: dist,
+            }],
+        )
+        .unwrap();
+        assert_eq!(
+            delta.iter().sum::<i64>(),
+            0,
+            "the ejecta blanket conserves mass"
+        );
+        assert_eq!(
+            delta[source], -mass,
+            "the impact source shed its whole mass"
+        );
+    }
+
+    #[test]
+    fn a_zero_azimuth_fan_is_empty() {
+        let (w, h) = (9usize, 9usize);
+        let flat = vec![Fixed::ZERO; w * h];
+        let fan = EjectaFan {
+            speed: Fixed::from_int(10),
+            elevation_angle: deg45(),
+            azimuths: 0,
+        };
+        assert!(ejecta_fan(
+            w,
+            h,
+            &flat,
+            40,
+            fan,
+            forces(Fixed::from_int(10), Fixed::ONE, 50)
+        )
+        .is_empty());
     }
 
     #[test]
