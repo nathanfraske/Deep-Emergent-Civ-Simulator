@@ -1861,14 +1861,24 @@ impl EnvironFields {
                         calib,
                     ),
                 };
-                // Where a real producer organism stands (biosphere-into-run), its located biomass is the food
-                // ceiling; elsewhere the abstract climate productivity is the baseline (the stand-in for
-                // unmodelled background vegetation). An all-zero producer (no biosphere seeded) takes the
-                // climate branch on every cell, so the capacity and its hash are byte-unchanged.
-                self.capacity.cells[i] = if self.producer[i] > Fixed::ZERO {
-                    self.producer[i]
-                } else {
-                    climate
+                self.capacity.cells[i] = match derived {
+                    // ARMED: the derived carbon-fixation rate IS the productivity everywhere (the land's
+                    // photosynthetic potential), so a located producer's ENERGY derives from its own cell's
+                    // fixation like any cell; its nutrient COMPOSITION still rides `producer_food` /
+                    // `set_real_composition` in `regrow_supply`. The static `producer[i]` biomass is retired as
+                    // the energy source on this path (retiring the static-T3 energy the derivation replaces).
+                    Some(_) => climate,
+                    // UNARMED (byte-identical): where a real producer organism stands (biosphere-into-run), its
+                    // located biomass is the food ceiling; elsewhere the abstract climate productivity is the
+                    // baseline (the stand-in for unmodelled background vegetation). An all-zero producer takes
+                    // the climate branch on every cell, so the capacity and its hash are byte-unchanged.
+                    None => {
+                        if self.producer[i] > Fixed::ZERO {
+                            self.producer[i]
+                        } else {
+                            climate
+                        }
+                    }
                 };
             }
         }
@@ -1896,6 +1906,10 @@ impl EnvironFields {
     /// the same way as data. Walks canonical row-major order; a pure deterministic fold (Principle 3).
     pub fn regrow_supply(&self, resource: &mut ResourceField, calib: &EnvironCalib) {
         let (w, h) = (self.width, self.height);
+        // Whether the DERIVED photosynthesis productivity is armed (and the sky supplies the flux anchor): on the
+        // armed path the food capacity is an absolute fixed-energy value, so a bare cell's energy food is marked
+        // real (eaten at `content = supply`) rather than double-scaled through the `food_energy_density` anchor.
+        let photosynthesis_armed = self.photosynthesis.is_some() && self.sky.is_some();
         // Size the dense ground layer to the environ grid the first time (idempotent), so every per-cell
         // write below lands in an O(1) indexed slot rather than a BTreeMap tree descent.
         resource.set_dims(w, h);
@@ -1929,6 +1943,13 @@ impl EnvironFields {
                 // (byte-identical for a run that seeds no producer food, so the four tracked pins hold).
                 match food {
                     Some(fc) => resource.set_real_composition(coord, fc.keys().cloned()),
+                    // ARMED (the derived productivity, #156): a cell with no located producer still grows its food
+                    // toward the DERIVED carbon-fixation capacity, which is already an absolute fixed-energy value,
+                    // so mark its energy class real so the forage INGEST eats it at `content = supply` and does NOT
+                    // double-scale through the `food_energy_density` anchor (retiring that scalar on the armed
+                    // energy path; the water and salinity axes below stay unmarked and keep the anchor).
+                    None if photosynthesis_armed => resource
+                        .set_real_composition(coord, std::iter::once(ENERGY_DENSITY.to_string())),
                     None => resource.set_real_composition(coord, std::iter::empty()),
                 }
                 let comp = resource.composition_mut(coord);
@@ -2062,6 +2083,19 @@ impl PhotosynthesisCalib {
             temp_breadth: Fixed::from_int(30),
             water_use_efficiency: Fixed::ONE,
         }
+    }
+
+    /// Read the photosynthesis calibration fail-loud from the manifest (Principle 11): each measured constant is
+    /// a reserved value that refuses to build while unset, never a silent default. The manifest home is the
+    /// `photosynthesis.*` keys, surfaced with their basis in the reserved manifest.
+    pub fn from_manifest(m: &CalibrationManifest) -> Result<PhotosynthesisCalib, CalibrationError> {
+        Ok(PhotosynthesisCalib {
+            quantum_yield: m.require_fixed("photosynthesis.quantum_yield")?,
+            light_saturation: m.require_fixed("photosynthesis.light_saturation")?,
+            temp_optimum: m.require_fixed("photosynthesis.temperature_optimum")?,
+            temp_breadth: m.require_fixed("photosynthesis.temperature_breadth")?,
+            water_use_efficiency: m.require_fixed("photosynthesis.water_use_efficiency")?,
+        })
     }
 }
 

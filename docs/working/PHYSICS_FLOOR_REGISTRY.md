@@ -29,7 +29,7 @@ The 8 deriving subsystems below live OUTSIDE the authored floor. Each produces a
 
 - local water presence, rainfall, evaporation, runoff <- Clausius-Clapeyron saturation(local temperature) + Dalton evaporation + condensation where moisture exceeds saturation + downhill routing to the lowest neighbour. Water is NOT authored per cell; it falls out of temperature and terrain. (`crates/sim/src/environ.rs:1406`)
 - per-cell biomass productivity / carrying capacity <- when photosynthesis is armed, the DERIVED carbon-fixation rate (carbon_fixation_rate: the light-response over the real insolation flux, the enzyme thermal tent, the water-use-efficiency coupling to evaporation, and the soil-nutrient limitation over matter-cycle fertility); unarmed, the abstract-producer Liebig minimum over (water, light, temperature, soil) with soil = soil_baseline + matter-cycle fertility (the interim the derivation retires). Productivity is NOT authored per cell. (`crates/sim/src/environ.rs:1823`)
-- per-cell carbon-fixation rate / net primary productivity <- the photosynthesis light-response (`crates/sim/src/environ.rs:2083`)
+- per-cell carbon-fixation rate / net primary productivity <- the photosynthesis light-response (`crates/sim/src/environ.rs:2117`)
 ### `crates/sim/src/locomotion.rs`
 
 - movement speed in tiles/tick, and (inverted) the cell edge in metres <- a real ground speed (about 1.4 m/s) / the tile edge, at the 1 s/tick base. The cell size is NOT free: it is fixed by one real creature's speed x the tick. Body-side, a being's own speed derives from its size (morphology), not a plant/animal tag. (`crates/sim/src/locomotion.rs:88`)
