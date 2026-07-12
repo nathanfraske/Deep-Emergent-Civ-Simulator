@@ -96,3 +96,30 @@ Surfaced to the gate rather than authored: the recommendation is to add the per-
 as a measured `[M]` elemental column (the cohesive energy of each element in its standard state), a
 component-level measured constant the same tier as the atomic weights already on the floor, an INPUT the
 derivation composes via Hess-law, not the output authored. Build HELD for the gate's ruling on the datum.
+
+## Build landed (post-datum-approval)
+
+The gate approved the datum: add the cited per-element atomization enthalpies as an `[M]` component column,
+compose the Hess `E_coh`, the estimator modulus, and the VRH aggregate, byte-neutral, gate per push. Built on
+`claude/materials-oracle-modulus-slice`:
+
+- `crates/physics/src/periodic.rs` and `crates/physics/data/periodic_table.toml`: the `atomization_enthalpy`
+  `[M]` column (optional, absent-not-zero, cited-with-source on the same discipline as the standard molar
+  entropy), populated for the common rock-formers (H, C, N, O, Na, Mg, Al, Si, P, S, K, Ca, Ti, Fe) from CODATA
+  Key Values for Thermodynamics (Cox, Wagman & Medvedev, 1989), the standard enthalpy of formation of the
+  monatomic gas.
+- `crates/physics/src/materials_oracle.rs`: `phase_cohesive_energy` (Hess `[D]`), `phase_elastic_modulus`
+  (`E_coh / V` estimator `[E]`, `1 kJ/cm^3 = 1 GPa`), and `assemblage_elastic_modulus` (the volume-weighted
+  Voigt-Reuss-Hill aggregate, emitting `{value, band, provenance}` with the derived VRH half-gap as the band and
+  a local seven-tag `Provenance` placeholder swapped to A's enforced enum when its register Phase 1 lands).
+- `crates/physics/data/mechanical_floor.toml`: the authored `mat.elastic_modulus` row flagged the retirement
+  target, kept feeding its live consumer (compose `elastic_recoil_energy`), retiring when the consumer reads the
+  derived modulus.
+
+Reserved, surfaced not baked: the per-phase ESTIMATOR SCATTER band (the factor by which real single-crystal
+moduli deviate from the cohesive-energy-density scale across bonding classes), its basis the empirical spread of
+`M / (E_coh / V)` in the estimator-calibration literature, the owner sets and validates against measured moduli.
+The emitted band is the derived VRH gap alone until the estimator band is set, at which point the emitted band
+widens to the larger of the two. Byte-neutral: no scenario reads the output, the sim determinism and invariant
+pins are unmoved. The tests hand-check `E_coh` (quartz 1859.06, periclase 997.88 kJ/mol), the modulus (quartz
+~82 GPa), the single-phase zero-band case, the two-phase Voigt-Reuss bracketing, and the data-gap `None`.

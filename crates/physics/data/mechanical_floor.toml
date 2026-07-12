@@ -266,6 +266,13 @@ range_lo = "1"
 range_hi = "10000"
 real = "Ashby and Jones; brittle-fracture literature (whisker and theoretical headroom)"
 
+# RETIREMENT TARGET (materials oracle, Stage-6 property emission). This authored per-material Young's modulus is
+# the named-substance-floor anchor the oracle replaces: crate::materials_oracle::assemblage_elastic_modulus now
+# DERIVES an elastic modulus from a composition's stable mineral assemblage (the cohesive-energy-density
+# estimator over the Voigt-Reuss-Hill aggregate), so a rock's stiffness falls out of its mineralogy rather than
+# this table. The row STAYS while it still feeds its live consumer (compose elastic_recoil_energy); it is flagged
+# authoring-to-be-retired, and retires when the consumer reads the derived modulus. Not deleted here: the
+# derivation lands dormant (byte-neutral), and the swap is a separate wired slice.
 [[axis]]
 id = "mat.elastic_modulus"
 measures = "Young's modulus, the stress per unit elastic strain"

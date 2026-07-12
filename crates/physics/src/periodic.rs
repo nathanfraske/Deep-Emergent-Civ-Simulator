@@ -83,6 +83,22 @@ pub struct Element {
     /// The citation for the standard molar entropy value (every thermochemical value is real-with-source).
     /// `None` when no entropy is populated; required non-empty whenever an entropy is.
     pub entropy_source: Option<String>,
+    /// The standard enthalpy of ATOMIZATION at 298.15 K, in kJ/mol, the enthalpy to convert one mole of the
+    /// element in its standard state into gaseous monatomic atoms (equivalently the standard enthalpy of
+    /// formation of the monatomic gas). This is the element's own COHESIVE ENERGY, a measured `[M]`
+    /// component-level constant that bottoms out in the element's band structure (quantum chemistry the engine
+    /// does not own), the same tier as the atomic weight and the standard molar entropy. The materials-oracle
+    /// derivations read it: a phase's cohesive energy is `sum(atomization enthalpies of its constituents) -
+    /// enthalpy_formation` by Hess's law, feeding the elastic modulus, the melting point, the strength ceiling,
+    /// and the surface and vacancy energies. `None` until a cited value is populated (the extensible registry:
+    /// an unpopulated row is absent, not zero).
+    pub atomization_enthalpy: Option<Fixed>,
+    /// The raw decimal string of the atomization enthalpy, retained verbatim as the provenance record and
+    /// against Q32.32 rounding, mirroring `weight_decimal`. `None` when no atomization enthalpy is populated.
+    pub atomization_decimal: Option<String>,
+    /// The citation for the atomization enthalpy (every thermochemical value is real-with-source). `None` when
+    /// none is populated; required non-empty whenever an atomization enthalpy is.
+    pub atomization_source: Option<String>,
     /// The citation and provenance for this row.
     pub provenance: String,
 }
@@ -455,6 +471,13 @@ struct ElementDef {
     /// The citation for the standard molar entropy; required non-empty when the entropy is populated.
     #[serde(default)]
     entropy_source: String,
+    /// The standard enthalpy of atomization at 298.15 K, in kJ/mol (the element's cohesive energy), as a
+    /// decimal string; empty when not populated.
+    #[serde(default)]
+    atomization_enthalpy: String,
+    /// The citation for the atomization enthalpy; required non-empty when the enthalpy is populated.
+    #[serde(default)]
+    atomization_source: String,
     /// The citation (every element is real-with-source).
     #[serde(default)]
     real: String,
@@ -523,6 +546,34 @@ impl ElementDef {
                 Some(self.entropy_source.trim().to_string()),
             )
         };
+        // The atomization enthalpy is optional, on the same discipline as the entropy: if present it must
+        // parse and carry its own citation (a measured `[M]` cohesive-energy datum, real-with-source).
+        let atomization_raw = self.atomization_enthalpy.trim();
+        let (atomization_enthalpy, atomization_decimal, atomization_source) = if atomization_raw
+            .is_empty()
+        {
+            (None, None, None)
+        } else {
+            let value = Fixed::from_decimal_str(atomization_raw).map_err(|detail| {
+                PeriodicError::BadValue {
+                    symbol: self.symbol.clone(),
+                    detail: format!("atomization_enthalpy: {detail}"),
+                }
+            })?;
+            if self.atomization_source.trim().is_empty() {
+                return Err(PeriodicError::BadValue {
+                    symbol: self.symbol.clone(),
+                    detail:
+                        "atomization_enthalpy is set but atomization_source (its citation) is empty"
+                            .to_string(),
+                });
+            }
+            (
+                Some(value),
+                Some(atomization_raw.to_string()),
+                Some(self.atomization_source.trim().to_string()),
+            )
+        };
         Ok(Element {
             symbol: self.symbol,
             name: self.name,
@@ -535,6 +586,9 @@ impl ElementDef {
             standard_molar_entropy,
             entropy_decimal,
             entropy_source,
+            atomization_enthalpy,
+            atomization_decimal,
+            atomization_source,
             provenance: self.real.trim().to_string(),
         })
     }

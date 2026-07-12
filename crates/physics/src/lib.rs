@@ -40,6 +40,7 @@
 pub mod geodynamics;
 pub mod graph;
 pub mod laws;
+pub mod materials_oracle;
 pub mod periodic;
 pub mod petrology;
 pub mod petrology_data;
