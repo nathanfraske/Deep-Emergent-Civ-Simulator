@@ -122,6 +122,7 @@ pub mod semantics;
 pub mod sensorium;
 pub mod stocks;
 pub mod substrate;
+pub mod tectonic_regime;
 pub mod tom;
 pub mod trace;
 pub mod transmission;
