@@ -378,6 +378,15 @@ pub struct EnvironFields {
     /// running hot on radiation alone. Armed by a scenario (the living world) that supplies its air medium's
     /// convective coefficient and latent heat.
     surface_cooling: Option<SurfaceCooling>,
+    /// The world's PHOTOSYNTHESIS calibration, or `None` when it is UNARMED (the default). While `None`,
+    /// [`Self::step_productivity`] keeps the abstract-producer Liebig `biomass_from` path, so a run that never
+    /// arms it is byte-identical and the four determinism pins hold. While `Some` (and the diurnal sky is armed,
+    /// so the stellar-constant flux anchor is present), the per-cell productivity DERIVES from photosynthesis
+    /// ([`carbon_fixation_rate`]): the light-response over the real insolation flux, the carbon-fixing enzyme's
+    /// thermal-performance tent, the water-use-efficiency coupling to the evaporation flux, and the soil-nutrient
+    /// limitation over the matter-cycle fertility, retiring the authored `productivity.*_requirement` and the flat
+    /// `soil_baseline` on the armed path (the photosynthesis-to-productivity arc, #156). Armed by the living world.
+    photosynthesis: Option<PhotosynthesisCalib>,
 }
 
 /// The SURFACE TURBULENT-COOLING data a world supplies to arm the diurnal surface balance's latent and sensible
@@ -1048,7 +1057,19 @@ impl EnvironFields {
             solar_inertia: Vec::new(),
             evaporation: Vec::new(),
             surface_cooling: None,
+            photosynthesis: None,
         }
+    }
+
+    /// Arm the DERIVED PHOTOSYNTHESIS productivity (the photosynthesis-to-productivity arc, #156, opt-in) with the
+    /// world's producer photosynthesis calibration, so [`Self::step_productivity`] derives each cell's carbon-
+    /// fixation rate ([`carbon_fixation_rate`]) instead of the abstract-producer Liebig `biomass_from`. Unarmed
+    /// (the default) the productivity stays the Liebig interim and the run is byte-identical, so the four
+    /// determinism pins hold; a scenario that wants the real derivation (the living world) calls this AND
+    /// [`Self::arm_diurnal`] (the derivation reads the sky's stellar-constant flux anchor). Where the sky is
+    /// unarmed the derivation has no flux anchor, so the Liebig path stands (the clean degrade).
+    pub fn arm_photosynthesis(&mut self, photo: PhotosynthesisCalib) {
+        self.photosynthesis = Some(photo);
     }
 
     /// Arm the DIURNAL insolation cycle (day-night arc, opt-in) with the world's data sky, so [`Self::step`]
@@ -1799,20 +1820,47 @@ impl EnvironFields {
     /// so a fertilised cell grows more where soil is the limiting factor and the matter cycle closes into
     /// the food web. With no matter cycle armed the fertility is zero and the soil supply is the plain
     /// baseline, so the productivity (and its hash) is unchanged.
-    // @derives: per-cell biomass productivity / carrying capacity <- Liebig minimum over (water, light, temperature, soil); soil = soil_baseline + matter-cycle fertility. Productivity is NOT authored per cell; it derives from local conditions. Residual to derive: soil_baseline should read from the per-column lithology mineral floor rather than a flat scalar.
+    // @derives: per-cell biomass productivity / carrying capacity <- when photosynthesis is armed, the DERIVED carbon-fixation rate (carbon_fixation_rate: the light-response over the real insolation flux, the enzyme thermal tent, the water-use-efficiency coupling to evaporation, and the soil-nutrient limitation over matter-cycle fertility); unarmed, the abstract-producer Liebig minimum over (water, light, temperature, soil) with soil = soil_baseline + matter-cycle fertility (the interim the derivation retires). Productivity is NOT authored per cell.
     fn step_productivity(&mut self, temp: &Field, calib: &EnvironCalib) {
         let (w, h) = (self.width, self.height);
+        // The DERIVED photosynthesis path (armed, #156): read the calibration and the stellar-constant flux anchor
+        // out as owned Copy values BEFORE the loop, so the per-cell field reads do not hold a borrow of `self`
+        // across the `self.capacity.cells[i]` write. `None` unless BOTH the photosynthesis and the diurnal sky are
+        // armed (the derivation needs the flux anchor), so an unarmed run keeps the Liebig `biomass_from` path and
+        // stays byte-identical.
+        let derived = match (&self.photosynthesis, &self.sky) {
+            (Some(photo), Some(sky)) => Some((*photo, sky.solar_constant)),
+            _ => None,
+        };
         for y in 0..h {
             for x in 0..w {
                 let i = self.idx(x, y);
-                let soil = calib.soil_baseline.saturating_add(self.fertility[i]);
-                let climate = biomass_from(
-                    self.water.cells[i],
-                    self.light[i],
-                    temp.at(x, y),
-                    soil,
-                    calib,
-                );
+                let climate = match derived {
+                    // The armed derivation: the carbon-fixation rate over the real insolation flux (normalised
+                    // light times the stellar constant), the enzyme thermal tent, the water-use-efficiency
+                    // coupling to the evaporation flux, and the soil-nutrient limitation over the matter-cycle
+                    // fertility. Retires the flat `soil_baseline` (soil supply IS the fertility) and the authored
+                    // water/light/temperature requirements on this path.
+                    Some((photo, solar_constant)) => carbon_fixation_rate(
+                        self.light[i],
+                        solar_constant,
+                        temp.at(x, y),
+                        self.evaporation.get(i).copied().unwrap_or(Fixed::ZERO),
+                        self.water.cells[i],
+                        self.fertility[i],
+                        calib.soil_req,
+                        &photo,
+                    ),
+                    // The unarmed Liebig interim (byte-identical): the abstract-producer minimum over the four
+                    // satisfactions, the soil supply the flat baseline plus the matter-cycle fertility.
+                    None => biomass_from(
+                        self.water.cells[i],
+                        self.light[i],
+                        temp.at(x, y),
+                        calib.soil_baseline.saturating_add(self.fertility[i]),
+                        calib,
+                    ),
+                };
                 // Where a real producer organism stands (biosphere-into-run), its located biomass is the food
                 // ceiling; elsewhere the abstract climate productivity is the baseline (the stand-in for
                 // unmodelled background vegetation). An all-zero producer (no biosphere seeded) takes the
@@ -2498,6 +2546,7 @@ mod tests {
             solar_inertia: Vec::new(),
             evaporation: Vec::new(),
             surface_cooling: None,
+            photosynthesis: None,
         }
     }
 
