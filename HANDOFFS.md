@@ -2945,3 +2945,17 @@ TWO DECISIONS SURFACED for gate (in #179 body + confirmed on #177 comment 495260
 BRANCH claude/momentum-vector-unification off main 04eccda (post-#176). PR #179 doc-only opener (docs/working/MOMENTUM_VECTOR_UNIFICATION_KICKOFF.md). CI: prose green, build in progress (doc-only). Subscribed to #179 for the gate ruling.
 
 STATE: BLOCKED on gate ruling of the two decisions. NEXT on ruling: build slice 1 (unified integrator core) byte-neutral, section-9 self-audit, gate per push. Honest limits in doc: z=0 heightfield is A's substrate boundary (unchanged), air drag deferred to floor drag_force via body-force slot, exactness trade real and MEASURED in slice 1's proof not assumed.
+
+---
+
+## 2026-07-12 (Agent C) - Momentum unification slices 1+2 BUILT (#179)
+
+Gate ruled both opener decisions (comment 4952613439): space-march (per-cell), RETIRE the siblings (keep parabola as test oracle), MEASURE the exactness trade. Slice 1 APPROVED (comment ~4952...): reductions are exact cell-for-cell (better than bounded), PD2 step-size refinement ADOPTED (no sub-cell param on per-cell z=0 heightfield). Slice 2 built, both pushed.
+
+SLICE 1 (crates/world/src/momentum.rs): the unified velocity-vector integrator. One force law under an emergent normal force: gravity+body-forces always, Coulomb friction only in contact (N=0 airborne). Regime emerges from arc-vs-terrain each step. Reduces EXACTLY (to Fixed rounding) to ballistic_landing (airborne: flat/valley/slope) and runout (contact: aligned azimuth). 8 tests. Three PD1 catches by test: sqrt(2*(1/2 e)) bug, CORDIC sin(0) tiny-positive wrongly launching grazing (fixed: start in contact, launch emerges), CORDIC cos(0)=1+1.6e-9 flipping one cell at energy-zero boundary (moved test off boundary, mu=0.12).
+
+SLICE 2 (momentum.rs): momentum_fan, isotropic CORDIC azimuths through the integrator, aggregated via redistribute. ANGULAR-RESOLUTION BONUS PROVEN BY CONTRAST: grazing contact fan = 16 distinct cells from 16 azimuths; surface launch_fan = 4 cells (four-axis collapse), SAME launch/ground. 6 fan tests (near-symmetric both regimes E7/W8/N8/S7, four-axis contrast, slope-broken, conservative, deterministic, zero-azimuth empty). azimuths reserved resolution knob. 14 momentum tests total.
+
+BRANCH claude/momentum-vector-unification (tip ed49e3e), rebuilt onto merged main (1ac525a, #177 in) via MERGE COMMIT not rebase (force-push is gated; use merge+cherry-pick to avoid history rewrite). Byte-neutral 40fe8a72. All gates clean.
+
+STATE: slice 2 signaled (comment 4952788137), awaiting gate ruling. NEXT: on gate go, the arc's mechanism is complete (integrator + fan). The Decision-2 RETIRE (fold runout/ballistic out of the driver path, keep parabola as test oracle) is HELD for A's arming lane (A on priority-0 provenance-ledger per gate) - do NOT build it until the gate signals A resumed arming; it couples to A's TransportKernelId becoming ONE unified transport-integrator arm. main advanced to #180 (Agent B physics cleanup, no file overlap, routine merge at PR-merge time). Do NOT touch A's genesis/surface_transport files or B's lanes.
