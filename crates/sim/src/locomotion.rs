@@ -1175,36 +1175,112 @@ pub fn draw_feeder_set(
     }
 }
 
-/// The reserved calibration the DERIVED-TAXIS run-and-tumble survival floor reads. Both are RESERVED values,
-/// surfaced with their basis and read from the manifest at the floor arming, never fabricated (Principle 11).
+/// The DERIVED-TAXIS run-and-tumble floor RATES for one being, DERIVED per-being from its own metabolism at the
+/// step ([`DerivedTaxisParams::derive`]), never authored (Principle 11). The floor is armed with a single scale
+/// ([`DerivedTaxisArming`], the being's reserve-swing noise floor); these two rates and the reward's adaptation
+/// baseline all fall out of that scale and the being's OWN resting drain, so no fabricated value enters the path
+/// and a fast- and a slow-metabolising being get different rates by their own physics (admit-the-alien).
 #[derive(Clone, Copy, Debug)]
 pub struct DerivedTaxisParams {
-    /// The RESTING tumble probability: the rate at which a being re-orients when its felt reserve change is
-    /// zero (a flat field, no gradient). Basis: the reciprocal of the resting run length, the same search
-    /// cadence the fixed-period explore uses (`1 / explore_persistence`), so a floor being with no gradient
-    /// searches at the cadence a controller-driven explorer does; a probability in `[0, 1]`.
+    /// The RESTING tumble probability: the rate at which a being re-orients when its felt reward is zero (a
+    /// barren heading, no net feed). Derived as `resting_drain / noise_floor`; since the noise floor is grounded
+    /// in the same resting per-tick fall, it lands near 1, a high baseline tumble the reward suppresses when the
+    /// being is fed (the run-and-tumble search cadence). A probability in `[0, 1]`.
     pub resting_tumble_rate: Fixed,
-    /// The reserve-swing SENSITIVITY: how strongly a unit of felt reserve derivative shifts the tumble rate
-    /// away from its resting value (a rising reserve lowers it, a falling one raises it). Basis: the
-    /// reserve-swing scale over which a being should commit to (or abandon) a heading, set so an ordinary
-    /// metabolic rise or fall meaningfully moves the tumble rate without saturating the probability.
+    /// The reserve-swing SENSITIVITY: how strongly a unit of felt reward shifts the tumble rate below its resting
+    /// value (a feeding heading lowers it, so the being persists). Derived as `1 / noise_floor`, so a reward at
+    /// the being's own noise-floor magnitude shifts the tumble rate by about one unit, meaningful on an ordinary
+    /// reserve swing and inert on sub-noise jitter.
     pub reserve_sensitivity: Fixed,
 }
 
-/// The being's own interoceptive REWARD SIGNAL for the run-and-tumble floor: the summed signed change across
-/// its DECLARED, backed (depletable metabolic) reserves since the last tick, read from its reserve memory
-/// BEFORE this tick re-snapshots it, so it is LAST tick's completed net change (a one-tick temporal
-/// difference, the past the floor reinforces). Keyed on the being's own reserve axes
-/// (`backing_component.is_some()`), never a hardcoded energy id, so a redox, mana-field, or silicon metabolism
-/// reads its own signal (admit-the-alien). Positive when the being's reserves rose last tick (its heading is
-/// feeding it), negative when they fell. The derived regulated axes (integrity, temperature) are excluded:
-/// they are a health band, not a metabolic reserve the walk should chase.
+impl DerivedTaxisParams {
+    /// DERIVE the floor rates from the being's OWN resting drain and its reserve-swing noise floor, no authored
+    /// constant (Principle 11). `resting_drain` is the being's summed resting per-tick reserve fall over its
+    /// declared backed reserves (a fraction of capacity), read from its physics-derived drain where a physiology
+    /// is installed and from the axis def otherwise ([`taxis_resting_drain`]). `noise_floor` is the arming scale
+    /// (the being's `harm.noise_floor`, grounded in the largest resting per-tick fall). The resting tumble rate
+    /// is `resting_drain / noise_floor` clamped to a probability: because the noise floor is grounded in the same
+    /// resting fall, it lands near 1 (frequent baseline tumbling, the correct run-and-tumble search), and the
+    /// bias comes from the sensitivity suppressing that rate when the reward rises. The sensitivity is
+    /// `1 / noise_floor`. A zero or negative noise floor (an unset or degenerate scale) yields a zero-sensitivity
+    /// resting floor (an unbiased walk), the clean degrade rather than a divide fault.
+    pub fn derive(resting_drain: Fixed, noise_floor: Fixed) -> DerivedTaxisParams {
+        if noise_floor <= Fixed::ZERO {
+            return DerivedTaxisParams {
+                resting_tumble_rate: Fixed::ZERO,
+                reserve_sensitivity: Fixed::ZERO,
+            };
+        }
+        DerivedTaxisParams {
+            resting_tumble_rate: resting_drain
+                .div(noise_floor)
+                .clamp(Fixed::ZERO, Fixed::ONE),
+            reserve_sensitivity: Fixed::ONE.div(noise_floor),
+        }
+    }
+}
+
+/// The DERIVED-TAXIS floor ARMING: the ONE scale the floor reads from the world, the being's reserve-swing noise
+/// floor (`harm.noise_floor`, itself grounded in the largest per-tick resting reserve fall a body incurs, an
+/// existing reserved value). `None` leaves the floor off (byte-identical); `Some` arms it. Everything else the
+/// floor needs (the resting tumble rate, the reserve sensitivity, the reward's adaptation baseline) is DERIVED
+/// per-being from this scale and the being's OWN resting drain at the step, so arming introduces NO new authored
+/// value (Principle 11) and the floor keys on the being's own metabolism (admit-the-alien).
+#[derive(Clone, Copy, Debug)]
+pub struct DerivedTaxisArming {
+    /// The being's reserve-swing noise floor (`harm.noise_floor`). Read at arming from the same manifest value
+    /// the harm learner uses, so the floor and the harm classifier agree on what an ordinary reserve swing is.
+    pub reserve_noise_floor: Fixed,
+}
+
+/// The being's OWN summed resting per-tick reserve fall over its declared backed (depletable metabolic) reserves,
+/// a fraction of capacity: the physics-derived resting drain where a physiology is installed (`being_drains`,
+/// the per-axis [`DerivedDrain::base`]), else the axis def's scalar `base_drain` (the fixture path). This is the
+/// sensory ADAPTATION baseline the run-and-tumble reward is centred on, and the cadence the resting tumble rate
+/// derives from, both keyed on the being's own metabolism (admit-the-alien: a redox, mana, or silicon metabolism
+/// sums its own drain). Excludes the derived regulated axes (integrity, temperature): they carry no backing
+/// component and are a health band, not a metabolic reserve the walk chases.
+fn taxis_resting_drain(
+    reg: &HomeostaticRegistry,
+    being_drains: Option<&BTreeMap<HomeostaticAxisId, DerivedDrain>>,
+) -> Fixed {
+    let mut sum = Fixed::ZERO;
+    for axis in &reg.axes {
+        if axis.backing_component.is_some() {
+            let resting = match being_drains.and_then(|d| d.get(&axis.id)) {
+                Some(dd) => dd.base,
+                None => axis.base_drain,
+            };
+            sum = sum.saturating_add(resting);
+        }
+    }
+    sum
+}
+
+/// The being's own interoceptive REWARD SIGNAL for the run-and-tumble floor: the summed signed change across its
+/// DECLARED, backed (depletable metabolic) reserves since the last tick, CENTRED on the being's own resting drain
+/// (`resting_drain`, [`taxis_resting_drain`]). Read from its reserve memory BEFORE this tick re-snapshots it, so
+/// the change is LAST tick's completed net change (a one-tick temporal difference, the past the floor reinforces).
+/// The centring is the sensory ADAPTATION baseline: a metabolising being's reserve always net-falls between feeds
+/// (its raw delta is systematically negative, ~ uptake minus its resting drain), so a reward centred on zero
+/// change would sit permanently negative and a high baseline tumble rate could never be suppressed. Adding the
+/// being's own resting drain re-centres the signal on "how much better than a barren heading is this one", so a
+/// heading that merely feeds the reserve faster than resting reads POSITIVE even while the being is net-losing,
+/// and the being climbs toward the least-bad direction while starving, exactly the survival floor's job. Keyed on
+/// the being's own reserve axes and its own drain (`backing_component.is_some()`), never a hardcoded energy id, so
+/// a redox, mana-field, or silicon metabolism reads its own signal (admit-the-alien). The derived regulated axes
+/// (integrity, temperature) are excluded: they are a health band, not a metabolic reserve the walk should chase.
 fn taxis_reward_signal(
     mem: &ReserveMemory,
     state: &Homeostasis,
     reg: &HomeostaticRegistry,
+    resting_drain: Fixed,
 ) -> Fixed {
-    let mut sum = Fixed::ZERO;
+    // Start from the being's own resting drain (the adaptation baseline), then add each backed axis's felt net
+    // change: reward = Σ(delta_axis) + resting_drain, which for a body paying only its resting drain equals the
+    // net environmental UPTAKE (a barren heading reads ~0, a feeding one positive).
+    let mut sum = resting_drain;
     for axis in &reg.axes {
         if axis.backing_component.is_some() {
             sum = sum.saturating_add(mem.delta(axis.id, state));
@@ -1336,11 +1412,12 @@ pub fn step_with_field_dirs<T: Terrain>(
     // content-bucket's direction into approach, so foraging emerges rather than being authored.
     resource_features: &BTreeMap<StableId, Vec<Fixed>>,
     deferred_actions: &mut BTreeMap<StableId, (AffordanceId, Fixed)>,
-    // The DERIVED-TAXIS survival floor calibration (the run-and-tumble motility floor beneath the controller).
-    // `None` (the default) leaves the floor OFF: no being runs the biased random walk, no `taxis_heading` is
-    // ever set, and every run is byte-identical. `Some` arms it, so a being not steered by a controller MOVE
-    // heading this tick re-orients stochastically at a rate modulated by its own reserve derivative.
-    taxis: Option<DerivedTaxisParams>,
+    // The DERIVED-TAXIS survival floor ARMING (the run-and-tumble motility floor beneath the controller): the ONE
+    // scale the floor reads, the being's reserve-swing noise floor. `None` (the default) leaves the floor OFF: no
+    // being runs the biased random walk, no `taxis_heading` is ever set, and every run is byte-identical. `Some`
+    // arms it, so a being not steered by a controller MOVE heading this tick re-orients stochastically at a rate
+    // DERIVED per-being from this scale and its own resting drain, modulated by its own reserve derivative.
+    taxis: Option<DerivedTaxisArming>,
 ) -> usize {
     walkers.sort_by_key(|w| w.id);
     let mut moved = 0usize;
@@ -1368,9 +1445,19 @@ pub fn step_with_field_dirs<T: Terrain>(
         // `last-tick-start`, which equals LAST tick's completed net reserve change (the past the run-and-tumble
         // floor reinforces). Zero when the floor is off or on the first armed tick (no prior snapshot), the
         // clean degrade. Captured before the snapshot below overwrites the previous levels.
-        let taxis_reward = match taxis {
-            Some(_) => taxis_reward_signal(&w.reserve_memory, &w.homeostasis, homeo),
-            None => Fixed::ZERO,
+        // DERIVE the floor rates and the reward per-being from the being's OWN resting drain (its physics-derived
+        // drain where a physiology is installed, else the axis def) and the armed reserve noise floor, so no
+        // authored constant enters the floor path (Principle 11) and a fast- and a slow-metabolising being get
+        // different rates. The reward is centred on that same resting drain (the adaptation baseline).
+        let (taxis_params, taxis_reward) = match taxis {
+            Some(arming) => {
+                let resting_drain = taxis_resting_drain(homeo, drains.get(&w.id));
+                let params = DerivedTaxisParams::derive(resting_drain, arming.reserve_noise_floor);
+                let reward =
+                    taxis_reward_signal(&w.reserve_memory, &w.homeostasis, homeo, resting_drain);
+                (Some(params), reward)
+            }
+            None => (None, Fixed::ZERO),
         };
         if !percepts.is_empty()
             || !material_percepts.is_empty()
@@ -1748,7 +1835,7 @@ pub fn step_with_field_dirs<T: Terrain>(
         // still seeks up any reserve-feeding gradient (the extinction-wall floor). Off entirely when unarmed
         // (`floor_run` is false), so an opted-out run never enters here and stays byte-identical.
         if floor_run {
-            if let Some(tp) = taxis {
+            if let Some(tp) = taxis_params {
                 let cost = terrain.cost(here);
                 let speed = match &w.structure {
                     Some(s) => locomotion_speed_structure(s, w.body.temperament.activity, cost, p),

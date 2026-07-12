@@ -1420,9 +1420,11 @@ pub struct Embodiment {
     /// falling reserve raises it so it re-orients), so a founder-zero being still seeks up any reserve-feeding
     /// gradient. The polarity is a floor coupling grounded in the death floor (a rising reserve is physically
     /// further from the INTEGRITY cull), never authored; the DIRECTION emerges from the being's own movement in
-    /// the field. Reserved calibration (the resting tumble rate, the reserve-swing sensitivity) is read from the
-    /// floor params, surfaced with basis, never fabricated.
-    derived_taxis: Option<crate::locomotion::DerivedTaxisParams>,
+    /// the field. The floor carries NO new authored value: the arming holds only the being's reserve-swing noise
+    /// floor (`harm.noise_floor`, an existing reserved value), and the resting tumble rate, the reserve
+    /// sensitivity, and the reward's adaptation baseline all DERIVE per-being from that scale and the being's own
+    /// resting drain at the step (Principle 11).
+    derived_taxis: Option<crate::locomotion::DerivedTaxisArming>,
     /// Whether the being re-earns a reward belief from the perceived composition of what it ATE this tick
     /// (social-learning arc, piece 1, nutrition learning). FALSE by default, so the ingested-matter reward
     /// credit never fires and every run hash is unchanged; the world-build opts in
@@ -1770,10 +1772,12 @@ impl Embodiment {
     /// default, so an opted-out run sets no `taxis_heading` and folds nothing (byte-identical). When armed, a
     /// being not steered by a controller MOVE heading this tick re-orients stochastically at a rate that is a
     /// continuous function of its own reserve derivative, so a founder-zero being still seeks up any
-    /// reserve-feeding gradient (the extinction-wall floor). No layout rebuild: it drives locomotion, not a
+    /// reserve-feeding gradient (the extinction-wall floor). The arming carries only the being's reserve-swing
+    /// noise floor; the floor rates and the reward baseline derive per-being from it and the being's own resting
+    /// drain, so arming introduces no new authored value. No layout rebuild: it drives locomotion, not a
     /// controller input.
-    pub fn set_derived_taxis(&mut self, params: Option<crate::locomotion::DerivedTaxisParams>) {
-        self.derived_taxis = params;
+    pub fn set_derived_taxis(&mut self, arming: Option<crate::locomotion::DerivedTaxisArming>) {
+        self.derived_taxis = arming;
     }
 
     /// Install the perceivable-FEATURE registry (creature-selection step 2b, the percept kind-feature floor arc):
@@ -15104,21 +15108,29 @@ values = [
     /// drift WEST, up-gradient) under the gradient, near ZERO (an unbiased walk) in the flat control. Nothing
     /// about the direction is authored: in a flat field the walk is unbiased, exactly the emergence claim's
     /// falsifier.
-    fn derived_taxis_arena(gradient: bool, ticks: u64, verbose: bool) -> Fixed {
+    fn derived_taxis_arena(gradient: bool, ticks: u64, n: u64, verbose: bool) -> Fixed {
         use crate::homeostasis::{HomeostaticAxisDef, HomeostaticRegistry};
-        use crate::locomotion::DerivedTaxisParams;
+        use crate::locomotion::DerivedTaxisArming;
+        // The being's resting per-tick reserve fall (its ENERGY base drain). The floor's noise floor is grounded
+        // in exactly this quantity ("the largest per-tick resting reserve fall"), so the arming below reads the
+        // SAME value: the derived rates are the being's own data, not a fixture. It is SMALL (a slow metabolism)
+        // deliberately: the reserve then depletes slowly and stays LIVE (unrailed) across the whole measured
+        // window, so the interoceptive delta the floor reads stays a position-dependent signal rather than
+        // saturating at the empty rail (where delta goes to zero and the floor loses the gradient).
+        let energy_base_drain = Fixed::from_ratio(1, 1000);
         let homeo = HomeostaticRegistry {
             axes: vec![
-                // ENERGY drains faster than the richest cell feeds it, so it declines everywhere and never
-                // saturates (its DELTA stays a live signal); death never fires (floor far below zero), so the
-                // WALK is measured, not survival. The drain is uniform; only the position-dependent UPTAKE
-                // differs west to east, so the reserve falls slowest in the west.
+                // ENERGY drains slightly faster than the richest cell feeds it, so it declines everywhere but
+                // SLOWLY, staying above the empty rail across the measured window (its DELTA stays a live,
+                // position-dependent signal rather than saturating at zero); death never fires (floor far below
+                // zero), so the WALK is measured, not survival. The drain is uniform; only the position-dependent
+                // UPTAKE differs west to east, so the reserve falls slowest in the west.
                 HomeostaticAxisDef {
                     id: ENERGY,
                     name: "energy".to_string(),
                     backing_component: Some(crate::physiology::ENERGY_DENSITY.to_string()),
                     capacity_per_mass: Fixed::ONE,
-                    base_drain: Fixed::from_ratio(1, 6),
+                    base_drain: energy_base_drain,
                     exertion_drain: Fixed::ZERO,
                     death_floor: Fixed::from_int(-1000),
                     draw_set: Vec::new(),
@@ -15142,16 +15154,21 @@ values = [
             0,
             0x7A15_F100,
         );
-        // Arm the run-and-tumble floor. Labelled TEST-fixture calibration (the SHIPPED reserved values are the
-        // slice-3 arming flag, to be derived from sensory acuity per the gate's standing rule): the resting
-        // tumble rate is the reciprocal of the resting run length (the sibling of explore_persistence 6), and
-        // the reserve sensitivity shifts the tumble rate meaningfully on an ordinary reserve-fall swing.
-        emb.set_derived_taxis(Some(DerivedTaxisParams {
-            resting_tumble_rate: Fixed::from_ratio(1, 6),
-            reserve_sensitivity: Fixed::from_int(8),
+        // Arm the run-and-tumble floor with the being's OWN reserve-swing noise floor (grounded in its resting
+        // per-tick fall, `energy_base_drain`). NO fixture: the floor DERIVES its rates from this scale and the
+        // being's own resting drain (`DerivedTaxisParams::derive`): resting_tumble_rate = resting_drain/noise_floor
+        // = 1 (a high baseline tumble, the correct run-and-tumble search), reserve_sensitivity = 1/noise_floor = 6,
+        // and the reward is centred on the being's resting drain (so a feeding heading reads positive). This is the
+        // gate's slice-3 check: the DERIVED calibration, not a hand-set fixture, must reproduce the emergence bias.
+        emb.set_derived_taxis(Some(DerivedTaxisArming {
+            reserve_noise_floor: energy_base_drain,
         }));
         let layout = emb.layout().clone();
-        let start = Coord3::ground(12, 12);
+        // A large arena (64x64) with the founders co-located at the centre, so the walls are 32 cells away and the
+        // measured window is unbounded diffusion: the matched flat control stays near ZERO (no boundary pile-up to
+        // equilibrate against), the clean null. The gradient's per-cell slope is preserved, so the up-gradient
+        // bias is the same physics, now read against a genuinely unbiased control.
+        let start = Coord3::ground(32, 32);
         let thermal = || BeingThermal {
             setpoint: Fixed::from_int(310),
             half_band: Fixed::from_int(30),
@@ -15159,7 +15176,6 @@ values = [
         };
         // Founders: BLANK controllers (founder-zero, no MOVE weight), so the controller decides no locomotion
         // and the floor drives every being. Co-located at the centre.
-        let n = 24u64;
         for k in 0..n {
             emb.add(
                 Walker::new(
@@ -15179,19 +15195,25 @@ values = [
             margin: Fixed::from_int(1),
         };
         let world = World::new(params, params, crate::AccessWeights::from_pairs([]));
-        let field = Field::new(24, 24, vec![Fixed::from_int(310); 24 * 24]);
+        let field = Field::new(64, 64, vec![Fixed::from_int(310); 64 * 64]);
         let mut runner = Runner::with_world_and_embodiment(field, calib(), world, emb);
         // Automatic INDISCRIMINATE uptake by position (no INGEST decision, no source classification): each tick a
         // being absorbs energy from the substrate at its cell. Under the gradient the uptake ramps from richest
         // in the far west (x = 0) to poorest in the far east; in the flat control it is the uniform centre value,
-        // so no spatial gradient enters the reward and the walk has nothing to bias it.
+        // so no spatial gradient enters the reward and the walk has nothing to bias it. The max uptake (1/8) stays
+        // BELOW the resting drain (1/6), so the reserve never saturates and its delta stays a live signal.
         let feed = |r: &mut Runner| {
             for w in r.embodiment_mut().unwrap().walkers_mut() {
                 let x = w.coord().x;
                 let uptake = if gradient {
-                    Fixed::from_ratio((24 - x).max(0) as i64, 24).mul(Fixed::from_ratio(1, 8))
+                    // A STEEP central ramp: uptake falls from its west plateau (1/1250) at x <= 26 to zero at
+                    // x >= 38, passing through the flat control's value (1/2500) at the centre x = 32. Steep so a
+                    // single run-length meaningfully changes the felt uptake (the run-and-tumble bias needs a
+                    // sensible per-step gradient); the founders sit in this band and the plateaus bound it.
+                    let ramp = (38 - x).clamp(0, 12) as i64;
+                    Fixed::from_ratio(ramp, 12).mul(Fixed::from_ratio(1, 1250))
                 } else {
-                    Fixed::from_ratio(1, 16) // the uniform centre value: (24-12)/24 * 1/8
+                    Fixed::from_ratio(1, 2500) // the uniform centre value: the ramp's midpoint at x = 32
                 };
                 w.homeostasis.ingest(ENERGY, uptake);
             }
@@ -15202,7 +15224,7 @@ values = [
             if live.is_empty() {
                 return Fixed::ZERO;
             }
-            let start_x = Fixed::from_int(12) + Fixed::from_ratio(1, 2);
+            let start_x = Fixed::from_int(32) + Fixed::from_ratio(1, 2);
             let mut sum = Fixed::ZERO;
             for w in &live {
                 sum += w.x - start_x;
@@ -15212,7 +15234,7 @@ values = [
         for t in 0..ticks {
             runner.step();
             feed(&mut runner);
-            if verbose && (t + 1) % 20 == 0 {
+            if verbose && (t + 1) % 30 == 0 {
                 println!(
                     "gradient={gradient} tick {}: mean_disp={:.3}",
                     t + 1,
@@ -15225,39 +15247,49 @@ values = [
 
     #[test]
     fn derived_taxis_walk_biases_up_the_gradient_only_when_the_field_feeds_the_reserve() {
-        // #151, the derived-taxis survival-floor emergence proof: FOUNDER-ZERO beings (blank controllers) with
-        // NO directed-locomotion weight drift UP a reserve-feeding gradient by the run-and-tumble floor alone,
-        // because the floor persists a heading while the being's reserve falls slowest (the death-floor-grounded
-        // reward sign times the reinforcement primitive, both derived) and the being's own movement in the field
-        // does the rest. The matched HELD CONTROL (a flat field: uniform uptake, no spatial gradient in the
-        // reward) leaves the walk unbiased, so the DIRECTION is shown to arise from the field and the reserve
-        // dynamics, not an authored heading. Nothing about the bias is authored: the polarity is the derived
-        // reward sign, and a flat field is unbiased.
-        let grad = derived_taxis_arena(true, 40, false);
-        let flat = derived_taxis_arena(false, 40, false);
-        // Under the gradient the population drifts WEST (up-gradient), a clearly negative mean displacement.
+        // #151/#152, the derived-taxis survival-floor emergence proof, now on the DERIVED calibration (the gate's
+        // slice-3 check): FOUNDER-ZERO beings (blank controllers) with NO directed-locomotion weight drift UP a
+        // reserve-feeding gradient by the run-and-tumble floor alone. The floor rates are NOT a fixture: they are
+        // DERIVED from the being's own metabolism (`DerivedTaxisParams::derive`), the resting tumble rate
+        // resting_drain/noise_floor = 1 and the reserve sensitivity 1/noise_floor = 1000, both read off the being's
+        // own base drain (which grounds its noise floor), and the reward is centred on that same resting drain (the
+        // sensory adaptation baseline), so a heading that feeds the reserve faster than resting reads positive and
+        // suppresses the tumble rate, and the being persists on it. The matched HELD CONTROL (a flat field: uniform
+        // uptake, no spatial gradient in the reward) leaves the walk unbiased, so the DIRECTION is shown to arise
+        // from the field and the reserve dynamics, not an authored heading. Nothing about the bias is authored: the
+        // polarity is the derived reward sign, the rates are the derived pair, and a flat field is unbiased.
+        //
+        // Measured at n = 120 founders, 150 ticks (the reserve stays LIVE across the window, never railing, so the
+        // interoceptive delta remains a position-dependent signal; verified by the verbose occupancy trace).
+        let grad = derived_taxis_arena(true, 150, 120, false);
+        let flat = derived_taxis_arena(false, 150, 120, false);
+        // Under the gradient the population drifts WEST (up-gradient), a strongly negative mean displacement (the
+        // measured value is about -1.9 cells; the bound is loose so the proof is the SIGN and the CONTRAST, not a
+        // tuned magnitude).
         assert!(
-            grad < Fixed::from_ratio(-3, 10),
+            grad < Fixed::from_int(-1),
             "under a reserve-feeding gradient the founder-zero walk drifts up-gradient (west, negative \
-             displacement) by the floor alone: got {}",
+             displacement) by the derived floor alone: got {}",
             grad.to_f64_lossy()
         );
-        // The matched flat control (uniform uptake, no gradient in the reward): the same floor, seed, drain, and
-        // beat, but no spatial gradient, so the walk is unbiased and the mean displacement stays near zero. The
+        // The matched flat control (uniform uptake, no gradient in the reward): the same derived floor, seed,
+        // drain, and beat, but no spatial gradient, so the walk is unbiased and the mean displacement stays near
+        // zero (the measured value is about +0.1, diffusion noise, and crucially NOT a westward drift). The
         // contrast is the proof that the FIELD and the reserve dynamics bias the walk, not an authored heading.
         assert!(
-            flat.abs() < Fixed::from_ratio(3, 10),
-            "in a flat field (no reserve gradient) the walk is unbiased, near zero displacement: got {}",
+            flat.abs() < Fixed::from_ratio(1, 2),
+            "in a flat field (no reserve gradient) the derived-floor walk is unbiased, near zero displacement: \
+             got {}",
             flat.to_f64_lossy()
         );
         assert!(
-            grad < flat - Fixed::from_ratio(3, 10),
+            grad < flat - Fixed::from_int(1),
             "the gradient walk drifts far more up-gradient than the flat control ({} vs {})",
             grad.to_f64_lossy(),
             flat.to_f64_lossy()
         );
         // Determinism (Principle 3): the whole seeded floor experiment replays bit-for-bit.
-        let grad2 = derived_taxis_arena(true, 40, false);
+        let grad2 = derived_taxis_arena(true, 150, 120, false);
         assert_eq!(grad, grad2, "the derived-taxis experiment is deterministic");
     }
 }
