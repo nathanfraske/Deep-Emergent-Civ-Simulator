@@ -124,6 +124,7 @@ pub mod semantics;
 pub mod sensorium;
 pub mod stocks;
 pub mod substrate;
+pub mod surface_drivers;
 pub mod surface_transport;
 pub mod tectonic_regime;
 pub mod tom;
