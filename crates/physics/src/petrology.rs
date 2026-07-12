@@ -53,8 +53,10 @@ pub fn reference_temperature_k() -> Fixed {
 ///
 /// the Benson-Helgeson apparent-Gibbs convention: the enthalpy of formation from the elements, less the
 /// entropy term (so temperature favours the higher-entropy phase), plus the pressure work from the reference
-/// (so pressure favours the lower-volume phase, the seed of the olivine-to-spinel-to-perovskite depth
-/// sequence). Because every competing assemblage forms from the same element budget, the element reference
+/// (so pressure favours the lower-volume phase, which drives a depth polymorph sequence such as
+/// olivine-to-spinel-to-perovskite ONCE the registry carries those competing polymorphs; the seed registry
+/// carries no polymorph pair, so that sequence does not yet emerge from it). Because every competing
+/// assemblage forms from the same element budget, the element reference
 /// cancels in the comparison, so the apparent energy is the right quantity to minimize (the relative energies
 /// decide the assemblage, which is why one internally consistent dataset is required).
 ///
@@ -107,10 +109,20 @@ pub fn phase_gibbs_energy(phase: &Phase, temperature_k: Fixed, pressure_bar: Fix
 /// canonical (registry name) order and carry positive amounts only, so the assemblage is a reproducible value.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Assemblage {
-    /// The present phases as `(name, molar amount)`, in canonical name order, amounts strictly positive.
+    /// The present phases as `(name, amount per unit total composition)`, in canonical name order, amounts
+    /// strictly positive. The composition is normalized to unit total before the solve, so these are relative
+    /// amounts (a caller scales by the input total for absolute moles); the assemblage proportions and the
+    /// derived density are what the consumers read.
     pub phases: Vec<(String, Fixed)>,
-    /// The total apparent Gibbs energy of the assemblage (joules), the quantity the minimization drove down.
+    /// The total apparent Gibbs energy of the assemblage per unit composition (joules), the quantity the
+    /// minimization drove down.
     pub total_gibbs: Fixed,
+    /// Whether the vertex enumeration was TRUNCATED by the fixed subset cap ([`MAX_SUBSETS_EXAMINED`]) before
+    /// it finished. `false` means the returned assemblage is the exhaustively-searched global minimum; `true`
+    /// means the search was capped and the result is the lowest-Gibbs assemblage found so far, which may not be
+    /// the true optimum. The signal keeps the cap a STATED bound rather than a silent substitution of a
+    /// non-derived assemblage (the no-silent-caps rule). For the seed registry it is always `false`.
+    pub truncated: bool,
 }
 
 /// The maximum number of candidate-phase subsets the minimization examines, a fixed determinism-and-cost bound
@@ -120,10 +132,14 @@ pub struct Assemblage {
 /// inside this cap. A bounded simplex is the scaling follow-on that removes the exponential.
 const MAX_SUBSETS_EXAMINED: usize = 4096;
 
-/// The amount below which a solved phase amount is fixed-point roundoff of the normal-equations solve rather
-/// than a present phase, and the element-balance residual below which the composition is reproduced. An
-/// engine-accuracy bound (the fixed-point resolution scale of the solve), not a per-world value; the
-/// exact-rational or QR solve that would tighten it is the flagged follow-on.
+/// The RELATIVE amount (of the unit-normalized composition) below which a solved phase amount is accumulated
+/// roundoff of the fixed-point normal-equations solve rather than a present phase, and the relative
+/// element-balance residual below which the composition is reproduced. Because the composition is normalized to
+/// unit total before the solve, this fixed value is a RELATIVE tolerance and so scale-invariant. Its basis is
+/// the accumulated roundoff margin of the fixed-point Gaussian elimination (about four hundred thousand times
+/// the Q32.32 resolution `2^-32`, a chosen accuracy margin, NOT the representation's resolution itself), an
+/// engine-accuracy bound rather than a per-world value; the exact-rational or QR solve that would tighten it is
+/// the flagged follow-on.
 fn solve_tolerance() -> Fixed {
     Fixed::from_ratio(1, 10_000)
 }
@@ -217,9 +233,11 @@ fn next_combination(idx: &mut [usize], n: usize) -> bool {
 /// DETERMINISTIC by construction (fixed enumeration order, fixed-point solve, first-found tie-break on equal
 /// Gibbs), so it replays bit-for-bit. Honest limits: the fixed-point normal equations lose conditioning near
 /// degeneracies (the exact-rational or QR solve the follow-on), and the vertex enumeration is exponential in
-/// the candidate count (a bounded simplex the follow-on); the assemblage is also only as complete as the
-/// registry, so a composition whose stable phase is not yet a registry row lands the nearest reachable
-/// assemblage, the data-driven property the registry grows to close.
+/// the candidate count (a bounded simplex the follow-on, and the returned assemblage carries a `truncated`
+/// flag when the fixed cap bites so a capped non-optimal result is never silent). The assemblage is EXACT
+/// balance or `None`: a composition the registry cannot exactly balance with non-negative phase amounts forms
+/// no assemblage (there is no nearest-phase projection), the honest data-gap the registry grows to close by
+/// adding the missing phase as a row.
 pub fn stable_assemblage(
     composition: &[(String, Fixed)],
     temperature_k: Fixed,
@@ -242,7 +260,20 @@ pub fn stable_assemblage(
         .map(|(i, (s, _))| (s.as_str(), i))
         .collect();
     let n_elem = elements.len();
-    let budget: Vec<Fixed> = elements.iter().map(|(_, a)| *a).collect();
+    // Normalize the composition to unit total so the solve is SCALE-INVARIANT and BOUNDED: the stable
+    // assemblage is a function of the RELATIVE composition and the conditions, never the arbitrary unit the
+    // amounts are expressed in (so a fixed tolerance below is a relative one, the derive-vs-author fix), and
+    // every phase amount stays at or below one so the Gibbs sum cannot overflow the fixed-point range (the
+    // overflow fix). The returned amounts are therefore PER UNIT TOTAL COMPOSITION; a caller scales by the
+    // input total for absolute moles, and the density (a ratio) is unchanged by the normalization.
+    let total_amount = elements.iter().fold(Fixed::ZERO, |acc, (_, a)| acc + *a);
+    if total_amount <= Fixed::ZERO {
+        return None;
+    }
+    let mut budget: Vec<Fixed> = Vec::with_capacity(n_elem);
+    for (_, a) in &elements {
+        budget.push(a.checked_div(total_amount)?);
+    }
 
     // The candidate phases: those whose formula uses only elements present in the budget.
     let candidates: Vec<&Phase> = registry
@@ -260,11 +291,13 @@ pub fn stable_assemblage(
     let tol = solve_tolerance();
     let mut best: Option<Assemblage> = None;
     let mut examined = 0usize;
+    let mut truncated = false;
     let max_size = n_elem.min(candidates.len());
     'sizes: for size in 1..=max_size {
         let mut idx: Vec<usize> = (0..size).collect();
         loop {
             if examined >= MAX_SUBSETS_EXAMINED {
+                truncated = true;
                 break 'sizes;
             }
             examined += 1;
@@ -353,6 +386,11 @@ pub fn stable_assemblage(
             }
         }
     }
+    // Signal on the returned assemblage whether the enumeration was capped (the no-silent-caps rule): a capped
+    // search may not have reached the global-minimum vertex.
+    if let Some(ref mut a) = best {
+        a.truncated = truncated;
+    }
     best
 }
 
@@ -380,6 +418,9 @@ fn assemble(
     Some(Assemblage {
         phases,
         total_gibbs: total,
+        // The caller (`stable_assemblage`) sets this on the final returned assemblage once it knows whether the
+        // whole enumeration was capped; a per-subset assemblage is never itself truncated.
+        truncated: false,
     })
 }
 
@@ -541,10 +582,15 @@ mod tests {
             vec!["forsterite".to_string()],
             "forsterite wins the free-energy minimization over periclase + quartz"
         );
-        // The single phase carries one mole (the whole Mg2SiO4 budget is one formula unit of forsterite).
+        // The amount is per UNIT TOTAL composition: the Mg2SiO4 budget is seven atom-moles normalized to a
+        // unit total, so the single forsterite phase (seven atoms per formula unit) carries one seventh.
         assert!(
-            (a.phases[0].1.to_f64_lossy() - 1.0).abs() < 1e-3,
-            "one formula unit of forsterite"
+            (a.phases[0].1.to_f64_lossy() - 1.0 / 7.0).abs() < 1e-3,
+            "one seventh of a formula unit of forsterite per unit total composition"
+        );
+        assert!(
+            !a.truncated,
+            "the seed enumeration is exhaustive, not capped"
         );
     }
 
@@ -598,21 +644,30 @@ mod tests {
     }
 
     #[test]
-    fn the_forsterite_density_derives_near_three_grams_per_cubic_centimetre() {
-        // The assemblage density is mass over volume from the registry and the periodic table: forsterite's
-        // 140.69 g/mol over 43.79 cm^3/mol is about 3.21 g/cm^3, near olivine's measured ~3.27 (the small
-        // deficit is the standard-state molar volume, the compressibility refinement the follow-on).
+    fn the_assemblage_density_computes_mass_over_volume_and_discriminates_phases() {
+        // assemblage_density is the total mass over the total volume of the phases, from the periodic table
+        // (atomic weights) and the registry (molar volumes), and it is scale-invariant so the normalization
+        // does not touch it. For pure forsterite it is the hand computation 140.69 g/mol over 43.79 cm^3/mol.
+        // This checks the COMPUTATION, not the physics: 3.213 is the registry's own mass over volume, so
+        // validating it against a measured olivine density would be circular. The separate DATA-accuracy note
+        // (the registry molar volume gives 3.21 versus real olivine near 3.27, the compressibility follow-on
+        // tightening it) is not what this test asserts. Density discriminates the assemblage, the property the
+        // isostasy read leans on: a pure-quartz assemblage reads lower.
         let r = PhaseRegistry::standard().expect("registry loads");
         let t = PeriodicTable::standard().expect("table loads");
-        let comp = vec![el("Mg", 2), el("Si", 1), el("O", 4)];
-        let a = stable_assemblage(&comp, Fixed::from_int(300), Fixed::from_int(1), &r).unwrap();
-        let d = assemblage_density(&a, &r, &t).expect("forsterite has a density");
+        let fo = stable_assemblage(
+            &[el("Mg", 2), el("Si", 1), el("O", 4)],
+            Fixed::from_int(300),
+            Fixed::from_int(1),
+            &r,
+        )
+        .unwrap();
+        let d_fo = assemblage_density(&fo, &r, &t).expect("forsterite has a density");
         assert!(
-            close(d, 3.213, 0.05),
-            "forsterite density derives near 3.21 g/cm^3, got {}",
-            d.to_f64_lossy()
+            close(d_fo, 140.6915 / 43.790, 0.02),
+            "the density is the registry mass over volume, got {}",
+            d_fo.to_f64_lossy()
         );
-        // A pure-quartz assemblage is less dense (2.65 g/cm^3), so density discriminates the assemblage.
         let qz = stable_assemblage(
             &[el("Si", 1), el("O", 2)],
             Fixed::from_int(300),
@@ -620,7 +675,89 @@ mod tests {
             &r,
         )
         .unwrap();
-        let dq = assemblage_density(&qz, &r, &t).unwrap();
-        assert!(dq < d, "quartz is less dense than forsterite");
+        let d_qz = assemblage_density(&qz, &r, &t).unwrap();
+        assert!(
+            d_qz < d_fo,
+            "quartz reads less dense than forsterite, so density discriminates the assemblage"
+        );
+    }
+
+    #[test]
+    fn pressure_shifts_the_assemblage_between_two_polymorphs() {
+        // The assemblage EMERGES with the conditions, not only from the per-phase energy: given two polymorphs
+        // of one composition (an open low-pressure one and a dense high-pressure one), the minimization selects
+        // the open phase at low pressure and the dense phase at high pressure, purely from the V*(P-P_ref)
+        // work. The seed registry carries no polymorph pair, so it cannot show this; a synthetic two-polymorph
+        // registry demonstrates the pressure sensitivity of the selection (the depth-sequence mechanism).
+        let toml = r#"
+[[phase]]
+name = "open_polymorph"
+formula = "SiO2"
+enthalpy_formation = "-1000.0"
+standard_entropy = "40.0"
+molar_volume = "25.0"
+source = "synthetic test: the open, low-pressure polymorph"
+
+[[phase]]
+name = "dense_polymorph"
+formula = "SiO2"
+enthalpy_formation = "-999.9"
+standard_entropy = "40.0"
+molar_volume = "20.0"
+source = "synthetic test: the dense, high-pressure polymorph"
+"#;
+        let r = PhaseRegistry::from_toml_str(toml).expect("the synthetic polymorph registry loads");
+        let comp = vec![el("Si", 1), el("O", 2)];
+        let low_p = stable_assemblage(&comp, Fixed::from_int(300), Fixed::from_int(1), &r).unwrap();
+        let high_p =
+            stable_assemblage(&comp, Fixed::from_int(300), Fixed::from_int(10_000), &r).unwrap();
+        assert_eq!(
+            phase_names(&low_p),
+            vec!["open_polymorph".to_string()],
+            "the open phase wins the minimization at low pressure"
+        );
+        assert_eq!(
+            phase_names(&high_p),
+            vec!["dense_polymorph".to_string()],
+            "the dense phase wins the minimization at high pressure through the volume work"
+        );
+    }
+
+    #[test]
+    fn the_element_input_order_does_not_change_the_assemblage() {
+        // The composition is sorted to a canonical element order internally, so the same composition passed
+        // with its elements in a different input order yields the identical assemblage: a determinism guard
+        // that the caller's ordering never leaks into the world-content result.
+        let r = PhaseRegistry::standard().expect("registry loads");
+        let forward = vec![el("Mg", 2), el("Si", 2), el("O", 6)];
+        let shuffled = vec![el("O", 6), el("Mg", 2), el("Si", 2)];
+        let a = stable_assemblage(&forward, Fixed::from_int(400), Fixed::from_int(50), &r).unwrap();
+        let b =
+            stable_assemblage(&shuffled, Fixed::from_int(400), Fixed::from_int(50), &r).unwrap();
+        assert_eq!(
+            a, b,
+            "the assemblage is independent of the element input order"
+        );
+    }
+
+    #[test]
+    fn the_assemblage_is_scale_invariant_and_large_compositions_do_not_overflow() {
+        // The two hardened seams in one test. Derive-vs-author: the same RELATIVE composition at two very
+        // different absolute scales yields the identical assemblage, because the normalization makes the result
+        // a function of the relative composition and the conditions, not the arbitrary unit it is expressed in.
+        // Correctness/overflow: the large absolute composition (thousands of moles) would, before the
+        // normalization, have driven a phase amount times its ~2.2e6 J Gibbs energy past the Q32.32 ceiling and
+        // silently dropped the assemblage; normalized, it solves cleanly and matches the small-scale result.
+        let r = PhaseRegistry::standard().expect("registry loads");
+        let small = vec![el("Mg", 2), el("Si", 1), el("O", 4)];
+        let large = vec![el("Mg", 2000), el("Si", 1000), el("O", 4000)];
+        let a = stable_assemblage(&small, Fixed::from_int(300), Fixed::from_int(1), &r).unwrap();
+        let b = stable_assemblage(&large, Fixed::from_int(300), Fixed::from_int(1), &r)
+            .expect("a thousand-fold larger composition still solves (no overflow)");
+        assert_eq!(
+            a, b,
+            "the assemblage is invariant to the composition's absolute scale"
+        );
+        assert_eq!(phase_names(&a), vec!["forsterite".to_string()]);
     }
 }
