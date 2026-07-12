@@ -119,7 +119,10 @@ def scan_derives(root):
     """Scan every .rs under crates/ for `// @derives:` markers, the deriving-substrate index.
 
     A marker sits at a derivation entry point (a subsystem that produces a world quantity from the
-    floor and the situation) and reads `// @derives: <quantity> <- <from these substrate inputs>`.
+    floor and the situation) and reads `// @derives[<id>]: <quantity> <- <from these substrate
+    inputs>`, or the bare `// @derives:` form. The optional `[<id>]` token is the machine handle the
+    derived-output-is-live gate keys its `RetiredFloorDerivation` registry to (task #43); it is
+    ignored here, so both forms land on the billboard.
     The generator emits every marker with its file:line, so the deriving half of the substrate map
     (orbital mechanics, hydrology, metabolism, the matter cycle, the time-space anchors: everything
     OUTSIDE crates/physics) is on the billboard and the stop-gate keeps it never-stale, exactly as
@@ -131,7 +134,7 @@ def scan_derives(root):
         rel = os.path.relpath(path, root)
         with open(path, encoding="utf-8") as fh:
             for i, ln in enumerate(fh):
-                m = re.search(r"//\s*@derives:\s*(.*\S)", ln)
+                m = re.search(r"//\s*@derives(?:\[\w+\])?:\s*(.*\S)", ln)
                 if m:
                     out.append((rel, i + 1, m.group(1).strip()))
     out.sort(key=lambda t: (t[0], t[1]))
