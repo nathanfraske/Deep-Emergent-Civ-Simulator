@@ -1302,7 +1302,7 @@ impl EnvironFields {
         let mut effective = self.elevation.clone();
         for y in 0..self.height {
             for x in 0..self.width {
-                let delta = earthwork.delta(Coord3::ground(x, y));
+                let delta = earthwork.total_delta(Coord3::ground(x, y));
                 if delta != Fixed::ZERO {
                     let i = self.idx(x, y);
                     effective[i] = effective[i].saturating_add(delta);
