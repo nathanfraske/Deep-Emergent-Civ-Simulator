@@ -94,6 +94,10 @@ fn alpha_k() -> Fixed {
 /// at one cell spacing is about `erfc(3.2) ~ 5e-6`, so two shells are ample.
 const N_REAL: i32 = 2;
 
+/// The real-space shell half-width, exposed so the charge-equilibration short-range shielding sum uses the same
+/// image shell as the Ewald real-space sum.
+pub const N_REAL_SHELLS: i32 = N_REAL;
+
 /// The fixed reciprocal-space shell half-width (`h_i` in `-N..=N`). With `alpha ~ 3.2 / L`, the Gaussian at
 /// this cutoff is `exp(-pi^2 N^2 / ALPHA_K^2)`, negligible by `N = 6`.
 const N_RECIP: i32 = 6;
@@ -263,6 +267,125 @@ fn scale(s: Fixed, v: &[Fixed; 3]) -> [Fixed; 3] {
     [s * v[0], s * v[1], s * v[2]]
 }
 
+/// The periodic Ewald POTENTIAL MATRIX `A_ij` in reduced units (1/length): the electrostatic potential at
+/// site `i` due to a unit charge at site `j` and all its periodic images, so the cell energy is
+/// `E = 0.5 sum_{i,j} q_i q_j A_ij` (cross-checked against [`ewald_energy`]). The shielded charge-equilibration
+/// solve reads this as the long-range `1/R` periodic Coulomb and subtracts the short-range shielding from the
+/// off-diagonal. Returns `None` for a degenerate cell. The parameters (`alpha`, the shell cutoffs) and the
+/// tin-foil convention are those of [`ewald_energy`].
+pub fn ewald_potential_matrix(cell: &Cell) -> Option<Vec<Vec<Fixed>>> {
+    let a1 = cell.lattice[0];
+    let a2 = cell.lattice[1];
+    let a3 = cell.lattice[2];
+    let volume = dot(&a1, &cross(&a2, &a3));
+    if volume <= Fixed::ZERO {
+        return None;
+    }
+    let n = cell.ions.len();
+    let cart: Vec<[Fixed; 3]> = cell
+        .ions
+        .iter()
+        .map(|ion| {
+            [
+                a1[0] * ion.frac[0] + a2[0] * ion.frac[1] + a3[0] * ion.frac[2],
+                a1[1] * ion.frac[0] + a2[1] * ion.frac[1] + a3[1] * ion.frac[2],
+                a1[2] * ion.frac[0] + a2[2] * ion.frac[1] + a3[2] * ion.frac[2],
+            ]
+        })
+        .collect();
+    let third = Fixed::ONE / Fixed::from_int(3);
+    let side = volume.powf(third);
+    let alpha = alpha_k() / side;
+
+    let mut a = vec![vec![Fixed::ZERO; n]; n];
+
+    // Real-space: A_ij += sum_L erfc(alpha r)/r over images r = r_i - r_j + L, excluding the true self (i=j,
+    // L=0). For i=j this accumulates the interaction with the site's own periodic images (L != 0).
+    for n1 in -N_REAL..=N_REAL {
+        for n2 in -N_REAL..=N_REAL {
+            for n3 in -N_REAL..=N_REAL {
+                let lat = [
+                    a1[0] * Fixed::from_int(n1)
+                        + a2[0] * Fixed::from_int(n2)
+                        + a3[0] * Fixed::from_int(n3),
+                    a1[1] * Fixed::from_int(n1)
+                        + a2[1] * Fixed::from_int(n2)
+                        + a3[1] * Fixed::from_int(n3),
+                    a1[2] * Fixed::from_int(n1)
+                        + a2[2] * Fixed::from_int(n2)
+                        + a3[2] * Fixed::from_int(n3),
+                ];
+                let self_image = n1 == 0 && n2 == 0 && n3 == 0;
+                for i in 0..n {
+                    for j in 0..n {
+                        if self_image && i == j {
+                            continue;
+                        }
+                        let d = [
+                            cart[i][0] - cart[j][0] + lat[0],
+                            cart[i][1] - cart[j][1] + lat[1],
+                            cart[i][2] - cart[j][2] + lat[2],
+                        ];
+                        let r2 = dot(&d, &d);
+                        if r2 <= Fixed::ZERO {
+                            continue;
+                        }
+                        let r = r2.sqrt();
+                        a[i][j] += erfc_nonneg(alpha * r) / r;
+                    }
+                }
+            }
+        }
+    }
+
+    // Reciprocal-space: A_ij += (4 pi / V) sum_{G != 0} exp(-G^2/4alpha^2)/G^2 cos(G . (r_i - r_j)).
+    let four_pi = Fixed::from_int(4) * Fixed::PI;
+    let two_pi = Fixed::from_int(2) * Fixed::PI;
+    let b1 = scale(two_pi / volume, &cross(&a2, &a3));
+    let b2 = scale(two_pi / volume, &cross(&a3, &a1));
+    let b3 = scale(two_pi / volume, &cross(&a1, &a2));
+    let four_alpha2 = Fixed::from_int(4) * alpha * alpha;
+    for h1 in -N_RECIP..=N_RECIP {
+        for h2 in -N_RECIP..=N_RECIP {
+            for h3 in -N_RECIP..=N_RECIP {
+                if h1 == 0 && h2 == 0 && h3 == 0 {
+                    continue;
+                }
+                let g = [
+                    b1[0] * Fixed::from_int(h1)
+                        + b2[0] * Fixed::from_int(h2)
+                        + b3[0] * Fixed::from_int(h3),
+                    b1[1] * Fixed::from_int(h1)
+                        + b2[1] * Fixed::from_int(h2)
+                        + b3[1] * Fixed::from_int(h3),
+                    b1[2] * Fixed::from_int(h1)
+                        + b2[2] * Fixed::from_int(h2)
+                        + b3[2] * Fixed::from_int(h3),
+                ];
+                let g2 = dot(&g, &g);
+                if g2 <= Fixed::ZERO {
+                    continue;
+                }
+                let factor = four_pi / volume * (Fixed::ZERO - g2 / four_alpha2).exp() / g2;
+                for i in 0..n {
+                    for j in 0..n {
+                        let phase = dot(&g, &cart[i]) - dot(&g, &cart[j]);
+                        a[i][j] += factor * phase.cos();
+                    }
+                }
+            }
+        }
+    }
+
+    // Diagonal self-energy correction: subtract 2 alpha / sqrt(pi) (the charge's interaction with its own
+    // screening Gaussian, which the reciprocal sum over-counts).
+    let two_alpha_over_sqrt_pi = Fixed::from_int(2) * alpha / Fixed::PI.sqrt();
+    for (i, row) in a.iter_mut().enumerate() {
+        row[i] -= two_alpha_over_sqrt_pi;
+    }
+    Some(a)
+}
+
 /// The MADELUNG CONSTANT of a structure, `M = -(E_total / formula_units) * reference_distance`, in reduced
 /// units (the energy per formula unit is `-M / r` with the Coulomb constant 1, so `M = -E_fu * r`). The
 /// `reference_distance` is the nearest cation-anion separation the tabulated constant is referenced to, and
@@ -412,6 +535,39 @@ mod tests {
         assert!(
             e < Fixed::ZERO,
             "a stable ionic cell has negative Madelung energy"
+        );
+    }
+
+    #[test]
+    #[allow(clippy::needless_range_loop)]
+    fn the_potential_matrix_reproduces_the_ewald_energy() {
+        // E = 0.5 sum_{i,j} q_i q_j A_ij must equal ewald_energy for the same cell (the matrix is the same
+        // Ewald sum, factored per pair). NaCl.
+        let ions = vec![
+            ion(0.0, 0.0, 0.0, 1),
+            ion(0.5, 0.5, 0.0, 1),
+            ion(0.5, 0.0, 0.5, 1),
+            ion(0.0, 0.5, 0.5, 1),
+            ion(0.5, 0.0, 0.0, -1),
+            ion(0.0, 0.5, 0.0, -1),
+            ion(0.0, 0.0, 0.5, -1),
+            ion(0.5, 0.5, 0.5, -1),
+        ];
+        let cell = cubic(2, ions);
+        let e = ewald_energy(&cell).expect("energy");
+        let a = ewald_potential_matrix(&cell).expect("matrix");
+        let mut e_from_matrix = Fixed::ZERO;
+        for i in 0..cell.ions.len() {
+            for j in 0..cell.ions.len() {
+                e_from_matrix += cell.ions[i].charge * cell.ions[j].charge * a[i][j];
+            }
+        }
+        e_from_matrix = e_from_matrix / Fixed::from_int(2);
+        assert!(
+            close(e_from_matrix, e.to_f64_lossy(), 1e-4),
+            "0.5 sum q q A = {} must equal ewald_energy {}",
+            e_from_matrix.to_f64_lossy(),
+            e.to_f64_lossy()
         );
     }
 
