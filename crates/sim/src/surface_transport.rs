@@ -38,6 +38,8 @@ use std::collections::BTreeMap;
 
 use civsim_core::Fixed;
 
+use crate::surface_drivers::ExactRootExponent;
+
 /// The four MASS-FATE reservoirs of surface mass transport, the fixed conservation-floor accounts every driver's
 /// mass moves between. Not world content and not a data-driven set: mass on a surface is in exactly one of these
 /// four fates, so the set is closed by the physics of mass conservation (unlike the DRIVER membership, which is
@@ -211,11 +213,21 @@ pub struct DriverRow {
     /// footprint. A transport kernel that redistributes within the solid column names only `ColumnSolid`; a
     /// dissolution kernel names `ColumnSolid` and `DissolvedLoad`.
     reservoirs: Vec<MassReservoir>,
+    /// The stream-power AREA exponent `m`, an [`ExactRootExponent`] DATUM (the Mirror fluvial default 1/2, the
+    /// exact integer square root). A fluid whose incision law has a different exponent in the GPU-canon-buildable
+    /// exact-root family is a data row, so no hardcoded Terran exponent sits in the path of world content
+    /// (Principle 11, admit-the-alien). Read by [`crate::surface_drivers::fluid_shear_with_exponents`] when the
+    /// arming step runs the driver.
+    area_exponent: ExactRootExponent,
+    /// The stream-power SLOPE exponent `n`, an [`ExactRootExponent`] datum (the Mirror fluvial default 1, linear).
+    slope_exponent: ExactRootExponent,
 }
 
 impl DriverRow {
     /// Build a driver row from its kernel, its property key-set, its reserved parameters, and the reservoir
-    /// fates it touches. The parameter and property membership is data.
+    /// fates it touches. The parameter and property membership is data. The stream-power exponents default to the
+    /// Mirror fluvial pair (m = 1/2, n = 1); [`Self::with_stream_power_exponents`] sets a different exact-root
+    /// exponent for a fluid whose incision law differs.
     pub fn new(
         name: impl Into<String>,
         kernel: TransportKernelId,
@@ -229,7 +241,33 @@ impl DriverRow {
             property_keys,
             params,
             reservoirs,
+            area_exponent: ExactRootExponent::SQRT,
+            slope_exponent: ExactRootExponent::LINEAR,
         }
+    }
+
+    /// Set the stream-power exponents (the exact-root area exponent `m` and slope exponent `n`) for a fluid whose
+    /// incision law differs from the Mirror fluvial default of `SQRT` (1/2) and `LINEAR` (1). The exponent is a
+    /// per-world and per-driver datum; a value outside the buildable exact-root family surfaces fail-loud when the
+    /// kernel applies it, not here.
+    pub fn with_stream_power_exponents(
+        mut self,
+        area: ExactRootExponent,
+        slope: ExactRootExponent,
+    ) -> DriverRow {
+        self.area_exponent = area;
+        self.slope_exponent = slope;
+        self
+    }
+
+    /// The stream-power area exponent `m` (the Mirror fluvial default 1/2).
+    pub fn area_exponent(&self) -> ExactRootExponent {
+        self.area_exponent
+    }
+
+    /// The stream-power slope exponent `n` (the Mirror fluvial default 1).
+    pub fn slope_exponent(&self) -> ExactRootExponent {
+        self.slope_exponent
     }
 
     /// A reserved parameter by name; an absent one reads zero (the substrate absence convention).
@@ -826,5 +864,28 @@ mod tests {
             honored_removals(11, &[5, 2, 8, 1])
         );
         assert_eq!(honored_removals(0, &[3, 4]), vec![0, 0]);
+    }
+
+    #[test]
+    fn a_driver_row_defaults_to_the_fluvial_exponents_and_carries_a_set_exponent() {
+        // The stream-power exponents are a per-driver datum on the row: the default is the Mirror fluvial pair
+        // (m = 1/2, n = 1), and a fluid whose incision law differs sets a different exact-root exponent.
+        let row = DriverRow::new(
+            "fluvial-water",
+            TransportKernelId::FluidShear,
+            vec!["density".into()],
+            BTreeMap::new(),
+            vec![MassReservoir::ColumnSolid],
+        );
+        assert_eq!(row.area_exponent(), ExactRootExponent::SQRT);
+        assert_eq!(row.slope_exponent(), ExactRootExponent::LINEAR);
+        let altered =
+            row.with_stream_power_exponents(ExactRootExponent::LINEAR, ExactRootExponent::LINEAR);
+        assert_eq!(
+            altered.area_exponent(),
+            ExactRootExponent::LINEAR,
+            "a per-driver exponent is a data row, not a rewrite"
+        );
+        assert_eq!(altered.slope_exponent(), ExactRootExponent::LINEAR);
     }
 }
