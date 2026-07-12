@@ -78,7 +78,7 @@ pub const LIFE_CADENCE_TICKS: u64 = 31_536_000;
 /// loud rather than panicking, wrapping, or returning a zero cadence: the base tick and the span
 /// must both be positive, the quotient must stay in fixed-point range, and the floored result
 /// must be at least one tick (a span shorter than one base tick would beat every tick).
-// @derives: a world's year/day/season in TICKS, and the cell area in metres <- the world's orbit (world-seconds) divided by the base tick (1 tick = 1 world-second, reserved). The calendar is NOT a hardcoded 365 days; it falls out of the orbit and the tick. The cell edge derives as a reference creature's real ground speed (m/s) x 1 s/tick (see locomotion base_speed), cross-checked by NPP density x cell area = standing crop.
+// @derives[clock_calendar_cell]: a world's year/day/season in TICKS, and the cell area in metres <- the world's orbit (world-seconds) divided by the base tick (1 tick = 1 world-second, reserved). The calendar is NOT a hardcoded 365 days; it falls out of the orbit and the tick. The cell edge derives as a reference creature's real ground speed (m/s) x 1 s/tick (see locomotion base_speed), cross-checked by NPP density x cell area = standing crop.
 pub fn ticks_from_seconds(
     seconds: Fixed,
     base_tick_seconds: Fixed,

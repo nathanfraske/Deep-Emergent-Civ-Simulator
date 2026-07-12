@@ -1403,7 +1403,7 @@ impl EnvironFields {
     /// clamped non-negative), then route a fraction downhill to the precomputed lowest neighbour,
     /// double-buffered so the advection is order-independent and conservative (a cell keeps what it does
     /// not send; a basin sends nothing).
-    // @derives: local water presence, rainfall, evaporation, runoff <- Clausius-Clapeyron saturation(local temperature) + Dalton evaporation + condensation where moisture exceeds saturation + downhill routing to the lowest neighbour. Water is NOT authored per cell; it falls out of temperature and terrain.
+    // @derives[hydrology_water]: local water presence, rainfall, evaporation, runoff <- Clausius-Clapeyron saturation(local temperature) + Dalton evaporation + condensation where moisture exceeds saturation + downhill routing to the lowest neighbour. Water is NOT authored per cell; it falls out of temperature and terrain.
     fn step_hydrology(&mut self, temp: &Field, calib: &EnvironCalib) {
         let (w, h) = (self.width, self.height);
         let n = (w as usize) * (h as usize);
@@ -1874,7 +1874,7 @@ impl EnvironFields {
     /// so a fertilised cell grows more where soil is the limiting factor and the matter cycle closes into
     /// the food web. With no matter cycle armed the fertility is zero and the soil supply is the plain
     /// baseline, so the productivity (and its hash) is unchanged.
-    // @derives: per-cell biomass productivity / carrying capacity <- when photosynthesis is armed, the DERIVED carbon-fixation rate (carbon_fixation_rate: the light-response over the real insolation flux, the enzyme thermal tent, the water-use-efficiency coupling to evaporation, and the soil-nutrient limitation over matter-cycle fertility); unarmed, the abstract-producer Liebig minimum over (water, light, temperature, soil) with soil = soil_baseline + matter-cycle fertility (the interim the derivation retires). Productivity is NOT authored per cell.
+    // @derives[productivity_capacity]: per-cell biomass productivity / carrying capacity <- when photosynthesis is armed, the DERIVED carbon-fixation rate (carbon_fixation_rate: the light-response over the real insolation flux, the enzyme thermal tent, the water-use-efficiency coupling to evaporation, and the soil-nutrient limitation over matter-cycle fertility); unarmed, the abstract-producer Liebig minimum over (water, light, temperature, soil) with soil = soil_baseline + matter-cycle fertility (the interim the derivation retires). Productivity is NOT authored per cell.
     fn step_productivity(&mut self, temp: &Field, calib: &EnvironCalib) {
         let (w, h) = (self.width, self.height);
         // The DERIVED photosynthesis path (armed, #156): read the calibration and the stellar-constant flux anchor
