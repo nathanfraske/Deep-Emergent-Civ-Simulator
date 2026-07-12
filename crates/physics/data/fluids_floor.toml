@@ -20,6 +20,95 @@ range_lo = "1"
 range_hi = "100000"
 real = "the K envelope from cryogenic to stellar/forge; grounds the wave-1 conduction and combustion temperature inputs"
 
+# --- Critical-point axes (the measured phase-behaviour primitives the transport-property derivations read) ---
+# The critical point (T_c, P_c) and the acentric factor are directly-observed substance constants, not derivable
+# without the many-body Hamiltonian, so they are the hunt-cleared irreducible primitives from which the
+# Lennard-Jones pair (and hence the Chapman-Enskog diffusivity) DERIVES by corresponding states. Only these are
+# authored; an alien gas is a data row carrying its own critical point.
+
+[[axis]]
+id = "chem.critical_temperature"
+measures = "the critical temperature T_c, the phase-behaviour endpoint above which no liquid-vapour distinction exists (the corresponding-states anchor the LJ well depth derives from)"
+unit = "K"
+dimension = "temperature"
+scale = "K"
+tier = 0
+range_lo = "1"
+range_hi = "100000"
+real = "Poling, Prausnitz and O'Connell, The Properties of Gases and Liquids (water 647.1, air pseudo-critical 132.5, helium 5.2)"
+
+[[axis]]
+id = "chem.critical_pressure"
+measures = "the critical pressure P_c at the critical point (the second corresponding-states anchor, for the LJ collision diameter)"
+unit = "MPa"
+dimension = "pressure"
+scale = "MPa"
+tier = 0
+range_lo = "0.01"
+range_hi = "1000"
+real = "Poling, Prausnitz and O'Connell (water 22.06, air 3.77, helium 0.227)"
+
+[[axis]]
+id = "chem.acentric_factor"
+measures = "Pitzer's acentric factor omega, the deviation of the vapour-pressure curve from the simple-fluid spherical reference (an equation-of-state and polarity input)"
+unit = "1"
+dimension = "dimensionless"
+scale = "1"
+tier = 0
+range_lo = "-1"
+range_hi = "2"
+real = "Poling, Prausnitz and O'Connell (water 0.344, air 0.035, argon 0)"
+
+# The volatile-thermodynamics primitives (design VOLATILE_THERMODYNAMICS_DESIGN_ANCHOR). A measured volatile's
+# saturation curve derives from these four alone; everything else (delta_cp, the Rankine-Kirchhoff constants, the
+# triple-point pressure) is theorem. The two latent heats are per MOLE (the first per-mole axes in the floor;
+# mole is a dimensionless count, so the dimension is plain energy, the unit carries the /mol, matching how
+# R = N_A*k_B carries J/K). The curve reads L in molar units against the molar R, so the mole cancels.
+
+[[axis]]
+id = "chem.boiling_point"
+measures = "the normal boiling point T_b, the temperature at which the saturation vapour pressure reaches one standard atmosphere (the in-regime anchor of the Rankine-Kirchhoff saturation curve)"
+unit = "K"
+dimension = "temperature"
+scale = "K"
+tier = 0
+range_lo = "1"
+range_hi = "10000"
+real = "NIST Chemistry WebBook / CRC Handbook normal boiling points (water 373.15, ethanol 351.4, ammonia 239.8)"
+
+[[axis]]
+id = "chem.vaporization_enthalpy"
+measures = "the molar enthalpy of vaporization L_b at the normal boiling point (the boiling-point latent heat, the saturation curve's energy primitive; per mole, mole a dimensionless count)"
+unit = "kJ/mol"
+dimension = "2,1,-2,0"
+scale = "kJ/mol"
+tier = 0
+range_lo = "1"
+range_hi = "1000"
+real = "NIST Chemistry WebBook / CRC Handbook enthalpy of vaporization at T_b (water 40.66, ethanol 38.6, ammonia 23.4)"
+
+[[axis]]
+id = "chem.fusion_enthalpy"
+measures = "the molar enthalpy of fusion L_fus (the solid-liquid enthalpy gap Dulong-Petit discards; adds to L_vap by Hess's law for the sublimation branch; per mole)"
+unit = "kJ/mol"
+dimension = "2,1,-2,0"
+scale = "kJ/mol"
+tier = 0
+range_lo = "0.1"
+range_hi = "1000"
+real = "NIST Chemistry WebBook / CRC Handbook enthalpy of fusion (water 6.01, ethanol 4.9, ammonia 5.66)"
+
+[[axis]]
+id = "chem.triple_point_temperature"
+measures = "the triple-point temperature T_triple, the solid-liquid-gas coexistence temperature (the low-temperature regime boundary between the sublimation and mid-range branches)"
+unit = "K"
+dimension = "temperature"
+scale = "K"
+tier = 0
+range_lo = "1"
+range_hi = "10000"
+real = "NIST / CRC triple-point temperatures (water 273.16, exact under the pre-2019 Kelvin definition; CO2 216.6; ammonia 195.4)"
+
 # --- Fluid axes ---
 
 [[axis]]
@@ -497,10 +586,20 @@ values = [
   { axis = "mat.density", value = "1.225" },
   { axis = "fluid.dynamic_viscosity", value = "0.0000178" },
   { axis = "fluid.bulk_modulus", value = "0.142" },
+  # Pseudo-critical point and acentric factor of dry air (Poling, Prausnitz and O'Connell), the second
+  # substance the Chapman-Enskog vapour-in-air diffusivity reads for its LJ pair.
+  { axis = "chem.critical_temperature", value = "132.5" },
+  { axis = "chem.critical_pressure", value = "3.77" },
+  { axis = "chem.acentric_factor", value = "0.035" },
 ]
 
 [[substance]]
 id = "water"
+# The molecular identity (the volatile-thermodynamics arc): the molar mass and atom count derive from the formula
+# plus the periodic table (never an authored molar mass). An irreducible layer-2 identity datum, cited: NIST / CRC
+# (water is H2O). The rotational class for the gas heat capacity is held pending the derivation hunt (likely VSEPR
+# from the formula plus the periodic-table valence counts).
+formula = "H2O"
 participates_in = ["law.hydrostatic_pressure", "law.buoyant_force", "law.poiseuille_flow", "law.speed_of_sound", "law.laplace_pressure", "law.acoustic_absorption", "law.tube_resonance"]
 real = "CRC (liquid water at 20C)"
 values = [
@@ -513,4 +612,18 @@ values = [
   # carries its vaporization value here, the surface energy balance's evaporative cooling reads it. A distinct
   # latent-heat-of-fusion axis (for the melt) is the deeper substrate follow-on for a world that needs both.
   { axis = "therm.latent_heat", value = "2454" },
+  # Critical point and acentric factor (Poling, Prausnitz and O'Connell), the corresponding-states primitives
+  # the Chapman-Enskog vapour diffusivity derives its LJ pair from. The polar acentric factor (0.344) is the
+  # datum a Stockmayer/Brokaw polar correction would key on (the owner's polarity decision), not yet consumed.
+  { axis = "chem.critical_temperature", value = "647.1" },
+  { axis = "chem.critical_pressure", value = "22.06" },
+  { axis = "chem.acentric_factor", value = "0.344" },
+  # The volatile-thermodynamics primitives (the four measured observables the saturation curve derives from,
+  # each hunter-cleared as irreducible). T_b and L_b anchor the mid-range Rankine-Kirchhoff curve; L_fus adds to
+  # L_vap by Hess for the sublimation branch; T_triple is the low-temperature regime boundary. Held (unread)
+  # until the wiring slice retires the affine tangent and therm.latent_heat for the derived molar L(T).
+  { axis = "chem.boiling_point", value = "373.15" },
+  { axis = "chem.vaporization_enthalpy", value = "40.66" },
+  { axis = "chem.fusion_enthalpy", value = "6.01" },
+  { axis = "chem.triple_point_temperature", value = "273.16" },
 ]

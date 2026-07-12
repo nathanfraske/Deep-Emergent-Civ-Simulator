@@ -151,8 +151,22 @@ pub const STEFAN_BOLTZMANN: Composite = Composite {
     provenance: "CODATA 2018 (derived from k_B, h, c)",
 };
 
+/// The molar gas constant `R = N_A * k_B`, the product of the Avogadro and Boltzmann fundamentals, DERIVED and
+/// never authored as its own number. Both fundamentals are SI-defining and exact, so the product is exact. It is
+/// the constant the volatile-thermodynamics saturation curve and the ideal-gas laws read (`R_v = R / M` for a
+/// substance's specific gas constant, and the Rankine-Kirchhoff constants for a volatile's saturation curve).
+pub const GAS_CONSTANT: Composite = Composite {
+    symbol: "R",
+    name: "molar gas constant",
+    formula: "N_A * k_B",
+    fundamentals: &["N_A", "k_B"],
+    value: "8.314462618",
+    unit: "J/(mol*K)",
+    provenance: "CODATA 2018 (derived from N_A, k_B; exact since the 2019 SI redefinition)",
+};
+
 /// The composites this table records as derive-targets over the fundamentals.
-pub const COMPOSITES: [Composite; 1] = [STEFAN_BOLTZMANN];
+pub const COMPOSITES: [Composite; 2] = [STEFAN_BOLTZMANN, GAS_CONSTANT];
 
 /// Look up a fundamental by its symbol.
 pub fn fundamental(symbol: &str) -> Option<&'static Fundamental> {
@@ -196,6 +210,24 @@ mod tests {
         assert!(
             relative < 1e-8,
             "sigma derived from the fundamentals ({derived:e}) drifts from the recorded CODATA value ({recorded:e}), relative {relative:e}"
+        );
+    }
+
+    #[test]
+    fn the_stored_fundamentals_reproduce_the_gas_constant_the_drift_check() {
+        // R = N_A * k_B, both SI-defining and exact since 2019, so the product is exact to the recorded value.
+        // f64 DELIBERATELY and ONLY here (a test), the same convention as the sigma drift-check.
+        let n_a = parse(&AVOGADRO);
+        let k_b = parse(&BOLTZMANN);
+        let derived = n_a * k_b;
+        let recorded: f64 = GAS_CONSTANT
+            .value
+            .parse()
+            .expect("the composite's recorded value parses");
+        let relative = (derived - recorded).abs() / recorded;
+        assert!(
+            relative < 1e-8,
+            "R derived from N_A and k_B ({derived:e}) drifts from the recorded value ({recorded:e}), relative {relative:e}"
         );
     }
 
