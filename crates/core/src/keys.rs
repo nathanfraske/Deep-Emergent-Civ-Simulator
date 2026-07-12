@@ -186,6 +186,14 @@ impl Phase {
     /// the whole substrate replays bit for bit. Distinct from DEVELOPMENT (the founder expression offset) and
     /// MATE_CHOICE so the creature draws never collide with a founder's on a counter.
     pub const CREATURE_REPRO: Phase = Phase(0x1F);
+    /// A derived-taxis TUMBLE draw (the run-and-tumble survival floor): whether a being RE-ORIENTS this tick
+    /// under the always-on motility floor, drawn against a tumble probability that is a continuous function of
+    /// the being's OWN interoceptive reserve derivative (a rising reserve lowers it so the being persists on
+    /// its heading, a falling reserve raises it so it re-orients). Keyed on the being and the tick, so whether a
+    /// being tumbles is a reproducible function of the seed, the being, and the tick, never the camera. Distinct
+    /// from EXPLORE (the fixed-period search heading) so the floor's tumble draw never collides with the
+    /// controller-driven explore on a shared counter.
+    pub const TUMBLE: Phase = Phase(0x20);
 }
 
 /// The sentinel for a coordinate that does not apply to a draw (the degrade rule). An

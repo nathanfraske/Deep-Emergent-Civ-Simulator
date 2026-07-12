@@ -1412,6 +1412,19 @@ pub struct Embodiment {
     /// to decide any behaviour: WHO it strikes is the occupant-agnostic `strike_occupant`, keyed on co-location
     /// and geometry, never on this set (Principle 8).
     predators: BTreeSet<StableId>,
+    /// Whether the DERIVED-TAXIS survival floor is armed (the run-and-tumble motility floor beneath the
+    /// controller). FALSE by default, so no being runs the floor, no `taxis_heading` is ever set, and every run
+    /// hash is unchanged (opt-in, the sibling of `creature_being_percept`). When true, a being not steered by a
+    /// controller MOVE heading this tick re-orients stochastically at a rate that is a continuous function of
+    /// its own interoceptive reserve derivative (a rising reserve lowers the tumble rate so it persists, a
+    /// falling reserve raises it so it re-orients), so a founder-zero being still seeks up any reserve-feeding
+    /// gradient. The polarity is a floor coupling grounded in the death floor (a rising reserve is physically
+    /// further from the INTEGRITY cull), never authored; the DIRECTION emerges from the being's own movement in
+    /// the field. The floor carries NO new authored value: the arming holds only the being's reserve-swing noise
+    /// floor (`harm.noise_floor`, an existing reserved value), and the resting tumble rate, the reserve
+    /// sensitivity, and the reward's adaptation baseline all DERIVE per-being from that scale and the being's own
+    /// resting drain at the step (Principle 11).
+    derived_taxis: Option<crate::locomotion::DerivedTaxisArming>,
     /// Whether the being re-earns a reward belief from the perceived composition of what it ATE this tick
     /// (social-learning arc, piece 1, nutrition learning). FALSE by default, so the ingested-matter reward
     /// credit never fires and every run hash is unchanged; the world-build opts in
@@ -1643,6 +1656,7 @@ impl Embodiment {
             creature_selection: None,
             creature_offspring_count: 0,
             predators: BTreeSet::new(),
+            derived_taxis: None,
             nutrition_learning: false,
             place_reward_learning: true,
             observe_and_imitate: false,
@@ -1752,6 +1766,18 @@ impl Embodiment {
     /// reaction is pure selection on the raw percept.
     pub fn set_creature_being_percept(&mut self, enabled: bool) {
         self.creature_being_percept = enabled;
+    }
+
+    /// Arm the DERIVED-TAXIS survival floor (the run-and-tumble motility floor beneath the controller). OFF by
+    /// default, so an opted-out run sets no `taxis_heading` and folds nothing (byte-identical). When armed, a
+    /// being not steered by a controller MOVE heading this tick re-orients stochastically at a rate that is a
+    /// continuous function of its own reserve derivative, so a founder-zero being still seeks up any
+    /// reserve-feeding gradient (the extinction-wall floor). The arming carries only the being's reserve-swing
+    /// noise floor; the floor rates and the reward baseline derive per-being from it and the being's own resting
+    /// drain, so arming introduces no new authored value. No layout rebuild: it drives locomotion, not a
+    /// controller input.
+    pub fn set_derived_taxis(&mut self, arming: Option<crate::locomotion::DerivedTaxisArming>) {
+        self.derived_taxis = arming;
     }
 
     /// Install the perceivable-FEATURE registry (creature-selection step 2b, the percept kind-feature floor arc):
@@ -3552,6 +3578,13 @@ impl Embodiment {
         &self.walkers
     }
 
+    /// Mutable access to the walkers (test-support and external-uptake harnesses, e.g. the derived-taxis floor's
+    /// automatic position-based uptake): the sibling of [`Embodiment::walkers`]. Mutating a walker's reserves
+    /// here is the caller's, exactly as an armed uptake pass would.
+    pub fn walkers_mut(&mut self) -> &mut [Walker] {
+        &mut self.walkers
+    }
+
     /// The standing resource field the grazers deplete and the environment regrows (a pure read, for the
     /// carrying-capacity reader; base-level liveliness step 3).
     pub fn resources(&self) -> &ResourceField {
@@ -4435,7 +4468,35 @@ impl Runner {
     /// [`crate::conservation::ConservationRegistry`] guards. Slice C2 lets the deposited nutrient fertilise
     /// the cell's productivity; volatilising the organic share to the air (a gas the decomposition vents) is
     /// a follow-on refinement of the split.
+    /// The matter-cycle step, wrapped by the Q1 Stone-3 per-step conservation gate.
     fn step_matter_cycle(&mut self) {
+        // Q1 Stone 3: the per-step conservation gate over the matter cycle (debug and test builds only, so it
+        // is compiled out in release and the canonical pins stay byte-identical). The decomposition legs move
+        // mass between the located material, the soil store, and located tissue and conserve their sum
+        // exactly (`ConstituentRegistry::split` absorbs all fixed-point rounding into the residual, and
+        // `mass_lost` is the exact material decrease), which the fixture tests prove; this lifts that
+        // guarantee to a runtime invariant, so a future change that leaks mass in any scenario fails at
+        // runtime rather than only where a test happens to look. The gate brackets `step_matter_cycle`
+        // specifically, the conservative decomposition legs in isolation, never a whole tick (a weathering
+        // source or a producer draw elsewhere in the tick is a legitimate boundary flow, not a leak).
+        #[cfg(debug_assertions)]
+        let ledger_before = self.embodiment.as_ref().map(Embodiment::decay_ledger_mass);
+        self.step_matter_cycle_inner();
+        #[cfg(debug_assertions)]
+        if let Some(before) = ledger_before {
+            let after = self
+                .embodiment
+                .as_ref()
+                .map(Embodiment::decay_ledger_mass)
+                .unwrap_or(before);
+            debug_assert_eq!(
+                before, after,
+                "the matter cycle leaked mass: material plus soil plus tissue changed from {before:?} to {after:?}"
+            );
+        }
+    }
+
+    fn step_matter_cycle_inner(&mut self) {
         let Some(calib) = self.matter_cycle else {
             return;
         };
@@ -6775,6 +6836,10 @@ impl Runner {
             &being_feature_map,
             &resource_feature_map,
             &mut deferred_actions,
+            // The derived-taxis survival floor calibration, `None` unless armed on this embodiment (a disjoint
+            // field read alongside the `&mut emb.walkers` borrow, both Copy). When `None` the floor never runs
+            // and the step is byte-identical.
+            emb.derived_taxis,
         );
         // (2a') Record each being's DISCOVERY proposal (ideation arc, piece 2, slice 2c): the candidate
         // action it sampled this tick, or `None` where it proposed nothing (or the loop is unarmed). Written
@@ -7825,6 +7890,14 @@ impl Runner {
                 // folds nothing and leaves an opted-out run's hash unchanged.
                 if let Some(tool) = &w.wielded {
                     tool.hash_into(&mut h);
+                }
+                // The run-and-tumble held heading (the derived-taxis survival floor): new per-being dynamic
+                // state, folded after the wielded tool. `None` for a being in a world with the motility floor
+                // OFF (never armed), so it folds nothing and leaves an opted-out run's hash unchanged (opt-in,
+                // the sibling of the reserve memory above).
+                if let Some((hx, hy)) = w.taxis_heading {
+                    h.write_fixed(hx);
+                    h.write_fixed(hy);
                 }
             }
         }
@@ -14698,5 +14771,553 @@ values = [
             pay_mean, pay_mean2,
             "the corpse-intake experiment is deterministic"
         );
+    }
+
+    /// The TWO-WAY-SORT arena (#150, the 2b per-feature discrimination proof): the mirror of #144, #146, and
+    /// #148 extended to TWO feature buckets read as a two-way sort. A perceiver keys on each perceived emitter's
+    /// own surface optical feature (`opt.emissivity.band_1` off its covering, `read_emitter`), binned by its own
+    /// resolution into a bucket, and steers its MOVE heading per (channel, bucket) through its OWN founder-zero
+    /// symmetric freely-signed per-bucket weight (`being_feature_input_base`). Two emitter types carry
+    /// DISTINGUISHING coverings and OPPOSITE fitness consequences: a WOUNDING predator (covering kind 4, chitin,
+    /// `band_1` 0.88 -> bucket 17) that culls a co-located perceiver through the one INTEGRITY cull, and a PREY
+    /// emitter (covering kind 0, bare hide, `band_1` 0.96 -> bucket 19) whose cell carries food, so co-locating
+    /// there refills the perceiver's energy and keeps it reproduction-eligible. Selection drives the two per-
+    /// bucket weights to OPPOSITE poles: the predator's bucket (17) to the AVOID pole (a perceiver that heads
+    /// toward it is wounded), the prey's bucket (19) to the APPROACH pole (a perceiver that heads toward it is
+    /// fed and breeds). `distinguishable` is the matched control: when false the predator ALSO wears covering
+    /// kind 0, so both emitter types fall in ONE bucket (19) and the sort collapses to a single net disposition
+    /// the perceiver cannot resolve into approach-one, avoid-the-other. Returns the population-mean prey-bucket
+    /// (19) weight, the mean predator-bucket (17) weight, and the surviving perceiver count. The feature is the
+    /// emitter's own covering datum, the discrimination the perceiver's own resolution, the weights founder-zero
+    /// symmetric; nothing about predator or prey identity is authored.
+    fn two_way_sort_arena(
+        distinguishable: bool,
+        generations: u64,
+        verbose: bool,
+    ) -> (Fixed, Fixed, usize) {
+        use crate::contact_transfer::ContactTransferRegistry;
+        use crate::homeostasis::{HomeostaticAxisDef, HomeostaticRegistry, INTEGRITY};
+        use crate::learn::BeingPerceptField;
+        use crate::material::StrikeParams;
+        use crate::medium::MediumField;
+        use crate::perceivable_feature::PerceivableFeatureRegistry;
+        let ax =
+            |id, name: &str, backing: Option<&str>, drain: Fixed, floor: i32| HomeostaticAxisDef {
+                id,
+                name: name.to_string(),
+                backing_component: backing.map(|s| s.to_string()),
+                capacity_per_mass: Fixed::ONE,
+                base_drain: drain,
+                exertion_drain: Fixed::ZERO,
+                death_floor: Fixed::from_int(floor),
+                draw_set: Vec::new(),
+            };
+        let homeo = HomeostaticRegistry {
+            axes: vec![
+                // ENERGY drains slowly but NEVER floors (death is only the predator's wound): the prey's food is
+                // the only refill, and refill is what keeps a perceiver above the reproduction-eligibility
+                // reserve, so APPROACHING the prey pays through breeding. TEMPERATURE never floors. INTEGRITY
+                // floors at zero, so the predator's whole-body wound is the ONLY death (APPROACHING the predator
+                // is lethal). Two opposite fitness consequences on two feature-distinguished emitters.
+                ax(
+                    ENERGY,
+                    "energy",
+                    Some(crate::physiology::ENERGY_DENSITY),
+                    Fixed::from_ratio(1, 12),
+                    -1000,
+                ),
+                ax(TEMPERATURE, "temperature", None, Fixed::ZERO, -1000),
+                ax(INTEGRITY, "integrity", None, Fixed::ZERO, 0),
+            ],
+        };
+        let organs = BodyPlanRegistry::dev_default();
+        let mut emb = Embodiment::new(
+            homeo.clone(),
+            AffordanceRegistry::dev_predator_geophage(),
+            LocomotionParams::dev_default(),
+            0,
+            0x2B_50_27_11,
+        );
+        // Physiology armed (the being-feature perceive pass reads the embodiment's organs for `read_emitter`,
+        // runner.rs:6217, and the perceive path is gated on physiology): the medium sits at the comfort set
+        // point so thermoregulation is cheap and the metabolic drain does not dominate the ENERGY axis's flat
+        // base drain.
+        emb.set_physiology(EmbodiedPhysiology::dev_fixture(
+            organs.clone(),
+            MediumField::uniform(
+                24,
+                24,
+                Fixed::ONE,
+                Fixed::ONE,
+                Fixed::ONE,
+                Fixed::from_int(310),
+            ),
+        ));
+        emb.set_strike(StrikeParams::dev_fixture());
+        emb.set_contact_transfer(ContactTransferRegistry::dev_terran());
+        emb.set_being_field(Some(BeingPerceptField::dev_fixture()));
+        emb.set_being_percept(true);
+        emb.set_creature_being_percept(true);
+        // The per-feature channel: one channel over the covering's `opt.emissivity.band_1` surface axis, 20
+        // buckets, step 0.05. A bare-hide covering (kind 0, band_1 0.96) discriminates into bucket 19; a chitin
+        // covering (kind 4, band_1 0.88) into bucket 17. The bucket boundaries are the ARENA's parameter (a
+        // reserved per-sensorium resolution when this channel is armed in a shipped scenario, flagged); here
+        // they set the two emitter types apart so the sort has a feature to key on.
+        emb.set_being_features(PerceivableFeatureRegistry::from_channels(&[(
+            "opt.emissivity.band_1",
+            20,
+            Fixed::from_ratio(1, 20),
+        )]));
+        emb.set_creature_selection(Some(CreatureSelectionParams {
+            mint_perturbation_spread: Fixed::from_decimal_str("0.05").unwrap(),
+            reproduction_eligibility_reserve: Fixed::from_ratio(7, 10),
+            offspring_mutation_spread: Fixed::from_decimal_str("0.02").unwrap(),
+        }));
+        let layout = emb.layout().clone();
+        let n_in = layout.n_in();
+        let move_base = layout.output_base(crate::homeostasis::MOVE).unwrap();
+        let ingest_base = layout.output_base(crate::homeostasis::INGEST).unwrap();
+        let bf = layout.being_feature_input_base();
+        let bias = n_in - 1;
+        let energy_here = layout.axis_input_base(ENERGY).unwrap() + 1;
+        // The two feature buckets the two emitter types fall in: prey (bare hide) -> 19, predator (chitin) -> 17.
+        let prey_bucket = 19usize;
+        let pred_bucket = 17usize;
+        // The SELECTED traits: the MOVE heading on the prey-bucket (dx, dy) and the predator-bucket (dx, dy)
+        // toward-directions. A positive weight heads toward that bucket's emitters, a negative away. Seeded
+        // symmetric zero-mean below (each founder carries one of the four sign combinations), so the population
+        // mean of each starts at zero and selection alone can move them; nothing about which bucket is approach
+        // versus avoid is authored. MOVE fires from the bias, and is suppressed and INGEST fired when food is
+        // underfoot (the baseline eat, common to every being), so a perceiver that reaches the prey's food EATS.
+        let sort_weights = |prey_sign: i64, pred_sign: i64| -> Vec<Fixed> {
+            let mut w = vec![Fixed::ZERO; layout.weight_count()];
+            w[move_base * n_in + bias] = Fixed::ONE; // MOVE activation from the bias (wants to move)
+            w[move_base * n_in + energy_here] = Fixed::from_int(-2); // stop moving when food is underfoot
+            w[ingest_base * n_in + energy_here] = Fixed::from_int(8); // eat when food is underfoot (baseline)
+            let ps = Fixed::from_int(8 * prey_sign as i32);
+            let ds = Fixed::from_int(8 * pred_sign as i32);
+            w[(move_base + 1) * n_in + (bf + 2 * prey_bucket)] = ps; // prey-bucket dx heading
+            w[(move_base + 2) * n_in + (bf + 2 * prey_bucket + 1)] = ps; // prey-bucket dy heading
+            w[(move_base + 1) * n_in + (bf + 2 * pred_bucket)] = ds; // predator-bucket dx heading
+            w[(move_base + 2) * n_in + (bf + 2 * pred_bucket + 1)] = ds; // predator-bucket dy heading
+            w
+        };
+        let thermal = || BeingThermal {
+            setpoint: Fixed::from_int(310),
+            half_band: Fixed::from_int(30),
+            initial_temp: Fixed::from_int(310),
+        };
+        // A perceiver body: bare hide (kind 0, its OWN covering is irrelevant, only an emitter's is read) plus a
+        // fat-body organ (kind 0) so a bred offspring gets a real ENERGY reserve (`Homeostasis::new` sizes it
+        // from the organs) and the adaptive lineage can compound, the #148 lesson.
+        let perceiver_body = || {
+            let mut b = repro_body();
+            b.covering = crate::anatomy::Part {
+                kind: 0,
+                development: Fixed::from_ratio(1, 2),
+            };
+            b.organs = vec![crate::anatomy::Part {
+                kind: 0,
+                development: Fixed::ONE,
+            }];
+            b
+        };
+        // A body wearing a chosen covering (for the two emitter types), no fat-body organ needed (they do not
+        // breed; they carry no heritable lineage, so `carries_lineage` excludes them from the beat).
+        let emitter_body = |covering: u16| {
+            let mut b = repro_body();
+            b.covering = crate::anatomy::Part {
+                kind: covering,
+                development: Fixed::from_ratio(1, 2),
+            };
+            b
+        };
+        // Seed the perceiver founders co-located at the centre, symmetric across the FOUR sign combinations of
+        // (prey-bucket weight, predator-bucket weight), so each per-bucket weight has population mean zero.
+        let start = Coord3::ground(12, 8);
+        let n_founders = 16u64;
+        for k in 0..n_founders {
+            let prey_sign: i64 = if k % 2 == 0 { 1 } else { -1 };
+            let pred_sign: i64 = if (k / 2) % 2 == 0 { 1 } else { -1 };
+            let ctrl = Controller::from_weights(
+                n_in,
+                layout.n_out(),
+                layout.hidden(),
+                sort_weights(prey_sign, pred_sign),
+            );
+            emb.add(
+                Walker::new(
+                    StableId(CREATURE_ID_TAG | (k + 1)),
+                    start,
+                    perceiver_body(),
+                    Homeostasis::from_mass(&homeo, Fixed::ONE),
+                    Physiology::dev_for_registry(&homeo),
+                    ctrl.clone(),
+                )
+                .with_lineage(ctrl),
+                thermal(),
+            );
+        }
+        // The PREY emitter (bare hide, kind 0 -> bucket 19), a blank-controller walker that stays put, placed
+        // WEST with food at its cell; approaching it (heading toward bucket 19) reaches the food.
+        let prey_cell = Coord3::ground(6, 8);
+        emb.add(
+            Walker::new(
+                StableId(CREATURE_ID_TAG | 900),
+                prey_cell,
+                emitter_body(0),
+                Homeostasis::from_mass(&homeo, Fixed::ONE),
+                Physiology::dev_for_registry(&homeo),
+                Controller::zeros(&layout),
+            ),
+            thermal(),
+        );
+        let params = crate::InferenceParams {
+            clamp: Fixed::from_int(50),
+            commit_threshold: Fixed::from_int(3),
+            margin: Fixed::from_int(1),
+        };
+        let cadence = 6u64;
+        let mut world = World::new(params, params, crate::AccessWeights::from_pairs([]));
+        world.set_life_cadence(cadence);
+        let field = Field::new(24, 24, vec![Fixed::from_int(310); 24 * 24]);
+        let mut runner = Runner::with_world_and_embodiment(field, calib(), world, emb);
+        // The PREDATOR (chitin, kind 4 -> bucket 17 when distinguishable, else bare hide kind 0 -> bucket 19 like
+        // the prey, the matched control), an emitting body that WOUNDS a co-located perceiver, placed EAST.
+        let pred_cell = Coord3::ground(13, 8);
+        let pred_covering: u16 = if distinguishable { 4 } else { 0 };
+        runner.spawn_predator(pred_cell, emitter_body(pred_covering));
+        // The prey's food: an energy patch at the prey emitter's cell, re-applied each tick so the standing
+        // supply the perceiver's INGEST depletes is replenished (a stable food source at the prey's location).
+        let set_food = |res: &mut ResourceField| {
+            res.composition_mut(prey_cell)
+                .set_nutrient("bio.energy_density", Fixed::from_ratio(9, 10));
+        };
+        set_food(runner.embodiment_mut().unwrap().resources_mut());
+        // Measure the population-mean prey-bucket and predator-bucket MOVE-heading weights over the surviving
+        // PERCEIVERS (exclude the predator and the stationary prey emitter, neither of which is a lineage-carrying
+        // perceiver: the predator has no lineage, and the prey emitter's id 900 is excluded explicitly).
+        let means = |r: &Runner| -> (Fixed, Fixed, usize) {
+            let emb = r.embodiment().unwrap();
+            let live: Vec<&Walker> = emb
+                .walkers()
+                .iter()
+                .filter(|w| w.alive && !is_predator(w.id) && w.id.0 != (CREATURE_ID_TAG | 900))
+                .collect();
+            if live.is_empty() {
+                return (Fixed::ZERO, Fixed::ZERO, 0);
+            }
+            let mut prey_sum = Fixed::ZERO;
+            let mut pred_sum = Fixed::ZERO;
+            for w in &live {
+                prey_sum += w
+                    .controller
+                    .weight((move_base + 1) * n_in + (bf + 2 * prey_bucket));
+                pred_sum += w
+                    .controller
+                    .weight((move_base + 1) * n_in + (bf + 2 * pred_bucket));
+            }
+            let n = Fixed::from_int(live.len() as i32);
+            (prey_sum.div(n), pred_sum.div(n), live.len())
+        };
+        let (p0, d0, n0) = means(&runner);
+        if verbose {
+            println!(
+                "distinguishable={distinguishable} start: n={n0} prey_b={:.3} pred_b={:.3}",
+                p0.to_f64_lossy(),
+                d0.to_f64_lossy()
+            );
+        }
+        for g in 0..generations {
+            for _t in 0..cadence {
+                set_food(runner.embodiment_mut().unwrap().resources_mut());
+                runner.step();
+            }
+            if verbose {
+                let (p, d, n) = means(&runner);
+                let off = runner
+                    .embodiment()
+                    .unwrap()
+                    .walkers()
+                    .iter()
+                    .filter(|w| w.id.0 & OFFSPRING_ID_BIT != 0)
+                    .count();
+                println!(
+                    "distinguishable={distinguishable} gen {}: n={n} off={off} prey_b={:.3} pred_b={:.3}",
+                    g + 1,
+                    p.to_f64_lossy(),
+                    d.to_f64_lossy()
+                );
+            }
+        }
+        means(&runner)
+    }
+
+    #[test]
+    fn per_feature_sort_emerges_only_when_the_emitters_are_distinguishable() {
+        // #150, the two-way-sort emergence proof (the mirror of #144/#146/#148 over TWO feature buckets). When
+        // the two emitter types carry DISTINGUISHING coverings, selection drives the perceiver's per-bucket
+        // weights to OPPOSITE poles: the prey's bucket (19) toward APPROACH (positive, a perceiver that heads
+        // there is fed and breeds) and the predator's bucket (17) toward AVOID (negative, a perceiver that heads
+        // there is wounded and dies), so a sharp emitter-specific sort emerges that the magnitude-only channel (a
+        // single net disposition over all emitters) cannot express. In the matched HELD CONTROL the predator
+        // wears the prey's covering, so both fall in ONE bucket and the sort collapses. The signs are measured
+        // against each bucket's fitness consequence; nothing about predator or prey identity is authored (the
+        // seed is symmetric zero-mean, the feature the emitter's own covering datum).
+        let (prey_b, pred_b, n) = two_way_sort_arena(true, 8, false);
+        let (ctrl_prey_b, ctrl_pred_b, _cn) = two_way_sort_arena(false, 8, false);
+        // The sort has OPPOSITE POLES: the prey bucket to the approach pole (positive, a perceiver drawn there
+        // is fed and breeds) and the predator bucket to the avoid pole (negative, a perceiver drawn there is
+        // wounded and dies), off their symmetric zero-mean seed. The magnitudes are modest, the two-bucket
+        // sibling of the #146 flee pole's modest avoidance: the approach and avoid pulls act on the SAME MOVE
+        // heading (the prey lies one way, the predator the other), so the two weights are coupled, and the
+        // stationary point-predator only culls the fraction that heads onto its cell, exactly the coupling and
+        // point-hazard limits #146 recorded. What is proven is the SIGN sort and its dependence on
+        // distinguishability, not a saturated magnitude.
+        assert!(
+            prey_b > Fixed::from_ratio(1, 4),
+            "the prey bucket was driven to the approach pole (positive): got {}",
+            prey_b.to_f64_lossy()
+        );
+        assert!(
+            pred_b < Fixed::from_ratio(-1, 12),
+            "the predator bucket was driven to the avoid pole (negative): got {}",
+            pred_b.to_f64_lossy()
+        );
+        // The SORT is the separation between the two bucket weights: clearly positive under distinguishable
+        // emitters (approach the prey bucket, avoid the predator bucket), and far smaller in the control where
+        // the two emitters share one bucket so the sort cannot form (the predator bucket is never populated, and
+        // the shared bucket carries the muddled magnitude net disposition).
+        let sort = prey_b - pred_b;
+        let ctrl_sort = ctrl_prey_b - ctrl_pred_b;
+        assert!(
+            sort > Fixed::from_ratio(2, 5),
+            "under distinguishable emitters the two-way sort is clear (prey_b - pred_b): got {}",
+            sort.to_f64_lossy()
+        );
+        assert!(
+            sort > ctrl_sort + Fixed::from_ratio(1, 5),
+            "the distinguishable sort exceeds the indistinguishable control by a clear margin ({} vs {})",
+            sort.to_f64_lossy(),
+            ctrl_sort.to_f64_lossy()
+        );
+        // The predator bucket is the discriminator: in the control the predator wears the prey's covering, so its
+        // bucket (17) is never populated and its weight stays at its zero seed, while under distinguishable
+        // emitters it is driven negative. That gap is the sort the per-feature channel adds over the magnitude
+        // proxy.
+        assert!(
+            pred_b < ctrl_pred_b - Fixed::from_ratio(1, 12),
+            "the predator bucket is driven to avoid only when the predator is perceptually distinct ({} vs {})",
+            pred_b.to_f64_lossy(),
+            ctrl_pred_b.to_f64_lossy()
+        );
+        assert!(
+            n > 0,
+            "perceivers survived under the distinguishable regime"
+        );
+        // Determinism (Principle 3): the whole seeded experiment replays bit-for-bit.
+        let (prey_b2, pred_b2, _) = two_way_sort_arena(true, 8, false);
+        assert_eq!(
+            (prey_b, pred_b),
+            (prey_b2, pred_b2),
+            "the two-way-sort experiment is deterministic"
+        );
+    }
+
+    /// The DERIVED-TAXIS emergence arena (#151, the survival-floor proof): FOUNDER-ZERO beings (blank
+    /// controllers, no directed-locomotion weight) in a reserve-feeding spatial gradient accumulate UP-gradient
+    /// by the run-and-tumble floor ALONE, with no percept of the gradient's direction and no authored heading.
+    /// The floor re-orients each being stochastically at a rate modulated by its own reserve derivative (rising
+    /// lowers the rate so it persists, falling raises it so it re-orients), so a being that persists while its
+    /// reserve falls SLOWEST walks toward where the field feeds it best. Automatic INDISCRIMINATE uptake (the
+    /// gate's floor context): each tick a being absorbs energy from the substrate PRESENT at its cell, with NO
+    /// INGEST decision and NO source classification, higher in the WEST (low x) under `gradient` and uniform in
+    /// the matched flat control. Returns the population-mean x-displacement from the start cell: NEGATIVE (a
+    /// drift WEST, up-gradient) under the gradient, near ZERO (an unbiased walk) in the flat control. Nothing
+    /// about the direction is authored: in a flat field the walk is unbiased, exactly the emergence claim's
+    /// falsifier.
+    fn derived_taxis_arena(gradient: bool, ticks: u64, n: u64, verbose: bool) -> Fixed {
+        use crate::homeostasis::{HomeostaticAxisDef, HomeostaticRegistry};
+        use crate::locomotion::DerivedTaxisArming;
+        // The being's resting per-tick reserve fall (its ENERGY base drain). The floor's noise floor is grounded
+        // in exactly this quantity ("the largest per-tick resting reserve fall"), so the arming below reads the
+        // SAME value: the derived rates are the being's own data, not a fixture. It is SMALL (a slow metabolism)
+        // deliberately: the reserve then depletes slowly and stays LIVE (unrailed) across the whole measured
+        // window, so the interoceptive delta the floor reads stays a position-dependent signal rather than
+        // saturating at the empty rail (where delta goes to zero and the floor loses the gradient).
+        let energy_base_drain = Fixed::from_ratio(1, 1000);
+        let homeo = HomeostaticRegistry {
+            axes: vec![
+                // ENERGY drains slightly faster than the richest cell feeds it, so it declines everywhere but
+                // SLOWLY, staying above the empty rail across the measured window (its DELTA stays a live,
+                // position-dependent signal rather than saturating at zero); death never fires (floor far below
+                // zero), so the WALK is measured, not survival. The drain is uniform; only the position-dependent
+                // UPTAKE differs west to east, so the reserve falls slowest in the west.
+                HomeostaticAxisDef {
+                    id: ENERGY,
+                    name: "energy".to_string(),
+                    backing_component: Some(crate::physiology::ENERGY_DENSITY.to_string()),
+                    capacity_per_mass: Fixed::ONE,
+                    base_drain: energy_base_drain,
+                    exertion_drain: Fixed::ZERO,
+                    death_floor: Fixed::from_int(-1000),
+                    draw_set: Vec::new(),
+                },
+                HomeostaticAxisDef {
+                    id: TEMPERATURE,
+                    name: "temperature".to_string(),
+                    backing_component: None,
+                    capacity_per_mass: Fixed::ONE,
+                    base_drain: Fixed::ZERO,
+                    exertion_drain: Fixed::ZERO,
+                    death_floor: Fixed::from_int(-1000),
+                    draw_set: Vec::new(),
+                },
+            ],
+        };
+        let mut emb = Embodiment::new(
+            homeo.clone(),
+            AffordanceRegistry::dev_default(),
+            LocomotionParams::dev_default(),
+            0,
+            0x7A15_F100,
+        );
+        // Arm the run-and-tumble floor with the being's OWN reserve-swing noise floor (grounded in its resting
+        // per-tick fall, `energy_base_drain`). NO fixture: the floor DERIVES its rates from this scale and the
+        // being's own resting drain (`DerivedTaxisParams::derive`): resting_tumble_rate = resting_drain/noise_floor
+        // = 1 (a high baseline tumble, the correct run-and-tumble search), reserve_sensitivity = 1/noise_floor = 6,
+        // and the reward is centred on the being's resting drain (so a feeding heading reads positive). This is the
+        // gate's slice-3 check: the DERIVED calibration, not a hand-set fixture, must reproduce the emergence bias.
+        emb.set_derived_taxis(Some(DerivedTaxisArming {
+            reserve_noise_floor: energy_base_drain,
+        }));
+        let layout = emb.layout().clone();
+        // A large arena (64x64) with the founders co-located at the centre, so the walls are 32 cells away and the
+        // measured window is unbounded diffusion: the matched flat control stays near ZERO (no boundary pile-up to
+        // equilibrate against), the clean null. The gradient's per-cell slope is preserved, so the up-gradient
+        // bias is the same physics, now read against a genuinely unbiased control.
+        let start = Coord3::ground(32, 32);
+        let thermal = || BeingThermal {
+            setpoint: Fixed::from_int(310),
+            half_band: Fixed::from_int(30),
+            initial_temp: Fixed::from_int(310),
+        };
+        // Founders: BLANK controllers (founder-zero, no MOVE weight), so the controller decides no locomotion
+        // and the floor drives every being. Co-located at the centre.
+        for k in 0..n {
+            emb.add(
+                Walker::new(
+                    StableId(CREATURE_ID_TAG | (k + 1)),
+                    start,
+                    repro_body(),
+                    Homeostasis::from_mass(&homeo, Fixed::ONE),
+                    Physiology::dev_for_registry(&homeo),
+                    Controller::zeros(&layout),
+                ),
+                thermal(),
+            );
+        }
+        let params = crate::InferenceParams {
+            clamp: Fixed::from_int(50),
+            commit_threshold: Fixed::from_int(3),
+            margin: Fixed::from_int(1),
+        };
+        let world = World::new(params, params, crate::AccessWeights::from_pairs([]));
+        let field = Field::new(64, 64, vec![Fixed::from_int(310); 64 * 64]);
+        let mut runner = Runner::with_world_and_embodiment(field, calib(), world, emb);
+        // Automatic INDISCRIMINATE uptake by position (no INGEST decision, no source classification): each tick a
+        // being absorbs energy from the substrate at its cell. Under the gradient the uptake ramps from richest
+        // in the far west (x = 0) to poorest in the far east; in the flat control it is the uniform centre value,
+        // so no spatial gradient enters the reward and the walk has nothing to bias it. The max uptake (1/8) stays
+        // BELOW the resting drain (1/6), so the reserve never saturates and its delta stays a live signal.
+        let feed = |r: &mut Runner| {
+            for w in r.embodiment_mut().unwrap().walkers_mut() {
+                let x = w.coord().x;
+                let uptake = if gradient {
+                    // A STEEP central ramp: uptake falls from its west plateau (1/1250) at x <= 26 to zero at
+                    // x >= 38, passing through the flat control's value (1/2500) at the centre x = 32. Steep so a
+                    // single run-length meaningfully changes the felt uptake (the run-and-tumble bias needs a
+                    // sensible per-step gradient); the founders sit in this band and the plateaus bound it.
+                    let ramp = (38 - x).clamp(0, 12) as i64;
+                    Fixed::from_ratio(ramp, 12).mul(Fixed::from_ratio(1, 1250))
+                } else {
+                    Fixed::from_ratio(1, 2500) // the uniform centre value: the ramp's midpoint at x = 32
+                };
+                w.homeostasis.ingest(ENERGY, uptake);
+            }
+        };
+        let mean_disp = |r: &Runner| -> Fixed {
+            let emb = r.embodiment().unwrap();
+            let live: Vec<&Walker> = emb.walkers().iter().filter(|w| w.alive).collect();
+            if live.is_empty() {
+                return Fixed::ZERO;
+            }
+            let start_x = Fixed::from_int(32) + Fixed::from_ratio(1, 2);
+            let mut sum = Fixed::ZERO;
+            for w in &live {
+                sum += w.x - start_x;
+            }
+            sum.div(Fixed::from_int(live.len() as i32))
+        };
+        for t in 0..ticks {
+            runner.step();
+            feed(&mut runner);
+            if verbose && (t + 1) % 30 == 0 {
+                println!(
+                    "gradient={gradient} tick {}: mean_disp={:.3}",
+                    t + 1,
+                    mean_disp(&runner).to_f64_lossy()
+                );
+            }
+        }
+        mean_disp(&runner)
+    }
+
+    #[test]
+    fn derived_taxis_walk_biases_up_the_gradient_only_when_the_field_feeds_the_reserve() {
+        // #151/#152, the derived-taxis survival-floor emergence proof, now on the DERIVED calibration (the gate's
+        // slice-3 check): FOUNDER-ZERO beings (blank controllers) with NO directed-locomotion weight drift UP a
+        // reserve-feeding gradient by the run-and-tumble floor alone. The floor rates are NOT a fixture: they are
+        // DERIVED from the being's own metabolism (`DerivedTaxisParams::derive`), the resting tumble rate
+        // resting_drain/noise_floor = 1 and the reserve sensitivity 1/noise_floor = 1000, both read off the being's
+        // own base drain (which grounds its noise floor), and the reward is centred on that same resting drain (the
+        // sensory adaptation baseline), so a heading that feeds the reserve faster than resting reads positive and
+        // suppresses the tumble rate, and the being persists on it. The matched HELD CONTROL (a flat field: uniform
+        // uptake, no spatial gradient in the reward) leaves the walk unbiased, so the DIRECTION is shown to arise
+        // from the field and the reserve dynamics, not an authored heading. Nothing about the bias is authored: the
+        // polarity is the derived reward sign, the rates are the derived pair, and a flat field is unbiased.
+        //
+        // Measured at n = 120 founders, 150 ticks (the reserve stays LIVE across the window, never railing, so the
+        // interoceptive delta remains a position-dependent signal; verified by the verbose occupancy trace).
+        let grad = derived_taxis_arena(true, 150, 120, false);
+        let flat = derived_taxis_arena(false, 150, 120, false);
+        // Under the gradient the population drifts WEST (up-gradient), a strongly negative mean displacement (the
+        // measured value is about -1.9 cells; the bound is loose so the proof is the SIGN and the CONTRAST, not a
+        // tuned magnitude).
+        assert!(
+            grad < Fixed::from_int(-1),
+            "under a reserve-feeding gradient the founder-zero walk drifts up-gradient (west, negative \
+             displacement) by the derived floor alone: got {}",
+            grad.to_f64_lossy()
+        );
+        // The matched flat control (uniform uptake, no gradient in the reward): the same derived floor, seed,
+        // drain, and beat, but no spatial gradient, so the walk is unbiased and the mean displacement stays near
+        // zero (the measured value is about +0.1, diffusion noise, and crucially NOT a westward drift). The
+        // contrast is the proof that the FIELD and the reserve dynamics bias the walk, not an authored heading.
+        assert!(
+            flat.abs() < Fixed::from_ratio(1, 2),
+            "in a flat field (no reserve gradient) the derived-floor walk is unbiased, near zero displacement: \
+             got {}",
+            flat.to_f64_lossy()
+        );
+        assert!(
+            grad < flat - Fixed::from_int(1),
+            "the gradient walk drifts far more up-gradient than the flat control ({} vs {})",
+            grad.to_f64_lossy(),
+            flat.to_f64_lossy()
+        );
+        // Determinism (Principle 3): the whole seeded floor experiment replays bit-for-bit.
+        let grad2 = derived_taxis_arena(true, 150, 120, false);
+        assert_eq!(grad, grad2, "the derived-taxis experiment is deterministic");
     }
 }
