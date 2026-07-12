@@ -16,11 +16,14 @@ armed by no scenario.
 Arming means a Mirror run calls `step_interior_field` each geodynamic tick, which needs three inputs the
 wiring consumes but does not itself supply, each DERIVED or per-world DATA, none authored:
 
-1. **The mantle COMPOSITION datum** (per-world data, the input `derive_mantle_density` reads). For Mirror
-   this is Earth's primitive mantle, pyrolite: the Mg-Fe-Si-O system dominated by olivine, orthopyroxene,
-   clinopyroxene, and an aluminous phase (spinel or garnet with depth). The element-to-amount vector is a
-   per-world datum with a real-world basis and citation (the primitive-mantle / pyrolite estimate, McDonough
-   and Sun 1995, "The composition of the Earth"), surfaced reserved for the owner to confirm rather than
+1. **The mantle COMPOSITION datum** (per-world data, the input `derive_mantle_density` reads). The key is
+   `world.mantle_composition` (gate ruling, the single shared source with A: A's Stage-3c producer reads the
+   SAME key, plus a sibling `world.crustal_composition`, so the mantle density is derived once from one datum,
+   never two, and the interior adds no second mantle-composition datum). For Mirror the value is Earth's
+   primitive mantle, pyrolite: the Mg-Fe-Si-O system dominated by olivine, orthopyroxene, clinopyroxene, and
+   an aluminous phase (spinel or garnet with depth). The element-to-amount vector is a per-world datum with a
+   real-world basis and citation (the primitive-mantle / pyrolite estimate, McDonough and Sun 1995, "The
+   composition of the Earth"), reserved-with-basis-and-citation for the owner to confirm rather than
    fabricated. The petrology kernel minimizes this composition to its stable assemblage and reads the density,
    so roughly 3.3 grams per cubic centimetre falls out; no density is authored.
 
@@ -51,9 +54,11 @@ single gated move.
 
 ## Seams surfaced for the gate's ruling
 
-1. **The mantle composition datum.** I propose to supply Mirror's mantle composition as the pyrolite estimate
-   with its citation, reserved for the owner's confirmation (the element-to-amount vector, not a fabricated
-   density). Confirm the datum and its citation before I add it as world data.
+1. **The mantle composition datum: SETTLED (gate ruling).** The key is `world.mantle_composition`, the single
+   shared source A's Stage-3c producer also reads (plus a sibling `world.crustal_composition`), so the mantle
+   density derives once from one datum. The interior reads exactly `world.mantle_composition` and adds no
+   second datum. The value is Mirror's pyrolite composition (element-to-amount, McDonough and Sun 1995),
+   reserved-with-basis-and-citation for the owner's confirmation, no fabricated density.
 
 2. **The lithostatic-pressure self-consistency.** I propose the reference-pressure first pass plus a short
    fixed-point iteration (both derivations), bounded by a fixed iteration cap (a determinism bound, never an
