@@ -20,10 +20,13 @@
 //! [`crate::surface_transport::TransportKernelId`]. Off the run path until a genesis pass arms a driver, so
 //! declaring the kernels is byte-neutral.
 //!
-//! This slice is the first build-now kernel, GRAVITY-DOWNSLOPE ([`hillslope_diffuse`]), which sets the local
-//! slope the fluid-shear and solid-solvent drivers read.
+//! The build-now kernels land one at a time. GRAVITY-DOWNSLOPE ([`hillslope_diffuse`]) is the first, and it
+//! sets the local slope the fluid-shear and solid-solvent drivers read. FLUID-SHEAR ([`fluid_shear`]) is the
+//! second, the moving-fluid entrainment and transport driver, the SOURCE half of the fluvial budget that hands a
+//! conserved carried-load field to deposition (the sink, a later slice).
 
 use civsim_core::Fixed;
+use civsim_world::flood::priority_flood;
 use civsim_world::solve::{fixed_cap_solve, SolveOutcome};
 
 use crate::calibration::CalibrationError;
@@ -129,6 +132,188 @@ fn max_change_bits(a: &[Fixed], b: &[Fixed]) -> u64 {
         .unwrap_or(0)
 }
 
+/// The largest grid the fluid-shear kernel accepts, so a cell's drainage area (a count bounded by the cell
+/// total) converts to `Fixed` through `from_ratio(area, 1)` without the `i128 << 32` intermediate exceeding the
+/// `i64` mantissa. `2^31` cells is a 46340-square grid, far above any genesis pass, so the bound is a
+/// correctness guard, never a live limit.
+const MAX_FLUID_SHEAR_CELLS: usize = 1usize << 31;
+
+/// The result of one [`fluid_shear`] pass: the flow routing, the drainage area, the entrained mass each column
+/// gives up, and the sediment each cell carries downstream. The kernel is the SOURCE half of the fluvial budget:
+/// it does not lower the elevation ledger (the snapshot-apply reconciliation applies `entrained` as the column
+/// delta) and it does not settle the load (deposition, a later driver, is the sink that consumes `carried_load`).
+/// Its conservation is the exact bookkeeping identity the pass guarantees: the total `entrained` mass equals the
+/// total `carried_load` arriving at the drainage outlets, so no mass is created or lost while it is in transit.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FluidShearPass {
+    /// The downstream receiver of each cell (from `priority_flood`); an outlet receives itself.
+    pub receiver: Vec<usize>,
+    /// The drainage area of each cell, the count of cells draining through it (itself included), the discharge
+    /// proxy `A` the transport law reads. Uniform runoff (each cell contributes one unit); a spatially-varying
+    /// runoff is the same accumulation over a per-cell runoff field, a data extension, not a rewrite.
+    pub drainage_area: Vec<i64>,
+    /// The mass each column gives up to entrainment this pass (`E_i`), the amount the reconciliation lowers the
+    /// column by. Non-negative and capped at the column's drop to its receiver (the base-level guard).
+    pub entrained: Vec<Fixed>,
+    /// The sediment each cell carries downstream: its own entrained mass plus every upstream cell's, accumulated
+    /// along the receivers. The value at an outlet is the total sediment its basin delivers, the load deposition
+    /// settles. Summing over the outlets recovers the total entrained mass exactly (the conservation identity).
+    pub carried_load: Vec<Fixed>,
+}
+
+/// Accumulate a per-cell quantity downstream along the `receiver` forest: the returned value at each cell is its
+/// own initial value plus every upstream cell's, gathered along the flow network. Deterministic and order-
+/// independent by construction (Principle 3, Principle 10): it processes cells in Kahn topological order (a cell
+/// is folded into its receiver only once ALL of its own contributors are folded in, so its value is final at
+/// that point), and the fold is a commutative, exact `Add`, so the result is a pure function of `initial` and
+/// `receiver` regardless of the ready-queue order. The receiver forest has no cycle (a `priority_flood`
+/// guarantee), so every cell is processed exactly once.
+fn accumulate_downstream<T>(initial: Vec<T>, receiver: &[usize]) -> Vec<T>
+where
+    T: Copy + std::ops::Add<Output = T>,
+{
+    let n = receiver.len();
+    let mut indegree = vec![0usize; n];
+    for (i, &r) in receiver.iter().enumerate() {
+        if r != i {
+            indegree[r] += 1;
+        }
+    }
+    let mut acc = initial;
+    // The ridge cells (nothing drains into them) are the roots of the topological order, collected in index
+    // order so the processing is a fixed, reproducible sequence.
+    let mut ready: Vec<usize> = (0..n).filter(|&i| indegree[i] == 0).collect();
+    let mut head = 0;
+    while head < ready.len() {
+        let c = ready[head];
+        head += 1;
+        let r = receiver[c];
+        if r != c {
+            acc[r] = acc[r] + acc[c];
+            indegree[r] -= 1;
+            if indegree[r] == 0 {
+                ready.push(r);
+            }
+        }
+    }
+    acc
+}
+
+/// The FLUID-SHEAR driver: a moving fluid (a condensed liquid or an ambient gas) exerting boundary shear that
+/// entrains grains and carries them downstream, the SOURCE half of the fluvial mass budget. One kernel spans the
+/// liquid and the gas cases: the exact-root stream-power form is identical, and the liquid-versus-gas difference
+/// lives in the reserved data (a dense liquid entrains at a lower threshold than a thin gas) and in the routing
+/// forcing, never in a hardcoded fluid branch. This pass uses the gravity-and-topography routing
+/// (`priority_flood`), so it is the fluvial (and gravity-driven density-current) case; the wind-routed aeolian
+/// case is the same kernel with a pressure-driven routing forcing, deferred until the atmospheric-flow field
+/// lands. Keying the threshold on the fluid's property data admits the alien: a Titan methane river is this
+/// kernel with a different reserved threshold and fluid-density property, not a rewrite.
+///
+/// The transport law is the exact-root stream-power incision, built entirely in the GPU-canon exact-root
+/// exponents (no arbitrary fractional power). Each cell's shear proxy is `sqrt(A) * S`: the drainage area `A` (a
+/// discharge proxy under uniform runoff) under the exact integer `Fixed::sqrt` (the resolved half power), times
+/// the local slope `S` to the receiver (the exact first power). Entrainment happens only above the reserved
+/// threshold `theta` (the Shields or Bagnold critical shear, in the shear-proxy units), and the entrained mass is
+/// `erodibility * (sqrt(A) * S - theta)` capped at the column's drop to its receiver (the base-level guard, so
+/// erosion never inverts the slope and opens a new pit). The entrained mass is routed downstream into
+/// `carried_load`, and the total carried to the outlets equals the total entrained (the conservation identity).
+///
+/// The reserved values, surfaced-with-basis and never fabricated: `erodibility` (the stream-power coefficient,
+/// an empirical rate with a notoriously wide error band, per fluid and lithology, calibrated against measured
+/// incision rates) and `theta` (the entrainment threshold, the Shields or Bagnold critical shear folded into the
+/// shear-proxy units, per fluid, so the liquid-versus-gas difference is data). Both are read from the driver
+/// row's parameters by name on the run path, failing loud on an unset value. Both must be non-negative; a
+/// negative value is refused fail-loud ([`CalibrationError::BadValue`]), never a silent clamp. `zero` erodibility
+/// or an unreachable threshold is a valid inert opt-out (the pass entrains nothing).
+///
+/// Deterministic fixed-point arithmetic (Principle 3); the routing, the accumulation, and the law are pure
+/// functions of the inputs and worker-invariant (Principle 10). `elevation` is the row-major field of
+/// `width * height` columns; a length mismatch or an over-large grid is refused fail-loud.
+pub fn fluid_shear(
+    elevation: &[Fixed],
+    width: usize,
+    height: usize,
+    erodibility: Fixed,
+    theta: Fixed,
+) -> Result<FluidShearPass, CalibrationError> {
+    if erodibility < Fixed::ZERO {
+        return Err(CalibrationError::BadValue {
+            id: "surface.fluid_shear_erodibility".to_string(),
+            detail: format!(
+                "the stream-power erodibility must be non-negative; got {}",
+                erodibility.to_f64_lossy()
+            ),
+        });
+    }
+    if theta < Fixed::ZERO {
+        return Err(CalibrationError::BadValue {
+            id: "surface.fluid_shear_entrainment_threshold".to_string(),
+            detail: format!(
+                "the entrainment threshold must be non-negative; got {}",
+                theta.to_f64_lossy()
+            ),
+        });
+    }
+    let n = width.saturating_mul(height);
+    if elevation.len() != n {
+        return Err(CalibrationError::BadValue {
+            id: "surface.fluid_shear_grid".to_string(),
+            detail: format!(
+                "the elevation length {} must equal width*height {}",
+                elevation.len(),
+                n
+            ),
+        });
+    }
+    if n >= MAX_FLUID_SHEAR_CELLS {
+        return Err(CalibrationError::BadValue {
+            id: "surface.fluid_shear_grid".to_string(),
+            detail: format!(
+                "the grid cell count {n} must be below 2^31 so a drainage area converts to Fixed exactly"
+            ),
+        });
+    }
+
+    // Route the flow: priority_flood over the raw fixed-point bits (a monotone key, so the ordering is the
+    // elevation ordering) gives each cell's downstream receiver, filling pits so flow is defined everywhere.
+    let bits: Vec<i64> = elevation.iter().map(|z| z.to_bits()).collect();
+    let receiver = priority_flood(width, height, &bits).receiver;
+
+    // The drainage area: accumulate a unit per cell downstream (the discharge proxy under uniform runoff).
+    let drainage_area = accumulate_downstream(vec![1i64; n], &receiver);
+
+    // The entrainment per cell: erodibility * (sqrt(A) * S - theta), above the threshold, capped at the drop to
+    // the receiver so erosion never inverts the slope.
+    let mut entrained = vec![Fixed::ZERO; n];
+    for i in 0..n {
+        let r = receiver[i];
+        // The slope to the receiver on the original terrain; zero at an outlet and inside a filled pit (a lake
+        // does not incise), so entrainment there is zero.
+        let drop = elevation[i] - elevation[r];
+        if drop <= Fixed::ZERO {
+            continue;
+        }
+        let area = Fixed::from_ratio(drainage_area[i], 1);
+        let shear = area.sqrt() * drop; // sqrt(A) * S, both exact-root exponents
+        if shear <= theta {
+            continue;
+        }
+        let capacity = erodibility * (shear - theta);
+        // The base-level guard: never erode below the receiver in one pass (never open a new pit).
+        entrained[i] = if capacity < drop { capacity } else { drop };
+    }
+
+    // Route the entrained mass downstream: each cell carries its own plus all upstream entrainment to its outlet.
+    let carried_load = accumulate_downstream(entrained.clone(), &receiver);
+
+    Ok(FluidShearPass {
+        receiver,
+        drainage_area,
+        entrained,
+        carried_load,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -217,5 +402,151 @@ mod tests {
         let b = hillslope_diffuse(z, 4, 3, Fixed::from_ratio(1, 5), 40, 2).expect("valid");
         assert_eq!(a.state, b.state);
         assert_eq!(a.iterations, b.iterations);
+    }
+
+    // A west-to-east ramp: elevation equals the column x, so flow drains toward the low west edge and the
+    // interior cells have a positive slope to their receivers.
+    fn west_ramp(width: usize, height: usize) -> Vec<Fixed> {
+        (0..width * height)
+            .map(|i| Fixed::from_int((i % width) as i32))
+            .collect()
+    }
+
+    fn outlet_load(pass: &FluidShearPass) -> Fixed {
+        (0..pass.receiver.len())
+            .filter(|&i| pass.receiver[i] == i)
+            .map(|i| pass.carried_load[i])
+            .fold(Fixed::ZERO, |acc, v| acc + v)
+    }
+
+    #[test]
+    fn a_flat_terrain_entrains_nothing() {
+        // No slope, no shear: a flat field entrains and carries no mass.
+        let z = vec![Fixed::from_int(7); 9];
+        let pass = fluid_shear(&z, 3, 3, Fixed::from_int(1), Fixed::ZERO).expect("valid");
+        assert!(pass.entrained.iter().all(|&e| e == Fixed::ZERO));
+        assert!(pass.carried_load.iter().all(|&c| c == Fixed::ZERO));
+    }
+
+    #[test]
+    fn the_entrained_mass_all_reaches_the_outlets_the_conservation_identity() {
+        // A ramp entrains on the interior, and every entrained unit is carried downstream to an outlet, so the
+        // total entrained equals the total delivered at the drainage outlets (no mass created or lost in transit,
+        // the load-bearing conservation identity of the source half).
+        let (w, h) = (4, 4);
+        let z = west_ramp(w, h);
+        let pass = fluid_shear(&z, w, h, Fixed::from_int(1), Fixed::ZERO).expect("valid");
+        let total_entrained = total(&pass.entrained);
+        assert_eq!(
+            total_entrained,
+            outlet_load(&pass),
+            "all entrained mass reaches the outlets"
+        );
+        assert!(
+            total_entrained > Fixed::ZERO,
+            "the slope entrains some mass"
+        );
+        // A carried load is never below the cell's own entrainment (it is its own plus the upstream load).
+        for i in 0..w * h {
+            assert!(pass.carried_load[i] >= pass.entrained[i]);
+            assert!(pass.entrained[i] >= Fixed::ZERO);
+        }
+    }
+
+    #[test]
+    fn every_cell_drains_to_exactly_one_outlet_so_the_areas_partition_the_grid() {
+        // The drainage area of the outlets partitions the grid: every cell drains to exactly one boundary outlet,
+        // so the outlet areas sum to the cell total (the check on the downstream accumulation).
+        let (w, h) = (5, 4);
+        let z = west_ramp(w, h);
+        let pass = fluid_shear(&z, w, h, Fixed::from_int(1), Fixed::ZERO).expect("valid");
+        let outlet_area: i64 = (0..w * h)
+            .filter(|&i| pass.receiver[i] == i)
+            .map(|i| pass.drainage_area[i])
+            .sum();
+        assert_eq!(
+            outlet_area as usize,
+            w * h,
+            "the outlet areas partition the grid"
+        );
+        // Every cell's area is at least one (itself) and at most the whole grid.
+        assert!(pass
+            .drainage_area
+            .iter()
+            .all(|&a| a >= 1 && a as usize <= w * h));
+    }
+
+    #[test]
+    fn a_bowl_does_not_incise_a_filled_pit_has_no_slope_to_entrain() {
+        // A rim at 5 around a central pit of 0: the pit fills and drains up over the rim, so its slope to the
+        // receiver on the original terrain is negative (a lake does not incise), and the flat rim has no slope,
+        // so nothing entrains.
+        let z = vec![
+            Fixed::from_int(5),
+            Fixed::from_int(5),
+            Fixed::from_int(5),
+            Fixed::from_int(5),
+            Fixed::ZERO,
+            Fixed::from_int(5),
+            Fixed::from_int(5),
+            Fixed::from_int(5),
+            Fixed::from_int(5),
+        ];
+        let pass = fluid_shear(&z, 3, 3, Fixed::from_int(1), Fixed::ZERO).expect("valid");
+        assert_eq!(
+            pass.entrained[4],
+            Fixed::ZERO,
+            "the filled pit does not incise"
+        );
+        assert!(pass.entrained.iter().all(|&e| e == Fixed::ZERO));
+    }
+
+    #[test]
+    fn a_high_threshold_entrains_nothing() {
+        // Above the reserved entrainment threshold nothing moves: a threshold beyond any cell's shear proxy
+        // leaves the field inert (the Shields/Bagnold critical-shear cutoff).
+        let (w, h) = (4, 4);
+        let z = west_ramp(w, h);
+        let pass = fluid_shear(&z, w, h, Fixed::from_int(1), Fixed::from_int(1000)).expect("valid");
+        assert!(pass.entrained.iter().all(|&e| e == Fixed::ZERO));
+    }
+
+    #[test]
+    fn zero_erodibility_is_an_inert_opt_out() {
+        // A zero erodibility entrains nothing: a valid inert opt-out, not a refused value.
+        let (w, h) = (4, 4);
+        let z = west_ramp(w, h);
+        let pass = fluid_shear(&z, w, h, Fixed::ZERO, Fixed::ZERO).expect("valid");
+        assert!(pass.entrained.iter().all(|&e| e == Fixed::ZERO));
+        assert!(outlet_load(&pass) == Fixed::ZERO);
+    }
+
+    #[test]
+    fn a_negative_reserved_value_is_refused_fail_loud() {
+        let z = west_ramp(3, 3);
+        assert!(
+            fluid_shear(&z, 3, 3, Fixed::from_int(-1), Fixed::ZERO).is_err(),
+            "a negative erodibility is refused"
+        );
+        assert!(
+            fluid_shear(&z, 3, 3, Fixed::from_int(1), Fixed::from_int(-1)).is_err(),
+            "a negative threshold is refused"
+        );
+    }
+
+    #[test]
+    fn a_length_mismatch_is_refused_fail_loud_for_fluid_shear() {
+        let z = vec![Fixed::ZERO; 5];
+        assert!(fluid_shear(&z, 3, 3, Fixed::from_int(1), Fixed::ZERO).is_err());
+    }
+
+    #[test]
+    fn the_fluid_shear_pass_is_a_pure_function_of_its_inputs() {
+        // Same inputs, bit-identical routing, area, entrainment, and carried load (Principle 3, Principle 10).
+        let (w, h) = (5, 4);
+        let z = west_ramp(w, h);
+        let a = fluid_shear(&z, w, h, Fixed::from_int(2), Fixed::from_ratio(1, 2)).expect("valid");
+        let b = fluid_shear(&z, w, h, Fixed::from_int(2), Fixed::from_ratio(1, 2)).expect("valid");
+        assert_eq!(a, b);
     }
 }

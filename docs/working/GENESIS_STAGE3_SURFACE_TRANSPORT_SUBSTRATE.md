@@ -147,14 +147,22 @@ not a modeled slip surface.
 The FLUID-SHEAR driver is a moving fluid, a condensed liquid or an ambient gas, exerting boundary shear that
 entrains and transports grains. Its law form is an entrainment threshold (Shields for a dense viscous fluid, Bagnold
 for a thin one) and a transport capacity above threshold, with the flowing fluid routed over the terrain by
-priority_flood. Whether one threshold-and-capacity form spans both the liquid and the gas grain-Reynolds regimes, or
-switches with the fluid property key-set (so a Titan methane river and a Venus dense-carbon-dioxide wind are one row
-with a regime branch or two rows), is a decision the grounding leaves to the build, keyed on the fluid data rather
-than on a named fluid. The capacity form is built in the exact-root exponents (a half power on discharge is a sqrt, a
-first power on slope is linear), CPU-deterministic and GPU-portable now, with the general arbitrary-exponent form
-deferred to the GPU-canon primitive. It keys on the fluid property key-set, the shear or discharge, the mobile grain
-size, and gravity, entrains from the column solid and carries mass as suspended and bed load to deposition. Its 2.5D
-limit is that channel form below the surface (an undercut bank, a canyon overhang) is not represented.
+priority_flood. The build resolved the liquid-versus-gas question the grounding left open (whether one form spans
+both grain-Reynolds regimes or switches with the fluid data): it is ONE kernel, one row per fluid, and the
+liquid-versus-gas difference lives in the reserved data (a dense liquid entrains at a lower threshold than a thin
+gas, so the threshold and the erodibility are per-fluid reserved values read from the property key-set) and in the
+routing forcing, never in a hardcoded fluid branch. A Titan methane river and a Venus dense-carbon-dioxide wind are
+the same kernel with different reserved thresholds and fluid-density properties, so the alien is a data row. What
+differs between the fluvial and the aeolian case is the routing forcing: the gravity-and-topography routing
+(priority_flood) is built now, so the built pass is the fluvial (and gravity-driven density-current) case, and the
+wind-routed aeolian case is the same kernel with a pressure-driven routing forcing, deferred until the
+atmospheric-flow field lands. The capacity form is built in the exact-root exponents (a half power on discharge is a
+sqrt via the exact integer `Fixed::sqrt`, a first power on slope is linear), CPU-deterministic and GPU-portable now,
+with the general arbitrary-exponent form deferred to the GPU-canon primitive. It keys on the fluid property
+key-set, the shear or discharge, the mobile grain size, and gravity, entrains from the column solid and carries
+mass as suspended and bed load to deposition, which the built pass routes downstream as a conserved carried-load
+field (the source half) that the deposition sink consumes. Its 2.5D limit is that channel form below the surface
+(an undercut bank, a canyon overhang) is not represented.
 
 The THERMAL-CHEMICAL ALTERATION driver alters the bedrock in place, and is the source the transport drivers
 presuppose. It has two limbs: chemical dissolution and weathering, which removes mass into the dissolved-load
