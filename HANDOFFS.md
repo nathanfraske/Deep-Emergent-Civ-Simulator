@@ -3146,3 +3146,20 @@ STATE: CLEAN REST POINT. Materials oracle foundation slice DONE + all my seams c
 
 BRANCH claude/materials-oracle-modulus-slice tip a254fd9: ewald.rs (Madelung kernel 1e-4 + potential matrix + anisotropy-validated), periodic.rs/toml (atomization/IE/EA [M] columns), qeq.rs (chi/eta + unbound limit + shielded SCC-DFTB QEq solve, [E]), lattice_modulus.rs (carve-2 Born-Lande [E] + oxide bias band; E_coh/V screen tier), materials_oracle.rs (E_coh/V quick-screen tier), mechanical_floor.toml (mat.elastic_modulus retirement flag). Local Provenance placeholder enums in materials_oracle.rs + qeq ChiEtaProvenance -> swap to A's enforced enum when register lands. Do NOT touch A's genesis/register/generator-arch or C's lanes.
 WHEN A'S REGISTER LANDS: swap (a) materials_oracle::Provenance enum, (b) qeq::ChiEtaProvenance, (c) any [E]/[D]/[M] doc tags -> A's enforced seven-tag enum. That's the only pre-merge change.
+
+---
+
+## 2026-07-12 (Agent B) - Materials oracle: OWNER RULED THE PREMISE. Rung 1 CONFIRMED unchanged (#182)
+
+Owner ruled the finding-1 premise (gate relay; owner doc origin/claude/materials-breathing-resolution, docs/working/MATERIALS_BREATHING_RESOLUTION.md). HEADLINE: ship rung 1 EXACTLY as settled - the [E] estimator with the documented bias, NaCl in-band, periclase flagged. NO CHANGE to my slice. Validated as correct rung 1. My honest negative was RIGHT.
+
+The resolution DISSOLVES the charge question rather than answering it:
+- "The" charge of an ion in a crystal is NOT an observable. MgO: Bader +1.7, Mulliken +1.2-1.5, fitted-QEq +1.6, Born effective charge (the ONLY measured one, via LO-TO phonon splitting) ~+1.96-2.0 (~formal). 0.8e spread, no ground truth. So +1.6 is a property of a fitted energy model, NOT of MgO - there was never a derive-first path to it. My QEq over-ionization was correct behaviour toward a non-existent target. Vindicates the refusal to fit.
+- ROOT = one banked boolean EA2 < 0: free O2- does not exist (O second electron affinity ~-8 eV negative), so the crystal anion is CREATED by the Madelung potential and BREATHES. That boolean forecasts a priori: rung-1 oxide stiffness, the Cauchy violation (MgO C12=95 vs C44=156, 1.6x; NaCl passes), and the inversion of the Clementi-Raimondi escalation (more accurate free-ion data doubles down on the invalid free-ion picture). My shielded-vs-bare-Ewald stability catch was the same lesson.
+- The three refinements COLLAPSE into ONE representation upgrade = RUNG 2 (parameter-free): Gordon-Kim/PIB (potential-induced breathing, geophysicists 1980s for these oxides). Replace point charges with overlapping stabilized densities -> the charge question EVAPORATES (no charge parameter in the density picture). Born-Mayer form DERIVED from density-tail overlap; breathing is the ionic Cauchy breaker. Triptych: embedding(metals) + Keating(covalent) + breathing(Madelung-stabilized ionics).
+
+GATE'S DEFERRED DECISION (owner left to gate): the optional breathing-subclass bias factor ~0.60 [M class] is DEFERRED, not added now (no consumer reads the dormant oxide modulus; rung 2 supersedes it; even the cheap factor needs an EA2 dispatcher not yet on the floor). Ready cheap bridge IF R-COEVOLVE (mantle elasticity) needs the accurate oxide modulus before rung 2. Until then my honest documented-bias estimator STANDS.
+
+FUTURE WORK (specified-not-built, sequenced when a consumer needs the accurate oxide modulus, slots with the shear arc): rung-2 Gordon-Kim/PIB breathing build, the EA2 dispatcher (floor addition), the triptych shear terms.
+
+STATE: NO ACTION. Rest continues. My slice UNCHANGED and complete, held only for the provenance-enum swap on A's register (the single pivot: also unblocks A's 3c -> my interior arming #178). Task #36 materials oracle COMPLETE at [E] rung-1. Task #35 interior arming HELD (main 48400b0, no A Stage-3c). Branch tip e248bce. Do NOT touch A's genesis/register/generator-arch or C's lanes. Signals covered by #182 PR subscription + self check-in (~00:10 UTC).
