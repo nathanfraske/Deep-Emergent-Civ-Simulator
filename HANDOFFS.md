@@ -2959,3 +2959,26 @@ SLICE 2 (momentum.rs): momentum_fan, isotropic CORDIC azimuths through the integ
 BRANCH claude/momentum-vector-unification (tip ed49e3e), rebuilt onto merged main (1ac525a, #177 in) via MERGE COMMIT not rebase (force-push is gated; use merge+cherry-pick to avoid history rewrite). Byte-neutral 40fe8a72. All gates clean.
 
 STATE: slice 2 signaled (comment 4952788137), awaiting gate ruling. NEXT: on gate go, the arc's mechanism is complete (integrator + fan). The Decision-2 RETIRE (fold runout/ballistic out of the driver path, keep parabola as test oracle) is HELD for A's arming lane (A on priority-0 provenance-ledger per gate) - do NOT build it until the gate signals A resumed arming; it couples to A's TransportKernelId becoming ONE unified transport-integrator arm. main advanced to #180 (Agent B physics cleanup, no file overlap, routine merge at PR-merge time). Do NOT touch A's genesis/surface_transport files or B's lanes.
+
+---
+
+## 2026-07-12 (Agent B) - Materials oracle slice 1 BUILT (#182): composition-derived elastic modulus
+
+Gate approved the datum (the per-element atomization-enthalpy [M] column) and directed "Build it: the Hess E_coh, the estimator modulus, the VRH aggregate, byte-neutral, gate per push." Built and pushed on claude/materials-oracle-modulus-slice (tip e8aac76, off main 64da409). Signaled #182 comment 4952938941.
+
+WHAT: Stage-6 property emission - a material's elastic modulus DERIVED from its stable mineral assemblage rather than authored per rock type, the elastic sibling of the density crustal_density already emits from the same assemblage. Retires the authored mat.elastic_modulus toward Principle 8.
+
+THE FLOOR INPUT (gate-approved [M] column): periodic.rs + periodic_table.toml carry a new atomization_enthalpy column - optional, absent-not-zero, cited-with-source on the standard-molar-entropy discipline (parse-and-require-citation or None). Populated H C N O Na Mg Al Si P S K Ca Ti Fe from CODATA Key Values for Thermodynamics (Cox, Wagman & Medvedev, 1989), the standard enthalpy of formation of the monatomic gas = the element's cohesive energy. INPUT the derivation composes, never authored output. Wired through Element struct + ElementDef serde + into_element (mirrors the entropy optional-parse block exactly).
+
+THE DERIVATION (crates/physics/src/materials_oracle.rs, NEW module, dormant):
+- phase_cohesive_energy: Hess E_coh = sum(atomization_i * count_i) - dH_f, [D] from [M] inputs.
+- phase_elastic_modulus: E_coh/V estimator [E], GPa directly (1 kJ/cm^3 = 1 GPa).
+- assemblage_elastic_modulus: volume-weighted Voigt-Reuss-Hill aggregate, emits PropertyEstimate {value, band, provenance}. band = derived Voigt-Reuss half-gap (zero for single phase). Provenance = LOCAL seven-tag placeholder enum, swap to A's enforced register enum when Phase 1 lands.
+
+RETIREMENT: mat.elastic_modulus flagged retirement target in mechanical_floor.toml (7-line comment), KEPT feeding live consumer compose elastic_recoil_energy, retires when consumer reads derived modulus.
+
+RESERVED (surfaced not baked): per-phase ESTIMATOR SCATTER band, basis = empirical spread of M/(E_coh/V) across bonding classes in estimator-calibration lit, owner sets + validates vs measured moduli, then emitted band widens to max(VRH gap, estimator band).
+
+VERIFIED: byte-neutral (sim world_determinism + invariants + determinism_harness pins all pass; nothing wired reads new data). 6 oracle tests (quartz E_coh 1859.06, periclase 997.88 kJ/mol hand-calc; quartz modulus ~82 GPa; single-phase zero band; two-phase forsterite+quartz VR bracketing; data-gap None). Full physics suite 173+ green. fmt+clippy clean. Floor registry regenerated (124 axes unchanged, line-shifts only). Five mandatory lenses reasoned by hand (offered full blind panel before merge/arm).
+
+STATE: slice signaled, awaiting gate review/merge. NEXT on gate go: (1) Hashin-Shtrikman refinement (Stage 7) OR next property (melting point / strength ceiling / surface energy) off the same E_coh; (2) swap Provenance placeholder when A's register enum lands. Task #35 (interior arming) still HELD for A's 3c producer. Do NOT touch A's genesis/register files or C's momentum/world lanes.

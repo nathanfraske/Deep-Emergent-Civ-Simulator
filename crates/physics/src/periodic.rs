@@ -549,31 +549,30 @@ impl ElementDef {
         // The atomization enthalpy is optional, on the same discipline as the entropy: if present it must
         // parse and carry its own citation (a measured `[M]` cohesive-energy datum, real-with-source).
         let atomization_raw = self.atomization_enthalpy.trim();
-        let (atomization_enthalpy, atomization_decimal, atomization_source) = if atomization_raw
-            .is_empty()
-        {
-            (None, None, None)
-        } else {
-            let value = Fixed::from_decimal_str(atomization_raw).map_err(|detail| {
-                PeriodicError::BadValue {
-                    symbol: self.symbol.clone(),
-                    detail: format!("atomization_enthalpy: {detail}"),
-                }
-            })?;
-            if self.atomization_source.trim().is_empty() {
-                return Err(PeriodicError::BadValue {
+        let (atomization_enthalpy, atomization_decimal, atomization_source) =
+            if atomization_raw.is_empty() {
+                (None, None, None)
+            } else {
+                let value = Fixed::from_decimal_str(atomization_raw).map_err(|detail| {
+                    PeriodicError::BadValue {
+                        symbol: self.symbol.clone(),
+                        detail: format!("atomization_enthalpy: {detail}"),
+                    }
+                })?;
+                if self.atomization_source.trim().is_empty() {
+                    return Err(PeriodicError::BadValue {
                     symbol: self.symbol.clone(),
                     detail:
                         "atomization_enthalpy is set but atomization_source (its citation) is empty"
                             .to_string(),
                 });
-            }
-            (
-                Some(value),
-                Some(atomization_raw.to_string()),
-                Some(self.atomization_source.trim().to_string()),
-            )
-        };
+                }
+                (
+                    Some(value),
+                    Some(atomization_raw.to_string()),
+                    Some(self.atomization_source.trim().to_string()),
+                )
+            };
         Ok(Element {
             symbol: self.symbol,
             name: self.name,
