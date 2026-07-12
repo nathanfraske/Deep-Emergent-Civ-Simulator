@@ -40,6 +40,8 @@ use civsim_core::Fixed;
 use civsim_physics::laws;
 use civsim_world::solve::{fixed_cap_solve, SolveOutcome};
 
+use crate::material::{GeodynamicColumn, GeodynamicField};
+
 /// The resident state of one interior column the convection solve evolves: its temperature and whether
 /// convection has begun. The convection flag is the one-way Rayleigh-onset latch (once the Rayleigh number
 /// has crossed the critical value it stays set), so the state records that the column has entered the
@@ -89,6 +91,9 @@ pub struct ColumnParams {
     pub v_max: Fixed,
     /// The representable conductive-flux cap (an engine bound).
     pub flux_max: Fixed,
+    /// The representable convective-stress cap (an engine bound), the ceiling on the driving stress the
+    /// lid-mobilization read compares to `mat.yield_strength`.
+    pub stress_max: Fixed,
     /// The tick duration.
     pub dt: Fixed,
 }
@@ -149,6 +154,67 @@ pub fn convection_step(state: &ColumnState, p: &ColumnParams) -> ColumnState {
     ColumnState {
         temperature,
         convecting,
+    }
+}
+
+/// The continuous interior read-outs of one column, the CONTINUOUS state the resident contract stores (gate
+/// ruling, #176): the stepped interior temperature, the Rayleigh number (the convective vigor a consumer
+/// reads to derive whether the column convects), and the convective driving stress (the lid-mobilization
+/// quantity). No discrete "convecting" flag is carried: the discrete condition is derived from the Rayleigh
+/// number against the critical value at each consumer site, so convection can begin and, on a cooling world,
+/// cease.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ColumnReadout {
+    /// The stepped interior temperature (K).
+    pub temperature: Fixed,
+    /// The Rayleigh number (dimensionless), the continuous convective vigor.
+    pub rayleigh: Fixed,
+    /// The convective driving stress (Pa) the interior flow exerts on the base of the lithosphere.
+    pub convective_stress: Fixed,
+}
+
+/// Read the continuous interior quantities of a column and its stepped temperature, composing the same floor
+/// law-forms [`convection_step`] threads, plus [`civsim_physics::laws::convective_stress`] for the
+/// lid-driving stress. The Rayleigh number and the stress are evaluated at the input state (the buoyancy the
+/// step responds to), and the temperature is the stepped result, so the three form the column's continuous
+/// state going out of the tick. Deterministic fixed-point.
+pub fn column_readout(state: &ColumnState, p: &ColumnParams) -> ColumnReadout {
+    let delta_t = state.temperature - p.reference_temperature;
+    let delta_rho = laws::thermal_density_anomaly(p.density, p.thermal_expansion_ppm, delta_t);
+    let rayleigh = laws::rayleigh_number(
+        delta_rho,
+        p.gravity,
+        p.depth,
+        p.viscosity,
+        p.thermal_diffusivity,
+        p.ra_max,
+    );
+    let velocity = laws::stokes_velocity(delta_rho, p.gravity, p.radius, p.viscosity, p.v_max);
+    // The shear length is the thermal BOUNDARY LAYER thickness, DERIVED (gate ruling, #176): the boundary
+    // layer thins with convective vigor as `depth * Ra^(-1/3)`, so a vigorous mantle (Ra of order 1e6) shears
+    // over a layer about a hundredth of its depth, concentrating the driving stress. The cube root is the
+    // deterministic fixed-point `Fixed::powf(1/3)` the merged Sherwood and surface-tension laws already use
+    // (task #45 is a later GPU-shader-parity refinement of `powf`, not a blocker for this CPU derivation, and
+    // the interior is a deep-time cold path). Written as `depth / Ra^(1/3)` (`powf` takes a positive
+    // exponent), clamped to at most the layer depth (a boundary layer cannot exceed its own layer, a geometric
+    // bound) and falling back to the depth when Ra is non-positive (no convection, where the stress is zero
+    // regardless).
+    let ra_cube_root = rayleigh.powf(Fixed::from_ratio(1, 3));
+    let length_scale = if ra_cube_root > Fixed::ZERO {
+        p.depth
+            .checked_div(ra_cube_root)
+            .unwrap_or(p.depth)
+            .min(p.depth)
+    } else {
+        p.depth
+    };
+    let convective_stress =
+        laws::convective_stress(p.viscosity, velocity, length_scale, p.stress_max);
+    let next = convection_step(state, p);
+    ColumnReadout {
+        temperature: next.temperature,
+        rayleigh,
+        convective_stress,
     }
 }
 
@@ -226,6 +292,98 @@ pub fn secular_history(
     state
 }
 
+/// Populate one column's INTERIOR fields on A's [`GeodynamicColumn`] contract from the interior chain,
+/// SNAPSHOT-APPLY (gate ruling, #176): read the start-of-tick `snapshot` column and return the end-of-tick
+/// column. The interior reads only the snapshot (its resident `temperature` and the surface lane's
+/// `crustal_density`), so whichever lane evaluates first reads the same values and the boundary is
+/// order-independent, no cross-lane evaluation order pinned. The interior writes its continuous state
+/// (`temperature`, `rayleigh`, `convective_stress`) and the `isostatic_elevation` it derives by floating the
+/// surface-written crust on the world's mantle; the surface lane's own fields pass through unchanged. A
+/// missing density or thickness yields the zero-default elevation (the absence convention), never a
+/// fabricated one.
+///
+/// `mantle_density` is DERIVED, never authored (gate ruling from the owner, #176): it is A's petrology kernel
+/// [`derive_mantle_density`] over the world's mantle COMPOSITION at the mantle's temperature and pressure, so
+/// no density is a bare per-world number. The caller passes the derived value (the derivation is threaded so
+/// the boundary stays snapshot-clean). Byte-neutral: no scenario calls this yet, so it is a dormant capability
+/// (the interior law-forms' pattern), and the arming (a scenario running it and the surface reading the
+/// result) is the separately-sequenced step.
+pub fn populate_interior_column(
+    snapshot: GeodynamicColumn,
+    p: &ColumnParams,
+    mantle_density: Fixed,
+) -> GeodynamicColumn {
+    // The resident interior state carries only the continuous temperature; the discrete convecting condition is
+    // derived inside the step from the Rayleigh number (a false prior latch makes the onset reversible, so a
+    // cooling column can stop convecting), never a stored flag.
+    let state = ColumnState {
+        temperature: snapshot.temperature,
+        convecting: false,
+    };
+    let readout = column_readout(&state, p);
+    let isostatic_elevation = civsim_physics::geodynamics::airy_isostatic_elevation(
+        snapshot.crustal_density,
+        mantle_density,
+        snapshot.crustal_thickness,
+    )
+    .unwrap_or(Fixed::ZERO);
+    GeodynamicColumn {
+        // The surface lane's fields pass through (the interior does not write them, snapshot-apply).
+        crustal_density: snapshot.crustal_density,
+        crustal_thickness: snapshot.crustal_thickness,
+        // The interior lane's writes.
+        isostatic_elevation,
+        temperature: readout.temperature,
+        convective_stress: readout.convective_stress,
+        rayleigh: readout.rayleigh,
+    }
+}
+
+/// Snapshot-apply the interior population over a whole [`GeodynamicField`]: read the start-of-tick `snapshot`
+/// field and return the end-of-tick field, each column populated against the snapshot (order-independent, gate
+/// ruling #176). The per-world interior parameters and mantle density are supplied by the caller (a future
+/// scenario). A column with no resident state is not walked, so an EMPTY field yields an empty field and the
+/// pass is byte-neutral over an unarmed geology; the walk is canonical `Coord3` order, so the fold is
+/// reproducible and thread-invariant. Called by no scenario yet.
+pub fn step_interior_field(
+    snapshot: &GeodynamicField,
+    p: &ColumnParams,
+    mantle_density: Fixed,
+) -> GeodynamicField {
+    let mut next = GeodynamicField::new();
+    for (coord, column) in snapshot.iter() {
+        next.set(coord, populate_interior_column(column, p, mantle_density));
+    }
+    next
+}
+
+/// Derive the mantle density from the world's mantle COMPOSITION, never an authored number (gate ruling from
+/// the owner, #176): A's petrology kernel ([`civsim_physics::petrology::crustal_density`], a GENERAL
+/// composition-to-density derivation despite the crust-specific name) minimizes the stable mineral assemblage
+/// of the composition at the mantle's temperature and pressure and reads its mass over volume, so the density
+/// is what the material IS under its conditions, neither a fundamental constant nor a bare per-world scalar.
+/// The mantle temperature is the interior heat chain's own thermal state (the column temperature the
+/// convection evolution carries), and the pressure is the lithostatic pressure at the mantle's depth; a
+/// reference-pressure first pass breaks the mild density-depends-on-pressure self-consistency (a short
+/// fixed-point refinement is the follow-on, both derivations, nothing authored). Returns `None` when the
+/// composition reaches no assemblage or a phase is missing from the data (fail-loud, never a fabricated
+/// density). The isostasy floats the crust on this derived mantle density.
+pub fn derive_mantle_density(
+    mantle_composition: &[(String, Fixed)],
+    mantle_temperature: Fixed,
+    reference_pressure_bar: Fixed,
+    registry: &civsim_physics::petrology_data::PhaseRegistry,
+    table: &civsim_physics::periodic::PeriodicTable,
+) -> Option<Fixed> {
+    civsim_physics::petrology::crustal_density(
+        mantle_composition,
+        mantle_temperature,
+        reference_pressure_bar,
+        registry,
+        table,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -253,6 +411,7 @@ mod tests {
             ra_max: Fixed::from_int(1_000_000),
             v_max: Fixed::from_int(1_000_000),
             flux_max: Fixed::from_int(1_000_000),
+            stress_max: Fixed::from_int(1_000_000),
             dt: Fixed::ONE,
         };
         (state, params)
@@ -406,6 +565,164 @@ mod tests {
         assert_eq!(
             a, b,
             "the same synthetic thermal history reproduces the same outcome"
+        );
+    }
+
+    // --- The interior column-wiring (#176) ---
+
+    #[test]
+    fn the_readout_exposes_the_continuous_state_and_a_hot_column_convects() {
+        // A hot column (well above the reference) reaches a super-critical Rayleigh number, so the derived
+        // convecting condition (Rayleigh against the critical value) is on, and the readout carries the
+        // continuous quantities the contract stores.
+        let (state, params) = column(Fixed::from_int(1)); // a low Ra_crit, so the hot column convects
+        let readout = column_readout(&state, &params);
+        assert!(
+            readout.rayleigh > params.ra_crit,
+            "the hot column is super-critical"
+        );
+        assert!(
+            readout.convective_stress > Fixed::ZERO,
+            "a convecting column exerts a driving stress"
+        );
+        // The stepped temperature is the convection_step result (the readout reuses it).
+        assert_eq!(
+            readout.temperature,
+            convection_step(&state, &params).temperature
+        );
+    }
+
+    #[test]
+    fn convection_is_reversible_a_cold_column_does_not_convect() {
+        // The gate's ruling: no stored convecting flag, so convection can CEASE on a cooling world. A column at
+        // the reference temperature has no buoyancy, a sub-critical Rayleigh number, and no convective stress.
+        let (_, params) = column(Fixed::from_int(1000));
+        let cold = ColumnState {
+            temperature: params.reference_temperature,
+            convecting: false,
+        };
+        let readout = column_readout(&cold, &params);
+        assert_eq!(
+            readout.rayleigh,
+            Fixed::ZERO,
+            "no contrast, no convective vigor"
+        );
+        assert_eq!(
+            readout.convective_stress,
+            Fixed::ZERO,
+            "a still interior drives no stress"
+        );
+    }
+
+    #[test]
+    fn populate_writes_the_interior_fields_and_the_snapshot_isostasy() {
+        // The interior populates its continuous fields and the isostatic elevation, reading the surface lane's
+        // crustal_density from the SNAPSHOT (snapshot-apply). The mantle density here stands in for the
+        // petrology-derived value (derive_mantle_density over the mantle composition); the test supplies it
+        // directly to isolate the wiring.
+        let (_, params) = column(Fixed::from_int(1));
+        let mantle_density = Fixed::from_ratio(33, 10); // a derived-density stand-in for the wiring test
+        let snapshot = GeodynamicColumn {
+            crustal_density: Fixed::from_ratio(265, 100), // written by the surface lane (felsic)
+            crustal_thickness: Fixed::from_int(35_000),
+            temperature: Fixed::from_int(400),
+            ..GeodynamicColumn::default()
+        };
+        let next = populate_interior_column(snapshot, &params, mantle_density);
+        // The surface field passes through unchanged (the interior does not write it).
+        assert_eq!(next.crustal_density, snapshot.crustal_density);
+        // The interior wrote its continuous state and the isostatic elevation from the snapshot crust.
+        assert!(next.rayleigh > Fixed::ZERO);
+        assert!(
+            next.isostatic_elevation > Fixed::ZERO,
+            "a felsic column floats above the reference"
+        );
+        let expected = civsim_physics::geodynamics::airy_isostatic_elevation(
+            snapshot.crustal_density,
+            mantle_density,
+            snapshot.crustal_thickness,
+        )
+        .unwrap();
+        assert_eq!(
+            next.isostatic_elevation, expected,
+            "the isostasy reads the snapshot crust and mantle"
+        );
+    }
+
+    #[test]
+    fn the_wiring_convection_is_reversible_a_cooled_column_ceases() {
+        // The latch guardrail (gate ruling, #176): the resident contract stores no convecting flag, so a column
+        // that once convected does NOT stay convecting against a fallen Rayleigh number. Populate a hot column
+        // (it convects, stress positive), then feed its result back cooled to the reference, and the re-populated
+        // column reads zero stress: the stress keys off the CURRENT Rayleigh number, reversibly, never a
+        // persisted onset latch overriding it.
+        let (_, params) = column(Fixed::from_int(1));
+        let hot = GeodynamicColumn {
+            temperature: Fixed::from_int(2000),
+            ..GeodynamicColumn::default()
+        };
+        let convecting = populate_interior_column(hot, &params, Fixed::from_ratio(33, 10));
+        assert!(
+            convecting.convective_stress > Fixed::ZERO,
+            "the hot column convects and drives a stress"
+        );
+        // Now the column has cooled to its reference (no contrast): re-populate against that snapshot.
+        let cooled = GeodynamicColumn {
+            temperature: params.reference_temperature,
+            ..convecting
+        };
+        let ceased = populate_interior_column(cooled, &params, Fixed::from_ratio(33, 10));
+        assert_eq!(
+            ceased.convective_stress,
+            Fixed::ZERO,
+            "a cooled column ceases convecting, no latch keeps the stress alive"
+        );
+        assert_eq!(
+            ceased.rayleigh,
+            Fixed::ZERO,
+            "the vigor falls with the contrast"
+        );
+    }
+
+    #[test]
+    fn the_boundary_layer_thins_with_vigor_so_a_hotter_column_drives_more_stress() {
+        // The derived boundary layer L = depth * Ra^(-1/3): a more vigorous column has a thinner boundary layer
+        // and a higher driving stress, the derive-clean thinning (not the depth reference-pass).
+        let (_, params) = column(Fixed::from_int(1));
+        let warm = column_readout(
+            &ColumnState {
+                temperature: Fixed::from_int(600),
+                convecting: false,
+            },
+            &params,
+        );
+        let hot = column_readout(
+            &ColumnState {
+                temperature: Fixed::from_int(2000),
+                convecting: false,
+            },
+            &params,
+        );
+        assert!(
+            hot.rayleigh > warm.rayleigh,
+            "the hotter column is more vigorous"
+        );
+        assert!(
+            hot.convective_stress > warm.convective_stress,
+            "a thinner boundary layer under higher vigor concentrates more driving stress"
+        );
+    }
+
+    #[test]
+    fn an_empty_field_step_is_byte_neutral() {
+        // Snapshot-apply over an unarmed geology walks no columns, so it yields an empty field (folds nothing
+        // into state_hash), the dormant byte-neutral guarantee.
+        let (_, params) = column(Fixed::from_int(1));
+        let empty = GeodynamicField::new();
+        let next = step_interior_field(&empty, &params, Fixed::from_ratio(33, 10));
+        assert!(
+            next.is_empty(),
+            "an unarmed geology stays empty and byte-neutral"
         );
     }
 }

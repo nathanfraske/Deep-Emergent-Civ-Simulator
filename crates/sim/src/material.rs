@@ -2027,6 +2027,7 @@ values = [
             crustal_density: Fixed::from_ratio(33, 10),
             crustal_thickness: Fixed::from_int(35_000),
             isostatic_elevation: Fixed::from_int(5),
+            ..GeodynamicColumn::default()
         };
         g.set(a, state);
         assert_eq!(g.get(a).crustal_density, Fixed::from_ratio(33, 10));
@@ -2041,11 +2042,13 @@ values = [
             crustal_density: Fixed::from_int(3),
             crustal_thickness: Fixed::ZERO,
             isostatic_elevation: Fixed::ZERO,
+            ..GeodynamicColumn::default()
         };
         let s2 = GeodynamicColumn {
             crustal_density: Fixed::ZERO,
             crustal_thickness: Fixed::ZERO,
             isostatic_elevation: Fixed::from_int(-1),
+            ..GeodynamicColumn::default()
         };
         let mut c1 = GeodynamicField::new();
         c1.set(a, s1);

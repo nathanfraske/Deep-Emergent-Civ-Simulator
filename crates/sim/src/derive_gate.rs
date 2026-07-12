@@ -661,6 +661,7 @@ fn probe_column_convection(_m: &CalibrationManifest) -> Result<ProbeReading, Str
         ra_max: Fixed::from_int(1_000_000),
         v_max: Fixed::from_int(1_000_000),
         flux_max: Fixed::from_int(1_000_000),
+        stress_max: Fixed::from_int(1_000_000),
         dt: Fixed::ONE,
     };
     let base_heat = Fixed::from_int(100);

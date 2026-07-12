@@ -39,6 +39,14 @@ use civsim_core::Fixed;
 /// default (the absence convention). The struct is deliberately minimal and ADDITIVE-EXTENSIBLE: the interior
 /// lane's deeper state (internal heat, convection velocity, plate membership, uplift rate) extends it by adding
 /// fields, never by reshaping the ones here.
+///
+/// The interior lane's additive extension (below `isostatic_elevation`) is deliberately CONTINUOUS: it carries
+/// the interior thermal state, the convective driving stress, and the Rayleigh number, and it carries NO
+/// stored discrete "convecting" flag (gate ruling, #176). A stored discrete state that selected behaviour would
+/// be the closed-enum template the tectonic-regime work retired; instead the discrete condition (whether the
+/// column convects) is DERIVED from the continuous Rayleigh number against the critical value wherever a
+/// consumer needs it, so convection can begin and, on a cooling world, cease, and the regime NAME stays an
+/// observer-side description. Each added field is `Default`-zero, so an unpopulated column stays byte-neutral.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct GeodynamicColumn {
     /// The petrology-derived crustal density (grams per cubic centimetre), written by the SURFACE lane and read
@@ -51,6 +59,18 @@ pub struct GeodynamicColumn {
     /// through [`airy_isostatic_elevation`]; the surface relaxation reads it and relaxes the effective
     /// elevation toward it. Zero is undetermined.
     pub isostatic_elevation: Fixed,
+    /// The interior thermal state (the column temperature in kelvin), the internal-heat quantity the convection
+    /// evolution carries. Written by the INTERIOR lane. Zero is undetermined. Continuous (no derived discrete
+    /// state is stored beside it).
+    pub temperature: Fixed,
+    /// The convective driving stress (pascals) the interior flow exerts on the base of the lithosphere
+    /// ([`crate::laws::convective_stress`]), the continuous quantity lid mobilization emerges from against
+    /// `mat.yield_strength`. Written by the INTERIOR lane. Zero is undetermined.
+    pub convective_stress: Fixed,
+    /// The Rayleigh number (dimensionless), the continuous convective-vigor ratio a consumer reads to derive
+    /// whether the column convects (against the critical value) rather than reading a stored flag. Written by
+    /// the INTERIOR lane. Zero is undetermined.
+    pub rayleigh: Fixed,
 }
 
 /// The AIRY (Archimedes) isostatic elevation a crustal column floats at, in metres above the compensation
