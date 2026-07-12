@@ -39,6 +39,7 @@
 
 pub mod graph;
 pub mod laws;
+pub mod periodic;
 pub mod quantities;
 pub mod scaled;
 
@@ -509,6 +510,9 @@ pub struct Substance {
     pub vector: BTreeMap<String, Fixed>,
     /// The laws this substance participates in.
     pub participates_in: Vec<String>,
+    /// The molecular formula (for example `H2O`), the substance's identity from which the molar mass and atom
+    /// count derive; empty when the molecular composition is not modelled.
+    pub formula: String,
     /// Whether the substance is real-with-source or fantasy-reserved.
     pub provenance: Provenance,
 }
@@ -528,6 +532,10 @@ impl Substance {
         for law in &self.participates_in {
             h.write_bytes(law.as_bytes());
         }
+        h.write_u64(0);
+        // The molecular formula is physical content (which nuclei), so it folds into the content hash beside the
+        // values, a separator keeping it distinct from the law list.
+        h.write_bytes(self.formula.as_bytes());
         h.write_u64(0);
         match &self.provenance {
             Provenance::RealWithSource(s) => {
@@ -1430,6 +1438,12 @@ impl LawDef {
 #[derive(Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 struct SubstanceDef {
     id: String,
+    /// The molecular formula (for example `H2O`), the substance's IRREDUCIBLE identity: which nuclei and how
+    /// many. The molar mass and atom count DERIVE from it plus the periodic table (never an authored molar mass),
+    /// so it is a layer-2 identity datum, universal, cited; empty for a substance whose molecular composition is
+    /// not modelled. An alien volatile carries its own formula as a data row.
+    #[serde(default)]
+    formula: String,
     #[serde(default)]
     values: Vec<ValuePair>,
     #[serde(default)]
@@ -1467,6 +1481,7 @@ impl SubstanceDef {
             id: self.id,
             vector,
             participates_in: self.participates_in,
+            formula: self.formula,
             provenance,
         })
     }
