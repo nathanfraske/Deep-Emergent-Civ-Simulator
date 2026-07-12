@@ -316,6 +316,7 @@ mod tests {
             volume_decimal: "10".to_string(),
             clapeyron_slope: None,
             clapeyron_decimal: None,
+            prototype: None,
             source: "test".to_string(),
         };
         assert!(

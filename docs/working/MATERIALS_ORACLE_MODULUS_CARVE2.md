@@ -115,3 +115,41 @@ structure constant `[C]` for a seeded prototype, and `B` is derived `[D]` from t
 (the `1/r0^4` is a `checked_mul` chain, the `r0^4` well inside Q32.32 for pm-to-angstrom radii). The provenance
 tags bind to A's enforced enum when its register lands, a local placeholder until then. No build of the radius,
 Madelung, Born, or `B` derivation until the gate rules the floor additions and the two seams above.
+
+## Foundation slice built (gate ruled the additions and confirmed both seams)
+
+The gate approved the floor additions and confirmed both seams (build it slightly larger than one property, the
+radius column and the prototype dispatch are what the oracle stands on). Built on
+`claude/materials-oracle-modulus-slice`:
+
+- `crates/physics/data/shannon_radii.toml` (the load-bearing `[M]` column, Shannon 1976), keyed by (symbol,
+  charge, coordination); `born_exponents.toml` (the `[M class]` Born exponent by noble-gas core, Pauling); and
+  `prototypes.toml` (the minimal aristotype library: rock-salt populated, corundum seeded with its Madelung held
+  absent). A per-phase `prototype` key on the phase registry (periclase rock-salt, corundum and hematite
+  corundum) is the data-driven bonding-class dispatch.
+- `crates/physics/src/lattice_modulus.rs`: `phase_bulk_modulus_ionic` derives `B = (n-1) A |z+ z-| (e^2/4pi
+  eps0) / (18 r0^4)` for a prototype-mapped ionic phase. The charge product comes from the formula and the
+  anion valence by charge balance (`identify_ionic_pair`, no authored per-phase charge), the Born exponent from
+  each ion's electron count mapping to a noble-gas core, the Madelung constant and coordination from the
+  prototype. The Coulomb energy and the eV/A^3-to-GPa conversion are the two cited fundamental law constants.
+- `Cl` gained its cited common oxidation states on the periodic table (needed for the NaCl validation and any
+  future chloride), byte-neutral (no chloride phase in the registry).
+
+Two findings surfaced by the build, for your ruling on the follow-on:
+
+- **The point-charge model overestimates the divalent oxides.** The bare full-formal-charge Born-Lande derives
+  NaCl to about 2 percent (24.4 GPa against a measured 24 to 25, the clean monovalent validation), but periclase
+  to about 266 GPa against a measured 160 to 165, a systematic 1.6-fold overestimate because covalency lowers
+  the effective charge below the formal `+/-2` and the point-charge model omits it. The derivation is the correct
+  derive-first FORM (`B` from radius, charge, structure, no per-rock authoring), and the overestimate is a
+  documented honest limit with the partial-charge refinement named; the reserved correction factor
+  (`B_measured / B_pointcharge` across the validation set) is surfaced on the function, the emitted band zero
+  until it is set. Ruling wanted: accept the derived-but-approximate `B` with the documented divalent systematic
+  and the reserved correction, or hold the oxide `B` behind the partial-charge refinement first.
+- **The corundum `A2B3` phases fall through this slice, on both counts.** Corundum and hematite map to the
+  corundum prototype structurally, but its reduced Madelung constant is held absent (the `A2B3` non-1:1 lattice
+  sum is an Ewald sum, not a single tabulated `AB` constant, which I will not fabricate), and independently
+  hematite's `Fe3+` (`[Ar]3d5`, 23 electrons) has no clean noble-gas Born core. So only periclase (and the NaCl
+  reference) derive this slice; corundum and hematite fall through to the screen tier, an honest `None`. Ruling wanted:
+  ground the corundum reduced-Madelung convention and the transition-metal Born value as the next prototype
+  addition, or leave the `A2B3` oxides on the screen tier until the covalent and `d`-electron routes land.

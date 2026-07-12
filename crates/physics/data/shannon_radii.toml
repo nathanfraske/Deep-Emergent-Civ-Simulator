@@ -1,0 +1,61 @@
+# The Shannon effective ionic radius table, the load-bearing measured `[M]` input to the ionic bulk-modulus
+# derivation (owner research, #182). The bulk modulus rides the interionic distance fourfold (`B ~ 1/r0^4`), so
+# this is the column the elasticity stands on, pm-grade, real-with-source.
+#
+# Each row is keyed by (symbol, charge, coordination), because the effective ionic radius depends on the ion's
+# OXIDATION STATE and its COORDINATION NUMBER, not the element alone: a cation is smaller the higher its charge
+# and the lower its coordination. The interionic distance r0 the derivation reads is the sum of the cation and
+# anion radii at the phase's coordination, which the structure prototype supplies. An unpopulated ion is absent,
+# not zero (the extensible registry): a phase whose ions are not all present here falls through to the
+# cohesive-energy-density screen tier, an honest fall-through never a fabricated radius.
+#
+# The mechanism is fixed Rust; the ion membership is data and grows with the world (Principle 11). Radii are in
+# picometres as decimal strings, parsed to fixed-point by integer arithmetic (no float reaches canonical state).
+# This seed carries the ions of the rock-salt-prototype seed phase (periclase) and the alkali-halide validation
+# reference (NaCl), plus the corundum-structure cations for when that prototype's Madelung constant is grounded.
+#
+# SOURCE: R. D. Shannon (1976), "Revised effective ionic radii and systematic studies of interatomic distances
+# in halides and chalcogenides", Acta Crystallographica A32, 751-767. Six-coordinate (octahedral) values; the
+# Fe(3+) value is the high-spin radius. These are the standard crystallographic effective ionic radii.
+
+[[ion]]
+symbol = "Na"
+charge = 1
+coordination = 6
+radius_pm = "102"
+source = "Shannon 1976, Acta Cryst A32 751 (Na+ VI = 1.02 A)"
+
+[[ion]]
+symbol = "Cl"
+charge = -1
+coordination = 6
+radius_pm = "181"
+source = "Shannon 1976, Acta Cryst A32 751 (Cl- VI = 1.81 A)"
+
+[[ion]]
+symbol = "Mg"
+charge = 2
+coordination = 6
+radius_pm = "72"
+source = "Shannon 1976, Acta Cryst A32 751 (Mg2+ VI = 0.72 A)"
+
+[[ion]]
+symbol = "O"
+charge = -2
+coordination = 6
+radius_pm = "140"
+source = "Shannon 1976, Acta Cryst A32 751 (O2- VI = 1.40 A)"
+
+[[ion]]
+symbol = "Al"
+charge = 3
+coordination = 6
+radius_pm = "53.5"
+source = "Shannon 1976, Acta Cryst A32 751 (Al3+ VI = 0.535 A)"
+
+[[ion]]
+symbol = "Fe"
+charge = 3
+coordination = 6
+radius_pm = "64.5"
+source = "Shannon 1976, Acta Cryst A32 751 (Fe3+ VI high-spin = 0.645 A)"
