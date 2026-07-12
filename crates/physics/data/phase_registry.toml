@@ -1,0 +1,66 @@
+# The candidate-phase thermodynamic registry (crate::petrology_data), the per-PHASE sibling of the periodic
+# table. One entry per candidate solid phase, carrying the standard-state primitives a free-energy-minimizing
+# petrology kernel reads: the enthalpy of formation (kJ/mol), the standard molar entropy (J/mol/K), and the
+# molar volume (cm^3/mol), each real-with-source. The pressure-temperature dependence (heat-capacity
+# coefficients, thermal expansion, bulk modulus, and a transition Clapeyron slope) grows onto a row when the
+# kernel needs it; the Clapeyron slope field is optional.
+#
+# The mechanism is fixed Rust; the phase MEMBERSHIP is data and grows with the world (Principle 11). This seed
+# stands up the Mg-Fe-Si-Al-O oxide-and-silicate core of a bulk-silicate world (Mirror = Earth); the Stage-3
+# petrology kernel grows the membership to the phases a world's composition and P,T field actually reach, and
+# an alien phase is a new row, not a rewrite.
+#
+# CALIBRATION NOTE (thermodynamic consistency): a free-energy minimization compares the RELATIVE energies of
+# competing phases, so all phases must come from ONE internally consistent dataset or the comparison is
+# corrupted. This seed cites Robie & Hemingway 1995 (USGS Bulletin 2131) throughout. The owner pins the
+# production dataset (Holland & Powell 2011 is the petrology standard for phase-equilibrium work) and verifies
+# each value against the source before the Stage-3 kernel runs; the seed values are cited reference data
+# surfaced for that verification, never invented.
+
+[[phase]]
+name = "quartz"
+formula = "SiO2"
+enthalpy_formation = "-910.70"
+standard_entropy = "41.46"
+molar_volume = "22.688"
+source = "Robie & Hemingway 1995, USGS Bulletin 2131 (298.15 K, 1 bar), alpha-quartz"
+
+[[phase]]
+name = "corundum"
+formula = "Al2O3"
+enthalpy_formation = "-1675.70"
+standard_entropy = "50.92"
+molar_volume = "25.575"
+source = "Robie & Hemingway 1995, USGS Bulletin 2131 (298.15 K, 1 bar)"
+
+[[phase]]
+name = "periclase"
+formula = "MgO"
+enthalpy_formation = "-601.60"
+standard_entropy = "26.95"
+molar_volume = "11.248"
+source = "Robie & Hemingway 1995, USGS Bulletin 2131 (298.15 K, 1 bar)"
+
+[[phase]]
+name = "hematite"
+formula = "Fe2O3"
+enthalpy_formation = "-826.23"
+standard_entropy = "87.40"
+molar_volume = "30.274"
+source = "Robie & Hemingway 1995, USGS Bulletin 2131 (298.15 K, 1 bar)"
+
+[[phase]]
+name = "forsterite"
+formula = "Mg2SiO4"
+enthalpy_formation = "-2173.00"
+standard_entropy = "94.11"
+molar_volume = "43.790"
+source = "Robie & Hemingway 1995, USGS Bulletin 2131 (298.15 K, 1 bar), Mg-olivine end-member"
+
+[[phase]]
+name = "fayalite"
+formula = "Fe2SiO4"
+enthalpy_formation = "-1479.36"
+standard_entropy = "148.32"
+molar_volume = "46.310"
+source = "Robie & Hemingway 1995, USGS Bulletin 2131 (298.15 K, 1 bar), Fe-olivine end-member"

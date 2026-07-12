@@ -40,6 +40,7 @@
 pub mod graph;
 pub mod laws;
 pub mod periodic;
+pub mod petrology_data;
 pub mod quantities;
 pub mod scaled;
 
