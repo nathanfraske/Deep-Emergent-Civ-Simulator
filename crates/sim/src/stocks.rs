@@ -53,6 +53,29 @@ pub struct Stock {
     /// boundary loss, never a leak. Compiled out of release.
     #[cfg(debug_assertions)]
     drop_starvation: Fixed,
+    /// DEBUG-ONLY energy-integrity diagnostic (Piece A readout, the lever-naming magnitudes): the
+    /// realized quantity DEPOSITED into the reserve since the last reset (what a consumer gathered and
+    /// the reserve could hold), and the realized quantity DRAWN out by [`Self::step`] (what metabolism
+    /// burned). Their ratio names the founder-starvation lever, gather versus burn, rather than the
+    /// clamp direction alone. Compiled out of release.
+    #[cfg(debug_assertions)]
+    realized_intake: Fixed,
+    #[cfg(debug_assertions)]
+    realized_drain: Fixed,
+}
+
+/// DEBUG-ONLY energy-integrity flows for one reserve over a window (Piece A readout): the clamp-drops
+/// plus the realized intake and metabolic drain, so the founder-starvation lever reads as a gather-
+/// versus-burn ratio, not only the clamp direction. A reserve DRAINED by metabolism (`drain > 0`) is a
+/// conserved metabolic pool (energy, water); one with no drain is a regulated band (condition,
+/// temperature), whose clamp churn is not an energy signal, which is how the readout tightens its lens.
+#[cfg(debug_assertions)]
+#[derive(Clone, Copy, Default, Debug)]
+pub struct ReserveFlows {
+    pub satiation_drop: Fixed,
+    pub starvation_drop: Fixed,
+    pub intake: Fixed,
+    pub drain: Fixed,
 }
 
 // A stock's identity is its physical state (amount, capacity, regen rate); the debug-only clamp-drop
@@ -81,6 +104,10 @@ impl Stock {
             drop_satiation: Fixed::ZERO,
             #[cfg(debug_assertions)]
             drop_starvation: Fixed::ZERO,
+            #[cfg(debug_assertions)]
+            realized_intake: Fixed::ZERO,
+            #[cfg(debug_assertions)]
+            realized_drain: Fixed::ZERO,
         }
     }
 
@@ -185,6 +212,9 @@ impl Stock {
             );
             self.drop_satiation += regen_overflow;
             self.drop_starvation += starvation;
+            // The realized metabolic burn this step (what the draw removed), for the
+            // gather-versus-burn lever readout.
+            self.realized_drain += drain_applied;
         }
     }
 
@@ -245,6 +275,9 @@ impl Stock {
                 "deposit overflow must equal the excess over capacity"
             );
             self.drop_satiation += overflow;
+            // The realized intake this deposit (what the reserve could hold of what was offered), for
+            // the gather-versus-burn lever readout.
+            self.realized_intake += stored;
         }
         stored
     }
@@ -264,12 +297,27 @@ impl Stock {
         self.drop_starvation
     }
 
-    /// DEBUG-ONLY (Piece A): clear the accumulated clamp-drop diagnostics, called at a tick boundary
-    /// so the readout is per-tick rather than cumulative over the whole run.
+    /// DEBUG-ONLY (Piece A): the reserve's energy-integrity flows since the last reset, the clamp-drops
+    /// plus the realized intake and metabolic drain, so a reader can name the founder-starvation lever
+    /// (gather versus burn) and tell a metabolic pool (`drain > 0`) from a regulated band.
+    #[cfg(debug_assertions)]
+    pub fn reserve_flows(&self) -> ReserveFlows {
+        ReserveFlows {
+            satiation_drop: self.drop_satiation,
+            starvation_drop: self.drop_starvation,
+            intake: self.realized_intake,
+            drain: self.realized_drain,
+        }
+    }
+
+    /// DEBUG-ONLY (Piece A): clear the accumulated clamp-drop and flow diagnostics, called at a tick
+    /// boundary so the readout is per-tick rather than cumulative over the whole run.
     #[cfg(debug_assertions)]
     pub fn reset_clamp_drops(&mut self) {
         self.drop_satiation = Fixed::ZERO;
         self.drop_starvation = Fixed::ZERO;
+        self.realized_intake = Fixed::ZERO;
+        self.realized_drain = Fixed::ZERO;
     }
 }
 

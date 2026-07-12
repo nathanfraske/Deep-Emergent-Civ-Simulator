@@ -459,16 +459,16 @@ impl Homeostasis {
         (satiation, starvation)
     }
 
-    /// DEBUG-ONLY (Piece A): the clamp-drops broken out PER AXIS as `(axis, satiation_waste,
-    /// starvation_shortfall)`, so the readout can separate the food reserve (energy) from a gas-exchange
-    /// reserve (respiration) whose satiation waste is ordinary gas turnover, not a food signal. Keeping the
-    /// axis identity is what makes the founder-starvation localiser honest: "satiation dominates" only
-    /// answers the food question when it is the ENERGY axis dominating.
+    /// DEBUG-ONLY (Piece A): the energy-integrity flows broken out PER AXIS as `(axis, flows)`, the
+    /// clamp-drops plus the realized intake and metabolic drain. Keeping the axis identity and the
+    /// gather-versus-burn magnitudes is what makes the founder-starvation localiser honest: a metabolic
+    /// pool (`drain > 0`, energy or water) is read apart from a regulated band (condition, temperature)
+    /// whose clamp churn is not an energy signal, and the intake-versus-drain ratio names the lever.
     #[cfg(debug_assertions)]
-    pub fn clamp_drops_by_axis(&self) -> Vec<(HomeostaticAxisId, Fixed, Fixed)> {
+    pub fn flows_by_axis(&self) -> Vec<(HomeostaticAxisId, crate::stocks::ReserveFlows)> {
         self.reserves
             .iter()
-            .map(|(id, s)| (*id, s.drop_satiation(), s.drop_starvation()))
+            .map(|(id, s)| (*id, s.reserve_flows()))
             .collect()
     }
 

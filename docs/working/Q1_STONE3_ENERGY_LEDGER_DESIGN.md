@@ -176,3 +176,20 @@ metabolic pool), a clamp churn that is not a food or energy-pool signal, so the 
 signal is on the metabolic reserves (energy, water). Byte-neutral: the accumulator, the tick hook, and
 the print are all `#[cfg(debug_assertions)]`, so all five pins hold bit-exact and the pinned and
 scheduled orders stay in step (the totals are never folded into the hash).
+
+The diagnostic was then tightened and extended on the gate's two follow-ups. The lens is tightened to the
+METABOLIC reserves by keying on the drain: a reserve DRAINED by metabolism (`drain > 0`, energy and
+water) is a conserved pool, while a regulated band (`drain == 0`, condition and temperature) is filtered
+out, a general test that admits the alien (a photosynthetic or mana reserve drained by its own metabolism
+qualifies) with no hardcoded axis list. And the readout is extended from the clamp DIRECTION to the
+gather-versus-burn MAGNITUDES: each reserve now carries its realized intake (deposits, what a consumer
+gathered) and its realized metabolic drain (`step` draws, what metabolism burned), so the intake-versus-
+drain ratio can name the founder-starvation lever (metabolic draw, gathering rate, or endowment) rather
+than only saying the reserve floors out. The gate's PD1 on the conclusion holds and is now visible in the
+data: on the current soil-deadlocked `living` (food near zero) the ENERGY axis reads gather 0.0000 versus
+burn 999.0000, which confirms the reserve floors out but cannot separate "no food" from "cannot use food"
+on its own. The DEFINITIVE localization is the same readout re-run with FOOD PRESENT (B's matter-cycle
+fix, or a throwaway fertility seed coordinated with B so the same file is not hacked twice): if the ENERGY
+reserve still floors at starvation with abundant food and gather stays below burn, that is the clean
+survival-window signal and the gather-versus-burn ratio names which of the three levers. Byte-neutral
+still: all the new flow accumulators and the readout are `#[cfg(debug_assertions)]`, the five pins hold.

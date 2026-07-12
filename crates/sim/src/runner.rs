@@ -1276,16 +1276,15 @@ pub struct CreatureSelectionParams {
 
 pub struct Embodiment {
     walkers: Vec<Walker>,
-    /// DEBUG-ONLY energy-integrity diagnostic (Q1 Stone-3 Piece A readout): the population's clamp-drops
-    /// summed over the whole run PER AXIS, as `axis -> (satiation_waste, starvation_shortfall)`, folded in
-    /// each tick before the cull so a founder that dies still counts its final tick. Per-axis so the food
-    /// reserve (energy) is read apart from a gas-exchange reserve (respiration), whose satiation waste is
-    /// ordinary turnover, not a food signal. The founder-starvation localiser on the ENERGY axis: a
-    /// starvation-dominated total means the metabolic drain outran intake (the being could not gather
-    /// enough), a satiation-dominated total means food arrived but the cap could not hold it (an intake
-    /// rate or gathering wall, not food quantity). Compiled out of release, so it moves no pin.
+    /// DEBUG-ONLY energy-integrity diagnostic (Q1 Stone-3 Piece A readout): the population's reserve
+    /// flows summed over the whole run PER AXIS, folded in each tick before the cull so a founder that
+    /// dies still counts its final tick. Each axis carries its clamp-drops plus the realized intake and
+    /// metabolic drain, so the food reserve (energy, `drain > 0`) is read apart from a regulated band
+    /// whose churn is not an energy signal, and the gather-versus-burn ratio names the founder-starvation
+    /// lever (metabolic draw too high, gathering too slow, or endowment too small). Compiled out of
+    /// release, so it moves no pin.
     #[cfg(debug_assertions)]
-    clamp_drops_by_axis: BTreeMap<HomeostaticAxisId, (Fixed, Fixed)>,
+    flows_by_axis: BTreeMap<HomeostaticAxisId, crate::stocks::ReserveFlows>,
     thermal: BTreeMap<StableId, BeingThermal>,
     homeo: HomeostaticRegistry,
     afford: AffordanceRegistry,
@@ -1645,7 +1644,7 @@ impl Embodiment {
         Embodiment {
             walkers: Vec::new(),
             #[cfg(debug_assertions)]
-            clamp_drops_by_axis: BTreeMap::new(),
+            flows_by_axis: BTreeMap::new(),
             thermal: BTreeMap::new(),
             homeo,
             afford,
@@ -3603,31 +3602,24 @@ impl Embodiment {
     /// rather than double-counting a survivor's cumulative field. Compiled out of release.
     #[cfg(debug_assertions)]
     fn accumulate_clamp_drops(&mut self) {
-        let mut tick: BTreeMap<HomeostaticAxisId, (Fixed, Fixed)> = BTreeMap::new();
         for w in self.walkers.iter_mut() {
-            for (axis, sat, starv) in w.homeostasis.clamp_drops_by_axis() {
-                let e = tick.entry(axis).or_insert((Fixed::ZERO, Fixed::ZERO));
-                e.0 += sat;
-                e.1 += starv;
+            for (axis, flows) in w.homeostasis.flows_by_axis() {
+                let e = self.flows_by_axis.entry(axis).or_default();
+                e.satiation_drop += flows.satiation_drop;
+                e.starvation_drop += flows.starvation_drop;
+                e.intake += flows.intake;
+                e.drain += flows.drain;
             }
             w.homeostasis.reset_clamp_drops();
         }
-        for (axis, (sat, starv)) in tick {
-            let e = self
-                .clamp_drops_by_axis
-                .entry(axis)
-                .or_insert((Fixed::ZERO, Fixed::ZERO));
-            e.0 += sat;
-            e.1 += starv;
-        }
     }
 
-    /// DEBUG-ONLY (Piece A readout): the population's run-total clamp-drops PER AXIS as
-    /// `axis -> (satiation_waste, starvation_shortfall)`, the founder-starvation localiser. Empty in a
-    /// build without debug assertions (the field does not exist there).
+    /// DEBUG-ONLY (Piece A readout): the population's run-total reserve flows PER AXIS (clamp-drops plus
+    /// realized intake and metabolic drain), the founder-starvation localiser. Empty in a build without
+    /// debug assertions (the field does not exist there).
     #[cfg(debug_assertions)]
-    pub fn clamp_drops_by_axis(&self) -> &BTreeMap<HomeostaticAxisId, (Fixed, Fixed)> {
-        &self.clamp_drops_by_axis
+    pub fn flows_by_axis(&self) -> &BTreeMap<HomeostaticAxisId, crate::stocks::ReserveFlows> {
+        &self.flows_by_axis
     }
 
     /// The standing resource field the grazers deplete and the environment regrows (a pure read, for the

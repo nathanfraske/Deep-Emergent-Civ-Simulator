@@ -1918,50 +1918,65 @@ fn snapshot(
         discovery_signal(runner);
     }
 
-    // The clamp-drop diagnostic (Q1 Stone-3 Piece A): the population's run-total reserve losses at the
-    // clamps PER AXIS, the second lens on the founder starvation. The food question keys on the ENERGY
-    // axis: a starvation-floor total there means the metabolic drain outran intake (the founders could
-    // not gather enough); a satiation-cap total there means energy arrived but the reserve was full (not
-    // a food-quantity wall). Reading it per axis keeps a gas-exchange reserve's ordinary turnover from
-    // reading as a food signal. Debug-only, so a release run prints nothing and moves no pin.
+    // The Piece-A energy-integrity diagnostic (Q1 Stone-3): the population's run-total reserve flows on
+    // the METABOLIC reserves (drained by metabolism, drain > 0: the conserved food and water pools),
+    // with the regulated bands (drain == 0, set-and-regulated churn, not an energy signal) filtered out.
+    // The food question keys on the ENERGY axis: a starvation-floor clamp means the reserve floors out
+    // (drain outran intake); the gather(intake)-versus-burn(drain) ratio names the lever. Definitive
+    // only with food present; on a food-starved world intake is near zero whatever the cause. Debug-only,
+    // so a release run prints nothing and moves no pin.
     #[cfg(debug_assertions)]
     if let Some(emb) = runner.embodiment() {
-        let by_axis = emb.clamp_drops_by_axis();
-        if !by_axis.is_empty() {
-            let dec = |x: civsim_core::Fixed| x.to_bits() as f64 / 4_294_967_296.0;
-            let label = |a: HomeostaticAxisId| -> String {
-                if a == ENERGY {
-                    "energy(food)".into()
-                } else if a == WATER {
-                    "water".into()
-                } else if a == TEMPERATURE {
-                    "temperature".into()
-                } else if a == INTEGRITY {
-                    "integrity".into()
-                } else {
-                    format!("{a:?}")
-                }
-            };
+        let dec = |x: civsim_core::Fixed| x.to_bits() as f64 / 4_294_967_296.0;
+        let label = |a: HomeostaticAxisId| -> String {
+            if a == ENERGY {
+                "energy(food)".into()
+            } else if a == WATER {
+                "water".into()
+            } else if a == TEMPERATURE {
+                "temperature".into()
+            } else if a == INTEGRITY {
+                "integrity".into()
+            } else {
+                format!("{a:?}")
+            }
+        };
+        let metabolic: Vec<_> = emb
+            .flows_by_axis()
+            .iter()
+            .filter(|(_, f)| f.drain > civsim_core::Fixed::ZERO)
+            .collect();
+        if !metabolic.is_empty() {
             println!(
-                "  clamp-drops (Piece A, run total per axis: satiation-cap | starvation-floor):"
+                "  Piece-A energy integrity (metabolic reserves, run total): intake(gather) | drain(burn) | satiation-cap | starvation-floor"
             );
-            for (axis, (sat, starv)) in by_axis {
+            for (axis, f) in &metabolic {
                 println!(
-                    "    {}: satiation {:.4} | starvation {:.4}",
-                    label(*axis),
-                    dec(*sat),
-                    dec(*starv)
+                    "    {}: intake {:.4} | drain {:.4} | satiation {:.4} | starvation {:.4}",
+                    label(**axis),
+                    dec(f.intake),
+                    dec(f.drain),
+                    dec(f.satiation_drop),
+                    dec(f.starvation_drop)
                 );
             }
-            if let Some((sat, starv)) = by_axis.get(&ENERGY) {
-                let verdict = if starv > sat {
-                    "STARVATION-FLOOR (energy drain outran intake: a gathering/intake-rate or endowment wall)"
-                } else if sat > starv {
-                    "SATIATION-CAP (energy arrived but the reserve was full: not a food-quantity wall)"
+            if let Some(f) = emb.flows_by_axis().get(&ENERGY) {
+                let clamp = if f.starvation_drop > f.satiation_drop {
+                    "STARVATION-FLOOR (the energy reserve floors out)"
+                } else if f.satiation_drop > f.starvation_drop {
+                    "SATIATION-CAP (the energy reserve overflows)"
                 } else {
-                    "balanced or no energy drops"
+                    "no energy clamp drops"
                 };
-                println!("    founder energy verdict: {verdict}");
+                let (gather, burn) = (dec(f.intake), dec(f.drain));
+                let ratio = if burn > 0.0 {
+                    gather / burn
+                } else {
+                    f64::INFINITY
+                };
+                println!(
+                    "    founder ENERGY: gather {gather:.4} vs burn {burn:.4} (intake/drain {ratio:.3})  |  clamp: {clamp}"
+                );
             }
         }
     }
