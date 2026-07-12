@@ -17,7 +17,7 @@ The lists below are GENERATED from `crates/physics/data/*.toml`, `crates/physics
 
 ## Deriving substrates (check here BEFORE authoring: what the world derives, and where)
 
-The 7 deriving subsystems below live OUTSIDE the authored floor. Each produces a world quantity from the floor and the situation, so its output must never be authored: if the value you need appears here, read or extend the subsystem, do not set a number. This is the list that stops `1 year = 365 days` from being authored when orbital mechanics already derives it. Generated from the `// @derives:` markers in the code; a subsystem missing its marker is a gap in this map, so mark every derivation entry point.
+The 8 deriving subsystems below live OUTSIDE the authored floor. Each produces a world quantity from the floor and the situation, so its output must never be authored: if the value you need appears here, read or extend the subsystem, do not set a number. This is the list that stops `1 year = 365 days` from being authored when orbital mechanics already derives it. Generated from the `// @derives:` markers in the code; a subsystem missing its marker is a gap in this map, so mark every derivation entry point.
 
 ### `crates/sim/src/clock.rs`
 
@@ -29,6 +29,7 @@ The 7 deriving subsystems below live OUTSIDE the authored floor. Each produces a
 
 - local water presence, rainfall, evaporation, runoff <- Clausius-Clapeyron saturation(local temperature) + Dalton evaporation + condensation where moisture exceeds saturation + downhill routing to the lowest neighbour. Water is NOT authored per cell; it falls out of temperature and terrain. (`crates/sim/src/environ.rs:1385`)
 - per-cell biomass productivity / carrying capacity <- Liebig minimum over (water, light, temperature, soil); soil = soil_baseline + matter-cycle fertility. Productivity is NOT authored per cell; it derives from local conditions. Residual to derive: soil_baseline should read from the per-column lithology mineral floor rather than a flat scalar. (`crates/sim/src/environ.rs:1802`)
+- per-cell carbon-fixation rate / net primary productivity <- the photosynthesis light-response (`crates/sim/src/environ.rs:2035`)
 ### `crates/sim/src/locomotion.rs`
 
 - movement speed in tiles/tick, and (inverted) the cell edge in metres <- a real ground speed (about 1.4 m/s) / the tile edge, at the 1 s/tick base. The cell size is NOT free: it is fixed by one real creature's speed x the tick. Body-side, a being's own speed derives from its size (morphology), not a plant/animal tag. (`crates/sim/src/locomotion.rs:88`)
