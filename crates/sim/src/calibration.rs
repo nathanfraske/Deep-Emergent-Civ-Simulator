@@ -64,6 +64,21 @@ pub struct ReservedValue {
     /// mislabel fails the build), so once the per-entry sweep lands every entry is born categorized.
     #[serde(default)]
     pub category: String,
+    /// The provenance tag (the genesis-forward provenance-DAG accounting): `measured`, `closure`,
+    /// `contingency`, or `derived`. Empty during migration, read as `Provenance::Unclassified`. This axis
+    /// is ORTHOGONAL to `category`: category is the three-way authorship test (is it an authored world
+    /// value), provenance is the refutability test (could an independent laboratory refute this number
+    /// WITHOUT running this simulator). ADDITIVE (an absent field is Unclassified); an unknown value fails
+    /// loud.
+    #[serde(default)]
+    pub provenance: String,
+    /// For a `derived` value, the ids it derives FROM: the provenance-DAG edges. A derived value's
+    /// EFFECTIVE provenance is the worst-case join over these transitive inputs (it is only as pinned as
+    /// its least-pinned input, and closure-tainted the moment its DAG touches a closure), so authorship
+    /// hides not in the lines tagged `closure` but in the `derived` lines whose ancestry passes through
+    /// one. A non-derived value declares none.
+    #[serde(default)]
+    pub inputs: Vec<String>,
 }
 
 /// The three-way-test category of a reserved value (AGENTIC_ADDENDUM section 9, the fundamental-constants
@@ -86,6 +101,47 @@ pub enum Category {
     Unclassified,
 }
 
+/// The provenance tag of a value (the genesis-forward provenance-DAG accounting, orthogonal to
+/// [`Category`]). The operational test that decides the tag: could an independent laboratory refute this
+/// number WITHOUT running this simulator? Yes for a MEASURED floor value (refutable by observation,
+/// carrying error bars) and a CONTINGENCY per-world initial condition; no for a CLOSURE (an unpinned or
+/// weakly-pinned free knob where turning it changes outcomes without contradicting a measurement). A
+/// DERIVED value is computed from others by a named law and is only as pinned as its least-pinned input,
+/// so its EFFECTIVE provenance is the worst-case join up the DAG: it passes the refutability test exactly
+/// when its ancestry bottoms out entirely in measured and contingency leaves, and it is closure-tainted
+/// the moment the DAG touches a single closure. The closure-reachability query over this axis is the true
+/// free-knob surface of the calibration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Provenance {
+    /// A pinned floor value, refutable by observation without the sim (carries error bars, not free).
+    Measured,
+    /// A per-world sampled initial condition (the layer-4 contingency vector), authored because nature
+    /// did not derive it either, but with derived evolution, attractors, and priors.
+    Contingency,
+    /// Computed from other values by a named law; only as pinned as its least-pinned transitive input.
+    Derived,
+    /// An unpinned or weakly-pinned free knob: turning it changes outcomes without contradicting a
+    /// measurement. This is the authorship surface the reachability query hunts.
+    Closure,
+    /// Not yet declared: the additive-migration default for an absent or empty provenance field.
+    Unclassified,
+}
+
+impl Provenance {
+    /// The pinned-ness rank, lower is worse (less pinned), for the worst-case join up the DAG. Closure is
+    /// the worst, an Unclassified (unknown) value is treated as more suspect than a declared Derived, and
+    /// Measured and Contingency are the pinned leaves. The join of a set is the member of minimum rank.
+    fn rank(self) -> u8 {
+        match self {
+            Provenance::Closure => 0,
+            Provenance::Unclassified => 1,
+            Provenance::Derived => 2,
+            Provenance::Contingency => 3,
+            Provenance::Measured => 4,
+        }
+    }
+}
+
 impl ReservedValue {
     /// Whether this entry has graduated from reserved to set with a non-empty value.
     pub fn is_set(&self) -> bool {
@@ -105,6 +161,25 @@ impl ReservedValue {
                 id: self.id.clone(),
                 detail: format!(
                     "unknown category '{other}', expected fundamental, per_world, derivable, or defect"
+                ),
+            }),
+        }
+    }
+
+    /// This entry's DECLARED provenance tag (not the effective, DAG-joined one, which the manifest
+    /// resolves). An empty field reads UNCLASSIFIED (the migration default); a non-empty field that is not
+    /// one of the four known values fails loud (a mislabel fails the build).
+    pub fn provenance(&self) -> Result<Provenance, CalibrationError> {
+        match self.provenance.trim() {
+            "" => Ok(Provenance::Unclassified),
+            "measured" => Ok(Provenance::Measured),
+            "contingency" => Ok(Provenance::Contingency),
+            "derived" => Ok(Provenance::Derived),
+            "closure" => Ok(Provenance::Closure),
+            other => Err(CalibrationError::BadValue {
+                id: self.id.clone(),
+                detail: format!(
+                    "unknown provenance '{other}', expected measured, contingency, derived, or closure"
                 ),
             }),
         }
@@ -238,6 +313,149 @@ impl CalibrationManifest {
             }
         }
         Ok(unclassified)
+    }
+
+    /// The EFFECTIVE provenance of a value: the worst-case join of its declared provenance with the
+    /// effective provenance of every input, transitively up the provenance DAG. A value is only as pinned
+    /// as its least-pinned transitive input (the join takes the minimum-rank member), so a `derived` value
+    /// whose ancestry touches a `closure` resolves to `Closure` here even though its own declared tag is
+    /// `derived`. Only a `derived` value joins over inputs; a leaf's effective provenance is its own tag.
+    /// Cycle-safe: an id already on the current resolution path is not re-entered (a cycle is a defect
+    /// [`Self::validate_provenance`] reports; here it simply does not loop), and an input naming an unknown
+    /// id contributes `Unclassified` (a suspect leaf) rather than panicking.
+    pub fn effective_provenance(&self, id: &str) -> Result<Provenance, CalibrationError> {
+        let mut on_path = std::collections::BTreeSet::new();
+        self.effective_provenance_inner(id, &mut on_path)
+    }
+
+    fn effective_provenance_inner(
+        &self,
+        id: &str,
+        on_path: &mut std::collections::BTreeSet<String>,
+    ) -> Result<Provenance, CalibrationError> {
+        let Some(v) = self.values.get(id) else {
+            return Ok(Provenance::Unclassified);
+        };
+        let own = v.provenance()?;
+        if own != Provenance::Derived {
+            return Ok(own);
+        }
+        if !on_path.insert(id.to_string()) {
+            return Ok(Provenance::Unclassified);
+        }
+        let mut worst = own;
+        for input in &v.inputs {
+            let eff = self.effective_provenance_inner(input, on_path)?;
+            if eff.rank() < worst.rank() {
+                worst = eff;
+            }
+        }
+        on_path.remove(id);
+        Ok(worst)
+    }
+
+    /// The closure-reachability query: the ids whose EFFECTIVE provenance is `Closure` through an
+    /// INHERITED taint (their own declared provenance is not `closure`, but a closure sits somewhere in
+    /// their transitive inputs). This is the subtle free-knob surface, the `derived` lines whose ancestry
+    /// passes through a closure, distinct from the declared closures themselves (the roots). Returned in
+    /// file order, deterministic.
+    pub fn closure_reachable(&self) -> Result<Vec<&str>, CalibrationError> {
+        let mut out = Vec::new();
+        for id in &self.order {
+            let own = self.values[id].provenance()?;
+            if own != Provenance::Closure && self.effective_provenance(id)? == Provenance::Closure {
+                out.push(id.as_str());
+            }
+        }
+        Ok(out)
+    }
+
+    /// The provenance gate, sibling to [`Self::validate_categories`]: parse every entry's provenance and
+    /// check the DAG is well-formed. A `derived` value must declare at least one input (else it is not
+    /// derived); a non-derived value must declare none (a leaf has no DAG edges); every input must name an
+    /// id the manifest carries; and the DAG must be acyclic (a cycle has no well-defined worst-case join).
+    /// Fails loud on the first structural defect. Returns the ids still UNCLASSIFIED (the migration
+    /// remainder), like `validate_categories`; an empty return means every entry declares a provenance.
+    /// ADDITIVE: an absent field is Unclassified and never errors.
+    pub fn validate_provenance(&self) -> Result<Vec<&str>, CalibrationError> {
+        let mut unclassified = Vec::new();
+        for id in &self.order {
+            let v = &self.values[id];
+            let p = v.provenance()?;
+            if p == Provenance::Derived {
+                if v.inputs.is_empty() {
+                    return Err(CalibrationError::BadValue {
+                        id: id.clone(),
+                        detail: "a derived value must declare at least one input (the provenance-DAG edges it derives from)".to_string(),
+                    });
+                }
+            } else if !v.inputs.is_empty() {
+                return Err(CalibrationError::BadValue {
+                    id: id.clone(),
+                    detail: format!("a {p:?} value declares inputs, but only a derived value has provenance-DAG edges"),
+                });
+            }
+            for input in &v.inputs {
+                if !self.values.contains_key(input) {
+                    return Err(CalibrationError::BadValue {
+                        id: id.clone(),
+                        detail: format!("input '{input}' names an id the manifest does not carry"),
+                    });
+                }
+            }
+            if p == Provenance::Unclassified {
+                unclassified.push(id.as_str());
+            }
+        }
+        self.check_acyclic()?;
+        Ok(unclassified)
+    }
+
+    /// Depth-first cycle detection over the provenance-DAG input edges: a cycle has no well-defined
+    /// worst-case join, so it fails loud. Iterative (an explicit stack of `(id, next-input-index)`), so a
+    /// deep chain does not overflow the call stack.
+    fn check_acyclic(&self) -> Result<(), CalibrationError> {
+        const UNVISITED: u8 = 0;
+        const IN_PROGRESS: u8 = 1;
+        const DONE: u8 = 2;
+        // BTreeMap, not HashMap: deterministic iteration and the R-CANON-WALK-clean ordered container.
+        let mut mark: std::collections::BTreeMap<&str, u8> = std::collections::BTreeMap::new();
+        for start in &self.order {
+            if mark.get(start.as_str()).copied().unwrap_or(UNVISITED) != UNVISITED {
+                continue;
+            }
+            let mut stack: Vec<(&str, usize)> = vec![(start.as_str(), 0)];
+            mark.insert(start.as_str(), IN_PROGRESS);
+            while let Some(&(id, idx)) = stack.last() {
+                let inputs = self
+                    .values
+                    .get(id)
+                    .map(|v| v.inputs.as_slice())
+                    .unwrap_or(&[]);
+                if idx < inputs.len() {
+                    let child = inputs[idx].as_str();
+                    stack.last_mut().unwrap().1 += 1;
+                    match mark.get(child).copied().unwrap_or(UNVISITED) {
+                        IN_PROGRESS => {
+                            return Err(CalibrationError::BadValue {
+                                id: child.to_string(),
+                                detail: "a provenance-DAG cycle: this id is reachable from its own inputs"
+                                    .to_string(),
+                            });
+                        }
+                        DONE => {}
+                        _ => {
+                            mark.insert(child, IN_PROGRESS);
+                            stack.push((child, 0));
+                        }
+                    }
+                } else {
+                    mark.insert(id, DONE);
+                    stack.pop();
+                }
+            }
+        }
+        Ok(())
     }
 
     /// The ids still reserved, in file order: the standing review queue that CI and
@@ -796,5 +1014,125 @@ source = "s"
             CalibrationManifest::from_toml_str(dup).unwrap_err(),
             CalibrationError::Duplicate("x.y".to_string())
         );
+    }
+
+    // A `[[reserved]]` TOML block for a provenance-DAG entry: id, its provenance tag, and (for a derived
+    // value) its input edges. The other fields are filler so the entry parses.
+    fn prov_entry(id: &str, provenance: &str, inputs: &[&str]) -> String {
+        let inputs_toml = if inputs.is_empty() {
+            String::new()
+        } else {
+            let list = inputs
+                .iter()
+                .map(|i| format!("\"{i}\""))
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("inputs = [{list}]\n")
+        };
+        format!(
+            "[[reserved]]\nid = \"{id}\"\nbasis = \"b\"\nstatus = \"set\"\nvalue = \"1\"\nunit = \"u\"\nset_by = \"o\"\nset_date = \"d\"\nsource = \"s\"\nprovenance = \"{provenance}\"\n{inputs_toml}"
+        )
+    }
+
+    #[test]
+    fn provenance_worst_case_join_and_closure_reachability() {
+        // A small provenance DAG. sigma and year derive from measured/contingency leaves (pinned);
+        // t_inf derives from a closure (eta_escape), so it is closure-tainted through the join, and
+        // escape_flux inherits that taint transitively through t_inf.
+        let toml = [
+            prov_entry("k_B", "measured", &[]),
+            prov_entry("h", "measured", &[]),
+            prov_entry("mass", "contingency", &[]),
+            prov_entry("eta_escape", "closure", &[]),
+            prov_entry("sigma", "derived", &["k_B", "h"]),
+            prov_entry("year", "derived", &["mass"]),
+            prov_entry("t_inf", "derived", &["eta_escape", "mass"]),
+            prov_entry("escape_flux", "derived", &["t_inf"]),
+        ]
+        .concat();
+        let m = CalibrationManifest::from_toml_str(&toml).unwrap();
+        assert_eq!(
+            m.validate_provenance().unwrap(),
+            Vec::<&str>::new(),
+            "every entry declares a provenance"
+        );
+        // A derived value bottoming out entirely in measured/contingency leaves is pinned, not closure.
+        assert_eq!(
+            m.effective_provenance("sigma").unwrap(),
+            Provenance::Derived
+        );
+        assert_eq!(m.effective_provenance("year").unwrap(), Provenance::Derived);
+        // A derived value whose DAG touches a closure resolves to Closure, transitively.
+        assert_eq!(
+            m.effective_provenance("t_inf").unwrap(),
+            Provenance::Closure
+        );
+        assert_eq!(
+            m.effective_provenance("escape_flux").unwrap(),
+            Provenance::Closure
+        );
+        // A declared leaf keeps its own tag.
+        assert_eq!(m.effective_provenance("k_B").unwrap(), Provenance::Measured);
+        // The closure-reachability query returns the INHERITED-taint surface, not the declared closure.
+        assert_eq!(m.closure_reachable().unwrap(), vec!["t_inf", "escape_flux"]);
+    }
+
+    #[test]
+    fn provenance_validation_catches_malformed_dags() {
+        // A derived value with no inputs is not derived.
+        let m = CalibrationManifest::from_toml_str(&prov_entry("x", "derived", &[])).unwrap();
+        assert!(matches!(
+            m.validate_provenance().unwrap_err(),
+            CalibrationError::BadValue { .. }
+        ));
+        // A non-derived value declaring inputs (a leaf has no DAG edges).
+        let m = CalibrationManifest::from_toml_str(
+            &[
+                prov_entry("a", "measured", &[]),
+                prov_entry("b", "measured", &["a"]),
+            ]
+            .concat(),
+        )
+        .unwrap();
+        assert!(matches!(
+            m.validate_provenance().unwrap_err(),
+            CalibrationError::BadValue { .. }
+        ));
+        // An input naming an unknown id.
+        let m =
+            CalibrationManifest::from_toml_str(&prov_entry("d", "derived", &["ghost"])).unwrap();
+        assert!(matches!(
+            m.validate_provenance().unwrap_err(),
+            CalibrationError::BadValue { .. }
+        ));
+        // A cycle in the DAG has no well-defined worst-case join.
+        let m = CalibrationManifest::from_toml_str(
+            &[
+                prov_entry("p", "derived", &["q"]),
+                prov_entry("q", "derived", &["p"]),
+            ]
+            .concat(),
+        )
+        .unwrap();
+        assert!(matches!(
+            m.validate_provenance().unwrap_err(),
+            CalibrationError::BadValue { .. }
+        ));
+    }
+
+    #[test]
+    fn provenance_parsing_is_additive_and_orthogonal_to_category() {
+        // An unknown provenance fails loud (a mislabel fails the gate).
+        let m = CalibrationManifest::from_toml_str(&prov_entry("x", "guessed", &[])).unwrap();
+        assert!(matches!(
+            m.validate_provenance().unwrap_err(),
+            CalibrationError::BadValue { .. }
+        ));
+        // An absent provenance field is UNCLASSIFIED (additive migration), returned not errored, and it is
+        // orthogonal to category: the same entry with no category is unclassified on that axis too.
+        let toml = "[[reserved]]\nid = \"y\"\nbasis = \"b\"\nstatus = \"set\"\nvalue = \"1\"\nunit = \"u\"\nset_by = \"o\"\nset_date = \"d\"\nsource = \"s\"\n";
+        let m = CalibrationManifest::from_toml_str(toml).unwrap();
+        assert_eq!(m.validate_provenance().unwrap(), vec!["y"]);
+        assert_eq!(m.validate_categories().unwrap(), vec!["y"]);
     }
 }
