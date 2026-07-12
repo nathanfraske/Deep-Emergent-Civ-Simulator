@@ -131,10 +131,15 @@ impl RetiredFloorDerivationRegistry {
 const CANONICAL: &[(&str, &str, &[&str], &str, &str)] = &[
     (
         "world_time_cadence",
-        "a world's year and day (the aging, drift, and calendar cadences)",
-        &["world.orbital_period_seconds"],
+        "a world's DAY cadence in ticks (the rotation-derived beat: aging, drift, the diurnal calendar)",
+        // Repointed off the celestial.rs passthrough (OrbitalElements reads the period straight
+        // through, a vacuous identity probe) to the substantive downstream derivation, AND
+        // differentiated from clock_calendar_cell: this row floors the ROTATION period (the day),
+        // clock_calendar_cell the ORBITAL period (the year), so the two temporal cadences are distinct
+        // derivations sharing the ticks_from_seconds kernel (gate ruling, #168).
+        &["world.rotation_period_seconds"],
         "default",
-        "crates/world/src/celestial.rs",
+        "crates/sim/src/clock.rs",
     ),
     (
         "locomotion_speed_cell",
@@ -153,7 +158,11 @@ const CANONICAL: &[(&str, &str, &[&str], &str, &str)] = &[
     (
         "hydrology_water",
         "local water presence, rainfall, evaporation, and runoff",
-        &["hydrology.saturation_t_ref"],
+        // Repointed off the retired `hydrology.saturation_t_ref` (Arc-2 derive-vs-author, in no
+        // profile, a probe on it fails-loud) to a live reserved key the water balance reads: the
+        // condensation rate scales the water added (`precip = precip_rate * excess` in step_hydrology),
+        // so perturbing it moves the derived water output (gate ruling, #168).
+        &["hydrology.precipitation_rate"],
         "full",
         "crates/sim/src/environ.rs",
     ),
@@ -253,6 +262,43 @@ pub type LivenessProbe = fn(&CalibrationManifest) -> Result<ProbeReading, String
 pub fn liveness_probe(id: &str) -> Option<LivenessProbe> {
     match id {
         "carbon_fixation_rate" => Some(probe_carbon_fixation_rate),
+        // The two temporal cadences are distinct derivations sharing the `ticks_from_seconds` kernel:
+        // the calendar row floors the ORBITAL period (the year), the world-time row the ROTATION
+        // period (the day). Different inputs, so different probes (gate ruling, #168).
+        "clock_calendar_cell" => Some(probe_year_cadence),
+        "world_time_cadence" => Some(probe_day_cadence),
+        "metabolic_rate" => Some(probe_metabolic_rate),
+        "productivity_capacity" => Some(probe_productivity_capacity),
+        _ => None,
+    }
+}
+
+/// The ids whose site-local probe is not yet wired, each with the reason its gap stands (an honest
+/// coverage gap, never a false [`Liveness::Dead`]). The reason is data, so a newly wired probe drops
+/// its row from this table and a newly registered derivation adds one. The CI harness asserts every
+/// unwired id carries a reason here, so no gap is silent.
+pub fn unwired_gap_reason(id: &str) -> Option<&'static str> {
+    match id {
+        "locomotion_speed_cell" => Some(
+            "the grown-limb speed kernel needs a representative BodyPlan and organ registry; \
+             wireable with a dev body, deferred as bulky scaffolding",
+        ),
+        "decomposition_recovery" => Some(
+            "declared input `decompose.decomposer_rate` is a PHANTOM: no `require_fixed` reads it \
+             and no profile carries it (the decomposer rate comes from DecomposerDriver fixture \
+             data, not a reserved manifest scalar). Needs a live key or a driver-param probe shape; \
+             surfaced for the gate's ruling (#168 catch 3)",
+        ),
+        "weathering_soil_nutrient" => Some(
+            "the deposit rate (`base_rate * wet`) is computed inline in the `weather_minerals` grid \
+             loop; no pure kernel to call site-locally without a run-path refactor or a single-cell \
+             Field situation, deferred",
+        ),
+        "hydrology_water" => Some(
+            "`step_hydrology` is a private `&mut self` grid method; the input is repointed to the \
+             live `hydrology.precipitation_rate` (source-verified to move the water balance), and \
+             the probe is wireable via a minimal Field situation once the step is exposed, deferred",
+        ),
         _ => None,
     }
 }
@@ -309,6 +355,203 @@ fn probe_carbon_fixation_rate(m: &CalibrationManifest) -> Result<ProbeReading, S
         baseline,
         perturbed,
     })
+}
+
+/// The shared tick-cadence probe body: floor a temporal period over the base tick and assert the tick
+/// count responds to the period. `ticks_from_seconds` is a non-trivial floored division (distinct from
+/// the raw period read the world-time row was repointed off), so doubling the period moves the count.
+/// The count is a `u64`, read into [`Fixed`] for the two-point comparison, exact for any realistic
+/// cadence (well under the fixed-point integer range). `label` names the cadence in error text.
+fn probe_tick_cadence(
+    m: &CalibrationManifest,
+    label: &str,
+    period: Fixed,
+) -> Result<ProbeReading, String> {
+    use crate::clock::{base_tick_seconds_fixed, ticks_from_seconds};
+    let base_tick =
+        base_tick_seconds_fixed(m).map_err(|e| format!("{label} cadence probe: {e}"))?;
+    let cadence_ticks = |seconds: Fixed| -> Result<Fixed, String> {
+        let ticks = ticks_from_seconds(seconds, base_tick)
+            .map_err(|e| format!("{label} cadence probe: {e:?}"))?;
+        i32::try_from(ticks).map(Fixed::from_int).map_err(|_| {
+            format!("{label} cadence probe: the tick count exceeds the probe's read range")
+        })
+    };
+    let baseline = cadence_ticks(period)?;
+    let perturbed_period = period
+        .checked_mul(Fixed::from_int(PROBE_PERTURBATION))
+        .ok_or_else(|| format!("{label} cadence probe: period perturbation overflowed"))?;
+    let perturbed = cadence_ticks(perturbed_period)?;
+    Ok(ProbeReading {
+        baseline,
+        perturbed,
+    })
+}
+
+/// The year-cadence probe (`clock_calendar_cell`): the year in ticks must respond to
+/// `world.orbital_period_seconds`, the orbital period floored over the base tick.
+fn probe_year_cadence(m: &CalibrationManifest) -> Result<ProbeReading, String> {
+    use crate::clock::orbital_from_manifest;
+    let orbit = orbital_from_manifest(m).map_err(|e| format!("year cadence probe: {e}"))?;
+    probe_tick_cadence(m, "year", orbit.orbital_period_seconds)
+}
+
+/// The day-cadence probe (`world_time_cadence`): the day in ticks must respond to
+/// `world.rotation_period_seconds`, the rotation period floored over the base tick. Distinct from the
+/// year cadence (a different period), so the two temporal rows are meaningfully separate derivations
+/// rather than one probe under two ids (gate ruling, #168). The rotation cadence is a real run-path
+/// derivation: `DiurnalSky::rotation_period_ticks` drives the diurnal cycle.
+fn probe_day_cadence(m: &CalibrationManifest) -> Result<ProbeReading, String> {
+    use crate::clock::orbital_from_manifest;
+    let orbit = orbital_from_manifest(m).map_err(|e| format!("day cadence probe: {e}"))?;
+    probe_tick_cadence(m, "day", orbit.rotation_period_seconds)
+}
+
+/// The metabolic-rate probe: a being's basal metabolic rate must respond to
+/// `metabolism.kleiber_coefficient`. Kleiber's law P = a * m^(3/4) reads the coefficient as a linear
+/// prefactor over the body mass, so doubling it moves the rate at any positive mass. The situation is
+/// one representative body mass; the cap is a structural non-clipping ceiling for the two-point read,
+/// never a world value.
+fn probe_metabolic_rate(m: &CalibrationManifest) -> Result<ProbeReading, String> {
+    use crate::physiology::MetabolicAnchors;
+    use civsim_physics::laws::basal_metabolic_rate;
+    // A cap far above any basal rate the perturbed coefficient reaches at the representative mass, so
+    // the probe reads the unclipped Kleiber response rather than a saturated ceiling.
+    let rate_cap = Fixed::from_int(1_000_000_000);
+    let mass_kg = Fixed::from_int(10);
+    let base =
+        MetabolicAnchors::from_manifest(m).map_err(|e| format!("metabolic_rate probe: {e}"))?;
+    let baseline = basal_metabolic_rate(mass_kg, base.kleiber_a, rate_cap);
+    let perturbed_coeff = base
+        .kleiber_a
+        .checked_mul(Fixed::from_int(PROBE_PERTURBATION))
+        .ok_or_else(|| {
+            "metabolic_rate probe: kleiber-coefficient perturbation overflowed".to_string()
+        })?;
+    let perturbed = basal_metabolic_rate(mass_kg, perturbed_coeff, rate_cap);
+    Ok(ProbeReading {
+        baseline,
+        perturbed,
+    })
+}
+
+/// The productivity-capacity probe: per-cell biomass productivity must respond to
+/// `productivity.soil_requirement`. `biomass_from` takes the Liebig minimum over the four factor
+/// satisfactions, each supply over its requirement; the situation saturates water, light, and
+/// temperature and holds the soil supply at the base requirement so soil is the binding factor.
+/// Doubling the soil requirement halves the soil satisfaction, so the minimum (and the biomass)
+/// moves. This mirrors the soil_baseline family: a requirement the derived output must track.
+fn probe_productivity_capacity(m: &CalibrationManifest) -> Result<ProbeReading, String> {
+    use crate::environ::{biomass_from, EnvironCalib};
+    let base =
+        EnvironCalib::from_manifest(m).map_err(|e| format!("productivity_capacity probe: {e}"))?;
+    // Water, light, and temperature supplied well past their requirements (each factor saturates at
+    // one), soil held at its own requirement so it is the binding Liebig factor. Situation
+    // scaffolding for the two-point read; it never enters the sim.
+    let saturated = Fixed::from_int(1000);
+    let soil_supply = base.soil_req;
+    let read =
+        |calib: &EnvironCalib| biomass_from(saturated, saturated, saturated, soil_supply, calib);
+    let baseline = read(&base);
+    let mut perturbed_calib = base;
+    perturbed_calib.soil_req = base
+        .soil_req
+        .checked_mul(Fixed::from_int(PROBE_PERTURBATION))
+        .ok_or_else(|| {
+            "productivity_capacity probe: soil-requirement perturbation overflowed".to_string()
+        })?;
+    let perturbed = read(&perturbed_calib);
+    Ok(ProbeReading {
+        baseline,
+        perturbed,
+    })
+}
+
+// --- The coverage signal (task #43 slice 3): the classification beside the pass/fail verdict ---
+//
+// A green gate must never be read as proof where the probe is absent or weak. Beside the Live/Dead
+// verdict, every registered derivation carries a coverage classification, so the gaps stay visible.
+// Only Dead fails CI (a derived output gone constant blocks the merge, the soil_baseline regression);
+// the other states are surfaced as gaps to close over time, never failures. This extends C's
+// live-but-deadband idea to the trivial and unwired cases (the gate's ruling, #168).
+
+/// The coverage classification of one registered derivation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Coverage {
+    /// A wired probe ran and the derived output responded to its input: the pass.
+    Live,
+    /// A wired probe ran and the derived output held constant under the perturbation: the fail (the
+    /// soil_baseline bug). The only state that fails CI.
+    Dead,
+    /// Registered and cross-checked, but no probe closure yet. An honest gap ([`unwired_gap_reason`]
+    /// names why), never a false [`Coverage::Dead`].
+    Unwired,
+    /// The site-local output is an identity read of the perturbed input, so a probe there is
+    /// structurally guaranteed Live and proves nothing (the passthrough case). The standing guard
+    /// against a passthrough slipping into the registry as a false Live. No row is Trivial today
+    /// (world_time_cadence was repointed off its passthrough), so this is the safety net for the
+    /// future, reported as a gap.
+    Trivial,
+    /// The probe reads Live at its site, but the derivation's effect lands in a downstream deadband
+    /// on the four canonical pins, so a scenario-level hash sweep would show it byte-neutral. A
+    /// coverage gap reported softly, never a liveness failure: the site-local read already proves the
+    /// output is alive. Detecting this needs the pinned scenario runs, out of the site-local harness's
+    /// scope, so it is a declared classification (data), surfaced for a future scenario-level signal.
+    DeadbandOnPins,
+}
+
+/// One row of the coverage report: a registered derivation and its classification. When the state is
+/// [`Coverage::Unwired`], `note` carries the gap reason; for a wired probe that failed to read (a
+/// fail-loud manifest error), `note` carries the error, and the row is left [`Coverage::Unwired`]
+/// rather than a false Dead (a probe that could not run has not proven the output dead).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CoverageRow {
+    /// The derivation id.
+    pub id: String,
+    /// Its coverage classification.
+    pub coverage: Coverage,
+    /// The gap reason for a non-Live/Dead state, or a probe error, in prose; empty for a clean
+    /// Live/Dead verdict.
+    pub note: String,
+}
+
+/// The full coverage report over the canonical registry, read against a base manifest: run each wired
+/// probe and classify it Live or Dead, classify each unwired id Unwired with its gap reason, and pass
+/// through the declared Trivial / DeadbandOnPins classifications. Deterministic (registry order), the
+/// same discipline the registry walk follows. This is the data the CI harness asserts over and prints.
+pub fn coverage_report(m: &CalibrationManifest) -> Vec<CoverageRow> {
+    let registry = RetiredFloorDerivationRegistry::canonical();
+    let mut rows = Vec::with_capacity(registry.len());
+    for d in registry.iter() {
+        let row = match liveness_probe(&d.id) {
+            Some(probe) => match probe(m) {
+                Ok(reading) => CoverageRow {
+                    id: d.id.clone(),
+                    coverage: match assess(&reading) {
+                        Liveness::Live => Coverage::Live,
+                        Liveness::Dead => Coverage::Dead,
+                    },
+                    note: String::new(),
+                },
+                // A probe that fails to read (a fail-loud manifest error) has NOT proven the output
+                // dead: it is an unwired-for-this-manifest gap, carrying the error, never a false Dead.
+                Err(e) => CoverageRow {
+                    id: d.id.clone(),
+                    coverage: Coverage::Unwired,
+                    note: e,
+                },
+            },
+            None => CoverageRow {
+                id: d.id.clone(),
+                coverage: Coverage::Unwired,
+                note: unwired_gap_reason(&d.id)
+                    .unwrap_or("no probe wired and no gap reason recorded")
+                    .to_string(),
+            },
+        };
+        rows.push(row);
+    }
+    rows
 }
 
 #[cfg(test)]
@@ -450,6 +693,110 @@ mod tests {
             assess(&dead),
             Liveness::Dead,
             "a derived output constant under its input perturbation must read Dead"
+        );
+    }
+
+    // --- The remaining wired probes (slice 4) ---
+
+    #[test]
+    fn the_two_temporal_cadences_read_live_on_distinct_periods() {
+        // The clock row floors the ORBITAL period (the year), the world-time row the ROTATION period
+        // (the day): distinct derivations sharing the ticks_from_seconds kernel, each responding to its
+        // own period, so both read Live.
+        let m = base_manifest();
+        for id in ["clock_calendar_cell", "world_time_cadence"] {
+            let probe = liveness_probe(id).unwrap_or_else(|| panic!("{id} is wired"));
+            let reading =
+                probe(&m).expect("the fixture manifest supplies the periods and base tick");
+            assert_eq!(
+                assess(&reading),
+                Liveness::Live,
+                "{id} must respond to its period"
+            );
+        }
+    }
+
+    #[test]
+    fn the_metabolic_rate_probe_reads_live() {
+        // Kleiber's law reads the coefficient as a linear prefactor, so the basal rate responds.
+        let m = base_manifest();
+        let probe = liveness_probe("metabolic_rate").expect("metabolic_rate is wired");
+        let reading = probe(&m).expect("the fixture manifest supplies the Kleiber coefficient");
+        assert_eq!(assess(&reading), Liveness::Live);
+    }
+
+    #[test]
+    fn the_productivity_capacity_probe_reads_live() {
+        // With soil the binding Liebig factor, doubling its requirement moves the biomass minimum.
+        let m = base_manifest();
+        let probe =
+            liveness_probe("productivity_capacity").expect("productivity_capacity is wired");
+        let reading =
+            probe(&m).expect("the fixture manifest supplies the productivity requirements");
+        assert_eq!(assess(&reading), Liveness::Live);
+    }
+
+    // --- The coverage signal (slice 3) ---
+
+    #[test]
+    fn the_coverage_report_has_no_dead_and_every_unwired_carries_a_reason() {
+        // The CI shape in miniature: over the canonical registry, no row is Dead (the only failing
+        // state), and every Unwired row carries a non-empty gap reason so no gap is silent.
+        let m = base_manifest();
+        let report = coverage_report(&m);
+        assert_eq!(
+            report.len(),
+            9,
+            "one coverage row per registered derivation"
+        );
+        for row in &report {
+            assert_ne!(
+                row.coverage,
+                Coverage::Dead,
+                "{} read Dead: a derived output went constant",
+                row.id
+            );
+            if row.coverage == Coverage::Unwired {
+                assert!(
+                    !row.note.is_empty(),
+                    "unwired row {} must carry a gap reason",
+                    row.id
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_wired_ids_read_live_and_the_phantom_decompose_is_a_surfaced_gap() {
+        let m = base_manifest();
+        let report = coverage_report(&m);
+        let by_id = |id: &str| {
+            report
+                .iter()
+                .find(|r| r.id == id)
+                .expect("id present")
+                .coverage
+        };
+        // The four wired derivations read Live.
+        for id in [
+            "carbon_fixation_rate",
+            "clock_calendar_cell",
+            "world_time_cadence",
+            "metabolic_rate",
+            "productivity_capacity",
+        ] {
+            assert_eq!(by_id(id), Coverage::Live, "{id} should read Live");
+        }
+        // The phantom-input row (catch 3) is a surfaced Unwired gap, never a false Dead, and its note
+        // names the phantom so the gate can rule.
+        let decompose = report
+            .iter()
+            .find(|r| r.id == "decomposition_recovery")
+            .expect("present");
+        assert_eq!(decompose.coverage, Coverage::Unwired);
+        assert!(
+            decompose.note.contains("PHANTOM"),
+            "the decompose gap reason names the phantom input"
         );
     }
 }

@@ -22,6 +22,7 @@ The 11 deriving subsystems below live OUTSIDE the authored floor. Each produces 
 ### `crates/sim/src/clock.rs`
 
 - a world's year/day/season in TICKS, and the cell area in metres <- the world's orbit (world-seconds) divided by the base tick (1 tick = 1 world-second, reserved). The calendar is NOT a hardcoded 365 days; it falls out of the orbit and the tick. The cell edge derives as a reference creature's real ground speed (m/s) x 1 s/tick (see locomotion base_speed), cross-checked by NPP density x cell area = standing crop. (`crates/sim/src/clock.rs:81`)
+- the DAY cadence in TICKS (the rotation-derived beat: aging, drift, the diurnal calendar) <- the ROTATION period floored over the base tick, this same kernel; repointed here off the celestial.rs passthrough (OrbitalElements is a manifest read, not a derivation) and differentiated from clock_calendar_cell (which floors the ORBITAL period, the year), so the two temporal cadences are distinct derivations, day versus year (gate ruling, #168). The rotation cadence is real on the run path: DiurnalSky::rotation_period_ticks drives the diurnal cycle. (`crates/sim/src/clock.rs:82`)
 ### `crates/sim/src/decompose.rs`
 
 - soil-nutrient recovery (the matter cycle corpse -> decompose -> soil -> productivity) <- local conditions (moisture, oxygen, warmth via a Liebig minimum) x the standing decomposer biomass. Decomposition is NOT universally good and NOT an authored recovery time: it is condition-gated and life-gated, so an anaerobic or decomposer-poor world recovers differently (the axis set is data, not the hardcoded moisture-oxygen-warmth triad). (`crates/sim/src/decompose.rs:145`)
@@ -41,9 +42,6 @@ The 11 deriving subsystems below live OUTSIDE the authored floor. Each produces 
 ### `crates/sim/src/physiology.rs`
 
 - a being's metabolic rate, energy drain, and heat loss <- Kleiber's law P = a * m^(3/4) over the body's own mass (kleiber_a and body_mass_kg_scale are per-race anchors, sigma is a universal constant); the rate is NOT authored, it derives from the being's body. Water loss derives from 1/L_vap (latent heat of vaporization) x metabolic power (physiology water-loss coupling, landed with the Mirror water arc). (`crates/sim/src/physiology.rs:130`)
-### `crates/world/src/celestial.rs`
-
-- a world's year and day (the time cadences: aging, drift, the calendar) <- the world's own orbit in canonical world-seconds; NEVER a hardcoded 365-day year (dev_earth is a labelled fixture, not the default). North-star: derive orbital_period_seconds from Kepler's third law over (semi-major axis, star mass) rather than carrying it as a scalar. (`crates/world/src/celestial.rs:38`)
 
 ## Material and quantity floor axes (the floor proper)
 

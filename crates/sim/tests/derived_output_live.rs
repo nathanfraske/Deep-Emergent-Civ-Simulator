@@ -26,9 +26,14 @@
 //! The site-local liveness probe (perturb the input, assert the derived value responds) is the next
 //! slice; this slice locks the membership.
 
-use civsim_sim::derive_gate::RetiredFloorDerivationRegistry;
+use civsim_sim::calibration::CalibrationManifest;
+use civsim_sim::derive_gate::{coverage_report, Coverage, RetiredFloorDerivationRegistry};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+
+/// The labelled dev-fixtures profile the CI harness reads: it carries the set (not reserved)
+/// constants the wired probes perturb. The gate reads run state and asserts; it never enters the sim.
+const DEV_FIXTURES: &str = include_str!("../../../calibration/profiles/dev-fixtures.toml");
 
 /// The determinism-critical crate source roots the annotations live in, repo-relative.
 const SCANNED_CRATES: &[&str] = &[
@@ -141,6 +146,62 @@ fn every_derives_annotation_has_a_registry_row_and_vice_versa() {
             d.id, d.site, at
         );
     }
+}
+
+#[test]
+fn the_coverage_gate_fails_on_no_dead_derivation_and_prints_the_report() {
+    // The CI harness (task #43 slice 4): walk the canonical registry against the dev-fixtures
+    // manifest, run every wired liveness probe, and FAIL on any Dead (a derived output gone constant,
+    // the soil_baseline regression the constructor gate cannot see). The other states (Unwired,
+    // Trivial, DeadbandOnPins) are surfaced as gaps, never failures: a green gate is honest about
+    // where the probe is absent or weak. The report prints so the gaps stay visible in CI logs.
+    let manifest = CalibrationManifest::from_toml_str(DEV_FIXTURES).expect("dev-fixtures parses");
+    let report = coverage_report(&manifest);
+    assert!(
+        !report.is_empty(),
+        "the registry carries derivations to classify"
+    );
+
+    let mut dead: Vec<&str> = Vec::new();
+    let mut silent_gap: Vec<&str> = Vec::new();
+    println!(
+        "derived-output coverage signal ({} derivations):",
+        report.len()
+    );
+    for row in &report {
+        let state = match row.coverage {
+            Coverage::Live => "LIVE",
+            Coverage::Dead => "DEAD",
+            Coverage::Unwired => "unwired",
+            Coverage::Trivial => "trivial",
+            Coverage::DeadbandOnPins => "deadband-on-pins",
+        };
+        if row.note.is_empty() {
+            println!("  {state:>16}  {}", row.id);
+        } else {
+            println!("  {state:>16}  {}  ({})", row.id, row.note);
+        }
+        if row.coverage == Coverage::Dead {
+            dead.push(&row.id);
+        }
+        // Every non-Live/Dead state must carry a reason, so no coverage gap is silent.
+        if matches!(
+            row.coverage,
+            Coverage::Unwired | Coverage::Trivial | Coverage::DeadbandOnPins
+        ) && row.note.is_empty()
+        {
+            silent_gap.push(&row.id);
+        }
+    }
+
+    assert!(
+        dead.is_empty(),
+        "derived outputs read Dead (constant under their declared input, the soil_baseline bug): {dead:?}"
+    );
+    assert!(
+        silent_gap.is_empty(),
+        "coverage gaps with no reason recorded (add a gap reason so the gap is visible): {silent_gap:?}"
+    );
 }
 
 #[test]
