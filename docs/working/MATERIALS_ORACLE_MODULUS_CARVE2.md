@@ -1,5 +1,20 @@
 # Materials oracle, corrected modulus carve: bulk modulus from lattice curvature on the radius (design-first)
 
+> GENERALIZED, not superseded-and-wasted (#182, generator architecture). The owner's generator architecture
+> (`docs/working/MATERIALS_ORACLE_GENERATOR_ARCH.md`, `MATERIALS_ORACLE_EWALD_CARVE.md`) dissolves both seams this
+> carve surfaced, and the gate ruled this build the AB point-charge SPECIAL CASE that empirically validates it:
+> the tabulated-Madelung prototype library generalizes to the Ewald charge-lattice sum (an Ewald kernel computes
+> it over positions, `A2B3` included), and the ionic-versus-covalent fork generalizes to one charge-equilibration
+> solve (QEq's partial charge corrects the divalent-oxide overestimate from first principles). The build
+> (`lattice_modulus.rs`, the Shannon-radius, Born-exponent, and prototype data files) STAYS on the branch as the
+> foundation and validation: the radii feed the bond-valence positions and the Born-Mayer repulsion, the Born
+> exponents feed the repulsion, the prototype key demotes to a memoization index, and `B = (n-1)A/(18 r0^4)`
+> becomes the AB fast path and a validation check. NOT added, per the gate: the reserved correction factor (QEq
+> supplies the partial charge) and the tabulated `A2B3` Madelung (Ewald computes it). The retags stand (the
+> atomization column to `[M, floor-and-validation]`, `E_coh/V` to the labeled screen tier). The whole slice
+> merges once QEq gives the corrected partial-charge `B`, not the point-charge value alone. This document is kept
+> as the record of the two seams the special case surfaced and the architecture that dissolves them.
+
 Agent B, the gate's reframe on #182. The owner's research redirects the modulus derivation from the
 cohesive-energy-density estimator to the principled radius-curvature route for the seed registry's
 ionic-covalent oxides, and splits the emitted property into the derivable bulk modulus and the class-dispatched

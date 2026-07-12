@@ -294,16 +294,17 @@ impl PrototypeLibrary {
 // ----- The Born-Lande bulk-modulus derivation -----
 
 /// The Coulomb energy `e^2 / (4 pi eps0)` at unit separation, in electron-volt-angstroms (CODATA 2018,
-/// `14.399645 eV.A`). A fundamental physical law constant (the physics floor, Principle 11), the energy scale of
-/// the Madelung sum.
+/// `14.399645 eV.A`), as the exact rational `1439964 / 100000`. A fundamental physical law constant (the physics
+/// floor, Principle 11), the energy scale of the Madelung sum, built by exact ratio rather than a decimal parse.
 fn coulomb_energy_ev_angstrom() -> Fixed {
-    Fixed::from_decimal_str("14.39964").expect("the Coulomb energy constant is a valid decimal")
+    Fixed::from_ratio(1_439_964, 100_000)
 }
 
 /// The conversion from `eV/A^3` to gigapascals (CODATA: `1 eV = 1.602177e-19 J`, `1 A^3 = 1e-30 m^3`, so
-/// `1 eV/A^3 = 160.2177 GPa`). A fundamental unit-conversion law constant.
+/// `1 eV/A^3 = 160.2177 GPa`), as the exact rational `1602177 / 10000`. A fundamental unit-conversion law
+/// constant, built by exact ratio rather than a decimal parse.
 fn gpa_per_ev_per_angstrom_cubed() -> Fixed {
-    Fixed::from_decimal_str("160.2177").expect("the eV/A^3 to GPa conversion is a valid decimal")
+    Fixed::from_ratio(1_602_177, 10_000)
 }
 
 /// The identified ionic roles of a binary phase: which element is the cation and which the anion, their integer
