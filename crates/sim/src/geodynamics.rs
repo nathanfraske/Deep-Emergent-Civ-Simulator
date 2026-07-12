@@ -172,6 +172,60 @@ pub fn convection_solve(
     )
 }
 
+/// A column's decaying radiogenic heat source paired with its thermal state, for the secular thermal
+/// history: over geological time the heat-producing isotope reservoir spends down (the memory primitive
+/// [`laws::radiogenic_decay`]), so the radiogenic heat production ([`laws::radiogenic_heat`] over the
+/// reservoir) falls and the interior cools, the spent-world relaxation the static-source convection step
+/// cannot express on its own.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SecularState {
+    /// The column's thermal state.
+    pub column: ColumnState,
+    /// The heat-producing isotope reservoir (concentration), spending down over the clock.
+    pub reservoir: Fixed,
+}
+
+/// One secular step over a world-clock tick: decay the isotope reservoir, recompute the radiogenic heat
+/// production it now supplies, and apply the convection step under that (falling) production. `decay_constant`
+/// is the isotope's per-tick decay rate and `specific_heat_production` its heat per unit reservoir; the
+/// step reuses [`convection_step`] with the recomputed heat production, so the whole convection composition
+/// (buoyancy, onset, flow, advection, conduction) runs under a source that dies over deep time.
+// @derives: the interior column's secular thermal history <- radiogenic_decay (the isotope reservoir spending down over the world clock) feeding radiogenic_heat (the falling heat production) into the convection step, so the interior warms under radiogenic heating and cools as the sources decay; no authored cooling knob, the source history is the decaying reservoir
+pub fn secular_step(
+    state: &SecularState,
+    p: &ColumnParams,
+    decay_constant: Fixed,
+    specific_heat_production: Fixed,
+) -> SecularState {
+    let reservoir = laws::radiogenic_decay(state.reservoir, decay_constant, p.dt);
+    let heat_production = laws::radiogenic_heat(reservoir, specific_heat_production);
+    let column = convection_step(
+        &state.column,
+        &ColumnParams {
+            heat_production,
+            ..*p
+        },
+    );
+    SecularState { column, reservoir }
+}
+
+/// March the secular step over `ticks` world-clock ticks, returning the interior's state after that span of
+/// geological time. Deterministic and bounded by `ticks` (never an unbounded spin), the time-marching
+/// counterpart to the fixed-`H` relaxation [`convection_solve`].
+pub fn secular_history(
+    initial: SecularState,
+    p: &ColumnParams,
+    decay_constant: Fixed,
+    specific_heat_production: Fixed,
+    ticks: u64,
+) -> SecularState {
+    let mut state = initial;
+    for _ in 0..ticks {
+        state = secular_step(&state, p, decay_constant, specific_heat_production);
+    }
+    state
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -269,6 +323,89 @@ mod tests {
         assert!(
             next.convecting,
             "the convection latch holds once set, even below the onset threshold"
+        );
+    }
+
+    #[test]
+    fn the_reservoir_decays_and_the_source_dies_over_the_thermal_history() {
+        let (column0, params) = column(Fixed::ZERO);
+        let decay = Fixed::from_ratio(1, 4); // 25% per tick, exactly representable
+        let specific_heat_production = Fixed::from_int(4);
+        let initial = SecularState {
+            column: column0,
+            reservoir: Fixed::from_int(100),
+        };
+        // One step: the reservoir spends down first-order, 100 -> 75.
+        let s1 = secular_step(&initial, &params, decay, specific_heat_production);
+        assert_eq!(
+            s1.reservoir,
+            Fixed::from_int(75),
+            "the isotope reservoir spends down first-order"
+        );
+        // It keeps falling, monotone.
+        let s2 = secular_step(&s1, &params, decay, specific_heat_production);
+        assert!(
+            s2.reservoir < s1.reservoir,
+            "the reservoir decays monotonically"
+        );
+        // Over a long history the source is spent (the reservoir approaches zero).
+        let late = secular_history(initial, &params, decay, specific_heat_production, 200);
+        assert!(
+            late.reservoir < Fixed::from_ratio(1, 100),
+            "the heat source is spent after long geological time"
+        );
+    }
+
+    #[test]
+    fn a_decaying_source_leaves_the_interior_cooler_than_a_sustained_one() {
+        // A decaying reservoir loses its heat source over time, so the interior cools below what a
+        // sustained (non-decaying) source would hold: the spent-world relaxation.
+        let (column0, params) = column(Fixed::ZERO);
+        let specific_heat_production = Fixed::from_int(4);
+        let initial = SecularState {
+            column: column0,
+            reservoir: Fixed::from_int(100),
+        };
+        let decaying = secular_history(
+            initial,
+            &params,
+            Fixed::from_ratio(1, 4),
+            specific_heat_production,
+            300,
+        );
+        // Zero decay constant: the source never spends down, so it sustains a warmer interior.
+        let sustained =
+            secular_history(initial, &params, Fixed::ZERO, specific_heat_production, 300);
+        assert!(
+            decaying.column.temperature < sustained.column.temperature,
+            "the interior with a decaying source ends cooler than one with a sustained source"
+        );
+    }
+
+    #[test]
+    fn the_secular_history_is_deterministic() {
+        let (column0, params) = column(Fixed::ZERO);
+        let initial = SecularState {
+            column: column0,
+            reservoir: Fixed::from_int(100),
+        };
+        let a = secular_history(
+            initial,
+            &params,
+            Fixed::from_ratio(1, 4),
+            Fixed::from_int(4),
+            100,
+        );
+        let b = secular_history(
+            initial,
+            &params,
+            Fixed::from_ratio(1, 4),
+            Fixed::from_int(4),
+            100,
+        );
+        assert_eq!(
+            a, b,
+            "the same synthetic thermal history reproduces the same outcome"
         );
     }
 }

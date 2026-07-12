@@ -17,7 +17,7 @@ The lists below are GENERATED from `crates/physics/data/*.toml`, `crates/physics
 
 ## Deriving substrates (check here BEFORE authoring: what the world derives, and where)
 
-The 10 deriving subsystems below live OUTSIDE the authored floor. Each produces a world quantity from the floor and the situation, so its output must never be authored: if the value you need appears here, read or extend the subsystem, do not set a number. This is the list that stops `1 year = 365 days` from being authored when orbital mechanics already derives it. Generated from the `// @derives:` markers in the code; a subsystem missing its marker is a gap in this map, so mark every derivation entry point.
+The 11 deriving subsystems below live OUTSIDE the authored floor. Each produces a world quantity from the floor and the situation, so its output must never be authored: if the value you need appears here, read or extend the subsystem, do not set a number. This is the list that stops `1 year = 365 days` from being authored when orbital mechanics already derives it. Generated from the `// @derives:` markers in the code; a subsystem missing its marker is a gap in this map, so mark every derivation entry point.
 
 ### `crates/sim/src/clock.rs`
 
@@ -34,6 +34,7 @@ The 10 deriving subsystems below live OUTSIDE the authored floor. Each produces 
 ### `crates/sim/src/geodynamics.rs`
 
 - the interior column temperature and convection-onset state <- the merged floor law-forms (thermal_density_anomaly, rayleigh_number, threshold_latch, stokes_velocity, heat_advection, internal_heat_evolution, conduction) over the column's own physical parameters; no authored convection knob (Ra_crit is the derived marginal-stability eigenvalue, the Stokes coefficient the derived 2/9, the buoyancy the real material thermal expansion). A bare @derives marker (no [id] token): this is a NEW derivation, not a retired-floor replacement, so it lands on the deriving-substrate billboard but stays out of the retired-floor-derivation registry (derive_gate.rs) and its [id] cross-check; broadening the liveness gate to any derived output is C's #43 slices 3+4, not this lane. (`crates/sim/src/geodynamics.rs:97`)
+- the interior column's secular thermal history <- radiogenic_decay (the isotope reservoir spending down over the world clock) feeding radiogenic_heat (the falling heat production) into the convection step, so the interior warms under radiogenic heating and cools as the sources decay; no authored cooling knob, the source history is the decaying reservoir (`crates/sim/src/geodynamics.rs:193`)
 ### `crates/sim/src/locomotion.rs`
 
 - movement speed in tiles/tick, and (inverted) the cell edge in metres <- a real ground speed (about 1.4 m/s) / the tile edge, at the 1 s/tick base. The cell size is NOT free: it is fixed by one real creature's speed x the tick. Body-side, a being's own speed derives from its size (morphology), not a plant/animal tag. (`crates/sim/src/locomotion.rs:88`)
