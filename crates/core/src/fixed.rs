@@ -217,6 +217,26 @@ impl Fixed {
         Fixed(radicand.isqrt() as i64)
     }
 
+    /// The real cube root, exact to the last fixed-point bit and deterministic, and defined for a
+    /// negative input (the cube root of a negative is real, unlike the square root). Computed by an
+    /// integer cube root over the 128-bit radicand `|bits| << 2*FRAC_BITS` (since
+    /// `cbrt(b / 2^F) * 2^F = icbrt(b * 2^(2F))`), sign carried through, so there is no float and no
+    /// transcendental series, and the result is identical on every machine and thread count. This is
+    /// the exact sibling to [`Fixed::sqrt`]: where `self.powf(1/3)` computes a cube root as the
+    /// exponential of a third of the logarithm and carries the compounded rounding of two series,
+    /// this floors a single integer root with no series error, so a perfect cube returns exactly.
+    #[inline]
+    pub fn cbrt(self) -> Fixed {
+        if self.0 == 0 {
+            return Fixed::ZERO;
+        }
+        // The magnitude's radicand: |bits| shifted by 2*FRAC_BITS. |bits| is at most 2^63, so the
+        // shift by 64 stays under 2^127 and fits the u128 radicand.
+        let radicand = (self.0.unsigned_abs() as u128) << (2 * FRAC_BITS);
+        let root = integer_cbrt(radicand) as i64;
+        Fixed(if self.0 < 0 { -root } else { root })
+    }
+
     /// Clamp into `[lo, hi]`.
     #[inline]
     pub fn clamp(self, lo: Fixed, hi: Fixed) -> Fixed {
@@ -272,6 +292,25 @@ impl Fixed {
         let bits = Fixed::sum_bits(iter).clamp(i64::MIN as i128, i64::MAX as i128);
         Fixed(bits as i64)
     }
+}
+
+/// The integer cube root of a `u128`: the largest `r` with `r^3 <= n`, computed by a bounded binary
+/// search. Every step is exact integer arithmetic (the cube guarded by `checked_mul`, so a candidate
+/// whose cube overflows `u128` is correctly treated as too large), so the result is deterministic and
+/// identical on every machine. The upper bound `1 << 43` covers the whole `u128` range, since
+/// `(2^43)^3 = 2^129 > u128::MAX`. This is the cube-root counterpart of the `u128::isqrt` the square
+/// root uses, hand-written because the standard library provides no integer cube root.
+fn integer_cbrt(n: u128) -> u128 {
+    let (mut lo, mut hi) = (0u128, 1u128 << 43);
+    while lo < hi {
+        let mid = lo + (hi - lo).div_ceil(2);
+        let cube = mid.checked_mul(mid).and_then(|sq| sq.checked_mul(mid));
+        match cube {
+            Some(c) if c <= n => lo = mid,
+            _ => hi = mid - 1,
+        }
+    }
+    lo
 }
 
 // === Transcendental constants (Q32.32, round-to-nearest of c*2^32, embedded exactly and
@@ -674,6 +713,61 @@ mod tests {
         assert_eq!(
             Fixed::from_ratio(7, 3).sqrt(),
             Fixed::from_ratio(7, 3).sqrt()
+        );
+    }
+
+    #[test]
+    fn cbrt_is_exact_on_cubes_floors_to_the_last_bit_and_matches_powf() {
+        // Perfect cubes come back exactly (no series error, unlike powf(1/3)).
+        assert_eq!(Fixed::from_int(8).cbrt(), Fixed::from_int(2));
+        assert_eq!(Fixed::from_int(27).cbrt(), Fixed::from_int(3));
+        assert_eq!(Fixed::from_int(64).cbrt(), Fixed::from_int(4));
+        assert_eq!(Fixed::from_int(1000).cbrt(), Fixed::from_int(10));
+        assert_eq!(Fixed::ONE.cbrt(), Fixed::ONE);
+        assert_eq!(Fixed::ZERO.cbrt(), Fixed::ZERO);
+        // Defined for negatives (the cube root of a negative is real): cbrt(-x) = -cbrt(x).
+        assert_eq!(Fixed::from_int(-8).cbrt(), Fixed::from_int(-2));
+        assert_eq!(Fixed::from_int(-27).cbrt(), Fixed::from_int(-3));
+
+        // The root floors to the last fixed-point bit: its cube does not exceed the input radicand,
+        // and the next representable bit up would, proven in exact u128 integer arithmetic (no float).
+        for x in [
+            Fixed::from_int(2),
+            Fixed::from_int(50),
+            Fixed::from_ratio(7, 3),
+            Fixed::from_int(1_000_000),
+        ] {
+            let rb = x.cbrt().to_bits() as u128;
+            let radicand = (x.to_bits() as u128) << (2 * FRAC_BITS);
+            assert!(
+                rb.pow(3) <= radicand,
+                "the cube of the root does not exceed the input"
+            );
+            assert!(
+                (rb + 1).pow(3) > radicand,
+                "the next bit up would exceed it (floored to the last bit)"
+            );
+        }
+
+        // Matches the powf(1/3) approximation to the powf precision target (cbrt is the exact one).
+        let third = Fixed::from_ratio(1, 3);
+        for x in [
+            Fixed::from_int(8),
+            Fixed::from_int(100),
+            Fixed::from_int(1000),
+        ] {
+            let exact = x.cbrt();
+            let approx = x.powf(third);
+            assert!(
+                (exact - approx).abs() <= Fixed::from_ratio(1, 100),
+                "cbrt {exact:?} matches powf(1/3) {approx:?} to the powf target"
+            );
+        }
+
+        // Deterministic: the same input gives the same bits every call.
+        assert_eq!(
+            Fixed::from_ratio(7, 3).cbrt(),
+            Fixed::from_ratio(7, 3).cbrt()
         );
     }
 
