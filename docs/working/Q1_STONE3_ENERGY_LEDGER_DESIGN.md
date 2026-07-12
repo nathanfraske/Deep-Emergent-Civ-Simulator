@@ -78,6 +78,31 @@ Piece B, design-only now, B-Fork-4-gated: the closed intake-equals-loss ENERGY t
 transfer of `taken * assim * eta` from the producer energy stock to the being's reserve, with the
 un-assimilated remainder a recorded boundary loss. Flagged, coupled to B's Fork-4, not built here.
 
+### The intake-equals-loss guard, ready to drop in (grounded against B's #156)
+
+B's #156 (photosynthesis-to-productivity) is where the producer fixed-carbon energy stock arrives: its
+Fork-4 food-value supersede retires the unconditional food-value scalar so a grazer's intake DERIVES
+from the fixed carbon a producer accumulated from derived net primary productivity, rather than from a
+scalar the bite reads today. #156 is design-first with the stock's exact site still an open fork, so the
+guard is designed against the CONTRACT, not a line that does not exist yet, and it drops in at whatever
+site B's supersede introduces.
+
+The contract the guard enforces at the bite, once the producer holds a fixed-carbon energy stock
+`C[cell]`: the being draws `consumed` from `C[cell]`, gains `gain = consumed * assim * eta` into its
+reserve, and the un-assimilated remainder `consumed - gain` is egested. The `Conserved<Q>` sequence is
+exactly the ledger primitives from slice 1: obtain the consumed quantity as the producer-stock
+decrement, `split` it into the assimilated part and the egested part, `transfer` the assimilated part to
+the being's reserve, and `destroy` the egested part to the egestion sink (which the matter cycle already
+returns to soil). The producer's fixed-carbon loss then equals the reserve gain plus the egested loss
+exactly, and a leak (energy vanishing at the handoff) fires the per-step gate. This is the exact
+intake-equals-source-loss guard, ready to wire at B's supersede site the moment Fork-4 lands.
+
+The one open question the wiring inherits from B, surfaced not answered: whether the producer stock B
+lands is a per-cell fixed-carbon ENERGY (the natural form for the energy transfer this guards) or a
+composition MASS vector (the current `set_producer_food` shape), because the guard keys on the quantity
+the stock holds. I track B's Fork-2 and Fork-4 rulings on #156 so the drop-in matches the stock B builds,
+rather than assuming its type.
+
 ## The design questions for your gate
 
 1. Scope now versus hold for B. Build Piece A (the reserve boundary-flow closure gate, real today and
