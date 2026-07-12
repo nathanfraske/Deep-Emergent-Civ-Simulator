@@ -135,3 +135,26 @@ output_measure = "the decayed isotope reservoir N_new = N*(1 - lambda*dt), a fir
 dimension = "dimensionless"
 interval_bound = "[0, CONC_MAX]"
 tier = 0
+
+# --- Interior convection (thermal-buoyancy-driven mantle flow) ---
+# stokes_velocity is the terminal creeping-flow speed at which a thermal parcel rises or sinks through the
+# viscous interior, v = C*delta_rho*g*r^2/eta, the flow the convection outer loop (C's crates/world/src/
+# solve.rs fixed-cap iterative primitive) iterates to a steady field. The buoyancy source delta_rho =
+# rho*alpha*dT (the material density times the thermal expansion therm.expansion times the temperature
+# contrast) and the parcel radius r are caller-composed values, NOT registry axes, so the law consumes the
+# existing density/expansion floor rather than authoring a buoyancy axis (the thermal-buoyancy convention,
+# law.thermal_buoyancy). The Stokes drag factor C (2/9 for a rigid sphere in creeping flow) is reserved
+# with basis. Byte-neutral: no scenario arms it, and the resident flow/temperature field it feeds belongs
+# to the shared geodynamics contract (sequenced separately behind A's GeodynamicColumn).
+
+[[law]]
+id = "law.stokes_velocity"
+kernel = "stokes_velocity"
+ports = [
+  { role = "gravity", axis = "mech.gravitational_acceleration" },
+  { role = "viscosity", axis = "fluid.dynamic_viscosity" },
+]
+output_measure = "the Stokes buoyant rise velocity v = C*delta_rho*g*r^2/eta of a thermal parcel through the viscous interior, signed so a parcel lighter than ambient rises and a denser one sinks"
+dimension = "1,0,-1,0"
+interval_bound = "[-V_MAX, V_MAX]"
+tier = 0

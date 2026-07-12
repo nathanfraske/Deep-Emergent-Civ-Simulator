@@ -3261,6 +3261,61 @@ pub fn radiogenic_decay(reservoir: Fixed, decay_constant: Fixed, dt: Fixed) -> F
     sat_sub(reservoir, lost).max(ZERO)
 }
 
+/// Stokes buoyant rise velocity of a thermal parcel: `v = C * delta_rho * g * r^2 / eta`, the terminal
+/// creeping-flow speed at which a thermal density anomaly rises or sinks through a viscous interior, the
+/// thermal-buoyancy-driven mantle flow the convection outer loop iterates. `delta_rho` is the parcel's
+/// density anomaly (kg/m^3), the caller-composed thermal-buoyancy source `rho * alpha * dT` (the material
+/// density times the thermal expansion [`therm.expansion`] times the temperature contrast, a composed
+/// value not a registry axis, the same convention as [`thermal_buoyancy`]'s composed temperature
+/// difference and [`internal_heat_evolution`]'s composed conductive loss). `g` is gravity, `r` the parcel
+/// radius, `eta` the dynamic viscosity, and `C` the Stokes drag/shape factor (2/9 for a rigid sphere in
+/// creeping flow), a reserved-with-basis geometry constant. Signed by the anomaly: a hot, light parcel
+/// (`delta_rho < 0`, lighter than ambient) rises with a positive velocity and a cold, dense one sinks, so
+/// the sign is carried by negating the anomaly (buoyancy opposes the density excess). The mantle-relevant
+/// creeping-flow regime is Stokes drag (Reynolds number far below one), so no inertial term enters.
+/// Clamped to `[-v_max, v_max]`; an inviscid medium (`eta <= 0`) has no terminal velocity and reads the
+/// absence convention. Deterministic fixed-point.
+pub fn stokes_velocity(
+    density_anomaly: Fixed,
+    gravity: Fixed,
+    radius: Fixed,
+    viscosity: Fixed,
+    drag_coefficient: Fixed,
+    v_max: Fixed,
+) -> Fixed {
+    // An inviscid or open (non-positive) viscosity is off the creeping-flow domain: no terminal
+    // velocity, the absence convention (no buoyant coupling).
+    if viscosity <= ZERO {
+        return ZERO;
+    }
+    let lo = sat_sub(ZERO, v_max);
+    // Buoyancy opposes the density excess: a parcel lighter than ambient (delta_rho < 0) rises
+    // (positive v), so the driving anomaly is the negated excess. The sign then flows through the
+    // otherwise-positive product (C, g, r^2 all >= 0), so an overflow routes by the drive's sign.
+    let drive = sat_sub(ZERO, density_anomaly);
+    let num = drag_coefficient
+        .checked_mul(drive)
+        .and_then(|x| x.checked_mul(gravity))
+        .and_then(|x| x.checked_mul(radius))
+        .and_then(|x| x.checked_mul(radius));
+    let num = match num {
+        Some(n) => n,
+        None => {
+            return if drive < ZERO { lo } else { v_max };
+        }
+    };
+    match num.checked_div(viscosity) {
+        Some(v) => v.clamp(lo, v_max),
+        None => {
+            if drive < ZERO {
+                lo
+            } else {
+                v_max
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3353,6 +3408,49 @@ mod tests {
             radiogenic_decay(n0, Fixed::from_int(5), dt),
             Fixed::ZERO,
             "the reservoir floors at zero"
+        );
+    }
+
+    #[test]
+    fn stokes_velocity_rises_light_parcels_and_sinks_dense_ones() {
+        // Exactly representable integers, so the creeping-flow velocity is exact.
+        let g = Fixed::from_int(2);
+        let r = Fixed::ONE;
+        let eta = Fixed::from_int(3);
+        let c = Fixed::ONE;
+        let v_max = Fixed::from_int(1000);
+        // A hot, light parcel (delta_rho = -6, lighter than ambient) rises:
+        // v = C*(-delta_rho)*g*r^2/eta = 1*6*2*1/3 = 4.
+        assert_eq!(
+            stokes_velocity(Fixed::from_int(-6), g, r, eta, c, v_max),
+            Fixed::from_int(4),
+            "a parcel lighter than ambient rises"
+        );
+        // A cold, dense parcel (delta_rho = +6) sinks: v = -4, the mirror sign.
+        assert_eq!(
+            stokes_velocity(Fixed::from_int(6), g, r, eta, c, v_max),
+            Fixed::from_int(-4),
+            "a parcel denser than ambient sinks"
+        );
+        // No anomaly, no flow.
+        assert_eq!(stokes_velocity(ZERO, g, r, eta, c, v_max), ZERO);
+        // An inviscid (zero) viscosity has no terminal velocity: the absence convention.
+        assert_eq!(
+            stokes_velocity(Fixed::from_int(-6), g, r, ZERO, c, v_max),
+            ZERO
+        );
+        // The rise velocity clamps to the cap, sign-correct, on a huge buoyancy drive.
+        assert_eq!(
+            stokes_velocity(
+                Fixed::from_int(-100000),
+                g,
+                r,
+                Fixed::ONE,
+                c,
+                Fixed::from_int(10)
+            ),
+            Fixed::from_int(10),
+            "the rise velocity clamps to the cap"
         );
     }
 

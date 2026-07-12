@@ -597,6 +597,10 @@ pub fn kernel_contract(kernel: &str) -> Option<KernelContract> {
             ports: const { &[prior("reservoir", 1), cur("decay_constant", 1), dt("dt")] },
             output: Asserted("N_new = N*(1 - lambda*dt); a first-order fold of the prior reservoir over the tick, an accumulate instance with a reservoir-proportional negative rate, not a port monomial"),
         },
+        "stokes_velocity" => KernelContract {
+            ports: const { &[cur("gravity", 1), cur("viscosity", -1)] },
+            output: Asserted("v = C*delta_rho*g*r^2/eta; the thermal density anomaly delta_rho (rho*alpha*dT) and the parcel radius r are caller-composed values, not registry axes (the thermal-buoyancy convention), and the Stokes drag factor C is a reserved dimensionless constant, so the buoyant creeping-flow velocity is not a port monomial over the declared axes"),
+        },
         _ => return None,
     })
 }
