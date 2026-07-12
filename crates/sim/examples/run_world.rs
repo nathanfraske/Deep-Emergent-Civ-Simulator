@@ -2584,13 +2584,33 @@ fn main() {
             runner.set_matter_cycle(MatterCycleCalib::dev_fixture());
             runner.set_decomposer(DecomposerDriverRegistry::dev_fixture());
             runner.set_corpse_matter(true);
+            // The DERIVED-TAXIS survival floor (#151/#152, slice 3): arm the run-and-tumble motility floor beneath
+            // the controller, so a founder-zero grazer whose evolved controller does not yet steer it still SEEKS
+            // up any reserve-feeding gradient rather than dying in place (the extinction wall the floor dissolves).
+            // NO new authored value enters: the arming carries ONLY the being's reserve-swing noise floor
+            // (`harm.noise_floor`, the existing reserved value the harm learner reads), and the floor derives its
+            // resting tumble rate, reserve sensitivity, and reward adaptation baseline per-being from that scale
+            // and the being's OWN resting drain (Principle 11, admit-the-alien). A STATED RE-PIN: the `living` hash
+            // moves; the four base pins hold, they declare no floor. Whether the floor lets the founders SUSTAIN or
+            // they still starve on the GATED biosphere balance is the honest sustain-or-extinct verdict REPORTED by
+            // the snapshots below, never tuned to force survival.
+            let taxis_noise_floor = manifest
+                .require_fixed("harm.noise_floor")
+                .expect("the dev-fixtures profile carries harm.noise_floor");
+            if let Some(emb) = runner.embodiment_mut() {
+                emb.set_derived_taxis(Some(civsim_sim::locomotion::DerivedTaxisArming {
+                    reserve_noise_floor: taxis_noise_floor,
+                }));
+            }
             println!(
                 "  LIVING SCENARIO ARMED (opt-in): honest dev_grazer founders (no oilseed hybrid), FOUND \
                  UNWIRED (zero forage weights; the offline forage warm start retired, the foraging arc) and \
                  carrying the RESOURCE-FEATURE percept (a cell's identity-blind matter content, hidden width \
                  {LIVING_HIDDEN}), so foraging and dispersal must EMERGE from selection in the running world, \
                  never authored; foraging {} real producer occupants for their own physics-derived food value; \
-                 matter cycle + decomposer + corpse deposit armed. INTERIM CALIBRATION: the food density and \
+                 matter cycle + decomposer + corpse deposit armed; the DERIVED-TAXIS survival floor armed (a \
+                 founder-zero grazer seeks up a reserve-feeding gradient by the run-and-tumble floor, its rates \
+                 derived from the being's own metabolism, no authored value). INTERIM CALIBRATION: the food density and \
                  bootstrap window are the EXISTING reserved values, a clearly-labelled placeholder; the honest \
                  sustain-or-extinct verdict for the Mirror needs the owner's cited net-primary-productivity \
                  datum. Survival is REPORTED below (population trajectory + cause of death), never tuned to \
