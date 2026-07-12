@@ -67,11 +67,15 @@ cultural input) and none of them a place where a cultural or emergent outcome is
   kilogram, not on the Earth-specific radiogenic story.
 - The per-world surface-pressure and surface-temperature datum. This gates whether the declared solvent is
   liquid at the surface and which surface processes run, and it co-determines inside the atmosphere loop
-  through line broadening, the lapse rate, and the greenhouse integral. It is confirmed carried nowhere today
-  (a grep of `calibration/reserved.toml` and the sim and world crates returns nothing; only a solvent's own
-  boiling point is on the floor, and `climate.mean_surface_temperature` is a worldgen offset, not the
-  surface-pressure gate). This is the Terran-bias fix: without it, no non-Earth world can gate its solvent
-  phase.
+  through line broadening, the lapse rate, and the greenhouse integral. Source-verified refinement (see the
+  verification note below): the surface-PRESSURE datum is absent (the only floor phase anchor is a
+  solvent's own boiling point, and the sole surface-pressure value on the path is a hardcoded `P_ref =
+  0.101325 MPa`, one atmosphere, in `laws.rs`, a Principle 11 defect to retire), whereas a per-world
+  surface-TEMPERATURE scalar already exists as `climate.mean_surface_temperature` (287 K, category
+  per-world), though it is a worldgen Kelvin-mapping offset, not a solvent-phase gate. So this Layer 0 slice
+  is narrower and sharper than a blanket absence: add the surface-pressure datum, retire the hardcoded
+  one-atmosphere `P_ref`, and reconcile the phase gate with the existing temperature scalar. This is the
+  Terran-bias fix: without a surface-pressure datum, no non-Earth world can gate its solvent phase.
 
 One fundamental is added: the gravitational constant G. It is absent from the closed floor (verified), and the
 flux derivation in stage 1 does not need it (the dimensionless mass-luminosity ratio cancels it), but Kepler's
@@ -174,10 +178,15 @@ datum and flags the consumer as downstream.
 ## Stage 3 (build order: after the orbit): early-Earth geodynamics
 
 This is the largest and deepest stage, and it turns on one hinge: unfreezing the elevation ledger. The
-`EarthworkField` and `recouple_terrain` both exist but sit off the run path; promoting them to the single
-resident effective-elevation field (base plus delta) that tectonics writes, surface processes carve, and
-biomes read, under a pinned within-tick sequence (uplift, weather, transport, deposit, re-route), is the hinge
-the whole domain turns on. The owner's 2026-07-10 ruling holds: build the first pass static (seed crust plus
+`EarthworkField` (`material.rs`) and `recouple_terrain` (`environ.rs`, wrapped by `recouple_hydrology` in
+`runner.rs`) both exist, and (source-verified refinement) `recouple_hydrology` is in fact called every tick in
+`step_inner`, but it is inert by default: `recouple_terrain` returns early on an empty earthwork, and the
+earthwork is populated only when a being lifts off founder-zero and enacts DIG or RELEASE, so the ledger is
+effectively off the default path and byte-identical by default. Unfreezing it means populating it on the run
+path (seed crust plus worldgen relaxation, then tectonic drift), promoting it to the single resident
+effective-elevation field (base plus delta) that tectonics writes, surface processes carve, and biomes read,
+under a pinned within-tick sequence (uplift, weather, transport, deposit, re-route). That is the hinge the
+whole domain turns on. The owner's 2026-07-10 ruling holds: build the first pass static (seed crust plus
 worldgen relaxation), but the field must not forbid live drift added later.
 
 One shared code path runs the whole stage: the universal periodic table plus the per-world bulk composition
@@ -306,6 +315,20 @@ Decided-and-reserved blockquote, a Part 62 record, and a Part 63 bibliography on
 honest-limit flags that do not block: the z=0 2.5D limit, ore genesis as the least-certain emergent claim, the
 fO2 monotonicity verification flag at super-Earth pressures, and the cross-vendor transcendental confirmation
 residual.
+
+## Source-verification of the plan's load-bearing claims (Prime Directive 1)
+
+The plan rests on roughly twenty factual "already-built / gap / reserved" classifications drawn from the
+five-reader fan-out. Because a reader is a lead generator and not a verdict, every load-bearing claim was
+adversarially re-checked against the real tree by a dedicated verifier charged to refute it (in addition to the
+four I checked by hand before posting: G absent, sigma and R derived, the 1361 literal, `Fixed::powf` built).
+Eighteen of the twenty confirmed at source. Two refined, and both refinements are folded into the stages
+above. First, the surface-pressure and surface-temperature datum (Layer 0): the surface-pressure datum is absent and the sole surface-pressure value on the path is a hardcoded one-atmosphere `P_ref` law
+constant to retire, but a per-world surface-temperature scalar already exists as
+`climate.mean_surface_temperature`, so the slice is narrower than a blanket absence. Second, the elevation
+ledger (Stage 3): `recouple_hydrology` is called every tick but is inert by default via the empty-earthwork
+guard, so the ledger is off the default path by inertness rather than by being uninvoked. Neither refinement
+reverses a conclusion; both sharpen a build slice. No claim was refuted.
 
 ## Discipline and the gate ask
 
