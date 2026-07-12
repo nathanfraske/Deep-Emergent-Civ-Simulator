@@ -32,7 +32,10 @@ wiring consumes but does not itself supply, each DERIVED or per-world DATA, none
    reference density over the depth, and a short fixed-point iteration then reads the petrology-derived density
    back into the pressure to resolve the mild density-depends-on-pressure self-consistency (density depends on
    the pressure that depends on density). Both are derivations: the depth is per-world geometry (the mantle's
-   extent from the planet and core radii), the gravity is per-world, and no pressure is authored.
+   extent from the planet and core radii), and the gravity `g` is READ from A's 3c DERIVED gravity accessor,
+   never a hardcoded value (gate ruling, the same discipline as C's ballistic integrator); the depth-varying
+   `g` inside the planet is a later refinement, and the surface derived `g` is a sound first-pass reference for
+   the mantle overburden. No pressure is authored.
 
 3. **The mantle TEMPERATURE** the petrology reads, which is already the interior heat chain's own thermal
    state (the column `temperature` the convection evolution carries), so it needs no new input.
