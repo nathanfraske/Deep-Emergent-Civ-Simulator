@@ -91,6 +91,7 @@ pub mod forward_model;
 pub mod genesis;
 pub mod genome;
 pub mod geodynamics;
+pub mod geodynamics_surface;
 pub mod homeostasis;
 pub mod institution;
 pub mod insult;

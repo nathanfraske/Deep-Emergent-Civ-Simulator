@@ -884,6 +884,14 @@ impl GeodynamicField {
         self.columns.get(&column).copied().unwrap_or_default()
     }
 
+    /// Walk the columns that carry geodynamic state, in canonical [`Coord3`] key order (the `BTreeMap` walk),
+    /// so a consumer that folds over them (the surface isostatic relaxation) is reproducible and
+    /// thread-invariant. An empty field yields nothing, so a consumer over an unarmed geology does no work and
+    /// stays byte-neutral.
+    pub fn iter(&self) -> impl Iterator<Item = (Coord3, GeodynamicColumn)> + '_ {
+        self.columns.iter().map(|(coord, state)| (*coord, *state))
+    }
+
     /// Set a column's geodynamic state. An all-zero state is pruned to keep the canonical walk minimal, so a
     /// column driven back to the default drops out (the same discipline as the earthwork prune).
     pub fn set(&mut self, column: Coord3, state: GeodynamicColumn) {
