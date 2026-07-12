@@ -545,6 +545,14 @@ value = "2"
 unit = "transpiration_per_fixation"
 source = "owner-authorized Earth-C3 interim, PR #156; Lambers et al. 2008; crates/sim/src/environ.rs carbon_fixation_rate"
 
+[[reserved]]
+id = "photosynthesis.cell_area_m2"
+basis = "the cell AREA in square metres, the spatial scale over which the carbon-fixation FLUX is integrated to yield a cell's per-tick fixed-carbon ENERGY (the a-prime joules bridge #42, E_food = fixation_flux * cell_area * tick), so the standing food a grazer eats and its Kleiber drain compare in the same joules. A per-world SPATIAL datum: the tile edge squared, where the tile edge is fixed by one real creature's walking speed and the tick (tile_edge = real_speed 1.4 m/s / base_speed 1 tile-per-tick at the 1 s base tick ~= 1.4 m, so a cell ~= 1.96 m^2, rounded to 2). The tick is the 1 s base folded as unity; a different-tick world carries the tick separately (the flagged follow-on)"
+status = "set"
+value = "2"
+unit = "square_metre"
+source = "derived from the locomotion tile-edge basis (real walking speed / base speed at the 1 s tick), PR #42; crates/sim/src/environ.rs step_productivity a-prime joules bridge"
+
 # --- the ABIOTIC mineral-weathering floor (#156, the matter-cycle completion): the base rate at which rock
 # weathers to soil nutrient, so the soil is fertile from geology before any biomass (the owner's super-fertile
 # marsh). Map-wide, scaled per-cell by the cell's own WETNESS (weather_minerals), so a wet marsh weathers
