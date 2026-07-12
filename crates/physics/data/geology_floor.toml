@@ -1,0 +1,23 @@
+# The geology floor (genesis-forward Layer 1, the emergent-geology arc; docs/working/GEOLOGY_ARC_PACKET.md).
+# The geo.* axes the deep-time genesis and the interior engine read. This first entry is the internal-heat-
+# production source term (W/kg), the heat-per-mass the mantle convection and the tectonic regime integrate over
+# the body mass. The axis is the authoring place (Principle 11); a world's VALUE is its radiogenic isotope
+# abundance, per-world data (Mirror is bulk silicate Earth), and a tidal or accretional source feeds the SAME
+# axis as heat-per-mass regardless of origin (admit-the-alien: a heat-pipe moon and a radiogenic planet differ
+# only in the value, not the mechanism). Loads onto the mechanical..biology floors; additive, so the existing
+# derivations are unchanged and the canonical pins hold until a genesis pass reads it. Every axis reduces to a
+# base-dimension monomial, so neutrality holds by the type; the range is owner-set with its basis in `real`,
+# and its per-quantity fixed-point scale derives from the declared decimal envelope (R-UNITS-PIN).
+
+# --- Interior-heat axes ---
+
+[[axis]]
+id = "geo.internal_heat_production"
+measures = "the internal heat produced per unit mass, the heat-per-mass source term (radiogenic, tidal, or accretional) the mantle convection and the tectonic-regime read integrate over the body mass"
+unit = "W/kg"
+dimension = "2,0,-3,0"
+scale = "W/kg"
+tier = 0
+range_lo = "0.0000000000001"
+range_hi = "0.0000000001"
+real = "bulk silicate Earth present radiogenic heat production is about 5e-12 W/kg (roughly 20 TW over the roughly 4e24 kg mantle, from U-238, U-235, Th-232, and K-40 decay), several-fold higher in the deep past and on tidally heated bodies (Io near 2e-11 W/kg), and near zero on a spent world. Envelope 1e-13 to 1e-10 W/kg. Turcotte and Schubert, Geodynamics; McDonough and Sun 1995 for the bulk silicate Earth composition"

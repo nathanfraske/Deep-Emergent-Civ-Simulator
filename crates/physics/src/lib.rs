@@ -730,6 +730,10 @@ impl PhysicsRegistry {
         reg.extend_from_toml_str(include_str!("../data/chem_optics_floor.toml"))?;
         reg.extend_from_toml_str(include_str!("../data/em_floor.toml"))?;
         reg.extend_from_toml_str(include_str!("../data/biology_floor.toml"))?;
+        // The geology floor (genesis-forward Layer 1): the geo.* axes the deep-time genesis and the interior
+        // engine read (the internal-heat-production source term first). Additive and self-contained, so the
+        // existing derivations are unchanged; a genesis pass reads it, but no current scenario does.
+        reg.extend_from_toml_str(include_str!("../data/geology_floor.toml"))?;
         // The ground floor loads LAST, so its z-column substances can carry cross-domain axes the reactive
         // floors define (the matter cycle's decomposable "carrion" carries `bio.mineral_ash_fraction`). Its
         // substances and axes are order-independent for the material derivations (a registry lookup by id).
