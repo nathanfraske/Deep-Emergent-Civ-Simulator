@@ -2982,3 +2982,27 @@ RESERVED (surfaced not baked): per-phase ESTIMATOR SCATTER band, basis = empiric
 VERIFIED: byte-neutral (sim world_determinism + invariants + determinism_harness pins all pass; nothing wired reads new data). 6 oracle tests (quartz E_coh 1859.06, periclase 997.88 kJ/mol hand-calc; quartz modulus ~82 GPa; single-phase zero band; two-phase forsterite+quartz VR bracketing; data-gap None). Full physics suite 173+ green. fmt+clippy clean. Floor registry regenerated (124 axes unchanged, line-shifts only). Five mandatory lenses reasoned by hand (offered full blind panel before merge/arm).
 
 STATE: slice signaled, awaiting gate review/merge. NEXT on gate go: (1) Hashin-Shtrikman refinement (Stage 7) OR next property (melting point / strength ceiling / surface energy) off the same E_coh; (2) swap Provenance placeholder when A's register enum lands. Task #35 (interior arming) still HELD for A's 3c producer. Do NOT touch A's genesis/register files or C's momentum/world lanes.
+
+---
+
+## 2026-07-12 (Agent B) - Materials oracle REFRAMED by owner research (#182), retags in, corrected carve surfaced
+
+Gate HELD the merge and reframed the modulus derivation (comment 4952...). Two CI/fmt notes: (1) my slice-1 fmt was crate-scoped not --all, left a non-canonical break at periodic.rs:549/569; FIXED cargo fmt --all in bbb1e5a. (2) The reframe.
+
+THE REFRAME (confirmed at source before acting):
+- CANCELLATION THEOREM: apparent_gibbs_energy (petrology.rs:83) reads dG_f/S/V only, so the elemental atomization sum cancels by Hess across candidate assemblages at fixed bulk composition. The disposer NEVER reads the atomization column. It was never petrology substrate.
+- E_coh/V is the METALLIC/quick-screen tier, WRONG for the registry's ionic-covalent oxides. Their bulk modulus is LATTICE CURVATURE ON THE RADIUS: B=(n-1)A/(18 r0^4) (Born-Lande, reproduces NaCl 24.8 GPa). B~1/r0^4 so the RADIUS is the load-bearing column, not the energy.
+- My slice conflated B with G (Young's E=9BG/(3B+G)). Central-force models obey Cauchy C12=C44 as a theorem, so G is the un-derived half, class-dispatched.
+
+RETAGS APPLIED (1aa535d, byte-neutral doc/comment only, values unmoved):
+- periodic.rs atomization column -> [M, floor-and-validation] (estimator input + validation battery, not substrate).
+- materials_oracle.rs E_coh/V -> labeled metallic/invented/quick-screen stiffness scale [E], not the oxide route.
+- mechanical_floor.toml mat.elastic_modulus retirement flag softened -> retired by principled B-derived + G-class-dispatched, not the screen scale.
+
+CORRECTED CARVE surfaced design-first (docs/working/MATERIALS_ORACLE_MODULUS_CARVE2.md), NOT built: add Shannon ionic radius [M] column; derive B=(n-1)A/(18 r0^4) for ionic class (z+z- Coulomb factor from the valence column already on the floor); emit B, name shear debt; keep E_coh/V as screen tier. FLOOR ADDITIONS surfaced for ruling: Madelung A per structure prototype, Born exponent n per noble-gas core.
+
+TWO SEAMS I found auditing the reframe (surfaced before building):
+- Seam A: half the registry (quartz framework, forsterite/fayalite orthosilicates) is NOT cleanly ionic; single-A/single-r0 Born-Lande fails there. Per-phase bonding class must be a DATA-DRIVEN key; quartz/olivines route to covalent Keating tier, not ionic B.
+- Seam B: Madelung constant is exact only for a phase mapping to a seeded prototype (rock-salt, corundum); arbitrary silicate needs an Ewald sum over the structure. Gate ionic-B to prototype-mapped phases; unmapped falls through to screen tier (honest None, never fabricated A).
+
+STATE: reframe signaled (comment 4952977243), awaiting gate ruling on the floor additions + the two seams. CI re-running on bbb1e5a (fmt fix). NEXT on ruling: build the Shannon-radius column + Born-Lande B for prototype-mapped ionic phases + per-phase class key, byte-neutral, section-9, gate per push. Task #35 (interior arming) still HELD for A's 3c (main unchanged at 64da409, no crust producer landed). Do NOT touch A's genesis/register or C's momentum/world lanes.
