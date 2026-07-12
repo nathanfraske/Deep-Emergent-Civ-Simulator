@@ -20,10 +20,14 @@
 //! [`crate::surface_transport::TransportKernelId`]. Off the run path until a genesis pass arms a driver, so
 //! declaring the kernels is byte-neutral.
 //!
-//! The build-now kernels land one at a time. GRAVITY-DOWNSLOPE ([`hillslope_diffuse`]) is the first, and it
-//! sets the local slope the fluid-shear and solid-solvent drivers read. FLUID-SHEAR ([`fluid_shear`]) is the
-//! second, the moving-fluid entrainment and transport driver, the SOURCE half of the fluvial budget that hands a
-//! conserved carried-load field to deposition (the sink, a later slice).
+//! The four build-now kernels land one at a time and close the continuous surface mass budget. GRAVITY-DOWNSLOPE
+//! ([`hillslope_diffuse`]) is the first, and it sets the local slope the fluid-shear and solid-solvent drivers
+//! read. FLUID-SHEAR ([`fluid_shear`]) is the second, the moving-fluid entrainment and transport driver, the
+//! SOURCE half of the fluvial budget. THERMAL-CHEMICAL ALTERATION ([`thermal_chemical_alter`]) is the third, the
+//! in-place weathering that dissolves rock into the dissolved-load reservoir and fractures it into the mobile
+//! grains the transport drivers move (the grain source they presuppose). DEPOSITION ([`deposit`]) is the fourth,
+//! the conservation SINK that settles the fluid-shear source where transport capacity drops, so the total
+//! deposited equals the total entrained and the column-to-column budget closes.
 
 use civsim_core::Fixed;
 use civsim_world::flood::priority_flood;
@@ -449,6 +453,120 @@ pub fn thermal_chemical_alter(
     })
 }
 
+/// The result of one [`deposit`] pass: the mass settled into each column and the sediment flux leaving each cell
+/// downstream. The kernel is the SINK half of the fluvial budget: `deposited` is the mass added to each column
+/// (the snapshot-apply reconciliation applies it as a positive delta, raising the elevation ledger), and it
+/// closes the column-to-column budget against the fluid-shear source, so the total deposited equals the total
+/// entrained (every source unit settles somewhere).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DepositionPass {
+    /// The mass settled into each column this pass (non-negative). Where the sediment flux exceeds the local
+    /// transport capacity the excess drops out here; a drainage outlet settles its whole remaining load.
+    pub deposited: Vec<Fixed>,
+    /// The sediment flux leaving each cell for its receiver (non-negative). Zero at a drainage outlet (which
+    /// deposits its whole load rather than exporting it off-grid, so the budget stays column-to-column).
+    pub carried_out: Vec<Fixed>,
+}
+
+/// The DEPOSITION driver: the conservation SINK that closes the fluvial budget, the negative half of the
+/// fluid-shear source. It walks the drainage network from upstream to downstream, and at each cell the sediment
+/// flux available to carry (the flux arriving from upstream plus the cell's own entrained source) is limited by
+/// the local transport `capacity`: the flux the capacity can hold continues downstream, and the excess SETTLES
+/// into the column here (raising the elevation ledger). Where the fluid slows or the slope flattens the capacity
+/// drops, so the load settles, exactly the depositional behaviour the budget needs. A drainage outlet settles its
+/// whole remaining load (the river-mouth deposit), so no mass exports off-grid and the total deposited equals the
+/// total entrained: the budget closes column to column.
+///
+/// The `capacity` is the exact-root transport capacity (formed as `transport_coefficient * sqrt(A) * S`, the same
+/// GPU-canon exact-root shear proxy the fluid-shear entrainment reads, with a reserved transport coefficient), so
+/// the caller supplies it in that form and the kernel is the pure settling operator over it. The grain-size
+/// sorting the design names (coarse grains settling first, fines carried further, each grain class with its own
+/// settling capacity in the exact-root settling form) is a refinement over this bulk-settling core, a per-class
+/// capacity extension deferred, so the built pass settles the bulk excess and closes the budget without yet
+/// fractionating the load by grain size.
+///
+/// Deterministic and worker-invariant (Principle 3, Principle 10): the walk is the same Kahn topological order as
+/// the drainage accumulation (a cell settles only once all its upstream flux has arrived, so its deposit is
+/// final), and the downstream fold is a commutative exact add, so `deposited` and `carried_out` are pure
+/// functions of the inputs. The fields are per-cell and equal length; a mismatch, a negative capacity, or a
+/// negative entrained source is refused fail-loud ([`CalibrationError::BadValue`]).
+pub fn deposit(
+    entrained: &[Fixed],
+    receiver: &[usize],
+    capacity: &[Fixed],
+) -> Result<DepositionPass, CalibrationError> {
+    let n = entrained.len();
+    if receiver.len() != n || capacity.len() != n {
+        return Err(CalibrationError::BadValue {
+            id: "surface.deposition_grid".to_string(),
+            detail: format!(
+                "the entrained ({}), receiver ({}), and capacity ({}) fields must be equal length",
+                n,
+                receiver.len(),
+                capacity.len()
+            ),
+        });
+    }
+    for i in 0..n {
+        if entrained[i] < Fixed::ZERO {
+            return Err(CalibrationError::BadValue {
+                id: "surface.deposition_entrained".to_string(),
+                detail: format!("the entrained source must be non-negative; cell {i} is negative"),
+            });
+        }
+        if capacity[i] < Fixed::ZERO {
+            return Err(CalibrationError::BadValue {
+                id: "surface.deposition_capacity".to_string(),
+                detail: format!(
+                    "the transport capacity must be non-negative; cell {i} is negative"
+                ),
+            });
+        }
+    }
+
+    let mut indegree = vec![0usize; n];
+    for (i, &r) in receiver.iter().enumerate() {
+        if r != i {
+            indegree[r] += 1;
+        }
+    }
+    let mut incoming = vec![Fixed::ZERO; n];
+    let mut deposited = vec![Fixed::ZERO; n];
+    let mut carried_out = vec![Fixed::ZERO; n];
+    let mut ready: Vec<usize> = (0..n).filter(|&i| indegree[i] == 0).collect();
+    let mut head = 0;
+    while head < ready.len() {
+        let c = ready[head];
+        head += 1;
+        let available = incoming[c] + entrained[c];
+        let carried = if available < capacity[c] {
+            available
+        } else {
+            capacity[c]
+        };
+        deposited[c] = available - carried;
+        let r = receiver[c];
+        if r != c {
+            carried_out[c] = carried;
+            incoming[r] += carried;
+            indegree[r] -= 1;
+            if indegree[r] == 0 {
+                ready.push(r);
+            }
+        } else {
+            // A drainage outlet settles its whole remaining load (the river-mouth deposit), so nothing exports
+            // off-grid and the column-to-column budget closes exactly.
+            deposited[c] += carried;
+            carried_out[c] = Fixed::ZERO;
+        }
+    }
+
+    Ok(DepositionPass {
+        deposited,
+        carried_out,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -866,5 +984,134 @@ mod tests {
         )
         .expect("valid");
         assert_eq!(a, b);
+    }
+
+    #[test]
+    fn all_entrained_mass_settles_the_conservation_identity() {
+        // A chain 0->1->2->3 (3 the outlet), a source at the head, an abundant capacity: the whole load carries
+        // to the mouth and settles there, so the total deposited equals the total entrained (the load-bearing
+        // conservation identity of the sink half).
+        let entrained = vec![Fixed::from_int(10), Fixed::ZERO, Fixed::ZERO, Fixed::ZERO];
+        let receiver = vec![1usize, 2, 3, 3];
+        let capacity = vec![Fixed::from_int(100); 4];
+        let pass = deposit(&entrained, &receiver, &capacity).expect("valid");
+        assert_eq!(
+            total(&pass.deposited),
+            total(&entrained),
+            "all mass settles"
+        );
+        assert_eq!(
+            pass.deposited[3],
+            Fixed::from_int(10),
+            "an abundant capacity carries the whole load to the mouth"
+        );
+        assert!(
+            pass.carried_out[3] == Fixed::ZERO,
+            "an outlet exports nothing"
+        );
+    }
+
+    #[test]
+    fn a_capacity_drop_settles_the_excess_upstream() {
+        // The same chain but the head cell's capacity is small: the excess above capacity settles at the head,
+        // and the rest carries to the mouth. The total still equals the entrained (nothing created or lost).
+        let entrained = vec![Fixed::from_int(10), Fixed::ZERO, Fixed::ZERO, Fixed::ZERO];
+        let receiver = vec![1usize, 2, 3, 3];
+        let capacity = vec![
+            Fixed::from_int(2),
+            Fixed::from_int(100),
+            Fixed::from_int(100),
+            Fixed::from_int(100),
+        ];
+        let pass = deposit(&entrained, &receiver, &capacity).expect("valid");
+        assert_eq!(
+            pass.deposited[0],
+            Fixed::from_int(8),
+            "the excess above the capacity settles at the head"
+        );
+        assert_eq!(
+            pass.deposited[3],
+            Fixed::from_int(2),
+            "the carried remainder settles at the mouth"
+        );
+        assert_eq!(total(&pass.deposited), total(&entrained), "still conserved");
+    }
+
+    #[test]
+    fn zero_entrained_deposits_nothing() {
+        let entrained = vec![Fixed::ZERO; 4];
+        let receiver = vec![1usize, 2, 3, 3];
+        let capacity = vec![Fixed::from_int(100); 4];
+        let pass = deposit(&entrained, &receiver, &capacity).expect("valid");
+        assert!(pass.deposited.iter().all(|&d| d == Fixed::ZERO));
+    }
+
+    #[test]
+    fn a_negative_deposition_input_is_refused_fail_loud() {
+        let receiver = vec![1usize, 1];
+        assert!(
+            deposit(
+                &[Fixed::from_int(-1), Fixed::ZERO],
+                &receiver,
+                &[Fixed::ZERO; 2]
+            )
+            .is_err(),
+            "a negative entrained source is refused"
+        );
+        assert!(
+            deposit(
+                &[Fixed::ZERO; 2],
+                &receiver,
+                &[Fixed::from_int(-1), Fixed::ZERO]
+            )
+            .is_err(),
+            "a negative capacity is refused"
+        );
+    }
+
+    #[test]
+    fn a_length_mismatch_is_refused_fail_loud_for_deposition() {
+        assert!(deposit(&[Fixed::ZERO; 3], &[0usize, 1], &[Fixed::ZERO; 3]).is_err());
+    }
+
+    #[test]
+    fn the_deposition_pass_is_a_pure_function_of_its_inputs() {
+        let entrained = vec![
+            Fixed::from_int(4),
+            Fixed::from_int(1),
+            Fixed::from_int(6),
+            Fixed::ZERO,
+        ];
+        let receiver = vec![2usize, 2, 3, 3];
+        let capacity = vec![
+            Fixed::from_int(3),
+            Fixed::from_int(3),
+            Fixed::from_int(5),
+            Fixed::from_int(100),
+        ];
+        let a = deposit(&entrained, &receiver, &capacity).expect("valid");
+        let b = deposit(&entrained, &receiver, &capacity).expect("valid");
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn the_fluid_shear_source_and_deposition_sink_conserve_together() {
+        // The full erosion-transport-deposition cycle over the two drivers: fluid-shear entrains from a ramp, and
+        // deposition settles that source, so the total deposited equals the total entrained (the drivers compose
+        // into a mass-conserving pass, the whole point of the source-and-sink split).
+        let (w, h) = (5, 4);
+        let z = west_ramp(w, h);
+        let shear = fluid_shear(&z, w, h, Fixed::from_int(1), Fixed::ZERO).expect("valid");
+        let capacity = vec![Fixed::from_int(1000); w * h]; // abundant, so the load routes to the outlets
+        let dep = deposit(&shear.entrained, &shear.receiver, &capacity).expect("valid");
+        assert_eq!(
+            total(&dep.deposited),
+            total(&shear.entrained),
+            "the source and the sink conserve together"
+        );
+        assert!(
+            total(&shear.entrained) > Fixed::ZERO,
+            "the ramp entrained some mass to deposit"
+        );
     }
 }
