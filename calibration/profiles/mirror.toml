@@ -372,26 +372,24 @@ source = "dev fixture for Part 25/28 R-REPRO; crates/sim/src/world.rs Reproducti
 # FIXTURE placeholders mirroring EnvironCalib::dev_fixture (crates/sim/src/environ.rs), not owner canon.
 # The reserved fail-loud entries live in calibration/reserved.toml. ---
 
-[[reserved]]
-id = "hydrology.saturation_slope"
-basis = "MIRROR Earth calibration (Clausius-Clapeyron tangent at 288 K, in moisture-index units): the affine slope d(e_s_index)/dT of the saturation curve at the reference temperature, so the Kelvin field's cold cells drop below the advected ambient vapour and rain. The saturation index e_s_index(T) = e_s(T)/e_s(T_source) is the local saturation vapour pressure as a fraction of the world's warm vapour-source saturation (the equatorial day-side, ~315 K), the same dimensionless scale the [0,1] worldgen moisture is read on. Its fractional slope is the Clausius-Clapeyron sensitivity beta = L/(Rv*T^2) times e_ref: at 288 K, beta = 2.5e6/(461.5*288^2) = 0.0653 per K, times e_ref 0.20 gives 0.0131 per K"
-status = "set"
-value = "0.0131"
-unit = "index_per_kelvin"
-source = "Clausius-Clapeyron relation, latent heat of vaporization L=2.5e6 J/kg, water vapour gas constant Rv=461.5 J/(kg*K) (standard thermodynamic constants); crates/sim/src/environ.rs, crates/physics/src/laws.rs saturation_vapor_pressure"
-category = "per_world"
-
-# RETIRED (Arc 2, derive-vs-author): `hydrology.saturation_t_ref` derives from
-# `climate.mean_surface_temperature` (now 288 K for Mirror). See crates/sim/src/environ.rs
-# EnvironCalib::from_manifest.
+# RETIRED (authoring-defect cleanup, derive-vs-author): `hydrology.saturation_slope` (was 0.0131 index/K)
+# and `hydrology.saturation_e_ref` (was 0.20) are NO LONGER authored here. Both encoded the SAME
+# Clausius-Clapeyron relation, so authoring both authored it twice; they now DERIVE (environ.rs
+# derive_saturation_index_tangent) from the volatile's measured specific latent heat (the floor
+# therm.latent_heat), its molar mass (the periodic table over its formula), the derived molar gas constant
+# R = N_A*k_B, and the two reference temperatures below: e_ref = e_s(T_ref)/e_s(T_source) =
+# exp((L/Rv)(1/T_source - 1/T_ref)), slope = L*e_ref/(Rv*T_ref^2). The ONE surviving input is the warm
+# vapour-source temperature (the moisture-index normalization AND the Kelvin-path opt-in signal).
 
 [[reserved]]
-id = "hydrology.saturation_e_ref"
-basis = "MIRROR Earth calibration (Clausius-Clapeyron, in moisture-index units): the saturation index e_s_index at the reference temperature 288 K, i.e. e_s(288 K)/e_s(T_source) where T_source is the world's warm vapour source (the equatorial day-side, ~315 K where moisture=1 means saturated warm air). By Clausius-Clapeyron e_s(288 K)=1.70 kPa and e_s(315 K)=8.50 kPa, so e_ref = 1.70/8.50 = 0.20. This lands e_s in the same [0,1] band the [0,1] worldgen moisture (mean 0.43) sits in, so cool and mid cells cross saturation and rain while hot cells evaporate, a balanced cycle. The moisture-index-to-vapour-pressure interpretation (moisture=1 = saturation at the warm source) is a stated modeling choice surfaced for the owner, not a derived constant; the e_ref VALUE derives from Clausius-Clapeyron once that reference is fixed"
+id = "hydrology.vapor_source_temperature"
+basis = "the world's warm vapour-source temperature T_source (Kelvin): the warmest saturated-air cell whose saturation vapour pressure sets the moisture index e_s_index(T) = e_s(T)/e_s(T_source), the dimensionless [0,1] scale the worldgen moisture is compared on (the hydrology has no dynamic vapour-pressure transport state yet, the flagged deeper water-cycle arc, so e_s is an index not an absolute pressure). It is the SAME warmest-cell temperature the field itself computes: T_source DERIVES as climate.mean_surface_temperature + climate.latitude_temperature_range/2 (the equatorial cell of Field::from_map_absolute), 288 + 46/2 = 311 K for Mirror. Its PRESENCE is also the Kelvin-path opt-in: a world that declares it derives the saturation slope and e_ref from the floor volatile, a normalised dev fixture that omits it keeps its labelled affine pair (byte-identical). DERIVE-FIRST NOTE: the field's equatorial-mean cell (311 K) is used; the sub-grid diurnal day-side peak (the ~315 K the retired calibration estimated) needs the DiurnalSky noon-insolation coupling threaded to EnvironCalib, a follow-on. Set as the field-consistent equatorial temperature; a warmer day-side source is the owner's to raise"
 status = "set"
-value = "0.20"
-unit = "saturation_index"
-source = "Clausius-Clapeyron saturation vapour pressures e_s(288 K)=1.70 kPa, e_s(315 K)=8.50 kPa (L=2.5e6 J/kg, Rv=461.5 J/(kg*K)); crates/sim/src/environ.rs"
+value = "311"
+set_by = "Authoring-defect cleanup (field-consistent equatorial temperature = mean + range/2, reversible interim pending the day-side diurnal coupling)"
+set_date = "2026-07-12"
+unit = "kelvin"
+source = "climate.mean_surface_temperature (288 K) + climate.latitude_temperature_range (46 K) / 2, the equatorial cell of crates/sim/src/runner.rs Field::from_map_absolute; crates/sim/src/environ.rs derive_saturation_index_tangent"
 category = "per_world"
 
 [[reserved]]

@@ -23,6 +23,7 @@
 ::from_bits(	crates/sim/src/belief.rs	2	bit-arithmetic	belief-mass mean computed in bit-space (sum over count)
 ::from_bits(	crates/sim/src/controller.rs	2	bit-arithmetic	controller-weight mutation applied in bit-space (weight bits plus deviation bits)
 ::from_bits(	crates/sim/src/decompose.rs	1	bit-arithmetic	decomposition drive computed in bit-space (temperature minus barrier), clamped
+::from_bits(	crates/sim/src/environ.rs	1	bit-arithmetic	the derived molar gas constant R = N_A*k_B reconstructed from its rescaled Q32.32 bits (the same CODATA composite-compute projection as the derived Stefan-Boltzmann sigma)
 ::from_bits(	crates/sim/src/evidence.rs	1	bit-arithmetic	evidence weight reconstructed from a value computed in bit-space
 ::from_bits(	crates/sim/src/homeostasis.rs	1	engine-constant	MIN_CAP ~1e-6, the smallest representable reserve capacity floor
 ::from_bits(	crates/sim/src/institution.rs	5	bit-arithmetic	apportionment residue split into exact bit-halves (the indivisible-residue handler)
