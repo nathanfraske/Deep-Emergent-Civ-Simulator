@@ -471,16 +471,17 @@ pub fn assemblage_density(
     total_mass.checked_div(total_volume)
 }
 
-/// The CRUSTAL DENSITY a bulk composition reaches at a temperature and pressure, in grams per cubic centimetre:
-/// the density of the stable mineral assemblage the composition minimizes to ([`stable_assemblage`] then
-/// [`assemblage_density`]). This is the composition-to-density bridge the isostasy read consumes: the elevation
-/// a crustal column floats at is set by its density and thickness through the buoyancy law, so a dense mafic
-/// crust and a light felsic crust float at different heights from their own chemistry alone, never an authored
-/// per-rock-type density table (Principle 8). DERIVED end to end, the density falls out of the composition, the
-/// conditions, and the data-defined registry. Returns `None` if the composition reaches no assemblage (a data
-/// gap the registry grows to close) or a phase is missing from the table. Byte-neutral: no consumer is wired
-/// yet; the interior isostasy reads this density across the `GeodynamicColumn` interface once both lanes land.
-pub fn crustal_density(
+/// The DENSITY a bulk composition reaches at a temperature and pressure, in grams per cubic centimetre: the
+/// density of the stable mineral assemblage the composition minimizes to ([`stable_assemblage`] then
+/// [`assemblage_density`]). The name is neutral because the SAME bridge serves the CRUST and the MANTLE (and any
+/// composition at its own conditions): the elevation a column floats at is set by its density and thickness
+/// through the buoyancy law, so a dense mafic crust and a light felsic crust float at different heights from their
+/// own chemistry alone, and the mantle density in the Airy contrast is this same read on the mantle composition,
+/// never an authored per-rock-type density table (Principle 8). DERIVED end to end, the density falls out of the
+/// composition, the conditions, and the data-defined registry. Returns `None` if the composition reaches no
+/// assemblage (a data gap the registry grows to close) or a phase is missing from the table. Byte-neutral: no
+/// consumer is wired yet; the isostasy reads this density across the `GeodynamicColumn` interface once armed.
+pub fn assemblage_density_at_conditions(
     composition: &[(String, Fixed)],
     temperature_k: Fixed,
     pressure_bar: Fixed,
@@ -792,14 +793,14 @@ source = "synthetic test: the dense, high-pressure polymorph"
     }
 
     #[test]
-    fn the_crustal_density_derives_from_chemistry_so_mafic_is_denser_than_felsic() {
+    fn the_assemblage_density_derives_from_chemistry_so_mafic_is_denser_than_felsic() {
         // The composition-to-density bridge the isostasy leans on: a mafic (forsterite, Mg-rich) crust derives
         // a higher density than a felsic (silica-rich) crust, purely from the stable assemblage each
         // composition minimizes to, so the two float at different isostatic heights from their own chemistry
         // alone, never an authored per-rock-type density.
         let r = PhaseRegistry::standard().expect("registry loads");
         let t = PeriodicTable::standard().expect("table loads");
-        let mafic = crustal_density(
+        let mafic = assemblage_density_at_conditions(
             &[el("Mg", 2), el("Si", 1), el("O", 4)],
             Fixed::from_int(300),
             Fixed::from_int(1),
@@ -807,7 +808,7 @@ source = "synthetic test: the dense, high-pressure polymorph"
             &t,
         )
         .expect("the mafic composition derives a density");
-        let felsic = crustal_density(
+        let felsic = assemblage_density_at_conditions(
             &[el("Si", 1), el("O", 2)],
             Fixed::from_int(300),
             Fixed::from_int(1),
