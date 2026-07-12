@@ -1522,7 +1522,7 @@ impl EnvironFields {
     /// `step_matter_cycle` conservation bracket (the decomposition legs stay conservative; runner.rs). Pure
     /// deterministic fold in canonical row-major order (Principle 3); a zero base or zero basin capacity is a
     /// no-op, so an unarmed run is byte-identical.
-    // @derives: abiotic mineral-weathering soil-nutrient supply (the matter-cycle completion, rock -> soil nutrient before any biomass) <- a reserved mineral-agnostic base dissolution rate x the cell's own WETNESS (standing water / basin capacity), the hydrolysis coupling; a wet marsh cell weathers strongly and a dry cell not at all. The base is reserved (no per-cell lithology exists to read the parent-rock composition from, the geology arc the follow-on) and the temperature-Arrhenius coupling is deferred, but the wetness scaling DERIVES from the water field, not authored per cell.
+    // @derives[weathering_soil_nutrient]: abiotic mineral-weathering soil-nutrient supply (the matter-cycle completion, rock -> soil nutrient before any biomass) <- a reserved mineral-agnostic base dissolution rate x the cell's own WETNESS (standing water / basin capacity), the hydrolysis coupling; a wet marsh cell weathers strongly and a dry cell not at all. The base is reserved (no per-cell lithology exists to read the parent-rock composition from, the geology arc the follow-on) and the temperature-Arrhenius coupling is deferred, but the wetness scaling DERIVES from the water field, not authored per cell.
     pub fn weather_minerals(
         &self,
         soil: &mut SoilNutrientField,
@@ -2185,7 +2185,7 @@ impl PhotosynthesisCalib {
 /// mineral derivation the follow-on). Every input is floor physics (the insolation flux, the surface temperature,
 /// the evaporative demand, the matter-cycle fertility) or a measured per-producer constant, so no free ecology
 /// knob enters.
-// @derives: per-cell carbon-fixation rate / net primary productivity <- the photosynthesis light-response
+// @derives[carbon_fixation_rate]: per-cell carbon-fixation rate / net primary productivity <- the photosynthesis light-response
 //   (quantum yield x light-saturation over the real insolation flux = normalised light x the solar_constant
 //   floor-unit pin, itself derivable from L/(4 pi d^2)), the carbon-fixing enzyme thermal-performance tent
 //   (measured optimum, breadth), the water limitation (water-use-efficiency x evaporative demand), and the

@@ -175,6 +175,20 @@ const CANONICAL: &[(&str, &str, &[&str], &str, &str)] = &[
         "full",
         "crates/sim/src/decompose.rs",
     ),
+    (
+        "weathering_soil_nutrient",
+        "abiotic mineral-weathering soil-nutrient supply (rock into soil nutrient before any biomass)",
+        &["weathering.mineral_dissolution_rate"],
+        "living",
+        "crates/sim/src/environ.rs",
+    ),
+    (
+        "carbon_fixation_rate",
+        "per-cell carbon-fixation rate / net primary productivity",
+        &["photosynthesis.light_saturation"],
+        "living",
+        "crates/sim/src/environ.rs",
+    ),
 ];
 
 #[cfg(test)]
@@ -184,7 +198,7 @@ mod tests {
     #[test]
     fn the_canonical_registry_carries_the_annotated_derivations() {
         let r = RetiredFloorDerivationRegistry::canonical();
-        assert_eq!(r.len(), 7, "one row per @derives[id] site today");
+        assert_eq!(r.len(), 9, "one row per @derives[id] site today");
         // Every row declares at least one input to perturb (register enforces it), a scenario, and a
         // site, so the gate has what it needs to probe each.
         for d in r.iter() {
@@ -199,7 +213,7 @@ mod tests {
         let r = RetiredFloorDerivationRegistry::canonical();
         let ids = r.ids();
         assert_eq!(ids.first(), Some(&"world_time_cadence"));
-        assert_eq!(ids.last(), Some(&"decomposition_recovery"));
+        assert_eq!(ids.last(), Some(&"carbon_fixation_rate"));
         // A second walk yields the identical order (no hash-map iteration leaks in).
         let again = RetiredFloorDerivationRegistry::canonical();
         assert_eq!(again.ids(), ids);
