@@ -597,6 +597,17 @@ pub fn kernel_contract(kernel: &str) -> Option<KernelContract> {
             ports: const { &[prior("reservoir", 1), cur("decay_constant", 1), dt("dt")] },
             output: Asserted("N_new = N*(1 - lambda*dt); a first-order fold of the prior reservoir over the tick, an accumulate instance with a reservoir-proportional negative rate, not a port monomial"),
         },
+        "internal_heat_evolution" => KernelContract {
+            ports: const {
+                &[
+                    prior("temperature", 1),
+                    cur("heat_production", 1),
+                    cur("specific_heat", -1),
+                    dt("dt"),
+                ]
+            },
+            output: Asserted("T_new = T + (H - L)/c * dt; the prior column temperature plus the net specific power (radiogenic production H minus the caller-composed conductive loss L, the Fourier surface flux over the column mass, not a registry axis) over the heat capacity across the tick. The port monomial H*c^-1*dt closes on temperature; the affine prior-temperature add and the composed loss make it an accumulate instance, not a port monomial"),
+        },
         _ => return None,
     })
 }

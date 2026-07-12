@@ -3261,6 +3261,53 @@ pub fn radiogenic_decay(reservoir: Fixed, decay_constant: Fixed, dt: Fixed) -> F
     sat_sub(reservoir, lost).max(ZERO)
 }
 
+/// Column heat balance: evolve an interior rock column's temperature over one tick,
+/// `T_new = T + (H - L)/c * dt`, the slow thermal relaxation of the deep interior. `H` is the
+/// radiogenic heat production (W/kg, from [`radiogenic_heat`] summed over the column's isotopes and
+/// spent down by [`radiogenic_decay`]); `L` is the conductive surface loss expressed as specific power
+/// (W/kg): the caller composes it from the Fourier surface flux the [`conduction`] law already computes
+/// (`q = k*(A/L_path)*dT`, W/m^2) divided by the column's mass per area, so this law does NOT re-derive
+/// Fourier, it consumes it (the same caller-composed-input convention as [`sensible_energy`]'s `dT`).
+/// `c` is the specific heat capacity (J/(kg*K)), so the net specific power over the heat capacity is the
+/// column's warming or cooling rate. An [`accumulate`] instance whose rate is `(H - L)/c`: the interior
+/// warms while radiogenic production leads surface loss and cools once the decaying reservoir falls
+/// behind (the spent-world relaxation), so one resident temperature carries the memory of the whole
+/// heat-production history. The net power is signed (a cooling column has `L > H`), and the temperature
+/// is floored at absolute zero. `H`, `L`, and `dt` are the caller's per-tick, tick-consistent values
+/// (the geology floor's stored-scaled `H` bridged into tick time, as [`radiogenic_decay`] documents);
+/// the kernel is unit-agnostic over a consistent set. Deterministic fixed-point.
+pub fn internal_heat_evolution(
+    temperature: Fixed,
+    heat_production: Fixed,
+    conductive_loss: Fixed,
+    specific_heat: Fixed,
+    dt: Fixed,
+) -> Fixed {
+    if specific_heat <= ZERO || dt <= ZERO {
+        return temperature;
+    }
+    // Net specific power (W/kg), signed: production minus the conductive surface loss.
+    let net = sat_sub(heat_production, conductive_loss);
+    // dT = net/c * dt. The divide by the heat capacity first keeps the rate small before dt grows it;
+    // an overflow at either step saturates by the sign of the net power, never wraps.
+    let rate = match net.checked_div(specific_heat) {
+        Some(r) => r,
+        None => {
+            if net < ZERO {
+                Fixed::MIN
+            } else {
+                Fixed::MAX
+            }
+        }
+    };
+    let delta = rate
+        .checked_mul(dt)
+        .unwrap_or(if net < ZERO { Fixed::MIN } else { Fixed::MAX });
+    // Saturating add applies a cooling (negative delta) or a warming; the interior never falls below
+    // absolute zero.
+    temperature.saturating_add(delta).max(ZERO)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3353,6 +3400,48 @@ mod tests {
             radiogenic_decay(n0, Fixed::from_int(5), dt),
             Fixed::ZERO,
             "the reservoir floors at zero"
+        );
+    }
+
+    #[test]
+    fn internal_heat_evolution_warms_on_net_heating_and_cools_on_net_loss() {
+        // Exactly representable values (integers), so the balance is exact and the identity is tested
+        // without rounding noise.
+        let t = Fixed::from_int(300);
+        let c = Fixed::from_int(4);
+        let dt = Fixed::ONE;
+        // Net heating H>L: dT = (8 - 0)/4 * 1 = 2, radiogenic production leads surface loss.
+        assert_eq!(
+            internal_heat_evolution(t, Fixed::from_int(8), ZERO, c, dt),
+            Fixed::from_int(302),
+            "production leading loss warms the column"
+        );
+        // Net cooling L>H: dT = (0 - 8)/4 * 1 = -2, the spent-world relaxation.
+        assert_eq!(
+            internal_heat_evolution(t, ZERO, Fixed::from_int(8), c, dt),
+            Fixed::from_int(298),
+            "loss leading production cools the column"
+        );
+        // Balanced H == L: steady state, no drift.
+        assert_eq!(
+            internal_heat_evolution(t, Fixed::from_int(8), Fixed::from_int(8), c, dt),
+            t,
+            "a balanced column holds its temperature"
+        );
+        // A zero tick or a zero (open) heat capacity is a no-op.
+        assert_eq!(
+            internal_heat_evolution(t, Fixed::from_int(8), ZERO, c, ZERO),
+            t
+        );
+        assert_eq!(
+            internal_heat_evolution(t, Fixed::from_int(8), ZERO, ZERO, dt),
+            t
+        );
+        // The temperature never falls below absolute zero: a large net loss floors at 0 K.
+        assert_eq!(
+            internal_heat_evolution(Fixed::ONE, ZERO, Fixed::from_int(8), c, dt),
+            ZERO,
+            "the column floors at absolute zero"
         );
     }
 

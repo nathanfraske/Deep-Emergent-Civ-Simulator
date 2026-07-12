@@ -135,3 +135,27 @@ output_measure = "the decayed isotope reservoir N_new = N*(1 - lambda*dt), a fir
 dimension = "dimensionless"
 interval_bound = "[0, CONC_MAX]"
 tier = 0
+
+# --- Interior evolution (the dynamic layer beneath the geology floor: the column heat balance) ---
+# internal_heat_evolution evolves a rock column's temperature from its net specific heating: the
+# radiogenic production (geo.internal_heat_production) minus the conductive surface loss, over the heat
+# capacity, across the tick. An accumulate instance (prior temperature + rate*dt), so it carries the
+# memory of the whole heat-production history in one resident temperature. The conductive loss is
+# caller-composed from the existing Fourier conduction law (law.conduction) over the column mass, NOT a
+# registry axis, so this law consumes conduction rather than re-deriving it (the same convention as the
+# sensible-energy law's caller-composed temperature difference). Byte-neutral: no scenario arms it, and
+# the resident column field it writes belongs to the shared geodynamics contract (sequenced separately).
+
+[[law]]
+id = "law.internal_heat_evolution"
+kernel = "internal_heat_evolution"
+ports = [
+  { role = "temperature", axis = "therm.temperature", temporal = "prior" },
+  { role = "heat_production", axis = "geo.internal_heat_production" },
+  { role = "specific_heat", axis = "therm.specific_heat" },
+  { role = "dt", temporal = "dt" },
+]
+output_measure = "the evolved column temperature T_new = T + (H - L)/c * dt, the interior warming when radiogenic production leads the conductive surface loss and cooling (the spent-world relaxation) once the decaying reservoir falls behind"
+dimension = "temperature"
+interval_bound = "[0, TEMP_MAX]"
+tier = 0
