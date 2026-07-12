@@ -107,6 +107,33 @@ test fixtures in the test module, the known crystal structures, not floor data.
 4. **Build-now versus hold.** The kernel is pure mechanism, self-validating, and byte-neutral, so its design
    risk is low. Confirm I build it now on the gate's go, or hold for a ruling on the transcendental seam first.
 
+## Built (gate ruled the transcendental seam)
+
+The gate approved the carve and ruled: Abramowitz-Stegun rational `erfc`, fixed-form deterministic `exp`,
+deterministic `alpha` and cutoffs, self-validate to 1e-4, tin-foil declared, Ewald-first single lane. Built on
+`claude/materials-oracle-modulus-slice` (`crates/physics/src/ewald.rs`):
+
+- The three-term split (real-space screened Coulomb, reciprocal-space Gaussian, self-energy), fixed-point and
+  deterministic. `erfc` is the A-S 7.1.26 five-term rational over the crate's deterministic `Fixed::exp`; the
+  structure factor uses the crate's CORDIC `sin_cos`; all transcendentals are fixed-form with no
+  input-dependent trip count. `alpha = 3.2 / V^(1/3)` and the fixed shell half-widths (`N_REAL = 2`,
+  `N_RECIP = 6`) are the deterministic convergence parameters. The A-S coefficients and `alpha` constant are
+  exact `from_ratio` rationals (no `from_decimal_str`, so no constructor-gate site).
+- Tin-foil boundary declared in the module doc, the polar surface term set to zero.
+- Self-validated: NaCl reproduces `1.747563` against the reference `1.747565`, CsCl `1.762675` against
+  `1.762675`, both inside the 1e-4 acceptance tolerance, the exact proof that the Madelung constant is the Ewald
+  sum over the positions. Fluorite (CaF2) validates the non-1:1, mixed-charge case (the generality corundum's
+  `A2B3` needs): the kernel handles arbitrary stoichiometry and lands a physical Madelung constant. `erfc`
+  itself is checked against `erfc(0)=1`, `erfc(1)=0.157299`, `erfc(2)=0.004678`.
+- Byte-neutral: nothing reads the kernel, the sim determinism and invariant pins are unmoved. 186 physics tests
+  green, constructor / determinism / prose gates clean.
+
+The Madelung convention is stated and consistent: `M = -(E_total / formula_units) * reference_distance` in
+reduced units with the full ionic charges, referenced to the nearest cation-anion distance. Corundum's exact
+1e-4 Madelung validation is the immediate follow-on (it needs the experimental rhombohedral cell and a cited
+reference constant under this convention); the kernel's generality for it is already proven by the non-1:1
+fluorite case. Next piece per the gate's order: the IE and EA columns and the derived `chi`/`eta`.
+
 ## The dependency order after the kernel (from the architecture, for context, not this slice)
 
 Per the architecture, after the Ewald kernel: the IE and EA per-element columns `[M]` with the free hardness
