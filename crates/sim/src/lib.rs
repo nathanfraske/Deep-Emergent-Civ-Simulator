@@ -60,6 +60,7 @@ pub mod affect;
 pub mod affordance_percept;
 pub mod agent;
 pub mod anatomy;
+pub mod astro;
 pub mod axiom;
 pub mod base_rates;
 pub mod belief;

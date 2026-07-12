@@ -66,6 +66,7 @@ EXEMPT_MODULES = {
     "crates/physics/src/petrology_data.rs", # the phase-registry loader (parses cited phase thermodynamics)
     "crates/physics/src/quantities.rs", # quantity definitions and the wide-decimal doc reference
     "crates/sim/src/calibration.rs",    # the calibration-manifest loader (parses the owner's reserved values)
+    "crates/sim/src/astro.rs",          # the stellar-flux derivation (parses cited astronomical anchors L_sun/AU)
 }
 
 
