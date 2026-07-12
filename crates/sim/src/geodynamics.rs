@@ -190,12 +190,26 @@ pub fn column_readout(state: &ColumnState, p: &ColumnParams) -> ColumnReadout {
         p.ra_max,
     );
     let velocity = laws::stokes_velocity(delta_rho, p.gravity, p.radius, p.viscosity, p.v_max);
-    // The shear length is the layer depth as a REFERENCE-pass value (per-world geometry, not an authored
-    // scale). The gate's derive-first correction (#176) is that the thermal boundary layer thins with
-    // convective vigor as about Ra^(-1/3) times the layer depth; that refinement needs the deterministic
-    // fixed-point fractional-power primitive (task #45, not yet built), so the layer depth stands in until
-    // #45 lands, when the shear length becomes depth * Ra^(-1/3). Surfaced, not silently authored.
-    let convective_stress = laws::convective_stress(p.viscosity, velocity, p.depth, p.stress_max);
+    // The shear length is the thermal BOUNDARY LAYER thickness, DERIVED (gate ruling, #176): the boundary
+    // layer thins with convective vigor as `depth * Ra^(-1/3)`, so a vigorous mantle (Ra of order 1e6) shears
+    // over a layer about a hundredth of its depth, concentrating the driving stress. The cube root is the
+    // deterministic fixed-point `Fixed::powf(1/3)` the merged Sherwood and surface-tension laws already use
+    // (task #45 is a later GPU-shader-parity refinement of `powf`, not a blocker for this CPU derivation, and
+    // the interior is a deep-time cold path). Written as `depth / Ra^(1/3)` (`powf` takes a positive
+    // exponent), clamped to at most the layer depth (a boundary layer cannot exceed its own layer, a geometric
+    // bound) and falling back to the depth when Ra is non-positive (no convection, where the stress is zero
+    // regardless).
+    let ra_cube_root = rayleigh.powf(Fixed::from_ratio(1, 3));
+    let length_scale = if ra_cube_root > Fixed::ZERO {
+        p.depth
+            .checked_div(ra_cube_root)
+            .unwrap_or(p.depth)
+            .min(p.depth)
+    } else {
+        p.depth
+    };
+    let convective_stress =
+        laws::convective_stress(p.viscosity, velocity, length_scale, p.stress_max);
     let next = convection_step(state, p);
     ColumnReadout {
         temperature: next.temperature,
@@ -632,6 +646,70 @@ mod tests {
         assert_eq!(
             next.isostatic_elevation, expected,
             "the isostasy reads the snapshot crust and mantle"
+        );
+    }
+
+    #[test]
+    fn the_wiring_convection_is_reversible_a_cooled_column_ceases() {
+        // The latch guardrail (gate ruling, #176): the resident contract stores no convecting flag, so a column
+        // that once convected does NOT stay convecting against a fallen Rayleigh number. Populate a hot column
+        // (it convects, stress positive), then feed its result back cooled to the reference, and the re-populated
+        // column reads zero stress: the stress keys off the CURRENT Rayleigh number, reversibly, never a
+        // persisted onset latch overriding it.
+        let (_, params) = column(Fixed::from_int(1));
+        let hot = GeodynamicColumn {
+            temperature: Fixed::from_int(2000),
+            ..GeodynamicColumn::default()
+        };
+        let convecting = populate_interior_column(hot, &params, Fixed::from_ratio(33, 10));
+        assert!(
+            convecting.convective_stress > Fixed::ZERO,
+            "the hot column convects and drives a stress"
+        );
+        // Now the column has cooled to its reference (no contrast): re-populate against that snapshot.
+        let cooled = GeodynamicColumn {
+            temperature: params.reference_temperature,
+            ..convecting
+        };
+        let ceased = populate_interior_column(cooled, &params, Fixed::from_ratio(33, 10));
+        assert_eq!(
+            ceased.convective_stress,
+            Fixed::ZERO,
+            "a cooled column ceases convecting, no latch keeps the stress alive"
+        );
+        assert_eq!(
+            ceased.rayleigh,
+            Fixed::ZERO,
+            "the vigor falls with the contrast"
+        );
+    }
+
+    #[test]
+    fn the_boundary_layer_thins_with_vigor_so_a_hotter_column_drives_more_stress() {
+        // The derived boundary layer L = depth * Ra^(-1/3): a more vigorous column has a thinner boundary layer
+        // and a higher driving stress, the derive-clean thinning (not the depth reference-pass).
+        let (_, params) = column(Fixed::from_int(1));
+        let warm = column_readout(
+            &ColumnState {
+                temperature: Fixed::from_int(600),
+                convecting: false,
+            },
+            &params,
+        );
+        let hot = column_readout(
+            &ColumnState {
+                temperature: Fixed::from_int(2000),
+                convecting: false,
+            },
+            &params,
+        );
+        assert!(
+            hot.rayleigh > warm.rayleigh,
+            "the hotter column is more vigorous"
+        );
+        assert!(
+            hot.convective_stress > warm.convective_stress,
+            "a thinner boundary layer under higher vigor concentrates more driving stress"
         );
     }
 

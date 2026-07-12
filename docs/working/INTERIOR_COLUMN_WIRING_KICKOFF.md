@@ -106,12 +106,14 @@ derive-first.
   NOT authored. `derive_mantle_density` threads A's petrology kernel (`crustal_density`, a general
   composition-to-density derivation) over the world's mantle COMPOSITION at the mantle temperature (the
   interior heat chain's own thermal state) and pressure, so the density is what the material is under its
-  conditions. Two completions are flagged, not silently authored: (a) the mantle COMPOSITION datum (Mirror's
+  conditions. Two completions are flagged, not silently authored: the mantle COMPOSITION datum (Mirror's
   peridotite in the Mg-Fe-Si-O system, with citation) and the lithostatic-pressure derivation with a
   reference-pressure first pass for the density-pressure self-consistency, which arrive with the arming
-  (sequenced with A's #175); (b) the `convective_stress` boundary-layer shear length, which the owner ruled
-  derives as `depth * Ra^(-1/3)`, needs the deterministic fixed-point fractional-power primitive (task #45,
-  not yet built), so the layer depth stands in as the reference-pass value until #45 lands. The
+  (sequenced with A's #175). The `convective_stress` boundary-layer shear length is DERIVED now (gate ruling,
+  #176): the owner ruled it derives as `depth * Ra^(-1/3)`, and the deterministic fixed-point `Fixed::powf`
+  the merged Sherwood and surface-tension laws already use computes the cube root, so `column_readout` carries
+  the real boundary layer (`depth / Ra^(1/3)`, clamped to the layer depth) rather than a placeholder; task #45
+  is a later GPU-shader-parity refinement of `powf`, not a blocker for this CPU derivation. The
   truly-per-world inputs shrink to COMPOSITION and planetary GEOMETRY; every density, boundary layer, and
   stress derives.
 
