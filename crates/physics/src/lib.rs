@@ -46,6 +46,7 @@ pub mod materials_oracle;
 pub mod periodic;
 pub mod petrology;
 pub mod petrology_data;
+pub mod qeq;
 pub mod quantities;
 pub mod scaled;
 

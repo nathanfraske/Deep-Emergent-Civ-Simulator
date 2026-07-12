@@ -108,6 +108,26 @@ pub struct Element {
     /// The citation for the atomization enthalpy (every thermochemical value is real-with-source). `None` when
     /// none is populated; required non-empty whenever an atomization enthalpy is.
     pub atomization_source: Option<String>,
+    /// The first IONIZATION ENERGY in electron-volts, the energy to remove the least-bound electron from the
+    /// neutral gaseous atom, a measured `[M]` component constant (owner research, #182). With the electron
+    /// affinity it composes the two quantities the charge-equilibration solve needs: the Mulliken
+    /// electronegativity `chi = (IE + EA)/2` and the chemical hardness `eta = (IE - EA)/2` (both derived `[D]`,
+    /// the hardness free from the same two columns). `None` until a cited value is populated (absent-not-zero).
+    pub ionization_energy: Option<Fixed>,
+    /// The raw decimal string of the first ionization energy, retained verbatim as provenance. `None` when
+    /// unpopulated.
+    pub ionization_decimal: Option<String>,
+    /// The citation for the first ionization energy. `None` when unpopulated; required non-empty when set.
+    pub ionization_source: Option<String>,
+    /// The ELECTRON AFFINITY in electron-volts, the energy released when an electron is added to the neutral
+    /// gaseous atom (positive for a bound anion, negative or near-zero for an unbound one), a measured `[M]`
+    /// component constant (owner research, #182). The electronegativity and hardness sibling of the ionization
+    /// energy; see [`Element::ionization_energy`]. `None` until a cited value is populated (absent-not-zero).
+    pub electron_affinity: Option<Fixed>,
+    /// The raw decimal string of the electron affinity, retained verbatim as provenance. `None` when unpopulated.
+    pub electron_affinity_decimal: Option<String>,
+    /// The citation for the electron affinity. `None` when unpopulated; required non-empty when set.
+    pub electron_affinity_source: Option<String>,
     /// The citation and provenance for this row.
     pub provenance: String,
 }
@@ -487,9 +507,56 @@ struct ElementDef {
     /// The citation for the atomization enthalpy; required non-empty when the enthalpy is populated.
     #[serde(default)]
     atomization_source: String,
+    /// The first ionization energy in eV, as a decimal string; empty when not populated.
+    #[serde(default)]
+    ionization_energy: String,
+    /// The citation for the first ionization energy; required non-empty when it is populated.
+    #[serde(default)]
+    ionization_source: String,
+    /// The electron affinity in eV, as a decimal string; empty when not populated.
+    #[serde(default)]
+    electron_affinity: String,
+    /// The citation for the electron affinity; required non-empty when it is populated.
+    #[serde(default)]
+    electron_affinity_source: String,
     /// The citation (every element is real-with-source).
     #[serde(default)]
     real: String,
+}
+
+/// An optional cited value as `(parsed, raw decimal, citation)`, all present together or all `None`.
+type OptionalCited = (Option<Fixed>, Option<String>, Option<String>);
+
+/// Parse an optional cited decimal column into `(value, raw, source)`: absent when the raw string is empty
+/// (`None, None, None`); otherwise the parsed `Fixed`, its verbatim decimal, and its required citation, or a
+/// load error when the value is unparseable or the citation missing. The shared shape of the ionization-energy
+/// and electron-affinity columns (a measured value must carry its source, the same discipline as the entropy
+/// and atomization columns).
+fn parse_optional_cited(
+    symbol: &str,
+    raw: &str,
+    source: &str,
+    field: &str,
+) -> Result<OptionalCited, PeriodicError> {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return Ok((None, None, None));
+    }
+    let value = Fixed::from_decimal_str(raw).map_err(|detail| PeriodicError::BadValue {
+        symbol: symbol.to_string(),
+        detail: format!("{field}: {detail}"),
+    })?;
+    if source.trim().is_empty() {
+        return Err(PeriodicError::BadValue {
+            symbol: symbol.to_string(),
+            detail: format!("{field} is set but its citation ({field}_source) is empty"),
+        });
+    }
+    Ok((
+        Some(value),
+        Some(raw.to_string()),
+        Some(source.trim().to_string()),
+    ))
 }
 
 fn default_true() -> bool {
@@ -582,6 +649,21 @@ impl ElementDef {
                     Some(self.atomization_source.trim().to_string()),
                 )
             };
+        // The ionization energy and electron affinity are optional cited columns (the charge-equilibration
+        // inputs), each parsed on the same discipline: a value must carry its own citation.
+        let (ionization_energy, ionization_decimal, ionization_source) = parse_optional_cited(
+            &self.symbol,
+            &self.ionization_energy,
+            &self.ionization_source,
+            "ionization_energy",
+        )?;
+        let (electron_affinity, electron_affinity_decimal, electron_affinity_source) =
+            parse_optional_cited(
+                &self.symbol,
+                &self.electron_affinity,
+                &self.electron_affinity_source,
+                "electron_affinity",
+            )?;
         Ok(Element {
             symbol: self.symbol,
             name: self.name,
@@ -597,6 +679,12 @@ impl ElementDef {
             atomization_enthalpy,
             atomization_decimal,
             atomization_source,
+            ionization_energy,
+            ionization_decimal,
+            ionization_source,
+            electron_affinity,
+            electron_affinity_decimal,
+            electron_affinity_source,
             provenance: self.real.trim().to_string(),
         })
     }

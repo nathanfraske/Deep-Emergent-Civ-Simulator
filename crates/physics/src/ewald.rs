@@ -48,6 +48,17 @@
 //! that surface term to zero. This is a declared physical convention, not an omission; a charge-neutral
 //! non-polar cell (the common rock-forming case) never reaches it.
 //!
+//! LIMITATION, flagged for re-validation (gate seam, #182): the self-validation is CUBIC only (NaCl, CsCl,
+//! fluorite), where `V^(1/3)` is the right length scale in every direction and the fixed shell cutoffs reach
+//! 1e-4. The silicate phases the oracle processes are NOT cubic (quartz hexagonal, olivine orthorhombic), and
+//! for a strongly anisotropic cell `V^(1/3)` under-represents the long axis, so the fixed real-space cutoff
+//! may under-converge in the thin direction under the same `alpha` rule. This is not a kernel defect (the split
+//! is exact; only the truncation shell is at issue), but the cubic validation cannot see it. When the first
+//! non-cubic silicate cell arrives (with positions and QEq), RE-VALIDATE the Ewald accuracy on it and, if the
+//! fixed rule under-converges, move to a per-axis cutoff or an anisotropy-aware `alpha` (the shell count keyed
+//! to each axis length rather than `V^(1/3)`), and add an anisotropic validation case. Checked at the seam, not
+//! discovered as a silent error in an olivine modulus.
+//!
 //! Byte-neutral and dormant: nothing calls this yet, so the pins hold. The validation cells (NaCl, CsCl,
 //! fluorite, corundum) are cited crystal structures in the test module, not floor data.
 
