@@ -597,6 +597,21 @@ pub fn kernel_contract(kernel: &str) -> Option<KernelContract> {
             ports: const { &[prior("reservoir", 1), cur("decay_constant", 1), dt("dt")] },
             output: Asserted("N_new = N*(1 - lambda*dt); a first-order fold of the prior reservoir over the tick, an accumulate instance with a reservoir-proportional negative rate, not a port monomial"),
         },
+        "internal_heat_evolution" => KernelContract {
+            ports: const {
+                &[
+                    prior("temperature", 1),
+                    cur("heat_production", 1),
+                    cur("specific_heat", -1),
+                    dt("dt"),
+                ]
+            },
+            output: Asserted("T_new = T + (H - L)/c * dt; the prior column temperature plus the net specific power (radiogenic production H minus the caller-composed conductive loss L, the Fourier surface flux over the column mass, not a registry axis) over the heat capacity across the tick. The port monomial H*c^-1*dt closes on temperature; the affine prior-temperature add and the composed loss make it an accumulate instance, not a port monomial"),
+        },
+        "stokes_velocity" => KernelContract {
+            ports: const { &[cur("gravity", 1), cur("viscosity", -1)] },
+            output: Asserted("v = C*delta_rho*g*r^2/eta; the thermal density anomaly delta_rho (rho*alpha*dT) and the parcel radius r are caller-composed values, not registry axes (the thermal-buoyancy convention), and the Stokes drag factor C is a reserved dimensionless constant, so the buoyant creeping-flow velocity is not a port monomial over the declared axes"),
+        },
         "thermal_density_anomaly" => KernelContract {
             ports: const { &[cur("density", 1), cur("thermal_expansion", 1)] },
             output: Asserted("delta_rho = -rho*alpha*dT; alpha carries the ppm-to-fraction 1e-6 scale and dT is a caller-composed temperature contrast (not a registry axis), and the sign is negated (a warmer parcel is lighter), so the density-excess output is not a clean port monomial over the declared axes"),
