@@ -43,6 +43,28 @@ Reverse-chronological. Each session appends one entry at the top: what was done,
 
 ---
 
+## 2026-07-12 (Agent A): Genesis Layer 0 COMPLETE + Stage 1 flux derived (the solar constant retired), continuous build
+
+**What was done (a marathon build segment, gate driving continuously, gating each push).** Built and pushed the whole genesis-forward Layer 0 (A lane) and Stage 1's flux derivation on `claude/genesis-forward-scoping`, each slice byte-neutral-or-stated with full verification (tests + clippy strict + fmt + constructor gate + 5 pins) and a per-slice gate report on #160.
+
+- **Slice 1 (`5a63bcd`, byte-neutral):** periodic-table `[[element]]` rows extended with cited `valence` + `standard_molar_entropy` columns (fail-loud on a missing citation; element-vs-phase split: per-element S, formation energy per-phase). Seed = bulk-silicate-Earth + volatiles, CRC-cited.
+- **Slice 2 (`6a318b9`, byte-neutral):** NEW `crate::physics::petrology_data` + `phase_registry.toml`, the candidate-phase thermodynamic registry (per-phase enthalpy/entropy/volume, Robie & Hemingway 1995, one consistent dataset for the Gibbs-min kernel), formula-cross-checked against the periodic table. Extensible, not a closed enum.
+- **Slice 3 (`5b314db`, byte-neutral):** `world.surface_pressure` per-world reserved-with-basis datum (the Terran-bias solvent-phase gate). Verified at source that no live read assumes 1 atm.
+- **Milestone section-9 five-lens self-audit** posted and gate-CONFIRMED clean.
+- **Stage 1 flux 4a (`126db72`, byte-neutral) + 4b (`7d113d6`, stated re-pin):** `crate::sim::astro` derives the solar constant, retiring the inline `DiurnalSky` `solar_constant = 1361` literal: `flux = L_sun*(M_star/M_sun)^exp / (4*pi*d^2)` in exact `BigRat` rational arithmetic (L_sun/d^2 overflow Q32.32, the sigma-scale path) with Machin pi.
+
+**The p_ref seam (PD1/PD5, caught both ways):** the verifier and then the gate called the RK `P_ref=1atm` a defect to retire; I grounded `laws.rs:1600` and walked it back (it is the boiling-point reference-pressure anchor, correct physics); the gate re-checked and confirmed. Not retired.
+
+**The owner's admit-the-alien correction (applied mid-Stage-1):** every authored value must be derived or scenario-time set, not hardcoded. My 4a had hardcoded Mirror's inputs in the kernel; fixed so `astro::stellar_flux(mass_ratio, exponent, distance_au)` takes all per-world inputs as ARGS, the Mirror values (1, 1 AU, 3.5) are labelled scenario dev fixtures in `DiurnalSky::reference`, and the anchors (L_sun/M_sun/AU) are the only cited reference data. An alien star is a data row.
+
+**The one stated re-pin:** living `7b5b6446` -> `1c260db2` (derived Mirror TSI ~1361.17 vs the old rounded integer 1361, +0.012%, L at M_sun = L_sun exactly); the other four pins byte-identical (`40fe8a72`/`d05a6488`/`9a28f113`/`967b22bd`). 914 sim tests pass. Never tuned to reproduce 1361.
+
+**CI discipline:** two mechanical CI failures early (fmt on slice 1; constructor-gate loader exemption + a stray adverb on slice 2), both fixed; `cargo fmt --check` + the constructor gate + a prose scan are now in my pre-push routine.
+
+**Where it stopped.** Layer 0 + Stage 1 flux complete, all pushed and reported on #160 (comments through 4950368242), the CONSENSUS_ROADMAP board item added in place. Branch tip `7d113d6`. G is already on main (C's #161, `850efcd`, 6.67430e-11); the gate holds the Layer-0 merge until the layer closes and double-checks the accumulated diff.
+
+**Where it goes next (task #63).** Stage 2, the orbit and cycles: rebase on `850efcd` (G present) first, then add the per-world eccentricity datum + the Kepler orbital-distance term in `insolation_at` (today a fixed luminosity, no d(phase)), axial+apsidal precession, the Milankovitch deep-time envelope, wire the `DiurnalSky` periods from the world's own orbit (retire the demo literal run_world.rs:2576), and consolidate the celestial substrate into a numbered design Part. Diurnal + seasonal already built (#112). Stage 3 (geodynamics) and Stage 4 (atmosphere) follow; B (internal-heat axis + memory primitives) and C (determinism primitives + provenance-DAG) run their Layer-0 lanes in parallel, the gate sequencing the `laws.rs` merges (B's law-forms then C's kernels).
+
 ## 2026-07-12 (Agent A): Genesis plan GATED, Layer 0 building; the p_ref boiling-point-anchor seam caught both ways
 
 **What was done.** The gate GATED the genesis-forward plan (#160) and carved the Layer 0 lanes. All four of my catches approved: the build-order inversion (Sun->orbit->geodynamics), the stage-0.5 planet-formation interim, the Ra_c reclassification, and Layer 0 as the first build. Then I ran an adversarial source-verification of the plan's ~20 built/gap/reserved claims (workflow `wobkmiujh`, 6 verifiers charged to refute, 0 errors): 18 of 20 confirmed at source, 2 refined (folded into the plan doc). Posted the Layer 0 file-structure layout with the disjoint-file boundaries confirmed.
