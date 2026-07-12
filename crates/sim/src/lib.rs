@@ -89,6 +89,7 @@ pub mod evolve;
 pub mod forward_model;
 pub mod genesis;
 pub mod genome;
+pub mod geodynamics;
 pub mod homeostasis;
 pub mod institution;
 pub mod insult;
