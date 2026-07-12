@@ -16,8 +16,10 @@
 //! `docs/working/GENESIS_STAGE3_SURFACE_TRANSPORT_SUBSTRATE.md`. Surface mass transport is a DATA-DEFINED,
 //! EXTENSIBLE driver substrate: the transport-and-deposition solve over the driver kernels is the fixed Rust,
 //! the driver MEMBERSHIP is data (a driver is a data row carrying its transport-law form, its property key-set,
-//! its primitive, and the conservation reservoirs its mass touches). This module holds the substrate; this first
-//! slice is the CONSERVATION LEDGER the whole budget closes against.
+//! its primitive, and the conservation reservoirs its mass touches). This module holds the substrate: the
+//! CONSERVATION LEDGER the whole budget closes against ([`SurfaceMassBudget`]), and the driver-row CONTRACT
+//! ([`DriverRow`], [`DriverRegistry`], [`TransportKernelId`]) that makes the driver membership data over a fixed
+//! kernel vocabulary.
 //!
 //! [`SurfaceMassBudget`] is the FOUR-RESERVOIR conservation ledger. A pure-erosion budget with only
 //! column-to-column deposition cannot close its mass budget for a dissolving, a volatile, or a low-gravity
@@ -30,6 +32,8 @@
 //! under those moves, so the budget closes exactly under fixed-point arithmetic (Principle 3), and it declares
 //! that total as its conserved projection to the Part-58 [`crate::conservation::ConservationRegistry`] when a
 //! genesis pass arms it. Off the run path until then, a pure addition.
+
+use std::collections::BTreeMap;
 
 use civsim_core::Fixed;
 
@@ -148,6 +152,145 @@ impl SurfaceMassBudget {
     /// rounding artifact, because `Fixed` addition is exact.
     pub fn is_conserved(&self, opening_total: Fixed) -> bool {
         self.total() == opening_total
+    }
+}
+
+/// The fixed TRANSPORT-KERNEL vocabulary the data-defined driver rows compose over. This enum is the honest
+/// EXTENSIBILITY BOUNDARY of the substrate, the point the design smoke test warned a data-defined registry can
+/// smuggle a closed set one level down: a driver reading a new PROPERTY key or tuning a new PARAMETER is a data
+/// row (the membership grows with the world), but a driver needing a kernel not here is a FLOOR EXTENSION (a new
+/// arm, a deliberate Rust change), named plainly, not unbounded data. The build-now four kernels close the
+/// continuous mass budget; the deferred kernels (a non-local ballistic redistribution for impact and granular
+/// mass flows, a phase-change transport for volatiles) are added as arms when their primitive lands.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum TransportKernelId {
+    /// Gravity-driven downslope diffusion (hillslope creep and threshold failure), relaxed by `fixed_cap_solve`.
+    /// It sets the slope the fluid-shear and solid-solvent kernels read.
+    HillslopeDiffusion,
+    /// Fluid-shear entrainment and transport capacity in the exact-root form (`E = K * sqrt(A) * S`), the flow
+    /// routed by `priority_flood`. Keyed on the fluid property key-set, so a liquid solvent and a gas are the
+    /// same kernel with different property data.
+    FluidShear,
+    /// Thermal-chemical alteration: dissolution moving mass into the dissolved-load reservoir, and thermal or
+    /// frost fracturing producing the mobile grains the transport kernels move.
+    ThermalChemicalAlteration,
+    /// Deposition, the settling of transported load where transport capacity drops, the conservation sink that
+    /// closes the column-to-column half of the budget.
+    Deposition,
+}
+
+/// A DRIVER ROW: the data record binding one [`TransportKernelId`] from the fixed vocabulary to its reserved
+/// parameters (keyed by name, surfaced-with-basis, never fabricated), its OPEN forcing PROPERTY key-set (the
+/// named world-property keys the kernel reads, extensible so an alien driver keyed on a triboelectric charge or
+/// a Bingham yield stress is a data row, not a rewrite), and the [`MassReservoir`] fates its mass touches. The
+/// driver MEMBERSHIP is data (a [`DriverRegistry`] of these rows grows with the world); the kernel vocabulary
+/// and the four reservoirs are the fixed floor. This mirrors the decompose-driver pattern (a data binding of a
+/// fixed kernel id to reserved params plus a world-declared axis set), the sibling data-defined registry.
+#[derive(Clone, Debug, PartialEq)]
+pub struct DriverRow {
+    /// The driver's name, its key in the registry.
+    pub name: String,
+    /// The fixed-vocabulary kernel this row invokes.
+    pub kernel: TransportKernelId,
+    /// The OPEN forcing property key-set: the named world-property keys the kernel reads (density, viscosity,
+    /// surface tension, latent heat, boiling point, a saturation curve, a chemical aggressiveness, or an
+    /// off-list key like a triboelectric charge). Extensible by naming a new key, the data half of the
+    /// extensibility line.
+    property_keys: Vec<String>,
+    /// The kernel's reserved parameters, keyed by name. An absent parameter reads zero (the substrate absence
+    /// convention, matching the decompose driver). On the run path each is loaded fail-loud from the calibration
+    /// manifest, surfaced-with-basis, never fabricated.
+    params: BTreeMap<String, Fixed>,
+    /// The [`MassReservoir`] fates this driver's mass touches, so the conservation ledger knows its reservoir
+    /// footprint. A transport kernel that redistributes within the solid column names only `ColumnSolid`; a
+    /// dissolution kernel names `ColumnSolid` and `DissolvedLoad`.
+    reservoirs: Vec<MassReservoir>,
+}
+
+impl DriverRow {
+    /// Build a driver row from its kernel, its property key-set, its reserved parameters, and the reservoir
+    /// fates it touches. The parameter and property membership is data.
+    pub fn new(
+        name: impl Into<String>,
+        kernel: TransportKernelId,
+        property_keys: Vec<String>,
+        params: BTreeMap<String, Fixed>,
+        reservoirs: Vec<MassReservoir>,
+    ) -> DriverRow {
+        DriverRow {
+            name: name.into(),
+            kernel,
+            property_keys,
+            params,
+            reservoirs,
+        }
+    }
+
+    /// A reserved parameter by name; an absent one reads zero (the substrate absence convention).
+    pub fn param(&self, name: &str) -> Fixed {
+        self.params.get(name).copied().unwrap_or(Fixed::ZERO)
+    }
+
+    /// Whether the kernel reads a named world-property key.
+    pub fn reads_property(&self, key: &str) -> bool {
+        self.property_keys.iter().any(|k| k == key)
+    }
+
+    /// The forcing property key-set the kernel reads.
+    pub fn property_keys(&self) -> &[String] {
+        &self.property_keys
+    }
+
+    /// Whether this driver's mass touches a reservoir fate.
+    pub fn touches(&self, reservoir: MassReservoir) -> bool {
+        self.reservoirs.contains(&reservoir)
+    }
+
+    /// The reservoir fates this driver's mass touches.
+    pub fn reservoirs(&self) -> &[MassReservoir] {
+        &self.reservoirs
+    }
+}
+
+/// The DRIVER REGISTRY: the data-defined, extensible membership of the surface-mass-transport substrate. It
+/// holds the [`DriverRow`]s a world declares in registration order, the ONE canonical walk (a name lookup is a
+/// convenience, never the walk), so a folded read over the drivers is reproducible and thread-invariant when a
+/// genesis pass arms it (Principle 3). Empty by default and off the run path, so declaring it is byte-neutral;
+/// the transport-and-deposition solve over the rows is the fixed Rust, the membership is data.
+#[derive(Clone, Debug, Default)]
+pub struct DriverRegistry {
+    rows: Vec<DriverRow>,
+}
+
+impl DriverRegistry {
+    /// An empty registry: no driver declared, the opt-out state a scenario that arms no transport stays in.
+    pub fn new() -> DriverRegistry {
+        DriverRegistry::default()
+    }
+
+    /// Register a driver row, appended in registration order (the canonical walk order).
+    pub fn register(&mut self, row: DriverRow) {
+        self.rows.push(row);
+    }
+
+    /// Whether no driver is registered (the byte-neutral opt-out state).
+    pub fn is_empty(&self) -> bool {
+        self.rows.is_empty()
+    }
+
+    /// The number of registered drivers.
+    pub fn len(&self) -> usize {
+        self.rows.len()
+    }
+
+    /// Walk the registered drivers in registration order, the ONE canonical walk.
+    pub fn iter(&self) -> impl Iterator<Item = &DriverRow> {
+        self.rows.iter()
+    }
+
+    /// A driver by name (a convenience lookup, never the canonical walk); the first match, or none.
+    pub fn get(&self, name: &str) -> Option<&DriverRow> {
+        self.rows.iter().find(|r| r.name == name)
     }
 }
 
@@ -288,5 +431,104 @@ mod tests {
         let b = SurfaceMassBudget::new();
         assert_eq!(b.total(), Fixed::ZERO);
         assert!(b.is_conserved(Fixed::ZERO));
+    }
+
+    fn params(pairs: &[(&str, i32)]) -> BTreeMap<String, Fixed> {
+        pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), Fixed::from_int(*v)))
+            .collect()
+    }
+
+    #[test]
+    fn a_driver_row_binds_a_kernel_to_named_params_and_an_open_property_key_set() {
+        // A driver is a data row: a fixed-vocabulary kernel plus reserved params by name plus the open forcing
+        // property keys it reads. An absent param reads zero (the substrate absence convention).
+        let row = DriverRow::new(
+            "fluvial-water",
+            TransportKernelId::FluidShear,
+            vec!["density".into(), "viscosity".into()],
+            params(&[("erodibility", 3), ("capacity_coefficient", 7)]),
+            vec![MassReservoir::ColumnSolid],
+        );
+        assert_eq!(row.kernel, TransportKernelId::FluidShear);
+        assert_eq!(row.param("erodibility"), Fixed::from_int(3));
+        assert_eq!(row.param("capacity_coefficient"), Fixed::from_int(7));
+        assert_eq!(
+            row.param("absent"),
+            Fixed::ZERO,
+            "an absent param reads zero"
+        );
+        assert!(row.reads_property("density") && row.reads_property("viscosity"));
+        assert!(row.touches(MassReservoir::ColumnSolid));
+        assert!(!row.touches(MassReservoir::DissolvedLoad));
+    }
+
+    #[test]
+    fn an_alien_driver_reads_an_off_list_property_key_as_a_data_row() {
+        // The open property key-set admits the alien: a driver keyed on a triboelectric charge (electrostatic
+        // dust transport) or a Bingham yield stress (a mud or lava mass flow) is a data row, not a rewrite. The
+        // key is any name; the kernel vocabulary is the only fixed set.
+        let dust = DriverRow::new(
+            "electrostatic-dust",
+            TransportKernelId::FluidShear,
+            vec!["triboelectric_charge".into(), "grain_size".into()],
+            params(&[("mobility", 1)]),
+            vec![MassReservoir::ColumnSolid],
+        );
+        assert!(
+            dust.reads_property("triboelectric_charge"),
+            "an off-list property key is a data row"
+        );
+        assert_eq!(dust.property_keys().len(), 2);
+    }
+
+    #[test]
+    fn a_dissolution_driver_declares_the_dissolved_load_reservoir_footprint() {
+        // A thermal-chemical dissolution driver moves mass from the solid column into the dissolved-load
+        // reservoir, so it declares both fates; the conservation ledger reads this footprint.
+        let row = DriverRow::new(
+            "carbonate-dissolution",
+            TransportKernelId::ThermalChemicalAlteration,
+            vec!["chemical_aggressiveness".into()],
+            params(&[("dissolution_rate", 2)]),
+            vec![MassReservoir::ColumnSolid, MassReservoir::DissolvedLoad],
+        );
+        assert!(row.touches(MassReservoir::ColumnSolid));
+        assert!(row.touches(MassReservoir::DissolvedLoad));
+        assert!(!row.touches(MassReservoir::LostToSpace));
+    }
+
+    #[test]
+    fn the_registry_walks_the_drivers_in_registration_order_and_is_empty_by_default() {
+        let mut reg = DriverRegistry::new();
+        assert!(reg.is_empty(), "the byte-neutral opt-out default");
+        reg.register(DriverRow::new(
+            "hillslope",
+            TransportKernelId::HillslopeDiffusion,
+            vec!["slope".into()],
+            params(&[("diffusivity", 1)]),
+            vec![MassReservoir::ColumnSolid],
+        ));
+        reg.register(DriverRow::new(
+            "deposition",
+            TransportKernelId::Deposition,
+            vec!["grain_size".into()],
+            BTreeMap::new(),
+            vec![MassReservoir::ColumnSolid],
+        ));
+        assert_eq!(reg.len(), 2);
+        let names: Vec<&str> = reg.iter().map(|r| r.name.as_str()).collect();
+        assert_eq!(
+            names,
+            vec!["hillslope", "deposition"],
+            "the canonical walk is registration order"
+        );
+        assert_eq!(
+            reg.get("deposition").map(|r| r.kernel),
+            Some(TransportKernelId::Deposition),
+            "a name lookup is a convenience over the walk"
+        );
+        assert!(reg.get("absent").is_none());
     }
 }
