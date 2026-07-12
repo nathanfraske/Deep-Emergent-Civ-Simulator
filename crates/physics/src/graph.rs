@@ -610,11 +610,15 @@ pub fn kernel_contract(kernel: &str) -> Option<KernelContract> {
         },
         "stokes_velocity" => KernelContract {
             ports: const { &[cur("gravity", 1), cur("viscosity", -1)] },
-            output: Asserted("v = C*delta_rho*g*r^2/eta; the thermal density anomaly delta_rho (rho*alpha*dT) and the parcel radius r are caller-composed values, not registry axes (the thermal-buoyancy convention), and the Stokes drag factor C is a reserved dimensionless constant, so the buoyant creeping-flow velocity is not a port monomial over the declared axes"),
+            output: Asserted("v = (2/9)*delta_rho*g*r^2/eta; the thermal density anomaly delta_rho (rho*alpha*dT) and the parcel radius r are caller-composed values, not registry axes (the thermal-buoyancy convention), and the sphere drag coefficient 2/9 is a derived dimensionless constant (from the buoyancy-vs-Stokes-drag force balance, not reserved), so the buoyant creeping-flow velocity is not a port monomial over the declared axes"),
         },
         "thermal_density_anomaly" => KernelContract {
             ports: const { &[cur("density", 1), cur("thermal_expansion", 1)] },
             output: Asserted("delta_rho = -rho*alpha*dT; alpha carries the ppm-to-fraction 1e-6 scale and dT is a caller-composed temperature contrast (not a registry axis), and the sign is negated (a warmer parcel is lighter), so the density-excess output is not a clean port monomial over the declared axes"),
+        },
+        "rayleigh_number" => KernelContract {
+            ports: const { &[cur("gravity", 1), cur("viscosity", -1)] },
+            output: Asserted("Ra = |delta_rho|*g*d^3/(eta*kappa); the density anomaly delta_rho, the layer depth d, and the thermal diffusivity kappa are caller-composed values, not registry axes, and the whole ratio is dimensionless, so it is not a port monomial over the declared axes; convection onsets when Ra crosses the derived critical Rayleigh number via threshold_latch"),
         },
         _ => return None,
     })
