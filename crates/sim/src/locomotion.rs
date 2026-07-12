@@ -1213,7 +1213,9 @@ impl DerivedTaxisParams {
             };
         }
         DerivedTaxisParams {
-            resting_tumble_rate: resting_drain.div(noise_floor).clamp(Fixed::ZERO, Fixed::ONE),
+            resting_tumble_rate: resting_drain
+                .div(noise_floor)
+                .clamp(Fixed::ZERO, Fixed::ONE),
             reserve_sensitivity: Fixed::ONE.div(noise_floor),
         }
     }
