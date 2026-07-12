@@ -51,6 +51,7 @@ pub mod redistribute;
 pub mod runout;
 pub mod solve;
 pub mod structure;
+pub mod surface_coupling;
 pub mod terrain;
 pub mod topology;
 pub mod view;
