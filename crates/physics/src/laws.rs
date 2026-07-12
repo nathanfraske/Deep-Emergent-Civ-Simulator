@@ -3179,9 +3179,106 @@ pub fn harmony_tilt(cost_reduction: Fixed, temperature: Fixed, tilt_max: Fixed) 
     z.exp().clamp(ONE, tilt_max.max(ONE))
 }
 
+// --- The MEMORY PRIMITIVES (the genesis-forward temporal dimension) ---
+//
+// The floor law kernels are otherwise memoryless (a pure function of present axes to present consequence; the
+// only prior-tick reach is the induction laws' one-step `Prior` + `Dt` finite-difference port). A large class
+// of geology is a RECORD of the past rather than a present equilibrium (extinct-dynamo remanence, the tidal
+// budget, metamorphic pressure-temperature-time paths, inherited radiometric age, the one-way surface-redox
+// transition), so the substrate needs a temporal and memory dimension. These three kernels are the dimension-
+// polymorphic building blocks a runner threads over a resident field (the caller holds the prior-tick value,
+// exactly as the induction laws hold the prior flux). The world CLOCK is the fourth primitive and already
+// exists as the monotone integer tick counter on the world, read rather than re-authored. Integer and fixed-
+// point throughout, so replay reproduces every carry-state bit for bit (Principle 3).
+
+/// The ACCUMULATOR: a resident quantity integrated over time, advanced each tick by a per-tick RATE,
+/// `new = prior + rate * DT`. The pure per-tick STEP the runner threads over a resident field, so the
+/// memoryless floor gains a carry-state building block: the strain that builds toward a yield, the dose toward
+/// a transition, the isotope reservoir that spends down. Dimension-polymorphic (the prior and the `rate * DT`
+/// increment share a dimension). Saturating, so an overflow pins at the fixed cap rather than wrapping.
+pub fn accumulate(prior: Fixed, rate: Fixed, dt: Fixed) -> Fixed {
+    if dt <= ZERO {
+        return prior;
+    }
+    let increment =
+        rate.checked_mul(dt)
+            .unwrap_or(if rate < ZERO { Fixed::MIN } else { Fixed::MAX });
+    prior.saturating_add(increment)
+}
+
+/// The one-time irreversible-threshold LATCH: fires ONCE when an accumulated `value` reaches a declared
+/// `threshold`, and then stays latched forever (`prior_latched` is the resident bit the caller threads). The
+/// one-way transition the memoryless present-to-present kernels cannot express: inner-core nucleation, a redox
+/// transition, a phase latch. Monotone by construction, it never un-fires, so the recorded past is stable.
+pub fn threshold_latch(value: Fixed, threshold: Fixed, prior_latched: bool) -> bool {
+    prior_latched || value >= threshold
+}
+
+/// The ELAPSED-AGE read of a per-parcel age stamp: a parcel's age is the world CLOCK now minus the clock value
+/// stamped at its formation or last re-equilibration, the input the radiogenic decay and any age-recorded
+/// relic reads. A saturating subtraction floored at zero (a formation stamp is never after now), integer and
+/// deterministic. The clock is passed as the tick count in `Fixed`; a deep-time genesis past the fixed integer
+/// range carries the clock in a wider representation, the flagged follow-on.
+pub fn elapsed_age(clock: Fixed, formation_stamp: Fixed) -> Fixed {
+    sat_sub(clock, formation_stamp).max(ZERO)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn accumulator_integrates_over_time_and_saturates() {
+        let dt = Fixed::from_int(2);
+        let rate = Fixed::from_int(3);
+        // new = prior + rate*dt: a resident quantity builds up tick by tick.
+        let a1 = accumulate(Fixed::ZERO, rate, dt);
+        assert_eq!(a1, Fixed::from_int(6));
+        let a2 = accumulate(a1, rate, dt);
+        assert_eq!(
+            a2,
+            Fixed::from_int(12),
+            "the accumulator carries state forward"
+        );
+        // A zero (or non-positive) tick is a no-op, so a paused step does not drift.
+        assert_eq!(accumulate(a2, rate, Fixed::ZERO), a2);
+        // A negative rate spends the reservoir down (the isotope-decay direction).
+        assert_eq!(
+            accumulate(a2, Fixed::ZERO - rate, dt),
+            Fixed::from_int(6),
+            "a negative rate integrates downward"
+        );
+        // Overflow pins at the cap rather than wrapping (determinism).
+        assert_eq!(accumulate(Fixed::MAX, rate, dt), Fixed::MAX);
+    }
+
+    #[test]
+    fn threshold_latch_fires_once_and_never_unfires() {
+        let threshold = Fixed::from_int(10);
+        // Below the threshold and never latched before: stays unlatched.
+        assert!(!threshold_latch(Fixed::from_int(9), threshold, false));
+        // Reaching the threshold fires it.
+        assert!(threshold_latch(Fixed::from_int(10), threshold, false));
+        assert!(threshold_latch(Fixed::from_int(11), threshold, false));
+        // Once latched, it stays latched even as the value falls back below (irreversible).
+        assert!(
+            threshold_latch(Fixed::from_int(0), threshold, true),
+            "the latch never un-fires: the recorded past is stable"
+        );
+    }
+
+    #[test]
+    fn elapsed_age_is_the_clock_minus_the_formation_stamp() {
+        let clock = Fixed::from_int(100);
+        assert_eq!(
+            elapsed_age(clock, Fixed::from_int(30)),
+            Fixed::from_int(70),
+            "age is now minus formation time"
+        );
+        // A parcel just formed has zero age; a stamp never after now floors at zero.
+        assert_eq!(elapsed_age(clock, clock), Fixed::ZERO);
+        assert_eq!(elapsed_age(clock, Fixed::from_int(200)), Fixed::ZERO);
+    }
 
     // Dev fixtures: representable caps for the determinism harness, never canon. The
     // owner's set caps reach a kernel through the calibration manifest when the engine
