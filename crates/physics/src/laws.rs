@@ -3261,6 +3261,40 @@ pub fn radiogenic_decay(reservoir: Fixed, decay_constant: Fixed, dt: Fixed) -> F
     sat_sub(reservoir, lost).max(ZERO)
 }
 
+/// Thermal density anomaly, the buoyancy SOURCE: `delta_rho = -rho * alpha * dT`, the density excess a
+/// thermal parcel carries relative to its surroundings, the source [`stokes_velocity`] and the buoyancy laws
+/// consume. `rho` is the material density (kg/m^3), `alpha` the volumetric thermal expansion read from
+/// [`therm.expansion`] in ppm/K (so the per-kelvin fraction is `alpha_ppm * 1e-6`), and `dT = T_parcel -
+/// T_ambient` the temperature contrast (a caller-composed difference of two `therm.temperature` samples, the
+/// sensible-energy convention). Signed by the physics: a warmer parcel (`dT > 0`) is LESS dense, so its
+/// density excess is NEGATIVE and it rises, exactly the sign [`stokes_velocity`] reads (a negative excess
+/// drives a positive rise velocity). This law consumes the existing density and thermal-expansion floor
+/// rather than authoring a buoyancy axis. Saturating on overflow, sign-correct. Deterministic fixed-point.
+pub fn thermal_density_anomaly(
+    density: Fixed,
+    thermal_expansion_ppm: Fixed,
+    delta_t: Fixed,
+) -> Fixed {
+    // magnitude = rho * alpha_ppm * dT / 1e6 (the ppm-to-fraction). density and alpha are >= 0, so the
+    // product's sign is dT's; an overflow routes to the extreme of that sign before the final negation.
+    let magnitude = density
+        .checked_mul(thermal_expansion_ppm)
+        .and_then(|x| x.checked_mul(delta_t))
+        .and_then(|x| x.checked_div(Fixed::from_int(1_000_000)));
+    let magnitude = match magnitude {
+        Some(m) => m,
+        None => {
+            if delta_t < ZERO {
+                Fixed::MIN
+            } else {
+                Fixed::MAX
+            }
+        }
+    };
+    // The density excess is negative for a warmer (lighter) parcel: delta_rho = -(rho*alpha*dT).
+    sat_sub(ZERO, magnitude)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3353,6 +3387,32 @@ mod tests {
             radiogenic_decay(n0, Fixed::from_int(5), dt),
             Fixed::ZERO,
             "the reservoir floors at zero"
+        );
+    }
+
+    #[test]
+    fn thermal_density_anomaly_is_negative_for_a_warmer_lighter_parcel() {
+        // rho = 2000 kg/m^3, alpha = 30 ppm/K (a rocky ~3e-5/K), exactly representable integers.
+        let rho = Fixed::from_int(2000);
+        let alpha = Fixed::from_int(30);
+        // A warmer parcel (dT = +100 K): magnitude = 2000*30*100/1e6 = 6; delta_rho = -6 (lighter, rises).
+        assert_eq!(
+            thermal_density_anomaly(rho, alpha, Fixed::from_int(100)),
+            Fixed::from_int(-6),
+            "a warmer parcel is lighter (negative density excess)"
+        );
+        // A colder parcel (dT = -100 K) is denser: a positive excess (sinks).
+        assert_eq!(
+            thermal_density_anomaly(rho, alpha, Fixed::from_int(-100)),
+            Fixed::from_int(6),
+            "a colder parcel is denser (positive density excess)"
+        );
+        // No contrast, no anomaly.
+        assert_eq!(thermal_density_anomaly(rho, alpha, ZERO), ZERO);
+        // A non-expanding material (alpha = 0) carries no thermal anomaly.
+        assert_eq!(
+            thermal_density_anomaly(rho, ZERO, Fixed::from_int(100)),
+            ZERO
         );
     }
 

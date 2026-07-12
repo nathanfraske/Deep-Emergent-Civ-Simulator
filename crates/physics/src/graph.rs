@@ -597,6 +597,10 @@ pub fn kernel_contract(kernel: &str) -> Option<KernelContract> {
             ports: const { &[prior("reservoir", 1), cur("decay_constant", 1), dt("dt")] },
             output: Asserted("N_new = N*(1 - lambda*dt); a first-order fold of the prior reservoir over the tick, an accumulate instance with a reservoir-proportional negative rate, not a port monomial"),
         },
+        "thermal_density_anomaly" => KernelContract {
+            ports: const { &[cur("density", 1), cur("thermal_expansion", 1)] },
+            output: Asserted("delta_rho = -rho*alpha*dT; alpha carries the ppm-to-fraction 1e-6 scale and dT is a caller-composed temperature contrast (not a registry axis), and the sign is negated (a warmer parcel is lighter), so the density-excess output is not a clean port monomial over the declared axes"),
+        },
         _ => return None,
     })
 }

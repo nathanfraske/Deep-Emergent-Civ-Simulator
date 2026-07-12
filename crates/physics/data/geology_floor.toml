@@ -135,3 +135,24 @@ output_measure = "the decayed isotope reservoir N_new = N*(1 - lambda*dt), a fir
 dimension = "dimensionless"
 interval_bound = "[0, CONC_MAX]"
 tier = 0
+
+# --- Interior convection buoyancy source (the thermal density anomaly) ---
+# thermal_density_anomaly is the buoyancy SOURCE the convection flow consumes: delta_rho = -rho*alpha*dT, the
+# density excess a thermal parcel carries (negative and rising when warmer, positive and sinking when colder).
+# It composes the existing density (mat.density) and thermal-expansion (therm.expansion, ppm/K) floor rather
+# than authoring a buoyancy axis; the temperature contrast dT is a caller-composed difference of two
+# therm.temperature samples (the sensible-energy convention), and alpha carries the ppm-to-fraction scale. The
+# sign is the physics (a warmer parcel is lighter), matched to the stokes_velocity flow that reads it. Byte-
+# neutral: no scenario arms it, and the resident field belongs to the shared geodynamics contract.
+
+[[law]]
+id = "law.thermal_density_anomaly"
+kernel = "thermal_density_anomaly"
+ports = [
+  { role = "density", axis = "mat.density" },
+  { role = "thermal_expansion", axis = "therm.expansion" },
+]
+output_measure = "the thermal density excess delta_rho = -rho*alpha*dT a parcel carries (negative when warmer and lighter), the buoyancy source the Stokes convection flow and the buoyancy laws consume"
+dimension = "-3,1,0,0"
+interval_bound = "[-RHO_MAX, RHO_MAX]"
+tier = 0
