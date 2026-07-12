@@ -3027,3 +3027,21 @@ EWALD CARVE opened design-first (docs/working/MATERIALS_ORACLE_EWALD_CARVE.md): 
 
 STATE: signaled (comment 4953055846), confirmed Ewald-next, awaiting gate ruling on the transcendental seam before building the kernel. Offered IE/EA columns as a parallel lane. CI re-running on a26ffd5.
 DEPENDENCY ORDER (architecture): Ewald kernel -> IE/EA columns + derived chi/eta -> QEq -> bond-valence positions -> energy assembly (Ewald(q)+Born-Mayer+London+Keating) -> modulus. The disposer RESOLUTION-LADDER rule is routed to A (not my build). Task #35 interior arming still HELD (main unchanged 64da409). Do NOT touch A's genesis/register/generator-arch or C's lanes.
+
+---
+
+## 2026-07-12 (Agent B) - Materials oracle: EWALD KERNEL BUILT + validated to 1e-4 (#182, generator arch piece 1)
+
+Gate approved the Ewald carve and ruled the transcendental seam: A-S rational erfc, fixed-form deterministic exp (crate's Fixed::exp), deterministic alpha+cutoffs, self-validate to 1e-4, tin-foil declared, Ewald-first single lane (no parallel - C on cbrt, A on register). Gate also OWNED the CI misdiagnosis (it said prose, I proved constructor gate - PD1 on its input).
+
+BUILT crates/physics/src/ewald.rs (commit 1444f74, dormant, byte-neutral, pure mechanism NO floor data):
+- Three-term Ewald split: real-space erfc-screened Coulomb, reciprocal Gaussian structure factor, self-energy. Tin-foil for polar cells (declared, surface term zeroed).
+- erfc = Abramowitz-Stegun 7.1.26 five-term rational over crate Fixed::exp; structure factor uses crate CORDIC sin_cos. ALL fixed-form, no input-dependent trip count. alpha=3.2/V^(1/3), N_REAL=2, N_RECIP=6 (deterministic convergence params). A-S coeffs + alpha are exact from_ratio (NO from_decimal_str, no constructor-gate site).
+- Cell{lattice:[[Fixed;3];3], ions:Vec<Ion{frac,charge}>}. ewald_energy(cell)->Option<Fixed> (reduced units). madelung_constant(cell, formula_units, ref_distance) = -(E/fu)*ref_dist.
+
+VALIDATED to gate's 1e-4: NaCl 1.747563 vs 1.747565, CsCl 1.762675 vs 1.762675 (the clean 1:1 proofs = "Madelung is Ewald of positions"). Fluorite CaF2 = non-1:1 mixed-charge structural validation (the generality corundum's A2B3 needs). erfc self-checked (erfc(0)=1, erfc(1)=0.157299, erfc(2)=0.004678). Convention: M=-(E/fu)*ref_dist, full charges, nearest cation-anion ref. 6 ewald tests. 186 physics tests total. All gates clean. Byte-neutral (sim pins unmoved).
+
+HONEST SCOPE NOTE surfaced: corundum's exact 1e-4 Madelung validation is the follow-on (needs experimental rhombohedral cell + cited reference constant); kernel generality for A2B3 already proven by fluorite. Did NOT fabricate a corundum reference.
+
+STATE: signaled (comment 4953086619), confirmed Ewald built. NEXT per gate order: IE/EA [M] columns + derived chi=(IE+EA)/2, hardness eta=(IE-EA)/2 (purely additive floor, quick), then QEq (needs IE/EA + Ewald), then bond-valence positions, then energy assembly, then modulus. Carve-2 (lattice_modulus.rs) stays as AB fast-path + validation; whole slice merges once QEq gives partial-charge B. Awaiting gate confirm to proceed to IE/EA, or ruling on adding corundum cell first.
+DEPENDENCY: QEq E(q)=sum(chi_i q_i + 0.5 eta_i q_i^2)+Ewald(q), neutrality linear solve. Energy assembly = Ewald(computed q)+Born-Mayer+London+Keating. Disposer RESOLUTION-LADDER routed to A. Task #35 interior arming still HELD (main 64da409 unchanged, no Stage-3c). Do NOT touch A's genesis/register/generator-arch or C's momentum/world/cbrt lanes.
