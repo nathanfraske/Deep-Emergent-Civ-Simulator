@@ -68,14 +68,20 @@ cultural input) and none of them a place where a cultural or emergent outcome is
 - The per-world surface-pressure and surface-temperature datum. This gates whether the declared solvent is
   liquid at the surface and which surface processes run, and it co-determines inside the atmosphere loop
   through line broadening, the lapse rate, and the greenhouse integral. Source-verified refinement (see the
-  verification note below): the surface-PRESSURE datum is absent (the only floor phase anchor is a
-  solvent's own boiling point, and the sole surface-pressure value on the path is a hardcoded `P_ref =
-  0.101325 MPa`, one atmosphere, in `laws.rs`, a Principle 11 defect to retire), whereas a per-world
+  verification note below): the world surface-PRESSURE datum is absent, whereas a per-world
   surface-TEMPERATURE scalar already exists as `climate.mean_surface_temperature` (287 K, category
-  per-world), though it is a worldgen Kelvin-mapping offset, not a solvent-phase gate. So this Layer 0 slice
-  is narrower and sharper than a blanket absence: add the surface-pressure datum, retire the hardcoded
-  one-atmosphere `P_ref`, and reconcile the phase gate with the existing temperature scalar. This is the
-  Terran-bias fix: without a surface-pressure datum, no non-Earth world can gate its solvent phase.
+  per-world), though it is a worldgen Kelvin-mapping offset, not a solvent-phase gate. One value-line
+  subtlety I checked at source rather than taking on the verifier's word: the `P_ref = 0.101325 MPa` (one
+  atmosphere) in `laws.rs` is NOT a Terran-bias surface-pressure defect. It is the matched reference pressure
+  parameter of `rankine_kirchhoff_constants` (`laws.rs:1600`), which by definition is the pressure at which a
+  substance's normal boiling point T_b is measured, so anchoring the saturation curve at `(T_b, 1 atm)` is
+  correct physics, not an authored world pressure. The genuine gap is separate: the world's own surface
+  pressure, the quantity the phase gate compares against the saturation pressure at the world's surface
+  temperature, is not carried. So this Layer 0 slice is narrower than a blanket absence: add the world
+  surface-pressure datum, reconcile the phase gate with the existing temperature scalar, and confirm during
+  the build whether any live ambient or driving-pressure read defaults to one atmosphere (which would be the
+  real surface-pressure assumption to retire, a point I verify rather than assert). This is the Terran-bias
+  fix: without a world surface-pressure datum, no non-Earth world can gate its solvent phase.
 
 One fundamental is added: the gravitational constant G. It is absent from the closed floor (verified), and the
 flux derivation in stage 1 does not need it (the dimensionless mass-luminosity ratio cancels it), but Kepler's
@@ -323,11 +329,17 @@ five-reader fan-out. Because a reader is a lead generator and not a verdict, eve
 adversarially re-checked against the real tree by a dedicated verifier charged to refute it (in addition to the
 four I checked by hand before posting: G absent, sigma and R derived, the 1361 literal, `Fixed::powf` built).
 Eighteen of the twenty confirmed at source. Two refined, and both refinements are folded into the stages
-above. First, the surface-pressure and surface-temperature datum (Layer 0): the surface-pressure datum is absent and the sole surface-pressure value on the path is a hardcoded one-atmosphere `P_ref` law
-constant to retire, but a per-world surface-temperature scalar already exists as
-`climate.mean_surface_temperature`, so the slice is narrower than a blanket absence. Second, the elevation
-ledger (Stage 3): `recouple_hydrology` is called every tick but is inert by default via the empty-earthwork
-guard, so the ledger is off the default path by inertness rather than by being uninvoked. Neither refinement
+above. First, the surface-pressure and surface-temperature datum (Layer 0): the world surface-pressure datum
+is absent, while a per-world surface-temperature scalar already exists as `climate.mean_surface_temperature`,
+so the slice is narrower than a blanket absence. A second-order check on the verifier's own conclusion belongs
+here: the verifier flagged the `P_ref = 0.101325 MPa` in `laws.rs` as a hardcoded surface-pressure defect, but
+grounding the site shows it is the matched reference-pressure parameter of `rankine_kirchhoff_constants`
+(`laws.rs:1600`), the pressure at which a substance's normal boiling point T_b is defined, so anchoring the
+saturation curve at `(T_b, 1 atm)` is correct physics and per-substance reference data, not an authored world
+pressure to retire. The genuine gap is the separate world surface-pressure quantity the phase gate compares
+against saturation. Second, the elevation ledger (Stage 3): `recouple_hydrology` is called every tick but is
+inert by default via the empty-earthwork guard, so the ledger is off the default path by inertness rather than
+by being uninvoked. Neither refinement
 reverses a conclusion; both sharpen a build slice. No claim was refuted.
 
 ## Discipline and the gate ask
