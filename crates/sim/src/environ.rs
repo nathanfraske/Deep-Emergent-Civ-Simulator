@@ -1405,16 +1405,30 @@ impl EnvironFields {
                     calib.sat_es_cap,
                 );
                 let moist = self.moisture[i];
-                // Precipitation: the moisture over saturation condenses (cold cells, low e_s).
+                // Precipitation: the moisture over saturation condenses (cold cells, low e_s). FOLLOW-ON (flagged,
+                // not faked): this branch still compares the ground `moisture_content` to `e_s` directly, the same
+                // substance-quantity conflation the evaporation coupling below retires. A correct precipitation
+                // driver needs a DYNAMIC `fluid.vapor_pressure` transport state (that evaporation feeds and
+                // condensation draws from), which does not exist yet (`self.moisture` is a static worldgen input),
+                // the deeper water-cycle arc; left as-is here under the gate's scope ruling.
                 let excess = moist - e_s;
                 let precip = if excess > Fixed::ZERO {
                     calib.precip_rate.mul(excess)
                 } else {
                     Fixed::ZERO
                 };
-                // Evaporation: the Dalton flux over the vapour-pressure deficit (hot cells, high e_s).
+                // Evaporation: the Dalton flux over the vapour-pressure deficit. The ambient vapour pressure is
+                // DERIVED from the ground moisture (the soil-moisture-availability, or alpha, evapotranspiration
+                // proxy): the ground wetness fraction sets the near-surface relative humidity, so `e_ambient` is the
+                // saturation vapour pressure scaled by wetness, `moist * e_s`, and the deficit
+                // `e_s - e_ambient = e_s * (1 - moist)` is a proper vapour-pressure deficit in MPa, non-negative,
+                // scaling with dryness (bone-dry evaporates at the full deficit, saturated ground evaporates
+                // nothing). This turns `fluid.moisture_content` (dimensionless) into the `fluid.vapor_pressure` (MPa)
+                // the Dalton law's `e_ambient` port is floor-bound to read, retiring the mismatch that fed a wetness
+                // fraction into a pressure port and zeroed the evaporation everywhere.
+                let e_ambient = moist.checked_mul(e_s).unwrap_or(Fixed::ZERO);
                 let evap = laws::evaporation_rate(
-                    moist,
+                    e_ambient,
                     e_s,
                     Fixed::ZERO,
                     calib.evap_a_still,
