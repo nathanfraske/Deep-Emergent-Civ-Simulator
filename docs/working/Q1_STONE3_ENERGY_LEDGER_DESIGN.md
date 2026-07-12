@@ -1,0 +1,108 @@
+# Q1 Stone-3 extension: the biosphere-to-founder energy-transfer conservation ledger (design-first)
+
+This is the design opener for the next arc: extend the Stone-3 `Conserved<Q>` ledger from the matter
+cycle to the energy handoffs that feed the founder, so an energy leak in the food chain fails the way
+a mass leak now does. Design-first: this document grounds the current energy transfers at source,
+classifies them into exact-conservative transfers and legitimately open boundary flows, and surfaces
+the one load-bearing finding and the fork before any code lands.
+
+## Grounding (what the tree holds), at source
+
+The reserve substrate (`crates/sim/src/homeostasis.rs`): each being carries `Fixed`-valued reserves
+(energy, water, and whatever else its physiology declares) each with a capacity. The per-tick reserve
+flows are three, all centralized:
+- `metabolize_derived` (line 495) drains each reserve by a per-being derived fraction of capacity, the
+  metabolic OUTFLOW (dissipation to work and heat).
+- `ingest(axis, amount)` (line 524) deposits a food yield into a reserve, capped at capacity, and
+  returns the amount the reserve could hold.
+- `adjust(axis, delta)` (line 535) applies a signed change, used by the medium-respiration gas flux
+  (`medium::respire`, uptake in a richer medium, loss in a poorer one) and by harm application.
+
+The food inflow (`crates/sim/src/runner.rs`, forage at 3120-3162, the whole-body bite at 3172-3284):
+the being bites the cell's MATTER (`material.take(coord, substance, want)`, line 3132), and its reserve
+gain is `gain = taken * assim * eta` (line 3143), the assimilated fraction of the taken MASS. The
+un-assimilated remainder `taken * (1 - assim*eta)` is a trophic boundary loss.
+
+The producer side (`runner.rs:4347`, `crates/sim/src/biosphere.rs`): the step writes the standing
+producer biomass into the resource field, keyed off the physical productivity (a rate fed by insolation
+and soil fertility). The producer stock is MASS and supply, not an energy stock.
+
+## The load-bearing finding (Prime Directive 1, verified at source)
+
+The biosphere-to-founder chain conserves MASS, and ENERGY is derived at the point of assimilation
+rather than tracked as a stock. The bite decrements the cell's mass; the being gains an assimilated
+reserve `gain = taken * assim * eta`; there is no producer-side energy stock that loses exactly that
+`gain`. So the closed ENERGY transfer this arc names, a grazer's intake equal to the plant's
+fixed-carbon energy loss, does not exist on the current tree, and it cannot be wired as a
+`Conserved<Q>` transfer until a producer fixed-carbon energy stock exists. That stock is precisely B's
+Fork-4 food-value supersede, as you noted in the Q1-wrap sign-off, so the intake-equals-loss energy
+transfer is B-Fork-4-gated. This is a source-verified confirmation of the follow-on I flagged, not a
+new claim, and it reshapes what the arc can build now versus design now.
+
+## The energy and reserve flows, classified
+
+- Boundary flows, legitimately open (recorded with a tagged source or sink, never a leak): insolation
+  into productivity (source), radiation and metabolic dissipation out (sink), and the un-assimilated
+  trophic remainder `taken * (1 - assim*eta)`, which the matter cycle already returns to soil.
+- Reserve inflows: forage ingest and whole-body-bite ingest (energy derived from bitten mass), plus
+  the respiration adjust (gas flux, signed).
+- Reserve outflows: `metabolize_derived` (dissipation) and the harm adjust (a `CONDITION` decrement).
+- Clamp-drops, the reserve's real silent-leak sites: `ingest` caps at capacity and returns the held
+  amount, so an ingest into a near-full reserve drops the excess (satiation waste); the drain and take
+  floor at zero, so a draw beyond the reserve drops the unmet part (a starvation shortfall). A closed
+  energy budget must RECORD these as boundary flows rather than let them vanish.
+- Closed transfers guardable as `Conserved<Q>::transfer` today: none on the food side, because the
+  producer energy stock does not exist. The one place a closed transfer will live is the
+  intake-equals-loss leg once B lands Fork-4.
+
+## The design (the Stone-3 energy extension, staged)
+
+Piece A, buildable now, the energy analogue of the matter-cycle gate: a per-being reserve
+BOUNDARY-FLOW closure gate. The being's total reserve changes each tick by exactly the sum of its
+recorded flows (ingest in, metabolize out, harm out, respiration signed), with the satiation-cap and
+starvation-floor clamps recorded as tagged boundary flows, so a silent clamp-drop of reserve energy
+fires the gate. This lifts the being's energy budget to a runtime invariant the way the matter gate
+lifted the ground's mass budget, and it does not wait on B.
+
+The honest byte-neutrality caveat (unlike the matter gate): the matter gate needed only a before-and-
+after total because the decomposition cycle is CLOSED. The reserve is not closed (it carries legitimate
+inflows and outflows), so this gate needs before-and-after equal to the net recorded flow, which means
+recording the per-tick flows. Before recommending a build shape I will assess whether that recording is
+byte-neutral-cheap (a debug-only accumulator at the three centralized flow sites, `metabolize_derived`,
+`ingest`, `adjust`) or invasive (the `Conserved<Q>` token re-wrap I declined for the matter cycle as
+over-engineering). My prior is the accumulator is cheap because the flows are few and already
+centralized, but the assessment governs the recommendation, not the prior.
+
+Piece B, design-only now, B-Fork-4-gated: the closed intake-equals-loss ENERGY transfer via
+`Conserved<Q>::transfer`, wired once B lands the producer fixed-carbon energy stock. The bite becomes a
+transfer of `taken * assim * eta` from the producer energy stock to the being's reserve, with the
+un-assimilated remainder a recorded boundary loss. Flagged, coupled to B's Fork-4, not built here.
+
+## The design questions for your gate
+
+1. Scope now versus hold for B. Build Piece A (the reserve boundary-flow closure gate, real today and
+   B-independent) now, and flag Piece B (the closed transfer) for B's Fork-4? Or hold the whole arc as
+   design-only until Fork-4 lands, since the leg you named is B-gated? My recommendation is to build
+   Piece A now: it is the real energy-integrity guard that does not wait on B, it is the direct analogue
+   of the matter gate, and it catches the satiation and starvation clamp-drops that are the reserve's
+   actual silent-leak sites.
+2. The clamp-drops. Record the satiation-cap and starvation-floor drops as boundary flows (the honest
+   closure, my recommendation), or is a reserve that clamps silently at its bounds the intended model?
+   My read: the clamps are physical (a reserve cannot store past capacity, nor drain below empty), so
+   the drops are real boundary flows (satiation waste, starvation shortfall) and recording them closes
+   the budget without changing the sim (byte-neutral). This is a classification question, not a value.
+3. Bite and forage MASS coverage. The matter-cycle gate brackets `step_matter_cycle` (decomposition),
+   not the bite leg where mass crosses from cell to being. Do you want a sibling mass-closure gate over
+   the bite path (the cell mass removed equal to the being's assimilated mass gain plus the egested
+   remainder plus the carried-mass change), which I would verify conservative at source first the way I
+   did the matter cycle? Offered, not assumed.
+
+## Discipline
+
+No code until you gate the design. The gates are byte-neutral by construction (debug-and-test runtime
+assertions, compiled out in release, so the five pins hold), unless one lights up a real leak, in which
+case the fix is a reviewed byte change and a finding, a candidate founder-starvation diagnosis exactly
+as the matter gate was framed. No authored value: the gates are exact-`Fixed` accounting identities
+with no tolerance, keyed on whatever reserves the being's physiology declares, so a photosynthetic,
+mana, or redox being is a data row (`physiology.rs`). Section-9 once by me per slice. This PR is the new
+bridge; #143 refreshes against main and merges as the accepted volatile substrate the moment this opens.
