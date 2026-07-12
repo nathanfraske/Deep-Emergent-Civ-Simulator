@@ -3063,3 +3063,18 @@ SEAM SURFACED (not fabricated): N and Mg have UNBOUND anions -> no measured EA -
 
 STATE: awaiting gate ruling on the unbound-anion parameterization (blocks QEq on the oxides). NEXT: QEq linear solve E(q)=sum(chi_i q_i + 0.5 eta_i q_i^2)+Ewald(q) at neutrality, once parameterization ruled. Then bond-valence positions, energy assembly, modulus.
 BRANCH STATE (claude/materials-oracle-modulus-slice tip 7753a4b): carve-2 lattice_modulus.rs (AB point-charge B, kept as fast-path+validation), ewald.rs (Madelung kernel, validated 1e-4), qeq.rs (chi/eta inputs). Whole slice merges once QEq gives partial-charge B. Task #35 interior arming still HELD (main 64da409 unchanged). Do NOT touch A's genesis/register/generator-arch or C's momentum/world/cbrt lanes.
+
+---
+
+## 2026-07-12 (Agent B) - Materials oracle: unbound-anion chi/eta limit built + QEq bare-Ewald stability seam surfaced (#182)
+
+Gate ruled the unbound-anion seam: use the physical EA->0 LIMIT (chi=eta=IE/2) from measured IE, tagged [E], NOT a fitted column; Rappe-Goddard fallback only if the limit proves too crude. Also gave the escalation-rule note: QEq is [E], its charge feeds Ewald (power law) + modulus (linear), NEITHER an exponent, so [E]-grade QEq is legal for this consumer (would be forbidden only if the charge fed a T_m->Arrhenius exponential).
+
+BUILT (commit 6d61ab6): qeq.rs element_chi_eta -> ChiEta{chi,eta,provenance}. ChiEtaProvenance::Derived [D] (bound anion, measured EA) or ::UnboundLimit [E] (chi=eta=IE/2, EA->0 limit). Mg = 3.823 < O 7.5395 (charge flows Mg->O, partial). mulliken_electronegativity/chemical_hardness now unbound-limit-aware. 4 tests.
+
+SEAM SURFACED before building the QEq solve (PD2 audit of gate's E(q)): with BARE POINT-CHARGE Ewald the QEq interaction matrix is NOT positive-definite for a strong ionic -> runaway ionization, no partial charge. MgO q^2 coefficient of the symmetric mode = 0.5(eta_Mg+eta_O)+W = 0.5(3.823+6.0785)-11.87 = -6.92 < 0 (W=-M*k/r_nn=-1.7476*14.39964/2.12=-11.87 eV per fu, unit charges). Unbounded below. FIX = the actual Rappe-Goddard 1991 QEq SHIELDED Coulomb: J_ij = Coulomb integral over Slater densities, ->eta at r->0, ->k/r at large r, restores positive-definiteness -> physical partial charge. Recorded as STABILITY SEAM in qeq.rs module doc.
+
+RULING WANTED (comment 4953141622): confirm shielded Rappe-Goddard J_ij (changes gate's stated bare Ewald(q)). Needs a per-element Slater exponent: (a) cited Clementi-Raimondi [M] column, or (b) DERIVE from the Shannon radius already on the floor (zeta~c/r_ion). I lean (b). Then build shielded QEq solve + validate MgO (Mg partial ~+1.6, periclase B ~170 GPa via partial charge into Born-Lande |q+q-|).
+
+189 physics tests, all gates clean, byte-neutral.
+STATE: awaiting gate ruling on shielded-Coulomb formulation + Slater-exponent source before building the QEq solve. BRANCH tip 6d61ab6: carve-2 lattice_modulus.rs (AB validation), ewald.rs (Madelung kernel 1e-4), qeq.rs (chi/eta + unbound limit + stability seam). Whole slice merges once QEq gives partial-charge B. Task #35 interior arming HELD (main 64da409). Do NOT touch A's genesis/register/generator-arch or C's lanes.
