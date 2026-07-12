@@ -418,7 +418,7 @@ impl CalibrationManifest {
         const UNVISITED: u8 = 0;
         const IN_PROGRESS: u8 = 1;
         const DONE: u8 = 2;
-        // BTreeMap, not HashMap: deterministic iteration and the R-CANON-WALK-clean ordered container.
+        // An ordered BTreeMap (not the crate's unordered lookup map): deterministic, R-CANON-WALK-clean.
         let mut mark: std::collections::BTreeMap<&str, u8> = std::collections::BTreeMap::new();
         for start in &self.order {
             if mark.get(start.as_str()).copied().unwrap_or(UNVISITED) != UNVISITED {
