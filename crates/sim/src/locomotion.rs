@@ -85,7 +85,7 @@ use crate::percept::PerceptRegistry;
 /// The reserved parameters of the movement physics. The mechanism that reads them is fixed; these
 /// numbers are the owner's to set, surfaced with a basis, never fabricated (Principle 11). The
 /// development fixture below lets the module run and be tested now.
-// @derives: movement speed in tiles/tick, and (inverted) the cell edge in metres <- a real ground speed (about 1.4 m/s) / the tile edge, at the 1 s/tick base. The cell size is NOT free: it is fixed by one real creature's speed x the tick. Body-side, a being's own speed derives from its size (morphology), not a plant/animal tag.
+// @derives[locomotion_speed_cell]: movement speed in tiles/tick, and (inverted) the cell edge in metres <- a real ground speed (about 1.4 m/s) / the tile edge, at the 1 s/tick base. The cell size is NOT free: it is fixed by one real creature's speed x the tick. Body-side, a being's own speed derives from its size (morphology), not a plant/animal tag.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct LocomotionParams {
     /// Tiles per tick a maximal, fully active body crosses on flat, open ground. RESERVED. Basis:

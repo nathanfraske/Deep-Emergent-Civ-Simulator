@@ -78,6 +78,7 @@ pub mod conviction_percept;
 pub mod decision;
 pub mod decompose;
 pub mod demography;
+pub mod derive_gate;
 pub mod dialogue;
 pub mod discovery;
 pub mod edibility;
