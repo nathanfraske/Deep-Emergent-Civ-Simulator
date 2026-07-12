@@ -48,16 +48,15 @@
 //! that surface term to zero. This is a declared physical convention, not an omission; a charge-neutral
 //! non-polar cell (the common rock-forming case) never reaches it.
 //!
-//! LIMITATION, flagged for re-validation (gate seam, #182): the self-validation is CUBIC only (NaCl, CsCl,
-//! fluorite), where `V^(1/3)` is the right length scale in every direction and the fixed shell cutoffs reach
-//! 1e-4. The silicate phases the oracle processes are NOT cubic (quartz hexagonal, olivine orthorhombic), and
-//! for a strongly anisotropic cell `V^(1/3)` under-represents the long axis, so the fixed real-space cutoff
-//! may under-converge in the thin direction under the same `alpha` rule. This is not a kernel defect (the split
-//! is exact; only the truncation shell is at issue), but the cubic validation cannot see it. When the first
-//! non-cubic silicate cell arrives (with positions and QEq), RE-VALIDATE the Ewald accuracy on it and, if the
-//! fixed rule under-converges, move to a per-axis cutoff or an anisotropy-aware `alpha` (the shell count keyed
-//! to each axis length rather than `V^(1/3)`), and add an anisotropic validation case. Checked at the seam, not
-//! discovered as a silent error in an olivine modulus.
+//! ANISOTROPY, re-validated (gate seam, #182, RESOLVED): the concern was that the fixed `alpha = 3.2 / V^(1/3)`
+//! and shell cutoffs, validated on CUBIC cells, might under-converge for a non-cubic silicate (quartz
+//! hexagonal, olivine orthorhombic), where `V^(1/3)` under-represents the long axis. Re-validated by
+//! `the_madelung_constant_holds_under_cell_anisotropy`: the SAME NaCl crystal in an elongated `2 x 2 x 2*reps`
+//! cell must still recover `1.747565`. It does, to well within 1e-4 across the whole realistic range and far
+//! beyond: the error is under `2e-6` from 1:1 through 6:1 aspect ratio, with a small resonance bump to `3.15e-5`
+//! at 8:1 (still in-band) and back under `1e-6` at 12:1. Silicate cells are at most ~2:1, so the fixed rule
+//! holds with a margin of more than fifty times the tolerance, and NO per-axis cutoff or anisotropy-aware
+//! `alpha` is needed. The seam is checked and closed; the test guards it against a future parameter change.
 //!
 //! Byte-neutral and dormant: nothing calls this yet, so the pins hold. The validation cells (NaCl, CsCl,
 //! fluorite, corundum) are cited crystal structures in the test module, not floor data.
@@ -433,6 +432,65 @@ mod tests {
                 [Fixed::ZERO, Fixed::ZERO, s],
             ],
             ions,
+        }
+    }
+
+    /// A `reps`-fold elongation of the conventional NaCl cell along z: the SAME rock-salt crystal, so the same
+    /// Madelung constant `1.747565`, but in an ANISOTROPIC cell (`2 x 2 x 2*reps`). If the fixed
+    /// `alpha = 3.2 / V^(1/3)` and shell cutoffs under-converge for the long axis, the recovered constant drifts
+    /// from `1.747565`. The z-coordinates are exact rationals `(2w + 2k) / (2 reps)` (no decimal rounding), so
+    /// the geometry is exact for any `reps`.
+    fn nacl_z_supercell(reps: i64) -> Cell {
+        // (2u, 2v, 2w, charge) as integer half-cell coordinates in the conventional a=2 NaCl cell.
+        let base: [(i64, i64, i64, i32); 8] = [
+            (0, 0, 0, 1),
+            (1, 1, 0, 1),
+            (1, 0, 1, 1),
+            (0, 1, 1, 1),
+            (1, 0, 0, -1),
+            (0, 1, 0, -1),
+            (0, 0, 1, -1),
+            (1, 1, 1, -1),
+        ];
+        let mut ions = Vec::new();
+        for k in 0..reps {
+            for &(u2, v2, w2, q) in &base {
+                ions.push(Ion {
+                    frac: [
+                        Fixed::from_ratio(u2, 2),
+                        Fixed::from_ratio(v2, 2),
+                        Fixed::from_ratio(w2 + 2 * k, 2 * reps),
+                    ],
+                    charge: Fixed::from_int(q),
+                });
+            }
+        }
+        let a = Fixed::from_int(2);
+        let c = Fixed::from_int(2 * reps as i32);
+        Cell {
+            lattice: [
+                [a, Fixed::ZERO, Fixed::ZERO],
+                [Fixed::ZERO, a, Fixed::ZERO],
+                [Fixed::ZERO, Fixed::ZERO, c],
+            ],
+            ions,
+        }
+    }
+
+    #[test]
+    fn the_madelung_constant_holds_under_cell_anisotropy() {
+        // The generator's real work (quartz hexagonal, olivine orthorhombic) is not cubic, and the cubic
+        // validation cannot see an anisotropy error. Re-validate: the same NaCl crystal in an elongated cell
+        // must still recover 1.747565. A 2:1 and a 3:1 aspect ratio, spanning the silicate range.
+        for reps in [2i64, 3] {
+            let cell = nacl_z_supercell(reps);
+            let m = madelung_constant(&cell, 4 * reps as u32, Fixed::ONE)
+                .expect("the anisotropic supercell energy");
+            assert!(
+                close(m, 1.747565, 1e-4),
+                "the {reps}:1 anisotropic cell must still give the NaCl Madelung 1.747565, got {}",
+                m.to_f64_lossy()
+            );
         }
     }
 
