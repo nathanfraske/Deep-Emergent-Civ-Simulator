@@ -137,7 +137,7 @@ use civsim_core::schedule::{run_serial, schedule, Access, ResourceId, SystemId};
 use civsim_core::{DrawKey, Fixed, Phase, StableId, StateHasher};
 use civsim_physics::laws;
 use civsim_physics::PhysicsRegistry;
-use civsim_world::{Coord3, TileMap};
+use civsim_world::{Coord3, PlanetaryBody, TileMap};
 use rayon::prelude::*;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -889,14 +889,6 @@ fn medium_sample(
     })
 }
 
-/// Standard gravity, the reference gravitational acceleration (NIST standard gravity 9.80665 m/s^2,
-/// the terran default `mech.gravitational_acceleration` cites), the datum the carry-load weight physics
-/// reads (material-substrate arc, cascade item 3). A cited physical constant, not a reserved tunable; a
-/// per-world gravity override rides Part 40, a documented follow-on.
-fn standard_gravity() -> Fixed {
-    Fixed::from_ratio(980665, 100000)
-}
-
 /// The physics force ceiling the weight law saturates at: the `mech.force` axis maximum (1e8 N, the
 /// mechanical floor's declared force range). A representability cap, not an authored quantity.
 const FORCE_CEILING: Fixed = Fixed::from_int(100_000_000);
@@ -1598,6 +1590,19 @@ pub struct Embodiment {
     /// cutting and the matter cycle in later slices) union it with the located substance mixture, so a corpse
     /// is worked and rots by the SAME mechanisms and axes as any other matter.
     tissue: TissueField,
+    /// The world's PLANETARY BODY (its radius and whole-planet mean density), the per-world geometry the
+    /// surface gravity derives from. Defaults to the labelled [`PlanetaryBody::dev_earth`] fixture; a
+    /// world-build installs its own through [`Embodiment::set_planetary`]. Not folded into `state_hash`
+    /// itself; it shapes the run through the DERIVED [`Embodiment::gravity`] below.
+    planetary: PlanetaryBody,
+    /// The surface gravity in m/s^2, DERIVED once from [`Embodiment::planetary`] through
+    /// `astro::surface_gravity` (`g = (4/3) * pi * G * R * rhobar`, `G` the floor fundamental), the single
+    /// accessor the carry-load weight physics reads. This retired the hardcoded `standard_gravity()` =
+    /// 9.80665 literal: gravity is no longer authored but falls out of the floor constant plus the two
+    /// per-world geometry data, so a denser or larger world weighs its beings differently as DATA. Cached
+    /// here rather than recomputed per read (the derivation is a wide-magnitude rational computation), kept
+    /// in step with `planetary` because both are written only together (`new` and `set_planetary`).
+    gravity: Fixed,
 }
 
 impl Embodiment {
@@ -1632,6 +1637,15 @@ impl Embodiment {
              temperature, so a nonzero metabolic draw would double-count (the double-drain hazard)"
         );
         let layout = ControllerLayout::new(&homeo, &afford, hidden);
+        // The world's planetary geometry defaults to the labelled Earth fixture, and the surface gravity
+        // DERIVES from it once here (retiring the hardcoded 9.80665): `g = (4/3) * pi * G * R * rhobar`,
+        // `G` the floor fundamental. The dev_earth geometry (a positive radius and density) always yields a
+        // finite gravity, so a `None` here is a broken invariant that must fail loud rather than fabricate a
+        // fallback; a world-build with degenerate geometry is refused at `set_planetary`, not silently.
+        let planetary = PlanetaryBody::dev_earth();
+        let gravity =
+            crate::astro::surface_gravity(planetary.radius_meters, planetary.mean_density)
+                .expect("the dev_earth planetary geometry derives a finite surface gravity");
         Embodiment {
             walkers: Vec::new(),
             thermal: BTreeMap::new(),
@@ -1679,6 +1693,8 @@ impl Embodiment {
             fire: FireField::new(),
             soil: SoilNutrientField::new(),
             tissue: TissueField::new(),
+            planetary,
+            gravity,
         }
     }
 
@@ -1978,6 +1994,27 @@ impl Embodiment {
     /// [`Embodiment::new`].
     pub fn set_organs(&mut self, organs: BodyPlanRegistry) {
         self.organs = organs;
+    }
+
+    /// Install the world's planetary geometry, re-deriving the cached surface gravity from it. The two
+    /// per-world data (the radius and the whole-planet mean density) flow through `astro::surface_gravity`
+    /// (`g = (4/3) * pi * G * R * rhobar`, `G` the floor fundamental), so a world set here weighs its beings
+    /// on its own gravity as DATA, never a code change. Without it the embodiment keeps the labelled
+    /// [`PlanetaryBody::dev_earth`] geometry from [`Embodiment::new`]. Returns an error (leaving the current
+    /// geometry untouched) on a degenerate body whose gravity does not derive (a non-positive radius or
+    /// density, or a value past the representable range), failing loud rather than fabricating a fallback.
+    pub fn set_planetary(&mut self, planetary: PlanetaryBody) -> Result<(), CalibrationError> {
+        let gravity =
+            crate::astro::surface_gravity(planetary.radius_meters, planetary.mean_density)
+                .ok_or_else(|| CalibrationError::BadValue {
+                    id: "world.surface_gravity".to_string(),
+                    detail: "the planetary radius and mean density must be positive and derive a \
+                             representable surface gravity (g = (4/3) pi G R rhobar)"
+                        .to_string(),
+                })?;
+        self.planetary = planetary;
+        self.gravity = gravity;
+        Ok(())
     }
 
     /// Install the anatomy-derived physiology (R-METABOLIZE) on this embodiment, so its beings drain,
@@ -2374,7 +2411,7 @@ impl Embodiment {
         let Some(w) = self.walkers.iter().find(|w| w.id == walker_id) else {
             return Fixed::ZERO;
         };
-        let gravity = standard_gravity();
+        let gravity = self.gravity;
         let capacity = being_muscle_force(w, phys);
         let carried = w.carried.weight(reg, gravity, FORCE_CEILING);
         let headroom = capacity - carried;
@@ -6821,7 +6858,7 @@ impl Runner {
                         if capacity <= Fixed::ZERO {
                             return None;
                         }
-                        let weight = w.carried.weight(reg, standard_gravity(), FORCE_CEILING);
+                        let weight = w.carried.weight(reg, emb.gravity, FORCE_CEILING);
                         let ratio = weight.checked_div(capacity).unwrap_or(Fixed::ZERO);
                         let factor = Fixed::ONE
                             + emb

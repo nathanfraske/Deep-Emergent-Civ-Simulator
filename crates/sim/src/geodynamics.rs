@@ -358,9 +358,10 @@ pub fn step_interior_field(
 }
 
 /// Derive the mantle density from the world's mantle COMPOSITION, never an authored number (gate ruling from
-/// the owner, #176): A's petrology kernel ([`civsim_physics::petrology::crustal_density`], a GENERAL
-/// composition-to-density derivation despite the crust-specific name) minimizes the stable mineral assemblage
-/// of the composition at the mantle's temperature and pressure and reads its mass over volume, so the density
+/// the owner, #176): A's petrology kernel ([`civsim_physics::petrology::assemblage_density_at_conditions`], a
+/// GENERAL composition-to-density derivation that serves the crust and the mantle alike) minimizes the stable
+/// mineral assemblage of the composition at the mantle's temperature and pressure and reads its mass over volume,
+/// so the density
 /// is what the material IS under its conditions, neither a fundamental constant nor a bare per-world scalar.
 /// The mantle temperature is the interior heat chain's own thermal state (the column temperature the
 /// convection evolution carries), and the pressure is the lithostatic pressure at the mantle's depth; a
@@ -375,7 +376,7 @@ pub fn derive_mantle_density(
     registry: &civsim_physics::petrology_data::PhaseRegistry,
     table: &civsim_physics::periodic::PeriodicTable,
 ) -> Option<Fixed> {
-    civsim_physics::petrology::crustal_density(
+    civsim_physics::petrology::assemblage_density_at_conditions(
         mantle_composition,
         mantle_temperature,
         reference_pressure_bar,

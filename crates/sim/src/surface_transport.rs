@@ -38,6 +38,8 @@ use std::collections::BTreeMap;
 
 use civsim_core::Fixed;
 
+use crate::surface_drivers::ExactRootExponent;
+
 /// The four MASS-FATE reservoirs of surface mass transport, the fixed conservation-floor accounts every driver's
 /// mass moves between. Not world content and not a data-driven set: mass on a surface is in exactly one of these
 /// four fates, so the set is closed by the physics of mass conservation (unlike the DRIVER membership, which is
@@ -211,11 +213,21 @@ pub struct DriverRow {
     /// footprint. A transport kernel that redistributes within the solid column names only `ColumnSolid`; a
     /// dissolution kernel names `ColumnSolid` and `DissolvedLoad`.
     reservoirs: Vec<MassReservoir>,
+    /// The stream-power AREA exponent `m`, an [`ExactRootExponent`] DATUM (the Mirror fluvial default 1/2, the
+    /// exact integer square root). A fluid whose incision law has a different exponent in the GPU-canon-buildable
+    /// exact-root family is a data row, so no hardcoded Terran exponent sits in the path of world content
+    /// (Principle 11, admit-the-alien). Read by [`crate::surface_drivers::fluid_shear_with_exponents`] when the
+    /// arming step runs the driver.
+    area_exponent: ExactRootExponent,
+    /// The stream-power SLOPE exponent `n`, an [`ExactRootExponent`] datum (the Mirror fluvial default 1, linear).
+    slope_exponent: ExactRootExponent,
 }
 
 impl DriverRow {
     /// Build a driver row from its kernel, its property key-set, its reserved parameters, and the reservoir
-    /// fates it touches. The parameter and property membership is data.
+    /// fates it touches. The parameter and property membership is data. The stream-power exponents default to the
+    /// Mirror fluvial pair (m = 1/2, n = 1); [`Self::with_stream_power_exponents`] sets a different exact-root
+    /// exponent for a fluid whose incision law differs.
     pub fn new(
         name: impl Into<String>,
         kernel: TransportKernelId,
@@ -229,7 +241,33 @@ impl DriverRow {
             property_keys,
             params,
             reservoirs,
+            area_exponent: ExactRootExponent::SQRT,
+            slope_exponent: ExactRootExponent::LINEAR,
         }
+    }
+
+    /// Set the stream-power exponents (the exact-root area exponent `m` and slope exponent `n`) for a fluid whose
+    /// incision law differs from the Mirror fluvial default of `SQRT` (1/2) and `LINEAR` (1). The exponent is a
+    /// per-world and per-driver datum; a value outside the buildable exact-root family surfaces fail-loud when the
+    /// kernel applies it, not here.
+    pub fn with_stream_power_exponents(
+        mut self,
+        area: ExactRootExponent,
+        slope: ExactRootExponent,
+    ) -> DriverRow {
+        self.area_exponent = area;
+        self.slope_exponent = slope;
+        self
+    }
+
+    /// The stream-power area exponent `m` (the Mirror fluvial default 1/2).
+    pub fn area_exponent(&self) -> ExactRootExponent {
+        self.area_exponent
+    }
+
+    /// The stream-power slope exponent `n` (the Mirror fluvial default 1).
+    pub fn slope_exponent(&self) -> ExactRootExponent {
+        self.slope_exponent
     }
 
     /// A reserved parameter by name; an absent one reads zero (the substrate absence convention).
@@ -375,6 +413,35 @@ pub fn reconcile_column(available: i64, signed_demands: &[i64]) -> (Vec<i64>, i6
     }
     let net = net.clamp(i128::from(i64::MIN), i128::from(i64::MAX)) as i64;
     (applied, net)
+}
+
+/// The reconcile-honored COMPOSITION CONTRACT, the one form both the surface arming step and the redistribution
+/// lane honor: reconcile a contested column's removal demands against the tick snapshot FIRST, then key every
+/// downstream sink write off the HONORED removal, never the raw demand. The seam this closes (surfaced by the
+/// section-9 panel on the surface lane and independently by the redistribution lane) is that a source driver bounds
+/// its removal by a local rule (the slope drop) and would route that FULL demanded mass to its sink, while
+/// [`reconcile_column`] clamps a contested column's honored removal to the snapshot mass it holds, so the sink
+/// would gain more than the column lost and the ledger would fabricate the difference.
+///
+/// `honored_removals` returns, for one column, each source writer's HONORED removal: the mass it both removes from
+/// the column AND routes to its sink. It reconciles the removal demands against the `available` snapshot (through
+/// [`reconcile_column`], so the split is the exact-integer largest-remainder apportionment, order-independent) and
+/// returns the honored magnitude per writer. The load-bearing invariant: the honored removal a writer routes to
+/// its sink equals the honored removal it takes from the column, so under contention the source lowering and the
+/// sink gain are the same mass and no mass is fabricated at the reconcile seam. The honored removals sum to
+/// `min(total_demand, available)` exactly.
+///
+/// The surface source writers are single-sink (fluid-shear entrains to deposition, dissolution moves to the
+/// dissolved-load reservoir), so a writer routes its whole honored removal to its one sink. A writer that FANS its
+/// honored removal across several sinks or destinations (the redistribution lane) splits the SAME honored removal
+/// with [`apportion`], so the destinations sum to exactly it; the single-sink case is that split with one weight.
+/// A fixed-point fraction-multiply is never used to rescale a raw sink by an honored FRACTION: it would round and
+/// the sinks would not sum to the honored removal, reopening the leak at the rounding scale.
+pub fn honored_removals(available: i64, removal_demands: &[i64]) -> Vec<i64> {
+    let signed: Vec<i64> = removal_demands.iter().map(|&d| -d.max(0)).collect();
+    let (applied, _net) = reconcile_column(available, &signed);
+    // Each removing writer's applied delta is negative; the honored removal magnitude is its negation.
+    applied.iter().map(|&a| a.saturating_neg()).collect()
 }
 
 #[cfg(test)]
@@ -707,5 +774,118 @@ mod tests {
     fn reconcile_is_a_no_op_on_no_writers_or_zero_demands() {
         assert_eq!(reconcile_column(50, &[]), (vec![], 0));
         assert_eq!(reconcile_column(50, &[0, 0]), (vec![0, 0], 0));
+    }
+
+    #[test]
+    fn honored_removals_sum_to_the_column_removal_so_the_composition_conserves() {
+        // The reconcile-honored contract: two erosion writers demand 60 and 60 from a column holding 80. The
+        // honored removals are apportioned (40 each), and their SUM is exactly the mass the column loses, so the
+        // sinks that receive the honored removals gain exactly what the column lost. Routing the raw demand (120)
+        // to the sinks instead would deposit 120 while the column lost only 80, fabricating 40 at the seam.
+        let demands = [60, 60];
+        let honored = honored_removals(80, &demands);
+        assert_eq!(
+            honored,
+            vec![40, 40],
+            "the honored removals are apportioned"
+        );
+        let sink_total: i64 = honored.iter().sum();
+        // The column removal is what reconcile_column applies (the negated applied deltas).
+        let (applied, _net) = reconcile_column(80, &[-60, -60]);
+        let column_removal: i64 = applied.iter().map(|&a| -a).sum();
+        assert_eq!(
+            sink_total, column_removal,
+            "the sinks gain exactly what the column loses"
+        );
+        assert_eq!(
+            sink_total, 80,
+            "the honored total is the snapshot available, not the 120 demanded"
+        );
+        assert!(
+            demands.iter().sum::<i64>() > sink_total,
+            "routing the raw demand would fabricate the difference (the seam the contract closes)"
+        );
+    }
+
+    #[test]
+    fn an_uncontested_column_honors_every_removal_in_full() {
+        // When the demands fit the snapshot, each writer's honored removal equals its demand (no apportionment).
+        assert_eq!(honored_removals(100, &[20, 30]), vec![20, 30]);
+        assert_eq!(honored_removals(50, &[50, 0]), vec![50, 0]);
+    }
+
+    #[test]
+    fn honored_removals_agree_with_the_reconcile_applied_deltas() {
+        // The honored removal magnitude is exactly the negation of reconcile_column's applied delta for each
+        // writer, so the composition helper cannot drift from the reconciliation it is built on.
+        let demands = [10, 3, 1];
+        let honored = honored_removals(7, &demands);
+        let signed: Vec<i64> = demands.iter().map(|&d| -d).collect();
+        let (applied, _net) = reconcile_column(7, &signed);
+        let from_applied: Vec<i64> = applied.iter().map(|&a| -a).collect();
+        assert_eq!(honored, from_applied);
+        assert_eq!(
+            honored.iter().sum::<i64>(),
+            7,
+            "conservative against the snapshot"
+        );
+    }
+
+    #[test]
+    fn the_honored_removal_source_conserves_through_deposition() {
+        // The capstone the suite lacked: the honored removal fed as the deposition SOURCE conserves end to end.
+        // The two writers' honored removals (40 each on a contested column of 80) route to two cells that drain to
+        // an outlet; deposition settles the whole honored load, so total deposited equals the honored removal
+        // total equals the column removal, with no fabricated mass at the composition seam.
+        let honored = honored_removals(80, &[60, 60]); // [40, 40]
+        let entrained: Vec<Fixed> = honored.iter().map(|&h| Fixed::from_int(h as i32)).collect();
+        let entrained = [entrained[0], entrained[1], Fixed::ZERO]; // two sources draining to cell 2 (outlet)
+        let receiver = [2usize, 2, 2];
+        let capacity = [Fixed::from_int(1000); 3];
+        let pass =
+            crate::surface_drivers::deposit(&entrained, &receiver, &capacity).expect("valid");
+        let deposited: Fixed = pass.deposited.iter().fold(Fixed::ZERO, |a, &v| a + v);
+        let honored_total = Fixed::from_int(honored.iter().sum::<i64>() as i32);
+        assert_eq!(
+            deposited, honored_total,
+            "deposited equals the honored removal, conserved"
+        );
+        assert_eq!(
+            honored_total,
+            Fixed::from_int(80),
+            "the column removal, not the 120 demanded"
+        );
+    }
+
+    #[test]
+    fn honored_removals_is_a_pure_function() {
+        assert_eq!(
+            honored_removals(11, &[5, 2, 8, 1]),
+            honored_removals(11, &[5, 2, 8, 1])
+        );
+        assert_eq!(honored_removals(0, &[3, 4]), vec![0, 0]);
+    }
+
+    #[test]
+    fn a_driver_row_defaults_to_the_fluvial_exponents_and_carries_a_set_exponent() {
+        // The stream-power exponents are a per-driver datum on the row: the default is the Mirror fluvial pair
+        // (m = 1/2, n = 1), and a fluid whose incision law differs sets a different exact-root exponent.
+        let row = DriverRow::new(
+            "fluvial-water",
+            TransportKernelId::FluidShear,
+            vec!["density".into()],
+            BTreeMap::new(),
+            vec![MassReservoir::ColumnSolid],
+        );
+        assert_eq!(row.area_exponent(), ExactRootExponent::SQRT);
+        assert_eq!(row.slope_exponent(), ExactRootExponent::LINEAR);
+        let altered =
+            row.with_stream_power_exponents(ExactRootExponent::LINEAR, ExactRootExponent::LINEAR);
+        assert_eq!(
+            altered.area_exponent(),
+            ExactRootExponent::LINEAR,
+            "a per-driver exponent is a data row, not a rewrite"
+        );
+        assert_eq!(altered.slope_exponent(), ExactRootExponent::LINEAR);
     }
 }

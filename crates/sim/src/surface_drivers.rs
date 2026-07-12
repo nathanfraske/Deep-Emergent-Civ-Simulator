@@ -190,6 +190,257 @@ fn div_or_overflow(a: Fixed, b: Fixed, id: &str) -> Result<Fixed, CalibrationErr
     })
 }
 
+/// An EXACT-ROOT EXPONENT: a rational power `num/den` restricted to the family that reduces to a proven
+/// GPU-canon-deterministic kernel today. The stream-power incision law reads its area and slope exponents as this
+/// data (on the driver row when a genesis pass arms it), so a non-Earth fluid whose incision law has a different
+/// exponent in the buildable family is a data row rather than a rewrite (Principle 11, admit-the-alien). The
+/// hardcoded Terran fluvial pair `m = 1/2`, `n = 1` becomes the reserved [`ExactRootExponent::SQRT`] and
+/// [`ExactRootExponent::LINEAR`] default, a per-world and per-driver datum. The general arbitrary-exponent
+/// fractional power is the deferred GPU-canon primitive (task #45), which extends the buildable set inside
+/// [`apply_exact_root`] without touching the driver kernels, the same fixed-mechanism / growing-membership shape
+/// the value and semantic substrates use.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ExactRootExponent {
+    /// The exponent numerator.
+    pub num: u32,
+    /// The exponent denominator (never zero).
+    pub den: u32,
+}
+
+impl ExactRootExponent {
+    /// The linear (identity) exponent `1/1`, the first-power slope term.
+    pub const LINEAR: ExactRootExponent = ExactRootExponent { num: 1, den: 1 };
+    /// The square-root exponent `1/2`, the half-power discharge term (the exact integer [`Fixed::sqrt`]).
+    pub const SQRT: ExactRootExponent = ExactRootExponent { num: 1, den: 2 };
+
+    /// Build an exponent `num/den`. A zero denominator is not a valid exponent, so it is refused fail-loud; the
+    /// buildability of the resulting power is checked at application in [`apply_exact_root`], not here (a row may
+    /// carry an exponent the current kernel cannot yet build, which surfaces as a fail-loud arming error rather
+    /// than a silent fallback).
+    pub fn new(num: u32, den: u32) -> Result<ExactRootExponent, CalibrationError> {
+        if den == 0 {
+            return Err(CalibrationError::BadValue {
+                id: "surface.exact_root_exponent".to_string(),
+                detail: format!("the exponent denominator must be non-zero; got {num}/{den}"),
+            });
+        }
+        Ok(ExactRootExponent { num, den })
+    }
+}
+
+/// Apply an [`ExactRootExponent`] to a non-negative `Fixed` base, over the family that reduces to a proven
+/// GPU-canon-deterministic kernel today: the identity (`1/1`), the exact integer square root (`1/2`), and the
+/// small integer powers (`2/1`, `3/1`) via the checked multiply. An exponent outside that buildable family (a
+/// cube root, an arbitrary fractional power) is refused fail-loud as deferred to the GPU-canon fractional-power
+/// primitive (task #45), never silently approximated: this is where #45 will EXTEND the family, so the driver
+/// kernels that call this stay unchanged. A negative base under a root has no real value and is refused
+/// fail-loud; the transport bases (a drainage area, a slope) are non-negative.
+pub fn apply_exact_root(
+    base: Fixed,
+    exponent: ExactRootExponent,
+) -> Result<Fixed, CalibrationError> {
+    let ExactRootExponent { num, den } = exponent;
+    if den > 1 && base < Fixed::ZERO {
+        return Err(CalibrationError::BadValue {
+            id: "surface.exact_root_negative_base".to_string(),
+            detail: format!(
+                "a root (den {den}) of a negative base {} has no real value",
+                base.to_f64_lossy()
+            ),
+        });
+    }
+    match (num, den) {
+        (1, 1) => Ok(base),
+        (1, 2) => Ok(base.sqrt()),
+        (2, 1) => mul_or_overflow(base, base, "surface.exact_root_square"),
+        (3, 1) => {
+            let sq = mul_or_overflow(base, base, "surface.exact_root_cube")?;
+            mul_or_overflow(sq, base, "surface.exact_root_cube")
+        }
+        _ => Err(CalibrationError::BadValue {
+            id: "surface.exact_root_unbuildable".to_string(),
+            detail: format!(
+                "the exponent {num}/{den} is not in the GPU-canon-buildable exact-root family (1/1, 1/2, 2/1, 3/1); deferred to the general fractional-power primitive (task #45)"
+            ),
+        }),
+    }
+}
+
+/// The stream-power INCISION PROCESS MODEL: the physical rule by which flow incises rock. Composed with the
+/// channel hydraulic geometry and the flow resistance it FIXES the stream-power exponents `m` and `n`, so those
+/// exponents DERIVE from the physics rather than being authored data (the owner's short-reserved-list bar). The
+/// three standard detachment-limited models (Whipple and Tucker 1999). This is a fixed FLOOR set of physically
+/// grounded incision rules, the discrete choice the exponent derivation reads; a nonlinear incision exponent or a
+/// different flow-resistance law is a floor extension.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum IncisionProcessModel {
+    /// Incision linear in the bed SHEAR STRESS (`tau = rho * g * h * S`) with Manning flow resistance. Derives
+    /// `m = c * (1 - b) * 3/5`, `n = 7/10` (for Mirror `b = 1/2`, `c = 1`: `m = 3/10`, `n = 7/10`, outside the
+    /// exact-root family so deferred to task #45 at application until the general fractional power lands).
+    ShearStressManning,
+    /// Incision linear in the UNIT STREAM POWER (`omega = rho * g * Q * S / w`, power per unit bed area). Derives
+    /// `m = c * (1 - b)`, `n = 1` (Mirror: `m = 1/2`, `n = 1`, the exact-root fluvial default).
+    UnitStreamPower,
+    /// Incision linear in the TOTAL STREAM POWER (`Omega = rho * g * Q * S`, power per unit channel length).
+    /// Derives `m = c`, `n = 1` (Mirror: `m = 1`, `n = 1`).
+    TotalStreamPower,
+}
+
+/// The greatest common divisor, for reducing a derived exponent to lowest terms.
+fn gcd(a: u64, b: u64) -> u64 {
+    if b == 0 {
+        a
+    } else {
+        gcd(b, a % b)
+    }
+}
+
+/// Reduce a rational `num/den` to an [`ExactRootExponent`] in lowest terms, failing loud on a zero denominator or
+/// a term that does not fit `u32`.
+fn reduce_exponent(num: u64, den: u64, id: &str) -> Result<ExactRootExponent, CalibrationError> {
+    if den == 0 {
+        return Err(CalibrationError::BadValue {
+            id: id.to_string(),
+            detail: "the derived exponent has a zero denominator".to_string(),
+        });
+    }
+    let g = gcd(num, den).max(1);
+    let (n, d) = (num / g, den / g);
+    if n > u32::MAX as u64 || d > u32::MAX as u64 {
+        return Err(CalibrationError::BadValue {
+            id: id.to_string(),
+            detail: format!("the derived exponent {n}/{d} does not fit u32"),
+        });
+    }
+    ExactRootExponent::new(n as u32, d as u32)
+}
+
+/// DERIVE the stream-power exponents `(m, n)` from the incision PROCESS MODEL and the channel scalings, so the
+/// driver-row exponents are derived rather than authored. `b` is the width-discharge hydraulic-geometry exponent
+/// (`w ~ Q^b`, near 1/2) and `c` is the discharge-area exponent (`Q ~ A^c`, near 1 under uniform runoff), each a
+/// rational `(num, den)`. The bed shear stress, water conservation, the flow resistance, and these two scalings
+/// reduce the incision rule to `E = K * A^m * S^n` with `m` and `n` fixed by the model (Whipple and Tucker 1999):
+/// so the exponents leave the per-world reserved list, and the only residual is the discrete process-model choice
+/// plus the near-universal `b` and `c` (themselves a deeper-derivation candidate through channel equilibrium).
+///
+/// The Mirror unit-stream-power case with `b = 1/2`, `c = 1` derives `(SQRT, LINEAR)`, reproducing the fluvial
+/// default, so wiring this derivation is byte-neutral. The shear-stress case derives exponents outside the
+/// buildable exact-root family (Mirror: 3/10, 7/10), correct as data but refused fail-loud at kernel application
+/// ([`apply_exact_root`]) until the general fractional-power primitive (task #45) lands. `b` must lie in `(0, 1)`
+/// and `c` must be positive; otherwise the scaling is unphysical and refused fail-loud.
+pub fn stream_power_exponents(
+    model: IncisionProcessModel,
+    b: (u32, u32),
+    c: (u32, u32),
+) -> Result<(ExactRootExponent, ExactRootExponent), CalibrationError> {
+    let (b_num, b_den) = (u64::from(b.0), u64::from(b.1));
+    let (c_num, c_den) = (u64::from(c.0), u64::from(c.1));
+    if b_den == 0 || b_num == 0 || b_num >= b_den {
+        return Err(CalibrationError::BadValue {
+            id: "surface.stream_power_hydraulic_geometry".to_string(),
+            detail: format!(
+                "the width-discharge exponent b = {}/{} must lie in (0, 1)",
+                b.0, b.1
+            ),
+        });
+    }
+    if c_den == 0 || c_num == 0 {
+        return Err(CalibrationError::BadValue {
+            id: "surface.stream_power_discharge".to_string(),
+            detail: format!(
+                "the discharge-area exponent c = {}/{} must be positive",
+                c.0, c.1
+            ),
+        });
+    }
+    // (1 - b) = (b_den - b_num) / b_den, positive because b lies in (0, 1).
+    let one_minus_b_num = b_den - b_num;
+    let id = "surface.stream_power_exponent";
+    match model {
+        // m = c * (1 - b), n = 1.
+        IncisionProcessModel::UnitStreamPower => Ok((
+            reduce_exponent(c_num * one_minus_b_num, c_den * b_den, id)?,
+            ExactRootExponent::LINEAR,
+        )),
+        // m = c, n = 1.
+        IncisionProcessModel::TotalStreamPower => Ok((
+            reduce_exponent(c_num, c_den, id)?,
+            ExactRootExponent::LINEAR,
+        )),
+        // m = c * (1 - b) * 3/5, n = 7/10 (Manning flow resistance).
+        IncisionProcessModel::ShearStressManning => Ok((
+            reduce_exponent(c_num * one_minus_b_num * 3, c_den * b_den * 5, id)?,
+            reduce_exponent(7, 10, id)?,
+        )),
+    }
+}
+
+/// DERIVE the entrainment threshold, the critical bed SHEAR STRESS at which a grain begins to move, from the
+/// Shields relation `tau_c = shields_number * (rho_s - rho_f) * g * d`. This is the physical threshold behind the
+/// fluid-shear driver's `theta`, derived rather than authored: the grain density `rho_s` and the fluid density
+/// `rho_f` are composition-derived (the petrology and fluid-property data), the gravity `g` is planetary geometry,
+/// the grain size `d` is the fracturing driver's product, and the ONLY reserved input is the dimensionless
+/// `shields_number`, a universal function of the grain Reynolds number near 0.045 in the rough-turbulent limit,
+/// reserved once with basis rather than per-world. So the entrainment threshold leaves the per-world reserved
+/// list. The liquid-versus-gas difference is data here: a dense liquid and a thin gas differ only through their
+/// `rho_f`, not a code branch.
+///
+/// The buoyant excess density `rho_s - rho_f` must be positive: a grain no denser than its fluid is not entrained
+/// from the bed by shear (it floats, a different transport mode), so that case is refused fail-loud rather than
+/// returning a nonsensical non-positive threshold. The reserved number, the gravity, and the grain size must be
+/// positive. The products are checked so an extreme input fails loud rather than wrapping silently. The result is
+/// a critical shear STRESS; mapping it to the driver's shear-proxy `theta` is the arming step, where the
+/// proxy-to-stress constants are known.
+pub fn shields_critical_shear_stress(
+    shields_number: Fixed,
+    grain_density: Fixed,
+    fluid_density: Fixed,
+    gravity: Fixed,
+    grain_size: Fixed,
+) -> Result<Fixed, CalibrationError> {
+    if shields_number <= Fixed::ZERO {
+        return Err(CalibrationError::BadValue {
+            id: "surface.shields_number".to_string(),
+            detail: format!(
+                "the dimensionless Shields number must be positive; got {}",
+                shields_number.to_f64_lossy()
+            ),
+        });
+    }
+    if gravity <= Fixed::ZERO {
+        return Err(CalibrationError::BadValue {
+            id: "surface.shields_gravity".to_string(),
+            detail: format!(
+                "the surface gravity must be positive; got {}",
+                gravity.to_f64_lossy()
+            ),
+        });
+    }
+    if grain_size <= Fixed::ZERO {
+        return Err(CalibrationError::BadValue {
+            id: "surface.shields_grain_size".to_string(),
+            detail: format!(
+                "the grain size must be positive; got {}",
+                grain_size.to_f64_lossy()
+            ),
+        });
+    }
+    if grain_density <= fluid_density {
+        return Err(CalibrationError::BadValue {
+            id: "surface.shields_buoyancy".to_string(),
+            detail: format!(
+                "a grain no denser than its fluid is not bed-entrained by shear (grain {} <= fluid {}); a buoyant grain is a different transport mode",
+                grain_density.to_f64_lossy(),
+                fluid_density.to_f64_lossy()
+            ),
+        });
+    }
+    let excess_density = grain_density - fluid_density;
+    let t1 = mul_or_overflow(shields_number, excess_density, "surface.shields_threshold")?;
+    let t2 = mul_or_overflow(t1, gravity, "surface.shields_threshold")?;
+    mul_or_overflow(t2, grain_size, "surface.shields_threshold")
+}
+
 /// The result of one [`fluid_shear`] pass: the flow routing, the drainage area, the entrained mass each column
 /// gives up, and the sediment each cell carries downstream. The kernel is the SOURCE half of the fluvial budget:
 /// it does not lower the elevation ledger (the snapshot-apply reconciliation applies `entrained` as the column
@@ -288,12 +539,43 @@ where
 /// Deterministic fixed-point arithmetic (Principle 3); the routing, the accumulation, and the law are pure
 /// functions of the inputs and worker-invariant (Principle 10). `elevation` is the row-major field of
 /// `width * height` columns; a length mismatch or an over-large grid is refused fail-loud.
+///
+/// This is the fluvial default (`m = 1/2`, `n = 1`); [`fluid_shear_with_exponents`] takes the exponents as data
+/// for a fluid whose incision law differs.
 pub fn fluid_shear(
     elevation: &[Fixed],
     width: usize,
     height: usize,
     erodibility: Fixed,
     theta: Fixed,
+) -> Result<FluidShearPass, CalibrationError> {
+    fluid_shear_with_exponents(
+        elevation,
+        width,
+        height,
+        erodibility,
+        theta,
+        ExactRootExponent::SQRT,
+        ExactRootExponent::LINEAR,
+    )
+}
+
+/// The exponent-configurable form of [`fluid_shear`]: the stream-power incision law with its AREA exponent `m`
+/// and SLOPE exponent `n` read as [`ExactRootExponent`] data rather than the hardcoded `m = 1/2`, `n = 1`. The
+/// arming step passes the driver row's reserved exponents here, so a non-Earth fluid whose incision law has a
+/// different exponent in the GPU-canon-buildable exact-root family is a data row. The shear proxy is
+/// `A^m * S^n` through [`apply_exact_root`]; an exponent outside the buildable family fails loud (deferred to the
+/// general fractional-power primitive, task #45). The Mirror fluvial default `SQRT`, `LINEAR` reproduces the
+/// original `sqrt(A) * S` exactly, so [`fluid_shear`] is byte-identical.
+#[allow(clippy::too_many_arguments)]
+pub fn fluid_shear_with_exponents(
+    elevation: &[Fixed],
+    width: usize,
+    height: usize,
+    erodibility: Fixed,
+    theta: Fixed,
+    area_exponent: ExactRootExponent,
+    slope_exponent: ExactRootExponent,
 ) -> Result<FluidShearPass, CalibrationError> {
     if erodibility < Fixed::ZERO {
         return Err(CalibrationError::BadValue {
@@ -341,12 +623,11 @@ pub fn fluid_shear(
     // The drainage area: accumulate a unit per cell downstream (the discharge proxy under uniform runoff).
     let drainage_area = accumulate_downstream(vec![1i64; n], &receiver);
 
-    // The entrainment per cell: erodibility * (sqrt(A) * S - theta), above the threshold, capped at the drop to
-    // the receiver so erosion never inverts the slope. The area exponent (m = 1/2, the exact integer `Fixed::sqrt`)
-    // and the slope exponent (n = 1, linear) are the fixed exact-root default, the standard fluvial stream-power
-    // values; per-driver selection of the exponent within the GPU-canon-buildable exact-root family (a Mars or a
-    // Titan fluid whose incision law has a different exponent) is the alien-clean refinement, deferred alongside
-    // the general arbitrary-exponent GPU-canon primitive.
+    // The entrainment per cell: erodibility * (A^m * S^n - theta), above the threshold, capped at the drop to the
+    // receiver so erosion never inverts the slope. The area exponent `m` and the slope exponent `n` are the
+    // driver row's [`ExactRootExponent`] data; the Mirror fluvial default (m = 1/2 via the exact integer
+    // `Fixed::sqrt`, n = 1 linear) reproduces the standard stream-power form. An exponent outside the buildable
+    // family fails loud (deferred to the general fractional-power primitive, task #45).
     let mut entrained = vec![Fixed::ZERO; n];
     for i in 0..n {
         let r = receiver[i];
@@ -357,8 +638,10 @@ pub fn fluid_shear(
             continue;
         }
         let area = Fixed::from_ratio(drainage_area[i], 1);
-        // sqrt(A) * S, both exact-root exponents; the product is checked so an extreme area-slope cannot wrap.
-        let shear = mul_or_overflow(area.sqrt(), drop, "surface.fluid_shear_shear_proxy")?;
+        // A^m * S^n, both exact-root exponents; the product is checked so an extreme area-slope cannot wrap.
+        let a_term = apply_exact_root(area, area_exponent)?;
+        let s_term = apply_exact_root(drop, slope_exponent)?;
+        let shear = mul_or_overflow(a_term, s_term, "surface.fluid_shear_shear_proxy")?;
         if shear <= theta {
             continue;
         }
@@ -785,6 +1068,281 @@ mod tests {
     }
 
     #[test]
+    fn apply_exact_root_covers_the_gpu_canon_buildable_family() {
+        // The identity, the exact square root, and the small integer powers, each exact.
+        assert_eq!(
+            apply_exact_root(Fixed::from_int(7), ExactRootExponent::LINEAR).unwrap(),
+            Fixed::from_int(7)
+        );
+        assert_eq!(
+            apply_exact_root(Fixed::from_int(9), ExactRootExponent::SQRT).unwrap(),
+            Fixed::from_int(3),
+            "sqrt(9) = 3 exactly"
+        );
+        assert_eq!(
+            apply_exact_root(Fixed::from_int(5), ExactRootExponent::new(2, 1).unwrap()).unwrap(),
+            Fixed::from_int(25),
+            "5^2 = 25"
+        );
+        assert_eq!(
+            apply_exact_root(Fixed::from_int(4), ExactRootExponent::new(3, 1).unwrap()).unwrap(),
+            Fixed::from_int(64),
+            "4^3 = 64"
+        );
+    }
+
+    #[test]
+    fn the_default_fluvial_exponents_are_the_reserved_sqrt_and_linear() {
+        // The Mirror fluvial default m=1/2, n=1: the current hardcoded stream-power behaviour as data.
+        assert_eq!(
+            ExactRootExponent::SQRT,
+            ExactRootExponent { num: 1, den: 2 }
+        );
+        assert_eq!(
+            ExactRootExponent::LINEAR,
+            ExactRootExponent { num: 1, den: 1 }
+        );
+    }
+
+    #[test]
+    fn an_unbuildable_exponent_is_refused_deferred_to_the_gpu_canon_primitive() {
+        // A cube root (1/3) and an arbitrary fractional power are outside today's buildable family: refused
+        // fail-loud as deferred to task #45, never silently approximated.
+        assert!(
+            apply_exact_root(Fixed::from_int(8), ExactRootExponent::new(1, 3).unwrap()).is_err()
+        );
+        assert!(
+            apply_exact_root(Fixed::from_int(8), ExactRootExponent::new(2, 3).unwrap()).is_err()
+        );
+        assert!(
+            apply_exact_root(Fixed::from_int(8), ExactRootExponent::new(5, 7).unwrap()).is_err()
+        );
+    }
+
+    #[test]
+    fn a_zero_denominator_and_a_negative_base_root_are_refused_fail_loud() {
+        assert!(
+            ExactRootExponent::new(1, 0).is_err(),
+            "a zero denominator is not an exponent"
+        );
+        // A root of a negative base has no real value.
+        assert!(apply_exact_root(Fixed::from_int(-4), ExactRootExponent::SQRT).is_err());
+        // A negative base under the identity (den 1) is fine.
+        assert_eq!(
+            apply_exact_root(Fixed::from_int(-4), ExactRootExponent::LINEAR).unwrap(),
+            Fixed::from_int(-4)
+        );
+    }
+
+    #[test]
+    fn an_overflowing_power_fails_loud() {
+        // A large base cubed overflows Q32.32: refused rather than wrapping silently.
+        assert!(apply_exact_root(
+            Fixed::from_int(2_000_000),
+            ExactRootExponent::new(3, 1).unwrap()
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn the_unit_stream_power_model_derives_the_mirror_fluvial_default() {
+        // The Mirror hydraulic geometry (b = 1/2, c = 1) under the unit-stream-power model derives m = 1/2,
+        // n = 1, the fluvial default: the exponents fall out of the physics, not a reserved datum.
+        let (m, n) =
+            stream_power_exponents(IncisionProcessModel::UnitStreamPower, (1, 2), (1, 1)).unwrap();
+        assert_eq!(m, ExactRootExponent::SQRT);
+        assert_eq!(n, ExactRootExponent::LINEAR);
+    }
+
+    #[test]
+    fn the_total_stream_power_model_derives_linear_in_area() {
+        // Total stream power derives m = c = 1, n = 1.
+        let (m, n) =
+            stream_power_exponents(IncisionProcessModel::TotalStreamPower, (1, 2), (1, 1)).unwrap();
+        assert_eq!(m, ExactRootExponent::LINEAR);
+        assert_eq!(n, ExactRootExponent::LINEAR);
+    }
+
+    #[test]
+    fn the_shear_stress_model_derives_unbuildable_exponents_deferred_to_45() {
+        // The shear-stress model with Manning resistance derives m = 3/10, n = 7/10 for the Mirror geometry:
+        // correct as data, but outside the buildable exact-root family, so the kernel refuses them fail-loud
+        // (deferred to the general fractional-power primitive).
+        let (m, n) =
+            stream_power_exponents(IncisionProcessModel::ShearStressManning, (1, 2), (1, 1))
+                .unwrap();
+        assert_eq!(m, ExactRootExponent { num: 3, den: 10 });
+        assert_eq!(n, ExactRootExponent { num: 7, den: 10 });
+        assert!(
+            apply_exact_root(Fixed::from_int(4), m).is_err(),
+            "the derived shear-stress exponent is not buildable yet"
+        );
+    }
+
+    #[test]
+    fn the_derived_unit_stream_power_exponents_reproduce_the_fluvial_kernel_byte_for_byte() {
+        // The byte-neutral proof of the derivation: deriving the exponents from the unit-stream-power model and
+        // feeding them to the kernel reproduces the fluvial default exactly, so wiring the derivation is
+        // byte-neutral.
+        let (w, h) = (5, 4);
+        let z = west_ramp(w, h);
+        let (m, n) =
+            stream_power_exponents(IncisionProcessModel::UnitStreamPower, (1, 2), (1, 1)).unwrap();
+        let derived = fluid_shear_with_exponents(&z, w, h, Fixed::from_int(1), Fixed::ZERO, m, n)
+            .expect("valid");
+        let default = fluid_shear(&z, w, h, Fixed::from_int(1), Fixed::ZERO).expect("valid");
+        assert_eq!(derived, default);
+    }
+
+    #[test]
+    fn a_different_hydraulic_geometry_derives_a_different_area_exponent() {
+        // The exponent tracks the physics: a steeper width-discharge scaling (b = 2/3) under unit stream power
+        // derives m = 1/3, a smaller area exponent than the b = 1/2 case.
+        let (m, _n) =
+            stream_power_exponents(IncisionProcessModel::UnitStreamPower, (2, 3), (1, 1)).unwrap();
+        assert_eq!(m, ExactRootExponent { num: 1, den: 3 });
+    }
+
+    #[test]
+    fn an_unphysical_hydraulic_geometry_is_refused_fail_loud() {
+        // b outside (0, 1) and a non-positive c are unphysical scalings, refused rather than deriving a nonsense
+        // exponent.
+        assert!(
+            stream_power_exponents(IncisionProcessModel::UnitStreamPower, (1, 1), (1, 1)).is_err()
+        );
+        assert!(
+            stream_power_exponents(IncisionProcessModel::UnitStreamPower, (3, 2), (1, 1)).is_err()
+        );
+        assert!(
+            stream_power_exponents(IncisionProcessModel::UnitStreamPower, (1, 2), (0, 1)).is_err()
+        );
+    }
+
+    #[test]
+    fn the_shields_threshold_derives_from_the_excess_density_gravity_and_grain_size() {
+        // tau_c = shields * (rho_s - rho_f) * g * d. With shields = 1/2, excess = 2, g = 10, d = 1:
+        // 0.5 * 2 * 10 * 1 = 10, an exact check on the derivation.
+        let tau = shields_critical_shear_stress(
+            Fixed::from_ratio(1, 2),
+            Fixed::from_int(3),
+            Fixed::from_int(1),
+            Fixed::from_int(10),
+            Fixed::from_int(1),
+        )
+        .unwrap();
+        assert_eq!(tau, Fixed::from_int(10));
+    }
+
+    #[test]
+    fn a_denser_grain_a_stronger_gravity_or_a_larger_grain_raises_the_threshold_a_denser_fluid_lowers_it(
+    ) {
+        let base = shields_critical_shear_stress(
+            Fixed::from_ratio(1, 2),
+            Fixed::from_int(3),
+            Fixed::from_int(1),
+            Fixed::from_int(10),
+            Fixed::from_int(1),
+        )
+        .unwrap();
+        let denser_grain = shields_critical_shear_stress(
+            Fixed::from_ratio(1, 2),
+            Fixed::from_int(4),
+            Fixed::from_int(1),
+            Fixed::from_int(10),
+            Fixed::from_int(1),
+        )
+        .unwrap();
+        let denser_fluid = shields_critical_shear_stress(
+            Fixed::from_ratio(1, 2),
+            Fixed::from_int(3),
+            Fixed::from_int(2),
+            Fixed::from_int(10),
+            Fixed::from_int(1),
+        )
+        .unwrap();
+        let stronger_gravity = shields_critical_shear_stress(
+            Fixed::from_ratio(1, 2),
+            Fixed::from_int(3),
+            Fixed::from_int(1),
+            Fixed::from_int(20),
+            Fixed::from_int(1),
+        )
+        .unwrap();
+        assert!(
+            denser_grain > base,
+            "a denser grain entrains at a higher shear"
+        );
+        assert!(
+            denser_fluid < base,
+            "a denser fluid lowers the threshold (the liquid-versus-gas difference is data)"
+        );
+        assert!(
+            stronger_gravity > base,
+            "stronger gravity holds the grain down"
+        );
+    }
+
+    #[test]
+    fn a_buoyant_grain_is_refused_fail_loud() {
+        // A grain no denser than its fluid is not bed-entrained by shear (it floats): refused rather than a
+        // non-positive threshold.
+        assert!(shields_critical_shear_stress(
+            Fixed::from_ratio(1, 2),
+            Fixed::from_int(1),
+            Fixed::from_int(2),
+            Fixed::from_int(10),
+            Fixed::from_int(1)
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn a_non_positive_shields_input_is_refused_fail_loud() {
+        let ok = (
+            Fixed::from_ratio(1, 2),
+            Fixed::from_int(3),
+            Fixed::from_int(1),
+        );
+        assert!(
+            shields_critical_shear_stress(Fixed::ZERO, ok.1, ok.2, Fixed::from_int(10), Fixed::ONE)
+                .is_err(),
+            "a non-positive Shields number is refused"
+        );
+        assert!(
+            shields_critical_shear_stress(ok.0, ok.1, ok.2, Fixed::ZERO, Fixed::ONE).is_err(),
+            "a non-positive gravity is refused"
+        );
+        assert!(
+            shields_critical_shear_stress(ok.0, ok.1, ok.2, Fixed::from_int(10), Fixed::ZERO)
+                .is_err(),
+            "a non-positive grain size is refused"
+        );
+    }
+
+    #[test]
+    fn the_shields_derivation_is_a_pure_function() {
+        let a = shields_critical_shear_stress(
+            Fixed::from_ratio(45, 1000),
+            Fixed::from_ratio(265, 100),
+            Fixed::ONE,
+            Fixed::from_ratio(98, 10),
+            Fixed::from_ratio(1, 100),
+        );
+        let b = shields_critical_shear_stress(
+            Fixed::from_ratio(45, 1000),
+            Fixed::from_ratio(265, 100),
+            Fixed::ONE,
+            Fixed::from_ratio(98, 10),
+            Fixed::from_ratio(1, 100),
+        );
+        assert_eq!(a, b);
+        assert!(
+            a.unwrap() > Fixed::ZERO,
+            "an Earth-like grain has a positive threshold"
+        );
+    }
+
+    #[test]
     fn a_flat_terrain_entrains_nothing() {
         // No slope, no shear: a flat field entrains and carries no mass.
         let z = vec![Fixed::from_int(7); 9];
@@ -913,6 +1471,78 @@ mod tests {
         let a = fluid_shear(&z, w, h, Fixed::from_int(2), Fixed::from_ratio(1, 2)).expect("valid");
         let b = fluid_shear(&z, w, h, Fixed::from_int(2), Fixed::from_ratio(1, 2)).expect("valid");
         assert_eq!(a, b);
+    }
+
+    #[test]
+    fn the_default_exponents_reproduce_the_fluvial_kernel_byte_for_byte() {
+        // fluid_shear delegates to fluid_shear_with_exponents with the Mirror fluvial default (SQRT, LINEAR), so
+        // the two are bit-identical: the exponent field is byte-neutral by construction.
+        let (w, h) = (5, 4);
+        let z = west_ramp(w, h);
+        let default = fluid_shear(&z, w, h, Fixed::from_int(1), Fixed::ZERO).expect("valid");
+        let explicit = fluid_shear_with_exponents(
+            &z,
+            w,
+            h,
+            Fixed::from_int(1),
+            Fixed::ZERO,
+            ExactRootExponent::SQRT,
+            ExactRootExponent::LINEAR,
+        )
+        .expect("valid");
+        assert_eq!(default, explicit);
+    }
+
+    #[test]
+    fn a_different_area_exponent_shapes_the_entrainment() {
+        // Below the base-level cap (a small erodibility), the area exponent shapes the entrainment: a linear
+        // exponent (m = 1) entrains differently from the sqrt default (m = 1/2), so the exponent is a live datum.
+        let (w, h) = (5, 4);
+        let z = west_ramp(w, h);
+        let k = Fixed::from_ratio(1, 100);
+        let sqrt_m = fluid_shear_with_exponents(
+            &z,
+            w,
+            h,
+            k,
+            Fixed::ZERO,
+            ExactRootExponent::SQRT,
+            ExactRootExponent::LINEAR,
+        )
+        .expect("valid");
+        let linear_m = fluid_shear_with_exponents(
+            &z,
+            w,
+            h,
+            k,
+            Fixed::ZERO,
+            ExactRootExponent::LINEAR,
+            ExactRootExponent::LINEAR,
+        )
+        .expect("valid");
+        assert_ne!(
+            sqrt_m.entrained, linear_m.entrained,
+            "the area exponent shapes the entrainment where the cap does not bind"
+        );
+    }
+
+    #[test]
+    fn an_unbuildable_fluid_shear_exponent_fails_loud() {
+        // A cube-root area exponent is outside the buildable family, so the kernel refuses it fail-loud (deferred
+        // to the general fractional-power primitive) rather than silently approximating.
+        let (w, h) = (3, 3);
+        let z = west_ramp(w, h);
+        let cube_root = ExactRootExponent::new(1, 3).unwrap();
+        assert!(fluid_shear_with_exponents(
+            &z,
+            w,
+            h,
+            Fixed::from_int(1),
+            Fixed::ZERO,
+            cube_root,
+            ExactRootExponent::LINEAR
+        )
+        .is_err());
     }
 
     #[test]

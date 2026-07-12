@@ -41,7 +41,7 @@
 //! in the research tier; this module makes the boundary visible instead of pretending it away.
 
 use civsim_core::Fixed;
-use civsim_world::OrbitalElements;
+use civsim_world::{OrbitalElements, PlanetaryBody};
 
 use crate::calibration::{CalibrationError, CalibrationManifest};
 
@@ -138,6 +138,21 @@ pub fn orbital_from_manifest(m: &CalibrationManifest) -> Result<OrbitalElements,
     Ok(OrbitalElements {
         orbital_period_seconds: m.require_fixed("world.orbital_period_seconds")?,
         rotation_period_seconds: m.require_fixed("world.rotation_period_seconds")?,
+    })
+}
+
+/// Read a world's planetary body from the two reserved owner scalars (`world.planet_radius` in metres,
+/// `world.mean_density` the whole-planet mean in kg/m^3), failing loud while either is reserved (never
+/// fabricating a value). The two data are the per-world geometry the surface gravity derives from
+/// (`g = (4/3) * pi * G * R * rhobar`); Earth's values are one option among many (see
+/// [`PlanetaryBody::dev_earth`]), never a silent default, so a reserved manifest correctly refuses to hand
+/// back a fabricated body rather than defaulting to Earth. A free function rather than an inherent
+/// `PlanetaryBody::from_manifest` because the type lives in `civsim-world`, which cannot depend on the
+/// manifest in `civsim-sim` (the same split [`orbital_from_manifest`] uses).
+pub fn planetary_from_manifest(m: &CalibrationManifest) -> Result<PlanetaryBody, CalibrationError> {
+    Ok(PlanetaryBody {
+        radius_meters: m.require_fixed("world.planet_radius")?,
+        mean_density: m.require_fixed("world.mean_density")?,
     })
 }
 
@@ -719,6 +734,48 @@ source = "s"
         let base_tick = base_tick_seconds_fixed(&m).unwrap();
         let cadence = ticks_from_seconds(orbital.orbital_period_seconds, base_tick).unwrap();
         assert_eq!(cadence, 86_400);
+    }
+
+    #[test]
+    fn planetary_from_manifest_reads_the_two_geometry_scalars_and_fails_loud_while_reserved() {
+        // Reserved: the reader refuses to fabricate a body, failing loud on the first reserved scalar.
+        let reserved = r#"
+[[reserved]]
+id = "world.planet_radius"
+basis = "b"
+status = "reserved"
+source = "s"
+[[reserved]]
+id = "world.mean_density"
+basis = "b"
+status = "reserved"
+source = "s"
+"#;
+        let m = CalibrationManifest::from_toml_str(reserved).unwrap();
+        assert!(matches!(
+            planetary_from_manifest(&m).unwrap_err(),
+            CalibrationError::Reserved(_)
+        ));
+
+        // Set: the reader reads the two owner scalars into a PlanetaryBody (Earth's values here, one option).
+        let set = r#"
+[[reserved]]
+id = "world.planet_radius"
+basis = "b"
+status = "set"
+value = "6371000"
+source = "s"
+[[reserved]]
+id = "world.mean_density"
+basis = "b"
+status = "set"
+value = "5514"
+source = "s"
+"#;
+        let m = CalibrationManifest::from_toml_str(set).unwrap();
+        let body = planetary_from_manifest(&m).unwrap();
+        assert_eq!(body.radius_meters, Fixed::from_int(6_371_000));
+        assert_eq!(body.mean_density, Fixed::from_int(5514));
     }
 
     #[test]
