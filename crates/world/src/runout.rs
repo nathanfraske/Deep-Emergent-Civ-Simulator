@@ -101,6 +101,36 @@ pub struct RunoutForces {
     pub step_cap: u32,
 }
 
+/// An OPEN body-force term the runout law sums beside gravity: a per-world force that does work on the
+/// parcel along the gradient of its own potential field, keyed on that field, so an alien force is a DATA
+/// ROW rather than a code path (admit-the-alien). Gravity is the built-in body force (its potential is the
+/// terrain elevation, its coefficient `g`); a magical world adds a mana-pressure gradient as one of these
+/// (its potential the mana field, its coefficient the mana-force axis), a photosynthetic lofting or an
+/// electrostatic hop likewise, and the one integrator sums whichever are present. The coefficient is a
+/// floor axis (Principle 9); nothing here is authored, the force is read from the world's own data.
+#[derive(Clone, Copy, Debug)]
+pub struct BodyForce<'a> {
+    /// The force coefficient (a floor axis), the work per unit potential drop per unit mass.
+    pub coefficient: Fixed,
+    /// The potential field over the grid whose downhill gradient the force drives the parcel along (one
+    /// entry per cell, `width * height` long). A drop in this potential returns energy, a rise costs it.
+    pub potential: &'a [Fixed],
+}
+
+/// The dimensionless runout-scale ratio, the launch specific energy over the per-step friction dissipation
+/// `mu * g * cell`: the number of flat-ground steps a parcel's budget carries it before friction spends it,
+/// the KE-to-dissipation ratio the regimes read out from. A small ratio is a slump that stops near, a large
+/// ratio a throw that reaches far; the regime is this DERIVED value, never a named category. Zero when the
+/// dissipation is non-positive (a frictionless or zero-gravity degenerate world), the caller's signal that
+/// the scale is unbounded rather than a fabricated number.
+pub fn regime_ratio(energy: Fixed, forces: RunoutForces) -> Fixed {
+    let dissipation = smul(smul(forces.friction, forces.gravity), forces.cell_size);
+    if dissipation <= Fixed::ZERO {
+        return Fixed::ZERO;
+    }
+    energy.checked_div(dissipation).unwrap_or(Fixed::MAX)
+}
+
 /// The path a parcel takes and where it deposits: the cells it passed through in order (the source first),
 /// the cell it came to rest in, and the specific energy left when it stopped. The rest cell is the
 /// single-parcel deposit site the redistribution operator credits; the multi-parcel fan that spreads a
@@ -152,11 +182,22 @@ fn heading_bias(heading: (Fixed, Fixed), dx: i32, dy: i32) -> Fixed {
     sadd(hx, hy)
 }
 
-/// Integrate a shed parcel's runout over a `width` by `height` fixed-point elevation grid from `source`,
-/// returning the path it takes and the cell it deposits in. Deterministic and worker-invariant: fixed-point
-/// throughout, a total-order neighbour choice (force score then lowest index), and a bounded march (at most
-/// `forces.step_cap` steps). Panics if `elevation.len()` is not `width * height` or `source` is out of range
-/// (construction invariants). See the module docs for the physics and the regimes that emerge from it.
+/// The energy an extra body force set returns for a step from `cur` to `nbr`: the sum over the forces of the
+/// coefficient times the drop in that force's potential. The caller ([`runout_with_forces`]) validates every
+/// potential to the grid length, so the bounds check here is a safe fallback that never fires in practice.
+fn body_gain(extra: &[BodyForce], cur: usize, nbr: usize) -> Fixed {
+    let mut gain = Fixed::ZERO;
+    for f in extra {
+        if let (Some(&pc), Some(&pn)) = (f.potential.get(cur), f.potential.get(nbr)) {
+            gain = sadd(gain, smul(f.coefficient, ssub(pc, pn)));
+        }
+    }
+    gain
+}
+
+/// Integrate a shed parcel's runout over a `width` by `height` fixed-point elevation grid under gravity
+/// alone, the common case. A convenience wrapper over [`runout_with_forces`] with no extra body forces; see
+/// it and the module docs for the physics.
 pub fn runout(
     width: usize,
     height: usize,
@@ -164,6 +205,26 @@ pub fn runout(
     source: usize,
     parcel: Parcel,
     forces: RunoutForces,
+) -> RunoutPath {
+    runout_with_forces(width, height, elevation, source, parcel, forces, &[])
+}
+
+/// Integrate a shed parcel's runout over a `width` by `height` fixed-point elevation grid from `source`,
+/// returning the path it takes and the cell it deposits in. Beside gravity (the terrain-potential body
+/// force) the parcel feels the `extra` open body forces, each summed along the gradient of its own field, so
+/// an alien force (a mana-pressure gradient) drives transport as a data row (admit-the-alien). Deterministic
+/// and worker-invariant: fixed-point throughout, a total-order neighbour choice (force score then lowest
+/// index), and a bounded march (at most `forces.step_cap` steps). Panics if `elevation.len()` is not
+/// `width * height` or `source` is out of range (construction invariants). See the module docs for the
+/// physics and the regimes that emerge from it.
+pub fn runout_with_forces(
+    width: usize,
+    height: usize,
+    elevation: &[Fixed],
+    source: usize,
+    parcel: Parcel,
+    forces: RunoutForces,
+    extra: &[BodyForce],
 ) -> RunoutPath {
     assert_eq!(
         elevation.len(),
@@ -177,6 +238,15 @@ pub fn runout(
         "source {source} is outside the {}-cell grid",
         width * height
     );
+    for f in extra {
+        assert_eq!(
+            f.potential.len(),
+            width * height,
+            "an extra body-force potential of length {} must equal width*height {}",
+            f.potential.len(),
+            width * height
+        );
+    }
     // The friction cost of one step is the same everywhere: mu * g * cell (the Coulomb dissipation per unit
     // mass over the horizontal step). A parcel must have this much specific energy plus whatever the slope
     // costs to advance, so a shallow-enough slope with no launch energy never moves (the repose stability).
@@ -189,27 +259,30 @@ pub fn runout(
     for _ in 0..forces.step_cap {
         // Score each neighbour by the force the parcel feels toward it: gravity (returned energy for a drop)
         // plus the momentum bias. The best score, then the lowest cell index on a tie, is a total order.
-        let mut best: Option<(usize, Fixed, Fixed)> = None; // (neighbour, score, drop)
+        // The total body-force gain toward a neighbour: gravity (g times the elevation drop) plus the open
+        // extra forces (each summed along its own potential gradient). The parcel is drawn where this total,
+        // plus its momentum bias, is largest.
+        let mut best: Option<(usize, Fixed, Fixed)> = None; // (neighbour, score, total force gain)
         for (nbr, dx, dy) in neighbors4(cur, width, height) {
             let drop = ssub(elevation[cur], elevation[nbr]);
-            let gravity_gain = smul(forces.gravity, drop);
-            let score = sadd(gravity_gain, heading_bias(parcel.heading, dx, dy));
+            let force_gain = sadd(smul(forces.gravity, drop), body_gain(extra, cur, nbr));
+            let score = sadd(force_gain, heading_bias(parcel.heading, dx, dy));
             let take = match best {
                 None => true,
                 Some((bn, bscore, _)) => score > bscore || (score == bscore && nbr < bn),
             };
             if take {
-                best = Some((nbr, score, drop));
+                best = Some((nbr, score, force_gain));
             }
         }
-        let (nbr, _, drop) = match best {
+        let (nbr, _, force_gain) = match best {
             Some(b) => b,
             None => break, // a zero-area interior with no neighbour (only the degenerate 1-cell grid)
         };
-        // The step's specific-energy change: gravity returns g*drop (a cost when climbing, drop < 0), and
-        // friction always dissipates its fixed cost. If the budget cannot cover it, the parcel rests here.
-        let gravity_gain = smul(forces.gravity, drop);
-        let next_energy = ssub(sadd(energy, gravity_gain), friction_cost);
+        // The step's specific-energy change: the summed body forces return `force_gain` (a cost when it is
+        // negative, climbing against them), and friction always dissipates its fixed cost. If the budget
+        // cannot cover it, the parcel rests here.
+        let next_energy = ssub(sadd(energy, force_gain), friction_cost);
         if next_energy < Fixed::ZERO {
             break;
         }
@@ -462,5 +535,132 @@ mod tests {
         );
         assert_eq!(path.rest, 0);
         assert_eq!(path.cells, vec![0]);
+    }
+
+    // --- Slice 3: the ballistic launch-dominated case, the open body-force slot, the regime ratio ---
+
+    #[test]
+    fn a_ballistic_launch_flies_its_heading_across_flat_ground() {
+        // Flat ground (gravity returns nothing on any step), so only the launch momentum drives the parcel:
+        // a strong east heading carries it east, friction spending the budget over the range e0/(mu*g*cell).
+        // The gravity-driven regime (a static parcel) would not move here; the ballistic regime does, the
+        // same law under a different parcel state.
+        let e = vec![Fixed::ZERO; 10];
+        let f = forces(Fixed::ONE, Fixed::from_ratio(1, 2), Fixed::ONE, 100);
+        // friction cost per step = 1/2; a budget of 2 carries 4 steps east.
+        let path = runout(
+            10,
+            1,
+            &e,
+            0,
+            Parcel {
+                energy: Fixed::from_int(2),
+                heading: (Fixed::from_int(10), Fixed::ZERO),
+            },
+            f,
+        );
+        assert_eq!(
+            path.rest, 4,
+            "the ballistic parcel flies its heading the friction-limited range"
+        );
+        // A static parcel on the same flat ground does not move (no launch energy, gravity flat).
+        let stuck = runout(
+            10,
+            1,
+            &e,
+            0,
+            Parcel {
+                energy: Fixed::ZERO,
+                heading: still(),
+            },
+            f,
+        );
+        assert_eq!(
+            stuck.rest, 0,
+            "with no launch energy the flat-ground parcel stays put"
+        );
+    }
+
+    #[test]
+    fn a_larger_ballistic_budget_flies_farther() {
+        let e = vec![Fixed::ZERO; 20];
+        let f = forces(Fixed::ONE, Fixed::from_ratio(1, 2), Fixed::ONE, 100);
+        let head = (Fixed::from_int(10), Fixed::ZERO);
+        let near = runout(
+            20,
+            1,
+            &e,
+            0,
+            Parcel {
+                energy: Fixed::from_int(2),
+                heading: head,
+            },
+            f,
+        );
+        let far = runout(
+            20,
+            1,
+            &e,
+            0,
+            Parcel {
+                energy: Fixed::from_int(4),
+                heading: head,
+            },
+            f,
+        );
+        assert!(
+            far.rest > near.rest,
+            "a larger launch budget reaches farther ({} vs {})",
+            far.rest,
+            near.rest
+        );
+    }
+
+    #[test]
+    fn an_alien_body_force_drives_transport_as_a_data_row() {
+        // Flat terrain, no launch energy, no momentum: gravity alone moves nothing. A world-declared mana
+        // field falling toward the east adds an open body force whose gradient drives the parcel east, all
+        // the way to the far edge, with no code path for "mana": the alien force is a data row keyed on its
+        // own field (admit-the-alien). The SAME parcel under gravity alone stays put.
+        let width = 8;
+        let flat = vec![Fixed::ZERO; width];
+        // A mana potential that falls by one per cell toward the east, so moving east is a mana drop.
+        let mana: Vec<Fixed> = (0..width)
+            .map(|x| Fixed::from_int((width - 1 - x) as i32))
+            .collect();
+        let f = forces(Fixed::ONE, Fixed::from_ratio(1, 2), Fixed::ONE, 100);
+        let parcel = Parcel {
+            energy: Fixed::ZERO,
+            heading: still(),
+        };
+        // Gravity alone: the flat-ground static parcel does not move.
+        let gravity_only = runout(width, 1, &flat, 0, parcel, f);
+        assert_eq!(
+            gravity_only.rest, 0,
+            "gravity alone leaves the flat-ground parcel still"
+        );
+        // With the mana body force (coefficient 1, above the friction cost 1/2), it flows east to the edge.
+        let mana_force = [BodyForce {
+            coefficient: Fixed::ONE,
+            potential: &mana,
+        }];
+        let driven = runout_with_forces(width, 1, &flat, 0, parcel, f, &mana_force);
+        assert_eq!(
+            driven.rest,
+            width - 1,
+            "the mana gradient drives the parcel to the far edge as a data row"
+        );
+    }
+
+    #[test]
+    fn the_regime_ratio_reads_the_launch_energy_over_the_dissipation() {
+        // The dimensionless runout-scale ratio is e0 / (mu*g*cell): with mu*g*cell = 1/2, a budget of 2
+        // reads a ratio of 4 (four flat-ground steps of reach). It is a derived readout, never a category.
+        let f = forces(Fixed::ONE, Fixed::from_ratio(1, 2), Fixed::ONE, 100);
+        assert_eq!(regime_ratio(Fixed::from_int(2), f), Fixed::from_int(4));
+        // A frictionless or zero-gravity degenerate world has non-positive dissipation, so the ratio reads
+        // zero (the unbounded-scale signal), never a fabricated number.
+        let frictionless = forces(Fixed::ONE, Fixed::ZERO, Fixed::ONE, 100);
+        assert_eq!(regime_ratio(Fixed::from_int(5), frictionless), Fixed::ZERO);
     }
 }
