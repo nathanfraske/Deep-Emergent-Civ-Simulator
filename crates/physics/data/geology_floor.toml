@@ -1,0 +1,137 @@
+# The geology floor (genesis-forward Layer 1, the emergent-geology arc; docs/working/GEOLOGY_ARC_PACKET.md).
+# The geo.* axes the deep-time genesis and the interior engine read. The internal-heat-production axis (W/kg)
+# is the heat-per-mass source term the mantle convection and the tectonic regime integrate over the body mass;
+# a world's VALUE is its radiogenic isotope abundance, per-world data (Mirror is bulk silicate Earth), and a
+# tidal or accretional source feeds the SAME axis as heat-per-mass regardless of origin (admit-the-alien: a
+# heat-pipe moon and a radiogenic planet differ only in the value, not the mechanism). The radiogenic isotope
+# decay constants and specific heat-production rates are UNIVERSAL reference data (the same reference-substance
+# tier that carries granite, loam, and hematite), cited once. Loads onto the mechanical..biology floors;
+# additive, so the existing derivations are unchanged and the canonical pins hold until a genesis pass reads
+# it. Every axis reduces to a base-dimension monomial, so neutrality holds by the type.
+#
+# Storage scales (the `scale = "x..."` factor): the geological source terms are far below the raw Q32.32
+# epsilon (a radiogenic heat production of 5e-12 W/kg, a decay constant of 5e-18 /s), so each axis stores its
+# quantity scaled UP by a declared factor and the consumer divides it back out (the Archard wear-coefficient
+# convention, mat.wear_coefficient). The factors are chosen so the heat law composes with NO rescale: the
+# concentration scale (x1e6) times the specific-heat-production scale (x1e6) equals the internal-heat scale
+# (x1e12), so a stored concentration times a stored specific production reads out directly as the stored
+# internal heat. The decay constant carries x1e18 for its own representability; the decay law reads it in the
+# caller's tick time (the SI constant bridged by the reserved seconds-per-tick, an engine cadence surfaced with
+# basis rather than fabricated here), not in raw stored bits.
+
+# --- Interior-heat axes ---
+
+[[axis]]
+id = "geo.internal_heat_production"
+measures = "the internal heat produced per unit mass, the heat-per-mass source term (radiogenic, tidal, or accretional) the mantle convection and the tectonic-regime read integrate over the body mass; stored scaled up by 1e12 so the sub-epsilon watts-per-kilogram are representable, the consumer dividing it back out"
+unit = "W/kg"
+dimension = "2,0,-3,0"
+scale = "x1e12"
+tier = 0
+range_lo = "0.1"
+range_hi = "100"
+real = "bulk silicate Earth present radiogenic heat production is about 5e-12 W/kg (roughly 20 TW over the roughly 4e24 kg mantle, from U-238, U-235, Th-232, and K-40 decay), several-fold higher in the deep past and on tidally heated bodies (Io near 2e-11 W/kg), and near zero on a spent world. Physical envelope 1e-13 to 1e-10 W/kg, stored 0.1 to 100 at scale x1e12 (Mirror 5e-12 W/kg reads 5.0). Turcotte and Schubert, Geodynamics; McDonough and Sun 1995 for the bulk silicate Earth composition"
+
+[[axis]]
+id = "geo.isotope_concentration"
+measures = "the mass fraction of a heat-producing isotope in the body, the decaying reservoir the radiogenic heat and the radiogenic decay read; a dimensionless fraction stored scaled up by 1e6 so the parts-per-billion mantle abundances are representable, the consumer dividing it back out"
+unit = "ratio"
+dimension = "dimensionless"
+scale = "x1e6"
+tier = 0
+range_lo = "0.0001"
+range_hi = "10000"
+real = "bulk silicate Earth abundances are about 13 ppb U (1.3e-8 mass fraction), 55 ppb Th (5.5e-8), and 240 ppm K (2.4e-4, of which K-40 is 0.0117 percent, 2.8e-8); continental crust is enriched several orders higher and an ore body higher still, so the physical envelope is 1e-10 to 1e-2, stored 1e-4 to 1e4 at scale x1e6. The per-world abundance is per-world data. McDonough and Sun 1995; Rudnick and Gao 2003 for the crust"
+
+[[axis]]
+id = "geo.specific_heat_production"
+measures = "the heat produced per unit mass of a pure heat-producing isotope, an intensive per-isotope constant; W/kg stored scaled up by 1e6 (matching the concentration scale so the heat law composes with no rescale), the consumer dividing it back out"
+unit = "W/kg"
+dimension = "2,0,-3,0"
+scale = "x1e6"
+tier = 0
+range_lo = "10"
+range_hi = "1000"
+real = "the per-isotope heat generation rates: U-238 9.46e-5, U-235 5.69e-4, Th-232 2.64e-5, and K-40 2.92e-5 W per kg of the isotope, so the physical envelope is 1e-5 to 1e-3 W/kg, stored 10 to 1000 at scale x1e6. Turcotte and Schubert, Geodynamics (Table 4.2); Rybach 1988"
+
+[[axis]]
+id = "geo.decay_constant"
+measures = "the radioactive decay constant lambda = ln2 / half-life of a heat-producing isotope, the rate at which its reservoir spends down; inverse seconds stored scaled up by 1e18 so the roughly 1e-18 per-second constants are representable, the consumer bridging it into tick time rather than reading raw stored bits"
+unit = "1/s"
+dimension = "0,0,-1,0"
+scale = "x1e18"
+tier = 0
+range_lo = "1"
+range_hi = "35"
+real = "lambda = ln2 / half-life: U-238 (half-life 4.468 Gyr) 4.916e-18, U-235 (0.7038 Gyr) 3.121e-17, Th-232 (14.05 Gyr) 1.563e-18, and K-40 (1.251 Gyr) 1.756e-17 per second, so the physical envelope is 1e-18 to 3.5e-17 /s, stored 1 to 35 at scale x1e18. Steiger and Jaeger 1977 for the geochronology decay constants; Audi et al. 2003 for the nuclear half-lives"
+
+# --- Heat-producing isotope reference data (universal, the granite/loam/hematite tier) ---
+# Each isotope carries its decay constant (stored x1e18) and its specific heat production (stored x1e6). The
+# per-world VALUE a body carries is its geo.isotope_concentration abundance (per-world data), not authored here.
+
+[[substance]]
+id = "u238"
+participates_in = ["law.radiogenic_heat", "law.radiogenic_decay"]
+real = "U-238, the dominant present-day heat producer: half-life 4.468 Gyr (lambda 4.916e-18 /s) and specific heat production 9.46e-5 W/kg. Steiger and Jaeger 1977; Turcotte and Schubert, Geodynamics (Table 4.2)"
+values = [
+  { axis = "geo.decay_constant", value = "4.916" },
+  { axis = "geo.specific_heat_production", value = "94.6" },
+]
+
+[[substance]]
+id = "u235"
+participates_in = ["law.radiogenic_heat", "law.radiogenic_decay"]
+real = "U-235, the deep-past heat producer (short half-life, so dominant early and near-spent now): half-life 0.7038 Gyr (lambda 3.121e-17 /s) and specific heat production 5.69e-4 W/kg. Steiger and Jaeger 1977; Turcotte and Schubert, Geodynamics (Table 4.2)"
+values = [
+  { axis = "geo.decay_constant", value = "31.21" },
+  { axis = "geo.specific_heat_production", value = "569" },
+]
+
+[[substance]]
+id = "th232"
+participates_in = ["law.radiogenic_heat", "law.radiogenic_decay"]
+real = "Th-232, the longest-lived heat producer (so a rising fraction of the budget over deep time): half-life 14.05 Gyr (lambda 1.563e-18 /s) and specific heat production 2.64e-5 W/kg. Steiger and Jaeger 1977; Turcotte and Schubert, Geodynamics (Table 4.2)"
+values = [
+  { axis = "geo.decay_constant", value = "1.563" },
+  { axis = "geo.specific_heat_production", value = "26.4" },
+]
+
+[[substance]]
+id = "k40"
+participates_in = ["law.radiogenic_heat", "law.radiogenic_decay"]
+real = "K-40, the potassium heat producer (0.0117 percent of natural potassium): half-life 1.251 Gyr (lambda 1.756e-17 /s) and specific heat production 2.92e-5 W/kg. Steiger and Jaeger 1977; Turcotte and Schubert, Geodynamics (Table 4.2)"
+values = [
+  { axis = "geo.decay_constant", value = "17.56" },
+  { axis = "geo.specific_heat_production", value = "29.2" },
+]
+
+# --- Interior-heat laws ---
+# radiogenic_heat is a pure monomial: the stored concentration (x1e6) times the stored specific production
+# (x1e6) reads out as the stored internal heat (x1e12), no rescale, summed over the isotopes by the caller.
+# radiogenic_decay is the first-order reservoir step N_new = N*(1 - lambda*dt), a memory-primitive accumulate
+# instance (a reservoir-proportional negative rate), read in the caller's tick time.
+
+[[law]]
+id = "law.radiogenic_heat"
+kernel = "radiogenic_heat"
+ports = [
+  { role = "concentration", axis = "geo.isotope_concentration" },
+  { role = "specific_heat_production", axis = "geo.specific_heat_production" },
+]
+output_measure = "the internal heat production H = concentration * specific heat production of one isotope, summed over the heat-producing isotopes by the caller"
+dimension = "2,0,-3,0"
+interval_bound = "[0, HEAT_MAX]"
+tier = 0
+
+[[law]]
+id = "law.radiogenic_decay"
+kernel = "radiogenic_decay"
+ports = [
+  { role = "reservoir", axis = "geo.isotope_concentration", temporal = "prior" },
+  { role = "decay_constant", axis = "geo.decay_constant" },
+  { role = "dt", temporal = "dt" },
+]
+output_measure = "the decayed isotope reservoir N_new = N*(1 - lambda*dt), a first-order step in the caller's tick time (the SI decay constant bridged by the reserved seconds-per-tick)"
+dimension = "dimensionless"
+interval_bound = "[0, CONC_MAX]"
+tier = 0
