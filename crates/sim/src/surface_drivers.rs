@@ -20,14 +20,25 @@
 //! [`crate::surface_transport::TransportKernelId`]. Off the run path until a genesis pass arms a driver, so
 //! declaring the kernels is byte-neutral.
 //!
-//! The four build-now kernels land one at a time and close the continuous surface mass budget. GRAVITY-DOWNSLOPE
-//! ([`hillslope_diffuse`]) is the first, and it sets the local slope the fluid-shear and solid-solvent drivers
-//! read. FLUID-SHEAR ([`fluid_shear`]) is the second, the moving-fluid entrainment and transport driver, the
-//! SOURCE half of the fluvial budget. THERMAL-CHEMICAL ALTERATION ([`thermal_chemical_alter`]) is the third, the
-//! in-place weathering that dissolves rock into the dissolved-load reservoir and fractures it into the mobile
-//! grains the transport drivers move (the grain source they presuppose). DEPOSITION ([`deposit`]) is the fourth,
-//! the conservation SINK that settles the fluid-shear source where transport capacity drops, so the total
-//! deposited equals the total entrained and the column-to-column budget closes.
+//! The four build-now kernels land one at a time. GRAVITY-DOWNSLOPE ([`hillslope_diffuse`]) is the first, and it
+//! sets the local slope the fluid-shear and solid-solvent drivers read. FLUID-SHEAR ([`fluid_shear`]) is the
+//! second, the moving-fluid entrainment and transport driver, the SOURCE half of the fluvial budget.
+//! THERMAL-CHEMICAL ALTERATION ([`thermal_chemical_alter`]) is the third, the in-place weathering that dissolves
+//! rock into the dissolved-load reservoir and fractures it into the mobile grains the transport drivers move (the
+//! grain source they presuppose). DEPOSITION ([`deposit`]) is the fourth, the conservation SINK that settles a
+//! transported source where transport capacity drops.
+//!
+//! The conservation each kernel proves is LOCAL to its own pass: the hillslope flux conserves total elevation
+//! exactly, `deposit` conserves the `entrained` source it is GIVEN (total deposited equals the total of its input
+//! source), and each reservoir transfer conserves the four-account total. The CROSS-WRITER budget closure (many
+//! drivers removing from one contested column) does NOT follow automatically from those local identities: a
+//! source driver bounds its entrainment by the slope drop and routes that full mass downstream, while
+//! [`crate::surface_transport::reconcile_column`] clamps the contested column's honored removal to its snapshot
+//! mass, so the arming step MUST route only the reconciled (honored) removal into the sink, never the raw
+//! pre-reconcile demand. That composition contract (reconcile the removals against the snapshot first, feed the
+//! honored removal as the deposition source) is specified in the design and is the arming step's responsibility;
+//! it is not yet built or tested here, so the whole-budget closure across contending writers is a stated
+//! obligation, not a proven property of these byte-neutral kernels.
 
 use civsim_core::Fixed;
 use civsim_world::flood::priority_flood;
@@ -56,8 +67,12 @@ fn max_diffusion_factor() -> Fixed {
 /// `factor` is the dimensionless per-step diffusion number `D * dt / dx^2`: the reserved hillslope diffusivity
 /// `D` (a per-material transport coefficient with an error band, calibrated against measured hillslope
 /// relaxation, surfaced-with-basis and never fabricated), over the genesis timestep and the grid spacing. It
-/// must lie in `(0, 1/4]` for the explicit scheme to relax rather than grow; a factor outside that range is
-/// refused fail-loud (a [`CalibrationError::BadValue`]), never a silent clamp. The nonlinear threshold-failure
+/// must lie in `(0, 1/4]` for the explicit scheme to stay bounded; a factor outside that range is refused
+/// fail-loud (a [`CalibrationError::BadValue`]), never a silent clamp. The upper end `1/4` is the neutral-
+/// stability boundary: the field stays bounded and deterministic there, but the highest-frequency (checkerboard)
+/// mode is undamped rather than relaxing, so strict monotone relaxation of every mode wants `factor < 1/4`, and
+/// the boundary is admitted (not forbidden) because it is bounded, not because it relaxes fastest. The nonlinear
+/// threshold-failure
 /// (landslide) branch above a reserved critical-slope angle is a deferred refinement of this linear creep core.
 ///
 /// Deterministic fixed-point arithmetic (Principle 3); the residual is the exact integer max elevation change so
@@ -139,8 +154,41 @@ fn max_change_bits(a: &[Fixed], b: &[Fixed]) -> u64 {
 /// The largest grid the fluid-shear kernel accepts, so a cell's drainage area (a count bounded by the cell
 /// total) converts to `Fixed` through `from_ratio(area, 1)` without the `i128 << 32` intermediate exceeding the
 /// `i64` mantissa. `2^31` cells is a 46340-square grid, far above any genesis pass, so the bound is a
-/// correctness guard, never a live limit.
+/// correctness guard, never a live limit. It bounds ONLY the area-to-`Fixed` conversion; the transport PRODUCTS
+/// (the shear proxy and the capacity) are guarded separately by [`mul_or_overflow`], because a `Fixed` multiply
+/// ends in a narrowing cast that would wrap silently rather than fail loud.
 const MAX_FLUID_SHEAR_CELLS: usize = 1usize << 31;
+
+/// Multiply two `Fixed` values, failing loud on a Q32.32 overflow. The `*` operator's `Fixed::mul` ends in an
+/// `as i64` narrowing cast, and a cast is NOT caught by overflow-checks, so an out-of-range product would wrap
+/// SILENTLY to a wrong value rather than panic. The transport laws can reach extreme magnitudes on a pathological
+/// input (a huge drainage area times a steep slope, an enormous reserved coefficient), and a silent wrap would
+/// corrupt the deterministic result, so every driver product routes through this checked form and surfaces an
+/// overflow as a [`CalibrationError`] the caller must handle.
+fn mul_or_overflow(a: Fixed, b: Fixed, id: &str) -> Result<Fixed, CalibrationError> {
+    a.checked_mul(b).ok_or_else(|| CalibrationError::BadValue {
+        id: id.to_string(),
+        detail: format!(
+            "the product overflowed Q32.32: {} * {}",
+            a.to_f64_lossy(),
+            b.to_f64_lossy()
+        ),
+    })
+}
+
+/// Divide two `Fixed` values, failing loud on a zero divisor or a Q32.32 overflow. Like [`mul_or_overflow`], this
+/// guards the narrowing cast in `Fixed::div` that would otherwise wrap a division by a near-zero denominator
+/// (a sub-microkelvin temperature in the Arrhenius exponent) into a silent wrong value.
+fn div_or_overflow(a: Fixed, b: Fixed, id: &str) -> Result<Fixed, CalibrationError> {
+    a.checked_div(b).ok_or_else(|| CalibrationError::BadValue {
+        id: id.to_string(),
+        detail: format!(
+            "the quotient overflowed Q32.32 or divided by zero: {} / {}",
+            a.to_f64_lossy(),
+            b.to_f64_lossy()
+        ),
+    })
+}
 
 /// The result of one [`fluid_shear`] pass: the flow routing, the drainage area, the entrained mass each column
 /// gives up, and the sediment each cell carries downstream. The kernel is the SOURCE half of the fluvial budget:
@@ -200,6 +248,13 @@ where
             }
         }
     }
+    // The caller (fluid_shear) always supplies a priority_flood receiver, which is acyclic, so every cell is
+    // processed; the assert documents that invariant (a cycle would leave cells unfolded and the accumulation
+    // incomplete). The public deposit kernel, which takes a caller-supplied receiver, guards this fail-loud.
+    debug_assert_eq!(
+        head, n,
+        "the receiver forest must be acyclic so every cell accumulates"
+    );
     acc
 }
 
@@ -287,7 +342,11 @@ pub fn fluid_shear(
     let drainage_area = accumulate_downstream(vec![1i64; n], &receiver);
 
     // The entrainment per cell: erodibility * (sqrt(A) * S - theta), above the threshold, capped at the drop to
-    // the receiver so erosion never inverts the slope.
+    // the receiver so erosion never inverts the slope. The area exponent (m = 1/2, the exact integer `Fixed::sqrt`)
+    // and the slope exponent (n = 1, linear) are the fixed exact-root default, the standard fluvial stream-power
+    // values; per-driver selection of the exponent within the GPU-canon-buildable exact-root family (a Mars or a
+    // Titan fluid whose incision law has a different exponent) is the alien-clean refinement, deferred alongside
+    // the general arbitrary-exponent GPU-canon primitive.
     let mut entrained = vec![Fixed::ZERO; n];
     for i in 0..n {
         let r = receiver[i];
@@ -298,11 +357,12 @@ pub fn fluid_shear(
             continue;
         }
         let area = Fixed::from_ratio(drainage_area[i], 1);
-        let shear = area.sqrt() * drop; // sqrt(A) * S, both exact-root exponents
+        // sqrt(A) * S, both exact-root exponents; the product is checked so an extreme area-slope cannot wrap.
+        let shear = mul_or_overflow(area.sqrt(), drop, "surface.fluid_shear_shear_proxy")?;
         if shear <= theta {
             continue;
         }
-        let capacity = erodibility * (shear - theta);
+        let capacity = mul_or_overflow(erodibility, shear - theta, "surface.fluid_shear_capacity")?;
         // The base-level guard: never erode below the receiver in one pass (never open a new pit).
         entrained[i] = if capacity < drop { capacity } else { drop };
     }
@@ -428,15 +488,35 @@ pub fn thermal_chemical_alter(
             Fixed::ZERO
         };
         // The Arrhenius dissolution rate: coefficient * exp(-activation_temperature / T). The exponent is a
-        // dimensionless ratio; a large barrier (cold surface) drives it toward zero rate (exp saturates).
-        let exponent = -(activation_temperature / temperature[i]);
-        let rate = dissolution_coefficient * exponent.exp();
+        // dimensionless ratio; a large barrier (cold surface) drives it toward zero rate (exp saturates). The
+        // rate is gated only by temperature, not by per-cell solvent PRESENCE: the `dissolution_coefficient` is
+        // uniform over the pass (it folds the solvent's aggressiveness and the lithology's solubility), so a
+        // world with a patchy solvent (a locally wet arid world) needs a per-cell solvent-availability forcing to
+        // gate dissolution to where the solvent is present, the analogue of the fluid-shear flow routing, a
+        // deferred extension. The division and the product are checked so a near-zero temperature or an extreme
+        // coefficient fails loud rather than wrapping silently.
+        let exponent = div_or_overflow(
+            activation_temperature,
+            temperature[i],
+            "surface.thermal_chemical_arrhenius",
+        )?;
+        let rate = mul_or_overflow(
+            dissolution_coefficient,
+            (-exponent).exp(),
+            "surface.thermal_chemical_dissolution_rate",
+        )?;
         dissolved[i] = if rate < available { rate } else { available };
         // The remaining solid mass after dissolution is the stock the fracturing limb can convert to grains.
         let after_dissolution = available - dissolved[i];
-        // Thermal and frost fracturing: linear in the diurnal range (a larger swing cracks more grains).
+        // Thermal and frost fracturing: linear in the temperature-cycling amplitude (`diurnal_range` on a
+        // rotating world; any cyclic thermal forcing, tidal or orbital, on an alien), a larger swing cracks more
+        // grains.
         let produced = if diurnal_range[i] > Fixed::ZERO {
-            fracture_coefficient * diurnal_range[i]
+            mul_or_overflow(
+                fracture_coefficient,
+                diurnal_range[i],
+                "surface.thermal_chemical_fracture_rate",
+            )?
         } else {
             Fixed::ZERO
         };
@@ -455,9 +535,11 @@ pub fn thermal_chemical_alter(
 
 /// The result of one [`deposit`] pass: the mass settled into each column and the sediment flux leaving each cell
 /// downstream. The kernel is the SINK half of the fluvial budget: `deposited` is the mass added to each column
-/// (the snapshot-apply reconciliation applies it as a positive delta, raising the elevation ledger), and it
-/// closes the column-to-column budget against the fluid-shear source, so the total deposited equals the total
-/// entrained (every source unit settles somewhere).
+/// (the snapshot-apply reconciliation applies it as a positive delta, raising the elevation ledger), and the pass
+/// conserves the source it is GIVEN: the total deposited equals the total of the `entrained` source array (every
+/// source unit settles somewhere). Whether that source array is the reconciled (honored) removal or a raw
+/// pre-reconcile demand is the ARMING step's responsibility, not this kernel's: the cross-writer budget closes
+/// only when the arming feeds the honored removal here (see the module note).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DepositionPass {
     /// The mass settled into each column this pass (non-negative). Where the sediment flux exceeds the local
@@ -475,7 +557,12 @@ pub struct DepositionPass {
 /// into the column here (raising the elevation ledger). Where the fluid slows or the slope flattens the capacity
 /// drops, so the load settles, exactly the depositional behaviour the budget needs. A drainage outlet settles its
 /// whole remaining load (the river-mouth deposit), so no mass exports off-grid and the total deposited equals the
-/// total entrained: the budget closes column to column.
+/// total of the `entrained` source it is given. This closes the budget column-to-column only when the caller
+/// feeds the RECONCILED (honored) removal as the source: on a contested column the source drivers demand more
+/// than the snapshot holds, [`crate::surface_transport::reconcile_column`] clamps the honored removal to the
+/// snapshot, and the arming step must route only that honored mass here, or the ledger would gain net mass
+/// (deposited from the raw demand exceeding the clamped removal). That composition contract is the arming step's,
+/// not this kernel's.
 ///
 /// The `capacity` is the exact-root transport capacity (formed as `transport_coefficient * sqrt(A) * S`, the same
 /// GPU-canon exact-root shear proxy the fluid-shear entrainment reads, with a reserved transport coefficient), so
@@ -522,6 +609,17 @@ pub fn deposit(
                 ),
             });
         }
+        // Each receiver must be a valid cell index, so a malformed caller-supplied routing fails loud here rather
+        // than panicking on an out-of-range index inside the walk.
+        if receiver[i] >= n {
+            return Err(CalibrationError::BadValue {
+                id: "surface.deposition_receiver".to_string(),
+                detail: format!(
+                    "receiver[{i}] = {} is out of range for {n} cells",
+                    receiver[i]
+                ),
+            });
+        }
     }
 
     let mut indegree = vec![0usize; n];
@@ -559,6 +657,20 @@ pub fn deposit(
             deposited[c] += carried;
             carried_out[c] = Fixed::ZERO;
         }
+    }
+
+    // Every cell must have been processed. A `priority_flood` receiver forest is acyclic (each cell drains to an
+    // outlet in finitely many steps), so the Kahn walk reaches all `n`; if a caller passes a receiver with a
+    // CYCLE, the cells in it never reach in-degree zero and would be skipped, and their entrained mass would be
+    // SILENTLY LOST (breaking the total-deposited == total-entrained identity). Refuse that fail-loud rather than
+    // return a quietly non-conserving result.
+    if head != n {
+        return Err(CalibrationError::BadValue {
+            id: "surface.deposition_receiver_cycle".to_string(),
+            detail: format!(
+                "the receiver forest has a cycle: only {head} of {n} cells drain to an outlet, so mass would be silently lost"
+            ),
+        });
     }
 
     Ok(DepositionPass {
@@ -1072,6 +1184,41 @@ mod tests {
     #[test]
     fn a_length_mismatch_is_refused_fail_loud_for_deposition() {
         assert!(deposit(&[Fixed::ZERO; 3], &[0usize, 1], &[Fixed::ZERO; 3]).is_err());
+    }
+
+    #[test]
+    fn a_cyclic_receiver_is_refused_fail_loud_so_mass_is_never_silently_lost() {
+        // A 2-cycle (cell 0 -> 1 -> 0, neither an outlet): the Kahn walk can process nothing, so the entrained
+        // mass would be silently dropped and the conservation identity broken. The kernel refuses it fail-loud
+        // rather than return a quietly non-conserving Ok (the hardened acyclicity precondition).
+        let entrained = vec![Fixed::from_int(5), Fixed::ZERO];
+        let cyclic = vec![1usize, 0];
+        let capacity = vec![Fixed::ZERO; 2];
+        assert!(deposit(&entrained, &cyclic, &capacity).is_err());
+    }
+
+    #[test]
+    fn an_out_of_range_receiver_is_refused_fail_loud_not_a_panic() {
+        // A receiver index beyond the grid is a malformed routing: refused with a clean error rather than a
+        // panic on the out-of-range index inside the walk.
+        let entrained = vec![Fixed::ZERO; 2];
+        let bad = vec![9usize, 1];
+        let capacity = vec![Fixed::ZERO; 2];
+        assert!(deposit(&entrained, &bad, &capacity).is_err());
+    }
+
+    #[test]
+    fn an_overflowing_transport_product_fails_loud_rather_than_wrapping_silently() {
+        // The shear proxy sqrt(A) * S and the capacity K * excess route through the checked multiply, so an
+        // extreme reserved coefficient surfaces as a fail-loud error rather than a silent Q32.32 wrap. A huge
+        // erodibility on a steep, high-drainage ramp overflows the capacity product.
+        let (w, h) = (4, 4);
+        let z = west_ramp(w, h);
+        let huge = Fixed::from_int(i32::MAX);
+        assert!(
+            fluid_shear(&z, w, h, huge, Fixed::ZERO).is_err(),
+            "an overflowing capacity product is refused, not wrapped"
+        );
     }
 
     #[test]

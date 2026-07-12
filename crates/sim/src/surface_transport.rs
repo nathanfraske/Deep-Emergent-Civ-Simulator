@@ -196,7 +196,12 @@ pub struct DriverRow {
     /// The OPEN forcing property key-set: the named world-property keys the kernel reads (density, viscosity,
     /// surface tension, latent heat, boiling point, a saturation curve, a chemical aggressiveness, or an
     /// off-list key like a triboelectric charge). Extensible by naming a new key, the data half of the
-    /// extensibility line.
+    /// extensibility line. It is the ARMING-step data contract: the byte-neutral driver kernels
+    /// ([`crate::surface_drivers`]) currently take their forcing as flat typed arguments (off the run path), and
+    /// when a genesis pass arms a driver the arming step reads these keys from the world's property data and
+    /// passes the resolved values as those arguments. So the open key-set records WHICH world properties a driver
+    /// depends on (the alien-generality contract) ahead of the kernel wiring that consumes them; until a driver is
+    /// armed it is the declared dependency, not yet a live read.
     property_keys: Vec<String>,
     /// The kernel's reserved parameters, keyed by name. An absent parameter reads zero (the substrate absence
     /// convention, matching the decompose driver). On the run path each is loaded fail-loud from the calibration
