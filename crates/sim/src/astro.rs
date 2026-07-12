@@ -37,6 +37,7 @@
 use civsim_core::Fixed;
 use civsim_units::bignum::{BigRat, BigUint};
 use civsim_units::compute;
+use civsim_units::fundamentals::GRAVITATIONAL_CONSTANT;
 
 /// The solar luminosity `L_sun` in watts, the IAU 2015 Resolution B3 nominal value (3.828e26 W). A cited
 /// REFERENCE ANCHOR (the Sun-anchored scale of the mass-luminosity relation), not a per-world value.
@@ -55,6 +56,11 @@ pub const SOLAR_MASS_KG: &str = "1.989e30";
 /// figures the Q32.32 result carries (a `2^-32` epsilon near a ~1361 magnitude is a relative ~1.7e-13), so
 /// the pi truncation never reaches the result's low bit. An engine-accuracy bound, not a world value.
 pub const FLUX_PI_DIGITS: u32 = 40;
+
+/// The number of decimal digits pi is computed to for the surface-gravity derivation. Far above the
+/// significant figures the Q32.32 result (about a `9.8` magnitude) carries, so the pi truncation never
+/// reaches the result's low bit. An engine-accuracy bound, not a world value.
+pub const GRAVITY_PI_DIGITS: u32 = 40;
 
 /// A non-negative `Fixed` (its bits over `2^FRAC_BITS`) as an exact rational, so an order-one `Fixed` argument
 /// multiplies into the wide-magnitude `BigRat` without leaving exact arithmetic. The caller passes a
@@ -89,6 +95,44 @@ pub fn stellar_flux(mass_ratio: Fixed, exponent: Fixed, distance_au: Fixed) -> O
     let luminosity = l_sun.mul(&nonneg_fixed_to_bigrat(mass_ratio.powf(exponent)));
     let flux = luminosity.div(&denom);
     let bits = flux.round_to_scale(Fixed::FRAC_BITS)?;
+    Fixed::from_bits_i128(bits)
+}
+
+/// The surface gravity of a uniform sphere, `g = (4/3) * pi * G * R * rhobar`, in m/s^2. `radius_m` is the
+/// planet radius in metres and `mean_density` the WHOLE-PLANET mean density in kg/m^3, both per-world
+/// geometry the scenario supplies (through [`civsim_world::PlanetaryBody`]); the gravitational constant `G`
+/// is read from the floor fundamental (`civsim_units::fundamentals::GRAVITATIONAL_CONSTANT`, the one authored
+/// place, whose first run-path consumer this is). So `g` is no longer an authored scalar (the retired inline
+/// `9.80665`) but a value that derives from the floor constant plus two per-world geometry data.
+///
+/// The scale discipline mirrors [`stellar_flux`]: `G` (about `6.7e-11`) underflows Q32.32 and `R * rhobar`
+/// (about `3.5e10`) overflows it, while the RESULT (about `9.8`) fits, so the whole product runs in exact
+/// rational arithmetic (`BigRat`) with pi from Machin's formula, rounding ONCE to the fixed-point scale at
+/// the end. The order-one geometry arguments stay `Fixed` and cross into `BigRat` exactly through the same
+/// non-negative bridge the flux uses. `None` on a non-positive radius or density (a degenerate world, not a
+/// rewrite) or a result past the representable range.
+///
+/// The admit-the-alien test: nothing terran is hardcoded here. A denser world, a smaller world, or a
+/// gas-giant-density world is a different pair of arguments, never a rewrite; the Mirror values live in the
+/// [`civsim_world::PlanetaryBody`] fixture the caller supplies. The uniform-sphere reduction omits rotation
+/// and oblateness (so a rotating world's measured surface gravity is slightly below this), and the full
+/// `g = G * M / R^2` with the radial density profile integrated over the interior is the deeper interior-lane
+/// form the whole-planet mean density stands in for until it derives.
+pub fn surface_gravity(radius_m: Fixed, mean_density: Fixed) -> Option<Fixed> {
+    if radius_m <= Fixed::ZERO || mean_density <= Fixed::ZERO {
+        return None;
+    }
+    let g_const = BigRat::from_decimal_str(GRAVITATIONAL_CONSTANT.value).ok()?;
+    let four_thirds = BigRat::from_i64(4).div(&BigRat::from_i64(3));
+    let pi = compute::pi(GRAVITY_PI_DIGITS);
+    let radius = nonneg_fixed_to_bigrat(radius_m);
+    let density = nonneg_fixed_to_bigrat(mean_density);
+    let g = four_thirds
+        .mul(&pi)
+        .mul(&g_const)
+        .mul(&radius)
+        .mul(&density);
+    let bits = g.round_to_scale(Fixed::FRAC_BITS)?;
     Fixed::from_bits_i128(bits)
 }
 
@@ -160,6 +204,96 @@ mod tests {
     fn a_non_positive_distance_routes_to_none() {
         assert_eq!(
             stellar_flux(Fixed::ONE, Fixed::from_ratio(35, 10), Fixed::ZERO),
+            None
+        );
+    }
+
+    // The dev_earth planetary geometry: Earth's mean radius and whole-planet mean density.
+    const EARTH_RADIUS_M: i32 = 6_371_000;
+    const EARTH_MEAN_DENSITY: i32 = 5514;
+
+    #[test]
+    fn earth_geometry_derives_near_standard_gravity() {
+        // g = (4/3) pi G R rhobar with R = 6.371e6 m and rhobar = 5514 kg/m^3 derives ~9.8213 m/s^2, near
+        // the NIST standard 9.80665 the retired literal carried. The uniform-sphere value is slightly ABOVE
+        // the measured surface gravity because the reduction omits Earth's rotation (centrifugal relief) and
+        // equatorial bulge, a ~0.15 percent offset, not the ~40 percent error a silicate mean would give.
+        let g = surface_gravity(
+            Fixed::from_int(EARTH_RADIUS_M),
+            Fixed::from_int(EARTH_MEAN_DENSITY),
+        )
+        .expect("Earth geometry derives a finite gravity");
+        assert!(
+            close(g, 9.8213),
+            "Earth geometry derives ~9.8213 m/s^2, got {}",
+            g.to_f64_lossy()
+        );
+        assert!(
+            g > Fixed::from_ratio(980_665, 100_000),
+            "the uniform-sphere value is above the measured 9.80665 (it omits rotation and oblateness), got {}",
+            g.to_f64_lossy()
+        );
+    }
+
+    #[test]
+    fn a_silicate_mean_density_would_be_far_too_low() {
+        // The load-bearing mean-density distinction: the crust-and-mantle SILICATE mean (~3300 kg/m^3) gives
+        // g ~ 5.9, wrong by ~40 percent, because it omits the compressed interior and the iron core. The
+        // whole-planet mean (5514) is the correct input. This test pins the difference so a future edit that
+        // reaches for the silicate density fails here rather than shipping a 40-percent-low gravity.
+        let silicate = surface_gravity(Fixed::from_int(EARTH_RADIUS_M), Fixed::from_int(3300))
+            .expect("derives");
+        assert!(
+            silicate.to_f64_lossy() < 6.0,
+            "a silicate mean density gives ~5.9 m/s^2, far below the true surface gravity, got {}",
+            silicate.to_f64_lossy()
+        );
+    }
+
+    #[test]
+    fn a_denser_planet_has_stronger_gravity() {
+        // g scales linearly in the mean density at fixed radius.
+        let earth = surface_gravity(
+            Fixed::from_int(EARTH_RADIUS_M),
+            Fixed::from_int(EARTH_MEAN_DENSITY),
+        )
+        .unwrap();
+        let denser =
+            surface_gravity(Fixed::from_int(EARTH_RADIUS_M), Fixed::from_int(8000)).unwrap();
+        assert!(
+            denser > earth,
+            "a denser planet at the same radius pulls harder"
+        );
+    }
+
+    #[test]
+    fn a_larger_planet_has_stronger_gravity() {
+        // g scales linearly in the radius at fixed mean density (the uniform-sphere surface gravity).
+        let earth = surface_gravity(
+            Fixed::from_int(EARTH_RADIUS_M),
+            Fixed::from_int(EARTH_MEAN_DENSITY),
+        )
+        .unwrap();
+        let larger = surface_gravity(
+            Fixed::from_int(2 * EARTH_RADIUS_M),
+            Fixed::from_int(EARTH_MEAN_DENSITY),
+        )
+        .unwrap();
+        let ratio = larger.to_f64_lossy() / earth.to_f64_lossy();
+        assert!(
+            (ratio - 2.0).abs() < 1e-3,
+            "doubling the radius doubles the surface gravity, got {ratio}"
+        );
+    }
+
+    #[test]
+    fn non_positive_geometry_routes_to_none() {
+        assert_eq!(
+            surface_gravity(Fixed::ZERO, Fixed::from_int(EARTH_MEAN_DENSITY)),
+            None
+        );
+        assert_eq!(
+            surface_gravity(Fixed::from_int(EARTH_RADIUS_M), Fixed::ZERO),
             None
         );
     }

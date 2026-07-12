@@ -64,6 +64,47 @@ impl OrbitalElements {
     }
 }
 
+/// A world's PLANETARY BODY: the whole-planet geometry the surface gravity derives from. The two per-world
+/// inputs to the uniform-sphere surface gravity `g = (4/3) * pi * G * R * rhobar` are the planet RADIUS and
+/// the whole-planet MEAN density; the gravitational constant `G` is the floor fundamental (the one authored
+/// place), so gravity is no longer an authored scalar but a value that falls out of the floor constant plus
+/// these two geometry data. Both fields are [`Fixed`], keeping the derivation float-free and deterministic
+/// (Principle 3).
+///
+/// Like [`OrbitalElements`] this is a passthrough of pure data: the gravity COMPUTE lives in the simulation
+/// crate beside the stellar-flux derivation (`civsim_sim::astro::surface_gravity`), because `G` (about
+/// `6.7e-11`) underflows Q32.32 and `R * rhobar` (about `3.5e10`) overflows it while the result (about
+/// `9.8`) fits, so the product runs in exact rational arithmetic rather than in `Fixed`. The manifest reader
+/// that fills these fields from the two reserved owner scalars lives in the simulation crate too, since the
+/// spatial crate does not depend on the manifest.
+///
+/// The density is the WHOLE-PLANET mean (Earth's about 5514 kg/m^3, dominated by the compressed interior and
+/// the iron core), not the crust-and-mantle silicate mean (about 3300), so `g` comes out near the measured
+/// surface value rather than about 40 percent low. Deriving that mean density from the world's bulk
+/// composition plus its core is the interior lane's deeper derivation; here it is a per-world measured datum.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct PlanetaryBody {
+    /// The planet radius in metres (Earth about 6.371e6).
+    pub radius_meters: Fixed,
+    /// The whole-planet MEAN density in kilograms per cubic metre (Earth about 5514), the mass-weighted
+    /// mean over the full radius including the core, not the silicate surface density.
+    pub mean_density: Fixed,
+}
+
+impl PlanetaryBody {
+    /// A labelled DEVELOPMENT FIXTURE, not owner values: Earth's mean radius (6,371,000 m) and its
+    /// whole-planet mean density (5514 kg/m^3), so fixtures and tests have a concrete world before the
+    /// owner sets the per-world geometry. Earth is one option among many, surfaced here for development
+    /// only, never the canonical default: the owner sets the real per-world values through the reserved
+    /// manifest scalars (`world.planet_radius`, `world.mean_density`).
+    pub fn dev_earth() -> PlanetaryBody {
+        PlanetaryBody {
+            radius_meters: Fixed::from_int(6_371_000),
+            mean_density: Fixed::from_int(5514),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

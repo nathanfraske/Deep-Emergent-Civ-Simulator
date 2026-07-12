@@ -1365,6 +1365,44 @@ unit = "megapascal"
 source = "Genesis-forward Layer 0 (docs/working/GENESIS_FORWARD_PLAN_OF_ATTACK.md, GENESIS_LAYER0_LAYOUT.md); the solvent-phase-stability gate; crates/physics/src/laws.rs VolatileSaturationCurve"
 category = "per_world"
 
+# --- Genesis-forward Stage 3 arming: the planetary geometry the surface gravity derives from ---
+# gravity DERIVES (g = (4/3) pi G R rhobar), retiring the hardcoded standard_gravity() = 9.80665. G is the
+# floor fundamental (the one authored place); R and rhobar are the two per-world geometry leaves below, and
+# world.surface_gravity is the derived node whose effective provenance is the join of the two. The run path
+# reads the labelled PlanetaryBody::dev_earth fixture (crates/world/src/celestial.rs) until an owner sets
+# these per-world values, the same fixture-plus-reserved-scalar split OrbitalElements uses.
+
+[[reserved]]
+id = "world.planet_radius"
+basis = "the world's planetary radius in metres, one of the two per-world geometry data the surface gravity derives from (g = (4/3) * pi * G * R * rhobar, with G the floor gravitational constant). A per-world geometry initial condition, MEASURED for a real world rather than derived (a planet's radius is set by its accretion and thermal history, not by a deeper floor substrate the surface lane holds). Mirror = Earth's volumetric mean radius, 6371000 m (geodetic/IUGG). Surfaced with its basis and citation; the run path uses the labelled PlanetaryBody::dev_earth fixture until the owner sets a per-world value here."
+status = "reserved"
+value = ""
+unit = "meters"
+source = "Genesis-forward Stage 3 arming (docs/working/GENESIS_STAGE3_ARMING_3C.md); crates/world/src/celestial.rs PlanetaryBody; crates/sim/src/astro.rs surface_gravity; crates/sim/src/clock.rs planetary_from_manifest"
+category = "per_world"
+provenance = "measured"
+
+[[reserved]]
+id = "world.mean_density"
+basis = "the world's WHOLE-PLANET mean density in kilograms per cubic metre, the second per-world geometry datum the surface gravity derives from (g = (4/3) * pi * G * R * rhobar). This is the mass-weighted mean over the FULL radius INCLUDING the iron core (Earth about 5514 kg/m^3), never the crust-and-mantle silicate mean (about 3300): gravity scales linearly in it, so a silicate mean gives g about 5.9, wrong by about 40 percent. MEASURED for a real world (refutable by geodesy and the moment of inertia), carried here as a measured leaf. The closure flag to the deeper derivation: the mean density SHOULD ultimately derive from the world's bulk composition plus its core (an iron mass fraction and a coarse radial density profile), the interior lane's domain (B, #178); when that lands, this measured datum retires and gravity fully derives from composition plus geometry (the owner's north star). Mirror = Earth's mean density 5514 kg/m^3 (cited). The run path uses the labelled PlanetaryBody::dev_earth fixture until the owner sets a per-world value here."
+status = "reserved"
+value = ""
+unit = "kilograms_per_cubic_meter"
+source = "Genesis-forward Stage 3 arming (docs/working/GENESIS_STAGE3_ARMING_3C.md); the deeper rhobar-from-bulk-composition-plus-core derivation flagged for the interior lane (#178); crates/world/src/celestial.rs PlanetaryBody; crates/sim/src/astro.rs surface_gravity"
+category = "per_world"
+provenance = "measured"
+
+[[reserved]]
+id = "world.surface_gravity"
+basis = "DERIVE: the surface gravity is not authored (it retired the hardcoded standard_gravity() = 9.80665). It DERIVES through astro::surface_gravity as g = (4/3) * pi * G * R * rhobar, the uniform-sphere surface gravity, reading the floor gravitational constant G (civsim_units::fundamentals::GRAVITATIONAL_CONSTANT, the one authored place) and the two per-world geometry leaves (world.planet_radius, world.mean_density). Gravity's EFFECTIVE provenance is the join of its inputs: measured today (both geometry leaves are measured), and fully composition-derived once the interior lane derives the mean density. Its declared value is never read (the code computes g from the two inputs), so it is a fail-loud DERIVE sentinel rather than an authored number. The uniform-sphere reduction omits rotation and oblateness (Mirror g about 9.82, near the measured 9.80665); the full g = G * M / R^2 with the radial density integrated over the interior is the deeper interior-lane form."
+status = "reserved"
+value = ""
+unit = "meters_per_second_squared"
+source = "Genesis-forward Stage 3 arming (docs/working/GENESIS_STAGE3_ARMING_3C.md); crates/sim/src/astro.rs surface_gravity; civsim_units::fundamentals::GRAVITATIONAL_CONSTANT; retires crates/sim/src/runner.rs standard_gravity()"
+category = "derivable"
+provenance = "derived"
+inputs = ["world.planet_radius", "world.mean_density"]
+
 # --- R-BEHAVIOR-EVOLVE Stage 1: homeostatic physiology (per homeostatic axis; docs/emergent_behavior_design.md) ---
 
 # physiology.reserve_capacity_per_mass RETIRED (worksheet §17, derive audit): the reserve
