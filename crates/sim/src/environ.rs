@@ -1508,6 +1508,46 @@ impl EnvironFields {
         }
     }
 
+    /// The ABIOTIC mineral-weathering floor (the matter-cycle completion, #156): rock dissolves to soil nutrient
+    /// MAP-WIDE at a rate that DERIVES from each cell's own WETNESS, times a reserved base mineral-dissolution
+    /// rate. Chemical weathering is hydrolysis, so it scales with the standing water a cell holds relative to its
+    /// basin capacity (`water / max_water_depth`, clamped): a WET marsh cell weathers strongly, a dry ridge
+    /// barely. The base rate is mineral-agnostic and reserved-with-basis, because the worldgen carries no
+    /// per-cell lithology to read the parent-rock composition from (the geology arc is the flagged follow-on);
+    /// the temperature (Arrhenius) coupling is likewise the deferred follow-on, like the thermal tent's `exp`, so
+    /// a warm marsh does not gate on it. So the soil is fertile from GEOLOGY before any biomass (primary
+    /// succession on weathered rock), and the biotic loop (plants grow, die, decompose back to soil) then
+    /// sustains it. Deposits the `bio.organic_residue` class the producer soil-draw and the fertility read both
+    /// key on. A legitimate out-of-ledger boundary source (rock into nutrient), run OUTSIDE the
+    /// `step_matter_cycle` conservation bracket (the decomposition legs stay conservative; runner.rs). Pure
+    /// deterministic fold in canonical row-major order (Principle 3); a zero base or zero basin capacity is a
+    /// no-op, so an unarmed run is byte-identical.
+    // @derives: abiotic mineral-weathering soil-nutrient supply (the matter-cycle completion, rock -> soil nutrient before any biomass) <- a reserved mineral-agnostic base dissolution rate x the cell's own WETNESS (standing water / basin capacity), the hydrolysis coupling; a wet marsh cell weathers strongly and a dry cell not at all. The base is reserved (no per-cell lithology exists to read the parent-rock composition from, the geology arc the follow-on) and the temperature-Arrhenius coupling is deferred, but the wetness scaling DERIVES from the water field, not authored per cell.
+    pub fn weather_minerals(
+        &self,
+        soil: &mut SoilNutrientField,
+        calib: &EnvironCalib,
+        base_rate: Fixed,
+        class: &str,
+    ) {
+        if base_rate <= Fixed::ZERO || calib.max_water_depth <= Fixed::ZERO {
+            return;
+        }
+        for y in 0..self.height {
+            for x in 0..self.width {
+                let wet = self
+                    .water
+                    .at(x, y)
+                    .div(calib.max_water_depth)
+                    .clamp(Fixed::ZERO, Fixed::ONE);
+                let rate = base_rate.checked_mul(wet).unwrap_or(Fixed::MAX);
+                if rate > Fixed::ZERO {
+                    soil.deposit(Coord3::ground(x, y), class, rate);
+                }
+            }
+        }
+    }
+
     /// Seed the located PRODUCER biomass from the living biosphere (the biosphere-into-run arc), once at
     /// world build. Overwrites (idempotent on re-seed); an off-grid cell is dropped. See [`Self::producer`].
     pub fn set_producer(&mut self, cells: &[(Coord3, Fixed)]) {
@@ -2960,6 +3000,65 @@ mod tests {
             hi,
             fix(full, opt, Fixed::ZERO, ample, ample),
             "the derivation is deterministic"
+        );
+    }
+
+    #[test]
+    fn mineral_weathering_scales_soil_nutrient_by_cell_wetness() {
+        // The ABIOTIC weathering floor (#156, the matter-cycle completion): rock weathers to soil nutrient
+        // MAP-WIDE at a rate that DERIVES from each cell's own wetness (hydrolysis), so a wet marsh cell weathers
+        // strongly and a fully-dry cell not at all. This is what breaks the soil-bootstrap deadlock (fertility
+        // positive from geology before any biomass). A zero base is a no-op (byte-neutral off), and the fold is
+        // deterministic.
+        let map = a_map(0x5EED);
+        let temp = Field::from_map(&map);
+        let calib = EnvironCalib::dev_fixture();
+        let mut e = EnvironFields::from_map(&map);
+        for _ in 0..40 {
+            e.step(&temp, &calib); // accumulate water so some cells are wet and some stay dry
+        }
+        let (w, h) = e.dims();
+        let class = "bio.organic_residue";
+
+        // Zero base deposits nothing (the unarmed run is byte-identical).
+        let mut soil_off = SoilNutrientField::new();
+        e.weather_minerals(&mut soil_off, &calib, Fixed::ZERO, class);
+        assert_eq!(
+            soil_off.cell_totals().count(),
+            0,
+            "a zero weathering base deposits nothing (byte-neutral off)"
+        );
+
+        // Armed: a wet cell carries weathered nutrient, a fully-dry cell carries none (wetness-scaled).
+        let base = Fixed::from_int(100);
+        let mut soil = SoilNutrientField::new();
+        e.weather_minerals(&mut soil, &calib, base, class);
+        let wet = (0..h)
+            .flat_map(|y| (0..w).map(move |x| (x, y)))
+            .find(|&(x, y)| e.water_at(x, y) > Fixed::ZERO)
+            .expect("the wet world offers a wet cell to weather");
+        assert!(
+            soil.mass(Coord3::ground(wet.0, wet.1), class) > Fixed::ZERO,
+            "a wet cell weathers soil nutrient from geology"
+        );
+        if let Some((dx, dy)) = (0..h)
+            .flat_map(|y| (0..w).map(move |x| (x, y)))
+            .find(|&(x, y)| e.water_at(x, y) == Fixed::ZERO)
+        {
+            assert_eq!(
+                soil.mass(Coord3::ground(dx, dy), class),
+                Fixed::ZERO,
+                "a fully-dry cell weathers nothing (the hydrolysis coupling)"
+            );
+        }
+
+        // Deterministic: a second identical pass reproduces the wet cell's deposit exactly.
+        let mut soil2 = SoilNutrientField::new();
+        e.weather_minerals(&mut soil2, &calib, base, class);
+        assert_eq!(
+            soil.mass(Coord3::ground(wet.0, wet.1), class),
+            soil2.mass(Coord3::ground(wet.0, wet.1), class),
+            "weathering is a deterministic fold"
         );
     }
 

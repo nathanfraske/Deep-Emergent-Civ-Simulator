@@ -545,6 +545,18 @@ value = "2"
 unit = "transpiration_per_fixation"
 source = "owner-authorized Earth-C3 interim, PR #156; Lambers et al. 2008; crates/sim/src/environ.rs carbon_fixation_rate"
 
+# --- the ABIOTIC mineral-weathering floor (#156, the matter-cycle completion): the base rate at which rock
+# weathers to soil nutrient, so the soil is fertile from geology before any biomass (the owner's super-fertile
+# marsh). Map-wide, scaled per-cell by the cell's own WETNESS (weather_minerals), so a wet marsh weathers
+# strongly. Mineral-agnostic INTERIM (the worldgen carries no per-cell lithology yet), pending the geology arc.
+[[reserved]]
+id = "weathering.mineral_dissolution_rate"
+basis = "the base mineral-dissolution rate (the soil nutrient a cell's parent rock weathers per tick at full wetness), the ABIOTIC floor that seeds the soil from geology before any biomass. Set to soil_requirement / fertility_scale (0.5 / 0.001 = 500) so a fully-wet marsh cell reaches soil-non-limiting (fertility >= soil_requirement) from dawn, the owner's super-fertile marsh; soil_factor caps at 1 so a higher rate does not over-fix. MINERAL-AGNOSTIC interim: the worldgen carries no per-cell lithology, so the parent-rock composition cannot be read yet (the geology-arc lithology derivation the flagged follow-on); the wetness coupling DERIVES from the cell's water and the temperature-Arrhenius coupling is the deferred follow-on. The wetness scaling is derived, only this base is reserved"
+status = "set"
+value = "500"
+unit = "soil_nutrient_per_tick"
+source = "owner-authorized super-fertile-marsh interim, PR #156; crates/sim/src/environ.rs weather_minerals; pending the geology-arc lithology derivation"
+
 [[reserved]]
 id = "salinity.weathering_rate"
 basis = "FIXTURE placeholder; the salt mass a cell gains per tick as salt leaches from rock, the salinity field source that accumulates in endorheic basins"

@@ -2594,6 +2594,16 @@ fn main() {
                 );
             }
             runner.set_matter_cycle(MatterCycleCalib::dev_fixture());
+            // The ABIOTIC mineral-weathering floor (#156, the matter-cycle completion): arm map-wide rock
+            // weathering so the soil is fertile from geology before any biomass (the owner's super-fertile
+            // marsh), breaking the soil-bootstrap deadlock that left the derived fixation identically zero
+            // (fertility 0 at dawn -> soil_factor 0 -> the photosynthesis constants inert). The base dissolution
+            // rate reads fail-loud from the manifest; the per-cell wetness scaling derives in weather_minerals.
+            runner.arm_mineral_weathering(
+                manifest
+                    .require_fixed("weathering.mineral_dissolution_rate")
+                    .expect("the mirror profile carries weathering.mineral_dissolution_rate"),
+            );
             runner.set_decomposer(DecomposerDriverRegistry::dev_fixture());
             runner.set_corpse_matter(true);
             // The DERIVED-TAXIS survival floor (#151/#152, slice 3): arm the run-and-tumble motility floor beneath
