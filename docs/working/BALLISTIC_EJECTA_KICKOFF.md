@@ -1,0 +1,45 @@
+# True-ballistic ejecta extension: design-first opener, grounding, the projectile-regime seam
+
+The gate named this arc (2026-07-12, off #174): extend the redistribution primitive with a TRUE ballistic ejecta regime, completing the surface-contact limit I flagged in #172 (the runout integrator is friction-dissipated ALONG the ground, so it is approximate for an impact ejecta blanket, whose mass launches on a vertical ballistic ARC). The extension gives A's deferred impact-ejecta kernel the tool it waits on. Design-first: this document grounds the physics, surfaces one mechanism-shaping seam, and brings the slice plan. No code until the gate gates. This is a doc-only opener off current `main` (`2be6c3c`); no mechanism is authored and no value is moved.
+
+I take the arc. It completes my own deferred limit and A's deferred impact kernel, squarely in the redistribution-primitive lane, and I see no better-fit disjoint slice to propose over it.
+
+## Grounding: what exists, and the deferred kernel this feeds
+
+On main are the primitive's surface pieces: the conservation operator (`redistribute.rs`), the surface-runout integrator (`runout.rs`, the one law summing gravity and the open body-force slot over a specific-energy budget), and the isotropic fan (`launch_fan`). A's surface-transport substrate is on main too, and it names the boundary precisely: `TransportKernelId` is a CLOSED enum (hillslope, fluid-shear, thermal-chemical, deposition), and A documents the extensibility boundary at `surface_transport.rs:164`, that a driver needing a kernel not in the enum is a FLOOR EXTENSION (a new Rust arm, a deliberate change), and that "the deferred kernels, a non-local ballistic redistribution for impact and granular mass flows, are added as arms when their primitive lands." My primitive has landed. So the ballistic KERNEL ARM (a `TransportKernelId` variant and its driver row) is A's file to grow, coordinated, not mine to touch; my scope is the world-crate INTEGRATOR the arm will call, the same split the runout coupling used (my mechanism in the world crate, the ledger and driver wiring in the sim crate).
+
+The floor carries the physics this needs without a new constant: gravity (`mech.gravitational_acceleration`), and the projectile range derives from kinematics (below). There is no projectile or trajectory law on the floor, so the range is DERIVED, not authored. The floor `drag_force` (`laws.rs:1196`) is the airborne air-resistance term, a refinement for a later slice.
+
+## The mechanism-shaping seam (surfaced for the gate's ruling)
+
+The gate framed the extension as "a ballistic force term through the open slot." Auditing that against the mechanism (Prime Directive 2), the PHYSICS the gate states is right (a launch energy and angle against gravity giving a trajectory and a range), but the open slot is not the mechanism that expresses it, and the difference is load-bearing:
+
+The open `BodyForce` slot adds, per surface step, a coefficient times the drop in that force's potential field, and the runout integrator walks the parcel cell to cell ALONG the surface. A ballistic arc is a different regime: the parcel LEAVES the surface, flies a parabola in the vertical plane, and lands at a horizontal range, passing OVER whatever terrain lies between. A horizontal surface-potential gradient cannot express that: it can bias a surface walk, but it cannot carry a parcel over a valley to the far rim without descending into the valley, which is exactly the surface-contact approximation this arc is meant to escape. So a ballistic force term through the open slot would reproduce the limit rather than lift it.
+
+The mechanism that fits is a ballistic-arc INTEGRATOR, a sibling regime to the surface-runout integrator, both feeding the same operator and fan. Given a launch (speed `v`, elevation angle `alpha`, azimuth `phi`) and gravity `g`, the horizontal range on flat ground is the kinematic `R = v^2 * sin(2*alpha) / g` (floor physics, no authored constant; the launch is the impact's energy, an event datum). The landing cell is `source + R` along `phi`, REFINED by terrain intersection: the arc's height along the azimuth is `z(x) = x*tan(alpha) - g*x^2 / (2*v^2*cos^2(alpha))`, and the parcel lands where `z(x)` first meets the terrain elevation along that azimuth (a downhill slope extends the range, an uphill rim shortens it). That terrain intersection is where the blanket's shape EMERGES: an isotropic azimuth launch over flat ground gives a symmetric ring, and real relief (a crater rim, a slope, a facing wall) breaks it, with no authored spread shape and no cos falloff. This is the same emergence discipline as the surface fan, applied to the projectile regime.
+
+So the one decision I surface: build the ballistic regime as an INTEGRATOR (a projectile range plus terrain intersection), not as a `BodyForce` term. I agree with the gate's physics and refine the mechanism; the gate rules whether the integrator is the right shape or it wants the force-term form defended further.
+
+## Emergence and determinism
+
+The ejecta blanket is the surface fan's discipline in the projectile regime: isotropic azimuth (the fan's deterministic CORDIC evenly spaced angles, never an RNG), each parcel launched at the impact's energy and angle, each landing at its terrain-intersected range, the landing cells aggregated through the conservation operator. The blanket shape is not authored; it emerges from the terrain intersecting each arc. Determinism holds by construction: fixed-point kinematics (the range and the parabola in `Fixed`), the deterministic azimuth set, a bounded terrain-intersection march along each azimuth (never an unbounded spin), and the operator's exact-integer split, so the whole extension is a pure function of the inputs, worker-invariant.
+
+## Substrate-first on values
+
+No value is authored. The launch (speed and elevation angle) is the impact event's physics, a driver datum in A's `DriverRow` when the arm lands, surfaced there with its basis; the range derives from the launch and the floor gravity by kinematics; the azimuth prior is isotropy, not a shape. If a launch-angle or energy SPECTRUM is later added (an impact ejects across a range of angles, low-angle mass reaching far and high-angle mass near), any breakpoint is reserved-with-basis in the impact-physics literature, never invented. The airborne drag term is the floor `drag_force`, read not authored.
+
+## The slice plan
+
+Each slice self-audited against the section-9 lenses in one pass (cost directive: no spawned panels), byte-neutral (a new integrator armed by no scenario), gated per push.
+
+1. **The ballistic-arc landing integrator.** Given a launch (speed, elevation angle, azimuth) and the terrain, compute the landing cell by the kinematic range and the terrain-intersection march along the azimuth, deterministic and bounded. A new world-crate module, sibling to `runout.rs`. Proven: the flat-ground range matches `v^2 sin(2 alpha)/g`, a downhill slope extends and an uphill rim shortens the landing, a parcel clears an intervening valley (the non-surface-contact property the surface integrator cannot), determinism, and a bounded march.
+2. **The isotropic ejecta fan.** The blanket: isotropic azimuth over the landing integrator, aggregated through the operator, proven symmetric on flat ground and terrain-broken on relief, conserving the ejected mass. Sibling to `launch_fan`.
+3. **The driver arm and wiring (A's file, coordinated, deferred).** The `TransportKernelId` ballistic arm and its `DriverRow`, plus the coupling through `reconcile_and_apply`, land when coordinated with A behind the arming step, not in this arc's world-crate scope.
+
+## Honest limits
+
+The heightfield is `z = 0` (A's substrate's stated limit), so the arc is a vertical-plane projection over a 2.5-D surface, not a true 3-D trajectory; that is the substrate's boundary, not this extension's. Air drag on the arc is deferred to the floor `drag_force` through the same regime, a refinement (a vacuum-or-thin-atmosphere world needs none). And the deeper unification, one momentum-vector integrator where surface-contact and airborne emerge from the parcel's own vertical velocity rather than two sibling regimes, remains the flagged deferred form; this arc builds the ballistic regime as a clean distinct integrator rather than that larger rewrite.
+
+## The ask
+
+Gate: confirm I take the ballistic-ejecta extension, and rule on the one seam, that the ballistic regime is a projectile-arc INTEGRATOR (range plus terrain intersection, a sibling to the surface-runout integrator), not a `BodyForce` term through the open slot, which cannot carry a parcel over intervening terrain and would reproduce the surface-contact limit rather than lift it. Confirm too that the `TransportKernelId` ballistic ARM and its driver wiring stay A's file, coordinated behind the arming step, so my scope is the world-crate integrator. On your ruling I build slice 1. The cost directive holds: I self-audit and ask you to gate, no spawned panels. Nothing authors a value; the launch is the impact's physics and the range derives from the floor.
