@@ -3261,6 +3261,200 @@ pub fn radiogenic_decay(reservoir: Fixed, decay_constant: Fixed, dt: Fixed) -> F
     sat_sub(reservoir, lost).max(ZERO)
 }
 
+/// Column heat balance: evolve an interior rock column's temperature over one tick,
+/// `T_new = T + (H - L)/c * dt`, the slow thermal relaxation of the deep interior. `H` is the
+/// radiogenic heat production (W/kg, from [`radiogenic_heat`] summed over the column's isotopes and
+/// spent down by [`radiogenic_decay`]); `L` is the conductive surface loss expressed as specific power
+/// (W/kg): the caller composes it from the Fourier surface flux the [`conduction`] law already computes
+/// (`q = k*(A/L_path)*dT`, W/m^2) divided by the column's mass per area, so this law does NOT re-derive
+/// Fourier, it consumes it (the same caller-composed-input convention as [`sensible_energy`]'s `dT`).
+/// `c` is the specific heat capacity (J/(kg*K)), so the net specific power over the heat capacity is the
+/// column's warming or cooling rate. An [`accumulate`] instance whose rate is `(H - L)/c`: the interior
+/// warms while radiogenic production leads surface loss and cools once the decaying reservoir falls
+/// behind (the spent-world relaxation), so one resident temperature carries the memory of the whole
+/// heat-production history. The net power is signed (a cooling column has `L > H`), and the temperature
+/// is floored at absolute zero. `H`, `L`, and `dt` are the caller's per-tick, tick-consistent values
+/// (the geology floor's stored-scaled `H` bridged into tick time, as [`radiogenic_decay`] documents);
+/// the kernel is unit-agnostic over a consistent set. Deterministic fixed-point.
+pub fn internal_heat_evolution(
+    temperature: Fixed,
+    heat_production: Fixed,
+    conductive_loss: Fixed,
+    specific_heat: Fixed,
+    dt: Fixed,
+) -> Fixed {
+    if specific_heat <= ZERO || dt <= ZERO {
+        return temperature;
+    }
+    // Net specific power (W/kg), signed: production minus the conductive surface loss.
+    let net = sat_sub(heat_production, conductive_loss);
+    // dT = net/c * dt. The divide by the heat capacity first keeps the rate small before dt grows it;
+    // an overflow at either step saturates by the sign of the net power, never wraps.
+    let rate = match net.checked_div(specific_heat) {
+        Some(r) => r,
+        None => {
+            if net < ZERO {
+                Fixed::MIN
+            } else {
+                Fixed::MAX
+            }
+        }
+    };
+    let delta = rate
+        .checked_mul(dt)
+        .unwrap_or(if net < ZERO { Fixed::MIN } else { Fixed::MAX });
+    // Saturating add applies a cooling (negative delta) or a warming; the interior never falls below
+    // absolute zero.
+    temperature.saturating_add(delta).max(ZERO)
+}
+
+/// Stokes buoyant rise velocity of a thermal parcel: `v = (2/9) * delta_rho * g * r^2 / eta`, the terminal
+/// creeping-flow speed at which a thermal density anomaly rises or sinks through a viscous interior, the
+/// thermal-buoyancy-driven mantle flow the convection outer loop iterates. `delta_rho` is the parcel's
+/// density anomaly (kg/m^3), the caller-composed thermal-buoyancy source `rho * alpha * dT` (from
+/// [`thermal_density_anomaly`], a composed value not a registry axis, the same convention as
+/// [`thermal_buoyancy`]'s composed temperature difference and [`internal_heat_evolution`]'s composed
+/// conductive loss). `g` is gravity, `r` the parcel radius, `eta` the dynamic viscosity. The drag/shape
+/// coefficient `C = 2/9` is DERIVED, not reserved: for a rigid sphere in creeping flow the buoyancy force
+/// `(4/3)*pi*r^3*delta_rho*g` balances the Stokes drag `6*pi*eta*r*v`, and solving gives
+/// `v = (2/9)*delta_rho*g*r^2/eta`, so the coefficient is exactly 2/9 from first principles. (A non-
+/// spherical parcel geometry would carry its own derived shape factor as data, admit-the-alien; the mantle-
+/// parcel model here is the standard rigid sphere.) Signed by the anomaly: a hot, light parcel
+/// (`delta_rho < 0`, lighter than ambient) rises with a positive velocity and a cold, dense one sinks, so
+/// the sign is carried by negating the anomaly (buoyancy opposes the density excess). The mantle-relevant
+/// creeping-flow regime is Stokes drag (Reynolds number far below one), so no inertial term enters. Clamped
+/// to `[-v_max, v_max]`; an inviscid medium (`eta <= 0`) has no terminal velocity and reads the absence
+/// convention. Deterministic fixed-point.
+pub fn stokes_velocity(
+    density_anomaly: Fixed,
+    gravity: Fixed,
+    radius: Fixed,
+    viscosity: Fixed,
+    v_max: Fixed,
+) -> Fixed {
+    // An inviscid or open (non-positive) viscosity is off the creeping-flow domain: no terminal
+    // velocity, the absence convention (no buoyant coupling).
+    if viscosity <= ZERO {
+        return ZERO;
+    }
+    let lo = sat_sub(ZERO, v_max);
+    // Buoyancy opposes the density excess: a parcel lighter than ambient (delta_rho < 0) rises
+    // (positive v), so the driving anomaly is the negated excess. The sign then flows through the
+    // otherwise-positive product (g, r^2, and the derived 2 all >= 0), so an overflow routes by the
+    // drive's sign. C = 2/9 is folded as the 2 in the numerator and the 9 in the denominator, so the
+    // derived sphere coefficient keeps full precision rather than rounding a 0.222... multiplier.
+    let drive = sat_sub(ZERO, density_anomaly);
+    let num = drive
+        .checked_mul(gravity)
+        .and_then(|x| x.checked_mul(radius))
+        .and_then(|x| x.checked_mul(radius))
+        .and_then(|x| x.checked_mul(Fixed::from_int(2)));
+    let num = match num {
+        Some(n) => n,
+        None => {
+            return if drive < ZERO { lo } else { v_max };
+        }
+    };
+    let denom = match viscosity.checked_mul(Fixed::from_int(9)) {
+        Some(d) => d,
+        // An enormous viscosity damps the creeping flow toward zero velocity.
+        None => return ZERO,
+    };
+    match num.checked_div(denom) {
+        Some(v) => v.clamp(lo, v_max),
+        None => {
+            if drive < ZERO {
+                lo
+            } else {
+                v_max
+            }
+        }
+    }
+}
+
+/// Thermal density anomaly, the buoyancy SOURCE: `delta_rho = -rho * alpha * dT`, the density excess a
+/// thermal parcel carries relative to its surroundings, the source [`stokes_velocity`] and the buoyancy laws
+/// consume. `rho` is the material density (kg/m^3), `alpha` the volumetric thermal expansion read from
+/// [`therm.expansion`] in ppm/K (so the per-kelvin fraction is `alpha_ppm * 1e-6`), and `dT = T_parcel -
+/// T_ambient` the temperature contrast (a caller-composed difference of two `therm.temperature` samples, the
+/// sensible-energy convention). Signed by the physics: a warmer parcel (`dT > 0`) is LESS dense, so its
+/// density excess is NEGATIVE and it rises, exactly the sign [`stokes_velocity`] reads (a negative excess
+/// drives a positive rise velocity). This law consumes the existing density and thermal-expansion floor
+/// rather than authoring a buoyancy axis. Saturating on overflow, sign-correct. Deterministic fixed-point.
+pub fn thermal_density_anomaly(
+    density: Fixed,
+    thermal_expansion_ppm: Fixed,
+    delta_t: Fixed,
+) -> Fixed {
+    // magnitude = rho * alpha_ppm * dT / 1e6 (the ppm-to-fraction). density and alpha are >= 0, so the
+    // product's sign is dT's; an overflow routes to the extreme of that sign before the final negation.
+    let magnitude = density
+        .checked_mul(thermal_expansion_ppm)
+        .and_then(|x| x.checked_mul(delta_t))
+        .and_then(|x| x.checked_div(Fixed::from_int(1_000_000)));
+    let magnitude = match magnitude {
+        Some(m) => m,
+        None => {
+            if delta_t < ZERO {
+                Fixed::MIN
+            } else {
+                Fixed::MAX
+            }
+        }
+    };
+    // The density excess is negative for a warmer (lighter) parcel: delta_rho = -(rho*alpha*dT).
+    sat_sub(ZERO, magnitude)
+}
+
+/// Rayleigh number, the convection ONSET control parameter: `Ra = |delta_rho| * g * d^3 / (eta * kappa)`,
+/// the dimensionless ratio of buoyant advection to thermal diffusion across a fluid layer. Convection
+/// begins when `Ra` crosses the critical Rayleigh number, so a runner pairs this with [`threshold_latch`]
+/// (`threshold_latch(Ra, Ra_crit, prior)`) to fire a one-way convection-on latch. `Ra_crit` is itself a
+/// DERIVED constant, not reserved: the marginal-stability eigenvalue of the linearised problem, about 1708
+/// for rigid-rigid boundaries and 657.5 for free-free. `delta_rho` is the caller-composed buoyancy source
+/// (`rho * alpha * dT`, from [`thermal_density_anomaly`]; the magnitude is taken, since a rising and a
+/// sinking parcel are equally unstable), `g` gravity, `d` the layer depth, `eta` the dynamic viscosity, and
+/// `kappa` the thermal diffusivity (`k / (rho * c)`, caller-composed from the conductivity, density, and
+/// specific heat). `d`, `delta_rho`, and `kappa` are the caller's representable-scaled values: raw SI mantle
+/// `d^3` and `eta` overflow Q32.32, so the runner scales them (as [`radiogenic_decay`] bridges the SI decay
+/// constant into tick time). Clamped to `[0, ra_max]`; without dissipation (`eta <= 0` or `kappa <= 0`)
+/// there is no finite Rayleigh number and the absence convention reads zero. Deterministic fixed-point.
+pub fn rayleigh_number(
+    density_anomaly: Fixed,
+    gravity: Fixed,
+    depth: Fixed,
+    viscosity: Fixed,
+    thermal_diffusivity: Fixed,
+    ra_max: Fixed,
+) -> Fixed {
+    // Without viscous or diffusive dissipation the ratio diverges: no defined convective drive, so the
+    // absence convention reads zero.
+    if viscosity <= ZERO || thermal_diffusivity <= ZERO {
+        return ZERO;
+    }
+    // Ra = |delta_rho| * g * d^3 / (eta * kappa). The buoyancy magnitude is the absolute density excess.
+    let mag = sat_abs(density_anomaly);
+    let num = mag
+        .checked_mul(gravity)
+        .and_then(|x| x.checked_mul(depth))
+        .and_then(|x| x.checked_mul(depth))
+        .and_then(|x| x.checked_mul(depth));
+    let num = match num {
+        Some(n) => n,
+        // A buoyancy term past the representable range is overwhelmingly supercritical.
+        None => return ra_max,
+    };
+    let denom = match viscosity.checked_mul(thermal_diffusivity) {
+        Some(d) => d,
+        // Enormous dissipation drives the Rayleigh number toward zero (no convection).
+        None => return ZERO,
+    };
+    match num.checked_div(denom) {
+        Some(ra) => ra.clamp(ZERO, ra_max),
+        None => ra_max,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3353,6 +3547,152 @@ mod tests {
             radiogenic_decay(n0, Fixed::from_int(5), dt),
             Fixed::ZERO,
             "the reservoir floors at zero"
+        );
+    }
+
+    #[test]
+    fn internal_heat_evolution_warms_on_net_heating_and_cools_on_net_loss() {
+        // Exactly representable values (integers), so the balance is exact and the identity is tested
+        // without rounding noise.
+        let t = Fixed::from_int(300);
+        let c = Fixed::from_int(4);
+        let dt = Fixed::ONE;
+        // Net heating H>L: dT = (8 - 0)/4 * 1 = 2, radiogenic production leads surface loss.
+        assert_eq!(
+            internal_heat_evolution(t, Fixed::from_int(8), ZERO, c, dt),
+            Fixed::from_int(302),
+            "production leading loss warms the column"
+        );
+        // Net cooling L>H: dT = (0 - 8)/4 * 1 = -2, the spent-world relaxation.
+        assert_eq!(
+            internal_heat_evolution(t, ZERO, Fixed::from_int(8), c, dt),
+            Fixed::from_int(298),
+            "loss leading production cools the column"
+        );
+        // Balanced H == L: steady state, no drift.
+        assert_eq!(
+            internal_heat_evolution(t, Fixed::from_int(8), Fixed::from_int(8), c, dt),
+            t,
+            "a balanced column holds its temperature"
+        );
+        // A zero tick or a zero (open) heat capacity is a no-op.
+        assert_eq!(
+            internal_heat_evolution(t, Fixed::from_int(8), ZERO, c, ZERO),
+            t
+        );
+        assert_eq!(
+            internal_heat_evolution(t, Fixed::from_int(8), ZERO, ZERO, dt),
+            t
+        );
+        // The temperature never falls below absolute zero: a large net loss floors at 0 K.
+        assert_eq!(
+            internal_heat_evolution(Fixed::ONE, ZERO, Fixed::from_int(8), c, dt),
+            ZERO,
+            "the column floors at absolute zero"
+        );
+    }
+
+    #[test]
+    fn stokes_velocity_rises_light_parcels_and_sinks_dense_ones() {
+        // The sphere drag coefficient C = 2/9 is derived and baked in; values chosen so the 2/9 divides
+        // exactly (delta_rho a multiple of 9), so the creeping-flow velocity is exact.
+        let g = Fixed::from_int(2);
+        let r = Fixed::ONE;
+        let eta = Fixed::ONE;
+        let v_max = Fixed::from_int(1000);
+        // A hot, light parcel (delta_rho = -9) rises: v = (2/9)*9*2*1^2/1 = 4.
+        assert_eq!(
+            stokes_velocity(Fixed::from_int(-9), g, r, eta, v_max),
+            Fixed::from_int(4),
+            "a parcel lighter than ambient rises"
+        );
+        // A cold, dense parcel (delta_rho = +9) sinks: v = -4, the mirror sign.
+        assert_eq!(
+            stokes_velocity(Fixed::from_int(9), g, r, eta, v_max),
+            Fixed::from_int(-4),
+            "a parcel denser than ambient sinks"
+        );
+        // No anomaly, no flow.
+        assert_eq!(stokes_velocity(ZERO, g, r, eta, v_max), ZERO);
+        // An inviscid (zero) viscosity has no terminal velocity: the absence convention.
+        assert_eq!(
+            stokes_velocity(Fixed::from_int(-9), g, r, ZERO, v_max),
+            ZERO
+        );
+        // The rise velocity clamps to the cap, sign-correct, on a huge buoyancy drive.
+        assert_eq!(
+            stokes_velocity(
+                Fixed::from_int(-99999),
+                g,
+                r,
+                Fixed::ONE,
+                Fixed::from_int(10)
+            ),
+            Fixed::from_int(10),
+            "the rise velocity clamps to the cap"
+        );
+    }
+
+    #[test]
+    fn thermal_density_anomaly_is_negative_for_a_warmer_lighter_parcel() {
+        // rho = 2000 kg/m^3, alpha = 30 ppm/K (a rocky ~3e-5/K), exactly representable integers.
+        let rho = Fixed::from_int(2000);
+        let alpha = Fixed::from_int(30);
+        // A warmer parcel (dT = +100 K): magnitude = 2000*30*100/1e6 = 6; delta_rho = -6 (lighter, rises).
+        assert_eq!(
+            thermal_density_anomaly(rho, alpha, Fixed::from_int(100)),
+            Fixed::from_int(-6),
+            "a warmer parcel is lighter (negative density excess)"
+        );
+        // A colder parcel (dT = -100 K) is denser: a positive excess (sinks).
+        assert_eq!(
+            thermal_density_anomaly(rho, alpha, Fixed::from_int(-100)),
+            Fixed::from_int(6),
+            "a colder parcel is denser (positive density excess)"
+        );
+        // No contrast, no anomaly.
+        assert_eq!(thermal_density_anomaly(rho, alpha, ZERO), ZERO);
+        // A non-expanding material (alpha = 0) carries no thermal anomaly.
+        assert_eq!(
+            thermal_density_anomaly(rho, ZERO, Fixed::from_int(100)),
+            ZERO
+        );
+    }
+
+    #[test]
+    fn rayleigh_number_is_the_buoyancy_to_diffusion_ratio() {
+        // Exactly representable integers, so the ratio is exact.
+        let g = Fixed::from_int(3);
+        let d = Fixed::from_int(2);
+        let eta = Fixed::from_int(4);
+        let kappa = Fixed::ONE;
+        let ra_max = Fixed::from_int(1_000_000);
+        // Ra = |delta_rho|*g*d^3/(eta*kappa) = 2*3*8/(4*1) = 12.
+        assert_eq!(
+            rayleigh_number(Fixed::from_int(-2), g, d, eta, kappa, ra_max),
+            Fixed::from_int(12),
+            "the Rayleigh number is buoyant advection over diffusion"
+        );
+        // The magnitude is what matters: a sinking (positive) anomaly is equally unstable.
+        assert_eq!(
+            rayleigh_number(Fixed::from_int(2), g, d, eta, kappa, ra_max),
+            Fixed::from_int(12),
+            "a rising and a sinking parcel share the Rayleigh number"
+        );
+        // Without dissipation there is no finite Rayleigh number: the absence convention.
+        assert_eq!(
+            rayleigh_number(Fixed::from_int(-2), g, d, ZERO, kappa, ra_max),
+            ZERO
+        );
+        assert_eq!(
+            rayleigh_number(Fixed::from_int(-2), g, d, eta, ZERO, ra_max),
+            ZERO
+        );
+        // A Rayleigh number past the cap reads overwhelmingly supercritical (clamped).
+        assert_eq!(
+            rayleigh_number(Fixed::from_int(-2), g, d, eta, kappa, Fixed::from_int(5)),
+            Fixed::from_int(5),
+            "the Rayleigh number clamps to the representable cap"
         );
     }
 
