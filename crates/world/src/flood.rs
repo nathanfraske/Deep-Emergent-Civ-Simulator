@@ -186,9 +186,9 @@ mod tests {
         let b = priority_flood(w, h, &elev);
         assert_eq!(a, b);
         // Every cell drains to the boundary and no interior sink survives.
-        for i in 0..(w * h) {
+        for (i, &e0) in elev.iter().enumerate() {
             assert!(drains_to_boundary(&a, i, w * h));
-            assert!(a.filled[i] >= elev[i], "filling never lowers a cell");
+            assert!(a.filled[i] >= e0, "filling never lowers a cell");
         }
     }
 
