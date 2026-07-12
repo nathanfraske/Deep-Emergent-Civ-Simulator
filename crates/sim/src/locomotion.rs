@@ -1355,6 +1355,150 @@ fn run_and_tumble<T: Terrain>(
     }
 }
 
+/// The forage INGEST underfoot: for each of the being's OWN reserves, eat the tile's standing content of the
+/// reserve's backing class, filling the reserve by the food's physical content converted through the being's own
+/// mass and storage density (`physical_intake`), depleting the tile. Called both by the controller's deliberate
+/// INGEST (output 3) and, beneath it, by the derived-taxis SURVIVAL FLOOR as the reflexive eat-underfoot that keeps
+/// a founder-zero being (which emits no INGEST) from starving in place on found food while selection wires the
+/// deliberate forage controller. Derive-clean and admit-the-alien: it keys on the being's OWN reserves and its own
+/// edibility (`assimilation`) and the tile's real composition, never a hardcoded "food" class or an authored
+/// threshold (satiation room bounds it, so a full being eats nothing). The evolved controller refines it (WHAT and
+/// WHEN to eat) and pre-empts it when it acts, so directed foraging still emerges.
+#[allow(clippy::too_many_arguments)]
+fn ingest_underfoot(
+    w: &mut Walker,
+    homeo: &HomeostaticRegistry,
+    organs: &BodyPlanRegistry,
+    resources: &mut ResourceField,
+    here: Coord3,
+    intake_anchors: Option<&crate::physiology::MetabolicAnchors>,
+    p: &LocomotionParams,
+) {
+    let eta = p.ingest_efficiency;
+    match intake_anchors {
+        Some(anchors) => {
+            // The being's own storage density on each class and its mass, its data alone.
+            let body_mass = crate::physiology::body_mass_kg(&w.body, anchors);
+            let storage = crate::physiology::whole_body_composition_vector(&w.body, organs);
+            for axis in &homeo.axes {
+                if !axis.draw_set.is_empty() {
+                    // A FEEDER RESERVE'S DRAW (R-SOURCE-VECTOR): the per-reserve FOLD
+                    // over its declared draw-axis set (a mixotroph's light-plus-tissue,
+                    // a photovore's flux). No current reserve declares a set, so this
+                    // branch never runs on the pinned scenarios and the four pins hold
+                    // by non-modification of the matter path below. Each term reads its
+                    // source, bridges to content by its own unit, fills bounded by the
+                    // REMAINING room (the live amount() reflects prior terms' ingests),
+                    // and depletes the source only where its floor character is a
+                    // depletable stock, so the deplete step keys on the conservation
+                    // law of the quantity, never on a source kind. The matter singleton
+                    // is the empty-set special case below, kept as today's fast path.
+                    draw_feeder_set(
+                        &axis.draw_set,
+                        axis.id,
+                        here,
+                        resources,
+                        &mut w.homeostasis,
+                        &w.physiology,
+                        &storage,
+                        body_mass,
+                        eta,
+                        p.food_energy_density,
+                    );
+                    continue;
+                }
+                let Some(class) = axis.backing_component.as_deref() else {
+                    continue;
+                };
+                let supply = resources.supply(here, class);
+                if supply <= Fixed::ZERO {
+                    continue; // the tile is no source of this axis
+                }
+                // The food's PHYSICAL content on the class (CORRECTED-T3), decided PER CLASS.
+                // Where THIS class's supply on the cell is a real producer-composition
+                // magnitude, its supply is ALREADY the physical content at the plant's OWN
+                // per-substance density (the seeding side carries the real magnitude), so eat
+                // it at `content = supply` directly: the real plant value SUPERSEDES the
+                // uniform `food_energy_density` anchor, as that anchor's own contract promised.
+                // Any other class (the always-written water mirror, or a class this cell's
+                // composition does not carry) keeps the reserved anchor bridge to physical
+                // content, on a producer cell exactly as on a bare cell (the per-class marker
+                // is what confines the supersession to the food axes; a per-cell flag would
+                // wrongly strip the anchor off the water axis too). Skipping the multiply for a
+                // composition class removes the double-scale; it lowers that axis's absolute
+                // food scale to the real density, an owner-gated biosphere-balance question
+                // surfaced, never tuned here.
+                let content = if resources.is_real_composition(here, class) {
+                    supply
+                } else {
+                    supply
+                        .checked_mul(p.food_energy_density)
+                        .unwrap_or(Fixed::MAX)
+                };
+                let body_c = storage.get(class).copied().unwrap_or(Fixed::ZERO);
+                let room = w.homeostasis.capacity(axis.id) - w.homeostasis.amount(axis.id);
+                let (eaten_content, gain) = crate::physiology::physical_intake(
+                    content,
+                    w.physiology.assimilation(class),
+                    eta,
+                    body_mass,
+                    body_c,
+                    room,
+                );
+                if eaten_content <= Fixed::ZERO {
+                    continue;
+                }
+                // Remove the standing supply the eaten content came from (content back to
+                // supply units), so the tile depletes by exactly what the being took. The
+                // inverse of the content bridge above (CORRECTED-T3), PER CLASS: a
+                // real-composition class's content IS its supply, so it depletes one-for-one; any
+                // other class divides back out the food_energy_density anchor.
+                let eaten_supply = if resources.is_real_composition(here, class) {
+                    eaten_content
+                } else {
+                    eaten_content
+                        .checked_div(p.food_energy_density)
+                        .unwrap_or(eaten_content)
+                };
+                resources.take(here, class, eaten_supply);
+                w.homeostasis.ingest(axis.id, gain);
+            }
+        }
+        None => {
+            // No physiology installed: the pre-grounding satisfaction measure stands, so a
+            // fixture without a physiology is byte-identical to before the grounding.
+            for axis in &homeo.axes {
+                let Some(class) = axis.backing_component.as_deref() else {
+                    continue;
+                };
+                let supply = resources.supply(here, class);
+                if supply <= Fixed::ZERO {
+                    continue;
+                }
+                let frac = laws::satisfaction(
+                    supply,
+                    w.physiology.assimilation(class),
+                    w.physiology.requirement(class),
+                );
+                let cap = w.homeostasis.capacity(axis.id);
+                let room = cap - w.homeostasis.amount(axis.id);
+                let target_gain = frac.checked_mul(cap).unwrap_or(cap).min(room);
+                if target_gain <= Fixed::ZERO {
+                    continue;
+                }
+                let gross = if eta > Fixed::ZERO {
+                    target_gain.checked_div(eta).unwrap_or(target_gain)
+                } else {
+                    target_gain
+                };
+                let taken = resources.take(here, class, gross);
+                let gain = taken.checked_mul(eta).unwrap_or(taken);
+                w.homeostasis.ingest(axis.id, gain);
+            }
+        }
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn step_with_field_dirs<T: Terrain>(
     walkers: &mut [Walker],
@@ -1669,134 +1813,15 @@ pub fn step_with_field_dirs<T: Terrain>(
                         // a mana-bearing plant by the SAME call a grazer fills energy from a seed (Principle 9).
                         // The tile loses exactly the content the being takes (conservation-honest), a grazed
                         // tile feeds the next id-ordered being less, and a full reserve draws nothing.
-                        let eta = p.ingest_efficiency;
-                        match intake_anchors {
-                            Some(anchors) => {
-                                // The being's own storage density on each class and its mass, its data alone.
-                                let body_mass = crate::physiology::body_mass_kg(&w.body, &anchors);
-                                let storage = crate::physiology::whole_body_composition_vector(
-                                    &w.body, organs,
-                                );
-                                for axis in &homeo.axes {
-                                    if !axis.draw_set.is_empty() {
-                                        // A FEEDER RESERVE'S DRAW (R-SOURCE-VECTOR): the per-reserve FOLD
-                                        // over its declared draw-axis set (a mixotroph's light-plus-tissue,
-                                        // a photovore's flux). No current reserve declares a set, so this
-                                        // branch never runs on the pinned scenarios and the four pins hold
-                                        // by non-modification of the matter path below. Each term reads its
-                                        // source, bridges to content by its own unit, fills bounded by the
-                                        // REMAINING room (the live amount() reflects prior terms' ingests),
-                                        // and depletes the source only where its floor character is a
-                                        // depletable stock, so the deplete step keys on the conservation
-                                        // law of the quantity, never on a source kind. The matter singleton
-                                        // is the empty-set special case below, kept as today's fast path.
-                                        draw_feeder_set(
-                                            &axis.draw_set,
-                                            axis.id,
-                                            here,
-                                            resources,
-                                            &mut w.homeostasis,
-                                            &w.physiology,
-                                            &storage,
-                                            body_mass,
-                                            eta,
-                                            p.food_energy_density,
-                                        );
-                                        continue;
-                                    }
-                                    let Some(class) = axis.backing_component.as_deref() else {
-                                        continue;
-                                    };
-                                    let supply = resources.supply(here, class);
-                                    if supply <= Fixed::ZERO {
-                                        continue; // the tile is no source of this axis
-                                    }
-                                    // The food's PHYSICAL content on the class (CORRECTED-T3), decided PER CLASS.
-                                    // Where THIS class's supply on the cell is a real producer-composition
-                                    // magnitude, its supply is ALREADY the physical content at the plant's OWN
-                                    // per-substance density (the seeding side carries the real magnitude), so eat
-                                    // it at `content = supply` directly: the real plant value SUPERSEDES the
-                                    // uniform `food_energy_density` anchor, as that anchor's own contract promised.
-                                    // Any other class (the always-written water mirror, or a class this cell's
-                                    // composition does not carry) keeps the reserved anchor bridge to physical
-                                    // content, on a producer cell exactly as on a bare cell (the per-class marker
-                                    // is what confines the supersession to the food axes; a per-cell flag would
-                                    // wrongly strip the anchor off the water axis too). Skipping the multiply for a
-                                    // composition class removes the double-scale; it lowers that axis's absolute
-                                    // food scale to the real density, an owner-gated biosphere-balance question
-                                    // surfaced, never tuned here.
-                                    let content = if resources.is_real_composition(here, class) {
-                                        supply
-                                    } else {
-                                        supply
-                                            .checked_mul(p.food_energy_density)
-                                            .unwrap_or(Fixed::MAX)
-                                    };
-                                    let body_c = storage.get(class).copied().unwrap_or(Fixed::ZERO);
-                                    let room = w.homeostasis.capacity(axis.id)
-                                        - w.homeostasis.amount(axis.id);
-                                    let (eaten_content, gain) = crate::physiology::physical_intake(
-                                        content,
-                                        w.physiology.assimilation(class),
-                                        eta,
-                                        body_mass,
-                                        body_c,
-                                        room,
-                                    );
-                                    if eaten_content <= Fixed::ZERO {
-                                        continue;
-                                    }
-                                    // Remove the standing supply the eaten content came from (content back to
-                                    // supply units), so the tile depletes by exactly what the being took. The
-                                    // inverse of the content bridge above (CORRECTED-T3), PER CLASS: a
-                                    // real-composition class's content IS its supply, so it depletes one-for-one; any
-                                    // other class divides back out the food_energy_density anchor.
-                                    let eaten_supply = if resources.is_real_composition(here, class)
-                                    {
-                                        eaten_content
-                                    } else {
-                                        eaten_content
-                                            .checked_div(p.food_energy_density)
-                                            .unwrap_or(eaten_content)
-                                    };
-                                    resources.take(here, class, eaten_supply);
-                                    w.homeostasis.ingest(axis.id, gain);
-                                }
-                            }
-                            None => {
-                                // No physiology installed: the pre-grounding satisfaction measure stands, so a
-                                // fixture without a physiology is byte-identical to before the grounding.
-                                for axis in &homeo.axes {
-                                    let Some(class) = axis.backing_component.as_deref() else {
-                                        continue;
-                                    };
-                                    let supply = resources.supply(here, class);
-                                    if supply <= Fixed::ZERO {
-                                        continue;
-                                    }
-                                    let frac = laws::satisfaction(
-                                        supply,
-                                        w.physiology.assimilation(class),
-                                        w.physiology.requirement(class),
-                                    );
-                                    let cap = w.homeostasis.capacity(axis.id);
-                                    let room = cap - w.homeostasis.amount(axis.id);
-                                    let target_gain =
-                                        frac.checked_mul(cap).unwrap_or(cap).min(room);
-                                    if target_gain <= Fixed::ZERO {
-                                        continue;
-                                    }
-                                    let gross = if eta > Fixed::ZERO {
-                                        target_gain.checked_div(eta).unwrap_or(target_gain)
-                                    } else {
-                                        target_gain
-                                    };
-                                    let taken = resources.take(here, class, gross);
-                                    let gain = taken.checked_mul(eta).unwrap_or(taken);
-                                    w.homeostasis.ingest(axis.id, gain);
-                                }
-                            }
-                        }
+                        ingest_underfoot(
+                            w,
+                            homeo,
+                            organs,
+                            resources,
+                            here,
+                            intake_anchors.as_ref(),
+                            p,
+                        );
                         // The tile's toxin classes are NOT a factor in this ingest arm (they neither feed
                         // nor deny a reserve here); they are the environmental-harm sink's concern, applied
                         // once per tick to the CONDITION reserve above (base-level liveliness step 4),
@@ -1835,6 +1860,21 @@ pub fn step_with_field_dirs<T: Terrain>(
         // still seeks up any reserve-feeding gradient (the extinction-wall floor). Off entirely when unarmed
         // (`floor_run` is false), so an opted-out run never enters here and stays byte-identical.
         if floor_run {
+            // The reflexive EAT-UNDERFOOT half of the survival floor (#42): a founder-zero being emits no
+            // deliberate INGEST (that is controller output 3), so beneath the controller the floor also eats the
+            // edible matter it is standing on (satiation-bounded, so a full being eats nothing), keeping it from
+            // starving in place on found food while selection wires the deliberate forage controller. Same
+            // derive-clean keying as the taxis MOVE floor: the being's own reserves and edibility, the tile's
+            // real composition. Only runs where the floor is armed (living), so an unarmed run is byte-identical.
+            ingest_underfoot(
+                w,
+                homeo,
+                organs,
+                resources,
+                here,
+                intake_anchors.as_ref(),
+                p,
+            );
             if let Some(tp) = taxis_params {
                 let cost = terrain.cost(here);
                 let speed = match &w.structure {
