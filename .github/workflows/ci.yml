@@ -42,6 +42,10 @@ jobs:
         run: |
           python3 scripts/determinism_gate.py
           python3 scripts/determinism_gate.py --self-test
+      - name: Constructor gate (no new inline Fixed value outside the audited baseline)
+        run: |
+          python3 scripts/constructor_gate.py
+          python3 scripts/constructor_gate.py --self-test
 
   rust:
     name: build, format, lint, test
