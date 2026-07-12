@@ -87,11 +87,20 @@ pub struct Element {
     /// element in its standard state into gaseous monatomic atoms (equivalently the standard enthalpy of
     /// formation of the monatomic gas). This is the element's own COHESIVE ENERGY, a measured `[M]`
     /// component-level constant that bottoms out in the element's band structure (quantum chemistry the engine
-    /// does not own), the same tier as the atomic weight and the standard molar entropy. The materials-oracle
-    /// derivations read it: a phase's cohesive energy is `sum(atomization enthalpies of its constituents) -
-    /// enthalpy_formation` by Hess's law, feeding the elastic modulus, the melting point, the strength ceiling,
-    /// and the surface and vacancy energies. `None` until a cited value is populated (the extensible registry:
-    /// an unpopulated row is absent, not zero).
+    /// does not own), the same tier as the atomic weight and the standard molar entropy.
+    ///
+    /// TAG: `[M, floor-and-validation]` (owner research, #182). This column is NOT load-bearing petrology
+    /// substrate: the phase disposer minimizes over the `dG_f` rows at fixed bulk composition, so the elemental
+    /// atomization sum is IDENTICAL across candidate assemblages and cancels by Hess (verified against
+    /// `apparent_gibbs_energy`); the disposer never reads this column. Its real roles are two. As an ESTIMATOR
+    /// input it feeds the cohesive-energy density `E_coh / V`, the METALLIC / invented-element / quick-screen
+    /// modulus tier (crate::materials_oracle), NOT the principled route for the ionic-covalent oxide phases,
+    /// whose bulk modulus rides lattice curvature on the Shannon radius instead. As the VALIDATION battery it is
+    /// the standing check on the estimators across the ~100 elements of Brewer/JANAF data (for the ionic,
+    /// molecular, and H-bonded classes the cohesion reassembles from IE + EA, polarizability, and the H-bond
+    /// ladder, so this column is the independent arbiter, the measured-helium-viscosity role with the arrow
+    /// reversed). `None` until a cited value is populated (the extensible registry: an unpopulated row is absent,
+    /// not zero).
     pub atomization_enthalpy: Option<Fixed>,
     /// The raw decimal string of the atomization enthalpy, retained verbatim as the provenance record and
     /// against Q32.32 rounding, mirroring `weight_decimal`. `None` when no atomization enthalpy is populated.

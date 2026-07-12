@@ -1,35 +1,39 @@
 //! The materials oracle, Stage-6 property emission: a material's mechanical properties DERIVED from its stable
 //! mineral assemblage rather than authored per rock type. This is the composition-to-property bridge the spec
-//! (`docs/working/MATERIALS_ORACLE_SPEC.md`) calls `K_solid`, the elastic-modulus sibling of the density
-//! `crustal_density` already emits from the same assemblage: the assemblage's phases and their mode fractions
-//! are the input, the aggregate stiffness is the derived output, so a rock's modulus falls out of its
-//! mineralogy and never an authored per-rock-type table (Principle 8). The named-substance floor's authored
-//! elastic anchor (`mat.elastic_modulus`) is the retirement target; this derivation stands the replacement up
-//! dormant (byte-neutral, armed by no scenario, the `derive_mantle_density` pattern one property over).
+//! (`docs/working/MATERIALS_ORACLE_SPEC.md`) calls `K_solid`, the mechanical sibling of the density
+//! `crustal_density` already emits from the same assemblage: the assemblage's phases and their volume fractions
+//! are the input, the aggregate stiffness is the derived output, so a rock's stiffness falls out of its
+//! mineralogy and never an authored per-rock-type table (Principle 8).
 //!
-//! The route, per the gate's ESTIMATOR-ONLY ruling on the carve (#182):
+//! TIER (owner research, #182). The stiffness of a solid splits by bonding class, and the routes are not one.
+//! The cohesive-energy-density estimator here, `M ~ E_coh / V`, is the METALLIC / invented-element /
+//! QUICK-SCREEN tier `[E]`: a bonding-agnostic order-of-magnitude stiffness SCALE, legitimate where nothing
+//! more principled is reachable (a metal, an invented phase with no structure, a first pass). It is NOT the
+//! principled route for the seed registry's ionic-to-covalent OXIDE phases (forsterite, quartz, periclase,
+//! corundum, hematite, fayalite): for those the bulk modulus is LATTICE CURVATURE on the Shannon radius,
+//! `B = (n-1) A / (18 r0^4)` (Madelung `A`, Born exponent `n`, cation-anion distance `r0`), column-pure with no
+//! `E_coh` at all and radius-dominated (`B ~ 1/r0^4`). That principled bulk-modulus route, and the shear-modulus
+//! debt it exposes (a central-force model obeys the Cauchy relation `C12 = C44` as a theorem, so `G` needs one
+//! class-dispatched ingredient beyond `B`), are the corrected carve in `MATERIALS_ORACLE_MODULUS_CARVE2.md`,
+//! surfaced for the gate's ruling, not built here.
 //!
-//! 1. The COHESIVE ENERGY of a phase by Hess's law, exact from the floor: the energy to disperse the phase into
-//!    free atoms is the energy to make free atoms from the elements' reference states (the sum of the elements'
-//!    atomization enthalpies, a measured `[M]` component-level datum now on the periodic table) minus the
-//!    energy the phase already released forming from those elements (its enthalpy of formation, on the phase
-//!    registry). `E_coh = sum(atomization_i * count_i) - dH_f`. Derived `[D]` from measured inputs, no authored
-//!    step.
-//! 2. The per-phase ELASTIC MODULUS estimated from the cohesive-energy density, `M ~ E_coh / V`: a stiff solid
-//!    is one that stores much cohesive energy in little volume, and the cohesive-energy density carries the
-//!    units of a modulus directly (`1 kJ/cm^3 = 1 GPa`, since `1 kJ = 1e3 J` over `1 cm^3 = 1e-6 m^3` is
-//!    `1e9 Pa`). This is the estimator `[E]`, the one approximate step: the true modulus scatters around the
-//!    cohesive-energy scale by a bonding-dependent factor of order one, surfaced below as the reserved
-//!    estimator band, never baked into the value.
-//! 3. The AGGREGATE modulus of the assemblage from its per-phase moduli over their volume fractions, the
-//!    Voigt-Reuss-Hill mean: the Voigt (arithmetic, volume-weighted) and Reuss (harmonic, volume-weighted)
-//!    means are the rigorous upper and lower bounds a two-phase-and-up composite's modulus must lie between,
-//!    and the Hill average is the standard first-pass estimate; their half-gap is the DERIVED aggregation band.
-//!    Derived `[D]` from the per-phase estimates. The Hashin-Shtrikman bounds are the tighter refinement the
-//!    spec marks for Stage 7, a follow-on, not this slice.
+//! What this module carries today, plainly labeled:
+//!
+//! 1. [`phase_cohesive_energy`] by Hess's law, exact from the floor: `E_coh = sum(atomization_i * count_i) -
+//!    dH_f`, the atomization enthalpies from the periodic table (`[M, floor-and-validation]`) and the enthalpy
+//!    of formation from the phase registry (`[M]`). Derived `[D]`, no authored step. This is the estimator input
+//!    and the validation quantity, not the disposer's substrate (which cancels it by Hess).
+//! 2. [`phase_elastic_modulus`], the `E_coh / V` quick-screen stiffness scale `[E]` (`1 kJ/cm^3 = 1 GPa`). A
+//!    bonding-agnostic order-of-magnitude estimate, not a cleanly separated bulk or shear modulus; the principled
+//!    ionic route above supersedes it for the oxide phases.
+//! 3. [`assemblage_elastic_modulus`], the Voigt-Reuss-Hill aggregate of the per-phase quick-screen scales over
+//!    their volume fractions, `[E]` (the aggregation is an exact `[D]` step, but it inherits the estimator tier
+//!    of its inputs). Its half-gap is the derived aggregation band; the Hashin-Shtrikman tightening is a Stage-7
+//!    follow-on.
 //!
 //! Everything here is fixed-point (the assemblage solve already is) and deterministic. Nothing reads the output
-//! yet, so the pins hold.
+//! yet, so the pins hold. `mat.elastic_modulus` (Young's) is retired only by the principled `B` derived plus `G`
+//! class-dispatched route, not by this quick-screen scale alone.
 
 use crate::periodic::PeriodicTable;
 use crate::petrology::Assemblage;
@@ -93,10 +97,12 @@ pub fn phase_cohesive_energy(phase: &Phase, table: &PeriodicTable) -> Option<Fix
     Some(atomization_sum - phase.enthalpy_formation)
 }
 
-/// The per-phase ELASTIC MODULUS in GPa, the estimator `M ~ E_coh / V`: the cohesive-energy density, in kJ/cm^3
-/// which is GPa directly (`1 kJ/cm^3 = 1 GPa`). Returns `None` if the cohesive energy is unavailable (a data
-/// gap) or the molar volume is non-positive. This is the estimator `[E]`, the single approximate step in the
-/// route; its scatter is the reserved band on [`assemblage_elastic_modulus`].
+/// The per-phase QUICK-SCREEN STIFFNESS SCALE in GPa, the estimator `M ~ E_coh / V`: the cohesive-energy
+/// density, in kJ/cm^3 which is GPa directly (`1 kJ/cm^3 = 1 GPa`). A bonding-agnostic order-of-magnitude
+/// stiffness, the METALLIC / invented-element tier `[E]`, not a cleanly separated bulk or shear modulus and not
+/// the principled route for the ionic-covalent oxide phases (whose bulk modulus rides the Shannon radius, see
+/// the module doc). Returns `None` if the cohesive energy is unavailable (a data gap) or the molar volume is
+/// non-positive. Its scatter is the reserved band on [`assemblage_elastic_modulus`].
 pub fn phase_elastic_modulus(phase: &Phase, table: &PeriodicTable) -> Option<Fixed> {
     let e_coh = phase_cohesive_energy(phase, table)?;
     if phase.molar_volume <= Fixed::ZERO {
@@ -105,17 +111,18 @@ pub fn phase_elastic_modulus(phase: &Phase, table: &PeriodicTable) -> Option<Fix
     e_coh.checked_div(phase.molar_volume)
 }
 
-/// The AGGREGATE elastic modulus of a stable [`Assemblage`] in GPa, the Voigt-Reuss-Hill estimate over its
-/// phases' per-phase moduli weighted by their VOLUME FRACTIONS: the Voigt mean (arithmetic) is the rigorous
-/// upper bound, the Reuss mean (harmonic) the rigorous lower bound, the Hill average of the two the first-pass
-/// estimate, and their half-gap the derived aggregation band. The value is emitted as an ESTIMATOR `[E]`: the
-/// aggregation step is an exact `[D]` relation, but the per-phase moduli it aggregates are estimator values, so
+/// The AGGREGATE quick-screen stiffness scale of a stable [`Assemblage`] in GPa, the Voigt-Reuss-Hill estimate
+/// over its phases' per-phase scales weighted by their VOLUME FRACTIONS: the Voigt mean (arithmetic) is the
+/// rigorous upper bound, the Reuss mean (harmonic) the rigorous lower bound, the Hill average of the two the
+/// first-pass estimate, and their half-gap the derived aggregation band. Emitted as an ESTIMATOR `[E]`: the
+/// aggregation step is an exact `[D]` relation, but the per-phase scales it aggregates are estimator values, so
 /// the composite is only as trustworthy as the estimator it is built on, and the honest tag is the weaker one.
+/// This is the metallic / quick-screen tier, superseded for the ionic-covalent oxide phases by the principled
+/// radius-curvature bulk modulus (the corrected carve); it does not by itself retire `mat.elastic_modulus`.
 ///
 /// Returns `None` if a phase is missing from the registry, an element from the table, or an atomization
 /// enthalpy is unpopulated (a data gap), or the assemblage has no volume. Byte-neutral: no consumer reads this
-/// yet, so the pins hold; it stands up the composition-derived replacement for the authored
-/// `mat.elastic_modulus` dormant, exactly as `derive_mantle_density` landed.
+/// yet, so the pins hold.
 ///
 /// The emitted `band` is the Voigt-Reuss half-gap, a `[D]` bound that is zero for a single-phase assemblage.
 /// RESERVED, surfaced not baked: the per-phase ESTIMATOR SCATTER band, the factor by which real moduli deviate
