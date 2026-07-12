@@ -41,11 +41,19 @@
 //! fitted-potential `~+1.6`), because at the interionic distance (`~2.12 A`, much larger than the density size
 //! `~1/tau ~ 0.5 A`) the shielding is weak, so the Madelung nearly fully ionizes the pair, checked only by the
 //! on-site hardness. This is the known behaviour of QEq on RAW atomic parameters (it is why EEM/QEq are usually
-//! FITTED). The fitted `~+1.6` needs either a `[C]` closure parameterization (which the register minimizes) or
-//! a compute-once DFT-charge tier; the cited SCF Slater exponent does NOT help (a larger `tau` shields LESS, so
-//! the charge rises). So the shielded solve is built and correct (stable, symmetric, neutral, bounded, where
-//! the bare Ewald runs away), and whether it corrects the modulus overestimate for a strong ionic is the open
-//! question surfaced to the gate, not asserted here.
+//! FITTED). The cited SCF Slater exponent does NOT help (a larger `tau` shields LESS, so the charge rises), so
+//! there is no derive-first route to the fitted charge.
+//!
+//! RESOLUTION (gate ruling #182): this is the honest `[E]` estimator-grade partial charge, COMPLETE at that
+//! grade. It is correct where estimator charges suffice (the disposer's formation-energy questions at the
+//! hundred-kJ/mol scale, per the resolution-ladder rule), and it cannot deliver the fine charge a stiff ionic
+//! MODULUS needs, which is the resolution ladder working: the `[E]` tier serves where its grade suffices and
+//! escalates where it does not. The modulus overestimate is MULTI-CAUSAL (the charge is one lever of three:
+//! even the correct Bader charge `Mg ~+1.7` reaches only `~192 GPa` against a measured 165), so the partial
+//! charge was never going to dissolve it alone. The three PRINCIPLED refinements, all unbuilt and no-fit, held
+//! for the owner's architecture ruling: the compute-once DFT/Bader charge (the amortized first-principles
+//! rung), the Born-Mayer exponential repulsive form (versus the overstiffening Born-Lande power), and the
+//! Keating covalent term (the named shear debt). A fitted `[C]` parameterization is not the path.
 //!
 //! `chi`/`eta` are `None` when the ionization energy is absent (a genuine data gap). Everything here is
 //! fixed-point and deterministic; nothing reads it yet, so the pins hold.

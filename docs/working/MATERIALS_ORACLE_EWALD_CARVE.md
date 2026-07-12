@@ -143,3 +143,34 @@ positions (`R = R0 - b ln s`, the `R0` pair table and universal `b`); then the e
 charges plus Born-Mayer plus London plus Keating); then the modulus emission. The disposer RESOLUTION-LADDER rule
 is routed to Agent A's provenance enforcement, not built here: I build the generators, the ladder gates which
 tier may answer which question. No build of any piece beyond the Ewald kernel until the gate rules its carve.
+
+## Slice complete at the honest [E] estimator grade (gate ruling #182)
+
+The generator stack is built and the derive-first thesis was tested to a rigorous negative. The gate ruled the
+slice COMPLETE at the honest `[E]` grade: do not fit, do not add the wrong-direction column.
+
+- **The Ewald kernel** (`ewald.rs`): the Madelung constant from positions, validated to 1e-4 (NaCl, CsCl,
+  fluorite), plus the periodic potential matrix `A_ij`. Dissolves the `A2B3` seam. `[D]`, exact.
+- **The IE/EA columns and derived `chi`/`eta`** (`qeq.rs`): `[M]` measured, `[D]` derived, with the
+  unbound-anion `chi = eta = IE/2` limit `[E]` for the elements whose anion is unbound.
+- **The shielded SCC-DFTB QEq solve** (`qeq.rs`): `tau = (16/5)U` parameter-free from the hardness, the
+  shielded periodic Coulomb, the linear solve. Stable, symmetric, neutral, bounded where the bare Ewald runs
+  away. The honest `[E]` estimator-grade partial charge.
+- **The ionic bulk modulus** (`lattice_modulus.rs`): the point-charge Born-Lande `B`, emitted `[E]` WITH the
+  documented systematic-overestimate band for stiff ionic oxides (NaCl in-band at ~24.4 GPa, periclase flagged
+  systematic-high at ~266 vs measured 165). A stated bias, not a hidden error.
+
+**The proven negative:** the derive-first QEq partial charge does NOT dissolve finding 1 (the divalent-oxide
+overestimate). Raw-Mulliken parameters over-ionize a stiff ionic (periclase Mg ~+2.08, above formal), the cited
+SCF Slater exponent makes it worse (wrong direction), and the overestimate is MULTI-CAUSAL: even the correct
+Bader charge Mg ~+1.7 reaches only ~192 GPa against 165. The charge is one lever of three.
+
+**The three principled refinements** (all unbuilt, all no-fit, HELD for the owner's architecture ruling, which
+the gate is raising since the build contradicts the generator architecture's premise that the partial charge
+dissolves finding 1): the compute-once DFT/Bader charge (the amortized first-principles rung), the Born-Mayer
+exponential repulsive form (versus the overstiffening Born-Lande power), and the Keating covalent term (the
+named shear debt). A fitted `[C]` parameterization is not the accuracy path.
+
+The slice is byte-neutral and dormant throughout; the whole materials-oracle foundation (Ewald generator,
+charge-equilibration, the tiered modulus estimator) is on the branch, honest at its grade, with the accuracy
+path flagged rather than fitted.

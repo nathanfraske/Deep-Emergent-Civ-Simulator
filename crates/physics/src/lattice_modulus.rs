@@ -379,12 +379,23 @@ fn identify_ionic_pair(phase: &Phase, table: &PeriodicTable) -> Option<IonicPair
 /// is an exact form over measured inputs but the point-charge model is an approximation, so the honest tag is
 /// the estimator one, not `[D]`.
 ///
+/// SYSTEMATIC OXIDE BIAS (stated, gate ruling #182): this is an honest `[E]` estimator with a KNOWN,
+/// documented systematic-overestimate for stiff ionic oxides, not a hidden error. The full-formal-charge
+/// point-charge Born-Lande is accurate for the monovalent alkali halides (NaCl derives ~24.4 GPa against a
+/// measured 24 to 25, in-band) but systematically HIGH for the divalent oxides (periclase derives ~266 GPa
+/// against a measured 160 to 165, the flagged systematic-high case). The overestimate is MULTI-CAUSAL, proven
+/// by the charge-equilibration build (`crate::qeq`): (i) the full formal charge overstates the ionicity (the
+/// derive-first QEq partial charge is the estimator, but even the correct Bader charge Mg ~+1.7 only reaches
+/// ~192 GPa, still high, so the charge is one lever of three), (ii) the Born-Lande power-law repulsion
+/// overstiffens versus the Born-Mayer exponential form, and (iii) covalent overlap the point-charge model
+/// omits. The three PRINCIPLED refinements (all unbuilt, all no-fit, held for the owner's architecture ruling):
+/// the compute-once DFT/Bader charge (the amortized first-principles rung), the Born-Mayer repulsive form, and
+/// the Keating covalent term (the named shear debt). A fitted `[C]` parameterization is NOT the path.
+///
 /// The emitted `band` is the derived point-charge magnitude scaled by the RESERVED estimator fraction (surfaced,
-/// not baked): the systematic deviation of the full-formal-charge point-charge Born-Lande from measured moduli,
-/// small for monovalent halides and larger for divalent oxides (the covalency the model omits). Its basis is the
-/// empirical `B_measured / B_pointcharge` ratio across the alkali-halide and oxide validation set, a fraction the
-/// owner sets; until set the band is emitted as zero and the systematic is documented, never invented into the
-/// value.
+/// not baked): the systematic `B_measured / B_pointcharge` deviation, small for the halides and larger for the
+/// stiff oxides, a fraction the owner sets; until set the band is emitted as zero and the systematic is
+/// documented here, never invented into the value.
 pub fn phase_bulk_modulus_ionic(
     phase: &Phase,
     table: &PeriodicTable,
