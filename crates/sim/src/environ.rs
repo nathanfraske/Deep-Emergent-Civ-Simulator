@@ -2421,8 +2421,10 @@ pub struct DiurnalSky {
     pub stars: Vec<Star>,
     /// The physical stellar flux scale (W/m^2) that turns the normalised daylit insolation into an absorbed
     /// irradiance for the radiative surface-temperature baseline, so the heat path reads physical watts while
-    /// the light path stays the normalised `[0, 1]` productivity signal. RESERVED, owner-set from the real
-    /// stellar constant (Mirror = Earth's ~1361 W/m^2 solar constant).
+    /// the light path stays the normalised `[0, 1]` productivity signal. DERIVED (genesis-forward Stage 1)
+    /// from the scenario-set stellar inputs through [`crate::astro::stellar_flux`]: `L_sun *
+    /// (M_star/M_sun)^exponent / (4*pi*d^2)`. Mirror is a solar-mass star at one AU, so this is Earth's real
+    /// ~1361.17 W/m^2; an alien world's mass, distance, or exponent lands its own value.
     pub solar_constant: Fixed,
     /// The per-world atmospheric BACK-RADIATION (downwelling longwave) floor (W/m^2), the night-side irradiance
     /// a surface still absorbs when the star is down, so the night baseline is `radiative_eq(back_radiation)`
@@ -2462,6 +2464,21 @@ impl DiurnalSky {
     /// pure-diurnal cycle. `rotation_period_ticks` is the day length in ticks (from the world's own rotation
     /// period through the seconds-to-ticks bridge); `orbital_period_ticks` its year.
     pub fn reference(rotation_period_ticks: u64, orbital_period_ticks: u64) -> DiurnalSky {
+        // The STELLAR-SOURCE inputs, labelled dev fixtures surfaced for the owner (the same scenario-set
+        // standing as the obliquity and albedo below): the star's mass as a fraction of the sun, the world's
+        // orbital distance in AU, and the mass-luminosity exponent (a reserved closure-residue). The reference
+        // world is a solar-mass star at one AU, so `solar_constant` DERIVES from these through the stellar-flux
+        // kernel (Earth's real ~1361.17 W/m^2) rather than being an authored number. An alien world sets a
+        // different mass, distance, or exponent (admit-the-alien: the derivation is fixed, the inputs are data).
+        let star_mass_ratio = Fixed::ONE;
+        let orbital_distance_au = Fixed::ONE;
+        let mass_luminosity_exponent = Fixed::from_ratio(35, 10);
+        let solar_constant = crate::astro::stellar_flux(
+            star_mass_ratio,
+            mass_luminosity_exponent,
+            orbital_distance_au,
+        )
+        .expect("the stellar flux derives for a solar-mass star at one AU");
         DiurnalSky {
             rotation_period_ticks: rotation_period_ticks.max(1),
             orbital_period_ticks: orbital_period_ticks.max(1),
@@ -2470,12 +2487,13 @@ impl DiurnalSky {
                 luminosity: Fixed::ONE,
                 phase_offset: Fixed::ZERO,
             }],
-            // LABELLED DEV FIXTURES (Earth-like), the reserved heat values surfaced for the owner, not decided
-            // here: the solar constant (W/m^2), a mild atmospheric back-radiation floor, a uniform surface
-            // emissivity (the per-material floor read is the follow-on), and a representability cap. Mirror
-            // sets these to Earth's real values; an airless world sets back_radiation to zero for a Moon-like
-            // plunge. Sigma is NOT among them: it DERIVES from the CODATA fundamentals, universal, not reserved.
-            solar_constant: Fixed::from_int(1361),
+            // The stellar flux DERIVES (above) from the scenario-set stellar inputs, retiring the old inline
+            // 1361 literal. The remaining LABELLED DEV FIXTURES (Earth-like), reserved and surfaced for the
+            // owner, not decided here: a mild atmospheric back-radiation floor, a uniform surface emissivity
+            // (the per-material floor read is the follow-on), and a representability cap. Mirror sets these to
+            // Earth's real values; an airless world sets back_radiation to zero for a Moon-like plunge. Sigma
+            // is NOT among them: it DERIVES from the CODATA fundamentals, universal, not reserved.
+            solar_constant,
             back_radiation: Fixed::from_int(300),
             // The reference world is a bare blackbody (no reflection), so an unarmed-albedo world is
             // byte-identical to the pre-albedo baseline. Mirror overrides this with Earth's Bond albedo.
