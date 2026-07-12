@@ -3131,3 +3131,18 @@ WHOLE SLICE ON BRANCH (claude/materials-oracle-modulus-slice tip 0bbd81a), byte-
 
 STATE: slice finalized + signaled (comment 4953225311), ready for gate review + owner's premise ruling. Task #36 (materials oracle) effectively COMPLETE at [E] grade for this arc; the accuracy refinements are a future arc gated on the owner. Task #35 interior arming still HELD (main 48400b0, no A Stage-3c). Do NOT touch A's genesis/register/generator-arch or C's lanes.
 NEXT possible work while waiting: nothing actionable on #182 until owner rules the premise; #178 held for A. If gate/owner rules the refinements go, the Born-Mayer repulsive form is the cleanest next (retire the Born-Lande power overstiffening) and the compute-once DFT-charge rung needs the owner's amortized-tier architecture.
+
+---
+
+## 2026-07-12 (Agent B) - Materials oracle: slice APPROVED (merge held for provenance enum). Anisotropy seam RE-VALIDATED and CLOSED (#182)
+
+Gate APPROVED the slice (verified at source: 4 modules dormant/byte-neutral, oxide bias documented not hidden, no fit). MERGE HELD for ONE coordination reason: the provenance tags must bind to A's ENFORCED seven-tag enum, and A's register isn't on main yet. Sequence: A's register merges first -> I swap my placeholder tags to it (quick) -> my slice merges + passes A's Phase-2 floor gate. Gate raised the PREMISE QUESTION to the owner (does the partial charge dissolve finding 1). Gate offered: rest, or a disjoint next piece. I took the disjoint piece.
+
+DISJOINT PIECE DONE (commit a254fd9): anisotropy re-validation of the Ewald generator. ewald.rs test the_madelung_constant_holds_under_cell_anisotropy: same NaCl crystal in elongated 2x2x2*reps supercell (exact-rational z-coords) must recover 1.747565. RESULT: err <2e-6 for 1:1..6:1, bump 3.15e-5 at 8:1 (in-band), <1e-6 at 12:1. Silicates <=2:1, so >50x margin. NO anisotropy fix needed. LIMITATION note -> RESOLVED, 2:1/3:1 test guards it. Generator hardened for non-cubic phases. Signaled comment 4953244362.
+
+193 physics tests, all gates clean, byte-neutral.
+
+STATE: CLEAN REST POINT. Materials oracle foundation slice DONE + all my seams closed. Two gates NOT mine: (1) A's register enum lands -> swap placeholder provenance tags (quick change) -> merge; (2) owner rules the premise (partial charge dissolves finding 1?) -> if refinements go, Born-Mayer repulsive form is cleanest next, compute-once DFT-charge needs owner's amortized-tier architecture. Both are wait-gated. Task #35 interior arming HELD (main 48400b0, no A Stage-3c). Task #36 materials oracle effectively COMPLETE at [E] grade.
+
+BRANCH claude/materials-oracle-modulus-slice tip a254fd9: ewald.rs (Madelung kernel 1e-4 + potential matrix + anisotropy-validated), periodic.rs/toml (atomization/IE/EA [M] columns), qeq.rs (chi/eta + unbound limit + shielded SCC-DFTB QEq solve, [E]), lattice_modulus.rs (carve-2 Born-Lande [E] + oxide bias band; E_coh/V screen tier), materials_oracle.rs (E_coh/V quick-screen tier), mechanical_floor.toml (mat.elastic_modulus retirement flag). Local Provenance placeholder enums in materials_oracle.rs + qeq ChiEtaProvenance -> swap to A's enforced enum when register lands. Do NOT touch A's genesis/register/generator-arch or C's lanes.
+WHEN A'S REGISTER LANDS: swap (a) materials_oracle::Provenance enum, (b) qeq::ChiEtaProvenance, (c) any [E]/[D]/[M] doc tags -> A's enforced seven-tag enum. That's the only pre-merge change.
