@@ -38,6 +38,7 @@
 ::from_bits(	crates/sim/src/transmission.rs	1	test-fixture	a bit-scale tolerance in a transmission test
 ::from_bits(	crates/sim/src/typology.rs	1	test-fixture	a bit-exact assertion in a typology test
 ::from_bits(	crates/sim/src/world.rs	1	bit-arithmetic	a field cell average computed in bit-space (numerator over count)
+::from_bits(	crates/sim/src/nonlocal_coupling.rs	2	test-fixture	the budget-conservation test reconstructs a Fixed from the per-cell field's bit-sum to compare against the ledger's ColumnSolid balance
 ::from_bits(	crates/world/src/runout.rs	2	bit-arithmetic	saturating fixed-point add/subtract helpers rebuilding a Fixed from raw-bit saturating arithmetic (the runout integrator's determinism-safe ops), no authored value
 ::from_decimal_str(	crates/sim/src/anatomy.rs	1	dev-fixture	a decimal-parser helper for a labelled kind-fixture string argument
 ::from_decimal_str(	crates/sim/src/morphogen.rs	1	dev-fixture	a decimal-parser helper for a labelled morphogen dev-fixture string argument
