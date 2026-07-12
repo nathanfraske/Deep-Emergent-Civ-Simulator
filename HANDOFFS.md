@@ -3006,3 +3006,24 @@ TWO SEAMS I found auditing the reframe (surfaced before building):
 - Seam B: Madelung constant is exact only for a phase mapping to a seeded prototype (rock-salt, corundum); arbitrary silicate needs an Ewald sum over the structure. Gate ionic-B to prototype-mapped phases; unmapped falls through to screen tier (honest None, never fabricated A).
 
 STATE: reframe signaled (comment 4952977243), awaiting gate ruling on the floor additions + the two seams. CI re-running on bbb1e5a (fmt fix). NEXT on ruling: build the Shannon-radius column + Born-Lande B for prototype-mapped ionic phases + per-phase class key, byte-neutral, section-9, gate per push. Task #35 (interior arming) still HELD for A's 3c (main unchanged at 64da409, no crust producer landed). Do NOT touch A's genesis/register or C's momentum/world lanes.
+
+---
+
+## 2026-07-12 (Agent B) - Materials oracle REFRAME 3: generator architecture (#182). Carve-2 KEPT as AB validation, Ewald kernel next.
+
+Two more gate turns: (1) minimal-prototype foundation slice built+pushed (4152e32: lattice_modulus.rs Born-Lande ionic B, shannon_radii/born_exponents/prototypes data, prototype key). Then (2) owner delivered the GENERATOR ARCHITECTURE (origin/claude/materials-oracle-generator-arch, MATERIALS_ORACLE_GENERATOR_ARCH.md) that dissolves both my seams: Madelung = Ewald(positions) [seam 2 -> a kernel not a table], ionicity = QEq charge-equilibration solve over IE/EA columns [seam 1 -> a solve not a fork]. Then (3) gate reconciled: carve-2 is NOT wasted, it is the AB point-charge SPECIAL CASE that VALIDATES the generator (my two findings map 1:1 onto QEq and Ewald). KEEP carve-2 on the branch, do NOT revert.
+
+KEY: I briefly reverted carve-2 on the earlier "superseded" comment, then RESTORED it on the reconciling comment (net branch history clean: 4152e32 -> a26ffd5, revert never pushed). Lesson: the gate's "superseded" meant "not the final answer / don't add correction factor / don't tabulate A2B3", NOT "delete". Carve-2 stays.
+
+GATE RULINGS on carve-2:
+- Do NOT add the reserved point-charge correction factor (QEq's partial charge supplies it from IE/EA: chi=(IE+EA)/2, hardness eta=(IE-EA)/2 the free second combination). Mg comes out <+2, correcting the 266->~165 overestimate from first principles.
+- Do NOT tabulate the A2B3 Madelung (Ewald computes it over positions).
+- Carve-2 B stays the AB fast-path + validation check; E_coh/V stays screen tier; G stays named shear debt; Shannon radii feed bond-valence positions + Born-Mayer; Born exponents feed repulsion; prototype key DEMOTES to memoization index.
+- Do NOT merge carve-2 alone (point-charge oxide B known ~1.6x high). Whole slice merges once QEq gives partial-charge B.
+
+CI FIX (a26ffd5): the red "documents and prose customs" job was the CONSTRUCTOR GATE (not prose - my prose was clean). 5 inline from_decimal_str in lattice_modulus.rs. Fixed: the 2 physical law constants (14.39964 eV.A Coulomb energy, 160.2177 GPa/(eV/A^3)) now build via from_ratio (exact rational, out of the from_decimal_str hard-gate); the 3 data-loader parses classified `deserialization` in scripts/constructor_baseline.tsv. All gates green, 180 physics tests, byte-neutral.
+
+EWALD CARVE opened design-first (docs/working/MATERIALS_ORACLE_EWALD_CARVE.md): the load-bearing generator. Three-term Ewald split (real erfc / reciprocal Gaussian / self-energy), tin-foil convention for polar cells, self-validates against NaCl 1.74756 / CsCl / fluorite / corundum Madelung constants, pure mechanism no floor data, byte-neutral. ONE seam surfaced for gate ruling: fixed-point erfc + exp (not on Fixed yet; powf is precedent) by series or Abramowitz-Stegun rational, Madelung self-check = acceptance test.
+
+STATE: signaled (comment 4953055846), confirmed Ewald-next, awaiting gate ruling on the transcendental seam before building the kernel. Offered IE/EA columns as a parallel lane. CI re-running on a26ffd5.
+DEPENDENCY ORDER (architecture): Ewald kernel -> IE/EA columns + derived chi/eta -> QEq -> bond-valence positions -> energy assembly (Ewald(q)+Born-Mayer+London+Keating) -> modulus. The disposer RESOLUTION-LADDER rule is routed to A (not my build). Task #35 interior arming still HELD (main unchanged 64da409). Do NOT touch A's genesis/register/generator-arch or C's lanes.
