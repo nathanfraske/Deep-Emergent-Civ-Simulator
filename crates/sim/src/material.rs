@@ -852,6 +852,63 @@ impl EarthworkField {
     }
 }
 
+/// The per-column geodynamic interface state lives in the SHARED [`civsim_physics::geodynamics`] contract, so
+/// the surface elevation-ledger lane (here) and the interior convection lane (the geology floor) import the
+/// same typed boundary rather than a private copy; re-exported here for the resident field below.
+pub use civsim_physics::geodynamics::GeodynamicColumn;
+
+/// The sparse per-column [`GeodynamicColumn`] field, the resident interface between the interior and surface
+/// geodynamics lanes. Empty by default and off the run path until a genesis pass arms the geology, so
+/// declaring it leaves every scenario byte-identical (the opt-in empty-default pattern, the sibling of
+/// [`EarthworkField`]). A column not present reads the zero default.
+#[derive(Clone, Debug, Default)]
+pub struct GeodynamicField {
+    columns: BTreeMap<Coord3, GeodynamicColumn>,
+}
+
+impl GeodynamicField {
+    /// An empty field: no column carries geodynamic state.
+    pub fn new() -> GeodynamicField {
+        GeodynamicField::default()
+    }
+
+    /// Whether no column carries geodynamic state (the opt-out state a scenario that arms no geology stays in,
+    /// so its `state_hash` fold folds nothing and it replays bit-for-bit).
+    pub fn is_empty(&self) -> bool {
+        self.columns.is_empty()
+    }
+
+    /// The geodynamic state at a column; an unset column reads the zero default (the absence convention). The
+    /// column is the ground [`Coord3`] (`Coord3::ground(x, y)`).
+    pub fn get(&self, column: Coord3) -> GeodynamicColumn {
+        self.columns.get(&column).copied().unwrap_or_default()
+    }
+
+    /// Set a column's geodynamic state. An all-zero state is pruned to keep the canonical walk minimal, so a
+    /// column driven back to the default drops out (the same discipline as the earthwork prune).
+    pub fn set(&mut self, column: Coord3, state: GeodynamicColumn) {
+        if state == GeodynamicColumn::default() {
+            self.columns.remove(&column);
+        } else {
+            self.columns.insert(column, state);
+        }
+    }
+
+    /// Fold the field into a hash beside [`EarthworkField::hash_into`], each entry written without a length
+    /// prefix so an EMPTY field folds nothing (an unarmed geology is hash-unchanged). The `BTreeMap` walks in
+    /// canonical key order, so the fold is reproducible and thread-invariant.
+    pub fn hash_into(&self, h: &mut StateHasher) {
+        for (column, state) in &self.columns {
+            h.write_i64(column.x as i64);
+            h.write_i64(column.y as i64);
+            h.write_i64(column.z as i64);
+            h.write_fixed(state.crustal_density);
+            h.write_fixed(state.crustal_thickness);
+            h.write_fixed(state.isostatic_elevation);
+        }
+    }
+}
+
 /// The per-cell FIRE INTENSITY (material-substrate arc, cascade item 6, LIVE FIRE): the combustion energy a
 /// cell releases this tick, keyed by its [`Coord3`], sparse over the burning cells. A cell holding a
 /// combustible substance (a substance carrying `therm.fuel_value`) that stands at or above its
@@ -1945,6 +2002,66 @@ values = [
         assert!(
             p.is_empty(),
             "a geology relaxed back to baseline is the opt-out state again"
+        );
+    }
+
+    #[test]
+    fn the_geodynamic_field_carries_the_interface_state_prunes_the_default_and_folds_canonically() {
+        let mut g = GeodynamicField::new();
+        assert!(g.is_empty(), "no column carries geodynamic state at first");
+        let a = Coord3::ground(2, 3);
+        let b = Coord3::ground(5, 1);
+        // An unset column reads the zero default.
+        assert_eq!(g.get(a), GeodynamicColumn::default());
+        // The surface lane writes a crustal density; the interior lane writes the isostatic elevation and
+        // uplift; each reads the other's fields at the same column, the two-way interface.
+        let state = GeodynamicColumn {
+            crustal_density: Fixed::from_ratio(33, 10),
+            crustal_thickness: Fixed::from_int(35_000),
+            isostatic_elevation: Fixed::from_int(5),
+        };
+        g.set(a, state);
+        assert_eq!(g.get(a).crustal_density, Fixed::from_ratio(33, 10));
+        assert_eq!(g.get(a).crustal_thickness, Fixed::from_int(35_000));
+        assert_eq!(g.get(a).isostatic_elevation, Fixed::from_int(5));
+        assert!(!g.is_empty());
+        // Setting a column back to the all-zero default prunes it (the absence convention).
+        g.set(a, GeodynamicColumn::default());
+        assert!(g.is_empty(), "an all-zero state is pruned");
+        // The hash is canonical: two fields with the same states built in different orders fold identically.
+        let s1 = GeodynamicColumn {
+            crustal_density: Fixed::from_int(3),
+            crustal_thickness: Fixed::ZERO,
+            isostatic_elevation: Fixed::ZERO,
+        };
+        let s2 = GeodynamicColumn {
+            crustal_density: Fixed::ZERO,
+            crustal_thickness: Fixed::ZERO,
+            isostatic_elevation: Fixed::from_int(-1),
+        };
+        let mut c1 = GeodynamicField::new();
+        c1.set(a, s1);
+        c1.set(b, s2);
+        let mut c2 = GeodynamicField::new();
+        c2.set(b, s2);
+        c2.set(a, s1);
+        let hash = |g: &GeodynamicField| {
+            let mut h = StateHasher::new();
+            g.hash_into(&mut h);
+            h.finish()
+        };
+        assert_eq!(
+            hash(&c1),
+            hash(&c2),
+            "the fold is insertion-order-independent"
+        );
+        // An empty field folds nothing (opting out is hash-neutral).
+        let mut h = StateHasher::new();
+        GeodynamicField::new().hash_into(&mut h);
+        assert_eq!(
+            h.finish(),
+            StateHasher::new().finish(),
+            "an empty geodynamic field folds no bytes"
         );
     }
 
