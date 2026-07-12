@@ -3091,3 +3091,20 @@ STATE: awaiting gate ruling on tau source (a cited Clementi-Raimondi column vs c
 
 BUILD PLAN (on ruling): shielded gamma_ij(R) [->1/R large R, ->U at R=0], periodic (shielded Ewald or real-space), build J = diag from chi/eta + gamma off-diagonal, linear solve (Gaussian elim, deterministic fixed-point) at neutrality -> partial charges. Validate MgO: Mg q ~+1.6. Then periclase B = carve-2 Born-Lande with |q+q-| (partial) instead of formal |z+z-|=4: B_partial = B_formal*(q^2/4) ~ 266*(2.56/4) ~ 170 GPa vs measured 165. That dissolves finding 1 (the divalent overestimate) from first principles.
 NON-CUBIC anisotropy seam (ewald.rs) still flagged for the first non-cubic silicate. Task #35 interior arming HELD (main now 48400b0 = C's #181 cbrt, no A Stage-3c). Do NOT touch A's genesis/register/generator-arch or C's lanes.
+
+---
+
+## 2026-07-12 (Agent B) - Materials oracle: shielded SCC-DFTB QEq solve BUILT (tau=(16/5)U). HONEST NEGATIVE: derive-first over-ionizes MgO (#182)
+
+Gate adopted option (c) tau=(16/5)U (credited the PD5 audit). Built the full shielded QEq solve.
+
+BUILT (commit 2a1441d):
+- ewald.rs: ewald_potential_matrix -> A_ij (periodic Ewald potential; E=0.5 sum qi qj Aij cross-checked vs ewald_energy). N_REAL_SHELLS exposed.
+- qeq.rs: SCC-DFTB gamma (Elstner equal + unequal-exponent branches), tau_from_eta=32*eta/(5k) [atomic-unit (16/5) folded into eV/A so gamma(0)*k=2eta=U, verified in test], deterministic fixed-point Gaussian solver, qeq_charges (shielded periodic Gamma=k(A_ij - sum_L S) off-diag, k(A_ii - sum_{L!=0}S)+2eta diag, solved at neutrality).
+
+HONEST NEGATIVE FINDING (proven, surfaced comment 4953206048): the shielded solve is STABLE/symmetric/neutral/bounded on MgO WHERE BARE EWALD RUNS AWAY (instability catch confirmed, machinery correct). BUT derive-first params (raw-Mulliken chi/eta + 1s tau) OVER-IONIZE: Mg ~+2.08, ABOVE formal +2, not the ~+1.6 target. B~266*(2.08^2/4)~288 GPa, WORSE than formal 266 (measured 165). Reason: tau_Mg=1.70/tau_O=2.70 /A -> density size ~1/tau~0.5A << 2.12A interionic dist, so nn Coulomb only ~12% shielded, Madelung nearly fully ionizes. KNOWN QEq-on-raw-parameters behaviour (why EEM/QEq are FITTED). Clementi-Raimondi does NOT help (larger tau -> LESS shielding -> HIGHER q, wrong direction, verified). So QEq-corrects-finding-1 thesis FAILS for derive-first inputs.
+
+RULING WANTED: which tier for the oxide charge? (i) accept QEq [E] over-ionization, route finding-1 correction to compute-once DFT/Bader charge rung; (ii) [C] fitted EEM parameterization (free-knob tier register minimizes); (iii) reconsider whether partial charge is even the dominant correction (Born-Mayer-vs-Born-Lande repulsive form + covalent overlap also drive the oxide overestimate, not captured by charge alone). Did NOT fabricate a charge or add a [C] param without the gate's call.
+
+192 physics tests, all gates clean, byte-neutral.
+STATE: awaiting gate tier ruling. BRANCH 2a1441d: carve-2 lattice_modulus.rs (AB validation), ewald.rs (Madelung kernel 1e-4 + potential matrix), qeq.rs (chi/eta + unbound limit + shielded solve). The shielded QEq machinery is a keeper regardless of the tier ruling; only the oxide-charge SOURCE is open. Whole slice merges once the finding-1 correction path is ruled. Task #35 interior arming HELD (main 48400b0, no A Stage-3c). Do NOT touch A's genesis/register/generator-arch or C's lanes.
