@@ -314,6 +314,141 @@ pub fn fluid_shear(
     })
 }
 
+/// The result of one [`thermal_chemical_alter`] pass: the two limbs of in-place bedrock alteration. `dissolved`
+/// is the mass each column gives up into solution (the `ColumnSolid` to `DissolvedLoad` reservoir move the
+/// snapshot-apply reconciliation and the [`crate::surface_transport::SurfaceMassBudget`] transfer carry out).
+/// `grains_produced` is the intact bedrock each column converts to mobile grains by thermal and frost
+/// fracturing; that mass stays in the solid column (no reservoir move) but becomes the transportable stock the
+/// gravity-downslope and fluid-shear drivers entrain, so this limb is the grain SOURCE those drivers presuppose.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ThermalChemicalPass {
+    /// The mass dissolved from each column into the dissolved-load reservoir this pass (non-negative, capped at
+    /// the column's available mass).
+    pub dissolved: Vec<Fixed>,
+    /// The intact bedrock each column converts to mobile grains this pass (non-negative, capped at the column's
+    /// available mass). It stays in the solid column; it is the transportable stock, not a reservoir move.
+    pub grains_produced: Vec<Fixed>,
+}
+
+/// The THERMAL-CHEMICAL ALTERATION driver: it alters the bedrock in place and is the SOURCE the transport drivers
+/// presuppose (they move grains that something must make). It has two limbs. The DISSOLUTION limb removes mass
+/// into solution on a thermally-activated (Arrhenius) kinetic, the rate `coefficient * exp(-activation_temperature
+/// / T)`, so a hotter surface dissolves faster; that mass moves from the solid column to the dissolved-load
+/// reservoir. The FRACTURING limb produces mobile grains by thermal and frost cracking, the rate
+/// `fracture_coefficient * diurnal_range`, so a larger day-night temperature swing makes more grains; that mass
+/// stays in the solid column as the transportable stock.
+///
+/// The Arrhenius form is the general temperature dependence of a reaction rate, and the driver keys it on DATA:
+/// the `dissolution_coefficient` folds the reserved pre-factor, the solvent's chemical aggressiveness, and the
+/// lithology's solubility (surfaced separately in the driver row, armed as their product), and the
+/// `activation_temperature` is the reserved activation energy over the floor gas constant. So a non-water solvent
+/// is a data row with its own coefficient and activation temperature, not a rewrite. The honest limit the design
+/// flags stands: the Arrhenius form assumes thermally-activated kinetics, so a solvent whose dissolution is not
+/// thermally activated (a purely mechanical or a radiolytic process) needs a different kernel form (a floor
+/// extension) rather than different data alone.
+///
+/// The reserved values, surfaced-with-basis and never fabricated: `dissolution_coefficient` (the combined
+/// pre-exponential, whose factors are the cited Arrhenius pre-factor per lithology and solvent, the solvent
+/// chemical aggressiveness, and the lithology solubility), `activation_temperature` (the cited activation energy
+/// over the floor gas constant, in Kelvin), and `fracture_coefficient` (a per-material fatigue rate folded with
+/// the solvent's freeze expansion, keyed on the diurnal range). All must be non-negative; a negative is refused
+/// fail-loud ([`CalibrationError::BadValue`]), never a silent clamp. A zero coefficient is a valid inert opt-out
+/// of that limb. A non-positive temperature is refused fail-loud (Kelvin is positive, and the Arrhenius exponent
+/// divides by it).
+///
+/// Deterministic fixed-point arithmetic over the pinned integer-only `Fixed::exp` (Principle 3), a pure function
+/// of the inputs and worker-invariant (Principle 10). The fields are per-column and equal length; a mismatch is
+/// refused fail-loud.
+#[allow(clippy::too_many_arguments)]
+pub fn thermal_chemical_alter(
+    column_mass: &[Fixed],
+    temperature: &[Fixed],
+    diurnal_range: &[Fixed],
+    dissolution_coefficient: Fixed,
+    activation_temperature: Fixed,
+    fracture_coefficient: Fixed,
+) -> Result<ThermalChemicalPass, CalibrationError> {
+    for (id, v) in [
+        (
+            "surface.thermal_chemical_dissolution_coefficient",
+            dissolution_coefficient,
+        ),
+        (
+            "surface.thermal_chemical_activation_temperature",
+            activation_temperature,
+        ),
+        (
+            "surface.thermal_chemical_fracture_coefficient",
+            fracture_coefficient,
+        ),
+    ] {
+        if v < Fixed::ZERO {
+            return Err(CalibrationError::BadValue {
+                id: id.to_string(),
+                detail: format!(
+                    "the thermal-chemical rate constant must be non-negative; got {}",
+                    v.to_f64_lossy()
+                ),
+            });
+        }
+    }
+    let n = column_mass.len();
+    if temperature.len() != n || diurnal_range.len() != n {
+        return Err(CalibrationError::BadValue {
+            id: "surface.thermal_chemical_grid".to_string(),
+            detail: format!(
+                "the column_mass ({}), temperature ({}), and diurnal_range ({}) fields must be equal length",
+                n,
+                temperature.len(),
+                diurnal_range.len()
+            ),
+        });
+    }
+
+    let mut dissolved = vec![Fixed::ZERO; n];
+    let mut grains_produced = vec![Fixed::ZERO; n];
+    for i in 0..n {
+        if temperature[i] <= Fixed::ZERO {
+            return Err(CalibrationError::BadValue {
+                id: "surface.thermal_chemical_temperature".to_string(),
+                detail: format!(
+                    "the surface temperature must be positive Kelvin; cell {} is {}",
+                    i,
+                    temperature[i].to_f64_lossy()
+                ),
+            });
+        }
+        let available = if column_mass[i] > Fixed::ZERO {
+            column_mass[i]
+        } else {
+            Fixed::ZERO
+        };
+        // The Arrhenius dissolution rate: coefficient * exp(-activation_temperature / T). The exponent is a
+        // dimensionless ratio; a large barrier (cold surface) drives it toward zero rate (exp saturates).
+        let exponent = -(activation_temperature / temperature[i]);
+        let rate = dissolution_coefficient * exponent.exp();
+        dissolved[i] = if rate < available { rate } else { available };
+        // The remaining solid mass after dissolution is the stock the fracturing limb can convert to grains.
+        let after_dissolution = available - dissolved[i];
+        // Thermal and frost fracturing: linear in the diurnal range (a larger swing cracks more grains).
+        let produced = if diurnal_range[i] > Fixed::ZERO {
+            fracture_coefficient * diurnal_range[i]
+        } else {
+            Fixed::ZERO
+        };
+        grains_produced[i] = if produced < after_dissolution {
+            produced
+        } else {
+            after_dissolution
+        };
+    }
+
+    Ok(ThermalChemicalPass {
+        dissolved,
+        grains_produced,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -547,6 +682,189 @@ mod tests {
         let z = west_ramp(w, h);
         let a = fluid_shear(&z, w, h, Fixed::from_int(2), Fixed::from_ratio(1, 2)).expect("valid");
         let b = fluid_shear(&z, w, h, Fixed::from_int(2), Fixed::from_ratio(1, 2)).expect("valid");
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn a_hotter_surface_dissolves_faster_the_arrhenius_kinetic() {
+        // The Arrhenius rate rises with temperature: two cells with the same abundant column and no diurnal
+        // range, the hotter one dissolves more (exp(-activation_temperature / T) is larger for a larger T).
+        let column = vec![Fixed::from_int(100), Fixed::from_int(100)];
+        let temperature = vec![Fixed::from_int(300), Fixed::from_int(600)];
+        let no_range = vec![Fixed::ZERO, Fixed::ZERO];
+        let pass = thermal_chemical_alter(
+            &column,
+            &temperature,
+            &no_range,
+            Fixed::from_int(10),  // coefficient
+            Fixed::from_int(600), // activation temperature
+            Fixed::ZERO,          // no fracturing this test
+        )
+        .expect("valid");
+        assert!(
+            pass.dissolved[1] > pass.dissolved[0],
+            "the hotter cell dissolves faster"
+        );
+        assert!(pass.dissolved[0] > Fixed::ZERO, "some dissolution occurs");
+        assert!(pass.grains_produced.iter().all(|&g| g == Fixed::ZERO));
+    }
+
+    #[test]
+    fn a_larger_diurnal_range_produces_more_grains() {
+        // Thermal and frost fracturing is linear in the diurnal range: the cell with the wider day-night swing
+        // makes more mobile grains.
+        let column = vec![Fixed::from_int(100), Fixed::from_int(100)];
+        let temperature = vec![Fixed::from_int(288), Fixed::from_int(288)];
+        let range = vec![Fixed::from_int(5), Fixed::from_int(40)];
+        let pass = thermal_chemical_alter(
+            &column,
+            &temperature,
+            &range,
+            Fixed::ZERO,              // no dissolution this test
+            Fixed::from_int(100),     // activation temperature (unused with zero coefficient)
+            Fixed::from_ratio(1, 10), // fracture coefficient
+        )
+        .expect("valid");
+        assert!(
+            pass.grains_produced[1] > pass.grains_produced[0],
+            "the wider swing makes more grains"
+        );
+        assert!(pass.dissolved.iter().all(|&d| d == Fixed::ZERO));
+    }
+
+    #[test]
+    fn alteration_never_exceeds_the_available_column_mass() {
+        // A thin column with aggressive dissolution and fracturing: the dissolved plus the grains produced never
+        // exceeds the column, and neither limb alone over-draws it (the fail-loud cap).
+        let column = vec![Fixed::from_int(1)];
+        let temperature = vec![Fixed::from_int(1000)];
+        let range = vec![Fixed::from_int(50)];
+        let pass = thermal_chemical_alter(
+            &column,
+            &temperature,
+            &range,
+            Fixed::from_int(1000),
+            Fixed::from_ratio(1, 1),
+            Fixed::from_int(1000),
+        )
+        .expect("valid");
+        assert!(
+            pass.dissolved[0] <= Fixed::from_int(1),
+            "dissolution capped"
+        );
+        assert!(
+            pass.dissolved[0] + pass.grains_produced[0] <= Fixed::from_int(1),
+            "the two limbs together never exceed the column"
+        );
+    }
+
+    #[test]
+    fn zero_coefficients_are_inert_opt_outs_for_thermal_chemical() {
+        let column = vec![Fixed::from_int(100); 4];
+        let temperature = vec![Fixed::from_int(500); 4];
+        let range = vec![Fixed::from_int(30); 4];
+        let pass = thermal_chemical_alter(
+            &column,
+            &temperature,
+            &range,
+            Fixed::ZERO,
+            Fixed::ZERO,
+            Fixed::ZERO,
+        )
+        .expect("valid");
+        assert!(pass.dissolved.iter().all(|&d| d == Fixed::ZERO));
+        assert!(pass.grains_produced.iter().all(|&g| g == Fixed::ZERO));
+    }
+
+    #[test]
+    fn a_negative_thermal_chemical_constant_is_refused_fail_loud() {
+        let column = vec![Fixed::from_int(10)];
+        let temperature = vec![Fixed::from_int(300)];
+        let range = vec![Fixed::from_int(10)];
+        assert!(thermal_chemical_alter(
+            &column,
+            &temperature,
+            &range,
+            Fixed::from_int(-1),
+            Fixed::from_int(100),
+            Fixed::from_int(1)
+        )
+        .is_err());
+        assert!(thermal_chemical_alter(
+            &column,
+            &temperature,
+            &range,
+            Fixed::from_int(1),
+            Fixed::from_int(100),
+            Fixed::from_int(-1)
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn a_non_positive_temperature_is_refused_fail_loud() {
+        // Kelvin is positive and the Arrhenius exponent divides by it: a zero or negative temperature is a bad
+        // input, refused rather than run to a divide-by-zero.
+        let column = vec![Fixed::from_int(10)];
+        let range = vec![Fixed::from_int(10)];
+        assert!(thermal_chemical_alter(
+            &column,
+            &[Fixed::ZERO],
+            &range,
+            Fixed::from_int(1),
+            Fixed::from_int(100),
+            Fixed::from_int(1)
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn a_length_mismatch_is_refused_fail_loud_for_thermal_chemical() {
+        let column = vec![Fixed::from_int(10); 3];
+        let temperature = vec![Fixed::from_int(300); 2];
+        let range = vec![Fixed::from_int(10); 3];
+        assert!(thermal_chemical_alter(
+            &column,
+            &temperature,
+            &range,
+            Fixed::from_int(1),
+            Fixed::from_int(100),
+            Fixed::from_int(1)
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn the_thermal_chemical_pass_is_a_pure_function_of_its_inputs() {
+        let column = vec![
+            Fixed::from_int(50),
+            Fixed::from_int(80),
+            Fixed::from_int(20),
+        ];
+        let temperature = vec![
+            Fixed::from_int(280),
+            Fixed::from_int(320),
+            Fixed::from_int(400),
+        ];
+        let range = vec![Fixed::from_int(12), Fixed::from_int(8), Fixed::from_int(25)];
+        let a = thermal_chemical_alter(
+            &column,
+            &temperature,
+            &range,
+            Fixed::from_int(5),
+            Fixed::from_int(500),
+            Fixed::from_ratio(1, 4),
+        )
+        .expect("valid");
+        let b = thermal_chemical_alter(
+            &column,
+            &temperature,
+            &range,
+            Fixed::from_int(5),
+            Fixed::from_int(500),
+            Fixed::from_ratio(1, 4),
+        )
+        .expect("valid");
         assert_eq!(a, b);
     }
 }
