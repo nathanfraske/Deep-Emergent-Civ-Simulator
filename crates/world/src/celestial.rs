@@ -35,7 +35,13 @@ use civsim_core::Fixed;
 /// world and a slow world beat aging, drift, and the calendar on their own orbits rather than
 /// on a shared hardcoded year. Both fields are [`Fixed`], keeping the whole derivation
 /// float-free and deterministic (Principle 3).
-// @derives[world_time_cadence]: a world's year and day (the time cadences: aging, drift, the calendar) <- the world's own orbit in canonical world-seconds; NEVER a hardcoded 365-day year (dev_earth is a labelled fixture, not the default). North-star: derive orbital_period_seconds from Kepler's third law over (semi-major axis, star mass) rather than carrying it as a scalar.
+///
+/// This is a passthrough: the two periods are READ from the manifest, not derived here (Kepler's
+/// third law over (semi-major axis, star mass) is the north-star that would make them a derivation).
+/// So this type carries no `@derives` annotation: its `world_time_cadence` liveness lives downstream
+/// where the period becomes a tick cadence (`ticks_from_seconds` in `crates/sim/src/clock.rs`), the
+/// substantive derivation the gate probes (repointed there, #168). A probe here would be a vacuous
+/// identity, which the coverage signal's `Trivial` state is the standing guard against.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct OrbitalElements {
     /// World-seconds per orbit (the length of a year).
