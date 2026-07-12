@@ -141,6 +141,54 @@ pub fn orbital_from_manifest(m: &CalibrationManifest) -> Result<OrbitalElements,
     })
 }
 
+/// The diurnal-cycle tick periods `(rotation_period_ticks, orbital_period_ticks)` for a chosen
+/// day-sampling resolution, DERIVED from the world's own orbit rather than authored as tick counts.
+/// `ticks_per_day` is the visibility SAMPLING RATE (how many ticks render one rotation), an observer
+/// or demo choice about time resolution and NOT a world datum, so a world with any rotation renders a
+/// day in the same number of ticks. Both returned periods derive from the world's rotation and
+/// orbital periods in world-seconds through the canonical seconds-to-ticks bridge
+/// ([`ticks_from_seconds`]) at the sampling base-tick that resolution implies (`rotation_period /
+/// ticks_per_day` world-seconds per tick), so the year in ticks is the world's own days-per-year
+/// (`orbital_period / rotation_period`) times the sampling rate, never a hardcoded 365. A fast world
+/// and a slow world render their day-night and seasons on their own orbits (admit-the-alien: the
+/// orbit is the data, the sampling rate is the observer's dial). Fails loud rather than fabricating:
+/// the sampling rate must be at least one tick and the derived base-tick and periods must be positive
+/// and in fixed-point range.
+pub fn diurnal_periods_at_sampling(
+    orbital: &OrbitalElements,
+    ticks_per_day: u64,
+) -> Result<(u64, u64), CalibrationError> {
+    if ticks_per_day == 0 {
+        return Err(CalibrationError::BadValue {
+            id: "time.diurnal_sampling".to_string(),
+            detail: "the day-sampling resolution must be at least one tick".to_string(),
+        });
+    }
+    let ticks_per_day_fixed = i32::try_from(ticks_per_day)
+        .map(Fixed::from_int)
+        .map_err(|_| CalibrationError::BadValue {
+            id: "time.diurnal_sampling".to_string(),
+            detail: "the day-sampling resolution is too large to represent in fixed-point"
+                .to_string(),
+        })?;
+    // The sampling base-tick renders one rotation in `ticks_per_day` ticks: base = rotation / n
+    // world-seconds per tick. Both the day and the year then run through the same canonical bridge,
+    // so the day comes back to `ticks_per_day` and the year is that times the world's days-per-year.
+    let sampling_base_tick = orbital
+        .rotation_period_seconds
+        .checked_div(ticks_per_day_fixed)
+        .ok_or_else(|| CalibrationError::BadValue {
+            id: "time.diurnal_sampling".to_string(),
+            detail: "the sampling base-tick overflows fixed-point range for this rotation period"
+                .to_string(),
+        })?;
+    let rotation_period_ticks =
+        ticks_from_seconds(orbital.rotation_period_seconds, sampling_base_tick)?;
+    let orbital_period_ticks =
+        ticks_from_seconds(orbital.orbital_period_seconds, sampling_base_tick)?;
+    Ok((rotation_period_ticks, orbital_period_ticks))
+}
+
 /// In-world years one pre-dawn radiation generation represents, for the deep-time readout only,
 /// never canonical state. Owner-set (2026-07-01, `time.years_per_generation`) to 10_000 years, a
 /// deep speciation timescale, so the default forty-generation radiation spans about 400_000 years.
@@ -558,6 +606,58 @@ mod tests {
             ticks_from_seconds(Fixed::from_int(1), Fixed::from_int(1)).unwrap(),
             1
         );
+    }
+
+    #[test]
+    fn the_diurnal_periods_derive_from_the_orbit_at_a_chosen_sampling() {
+        // The day-night render periods are a derivation from the world's own orbit, not authored
+        // tick counts. At a 128-tick day sampling the Earth fixture reproduces exactly the tick
+        // counts the retired run_world literal wrote by hand (128 for the day, 128*365 for the year),
+        // but now the year comes out of the world's days-per-year (orbital / rotation period) rather
+        // than a hardcoded 365: the demo picks only the sampling rate, the orbit supplies the rest.
+        let earth = OrbitalElements::dev_earth();
+        let (rotation, orbit) = diurnal_periods_at_sampling(&earth, 128).unwrap();
+        assert_eq!(
+            rotation, 128,
+            "the day renders in the chosen sampling ticks"
+        );
+        assert_eq!(
+            orbit,
+            128 * 365,
+            "the year is the sampling times the world's days-per-year"
+        );
+    }
+
+    #[test]
+    fn a_different_orbit_derives_different_diurnal_periods_at_the_same_sampling() {
+        // The non-steering property: one sampling rate, two orbits, two year-lengths. A world whose
+        // year is 400 of its own days gets a 400-day year in ticks at the same day sampling, never
+        // Earth's 365, so the calendar is a property of the world's orbit. The day always renders in
+        // the sampling rate (the observer's dial), whatever the world's rotation period is.
+        let sampling = 100;
+        let alien = OrbitalElements {
+            rotation_period_seconds: Fixed::from_int(50_000),
+            orbital_period_seconds: Fixed::from_int(50_000 * 400),
+        };
+        let (rotation, orbit) = diurnal_periods_at_sampling(&alien, sampling).unwrap();
+        assert_eq!(
+            rotation, sampling,
+            "the day renders in the sampling ticks for any rotation"
+        );
+        assert_eq!(
+            orbit,
+            sampling * 400,
+            "the year is the sampling times this world's days-per-year"
+        );
+        assert_ne!(orbit, sampling * 365, "not Earth's calendar");
+    }
+
+    #[test]
+    fn the_diurnal_sampling_fails_loud_on_a_zero_rate() {
+        // A zero day-sampling would divide by zero to find the base tick: refused fail-loud rather
+        // than panicking or fabricating a period.
+        let earth = OrbitalElements::dev_earth();
+        assert!(diurnal_periods_at_sampling(&earth, 0).is_err());
     }
 
     #[test]

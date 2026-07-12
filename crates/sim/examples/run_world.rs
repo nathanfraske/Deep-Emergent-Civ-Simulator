@@ -2567,13 +2567,30 @@ fn main() {
                 env.set_producer_food(&comps);
                 // Day-night arc (arc 2): arm the diurnal insolation cycle so the light and surface temperature
                 // sweep day to night, and any rhythm a being keeps emerges from selection over those cycling
-                // physical fields, never from an authored clock. A short 128-tick "day" makes the cycle visible
-                // over the run. This is the MIRROR sky: Earth's real single sun at its real 23.44-degree axial
-                // tilt, so REAL SEASONS ride on top of the day-night through the declination term (a year is
-                // 128*365 ticks; the sub-solar latitude, and with it the poles' warmth, swings across it). The
-                // tilt is Mirror's per-world datum, not a global author. Opt-in and byte-neutral off, so the
+                // physical fields, never from an authored clock. This is the MIRROR sky: Earth's real single sun
+                // at its real 23.44-degree axial tilt, so REAL SEASONS ride on top of the day-night through the
+                // declination term (the sub-solar latitude, and with it the poles' warmth, swings across it).
+                // The tilt is Mirror's per-world datum, not a global author. Opt-in and byte-neutral off, so the
                 // four tracked determinism pins hold; only this armed scenario cycles.
-                env.arm_diurnal(civsim_sim::environ::DiurnalSky::mirror(128, 128 * 365));
+                //
+                // The two sky periods DERIVE from the world's own orbit (Stage 2, retiring the hand-written
+                // `128, 128*365` literal): the year in ticks is no longer a hardcoded 365 but the world's own
+                // days-per-year (orbital / rotation period, read from the Mirror manifest's celestial scalars)
+                // times the day sampling. The ONLY demo choice left is `DEMO_TICKS_PER_DAY`, the visibility
+                // SAMPLING RATE (how many ticks render one rotation), an observer dial for making the cycle
+                // watchable over a short run, not a world datum. For Mirror this is exactly (128, 128*365) as
+                // before (its year is 365 of its own days), so this is byte-neutral; an alien orbit would land
+                // its own calendar automatically.
+                const DEMO_TICKS_PER_DAY: u64 = 128;
+                let orbital = civsim_sim::clock::orbital_from_manifest(&manifest)
+                    .expect("the Mirror manifest carries the world's orbital scalars");
+                let (rotation_period_ticks, orbital_period_ticks) =
+                    civsim_sim::clock::diurnal_periods_at_sampling(&orbital, DEMO_TICKS_PER_DAY)
+                        .expect("the Mirror orbit yields a valid diurnal sampling");
+                env.arm_diurnal(civsim_sim::environ::DiurnalSky::mirror(
+                    rotation_period_ticks,
+                    orbital_period_ticks,
+                ));
                 // Surface turbulent cooling (surface-energy-balance arc): arm the latent and sensible loss so the
                 // surface temperature emerges from the FULL balance rather than radiation alone (closing the hot
                 // bias). `h` is the air medium's convective coefficient and `L_vap` is water's latent heat of
