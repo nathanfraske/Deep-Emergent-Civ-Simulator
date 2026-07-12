@@ -1964,6 +1964,134 @@ pub fn biomass_from(
     ])
 }
 
+/// The DERIVED photosynthesis calibration: the measured per-producer constants the carbon-fixation derivation
+/// reads (the photosynthesis-to-productivity arc, #156). Each is a per-substance MEASURED datum surfaced
+/// reserved-with-basis (Principle 11), refutable in a lab without this simulator, never an ecology knob; a
+/// different world's producer, or an evolved lineage, is a data row (admit-the-alien). These REPLACE the authored
+/// abstract-producer half-saturation constants (`productivity.water/light/temperature_requirement`).
+#[derive(Clone, Copy, Debug)]
+pub struct PhotosynthesisCalib {
+    /// The photosynthetic QUANTUM YIELD (the initial slope of the light-response curve): the fraction of
+    /// incident radiant energy fixed as chemical energy at low, light-limited irradiance. RESERVED. Basis: the
+    /// measured maximum quantum efficiency of the producer's photosystem (a C3 leaf fixes on the order of a few
+    /// percent of incident energy at low light; Taiz and Zeiger, Plant Physiology).
+    pub quantum_yield: Fixed,
+    /// The LIGHT-SATURATION IRRADIANCE (in the same physical flux units as `insolation * solar_constant`): the
+    /// irradiance at which fixation stops rising with light (the enzyme- or CO2-limited plateau begins).
+    /// RESERVED. Basis: the measured light-saturation point of the producer's photosynthesis, well below full sun
+    /// for C3 vegetation (Taiz and Zeiger; Larcher, Physiological Plant Ecology).
+    pub light_saturation: Fixed,
+    /// The carbon-fixing enzyme's THERMAL OPTIMUM (an absolute temperature): where the fixation rate peaks.
+    /// RESERVED. Basis: the measured optimum temperature of the producer's carboxylating enzyme (about 298 K for
+    /// temperate C3 vegetation; Berry and Bjorkman 1980, Annu. Rev. Plant Physiol.).
+    pub temp_optimum: Fixed,
+    /// The carbon-fixing enzyme's THERMAL BREADTH (the half-width of its thermal-performance curve): the
+    /// temperature departure from the optimum at which fixation falls to zero. RESERVED. Basis: the measured
+    /// thermal breadth of the producer's photosynthetic temperature response (Berry and Bjorkman 1980; Larcher).
+    /// The piecewise-linear TENT over (optimum, breadth) approximates the measured thermal-performance curve; the
+    /// exact Johnson-Lewin activation-times-deactivation form is reserved for when the `Fixed::exp` kernel is
+    /// canon-pinned (R-GPU-CANON-PIN), the flagged follow-on.
+    pub temp_breadth: Fixed,
+    /// The WATER-USE EFFICIENCY coupling (the water a producer must transpire per unit fixation at its potential
+    /// rate): the coefficient turning the cell's evaporative demand into the water requirement. RESERVED. Basis:
+    /// the measured transpiration efficiency of the producer (carbon fixed per water transpired; the water-use-
+    /// efficiency literature). The derived water requirement is `water_use_efficiency * evaporative_demand`,
+    /// retiring the flat `productivity.water_requirement`.
+    pub water_use_efficiency: Fixed,
+}
+
+impl PhotosynthesisCalib {
+    /// A LABELLED DEV FIXTURE standing up Earth-like C3 magnitudes for the tests and harness paths, not owner
+    /// values: a quantum yield of a twentieth (a few percent of incident energy fixed at low light), a light
+    /// saturation of 300 (well below the ~1361 stellar constant, so C3 saturates below full sun), a thermal
+    /// optimum of 298 K and a breadth of 30 K (the temperate-C3 photosynthetic temperature response), and a unit
+    /// water-use efficiency. The shipped values read from the manifest at arming; these only run in tests.
+    pub fn dev_fixture() -> PhotosynthesisCalib {
+        PhotosynthesisCalib {
+            quantum_yield: Fixed::from_ratio(1, 20),
+            light_saturation: Fixed::from_int(300),
+            temp_optimum: Fixed::from_int(298),
+            temp_breadth: Fixed::from_int(30),
+            water_use_efficiency: Fixed::ONE,
+        }
+    }
+}
+
+/// The DERIVED per-cell CARBON-FIXATION RATE (net primary productivity), the photosynthesis substrate that
+/// RETIRES the authored Liebig `biomass_from`. It is the Liebig MINIMUM (the limiting factor sets the rate, the
+/// same min-fold the biome-fit uses) over four unit-interval factors, scaled by the light-saturated ABSOLUTE
+/// rate `p_max`. The rate `p_max` is the product of the quantum yield and the light saturation, so the absolute
+/// scale DERIVES from the stellar-constant flux anchor and the measured efficiency, with no owner net-primary-
+/// productivity number. The light factor is `I / (I + light_saturation)`, the saturating light limitation, with
+/// the real irradiance `I` the normalised insolation times the solar constant, so at low light the rate follows
+/// the quantum-yield slope and at high light it saturates to `p_max`. The temperature factor is the piecewise-
+/// linear TENT `max(0, 1 - |T - optimum| / breadth)` approximating the carbon-fixing enzyme's measured thermal-
+/// performance. The water factor is the water limitation whose requirement DERIVES from the evaporative demand
+/// and the measured water-use-efficiency, retiring the flat `productivity.water_requirement`. The soil factor is
+/// the nutrient limitation over the matter-cycle fertility, retiring the flat `soil_baseline` (the lithology-
+/// mineral derivation the follow-on). Every input is floor physics (the insolation flux, the surface temperature,
+/// the evaporative demand, the matter-cycle fertility) or a measured per-producer constant, so no free ecology
+/// knob enters.
+// @derives: per-cell carbon-fixation rate / net primary productivity <- the photosynthesis light-response
+//   (quantum yield x light-saturation over the real insolation flux = normalised light x the solar_constant
+//   floor-unit pin, itself derivable from L/(4 pi d^2)), the carbon-fixing enzyme thermal-performance tent
+//   (measured optimum, breadth), the water limitation (water-use-efficiency x evaporative demand), and the
+//   soil-nutrient limitation (matter-cycle fertility). Retires the authored productivity.*_requirement and the
+//   flat soil_baseline; the measured photosynthetic constants are reserved-with-basis.
+#[allow(clippy::too_many_arguments)]
+pub fn carbon_fixation_rate(
+    insolation_normalised: Fixed,
+    solar_constant: Fixed,
+    temperature: Fixed,
+    evaporative_demand: Fixed,
+    water_supply: Fixed,
+    soil_fertility: Fixed,
+    soil_requirement: Fixed,
+    photo: &PhotosynthesisCalib,
+) -> Fixed {
+    // The real irradiance: the normalised daylit insolation scaled by the stellar-constant flux anchor.
+    let irradiance = insolation_normalised
+        .checked_mul(solar_constant)
+        .unwrap_or(Fixed::MAX);
+    // The absolute light-saturated rate: the measured quantum yield times the light-saturation irradiance, so the
+    // absolute scale derives from the flux anchor and the measured efficiency (no owner NPP number).
+    let p_max = photo
+        .quantum_yield
+        .checked_mul(photo.light_saturation)
+        .unwrap_or(Fixed::MAX);
+    // light_fraction = I / (I + I_sat), the saturating light limitation in [0, 1].
+    let denom = irradiance.saturating_add(photo.light_saturation);
+    let light_fraction = if denom > Fixed::ZERO {
+        irradiance.div(denom).clamp(Fixed::ZERO, Fixed::ONE)
+    } else {
+        Fixed::ZERO
+    };
+    // temp_factor: the piecewise-linear tent over the enzyme optimum and breadth (a zero breadth reads a
+    // knife-edge, non-optimum temperatures fixing nothing).
+    let temp_factor = if photo.temp_breadth > Fixed::ZERO {
+        let dist = (temperature - photo.temp_optimum).abs();
+        (Fixed::ONE - dist.div(photo.temp_breadth)).clamp(Fixed::ZERO, Fixed::ONE)
+    } else if temperature == photo.temp_optimum {
+        Fixed::ONE
+    } else {
+        Fixed::ZERO
+    };
+    // water_factor: the water limitation, its requirement derived from the evaporative demand and the WUE.
+    let water_req = photo
+        .water_use_efficiency
+        .checked_mul(evaporative_demand)
+        .unwrap_or(Fixed::MAX);
+    let water_factor = laws::satisfaction(water_supply, Fixed::ONE, Some(water_req));
+    // soil_factor: the nutrient limitation over the matter-cycle fertility.
+    let soil_factor = laws::satisfaction(soil_fertility, Fixed::ONE, Some(soil_requirement));
+    // The Liebig minimum over the four factors, scaled by the absolute light-saturated rate.
+    let limiting = light_fraction
+        .min(temp_factor)
+        .min(water_factor)
+        .min(soil_factor);
+    p_max.checked_mul(limiting).unwrap_or(Fixed::ZERO)
+}
+
 /// The standing food VOLUME implied by a cell's food supplies and its fixed producer composition (T3): the
 /// Liebig MINIMUM over the composition's axes of `supply / density`, so the axes stay in the fixed ratio and
 /// a grazer that depleted one axis has shrunk the WHOLE plant's volume (never N axes drifting apart into
@@ -2660,6 +2788,81 @@ mod tests {
             biomass_from(Fixed::ZERO, Fixed::ONE, Fixed::ONE, Fixed::ONE, &c),
             Fixed::ZERO,
             "a cell with no water grows nothing"
+        );
+    }
+
+    #[test]
+    fn carbon_fixation_derives_from_the_photosynthesis_physics_and_the_measured_constants() {
+        // The derived carbon-fixation rate (the photosynthesis-to-productivity arc, #156): productivity is a
+        // measured rate from the cell's own physical fields and the producer's measured enzyme data, not an
+        // authored per-cell number. Every assertion checks a physics behaviour, none a fitted magnitude.
+        let p = PhotosynthesisCalib::dev_fixture(); // C3-like: quantum yield 1/20, saturation 300, opt 298 K, breadth 30 K
+        let sun = Fixed::from_int(1361); // the stellar-constant flux anchor (Earth's measured solar constant)
+        let opt = Fixed::from_int(298); // the enzyme thermal optimum
+                                        // At the optimum temperature, well-watered and fertile, fixation RISES with insolation and SATURATES
+                                        // (the light-response curve): the increment from a tenth to a half of full sun exceeds the increment from
+                                        // a half to full sun, so the curve is concave, never linear.
+        let fix = |insol: Fixed, temp: Fixed, evap: Fixed, water: Fixed, soil: Fixed| {
+            carbon_fixation_rate(
+                insol,
+                sun,
+                temp,
+                evap,
+                water,
+                soil,
+                Fixed::from_ratio(1, 2),
+                &p,
+            )
+        };
+        let full = Fixed::ONE;
+        let ample = Fixed::from_int(10); // abundant water and soil supply, so light and temperature limit
+        let lo = fix(Fixed::from_ratio(1, 10), opt, Fixed::ZERO, ample, ample);
+        let mid = fix(Fixed::from_ratio(1, 2), opt, Fixed::ZERO, ample, ample);
+        let hi = fix(full, opt, Fixed::ZERO, ample, ample);
+        assert!(
+            lo < mid && mid < hi,
+            "fixation rises with insolation: {lo:?} {mid:?} {hi:?}"
+        );
+        assert!(
+            (mid - lo) > (hi - mid),
+            "the light-response saturates (concave), not linear: {lo:?} {mid:?} {hi:?}"
+        );
+        // The temperature TENT peaks at the enzyme optimum and falls away: the optimum fixes more than a cell 20 K
+        // colder, and a cell a full breadth (30 K) off the optimum fixes NOTHING (the tent floor).
+        let at_opt = fix(full, opt, Fixed::ZERO, ample, ample);
+        let cold = fix(full, Fixed::from_int(278), Fixed::ZERO, ample, ample);
+        let too_hot = fix(full, Fixed::from_int(328), Fixed::ZERO, ample, ample);
+        assert!(
+            cold < at_opt,
+            "the optimum fixes more than a colder cell: {cold:?} vs {at_opt:?}"
+        );
+        assert_eq!(
+            too_hot,
+            Fixed::ZERO,
+            "a cell a full thermal breadth past the optimum fixes nothing (the enzyme is out of band)"
+        );
+        // The WATER limitation: a higher evaporative demand raises the derived water requirement, so a cell with
+        // the same water supply but a drier atmosphere fixes LESS (the water-use-efficiency coupling), never a
+        // flat authored requirement.
+        let humid = fix(full, opt, Fixed::from_int(1), Fixed::ONE, ample);
+        let arid = fix(full, opt, Fixed::from_int(20), Fixed::ONE, ample);
+        assert!(
+            arid < humid,
+            "a drier atmosphere (higher evaporative demand) fixes less: {arid:?} vs {humid:?}"
+        );
+        // The SOIL-nutrient limitation over the matter-cycle fertility: a nutrient-poor cell fixes less than a
+        // fertile one (the Liebig soil factor, retiring the flat soil_baseline).
+        let poor = fix(full, opt, Fixed::ZERO, ample, Fixed::from_ratio(1, 10));
+        let fertile = fix(full, opt, Fixed::ZERO, ample, ample);
+        assert!(
+            poor < fertile,
+            "a nutrient-poor cell fixes less: {poor:?} vs {fertile:?}"
+        );
+        // Determinism (Principle 3): a pure function of its physical inputs, bit-identical on replay.
+        assert_eq!(
+            hi,
+            fix(full, opt, Fixed::ZERO, ample, ample),
+            "the derivation is deterministic"
         );
     }
 
