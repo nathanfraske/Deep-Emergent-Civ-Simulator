@@ -86,3 +86,40 @@ assumed; the CI run confirms the pins.
 It does not arm any scenario (that is #175, gate-sequenced with A). It does not touch the surface lane's
 `crustal_density` production (A's) or the ledger redistribution (C's #174). It extends `GeodynamicColumn`
 only additively, on the gate's ruling of the field set. No build until the gate rules the three seams.
+
+## Gate rulings applied, and the build status
+
+The gate ruled all three seams (#176); seams 1 and 2 stand, seam 3 was corrected by the owner toward
+derive-first.
+
+- **Seam 1 (built):** the additive `GeodynamicColumn` fields are CONTINUOUS: `temperature`,
+  `convective_stress`, and `rayleigh`, each `Default`-zero. No stored `convecting` flag: the discrete
+  condition is derived from the Rayleigh number against the critical value (a false prior latch makes the
+  onset reversible, so a cooling column can cease convecting). `column_readout` exposes the three continuous
+  quantities; the wiring stores them.
+- **Seam 2 (built):** the boundary is snapshot-apply. `populate_interior_column` reads only the start-of-tick
+  snapshot (the resident temperature and the surface lane's `crustal_density`), so the boundary is
+  order-independent, no cross-lane evaluation order pinned; the one-tick feedback lag is the owner-accepted
+  determinism cost. `step_interior_field` folds the snapshot in canonical `Coord3` order and yields an empty
+  field over an unarmed geology (byte-neutral).
+- **Seam 3 (corrected to derive-first; the bridge is built, two completions flagged):** `mantle_density` is
+  NOT authored. `derive_mantle_density` threads A's petrology kernel (`crustal_density`, a general
+  composition-to-density derivation) over the world's mantle COMPOSITION at the mantle temperature (the
+  interior heat chain's own thermal state) and pressure, so the density is what the material is under its
+  conditions. Two completions are flagged, not silently authored: (a) the mantle COMPOSITION datum (Mirror's
+  peridotite in the Mg-Fe-Si-O system, with citation) and the lithostatic-pressure derivation with a
+  reference-pressure first pass for the density-pressure self-consistency, which arrive with the arming
+  (sequenced with A's #175); (b) the `convective_stress` boundary-layer shear length, which the owner ruled
+  derives as `depth * Ra^(-1/3)`, needs the deterministic fixed-point fractional-power primitive (task #45,
+  not yet built), so the layer depth stands in as the reference-pass value until #45 lands. The
+  truly-per-world inputs shrink to COMPOSITION and planetary GEOMETRY; every density, boundary layer, and
+  stress derives.
+
+Also noted for A (not changed here): A's `crustal_density` is not crust-specific (it is a general
+composition-to-density derivation), so a neutral name like assemblage-density-at-conditions would read
+truer; surfaced for A, not renamed across the shared contract unilaterally.
+
+Byte-neutral throughout: the wiring and the extended fields are armed by no scenario, and the resident field
+folds nothing while empty, so the four pins hold. What is built is the structural wiring and the derive-first
+density bridge; the arming (with #175) and the two seam-3 completions (the composition datum plus P-T
+self-consistency, and the `#45`-blocked boundary-layer refinement) are the sequenced follow-ons.

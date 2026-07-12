@@ -135,6 +135,7 @@ mod tests {
                 crustal_density: Fixed::from_ratio(27, 10),
                 crustal_thickness: Fixed::from_int(35_000),
                 isostatic_elevation: target,
+                ..GeodynamicColumn::default()
             },
         );
         let observed = relax_toward_isostasy(&mut earthwork, &geo, flat_base, Fixed::ONE)
@@ -211,6 +212,7 @@ mod tests {
                 crustal_density: Fixed::from_ratio(265, 100),
                 crustal_thickness: thickness,
                 isostatic_elevation: felsic_target,
+                ..GeodynamicColumn::default()
             },
         );
         geo.set(
@@ -219,6 +221,7 @@ mod tests {
                 crustal_density: Fixed::from_ratio(300, 100),
                 crustal_thickness: thickness,
                 isostatic_elevation: mafic_target,
+                ..GeodynamicColumn::default()
             },
         );
         relax_toward_isostasy(&mut earthwork, &geo, flat_base, Fixed::ONE).expect("valid fraction");
