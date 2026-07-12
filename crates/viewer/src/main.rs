@@ -26,8 +26,11 @@
 //! Controls: arrow keys or WASD pan, `+`/`-` (or `=`/`-`) zoom in and out, `Home` recentres,
 //! `Esc` or the window close button quits. Zooming in past the whole-tile view enters the
 //! superfine, where organisms are drawn as marks coloured by kind (plants green, herbivores
-//! amber, carnivores red). The window is an observer: it reads the living world and never
-//! writes it (Principle 10), so the same seed always shows the same world and biosphere.
+//! amber, carnivores red). Zooming OUT past the whole-world overview enters the outer,
+//! powers-of-ten tiers: first the planet as a single downsampled globe, then, further out, the
+//! solar system (the star at the centre, the orbit line, and the planet as a dot moving along it
+//! as sim time advances). The window is an observer: it reads the living world and never writes
+//! it (Principle 10), so the same seed always shows the same world and biosphere.
 
 mod render;
 
@@ -52,6 +55,20 @@ const SUPERFINE_LEVELS: u32 = 4;
 /// The default live playback speed, in radiation generations per real second. A view-side
 /// default the observer speeds up or slows down from; it never touches canonical state.
 const DEFAULT_GEN_RATE: f64 = 4.0;
+/// How the outer, powers-of-ten zoom shrinks the on-screen whole-surface scale per zoom-out step
+/// past the whole-world overview. A view constant chosen for a smooth zoom rather than a strict
+/// decade: each `-` beyond the overview multiplies the whole-surface pixels-per-cell by this
+/// factor, so the planet disc, then the solar system, come into view continuously.
+const OUT_ZOOM_SHRINK: f64 = 2.0 / 3.0;
+/// The deepest outer zoom-out step, so the whole-surface scale cannot underflow to nothing.
+const OUT_ZOOM_MAX: u32 = 16;
+/// Real seconds for one full orbit of the solar-system view at the default playback rate. A
+/// view-side animation pace (Principle 10: nothing in the sim reads it); the orbit turns faster
+/// when the observer speeds the playback up and freezes when it is paused. See the note at the
+/// orbit-clock in `main` for why the deep-time radiation clock cannot itself resolve an orbit.
+const DISPLAY_ORBIT_SECONDS: f64 = 14.0;
+/// The star's colour in the solar-system view: a bright yellow-white. Presentation only.
+const SUN_COLOR: Rgb = Rgb::new(255, 240, 200);
 
 /// The selector readout for a tile's occupants: the selected creature inspected in full (its
 /// derived trophic label, temperament, natural weapons, covering, and senses, named from the
@@ -429,6 +446,29 @@ fn main() {
     let home = Coord3::ground(width / 2, height / 2);
     let mut cam = Camera::new(home, 0);
     let mut zoom: u32 = 0;
+    // The outer, powers-of-ten zoom: 0 is the cell surface (unchanged), and each zoom-out step past
+    // the whole-world overview raises this, shrinking the on-screen surface into the planet disc,
+    // then the solar system. The surface path is byte-identical to before while `out_zoom` is 0.
+    let mut out_zoom: u32 = 0;
+    // The planet's disc colour is the downsample (average) of the surface map, computed once: the
+    // terrain (and so its average colour) is fixed, only the occupants change as the ecology
+    // radiates. A pure read of canon (Principle 10).
+    let planet_color = render::average_terrain_color(&living);
+    // The globe's cell diameter (the larger map axis), so the whole map fits inside the disc.
+    let world_cells = width.max(height).max(1) as f64;
+    // The world's year in world-seconds, read from canon for the orbital-angle law. It is a
+    // display read only; nothing is written back (Principle 10).
+    let orbital_period = living.orbital.orbital_period_seconds.to_f64_lossy();
+    // A view-side clock that turns the orbit dot. The deep-time radiation advances in whole
+    // generations of YEARS_PER_GENERATION years each, far coarser than one orbit (one year), so the
+    // true within-year orbital phase is not resolvable from the deep-time clock: at every generation
+    // the planet would sit back at the same phase. This clock instead tracks the observer watching
+    // time pass (it advances while the playback runs, freezes when paused, and speeds up with the
+    // playback rate), so the dot visibly orbits as sim time advances. When the fine, tick-based
+    // world-seconds clock (or the real orbital elements) is wired in, feed the true elapsed
+    // world-seconds and true period to `render::planet_orbit_angle` and drop this presentation
+    // clock. Instant-based, but nothing in the sim reads it, so determinism is untouched.
+    let mut orbit_clock: f64 = 0.0;
 
     // Demo mode zooms into the populated tile nearest the map centre and self-closes.
     let start = std::time::Instant::now();
@@ -468,6 +508,15 @@ fn main() {
             }
         }
 
+        // Turn the solar-system orbit dot (view only). It moves while the observer is watching time
+        // pass: always in demo mode, and while the interactive playback is running (frozen when
+        // paused, faster when sped up). Nothing in the sim reads this (Principle 10).
+        if demo_secs.is_some() {
+            orbit_clock += frame_dt;
+        } else if !driver.is_paused() {
+            orbit_clock += frame_dt * (driver.rate() / DEFAULT_GEN_RATE);
+        }
+
         let depth = tree.depth();
         if let Some(total) = demo_secs {
             let t = start.elapsed().as_secs_f32();
@@ -480,8 +529,11 @@ fn main() {
             zoom = ((frac * (max_zoom as f32 + 0.999)) as u32).min(max_zoom);
             cam.center = target_center;
         } else {
-            // Pan by one node in the overview, one tile in the superfine, so panning is steady.
-            let step = if zoom <= depth {
+            // Pan by one node in the overview, one tile in the superfine, so panning is steady. In
+            // the outer tiers the whole planet is centred, so panning is a no-op there.
+            let step = if out_zoom > 0 {
+                0
+            } else if zoom <= depth {
                 tree.node_side(zoom)
             } else {
                 1
@@ -505,10 +557,26 @@ fn main() {
 
             for k in window.get_keys_pressed(KeyRepeat::No) {
                 match k {
-                    Key::Equal | Key::NumPadPlus => zoom = (zoom + 1).min(max_zoom),
-                    Key::Minus | Key::NumPadMinus => zoom = zoom.saturating_sub(1),
+                    // Zoom in climbs back out of the outer tiers first, then sharpens the surface,
+                    // so the zoom-in path is unchanged once `out_zoom` is 0. Zoom out sharpens down
+                    // to the whole-world overview, then steps into the outer, powers-of-ten tiers.
+                    Key::Equal | Key::NumPadPlus => {
+                        if out_zoom > 0 {
+                            out_zoom -= 1;
+                        } else {
+                            zoom = (zoom + 1).min(max_zoom);
+                        }
+                    }
+                    Key::Minus | Key::NumPadMinus => {
+                        if zoom == 0 {
+                            out_zoom = (out_zoom + 1).min(OUT_ZOOM_MAX);
+                        } else {
+                            zoom = zoom.saturating_sub(1);
+                        }
+                    }
                     Key::Home => {
                         zoom = 0;
+                        out_zoom = 0;
                         cam.center = home;
                     }
                     // Time control: space pauses, `.` and `,` speed up and slow down, `n` steps
@@ -537,36 +605,137 @@ fn main() {
         }
 
         let level = zoom.min(depth);
-        let (mut buf, cell_px, side, mode) = if zoom <= depth {
-            (
-                cam.paint(&tree, &biomes, win_w, win_h, CELL, BG),
-                CELL as i32,
-                tree.node_side(level),
-                format!("overview {zoom}/{depth}"),
-            )
+        // The outer, powers-of-ten zoom scale: on-screen pixels per world cell of the whole-surface
+        // projection, halving toward nothing as the observer pulls back. `out_zoom` 0 leaves the
+        // scale at 1.0 (the surface, drawn exactly as before); each step past the overview shrinks
+        // it into the planet disc, then the solar system.
+        let surface_scale = OUT_ZOOM_SHRINK.powi(out_zoom as i32);
+        let lod = render::lod_for_scale(surface_scale);
+        let outer = out_zoom > 0;
+        // The orbit dot's angle, from the view-side orbit clock and the world's own year. The
+        // period cancels in the display pace but is read from canon and passed through the same law
+        // the real orbital elements will use, so the seam is honest.
+        let planet_angle = render::planet_orbit_angle(
+            orbit_clock * orbital_period / DISPLAY_ORBIT_SECONDS,
+            orbital_period,
+        );
+        let (mut buf, cell_px, side, mode) = if !outer {
+            if zoom <= depth {
+                (
+                    cam.paint(&tree, &biomes, win_w, win_h, CELL, BG),
+                    CELL as i32,
+                    tree.node_side(level),
+                    format!("overview {zoom}/{depth}"),
+                )
+            } else {
+                let sf = zoom - depth; // 1..=SUPERFINE_LEVELS
+                let tile_px = (6 + 6 * sf) as i32;
+                (
+                    render::superfine(
+                        &living,
+                        &biomes,
+                        cam.center,
+                        tile_px as usize,
+                        win_w,
+                        win_h,
+                        BG,
+                    ),
+                    tile_px,
+                    1,
+                    format!("superfine {sf} ({tile_px}px/tile)"),
+                )
+            }
         } else {
-            let sf = zoom - depth; // 1..=SUPERFINE_LEVELS
-            let tile_px = (6 + 6 * sf) as i32;
-            (
-                render::superfine(
-                    &living,
-                    &biomes,
-                    cam.center,
-                    tile_px as usize,
-                    win_w,
-                    win_h,
-                    BG,
-                ),
-                tile_px,
-                1,
-                format!("superfine {sf} ({tile_px}px/tile)"),
-            )
+            // The outer tiers: the whole planet as a disc, then the solar system around it. The
+            // planet's on-screen pixel size (`surface_scale * world_cells`) shrinks smoothly across
+            // both, and in the solar tier the sun and orbit grow from nothing as the view pulls
+            // back, so the reveal is continuous.
+            let cx = (win_w / 2) as i32;
+            let cy = (win_h / 2) as i32;
+            match lod {
+                render::Lod::SolarSystem => {
+                    let min_dim = win_w.min(win_h) as f64;
+                    // How far past the solar threshold we are: 0 at the boundary, growing toward 1.
+                    let t = ((render::SOLAR_SCALE - surface_scale) / render::SOLAR_SCALE)
+                        .clamp(0.0, 1.0);
+                    let orbit_r = (t * 0.40 * min_dim).round() as usize;
+                    let sun_r = (t * 0.06 * min_dim).round() as usize;
+                    let planet_r = (surface_scale * world_cells * 0.5).round().max(2.0) as usize;
+                    let mut b = render::solar_system(
+                        planet_color,
+                        SUN_COLOR,
+                        sun_r,
+                        orbit_r,
+                        planet_r,
+                        planet_angle,
+                        win_w,
+                        win_h,
+                        BG,
+                    );
+                    // Cheap labels: the star at the focus, the planet on its orbit.
+                    if sun_r > 6 {
+                        render::draw_label(
+                            &mut b,
+                            win_w,
+                            win_h,
+                            cx - 10,
+                            cy - sun_r as i32 - 14,
+                            "SUN",
+                            1,
+                            Rgb::new(255, 240, 200),
+                            Rgb::new(24, 20, 8),
+                        );
+                    }
+                    let (px, py) = render::planet_orbit_xy(cx, cy, orbit_r, planet_angle);
+                    render::draw_label(
+                        &mut b,
+                        win_w,
+                        win_h,
+                        px + planet_r as i32 + 3,
+                        py - 3,
+                        "PLANET",
+                        1,
+                        Rgb::new(220, 230, 245),
+                        Rgb::new(10, 12, 22),
+                    );
+                    (b, 1i32, 1i32, format!("solar-system (out {out_zoom})"))
+                }
+                _ => {
+                    // Planet tier (and the safe fall-through): the whole surface as one globe.
+                    let diameter = (surface_scale * world_cells).round().max(6.0) as usize;
+                    let mut b = render::planet_disk(planet_color, diameter, win_w, win_h, BG);
+                    render::draw_label(
+                        &mut b,
+                        win_w,
+                        win_h,
+                        cx - 18,
+                        cy + (diameter / 2) as i32 + 5,
+                        "PLANET",
+                        1,
+                        Rgb::new(220, 230, 245),
+                        Rgb::new(10, 12, 22),
+                    );
+                    (b, 1i32, 1i32, format!("planet (out {out_zoom})"))
+                }
+            }
         };
 
         // The tile selector: outline the hovered cell and read out what is under it. In demo
-        // mode there is no mouse, so point at the centre of the window (the target tile).
-        let mut detail = "point at a tile".to_string();
-        let mouse = if demo_secs.is_some() {
+        // mode there is no mouse, so point at the centre of the window (the target tile). The
+        // outer tiers have no cells, so the selector is skipped there.
+        let mut detail = if outer {
+            match lod {
+                render::Lod::SolarSystem => {
+                    "solar system: the star, the orbit, the planet as a dot".to_string()
+                }
+                _ => "planet: the whole surface as a globe".to_string(),
+            }
+        } else {
+            "point at a tile".to_string()
+        };
+        let mouse = if outer {
+            None
+        } else if demo_secs.is_some() {
             Some((win_w as f32 / 2.0, win_h as f32 / 2.0))
         } else {
             window.get_mouse_pos(MouseMode::Discard)
@@ -678,7 +847,7 @@ fn main() {
                 win_h,
                 4,
                 20,
-                "space pause  . faster  , slower  n step  +/- zoom  wasd pan",
+                "space pause  . faster  , slower  n step  +/- zoom (out: planet, solar)  wasd pan",
                 1,
                 Rgb::new(170, 180, 200),
                 Rgb::new(10, 12, 20),
