@@ -188,8 +188,23 @@ drain ratio can name the founder-starvation lever (metabolic draw, gathering rat
 than only saying the reserve floors out. The gate's PD1 on the conclusion holds and is now visible in the
 data: on the current soil-deadlocked `living` (food near zero) the ENERGY axis reads gather 0.0000 versus
 burn 999.0000, which confirms the reserve floors out but cannot separate "no food" from "cannot use food"
-on its own. The DEFINITIVE localization is the same readout re-run with FOOD PRESENT (B's matter-cycle
-fix, or a throwaway fertility seed coordinated with B so the same file is not hacked twice): if the ENERGY
-reserve still floors at starvation with abundant food and gather stays below burn, that is the clean
-survival-window signal and the gather-versus-burn ratio names which of the three levers. Byte-neutral
-still: all the new flow accumulators and the readout are `#[cfg(debug_assertions)]`, the five pins hold.
+on its own.
+
+The definitive food-present run is done (B's matter-cycle completion landed on main, #156, arming
+photosynthesis productivity and mineral weathering so the marsh is food-present on `living`). The readout
+rebased onto that main and re-run gives the decisive split: it is a MECHANISM, not the owner's
+calibration. Food is abundant (the carrying-capacity reader shows standing food about 980, roughly 20 to
+100 food per being, mean productivity about 1.0), yet the founders die of starvation (population 44 to 30
+to 10, cause of death starvation), and the ENERGY gather is 0.0000 EXACTLY while burn is 280 to 734. A
+gather of exactly zero with abundant food is not a scaled anchor factor (the dropped `food_energy_density`
+calibration would give a small nonzero gather, roughly burn over 125 to burn over 3000); it is total, so
+the survival window is a mechanism, and B's #42 fix is a derive-clean mechanism rather than a reserved
+value. The traced candidate locus: the energy reserve gains through exactly one path (forage or bite to
+`Homeostasis::ingest` to `Stock::deposit`, both instrumented), and it fires ZERO times for energy, while
+the abundant standing food lives in the RESOURCE field (`Embodiment::resources`, `bio.energy_density`,
+which the founders perceive for the forage taxis) and the forage INGEST reads the MATERIAL field for the
+energy-backing substance (`self.material.volume(coord, ENERGY_DENSITY)`), so the producer food is not
+landing as forage-able material of the energy-backing substance at the grazers' cells and never converts
+to reserve energy. B (who owns #42) confirms the exact break. Byte-neutral still: all the flow
+accumulators and the readout are `#[cfg(debug_assertions)]`, so the five pins hold (the four canonical at
+`40fe8a72`/`d05a6488`/`9a28f113`/`967b22bd`, living at the post-#156 `7b5b6446`).
