@@ -79,7 +79,7 @@ pub const LIFE_CADENCE_TICKS: u64 = 31_536_000;
 /// must both be positive, the quotient must stay in fixed-point range, and the floored result
 /// must be at least one tick (a span shorter than one base tick would beat every tick).
 // @derives[clock_calendar_cell]: a world's year/day/season in TICKS, and the cell area in metres <- the world's orbit (world-seconds) divided by the base tick (1 tick = 1 world-second, reserved). The calendar is NOT a hardcoded 365 days; it falls out of the orbit and the tick. The cell edge derives as a reference creature's real ground speed (m/s) x 1 s/tick (see locomotion base_speed), cross-checked by NPP density x cell area = standing crop.
-// @derives[world_time_cadence]: the time cadences (aging, drift, the calendar) in TICKS <- the same orbit-over-base-tick floored division; repointed here off the celestial.rs passthrough (OrbitalElements is a manifest read, not a derivation), so the world_time_cadence liveness is probed where the period becomes a real tick cadence (gate ruling, #168). Shares this substantive kernel with clock_calendar_cell.
+// @derives[world_time_cadence]: the DAY cadence in TICKS (the rotation-derived beat: aging, drift, the diurnal calendar) <- the ROTATION period floored over the base tick, this same kernel; repointed here off the celestial.rs passthrough (OrbitalElements is a manifest read, not a derivation) and differentiated from clock_calendar_cell (which floors the ORBITAL period, the year), so the two temporal cadences are distinct derivations, day versus year (gate ruling, #168). The rotation cadence is real on the run path: DiurnalSky::rotation_period_ticks drives the diurnal cycle.
 pub fn ticks_from_seconds(
     seconds: Fixed,
     base_tick_seconds: Fixed,

@@ -131,12 +131,14 @@ impl RetiredFloorDerivationRegistry {
 const CANONICAL: &[(&str, &str, &[&str], &str, &str)] = &[
     (
         "world_time_cadence",
-        "a world's year and day (the aging, drift, and calendar cadences)",
-        &["world.orbital_period_seconds"],
-        "default",
+        "a world's DAY cadence in ticks (the rotation-derived beat: aging, drift, the diurnal calendar)",
         // Repointed off the celestial.rs passthrough (OrbitalElements reads the period straight
-        // through, so a probe there is a vacuous identity) to the substantive downstream derivation:
-        // ticks_from_seconds floors the period over the base tick, the real cadence (gate ruling, #168).
+        // through, a vacuous identity probe) to the substantive downstream derivation, AND
+        // differentiated from clock_calendar_cell: this row floors the ROTATION period (the day),
+        // clock_calendar_cell the ORBITAL period (the year), so the two temporal cadences are distinct
+        // derivations sharing the ticks_from_seconds kernel (gate ruling, #168).
+        &["world.rotation_period_seconds"],
+        "default",
         "crates/sim/src/clock.rs",
     ),
     (
@@ -260,9 +262,11 @@ pub type LivenessProbe = fn(&CalibrationManifest) -> Result<ProbeReading, String
 pub fn liveness_probe(id: &str) -> Option<LivenessProbe> {
     match id {
         "carbon_fixation_rate" => Some(probe_carbon_fixation_rate),
-        // The tick cadence is the substantive derivation both the clock and the world-time rows
-        // resolve to (`ticks_from_seconds` over the orbital period): one probe, two ids.
-        "clock_calendar_cell" | "world_time_cadence" => Some(probe_tick_cadence),
+        // The two temporal cadences are distinct derivations sharing the `ticks_from_seconds` kernel:
+        // the calendar row floors the ORBITAL period (the year), the world-time row the ROTATION
+        // period (the day). Different inputs, so different probes (gate ruling, #168).
+        "clock_calendar_cell" => Some(probe_year_cadence),
+        "world_time_cadence" => Some(probe_day_cadence),
         "metabolic_rate" => Some(probe_metabolic_rate),
         "productivity_capacity" => Some(probe_productivity_capacity),
         _ => None,
@@ -353,33 +357,54 @@ fn probe_carbon_fixation_rate(m: &CalibrationManifest) -> Result<ProbeReading, S
     })
 }
 
-/// The tick-cadence probe (serves `clock_calendar_cell` and `world_time_cadence`): the world's year
-/// in ticks must respond to `world.orbital_period_seconds`. `ticks_from_seconds` floors the orbital
-/// period over the base tick, a non-trivial floored division (distinct from the raw period read the
-/// world-time row was repointed off), so doubling the period moves the tick count. The count is a
-/// `u64`; it is read into [`Fixed`] for the two-point comparison, which is exact for any realistic
-/// cadence (well under the fixed-point integer range).
-fn probe_tick_cadence(m: &CalibrationManifest) -> Result<ProbeReading, String> {
-    use crate::clock::{base_tick_seconds_fixed, orbital_from_manifest, ticks_from_seconds};
-    let base_tick = base_tick_seconds_fixed(m).map_err(|e| format!("tick_cadence probe: {e}"))?;
-    let orbit = orbital_from_manifest(m).map_err(|e| format!("tick_cadence probe: {e}"))?;
-    let year_ticks = |seconds: Fixed| -> Result<Fixed, String> {
+/// The shared tick-cadence probe body: floor a temporal period over the base tick and assert the tick
+/// count responds to the period. `ticks_from_seconds` is a non-trivial floored division (distinct from
+/// the raw period read the world-time row was repointed off), so doubling the period moves the count.
+/// The count is a `u64`, read into [`Fixed`] for the two-point comparison, exact for any realistic
+/// cadence (well under the fixed-point integer range). `label` names the cadence in error text.
+fn probe_tick_cadence(
+    m: &CalibrationManifest,
+    label: &str,
+    period: Fixed,
+) -> Result<ProbeReading, String> {
+    use crate::clock::{base_tick_seconds_fixed, ticks_from_seconds};
+    let base_tick =
+        base_tick_seconds_fixed(m).map_err(|e| format!("{label} cadence probe: {e}"))?;
+    let cadence_ticks = |seconds: Fixed| -> Result<Fixed, String> {
         let ticks = ticks_from_seconds(seconds, base_tick)
-            .map_err(|e| format!("tick_cadence probe: {e:?}"))?;
+            .map_err(|e| format!("{label} cadence probe: {e:?}"))?;
         i32::try_from(ticks).map(Fixed::from_int).map_err(|_| {
-            "tick_cadence probe: the tick count exceeds the probe's read range".to_string()
+            format!("{label} cadence probe: the tick count exceeds the probe's read range")
         })
     };
-    let baseline = year_ticks(orbit.orbital_period_seconds)?;
-    let perturbed_period = orbit
-        .orbital_period_seconds
+    let baseline = cadence_ticks(period)?;
+    let perturbed_period = period
         .checked_mul(Fixed::from_int(PROBE_PERTURBATION))
-        .ok_or_else(|| "tick_cadence probe: orbital-period perturbation overflowed".to_string())?;
-    let perturbed = year_ticks(perturbed_period)?;
+        .ok_or_else(|| format!("{label} cadence probe: period perturbation overflowed"))?;
+    let perturbed = cadence_ticks(perturbed_period)?;
     Ok(ProbeReading {
         baseline,
         perturbed,
     })
+}
+
+/// The year-cadence probe (`clock_calendar_cell`): the year in ticks must respond to
+/// `world.orbital_period_seconds`, the orbital period floored over the base tick.
+fn probe_year_cadence(m: &CalibrationManifest) -> Result<ProbeReading, String> {
+    use crate::clock::orbital_from_manifest;
+    let orbit = orbital_from_manifest(m).map_err(|e| format!("year cadence probe: {e}"))?;
+    probe_tick_cadence(m, "year", orbit.orbital_period_seconds)
+}
+
+/// The day-cadence probe (`world_time_cadence`): the day in ticks must respond to
+/// `world.rotation_period_seconds`, the rotation period floored over the base tick. Distinct from the
+/// year cadence (a different period), so the two temporal rows are meaningfully separate derivations
+/// rather than one probe under two ids (gate ruling, #168). The rotation cadence is a real run-path
+/// derivation: `DiurnalSky::rotation_period_ticks` drives the diurnal cycle.
+fn probe_day_cadence(m: &CalibrationManifest) -> Result<ProbeReading, String> {
+    use crate::clock::orbital_from_manifest;
+    let orbit = orbital_from_manifest(m).map_err(|e| format!("day cadence probe: {e}"))?;
+    probe_tick_cadence(m, "day", orbit.rotation_period_seconds)
 }
 
 /// The metabolic-rate probe: a being's basal metabolic rate must respond to
@@ -674,17 +699,19 @@ mod tests {
     // --- The remaining wired probes (slice 4) ---
 
     #[test]
-    fn the_tick_cadence_probe_reads_live_for_both_time_rows() {
-        // The substantive derivation both the clock and the world-time rows resolve to: the year in
-        // ticks responds to the orbital period, so the shared probe reads Live for each id.
+    fn the_two_temporal_cadences_read_live_on_distinct_periods() {
+        // The clock row floors the ORBITAL period (the year), the world-time row the ROTATION period
+        // (the day): distinct derivations sharing the ticks_from_seconds kernel, each responding to its
+        // own period, so both read Live.
         let m = base_manifest();
         for id in ["clock_calendar_cell", "world_time_cadence"] {
             let probe = liveness_probe(id).unwrap_or_else(|| panic!("{id} is wired"));
-            let reading = probe(&m).expect("the fixture manifest supplies the orbit and base tick");
+            let reading =
+                probe(&m).expect("the fixture manifest supplies the periods and base tick");
             assert_eq!(
                 assess(&reading),
                 Liveness::Live,
-                "{id} must respond to its orbital period"
+                "{id} must respond to its period"
             );
         }
     }
