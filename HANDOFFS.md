@@ -3045,3 +3045,21 @@ HONEST SCOPE NOTE surfaced: corundum's exact 1e-4 Madelung validation is the fol
 
 STATE: signaled (comment 4953086619), confirmed Ewald built. NEXT per gate order: IE/EA [M] columns + derived chi=(IE+EA)/2, hardness eta=(IE-EA)/2 (purely additive floor, quick), then QEq (needs IE/EA + Ewald), then bond-valence positions, then energy assembly, then modulus. Carve-2 (lattice_modulus.rs) stays as AB fast-path + validation; whole slice merges once QEq gives partial-charge B. Awaiting gate confirm to proceed to IE/EA, or ruling on adding corundum cell first.
 DEPENDENCY: QEq E(q)=sum(chi_i q_i + 0.5 eta_i q_i^2)+Ewald(q), neutrality linear solve. Energy assembly = Ewald(computed q)+Born-Mayer+London+Keating. Disposer RESOLUTION-LADDER routed to A. Task #35 interior arming still HELD (main 64da409 unchanged, no Stage-3c). Do NOT touch A's genesis/register/generator-arch or C's momentum/world/cbrt lanes.
+
+---
+
+## 2026-07-12 (Agent B) - Materials oracle: IE/EA columns + derived chi/eta built (#182, generator arch piece 2). Unbound-anion seam surfaced.
+
+Gate APPROVED the Ewald kernel (verified determinism at source: no variable-trip-count loop), approved corundum deferral, and surfaced the ANISOTROPY seam (alpha=3.2/V^(1/3) validated cubic-only; non-cubic silicates may under-converge in the thin axis; RE-VALIDATE with per-axis cutoff when first non-cubic cell arrives). I recorded that seam as a flagged LIMITATION in ewald.rs module doc.
+
+BUILT (commit 7753a4b, dormant, byte-neutral):
+- periodic.rs Element + ElementDef + into_element: ionization_energy [M] (NIST) + electron_affinity [M] (Andersen/Haugen/Hotop 1999, CRC) columns, eV, optional-cited (new shared parse_optional_cited helper + OptionalCited type alias). periodic.rs is EXEMPT_MODULES so no constructor-gate site.
+- periodic_table.toml: IE for 15 rock-formers (H C N O Na Mg Al Si P S Cl K Ca Ti Fe), EA for 13 (bound anions).
+- qeq.rs (NEW module): mulliken_electronegativity chi=(IE+EA)/2 [D] (Mulliken 1934), chemical_hardness eta=(IE-EA)/2 [D] (Parr & Pearson 1983, free). Both Option (None if IE or EA absent). 3 tests (O chi 7.5395/eta 6.0785 hand-calc, Na<O ordering, Mg/N None).
+
+SEAM SURFACED (not fabricated): N and Mg have UNBOUND anions -> no measured EA -> left ABSENT -> chi/eta None. Mg is in the key oxides (periclase, forsterite) QEq must correct, so chi=(IE+EA)/2 can't run on them from raw columns. Resolution surfaced for gate ruling: add cited Rappe & Goddard 1991 QEq parameters as [M-fit] per-element column for unbound-anion elements (Mg, N...), overriding derived chi/eta where EA unbound. Did NOT fabricate an Mg EA. Signaled comment 4953113330.
+
+189 physics tests, constructor/determinism/prose gates clean, sim pins unmoved.
+
+STATE: awaiting gate ruling on the unbound-anion parameterization (blocks QEq on the oxides). NEXT: QEq linear solve E(q)=sum(chi_i q_i + 0.5 eta_i q_i^2)+Ewald(q) at neutrality, once parameterization ruled. Then bond-valence positions, energy assembly, modulus.
+BRANCH STATE (claude/materials-oracle-modulus-slice tip 7753a4b): carve-2 lattice_modulus.rs (AB point-charge B, kept as fast-path+validation), ewald.rs (Madelung kernel, validated 1e-4), qeq.rs (chi/eta inputs). Whole slice merges once QEq gives partial-charge B. Task #35 interior arming still HELD (main 64da409 unchanged). Do NOT touch A's genesis/register/generator-arch or C's momentum/world/cbrt lanes.
