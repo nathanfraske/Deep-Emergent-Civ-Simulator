@@ -40,6 +40,7 @@
 ::from_bits(	crates/sim/src/world.rs	1	bit-arithmetic	a field cell average computed in bit-space (numerator over count)
 ::from_bits(	crates/sim/src/nonlocal_coupling.rs	2	test-fixture	the budget-conservation test reconstructs a Fixed from the per-cell field's bit-sum to compare against the ledger's ColumnSolid balance
 ::from_bits(	crates/world/src/runout.rs	2	bit-arithmetic	saturating fixed-point add/subtract helpers rebuilding a Fixed from raw-bit saturating arithmetic (the runout integrator's determinism-safe ops), no authored value
+::from_bits(	crates/world/src/ballistic.rs	2	bit-arithmetic	saturating fixed-point add/subtract helpers rebuilding a Fixed from raw-bit saturating arithmetic (the ballistic integrator's determinism-safe ops), no authored value
 ::from_decimal_str(	crates/sim/src/anatomy.rs	1	dev-fixture	a decimal-parser helper for a labelled kind-fixture string argument
 ::from_decimal_str(	crates/sim/src/morphogen.rs	1	dev-fixture	a decimal-parser helper for a labelled morphogen dev-fixture string argument
 ::from_decimal_str(	crates/sim/src/runner.rs	17	dev-fixture	labelled non-canonical scenario values (the spawn_predator demo geometry and the test-scenario CreatureSelectionParams mutation spreads); production wiring should read these from the manifest

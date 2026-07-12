@@ -42,6 +42,7 @@
 //!
 //! The multi-scale GPU view (Part 14) is a later swap of the same [`view`] reads.
 
+pub mod ballistic;
 pub mod celestial;
 pub mod flood;
 pub mod label;
