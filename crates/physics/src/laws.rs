@@ -3455,6 +3455,35 @@ pub fn rayleigh_number(
     }
 }
 
+/// Convective heat advection as specific power: `F = c * |v| * |dT| / d`, the heat a buoyant flow carries out
+/// of a column per unit mass. When convection is active (the Rayleigh onset has fired), the buoyant flow
+/// [`stokes_velocity`] transports heat from the hot interior toward the surface, a LOSS that augments the
+/// conductive loss in [`internal_heat_evolution`], so a convecting column relaxes to a cooler steady state
+/// than pure conduction. `c` is the specific heat, `v` the flow velocity, `dT` the temperature contrast the
+/// flow carries, and `d` the layer depth over which the advected heat is spread; the magnitudes are taken
+/// because convection removes heat regardless of the flow's sign (a rising hot parcel and a sinking cold one
+/// both carry heat down the gradient). The velocity, contrast, and depth are the caller's composed values;
+/// the kernel is unit-agnostic over a consistent set. Saturating on overflow. Deterministic fixed-point.
+pub fn heat_advection(
+    velocity: Fixed,
+    specific_heat: Fixed,
+    delta_t: Fixed,
+    depth: Fixed,
+) -> Fixed {
+    // A zero (open) depth would spread the advected heat over nothing: the absence convention reads zero.
+    if depth <= ZERO {
+        return ZERO;
+    }
+    // F = c * |v| * |dT| / d (W/kg), a non-negative convective loss.
+    let num = specific_heat
+        .checked_mul(sat_abs(velocity))
+        .and_then(|x| x.checked_mul(sat_abs(delta_t)));
+    match num {
+        Some(n) => n.checked_div(depth).unwrap_or(Fixed::MAX),
+        None => Fixed::MAX,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3693,6 +3722,32 @@ mod tests {
             rayleigh_number(Fixed::from_int(-2), g, d, eta, kappa, Fixed::from_int(5)),
             Fixed::from_int(5),
             "the Rayleigh number clamps to the representable cap"
+        );
+    }
+
+    #[test]
+    fn heat_advection_is_the_convective_specific_power_loss() {
+        // Exactly representable integers, so the flux is exact.
+        let c = Fixed::from_int(4);
+        let d = Fixed::from_int(2);
+        // F = c*|v|*|dT|/d = 4*6*3/2 = 36.
+        assert_eq!(
+            heat_advection(Fixed::from_int(6), c, Fixed::from_int(3), d),
+            Fixed::from_int(36),
+            "the convective loss is the advective flux over the column mass"
+        );
+        // The magnitudes: a downward (negative) flow and a negative contrast carry heat just the same.
+        assert_eq!(
+            heat_advection(Fixed::from_int(-6), c, Fixed::from_int(-3), d),
+            Fixed::from_int(36),
+            "convection removes heat regardless of the flow's sign"
+        );
+        // No flow, no convective loss.
+        assert_eq!(heat_advection(ZERO, c, Fixed::from_int(3), d), ZERO);
+        // A zero (open) depth reads the absence convention.
+        assert_eq!(
+            heat_advection(Fixed::from_int(6), c, Fixed::from_int(3), ZERO),
+            ZERO
         );
     }
 

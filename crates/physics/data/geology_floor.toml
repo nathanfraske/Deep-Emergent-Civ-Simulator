@@ -219,3 +219,22 @@ output_measure = "the Rayleigh number Ra = |delta_rho|*g*d^3/(eta*kappa), the di
 dimension = "dimensionless"
 interval_bound = "[0, RA_MAX]"
 tier = 0
+
+# --- Interior convection heat transport (the convective advection) ---
+# heat_advection is the convective heat a buoyant flow carries out of a column, F = c*|v|*|dT|/d (W/kg), a
+# specific-power LOSS that augments the conductive loss in internal_heat_evolution once convection is active,
+# so a convecting column relaxes cooler than pure conduction. The flow velocity v (from stokes_velocity), the
+# temperature contrast dT, and the layer depth d are caller-composed values, NOT registry axes; the law
+# reuses therm.specific_heat. Byte-neutral: no scenario arms it; the geodynamics subsystem (crates/sim)
+# composes it with the other interior law-forms over C's fixed_cap_solve.
+
+[[law]]
+id = "law.heat_advection"
+kernel = "heat_advection"
+ports = [
+  { role = "specific_heat", axis = "therm.specific_heat" },
+]
+output_measure = "the convective heat advection F = c*|v|*|dT|/d (W/kg), the specific-power loss a buoyant flow carries out of a column, augmenting the conductive loss once convection is active"
+dimension = "2,0,-3,0"
+interval_bound = "[0, HEAT_MAX]"
+tier = 0

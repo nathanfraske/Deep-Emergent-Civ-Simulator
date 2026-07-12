@@ -620,6 +620,10 @@ pub fn kernel_contract(kernel: &str) -> Option<KernelContract> {
             ports: const { &[cur("gravity", 1), cur("viscosity", -1)] },
             output: Asserted("Ra = |delta_rho|*g*d^3/(eta*kappa); the density anomaly delta_rho, the layer depth d, and the thermal diffusivity kappa are caller-composed values, not registry axes, and the whole ratio is dimensionless, so it is not a port monomial over the declared axes; convection onsets when Ra crosses the derived critical Rayleigh number via threshold_latch"),
         },
+        "heat_advection" => KernelContract {
+            ports: const { &[cur("specific_heat", 1)] },
+            output: Asserted("F = c*|v|*|dT|/d; the flow velocity v, the temperature contrast dT, and the depth d are caller-composed values (not registry axes), so the convective specific-power loss (W/kg) is not a port monomial over the declared axes"),
+        },
         _ => return None,
     })
 }
