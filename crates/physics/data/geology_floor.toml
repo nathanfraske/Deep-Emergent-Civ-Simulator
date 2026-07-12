@@ -238,3 +238,25 @@ output_measure = "the convective heat advection F = c*|v|*|dT|/d (W/kg), the spe
 dimension = "2,0,-3,0"
 interval_bound = "[0, HEAT_MAX]"
 tier = 0
+
+# --- Lid mobilization (the convective driving stress) ---
+# convective_stress is the driving stress the interior convection exerts on the base of the lithosphere,
+# tau = eta*|v|/L (Pa). The lid mobilizes LOCALLY where this stress exceeds the lid's own mat.yield_strength,
+# so mobile-lid, stagnant-lid, and every regime between EMERGE from a continuous competition rather than from
+# a named regime chosen by an authored threshold on the Rayleigh number (which governs convection ONSET, not
+# lid mobilization: a stagnant-lid world convects under a lid the convective stress never overcomes). The
+# convective velocity v (from stokes_velocity) and the shear length L are caller-composed values, NOT registry
+# axes; the law reads fluid.dynamic_viscosity. Byte-neutral: no scenario arms it; the geodynamics subsystem
+# (crates/sim) composes it, and the tectonic-regime readout compares it to mat.yield_strength OBSERVER-side,
+# never writing a regime back to canonical state.
+
+[[law]]
+id = "law.convective_stress"
+kernel = "convective_stress"
+ports = [
+  { role = "viscosity", axis = "fluid.dynamic_viscosity" },
+]
+output_measure = "the convective driving stress tau = eta*|v|/L (Pa) the interior flow exerts on the base of the lithosphere, the continuous quantity lid mobilization emerges from against mat.yield_strength"
+dimension = "-1,1,-2,0"
+interval_bound = "[0, STRESS_MAX]"
+tier = 0

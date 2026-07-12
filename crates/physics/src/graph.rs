@@ -624,6 +624,10 @@ pub fn kernel_contract(kernel: &str) -> Option<KernelContract> {
             ports: const { &[cur("specific_heat", 1)] },
             output: Asserted("F = c*|v|*|dT|/d; the flow velocity v, the temperature contrast dT, and the depth d are caller-composed values (not registry axes), so the convective specific-power loss (W/kg) is not a port monomial over the declared axes"),
         },
+        "convective_stress" => KernelContract {
+            ports: const { &[cur("viscosity", 1)] },
+            output: Asserted("tau = eta*|v|/L; the convective velocity v (from stokes_velocity) and the shear length scale L are caller-composed values, not registry axes, so the driving stress (Pa, dimension M L^-1 T^-2) is not a port monomial over the declared axes; the lithosphere mobilizes where this stress exceeds mat.yield_strength, the continuous competition that replaces an authored mobile-versus-stagnant regime threshold on the Rayleigh number"),
+        },
         _ => return None,
     })
 }

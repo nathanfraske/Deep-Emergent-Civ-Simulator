@@ -3484,6 +3484,40 @@ pub fn heat_advection(
     }
 }
 
+/// The convective driving stress the interior flow exerts on the base of the lithosphere:
+/// `tau = eta * |v| / L`. The buoyant convective flow ([`stokes_velocity`]) shears against the overlying
+/// rigid lid, and the resulting stress competes with the lid's own yield strength (`mat.yield_strength`):
+/// the lid mobilizes LOCALLY where the convective stress exceeds the yield strength, so a mobile lid, a
+/// stagnant lid, and everything between EMERGE from this continuous competition rather than from a named
+/// regime selected by an authored threshold. This is the second continuous quantity the tectonic-regime
+/// readout reads; the first is the Rayleigh number, which governs the ONSET of convection, not lid
+/// mobilization (a stagnant-lid world convects, super-critical Rayleigh, under a lid whose yield strength the
+/// convective stress never reaches). `eta` is the viscosity, `v` the convective velocity (from
+/// [`stokes_velocity`]), and `L` the length scale over which the flow shears (the boundary-layer or layer
+/// depth); a zero length reads zero (absence). Saturating on overflow, clamped to `[0, stress_max]`.
+/// Deterministic fixed-point.
+pub fn convective_stress(
+    viscosity: Fixed,
+    velocity: Fixed,
+    length_scale: Fixed,
+    stress_max: Fixed,
+) -> Fixed {
+    // A zero (open) length scale would shear over nothing: the absence convention reads zero.
+    if length_scale <= ZERO {
+        return ZERO;
+    }
+    // tau = eta * |v| / L (Pa), a non-negative driving stress.
+    let num = match viscosity.checked_mul(sat_abs(velocity)) {
+        Some(n) => n,
+        // A stress term past the representable range is overwhelmingly strong.
+        None => return stress_max,
+    };
+    match num.checked_div(length_scale) {
+        Some(tau) => tau.clamp(ZERO, stress_max),
+        None => stress_max,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3748,6 +3782,54 @@ mod tests {
         assert_eq!(
             heat_advection(Fixed::from_int(6), c, Fixed::from_int(3), ZERO),
             ZERO
+        );
+    }
+
+    #[test]
+    fn convective_stress_is_the_viscous_driving_stress() {
+        let cap = Fixed::from_int(1_000_000);
+        // tau = eta*|v|/L = 4*6/2 = 12, exactly representable.
+        assert_eq!(
+            convective_stress(
+                Fixed::from_int(4),
+                Fixed::from_int(6),
+                Fixed::from_int(2),
+                cap
+            ),
+            Fixed::from_int(12),
+            "the driving stress is the viscosity times the flow speed over the shear length"
+        );
+        // The magnitude: a downward (negative) flow shears the lid just the same.
+        assert_eq!(
+            convective_stress(
+                Fixed::from_int(4),
+                Fixed::from_int(-6),
+                Fixed::from_int(2),
+                cap
+            ),
+            Fixed::from_int(12),
+            "the stress magnitude is independent of the flow's sign"
+        );
+        // No flow, no driving stress (a still interior applies none).
+        assert_eq!(
+            convective_stress(Fixed::from_int(4), ZERO, Fixed::from_int(2), cap),
+            ZERO
+        );
+        // A zero (open) shear length reads the absence convention.
+        assert_eq!(
+            convective_stress(Fixed::from_int(4), Fixed::from_int(6), ZERO, cap),
+            ZERO
+        );
+        // The output clamps to the cap rather than diverging.
+        assert_eq!(
+            convective_stress(
+                Fixed::from_int(10),
+                Fixed::from_int(10),
+                Fixed::from_ratio(1, 100),
+                Fixed::from_int(50)
+            ),
+            Fixed::from_int(50),
+            "the stress pins at the representable cap"
         );
     }
 
