@@ -12,24 +12,27 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! # The retired-floor-derivation registry (task #43, the derived-output-is-live gate)
+//! # The derivation registry (tasks #43 and #46, the derived-output-is-live gate)
 //!
 //! The constructor gate (`scripts/constructor_gate.py`) proves no authored value sits on the
-//! canonical path. It cannot prove the derived value that REPLACED a retired floor is alive: a
-//! derivation can retire an authored floor (obeying the gate) and then produce a constant, and
-//! nothing catches it. That is the `soil_baseline` bug (a 330x sweep of the photosynthesis
-//! constants left the state hash byte-identical) and the identically-zero Dalton evaporation
-//! closed in the hydrology re-baseline.
+//! canonical path. It cannot prove a DERIVED value is alive: a derivation can obey the gate and then
+//! produce a constant, and nothing catches it. That is the `soil_baseline` bug (a 330x sweep of the
+//! photosynthesis constants left the state hash byte-identical) and the identically-zero Dalton
+//! evaporation closed in the hydrology re-baseline.
 //!
 //! This registry is the data-defined membership of the derived-output-is-live gate: one row per
-//! retired-floor derivation, naming the derivation, the reserved input it derives from, the
-//! scenario that arms it on the run path, and the source site that carries its `@derives[id]:`
-//! annotation. The MECHANISM (the gate that perturbs an input and asserts the derived value
-//! responds at its site) is fixed Rust; the MEMBERSHIP is data and grows with the world as new
-//! derivations retire new floors, sibling to the value, semantic, institution-function, and
-//! provenance substrates. Each row's `id` matches the `@derives[id]:` token at its site, and the
-//! cross-check (in the gate's test) asserts every annotated site has a row and every row a site,
-//! the ratchet the constructor gate already models.
+//! tracked derivation, naming the derivation, its category ([`DerivationCategory`]: a retired-floor
+//! replacement or a new derived output), the input source it derives from ([`InputSource`]: a
+//! manifest scalar, a data-defined driver parameter, or a resident-state field), the scenario that
+//! arms it on the run path, and the source site that carries its `@derives[id]:` annotation. The
+//! liveness principle (perturb the input, assert the derived value responds at its site) applies to
+//! ANY derived output regardless of its input source, so the gate covers all three (task #46, the
+//! broadening past the original retired-floor-plus-manifest-key shape). The MECHANISM (the gate that
+//! perturbs an input and asserts the derived value responds) is fixed Rust; the MEMBERSHIP is data
+//! and grows with the world, sibling to the value, semantic, institution-function, and provenance
+//! substrates. Each row's `id` matches the `@derives[id]:` token at its site, and the cross-check
+//! (in the gate's test) asserts every annotated site has a row and every row a site, the ratchet the
+//! constructor gate already models.
 //!
 //! The membership and its cross-check are the first surface. The site-local liveness probe (perturb
 //! the declared input, assert the derived output responds at its site) is the pass/fail gate below: a
@@ -39,18 +42,108 @@
 use crate::calibration::CalibrationManifest;
 use civsim_core::Fixed;
 
-/// One retired-floor derivation: a derived value that replaced an authored floor, and the metadata
-/// the liveness gate reads to probe it. All fields are data, so a new derivation is a new row.
+/// Whether a derivation replaced an authored floor or is a new derived output. The liveness principle
+/// (perturb the input, assert the output responds) applies to both; the category only records which
+/// class a row is, so the retired-floor cases (the soil_baseline-bug class) stay named (task #46).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DerivationCategory {
+    /// A derived value that REPLACED an authored floor: the class behind the soil_baseline bug.
+    RetiredFloor,
+    /// A derived output that retired no floor (new physics or a new derivation), for example the
+    /// convection subsystem's stepped column state.
+    NewDerivation,
+}
+
+impl DerivationCategory {
+    /// Parse the canonical table's category token. Panics on a malformed token (canonical data, a
+    /// construction invariant, not a runtime input).
+    fn parse(token: &str) -> DerivationCategory {
+        match token {
+            "retired-floor" => DerivationCategory::RetiredFloor,
+            "new-derivation" => DerivationCategory::NewDerivation,
+            other => panic!("unknown derivation category '{other}'"),
+        }
+    }
+}
+
+/// Where a derivation's perturbable input lives. The gate perturbs whichever source and asserts the
+/// derived output responds, so the liveness principle covers a manifest scalar, a data-defined driver
+/// parameter, or a resident simulation-state field alike (task #46). The declared source names what
+/// the probe perturbs, so the coverage signal never mistakes a driver-param or field input for a
+/// missing manifest key (the phantom `decompose.decomposer_rate` bug the broadening closes).
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct RetiredFloorDerivation {
+pub enum InputSource {
+    /// A reserved manifest scalar, perturbed via `require_fixed(key)`.
+    ManifestKey(String),
+    /// A named parameter on a data-defined driver row (for example a `DecomposerDriver` param).
+    DriverParam {
+        /// The driver the parameter lives on, in prose (a `DecomposerDriver` kind, say `life`).
+        driver: String,
+        /// The parameter name the probe perturbs (for example `biomass_reference`).
+        param: String,
+    },
+    /// A field on a resident simulation-state struct (for example a `ColumnParams` field).
+    ResidentField {
+        /// The struct the field lives on, in prose (for example `ColumnParams`).
+        holder: String,
+        /// The field name the probe perturbs (for example `heat_production`).
+        field: String,
+    },
+}
+
+impl InputSource {
+    /// Parse the canonical table's compact input encoding: `manifest:<key>`,
+    /// `driver:<driver>/<param>`, or `field:<holder>/<field>`. Panics on a malformed spec (canonical
+    /// data, a construction invariant, not a runtime input).
+    fn parse(spec: &str) -> InputSource {
+        if let Some(key) = spec.strip_prefix("manifest:") {
+            InputSource::ManifestKey(key.to_string())
+        } else if let Some(rest) = spec.strip_prefix("driver:") {
+            let (driver, param) = rest
+                .split_once('/')
+                .unwrap_or_else(|| panic!("malformed driver input spec '{spec}'"));
+            InputSource::DriverParam {
+                driver: driver.to_string(),
+                param: param.to_string(),
+            }
+        } else if let Some(rest) = spec.strip_prefix("field:") {
+            let (holder, field) = rest
+                .split_once('/')
+                .unwrap_or_else(|| panic!("malformed field input spec '{spec}'"));
+            InputSource::ResidentField {
+                holder: holder.to_string(),
+                field: field.to_string(),
+            }
+        } else {
+            panic!("input spec '{spec}' has no source prefix (manifest:/driver:/field:)")
+        }
+    }
+
+    /// A short label of the source kind, for the coverage report.
+    pub fn kind(&self) -> &'static str {
+        match self {
+            InputSource::ManifestKey(_) => "manifest-key",
+            InputSource::DriverParam { .. } => "driver-param",
+            InputSource::ResidentField { .. } => "resident-field",
+        }
+    }
+}
+
+/// One derivation the liveness gate tracks: a derived value (a retired-floor replacement or a new
+/// derived output) and the metadata the gate reads to probe it. All fields are data, so a new
+/// derivation is a new row.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Derivation {
     /// The stable id, matching the `@derives[id]:` token at the site.
     pub id: String,
     /// What the derivation produces, in prose (the derived quantity).
     pub derived: String,
-    /// The reserved input keys or floor sources the derivation reads, the values the gate perturbs
-    /// to prove the output responds. Empty is not allowed: a derivation with no declared input has
-    /// nothing to perturb, so the gate could not prove it alive.
-    pub inputs: Vec<String>,
+    /// Whether the derivation replaced an authored floor or is a new derived output.
+    pub category: DerivationCategory,
+    /// The input sources the derivation reads, the values the gate perturbs to prove the output
+    /// responds. Empty is not allowed: a derivation with no declared input has nothing to perturb, so
+    /// the gate could not prove it alive.
+    pub inputs: Vec<InputSource>,
     /// The run scenario that arms the derivation on the canonical path.
     pub scenario: String,
     /// The source file carrying this derivation's `@derives[id]:` annotation, repo-relative.
@@ -59,36 +152,36 @@ pub struct RetiredFloorDerivation {
 
 /// The registry of retired-floor derivations. Ordered by registration, so any canonical walk over
 /// it is deterministic (the same discipline the quantity and unit registries follow). The built-in
-/// membership is [`RetiredFloorDerivationRegistry::canonical`]; a world may register more.
+/// membership is [`DerivationRegistry::canonical`]; a world may register more.
 #[derive(Clone, Debug, Default)]
-pub struct RetiredFloorDerivationRegistry {
-    entries: Vec<RetiredFloorDerivation>,
+pub struct DerivationRegistry {
+    entries: Vec<Derivation>,
 }
 
-impl RetiredFloorDerivationRegistry {
+impl DerivationRegistry {
     /// An empty registry.
-    pub fn new() -> RetiredFloorDerivationRegistry {
-        RetiredFloorDerivationRegistry::default()
+    pub fn new() -> DerivationRegistry {
+        DerivationRegistry::default()
     }
 
     /// Register a derivation. Panics on a duplicate id or an empty input list, so the registry
     /// cannot carry a row the gate could not probe or two rows for one id.
-    pub fn register(&mut self, d: RetiredFloorDerivation) {
+    pub fn register(&mut self, d: Derivation) {
         assert!(
             !d.inputs.is_empty(),
-            "retired-floor derivation '{}' declares no input to perturb",
+            "derivation '{}' declares no input to perturb",
             d.id
         );
         assert!(
             !self.entries.iter().any(|e| e.id == d.id),
-            "duplicate retired-floor derivation id '{}'",
+            "duplicate derivation id '{}'",
             d.id
         );
         self.entries.push(d);
     }
 
     /// Walk the derivations in canonical registration order.
-    pub fn iter(&self) -> impl Iterator<Item = &RetiredFloorDerivation> {
+    pub fn iter(&self) -> impl Iterator<Item = &Derivation> {
         self.entries.iter()
     }
 
@@ -110,13 +203,14 @@ impl RetiredFloorDerivationRegistry {
     /// The built-in membership: every retired-floor derivation the codebase carries today, each
     /// keyed to its `@derives[id]:` site. This is the data the gate reads; extending it is adding a
     /// row, never changing the gate.
-    pub fn canonical() -> RetiredFloorDerivationRegistry {
-        let mut r = RetiredFloorDerivationRegistry::new();
-        for (id, derived, inputs, scenario, site) in CANONICAL {
-            r.register(RetiredFloorDerivation {
+    pub fn canonical() -> DerivationRegistry {
+        let mut r = DerivationRegistry::new();
+        for (id, derived, inputs, scenario, site, category) in CANONICAL {
+            r.register(Derivation {
                 id: id.to_string(),
                 derived: derived.to_string(),
-                inputs: inputs.iter().map(|s| s.to_string()).collect(),
+                category: DerivationCategory::parse(category),
+                inputs: inputs.iter().map(|s| InputSource::parse(s)).collect(),
                 scenario: scenario.to_string(),
                 site: site.to_string(),
             });
@@ -125,10 +219,22 @@ impl RetiredFloorDerivationRegistry {
     }
 }
 
-/// The built-in derivation rows as data: `(id, derived, inputs, scenario, site)`. Each id matches an
-/// `@derives[id]:` annotation at its site. The input keys are the reserved values or floor sources
-/// the derivation reads; the liveness probe perturbs one and asserts the derived output moves.
-const CANONICAL: &[(&str, &str, &[&str], &str, &str)] = &[
+/// The built-in derivation rows as data: `(id, derived, inputs, scenario, site, category)`. Each id
+/// matches an `@derives[id]:` annotation at its site. Each input is the compact source encoding
+/// [`InputSource::parse`] reads (`manifest:<key>`, `driver:<driver>/<param>`, or
+/// `field:<holder>/<field>`); the liveness probe perturbs one and asserts the derived output moves.
+/// The category is `retired-floor` (replaced an authored floor) or `new-derivation` (task #46).
+/// One built-in derivation row as data: `(id, derived, inputs, scenario, site, category)`.
+type CanonicalRow = (
+    &'static str,
+    &'static str,
+    &'static [&'static str],
+    &'static str,
+    &'static str,
+    &'static str,
+);
+
+const CANONICAL: &[CanonicalRow] = &[
     (
         "world_time_cadence",
         "a world's DAY cadence in ticks (the rotation-derived beat: aging, drift, the diurnal calendar)",
@@ -137,23 +243,26 @@ const CANONICAL: &[(&str, &str, &[&str], &str, &str)] = &[
         // differentiated from clock_calendar_cell: this row floors the ROTATION period (the day),
         // clock_calendar_cell the ORBITAL period (the year), so the two temporal cadences are distinct
         // derivations sharing the ticks_from_seconds kernel (gate ruling, #168).
-        &["world.rotation_period_seconds"],
+        &["manifest:world.rotation_period_seconds"],
         "default",
         "crates/sim/src/clock.rs",
+        "retired-floor",
     ),
     (
         "locomotion_speed_cell",
         "movement speed in tiles per tick and the cell edge in metres",
-        &["locomotion.base_speed_m_per_s"],
+        &["manifest:locomotion.base_speed_m_per_s"],
         "default",
         "crates/sim/src/locomotion.rs",
+        "retired-floor",
     ),
     (
         "clock_calendar_cell",
         "a world's year, day, and season in ticks, and the cell area",
-        &["world.orbital_period_seconds"],
+        &["manifest:world.orbital_period_seconds"],
         "default",
         "crates/sim/src/clock.rs",
+        "retired-floor",
     ),
     (
         "hydrology_water",
@@ -162,44 +271,70 @@ const CANONICAL: &[(&str, &str, &[&str], &str, &str)] = &[
         // profile, a probe on it fails-loud) to a live reserved key the water balance reads: the
         // condensation rate scales the water added (`precip = precip_rate * excess` in step_hydrology),
         // so perturbing it moves the derived water output (gate ruling, #168).
-        &["hydrology.precipitation_rate"],
+        &["manifest:hydrology.precipitation_rate"],
         "full",
         "crates/sim/src/environ.rs",
+        "retired-floor",
     ),
     (
         "productivity_capacity",
         "per-cell biomass productivity and carrying capacity",
-        &["productivity.soil_requirement"],
+        &["manifest:productivity.soil_requirement"],
         "full",
         "crates/sim/src/environ.rs",
+        "retired-floor",
     ),
     (
         "metabolic_rate",
         "a being's metabolic rate, energy drain, and heat loss",
-        &["metabolism.kleiber_a"],
+        // The real manifest scalar the derivation reads (`MetabolicAnchors::from_manifest`), corrected
+        // from the field name `kleiber_a` so the declared source names the perturbed key (task #46).
+        &["manifest:metabolism.kleiber_coefficient"],
         "full",
         "crates/sim/src/physiology.rs",
+        "retired-floor",
     ),
     (
         "decomposition_recovery",
         "soil-nutrient recovery through the matter cycle",
-        &["decompose.decomposer_rate"],
+        // Repointed off the phantom manifest key `decompose.decomposer_rate` (read by no require_fixed,
+        // in no profile) to the real input source: the `biomass_reference` parameter on a
+        // DecomposerDriver Life row, a data-defined driver-param, not a manifest scalar (task #46, the
+        // driver-param case the broadening turns from Unwired into a real probe).
+        &["driver:life/biomass_reference"],
         "full",
         "crates/sim/src/decompose.rs",
+        "retired-floor",
     ),
     (
         "weathering_soil_nutrient",
         "abiotic mineral-weathering soil-nutrient supply (rock into soil nutrient before any biomass)",
-        &["weathering.mineral_dissolution_rate"],
+        &["manifest:weathering.mineral_dissolution_rate"],
         "living",
         "crates/sim/src/environ.rs",
+        "retired-floor",
     ),
     (
         "carbon_fixation_rate",
         "per-cell carbon-fixation rate / net primary productivity",
-        &["photosynthesis.light_saturation"],
+        &["manifest:photosynthesis.light_saturation"],
         "living",
         "crates/sim/src/environ.rs",
+        "retired-floor",
+    ),
+    (
+        "column_convection",
+        "the interior column's stepped thermal state (the convection subsystem's derived temperature)",
+        // A NEW derived output that retired no floor (new physics), covered now the gate is broadened
+        // beyond retired-floor (task #46): the input is a ColumnParams field, a resident-state value,
+        // not a manifest scalar. Perturbing the heat production moves the stepped column temperature.
+        &["field:ColumnParams/heat_production"],
+        // The subsystem is not yet armed on any run scenario (the column-wiring slice is held for A's
+        // GeodynamicColumn contract), so the probe is site-local over a synthetic column. `default` is
+        // the scenario it will run under once wired; the field is documentation, unused by the probe.
+        "default",
+        "crates/sim/src/geodynamics.rs",
+        "new-derivation",
     ),
 ];
 
@@ -269,6 +404,9 @@ pub fn liveness_probe(id: &str) -> Option<LivenessProbe> {
         "world_time_cadence" => Some(probe_day_cadence),
         "metabolic_rate" => Some(probe_metabolic_rate),
         "productivity_capacity" => Some(probe_productivity_capacity),
+        // The two broadening proof cases (task #46): a driver-param input and a resident-field input.
+        "decomposition_recovery" => Some(probe_decomposition_recovery),
+        "column_convection" => Some(probe_column_convection),
         _ => None,
     }
 }
@@ -282,12 +420,6 @@ pub fn unwired_gap_reason(id: &str) -> Option<&'static str> {
         "locomotion_speed_cell" => Some(
             "the grown-limb speed kernel needs a representative BodyPlan and organ registry; \
              wireable with a dev body, deferred as bulky scaffolding",
-        ),
-        "decomposition_recovery" => Some(
-            "declared input `decompose.decomposer_rate` is a PHANTOM: no `require_fixed` reads it \
-             and no profile carries it (the decomposer rate comes from DecomposerDriver fixture \
-             data, not a reserved manifest scalar). Needs a live key or a driver-param probe shape; \
-             surfaced for the gate's ruling (#168 catch 3)",
         ),
         "weathering_soil_nutrient" => Some(
             "the deposit rate (`base_rate * wet`) is computed inline in the `weather_minerals` grid \
@@ -467,6 +599,84 @@ fn probe_productivity_capacity(m: &CalibrationManifest) -> Result<ProbeReading, 
     })
 }
 
+/// The decomposition-recovery probe (task #46, the DRIVER-PARAM proof): the matter-cycle recovery
+/// activity must respond to the `biomass_reference` parameter on a `DecomposerDriver` Life row, a
+/// data-defined driver-param rather than a manifest scalar (the input source the broadening adds). The
+/// situation is a single Life row at a favourable standing stock in the rising region (below the
+/// reference), so doubling the reference biomass, the standing crop at which activity saturates, moves
+/// the activity. This turns the phantom-input row into a real probe. The manifest is unused: the input
+/// lives on the driver, not the manifest.
+fn probe_decomposition_recovery(_m: &CalibrationManifest) -> Result<ProbeReading, String> {
+    use crate::decompose::{DecomposerDriver, DecomposerDriverRegistry};
+    // A registry of one Life row, so `activity_at` returns that row's contribution:
+    // saturating_response(life_stock, biomass_reference). A stock below the reference keeps the read in
+    // the rising region (not saturated at either end). Situation scaffolding; it never enters the sim.
+    let life_stock = Fixed::ONE;
+    let base_reference = Fixed::from_int(2);
+    let activity = |reference: Fixed| {
+        let mut reg = DecomposerDriverRegistry::new();
+        reg.push(DecomposerDriver::life(reference));
+        reg.activity_at(&[], life_stock)
+    };
+    let baseline = activity(base_reference);
+    let perturbed_reference = base_reference
+        .checked_mul(Fixed::from_int(PROBE_PERTURBATION))
+        .ok_or_else(|| {
+            "decomposition_recovery probe: biomass-reference perturbation overflowed".to_string()
+        })?;
+    let perturbed = activity(perturbed_reference);
+    Ok(ProbeReading {
+        baseline,
+        perturbed,
+    })
+}
+
+/// The convection-subsystem probe (task #46, the RESIDENT-FIELD proof, a NEW derived output that
+/// retired no floor): the stepped column temperature must respond to the `heat_production` field on
+/// `ColumnParams`, a resident-state value rather than a manifest scalar. One convection step reads the
+/// heat production into the internal-heat balance, so doubling it moves the stepped temperature. This
+/// proves the broadened gate covers a derivation beyond the retired-floor class. The manifest is
+/// unused: the input lives on the resident column parameters, not the manifest.
+fn probe_column_convection(_m: &CalibrationManifest) -> Result<ProbeReading, String> {
+    use crate::geodynamics::{convection_step, ColumnParams, ColumnState};
+    // A representative warm interior over a cold reference, the same shape the geodynamics tests use.
+    // Situation scaffolding for the two-point read; it never enters the sim.
+    let state = ColumnState {
+        temperature: Fixed::from_int(400),
+        convecting: false,
+    };
+    let params = |heat_production: Fixed| ColumnParams {
+        reference_temperature: Fixed::from_int(300),
+        density: Fixed::ONE,
+        thermal_conductivity: Fixed::from_int(2),
+        thermal_expansion_ppm: Fixed::from_int(30),
+        gravity: Fixed::from_int(10),
+        depth: Fixed::ONE,
+        radius: Fixed::ONE,
+        viscosity: Fixed::ONE,
+        thermal_diffusivity: Fixed::from_ratio(1, 100),
+        specific_heat: Fixed::from_int(10),
+        heat_production,
+        ra_crit: Fixed::from_int(2000),
+        ra_max: Fixed::from_int(1_000_000),
+        v_max: Fixed::from_int(1_000_000),
+        flux_max: Fixed::from_int(1_000_000),
+        dt: Fixed::ONE,
+    };
+    let base_heat = Fixed::from_int(100);
+    let baseline = convection_step(&state, &params(base_heat)).temperature;
+    let perturbed_heat = base_heat
+        .checked_mul(Fixed::from_int(PROBE_PERTURBATION))
+        .ok_or_else(|| {
+            "column_convection probe: heat-production perturbation overflowed".to_string()
+        })?;
+    let perturbed = convection_step(&state, &params(perturbed_heat)).temperature;
+    Ok(ProbeReading {
+        baseline,
+        perturbed,
+    })
+}
+
 // --- The coverage signal (task #43 slice 3): the classification beside the pass/fail verdict ---
 //
 // A green gate must never be read as proof where the probe is absent or weak. Beside the Live/Dead
@@ -520,7 +730,7 @@ pub struct CoverageRow {
 /// through the declared Trivial / DeadbandOnPins classifications. Deterministic (registry order), the
 /// same discipline the registry walk follows. This is the data the CI harness asserts over and prints.
 pub fn coverage_report(m: &CalibrationManifest) -> Vec<CoverageRow> {
-    let registry = RetiredFloorDerivationRegistry::canonical();
+    let registry = DerivationRegistry::canonical();
     let mut rows = Vec::with_capacity(registry.len());
     for d in registry.iter() {
         let row = match liveness_probe(&d.id) {
@@ -560,8 +770,8 @@ mod tests {
 
     #[test]
     fn the_canonical_registry_carries_the_annotated_derivations() {
-        let r = RetiredFloorDerivationRegistry::canonical();
-        assert_eq!(r.len(), 9, "one row per @derives[id] site today");
+        let r = DerivationRegistry::canonical();
+        assert_eq!(r.len(), 10, "one row per @derives[id] site today");
         // Every row declares at least one input to perturb (register enforces it), a scenario, and a
         // site, so the gate has what it needs to probe each.
         for d in r.iter() {
@@ -573,23 +783,24 @@ mod tests {
 
     #[test]
     fn the_walk_is_deterministic_registration_order() {
-        let r = RetiredFloorDerivationRegistry::canonical();
+        let r = DerivationRegistry::canonical();
         let ids = r.ids();
         assert_eq!(ids.first(), Some(&"world_time_cadence"));
-        assert_eq!(ids.last(), Some(&"carbon_fixation_rate"));
+        assert_eq!(ids.last(), Some(&"column_convection"));
         // A second walk yields the identical order (no hash-map iteration leaks in).
-        let again = RetiredFloorDerivationRegistry::canonical();
+        let again = DerivationRegistry::canonical();
         assert_eq!(again.ids(), ids);
     }
 
     #[test]
-    #[should_panic(expected = "duplicate retired-floor derivation id")]
+    #[should_panic(expected = "duplicate derivation id")]
     fn a_duplicate_id_panics() {
-        let mut r = RetiredFloorDerivationRegistry::canonical();
-        r.register(RetiredFloorDerivation {
+        let mut r = DerivationRegistry::canonical();
+        r.register(Derivation {
             id: "metabolic_rate".to_string(),
             derived: "x".to_string(),
-            inputs: vec!["y".to_string()],
+            category: DerivationCategory::RetiredFloor,
+            inputs: vec![InputSource::ManifestKey("y".to_string())],
             scenario: "full".to_string(),
             site: "z.rs".to_string(),
         });
@@ -598,10 +809,11 @@ mod tests {
     #[test]
     #[should_panic(expected = "declares no input to perturb")]
     fn an_inputless_derivation_panics() {
-        let mut r = RetiredFloorDerivationRegistry::new();
-        r.register(RetiredFloorDerivation {
+        let mut r = DerivationRegistry::new();
+        r.register(Derivation {
             id: "x".to_string(),
             derived: "x".to_string(),
+            category: DerivationCategory::NewDerivation,
             inputs: vec![],
             scenario: "full".to_string(),
             site: "z.rs".to_string(),
@@ -624,7 +836,7 @@ mod tests {
         // A probe may only exist for an id the registry carries, so the cross-check that guards the
         // membership also guards the probe wiring. (The reverse is allowed: a registered derivation
         // whose probe is not yet wired is an honest coverage gap, a None, never a false Dead.)
-        let registry = RetiredFloorDerivationRegistry::canonical();
+        let registry = DerivationRegistry::canonical();
         let ids = registry.ids();
         for d in registry.iter() {
             if liveness_probe(&d.id).is_some() {
@@ -746,7 +958,7 @@ mod tests {
         let report = coverage_report(&m);
         assert_eq!(
             report.len(),
-            9,
+            10,
             "one coverage row per registered derivation"
         );
         for row in &report {
@@ -767,7 +979,7 @@ mod tests {
     }
 
     #[test]
-    fn the_wired_ids_read_live_and_the_phantom_decompose_is_a_surfaced_gap() {
+    fn the_wired_ids_read_live_including_the_two_broadening_proof_cases() {
         let m = base_manifest();
         let report = coverage_report(&m);
         let by_id = |id: &str| {
@@ -777,26 +989,42 @@ mod tests {
                 .expect("id present")
                 .coverage
         };
-        // The four wired derivations read Live.
+        // The manifest-key wired derivations read Live, and so do the two proof cases the broadening
+        // adds: decomposition_recovery (a driver-param input) and column_convection (a resident-field
+        // input, a NEW derived output that retired no floor). Both were Unwired before task #46.
         for id in [
             "carbon_fixation_rate",
             "clock_calendar_cell",
             "world_time_cadence",
             "metabolic_rate",
             "productivity_capacity",
+            "decomposition_recovery",
+            "column_convection",
         ] {
             assert_eq!(by_id(id), Coverage::Live, "{id} should read Live");
         }
-        // The phantom-input row (catch 3) is a surfaced Unwired gap, never a false Dead, and its note
-        // names the phantom so the gate can rule.
-        let decompose = report
+    }
+
+    #[test]
+    fn the_input_source_kinds_cover_the_three_broadened_sources() {
+        // The registry now declares manifest-key, driver-param, and resident-field inputs, so the
+        // broadening covers all three source kinds (task #46), not manifest keys alone.
+        let r = DerivationRegistry::canonical();
+        let kind_of = |id: &str| {
+            r.iter()
+                .find(|d| d.id == id)
+                .and_then(|d| d.inputs.first())
+                .map(|s| s.kind())
+                .expect("id present with an input")
+        };
+        assert_eq!(kind_of("carbon_fixation_rate"), "manifest-key");
+        assert_eq!(kind_of("decomposition_recovery"), "driver-param");
+        assert_eq!(kind_of("column_convection"), "resident-field");
+        // The new-derivation category is carried, distinct from the retired-floor class.
+        let column = r
             .iter()
-            .find(|r| r.id == "decomposition_recovery")
+            .find(|d| d.id == "column_convection")
             .expect("present");
-        assert_eq!(decompose.coverage, Coverage::Unwired);
-        assert!(
-            decompose.note.contains("PHANTOM"),
-            "the decompose gap reason names the phantom input"
-        );
+        assert_eq!(column.category, DerivationCategory::NewDerivation);
     }
 }
