@@ -504,17 +504,17 @@ impl ElementDef {
         let (standard_molar_entropy, entropy_decimal, entropy_source) = if entropy_raw.is_empty() {
             (None, None, None)
         } else {
-            let value = Fixed::from_decimal_str(entropy_raw).map_err(|detail| {
-                PeriodicError::BadValue {
+            let value =
+                Fixed::from_decimal_str(entropy_raw).map_err(|detail| PeriodicError::BadValue {
                     symbol: self.symbol.clone(),
                     detail: format!("standard_molar_entropy: {detail}"),
-                }
-            })?;
+                })?;
             if self.entropy_source.trim().is_empty() {
                 return Err(PeriodicError::BadValue {
                     symbol: self.symbol.clone(),
-                    detail: "standard_molar_entropy is set but entropy_source (its citation) is empty"
-                        .to_string(),
+                    detail:
+                        "standard_molar_entropy is set but entropy_source (its citation) is empty"
+                            .to_string(),
                 });
             }
             (
@@ -800,15 +800,24 @@ real = "test"
         let fe = t.element("Fe").expect("iron loads");
         assert_eq!(fe.valence, vec![2, 3], "the valence set round-trips");
         assert!(
-            close(fe.standard_molar_entropy.expect("Fe carries an entropy"), 27.28),
+            close(
+                fe.standard_molar_entropy.expect("Fe carries an entropy"),
+                27.28
+            ),
             "the entropy parses to its decimal value"
         );
         assert_eq!(fe.entropy_decimal.as_deref(), Some("27.28"));
         assert_eq!(fe.entropy_source.as_deref(), Some("test source"));
         // The unpopulated row is ABSENT, not zero: an empty valence set and no entropy.
         let h = t.element("H").expect("hydrogen loads");
-        assert!(h.valence.is_empty(), "an unpopulated valence is empty, not [0]");
-        assert_eq!(h.standard_molar_entropy, None, "an unpopulated entropy is None, not zero");
+        assert!(
+            h.valence.is_empty(),
+            "an unpopulated valence is empty, not [0]"
+        );
+        assert_eq!(
+            h.standard_molar_entropy, None,
+            "an unpopulated entropy is None, not zero"
+        );
         assert_eq!(h.entropy_decimal, None);
         assert_eq!(h.entropy_source, None);
     }
@@ -838,14 +847,19 @@ real = "test"
         // standard molar entropy in the embedded table.
         let t = table();
         for sym in ["O", "Si", "Mg", "Fe", "Al", "Ca", "Na", "K"] {
-            let e = t.element(sym).unwrap_or_else(|| panic!("{sym} is in the table"));
+            let e = t
+                .element(sym)
+                .unwrap_or_else(|| panic!("{sym} is in the table"));
             assert!(!e.valence.is_empty(), "{sym} should carry a valence set");
             assert!(
                 e.standard_molar_entropy.is_some(),
                 "{sym} should carry a cited standard molar entropy"
             );
             assert!(
-                e.entropy_source.as_deref().map(|s| !s.is_empty()).unwrap_or(false),
+                e.entropy_source
+                    .as_deref()
+                    .map(|s| !s.is_empty())
+                    .unwrap_or(false),
                 "{sym}'s entropy must carry a citation"
             );
         }
