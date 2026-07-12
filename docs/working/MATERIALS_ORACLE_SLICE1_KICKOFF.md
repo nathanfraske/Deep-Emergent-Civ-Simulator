@@ -75,3 +75,24 @@ down to components, never eliminated; fixed-point determinism (the assemblage so
 This slice does NOT touch the other eight stages, the full disposer refactor, or the named-substance-floor
 deletion beyond the one retired row: it proves the deletion pattern on one property end to end, so the larger
 refactor builds on a demonstrated shape. No build until the gate rules the carve.
+
+## Gate rulings and the held datum (post-approval)
+
+The gate approved the carve and ruled the five seams (#182): VRH aggregation first (Hashin-Shtrikman the
+refinement); ESTIMATOR-ONLY, author no new column (derive `E_coh` from existing data, or use the EOS route);
+provenance designed against the seven-tag semantics with a local placeholder swapped to A's enforced enum
+when its register Phase 1 lands; `mat.elastic_modulus` confirmed as the retirement target.
+
+Grounding the estimator route against the floor then surfaced a datum truly absent (the gate's "surface it
+before authoring" case): neither estimator route runs on the current floor. The Hess-law `E_coh` route needs
+per-element atomization enthalpies, which the periodic table does not carry (elements carry only symbol, z,
+atomic weight, valence, entropy). The EOS `B_0` route needs a per-phase bulk modulus or EOS parameter, which
+the phase registry does not carry (phases carry only formation enthalpy, entropy, molar volume). And
+`dH_f / V` is not a physical modulus estimator (formation-energy density, not cohesive-energy density, and can
+be negative). So the modulus has no derivation route from existing data, and the honest-failure path
+degenerates (every phase would flag with no value, so the authored row could not be retired).
+
+Surfaced to the gate rather than authored: the recommendation is to add the per-element atomization enthalpy
+as a measured `[M]` elemental column (the cohesive energy of each element in its standard state), a
+component-level measured constant the same tier as the atomic weights already on the floor, an INPUT the
+derivation composes via Hess-law, not the output authored. Build HELD for the gate's ruling on the datum.
