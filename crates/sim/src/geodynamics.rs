@@ -94,7 +94,7 @@ pub struct ColumnParams {
 }
 
 /// One convection-evolution step: compose the merged floor law-forms into the next column state.
-// @derives[column_convection]: the interior column temperature and convection-onset state <- the merged floor law-forms (thermal_density_anomaly, rayleigh_number, threshold_latch, stokes_velocity, heat_advection, internal_heat_evolution, conduction) over the column's own physical parameters; no authored convection knob (Ra_crit is the derived marginal-stability eigenvalue, the Stokes coefficient the derived 2/9, the buoyancy the real material thermal expansion)
+// @derives: the interior column temperature and convection-onset state <- the merged floor law-forms (thermal_density_anomaly, rayleigh_number, threshold_latch, stokes_velocity, heat_advection, internal_heat_evolution, conduction) over the column's own physical parameters; no authored convection knob (Ra_crit is the derived marginal-stability eigenvalue, the Stokes coefficient the derived 2/9, the buoyancy the real material thermal expansion). A bare @derives marker (no [id] token): this is a NEW derivation, not a retired-floor replacement, so it lands on the deriving-substrate billboard but stays out of the retired-floor-derivation registry (derive_gate.rs) and its [id] cross-check; broadening the liveness gate to any derived output is C's #43 slices 3+4, not this lane.
 pub fn convection_step(state: &ColumnState, p: &ColumnParams) -> ColumnState {
     // The column's temperature contrast with its cold reference drives buoyancy, conduction, and advection.
     let delta_t = state.temperature - p.reference_temperature;
