@@ -50,6 +50,9 @@ symbol = "H"
 name = "hydrogen"
 z = 1
 standard_atomic_weight = "1.008"
+valence = [1, -1]
+standard_molar_entropy = "130.68"
+entropy_source = "CRC Handbook of Chemistry and Physics, 97th ed. (2016), standard molar entropy S(298.15 K) of the element reference state"
 interval_lo = "1.00784"
 interval_hi = "1.00811"
 real = "CIAAW/IUPAC Standard Atomic Weights 2021 (interval element; conventional 1.008, terrestrial interval [1.00784, 1.00811] from deuterium fractionation between waters and organics)"
@@ -91,6 +94,9 @@ symbol = "C"
 name = "carbon"
 z = 6
 standard_atomic_weight = "12.011"
+valence = [4, 2, -4]
+standard_molar_entropy = "5.74"
+entropy_source = "CRC Handbook of Chemistry and Physics, 97th ed. (2016), standard molar entropy S(298.15 K) of the element reference state"
 interval_lo = "12.0096"
 interval_hi = "12.0116"
 real = "CIAAW/IUPAC Standard Atomic Weights 2021 (interval element; conventional 12.011, terrestrial interval [12.0096, 12.0116] from 13C fractionation between marine carbonate and plant organic carbon)"
@@ -100,6 +106,9 @@ symbol = "N"
 name = "nitrogen"
 z = 7
 standard_atomic_weight = "14.007"
+valence = [-3, 3, 5]
+standard_molar_entropy = "191.61"
+entropy_source = "CRC Handbook of Chemistry and Physics, 97th ed. (2016), standard molar entropy S(298.15 K) of the element reference state"
 interval_lo = "14.00643"
 interval_hi = "14.00728"
 real = "CIAAW/IUPAC Standard Atomic Weights 2021 (interval element; conventional 14.007, terrestrial interval [14.00643, 14.00728])"
@@ -109,6 +118,9 @@ symbol = "O"
 name = "oxygen"
 z = 8
 standard_atomic_weight = "15.999"
+valence = [-2, -1]
+standard_molar_entropy = "205.15"
+entropy_source = "CRC Handbook of Chemistry and Physics, 97th ed. (2016), standard molar entropy S(298.15 K) of the element reference state"
 interval_lo = "15.99903"
 interval_hi = "15.99977"
 real = "CIAAW/IUPAC Standard Atomic Weights 2021 (interval element; conventional 15.999, terrestrial interval [15.99903, 15.99977])"
@@ -132,6 +144,9 @@ symbol = "Na"
 name = "sodium"
 z = 11
 standard_atomic_weight = "22.990"
+valence = [1]
+standard_molar_entropy = "51.30"
+entropy_source = "CRC Handbook of Chemistry and Physics, 97th ed. (2016), standard molar entropy S(298.15 K) of the element reference state"
 real = "CIAAW/IUPAC Standard Atomic Weights 2021 (mononuclidic, 23Na only)"
 
 [[element]]
@@ -139,6 +154,9 @@ symbol = "Mg"
 name = "magnesium"
 z = 12
 standard_atomic_weight = "24.305"
+valence = [2]
+standard_molar_entropy = "32.67"
+entropy_source = "CRC Handbook of Chemistry and Physics, 97th ed. (2016), standard molar entropy S(298.15 K) of the element reference state"
 interval_lo = "24.304"
 interval_hi = "24.307"
 real = "CIAAW/IUPAC Standard Atomic Weights 2021 (interval element; conventional 24.305, terrestrial interval [24.304, 24.307])"
@@ -148,6 +166,9 @@ symbol = "Al"
 name = "aluminium"
 z = 13
 standard_atomic_weight = "26.982"
+valence = [3]
+standard_molar_entropy = "28.30"
+entropy_source = "CRC Handbook of Chemistry and Physics, 97th ed. (2016), standard molar entropy S(298.15 K) of the element reference state"
 real = "CIAAW/IUPAC Standard Atomic Weights 2021 (mononuclidic, 27Al only)"
 
 [[element]]
@@ -155,6 +176,9 @@ symbol = "Si"
 name = "silicon"
 z = 14
 standard_atomic_weight = "28.085"
+valence = [4, -4]
+standard_molar_entropy = "18.81"
+entropy_source = "CRC Handbook of Chemistry and Physics, 97th ed. (2016), standard molar entropy S(298.15 K) of the element reference state"
 interval_lo = "28.084"
 interval_hi = "28.086"
 real = "CIAAW/IUPAC Standard Atomic Weights 2021 (interval element; conventional 28.085, terrestrial interval [28.084, 28.086])"
@@ -164,6 +188,9 @@ symbol = "P"
 name = "phosphorus"
 z = 15
 standard_atomic_weight = "30.974"
+valence = [5, 3, -3]
+standard_molar_entropy = "41.09"
+entropy_source = "CRC Handbook of Chemistry and Physics, 97th ed. (2016), standard molar entropy S(298.15 K) of the element reference state"
 real = "CIAAW/IUPAC Standard Atomic Weights 2021 (mononuclidic, 31P only)"
 
 [[element]]
@@ -171,6 +198,9 @@ symbol = "S"
 name = "sulfur"
 z = 16
 standard_atomic_weight = "32.06"
+valence = [-2, 4, 6]
+standard_molar_entropy = "32.07"
+entropy_source = "CRC Handbook of Chemistry and Physics, 97th ed. (2016), standard molar entropy S(298.15 K) of the element reference state"
 interval_lo = "32.059"
 interval_hi = "32.076"
 real = "CIAAW/IUPAC Standard Atomic Weights 2021 (interval element; conventional 32.06, terrestrial interval [32.059, 32.076])"
@@ -198,6 +228,9 @@ symbol = "K"
 name = "potassium"
 z = 19
 standard_atomic_weight = "39.098"
+valence = [1]
+standard_molar_entropy = "64.68"
+entropy_source = "CRC Handbook of Chemistry and Physics, 97th ed. (2016), standard molar entropy S(298.15 K) of the element reference state"
 real = "CIAAW/IUPAC Standard Atomic Weights 2021"
 
 [[element]]
@@ -205,6 +238,9 @@ symbol = "Ca"
 name = "calcium"
 z = 20
 standard_atomic_weight = "40.078"
+valence = [2]
+standard_molar_entropy = "41.59"
+entropy_source = "CRC Handbook of Chemistry and Physics, 97th ed. (2016), standard molar entropy S(298.15 K) of the element reference state"
 real = "CIAAW/IUPAC Standard Atomic Weights 2021"
 
 [[element]]
@@ -219,6 +255,9 @@ symbol = "Ti"
 name = "titanium"
 z = 22
 standard_atomic_weight = "47.867"
+valence = [4, 3, 2]
+standard_molar_entropy = "30.72"
+entropy_source = "CRC Handbook of Chemistry and Physics, 97th ed. (2016), standard molar entropy S(298.15 K) of the element reference state"
 real = "CIAAW/IUPAC Standard Atomic Weights 2021"
 
 [[element]]
@@ -233,6 +272,9 @@ symbol = "Cr"
 name = "chromium"
 z = 24
 standard_atomic_weight = "51.996"
+valence = [3, 6, 2]
+standard_molar_entropy = "23.77"
+entropy_source = "CRC Handbook of Chemistry and Physics, 97th ed. (2016), standard molar entropy S(298.15 K) of the element reference state"
 real = "CIAAW/IUPAC Standard Atomic Weights 2021"
 
 [[element]]
@@ -240,6 +282,9 @@ symbol = "Mn"
 name = "manganese"
 z = 25
 standard_atomic_weight = "54.938"
+valence = [2, 4, 7]
+standard_molar_entropy = "32.01"
+entropy_source = "CRC Handbook of Chemistry and Physics, 97th ed. (2016), standard molar entropy S(298.15 K) of the element reference state"
 real = "CIAAW/IUPAC Standard Atomic Weights 2021 (mononuclidic, 55Mn only)"
 
 [[element]]
@@ -247,6 +292,9 @@ symbol = "Fe"
 name = "iron"
 z = 26
 standard_atomic_weight = "55.845"
+valence = [2, 3]
+standard_molar_entropy = "27.28"
+entropy_source = "CRC Handbook of Chemistry and Physics, 97th ed. (2016), standard molar entropy S(298.15 K) of the element reference state"
 real = "CIAAW/IUPAC Standard Atomic Weights 2021"
 
 [[element]]
@@ -261,6 +309,9 @@ symbol = "Ni"
 name = "nickel"
 z = 28
 standard_atomic_weight = "58.693"
+valence = [2]
+standard_molar_entropy = "29.87"
+entropy_source = "CRC Handbook of Chemistry and Physics, 97th ed. (2016), standard molar entropy S(298.15 K) of the element reference state"
 real = "CIAAW/IUPAC Standard Atomic Weights 2021"
 
 [[element]]
