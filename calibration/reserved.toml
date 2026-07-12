@@ -2185,11 +2185,22 @@ category = "per_world"
 # the physical fields, never a biome or race label (Principles 8, 9); only these magnitudes are the
 # owner's. The dev-fixtures profile stands up labelled values so the harness runs. ---
 
+# RETIRED as authored inputs (authoring-defect cleanup, derive-vs-author, Principle 6):
+# `hydrology.saturation_slope` and `hydrology.saturation_e_ref` were TWO authored numbers encoding the SAME
+# Clausius-Clapeyron relation (double-authoring). On the Kelvin path (a world that declares
+# `hydrology.vapor_source_temperature`, below) both now DERIVE in environ.rs derive_saturation_index_tangent
+# from the volatile's measured specific latent heat (floor therm.latent_heat), its molar mass (periodic table
+# over its formula), the derived molar gas constant R = N_A*k_B, and the reference temperatures:
+# e_ref = e_s(T_ref)/e_s(T_source), slope = L*e_ref/(Rv*T_ref^2). The two entries below are kept ONLY as the
+# fail-loud FIXTURE FALLBACK for a NORMALISED world (the dev harness on the [0,1] temperature axis, where a
+# physical Kelvin curve is meaningless); the dev-fixtures profile carries their labelled 0.5 values. A
+# canonical Kelvin world never reads them.
+
 [[reserved]]
 id = "hydrology.saturation_slope"
-basis = "the affine slope of the saturation vapour pressure over temperature, the Clausius-Clapeyron tangent over the simulated band (laws::saturation_vapor_pressure): it sets how much less water cold air holds, so a cold humid cell crosses saturation and precipitates. Set from the physical Clausius-Clapeyron slope at the world's reference temperature over its temperature-axis scale"
+basis = "FIXTURE-FALLBACK ONLY (retired as an authored input): the affine slope of the saturation index over temperature the NORMALISED dev harness reads when it declares no hydrology.vapor_source_temperature; the Kelvin path DERIVES this (environ.rs derive_saturation_index_tangent, see the retirement note above). Not an owner-canon value: a Kelvin world derives it from the floor volatile's latent heat and molar mass"
 status = "set"
-set_by = "Owner Mirror sign-off 2026-07-09 (remainder delegated under the derive-gate)"
+set_by = "Owner Mirror sign-off 2026-07-09; retired to fixture-fallback by the authoring-defect cleanup 2026-07-12 (Kelvin path derives)"
 set_date = "2026-07-09"
 value = "0.0001048"
 unit = "mpa_per_temperature"
@@ -2202,18 +2213,24 @@ category = "per_world"
 # habitable-band midpoint, and it is the same absolute-temperature value the field is centred on
 # (Field::from_map_absolute), so the tangent's reference is read from the world's own mean rather than a
 # duplicate reserved scalar. EnvironCalib::from_manifest reads climate.mean_surface_temperature for it.
-# The tangent's slope (hydrology.saturation_slope) and value at t_ref (hydrology.saturation_e_ref) stay
-# reserved, now anchored at the world's own mean temperature.
 
 [[reserved]]
 id = "hydrology.saturation_e_ref"
-basis = "the saturation vapour pressure at the reference temperature, the physical saturation pressure of the world's condensing species at that temperature"
+basis = "FIXTURE-FALLBACK ONLY (retired as an authored input): the saturation index at the reference temperature the NORMALISED dev harness reads when it declares no hydrology.vapor_source_temperature; the Kelvin path DERIVES this (environ.rs derive_saturation_index_tangent, e_ref = e_s(T_ref)/e_s(T_source), see the retirement note above). Not an owner-canon value: a Kelvin world derives it from the floor volatile's latent heat and molar mass"
 status = "set"
-set_by = "Owner Mirror sign-off 2026-07-09 (remainder delegated under the derive-gate)"
+set_by = "Owner Mirror sign-off 2026-07-09; retired to fixture-fallback by the authoring-defect cleanup 2026-07-12 (Kelvin path derives)"
 set_date = "2026-07-09"
 value = "0.001596"
 unit = "mpa"
 source = "base-level liveliness step 2; crates/sim/src/environ.rs; laws::saturation_vapor_pressure"
+category = "per_world"
+
+[[reserved]]
+id = "hydrology.vapor_source_temperature"
+basis = "the world's warm vapour-source temperature T_source (Kelvin): the warmest saturated-air cell whose saturation vapour pressure normalises the moisture index e_s_index(T) = e_s(T)/e_s(T_source), the dimensionless [0,1] scale the worldgen moisture is compared on (the hydrology carries no dynamic vapour-pressure transport state yet, so e_s is an index, not an absolute pressure, the flagged deeper water-cycle arc). It DERIVES as climate.mean_surface_temperature + climate.latitude_temperature_range/2 (the equatorial cell of Field::from_map_absolute, the warmest cell the field represents). Its PRESENCE is the Kelvin-path opt-in for the derived saturation tangent (a world without it keeps the fixture-fallback slope/e_ref above). Set per-world from the world's own climate anchors; reserved here (unset) so a calibrated boot falls back rather than requiring it. DERIVE-FIRST NOTE: the sub-grid diurnal day-side peak is a warmer source needing the DiurnalSky insolation coupling, a follow-on"
+status = "reserved"
+unit = "kelvin"
+source = "climate.mean_surface_temperature + climate.latitude_temperature_range/2, the equatorial cell of crates/sim/src/runner.rs Field::from_map_absolute; crates/sim/src/environ.rs derive_saturation_index_tangent"
 category = "per_world"
 
 [[reserved]]

@@ -42,6 +42,8 @@
 
 use civsim_core::{Fixed, StateHasher};
 use civsim_physics::laws;
+use civsim_physics::periodic::PeriodicTable;
+use civsim_physics::PhysicsRegistry;
 use civsim_world::{Coord3, TileMap};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -121,7 +123,10 @@ impl ScalarField {
 #[derive(Clone, Copy, Debug)]
 pub struct EnvironCalib {
     // Saturation vapour pressure e_s = e_ref + slope * (T - T_ref), the affine Clausius-Clapeyron
-    // tangent (laws::saturation_vapor_pressure).
+    // tangent (laws::saturation_vapor_pressure). On a Kelvin world (one that declares a
+    // `hydrology.vapor_source_temperature`) `sat_slope` and `sat_e_ref` DERIVE from the volatile's
+    // measured latent heat and molar mass ([`derive_saturation_index_tangent`]), no longer two
+    // independently-authored numbers; the normalised dev fixture keeps its labelled affine pair.
     pub sat_slope: Fixed,
     pub sat_t_ref: Fixed,
     pub sat_e_ref: Fixed,
@@ -180,20 +185,161 @@ pub struct EnvironCalib {
     pub reference_water: Fixed,
 }
 
+/// The molar gas constant `R = N_A * k_B` DERIVED from the CODATA fundamentals (never an authored decimal),
+/// the same float-free composite compute the Stefan-Boltzmann sigma uses
+/// ([`crate::physiology::derived_stefan_boltzmann`]): the units-crate evaluates the relation EXACTLY as a
+/// rational and rounds ONCE to a fixed-point scale, and this projects it to the sim's Q32.32 `Fixed`. A pure,
+/// deterministic, memoized load constant, so it perturbs no canonical result. `R` sits comfortably inside
+/// Q32.32 (~8.314), so the projection is exact to the canonical resolution.
+pub fn derived_gas_constant() -> Fixed {
+    use std::sync::OnceLock;
+    static R: OnceLock<Fixed> = OnceLock::new();
+    *R.get_or_init(|| {
+        // The same significance target and guard the sigma derivation uses (physiology.rs); at these values
+        // the consumed Q32.32 value is invariant to them (they are fixed-point representation knobs).
+        let (bits, scale) = civsim_units::compute::derived_composite_bits(
+            &civsim_units::fundamentals::GAS_CONSTANT,
+            30,
+            1,
+            Fixed::FRAC_BITS,
+        )
+        .expect("the molar gas constant must derive from the fundamentals");
+        let bits = i64::try_from(bits).expect("R at its derived scale fits i64");
+        let q32 = civsim_units::rescale_bits(bits, scale, Fixed::FRAC_BITS)
+            .expect("R rescale to Q32.32 must not overflow");
+        Fixed::from_bits(q32)
+    })
+}
+
+/// Parse a chemical formula string (`"H2O"`, `"CO2"`, `"CH4"`) into its element counts, so a volatile's molar
+/// mass derives from its OWN declared formula plus the periodic table rather than a hardcoded molecule (an
+/// alien volatile is a data row, Principle 11). Each element is one uppercase letter, optional lowercase
+/// letters (a two-letter symbol such as `He` or `Cl`), and an optional decimal count (default one). Returns
+/// `None` on a malformed or empty formula.
+fn parse_formula(formula: &str) -> Option<BTreeMap<String, u32>> {
+    let mut counts: BTreeMap<String, u32> = BTreeMap::new();
+    let chars: Vec<char> = formula.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        if !chars[i].is_ascii_uppercase() {
+            return None;
+        }
+        let mut symbol = String::new();
+        symbol.push(chars[i]);
+        i += 1;
+        while i < chars.len() && chars[i].is_ascii_lowercase() {
+            symbol.push(chars[i]);
+            i += 1;
+        }
+        let mut digits = String::new();
+        while i < chars.len() && chars[i].is_ascii_digit() {
+            digits.push(chars[i]);
+            i += 1;
+        }
+        let count: u32 = if digits.is_empty() {
+            1
+        } else {
+            digits.parse().ok()?
+        };
+        *counts.entry(symbol).or_insert(0) += count;
+    }
+    if counts.is_empty() {
+        None
+    } else {
+        Some(counts)
+    }
+}
+
+/// The moisture-index saturation tangent `(slope, e_ref)` DERIVED for the world's condensing volatile, the
+/// affine pair the hydrology's [`laws::saturation_vapor_pressure`] reads. It retires the double-authored
+/// `hydrology.saturation_slope` and `hydrology.saturation_e_ref`: both encode the SAME Clausius-Clapeyron
+/// relation, so authoring both authors it twice. Here both DERIVE from the volatile's MEASURED specific latent
+/// heat of vaporization (the floor `therm.latent_heat`), its molar mass (the periodic table over its own
+/// formula), the DERIVED molar gas constant ([`derived_gas_constant`], `R = N_A*k_B`), and two per-world
+/// reference temperatures.
+///
+/// The hydrology precipitation and evaporation compare `e_s` against the worldgen `[0, 1]` moisture field, so
+/// `e_s` is a dimensionless SATURATION INDEX `e_s(T)/e_s(T_source)` (the local saturation as a fraction of the
+/// world's warm vapour source), not an absolute pressure. So the derivation stays in that index space:
+/// `e_ref = e_s(T_ref)/e_s(T_source) = exp((L/R_v)*(1/T_source - 1/T_ref))` (the constant-latent-heat
+/// Clausius-Clapeyron saturation ratio, `T_source > T_ref` so the exponent is negative and `e_ref < 1`), and
+/// `slope = L*e_ref/(R_v*T_ref^2)` (the named [`laws::saturation_slope_from_latent_heat`], the tangent of that
+/// index at `T_ref`). `R_v = R/M` is the specific gas constant. `t_ref` is the world's mean surface temperature
+/// (Kelvin), `t_source` its warm vapour-source temperature (the moisture-index normalization). Returns `None`
+/// if the temperatures are degenerate or the floor lacks the volatile or a primitive.
+pub fn derive_saturation_index_tangent(t_ref: Fixed, t_source: Fixed) -> Option<(Fixed, Fixed)> {
+    if t_ref <= Fixed::ZERO || t_source <= Fixed::ZERO {
+        return None;
+    }
+    let floor = PhysicsRegistry::ground().ok()?;
+    // The condensing volatile is keyed by the floor substance id, the same "water" the surface-cooling latent
+    // heat reads (run_world derive_surface_cooling); a data-defined condensing-species selector is the alien
+    // follow-on, consistent with that existing read.
+    let water = floor.substance("water")?;
+    // The measured specific latent heat of vaporization L (floor therm.latent_heat, stored kJ/kg -> J/kg).
+    let latent_kj = water.vector.get("therm.latent_heat").copied()?;
+    let l_vap = latent_kj.checked_mul(Fixed::from_int(1000))?;
+    // The specific gas constant R_v = R / M: the DERIVED molar gas constant over the volatile's molar mass,
+    // itself derived from the volatile's OWN formula plus the periodic table (never an authored molar mass).
+    // molar_mass is g/mol, so R_v = R * 1000 / M_gmol yields J/(kg*K).
+    let counts = parse_formula(&water.formula)?;
+    let periodic = PeriodicTable::standard().ok()?;
+    let m_gmol = periodic.molar_mass(&counts).ok()?;
+    if m_gmol <= Fixed::ZERO {
+        return None;
+    }
+    let r = derived_gas_constant();
+    let r_v = r.checked_mul(Fixed::from_int(1000))?.checked_div(m_gmol)?;
+    if r_v <= Fixed::ZERO {
+        return None;
+    }
+    // e_ref = e_s(T_ref)/e_s(T_source) = exp((L/R_v)*(1/T_source - 1/T_ref)), the constant-L Clausius-Clapeyron
+    // saturation index at the reference temperature.
+    let l_over_rv = l_vap.checked_div(r_v)?;
+    let inv_source = Fixed::ONE.checked_div(t_source)?;
+    let inv_ref = Fixed::ONE.checked_div(t_ref)?;
+    let exponent = l_over_rv.checked_mul(inv_source - inv_ref)?;
+    let e_ref = exponent.exp();
+    // slope = L*e_ref/(R_v*T_ref^2), the tangent of that index at T_ref (the named Clausius-Clapeyron slope law).
+    let slope = laws::saturation_slope_from_latent_heat(l_vap, t_ref, e_ref, r_v);
+    Some((slope, e_ref))
+}
+
 impl EnvironCalib {
     /// The environmental calibration read fail-loud from the manifest (Principle 11): every forcing
     /// constant is a reserved value that refuses to build while unset.
     pub fn from_manifest(m: &CalibrationManifest) -> Result<EnvironCalib, CalibrationError> {
+        // The saturation tangent's reference temperature DERIVES from the world's mean surface
+        // temperature (the habitable-band midpoint the tangent is most accurate around), the same
+        // absolute-temperature value the temperature field is centred on (Field::from_map_absolute),
+        // rather than a duplicate reserved scalar (derive-vs-author, Principle 6; the retired
+        // hydrology.saturation_t_ref duplicated it).
+        let sat_t_ref = m.require_fixed("climate.mean_surface_temperature")?;
+        // The tangent's SLOPE and E_REF DERIVE from the condensing volatile's measured latent heat and
+        // molar mass on the Kelvin path, retiring the double-authored `hydrology.saturation_slope` and
+        // `hydrology.saturation_e_ref` (both encoded the SAME Clausius-Clapeyron relation, so authoring
+        // both authored it twice). The opt-in signal AND the moisture-index normalization reference is the
+        // per-world `hydrology.vapor_source_temperature` (the warmest saturated-air cell, T_ref + range/2);
+        // a normalised dev fixture that declares none keeps its labelled affine pair, byte-identical.
+        let (sat_slope, sat_e_ref) = match m.require_fixed("hydrology.vapor_source_temperature") {
+            Ok(t_source) => {
+                let tangent = derive_saturation_index_tangent(sat_t_ref, t_source);
+                tangent.ok_or_else(|| CalibrationError::BadValue {
+                    id: "hydrology.vapor_source_temperature".to_string(),
+                    detail:
+                        "the condensing volatile's saturation index failed to derive from the floor"
+                            .to_string(),
+                })?
+            }
+            Err(_) => (
+                m.require_fixed("hydrology.saturation_slope")?,
+                m.require_fixed("hydrology.saturation_e_ref")?,
+            ),
+        };
         Ok(EnvironCalib {
-            sat_slope: m.require_fixed("hydrology.saturation_slope")?,
-            // The saturation tangent's reference temperature DERIVES from the world's mean surface
-            // temperature (the habitable-band midpoint the tangent is most accurate around), the same
-            // absolute-temperature value the temperature field is centred on (Field::from_map_absolute),
-            // rather than a duplicate reserved scalar (derive-vs-author, Principle 6; the retired
-            // hydrology.saturation_t_ref duplicated it). The tangent's slope and value at t_ref stay the
-            // owner's reserved calibration, now anchored at the world's own mean temperature.
-            sat_t_ref: m.require_fixed("climate.mean_surface_temperature")?,
-            sat_e_ref: m.require_fixed("hydrology.saturation_e_ref")?,
+            sat_slope,
+            sat_t_ref,
+            sat_e_ref,
             sat_es_cap: m.require_fixed("hydrology.saturation_cap")?,
             precip_rate: m.require_fixed("hydrology.precipitation_rate")?,
             evap_a_still: m.require_fixed("hydrology.evaporation_still")?,
@@ -4655,5 +4801,63 @@ mod tests {
             after_heavy < settled,
             "sustained over-harvest holds the food far below the ungrazed level: {after_heavy:?} < {settled:?}"
         );
+    }
+
+    #[test]
+    fn the_gas_constant_derives_from_the_fundamentals() {
+        // R = N_A * k_B derives from the CODATA fundamentals (never an authored decimal), landing near
+        // 8.314462618 J/(mol*K) at Q32.32 (the value fits comfortably inside the representable window).
+        let r = derived_gas_constant();
+        assert!(
+            r > Fixed::from_ratio(8310, 1000) && r < Fixed::from_ratio(8320, 1000),
+            "R derives to ~8.314 J/(mol*K), got {r:?}"
+        );
+    }
+
+    #[test]
+    fn a_chemical_formula_parses_to_its_element_counts() {
+        // The volatile's molar mass derives from its OWN formula (an alien volatile is a data row), so the
+        // parser must count H2O, a two-letter symbol, and a bare (count-one) element correctly.
+        let water = parse_formula("H2O").expect("H2O parses");
+        assert_eq!(water.get("H"), Some(&2));
+        assert_eq!(water.get("O"), Some(&1));
+        let calcite = parse_formula("CaCO3").expect("CaCO3 parses (two-letter symbol)");
+        assert_eq!(calcite.get("Ca"), Some(&1));
+        assert_eq!(calcite.get("C"), Some(&1));
+        assert_eq!(calcite.get("O"), Some(&3));
+        assert!(parse_formula("").is_none(), "an empty formula is rejected");
+        assert!(parse_formula("2O").is_none(), "a leading digit is rejected");
+    }
+
+    #[test]
+    fn the_saturation_index_tangent_derives_from_the_floor_volatile() {
+        // The moisture-index saturation tangent DERIVES from water's measured latent heat, its molar mass,
+        // and the derived gas constant, at Mirror's reference (288 K) and warm-source (mean + range/2 = 311 K)
+        // temperatures. The constant-latent-heat Clausius-Clapeyron index e_ref = e_s(288)/e_s(311) lands near
+        // 0.255 (below one, since the reference is colder than the source), and the tangent slope near 0.0164
+        // index/K, reproducing the retired authored pair's Clausius-Clapeyron basis (0.20, 0.0131) from the
+        // field-consistent 311 K source rather than the old 315 K estimate.
+        let t_ref = Fixed::from_int(288);
+        let t_source = Fixed::from_int(311);
+        let (slope, e_ref) =
+            derive_saturation_index_tangent(t_ref, t_source).expect("the water tangent derives");
+        assert!(
+            e_ref > Fixed::from_ratio(24, 100) && e_ref < Fixed::from_ratio(27, 100),
+            "e_ref derives to ~0.255 (a saturation index below one), got {e_ref:?}"
+        );
+        assert!(
+            slope > Fixed::from_ratio(15, 1000) && slope < Fixed::from_ratio(18, 1000),
+            "the tangent slope derives to ~0.0164 index/K, got {slope:?}"
+        );
+        // A WARMER vapour source lowers the index (the reference is a smaller fraction of a warmer saturation),
+        // the Clausius-Clapeyron monotonicity, so the mechanism responds to the world's own climate.
+        let (_, e_ref_warmer) = derive_saturation_index_tangent(t_ref, Fixed::from_int(330))
+            .expect("the warmer-source tangent derives");
+        assert!(
+            e_ref_warmer < e_ref,
+            "a warmer vapour source gives a lower saturation index: {e_ref_warmer:?} < {e_ref:?}"
+        );
+        // A degenerate temperature yields None rather than a divide-by-zero.
+        assert!(derive_saturation_index_tangent(Fixed::ZERO, t_source).is_none());
     }
 }

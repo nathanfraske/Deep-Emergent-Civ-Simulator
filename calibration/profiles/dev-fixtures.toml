@@ -352,7 +352,7 @@ source = "dev fixture for Part 25/28 R-REPRO; crates/sim/src/world.rs Reproducti
 
 [[reserved]]
 id = "hydrology.saturation_slope"
-basis = "FIXTURE placeholder; the affine slope of saturation vapour pressure over temperature (laws::saturation_vapor_pressure), so cold cells saturate at a lower vapour pressure and rain"
+basis = "FIXTURE placeholder for the NORMALISED [0,1] dev temperature axis (this profile declares no hydrology.vapor_source_temperature, so EnvironCalib::from_manifest reads this labelled affine slope rather than deriving it): the slope of saturation vapour pressure over temperature (laws::saturation_vapor_pressure), so cold cells saturate lower and rain. A Kelvin world DERIVES this from the floor volatile's latent heat and molar mass"
 status = "set"
 value = "0.5"
 unit = "mpa_per_temperature"
@@ -364,7 +364,7 @@ source = "dev fixture for base-level liveliness step 2 hydrology; crates/sim/src
 
 [[reserved]]
 id = "hydrology.saturation_e_ref"
-basis = "FIXTURE placeholder; the reference saturation vapour pressure at the reference temperature"
+basis = "FIXTURE placeholder for the NORMALISED [0,1] dev temperature axis (read only when no hydrology.vapor_source_temperature is declared; a Kelvin world DERIVES e_ref from the floor volatile's latent heat and molar mass): the reference saturation vapour pressure at the reference temperature"
 status = "set"
 value = "0.5"
 unit = "mpa"
