@@ -587,6 +587,16 @@ pub fn kernel_contract(kernel: &str) -> Option<KernelContract> {
             ports: const { &[cur("inductance", 1), cur("current", 2)] },
             output: Monomial,
         },
+        "radiogenic_heat" => KernelContract {
+            ports: const {
+                &[cur("concentration", 1), cur("specific_heat_production", 1)]
+            },
+            output: Monomial,
+        },
+        "radiogenic_decay" => KernelContract {
+            ports: const { &[prior("reservoir", 1), cur("decay_constant", 1), dt("dt")] },
+            output: Asserted("N_new = N*(1 - lambda*dt); a first-order fold of the prior reservoir over the tick, an accumulate instance with a reservoir-proportional negative rate, not a port monomial"),
+        },
         _ => return None,
     })
 }

@@ -3223,6 +3223,44 @@ pub fn elapsed_age(clock: Fixed, formation_stamp: Fixed) -> Fixed {
     sat_sub(clock, formation_stamp).max(ZERO)
 }
 
+// --- Radiogenic internal heat (the geology floor's heat-per-mass source; a first consumer of the memory
+// primitives above) ---
+
+/// Radiogenic HEAT production: the internal heat produced per unit mass by a heat-producing isotope reservoir,
+/// `H = concentration * specific_heat_production` (W/kg). The concentration is the isotope's mass fraction (kg
+/// isotope per kg rock, dimensionless) and the specific heat production is the heat per unit mass of the
+/// isotope (W per kg of isotope), so the product is the rock's heat-per-mass; the caller sums it over the
+/// heat-producing isotopes (U-238, U-235, Th-232, K-40). A monomial, saturating so an overflow pins at the cap.
+/// Both inputs are the geology floor's stored-scaled values (concentration at x1e6, specific production at x1e6);
+/// the scales compose to the internal-heat scale (1e6 * 1e6 = 1e12), so the stored product IS the stored heat and
+/// no rescale is needed (the scale choice in geology_floor.toml is what makes this hold).
+pub fn radiogenic_heat(concentration: Fixed, specific_heat_production: Fixed) -> Fixed {
+    concentration
+        .checked_mul(specific_heat_production)
+        .unwrap_or(Fixed::MAX)
+}
+
+/// Radiogenic reservoir DECAY: the first-order decay of a heat-producing isotope reservoir over the tick,
+/// `N_new = N - lambda*N*DT = N*(1 - lambda*DT)`, the discrete first-order step (the exact exponential is the
+/// R-GPU-CANON-PIN follow-on). This is an [`accumulate`] instance whose rate is reservoir-proportional
+/// (`rate = -lambda*N`), so the concentration spends down over geological time and the radiogenic heat falls
+/// with it. Floored at zero (a reservoir never goes negative, and a `lambda*DT` past one cannot remove more
+/// than is present); the caller stores the decremented reservoir as resident state, exactly as the induction
+/// laws store the prior flux. `decay_constant` is the PER-TICK rate the caller bridges from the geology floor's
+/// SI decay constant (geo.decay_constant, stored at x1e18) and the reserved seconds-per-tick, not the raw stored
+/// datum: the raw SI constant (~1e-18 /s) is sub-epsilon in Q32.32, so the SI-to-tick bridge is what makes the
+/// step representable, and `dt` is the tick count over which it steps.
+pub fn radiogenic_decay(reservoir: Fixed, decay_constant: Fixed, dt: Fixed) -> Fixed {
+    if dt <= ZERO || decay_constant <= ZERO {
+        return reservoir;
+    }
+    let lost = reservoir
+        .checked_mul(decay_constant)
+        .and_then(|x| x.checked_mul(dt))
+        .unwrap_or(reservoir);
+    sat_sub(reservoir, lost).max(ZERO)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3278,6 +3316,44 @@ mod tests {
         // A parcel just formed has zero age; a stamp never after now floors at zero.
         assert_eq!(elapsed_age(clock, clock), Fixed::ZERO);
         assert_eq!(elapsed_age(clock, Fixed::from_int(200)), Fixed::ZERO);
+    }
+
+    #[test]
+    fn radiogenic_heat_is_concentration_times_specific_production() {
+        // Exactly representable fixed-point values (halves, not the unrepresentable 1/100), so
+        // the product is exact and the identity is tested without rounding noise.
+        let conc = Fixed::from_ratio(1, 2); // half the mass is the isotope
+        let specific = Fixed::from_int(6); // W per kg of isotope
+        assert_eq!(
+            radiogenic_heat(conc, specific),
+            Fixed::from_int(3),
+            "heat per mass is the mass fraction times the isotope's specific heat production"
+        );
+        // A depleted reservoir produces no heat.
+        assert_eq!(radiogenic_heat(Fixed::ZERO, specific), Fixed::ZERO);
+    }
+
+    #[test]
+    fn radiogenic_decay_spends_the_reservoir_down_and_never_goes_negative() {
+        let n0 = Fixed::from_int(100);
+        // A quarter per unit time is exactly representable, so the step is exact.
+        let lambda = Fixed::from_ratio(1, 4);
+        let dt = Fixed::ONE;
+        // First-order step: N_new = N*(1 - lambda*dt) = 100*(1 - 0.25) = 75.
+        let n1 = radiogenic_decay(n0, lambda, dt);
+        assert_eq!(n1, Fixed::from_int(75), "the reservoir decays first-order");
+        // It keeps falling, monotone (the recorded past of a spent engine).
+        let n2 = radiogenic_decay(n1, lambda, dt);
+        assert!(n2 < n1, "the reservoir spends down over time");
+        // A zero tick or a zero decay constant is a no-op (no drift).
+        assert_eq!(radiogenic_decay(n0, lambda, Fixed::ZERO), n0);
+        assert_eq!(radiogenic_decay(n0, Fixed::ZERO, dt), n0);
+        // A lambda*dt past one cannot remove more than is present: floors at zero, never negative.
+        assert_eq!(
+            radiogenic_decay(n0, Fixed::from_int(5), dt),
+            Fixed::ZERO,
+            "the reservoir floors at zero"
+        );
     }
 
     // Dev fixtures: representable caps for the determinism harness, never canon. The
