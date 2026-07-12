@@ -47,6 +47,7 @@ pub mod flood;
 pub mod label;
 pub mod lod;
 pub mod noise;
+pub mod redistribute;
 pub mod solve;
 pub mod structure;
 pub mod terrain;
