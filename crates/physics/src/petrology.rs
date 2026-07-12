@@ -17,10 +17,12 @@
 //! DERIVED by minimizing the total Gibbs free energy over the candidate-phase registry
 //! ([`crate::petrology_data`]) rather than authored as a fixed mineral sequence. The assemblage EMERGES from
 //! the thermodynamics and the world's own composition (Principle 8): a Terran bulk-silicate composition lands
-//! olivine and pyroxene, an alien chemistry lands its own phases, because the mechanism reads the data-defined
-//! registry and the per-world element budget, never a hardcoded CIPW-style allocation order (which would
-//! author a Terran igneous sequence, the value-line violation the design forbids). The mechanism is fixed
-//! Rust; the phase membership, their thermodynamics, and the bulk composition are data (Principle 11).
+//! the silicate assemblage its registry carries (olivine end-members in the seed; pyroxene, spinel, and melt
+//! are registry rows a fuller dataset adds), an alien chemistry lands its own phases, because the mechanism
+//! reads the data-defined registry and the per-world element budget, never a hardcoded CIPW-style allocation
+//! order (which would author a Terran igneous sequence, the value-line violation the design forbids). The
+//! mechanism is fixed Rust; the phase membership, their thermodynamics, and the bulk composition are data
+//! (Principle 11).
 //!
 //! This module carries the ATOMIC BUILDING BLOCK, the per-phase Gibbs free energy at a pressure and
 //! temperature; the assemblage-minimization over the element budget is the sibling follow-on that composes
@@ -35,7 +37,9 @@ use std::collections::BTreeMap;
 /// The standard-state reference PRESSURE of the thermodynamic dataset, one bar. The enthalpy of formation and
 /// the standard entropy in the registry are tabulated at this reference, so the pressure work term is measured
 /// from it. A definitional anchor of the cited data (like the boiling-point reference pressure in the
-/// Rankine-Kirchhoff law), not a per-world value.
+/// Rankine-Kirchhoff law), not a per-world value. It is the SEED dataset's reference state; declaring the
+/// reference state as registry data (so a world could carry an alien dataset with a different reference)
+/// is the follow-on that lets datasets mix, and until then one internally consistent dataset is required.
 pub const REFERENCE_PRESSURE_BAR: i32 = 1;
 
 /// The standard-state reference TEMPERATURE of the thermodynamic dataset, 298.15 K, the temperature the
@@ -71,7 +75,11 @@ pub fn reference_temperature_k() -> Fixed {
 /// values (constant in temperature and pressure), so the heat-capacity integral that bends `H(T)` and `S(T)`
 /// and the compressibility and thermal expansion that bend `V(P, T)` are the flagged follow-on the registry
 /// grows the optional coefficient fields for. The leading-order energy is exact for the standard state and
-/// carries the correct sign of the temperature and pressure dependence.
+/// carries the correct sign of the temperature and pressure dependence. The per-phase energy uses the
+/// fixed-point operators rather than the checked composition-layer arithmetic: it is overflow-safe for all
+/// physical phase data (bounded enthalpy, entropy, and molar volume) across geological pressures, and the
+/// assemblage-level sum that could otherwise grow with the composition is separately bounded by the unit
+/// normalization in [`stable_assemblage`].
 pub fn apparent_gibbs_energy(
     enthalpy_formation_kj_per_mol: Fixed,
     standard_entropy_j_per_mol_k: Fixed,
@@ -463,6 +471,26 @@ pub fn assemblage_density(
     total_mass.checked_div(total_volume)
 }
 
+/// The CRUSTAL DENSITY a bulk composition reaches at a temperature and pressure, in grams per cubic centimetre:
+/// the density of the stable mineral assemblage the composition minimizes to ([`stable_assemblage`] then
+/// [`assemblage_density`]). This is the composition-to-density bridge the isostasy read consumes: the elevation
+/// a crustal column floats at is set by its density and thickness through the buoyancy law, so a dense mafic
+/// crust and a light felsic crust float at different heights from their own chemistry alone, never an authored
+/// per-rock-type density table (Principle 8). DERIVED end to end, the density falls out of the composition, the
+/// conditions, and the data-defined registry. Returns `None` if the composition reaches no assemblage (a data
+/// gap the registry grows to close) or a phase is missing from the table. Byte-neutral: no consumer is wired
+/// yet; the interior isostasy reads this density across the `GeodynamicColumn` interface once both lanes land.
+pub fn crustal_density(
+    composition: &[(String, Fixed)],
+    temperature_k: Fixed,
+    pressure_bar: Fixed,
+    registry: &PhaseRegistry,
+    table: &PeriodicTable,
+) -> Option<Fixed> {
+    let assemblage = stable_assemblage(composition, temperature_k, pressure_bar, registry)?;
+    assemblage_density(&assemblage, registry, table)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -649,10 +677,12 @@ mod tests {
         // (atomic weights) and the registry (molar volumes), and it is scale-invariant so the normalization
         // does not touch it. For pure forsterite it is the hand computation 140.69 g/mol over 43.79 cm^3/mol.
         // This checks the COMPUTATION, not the physics: 3.213 is the registry's own mass over volume, so
-        // validating it against a measured olivine density would be circular. The separate DATA-accuracy note
-        // (the registry molar volume gives 3.21 versus real olivine near 3.27, the compressibility follow-on
-        // tightening it) is not what this test asserts. Density discriminates the assemblage, the property the
-        // isostasy read leans on: a pure-quartz assemblage reads lower.
+        // validating it against a measured density would be circular. As a physical aside (not what the test
+        // asserts): 3.21 g/cm^3 is the correct room-condition density of PURE forsterite (measured near 3.22);
+        // real mantle olivine near 3.27 is denser because it is Fe-bearing, a COMPOSITION difference (add the
+        // fayalite end-member), not a pressure correction (which is zero at the 1 bar tested). Density
+        // discriminates the assemblage, the property the isostasy read leans on: a pure-quartz assemblage reads
+        // lower.
         let r = PhaseRegistry::standard().expect("registry loads");
         let t = PeriodicTable::standard().expect("table loads");
         let fo = stable_assemblage(
@@ -759,5 +789,45 @@ source = "synthetic test: the dense, high-pressure polymorph"
             "the assemblage is invariant to the composition's absolute scale"
         );
         assert_eq!(phase_names(&a), vec!["forsterite".to_string()]);
+    }
+
+    #[test]
+    fn the_crustal_density_derives_from_chemistry_so_mafic_is_denser_than_felsic() {
+        // The composition-to-density bridge the isostasy leans on: a mafic (forsterite, Mg-rich) crust derives
+        // a higher density than a felsic (silica-rich) crust, purely from the stable assemblage each
+        // composition minimizes to, so the two float at different isostatic heights from their own chemistry
+        // alone, never an authored per-rock-type density.
+        let r = PhaseRegistry::standard().expect("registry loads");
+        let t = PeriodicTable::standard().expect("table loads");
+        let mafic = crustal_density(
+            &[el("Mg", 2), el("Si", 1), el("O", 4)],
+            Fixed::from_int(300),
+            Fixed::from_int(1),
+            &r,
+            &t,
+        )
+        .expect("the mafic composition derives a density");
+        let felsic = crustal_density(
+            &[el("Si", 1), el("O", 2)],
+            Fixed::from_int(300),
+            Fixed::from_int(1),
+            &r,
+            &t,
+        )
+        .expect("the felsic composition derives a density");
+        assert!(
+            mafic.to_f64_lossy() > 3.0,
+            "the mafic (forsterite) crust is dense, got {}",
+            mafic.to_f64_lossy()
+        );
+        assert!(
+            felsic.to_f64_lossy() < 2.8,
+            "the felsic (silica) crust is light, got {}",
+            felsic.to_f64_lossy()
+        );
+        assert!(
+            mafic > felsic,
+            "mafic crust derives a higher density than felsic, so it floats lower"
+        );
     }
 }
