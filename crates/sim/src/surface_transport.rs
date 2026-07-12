@@ -17,9 +17,10 @@
 //! EXTENSIBLE driver substrate: the transport-and-deposition solve over the driver kernels is the fixed Rust,
 //! the driver MEMBERSHIP is data (a driver is a data row carrying its transport-law form, its property key-set,
 //! its primitive, and the conservation reservoirs its mass touches). This module holds the substrate: the
-//! CONSERVATION LEDGER the whole budget closes against ([`SurfaceMassBudget`]), and the driver-row CONTRACT
+//! CONSERVATION LEDGER the whole budget closes against ([`SurfaceMassBudget`]), the driver-row CONTRACT
 //! ([`DriverRow`], [`DriverRegistry`], [`TransportKernelId`]) that makes the driver membership data over a fixed
-//! kernel vocabulary.
+//! kernel vocabulary, and the SNAPSHOT-APPLY reconciliation ([`apportion`], [`reconcile_column`]) that lets many
+//! writers change a column within one tick deterministically and conservatively.
 //!
 //! [`SurfaceMassBudget`] is the FOUR-RESERVOIR conservation ledger. A pure-erosion budget with only
 //! column-to-column deposition cannot close its mass budget for a dissolving, a volatile, or a low-gravity
@@ -294,6 +295,83 @@ impl DriverRegistry {
     }
 }
 
+/// Apportion an available integer amount among a set of non-negative demands by the exact-integer
+/// largest-remainder method (Hamilton's method), the deterministic core of the snapshot-apply reconciliation.
+/// When several writers contest a column whose available mass is less than their total demand, the available is
+/// split so each writer's claim is exact and order-independent. If the demands sum to at most `available`, each
+/// is met in full. Otherwise each demander gets `floor(available * demand_i / total_demand)`, and the leftover
+/// (`available` minus the sum of those floors) is handed out one unit at a time to the demanders with the
+/// largest fractional remainders (`available * demand_i mod total_demand`), TIES BROKEN BY THE LOWER INDEX, so
+/// the result is a pure function of the inputs (Principle 3, Principle 10). The allocations sum to
+/// `min(total_demand, available)` exactly (conservative: no unit is created or lost) and each allocation is at
+/// most its demand. It works in the raw integer mass domain (a `Fixed` mass is passed as its bits) so the split
+/// is exact; `i128` intermediates hold `available * demand` without overflow. A negative `available` or demand
+/// reads as zero.
+pub fn apportion(available: i64, demands: &[i64]) -> Vec<i64> {
+    let avail = i128::from(available.max(0));
+    let clamped: Vec<i128> = demands.iter().map(|&d| i128::from(d.max(0))).collect();
+    let total: i128 = clamped.iter().sum();
+    if total <= avail {
+        // Every demand met in full (the clamped non-negative demand).
+        return clamped.iter().map(|&d| d as i64).collect();
+    }
+    if avail == 0 {
+        return vec![0; demands.len()];
+    }
+    // total > avail > 0: the largest-remainder split.
+    let mut alloc: Vec<i64> = Vec::with_capacity(clamped.len());
+    let mut remainders: Vec<(i128, usize)> = Vec::with_capacity(clamped.len());
+    let mut floor_sum: i128 = 0;
+    for (i, &d) in clamped.iter().enumerate() {
+        let num = avail * d;
+        alloc.push((num / total) as i64);
+        floor_sum += num / total;
+        remainders.push((num % total, i));
+    }
+    // The leftover lies in `[0, clamped.len())`: each floor is within one unit of the exact share.
+    let mut leftover = avail - floor_sum;
+    // Largest remainder first, ties by the lower index: a total order, so no non-deterministic tie.
+    remainders.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
+    for &(_, i) in &remainders {
+        if leftover <= 0 {
+            break;
+        }
+        alloc[i] += 1;
+        leftover -= 1;
+    }
+    alloc
+}
+
+/// Reconcile one column's writer demands under the SNAPSHOT-APPLY discipline (raw integer mass units; a `Fixed`
+/// mass is passed as its bits, the `Fixed` and [`crate::material::EarthworkField`] wiring is the arming step).
+/// Each writer's `signed_demand` is computed against the tick SNAPSHOT (`available`, the column's mass at tick
+/// start), never against a value another writer already moved this tick, so the apply is order-independent.
+/// Additions (a positive demand, deposition or uplift) apply in full. Removals (a negative demand, erosion or
+/// subsidence) are limited by the snapshot available mass: if the total removal exceeds it, the available is
+/// APPORTIONED among the removing writers by [`apportion`], so no writer's honored removal exceeds its fair
+/// share and the column never drops below zero. Returns each writer's APPLIED signed delta (in the input order,
+/// because each writer routes its honored mass to its own reservoir fate) and the column's NET change. The
+/// honored removals sum to `min(total_removal, available)` exactly, so the reconciliation is conservative and
+/// deterministic. The net is accumulated in `i128` and saturated into `i64` so an extreme demand set cannot
+/// overflow.
+pub fn reconcile_column(available: i64, signed_demands: &[i64]) -> (Vec<i64>, i64) {
+    // The removal magnitude each writer asks for (zero for an adding writer), apportioned against the snapshot.
+    let removals: Vec<i64> = signed_demands
+        .iter()
+        .map(|&d| if d < 0 { d.saturating_neg() } else { 0 })
+        .collect();
+    let honored = apportion(available, &removals);
+    let mut applied = Vec::with_capacity(signed_demands.len());
+    let mut net: i128 = 0;
+    for (i, &d) in signed_demands.iter().enumerate() {
+        let a = if d >= 0 { d } else { -honored[i] };
+        applied.push(a);
+        net += i128::from(a);
+    }
+    let net = net.clamp(i128::from(i64::MIN), i128::from(i64::MAX)) as i64;
+    (applied, net)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -530,5 +608,99 @@ mod tests {
             "a name lookup is a convenience over the walk"
         );
         assert!(reg.get("absent").is_none());
+    }
+
+    #[test]
+    fn an_uncontested_apportionment_meets_every_demand_in_full() {
+        // Total demand at or below the available: each demander gets exactly what it asked.
+        assert_eq!(apportion(10, &[3, 3, 3]), vec![3, 3, 3]);
+        assert_eq!(
+            apportion(9, &[3, 3, 3]),
+            vec![3, 3, 3],
+            "sum equal to available"
+        );
+        assert_eq!(apportion(100, &[1, 0, 5]), vec![1, 0, 5]);
+    }
+
+    #[test]
+    fn a_contested_apportionment_splits_by_largest_remainder_conservatively() {
+        // total 9 > available 7: floor(7*3/9) = 2 each (sum 6), leftover 1 to the largest remainder; the three
+        // remainders are equal (7*3 mod 9 = 3 each), so the tie breaks to the lowest index.
+        let a = apportion(7, &[3, 3, 3]);
+        assert_eq!(a, vec![3, 2, 2], "leftover unit to index 0 on the tie");
+        assert_eq!(
+            a.iter().sum::<i64>(),
+            7,
+            "the split sums to the available exactly"
+        );
+        // No allocation exceeds its demand.
+        for (alloc, demand) in a.iter().zip([3, 3, 3]) {
+            assert!(*alloc <= demand);
+        }
+    }
+
+    #[test]
+    fn the_apportionment_is_conservative_and_bounded_on_an_uneven_contest() {
+        // A larger demander takes a larger share, the split still sums to the available, none over-allocated.
+        let demands = [10, 3, 1];
+        let a = apportion(7, &demands);
+        assert_eq!(a.iter().sum::<i64>(), 7, "sums to the available");
+        for (alloc, demand) in a.iter().zip(demands) {
+            assert!(*alloc <= demand, "no writer over its demand");
+            assert!(*alloc >= 0);
+        }
+        assert!(
+            a[0] >= a[1] && a[1] >= a[2],
+            "a larger demand takes no smaller a share"
+        );
+    }
+
+    #[test]
+    fn the_apportionment_is_a_pure_function_of_its_inputs() {
+        // Deterministic and order-independent: the same inputs give a bit-identical split (Principle 3, 10).
+        let demands = [5, 2, 8, 1, 4];
+        assert_eq!(apportion(11, &demands), apportion(11, &demands));
+        // Zero available yields all zero; negative inputs read as zero.
+        assert_eq!(apportion(0, &[3, 4]), vec![0, 0]);
+        assert_eq!(apportion(-5, &[3, 4]), vec![0, 0]);
+        assert_eq!(
+            apportion(10, &[-3, 4]),
+            vec![0, 4],
+            "a negative demand reads as zero"
+        );
+    }
+
+    #[test]
+    fn reconcile_applies_additions_in_full_and_removals_within_the_snapshot() {
+        // A column with 100 available; two writers add, one removes within the available: all honored in full.
+        let (applied, net) = reconcile_column(100, &[20, -30, 10]);
+        assert_eq!(applied, vec![20, -30, 10]);
+        assert_eq!(net, 0, "20 + 10 added, 30 removed");
+    }
+
+    #[test]
+    fn reconcile_apportions_removals_that_exceed_the_snapshot_so_the_column_never_goes_negative() {
+        // Two erosion writers demand 60 and 60 (total 120) from a column with only 80 available: the 80 is
+        // apportioned (40 each here, equal demands), so the honored removal is exactly the available, and a
+        // simultaneous addition of 10 applies in full.
+        let (applied, net) = reconcile_column(80, &[-60, -60, 10]);
+        assert_eq!(
+            applied,
+            vec![-40, -40, 10],
+            "the 80 available split evenly between the removers"
+        );
+        assert_eq!(net, -70, "10 added, 80 removed");
+        // The removals never exceed the snapshot available (the column does not go below zero).
+        let removed: i64 = applied.iter().filter(|&&a| a < 0).map(|&a| -a).sum();
+        assert_eq!(
+            removed, 80,
+            "honored removal equals the available, not the 120 demanded"
+        );
+    }
+
+    #[test]
+    fn reconcile_is_a_no_op_on_no_writers_or_zero_demands() {
+        assert_eq!(reconcile_column(50, &[]), (vec![], 0));
+        assert_eq!(reconcile_column(50, &[0, 0]), (vec![0, 0], 0));
     }
 }
