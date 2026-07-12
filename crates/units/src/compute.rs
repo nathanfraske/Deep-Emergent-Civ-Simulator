@@ -27,7 +27,7 @@
 //! per-tick canonical path.
 
 use crate::bignum::{BigRat, BigUint};
-use crate::fundamentals::{fundamental, Composite};
+use crate::fundamentals::{fundamental, Composite, Fundamental};
 
 /// Evaluate a composite's declared formula over its named inputs, EXACTLY as a rational. `resolve` maps a
 /// symbol (`pi`, `k_B`, ...) to its exact rational value. The returned rational is the composite's true
@@ -132,6 +132,25 @@ pub fn composite_scale_bits(
     canonical_scale: u32,
 ) -> Result<u32, String> {
     let value = BigRat::from_decimal_str(composite.value)?;
+    let lg = value.floor_log2() as i32;
+    Ok(crate::derive_scale_bits(lg, lg, sig_target, guard, canonical_scale).scale_bits)
+}
+
+/// The per-quantity fixed-point scale a raw fundamental is stored at when a consumer reads it at a
+/// scale, derived from the fundamental's own magnitude bracket and the caller's global significance
+/// target and guard (the R-UNITS-PIN reserved knobs), through the crate's [`crate::derive_scale_bits`].
+/// The same mechanism as [`composite_scale_bits`], applied to a fundamental: a fundamental such as the
+/// gravitational constant (magnitude about `2^-34`, below the canonical Q32.32 epsilon) derives a finer
+/// scale that holds it, so it is representable rather than truncating to zero. The scale is a function
+/// of the quantity's own magnitude plus the two reserved knobs, never an independent per-fundamental
+/// dial.
+pub fn fundamental_scale_bits(
+    fund: &Fundamental,
+    sig_target: u32,
+    guard: u32,
+    canonical_scale: u32,
+) -> Result<u32, String> {
+    let value = BigRat::from_decimal_str(fund.value)?;
     let lg = value.floor_log2() as i32;
     Ok(crate::derive_scale_bits(lg, lg, sig_target, guard, canonical_scale).scale_bits)
 }
@@ -531,5 +550,30 @@ mod tests {
         let a = compute_composite_at_scale(&STEFAN_BOLTZMANN, 45, 55).unwrap();
         let b = compute_composite_at_scale(&STEFAN_BOLTZMANN, 60, 55).unwrap();
         assert_eq!(a, b);
+    }
+
+    #[test]
+    fn the_gravitational_constant_derives_a_scale_that_represents_it() {
+        use crate::fundamentals::GRAVITATIONAL_CONSTANT;
+        // G ~ 6.674e-11 is below the canonical Q32.32 epsilon (~2.3e-10), so at the canonical scale it
+        // truncates to zero: that is why a raw fundamental needs its own derived per-quantity scale.
+        let g = BigRat::from_decimal_str(GRAVITATIONAL_CONSTANT.value).unwrap();
+        assert_eq!(
+            g.round_to_scale(32),
+            Some(0),
+            "G underflows Q32.32, which is what the derived scale fixes"
+        );
+        // The R-UNITS-PIN scale mechanism derives a finer scale from G's own magnitude (dev-fixture knobs:
+        // significance target 30 bits, guard 1), at which G is representable as a non-zero magnitude.
+        let scale = fundamental_scale_bits(&GRAVITATIONAL_CONSTANT, 30, 1, 32).unwrap();
+        assert!(
+            scale > 32,
+            "G derives a scale finer than the canonical 32, got {scale}"
+        );
+        let bits = g.round_to_scale(scale).unwrap();
+        assert!(
+            bits > 0,
+            "G is representable (non-zero) at its derived scale {scale}, got {bits}"
+        );
     }
 }

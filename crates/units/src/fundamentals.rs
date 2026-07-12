@@ -15,8 +15,11 @@
 //! The closed table of fundamental physical constants: the ONE authored universal layer of the
 //! value-authoring line (AGENTIC_ADDENDUM section 9, the fundamental-constants floor). The universal authored
 //! layer reduces to exactly the fundamental constants reality measures and cannot derive from anything deeper
-//! (`c`, `k_B`, `h`, `e`, `eps_0`, `N_A`, the handful this engine's physics reaches). The list is small,
-//! closed, and does not grow, because reality's list does not grow. Everything DERIVABLE derives from these:
+//! (`c`, `k_B`, `h`, `e`, `eps_0`, `N_A`, `G`, the handful this engine's physics reaches). The list is small
+//! and bounded by reality's own fundamentals: it grows only when the engine's physics reaches a further one of
+//! them (the gravitational constant `G` joined when the genesis-forward stellar and orbital physics arrived as
+//! its first consumer), never an invented number, and never beyond the constants reality measures. Everything
+//! DERIVABLE derives from these:
 //! a composite such as the Stefan-Boltzmann sigma is COMPUTED from the fundamentals, never authored as its own
 //! number.
 //!
@@ -102,15 +105,30 @@ pub const AVOGADRO: Fundamental = Fundamental {
     provenance: "CODATA 2018 (SI-defining since the 2019 SI redefinition, exact)",
 };
 
-/// The closed, non-growing list of the fundamental constants this engine's physics reaches. Reality's list
-/// does not grow, so neither does this one (AGENTIC_ADDENDUM section 9).
-pub const FUNDAMENTALS: [Fundamental; 6] = [
+/// The Newtonian constant of gravitation. Unlike the SI-defining fundamentals above, G is MEASURED,
+/// not exact: it is the least precisely known fundamental (its value has resisted tightening for
+/// decades), so its provenance carries the relative standard uncertainty. It is the fundamental the
+/// genesis-forward stellar and orbital physics reaches (Kepler's third law, the escape velocity, the
+/// mass-luminosity relation), joining the floor as its first consumer arrives.
+pub const GRAVITATIONAL_CONSTANT: Fundamental = Fundamental {
+    symbol: "G",
+    name: "Newtonian constant of gravitation",
+    value: "6.67430e-11",
+    unit: "m^3/(kg*s^2)",
+    provenance: "CODATA 2018 (measured, relative standard uncertainty 2.2e-5)",
+};
+
+/// The list of the fundamental constants this engine's physics reaches, bounded by reality's own set. It
+/// grows only when the physics reaches a further one of reality's measured fundamentals (G joined for the
+/// genesis-forward stellar and orbital physics), never an invented number (AGENTIC_ADDENDUM section 9).
+pub const FUNDAMENTALS: [Fundamental; 7] = [
     SPEED_OF_LIGHT,
     BOLTZMANN,
     PLANCK,
     ELEMENTARY_CHARGE,
     VACUUM_PERMITTIVITY,
     AVOGADRO,
+    GRAVITATIONAL_CONSTANT,
 ];
 
 /// A composite physical constant: computed from the fundamentals, never authored as its own number
@@ -276,7 +294,7 @@ mod tests {
 
     #[test]
     fn every_fundamental_value_parses_finite_and_positive() {
-        // A magnitude guard over ALL six fundamentals, not only the three the sigma drift-check consumes: a
+        // A magnitude guard over ALL seven fundamentals, not only the three the sigma drift-check consumes: a
         // raw fundamental has no internal derivation to check a wrong DIGIT against (that is human review
         // against the recorded provenance), but a malformed, non-finite, or non-positive value is a defect a
         // cheap self-consistent test catches for the whole table.
@@ -313,5 +331,30 @@ mod tests {
         assert_eq!(fundamental("k_B"), Some(&BOLTZMANN));
         assert!(fundamental("not_a_constant").is_none());
         assert_eq!(composite("sigma"), Some(&STEFAN_BOLTZMANN));
+    }
+
+    #[test]
+    fn the_gravitational_constant_is_the_seventh_measured_fundamental() {
+        assert_eq!(
+            FUNDAMENTALS.len(),
+            7,
+            "G joined the floor as the seventh fundamental"
+        );
+        let g = fundamental("G").expect("G is in the fundamentals table");
+        assert_eq!(g, &GRAVITATIONAL_CONSTANT);
+        assert_eq!(g.name, "Newtonian constant of gravitation");
+        assert_eq!(g.unit, "m^3/(kg*s^2)");
+        // G is MEASURED, not SI-defining-exact: its provenance carries the uncertainty, unlike c/h/k_B/e/N_A.
+        assert!(
+            g.provenance.contains("measured"),
+            "G's provenance must record it as measured, not exact: {}",
+            g.provenance
+        );
+        // The value parses and sits at the expected order of magnitude (~6.674e-11). f64 in a test only.
+        let v: f64 = g.value.parse().expect("G's value parses");
+        assert!(
+            (6.6e-11..6.8e-11).contains(&v),
+            "G is about 6.674e-11, got {v:e}"
+        );
     }
 }
