@@ -375,6 +375,72 @@ pub fn stream_power_exponents(
     }
 }
 
+/// DERIVE the entrainment threshold, the critical bed SHEAR STRESS at which a grain begins to move, from the
+/// Shields relation `tau_c = shields_number * (rho_s - rho_f) * g * d`. This is the physical threshold behind the
+/// fluid-shear driver's `theta`, derived rather than authored: the grain density `rho_s` and the fluid density
+/// `rho_f` are composition-derived (the petrology and fluid-property data), the gravity `g` is planetary geometry,
+/// the grain size `d` is the fracturing driver's product, and the ONLY reserved input is the dimensionless
+/// `shields_number`, a universal function of the grain Reynolds number near 0.045 in the rough-turbulent limit,
+/// reserved once with basis rather than per-world. So the entrainment threshold leaves the per-world reserved
+/// list. The liquid-versus-gas difference is data here: a dense liquid and a thin gas differ only through their
+/// `rho_f`, not a code branch.
+///
+/// The buoyant excess density `rho_s - rho_f` must be positive: a grain no denser than its fluid is not entrained
+/// from the bed by shear (it floats, a different transport mode), so that case is refused fail-loud rather than
+/// returning a nonsensical non-positive threshold. The reserved number, the gravity, and the grain size must be
+/// positive. The products are checked so an extreme input fails loud rather than wrapping silently. The result is
+/// a critical shear STRESS; mapping it to the driver's shear-proxy `theta` is the arming step, where the
+/// proxy-to-stress constants are known.
+pub fn shields_critical_shear_stress(
+    shields_number: Fixed,
+    grain_density: Fixed,
+    fluid_density: Fixed,
+    gravity: Fixed,
+    grain_size: Fixed,
+) -> Result<Fixed, CalibrationError> {
+    if shields_number <= Fixed::ZERO {
+        return Err(CalibrationError::BadValue {
+            id: "surface.shields_number".to_string(),
+            detail: format!(
+                "the dimensionless Shields number must be positive; got {}",
+                shields_number.to_f64_lossy()
+            ),
+        });
+    }
+    if gravity <= Fixed::ZERO {
+        return Err(CalibrationError::BadValue {
+            id: "surface.shields_gravity".to_string(),
+            detail: format!(
+                "the surface gravity must be positive; got {}",
+                gravity.to_f64_lossy()
+            ),
+        });
+    }
+    if grain_size <= Fixed::ZERO {
+        return Err(CalibrationError::BadValue {
+            id: "surface.shields_grain_size".to_string(),
+            detail: format!(
+                "the grain size must be positive; got {}",
+                grain_size.to_f64_lossy()
+            ),
+        });
+    }
+    if grain_density <= fluid_density {
+        return Err(CalibrationError::BadValue {
+            id: "surface.shields_buoyancy".to_string(),
+            detail: format!(
+                "a grain no denser than its fluid is not bed-entrained by shear (grain {} <= fluid {}); a buoyant grain is a different transport mode",
+                grain_density.to_f64_lossy(),
+                fluid_density.to_f64_lossy()
+            ),
+        });
+    }
+    let excess_density = grain_density - fluid_density;
+    let t1 = mul_or_overflow(shields_number, excess_density, "surface.shields_threshold")?;
+    let t2 = mul_or_overflow(t1, gravity, "surface.shields_threshold")?;
+    mul_or_overflow(t2, grain_size, "surface.shields_threshold")
+}
+
 /// The result of one [`fluid_shear`] pass: the flow routing, the drainage area, the entrained mass each column
 /// gives up, and the sediment each cell carries downstream. The kernel is the SOURCE half of the fluvial budget:
 /// it does not lower the elevation ledger (the snapshot-apply reconciliation applies `entrained` as the column
@@ -1149,6 +1215,130 @@ mod tests {
         );
         assert!(
             stream_power_exponents(IncisionProcessModel::UnitStreamPower, (1, 2), (0, 1)).is_err()
+        );
+    }
+
+    #[test]
+    fn the_shields_threshold_derives_from_the_excess_density_gravity_and_grain_size() {
+        // tau_c = shields * (rho_s - rho_f) * g * d. With shields = 1/2, excess = 2, g = 10, d = 1:
+        // 0.5 * 2 * 10 * 1 = 10, an exact check on the derivation.
+        let tau = shields_critical_shear_stress(
+            Fixed::from_ratio(1, 2),
+            Fixed::from_int(3),
+            Fixed::from_int(1),
+            Fixed::from_int(10),
+            Fixed::from_int(1),
+        )
+        .unwrap();
+        assert_eq!(tau, Fixed::from_int(10));
+    }
+
+    #[test]
+    fn a_denser_grain_a_stronger_gravity_or_a_larger_grain_raises_the_threshold_a_denser_fluid_lowers_it(
+    ) {
+        let base = shields_critical_shear_stress(
+            Fixed::from_ratio(1, 2),
+            Fixed::from_int(3),
+            Fixed::from_int(1),
+            Fixed::from_int(10),
+            Fixed::from_int(1),
+        )
+        .unwrap();
+        let denser_grain = shields_critical_shear_stress(
+            Fixed::from_ratio(1, 2),
+            Fixed::from_int(4),
+            Fixed::from_int(1),
+            Fixed::from_int(10),
+            Fixed::from_int(1),
+        )
+        .unwrap();
+        let denser_fluid = shields_critical_shear_stress(
+            Fixed::from_ratio(1, 2),
+            Fixed::from_int(3),
+            Fixed::from_int(2),
+            Fixed::from_int(10),
+            Fixed::from_int(1),
+        )
+        .unwrap();
+        let stronger_gravity = shields_critical_shear_stress(
+            Fixed::from_ratio(1, 2),
+            Fixed::from_int(3),
+            Fixed::from_int(1),
+            Fixed::from_int(20),
+            Fixed::from_int(1),
+        )
+        .unwrap();
+        assert!(
+            denser_grain > base,
+            "a denser grain entrains at a higher shear"
+        );
+        assert!(
+            denser_fluid < base,
+            "a denser fluid lowers the threshold (the liquid-versus-gas difference is data)"
+        );
+        assert!(
+            stronger_gravity > base,
+            "stronger gravity holds the grain down"
+        );
+    }
+
+    #[test]
+    fn a_buoyant_grain_is_refused_fail_loud() {
+        // A grain no denser than its fluid is not bed-entrained by shear (it floats): refused rather than a
+        // non-positive threshold.
+        assert!(shields_critical_shear_stress(
+            Fixed::from_ratio(1, 2),
+            Fixed::from_int(1),
+            Fixed::from_int(2),
+            Fixed::from_int(10),
+            Fixed::from_int(1)
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn a_non_positive_shields_input_is_refused_fail_loud() {
+        let ok = (
+            Fixed::from_ratio(1, 2),
+            Fixed::from_int(3),
+            Fixed::from_int(1),
+        );
+        assert!(
+            shields_critical_shear_stress(Fixed::ZERO, ok.1, ok.2, Fixed::from_int(10), Fixed::ONE)
+                .is_err(),
+            "a non-positive Shields number is refused"
+        );
+        assert!(
+            shields_critical_shear_stress(ok.0, ok.1, ok.2, Fixed::ZERO, Fixed::ONE).is_err(),
+            "a non-positive gravity is refused"
+        );
+        assert!(
+            shields_critical_shear_stress(ok.0, ok.1, ok.2, Fixed::from_int(10), Fixed::ZERO)
+                .is_err(),
+            "a non-positive grain size is refused"
+        );
+    }
+
+    #[test]
+    fn the_shields_derivation_is_a_pure_function() {
+        let a = shields_critical_shear_stress(
+            Fixed::from_ratio(45, 1000),
+            Fixed::from_ratio(265, 100),
+            Fixed::ONE,
+            Fixed::from_ratio(98, 10),
+            Fixed::from_ratio(1, 100),
+        );
+        let b = shields_critical_shear_stress(
+            Fixed::from_ratio(45, 1000),
+            Fixed::from_ratio(265, 100),
+            Fixed::ONE,
+            Fixed::from_ratio(98, 10),
+            Fixed::from_ratio(1, 100),
+        );
+        assert_eq!(a, b);
+        assert!(
+            a.unwrap() > Fixed::ZERO,
+            "an Earth-like grain has a positive threshold"
         );
     }
 
