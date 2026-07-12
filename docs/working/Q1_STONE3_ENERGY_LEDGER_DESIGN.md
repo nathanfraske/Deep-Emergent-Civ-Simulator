@@ -164,7 +164,15 @@ energy losses are the recorded clamp-drops and every clamp accounts every unit, 
 the matter gate passing. The true energy-LEAK guard stays Piece B (intake-equals-loss), which has the
 food conservation partner, on B's Fork-4.
 
-Honest limit: the per-being `clamp_drops` accessor is the readout substrate, but a living-run readout of
-the satiation-versus-starvation ratio needs a per-tick capture BEFORE the cull, because the `living`
-founders go extinct so the end-of-run survivors carry no drops. That aggregation hook (a debug-only
-runner accumulator summed each tick before the death cull) is the next step, scoped not assumed.
+The living readout is wired: a debug-only `Embodiment` accumulator folds each tick's per-being
+clamp-drops PER AXIS into a run total BEFORE the cull (so a founder that dies this tick still counts its
+final tick's losses), and `run_world` prints it for any embodied run. A PD1 catch shaped it: the coarse
+population total on `living` reads satiation-cap dominant (about 6615 versus 0.65), which would say "food
+left on the table", but the per-axis breakdown reverses that on the food axis. On the ENERGY reserve the
+`living` founders drop only at the STARVATION FLOOR (0.65 starvation, zero satiation): the metabolic
+drain outran intake, the founders could not gather enough before starving, not a food-quantity wall. The
+6615 satiation is on the CONDITION regulated band (a set-and-regulated health band, not a conserved
+metabolic pool), a clamp churn that is not a food or energy-pool signal, so the diagnostic's meaningful
+signal is on the metabolic reserves (energy, water). Byte-neutral: the accumulator, the tick hook, and
+the print are all `#[cfg(debug_assertions)]`, so all five pins hold bit-exact and the pinned and
+scheduled orders stay in step (the totals are never folded into the hash).

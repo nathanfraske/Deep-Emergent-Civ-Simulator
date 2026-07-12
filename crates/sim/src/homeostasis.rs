@@ -459,6 +459,19 @@ impl Homeostasis {
         (satiation, starvation)
     }
 
+    /// DEBUG-ONLY (Piece A): the clamp-drops broken out PER AXIS as `(axis, satiation_waste,
+    /// starvation_shortfall)`, so the readout can separate the food reserve (energy) from a gas-exchange
+    /// reserve (respiration) whose satiation waste is ordinary gas turnover, not a food signal. Keeping the
+    /// axis identity is what makes the founder-starvation localiser honest: "satiation dominates" only
+    /// answers the food question when it is the ENERGY axis dominating.
+    #[cfg(debug_assertions)]
+    pub fn clamp_drops_by_axis(&self) -> Vec<(HomeostaticAxisId, Fixed, Fixed)> {
+        self.reserves
+            .iter()
+            .map(|(id, s)| (*id, s.drop_satiation(), s.drop_starvation()))
+            .collect()
+    }
+
     /// DEBUG-ONLY (Piece A): clear every reserve's clamp-drop diagnostic, called at a tick boundary so
     /// the readout is per-tick rather than cumulative.
     #[cfg(debug_assertions)]

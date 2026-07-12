@@ -1918,6 +1918,54 @@ fn snapshot(
         discovery_signal(runner);
     }
 
+    // The clamp-drop diagnostic (Q1 Stone-3 Piece A): the population's run-total reserve losses at the
+    // clamps PER AXIS, the second lens on the founder starvation. The food question keys on the ENERGY
+    // axis: a starvation-floor total there means the metabolic drain outran intake (the founders could
+    // not gather enough); a satiation-cap total there means energy arrived but the reserve was full (not
+    // a food-quantity wall). Reading it per axis keeps a gas-exchange reserve's ordinary turnover from
+    // reading as a food signal. Debug-only, so a release run prints nothing and moves no pin.
+    #[cfg(debug_assertions)]
+    if let Some(emb) = runner.embodiment() {
+        let by_axis = emb.clamp_drops_by_axis();
+        if !by_axis.is_empty() {
+            let dec = |x: civsim_core::Fixed| x.to_bits() as f64 / 4_294_967_296.0;
+            let label = |a: HomeostaticAxisId| -> String {
+                if a == ENERGY {
+                    "energy(food)".into()
+                } else if a == WATER {
+                    "water".into()
+                } else if a == TEMPERATURE {
+                    "temperature".into()
+                } else if a == INTEGRITY {
+                    "integrity".into()
+                } else {
+                    format!("{a:?}")
+                }
+            };
+            println!(
+                "  clamp-drops (Piece A, run total per axis: satiation-cap | starvation-floor):"
+            );
+            for (axis, (sat, starv)) in by_axis {
+                println!(
+                    "    {}: satiation {:.4} | starvation {:.4}",
+                    label(*axis),
+                    dec(*sat),
+                    dec(*starv)
+                );
+            }
+            if let Some((sat, starv)) = by_axis.get(&ENERGY) {
+                let verdict = if starv > sat {
+                    "STARVATION-FLOOR (energy drain outran intake: a gathering/intake-rate or endowment wall)"
+                } else if sat > starv {
+                    "SATIATION-CAP (energy arrived but the reserve was full: not a food-quantity wall)"
+                } else {
+                    "balanced or no energy drops"
+                };
+                println!("    founder energy verdict: {verdict}");
+            }
+        }
+    }
+
     println!("  state_hash: {:032x}", runner.state_hash());
     current
 }
