@@ -747,12 +747,24 @@ impl MaterialField {
 /// field is the elevation bookkeeping that lets the dig and the deposit reshape the terrain, not only move
 /// matter between a cell and a carrier. Off the run path until the dig affordance wires it, so declaring it
 /// leaves every scenario byte-identical (the opt-in empty-default pattern).
+///
+/// Two SOURCES accumulate onto the same effective elevation, kept in separate maps so a being can dig into
+/// geologically-lifted crust and each source stays legible: the being EARTHWORK delta (dig and mound, the
+/// original source), and the GEOLOGICAL delta (seed crust plus isostatic relaxation, and later the interior
+/// uplift read, the genesis-forward Stage-3 surface lane). The physics reads the sum ([`Self::total_delta`]);
+/// both maps are empty by default, so a world that arms neither is byte-identical to the pre-ledger baseline
+/// (the opt-in empty-default pattern holds for the added geological source too).
 #[derive(Clone, Debug, Default)]
 pub struct EarthworkField {
-    /// The elevation delta at each reworked column, keyed by its ground [`Coord3`] (z zero). A column not
-    /// present reads a zero delta (the absence convention). A column driven back to a zero delta is pruned,
-    /// so the canonical walk stays minimal.
+    /// The being-earthwork elevation delta at each reworked column, keyed by its ground [`Coord3`] (z zero). A
+    /// column not present reads a zero delta (the absence convention). A column driven back to a zero delta is
+    /// pruned, so the canonical walk stays minimal.
     deltas: BTreeMap<Coord3, Fixed>,
+    /// The GEOLOGICAL elevation delta at each column (seed crust, isostatic relaxation, and the interior
+    /// uplift read), keyed by its ground [`Coord3`]. Empty by default and off the run path until a scenario
+    /// arms the geology, so declaring it leaves every scenario byte-identical. The genesis-forward Stage-3
+    /// surface source writes it; the physics reads it summed with the being delta.
+    geological: BTreeMap<Coord3, Fixed>,
 }
 
 impl EarthworkField {
@@ -761,16 +773,31 @@ impl EarthworkField {
         EarthworkField::default()
     }
 
-    /// Whether no column has been reworked (the opt-out state a scenario that declares no earthwork stays
-    /// in, so its `state_hash` fold folds nothing and it replays bit-for-bit).
+    /// Whether no column has been reworked by EITHER source (being earthwork or geology), the opt-out state a
+    /// scenario that arms neither stays in, so its `state_hash` fold folds nothing and it replays bit-for-bit.
     pub fn is_empty(&self) -> bool {
-        self.deltas.is_empty()
+        self.deltas.is_empty() && self.geological.is_empty()
     }
 
-    /// The elevation delta at a column (positive a mound, negative a pit); an unreworked column reads zero.
-    /// The column is the ground [`Coord3`] (`Coord3::ground(x, y)`); the caller passes the surface column.
+    /// The BEING-earthwork elevation delta at a column (positive a mound, negative a pit); an unreworked
+    /// column reads zero. The column is the ground [`Coord3`] (`Coord3::ground(x, y)`); the caller passes the
+    /// surface column. This is the dig-and-mound source alone; [`Self::total_delta`] adds the geological one.
     pub fn delta(&self, column: Coord3) -> Fixed {
         self.deltas.get(&column).copied().unwrap_or(Fixed::ZERO)
+    }
+
+    /// The GEOLOGICAL elevation delta at a column (seed crust, isostatic relaxation, the interior uplift read);
+    /// an unlifted column reads zero. The genesis-forward Stage-3 surface source writes this.
+    pub fn geological_delta(&self, column: Coord3) -> Fixed {
+        self.geological.get(&column).copied().unwrap_or(Fixed::ZERO)
+    }
+
+    /// The EFFECTIVE elevation delta the physics reads: the being earthwork plus the geological delta, so a
+    /// dug pit in lifted crust reads both. Saturating so an extreme sum stays representable. When the geology
+    /// is unarmed (the geological map empty) this equals [`Self::delta`], so the read is byte-neutral.
+    pub fn total_delta(&self, column: Coord3) -> Fixed {
+        self.delta(column)
+            .saturating_add(self.geological_delta(column))
     }
 
     /// Move a column's elevation by `change` (negative to dig down, positive to mound up), accumulating onto
@@ -788,16 +815,104 @@ impl EarthworkField {
         }
     }
 
-    /// Fold the earthwork into a hash in canonical (column, delta) order, for the runner's `state_hash`
-    /// beside [`MaterialField::hash_into`]. An empty field folds nothing, so an opted-out run is unchanged;
-    /// nothing calls it on the run path yet, so the substrate is hash-neutral until the dig affordance wires
-    /// it. The `BTreeMap` walks in canonical key order, so the fold is reproducible and thread-invariant.
+    /// Move a column's GEOLOGICAL elevation by `change` (negative subsidence, positive uplift), accumulating
+    /// onto any prior geological rework. A column driven back to zero is pruned to keep the canonical walk
+    /// minimal. The genesis-forward Stage-3 surface source (seed crust, isostatic relaxation, the interior
+    /// uplift read) writes through this, the geological sibling of [`Self::adjust`]; a pure deterministic
+    /// bookkeeping write with no randomness.
+    pub fn adjust_geological(&mut self, column: Coord3, change: Fixed) {
+        if change == Fixed::ZERO {
+            return;
+        }
+        let entry = self.geological.entry(column).or_insert(Fixed::ZERO);
+        *entry = entry.saturating_add(change);
+        if *entry == Fixed::ZERO {
+            self.geological.remove(&column);
+        }
+    }
+
+    /// Fold the earthwork into a hash for the runner's `state_hash` beside [`MaterialField::hash_into`]. Both
+    /// sources fold in canonical key order, the being deltas then the geological deltas, each entry written
+    /// without a length prefix so an EMPTY map folds nothing: a scenario that arms neither source is
+    /// hash-unchanged, and one that arms only the being earthwork is identical to before the geological source
+    /// was added. The `BTreeMap` walks in canonical key order, so the fold is reproducible and thread-invariant.
     pub fn hash_into(&self, h: &mut StateHasher) {
         for (column, delta) in &self.deltas {
             h.write_i64(column.x as i64);
             h.write_i64(column.y as i64);
             h.write_i64(column.z as i64);
             h.write_fixed(*delta);
+        }
+        for (column, delta) in &self.geological {
+            h.write_i64(column.x as i64);
+            h.write_i64(column.y as i64);
+            h.write_i64(column.z as i64);
+            h.write_fixed(*delta);
+        }
+    }
+}
+
+/// The per-column geodynamic interface state lives in the SHARED [`civsim_physics::geodynamics`] contract, so
+/// the surface elevation-ledger lane (here) and the interior convection lane (the geology floor) import the
+/// same typed boundary rather than a private copy; re-exported here for the resident field below.
+pub use civsim_physics::geodynamics::GeodynamicColumn;
+
+/// The sparse per-column [`GeodynamicColumn`] field, the resident interface between the interior and surface
+/// geodynamics lanes. Empty by default and off the run path until a genesis pass arms the geology, so
+/// declaring it leaves every scenario byte-identical (the opt-in empty-default pattern, the sibling of
+/// [`EarthworkField`]). A column not present reads the zero default.
+#[derive(Clone, Debug, Default)]
+pub struct GeodynamicField {
+    columns: BTreeMap<Coord3, GeodynamicColumn>,
+}
+
+impl GeodynamicField {
+    /// An empty field: no column carries geodynamic state.
+    pub fn new() -> GeodynamicField {
+        GeodynamicField::default()
+    }
+
+    /// Whether no column carries geodynamic state (the opt-out state a scenario that arms no geology stays in,
+    /// so its `state_hash` fold folds nothing and it replays bit-for-bit).
+    pub fn is_empty(&self) -> bool {
+        self.columns.is_empty()
+    }
+
+    /// The geodynamic state at a column; an unset column reads the zero default (the absence convention). The
+    /// column is the ground [`Coord3`] (`Coord3::ground(x, y)`).
+    pub fn get(&self, column: Coord3) -> GeodynamicColumn {
+        self.columns.get(&column).copied().unwrap_or_default()
+    }
+
+    /// Walk the columns that carry geodynamic state, in canonical [`Coord3`] key order (the `BTreeMap` walk),
+    /// so a consumer that folds over them (the surface isostatic relaxation) is reproducible and
+    /// thread-invariant. An empty field yields nothing, so a consumer over an unarmed geology does no work and
+    /// stays byte-neutral.
+    pub fn iter(&self) -> impl Iterator<Item = (Coord3, GeodynamicColumn)> + '_ {
+        self.columns.iter().map(|(coord, state)| (*coord, *state))
+    }
+
+    /// Set a column's geodynamic state. An all-zero state is pruned to keep the canonical walk minimal, so a
+    /// column driven back to the default drops out (the same discipline as the earthwork prune).
+    pub fn set(&mut self, column: Coord3, state: GeodynamicColumn) {
+        if state == GeodynamicColumn::default() {
+            self.columns.remove(&column);
+        } else {
+            self.columns.insert(column, state);
+        }
+    }
+
+    /// Fold the field into a hash beside [`EarthworkField::hash_into`], each entry written without a length
+    /// prefix so an EMPTY field folds nothing (an unarmed geology is hash-unchanged). The `BTreeMap` walks in
+    /// canonical key order, so the fold is reproducible and thread-invariant.
+    pub fn hash_into(&self, h: &mut StateHasher) {
+        for (column, state) in &self.columns {
+            h.write_i64(column.x as i64);
+            h.write_i64(column.y as i64);
+            h.write_i64(column.z as i64);
+            h.write_fixed(state.crustal_density);
+            h.write_fixed(state.crustal_thickness);
+            h.write_fixed(state.isostatic_elevation);
         }
     }
 }
@@ -1830,6 +1945,132 @@ values = [
         EarthworkField::new().hash_into(&mut h);
         let h0 = StateHasher::new();
         assert_eq!(h.finish(), h0.finish(), "an empty earthwork folds no bytes");
+    }
+
+    #[test]
+    fn the_geological_source_sums_with_the_being_earthwork_and_stays_byte_neutral_when_unarmed() {
+        let a = Coord3::ground(2, 3);
+        let b = Coord3::ground(5, 1);
+        let hash = |ew: &EarthworkField| {
+            let mut h = StateHasher::new();
+            ew.hash_into(&mut h);
+            h.finish()
+        };
+        // A field with only being earthwork is byte-identical to one built by the old delta-only path: the
+        // empty geological map folds no bytes, so adding the geological source did not perturb the hash.
+        let mut being_only = EarthworkField::new();
+        being_only.adjust(a, Fixed::from_int(-3));
+        being_only.adjust(b, Fixed::from_int(4));
+        assert!(
+            being_only.geological_delta(a) == Fixed::ZERO
+                && being_only.geological_delta(b) == Fixed::ZERO
+        );
+        assert_eq!(
+            being_only.total_delta(a),
+            being_only.delta(a),
+            "with the geology unarmed the effective delta is the being delta alone"
+        );
+        // The geological source accumulates, prunes to zero, and is a distinct source from the being delta.
+        let mut ew = EarthworkField::new();
+        ew.adjust(a, Fixed::from_int(-3)); // a being pit
+        ew.adjust_geological(a, Fixed::from_int(10)); // geological uplift under it
+        ew.adjust_geological(a, Fixed::from_int(2)); // more uplift, accumulating
+        assert_eq!(
+            ew.geological_delta(a),
+            Fixed::from_int(12),
+            "geological uplift accumulates"
+        );
+        assert_eq!(
+            ew.delta(a),
+            Fixed::from_int(-3),
+            "the being delta is untouched by the geology"
+        );
+        assert_eq!(
+            ew.total_delta(a),
+            Fixed::from_int(9),
+            "the physics reads the sum: a pit dug into lifted crust"
+        );
+        // A geological-only field is not empty, and folds canonically (insertion-order-independent).
+        let mut g1 = EarthworkField::new();
+        g1.adjust_geological(Coord3::ground(0, 0), Fixed::from_int(1));
+        g1.adjust_geological(Coord3::ground(9, 9), Fixed::from_int(-1));
+        assert!(!g1.is_empty(), "an armed geology is not the opt-out state");
+        let mut g2 = EarthworkField::new();
+        g2.adjust_geological(Coord3::ground(9, 9), Fixed::from_int(-1));
+        g2.adjust_geological(Coord3::ground(0, 0), Fixed::from_int(1));
+        assert_eq!(
+            hash(&g1),
+            hash(&g2),
+            "the geological fold is insertion-order-independent"
+        );
+        // Driving the geological uplift back to zero prunes it and returns the field to empty.
+        let mut p = EarthworkField::new();
+        p.adjust_geological(a, Fixed::from_int(5));
+        p.adjust_geological(a, Fixed::from_int(-5));
+        assert!(
+            p.is_empty(),
+            "a geology relaxed back to baseline is the opt-out state again"
+        );
+    }
+
+    #[test]
+    fn the_geodynamic_field_carries_the_interface_state_prunes_the_default_and_folds_canonically() {
+        let mut g = GeodynamicField::new();
+        assert!(g.is_empty(), "no column carries geodynamic state at first");
+        let a = Coord3::ground(2, 3);
+        let b = Coord3::ground(5, 1);
+        // An unset column reads the zero default.
+        assert_eq!(g.get(a), GeodynamicColumn::default());
+        // The surface lane writes a crustal density; the interior lane writes the isostatic elevation and
+        // uplift; each reads the other's fields at the same column, the two-way interface.
+        let state = GeodynamicColumn {
+            crustal_density: Fixed::from_ratio(33, 10),
+            crustal_thickness: Fixed::from_int(35_000),
+            isostatic_elevation: Fixed::from_int(5),
+        };
+        g.set(a, state);
+        assert_eq!(g.get(a).crustal_density, Fixed::from_ratio(33, 10));
+        assert_eq!(g.get(a).crustal_thickness, Fixed::from_int(35_000));
+        assert_eq!(g.get(a).isostatic_elevation, Fixed::from_int(5));
+        assert!(!g.is_empty());
+        // Setting a column back to the all-zero default prunes it (the absence convention).
+        g.set(a, GeodynamicColumn::default());
+        assert!(g.is_empty(), "an all-zero state is pruned");
+        // The hash is canonical: two fields with the same states built in different orders fold identically.
+        let s1 = GeodynamicColumn {
+            crustal_density: Fixed::from_int(3),
+            crustal_thickness: Fixed::ZERO,
+            isostatic_elevation: Fixed::ZERO,
+        };
+        let s2 = GeodynamicColumn {
+            crustal_density: Fixed::ZERO,
+            crustal_thickness: Fixed::ZERO,
+            isostatic_elevation: Fixed::from_int(-1),
+        };
+        let mut c1 = GeodynamicField::new();
+        c1.set(a, s1);
+        c1.set(b, s2);
+        let mut c2 = GeodynamicField::new();
+        c2.set(b, s2);
+        c2.set(a, s1);
+        let hash = |g: &GeodynamicField| {
+            let mut h = StateHasher::new();
+            g.hash_into(&mut h);
+            h.finish()
+        };
+        assert_eq!(
+            hash(&c1),
+            hash(&c2),
+            "the fold is insertion-order-independent"
+        );
+        // An empty field folds nothing (opting out is hash-neutral).
+        let mut h = StateHasher::new();
+        GeodynamicField::new().hash_into(&mut h);
+        assert_eq!(
+            h.finish(),
+            StateHasher::new().finish(),
+            "an empty geodynamic field folds no bytes"
+        );
     }
 
     #[test]

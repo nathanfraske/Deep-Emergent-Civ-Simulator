@@ -1356,6 +1356,15 @@ unit = "seconds_per_rotation"
 source = "Part 14.6, Part 32; crates/world/src/celestial.rs"
 category = "per_world"
 
+[[reserved]]
+id = "world.surface_pressure"
+basis = "the world's mean surface atmospheric pressure, the datum the solvent-phase-stability gate compares against the saturation pressure at the world's surface temperature to decide whether the declared solvent is liquid at the surface and which surface processes run (fluvial versus aeolian versus glacial). A per-world initial condition, not derivable from a deeper floor substrate until the Stage-4 atmosphere solve derives it as hydrostatic exactness (g times the solved gas-column mass); carried as reserved-with-basis until then. Mirror = Earth's mean sea-level pressure about 0.101325 MPa (one standard atmosphere, definitional). The Terran-bias fix: without it no non-Earth world can gate its solvent phase. Verified at source (2026-07-12) that no live read silently assumes one atmosphere: the only 1 atm on the path is the Rankine-Kirchhoff boiling-point reference pressure P_ref (correct physics, the pressure at which a substance's normal boiling point is defined, not a world pressure), and fluid.driving_pressure is a per-part imposed or local pressure consumed only by the opt-in strike and hydraulic path, off every pinned scenario. So nothing is retired; this datum is a pure addition."
+status = "reserved"
+value = ""
+unit = "megapascal"
+source = "Genesis-forward Layer 0 (docs/working/GENESIS_FORWARD_PLAN_OF_ATTACK.md, GENESIS_LAYER0_LAYOUT.md); the solvent-phase-stability gate; crates/physics/src/laws.rs VolatileSaturationCurve"
+category = "per_world"
+
 # --- R-BEHAVIOR-EVOLVE Stage 1: homeostatic physiology (per homeostatic axis; docs/emergent_behavior_design.md) ---
 
 # physiology.reserve_capacity_per_mass RETIRED (worksheet §17, derive audit): the reserve

@@ -37,9 +37,12 @@
 //! never a fabricated default), the same fail-loud discipline as the calibration
 //! manifest. The law kernels themselves are phase 2.
 
+pub mod geodynamics;
 pub mod graph;
 pub mod laws;
 pub mod periodic;
+pub mod petrology;
+pub mod petrology_data;
 pub mod quantities;
 pub mod scaled;
 

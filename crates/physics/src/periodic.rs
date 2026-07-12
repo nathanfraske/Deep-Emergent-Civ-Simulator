@@ -64,6 +64,25 @@ pub struct Element {
     /// radioactive-only element with no characteristic terrestrial composition, whose stored value is a
     /// single-isotope reference mass (CIAAW assigns it no standard atomic weight).
     pub has_standard_weight: bool,
+    /// The element's common oxidation states (its valence set), the small integers the petrology and
+    /// speciation kernels read for stoichiometry and charge balance. Empty for a row not yet populated (the
+    /// registry grows with the world). Structural reference data, ultimately a cache of the banked
+    /// electromagnetic (Pauli plus Coulomb) shell structure (the periodic-table-as-cache map); authored as
+    /// data now, keyed per element so an alien chemistry is a data row.
+    pub valence: Vec<i8>,
+    /// The standard molar entropy `S degrees` at 298.15 K and the standard-state pressure, in J/(mol K), the
+    /// thermochemical reference the phase-stability and Gibbs-energy reads consume. `None` until a cited value
+    /// is populated (the extensible registry: membership grows, an unpopulated row is absent not zero). This
+    /// is per-element reference data (the element's reference-state entropy), distinct from a phase's Gibbs
+    /// energy of formation, which is per-phase in the phase registry (a pure element's formation energy is
+    /// zero by definition).
+    pub standard_molar_entropy: Option<Fixed>,
+    /// The raw decimal string of the standard molar entropy, retained verbatim as the provenance record and
+    /// against Q32.32 rounding, mirroring `weight_decimal`. `None` when no entropy is populated.
+    pub entropy_decimal: Option<String>,
+    /// The citation for the standard molar entropy value (every thermochemical value is real-with-source).
+    /// `None` when no entropy is populated; required non-empty whenever an entropy is.
+    pub entropy_source: Option<String>,
     /// The citation and provenance for this row.
     pub provenance: String,
 }
@@ -426,6 +445,16 @@ struct ElementDef {
     /// for a radioactive-only element whose value is a single-isotope reference mass.
     #[serde(default = "default_true")]
     has_standard_weight: bool,
+    /// The common oxidation states (valence set); empty when not populated.
+    #[serde(default)]
+    valence: Vec<i8>,
+    /// The standard molar entropy S degrees at 298.15 K, in J/(mol K), as a decimal string; empty when not
+    /// populated.
+    #[serde(default)]
+    standard_molar_entropy: String,
+    /// The citation for the standard molar entropy; required non-empty when the entropy is populated.
+    #[serde(default)]
+    entropy_source: String,
     /// The citation (every element is real-with-source).
     #[serde(default)]
     real: String,
@@ -469,6 +498,31 @@ impl ElementDef {
         if self.real.trim().is_empty() {
             return Err(PeriodicError::MissingProvenance(self.symbol.clone()));
         }
+        // The standard molar entropy is optional, but if present it must parse and carry its own citation
+        // (every thermochemical value is real-with-source, the same discipline as the atomic weight).
+        let entropy_raw = self.standard_molar_entropy.trim();
+        let (standard_molar_entropy, entropy_decimal, entropy_source) = if entropy_raw.is_empty() {
+            (None, None, None)
+        } else {
+            let value =
+                Fixed::from_decimal_str(entropy_raw).map_err(|detail| PeriodicError::BadValue {
+                    symbol: self.symbol.clone(),
+                    detail: format!("standard_molar_entropy: {detail}"),
+                })?;
+            if self.entropy_source.trim().is_empty() {
+                return Err(PeriodicError::BadValue {
+                    symbol: self.symbol.clone(),
+                    detail:
+                        "standard_molar_entropy is set but entropy_source (its citation) is empty"
+                            .to_string(),
+                });
+            }
+            (
+                Some(value),
+                Some(entropy_raw.to_string()),
+                Some(self.entropy_source.trim().to_string()),
+            )
+        };
         Ok(Element {
             symbol: self.symbol,
             name: self.name,
@@ -477,6 +531,10 @@ impl ElementDef {
             weight_decimal: self.standard_atomic_weight.trim().to_string(),
             interval,
             has_standard_weight: self.has_standard_weight,
+            valence: self.valence,
+            standard_molar_entropy,
+            entropy_decimal,
+            entropy_source,
             provenance: self.real.trim().to_string(),
         })
     }
@@ -717,5 +775,97 @@ real = "test"
             PeriodicTable::from_toml_str(half).unwrap_err(),
             PeriodicError::BadValue { .. }
         ));
+    }
+
+    #[test]
+    fn valence_and_entropy_parse_and_default_to_absent() {
+        // A row that populates the new columns, and a row that leaves them out.
+        let src = r#"
+[[element]]
+symbol = "Fe"
+z = 26
+standard_atomic_weight = "55.845"
+valence = [2, 3]
+standard_molar_entropy = "27.28"
+entropy_source = "test source"
+real = "test"
+
+[[element]]
+symbol = "H"
+z = 1
+standard_atomic_weight = "1.008"
+real = "test"
+"#;
+        let t = PeriodicTable::from_toml_str(src).expect("the rows load");
+        let fe = t.element("Fe").expect("iron loads");
+        assert_eq!(fe.valence, vec![2, 3], "the valence set round-trips");
+        assert!(
+            close(
+                fe.standard_molar_entropy.expect("Fe carries an entropy"),
+                27.28
+            ),
+            "the entropy parses to its decimal value"
+        );
+        assert_eq!(fe.entropy_decimal.as_deref(), Some("27.28"));
+        assert_eq!(fe.entropy_source.as_deref(), Some("test source"));
+        // The unpopulated row is ABSENT, not zero: an empty valence set and no entropy.
+        let h = t.element("H").expect("hydrogen loads");
+        assert!(
+            h.valence.is_empty(),
+            "an unpopulated valence is empty, not [0]"
+        );
+        assert_eq!(
+            h.standard_molar_entropy, None,
+            "an unpopulated entropy is None, not zero"
+        );
+        assert_eq!(h.entropy_decimal, None);
+        assert_eq!(h.entropy_source, None);
+    }
+
+    #[test]
+    fn an_entropy_without_its_citation_fails_to_load() {
+        let no_src = r#"
+[[element]]
+symbol = "Fe"
+z = 26
+standard_atomic_weight = "55.845"
+standard_molar_entropy = "27.28"
+real = "test"
+"#;
+        assert!(
+            matches!(
+                PeriodicTable::from_toml_str(no_src).unwrap_err(),
+                PeriodicError::BadValue { .. }
+            ),
+            "a thermochemical value must carry its own citation"
+        );
+    }
+
+    #[test]
+    fn the_seeded_rock_forming_elements_carry_valence_and_entropy() {
+        // The bulk-silicate-Earth seed set populated in this slice: each carries a valence set and a cited
+        // standard molar entropy in the embedded table.
+        let t = table();
+        for sym in ["O", "Si", "Mg", "Fe", "Al", "Ca", "Na", "K"] {
+            let e = t
+                .element(sym)
+                .unwrap_or_else(|| panic!("{sym} is in the table"));
+            assert!(!e.valence.is_empty(), "{sym} should carry a valence set");
+            assert!(
+                e.standard_molar_entropy.is_some(),
+                "{sym} should carry a cited standard molar entropy"
+            );
+            assert!(
+                e.entropy_source
+                    .as_deref()
+                    .map(|s| !s.is_empty())
+                    .unwrap_or(false),
+                "{sym}'s entropy must carry a citation"
+            );
+        }
+        // Iron's common oxidation states and its reference-state entropy (~27.3 J/mol/K).
+        let fe = t.element("Fe").expect("iron is in the table");
+        assert!(fe.valence.contains(&2) && fe.valence.contains(&3));
+        assert!(close(fe.standard_molar_entropy.unwrap(), 27.28));
     }
 }

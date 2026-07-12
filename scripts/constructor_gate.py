@@ -63,8 +63,10 @@ EXEMPT_MODULES = {
     "crates/physics/src/laws.rs",       # kernel: math constants (pi^2, von Mises) and argument-read law arithmetic
     "crates/physics/src/lib.rs",        # the physics registry loader (parses cited axis/substance data)
     "crates/physics/src/periodic.rs",   # the periodic-table loader (parses cited atomic weights)
+    "crates/physics/src/petrology_data.rs", # the phase-registry loader (parses cited phase thermodynamics)
     "crates/physics/src/quantities.rs", # quantity definitions and the wide-decimal doc reference
     "crates/sim/src/calibration.rs",    # the calibration-manifest loader (parses the owner's reserved values)
+    "crates/sim/src/astro.rs",          # the stellar-flux derivation (parses cited astronomical anchors L_sun/AU)
 }
 
 

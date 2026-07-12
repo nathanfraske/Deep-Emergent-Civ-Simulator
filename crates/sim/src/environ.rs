@@ -1302,7 +1302,7 @@ impl EnvironFields {
         let mut effective = self.elevation.clone();
         for y in 0..self.height {
             for x in 0..self.width {
-                let delta = earthwork.delta(Coord3::ground(x, y));
+                let delta = earthwork.total_delta(Coord3::ground(x, y));
                 if delta != Fixed::ZERO {
                     let i = self.idx(x, y);
                     effective[i] = effective[i].saturating_add(delta);
@@ -2417,12 +2417,27 @@ pub struct DiurnalSky {
     /// The world's axial tilt in radians; 0 is the reference world (no seasons, poles dark). The declination
     /// derives from this and the orbital phase, so a tilted world gets seasons and polar day/night as data.
     pub obliquity: Fixed,
+    /// The world's orbital ECCENTRICITY (the shape of its ellipse), 0 for a circular orbit. The delivered
+    /// flux varies over the year by the inverse square of the orbit distance, which a Kepler solve derives
+    /// from this and the orbital phase; 0 is the reference world (a circle, no distance variation, byte-neutral).
+    /// Per-world data (Principle 11): Mirror carries Earth's near-circular ~0.0167, an eccentric world its own.
+    pub eccentricity: Fixed,
+    /// The PERIHELION PHASE: the orbital phase (in the seasonal cycle) at which the world is closest to its
+    /// star, so the distance minimum need not coincide with the seasonal reference. This is the precession
+    /// term: it decouples perihelion from the seasons, setting whether the eccentricity brightening falls in
+    /// one hemisphere's summer or its winter (the seasonal-amplitude asymmetry). 0 puts perihelion at the
+    /// reference equinox (the pre-precession behaviour, byte-neutral). Per-world data: Mirror carries Earth's
+    /// value (perihelion ~13 days after the December solstice), an eccentric world its own; the slow drift of
+    /// this phase over deep time is the Milankovitch precession follow-on.
+    pub perihelion_phase: Fixed,
     /// The data star-list. One unit-luminosity star at zero phase offset is the single-star reference.
     pub stars: Vec<Star>,
     /// The physical stellar flux scale (W/m^2) that turns the normalised daylit insolation into an absorbed
     /// irradiance for the radiative surface-temperature baseline, so the heat path reads physical watts while
-    /// the light path stays the normalised `[0, 1]` productivity signal. RESERVED, owner-set from the real
-    /// stellar constant (Mirror = Earth's ~1361 W/m^2 solar constant).
+    /// the light path stays the normalised `[0, 1]` productivity signal. DERIVED (genesis-forward Stage 1)
+    /// from the scenario-set stellar inputs through [`crate::astro::stellar_flux`]: `L_sun *
+    /// (M_star/M_sun)^exponent / (4*pi*d^2)`. Mirror is a solar-mass star at one AU, so this is Earth's real
+    /// ~1361.17 W/m^2; an alien world's mass, distance, or exponent lands its own value.
     pub solar_constant: Fixed,
     /// The per-world atmospheric BACK-RADIATION (downwelling longwave) floor (W/m^2), the night-side irradiance
     /// a surface still absorbs when the star is down, so the night baseline is `radiative_eq(back_radiation)`
@@ -2462,20 +2477,43 @@ impl DiurnalSky {
     /// pure-diurnal cycle. `rotation_period_ticks` is the day length in ticks (from the world's own rotation
     /// period through the seconds-to-ticks bridge); `orbital_period_ticks` its year.
     pub fn reference(rotation_period_ticks: u64, orbital_period_ticks: u64) -> DiurnalSky {
+        // The STELLAR-SOURCE inputs, labelled dev fixtures surfaced for the owner (the same scenario-set
+        // standing as the obliquity and albedo below): the star's mass as a fraction of the sun, the world's
+        // orbital distance in AU, and the mass-luminosity exponent (a reserved closure-residue). The reference
+        // world is a solar-mass star at one AU, so `solar_constant` DERIVES from these through the stellar-flux
+        // kernel (Earth's real ~1361.17 W/m^2) rather than being an authored number. An alien world sets a
+        // different mass, distance, or exponent (admit-the-alien: the derivation is fixed, the inputs are data).
+        let star_mass_ratio = Fixed::ONE;
+        let orbital_distance_au = Fixed::ONE;
+        let mass_luminosity_exponent = Fixed::from_ratio(35, 10);
+        let solar_constant = crate::astro::stellar_flux(
+            star_mass_ratio,
+            mass_luminosity_exponent,
+            orbital_distance_au,
+        )
+        .expect("the stellar flux derives for a solar-mass star at one AU");
         DiurnalSky {
             rotation_period_ticks: rotation_period_ticks.max(1),
             orbital_period_ticks: orbital_period_ticks.max(1),
             obliquity: Fixed::ZERO,
+            // The reference world is a CIRCULAR orbit (eccentricity 0): the distance never varies, so the
+            // orbital-distance flux factor is exactly 1 and the reference world is byte-identical to the
+            // pre-eccentricity baseline. Mirror overrides this with Earth's near-circular value.
+            eccentricity: Fixed::ZERO,
+            // The reference world's perihelion sits at the seasonal reference (phase 0): no precession offset,
+            // so the perihelion-vs-solstice term is inert and byte-neutral. Mirror sets Earth's real phase.
+            perihelion_phase: Fixed::ZERO,
             stars: vec![Star {
                 luminosity: Fixed::ONE,
                 phase_offset: Fixed::ZERO,
             }],
-            // LABELLED DEV FIXTURES (Earth-like), the reserved heat values surfaced for the owner, not decided
-            // here: the solar constant (W/m^2), a mild atmospheric back-radiation floor, a uniform surface
-            // emissivity (the per-material floor read is the follow-on), and a representability cap. Mirror
-            // sets these to Earth's real values; an airless world sets back_radiation to zero for a Moon-like
-            // plunge. Sigma is NOT among them: it DERIVES from the CODATA fundamentals, universal, not reserved.
-            solar_constant: Fixed::from_int(1361),
+            // The stellar flux DERIVES (above) from the scenario-set stellar inputs, retiring the old inline
+            // 1361 literal. The remaining LABELLED DEV FIXTURES (Earth-like), reserved and surfaced for the
+            // owner, not decided here: a mild atmospheric back-radiation floor, a uniform surface emissivity
+            // (the per-material floor read is the follow-on), and a representability cap. Mirror sets these to
+            // Earth's real values; an airless world sets back_radiation to zero for a Moon-like plunge. Sigma
+            // is NOT among them: it DERIVES from the CODATA fundamentals, universal, not reserved.
+            solar_constant,
             back_radiation: Fixed::from_int(300),
             // The reference world is a bare blackbody (no reflection), so an unarmed-albedo world is
             // byte-identical to the pre-albedo baseline. Mirror overrides this with Earth's Bond albedo.
@@ -2507,9 +2545,73 @@ impl DiurnalSky {
             // ~288 K instead of the ~311 K a bare (albedo-zero) world reaches. Surfaced for the owner as the
             // reserved world datum, cited not fabricated.
             albedo: Fixed::from_ratio(306, 1000),
+            // Earth's measured orbital eccentricity, ~0.0167 (a near-circular ellipse). Per-world data: this
+            // is what makes Mirror's delivered flux ~3.4% higher at perihelion than at aphelion over the year,
+            // the distance modulation a Kepler solve derives. Surfaced for the owner as the reserved world
+            // datum, cited not fabricated.
+            eccentricity: Fixed::from_ratio(167, 10_000),
+            // Earth's perihelion phase. Perihelion (~January 4) falls ~13 days after the December solstice,
+            // which in this law's declination convention (0 the March equinox, 3/4 the December solstice) sits
+            // at orbital phase ~0.75 + 13/365 ~ 0.787. So Mirror's closest approach is in the northern winter,
+            // the real precession offset that makes the southern hemisphere's summer the more extreme one.
+            // Per-world data surfaced with its basis (the exact ecliptic-longitude convention is owner-refinable).
+            perihelion_phase: Fixed::from_ratio(787, 1000),
             ..DiurnalSky::reference(rotation_period_ticks, orbital_period_ticks)
         }
     }
+}
+
+/// The fixed iteration cap for the Kepler eccentric-anomaly fixed-point solve. An engine-accuracy /
+/// determinism bound (a fixed integer count, not a world value): the fixed-point `E = M + e*sin(E)` converges
+/// geometrically at rate `e`, so at the represented eccentricity range this is far more than enough to reach
+/// the `Fixed` epsilon (Earth's e ~ 0.017 converges in ~3 steps; even e ~ 0.9 well inside the cap). Fixed, so
+/// the solve is deterministic and worker-invariant, never an unbounded until-converged loop.
+const KEPLER_ITERS: usize = 16;
+
+/// The orbital-distance flux factor `(a/d)^2` at an orbital phase, DERIVED from the world's eccentricity by a
+/// Kepler solve: the delivered irradiance scales as the inverse square of the star distance, and the distance
+/// varies over an eccentric orbit as `d/a = 1 - e*cos(E)`, with the eccentric anomaly `E` solving Kepler's
+/// equation `M = E - e*sin(E)` for the mean anomaly `M = 2*pi*orbital_phase` (perihelion at phase 0; the
+/// perihelion-longitude phase relative to the seasons is the precession follow-on). A CIRCULAR orbit
+/// (`eccentricity <= 0`) returns exactly 1, so a world that does not declare an eccentricity is byte-identical
+/// to the pre-eccentricity baseline. A degenerate non-closed orbit (`d/a <= 0`, `e >= 1`) returns 1 rather
+/// than diverge. Deterministic fixed-point CORDIC trig under a fixed iteration cap.
+fn orbital_distance_factor(
+    orbital_phase: Fixed,
+    eccentricity: Fixed,
+    perihelion_phase: Fixed,
+) -> Fixed {
+    if eccentricity <= Fixed::ZERO {
+        return Fixed::ONE;
+    }
+    let two_pi = Fixed::PI.saturating_add(Fixed::PI);
+    // The mean anomaly is measured FROM perihelion: at orbital_phase == perihelion_phase the world is closest
+    // (M = 0). Subtracting the perihelion phase is the precession offset, decoupling the distance minimum from
+    // the seasonal reference the declination keys to. A zero perihelion phase reduces to M = 2*pi*orbital_phase.
+    let mean_anomaly = two_pi
+        .checked_mul(orbital_phase - perihelion_phase)
+        .unwrap_or(Fixed::ZERO);
+    // Kepler's equation by fixed-point iteration E_{n+1} = M + e*sin(E_n), a fixed cap for determinism.
+    let mut e_anom = mean_anomaly;
+    for _ in 0..KEPLER_ITERS {
+        e_anom = mean_anomaly.saturating_add(
+            eccentricity
+                .checked_mul(e_anom.sin())
+                .unwrap_or(Fixed::ZERO),
+        );
+    }
+    // d/a = 1 - e*cos(E); factor = (a/d)^2 = 1 / (1 - e*cos(E))^2.
+    let d_over_a = Fixed::ONE
+        - eccentricity
+            .checked_mul(e_anom.cos())
+            .unwrap_or(Fixed::ZERO);
+    if d_over_a <= Fixed::ZERO {
+        return Fixed::ONE;
+    }
+    d_over_a
+        .checked_mul(d_over_a)
+        .and_then(|d2| Fixed::ONE.checked_div(d2))
+        .unwrap_or(Fixed::ONE)
 }
 
 /// The instantaneous insolation at a cell (day-night sun-angle law): the sum over the world's data star-list of
@@ -2580,7 +2682,15 @@ fn insolation_at(
         let lit = cos_zenith.max(Fixed::ZERO);
         total = total.saturating_add(star.luminosity.checked_mul(lit).unwrap_or(Fixed::ZERO));
     }
+    // Scale by the orbital-distance flux factor (a/d)^2 (exactly 1 for a circular orbit, so byte-neutral
+    // there): an eccentric world receives more flux at perihelion and less at aphelion over its year.
     total
+        .checked_mul(orbital_distance_factor(
+            orbital_phase,
+            sky.eccentricity,
+            sky.perihelion_phase,
+        ))
+        .unwrap_or(total)
 }
 
 /// Precompute each cell's downhill routing target: the index of the strictly-lowest of its four
@@ -2738,6 +2848,119 @@ mod tests {
                 "a zero-tilt pole is dark at phase {p}/4, got {pole:?}"
             );
         }
+    }
+
+    #[test]
+    fn a_circular_orbit_has_a_unit_distance_factor_so_the_reference_is_byte_neutral() {
+        // Eccentricity 0 is a circle: the distance never varies, so the orbital-distance flux factor is
+        // EXACTLY 1 at every phase and every perihelion phase, and a world that does not declare an
+        // eccentricity is byte-identical to the pre-eccentricity baseline.
+        for p in [0, 1, 2, 3, 7] {
+            let factor = orbital_distance_factor(
+                Fixed::from_ratio(p, 8),
+                Fixed::ZERO,
+                Fixed::from_ratio(3, 8),
+            );
+            assert_eq!(
+                factor,
+                Fixed::ONE,
+                "a circular orbit's distance factor is exactly 1 at phase {p}/8, got {factor:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_eccentric_orbit_is_brighter_at_perihelion_and_dimmer_at_aphelion() {
+        // With the perihelion at orbital phase 0, phase 0 is closest (more flux) and phase 1/2 farthest (less).
+        // For Earth's e ~ 0.0167 the perihelion factor is ~(1/(1-e))^2 ~ 1.034 and aphelion ~(1/(1+e))^2 ~
+        // 0.967, the ~3.4% swing. The ordering and rough magnitude are what Kepler's geometry asserts.
+        let e = Fixed::from_ratio(167, 10_000);
+        let perihelion = orbital_distance_factor(Fixed::ZERO, e, Fixed::ZERO);
+        let aphelion = orbital_distance_factor(Fixed::from_ratio(1, 2), e, Fixed::ZERO);
+        assert!(
+            perihelion > Fixed::ONE && aphelion < Fixed::ONE,
+            "perihelion brightens ({perihelion:?}) and aphelion dims ({aphelion:?})"
+        );
+        assert!(
+            perihelion > aphelion,
+            "the world is brighter at perihelion than aphelion"
+        );
+        // The perihelion factor is close to (1/(1-e))^2 ~ 1.034 (within a coarse fixed-point tolerance).
+        assert!(
+            (perihelion.to_f64_lossy() - 1.034).abs() < 0.01,
+            "the perihelion factor is ~1.034, got {}",
+            perihelion.to_f64_lossy()
+        );
+    }
+
+    #[test]
+    fn precession_moves_the_distance_minimum_to_the_declared_perihelion_phase() {
+        // The perihelion phase decouples the closest approach from the seasonal reference: the distance factor
+        // peaks at orbital_phase == perihelion_phase, wherever that is set, not at phase 0. With perihelion at
+        // 0.3, orbital phase 0.3 is the max and phase 0 is no longer it; half a year past perihelion is the min.
+        let e = Fixed::from_ratio(167, 10_000);
+        let peri_phase = Fixed::from_ratio(3, 10);
+        let at_perihelion = orbital_distance_factor(peri_phase, e, peri_phase);
+        let at_phase_zero = orbital_distance_factor(Fixed::ZERO, e, peri_phase);
+        let half_year_later = orbital_distance_factor(
+            peri_phase.saturating_add(Fixed::from_ratio(1, 2)),
+            e,
+            peri_phase,
+        );
+        assert!(
+            at_perihelion > at_phase_zero,
+            "the max flux is at the declared perihelion phase, not at phase 0"
+        );
+        assert!(
+            at_perihelion > Fixed::ONE && half_year_later < Fixed::ONE,
+            "perihelion brightens and half a year later (aphelion) dims"
+        );
+        // Mirror carries a real, nonzero perihelion phase (Earth's ~0.787), so its closest approach is off the
+        // seasonal reference: the precession offset is armed, not inert.
+        let mirror = DiurnalSky::mirror(100, 36500);
+        assert!(
+            mirror.perihelion_phase > Fixed::from_ratio(7, 10),
+            "Mirror's perihelion phase is set to Earth's ~0.787, got {:?}",
+            mirror.perihelion_phase
+        );
+        let mirror_peri = orbital_distance_factor(
+            mirror.perihelion_phase,
+            mirror.eccentricity,
+            mirror.perihelion_phase,
+        );
+        let mirror_apo = orbital_distance_factor(
+            mirror
+                .perihelion_phase
+                .saturating_add(Fixed::from_ratio(1, 2)),
+            mirror.eccentricity,
+            mirror.perihelion_phase,
+        );
+        assert!(
+            mirror_peri > mirror_apo,
+            "Mirror is brighter at its perihelion than half a year later"
+        );
+    }
+
+    #[test]
+    fn the_circular_reference_reads_identically_across_the_year() {
+        // The zero-eccentricity reference reads the same insolation at any two orbital phases at matched noon
+        // geometry: no distance modulation, and (both equinoxes) no season, so the sky is byte-identical.
+        let flat = DiurnalSky::reference(100, 36500);
+        let (w, h) = (10, 5);
+        let a = insolation_at(0, 2, w, h, Fixed::ZERO, Fixed::ZERO, &flat);
+        let b = insolation_at(
+            0,
+            2,
+            w,
+            h,
+            Fixed::from_ratio(1, 2),
+            Fixed::from_ratio(1, 2),
+            &flat,
+        );
+        assert_eq!(
+            a, b,
+            "the circular reference reads identically at two equinox noons"
+        );
     }
 
     #[test]
