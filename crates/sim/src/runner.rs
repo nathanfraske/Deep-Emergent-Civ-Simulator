@@ -4468,7 +4468,35 @@ impl Runner {
     /// [`crate::conservation::ConservationRegistry`] guards. Slice C2 lets the deposited nutrient fertilise
     /// the cell's productivity; volatilising the organic share to the air (a gas the decomposition vents) is
     /// a follow-on refinement of the split.
+    /// The matter-cycle step, wrapped by the Q1 Stone-3 per-step conservation gate.
     fn step_matter_cycle(&mut self) {
+        // Q1 Stone 3: the per-step conservation gate over the matter cycle (debug and test builds only, so it
+        // is compiled out in release and the canonical pins stay byte-identical). The decomposition legs move
+        // mass between the located material, the soil store, and located tissue and conserve their sum
+        // exactly (`ConstituentRegistry::split` absorbs all fixed-point rounding into the residual, and
+        // `mass_lost` is the exact material decrease), which the fixture tests prove; this lifts that
+        // guarantee to a runtime invariant, so a future change that leaks mass in any scenario fails at
+        // runtime rather than only where a test happens to look. The gate brackets `step_matter_cycle`
+        // specifically, the conservative decomposition legs in isolation, never a whole tick (a weathering
+        // source or a producer draw elsewhere in the tick is a legitimate boundary flow, not a leak).
+        #[cfg(debug_assertions)]
+        let ledger_before = self.embodiment.as_ref().map(Embodiment::decay_ledger_mass);
+        self.step_matter_cycle_inner();
+        #[cfg(debug_assertions)]
+        if let Some(before) = ledger_before {
+            let after = self
+                .embodiment
+                .as_ref()
+                .map(Embodiment::decay_ledger_mass)
+                .unwrap_or(before);
+            debug_assert_eq!(
+                before, after,
+                "the matter cycle leaked mass: material plus soil plus tissue changed from {before:?} to {after:?}"
+            );
+        }
+    }
+
+    fn step_matter_cycle_inner(&mut self) {
         let Some(calib) = self.matter_cycle else {
             return;
         };

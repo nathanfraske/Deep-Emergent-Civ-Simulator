@@ -1,0 +1,43 @@
+# Constructor gate baseline (Q1 Stone 1, items 2 and 3). The one-time AUDIT of the raw-representation
+# `::from_bits(` and decimal-parse `::from_decimal_str(` constructors in the non-exempt world-content
+# modules (physics, sim, world; core and units are the quarantine, laws.rs and the loaders are exempt
+# wholesale). Each row is CLASSIFIED, never a blanket freeze: the class column is one of
+# engine-constant (a Principle-11 engine-mechanics constant: a half, an epsilon, a smallest-
+# representable floor), bit-arithmetic (a Fixed reconstructed from a value computed in raw Q32.32 bits:
+# a complement, a residue split, a bit-space mean), deserialization (a stored bit-pattern round-tripped
+# back), test-fixture (a #[cfg(test)] constant or assertion), dev-fixture (a labelled non-canonical
+# scenario or demo value, production-should-manifest-wire), or authored-should-derive (a value on the
+# path of world content that must instead read from the floor: a SURFACED DEFECT, reported and to be
+# fixed, never silently frozen). The gate fails on any count above a row's baseline (a new site to
+# classify) or below it (update the row). Columns: pattern<TAB>path<TAB>count<TAB>class<TAB>reason.
+#
+# Audit result: 0 authored-should-derive rows. The canonical world-content path carries no inline
+# authored value; every occurrence is engine-mechanics, bit-space arithmetic, deserialization, a test
+# fixture, or a labelled dev-fixture. The dev-fixtures (the spawn_predator geometry and the test-
+# scenario CreatureSelectionParams mutation spreads) are authored in the quarantined run harness and
+# the test scenarios, not on a canonical law path; production wiring should read them from the manifest
+# (flagged, not a current canonical defect).
+::from_bits(	crates/physics/src/scaled.rs	2	test-fixture	scaled-representation unit tests constructing a specific Q-format value from bits
+::from_bits(	crates/sim/src/absence.rs	1	engine-constant	LIFESPAN_HAZARD_THRESHOLD = 0.5 (1 << FRAC_BITS-1), a hazard midpoint
+::from_bits(	crates/sim/src/axiom.rs	3	bit-arithmetic	group-belief mean and variance accumulated in bit-space, plus a test tolerance
+::from_bits(	crates/sim/src/belief.rs	2	bit-arithmetic	belief-mass mean computed in bit-space (sum over count)
+::from_bits(	crates/sim/src/controller.rs	2	bit-arithmetic	controller-weight mutation applied in bit-space (weight bits plus deviation bits)
+::from_bits(	crates/sim/src/decompose.rs	1	bit-arithmetic	decomposition drive computed in bit-space (temperature minus barrier), clamped
+::from_bits(	crates/sim/src/evidence.rs	1	bit-arithmetic	evidence weight reconstructed from a value computed in bit-space
+::from_bits(	crates/sim/src/homeostasis.rs	1	engine-constant	MIN_CAP ~1e-6, the smallest representable reserve capacity floor
+::from_bits(	crates/sim/src/institution.rs	5	bit-arithmetic	apportionment residue split into exact bit-halves (the indivisible-residue handler)
+::from_bits(	crates/sim/src/insult.rs	6	bit-arithmetic	damage and repair arithmetic in bit-space (complement, difference, abs), plus tiny test inputs
+::from_bits(	crates/sim/src/langmod.rs	1	engine-constant	LOSS_THRESHOLD = 0.5, a labelled function-loss knee fixture
+::from_bits(	crates/sim/src/locomotion.rs	2	engine-constant	HALF (0.5) and HEADING_EPS (~1e-3), heading-quantisation constants
+::from_bits(	crates/sim/src/lod.rs	3	bit-arithmetic	apportionment share bits and the level-of-detail wealth-proxy deserialization round-trip
+::from_bits(	crates/sim/src/morphogen.rs	6	engine-constant	damage bit-accumulation and the JITTER/GROWTH_LO/GROWTH_HI/HALF growth-band constants
+::from_bits(	crates/sim/src/physiology.rs	2	bit-arithmetic	a derived value reconstructed from bits, and a derived-Stefan-Boltzmann test assertion
+::from_bits(	crates/sim/src/runner.rs	7	engine-constant	promotion and stencil-stability constants, temperature-field deserialization, strike-damage bit-accumulation, and labelled AIR_K/WATER_K test fixtures
+::from_bits(	crates/sim/src/tom.rs	1	engine-constant	LADDER_WEIGHT_FLOOR = 1 bit, the smallest representable ladder weight
+::from_bits(	crates/sim/src/trace.rs	2	bit-arithmetic	a decay complement computed in bit-space
+::from_bits(	crates/sim/src/transmission.rs	1	test-fixture	a bit-scale tolerance in a transmission test
+::from_bits(	crates/sim/src/typology.rs	1	test-fixture	a bit-exact assertion in a typology test
+::from_bits(	crates/sim/src/world.rs	1	bit-arithmetic	a field cell average computed in bit-space (numerator over count)
+::from_decimal_str(	crates/sim/src/anatomy.rs	1	dev-fixture	a decimal-parser helper for a labelled kind-fixture string argument
+::from_decimal_str(	crates/sim/src/morphogen.rs	1	dev-fixture	a decimal-parser helper for a labelled morphogen dev-fixture string argument
+::from_decimal_str(	crates/sim/src/runner.rs	17	dev-fixture	labelled non-canonical scenario values (the spawn_predator demo geometry and the test-scenario CreatureSelectionParams mutation spreads); production wiring should read these from the manifest
