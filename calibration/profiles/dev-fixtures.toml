@@ -519,6 +519,14 @@ unit = "transpiration_per_fixation"
 source = "dev fixture for the photosynthesis-to-productivity derivation #156; crates/sim/src/environ.rs carbon_fixation_rate"
 
 [[reserved]]
+id = "photosynthesis.cell_area_m2"
+basis = "the cell AREA in square metres, the spatial scale the carbon-fixation FLUX is integrated over to yield a cell's per-tick fixed-carbon ENERGY (the a-prime joules bridge #42, E_food = fixation_flux * cell_area * tick). A per-world spatial datum: the tile edge squared (tile_edge = real_speed / base_speed at the 1 s tick ~= 1.4 m, cell ~= 2 m^2). Dev fixture; inert on the base scenarios (they do not arm photosynthesis)"
+status = "set"
+value = "2"
+unit = "square_metre"
+source = "dev fixture for the a-prime joules bridge #42; crates/sim/src/environ.rs step_productivity"
+
+[[reserved]]
 id = "salinity.weathering_rate"
 basis = "FIXTURE placeholder; the salt mass a cell gains per tick as salt leaches from rock, the salinity field source that accumulates in endorheic basins"
 status = "set"

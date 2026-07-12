@@ -1895,6 +1895,10 @@ impl EnvironFields {
                     // coupling to the evaporation flux, and the soil-nutrient limitation over the matter-cycle
                     // fertility. Retires the flat `soil_baseline` (soil supply IS the fertility) and the authored
                     // water/light/temperature requirements on this path.
+                    // a-prime joules bridge (#42): the carbon-fixation FLUX (W/m^2) integrated over the cell area
+                    // (and the 1 s tick, folded as unity) yields the cell's per-tick fixed-carbon ENERGY in joules,
+                    // so the standing food a grazer eats and its Kleiber drain compare in the same joules rather
+                    // than a flux-versus-energy scale gap papered over by the retired `food_energy_density` anchor.
                     Some((photo, solar_constant)) => carbon_fixation_rate(
                         self.light[i],
                         solar_constant,
@@ -1904,7 +1908,9 @@ impl EnvironFields {
                         self.fertility[i],
                         calib.soil_req,
                         &photo,
-                    ),
+                    )
+                    .checked_mul(photo.cell_area_m2)
+                    .unwrap_or(Fixed::MAX),
                     // The unarmed Liebig interim (byte-identical): the abstract-producer minimum over the four
                     // satisfactions, the soil supply the flat baseline plus the matter-cycle fertility.
                     None => biomass_from(
@@ -2121,6 +2127,15 @@ pub struct PhotosynthesisCalib {
     /// efficiency literature). The derived water requirement is `water_use_efficiency * evaporative_demand`,
     /// retiring the flat `productivity.water_requirement`.
     pub water_use_efficiency: Fixed,
+    /// The CELL AREA (m^2): the spatial scale over which the fixation FLUX is integrated to yield the cell's
+    /// per-tick fixed-carbon ENERGY (`E_food = fixation_flux [W/m^2] * cell_area [m^2] * tick [s]`, the a-prime
+    /// joules bridge, #42), so the standing food a grazer eats and its Kleiber drain compare in the same joules.
+    /// RESERVED, a per-world SPATIAL datum (not a photosynthesis property, carried here as its only consumer).
+    /// Basis: the tile edge squared, and the tile edge is fixed by one real creature's walking speed and the tick
+    /// (`tile_edge = real_speed / base_speed` at the 1 s base tick, so about 1.4 m and a cell of about 2 m^2;
+    /// `locomotion.rs:88`). The tick is the 1 s base, folded in as unity; a world with a different tick carries it
+    /// separately, the flagged follow-on.
+    pub cell_area_m2: Fixed,
 }
 
 impl PhotosynthesisCalib {
@@ -2136,6 +2151,7 @@ impl PhotosynthesisCalib {
             temp_optimum: Fixed::from_int(298),
             temp_breadth: Fixed::from_int(30),
             water_use_efficiency: Fixed::ONE,
+            cell_area_m2: Fixed::from_int(2),
         }
     }
 
@@ -2149,6 +2165,7 @@ impl PhotosynthesisCalib {
             temp_optimum: m.require_fixed("photosynthesis.temperature_optimum")?,
             temp_breadth: m.require_fixed("photosynthesis.temperature_breadth")?,
             water_use_efficiency: m.require_fixed("photosynthesis.water_use_efficiency")?,
+            cell_area_m2: m.require_fixed("photosynthesis.cell_area_m2")?,
         })
     }
 }
