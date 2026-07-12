@@ -3108,3 +3108,26 @@ RULING WANTED: which tier for the oxide charge? (i) accept QEq [E] over-ionizati
 
 192 physics tests, all gates clean, byte-neutral.
 STATE: awaiting gate tier ruling. BRANCH 2a1441d: carve-2 lattice_modulus.rs (AB validation), ewald.rs (Madelung kernel 1e-4 + potential matrix), qeq.rs (chi/eta + unbound limit + shielded solve). The shielded QEq machinery is a keeper regardless of the tier ruling; only the oxide-charge SOURCE is open. Whole slice merges once the finding-1 correction path is ruled. Task #35 interior arming HELD (main 48400b0, no A Stage-3c). Do NOT touch A's genesis/register/generator-arch or C's lanes.
+
+---
+
+## 2026-07-12 (Agent B) - Materials oracle slice FINALIZED at honest [E] grade (#182)
+
+Gate CONFIRMED the honest negative, OWNED the escalation direction-error (authorized Clementi-Raimondi without checking direction; I verified it goes wrong way), and RULED the slice COMPLETE at the honest [E] grade: do NOT fit, do NOT add the wrong-direction column. Gate is raising the PREMISE QUESTION to the owner (does the partial charge dissolve finding 1) since the build contradicts the generator architecture's claim that it does.
+
+FINALIZED (commit 0bbd81a, docs only, byte-neutral):
+- lattice_modulus.rs phase_bulk_modulus_ionic: SYSTEMATIC OXIDE BIAS stated (NaCl in-band ~24.4; periclase systematic-high ~266 vs 165), multi-causal, three refinements flagged.
+- qeq.rs: RESOLUTION - QEq partial charge is honest [E] estimator, COMPLETE at grade, correct for disposer formation-energy questions (resolution-ladder), can't deliver fine modulus charge. Three no-fit refinements held for owner.
+- MATERIALS_ORACLE_EWALD_CARVE.md: slice-complete summary.
+
+THE THREE PRINCIPLED REFINEMENTS (unbuilt, no-fit, HELD for owner's architecture ruling): (1) compute-once DFT/Bader charge (amortized first-principles rung), (2) Born-Mayer exponential repulsive form (vs overstiffening Born-Lande power), (3) Keating covalent term (the named shear debt / G). A fitted [C] param is NOT the path.
+
+WHOLE SLICE ON BRANCH (claude/materials-oracle-modulus-slice tip 0bbd81a), byte-neutral/dormant, honest at grade:
+- ewald.rs: Madelung kernel (1e-4: NaCl/CsCl/fluorite) + potential matrix A_ij. [D] exact.
+- periodic.rs/periodic_table.toml: atomization [M,floor-and-validation], IE [M], EA [M] columns.
+- qeq.rs: chi/eta [D] + unbound-limit [E] + shielded SCC-DFTB QEq solve (tau=(16/5)U) [E].
+- lattice_modulus.rs: carve-2 point-charge Born-Lande B [E] + documented oxide bias band; E_coh/V screen tier.
+- mechanical_floor.toml: mat.elastic_modulus flagged retirement target (kept feeding live consumer).
+
+STATE: slice finalized + signaled (comment 4953225311), ready for gate review + owner's premise ruling. Task #36 (materials oracle) effectively COMPLETE at [E] grade for this arc; the accuracy refinements are a future arc gated on the owner. Task #35 interior arming still HELD (main 48400b0, no A Stage-3c). Do NOT touch A's genesis/register/generator-arch or C's lanes.
+NEXT possible work while waiting: nothing actionable on #182 until owner rules the premise; #178 held for A. If gate/owner rules the refinements go, the Born-Mayer repulsive form is the cleanest next (retire the Born-Lande power overstiffening) and the compute-once DFT-charge rung needs the owner's amortized-tier architecture.
