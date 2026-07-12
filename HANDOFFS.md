@@ -3078,3 +3078,16 @@ RULING WANTED (comment 4953141622): confirm shielded Rappe-Goddard J_ij (changes
 
 189 physics tests, all gates clean, byte-neutral.
 STATE: awaiting gate ruling on shielded-Coulomb formulation + Slater-exponent source before building the QEq solve. BRANCH tip 6d61ab6: carve-2 lattice_modulus.rs (AB validation), ewald.rs (Madelung kernel 1e-4), qeq.rs (chi/eta + unbound limit + stability seam). Whole slice merges once QEq gives partial-charge B. Task #35 interior arming HELD (main 64da409). Do NOT touch A's genesis/register/generator-arch or C's lanes.
+
+---
+
+## 2026-07-12 (Agent B) - Materials oracle: gate confirmed the shielded-QEq audit; surfaced option (c) tau=(16/5)U before building (#182)
+
+Gate CONFIRMED my bare-Ewald instability audit (arithmetic + physics both verified at source) and ruled the shielded Rappe-Goddard J_ij is correct (corrects the owner's "+Ewald(q)" shorthand). On the Slater exponent, gate ruled (a) cited Clementi-Raimondi [M] column, NOT (b) zeta=c/r (rejected: c is a free knob = [C] closure "wearing a derivation's clothes"). Gate's PRINCIPLE: derive-from-existing-data is derive-first ONLY with NO free knob. Gate flagged the Slater's-rules route (zeta from Z+config) as the true parameter-free refinement but noted it needs unbuilt config machinery.
+
+I AUDITED that ruling (PD2/PD5) and surfaced option (c) (comment 4953158528): the SCC-DFTB relation tau_i=(16/5)U_i derives the shielding decay from the hardness already on the floor via an EXACT relation (1s Slater density Coulomb self-energy U=(5/16)tau, so tau=16U/5, U=IE-EA=2*eta). NO free knob (unlike b), NO new column (unlike a), NO config machinery (unlike Slater's rules). On the gate's own hierarchy (parameter-free > [M] > [C]) this beats the cited column. Trade-off: 1s-density model cruder than Clementi-Raimondi SCF exponent. RECOMMENDED (c) with the cited [M] column as accuracy refinement only if MgO misses (~+1.6, ~170 GPa) - same shape as the unbound-anion ruling.
+
+STATE: awaiting gate ruling on tau source (a cited Clementi-Raimondi column vs c SCC-DFTB tau=16U/5). Either way the build is the SAME shielded Rappe-Goddard/SCC-DFTB gamma_ij QEq linear solve on unbound-limit chi/eta; only tau's source differs. Build immediately on ruling, validate MgO. Tree clean 8014630, all gates green, CI pending on 8014630.
+
+BUILD PLAN (on ruling): shielded gamma_ij(R) [->1/R large R, ->U at R=0], periodic (shielded Ewald or real-space), build J = diag from chi/eta + gamma off-diagonal, linear solve (Gaussian elim, deterministic fixed-point) at neutrality -> partial charges. Validate MgO: Mg q ~+1.6. Then periclase B = carve-2 Born-Lande with |q+q-| (partial) instead of formal |z+z-|=4: B_partial = B_formal*(q^2/4) ~ 266*(2.56/4) ~ 170 GPa vs measured 165. That dissolves finding 1 (the divalent overestimate) from first principles.
+NON-CUBIC anisotropy seam (ewald.rs) still flagged for the first non-cubic silicate. Task #35 interior arming HELD (main now 48400b0 = C's #181 cbrt, no A Stage-3c). Do NOT touch A's genesis/register/generator-arch or C's lanes.
