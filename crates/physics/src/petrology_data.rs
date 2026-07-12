@@ -24,7 +24,7 @@
 //! reference substances and the periodic table, NOT a closed enum of Earth minerals: an alien phase in an
 //! alien chemistry is a new row, not a rewrite. The registry seeds the Mg-Fe-Si-Al-O oxide-and-silicate core
 //! of a bulk-silicate world; the Stage-3 petrology kernel grows the membership to the phases a given world's
-//! composition and pressure-temperature field actually reach.
+//! composition and pressure-temperature field reach.
 //!
 //! Every value is fixed-point ([`Fixed`]), parsed from a decimal string by integer arithmetic (no float in
 //! canonical state), and carries its own citation (real-with-source, the same discipline as the atomic
