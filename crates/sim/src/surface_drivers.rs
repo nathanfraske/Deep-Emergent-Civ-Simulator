@@ -266,6 +266,115 @@ pub fn apply_exact_root(
     }
 }
 
+/// The stream-power INCISION PROCESS MODEL: the physical rule by which flow incises rock. Composed with the
+/// channel hydraulic geometry and the flow resistance it FIXES the stream-power exponents `m` and `n`, so those
+/// exponents DERIVE from the physics rather than being authored data (the owner's short-reserved-list bar). The
+/// three standard detachment-limited models (Whipple and Tucker 1999). This is a fixed FLOOR set of physically
+/// grounded incision rules, the discrete choice the exponent derivation reads; a nonlinear incision exponent or a
+/// different flow-resistance law is a floor extension.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum IncisionProcessModel {
+    /// Incision linear in the bed SHEAR STRESS (`tau = rho * g * h * S`) with Manning flow resistance. Derives
+    /// `m = c * (1 - b) * 3/5`, `n = 7/10` (for Mirror `b = 1/2`, `c = 1`: `m = 3/10`, `n = 7/10`, outside the
+    /// exact-root family so deferred to task #45 at application until the general fractional power lands).
+    ShearStressManning,
+    /// Incision linear in the UNIT STREAM POWER (`omega = rho * g * Q * S / w`, power per unit bed area). Derives
+    /// `m = c * (1 - b)`, `n = 1` (Mirror: `m = 1/2`, `n = 1`, the exact-root fluvial default).
+    UnitStreamPower,
+    /// Incision linear in the TOTAL STREAM POWER (`Omega = rho * g * Q * S`, power per unit channel length).
+    /// Derives `m = c`, `n = 1` (Mirror: `m = 1`, `n = 1`).
+    TotalStreamPower,
+}
+
+/// The greatest common divisor, for reducing a derived exponent to lowest terms.
+fn gcd(a: u64, b: u64) -> u64 {
+    if b == 0 {
+        a
+    } else {
+        gcd(b, a % b)
+    }
+}
+
+/// Reduce a rational `num/den` to an [`ExactRootExponent`] in lowest terms, failing loud on a zero denominator or
+/// a term that does not fit `u32`.
+fn reduce_exponent(num: u64, den: u64, id: &str) -> Result<ExactRootExponent, CalibrationError> {
+    if den == 0 {
+        return Err(CalibrationError::BadValue {
+            id: id.to_string(),
+            detail: "the derived exponent has a zero denominator".to_string(),
+        });
+    }
+    let g = gcd(num, den).max(1);
+    let (n, d) = (num / g, den / g);
+    if n > u32::MAX as u64 || d > u32::MAX as u64 {
+        return Err(CalibrationError::BadValue {
+            id: id.to_string(),
+            detail: format!("the derived exponent {n}/{d} does not fit u32"),
+        });
+    }
+    ExactRootExponent::new(n as u32, d as u32)
+}
+
+/// DERIVE the stream-power exponents `(m, n)` from the incision PROCESS MODEL and the channel scalings, so the
+/// driver-row exponents are derived rather than authored. `b` is the width-discharge hydraulic-geometry exponent
+/// (`w ~ Q^b`, near 1/2) and `c` is the discharge-area exponent (`Q ~ A^c`, near 1 under uniform runoff), each a
+/// rational `(num, den)`. The bed shear stress, water conservation, the flow resistance, and these two scalings
+/// reduce the incision rule to `E = K * A^m * S^n` with `m` and `n` fixed by the model (Whipple and Tucker 1999):
+/// so the exponents leave the per-world reserved list, and the only residual is the discrete process-model choice
+/// plus the near-universal `b` and `c` (themselves a deeper-derivation candidate through channel equilibrium).
+///
+/// The Mirror unit-stream-power case with `b = 1/2`, `c = 1` derives `(SQRT, LINEAR)`, reproducing the fluvial
+/// default, so wiring this derivation is byte-neutral. The shear-stress case derives exponents outside the
+/// buildable exact-root family (Mirror: 3/10, 7/10), correct as data but refused fail-loud at kernel application
+/// ([`apply_exact_root`]) until the general fractional-power primitive (task #45) lands. `b` must lie in `(0, 1)`
+/// and `c` must be positive; otherwise the scaling is unphysical and refused fail-loud.
+pub fn stream_power_exponents(
+    model: IncisionProcessModel,
+    b: (u32, u32),
+    c: (u32, u32),
+) -> Result<(ExactRootExponent, ExactRootExponent), CalibrationError> {
+    let (b_num, b_den) = (u64::from(b.0), u64::from(b.1));
+    let (c_num, c_den) = (u64::from(c.0), u64::from(c.1));
+    if b_den == 0 || b_num == 0 || b_num >= b_den {
+        return Err(CalibrationError::BadValue {
+            id: "surface.stream_power_hydraulic_geometry".to_string(),
+            detail: format!(
+                "the width-discharge exponent b = {}/{} must lie in (0, 1)",
+                b.0, b.1
+            ),
+        });
+    }
+    if c_den == 0 || c_num == 0 {
+        return Err(CalibrationError::BadValue {
+            id: "surface.stream_power_discharge".to_string(),
+            detail: format!(
+                "the discharge-area exponent c = {}/{} must be positive",
+                c.0, c.1
+            ),
+        });
+    }
+    // (1 - b) = (b_den - b_num) / b_den, positive because b lies in (0, 1).
+    let one_minus_b_num = b_den - b_num;
+    let id = "surface.stream_power_exponent";
+    match model {
+        // m = c * (1 - b), n = 1.
+        IncisionProcessModel::UnitStreamPower => Ok((
+            reduce_exponent(c_num * one_minus_b_num, c_den * b_den, id)?,
+            ExactRootExponent::LINEAR,
+        )),
+        // m = c, n = 1.
+        IncisionProcessModel::TotalStreamPower => Ok((
+            reduce_exponent(c_num, c_den, id)?,
+            ExactRootExponent::LINEAR,
+        )),
+        // m = c * (1 - b) * 3/5, n = 7/10 (Manning flow resistance).
+        IncisionProcessModel::ShearStressManning => Ok((
+            reduce_exponent(c_num * one_minus_b_num * 3, c_den * b_den * 5, id)?,
+            reduce_exponent(7, 10, id)?,
+        )),
+    }
+}
+
 /// The result of one [`fluid_shear`] pass: the flow routing, the drainage area, the entrained mass each column
 /// gives up, and the sediment each cell carries downstream. The kernel is the SOURCE half of the fluvial budget:
 /// it does not lower the elevation ledger (the snapshot-apply reconciliation applies `entrained` as the column
@@ -967,6 +1076,80 @@ mod tests {
             ExactRootExponent::new(3, 1).unwrap()
         )
         .is_err());
+    }
+
+    #[test]
+    fn the_unit_stream_power_model_derives_the_mirror_fluvial_default() {
+        // The Mirror hydraulic geometry (b = 1/2, c = 1) under the unit-stream-power model derives m = 1/2,
+        // n = 1, the fluvial default: the exponents fall out of the physics, not a reserved datum.
+        let (m, n) =
+            stream_power_exponents(IncisionProcessModel::UnitStreamPower, (1, 2), (1, 1)).unwrap();
+        assert_eq!(m, ExactRootExponent::SQRT);
+        assert_eq!(n, ExactRootExponent::LINEAR);
+    }
+
+    #[test]
+    fn the_total_stream_power_model_derives_linear_in_area() {
+        // Total stream power derives m = c = 1, n = 1.
+        let (m, n) =
+            stream_power_exponents(IncisionProcessModel::TotalStreamPower, (1, 2), (1, 1)).unwrap();
+        assert_eq!(m, ExactRootExponent::LINEAR);
+        assert_eq!(n, ExactRootExponent::LINEAR);
+    }
+
+    #[test]
+    fn the_shear_stress_model_derives_unbuildable_exponents_deferred_to_45() {
+        // The shear-stress model with Manning resistance derives m = 3/10, n = 7/10 for the Mirror geometry:
+        // correct as data, but outside the buildable exact-root family, so the kernel refuses them fail-loud
+        // (deferred to the general fractional-power primitive).
+        let (m, n) =
+            stream_power_exponents(IncisionProcessModel::ShearStressManning, (1, 2), (1, 1))
+                .unwrap();
+        assert_eq!(m, ExactRootExponent { num: 3, den: 10 });
+        assert_eq!(n, ExactRootExponent { num: 7, den: 10 });
+        assert!(
+            apply_exact_root(Fixed::from_int(4), m).is_err(),
+            "the derived shear-stress exponent is not buildable yet"
+        );
+    }
+
+    #[test]
+    fn the_derived_unit_stream_power_exponents_reproduce_the_fluvial_kernel_byte_for_byte() {
+        // The byte-neutral proof of the derivation: deriving the exponents from the unit-stream-power model and
+        // feeding them to the kernel reproduces the fluvial default exactly, so wiring the derivation is
+        // byte-neutral.
+        let (w, h) = (5, 4);
+        let z = west_ramp(w, h);
+        let (m, n) =
+            stream_power_exponents(IncisionProcessModel::UnitStreamPower, (1, 2), (1, 1)).unwrap();
+        let derived = fluid_shear_with_exponents(&z, w, h, Fixed::from_int(1), Fixed::ZERO, m, n)
+            .expect("valid");
+        let default = fluid_shear(&z, w, h, Fixed::from_int(1), Fixed::ZERO).expect("valid");
+        assert_eq!(derived, default);
+    }
+
+    #[test]
+    fn a_different_hydraulic_geometry_derives_a_different_area_exponent() {
+        // The exponent tracks the physics: a steeper width-discharge scaling (b = 2/3) under unit stream power
+        // derives m = 1/3, a smaller area exponent than the b = 1/2 case.
+        let (m, _n) =
+            stream_power_exponents(IncisionProcessModel::UnitStreamPower, (2, 3), (1, 1)).unwrap();
+        assert_eq!(m, ExactRootExponent { num: 1, den: 3 });
+    }
+
+    #[test]
+    fn an_unphysical_hydraulic_geometry_is_refused_fail_loud() {
+        // b outside (0, 1) and a non-positive c are unphysical scalings, refused rather than deriving a nonsense
+        // exponent.
+        assert!(
+            stream_power_exponents(IncisionProcessModel::UnitStreamPower, (1, 1), (1, 1)).is_err()
+        );
+        assert!(
+            stream_power_exponents(IncisionProcessModel::UnitStreamPower, (3, 2), (1, 1)).is_err()
+        );
+        assert!(
+            stream_power_exponents(IncisionProcessModel::UnitStreamPower, (1, 2), (0, 1)).is_err()
+        );
     }
 
     #[test]
