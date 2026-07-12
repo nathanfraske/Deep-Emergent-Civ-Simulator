@@ -48,7 +48,18 @@ CRATES = [
 ]
 # The scanned vectors. Each is a plain substring; the baseline captures the exact occurrence count
 # per file (imports included), so the gate is a pure introduction ratchet.
-PATTERNS = ["Instant::now", "SystemTime", "thread::current", "ThreadId", "HashMap", "HashSet"]
+# `civsim_viewer` is the read-and-render crate (Q1 Stone 2, the viewer-import ratchet): the
+# determinism crates must never import it, so an observer's render path cannot feed back into
+# canonical state. Its baseline is zero (the boundary is structural today), so any import fails.
+PATTERNS = [
+    "Instant::now",
+    "SystemTime",
+    "thread::current",
+    "ThreadId",
+    "HashMap",
+    "HashSet",
+    "civsim_viewer",
+]
 BASELINE = ROOT / "scripts" / "determinism_baseline.tsv"
 
 
