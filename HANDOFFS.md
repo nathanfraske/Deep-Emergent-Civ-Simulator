@@ -2925,3 +2925,37 @@ GATE RULINGS on the two flagged seams:
 (B) EXPONENT FIELD: BUILD the driver-row exact-root-exponent field NOW (do not defer whole to #45). Mechanism fixed Rust, exponent = data from the exact-root family (m in {1/2,1}, composable cube root), default m=1/2 n=1 reserved-with-basis as the Mirror fluvial per-world datum, #45 later EXTENDS membership without touching the kernel. Sequence BEFORE drivers go live, byte-neutral (default reproduces current).
 BRIDGE PR #175 OPENED (claude/genesis-arming-step off main, design-first opener docs/working/GENESIS_STAGE3_ARMING_STEP.md), confirmed to gate (comment 4952268087). Scopes the arc: (1) reconcile-honored composition contract, (2) exponent field, (3) arm Mirror = bulk silicate Earth (McDonough & Sun 1995) producer filling isostatic_elevation (the STATED genesis re-pin). Gate is running the #160 full merge pass (accumulated-diff double-check, living re-pin to 8c99be0c, CI incl mirror_calibrated_boot, squash landing GeodynamicColumn + 4-reservoir ledger).
 STATE: TWO BRANCHES. claude/genesis-forward-scoping = #160 substrate (segment-complete, awaiting gate merge). claude/genesis-arming-step = #175 opener (awaiting #160 merge to rebase onto merged main + build). BLOCKED on the #160 merge (pieces 1-2 edit the substrate code that lands with the merge; the gate ruled "ground against the merged substrate"). NEXT when #160 merges: rebase #175 onto merged main, build piece 1 (reconcile-honored composition contract + the contested-column composition test) byte-neutral, then piece 2 (exponent DriverRow field) byte-neutral, then piece 3 (arm Mirror, the stated re-pin), section-9 panel at the arc boundary, gate-checkpoint each. Follow the gate throughout (owner-authorized).
+
+---
+
+## 2026-07-12 (Agent C) - Momentum-vector unification arc OPENED (#179)
+
+Prior C arcs this session all MERGED: redistribution primitive (#172), ledger coupling (#174), ballistic ejecta (#177, CI-green, gate-approved slice 2, gate to merge once bridge up).
+
+NEXT ARC opened design-first per gate's "your call" between (a) the momentum-vector unification I keep flagging or (b) a determinism/numerics primitive the arc needs. I take (a) and showed the two collapse: slice 1 (unified integrator core) IS the numerics primitive. PD1 correction: my first instinct was a fixed-point sqrt, but `Fixed::sqrt` (fixed.rs:212, exact 128-bit isqrt) already exists.
+
+MECHANISM: one sub-cell velocity-vector integrator where surface-contact vs airborne EMERGES from height-vs-terrain each step, retiring the authored kernel selection between runout.rs (surface-contact one-law) and ballistic.rs (airborne closed-form). Also retires the surface fan's 4-axis snap + both fans' sub-cell floor artifact (a Fixed velocity vector holds heading at CORDIC resolution in both regimes).
+
+VERIFIED byte-neutral basis: runout/ballistic/launch_fan/ejecta_fan have NO caller outside their modules, no scenario/run_world arm them, so refactor moves no canonical state (the four pins hold). Load-bearing for the retire decision.
+
+TWO DECISIONS SURFACED for gate (in #179 body + confirmed on #177 comment 4952601834):
+1. Stepping seam: bounded SPACE-march (recommended, same determinism envelope as existing marches, reduces to closed-form parabola in fine-step limit) vs fixed-dt symplectic. Step size reserved-with-basis (step at which range error vs closed form < cell size), never authored.
+2. Retire-vs-supersede: RETIRE the two siblings into limits of one law (recommended, byte-neutral pure refactor since unarmed), optionally keeping the closed-form parabola as a test-only exact oracle. SUPERSEDE leaves the template.
+
+BRANCH claude/momentum-vector-unification off main 04eccda (post-#176). PR #179 doc-only opener (docs/working/MOMENTUM_VECTOR_UNIFICATION_KICKOFF.md). CI: prose green, build in progress (doc-only). Subscribed to #179 for the gate ruling.
+
+STATE: BLOCKED on gate ruling of the two decisions. NEXT on ruling: build slice 1 (unified integrator core) byte-neutral, section-9 self-audit, gate per push. Honest limits in doc: z=0 heightfield is A's substrate boundary (unchanged), air drag deferred to floor drag_force via body-force slot, exactness trade real and MEASURED in slice 1's proof not assumed.
+
+---
+
+## 2026-07-12 (Agent C) - Momentum unification slices 1+2 BUILT (#179)
+
+Gate ruled both opener decisions (comment 4952613439): space-march (per-cell), RETIRE the siblings (keep parabola as test oracle), MEASURE the exactness trade. Slice 1 APPROVED (comment ~4952...): reductions are exact cell-for-cell (better than bounded), PD2 step-size refinement ADOPTED (no sub-cell param on per-cell z=0 heightfield). Slice 2 built, both pushed.
+
+SLICE 1 (crates/world/src/momentum.rs): the unified velocity-vector integrator. One force law under an emergent normal force: gravity+body-forces always, Coulomb friction only in contact (N=0 airborne). Regime emerges from arc-vs-terrain each step. Reduces EXACTLY (to Fixed rounding) to ballistic_landing (airborne: flat/valley/slope) and runout (contact: aligned azimuth). 8 tests. Three PD1 catches by test: sqrt(2*(1/2 e)) bug, CORDIC sin(0) tiny-positive wrongly launching grazing (fixed: start in contact, launch emerges), CORDIC cos(0)=1+1.6e-9 flipping one cell at energy-zero boundary (moved test off boundary, mu=0.12).
+
+SLICE 2 (momentum.rs): momentum_fan, isotropic CORDIC azimuths through the integrator, aggregated via redistribute. ANGULAR-RESOLUTION BONUS PROVEN BY CONTRAST: grazing contact fan = 16 distinct cells from 16 azimuths; surface launch_fan = 4 cells (four-axis collapse), SAME launch/ground. 6 fan tests (near-symmetric both regimes E7/W8/N8/S7, four-axis contrast, slope-broken, conservative, deterministic, zero-azimuth empty). azimuths reserved resolution knob. 14 momentum tests total.
+
+BRANCH claude/momentum-vector-unification (tip ed49e3e), rebuilt onto merged main (1ac525a, #177 in) via MERGE COMMIT not rebase (force-push is gated; use merge+cherry-pick to avoid history rewrite). Byte-neutral 40fe8a72. All gates clean.
+
+STATE: slice 2 signaled (comment 4952788137), awaiting gate ruling. NEXT: on gate go, the arc's mechanism is complete (integrator + fan). The Decision-2 RETIRE (fold runout/ballistic out of the driver path, keep parabola as test oracle) is HELD for A's arming lane (A on priority-0 provenance-ledger per gate) - do NOT build it until the gate signals A resumed arming; it couples to A's TransportKernelId becoming ONE unified transport-integrator arm. main advanced to #180 (Agent B physics cleanup, no file overlap, routine merge at PR-merge time). Do NOT touch A's genesis/surface_transport files or B's lanes.
