@@ -298,6 +298,81 @@ pub fn runout_with_forces(
     }
 }
 
+/// An isotropic launch fan: a source sheds its mass as `directions` equal parcels launched at evenly spaced
+/// angles, the maximum-entropy unbiased direction prior. Each parcel carries the same launch state (an event
+/// datum), and the blanket that results is NOT authored: it EMERGES from the terrain shaping each parcel's
+/// runout, so a flat ground gives a symmetric spread and a slope funnels the deposit downhill, both falling
+/// out of the physics rather than a coded spread shape.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LaunchFan {
+    /// Each parcel's launch specific energy (its range budget).
+    pub energy: Fixed,
+    /// The launch speed, the magnitude of the directional momentum bias applied to each `(cos, sin)`
+    /// direction: a large speed is a ballistic throw, a small speed a gravity-directed release.
+    pub speed: Fixed,
+    /// The number of evenly spaced launch directions. A RESOLUTION and determinism bound, not a physical
+    /// value: reserved-with-basis as the fewest directions at which the blanket's shape stops changing
+    /// beyond the grid resolution (a resolution-versus-cost bound), never fabricated.
+    pub directions: u32,
+}
+
+/// Fire an isotropic launch fan from `source` and aggregate where the parcels come to rest into a canonical
+/// destination distribution the conservation operator ([`crate::redistribute`]) credits. The directions are
+/// the evenly spaced angles `i * 2*pi / directions` from a fixed origin (deterministic fixed-point CORDIC,
+/// never an RNG), each parcel runs through [`runout_with_forces`], and the rest cells are gathered in cell
+/// order into `(cell, count)` weights, so the whole fan is a pure function of its inputs, worker-invariant.
+/// A parcel that rests at the source contributes there (a fraction of the mass stays), which the operator
+/// nets correctly. Returns an empty distribution for a zero-direction fan.
+///
+/// The honest boundary (the integrator is SURFACE-CONTACT, friction-dissipated along the ground): this fan
+/// is correct for the surface-flowing mass movements (debris flows, lahars, pyroclastic and turbidity
+/// currents, lava runout) and APPROXIMATE for a true impact ejecta blanket, whose parcels launch on a
+/// VERTICAL ballistic arc. The vertical-arc regime (airborne drag in flight versus contact friction on the
+/// ground) is a deeper force-term extension through the same open [`BodyForce`] slot, deferred behind this
+/// boundary, not built here.
+///
+/// A second honest limit, the ANGULAR resolution: the integrator takes greedy single-cell 4-connected
+/// steps, so on flat ground a diagonal launch snaps to its nearest axis (the deposit is SYMMETRIC but
+/// effectively four-axis, and directions beyond the four re-weight the same axis endpoints rather than
+/// filling in angles); the terrain breaks this on real relief, and true angular resolution is the deferred
+/// momentum-vector (sub-cell velocity) integrator, a follow-on refinement of the same law.
+pub fn launch_fan(
+    width: usize,
+    height: usize,
+    elevation: &[Fixed],
+    source: usize,
+    fan: LaunchFan,
+    forces: RunoutForces,
+    extra: &[BodyForce],
+) -> Vec<crate::redistribute::Weighted> {
+    use crate::redistribute::Weighted;
+    use std::collections::BTreeMap;
+    if fan.directions == 0 {
+        return Vec::new();
+    }
+    // 2*pi as the full turn the directions evenly divide; HALF_PI times four keeps it exact-in-Fixed.
+    let full_turn = Fixed::HALF_PI.mul(Fixed::from_int(4));
+    let count = Fixed::from_int(fan.directions as i32);
+    // An ordered map so the aggregation is canonical (cell order), never a hash-iteration leak.
+    let mut rests: BTreeMap<usize, u64> = BTreeMap::new();
+    for i in 0..fan.directions {
+        // The evenly spaced launch angle and its unit direction (cos, sin), scaled by the launch speed.
+        let theta = full_turn.mul(Fixed::from_int(i as i32)).div(count);
+        let (sin, cos) = theta.sin_cos();
+        let heading = (fan.speed.mul(cos), fan.speed.mul(sin));
+        let parcel = Parcel {
+            energy: fan.energy,
+            heading,
+        };
+        let path = runout_with_forces(width, height, elevation, source, parcel, forces, extra);
+        *rests.entry(path.rest).or_insert(0) += 1;
+    }
+    rests
+        .into_iter()
+        .map(|(dest, weight)| Weighted { dest, weight })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -650,6 +725,140 @@ mod tests {
             width - 1,
             "the mana gradient drives the parcel to the far edge as a data row"
         );
+    }
+
+    // The four axis reaches of a fan's deposit around a source, for the symmetry and terrain-broken tests.
+    fn axis_reaches(
+        dist: &[crate::redistribute::Weighted],
+        w: usize,
+        sx: usize,
+        sy: usize,
+    ) -> (u64, u64, u64, u64) {
+        let (mut east, mut west, mut north, mut south) = (0u64, 0u64, 0u64, 0u64);
+        for wt in dist {
+            let x = wt.dest % w;
+            let y = wt.dest / w;
+            if x > sx {
+                east += wt.weight;
+            }
+            if x < sx {
+                west += wt.weight;
+            }
+            if y > sy {
+                south += wt.weight;
+            }
+            if y < sy {
+                north += wt.weight;
+            }
+        }
+        (east, west, north, south)
+    }
+
+    #[test]
+    fn an_isotropic_fan_spreads_symmetrically_on_flat_ground() {
+        // Flat ground, source at the centre, an 8-direction ballistic fan: the deposit is balanced
+        // east-west and north-south (the maximum-entropy prior with no terrain to break it), spreads to
+        // several cells (a blanket, not a point), and conserves the parcel count (total weight = directions).
+        let (w, h) = (41usize, 41usize);
+        let flat = vec![Fixed::ZERO; w * h];
+        let (sx, sy) = (20usize, 20usize);
+        let source = sy * w + sx;
+        let f = forces(Fixed::ONE, Fixed::from_ratio(1, 2), Fixed::ONE, 200);
+        let fan = LaunchFan {
+            energy: Fixed::from_int(4),
+            speed: Fixed::from_int(8),
+            directions: 8,
+        };
+        let dist = launch_fan(w, h, &flat, source, fan, f, &[]);
+        let total: u64 = dist.iter().map(|wt| wt.weight).sum();
+        assert_eq!(total, 8, "every launched parcel is accounted for");
+        assert!(
+            dist.len() > 1,
+            "the fan spreads into a blanket, not a point"
+        );
+        let (east, west, north, south) = axis_reaches(&dist, w, sx, sy);
+        assert_eq!(east, west, "flat-ground symmetry east-west");
+        assert_eq!(north, south, "flat-ground symmetry north-south");
+    }
+
+    #[test]
+    fn a_fan_on_a_slope_funnels_the_deposit_downhill() {
+        // A ramp falling toward the west (lower x) breaks the symmetry: downhill (west) parcels gain energy
+        // and reach far, uphill (east) parcels lose it and stop near, so the deposit is west-heavy. The
+        // asymmetry EMERGES from the terrain, not an authored bias.
+        let (w, h) = (41usize, 21usize);
+        let e = ramp(w, h, Fixed::from_ratio(3, 4));
+        let (sx, sy) = (20usize, 10usize);
+        let source = sy * w + sx;
+        let f = forces(Fixed::ONE, Fixed::from_ratio(1, 2), Fixed::ONE, 400);
+        let fan = LaunchFan {
+            energy: Fixed::from_int(2),
+            speed: Fixed::from_int(4),
+            directions: 8,
+        };
+        let dist = launch_fan(w, h, &e, source, fan, f, &[]);
+        let (east, west, _north, _south) = axis_reaches(&dist, w, sx, sy);
+        assert!(
+            west > east,
+            "the deposit funnels downhill (west {west} > east {east})"
+        );
+    }
+
+    #[test]
+    fn the_fan_is_deterministic() {
+        let (w, h) = (21usize, 21usize);
+        let e = ramp(w, h, Fixed::from_ratio(2, 5));
+        let source = 10 * w + 10;
+        let f = forces(Fixed::ONE, Fixed::from_ratio(1, 3), Fixed::ONE, 200);
+        let fan = LaunchFan {
+            energy: Fixed::from_int(3),
+            speed: Fixed::from_int(5),
+            directions: 12,
+        };
+        let a = launch_fan(w, h, &e, source, fan, f, &[]);
+        let b = launch_fan(w, h, &e, source, fan, f, &[]);
+        assert_eq!(a, b, "the same fan reproduces the same distribution");
+    }
+
+    #[test]
+    fn the_fan_feeds_the_operator_a_conservative_blanket() {
+        // The whole surface transport: the fan places the blanket, the operator moves the source's mass into
+        // it conservatively, so the delta field sums to zero and the source is debited its whole mass.
+        let (w, h) = (31usize, 31usize);
+        let flat = vec![Fixed::ZERO; w * h];
+        let source = 15 * w + 15;
+        let f = forces(Fixed::ONE, Fixed::from_ratio(1, 2), Fixed::ONE, 200);
+        let fan = LaunchFan {
+            energy: Fixed::from_int(3),
+            speed: Fixed::from_int(6),
+            directions: 8,
+        };
+        let dist = launch_fan(w, h, &flat, source, fan, f, &[]);
+        let mass = 4000;
+        let delta = redistribute(
+            w * h,
+            &[Redistribution {
+                source,
+                mass,
+                dests: dist,
+            }],
+        )
+        .unwrap();
+        assert_eq!(delta.iter().sum::<i64>(), 0, "the blanket conserves mass");
+        assert_eq!(delta[source], -mass, "the source shed its whole mass");
+    }
+
+    #[test]
+    fn a_zero_direction_fan_is_empty() {
+        let (w, h) = (5usize, 5usize);
+        let flat = vec![Fixed::ZERO; w * h];
+        let f = forces(Fixed::ONE, Fixed::from_ratio(1, 2), Fixed::ONE, 50);
+        let fan = LaunchFan {
+            energy: Fixed::from_int(2),
+            speed: Fixed::from_int(3),
+            directions: 0,
+        };
+        assert!(launch_fan(w, h, &flat, 12, fan, f, &[]).is_empty());
     }
 
     #[test]
