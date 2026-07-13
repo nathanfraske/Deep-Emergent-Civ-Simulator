@@ -360,3 +360,36 @@ fn the_full_floor_is_born_provenance_tagged() {
     }
     assert!(element_count > 0, "the periodic table is non-empty");
 }
+
+#[test]
+fn every_loaded_floor_entry_has_a_seven_tag_grade_in_the_register() {
+    use civsim_physics::floor_provenance::FloorProvenance;
+    // The floor grade register (Phase 2 slice 2) must stay in sync with the LOADED floor: every axis and
+    // substance the ground registry carries, and every periodic element, has a seven-tag grade keyed by its
+    // id. This is the cross-check the Python floor-provenance gate makes structurally, asserted here against
+    // the real loaded structs so a new floor entry without a grade fails the build.
+    let reg = FloorProvenance::embedded().expect("the floor grade register parses");
+    let ground = PhysicsRegistry::ground().expect("the ground floor loads");
+    let table = PeriodicTable::standard().expect("the periodic table loads");
+    for axis in ground.axes() {
+        assert!(
+            reg.grade(&axis.id).is_some(),
+            "floor axis '{}' has no grade in floor_provenance.toml",
+            axis.id
+        );
+    }
+    for sub in ground.substances() {
+        assert!(
+            reg.grade(&sub.id).is_some(),
+            "floor substance '{}' has no grade in floor_provenance.toml",
+            sub.id
+        );
+    }
+    for element in table.elements() {
+        assert!(
+            reg.grade(&element.symbol).is_some(),
+            "periodic element '{}' has no grade in floor_provenance.toml",
+            element.symbol
+        );
+    }
+}
