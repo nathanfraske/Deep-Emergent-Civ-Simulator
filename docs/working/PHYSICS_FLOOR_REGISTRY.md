@@ -170,22 +170,22 @@ The 11 deriving subsystems below live OUTSIDE the authored floor. Each produces 
 - `mat.compressive_strength` [MPa] (crates/physics/data/mechanical_floor.toml:237): the maximum compressive stress before crushing
 - `mat.shear_strength` [MPa] (crates/physics/data/mechanical_floor.toml:248): the maximum shear stress before shear failure (independent for anisotropic and brittle substances)
 - `mat.fracture_strength` [MPa] (crates/physics/data/mechanical_floor.toml:259): the stress at which brittle fracture initiates (the shared thermal-fracture read)
-- `mat.elastic_modulus` [MPa] (crates/physics/data/mechanical_floor.toml:279): Young's modulus, the stress per unit elastic strain
-- `mat.fracture_energy` [J/m^2] (crates/physics/data/mechanical_floor.toml:290): the critical strain-energy release rate to advance a crack
-- `mat.ductility` [ratio] (crates/physics/data/mechanical_floor.toml:301): tensile strain to failure
-- `mat.poisson_ratio` [ratio] (crates/physics/data/mechanical_floor.toml:312): the ratio of transverse contraction to axial extension under load
-- `mat.wear_coefficient` [ratio] (crates/physics/data/mechanical_floor.toml:323): the Archard dimensionless wear coefficient, stored at scale x1e6 (the kernel divides it back out)
-- `mat.specific_cut_energy` [MJ/m^3] (crates/physics/data/mechanical_floor.toml:334): the energy to remove or part unit volume (energy density, reducing to pressure)
-- `therm.conductivity` [W/(m*K)] (crates/physics/data/mechanical_floor.toml:347): the conductive heat transfer rate per unit area per unit gradient
-- `therm.specific_heat` [J/(kg*K)] (crates/physics/data/mechanical_floor.toml:358): the energy to raise unit mass by one degree
-- `therm.melting_temperature` [K] (crates/physics/data/mechanical_floor.toml:369): the solid-to-liquid transition temperature
-- `therm.boiling_temperature` [K] (crates/physics/data/mechanical_floor.toml:380): the liquid-to-gas transition temperature at reference pressure
-- `therm.ignition_temperature` [K] (crates/physics/data/mechanical_floor.toml:391): the lowest temperature that sustains combustion without a spark
-- `therm.expansion` [ppm/K] (crates/physics/data/mechanical_floor.toml:402): the fractional length change per degree, stored in ppm/K (the x1e6 scale)
-- `therm.latent_heat` [kJ/kg] (crates/physics/data/mechanical_floor.toml:413): the energy per unit mass of a phase change, stored in kJ/kg
-- `therm.fuel_value` [kJ/kg] (crates/physics/data/mechanical_floor.toml:424): the chemical energy released per unit mass on complete combustion, stored in kJ/kg (the energy sub-domain owns this; Materials reads it cross-domain)
-- `therm.oxidiser_demand` [ratio] (crates/physics/data/mechanical_floor.toml:435): the stoichiometric oxidiser-to-fuel mass ratio (0 for a self-oxidiser)
-- `mech.stroke_length` [m] (crates/physics/data/mechanical_floor.toml:762): the distance an actuating force acts over in one stroke, the reach of a power stroke, grown independently of the segment length so the acting-distance...
+- `mat.elastic_modulus` [MPa] (crates/physics/data/mechanical_floor.toml:270): Young's modulus, the stress per unit elastic strain
+- `mat.fracture_energy` [J/m^2] (crates/physics/data/mechanical_floor.toml:281): the critical strain-energy release rate to advance a crack
+- `mat.ductility` [ratio] (crates/physics/data/mechanical_floor.toml:292): tensile strain to failure
+- `mat.poisson_ratio` [ratio] (crates/physics/data/mechanical_floor.toml:303): the ratio of transverse contraction to axial extension under load
+- `mat.wear_coefficient` [ratio] (crates/physics/data/mechanical_floor.toml:314): the Archard dimensionless wear coefficient, stored at scale x1e6 (the kernel divides it back out)
+- `mat.specific_cut_energy` [MJ/m^3] (crates/physics/data/mechanical_floor.toml:325): the energy to remove or part unit volume (energy density, reducing to pressure)
+- `therm.conductivity` [W/(m*K)] (crates/physics/data/mechanical_floor.toml:338): the conductive heat transfer rate per unit area per unit gradient
+- `therm.specific_heat` [J/(kg*K)] (crates/physics/data/mechanical_floor.toml:349): the energy to raise unit mass by one degree
+- `therm.melting_temperature` [K] (crates/physics/data/mechanical_floor.toml:360): the solid-to-liquid transition temperature
+- `therm.boiling_temperature` [K] (crates/physics/data/mechanical_floor.toml:371): the liquid-to-gas transition temperature at reference pressure
+- `therm.ignition_temperature` [K] (crates/physics/data/mechanical_floor.toml:382): the lowest temperature that sustains combustion without a spark
+- `therm.expansion` [ppm/K] (crates/physics/data/mechanical_floor.toml:393): the fractional length change per degree, stored in ppm/K (the x1e6 scale)
+- `therm.latent_heat` [kJ/kg] (crates/physics/data/mechanical_floor.toml:404): the energy per unit mass of a phase change, stored in kJ/kg
+- `therm.fuel_value` [kJ/kg] (crates/physics/data/mechanical_floor.toml:415): the chemical energy released per unit mass on complete combustion, stored in kJ/kg (the energy sub-domain owns this; Materials reads it cross-domain)
+- `therm.oxidiser_demand` [ratio] (crates/physics/data/mechanical_floor.toml:426): the stoichiometric oxidiser-to-fuel mass ratio (0 for a self-oxidiser)
+- `mech.stroke_length` [m] (crates/physics/data/mechanical_floor.toml:753): the distance an actuating force acts over in one stroke, the reach of a power stroke, grown independently of the segment length so the acting-distance...
 
 ## Reference substances (authored real-material data, not axes)
 
@@ -220,8 +220,8 @@ The 11 deriving subsystems below live OUTSIDE the authored floor. Each produces 
 
 ### `crates/physics/data/mechanical_floor.toml` (2 substances)
 
-- `iron` (crates/physics/data/mechanical_floor.toml:730)
-- `oak` (crates/physics/data/mechanical_floor.toml:743)
+- `iron` (crates/physics/data/mechanical_floor.toml:721)
+- `oak` (crates/physics/data/mechanical_floor.toml:734)
 
 ## Law kernels (fixed Rust mechanisms, not authored values)
 
@@ -301,27 +301,27 @@ Two kinds, kept distinct: a DECLARED law is a `[[law]]` block in the floor data 
 
 #### `crates/physics/data/mechanical_floor.toml` (21 laws)
 
-- `law.contact_pressure` -> `contact_pressure` (crates/physics/data/mechanical_floor.toml:448)
-- `law.cut_penetrate` -> `cut_penetrate` (crates/physics/data/mechanical_floor.toml:460)
-- `law.bend_stress` -> `bend_stress` (crates/physics/data/mechanical_floor.toml:473)
-- `law.axial_stress` -> `axial_stress` (crates/physics/data/mechanical_floor.toml:487)
-- `law.fracture_onset` -> `fracture_onset` (crates/physics/data/mechanical_floor.toml:500)
-- `law.kinetic_energy` -> `kinetic_energy` (crates/physics/data/mechanical_floor.toml:518)
-- `law.impulse` -> `impulse` (crates/physics/data/mechanical_floor.toml:530)
-- `law.lever` -> `lever` (crates/physics/data/mechanical_floor.toml:544)
-- `law.friction` -> `friction` (crates/physics/data/mechanical_floor.toml:557)
-- `law.reach` -> `reach` (crates/physics/data/mechanical_floor.toml:572)
-- `law.weight` -> `weight` (crates/physics/data/mechanical_floor.toml:583)
-- `law.power` -> `power` (crates/physics/data/mechanical_floor.toml:595)
-- `law.euler_buckle` -> `euler_buckle` (crates/physics/data/mechanical_floor.toml:607)
-- `law.shear` -> `shear` (crates/physics/data/mechanical_floor.toml:621)
-- `law.wear` -> `wear` (crates/physics/data/mechanical_floor.toml:635)
-- `law.conduction` -> `conduction` (crates/physics/data/mechanical_floor.toml:649)
-- `law.sensible_heat` -> `sensible_energy` (crates/physics/data/mechanical_floor.toml:662)
-- `law.sensible_rise` -> `sensible_rise` (crates/physics/data/mechanical_floor.toml:674)
-- `law.phase_change` -> `phase_change_energy` (crates/physics/data/mechanical_floor.toml:686)
-- `law.combustion` -> `combustion` (crates/physics/data/mechanical_floor.toml:700)
-- `law.thermal_stress` -> `thermal_stress` (crates/physics/data/mechanical_floor.toml:714)
+- `law.contact_pressure` -> `contact_pressure` (crates/physics/data/mechanical_floor.toml:439)
+- `law.cut_penetrate` -> `cut_penetrate` (crates/physics/data/mechanical_floor.toml:451)
+- `law.bend_stress` -> `bend_stress` (crates/physics/data/mechanical_floor.toml:464)
+- `law.axial_stress` -> `axial_stress` (crates/physics/data/mechanical_floor.toml:478)
+- `law.fracture_onset` -> `fracture_onset` (crates/physics/data/mechanical_floor.toml:491)
+- `law.kinetic_energy` -> `kinetic_energy` (crates/physics/data/mechanical_floor.toml:509)
+- `law.impulse` -> `impulse` (crates/physics/data/mechanical_floor.toml:521)
+- `law.lever` -> `lever` (crates/physics/data/mechanical_floor.toml:535)
+- `law.friction` -> `friction` (crates/physics/data/mechanical_floor.toml:548)
+- `law.reach` -> `reach` (crates/physics/data/mechanical_floor.toml:563)
+- `law.weight` -> `weight` (crates/physics/data/mechanical_floor.toml:574)
+- `law.power` -> `power` (crates/physics/data/mechanical_floor.toml:586)
+- `law.euler_buckle` -> `euler_buckle` (crates/physics/data/mechanical_floor.toml:598)
+- `law.shear` -> `shear` (crates/physics/data/mechanical_floor.toml:612)
+- `law.wear` -> `wear` (crates/physics/data/mechanical_floor.toml:626)
+- `law.conduction` -> `conduction` (crates/physics/data/mechanical_floor.toml:640)
+- `law.sensible_heat` -> `sensible_energy` (crates/physics/data/mechanical_floor.toml:653)
+- `law.sensible_rise` -> `sensible_rise` (crates/physics/data/mechanical_floor.toml:665)
+- `law.phase_change` -> `phase_change_energy` (crates/physics/data/mechanical_floor.toml:677)
+- `law.combustion` -> `combustion` (crates/physics/data/mechanical_floor.toml:691)
+- `law.thermal_stress` -> `thermal_stress` (crates/physics/data/mechanical_floor.toml:705)
 
 ### Direct kernels (`crates/physics/src/laws.rs`, 111 `pub fn`, 35 unbacked)
 
