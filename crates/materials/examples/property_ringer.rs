@@ -47,9 +47,10 @@
 use civsim_core::Fixed;
 use civsim_materials::{
     chen_tse_hardness_gpa, debye_heat_capacity_j_per_mol_k, debye_temperature,
-    debye_velocity_km_per_s, density_g_per_cm3, freezer, lattice_thermal_conductivity_w_per_m_k,
-    linear_thermal_expansion_per_k, poisson_ratio, shear_modulus_gpa, surface_energy_j_per_m2,
-    thermal_diffusivity_m2_per_s, youngs_modulus_gpa, PropertyRoute,
+    debye_velocity_km_per_s, density_g_per_cm3, freezer, grain_boundary_energy_j_per_m2,
+    lattice_thermal_conductivity_w_per_m_k, linear_thermal_expansion_per_k, poisson_ratio,
+    shear_modulus_gpa, surface_energy_j_per_m2, thermal_diffusivity_m2_per_s, youngs_modulus_gpa,
+    PropertyRoute,
 };
 use civsim_physics::metal_eos::MetalEosAnchors;
 use civsim_physics::periodic::PeriodicTable;
@@ -873,6 +874,31 @@ fn thermal_surface_ringer(table: &PeriodicTable, anchors: &MetalEosAnchors) -> (
             &format!("gamma_sv[{}] f=0.18", e.name),
             gamma_sv.to_f64_lossy(),
             e.obs_gamma_sv,
+            &v,
+            &mut defects,
+            &mut checks,
+        );
+    }
+    println!();
+
+    // CROSS-CLASS r_gb (the gate's caveat, mirroring f_surf): fix ONE metal-class grain-boundary-to-surface ratio
+    // (0.32) and require it to reproduce multiple metals' gamma_gb from their CITED gamma_sv, validating r_gb as a
+    // per-class constant rather than a per-metal fit. Feeding the observed gamma_sv isolates r_gb from the f_surf
+    // approximation. Observed high-angle grain-boundary energies (J/m^2): Fe ~0.78, Cu ~0.60, Al ~0.32, Ni ~0.69.
+    println!("--- cross-class r_gb (one metal-class ratio 0.32, multiple metals) ---");
+    let r_gb = dec(32, 100);
+    for (name, gamma_sv_obs, gamma_gb_obs) in [
+        ("Fe", dec(240, 100), 0.78),
+        ("Cu", dec(179, 100), 0.60),
+        ("Al", dec(114, 100), 0.32),
+        ("Ni", dec(228, 100), 0.69),
+    ] {
+        let gamma_gb = grain_boundary_energy_j_per_m2(gamma_sv_obs, r_gb);
+        let v = grade(gamma_gb.to_f64_lossy(), gamma_gb_obs, 0.40);
+        report(
+            &format!("gamma_gb[{name}] r=0.32"),
+            gamma_gb.to_f64_lossy(),
+            gamma_gb_obs,
             &v,
             &mut defects,
             &mut checks,
