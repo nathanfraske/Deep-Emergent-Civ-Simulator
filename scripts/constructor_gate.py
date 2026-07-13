@@ -68,6 +68,7 @@ EXEMPT_MODULES = {
     "crates/physics/src/ionization_ladder.rs", # the ionization-ladder loader (parses cited NIST successive IEs)
     "crates/physics/src/d_state_radius.rs", # the d-state-radius loader (parses cited Clementi-Raimondi Zeff)
     "crates/physics/src/metal_eos.rs",  # the metal-EOS-anchor loader (parses cited WebElements molar volume + B_0)
+    "crates/physics/src/rose_eos.rs",   # the Rose UBER EOS law (cited floor constants: Avogadro + eV unit conversions)
     "crates/physics/src/quantities.rs", # quantity definitions and the wide-decimal doc reference
     "crates/sim/src/calibration.rs",    # the calibration-manifest loader (parses the owner's reserved values)
     "crates/sim/src/astro.rs",          # the stellar-flux derivation (parses cited astronomical anchors L_sun/AU)

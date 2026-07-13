@@ -54,6 +54,7 @@ pub mod petrology;
 pub mod petrology_data;
 pub mod qeq;
 pub mod quantities;
+pub mod rose_eos;
 pub mod scaled;
 
 use civsim_core::{Fixed, StateHasher};

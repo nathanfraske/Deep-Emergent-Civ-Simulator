@@ -250,8 +250,9 @@ fn coulomb_energy_ev_angstrom() -> Fixed {
 
 /// The conversion from `eV/A^3` to gigapascals (CODATA: `1 eV = 1.602177e-19 J`, `1 A^3 = 1e-30 m^3`, so
 /// `1 eV/A^3 = 160.2177 GPa`), as the exact rational `1602177 / 10000`. A fundamental unit-conversion law
-/// constant, built by exact ratio rather than a decimal parse.
-fn gpa_per_ev_per_angstrom_cubed() -> Fixed {
+/// constant, built by exact ratio rather than a decimal parse. Public so the Rose EOS (`rose_eos`) reads the same
+/// constant rather than a second copy.
+pub fn gpa_per_ev_per_angstrom_cubed() -> Fixed {
     Fixed::from_ratio(1_602_177, 10_000)
 }
 
@@ -410,8 +411,8 @@ pub fn phase_bulk_modulus_ionic(
 
 /// The eV-to-kilojoule-per-mole conversion, `N_A e / 1000 = 96.485 kJ/(mol.eV)` (CODATA Faraday over a thousand),
 /// as the exact rational `96485 / 1000`. Converts a per-formula-unit energy in electron-volts to the molar
-/// energy the disposer ranks in.
-fn ev_to_kj_per_mol() -> Fixed {
+/// energy the disposer ranks in. Public so the Rose EOS (`rose_eos`) reads the same constant rather than a copy.
+pub fn ev_to_kj_per_mol() -> Fixed {
     Fixed::from_ratio(96_485, 1_000)
 }
 

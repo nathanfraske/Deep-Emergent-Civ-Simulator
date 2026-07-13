@@ -42,6 +42,7 @@
 use civsim_core::Fixed;
 use civsim_physics::metal_eos::MetalEosAnchors;
 use civsim_physics::periodic::PeriodicTable;
+use civsim_physics::rose_eos;
 
 /// The elemental metallic energy route over the banked cohesive energy and the D3-a EOS anchors.
 pub struct MetallicRoute<'a> {
@@ -130,6 +131,21 @@ impl<'a> MetallicRoute<'a> {
         let (symbol, _count) = &composition[0];
         let e_coh = self.cohesive_energy(symbol)?;
         Some(Fixed::ZERO - e_coh)
+    }
+
+    /// The metallic cohesive energy (kJ/mol) of an anchored elemental metal at a compressed or expanded molar
+    /// volume, the full Rose UBER `E(V)` curve over the D3-a anchors (`rose_eos`). At the equilibrium volume it is
+    /// `-E_coh` (the well depth `metallic_energy` reports); off equilibrium it is the `E(V)` the disposer's `P.dV`
+    /// term reads. `None` when the metal is not anchored, carries no banked cohesive energy, or a step overflows.
+    pub fn cohesive_energy_at_volume(&self, symbol: &str, molar_volume: Fixed) -> Option<Fixed> {
+        let anchor = self.anchors.anchor(symbol)?;
+        let e_coh = self.table.element(symbol)?.atomization_enthalpy?;
+        rose_eos::cohesive_energy_at_volume(
+            e_coh,
+            anchor.molar_volume,
+            anchor.bulk_modulus_gpa,
+            molar_volume,
+        )
     }
 }
 
@@ -233,6 +249,32 @@ mod tests {
         assert!(
             route.metallic_energy(&comp(&[("Cu", 1)])).is_none(),
             "Cu (no anchor) escalates"
+        );
+    }
+
+    #[test]
+    fn the_route_evaluates_the_rose_curve_over_volume() {
+        // The volume-aware route reads the Rose EOS over the anchors: at the equilibrium molar volume it returns
+        // -E_coh (the well bottom), and compression raises the energy above it. An unanchored metal escalates.
+        let (t, a) = floors();
+        let route = MetallicRoute::new(&t, &a);
+        let v0 = a.molar_volume("Fe").expect("Fe V0");
+        let at_equilibrium = route.cohesive_energy_at_volume("Fe", v0).expect("Fe E(V0)");
+        assert!(
+            close(at_equilibrium, -416.3, 0.01),
+            "Fe E(V0) = -E_coh, got {}",
+            at_equilibrium.to_f64_lossy()
+        );
+        let compressed = route
+            .cohesive_energy_at_volume("Fe", v0.checked_mul(Fixed::from_ratio(9, 10)).unwrap())
+            .expect("Fe E(0.9 V0)");
+        assert!(
+            compressed > at_equilibrium,
+            "compression raises Fe's energy above the well bottom"
+        );
+        assert!(
+            route.cohesive_energy_at_volume("Cu", v0).is_none(),
+            "an unanchored metal escalates in the volume-aware route"
         );
     }
 
