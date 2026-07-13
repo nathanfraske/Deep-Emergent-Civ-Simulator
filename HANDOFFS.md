@@ -3191,3 +3191,15 @@ Gate: owner resolved all 4 of my audit findings cleanly (each proves the catch w
 - Self-consistency loop: named convex inner solve under the solver law - MY SHIELDED QEq is the positive-definite piece making it convex; two failure modes pre-declared (charge-transfer runaway, charge-order fold), memoized per (composition, E-bucket).
 
 STATE: materials foundation = complete-with-resolutions. Slice still banked/approved, held for provenance-enum swap on A's register. Two forward threads (enum swap; interior arming #178) still gate on A's register. Task #35 HELD. Rest continues. Branch tip unchanged (audit was design-only). Check-in armed ~01:44 UTC re-checks main for A's register/Stage-3c.
+
+## 2026-07-12 (Agent B) - A's provenance register PHASE 1 landed on main (45c510b), enforced. Swap gated on PHASE 2 (#182)
+
+Gate: A's provenance register (enforced seven-tag enum + mandatory gate: every reserved value born-tagged or the build fails) is ON MAIN at 45c510b. My materials tags now have a real enum to bind to. BUT: HOLD the swap for A's PHASE 2 (extending the gate to the FLOOR MANIFESTS - where my IE/EA columns, the modulus, and the Ewald/QEq machinery live). Sequence: A's Phase-2 floor gate lands -> I swap placeholder tags to the enforced enum -> confirm gate green on my floor additions -> gate runs the merge pass.
+
+DO NOT swap on Phase 1 alone. Corrected the self check-in (deleted trig_01CbRffJC6j3bm3ZLFgmFeMZ, armed trig_016PqgZiAWkEHiBaQKdWggaQ ~02:49 UTC) so the trigger is A's PHASE 2 floor gate, not the Phase-1 register.
+
+ROLES HEADS-UP (owner, via gate): A is PRIMARY on the materials substrate BUILDOUT that follows (A built the register -> carries the provenance-enforcement discipline the whole substrate obeys). MY foundation slice is the banked BASE the buildout stands on. My deep materials context stays load-bearing: gate ROUTES materials-physics questions to me; I SUPPORT A on the buildout. My arc work (Ewald generator, shielded QEq, honest rung-1 modulus, the 2 foundation audits, the 4 resolved gaps) IS the foundation. Owner's unifying framework = Gap Law + Residual Law (now the substrate spine), subsumes the convergence my audits surfaced.
+
+WHEN I SWAP (on Phase-2 signal): read A's enforced enum on main (from the register commit 45c510b), replace (a) materials_oracle::Provenance, (b) qeq::ChiEtaProvenance, (c) [E]/[D]/[M] doc tags -> A's enum. Confirm the provenance gate passes on my floor additions (IE/EA/atomization columns, the modulus). That's the only pre-merge change.
+
+STATE: REST continues. Slice complete/banked/approved + foundation-audited + all-gaps-resolved, held for the Phase-2 tag swap. Interior arming #178 still HELD for A's Stage-3c (also downstream of A's register). Task #35 HELD, #36 materials COMPLETE at rung-1, #37 audit COMPLETE. main 48400b0 (my branch base) but register at 45c510b - main advanced; my branch is off 64da409, disjoint files, clean merge expected. Branch tip f739374. Do NOT touch A's register/genesis/generator-arch or C's lanes.
