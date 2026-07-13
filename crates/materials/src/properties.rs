@@ -27,14 +27,15 @@
 //!   S_vib / Debye-Cp consumer arrives"): Stage 6's Slack conductivity, Grueneisen expansion, and Debye heat
 //!   capacity are that consumer, so it is built now, reserving no value beyond the exact unit fold.
 //!
-//! HONEST LIMIT (the bulk-elastic approximation, carried from the freezer's `T_m`): the true Debye temperature
-//! uses the DEBYE-AVERAGED sound velocity `v_D` (over the longitudinal and the two transverse modes), which
-//! needs the shear modulus. With only the bulk modulus `B_0` among the anchors, `c_s = sqrt(B_0/rho)` is the
-//! BULK sound speed, which is faster than `v_D`, so `Theta_D` is OVERESTIMATED (iron lands about 609 K from the
-//! bulk speed against a measured `Theta_D` near 470 K, roughly 30 percent high). The shear-aware `v_D` (and the
-//! iron-accurate `Theta_D`) is the follow-on when a shear modulus is anchored, the same elastic limit the
-//! Lindemann `T_m` names; the Slack conductivity downstream inherits it (it scales as `Theta_D^3`), stated at
-//! its site when built. Byte-neutral: `civsim-materials` is a leaf, not linked into the run_world binary.
+//! The Debye temperature has TWO paths. The BULK path ([`debye_temperature`] / [`PropertyRoute::debye_temperature`])
+//! uses only `c_s = sqrt(B_0/rho)`, so with no shear modulus it OVERESTIMATES by roughly 30 percent (iron ~609 K
+//! from the bulk speed against a measured ~470 K), the bulk-elastic approximation the Lindemann `T_m` also
+//! carries. The SHEAR-AWARE path ([`debye_velocity_km_per_s`] / [`PropertyRoute::debye_temperature_shear_aware`])
+//! uses the Debye-averaged velocity `v_D` over the longitudinal and transverse modes, which needs the shear
+//! modulus `G = k*B_0` (through the moduli slice's reserved Pugh ratio `k`); fed the true `v_D`, iron's `Theta_D`
+//! lands ~470 K. So the bulk-elastic limit is RETIRED for any metal with a Pugh ratio, the bulk path remaining the
+//! fallback where `k` is unknown. The Slack conductivity downstream (which scales as `Theta_D^3`) should read the
+//! shear-aware path. Byte-neutral: `civsim-materials` is a leaf, not linked into the run_world binary.
 
 use civsim_core::Fixed;
 use civsim_physics::metal_eos::MetalEosAnchors;
@@ -186,6 +187,59 @@ pub fn chen_tse_hardness_gpa(shear_modulus_gpa: Fixed, pugh_ratio: Fixed) -> Fix
         .unwrap_or(ZERO)
 }
 
+/// The Debye-averaged sound velocity `v_D` (km/s), the shear-aware speed the Debye temperature properly uses:
+/// `3/v_D^3 = 1/v_L^3 + 2/v_T^3` over the longitudinal `v_L = sqrt((K + 4G/3)/rho)` and the transverse
+/// `v_T = sqrt(G/rho)` (the two transverse modes weighted twice). It reuses the freezer's `sqrt(modulus/rho) =
+/// km/s` fold for each and the built `cbrt` for the average, and it needs the shear modulus `G` (so it retires
+/// the bulk-elastic limit `debye_temperature` carries: fed the true `v_D`, the Debye temperature lands the
+/// measured value rather than the ~30 percent bulk overestimate). The cubes are formed with checked multiplies,
+/// not the wrapping `powi`. No reserved value beyond the moduli's Pugh ratio `k` (which `G` already carries).
+/// Non-positive inputs yield zero.
+pub fn debye_velocity_km_per_s(
+    bulk_modulus_gpa: Fixed,
+    shear_modulus_gpa: Fixed,
+    density_g_per_cm3: Fixed,
+) -> Fixed {
+    if bulk_modulus_gpa <= ZERO || shear_modulus_gpa <= ZERO || density_g_per_cm3 <= ZERO {
+        return ZERO;
+    }
+    // The P-wave (longitudinal) modulus M = K + 4G/3; v_L = sqrt(M/rho), v_T = sqrt(G/rho), both km/s.
+    let four_g_thirds = match shear_modulus_gpa
+        .checked_mul(Fixed::from_int(4))
+        .and_then(|x| x.checked_div(Fixed::from_int(3)))
+    {
+        Some(x) => x,
+        None => return ZERO,
+    };
+    let p_wave_modulus = bulk_modulus_gpa.saturating_add(four_g_thirds);
+    let v_l = freezer::sound_speed_km_per_s(p_wave_modulus, density_g_per_cm3);
+    let v_t = freezer::sound_speed_km_per_s(shear_modulus_gpa, density_g_per_cm3);
+    if v_l <= ZERO || v_t <= ZERO {
+        return ZERO;
+    }
+    // 3 / v_D^3 = 1/v_L^3 + 2/v_T^3, so v_D = cbrt(3 / (1/v_L^3 + 2/v_T^3)). Cubes via checked multiplies.
+    let v_l3 = v_l.checked_mul(v_l).and_then(|x| x.checked_mul(v_l));
+    let v_t3 = v_t.checked_mul(v_t).and_then(|x| x.checked_mul(v_t));
+    let (vl3, vt3) = match (v_l3, v_t3) {
+        (Some(a), Some(b)) if a > ZERO && b > ZERO => (a, b),
+        _ => return ZERO,
+    };
+    let inv_sum = match (
+        Fixed::ONE.checked_div(vl3),
+        Fixed::from_int(2).checked_div(vt3),
+    ) {
+        (Some(a), Some(b)) => a.saturating_add(b),
+        _ => return ZERO,
+    };
+    if inv_sum <= ZERO {
+        return ZERO;
+    }
+    match Fixed::from_int(3).checked_div(inv_sum) {
+        Some(x) if x > ZERO => x.cbrt(),
+        _ => ZERO,
+    }
+}
+
 /// The property route bound to the periodic table and the EOS anchors, so density reads the molar mass and molar
 /// volume, and the Debye temperature reuses the freezer's sound speed over the anchors, all for an anchored
 /// metal. No reserved value enters (this first slice reserves none); a metal missing an anchor escalates
@@ -258,6 +312,22 @@ impl<'a> PropertyRoute<'a> {
         let bulk_modulus = self.anchors.bulk_modulus_gpa(symbol)?;
         let shear = shear_modulus_gpa(bulk_modulus, pugh_ratio);
         Some(chen_tse_hardness_gpa(shear, pugh_ratio))
+    }
+
+    /// The SHEAR-AWARE Debye temperature `Theta_D` (K) for an anchored metal, using the Debye-averaged velocity
+    /// `v_D` (from the anchored `B_0`, the derived shear modulus `G = k*B_0`, and the density) rather than the
+    /// bulk sound speed. This RETIRES the bulk-elastic overestimate of [`PropertyRoute::debye_temperature`]:
+    /// with `G` available (through the reserved Pugh ratio `k`), iron lands `~470 K` rather than the bulk `~609`.
+    /// `None` (escalate) when the metal lacks a bulk modulus, a molar volume, or a standard atomic weight.
+    pub fn debye_temperature_shear_aware(&self, symbol: &str, pugh_ratio: Fixed) -> Option<Fixed> {
+        let bulk_modulus = self.anchors.bulk_modulus_gpa(symbol)?;
+        let molar_volume = self.anchors.molar_volume(symbol)?;
+        let rho = self.density(symbol)?;
+        let shear = shear_modulus_gpa(bulk_modulus, pugh_ratio);
+        let v_d = debye_velocity_km_per_s(bulk_modulus, shear, rho);
+        let atomic_volume =
+            molar_volume.checked_mul(rose_eos::cm3_per_mol_to_angstrom3_per_atom())?;
+        Some(debye_temperature(v_d, atomic_volume))
     }
 }
 
@@ -427,6 +497,50 @@ mod tests {
         assert!(
             route.hardness("Xx", diamond_k).is_none(),
             "an unanchored metal escalates in the hardness route"
+        );
+    }
+
+    #[test]
+    fn the_shear_aware_debye_velocity_retires_the_bulk_elastic_limit() {
+        // Iron: K = 170, G = k*K = 0.48*170 ~81.6, rho ~7.87. v_L = sqrt((K+4G/3)/rho) ~5.96 km/s,
+        // v_T = sqrt(G/rho) ~3.22 km/s, v_D = cbrt(3/(1/v_L^3 + 2/v_T^3)) ~3.60 km/s (the shear modes drag the
+        // Debye velocity well below the bulk ~4.65).
+        let k_fe = Fixed::from_ratio(48, 100);
+        let bulk = Fixed::from_int(170);
+        let g = shear_modulus_gpa(bulk, k_fe);
+        let rho = Fixed::from_ratio(787, 100);
+        let v_d = debye_velocity_km_per_s(bulk, g, rho);
+        assert!(
+            close(v_d, 3.60, 0.15),
+            "iron Debye velocity ~3.6 km/s: {v_d:?}"
+        );
+        // It is lower than the bulk sound speed (the shear modes soften the average).
+        let v_bulk = freezer::sound_speed_km_per_s(bulk, rho);
+        assert!(
+            v_d < v_bulk,
+            "the Debye velocity is below the bulk sound speed"
+        );
+        // The shear-aware Debye temperature lands iron's measured ~470 K, retiring the bulk-elastic ~609 K.
+        let t = table();
+        let a = anchors();
+        let route = PropertyRoute::new(&t, &a);
+        let theta_shear = route
+            .debye_temperature_shear_aware("Fe", k_fe)
+            .expect("Fe shear-aware Theta_D");
+        assert!(
+            close(theta_shear, 470.0, 40.0),
+            "shear-aware iron Theta_D ~470 K (retires the bulk ~609): {theta_shear:?}"
+        );
+        let theta_bulk = route.debye_temperature("Fe").expect("Fe bulk Theta_D");
+        assert!(
+            theta_shear < theta_bulk,
+            "the shear-aware Theta_D is below the bulk overestimate"
+        );
+        // Guards and escalation.
+        assert_eq!(debye_velocity_km_per_s(ZERO, g, rho), ZERO);
+        assert!(
+            route.debye_temperature_shear_aware("Xx", k_fe).is_none(),
+            "an unanchored metal escalates"
         );
     }
 }
