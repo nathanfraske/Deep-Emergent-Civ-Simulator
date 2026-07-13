@@ -1,0 +1,253 @@
+// Copyright 2026 Nathan M. Fraske
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+//! Stage 5, the freezer: the realized assemblage as kinetics race the world's cooling rate, and the rate-law
+//! kernel's first consumer. Its atom is the thermally-activated self-diffusivity `D = nu * exp(-E*/(R*T))`,
+//! which is [`civsim_physics::laws::arrhenius_rate`] with `nu = c_s/a` the attempt-frequency prefactor and
+//! `E*/(R*T)` the reduced barrier.
+//!
+//! The freezing/self-diffusion barrier `E*` is the DERIVE-FIRST Form B ruled on #187: `E* = f * E_coh`, the
+//! per-class vacancy fraction of the already-built Rose cohesive energy, reused directly rather than routed
+//! through the composite `g * R * T_m`. Because the barrier `Q = H_vf + H_vm` and the melting point both scale
+//! with `E_coh`, the spec's `g` is the composite `g = k * f` (`k = E_coh/(R*T_m)` the cohesive-to-melting
+//! ratio, `f` the vacancy fraction); Form B pulls `k` out and reuses the derived `E_coh`, one derivation hop
+//! shorter and one correlation fewer. The vacancy fraction `f` is RESERVED-with-basis (never entered here): the
+//! fraction of the cohesive energy spent forming plus moving the diffusion carrier (`H_vf + H_vm`), cited to
+//! Brown & Ashby 1980 / Sherby & Simnad 1962, keyed off the material's bonding class, verified at the primary
+//! source before entry. The derive-first win is REAL but PARTIAL: the barrier reads one per-class empirical
+//! constant either way (the vacancy energetics are not floored; deriving `H_vf`/`H_vm` from the bonding would
+//! drive `f` toward zero, the named follow-on). `R` (the molar gas constant) is DERIVED (`N_A * k_B`), not
+//! authored, and the caller supplies it; the kernel sees only the dimensionless `E*/(R*T)`, blind to whether
+//! the caller worked in molar (`R*T`) or per-particle (`k_B*T`) units.
+//!
+//! This slice builds the barrier and the rate composition (the kernel consumed, `E_coh` reused). The attempt
+//! frequency `nu = c_s/a` from the EOS anchors, the anchored `[M]` melting points `T_m` for the `D0`
+//! normalization and the consistency twin (`g*R*T_m` and `f*E_coh` agree within class scatter), and the
+//! derived Lindemann `T_m` (staged behind the fixed-point fractional-power primitive, task #45) are the
+//! follow-on slices. The sub-kT polymorph terminal resolves by the derived `kT` boundary, never a reserved
+//! threshold (the Gap-Law discipline: the resolution boundary is a physical quantity).
+
+use civsim_core::Fixed;
+use civsim_physics::laws;
+
+use crate::metallic::MetallicRoute;
+
+const ZERO: Fixed = Fixed::ZERO;
+
+/// The self-diffusion / freezing barrier `E* = f * E_coh` (Form B, gate-ruled #187): the per-class vacancy
+/// fraction `f` of the cohesive energy `E_coh`, in the cohesive energy's own units (kJ/mol for the metallic
+/// route). `f` is RESERVED-with-basis (`H_vf + H_vm` as a fraction of `E_coh`, cited Brown & Ashby 1980 /
+/// Sherby & Simnad 1962, per bonding class); the caller supplies it from the reserved data, so no value is
+/// planted here. Guards non-positive inputs (no cohesion or no fraction: no barrier); an overflowing product
+/// saturates to [`Fixed::MAX`] (an insurmountable barrier, which the rate reads as the frozen regime).
+pub fn diffusion_barrier(cohesive_energy: Fixed, vacancy_fraction: Fixed) -> Fixed {
+    if cohesive_energy <= ZERO || vacancy_fraction <= ZERO {
+        return ZERO;
+    }
+    cohesive_energy
+        .checked_mul(vacancy_fraction)
+        .unwrap_or(Fixed::MAX)
+}
+
+/// The self-diffusivity `D = nu * exp(-E*/(R*T))` over the rate-law kernel ([`laws::arrhenius_rate`]), closing
+/// the canonical `D0 ~ a^2 * nu`. The barrier is Form B ([`diffusion_barrier`]); the reduced barrier `E*/(R*T)`
+/// is formed by [`laws::reduced_barrier`] at the MOLAR scale (`E_coh` in kJ/mol, `R*T` in kJ/mol, the kernel
+/// blind to the scale so no `R = N_A*k_B` composite drift enters), and `nu = c_s/a` is the caller's attempt
+/// frequency, supplied at a working scale whose value is representable (the SI attempt frequency `~1e13 Hz`
+/// overflows Q32.32, the same fold the Eyring prefactor documents). `R` is the DERIVED molar gas constant. The
+/// rate freezes out below about `0.77 * T_m` (the kernel's honest exp-window limit at `E*/(R*T) > 22`), the
+/// physical freeze-out. A non-positive thermal scale collapses the rate to zero. Deterministic fixed-point.
+pub fn self_diffusivity(
+    attempt_frequency: Fixed,
+    cohesive_energy: Fixed,
+    vacancy_fraction: Fixed,
+    gas_constant: Fixed,
+    temperature: Fixed,
+) -> Fixed {
+    let e_star = diffusion_barrier(cohesive_energy, vacancy_fraction);
+    let thermal = match gas_constant.checked_mul(temperature) {
+        Some(rt) if rt > ZERO => rt,
+        _ => return ZERO, // no thermal scale (or an overflowing one): no crossing
+    };
+    let reduced = laws::reduced_barrier(e_star, thermal);
+    laws::arrhenius_rate(attempt_frequency, reduced)
+}
+
+/// The freezer route bound to the metallic route, so the Form-B barrier reads the real derived `E_coh` for an
+/// anchored metal. The reserved vacancy fraction `f` is supplied by the caller, never planted, so this reuses
+/// the substrate's derived cohesive energy without entering a value.
+pub struct FreezerRoute<'a> {
+    metallic: &'a MetallicRoute<'a>,
+}
+
+impl<'a> FreezerRoute<'a> {
+    /// Bind the freezer to the metallic route (the source of the derived `E_coh`).
+    pub fn new(metallic: &'a MetallicRoute<'a>) -> Self {
+        FreezerRoute { metallic }
+    }
+
+    /// The Form-B barrier `E* = f * E_coh` for an anchored metal, or `None` (escalate) when the metal carries
+    /// no banked cohesive energy. `f` (the reserved vacancy fraction) is the caller's, so this reuses the
+    /// derived `E_coh` without planting a value.
+    pub fn barrier(&self, symbol: &str, vacancy_fraction: Fixed) -> Option<Fixed> {
+        let e_coh = self.metallic.cohesive_energy(symbol)?;
+        Some(diffusion_barrier(e_coh, vacancy_fraction))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::metallic::MetallicRoute;
+    use civsim_physics::metal_eos::MetalEosAnchors;
+    use civsim_physics::periodic::PeriodicTable;
+
+    // Test fixtures, clearly test-only and NOT canonical entries: the reserved vacancy fraction `f` is
+    // exercised at its basis value (`g ~ 17-18` implies `f ~ 0.55`, `H_vf ~ 0.3 E_coh`), and `R` at the
+    // derived molar gas constant in kJ/(mol K). The owner enters the canonical `f` per class after primary
+    // verification; these fixtures only exercise the mechanism.
+    fn f_fixture() -> Fixed {
+        Fixed::from_ratio(55, 100) // f ~ 0.55, the sanity-check basis value (test-only)
+    }
+    fn r_kj_per_mol_k() -> Fixed {
+        Fixed::from_ratio(8314, 1_000_000) // R = 8.314e-3 kJ/(mol K), derived (N_A*k_B)
+    }
+    fn close(a: Fixed, b: f64, tol: f64) -> bool {
+        (a.to_f64_lossy() - b).abs() < tol
+    }
+
+    #[test]
+    fn diffusion_barrier_is_the_vacancy_fraction_of_the_cohesive_energy() {
+        // E* = f * E_coh: 0.55 * 400 ~ 220 (f is not a dyadic rational, so check within tolerance).
+        let e_coh = Fixed::from_int(400);
+        let e_star = diffusion_barrier(e_coh, f_fixture());
+        assert!(
+            close(e_star, 220.0, 0.01),
+            "the barrier is the vacancy fraction of the cohesive energy: {e_star:?}"
+        );
+        // Monotone: a deeper cohesive well is a higher barrier (same f).
+        let deeper = diffusion_barrier(Fixed::from_int(500), f_fixture());
+        assert!(deeper > e_star, "a deeper cohesive well raises the barrier");
+        // The absence convention: no cohesion or no fraction, no barrier (self-gating).
+        assert_eq!(
+            diffusion_barrier(ZERO, f_fixture()),
+            ZERO,
+            "no cohesive energy: no barrier"
+        );
+        assert_eq!(
+            diffusion_barrier(e_coh, ZERO),
+            ZERO,
+            "no vacancy fraction: no barrier"
+        );
+        // Deterministic (Principle 3).
+        assert_eq!(e_star, diffusion_barrier(e_coh, f_fixture()));
+    }
+
+    #[test]
+    fn self_diffusivity_freezes_out_cold_and_rises_with_temperature() {
+        // Iron-scale cohesion (E_coh ~ 400 kJ/mol), a normalized attempt frequency (nu ~ 1 at the working
+        // scale). E* = 0.55 * 400 = 220 kJ/mol; reduced = 220/(R*T). At T = 1000 K, reduced = 220/8.314 = 26.5
+        // > 22, so the rate underflows to zero: the frozen regime (T well below the ~1811 K melting point). At
+        // T = 2200 K, reduced = 220/18.29 = 12.0, inside the window, so the rate is positive.
+        let e_coh = Fixed::from_int(400);
+        let nu = Fixed::ONE;
+        let cold = self_diffusivity(
+            nu,
+            e_coh,
+            f_fixture(),
+            r_kj_per_mol_k(),
+            Fixed::from_int(1000),
+        );
+        assert_eq!(
+            cold, ZERO,
+            "cold: the barrier is unresolvable, the rate freezes out"
+        );
+        let hot = self_diffusivity(
+            nu,
+            e_coh,
+            f_fixture(),
+            r_kj_per_mol_k(),
+            Fixed::from_int(2200),
+        );
+        assert!(hot > ZERO && hot < nu, "hot: 0 < rate < attempt frequency");
+        // Monotone in temperature: hotter diffuses faster (a lower reduced barrier).
+        let hotter = self_diffusivity(
+            nu,
+            e_coh,
+            f_fixture(),
+            r_kj_per_mol_k(),
+            Fixed::from_int(2500),
+        );
+        assert!(hotter > hot, "the diffusivity rises with temperature");
+        // No thermal scale, no crossing.
+        assert_eq!(
+            self_diffusivity(nu, e_coh, f_fixture(), r_kj_per_mol_k(), ZERO),
+            ZERO,
+            "no thermal scale: no diffusion"
+        );
+        // No attempts, no rate.
+        assert_eq!(
+            self_diffusivity(
+                ZERO,
+                e_coh,
+                f_fixture(),
+                r_kj_per_mol_k(),
+                Fixed::from_int(2200)
+            ),
+            ZERO,
+            "no attempt frequency: no diffusion"
+        );
+        // Deterministic (Principle 3).
+        assert_eq!(
+            hot,
+            self_diffusivity(
+                nu,
+                e_coh,
+                f_fixture(),
+                r_kj_per_mol_k(),
+                Fixed::from_int(2200)
+            )
+        );
+    }
+
+    #[test]
+    fn the_freezer_route_reads_the_derived_cohesive_energy() {
+        // The route reuses the built Rose E_coh: the barrier for an anchored metal is f times its cohesive
+        // energy, so it tracks the metal's own derived well depth. Fe (deeper cohesion) has a higher barrier
+        // than Na (shallow), the derive-first substrate reuse the fork was about.
+        let table = PeriodicTable::standard().expect("periodic table");
+        let anchors = MetalEosAnchors::standard().expect("metal EOS anchors");
+        let metallic = MetallicRoute::new(&table, &anchors);
+        let freezer = FreezerRoute::new(&metallic);
+
+        let fe = freezer.barrier("Fe", f_fixture()).expect("Fe barrier");
+        let na = freezer.barrier("Na", f_fixture()).expect("Na barrier");
+        assert!(
+            fe > na && na > ZERO,
+            "the barrier tracks the metal's own derived cohesive energy (Fe deeper than Na)"
+        );
+        // The barrier equals f times the route's own cohesive energy (the reuse is exact, no re-derivation).
+        let fe_coh = metallic.cohesive_energy("Fe").expect("Fe E_coh");
+        assert_eq!(
+            fe,
+            diffusion_barrier(fe_coh, f_fixture()),
+            "the route barrier is f * E_coh over the built cohesive energy"
+        );
+        // A metal with no banked cohesive energy escalates (the honest refusal the metallic route already gives).
+        assert!(
+            freezer.barrier("Xx", f_fixture()).is_none(),
+            "an unanchored symbol escalates rather than fabricating a barrier"
+        );
+    }
+}
