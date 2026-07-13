@@ -46,6 +46,7 @@
 
 pub mod contract;
 pub mod correlation;
+pub mod freezer;
 pub mod localized;
 pub mod log;
 pub mod memo;
