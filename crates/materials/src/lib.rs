@@ -72,7 +72,7 @@ pub use metallic::MetallicRoute;
 pub use nucleation::{
     avrami_grain_size, critical_atom_count, critical_radius_over_spacing, interfacial_energy,
     nucleation_prefactor, nucleation_rate, reduced_driving_force, reduced_interfacial_energy,
-    reduced_nucleation_barrier, richards_ratio, zeldovich_factor,
+    reduced_nucleation_barrier, richards_ratio, zeldovich_factor, NucleationRoute,
 };
 pub use quench::{
     dodson_closure_temperature, polymorphs_are_thermally_unresolvable, quench_exchange,

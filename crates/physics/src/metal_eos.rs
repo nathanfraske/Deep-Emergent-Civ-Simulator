@@ -84,16 +84,23 @@ struct MetalDef {
     #[serde(default)]
     bulk_modulus_gpa: String,
     #[serde(default)]
+    heat_of_fusion: String,
+    #[serde(default)]
     source: String,
 }
 
-/// One metal's EOS anchors: the measured equilibrium molar volume and bulk modulus.
+/// One metal's EOS anchors: the measured equilibrium molar volume and bulk modulus, plus the optional measured
+/// heat of fusion (the melt thermodynamics the nucleation slice reads).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MetalEosAnchor {
     /// The equilibrium molar volume in cm^3/mol (MEASURED `[M]`).
     pub molar_volume: Fixed,
     /// The bulk modulus `B_0` in GPa (MEASURED `[M]`).
     pub bulk_modulus_gpa: Fixed,
+    /// The molar heat of fusion `dH_f` in kJ/mol (MEASURED `[M]`), or [`Fixed::ZERO`] when the metal carries no
+    /// anchored melt enthalpy. The nucleation slice reads it to derive the melt entropy `dS_f = dH_f/T_m` and the
+    /// Turnbull interfacial energy; a metal without it escalates in the nucleation route rather than fabricating.
+    pub heat_of_fusion: Fixed,
 }
 
 /// The elemental EOS anchors floor: per metal symbol, the two measured cohesive-energy EOS inputs.
@@ -122,9 +129,24 @@ impl MetalEosAnchors {
             if molar_volume <= Fixed::ZERO || bulk_modulus_gpa <= Fixed::ZERO {
                 return Err(MetalEosError::NonPositive(entry.symbol.clone()));
             }
+            // The heat of fusion is optional: an empty field means the metal carries no anchored melt enthalpy
+            // (the nucleation route escalates for it). When present, it must be positive, the same guard the two
+            // required anchors take.
+            let heat_of_fusion = if entry.heat_of_fusion.trim().is_empty() {
+                Fixed::ZERO
+            } else {
+                let dh = Fixed::from_decimal_str(entry.heat_of_fusion.trim()).map_err(|d| {
+                    MetalEosError::BadValue(format!("{} heat_of_fusion: {d}", entry.symbol))
+                })?;
+                if dh <= Fixed::ZERO {
+                    return Err(MetalEosError::NonPositive(entry.symbol.clone()));
+                }
+                dh
+            };
             let anchor = MetalEosAnchor {
                 molar_volume,
                 bulk_modulus_gpa,
+                heat_of_fusion,
             };
             if by_symbol.insert(entry.symbol.clone(), anchor).is_some() {
                 return Err(MetalEosError::Duplicate(entry.symbol));
@@ -158,6 +180,18 @@ impl MetalEosAnchors {
     /// The bulk modulus `B_0` (GPa) for a metal, or `None` when absent.
     pub fn bulk_modulus_gpa(&self, symbol: &str) -> Option<Fixed> {
         self.by_symbol.get(symbol).map(|a| a.bulk_modulus_gpa)
+    }
+
+    /// The molar heat of fusion `dH_f` (kJ/mol, MEASURED `[M]`) for a metal, or `None` when the metal is absent
+    /// or carries no anchored melt enthalpy (the nucleation route escalates rather than fabricating one).
+    pub fn heat_of_fusion(&self, symbol: &str) -> Option<Fixed> {
+        self.by_symbol.get(symbol).and_then(|a| {
+            if a.heat_of_fusion > Fixed::ZERO {
+                Some(a.heat_of_fusion)
+            } else {
+                None
+            }
+        })
     }
 
     /// The number of metals with seeded EOS anchors.
@@ -194,6 +228,34 @@ mod tests {
         for symbol in ["Na", "Mg", "Al", "K", "Ca", "Ti", "Fe"] {
             assert!(a.anchor(symbol).is_some(), "{symbol} has EOS anchors");
         }
+    }
+
+    #[test]
+    fn the_heat_of_fusion_reads_the_measured_melt_enthalpy() {
+        // The added [M] column: each seeded metal carries its WebElements enthalpy of fusion (kJ/mol), read by
+        // the nucleation slice to derive the melt entropy and the Turnbull interfacial energy.
+        let a = anchors();
+        assert!(
+            close(a.heat_of_fusion("Fe").expect("Fe dH_f"), 13.8, 0.001),
+            "Fe dH_f = 13.8 kJ/mol"
+        );
+        assert!(
+            close(a.heat_of_fusion("Na").expect("Na dH_f"), 2.60, 0.001),
+            "Na dH_f = 2.60 kJ/mol"
+        );
+        // All seven seeded metals carry the melt enthalpy, and it is positive (the melt costs energy).
+        for symbol in ["Na", "Mg", "Al", "K", "Ca", "Ti", "Fe"] {
+            let dh = a.heat_of_fusion(symbol).expect("seeded dH_f");
+            assert!(
+                dh > Fixed::ZERO,
+                "{symbol} carries a positive heat of fusion"
+            );
+        }
+        // An unanchored metal returns None (the nucleation route escalates rather than fabricating).
+        assert!(
+            a.heat_of_fusion("Xx").is_none(),
+            "an unanchored symbol has no dH_f"
+        );
     }
 
     #[test]

@@ -47,6 +47,10 @@
 
 use civsim_core::Fixed;
 use civsim_physics::laws;
+use civsim_physics::metal_eos::MetalEosAnchors;
+use civsim_physics::rose_eos;
+
+use crate::freezer::FreezerRoute;
 
 const ZERO: Fixed = Fixed::ZERO;
 
@@ -295,6 +299,50 @@ pub fn avrami_grain_size(growth_rate: Fixed, nucleation_rate: Fixed) -> Fixed {
     match growth_rate.checked_div(nucleation_rate) {
         Some(ratio) if ratio > ZERO => ratio.sqrt().sqrt(),
         _ => ZERO,
+    }
+}
+
+/// The nucleation route bound to the freezer route and the EOS anchors, so the Turnbull interfacial energy reads
+/// the MEASURED heat of fusion `dH_f` and molar volume from the anchors and the melt entropy reuses the built
+/// Lindemann `T_m`, all for an anchored metal. The reserved Turnbull coefficient `C` and Lindemann ratio `delta`
+/// are supplied by the caller, never planted, so the route reuses the substrate's measured and derived quantities
+/// without entering a value.
+pub struct NucleationRoute<'a> {
+    freezer: &'a FreezerRoute<'a>,
+    anchors: &'a MetalEosAnchors,
+}
+
+impl<'a> NucleationRoute<'a> {
+    /// Bind the nucleation route to the freezer route (the source of the built Lindemann `T_m`) and the EOS
+    /// anchors (`V_m` and the measured `dH_f`).
+    pub fn new(freezer: &'a FreezerRoute<'a>, anchors: &'a MetalEosAnchors) -> Self {
+        NucleationRoute { freezer, anchors }
+    }
+
+    /// The solid-liquid interfacial energy `gamma_sl` (J/m^2) for an anchored metal, the Turnbull relation over
+    /// the metal's measured heat of fusion and atomic volume, reserving only the caller's Turnbull coefficient
+    /// `C`. Returns `None` (escalate) when the metal carries no molar volume or no anchored heat of fusion, the
+    /// honest refusal rather than a fabricated interfacial energy. Reuses the built `cm^3/mol -> A^3` converter.
+    pub fn interfacial_energy(&self, symbol: &str, turnbull_coefficient: Fixed) -> Option<Fixed> {
+        let v_m = self.anchors.molar_volume(symbol)?;
+        let dh_f = self.anchors.heat_of_fusion(symbol)?;
+        let v_atom = v_m.checked_mul(rose_eos::cm3_per_mol_to_angstrom3_per_atom())?;
+        Some(interfacial_energy(v_atom, dh_f, turnbull_coefficient))
+    }
+
+    /// The Richards ratio `dS_f/R` for an anchored metal, the measured melt entropy derived from the metal's
+    /// heat of fusion and the built Lindemann `T_m` (via the freezer route, so `delta` is the caller's reserved
+    /// Lindemann ratio). Returns `None` (escalate) when the metal lacks a heat of fusion or the anchors for
+    /// `T_m`.
+    pub fn richards_ratio(
+        &self,
+        symbol: &str,
+        lindemann_ratio: Fixed,
+        gas_constant: Fixed,
+    ) -> Option<Fixed> {
+        let dh_f = self.anchors.heat_of_fusion(symbol)?;
+        let t_m = self.freezer.melting_point(symbol, lindemann_ratio)?;
+        Some(richards_ratio(dh_f, t_m, gas_constant))
     }
 }
 
@@ -548,5 +596,46 @@ mod tests {
             interfacial_energy(iron_atomic_volume(), iron_heat_of_fusion(), turnbull_c()),
             interfacial_energy(iron_atomic_volume(), iron_heat_of_fusion(), turnbull_c())
         );
+    }
+
+    #[test]
+    fn the_nucleation_route_reads_the_anchored_melt_enthalpy() {
+        use crate::metallic::MetallicRoute;
+        use civsim_physics::metal_eos::MetalEosAnchors;
+        use civsim_physics::periodic::PeriodicTable;
+
+        let table = PeriodicTable::standard().expect("periodic table");
+        let anchors = MetalEosAnchors::standard().expect("metal EOS anchors");
+        let metallic = MetallicRoute::new(&table, &anchors);
+        let freezer = FreezerRoute::new(&metallic, &anchors);
+        let route = NucleationRoute::new(&freezer, &anchors);
+
+        // The route reads Fe's anchored dH_f (13.8 kJ/mol) and V_m (7.09 cm^3/mol) and lands the measured iron
+        // gamma_sl ~0.204 J/m^2 within Turnbull's scatter, from the cited C alone (non-circular, through the
+        // anchored substrate rather than a test fixture).
+        let gamma = route
+            .interfacial_energy("Fe", turnbull_c())
+            .expect("Fe gamma_sl");
+        assert!(
+            close(gamma, 0.204, 0.04),
+            "the route reads the anchored dH_f and lands iron's gamma_sl: {gamma:?}"
+        );
+        // The route's melt entropy for Fe reuses the built Lindemann T_m, near Richards' R.
+        let dsf = route
+            .richards_ratio("Fe", delta_fixture(), r_kj_per_mol_k())
+            .expect("Fe dS_f/R");
+        assert!(
+            dsf > ZERO && dsf < Fixed::from_int(2),
+            "iron's melt entropy is near R"
+        );
+        // A metal with no anchored heat of fusion escalates rather than fabricating one.
+        assert!(
+            route.interfacial_energy("Xx", turnbull_c()).is_none(),
+            "an unanchored metal escalates in the nucleation route"
+        );
+    }
+
+    fn delta_fixture() -> Fixed {
+        Fixed::from_ratio(9, 100) // the Lindemann ratio delta ~ 0.09 (test-only), for the built T_m
     }
 }
