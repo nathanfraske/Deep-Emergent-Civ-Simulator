@@ -1,0 +1,68 @@
+# The elemental equation-of-state anchors per metal: the equilibrium molar volume and the bulk modulus, the two
+# MEASURED [M] inputs the elemental Rose/Vinet cohesive-energy EOS reads alongside the banked cohesive energy
+# (periodic_table.toml atomization_enthalpy). Cited to WebElements (the gate spot-checks against CRC/WebElements).
+# No consumer is wired to these in any pinned run path yet (a pure addition, byte-neutral); the materials metallic
+# route (D3-c) reads them, inside the D2b correlation guard.
+#
+# WHY THESE TWO, AND WHY PER-MOLE. The Rose universal binding-energy relation for a pure metal needs three inputs:
+# the cohesive energy E_coh (banked as atomization_enthalpy, kJ/mol), the equilibrium volume, and the bulk modulus
+# B_0. The stored volume is the MEASURED molar volume in cm^3/mol, exactly as the source prints it (source-
+# verifiable), and B_0 is the MEASURED bulk modulus in GPa. The combination B_0 * V_m carries units GPa * cm^3/mol
+# = kJ/mol, the same energy-per-mole scale as E_coh, so the EOS assembles per-mole-consistently with no Avogadro
+# conversion. The raw source values are stored, and the EOS length scale derives from them in code (D3-c).
+#
+# WHAT IS NOT HERE: the Miedema n_ws. The Miedema alloy-model electron density at the Wigner-Seitz boundary,
+# n_ws = 0.82 (B_0 / V_m)^(1/2) (the form cited across the Miedema literature, the 0.82 a cited model coefficient),
+# is deliberately NOT stored here. It is an ALLOY-model parameter (the elemental Rose/Vinet route does not read
+# it), and its only consumer, the Miedema formation-enthalpy term, escalates until its book-fitted partner phi* is
+# sourced. Its ABSOLUTE scale is book-pinned: the cited form applied to these WebElements B_0/V_m reproduces the
+# tabulated Miedema n_ws^(1/3) only to within roughly six to ten percent, systematically low (Na 0.750 versus
+# 0.820, Al 1.313 versus 1.390, Fe 1.590 versus 1.770, tabulated values from de Boer, Boom, Miedema, Cohesion in
+# Metals 1988), so entering a derived n_ws now would plant a value known to disagree with the accepted parameter.
+# n_ws therefore rides with the escalating alloy term, where its scale is pinned against the book table and
+# validated by its consumer, the same book-source seam as phi*.
+#
+# The seed is the seven metals that already carry a banked cohesive energy: the alkali (Na, K), alkaline-earth
+# (Mg, Ca), a simple metal (Al), and two transition metals (Ti, Fe), a spread across the metallic bonding range.
+
+[[metal]]
+symbol = "Na"
+molar_volume = "23.78"
+bulk_modulus_gpa = "6.3"
+source = "WebElements (www.webelements.com/sodium/physics.html): molar volume 23.78 cm^3/mol, bulk modulus 6.3 GPa"
+
+[[metal]]
+symbol = "Mg"
+molar_volume = "14.00"
+bulk_modulus_gpa = "45"
+source = "WebElements (www.webelements.com/magnesium/physics.html): molar volume 14.00 cm^3/mol, bulk modulus 45 GPa"
+
+[[metal]]
+symbol = "Al"
+molar_volume = "10.00"
+bulk_modulus_gpa = "76"
+source = "WebElements (www.webelements.com/aluminium/physics.html): molar volume 10.00 cm^3/mol, bulk modulus 76 GPa"
+
+[[metal]]
+symbol = "K"
+molar_volume = "45.94"
+bulk_modulus_gpa = "3.1"
+source = "WebElements (www.webelements.com/potassium/physics.html): molar volume 45.94 cm^3/mol, bulk modulus 3.1 GPa"
+
+[[metal]]
+symbol = "Ca"
+molar_volume = "26.20"
+bulk_modulus_gpa = "17"
+source = "WebElements (www.webelements.com/calcium/physics.html): molar volume 26.20 cm^3/mol, bulk modulus 17 GPa"
+
+[[metal]]
+symbol = "Ti"
+molar_volume = "10.64"
+bulk_modulus_gpa = "110"
+source = "WebElements (www.webelements.com/titanium/physics.html): molar volume 10.64 cm^3/mol, bulk modulus 110 GPa"
+
+[[metal]]
+symbol = "Fe"
+molar_volume = "7.09"
+bulk_modulus_gpa = "170"
+source = "WebElements (www.webelements.com/iron/physics.html): molar volume 7.09 cm^3/mol, bulk modulus 170 GPa"
