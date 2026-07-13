@@ -3163,3 +3163,21 @@ GATE'S DEFERRED DECISION (owner left to gate): the optional breathing-subclass b
 FUTURE WORK (specified-not-built, sequenced when a consumer needs the accurate oxide modulus, slots with the shear arc): rung-2 Gordon-Kim/PIB breathing build, the EA2 dispatcher (floor addition), the triptych shear terms.
 
 STATE: NO ACTION. Rest continues. My slice UNCHANGED and complete, held only for the provenance-enum swap on A's register (the single pivot: also unblocks A's 3c -> my interior arming #178). Task #36 materials oracle COMPLETE at [E] rung-1. Task #35 interior arming HELD (main 48400b0, no A Stage-3c). Branch tip e248bce. Do NOT touch A's genesis/register/generator-arch or C's lanes. Signals covered by #182 PR subscription + self check-in (~00:10 UTC).
+
+---
+
+## 2026-07-12 (Agent B) - Owner-directed AUDIT of the materials framing (3 docs). VERDICT: YES, correct fundamentals (#182)
+
+Owner (via gate) lifted me off rest for a source-grounded, non-deferential audit: is the materials framing CORRECT, and is it the fundamentals to build off of? Read all 3 docs at source (origin branches): MATERIALS_ORACLE_SPEC.md (9-stage oracle), MATERIALS_ORACLE_GENERATOR_ARCH.md (Ewald+QEq+resolution-ladder), MATERIALS_BREATHING_RESOLUTION.md (charge-not-observable, EA2<0, Gordon-Kim/PIB). Posted full audit comment 4953338358.
+
+VERDICT: YES, correct fundamentals to build off of. The 3 deepest insights VERIFIED SOUND: (1) charge-not-an-observable (MgO 0.8e spread; only MEASURED charge = Born effective ~+1.96-2.0 formal, via LO-TO phonons; +1.6 is a fitted-model artifact - vindicates my refusal to fit, explains my +2.08); (2) EA2<0 boolean forecasts all 3 findings a priori (rung-1 oxide stiffness, MgO Cauchy C12=95/C44=156 violation vs NaCl passing, the Clementi-Raimondi inversion I found); (3) Gordon-Kim/PIB is the right parameter-free rung, citations all real (Gordon-Kim 1972, Muhlhausen-Gordon 1981 Watson sphere, Boyer-Mehl-Cohen PIB, Mehl-Hemley-Boyer 1986, Isaak-Cohen-Mehl 1990, Wolf-Bukowinski 1988), built by geophysicists for these exact mantle oxides. Citations otherwise clean.
+
+FOUND (seams, non-deferential): 
+- MINOR ERROR: Stage 0 g-factor "g=2+alpha/2pi" is factor-of-2 wrong (Schwinger a_e=(g-2)/2=alpha/2pi -> g=2+alpha/pi=2.00232, not 2.00116). Off materials path but a [D] value stated wrong.
+- GAP 1: shear/elastic TRIPTYCH (embedding/Keating/breathing) incomplete for MOLECULAR + H-BONDED solids (ices H2O/N2/CO2/CH4 - in scope: Pluto N2-CO self-check!). Energy plane has London + E_HB but no shear/elastic class for them. Needs a 4th/5th shear route.
+- GAP 2: AMORPHOUS/glassy phases (silicate glass, obsidian, amorphous ice) have NO representation (assemblage machinery assumes crystalline order; no lattice -> no Madelung/prototype). 
+- GAP 3 (coherence): "one flow" understates a self-consistent LOOP (positions<->charges<->energy: Ewald needs positions, QEq needs positions, bond-valence needs oxidation state, AIRSS relaxes on energy). Deterministic convergence of that loop is load-bearing but unstated in the solver law.
+- Sulfide covalent-metallic middle: soft spot, already flagged by the spec (not a missed gap).
+STRENGTH noted: the energy-vs-curvature distinction is handled right (disposer ~5% Born-Lande ENERGY fine for formation-ranking; ~1.65x MODULUS overestimate is a separate Stage-6 band).
+
+STATE: audit posted for owner's read. Back to REST after. Materials slice still complete/banked, held for provenance-enum swap on A's register. Task #35 interior arming HELD (main 48400b0, no A Stage-3c). Task #37 audit COMPLETE. Branch tip 130f399 unchanged (audit was design-only, no code). Do NOT touch A's genesis/register/generator-arch or C's lanes.
