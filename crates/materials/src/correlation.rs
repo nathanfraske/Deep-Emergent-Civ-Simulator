@@ -72,6 +72,36 @@ pub enum CorrelationClass {
     OutOfScope,
 }
 
+/// The energy route the correlation guard directs a composition to, keyed on its correlation class BEFORE any
+/// energy estimate: the whole point of the D2 arc, so a Mott insulator (Localized) is routed AWAY from the
+/// metallic estimator and never handed a confident metallic number. Each route is a SLOT; an unimplemented slot
+/// is an honest escalation (never a fabricated number), so until D3-c fills the metallic slot and a later slice
+/// fills the localized machinery, invoking those routes escalates. The guard's routing DECISION is complete now.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EnergyRoute {
+    /// The metallic energy route (the Itinerant class): the Rose/Vinet EOS plus Miedema. Filled by D3-c; until
+    /// then this slot is unimplemented and invoking it escalates.
+    Metallic,
+    /// The localized machinery (the Localized class): Hund, crystal field, superexchange. A later slice; until
+    /// then this slot is unimplemented and invoking it escalates.
+    Localized,
+    /// Estimators FORBIDDEN: escalate to measured or compute-once. The Window (near `U/W = 1`) and the
+    /// out-of-scope classes route here directly, and any unimplemented slot collapses here too.
+    Escalate,
+}
+
+/// The pure mapping from a correlation class to its energy route, the correlation guard's decision independent of
+/// scoring: Itinerant to the metallic route, Localized to the localized machinery, Window and OutOfScope to
+/// escalation (estimators forbidden). A Localized material is routed AWAY from the metallic route, the
+/// correlation-hardening spec's whole point.
+pub fn route_of_class(class: CorrelationClass) -> EnergyRoute {
+    match class {
+        CorrelationClass::Itinerant => EnergyRoute::Metallic,
+        CorrelationClass::Localized => EnergyRoute::Localized,
+        CorrelationClass::Window | CorrelationClass::OutOfScope => EnergyRoute::Escalate,
+    }
+}
+
 /// What can go wrong calibrating the classifier against the MIT reference set.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CalibrationError {
@@ -219,6 +249,17 @@ impl<'a> CorrelationClassifier<'a> {
         }
     }
 
+    /// The CORRELATION GUARD (D3-b): route a composition to its energy route by its correlation class, BEFORE any
+    /// energy estimate. Classify, then map the class to its route ([`route_of_class`]). This is the class-keyed
+    /// dispatch the whole D2 arc built toward: a Mott insulator (Localized) is routed AWAY from the metallic
+    /// route and never handed a confident metallic number; an itinerant metal routes to the metallic route; a
+    /// window or out-of-scope material escalates. The metallic and localized route slots are filled by later
+    /// slices, and until then invoking them escalates (an unimplemented slot is an honest escalation), but the
+    /// routing DECISION here is complete.
+    pub fn route(&self, composition: &[(String, u32)]) -> EnergyRoute {
+        route_of_class(self.classify(composition))
+    }
+
     /// The correlated cation-anion roles of a binary compound: the anion is the element with a negative valence,
     /// the cation is the other AND must carry a d-state radius (a correlated d-block centre); the cation charge
     /// derives from charge balance. `None` for a non-binary, a non-d-block cation, or a non-integer balance.
@@ -343,6 +384,65 @@ mod tests {
                 metal.0
             );
         }
+    }
+
+    #[test]
+    fn the_guard_routes_a_mott_insulator_away_from_the_metallic_route() {
+        // THE D2b PAYOFF (D3-b): the correlation guard routes NiO (Localized) to the localized route, AWAY from
+        // the metallic estimator, so a Mott insulator is never handed a confident metallic number. The itinerant
+        // metals route TO the metallic route; a window or out-of-scope material escalates.
+        let (t, l, ds, r, mit) = floors();
+        let c = CorrelationClassifier::calibrate(&t, &l, &ds, &r, &mit).expect("calibrates");
+        // NiO (a Mott insulator) is routed away from the metallic slot.
+        let nio = comp(&[("Ni", 1), ("O", 1)]);
+        assert_eq!(
+            c.route(&nio),
+            EnergyRoute::Localized,
+            "NiO routes to the localized machinery, never the metallic estimator"
+        );
+        assert_ne!(
+            c.route(&nio),
+            EnergyRoute::Metallic,
+            "a Mott insulator is never handed the metallic route"
+        );
+        // The itinerant metals route TO the metallic slot (D3-c will fill it).
+        for metal in [("Ti", 1), ("V", 1)] {
+            assert_eq!(
+                c.route(&comp(&[(metal.0, metal.1), ("O", 1)])),
+                EnergyRoute::Metallic,
+                "{}O (itinerant) routes to the metallic route",
+                metal.0
+            );
+        }
+        // Out-of-scope (VO2, MgO) escalates.
+        assert_eq!(
+            c.route(&comp(&[("V", 1), ("O", 2)])),
+            EnergyRoute::Escalate,
+            "VO2 (out of scope) escalates rather than routing"
+        );
+    }
+
+    #[test]
+    fn the_guard_maps_every_class_to_a_route() {
+        // The pure routing decision, independent of scoring: itinerant to metallic, localized to localized,
+        // window and out-of-scope to escalation. All four classes covered (the window case is unreachable by a
+        // real seeded composition, so its mapping is proven here directly).
+        assert_eq!(
+            route_of_class(CorrelationClass::Itinerant),
+            EnergyRoute::Metallic
+        );
+        assert_eq!(
+            route_of_class(CorrelationClass::Localized),
+            EnergyRoute::Localized
+        );
+        assert_eq!(
+            route_of_class(CorrelationClass::Window),
+            EnergyRoute::Escalate
+        );
+        assert_eq!(
+            route_of_class(CorrelationClass::OutOfScope),
+            EnergyRoute::Escalate
+        );
     }
 
     #[test]

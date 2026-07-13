@@ -52,6 +52,9 @@ pub mod thermochemical;
 pub mod verdict;
 
 pub use contract::{Disposer, Preflight, Proposer, Quench, RealizedState, Validity};
+pub use correlation::{
+    route_of_class, CalibrationError, CorrelationClass, CorrelationClassifier, EnergyRoute,
+};
 pub use log::{VerdictKind, VerdictLog, VerdictRecord};
 pub use memo::Memo;
 pub use thermochemical::{
