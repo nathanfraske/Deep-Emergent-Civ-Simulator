@@ -111,6 +111,98 @@ pub fn plasma_energy_ev(carrier_density_per_nm3: Fixed) -> Fixed {
         .unwrap_or(Fixed::MAX)
 }
 
+/// The scattering-time fold `hbar * 1e15 / (2*pi*k_B)` (`~1215.7 fs*K`), mapping `1/(lambda_tr*T)` to the
+/// relaxation time in femtoseconds. ASSEMBLED from the exact `hbar` and `k_B` mantissas, `2*pi` from `Fixed::PI`,
+/// and a single power of ten (the dimensionless-constant law): `(1.054571817 / (2*pi*1.380649)) * 1e4`. The `fs`
+/// working unit keeps `tau ~ 20..40 fs` representable where the SI `~2e-14 s` underflows Q32.32.
+fn scattering_time_fold_fs_k() -> Fixed {
+    let two_pi_kb = match Fixed::from_int(2)
+        .checked_mul(Fixed::PI)
+        .and_then(|x| x.checked_mul(Fixed::from_ratio(1_380_649, 1_000_000)))
+    {
+        Some(v) if v > ZERO => v,
+        _ => return ZERO,
+    };
+    // hbar mantissa 1.054571817, times 1e4 (the collapsed 10^(-34+15+23)), over 2*pi*k_B mantissa.
+    Fixed::from_ratio(1_054_571_817, 1_000_000_000)
+        .checked_mul(Fixed::from_int(10_000))
+        .and_then(|x| x.checked_div(two_pi_kb))
+        .unwrap_or(Fixed::MAX)
+}
+
+/// The phonon-limited Drude scattering time `tau` (fs), the high-temperature (`T > Theta_D`) form
+/// `hbar / tau = 2*pi*lambda_tr*k_B*T`, so `tau = scattering_time_fold_fs_k() / (lambda_tr * T)`. The ONE RESERVED
+/// coefficient is the dimensionless transport electron-phonon coupling `lambda_tr` (`[M]` per material, McMillan
+/// 1968 / Allen 1971, the SAME `lambda` Eliashberg consumes for superconducting `T_c`, a dual-consumer column),
+/// caller-supplied and never planted (`~0.16` for copper). HONEST LIMITS: this is the `T > Theta_D` linear-in-`T`
+/// regime; below `Theta_D` the Bloch-Grueneisen `T^5` law takes over (a derived-in-form follow-on), and a defect
+/// residual-resistivity term adds by Matthiessen (tying to the damage floor). Non-positive inputs yield zero.
+pub fn drude_scattering_time_fs(lambda_tr: Fixed, temperature: Fixed) -> Fixed {
+    if lambda_tr <= ZERO || temperature <= ZERO {
+        return ZERO;
+    }
+    let denom = match lambda_tr.checked_mul(temperature) {
+        Some(v) if v > ZERO => v,
+        _ => return ZERO,
+    };
+    scattering_time_fold_fs_k()
+        .checked_div(denom)
+        .unwrap_or(Fixed::MAX)
+}
+
+/// The Drude conductivity fold `e^2 * 1e12 / m_e` (`~2.818e4`), mapping `n_e[/nm^3] * tau[fs]` to `sigma[S/m]`.
+/// ASSEMBLED from the exact `e` and `m_e` mantissas and a single power of ten (the dimensionless-constant law):
+/// `(1.602176634^2 / 9.1093837015) * 1e5`, since `e^2` carries `10^-38`, the `n_e` cm-to-nm and `tau` fs
+/// conversions carry `10^(27-15) = 10^12`, and `m_e` carries `10^-31`, netting `10^5`.
+fn drude_conductivity_fold() -> Fixed {
+    let e_mantissa = Fixed::from_ratio(1_602_176_634, 1_000_000_000);
+    let e_sq = match e_mantissa.checked_mul(e_mantissa) {
+        Some(v) => v,
+        None => return Fixed::MAX,
+    };
+    let me_mantissa = Fixed::from_ratio(91_093_837_015, 10_000_000_000);
+    e_sq.checked_div(me_mantissa)
+        .and_then(|x| x.checked_mul(Fixed::from_int(100_000)))
+        .unwrap_or(Fixed::MAX)
+}
+
+/// The Drude conductivity `sigma` (S/m) from the carrier density (`/nm^3`) and the scattering time (fs):
+/// `sigma = n_e * e^2 * tau / m_e`, folded to `n_e[/nm^3] * tau[fs] * drude_conductivity_fold()`. This is the
+/// fundamental Drude relation, no reserved value; the reserved coupling enters through `tau`. The `S/m` value
+/// (`~1e5..1e8` for a metal) is representable. This is the leg the `sigma` ROUND-TRIP TEST exercises: a `tau` that
+/// yields a cited resistivity, run back through here, must rebuild that resistivity, so a units fold fails loudly.
+/// Non-positive inputs yield zero.
+pub fn drude_conductivity_from_tau(
+    carrier_density_per_nm3: Fixed,
+    scattering_time_fs: Fixed,
+) -> Fixed {
+    if carrier_density_per_nm3 <= ZERO || scattering_time_fs <= ZERO {
+        return ZERO;
+    }
+    carrier_density_per_nm3
+        .checked_mul(scattering_time_fs)
+        .and_then(|x| x.checked_mul(drude_conductivity_fold()))
+        .unwrap_or(Fixed::MAX)
+}
+
+/// The Drude electrical conductivity `sigma` (S/m) from the carrier density, the reserved transport coupling
+/// `lambda_tr`, and the temperature: the phonon-limited `tau` ([`drude_scattering_time_fs`]) into the Drude
+/// relation ([`drude_conductivity_from_tau`]). Reserves the one coefficient `lambda_tr`. HONEST LIMITS: the
+/// free-electron Drude form is few-percent for a good simple metal and degrades for the d-block (the band mass);
+/// the Mott-Ioffe-Regel bound (the mean free path cannot fall below a lattice spacing; Gunnarsson-Calandra-Han
+/// 2003) marks where Drude itself dies, the resistivity-saturation ceiling. Non-positive inputs yield zero.
+pub fn drude_conductivity_s_per_m(
+    carrier_density_per_nm3: Fixed,
+    lambda_tr: Fixed,
+    temperature: Fixed,
+) -> Fixed {
+    let tau = drude_scattering_time_fs(lambda_tr, temperature);
+    if tau <= ZERO {
+        return ZERO;
+    }
+    drude_conductivity_from_tau(carrier_density_per_nm3, tau)
+}
+
 /// The electronic route bound to the periodic table and the EOS anchors, so the free-electron density and the
 /// plasma energy read the molar mass and the derived density for an anchored metal. The conduction-electron count
 /// `z` is caller-supplied DATA (the periodic-table valence for a simple metal; the d-band effective count is the
@@ -155,6 +247,21 @@ impl<'a> ElectronicRoute<'a> {
     pub fn plasma_energy(&self, symbol: &str, conduction_electrons_z: Fixed) -> Option<Fixed> {
         let n_e = self.carrier_density(symbol, conduction_electrons_z)?;
         Some(plasma_energy_ev(n_e))
+    }
+
+    /// The Drude electrical conductivity `sigma` (S/m) for an anchored metal at a temperature, over the free-
+    /// electron density and the caller's reserved transport coupling `lambda_tr`. `None` (escalate) when the metal
+    /// has no anchor. Both `z` and `lambda_tr` are caller-supplied, never planted. Carries the free-electron and
+    /// Mott-Ioffe-Regel limits of [`drude_conductivity_s_per_m`].
+    pub fn conductivity(
+        &self,
+        symbol: &str,
+        conduction_electrons_z: Fixed,
+        lambda_tr: Fixed,
+        temperature: Fixed,
+    ) -> Option<Fixed> {
+        let n_e = self.carrier_density(symbol, conduction_electrons_z)?;
+        Some(drude_conductivity_s_per_m(n_e, lambda_tr, temperature))
     }
 }
 
@@ -285,6 +392,84 @@ mod tests {
         assert!(
             route.plasma_energy("Xx", Fixed::from_int(1)).is_none(),
             "an unanchored symbol has no plasma energy"
+        );
+    }
+
+    #[test]
+    fn the_drude_conductivity_closes_on_the_transport_coupling_and_round_trips_tau() {
+        // Copper: n_e ~85 /nm^3, lambda_tr ~0.16 (cited test-only, McMillan/Allen), T = 300 K.
+        // tau = 1215.7 / (0.16*300) ~25.3 fs; sigma = n_e * tau * fold ~6.06e7 S/m against the measured ~5.9e7.
+        let n_cu = Fixed::from_int(85);
+        let lambda_cu = Fixed::from_ratio(16, 100);
+        let tau = drude_scattering_time_fs(lambda_cu, Fixed::from_int(300));
+        assert!(
+            close(tau, 25.3, 1.0),
+            "copper scattering time ~25 fs: {tau:?}"
+        );
+        let sigma = drude_conductivity_s_per_m(n_cu, lambda_cu, Fixed::from_int(300));
+        assert!(
+            close(sigma, 6.06e7, 6.0e6),
+            "copper conductivity ~6e7 S/m (measured ~5.9e7): {sigma:?}"
+        );
+
+        // THE sigma ROUND-TRIP TEST (the owner's requirement): a tau that yields copper's cited sigma (5.88e7),
+        // run back through the Drude relation, must rebuild that sigma, so a units fold fails loudly. Copper's
+        // cited resistivity 1.7e-8 ohm*m -> sigma 5.88e7 -> the physical tau is ~24.6 fs; recompute and assert.
+        let tau_from_cited = Fixed::from_ratio(246, 10); // 24.6 fs, backed out of the cited resistivity
+        let sigma_round = drude_conductivity_from_tau(n_cu, tau_from_cited);
+        assert!(
+            close(sigma_round, 5.88e7, 3.0e6),
+            "the tau that yields the cited resistivity rebuilds sigma ~5.9e7 (units round-trip): {sigma_round:?}"
+        );
+
+        // Monotone: a stronger coupling (more scattering) shortens tau and lowers sigma; a higher temperature too.
+        assert!(
+            drude_scattering_time_fs(Fixed::from_ratio(30, 100), Fixed::from_int(300)) < tau,
+            "a stronger transport coupling shortens the scattering time"
+        );
+        assert!(
+            drude_conductivity_s_per_m(n_cu, Fixed::from_ratio(30, 100), Fixed::from_int(300))
+                < sigma,
+            "a stronger coupling lowers the conductivity"
+        );
+        assert!(
+            drude_conductivity_s_per_m(n_cu, lambda_cu, Fixed::from_int(600)) < sigma,
+            "a higher temperature lowers the conductivity (more phonon scattering)"
+        );
+        // Guards.
+        assert_eq!(drude_scattering_time_fs(ZERO, Fixed::from_int(300)), ZERO);
+        assert_eq!(drude_conductivity_from_tau(ZERO, tau), ZERO);
+        assert_eq!(
+            drude_conductivity_s_per_m(n_cu, ZERO, Fixed::from_int(300)),
+            ZERO
+        );
+
+        // Through the route (reads n_e from the anchors; z and lambda_tr caller-supplied). Sodium lambda_tr ~0.11.
+        let t = table();
+        let a = anchors();
+        let route = ElectronicRoute::new(&t, &a);
+        let sigma_na = route
+            .conductivity(
+                "Na",
+                Fixed::from_int(1),
+                Fixed::from_ratio(11, 100),
+                Fixed::from_int(300),
+            )
+            .expect("Na conductivity");
+        assert!(
+            sigma_na.to_f64_lossy() > 1.0e7 && sigma_na.to_f64_lossy() < 4.0e7,
+            "route sodium conductivity is a sensible metal value ~2e7 S/m: {sigma_na:?}"
+        );
+        assert!(
+            route
+                .conductivity(
+                    "Xx",
+                    Fixed::from_int(1),
+                    Fixed::from_ratio(16, 100),
+                    Fixed::from_int(300)
+                )
+                .is_none(),
+            "an unanchored metal escalates in the conductivity route"
         );
     }
 }
