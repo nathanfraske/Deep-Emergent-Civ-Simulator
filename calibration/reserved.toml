@@ -67,7 +67,8 @@ set_by = "Nathan M. Fraske"
 set_date = "2026-06-30"
 unit = "log_odds"
 source = "Part 9 evidence engine; record 62.6; audit section 1f"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "evidence.runner_up_margin"
@@ -78,7 +79,8 @@ set_by = "Nathan M. Fraske"
 set_date = "2026-06-30"
 unit = "log_odds"
 source = "Part 9 evidence engine; record 62.6; audit section 1f"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "evidence.log_odds_clamp"
@@ -89,7 +91,8 @@ set_by = "Nathan M. Fraske"
 set_date = "2026-06-30"
 unit = "log_odds"
 source = "Part 9 evidence engine; record 62.6; audit section 1f"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 # evidence.trace_decay_curves RETIRED (worksheet §13b, derive audit): a trace's persistence over
 # time is no longer an authored per-kind curve. It DERIVES through trace::organic_salience and
@@ -154,7 +157,8 @@ set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
 set_date = "2026-07-09"
 unit = "age_cadences"
 source = "Part 20, Part 40; crates/sim/src/absence.rs characteristic_lifespan/absence_window"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "evidence.concealment_suppression"
@@ -165,7 +169,8 @@ set_by = "Nathan M. Fraske"
 set_date = "2026-07-03"
 unit = "ratio"
 source = "Part 9 evidence engine; record 62.6; audit section 1f"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "evidence.aggregate_diffusion_rate"
@@ -175,6 +180,9 @@ value = ""
 unit = "per_tick"
 source = "Part 9 evidence engine; record 62.6; audit section 1f; crates/sim/src/evidence.rs"
 category = "derivable"
+provenance = "derived"
+inputs = ["gossip.told_weight", "gossip.trust_baseline"]
+derived_from = ["gossip.told_weight", "gossip.trust_baseline"]
 
 # evidence.knowledge_to_strength RETIRED (belief facet-strength substrate built, 2026-07-03):
 # the mapping from a pool knowledge level to a promoted mind belief strength was a second,
@@ -202,7 +210,8 @@ status = "reserved"
 value = ""
 unit = "curve"
 source = "Part 20 being model; record 62.2; audit section 1a; crates/sim/src/personality.rs"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "being.maturity_targets"
@@ -211,7 +220,8 @@ status = "reserved"
 value = ""
 unit = "axis_units"
 source = "Part 20 being model; record 62.2; audit section 1a; crates/sim/src/personality.rs"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "being.life_event_impulse"
@@ -222,7 +232,8 @@ set_by = "Nathan M. Fraske"
 set_date = "2026-07-03"
 unit = "axis_units"
 source = "Part 20 being model; record 62.2; audit section 1a"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 # --- R-VALUE-METRIC: value distance (Part 21, record 62.3) ---
 
@@ -233,7 +244,8 @@ status = "reserved"
 value = ""
 unit = "weight"
 source = "Part 21 value-distance metric; record 62.3; audit section 1b"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "value_metric.conflict_coefficient"
@@ -244,7 +256,8 @@ set_by = "Nathan M. Fraske"
 set_date = "2026-07-03"
 unit = "coefficient"
 source = "Part 21 value-distance metric; record 62.3; audit section 1b"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "value_metric.enculturation_pull_rate"
@@ -253,7 +266,8 @@ status = "reserved"
 value = ""
 unit = "per_tick"
 source = "Part 21 value-distance metric; record 62.3; audit section 1b"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "value_metric.incommensurability_floor"
@@ -263,6 +277,8 @@ value = ""
 unit = "distance"
 source = "Part 21 value-distance metric; record 62.3; audit section 1b"
 category = "derivable"
+provenance = "derived"
+derived_from = ["cross_race_distance project_to_etic_with_loss (live per-race-pair etic projection loss, value.rs:489, superseding the removed flat floor constant value.rs:59)"]
 
 [[reserved]]
 id = "value_metric.etic_substrate_axes"
@@ -272,6 +288,9 @@ value = ""
 unit = "set"
 source = "Part 21 value-distance metric; record 62.3; audit section 1b"
 category = "derivable"
+provenance = "derived"
+inputs = ["value_metric.etic_recurrence_min"]
+derived_from = ["value_metric.etic_recurrence_min"]
 
 [[reserved]]
 id = "value_metric.etic_recurrence_min"
@@ -280,7 +299,8 @@ status = "reserved"
 value = ""
 unit = "count"
 source = "Part 21 value-distance metric; record 62.3; audit section 1b"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 # --- R-GENOME: genetics and deep-time evolution (Part 25, record 62.5) ---
 
@@ -307,7 +327,8 @@ set_by = "Nathan M. Fraske"
 set_date = "2026-07-03"
 unit = "gauss_approx"
 source = "Part 25.10; crates/core/src/gauss.rs GaussApprox"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "genome.additive_mutation_step"
@@ -316,7 +337,8 @@ status = "reserved"
 value = ""
 unit = "trait_units"
 source = "Part 25.5, 25.10; crates/sim/src/genome.rs GeneticScheme::gamete"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "genome.environment_variance"
@@ -325,7 +347,8 @@ status = "reserved"
 value = ""
 unit = "cognition_offset"
 source = "Part 25.6 developmental environment; audit section 1d; crates/sim/src/race.rs environment_variance"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "genome.loci_per_channel"
@@ -336,7 +359,8 @@ set_by = "Nathan M. Fraske"
 set_date = "2026-06-30"
 unit = "count"
 source = "Part 25 genome model; record 62.5; audit section 1d"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "genome.mutation_rates"
@@ -347,7 +371,8 @@ set_by = "Nathan M. Fraske"
 set_date = "2026-07-03"
 unit = "per_genome_per_generation"
 source = "Part 25 genome model; record 62.5; audit section 1d"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 # Ne, the speciation distance, and the incompatibility-count threshold are surfaced in
 # full, with bases, in the genome-and-deep-time block below (the implemented set); the
@@ -362,7 +387,8 @@ status = "reserved"
 value = ""
 unit = "curve"
 source = "Part 25 genome model; record 62.5; audit section 1d"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 # --- R-AXIOM: axiomatic beliefs (Part 28, record 62.4) ---
 
@@ -384,7 +410,8 @@ set_date = "2026-07-09"
 value = "0=0,8=16"
 unit = "curve"
 source = "Part 28 axiom model; Part 25.6; Part 9; record 62.4; audit section 1c; derived in axiom::RingCapacityLaw::capacity_for; worksheet §13b"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "axiom.evidence_ring_hard_cap"
@@ -395,7 +422,8 @@ set_date = "2026-07-09"
 value = "32"
 unit = "count"
 source = "Part 28 axiom model; Part 25.6; Part 9; record 62.4; audit section 1c; derived in axiom::RingCapacityLaw::capacity_for; worksheet §13b"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "axiom.entrenchment_curve"
@@ -404,7 +432,8 @@ status = "reserved"
 value = ""
 unit = "curve"
 source = "Part 28 axiom model; record 62.4; audit section 1c"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "axiom.calcification_rate"
@@ -415,7 +444,8 @@ set_by = "Nathan M. Fraske"
 set_date = "2026-07-03"
 unit = "per_tick"
 source = "Part 28 axiom model; record 62.4; audit section 1c; world-dialing lever, worksheet §14"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "axiom.conformity_prestige_strengths"
@@ -426,7 +456,8 @@ set_by = "Nathan M. Fraske"
 set_date = "2026-07-03"
 unit = "strength"
 source = "Part 28 axiom model; record 62.4; audit section 1c"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "axiom.group_aggregation_rule"
@@ -435,7 +466,8 @@ status = "reserved"
 value = ""
 unit = "rule"
 source = "Part 28 axiom model; record 62.4; audit section 1c"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "axiom.stubbornness_dogmatism_weight"
@@ -444,7 +476,8 @@ status = "reserved"
 value = ""
 unit = "weight"
 source = "Part 28 axiom model; record 62.4; audit section 1c; crates/sim/src/axiom.rs EpistemicStance::effective_stubbornness"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 # --- R-LANG: language and meaning (Part 33, record 62.7) ---
 
@@ -456,6 +489,8 @@ value = ""
 unit = "threshold"
 source = "Part 33 language system; record 62.7; audit section 1g"
 category = "derivable"
+provenance = "derived"
+derived_from = ["semantics::concept_thresholds", "concept-prototype min_positive_separation (Euclidean, Part 21 metric)", "perceptual jnd (langmod::perceptual_geometry)", "langmod::PerceptualGeometry::contrast_budget"]
 
 [[reserved]]
 id = "lang.phoneme_priors"
@@ -465,6 +500,8 @@ value = ""
 unit = "prior"
 source = "Part 33 language system; record 62.7; audit section 1g; Part 33.3 record 62.13"
 category = "derivable"
+provenance = "derived"
+derived_from = ["langmod::phoneme_priors", "race perceptual_geometry confusability (langmod::perceptual_geometry)", "per-value capability gate", "FeatureValueDef.resonator_length"]
 
 [[reserved]]
 id = "articulation.base_resonator_lengths"
@@ -474,6 +511,7 @@ value = ""
 unit = "metres_per_sound"
 source = "Part 33.3 language system; record 62.13; crates/sim/src/language.rs phonetic; crates/sim/src/langmod.rs perceptual_geometry"
 category = "per_world"
+provenance = "measured"
 
 [[reserved]]
 id = "articulation.vocal_tract_scale"
@@ -484,7 +522,8 @@ set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
 set_date = "2026-07-09"
 unit = "scale"
 source = "Part 33.3 language system; record 62.13; crates/sim/src/race.rs Articulation; crates/sim/src/langmod.rs articulated_geometry; couples R-ORGAN-FLUX"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "articulation.hearing_resolution"
@@ -496,6 +535,7 @@ set_date = "2026-07-09"
 unit = "hertz"
 source = "Part 33.3 language system; record 62.13; crates/sim/src/race.rs Articulation; crates/sim/src/sensorium.rs resolution; crates/sim/src/langmod.rs articulated_geometry"
 category = "per_world"
+provenance = "measured"
 
 [[reserved]]
 id = "articulation.producibility_threshold"
@@ -504,7 +544,8 @@ status = "reserved"
 value = ""
 unit = "prior"
 source = "Part 33.3 language system; record 62.13; crates/sim/src/langmod.rs producible_values"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "articulation.word_min_len"
@@ -515,7 +556,8 @@ set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
 set_date = "2026-07-09"
 unit = "count"
 source = "Part 33.3 language system; record 62.13; crates/sim/src/langmod.rs form_system_from_values"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "articulation.word_max_len"
@@ -524,7 +566,8 @@ status = "reserved"
 value = ""
 unit = "count"
 source = "Part 33.3 language system; record 62.13; crates/sim/src/langmod.rs form_system_from_values"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "lang.drift_operator_rates"
@@ -535,7 +578,8 @@ set_by = "Nathan M. Fraske"
 set_date = "2026-07-03"
 unit = "per_generation"
 source = "Part 33 language system; record 62.7; audit section 1g"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "lang.distance_component_weights"
@@ -545,6 +589,8 @@ value = ""
 unit = "weight"
 source = "Part 33 language system; record 62.7; audit section 1g; R-LANG-DET record 62.12"
 category = "derivable"
+provenance = "derived"
+derived_from = ["lexicon form-diversity (order-2 Hill number over pooled word forms)", "form-system phoneme diversity", "typology (parameter,value) setting diversity"]
 
 [[reserved]]
 id = "lang.l2_acquisition"
@@ -555,7 +601,8 @@ set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
 set_date = "2026-07-09"
 unit = "curve"
 source = "Part 33.6 language system; record 62.7; audit section 1g; Part 20 R-AGING"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "lang.writing_invention_threshold"
@@ -564,7 +611,8 @@ status = "reserved"
 value = ""
 unit = "threshold"
 source = "Part 33 language system; record 62.7; audit section 1g"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "lang.dawn_round_cap"
@@ -573,7 +621,8 @@ status = "reserved"
 value = ""
 unit = "rounds"
 source = "Part 33 language system; record 62.7; audit section 1g"
-category = "per_world"
+category = "defect"
+provenance = "authored"
 
 # --- R-LANG-TYPOLOGY: the typological substrate (Part 33.4; scoped proposal) ---
 
@@ -584,7 +633,8 @@ status = "reserved"
 value = ""
 unit = "threshold"
 source = "Part 33.9; record 62.24"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "lang.prime_founding_resilience"
@@ -593,7 +643,8 @@ status = "reserved"
 value = ""
 unit = "ranks"
 source = "Part 33.1, 33.9; record 62.24"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 # lang.typology_harmony_strong RETIRED (parse-cost floor built, 2026-07-03): the strong-tier harmony
 # tilt is no longer an authored number. The word-order harmony tilt DERIVES through
@@ -618,7 +669,8 @@ status = "reserved"
 value = ""
 unit = "temperature"
 source = "Part 33.4 typological substrate; docs/working/LANG_TYPOLOGY_SCOPED_PROPOSAL.md; crates/physics/src/laws.rs parse_cost/harmony_tilt; crates/sim/src/typology.rs"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "lang.typology_disharmony"
@@ -630,6 +682,7 @@ set_date = "2026-07-09"
 unit = "probability"
 source = "Part 33.4 typological substrate; docs/working/LANG_TYPOLOGY_SCOPED_PROPOSAL.md; crates/sim/src/typology.rs"
 category = "per_world"
+provenance = "measured"
 
 [[reserved]]
 id = "lang.typology_distance_weights"
@@ -639,6 +692,8 @@ value = ""
 unit = "weight"
 source = "Part 33.5 grammatical distance; docs/working/LANG_TYPOLOGY_SCOPED_PROPOSAL.md; crates/sim/src/typology.rs"
 category = "derivable"
+provenance = "derived"
+derived_from = ["typology prior counts (TypologyPrior)"]
 
 # --- R-LANG-DET: order-sensitive language procedures pinned (Part 33, record 62.12) ---
 
@@ -649,7 +704,8 @@ status = "reserved"
 value = ""
 unit = "curve"
 source = "Part 33.4; record 62.12; audit section 1n"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "langdet.salience_decay_floor"
@@ -658,7 +714,8 @@ status = "reserved"
 value = ""
 unit = "rate"
 source = "Part 33.4; record 62.12; audit section 1n"
-category = "derivable"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "langdet.usage_recency_window"
@@ -667,7 +724,8 @@ status = "reserved"
 value = ""
 unit = "ticks"
 source = "Part 33.4; record 62.12; audit section 1n"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "langdet.retention_memory_scale"
@@ -678,7 +736,8 @@ set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
 set_date = "2026-07-09"
 unit = "curve"
 source = "Part 33.4; record 62.12; audit section 1n; Part 9 belief deterioration"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "langdet.substrate_quantization"
@@ -688,6 +747,9 @@ value = ""
 unit = "granularity"
 source = "Part 33.5; record 62.12; audit section 1n"
 category = "derivable"
+provenance = "derived"
+inputs = ["lang.concept_thresholds"]
+derived_from = ["lang.concept_thresholds"]
 
 [[reserved]]
 id = "langdet.incommensurability_ceiling"
@@ -697,6 +759,8 @@ value = ""
 unit = "distance"
 source = "Part 33.5; record 62.12; audit section 1n"
 category = "derivable"
+provenance = "derived"
+derived_from = ["value.incommensurability_ceiling"]
 
 # --- R-LANG-MODALITY: language across all modalities (Part 33.3, record 62.13) ---
 
@@ -707,7 +771,8 @@ status = "reserved"
 value = ""
 unit = "registry"
 source = "Part 33.3; record 62.13; audit section 1o"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "langmod.perceptual_geometry"
@@ -717,6 +782,8 @@ value = ""
 unit = "granularity"
 source = "Part 33.3; record 62.13; audit section 1o"
 category = "derivable"
+provenance = "derived"
+derived_from = ["acoustic.absorption_reference", "acoustic.resonator_length", "sensorium just-noticeable-difference", "law.speed_of_sound"]
 
 [[reserved]]
 id = "langmod.capability_gates"
@@ -726,6 +793,9 @@ value = ""
 unit = "threshold"
 source = "Part 33.3; record 62.13; audit section 1o"
 category = "derivable"
+provenance = "derived"
+inputs = ["body.function_loss_threshold"]
+derived_from = ["body.function_loss_threshold", "body function_integrity", "sensorium acuity"]
 
 [[reserved]]
 id = "langmod.acquisition_split"
@@ -735,6 +805,9 @@ value = ""
 unit = "rate"
 source = "Part 33.6; record 62.13; audit section 1o"
 category = "derivable"
+provenance = "derived"
+inputs = ["langmod.capability_gates"]
+derived_from = ["langmod.capability_gates"]
 
 [[reserved]]
 id = "langmod.blend_propensity"
@@ -745,7 +818,8 @@ set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
 set_date = "2026-07-09"
 unit = "probability"
 source = "Part 33.6; record 62.13; audit section 1o"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "langmod.dawn_cap_unitsize"
@@ -754,7 +828,8 @@ status = "reserved"
 value = ""
 unit = "rounds"
 source = "Part 33.9; record 62.13; audit section 1o"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "langmod.mismatch_triggers"
@@ -763,7 +838,8 @@ status = "reserved"
 value = ""
 unit = "threshold"
 source = "Part 33.3; record 62.13; audit section 1o"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 # --- R-INST: emergent institutions (Part 36, record 62.8) ---
 
@@ -774,7 +850,8 @@ status = "reserved"
 value = ""
 unit = "set"
 source = "Part 36 institutions; record 62.8; audit section 1k"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "inst.similarity_feature_weights"
@@ -783,7 +860,8 @@ status = "reserved"
 value = ""
 unit = "weight"
 source = "Part 36 institutions; record 62.8; audit section 1k"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "inst.recognition_threshold"
@@ -792,7 +870,8 @@ status = "reserved"
 value = ""
 unit = "threshold"
 source = "Part 36 institutions; record 62.8; audit section 1k"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "inst.crystallization_rates"
@@ -801,7 +880,8 @@ status = "reserved"
 value = ""
 unit = "per_tick"
 source = "Part 36 institutions; record 62.8; audit section 1k"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 # The crystallization-rates umbrella above is refined into the two parameters the built substrate
 # reads (crates/sim/src/institution.rs, CrystallizationParams), each supplied to crystallize() as a
@@ -815,7 +895,8 @@ status = "reserved"
 value = ""
 unit = "threshold"
 source = "Part 36 institutions; record 62.8; audit section 1k; crates/sim/src/institution.rs"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "inst.crystallization_rate"
@@ -824,7 +905,8 @@ status = "reserved"
 value = ""
 unit = "per_tick"
 source = "Part 36 institutions; record 62.8; audit section 1k; crates/sim/src/institution.rs"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "inst.distance_weights"
@@ -833,7 +915,8 @@ status = "reserved"
 value = ""
 unit = "weight"
 source = "Part 36 institutions; record 62.8; audit section 1k; crates/sim/src/institution.rs"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 # --- R-DEEPTECH-COMPOSE: recursive technology composition (Part 41, record 62.10) ---
 # The Part 41 composition evaluator is BUILT (2026-07-03, crates/compose, civsim-compose): a memoised,
@@ -854,7 +937,8 @@ status = "reserved"
 value = ""
 unit = "levels"
 source = "Part 41 composition mechanism; record 62.10; audit section 1l; crates/compose/src/eval.rs"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "compose.viability_threshold"
@@ -863,7 +947,8 @@ status = "reserved"
 value = ""
 unit = "safety_fraction"
 source = "Part 41 composition mechanism; record 62.10; audit section 1l; crates/compose/src/eval.rs; crates/compose/src/promote.rs"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "compose.transmission_stability"
@@ -873,6 +958,9 @@ value = ""
 unit = "ticks"
 source = "Part 41 composition mechanism; record 62.10; audit section 1l; transmission substrate (crates/sim/src/transmission.rs)"
 category = "derivable"
+provenance = "derived"
+inputs = ["transmission.loss_rate", "transmission.drift_rate"]
+derived_from = ["transmission.loss_rate", "transmission.drift_rate"]
 
 [[reserved]]
 id = "compose.reuse_compression_threshold"
@@ -881,7 +969,8 @@ status = "reserved"
 value = ""
 unit = "count"
 source = "Part 41 composition mechanism; record 62.10; audit section 1l; crates/compose/src/promote.rs"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "compose.interface_penalty_curve"
@@ -890,7 +979,8 @@ status = "reserved"
 value = ""
 unit = "curve"
 source = "Part 41 composition mechanism; record 62.10; audit section 1l; crates/compose/src/eval.rs"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "compose.emergent_proxy_weights"
@@ -899,7 +989,8 @@ status = "reserved"
 value = ""
 unit = "weight"
 source = "Part 41 composition mechanism; record 62.10; audit section 1l; crates/compose/src/proxy.rs"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "compose.control_efficiency_floor"
@@ -908,7 +999,8 @@ status = "reserved"
 value = ""
 unit = "efficiency_fraction"
 source = "Part 41 composition mechanism; crates/compose/src/proxy.rs ProxyKernel::ControlLoopStability"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "compose.resonance_floor"
@@ -917,7 +1009,8 @@ status = "reserved"
 value = ""
 unit = "natural_frequency"
 source = "Part 41 composition mechanism; crates/compose/src/proxy.rs ProxyKernel::Resonance"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 # --- Knowledge-transmission substrate: the drift and loss rates compose.transmission_stability
 # derives from (Parts 20, 23, 25, 41; crates/sim/src/transmission.rs). The transmit and loss
@@ -933,7 +1026,8 @@ set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
 set_date = "2026-07-09"
 unit = "proficiency_per_copy"
 source = "Parts 20, 23, 25 transmission; Part 41 compose.transmission_stability; crates/sim/src/transmission.rs"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "transmission.loss_rate"
@@ -942,7 +1036,8 @@ status = "reserved"
 value = ""
 unit = "proficiency_per_tick"
 source = "Parts 20, 23, 25 transmission; Part 41 compose.transmission_stability; crates/sim/src/transmission.rs"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "transmission.loss_practitioner_floor"
@@ -951,7 +1046,8 @@ status = "reserved"
 value = ""
 unit = "practitioners"
 source = "Parts 20, 23, 25 transmission; Part 41 compose.transmission_stability; crates/sim/src/transmission.rs"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 # --- R-TIER-CONSIST: tier consistency (Part 54, record 62.9) ---
 
@@ -962,7 +1058,8 @@ status = "reserved"
 value = ""
 unit = "significance"
 source = "Part 54 tier consistency; record 62.9; audit section 1j"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "tier.decision_propensity"
@@ -971,7 +1068,8 @@ status = "reserved"
 value = ""
 unit = "per_tick"
 source = "Part 54 tier consistency; record 62.9; audit section 1j"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "tier.belief_level_to_strength"
@@ -982,7 +1080,8 @@ set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
 set_date = "2026-07-09"
 unit = "curve"
 source = "Part 54 tier consistency; record 62.9; audit section 1j"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "tier.belief_dispersion"
@@ -991,7 +1090,8 @@ status = "reserved"
 value = ""
 unit = "ratio"
 source = "Part 54 tier consistency; record 62.9; audit section 1j"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "tier.partition_remainder_rule"
@@ -1002,7 +1102,8 @@ unit = "rule"
 set_by = "Nathan M. Fraske"
 set_date = "2026-06-29"
 source = "Part 54 tier consistency; record 62.9; audit section 1j"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 # --- R-TOM-UPDATE: recursive theory of mind (Part 37, record 62.11) ---
 # The access-channel set is data (the registry in crates/sim/src/tom.rs); these are the
@@ -1033,7 +1134,8 @@ set_by = "Nathan M. Fraske"
 set_date = "2026-06-30"
 unit = "log_odds"
 source = "Part 37 theory of mind; record 62.11; audit section 1m"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "tom.access_weight.absence"
@@ -1044,7 +1146,8 @@ set_by = "Nathan M. Fraske"
 set_date = "2026-06-30"
 unit = "log_odds"
 source = "Part 37 theory of mind; record 62.11; audit section 1m"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "tom.access_weight.denied"
@@ -1055,7 +1158,8 @@ set_by = "Nathan M. Fraske"
 set_date = "2026-06-30"
 unit = "log_odds"
 source = "Part 37 theory of mind; record 62.11; audit section 1m"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 # tom.meta_commit_threshold, tom.meta_runner_up_margin, and tom.meta_log_odds_clamp RETIRED here:
 # they DERIVE from the first-order evidence.* params through tom::meta_params_from_evidence (see the
@@ -1074,7 +1178,8 @@ set_by = "Nathan M. Fraske"
 set_date = "2026-06-30"
 unit = "log_odds"
 source = "Part 9.5 gossip loop; audit section"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "gossip.trust_baseline"
@@ -1085,7 +1190,8 @@ set_by = "Nathan M. Fraske"
 set_date = "2026-06-30"
 unit = "fraction"
 source = "Part 9.5 gossip loop; Part 37 trust"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "gossip.trust_penalty"
@@ -1096,7 +1202,8 @@ set_by = "Nathan M. Fraske"
 set_date = "2026-06-30"
 unit = "fraction"
 source = "Part 9.5 gossip loop; Part 37 trust"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 # --- language: the naming game (Part 33) ---
 
@@ -1109,7 +1216,8 @@ set_by = "Nathan M. Fraske"
 set_date = "2026-06-30"
 unit = "probability"
 source = "Part 33 procedural language; record 62.6"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "language.sound_change_rate"
@@ -1120,7 +1228,8 @@ set_by = "Nathan M. Fraske"
 set_date = "2026-07-02"
 unit = "probability"
 source = "Part 33.4 drift; record 62.12; audit section 1n"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 # language.generation_ticks RETIRED (per-lineage drift cadence built, 2026-07-03): the drift cadence
 # is no longer one global Earth-year scalar. It DERIVES per lineage through world::drift_languages
@@ -1149,7 +1258,8 @@ set_by = "Nathan M. Fraske"
 set_date = "2026-06-30"
 unit = "individuals"
 source = "Part 25.7-25.8; R-REPRO census tier (crates/sim/src/census.rs); pre-dawn founder seed / world-dialing lever, worksheet §13a/§14"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "reproduction.mutation_spread"
@@ -1160,7 +1270,8 @@ set_by = "Owner Mirror sign-off 2026-07-09 (remainder delegated under the derive
 set_date = "2026-07-09"
 unit = "disposition_units_half_width"
 source = "Part 25, Part 28, R-REPRO; crates/sim/src/world.rs ReproductionParams / inherited_beliefs; real-world unification step 1"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 # --- creature-selection step 2: the in-run creature reproduction and behaviour-selection substrate
 # (crates/sim/src/runner.rs CreatureSelectionParams, spawn_creatures mint perturbation, reproduce_creatures).
@@ -1174,7 +1285,8 @@ status = "reserved"
 value = ""
 unit = "controller_weight_half_width"
 source = "creature-selection step 2 (#126); crates/sim/src/runner.rs spawn_creatures / CreatureSelectionParams; Part 8, Part 25"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "creature_selection.reproduction_eligibility_reserve"
@@ -1183,7 +1295,8 @@ status = "reserved"
 value = ""
 unit = "reserve_fraction"
 source = "creature-selection step 2 (#126); crates/sim/src/runner.rs reproduce_creatures; Part 8, Part 20"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "creature_selection.offspring_mutation_spread"
@@ -1192,7 +1305,8 @@ status = "reserved"
 value = ""
 unit = "controller_weight_half_width"
 source = "creature-selection step 2 (#126); crates/sim/src/runner.rs reproduce_creatures / Controller::midparent; Part 25, R-REPRO"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "genome.speciation_distance"
@@ -1203,7 +1317,8 @@ set_by = "Nathan M. Fraske"
 set_date = "2026-06-30"
 unit = "distance"
 source = "Part 25.7; biosphere candidate"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "genome.selection_scaling"
@@ -1214,7 +1329,8 @@ set_by = "Nathan M. Fraske"
 set_date = "2026-06-30"
 unit = "coefficient"
 source = "Part 25.7"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "genome.point_mutation_rate"
@@ -1225,7 +1341,8 @@ set_by = "Nathan M. Fraske"
 set_date = "2026-06-30"
 unit = "probability"
 source = "Part 25.5"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "genome.recombination_default"
@@ -1236,7 +1353,8 @@ set_by = "Nathan M. Fraske"
 set_date = "2026-06-30"
 unit = "fraction"
 source = "Part 25.4"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 # genome.mutation_step RETIRED (2026-07-03, superseded by genome.additive_mutation_step): the
 # placeholder "size of the continuous additive perturbation" is replaced by the fail-loud Gaussian-
@@ -1255,7 +1373,8 @@ set_by = "Nathan M. Fraske"
 set_date = "2026-06-30"
 unit = "generations"
 source = "Part 25.7; biosphere candidate"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "genome.speciation_incompatibilities"
@@ -1266,7 +1385,8 @@ set_by = "Nathan M. Fraske"
 set_date = "2026-06-30"
 unit = "count"
 source = "Part 25.7"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "genome.allele_presence_threshold"
@@ -1275,7 +1395,8 @@ status = "reserved"
 value = ""
 unit = "joint_probability"
 source = "Part 25.7; crates/sim/src/genome.rs"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "speciation.distance_threshold"
@@ -1284,7 +1405,8 @@ status = "reserved"
 value = ""
 unit = "frequency_distance"
 source = "Part 25.7; crates/sim/src/epoch.rs step_generation; crates/sim/src/genome.rs reproductively_isolated"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "speciation.incompatibility_threshold"
@@ -1293,7 +1415,8 @@ status = "reserved"
 value = ""
 unit = "count"
 source = "Part 25.7; crates/sim/src/epoch.rs step_generation; crates/sim/src/genome.rs reproductively_isolated"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "time.base_tick_seconds"
@@ -1304,7 +1427,8 @@ set_by = "Nathan M. Fraske"
 set_date = "2026-07-01"
 unit = "seconds_per_tick"
 source = "Part 14.6, Part 54; docs/time_and_playback.md"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "time.life_cadence_ticks"
@@ -1316,6 +1440,9 @@ set_date = "2026-07-01"
 unit = "ticks"
 source = "Part 20; crates/sim/src/world.rs age_step/apply_mortality"
 category = "derivable"
+provenance = "derived"
+inputs = ["world.orbital_period_seconds", "time.base_tick_seconds"]
+derived_from = ["world.orbital_period_seconds", "time.base_tick_seconds"]
 
 [[reserved]]
 id = "time.years_per_generation"
@@ -1326,7 +1453,8 @@ set_by = "Nathan M. Fraske"
 set_date = "2026-07-01"
 unit = "years_per_generation"
 source = "Part 25, Part 32; docs/time_and_playback.md"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 # --- R-CELESTIAL: a world's orbit (Parts 14.6, 32, 20). The two orbital scalars are the
 # physical inputs the canonical time cadences derive from: the life-cadence beat is
@@ -1344,6 +1472,7 @@ set_date = "2026-07-09"
 unit = "seconds_per_orbit"
 source = "Part 14.6, Part 32, Part 20; crates/world/src/celestial.rs; crates/sim/src/clock.rs ticks_from_seconds"
 category = "per_world"
+provenance = "measured"
 
 [[reserved]]
 id = "world.rotation_period_seconds"
@@ -1355,6 +1484,7 @@ set_date = "2026-07-09"
 unit = "seconds_per_rotation"
 source = "Part 14.6, Part 32; crates/world/src/celestial.rs"
 category = "per_world"
+provenance = "measured"
 
 [[reserved]]
 id = "world.surface_pressure"
@@ -1363,7 +1493,8 @@ status = "reserved"
 value = ""
 unit = "megapascal"
 source = "Genesis-forward Layer 0 (docs/working/GENESIS_FORWARD_PLAN_OF_ATTACK.md, GENESIS_LAYER0_LAYOUT.md); the solvent-phase-stability gate; crates/physics/src/laws.rs VolatileSaturationCurve"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 # --- R-BEHAVIOR-EVOLVE Stage 1: homeostatic physiology (per homeostatic axis; docs/emergent_behavior_design.md) ---
 
@@ -1382,6 +1513,9 @@ value = ""
 unit = "fraction_of_capacity_per_tick"
 source = "Part 20, Part 41; crates/sim/src/physiology.rs derive_base_drain; laws::basal_metabolic_rate, resting_heat_loss, metabolic_drain_fraction"
 category = "derivable"
+provenance = "derived"
+inputs = ["metabolism.kleiber_coefficient", "metabolism.body_mass_kg_scale"]
+derived_from = ["metabolism.kleiber_coefficient", "metabolism.body_mass_kg_scale"]
 
 [[reserved]]
 id = "physiology.exertion_drain_coupling"
@@ -1391,6 +1525,9 @@ value = ""
 unit = "fraction_of_capacity_per_tick_per_exertion"
 source = "Part 20, Part 35; crates/sim/src/physiology.rs derive_exertion_coupling; laws::power, metabolic_drain_fraction"
 category = "derivable"
+provenance = "derived"
+inputs = ["metabolism.kleiber_coefficient", "metabolism.body_mass_kg_scale"]
+derived_from = ["metabolism.kleiber_coefficient", "metabolism.body_mass_kg_scale"]
 
 [[reserved]]
 id = "physiology.death_floor"
@@ -1401,7 +1538,8 @@ set_by = "Nathan M. Fraske"
 set_date = "2026-07-03"
 unit = "fraction_of_capacity"
 source = "Part 20; crates/sim/src/homeostasis.rs"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 # --- R-BEHAVIOR-EVOLVE Stages 2 to 4: the evolved behaviour controller (Part 8; record 62.19;
 # docs/emergent_behavior_design.md) ---
@@ -1424,7 +1562,8 @@ set_by = "Nathan M. Fraske"
 set_date = "2026-07-01"
 unit = "hidden_units"
 source = "Part 8; crates/sim/src/controller.rs; docs/audit.md 6d"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 # --- base-level liveliness step 1: the founding thermotaxis reaction norm the dawn controller gene block
 # seeds (crates/sim/src/controller.rs taxis_move_weights, crates/sim/src/genome.rs
@@ -1442,7 +1581,8 @@ set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
 set_date = "2026-07-09"
 unit = "controller_weight"
 source = "base-level liveliness step 1 (docs/working/BASE_LIVELINESS_HANDOFF.md); crates/sim/src/controller.rs taxis_move_weights; crates/sim/examples/run_world.rs"
-category = "per_world"
+category = "defect"
+provenance = "authored"
 
 [[reserved]]
 id = "controller.taxis.heading_gain"
@@ -1453,7 +1593,8 @@ set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
 set_date = "2026-07-09"
 unit = "controller_weight"
 source = "base-level liveliness step 1 (docs/working/BASE_LIVELINESS_HANDOFF.md); crates/sim/src/controller.rs taxis_move_weights forage_taxis_weights; crates/sim/examples/run_world.rs"
-category = "per_world"
+category = "defect"
+provenance = "authored"
 
 [[reserved]]
 id = "controller.taxis.here_suppress"
@@ -1464,7 +1605,8 @@ set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
 set_date = "2026-07-09"
 unit = "controller_weight"
 source = "base-level liveliness step 3 (docs/working/BASE_LIVELINESS_HANDOFF.md); crates/sim/src/controller.rs forage_taxis_weights; crates/sim/examples/run_world.rs"
-category = "per_world"
+category = "defect"
+provenance = "authored"
 
 [[reserved]]
 id = "controller.taxis.ingest_drive"
@@ -1475,7 +1617,8 @@ set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
 set_date = "2026-07-09"
 unit = "controller_weight"
 source = "base-level liveliness step 3 (docs/working/BASE_LIVELINESS_HANDOFF.md); crates/sim/src/controller.rs forage_taxis_weights; crates/sim/examples/run_world.rs"
-category = "per_world"
+category = "defect"
+provenance = "authored"
 
 # behavior.controller_init_spread, controller_mutation_rate, and controller_mutation_step RETIRED
 # (controller-scaling derivation built, 2026-07-03; worksheet §13a): the three controller scalings no
@@ -1497,7 +1640,8 @@ status = "reserved"
 value = ""
 unit = "mutations_per_genome"
 source = "Part 8, Part 25; crates/sim/src/evolve.rs from_layout; worksheet §13a"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "behavior.controller_mutation_step_fraction"
@@ -1506,7 +1650,8 @@ status = "reserved"
 value = ""
 unit = "fraction_of_clamp_width"
 source = "Part 8; crates/sim/src/evolve.rs from_layout; worksheet §13a"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "behavior.selection_pop_size"
@@ -1517,7 +1662,8 @@ set_by = "Nathan M. Fraske"
 set_date = "2026-07-03"
 unit = "lineages"
 source = "Part 8, Part 54; crates/sim/src/evolve.rs"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "behavior.episode_ticks"
@@ -1528,7 +1674,8 @@ set_by = "Nathan M. Fraske"
 set_date = "2026-07-03"
 unit = "ticks"
 source = "Part 8, Part 54; crates/sim/src/evolve.rs"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 # RETIRED (units-arc bridge, derive-vs-author, Principle 6): `behavior.selection_generations` (the generations
 # behaviour adapts before the dawn) now DERIVES from `biosphere.predawn_generations`: its own basis declared
@@ -1548,6 +1695,7 @@ value = ""
 unit = "material_axes"
 source = "Part 35, Part 41; crates/sim/src/body.rs"
 category = "per_world"
+provenance = "measured"
 
 [[reserved]]
 id = "body.covering_fracture_energy"
@@ -1557,6 +1705,7 @@ value = ""
 unit = "fracture_energy_j_per_m2"
 source = "predation-integration #120; crates/sim/src/anatomy.rs BodyPlanRegistry coverings; crates/sim/src/runner.rs strike_occupant coarse branch; Part 35, Part 41"
 category = "per_world"
+provenance = "measured"
 
 [[reserved]]
 id = "body.covering_spectral_emissivity"
@@ -1566,6 +1715,7 @@ value = ""
 unit = "emissivity_ratio_per_band"
 source = "creature-selection step 2b #126; crates/sim/src/anatomy.rs BodyPlanRegistry coverings; crates/physics/data/chem_optics_floor.toml opt.emissivity.band_*; crates/sim/src/perceivable_feature.rs; Part 41"
 category = "per_world"
+provenance = "measured"
 
 [[reserved]]
 id = "body.damage_caps"
@@ -1574,7 +1724,8 @@ status = "reserved"
 value = ""
 unit = "floor_axis_maxima"
 source = "Part 35, Part 41; crates/sim/src/body.rs"
-category = "per_world"
+category = "defect"
+provenance = "authored"
 
 [[reserved]]
 id = "body.fracture_damage"
@@ -1585,7 +1736,8 @@ set_by = "Nathan M. Fraske"
 set_date = "2026-07-03"
 unit = "fraction_of_integrity"
 source = "Part 35; crates/sim/src/body.rs"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "body.function_loss_threshold"
@@ -1594,7 +1746,8 @@ status = "reserved"
 value = ""
 unit = "fraction_of_integrity"
 source = "Part 35, Part 33.3; record 62.13; crates/sim/src/body.rs; crates/sim/src/langmod.rs"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "body.burn_scale"
@@ -1603,7 +1756,8 @@ status = "reserved"
 value = ""
 unit = "temperature_rise"
 source = "Part 35, Part 41; crates/sim/src/body.rs"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "body.fluid_critical_fraction"
@@ -1613,6 +1767,7 @@ value = ""
 unit = "fraction_of_volume"
 source = "Part 35; crates/sim/src/body.rs"
 category = "per_world"
+provenance = "measured"
 
 [[reserved]]
 id = "body.clot_and_breach_rates"
@@ -1621,7 +1776,8 @@ status = "reserved"
 value = ""
 unit = "volume_fraction_per_tick"
 source = "Part 35; crates/sim/src/body.rs"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "body.promotion_shape"
@@ -1631,6 +1787,7 @@ value = ""
 unit = "body_shape"
 source = "Part 35, Part 20; crates/sim/src/body.rs"
 category = "per_world"
+provenance = "measured"
 
 [[reserved]]
 id = "body.strike_energetics"
@@ -1639,7 +1796,8 @@ status = "reserved"
 value = ""
 unit = "strike_inputs"
 source = "Part 35, Part 8; crates/sim/src/body.rs"
-category = "derivable"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "field.diffusion"
@@ -1649,6 +1807,9 @@ value = ""
 unit = "ratio_per_tick"
 source = "canonical runner field layer (crates/sim/src/runner.rs); crates/physics/src/laws.rs thermal_diffusivity; design Part 5.4/5.5; R-GPU-CANON-PIN diffusion stencil"
 category = "derivable"
+provenance = "derived"
+inputs = ["field.cell_size", "time.base_tick_seconds"]
+derived_from = ["medium.{conductivity,density,specific_heat}", "field.cell_size", "time.base_tick_seconds"]
 
 [[reserved]]
 id = "field.cell_size"
@@ -1659,7 +1820,8 @@ set_date = "2026-07-09"
 value = "0.01"
 unit = "metres_per_cell"
 source = "canonical runner field layer (crates/sim/src/runner.rs) derive_field_diffusion; design Part 5.4/5.5"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "field.diffusion.high"
@@ -1668,7 +1830,8 @@ status = "reserved"
 value = ""
 unit = "ratio_per_tick"
 source = "worksheet §3; Part 5.4-5.5 field / Part 20 physiology"
-category = "derivable"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "field.relaxation"
@@ -1679,7 +1842,8 @@ set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
 set_date = "2026-07-09"
 unit = "ratio_per_tick"
 source = "canonical runner field layer (crates/sim/src/runner.rs); design Part 5.4/5.5"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "climate.mean_surface_temperature"
@@ -1691,6 +1855,7 @@ set_date = "2026-07-09"
 unit = "kelvin"
 source = "Mirror climate calibration (temperature-units reconciliation); crates/sim/src/runner.rs Field::from_map_absolute; crates/sim/src/worldbuild.rs"
 category = "per_world"
+provenance = "measured"
 
 [[reserved]]
 id = "climate.latitude_temperature_range"
@@ -1702,6 +1867,7 @@ set_date = "2026-07-09"
 unit = "kelvin"
 source = "Mirror climate calibration (temperature-units reconciliation); crates/sim/src/runner.rs Field::from_map_absolute; crates/sim/src/worldbuild.rs"
 category = "per_world"
+provenance = "measured"
 
 [[reserved]]
 id = "field.relaxation.low"
@@ -1710,7 +1876,8 @@ status = "reserved"
 value = ""
 unit = "ratio_per_tick"
 source = "worksheet §3; Part 5.4-5.5 field / Part 20 physiology"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "field.body_exchange"
@@ -1721,7 +1888,8 @@ set_date = "2026-07-09"
 value = "0.1"
 unit = "ratio_per_tick"
 source = "canonical runner field layer (crates/sim/src/runner.rs); crates/sim/src/physiology.rs derive_body_exchange_rate; design Part 35 body arc; Part 41 fluids floor (law.convective_flux)"
-category = "derivable"
+category = "defect"
+provenance = "closure"
 
 # --- R-METABOLIZE: the owner anchors the derived resting metabolism and body-to-medium exchange need.
 # The anchors read by MetabolicAnchors::from_manifest are the Kleiber coefficient a and the normalized
@@ -1743,7 +1911,8 @@ set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
 set_date = "2026-07-09"
 unit = "watt_per_kg_three_quarter"
 source = "Part 20, Part 41; crates/sim/src/physiology.rs; laws::basal_metabolic_rate"
-category = "per_world"
+category = "derivable"
+provenance = "estimator"
 
 [[reserved]]
 id = "metabolism.body_mass_kg_scale"
@@ -1754,7 +1923,8 @@ set_by = "Owner Mirror sign-off 2026-07-09 (docs/working/MIRROR_SIGNOFF_DECISION
 set_date = "2026-07-09"
 unit = "kilograms_at_body_mass_one"
 source = "Part 25.14 body plan, R-UNITS-PIN; crates/sim/src/physiology.rs"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 # RETIRED (Arc 2, derive-vs-author): the metabolism now reads h from the being's medium (medium.{air,water}
 # convective_coefficient axis), read at the being's cell via MediumField::convective_at, rather than a
@@ -1774,7 +1944,8 @@ status = "set"
 value = "1"
 unit = "gas_transfer_coefficient"
 source = "Part 20, Part 35, Part 41 fluids/biology floor; R-MEDIUM; crates/sim/src/medium.rs respire, crates/sim/src/runner.rs EmbodiedPhysiology"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 set_by = "Owner Mirror sign-off 2026-07-09 (remainder delegated under the derive-gate; INTERIM, see note)"
 set_date = "2026-07-09"
 note = "INTERIM delegated value to let Mirror's embodied founders breathe under Calibrated. FLAGGED FOR THE OWNER: this is a per-membrane gas permeability (Fick k = D/L, the being's respiratory-membrane diffusivity over its thickness), a biology datum, not derivable from a deeper substrate; the real value is the owner's to set per the being's membrane (a permeable gill/lung exchanges faster than a thick integument). Set to the labelled unit interim (1) so the embodied boot runs; surfaced to the reviewer for the owner's real per-membrane value."
@@ -1788,7 +1959,8 @@ set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
 set_date = "2026-07-09"
 unit = "normalised_elevation"
 source = "R-MEDIUM (Part 62 medium substrate); owner ruling 2026-07-04 (docs/working/REAL_WORLD_UNIFICATION_HANDOFF.md §7); crates/sim/src/medium.rs MediumField::from_map, crates/sim/src/runner.rs medium_field_from_manifest; crates/world/src/terrain.rs biome elevation bands"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 # --- Scenario direction siblings (docs/working/TEST_WORLDS.md) ---
 #
@@ -1807,7 +1979,8 @@ status = "reserved"
 value = ""
 unit = "ratio_per_tick"
 source = "worksheet §3; Part 5.4-5.5 field / Part 20 physiology"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "physiology.thermal_setpoint"
@@ -1819,6 +1992,7 @@ set_date = "2026-07-09"
 unit = "kelvin"
 source = "worksheet §3b; Part 20 physiology"
 category = "per_world"
+provenance = "measured"
 
 [[reserved]]
 id = "physiology.thermal_setpoint.high"
@@ -1827,7 +2001,8 @@ status = "reserved"
 value = ""
 unit = "kelvin"
 source = "worksheet §3b; Part 20 physiology"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "physiology.thermal_setpoint.low"
@@ -1836,7 +2011,8 @@ status = "reserved"
 value = ""
 unit = "kelvin"
 source = "worksheet §3b; Part 20 physiology"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "physiology.thermal_half_band"
@@ -1847,7 +2023,8 @@ set_by = "Owner Mirror sign-off 2026-07-09 (docs/working/MIRROR_SIGNOFF_DECISION
 set_date = "2026-07-09"
 unit = "kelvin"
 source = "worksheet §3b; Part 20 physiology"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "physiology.thermal_half_band.high"
@@ -1856,7 +2033,8 @@ status = "reserved"
 value = ""
 unit = "kelvin"
 source = "worksheet §3b; Part 20 physiology"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "physiology.thermal_half_band.low"
@@ -1865,7 +2043,8 @@ status = "reserved"
 value = ""
 unit = "kelvin"
 source = "worksheet §3b; Part 20 physiology"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "medium.air"
@@ -1876,7 +2055,8 @@ set_date = "2026-07-09"
 value = "density=1.2,respirable_content=9,toxicity=0,in_medium_exchange_rate=0.05,conductivity=0.0262,specific_heat=1005,convective_coefficient=10"
 unit = "medium_profile"
 source = "worksheet §3c; R-MEDIUM (Part 62 medium substrate); crates/sim/src/medium.rs; field.diffusion derivation (crates/sim/src/runner.rs)"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "medium.water"
@@ -1887,7 +2067,8 @@ set_date = "2026-07-09"
 value = "density=1000,respirable_content=0.3,toxicity=0,in_medium_exchange_rate=0.20,conductivity=0.606,specific_heat=4186,convective_coefficient=10"
 unit = "medium_profile"
 source = "worksheet §3c; R-MEDIUM (Part 62 medium substrate); crates/sim/src/medium.rs; field.diffusion derivation (crates/sim/src/runner.rs)"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "medium.dense_toxic"
@@ -1896,7 +2077,8 @@ status = "reserved"
 value = ""
 unit = "medium_profile"
 source = "worksheet §3c; R-MEDIUM (Part 62 medium substrate); crates/sim/src/medium.rs; field.diffusion derivation (crates/sim/src/runner.rs)"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "genome.mutation_rates.high"
@@ -1907,7 +2089,8 @@ set_by = "Nathan M. Fraske"
 set_date = "2026-07-03"
 unit = "per_genome_per_generation"
 source = "Part 25 genome model; record 62.5; the high end per docs/working/TEST_WORLDS.md (Tempest, Arcanum)"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "genome.mutation_rates.low"
@@ -1916,7 +2099,8 @@ status = "reserved"
 value = ""
 unit = "per_genome_per_generation"
 source = "Part 25.7; the low end per docs/working/RESERVED_VALUES_WORKSHEET.md (Europa)"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "genome.point_mutation_rate.high"
@@ -1927,7 +2111,8 @@ set_by = "Nathan M. Fraske"
 set_date = "2026-07-02"
 unit = "probability"
 source = "Part 25.5; the high end per docs/working/TEST_WORLDS.md (Tempest, Arcanum)"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "genome.point_mutation_rate.low"
@@ -1936,7 +2121,8 @@ status = "reserved"
 value = ""
 unit = "probability"
 source = "Part 25.7; the low end per docs/working/RESERVED_VALUES_WORKSHEET.md (Europa)"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 # genome.mutation_step.high and genome.mutation_step.low RETIRED (2026-07-03, with their retired
 # baseline genome.mutation_step): the direction siblings of the superseded placeholder. Replaced by
@@ -1952,7 +2138,8 @@ status = "reserved"
 value = ""
 unit = "trait_units"
 source = "Part 25.5, 25.10; the high end per docs/working/TEST_WORLDS.md (Tempest, Arcanum)"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "genome.additive_mutation_step.low"
@@ -1961,7 +2148,8 @@ status = "reserved"
 value = ""
 unit = "trait_units"
 source = "Part 25.10; the low end per docs/working/RESERVED_VALUES_WORKSHEET.md (Europa)"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "genome.selection_scaling.high"
@@ -1972,7 +2160,8 @@ set_by = "Nathan M. Fraske"
 set_date = "2026-07-02"
 unit = "coefficient"
 source = "Part 25.7; the high end per docs/working/TEST_WORLDS.md (Tempest)"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "language.sound_change_rate.high"
@@ -1983,7 +2172,8 @@ set_by = "Nathan M. Fraske"
 set_date = "2026-07-03"
 unit = "probability"
 source = "Part 33.4 drift; record 62.12; the high end per docs/working/TEST_WORLDS.md (Tempest, Arcanum)"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "language.sound_change_rate.low"
@@ -1994,7 +2184,8 @@ set_by = "Nathan M. Fraske"
 set_date = "2026-07-03"
 unit = "probability"
 source = "Part 33 language system; record 62.7; the low end per docs/working/RESERVED_VALUES_WORKSHEET.md (Europa)"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "lang.drift_operator_rates.high"
@@ -2005,7 +2196,8 @@ set_by = "Nathan M. Fraske"
 set_date = "2026-07-03"
 unit = "per_generation"
 source = "Part 33 language system; record 62.7; the high end per docs/working/TEST_WORLDS.md (Tempest, Arcanum)"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "lang.drift_operator_rates.low"
@@ -2016,7 +2208,8 @@ set_by = "Nathan M. Fraske"
 set_date = "2026-07-03"
 unit = "per_generation"
 source = "Part 33 language system; the low end per docs/working/RESERVED_VALUES_WORKSHEET.md (Europa)"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "language.innovation_rate.high"
@@ -2027,7 +2220,8 @@ set_by = "Nathan M. Fraske"
 set_date = "2026-07-03"
 unit = "probability"
 source = "Part 33 procedural language; record 62.6; the high end per docs/working/TEST_WORLDS.md (Tempest, Arcanum)"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "language.innovation_rate.low"
@@ -2038,7 +2232,8 @@ set_by = "Nathan M. Fraske"
 set_date = "2026-07-03"
 unit = "probability"
 source = "Part 33 procedural language; record 62.6; the low end per docs/working/RESERVED_VALUES_WORKSHEET.md (Europa)"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "axiom.calcification_rate.high"
@@ -2049,7 +2244,8 @@ set_by = "Nathan M. Fraske"
 set_date = "2026-07-03"
 unit = "per_tick"
 source = "Part 28 axiom model; record 62.4; the high end per docs/working/TEST_WORLDS.md (Tempest, Arcanum)"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "axiom.calcification_cap"
@@ -2060,7 +2256,8 @@ set_by = "Nathan M. Fraske"
 set_date = "2026-07-03"
 unit = "fraction"
 source = "Part 28 axiom model; record 62.4"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "axiom.calcification_brittleness"
@@ -2069,7 +2266,8 @@ status = "reserved"
 value = ""
 unit = "rate"
 source = "Part 28 axiom model; record 62.4"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "axiom.conformity_prestige_strengths.high"
@@ -2080,7 +2278,8 @@ set_by = "Nathan M. Fraske"
 set_date = "2026-07-03"
 unit = "strength"
 source = "Part 28 axiom model; record 62.4; the high end per docs/working/TEST_WORLDS.md (Tempest, Arcanum)"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "axiom.fission_threshold"
@@ -2089,7 +2288,8 @@ status = "reserved"
 value = ""
 unit = "variance"
 source = "Part 28 axiom model; record 62.4"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "axiom.deviation_threshold"
@@ -2098,7 +2298,8 @@ status = "reserved"
 value = ""
 unit = "distance"
 source = "Part 28 axiom model; record 62.4"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "value_metric.conflict_coefficient.high"
@@ -2109,7 +2310,8 @@ set_by = "Nathan M. Fraske"
 set_date = "2026-07-03"
 unit = "coefficient"
 source = "Part 21 value-distance metric; record 62.3; the high end per docs/working/TEST_WORLDS.md (Tempest, Arcanum)"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "value_metric.conflict_coefficient.low"
@@ -2120,7 +2322,8 @@ set_by = "Nathan M. Fraske"
 set_date = "2026-07-03"
 unit = "coefficient"
 source = "Part 21 value-distance metric; record 62.3; the low end per docs/working/RESERVED_VALUES_WORKSHEET.md (Europa)"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "being.life_event_impulse.high"
@@ -2131,7 +2334,8 @@ set_by = "Nathan M. Fraske"
 set_date = "2026-07-03"
 unit = "axis_units"
 source = "Part 20 being model; record 62.2; the high end per docs/working/TEST_WORLDS.md (Tempest, Arcanum)"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "biosphere.predawn_generations.high"
@@ -2142,7 +2346,8 @@ set_by = "Nathan M. Fraske"
 set_date = "2026-07-03"
 unit = "generations"
 source = "Part 25.7; biosphere candidate; the high end per docs/working/TEST_WORLDS.md (Tempest)"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "genome.effective_population_size.low"
@@ -2153,7 +2358,8 @@ set_by = "Nathan M. Fraske"
 set_date = "2026-07-02"
 unit = "individuals"
 source = "Part 25.7-25.8; biosphere candidate; the low end per docs/working/TEST_WORLDS.md (Tempest); dials the pre-dawn founder seed (the canonical Ne now derives from the census, R-REPRO census tier, crates/sim/src/census.rs)"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "genome.speciation_distance.low"
@@ -2164,7 +2370,8 @@ set_by = "Nathan M. Fraske"
 set_date = "2026-07-02"
 unit = "distance"
 source = "Part 25.7; biosphere candidate; the low end per docs/working/TEST_WORLDS.md (Tempest)"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "genome.speciation_incompatibilities.low"
@@ -2175,7 +2382,8 @@ set_by = "Nathan M. Fraske"
 set_date = "2026-07-03"
 unit = "count"
 source = "Part 25.7; the low end per docs/working/TEST_WORLDS.md (Tempest)"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 # --- base-level liveliness step 2: the environmental field stack (hydrology and primary productivity;
 # docs/working/BASE_LIVELINESS_HANDOFF.md; crates/sim/src/environ.rs). Every forcing constant is
@@ -2205,7 +2413,8 @@ set_date = "2026-07-09"
 value = "0.0001048"
 unit = "mpa_per_temperature"
 source = "base-level liveliness step 2 (Part 15, Part 18); crates/sim/src/environ.rs; laws::saturation_vapor_pressure"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 # RETIRED (Arc 2, derive-vs-author, Principle 6): `hydrology.saturation_t_ref` (the reference temperature
 # the saturation affine tangent is taken at, "the midpoint of the world's habitable temperature band")
@@ -2223,7 +2432,8 @@ set_date = "2026-07-09"
 value = "0.001596"
 unit = "mpa"
 source = "base-level liveliness step 2; crates/sim/src/environ.rs; laws::saturation_vapor_pressure"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "hydrology.vapor_source_temperature"
@@ -2231,7 +2441,8 @@ basis = "the world's warm vapour-source temperature T_source (Kelvin): the warme
 status = "reserved"
 unit = "kelvin"
 source = "climate.mean_surface_temperature + climate.latitude_temperature_range/2, the equatorial cell of crates/sim/src/runner.rs Field::from_map_absolute; crates/sim/src/environ.rs derive_saturation_index_tangent"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "hydrology.saturation_cap"
@@ -2242,7 +2453,8 @@ set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
 set_date = "2026-07-09"
 unit = "mpa"
 source = "base-level liveliness step 2; crates/sim/src/environ.rs; laws::saturation_vapor_pressure"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "hydrology.precipitation_rate"
@@ -2253,7 +2465,8 @@ set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
 set_date = "2026-07-09"
 unit = "ratio_per_tick"
 source = "base-level liveliness step 2; crates/sim/src/environ.rs"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "hydrology.evaporation_still"
@@ -2264,7 +2477,8 @@ set_date = "2026-07-09"
 value = "0.1"
 unit = "evaporation_coefficient"
 source = "base-level liveliness step 2; crates/sim/src/environ.rs; laws::evaporation_rate"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "hydrology.evaporation_wind"
@@ -2275,7 +2489,8 @@ set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
 set_date = "2026-07-09"
 unit = "evaporation_coefficient"
 source = "base-level liveliness step 2 (wind in step 4); crates/sim/src/environ.rs; laws::evaporation_rate"
-category = "per_world"
+category = "defect"
+provenance = "authored"
 
 [[reserved]]
 id = "hydrology.evaporation_cap"
@@ -2286,7 +2501,8 @@ set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
 set_date = "2026-07-09"
 unit = "evaporation_flux"
 source = "base-level liveliness step 2; crates/sim/src/environ.rs; laws::evaporation_rate"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "hydrology.routing_rate"
@@ -2297,7 +2513,8 @@ set_date = "2026-07-09"
 value = "0.25"
 unit = "ratio_per_tick"
 source = "base-level liveliness step 2; crates/sim/src/environ.rs"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "productivity.water_requirement"
@@ -2308,7 +2525,8 @@ set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
 set_date = "2026-07-09"
 unit = "water_depth"
 source = "base-level liveliness step 2 productivity; crates/sim/src/environ.rs; laws::net_nutrition"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "productivity.light_requirement"
@@ -2319,7 +2537,8 @@ set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
 set_date = "2026-07-09"
 unit = "light"
 source = "base-level liveliness step 2 productivity; crates/sim/src/environ.rs; laws::net_nutrition"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "productivity.temperature_requirement"
@@ -2330,7 +2549,8 @@ set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
 set_date = "2026-07-09"
 unit = "temperature"
 source = "base-level liveliness step 2 productivity; crates/sim/src/environ.rs; laws::net_nutrition"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "productivity.soil_requirement"
@@ -2341,7 +2561,8 @@ set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
 set_date = "2026-07-09"
 unit = "soil_nutrient"
 source = "base-level liveliness step 2 productivity (soil field in step 4); crates/sim/src/environ.rs; laws::net_nutrition"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 # RETIRED (units-arc bridge, derive-vs-author, Principle 6): `productivity.soil_baseline` (the uniform soil
 # supply every cell carries at baseline, before the matter-cycle fertility field differentiates) now DERIVES
@@ -2359,7 +2580,8 @@ set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
 set_date = "2026-07-09"
 unit = "water_depth"
 source = "base-level liveliness step 2 hydrology; crates/sim/src/environ.rs"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 # --- base-level liveliness step 3: the living resource loop (the standing food stock a grazer depletes
 # and the environment regrows toward the step-2 productivity capacity). The regrowth constants are read
@@ -2378,7 +2600,8 @@ set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
 set_date = "2026-07-09"
 unit = "ratio_per_tick"
 source = "base-level liveliness step 3; crates/sim/src/environ.rs; crates/sim/src/stocks.rs"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "productivity.colonization"
@@ -2389,7 +2612,8 @@ set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
 set_date = "2026-07-09"
 unit = "producer_biomass"
 source = "base-level liveliness step 3; crates/sim/src/environ.rs"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 # --- base-level liveliness step 4: the salinity field (a per-cell salt mass advected downhill with the
 # water routing and weathered into every cell, capped, whose concentration is the bio.salinity toxin dose
@@ -2410,7 +2634,8 @@ set_date = "2026-07-09"
 value = "0.002"
 unit = "salt_mass_per_tick"
 source = "base-level liveliness step 4; crates/sim/src/environ.rs"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "salinity.salt_cap"
@@ -2421,7 +2646,8 @@ set_date = "2026-07-09"
 value = "2"
 unit = "salt_mass"
 source = "base-level liveliness step 4; crates/sim/src/environ.rs"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "salinity.dose_scale"
@@ -2432,7 +2658,8 @@ set_date = "2026-07-09"
 value = "1"
 unit = "dose_per_concentration"
 source = "base-level liveliness step 4; crates/sim/src/environ.rs; civsim_physics::laws::harm_class"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "salinity.reference_water"
@@ -2443,7 +2670,8 @@ set_date = "2026-07-09"
 value = "1"
 unit = "water_depth"
 source = "base-level liveliness step 4; crates/sim/src/environ.rs"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 # --- base-level liveliness step 5: the belief-diffusion movers armed in build_dawn_runner
 # (crates/sim/src/worldbuild.rs), fail-loud from the manifest. Enculturation drifts each band's intrinsic
@@ -2460,7 +2688,8 @@ set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
 set_date = "2026-07-09"
 unit = "ratio"
 source = "base-level liveliness step 5; crates/sim/src/worldbuild.rs; crates/sim/src/world.rs enculturate"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "belief.diffusion_rate"
@@ -2471,7 +2700,8 @@ set_date = "2026-07-09"
 value = "0.4"
 unit = "ratio_per_tick"
 source = "base-level liveliness step 5; crates/sim/src/worldbuild.rs; crates/sim/src/world.rs diffuse_beliefs"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 # --- base-level liveliness §4 and step 5: the surfacing-policy magnitudes read fail-loud by
 # LivelinessCalib::from_manifest (crates/sim/src/runner.rs) and armed in build_dawn_runner. Two hooks gate
@@ -2490,7 +2720,8 @@ set_date = "2026-07-09"
 value = "0.01"
 unit = "ratio_per_tick"
 source = "harm-learning slice b; crates/sim/src/learn.rs; crates/sim/src/homeostasis.rs"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "harm.feature_granularity"
@@ -2501,7 +2732,8 @@ set_date = "2026-07-09"
 value = "1"
 unit = "dose"
 source = "harm-learning slice b; crates/sim/src/learn.rs; crates/sim/src/percept.rs; crates/sim/src/sensorium.rs"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "harm.p_harm_given_harms"
@@ -2512,7 +2744,8 @@ set_date = "2026-07-09"
 value = "0.9"
 unit = "probability"
 source = "harm-learning slice b; crates/sim/src/learn.rs; crates/sim/src/evidence.rs; crates/sim/src/trace.rs"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "harm.p_harm_given_benign"
@@ -2523,7 +2756,8 @@ set_date = "2026-07-09"
 value = "0.1"
 unit = "probability"
 source = "harm-learning slice b; crates/sim/src/learn.rs; crates/sim/src/evidence.rs; crates/sim/src/trace.rs"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 # --- ideation / experiential-discovery arc, piece 1 (the appetitive reward learner): the sign complement
 # of the harm-learning constants above, read fail-loud by RewardLearningCalib::from_manifest
@@ -2539,7 +2773,8 @@ status = "reserved"
 value = ""
 unit = "ratio_per_tick"
 source = "ideation arc piece 1 slice 1a; crates/sim/src/learn.rs; crates/sim/src/homeostasis.rs"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "reward.feature_granularity"
@@ -2548,7 +2783,8 @@ status = "reserved"
 value = ""
 unit = "dose"
 source = "ideation arc piece 1 slice 1a; crates/sim/src/learn.rs; crates/sim/src/percept.rs"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "discovery.target_value_granularity"
@@ -2557,7 +2793,8 @@ status = "reserved"
 value = ""
 unit = "dose"
 source = "social-learning arc piece 3 material granularity; crates/sim/src/discovery.rs; crates/sim/src/runner.rs"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "reward.p_reward_given_rewards"
@@ -2566,7 +2803,8 @@ status = "reserved"
 value = ""
 unit = "probability"
 source = "ideation arc piece 1 slice 1a; crates/sim/src/learn.rs; crates/sim/src/evidence.rs"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "reward.p_reward_given_neutral"
@@ -2575,7 +2813,8 @@ status = "reserved"
 value = ""
 unit = "probability"
 source = "ideation arc piece 1 slice 1a; crates/sim/src/learn.rs; crates/sim/src/evidence.rs"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "reward.eligibility_decay"
@@ -2584,7 +2823,8 @@ status = "reserved"
 value = ""
 unit = "ratio_per_tick"
 source = "ideation arc piece 1 slice 1b; crates/sim/src/learn.rs; crates/sim/src/homeostasis.rs"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "harm.eligibility_decay"
@@ -2593,7 +2833,8 @@ status = "reserved"
 value = ""
 unit = "ratio_per_tick"
 source = "being-percept keystone step 6; crates/sim/src/learn.rs"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "being_percept.emission_coefficient"
@@ -2602,7 +2843,8 @@ status = "reserved"
 value = ""
 unit = "dimensionless"
 source = "being-percept keystone step 6; crates/sim/src/physiology.rs; crates/sim/src/learn.rs"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 # --- ideation / experiential-discovery arc, piece 2 (action-as-hypothesis): the affordance-percept
 # derivations read fail-loud references, read by AffordancePerceptRefs (crates/sim/src/affordance_percept.rs)
@@ -2619,7 +2861,8 @@ status = "reserved"
 value = ""
 unit = "MPa"
 source = "ideation arc piece 2 slice 2a; crates/sim/src/affordance_percept.rs; crates/sim/src/material.rs"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "discovery.exploration_floor"
@@ -2628,7 +2871,8 @@ status = "reserved"
 value = ""
 unit = "weight_ratio"
 source = "ideation arc piece 2 slice 2b; crates/sim/src/discovery.rs; crates/core/src/keys.rs"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 # --- ideation / experiential-discovery arc, piece 3, slice 3b (surprise-modulated exploration): the
 # being's forward-model prediction error (surprise) LIFTS its heritable exploration propensity
@@ -2643,6 +2887,9 @@ value = ""
 unit = "reward_scale"
 source = "ideation arc piece 3 slice 3b; crates/sim/src/discovery.rs; crates/sim/src/runner.rs"
 category = "derivable"
+provenance = "derived"
+inputs = ["reward.noise_floor"]
+derived_from = ["reward.noise_floor"]
 
 [[reserved]]
 id = "discovery.surprise_gain"
@@ -2651,7 +2898,8 @@ status = "reserved"
 value = ""
 unit = "lift_ratio"
 source = "ideation arc piece 3 slice 3b; crates/sim/src/discovery.rs; crates/sim/src/runner.rs"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 # --- ideation / experiential-discovery arc, piece 4, slice 4a (the belief-graph planner): a being ranks
 # what it believes pays off toward a goal, bounded by a cognition budget. Read by planning::plan_toward
@@ -2664,7 +2912,8 @@ status = "reserved"
 value = ""
 unit = "count"
 source = "ideation arc piece 4 slice 4a; crates/sim/src/planning.rs"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 # --- relational-belief substrate (arc 2, the multi-hop planner): a being chains relational beliefs
 # ("A yields X", "A causes B") backward from a goal, bounded by a chain-length budget. Read by
@@ -2678,7 +2927,8 @@ status = "reserved"
 value = ""
 unit = "count"
 source = "relational-belief substrate arc 2; crates/sim/src/planning.rs"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 # --- experiential-conviction substrate (OWNER_DECISIONS_LOG R2/R4/R5/R6): the felt-conviction learner's
 # fail-loud manifest read (R6b), threaded onto the canonical build path (Arc 1 gap b). The mechanism is fixed
@@ -2692,7 +2942,8 @@ status = "reserved"
 value = ""
 unit = "ratio_per_tick"
 source = "OWNER_DECISIONS_LOG R4/R6b; crates/sim/src/conviction_experience.rs"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "felt_conviction.move_threshold"
@@ -2701,7 +2952,8 @@ status = "reserved"
 value = ""
 unit = "stance_scale"
 source = "OWNER_DECISIONS_LOG R5/R6a; crates/sim/src/conviction_experience.rs; axiom.entrenchment_curve"
-category = "derivable"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "felt_conviction.move_plasticity"
@@ -2710,7 +2962,8 @@ status = "reserved"
 value = ""
 unit = "ratio"
 source = "OWNER_DECISIONS_LOG R5; crates/sim/src/conviction_experience.rs; crates/sim/src/axiom.rs"
-category = "derivable"
+category = "defect"
+provenance = "closure"
 
 # --- ideation / experiential-discovery arc, piece 4, slice 4b (the deliberation-enactment gate,
 # Walker::deliberation, the DELIBERATE-phase draw): NO NEW reserved scalar, on the same grounding as 2c-2.
@@ -2744,7 +2997,8 @@ set_date = "2026-07-09"
 value = "0.5"
 unit = "reserve_level"
 source = "base-level liveliness §4; crates/sim/src/runner.rs"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "promotion.budget"
@@ -2755,7 +3009,8 @@ set_date = "2026-07-09"
 value = "64"
 unit = "count"
 source = "base-level liveliness §4; crates/sim/src/runner.rs"
-category = "per_world"
+category = "defect"
+provenance = "closure"
 
 [[reserved]]
 id = "body.tissue_turnover_rate"
@@ -2765,6 +3020,7 @@ value = ""
 unit = "material_axes"
 source = "Part 35, Part 41; crates/sim/src/morphogen.rs accrue_aging; crates/sim/src/insult.rs repair_energy"
 category = "per_world"
+provenance = "measured"
 
 [[reserved]]
 id = "aging.wear_energy_ceiling"
@@ -2773,4 +3029,5 @@ status = "reserved"
 value = ""
 unit = "energy_ceiling"
 source = "Part 35, Part 41; crates/sim/src/runner.rs; crates/physics/src/laws.rs wear_energy"
-category = "per_world"
+category = "defect"
+provenance = "authored"

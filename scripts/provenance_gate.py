@@ -21,9 +21,15 @@ of the seven provenance tags, so the register can never silently drift back to e
 made it mandatory: a designed-but-optional ledger stayed 0-of-228 tagged).
 
 The seven tags: derived, measured, estimator, closure, authored, written_state, contingency. This gate
-checks the STRUCTURAL invariant (every entry carries one of the seven, and a derived value declares its
+checks the STRUCTURAL invariant (every entry carries one of the seven, and only a derived value declares
 DAG edges); the Rust test carries the semantic invariant (the acyclic DAG, the worst-case join, and the
 category-provenance consistency), because those need the loader. Two gates, one register.
+
+A derived value declares the MANIFEST-value edges it derives from where it has them, and may legitimately
+declare NONE when it derives from code-level substrate quantities or floor constants that are not
+themselves reserved-manifest values (its actual derivation is recorded in its basis; the manifest DAG
+traces only manifest-value ancestry). So the gate does NOT require a derived value to carry inputs; it
+requires only that a NON-derived value carry none (a leaf has no DAG edges).
 
 The honesty number (the count of closure-plus-authored on the authoring surface, after DAG reachability)
 is reported by the Rust `authoring_surface` query, not here; this gate only proves the register is full.
@@ -70,9 +76,6 @@ def check(text):
         for e in entries
         if e["provenance"] != "" and e["provenance"] not in SEVEN_TAGS
     ]
-    derived_no_inputs = [
-        e["id"] for e in entries if e["provenance"] == "derived" and not e["has_inputs"]
-    ]
     non_derived_with_inputs = [
         e["id"]
         for e in entries
@@ -80,12 +83,12 @@ def check(text):
         and e["provenance"] != "derived"
         and e["has_inputs"]
     ]
-    return entries, untagged, unknown, derived_no_inputs, non_derived_with_inputs
+    return entries, untagged, unknown, non_derived_with_inputs
 
 
 def main():
     text = MANIFEST.read_text()
-    entries, untagged, unknown, derived_no_inputs, non_derived_with_inputs = check(text)
+    entries, untagged, unknown, non_derived_with_inputs = check(text)
     ok = True
     if untagged:
         ok = False
@@ -97,11 +100,6 @@ def main():
         print("provenance gate: unknown provenance tag(s) (not one of the seven):")
         for i, p in unknown:
             print(f"  - {i}: '{p}'")
-    if derived_no_inputs:
-        ok = False
-        print("provenance gate: derived value(s) with no `inputs` DAG edges:")
-        for i in derived_no_inputs:
-            print(f"  - {i}")
     if non_derived_with_inputs:
         ok = False
         print("provenance gate: non-derived value(s) that declare `inputs` (only derived has DAG edges):")
@@ -118,11 +116,19 @@ def main():
 def self_test():
     """Prove a synthetic untagged entry is caught."""
     bad = '\n[[reserved]]\nid = "sample.untagged"\nbasis = "b"\nstatus = "reserved"\nsource = "s"\n'
-    _, untagged, _, _, _ = check(bad)
+    _, untagged, _, _ = check(bad)
     assert untagged == ["sample.untagged"], f"self-test failed: {untagged}"
     good = '\n[[reserved]]\nid = "sample.tagged"\nbasis = "b"\nstatus = "reserved"\nsource = "s"\nprovenance = "closure"\n'
-    _, untagged, unknown, _, _ = check(good)
+    _, untagged, unknown, non_der = check(good)
     assert untagged == [] and unknown == [], f"self-test failed: {untagged} {unknown}"
+    # A derived value with no manifest inputs is accepted (it derives from code-level substrate quantities).
+    der0 = '\n[[reserved]]\nid = "sample.derived"\nbasis = "b"\nstatus = "reserved"\nsource = "s"\nprovenance = "derived"\n'
+    _, untagged, unknown, non_der = check(der0)
+    assert untagged == [] and unknown == [] and non_der == [], f"self-test failed: {untagged} {unknown} {non_der}"
+    # A non-derived value that declares inputs is caught (a leaf has no DAG edges).
+    leaf_edges = '\n[[reserved]]\nid = "sample.leaf"\nbasis = "b"\nstatus = "reserved"\nsource = "s"\nprovenance = "measured"\ninputs = ["x"]\n'
+    _, _, _, non_der = check(leaf_edges)
+    assert non_der == ["sample.leaf"], f"self-test failed: {non_der}"
     print("provenance gate self-test: passed")
     return 0
 

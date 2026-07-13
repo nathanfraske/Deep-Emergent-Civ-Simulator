@@ -72,13 +72,26 @@ pub struct ReservedValue {
     /// loud.
     #[serde(default)]
     pub provenance: String,
-    /// For a `derived` value, the ids it derives FROM: the provenance-DAG edges. A derived value's
-    /// EFFECTIVE provenance is the worst-case join over these transitive inputs (it is only as pinned as
-    /// its least-pinned input, and closure-tainted the moment its DAG touches a closure), so authorship
-    /// hides not in the lines tagged `closure` but in the `derived` lines whose ancestry passes through
-    /// one. A non-derived value declares none.
+    /// For a `derived` value, the MANIFEST-VALUE ids it derives from: the machine-verifiable provenance-DAG
+    /// edges. A derived value's EFFECTIVE provenance is the worst-case join over these transitive inputs (it
+    /// is only as pinned as its least-pinned input, and closure-tainted the moment its DAG touches a
+    /// closure), so authorship hides not in the lines tagged `closure` but in the `derived` lines whose
+    /// ancestry passes through one. Every id here must resolve to a manifest entry, and only a `derived`
+    /// value declares any (a leaf has no DAG edges). This is a SUBSET of `derived_from`: the sources that are
+    /// themselves reserved values and so can be joined; the code-level sources live in `derived_from` alone.
     #[serde(default)]
     pub inputs: Vec<String>,
+    /// For a `derived` value, the FULL named source list it computes from, a superset of `inputs`. A
+    /// derivation names its inputs by definition, so this is MANDATORY and non-empty for a `derived` value
+    /// and empty for every other tag. Where a source is another reserved value it also appears in `inputs`
+    /// (a joinable DAG edge); where a source is a code-level substrate law or a floor quantity that is not a
+    /// reserved value (`semantics::concept_thresholds`, the perceptual JND, a `law::` constant), it is
+    /// recorded here alone: the manifest DAG traces only manifest-value ancestry, so a code-level source is
+    /// named and disclosed here rather than silently dropped. The honest limit this makes explicit: a
+    /// code-level source that is itself a free knob cannot be joined, so an auditor reads `derived_from` to
+    /// check the un-joinable edges by hand.
+    #[serde(default)]
+    pub derived_from: Vec<String>,
 }
 
 /// The three-way-test category of a reserved value (AGENTIC_ADDENDUM section 9, the fundamental-constants
@@ -413,29 +426,50 @@ impl CalibrationManifest {
     }
 
     /// The provenance gate, sibling to [`Self::validate_categories`]: parse every entry's provenance and
-    /// check the DAG is well-formed. A `derived` value must declare at least one input (else it is not
-    /// derived); a non-derived value must declare none (a leaf has no DAG edges); every input must name an
-    /// id the manifest carries; and the DAG must be acyclic (a cycle has no well-defined worst-case join).
-    /// Fails loud on the first structural defect. Returns the ids still UNCLASSIFIED (the migration
-    /// remainder), like `validate_categories`; an empty return means every entry declares a provenance.
-    /// ADDITIVE: an absent field is Unclassified and never errors.
+    /// check the DAG is well-formed. A derivation names its inputs by definition, so a `derived` value MUST
+    /// declare a non-empty `derived_from` (its full named source list); a value that computes from nothing is
+    /// not a derivation. Those sources split two ways: the ones that are themselves reserved values are the
+    /// machine-verifiable DAG edges in `inputs` (every one must resolve to a manifest id, and `inputs` is a
+    /// subset of `derived_from`), joined for the worst-case effective provenance; the code-level substrate
+    /// laws and floor quantities that are not reserved values live in `derived_from` alone (named and
+    /// disclosed, un-joinable, the honest limit that the manifest DAG traces only manifest-value ancestry). A
+    /// NON-derived value is a leaf: it declares no `inputs` and no `derived_from`. The DAG must be acyclic (a
+    /// cycle has no well-defined worst-case join). Fails loud on the first structural defect. Returns the ids
+    /// still UNCLASSIFIED (the migration remainder), like `validate_categories`; an empty return means every
+    /// entry declares a provenance. ADDITIVE: an absent field is Unclassified and never errors.
     pub fn validate_provenance(&self) -> Result<Vec<&str>, CalibrationError> {
         let mut unclassified = Vec::new();
         for id in &self.order {
             let v = &self.values[id];
             let p = v.provenance()?;
             if p == Provenance::Derived {
-                if v.inputs.is_empty() {
+                if v.derived_from.is_empty() {
                     return Err(CalibrationError::BadValue {
                         id: id.clone(),
-                        detail: "a derived value must declare at least one input (the provenance-DAG edges it derives from)".to_string(),
+                        detail: "a derived value must declare a non-empty derived_from (a derivation names its inputs); a value that computes from nothing is not derived".to_string(),
                     });
                 }
-            } else if !v.inputs.is_empty() {
-                return Err(CalibrationError::BadValue {
-                    id: id.clone(),
-                    detail: format!("a {p:?} value declares inputs, but only a derived value has provenance-DAG edges"),
-                });
+                for input in &v.inputs {
+                    if !v.derived_from.contains(input) {
+                        return Err(CalibrationError::BadValue {
+                            id: id.clone(),
+                            detail: format!("DAG edge '{input}' is in inputs but not in derived_from (inputs must be a subset of the declared sources)"),
+                        });
+                    }
+                }
+            } else {
+                if !v.inputs.is_empty() {
+                    return Err(CalibrationError::BadValue {
+                        id: id.clone(),
+                        detail: format!("a {p:?} value declares inputs, but only a derived value has provenance-DAG edges"),
+                    });
+                }
+                if !v.derived_from.is_empty() {
+                    return Err(CalibrationError::BadValue {
+                        id: id.clone(),
+                        detail: format!("a {p:?} value declares derived_from, but only a derived value derives from sources"),
+                    });
+                }
             }
             for input in &v.inputs {
                 if !self.values.contains_key(input) {
@@ -1133,22 +1167,37 @@ source = "s"
         );
     }
 
-    // A `[[reserved]]` TOML block for a provenance-DAG entry: id, its provenance tag, and (for a derived
-    // value) its input edges. The other fields are filler so the entry parses.
-    fn prov_entry(id: &str, provenance: &str, inputs: &[&str]) -> String {
-        let inputs_toml = if inputs.is_empty() {
-            String::new()
-        } else {
-            let list = inputs
-                .iter()
-                .map(|i| format!("\"{i}\""))
-                .collect::<Vec<_>>()
-                .join(", ");
-            format!("inputs = [{list}]\n")
-        };
+    // A TOML list literal `field = ["a", "b"]`, or the empty string when the list is empty (so an absent
+    // field reads as the serde default).
+    fn toml_list(field: &str, items: &[&str]) -> String {
+        if items.is_empty() {
+            return String::new();
+        }
+        let list = items
+            .iter()
+            .map(|i| format!("\"{i}\""))
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!("{field} = [{list}]\n")
+    }
+
+    // A `[[reserved]]` TOML block for a provenance-DAG entry with FULL control of both edge lists: id, its
+    // provenance tag, its manifest-resolvable `inputs` edges, and its full `derived_from` source list. The
+    // other fields are filler so the entry parses.
+    fn prov_entry_df(id: &str, provenance: &str, inputs: &[&str], derived_from: &[&str]) -> String {
         format!(
-            "[[reserved]]\nid = \"{id}\"\nbasis = \"b\"\nstatus = \"set\"\nvalue = \"1\"\nunit = \"u\"\nset_by = \"o\"\nset_date = \"d\"\nsource = \"s\"\nprovenance = \"{provenance}\"\n{inputs_toml}"
+            "[[reserved]]\nid = \"{id}\"\nbasis = \"b\"\nstatus = \"set\"\nvalue = \"1\"\nunit = \"u\"\nset_by = \"o\"\nset_date = \"d\"\nsource = \"s\"\nprovenance = \"{provenance}\"\n{}{}",
+            toml_list("inputs", inputs),
+            toml_list("derived_from", derived_from),
         )
+    }
+
+    // The common case: a derived value derives from exactly its manifest edges (inputs == derived_from), and
+    // a non-derived leaf declares whatever `inputs` the test wants to exercise (with no derived_from, so the
+    // non-derived-with-inputs rejection still fires when the test passes a non-empty list).
+    fn prov_entry(id: &str, provenance: &str, inputs: &[&str]) -> String {
+        let derived_from: &[&str] = if provenance == "derived" { inputs } else { &[] };
+        prov_entry_df(id, provenance, inputs, derived_from)
     }
 
     #[test]
@@ -1196,8 +1245,37 @@ source = "s"
 
     #[test]
     fn provenance_validation_catches_malformed_dags() {
-        // A derived value with no inputs is not derived.
-        let m = CalibrationManifest::from_toml_str(&prov_entry("x", "derived", &[])).unwrap();
+        // A derivation names its inputs by definition: a derived value with an EMPTY derived_from is rejected
+        // (a value that computes from nothing is not a derivation, the laundering hole a bare [D] would open).
+        let m =
+            CalibrationManifest::from_toml_str(&prov_entry_df("x", "derived", &[], &[])).unwrap();
+        assert!(matches!(
+            m.validate_provenance().unwrap_err(),
+            CalibrationError::BadValue { .. }
+        ));
+        // A derived value with NO manifest inputs but a non-empty derived_from is allowed: its sources are
+        // code-level substrate laws that are not reserved values, so they are named and disclosed in
+        // derived_from but cannot be joined. Its effective provenance is its own Derived tag (nothing to join
+        // it down). This is the honest limit: the manifest DAG traces only manifest-value ancestry.
+        let m = CalibrationManifest::from_toml_str(&prov_entry_df(
+            "x",
+            "derived",
+            &[],
+            &["semantics::concept_thresholds"],
+        ))
+        .unwrap();
+        assert_eq!(m.validate_provenance().unwrap(), Vec::<&str>::new());
+        assert_eq!(m.effective_provenance("x").unwrap(), Provenance::Derived);
+        // A derived value whose inputs are not a subset of derived_from is rejected (a DAG edge that is not a
+        // declared source).
+        let m = CalibrationManifest::from_toml_str(
+            &[
+                prov_entry("a", "measured", &[]),
+                prov_entry_df("b", "derived", &["a"], &["some_code_source"]),
+            ]
+            .concat(),
+        )
+        .unwrap();
         assert!(matches!(
             m.validate_provenance().unwrap_err(),
             CalibrationError::BadValue { .. }
@@ -1211,6 +1289,13 @@ source = "s"
             .concat(),
         )
         .unwrap();
+        assert!(matches!(
+            m.validate_provenance().unwrap_err(),
+            CalibrationError::BadValue { .. }
+        ));
+        // A non-derived value declaring derived_from (only a derived value derives from sources).
+        let m = CalibrationManifest::from_toml_str(&prov_entry_df("c", "measured", &[], &["x"]))
+            .unwrap();
         assert!(matches!(
             m.validate_provenance().unwrap_err(),
             CalibrationError::BadValue { .. }
