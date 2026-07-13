@@ -282,7 +282,13 @@ where
             second = i;
         }
     }
-    let delta = energies[second] - energies[best];
+    // The winner-to-runner-up gap. `checked_sub` keeps this `pub` kernel total: for any realistic energy pair
+    // it is the exact difference, and on the (in-practice unreachable) overflow of two energies spanning the full
+    // Q32.32 range it saturates to `MAX`, which decides (maximally-separated candidates are decidable), never a
+    // panic on an in-contract input.
+    let delta = energies[second]
+        .checked_sub(energies[best])
+        .unwrap_or(Fixed::MAX);
     if delta >= resolution_s {
         Verdict::Decided(Decided {
             winner: ordered[best].clone(),

@@ -142,9 +142,12 @@ impl<'a> ThermochemicalDisposer<'a> {
                 } else {
                     min_energy
                 };
+                // On the (in-practice unreachable) overflow of the band multiply, escalate rather than
+                // collapse: a maximal resolution makes every pair fall inside the band, so the set escalates
+                // (the conservative direction), never a silent Gap-Law collapse into always-Decided.
                 self.band_fraction
                     .checked_mul(magnitude)
-                    .unwrap_or(Fixed::ZERO)
+                    .unwrap_or(Fixed::MAX)
             }
             None => Fixed::ZERO,
         };

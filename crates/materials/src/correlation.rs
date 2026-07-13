@@ -47,6 +47,19 @@
 //! corundum V2O3) has a different structure factor and should escalate (or carry its own class calibration),
 //! never be routed by this rock-salt-fit threshold. D2b's scope is the rock-salt divalent monoxides; other
 //! structures and higher charges escalate as out of scope.
+//!
+//! HONEST LIMIT (the scope is NOT fully code-enforced, audit findings, named follow-ons). Two Terran-scope
+//! encodings the classifier does not yet read from data: (a) the interionic distance is read at a hardcoded
+//! octahedral coordination (`OCTAHEDRAL = 6`, the rock-salt cation coordination that also lives as data in
+//! `prototypes.toml`), while `identify_correlated_pair` admits ANY binary d-block-cation oxide, so a non-rock-salt
+//! 1:1 correlated oxide is scored at coordination 6 (a wrong `d`, hence a wrong `rho`) rather than escalating as
+//! the note above promises; enforcing that escalation needs the substance's own structure datum (read the
+//! coordination from the structure floor + escalate a non-rock-salt structure), a follow-on. (b) The bandwidth
+//! axis reads the 3d-STATE radius (`d_state_radius`, `N_STAR_3D = 3`), so the classifier is correct only for the
+//! 3d transition series (its calibration set); a 4d/5d/4f correlated centre needs both a general principal quantum
+//! number derived from the element's configuration AND its own per-series calibration, a named follow-on. Within
+//! the seeded 3d rock-salt monoxides both hold by construction, so the current results are sound; the gaps are
+//! that the code, not only the data, encodes the Terran scope.
 
 use civsim_core::Fixed;
 use civsim_physics::d_state_radius::DStateRadii;
@@ -357,8 +370,15 @@ mod tests {
 
     #[test]
     fn the_insulators_are_localized_and_the_metals_itinerant() {
-        // The famous band-filling failure avoided: NiO (which band theory calls a metal) sites as LOCALIZED, and
-        // the early-3d monoxides TiO/VO site as ITINERANT, the class keyed before any energy route.
+        // NiO (which band theory calls a metal) sites as LOCALIZED and the early-3d monoxides TiO/VO site as
+        // ITINERANT, the class keyed before any energy route. HONEST SCOPE OF THIS TEST: these six are the
+        // calibration set, so each classifying to its own side is a by-construction property once calibrate()
+        // succeeds (an insulator has rho >= insulator_min, a metal rho <= metal_max); what this test actually
+        // guards is the boundary INCLUSIVITY of classify_rho (a strict bound would drop a boundary member into
+        // Window). The GENUINE validation, that the derived rho ORDERS the set at all (and refuses a set it
+        // cannot), lives in the_derived_rho_separates_the_mit_set... and a_non_separating_reference_set_is_refused,
+        // not here. No held-out monoxide is classified (the seeded d-block cations are the calibration set only),
+        // so out-of-sample generalization is not tested; it is a flagged follow-on (a wider cited MIT set).
         let (t, l, ds, r, mit) = floors();
         let c = CorrelationClassifier::calibrate(&t, &l, &ds, &r, &mit).expect("calibrates");
         for insulator in [

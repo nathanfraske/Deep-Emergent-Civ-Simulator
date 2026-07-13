@@ -80,10 +80,14 @@ impl<'a> MetallicRoute<'a> {
             .checked_div(e_coh)
     }
 
-    /// The `[D]`-from-`[M]` metallic band: the RMS relative deviation of the Rose universal ratio from its
-    /// anchored-set mean (the metallic route's self-uncertainty against the cohesive-energy references, the D1
-    /// shape). `None` when the anchored set is empty or any anchored metal is unscorable. The absolute scale is
-    /// physical (a per-metal ratio); the SPREAD is the load-bearing honesty number.
+    /// The `[D]`-from-`[M]` metallic band: the RMS relative deviation of the Rose universal ratio `B_0 V_m / E_coh`
+    /// from its anchored-set mean. HONEST SCOPE: this is the DISPERSION of the Rose universal relation across the
+    /// anchored set (a coherence statistic of how uniformly the relation holds), NOT the error of the exact
+    /// `-E_coh` this route currently returns (that value is the banked measurement, so its own uncertainty is the
+    /// measurement's). Its role is to scale `resolution_s` WHEN the metallic route is wired into a disposer (the
+    /// D1 band's role), where a wider spread means the metallic model separates candidates less confidently; it is
+    /// NOT YET CONSUMED (no metallic dispose path exists), and it is set-dependent (it moves as the anchored
+    /// registry grows). `None` when the anchored set is empty or any anchored metal is unscorable.
     pub fn band_fraction(&self) -> Option<Fixed> {
         let mut ratios = Vec::new();
         for (symbol, _anchor) in self.anchors.iter() {
