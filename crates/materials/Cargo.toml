@@ -14,5 +14,8 @@ rust-version.workspace = true
 # content hash the seeded-draw canonicalization law keys on). The kernel reuses these rather than
 # inventing its own, so honoring the canonicalization law is cheap.
 civsim-core = { path = "../core" }
-# civsim-physics is added when the thermochemical and attractor instantiations land (they compute the
-# free energy the disposer reads); slice 1 (the contract) is physics-free.
+# The physics floor the thermochemical instantiation reads: the periodic table's per-element oxidation-state
+# (valence) set is the charge-balance input the Stage-2 proposer enumerates over, keyed per element so an
+# alien chemistry is a data row (Principle 9). The kernel contract (verdict/contract/memo/log) stays
+# physics-free; only the instantiation depends on physics.
+civsim-physics = { path = "../physics" }

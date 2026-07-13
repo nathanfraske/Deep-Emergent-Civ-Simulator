@@ -47,11 +47,15 @@
 pub mod contract;
 pub mod log;
 pub mod memo;
+pub mod thermochemical;
 pub mod verdict;
 
 pub use contract::{Disposer, Preflight, Proposer, Quench, RealizedState, Validity};
 pub use log::{VerdictKind, VerdictLog, VerdictRecord};
 pub use memo::Memo;
+pub use thermochemical::{
+    charge_neutral_primitives, Composition, Environment, Stoichiometry, ThermochemicalProposer,
+};
 pub use verdict::{
     content_key, dispose, seeded_draw, trivial, Band, Candidate, Decided, Escalate, ProvenanceKey,
     SeededDraw, TieSlot, Trivial, Verdict,
