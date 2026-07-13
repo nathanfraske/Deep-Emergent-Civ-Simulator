@@ -40,6 +40,7 @@
 pub mod floor_provenance;
 pub mod geodynamics;
 pub mod graph;
+pub mod ionic_radii;
 pub mod laws;
 pub mod periodic;
 pub mod petrology;
