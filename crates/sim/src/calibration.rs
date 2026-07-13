@@ -161,7 +161,10 @@ impl Provenance {
     /// value (as pinned as its inputs, capped here at its own rank so a bad input joins it down), WRITTEN
     /// state, a CONTINGENCY leaf, and a MEASURED leaf as the most pinned. The join of a set is the member of
     /// minimum rank, so any authored or closure ancestor surfaces to the top of the derived chain.
-    fn rank(self) -> u8 {
+    ///
+    /// `pub(crate)` so the joined register ([`crate::unified_provenance`]) runs the identical worst-case join
+    /// over the calibration-plus-floor node set, one honesty query spanning both registers.
+    pub(crate) fn rank(self) -> u8 {
         match self {
             Provenance::Authored => 0,
             Provenance::Closure => 1,
@@ -172,6 +175,25 @@ impl Provenance {
             Provenance::Contingency => 6,
             Provenance::Measured => 7,
         }
+    }
+
+    /// Parse a seven-tag provenance string to its variant: the single source of truth for the mapping, shared
+    /// by the calibration entries ([`ReservedValue::provenance`]) and the physics-floor grades (the joined
+    /// register, [`crate::unified_provenance`]). An empty string is [`Provenance::Unclassified`] (the additive
+    /// migration default and the fail-loud sentinel); an unrecognized tag is `None` (the caller fails loud with
+    /// its own context). The tag spellings are the owner's canonical register keys.
+    pub fn from_tag(tag: &str) -> Option<Provenance> {
+        Some(match tag {
+            "" => Provenance::Unclassified,
+            "derived" => Provenance::Derived,
+            "measured" => Provenance::Measured,
+            "estimator" => Provenance::Estimator,
+            "closure" => Provenance::Closure,
+            "authored" => Provenance::Authored,
+            "written_state" => Provenance::WrittenState,
+            "contingency" => Provenance::Contingency,
+            _ => return None,
+        })
     }
 }
 
@@ -204,22 +226,13 @@ impl ReservedValue {
     /// forbids on the shipped manifest); a non-empty field that is not one of the seven known tags fails
     /// loud (a mislabel fails the build).
     pub fn provenance(&self) -> Result<Provenance, CalibrationError> {
-        match self.provenance.trim() {
-            "" => Ok(Provenance::Unclassified),
-            "derived" => Ok(Provenance::Derived),
-            "measured" => Ok(Provenance::Measured),
-            "estimator" => Ok(Provenance::Estimator),
-            "closure" => Ok(Provenance::Closure),
-            "authored" => Ok(Provenance::Authored),
-            "written_state" => Ok(Provenance::WrittenState),
-            "contingency" => Ok(Provenance::Contingency),
-            other => Err(CalibrationError::BadValue {
-                id: self.id.clone(),
-                detail: format!(
-                    "unknown provenance '{other}', expected one of the seven tags: derived, measured, estimator, closure, authored, written_state, contingency"
-                ),
-            }),
-        }
+        let tag = self.provenance.trim();
+        Provenance::from_tag(tag).ok_or_else(|| CalibrationError::BadValue {
+            id: self.id.clone(),
+            detail: format!(
+                "unknown provenance '{tag}', expected one of the seven tags: derived, measured, estimator, closure, authored, written_state, contingency"
+            ),
+        })
     }
 }
 
@@ -320,6 +333,14 @@ impl CalibrationManifest {
     /// The entry for an id, set or reserved.
     pub fn get(&self, id: &str) -> Option<&ReservedValue> {
         self.values.get(id)
+    }
+
+    /// Every entry in file order (a deterministic walk). The joined register ([`crate::unified_provenance`])
+    /// uses this to fold the calibration manifest into the calibration-plus-floor node set; it reads
+    /// config by key on the run path and is never hashed into state (R-CANON-WALK), so this ordered
+    /// iterator is an accounting-side view, not a simulation walk.
+    pub fn iter(&self) -> impl Iterator<Item = &ReservedValue> {
+        self.order.iter().map(move |id| &self.values[id])
     }
 
     /// Whether an id exists and is set.
