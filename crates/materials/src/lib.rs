@@ -48,6 +48,7 @@ pub mod assemblage;
 pub mod contract;
 pub mod correlation;
 pub mod creep;
+pub mod electronic;
 pub mod freezer;
 pub mod localized;
 pub mod log;
@@ -71,6 +72,7 @@ pub use creep::{
     creep_dominant_regime, creep_ln_reference_rate, creep_regime_log_rate, creep_selection_gap,
     creep_total_log_rate, CreepComposition, CreepRegime,
 };
+pub use electronic::{carrier_density_per_nm3, plasma_energy_ev, ElectronicRoute};
 pub use localized::LocalizedRoute;
 pub use log::{VerdictKind, VerdictLog, VerdictRecord};
 pub use memo::Memo;
