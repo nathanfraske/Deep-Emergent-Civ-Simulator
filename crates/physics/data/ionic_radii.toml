@@ -104,6 +104,16 @@ coordination = 6
 crystal_radius = "1.52"
 source = "Shannon 1976, Acta Cryst A32 (K+ [6] crystal radius; effective 1.38 + 0.14)"
 
+# Rubidium: Rb+ [6]. A rock-salt alkali (RbCl is rock-salt), the near-neighbour of K+ in the alkali-chloride
+# series: KCl and RbCl are the closest-spaced rock-salt binaries with noble-gas Born cores, the disposer's
+# within-ionic-class near-degenerate pair (their lattice energies fall inside the estimator's measured band).
+[[radius]]
+symbol = "Rb"
+oxidation_state = 1
+coordination = 6
+crystal_radius = "1.66"
+source = "Shannon 1976, Acta Cryst A32 (Rb+ [6] crystal radius; effective 1.52 + 0.14)"
+
 # Chloride, the alkali-halide validation anion (NaCl): Cl- [6]. An ANION, so the crystal radius is the effective
 # minus 0.14 (the anion side of the matched pair), the mirror of the cation convention.
 [[radius]]

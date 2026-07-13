@@ -271,14 +271,14 @@ struct IonicPair {
 /// (not two elements, no element with a negative valence, or a charge balance that is not a positive integer
 /// cation charge). No charge is authored: the anion takes its dominant (first) negative valence and the cation
 /// charge falls out of `x*z_cation + y*z_anion = 0`.
-fn identify_ionic_pair(phase: &Phase, table: &PeriodicTable) -> Option<IonicPair> {
-    if phase.composition.len() != 2 {
+fn identify_ionic_pair(composition: &[(String, u32)], table: &PeriodicTable) -> Option<IonicPair> {
+    if composition.len() != 2 {
         return None;
     }
     // Split into the element with a negative valence (the anion) and the other (the cation).
     let mut cation: Option<(&str, u8, u32)> = None;
     let mut anion: Option<(&str, u8, u32, i8)> = None;
-    for (symbol, count) in &phase.composition {
+    for (symbol, count) in composition {
         let el = table.element(symbol)?;
         let dominant_negative = el.valence.iter().copied().find(|v| *v < 0);
         match dominant_negative {
@@ -353,7 +353,7 @@ pub fn phase_bulk_modulus_ionic(
 ) -> Option<PropertyEstimate> {
     let prototype = prototypes.prototype(phase.prototype.as_deref()?)?;
     let madelung = prototype.madelung?;
-    let pair = identify_ionic_pair(phase, table)?;
+    let pair = identify_ionic_pair(&phase.composition, table)?;
 
     // The interionic distance r0 = r_cation + r_anion, in angstroms, from the shared crystal radii. The sum is
     // convention-invariant (crystal cation plus crystal anion equals effective cation plus effective anion), so
@@ -438,9 +438,35 @@ pub fn phase_lattice_energy_ionic(
     born: &BornExponents,
     prototypes: &PrototypeLibrary,
 ) -> Option<PropertyEstimate> {
-    let prototype = prototypes.prototype(phase.prototype.as_deref()?)?;
+    lattice_energy_ionic_raw(
+        &phase.composition,
+        phase.prototype.as_deref()?,
+        table,
+        radii,
+        born,
+        prototypes,
+    )
+}
+
+/// The BORN-LANDE LATTICE ENERGY in kJ/mol of a binary ionic COMPOSITION at a named structure prototype, the
+/// composition-keyed core of [`phase_lattice_energy_ionic`] (the phase wrapper reads a phase's composition and
+/// prototype key and delegates here). Separated so a consumer that carries a raw `(composition, prototype)`
+/// rather than a petrology [`Phase`] (the materials Stage-4 disposer, whose candidates are compositions with a
+/// seeded prototype, never registry rows) reads the identical derivation without fabricating a phase. Returns
+/// `None` on the same gaps (unseeded or absent-Madelung prototype, not a clean binary ionic, an ion absent from
+/// the radii or the Born cores). Provenance `[E]`: an exact form over measured inputs, the point-charge model an
+/// approximation; the emitted `band` is zero (the raw energy), the disposer wrapping it with the measured band.
+pub fn lattice_energy_ionic_raw(
+    composition: &[(String, u32)],
+    prototype_name: &str,
+    table: &PeriodicTable,
+    radii: &IonicRadii,
+    born: &BornExponents,
+    prototypes: &PrototypeLibrary,
+) -> Option<PropertyEstimate> {
+    let prototype = prototypes.prototype(prototype_name)?;
     let madelung = prototype.madelung?;
-    let pair = identify_ionic_pair(phase, table)?;
+    let pair = identify_ionic_pair(composition, table)?;
 
     // The interionic distance r0 = r_cation + r_anion, in angstroms, from the shared crystal radii (the same
     // convention-invariant sum the modulus reads).
@@ -487,6 +513,139 @@ pub fn phase_lattice_energy_ionic(
         band: Fixed::ZERO,
         provenance: Provenance::Estimator,
     })
+}
+
+// ----- The ionic lattice-energy estimator's MEASURED band-fraction (its self-uncertainty vs Born-Haber) -----
+
+/// One row of the ionic lattice-energy validation set: a compound whose formal-charge Born-Lande lattice energy
+/// the estimator computes and whose CITED Born-Haber lattice energy it is scored against. The Born-Haber energy
+/// is measured `[M]` data (the lattice-energy leg of a Born-Haber cycle over measured component enthalpies), the
+/// same provenance class as the Shannon radii the estimator reads.
+#[derive(Debug, Clone)]
+pub struct EnergyValidationRef {
+    /// The compound name (diagnostics only).
+    pub name: String,
+    /// The composition (element, count), the estimator's input.
+    pub composition: Vec<(String, u32)>,
+    /// The structure prototype key the estimator maps the composition to.
+    pub prototype: String,
+    /// The cited Born-Haber lattice energy in kJ/mol (negative, the released lattice energy).
+    pub born_haber_kj_per_mol: Fixed,
+}
+
+/// The ionic lattice-energy validation set: the cited Born-Haber references the estimator's model-floor band is
+/// MEASURED against. Data-driven and growing (Principle 11): the mechanism (the RMS deviation) is fixed Rust, the
+/// reference membership is data and grows as more Born-Haber references (and, deliberately, more covalent-leaning
+/// compounds, which widen the measured fraction) are cited.
+#[derive(Debug, Clone, Default)]
+pub struct EnergyValidationSet {
+    rows: Vec<EnergyValidationRef>,
+}
+
+#[derive(Debug, Default, Deserialize, Serialize)]
+struct ValidationFile {
+    #[serde(default)]
+    reference: Vec<ValidationDef>,
+}
+
+#[derive(Debug, Default, Deserialize, Serialize)]
+struct ValidationDef {
+    name: String,
+    composition: BTreeMap<String, u32>,
+    prototype: String,
+    born_haber_kj_per_mol: String,
+    #[serde(default)]
+    source: String,
+}
+
+impl EnergyValidationSet {
+    /// Load the validation set from a TOML string. Every row must carry a citation (the Born-Haber reference is
+    /// measured-with-source, never an unsourced number).
+    pub fn from_toml_str(s: &str) -> Result<Self, LatticeError> {
+        let file: ValidationFile =
+            toml::from_str(s).map_err(|e| LatticeError::Parse(e.to_string()))?;
+        let mut rows = Vec::new();
+        for r in file.reference {
+            if r.source.trim().is_empty() {
+                return Err(LatticeError::MissingSource(format!("reference {}", r.name)));
+            }
+            let energy = Fixed::from_decimal_str(r.born_haber_kj_per_mol.trim())
+                .map_err(|d| LatticeError::BadValue(format!("born_haber {}: {d}", r.name)))?;
+            rows.push(EnergyValidationRef {
+                name: r.name,
+                composition: r.composition.into_iter().collect(),
+                prototype: r.prototype,
+                born_haber_kj_per_mol: energy,
+            });
+        }
+        Ok(EnergyValidationSet { rows })
+    }
+
+    /// The embedded standard validation set (`data/ionic_lattice_energy_validation.toml`).
+    pub fn standard() -> Result<Self, LatticeError> {
+        Self::from_toml_str(include_str!("../data/ionic_lattice_energy_validation.toml"))
+    }
+
+    /// The validation rows.
+    pub fn rows(&self) -> &[EnergyValidationRef] {
+        &self.rows
+    }
+}
+
+/// The ionic lattice-energy estimator's MEASURED model-floor band-fraction: the ROOT-MEAN-SQUARE relative
+/// deviation of the formal-charge Born-Lande energy from the cited Born-Haber references over the validation set.
+/// This is the estimator's own uncertainty MEASURED against reality (`[M]`, the same provenance class as the
+/// Born-Haber references and Shannon radii it is computed from, refutable by measuring more references without
+/// running the sim), NOT an authored or reserved `[C]` knob. The disposer reads it as the model-floor fraction of
+/// the resolution band, so a near-degenerate pair the estimator cannot separate within this measured error
+/// escalates rather than emitting a confident wrong ground state. Zero authored: the fraction is DERIVED in code
+/// from the cited references, never a stored constant.
+///
+/// HONEST LIMIT (the estimate-of-an-estimate caveat): the fraction is VALIDATION-SET-DEPENDENT. It reflects the
+/// Born-Lande-versus-Born-Mayer repulsion-form floor (roughly constant across ionic solids, which is why NaCl,
+/// about as ionic as a solid gets, is still a few percent off), and it GROWS as covalent-leaning compounds enter
+/// the set (the physical reason the ladder must escalate the covalent-middle cases). It is not a universal
+/// constant; a wider or more-covalent validation set moves it. Path A adds the per-candidate DERIVED covalency
+/// term (from the Mulliken electronegativity difference) that widens the band where ionicity drops.
+///
+/// Returns `None` if any validation row's energy is not computable (the estimator cannot score its own
+/// reference, a coverage failure), or the set is empty, so the fraction is never fabricated from a partial set.
+pub fn ionic_energy_band_fraction(
+    validation: &EnergyValidationSet,
+    table: &PeriodicTable,
+    radii: &IonicRadii,
+    born: &BornExponents,
+    prototypes: &PrototypeLibrary,
+) -> Option<Fixed> {
+    if validation.rows.is_empty() {
+        return None;
+    }
+    let mut sum_sq = Fixed::ZERO;
+    for row in &validation.rows {
+        let estimate = lattice_energy_ionic_raw(
+            &row.composition,
+            &row.prototype,
+            table,
+            radii,
+            born,
+            prototypes,
+        )?;
+        let reference = row.born_haber_kj_per_mol;
+        if reference == Fixed::ZERO {
+            return None;
+        }
+        // The relative deviation |U_est - U_ref| / |U_ref|, a pure ratio of the estimator's derived energy to the
+        // measured reference. Squared and accumulated for the root-mean-square.
+        let deviation = (estimate.value - reference).checked_div(reference)?;
+        let magnitude = if deviation < Fixed::ZERO {
+            Fixed::ZERO - deviation
+        } else {
+            deviation
+        };
+        sum_sq += magnitude.checked_mul(magnitude)?;
+    }
+    let mean_sq = sum_sq.checked_div(Fixed::from_int(validation.rows.len() as i32))?;
+    Some(mean_sq.sqrt())
 }
 
 #[cfg(test)]
@@ -619,12 +778,14 @@ mod tests {
         // by 2*z_Al + 3*(-2) = 0. The cation charge is never read from a per-phase field.
         let reg = registry();
         let periclase = reg.phase("periclase").unwrap();
-        let pair = identify_ionic_pair(periclase, &table()).expect("MgO is a clean binary ionic");
+        let pair = identify_ionic_pair(&periclase.composition, &table())
+            .expect("MgO is a clean binary ionic");
         assert_eq!(pair.cation_symbol, "Mg");
         assert_eq!(pair.cation_charge, 2);
         assert_eq!(pair.anion_charge, -2);
         let corundum = reg.phase("corundum").unwrap();
-        let pair = identify_ionic_pair(corundum, &table()).expect("Al2O3 is a clean binary ionic");
+        let pair = identify_ionic_pair(&corundum.composition, &table())
+            .expect("Al2O3 is a clean binary ionic");
         assert_eq!(pair.cation_symbol, "Al");
         assert_eq!(pair.cation_charge, 3);
     }
@@ -710,5 +871,62 @@ mod tests {
                 "{name} falls through the ionic lattice-energy route"
             );
         }
+    }
+
+    #[test]
+    fn the_raw_energy_route_matches_the_phase_wrapper() {
+        // The phase wrapper is a thin delegate: it reads a phase's composition and prototype key and calls the
+        // raw route. A composition-keyed caller (the Stage-4 disposer) gets the identical energy, so the refactor
+        // is behaviour-preserving.
+        let phase_est = phase_lattice_energy_ionic(&nacl(), &table(), &radii(), &born(), &protos())
+            .expect("the phase route derives NaCl");
+        let raw_est = lattice_energy_ionic_raw(
+            &nacl().composition,
+            "rock-salt",
+            &table(),
+            &radii(),
+            &born(),
+            &protos(),
+        )
+        .expect("the raw route derives NaCl");
+        assert_eq!(
+            phase_est.value, raw_est.value,
+            "the raw route and the phase wrapper compute the identical lattice energy"
+        );
+    }
+
+    #[test]
+    fn the_validation_set_loads_its_cited_references() {
+        let set = EnergyValidationSet::standard().expect("the ionic validation set loads");
+        assert_eq!(set.rows().len(), 2, "the seed set is NaCl and periclase");
+        // Both references are the released (negative) lattice energy, so the deviation is a like-for-like ratio.
+        for row in set.rows() {
+            assert!(
+                row.born_haber_kj_per_mol < Fixed::ZERO,
+                "the Born-Haber reference for {} is the released (negative) lattice energy",
+                row.name
+            );
+        }
+    }
+
+    #[test]
+    fn the_ionic_band_fraction_is_the_measured_deviation_from_born_haber() {
+        // The band-fraction is the RMS relative deviation of the formal-charge Born-Lande energy from the cited
+        // Born-Haber references (NaCl about 4.6 percent, periclase about 3.5 percent), so the RMS is about 4
+        // percent. It is DERIVED from the cited references, never a stored constant, so it is [M] not [C].
+        let set = EnergyValidationSet::standard().expect("the validation set loads");
+        let fraction = ionic_energy_band_fraction(&set, &table(), &radii(), &born(), &protos())
+            .expect("the estimator scores both of its own references");
+        assert!(
+            close(fraction, 0.04, 0.015),
+            "the measured band-fraction should be about 4 percent, got {}",
+            fraction.to_f64_lossy()
+        );
+        // It is a small positive fraction (an estimator's honest self-uncertainty), never zero or absurd.
+        assert!(
+            fraction > Fixed::ZERO && fraction < Fixed::from_ratio(1, 5),
+            "the band-fraction is a small positive fraction, got {}",
+            fraction.to_f64_lossy()
+        );
     }
 }
