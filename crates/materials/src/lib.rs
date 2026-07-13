@@ -68,8 +68,8 @@ pub use correlation::{
     route_of_class, CalibrationError, CorrelationClass, CorrelationClassifier, EnergyRoute,
 };
 pub use creep::{
-    creep_dominant_regime, creep_ln_reference_rate, creep_regime_log_rate, creep_total_log_rate,
-    CreepRegime,
+    creep_dominant_regime, creep_ln_reference_rate, creep_regime_log_rate, creep_selection_gap,
+    creep_total_log_rate, CreepComposition, CreepRegime,
 };
 pub use localized::LocalizedRoute;
 pub use log::{VerdictKind, VerdictLog, VerdictRecord};
