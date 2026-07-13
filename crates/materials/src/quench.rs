@@ -129,6 +129,50 @@ fn abs_diff(a: Fixed, b: Fixed) -> Fixed {
     }
 }
 
+/// The quench outcome of one exchange reaction at a temperature (Stage 5, part 2, section 2 of the #188
+/// design): whether the exchange froze its composition in during cooling.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QuenchOutcome {
+    /// The exchange's Dodson closure temperature is at or above the current temperature, so diffusion closed
+    /// while the system cooled through `T_c` and the composition is INHERITED metastably ("diamond persists").
+    Frozen,
+    /// The closure temperature is below the current temperature, so the exchange is still re-equilibrating and
+    /// tracks the equilibrium assemblage.
+    Open,
+}
+
+/// The metastable-inheritance rule, the core of the realized-assemblage quench: an exchange whose Dodson closure
+/// temperature (`dodson_closure_temperature`) is at or above the CURRENT temperature has already frozen
+/// (diffusion closed while cooling through `T_c`), so it is inherited unchanged; below `T_c` it re-equilibrates.
+/// This is a pure comparison of two derived temperatures, no reserved value. A non-positive closure temperature
+/// (no closure, the degenerate case) is always Open (the exchange never froze).
+pub fn quench_exchange(closure_temperature: Fixed, current_temperature: Fixed) -> QuenchOutcome {
+    if closure_temperature > ZERO && closure_temperature >= current_temperature {
+        QuenchOutcome::Frozen
+    } else {
+        QuenchOutcome::Open
+    }
+}
+
+/// The sub-kT polymorph resolution boundary (Stage 5, part 2, section 4 of the #188 design): whether two
+/// competing polymorphs sit within the thermal energy `kT` of each other in free energy, and so are thermally
+/// UNRESOLVABLE and must resolve by the content-keyed seeded draw ([`crate::verdict::Verdict::SeededDraw`])
+/// rather than a decided winner. The boundary is the DERIVED `kT` at the freezing temperature (the gate's #188
+/// ruling: a physical quantity, never a reserved threshold): `thermal_energy = k_B * T_c` (or `R * T_c` at the
+/// molar scale the free-energy gap is expressed in), and the gap is the disposer's computed free-energy
+/// difference. Returns true (draw) when `free_energy_gap < thermal_energy` (unresolvable), false (the disposer
+/// decides) otherwise. A non-positive thermal scale (no freezing temperature) is unresolvable by convention (no
+/// thermal scale to separate the polymorphs), so it draws; a non-positive gap (degenerate) also draws.
+pub fn polymorphs_are_thermally_unresolvable(
+    free_energy_gap: Fixed,
+    thermal_energy_at_closure: Fixed,
+) -> bool {
+    if thermal_energy_at_closure <= ZERO || free_energy_gap <= ZERO {
+        return true;
+    }
+    free_energy_gap < thermal_energy_at_closure
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -235,5 +279,62 @@ mod tests {
             Fixed::from_int(55),
         );
         assert_eq!(a, b);
+    }
+
+    #[test]
+    fn quench_exchange_freezes_at_or_above_the_closure_temperature() {
+        // T_c above the current temperature: the exchange froze while cooling through T_c and inherits.
+        assert_eq!(
+            quench_exchange(Fixed::from_int(1500), Fixed::from_int(1000)),
+            QuenchOutcome::Frozen,
+            "a closure temperature above the current temperature freezes (inherits)"
+        );
+        // At the boundary (T_c == current T): frozen (the >= boundary, the exchange closes exactly here).
+        assert_eq!(
+            quench_exchange(Fixed::from_int(1000), Fixed::from_int(1000)),
+            QuenchOutcome::Frozen,
+            "at the closure boundary the exchange freezes"
+        );
+        // T_c below the current temperature: still re-equilibrating.
+        assert_eq!(
+            quench_exchange(Fixed::from_int(800), Fixed::from_int(1000)),
+            QuenchOutcome::Open,
+            "a closure temperature below the current temperature is still open"
+        );
+        // No closure (degenerate T_c): always open (the exchange never froze).
+        assert_eq!(
+            quench_exchange(ZERO, Fixed::from_int(1000)),
+            QuenchOutcome::Open,
+            "no closure temperature: the exchange never freezes"
+        );
+    }
+
+    #[test]
+    fn polymorphs_draw_only_within_the_derived_kt() {
+        // Within kT of each other: thermally unresolvable, so the seeded draw is the terminal.
+        assert!(
+            polymorphs_are_thermally_unresolvable(Fixed::from_ratio(1, 2), ONE),
+            "a free-energy gap below kT is unresolvable (draw)"
+        );
+        // Beyond kT: the disposer decides, no draw.
+        assert!(
+            !polymorphs_are_thermally_unresolvable(Fixed::from_int(2), ONE),
+            "a free-energy gap above kT is resolvable (the disposer decides)"
+        );
+        // At the boundary (gap == kT): resolvable (not strictly within), the disposer decides.
+        assert!(
+            !polymorphs_are_thermally_unresolvable(ONE, ONE),
+            "at the kT boundary the gap is resolvable"
+        );
+        // No thermal scale (no freezing temperature): unresolvable by convention (draws).
+        assert!(
+            polymorphs_are_thermally_unresolvable(Fixed::from_int(2), ZERO),
+            "no thermal scale: the polymorphs draw"
+        );
+        // A degenerate (non-positive) gap draws.
+        assert!(
+            polymorphs_are_thermally_unresolvable(ZERO, ONE),
+            "a degenerate gap draws"
+        );
     }
 }
