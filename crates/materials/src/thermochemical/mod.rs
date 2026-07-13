@@ -18,10 +18,14 @@
 //! This is a plugin over the generic kernel ([`crate::verdict`], [`crate::contract`]): it supplies the physics
 //! (the free-energy content) while the kernel owns the selection discipline. The Stage-2 proposer
 //! ([`proposer`]) is here, complete with its two tiers (ionic charge balance, MO viability) and the laziness
-//! invariant; the disposer and freezer land in following slices.
+//! invariant; the Stage-4 disposer ([`disposer`]) is here for its ionic branch (D1), scoring candidates by the
+//! Born-Lande lattice energy and disposing through the sealed kernel with the estimator's measured band. The
+//! freezer lands in a following slice.
 
+pub mod disposer;
 pub mod proposer;
 
+pub use disposer::ThermochemicalDisposer;
 pub use proposer::{
     charge_neutral_primitives, max_formable_amount, mo_viable_diatomics, propose_candidates,
     prune_lazy, BondingHints, Composition, Compound, Environment, ThermochemicalProposer,

@@ -55,7 +55,7 @@ pub use log::{VerdictKind, VerdictLog, VerdictRecord};
 pub use memo::Memo;
 pub use thermochemical::{
     charge_neutral_primitives, mo_viable_diatomics, propose_candidates, BondingHints, Composition,
-    Compound, Environment, ThermochemicalProposer,
+    Compound, Environment, ThermochemicalDisposer, ThermochemicalProposer,
 };
 pub use verdict::{
     content_key, dispose, seeded_draw, trivial, Band, Candidate, Decided, Escalate, ProvenanceKey,
