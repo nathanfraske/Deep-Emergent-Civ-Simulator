@@ -3181,3 +3181,13 @@ FOUND (seams, non-deferential):
 STRENGTH noted: the energy-vs-curvature distinction is handled right (disposer ~5% Born-Lande ENERGY fine for formation-ranking; ~1.65x MODULUS overestimate is a separate Stage-6 band).
 
 STATE: audit posted for owner's read. Back to REST after. Materials slice still complete/banked, held for provenance-enum swap on A's register. Task #35 interior arming HELD (main 48400b0, no A Stage-3c). Task #37 audit COMPLETE. Branch tip 130f399 unchanged (audit was design-only, no code). Do NOT touch A's genesis/register/generator-arch or C's lanes.
+
+## 2026-07-12 (Agent B) - Audit findings ALL RESOLVED by owner (21st audit), captured at source (#182)
+
+Gate: owner resolved all 4 of my audit findings cleanly (each proves the catch was load-bearing). Full resolutions in docs/working/MATERIALS_FOUNDATION_AUDIT.md (on origin, updated at source) for the resume. No action; rest continues.
+- g-factor: fixed to 2+alpha/pi, PLUS a standing spec rule earned (a [D] value stores its closed form and re-evaluates, never hand-copies) - routed to A's register.
+- Triptych legs: molecular = plastic-phase shear flag + multipole ladder; H-bonded ices = Keating angular term priced off the banked E_HB ladder (no new fit) + proton-disorder floor. MY CAUCHY DIAGNOSTIC PROMOTED to the substrate's UNIVERSAL bonding-class litmus (5 classes, 5 violation mechanisms, each a class tag).
+- Amorphous/glass: freezer working as designed - glass = arrested liquid in the WRITTEN-STATE registry (composition, fictive temp T_f, path), existing slots + one new derived constant (<r>=2.4 rigidity threshold from constraint counting).
+- Self-consistency loop: named convex inner solve under the solver law - MY SHIELDED QEq is the positive-definite piece making it convex; two failure modes pre-declared (charge-transfer runaway, charge-order fold), memoized per (composition, E-bucket).
+
+STATE: materials foundation = complete-with-resolutions. Slice still banked/approved, held for provenance-enum swap on A's register. Two forward threads (enum swap; interior arming #178) still gate on A's register. Task #35 HELD. Rest continues. Branch tip unchanged (audit was design-only). Check-in armed ~01:44 UTC re-checks main for A's register/Stage-3c.
