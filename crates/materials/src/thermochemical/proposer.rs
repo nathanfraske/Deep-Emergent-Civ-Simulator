@@ -477,9 +477,11 @@ pub fn propose_candidates(
 /// amounts and the candidate's own integer stoichiometry, deriving with no energy and no reserved threshold.
 /// `Fixed::ZERO` when any constituent is absent (keyed at zero or not keyed at all) or when the limiting supply
 /// rounds below one representable unit of the compound; that zero IS the laziness cut, at the fixed-point
-/// representability floor rather than an authored value. The disposer and freezer read this same bound to scale
-/// the extensive free energy and the phase fractions, so it is the proposer-side datum the later stages read,
-/// over serving as a prune alone.
+/// representability floor rather than an authored value. The PURE disposer selects on the INTENSIVE per-candidate
+/// energy and does not read this bound (its [`crate::contract::Disposer::dispose`] signature carries no
+/// composition): the EXTENSIVE assemblage scaling by the formable amounts, and the phase fractions, are a FOLD
+/// over the disposer plus the composition budget (a later slice), never an input to the pure selection. So this
+/// bound is the proposer-side prune and the later assemblage fold's datum, not a `dispose` input.
 pub fn max_formable_amount(candidate: &Compound, composition: &Composition) -> Fixed {
     let mut limiting: Option<Fixed> = None;
     for (element, &count) in candidate.composition() {

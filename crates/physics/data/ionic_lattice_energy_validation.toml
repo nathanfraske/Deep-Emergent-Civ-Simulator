@@ -1,6 +1,7 @@
 # The ionic lattice-energy estimator's VALIDATION SET: the cited Born-Haber lattice energies against which the
 # formal-charge Born-Lande estimator (crate::lattice_modulus::lattice_energy_ionic_raw) is scored, so its
-# model-floor band-fraction is MEASURED [M], never authored. The band-fraction the disposer reads is the
+# model-floor band-fraction is graded [D]-from-[M] (a derived RMS statistic whose derived_from is these cited
+# references, effective provenance [M]), never authored. The band-fraction the disposer reads is the
 # root-mean-square relative deviation of the estimator from these references (crate::lattice_modulus::
 # ionic_energy_band_fraction); no consumer is wired to it in any pinned run path yet (a pure addition,
 # byte-neutral).

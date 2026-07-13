@@ -21,11 +21,12 @@
 //! not: the per-candidate ENERGY (the physics) and the RESOLUTION BAND (the estimator's measured uncertainty).
 //!
 //! THE MEASURED BAND (the never-fabricate crux, gate-ruled). The resolution band is the model-floor fraction
-//! times the winner's energy magnitude, and the fraction is `[M]` MEASURED, not authored: it is the
+//! times the winner's energy magnitude, and the fraction is graded `[D]`-from-`[M]` (a derived RMS statistic
+//! whose `derived_from` is the cited Born-Haber references, EFFECTIVE provenance `[M]`), not authored: it is the
 //! root-mean-square relative deviation of the formal-charge Born-Lande energy from the cited Born-Haber
 //! references (`civsim_physics::lattice_modulus::ionic_energy_band_fraction`, about 4 percent), refutable by
-//! measuring more references without running the sim. So D1 is ZERO-AUTHORED (one new `[M]` value, the
-//! validation-set-derived band-fraction, never a reserved `[C]` knob). The band is what makes the estimator
+//! measuring more references without running the sim. So D1 is ZERO-AUTHORED (one new value, effective `[M]`,
+//! derived-in-form, never a reserved `[C]` knob). The band is what makes the estimator
 //! honest: a near-degenerate pair it cannot separate within its measured error ESCALATES rather than emitting a
 //! confident wrong ground state. The floor fraction is roughly constant across ionic solids (NaCl, about as
 //! ionic as a solid gets, is still a few percent off, which is the Born-Lande-versus-Born-Mayer repulsion-form

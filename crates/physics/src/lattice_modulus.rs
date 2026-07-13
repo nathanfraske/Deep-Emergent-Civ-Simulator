@@ -594,12 +594,14 @@ impl EnergyValidationSet {
 
 /// The ionic lattice-energy estimator's MEASURED model-floor band-fraction: the ROOT-MEAN-SQUARE relative
 /// deviation of the formal-charge Born-Lande energy from the cited Born-Haber references over the validation set.
-/// This is the estimator's own uncertainty MEASURED against reality (`[M]`, the same provenance class as the
-/// Born-Haber references and Shannon radii it is computed from, refutable by measuring more references without
-/// running the sim), NOT an authored or reserved `[C]` knob. The disposer reads it as the model-floor fraction of
-/// the resolution band, so a near-degenerate pair the estimator cannot separate within this measured error
-/// escalates rather than emitting a confident wrong ground state. Zero authored: the fraction is DERIVED in code
-/// from the cited references, never a stored constant.
+/// This is the estimator's own uncertainty measured against reality. Its DECLARED grade is `[D]`-from-`[M]`: a
+/// DERIVED statistic (a root-mean-square) whose `derived_from` is the cited Born-Haber validation references, so
+/// its EFFECTIVE provenance is `[M]` (the worst-case join over all-`[M]` inputs lands at measured), refutable by
+/// measuring more references without running the sim, NOT an authored or reserved `[C]` knob. Measured-and-
+/// refutable, derived-in-form. The disposer reads it as the model-floor fraction of the resolution band, so a
+/// near-degenerate pair the estimator cannot separate within this error escalates rather than emitting a
+/// confident wrong ground state. Zero authored: the fraction is DERIVED in code from the cited references, never
+/// a stored constant.
 ///
 /// HONEST LIMIT (the estimate-of-an-estimate caveat): the fraction is VALIDATION-SET-DEPENDENT. It reflects the
 /// Born-Lande-versus-Born-Mayer repulsion-form floor (roughly constant across ionic solids, which is why NaCl,
