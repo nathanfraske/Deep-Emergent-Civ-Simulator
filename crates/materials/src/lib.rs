@@ -44,6 +44,7 @@
 //! every verdict carries is an opaque `u64` content id that `sim` resolves against the seven-tag joined
 //! register, keeping the honesty query where the register lives.
 
+pub mod assemblage;
 pub mod contract;
 pub mod correlation;
 pub mod freezer;
@@ -51,9 +52,15 @@ pub mod localized;
 pub mod log;
 pub mod memo;
 pub mod metallic;
+pub mod nucleation;
+pub mod quench;
 pub mod thermochemical;
 pub mod verdict;
 
+pub use assemblage::{
+    realize_assemblage, CoolingPath, DrawContext, EquilibriumExchange, ExchangeKinetics,
+    RealizedAssemblage, RealizedExchange,
+};
 pub use contract::{Disposer, Preflight, Proposer, Quench, RealizedState, Validity};
 pub use correlation::{
     route_of_class, CalibrationError, CorrelationClass, CorrelationClassifier, EnergyRoute,
@@ -62,6 +69,15 @@ pub use localized::LocalizedRoute;
 pub use log::{VerdictKind, VerdictLog, VerdictRecord};
 pub use memo::Memo;
 pub use metallic::MetallicRoute;
+pub use nucleation::{
+    avrami_grain_size, critical_atom_count, critical_radius_over_spacing, interfacial_energy,
+    nucleation_prefactor, nucleation_rate, reduced_driving_force, reduced_interfacial_energy,
+    reduced_nucleation_barrier, richards_ratio, zeldovich_factor, NucleationRoute,
+};
+pub use quench::{
+    dodson_closure_temperature, polymorphs_are_thermally_unresolvable, quench_exchange,
+    QuenchOutcome,
+};
 pub use thermochemical::{
     charge_neutral_primitives, mo_viable_diatomics, propose_candidates, BondingHints, Composition,
     Compound, Environment, ThermochemicalDisposer, ThermochemicalProposer,

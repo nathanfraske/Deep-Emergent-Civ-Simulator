@@ -24,45 +24,65 @@
 #
 # The seed is the seven metals that already carry a banked cohesive energy: the alkali (Na, K), alkaline-earth
 # (Mg, Ca), a simple metal (Al), and two transition metals (Ti, Fe), a spread across the metallic bonding range.
+#
+# THE HEAT OF FUSION dH_f (kJ/mol), added for the §5 nucleation slice (freezer output side, PR #188). The
+# grain/CNT mechanism reads the MEASURED melt enthalpy to derive the melt entropy dS_f = dH_f/T_m (over the built
+# Lindemann T_m) and the Turnbull solid-liquid interfacial energy, so the mechanism reserves only the Turnbull
+# coefficient C (one per-class knob) and reads dH_f as refutable [M] data (framing 3, gate-ruled). Cited to
+# WebElements thermochemistry pages for source-consistency with the molar-volume/bulk-modulus of the same row.
+# The field is OPTIONAL (a metal without it escalates in the nucleation route rather than fabricating), and no
+# pinned run path reads these anchors (byte-neutral: only the materials leaf consumes them).
 
 [[metal]]
 symbol = "Na"
 molar_volume = "23.78"
 bulk_modulus_gpa = "6.3"
-source = "WebElements (www.webelements.com/sodium/physics.html): molar volume 23.78 cm^3/mol, bulk modulus 6.3 GPa"
+heat_of_fusion = "2.60"
+source = "WebElements: molar volume 23.78 cm^3/mol, bulk modulus 6.3 GPa (sodium/physics.html); enthalpy of fusion 2.60 kJ/mol (sodium/thermochemistry.html)"
 
 [[metal]]
 symbol = "Mg"
 molar_volume = "14.00"
 bulk_modulus_gpa = "45"
-source = "WebElements (www.webelements.com/magnesium/physics.html): molar volume 14.00 cm^3/mol, bulk modulus 45 GPa"
+heat_of_fusion = "8.7"
+source = "WebElements: molar volume 14.00 cm^3/mol, bulk modulus 45 GPa (magnesium/physics.html); enthalpy of fusion 8.7 kJ/mol (magnesium/thermochemistry.html)"
 
 [[metal]]
 symbol = "Al"
 molar_volume = "10.00"
 bulk_modulus_gpa = "76"
-source = "WebElements (www.webelements.com/aluminium/physics.html): molar volume 10.00 cm^3/mol, bulk modulus 76 GPa"
+heat_of_fusion = "10.7"
+source = "WebElements: molar volume 10.00 cm^3/mol, bulk modulus 76 GPa (aluminium/physics.html); enthalpy of fusion 10.7 kJ/mol (aluminium/thermochemistry.html)"
 
 [[metal]]
 symbol = "K"
 molar_volume = "45.94"
 bulk_modulus_gpa = "3.1"
-source = "WebElements (www.webelements.com/potassium/physics.html): molar volume 45.94 cm^3/mol, bulk modulus 3.1 GPa"
+heat_of_fusion = "2.33"
+source = "WebElements: molar volume 45.94 cm^3/mol, bulk modulus 3.1 GPa (potassium/physics.html); enthalpy of fusion 2.33 kJ/mol (potassium/thermochemistry.html)"
 
 [[metal]]
 symbol = "Ca"
 molar_volume = "26.20"
 bulk_modulus_gpa = "17"
-source = "WebElements (www.webelements.com/calcium/physics.html): molar volume 26.20 cm^3/mol, bulk modulus 17 GPa"
+heat_of_fusion = "8.54"
+source = "WebElements: molar volume 26.20 cm^3/mol, bulk modulus 17 GPa (calcium/physics.html); enthalpy of fusion 8.54 kJ/mol (calcium/thermochemistry.html)"
 
+# SOURCE-VARIANCE FLAG (never-fabricate): titanium's enthalpy of fusion is source-variable. WebElements gives
+# 18.7 kJ/mol; the CRC/thermochemical family gives ~14-15 kJ/mol (Ti's hcp->bcc->melt sequence makes its melt
+# enthalpy uncertain across tabulations). The WebElements value is used here for source-consistency
+# with this row's molar-volume/bulk-modulus (also WebElements); a CRC value is a one-line reversible change. The
+# other six metals agree across sources within ~2%.
 [[metal]]
 symbol = "Ti"
 molar_volume = "10.64"
 bulk_modulus_gpa = "110"
-source = "WebElements (www.webelements.com/titanium/physics.html): molar volume 10.64 cm^3/mol, bulk modulus 110 GPa"
+heat_of_fusion = "18.7"
+source = "WebElements: molar volume 10.64 cm^3/mol, bulk modulus 110 GPa (titanium/physics.html); enthalpy of fusion 18.7 kJ/mol (titanium/thermochemistry.html; source-variable, CRC-family ~14-15, see flag above)"
 
 [[metal]]
 symbol = "Fe"
 molar_volume = "7.09"
 bulk_modulus_gpa = "170"
-source = "WebElements (www.webelements.com/iron/physics.html): molar volume 7.09 cm^3/mol, bulk modulus 170 GPa"
+heat_of_fusion = "13.8"
+source = "WebElements: molar volume 7.09 cm^3/mol, bulk modulus 170 GPa (iron/physics.html); enthalpy of fusion 13.8 kJ/mol (iron/thermochemistry.html; CRC 13.81, agree)"
