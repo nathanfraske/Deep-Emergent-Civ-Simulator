@@ -48,6 +48,10 @@
 //! per-class knock-down `in (0, 1]` (the ONE reserved coefficient, spanning `~1e-2` for a soft annealed metal to
 //! `~1` for a covalent solid or a defect-free whisker) to the operative strength. The richer Hall-Petch
 //! grain-size model is a flagged design-first follow-on.
+//!
+//! THERMAL EXPANSION ([`volumetric_thermal_expansion_per_k`], [`linear_thermal_expansion_per_k`]) is the Grueneisen
+//! relation `alpha_V = gamma_G * C_v / (K * V_m)` over the built `C_v`, the anchored `K`/`V_m`, and the ONE reserved
+//! Grueneisen `gamma_G` (shared with the Slack conductivity, one hunt for both). Iron lands `alpha_L ~ 1.0e-5 /K`.
 
 use civsim_core::Fixed;
 use civsim_physics::metal_eos::MetalEosAnchors;
@@ -415,6 +419,68 @@ pub fn operative_shear_strength_gpa(shear_modulus_gpa: Fixed, knockdown: Fixed) 
         .unwrap_or(Fixed::MAX)
 }
 
+/// The VOLUMETRIC thermal expansion coefficient `alpha_V` (per kelvin), the Grueneisen relation
+/// `alpha_V = gamma_G * C_v / (K * V_m)` rearranged from the thermodynamic identity
+/// `gamma_G = alpha_V * K_T * V_m / C_v`. It reads the built heat capacity `C_v`, the anchored bulk modulus `K`,
+/// and the molar volume `V_m`; the ONE RESERVED-with-basis per-class coefficient is the Grueneisen parameter
+/// `gamma_G` (the SAME coefficient the Slack conductivity reserves, so one hunt serves both). The basis:
+/// `gamma_G = alpha_V * K * V_m / C_v`, the measured Grueneisen parameter per bonding class, `~1.5-2.2` for close-
+/// packed metals (iron `~1.7`, aluminium `~2.2`), lower for open/covalent solids (diamond `~0.9`), caller-supplied
+/// and never planted. UNIT FOLD: `K[GPa] * V_m[cm^3/mol] = kJ/mol` while `C_v` is in `J/(mol*K)`, so the `1000` in
+/// the denominator is the exact `kJ -> J` conversion, not an authored value. BASIS CONSISTENCY: `C_v` and `V_m`
+/// must share a basis (both per mole of atoms, or both per mole of formula units); for an element metal (one atom
+/// per formula) they coincide, and a compound caller passes both per-atom (`C_v` per atom, `V_m / n`). Non-positive
+/// inputs yield zero.
+pub fn volumetric_thermal_expansion_per_k(
+    gruneisen: Fixed,
+    heat_capacity_j_per_mol_k: Fixed,
+    bulk_modulus_gpa: Fixed,
+    molar_volume_cm3_per_mol: Fixed,
+) -> Fixed {
+    if gruneisen <= ZERO
+        || heat_capacity_j_per_mol_k <= ZERO
+        || bulk_modulus_gpa <= ZERO
+        || molar_volume_cm3_per_mol <= ZERO
+    {
+        return ZERO;
+    }
+    // denom = 1000 * K[GPa] * V_m[cm^3/mol] (the 1000 folds kJ/mol -> J/mol to match C_v's J/(mol*K)).
+    let denom = match bulk_modulus_gpa
+        .checked_mul(molar_volume_cm3_per_mol)
+        .and_then(|kv| kv.checked_mul(Fixed::from_int(1000)))
+    {
+        Some(d) if d > ZERO => d,
+        _ => return ZERO,
+    };
+    match gruneisen
+        .checked_mul(heat_capacity_j_per_mol_k)
+        .and_then(|num| num.checked_div(denom))
+    {
+        Some(a) => a,
+        None => Fixed::MAX,
+    }
+}
+
+/// The LINEAR thermal expansion coefficient `alpha_L = alpha_V / 3` (per kelvin), the isotropic third of the
+/// volumetric [`volumetric_thermal_expansion_per_k`] (an isotropic solid expands equally on three axes). Same one
+/// reserved Grueneisen `gamma_G`, same basis-consistency requirement. Iron lands `~1.04e-5 /K` against a measured
+/// `~1.18e-5`. HONEST LIMIT: the linear coefficient is the isotropic average; an anisotropic (non-cubic) crystal
+/// has axis-dependent expansion this single scalar does not resolve. Non-positive inputs yield zero.
+pub fn linear_thermal_expansion_per_k(
+    gruneisen: Fixed,
+    heat_capacity_j_per_mol_k: Fixed,
+    bulk_modulus_gpa: Fixed,
+    molar_volume_cm3_per_mol: Fixed,
+) -> Fixed {
+    let volumetric = volumetric_thermal_expansion_per_k(
+        gruneisen,
+        heat_capacity_j_per_mol_k,
+        bulk_modulus_gpa,
+        molar_volume_cm3_per_mol,
+    );
+    volumetric.checked_div(Fixed::from_int(3)).unwrap_or(ZERO)
+}
+
 /// The property route bound to the periodic table and the EOS anchors, so density reads the molar mass and molar
 /// volume, and the Debye temperature reuses the freezer's sound speed over the anchors, all for an anchored
 /// metal. No reserved value enters (this first slice reserves none); a metal missing an anchor escalates
@@ -542,6 +608,31 @@ impl<'a> PropertyRoute<'a> {
         let bulk_modulus = self.anchors.bulk_modulus_gpa(symbol)?;
         let shear = shear_modulus_gpa(bulk_modulus, pugh_ratio);
         Some(operative_shear_strength_gpa(shear, knockdown))
+    }
+
+    /// The LINEAR thermal expansion coefficient `alpha_L` (per kelvin) for an anchored metal at a temperature, the
+    /// Grueneisen relation over the anchored `K`/`V_m`, the built heat capacity `C_v` (via the shear-aware
+    /// `Theta_D`), and the caller's reserved Grueneisen `gamma_G`. For an element metal `C_v` (per atom) and `V_m`
+    /// (per atom) share a basis, so no atom-count enters. `None` (escalate) when the metal lacks a bulk modulus, a
+    /// molar volume, or a standard atomic weight. `gamma_G` and the Pugh ratio `k` are caller-supplied, never
+    /// planted.
+    pub fn linear_thermal_expansion(
+        &self,
+        symbol: &str,
+        temperature: Fixed,
+        pugh_ratio: Fixed,
+        gruneisen: Fixed,
+    ) -> Option<Fixed> {
+        let bulk_modulus = self.anchors.bulk_modulus_gpa(symbol)?;
+        let molar_volume = self.anchors.molar_volume(symbol)?;
+        let theta_d = self.debye_temperature_shear_aware(symbol, pugh_ratio)?;
+        let cv = debye_heat_capacity_j_per_mol_k(theta_d, temperature);
+        Some(linear_thermal_expansion_per_k(
+            gruneisen,
+            cv,
+            bulk_modulus,
+            molar_volume,
+        ))
     }
 }
 
@@ -912,6 +1003,87 @@ mod tests {
         assert!(
             route.theoretical_shear_strength("Xx", k_fe).is_none(),
             "an unanchored metal escalates in the strength route"
+        );
+    }
+
+    #[test]
+    fn the_thermal_expansion_is_the_gruneisen_relation_over_the_built_heat_capacity() {
+        // Iron: gamma_G ~1.7 (cited test-only), C_v ~22.1 J/(mol*K) at 300 K, K = 170 GPa, V_m = 7.09 cm^3/mol.
+        // alpha_V = gamma*C_v/(1000*K*V_m) = 1.7*22.1/(1000*170*7.09) ~3.12e-5 /K; alpha_L = alpha_V/3 ~1.04e-5.
+        let gamma_fe = Fixed::from_ratio(17, 10); // Grueneisen ~1.7 (iron, test-only)
+        let cv = Fixed::from_ratio(221, 10); // ~22.1 J/(mol*K), the built Debye C_v
+        let k = Fixed::from_int(170);
+        let v_m = Fixed::from_ratio(709, 100);
+        let alpha_v = volumetric_thermal_expansion_per_k(gamma_fe, cv, k, v_m);
+        assert!(
+            close(alpha_v, 3.12e-5, 3.0e-6),
+            "iron volumetric expansion ~3.1e-5 /K: {alpha_v:?}"
+        );
+        let alpha_l = linear_thermal_expansion_per_k(gamma_fe, cv, k, v_m);
+        assert!(
+            close(alpha_l, 1.04e-5, 1.0e-6),
+            "iron linear expansion ~1.04e-5 /K (measured ~1.18e-5): {alpha_l:?}"
+        );
+        // Linear is one third of volumetric (isotropic).
+        assert!(
+            close(alpha_l, alpha_v.to_f64_lossy() / 3.0, 1.0e-7),
+            "linear is a third of volumetric"
+        );
+        // Monotone: a higher Grueneisen (more anharmonic) raises the expansion; stiffer K lowers it.
+        assert!(
+            volumetric_thermal_expansion_per_k(Fixed::from_int(2), cv, k, v_m) > alpha_v,
+            "a higher Grueneisen raises expansion"
+        );
+        assert!(
+            volumetric_thermal_expansion_per_k(gamma_fe, cv, Fixed::from_int(400), v_m) < alpha_v,
+            "a stiffer bulk modulus lowers expansion"
+        );
+        // Guards: any non-positive input yields zero.
+        assert_eq!(volumetric_thermal_expansion_per_k(ZERO, cv, k, v_m), ZERO);
+        assert_eq!(
+            volumetric_thermal_expansion_per_k(gamma_fe, ZERO, k, v_m),
+            ZERO
+        );
+        assert_eq!(
+            volumetric_thermal_expansion_per_k(gamma_fe, cv, ZERO, v_m),
+            ZERO
+        );
+        assert_eq!(
+            volumetric_thermal_expansion_per_k(gamma_fe, cv, k, ZERO),
+            ZERO
+        );
+        // Determinism.
+        assert_eq!(
+            alpha_v,
+            volumetric_thermal_expansion_per_k(gamma_fe, cv, k, v_m)
+        );
+
+        // Through the route (reads K/V_m from the anchors, computes C_v via the shear-aware Theta_D internally).
+        let t = table();
+        let a = anchors();
+        let route = PropertyRoute::new(&t, &a);
+        let route_alpha = route
+            .linear_thermal_expansion(
+                "Fe",
+                Fixed::from_int(300),
+                Fixed::from_ratio(48, 100),
+                gamma_fe,
+            )
+            .expect("Fe linear expansion");
+        assert!(
+            close(route_alpha, 1.04e-5, 2.0e-6),
+            "route iron linear expansion ~1.0e-5 /K: {route_alpha:?}"
+        );
+        assert!(
+            route
+                .linear_thermal_expansion(
+                    "Xx",
+                    Fixed::from_int(300),
+                    Fixed::from_ratio(48, 100),
+                    gamma_fe
+                )
+                .is_none(),
+            "an unanchored metal escalates in the expansion route"
         );
     }
 }
