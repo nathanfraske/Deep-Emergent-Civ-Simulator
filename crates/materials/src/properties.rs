@@ -42,6 +42,12 @@
 //! capped composite-Simpson rule (the integrand rewritten to keep `e^x` in-window). It reserves no value: `R` is a
 //! floor constant, `D` is pure math, and the atom count is data. It is `C_v` (constant volume); the small
 //! `C_p - C_v` correction rides the thermal-expansion slice once the Grueneisen `alpha` is built.
+//!
+//! STRENGTH ([`theoretical_shear_strength_gpa`], [`operative_shear_strength_gpa`]) reads the shear modulus: the
+//! Frenkel ideal `tau_th = G/(2*pi)` (no reserved value, the upper bound a real material approaches) scaled by a
+//! per-class knock-down `in (0, 1]` (the ONE reserved coefficient, spanning `~1e-2` for a soft annealed metal to
+//! `~1` for a covalent solid or a defect-free whisker) to the operative strength. The richer Hall-Petch
+//! grain-size model is a flagged design-first follow-on.
 
 use civsim_core::Fixed;
 use civsim_physics::metal_eos::MetalEosAnchors;
@@ -365,6 +371,43 @@ pub fn debye_heat_capacity_j_per_mol_k(debye_temperature: Fixed, temperature: Fi
         .unwrap_or(Fixed::MAX)
 }
 
+/// The theoretical (ideal) shear strength `tau_th = G / (2*pi)` (GPa), the Frenkel limit: the stress at which a
+/// perfect dislocation-free crystal shears by sliding whole atomic planes, from the shear modulus alone. No
+/// reserved value (the `2*pi` is from [`Fixed::PI`]); it is the exact upper bound a material's strength can
+/// approach. HONEST LIMIT: the classic sinusoidal `G/(2*pi)` overestimates the refined (DFT) ideal shear by
+/// roughly a factor of two (iron `~13 GPa` here against a refined `~7 GPa`); the per-class knock-down in
+/// [`operative_shear_strength_gpa`] absorbs both that model imprecision and the dislocation physics. Non-positive
+/// input yields zero.
+pub fn theoretical_shear_strength_gpa(shear_modulus_gpa: Fixed) -> Fixed {
+    if shear_modulus_gpa <= ZERO {
+        return ZERO;
+    }
+    let two_pi = match Fixed::from_int(2).checked_mul(Fixed::PI) {
+        Some(v) if v > ZERO => v,
+        _ => return ZERO,
+    };
+    shear_modulus_gpa.checked_div(two_pi).unwrap_or(Fixed::MAX)
+}
+
+/// The operative shear strength (GPa) `= knockdown * G / (2*pi)`, the ideal Frenkel strength scaled by the ONE
+/// RESERVED-with-basis per-class knock-down fraction. In a real crystal, mobile dislocations let it shear far
+/// below the ideal, so the operative (measured yield/flow) strength is `knockdown in (0, 1]` of the theoretical:
+/// the basis is the ratio of the measured operative shear strength to `G/(2*pi)` per bonding/microstructural
+/// class, spanning `~1e-2` for a soft annealed metal (iron `~0.012`, copper `~0.009`), through work-hardened and
+/// fine-grained metals, up to `~0.7` for a covalent solid with few mobile dislocations (diamond) and `-> 1` for a
+/// defect-free whisker. The knock-down is caller-supplied, never planted. This is the reduced-order per-class
+/// residual the design opener named; the richer follow-on is a Hall-Petch grain-size model
+/// (`sigma_y = sigma_0 + k_HP / sqrt(d)`, reading the freezer's built grain size), a two-coefficient design-first
+/// piece flagged for its own slice. Non-positive inputs, or a knock-down outside `(0, 1]`, yield zero.
+pub fn operative_shear_strength_gpa(shear_modulus_gpa: Fixed, knockdown: Fixed) -> Fixed {
+    if shear_modulus_gpa <= ZERO || knockdown <= ZERO || knockdown > Fixed::ONE {
+        return ZERO;
+    }
+    theoretical_shear_strength_gpa(shear_modulus_gpa)
+        .checked_mul(knockdown)
+        .unwrap_or(Fixed::MAX)
+}
+
 /// The property route bound to the periodic table and the EOS anchors, so density reads the molar mass and molar
 /// volume, and the Debye temperature reuses the freezer's sound speed over the anchors, all for an anchored
 /// metal. No reserved value enters (this first slice reserves none); a metal missing an anchor escalates
@@ -468,6 +511,30 @@ impl<'a> PropertyRoute<'a> {
     ) -> Option<Fixed> {
         let theta_d = self.debye_temperature_shear_aware(symbol, pugh_ratio)?;
         Some(debye_heat_capacity_j_per_mol_k(theta_d, temperature))
+    }
+
+    /// The theoretical (ideal) shear strength `tau_th = G/(2*pi)` (GPa) for an anchored metal, over the derived
+    /// shear modulus (`k*B_0`). `None` (escalate) when the metal has no anchored bulk modulus. Reserves only the
+    /// caller's Pugh ratio `k` (which `G` carries); the Frenkel limit itself has no reserved value.
+    pub fn theoretical_shear_strength(&self, symbol: &str, pugh_ratio: Fixed) -> Option<Fixed> {
+        let bulk_modulus = self.anchors.bulk_modulus_gpa(symbol)?;
+        let shear = shear_modulus_gpa(bulk_modulus, pugh_ratio);
+        Some(theoretical_shear_strength_gpa(shear))
+    }
+
+    /// The operative shear strength (GPa) for an anchored metal, the ideal Frenkel strength scaled by the caller's
+    /// reserved per-class `knockdown in (0, 1]` (see [`operative_shear_strength_gpa`] for its basis), over the
+    /// derived shear modulus. `None` (escalate) when the metal has no anchored bulk modulus. Both `k` and the
+    /// knock-down are caller-supplied, never planted.
+    pub fn operative_shear_strength(
+        &self,
+        symbol: &str,
+        pugh_ratio: Fixed,
+        knockdown: Fixed,
+    ) -> Option<Fixed> {
+        let bulk_modulus = self.anchors.bulk_modulus_gpa(symbol)?;
+        let shear = shear_modulus_gpa(bulk_modulus, pugh_ratio);
+        Some(operative_shear_strength_gpa(shear, knockdown))
     }
 }
 
@@ -765,6 +832,79 @@ mod tests {
                 .heat_capacity("Xx", Fixed::from_int(300), Fixed::from_ratio(48, 100))
                 .is_none(),
             "an unanchored metal escalates in the heat-capacity route"
+        );
+    }
+
+    #[test]
+    fn the_shear_strength_is_the_frenkel_ideal_scaled_by_a_per_class_knockdown() {
+        // Iron: G ~82 GPa -> the Frenkel ideal tau_th = G/(2*pi) ~13.05 GPa (the dislocation-free upper bound).
+        let g_iron = Fixed::from_int(82);
+        let tau_th = theoretical_shear_strength_gpa(g_iron);
+        assert!(
+            close(tau_th, 13.05, 0.1),
+            "iron theoretical shear strength G/(2pi) ~13.05 GPa: {tau_th:?}"
+        );
+        // Annealed iron's operative shear strength is ~0.15 GPa, so the per-class knock-down chi ~0.0115
+        // (cited test-only: measured yield over the Frenkel ideal). The operative strength must land ~0.15 GPa.
+        let chi_iron = Fixed::from_ratio(115, 10000); // ~0.0115, annealed iron (test-only)
+        let tau_op = operative_shear_strength_gpa(g_iron, chi_iron);
+        assert!(
+            close(tau_op, 0.150, 0.02),
+            "iron operative shear strength ~0.15 GPa: {tau_op:?}"
+        );
+        // A near-ideal covalent solid keeps most of the ideal strength: diamond G ~535, chi ~0.70 -> ~60 GPa.
+        let tau_diamond =
+            operative_shear_strength_gpa(Fixed::from_int(535), Fixed::from_ratio(70, 100));
+        assert!(
+            close(tau_diamond, 60.0, 3.0),
+            "diamond operative shear strength ~60 GPa (near-ideal): {tau_diamond:?}"
+        );
+        // The operative strength never exceeds the ideal, and it rises with the knock-down.
+        assert!(
+            tau_op < tau_th,
+            "operative strength is below the Frenkel ideal"
+        );
+        assert!(
+            operative_shear_strength_gpa(g_iron, Fixed::from_ratio(5, 100)) > tau_op,
+            "a higher knock-down raises the operative strength"
+        );
+        // A stiffer material has a higher ideal strength.
+        assert!(
+            theoretical_shear_strength_gpa(Fixed::from_int(200)) > tau_th,
+            "a higher shear modulus raises the ideal strength"
+        );
+        // Guards: no modulus, or a knock-down outside (0, 1], yields zero; determinism.
+        assert_eq!(theoretical_shear_strength_gpa(ZERO), ZERO);
+        assert_eq!(operative_shear_strength_gpa(g_iron, ZERO), ZERO);
+        assert_eq!(
+            operative_shear_strength_gpa(g_iron, Fixed::from_ratio(15, 10)),
+            ZERO,
+            "a knock-down above 1 is rejected (the operative cannot exceed the ideal)"
+        );
+        assert_eq!(tau_th, theoretical_shear_strength_gpa(g_iron));
+
+        // Through the route (reads B_0, derives G = k*B_0, reuses the Pugh ratio; knock-down caller-supplied).
+        let t = table();
+        let a = anchors();
+        let route = PropertyRoute::new(&t, &a);
+        let k_fe = Fixed::from_ratio(48, 100);
+        let route_tau_th = route
+            .theoretical_shear_strength("Fe", k_fe)
+            .expect("Fe theoretical shear strength");
+        assert!(
+            close(route_tau_th, 13.05, 1.0),
+            "route iron theoretical shear strength ~13 GPa: {route_tau_th:?}"
+        );
+        let route_tau_op = route
+            .operative_shear_strength("Fe", k_fe, chi_iron)
+            .expect("Fe operative shear strength");
+        assert!(
+            route_tau_op > ZERO && route_tau_op < route_tau_th,
+            "route iron operative strength is a positive sub-ideal value: {route_tau_op:?}"
+        );
+        assert!(
+            route.theoretical_shear_strength("Xx", k_fe).is_none(),
+            "an unanchored metal escalates in the strength route"
         );
     }
 }
