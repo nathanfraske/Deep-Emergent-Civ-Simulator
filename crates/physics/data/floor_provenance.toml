@@ -996,3 +996,35 @@ grade = "measured"
 [[grade]]
 id = "Zr"
 grade = "measured"
+
+# --- candidate phases (phase_registry.toml): cited thermodynamic data, measured plus a generality defect (seam-1 reconciled by the two-axis distinction) ---
+
+[[grade]]
+id = "phase.quartz"
+grade = "measured"
+derive_first_defect = true
+
+[[grade]]
+id = "phase.corundum"
+grade = "measured"
+derive_first_defect = true
+
+[[grade]]
+id = "phase.periclase"
+grade = "measured"
+derive_first_defect = true
+
+[[grade]]
+id = "phase.hematite"
+grade = "measured"
+derive_first_defect = true
+
+[[grade]]
+id = "phase.forsterite"
+grade = "measured"
+derive_first_defect = true
+
+[[grade]]
+id = "phase.fayalite"
+grade = "measured"
+derive_first_defect = true

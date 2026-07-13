@@ -206,6 +206,16 @@ def check():
                 manifest_entries.append({"id": b["id"], "bucket": b["bucket"]})
         if missing:
             failures[path.name] = missing
+    # The candidate phases (phase_registry.toml, seam-1 reconciled by the two-axis distinction): they carry
+    # no inline real/fantasy (their thermodynamic data is cited via per-property `source =`), so they are
+    # exempt from the real/fantasy completeness check, but each MUST carry a grade in the register keyed
+    # "phase.<name>" (measured plus a derive-first defect). Bucket None, so the real/fantasy-to-grade
+    # consistency is skipped; only completeness, one-of-seven, and derived-needs-derived_from apply.
+    phase_path = FLOOR_DIR / "phase_registry.toml"
+    if phase_path.exists():
+        for m in re.finditer(r'^name = "([^"]+)"', phase_path.read_text(), re.M):
+            total += 1
+            manifest_entries.append({"id": f"phase.{m.group(1)}", "bucket": None})
     return total, failures, manifest_entries
 
 

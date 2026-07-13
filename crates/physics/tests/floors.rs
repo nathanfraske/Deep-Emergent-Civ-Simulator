@@ -392,4 +392,23 @@ fn every_loaded_floor_entry_has_a_seven_tag_grade_in_the_register() {
             element.symbol
         );
     }
+    // The candidate phases (seam-1 reconciled): each carries a grade keyed "phase.<name>" (measured plus a
+    // derive-first defect, its cited thermodynamic data being a measurement stored not derived). Keyed with
+    // the "phase." prefix so a phase (hematite, Fe2O3) does not collide with a ground substance (hematite).
+    let phases = civsim_physics::petrology_data::PhaseRegistry::standard()
+        .expect("the phase registry loads");
+    for phase in phases.phases() {
+        let key = format!("phase.{}", phase.name);
+        let grade = reg
+            .grade(&key)
+            .unwrap_or_else(|| panic!("phase '{key}' has no grade in floor_provenance.toml"));
+        assert_eq!(
+            grade.grade, "measured",
+            "a candidate phase carries cited thermodynamic data, so it is measured, not derived"
+        );
+        assert!(
+            grade.derive_first_defect,
+            "a phase's stored properties should derive from constituents in the materials buildout"
+        );
+    }
 }

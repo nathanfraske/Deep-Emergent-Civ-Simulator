@@ -105,7 +105,11 @@ mod tests {
     #[test]
     fn the_embedded_floor_register_parses_and_the_authoring_surface_is_the_reserved_couplings() {
         let reg = FloorProvenance::embedded().expect("the embedded floor grade register parses");
-        assert_eq!(reg.grades.len(), 235, "every floor value entry is graded");
+        assert_eq!(
+            reg.grades.len(),
+            241,
+            "every floor value entry is graded (235 axes/substances/elements plus 6 candidate phases)"
+        );
         // The floor authoring surface is the handful of genuine owner-reserved biology and chemistry
         // couplings, source-verified; the physics quantity axes and the metrological atomic-weight
         // conventions are measured, not on the authoring surface (the seam PD1 caught and the gate confirmed
