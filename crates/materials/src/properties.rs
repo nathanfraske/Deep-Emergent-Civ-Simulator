@@ -155,6 +155,37 @@ pub fn poisson_ratio(bulk_modulus_gpa: Fixed, shear_modulus_gpa: Fixed) -> Fixed
     }
 }
 
+/// The intrinsic Vickers hardness `H_V` (GPa), the Chen-Tse (2011) correlation `H_V = 2*(k^2 * G)^0.585 - 3`,
+/// where `k = G/K` is the Pugh ratio (the SAME reserved coefficient as the moduli, so hardness adds NO new
+/// per-class value) and `G` the derived shear modulus. The `^0.585` is the built `Fixed::powf`. The form
+/// constants `{2, 0.585, 3}` are the CITED Chen-Tse fitted parameters (universal, not per-class, not per-world),
+/// verified at the primary source, an empirical moduli-to-hardness correlation. Clamped non-negative (the `-3`
+/// drives a very soft solid to zero). HONEST LIMITS: this is the INTRINSIC (dislocation-free) hardness; the
+/// operative hardness of a ductile metal is lower (dislocation plasticity), the strength knock-down the follow-on.
+/// The correlation is validated on hard covalent solids (diamond lands ~95 GPa against ~96 measured, its home
+/// turf) and is LESS accurate for soft low-`k` metals (iron's intrinsic ~8 GPa against a much softer annealed
+/// ~1 GPa, the same low-`k` metallic-bonding case Chen-Tse note). Non-positive inputs yield zero.
+pub fn chen_tse_hardness_gpa(shear_modulus_gpa: Fixed, pugh_ratio: Fixed) -> Fixed {
+    if shear_modulus_gpa <= ZERO || pugh_ratio <= ZERO {
+        return ZERO;
+    }
+    // base = k^2 * G, formed with checked multiplies (not the wrapping powi), the checked-innermost discipline.
+    let base = match pugh_ratio
+        .checked_mul(pugh_ratio)
+        .and_then(|k_sq| k_sq.checked_mul(shear_modulus_gpa))
+    {
+        Some(x) if x > ZERO => x,
+        _ => return ZERO,
+    };
+    // ^0.585 (the cited Chen-Tse exponent) over the built powf; then 2*(..) - 3, clamped non-negative.
+    let powered = base.powf(Fixed::from_ratio(585, 1000));
+    Fixed::from_int(2)
+        .checked_mul(powered)
+        .and_then(|x| x.checked_sub(Fixed::from_int(3)))
+        .map(|v| v.max(ZERO))
+        .unwrap_or(ZERO)
+}
+
 /// The property route bound to the periodic table and the EOS anchors, so density reads the molar mass and molar
 /// volume, and the Debye temperature reuses the freezer's sound speed over the anchors, all for an anchored
 /// metal. No reserved value enters (this first slice reserves none); a metal missing an anchor escalates
@@ -217,6 +248,16 @@ impl<'a> PropertyRoute<'a> {
         let bulk_modulus = self.anchors.bulk_modulus_gpa(symbol)?;
         let shear = shear_modulus_gpa(bulk_modulus, pugh_ratio);
         Some(poisson_ratio(bulk_modulus, shear))
+    }
+
+    /// The intrinsic Vickers hardness `H_V` (GPa) for an anchored metal, the Chen-Tse correlation over the
+    /// derived shear modulus (`k * B_0`) and the SAME reserved Pugh ratio `k` (no new coefficient). `None`
+    /// (escalate) when the metal has no anchored bulk modulus. Carries the intrinsic-versus-operative and
+    /// soft-low-`k`-metal limits.
+    pub fn hardness(&self, symbol: &str, pugh_ratio: Fixed) -> Option<Fixed> {
+        let bulk_modulus = self.anchors.bulk_modulus_gpa(symbol)?;
+        let shear = shear_modulus_gpa(bulk_modulus, pugh_ratio);
+        Some(chen_tse_hardness_gpa(shear, pugh_ratio))
     }
 }
 
@@ -348,6 +389,44 @@ mod tests {
         assert!(
             route.shear_modulus("Xx", k_fe).is_none(),
             "an unanchored metal escalates in the moduli route"
+        );
+    }
+
+    #[test]
+    fn chen_tse_hardness_lands_diamond_and_gives_iron_intrinsic() {
+        // The Chen-Tse VALIDATION on its home turf (hard covalent solids): diamond k = G/K = 535/443 ~1.208,
+        // G = 535 GPa -> H_V = 2*(1.208^2 * 535)^0.585 - 3 ~95 GPa against the measured ~96 GPa. Cited diamond
+        // moduli in, measured hardness the target, non-circular.
+        let diamond_k = Fixed::from_ratio(1208, 1000);
+        let diamond_g = Fixed::from_int(535);
+        let h_diamond = chen_tse_hardness_gpa(diamond_g, diamond_k);
+        assert!(
+            close(h_diamond, 95.0, 4.0),
+            "Chen-Tse lands diamond ~95 GPa: {h_diamond:?}"
+        );
+        // Iron: k ~0.48, G ~82 GPa -> the INTRINSIC hardness ~8 GPa, higher than soft annealed iron's ~1 GPa
+        // (the gap is the dislocation-plasticity knock-down, the strength slice).
+        let h_iron = chen_tse_hardness_gpa(Fixed::from_int(82), Fixed::from_ratio(48, 100));
+        assert!(
+            close(h_iron, 8.2, 1.5),
+            "iron intrinsic hardness ~8 GPa: {h_iron:?}"
+        );
+        assert!(h_diamond > h_iron, "diamond is far harder than iron");
+        // Guards and determinism.
+        assert_eq!(chen_tse_hardness_gpa(ZERO, diamond_k), ZERO);
+        assert_eq!(chen_tse_hardness_gpa(diamond_g, ZERO), ZERO);
+        assert_eq!(h_diamond, chen_tse_hardness_gpa(diamond_g, diamond_k));
+        // Through the route (reuses k, no new coefficient).
+        let t = table();
+        let a = anchors();
+        let route = PropertyRoute::new(&t, &a);
+        let h_fe = route
+            .hardness("Fe", Fixed::from_ratio(48, 100))
+            .expect("Fe hardness");
+        assert!(h_fe > ZERO, "route iron hardness is positive: {h_fe:?}");
+        assert!(
+            route.hardness("Xx", diamond_k).is_none(),
+            "an unanchored metal escalates in the hardness route"
         );
     }
 }
