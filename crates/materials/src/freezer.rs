@@ -31,15 +31,21 @@
 //! authored, and the caller supplies it; the kernel sees only the dimensionless `E*/(R*T)`, blind to whether
 //! the caller worked in molar (`R*T`) or per-particle (`k_B*T`) units.
 //!
-//! This slice builds the barrier and the rate composition (the kernel consumed, `E_coh` reused). The attempt
-//! frequency `nu = c_s/a` from the EOS anchors, the anchored `[M]` melting points `T_m` for the `D0`
-//! normalization and the consistency twin (`g*R*T_m` and `f*E_coh` agree within class scatter), and the
-//! derived Lindemann `T_m` (staged behind the fixed-point fractional-power primitive, task #45) are the
-//! follow-on slices. The sub-kT polymorph terminal resolves by the derived `kT` boundary, never a reserved
-//! threshold (the Gap-Law discipline: the resolution boundary is a physical quantity).
+//! This module builds the barrier and the rate composition (the kernel consumed, `E_coh` reused) and the
+//! DERIVED Lindemann melting point `T_m` ([`debye_melting_point`]). The `T_m` derivation is NOT gated on the
+//! fractional-power primitive (task #45): a prove-it check found the Lindemann `^(2/3)` is `cbrt^2` over the
+//! built exact `cbrt`, and the Lindemann-Gilvarry chain collapses algebraically to `T_m ~ B_0 * V_atom`, so it
+//! is buildable now and is alien-general (any substance with EOS anchors derives its own `T_m`, no cited
+//! melting point). The follow-on slices are the attempt frequency `nu = c_s/a` closing the `D0 ~ a^2 * nu`
+//! normalization, the Frost-Ashby creep axis `T/T_m`, and the consistency twin (`g*R*T_m` and `f*E_coh` agree
+//! within class scatter, sited in a test file). The sub-kT polymorph terminal resolves by the derived `kT`
+//! boundary, never a reserved threshold (the Gap-Law discipline: the resolution boundary is a physical
+//! quantity).
 
 use civsim_core::Fixed;
 use civsim_physics::laws;
+use civsim_physics::metal_eos::MetalEosAnchors;
+use civsim_physics::rose_eos;
 
 use crate::metallic::MetallicRoute;
 
@@ -84,17 +90,85 @@ pub fn self_diffusivity(
     laws::arrhenius_rate(attempt_frequency, reduced)
 }
 
-/// The freezer route bound to the metallic route, so the Form-B barrier reads the real derived `E_coh` for an
-/// anchored metal. The reserved vacancy fraction `f` is supplied by the caller, never planted, so this reuses
-/// the substrate's derived cohesive energy without entering a value.
+/// The derived Lindemann melting temperature `T_m` (K), the algebraic collapse of the Lindemann-Gilvarry
+/// criterion when the Debye temperature is taken from the bulk sound speed `c_s = sqrt(B_0/rho)`. Walking the
+/// chain `T_m = C_L*M*theta_D^2*V^(2/3)` with `theta_D = C_theta*c_s*n^(1/3)` and `c_s^2 = B_0*V_atom/M`, the
+/// atomic mass `M` CANCELS and `V^(1/3)*V^(2/3) = V`, collapsing to
+/// `T_m = delta^2 * [(6*pi^2)^(2/3)/9] * (B_0 * V_atom / k_B)`. So the melting point is the elastic energy per
+/// atom `B_0 * V_atom` (a pressure times a volume, an energy) over the thermal scale, times the squared
+/// Lindemann ratio and a pure-math factor. Every fractional power in the original chain is a built exact
+/// `sqrt`/`cbrt`/integer power (no fractional-power primitive), so this is buildable now and admits the alien:
+/// any substance with EOS anchors derives its own `T_m` from its own bond-strength physics, no cited melting
+/// point needed.
+///
+/// The Lindemann ratio `delta` (the critical vibrational amplitude as a fraction of the interatomic distance,
+/// famously near 0.1) is RESERVED-with-basis, per bonding class `[E]`, keyed off the material's class, verified
+/// at the primary source before entry; the caller supplies it, so no value is planted. `[(6*pi^2)^(2/3)/9]` is
+/// derived here from `Fixed::PI` and the exact `cbrt`. The `k_B` fold (`10^-21 J / k_B`, mapping `GPa*A^3` to
+/// kelvin) is the exact rational `10^8 / 1380649` from the SI-exact Boltzmann constant, folded once at the
+/// atomic scale (the raw `10^-21`/`k_B` underflows Q32.32, the same fold `nernst_emf` and the Eyring prefactor
+/// use). HONEST LIMIT: with only the bulk modulus among the anchors (no shear modulus), the Debye velocity is
+/// approximated by the bulk sound speed, so the transverse modes are folded into `delta`; a shear-aware Debye
+/// average is the follow-on when the elastic anchors carry `G`. Non-positive inputs (no elastic scale, no
+/// volume, or no ratio) yield zero (no melting point).
+pub fn debye_melting_point(
+    bulk_modulus_gpa: Fixed,
+    atomic_volume_angstrom3: Fixed,
+    lindemann_ratio: Fixed,
+) -> Fixed {
+    if bulk_modulus_gpa <= ZERO || atomic_volume_angstrom3 <= ZERO || lindemann_ratio <= ZERO {
+        return ZERO;
+    }
+    // The elastic energy per atom in the atomic-scale unit (GPa*A^3).
+    let elastic = match bulk_modulus_gpa.checked_mul(atomic_volume_angstrom3) {
+        Some(e) => e,
+        None => return Fixed::MAX,
+    };
+    let delta_sq = lindemann_ratio.powi(2);
+    // delta^2 * K_num * K_fold * (B_0 * V_atom): the big factors (K_num*K_fold*elastic ~ 1e5 K) then the
+    // delta^2 ~ 1e-2 scaling, so no intermediate overflows for physical inputs.
+    elastic
+        .checked_mul(lindemann_numeric_factor())
+        .and_then(|x| x.checked_mul(kb_fold_gpa_angstrom3_to_kelvin()))
+        .and_then(|x| x.checked_mul(delta_sq))
+        .unwrap_or(Fixed::MAX)
+}
+
+/// The pure-math Lindemann-Gilvarry collapse factor `(6*pi^2)^(2/3)/9`, derived from `Fixed::PI` and the exact
+/// `cbrt` (no authored decimal): `6*pi^2 ~ 59.22`, its cube root squared `~15.20`, over nine `~1.689`.
+fn lindemann_numeric_factor() -> Fixed {
+    let six_pi_sq = Fixed::from_int(6)
+        .checked_mul(Fixed::PI)
+        .and_then(|x| x.checked_mul(Fixed::PI))
+        .unwrap_or(ZERO);
+    // (6*pi^2)^(2/3) = cbrt(6*pi^2)^2, both exact built ops.
+    let two_thirds_power = six_pi_sq.cbrt().powi(2);
+    two_thirds_power
+        .checked_div(Fixed::from_int(9))
+        .unwrap_or(ZERO)
+}
+
+/// The `k_B` fold mapping the atomic-scale elastic energy `B_0[GPa]*V_atom[A^3]` (`= 10^-21 J`) to kelvin:
+/// `10^-21 / k_B`. With the SI-exact `k_B = 1.380649e-23 J/K`, this is the exact rational `10^8 / 1380649
+/// ~ 72.43 K/(GPa*A^3)`, folded once at the cited atomic scale (the raw `10^-21`/`k_B` underflows Q32.32).
+fn kb_fold_gpa_angstrom3_to_kelvin() -> Fixed {
+    Fixed::from_ratio(100_000_000, 1_380_649)
+}
+
+/// The freezer route bound to the metallic route and the EOS anchors, so the Form-B barrier reads the derived
+/// `E_coh` and the Lindemann `T_m` reads the anchors' `B_0` and `V_m`, all for an anchored metal. The reserved
+/// vacancy fraction `f` and Lindemann ratio `delta` are supplied by the caller, never planted, so the route
+/// reuses the substrate's derived quantities without entering a value.
 pub struct FreezerRoute<'a> {
     metallic: &'a MetallicRoute<'a>,
+    anchors: &'a MetalEosAnchors,
 }
 
 impl<'a> FreezerRoute<'a> {
-    /// Bind the freezer to the metallic route (the source of the derived `E_coh`).
-    pub fn new(metallic: &'a MetallicRoute<'a>) -> Self {
-        FreezerRoute { metallic }
+    /// Bind the freezer to the metallic route (the source of the derived `E_coh`) and the EOS anchors (`B_0`,
+    /// `V_m`).
+    pub fn new(metallic: &'a MetallicRoute<'a>, anchors: &'a MetalEosAnchors) -> Self {
+        FreezerRoute { metallic, anchors }
     }
 
     /// The Form-B barrier `E* = f * E_coh` for an anchored metal, or `None` (escalate) when the metal carries
@@ -103,6 +177,17 @@ impl<'a> FreezerRoute<'a> {
     pub fn barrier(&self, symbol: &str, vacancy_fraction: Fixed) -> Option<Fixed> {
         let e_coh = self.metallic.cohesive_energy(symbol)?;
         Some(diffusion_barrier(e_coh, vacancy_fraction))
+    }
+
+    /// The derived Lindemann melting point `T_m` (K) for an anchored metal, from its EOS anchors (`B_0`, `V_m`)
+    /// and the reserved per-class Lindemann ratio, or `None` (escalate) when the metal carries no anchors.
+    /// Reuses the built `cm^3/mol -> A^3/atom` converter for `V_atom`. `delta` is the caller's reserved value,
+    /// never planted.
+    pub fn melting_point(&self, symbol: &str, lindemann_ratio: Fixed) -> Option<Fixed> {
+        let b0 = self.anchors.bulk_modulus_gpa(symbol)?;
+        let v_m = self.anchors.molar_volume(symbol)?;
+        let v_atom = v_m.checked_mul(rose_eos::cm3_per_mol_to_angstrom3_per_atom())?;
+        Some(debye_melting_point(b0, v_atom, lindemann_ratio))
     }
 }
 
@@ -122,6 +207,9 @@ mod tests {
     }
     fn r_kj_per_mol_k() -> Fixed {
         Fixed::from_ratio(8314, 1_000_000) // R = 8.314e-3 kJ/(mol K), derived (N_A*k_B)
+    }
+    fn delta_fixture() -> Fixed {
+        Fixed::from_ratio(9, 100) // the Lindemann ratio delta ~ 0.09 (test-only, not a canonical entry)
     }
     fn close(a: Fixed, b: f64, tol: f64) -> bool {
         (a.to_f64_lossy() - b).abs() < tol
@@ -229,7 +317,7 @@ mod tests {
         let table = PeriodicTable::standard().expect("periodic table");
         let anchors = MetalEosAnchors::standard().expect("metal EOS anchors");
         let metallic = MetallicRoute::new(&table, &anchors);
-        let freezer = FreezerRoute::new(&metallic);
+        let freezer = FreezerRoute::new(&metallic, &anchors);
 
         let fe = freezer.barrier("Fe", f_fixture()).expect("Fe barrier");
         let na = freezer.barrier("Na", f_fixture()).expect("Na barrier");
@@ -248,6 +336,83 @@ mod tests {
         assert!(
             freezer.barrier("Xx", f_fixture()).is_none(),
             "an unanchored symbol escalates rather than fabricating a barrier"
+        );
+    }
+
+    #[test]
+    fn debye_melting_point_recovers_a_real_melting_point_at_the_lindemann_ratio() {
+        // The collapse and the k_B fold are validated by feeding the LITERATURE Lindemann ratio and recovering
+        // a cited melting point (used here only as a test reference, never entered into the mechanism). Iron:
+        // B_0 = 170 GPa, V_m = 7.09 cm^3/mol -> V_atom ~ 11.77 A^3, and delta ~ 0.086 gives T_m ~ 1811 K (the
+        // measured value). If the pure-math factor or the k_B fold were wrong, the literature delta would not
+        // recover T_m, so this pins both derived constants numerically.
+        let b0_fe = Fixed::from_int(170);
+        let v_atom_fe = Fixed::from_ratio(709, 100)
+            .checked_mul(rose_eos::cm3_per_mol_to_angstrom3_per_atom())
+            .expect("Fe atomic volume");
+        let t_m_fe = debye_melting_point(b0_fe, v_atom_fe, Fixed::from_ratio(86, 1000));
+        assert!(
+            close(t_m_fe, 1811.0, 60.0),
+            "the Lindemann ratio ~0.086 recovers iron's measured melting point ~1811 K: {t_m_fe:?}"
+        );
+        // T_m rises with the elastic energy per atom B_0 * V_atom (the collapse's content): a softer material of
+        // the same volume melts lower at the same delta.
+        let softer =
+            debye_melting_point(Fixed::from_int(80), v_atom_fe, Fixed::from_ratio(86, 1000));
+        assert!(
+            softer < t_m_fe && softer > ZERO,
+            "a softer material melts lower"
+        );
+        // Guards: no elastic scale, no volume, or no ratio, no melting point.
+        assert_eq!(debye_melting_point(ZERO, v_atom_fe, delta_fixture()), ZERO);
+        assert_eq!(debye_melting_point(b0_fe, ZERO, delta_fixture()), ZERO);
+        assert_eq!(debye_melting_point(b0_fe, v_atom_fe, ZERO), ZERO);
+        // Deterministic (Principle 3).
+        assert_eq!(
+            t_m_fe,
+            debye_melting_point(b0_fe, v_atom_fe, Fixed::from_ratio(86, 1000))
+        );
+    }
+
+    #[test]
+    fn the_freezer_route_derives_the_melting_point_from_the_anchors() {
+        // The route reads B_0 and V_m from the EOS anchors and reuses the built cm^3/mol -> A^3 converter, so a
+        // stiffer, larger-volume metal melts higher at the same reserved delta. Fe (high B_0 * V_atom) melts
+        // well above Na (low), tracking the elastic energy per atom, with delta the caller's reserved value.
+        let table = PeriodicTable::standard().expect("periodic table");
+        let anchors = MetalEosAnchors::standard().expect("metal EOS anchors");
+        let metallic = MetallicRoute::new(&table, &anchors);
+        let freezer = FreezerRoute::new(&metallic, &anchors);
+
+        let fe = freezer
+            .melting_point("Fe", delta_fixture())
+            .expect("Fe melting point");
+        let na = freezer
+            .melting_point("Na", delta_fixture())
+            .expect("Na melting point");
+        assert!(
+            fe > na && na > ZERO,
+            "T_m tracks the elastic energy per atom (Fe melts above Na)"
+        );
+        // The route melting point equals the pure function over the converted anchors (exact reuse).
+        let v_atom_fe = anchors
+            .molar_volume("Fe")
+            .expect("Fe V_m")
+            .checked_mul(rose_eos::cm3_per_mol_to_angstrom3_per_atom())
+            .expect("Fe V_atom");
+        assert_eq!(
+            fe,
+            debye_melting_point(
+                anchors.bulk_modulus_gpa("Fe").expect("Fe B_0"),
+                v_atom_fe,
+                delta_fixture()
+            ),
+            "the route T_m is the Lindemann collapse over the anchors' B_0 and V_atom"
+        );
+        // An unanchored symbol escalates rather than fabricating a melting point.
+        assert!(
+            freezer.melting_point("Xx", delta_fixture()).is_none(),
+            "an unanchored symbol escalates"
         );
     }
 }

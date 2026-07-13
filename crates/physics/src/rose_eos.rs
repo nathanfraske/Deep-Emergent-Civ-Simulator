@@ -43,8 +43,9 @@ use civsim_core::Fixed;
 /// The `cm^3/mol` to `A^3/atom` conversion `10^24 / N_A = 1.6605391 A^3.mol/cm^3` (CODATA: `N_A = 6.02214076e23`
 /// per mol, the exact SI-defined Avogadro constant since 2019), as the exact rational `10^9 / 602214076`. The
 /// per-atom volume the Wigner-Seitz radius needs, built by exact ratio rather than a decimal parse. A fundamental
-/// floor constant (Principle 11).
-fn cm3_per_mol_to_angstrom3_per_atom() -> Fixed {
+/// floor constant (Principle 11). Public so consumers that need the per-atom volume directly (the freezer's
+/// Lindemann melting point) reuse the exact converter rather than replicating the ratio.
+pub fn cm3_per_mol_to_angstrom3_per_atom() -> Fixed {
     Fixed::from_ratio(1_000_000_000, 602_214_076)
 }
 
