@@ -21,7 +21,8 @@
 //! physics proof (the mace-versus-morningstar strike, edibility as a relation) lives in
 //! the law harness in `laws.rs`; this is the data half of the proof.
 
-use civsim_physics::PhysicsRegistry;
+use civsim_physics::periodic::PeriodicTable;
+use civsim_physics::{PhysicsRegistry, Provenance};
 
 fn data_path(file: &str) -> String {
     format!("{}/data/{}", env!("CARGO_MANIFEST_DIR"), file)
@@ -295,5 +296,119 @@ fn every_law_input_resolves_to_a_defined_axis() {
                 );
             }
         }
+    }
+}
+
+// The provenance string a floor value carries, real-with-source or fantasy-reserved; both variants hold the
+// ground for the value (the citation or the basis), which the born-provenance invariant requires non-empty.
+fn provenance_ground(p: &Provenance) -> &str {
+    match p {
+        Provenance::RealWithSource(s) | Provenance::FantasyReserved(s) => s,
+    }
+}
+
+#[test]
+fn the_full_floor_is_born_provenance_tagged() {
+    // The floor-provenance born gate (provenance register Phase 2, the floor loader): the sibling of the
+    // calibration born-provenance test one register level down. Every VALUE entry the physics floor carries
+    // (a QuantityAxis, a Substance, a periodic Element) declares a provenance, so a floor value can never
+    // ship untagged. The Rust loader already enforces this fail-loud (`provenance_from` returns
+    // `MissingProvenance` when an entry declares neither `real` nor `fantasy`), so `ground()` and
+    // `PeriodicTable::standard()` panicking on a missing tag IS the enforcement; this test exercises it over
+    // the real embedded floor and asserts each entry's provenance ground is non-empty (a degenerate
+    // `RealWithSource("")` is as much a defect as an absent tag). Laws are derivations and carry no
+    // provenance value (they are implicitly derived); phases derive their provenance from their constituent
+    // substances (the seam-1 ruling), so neither is asserted here. Phase 2 refines these two tags into the
+    // seven-tag register; this establishes the enforcement surface, byte-neutral. The counts are the current
+    // floor totals (they grow with the world), asserted as non-empty lower bounds rather than exact so a new
+    // floor entry does not break the invariant test.
+    let reg = PhysicsRegistry::ground()
+        .expect("the ground floor loads with every value born provenance-tagged");
+    let mut axis_count = 0;
+    for axis in reg.axes() {
+        assert!(
+            !provenance_ground(&axis.provenance).trim().is_empty(),
+            "floor axis '{}' carries an empty provenance ground",
+            axis.id
+        );
+        axis_count += 1;
+    }
+    let mut substance_count = 0;
+    for sub in reg.substances() {
+        assert!(
+            !provenance_ground(&sub.provenance).trim().is_empty(),
+            "floor substance '{}' carries an empty provenance ground",
+            sub.id
+        );
+        substance_count += 1;
+    }
+    assert!(
+        axis_count > 0 && substance_count > 0,
+        "the ground floor is non-empty"
+    );
+
+    let table = PeriodicTable::standard()
+        .expect("the periodic table loads with every element provenance-tagged");
+    let mut element_count = 0;
+    for element in table.elements() {
+        assert!(
+            !element.provenance.trim().is_empty(),
+            "periodic element '{}' carries an empty provenance ground",
+            element.symbol
+        );
+        element_count += 1;
+    }
+    assert!(element_count > 0, "the periodic table is non-empty");
+}
+
+#[test]
+fn every_loaded_floor_entry_has_a_seven_tag_grade_in_the_register() {
+    use civsim_physics::floor_provenance::FloorProvenance;
+    // The floor grade register (Phase 2 slice 2) must stay in sync with the LOADED floor: every axis and
+    // substance the ground registry carries, and every periodic element, has a seven-tag grade keyed by its
+    // id. This is the cross-check the Python floor-provenance gate makes structurally, asserted here against
+    // the real loaded structs so a new floor entry without a grade fails the build.
+    let reg = FloorProvenance::embedded().expect("the floor grade register parses");
+    let ground = PhysicsRegistry::ground().expect("the ground floor loads");
+    let table = PeriodicTable::standard().expect("the periodic table loads");
+    for axis in ground.axes() {
+        assert!(
+            reg.grade(&axis.id).is_some(),
+            "floor axis '{}' has no grade in floor_provenance.toml",
+            axis.id
+        );
+    }
+    for sub in ground.substances() {
+        assert!(
+            reg.grade(&sub.id).is_some(),
+            "floor substance '{}' has no grade in floor_provenance.toml",
+            sub.id
+        );
+    }
+    for element in table.elements() {
+        assert!(
+            reg.grade(&element.symbol).is_some(),
+            "periodic element '{}' has no grade in floor_provenance.toml",
+            element.symbol
+        );
+    }
+    // The candidate phases (seam-1 reconciled): each carries a grade keyed "phase.<name>" (measured plus a
+    // derive-first defect, its cited thermodynamic data being a measurement stored not derived). Keyed with
+    // the "phase." prefix so a phase (hematite, Fe2O3) does not collide with a ground substance (hematite).
+    let phases = civsim_physics::petrology_data::PhaseRegistry::standard()
+        .expect("the phase registry loads");
+    for phase in phases.phases() {
+        let key = format!("phase.{}", phase.name);
+        let grade = reg
+            .grade(&key)
+            .unwrap_or_else(|| panic!("phase '{key}' has no grade in floor_provenance.toml"));
+        assert_eq!(
+            grade.grade, "measured",
+            "a candidate phase carries cited thermodynamic data, so it is measured, not derived"
+        );
+        assert!(
+            grade.derive_first_defect,
+            "a phase's stored properties should derive from constituents in the materials buildout"
+        );
     }
 }

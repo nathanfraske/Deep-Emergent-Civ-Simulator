@@ -1,0 +1,1030 @@
+# Copyright 2026 Nathan M. Fraske
+# Licensed under the Apache License, Version 2.0; see LICENSE.
+#
+# The physics-floor provenance grade register (provenance register Phase 2, the floor unification).
+# Sidecar to the floor manifests: each value entry's two-tag real/fantasy provenance refined into the
+# owner's seven-tag register (docs/PROVENANCE_LEDGER.md). A `real` entry refines to [M] measured, [D]
+# derived (with derived_from), or [E] estimator; a `fantasy` entry to [A] authored, [C] closure, [D]
+# derived, or [X] contingency. The tag is DERIVED from the entry's own recorded ground, source-verified
+# (the panel is a lead, source is the verdict), never re-authored. `derive_first_defect` marks a bulk
+# material property stored on the substance rather than derived from its components: a generality defect
+# (Principle 11, admit-the-alien) ORTHOGONAL to the refutability provenance, so the value stays [M] and
+# the defect is separately countable for the materials buildout that resolves it (the gate's seam-2
+# correction, verified at source). scripts/floor_provenance_gate.py enforces completeness and the
+# real/fantasy-to-grade consistency; the honesty number is the closure-plus-authored query over this
+# register unified with reserved.toml.
+
+[[grade]]
+id = "bio.consumer.assimilation"
+grade = "measured"
+
+[[grade]]
+id = "bio.consumer.fermentation"
+grade = "measured"
+
+[[grade]]
+id = "bio.consumer.hill_exponent"
+grade = "closure"
+unsettled = true
+
+[[grade]]
+id = "bio.consumer.reference_tolerance"
+grade = "measured"
+
+[[grade]]
+id = "bio.consumer.requirement"
+grade = "measured"
+
+[[grade]]
+id = "bio.convective_surface"
+grade = "measured"
+unsettled = true
+
+[[grade]]
+id = "bio.decomposition_barrier"
+grade = "measured"
+
+[[grade]]
+id = "bio.decomposition_rate"
+grade = "closure"
+
+[[grade]]
+id = "bio.energy_density"
+grade = "measured"
+
+[[grade]]
+id = "bio.lipid_fraction"
+grade = "measured"
+
+[[grade]]
+id = "bio.mineral_ash_fraction"
+grade = "measured"
+
+[[grade]]
+id = "bio.net_harm"
+grade = "closure"
+unsettled = true
+
+[[grade]]
+id = "bio.net_nutrition"
+grade = "derived"
+derived_from = ["law.net_nutrition"]
+unsettled = true
+
+[[grade]]
+id = "bio.nonstructural_carbohydrate_fraction"
+grade = "measured"
+
+[[grade]]
+id = "bio.protein_fraction"
+grade = "measured"
+
+[[grade]]
+id = "bio.respiratory_surface"
+grade = "measured"
+unsettled = true
+
+[[grade]]
+id = "bio.structural_carbohydrate_fraction"
+grade = "measured"
+
+[[grade]]
+id = "bio.toxin.alkaloid"
+grade = "measured"
+
+[[grade]]
+id = "bio.toxin.cardiac_glycoside"
+grade = "measured"
+
+[[grade]]
+id = "bio.toxin.cyanogenic"
+grade = "measured"
+
+[[grade]]
+id = "bio.toxin_load_coarse"
+grade = "derived"
+derived_from = ["bio.toxin.alkaloid", "bio.toxin.cyanogenic", "bio.toxin.cardiac_glycoside", "registered per-class toxin maxima"]
+
+[[grade]]
+id = "bio.water_fraction"
+grade = "measured"
+
+[[grade]]
+id = "chem.acidity"
+grade = "measured"
+
+[[grade]]
+id = "chem.activation_energy"
+grade = "measured"
+
+[[grade]]
+id = "chem.corrosion_susceptibility"
+grade = "closure"
+unsettled = true
+
+[[grade]]
+id = "chem.formation_enthalpy"
+grade = "measured"
+
+[[grade]]
+id = "chem.solute_affinity"
+grade = "closure"
+unsettled = true
+
+[[grade]]
+id = "chem.standard_potential"
+grade = "measured"
+
+[[grade]]
+id = "opt.absorption_coefficient"
+grade = "measured"
+
+[[grade]]
+id = "opt.emissivity"
+grade = "measured"
+
+[[grade]]
+id = "opt.emissivity.band_0"
+grade = "measured"
+
+[[grade]]
+id = "opt.emissivity.band_1"
+grade = "measured"
+
+[[grade]]
+id = "opt.emissivity.band_2"
+grade = "measured"
+
+[[grade]]
+id = "opt.reflectance"
+grade = "measured"
+
+[[grade]]
+id = "opt.refractive_index"
+grade = "measured"
+
+[[grade]]
+id = "opt.scattering_coefficient"
+grade = "measured"
+unsettled = true
+
+[[grade]]
+id = "opt.source_power"
+grade = "measured"
+
+[[grade]]
+id = "opt.spectral_band"
+grade = "closure"
+unsettled = true
+
+[[grade]]
+id = "opt.transmittance"
+grade = "measured"
+
+[[grade]]
+id = "copper"
+grade = "measured"
+derive_first_defect = true
+
+[[grade]]
+id = "elec.capacitance"
+grade = "measured"
+
+[[grade]]
+id = "elec.charge"
+grade = "measured"
+
+[[grade]]
+id = "elec.current"
+grade = "measured"
+
+[[grade]]
+id = "elec.electric_field"
+grade = "measured"
+
+[[grade]]
+id = "elec.emf"
+grade = "measured"
+
+[[grade]]
+id = "elec.potential"
+grade = "measured"
+
+[[grade]]
+id = "elec.resistance"
+grade = "measured"
+
+[[grade]]
+id = "elec.resistivity"
+grade = "measured"
+
+[[grade]]
+id = "lodestone"
+grade = "estimator"
+derive_first_defect = true
+unsettled = true
+
+[[grade]]
+id = "mag.coupling_coefficient"
+grade = "measured"
+
+[[grade]]
+id = "mag.flux"
+grade = "measured"
+
+[[grade]]
+id = "mag.flux_density"
+grade = "measured"
+
+[[grade]]
+id = "mag.inductance"
+grade = "measured"
+
+[[grade]]
+id = "mag.magnetic_moment"
+grade = "measured"
+
+[[grade]]
+id = "mag.permeability"
+grade = "measured"
+
+[[grade]]
+id = "acoustic.absorption_coefficient"
+grade = "measured"
+
+[[grade]]
+id = "acoustic.absorption_reference"
+grade = "measured"
+
+[[grade]]
+id = "acoustic.formant_frequency"
+grade = "measured"
+
+[[grade]]
+id = "acoustic.frequency"
+grade = "measured"
+
+[[grade]]
+id = "acoustic.resonator_length"
+grade = "measured"
+
+[[grade]]
+id = "acoustic.source_power"
+grade = "measured"
+
+[[grade]]
+id = "air"
+grade = "measured"
+
+[[grade]]
+id = "chem.acentric_factor"
+grade = "measured"
+
+[[grade]]
+id = "chem.boiling_point"
+grade = "measured"
+
+[[grade]]
+id = "chem.critical_pressure"
+grade = "measured"
+
+[[grade]]
+id = "chem.critical_temperature"
+grade = "measured"
+
+[[grade]]
+id = "chem.fusion_enthalpy"
+grade = "measured"
+
+[[grade]]
+id = "chem.triple_point_temperature"
+grade = "measured"
+
+[[grade]]
+id = "chem.vaporization_enthalpy"
+grade = "measured"
+
+[[grade]]
+id = "fluid.bulk_modulus"
+grade = "measured"
+
+[[grade]]
+id = "fluid.channel_radius"
+grade = "measured"
+
+[[grade]]
+id = "fluid.column_height"
+grade = "contingency"
+unsettled = true
+
+[[grade]]
+id = "fluid.convective_coefficient"
+grade = "measured"
+
+[[grade]]
+id = "fluid.drag_coefficient"
+grade = "measured"
+
+[[grade]]
+id = "fluid.driving_pressure"
+grade = "measured"
+
+[[grade]]
+id = "fluid.dynamic_viscosity"
+grade = "measured"
+
+[[grade]]
+id = "fluid.gas_transfer_coefficient"
+grade = "estimator"
+unsettled = true
+
+[[grade]]
+id = "fluid.immersed_volume"
+grade = "contingency"
+unsettled = true
+
+[[grade]]
+id = "fluid.lift_coefficient"
+grade = "measured"
+
+[[grade]]
+id = "fluid.moisture_content"
+grade = "measured"
+
+[[grade]]
+id = "fluid.respirable_content"
+grade = "measured"
+
+[[grade]]
+id = "fluid.surface_tension"
+grade = "measured"
+
+[[grade]]
+id = "fluid.vapor_pressure"
+grade = "measured"
+
+[[grade]]
+id = "therm.temperature"
+grade = "measured"
+
+[[grade]]
+id = "water"
+grade = "measured"
+
+[[grade]]
+id = "geo.decay_constant"
+grade = "derived"
+derived_from = ["half-life (U-238 4.468 Gyr, U-235 0.7038 Gyr, Th-232 14.05 Gyr, K-40 1.251 Gyr; Audi et al. 2003)", "law lambda = ln2 / half-life"]
+unsettled = true
+
+[[grade]]
+id = "geo.internal_heat_production"
+grade = "measured"
+
+[[grade]]
+id = "geo.isotope_concentration"
+grade = "measured"
+unsettled = true
+
+[[grade]]
+id = "geo.specific_heat_production"
+grade = "measured"
+
+[[grade]]
+id = "k40"
+grade = "measured"
+
+[[grade]]
+id = "th232"
+grade = "measured"
+
+[[grade]]
+id = "u235"
+grade = "measured"
+
+[[grade]]
+id = "u238"
+grade = "measured"
+
+[[grade]]
+id = "carrion"
+grade = "measured"
+derive_first_defect = true
+
+[[grade]]
+id = "clay"
+grade = "measured"
+derive_first_defect = true
+
+[[grade]]
+id = "granite"
+grade = "measured"
+derive_first_defect = true
+
+[[grade]]
+id = "halite"
+grade = "measured"
+derive_first_defect = true
+
+[[grade]]
+id = "hematite"
+grade = "measured"
+derive_first_defect = true
+
+[[grade]]
+id = "loam"
+grade = "measured"
+derive_first_defect = true
+
+[[grade]]
+id = "oilseed"
+grade = "measured"
+derive_first_defect = true
+
+[[grade]]
+id = "spent_hull"
+grade = "measured"
+derive_first_defect = true
+
+[[grade]]
+id = "tuber"
+grade = "measured"
+derive_first_defect = true
+
+[[grade]]
+id = "iron"
+grade = "measured"
+derive_first_defect = true
+
+[[grade]]
+id = "mat.compressive_strength"
+grade = "measured"
+
+[[grade]]
+id = "mat.density"
+grade = "measured"
+
+[[grade]]
+id = "mat.ductility"
+grade = "measured"
+
+[[grade]]
+id = "mat.elastic_modulus"
+grade = "measured"
+
+[[grade]]
+id = "mat.fracture_energy"
+grade = "measured"
+
+[[grade]]
+id = "mat.fracture_strength"
+grade = "measured"
+
+[[grade]]
+id = "mat.indentation_hardness"
+grade = "measured"
+
+[[grade]]
+id = "mat.poisson_ratio"
+grade = "measured"
+
+[[grade]]
+id = "mat.shear_strength"
+grade = "measured"
+
+[[grade]]
+id = "mat.specific_cut_energy"
+grade = "measured"
+
+[[grade]]
+id = "mat.ultimate_tensile_strength"
+grade = "measured"
+
+[[grade]]
+id = "mat.wear_coefficient"
+grade = "measured"
+unsettled = true
+
+[[grade]]
+id = "mat.yield_strength"
+grade = "measured"
+
+[[grade]]
+id = "mech.arm_length"
+grade = "measured"
+
+[[grade]]
+id = "mech.constraint_factor"
+grade = "measured"
+
+[[grade]]
+id = "mech.contact_area"
+grade = "measured"
+
+[[grade]]
+id = "mech.cross_section_area"
+grade = "measured"
+
+[[grade]]
+id = "mech.edge_radius"
+grade = "measured"
+
+[[grade]]
+id = "mech.effective_length_factor"
+grade = "measured"
+
+[[grade]]
+id = "mech.force"
+grade = "measured"
+
+[[grade]]
+id = "mech.gravitational_acceleration"
+grade = "measured"
+
+[[grade]]
+id = "mech.kinetic_friction"
+grade = "measured"
+
+[[grade]]
+id = "mech.mass"
+grade = "measured"
+
+[[grade]]
+id = "mech.restitution"
+grade = "measured"
+
+[[grade]]
+id = "mech.second_moment_of_area"
+grade = "measured"
+
+[[grade]]
+id = "mech.section_modulus"
+grade = "measured"
+
+[[grade]]
+id = "mech.slide_distance"
+grade = "measured"
+
+[[grade]]
+id = "mech.static_friction"
+grade = "measured"
+
+[[grade]]
+id = "mech.stroke_length"
+grade = "measured"
+
+[[grade]]
+id = "mech.velocity"
+grade = "measured"
+
+[[grade]]
+id = "oak"
+grade = "measured"
+derive_first_defect = true
+
+[[grade]]
+id = "therm.boiling_temperature"
+grade = "measured"
+
+[[grade]]
+id = "therm.conductivity"
+grade = "measured"
+
+[[grade]]
+id = "therm.expansion"
+grade = "measured"
+
+[[grade]]
+id = "therm.fuel_value"
+grade = "measured"
+
+[[grade]]
+id = "therm.ignition_temperature"
+grade = "measured"
+
+[[grade]]
+id = "therm.latent_heat"
+grade = "measured"
+
+[[grade]]
+id = "therm.melting_temperature"
+grade = "measured"
+
+[[grade]]
+id = "therm.oxidiser_demand"
+grade = "measured"
+unsettled = true
+
+[[grade]]
+id = "therm.specific_heat"
+grade = "measured"
+
+[[grade]]
+id = "Ac"
+grade = "measured"
+unsettled = true
+
+[[grade]]
+id = "Ag"
+grade = "measured"
+
+[[grade]]
+id = "Al"
+grade = "measured"
+
+[[grade]]
+id = "Ar"
+grade = "measured"
+
+[[grade]]
+id = "As"
+grade = "measured"
+
+[[grade]]
+id = "At"
+grade = "measured"
+unsettled = true
+
+[[grade]]
+id = "Au"
+grade = "measured"
+
+[[grade]]
+id = "B"
+grade = "measured"
+
+[[grade]]
+id = "Ba"
+grade = "measured"
+
+[[grade]]
+id = "Be"
+grade = "measured"
+
+[[grade]]
+id = "Bi"
+grade = "measured"
+
+[[grade]]
+id = "Br"
+grade = "measured"
+
+[[grade]]
+id = "C"
+grade = "measured"
+
+[[grade]]
+id = "Ca"
+grade = "measured"
+
+[[grade]]
+id = "Cd"
+grade = "measured"
+
+[[grade]]
+id = "Ce"
+grade = "measured"
+
+[[grade]]
+id = "Cl"
+grade = "measured"
+
+[[grade]]
+id = "Co"
+grade = "measured"
+
+[[grade]]
+id = "Cr"
+grade = "measured"
+
+[[grade]]
+id = "Cs"
+grade = "measured"
+
+[[grade]]
+id = "Cu"
+grade = "measured"
+
+[[grade]]
+id = "Dy"
+grade = "measured"
+
+[[grade]]
+id = "Er"
+grade = "measured"
+
+[[grade]]
+id = "Eu"
+grade = "measured"
+
+[[grade]]
+id = "F"
+grade = "measured"
+
+[[grade]]
+id = "Fe"
+grade = "measured"
+
+[[grade]]
+id = "Fr"
+grade = "measured"
+unsettled = true
+
+[[grade]]
+id = "Ga"
+grade = "measured"
+
+[[grade]]
+id = "Gd"
+grade = "measured"
+
+[[grade]]
+id = "Ge"
+grade = "measured"
+
+[[grade]]
+id = "H"
+grade = "measured"
+
+[[grade]]
+id = "He"
+grade = "measured"
+
+[[grade]]
+id = "Hf"
+grade = "measured"
+
+[[grade]]
+id = "Hg"
+grade = "measured"
+
+[[grade]]
+id = "Ho"
+grade = "measured"
+
+[[grade]]
+id = "I"
+grade = "measured"
+
+[[grade]]
+id = "In"
+grade = "measured"
+
+[[grade]]
+id = "Ir"
+grade = "measured"
+
+[[grade]]
+id = "K"
+grade = "measured"
+
+[[grade]]
+id = "Kr"
+grade = "measured"
+
+[[grade]]
+id = "La"
+grade = "measured"
+
+[[grade]]
+id = "Li"
+grade = "measured"
+
+[[grade]]
+id = "Lu"
+grade = "measured"
+
+[[grade]]
+id = "Mg"
+grade = "measured"
+
+[[grade]]
+id = "Mn"
+grade = "measured"
+
+[[grade]]
+id = "Mo"
+grade = "measured"
+
+[[grade]]
+id = "N"
+grade = "measured"
+
+[[grade]]
+id = "Na"
+grade = "measured"
+
+[[grade]]
+id = "Nb"
+grade = "measured"
+
+[[grade]]
+id = "Nd"
+grade = "measured"
+
+[[grade]]
+id = "Ne"
+grade = "measured"
+
+[[grade]]
+id = "Ni"
+grade = "measured"
+
+[[grade]]
+id = "O"
+grade = "measured"
+
+[[grade]]
+id = "Os"
+grade = "measured"
+
+[[grade]]
+id = "P"
+grade = "measured"
+
+[[grade]]
+id = "Pa"
+grade = "measured"
+
+[[grade]]
+id = "Pb"
+grade = "measured"
+unsettled = true
+
+[[grade]]
+id = "Pd"
+grade = "measured"
+
+[[grade]]
+id = "Pm"
+grade = "measured"
+unsettled = true
+
+[[grade]]
+id = "Po"
+grade = "measured"
+unsettled = true
+
+[[grade]]
+id = "Pr"
+grade = "measured"
+
+[[grade]]
+id = "Pt"
+grade = "measured"
+
+[[grade]]
+id = "Ra"
+grade = "measured"
+unsettled = true
+
+[[grade]]
+id = "Rb"
+grade = "measured"
+
+[[grade]]
+id = "Re"
+grade = "measured"
+
+[[grade]]
+id = "Rh"
+grade = "measured"
+
+[[grade]]
+id = "Rn"
+grade = "measured"
+unsettled = true
+
+[[grade]]
+id = "Ru"
+grade = "measured"
+
+[[grade]]
+id = "S"
+grade = "measured"
+
+[[grade]]
+id = "Sb"
+grade = "measured"
+
+[[grade]]
+id = "Sc"
+grade = "measured"
+
+[[grade]]
+id = "Se"
+grade = "measured"
+
+[[grade]]
+id = "Si"
+grade = "measured"
+
+[[grade]]
+id = "Sm"
+grade = "measured"
+
+[[grade]]
+id = "Sn"
+grade = "measured"
+
+[[grade]]
+id = "Sr"
+grade = "measured"
+
+[[grade]]
+id = "Ta"
+grade = "measured"
+
+[[grade]]
+id = "Tb"
+grade = "measured"
+
+[[grade]]
+id = "Tc"
+grade = "measured"
+unsettled = true
+
+[[grade]]
+id = "Te"
+grade = "measured"
+
+[[grade]]
+id = "Th"
+grade = "measured"
+
+[[grade]]
+id = "Ti"
+grade = "measured"
+
+[[grade]]
+id = "Tl"
+grade = "measured"
+unsettled = true
+
+[[grade]]
+id = "Tm"
+grade = "measured"
+
+[[grade]]
+id = "U"
+grade = "measured"
+
+[[grade]]
+id = "V"
+grade = "measured"
+
+[[grade]]
+id = "W"
+grade = "measured"
+
+[[grade]]
+id = "Xe"
+grade = "measured"
+
+[[grade]]
+id = "Y"
+grade = "measured"
+
+[[grade]]
+id = "Yb"
+grade = "measured"
+
+[[grade]]
+id = "Zn"
+grade = "measured"
+
+[[grade]]
+id = "Zr"
+grade = "measured"
+
+# --- candidate phases (phase_registry.toml): cited thermodynamic data, measured plus a generality defect (seam-1 reconciled by the two-axis distinction) ---
+
+[[grade]]
+id = "phase.quartz"
+grade = "measured"
+derive_first_defect = true
+
+[[grade]]
+id = "phase.corundum"
+grade = "measured"
+derive_first_defect = true
+
+[[grade]]
+id = "phase.periclase"
+grade = "measured"
+derive_first_defect = true
+
+[[grade]]
+id = "phase.hematite"
+grade = "measured"
+derive_first_defect = true
+
+[[grade]]
+id = "phase.forsterite"
+grade = "measured"
+derive_first_defect = true
+
+[[grade]]
+id = "phase.fayalite"
+grade = "measured"
+derive_first_defect = true

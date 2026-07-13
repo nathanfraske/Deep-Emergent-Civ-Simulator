@@ -150,7 +150,14 @@ def render_entries(body, rel, entries):
 
 
 def main():
-    floors = sorted(glob.glob(os.path.join(ROOT, "crates/physics/data/*.toml")))
+    # floor_provenance.toml is the seven-tag grade accounting sidecar (provenance register Phase 2), keyed
+    # by entry id, not a physics floor manifest of axes/laws/substances, so it is excluded from the floor
+    # registry generation (the derive-vs-author reference is the axes/laws/substances, not their grades).
+    floors = sorted(
+        f
+        for f in glob.glob(os.path.join(ROOT, "crates/physics/data/*.toml"))
+        if os.path.basename(f) != "floor_provenance.toml"
+    )
     parsed = [(os.path.relpath(f, ROOT), *parse_floor(f)) for f in floors]
     n_axes = sum(len(a) for _, a, _, _ in parsed)
     n_sub = sum(len(s) for _, _, s, _ in parsed)

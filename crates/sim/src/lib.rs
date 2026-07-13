@@ -132,6 +132,7 @@ pub mod tom;
 pub mod trace;
 pub mod transmission;
 pub mod typology;
+pub mod unified_provenance;
 pub mod value;
 pub mod world;
 pub mod worldbuild;
