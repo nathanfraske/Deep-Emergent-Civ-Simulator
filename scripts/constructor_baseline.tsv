@@ -46,3 +46,4 @@
 ::from_decimal_str(	crates/sim/src/anatomy.rs	1	dev-fixture	a decimal-parser helper for a labelled kind-fixture string argument
 ::from_decimal_str(	crates/sim/src/morphogen.rs	1	dev-fixture	a decimal-parser helper for a labelled morphogen dev-fixture string argument
 ::from_decimal_str(	crates/sim/src/runner.rs	17	dev-fixture	labelled non-canonical scenario values (the spawn_predator demo geometry and the test-scenario CreatureSelectionParams mutation spreads); production wiring should read these from the manifest
+::from_decimal_str(	crates/physics/src/lattice_modulus.rs	3	deserialization	the Born-exponent, structure-prototype, and ionic-lattice-energy-validation loaders round-trip cited decimal strings (Born exponents, Madelung constants, Born-Haber reference energies) from their TOML data files to fixed-point, the same discipline as the periodic-table and phase-registry loaders

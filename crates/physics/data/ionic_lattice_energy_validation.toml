@@ -1,0 +1,37 @@
+# The ionic lattice-energy estimator's VALIDATION SET: the cited Born-Haber lattice energies against which the
+# formal-charge Born-Lande estimator (crate::lattice_modulus::lattice_energy_ionic_raw) is scored, so its
+# model-floor band-fraction is graded [D]-from-[M] (a derived RMS statistic whose derived_from is these cited
+# references, effective provenance [M]), never authored. The band-fraction the disposer reads is the
+# root-mean-square relative deviation of the estimator from these references (crate::lattice_modulus::
+# ionic_energy_band_fraction); no consumer is wired to it in any pinned run path yet (a pure addition,
+# byte-neutral).
+#
+# PROVENANCE (why the band-fraction is [M], not a reserved [C] knob). A Born-Haber lattice energy is measured
+# [M]: it is the lattice-energy leg of a Born-Haber cycle closed over independently measured enthalpies
+# (sublimation, ionization, dissociation, electron affinity, and the compound's formation enthalpy), the same
+# provenance class as the Shannon radii the estimator reads. A lab refutes or revises it by remeasuring those
+# component enthalpies, no simulation involved, which is exactly why the band-fraction computed from it is [M]
+# and not a free knob set against nothing.
+#
+# GROWING REGISTRY (Principle 11). The mechanism (the RMS deviation) is fixed Rust; the reference membership is
+# data and grows. The seed is the two clean ionic prototypes D1's scope covers: NaCl (the monovalent alkali
+# halide) and periclase MgO (the divalent oxide). Adding covalent-leaning references DELIBERATELY widens the
+# measured fraction, the physical reason the resolution ladder must escalate the covalent-middle cases; Path A
+# adds the per-candidate derived covalency term for the finer widening.
+#
+# The sign convention is the RELEASED lattice energy (negative, the bound solid below the free formal ions),
+# matching the estimator's emitted sign so the deviation is a like-for-like ratio.
+
+[[reference]]
+name = "halite"
+composition = { Na = 1, Cl = 1 }
+prototype = "rock-salt"
+born_haber_kj_per_mol = "-787"
+source = "NaCl Born-Haber cycle lattice energy, standard tabulated value (-787 kJ/mol released); the lattice-energy leg closed over the measured sublimation, ionization, dissociation, electron-affinity, and formation enthalpies"
+
+[[reference]]
+name = "periclase"
+composition = { Mg = 1, O = 1 }
+prototype = "rock-salt"
+born_haber_kj_per_mol = "-3795"
+source = "MgO Born-Haber cycle lattice energy, standard tabulated value (-3795 kJ/mol released); the divalent-oxide reference, the lattice-energy leg of the Born-Haber cycle over the measured component enthalpies"

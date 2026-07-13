@@ -1,0 +1,32 @@
+// Copyright 2026 Nathan M. Fraske
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+//! The thermochemical instantiation of the Verdict kernel contract: the proposer, disposer, and freezer for
+//! chemical selection (`MATERIALS_ORACLE_SPEC.md` stages 2, 4, 5).
+//!
+//! This is a plugin over the generic kernel ([`crate::verdict`], [`crate::contract`]): it supplies the physics
+//! (the free-energy content) while the kernel owns the selection discipline. The Stage-2 proposer
+//! ([`proposer`]) is here, complete with its two tiers (ionic charge balance, MO viability) and the laziness
+//! invariant; the Stage-4 disposer ([`disposer`]) is here for its ionic branch (D1), scoring candidates by the
+//! Born-Lande lattice energy and disposing through the sealed kernel with the estimator's measured band. The
+//! freezer lands in a following slice.
+
+pub mod disposer;
+pub mod proposer;
+
+pub use disposer::ThermochemicalDisposer;
+pub use proposer::{
+    charge_neutral_primitives, max_formable_amount, mo_viable_diatomics, propose_candidates,
+    prune_lazy, BondingHints, Composition, Compound, Environment, ThermochemicalProposer,
+};

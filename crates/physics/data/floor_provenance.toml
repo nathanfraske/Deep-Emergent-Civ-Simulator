@@ -471,6 +471,7 @@ grade = "measured"
 [[grade]]
 id = "mat.elastic_modulus"
 grade = "measured"
+derive_first_defect = true
 
 [[grade]]
 id = "mat.fracture_energy"

@@ -1,0 +1,76 @@
+# The 3d-STATE radius per element, the correlation classifier's bandwidth-axis input (Harrison W ~ r_d^3/d^5).
+# DERIVED [D]-from-[M]: the stored datum is the MEASURED [M] effective nuclear charge Zeff(3d) (Clementi and
+# Raimondi 1963, SCF screening constants), and the radius is derived in code as r_3d = (n*)^2 * a_0 / Zeff, with
+# n* = 3 the Slater effective principal quantum number for the 3d shell and a_0 the Bohr radius. No consumer is
+# wired to it in any pinned run path yet (a pure addition, byte-neutral); D2b reads it.
+#
+# WHY DERIVE-FIRST FROM Zeff, not a transcribed radius (gate ruling). Storing Zeff and deriving the radius keeps
+# the [M] datum (the SCF effective charge, refutable) separate from the [D] radius (the hydrogenic mean-radius
+# relation over it), and it gives the correct d-STATE scale by construction rather than by a transcription that
+# could grab the wrong orbital.
+#
+# THE 4s-VERSUS-3d CATCH, made a build guard. The readily-tabulated "orbital radius" for a 3d metal is the
+# OUTERMOST (4s) orbital, roughly 1.0 to 1.7 Angstrom, NOT the compact 3d-state radius, roughly 0.3 to 0.7. The
+# spec's "Waber-Cromer / Harrison Solid State Table" conflates two different quantities and the easy Waber-Cromer
+# value is the 4s. Deriving from Zeff(3d) lands the d-state scale, and the loader's SCALE GUARD rejects any
+# derived radius outside the d-state window (0.2 to 0.8 Angstrom), so a future entry of the wrong (outermost)
+# orbital fails the build the way the ladder's strictly-increasing guard catches a bad ionization ladder.
+#
+# NORMALIZATION ROBUSTNESS. The absolute r_d scale is absorbed by D2b's MIT-calibrated screening (a uniform
+# scaling of r_d by k scales W by k^3, which the screening re-fits), so only the RELATIVE contraction across the
+# series is load-bearing, and Zeff captures it: Zeff rises across the series (Sc 7.12 to Zn 13.88), so r_3d
+# contracts monotonically. D2b MUST calibrate its screening against this same r_d source (the self-consistency
+# condition).
+#
+# The seed is the 3d transition series Sc through Zn (the Mott-insulator row). Values cited to Clementi-Raimondi
+# 1963, cross-checked (Cr 9.757, Co 11.855, Cu 13.201) against the KnowledgeDoor reproduction of the same table.
+
+[[d_state]]
+symbol = "Sc"
+z_eff_3d = "7.120"
+source = "Clementi, E., Raimondi, D. L. (1963), Atomic Screening Constants from SCF Functions, J. Chem. Phys. 38, 2686: 3d effective nuclear charge"
+
+[[d_state]]
+symbol = "Ti"
+z_eff_3d = "8.141"
+source = "Clementi, E., Raimondi, D. L. (1963), Atomic Screening Constants from SCF Functions, J. Chem. Phys. 38, 2686: 3d effective nuclear charge"
+
+[[d_state]]
+symbol = "V"
+z_eff_3d = "8.983"
+source = "Clementi, E., Raimondi, D. L. (1963), Atomic Screening Constants from SCF Functions, J. Chem. Phys. 38, 2686: 3d effective nuclear charge"
+
+[[d_state]]
+symbol = "Cr"
+z_eff_3d = "9.757"
+source = "Clementi, E., Raimondi, D. L. (1963), Atomic Screening Constants from SCF Functions, J. Chem. Phys. 38, 2686: 3d effective nuclear charge"
+
+[[d_state]]
+symbol = "Mn"
+z_eff_3d = "10.528"
+source = "Clementi, E., Raimondi, D. L. (1963), Atomic Screening Constants from SCF Functions, J. Chem. Phys. 38, 2686: 3d effective nuclear charge"
+
+[[d_state]]
+symbol = "Fe"
+z_eff_3d = "11.180"
+source = "Clementi, E., Raimondi, D. L. (1963), Atomic Screening Constants from SCF Functions, J. Chem. Phys. 38, 2686: 3d effective nuclear charge"
+
+[[d_state]]
+symbol = "Co"
+z_eff_3d = "11.855"
+source = "Clementi, E., Raimondi, D. L. (1963), Atomic Screening Constants from SCF Functions, J. Chem. Phys. 38, 2686: 3d effective nuclear charge"
+
+[[d_state]]
+symbol = "Ni"
+z_eff_3d = "12.530"
+source = "Clementi, E., Raimondi, D. L. (1963), Atomic Screening Constants from SCF Functions, J. Chem. Phys. 38, 2686: 3d effective nuclear charge"
+
+[[d_state]]
+symbol = "Cu"
+z_eff_3d = "13.201"
+source = "Clementi, E., Raimondi, D. L. (1963), Atomic Screening Constants from SCF Functions, J. Chem. Phys. 38, 2686: 3d effective nuclear charge"
+
+[[d_state]]
+symbol = "Zn"
+z_eff_3d = "13.878"
+source = "Clementi, E., Raimondi, D. L. (1963), Atomic Screening Constants from SCF Functions, J. Chem. Phys. 38, 2686: 3d effective nuclear charge"

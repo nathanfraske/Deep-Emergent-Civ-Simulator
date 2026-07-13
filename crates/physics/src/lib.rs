@@ -37,15 +37,26 @@
 //! never a fabricated default), the same fail-loud discipline as the calibration
 //! manifest. The law kernels themselves are phase 2.
 
+pub mod d_state_radius;
+pub mod ewald;
 pub mod floor_provenance;
 pub mod geodynamics;
 pub mod graph;
+pub mod ionic_radii;
+pub mod ionization_ladder;
+pub mod lattice_modulus;
 pub mod laws;
+pub mod materials_oracle;
+pub mod metal_eos;
+pub mod mit_reference;
 pub mod periodic;
 pub mod petrology;
 pub mod petrology_data;
+pub mod qeq;
 pub mod quantities;
+pub mod rose_eos;
 pub mod scaled;
+pub mod tm_oxide_lattice_energy;
 
 use civsim_core::{Fixed, StateHasher};
 use serde::{Deserialize, Serialize};

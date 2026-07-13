@@ -1,0 +1,73 @@
+# The successive-ionization-energy ladder, per element, in electron-volts, MEASURED [M] (spectroscopic; a
+# laboratory refutes one by atomic spectroscopy without running the sim). The correlation classifier's on-site
+# Coulomb axis reads it: the atomic Hubbard U of an ion of charge q is the differential ionization energy
+# U_atomic(q) = IE_{q+1} - IE_q (the cost to add an electron to the q-plus ion minus the cost to remove one),
+# which for a d-electron ion is the d-d Coulomb repulsion the Mott-Hubbard picture keys on. The spec's own
+# example: Ni2+ has IE3 - IE2 = 35.187 - 18.169 = 17.0 eV, screened in-crystal to the textbook 7 to 8.
+#
+# WHY A NEW COLUMN (the D2 grounding delta, gate-ruled). The periodic table carries only the FIRST ionization
+# energy (its lone consumer is the charge-equilibration chi/eta), so the successive ladder the classifier needs
+# is not banked. The correlation-hardening spec's premise that this ladder was "already a banked column" did not
+# hold at source; this file is the faithful build. A sibling of the periodic table and the Shannon radii, read
+# by the materials substrate's correlation classifier (D2b); no consumer is wired to it in any pinned run path
+# yet (a pure addition, byte-neutral).
+#
+# GROWING REGISTRY (Principle 11). The mechanism (the U ladder read) is fixed Rust; the element membership is
+# data and grows. The seed is the 3d transition series (Sc through Zn), the Mott-insulator row the classifier
+# exists to route correctly, IE1 through IE4 (enough for the common 2-plus and 3-plus oxide cations). More rows
+# and deeper ladders (the 4d/5d series, higher charges) are added as the world needs them, each cited [M].
+#
+# The values are the NIST Atomic Spectra Database ground-state ionization energies (Kramida et al.), the same
+# authority the periodic table's first-ionization-energy column cites. The loader checks each ladder is strictly
+# increasing (a successive ionization energy must exceed the prior: removing an electron from a more positive
+# ion costs more), the physical reproduction-style guard, and fails loud on a missing citation.
+
+[[ladder]]
+symbol = "Sc"
+ionization_energies_ev = ["6.56149", "12.79977", "24.756839", "73.4894"]
+source = "NIST Atomic Spectra Database (Kramida et al.), ground-state ionization energies Sc I-IV"
+
+[[ladder]]
+symbol = "Ti"
+ionization_energies_ev = ["6.828120", "13.5755", "27.49171", "43.26717"]
+source = "NIST Atomic Spectra Database (Kramida et al.), ground-state ionization energies Ti I-IV"
+
+[[ladder]]
+symbol = "V"
+ionization_energies_ev = ["6.746187", "14.634", "29.3111", "46.709"]
+source = "NIST Atomic Spectra Database (Kramida et al.), ground-state ionization energies V I-IV"
+
+[[ladder]]
+symbol = "Cr"
+ionization_energies_ev = ["6.76651", "16.486305", "30.959", "49.16"]
+source = "NIST Atomic Spectra Database (Kramida et al.), ground-state ionization energies Cr I-IV"
+
+[[ladder]]
+symbol = "Mn"
+ionization_energies_ev = ["7.4340380", "15.63999", "33.668", "51.21"]
+source = "NIST Atomic Spectra Database (Kramida et al.), ground-state ionization energies Mn I-IV"
+
+[[ladder]]
+symbol = "Fe"
+ionization_energies_ev = ["7.9024681", "16.19921", "30.651", "54.91"]
+source = "NIST Atomic Spectra Database (Kramida et al.), ground-state ionization energies Fe I-IV"
+
+[[ladder]]
+symbol = "Co"
+ionization_energies_ev = ["7.88101", "17.0844", "33.50", "51.27"]
+source = "NIST Atomic Spectra Database (Kramida et al.), ground-state ionization energies Co I-IV"
+
+[[ladder]]
+symbol = "Ni"
+ionization_energies_ev = ["7.639878", "18.168838", "35.187", "54.92"]
+source = "NIST Atomic Spectra Database (Kramida et al.), ground-state ionization energies Ni I-IV"
+
+[[ladder]]
+symbol = "Cu"
+ionization_energies_ev = ["7.726380", "20.29239", "36.841", "57.38"]
+source = "NIST Atomic Spectra Database (Kramida et al.), ground-state ionization energies Cu I-IV"
+
+[[ladder]]
+symbol = "Zn"
+ionization_energies_ev = ["9.394197", "17.96439", "39.72330", "59.573"]
+source = "NIST Atomic Spectra Database (Kramida et al.), ground-state ionization energies Zn I-IV"

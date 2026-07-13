@@ -1,0 +1,56 @@
+# The transition-metal monoxide Born-Haber lattice energies: the MEASURED [M] lattice energy of the rock-salt
+# divalent 3d monoxides that the correlation guard sites as LOCALIZED (Mott insulators). The materials localized
+# route (D3 follow-on #3) reads this to fill the guard's Localized slot with a real cohesive number for the seeded
+# insulators, escalating for any unseeded oxide. No consumer is wired to it in any pinned run path yet (a pure
+# addition, byte-neutral).
+#
+# WHY A MEASURED FILL, NOT A DERIVED ONE (the gate's ruling, the resolution ladder's TOP rung). A Mott insulator
+# is ionically bonded, so its lattice energy would in principle route to the D1 Born-Lande ionic estimator. But
+# D1's Born exponent keys on the ion's isoelectronic NOBLE-GAS core (Pauling's scheme), and a 3d cation such as
+# Ni2+ ([Ar]3d8, 26 electrons) is not isoelectronic with any noble gas, so it falls through and D1 cannot score a
+# TM oxide. The d-electron Born exponent is not cleanly derivable (fitting n to the bulk modulus is circular; the
+# Ar-core value is wrong because the 3d ion's repulsion is 3d-mediated), the surface-before-authoring gap the
+# born_exponents.toml already flags. So the honest fill is the MEASURED Born-Haber value, the most-pinned rung of
+# the provenance ladder (measured row, then estimator, then compute-once): escalating to the cited measurement
+# when the substrate cannot DERIVE the value is the ladder working as designed, not a lookup dodging derive-first.
+# There is therefore NO derived model band here; the uncertainty is the measurement's. The derived TM-oxide
+# repulsion model (a cited Born-Mayer rho) is the shared deeper follow-on that upgrades this measured fill to a
+# derivation for the UNSEEDED oxides, and it is the same TM-oxide gap that blocks the itinerant-oxide route, so
+# one coherent follow-on serves both (flagged, not built, until a cited non-circular rho is grounded).
+#
+# SOURCE AND ITS VARIANCE (for the spot-check). The Born-Haber lattice energy of a 3d monoxide is source-variable
+# by a few percent across cycle-closure tabulations (for example FeO reads 3795 in the CALCULLA table and about
+# 3865 in some textbook progressions), because the cycle is closed over slightly different component-enthalpy
+# sets. The values below are the CALCULLA standard-tabulated set (calculla.com/lattice_energy_table), chosen
+# because it tabulates all four consistently AND its MgO (3795) matches the MgO -3795 the D1 validation set
+# already cites, so it is the same convention as the existing floor. This is the measured [M] class, the same as
+# the D1 Born-Haber validation set and the MIT reference set; a different tabulation is a one-line reversible
+# change (the gate logged the measured fill as a reversible interim for the owner).
+#
+# The seed is the four rock-salt divalent 3d MONOXIDES the MIT reference set classifies as insulators (NiO, CoO,
+# FeO, MnO). The sign convention is the RELEASED lattice energy (negative, the bound solid below the free ions),
+# matching the D1 estimator's emitted sign.
+
+[[oxide]]
+name = "bunsenite"
+composition = { Ni = 1, O = 1 }
+born_haber_kj_per_mol = "-3908"
+source = "NiO Born-Haber lattice energy, 3908 kJ/mol released (CALCULLA lattice-energy table, calculla.com/lattice_energy_table; standard-tabulated set whose MgO 3795 matches the D1 validation set)"
+
+[[oxide]]
+name = "cobalt(II) oxide"
+composition = { Co = 1, O = 1 }
+born_haber_kj_per_mol = "-3837"
+source = "CoO Born-Haber lattice energy, 3837 kJ/mol released (CALCULLA lattice-energy table, calculla.com/lattice_energy_table; standard-tabulated set whose MgO 3795 matches the D1 validation set)"
+
+[[oxide]]
+name = "wustite"
+composition = { Fe = 1, O = 1 }
+born_haber_kj_per_mol = "-3795"
+source = "FeO Born-Haber lattice energy, 3795 kJ/mol released (CALCULLA lattice-energy table, calculla.com/lattice_energy_table; textbook progressions read about 3865, the cycle-closure variance noted above)"
+
+[[oxide]]
+name = "manganosite"
+composition = { Mn = 1, O = 1 }
+born_haber_kj_per_mol = "-3724"
+source = "MnO Born-Haber lattice energy, 3724 kJ/mol released (CALCULLA lattice-energy table, calculla.com/lattice_energy_table; standard-tabulated set whose MgO 3795 matches the D1 validation set)"

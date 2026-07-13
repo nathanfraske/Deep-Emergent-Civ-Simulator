@@ -175,6 +175,14 @@ impl Fixed {
         }
     }
 
+    /// Checked subtract: `None` if the difference does not fit in `i64` (a raw fixed-point subtraction, no
+    /// scaling). Completes the checked-arithmetic family alongside [`Fixed::checked_mul`]/[`Fixed::checked_div`],
+    /// so a `pub` kernel can stay total on a difference that would panic the `Sub` operator under overflow-checks.
+    #[inline]
+    pub fn checked_sub(self, rhs: Fixed) -> Option<Fixed> {
+        self.0.checked_sub(rhs.0).map(Fixed)
+    }
+
     /// Saturating add for accumulators that may run for centuries (design Part 3.1).
     #[inline]
     pub const fn saturating_add(self, rhs: Fixed) -> Fixed {

@@ -71,6 +71,13 @@ pub struct Phase {
     pub clapeyron_slope: Option<Fixed>,
     /// The raw decimal string of the Clapeyron slope; `None` when absent.
     pub clapeyron_decimal: Option<String>,
+    /// The STRUCTURE-PROTOTYPE key (the aristotype), naming the structure type the phase crystallizes in (for
+    /// example `rock-salt` for periclase). This is the data-driven bonding-class dispatch (owner research,
+    /// #182): a phase carrying a prototype key that maps to a seeded ionic prototype derives its bulk modulus
+    /// from lattice curvature (the Madelung constant and coordination the prototype supplies); a phase without a
+    /// key, or whose prototype is unseeded, falls through to the cohesive-energy-density screen tier, an honest
+    /// fall-through never a forced ionic formula. `None` for a phase not yet keyed (the extensible registry).
+    pub prototype: Option<String>,
     /// The citation for this phase's thermodynamic data (real-with-source; one internally consistent dataset).
     pub source: String,
 }
@@ -264,6 +271,9 @@ struct PhaseDef {
     /// The Clapeyron slope in MPa/K; empty when the phase carries none yet.
     #[serde(default)]
     clapeyron_slope: String,
+    /// The structure-prototype (aristotype) key; empty when the phase carries none yet.
+    #[serde(default)]
+    prototype: String,
     /// The citation (every phase is real-with-source).
     #[serde(default)]
     source: String,
@@ -289,6 +299,12 @@ impl PhaseDef {
                 Some(clapeyron_raw.to_string()),
             )
         };
+        let prototype_raw = self.prototype.trim();
+        let prototype = if prototype_raw.is_empty() {
+            None
+        } else {
+            Some(prototype_raw.to_string())
+        };
         if self.source.trim().is_empty() {
             return Err(PhaseError::MissingSource(self.name.clone()));
         }
@@ -309,6 +325,7 @@ impl PhaseDef {
             volume_decimal: self.molar_volume.trim().to_string(),
             clapeyron_slope,
             clapeyron_decimal,
+            prototype,
             source: self.source.trim().to_string(),
         })
     }
