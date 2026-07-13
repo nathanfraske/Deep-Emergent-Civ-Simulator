@@ -36,11 +36,14 @@
 //! fractional-power primitive (task #45): a prove-it check found the Lindemann `^(2/3)` is `cbrt^2` over the
 //! built exact `cbrt`, and the Lindemann-Gilvarry chain collapses algebraically to `T_m ~ B_0 * V_atom`, so it
 //! is buildable now and is alien-general (any substance with EOS anchors derives its own `T_m`, no cited
-//! melting point). The follow-on slices are the attempt frequency `nu = c_s/a` closing the `D0 ~ a^2 * nu`
-//! normalization, the Frost-Ashby creep axis `T/T_m`, and the consistency twin (`g*R*T_m` and `f*E_coh` agree
-//! within class scatter, sited in a test file). The sub-kT polymorph terminal resolves by the derived `kT`
-//! boundary, never a reserved threshold (the Gap-Law discipline: the resolution boundary is a physical
-//! quantity).
+//! melting point). It also builds the attempt frequency `nu = c_s/a` ([`attempt_frequency_per_ps`] over
+//! [`sound_speed_km_per_s`]) closing the `D0 ~ a^2 * nu` normalization, and the Frost-Ashby creep axis `T/T_m`
+//! ([`homologous_temperature`]); the consistency twin (`g*R*T_m` and `f*E_coh` agree within class scatter)
+//! lives in `tests/freezer_consistency.rs`. The remaining pieces are the end-to-end route diffusivity (wiring
+//! `nu` from the anchors, which needs the atomic mass), the Dodson closure temperature (a freezer-side root-find
+//! around the kernel), and the `theta_D` sibling (built only when its S_vib / Debye-Cp consumer arrives, not by
+//! unwinding the `T_m` collapse). The sub-kT polymorph terminal resolves by the derived `kT` boundary, never a
+//! reserved threshold (the Gap-Law discipline: the resolution boundary is a physical quantity).
 
 use civsim_core::Fixed;
 use civsim_physics::laws;
@@ -153,6 +156,57 @@ fn lindemann_numeric_factor() -> Fixed {
 /// ~ 72.43 K/(GPa*A^3)`, folded once at the cited atomic scale (the raw `10^-21`/`k_B` underflows Q32.32).
 fn kb_fold_gpa_angstrom3_to_kelvin() -> Fixed {
     Fixed::from_ratio(100_000_000, 1_380_649)
+}
+
+/// The bulk sound speed `c_s = sqrt(B_0/rho)` in km/s, from the bulk modulus (GPa) and the density (g/cm^3).
+/// The unit fold is exact and needs no constant: `sqrt(GPa / (g/cm^3)) = sqrt(10^9 Pa / 10^3 kg.m^-3) =
+/// sqrt(10^6 m^2/s^2) = 10^3 m/s = 1 km/s`, so the square root of `B_0[GPa]/rho[g/cm^3]` is already in km/s
+/// (the atomic-scale working unit, representable where the SI `~5000 m/s` also fits but the elastic modulus in
+/// pascals would not). Non-positive inputs (no elastic scale or no mass) yield zero.
+pub fn sound_speed_km_per_s(bulk_modulus_gpa: Fixed, density_g_per_cm3: Fixed) -> Fixed {
+    if bulk_modulus_gpa <= ZERO || density_g_per_cm3 <= ZERO {
+        return ZERO;
+    }
+    match bulk_modulus_gpa.checked_div(density_g_per_cm3) {
+        Some(ratio) => ratio.sqrt(),
+        None => ZERO,
+    }
+}
+
+/// The attempt frequency `nu = c_s/a` in inverse picoseconds, from the sound speed (km/s) and the interatomic
+/// spacing (angstrom). The working unit is `/ps` because the SI attempt frequency (`c_s/a ~ 10^13 Hz`)
+/// overflows Q32.32; the fold is the exact unit constant `1 km/s = 10 A/ps` (`10^3 m/s = 10^13 A/s = 10 A/ps`),
+/// so `nu[/ps] = 10 * c_s[km/s] / a[A]`. This is the prefactor [`self_diffusivity`] takes, closing the
+/// canonical `D0 ~ a^2 * nu`. The spacing `a` is the material's own characteristic atomic length (the
+/// Wigner-Seitz radius from the molar volume); the order-unity choice of length folds into the order-of-
+/// magnitude `D0`, which the spec states approximately (`~10^-5 m^2/s`). Non-positive inputs yield zero.
+pub fn attempt_frequency_per_ps(sound_speed_km_per_s: Fixed, spacing_angstrom: Fixed) -> Fixed {
+    if sound_speed_km_per_s <= ZERO || spacing_angstrom <= ZERO {
+        return ZERO;
+    }
+    // nu = 10 * c_s / a; the 10 is the exact km/s -> A/ps unit conversion, not an authored value.
+    match sound_speed_km_per_s
+        .checked_mul(Fixed::from_int(10))
+        .and_then(|x| x.checked_div(spacing_angstrom))
+    {
+        Some(nu) => nu,
+        None => Fixed::MAX,
+    }
+}
+
+/// The homologous temperature `T/T_m` (dimensionless), the Frost-Ashby deformation-map axis over which creep
+/// mechanisms are universal across substances. A material at a given fraction of its own melting point sits at
+/// the same point on the map regardless of the absolute temperatures, which is why the axis serves every
+/// substance real or invented. Clamped non-negative; a non-positive melting point (no derived `T_m`) yields
+/// zero (the map is undefined without a melting scale).
+pub fn homologous_temperature(temperature: Fixed, melting_point: Fixed) -> Fixed {
+    if melting_point <= ZERO {
+        return ZERO;
+    }
+    match temperature.max(ZERO).checked_div(melting_point) {
+        Some(ratio) => ratio,
+        None => Fixed::MAX,
+    }
 }
 
 /// The freezer route bound to the metallic route and the EOS anchors, so the Form-B barrier reads the derived
@@ -413,6 +467,59 @@ mod tests {
         assert!(
             freezer.melting_point("Xx", delta_fixture()).is_none(),
             "an unanchored symbol escalates"
+        );
+    }
+
+    #[test]
+    fn the_attempt_frequency_and_creep_axis_derive_from_the_anchors() {
+        // Bulk sound speed c_s = sqrt(B_0/rho) in km/s (the unit fold is exact): iron B_0 = 170 GPa, rho ~ 7.87
+        // g/cm^3 -> c_s ~ 4.65 km/s. This is the BULK sound speed; the longitudinal wave, carrying the shear
+        // stiffness too, runs faster (~5.9 km/s), so the B_0-only value is the bulk one, the documented limit.
+        let c_s = sound_speed_km_per_s(Fixed::from_int(170), Fixed::from_ratio(787, 100));
+        assert!(
+            close(c_s, 4.648, 0.02),
+            "iron bulk sound speed ~4.65 km/s: {c_s:?}"
+        );
+        // A stiffer material at the same density is faster; a denser one at the same modulus is slower.
+        assert!(sound_speed_km_per_s(Fixed::from_int(340), Fixed::from_ratio(787, 100)) > c_s);
+        assert!(sound_speed_km_per_s(Fixed::from_int(170), Fixed::from_int(16)) < c_s);
+        assert_eq!(
+            sound_speed_km_per_s(ZERO, Fixed::ONE),
+            ZERO,
+            "no elastic scale: no sound speed"
+        );
+
+        // nu = 10 * c_s / a in /ps: iron a ~ 1.41 A (Wigner-Seitz) -> nu ~ 33 /ps (the SI ~3.3e13 Hz overflows
+        // Q32.32, hence the /ps working unit; the 10 is the exact km/s -> A/ps unit conversion).
+        let nu = attempt_frequency_per_ps(c_s, Fixed::from_ratio(141, 100));
+        assert!(
+            close(nu, 32.96, 0.3),
+            "iron attempt frequency ~33 /ps: {nu:?}"
+        );
+        // A shorter spacing (a denser lattice) attempts faster.
+        assert!(attempt_frequency_per_ps(c_s, Fixed::ONE) > nu);
+        assert_eq!(
+            attempt_frequency_per_ps(ZERO, Fixed::ONE),
+            ZERO,
+            "no sound speed: no attempts"
+        );
+
+        // The homologous temperature T/T_m: a material at half its melting point sits at 0.5 on the Frost-Ashby
+        // map regardless of the absolute scale (universal across substances).
+        assert!(close(
+            homologous_temperature(Fixed::from_int(900), Fixed::from_int(1800)),
+            0.5,
+            0.001
+        ));
+        assert_eq!(
+            homologous_temperature(Fixed::from_int(300), ZERO),
+            ZERO,
+            "no melting scale: the map is undefined"
+        );
+        // Deterministic (Principle 3).
+        assert_eq!(
+            nu,
+            attempt_frequency_per_ps(c_s, Fixed::from_ratio(141, 100))
         );
     }
 }

@@ -90,7 +90,7 @@ fn the_barrier_forms_agree_within_a_bonding_class_and_diverge_across_classes() {
     // The per-class NECESSITY: an alkaline-earth metal (Mg) has a markedly different cohesive-to-melting ratio,
     // so the transition-class k over- or under-states its barrier well beyond the intra-class scatter. This is
     // the "real but partial" residual made concrete: the anchored set spans alkali, alkaline-earth, and
-    // transition metals, so g (and delta, and f) are genuinely per-class, not one authored universal.
+    // transition metals, so g (and delta, and f) are per-class, not one authored universal.
     let k_mg = k_ratio("Mg");
     assert!(
         (k_fe / k_mg - 1.0).abs() > 0.20,
