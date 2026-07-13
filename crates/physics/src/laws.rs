@@ -2061,6 +2061,68 @@ pub fn reaction(
     (sat_sub(products_sum, reactants_sum), temperature >= barrier)
 }
 
+/// The thermally-activated rate law `rate = prefactor * exp(-reduced_barrier)`, the one shared Arrhenius/
+/// Eyring primitive. `reduced_barrier` is the SINGLE dimensionless group `E*/(k_B*T)` (equivalently the molar
+/// `E_a/(R*T)`, the same number), formed by the caller at its own working scale (see [`reduced_barrier`]);
+/// `prefactor` is the attempt frequency in the caller's own rate unit (a constant Arrhenius `A`, an Eyring
+/// `k_B*T/h` from [`eyring_prefactor`], or the freezer's `nu = c_s/a`). DOMAIN-NEUTRAL: no material, organism,
+/// or mechanism enters the signature; the domain lives entirely in the two scalars the caller computes, so the
+/// same law serves diffusion, enzyme turnover, mantle creep, prebiotic chemistry, and memory fade alike.
+/// A non-positive prefactor yields zero (no attempts, no rate). The reduced barrier is clamped non-negative (a
+/// negative barrier is not a rate law: it would author a rate above the attempt frequency; the physical floor
+/// is a barrierless crossing at the full prefactor). Above the `Fixed::exp` window (`reduced_barrier > 22`) the
+/// exponential saturates to zero: the FROZEN REGIME (for the freezer, `T` below about `0.77*T_m`), an honest
+/// Q32.32 limit rather than a defect (a barrier over 22 thermal energies has a rate below `e^-22 ~ 3e-10` of
+/// the prefactor, zero at any tick resolution). Because `exp(-x) <= 1` for `x >= 0`, the rate never exceeds the
+/// prefactor, so the product cannot overflow. Deterministic fixed-point (`Fixed::exp`, the pinned
+/// R-GPU-CANON-PIN reference, integer-only and bit-identical on every backend).
+pub fn arrhenius_rate(prefactor: Fixed, reduced_barrier: Fixed) -> Fixed {
+    if prefactor <= ZERO {
+        return ZERO; // no attempts, no rate
+    }
+    // A negative barrier is not a rate law (it would author a rate above the attempt frequency); the physical
+    // floor is a barrierless crossing at the full prefactor, so clamp the reduced barrier non-negative.
+    let barrier = reduced_barrier.max(ZERO);
+    // exp(-barrier), in (0, 1] for barrier >= 0; barrier > 22 underflows to zero (the frozen regime).
+    let factor = sat_sub(ZERO, barrier).exp();
+    // The factor is <= ONE, so the product is <= prefactor and cannot overflow (the unwrap_or is unreachable).
+    prefactor.checked_mul(factor).unwrap_or(prefactor)
+}
+
+/// Form the dimensionless reduced barrier `E*/(k_B*T)` from a barrier energy and a thermal energy in MATCHING
+/// units (both per-particle over `k_B*T`, or both molar over `R*T`; the ratio is scale-free either way, and
+/// [`arrhenius_rate`] never sees the units). This is where the single Buckingham-Pi group is assembled, so the
+/// kernel stays blind to molar-versus-per-particle and blind to the molar gas constant `R = N_A*k_B` entirely
+/// (the per-particle `k_B` scale that [`nernst_emf`] uses, sidestepping the `R`/`F` composite drift). A
+/// non-positive thermal energy (no thermal scale) returns [`Fixed::MAX`], which the kernel reads as the frozen
+/// regime so the rate collapses to zero (no thermal energy, no crossing); an overflowing ratio (an enormous
+/// barrier over a vanishing thermal energy) also saturates to [`Fixed::MAX`], the same zero-rate boundary.
+pub fn reduced_barrier(barrier_energy: Fixed, thermal_energy: Fixed) -> Fixed {
+    if thermal_energy <= ZERO {
+        return Fixed::MAX; // no thermal scale: the kernel reads MAX as the frozen regime (rate -> 0)
+    }
+    barrier_energy
+        .checked_div(thermal_energy)
+        .unwrap_or(Fixed::MAX)
+}
+
+/// The Eyring transition-state prefactor `k_B*T/h` (the universal attempt frequency of transition-state
+/// theory), formed from a thermal energy and a Planck constant PRE-FOLDED to the caller's own working
+/// frequency unit. SURFACED, NOT ASSUMED: at SI scale `k_B*T/h ~ 6e12 /s` is far outside the Q32.32 range, so
+/// the caller must express `k_B*T` and `h` at a working scale whose ratio is representable (the same once-at-a-
+/// cited-scale fold [`nernst_emf`] and the collision integral use). A non-positive Planck term returns zero (no
+/// frequency scale, no attempts); an overflowing ratio saturates to [`Fixed::MAX`] (the honest cap: the
+/// caller's working scale was too fine). A constant-Arrhenius consumer or the freezer's `nu = c_s/a` does not
+/// call this at all; the kernel takes whichever prefactor the caller supplies.
+pub fn eyring_prefactor(thermal_energy_scaled: Fixed, planck_scaled: Fixed) -> Fixed {
+    if planck_scaled <= ZERO {
+        return ZERO; // no frequency scale, no attempts
+    }
+    thermal_energy_scaled
+        .checked_div(planck_scaled)
+        .unwrap_or(Fixed::MAX)
+}
+
 /// Corrosion driving margin (a rate proxy): the oxidiser-minus-material potential, times the
 /// material susceptibility, times a monotone acidity factor. A thermodynamically uphill pairing
 /// (non-positive driving) does not attack. Reports the driving margin; the exponential Tafel rate is
@@ -5902,5 +5964,160 @@ mod tests {
         );
         // Deterministic (Principle 3).
         assert_eq!(e, elastic_recoil_energy(yield_s, modulus, volume, cap));
+    }
+
+    #[test]
+    fn arrhenius_rate_is_prefactor_times_exp_minus_barrier_and_freezes_out() {
+        let a = Fixed::from_int(1000);
+        // A zero barrier is a barrierless crossing: the rate is the full attempt frequency (exp(0) = 1, exact).
+        assert_eq!(
+            arrhenius_rate(a, ZERO),
+            a,
+            "zero reduced barrier: the rate is the full prefactor"
+        );
+        // No attempts, no rate.
+        assert_eq!(arrhenius_rate(ZERO, ONE), ZERO, "no prefactor: no rate");
+        assert_eq!(
+            arrhenius_rate(sat_sub(ZERO, a), ONE),
+            ZERO,
+            "negative prefactor: no rate"
+        );
+        // A negative reduced barrier clamps to the barrierless full rate (it never authors a rate above the
+        // attempt frequency).
+        assert_eq!(
+            arrhenius_rate(a, sat_sub(ZERO, ONE)),
+            a,
+            "negative barrier clamps to the full prefactor, never above it"
+        );
+        // exp(-1): the rate is a bounded fraction of the prefactor (~0.3679 * 1000 ~ 368).
+        let r1 = arrhenius_rate(a, ONE);
+        assert!(
+            r1 > ZERO && r1 < a,
+            "0 < rate < prefactor for a positive barrier"
+        );
+        assert!(
+            (r1.to_f64_lossy() - 1000.0 * (-1.0f64).exp()).abs() < 0.5,
+            "rate at reduced barrier 1 is prefactor * exp(-1): {r1:?}"
+        );
+        // Monotone: the rate FALLS as the barrier rises (a higher barrier is a slower crossing).
+        let r2 = arrhenius_rate(a, Fixed::from_int(2));
+        let r3 = arrhenius_rate(a, Fixed::from_int(3));
+        assert!(
+            r1 > r2 && r2 > r3 && r3 > ZERO,
+            "the rate falls monotonically with the barrier"
+        );
+        // The frozen regime: a barrier beyond the exp window (> 22) underflows to zero rate, an honest limit.
+        assert_eq!(
+            arrhenius_rate(a, Fixed::from_int(23)),
+            ZERO,
+            "a reduced barrier past the exp window reads as the frozen regime (zero rate)"
+        );
+        assert!(
+            arrhenius_rate(a, Fixed::from_int(21)) > ZERO,
+            "just inside the window the rate is still positive"
+        );
+        // Deterministic (Principle 3): the same inputs return the same bits.
+        assert_eq!(r1, arrhenius_rate(a, ONE));
+    }
+
+    #[test]
+    fn reduced_barrier_forms_the_dimensionless_group_and_is_scale_free() {
+        // E*/(k_B*T): a plain dimensionless ratio, exact when representable.
+        assert_eq!(
+            reduced_barrier(Fixed::from_int(10), Fixed::from_int(5)),
+            Fixed::from_int(2),
+            "the reduced barrier is the barrier energy over the thermal energy"
+        );
+        // Scale-free: multiplying numerator and denominator by the same factor (per-particle k_B*T versus molar
+        // R*T, the two related by N_A) gives the SAME group, which is why the kernel is blind to the units.
+        assert_eq!(
+            reduced_barrier(Fixed::from_int(10), Fixed::from_int(5)),
+            reduced_barrier(Fixed::from_int(100), Fixed::from_int(50)),
+            "the group is scale-free: molar and per-particle give the same number"
+        );
+        // No thermal scale (non-positive temperature): the kernel must read the frozen regime, so the helper
+        // returns the saturating sentinel that drives the rate to zero.
+        assert_eq!(
+            reduced_barrier(Fixed::from_int(10), ZERO),
+            Fixed::MAX,
+            "no thermal scale saturates the barrier (rate -> 0)"
+        );
+        assert_eq!(
+            reduced_barrier(Fixed::from_int(10), sat_sub(ZERO, ONE)),
+            Fixed::MAX,
+            "a non-positive thermal energy saturates the barrier"
+        );
+        // The end-to-end frozen collapse: no thermal scale feeds the kernel MAX, which underflows to zero rate.
+        assert_eq!(
+            arrhenius_rate(
+                Fixed::from_int(1000),
+                reduced_barrier(Fixed::from_int(10), ZERO)
+            ),
+            ZERO,
+            "no thermal scale collapses the composed rate to zero"
+        );
+    }
+
+    #[test]
+    fn eyring_prefactor_divides_thermal_by_planck_and_guards() {
+        // The TST attempt frequency k_B*T/h, formed at the caller's working scale (both pre-folded).
+        assert_eq!(
+            eyring_prefactor(Fixed::from_int(6), Fixed::from_int(3)),
+            Fixed::from_int(2),
+            "the Eyring prefactor is the thermal energy over the Planck term"
+        );
+        // No frequency scale, no attempts.
+        assert_eq!(
+            eyring_prefactor(Fixed::from_int(6), ZERO),
+            ZERO,
+            "a non-positive Planck term returns zero"
+        );
+        // An overflowing ratio (the caller's working scale too fine) saturates to the honest cap, never wraps.
+        assert_eq!(
+            eyring_prefactor(Fixed::MAX, Fixed::from_ratio(1, 1000)),
+            Fixed::MAX,
+            "an overflowing ratio saturates to Fixed::MAX"
+        );
+    }
+
+    #[test]
+    fn arrhenius_numerical_twin_recovers_minus_activation_temperature() {
+        // The numerical-twin rule (RUNBOOK section 5): the analytic Arrhenius slope is
+        // d ln(rate)/d(1/T) = -E*/k_B, a straight line whose slope IS the barrier. Here, working at a per-
+        // particle scale where k_B folds to one, E* = G is the activation temperature, so the recovered slope
+        // must be -G. Because the Arrhenius ln is EXACTLY linear in 1/T (ln(rate) = ln(A) - G/T), the central
+        // difference carries no truncation error, so the recovered slope equals -G to fixed-point rounding at
+        // EVERY step size: the h^2 plateau is the whole range, which we show with a wide and a narrow pair.
+        let a = Fixed::from_int(1000);
+        let g = Fixed::from_int(10); // E*/k_B, the activation temperature
+
+        // ln(rate) at a given temperature, taking the real kernel output (exp then ln, the full round trip).
+        let ln_rate_at = |t: i32| -> f64 {
+            let rate = arrhenius_rate(a, reduced_barrier(g, Fixed::from_int(t)));
+            rate.ln().to_f64_lossy()
+        };
+        // The central-difference slope of ln(rate) against 1/T between two temperatures.
+        let slope = |t_hi: i32, t_lo: i32| -> f64 {
+            let d_ln = ln_rate_at(t_hi) - ln_rate_at(t_lo);
+            let d_inv_t = 1.0 / (t_hi as f64) - 1.0 / (t_lo as f64);
+            d_ln / d_inv_t
+        };
+        // Wide pair (T = 20, 5; reduced barriers 0.5 and 2.0, both exact and inside the window).
+        let wide = slope(20, 5);
+        // Narrow pair (T = 10, 8; reduced barriers 1.0 and 1.25).
+        let narrow = slope(10, 8);
+        assert!(
+            (wide + 10.0).abs() < 0.05,
+            "the wide-pair slope recovers -E*/k_B = -10: {wide}"
+        );
+        assert!(
+            (narrow + 10.0).abs() < 0.05,
+            "the narrow-pair slope also recovers -10 (step-size independent, the h^2 plateau): {narrow}"
+        );
+        // The two step sizes agree, confirming the plateau (the recovered barrier does not drift with h).
+        assert!(
+            (wide - narrow).abs() < 0.05,
+            "the recovered slope is step-size independent: wide {wide} vs narrow {narrow}"
+        );
     }
 }

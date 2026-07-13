@@ -55,15 +55,21 @@ already-built `battery_emf` and Nernst), under mass conservation, never reading 
 **Productivity and carbon fixation** (`PRODUCTIVITY_DERIVATION_KICKOFF.md`). This consumer is the sharpest
 input-audit catch of the survey, and it constrains the kernel's shape. A carbon-fixation enzyme's thermal
 response is NOT a monotonic Arrhenius (which only ever rises with temperature): it is a THERMAL OPTIMUM, rising
-to a peak near the enzyme's optimum and FALLING above it as the enzyme denatures. That curve is the product of
-an activation term and a high-temperature deactivation term (the Johnson-Lewin / Sharpe-Schoolfield form), i.e.
-TWO Arrhenius factors, one forward and one for the denaturation, not one. The design consequence is a hard
-boundary the kernel must respect: the kernel is the SINGLE monotonic Arrhenius factor, and a thermal-optimum
-curve is COMPOSED from two calls (an activation rate and a deactivation rate), never wired as a special mode
-inside the kernel. Baking a peaked shape into the kernel would author biology into a physics primitive. The
-productivity doc's own Fork 1 (whether to build the exponential Johnson-Lewin now or a float-free tent) is a
-consumer-side design call for that arc; the rate kernel only owes it a clean single-factor Arrhenius to compose
-from.
+to a peak near the enzyme's optimum and FALLING above it as the enzyme denatures. The correct composition is a
+QUOTIENT, not a product (the Johnson-Lewin / Sharpe-Schoolfield form): the rising activation rate times the
+FALLING active fraction, `rate = activation * [1 / (1 + K_deactivation)]`, where `K_deactivation` is the
+temperature-rising equilibrium constant of the reversibly-denatured state, so the active fraction is a
+saturating denominator that falls as `T` climbs past the denaturation midpoint. A BARE PRODUCT of two
+positive-barrier Arrhenius terms cannot peak: `exp(-E1/kT) * exp(-E2/kT) = exp(-(E1+E2)/kT)`, a single Arrhenius
+in the summed barrier, monotonic with no interior maximum. The peak needs one factor that rises with `T` (the
+activation) and one that falls (the active fraction), and the falling factor is the `1/(1+K)` saturating
+denominator, never a second forward Arrhenius. The design consequence is a hard boundary the kernel must
+respect: the kernel is the SINGLE monotonic Arrhenius factor, and a thermal-optimum curve is COMPOSED outside
+it (an activation rate, and the deactivation entering as a saturating denominator `1/(1 + K_deactivation)`,
+with `K_deactivation` itself formed from a second reduced barrier), never wired as a special mode inside the
+kernel. Baking a peaked shape into the kernel would author biology into a physics primitive. The productivity
+doc's own Fork 1 (whether to build the exponential Johnson-Lewin now or a float-free tent) is a consumer-side
+design call for that arc; the rate kernel only owes it a clean single-factor Arrhenius to compose from.
 
 **Geology: solid-state creep and radiogenic decay** (`GEOLOGY_ARC_PACKET.md`). The creep-viscosity kernel reads
 `chem.activation_energy` plus a per-world reference viscosity and is Arrhenius in exactly this barrier: mantle
@@ -103,12 +109,14 @@ pub fn arrhenius_rate(prefactor: Fixed, reduced_barrier: Fixed) -> Fixed
 /// crossing). This is where the Buckingham-Pi group is assembled; the kernel above never sees the units.
 pub fn reduced_barrier(barrier_energy: Fixed, thermal_energy: Fixed) -> Fixed
 
-/// The Eyring transition-state prefactor k_B*T/h (the universal attempt frequency of TST), formed at a
-/// caller-supplied working scale. SURFACED, NOT ASSUMED: at SI scale k_B*T/h is ~6e12 /s, far outside the
-/// Q32.32 range, so the fundamentals cannot be multiplied raw; the caller passes k_B*T and h pre-folded to
-/// its own frequency unit (the same once-at-a-cited-scale fold nernst_emf and the collision integral use).
-/// A constant-Arrhenius consumer or the freezer's nu = c_s/a does not call this at all.
-pub fn eyring_prefactor(kt_over_h_scaled: Fixed) -> Fixed
+/// The Eyring transition-state prefactor k_B*T/h (the universal attempt frequency of TST), formed from a
+/// thermal energy and a Planck constant PRE-FOLDED to the caller's working frequency unit and divided here.
+/// SURFACED, NOT ASSUMED: at SI scale k_B*T/h is ~6e12 /s, far outside the Q32.32 range, so the caller must
+/// express k_B*T and h at a working scale whose ratio is representable (the same once-at-a-cited-scale fold
+/// nernst_emf and the collision integral use). A non-positive Planck term returns zero; an overflowing ratio
+/// saturates to Fixed::MAX (the honest cap). A constant-Arrhenius consumer or the freezer's nu = c_s/a does
+/// not call this at all.
+pub fn eyring_prefactor(thermal_energy_scaled: Fixed, planck_scaled: Fixed) -> Fixed
 ```
 
 The signature of `arrhenius_rate` is the whole point: `(prefactor, reduced_barrier)`, two scalars, no domain.
@@ -128,10 +136,18 @@ single group
 the activation energy in units of the thermal energy. `rate / prefactor = exp(-Pi_1)` is dimensionless, and
 `Pi_1` is the only group inside the transcendental. The prefactor carries the rate's dimension and sets the
 scale; it is not a second dimensionless group. Nondimensionalizing the Arrhenius law by the thermal energy and
-the attempt frequency leaves exactly `Pi_1`, which is the budget the gate named. Any consumer that needs a
-second dimensionless quantity (the productivity thermal optimum needs a second barrier for the deactivation
-branch) forms a SECOND, independent `Pi_1` for its second Arrhenius factor and composes, so the kernel's own
-budget stays at one group per call.
+the attempt frequency leaves exactly `Pi_1`, which is the budget the gate named.
+
+The one-group budget is stated EXACT for the constant-prefactor Arrhenius form. The Eyring TST form puts a
+second temperature dependence in the PREFACTOR (`k_B*T/h` rises linearly with `T`), so an Eyring rate's full
+temperature dependence is the prefactor's linear `T` times the exponential in `Pi_1`. That linear prefactor
+factor is not a second dimensionless group in the exponent (the exponent still carries only `Pi_1`), but it is
+a second temperature dependence, so the Pi-minimality claim is precise as: exactly one dimensionless group
+inside the transcendental, and for the constant-prefactor Arrhenius form that is the whole temperature
+dependence. Any consumer that needs a second dimensionless quantity (the productivity thermal optimum needs a
+second reduced barrier for its deactivation equilibrium constant `K_deactivation`) forms a SECOND, independent
+`Pi_1` for that barrier and composes it as the saturating denominator of Section 2, so the kernel's own budget
+stays at one group per call.
 
 ## 5. The transcendental coupling, surfaced (the exp gap)
 
@@ -189,10 +205,16 @@ key the barrier off the already-derived cohesive energy plus the vacancy-fractio
 reducing `g` from a read constant to a smaller derived residual (the vacancy-formation fraction of the cohesive
 energy), rather than reading `g * R * T_m` wholesale. This is more derive-first and less reference-data, and it
 reuses a quantity the floor already carries. It is also more work and may not close cleanly (the vacancy
-energetics are not floored). I am NOT choosing between the two; I am surfacing that the conservative form (g as
-per-class reference data) is safe and buildable now, and the sharper form (barrier from E_coh) is the deeper
-derivation to weigh. The gate and owner rule which the freezer uses; the kernel is identical either way, since
-the freezer forms `E*` before the call.
+energetics are not floored). Stated plainly, so no derive-first win is oversold: EITHER form carries a residual
+class proportionality (the sharper form still needs the vacancy-formation fraction of `E_coh`, itself a per-
+class number), so the derive-first gain is real but PARTIAL, moving `g` from a wholesale read to a smaller
+per-class residual rather than eliminating it. I am NOT choosing between the two; I am surfacing that the
+conservative form (g as per-class reference data) is safe and buildable now, and the sharper form (barrier from
+E_coh) is the deeper derivation to weigh. This fork is ruled at the FREEZER slice, not at the kernel: when the
+freezer wires, the derivation-hunter runs on it (does the barrier truly derive from the Rose `E_coh` via the
+Van Liempt `Q ~ const * T_m` relation, with `T_m` and `E_coh` both bond-strength proxies) before the cited
+per-class `g` reference data is accepted, and the owner weighs in there. The kernel is identical either way,
+since the freezer forms `E*` before the call.
 
 ## 7. The numerical twin
 
@@ -214,11 +236,19 @@ delivers the neutral primitive and proves it in isolation, exactly as the physic
 proven before their consumers arrived. The abiogenesis smooth-rate replacement of the `reaction` boolean gate,
 the memory-turnover consumer, and the creep-viscosity consumer are each their own later, flag-first slice.
 
-## 9. Honest limits and the open questions for the gate
+## 9. Honest limits and the gate's ruling
+
+Gate ruling, 2026-07-13: the design is APPROVED to build (the second-opinion generality check passed, no
+signature leak across the six consumers). One correction folded above (the productivity composition is a
+quotient, not a product; Section 2). Two items carried forward to the freezer slice, neither blocking the
+kernel: the `g` derive-first fork is ruled at the freezer slice with the derivation-hunter (Section 6), and the
+freezer's Dodson closure is an implicit solve for the closure temperature, so the freezer wiring composes a
+root-find AROUND the kernel (a freezer-slice concern, not a kernel one). The honest limits that stand:
 
 - The kernel is the single monotonic Arrhenius factor. Peaked thermal-optimum curves (the productivity enzyme)
-  are composed from two calls and are the consumer's arc, not this kernel's shape. Confirm the composition
-  boundary is where the gate wants it.
+  are composed OUTSIDE it as the rising activation times the falling saturating denominator `1/(1+K)`, never a
+  product of two forward Arrhenius terms (which is monotonic). That composition is the consumer's arc, not this
+  kernel's shape. The gate confirmed this boundary.
 - The reduced barrier above 22 reads as zero rate (the frozen regime). This is physically correct for the
   freezer and for slow chemistry, but it is a real ceiling: a consumer that needs a meaningful rate at
   `Pi_1 > 22` would be asking for a number below Q32.32 resolution, and the honest answer is zero at this
