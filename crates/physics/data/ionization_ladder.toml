@@ -22,52 +22,52 @@
 # increasing (a successive ionization energy must exceed the prior: removing an electron from a more positive
 # ion costs more), the physical reproduction-style guard, and fails loud on a missing citation.
 
-[[element]]
+[[ladder]]
 symbol = "Sc"
 ionization_energies_ev = ["6.56149", "12.79977", "24.756839", "73.4894"]
 source = "NIST Atomic Spectra Database (Kramida et al.), ground-state ionization energies Sc I-IV"
 
-[[element]]
+[[ladder]]
 symbol = "Ti"
 ionization_energies_ev = ["6.828120", "13.5755", "27.49171", "43.26717"]
 source = "NIST Atomic Spectra Database (Kramida et al.), ground-state ionization energies Ti I-IV"
 
-[[element]]
+[[ladder]]
 symbol = "V"
 ionization_energies_ev = ["6.746187", "14.634", "29.3111", "46.709"]
 source = "NIST Atomic Spectra Database (Kramida et al.), ground-state ionization energies V I-IV"
 
-[[element]]
+[[ladder]]
 symbol = "Cr"
 ionization_energies_ev = ["6.76651", "16.486305", "30.959", "49.16"]
 source = "NIST Atomic Spectra Database (Kramida et al.), ground-state ionization energies Cr I-IV"
 
-[[element]]
+[[ladder]]
 symbol = "Mn"
 ionization_energies_ev = ["7.4340380", "15.63999", "33.668", "51.21"]
 source = "NIST Atomic Spectra Database (Kramida et al.), ground-state ionization energies Mn I-IV"
 
-[[element]]
+[[ladder]]
 symbol = "Fe"
 ionization_energies_ev = ["7.9024681", "16.19921", "30.651", "54.91"]
 source = "NIST Atomic Spectra Database (Kramida et al.), ground-state ionization energies Fe I-IV"
 
-[[element]]
+[[ladder]]
 symbol = "Co"
 ionization_energies_ev = ["7.88101", "17.0844", "33.50", "51.27"]
 source = "NIST Atomic Spectra Database (Kramida et al.), ground-state ionization energies Co I-IV"
 
-[[element]]
+[[ladder]]
 symbol = "Ni"
 ionization_energies_ev = ["7.639878", "18.168838", "35.187", "54.92"]
 source = "NIST Atomic Spectra Database (Kramida et al.), ground-state ionization energies Ni I-IV"
 
-[[element]]
+[[ladder]]
 symbol = "Cu"
 ionization_energies_ev = ["7.726380", "20.29239", "36.841", "57.38"]
 source = "NIST Atomic Spectra Database (Kramida et al.), ground-state ionization energies Cu I-IV"
 
-[[element]]
+[[ladder]]
 symbol = "Zn"
 ionization_energies_ev = ["9.394197", "17.96439", "39.72330", "59.573"]
 source = "NIST Atomic Spectra Database (Kramida et al.), ground-state ionization energies Zn I-IV"

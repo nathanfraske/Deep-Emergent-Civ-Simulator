@@ -73,11 +73,11 @@ impl std::error::Error for IonizationLadderError {}
 #[derive(Debug, Default, Deserialize, Serialize)]
 struct LadderFile {
     #[serde(default)]
-    element: Vec<ElementDef>,
+    ladder: Vec<LadderDef>,
 }
 
 #[derive(Debug, Default, Deserialize, Serialize)]
-struct ElementDef {
+struct LadderDef {
     symbol: String,
     #[serde(default)]
     ionization_energies_ev: Vec<String>,
@@ -98,20 +98,20 @@ impl IonizationLadder {
         let file: LadderFile =
             toml::from_str(s).map_err(|e| IonizationLadderError::Parse(e.to_string()))?;
         let mut by_symbol = BTreeMap::new();
-        for element in file.element {
-            if element.source.trim().is_empty() {
-                return Err(IonizationLadderError::MissingSource(element.symbol.clone()));
+        for entry in file.ladder {
+            if entry.source.trim().is_empty() {
+                return Err(IonizationLadderError::MissingSource(entry.symbol.clone()));
             }
-            if element.ionization_energies_ev.is_empty() {
+            if entry.ionization_energies_ev.is_empty() {
                 return Err(IonizationLadderError::NotMonotonic(format!(
                     "{} has an empty ladder",
-                    element.symbol
+                    entry.symbol
                 )));
             }
-            let mut energies = Vec::with_capacity(element.ionization_energies_ev.len());
-            for raw in &element.ionization_energies_ev {
+            let mut energies = Vec::with_capacity(entry.ionization_energies_ev.len());
+            for raw in &entry.ionization_energies_ev {
                 let value = Fixed::from_decimal_str(raw.trim()).map_err(|d| {
-                    IonizationLadderError::BadValue(format!("{} energy {raw}: {d}", element.symbol))
+                    IonizationLadderError::BadValue(format!("{} energy {raw}: {d}", entry.symbol))
                 })?;
                 energies.push(value);
             }
@@ -120,14 +120,14 @@ impl IonizationLadder {
                 if pair[1] <= pair[0] {
                     return Err(IonizationLadderError::NotMonotonic(format!(
                         "{}: {} not greater than {}",
-                        element.symbol,
+                        entry.symbol,
                         pair[1].to_f64_lossy(),
                         pair[0].to_f64_lossy()
                     )));
                 }
             }
-            if by_symbol.insert(element.symbol.clone(), energies).is_some() {
-                return Err(IonizationLadderError::Duplicate(element.symbol));
+            if by_symbol.insert(entry.symbol.clone(), energies).is_some() {
+                return Err(IonizationLadderError::Duplicate(entry.symbol));
             }
         }
         Ok(IonizationLadder { by_symbol })
@@ -263,7 +263,7 @@ mod tests {
         // The monotonicity guard fails loud on a physically impossible ladder (a later ionization cheaper than
         // an earlier one).
         let bad = r#"
-[[element]]
+[[ladder]]
 symbol = "Zz"
 ionization_energies_ev = ["10.0", "5.0"]
 source = "test"
@@ -277,7 +277,7 @@ source = "test"
     #[test]
     fn a_missing_citation_is_rejected() {
         let bad = r#"
-[[element]]
+[[ladder]]
 symbol = "Zz"
 ionization_energies_ev = ["5.0", "10.0"]
 source = ""
