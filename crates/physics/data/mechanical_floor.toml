@@ -266,6 +266,15 @@ range_lo = "1"
 range_hi = "10000"
 real = "Ashby and Jones; brittle-fracture literature (whisker and theoretical headroom)"
 
+# RETIREMENT TARGET (materials oracle, Stage-6 property emission). This authored per-material Young's modulus is
+# the named-substance-floor anchor the oracle replaces. Young's modulus E is a mix of the bulk modulus B and the
+# shear modulus G (E = 9BG/(3B+G)), and the two derive by different routes (owner research, #182): for the seed
+# registry's ionic-covalent oxides B is LATTICE CURVATURE on the Shannon radius (crate::materials_oracle carries
+# only the metallic/quick-screen E_coh/V scale today), and G is class-dispatched (Cauchy relation, a separate
+# slice). So this row is retired by the principled B-derived-plus-G-class-dispatched route, NOT by the current
+# quick-screen scale alone. The row STAYS while it still feeds its live consumer (compose elastic_recoil_energy);
+# it is flagged authoring-to-be-retired. Not deleted here: the derivations land dormant (byte-neutral), and the
+# swap is a separate wired slice once B and G are both derived.
 [[axis]]
 id = "mat.elastic_modulus"
 measures = "Young's modulus, the stress per unit elastic strain"

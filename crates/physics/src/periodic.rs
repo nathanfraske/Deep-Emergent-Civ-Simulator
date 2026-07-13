@@ -83,6 +83,51 @@ pub struct Element {
     /// The citation for the standard molar entropy value (every thermochemical value is real-with-source).
     /// `None` when no entropy is populated; required non-empty whenever an entropy is.
     pub entropy_source: Option<String>,
+    /// The standard enthalpy of ATOMIZATION at 298.15 K, in kJ/mol, the enthalpy to convert one mole of the
+    /// element in its standard state into gaseous monatomic atoms (equivalently the standard enthalpy of
+    /// formation of the monatomic gas). This is the element's own COHESIVE ENERGY, a measured `[M]`
+    /// component-level constant that bottoms out in the element's band structure (quantum chemistry the engine
+    /// does not own), the same tier as the atomic weight and the standard molar entropy.
+    ///
+    /// TAG: `[M, floor-and-validation]` (owner research, #182). This column is NOT load-bearing petrology
+    /// substrate: the phase disposer minimizes over the `dG_f` rows at fixed bulk composition, so the elemental
+    /// atomization sum is IDENTICAL across candidate assemblages and cancels by Hess (verified against
+    /// `apparent_gibbs_energy`); the disposer never reads this column. Its real roles are two. As an ESTIMATOR
+    /// input it feeds the cohesive-energy density `E_coh / V`, the METALLIC / invented-element / quick-screen
+    /// modulus tier (crate::materials_oracle), NOT the principled route for the ionic-covalent oxide phases,
+    /// whose bulk modulus rides lattice curvature on the Shannon radius instead. As the VALIDATION battery it is
+    /// the standing check on the estimators across the ~100 elements of Brewer/JANAF data (for the ionic,
+    /// molecular, and H-bonded classes the cohesion reassembles from IE + EA, polarizability, and the H-bond
+    /// ladder, so this column is the independent arbiter, the measured-helium-viscosity role with the arrow
+    /// reversed). `None` until a cited value is populated (the extensible registry: an unpopulated row is absent,
+    /// not zero).
+    pub atomization_enthalpy: Option<Fixed>,
+    /// The raw decimal string of the atomization enthalpy, retained verbatim as the provenance record and
+    /// against Q32.32 rounding, mirroring `weight_decimal`. `None` when no atomization enthalpy is populated.
+    pub atomization_decimal: Option<String>,
+    /// The citation for the atomization enthalpy (every thermochemical value is real-with-source). `None` when
+    /// none is populated; required non-empty whenever an atomization enthalpy is.
+    pub atomization_source: Option<String>,
+    /// The first IONIZATION ENERGY in electron-volts, the energy to remove the least-bound electron from the
+    /// neutral gaseous atom, a measured `[M]` component constant (owner research, #182). With the electron
+    /// affinity it composes the two quantities the charge-equilibration solve needs: the Mulliken
+    /// electronegativity `chi = (IE + EA)/2` and the chemical hardness `eta = (IE - EA)/2` (both derived `[D]`,
+    /// the hardness free from the same two columns). `None` until a cited value is populated (absent-not-zero).
+    pub ionization_energy: Option<Fixed>,
+    /// The raw decimal string of the first ionization energy, retained verbatim as provenance. `None` when
+    /// unpopulated.
+    pub ionization_decimal: Option<String>,
+    /// The citation for the first ionization energy. `None` when unpopulated; required non-empty when set.
+    pub ionization_source: Option<String>,
+    /// The ELECTRON AFFINITY in electron-volts, the energy released when an electron is added to the neutral
+    /// gaseous atom (positive for a bound anion, negative or near-zero for an unbound one), a measured `[M]`
+    /// component constant (owner research, #182). The electronegativity and hardness sibling of the ionization
+    /// energy; see [`Element::ionization_energy`]. `None` until a cited value is populated (absent-not-zero).
+    pub electron_affinity: Option<Fixed>,
+    /// The raw decimal string of the electron affinity, retained verbatim as provenance. `None` when unpopulated.
+    pub electron_affinity_decimal: Option<String>,
+    /// The citation for the electron affinity. `None` when unpopulated; required non-empty when set.
+    pub electron_affinity_source: Option<String>,
     /// The citation and provenance for this row.
     pub provenance: String,
 }
@@ -455,9 +500,63 @@ struct ElementDef {
     /// The citation for the standard molar entropy; required non-empty when the entropy is populated.
     #[serde(default)]
     entropy_source: String,
+    /// The standard enthalpy of atomization at 298.15 K, in kJ/mol (the element's cohesive energy), as a
+    /// decimal string; empty when not populated.
+    #[serde(default)]
+    atomization_enthalpy: String,
+    /// The citation for the atomization enthalpy; required non-empty when the enthalpy is populated.
+    #[serde(default)]
+    atomization_source: String,
+    /// The first ionization energy in eV, as a decimal string; empty when not populated.
+    #[serde(default)]
+    ionization_energy: String,
+    /// The citation for the first ionization energy; required non-empty when it is populated.
+    #[serde(default)]
+    ionization_source: String,
+    /// The electron affinity in eV, as a decimal string; empty when not populated.
+    #[serde(default)]
+    electron_affinity: String,
+    /// The citation for the electron affinity; required non-empty when it is populated.
+    #[serde(default)]
+    electron_affinity_source: String,
     /// The citation (every element is real-with-source).
     #[serde(default)]
     real: String,
+}
+
+/// An optional cited value as `(parsed, raw decimal, citation)`, all present together or all `None`.
+type OptionalCited = (Option<Fixed>, Option<String>, Option<String>);
+
+/// Parse an optional cited decimal column into `(value, raw, source)`: absent when the raw string is empty
+/// (`None, None, None`); otherwise the parsed `Fixed`, its verbatim decimal, and its required citation, or a
+/// load error when the value is unparseable or the citation missing. The shared shape of the ionization-energy
+/// and electron-affinity columns (a measured value must carry its source, the same discipline as the entropy
+/// and atomization columns).
+fn parse_optional_cited(
+    symbol: &str,
+    raw: &str,
+    source: &str,
+    field: &str,
+) -> Result<OptionalCited, PeriodicError> {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return Ok((None, None, None));
+    }
+    let value = Fixed::from_decimal_str(raw).map_err(|detail| PeriodicError::BadValue {
+        symbol: symbol.to_string(),
+        detail: format!("{field}: {detail}"),
+    })?;
+    if source.trim().is_empty() {
+        return Err(PeriodicError::BadValue {
+            symbol: symbol.to_string(),
+            detail: format!("{field} is set but its citation ({field}_source) is empty"),
+        });
+    }
+    Ok((
+        Some(value),
+        Some(raw.to_string()),
+        Some(source.trim().to_string()),
+    ))
 }
 
 fn default_true() -> bool {
@@ -523,6 +622,48 @@ impl ElementDef {
                 Some(self.entropy_source.trim().to_string()),
             )
         };
+        // The atomization enthalpy is optional, on the same discipline as the entropy: if present it must
+        // parse and carry its own citation (a measured `[M]` cohesive-energy datum, real-with-source).
+        let atomization_raw = self.atomization_enthalpy.trim();
+        let (atomization_enthalpy, atomization_decimal, atomization_source) =
+            if atomization_raw.is_empty() {
+                (None, None, None)
+            } else {
+                let value = Fixed::from_decimal_str(atomization_raw).map_err(|detail| {
+                    PeriodicError::BadValue {
+                        symbol: self.symbol.clone(),
+                        detail: format!("atomization_enthalpy: {detail}"),
+                    }
+                })?;
+                if self.atomization_source.trim().is_empty() {
+                    return Err(PeriodicError::BadValue {
+                    symbol: self.symbol.clone(),
+                    detail:
+                        "atomization_enthalpy is set but atomization_source (its citation) is empty"
+                            .to_string(),
+                });
+                }
+                (
+                    Some(value),
+                    Some(atomization_raw.to_string()),
+                    Some(self.atomization_source.trim().to_string()),
+                )
+            };
+        // The ionization energy and electron affinity are optional cited columns (the charge-equilibration
+        // inputs), each parsed on the same discipline: a value must carry its own citation.
+        let (ionization_energy, ionization_decimal, ionization_source) = parse_optional_cited(
+            &self.symbol,
+            &self.ionization_energy,
+            &self.ionization_source,
+            "ionization_energy",
+        )?;
+        let (electron_affinity, electron_affinity_decimal, electron_affinity_source) =
+            parse_optional_cited(
+                &self.symbol,
+                &self.electron_affinity,
+                &self.electron_affinity_source,
+                "electron_affinity",
+            )?;
         Ok(Element {
             symbol: self.symbol,
             name: self.name,
@@ -535,6 +676,15 @@ impl ElementDef {
             standard_molar_entropy,
             entropy_decimal,
             entropy_source,
+            atomization_enthalpy,
+            atomization_decimal,
+            atomization_source,
+            ionization_energy,
+            ionization_decimal,
+            ionization_source,
+            electron_affinity,
+            electron_affinity_decimal,
+            electron_affinity_source,
             provenance: self.real.trim().to_string(),
         })
     }

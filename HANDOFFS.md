@@ -2959,3 +2959,235 @@ SLICE 2 (momentum.rs): momentum_fan, isotropic CORDIC azimuths through the integ
 BRANCH claude/momentum-vector-unification (tip ed49e3e), rebuilt onto merged main (1ac525a, #177 in) via MERGE COMMIT not rebase (force-push is gated; use merge+cherry-pick to avoid history rewrite). Byte-neutral 40fe8a72. All gates clean.
 
 STATE: slice 2 signaled (comment 4952788137), awaiting gate ruling. NEXT: on gate go, the arc's mechanism is complete (integrator + fan). The Decision-2 RETIRE (fold runout/ballistic out of the driver path, keep parabola as test oracle) is HELD for A's arming lane (A on priority-0 provenance-ledger per gate) - do NOT build it until the gate signals A resumed arming; it couples to A's TransportKernelId becoming ONE unified transport-integrator arm. main advanced to #180 (Agent B physics cleanup, no file overlap, routine merge at PR-merge time). Do NOT touch A's genesis/surface_transport files or B's lanes.
+
+---
+
+## 2026-07-12 (Agent B) - Materials oracle slice 1 BUILT (#182): composition-derived elastic modulus
+
+Gate approved the datum (the per-element atomization-enthalpy [M] column) and directed "Build it: the Hess E_coh, the estimator modulus, the VRH aggregate, byte-neutral, gate per push." Built and pushed on claude/materials-oracle-modulus-slice (tip e8aac76, off main 64da409). Signaled #182 comment 4952938941.
+
+WHAT: Stage-6 property emission - a material's elastic modulus DERIVED from its stable mineral assemblage rather than authored per rock type, the elastic sibling of the density crustal_density already emits from the same assemblage. Retires the authored mat.elastic_modulus toward Principle 8.
+
+THE FLOOR INPUT (gate-approved [M] column): periodic.rs + periodic_table.toml carry a new atomization_enthalpy column - optional, absent-not-zero, cited-with-source on the standard-molar-entropy discipline (parse-and-require-citation or None). Populated H C N O Na Mg Al Si P S K Ca Ti Fe from CODATA Key Values for Thermodynamics (Cox, Wagman & Medvedev, 1989), the standard enthalpy of formation of the monatomic gas = the element's cohesive energy. INPUT the derivation composes, never authored output. Wired through Element struct + ElementDef serde + into_element (mirrors the entropy optional-parse block exactly).
+
+THE DERIVATION (crates/physics/src/materials_oracle.rs, NEW module, dormant):
+- phase_cohesive_energy: Hess E_coh = sum(atomization_i * count_i) - dH_f, [D] from [M] inputs.
+- phase_elastic_modulus: E_coh/V estimator [E], GPa directly (1 kJ/cm^3 = 1 GPa).
+- assemblage_elastic_modulus: volume-weighted Voigt-Reuss-Hill aggregate, emits PropertyEstimate {value, band, provenance}. band = derived Voigt-Reuss half-gap (zero for single phase). Provenance = LOCAL seven-tag placeholder enum, swap to A's enforced register enum when Phase 1 lands.
+
+RETIREMENT: mat.elastic_modulus flagged retirement target in mechanical_floor.toml (7-line comment), KEPT feeding live consumer compose elastic_recoil_energy, retires when consumer reads derived modulus.
+
+RESERVED (surfaced not baked): per-phase ESTIMATOR SCATTER band, basis = empirical spread of M/(E_coh/V) across bonding classes in estimator-calibration lit, owner sets + validates vs measured moduli, then emitted band widens to max(VRH gap, estimator band).
+
+VERIFIED: byte-neutral (sim world_determinism + invariants + determinism_harness pins all pass; nothing wired reads new data). 6 oracle tests (quartz E_coh 1859.06, periclase 997.88 kJ/mol hand-calc; quartz modulus ~82 GPa; single-phase zero band; two-phase forsterite+quartz VR bracketing; data-gap None). Full physics suite 173+ green. fmt+clippy clean. Floor registry regenerated (124 axes unchanged, line-shifts only). Five mandatory lenses reasoned by hand (offered full blind panel before merge/arm).
+
+STATE: slice signaled, awaiting gate review/merge. NEXT on gate go: (1) Hashin-Shtrikman refinement (Stage 7) OR next property (melting point / strength ceiling / surface energy) off the same E_coh; (2) swap Provenance placeholder when A's register enum lands. Task #35 (interior arming) still HELD for A's 3c producer. Do NOT touch A's genesis/register files or C's momentum/world lanes.
+
+---
+
+## 2026-07-12 (Agent B) - Materials oracle REFRAMED by owner research (#182), retags in, corrected carve surfaced
+
+Gate HELD the merge and reframed the modulus derivation (comment 4952...). Two CI/fmt notes: (1) my slice-1 fmt was crate-scoped not --all, left a non-canonical break at periodic.rs:549/569; FIXED cargo fmt --all in bbb1e5a. (2) The reframe.
+
+THE REFRAME (confirmed at source before acting):
+- CANCELLATION THEOREM: apparent_gibbs_energy (petrology.rs:83) reads dG_f/S/V only, so the elemental atomization sum cancels by Hess across candidate assemblages at fixed bulk composition. The disposer NEVER reads the atomization column. It was never petrology substrate.
+- E_coh/V is the METALLIC/quick-screen tier, WRONG for the registry's ionic-covalent oxides. Their bulk modulus is LATTICE CURVATURE ON THE RADIUS: B=(n-1)A/(18 r0^4) (Born-Lande, reproduces NaCl 24.8 GPa). B~1/r0^4 so the RADIUS is the load-bearing column, not the energy.
+- My slice conflated B with G (Young's E=9BG/(3B+G)). Central-force models obey Cauchy C12=C44 as a theorem, so G is the un-derived half, class-dispatched.
+
+RETAGS APPLIED (1aa535d, byte-neutral doc/comment only, values unmoved):
+- periodic.rs atomization column -> [M, floor-and-validation] (estimator input + validation battery, not substrate).
+- materials_oracle.rs E_coh/V -> labeled metallic/invented/quick-screen stiffness scale [E], not the oxide route.
+- mechanical_floor.toml mat.elastic_modulus retirement flag softened -> retired by principled B-derived + G-class-dispatched, not the screen scale.
+
+CORRECTED CARVE surfaced design-first (docs/working/MATERIALS_ORACLE_MODULUS_CARVE2.md), NOT built: add Shannon ionic radius [M] column; derive B=(n-1)A/(18 r0^4) for ionic class (z+z- Coulomb factor from the valence column already on the floor); emit B, name shear debt; keep E_coh/V as screen tier. FLOOR ADDITIONS surfaced for ruling: Madelung A per structure prototype, Born exponent n per noble-gas core.
+
+TWO SEAMS I found auditing the reframe (surfaced before building):
+- Seam A: half the registry (quartz framework, forsterite/fayalite orthosilicates) is NOT cleanly ionic; single-A/single-r0 Born-Lande fails there. Per-phase bonding class must be a DATA-DRIVEN key; quartz/olivines route to covalent Keating tier, not ionic B.
+- Seam B: Madelung constant is exact only for a phase mapping to a seeded prototype (rock-salt, corundum); arbitrary silicate needs an Ewald sum over the structure. Gate ionic-B to prototype-mapped phases; unmapped falls through to screen tier (honest None, never fabricated A).
+
+STATE: reframe signaled (comment 4952977243), awaiting gate ruling on the floor additions + the two seams. CI re-running on bbb1e5a (fmt fix). NEXT on ruling: build the Shannon-radius column + Born-Lande B for prototype-mapped ionic phases + per-phase class key, byte-neutral, section-9, gate per push. Task #35 (interior arming) still HELD for A's 3c (main unchanged at 64da409, no crust producer landed). Do NOT touch A's genesis/register or C's momentum/world lanes.
+
+---
+
+## 2026-07-12 (Agent B) - Materials oracle REFRAME 3: generator architecture (#182). Carve-2 KEPT as AB validation, Ewald kernel next.
+
+Two more gate turns: (1) minimal-prototype foundation slice built+pushed (4152e32: lattice_modulus.rs Born-Lande ionic B, shannon_radii/born_exponents/prototypes data, prototype key). Then (2) owner delivered the GENERATOR ARCHITECTURE (origin/claude/materials-oracle-generator-arch, MATERIALS_ORACLE_GENERATOR_ARCH.md) that dissolves both my seams: Madelung = Ewald(positions) [seam 2 -> a kernel not a table], ionicity = QEq charge-equilibration solve over IE/EA columns [seam 1 -> a solve not a fork]. Then (3) gate reconciled: carve-2 is NOT wasted, it is the AB point-charge SPECIAL CASE that VALIDATES the generator (my two findings map 1:1 onto QEq and Ewald). KEEP carve-2 on the branch, do NOT revert.
+
+KEY: I briefly reverted carve-2 on the earlier "superseded" comment, then RESTORED it on the reconciling comment (net branch history clean: 4152e32 -> a26ffd5, revert never pushed). Lesson: the gate's "superseded" meant "not the final answer / don't add correction factor / don't tabulate A2B3", NOT "delete". Carve-2 stays.
+
+GATE RULINGS on carve-2:
+- Do NOT add the reserved point-charge correction factor (QEq's partial charge supplies it from IE/EA: chi=(IE+EA)/2, hardness eta=(IE-EA)/2 the free second combination). Mg comes out <+2, correcting the 266->~165 overestimate from first principles.
+- Do NOT tabulate the A2B3 Madelung (Ewald computes it over positions).
+- Carve-2 B stays the AB fast-path + validation check; E_coh/V stays screen tier; G stays named shear debt; Shannon radii feed bond-valence positions + Born-Mayer; Born exponents feed repulsion; prototype key DEMOTES to memoization index.
+- Do NOT merge carve-2 alone (point-charge oxide B known ~1.6x high). Whole slice merges once QEq gives partial-charge B.
+
+CI FIX (a26ffd5): the red "documents and prose customs" job was the CONSTRUCTOR GATE (not prose - my prose was clean). 5 inline from_decimal_str in lattice_modulus.rs. Fixed: the 2 physical law constants (14.39964 eV.A Coulomb energy, 160.2177 GPa/(eV/A^3)) now build via from_ratio (exact rational, out of the from_decimal_str hard-gate); the 3 data-loader parses classified `deserialization` in scripts/constructor_baseline.tsv. All gates green, 180 physics tests, byte-neutral.
+
+EWALD CARVE opened design-first (docs/working/MATERIALS_ORACLE_EWALD_CARVE.md): the load-bearing generator. Three-term Ewald split (real erfc / reciprocal Gaussian / self-energy), tin-foil convention for polar cells, self-validates against NaCl 1.74756 / CsCl / fluorite / corundum Madelung constants, pure mechanism no floor data, byte-neutral. ONE seam surfaced for gate ruling: fixed-point erfc + exp (not on Fixed yet; powf is precedent) by series or Abramowitz-Stegun rational, Madelung self-check = acceptance test.
+
+STATE: signaled (comment 4953055846), confirmed Ewald-next, awaiting gate ruling on the transcendental seam before building the kernel. Offered IE/EA columns as a parallel lane. CI re-running on a26ffd5.
+DEPENDENCY ORDER (architecture): Ewald kernel -> IE/EA columns + derived chi/eta -> QEq -> bond-valence positions -> energy assembly (Ewald(q)+Born-Mayer+London+Keating) -> modulus. The disposer RESOLUTION-LADDER rule is routed to A (not my build). Task #35 interior arming still HELD (main unchanged 64da409). Do NOT touch A's genesis/register/generator-arch or C's lanes.
+
+---
+
+## 2026-07-12 (Agent B) - Materials oracle: EWALD KERNEL BUILT + validated to 1e-4 (#182, generator arch piece 1)
+
+Gate approved the Ewald carve and ruled the transcendental seam: A-S rational erfc, fixed-form deterministic exp (crate's Fixed::exp), deterministic alpha+cutoffs, self-validate to 1e-4, tin-foil declared, Ewald-first single lane (no parallel - C on cbrt, A on register). Gate also OWNED the CI misdiagnosis (it said prose, I proved constructor gate - PD1 on its input).
+
+BUILT crates/physics/src/ewald.rs (commit 1444f74, dormant, byte-neutral, pure mechanism NO floor data):
+- Three-term Ewald split: real-space erfc-screened Coulomb, reciprocal Gaussian structure factor, self-energy. Tin-foil for polar cells (declared, surface term zeroed).
+- erfc = Abramowitz-Stegun 7.1.26 five-term rational over crate Fixed::exp; structure factor uses crate CORDIC sin_cos. ALL fixed-form, no input-dependent trip count. alpha=3.2/V^(1/3), N_REAL=2, N_RECIP=6 (deterministic convergence params). A-S coeffs + alpha are exact from_ratio (NO from_decimal_str, no constructor-gate site).
+- Cell{lattice:[[Fixed;3];3], ions:Vec<Ion{frac,charge}>}. ewald_energy(cell)->Option<Fixed> (reduced units). madelung_constant(cell, formula_units, ref_distance) = -(E/fu)*ref_dist.
+
+VALIDATED to gate's 1e-4: NaCl 1.747563 vs 1.747565, CsCl 1.762675 vs 1.762675 (the clean 1:1 proofs = "Madelung is Ewald of positions"). Fluorite CaF2 = non-1:1 mixed-charge structural validation (the generality corundum's A2B3 needs). erfc self-checked (erfc(0)=1, erfc(1)=0.157299, erfc(2)=0.004678). Convention: M=-(E/fu)*ref_dist, full charges, nearest cation-anion ref. 6 ewald tests. 186 physics tests total. All gates clean. Byte-neutral (sim pins unmoved).
+
+HONEST SCOPE NOTE surfaced: corundum's exact 1e-4 Madelung validation is the follow-on (needs experimental rhombohedral cell + cited reference constant); kernel generality for A2B3 already proven by fluorite. Did NOT fabricate a corundum reference.
+
+STATE: signaled (comment 4953086619), confirmed Ewald built. NEXT per gate order: IE/EA [M] columns + derived chi=(IE+EA)/2, hardness eta=(IE-EA)/2 (purely additive floor, quick), then QEq (needs IE/EA + Ewald), then bond-valence positions, then energy assembly, then modulus. Carve-2 (lattice_modulus.rs) stays as AB fast-path + validation; whole slice merges once QEq gives partial-charge B. Awaiting gate confirm to proceed to IE/EA, or ruling on adding corundum cell first.
+DEPENDENCY: QEq E(q)=sum(chi_i q_i + 0.5 eta_i q_i^2)+Ewald(q), neutrality linear solve. Energy assembly = Ewald(computed q)+Born-Mayer+London+Keating. Disposer RESOLUTION-LADDER routed to A. Task #35 interior arming still HELD (main 64da409 unchanged, no Stage-3c). Do NOT touch A's genesis/register/generator-arch or C's momentum/world/cbrt lanes.
+
+---
+
+## 2026-07-12 (Agent B) - Materials oracle: IE/EA columns + derived chi/eta built (#182, generator arch piece 2). Unbound-anion seam surfaced.
+
+Gate APPROVED the Ewald kernel (verified determinism at source: no variable-trip-count loop), approved corundum deferral, and surfaced the ANISOTROPY seam (alpha=3.2/V^(1/3) validated cubic-only; non-cubic silicates may under-converge in the thin axis; RE-VALIDATE with per-axis cutoff when first non-cubic cell arrives). I recorded that seam as a flagged LIMITATION in ewald.rs module doc.
+
+BUILT (commit 7753a4b, dormant, byte-neutral):
+- periodic.rs Element + ElementDef + into_element: ionization_energy [M] (NIST) + electron_affinity [M] (Andersen/Haugen/Hotop 1999, CRC) columns, eV, optional-cited (new shared parse_optional_cited helper + OptionalCited type alias). periodic.rs is EXEMPT_MODULES so no constructor-gate site.
+- periodic_table.toml: IE for 15 rock-formers (H C N O Na Mg Al Si P S Cl K Ca Ti Fe), EA for 13 (bound anions).
+- qeq.rs (NEW module): mulliken_electronegativity chi=(IE+EA)/2 [D] (Mulliken 1934), chemical_hardness eta=(IE-EA)/2 [D] (Parr & Pearson 1983, free). Both Option (None if IE or EA absent). 3 tests (O chi 7.5395/eta 6.0785 hand-calc, Na<O ordering, Mg/N None).
+
+SEAM SURFACED (not fabricated): N and Mg have UNBOUND anions -> no measured EA -> left ABSENT -> chi/eta None. Mg is in the key oxides (periclase, forsterite) QEq must correct, so chi=(IE+EA)/2 can't run on them from raw columns. Resolution surfaced for gate ruling: add cited Rappe & Goddard 1991 QEq parameters as [M-fit] per-element column for unbound-anion elements (Mg, N...), overriding derived chi/eta where EA unbound. Did NOT fabricate an Mg EA. Signaled comment 4953113330.
+
+189 physics tests, constructor/determinism/prose gates clean, sim pins unmoved.
+
+STATE: awaiting gate ruling on the unbound-anion parameterization (blocks QEq on the oxides). NEXT: QEq linear solve E(q)=sum(chi_i q_i + 0.5 eta_i q_i^2)+Ewald(q) at neutrality, once parameterization ruled. Then bond-valence positions, energy assembly, modulus.
+BRANCH STATE (claude/materials-oracle-modulus-slice tip 7753a4b): carve-2 lattice_modulus.rs (AB point-charge B, kept as fast-path+validation), ewald.rs (Madelung kernel, validated 1e-4), qeq.rs (chi/eta inputs). Whole slice merges once QEq gives partial-charge B. Task #35 interior arming still HELD (main 64da409 unchanged). Do NOT touch A's genesis/register/generator-arch or C's momentum/world/cbrt lanes.
+
+---
+
+## 2026-07-12 (Agent B) - Materials oracle: unbound-anion chi/eta limit built + QEq bare-Ewald stability seam surfaced (#182)
+
+Gate ruled the unbound-anion seam: use the physical EA->0 LIMIT (chi=eta=IE/2) from measured IE, tagged [E], NOT a fitted column; Rappe-Goddard fallback only if the limit proves too crude. Also gave the escalation-rule note: QEq is [E], its charge feeds Ewald (power law) + modulus (linear), NEITHER an exponent, so [E]-grade QEq is legal for this consumer (would be forbidden only if the charge fed a T_m->Arrhenius exponential).
+
+BUILT (commit 6d61ab6): qeq.rs element_chi_eta -> ChiEta{chi,eta,provenance}. ChiEtaProvenance::Derived [D] (bound anion, measured EA) or ::UnboundLimit [E] (chi=eta=IE/2, EA->0 limit). Mg = 3.823 < O 7.5395 (charge flows Mg->O, partial). mulliken_electronegativity/chemical_hardness now unbound-limit-aware. 4 tests.
+
+SEAM SURFACED before building the QEq solve (PD2 audit of gate's E(q)): with BARE POINT-CHARGE Ewald the QEq interaction matrix is NOT positive-definite for a strong ionic -> runaway ionization, no partial charge. MgO q^2 coefficient of the symmetric mode = 0.5(eta_Mg+eta_O)+W = 0.5(3.823+6.0785)-11.87 = -6.92 < 0 (W=-M*k/r_nn=-1.7476*14.39964/2.12=-11.87 eV per fu, unit charges). Unbounded below. FIX = the actual Rappe-Goddard 1991 QEq SHIELDED Coulomb: J_ij = Coulomb integral over Slater densities, ->eta at r->0, ->k/r at large r, restores positive-definiteness -> physical partial charge. Recorded as STABILITY SEAM in qeq.rs module doc.
+
+RULING WANTED (comment 4953141622): confirm shielded Rappe-Goddard J_ij (changes gate's stated bare Ewald(q)). Needs a per-element Slater exponent: (a) cited Clementi-Raimondi [M] column, or (b) DERIVE from the Shannon radius already on the floor (zeta~c/r_ion). I lean (b). Then build shielded QEq solve + validate MgO (Mg partial ~+1.6, periclase B ~170 GPa via partial charge into Born-Lande |q+q-|).
+
+189 physics tests, all gates clean, byte-neutral.
+STATE: awaiting gate ruling on shielded-Coulomb formulation + Slater-exponent source before building the QEq solve. BRANCH tip 6d61ab6: carve-2 lattice_modulus.rs (AB validation), ewald.rs (Madelung kernel 1e-4), qeq.rs (chi/eta + unbound limit + stability seam). Whole slice merges once QEq gives partial-charge B. Task #35 interior arming HELD (main 64da409). Do NOT touch A's genesis/register/generator-arch or C's lanes.
+
+---
+
+## 2026-07-12 (Agent B) - Materials oracle: gate confirmed the shielded-QEq audit; surfaced option (c) tau=(16/5)U before building (#182)
+
+Gate CONFIRMED my bare-Ewald instability audit (arithmetic + physics both verified at source) and ruled the shielded Rappe-Goddard J_ij is correct (corrects the owner's "+Ewald(q)" shorthand). On the Slater exponent, gate ruled (a) cited Clementi-Raimondi [M] column, NOT (b) zeta=c/r (rejected: c is a free knob = [C] closure "wearing a derivation's clothes"). Gate's PRINCIPLE: derive-from-existing-data is derive-first ONLY with NO free knob. Gate flagged the Slater's-rules route (zeta from Z+config) as the true parameter-free refinement but noted it needs unbuilt config machinery.
+
+I AUDITED that ruling (PD2/PD5) and surfaced option (c) (comment 4953158528): the SCC-DFTB relation tau_i=(16/5)U_i derives the shielding decay from the hardness already on the floor via an EXACT relation (1s Slater density Coulomb self-energy U=(5/16)tau, so tau=16U/5, U=IE-EA=2*eta). NO free knob (unlike b), NO new column (unlike a), NO config machinery (unlike Slater's rules). On the gate's own hierarchy (parameter-free > [M] > [C]) this beats the cited column. Trade-off: 1s-density model cruder than Clementi-Raimondi SCF exponent. RECOMMENDED (c) with the cited [M] column as accuracy refinement only if MgO misses (~+1.6, ~170 GPa) - same shape as the unbound-anion ruling.
+
+STATE: awaiting gate ruling on tau source (a cited Clementi-Raimondi column vs c SCC-DFTB tau=16U/5). Either way the build is the SAME shielded Rappe-Goddard/SCC-DFTB gamma_ij QEq linear solve on unbound-limit chi/eta; only tau's source differs. Build immediately on ruling, validate MgO. Tree clean 8014630, all gates green, CI pending on 8014630.
+
+BUILD PLAN (on ruling): shielded gamma_ij(R) [->1/R large R, ->U at R=0], periodic (shielded Ewald or real-space), build J = diag from chi/eta + gamma off-diagonal, linear solve (Gaussian elim, deterministic fixed-point) at neutrality -> partial charges. Validate MgO: Mg q ~+1.6. Then periclase B = carve-2 Born-Lande with |q+q-| (partial) instead of formal |z+z-|=4: B_partial = B_formal*(q^2/4) ~ 266*(2.56/4) ~ 170 GPa vs measured 165. That dissolves finding 1 (the divalent overestimate) from first principles.
+NON-CUBIC anisotropy seam (ewald.rs) still flagged for the first non-cubic silicate. Task #35 interior arming HELD (main now 48400b0 = C's #181 cbrt, no A Stage-3c). Do NOT touch A's genesis/register/generator-arch or C's lanes.
+
+---
+
+## 2026-07-12 (Agent B) - Materials oracle: shielded SCC-DFTB QEq solve BUILT (tau=(16/5)U). HONEST NEGATIVE: derive-first over-ionizes MgO (#182)
+
+Gate adopted option (c) tau=(16/5)U (credited the PD5 audit). Built the full shielded QEq solve.
+
+BUILT (commit 2a1441d):
+- ewald.rs: ewald_potential_matrix -> A_ij (periodic Ewald potential; E=0.5 sum qi qj Aij cross-checked vs ewald_energy). N_REAL_SHELLS exposed.
+- qeq.rs: SCC-DFTB gamma (Elstner equal + unequal-exponent branches), tau_from_eta=32*eta/(5k) [atomic-unit (16/5) folded into eV/A so gamma(0)*k=2eta=U, verified in test], deterministic fixed-point Gaussian solver, qeq_charges (shielded periodic Gamma=k(A_ij - sum_L S) off-diag, k(A_ii - sum_{L!=0}S)+2eta diag, solved at neutrality).
+
+HONEST NEGATIVE FINDING (proven, surfaced comment 4953206048): the shielded solve is STABLE/symmetric/neutral/bounded on MgO WHERE BARE EWALD RUNS AWAY (instability catch confirmed, machinery correct). BUT derive-first params (raw-Mulliken chi/eta + 1s tau) OVER-IONIZE: Mg ~+2.08, ABOVE formal +2, not the ~+1.6 target. B~266*(2.08^2/4)~288 GPa, WORSE than formal 266 (measured 165). Reason: tau_Mg=1.70/tau_O=2.70 /A -> density size ~1/tau~0.5A << 2.12A interionic dist, so nn Coulomb only ~12% shielded, Madelung nearly fully ionizes. KNOWN QEq-on-raw-parameters behaviour (why EEM/QEq are FITTED). Clementi-Raimondi does NOT help (larger tau -> LESS shielding -> HIGHER q, wrong direction, verified). So QEq-corrects-finding-1 thesis FAILS for derive-first inputs.
+
+RULING WANTED: which tier for the oxide charge? (i) accept QEq [E] over-ionization, route finding-1 correction to compute-once DFT/Bader charge rung; (ii) [C] fitted EEM parameterization (free-knob tier register minimizes); (iii) reconsider whether partial charge is even the dominant correction (Born-Mayer-vs-Born-Lande repulsive form + covalent overlap also drive the oxide overestimate, not captured by charge alone). Did NOT fabricate a charge or add a [C] param without the gate's call.
+
+192 physics tests, all gates clean, byte-neutral.
+STATE: awaiting gate tier ruling. BRANCH 2a1441d: carve-2 lattice_modulus.rs (AB validation), ewald.rs (Madelung kernel 1e-4 + potential matrix), qeq.rs (chi/eta + unbound limit + shielded solve). The shielded QEq machinery is a keeper regardless of the tier ruling; only the oxide-charge SOURCE is open. Whole slice merges once the finding-1 correction path is ruled. Task #35 interior arming HELD (main 48400b0, no A Stage-3c). Do NOT touch A's genesis/register/generator-arch or C's lanes.
+
+---
+
+## 2026-07-12 (Agent B) - Materials oracle slice FINALIZED at honest [E] grade (#182)
+
+Gate CONFIRMED the honest negative, OWNED the escalation direction-error (authorized Clementi-Raimondi without checking direction; I verified it goes wrong way), and RULED the slice COMPLETE at the honest [E] grade: do NOT fit, do NOT add the wrong-direction column. Gate is raising the PREMISE QUESTION to the owner (does the partial charge dissolve finding 1) since the build contradicts the generator architecture's claim that it does.
+
+FINALIZED (commit 0bbd81a, docs only, byte-neutral):
+- lattice_modulus.rs phase_bulk_modulus_ionic: SYSTEMATIC OXIDE BIAS stated (NaCl in-band ~24.4; periclase systematic-high ~266 vs 165), multi-causal, three refinements flagged.
+- qeq.rs: RESOLUTION - QEq partial charge is honest [E] estimator, COMPLETE at grade, correct for disposer formation-energy questions (resolution-ladder), can't deliver fine modulus charge. Three no-fit refinements held for owner.
+- MATERIALS_ORACLE_EWALD_CARVE.md: slice-complete summary.
+
+THE THREE PRINCIPLED REFINEMENTS (unbuilt, no-fit, HELD for owner's architecture ruling): (1) compute-once DFT/Bader charge (amortized first-principles rung), (2) Born-Mayer exponential repulsive form (vs overstiffening Born-Lande power), (3) Keating covalent term (the named shear debt / G). A fitted [C] param is NOT the path.
+
+WHOLE SLICE ON BRANCH (claude/materials-oracle-modulus-slice tip 0bbd81a), byte-neutral/dormant, honest at grade:
+- ewald.rs: Madelung kernel (1e-4: NaCl/CsCl/fluorite) + potential matrix A_ij. [D] exact.
+- periodic.rs/periodic_table.toml: atomization [M,floor-and-validation], IE [M], EA [M] columns.
+- qeq.rs: chi/eta [D] + unbound-limit [E] + shielded SCC-DFTB QEq solve (tau=(16/5)U) [E].
+- lattice_modulus.rs: carve-2 point-charge Born-Lande B [E] + documented oxide bias band; E_coh/V screen tier.
+- mechanical_floor.toml: mat.elastic_modulus flagged retirement target (kept feeding live consumer).
+
+STATE: slice finalized + signaled (comment 4953225311), ready for gate review + owner's premise ruling. Task #36 (materials oracle) effectively COMPLETE at [E] grade for this arc; the accuracy refinements are a future arc gated on the owner. Task #35 interior arming still HELD (main 48400b0, no A Stage-3c). Do NOT touch A's genesis/register/generator-arch or C's lanes.
+NEXT possible work while waiting: nothing actionable on #182 until owner rules the premise; #178 held for A. If gate/owner rules the refinements go, the Born-Mayer repulsive form is the cleanest next (retire the Born-Lande power overstiffening) and the compute-once DFT-charge rung needs the owner's amortized-tier architecture.
+
+---
+
+## 2026-07-12 (Agent B) - Materials oracle: slice APPROVED (merge held for provenance enum). Anisotropy seam RE-VALIDATED and CLOSED (#182)
+
+Gate APPROVED the slice (verified at source: 4 modules dormant/byte-neutral, oxide bias documented not hidden, no fit). MERGE HELD for ONE coordination reason: the provenance tags must bind to A's ENFORCED seven-tag enum, and A's register isn't on main yet. Sequence: A's register merges first -> I swap my placeholder tags to it (quick) -> my slice merges + passes A's Phase-2 floor gate. Gate raised the PREMISE QUESTION to the owner (does the partial charge dissolve finding 1). Gate offered: rest, or a disjoint next piece. I took the disjoint piece.
+
+DISJOINT PIECE DONE (commit a254fd9): anisotropy re-validation of the Ewald generator. ewald.rs test the_madelung_constant_holds_under_cell_anisotropy: same NaCl crystal in elongated 2x2x2*reps supercell (exact-rational z-coords) must recover 1.747565. RESULT: err <2e-6 for 1:1..6:1, bump 3.15e-5 at 8:1 (in-band), <1e-6 at 12:1. Silicates <=2:1, so >50x margin. NO anisotropy fix needed. LIMITATION note -> RESOLVED, 2:1/3:1 test guards it. Generator hardened for non-cubic phases. Signaled comment 4953244362.
+
+193 physics tests, all gates clean, byte-neutral.
+
+STATE: CLEAN REST POINT. Materials oracle foundation slice DONE + all my seams closed. Two gates NOT mine: (1) A's register enum lands -> swap placeholder provenance tags (quick change) -> merge; (2) owner rules the premise (partial charge dissolves finding 1?) -> if refinements go, Born-Mayer repulsive form is cleanest next, compute-once DFT-charge needs owner's amortized-tier architecture. Both are wait-gated. Task #35 interior arming HELD (main 48400b0, no A Stage-3c). Task #36 materials oracle effectively COMPLETE at [E] grade.
+
+BRANCH claude/materials-oracle-modulus-slice tip a254fd9: ewald.rs (Madelung kernel 1e-4 + potential matrix + anisotropy-validated), periodic.rs/toml (atomization/IE/EA [M] columns), qeq.rs (chi/eta + unbound limit + shielded SCC-DFTB QEq solve, [E]), lattice_modulus.rs (carve-2 Born-Lande [E] + oxide bias band; E_coh/V screen tier), materials_oracle.rs (E_coh/V quick-screen tier), mechanical_floor.toml (mat.elastic_modulus retirement flag). Local Provenance placeholder enums in materials_oracle.rs + qeq ChiEtaProvenance -> swap to A's enforced enum when register lands. Do NOT touch A's genesis/register/generator-arch or C's lanes.
+WHEN A'S REGISTER LANDS: swap (a) materials_oracle::Provenance enum, (b) qeq::ChiEtaProvenance, (c) any [E]/[D]/[M] doc tags -> A's enforced seven-tag enum. That's the only pre-merge change.
+
+---
+
+## 2026-07-12 (Agent B) - Materials oracle: OWNER RULED THE PREMISE. Rung 1 CONFIRMED unchanged (#182)
+
+Owner ruled the finding-1 premise (gate relay; owner doc origin/claude/materials-breathing-resolution, docs/working/MATERIALS_BREATHING_RESOLUTION.md). HEADLINE: ship rung 1 EXACTLY as settled - the [E] estimator with the documented bias, NaCl in-band, periclase flagged. NO CHANGE to my slice. Validated as correct rung 1. My honest negative was RIGHT.
+
+The resolution DISSOLVES the charge question rather than answering it:
+- "The" charge of an ion in a crystal is NOT an observable. MgO: Bader +1.7, Mulliken +1.2-1.5, fitted-QEq +1.6, Born effective charge (the ONLY measured one, via LO-TO phonon splitting) ~+1.96-2.0 (~formal). 0.8e spread, no ground truth. So +1.6 is a property of a fitted energy model, NOT of MgO - there was never a derive-first path to it. My QEq over-ionization was correct behaviour toward a non-existent target. Vindicates the refusal to fit.
+- ROOT = one banked boolean EA2 < 0: free O2- does not exist (O second electron affinity ~-8 eV negative), so the crystal anion is CREATED by the Madelung potential and BREATHES. That boolean forecasts a priori: rung-1 oxide stiffness, the Cauchy violation (MgO C12=95 vs C44=156, 1.6x; NaCl passes), and the inversion of the Clementi-Raimondi escalation (more accurate free-ion data doubles down on the invalid free-ion picture). My shielded-vs-bare-Ewald stability catch was the same lesson.
+- The three refinements COLLAPSE into ONE representation upgrade = RUNG 2 (parameter-free): Gordon-Kim/PIB (potential-induced breathing, geophysicists 1980s for these oxides). Replace point charges with overlapping stabilized densities -> the charge question EVAPORATES (no charge parameter in the density picture). Born-Mayer form DERIVED from density-tail overlap; breathing is the ionic Cauchy breaker. Triptych: embedding(metals) + Keating(covalent) + breathing(Madelung-stabilized ionics).
+
+GATE'S DEFERRED DECISION (owner left to gate): the optional breathing-subclass bias factor ~0.60 [M class] is DEFERRED, not added now (no consumer reads the dormant oxide modulus; rung 2 supersedes it; even the cheap factor needs an EA2 dispatcher not yet on the floor). Ready cheap bridge IF R-COEVOLVE (mantle elasticity) needs the accurate oxide modulus before rung 2. Until then my honest documented-bias estimator STANDS.
+
+FUTURE WORK (specified-not-built, sequenced when a consumer needs the accurate oxide modulus, slots with the shear arc): rung-2 Gordon-Kim/PIB breathing build, the EA2 dispatcher (floor addition), the triptych shear terms.
+
+STATE: NO ACTION. Rest continues. My slice UNCHANGED and complete, held only for the provenance-enum swap on A's register (the single pivot: also unblocks A's 3c -> my interior arming #178). Task #36 materials oracle COMPLETE at [E] rung-1. Task #35 interior arming HELD (main 48400b0, no A Stage-3c). Branch tip e248bce. Do NOT touch A's genesis/register/generator-arch or C's lanes. Signals covered by #182 PR subscription + self check-in (~00:10 UTC).
+
+---
+
+## 2026-07-12 (Agent B) - Owner-directed AUDIT of the materials framing (3 docs). VERDICT: YES, correct fundamentals (#182)
+
+Owner (via gate) lifted me off rest for a source-grounded, non-deferential audit: is the materials framing CORRECT, and is it the fundamentals to build off of? Read all 3 docs at source (origin branches): MATERIALS_ORACLE_SPEC.md (9-stage oracle), MATERIALS_ORACLE_GENERATOR_ARCH.md (Ewald+QEq+resolution-ladder), MATERIALS_BREATHING_RESOLUTION.md (charge-not-observable, EA2<0, Gordon-Kim/PIB). Posted full audit comment 4953338358.
+
+VERDICT: YES, correct fundamentals to build off of. The 3 deepest insights VERIFIED SOUND: (1) charge-not-an-observable (MgO 0.8e spread; only MEASURED charge = Born effective ~+1.96-2.0 formal, via LO-TO phonons; +1.6 is a fitted-model artifact - vindicates my refusal to fit, explains my +2.08); (2) EA2<0 boolean forecasts all 3 findings a priori (rung-1 oxide stiffness, MgO Cauchy C12=95/C44=156 violation vs NaCl passing, the Clementi-Raimondi inversion I found); (3) Gordon-Kim/PIB is the right parameter-free rung, citations all real (Gordon-Kim 1972, Muhlhausen-Gordon 1981 Watson sphere, Boyer-Mehl-Cohen PIB, Mehl-Hemley-Boyer 1986, Isaak-Cohen-Mehl 1990, Wolf-Bukowinski 1988), built by geophysicists for these exact mantle oxides. Citations otherwise clean.
+
+FOUND (seams, non-deferential): 
+- MINOR ERROR: Stage 0 g-factor "g=2+alpha/2pi" is factor-of-2 wrong (Schwinger a_e=(g-2)/2=alpha/2pi -> g=2+alpha/pi=2.00232, not 2.00116). Off materials path but a [D] value stated wrong.
+- GAP 1: shear/elastic TRIPTYCH (embedding/Keating/breathing) incomplete for MOLECULAR + H-BONDED solids (ices H2O/N2/CO2/CH4 - in scope: Pluto N2-CO self-check!). Energy plane has London + E_HB but no shear/elastic class for them. Needs a 4th/5th shear route.
+- GAP 2: AMORPHOUS/glassy phases (silicate glass, obsidian, amorphous ice) have NO representation (assemblage machinery assumes crystalline order; no lattice -> no Madelung/prototype). 
+- GAP 3 (coherence): "one flow" understates a self-consistent LOOP (positions<->charges<->energy: Ewald needs positions, QEq needs positions, bond-valence needs oxidation state, AIRSS relaxes on energy). Deterministic convergence of that loop is load-bearing but unstated in the solver law.
+- Sulfide covalent-metallic middle: soft spot, already flagged by the spec (not a missed gap).
+STRENGTH noted: the energy-vs-curvature distinction is handled right (disposer ~5% Born-Lande ENERGY fine for formation-ranking; ~1.65x MODULUS overestimate is a separate Stage-6 band).
+
+STATE: audit posted for owner's read. Back to REST after. Materials slice still complete/banked, held for provenance-enum swap on A's register. Task #35 interior arming HELD (main 48400b0, no A Stage-3c). Task #37 audit COMPLETE. Branch tip 130f399 unchanged (audit was design-only, no code). Do NOT touch A's genesis/register/generator-arch or C's lanes.
+
+## 2026-07-12 (Agent B) - Audit findings ALL RESOLVED by owner (21st audit), captured at source (#182)
+
+Gate: owner resolved all 4 of my audit findings cleanly (each proves the catch was load-bearing). Full resolutions in docs/working/MATERIALS_FOUNDATION_AUDIT.md (on origin, updated at source) for the resume. No action; rest continues.
+- g-factor: fixed to 2+alpha/pi, PLUS a standing spec rule earned (a [D] value stores its closed form and re-evaluates, never hand-copies) - routed to A's register.
+- Triptych legs: molecular = plastic-phase shear flag + multipole ladder; H-bonded ices = Keating angular term priced off the banked E_HB ladder (no new fit) + proton-disorder floor. MY CAUCHY DIAGNOSTIC PROMOTED to the substrate's UNIVERSAL bonding-class litmus (5 classes, 5 violation mechanisms, each a class tag).
+- Amorphous/glass: freezer working as designed - glass = arrested liquid in the WRITTEN-STATE registry (composition, fictive temp T_f, path), existing slots + one new derived constant (<r>=2.4 rigidity threshold from constraint counting).
+- Self-consistency loop: named convex inner solve under the solver law - MY SHIELDED QEq is the positive-definite piece making it convex; two failure modes pre-declared (charge-transfer runaway, charge-order fold), memoized per (composition, E-bucket).
+
+STATE: materials foundation = complete-with-resolutions. Slice still banked/approved, held for provenance-enum swap on A's register. Two forward threads (enum swap; interior arming #178) still gate on A's register. Task #35 HELD. Rest continues. Branch tip unchanged (audit was design-only). Check-in armed ~01:44 UTC re-checks main for A's register/Stage-3c.

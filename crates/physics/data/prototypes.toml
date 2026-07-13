@@ -1,0 +1,37 @@
+# The structure-prototype (aristotype) library, seeded minimally (owner research, #182). Each prototype names a
+# structure type and carries the two structure constants the ionic bulk-modulus derivation reads: the MADELUNG
+# CONSTANT (the dimensionless lattice sum of the electrostatic energy, exact for the structure type) and the
+# CATION and ANION COORDINATION numbers (which pick the Shannon radii that sum to the interionic distance r0).
+# A phase carries a prototype KEY (on its registry row); the derivation looks the key up here. This is the
+# data-driven bonding-class dispatch: the mechanism is fixed Rust, the prototype membership is data and grows as
+# ionic phases need it (Principle 11), never a hardcoded per-phase assignment.
+#
+# The Madelung constant is exact `[D per prototype]` for a structure whose lattice sum is tabulated (the simple
+# aristotypes: rock-salt, caesium-chloride, fluorite, zincblende, wurtzite). For a complex or non-1:1 structure
+# it is an Ewald sum over the actual atom positions, which is not a single tabulated constant; such a prototype
+# carries its Madelung constant only once that reduced value is grounded and cited. An unpopulated Madelung
+# constant is absent, not zero: a phase keyed to it falls through to the cohesive-energy-density screen tier, an
+# honest fall-through, NEVER a fabricated constant (surface-before-authoring made structural).
+#
+# SEED: rock-salt (the AB octahedral aristotype, the clean single-distance Born-Lande case, populated) and
+# corundum (the A2B3 structure of corundum and hematite, seeded but its reduced Madelung constant HELD absent
+# because the A2B3 non-1:1 lattice sum needs the reduced-Madelung + effective-distance convention grounded before
+# it is authored; until then corundum and hematite fall through to the screen tier).
+
+[[prototype]]
+name = "rock-salt"
+madelung_constant = "1.74756"
+cation_coordination = 6
+anion_coordination = 6
+source = "standard rock-salt (NaCl-type) Madelung constant, Kittel Introduction to Solid State Physics; Sherman 1932"
+
+[[prototype]]
+name = "corundum"
+# The corundum (alpha-Al2O3 / alpha-Fe2O3) A2B3 structure. Madelung constant HELD ABSENT: the non-1:1
+# stoichiometry makes the electrostatic lattice sum a reduced Madelung constant over multiple distances rather
+# than a single tabulated AB value, so it is not authored until the reduced convention is grounded and cited.
+# Corundum and hematite fall through to the screen tier until then.
+madelung_constant = ""
+cation_coordination = 6
+anion_coordination = 6
+source = "corundum (alpha-Al2O3) structure type; reduced Madelung constant pending the A2B3 lattice-sum convention"
