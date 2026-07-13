@@ -30,6 +30,19 @@
 //! OBSERVED reference values are cited measurements (CRC Handbook, Kittel ISSP, Simmons & Wang single-crystal
 //! elastic constants, WebElements), validation-only, never mechanism inputs. Where a reference is source-variable
 //! it is noted. The Q8 citation tier can auto-verify these references against the literature on request.
+//!
+//! INDEPENDENT validations versus CONSISTENCY checks (read the 92/0 correctly). The load-bearing INDEPENDENT
+//! validations, where the floor predicts a DIFFERENT measured observable than its inputs, are: DENSITY (`M/V_m`
+//! against measured `rho`), the shear-aware DEBYE TEMPERATURE (elastic velocities against the calorimetric
+//! `Theta_D`), the HEAT CAPACITY (Debye over `Theta_D` against measured `C_v`), the MELTING POINT (Lindemann
+//! under an independent `delta`, reported as the implied `delta`), and HARDNESS on its covalent home turf (diamond
+//! `95.4` against `96`). Young's `E` and Poisson `nu`, by contrast, are largely ELASTIC-ALGEBRA CONSISTENCY: with
+//! `k = G_obs/K_obs` fed cited and `K = B_0` anchored, `nu` is a pure function of the cited `k` and `E` reads the
+//! cited `K, G` directly, so "within grade" there confirms the relation implementations and the fixed-point
+//! fidelity (valuable) rather than independently confirming `G`. This is the correct scope: the ringer validates
+//! the mechanism GIVEN its reserved per-class Pugh ratio, and by design does not re-derive whether that ratio
+//! generalizes (that is the surfaced-with-basis reserved coefficient). So the count is a mix, not 92 independent
+//! physics confirmations; the independent hits are the ones listed above.
 
 use civsim_core::Fixed;
 use civsim_materials::{
