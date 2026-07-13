@@ -224,7 +224,9 @@ mod tests {
         );
         // A binary (an oxide) escalates: elemental anchors do not give an oxide's energy.
         assert!(
-            route.metallic_energy(&comp(&[("Ti", 1), ("O", 1)])).is_none(),
+            route
+                .metallic_energy(&comp(&[("Ti", 1), ("O", 1)]))
+                .is_none(),
             "TiO escalates in the elemental metallic route (no oxide anchor)"
         );
         // An unanchored element escalates.
