@@ -36,6 +36,12 @@
 //! lands ~470 K. So the bulk-elastic limit is RETIRED for any metal with a Pugh ratio, the bulk path remaining the
 //! fallback where `k` is unknown. The Slack conductivity downstream (which scales as `Theta_D^3`) should read the
 //! shear-aware path. Byte-neutral: `civsim-materials` is a leaf, not linked into the run_world binary.
+//!
+//! The DEBYE HEAT CAPACITY ([`debye_heat_capacity_j_per_mol_k`] over [`debye_function`]) is the first consumer of
+//! the Debye temperature: `C_v = 3R * D(Theta_D/T)` per mole of atoms, the bounded Debye integral evaluated by a
+//! capped composite-Simpson rule (the integrand rewritten to keep `e^x` in-window). It reserves no value: `R` is a
+//! floor constant, `D` is pure math, and the atom count is data. It is `C_v` (constant volume); the small
+//! `C_p - C_v` correction rides the thermal-expansion slice once the Grueneisen `alpha` is built.
 
 use civsim_core::Fixed;
 use civsim_physics::metal_eos::MetalEosAnchors;
@@ -240,6 +246,125 @@ pub fn debye_velocity_km_per_s(
     }
 }
 
+/// The molar gas constant `R` (J/(mol*K)) as the exact CODATA value `N_A * k_B = 8.314462618 J/(mol*K)`, a
+/// physics FLOOR constant (the same status as the Planck-Boltzmann fold `h/k_B` in [`debye_fold`]), NOT a reserved
+/// value: `from_ratio(8314462618, 1000000000)`.
+fn gas_constant_j_per_mol_k() -> Fixed {
+    Fixed::from_ratio(8_314_462_618, 1_000_000_000)
+}
+
+/// The number of composite-Simpson intervals for the Debye integral over `[0, min(y, X_CAP)]`. A NUMERICAL
+/// resolution (the algorithm matches the exact Debye function to five decimals by this count), not a physics
+/// value; must stay EVEN for Simpson's rule.
+const DEBYE_SIMPSON_INTERVALS: i32 = 64;
+
+/// The Debye integrand `f(x) = x^4 * e^x / (e^x - 1)^2`, written in the algebraically-identical form
+/// `x^4 / (e^x + e^-x - 2) = x^4 / (2*(cosh x - 1))`. The rewrite is load-bearing: it keeps `e^x` inside the
+/// deterministic exp window and never forms the `(e^x - 1)^2` that overflows Q32.32 at large `x` (at `x = 20`,
+/// `e^x ~ 4.85e8` is representable but its square is not). Zero at `x <= 0` (the smooth limit, `f ~ x^2` as
+/// `x -> 0`), and zero where the denominator collapses below fixed-point resolution (an `x` so small its
+/// contribution to the integral is negligible).
+fn debye_integrand(x: Fixed) -> Fixed {
+    if x <= ZERO {
+        return ZERO;
+    }
+    let ex = x.exp();
+    let emx = (-x).exp();
+    // denom = e^x + e^-x - 2 = 2*(cosh x - 1), strictly positive for x > 0.
+    let denom = match ex.saturating_add(emx).checked_sub(Fixed::from_int(2)) {
+        Some(d) if d > ZERO => d,
+        _ => return ZERO,
+    };
+    let x2 = match x.checked_mul(x) {
+        Some(v) => v,
+        None => return ZERO,
+    };
+    let x4 = match x2.checked_mul(x2) {
+        Some(v) => v,
+        None => return ZERO,
+    };
+    x4.checked_div(denom).unwrap_or(ZERO)
+}
+
+/// The Debye function `D(y) = (3/y^3) * integral_0^y  x^4 * e^x / (e^x - 1)^2 dx`, with `y = Theta_D / T`: the
+/// temperature scaling of the Debye heat capacity (`C_v = 3nR * D(Theta_D/T)`). It runs from `D -> 1` as
+/// `y -> 0` (the Dulong-Petit high-temperature limit) to `D -> (4*pi^4/5) / y^3` as `y -> infinity` (the
+/// `T^3` low-temperature tail). The integral is a composite Simpson rule over `[0, min(y, X_CAP)]` with
+/// `X_CAP = 20`, a NUMERICAL bound: beyond `x ~ 20` the integrand is below `2e-5` of the total AND `e^x` stays
+/// inside the exp window, so the cap loses nothing and keeps the arithmetic in-range. Over the rewritten
+/// [`debye_integrand`], this is a pure-math function: no reserved value, no physics constant. Non-positive `y`
+/// yields `1` (the high-temperature limit).
+pub fn debye_function(theta_over_t: Fixed) -> Fixed {
+    if theta_over_t <= ZERO {
+        return Fixed::ONE;
+    }
+    // X_CAP = 20: the numerical integration bound (see the doc). min(y, X_CAP) is the upper limit.
+    let upper = theta_over_t.min(Fixed::from_int(20));
+    let n = DEBYE_SIMPSON_INTERVALS;
+    let h = match upper.checked_div(Fixed::from_int(n)) {
+        Some(v) if v > ZERO => v,
+        _ => return Fixed::ONE,
+    };
+    // Composite Simpson: integral ~ (h/3) * [f(0) + f(upper) + 4*sum(odd) + 2*sum(even)].
+    let mut acc = debye_integrand(ZERO).saturating_add(debye_integrand(upper));
+    let mut i = 1i32;
+    while i < n {
+        let x = h.checked_mul(Fixed::from_int(i)).unwrap_or(upper);
+        let weight = if i % 2 == 1 { 4 } else { 2 };
+        let term = debye_integrand(x)
+            .checked_mul(Fixed::from_int(weight))
+            .unwrap_or(ZERO);
+        acc = acc.saturating_add(term);
+        i += 1;
+    }
+    let integral = match acc
+        .checked_mul(h)
+        .and_then(|s| s.checked_div(Fixed::from_int(3)))
+    {
+        Some(v) => v,
+        None => return ZERO,
+    };
+    // D = 3 * integral / y^3, the cube via checked multiplies.
+    let y3 = match theta_over_t
+        .checked_mul(theta_over_t)
+        .and_then(|y2| y2.checked_mul(theta_over_t))
+    {
+        Some(v) if v > ZERO => v,
+        // y so small its cube underflows: the answer is the Dulong-Petit high-T limit D ~ 1.
+        _ => return Fixed::ONE,
+    };
+    Fixed::from_int(3)
+        .checked_mul(integral)
+        .and_then(|x| x.checked_div(y3))
+        .unwrap_or(ZERO)
+}
+
+/// The Debye molar heat capacity at constant volume `C_v` (J/(mol*K)) per mole of ATOMS: `C_v = 3R * D(Theta_D/T)`,
+/// the Debye model over the built Debye temperature and the temperature, with `R` the exact gas constant (floor)
+/// and `D` the [`debye_function`]. No reserved value. Per mole of a compound with `n` atoms per formula unit,
+/// multiply by `n` (that count is DATA, so the per-substance basis is a data row, not a rewrite). `C_v` rises
+/// from `0` at `T = 0` (the `T^3` law) to the Dulong-Petit ceiling `3R ~ 24.94 J/(mol*K)` as `T >> Theta_D`.
+/// HONEST LIMITS: this is `C_v` (constant VOLUME). The MEASURED `C_p` (constant pressure) is slightly higher,
+/// `C_p = C_v + 9 * alpha^2 * B_T * V_m * T` (a few percent near room temperature for a solid); that correction
+/// is the thermal-expansion slice's, folded in once the Grueneisen `alpha` is built (`alpha` derives from
+/// `gamma_G`), so `C_v` is the piece that rests only on the Debye temperature. The Debye model itself also omits
+/// the electronic and anharmonic heat capacity (why iron's Debye `C_v ~ 22 J/(mol*K)` at 300 K sits below the
+/// measured `~25`), the reduced-order reach stated at its site. Non-positive `Theta_D` or temperature yields zero.
+pub fn debye_heat_capacity_j_per_mol_k(debye_temperature: Fixed, temperature: Fixed) -> Fixed {
+    if debye_temperature <= ZERO || temperature <= ZERO {
+        return ZERO;
+    }
+    let y = match debye_temperature.checked_div(temperature) {
+        Some(v) => v,
+        None => return ZERO,
+    };
+    let d = debye_function(y);
+    Fixed::from_int(3)
+        .checked_mul(gas_constant_j_per_mol_k())
+        .and_then(|three_r| three_r.checked_mul(d))
+        .unwrap_or(Fixed::MAX)
+}
+
 /// The property route bound to the periodic table and the EOS anchors, so density reads the molar mass and molar
 /// volume, and the Debye temperature reuses the freezer's sound speed over the anchors, all for an anchored
 /// metal. No reserved value enters (this first slice reserves none); a metal missing an anchor escalates
@@ -328,6 +453,21 @@ impl<'a> PropertyRoute<'a> {
         let atomic_volume =
             molar_volume.checked_mul(rose_eos::cm3_per_mol_to_angstrom3_per_atom())?;
         Some(debye_temperature(v_d, atomic_volume))
+    }
+
+    /// The Debye molar heat capacity `C_v` (J/(mol*K), per mole of atoms) for an anchored metal at a temperature,
+    /// over the SHEAR-AWARE Debye temperature (`k*B_0`-derived, the accurate one). `None` (escalate) when the
+    /// metal lacks a bulk modulus, a molar volume, or a standard atomic weight. Carries the `C_v`-versus-`C_p`
+    /// and electronic/anharmonic limits of [`debye_heat_capacity_j_per_mol_k`]. `k` is the caller's reserved
+    /// Pugh ratio, never planted.
+    pub fn heat_capacity(
+        &self,
+        symbol: &str,
+        temperature: Fixed,
+        pugh_ratio: Fixed,
+    ) -> Option<Fixed> {
+        let theta_d = self.debye_temperature_shear_aware(symbol, pugh_ratio)?;
+        Some(debye_heat_capacity_j_per_mol_k(theta_d, temperature))
     }
 }
 
@@ -541,6 +681,90 @@ mod tests {
         assert!(
             route.debye_temperature_shear_aware("Xx", k_fe).is_none(),
             "an unanchored metal escalates"
+        );
+    }
+
+    #[test]
+    fn the_debye_heat_capacity_spans_the_dulong_petit_and_t_cubed_limits() {
+        // Reference values from the exact Debye function C_v = 3R * D(Theta_D/T) (validated against a
+        // high-accuracy quadrature; the capped-Simpson algorithm matches it to five decimals).
+        let three_r = 24.943387854; // 3R, the Dulong-Petit ceiling J/(mol*K).
+
+        // HIGH-T (Theta_D/T = 0.1, T = 10*Theta_D): C_v -> 3R. Theta_D = 470, T = 4700.
+        let cv_hot = debye_heat_capacity_j_per_mol_k(Fixed::from_int(470), Fixed::from_int(4700));
+        assert!(
+            close(cv_hot, 24.93, 0.1),
+            "high-T C_v approaches the Dulong-Petit 3R ~24.94: {cv_hot:?}"
+        );
+        assert!(
+            cv_hot.to_f64_lossy() < three_r,
+            "C_v never exceeds the 3R ceiling"
+        );
+
+        // IRON at 300 K, shear-aware Theta_D = 470 (y = 1.567): the Debye C_v ~22.13 J/(mol*K). This sits below
+        // the measured ~25 by the documented electronic/anharmonic omission, NOT a mechanism error.
+        let cv_iron = debye_heat_capacity_j_per_mol_k(Fixed::from_int(470), Fixed::from_int(300));
+        assert!(
+            close(cv_iron, 22.13, 0.3),
+            "iron Debye C_v at 300 K ~22.1 J/(mol*K): {cv_iron:?}"
+        );
+
+        // DEEP-T (Theta_D/T = 25, hits the x_cap=20 branch): C_v ~0.1244 J/(mol*K), and it must match the
+        // analytic T^3 asymptote (12*pi^4/5) * R / y^3 that the cap is designed to reproduce. Theta_D = 500, T = 20.
+        let cv_cold = debye_heat_capacity_j_per_mol_k(Fixed::from_int(500), Fixed::from_int(20));
+        let t3_asymptote =
+            12.0 * std::f64::consts::PI.powi(4) / 5.0 * 8.314462618 / 25.0_f64.powi(3);
+        assert!(
+            close(cv_cold, t3_asymptote, 0.005),
+            "deep-T C_v ~{t3_asymptote:.4} matches the T^3 asymptote (cap branch): {cv_cold:?}"
+        );
+
+        // Monotone: warmer is a higher heat capacity (smaller y, larger D), bounded by 3R.
+        let cv_warmer = debye_heat_capacity_j_per_mol_k(Fixed::from_int(470), Fixed::from_int(600));
+        assert!(
+            cv_warmer > cv_iron && cv_warmer.to_f64_lossy() < three_r,
+            "C_v rises with temperature toward the 3R ceiling"
+        );
+
+        // The Debye function itself: D -> 1 at high T, D in (0,1) at finite y, and deterministic (Principle 3).
+        let d_hot = debye_function(Fixed::from_ratio(1, 10));
+        assert!(
+            close(d_hot, 0.9995, 0.001),
+            "D(0.1) ~1 (Dulong-Petit): {d_hot:?}"
+        );
+        let d_iron = debye_function(Fixed::from_ratio(1567, 1000));
+        assert!(
+            d_iron > ZERO && d_iron < Fixed::ONE,
+            "D(1.567) is a fraction in (0,1): {d_iron:?}"
+        );
+        assert_eq!(d_iron, debye_function(Fixed::from_ratio(1567, 1000)));
+
+        // Guards.
+        assert_eq!(
+            debye_heat_capacity_j_per_mol_k(ZERO, Fixed::from_int(300)),
+            ZERO
+        );
+        assert_eq!(
+            debye_heat_capacity_j_per_mol_k(Fixed::from_int(470), ZERO),
+            ZERO
+        );
+
+        // Through the route (over the shear-aware Theta_D, reusing the caller's Pugh ratio k = 0.48).
+        let t = table();
+        let a = anchors();
+        let route = PropertyRoute::new(&t, &a);
+        let cv_route = route
+            .heat_capacity("Fe", Fixed::from_int(300), Fixed::from_ratio(48, 100))
+            .expect("Fe heat capacity");
+        assert!(
+            cv_route.to_f64_lossy() > 18.0 && cv_route.to_f64_lossy() < three_r,
+            "route iron C_v at 300 K is a sensible sub-Dulong-Petit value: {cv_route:?}"
+        );
+        assert!(
+            route
+                .heat_capacity("Xx", Fixed::from_int(300), Fixed::from_ratio(48, 100))
+                .is_none(),
+            "an unanchored metal escalates in the heat-capacity route"
         );
     }
 }

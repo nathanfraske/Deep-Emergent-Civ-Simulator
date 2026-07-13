@@ -76,8 +76,9 @@ pub use nucleation::{
     reduced_nucleation_barrier, richards_ratio, zeldovich_factor, NucleationRoute,
 };
 pub use properties::{
-    chen_tse_hardness_gpa, debye_temperature, debye_velocity_km_per_s, density_g_per_cm3,
-    poisson_ratio, shear_modulus_gpa, youngs_modulus_gpa, PropertyRoute,
+    chen_tse_hardness_gpa, debye_function, debye_heat_capacity_j_per_mol_k, debye_temperature,
+    debye_velocity_km_per_s, density_g_per_cm3, poisson_ratio, shear_modulus_gpa,
+    youngs_modulus_gpa, PropertyRoute,
 };
 pub use quench::{
     dodson_closure_temperature, polymorphs_are_thermally_unresolvable, quench_exchange,
