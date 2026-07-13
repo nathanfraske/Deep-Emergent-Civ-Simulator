@@ -47,15 +47,28 @@ table, and a deep piece that is a new floor axis.
 
 ## 3. The near-ready entry, grounded
 
-The free-electron entry is not speculative; it reproduces measured electronic scales from valence and the built
-density alone. The plasma energy `hbar * omega_p` computed from `n_e = z * rho * N_A / M` lands the measured values
-across simple metals: sodium `5.9 eV` against a measured `5.7`, aluminium `15.8` against `15.8`, copper `10.8`
-against `10.8`, each within roughly one percent, with the conduction-electron count `z` taken from the group
-(one for the alkali and for copper, three for aluminium). The Drude conductivity closes the same way: copper's
-measured resistivity backs out a scattering time `tau ~ 2.5e-10 ps` (in the picosecond working unit the freezer's
-attempt frequency already uses), the phonon-limited relaxation time the model expects. So the near-ready entry is a
-clean first slice: `n_e` and `omega_p` reserve no value, and the Drude conductivity reserves only the scattering
-physics.
+The free-electron entry reproduces measured electronic scales from valence and the built density alone, at the
+FEW-PERCENT grade honest for a simple-metal (sp-band) free-electron model, NOT the "~1 percent" the first draft
+overclaimed. The plasma energy `hbar * omega_p` computed from `n_e = z * rho * N_A / M` lands the sp-metal trio:
+sodium `5.92 eV` against a measured `~5.7` (`~4 percent`), magnesium `10.9` against `~10.6`, aluminium `15.8`
+against `~15.3`, with the conduction-electron count `z` from the group (one for the alkali, two for magnesium,
+three for aluminium). The earlier copper row was dropped: copper's plasma response is wrecked by d-band interband
+screening and yields no clean `10.8 eV` observation, so a "10.8 against 10.8" comparison was calculated-versus-
+calculated (circular) and is removed.
+
+THE NAMED d-BLOCK FAILURE EXHIBIT (it motivates the deep piece better than prose). Silver's free-electron
+prediction is `9.0 eV` (`n_e = 5.86e28 /m^3` gives `hbar * omega_p = 8.99 eV`), against the OBSERVED screened
+plasmon `~3.8 eV`: a factor `2.4` miss, the d-electron interband screening the free-electron model cannot see
+(Ehrenreich and Philipp, Phys. Rev. 128, 1622 (1962)). This one row is why the deep piece (the band structure) is
+required for the d-block, and why the near-ready entry is scoped to the sp-metals with the d-block flagged.
+
+The Drude conductivity closes with the CORRECTED scattering time (the first draft's `~2.5e-10 ps` was an
+eight-decade units error). Copper's measured resistivity `~1.7e-8 ohm*m` backs out `tau = 2.5e-14 s = 0.025 ps`
+(NOT `2.5e-10 ps`), the phonon-limited relaxation time the model expects. The Drude slice therefore carries a
+mandatory `sigma` ROUND-TRIP TEST: store `tau`, recompute `sigma = n_e * e^2 * tau / m_e`, and assert it rebuilds
+the cited resistivity, so a units fold in `tau` fails loudly. So the near-ready entry is a clean first slice
+(`n_e` and `omega_p`, no reserved value), and the Drude conductivity that follows reserves only the transport
+electron-phonon coupling (section 5, Call 3).
 
 ## 4. The metal / semiconductor / insulator distinction must EMERGE (the Principle-8 line)
 
@@ -122,3 +135,58 @@ reduced-order, without the itinerant-band detail a full treatment carries. Optic
 and interband-gap order captures the metal cast and the semiconductor edge, not the fine absorption spectrum. Each
 limit is stated at its mechanism when built, on the arc's discipline of naming the reach ceiling rather than hiding
 it.
+
+## 9. Amendment (owner research audit, 36th): the sharpened calls and the coherence redirects
+
+The research tier ran this opener and ratified its shape while sharpening the four calls and catching three
+coherence redirects where the sub-arc was about to rebuild or bypass banked machinery. This section supersedes
+section 5 where they differ, and the two numeric defects it caught are already fixed in section 3 (the copper
+`tau` eight-decade units error, corrected to `2.5e-14 s = 0.025 ps` with a mandatory `sigma` round-trip test; the
+inconsistent validation trio, replaced with the Na/Mg/Al few-percent set plus the silver d-screening exhibit).
+
+- CALL 1 (depth): reduced-order `[M]` now, with a MISSING MIDDLE RUNG that is already half-banked. The ladder is
+  `[M]` measured rows at top, then a HARRISON universal tight-binding estimator (the same `V ~ hbar^2 * r_d^3 /
+  (m * d^5)` matrix elements the banked Friedel-Harrison cohesion estimator already uses give band widths and gaps
+  at factor grade from table columns, the admit-the-alien rung), then compute-once at the bottom. The compute-once
+  gap rung is bound by the banked eigenvalue-routing law: HYBRID or GW class, NEVER plain PBE (the derivative-
+  discontinuity entry), cited explicitly so no one wires PBE gaps in good faith.
+- CALL 2 (`z`): nominal valence proxy now, and the `[M]` TOP RUNG is the HALL COEFFICIENT `R_H = 1/(n_eff * e)`,
+  the measured effective carrier density, refutable-without-sim, carrying SIGN. Its sign failures (Be, Zn, Cd
+  positive) are exactly the band-structure boundary the valence proxy cannot cross, so the d-band flag AUTO-RAISES
+  from the periodic table's occupancy columns and routes to the Hall row where one exists.
+- CALL 3 (`tau`): the reserved coefficient is the DIMENSIONLESS transport electron-phonon coupling `lambda_tr`.
+  Above `Theta_D` the phonon-limited rate has the clean form `hbar/tau = 2*pi*lambda_tr*k_B*T`, so `lambda_tr` is
+  the ONLY reserved number, `[M]` per material from the McMillan (1968) / Allen (1971) lineage, and it is the SAME
+  `lambda` Eliashberg consumes for conventional superconducting `T_c` (a dual-consumer column). Consistency: `lambda
+  ~ 0.13` for copper predicts `tau(300 K) = 3.1e-14 s` against the backed-out `2.5e-14`, within 25 percent, so
+  `lambda_tr,Cu ~ 0.16` closes it. Bloch-Grueneisen `T^5` below `Theta_D` is derived-in-form; Matthiessen
+  additivity ties the defect residual-resistivity term to the damage floor (with RRR a free in-sim purity meter).
+  Honest-limit ceiling: the Mott-Ioffe-Regel bound (the mean free path cannot fall below a lattice spacing;
+  Gunnarsson, Calandra, Han 2003) marks where Drude itself dies.
+- CALL 4 (magnetism): dispatch on the banked `U/W` classifier, Hund's-rule local moments first (already built),
+  Stoner itinerant as the follow-on. `g(E_F)` has a measured route: the Sommerfeld coefficient `g(E_F) = 3 *
+  gamma_el / (pi^2 * k_B^2)` from the low-temperature electronic heat capacity, refutable-without-sim, so `g(E_F)`
+  starts `[M]` with the reduced-order DOS as estimator; the Stoner `I` is `[M]` (Janak 1977). Validation: only
+  Fe, Co, Ni clear `g*I > 1` among the elements, and Pd sits just under with a `~10x` Stoner-enhanced
+  susceptibility, a `delta -> 0` Gap Law near-miss the classifier FLAGS rather than scoring as a failure.
+
+THREE COHERENCE REDIRECTS (do not rebuild or bypass banked machinery):
+
+1. OPTICAL COLOUR is partially built: the d-d transitions ARE the banked `10Dq` crystal-field machinery (ruby
+   versus emerald), so the sub-arc CONSUMES that column and builds only the interband and plasma pieces.
+2. The gap-keyed emergence MISROUTES DERIVED gaps: it is safe for measured-`[M]`-gap rows, but a reduced-order band
+   model returns NiO metallic when it is a Mott insulator, so the banked `U/W` preflight MUST run BEFORE gap
+   classification on any non-`[M]` route, or this sub-arc reintroduces the exact failure the Mott turn closed.
+   (This corrects section 4's Principle-8 claim, which was clean only for the measured-gap case.)
+3. WIEDEMANN-FRANZ: the phonon-dominated-insulator versus electron-dominated-metal crossover is an EMERGENT readout
+   of the computed lattice-versus-electronic `kappa`, never a class label.
+
+VALIDATION BATTERY additions: the Na/Mg/Al plasma trio at few-percent grade, the silver `9.0`-versus-`3.8 eV`
+d-screening failure exhibit, Pd's Stoner near-miss, the `tau` `sigma` round-trip test. LAYER-3 additions:
+`lambda_tr` `[M, dual-consumer]`, the Hall and Sommerfeld `[M]` routes, the Harrison band rung, and the
+Mott-Ioffe-Regel ceiling. Citations verified at source: Ehrenreich and Philipp 1962, Janak 1977, McMillan 1968,
+Allen 1971, Gunnarsson-Calandra-Han 2003, Ashcroft and Mermin tables 1.2 and 14.1.
+
+Build order unchanged: the near-ready entry (`n_e`, `omega_p`) first, then the Drude conductivity on the corrected
+`tau` with `lambda_tr` and its round-trip test, then the `[M]`-plus-Harrison-plus-compute-once gap tier with the
+`U/W` preflight, then DOS and Hund magnetism, then the interband and plasma optics over the banked `10Dq`.
