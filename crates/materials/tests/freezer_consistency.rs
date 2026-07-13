@@ -34,7 +34,7 @@ fn r_kj_per_mol_k() -> Fixed {
     Fixed::from_ratio(8314, 1_000_000) // R = 8.314e-3 kJ/(mol K), derived (N_A*k_B)
 }
 fn delta_fixture() -> Fixed {
-    Fixed::from_ratio(86, 1000) // the Lindemann ratio delta ~ 0.086 (test-only)
+    Fixed::from_ratio(9, 100) // the Lindemann ratio delta ~ 0.09, near the ~0.1 near-universal (test-only)
 }
 fn f_fixture() -> Fixed {
     Fixed::from_ratio(55, 100) // the vacancy fraction f ~ 0.55 (test-only)

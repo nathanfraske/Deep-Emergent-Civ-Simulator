@@ -167,9 +167,11 @@ the whole Lindemann-Gilvarry chain, every fractional power is `sqrt`, `cbrt`, or
 
 So the derived `T_m` reads exactly ONE reserved value, the Lindemann ratio `delta`, with everything else derived
 from the material's own `B_0`, `V_m`, `M` and the fundamentals. This is strictly more derive-first than the
-interim cited `[M]` melting-point table, which is per-material Terran data, and it admits the alien: a material
-with EOS anchors but no cited melting point still gets a `T_m` from its own bond-strength physics. It is
-buildable NOW, not gated on #45.
+interim cited `[M]` melting-point table, which is per-material Terran data, and it admits the alien WITHIN THE
+CRYSTALLINE REGIME: a crystalline material with EOS anchors but no cited melting point still gets a `T_m` from
+its own bond-strength physics. It is buildable NOW, not gated on #45. The honest limit named in the code: the
+Lindemann criterion is a crystalline-melting theory, so an amorphous solid (a glass) has a kinetic glass
+transition rather than a Lindemann `T_m`, the phase-order follow-on when a crystallinity datum joins the anchors.
 
 Task #45 remains needed, but for a NARROWER set than the staging implied: arbitrary-denominator powers
 like the geology stream-power `slope^0.7` (a tenth root), NOT the Lindemann `^(2/3)` (which is `cbrt^2`) and NOT

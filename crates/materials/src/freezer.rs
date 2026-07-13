@@ -35,8 +35,9 @@
 //! DERIVED Lindemann melting point `T_m` ([`debye_melting_point`]). The `T_m` derivation is NOT gated on the
 //! fractional-power primitive (task #45): a prove-it check found the Lindemann `^(2/3)` is `cbrt^2` over the
 //! built exact `cbrt`, and the Lindemann-Gilvarry chain collapses algebraically to `T_m ~ B_0 * V_atom`, so it
-//! is buildable now and is alien-general (any substance with EOS anchors derives its own `T_m`, no cited
-//! melting point). It also builds the attempt frequency `nu = c_s/a` ([`attempt_frequency_per_ps`] over
+//! is buildable now and is alien-general WITHIN THE CRYSTALLINE REGIME (any crystalline substance with EOS
+//! anchors derives its own `T_m`; an amorphous solid has a glass transition, not a Lindemann melting point,
+//! the follow-on named in `debye_melting_point`). It also builds the attempt frequency `nu = c_s/a` ([`attempt_frequency_per_ps`] over
 //! [`sound_speed_km_per_s`]) closing the `D0 ~ a^2 * nu` normalization, and the Frost-Ashby creep axis `T/T_m`
 //! ([`homologous_temperature`]); the consistency twin (`g*R*T_m` and `f*E_coh` agree within class scatter)
 //! lives in `tests/freezer_consistency.rs`. The remaining pieces are the end-to-end route diffusivity (wiring
@@ -100,9 +101,9 @@ pub fn self_diffusivity(
 /// `T_m = delta^2 * [(6*pi^2)^(2/3)/9] * (B_0 * V_atom / k_B)`. So the melting point is the elastic energy per
 /// atom `B_0 * V_atom` (a pressure times a volume, an energy) over the thermal scale, times the squared
 /// Lindemann ratio and a pure-math factor. Every fractional power in the original chain is a built exact
-/// `sqrt`/`cbrt`/integer power (no fractional-power primitive), so this is buildable now and admits the alien:
-/// any substance with EOS anchors derives its own `T_m` from its own bond-strength physics, no cited melting
-/// point needed.
+/// `sqrt`/`cbrt`/integer power (no fractional-power primitive), so this is buildable now and admits the alien
+/// WITHIN ITS REGIME (below): any CRYSTALLINE substance with EOS anchors derives its own `T_m` from its own
+/// bond-strength physics, no cited melting point needed.
 ///
 /// The Lindemann ratio `delta` (the critical vibrational amplitude as a fraction of the interatomic distance,
 /// famously near 0.1) is RESERVED-with-basis, per bonding class `[E]`, keyed off the material's class, verified
@@ -110,9 +111,18 @@ pub fn self_diffusivity(
 /// derived here from `Fixed::PI` and the exact `cbrt`. The `k_B` fold (`10^-21 J / k_B`, mapping `GPa*A^3` to
 /// kelvin) is the exact rational `10^8 / 1380649` from the SI-exact Boltzmann constant, folded once at the
 /// atomic scale (the raw `10^-21`/`k_B` underflows Q32.32, the same fold `nernst_emf` and the Eyring prefactor
-/// use). HONEST LIMIT: with only the bulk modulus among the anchors (no shear modulus), the Debye velocity is
-/// approximated by the bulk sound speed, so the transverse modes are folded into `delta`; a shear-aware Debye
-/// average is the follow-on when the elastic anchors carry `G`. Non-positive inputs (no elastic scale, no
+/// use).
+///
+/// HONEST LIMITS (two, named with equal rigor). First, the REGIME: the Lindemann criterion is a CRYSTALLINE
+/// melting theory (a vibration amplitude against periodic lattice sites, defining a first-order `T_m`). A
+/// genuinely alien AMORPHOUS solid (a silicate glass, any aperiodic solid a world generates) has no periodic
+/// sites and a kinetic, cooling-rate-dependent GLASS TRANSITION, not a Lindemann melting point; fed a glass's
+/// `B_0`/`V_atom`/`delta` this still returns a number, but that number has no first-order-melting referent. So
+/// the alien-generality is within the crystalline regime; a glass-transition path keyed on a phase-order datum
+/// is the follow-on (no such datum is in the anchors today, and every current caller is a crystalline metal).
+/// Second, the ELASTIC input: with only the bulk modulus among the anchors (no shear modulus), the Debye
+/// velocity is approximated by the bulk sound speed, so the transverse modes fold into `delta`; a shear-aware
+/// Debye average is the follow-on when the elastic anchors carry `G`. Non-positive inputs (no elastic scale, no
 /// volume, or no ratio) yield zero (no melting point).
 pub fn debye_melting_point(
     bulk_modulus_gpa: Fixed,
@@ -394,25 +404,27 @@ mod tests {
     }
 
     #[test]
-    fn debye_melting_point_recovers_a_real_melting_point_at_the_lindemann_ratio() {
-        // The collapse and the k_B fold are validated by feeding the LITERATURE Lindemann ratio and recovering
-        // a cited melting point (used here only as a test reference, never entered into the mechanism). Iron:
-        // B_0 = 170 GPa, V_m = 7.09 cm^3/mol -> V_atom ~ 11.77 A^3, and delta ~ 0.086 gives T_m ~ 1811 K (the
-        // measured value). If the pure-math factor or the k_B fold were wrong, the literature delta would not
-        // recover T_m, so this pins both derived constants numerically.
+    fn debye_melting_point_lands_iron_within_the_lindemann_scatter_at_an_independent_ratio() {
+        // A scatter / plausibility check, NOT a circular literature recovery (the confirmation-bias catch that
+        // an earlier version tripped): feed an INDEPENDENT Lindemann ratio delta ~ 0.09 (the value near the ~0.1
+        // that is famously near-universal across solids, NOT back-solved from iron's answer) and require the
+        // derived T_m to land iron's measured melting point (~1811 K) within the Lindemann criterion's OWN known
+        // ~15-20% scatter. This catches a GROSS error in the derived pure-math factor or the k_B fold (either
+        // would scale T_m by ~100% and fall far outside the scatter) even though it does NOT pin the constants to
+        // high precision (delta itself carries the ~15-20% scatter, and the real per-class delta is reserved and
+        // caller-supplied, never planted). Iron: B_0 = 170 GPa, V_m = 7.09 cm^3/mol -> V_atom ~ 11.77 A^3.
         let b0_fe = Fixed::from_int(170);
         let v_atom_fe = Fixed::from_ratio(709, 100)
             .checked_mul(rose_eos::cm3_per_mol_to_angstrom3_per_atom())
             .expect("Fe atomic volume");
-        let t_m_fe = debye_melting_point(b0_fe, v_atom_fe, Fixed::from_ratio(86, 1000));
+        let t_m_fe = debye_melting_point(b0_fe, v_atom_fe, delta_fixture());
         assert!(
-            close(t_m_fe, 1811.0, 60.0),
-            "the Lindemann ratio ~0.086 recovers iron's measured melting point ~1811 K: {t_m_fe:?}"
+            close(t_m_fe, 1811.0, 380.0),
+            "an independent delta ~0.09 lands iron's ~1811 K within the Lindemann ~20% scatter: {t_m_fe:?}"
         );
         // T_m rises with the elastic energy per atom B_0 * V_atom (the collapse's content): a softer material of
         // the same volume melts lower at the same delta.
-        let softer =
-            debye_melting_point(Fixed::from_int(80), v_atom_fe, Fixed::from_ratio(86, 1000));
+        let softer = debye_melting_point(Fixed::from_int(80), v_atom_fe, delta_fixture());
         assert!(
             softer < t_m_fe && softer > ZERO,
             "a softer material melts lower"
@@ -424,7 +436,7 @@ mod tests {
         // Deterministic (Principle 3).
         assert_eq!(
             t_m_fe,
-            debye_melting_point(b0_fe, v_atom_fe, Fixed::from_ratio(86, 1000))
+            debye_melting_point(b0_fe, v_atom_fe, delta_fixture())
         );
     }
 
