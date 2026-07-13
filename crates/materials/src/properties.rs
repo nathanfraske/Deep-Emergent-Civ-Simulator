@@ -62,8 +62,11 @@
 //!
 //! LATTICE THERMAL CONDUCTIVITY ([`lattice_thermal_conductivity_w_per_m_k`]) is the Slack model over the shear-aware
 //! `Theta_D^3`, reusing the expansion's `gamma_G` and the CITED universal Slack constants, so it reserves NO new
-//! coefficient. It is ORDER-OF-MAGNITUDE (within `~3x` for simple crystals, an upper bound for anharmonic ones like
-//! rutile) and is the LATTICE part only: a metal's total conductivity is electronic-dominated (the deferred sub-arc).
+//! coefficient. Its prefactor is FACTORED per the dimensionless-constant law (a fundamental-constant fold assembled
+//! from the `k_B`/`hbar`/`amu` mantissas, times the pure-math `3*cbrt(4)/(20*pi^3)`, times the one cited phase-space
+//! number `0.849`, times the `gamma`-correction), reassembly-tested both directions. It is ORDER-OF-MAGNITUDE
+//! (within `~3x` for simple crystals, an upper bound for anharmonic ones like rutile) and is the LATTICE part only:
+//! a metal's total conductivity is electronic-dominated (the deferred sub-arc).
 //!
 //! THERMAL DIFFUSIVITY ([`thermal_diffusivity_m2_per_s`]) is the pure composition `alpha = kappa / (rho * c_p) =
 //! kappa * V_m / C_v` (the mass cancels), reserving NO value over the built conductivity, molar volume, and `C_v`.
@@ -603,19 +606,85 @@ fn slack_gamma_correction(gruneisen: Fixed) -> Fixed {
     }
 }
 
+/// The cited Slack-Leibfried-Schlomann phase-space number `0.849`, the ONE pure number in the conductivity
+/// prefactor (the whole prefactor factors as this dimensionless number times a fundamental-constant fold times a
+/// pure-math geometric factor, so only this is cited). PROVENANCE TAG:
+/// `[secondary-sourced + reassembly-passing, gamma-dependent, primary pending]`, one rung BELOW top-`[M]`: the
+/// secondary sources contradict each other on Julian's correction to Leibfried-Schlomann (a factor-two dispute,
+/// restated constants differing `~10..30 percent`), so `0.849` carries a Slack-versus-Julian BAND and the tag
+/// closes to top rung when the primary (Julian 1965, Phys. Rev. 137 A128) is fetched. This is the dimensionless-
+/// constant law in force: a dimensional empirical constant factored until only a pure number is cited.
+fn slack_phase_space_number() -> Fixed {
+    Fixed::from_ratio(849, 1000)
+}
+
+/// The dimensionless geometric factor `3 * cbrt(4) / (20 * pi^3)` of the Leibfried-Schlomann prefactor (about
+/// `7.68e-3`), DERIVED from the built `cbrt` and `Fixed::PI`, no authored decimal.
+fn slack_geometric_factor() -> Fixed {
+    let numerator = match Fixed::from_int(3).checked_mul(Fixed::from_int(4).cbrt()) {
+        Some(v) => v,
+        None => return ZERO,
+    };
+    let denom = Fixed::PI
+        .checked_mul(Fixed::PI)
+        .and_then(|x| x.checked_mul(Fixed::PI))
+        .and_then(|p3| p3.checked_mul(Fixed::from_int(20)));
+    match denom {
+        Some(d) if d > ZERO => numerator.checked_div(d).unwrap_or(ZERO),
+        _ => ZERO,
+    }
+}
+
+/// The dimensional fold `(k_B/hbar)^3 * amu * Angstrom`, times `1e6` to pair with the `(Theta/100)^3` rescale in
+/// [`lattice_thermal_conductivity_w_per_m_k`]. ASSEMBLED from the EXACT SI mantissas and a single collapsed power
+/// of ten (the dimensionless-constant law: no folded dimensional decimal). The powers collapse cleanly:
+/// `(k_B/hbar)^3` carries `10^33`, `amu` carries `10^-27`, the angstrom `10^-10`, the rescale `10^6`, netting
+/// `10^2`, so the whole fold is `(1.380649/1.054571817)^3 * 1.66053906660 * 10^2 ~ 372.6`. The constituents
+/// `k_B`, `hbar`, and `amu` each overflow or underflow Q32.32 alone; only this collapsed mantissa product is
+/// representable, which is why the fold is assembled rather than multiplied out.
+fn slack_dimensional_fold_rescaled() -> Fixed {
+    // k_B/hbar as the exact mantissa ratio (the 10^11 power is carried in the collapsed 10^2 below).
+    let kb_over_hbar = match Fixed::from_ratio(1_380_649, 1_000_000)
+        .checked_div(Fixed::from_ratio(1_054_571_817, 1_000_000_000))
+    {
+        Some(v) => v,
+        None => return Fixed::MAX,
+    };
+    let cubed = match kb_over_hbar
+        .checked_mul(kb_over_hbar)
+        .and_then(|sq| sq.checked_mul(kb_over_hbar))
+    {
+        Some(v) => v,
+        None => return Fixed::MAX,
+    };
+    // amu mantissa 1.66053906660, then the collapsed power of ten 10^2.
+    let amu_mantissa = Fixed::from_ratio(166_053_906_660, 100_000_000_000);
+    cubed
+        .checked_mul(amu_mantissa)
+        .and_then(|m| m.checked_mul(Fixed::from_int(100)))
+        .unwrap_or(Fixed::MAX)
+}
+
 /// The LATTICE (phonon) thermal conductivity `kappa_L` (W/(m*K)), the Slack model
 /// `kappa_L = A(gamma) * M_bar * Theta_a^3 * delta / (gamma^2 * n^(2/3) * T)`, where `M_bar` is the mean atomic
 /// mass (amu), `Theta_a` the acoustic Debye temperature (the built shear-aware `Theta_D`, which IS the acoustic
 /// average), `delta = cbrt(V_atom)` the interatomic spacing, `n` the atoms per primitive cell (DATA), and
-/// `A(gamma) = 3.1e-6 * [`slack_gamma_correction`]` the Slack prefactor. It RESERVES NO NEW COEFFICIENT: it reuses
-/// the expansion's Grueneisen `gamma_G`, and the Slack constants `{3.1e-6, 0.514, 0.228}` are cited UNIVERSAL fit
-/// values. The `Theta^3` is computed as `(Theta/100)^3` with the `1e6` folded into the prefactor (`3.1e-6 * 1e6 =
-/// 3.1`), so no intermediate overflows Q32.32 (a bare `Theta^3 ~ 1e10` for a stiff solid would).
+/// the Slack prefactor `A(gamma) = C_pure(gamma) * (k_B/hbar)^3 * amu * Angstrom`. It RESERVES NO NEW COEFFICIENT
+/// beyond the expansion's `gamma_G`, and per the DIMENSIONLESS-CONSTANT LAW the prefactor is FACTORED, not folded:
+/// the dimensional part is [`slack_dimensional_fold_rescaled`] (assembled from the `k_B`, `hbar`, `amu` exact
+/// mantissas), the pure-math part is [`slack_geometric_factor`] (`3*cbrt(4)/(20*pi^3)`), the `gamma`-dependence is
+/// [`slack_gamma_correction`], and the ONLY cited number is [`slack_phase_space_number`] `0.849` (with its
+/// Leibfried-Schlomann-Julian band). The old folded `3.1e-6` was the collapse of exactly this structure; the
+/// reassembly rebuilds it within the citation's two significant figures (the derived coefficient is `~3.04`), and
+/// unlike the folded scalar the factored form carries the true `gamma`-dependence (diamond at `gamma ~ 0.9` runs
+/// `~13 percent` higher). The `Theta^3` is computed as `(Theta/100)^3` with the paired `10^6` collapsed into the
+/// dimensional fold, so no intermediate overflows Q32.32 (a bare `Theta^3 ~ 1e10` for a stiff solid would).
 ///
 /// HONEST LIMITS, named at the site (this is a REDUCED-ORDER model). (1) It is ORDER-OF-MAGNITUDE: within a factor
-/// of `~3` for simple crystals (diamond `~2700` against `~2200`, NaCl `~9` against `~6.5`, MgO `~140` against
-/// `~60`), but it OVERSTATES strongly-anharmonic or complex-cell crystals the single-scattering form misses (rutile
-/// `TiO2 ~54` against a measured `~9`), so such classes are an intrinsic upper bound, not a trusted value. (2) It is
+/// of `~3` for simple crystals (with the derived prefactor: diamond `~2108` against `~2200`, NaCl `~7.1` against
+/// `~6.5`, MgO `~110` against `~60`), but it OVERSTATES strongly-anharmonic or complex-cell crystals the single-
+/// scattering form misses (rutile `TiO2 ~43` against a measured `~9`), so such classes are an intrinsic upper
+/// bound, not a trusted value. (2) It is
 /// the LATTICE conductivity only. For an INSULATOR/semiconductor that is the whole story; for a METAL the total is
 /// dominated by the ELECTRONIC conductivity (Wiedemann-Franz), which needs the electronic-structure substrate (the
 /// deferred Stage-6 sub-arc), and the Slack phonon form additionally over-predicts even the metal's lattice part.
@@ -650,8 +719,13 @@ pub fn lattice_thermal_conductivity_w_per_m_k(
         Some(v) => v,
         None => return Fixed::MAX,
     };
-    // A(gamma) rescaled = 3.1 * gamma_correction (3.1 = 3.1e-6 * 1e6, the cited Slack base times the 1e6 fold).
-    let a_rescaled = match Fixed::from_ratio(31, 10).checked_mul(slack_gamma_correction(gruneisen))
+    // A(gamma) rescaled = (dimensional fold) * 0.849 * (geometric) * gamma_correction, the dimensionless-constant
+    // law: the fundamental-constant fold and the pure-math geometric factor derived, only 0.849 cited. This
+    // rebuilds the old folded 3.1 within the citation's two significant figures and carries the true gamma-shape.
+    let a_rescaled = match slack_dimensional_fold_rescaled()
+        .checked_mul(slack_phase_space_number())
+        .and_then(|x| x.checked_mul(slack_geometric_factor()))
+        .and_then(|x| x.checked_mul(slack_gamma_correction(gruneisen)))
     {
         Some(v) => v,
         None => return Fixed::MAX,
@@ -1463,7 +1537,8 @@ mod tests {
     #[test]
     fn the_lattice_conductivity_is_the_slack_model_within_an_order_of_magnitude() {
         // NaCl (simple ionic insulator): gamma=1.6, M_bar=29.22 amu, Theta=321, V_atom=22.36 A^3, n=2, T=300.
-        // Slack kappa_L ~9.0 W/(m*K); measured total ~6.5 (an insulator, so lattice IS the total). Within factor 3.
+        // Slack kappa_L ~7.06 W/(m*K); measured total ~6.5 (an insulator, so lattice IS the total). The DERIVED
+        // (factored) prefactor lands closer than the old folded 3.1 (~9.0): the dimensionless-constant law paying off.
         let nacl = lattice_thermal_conductivity_w_per_m_k(
             Fixed::from_ratio(16, 10),
             Fixed::from_ratio(2922, 100),
@@ -1473,15 +1548,16 @@ mod tests {
             Fixed::from_int(300),
         );
         assert!(
-            close(nacl, 9.0, 1.0),
-            "NaCl lattice conductivity ~9 W/(m*K): {nacl:?}"
+            close(nacl, 7.06, 0.6),
+            "NaCl lattice conductivity ~7.1 W/(m*K), derived prefactor: {nacl:?}"
         );
         assert!(
             nacl.to_f64_lossy() > 6.5 / 3.0 && nacl.to_f64_lossy() < 6.5 * 3.0,
             "NaCl lands within an order of magnitude (factor 3) of the measured ~6.5"
         );
         // Diamond (the high-conductivity extreme): gamma=0.9, M_bar=12.011, Theta=2230, V_atom=5.674, n=2.
-        // Slack kappa_L ~2690 W/(m*K); measured ~2200. The (Theta/100)^3 fold keeps Theta^3 ~1.1e10 in range.
+        // Slack kappa_L ~2108 W/(m*K); measured ~2200 (a 4% hit, better than the old folded ~2690). The
+        // (Theta/100)^3 fold keeps Theta^3 ~1.1e10 in range.
         let diamond = lattice_thermal_conductivity_w_per_m_k(
             Fixed::from_ratio(9, 10),
             Fixed::from_ratio(12011, 1000),
@@ -1491,8 +1567,8 @@ mod tests {
             Fixed::from_int(300),
         );
         assert!(
-            close(diamond, 2690.0, 150.0),
-            "diamond lattice conductivity ~2690 W/(m*K): {diamond:?}"
+            close(diamond, 2108.0, 150.0),
+            "diamond lattice conductivity ~2108 W/(m*K), derived prefactor: {diamond:?}"
         );
         assert!(
             diamond.to_f64_lossy() > 2200.0 / 3.0 && diamond.to_f64_lossy() < 2200.0 * 3.0,
@@ -1737,6 +1813,51 @@ mod tests {
                 .grain_boundary_energy("Xx", Fixed::from_ratio(18, 100), r_gb)
                 .is_none(),
             "an element without an atomization enthalpy or anchor escalates"
+        );
+    }
+
+    #[test]
+    fn the_slack_prefactor_reassembles_from_fundamental_constants() {
+        // The dimensionless-constant law: the old folded 3.1e-6 = C_pure(gamma) * (k_B/hbar)^3 * amu * Angstrom,
+        // with only the phase-space number 0.849 cited and the rest derived. Reassembly asserts BOTH directions.
+
+        // C_pure(gamma) = 0.849 * [3*cbrt(4)/(20*pi^3)] * gamma_correction(gamma), fully dimensionless.
+        // DIRECTION (structure): at gamma = 2, C_pure ~8.15e-3, matching the demanded 8.32e-3 (from 3.1e-6) at ~2%.
+        let gamma = Fixed::from_int(2);
+        let c_pure = slack_phase_space_number()
+            .checked_mul(slack_geometric_factor())
+            .and_then(|x| x.checked_mul(slack_gamma_correction(gamma)))
+            .expect("C_pure");
+        assert!(
+            close(c_pure, 8.15e-3, 3.0e-4),
+            "C_pure(2) ~8.15e-3 (demanded 8.32e-3, within ~2%): {c_pure:?}"
+        );
+
+        // DIRECTION (folded -> cited): the full rescaled coefficient (dimensional fold * C_pure) rebuilds the old
+        // folded ~3.1 within the citation's two significant figures (the derived value is ~3.04).
+        let a_rescaled = slack_dimensional_fold_rescaled()
+            .checked_mul(c_pure)
+            .expect("a_rescaled");
+        assert!(
+            close(a_rescaled, 3.04, 0.12),
+            "the derived prefactor rebuilds the cited ~3.1 (folded), derived ~3.04: {a_rescaled:?}"
+        );
+
+        // Rider 1: the coefficient is gamma-DEPENDENT, not frozen at gamma = 2. Diamond (gamma ~0.9) runs higher.
+        let c_diamond = slack_phase_space_number()
+            .checked_mul(slack_geometric_factor())
+            .and_then(|x| x.checked_mul(slack_gamma_correction(Fixed::from_ratio(9, 10))))
+            .expect("C_pure diamond");
+        assert!(
+            c_diamond > c_pure,
+            "C_pure carries the gamma-dependence (diamond above gamma=2), not a frozen scalar"
+        );
+
+        // The dimensional fold assembles to the expected ~372.6 (mantissa product * 10^2), representable.
+        assert!(
+            close(slack_dimensional_fold_rescaled(), 372.6, 1.0),
+            "the (k_B/hbar)^3 * amu * Angstrom * 1e6 fold assembles to ~372.6: {:?}",
+            slack_dimensional_fold_rescaled()
         );
     }
 }
