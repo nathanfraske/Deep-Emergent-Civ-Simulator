@@ -53,6 +53,7 @@ pub mod log;
 pub mod memo;
 pub mod metallic;
 pub mod nucleation;
+pub mod properties;
 pub mod quench;
 pub mod thermochemical;
 pub mod verdict;
@@ -74,6 +75,7 @@ pub use nucleation::{
     nucleation_prefactor, nucleation_rate, reduced_driving_force, reduced_interfacial_energy,
     reduced_nucleation_barrier, richards_ratio, zeldovich_factor, NucleationRoute,
 };
+pub use properties::{debye_temperature, density_g_per_cm3, PropertyRoute};
 pub use quench::{
     dodson_closure_temperature, polymorphs_are_thermally_unresolvable, quench_exchange,
     QuenchOutcome,
