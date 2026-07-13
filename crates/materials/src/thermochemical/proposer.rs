@@ -32,8 +32,16 @@
 //!
 //! All oxidation states come from `Element::valence` and all valence-electron counts from the periodic table's
 //! shell-filling cache (`PeriodicTable::main_group_valence`), keyed per element so an alien chemistry is a data
-//! row (Principle 9), never an authored table. The silicate polymerization arithmetic and the laziness
-//! invariant are following sub-slices.
+//! row (Principle 9), never an authored table.
+//!
+//! The LAZINESS INVARIANT ([`max_formable_amount`], [`prune_lazy`]) closes the proposer side: a candidate is
+//! proposed only where the composition can form a representably-nonzero amount of it. The bound is the limiting
+//! reagent, `min` over the candidate's constituents of `amount(element) / count(element)`, so it derives from
+//! the composition amounts and the candidate's own integer stoichiometry, with the presence cut at the
+//! fixed-point representability floor (`> Fixed::ZERO`), authoring no threshold. The energy-scaled cut (a
+//! resolvable amount whose free-energy contribution falls below the deciding model's resolution) is NOT here:
+//! that is the disposer's own `delta`-versus-`resolution_s` ladder, keyed on the model's resolution, so it lands
+//! at Stage 4. The silicate polymerization arithmetic is a following sub-slice.
 
 use crate::contract::Proposer;
 use crate::verdict::{content_key, Candidate};
@@ -62,9 +70,21 @@ impl Composition {
         }
     }
 
-    /// The elements present, in canonical (sorted) order.
+    /// The elements keyed in the composition, in canonical (sorted) order (whatever their amount).
     pub fn elements(&self) -> impl Iterator<Item = &str> {
         self.amounts.keys().map(|s| s.as_str())
+    }
+
+    /// The elements PRESENT in a representably-nonzero amount, in canonical (sorted) order: the laziness
+    /// invariant's element floor. An element keyed at `Fixed::ZERO` (named but absent, or an amount that rounds
+    /// below the fixed-point representability floor) is not present, so the tiers do not enumerate over it and
+    /// no candidate is proposed for it. The cut is `> Fixed::ZERO` (the Q32.32 epsilon), a property of the type,
+    /// not an authored threshold.
+    pub fn present_elements(&self) -> impl Iterator<Item = &str> {
+        self.amounts
+            .iter()
+            .filter(|(_, amount)| **amount > Fixed::ZERO)
+            .map(|(symbol, _)| symbol.as_str())
     }
 }
 
@@ -270,7 +290,9 @@ pub fn charge_neutral_primitives(
     environment: &Environment,
     table: &PeriodicTable,
 ) -> Vec<Compound> {
-    let elements: Vec<&str> = composition.elements().collect();
+    // Enumerate only over elements present in a representably-nonzero amount (the laziness invariant's element
+    // floor): an element keyed at zero proposes nothing.
+    let elements: Vec<&str> = composition.present_elements().collect();
     let n = elements.len();
     let mut merged: BTreeMap<BTreeMap<String, u32>, BondingHints> = BTreeMap::new();
     if n == 0 || n >= 63 {
@@ -418,7 +440,8 @@ fn diatomic_if_viable(a: &str, b: &str, table: &PeriodicTable) -> Option<Compoun
 /// diatomics (the CO lesson); cross-shell pairs, d/f-block centres, charged molecular ions, and polyatomics are
 /// out of scope (later tiers). Deduplicated and canonically ordered.
 pub fn mo_viable_diatomics(composition: &Composition, table: &PeriodicTable) -> Vec<Compound> {
-    let elements: Vec<&str> = composition.elements().collect();
+    // Only present (representably-nonzero) elements form diatomics (the laziness invariant's element floor).
+    let elements: Vec<&str> = composition.present_elements().collect();
     let mut merged: BTreeMap<BTreeMap<String, u32>, BondingHints> = BTreeMap::new();
     for (i, &a) in elements.iter().enumerate() {
         for &b in &elements[i..] {
@@ -445,7 +468,48 @@ pub fn propose_candidates(
     for compound in mo_viable_diatomics(composition, table) {
         merge_compound(&mut merged, compound);
     }
-    into_sorted_compounds(merged)
+    // The laziness invariant: keep only candidates the composition can form a representably-nonzero amount of.
+    prune_lazy(into_sorted_compounds(merged), composition)
+}
+
+/// The maximum amount of a candidate compound the composition can form: the limiting reagent, `min` over the
+/// candidate's constituent elements of `amount(element) / count(element)`. A pure function of the composition
+/// amounts and the candidate's own integer stoichiometry, deriving with no energy and no reserved threshold.
+/// `Fixed::ZERO` when any constituent is absent (keyed at zero or not keyed at all) or when the limiting supply
+/// rounds below one representable unit of the compound; that zero IS the laziness cut, at the fixed-point
+/// representability floor rather than an authored value. The disposer and freezer read this same bound to scale
+/// the extensive free energy and the phase fractions, so it is the proposer-side datum the later stages read,
+/// over serving as a prune alone.
+pub fn max_formable_amount(candidate: &Compound, composition: &Composition) -> Fixed {
+    let mut limiting: Option<Fixed> = None;
+    for (element, &count) in candidate.composition() {
+        let available = composition
+            .amounts
+            .get(element)
+            .copied()
+            .unwrap_or(Fixed::ZERO);
+        // available / count: how much of the candidate this element's supply allows. `count >= 1` for every
+        // keyed element (a composition entry exists only with a positive count), so the divisor is never zero.
+        let per_element = available.div(Fixed::from_int(count as i32));
+        limiting = Some(match limiting {
+            Some(current) if current <= per_element => current,
+            _ => per_element,
+        });
+    }
+    limiting.unwrap_or(Fixed::ZERO)
+}
+
+/// The laziness prune: keep only the candidates the composition can form a representably-nonzero amount of
+/// ([`max_formable_amount`] above `Fixed::ZERO`). Lossless with respect to the disposer's verdict: a candidate
+/// with zero formable amount can never be a ground state the disposer selects, so dropping it changes no
+/// outcome. The energy-scaled cut (a resolvable amount whose free-energy contribution is below the deciding
+/// model's resolution) is deliberately NOT here: it needs the per-candidate free energy the disposer assembles,
+/// so it is the disposer's `delta`-versus-`resolution_s` ladder at Stage 4, not a proposer threshold.
+pub fn prune_lazy(candidates: Vec<Compound>, composition: &Composition) -> Vec<Compound> {
+    candidates
+        .into_iter()
+        .filter(|candidate| max_formable_amount(candidate, composition) > Fixed::ZERO)
+        .collect()
 }
 
 /// Merge a compound into a by-composition map, filling in hints when the composition already exists.
@@ -672,5 +736,148 @@ mod tests {
             proposer.propose(&c, &env, 0),
             propose_candidates(&c, &env, &t)
         );
+    }
+
+    /// A compound with the given (element, count) composition and empty hints, for the laziness tests (the
+    /// hints do not enter the formable-amount bound, which reads composition and amounts only).
+    fn compound(pairs: &[(&str, u32)]) -> Compound {
+        Compound {
+            composition: comp(pairs),
+            hints: BondingHints::default(),
+        }
+    }
+
+    #[test]
+    fn the_formable_amount_is_the_limiting_reagent() {
+        // Al2O3 from Al:2, O:3: min(2/2, 3/3) = 1, both reagents exactly stoichiometric.
+        let exact =
+            Composition::from_pairs([("Al", Fixed::from_int(2)), ("O", Fixed::from_int(3))]);
+        assert_eq!(
+            max_formable_amount(&compound(&[("Al", 2), ("O", 3)]), &exact),
+            Fixed::from_int(1)
+        );
+        // Al2O3 from Al:2, O:30: aluminium limits, min(2/2, 30/3) = min(1, 10) = 1.
+        let al_limited =
+            Composition::from_pairs([("Al", Fixed::from_int(2)), ("O", Fixed::from_int(30))]);
+        assert_eq!(
+            max_formable_amount(&compound(&[("Al", 2), ("O", 3)]), &al_limited),
+            Fixed::from_int(1)
+        );
+        // Al2O3 from Al:20, O:3: oxygen limits, min(20/2, 3/3) = min(10, 1) = 1.
+        let o_limited =
+            Composition::from_pairs([("Al", Fixed::from_int(20)), ("O", Fixed::from_int(3))]);
+        assert_eq!(
+            max_formable_amount(&compound(&[("Al", 2), ("O", 3)]), &o_limited),
+            Fixed::from_int(1)
+        );
+        // Al2O3 from Al:4, O:30: min(4/2, 30/3) = min(2, 10) = 2 (four aluminium make two formula units).
+        let two_units =
+            Composition::from_pairs([("Al", Fixed::from_int(4)), ("O", Fixed::from_int(30))]);
+        assert_eq!(
+            max_formable_amount(&compound(&[("Al", 2), ("O", 3)]), &two_units),
+            Fixed::from_int(2)
+        );
+    }
+
+    #[test]
+    fn an_absent_constituent_gives_zero_formable_amount() {
+        // A candidate needing oxygen, but the composition has no oxygen keyed: unformable (limiting reagent 0).
+        let no_oxygen = Composition::from_pairs([("Al", Fixed::from_int(2))]);
+        assert_eq!(
+            max_formable_amount(&compound(&[("Al", 2), ("O", 3)]), &no_oxygen),
+            Fixed::ZERO
+        );
+        // A constituent keyed at exactly zero is equally absent.
+        let zero_oxygen = Composition::from_pairs([("Al", Fixed::from_int(2)), ("O", Fixed::ZERO)]);
+        assert_eq!(
+            max_formable_amount(&compound(&[("Al", 2), ("O", 3)]), &zero_oxygen),
+            Fixed::ZERO
+        );
+    }
+
+    #[test]
+    fn the_presence_cut_is_the_representability_floor_not_an_authored_value() {
+        // The limiting-reagent bound rounds to ZERO exactly when less than one representable unit of the
+        // compound can form: the cut is the Q32.32 epsilon, a property of the type, not a fabricated threshold.
+        // Three epsilons of a reagent that a count-4 compound needs makes 3/4 -> 0 of a unit (pruned); four
+        // epsilons makes exactly one epsilon of a unit (kept). No authored number appears anywhere.
+        let three_eps = Composition::from_pairs([("X", Fixed::from_bits(3))]);
+        assert_eq!(
+            max_formable_amount(&compound(&[("X", 4)]), &three_eps),
+            Fixed::ZERO,
+            "below one representable unit rounds to the laziness cut"
+        );
+        let four_eps = Composition::from_pairs([("X", Fixed::from_bits(4))]);
+        assert_eq!(
+            max_formable_amount(&compound(&[("X", 4)]), &four_eps),
+            Fixed::from_bits(1),
+            "exactly one representable unit survives the cut"
+        );
+    }
+
+    #[test]
+    fn prune_lazy_drops_the_unformable_and_keeps_the_formable() {
+        let composition =
+            Composition::from_pairs([("Al", Fixed::from_int(2)), ("O", Fixed::from_int(3))]);
+        let formable = compound(&[("Al", 2), ("O", 3)]); // limiting reagent 1
+        let unformable = compound(&[("Al", 2), ("O", 3), ("K", 1)]); // needs K, which is absent
+        let pruned = prune_lazy(vec![formable.clone(), unformable], &composition);
+        assert_eq!(
+            pruned,
+            vec![formable],
+            "only the formable candidate survives"
+        );
+    }
+
+    #[test]
+    fn every_proposed_candidate_is_formable() {
+        // The invariant the proposer upholds: every candidate in the unified stream has a positive formable
+        // amount (the laziness prune ran), so no phantom candidate reaches the disposer.
+        let t = table();
+        let c = Composition::from_pairs([
+            ("Fe", Fixed::from_int(1)),
+            ("O", Fixed::from_int(2)),
+            ("C", Fixed::from_int(1)),
+        ]);
+        let env = Environment::unconstrained().with_states("O", vec![-2]);
+        let candidates = propose_candidates(&c, &env, &t);
+        assert!(!candidates.is_empty(), "the composition proposes something");
+        for candidate in &candidates {
+            assert!(
+                max_formable_amount(candidate, &c) > Fixed::ZERO,
+                "proposed candidate {:?} must be formable",
+                candidate.composition()
+            );
+        }
+    }
+
+    #[test]
+    fn a_zero_amount_element_proposes_nothing() {
+        // An element keyed at zero amount is not present, so the tiers do not enumerate over it: a composition
+        // of real carbon and zero oxygen proposes no oxide, only what carbon alone can form.
+        let t = table();
+        let c = Composition::from_pairs([("C", Fixed::from_int(1)), ("O", Fixed::ZERO)]);
+        let env = Environment::unconstrained().with_states("O", vec![-2]);
+        let candidates = propose_candidates(&c, &env, &t);
+        for candidate in &candidates {
+            assert!(
+                !candidate.composition().contains_key("O"),
+                "no oxygen-bearing candidate when oxygen is absent, got {:?}",
+                candidate.composition()
+            );
+        }
+    }
+
+    #[test]
+    fn the_formable_amount_scales_with_the_amounts_not_an_absolute_floor() {
+        // The derive-first property: the bound is relative to the composition amounts and the stoichiometry, so
+        // scaling every amount by the same factor scales the formable amount by that factor (no fixed absolute
+        // floor lurks). Doubling the supply doubles what can form.
+        let base = Composition::from_pairs([("Al", Fixed::from_int(2)), ("O", Fixed::from_int(3))]);
+        let doubled =
+            Composition::from_pairs([("Al", Fixed::from_int(4)), ("O", Fixed::from_int(6))]);
+        let cand = compound(&[("Al", 2), ("O", 3)]);
+        assert_eq!(max_formable_amount(&cand, &base), Fixed::from_int(1));
+        assert_eq!(max_formable_amount(&cand, &doubled), Fixed::from_int(2));
     }
 }

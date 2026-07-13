@@ -16,12 +16,13 @@
 //! chemical selection (`MATERIALS_ORACLE_SPEC.md` stages 2, 4, 5).
 //!
 //! This is a plugin over the generic kernel ([`crate::verdict`], [`crate::contract`]): it supplies the physics
-//! (the free-energy content) while the kernel owns the selection discipline. Slice a of the Stage-2 proposer
-//! ([`proposer`]) is here; the disposer and freezer land in following slices.
+//! (the free-energy content) while the kernel owns the selection discipline. The Stage-2 proposer
+//! ([`proposer`]) is here, complete with its two tiers (ionic charge balance, MO viability) and the laziness
+//! invariant; the disposer and freezer land in following slices.
 
 pub mod proposer;
 
 pub use proposer::{
-    charge_neutral_primitives, mo_viable_diatomics, propose_candidates, BondingHints, Composition,
-    Compound, Environment, ThermochemicalProposer,
+    charge_neutral_primitives, max_formable_amount, mo_viable_diatomics, propose_candidates,
+    prune_lazy, BondingHints, Composition, Compound, Environment, ThermochemicalProposer,
 };
