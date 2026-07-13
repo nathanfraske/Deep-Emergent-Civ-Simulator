@@ -12,31 +12,38 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The Stage-2 proposer, sub-slice a: the complete primitive charge-neutral stoichiometry enumeration.
+//! The Stage-2 proposer: the candidate compounds for a local composition, over two tiers.
 //!
-//! Over a local composition's elements at their environment-accessible oxidation states, the proposer emits
-//! every PRIMITIVE (irreducible) charge-neutral formula. These are the Hilbert basis of the charge-neutrality
-//! cone `sum(state * count) = 0` over the (element, oxidation-state) species: FINITE by Gordan's lemma and
-//! computed from the charges alone, with each count bounded by the opposite side's maximum charge magnitude
-//! (the Lambert-Pottier bound on the minimal solutions of a homogeneous linear Diophantine equation). So the
-//! enumeration is complete with NO fabricated cap and NO reserved value: a non-primitive formula (a doubled
-//! formula, or a mixed-valence phase like Fe3O4 = FeO + Fe2O3) is a reducible multiple the disposer composes,
-//! never a proposer primitive. The oxidation states are read per element from `Element::valence`, keyed per
-//! element so an alien chemistry is a data row (Principle 9), never an authored stoichiometry table.
+//! A candidate's IDENTITY is its COMPOSITION (element -> count), the representation-independent observable. The
+//! bonding descriptor is OPEN attached metadata ([`BondingHints`]) the disposer's energy models consume, NOT
+//! part of the identity, so two proposer arrangements of one composition are the same candidate and the
+//! disposer (not the proposer) resolves the valence and bonding. There is no closed bonding-mode enum; the
+//! hints grow as new tiers attach what they derive.
 //!
-//! This is the classical-valence cheap first pass. The MO-viability tier (the CO/NO/O2-diradical world-content
-//! strict valence misses), the silicate polymerization arithmetic, and the laziness invariant are following
-//! sub-slices.
+//! Two tiers emit into the one candidate stream, keyed and deduplicated on composition:
+//! - The IONIC charge-balance tier ([`charge_neutral_primitives`]): every primitive (irreducible)
+//!   charge-neutral stoichiometry, the Hilbert basis of `sum(state * count) = 0` over the (element,
+//!   oxidation-state) species (FINITE by Gordan's lemma, the Lambert-Pottier bound derived from the charges,
+//!   no cap, no reserved value; the mixed-valence Fe3O4 = FeO + Fe2O3 is reducible, so it is composed by the
+//!   disposer, never a primitive). It attaches its oxidation-state arrangement as a hint.
+//! - The MO-viability tier ([`mo_viable_diatomics`]): the covalent diatomics strict valence misses (CO, NO,
+//!   the O2 diradical), viable iff the bond order is positive (a net bound state), the bond order computed from
+//!   the total valence electrons filling the valence-shell molecular orbitals. It attaches the bond order.
+//!
+//! All oxidation states come from `Element::valence` and all valence-electron counts from the periodic table's
+//! shell-filling cache (`PeriodicTable::main_group_valence`), keyed per element so an alien chemistry is a data
+//! row (Principle 9), never an authored table. The silicate polymerization arithmetic and the laziness
+//! invariant are following sub-slices.
 
 use crate::contract::Proposer;
 use crate::verdict::{content_key, Candidate};
 use civsim_core::{Fixed, StateHasher};
 use civsim_physics::periodic::PeriodicTable;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 /// A local composition (`x_local`): the locally dominant elements and their amounts, symbol-keyed (the
 /// codebase convention, `crates/sim/src/material.rs`). Extensible, no closed element set; the amount is read
-/// by the later laziness invariant, not by this charge-balance pass.
+/// by the later laziness invariant, not by the charge-balance or MO passes.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Composition {
     /// The amount (moles or mass, the caller's unit) per element symbol.
@@ -63,10 +70,10 @@ impl Composition {
 
 /// The proposer's slice of the environment `E`: the accessible oxidation states per element, which the
 /// mu-vector's buffer ladder sets per environment (multi-valence resolved per environment, never per element).
-/// Sub-slice a supplies this as an explicit filter; the full mu-vector buffer ladder is a later stage. An
-/// element absent from the map falls back to its full periodic-table valence set (the environment does not
-/// constrain it), and an accessible state the element's valence does not carry is dropped (the environment
-/// cannot grant a non-physical state).
+/// It constrains the IONIC tier; the covalent MO tier is environment-independent (a molecule's existence is
+/// intrinsic, its abundance the disposer's and laziness's concern). An element absent from the map falls back
+/// to its full periodic-table valence set, and an accessible state the element's valence does not carry is
+/// dropped (the environment cannot grant a non-physical state).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Environment {
     /// The environment-accessible oxidation states per element symbol.
@@ -86,21 +93,60 @@ impl Environment {
     }
 }
 
-/// A charge-neutral stoichiometry candidate: element species (an element at an oxidation state) with integer
-/// counts summing to zero net charge. Content-identified for the canonicalization law: two stoichiometries are
-/// the same candidate iff their `(symbol, state) -> count` maps are equal, whatever order they were built in.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Stoichiometry {
-    /// The species and their counts: `(element symbol, oxidation state) -> count`, all counts positive.
-    pub species: BTreeMap<(String, i8), u32>,
+/// Open bonding hints: what a proposer tier derived about a candidate's bonding, for the disposer's energy
+/// models. Each tier's finding is an optional field (extensible, never a closed bonding-mode enum), and the
+/// hints are NOT part of the candidate identity, so they never split one composition into two candidates. When
+/// two tiers propose the same composition their hints merge.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct BondingHints {
+    /// The ionic charge-balance tier's oxidation-state arrangement, `(element, state) -> count`, whose net
+    /// charge is zero. `None` if no ionic tier proposed this composition.
+    pub oxidation_states: Option<BTreeMap<(String, i8), u32>>,
+    /// The MO-viability tier's diatomic bond order (net bonding electrons over two). `None` if the MO tier did
+    /// not propose this composition.
+    pub bond_order: Option<Fixed>,
 }
 
-impl Candidate for Stoichiometry {
+impl BondingHints {
+    /// Fill any hint this one lacks from `other` (the merge when two tiers propose one composition).
+    fn merge(&mut self, other: BondingHints) {
+        if self.oxidation_states.is_none() {
+            self.oxidation_states = other.oxidation_states;
+        }
+        if self.bond_order.is_none() {
+            self.bond_order = other.bond_order;
+        }
+    }
+}
+
+/// A candidate material compound: its IDENTITY is its COMPOSITION (element -> count), with the bonding
+/// descriptor as open, non-identifying [`BondingHints`]. Two compounds are the same candidate iff their
+/// compositions are equal, whatever bonding a proposer tier read into them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Compound {
+    composition: BTreeMap<String, u32>,
+    hints: BondingHints,
+}
+
+impl Compound {
+    /// The composition (element -> count), the candidate identity.
+    pub fn composition(&self) -> &BTreeMap<String, u32> {
+        &self.composition
+    }
+
+    /// The open bonding hints (not part of the identity).
+    pub fn hints(&self) -> &BondingHints {
+        &self.hints
+    }
+}
+
+impl Candidate for Compound {
     fn feed_content(&self, hasher: &mut StateHasher) {
-        // The BTreeMap iterates in sorted key order, so the fed content is canonical (order-independent).
-        for ((symbol, state), count) in &self.species {
+        // ONLY the composition (the identity) is fed; the bonding hints are metadata, never hashed, so two
+        // arrangements of one composition share a content key and deduplicate. The BTreeMap iterates in sorted
+        // key order, so the fed content is canonical (order-independent).
+        for (symbol, count) in &self.composition {
             hasher.write_bytes(symbol.as_bytes());
-            hasher.write_i64(*state as i64);
             hasher.write_u32(*count);
         }
     }
@@ -123,12 +169,12 @@ fn accessible_states(symbol: &str, environment: &Environment, table: &PeriodicTa
     }
 }
 
-/// The Hilbert basis of the charge-neutrality cone over a species list (each species an `(element, state)`
-/// with its integer charge = state): every primitive (irreducible) non-negative count vector with
-/// `sum(charge * count) = 0`. Each count is bounded by the Lambert-Pottier bound (a cation count by the
-/// maximum anion magnitude, an anion count by the maximum cation charge, a state-0 native by 1), a bound
-/// DERIVED from the charges, so the enumeration is complete with no fabricated cap. Returned as count vectors
-/// aligned with `species`.
+/// The Hilbert basis of the charge-neutrality cone over a species list (each species an `(element, state)` with
+/// its integer charge = state): every primitive (irreducible) non-negative count vector with
+/// `sum(charge * count) = 0`. Each count is bounded by the Lambert-Pottier bound (a cation count by the maximum
+/// anion magnitude, an anion count by the maximum cation charge, a state-0 native by 1), a bound DERIVED from
+/// the charges, so the enumeration is complete with no fabricated cap. Returned as count vectors aligned with
+/// `species`.
 fn hilbert_basis_charge_neutral(species: &[(String, i8)]) -> Vec<Vec<u32>> {
     let m = species.len();
     if m == 0 {
@@ -180,7 +226,6 @@ fn hilbert_basis_charge_neutral(species: &[(String, i8)]) -> Vec<Vec<u32>> {
         let mut i = 0;
         loop {
             if i == m {
-                // The whole space is enumerated.
                 return minimal_solutions(solutions);
             }
             if counts[i] < bounds[i] {
@@ -194,8 +239,8 @@ fn hilbert_basis_charge_neutral(species: &[(String, i8)]) -> Vec<Vec<u32>> {
 }
 
 /// Filter a set of non-zero charge-neutral solutions to the minimal ones (the Hilbert basis): a solution is
-/// reducible iff some other solution is componentwise `<=` it (then their difference is also a solution, so it
-/// is a sum of two non-zero solutions). The minimal ones are the primitives.
+/// reducible iff some other solution is componentwise `<=` it (their difference is then a non-zero
+/// charge-neutral solution, so it is a sum of two non-zero solutions). The minimal ones are the primitives.
 fn minimal_solutions(solutions: Vec<Vec<u32>>) -> Vec<Vec<u32>> {
     let mut basis = Vec::new();
     for (i, s) in solutions.iter().enumerate() {
@@ -210,34 +255,32 @@ fn minimal_solutions(solutions: Vec<Vec<u32>>) -> Vec<Vec<u32>> {
     basis
 }
 
-/// Enumerate the complete set of primitive charge-neutral stoichiometries over a composition's elements at
-/// their environment-accessible oxidation states. Complete (the Hilbert basis over every element subset), with
-/// no fabricated cap and no reserved value. Returned in canonical (content-key) order, deterministic.
+/// The IONIC tier: the complete set of primitive charge-neutral compounds over a composition's elements at
+/// their environment-accessible oxidation states. Each compound's identity is its composition (element ->
+/// count); its oxidation-state arrangement is attached as a hint. Complete, no fabricated cap, no reserved
+/// value. Deduplicated and canonically ordered.
 ///
 /// The enumeration is over the subsets of the composition's elements, so each Hilbert-basis computation is
-/// small and a formula is emitted once (from its exact element set: a primitive is kept for a subset only if
-/// it uses every element of that subset). This is complete for a local dominant composition (`x_local`, a
-/// handful of elements); a composition beyond the machine subset-mask width is out of this sub-slice's scope
-/// (the dominant cut and the laziness invariant bound it in later slices), and returns empty rather than
-/// overflowing.
+/// small and a formula is emitted once (from its exact element set: a primitive is kept for a subset only if it
+/// uses every element of that subset). Complete for a local dominant composition (`x_local`, a handful of
+/// elements); a composition beyond the machine subset-mask width is out of scope (the dominant cut and the
+/// laziness invariant bound it in later slices) and returns empty rather than overflowing.
 pub fn charge_neutral_primitives(
     composition: &Composition,
     environment: &Environment,
     table: &PeriodicTable,
-) -> Vec<Stoichiometry> {
+) -> Vec<Compound> {
     let elements: Vec<&str> = composition.elements().collect();
     let n = elements.len();
-    let mut out: Vec<Stoichiometry> = Vec::new();
+    let mut merged: BTreeMap<BTreeMap<String, u32>, BondingHints> = BTreeMap::new();
     if n == 0 || n >= 63 {
-        return out;
+        return Vec::new();
     }
-    let mut seen: BTreeSet<u64> = BTreeSet::new();
     for mask in 1u64..(1u64 << n) {
         let subset: Vec<&str> = (0..n)
             .filter(|i| mask & (1u64 << i) != 0)
             .map(|i| elements[i])
             .collect();
-        // The species: every (element, accessible-state) over the subset.
         let mut species: Vec<(String, i8)> = Vec::new();
         for &el in &subset {
             for st in accessible_states(el, environment, table) {
@@ -248,8 +291,8 @@ pub fn charge_neutral_primitives(
             continue;
         }
         for counts in hilbert_basis_charge_neutral(&species) {
-            // Keep the primitive only if it uses EVERY element of the subset (some state of each has a
-            // positive count), so the formula is emitted once from its exact element set.
+            // Keep the primitive only if it uses EVERY element of the subset, so the formula is emitted once
+            // from its exact element set.
             let uses_all = subset.iter().all(|&el| {
                 species
                     .iter()
@@ -259,37 +302,185 @@ pub fn charge_neutral_primitives(
             if !uses_all {
                 continue;
             }
-            let mut sp: BTreeMap<(String, i8), u32> = BTreeMap::new();
+            let mut composition_out: BTreeMap<String, u32> = BTreeMap::new();
+            let mut arrangement: BTreeMap<(String, i8), u32> = BTreeMap::new();
             for ((el, st), c) in species.iter().zip(&counts) {
                 if *c > 0 {
-                    sp.insert((el.clone(), *st), *c);
+                    *composition_out.entry(el.clone()).or_insert(0) += c;
+                    arrangement.insert((el.clone(), *st), *c);
                 }
             }
-            let stoich = Stoichiometry { species: sp };
-            if seen.insert(content_key(&stoich)) {
-                out.push(stoich);
+            // First arrangement wins on a composition collision (the disposer re-derives the arrangement; the
+            // hint is advisory).
+            merged
+                .entry(composition_out)
+                .or_insert_with(|| BondingHints {
+                    oxidation_states: Some(arrangement),
+                    bond_order: None,
+                });
+        }
+    }
+    into_sorted_compounds(merged)
+}
+
+/// The valence shell a main-group element bonds through: period-1 (the `1s` duet) or the `ns np` shell of
+/// period 2 and beyond. `None` for a d-block, f-block, or period-6/7 heavy centre (the shell-filling cache
+/// returns no main-group valence there), which the MO tier routes out of scope rather than guess.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ShellKind {
+    /// Period 1: the `1s` shell only (hydrogen, helium).
+    SOnly,
+    /// Period 2 and beyond main-group: the `ns np` shell.
+    SP,
+}
+
+/// The valence shell of an element by symbol, or `None` when the shell-filling cache does not resolve a
+/// main-group valence (a d/f-block or heavy centre).
+fn shell_kind(symbol: &str, table: &PeriodicTable) -> Option<ShellKind> {
+    table.main_group_valence(symbol)?;
+    let z = table.element(symbol)?.z;
+    Some(if z <= 2 {
+        ShellKind::SOnly
+    } else {
+        ShellKind::SP
+    })
+}
+
+/// The valence-shell molecular-orbital levels for a shell, as `(is_bonding, capacity)` in energy order,
+/// DERIVED from the atomic-orbital structure rather than tabulated: each subshell of `k` orbitals gives a
+/// bonding MO group of capacity `2k` and an antibonding group of capacity `2k` under LCAO (an orbital holds two
+/// electrons). The `s` subshell has one orbital; the `p` subshell has three (one sigma plus two pi). The bond
+/// order is insensitive to the order WITHIN the bonding or antibonding groups (the s-p mixing crossover that
+/// flips sigma_2p and pi_2p between N2 and O2 moves no electron between bonding and antibonding), so the groups
+/// are listed coalesced and the bond order is well-defined without tracking the crossover.
+fn mo_sequence(shell: ShellKind) -> Vec<(bool, u32)> {
+    const S_ORBITALS: u32 = 1;
+    const P_ORBITALS: u32 = 3; // one sigma + two pi
+    let mut levels = vec![
+        (true, 2 * S_ORBITALS),  // sigma_s bonding
+        (false, 2 * S_ORBITALS), // sigma*_s antibonding
+    ];
+    if shell == ShellKind::SP {
+        levels.push((true, 2 * P_ORBITALS)); // the 2p bonding group (sigma_p + two pi_p)
+        levels.push((false, 2 * P_ORBITALS)); // the 2p antibonding group (two pi*_p + sigma*_p)
+    }
+    levels
+}
+
+/// The net bonding electrons (bonding minus antibonding) for `n` valence electrons filling a shell's MO levels
+/// in order. Twice the bond order; positive iff the molecule is a bound state.
+fn net_bonding(n: u32, sequence: &[(bool, u32)]) -> i32 {
+    let mut remaining = n;
+    let mut net: i32 = 0;
+    for &(is_bonding, capacity) in sequence {
+        let filled = remaining.min(capacity) as i32;
+        net += if is_bonding { filled } else { -filled };
+        remaining -= filled as u32;
+        if remaining == 0 {
+            break;
+        }
+    }
+    net
+}
+
+/// A diatomic `a`-`b` as a viable compound, or `None` when it is not viable or out of scope. Viable iff the
+/// bond order is positive (a net bound state), from the total valence electrons filling the shared valence
+/// shell's MO levels. Out of scope (returns `None`, a later tier's or an override's job, never a wrong answer):
+/// a cross-shell pair (one period-1, one period-2+, where the simple diagram is an approximation), a d/f-block
+/// centre, and (by construction, only neutral atoms are summed) a charged molecular ion.
+fn diatomic_if_viable(a: &str, b: &str, table: &PeriodicTable) -> Option<Compound> {
+    let shell_a = shell_kind(a, table)?;
+    let shell_b = shell_kind(b, table)?;
+    if shell_a != shell_b {
+        return None; // cross-shell: the simple homonuclear-shape diagram is an approximation, out of scope
+    }
+    let va = table.main_group_valence(a)?;
+    let vb = table.main_group_valence(b)?;
+    let n = va as u32 + vb as u32;
+    let net = net_bonding(n, &mo_sequence(shell_a));
+    if net <= 0 {
+        return None; // bond order <= 0: no bound state
+    }
+    let mut composition: BTreeMap<String, u32> = BTreeMap::new();
+    *composition.entry(a.to_string()).or_insert(0) += 1;
+    *composition.entry(b.to_string()).or_insert(0) += 1;
+    Some(Compound {
+        composition,
+        hints: BondingHints {
+            oxidation_states: None,
+            bond_order: Some(Fixed::from_ratio(net as i64, 2)),
+        },
+    })
+}
+
+/// The MO-viability tier: the viable diatomics (homonuclear A2 and heteronuclear A-B) over the composition's
+/// main-group elements, each with its bond order attached as a hint. Scope: same-valence-shell main-group
+/// diatomics (the CO lesson); cross-shell pairs, d/f-block centres, charged molecular ions, and polyatomics are
+/// out of scope (later tiers). Deduplicated and canonically ordered.
+pub fn mo_viable_diatomics(composition: &Composition, table: &PeriodicTable) -> Vec<Compound> {
+    let elements: Vec<&str> = composition.elements().collect();
+    let mut merged: BTreeMap<BTreeMap<String, u32>, BondingHints> = BTreeMap::new();
+    for (i, &a) in elements.iter().enumerate() {
+        for &b in &elements[i..] {
+            if let Some(compound) = diatomic_if_viable(a, b, table) {
+                merged.entry(compound.composition).or_insert(compound.hints);
             }
         }
     }
+    into_sorted_compounds(merged)
+}
+
+/// The full Stage-2 proposal: the ionic and MO tiers merged into one candidate stream, keyed on composition
+/// (two tiers proposing one composition merge their hints), canonically ordered. This is what the disposer
+/// consumes.
+pub fn propose_candidates(
+    composition: &Composition,
+    environment: &Environment,
+    table: &PeriodicTable,
+) -> Vec<Compound> {
+    let mut merged: BTreeMap<BTreeMap<String, u32>, BondingHints> = BTreeMap::new();
+    for compound in charge_neutral_primitives(composition, environment, table) {
+        merge_compound(&mut merged, compound);
+    }
+    for compound in mo_viable_diatomics(composition, table) {
+        merge_compound(&mut merged, compound);
+    }
+    into_sorted_compounds(merged)
+}
+
+/// Merge a compound into a by-composition map, filling in hints when the composition already exists.
+fn merge_compound(merged: &mut BTreeMap<BTreeMap<String, u32>, BondingHints>, compound: Compound) {
+    merged
+        .entry(compound.composition)
+        .or_default()
+        .merge(compound.hints);
+}
+
+/// Build the canonically-ordered compound list from a by-composition hint map (content-key order, the kernel's
+/// canonical candidate order).
+fn into_sorted_compounds(merged: BTreeMap<BTreeMap<String, u32>, BondingHints>) -> Vec<Compound> {
+    let mut out: Vec<Compound> = merged
+        .into_iter()
+        .map(|(composition, hints)| Compound { composition, hints })
+        .collect();
     out.sort_by_key(content_key);
     out
 }
 
 /// The thermochemical proposer: the Stage-2 instantiation of the kernel's [`Proposer`] contract over the
-/// periodic-table floor. Sub-slice a proposes the primitive charge-neutral stoichiometries; the MO-viability
-/// tier is a following sub-slice.
+/// periodic-table floor. Proposes the merged ionic and MO candidate stream.
 pub struct ThermochemicalProposer<'t> {
-    /// The periodic-table floor the charge-balance reads the oxidation states from.
+    /// The periodic-table floor the tiers read from.
     pub table: &'t PeriodicTable,
 }
 
 impl<'t> Proposer for ThermochemicalProposer<'t> {
     type Composition = Composition;
     type Environment = Environment;
-    type Candidate = Stoichiometry;
+    type Candidate = Compound;
 
-    fn propose(&self, x: &Composition, e: &Environment, _seed: u64) -> Vec<Stoichiometry> {
-        charge_neutral_primitives(x, e, self.table)
+    fn propose(&self, x: &Composition, e: &Environment, _seed: u64) -> Vec<Compound> {
+        propose_candidates(x, e, self.table)
     }
 }
 
@@ -301,113 +492,185 @@ mod tests {
         PeriodicTable::standard().expect("the standard periodic table loads")
     }
 
-    /// Build the expected stoichiometry from `(symbol, state, count)` triples, for assertions.
-    fn stoich(triples: &[(&str, i8, u32)]) -> Stoichiometry {
-        Stoichiometry {
-            species: triples
-                .iter()
-                .map(|(s, st, c)| ((s.to_string(), *st), *c))
-                .collect(),
-        }
+    fn comp(pairs: &[(&str, u32)]) -> BTreeMap<String, u32> {
+        pairs.iter().map(|(s, c)| (s.to_string(), *c)).collect()
+    }
+
+    /// Find a candidate by its composition (the identity), if present.
+    fn find<'a>(
+        candidates: &'a [Compound],
+        composition: &BTreeMap<String, u32>,
+    ) -> Option<&'a Compound> {
+        candidates.iter().find(|c| c.composition() == composition)
     }
 
     #[test]
-    fn al_o_yields_al2o3_as_a_primitive() {
-        // The completeness spot-check. Al(+3), O(-2): the primitive charge-neutral binary is Al2O3.
+    fn the_ionic_tier_yields_al2o3_as_a_primitive() {
         let t = table();
-        let comp = Composition::from_pairs([("Al", Fixed::from_int(2)), ("O", Fixed::from_int(3))]);
+        let c = Composition::from_pairs([("Al", Fixed::from_int(2)), ("O", Fixed::from_int(3))]);
         let env = Environment::unconstrained().with_states("O", vec![-2]);
-        let primitives = charge_neutral_primitives(&comp, &env, &t);
-        assert!(
-            primitives.contains(&stoich(&[("Al", 3, 2), ("O", -2, 3)])),
-            "Al2O3 is a primitive charge-neutral stoichiometry, got {primitives:?}"
+        let ionic = charge_neutral_primitives(&c, &env, &t);
+        let al2o3 = find(&ionic, &comp(&[("Al", 2), ("O", 3)])).expect("Al2O3 present");
+        // Its identity is the composition; the ionic arrangement is a hint.
+        assert_eq!(
+            al2o3
+                .hints()
+                .oxidation_states
+                .as_ref()
+                .unwrap()
+                .get(&("Al".to_string(), 3)),
+            Some(&2)
         );
     }
 
     #[test]
-    fn fe_o_yields_feo_and_fe2o3_but_not_the_reducible_fe3o4() {
-        // The mixed-valence + reducibility check. Fe(+2, +3), O(-2): the primitives are FeO and Fe2O3;
-        // magnetite Fe3O4 = FeO + Fe2O3 is reducible, so it is NOT a proposer primitive (it is the disposer's
-        // buffer-ladder composition).
+    fn the_ionic_tier_yields_feo_and_fe2o3_but_not_the_reducible_fe3o4() {
         let t = table();
-        let comp = Composition::from_pairs([("Fe", Fixed::from_int(1)), ("O", Fixed::from_int(1))]);
+        let c = Composition::from_pairs([("Fe", Fixed::from_int(1)), ("O", Fixed::from_int(1))]);
         let env = Environment::unconstrained().with_states("O", vec![-2]);
-        let primitives = charge_neutral_primitives(&comp, &env, &t);
+        let ionic = charge_neutral_primitives(&c, &env, &t);
         assert!(
-            primitives.contains(&stoich(&[("Fe", 2, 1), ("O", -2, 1)])),
+            find(&ionic, &comp(&[("Fe", 1), ("O", 1)])).is_some(),
             "FeO is a primitive"
         );
         assert!(
-            primitives.contains(&stoich(&[("Fe", 3, 2), ("O", -2, 3)])),
+            find(&ionic, &comp(&[("Fe", 2), ("O", 3)])).is_some(),
             "Fe2O3 is a primitive"
         );
-        // Fe3O4 = (Fe+2)1 (Fe+3)2 O4 is reducible (FeO + Fe2O3), so it must not appear.
         assert!(
-            !primitives.contains(&stoich(&[("Fe", 2, 1), ("Fe", 3, 2), ("O", -2, 4)])),
-            "Fe3O4 is reducible and must not be a proposer primitive, got {primitives:?}"
+            find(&ionic, &comp(&[("Fe", 3), ("O", 4)])).is_none(),
+            "Fe3O4 is reducible and must not be a primitive"
         );
     }
 
     #[test]
-    fn the_enumeration_is_element_order_independent_and_deterministic() {
-        // Two compositions with the SAME elements built in different insertion orders yield the identical
-        // candidate set in the identical (content-key) order.
+    fn the_candidate_identity_is_composition_not_bonding() {
+        // Two compounds of the same composition but different hints share a content key (the identity is the
+        // composition, the hints are metadata), so they are the same candidate.
+        let ionic = Compound {
+            composition: comp(&[("C", 1), ("O", 1)]),
+            hints: BondingHints {
+                oxidation_states: Some(
+                    [(("C".to_string(), 2), 1u32), (("O".to_string(), -2), 1)].into(),
+                ),
+                bond_order: None,
+            },
+        };
+        let covalent = Compound {
+            composition: comp(&[("C", 1), ("O", 1)]),
+            hints: BondingHints {
+                oxidation_states: None,
+                bond_order: Some(Fixed::from_int(3)),
+            },
+        };
+        assert_eq!(
+            content_key(&ionic),
+            content_key(&covalent),
+            "one composition is one candidate whatever bonding was read into it"
+        );
+    }
+
+    #[test]
+    fn the_mo_tier_bond_orders_match_the_diagram() {
         let t = table();
-        let a = Composition::from_pairs([("Fe", Fixed::from_int(1)), ("O", Fixed::from_int(1))]);
-        let b = Composition::from_pairs([("O", Fixed::from_int(1)), ("Fe", Fixed::from_int(1))]);
+        let bo = |a: &str, b: &str| -> Option<Fixed> {
+            diatomic_if_viable(a, b, &t).and_then(|c| c.hints().bond_order)
+        };
+        // CO and N2: bond order 3. NO: 2.5. O2: 2 (the diradical). F2: 1.
+        assert_eq!(bo("C", "O"), Some(Fixed::from_int(3)));
+        assert_eq!(bo("N", "N"), Some(Fixed::from_int(3)));
+        assert_eq!(bo("N", "O"), Some(Fixed::from_ratio(5, 2)));
+        assert_eq!(bo("O", "O"), Some(Fixed::from_int(2)));
+        assert_eq!(bo("F", "F"), Some(Fixed::from_int(1)));
+        // B2 (BO 1), C2 (BO 2), Li2 (BO 1, a real gas-phase molecule).
+        assert_eq!(bo("B", "B"), Some(Fixed::from_int(1)));
+        assert_eq!(bo("C", "C"), Some(Fixed::from_int(2)));
+        assert_eq!(bo("Li", "Li"), Some(Fixed::from_int(1)));
+        // Ne2, He2, Be2: bond order 0, not viable (no bound state).
+        assert_eq!(bo("Ne", "Ne"), None);
+        assert_eq!(bo("He", "He"), None);
+        assert_eq!(bo("Be", "Be"), None);
+    }
+
+    #[test]
+    fn cross_shell_and_dblock_diatomics_are_out_of_scope() {
+        let t = table();
+        // H (period 1) with F (period 2): cross-shell, out of scope (a later refinement, not a wrong BO).
+        assert!(
+            diatomic_if_viable("H", "F", &t).is_none(),
+            "cross-shell HF is out of scope"
+        );
+        // Fe is a 3d-block centre: no main-group valence, out of scope.
+        assert!(
+            diatomic_if_viable("Fe", "Fe", &t).is_none(),
+            "a d-block diatomic is out of scope"
+        );
+    }
+
+    #[test]
+    fn the_mo_tier_admits_o2_where_charge_balance_omits_it() {
+        // Over {O} alone the ionic tier produces nothing (O has only anionic states, no cation to balance), but
+        // the MO tier admits O2 (bond order 2). The unified proposal carries it.
+        let t = table();
+        let c = Composition::from_pairs([("O", Fixed::from_int(1))]);
+        let env = Environment::unconstrained();
+        let ionic = charge_neutral_primitives(&c, &env, &t);
+        assert!(ionic.is_empty(), "charge balance omits O2, got {ionic:?}");
+        let all = propose_candidates(&c, &env, &t);
+        let o2 = find(&all, &comp(&[("O", 2)])).expect("O2 present in the unified stream");
+        assert_eq!(o2.hints().bond_order, Some(Fixed::from_int(2)));
+    }
+
+    #[test]
+    fn co_carries_both_tiers_hints_merged_on_one_composition() {
+        // CO is producible by BOTH tiers (ionic C+2/O-2 and covalent bond order 3). In the unified stream it is
+        // one candidate carrying both hints, the disposer to resolve.
+        let t = table();
+        let c = Composition::from_pairs([("C", Fixed::from_int(1)), ("O", Fixed::from_int(1))]);
+        let env = Environment::unconstrained()
+            .with_states("C", vec![2])
+            .with_states("O", vec![-2]);
+        let all = propose_candidates(&c, &env, &t);
+        let co = find(&all, &comp(&[("C", 1), ("O", 1)])).expect("CO present");
+        assert!(
+            co.hints().oxidation_states.is_some(),
+            "the ionic arrangement hint is present"
+        );
+        assert_eq!(
+            co.hints().bond_order,
+            Some(Fixed::from_int(3)),
+            "the MO bond-order hint is present"
+        );
+    }
+
+    #[test]
+    fn the_unified_stream_is_element_order_independent_and_deterministic() {
+        let t = table();
         let env = Environment::unconstrained().with_states("O", vec![-2]);
-        let pa = charge_neutral_primitives(&a, &env, &t);
-        let pb = charge_neutral_primitives(&b, &env, &t);
+        let a = Composition::from_pairs([("C", Fixed::from_int(1)), ("O", Fixed::from_int(1))]);
+        let b = Composition::from_pairs([("O", Fixed::from_int(1)), ("C", Fixed::from_int(1))]);
+        let pa = propose_candidates(&a, &env, &t);
+        let pb = propose_candidates(&b, &env, &t);
         assert_eq!(
             pa, pb,
-            "the candidate set is a pure function of the element set, not the order"
+            "the candidate stream is a function of the composition, not the order"
         );
-        // Running twice is identical (determinism).
-        assert_eq!(pa, charge_neutral_primitives(&a, &env, &t));
-    }
-
-    #[test]
-    fn the_environment_filters_the_accessible_states() {
-        // Allowing O(-1) as well as O(-2) admits extra charge-neutral candidates the -2-only environment does
-        // not, so the environment genuinely constrains the proposal (multi-valence resolved per environment).
-        let t = table();
-        let comp = Composition::from_pairs([("Al", Fixed::from_int(2)), ("O", Fixed::from_int(3))]);
-        let only_oxide = Environment::unconstrained().with_states("O", vec![-2]);
-        let with_peroxide = Environment::unconstrained().with_states("O", vec![-2, -1]);
-        let a = charge_neutral_primitives(&comp, &only_oxide, &t);
-        let b = charge_neutral_primitives(&comp, &with_peroxide, &t);
-        assert!(
-            b.len() > a.len(),
-            "admitting the O(-1) state widens the proposal (a {} vs b {})",
-            a.len(),
-            b.len()
-        );
-        // Al2O3 is present under both.
-        assert!(a.contains(&stoich(&[("Al", 3, 2), ("O", -2, 3)])));
-        assert!(b.contains(&stoich(&[("Al", 3, 2), ("O", -2, 3)])));
-    }
-
-    #[test]
-    fn a_lone_cation_yields_no_candidate() {
-        // Al(+3) alone cannot form a charge-neutral formula (no anion to balance, no native state-0), so the
-        // proposal is empty. The bound is derived: with no anion, the cation's Lambert-Pottier bound is 0.
-        let t = table();
-        let comp = Composition::from_pairs([("Al", Fixed::from_int(1))]);
-        let env = Environment::unconstrained();
-        let primitives = charge_neutral_primitives(&comp, &env, &t);
-        assert!(
-            primitives.is_empty(),
-            "a lone cation yields nothing, got {primitives:?}"
+        assert_eq!(
+            pa,
+            propose_candidates(&a, &env, &t),
+            "deterministic across runs"
         );
     }
 
     #[test]
-    fn the_proposer_trait_wraps_the_enumeration() {
+    fn the_proposer_trait_wraps_the_unified_stream() {
         let t = table();
         let proposer = ThermochemicalProposer { table: &t };
-        let comp = Composition::from_pairs([("Al", Fixed::from_int(2)), ("O", Fixed::from_int(3))]);
+        let c = Composition::from_pairs([("C", Fixed::from_int(1)), ("O", Fixed::from_int(1))]);
         let env = Environment::unconstrained().with_states("O", vec![-2]);
-        let proposed = proposer.propose(&comp, &env, 0);
-        assert_eq!(proposed, charge_neutral_primitives(&comp, &env, &t));
+        assert_eq!(
+            proposer.propose(&c, &env, 0),
+            propose_candidates(&c, &env, &t)
+        );
     }
 }

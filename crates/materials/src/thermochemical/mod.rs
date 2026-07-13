@@ -22,5 +22,6 @@
 pub mod proposer;
 
 pub use proposer::{
-    charge_neutral_primitives, Composition, Environment, Stoichiometry, ThermochemicalProposer,
+    charge_neutral_primitives, mo_viable_diatomics, propose_candidates, BondingHints, Composition,
+    Compound, Environment, ThermochemicalProposer,
 };

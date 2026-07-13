@@ -205,6 +205,16 @@ impl PeriodicTable {
         self.by_z.get(&z).and_then(|s| self.elements.get(s))
     }
 
+    /// The main-group valence-electron count (the s+p count, 1 through 8) for an element by symbol, read from
+    /// its atomic number Z by noble-gas-core shell filling: periodic-table STRUCTURE, not an authored value
+    /// (the same shell-filling cache the VSEPR rotational-class derivation reads). `None` for an unknown symbol
+    /// or a d-block, f-block, or period-6/7 heavy centre, which the caller routes to an override rather than
+    /// guess. Covers hydrogen through xenon. Exposed for the materials substrate's MO-viability tier
+    /// (`civsim_materials`), which counts a diatomic's total valence electrons from it.
+    pub fn main_group_valence(&self, symbol: &str) -> Option<u8> {
+        self.element(symbol).and_then(|e| main_group_valence(e.z))
+    }
+
     /// The elements, in sorted symbol order.
     pub fn elements(&self) -> impl Iterator<Item = &Element> + '_ {
         self.elements.values()
