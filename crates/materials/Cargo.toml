@@ -1,0 +1,18 @@
+[package]
+name = "civsim-materials"
+description = "The materials substrate kernel: the owner's Verdict selection contract (VERDICT_KERNEL_CONTRACT.md), reifying the proposer -> disposer -> freezer loop and the Gap/Residual meta-laws as types so they are type-enforced rather than convention-enforced. The kernel owns the contract and the discipline; the physics content (the thermochemical and attractor instantiations) lands in plugin modules implementing its traits. A clean layer above core and physics, below sim (core -> physics -> materials -> sim)."
+authors.workspace = true
+license.workspace = true
+edition.workspace = true
+version.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# The deterministic fixed-point and canonicalization primitives: Fixed (Q32.32), canonical_sorted
+# (input-order-independent ordering, R-CANON-WALK), and content_id over StateHasher (the deterministic
+# content hash the seeded-draw canonicalization law keys on). The kernel reuses these rather than
+# inventing its own, so honoring the canonicalization law is cheap.
+civsim-core = { path = "../core" }
+# civsim-physics is added when the thermochemical and attractor instantiations land (they compute the
+# free energy the disposer reads); slice 1 (the contract) is physics-free.

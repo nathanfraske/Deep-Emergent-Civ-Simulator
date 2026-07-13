@@ -341,6 +341,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "civsim-materials"
+version = "0.1.0"
+dependencies = [
+ "civsim-core",
+]
+
+[[package]]
 name = "civsim-physics"
 version = "0.1.0"
 dependencies = [
