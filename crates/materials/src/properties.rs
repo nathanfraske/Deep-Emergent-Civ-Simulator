@@ -659,9 +659,10 @@ pub fn lattice_thermal_conductivity_w_per_m_k(
 /// (J/(mol*K)); the `1e-6` folds `V_m` from `cm^3/mol` to `m^3/mol` (the exact unit constant). `kappa`, `V_m`, and
 /// `C_v` must share a basis (per mole of atoms, or per formula unit); the ratio `V_m / C_v` is basis-invariant.
 /// HONEST LIMITS: it inherits the conductivity's reach (order-of-magnitude, LATTICE-only, so for a metal this is
-/// the phonon-based diffusivity with the electronic total deferred), and it uses `C_v` for `c_p` (the solid
-/// `C_p - C_v` difference is a few percent, the correction the expansion slice supplies). Non-positive inputs
-/// yield zero.
+/// the phonon-based diffusivity with the electronic total deferred), and it uses `C_v` for `c_p` (a deliberate
+/// choice: the solid `C_p - C_v = alpha_V^2 * K * V_m * T` is `~3..5 percent` at room temperature, negligible
+/// inside the factor-3 Slack `kappa` uncertainty `alpha` already carries, and the correction rides the expansion
+/// slice once `alpha_V` is built). Non-positive inputs yield zero.
 pub fn thermal_diffusivity_m2_per_s(
     conductivity_w_per_m_k: Fixed,
     molar_volume_cm3_per_mol: Fixed,
