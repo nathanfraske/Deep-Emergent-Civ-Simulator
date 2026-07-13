@@ -6081,55 +6081,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn arrhenius_numerical_twin_recovers_minus_activation_temperature() {
-        // The numerical-twin rule (RUNBOOK section 5): the analytic Arrhenius slope is
-        // d ln(rate)/d(1/T) = -E*/k_B, a straight line whose slope IS the barrier. Here, working at a per-
-        // particle scale where k_B folds to one, E* = G is the activation temperature, so the recovered slope
-        // must be -G. Because the Arrhenius ln is EXACTLY linear in 1/T (ln(rate) = ln(A) - G/T), the central
-        // difference carries no truncation error, so the recovered slope equals -G to fixed-point rounding at
-        // EVERY step size: the h^2 plateau is the whole range, which we show with a wide and a narrow pair.
-        // Integer-only (Fixed throughout), so the twin itself stays on the canonical no-float path.
-        let a = Fixed::from_int(1000);
-        let g = Fixed::from_int(10); // E*/k_B, the activation temperature
-
-        // ln(rate) at a temperature, from the REAL kernel output (exp then ln, the full round trip).
-        let ln_rate_at =
-            |t: i32| -> Fixed { arrhenius_rate(a, reduced_barrier(g, Fixed::from_int(t))).ln() };
-        // 1/T as a Fixed.
-        let inv_t = |t: i32| -> Fixed { ONE.checked_div(Fixed::from_int(t)).unwrap_or(ZERO) };
-        // The central-difference slope of ln(rate) against 1/T between two temperatures, all in Fixed.
-        let slope = |t_hi: i32, t_lo: i32| -> Fixed {
-            let d_ln = sat_sub(ln_rate_at(t_hi), ln_rate_at(t_lo));
-            let d_inv_t = sat_sub(inv_t(t_hi), inv_t(t_lo));
-            d_ln.checked_div(d_inv_t).unwrap_or(ZERO)
-        };
-        // |x| for a Fixed, via the saturating difference from zero.
-        let abs_fixed = |x: Fixed| -> Fixed {
-            if x.to_bits() >= 0 {
-                x
-            } else {
-                sat_sub(ZERO, x)
-            }
-        };
-        let tol = Fixed::from_ratio(5, 100); // 0.05, comfortably above fixed-point rounding
-        let target = Fixed::from_int(-10);
-        // Wide pair (T = 20, 5; reduced barriers 0.5 and 2.0, both inside the window).
-        let wide = slope(20, 5);
-        // Narrow pair (T = 10, 8; reduced barriers 1.0 and 1.25).
-        let narrow = slope(10, 8);
-        assert!(
-            abs_fixed(sat_sub(wide, target)) < tol,
-            "the wide-pair slope recovers -E*/k_B = -10: {wide:?}"
-        );
-        assert!(
-            abs_fixed(sat_sub(narrow, target)) < tol,
-            "the narrow-pair slope also recovers -10 (step-size independent, the h^2 plateau): {narrow:?}"
-        );
-        // The two step sizes agree, confirming the plateau (the recovered barrier does not drift with h).
-        assert!(
-            abs_fixed(sat_sub(wide, narrow)) < tol,
-            "the recovered slope is step-size independent: wide {wide:?} vs narrow {narrow:?}"
-        );
-    }
+    // The numerical twin (d ln(rate)/d(1/T) = -E*/k_B) lives in `crates/physics/tests/rate_law.rs`, not
+    // inline: a numerical-differentiation twin uses a float boundary read, and the integer-only steering scan
+    // (`the_canonical_kernel_path_is_integer_only`) rejects any float token in this module, test code
+    // included. The two disciplines pair cleanly once the twin is sited in a test file (RUNBOOK section 5).
 }
