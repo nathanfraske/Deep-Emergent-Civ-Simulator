@@ -143,6 +143,13 @@ impl MetalEosAnchors {
         self.by_symbol.get(symbol).copied()
     }
 
+    /// Iterate the seeded metals and their anchors in canonical (key-sorted) order (the `BTreeMap` guarantees a
+    /// deterministic walk, never insertion order). The metallic route reads this to measure its band across the
+    /// anchored set.
+    pub fn iter(&self) -> impl Iterator<Item = (&str, &MetalEosAnchor)> {
+        self.by_symbol.iter().map(|(s, a)| (s.as_str(), a))
+    }
+
     /// The equilibrium molar volume (cm^3/mol) for a metal, or `None` when absent.
     pub fn molar_volume(&self, symbol: &str) -> Option<Fixed> {
         self.by_symbol.get(symbol).map(|a| a.molar_volume)

@@ -48,6 +48,7 @@ pub mod contract;
 pub mod correlation;
 pub mod log;
 pub mod memo;
+pub mod metallic;
 pub mod thermochemical;
 pub mod verdict;
 
@@ -57,6 +58,7 @@ pub use correlation::{
 };
 pub use log::{VerdictKind, VerdictLog, VerdictRecord};
 pub use memo::Memo;
+pub use metallic::MetallicRoute;
 pub use thermochemical::{
     charge_neutral_primitives, mo_viable_diatomics, propose_candidates, BondingHints, Composition,
     Compound, Environment, ThermochemicalDisposer, ThermochemicalProposer,
