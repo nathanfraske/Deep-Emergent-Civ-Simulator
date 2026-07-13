@@ -1,0 +1,50 @@
+# The metal-insulator-transition (MIT) REFERENCE SET: the observed metal-versus-insulator classification of the
+# rock-salt divalent 3d monoxides, MEASURED [M] (the observed conductivity class, refutable without the sim).
+# The correlation classifier (materials) calibrates its U/W separation threshold against this set: the derived
+# U/W must ORDER the set (insulators above metals in U/W); the separation margin is the honesty number, the
+# analog of the ionic lattice-energy validation set for D1. No consumer in any pinned run path yet (byte-neutral).
+#
+# SCOPE: rock-salt divalent monoxides only, so the M-M-versus-M-O structure factor is uniform across the set and
+# is absorbed into the single calibrated U/W normalization (the folded-constant ruling). A correlated material of
+# a different structure (rutile VO2, corundum V2O3) or a higher charge state beyond the seeded ladder escalates
+# (out of the calibrated class) rather than being routed by this rock-salt-fit threshold, the documented limit.
+#
+# THE CLASSIFICATION (standard, e.g. Imada, Fujimori & Tokura, Rev. Mod. Phys. 70, 1039, 1998): NiO/CoO/FeO/MnO
+# are the archetypal Mott and charge-transfer INSULATORS (the famous band-filling failure, band theory calls
+# them metals); TiO and VO are correlated METALS (itinerant d electrons, the early-3d monoxides).
+
+[[reference]]
+name = "nickel oxide"
+composition = { Ni = 1, O = 1 }
+observed_class = "insulator"
+source = "NiO, archetypal charge-transfer/Mott insulator (Imada, Fujimori & Tokura, Rev. Mod. Phys. 70, 1039, 1998)"
+
+[[reference]]
+name = "cobalt oxide"
+composition = { Co = 1, O = 1 }
+observed_class = "insulator"
+source = "CoO, Mott/charge-transfer insulator (Imada, Fujimori & Tokura, Rev. Mod. Phys. 70, 1039, 1998)"
+
+[[reference]]
+name = "iron oxide"
+composition = { Fe = 1, O = 1 }
+observed_class = "insulator"
+source = "FeO (wustite), Mott/charge-transfer insulator (Imada, Fujimori & Tokura, Rev. Mod. Phys. 70, 1039, 1998)"
+
+[[reference]]
+name = "manganese oxide"
+composition = { Mn = 1, O = 1 }
+observed_class = "insulator"
+source = "MnO, archetypal Mott/charge-transfer insulator (Imada, Fujimori & Tokura, Rev. Mod. Phys. 70, 1039, 1998)"
+
+[[reference]]
+name = "titanium oxide"
+composition = { Ti = 1, O = 1 }
+observed_class = "metal"
+source = "TiO, correlated metal (itinerant 3d, the early-3d rock-salt monoxide; Imada, Fujimori & Tokura, Rev. Mod. Phys. 70, 1039, 1998)"
+
+[[reference]]
+name = "vanadium oxide"
+composition = { V = 1, O = 1 }
+observed_class = "metal"
+source = "VO, correlated metal (itinerant 3d, rock-salt monoxide; Imada, Fujimori & Tokura, Rev. Mod. Phys. 70, 1039, 1998)"

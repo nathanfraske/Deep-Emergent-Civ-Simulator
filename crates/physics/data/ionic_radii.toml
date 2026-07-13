@@ -80,6 +80,49 @@ spin = "high"
 crystal_radius = "0.92"
 source = "Shannon 1976, Acta Cryst A32 (Fe2+ [6] high-spin crystal radius; effective 0.78 + 0.14)"
 
+# The MIT reference-set 3d cations (the correlation classifier's d = r0 input; the rock-salt monoxide series).
+# Titanium(II), the TiO metal cation: Ti2+ [6].
+[[radius]]
+symbol = "Ti"
+oxidation_state = 2
+coordination = 6
+crystal_radius = "1.00"
+source = "Shannon 1976, Acta Cryst A32 (Ti2+ [6] crystal radius; effective 0.86 + 0.14)"
+
+# Vanadium(II), the VO metal cation: V2+ [6].
+[[radius]]
+symbol = "V"
+oxidation_state = 2
+coordination = 6
+crystal_radius = "0.93"
+source = "Shannon 1976, Acta Cryst A32 (V2+ [6] crystal radius; effective 0.79 + 0.14)"
+
+# Manganese(II), high spin, the MnO insulator cation: Mn2+ [6] HS.
+[[radius]]
+symbol = "Mn"
+oxidation_state = 2
+coordination = 6
+spin = "high"
+crystal_radius = "0.97"
+source = "Shannon 1976, Acta Cryst A32 (Mn2+ [6] high-spin crystal radius; effective 0.83 + 0.14)"
+
+# Cobalt(II), high spin, the CoO insulator cation: Co2+ [6] HS.
+[[radius]]
+symbol = "Co"
+oxidation_state = 2
+coordination = 6
+spin = "high"
+crystal_radius = "0.885"
+source = "Shannon 1976, Acta Cryst A32 (Co2+ [6] high-spin crystal radius; effective 0.745 + 0.14)"
+
+# Nickel(II), the NiO insulator cation (d8, no spin split): Ni2+ [6].
+[[radius]]
+symbol = "Ni"
+oxidation_state = 2
+coordination = 6
+crystal_radius = "0.83"
+source = "Shannon 1976, Acta Cryst A32 (Ni2+ [6] crystal radius; effective 0.69 + 0.14)"
+
 # Calcium: Ca2+ [6].
 [[radius]]
 symbol = "Ca"

@@ -45,6 +45,7 @@
 //! register, keeping the honesty query where the register lives.
 
 pub mod contract;
+pub mod correlation;
 pub mod log;
 pub mod memo;
 pub mod thermochemical;

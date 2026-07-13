@@ -47,6 +47,7 @@ pub mod ionization_ladder;
 pub mod lattice_modulus;
 pub mod laws;
 pub mod materials_oracle;
+pub mod mit_reference;
 pub mod periodic;
 pub mod petrology;
 pub mod petrology_data;
