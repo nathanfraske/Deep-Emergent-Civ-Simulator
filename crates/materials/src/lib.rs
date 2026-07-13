@@ -46,6 +46,7 @@
 
 pub mod contract;
 pub mod correlation;
+pub mod localized;
 pub mod log;
 pub mod memo;
 pub mod metallic;
@@ -56,6 +57,7 @@ pub use contract::{Disposer, Preflight, Proposer, Quench, RealizedState, Validit
 pub use correlation::{
     route_of_class, CalibrationError, CorrelationClass, CorrelationClassifier, EnergyRoute,
 };
+pub use localized::LocalizedRoute;
 pub use log::{VerdictKind, VerdictLog, VerdictRecord};
 pub use memo::Memo;
 pub use metallic::MetallicRoute;
