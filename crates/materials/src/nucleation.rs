@@ -42,8 +42,12 @@
 //! HONEST LIMITS, each at its site: the HOMOGENEOUS baseline (heterogeneous nucleation multiplies `dG*` by the
 //! contact-angle potency `f(theta)` and changes `N_s` to substrate sites, so the wetting angle `theta` is the
 //! reserved residual of a later follow-on, not this slice); the CRYSTALLINE regime (a glass has no CNT barrier
-//! of this form); and the lumped single-rate, reduced-order treatment (not a full cluster population balance or
-//! cooling-path integral). Byte-neutral: `civsim-materials` is a leaf, not linked into the run_world binary.
+//! of this form); the ISOTROPIC spherical-nucleus shape (the barrier's `16*pi/3` and the atom count's `4*pi/3`
+//! are the sphere factors, so an anisotropic or faceted crystal, including much of the low-coefficient
+//! Bi/Sb/Ge/water class the Turnbull `C` targets, carries a wetting/shape factor this reduced-order form omits;
+//! a per-substance nucleus-shape parameter is the follow-on); and the lumped single-rate, reduced-order
+//! treatment (not a full cluster population balance or cooling-path integral). Byte-neutral: `civsim-materials`
+//! is a leaf, not linked into the run_world binary.
 
 use civsim_core::Fixed;
 use civsim_physics::laws;
@@ -237,14 +241,22 @@ pub fn critical_radius_over_spacing(
 }
 
 /// The number of atoms in the critical nucleus, `n* = (4*pi/3) * (r*/a)^3` (a sphere of radius `r*` measured in
-/// atomic volumes). Derived from the critical radius; a non-positive radius yields zero.
+/// atomic volumes). Derived from the critical radius; a non-positive radius yields zero. The cube is formed by
+/// CHECKED multiplies, not `Fixed::powi` (whose repeated-squaring uses the raw wrapping `mul`): the critical
+/// radius `r*/a = 2C/(1 - T/T_m)` DIVERGES as the undercooling vanishes (the Gibbs-Thomson critical size grows
+/// without bound at `T -> T_m`), so its cube can exceed Q32.32 for a physical shallow-undercooling input;
+/// saturating to [`Fixed::MAX`] (an unbounded critical nucleus) is the physical limit and flows correctly through
+/// the Zeldovich factor (`Z -> 0`) and the vanishing shallow-undercooling nucleation rate, where the raw `powi`
+/// would instead wrap to a spurious (even negative) atom count.
 pub fn critical_atom_count(critical_radius_over_spacing: Fixed) -> Fixed {
     if critical_radius_over_spacing <= ZERO {
         return ZERO;
     }
-    four_pi_over_three()
-        .checked_mul(critical_radius_over_spacing.powi(3))
-        .unwrap_or(Fixed::MAX)
+    let r = critical_radius_over_spacing;
+    match r.checked_mul(r).and_then(|sq| sq.checked_mul(r)) {
+        Some(cube) => four_pi_over_three().checked_mul(cube).unwrap_or(Fixed::MAX),
+        None => Fixed::MAX, // the critical radius is diverging: an unbounded critical nucleus
+    }
 }
 
 /// The Zeldovich factor `Z = sqrt(dG*/(3*pi*k_B*T*n*^2)) = sqrt(reduced_barrier/(3*pi)) / n*`: the barrier-
@@ -575,6 +587,47 @@ mod tests {
             avrami_grain_size(Fixed::from_int(16), ZERO),
             ZERO,
             "no nucleation: no grains"
+        );
+    }
+
+    #[test]
+    fn critical_atom_count_saturates_at_shallow_undercooling_not_wraps() {
+        // The audit catch (a confirmed correctness defect, hardened): r*/a = 2C/(1 - T/T_m) DIVERGES as the
+        // undercooling vanishes, and cubing a large r*/a must SATURATE (an unbounded critical nucleus), never
+        // wrap to a negative atom count through the raw powi. At iron fixtures and T ~ 1810.4 K (~0.6 K below
+        // T_m = 1811), r*/a is a few thousand and its cube (~1e10) exceeds Q32.32.
+        let dsf = richards_ratio(
+            iron_heat_of_fusion(),
+            iron_melting_point(),
+            r_kj_per_mol_k(),
+        );
+        let beta_gamma = reduced_interfacial_energy(dsf, turnbull_c());
+        let t_shallow = Fixed::from_ratio(18104, 10); // 1810.4 K, ~0.6 K below T_m
+        let dgv = reduced_driving_force(dsf, iron_melting_point(), t_shallow);
+        let r_star = critical_radius_over_spacing(beta_gamma, dgv);
+        assert!(
+            r_star > Fixed::from_int(1000),
+            "the critical radius is large at shallow undercooling: {r_star:?}"
+        );
+        let n_star = critical_atom_count(r_star);
+        assert!(
+            n_star > ZERO,
+            "the critical atom count saturates positive, never wraps negative: {n_star:?}"
+        );
+        // Directly on a large radius: 2571^3 ~ 1.7e10 exceeds Q32.32 max (~2.1e9), so the checked cube saturates
+        // to a positive value rather than wrapping (the raw powi would sign-flip here).
+        let n_big = critical_atom_count(Fixed::from_int(2571));
+        assert!(
+            n_big > ZERO,
+            "a large critical radius cubes to a positive (saturated) count: {n_big:?}"
+        );
+        // The Zeldovich factor with a diverging critical nucleus vanishes (no nucleation at shallow undercooling),
+        // the physically correct limit the saturation preserves.
+        let barrier = reduced_nucleation_barrier(beta_gamma, dgv, iron_melting_point(), t_shallow);
+        let z = zeldovich_factor(barrier, n_star);
+        assert!(
+            z >= ZERO && z < Fixed::ONE,
+            "Z vanishes toward zero at shallow undercooling: {z:?}"
         );
     }
 
