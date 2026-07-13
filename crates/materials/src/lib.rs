@@ -79,8 +79,8 @@ pub use properties::{
     chen_tse_hardness_gpa, debye_function, debye_heat_capacity_j_per_mol_k, debye_temperature,
     debye_velocity_km_per_s, density_g_per_cm3, lattice_thermal_conductivity_w_per_m_k,
     linear_thermal_expansion_per_k, operative_shear_strength_gpa, poisson_ratio, shear_modulus_gpa,
-    surface_energy_j_per_m2, theoretical_shear_strength_gpa, volumetric_thermal_expansion_per_k,
-    youngs_modulus_gpa, PropertyRoute,
+    surface_energy_j_per_m2, theoretical_shear_strength_gpa, thermal_diffusivity_m2_per_s,
+    volumetric_thermal_expansion_per_k, youngs_modulus_gpa, PropertyRoute,
 };
 pub use quench::{
     dodson_closure_temperature, polymorphs_are_thermally_unresolvable, quench_exchange,

@@ -62,6 +62,10 @@
 //! `Theta_D^3`, reusing the expansion's `gamma_G` and the CITED universal Slack constants, so it reserves NO new
 //! coefficient. It is ORDER-OF-MAGNITUDE (within `~3x` for simple crystals, an upper bound for anharmonic ones like
 //! rutile) and is the LATTICE part only: a metal's total conductivity is electronic-dominated (the deferred sub-arc).
+//!
+//! THERMAL DIFFUSIVITY ([`thermal_diffusivity_m2_per_s`]) is the pure composition `alpha = kappa / (rho * c_p) =
+//! kappa * V_m / C_v` (the mass cancels), reserving NO value over the built conductivity, molar volume, and `C_v`.
+//! It inherits the conductivity's order-of-magnitude and lattice-only reach.
 
 use civsim_core::Fixed;
 use civsim_physics::metal_eos::MetalEosAnchors;
@@ -648,6 +652,36 @@ pub fn lattice_thermal_conductivity_w_per_m_k(
     numerator.checked_div(denominator).unwrap_or(Fixed::MAX)
 }
 
+/// The thermal diffusivity `alpha = kappa / (rho * c_p)` (m^2/s), how fast a temperature disturbance spreads. It
+/// COMPOSES built quantities and reserves NO value: the volumetric heat capacity `rho * c_p` equals `C_v / V_m`
+/// (the mass cancels, since `rho = M / V_m` and `c_p = C_v / M`), so `alpha = kappa * V_m / C_v`. It reads the
+/// lattice conductivity `kappa` (W/(m*K)), the molar volume `V_m` (cm^3/mol), and the molar heat capacity `C_v`
+/// (J/(mol*K)); the `1e-6` folds `V_m` from `cm^3/mol` to `m^3/mol` (the exact unit constant). `kappa`, `V_m`, and
+/// `C_v` must share a basis (per mole of atoms, or per formula unit); the ratio `V_m / C_v` is basis-invariant.
+/// HONEST LIMITS: it inherits the conductivity's reach (order-of-magnitude, LATTICE-only, so for a metal this is
+/// the phonon-based diffusivity with the electronic total deferred), and it uses `C_v` for `c_p` (the solid
+/// `C_p - C_v` difference is a few percent, the correction the expansion slice supplies). Non-positive inputs
+/// yield zero.
+pub fn thermal_diffusivity_m2_per_s(
+    conductivity_w_per_m_k: Fixed,
+    molar_volume_cm3_per_mol: Fixed,
+    heat_capacity_j_per_mol_k: Fixed,
+) -> Fixed {
+    if conductivity_w_per_m_k <= ZERO
+        || molar_volume_cm3_per_mol <= ZERO
+        || heat_capacity_j_per_mol_k <= ZERO
+    {
+        return ZERO;
+    }
+    // alpha = kappa * V_m / C_v, then * 1e-6 (cm^3/mol -> m^3/mol). The V_m/C_v then 1e-6 ordering keeps the
+    // intermediate order-unity rather than forming a tiny product first.
+    conductivity_w_per_m_k
+        .checked_mul(molar_volume_cm3_per_mol)
+        .and_then(|x| x.checked_div(heat_capacity_j_per_mol_k))
+        .and_then(|x| x.checked_div(Fixed::from_int(1_000_000)))
+        .unwrap_or(ZERO)
+}
+
 /// The property route bound to the periodic table and the EOS anchors, so density reads the molar mass and molar
 /// volume, and the Debye temperature reuses the freezer's sound speed over the anchors, all for an anchored
 /// metal. No reserved value enters (this first slice reserves none); a metal missing an anchor escalates
@@ -846,6 +880,31 @@ impl<'a> PropertyRoute<'a> {
             atomic_volume,
             1,
             temperature,
+        ))
+    }
+
+    /// The (lattice-based) thermal diffusivity `alpha` (m^2/s) for an anchored metal at a temperature, composing
+    /// the lattice conductivity, the molar volume, and the built heat capacity `C_v` (via the shear-aware
+    /// `Theta_D`). `None` (escalate) when the metal lacks a bulk modulus, a molar volume, or a standard atomic
+    /// weight. Inherits the conductivity's LATTICE-only limit: for a metal this is the phonon-based diffusivity,
+    /// the electronic contribution deferred to the electronic-structure sub-arc. `gamma_G` and the Pugh ratio `k`
+    /// are caller-supplied.
+    pub fn thermal_diffusivity(
+        &self,
+        symbol: &str,
+        temperature: Fixed,
+        pugh_ratio: Fixed,
+        gruneisen: Fixed,
+    ) -> Option<Fixed> {
+        let molar_volume = self.anchors.molar_volume(symbol)?;
+        let conductivity =
+            self.lattice_thermal_conductivity(symbol, temperature, pugh_ratio, gruneisen)?;
+        let theta_d = self.debye_temperature_shear_aware(symbol, pugh_ratio)?;
+        let heat_capacity = debye_heat_capacity_j_per_mol_k(theta_d, temperature);
+        Some(thermal_diffusivity_m2_per_s(
+            conductivity,
+            molar_volume,
+            heat_capacity,
         ))
     }
 }
@@ -1489,6 +1548,98 @@ mod tests {
                 )
                 .is_none(),
             "an unanchored metal escalates in the conductivity route"
+        );
+    }
+
+    #[test]
+    fn the_thermal_diffusivity_composes_conductivity_heat_capacity_and_volume() {
+        // Diamond: kappa ~2690 W/(m*K), V_m = 3.417 cm^3/mol, C_v ~4.06 J/(mol*K) at 300 K.
+        // alpha = kappa * V_m * 1e-6 / C_v = 2690 * 3.417e-6 / 4.06 ~2.26e-3 m^2/s (measured ~1.2e-3, factor ~1.9,
+        // inheriting the conductivity's grade).
+        let alpha = thermal_diffusivity_m2_per_s(
+            Fixed::from_int(2690),
+            Fixed::from_ratio(3417, 1000),
+            Fixed::from_ratio(406, 100),
+        );
+        assert!(
+            close(alpha, 2.26e-3, 2.0e-4),
+            "diamond thermal diffusivity ~2.26e-3 m^2/s: {alpha:?}"
+        );
+        // NaCl: kappa ~9, V_m = 26.94, C_v ~47.4 (per formula) -> alpha ~5.1e-6 m^2/s (measured ~3.3e-6).
+        let alpha_nacl = thermal_diffusivity_m2_per_s(
+            Fixed::from_int(9),
+            Fixed::from_ratio(2694, 100),
+            Fixed::from_ratio(474, 10),
+        );
+        assert!(
+            close(alpha_nacl, 5.1e-6, 1.0e-6),
+            "NaCl thermal diffusivity ~5.1e-6 m^2/s: {alpha_nacl:?}"
+        );
+        assert!(
+            alpha > alpha_nacl,
+            "diamond diffuses heat far faster than NaCl"
+        );
+        // Monotone: more conductivity raises alpha; more heat capacity (more to heat) lowers it.
+        assert!(
+            thermal_diffusivity_m2_per_s(
+                Fixed::from_int(3000),
+                Fixed::from_ratio(3417, 1000),
+                Fixed::from_ratio(406, 100)
+            ) > alpha,
+            "a higher conductivity raises the diffusivity"
+        );
+        assert!(
+            thermal_diffusivity_m2_per_s(
+                Fixed::from_int(2690),
+                Fixed::from_ratio(3417, 1000),
+                Fixed::from_int(8)
+            ) < alpha,
+            "a higher heat capacity lowers the diffusivity"
+        );
+        // Guards and determinism.
+        assert_eq!(
+            thermal_diffusivity_m2_per_s(ZERO, Fixed::from_int(3), Fixed::from_int(4)),
+            ZERO
+        );
+        assert_eq!(
+            thermal_diffusivity_m2_per_s(Fixed::from_int(2690), Fixed::from_int(3), ZERO),
+            ZERO
+        );
+        assert_eq!(
+            alpha,
+            thermal_diffusivity_m2_per_s(
+                Fixed::from_int(2690),
+                Fixed::from_ratio(3417, 1000),
+                Fixed::from_ratio(406, 100)
+            )
+        );
+
+        // Through the route (a metal: lattice-based diffusivity, the electronic total deferred).
+        let t = table();
+        let a = anchors();
+        let route = PropertyRoute::new(&t, &a);
+        let fe_alpha = route
+            .thermal_diffusivity(
+                "Fe",
+                Fixed::from_int(300),
+                Fixed::from_ratio(48, 100),
+                Fixed::from_ratio(17, 10),
+            )
+            .expect("Fe thermal diffusivity");
+        assert!(
+            fe_alpha > ZERO,
+            "iron lattice-based thermal diffusivity is positive: {fe_alpha:?}"
+        );
+        assert!(
+            route
+                .thermal_diffusivity(
+                    "Xx",
+                    Fixed::from_int(300),
+                    Fixed::from_ratio(48, 100),
+                    Fixed::from_ratio(17, 10)
+                )
+                .is_none(),
+            "an unanchored metal escalates in the diffusivity route"
         );
     }
 }
