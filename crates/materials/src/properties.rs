@@ -98,6 +98,63 @@ pub fn debye_temperature(sound_speed_km_per_s: Fixed, atomic_volume_angstrom3: F
         .unwrap_or(Fixed::MAX)
 }
 
+/// The shear modulus `G` (GPa) `= k * K`, the Pugh modulus ratio times the anchored bulk modulus. The Pugh ratio
+/// `k = G/K` is the ONE RESERVED-with-basis per-class coefficient of the elastic-and-hardness family (Pugh 1954;
+/// the Chen-Tse 2011 hardness `k`), caller-supplied and never planted: `~0.5` for ductile metals (iron `~0.48`),
+/// higher for brittle/covalent solids, per bonding class, primary-verified before entry. The isotropic bulk
+/// modulus `K = B_0` alone cannot fix the shear stiffness (the derivation-hunt bottoms out here: `G/K` needs the
+/// bonding directionality the volume-only Rose EOS does not carry), so `k` is the irreducible residual, and from
+/// it `G`, `E`, and Poisson all derive. Non-positive inputs yield zero.
+pub fn shear_modulus_gpa(bulk_modulus_gpa: Fixed, pugh_ratio: Fixed) -> Fixed {
+    if bulk_modulus_gpa <= ZERO || pugh_ratio <= ZERO {
+        return ZERO;
+    }
+    bulk_modulus_gpa
+        .checked_mul(pugh_ratio)
+        .unwrap_or(Fixed::MAX)
+}
+
+/// Young's modulus `E` (GPa) `= 9*K*G / (3*K + G)`, the isotropic elastic relation from the bulk and shear
+/// moduli. No reserved value (a pure function of the two moduli). Non-positive inputs, or a degenerate zero
+/// denominator, yield zero.
+pub fn youngs_modulus_gpa(bulk_modulus_gpa: Fixed, shear_modulus_gpa: Fixed) -> Fixed {
+    if bulk_modulus_gpa <= ZERO || shear_modulus_gpa <= ZERO {
+        return ZERO;
+    }
+    let denom = Fixed::from_int(3)
+        .checked_mul(bulk_modulus_gpa)
+        .map(|x| x.saturating_add(shear_modulus_gpa));
+    let num = Fixed::from_int(9)
+        .checked_mul(bulk_modulus_gpa)
+        .and_then(|x| x.checked_mul(shear_modulus_gpa));
+    match (num, denom) {
+        (Some(n), Some(d)) if d > ZERO => n.checked_div(d).unwrap_or(Fixed::MAX),
+        _ => ZERO,
+    }
+}
+
+/// Poisson's ratio `nu = (3*K - 2*G) / (2*(3*K + G))`, the isotropic elastic relation from the bulk and shear
+/// moduli, the trivial companion the gate named. No reserved value. It can be negative (an auxetic solid) where
+/// `G > 1.5*K`, which the signed difference carries; a degenerate zero denominator yields zero.
+pub fn poisson_ratio(bulk_modulus_gpa: Fixed, shear_modulus_gpa: Fixed) -> Fixed {
+    if bulk_modulus_gpa <= ZERO || shear_modulus_gpa <= ZERO {
+        return ZERO;
+    }
+    let three_k = Fixed::from_int(3)
+        .checked_mul(bulk_modulus_gpa)
+        .unwrap_or(Fixed::MAX);
+    let num = three_k.checked_sub(
+        Fixed::from_int(2)
+            .checked_mul(shear_modulus_gpa)
+            .unwrap_or(Fixed::MAX),
+    );
+    let denom = Fixed::from_int(2).checked_mul(three_k.saturating_add(shear_modulus_gpa));
+    match (num, denom) {
+        (Some(n), Some(d)) if d > ZERO => n.checked_div(d).unwrap_or(Fixed::MAX),
+        _ => ZERO,
+    }
+}
+
 /// The property route bound to the periodic table and the EOS anchors, so density reads the molar mass and molar
 /// volume, and the Debye temperature reuses the freezer's sound speed over the anchors, all for an anchored
 /// metal. No reserved value enters (this first slice reserves none); a metal missing an anchor escalates
@@ -136,6 +193,30 @@ impl<'a> PropertyRoute<'a> {
         let atomic_volume =
             molar_volume.checked_mul(rose_eos::cm3_per_mol_to_angstrom3_per_atom())?;
         Some(debye_temperature(sound_speed, atomic_volume))
+    }
+
+    /// The shear modulus `G` (GPa) for an anchored metal, `k * B_0` over the anchored bulk modulus and the
+    /// caller's reserved Pugh ratio `k`. `None` (escalate) when the metal has no anchored bulk modulus. `k` is
+    /// the caller's reserved coefficient, never planted.
+    pub fn shear_modulus(&self, symbol: &str, pugh_ratio: Fixed) -> Option<Fixed> {
+        let bulk_modulus = self.anchors.bulk_modulus_gpa(symbol)?;
+        Some(shear_modulus_gpa(bulk_modulus, pugh_ratio))
+    }
+
+    /// Young's modulus `E` (GPa) for an anchored metal, from the anchored bulk modulus and the derived shear
+    /// modulus (`k * B_0`). `None` (escalate) when the metal has no anchored bulk modulus.
+    pub fn youngs_modulus(&self, symbol: &str, pugh_ratio: Fixed) -> Option<Fixed> {
+        let bulk_modulus = self.anchors.bulk_modulus_gpa(symbol)?;
+        let shear = shear_modulus_gpa(bulk_modulus, pugh_ratio);
+        Some(youngs_modulus_gpa(bulk_modulus, shear))
+    }
+
+    /// Poisson's ratio for an anchored metal, from the anchored bulk modulus and the derived shear modulus.
+    /// `None` (escalate) when the metal has no anchored bulk modulus.
+    pub fn poisson_ratio(&self, symbol: &str, pugh_ratio: Fixed) -> Option<Fixed> {
+        let bulk_modulus = self.anchors.bulk_modulus_gpa(symbol)?;
+        let shear = shear_modulus_gpa(bulk_modulus, pugh_ratio);
+        Some(poisson_ratio(bulk_modulus, shear))
     }
 }
 
@@ -221,6 +302,52 @@ mod tests {
         assert!(
             route.debye_temperature("Xx").is_none(),
             "an unanchored symbol has no Debye temperature"
+        );
+    }
+
+    #[test]
+    fn the_elastic_moduli_derive_from_the_bulk_modulus_and_the_pugh_ratio() {
+        // NON-CIRCULAR check: feed iron's CITED Pugh ratio k = 0.48 (its measured G/K, independent) and the
+        // anchored K = B_0 = 170 GPa, and require G, E, Poisson to land iron's measured values (G ~82 GPa,
+        // E ~211 GPa, nu ~0.29). k is cited-independent, so the moduli match is a consequence, not a fit.
+        let k_fe = Fixed::from_ratio(48, 100); // Pugh ratio ~0.48 (iron, test-only)
+        let bulk = Fixed::from_int(170);
+        let g = shear_modulus_gpa(bulk, k_fe);
+        assert!(close(g, 81.6, 2.0), "G = k*K ~82 GPa: {g:?}");
+        let e = youngs_modulus_gpa(bulk, g);
+        assert!(close(e, 211.0, 6.0), "E = 9KG/(3K+G) ~211 GPa: {e:?}");
+        let nu = poisson_ratio(bulk, g);
+        assert!(
+            close(nu, 0.29, 0.02),
+            "nu = (3K-2G)/(2(3K+G)) ~0.29: {nu:?}"
+        );
+        // Monotone: a higher Pugh ratio (stiffer shear) raises G and E and lowers Poisson.
+        let g_stiff = shear_modulus_gpa(bulk, Fixed::from_ratio(60, 100));
+        assert!(g_stiff > g, "a higher Pugh ratio raises the shear modulus");
+        assert!(
+            youngs_modulus_gpa(bulk, g_stiff) > e,
+            "a higher Pugh ratio raises Young's modulus"
+        );
+        assert!(
+            poisson_ratio(bulk, g_stiff) < nu,
+            "a higher Pugh ratio lowers Poisson's ratio"
+        );
+        // Guards.
+        assert_eq!(shear_modulus_gpa(ZERO, k_fe), ZERO);
+        assert_eq!(youngs_modulus_gpa(bulk, ZERO), ZERO);
+        assert_eq!(poisson_ratio(bulk, ZERO), ZERO);
+        // Through the route (reads B_0 from the anchors, reserves only the caller's k).
+        let t = table();
+        let a = anchors();
+        let route = PropertyRoute::new(&t, &a);
+        let route_e = route.youngs_modulus("Fe", k_fe).expect("Fe E");
+        assert!(
+            close(route_e, 211.0, 8.0),
+            "route iron E ~211 GPa: {route_e:?}"
+        );
+        assert!(
+            route.shear_modulus("Xx", k_fe).is_none(),
+            "an unanchored metal escalates in the moduli route"
         );
     }
 }
