@@ -1,13 +1,14 @@
 # The unified rate-law kernel: a domain-neutral physics-floor primitive (design-first)
 
-This is the design opener for the next arc, owner-ruled and gate-sequenced: the unified Eyring/Arrhenius
-rate law as a domain-neutral physics-floor primitive, with Stage 5 (the freezer) as its first consumer. It
-authors no mechanism and moves no value yet. Its purpose is to surface the neutral kernel and its interface
-for the gate's review (with the local-broker second opinion) before a single line of the kernel is built.
-The build lands on this branch when the gate rules on the design.
+This is the design for the arc, owner-ruled and gate-sequenced: the unified Eyring/Arrhenius rate law as a
+domain-neutral physics-floor primitive, with Stage 5 (the freezer) as its first consumer. It authors no rate
+value and moves no floor value. The design was surfaced for the gate's review (with the local-broker second
+opinion) and APPROVED to build (2026-07-13, Section 9); the three kernel functions of Section 3 are now built
+in `crates/physics/src/laws.rs` with the determinism and numerical-twin tests.
 
-The five run_world/materials pins are untouched (this is a doc-only change), and the disposer arc it branches
-from is complete, audited, and merge-ready on `#186`.
+The kernel is byte-neutral: the three functions have zero callers on any run path (a dormant additive leaf),
+proven differentially (default and living scenario hashes bit-identical with and without the kernel), so no
+run_world pin moves. The disposer arc it branches from is complete, audited, and merged (`#186`).
 
 ## 1. What the kernel is, in one sentence
 
