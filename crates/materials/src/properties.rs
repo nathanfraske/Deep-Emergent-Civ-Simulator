@@ -176,8 +176,15 @@ pub fn poisson_ratio(bulk_modulus_gpa: Fixed, shear_modulus_gpa: Fixed) -> Fixed
 /// drives a very soft solid to zero). HONEST LIMITS: this is the INTRINSIC (dislocation-free) hardness; the
 /// operative hardness of a ductile metal is lower (dislocation plasticity), the strength knock-down the follow-on.
 /// The correlation is validated on hard covalent solids (diamond lands ~95 GPa against ~96 measured, its home
-/// turf) and is LESS accurate for soft low-`k` metals (iron's intrinsic ~8 GPa against a much softer annealed
-/// ~1 GPa, the same low-`k` metallic-bonding case Chen-Tse note). Non-positive inputs yield zero.
+/// turf) and is LESS accurate off that turf, in two named directions: (1) for soft low-`k` metals it OVERSTATES
+/// (iron's intrinsic ~8 GPa against a much softer annealed ~1 GPa, the same low-`k` metallic-bonding case
+/// Chen-Tse note), the intrinsic-versus-operative gap the strength slice's knock-down carries; (2) for IONIC
+/// solids it OVERSTATES more strongly (rock-salt MgO ~23 GPa here against a measured ~9, NaCl ~2 GPa against
+/// ~0.25), because ionic bonding admits easy dislocation glide on the ionic slip systems, decoupling the operative
+/// hardness from the elastic moduli the correlation reads. So OFF the covalent domain (ductile-metal or ionic) the
+/// emitted value is an intrinsic UPPER BOUND on the operative hardness, named as such rather than trusted as the
+/// operative number: a moduli-to-hardness correlation cannot see the slip-system physics that softens those
+/// classes. Non-positive inputs yield zero.
 pub fn chen_tse_hardness_gpa(shear_modulus_gpa: Fixed, pugh_ratio: Fixed) -> Fixed {
     if shear_modulus_gpa <= ZERO || pugh_ratio <= ZERO {
         return ZERO;
