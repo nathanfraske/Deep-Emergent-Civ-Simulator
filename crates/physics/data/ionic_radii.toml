@@ -103,3 +103,12 @@ oxidation_state = 1
 coordination = 6
 crystal_radius = "1.52"
 source = "Shannon 1976, Acta Cryst A32 (K+ [6] crystal radius; effective 1.38 + 0.14)"
+
+# Chloride, the alkali-halide validation anion (NaCl): Cl- [6]. An ANION, so the crystal radius is the effective
+# minus 0.14 (the anion side of the matched pair), the mirror of the cation convention.
+[[radius]]
+symbol = "Cl"
+oxidation_state = -1
+coordination = 6
+crystal_radius = "1.67"
+source = "Shannon 1976, Acta Cryst A32 (Cl- [6] crystal radius; effective 1.81 - 0.14)"

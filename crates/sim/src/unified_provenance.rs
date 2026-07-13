@@ -443,8 +443,9 @@ mod tests {
         }
         assert_eq!(
             floor.derive_first_defects().len(),
-            19,
-            "the derive-first-defect count (13 bulk substances + 6 phases) survives the fold unchanged"
+            20,
+            "the derive-first-defect count (13 bulk substances, the elastic-modulus axis the materials \
+             modulus route targets, and 6 phases) survives the fold unchanged"
         );
     }
 }

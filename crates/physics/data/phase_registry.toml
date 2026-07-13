@@ -31,6 +31,7 @@ formula = "Al2O3"
 enthalpy_formation = "-1675.70"
 standard_entropy = "50.92"
 molar_volume = "25.575"
+prototype = "corundum"
 source = "Robie & Hemingway 1995, USGS Bulletin 2131 (298.15 K, 1 bar)"
 
 [[phase]]
@@ -39,6 +40,7 @@ formula = "MgO"
 enthalpy_formation = "-601.60"
 standard_entropy = "26.95"
 molar_volume = "11.248"
+prototype = "rock-salt"
 source = "Robie & Hemingway 1995, USGS Bulletin 2131 (298.15 K, 1 bar)"
 
 [[phase]]
@@ -47,6 +49,7 @@ formula = "Fe2O3"
 enthalpy_formation = "-826.23"
 standard_entropy = "87.40"
 molar_volume = "30.274"
+prototype = "corundum"
 source = "Robie & Hemingway 1995, USGS Bulletin 2131 (298.15 K, 1 bar)"
 
 [[phase]]

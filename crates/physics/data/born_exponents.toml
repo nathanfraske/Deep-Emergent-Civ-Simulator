@@ -1,0 +1,47 @@
+# The Born exponent table, a measured `[M]` CLASS constant keyed by noble-gas core (owner research, #182). The
+# Born exponent n sets the stiffness of the short-range repulsion in the Born-Lande lattice-energy model; it
+# enters the bulk modulus as the factor (n - 1). Pauling established that n is a property of the ELECTRON CORE,
+# not the compound: an ion is assigned the value of the noble-gas core it is isoelectronic with, so the constant
+# is a class datum keyed by core (never a per-compound fit against compressibility, which would be circular).
+#
+# The derivation maps each ion (its atomic number minus its charge gives its electron count) to the noble gas it
+# is isoelectronic with, reads that core's exponent, and averages the cation and anion cores for the pair. An
+# ion whose electron count is NOT a closed noble-gas shell (a transition-metal ion such as Fe3+ = [Ar]3d5, which
+# is not isoelectronic with any noble gas) has no clean core here and is absent, not zero: its phase falls
+# through to the screen tier until a cited value for the d-electron core is grounded (surface-before-authoring).
+#
+# The mechanism is fixed Rust; the core membership is data (Principle 11). Exponents are dimensionless decimal
+# strings parsed to fixed-point.
+#
+# SOURCE: L. Pauling, "The Nature of the Chemical Bond" (3rd ed., 1960); C. Kittel, "Introduction to Solid State
+# Physics" (the Born exponent series He 5, Ne 7, Ar 9, Kr 10, Xe 12 by isoelectronic noble-gas core).
+
+[[core]]
+noble_gas = "He"
+electrons = 2
+exponent = "5"
+source = "Pauling 1960 / Kittel, Born exponent by noble-gas core (He-core = 5)"
+
+[[core]]
+noble_gas = "Ne"
+electrons = 10
+exponent = "7"
+source = "Pauling 1960 / Kittel, Born exponent by noble-gas core (Ne-core = 7)"
+
+[[core]]
+noble_gas = "Ar"
+electrons = 18
+exponent = "9"
+source = "Pauling 1960 / Kittel, Born exponent by noble-gas core (Ar-core = 9)"
+
+[[core]]
+noble_gas = "Kr"
+electrons = 36
+exponent = "10"
+source = "Pauling 1960 / Kittel, Born exponent by noble-gas core (Kr-core = 10)"
+
+[[core]]
+noble_gas = "Xe"
+electrons = 54
+exponent = "12"
+source = "Pauling 1960 / Kittel, Born exponent by noble-gas core (Xe-core = 12)"

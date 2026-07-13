@@ -1,6 +1,6 @@
 # The materials substrate buildout: design-first opener (Agent A primary, after Phase 2)
 
-Phase 2 (the provenance-register floor unification) is complete: one provenance axis, one honesty number (211), the physics floor essentially all measured, the authored surface the calibration knobs plus six biology and chemistry couplings, and `derive_first_defects()` a queryable 19-entry punch-list of stored-not-derived floor values the materials buildout will relocate to computed inputs. This opener leads the buildout. It authors no value and moves no pin: it grounds the arc against the actual substrate, reifies the owner's Verdict kernel contract as slice 1, and surfaces the seams for the gate to rule before any code lands.
+Phase 2 (the provenance-register floor unification) is complete: one provenance axis, one honesty number (211), the physics floor essentially all measured, the authored surface the calibration knobs plus six biology and chemistry couplings, and `derive_first_defects()` a queryable punch-list of stored-not-derived floor values the materials buildout will relocate to computed inputs (19 at Phase-2 completion, 20 after the disposer port flagged the authored elastic modulus). This opener leads the buildout. It authors no value and moves no pin: it grounds the arc against the actual substrate, reifies the owner's Verdict kernel contract as slice 1, and surfaces the seams for the gate to rule before any code lands.
 
 ## The arc, and why the Verdict kernel leads it
 
