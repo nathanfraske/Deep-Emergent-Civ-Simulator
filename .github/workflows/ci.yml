@@ -50,6 +50,10 @@ jobs:
         run: |
           python3 scripts/provenance_gate.py
           python3 scripts/provenance_gate.py --self-test
+      - name: Floor-provenance gate (every physics-floor value carries a real/fantasy provenance)
+        run: |
+          python3 scripts/floor_provenance_gate.py
+          python3 scripts/floor_provenance_gate.py --self-test
 
   rust:
     name: build, format, lint, test
