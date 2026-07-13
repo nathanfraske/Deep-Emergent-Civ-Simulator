@@ -51,6 +51,7 @@ pub mod localized;
 pub mod log;
 pub mod memo;
 pub mod metallic;
+pub mod quench;
 pub mod thermochemical;
 pub mod verdict;
 
