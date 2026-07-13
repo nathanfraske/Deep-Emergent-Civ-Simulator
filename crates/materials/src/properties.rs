@@ -56,7 +56,9 @@
 //! SURFACE ENERGY ([`surface_energy_j_per_m2`]) is the broken-bond `gamma_sv = f_surf * E_coh_per_atom / A_atom`
 //! over the built cohesive energy and atomic volume, reserving ONE per-class surface-bond fraction `f_surf`
 //! (`~0.18`). This is the derivation the freezer REJECTED for the solid-liquid `gamma_sl`, landing where it belongs:
-//! the solid-vapour surface energy. Iron lands `~2.4 J/m^2`.
+//! the solid-vapour surface energy. Iron lands `~2.4 J/m^2`. The GRAIN-BOUNDARY energy
+//! ([`grain_boundary_energy_j_per_m2`]) is its sibling, `gamma_gb = r_gb * gamma_sv` reserving one per-class
+//! grain-boundary-to-surface ratio `r_gb` (`~0.3`, high-angle), feeding grain growth and Hall-Petch.
 //!
 //! LATTICE THERMAL CONDUCTIVITY ([`lattice_thermal_conductivity_w_per_m_k`]) is the Slack model over the shear-aware
 //! `Theta_D^3`, reusing the expansion's `gamma_G` and the CITED universal Slack constants, so it reserves NO new
@@ -546,6 +548,32 @@ pub fn surface_energy_j_per_m2(
         .unwrap_or(Fixed::MAX)
 }
 
+/// The grain-boundary energy `gamma_gb` (J/m^2) `= r_gb * gamma_sv`, the broken-bond SIBLING of the surface energy.
+/// A grain boundary is two misoriented crystals meeting, so its atoms keep (misaligned) neighbours across the
+/// boundary and fewer bonds are cut than at a free surface; `gamma_gb` is therefore a per-class FRACTION of the
+/// solid-vapour `gamma_sv`. The ONE RESERVED-with-basis per-class coefficient is the grain-boundary-to-surface
+/// ratio `r_gb`: the measured `gamma_gb / gamma_sv`, `~0.30..0.34` for HIGH-ANGLE boundaries across metals (iron
+/// `~0.33`, copper `~0.34`, aluminium `~0.28`, nickel `~0.30`), caller-supplied and never planted. It reads the
+/// built `gamma_sv`. Iron lands `~0.79 J/m^2` (measured `~0.78`). HONEST LIMITS: `r_gb` is the HIGH-ANGLE value;
+/// a LOW-ANGLE (small-misorientation) boundary follows Read-Shockley (`gamma ~ theta*(A - ln theta)`, rising with
+/// the misorientation angle), a different regime keyed on a boundary-angle datum, the follow-on. `gamma_gb` feeds
+/// grain growth and the Hall-Petch strength the knock-down wants. Non-positive inputs, or a ratio outside `(0, 1]`
+/// (a grain boundary cannot cost more than a free surface), yield zero.
+pub fn grain_boundary_energy_j_per_m2(
+    surface_energy_j_per_m2: Fixed,
+    gb_to_surface_ratio: Fixed,
+) -> Fixed {
+    if surface_energy_j_per_m2 <= ZERO
+        || gb_to_surface_ratio <= ZERO
+        || gb_to_surface_ratio > Fixed::ONE
+    {
+        return ZERO;
+    }
+    surface_energy_j_per_m2
+        .checked_mul(gb_to_surface_ratio)
+        .unwrap_or(Fixed::MAX)
+}
+
 /// The Morelli-Slack Grueneisen correction factor `1 / (1 - 0.514/gamma + 0.228/gamma^2)` for the lattice
 /// thermal conductivity, the weak dependence of the Slack prefactor on the Grueneisen parameter. The constants
 /// `{0.514, 0.228}` are the CITED Morelli-Slack (2006) UNIVERSAL fit values (not per-class, not per-world, the
@@ -850,6 +878,23 @@ impl<'a> PropertyRoute<'a> {
             surface_bond_fraction,
             cohesive_energy,
             atomic_volume,
+        ))
+    }
+
+    /// The grain-boundary energy `gamma_gb` (J/m^2) for an anchored metal, `r_gb * gamma_sv` over the broken-bond
+    /// surface energy and the caller's reserved grain-boundary-to-surface ratio `r_gb` (`~0.3`, high-angle).
+    /// `None` (escalate) when the metal lacks an atomization enthalpy or a molar volume. Both `f_surf` and `r_gb`
+    /// are caller-supplied, never planted.
+    pub fn grain_boundary_energy(
+        &self,
+        symbol: &str,
+        surface_bond_fraction: Fixed,
+        gb_to_surface_ratio: Fixed,
+    ) -> Option<Fixed> {
+        let surface_energy = self.surface_energy(symbol, surface_bond_fraction)?;
+        Some(grain_boundary_energy_j_per_m2(
+            surface_energy,
+            gb_to_surface_ratio,
         ))
     }
 
@@ -1641,6 +1686,57 @@ mod tests {
                 )
                 .is_none(),
             "an unanchored metal escalates in the diffusivity route"
+        );
+    }
+
+    #[test]
+    fn the_grain_boundary_energy_is_a_per_class_fraction_of_the_surface_energy() {
+        // Iron: gamma_sv ~2.4 J/m^2, r_gb ~0.33 (cited test-only, high-angle) -> gamma_gb ~0.79 J/m^2 (measured ~0.78).
+        let gamma_sv = Fixed::from_ratio(240, 100);
+        let r_gb = Fixed::from_ratio(33, 100);
+        let gamma_gb = grain_boundary_energy_j_per_m2(gamma_sv, r_gb);
+        assert!(
+            close(gamma_gb, 0.792, 0.03),
+            "iron grain-boundary energy ~0.79 J/m^2: {gamma_gb:?}"
+        );
+        // A grain boundary always costs less than a free surface (fewer bonds cut).
+        assert!(gamma_gb < gamma_sv, "gamma_gb is below gamma_sv");
+        // Monotone in the ratio.
+        assert!(
+            grain_boundary_energy_j_per_m2(gamma_sv, Fixed::from_ratio(40, 100)) > gamma_gb,
+            "a higher grain-boundary-to-surface ratio raises gamma_gb"
+        );
+        // Guards: non-positive inputs, or a ratio above 1 (a boundary cannot cost more than a free surface), yield
+        // zero; determinism.
+        assert_eq!(grain_boundary_energy_j_per_m2(ZERO, r_gb), ZERO);
+        assert_eq!(grain_boundary_energy_j_per_m2(gamma_sv, ZERO), ZERO);
+        assert_eq!(
+            grain_boundary_energy_j_per_m2(gamma_sv, Fixed::from_ratio(15, 10)),
+            ZERO,
+            "a ratio above 1 is rejected"
+        );
+        assert_eq!(gamma_gb, grain_boundary_energy_j_per_m2(gamma_sv, r_gb));
+
+        // Through the route (composes the built surface energy; f_surf and r_gb caller-supplied).
+        let t = table();
+        let a = anchors();
+        let route = PropertyRoute::new(&t, &a);
+        let route_gb = route
+            .grain_boundary_energy("Fe", Fixed::from_ratio(18, 100), r_gb)
+            .expect("Fe grain-boundary energy");
+        assert!(
+            route_gb > ZERO
+                && route_gb
+                    < route
+                        .surface_energy("Fe", Fixed::from_ratio(18, 100))
+                        .unwrap(),
+            "route iron gamma_gb is positive and below gamma_sv: {route_gb:?}"
+        );
+        assert!(
+            route
+                .grain_boundary_energy("Xx", Fixed::from_ratio(18, 100), r_gb)
+                .is_none(),
+            "an element without an atomization enthalpy or anchor escalates"
         );
     }
 }
