@@ -52,6 +52,11 @@
 //! THERMAL EXPANSION ([`volumetric_thermal_expansion_per_k`], [`linear_thermal_expansion_per_k`]) is the Grueneisen
 //! relation `alpha_V = gamma_G * C_v / (K * V_m)` over the built `C_v`, the anchored `K`/`V_m`, and the ONE reserved
 //! Grueneisen `gamma_G` (shared with the Slack conductivity, one hunt for both). Iron lands `alpha_L ~ 1.0e-5 /K`.
+//!
+//! SURFACE ENERGY ([`surface_energy_j_per_m2`]) is the broken-bond `gamma_sv = f_surf * E_coh_per_atom / A_atom`
+//! over the built cohesive energy and atomic volume, reserving ONE per-class surface-bond fraction `f_surf`
+//! (`~0.18`). This is the derivation the freezer REJECTED for the solid-liquid `gamma_sl`, landing where it belongs:
+//! the solid-vapour surface energy. Iron lands `~2.4 J/m^2`.
 
 use civsim_core::Fixed;
 use civsim_physics::metal_eos::MetalEosAnchors;
@@ -423,7 +428,11 @@ pub fn operative_shear_strength_gpa(shear_modulus_gpa: Fixed, knockdown: Fixed) 
 /// `alpha_V = gamma_G * C_v / (K * V_m)` rearranged from the thermodynamic identity
 /// `gamma_G = alpha_V * K_T * V_m / C_v`. It reads the built heat capacity `C_v`, the anchored bulk modulus `K`,
 /// and the molar volume `V_m`; the ONE RESERVED-with-basis per-class coefficient is the Grueneisen parameter
-/// `gamma_G` (the SAME coefficient the Slack conductivity reserves, so one hunt serves both). The basis:
+/// `gamma_G` (the SAME coefficient the Slack conductivity reserves, so one hunt serves both; HONEST LIMIT: the
+/// thermodynamic weighted Grueneisen that governs expansion and the high-temperature acoustic Grueneisen that
+/// Slack uses are not rigorously the same mode average, they differ within the per-class scatter the coefficient
+/// already carries, so sharing one `gamma_G` is a sound modelling choice, not a claim the two averages are
+/// physically identical). The basis:
 /// `gamma_G = alpha_V * K * V_m / C_v`, the measured Grueneisen parameter per bonding class, `~1.5-2.2` for close-
 /// packed metals (iron `~1.7`, aluminium `~2.2`), lower for open/covalent solids (diamond `~0.9`), caller-supplied
 /// and never planted. UNIT FOLD: `K[GPa] * V_m[cm^3/mol] = kJ/mol` while `C_v` is in `J/(mol*K)`, so the `1000` in
@@ -479,6 +488,53 @@ pub fn linear_thermal_expansion_per_k(
         molar_volume_cm3_per_mol,
     );
     volumetric.checked_div(Fixed::from_int(3)).unwrap_or(ZERO)
+}
+
+/// The surface-energy unit fold `10^23 / N_A` (`~0.16605`), mapping the broken-bond surface energy from
+/// `(kJ/mol) / Angstrom^2` to `J/m^2`: the cohesive energy per atom is `E_coh[kJ/mol] * 1000 / N_A` joules and the
+/// area per surface atom is `V_atom[A^3]^(2/3) * 10^-20` square metres, so their ratio carries the exact constant
+/// `1000 * 10^20 / N_A = 10^23 / N_A`. The exact SI rational from `N_A = 6.02214076e23`. No authored decimal.
+fn surface_energy_fold() -> Fixed {
+    Fixed::from_ratio(100_000_000, 602_214_076)
+}
+
+/// The solid-vapour surface energy `gamma_sv` (J/m^2), the BROKEN-BOND model:
+/// `gamma_sv = f_surf * E_coh_per_atom / A_atom`, the fraction of the cohesive energy carried by the bonds cut
+/// when a surface is created, per unit surface area. This is EXACTLY the derivation the freezer REJECTED for the
+/// solid-LIQUID interfacial energy `gamma_sl` (because the broken-bond count gives the solid-VAPOUR energy, the
+/// wrong quantity for melt nucleation), landing where it belongs: `gamma_sv`, feeding wetting, fracture surface
+/// energy, and the heterogeneous-nucleation follow-on the freezer flagged. It reads the built cohesive energy
+/// `E_coh` (kJ/mol, the atomization enthalpy) and the atomic volume, folded to
+/// `gamma_sv = f_surf * surface_energy_fold() * E_coh / cbrt(V_atom)^2` (the area per atom being `V_atom^(2/3)`).
+/// The ONE RESERVED-with-basis per-class coefficient is the surface-bond fraction `f_surf`: the fraction of the
+/// cohesive energy residing in the broken surface bonds, `~0.13-0.27` across metals (centred `~0.18`, the broken-
+/// nearest-neighbour count at a close-packed surface), per bonding class and surface orientation, caller-supplied
+/// and never planted. Iron lands `~2.4 J/m^2` at `f_surf ~ 0.18`. HONEST LIMITS: the fraction is an orientation-
+/// AVERAGE (a real crystal has orientation-dependent `gamma_sv`); the model is validated on metals (ionic and
+/// covalent surfaces cut different bonds, so `f_surf` is per-class); and the grain-boundary energy `gamma_gb` is
+/// the sibling, `~1/3` of `gamma_sv` (a grain boundary breaks fewer bonds than a free surface), reserving its own
+/// grain-boundary-to-surface ratio, a thin follow-on over this. Non-positive inputs yield zero.
+pub fn surface_energy_j_per_m2(
+    surface_bond_fraction: Fixed,
+    cohesive_energy_kj_per_mol: Fixed,
+    atomic_volume_angstrom3: Fixed,
+) -> Fixed {
+    if surface_bond_fraction <= ZERO
+        || cohesive_energy_kj_per_mol <= ZERO
+        || atomic_volume_angstrom3 <= ZERO
+    {
+        return ZERO;
+    }
+    // A_atom = V_atom^(2/3) = cbrt(V_atom)^2, both built exact ops.
+    let area = atomic_volume_angstrom3.cbrt().powi(2);
+    if area <= ZERO {
+        return ZERO;
+    }
+    surface_bond_fraction
+        .checked_mul(surface_energy_fold())
+        .and_then(|x| x.checked_mul(cohesive_energy_kj_per_mol))
+        .and_then(|x| x.checked_div(area))
+        .unwrap_or(Fixed::MAX)
 }
 
 /// The property route bound to the periodic table and the EOS anchors, so density reads the molar mass and molar
@@ -632,6 +688,22 @@ impl<'a> PropertyRoute<'a> {
             cv,
             bulk_modulus,
             molar_volume,
+        ))
+    }
+
+    /// The solid-vapour surface energy `gamma_sv` (J/m^2) for an anchored metal, the broken-bond model over the
+    /// cohesive energy (the periodic table's atomization enthalpy) and the atomic volume (from the molar volume),
+    /// with the caller's reserved surface-bond fraction `f_surf`. `None` (escalate) when the metal lacks an
+    /// atomization enthalpy or a molar volume. `f_surf` is caller-supplied, never planted.
+    pub fn surface_energy(&self, symbol: &str, surface_bond_fraction: Fixed) -> Option<Fixed> {
+        let cohesive_energy = self.table.element(symbol)?.atomization_enthalpy?;
+        let molar_volume = self.anchors.molar_volume(symbol)?;
+        let atomic_volume =
+            molar_volume.checked_mul(rose_eos::cm3_per_mol_to_angstrom3_per_atom())?;
+        Some(surface_energy_j_per_m2(
+            surface_bond_fraction,
+            cohesive_energy,
+            atomic_volume,
         ))
     }
 }
@@ -1084,6 +1156,60 @@ mod tests {
                 )
                 .is_none(),
             "an unanchored metal escalates in the expansion route"
+        );
+    }
+
+    #[test]
+    fn the_surface_energy_is_the_broken_bond_model_over_the_cohesive_energy() {
+        // Iron: E_coh ~416 kJ/mol (atomization enthalpy), V_atom ~11.77 A^3, f_surf ~0.18 (cited test-only).
+        // gamma_sv = f * (1e23/N_A) * E_coh / V_atom^(2/3) = 0.18 * 0.16605 * 416 / 5.16 ~2.4 J/m^2 (measured ~2.4).
+        let f_fe = Fixed::from_ratio(18, 100); // surface-bond fraction ~0.18 (iron, test-only)
+        let e_coh = Fixed::from_int(416);
+        let v_atom = Fixed::from_ratio(1177, 100);
+        let gamma = surface_energy_j_per_m2(f_fe, e_coh, v_atom);
+        assert!(
+            close(gamma, 2.41, 0.15),
+            "iron surface energy ~2.4 J/m^2: {gamma:?}"
+        );
+        // Monotone: more broken-bond fraction, or more cohesion, raises the surface energy; a larger (more open)
+        // atomic volume lowers it (fewer bonds per unit area).
+        assert!(
+            surface_energy_j_per_m2(Fixed::from_ratio(25, 100), e_coh, v_atom) > gamma,
+            "a higher surface-bond fraction raises the surface energy"
+        );
+        assert!(
+            surface_energy_j_per_m2(f_fe, Fixed::from_int(500), v_atom) > gamma,
+            "more cohesion raises the surface energy"
+        );
+        assert!(
+            surface_energy_j_per_m2(f_fe, e_coh, Fixed::from_int(40)) < gamma,
+            "a larger atomic volume lowers the surface energy"
+        );
+        // A soft, weakly-bound metal (Na: E_coh ~107, V_atom ~39.5) has a far lower surface energy than iron.
+        let gamma_na =
+            surface_energy_j_per_m2(f_fe, Fixed::from_int(107), Fixed::from_ratio(3949, 100));
+        assert!(
+            gamma_na > ZERO && gamma_na < gamma,
+            "sodium's surface energy is well below iron's: {gamma_na:?}"
+        );
+        // Guards and determinism.
+        assert_eq!(surface_energy_j_per_m2(ZERO, e_coh, v_atom), ZERO);
+        assert_eq!(surface_energy_j_per_m2(f_fe, ZERO, v_atom), ZERO);
+        assert_eq!(surface_energy_j_per_m2(f_fe, e_coh, ZERO), ZERO);
+        assert_eq!(gamma, surface_energy_j_per_m2(f_fe, e_coh, v_atom));
+
+        // Through the route (reads E_coh from the periodic table, V_m from the anchors; f_surf caller-supplied).
+        let t = table();
+        let a = anchors();
+        let route = PropertyRoute::new(&t, &a);
+        let route_gamma = route.surface_energy("Fe", f_fe).expect("Fe surface energy");
+        assert!(
+            close(route_gamma, 2.41, 0.4),
+            "route iron surface energy ~2.4 J/m^2: {route_gamma:?}"
+        );
+        assert!(
+            route.surface_energy("Xx", f_fe).is_none(),
+            "an element without an atomization enthalpy or anchor escalates"
         );
     }
 }
