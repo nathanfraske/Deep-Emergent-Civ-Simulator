@@ -82,25 +82,92 @@ temperature `T_c` from the Dodson closure, the natural choice), and the free-ene
 computes as the comparison input. This piece is the near-ready one: it wires the built `Verdict::SeededDraw` to
 the derived `kT` boundary, no new physics.
 
-## 5. Grain size from nucleation (CONTESTED, design-first, new physics)
+## 5. Grain size from nucleation: the derivation-hunt on `gamma` and `I_0` (design-first, gate ruling)
 
 The spec: "grain size writes from nucleation (CNT prefactor flag)." Classical nucleation theory gives the
-nucleation rate `I = I_0 * exp(-dG*/(k_B*T))` where `dG* = 16*pi*gamma^3/(3*dGv^2)` is the nucleation barrier
-(`gamma` the interfacial energy, `dGv` the volumetric free-energy driving force), and the grain size follows
-from the balance of nucleation rate against growth rate against the cooling rate. This is NEW physics with its
-own reserved constant: the interfacial energy `gamma` (a per-material `[E]`/`[M]` datum, surfaced reserved,
-never planted), and the CNT prefactor `I_0` (the spec's "prefactor flag"). The nucleation barrier `dG*` reuses
-the rate-law kernel (`exp(-dG*/(k_B*T))` is `arrhenius_rate` with a nucleation reduced barrier), so the kernel
-is the consumer here too. This is the largest contested piece: I will surface the CNT form, the `gamma`
-reservation with its basis, and the grain-size-from-rates balance for the gate's design-first ruling before
-building, and it may be its own slice after the Dodson closure lands.
+steady-state nucleation rate
+
+    I = I_0 * exp(-dG*/(k_B*T)),   dG* = 16*pi*gamma^3 / (3*dGv^2),
+
+with `dG*` the nucleation barrier, `gamma` the solid-liquid interfacial energy, and `dGv` the volumetric
+free-energy driving force. The barrier reuses the rate-law kernel directly: `exp(-dG*/(k_B*T))` is
+`arrhenius_rate` with the nucleation reduced barrier `dG*/(k_B*T)`, so the kernel is the consumer here too.
+Before reserving `gamma` and `I_0`, I hunted each the way the vacancy fraction and the Lindemann ratio were
+hunted (the gate's instruction: reserve only the irreducible residual). The result is that almost nothing is
+left to reserve.
+
+**The `gamma` hunt (and a prove-it catch on this document's own opener).** The opener hypothesized
+`gamma ~ per-class surface-fraction * E_coh / area`, the broken-bond model. Testing it against the source: the
+broken-bond model over `E_coh` gives the SOLID-VAPOR surface energy `gamma_sv` (the bonds cut to expose a
+surface to vacuum), which is the wrong interfacial energy for freezing from a melt. Nucleation from the liquid
+keys on the SOLID-LIQUID interfacial energy `gamma_sl`, five-to-ten times smaller than `gamma_sv` because the
+melt is a condensed phase and few bonds are fully broken across the interface. Forcing the `E_coh` broken-bond
+route to reproduce `gamma_sl` would demand a "surface fraction" secretly absorbing the melt entropy, hidden work
+rather than an honest coordination fraction. So the `E_coh` route is rejected for `gamma_sl`.
+
+The derive-clean route is Turnbull (1950): `gamma_sl = C * dH_f / (N_A^(1/3) * V_m^(2/3))`, the interfacial
+energy as a coefficient `C` times the heat of fusion `dH_f` over the atomic interfacial area. The heat of fusion
+is not a new datum: by Richards' rule the entropy of fusion `dS_f` is near-constant (about `R` for close-packed
+metals), so `dH_f = T_m * dS_f ~ R * T_m`, keyed on the BUILT Lindemann `T_m`. The two combine and collapse
+(`N_A^(1/3) V_m^(2/3) = N_A * V_atom^(2/3)`, `R/N_A = k_B`) to
+
+    gamma_sl ~ beta_gamma * k_B * T_m / V_atom^(2/3),   beta_gamma = C * (dS_f / R),
+
+the interfacial energy as the thermal energy per unit atomic area, scaled by ONE dimensionless per-class
+coefficient. Every other factor is built: `T_m` (the Lindemann collapse), `k_B` (the exact fold already in the
+freezer), and `V_atom^(2/3) = cbrt(V_atom)^2` (the exact `cbrt` the Lindemann factor already uses). The source
+confirms the physics: the measured `gamma_sl` of close-packed metals is "primarily entropic in origin, linearly
+correlated with the melting temperature," which is the `k_B * T_m / a^2` scaling. A magnitude sanity-check (NOT
+a planted value): iron at `C = 0.45`, `dH_f = 13.81 kJ/mol`, `V_atom ~ 11.77 A^3` gives `gamma_sl ~ 0.20 J/m^2`
+by both the direct Turnbull form and the collapse, against the measured `~0.204 J/m^2`.
+
+So `gamma_sl` reserves exactly ONE dimensionless per-class coefficient `beta_gamma` (Turnbull's `C` folded with
+Richards' `dS_f/R`, about 0.45 for close-packed metals and about 0.32 for the nonmetals Bi, Sb, Ge, and water),
+the Form-B shape, sibling to the vacancy fraction `f` and the Lindemann ratio `delta`. Its basis, surfaced for
+the owner: the interfacial energy as a fraction of `k_B*T_m/a^2`, cited Turnbull 1950 and Kelton and Greer, per
+bonding class, verified at the primary source before entry. If the elastic anchors later carry a measured heat
+of fusion `dH_f`, `gamma_sl` reads it directly and only Turnbull's `C` remains reserved (the read-if-available,
+derive-if-not pattern).
+
+**The `I_0` hunt (nothing left to reserve).** The steady-state CNT prefactor is `I_0 = N_s * Z * beta*` (Kelton
+and Greer; Christian): the number density of nucleation sites `N_s`, the Zeldovich factor `Z`, and the atomic
+attachment rate `beta*` to the critical nucleus. Each decomposes into a built primitive. `N_s` is the site
+density = the material density (anchored) over the atomic mass (the periodic-table floor), no new datum.
+`Z = sqrt(eta / (2*pi*k_B*T))` with `eta = -d^2G/dn^2` at the critical size is a pure function of the barrier
+curvature, computed from `dG*`, `k_B*T`, and the critical size, all in hand once `gamma` is set, over the built
+`Fixed::sqrt`; no new datum. `beta*` is the interface-attachment rate, diffusion-limited from the melt, so it is
+the BUILT self-diffusivity (`self_diffusivity`, the attempt frequency `nu` through the kernel) times the
+geometric surface-atom count of the critical nucleus; no new datum. So the spec's "CNT prefactor flag" resolves
+to NO authored prefactor: `I_0` composes from the anchored density, the periodic-table mass, the built attempt
+frequency, and the computed barrier curvature.
+
+The remaining driving force `dGv` also derives: `dGv = dS_f * dT / V_atom ~ k_B * (dS_f/R) * (T_m - T) / V_atom`,
+the undercooling `dT = T_m - T` (built `T_m`, environment `T`) times the same `dS_f/R` fraction over the atomic
+volume (anchored). The grain size then follows from the balance of the nucleation rate `I` against the growth
+rate against the cooling rate (the Johnson-Mehl-Avrami / time-temperature-transformation logic), a dynamics over
+the built rates, no new constant.
+
+**The reserved residual, and the honest limits.** After the hunt, the whole CNT grain mechanism reserves exactly
+ONE new value: the per-class interfacial coefficient `beta_gamma` (or Turnbull's `C` alone, if a measured `dH_f`
+is anchored). `I_0`, `dG*`, `dGv`, and the Zeldovich factor reserve nothing. The honest limits, each to be
+stated at its site when built: FIRST, this is the HOMOGENEOUS baseline; real solidification is often
+HETEROGENEOUS (on walls, impurities, prior grains), which multiplies `dG*` by the contact-angle potency
+`f(theta) = (2 - 3*cos(theta) + cos^3(theta))/4` in `[0,1]` and changes `N_s` to substrate sites, so the wetting
+contact angle `theta` (a per-interface-pair dimensionless datum) is the reserved residual of the heterogeneous
+follow-on, not this slice. SECOND, the CRYSTALLINE regime carries over from the kinetics engine (a glass has no
+CNT nucleation barrier of this form). THIRD, the lumped single-rate treatment is reduced-order, not a full
+cluster population balance. I will build the grain slice only on the gate's ruling of this hunt; if the gate
+concurs, `beta_gamma` is the one reserved constant, surfaced with its basis, and everything else is built or
+derived.
 
 ## 6. Provenance, byte-neutrality, and the build order
 
 Provenance: every reserved value is surfaced with basis and caller-supplied or floor-read, never planted, on
 the #187 discipline. The Dodson geometry constant `A` is derived from the named geometry; the `kT` boundary is
-derived; the CNT interfacial energy `gamma` and prefactor are the reserved constants of the grain slice,
-surfaced with basis. No rate value is authored.
+derived; after the section-5 hunt the CNT interfacial energy `gamma_sl` reserves ONE per-class coefficient
+`beta_gamma` (the Turnbull-Richards fraction, keyed on the built `T_m`), and the prefactor `I_0` reserves
+nothing (it composes from the anchored density, the periodic-table mass, and the built attempt frequency and
+barrier curvature), each surfaced with basis. No rate value is authored.
 
 Byte-neutrality: materials is a leaf not linked into the run_world binary, so the output side moves no run pin,
 proven differentially per push as the kinetics engine was.
