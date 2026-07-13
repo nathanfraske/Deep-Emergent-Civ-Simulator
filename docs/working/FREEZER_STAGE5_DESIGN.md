@@ -144,3 +144,46 @@ The reserved list (never entered, surfaced with basis, the owner rules each): th
 recommended); the per-class barrier constant (`f` or `g`) with its cited basis; the Lindemann constant and the
 Slater gamma form; the cryoscopic-depression form; the seeded-draw resolution boundary; the Dodson closure
 tolerance and iteration cap. Nothing is entered until the gate reviews this design and rules the barrier fork.
+
+## 6. The derived Lindemann T_m: a prove-it catch that unblocks the alien-general path (post-barrier)
+
+The gate's staging put the DERIVED Lindemann `T_m` behind task #45 (the fixed-point fractional-power primitive),
+because Lindemann carries a `V^(2/3)` term and the interim was to read cited `[M]` melting points for the
+anchored metals. A prove-it check against the built `Fixed` API disproves the #45 dependency for this chain.
+
+`V^(2/3) = cbrt(V)^2`, and `Fixed::cbrt` is BUILT and EXACT (an integer cube root over the 128-bit radicand,
+exact to the last fixed-point bit, the exact sibling to `Fixed::sqrt`, defined for negatives). So `^(2/3)` is
+`cbrt` then a squaring (`powi(2)`), both built and exact, with no general fractional-power primitive. Walking
+the whole Lindemann-Gilvarry chain, every fractional power is `sqrt`, `cbrt`, or an integer power:
+
+- `c_s = sqrt(B_0 / rho)`, the bulk sound speed. `sqrt`, built.
+- `theta_D` (Debye) `= C_theta * c_s * cbrt(n)`, `n` the number density. `cbrt`, built. The prefactor
+  `C_theta = (hbar/k_B) * (6*pi^2)^(1/3)` is DERIVABLE from the fundamentals (`(6*pi^2)^(1/3)` is one `cbrt`),
+  so it is not a reserved value.
+- `T_m = C_L * M * theta_D^2 * V^(2/3)`. `theta_D^2` is `powi(2)`, `V^(2/3)` is `cbrt(V)^2`, both built. The
+  Lindemann coefficient `C_L = delta^2 * k_B / (9 * hbar^2)` folds the fundamentals `k_B`/`hbar` and the ONE
+  reserved estimator, the Lindemann ratio `delta ~ 0.1` (the critical vibrational amplitude as a fraction of the
+  interatomic distance, the spec's `[E]` tag).
+
+So the derived `T_m` reads exactly ONE reserved value, the Lindemann ratio `delta`, with everything else derived
+from the material's own `B_0`, `V_m`, `M` and the fundamentals. This is strictly more derive-first than the
+interim cited `[M]` melting-point table, which is per-material Terran data, and it admits the alien: a material
+with EOS anchors but no cited melting point still gets a `T_m` from its own bond-strength physics. It is
+buildable NOW, not gated on #45.
+
+Task #45 remains needed, but for a NARROWER set than the staging implied: arbitrary-denominator powers
+like the geology stream-power `slope^0.7` (a tenth root), NOT the Lindemann `^(2/3)` (which is `cbrt^2`) and NOT
+the convection `Ra^(1/3)` (which is `cbrt`). Scoping #45 stays worthwhile as its own floor slice for the
+stream-power family and the condensation transcendentals, design-first, but it is off the freezer's critical
+path.
+
+The design-first calls the gate reviews before I enter `delta` or build this chain: (a) the exact Lindemann
+variant (Lindemann-Gilvarry as above versus a variant, and whether the Slater gamma anharmonic correction rides
+here or in `V*`); (b) the UNIT-SCALE FOLD, since the SI-scale intermediates overflow or underflow Q32.32 (the
+number density `n ~ 1e28 /m^3` overflows, `V ~ 1e-29 m^3` underflows), so the chain must work in atomic-scale
+units (volume in cubic angstroms, density per cubic angstrom) with the constants folded once at that cited
+scale, the same discipline `nernst_emf`, the collision integral, and the Eyring prefactor use; (c) whether
+`delta` is one reserved estimator or a per-class `[E]`. Recommendation: build the derived Lindemann `T_m` next
+(alien-general, one reserved `delta`, no #45), over the interim cited `[M]` path. The consistency twin then
+compares `g*R*T_m` (with the derived `T_m`) against `f*E_coh`, validating the barrier constant against the
+derived melting point.
