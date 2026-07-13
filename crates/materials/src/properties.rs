@@ -57,6 +57,11 @@
 //! over the built cohesive energy and atomic volume, reserving ONE per-class surface-bond fraction `f_surf`
 //! (`~0.18`). This is the derivation the freezer REJECTED for the solid-liquid `gamma_sl`, landing where it belongs:
 //! the solid-vapour surface energy. Iron lands `~2.4 J/m^2`.
+//!
+//! LATTICE THERMAL CONDUCTIVITY ([`lattice_thermal_conductivity_w_per_m_k`]) is the Slack model over the shear-aware
+//! `Theta_D^3`, reusing the expansion's `gamma_G` and the CITED universal Slack constants, so it reserves NO new
+//! coefficient. It is ORDER-OF-MAGNITUDE (within `~3x` for simple crystals, an upper bound for anharmonic ones like
+//! rutile) and is the LATTICE part only: a metal's total conductivity is electronic-dominated (the deferred sub-arc).
 
 use civsim_core::Fixed;
 use civsim_physics::metal_eos::MetalEosAnchors;
@@ -537,6 +542,112 @@ pub fn surface_energy_j_per_m2(
         .unwrap_or(Fixed::MAX)
 }
 
+/// The Morelli-Slack Grueneisen correction factor `1 / (1 - 0.514/gamma + 0.228/gamma^2)` for the lattice
+/// thermal conductivity, the weak dependence of the Slack prefactor on the Grueneisen parameter. The constants
+/// `{0.514, 0.228}` are the CITED Morelli-Slack (2006) UNIVERSAL fit values (not per-class, not per-world, the
+/// same status as the Chen-Tse hardness constants), so folding the prefactor through this form means the
+/// conductivity reserves NO new coefficient beyond the `gamma_G` the expansion already reserves. The denominator
+/// is positive for every physical `gamma > 0` (its minimum near `gamma ~ 0.7` is `~0.73`); a non-positive or
+/// degenerate `gamma` returns one (no correction).
+fn slack_gamma_correction(gruneisen: Fixed) -> Fixed {
+    if gruneisen <= ZERO {
+        return Fixed::ONE;
+    }
+    let over_gamma = match Fixed::ONE.checked_div(gruneisen) {
+        Some(v) => v,
+        None => return Fixed::ONE,
+    };
+    let over_gamma_sq = over_gamma.checked_mul(over_gamma).unwrap_or(ZERO);
+    // denom = 1 - 0.514/gamma + 0.228/gamma^2.
+    let term1 = Fixed::from_ratio(514, 1000).checked_mul(over_gamma);
+    let term2 = Fixed::from_ratio(228, 1000).checked_mul(over_gamma_sq);
+    let denom = match (term1, term2) {
+        (Some(a), Some(b)) => Fixed::ONE.checked_sub(a).map(|x| x.saturating_add(b)),
+        _ => None,
+    };
+    match denom {
+        Some(d) if d > ZERO => Fixed::ONE.checked_div(d).unwrap_or(Fixed::ONE),
+        _ => Fixed::ONE,
+    }
+}
+
+/// The LATTICE (phonon) thermal conductivity `kappa_L` (W/(m*K)), the Slack model
+/// `kappa_L = A(gamma) * M_bar * Theta_a^3 * delta / (gamma^2 * n^(2/3) * T)`, where `M_bar` is the mean atomic
+/// mass (amu), `Theta_a` the acoustic Debye temperature (the built shear-aware `Theta_D`, which IS the acoustic
+/// average), `delta = cbrt(V_atom)` the interatomic spacing, `n` the atoms per primitive cell (DATA), and
+/// `A(gamma) = 3.1e-6 * [`slack_gamma_correction`]` the Slack prefactor. It RESERVES NO NEW COEFFICIENT: it reuses
+/// the expansion's Grueneisen `gamma_G`, and the Slack constants `{3.1e-6, 0.514, 0.228}` are cited UNIVERSAL fit
+/// values. The `Theta^3` is computed as `(Theta/100)^3` with the `1e6` folded into the prefactor (`3.1e-6 * 1e6 =
+/// 3.1`), so no intermediate overflows Q32.32 (a bare `Theta^3 ~ 1e10` for a stiff solid would).
+///
+/// HONEST LIMITS, named at the site (this is a REDUCED-ORDER model). (1) It is ORDER-OF-MAGNITUDE: within a factor
+/// of `~3` for simple crystals (diamond `~2700` against `~2200`, NaCl `~9` against `~6.5`, MgO `~140` against
+/// `~60`), but it OVERSTATES strongly-anharmonic or complex-cell crystals the single-scattering form misses (rutile
+/// `TiO2 ~54` against a measured `~9`), so such classes are an intrinsic upper bound, not a trusted value. (2) It is
+/// the LATTICE conductivity only. For an INSULATOR/semiconductor that is the whole story; for a METAL the total is
+/// dominated by the ELECTRONIC conductivity (Wiedemann-Franz), which needs the electronic-structure substrate (the
+/// deferred Stage-6 sub-arc), and the Slack phonon form additionally over-predicts even the metal's lattice part.
+/// So for a metal this is a lattice COMPONENT, not the total. Non-positive inputs yield zero.
+pub fn lattice_thermal_conductivity_w_per_m_k(
+    gruneisen: Fixed,
+    mean_atomic_mass_amu: Fixed,
+    debye_temperature_k: Fixed,
+    atomic_volume_angstrom3: Fixed,
+    atoms_per_primitive_cell: i32,
+    temperature: Fixed,
+) -> Fixed {
+    if gruneisen <= ZERO
+        || mean_atomic_mass_amu <= ZERO
+        || debye_temperature_k <= ZERO
+        || atomic_volume_angstrom3 <= ZERO
+        || atoms_per_primitive_cell < 1
+        || temperature <= ZERO
+    {
+        return ZERO;
+    }
+    let delta = atomic_volume_angstrom3.cbrt();
+    // (Theta/100)^3 via checked multiplies; the 1e6 this drops is folded into the 3.1 prefactor below.
+    let theta_scaled = match debye_temperature_k.checked_div(Fixed::from_int(100)) {
+        Some(v) if v > ZERO => v,
+        _ => return ZERO,
+    };
+    let theta3 = match theta_scaled
+        .checked_mul(theta_scaled)
+        .and_then(|sq| sq.checked_mul(theta_scaled))
+    {
+        Some(v) => v,
+        None => return Fixed::MAX,
+    };
+    // A(gamma) rescaled = 3.1 * gamma_correction (3.1 = 3.1e-6 * 1e6, the cited Slack base times the 1e6 fold).
+    let a_rescaled = match Fixed::from_ratio(31, 10).checked_mul(slack_gamma_correction(gruneisen))
+    {
+        Some(v) => v,
+        None => return Fixed::MAX,
+    };
+    let numerator = match a_rescaled
+        .checked_mul(mean_atomic_mass_amu)
+        .and_then(|x| x.checked_mul(theta3))
+        .and_then(|x| x.checked_mul(delta))
+    {
+        Some(v) => v,
+        None => return Fixed::MAX,
+    };
+    // denominator = gamma^2 * n^(2/3) * T; n^(2/3) = cbrt(n)^2.
+    let gamma_sq = match gruneisen.checked_mul(gruneisen) {
+        Some(v) => v,
+        None => return ZERO,
+    };
+    let n23 = Fixed::from_int(atoms_per_primitive_cell).cbrt().powi(2);
+    let denominator = match gamma_sq
+        .checked_mul(n23)
+        .and_then(|x| x.checked_mul(temperature))
+    {
+        Some(v) if v > ZERO => v,
+        _ => return ZERO,
+    };
+    numerator.checked_div(denominator).unwrap_or(Fixed::MAX)
+}
+
 /// The property route bound to the periodic table and the EOS anchors, so density reads the molar mass and molar
 /// volume, and the Debye temperature reuses the freezer's sound speed over the anchors, all for an anchored
 /// metal. No reserved value enters (this first slice reserves none); a metal missing an anchor escalates
@@ -704,6 +815,37 @@ impl<'a> PropertyRoute<'a> {
             surface_bond_fraction,
             cohesive_energy,
             atomic_volume,
+        ))
+    }
+
+    /// The LATTICE (phonon) thermal conductivity `kappa_L` (W/(m*K)) for an anchored metal at a temperature, the
+    /// Slack model over the mean atomic mass, the shear-aware `Theta_D`, the atomic volume, and the caller's
+    /// reserved Grueneisen `gamma_G` (an element metal has one atom per primitive cell). `None` (escalate) when the
+    /// metal lacks a bulk modulus, a molar volume, or a standard atomic weight. IMPORTANT: for a metal this is the
+    /// LATTICE COMPONENT only, not the total conductivity: a metal's heat is carried mostly by ELECTRONS
+    /// (Wiedemann-Franz), which the electronic-structure sub-arc supplies, and the Slack phonon form over-predicts
+    /// even the lattice part for a metal. So read this as the phonon component with the electronic total deferred,
+    /// never as the metal's measured conductivity. `gamma_G` and the Pugh ratio `k` are caller-supplied.
+    pub fn lattice_thermal_conductivity(
+        &self,
+        symbol: &str,
+        temperature: Fixed,
+        pugh_ratio: Fixed,
+        gruneisen: Fixed,
+    ) -> Option<Fixed> {
+        let molar_volume = self.anchors.molar_volume(symbol)?;
+        let molar_mass = self.table.element(symbol)?.standard_atomic_weight;
+        let theta_d = self.debye_temperature_shear_aware(symbol, pugh_ratio)?;
+        let atomic_volume =
+            molar_volume.checked_mul(rose_eos::cm3_per_mol_to_angstrom3_per_atom())?;
+        // An element metal is one atom per primitive cell (BCC/FCC primitive cells hold one atom).
+        Some(lattice_thermal_conductivity_w_per_m_k(
+            gruneisen,
+            molar_mass,
+            theta_d,
+            atomic_volume,
+            1,
+            temperature,
         ))
     }
 }
@@ -1210,6 +1352,143 @@ mod tests {
         assert!(
             route.surface_energy("Xx", f_fe).is_none(),
             "an element without an atomization enthalpy or anchor escalates"
+        );
+    }
+
+    #[test]
+    fn the_lattice_conductivity_is_the_slack_model_within_an_order_of_magnitude() {
+        // NaCl (simple ionic insulator): gamma=1.6, M_bar=29.22 amu, Theta=321, V_atom=22.36 A^3, n=2, T=300.
+        // Slack kappa_L ~9.0 W/(m*K); measured total ~6.5 (an insulator, so lattice IS the total). Within factor 3.
+        let nacl = lattice_thermal_conductivity_w_per_m_k(
+            Fixed::from_ratio(16, 10),
+            Fixed::from_ratio(2922, 100),
+            Fixed::from_int(321),
+            Fixed::from_ratio(2236, 100),
+            2,
+            Fixed::from_int(300),
+        );
+        assert!(
+            close(nacl, 9.0, 1.0),
+            "NaCl lattice conductivity ~9 W/(m*K): {nacl:?}"
+        );
+        assert!(
+            nacl.to_f64_lossy() > 6.5 / 3.0 && nacl.to_f64_lossy() < 6.5 * 3.0,
+            "NaCl lands within an order of magnitude (factor 3) of the measured ~6.5"
+        );
+        // Diamond (the high-conductivity extreme): gamma=0.9, M_bar=12.011, Theta=2230, V_atom=5.674, n=2.
+        // Slack kappa_L ~2690 W/(m*K); measured ~2200. The (Theta/100)^3 fold keeps Theta^3 ~1.1e10 in range.
+        let diamond = lattice_thermal_conductivity_w_per_m_k(
+            Fixed::from_ratio(9, 10),
+            Fixed::from_ratio(12011, 1000),
+            Fixed::from_int(2230),
+            Fixed::from_ratio(5674, 1000),
+            2,
+            Fixed::from_int(300),
+        );
+        assert!(
+            close(diamond, 2690.0, 150.0),
+            "diamond lattice conductivity ~2690 W/(m*K): {diamond:?}"
+        );
+        assert!(
+            diamond.to_f64_lossy() > 2200.0 / 3.0 && diamond.to_f64_lossy() < 2200.0 * 3.0,
+            "diamond lands within a factor 3 of the measured ~2200"
+        );
+        // Monotone: higher Theta raises kappa steeply (Theta^3); higher Grueneisen (more anharmonic scattering)
+        // lowers it; a higher temperature lowers it (1/T).
+        assert!(
+            lattice_thermal_conductivity_w_per_m_k(
+                Fixed::from_ratio(16, 10),
+                Fixed::from_ratio(2922, 100),
+                Fixed::from_int(400),
+                Fixed::from_ratio(2236, 100),
+                2,
+                Fixed::from_int(300)
+            ) > nacl,
+            "a higher Debye temperature raises the lattice conductivity"
+        );
+        assert!(
+            lattice_thermal_conductivity_w_per_m_k(
+                Fixed::from_int(3),
+                Fixed::from_ratio(2922, 100),
+                Fixed::from_int(321),
+                Fixed::from_ratio(2236, 100),
+                2,
+                Fixed::from_int(300)
+            ) < nacl,
+            "a higher Grueneisen (more anharmonic) lowers the lattice conductivity"
+        );
+        assert!(
+            lattice_thermal_conductivity_w_per_m_k(
+                Fixed::from_ratio(16, 10),
+                Fixed::from_ratio(2922, 100),
+                Fixed::from_int(321),
+                Fixed::from_ratio(2236, 100),
+                2,
+                Fixed::from_int(600)
+            ) < nacl,
+            "a higher temperature lowers the lattice conductivity (1/T)"
+        );
+        // Guards: any non-positive input, or fewer than one atom per cell, yields zero; determinism.
+        assert_eq!(
+            lattice_thermal_conductivity_w_per_m_k(
+                ZERO,
+                Fixed::from_int(29),
+                Fixed::from_int(321),
+                Fixed::from_int(22),
+                2,
+                Fixed::from_int(300)
+            ),
+            ZERO
+        );
+        assert_eq!(
+            lattice_thermal_conductivity_w_per_m_k(
+                Fixed::from_ratio(16, 10),
+                Fixed::from_int(29),
+                Fixed::from_int(321),
+                Fixed::from_int(22),
+                0,
+                Fixed::from_int(300)
+            ),
+            ZERO
+        );
+        assert_eq!(nacl, {
+            lattice_thermal_conductivity_w_per_m_k(
+                Fixed::from_ratio(16, 10),
+                Fixed::from_ratio(2922, 100),
+                Fixed::from_int(321),
+                Fixed::from_ratio(2236, 100),
+                2,
+                Fixed::from_int(300),
+            )
+        });
+
+        // Through the route (a metal: LATTICE component only, the total is electronic and deferred). Fe lattice
+        // kappa is a positive figure; the point is it emits the phonon part, flagged, not a fabricated total.
+        let t = table();
+        let a = anchors();
+        let route = PropertyRoute::new(&t, &a);
+        let fe_lattice = route
+            .lattice_thermal_conductivity(
+                "Fe",
+                Fixed::from_int(300),
+                Fixed::from_ratio(48, 100),
+                Fixed::from_ratio(17, 10),
+            )
+            .expect("Fe lattice conductivity");
+        assert!(
+            fe_lattice > ZERO,
+            "iron lattice conductivity is a positive phonon component: {fe_lattice:?}"
+        );
+        assert!(
+            route
+                .lattice_thermal_conductivity(
+                    "Xx",
+                    Fixed::from_int(300),
+                    Fixed::from_ratio(48, 100),
+                    Fixed::from_ratio(17, 10)
+                )
+                .is_none(),
+            "an unanchored metal escalates in the conductivity route"
         );
     }
 }
