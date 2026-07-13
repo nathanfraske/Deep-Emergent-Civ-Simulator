@@ -42,6 +42,7 @@ pub mod floor_provenance;
 pub mod geodynamics;
 pub mod graph;
 pub mod ionic_radii;
+pub mod ionization_ladder;
 pub mod lattice_modulus;
 pub mod laws;
 pub mod materials_oracle;
