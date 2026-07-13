@@ -47,6 +47,7 @@
 pub mod assemblage;
 pub mod contract;
 pub mod correlation;
+pub mod creep;
 pub mod freezer;
 pub mod localized;
 pub mod log;
@@ -65,6 +66,10 @@ pub use assemblage::{
 pub use contract::{Disposer, Preflight, Proposer, Quench, RealizedState, Validity};
 pub use correlation::{
     route_of_class, CalibrationError, CorrelationClass, CorrelationClassifier, EnergyRoute,
+};
+pub use creep::{
+    creep_dominant_regime, creep_ln_reference_rate, creep_regime_log_rate, creep_total_log_rate,
+    CreepRegime,
 };
 pub use localized::LocalizedRoute;
 pub use log::{VerdictKind, VerdictLog, VerdictRecord};
