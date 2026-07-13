@@ -408,6 +408,87 @@ pub fn phase_bulk_modulus_ionic(
     })
 }
 
+/// The eV-to-kilojoule-per-mole conversion, `N_A e / 1000 = 96.485 kJ/(mol.eV)` (CODATA Faraday over a thousand),
+/// as the exact rational `96485 / 1000`. Converts a per-formula-unit energy in electron-volts to the molar
+/// energy the disposer ranks in.
+fn ev_to_kj_per_mol() -> Fixed {
+    Fixed::from_ratio(96_485, 1_000)
+}
+
+/// The BORN-LANDE LATTICE ENERGY in kJ/mol of a prototype-mapped ionic phase, DERIVED as
+/// `U = -A |z+ z-| (e^2/4pi eps0) (1 - 1/n) / r0`, the energy to form the ionic solid from its FORMAL gas-phase
+/// ions (the Born-Haber reference), emitted as a `PropertyEstimate` `{value, band, provenance}`. Returns `None`
+/// (a fall-through, never a fabricated value) on the same gaps as [`phase_bulk_modulus_ionic`] (no prototype key,
+/// an absent Madelung, not a clean binary ionic, an ion absent from the radii or the Born cores).
+///
+/// FORMAL CHARGES ARE CORRECT HERE, not a placeholder for QeQ: the experimental Born-Haber lattice energy is
+/// DEFINED for the formal-ion reference (`Mg2+(g) + O2-(g) -> MgO(s)`), so the formal-charge Born-Lande
+/// reproduces it to a few percent (NaCl about -751 against -787, periclase about -3926 against -3795), and a QeQ
+/// partial charge (the +1.7 electron-density charge) would compute a DIFFERENT quantity that does not match the
+/// Born-Haber energy. QeQ dissolves the MODULUS overestimate (the curvature, riding `r0^4`), a different
+/// consumer, not the energy's error. The residual estimator error is the ionic model's covalent-bond breakdown,
+/// largest for a small electronegativity difference; the disposer carries that as its `[E]` band, so a
+/// covalent-leaning pair escalates rather than emits a confident wrong ground state. Provenance `[E]`: an exact
+/// form over measured inputs, the point-charge model an approximation. The emitted `band` is zero here (the raw
+/// energy); the disposer wraps it with the covalency-scaled resolution band.
+pub fn phase_lattice_energy_ionic(
+    phase: &Phase,
+    table: &PeriodicTable,
+    radii: &IonicRadii,
+    born: &BornExponents,
+    prototypes: &PrototypeLibrary,
+) -> Option<PropertyEstimate> {
+    let prototype = prototypes.prototype(phase.prototype.as_deref()?)?;
+    let madelung = prototype.madelung?;
+    let pair = identify_ionic_pair(phase, table)?;
+
+    // The interionic distance r0 = r_cation + r_anion, in angstroms, from the shared crystal radii (the same
+    // convention-invariant sum the modulus reads).
+    let cation_radius = radii
+        .radius(
+            &pair.cation_symbol,
+            pair.cation_charge,
+            prototype.cation_coordination,
+        )?
+        .crystal_radius;
+    let anion_radius = radii
+        .radius(
+            &pair.anion_symbol,
+            pair.anion_charge,
+            prototype.anion_coordination,
+        )?
+        .crystal_radius;
+    let r0 = cation_radius + anion_radius;
+    if r0 <= Fixed::ZERO {
+        return None;
+    }
+
+    // The Born exponent n = mean of the cation and anion noble-gas-core values (the same as the modulus).
+    let cation_electrons = (pair.cation_z as i32 - pair.cation_charge as i32) as u32;
+    let anion_electrons = (pair.anion_z as i32 - pair.anion_charge as i32) as u32;
+    let n_cation = born.exponent_for_electrons(cation_electrons)?;
+    let n_anion = born.exponent_for_electrons(anion_electrons)?;
+    let n = (n_cation + n_anion).checked_div(Fixed::from_int(2))?;
+
+    // The charge product |z+ z-| from charge balance (the anion charge is negative, so the product negates).
+    let charge_product = Fixed::from_int(pair.cation_charge as i32 * -(pair.anion_charge as i32));
+
+    // U = -A |z+z-| k (1 - 1/n) / r0, in eV per formula unit (k in eV.A, r0 in A), then to kJ/mol. Negative
+    // (bound): the magnitude below is positive, negated for the emitted energy.
+    let born_factor = Fixed::ONE - Fixed::ONE.checked_div(n)?;
+    let magnitude_ev = madelung
+        .checked_mul(charge_product)?
+        .checked_mul(coulomb_energy_ev_angstrom())?
+        .checked_mul(born_factor)?
+        .checked_div(r0)?;
+    let u_kj_per_mol = (Fixed::ZERO - magnitude_ev).checked_mul(ev_to_kj_per_mol())?;
+    Some(PropertyEstimate {
+        value: u_kj_per_mol,
+        band: Fixed::ZERO,
+        provenance: Provenance::Estimator,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -577,5 +658,57 @@ mod tests {
                 .is_none(),
             "the corundum Madelung constant is held absent"
         );
+    }
+
+    #[test]
+    fn nacl_lattice_energy_matches_the_born_haber_reference() {
+        // Formal-charge Born-Lande: U = -A |z+z-| k (1-1/n) / r0, then to kJ/mol. For NaCl (A=1.74756, z+z-=1,
+        // n=avg(Ne 7, Ar 9)=8, r0=1.16+1.67=2.83) this is about -751 kJ/mol, a few percent of the Born-Haber -787.
+        let est = phase_lattice_energy_ionic(&nacl(), &table(), &radii(), &born(), &protos())
+            .expect("NaCl derives its lattice energy");
+        assert!(
+            close(est.value, -751.0, 20.0),
+            "NaCl lattice energy should be about -751 kJ/mol, got {}",
+            est.value.to_f64_lossy()
+        );
+        assert_eq!(est.provenance, Provenance::Estimator);
+    }
+
+    #[test]
+    fn periclase_lattice_energy_is_the_divalent_born_haber_energy() {
+        // MgO (A=1.74756, z+z-=4, n=7, r0=0.86+1.26=2.12): about -3927 kJ/mol, a few percent of the Born-Haber
+        // -3795. The formal charge is CORRECT here (the Born-Haber reference IS the formal ion), unlike the
+        // modulus which the formal charge overestimates.
+        let reg = registry();
+        let periclase = reg
+            .phase("periclase")
+            .expect("periclase is in the registry");
+        let est = phase_lattice_energy_ionic(periclase, &table(), &radii(), &born(), &protos())
+            .expect("periclase derives its lattice energy");
+        assert!(
+            close(est.value, -3927.0, 120.0),
+            "periclase lattice energy should be about -3927 kJ/mol, got {}",
+            est.value.to_f64_lossy()
+        );
+        // The fourfold divalent charge product makes it far deeper than the monovalent halide: the Coulomb depth
+        // earned from data, not authored.
+        assert!(
+            est.value < Fixed::from_int(-2000),
+            "the divalent lattice energy is far deeper than the monovalent halide"
+        );
+    }
+
+    #[test]
+    fn phases_without_a_seeded_prototype_fall_through_the_energy_route() {
+        // Quartz and forsterite carry no ionic prototype key, so the lattice-energy route returns None, the
+        // honest fall-through Path A (positions to Ewald) closes for any structure.
+        let reg = registry();
+        for name in ["quartz", "forsterite"] {
+            let phase = reg.phase(name).expect("phase is in the registry");
+            assert!(
+                phase_lattice_energy_ionic(phase, &table(), &radii(), &born(), &protos()).is_none(),
+                "{name} falls through the ionic lattice-energy route"
+            );
+        }
     }
 }
