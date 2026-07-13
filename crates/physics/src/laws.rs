@@ -5995,9 +5995,10 @@ mod tests {
             r1 > ZERO && r1 < a,
             "0 < rate < prefactor for a positive barrier"
         );
+        // prefactor * exp(-1) ~ 367.9, checked as a Fixed bracket so the module stays integer-only.
         assert!(
-            (r1.to_f64_lossy() - 1000.0 * (-1.0f64).exp()).abs() < 0.5,
-            "rate at reduced barrier 1 is prefactor * exp(-1): {r1:?}"
+            r1 > Fixed::from_int(366) && r1 < Fixed::from_int(370),
+            "rate at reduced barrier 1 is prefactor * exp(-1) ~ 367.9: {r1:?}"
         );
         // Monotone: the rate FALLS as the barrier rises (a higher barrier is a slower crossing).
         let r2 = arrhenius_rate(a, Fixed::from_int(2));
@@ -6088,36 +6089,47 @@ mod tests {
         // must be -G. Because the Arrhenius ln is EXACTLY linear in 1/T (ln(rate) = ln(A) - G/T), the central
         // difference carries no truncation error, so the recovered slope equals -G to fixed-point rounding at
         // EVERY step size: the h^2 plateau is the whole range, which we show with a wide and a narrow pair.
+        // Integer-only (Fixed throughout), so the twin itself stays on the canonical no-float path.
         let a = Fixed::from_int(1000);
         let g = Fixed::from_int(10); // E*/k_B, the activation temperature
 
-        // ln(rate) at a given temperature, taking the real kernel output (exp then ln, the full round trip).
-        let ln_rate_at = |t: i32| -> f64 {
-            let rate = arrhenius_rate(a, reduced_barrier(g, Fixed::from_int(t)));
-            rate.ln().to_f64_lossy()
+        // ln(rate) at a temperature, from the REAL kernel output (exp then ln, the full round trip).
+        let ln_rate_at =
+            |t: i32| -> Fixed { arrhenius_rate(a, reduced_barrier(g, Fixed::from_int(t))).ln() };
+        // 1/T as a Fixed.
+        let inv_t = |t: i32| -> Fixed { ONE.checked_div(Fixed::from_int(t)).unwrap_or(ZERO) };
+        // The central-difference slope of ln(rate) against 1/T between two temperatures, all in Fixed.
+        let slope = |t_hi: i32, t_lo: i32| -> Fixed {
+            let d_ln = sat_sub(ln_rate_at(t_hi), ln_rate_at(t_lo));
+            let d_inv_t = sat_sub(inv_t(t_hi), inv_t(t_lo));
+            d_ln.checked_div(d_inv_t).unwrap_or(ZERO)
         };
-        // The central-difference slope of ln(rate) against 1/T between two temperatures.
-        let slope = |t_hi: i32, t_lo: i32| -> f64 {
-            let d_ln = ln_rate_at(t_hi) - ln_rate_at(t_lo);
-            let d_inv_t = 1.0 / (t_hi as f64) - 1.0 / (t_lo as f64);
-            d_ln / d_inv_t
+        // |x| for a Fixed, via the saturating difference from zero.
+        let abs_fixed = |x: Fixed| -> Fixed {
+            if x.to_bits() >= 0 {
+                x
+            } else {
+                sat_sub(ZERO, x)
+            }
         };
-        // Wide pair (T = 20, 5; reduced barriers 0.5 and 2.0, both exact and inside the window).
+        let tol = Fixed::from_ratio(5, 100); // 0.05, comfortably above fixed-point rounding
+        let target = Fixed::from_int(-10);
+        // Wide pair (T = 20, 5; reduced barriers 0.5 and 2.0, both inside the window).
         let wide = slope(20, 5);
         // Narrow pair (T = 10, 8; reduced barriers 1.0 and 1.25).
         let narrow = slope(10, 8);
         assert!(
-            (wide + 10.0).abs() < 0.05,
-            "the wide-pair slope recovers -E*/k_B = -10: {wide}"
+            abs_fixed(sat_sub(wide, target)) < tol,
+            "the wide-pair slope recovers -E*/k_B = -10: {wide:?}"
         );
         assert!(
-            (narrow + 10.0).abs() < 0.05,
-            "the narrow-pair slope also recovers -10 (step-size independent, the h^2 plateau): {narrow}"
+            abs_fixed(sat_sub(narrow, target)) < tol,
+            "the narrow-pair slope also recovers -10 (step-size independent, the h^2 plateau): {narrow:?}"
         );
         // The two step sizes agree, confirming the plateau (the recovered barrier does not drift with h).
         assert!(
-            (wide - narrow).abs() < 0.05,
-            "the recovered slope is step-size independent: wide {wide} vs narrow {narrow}"
+            abs_fixed(sat_sub(wide, narrow)) < tol,
+            "the recovered slope is step-size independent: wide {wide:?} vs narrow {narrow:?}"
         );
     }
 }
