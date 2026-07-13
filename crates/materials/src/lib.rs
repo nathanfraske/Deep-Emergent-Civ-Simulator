@@ -52,6 +52,7 @@ pub mod localized;
 pub mod log;
 pub mod memo;
 pub mod metallic;
+pub mod nucleation;
 pub mod quench;
 pub mod thermochemical;
 pub mod verdict;
@@ -68,6 +69,11 @@ pub use localized::LocalizedRoute;
 pub use log::{VerdictKind, VerdictLog, VerdictRecord};
 pub use memo::Memo;
 pub use metallic::MetallicRoute;
+pub use nucleation::{
+    avrami_grain_size, critical_atom_count, critical_radius_over_spacing, interfacial_energy,
+    nucleation_prefactor, nucleation_rate, reduced_driving_force, reduced_interfacial_energy,
+    reduced_nucleation_barrier, richards_ratio, zeldovich_factor,
+};
 pub use quench::{
     dodson_closure_temperature, polymorphs_are_thermally_unresolvable, quench_exchange,
     QuenchOutcome,
