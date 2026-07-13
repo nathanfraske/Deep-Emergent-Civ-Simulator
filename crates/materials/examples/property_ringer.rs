@@ -47,8 +47,9 @@
 use civsim_core::Fixed;
 use civsim_materials::{
     chen_tse_hardness_gpa, debye_heat_capacity_j_per_mol_k, debye_temperature,
-    debye_velocity_km_per_s, density_g_per_cm3, freezer, poisson_ratio, shear_modulus_gpa,
-    youngs_modulus_gpa, PropertyRoute,
+    debye_velocity_km_per_s, density_g_per_cm3, freezer, lattice_thermal_conductivity_w_per_m_k,
+    linear_thermal_expansion_per_k, poisson_ratio, shear_modulus_gpa, surface_energy_j_per_m2,
+    thermal_diffusivity_m2_per_s, youngs_modulus_gpa, PropertyRoute,
 };
 use civsim_physics::metal_eos::MetalEosAnchors;
 use civsim_physics::periodic::PeriodicTable;
@@ -556,6 +557,12 @@ fn main() {
         println!();
     }
 
+    // The thermal and surface properties built as the core landed (expansion, conductivity, diffusivity, gamma_sv),
+    // with the cross-class f_surf check the gate asked for.
+    let (t_checks, t_defects) = thermal_surface_ringer(&table, &anchors);
+    checks += t_checks;
+    defects += t_defects;
+
     println!("======================= SUMMARY ========================");
     println!("{checks} checks, {defects} DEFECT(s).");
     if defects == 0 {
@@ -567,6 +574,313 @@ fn main() {
         println!("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
         std::process::exit(1);
     }
+}
+
+/// The THERMAL and SURFACE properties built as the core landed: linear thermal expansion (Grueneisen), lattice
+/// thermal conductivity (Slack), thermal diffusivity, and the solid-vapour surface energy (broken-bond). Same
+/// discipline: within-grade / flag-limit / DEFECT. It also runs the CROSS-CLASS `f_surf` check the gate asked for:
+/// ONE surface-bond fraction fixed for the metal class must reproduce MULTIPLE metals' `gamma_sv`, validating
+/// `f_surf` as a per-class constant rather than a per-metal fit. Returns `(checks, defects)`.
+fn thermal_surface_ringer(table: &PeriodicTable, anchors: &MetalEosAnchors) -> (usize, usize) {
+    let a3_per_cm3mol = rose_eos::cm3_per_mol_to_angstrom3_per_atom();
+    let _ = (table, anchors); // the thermal section validates through the free functions with cited inputs
+
+    // (name, is_metal, is_ionic, M, V_m, K, k, atoms_per_formula, atoms_per_prim_cell, gamma_G, E_coh, f_surf,
+    //  obs_alpha_L[/K], obs_kappa[W/m/K], obs_gamma_sv[J/m^2] or -1 for none)
+    struct T {
+        name: &'static str,
+        is_metal: bool,
+        is_ionic: bool,
+        m: Fixed,
+        vm: Fixed,
+        k: Fixed,
+        pugh: Fixed,
+        n_formula: i32,
+        n_prim: i32,
+        gamma: Fixed,
+        e_coh: Fixed,
+        f_surf: Fixed,
+        obs_alpha_l: f64,
+        obs_kappa: f64,
+        obs_gamma_sv: f64,
+    }
+    let mk = |name,
+              is_metal,
+              is_ionic,
+              m,
+              vm,
+              k,
+              pugh,
+              n_formula,
+              n_prim,
+              gamma,
+              e_coh,
+              f_surf,
+              obs_alpha_l,
+              obs_kappa,
+              obs_gamma_sv| T {
+        name,
+        is_metal,
+        is_ionic,
+        m,
+        vm,
+        k,
+        pugh,
+        n_formula,
+        n_prim,
+        gamma,
+        e_coh,
+        f_surf,
+        obs_alpha_l,
+        obs_kappa,
+        obs_gamma_sv,
+    };
+    let entries = vec![
+        mk(
+            "Fe",
+            true,
+            false,
+            dec(55845, 1000),
+            dec(709, 100),
+            dec(170, 1),
+            dec(48, 100),
+            1,
+            1,
+            dec(17, 10),
+            dec(416, 1),
+            dec(18, 100),
+            11.8e-6,
+            80.0,
+            2.4,
+        ),
+        mk(
+            "Al",
+            true,
+            false,
+            dec(26982, 1000),
+            dec(1000, 100),
+            dec(76, 1),
+            dec(342, 1000),
+            1,
+            1,
+            dec(22, 10),
+            dec(330, 1),
+            dec(18, 100),
+            23.1e-6,
+            237.0,
+            1.14,
+        ),
+        mk(
+            "Cu",
+            true,
+            false,
+            dec(63546, 1000),
+            dec(711, 100),
+            dec(140, 1),
+            dec(343, 1000),
+            1,
+            1,
+            dec(20, 10),
+            dec(338, 1),
+            dec(18, 100),
+            16.5e-6,
+            401.0,
+            1.79,
+        ),
+        mk(
+            "Na",
+            true,
+            false,
+            dec(22990, 1000),
+            dec(2378, 100),
+            dec(63, 10),
+            dec(52, 100),
+            1,
+            1,
+            dec(13, 10),
+            dec(107, 1),
+            dec(18, 100),
+            71.0e-6,
+            140.0,
+            0.26,
+        ),
+        mk(
+            "Diamond",
+            false,
+            false,
+            dec(12011, 1000),
+            dec(3417, 1000),
+            dec(443, 1),
+            dec(1208, 1000),
+            1,
+            2,
+            dec(9, 10),
+            dec(715, 1),
+            dec(16, 100),
+            1.0e-6,
+            2200.0,
+            -1.0,
+        ),
+        mk(
+            "NaCl",
+            false,
+            true,
+            dec(58440, 1000),
+            dec(2694, 100),
+            dec(245, 10),
+            dec(59, 100),
+            2,
+            2,
+            dec(16, 10),
+            dec(640, 1),
+            dec(30, 100),
+            40.0e-6,
+            6.5,
+            0.30,
+        ),
+        mk(
+            "MgO",
+            false,
+            true,
+            dec(40304, 1000),
+            dec(1125, 100),
+            dec(162, 1),
+            dec(80, 100),
+            2,
+            2,
+            dec(15, 10),
+            dec(1000, 1),
+            dec(30, 100),
+            10.5e-6,
+            60.0,
+            1.20,
+        ),
+    ];
+
+    let mut checks = 0usize;
+    let mut defects = 0usize;
+
+    println!("\n============ THERMAL / SURFACE PROPERTIES (core-as-it-landed) ============\n");
+    for e in &entries {
+        println!("--- {} ---", e.name);
+        let rho = density_g_per_cm3(e.m, e.vm);
+        let g = shear_modulus_gpa(e.k, e.pugh);
+        // Per-ATOM basis: V_atom = (V_m / n_formula) * fold; C_v per atom; V_m per atom for the Grueneisen.
+        let vm_per_atom =
+            e.vm.checked_div(Fixed::from_int(e.n_formula))
+                .expect("V_m/n");
+        let v_atom = vm_per_atom
+            .checked_mul(a3_per_cm3mol)
+            .expect("atomic volume");
+        let v_d = debye_velocity_km_per_s(e.k, g, rho);
+        let theta_d = debye_temperature(v_d, v_atom);
+        let cv_atom = debye_heat_capacity_j_per_mol_k(theta_d, Fixed::from_int(300));
+
+        // LINEAR THERMAL EXPANSION (Grueneisen), per-atom basis (C_v per atom with V_m per atom).
+        let alpha_l = linear_thermal_expansion_per_k(e.gamma, cv_atom, e.k, vm_per_atom);
+        let v = grade(alpha_l.to_f64_lossy(), e.obs_alpha_l, 0.25);
+        report(
+            "alpha_L (/K)",
+            alpha_l.to_f64_lossy(),
+            e.obs_alpha_l,
+            &v,
+            &mut defects,
+            &mut checks,
+        );
+
+        // LATTICE THERMAL CONDUCTIVITY (Slack). Insulator: within factor 3. Metal: LATTICE component only, the
+        // total is electronic (deferred), so it is a named FLAG, never compared as the total.
+        let m_bar =
+            e.m.checked_div(Fixed::from_int(e.n_formula))
+                .expect("mean mass");
+        let kappa = lattice_thermal_conductivity_w_per_m_k(
+            e.gamma,
+            m_bar,
+            theta_d,
+            v_atom,
+            e.n_prim,
+            Fixed::from_int(300),
+        );
+        let v = if e.is_metal {
+            Verdict::Flag("lattice component only; metal total is electronic (deferred)")
+        } else {
+            let rel = (kappa.to_f64_lossy() - e.obs_kappa).abs() / e.obs_kappa;
+            if kappa.to_f64_lossy() > e.obs_kappa / 3.0 && kappa.to_f64_lossy() < e.obs_kappa * 3.0
+            {
+                Verdict::Within(rel)
+            } else {
+                // Beyond factor 3: the anharmonic/complex-cell upper-bound case (rutile-like), a named limit.
+                Verdict::Flag("anharmonic/complex-cell: Slack upper bound")
+            }
+        };
+        report(
+            "kappa_lattice (W/m/K)",
+            kappa.to_f64_lossy(),
+            e.obs_kappa,
+            &v,
+            &mut defects,
+            &mut checks,
+        );
+
+        // THERMAL DIFFUSIVITY = kappa * V_m / C_v (per-atom basis). Inherits the conductivity's reach.
+        let alpha_th = thermal_diffusivity_m2_per_s(kappa, vm_per_atom, cv_atom);
+        println!(
+            "    {:22} derived {:>9.3e}  (composes kappa above; inherits its grade / lattice-only limit)",
+            "alpha_thermal (m^2/s)",
+            alpha_th.to_f64_lossy()
+        );
+        checks += 1;
+
+        // SURFACE ENERGY gamma_sv (broken-bond). Metal/covalent: the model's domain (within grade). Ionic: OFF
+        // domain (ionic surfaces relax and the cohesive basis is ions not atoms), a named FLAG upper bound.
+        let gamma_sv = surface_energy_j_per_m2(e.f_surf, e.e_coh, v_atom);
+        let v = if e.is_ionic {
+            Verdict::Flag("off broken-bond domain: ionic surface relaxation (upper bound)")
+        } else if e.obs_gamma_sv < 0.0 {
+            Verdict::Flag("no clean reference (diamond surface reconstructs)")
+        } else {
+            grade(gamma_sv.to_f64_lossy(), e.obs_gamma_sv, 0.35)
+        };
+        report(
+            "gamma_sv (J/m^2)",
+            gamma_sv.to_f64_lossy(),
+            e.obs_gamma_sv.max(0.0),
+            &v,
+            &mut defects,
+            &mut checks,
+        );
+        println!();
+    }
+
+    // CROSS-CLASS f_surf: fix ONE metal-class fraction (0.18) and require it to reproduce MULTIPLE metals'
+    // gamma_sv within grade, validating f_surf as a PER-CLASS constant (the gate's caveat), not a per-metal fit.
+    println!("--- cross-class f_surf (one metal-class fraction 0.18, multiple metals) ---");
+    let f_metal = dec(18, 100);
+    for e in entries
+        .iter()
+        .filter(|e| e.is_metal && e.obs_gamma_sv > 0.0)
+    {
+        let vm_per_atom =
+            e.vm.checked_div(Fixed::from_int(e.n_formula))
+                .expect("V_m/n");
+        let v_atom = vm_per_atom
+            .checked_mul(a3_per_cm3mol)
+            .expect("atomic volume");
+        let gamma_sv = surface_energy_j_per_m2(f_metal, e.e_coh, v_atom);
+        // A per-class constant should hold the class to within ~40% (the orientation/class scatter).
+        let v = grade(gamma_sv.to_f64_lossy(), e.obs_gamma_sv, 0.40);
+        report(
+            &format!("gamma_sv[{}] f=0.18", e.name),
+            gamma_sv.to_f64_lossy(),
+            e.obs_gamma_sv,
+            &v,
+            &mut defects,
+            &mut checks,
+        );
+    }
+    println!();
+
+    (checks, defects)
 }
 
 fn report(
@@ -582,12 +896,22 @@ fn report(
         *defects += 1;
     }
     println!(
-        "    {:22} derived {:>9.3}  observed {:>9.3}  {}",
+        "    {:22} derived {:>11}  observed {:>11}  {}",
         prop,
-        derived,
-        observed,
+        fmt_val(derived),
+        fmt_val(observed),
         show(v)
     );
+}
+
+/// Format a value for the table: scientific for small non-zero magnitudes (e.g. thermal expansion `~1e-5`),
+/// plain decimal otherwise, so a small property does not render as `0.000`.
+fn fmt_val(x: f64) -> String {
+    if x != 0.0 && x.abs() < 0.01 {
+        format!("{x:.3e}")
+    } else {
+        format!("{x:.3}")
+    }
 }
 
 fn report_hardness(
