@@ -293,7 +293,8 @@ pub fn kramers_free_free_opacity(
     let t = nonneg_fixed_to_bigrat(temperature_k);
 
     // kappa_ff^2 = RAT^2 * SQ * Phi^2 * comp^2 * rho^2 * g^2 * T^-7 (the squaring removes both sqrt(SQ) and the
-    // T^(-1/2), leaving a clean rational), then a single Fixed::sqrt. T^7 = T^4 * T^2 * T.
+    // T^(-1/2), leaving a clean rational), then a single Fixed::sqrt. T^7 = T^4 * T^2 * T. The whole product is
+    // formed together so the small ~kappa_ff^2 never forms the overflowing A_ff^2 alone.
     let t2 = t.mul(&t);
     let t7 = t2.mul(&t2).mul(&t2).mul(&t);
     let kappa_squared = rat
@@ -311,6 +312,76 @@ pub fn kramers_free_free_opacity(
 
     let bits = kappa_squared.round_to_scale(Fixed::FRAC_BITS)?;
     Some(Fixed::from_bits_i128(bits)?.sqrt())
+}
+
+/// The frequency-INDEPENDENT free-free (bremsstrahlung) opacity prefactor `A_ff` (cgs), so the monochromatic
+/// H-plasma free-free opacity is `kappa_ff_nu(x) = A_ff * free_free_shape(x)`, which the total-opacity assembly
+/// sums with the other monochromatic terms BEFORE Rosseland-averaging (the Rosseland mean is not additive, so the
+/// per-term means cannot be summed). It is recovered as `A_ff = kappa_ff / Phi` from the Rosseland free-free
+/// ([`kramers_free_free_opacity`]) and `Phi = rosseland_mean(free_free_shape)`, because the Rosseland mean is
+/// homogeneous of degree one (`rosseland_mean(A_ff * shape) = A_ff * Phi`). Recovered this way rather than from
+/// `sqrt(A_ff^2)` because `A_ff ~ 1e5` overflows Q32.32 when squared, while `A_ff` and `kappa_ff` are both
+/// representable: `kramers` forms the small `kappa_ff^2 = A_ff^2 * Phi^2` together and never `A_ff^2` alone.
+/// `None` if the free-free or the shape mean fails to resolve.
+fn free_free_prefactor(
+    density_g_per_cm3: Fixed,
+    temperature_k: Fixed,
+    hydrogen_mass_fraction: Fixed,
+    charge_weighted_abundance: Fixed,
+    gaunt_factor: Fixed,
+) -> Option<Fixed> {
+    let phi = rosseland_mean(free_free_shape)?;
+    let kappa_ff = kramers_free_free_opacity(
+        density_g_per_cm3,
+        temperature_k,
+        hydrogen_mass_fraction,
+        charge_weighted_abundance,
+        gaunt_factor,
+    )?;
+    kappa_ff.checked_div(phi)
+}
+
+/// The TOTAL gas/plasma Rosseland-mean opacity `kappa_R` (cm^2/g): the assembly of the gas terms into the single
+/// opacity the disk reads, `kappa_R = rosseland_mean(kappa_es + kappa_H-(x) + kappa_ff(x))`. The MONOCHROMATIC
+/// terms sum at each dimensionless frequency `x`, then the whole is Rosseland-averaged: the Rosseland (harmonic)
+/// mean is NOT additive, so the per-term Rosseland means cannot be summed, the monochromatic opacities must be.
+/// Electron scattering ([`electron_scattering_opacity`]) is grey (frequency-independent), so it is the constant
+/// POSITIVE FLOOR that keeps the summed opacity above zero at every `x`, which is exactly what the Rosseland
+/// kernel's strict-positivity precondition needs (a term that vanishes in some window, like H- past its threshold,
+/// is filled by the floor). H- ([`h_minus_opacity`]) is the monochromatic bound-free-plus-free-free spectral
+/// provider; free-free is `A_ff * free_free_shape(x)` with the shared prefactor. This is the GAS HALF of the disk
+/// opacity closure; the grain terms join the same sum in the grain slice. `T`, `rho`, `X`, `<Z^2/A>`, the Gaunt
+/// factor, and the electron pressure are the plasma state (caller data, admit-the-alien). `None` if a term or the
+/// mean fails to resolve.
+#[allow(clippy::too_many_arguments)]
+pub fn total_gas_rosseland_opacity(
+    temperature_k: Fixed,
+    density_g_per_cm3: Fixed,
+    hydrogen_mass_fraction: Fixed,
+    charge_weighted_abundance: Fixed,
+    gaunt_factor: Fixed,
+    electron_pressure_dyn_cm2: Fixed,
+    table: &PeriodicTable,
+) -> Option<Fixed> {
+    let kappa_es = electron_scattering_opacity(hydrogen_mass_fraction, table)?;
+    let a_ff = free_free_prefactor(
+        density_g_per_cm3,
+        temperature_k,
+        hydrogen_mass_fraction,
+        charge_weighted_abundance,
+        gaunt_factor,
+    )?;
+    rosseland_mean(|x| {
+        let ff = a_ff.checked_mul(free_free_shape(x)?)?;
+        let hm = h_minus_opacity(
+            x,
+            temperature_k,
+            hydrogen_mass_fraction,
+            electron_pressure_dyn_cm2,
+            table,
+        )?;
+        kappa_es.checked_add(ff)?.checked_add(hm)
+    })
 }
 
 /// The John 1988 photodetachment threshold wavelength `lambda_0` (micron) of the H- bound-free cross-section fit:
@@ -1552,6 +1623,63 @@ mod tests {
         assert!(
             (3.68e22..=3.8e22).contains(&c_ff),
             "the derived C_ff lands in the cited [3.68e22, 3.8e22] envelope, got {c_ff:e}"
+        );
+    }
+
+    #[test]
+    fn the_total_gas_opacity_assembles_above_the_electron_scattering_floor() {
+        // The gas-side closure: the monochromatic terms (electron scattering grey, H-, free-free) SUM at each
+        // frequency and the whole is Rosseland-averaged (not the per-term means summed, the mean is not additive).
+        // The grey electron-scattering floor keeps the sum positive everywhere, so the strict-positivity kernel
+        // succeeds and the assembled opacity is at least the floor, and strictly above it where free-free is
+        // present. A hot ionized state (T = 8000 K), the free-free / electron-scattering regime.
+        let tbl = table();
+        let (temp, rho, x, z2a, g, p_e) = (
+            Fixed::from_int(8000),
+            Fixed::from_ratio(1, 1_000_000),
+            Fixed::from_ratio(7, 10),
+            Fixed::ONE,
+            Fixed::ONE,
+            Fixed::from_int(10),
+        );
+        let total = total_gas_rosseland_opacity(temp, rho, x, z2a, g, p_e, &tbl)
+            .expect("the gas closure assembles");
+        let floor = electron_scattering_opacity(x, &tbl).unwrap();
+        assert!(
+            total > Fixed::ZERO,
+            "the assembled gas opacity is positive (the floor holds through the Rosseland mean)"
+        );
+        assert!(
+            total >= floor,
+            "the assembled opacity is at least the electron-scattering floor ({} vs {})",
+            total.to_f64_lossy(),
+            floor.to_f64_lossy()
+        );
+        assert!(
+            total > floor,
+            "free-free lifts the opacity above the bare floor at this hot dense state"
+        );
+        // Deterministic, and a thinner gas (less free-free) falls toward the floor.
+        assert_eq!(
+            total,
+            total_gas_rosseland_opacity(temp, rho, x, z2a, g, p_e, &tbl).unwrap(),
+            "the assembly replays byte for byte"
+        );
+        let thin = total_gas_rosseland_opacity(
+            temp,
+            Fixed::from_ratio(1, 1_000_000_000),
+            x,
+            z2a,
+            g,
+            p_e,
+            &tbl,
+        )
+        .unwrap();
+        assert!(
+            thin < total,
+            "a thinner gas has a lower free-free contribution ({} vs {})",
+            thin.to_f64_lossy(),
+            total.to_f64_lossy()
         );
     }
 
