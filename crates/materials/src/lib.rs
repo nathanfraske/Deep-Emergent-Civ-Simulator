@@ -51,6 +51,7 @@ pub mod correlation;
 pub mod creep;
 pub mod electronic;
 pub mod freezer;
+pub mod harrison;
 pub mod localized;
 pub mod log;
 pub mod memo;
@@ -81,6 +82,7 @@ pub use electronic::{
     carrier_density_per_nm3, drude_conductivity_from_tau, drude_conductivity_s_per_m,
     drude_scattering_time_fs, plasma_energy_ev, ElectronicRoute,
 };
+pub use harrison::{eta, two_center_matrix_element, TwoCenterBond};
 pub use localized::LocalizedRoute;
 pub use log::{VerdictKind, VerdictLog, VerdictRecord};
 pub use memo::Memo;
