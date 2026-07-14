@@ -21,10 +21,13 @@
 //! polar energy `V_3 = (eps_h_A - eps_h_B) / 2` with the sp3 hybrid term value `eps_h = (eps_s + 3 * eps_p) / 4`.
 //! No consumer is wired to it in any pinned run path yet (byte-neutral).
 //!
-//! GATED ON THE FETCH. The standard column is seeded EMPTY: the term values are the owner's reserved book fetch
-//! (Herman-Skillman Hartree-Fock, cited at delivery), NEVER seeded from memory. The estimator escalates on any
-//! element until the fetch populates the column, the same shape as the compute-once guard: the mechanism is built
-//! now, the data lands on the fetch.
+//! PROVENANCE (owner-delivered primary, the Slack-loop closed). The column carries the Herman & Skillman (1963)
+//! Hartree-Fock-Slater (Xalpha) term values as tabulated in Harrison 1980 Table 2-2 (the Solid State Table
+//! generation), delivered by the owner from the primary source, NEVER seeded from memory. The tag is
+//! `[Herman-Skillman 1963 via Harrison 1980 Table 2-2, cited]`, the SAME generation as the pinned eta quartet, so
+//! the co-conventioned pair is single-provenance. These are HF-class Koopmans-compatible (a Kohn-Sham LDA/PBE
+//! eigenvalue is barred, the PPLB rule); being HFS rather than pure HF, the p-block Koopmans residual sits at the
+//! ~20% gate boundary rather than ~10%.
 //!
 //! THE KOOPMANS CROSS-CHECK. When populated, each row carries a cross-check, never a substitute. Koopmans' theorem
 //! relates the highest occupied orbital energy to the first ionization energy, `eps_HOMO ~ -IE_1`, and for the
@@ -192,17 +195,41 @@ mod tests {
     }
 
     #[test]
-    fn the_standard_column_is_gated_empty_until_the_fetch() {
-        // The term values are the owner's reserved book fetch, so the standard column is seeded EMPTY: the
-        // mechanism is built now, the data lands on the fetch.
-        let tv = TermValues::standard().expect("the empty column loads");
+    fn the_column_carries_the_delivered_herman_skillman_values() {
+        // The owner delivered the primary Harrison 1980 Table 2-2 (Herman-Skillman HFS) term values, so the column
+        // is populated (the Slack-loop closed). Silicon eps_s = -13.55, eps_p = -6.52 eV, both negative with eps_s
+        // deeper. The eight tetrahedral-trend elements are seeded.
+        let tv = TermValues::standard().expect("the column loads");
+        assert!(!tv.is_empty(), "the column carries the delivered values");
+        let si = tv.term_value("Si").expect("Si term values");
         assert!(
-            tv.is_empty(),
-            "the standard column is gated empty until the fetch"
+            close(si.eps_s, -13.55, 0.005) && close(si.eps_p, -6.52, 0.005),
+            "Si eps_s = -13.55, eps_p = -6.52 eV"
         );
         assert!(
-            tv.term_value("Si").is_none(),
-            "no term value until the fetch"
+            si.eps_s < si.eps_p,
+            "eps_s is deeper (more negative) than eps_p"
+        );
+        for symbol in ["C", "Si", "Ge", "Sn", "Ga", "As", "Zn", "Se"] {
+            assert!(tv.term_value(symbol).is_some(), "{symbol} is seeded");
+        }
+    }
+
+    #[test]
+    fn the_hfs_koopmans_residual_sits_at_the_20_percent_gate_boundary() {
+        // The delivered values are Hartree-Fock-SLATER (Xalpha), not pure HF, so the p-block Koopmans residual
+        // (eps_p vs -IE_1) sits at ~18-20%, at the ~20% gate boundary (a pure-HF column would run ~10%; a DFT-LSD
+        // column 30-50%). Silicon eps_p = -6.52 vs -IE_1 ~ -8.15 is ~20%. The gate is calibrated for HFS, and the
+        // owner's earlier ~7-10% recollection was optimistic for this HFS generation.
+        let tv = TermValues::standard().expect("column");
+        let table = PeriodicTable::standard().expect("periodic table");
+        let si = tv
+            .koopmans_residual_fraction("Si", &table)
+            .expect("Si residual");
+        assert!(
+            (0.15..0.25).contains(&si.to_f64_lossy()),
+            "Si HFS Koopmans residual ~ 20% (HFS, not pure HF), got {}",
+            si.to_f64_lossy()
         );
     }
 

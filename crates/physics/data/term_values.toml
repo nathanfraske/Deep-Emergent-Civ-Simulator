@@ -1,17 +1,63 @@
 # The atomic term-value column (crate::term_values), the Harrison sp bond-orbital gap estimator's polar-energy
-# input. Per element the s and p orbital term values in eV (negative, a bound orbital sits below vacuum),
-# provenance [compute-once, cited, historical Herman-Skillman HF]. The gap estimator reads eps_s/eps_p to form the
-# sp3 hybrid term value eps_h = (eps_s + 3*eps_p)/4 and the polar energy V_3 = (eps_h_A - eps_h_B)/2.
+# input. Per element the s and p orbital term values in eV (negative, a bound orbital sits below vacuum). The gap
+# estimator reads eps_s/eps_p to form the sp3 hybrid term value eps_h = (eps_s + 3*eps_p)/4 and the polar energy
+# V_3 = (eps_h_A - eps_h_B)/2.
 #
-# GATED ON THE FETCH: this column is seeded EMPTY. The term values are the owner's reserved book fetch
-# (Herman-Skillman Hartree-Fock), cited at delivery and never seeded from memory. The estimator escalates on any
-# element until the fetch populates the column, the same shape as the compute-once guard. Each fetched row carries
-# a Koopmans cross-check (eps_p ~ -IE_1 at the 10-to-20-percent grade) against the banked ionization-energy column,
-# a coherence gate on the fetch.
+# PROVENANCE (owner-delivered primary, the Slack-loop closed): the values are Herman & Skillman (1963) Hartree-
+# Fock-Slater (Xalpha) atomic term values as tabulated in W. A. Harrison, "Electronic Structure and the Properties
+# of Solids" (Freeman 1980; Dover 1989), Table 2-2 (the Solid State Table generation), delivered by the owner from
+# the primary source. This is the SAME generation as the pinned eta quartet (rider 1), so the co-conventioned pair
+# is single-provenance. Tag: [Herman-Skillman 1963 via Harrison 1980 Table 2-2, cited].
 #
-# Row shape once the fetch lands (example, NOT a seeded value):
-#   [[term_value]]
-#   symbol = "Si"
-#   eps_s_ev = "..."   # negative, cited Herman-Skillman HF
-#   eps_p_ev = "..."   # negative, cited Herman-Skillman HF
-#   source = "Herman & Skillman 1963 (via Harrison 1980), ..."
+# KOOPMANS DEFINITION TAG: these are HF-class Koopmans-compatible (Hartree-Fock-Slater / Xalpha), so eps_p ~ -IE_1
+# holds. Herman-Skillman being HFS rather than pure HF, the p-block residual sits at ~18-20% (Si eps_p -6.52 vs
+# -IE_1 -8.15 = 20%), at the ~20% Koopmans gate boundary (HF ~10% pass, LDA 30-50% fail), NOT the ~7-10% a pure-HF
+# column would give. A Kohn-Sham LDA/PBE eigenvalue (NIST DFT) is barred from this column (the PPLB rule).
+
+[[term_value]]
+symbol = "C"
+eps_s_ev = "-17.52"
+eps_p_ev = "-8.97"
+source = "Herman & Skillman 1963 (HFS) via Harrison 1980 Table 2-2 (Solid State Table)"
+
+[[term_value]]
+symbol = "Si"
+eps_s_ev = "-13.55"
+eps_p_ev = "-6.52"
+source = "Herman & Skillman 1963 (HFS) via Harrison 1980 Table 2-2 (Solid State Table)"
+
+[[term_value]]
+symbol = "Ge"
+eps_s_ev = "-14.38"
+eps_p_ev = "-6.36"
+source = "Herman & Skillman 1963 (HFS) via Harrison 1980 Table 2-2 (Solid State Table)"
+
+[[term_value]]
+symbol = "Sn"
+eps_s_ev = "-12.50"
+eps_p_ev = "-5.94"
+source = "Herman & Skillman 1963 (HFS) via Harrison 1980 Table 2-2 (Solid State Table)"
+
+[[term_value]]
+symbol = "Ga"
+eps_s_ev = "-11.37"
+eps_p_ev = "-4.90"
+source = "Herman & Skillman 1963 (HFS) via Harrison 1980 Table 2-2 (Solid State Table)"
+
+[[term_value]]
+symbol = "As"
+eps_s_ev = "-17.33"
+eps_p_ev = "-7.91"
+source = "Herman & Skillman 1963 (HFS) via Harrison 1980 Table 2-2 (Solid State Table)"
+
+[[term_value]]
+symbol = "Zn"
+eps_s_ev = "-8.40"
+eps_p_ev = "-3.38"
+source = "Herman & Skillman 1963 (HFS) via Harrison 1980 Table 2-2 (Solid State Table; 4p extrapolated)"
+
+[[term_value]]
+symbol = "Se"
+eps_s_ev = "-20.32"
+eps_p_ev = "-9.53"
+source = "Herman & Skillman 1963 (HFS) via Harrison 1980 Table 2-2 (Solid State Table)"
