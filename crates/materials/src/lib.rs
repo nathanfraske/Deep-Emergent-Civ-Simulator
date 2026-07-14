@@ -95,7 +95,8 @@ pub use harrison::{
 pub use localized::LocalizedRoute;
 pub use log::{VerdictKind, VerdictLog, VerdictRecord};
 pub use magnetism::{
-    d_electron_count_3d, hund_local_moment, hund_unpaired_count, spin_only_moment_bohr,
+    d_electron_count_3d, hund_local_moment, hund_unpaired_count, low_spin_unpaired_count,
+    octahedral_spin_decision, octahedral_spin_moment, spin_only_moment_bohr, OctahedralSpin,
 };
 pub use memo::Memo;
 pub use metallic::MetallicRoute;
