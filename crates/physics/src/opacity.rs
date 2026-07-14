@@ -249,9 +249,13 @@ fn free_free_shape(x: Fixed) -> Option<Fixed> {
     one_minus.checked_div(x3)
 }
 
-/// The KRAMERS FREE-FREE (bremsstrahlung) Rosseland opacity `kappa_ff` (cm^2/g), DERIVED from the fundamentals
-/// through the shared Rosseland kernel, never read from the Bell-Lin fit. A free electron accelerating past an ion
-/// radiates a continuum; the bound-free-corrected absorption coefficient carries the spectral shape
+/// The KRAMERS FREE-FREE (bremsstrahlung) Rosseland opacity `kappa_ff_ion` (cm^2/g), DERIVED from the fundamentals
+/// through the shared Rosseland kernel, never read from the Bell-Lin fit. DEFINITION TAG: this is `kappa_ff_ion`,
+/// an electron scattering off a POSITIVE ION, scaling as `n_e sum(Z_i^2 n_i)`; it is a DIFFERENT channel from the
+/// H- free-free [`h_minus_free_free_opacity`] (`kappa_ff_Hminus`, an electron off a NEUTRAL hydrogen, scaling as
+/// `(X/m_H) P_e`). Both are additive in the monochromatic sum but key off different densities and must never be
+/// merged. A free electron accelerating past an ion radiates a continuum; the bound-free-corrected absorption
+/// coefficient carries the spectral shape
 /// [`free_free_shape`] `x^-3 (1 - e^-x)`, and its Rosseland mean is the classic
 /// `kappa_ff = C_ff * (1+X) * <Z^2/A> * g_ff * rho * T^(-7/2)` (cgs). The whole point of the generator is that
 /// `C_ff` is NOT the fitted `~3.68e22`: it reassembles from the bremsstrahlung prefactor and the kernel's Rosseland
@@ -825,14 +829,28 @@ fn h_minus_ff_sum(
     Some(sum)
 }
 
-/// The monochromatic H- FREE-FREE opacity `kappa_ff` (cm^2/g) at dimensionless frequency `x = h*nu/(k_B*T)`, the H-
-/// gas term that fills the below-photodetachment-threshold window the bound-free leaves empty (so the assembled
-/// bf+ff H- opacity is positive at every frequency and can be Rosseland-averaged). A neutral hydrogen, a free
-/// electron, and a photon interact (`H0 + e- + photon`) with no threshold, so this term is continuous across all
-/// wavelengths and rises to the infrared. The absorption coefficient is the cited John 1988 eq. 6 fit
+/// The monochromatic H- FREE-FREE opacity `kappa_ff_Hminus` (cm^2/g) at dimensionless frequency `x = h*nu/(k_B*T)`,
+/// the H- gas term that fills the below-photodetachment-threshold window the bound-free leaves empty (so the
+/// assembled bf+ff H- opacity is positive at every frequency and can be Rosseland-averaged). A neutral hydrogen, a
+/// free electron, and a photon interact (`H0 + e- + photon`) with no threshold, so this term is continuous across
+/// all wavelengths and rises to the infrared. The absorption coefficient is the cited John 1988 eq. 6 fit
 /// (`kappa_ff_coeff = 1e-29 * sum_n (5040/T)^((n+1)/2) * poly_n(lambda)`, cm^4/dyn per neutral H per electron
 /// pressure, [`h_minus_ff_region1`]/[`h_minus_ff_region2`]) times `(X / m_H) * P_e`, so
-/// `kappa_ff = kappa_ff_coeff * (X / m_H) * P_e`.
+/// `kappa_ff_Hminus = kappa_ff_coeff * (X / m_H) * P_e`.
+///
+/// DEFINITION TAG (the two free-free channels are DISTINCT physics and must never be merged): this is
+/// `kappa_ff_Hminus`, an electron scattering off a NEUTRAL hydrogen atom (the transient H- during the encounter),
+/// so it scales as the neutral-H density times the electron pressure, `(X/m_H) P_e`. It is NOT the electron-ION
+/// bremsstrahlung [`kramers_free_free_opacity`] (`kappa_ff_ion`), which is an electron scattering off a POSITIVE
+/// ion and scales as `n_e sum(Z_i^2 n_i)`. Both are real and ADDITIVE in the monochromatic sum, but they key off
+/// different densities (neutral H versus ions) and different ionization powers; joining them, or feeding one's
+/// density to the other, is the definition-mismatch class this codebase legislates against.
+///
+/// DECLARED REDUCTION: this per-`P_e` form is exact BECAUSE the actual H- number density is a negligible fraction
+/// of the electrons, `n(H-)/n_e ~ 1e-8` (the Saha population of a 0.754 eV binding at stellar temperatures). H- is
+/// never a bulk species to track; the opacity is a per-encounter cross section carried by the neutral-H population
+/// and the electron pressure, which is exactly why the stellar-atmosphere form is written per neutral H per `P_e`
+/// rather than over an explicit H- density.
 ///
 /// The only fetched piece is the fit's coefficients (the cited [M] tier); the `5040/T` temperature scaling, the
 /// `hc/k` wavelength fold, and the `m_H` from the periodic table all derive. The polynomial sum runs in exact
@@ -2241,6 +2259,34 @@ mod tests {
             &t,
         );
         assert_eq!(a, b, "the H- free-free derivation replays byte for byte");
+    }
+
+    #[test]
+    fn the_h_minus_opacity_has_its_minimum_near_the_photodetachment_threshold() {
+        // The pre-registered 1.64 micron battery row: the assembled bf+ff H- opacity has its MINIMUM near the
+        // 1.6419 micron photodetachment threshold, where the bound-free (peaking near 0.85 micron) has cut off and
+        // the free-free (rising to the infrared) has not yet climbed. This is the famous H- opacity window that lets
+        // us see deepest into a star near 1.6 micron. At T = 6000 K, x = (hc/k)/(lambda T) = 2.398/lambda_um, so
+        // lambda = 1.0, 1.6419, 3.0 micron are x = 2.398, 1.4605, 0.799.
+        let t = table();
+        let temp = Fixed::from_int(6000);
+        let (x_val, p_e) = (Fixed::from_ratio(7, 10), Fixed::from_int(100));
+        let short = h_minus_opacity(Fixed::from_ratio(2398, 1000), temp, x_val, p_e, &t).unwrap();
+        let minimum =
+            h_minus_opacity(Fixed::from_ratio(14605, 10000), temp, x_val, p_e, &t).unwrap();
+        let long = h_minus_opacity(Fixed::from_ratio(799, 1000), temp, x_val, p_e, &t).unwrap();
+        assert!(
+            minimum < short,
+            "H- opacity at the 1.64 micron threshold is below the bound-free peak side ({} vs {})",
+            minimum.to_f64_lossy(),
+            short.to_f64_lossy()
+        );
+        assert!(
+            minimum < long,
+            "H- opacity at the 1.64 micron threshold is below the infrared free-free side ({} vs {})",
+            minimum.to_f64_lossy(),
+            long.to_f64_lossy()
+        );
     }
 
     fn optics() -> crate::optical_constants::OpticalConstants {
