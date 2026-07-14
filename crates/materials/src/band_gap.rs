@@ -15,7 +15,8 @@
 //! Stage 6, the band-gap tier (`docs/working/STAGE6_ELECTRONIC_STRUCTURE_DESIGN.md`, section 10): the
 //! fabrication-free core the tier's design surface ruled buildable now (independent of the Harrison-rung fork held
 //! for the gate). Slice 1 is the log-space thermal carrier activation; slice 2 is the emergent conduction
-//! classification with the `U/W` preflight over the banked correlation classifier.
+//! classification with the `U/W` preflight over the banked correlation classifier; slice 3b reads the banked
+//! band-gap column (the physics `[M]`/compute-once floor data) and routes a substance by its provenance.
 //!
 //! A semiconductor's intrinsic carrier density is `n_i = N_eff * exp(-E_gap / 2kT)`, thermally activated across
 //! the gap. The activation factor `exp(-E_gap / 2kT)` is the RANGE-CENSUS flag of the electronic sub-arc: for a
@@ -42,6 +43,7 @@
 //! Byte-neutral: `civsim-materials` is a leaf, not linked into the run_world binary.
 
 use civsim_core::Fixed;
+use civsim_physics::band_gap::BandGapColumn;
 
 use crate::correlation::{CorrelationClass, CorrelationClassifier};
 
@@ -158,6 +160,24 @@ pub fn conduction_class_estimated(
         CorrelationClass::Localized => ConductionClass::CorrelatedInsulator,
         CorrelationClass::Window | CorrelationClass::OutOfScope => ConductionClass::Escalate,
         CorrelationClass::Itinerant => conduction_class_from_gap(gap_ev, temperature_k),
+    }
+}
+
+/// The conduction class from the banked band-gap column (the tier's top and bottom rungs), reading a substance's
+/// gap and its provenance and routing accordingly. Every row in the column is AUTHORITATIVE, a measured `[M]` gap
+/// or a compute-once hybrid/GW eigenvalue, and each encodes the correlation gap (a Mott insulator's charge-transfer
+/// gap included), so the gap-sign sort runs directly with NO `U/W` preflight; the preflight is only for the
+/// reduced-order Harrison estimator (the held middle rung, which is not a column). A substance absent from the
+/// column has no banked gap: the reduced-order route would sit there, and until it lands the tier escalates rather
+/// than guess. Reserves no value: the gap is the column's cited data, the temperature the world's.
+pub fn conduction_class_from_column(
+    column: &BandGapColumn,
+    composition: &[(String, u32)],
+    temperature_k: Fixed,
+) -> ConductionClass {
+    match column.gap(composition) {
+        Some(band_gap) => conduction_class_measured(band_gap.gap_ev, temperature_k),
+        None => ConductionClass::Escalate,
     }
 }
 
@@ -394,6 +414,71 @@ mod tests {
         assert!(
             matches!(si_measured, ConductionClass::NonMetal { .. }),
             "measured silicon is a semiconductor"
+        );
+    }
+
+    #[test]
+    fn the_column_consumer_sorts_a_seeded_semiconductor_and_a_mott_insulator() {
+        // Slice 3b: the banked column drives the classification. Silicon's cited 1.12 eV measured gap sorts it a
+        // non-metal semiconductor; NiO's cited 4.3 eV measured gap sorts it a non-metal insulator (a Mott insulator
+        // whose MEASURED gap is authoritative, so it sorts correctly with no preflight, and is far more suppressed
+        // than the semiconductor). The metal/insulator split is the continuous activation from the banked gaps.
+        let col = BandGapColumn::standard().expect("the band-gap column loads");
+        let t300 = Fixed::from_int(300);
+        let si = conduction_class_from_column(&col, &comp(&[("Si", 1)]), t300);
+        let nio = conduction_class_from_column(&col, &comp(&[("Ni", 1), ("O", 1)]), t300);
+        match (si, nio) {
+            (
+                ConductionClass::NonMetal {
+                    ln_activation: si_ln,
+                },
+                ConductionClass::NonMetal {
+                    ln_activation: nio_ln,
+                },
+            ) => {
+                assert!(
+                    nio_ln < si_ln,
+                    "the 4.3 eV Mott insulator is far more suppressed than the 1.12 eV semiconductor"
+                );
+            }
+            _ => panic!("Si and NiO sort as non-metals from their banked measured gaps"),
+        }
+    }
+
+    #[test]
+    fn the_column_consumer_escalates_a_substance_with_no_banked_gap() {
+        // A substance absent from the column has no banked [M] or compute-once gap, so the tier escalates (the
+        // reduced-order Harrison route, held, would sit there). Aluminium is a metal, not a gapped substance, and
+        // is not in the seeded gap column.
+        let col = BandGapColumn::standard().expect("the band-gap column loads");
+        let t300 = Fixed::from_int(300);
+        assert_eq!(
+            conduction_class_from_column(&col, &comp(&[("Al", 1)]), t300),
+            ConductionClass::Escalate,
+            "a substance with no banked gap escalates (the reduced-order route is held)"
+        );
+    }
+
+    #[test]
+    fn a_compute_once_gw_row_routes_authoritatively_like_a_measurement() {
+        // A COMPUTE-ONCE hybrid/GW gap is authoritative (it encodes the correlation gap), so the column consumer
+        // routes it through the gap-sign sort exactly as a measurement, with no U/W preflight. (A test-only GW
+        // fixture; the standard column is all measured until a cited GW value is banked.)
+        let fixture = r#"
+[[gap]]
+name = "test GW semiconductor"
+composition = { Xx = 1 }
+gap_ev = "2.0"
+provenance = "computed"
+functional = "GW"
+source = "test-only fixture"
+"#;
+        let col = BandGapColumn::from_toml_str(fixture).expect("the fixture column loads");
+        let t300 = Fixed::from_int(300);
+        let xx = conduction_class_from_column(&col, &comp(&[("Xx", 1)]), t300);
+        assert!(
+            matches!(xx, ConductionClass::NonMetal { .. }),
+            "a compute-once GW gap routes authoritatively (a non-metal via its gap), no preflight"
         );
     }
 }
