@@ -7,7 +7,7 @@ slicing and the residue treatment before any machinery is built.
 
 ## 1. Why the irradiated regime alone is incomplete
 
-`disk_midplane_temperature` (front-end slice 2) covers the IRRADIATED, passive, optically-thin regime: the disk
+`irradiated_disk_temperature` (front-end slice 2) covers the IRRADIATED, passive, optically-thin regime: the disk
 annulus at `r` reprocesses the stellar flux `F(r) = L/(4*pi*r^2)` and reaches `sigma*T^4 = reprocessing_factor*F(r)`.
 That is the OUTER disk. The disk-thermal skeleton condensation needs has two derived heat sources, not one:
 
@@ -86,12 +86,12 @@ kernels, a fixed cap, integer-only: determinism holds by construction.
 
 ## 6. The reprocessing-factor reconciliation (the gate's flag on slice 2)
 
-The gate flagged that `disk_midplane_temperature`'s `1/4` folds the surface-versus-midplane optical-depth
+The gate flagged that `irradiated_disk_temperature`'s `1/4` folds the surface-versus-midplane optical-depth
 distinction into one number. The resolution in the completed profile: the irradiation term KEEPS its surface
 form (the `1/4` optically-thin value is the correct passive-surface equilibrium, and irradiation heats the surface,
 not the interior), while the optically-thick BOOST applies to the VISCOUS term through `tau_R`. So
-`disk_midplane_temperature` stays the irradiation contribution (`T_irr`), and the two-regime function is the new
-completed reader condensation consumes. Question for the gate: keep `disk_midplane_temperature` as the `T_irr`
+`irradiated_disk_temperature` stays the irradiation contribution (`T_irr`), and the two-regime function is the new
+completed reader condensation consumes. Question for the gate: keep `irradiated_disk_temperature` as the `T_irr`
 term unchanged, or fold it into the combined function.
 
 ## 7. Derive-not-fit anchors (the acceptance checks, never fit)
@@ -109,5 +109,5 @@ term unchanged, or fold it into the combined function.
 Confirm the slicing (3a viscous `T_eff`, 3b regime sum, 3c opacity closure plus midplane fixed point), and rule
 on three choices: (1) `Mdot` as a caller residue now versus `alpha` as the primitive with `Mdot` derived;
 (2) the opacity as a data-defined registry with emergent regime boundaries (the recommended shape); and
-(3) whether `disk_midplane_temperature` stays the `T_irr` term or is subsumed. Slice 3a is ready to build the
+(3) whether `irradiated_disk_temperature` stays the `T_irr` term or is subsumed. Slice 3a is ready to build the
 moment the slicing and the `Mdot` treatment are confirmed.

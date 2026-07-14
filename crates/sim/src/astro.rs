@@ -152,14 +152,17 @@ pub fn stellar_effective_temperature(
     ))
 }
 
-/// The DISK MID-PLANE TEMPERATURE `T(r)` (K) at an orbital distance, DERIVED from irradiation balance: the disk
-/// annulus at distance `r` intercepts the stellar flux `F(r) = L/(4*pi*r^2)` ([`stellar_flux`], the same flux a
-/// world at that orbit receives), absorbs a geometry-set fraction of it, and re-radiates in thermal equilibrium,
-/// so `sigma*T^4 = reprocessing_factor*F(r)` and `T(r) = (reprocessing_factor*F(r)/sigma)^(1/4)`. This is the
-/// radial temperature profile the condensation sequence reads: it sets WHERE each material condenses (its
-/// snow line), because `T` falls with distance as `F^(1/4) ~ r^(-1/2)`, so a volatile that condenses below some
-/// temperature has a condensation front at the radius where `T(r)` crosses it. `sigma` is the CODATA-derived
-/// Stefan-Boltzmann constant ([`crate::physiology::derived_stefan_boltzmann`]), never authored.
+/// The IRRADIATED-DISK (surface-equilibrium) TEMPERATURE `T_irr(r)` (K) at an orbital distance, DERIVED from
+/// irradiation balance: the disk annulus at distance `r` intercepts the stellar flux `F(r) = L/(4*pi*r^2)`
+/// ([`stellar_flux`], the same flux a world at that orbit receives), absorbs a geometry-set fraction of it, and
+/// re-radiates in thermal equilibrium, so `sigma*T^4 = reprocessing_factor*F(r)` and
+/// `T_irr(r) = (reprocessing_factor*F(r)/sigma)^(1/4)`. This is the SURFACE term of the two-regime disk-thermal
+/// profile: irradiation heats the disk SURFACE, so it keeps this optically-thin equilibrium form and is not
+/// boosted by the interior optical depth (the viscous term is, in [`disk_effective_temperature`] and the
+/// optically-thick midplane closure). It falls with distance as `F^(1/4) ~ r^(-1/2)`, the outer-disk slope. Named
+/// for the irradiation term rather than the midplane, correcting the earlier misnomer: this is `T_irr`, not the
+/// full midplane temperature. `sigma` is the CODATA-derived Stefan-Boltzmann constant
+/// ([`crate::physiology::derived_stefan_boltzmann`]), never authored.
 ///
 /// Every per-world input is a scenario-set ARGUMENT (the admit-the-alien test): `mass_ratio`, `luminosity_exponent`
 /// (the star's mass and its mass-luminosity residue, together fixing `L`), `distance_au` (the orbit), and
@@ -172,7 +175,7 @@ pub fn stellar_effective_temperature(
 /// bound). At Earth's orbit (`mass_ratio = 1`, `distance_au = 1`, `reprocessing_factor = 1/4`) this derives the
 /// ~278 K blackbody equilibrium temperature from `L_sun`, the AU, and the derived `sigma` alone, the derive-not-fit
 /// anchor. `None` on a non-positive distance or a flux past the representable range.
-pub fn disk_midplane_temperature(
+pub fn irradiated_disk_temperature(
     mass_ratio: Fixed,
     luminosity_exponent: Fixed,
     distance_au: Fixed,
@@ -347,7 +350,7 @@ mod tests {
         // atmosphere arc supplies later; here the airless blackbody value is the DERIVED anchor). Nothing tuned:
         // it falls out of L_sun, the AU, and the CODATA-derived sigma.
         let t_max = Fixed::from_int(100_000);
-        let t = disk_midplane_temperature(
+        let t = irradiated_disk_temperature(
             Fixed::ONE,
             Fixed::from_ratio(35, 10),
             Fixed::ONE,
@@ -371,8 +374,9 @@ mod tests {
             Fixed::from_ratio(1, 4),
             Fixed::from_int(100_000),
         );
-        let near = disk_midplane_temperature(Fixed::ONE, alpha, Fixed::ONE, factor, t_max).unwrap();
-        let far = disk_midplane_temperature(Fixed::ONE, alpha, Fixed::from_int(4), factor, t_max)
+        let near =
+            irradiated_disk_temperature(Fixed::ONE, alpha, Fixed::ONE, factor, t_max).unwrap();
+        let far = irradiated_disk_temperature(Fixed::ONE, alpha, Fixed::from_int(4), factor, t_max)
             .unwrap();
         let ratio = near.to_f64_lossy() / far.to_f64_lossy();
         assert!(
@@ -390,9 +394,11 @@ mod tests {
             Fixed::from_ratio(1, 4),
             Fixed::from_int(100_000),
         );
-        let sun = disk_midplane_temperature(Fixed::ONE, alpha, Fixed::ONE, factor, t_max).unwrap();
-        let heavy = disk_midplane_temperature(Fixed::from_int(2), alpha, Fixed::ONE, factor, t_max)
-            .unwrap();
+        let sun =
+            irradiated_disk_temperature(Fixed::ONE, alpha, Fixed::ONE, factor, t_max).unwrap();
+        let heavy =
+            irradiated_disk_temperature(Fixed::from_int(2), alpha, Fixed::ONE, factor, t_max)
+                .unwrap();
         assert!(
             heavy > sun,
             "a brighter star warms the disk at the same orbit"
@@ -404,7 +410,7 @@ mod tests {
         // T ~ reprocessing_factor^(1/4): a sixteen-fold larger factor is a two-fold hotter disk, the geometry
         // residue entering as a fourth root (so its uncertainty is strongly damped in the temperature).
         let (alpha, t_max) = (Fixed::from_ratio(35, 10), Fixed::from_int(100_000));
-        let low = disk_midplane_temperature(
+        let low = irradiated_disk_temperature(
             Fixed::ONE,
             alpha,
             Fixed::ONE,
@@ -413,7 +419,7 @@ mod tests {
         )
         .unwrap();
         let high =
-            disk_midplane_temperature(Fixed::ONE, alpha, Fixed::ONE, Fixed::ONE, t_max).unwrap();
+            irradiated_disk_temperature(Fixed::ONE, alpha, Fixed::ONE, Fixed::ONE, t_max).unwrap();
         let ratio = high.to_f64_lossy() / low.to_f64_lossy();
         assert!(
             (ratio - 2.0).abs() < 0.05,
@@ -424,7 +430,7 @@ mod tests {
     #[test]
     fn a_non_positive_disk_distance_routes_to_none() {
         assert_eq!(
-            disk_midplane_temperature(
+            irradiated_disk_temperature(
                 Fixed::ONE,
                 Fixed::from_ratio(35, 10),
                 Fixed::ZERO,
