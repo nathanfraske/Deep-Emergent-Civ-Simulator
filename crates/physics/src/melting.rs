@@ -461,6 +461,37 @@ pub fn multicomponent_solidus(endmembers: &[Endmember], pressure_bar: Fixed) -> 
     lo.checked_add(hi_b)?.checked_div(two)
 }
 
+/// The FIRST-MELT (eutectic) LIQUID COMPOSITION of an assemblage: the mole fraction of each endmember in the
+/// liquid at the multi-saturation solidus, in the input order, normalized to sum to one. At the solidus the
+/// saturation curves already sum to one (that is what [`multicomponent_solidus`] solves), so each endmember's
+/// `x_i = liquidus_mole_fraction(i, T_sol)` IS its share of the first liquid: the low-melting endmembers
+/// dominate it and the high-melting ones are left in the residue. This is how the crust DERIVES from the
+/// mantle rather than being authored: a peridotite's first melt comes out enriched in the fusible minerals
+/// (clinopyroxene, plagioclase: a basalt) and depleted in olivine, so the melt is the crust and the residue is
+/// the refractory mantle, both emergent from the same signatures. `None` on an empty or non-physical
+/// assemblage. Returns the composition paired with the solidus temperature it was taken at.
+pub fn eutectic_liquid_composition(
+    endmembers: &[Endmember],
+    pressure_bar: Fixed,
+) -> Option<(Fixed, Vec<Fixed>)> {
+    let t_sol = multicomponent_solidus(endmembers, pressure_bar)?;
+    let mut xs: Vec<Fixed> = Vec::with_capacity(endmembers.len());
+    let mut total = Fixed::ZERO;
+    for em in endmembers {
+        let shifted = at_pressure(*em, pressure_bar)?;
+        let x = liquidus_mole_fraction(shifted, t_sol)?;
+        total = total.checked_add(x)?;
+        xs.push(x);
+    }
+    if total <= Fixed::ZERO {
+        return None;
+    }
+    for x in &mut xs {
+        *x = x.checked_div(total)?; // normalize the tiny fixed-point residual to an exact unit sum
+    }
+    Some((t_sol, xs))
+}
+
 /// The result of an adiabatic decompression melting column: the crustal thickness it produces, the melt
 /// fraction at the top of the column, and the pressure at which melting began.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1053,6 +1084,40 @@ mod tests {
         assert!(
             hot.crust_thickness_km > normal.crust_thickness_km,
             "the derived chain thickens with temperature"
+        );
+    }
+
+    #[test]
+    fn the_peridotite_first_melt_is_a_derived_basalt() {
+        // The crust derives from the mantle: the first melt of the four-mineral lherzolite is enriched in the
+        // fusible clinopyroxene and plagioclase (a basalt) and depleted in the refractory olivine, so the melt
+        // is the oceanic crust and the residue the harzburgite mantle, both from the same signatures.
+        let assemblage = [forsterite(), enstatite(), diopside(), anorthite()];
+        let (t_sol, comp) = eutectic_liquid_composition(&assemblage, Fixed::ZERO).unwrap();
+        assert!(
+            close(t_sol, 1520.0, 6.0),
+            "taken at the solidus, got {}",
+            t_sol.to_f64_lossy()
+        );
+        let (fo, en, di, an) = (
+            comp[0].to_f64_lossy(),
+            comp[1].to_f64_lossy(),
+            comp[2].to_f64_lossy(),
+            comp[3].to_f64_lossy(),
+        );
+        let sum = fo + en + di + an;
+        assert!(
+            (sum - 1.0).abs() < 1e-3,
+            "the liquid composition sums to one, got {sum}"
+        );
+        assert!(
+            fo < 0.15,
+            "olivine is depleted in the melt (stays in the residue), got {fo}"
+        );
+        assert!(di > 0.30, "clinopyroxene is enriched in the melt, got {di}");
+        assert!(
+            di + an > fo,
+            "the melt is basaltic (cpx + plag rich, olivine poor)"
         );
     }
 
