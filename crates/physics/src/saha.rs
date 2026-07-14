@@ -30,7 +30,9 @@
 //! bisection is fold-free and iteration-capped), and only the representable `P_e = n_e k T` is exported. The pinned
 //! transcendentals ([`Fixed::exp`], [`Fixed::ln`]) and the fixed iteration count keep it deterministic.
 
+use crate::periodic::PeriodicTable;
 use civsim_core::Fixed;
+use civsim_units::bignum::BigRat;
 use civsim_units::fundamentals;
 
 /// The natural log of a decimal-string magnitude, for constants that overflow or underflow `Fixed` and so cannot
@@ -68,6 +70,59 @@ pub fn log_sum_exp(a: Fixed, b: Fixed) -> Fixed {
     // lo - hi <= 0; a saturating subtract only matters at the representable rails, which the log domain avoids.
     let d = lo - hi;
     hi + (Fixed::ONE + d.exp()).ln()
+}
+
+/// The eV-to-kelvin factor `e / k_B` (K/eV, ~11605): both `e` and `k_B` underflow `Fixed`, but their ratio is
+/// representable, so the Boltzmann argument `chi/(k T) = chi_eV * (e/k_B) / T` is formed from this ratio rather
+/// than from the underflowing individual constants. Computed once in exact `BigRat`.
+fn ev_to_kelvin() -> Option<Fixed> {
+    let e = BigRat::from_decimal_str(fundamentals::fundamental("e")?.value).ok()?;
+    let k = BigRat::from_decimal_str(fundamentals::fundamental("k_B")?.value).ok()?;
+    Fixed::from_bits_i128(e.div(&k).round_to_scale(Fixed::FRAC_BITS)?)
+}
+
+/// The GROUND-STATE statistical weights `(g_neutral, g_ion)` for the Saha partition-function ratio,
+/// GROUND-STATE-ONLY: at disk temperatures the fine structure of the ground term is unresolved (its splitting is
+/// far below `k T`) so the ground TERM's multiplicity is the partition function, and the excited terms (an eV up)
+/// are unpopulated. Definition-tagged so a mixed-convention weight cannot silently join the shared `n_e`: `g` is
+/// the ground-term multiplicity from the atomic term symbol, cited to the NIST Atomic Spectra Database ground
+/// levels. Hydrogen and the alkalis are `2S` doublet neutrals ionizing to closed-shell singlet ions
+/// (`g0 = 2, g+ = 1`); helium and the alkaline earths are the reverse (`g0 = 1, g+ = 2`). `None` for a species
+/// with no pinned convention, so the solve EXCLUDES it (a rung the metal donors join once cited) rather than
+/// guessing a weight.
+fn ground_state_degeneracies(symbol: &str) -> Option<(Fixed, Fixed)> {
+    let (g0, gp): (i32, i32) = match symbol {
+        "H" | "Li" | "Na" | "K" | "Rb" | "Cs" => (2, 1),
+        "He" | "Be" | "Mg" | "Ca" | "Sr" | "Ba" => (1, 2),
+        _ => return None,
+    };
+    Some((Fixed::from_int(g0), Fixed::from_int(gp)))
+}
+
+/// The log of the single-ionization SAHA function `ln S(T)` for one species, where `S = n_ion n_e / n_neutral`,
+/// assembled in the log domain from the underflow-safe log-constants:
+/// `ln S = ln(2 g+/g0) + (3/2) [ln 2pi + ln m_e + ln k_B + ln T - 2 ln h] - chi_eV (e/k_B) / T`,
+/// with `S` in SI number density (per cubic metre, matching the number densities the charge-neutrality solve
+/// sums). The `2 g+/g0` is the electron-spin-times-partition-ratio, `(2 pi m_e k_B T/h^2)^(3/2)` is the quantum
+/// concentration, and the last term is the Boltzmann factor formed from the representable `e/k_B` ratio and the
+/// FIRST ionization energy read from the measured [`PeriodicTable`] (the periodic table carries the first IE per
+/// element; the successive-IE ladder is a separate transition-metal column). `None` if the species lacks a pinned
+/// degeneracy convention or a first ionization energy, or on a non-positive temperature.
+pub fn ln_saha_factor(symbol: &str, temperature_k: Fixed, table: &PeriodicTable) -> Option<Fixed> {
+    if temperature_k <= Fixed::ZERO {
+        return None;
+    }
+    let (g0, gp) = ground_state_degeneracies(symbol)?;
+    let chi_ev = table.element(symbol)?.ionization_energy?;
+    let g_factor = Fixed::from_int(2).mul(gp).checked_div(g0)?.ln();
+    // (3/2) ln(2 pi m_e k_B T / h^2), each log underflow-safe.
+    let ln_2pi = ln_of_decimal("6.283185307")?;
+    let quantum = ln_2pi + ln_fundamental("m_e")? + ln_fundamental("k_B")? + temperature_k.ln()
+        - Fixed::from_int(2).mul(ln_fundamental("h")?);
+    let ln_quantum_concentration = Fixed::from_ratio(3, 2).mul(quantum);
+    // chi/(k T) = chi_eV * (e/k_B) / T, from the representable ratio.
+    let boltzmann = chi_ev.mul(ev_to_kelvin()?).checked_div(temperature_k)?;
+    Some(g_factor + ln_quantum_concentration - boltzmann)
 }
 
 #[cfg(test)]
@@ -144,5 +199,35 @@ mod tests {
             close(log_sum_exp(Fixed::from_int(30), Fixed::ZERO), 30.0, 1e-6),
             "a dominant term returns itself"
         );
+    }
+
+    fn table() -> PeriodicTable {
+        PeriodicTable::standard().expect("the periodic table loads")
+    }
+
+    #[test]
+    fn the_saha_factor_lands_hydrogen_and_makes_potassium_the_readier_donor() {
+        // ln S(H, 6000 K) = ln(2 g+/g0) + (3/2) ln(2pi m_e k_B T/h^2) - chi/(kT), hand-checked: the g factor is 0
+        // (2*1/2 = 1), the quantum-concentration log ~62.29, the Boltzmann term 13.6 * 11605 / 6000 ~26.30, so
+        // ln S ~35.99.
+        let t = table();
+        let ln_s = ln_saha_factor("H", Fixed::from_int(6000), &t).unwrap();
+        assert!(
+            close(ln_s, 35.99, 0.3),
+            "ln S(H, 6000K) ~ 35.99, got {}",
+            ln_s.to_f64_lossy()
+        );
+        // The inner-disk character: potassium (IE 4.34 eV) ionizes far more readily than hydrogen (13.6 eV) at the
+        // same cool temperature, so it feeds the electron budget below ~3000 K. ln S(K) >> ln S(H).
+        let ln_k = ln_saha_factor("K", Fixed::from_int(3000), &t).unwrap();
+        let ln_h = ln_saha_factor("H", Fixed::from_int(3000), &t).unwrap();
+        assert!(
+            ln_k > ln_h,
+            "K ionizes more readily than H at 3000 K: ln S(K) {} > ln S(H) {}",
+            ln_k.to_f64_lossy(),
+            ln_h.to_f64_lossy()
+        );
+        // A species with no pinned degeneracy convention is excluded, not guessed.
+        assert_eq!(ln_saha_factor("Xx", Fixed::from_int(6000), &t), None);
     }
 }
