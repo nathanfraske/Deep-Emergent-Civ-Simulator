@@ -199,6 +199,114 @@ pub fn batch_melt_fraction(
     }
 }
 
+/// The unclamped partition ratio `K_i = x_i^solid / x_i^liquid = exp[(dH_fus,i/R)(1/T - 1/T_m,i)]` of an
+/// endmember between an ideal solid solution and an ideal liquid, the Turnbull form of the equal-chemical-
+/// potential condition with `dG_fus = dH_fus(1 - T/T_m)` (the same `dCp = 0` grade as the Schroeder-van Laar
+/// liquidus, which is this ratio's reciprocal at a pure solid). Below the melting point `K > 1` (the solid is
+/// enriched in `i`); above it `K < 1`. Unlike [`liquidus_mole_fraction`] it does NOT clamp, since the solid-
+/// solution loop needs the raw ratio on both sides of `T_m`. `None` on a non-physical input.
+fn partition_ratio(endmember: Endmember, temperature_k: Fixed) -> Option<Fixed> {
+    if temperature_k <= Fixed::ZERO
+        || endmember.melting_point_k <= Fixed::ZERO
+        || endmember.fusion_enthalpy_j_per_mol < Fixed::ZERO
+    {
+        return None;
+    }
+    let r = molar_gas_constant();
+    let inv_t = Fixed::ONE.checked_div(temperature_k)?;
+    let inv_tm = Fixed::ONE.checked_div(endmember.melting_point_k)?;
+    let diff = inv_t.checked_sub(inv_tm)?;
+    let dh_over_r = endmember.fusion_enthalpy_j_per_mol.checked_div(r)?;
+    Some(dh_over_r.checked_mul(diff)?.exp())
+}
+
+/// Clamp a fraction to the unit interval `[0, 1]`, the tail-truncation of a lever rule outside its two-phase
+/// window.
+fn clamp_unit(v: Fixed) -> Fixed {
+    if v < Fixed::ZERO {
+        Fixed::ZERO
+    } else if v > Fixed::ONE {
+        Fixed::ONE
+    } else {
+        v
+    }
+}
+
+/// The binary SOLID-SOLUTION LOOP of two ideal endmembers that mix in BOTH the solid and the liquid (a
+/// complete solid solution, the olivine forsterite-fayalite case, the other binary topology beside the
+/// eutectic of pure immiscible solids). At a temperature strictly between the two pure melting points the
+/// liquid and a coexisting solid solution have DIFFERENT compositions, the liquidus and solidus of a lens:
+/// solving the two equal-chemical-potential conditions (one per endmember, `x_i^s = K_i x_i^l`) with each
+/// phase summing to one gives `x_B^liq = (K_A - 1)/(K_A - K_B)` and `x_B^sol = K_B * x_B^liq` in closed form,
+/// no iteration. Returns `(x_B^liquidus, x_B^solidus)`, the liquid and solid `B`-fractions. `None` outside the
+/// melting-point interval (no two-phase equilibrium there) or if the two endmembers share a signature (a
+/// degenerate loop). Whether a pair forms a loop or a eutectic is a property of the pair (their solid
+/// miscibility), read from the pair rather than authored; this is the loop branch, [`binary_eutectic`] the
+/// eutectic branch.
+pub fn binary_solid_solution_loop(
+    a: Endmember,
+    b: Endmember,
+    temperature_k: Fixed,
+) -> Option<(Fixed, Fixed)> {
+    let (tm_lo, tm_hi) = if a.melting_point_k < b.melting_point_k {
+        (a.melting_point_k, b.melting_point_k)
+    } else {
+        (b.melting_point_k, a.melting_point_k)
+    };
+    if temperature_k < tm_lo || temperature_k > tm_hi {
+        return None;
+    }
+    let k_a = partition_ratio(a, temperature_k)?;
+    let k_b = partition_ratio(b, temperature_k)?;
+    let denom = k_a.checked_sub(k_b)?;
+    if denom == Fixed::ZERO {
+        return None; // identical signatures: no lens
+    }
+    let x_b_liq = k_a.checked_sub(Fixed::ONE)?.checked_div(denom)?;
+    let x_b_sol = k_b.checked_mul(x_b_liq)?;
+    Some((clamp_unit(x_b_liq), clamp_unit(x_b_sol)))
+}
+
+/// The equilibrium MELT FRACTION `F` of a binary complete SOLID SOLUTION of bulk `B`-fraction `bulk_fraction_b`
+/// at a temperature, by the LEVER RULE across the lens of [`binary_solid_solution_loop`]. Below the lower pure
+/// melting point the whole system is one solid solution (`F = 0`); above the higher it is all liquid
+/// (`F = 1`); between, a solid of composition `x_B^sol` coexists with a liquid of `x_B^liq`, and
+/// `F = (X_B - x_B^sol)/(x_B^liq - x_B^sol)`, clamped to `[0, 1]` for a bulk outside this temperature's two-
+/// phase window. The lever is orientation-independent (it reads the same whichever endmember is the higher-
+/// melting one), so the caller need not order the pair. `None` on a non-physical endmember, a degenerate loop,
+/// or a bulk fraction outside `[0, 1]`.
+pub fn solution_melt_fraction(
+    a: Endmember,
+    b: Endmember,
+    bulk_fraction_b: Fixed,
+    temperature_k: Fixed,
+) -> Option<Fixed> {
+    if bulk_fraction_b < Fixed::ZERO || bulk_fraction_b > Fixed::ONE {
+        return None;
+    }
+    let (tm_lo, tm_hi) = if a.melting_point_k < b.melting_point_k {
+        (a.melting_point_k, b.melting_point_k)
+    } else {
+        (b.melting_point_k, a.melting_point_k)
+    };
+    if tm_lo <= Fixed::ZERO {
+        return None;
+    }
+    if temperature_k <= tm_lo {
+        return Some(Fixed::ZERO);
+    }
+    if temperature_k >= tm_hi {
+        return Some(Fixed::ONE);
+    }
+    let (x_b_liq, x_b_sol) = binary_solid_solution_loop(a, b, temperature_k)?;
+    let numer = bulk_fraction_b.checked_sub(x_b_sol)?;
+    let denom = x_b_liq.checked_sub(x_b_sol)?;
+    if denom == Fixed::ZERO {
+        return None;
+    }
+    Some(clamp_unit(numer.checked_div(denom)?))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -217,6 +325,19 @@ mod tests {
         Endmember {
             melting_point_k: Fixed::from_int(1830),
             fusion_enthalpy_j_per_mol: Fixed::from_int(133_000),
+        }
+    }
+    // Forsterite and fayalite, the olivine endmembers the second gate's complete solid solution runs on.
+    fn forsterite() -> Endmember {
+        Endmember {
+            melting_point_k: Fixed::from_int(2163),
+            fusion_enthalpy_j_per_mol: Fixed::from_int(114_000),
+        }
+    }
+    fn fayalite() -> Endmember {
+        Endmember {
+            melting_point_k: Fixed::from_int(1490),
+            fusion_enthalpy_j_per_mol: Fixed::from_int(89_000),
         }
     }
 
@@ -310,6 +431,140 @@ mod tests {
             f_high >= f_just && f_just >= f_below,
             "F rises monotonically with temperature"
         );
+    }
+
+    #[test]
+    fn the_forsterite_fayalite_loop_recovers_the_pure_melting_points() {
+        // The other binary topology: a complete solid solution (olivine), a lens with no eutectic. At each
+        // pure melting point the liquidus and solidus meet at the pure composition, and between them the solid
+        // is always enriched in the higher-melting forsterite relative to the coexisting liquid.
+        let (fo, fa) = (forsterite(), fayalite());
+        let (xl_lo, xs_lo) = binary_solid_solution_loop(fo, fa, fa.melting_point_k).unwrap();
+        assert!(
+            close(xl_lo, 1.0, 0.01) && close(xs_lo, 1.0, 0.01),
+            "pure fayalite at its melting point"
+        );
+        let (xl_hi, xs_hi) = binary_solid_solution_loop(fo, fa, fo.melting_point_k).unwrap();
+        assert!(
+            close(xl_hi, 0.0, 0.01) && close(xs_hi, 0.0, 0.01),
+            "pure forsterite at its melting point"
+        );
+        // Interior: the liquid is fayalite-enriched, the solid forsterite-enriched (x_Fa^liq > x_Fa^sol).
+        let (xl, xs) = binary_solid_solution_loop(fo, fa, Fixed::from_int(1800)).unwrap();
+        assert!(
+            xl.to_f64_lossy() > xs.to_f64_lossy(),
+            "the liquid is enriched in the lower-melting fayalite, got liq {} sol {}",
+            xl.to_f64_lossy(),
+            xs.to_f64_lossy()
+        );
+        // Outside the melting-point interval there is no two-phase lens.
+        assert_eq!(
+            binary_solid_solution_loop(fo, fa, Fixed::from_int(1400)),
+            None
+        );
+        assert_eq!(
+            binary_solid_solution_loop(fo, fa, Fixed::from_int(2200)),
+            None
+        );
+    }
+
+    #[test]
+    fn the_forsterite_fayalite_loop_lands_on_the_ideal_lens() {
+        // The ideal lens at two checkpoints, against the closed-form reference (x_Fa^liq, x_Fa^sol):
+        // (0.887, 0.365) at 1700 K and (0.641, 0.136) at 1900 K.
+        let (fo, fa) = (forsterite(), fayalite());
+        let (xl17, xs17) = binary_solid_solution_loop(fo, fa, Fixed::from_int(1700)).unwrap();
+        assert!(
+            close(xl17, 0.887, 0.015),
+            "liquidus x_Fa at 1700 K ~ 0.887, got {}",
+            xl17.to_f64_lossy()
+        );
+        assert!(
+            close(xs17, 0.365, 0.015),
+            "solidus x_Fa at 1700 K ~ 0.365, got {}",
+            xs17.to_f64_lossy()
+        );
+        let (xl19, xs19) = binary_solid_solution_loop(fo, fa, Fixed::from_int(1900)).unwrap();
+        assert!(
+            close(xl19, 0.641, 0.015),
+            "liquidus x_Fa at 1900 K ~ 0.641, got {}",
+            xl19.to_f64_lossy()
+        );
+        assert!(
+            close(xs19, 0.136, 0.015),
+            "solidus x_Fa at 1900 K ~ 0.136, got {}",
+            xs19.to_f64_lossy()
+        );
+    }
+
+    #[test]
+    fn the_solution_melt_fraction_rises_across_the_lens() {
+        // An Fo50Fa50 bulk melts across the lens: all solid below its solidus, partial through it, all liquid
+        // above its liquidus, F an output of the loop geometry. The reference lever values are ~0.26 at 1700 K
+        // and ~0.72 at 1900 K.
+        let (fo, fa) = (forsterite(), fayalite());
+        let x = Fixed::from_ratio(50, 100);
+        let f14 = solution_melt_fraction(fo, fa, x, Fixed::from_int(1400)).unwrap();
+        let f16 = solution_melt_fraction(fo, fa, x, Fixed::from_int(1600)).unwrap();
+        let f17 = solution_melt_fraction(fo, fa, x, Fixed::from_int(1700)).unwrap();
+        let f19 = solution_melt_fraction(fo, fa, x, Fixed::from_int(1900)).unwrap();
+        let f22 = solution_melt_fraction(fo, fa, x, Fixed::from_int(2200)).unwrap();
+        assert_eq!(
+            f14,
+            Fixed::ZERO,
+            "below the lower melting point the system is one solid solution"
+        );
+        assert_eq!(
+            f16,
+            Fixed::ZERO,
+            "an Fo-rich bulk is still below its solidus at 1600 K"
+        );
+        assert!(
+            close(f17, 0.26, 0.03),
+            "partial melt ~0.26 at 1700 K, got {}",
+            f17.to_f64_lossy()
+        );
+        assert!(
+            close(f19, 0.72, 0.03),
+            "partial melt ~0.72 at 1900 K, got {}",
+            f19.to_f64_lossy()
+        );
+        assert_eq!(
+            f22,
+            Fixed::ONE,
+            "above the higher melting point it is all liquid"
+        );
+        assert!(
+            f22 >= f19 && f19 >= f17 && f17 >= f16,
+            "F rises monotonically with temperature"
+        );
+    }
+
+    #[test]
+    fn the_same_eutectic_machinery_admits_the_cryogenic_alien() {
+        // Prime-directive test: the SAME binary_eutectic, unchanged, on cryogenic volatile-ice rows instead of
+        // silicate rows. Water ice (273.15 K, 6010 J/mol) plus ammonia (195.4 K, 5660 J/mol) is the ammonia-
+        // water system whose eutectic is what makes cryovolcanism possible. The ideal eutectic lands near
+        // 180 K, within ~4 K of the experimental ~176 K, so the alien is a data row, not a rewrite. The
+        // composition is far off (x_NH3 ~ 0.74 against the measured ~0.33): ammonia-water is strongly non-
+        // ideal (hydrogen-bonded, hydrate-forming), the honest rung-1 Margules target, not a rung-0 claim.
+        let water = Endmember {
+            melting_point_k: Fixed::from_ratio(27315, 100),
+            fusion_enthalpy_j_per_mol: Fixed::from_int(6010),
+        };
+        let ammonia = Endmember {
+            melting_point_k: Fixed::from_ratio(1954, 10),
+            fusion_enthalpy_j_per_mol: Fixed::from_int(5660),
+        };
+        let (t_e, x_nh3) = binary_eutectic(water, ammonia).expect("the cryogenic curves cross");
+        assert!(
+            close(t_e, 180.2, 3.0),
+            "the ideal ammonia-water eutectic lands near 180 K (experimental ~176 K), got {}",
+            t_e.to_f64_lossy()
+        );
+        // It is a cryogenic eutectic, far below the water melting point, and a valid liquid composition.
+        assert!(t_e.to_f64_lossy() < 195.0 && t_e.to_f64_lossy() > 150.0);
+        assert!(x_nh3.to_f64_lossy() > 0.0 && x_nh3.to_f64_lossy() < 1.0);
     }
 
     #[test]
