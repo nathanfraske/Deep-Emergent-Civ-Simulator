@@ -41,8 +41,13 @@
 //! Q1 (a), the ruled granularity. This slice is the CHARACTERISTIC ENERGIES (the onsets and lines), the
 //! fabrication-free observer-independent core, reserving nothing (each energy is the substance's own electronic
 //! datum: the gap, the plasma energy, the crystal-field splitting). The full absorption/reflection envelope is a
-//! derived follow-on ONLY when its broadening widths derive from the floor (thermal `~ kT`, the lifetime width from
-//! the Drude scattering time already built, phonon widths), never an authored linewidth.
+//! derived follow-on that reads GROUNDED broadening widths: the thermal width `~ k_B T`
+//! ([`thermal_broadening_width_ev`]) and the lifetime width `hbar / tau` from the Drude scattering time
+//! ([`lifetime_broadening_width_ev`]) land here, both reassembled from fundamental constants (the dimensionless-
+//! constant law), never an authored linewidth. The spectrum envelope reads them: [`feature_response_at`] gives a
+//! Lorentzian for a d-d line and a broadened step for an edge, evaluated per feature so the caller sums a
+//! substance's features into the full spectrum, still observer-independent. The phonon broadening width is the
+//! remaining follow-on.
 //!
 //! HONEST LIMITS. The metal route emits the plasma edge; the d-band interband transition that reddens copper and
 //! gold (a `d`-band-to-Fermi-level onset, distinct from a gap) is a named follow-on within the metal route. The d-d
@@ -145,6 +150,111 @@ pub fn falls_in_observer_window(
     energy.energy_ev >= window_low_ev && energy.energy_ev <= window_high_ev
 }
 
+/// The Boltzmann constant in eV/K (`~8.617e-5`), reassembled from the exact `k_B` and `e` mantissas (the
+/// dimensionless-constant law): `k_B[eV/K] = k_B[J/K] / e[C] = (1.380649 / 1.602176634) * 1e-4`, the `1e-4` the net
+/// of `k_B`'s `1e-23` over `e`'s `1e-19`. No folded dimensional decimal is authored.
+fn kb_ev_per_k() -> Fixed {
+    let kb_mantissa = Fixed::from_ratio(1_380_649, 1_000_000);
+    let e_mantissa = Fixed::from_ratio(1_602_176_634, 1_000_000_000);
+    kb_mantissa
+        .checked_div(e_mantissa)
+        .and_then(|r| r.checked_div(Fixed::from_int(10_000)))
+        .unwrap_or(Fixed::ZERO)
+}
+
+/// The reduced Planck constant in eV*fs (`~0.6582`), reassembled from the exact `hbar` and `e` mantissas:
+/// `hbar[eV*fs] = hbar[J*s] / e[C] * 1e15 = 1.054571817 / 1.602176634`, the powers `1e-34 / 1e-19 * 1e15` netting to
+/// `1e0`, so the mantissa ratio is the value.
+fn hbar_ev_fs() -> Fixed {
+    let hbar_mantissa = Fixed::from_ratio(1_054_571_817, 1_000_000_000);
+    let e_mantissa = Fixed::from_ratio(1_602_176_634, 1_000_000_000);
+    hbar_mantissa.checked_div(e_mantissa).unwrap_or(Fixed::ZERO)
+}
+
+/// The thermal broadening width (eV) of an absorption edge, `~ k_B * T`: at finite temperature an absorption onset
+/// is thermally smeared (the Urbach-tail scale), rather than a sharp step. Derived from the Boltzmann constant and
+/// the world temperature, reserving no value (`k_B` in eV/K reassembles from fundamental constants). Zero for a
+/// non-positive temperature. One of the grounded broadening widths the derived spectrum envelope (Q1 (b)) reads,
+/// never an authored linewidth.
+pub fn thermal_broadening_width_ev(temperature_k: Fixed) -> Fixed {
+    if temperature_k <= Fixed::ZERO {
+        return Fixed::ZERO;
+    }
+    kb_ev_per_k()
+        .checked_mul(temperature_k)
+        .unwrap_or(Fixed::ZERO)
+}
+
+/// The lifetime broadening width (eV), `hbar / tau`, from the Drude carrier scattering time `tau` in femtoseconds
+/// (the same `tau` [`crate::electronic::drude_scattering_time_fs`] produces): a finite carrier lifetime broadens a
+/// spectral feature by `hbar / tau`. Derived from `hbar` in eV*fs (reassembled from fundamental constants), reserving
+/// no value. Zero for a non-positive `tau`. The second grounded broadening width the derived spectrum envelope
+/// (Q1 (b)) reads.
+pub fn lifetime_broadening_width_ev(scattering_time_fs: Fixed) -> Fixed {
+    if scattering_time_fs <= Fixed::ZERO {
+        return Fixed::ZERO;
+    }
+    hbar_ev_fs()
+        .checked_div(scattering_time_fs)
+        .unwrap_or(Fixed::ZERO)
+}
+
+/// The Lorentzian lineshape (a relative response, peak 1 at the centre): `hw^2 / ((probe - centre)^2 + hw^2)` with
+/// `hw = width / 2`, so the width is the full width at half maximum (the response is `0.5` at `centre +/- width/2`).
+/// The natural lifetime-broadened line for a discrete transition (the d-d line at `Delta_o`). `None` for a
+/// non-positive width or on overflow.
+pub fn lorentzian_response(probe_ev: Fixed, centre_ev: Fixed, width_ev: Fixed) -> Option<Fixed> {
+    if width_ev <= Fixed::ZERO {
+        return None;
+    }
+    let hw = width_ev.checked_div(Fixed::from_int(2))?;
+    let hw_sq = hw.checked_mul(hw)?;
+    let d = probe_ev.checked_sub(centre_ev)?;
+    let d_sq = d.checked_mul(d)?;
+    hw_sq.checked_div(d_sq.checked_add(hw_sq)?)
+}
+
+/// A broadened absorption / reflection STEP (a relative response rising `0` to `1`), the edge features (the interband
+/// onset, the plasma edge) smeared over the broadening width: the logistic `1 / (1 + exp(-(probe - onset) / width))`,
+/// `0.5` at the onset, rising above and falling below. The `exp` census window is guarded (far below the onset the
+/// response is `0`, far above it is `1`), so a wide probe range never overflows the transcendental. `None` for a
+/// non-positive width or on overflow.
+pub fn broadened_step_response(probe_ev: Fixed, onset_ev: Fixed, width_ev: Fixed) -> Option<Fixed> {
+    if width_ev <= Fixed::ZERO {
+        return None;
+    }
+    let x = probe_ev.checked_sub(onset_ev)?.checked_div(width_ev)?;
+    // Guard the exp window ([-22, 21.5]): far above the onset saturates to 1, far below to 0.
+    let bound = Fixed::from_int(20);
+    if x > bound {
+        return Some(Fixed::ONE);
+    }
+    if x < Fixed::ZERO.checked_sub(bound)? {
+        return Some(Fixed::ZERO);
+    }
+    let e = Fixed::ZERO.checked_sub(x)?.exp(); // exp(-x)
+    Fixed::ONE.checked_div(Fixed::ONE.checked_add(e)?)
+}
+
+/// The derived-spectrum response of one optical feature at a probe energy (Q1 (b), the spectrum envelope): a `DdLine`
+/// is a Lorentzian centred at its energy, an `InterbandOnset` or `PlasmaEdge` a broadened step at its energy, each
+/// smeared by the caller's GROUNDED broadening `width_ev` (from [`thermal_broadening_width_ev`] or
+/// [`lifetime_broadening_width_ev`], never an authored linewidth). Evaluated per feature so the caller sums over a
+/// substance's features into the full envelope. Still observer-independent: this is the physical spectrum, not a
+/// colour. `None` on a non-positive width or overflow.
+pub fn feature_response_at(
+    probe_ev: Fixed,
+    feature: &OpticalEnergy,
+    width_ev: Fixed,
+) -> Option<Fixed> {
+    match feature.feature {
+        OpticalFeature::DdLine => lorentzian_response(probe_ev, feature.energy_ev, width_ev),
+        OpticalFeature::InterbandOnset | OpticalFeature::PlasmaEdge => {
+            broadened_step_response(probe_ev, feature.energy_ev, width_ev)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -234,5 +344,108 @@ mod tests {
             !falls_in_observer_window(&dd, ev(5, 10), ev(15, 10)),
             "2.5 eV is outside an infrared-sensing being's window (a different perceived world)"
         );
+    }
+
+    fn close(a: Fixed, b: f64, tol: f64) -> bool {
+        (a.to_f64_lossy() - b).abs() < tol
+    }
+
+    #[test]
+    fn the_broadening_widths_derive_from_the_constants() {
+        // Thermal ~ k_B T: kT(300 K) ~ 0.0259 eV (25.9 meV). Lifetime hbar/tau: tau = 20 fs -> ~0.033 eV. Both from
+        // fundamental constants, no reserved value; zero at a non-positive input.
+        let thermal = thermal_broadening_width_ev(Fixed::from_int(300));
+        assert!(
+            close(thermal, 0.02585, 5e-4),
+            "kT(300) ~ 0.0259 eV, got {}",
+            thermal.to_f64_lossy()
+        );
+        assert_eq!(thermal_broadening_width_ev(Fixed::ZERO), Fixed::ZERO);
+        let lifetime = lifetime_broadening_width_ev(Fixed::from_int(20));
+        assert!(
+            close(lifetime, 0.0329, 5e-4),
+            "hbar/tau(20 fs) ~ 0.033 eV, got {}",
+            lifetime.to_f64_lossy()
+        );
+        assert_eq!(lifetime_broadening_width_ev(Fixed::ZERO), Fixed::ZERO);
+    }
+
+    #[test]
+    fn the_lorentzian_peaks_at_the_centre_and_halves_at_the_half_width() {
+        // Peak 1 at the centre, 0.5 at centre +/- width/2 (the width is the FWHM), and small far away. A d-d line at
+        // 2.0 eV with a 0.2 eV width.
+        let centre = ev(2, 1);
+        let width = ev(2, 10); // 0.2 eV
+        assert!(close(
+            lorentzian_response(centre, centre, width).unwrap(),
+            1.0,
+            1e-6
+        ));
+        // At centre + width/2 = 2.1 eV, the response is 0.5 (half maximum).
+        assert!(close(
+            lorentzian_response(ev(21, 10), centre, width).unwrap(),
+            0.5,
+            1e-3
+        ));
+        // Far off resonance (1.0 eV, five half-widths away) the response is small.
+        assert!(
+            lorentzian_response(ev(1, 1), centre, width)
+                .unwrap()
+                .to_f64_lossy()
+                < 0.02
+        );
+        assert!(lorentzian_response(centre, centre, Fixed::ZERO).is_none());
+    }
+
+    #[test]
+    fn the_broadened_step_rises_through_the_onset() {
+        // A broadened edge: 0.5 at the onset, saturating to ~0 far below and ~1 far above (the exp window guarded, so
+        // a wide probe range never overflows). An interband onset at 2.0 eV with a 0.1 eV width.
+        let onset = ev(2, 1);
+        let width = ev(1, 10); // 0.1 eV
+        assert!(close(
+            broadened_step_response(onset, onset, width).unwrap(),
+            0.5,
+            1e-6
+        ));
+        // Far above the onset (probe 3 eV, ten widths up) saturates to ~1; far below (1 eV) to ~0.
+        assert!(
+            broadened_step_response(ev(3, 1), onset, width)
+                .unwrap()
+                .to_f64_lossy()
+                > 0.99
+        );
+        assert!(
+            broadened_step_response(ev(1, 1), onset, width)
+                .unwrap()
+                .to_f64_lossy()
+                < 0.01
+        );
+        assert!(broadened_step_response(onset, onset, Fixed::ZERO).is_none());
+    }
+
+    #[test]
+    fn the_feature_response_lineshapes_the_right_way_per_feature() {
+        // A d-d line reads a Lorentzian (peak at its energy); an interband onset reads a broadened step (0.5 at its
+        // energy). The dispatch on the feature type, the derived spectrum envelope (Q1 (b)).
+        let width = ev(2, 10);
+        let dd = OpticalEnergy {
+            feature: OpticalFeature::DdLine,
+            energy_ev: ev(2, 1),
+        };
+        assert!(close(
+            feature_response_at(ev(2, 1), &dd, width).unwrap(),
+            1.0,
+            1e-6
+        ));
+        let onset = OpticalEnergy {
+            feature: OpticalFeature::InterbandOnset,
+            energy_ev: ev(2, 1),
+        };
+        assert!(close(
+            feature_response_at(ev(2, 1), &onset, width).unwrap(),
+            0.5,
+            1e-6
+        ));
     }
 }
