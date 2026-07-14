@@ -1,0 +1,209 @@
+# The Stoner column (crate::stoner), the itinerant magnetism criterion's input: per element the Stoner exchange
+# parameter I and the NONMAGNETIC band density of states at the Fermi level N(E_F). The itinerant magnetic classifier
+# reads I and N to form the Stoner product I * N(E_F); a value above 1 is the spontaneous-polarization (itinerant
+# ferromagnet) threshold.
+#
+# UNITS (Janak's convention): I in rydberg (Ry), N in states per rydberg per atom (states/Ry/atom). The product
+# I * N is DIMENSIONLESS and CONVENTION-INDEPENDENT (a per-spin / per-atom or Ry / eV rescaling of one factor
+# rescales the other inversely), so the criterion compares I * N against 1 directly, in whatever matched convention
+# the pair is tabulated.
+#
+# DEFINITION TAG on N: this is the CALCULATED NONMAGNETIC BAND DOS (from the paramagnetic band structure), NOT the
+# calorimetric (1+lambda)-dressed exchange-split ground-state DOS a measured electronic specific-heat gamma produces.
+# The criterion needs the bare nonmagnetic band DOS; a dressed gamma DOS understates it and gives false negatives
+# (Fe, Co below 1). The consuming newtype is NonmagneticDos, so the wrong DOS cannot be wired.
+#
+# PROVENANCE (owner-delivered primary, admissible): J. F. Janak, "Uniform susceptibilities of metallic elements,"
+# Physical Review B 16, 255 (1977), Table I. Delivered by the owner from the primary source, audited for internal
+# consistency: every row's I * N reproduces Janak's tabulated Stoner product, and the exchange enhancement
+# chi = 1 / (1 - I * N) reproduces the tabulated enhancement (to Janak's rounding). Fe (1.119) and Ni (2.055) exceed
+# 1 (ferromagnetic); Co (0.842) and Pd (0.906) are the marginal near-misses; the simple metals (Cu 0.135, Ag 0.100,
+# Al 0.335) are the deep paramagnets. This SUPERSEDES two earlier rendered compilations that the definition tag
+# caught as mutually inconsistent (a per-spin / per-atom mis-scaling). Tag: [Janak 1977 Phys Rev B 16 255 Table I,
+# cited]. The band edges for classification are the owner's calibration (reserved), not in this data file.
+
+[[stoner]]
+symbol = "Li"
+i_ry = "0.0718"
+n_states_per_ry_atom = "5.91"
+source = "Janak 1977 Phys Rev B 16 255 Table I"
+
+[[stoner]]
+symbol = "Be"
+i_ry = "0.0825"
+n_states_per_ry_atom = "0.98"
+source = "Janak 1977 Phys Rev B 16 255 Table I"
+
+[[stoner]]
+symbol = "Na"
+i_ry = "0.0631"
+n_states_per_ry_atom = "6.27"
+source = "Janak 1977 Phys Rev B 16 255 Table I"
+
+[[stoner]]
+symbol = "Mg"
+i_ry = "0.0601"
+n_states_per_ry_atom = "4.67"
+source = "Janak 1977 Phys Rev B 16 255 Table I"
+
+[[stoner]]
+symbol = "Al"
+i_ry = "0.0604"
+n_states_per_ry_atom = "5.55"
+source = "Janak 1977 Phys Rev B 16 255 Table I"
+
+[[stoner]]
+symbol = "K"
+i_ry = "0.0498"
+n_states_per_ry_atom = "9.53"
+source = "Janak 1977 Phys Rev B 16 255 Table I"
+
+[[stoner]]
+symbol = "Ca"
+i_ry = "0.0401"
+n_states_per_ry_atom = "17.66"
+source = "Janak 1977 Phys Rev B 16 255 Table I"
+
+[[stoner]]
+symbol = "Sc"
+i_ry = "0.0256"
+n_states_per_ry_atom = "28.53"
+source = "Janak 1977 Phys Rev B 16 255 Table I"
+
+[[stoner]]
+symbol = "Ti"
+i_ry = "0.0275"
+n_states_per_ry_atom = "15.65"
+source = "Janak 1977 Phys Rev B 16 255 Table I"
+
+[[stoner]]
+symbol = "V"
+i_ry = "0.0289"
+n_states_per_ry_atom = "24.87"
+source = "Janak 1977 Phys Rev B 16 255 Table I"
+
+[[stoner]]
+symbol = "Cr"
+i_ry = "0.0302"
+n_states_per_ry_atom = "10.05"
+source = "Janak 1977 Phys Rev B 16 255 Table I (uniform q=0; Cr's finite-q SDW is outside the criterion)"
+
+[[stoner]]
+symbol = "Mn"
+i_ry = "0.0309"
+n_states_per_ry_atom = "21.36"
+source = "Janak 1977 Phys Rev B 16 255 Table I"
+
+[[stoner]]
+symbol = "Fe"
+i_ry = "0.0339"
+n_states_per_ry_atom = "33.00"
+source = "Janak 1977 Phys Rev B 16 255 Table I"
+
+[[stoner]]
+symbol = "Co"
+i_ry = "0.0346"
+n_states_per_ry_atom = "24.33"
+source = "Janak 1977 Phys Rev B 16 255 Table I"
+
+[[stoner]]
+symbol = "Ni"
+i_ry = "0.0345"
+n_states_per_ry_atom = "59.57"
+source = "Janak 1977 Phys Rev B 16 255 Table I"
+
+[[stoner]]
+symbol = "Cu"
+i_ry = "0.0343"
+n_states_per_ry_atom = "3.93"
+source = "Janak 1977 Phys Rev B 16 255 Table I"
+
+[[stoner]]
+symbol = "Zn"
+i_ry = "0.0339"
+n_states_per_ry_atom = "2.50"
+source = "Janak 1977 Phys Rev B 16 255 Table I"
+
+[[stoner]]
+symbol = "Ga"
+i_ry = "0.0326"
+n_states_per_ry_atom = "1.83"
+source = "Janak 1977 Phys Rev B 16 255 Table I"
+
+[[stoner]]
+symbol = "Rb"
+i_ry = "0.0461"
+n_states_per_ry_atom = "12.56"
+source = "Janak 1977 Phys Rev B 16 255 Table I"
+
+[[stoner]]
+symbol = "Sr"
+i_ry = "0.0373"
+n_states_per_ry_atom = "23.93"
+source = "Janak 1977 Phys Rev B 16 255 Table I"
+
+[[stoner]]
+symbol = "Y"
+i_ry = "0.0227"
+n_states_per_ry_atom = "25.56"
+source = "Janak 1977 Phys Rev B 16 255 Table I"
+
+[[stoner]]
+symbol = "Zr"
+i_ry = "0.0245"
+n_states_per_ry_atom = "13.43"
+source = "Janak 1977 Phys Rev B 16 255 Table I"
+
+[[stoner]]
+symbol = "Nb"
+i_ry = "0.0256"
+n_states_per_ry_atom = "26.92"
+source = "Janak 1977 Phys Rev B 16 255 Table I"
+
+[[stoner]]
+symbol = "Mo"
+i_ry = "0.0270"
+n_states_per_ry_atom = "9.34"
+source = "Janak 1977 Phys Rev B 16 255 Table I"
+
+[[stoner]]
+symbol = "Tc"
+i_ry = "0.0272"
+n_states_per_ry_atom = "14.22"
+source = "Janak 1977 Phys Rev B 16 255 Table I"
+
+[[stoner]]
+symbol = "Ru"
+i_ry = "0.0278"
+n_states_per_ry_atom = "11.45"
+source = "Janak 1977 Phys Rev B 16 255 Table I"
+
+[[stoner]]
+symbol = "Rh"
+i_ry = "0.0277"
+n_states_per_ry_atom = "21.22"
+source = "Janak 1977 Phys Rev B 16 255 Table I"
+
+[[stoner]]
+symbol = "Pd"
+i_ry = "0.0272"
+n_states_per_ry_atom = "33.30"
+source = "Janak 1977 Phys Rev B 16 255 Table I"
+
+[[stoner]]
+symbol = "Ag"
+i_ry = "0.0276"
+n_states_per_ry_atom = "3.61"
+source = "Janak 1977 Phys Rev B 16 255 Table I"
+
+[[stoner]]
+symbol = "Cd"
+i_ry = "0.0272"
+n_states_per_ry_atom = "2.48"
+source = "Janak 1977 Phys Rev B 16 255 Table I"
+
+[[stoner]]
+symbol = "In"
+i_ry = "0.0263"
+n_states_per_ry_atom = "3.39"
+source = "Janak 1977 Phys Rev B 16 255 Table I"

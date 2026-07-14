@@ -119,8 +119,8 @@ pub use quench::{
     QuenchOutcome,
 };
 pub use stoner::{
-    negative_control_gate, stoner_classify, stoner_product, NonmagneticDos, StonerClass,
-    StonerControl,
+    negative_control_gate, stoner_class_from_column, stoner_classify, stoner_product,
+    NonmagneticDos, StonerClass, StonerControl,
 };
 pub use thermochemical::{
     charge_neutral_primitives, mo_viable_diatomics, propose_candidates, BondingHints, Composition,

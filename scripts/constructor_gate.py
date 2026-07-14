@@ -73,6 +73,7 @@ EXEMPT_MODULES = {
     "crates/physics/src/band_gap.rs",   # the band-gap loader (parses cited [M] gaps + compute-once HYBRID/GW eigenvalues)
     "crates/physics/src/term_values.rs", # the term-value loader (parses cited Herman-Skillman eps_s/eps_p, gated on the fetch)
     "crates/physics/src/crystal_field.rs", # the crystal-field loader (parses cited Jorgensen f/g, Racah B, oxide Delta_o)
+    "crates/physics/src/stoner.rs",     # the Stoner loader (parses cited Janak 1977 I and nonmagnetic-band N)
     "crates/physics/src/quantities.rs", # quantity definitions and the wide-decimal doc reference
     "crates/sim/src/calibration.rs",    # the calibration-manifest loader (parses the owner's reserved values)
     "crates/sim/src/astro.rs",          # the stellar-flux derivation (parses cited astronomical anchors L_sun/AU)
