@@ -14,6 +14,7 @@ Usage: aesopus_pull.py <label> <solmix> <zeta_ref> <xhmin> <fco1> <fc1> <fn1>
   empty C/O ladder args as "-".
 """
 import re, sys, time, json, hashlib, urllib.parse, requests
+from aesopus_fields import build_fields
 
 BASE = "https://stev.oapd.inaf.it/cgi-bin"
 FORM_URL = BASE + "/aesopus_1.0"
@@ -21,25 +22,10 @@ FORM_HTML = "aesopus_1.0_form.html"
 POLL_SECS, MAX_WAIT = 15, 420
 
 label, solmix, zeta_ref, xhmin, fco1, fc1, fn1 = sys.argv[1:8]
-co = lambda v: "" if v == "-" else v
 
-# Parse the form defaults (text + hidden), then set the requested composition.
+# The POST body is built by the shared field-builder (the provenance battery reconstructs from the same function).
 form_html = open(FORM_HTML).read()
-fields = {}
-for tag in re.findall(r"<input\b[^>]*>", form_html, flags=re.I):
-    nm = re.search(r'name="([^"]*)"', tag)
-    if not nm:
-        continue
-    typ = (re.search(r'type="([^"]*)"', tag) or [None, "text"])[1].lower() \
-          if re.search(r'type="([^"]*)"', tag) else "text"
-    if typ in ("submit", "radio"):
-        continue
-    val = re.search(r'value="([^"]*)"', tag)
-    fields[nm.group(1)] = val.group(1) if val else ""
-fields.update({"solmix": solmix, "ifracn": "1", "ialpha": "0",
-               "zeta_ref": zeta_ref, "xhmin": xhmin, "xhmax": xhmin,
-               "fco1": co(fco1), "fc1": co(fc1), "fn1": co(fn1),
-               "submit_form": "Submit"})
+fields = build_fields(form_html, solmix, zeta_ref, xhmin, fco1, fc1, fn1)
 
 multipart = {k: (None, v) for k, v in fields.items()}
 r = requests.post(FORM_URL, files=multipart, timeout=180, verify=False)
