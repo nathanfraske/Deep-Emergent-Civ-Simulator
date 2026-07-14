@@ -45,6 +45,7 @@
 //! register, keeping the honesty query where the register lives.
 
 pub mod assemblage;
+pub mod band_gap;
 pub mod contract;
 pub mod correlation;
 pub mod creep;
@@ -64,6 +65,7 @@ pub use assemblage::{
     realize_assemblage, CoolingPath, DrawContext, EquilibriumExchange, ExchangeKinetics,
     RealizedAssemblage, RealizedExchange,
 };
+pub use band_gap::ln_thermal_carrier_activation;
 pub use contract::{Disposer, Preflight, Proposer, Quench, RealizedState, Validity};
 pub use correlation::{
     route_of_class, CalibrationError, CorrelationClass, CorrelationClassifier, EnergyRoute,
