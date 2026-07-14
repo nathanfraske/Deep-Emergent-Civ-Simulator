@@ -44,10 +44,14 @@ surface density `Sigma(r)` (the deferred stage-2 half) re-enters, as the column 
 
 ## 3. Proposed slicing (three slices, each byte-neutral until a scenario arms them)
 
-- **3a: the viscous effective temperature.** `viscous_disk_temperature`, computing `D(r) = (3/(8*pi))*Mdot*Omega_K^2`
-  in the wide-BigRat path (the operands `G`, `M_star`, `r^3`, `Mdot` overflow Q32.32 while the ~10^7 W/m^2 result
-  fits) and the fourth root through `radiative_equilibrium`. Reuses the exact pattern `stellar_flux` and the
-  irradiated slice already proved. The clean, unambiguous first piece.
+- **3a: the viscous effective temperature. BUILT (byte-neutral).** `viscous_disk_temperature` (with the private
+  `viscous_dissipation_flux`), computing `D(r) = (3/(8*pi))*Mdot*Omega_K^2*inner_boundary_factor`,
+  `Omega_K^2 = G*M_star/r^3`, in the wide-BigRat path (the operands `Mdot`, `G`, `M_star`, `r^3` overflow or
+  underflow Q32.32 while the ~few W/m^2 result fits) and the fourth root through `radiative_equilibrium`. `Mdot` is
+  the caller residue (in M_sun per megayear, Mirror ~0.01), `G` read from the fundamentals register (single
+  source), `M_sun` and the Julian year the cited unit anchors. Derive-not-fit anchor: Mirror's disk at 1 AU
+  derives `T_visc` ~85.1 K, below the ~278 K irradiation there (irradiation leads at 1 AU, viscous dominates well
+  inside), with the `r^(-3/4)` slope. Reuses the exact pattern `stellar_flux` and the irradiated slice proved.
 - **3b: the regime combination.** `disk_effective_temperature` summing `T_visc_eff^4 + T_irr^4`, so the profile
   transitions from viscous-inner to irradiated-outer with no authored boundary.
 - **3c: the opacity closure and the optically-thick midplane.** The Rosseland opacity `kappa_R(T)` as a

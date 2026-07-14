@@ -57,6 +57,11 @@ pub const SOLAR_MASS_KG: &str = "1.989e30";
 /// at the stellar surface).
 pub const SOLAR_RADIUS_M: &str = "6.957e8";
 
+/// The Julian year in seconds (365.25 days * 86400 s = 31557600 s exactly), a cited definitional constant: the
+/// seconds-per-year the accretion-rate argument (expressed in solar masses per megayear) is scaled by to reach
+/// kg/s. A unit conversion, not a per-world value.
+pub const JULIAN_YEAR_S: &str = "31557600";
+
 /// The number of decimal digits pi is computed to for the flux derivation. Far above the ~10 significant
 /// figures the Q32.32 result carries (a `2^-32` epsilon near a ~1361 magnitude is a relative ~1.7e-13), so
 /// the pi truncation never reaches the result's low bit. An engine-accuracy bound, not a world value.
@@ -189,6 +194,88 @@ pub fn irradiated_disk_temperature(
     let sigma = crate::physiology::derived_stefan_boltzmann();
     Some(civsim_physics::laws::radiative_equilibrium(
         absorbed,
+        Fixed::ONE,
+        sigma,
+        t_max,
+    ))
+}
+
+/// The steady-disk viscous DISSIPATION FLUX `D(r)` (W/m^2) at an orbital distance: the Shakura-Sunyaev
+/// `D = (3/(8*pi)) * Mdot * Omega_K^2 * inner_boundary_factor`, with the Keplerian frequency
+/// `Omega_K^2 = G*M_star/r^3`. This is the accretional heating rate the viscous-inner disk radiates (each face
+/// radiates `sigma*T^4 = D`), the source term the viscous temperature and the two-regime combination read.
+///
+/// `accretion_rate_msun_myr` is the mass-accretion rate `Mdot` in solar masses per megayear, the reserved
+/// closure-residue (Mirror's ~0.01, that is ~1e-8 M_sun/yr, is order-one at this scale, keeping full fixed-point
+/// precision; its basis the observed class-II disk accretion rate). `mass_ratio` sets `M_star = mass_ratio*M_sun`,
+/// `distance_au` the orbit, `inner_boundary_factor` the `(1 - sqrt(R_in/r))` inner-edge suppression (~1 in the
+/// bulk disk where the condensation fronts sit, its basis the inner truncation radius, retiring when `R_in`
+/// derives). `G` is the CODATA gravitational constant read from the fundamentals register (single source), and
+/// `M_sun` and the Julian year are the cited unit anchors. The wide-magnitude product (`Mdot`, `G`, `M_star`,
+/// `r^3` overflow or underflow Q32.32 while the ~few W/m^2 result fits) runs in exact BigRat and rounds once.
+/// `None` on a non-positive distance or a dissipation past the representable range.
+fn viscous_dissipation_flux(
+    accretion_rate_msun_myr: Fixed,
+    mass_ratio: Fixed,
+    distance_au: Fixed,
+    inner_boundary_factor: Fixed,
+) -> Option<Fixed> {
+    if distance_au <= Fixed::ZERO {
+        return None;
+    }
+    let m_sun = BigRat::from_decimal_str(SOLAR_MASS_KG).ok()?;
+    // Mdot [kg/s] = accretion_rate [M_sun/Myr] * M_sun / (1e6 * Julian year).
+    let megayear = BigRat::from_decimal_str(JULIAN_YEAR_S)
+        .ok()?
+        .mul(&BigRat::from_i64(1_000_000));
+    let mdot = nonneg_fixed_to_bigrat(accretion_rate_msun_myr)
+        .mul(&m_sun)
+        .div(&megayear);
+    // Omega_K^2 [1/s^2] = G * M_star / r^3, with M_star = mass_ratio*M_sun and r = distance_au*AU.
+    let g =
+        BigRat::from_decimal_str(civsim_units::fundamentals::GRAVITATIONAL_CONSTANT.value).ok()?;
+    let m_star = nonneg_fixed_to_bigrat(mass_ratio).mul(&m_sun);
+    let au = BigRat::from_decimal_str(ASTRONOMICAL_UNIT_M).ok()?;
+    let r = nonneg_fixed_to_bigrat(distance_au).mul(&au);
+    let r3 = r.mul(&r).mul(&r);
+    let omega_k2 = g.mul(&m_star).div(&r3);
+    // D = (3/(8*pi)) * Mdot * Omega_K^2 * inner_boundary_factor.
+    let three_over_eight_pi =
+        BigRat::from_i64(3).div(&BigRat::from_i64(8).mul(&compute::pi(FLUX_PI_DIGITS)));
+    let d = three_over_eight_pi
+        .mul(&mdot)
+        .mul(&omega_k2)
+        .mul(&nonneg_fixed_to_bigrat(inner_boundary_factor));
+    let bits = d.round_to_scale(Fixed::FRAC_BITS)?;
+    Fixed::from_bits_i128(bits)
+}
+
+/// The VISCOUS-DISK EFFECTIVE TEMPERATURE `T_visc(r)` (K) at an orbital distance, DERIVED from the accretional
+/// heating: each face of the disk radiates `sigma*T_visc^4 = D(r)`, so `T_visc = (D(r)/sigma)^(1/4)`, the same
+/// Stefan-Boltzmann inversion the irradiated regime uses ([`radiative_equilibrium`], the proven two-sqrt fourth
+/// root). `D(r)` is the viscous dissipation ([`viscous_dissipation_flux`]), `sigma` the CODATA-derived
+/// Stefan-Boltzmann constant. This is the VISCOUS-INNER term of the two-regime disk-thermal profile: it falls
+/// with distance as `D^(1/4) ~ r^(-3/4)`, steeper than the irradiated `r^(-1/2)`, so it dominates the inner disk
+/// and the two cross at an emergent transition radius (no authored boundary). Every per-world input is a
+/// scenario-set ARGUMENT (the admit-the-alien test): the accretion rate, the mass ratio, the orbit, the
+/// inner-edge factor, all data rows for a different disk. `t_max` is the representable ceiling the fourth-root
+/// read caps at. `None` on a non-positive distance or a dissipation past the representable range.
+pub fn viscous_disk_temperature(
+    accretion_rate_msun_myr: Fixed,
+    mass_ratio: Fixed,
+    distance_au: Fixed,
+    inner_boundary_factor: Fixed,
+    t_max: Fixed,
+) -> Option<Fixed> {
+    let dissipation = viscous_dissipation_flux(
+        accretion_rate_msun_myr,
+        mass_ratio,
+        distance_au,
+        inner_boundary_factor,
+    )?;
+    let sigma = crate::physiology::derived_stefan_boltzmann();
+    Some(civsim_physics::laws::radiative_equilibrium(
+        dissipation,
         Fixed::ONE,
         sigma,
         t_max,
@@ -435,6 +522,113 @@ mod tests {
                 Fixed::from_ratio(35, 10),
                 Fixed::ZERO,
                 Fixed::from_ratio(1, 4),
+                Fixed::from_int(100_000)
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn a_mirror_disk_at_one_au_derives_the_viscous_temperature() {
+        // Mirror's disk at 1 AU: a solar-mass star, an accretion rate of 0.01 M_sun/Myr (~1e-8 M_sun/yr, the
+        // observed class-II value), no inner-edge suppression. The Shakura-Sunyaev dissipation
+        // D = (3/8pi) Mdot G M_sun / r^3 ~3 W/m^2 gives T_visc = (D/sigma)^(1/4) ~85 K. This is DERIVED from the
+        // accretion rate, G, M_sun, and the AU; nothing tuned. ~85 K is BELOW the ~278 K irradiation at 1 AU, so
+        // irradiation leads there (the regime the gate noted); the viscous term dominates well inside 1 AU.
+        let t_max = Fixed::from_int(100_000);
+        let t = viscous_disk_temperature(
+            Fixed::from_ratio(1, 100), // 0.01 M_sun/Myr
+            Fixed::ONE,
+            Fixed::ONE,
+            Fixed::ONE, // inner-edge factor ~1 in the bulk disk
+            t_max,
+        )
+        .expect("the viscous temperature derives");
+        let k = t.to_f64_lossy();
+        assert!(
+            (k - 85.0).abs() < 4.0,
+            "Mirror's disk at 1 AU derives T_visc ~85 K, got {k}"
+        );
+    }
+
+    #[test]
+    fn the_viscous_temperature_falls_as_r_to_the_minus_three_quarters() {
+        // D ~ Omega_K^2 ~ r^-3 and T ~ D^(1/4), so T ~ r^(-3/4): four times the distance is 4^(3/4) ~2.83 times
+        // cooler. This is STEEPER than the irradiated r^(-1/2), which is why the viscous term dominates the inner
+        // disk and the two regimes cross at an emergent transition radius.
+        let (mdot, factor, t_max) = (
+            Fixed::from_ratio(1, 100),
+            Fixed::ONE,
+            Fixed::from_int(100_000),
+        );
+        let near = viscous_disk_temperature(mdot, Fixed::ONE, Fixed::ONE, factor, t_max).unwrap();
+        let far =
+            viscous_disk_temperature(mdot, Fixed::ONE, Fixed::from_int(4), factor, t_max).unwrap();
+        let ratio = near.to_f64_lossy() / far.to_f64_lossy();
+        assert!(
+            (ratio - 4.0_f64.powf(0.75)).abs() < 0.05,
+            "four times the distance is 4^(3/4) ~2.83 times cooler, got {ratio}"
+        );
+    }
+
+    #[test]
+    fn a_higher_accretion_rate_warms_the_viscous_disk() {
+        // T_visc ~ Mdot^(1/4): a sixteen-fold higher accretion rate is a two-fold hotter viscous disk, the
+        // accretion residue entering as a fourth root (strongly damped).
+        let (factor, t_max) = (Fixed::ONE, Fixed::from_int(100_000));
+        let low = viscous_disk_temperature(
+            Fixed::from_ratio(1, 100),
+            Fixed::ONE,
+            Fixed::ONE,
+            factor,
+            t_max,
+        )
+        .unwrap();
+        let high = viscous_disk_temperature(
+            Fixed::from_ratio(16, 100),
+            Fixed::ONE,
+            Fixed::ONE,
+            factor,
+            t_max,
+        )
+        .unwrap();
+        let ratio = high.to_f64_lossy() / low.to_f64_lossy();
+        assert!(
+            (ratio - 2.0).abs() < 0.05,
+            "a sixteen-fold higher accretion rate doubles the viscous temperature, got {ratio}"
+        );
+    }
+
+    #[test]
+    fn the_inner_boundary_factor_suppresses_the_viscous_temperature() {
+        // The (1 - sqrt(R_in/r)) factor multiplies the dissipation, so a smaller factor is a cooler annulus, and
+        // it enters as a fourth root: a sixteen-fold smaller factor halves T_visc.
+        let (mdot, t_max) = (Fixed::from_ratio(1, 100), Fixed::from_int(100_000));
+        let full =
+            viscous_disk_temperature(mdot, Fixed::ONE, Fixed::ONE, Fixed::ONE, t_max).unwrap();
+        let suppressed = viscous_disk_temperature(
+            mdot,
+            Fixed::ONE,
+            Fixed::ONE,
+            Fixed::from_ratio(1, 16),
+            t_max,
+        )
+        .unwrap();
+        let ratio = full.to_f64_lossy() / suppressed.to_f64_lossy();
+        assert!(
+            (ratio - 2.0).abs() < 0.05,
+            "a sixteen-fold smaller inner-edge factor halves the temperature, got {ratio}"
+        );
+    }
+
+    #[test]
+    fn a_non_positive_viscous_distance_routes_to_none() {
+        assert_eq!(
+            viscous_disk_temperature(
+                Fixed::from_ratio(1, 100),
+                Fixed::ONE,
+                Fixed::ZERO,
+                Fixed::ONE,
                 Fixed::from_int(100_000)
             ),
             None
