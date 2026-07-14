@@ -326,6 +326,47 @@ pub fn disk_effective_temperature(
     ))
 }
 
+/// The DISK SURFACE DENSITY `Sigma(r)` (in the normalization's units) at an orbital distance, the Lynden-Bell and
+/// Pringle self-similar profile `Sigma(r) = Sigma_c * (r/r_c)^(-gamma) * exp(-(r/r_c)^(2-gamma))`: a power-law
+/// interior steepened by an exponential cutoff beyond the characteristic radius `r_c`. This is the second half of
+/// the stage-2 disk structure and the column the disk optical depth integrates (`tau_R = kappa_R * Sigma / 2`),
+/// which the optically-thick midplane closure (slice 3c-iii) reads.
+///
+/// Every per-world input is a scenario-set ARGUMENT (the admit-the-alien test): `distance_au` (the orbit),
+/// `characteristic_radius_au` the cutoff radius `r_c` (a reserved residue, its basis the disk's viscous-spreading /
+/// angular-momentum radius), `gamma` the surface-density slope (the viscous-spreading exponent, a reserved residue
+/// ~1, its basis the viscosity power law `nu ~ r^gamma`), and `normalization` the scale `Sigma_c` (a reserved
+/// residue, its basis the disk-mass fraction, `Sigma_c ~ M_disk*(2-gamma)/(2*pi*r_c^2)`). The profile SHAPE is the
+/// fixed physics; the three residues are the caller's, so a different disk is a data row. `gamma` must be below 2
+/// (the finite-mass condition, `2-gamma > 0` giving the outer cutoff), else `None`. The order-one ratio
+/// `x = r/r_c` keeps the powers and the exponential in `Fixed`; far beyond `r_c` the `exp` argument passes the
+/// window floor and saturates to zero, the physical disk edge. `None` on a non-positive distance or radius,
+/// `gamma >= 2`, or an intermediate past the representable range.
+pub fn disk_surface_density(
+    distance_au: Fixed,
+    characteristic_radius_au: Fixed,
+    gamma: Fixed,
+    normalization: Fixed,
+) -> Option<Fixed> {
+    if distance_au <= Fixed::ZERO || characteristic_radius_au <= Fixed::ZERO {
+        return None;
+    }
+    let two = Fixed::from_int(2);
+    if gamma >= two {
+        return None; // the finite-mass condition 2 - gamma > 0 (an outer cutoff exists)
+    }
+    let x = distance_au.checked_div(characteristic_radius_au)?;
+    // The power-law interior x^(-gamma) = 1 / x^gamma.
+    let power = Fixed::ONE.checked_div(x.powf(gamma))?;
+    // The exponential cutoff exp(-(x^(2-gamma))); beyond r_c the argument passes the exp window floor and the
+    // exponential saturates to zero, the disk's physical outer edge.
+    let cutoff = Fixed::ZERO
+        .checked_sub(x.powf(two.checked_sub(gamma)?))?
+        .exp();
+    let density = normalization.checked_mul(power)?.checked_mul(cutoff)?;
+    Some(density)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -769,5 +810,59 @@ mod tests {
             ),
             None
         );
+    }
+
+    #[test]
+    fn the_surface_density_at_the_characteristic_radius_is_the_normalization_over_e() {
+        // At r = r_c (x = 1) the profile is Sigma_c * 1^(-gamma) * exp(-1^(2-gamma)) = Sigma_c/e, whatever gamma
+        // (1 to any power is 1). With Sigma_c = 1000 that is ~367.9, the derived value at the characteristic radius.
+        let d = disk_surface_density(
+            Fixed::from_int(10), // r = r_c
+            Fixed::from_int(10), // r_c
+            Fixed::ONE,          // gamma = 1
+            Fixed::from_int(1000),
+        )
+        .expect("the surface density derives");
+        assert!(
+            (d.to_f64_lossy() - 1000.0 / std::f64::consts::E).abs() < 2.0,
+            "Sigma(r_c) is Sigma_c/e ~367.9, got {}",
+            d.to_f64_lossy()
+        );
+    }
+
+    #[test]
+    fn the_surface_density_rises_toward_the_inner_disk_and_truncates_outside() {
+        // The power-law interior makes the disk denser inward (x < 1), the exponential cutoff makes it fall off
+        // steeply outward (x > 1): Sigma(0.5 r_c) > Sigma(r_c) > Sigma(2 r_c). The characteristic radius is the
+        // knee between the two.
+        let (rc, gamma, norm) = (Fixed::from_int(10), Fixed::ONE, Fixed::from_int(1000));
+        let inner = disk_surface_density(Fixed::from_int(5), rc, gamma, norm).unwrap();
+        let knee = disk_surface_density(Fixed::from_int(10), rc, gamma, norm).unwrap();
+        let outer = disk_surface_density(Fixed::from_int(20), rc, gamma, norm).unwrap();
+        assert!(inner > knee, "the inner disk is denser than the knee");
+        assert!(knee > outer, "the outer disk is thinner than the knee");
+    }
+
+    #[test]
+    fn the_surface_density_edge_saturates_to_zero() {
+        // Far beyond r_c the exp argument (-(x^(2-gamma)) = -30 at 30 r_c) passes the window floor and the
+        // exponential saturates to zero, the disk's physical outer edge (no negative or wrapped density).
+        let (rc, gamma, norm) = (Fixed::from_int(10), Fixed::ONE, Fixed::from_int(1000));
+        let edge = disk_surface_density(Fixed::from_int(300), rc, gamma, norm).unwrap();
+        assert_eq!(
+            edge,
+            Fixed::ZERO,
+            "the disk truncates to zero past the cutoff"
+        );
+    }
+
+    #[test]
+    fn the_surface_density_requires_a_finite_mass_slope_and_positive_geometry() {
+        let (rc, norm) = (Fixed::from_int(10), Fixed::from_int(1000));
+        // gamma >= 2 has no outer cutoff (infinite mass), routed to None.
+        assert!(disk_surface_density(Fixed::from_int(10), rc, Fixed::from_int(2), norm).is_none());
+        // Non-positive distance or characteristic radius routes to None.
+        assert!(disk_surface_density(Fixed::ZERO, rc, Fixed::ONE, norm).is_none());
+        assert!(disk_surface_density(Fixed::from_int(10), Fixed::ZERO, Fixed::ONE, norm).is_none());
     }
 }

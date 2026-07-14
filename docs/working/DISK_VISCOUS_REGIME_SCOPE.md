@@ -59,9 +59,19 @@ surface density `Sigma(r)` (the deferred stage-2 half) re-enters, as the column 
   close orbit the effective temperature tracks the viscous term. At 1 AU it derives ~278.8 K (the ~278.2 K
   irradiation plus the ~85 K viscous in quadrature), the transition to viscous-dominated emerging inward with no
   authored boundary.
-- **3c: the opacity closure and the optically-thick midplane.** The Rosseland opacity `kappa_R(T)` as a
-  data-defined piecewise law, the bounded `T <-> kappa` midplane fixed point, and the optical-depth correction,
-  reading `Sigma(r)` (built alongside as the surface-density input). The heaviest slice; the fixed-point machinery.
+- **3c: the opacity closure and the optically-thick midplane**, sub-sliced (the gate ratified the shape):
+  - **3c-i: the composition-keyed opacity registry.** The Rosseland `kappa_R(T)` piecewise evaluator, data-defined
+    (TOML sibling to the phase registry), regime boundaries COMPUTED from segment crossings, ladder keyed off the
+    disk COMPOSITION vector. BLOCKED on the cited Bell-Lin 1994 / Semenov 2003 coefficients (requested; never
+    fabricated), and the `kappa_0` magnitude range (2e-4 to 2e16) sets the representation, so it waits for the table.
+  - **3c-ii: the surface density `Sigma(r)`. BUILT (byte-neutral).** `disk_surface_density`, the Lynden-Bell and
+    Pringle self-similar profile `Sigma_c*(r/r_c)^(-gamma)*exp(-(r/r_c)^(2-gamma))`, the column the optical depth
+    integrates. Reserved caller residues: the normalization `Sigma_c` (disk-mass fraction), the slope `gamma`
+    (viscous-spreading exponent, `< 2` for finite mass), and the characteristic radius `r_c`. Anchors: `Sigma(r_c)`
+    is `Sigma_c/e`, the interior rises as the power law, the exterior truncates exponentially, and past the `exp`
+    window the disk edge saturates to zero. The order-one `x = r/r_c` keeps it in `Fixed`.
+  - **3c-iii: the optically-thick midplane fixed point** (bounded `SURFACE_BALANCE_ITERS`-style bisection) reading
+    `kappa_R(T)` and `Sigma`, plus the `alpha`-primitive retirement of `Mdot`. The heaviest piece; awaits 3c-i.
 
 ## 4. Reserved residues, each surfaced with its basis (never fabricated)
 
