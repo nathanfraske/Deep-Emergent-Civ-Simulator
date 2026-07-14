@@ -428,30 +428,48 @@ fn free_free_prefactor_ionized(
     a_ff_full.checked_mul(ln_ratio.exp())
 }
 
-/// The TOTAL gas/plasma Rosseland-mean opacity `kappa_R` (cm^2/g): the assembly of the gas terms into the single
-/// opacity the disk reads, `kappa_R = rosseland_mean(kappa_es + kappa_H-(x) + kappa_ff(x))`. The MONOCHROMATIC
-/// terms sum at each dimensionless frequency `x`, then the whole is Rosseland-averaged: the Rosseland (harmonic)
-/// mean is NOT additive, so the per-term Rosseland means cannot be summed, the monochromatic opacities must be.
-/// Electron scattering ([`electron_scattering_opacity`]) is grey (frequency-independent), so it is the constant
-/// POSITIVE FLOOR that keeps the summed opacity above zero at every `x`, which is exactly what the Rosseland
-/// kernel's strict-positivity precondition needs (a term that vanishes in some window, like H- past its threshold,
-/// is filled by the floor). H- ([`h_minus_opacity`]) is the monochromatic bound-free-plus-free-free spectral
-/// provider; free-free is `A_ff * free_free_shape(x)` with the shared prefactor. This is the GAS HALF of the disk
-/// opacity closure; the grain terms join the same sum in the grain slice. `T`, `rho`, `X`, `<Z^2/A>`, the Gaunt
-/// factor, and the electron pressure are the plasma state (caller data, admit-the-alien). `None` if a term or the
-/// mean fails to resolve.
+/// The TOTAL ionized-gas Rosseland-mean opacity `kappa_R` (cm^2/g): the assembly of the three gas terms into the
+/// single opacity the disk reads, `kappa_R = rosseland_mean(kappa_es + kappa_H-(x) + kappa_ff(x))`. The
+/// MONOCHROMATIC terms sum at each dimensionless frequency `x`, then the whole is Rosseland-averaged: the Rosseland
+/// (harmonic) mean is NOT additive, so the per-term Rosseland means cannot be summed, the monochromatic opacities
+/// must be.
+///
+/// THE JOIN LAW: all three terms read ONE electron density from ONE Saha solve. Electron scattering is
+/// [`electron_scattering_opacity_from_electron_density`] (`sigma_T n_e/rho`, linear in `n_e`); free-free is
+/// `A_ff * free_free_shape(x)` with the partial-ionization prefactor [`free_free_prefactor_ionized`] (the
+/// `n_e sum Z^2 n_i` product); H- ([`h_minus_opacity`]) reads the same solve's electron pressure `P_e`. Passing
+/// three implicit electron densities to three terms is the definition-mismatch class this assembly legislates
+/// against.
+///
+/// Because electron scattering is now `n_e`-linear (not the grey `0.348(1+X)` constant), the grey POSITIVE FLOOR
+/// is gone: in cold weakly-ionized gas `n_e -> 0`, es and ff vanish and H- sleeps, so the summed monochromatic
+/// opacity reaches zero and the strict-positivity Rosseland kernel returns `None`. That is the physical singularity
+/// (grains sublimated ~1500 K, H- not yet risen ~2500 K) whose occupant is MOLECULAR opacity, supplied by the
+/// Ferguson regime handoff, NOT by this ionized-gas assembly. This function is therefore the HOT-REGIME closure;
+/// its `None` in the cold gap is the handoff signal, not a failure. `ln n_e`, `ln sum Z^2 n_i`, `ln rho`, and
+/// `P_e` are the Saha state; `T`, `rho`, `X`, `<Z^2/A>`, and the Gaunt factor are the plasma data (admit-the-alien).
+/// `None` if a term or the mean fails to resolve (including the cold molecular gap).
 #[allow(clippy::too_many_arguments)]
 pub fn total_gas_rosseland_opacity(
     temperature_k: Fixed,
     density_g_per_cm3: Fixed,
+    ln_density_g_cm3: Fixed,
     hydrogen_mass_fraction: Fixed,
     charge_weighted_abundance: Fixed,
     gaunt_factor: Fixed,
+    ln_electron_density_cm3: Fixed,
+    ln_sum_z2_ni_cm3: Fixed,
     electron_pressure_dyn_cm2: Fixed,
     table: &PeriodicTable,
 ) -> Option<Fixed> {
-    let kappa_es = electron_scattering_opacity(hydrogen_mass_fraction, table)?;
-    let a_ff = free_free_prefactor(
+    let kappa_es = electron_scattering_opacity_from_electron_density(
+        ln_electron_density_cm3,
+        ln_density_g_cm3,
+    )?;
+    let a_ff = free_free_prefactor_ionized(
+        ln_electron_density_cm3,
+        ln_sum_z2_ni_cm3,
+        ln_density_g_cm3,
         density_g_per_cm3,
         temperature_k,
         hydrogen_mass_fraction,
@@ -1734,59 +1752,114 @@ mod tests {
     }
 
     #[test]
-    fn the_total_gas_opacity_assembles_above_the_electron_scattering_floor() {
-        // The gas-side closure: the monochromatic terms (electron scattering grey, H-, free-free) SUM at each
-        // frequency and the whole is Rosseland-averaged (not the per-term means summed, the mean is not additive).
-        // The grey electron-scattering floor keeps the sum positive everywhere, so the strict-positivity kernel
-        // succeeds and the assembled opacity is at least the floor, and strictly above it where free-free is
-        // present. A hot ionized state (T = 8000 K), the free-free / electron-scattering regime.
+    fn the_total_gas_opacity_joins_the_three_terms_on_one_saha_solve() {
+        // The JOIN LAW end to end: ONE Saha solve at T = 6000 K (photospheric H with trace metal donors) sets the
+        // electron density and pressure, and es (sigma_T n_e/rho), free-free (n_e sum Z^2 n_i), and H- (P_e) all
+        // read that single solve. The monochromatic terms sum at each frequency and the whole is Rosseland-averaged.
+        // In this hot ionized state the sum is positive, so the strict-positivity kernel succeeds and the assembly
+        // sits at or above the n_e-linear electron-scattering floor.
         let tbl = table();
-        let (temp, rho, x, z2a, g, p_e) = (
-            Fixed::from_int(8000),
-            Fixed::from_ratio(1, 1_000_000),
+        let temp = Fixed::from_int(6000);
+        let species = [
+            ("H", crate::saha::ln_of_decimal("1e17").unwrap()),
+            ("Na", crate::saha::ln_of_decimal("2e11").unwrap()),
+            ("K", crate::saha::ln_of_decimal("1e10").unwrap()),
+            ("Mg", crate::saha::ln_of_decimal("3e12").unwrap()),
+            ("Ca", crate::saha::ln_of_decimal("2e11").unwrap()),
+        ];
+        let state = crate::saha::electron_density_saha(temp, &species, &tbl).unwrap();
+        assert!(
+            !state.no_free_electrons,
+            "the 6000 K gas has free electrons"
+        );
+        // rho ~ n_H m_H / X for n_H = 1e17, X = 0.7: ~2.4e-7 g/cm^3.
+        let rho = Fixed::from_ratio(24, 100_000_000);
+        let ln_rho = crate::saha::ln_of_decimal("2.4e-7").unwrap();
+        let (x, z2a, g) = (
             Fixed::from_ratio(7, 10),
             Fixed::ONE,
-            Fixed::ONE,
-            Fixed::from_int(10),
+            Fixed::from_ratio(12, 10),
         );
-        let total = total_gas_rosseland_opacity(temp, rho, x, z2a, g, p_e, &tbl)
-            .expect("the gas closure assembles");
-        let floor = electron_scattering_opacity(x, &tbl).unwrap();
-        assert!(
-            total > Fixed::ZERO,
-            "the assembled gas opacity is positive (the floor holds through the Rosseland mean)"
-        );
-        assert!(
-            total >= floor,
-            "the assembled opacity is at least the electron-scattering floor ({} vs {})",
-            total.to_f64_lossy(),
-            floor.to_f64_lossy()
-        );
-        assert!(
-            total > floor,
-            "free-free lifts the opacity above the bare floor at this hot dense state"
-        );
-        // Deterministic, and a thinner gas (less free-free) falls toward the floor.
-        assert_eq!(
-            total,
-            total_gas_rosseland_opacity(temp, rho, x, z2a, g, p_e, &tbl).unwrap(),
-            "the assembly replays byte for byte"
-        );
-        let thin = total_gas_rosseland_opacity(
+        // Single-stage: sum Z^2 n_i = n_e, so ln n_e feeds both the electron and the ion side (the general
+        // interface, collapsed for the single-charge regime).
+        let ln_ne = state.ln_electron_density_cm3;
+        let total = total_gas_rosseland_opacity(
             temp,
-            Fixed::from_ratio(1, 1_000_000_000),
+            rho,
+            ln_rho,
             x,
             z2a,
             g,
-            p_e,
+            ln_ne,
+            ln_ne,
+            state.electron_pressure_dyn_cm2,
             &tbl,
         )
-        .unwrap();
+        .expect("the hot-regime gas closure assembles");
+        let es_floor = electron_scattering_opacity_from_electron_density(ln_ne, ln_rho).unwrap();
         assert!(
-            thin < total,
-            "a thinner gas has a lower free-free contribution ({} vs {})",
-            thin.to_f64_lossy(),
-            total.to_f64_lossy()
+            total > Fixed::ZERO,
+            "the assembled gas opacity is positive in the hot regime"
+        );
+        assert!(
+            total >= es_floor,
+            "the assembly is at least the n_e-linear electron-scattering floor ({} vs {})",
+            total.to_f64_lossy(),
+            es_floor.to_f64_lossy()
+        );
+        // Deterministic replay.
+        assert_eq!(
+            total,
+            total_gas_rosseland_opacity(
+                temp,
+                rho,
+                ln_rho,
+                x,
+                z2a,
+                g,
+                ln_ne,
+                ln_ne,
+                state.electron_pressure_dyn_cm2,
+                &tbl,
+            )
+            .unwrap(),
+            "the assembly replays byte for byte"
+        );
+    }
+
+    #[test]
+    fn the_gas_closure_returns_none_in_the_cold_molecular_gap() {
+        // The singularity the n_e-linear restatement exposes: with the grey electron-scattering floor gone, a cold
+        // weakly-ionized gas (T = 1200 K, grains sublimating, H- not yet risen) has n_e -> 0 from the Saha solve,
+        // so es and ff vanish and H- sleeps, the summed monochromatic opacity reaches zero, and the strict-
+        // positivity Rosseland kernel returns None. That None is the MOLECULAR handoff signal (the Ferguson term's
+        // window), not a failure of the ionized-gas closure.
+        let tbl = table();
+        let temp = Fixed::from_int(1200);
+        let species = [
+            ("H", crate::saha::ln_of_decimal("1e17").unwrap()),
+            ("K", crate::saha::ln_of_decimal("1e10").unwrap()),
+        ];
+        let state = crate::saha::electron_density_saha(temp, &species, &tbl).unwrap();
+        let rho = Fixed::from_ratio(24, 100_000_000);
+        let ln_rho = crate::saha::ln_of_decimal("2.4e-7").unwrap();
+        let ln_ne = state.ln_electron_density_cm3;
+        let total = total_gas_rosseland_opacity(
+            temp,
+            rho,
+            ln_rho,
+            Fixed::from_ratio(7, 10),
+            Fixed::ONE,
+            Fixed::from_ratio(12, 10),
+            ln_ne,
+            ln_ne,
+            state.electron_pressure_dyn_cm2,
+            &tbl,
+        );
+        assert!(
+            total.is_none(),
+            "the cold molecular gap has no ionized-gas opacity: the closure hands off to the molecular term, got {:?}",
+            total.map(|k| k.to_f64_lossy())
         );
     }
 
