@@ -115,6 +115,79 @@ pub fn electron_scattering_opacity(
     Fixed::from_bits_i128(bits)
 }
 
+/// The number of quadrature intervals the Rosseland-mean integral takes: a FIXED count (the determinism bound, the
+/// `SURFACE_BALANCE_ITERS` model), integer-only, no until-converged spin. Set so the Planck weighting is well
+/// resolved across its peak and its tails past the bounds are negligible.
+const ROSSELAND_INTERVALS: u32 = 512;
+
+/// The dimensionless-frequency `x = h*nu/(k_B*T)` lower bound of the Rosseland integral. Below it the weighting
+/// `w(x) ~ x^2` is negligible; `1/20` keeps the near-zero curvature resolved.
+fn rosseland_x_min() -> Fixed {
+    Fixed::from_ratio(1, 20)
+}
+
+/// The dimensionless-frequency upper bound. The weighting `w(x) ~ x^4 e^-x` is negligible past it, and it stays
+/// well inside the `Fixed::exp` window (`e^-20` is representable) so no overflow-prone `e^x` ever forms.
+fn rosseland_x_max() -> Fixed {
+    Fixed::from_int(20)
+}
+
+/// The ROSSELAND weighting `w(x)` (proportional to `dB_nu/dT`, the temperature derivative of the Planck function)
+/// in the dimensionless frequency `x = h*nu/(k_B*T)`: `w(x) = x^4 * e^-x / (1 - e^-x)^2`. Written with `e^-x`
+/// (always in `(0, 1]` for `x >= 0`) rather than the algebraically-equal `x^4 e^x/(e^x-1)^2`, because `e^x`
+/// overflows `Fixed` past `x ~ 21.5` while `e^-x` never does. Zero at `x <= 0`. `None` only on an arithmetic
+/// overflow (the `x^4` stays small over the integration range).
+fn rosseland_weight(x: Fixed) -> Option<Fixed> {
+    if x <= Fixed::ZERO {
+        return Some(Fixed::ZERO);
+    }
+    let e_neg_x = Fixed::ZERO.checked_sub(x)?.exp();
+    let one_minus = Fixed::ONE.checked_sub(e_neg_x)?;
+    if one_minus <= Fixed::ZERO {
+        return Some(Fixed::ZERO);
+    }
+    let x2 = x.checked_mul(x)?;
+    let x4 = x2.checked_mul(x2)?;
+    x4.checked_mul(e_neg_x)?
+        .checked_div(one_minus.checked_mul(one_minus)?)
+}
+
+/// The ROSSELAND-MEAN opacity `kappa_R` of a monochromatic opacity `kappa_nu` (the gate's determinism-critical
+/// kernel, reused by every opacity term). The Rosseland mean is the harmonic mean of `kappa_nu` weighted by the
+/// Planck temperature-derivative: `1/kappa_R = integral[(1/kappa_nu) w dx] / integral[w dx]`, so
+/// `kappa_R = (sum w) / (sum w/kappa_nu)` over a BOUNDED fixed-count midpoint quadrature (no until-converged spin,
+/// integer-only `Fixed`, so determinism holds by construction). `kappa_nu` is a function of the dimensionless
+/// frequency `x = h*nu/(k_B*T)`, so this kernel is temperature-scale-free (the temperature dependence lives in the
+/// caller's `kappa_nu(x)`); a frequency where it returns `None` or a non-positive value drops from the harmonic
+/// sum (a transparent point does not block the mean). `None` if the accumulation overflows or no frequency
+/// contributes.
+pub fn rosseland_mean(kappa_nu: impl Fn(Fixed) -> Option<Fixed>) -> Option<Fixed> {
+    let x_min = rosseland_x_min();
+    let dx = rosseland_x_max()
+        .checked_sub(x_min)?
+        .checked_div(Fixed::from_int(ROSSELAND_INTERVALS as i32))?;
+    let half_dx = dx.checked_div(Fixed::from_int(2))?;
+    let mut weight_sum = Fixed::ZERO;
+    let mut harmonic_sum = Fixed::ZERO; // sum of w / kappa_nu
+    for i in 0..ROSSELAND_INTERVALS {
+        let x = x_min.checked_add(
+            dx.checked_mul(Fixed::from_int(i as i32))?
+                .checked_add(half_dx)?,
+        )?;
+        let w = rosseland_weight(x)?;
+        weight_sum = weight_sum.checked_add(w)?;
+        if let Some(k) = kappa_nu(x) {
+            if k > Fixed::ZERO {
+                harmonic_sum = harmonic_sum.checked_add(w.checked_div(k)?)?;
+            }
+        }
+    }
+    if harmonic_sum <= Fixed::ZERO {
+        return None;
+    }
+    weight_sum.checked_div(harmonic_sum)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -177,5 +250,60 @@ mod tests {
             electron_scattering_opacity(x, &t),
             "a pure derivation from the fundamentals replays byte for byte"
         );
+    }
+
+    #[test]
+    fn the_rosseland_weight_peaks_near_the_planck_derivative_maximum() {
+        // The Rosseland weighting w(x) = x^4 e^-x/(1-e^-x)^2 (the temperature derivative of the Planck function)
+        // peaks near x ~ 3.8: it is larger at x = 4 than at x = 1 or x = 10, the shape that makes the Rosseland
+        // mean weight the frequencies near the Planck-derivative maximum.
+        let w1 = rosseland_weight(Fixed::from_int(1)).unwrap();
+        let w4 = rosseland_weight(Fixed::from_int(4)).unwrap();
+        let w10 = rosseland_weight(Fixed::from_int(10)).unwrap();
+        assert!(w4 > w1 && w4 > w10, "the weight peaks near x ~ 4");
+    }
+
+    #[test]
+    fn a_grey_opacity_rosseland_means_to_itself() {
+        // The harmonic mean of a constant is the constant: a frequency-independent (grey) kappa_nu = kappa_0
+        // Rosseland-averages back to kappa_0. This is the exact-recovery test that validates the quadrature kernel
+        // against a known analytic answer, independent of any opacity physics.
+        let kappa_0 = Fixed::from_int(5);
+        let k = rosseland_mean(|_x| Some(kappa_0)).expect("a grey opacity has a Rosseland mean");
+        assert!(
+            (k.to_f64_lossy() - 5.0).abs() < 0.01,
+            "a grey opacity Rosseland-means to itself (~5), got {}",
+            k.to_f64_lossy()
+        );
+    }
+
+    #[test]
+    fn the_rosseland_mean_is_bounded_by_the_opacity_range_and_favors_the_low_side() {
+        // For a kappa_nu rising from kappa_0 (at low x) to 3*kappa_0 (at high x), the Rosseland (harmonic) mean
+        // sits inside [kappa_0, 3*kappa_0] and below the midpoint 2*kappa_0: the harmonic mean weights the low-
+        // opacity (transparent) frequencies, the physical reason a spectral window dominates the mean.
+        let kappa_0 = 2.0;
+        let k = rosseland_mean(|x| {
+            // kappa_nu = kappa_0 * (1 + x/10): kappa_0 at x=0 up to ~3*kappa_0 at x=20.
+            let factor = Fixed::ONE.checked_add(x.checked_div(Fixed::from_int(10))?)?;
+            Fixed::from_ratio(2, 1).checked_mul(factor)
+        })
+        .expect("the mean resolves");
+        let kf = k.to_f64_lossy();
+        assert!(
+            kf > kappa_0 && kf < 3.0 * kappa_0,
+            "the Rosseland mean is inside the opacity range, got {kf}"
+        );
+        assert!(
+            kf < 2.0 * kappa_0,
+            "the harmonic mean favors the low-opacity side (below the midpoint), got {kf}"
+        );
+    }
+
+    #[test]
+    fn the_rosseland_mean_is_deterministic() {
+        let k1 = rosseland_mean(|_| Some(Fixed::from_int(3)));
+        let k2 = rosseland_mean(|_| Some(Fixed::from_int(3)));
+        assert_eq!(k1, k2, "the bounded quadrature replays byte for byte");
     }
 }
