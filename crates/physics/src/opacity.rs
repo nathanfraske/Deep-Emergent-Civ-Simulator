@@ -158,9 +158,16 @@ fn rosseland_weight(x: Fixed) -> Option<Fixed> {
 /// `kappa_R = (sum w) / (sum w/kappa_nu)` over a BOUNDED fixed-count midpoint quadrature (no until-converged spin,
 /// integer-only `Fixed`, so determinism holds by construction). `kappa_nu` is a function of the dimensionless
 /// frequency `x = h*nu/(k_B*T)`, so this kernel is temperature-scale-free (the temperature dependence lives in the
-/// caller's `kappa_nu(x)`); a frequency where it returns `None` or a non-positive value drops from the harmonic
-/// sum (a transparent point does not block the mean). `None` if the accumulation overflows or no frequency
-/// contributes.
+/// caller's `kappa_nu(x)`).
+///
+/// STRICT-POSITIVITY PRECONDITION (fail-loud): `kappa_nu` must be positive across the whole range. The assembled
+/// opacity always carries the electron-scattering floor (`kappa_nu >= kappa_es > 0`), so it holds by construction.
+/// A `None` or non-positive `kappa_nu` at any quadrature point is an ERROR, not a transparent window (a real
+/// transparent window is `kappa_nu -> 0+`, a small positive value the harmonic sum `w/kappa_nu` handles on its own
+/// by blowing up so `kappa_R -> 0`), so this returns `None` rather than silently dropping the point. Dropping it
+/// would leave `sum w` (over every `x`) and `sum w/kappa_nu` (over the kept `x`) summing over different point sets,
+/// biasing `kappa_R` HIGH by the weight of the dropped point (worst near the `x ~ 3.83` peak). `None` if the
+/// precondition is violated, the accumulation overflows, or no frequency contributes.
 pub fn rosseland_mean(kappa_nu: impl Fn(Fixed) -> Option<Fixed>) -> Option<Fixed> {
     let x_min = rosseland_x_min();
     let dx = rosseland_x_max()
@@ -176,16 +183,133 @@ pub fn rosseland_mean(kappa_nu: impl Fn(Fixed) -> Option<Fixed>) -> Option<Fixed
         )?;
         let w = rosseland_weight(x)?;
         weight_sum = weight_sum.checked_add(w)?;
-        if let Some(k) = kappa_nu(x) {
-            if k > Fixed::ZERO {
-                harmonic_sum = harmonic_sum.checked_add(w.checked_div(k)?)?;
-            }
+        // Fail loud on the strict-positivity precondition: a None or non-positive kappa_nu is an error, not a
+        // transparent window, so propagate None rather than drop the point and leave the numerator and
+        // denominator summing over different point sets (which would bias kappa_R high).
+        let k = kappa_nu(x)?;
+        if k <= Fixed::ZERO {
+            return None;
         }
+        harmonic_sum = harmonic_sum.checked_add(w.checked_div(k)?)?;
     }
     if harmonic_sum <= Fixed::ZERO {
         return None;
     }
     weight_sum.checked_div(harmonic_sum)
+}
+
+/// The FREE-FREE spectral shape `f(x) = x^-3 * (1 - e^-x)` (dimensionless), the frequency dependence of the
+/// bremsstrahlung absorption coefficient in the dimensionless frequency `x = h*nu/(k_B*T)`, with the `(1 - e^-x)`
+/// factor its stimulated-emission correction. It is strictly positive on `(0, x_max]` (`x^-3 > 0` and
+/// `1 - e^-x > 0`), so it meets the Rosseland kernel's strict-positivity precondition. `None` only on an arithmetic
+/// overflow (the values stay near `x^-3 ~ 8000` at the low bound, well inside range). Zero-or-below `x` returns
+/// `None` (out of the integration domain).
+fn free_free_shape(x: Fixed) -> Option<Fixed> {
+    if x <= Fixed::ZERO {
+        return None;
+    }
+    let e_neg_x = Fixed::ZERO.checked_sub(x)?.exp();
+    let one_minus = Fixed::ONE.checked_sub(e_neg_x)?;
+    let x3 = x.checked_mul(x)?.checked_mul(x)?;
+    one_minus.checked_div(x3)
+}
+
+/// The KRAMERS FREE-FREE (bremsstrahlung) Rosseland opacity `kappa_ff` (cm^2/g), DERIVED from the fundamentals
+/// through the shared Rosseland kernel, never read from the Bell-Lin fit. A free electron accelerating past an ion
+/// radiates a continuum; the bound-free-corrected absorption coefficient carries the spectral shape
+/// [`free_free_shape`] `x^-3 (1 - e^-x)`, and its Rosseland mean is the classic
+/// `kappa_ff = C_ff * (1+X) * <Z^2/A> * g_ff * rho * T^(-7/2)` (cgs). The whole point of the generator is that
+/// `C_ff` is NOT the fitted `~3.68e22`: it reassembles from the bremsstrahlung prefactor and the kernel's Rosseland
+/// average of the free-free shape, and LANDS inside the cited `[3.68e22, 3.8e22]` textbook envelope as a
+/// consequence, never as an input.
+///
+/// Every constant is read from the register, nothing fetched:
+/// - The monochromatic prefactor is the SI bremsstrahlung coefficient
+///   `A = (4/(3 m_e h c)) * (e^2/(4*pi*eps_0))^3 * sqrt(2*pi/(3 k_B m_e))`, reading `e, eps_0, m_e, h, c, k_B` (the
+///   Gaussian `e^6` becomes `(e^2/(4*pi*eps_0))^3` in SI). After substituting `nu = x k_B T/h` the temperature
+///   power becomes `T^(-7/2)` and the dimensional prefactor is `pref = A * (h^3/k_B^3)/(2 m_u^2)`, with the atomic
+///   mass unit `m_u = 1/(1000 N_A)` kg (the free-free composition reduction counts nucleons in `m_u`).
+/// - `Phi = rosseland_mean(free_free_shape)` is DERIVED by the shared kernel (Rosseland-averaging the actual
+///   free-free spectral shape), landing `~5.09e-3` (the closed form `(4*pi^4/15)/(2520*(zeta(6)+zeta(7)))`), so no
+///   fitted `C_ff` is ever cited; `C_ff = 10^4 * pref * Phi` falls out inside the envelope.
+/// - `kappa_ff = 10^4 * pref * Phi * (1+X) * charge_weighted_abundance * g_ff * rho * T^(-7/2)` (the `10^4` is `10`
+///   for `m^2/kg -> cm^2/g` times `10^3` for `rho g/cm^3 -> kg/m^3`).
+///
+/// The wide-magnitude compute runs in exact `BigRat` and the single square root is taken LAST (the squaring trick:
+/// `kappa_ff^2` is a clean rational because `sqrt(2*pi/(3 k_B m_e))` squares away and `T^(-7/2)` becomes `T^-7`,
+/// and unlike the `~10^5` dimensional prefactor the result `kappa_ff^2 ~ 10^5` fits `Fixed`), then one
+/// `Fixed::sqrt`. Every per-world quantity is a caller argument (the admit-the-alien seam): `hydrogen_mass_fraction`
+/// X (the `1+X` electrons per nucleon of an ionized H-He plasma), `charge_weighted_abundance` `sum(Z_i^2 X_i/A_i)`
+/// (the ion factor, `X+Y` for hydrogen-helium), and `gaunt_factor` g_ff (basis: the thermally-averaged free-free
+/// Gaunt factor `~1.0 to 1.2` over the disk's temperature and frequency range, Rybicki and Lightman 1979). A
+/// hydrogen-poor or metal-rich plasma is a data row, never a rewrite. `None` if a fundamental fails to resolve, the
+/// kernel returns no `Phi`, or the result leaves the representable range (an extreme density or temperature whose
+/// `kappa_ff^2` overflows `Fixed`).
+pub fn kramers_free_free_opacity(
+    density_g_per_cm3: Fixed,
+    temperature_k: Fixed,
+    hydrogen_mass_fraction: Fixed,
+    charge_weighted_abundance: Fixed,
+    gaunt_factor: Fixed,
+) -> Option<Fixed> {
+    let e = fundamental_bigrat("e")?;
+    let eps_0 = fundamental_bigrat("eps_0")?;
+    let m_e = fundamental_bigrat("m_e")?;
+    let h = fundamental_bigrat("h")?;
+    let c = fundamental_bigrat("c")?;
+    let k_b = fundamental_bigrat("k_B")?;
+    let n_a = fundamental_bigrat("N_A")?;
+    let pi = compute::pi(OPACITY_PI_DIGITS);
+
+    // The Coulomb-squared charge alpha_c = e^2/(4*pi*eps_0) (the SI stand-in for the Gaussian e^2), and the atomic
+    // mass unit m_u = 1/(1000 N_A) kg (1 g/mol over Avogadro).
+    let alpha_c = e.mul(&e).div(&BigRat::from_i64(4).mul(&pi).mul(&eps_0));
+    let m_u = BigRat::from_i64(1).div(&BigRat::from_i64(1000).mul(&n_a));
+
+    // RAT: the pure-rational part of the cgs prefactor, 10^4 * (4 alpha_c^3/(3 m_e h c)) * (h^3/k_B^3)/(2 m_u^2).
+    // SQ: the part under the single square root, 2*pi/(3 k_B m_e). So pref_cgs = RAT * sqrt(SQ).
+    let alpha_c3 = alpha_c.mul(&alpha_c).mul(&alpha_c);
+    let brems = BigRat::from_i64(4)
+        .mul(&alpha_c3)
+        .div(&BigRat::from_i64(3).mul(&m_e).mul(&h).mul(&c));
+    let h3 = h.mul(&h).mul(&h);
+    let kb3 = k_b.mul(&k_b).mul(&k_b);
+    let temp_prefactor = h3.div(&kb3).div(&BigRat::from_i64(2).mul(&m_u).mul(&m_u));
+    let rat = BigRat::from_i64(10000).mul(&brems).mul(&temp_prefactor);
+    let sq = BigRat::from_i64(2)
+        .mul(&pi)
+        .div(&BigRat::from_i64(3).mul(&k_b).mul(&m_e));
+
+    // Phi, the Rosseland mean of the free-free spectral shape, DERIVED by the shared kernel (never a cited C_ff).
+    let phi = nonneg_fixed_to_bigrat(rosseland_mean(free_free_shape)?);
+
+    // The composition and state factors, all caller-supplied (admit-the-alien): comp = (1+X) * <Z^2/A>.
+    let comp = BigRat::from_i64(1)
+        .add(&nonneg_fixed_to_bigrat(hydrogen_mass_fraction))
+        .mul(&nonneg_fixed_to_bigrat(charge_weighted_abundance));
+    let rho = nonneg_fixed_to_bigrat(density_g_per_cm3);
+    let g = nonneg_fixed_to_bigrat(gaunt_factor);
+    let t = nonneg_fixed_to_bigrat(temperature_k);
+
+    // kappa_ff^2 = RAT^2 * SQ * Phi^2 * comp^2 * rho^2 * g^2 * T^-7 (the squaring removes both sqrt(SQ) and the
+    // T^(-1/2), leaving a clean rational), then a single Fixed::sqrt. T^7 = T^4 * T^2 * T.
+    let t2 = t.mul(&t);
+    let t7 = t2.mul(&t2).mul(&t2).mul(&t);
+    let kappa_squared = rat
+        .mul(&rat)
+        .mul(&sq)
+        .mul(&phi)
+        .mul(&phi)
+        .mul(&comp)
+        .mul(&comp)
+        .mul(&rho)
+        .mul(&rho)
+        .mul(&g)
+        .mul(&g)
+        .div(&t7);
+
+    let bits = kappa_squared.round_to_scale(Fixed::FRAC_BITS)?;
+    Some(Fixed::from_bits_i128(bits)?.sqrt())
 }
 
 #[cfg(test)]
@@ -305,5 +429,124 @@ mod tests {
         let k1 = rosseland_mean(|_| Some(Fixed::from_int(3)));
         let k2 = rosseland_mean(|_| Some(Fixed::from_int(3)));
         assert_eq!(k1, k2, "the bounded quadrature replays byte for byte");
+    }
+
+    #[test]
+    fn a_non_positive_or_missing_opacity_fails_loud_rather_than_biasing_the_mean() {
+        // The strict-positivity precondition (the gate's fix): a kappa_nu that is None or non-positive at any
+        // quadrature point is an ERROR, not a transparent window, so the mean returns None rather than silently
+        // dropping the point (which would leave the numerator over every x and the denominator over the kept x,
+        // biasing kappa_R high). A real transparent window is kappa_nu -> 0+ (small positive), which the harmonic
+        // sum w/kappa_nu handles on its own.
+        let all_zero = rosseland_mean(|_| Some(Fixed::ZERO));
+        assert_eq!(all_zero, None, "a non-positive opacity fails loud");
+        let gappy = rosseland_mean(|x| {
+            if x > Fixed::from_int(3) {
+                None // a missing point past the weight peak
+            } else {
+                Some(Fixed::from_int(2))
+            }
+        });
+        assert_eq!(
+            gappy, None,
+            "a missing frequency fails loud, it does not drop from the mean"
+        );
+    }
+
+    #[test]
+    fn a_power_law_opacity_rosseland_means_to_the_analytic_moment_ratio() {
+        // Beyond the grey recovery (which is resolution-independent, so it checks only the harmonic-mean algebra),
+        // a power-law kappa_nu = kappa_0 * x has a closed-form Rosseland mean, kappa_R = kappa_0 * J(4)/J(3) =
+        // kappa_0 * 4*zeta(4)/zeta(3) ~ 3.6016 * kappa_0, where J(s) = Gamma(s+1) zeta(s) is the s-th moment of the
+        // Planck-derivative weight over (0, inf). The 512-interval sum landing this (the truncation to [1/20, 20]
+        // costs ~0.02%) is what proves the quadrature RESOLVES the integral, not merely the harmonic-mean algebra.
+        let kappa_0 = Fixed::from_int(2);
+        let k = rosseland_mean(|x| kappa_0.checked_mul(x)).expect("the mean resolves");
+        let ratio = k.to_f64_lossy() / 2.0;
+        assert!(
+            (ratio - 3.6016).abs() < 0.036, // within 1% of 4*zeta(4)/zeta(3)
+            "a power-law kappa_nu Rosseland-means to 4*zeta(4)/zeta(3) ~ 3.6016 * kappa_0, got ratio {ratio}"
+        );
+    }
+
+    /// A hydrogen-helium plasma reference: X = 0.7, `<Z^2/A> = X + Y = 1.0` (Y = 0.3), Gaunt factor 1.
+    fn solar_ff(rho: Fixed, t: Fixed) -> Fixed {
+        kramers_free_free_opacity(rho, t, Fixed::from_ratio(7, 10), Fixed::ONE, Fixed::ONE)
+            .expect("the free-free opacity derives")
+    }
+
+    #[test]
+    fn the_free_free_shape_rosseland_averages_to_the_analytic_phi() {
+        // Phi = rosseland_mean(free_free_shape) is DERIVED by the kernel, never a cited C_ff. It lands the closed
+        // form (4*pi^4/15)/(2520*(zeta(6)+zeta(7))) ~ 5.0886e-3, so the free-free spectral shape is Rosseland-
+        // averaged through the same kernel every opacity term reuses.
+        let phi =
+            rosseland_mean(free_free_shape).expect("the free-free shape has a Rosseland mean");
+        assert!(
+            (phi.to_f64_lossy() - 5.0886e-3).abs() < 5e-5,
+            "the free-free shape Rosseland-averages to Phi ~ 5.09e-3, got {}",
+            phi.to_f64_lossy()
+        );
+    }
+
+    #[test]
+    fn the_solar_free_free_opacity_lands_inside_the_kramers_envelope() {
+        // Pre-registered acceptance gate: the DERIVED C_ff lands inside the cited [3.68e22, 3.8e22] textbook
+        // envelope (Bell-Lin ~3.68e22 to KWW ~3.8e22), a consequence of the derivation, never an input. At
+        // rho = 1e-6 g/cm^3, T = 1e4 K, comp = (1+X)<Z^2/A> = 1.7, the opacity is kappa_ff = C_ff * comp * rho *
+        // T^-3.5, so the implied C_ff = kappa_ff / (comp * rho * T^-3.5) is the number under test.
+        let rho = Fixed::from_ratio(1, 1_000_000);
+        let t = Fixed::from_int(10_000);
+        let kappa = solar_ff(rho, t);
+        let comp = 1.7_f64;
+        let c_ff = kappa.to_f64_lossy() / (comp * 1e-6 * 1e4_f64.powf(-3.5));
+        assert!(
+            (3.68e22..=3.8e22).contains(&c_ff),
+            "the derived C_ff lands in the cited [3.68e22, 3.8e22] envelope, got {c_ff:e}"
+        );
+    }
+
+    #[test]
+    fn the_free_free_opacity_scales_as_density_and_inverse_temperature() {
+        // kappa_ff ~ rho * T^(-7/2): doubling the density doubles the opacity (linear), and raising the temperature
+        // lowers it steeply. This is the Kramers signature the disk-thermal profile reads.
+        let rho = Fixed::from_ratio(1, 1_000_000);
+        let base = solar_ff(rho, Fixed::from_int(10_000));
+        let double_rho = solar_ff(Fixed::from_ratio(2, 1_000_000), Fixed::from_int(10_000));
+        let hotter = solar_ff(rho, Fixed::from_int(20_000));
+        let ratio = double_rho.to_f64_lossy() / base.to_f64_lossy();
+        assert!(
+            (ratio - 2.0).abs() < 0.02,
+            "doubling the density doubles the free-free opacity, got ratio {ratio}"
+        );
+        assert!(
+            hotter.to_f64_lossy() < base.to_f64_lossy(),
+            "a hotter plasma has a lower free-free opacity (T^-7/2)"
+        );
+    }
+
+    #[test]
+    fn a_hydrogen_poor_plasma_has_a_lower_free_free_opacity_admit_the_alien() {
+        // Composition is caller data, not a rewrite: a hydrogen-poor plasma (lower X, a lower 1+X electron factor)
+        // has a lower free-free opacity at the same <Z^2/A>. The alien is a data row.
+        let rho = Fixed::from_ratio(1, 1_000_000);
+        let t = Fixed::from_int(10_000);
+        let solar = solar_ff(rho, t);
+        let poor =
+            kramers_free_free_opacity(rho, t, Fixed::from_ratio(1, 10), Fixed::ONE, Fixed::ONE)
+                .expect("the free-free opacity derives");
+        assert!(
+            poor.to_f64_lossy() < solar.to_f64_lossy(),
+            "a hydrogen-poor plasma has a lower free-free opacity"
+        );
+    }
+
+    #[test]
+    fn the_free_free_opacity_is_deterministic() {
+        let rho = Fixed::from_ratio(1, 1_000_000);
+        let t = Fixed::from_int(10_000);
+        let a = kramers_free_free_opacity(rho, t, Fixed::from_ratio(7, 10), Fixed::ONE, Fixed::ONE);
+        let b = kramers_free_free_opacity(rho, t, Fixed::from_ratio(7, 10), Fixed::ONE, Fixed::ONE);
+        assert_eq!(a, b, "the free-free derivation replays byte for byte");
     }
 }
