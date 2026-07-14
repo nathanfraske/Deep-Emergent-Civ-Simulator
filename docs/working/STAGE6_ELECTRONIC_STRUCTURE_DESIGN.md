@@ -307,3 +307,77 @@ arc's rhythm of building the certain part and surfacing the contested part rathe
 
 Byte-neutrality holds throughout: the gap tier lands in the materials leaf and the new `[M]` gap column in a data
 file, moving no run pin, proven per push as the mechanical and near-ready electronic slices were.
+
+## 11. The magnetism sub-arc: the design-first surface (for the gate's ruling)
+
+The next build-order item after the gap tier (section 9 Call 4). Surfaced design-first before a line is built, on the
+same discipline the gap tier ran under. Its purpose is to scope the magnetism pieces and their contested calls, and
+to correct two inventory claims the grounding caught, so the gate rules the depth and the reserved-column set before
+building.
+
+### 11.1 The "already built" premise, checked against the code
+
+Section 9 Call 4 reads "Hund's-rule local moments first (already built)". Checked at source, that does not hold: the
+correlation classifier's Localized route (`EnergyRoute::Localized`) is documented "a later slice; until then this
+slot is unimplemented and invoking it escalates," and the one route that fills the Localized slot (`localized.rs`)
+returns the cited Born-Haber lattice ENERGY, not a magnetic moment. So magnetism BUILDS the Hund local-moment
+machinery; it does not consume an existing one. The catch is mild (the dispatch slot exists, the moment computation
+is new) and does not change the ruling's shape, but it corrects the inventory, the same map-versus-territory law
+Part 1 codified: the gate's "banked" reads as "banked-in-spec until grounded".
+
+### 11.2 The Hund local moment DERIVES from the banked floor (no new column)
+
+The better news the grounding surfaced: the free-ion Hund spin-only moment needs no new data column. The number of
+unpaired d-electrons of a 3d transition-metal ion follows from its d-electron count and Hund's first rule, and the
+d-count derives from the banked periodic table. For a 3d ion the valence-electron count is `Z - 18` (the 4s and 3d
+electrons above the argon core), the ion's charge removes electrons 4s-first, so the d-count is `(Z - 18) - q` for
+the common divalent and trivalent ions, and `q` comes from the banked valence (oxidation-state) set. Hund's first
+rule then gives the unpaired count (`n` for `d^n` with `n <= 5`, `10 - n` for `n >= 5`), and the spin-only moment is
+`mu = sqrt(n_unpaired (n_unpaired + 2))` Bohr magnetons. So the Hund local moment is a DERIVATION over `Z` and the
+valence, never a reserved column: iron(II) is `d^6`, four unpaired, `mu = sqrt(24) = 4.90 mu_B`, the standard
+spin-only value. The Bohr magneton is a fundamental constant (the physics floor). This is the derive-first form the
+owner's value-authoring line demands, and it is buildable now with no reserved value.
+
+Its honest limit: the spin-only moment omits the orbital contribution (which lifts the observed moment above
+spin-only for the early and late 3d ions) and assumes high-spin free-ion filling (a strong crystal field forces
+low-spin, changing the unpaired count). The crystal-field correction reads the banked `10Dq` column (the same one
+the optical d-d transitions consume), a coupling to name; the orbital contribution is a flagged refinement.
+
+### 11.3 The itinerant Stoner piece needs new [M] columns (the deep piece)
+
+The itinerant branch (a metal's band ferromagnetism, the Stoner criterion `g(E_F) I > 1`) needs two quantities the
+floor does not carry: the density of states at the Fermi level `g(E_F)` and the Stoner exchange integral `I`.
+Section 9 Call 4 gives each a route: `g(E_F)` has a MEASURED route through the Sommerfeld coefficient `g(E_F) =
+3 gamma_el / (pi^2 k_B^2)` from the low-temperature electronic heat capacity (`gamma_el` a new `[M]` column,
+refutable without the sim), with the reduced-order DOS as the estimator; and `I` is `[M]` (Janak 1977, a new cited
+column). Both are new floor pieces, the deep half of the sub-arc, the analog of the gap column for the gap tier.
+
+### 11.4 The dispatch, and the Gap-Law near-miss
+
+Magnetism dispatches on the banked `U/W` correlation classifier (the D2b machinery the gap tier's preflight already
+consumes): a Localized (Mott) centre carries a Hund LOCAL moment (section 11.2), an Itinerant metal is scored by the
+Stoner criterion (section 11.3), and a Window or out-of-scope material escalates. The validation section 9 Call 4
+pre-registers: among the elements only iron, cobalt, and nickel clear `g I > 1` (the itinerant ferromagnets), and
+palladium sits narrowly under the threshold with a roughly tenfold Stoner-enhanced susceptibility, a `delta -> 0` Gap-Law near-miss the
+classifier FLAGS (a near-degenerate verdict) rather than scoring as a clean failure. That flag is the Gap-Law
+discipline applied to magnetism.
+
+### 11.5 The contested calls, byte-neutrality, and build order
+
+THE CALL (depth and order). Section 9 Call 4 rules Hund local moments first, Stoner itinerant as the follow-on. The
+grounding sharpens it: the Hund local moment is buildable NOW (a derivation over the banked `Z` and valence, no new
+column), so it is the natural first slice; the Stoner piece waits on the two new `[M]` columns (`gamma_el`, `I`). The
+gate's call on whether the Hund first slice ships spin-only (free-ion, buildable now, reserves nothing) or waits for
+the crystal-field `10Dq` coupling (high-spin versus low-spin correct); the recommendation is spin-only first with the
+crystal-field correction a named follow-on, since spin-only is the honest first cut.
+
+Byte-neutrality: the magnetism pieces land in the materials leaf and any new `[M]` column (`gamma_el`, `I`) in a
+physics data file, moving no run pin, proven per push as the gap tier was. Admit-the-alien: every piece keys on the
+being's or material's own data (the d-count from its `Z` and valence, `g(E_F)` from its own heat capacity), so an
+alien magnet is a data row, never a rewrite.
+
+Build order, gated per push: (a) the Hund spin-only local moment (derived from `Z` and valence, no reserved value),
+dispatched on the `U/W` classifier's Localized class; (b) the crystal-field high-spin versus low-spin correction over
+the banked `10Dq`; (c) the Sommerfeld `g(E_F)` column and the Stoner `I`, and the itinerant Stoner criterion with the
+palladium near-miss flag; (d) the susceptibility. The gate's ruling on the depth and the reserved-column set before
+the deep pieces are built.
