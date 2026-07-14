@@ -987,6 +987,59 @@ fn electronic_ringer(table: &PeriodicTable, anchors: &MetalEosAnchors) -> (usize
     );
     println!();
 
+    // CROSS-MATERIAL lambda_tr (the gate's caveat, mirroring f_surf/r_gb): each metal fed its INDEPENDENT literature
+    // lambda_tr (the McMillan/Allen electron-phonon coupling from the superconductivity lineage, NOT a resistivity
+    // closure value) must reproduce its resistivity within the reduced-order free-electron grade (~30%), validating
+    // lambda_tr as a genuine per-material [M] value rather than a per-metal fit. (z, rho, M, lambda_tr, obs_sigma).
+    println!("--- cross-material lambda_tr (independent McMillan/Allen values, one per metal) ---");
+    for (name, z, rho, m, lambda, sigma_obs) in [
+        (
+            "Cu",
+            1,
+            dec(896, 100),
+            dec(63546, 1000),
+            dec(13, 100),
+            5.95e7,
+        ),
+        (
+            "Ag",
+            1,
+            dec(1049, 100),
+            dec(107868, 1000),
+            dec(13, 100),
+            6.29e7,
+        ),
+        (
+            "Au",
+            1,
+            dec(1930, 100),
+            dec(196967, 1000),
+            dec(15, 100),
+            4.52e7,
+        ),
+        (
+            "Al",
+            3,
+            dec(270, 100),
+            dec(26982, 1000),
+            dec(43, 100),
+            3.77e7,
+        ),
+    ] {
+        let n_e = carrier_density_per_nm3(Fixed::from_int(z), rho, m);
+        let sigma = drude_conductivity_s_per_m(n_e, lambda, Fixed::from_int(300));
+        let v = grade(sigma.to_f64_lossy(), sigma_obs, 0.32);
+        report(
+            &format!("sigma[{name}] lit-lambda"),
+            sigma.to_f64_lossy(),
+            sigma_obs,
+            &v,
+            &mut defects,
+            &mut checks,
+        );
+    }
+    println!();
+
     (checks, defects)
 }
 
