@@ -244,9 +244,98 @@ impl BiomeSet {
     }
 }
 
+/// A tile's RELIEF class in the GENERATED world, EMERGED from its derived elevation crossing DERIVED references
+/// (gate-ruled, the R1 override at the tile): a discrete label crosses a derived threshold, never an authored
+/// metre-band table, the band-gap-emergence pattern at planetary scale (the semiconductor/insulator split crossed
+/// the thermally-activated carrier density, not an authored eV boundary; the ocean/land split crosses sea level,
+/// not an authored metre). The authored [`BiomeSet`] band table retires to the labelled dev fixture; this is the
+/// canonical generated-world classification. The tile's surface MATERIAL (rocky, basaltic, sedimentary) is the
+/// other half, read from the substrate's stable assemblage at that place, and pairs with the relief here.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum TerrainRelief {
+    /// Below the sea-level reference: submarine (the ocean/land boundary crossed downward).
+    Submarine,
+    /// At or above sea level, below the relief datum: lowland.
+    Lowland,
+    /// At or above the relief datum: upland.
+    Upland,
+}
+
+/// The relief DATUM: the mean elevation of a tile field, the derived reference the lowland/upland split rides (an
+/// isostatic/modal datum DERIVED from the field itself, never a planted number). `None` for an empty field or on
+/// overflow. This is a derived reference, so no authored elevation threshold enters the canon.
+pub fn relief_datum(elevations: &[Fixed]) -> Option<Fixed> {
+    if elevations.is_empty() {
+        return None;
+    }
+    let mut sum = Fixed::ZERO;
+    for e in elevations {
+        sum = sum.checked_add(*e)?;
+    }
+    sum.checked_div(Fixed::from_int(elevations.len() as i32))
+}
+
+/// Classify a tile's relief by CROSSING the derived references (gate-ruled): the `sea_level` reference (the
+/// ocean/land boundary, derived from the water budget or a clearly-labelled Slice-0 fixture that retires when the
+/// water inventory derives) and the `relief_datum` (the derived modal elevation, [`relief_datum`]). A tile below
+/// sea level is [`TerrainRelief::Submarine`]; at or above sea level and below the datum, [`TerrainRelief::Lowland`];
+/// at or above the datum, [`TerrainRelief::Upland`]. Both references are PARAMETERS, so the real sea-level
+/// derivation slots in with no reclassification and no authored metre-band table ever enters the canonical path.
+pub fn classify_relief(elevation: Fixed, sea_level: Fixed, relief_datum: Fixed) -> TerrainRelief {
+    if elevation < sea_level {
+        TerrainRelief::Submarine
+    } else if elevation < relief_datum {
+        TerrainRelief::Lowland
+    } else {
+        TerrainRelief::Upland
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_relief_datum_derives_from_the_field_mean() {
+        // The relief datum is the mean elevation of the field, a DERIVED reference (never a planted number).
+        // [1, 2, 3] has mean 2; an empty field has no datum.
+        let d =
+            relief_datum(&[Fixed::from_int(1), Fixed::from_int(2), Fixed::from_int(3)]).unwrap();
+        assert_eq!(d, Fixed::from_int(2));
+        assert!(relief_datum(&[]).is_none());
+    }
+
+    #[test]
+    fn the_relief_classifies_by_crossing_the_derived_references_not_a_band_table() {
+        // THE R1-OVERRIDE TILE CLASSIFICATION: relief emerges from CROSSING the derived references (sea level, the
+        // relief datum), not an authored metre band. Below sea level -> Submarine; between sea level and the datum
+        // -> Lowland; above the datum -> Upland.
+        let sea = Fixed::from_int(10);
+        let datum = Fixed::from_int(20);
+        assert_eq!(
+            classify_relief(Fixed::from_int(5), sea, datum),
+            TerrainRelief::Submarine
+        );
+        assert_eq!(
+            classify_relief(Fixed::from_int(15), sea, datum),
+            TerrainRelief::Lowland
+        );
+        assert_eq!(
+            classify_relief(Fixed::from_int(25), sea, datum),
+            TerrainRelief::Upland
+        );
+        // The SAME elevation reclassifies when the derived references move (proving no hardcoded threshold, the
+        // references are parameters): elevation 15 is Lowland above, but Submarine under a higher sea level and
+        // Upland under a lower datum.
+        assert_eq!(
+            classify_relief(Fixed::from_int(15), Fixed::from_int(18), datum),
+            TerrainRelief::Submarine
+        );
+        assert_eq!(
+            classify_relief(Fixed::from_int(15), sea, Fixed::from_int(12)),
+            TerrainRelief::Upland
+        );
+    }
 
     fn p(n: i64) -> Fixed {
         Fixed::from_ratio(n, 100)
