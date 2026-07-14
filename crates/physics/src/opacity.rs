@@ -1187,6 +1187,100 @@ pub fn grain_size_averaged_opacity(
         .checked_mul(Fixed::from_int(10000))
 }
 
+/// The Newton iteration count for the Bruggeman effective-medium solve. The iteration converges
+/// quadratically from the volume-weighted seed, so a converged root is reached in well under this count;
+/// the surplus holds the root fixed and keeps the count data-independent (determinism needs a fixed number
+/// of steps, not a convergence branch). An engine-convergence bound, not world content.
+const BRUGGEMAN_ITERS: u32 = 40;
+
+/// The effective complex refractive index `(n_eff, k_eff)` of a grain built from several condensate species
+/// mixed at the given volume fractions, DERIVED by the Bruggeman effective-medium rule rather than by
+/// averaging the indices. Bruggeman treats every component symmetrically (no host), solving
+/// `sum_i f_i (eps_i - eps_eff) / (eps_i + 2 eps_eff) = 0` for the effective permittivity `eps_eff`, with
+/// each `eps_i = (n_i + i k_i)^2`. The solve is Newton's method (`f'(eps) = -3 sum_i f_i eps_i /
+/// (eps_i + 2 eps_eff)^2`) from the volume-weighted seed, run in the deterministic wide-fixed complex
+/// arithmetic, then `eps_eff` is turned back into `(n, k)`.
+///
+/// The composition is DATA: the fractions come from the upstream condensate assemblage (the disposer
+/// output), and each `(n_i, k_i)` is a measured optical-constants row (the alien seam: a world whose grains
+/// carry a condensate not in the Terran set is a different set of rows and fractions, never a rewrite). The
+/// rule is scale-free in the fractions (the root is unchanged if they are all scaled), so it does not
+/// require them pre-normalized. `None` if the lists differ in length or are empty, on a non-physical index
+/// or a negative fraction, or on any overflow or singular denominator in the solve.
+pub fn bruggeman_effective_index(
+    fractions: &[Fixed],
+    indices: &[(Fixed, Fixed)],
+) -> Option<(Fixed, Fixed)> {
+    if fractions.is_empty() || fractions.len() != indices.len() {
+        return None;
+    }
+    for (frac, (n, k)) in fractions.iter().zip(indices.iter()) {
+        if *frac < Fixed::ZERO || *n <= Fixed::ZERO || *k < Fixed::ZERO {
+            return None;
+        }
+    }
+
+    // eps_i = (n_i + i k_i)^2 = (n^2 - k^2) + i (2 n k), in wide-fixed.
+    let mut eps_list = Vec::with_capacity(indices.len());
+    for (n, k) in indices {
+        let n_w = fixed_to_wfixed(*n);
+        let k_w = fixed_to_wfixed(*k);
+        let re = wmul(n_w, n_w)?.checked_sub(wmul(k_w, k_w)?)?;
+        let im = wmul(n_w, k_w)?.checked_mul(2)?;
+        eps_list.push(WCplx { re, im });
+    }
+
+    // Seed: the volume-weighted mean permittivity (sum f_i eps_i) / (sum f_i).
+    let mut num_seed = WCplx::real(0);
+    let mut den_seed: i128 = 0;
+    for (frac, eps) in fractions.iter().zip(eps_list.iter()) {
+        let f_w = fixed_to_wfixed(*frac);
+        num_seed = num_seed.add(eps.scale(f_w)?)?;
+        den_seed = den_seed.checked_add(f_w)?;
+    }
+    if den_seed <= 0 {
+        return None;
+    }
+    let mut eff = num_seed.div(WCplx::real(den_seed))?;
+
+    let two_w = 2 * MIE_ONE_W;
+    let neg_three_w = -3 * MIE_ONE_W;
+    for _ in 0..BRUGGEMAN_ITERS {
+        let mut f_val = WCplx::real(0);
+        let mut f_prime = WCplx::real(0);
+        for (frac, eps) in fractions.iter().zip(eps_list.iter()) {
+            let f_w = fixed_to_wfixed(*frac);
+            let denom = eps.add(eff.scale(two_w)?)?; // eps_i + 2 eps_eff
+            let term = eps.sub(eff)?.div(denom)?.scale(f_w)?; // f_i (eps_i - eps_eff)/(eps_i + 2 eps_eff)
+            f_val = f_val.add(term)?;
+            let denom_sq = denom.mul(denom)?;
+            let term_p = eps.div(denom_sq)?.scale(f_w)?; // f_i eps_i / (eps_i + 2 eps_eff)^2
+            f_prime = f_prime.add(term_p)?;
+        }
+        let f_prime = f_prime.scale(neg_three_w)?; // f'(eps) = -3 sum ...
+        eff = eff.sub(f_val.div(f_prime)?)?; // Newton step
+    }
+
+    // eps_eff = re + i im -> (n, k): n = sqrt((|eps| + re)/2), k = sqrt((|eps| - re)/2).
+    let re_f = Fixed::from_bits_i128(wfixed_to_bigrat(eff.re).round_to_scale(Fixed::FRAC_BITS)?)?;
+    let im_f = Fixed::from_bits_i128(wfixed_to_bigrat(eff.im).round_to_scale(Fixed::FRAC_BITS)?)?;
+    let modulus = re_f
+        .checked_mul(re_f)?
+        .checked_add(im_f.checked_mul(im_f)?)?
+        .sqrt();
+    let two = Fixed::from_int(2);
+    let n_eff = modulus.checked_add(re_f)?.checked_div(two)?.sqrt();
+    // The k branch can round a hair below zero for a pure dielectric (|eps| == re); clamp before the root.
+    let k_arg = modulus.checked_sub(re_f)?;
+    let k_arg = if k_arg < Fixed::ZERO {
+        Fixed::ZERO
+    } else {
+        k_arg
+    };
+    let k_eff = k_arg.checked_div(two)?.sqrt();
+    Some((n_eff, k_eff))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2127,6 +2221,122 @@ mod tests {
             grain_size_averaged_opacity(Fixed::from_int(10), n, k, rho, p, amax, amin),
             None,
             "a_max <= a_min is rejected"
+        );
+    }
+
+    // The Bruggeman references below are the effective (n, k) of a mixed grain, cross-checked against the
+    // exact two-component quadratic and the N-component Newton solve in f64.
+    fn sil_index() -> (Fixed, Fixed) {
+        (Fixed::from_ratio(168, 100), Fixed::from_ratio(3, 100))
+    }
+    fn ice_index() -> (Fixed, Fixed) {
+        (Fixed::from_ratio(131, 100), Fixed::from_ratio(1, 1_000_000))
+    }
+    fn iron_index() -> (Fixed, Fixed) {
+        (Fixed::from_ratio(35, 10), Fixed::from_int(4))
+    }
+
+    #[test]
+    fn the_bruggeman_mix_matches_the_two_component_quadratic() {
+        // A 50/50 silicate-ice mix: the effective index sits between the two, n ~ 1.491, k ~ 0.0144. This
+        // is the case with a closed-form quadratic root, so it pins the Newton solve.
+        let half = Fixed::from_ratio(5, 10);
+        let (n, k) = bruggeman_effective_index(&[half, half], &[sil_index(), ice_index()]).unwrap();
+        assert!(
+            (n.to_f64_lossy() - 1.4912).abs() < 1e-3,
+            "effective n ~ 1.491, got {}",
+            n.to_f64_lossy()
+        );
+        assert!(
+            (k.to_f64_lossy() - 0.014426).abs() < 1e-3,
+            "effective k ~ 0.0144, got {}",
+            k.to_f64_lossy()
+        );
+    }
+
+    #[test]
+    fn the_bruggeman_mix_of_one_component_is_that_component() {
+        // A single component at any fraction returns its own index (the root of f_i(eps_i - eps)/... = 0 is
+        // eps_i itself), the reduction that validates the solve against the trivial case.
+        let (n, k) = bruggeman_effective_index(&[Fixed::from_int(1)], &[sil_index()]).unwrap();
+        assert!(
+            (n.to_f64_lossy() - 1.68).abs() < 1e-4 && (k.to_f64_lossy() - 0.03).abs() < 1e-4,
+            "a pure component returns itself, got n={} k={}",
+            n.to_f64_lossy(),
+            k.to_f64_lossy()
+        );
+    }
+
+    #[test]
+    fn the_bruggeman_mix_grows_absorbing_with_the_metal_fraction() {
+        // Mixing in a metal (high k iron) raises the effective absorption index monotonically: the alien
+        // seam is a data change (a different fraction of a different measured row), never a rewrite.
+        let mut last_k = -1.0;
+        for pct in [0i64, 5, 20, 40] {
+            let f = Fixed::from_ratio(pct, 100);
+            let one_minus = Fixed::from_int(1).checked_sub(f).unwrap();
+            let (_, k) =
+                bruggeman_effective_index(&[one_minus, f], &[sil_index(), iron_index()]).unwrap();
+            assert!(
+                k.to_f64_lossy() > last_k,
+                "the effective k rises with the metal fraction"
+            );
+            last_k = k.to_f64_lossy();
+        }
+    }
+
+    #[test]
+    fn the_bruggeman_mix_is_scale_free_in_the_fractions() {
+        // The Bruggeman root is unchanged if every fraction is scaled (the equation is homogeneous in f),
+        // so unnormalized fractions give the same effective index as their normalized form.
+        let a = bruggeman_effective_index(
+            &[Fixed::from_ratio(6, 10), Fixed::from_ratio(4, 10)],
+            &[sil_index(), iron_index()],
+        )
+        .unwrap();
+        let b = bruggeman_effective_index(
+            &[Fixed::from_int(3), Fixed::from_int(2)],
+            &[sil_index(), iron_index()],
+        )
+        .unwrap();
+        assert_eq!(
+            a, b,
+            "scaling all fractions leaves the effective index unchanged"
+        );
+    }
+
+    #[test]
+    fn the_bruggeman_mix_is_deterministic() {
+        let third = Fixed::from_ratio(1, 3);
+        assert_eq!(
+            bruggeman_effective_index(
+                &[third, third, third],
+                &[sil_index(), ice_index(), iron_index()]
+            ),
+            bruggeman_effective_index(
+                &[third, third, third],
+                &[sil_index(), ice_index(), iron_index()]
+            ),
+            "the Newton solve replays byte for byte"
+        );
+    }
+
+    #[test]
+    fn the_bruggeman_mix_rejects_bad_arguments() {
+        assert_eq!(
+            bruggeman_effective_index(&[], &[]),
+            None,
+            "an empty mix is rejected"
+        );
+        assert_eq!(
+            bruggeman_effective_index(&[Fixed::from_int(1)], &[sil_index(), ice_index()]),
+            None,
+            "a length mismatch is rejected"
+        );
+        assert_eq!(
+            bruggeman_effective_index(&[Fixed::from_ratio(-1, 10)], &[sil_index()]),
+            None,
+            "a negative fraction is rejected"
         );
     }
 }
