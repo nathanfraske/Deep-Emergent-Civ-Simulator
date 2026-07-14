@@ -61,6 +61,7 @@ pub mod metallic;
 pub mod nucleation;
 pub mod properties;
 pub mod quench;
+pub mod stoner;
 pub mod thermochemical;
 pub mod verdict;
 
@@ -116,6 +117,10 @@ pub use properties::{
 pub use quench::{
     dodson_closure_temperature, polymorphs_are_thermally_unresolvable, quench_exchange,
     QuenchOutcome,
+};
+pub use stoner::{
+    negative_control_gate, stoner_classify, stoner_product, NonmagneticDos, StonerClass,
+    StonerControl,
 };
 pub use thermochemical::{
     charge_neutral_primitives, mo_viable_diatomics, propose_candidates, BondingHints, Composition,
