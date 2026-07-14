@@ -48,12 +48,21 @@
 //! admitted. So an estimator-grade non-metal classifies but carries no carrier density ([`ConductionClass::NonMetal`]
 //! with `ln_activation: None`).
 //!
+//! THE PPLB INSTANCE FOLD (the definition-tag follow-on). The tier's provenance grades are an INSTANCE of the shared
+//! Perdew-Parr-Levy-Balduz rule ([`crate::definition::EigenvalueProvenance`]), rather than a parallel one-off:
+//! [`GapGrade`] and the physics [`GapProvenance`] both map into it, and every rung of the tier is Koopmans-
+//! ADMISSIBLE (a measurement, a compute-once hybrid/GW eigenvalue, or a Harrison estimate built from HF-class term
+//! values). The tier has NO representation for a Koopmans-incompatible (KS-LDA) gap: the compute-once law bars it at
+//! load ([`EigenvalueFunctional`] carries no semilocal variant), so the barred case is unrepresentable here rather
+//! than mapped. See [`GapGrade::eigenvalue_provenance`] and [`gap_eigenvalue_provenance`].
+//!
 //! Byte-neutral: `civsim-materials` is a leaf, not linked into the run_world binary.
 
 use civsim_core::Fixed;
-use civsim_physics::band_gap::{BandGapColumn, GapProvenance};
+use civsim_physics::band_gap::{BandGapColumn, EigenvalueFunctional, GapProvenance};
 
 use crate::correlation::{CorrelationClass, CorrelationClassifier};
+use crate::definition::EigenvalueProvenance;
 
 const ZERO: Fixed = Fixed::ZERO;
 
@@ -96,6 +105,37 @@ impl GapGrade {
     /// gap (measured or compute-once). An estimator gap is barred.
     fn admits_exponent(self) -> bool {
         matches!(self, GapGrade::Measured | GapGrade::ComputeOnce)
+    }
+
+    /// The Koopmans provenance ([`EigenvalueProvenance`]) of this gap grade, the PPLB INSTANCE fold (the
+    /// definition-tag follow-on): the band-gap tier's provenance ladder is an instance of the shared Perdew-Parr-
+    /// Levy-Balduz rule, not a parallel one-off. Every grade is Koopmans-ADMISSIBLE: a measurement maps to `Measured`,
+    /// and both a compute-once hybrid/GW eigenvalue and a Harrison estimate (built from HF-class term values) map to
+    /// `KoopmansCompatible`. The tier never yields a `KoopmansIncompatible` grade (a KS-LDA gap is barred at load, so
+    /// it is unrepresentable rather than mapped). This is the exponent axis (grade) meeting the Koopmans axis
+    /// (provenance): distinct concerns, one shared rule that no rung of the tier violates.
+    pub fn eigenvalue_provenance(self) -> EigenvalueProvenance {
+        match self {
+            GapGrade::Measured => EigenvalueProvenance::Measured,
+            GapGrade::ComputeOnce | GapGrade::Estimator => EigenvalueProvenance::KoopmansCompatible,
+        }
+    }
+}
+
+/// The Koopmans provenance ([`EigenvalueProvenance`]) of a physics band-gap column entry's provenance, the PPLB
+/// instance fold at the column boundary: a measured `[M]` gap maps to `Measured`, a compute-once hybrid or GW
+/// eigenvalue to `KoopmansCompatible`. Both are admitted to a Koopmans-gated consumer; the column cannot produce a
+/// `KoopmansIncompatible` provenance, because the compute-once law ([`EigenvalueFunctional`], no semilocal variant)
+/// bars a KS-LDA gap at load. So the band-gap no-PBE guard and the term-value no-KS-LDA guard are two instances of
+/// one rule, [`crate::definition::EigenvalueProvenance`], reconciled here.
+pub fn gap_eigenvalue_provenance(provenance: GapProvenance) -> EigenvalueProvenance {
+    match provenance {
+        GapProvenance::Measured => EigenvalueProvenance::Measured,
+        GapProvenance::ComputeOnce { functional } => match functional {
+            EigenvalueFunctional::Hybrid | EigenvalueFunctional::Gw => {
+                EigenvalueProvenance::KoopmansCompatible
+            }
+        },
     }
 }
 
@@ -606,6 +646,46 @@ source = "test-only fixture"
             tio_gapped,
             ConductionClass::NonMetal { ln_activation: None },
             "an estimator-grade non-metal classifies, but the carrier-density exponent escalates (the rider)"
+        );
+    }
+
+    #[test]
+    fn the_gap_tier_is_an_instance_of_the_pplb_rule() {
+        // THE PPLB INSTANCE FOLD (the definition-tag follow-on): every rung of the band-gap tier is Koopmans-
+        // ADMISSIBLE. A measurement, a compute-once hybrid/GW eigenvalue, and a Harrison estimate (from HF-class term
+        // values) all admit a Koopmans-gated consumer, so the whole tier is KS-LDA-free by construction.
+        assert!(GapGrade::Measured
+            .eigenvalue_provenance()
+            .admits_koopmans_gated());
+        assert!(GapGrade::ComputeOnce
+            .eigenvalue_provenance()
+            .admits_koopmans_gated());
+        assert!(GapGrade::Estimator
+            .eigenvalue_provenance()
+            .admits_koopmans_gated());
+        assert_eq!(
+            GapGrade::Measured.eigenvalue_provenance(),
+            EigenvalueProvenance::Measured
+        );
+        // The physics GapProvenance folds the same way: measured -> Measured, compute-once hybrid/GW ->
+        // KoopmansCompatible, and the require_koopmans_gated join admits every tier provenance (none is barred).
+        assert_eq!(
+            gap_eigenvalue_provenance(GapProvenance::Measured),
+            EigenvalueProvenance::Measured
+        );
+        for functional in [EigenvalueFunctional::Hybrid, EigenvalueFunctional::Gw] {
+            let prov = gap_eigenvalue_provenance(GapProvenance::ComputeOnce { functional });
+            assert_eq!(prov, EigenvalueProvenance::KoopmansCompatible);
+            assert!(
+                crate::definition::require_koopmans_gated(prov).is_ok(),
+                "a compute-once hybrid/GW gap is admitted to a Koopmans-gated consumer"
+            );
+        }
+        assert!(
+            crate::definition::require_koopmans_gated(gap_eigenvalue_provenance(
+                GapProvenance::Measured
+            ))
+            .is_ok()
         );
     }
 }
