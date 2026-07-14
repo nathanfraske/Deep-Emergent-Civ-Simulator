@@ -486,6 +486,281 @@ pub fn h_minus_bound_free_opacity(
     Some(Fixed::from_bits_i128(kappa_squared.round_to_scale(Fixed::FRAC_BITS)?)?.sqrt())
 }
 
+/// The John 1988 (A&A 193, 189, eq. 6) H- FREE-FREE absorption-coefficient fit, REGION 1 (`lambda >= 0.3645
+/// micron`). Each entry is the temperature index `n` and the six polynomial coefficients `[A, B, C, D, E, F]` of
+/// `A*lambda^2 + B + C/lambda + D/lambda^2 + E/lambda^3 + F/lambda^4` (lambda in micron), summed as
+/// `kappa_ff = 1e-29 * sum_n (5040/T)^((n+1)/2) * poly_n(lambda)` (cm^4/dyn, per neutral H per electron pressure).
+/// The fit represents the primary Bell & Berrington 1987 (J.Phys.B 20, 801) R-matrix free-free calculation.
+///
+/// PROVENANCE (tier-honest, the same [M] secondary-transcription class ruled load-able as the bound-free): [Bell &
+/// Berrington 1987 primary R-matrix free-free; John 1988 A&A 193 189 eq.6 fit; cross-validated pyratbay+BeAR
+/// open-source transcription; validated via the assembled H- opacity in the free-free-dominated regime]. The
+/// Bell-Berrington table and the John PDF are paywalled, so these coefficients are byte-identical across the two
+/// independent open codes; the standing validation is the assembled bf+ff H- opacity against a primary-citable
+/// benchmark in the pure-free-free regime `lambda > 1.6419 micron`, where the bound-free is exactly zero.
+fn h_minus_ff_region1() -> [(i32, [&'static str; 6]); 5] {
+    [
+        (
+            2,
+            [
+                "2483.346",
+                "285.827",
+                "-2054.291",
+                "2827.776",
+                "-1341.537",
+                "208.952",
+            ],
+        ),
+        (
+            3,
+            [
+                "-3449.889",
+                "-1158.382",
+                "8746.523",
+                "-11485.632",
+                "5303.609",
+                "-812.939",
+            ],
+        ),
+        (
+            4,
+            [
+                "2200.040",
+                "2427.719",
+                "-13651.105",
+                "16755.524",
+                "-7510.494",
+                "1132.738",
+            ],
+        ),
+        (
+            5,
+            [
+                "-696.271",
+                "-1841.400",
+                "8624.970",
+                "-10051.530",
+                "4400.067",
+                "-655.020",
+            ],
+        ),
+        (
+            6,
+            [
+                "88.283",
+                "444.517",
+                "-1863.864",
+                "2095.288",
+                "-901.788",
+                "132.985",
+            ],
+        ),
+    ]
+}
+
+/// The John 1988 eq. 6 H- free-free fit, REGION 2 (`0.1823 <= lambda < 0.3645 micron`), `n = 1..4`. Same form,
+/// units, and provenance as [`h_minus_ff_region1`].
+fn h_minus_ff_region2() -> [(i32, [&'static str; 6]); 4] {
+    [
+        (
+            1,
+            [
+                "518.1021",
+                "-734.8666",
+                "1021.1775",
+                "-479.0721",
+                "93.1373",
+                "-6.4285",
+            ],
+        ),
+        (
+            2,
+            [
+                "473.2636",
+                "1443.4137",
+                "-1977.3395",
+                "922.3575",
+                "-178.9275",
+                "12.3600",
+            ],
+        ),
+        (
+            3,
+            [
+                "-482.2089",
+                "-737.1616",
+                "1096.8827",
+                "-521.1341",
+                "101.7963",
+                "-7.0571",
+            ],
+        ),
+        (
+            4,
+            [
+                "115.5291",
+                "169.6374",
+                "-245.6490",
+                "114.2430",
+                "-21.9972",
+                "1.5097",
+            ],
+        ),
+    ]
+}
+
+/// The `(5040/T)^((n+1)/2)` temperature factor times the `[A, B, C, D, E, F]` polynomial, accumulated in `BigRat`
+/// (exact, so the large-coefficient cancellation in the polynomial sum loses no precision). `sqrt_theta` is
+/// `sqrt(5040/T)` (one `Fixed::sqrt`, since the fit's half-integer powers of `5040/T` are integer powers of its
+/// root), and `inv_lambda` is `1/lambda`. Returns the running sum contribution `sum_n (sqrt_theta)^(n+1) * poly_n`.
+fn h_minus_ff_sum(
+    rows: &[(i32, [&'static str; 6])],
+    lambda: &BigRat,
+    inv_lambda: &BigRat,
+    sqrt_theta: &BigRat,
+) -> Option<BigRat> {
+    let lambda2 = lambda.mul(lambda);
+    let inv2 = inv_lambda.mul(inv_lambda);
+    let inv3 = inv2.mul(inv_lambda);
+    let inv4 = inv3.mul(inv_lambda);
+    let mut sum = BigRat::from_i64(0);
+    for (n, coeffs) in rows {
+        let a = BigRat::from_decimal_str(coeffs[0]).ok()?;
+        let b = BigRat::from_decimal_str(coeffs[1]).ok()?;
+        let cc = BigRat::from_decimal_str(coeffs[2]).ok()?;
+        let d = BigRat::from_decimal_str(coeffs[3]).ok()?;
+        let e = BigRat::from_decimal_str(coeffs[4]).ok()?;
+        let f = BigRat::from_decimal_str(coeffs[5]).ok()?;
+        let poly = a
+            .mul(&lambda2)
+            .add(&b)
+            .add(&cc.mul(inv_lambda))
+            .add(&d.mul(&inv2))
+            .add(&e.mul(&inv3))
+            .add(&f.mul(&inv4));
+        // (sqrt_theta)^(n+1) by repeated multiply.
+        let mut theta_pow = BigRat::from_i64(1);
+        for _ in 0..(n + 1) {
+            theta_pow = theta_pow.mul(sqrt_theta);
+        }
+        sum = sum.add(&theta_pow.mul(&poly));
+    }
+    Some(sum)
+}
+
+/// The monochromatic H- FREE-FREE opacity `kappa_ff` (cm^2/g) at dimensionless frequency `x = h*nu/(k_B*T)`, the H-
+/// gas term that fills the below-photodetachment-threshold window the bound-free leaves empty (so the assembled
+/// bf+ff H- opacity is positive at every frequency and can be Rosseland-averaged). A neutral hydrogen, a free
+/// electron, and a photon interact (`H0 + e- + photon`) with no threshold, so this term is continuous across all
+/// wavelengths and rises to the infrared. The absorption coefficient is the cited John 1988 eq. 6 fit
+/// (`kappa_ff_coeff = 1e-29 * sum_n (5040/T)^((n+1)/2) * poly_n(lambda)`, cm^4/dyn per neutral H per electron
+/// pressure, [`h_minus_ff_region1`]/[`h_minus_ff_region2`]) times `(X / m_H) * P_e`, so
+/// `kappa_ff = kappa_ff_coeff * (X / m_H) * P_e`.
+///
+/// The only fetched piece is the fit's coefficients (the cited [M] tier); the `5040/T` temperature scaling, the
+/// `hc/k` wavelength fold, and the `m_H` from the periodic table all derive. The polynomial sum runs in exact
+/// `BigRat` (its large-coefficient cancellation loses no precision), with a single `Fixed::sqrt` for the
+/// `sqrt(5040/T)` root that serves the fit's half-integer temperature powers. Every per-world quantity is a caller
+/// argument (admit-the-alien): `x`, `T`, `hydrogen_mass_fraction` X, and `electron_pressure_dyn_cm2` `P_e` (the
+/// same per-electron-pressure form as the bound-free). Returns zero for `lambda < 0.1823 micron` (below the fit's
+/// short-wavelength bound). HONEST LIMIT: the fit is stated for `lambda` up to 14 micron; far-infrared `lambda`
+/// (very small `x`) extrapolates the region-1 polynomial, but the Rosseland weight there (`w ~ x^2`) is negligible,
+/// so the extrapolation does not reach the mean. `None` if a fundamental or the hydrogen data fails to resolve, or
+/// the result leaves the representable range.
+pub fn h_minus_free_free_opacity(
+    x: Fixed,
+    temperature_k: Fixed,
+    hydrogen_mass_fraction: Fixed,
+    electron_pressure_dyn_cm2: Fixed,
+    table: &PeriodicTable,
+) -> Option<Fixed> {
+    if x <= Fixed::ZERO || temperature_k <= Fixed::ZERO {
+        return None;
+    }
+    let h = fundamental_bigrat("h")?;
+    let c = fundamental_bigrat("c")?;
+    let k_b = fundamental_bigrat("k_B")?;
+    let n_a = fundamental_bigrat("N_A")?;
+
+    // lambda = (h c/k)/(x T) [micron] (h c/k in SI is m*K, *1e6 -> micron*K), as Fixed for the region select and as
+    // BigRat for the polynomial.
+    let t_br = nonneg_fixed_to_bigrat(temperature_k);
+    let alpha_um_k = h.mul(&c).div(&k_b).mul(&BigRat::from_i64(1_000_000));
+    let lambda_br_raw = alpha_um_k.div(&nonneg_fixed_to_bigrat(x).mul(&t_br));
+    let lambda = Fixed::from_bits_i128(lambda_br_raw.round_to_scale(Fixed::FRAC_BITS)?)?;
+    if lambda < Fixed::from_ratio(1823, 10000) {
+        return Some(Fixed::ZERO); // below the fit's short-wavelength bound
+    }
+    let region1 = h_minus_ff_region1();
+    let region2 = h_minus_ff_region2();
+    let rows: &[(i32, [&'static str; 6])] = if lambda >= Fixed::from_ratio(3645, 10000) {
+        &region1
+    } else {
+        &region2
+    };
+
+    let lambda_bigrat = nonneg_fixed_to_bigrat(lambda);
+    let inv_lambda = BigRat::from_i64(1).div(&lambda_bigrat);
+    // sqrt(5040/T) via one Fixed::sqrt.
+    let theta = BigRat::from_i64(5040).div(&t_br);
+    let sqrt_theta = nonneg_fixed_to_bigrat(
+        Fixed::from_bits_i128(theta.round_to_scale(Fixed::FRAC_BITS)?)?.sqrt(),
+    );
+    let sum = h_minus_ff_sum(rows, &lambda_bigrat, &inv_lambda, &sqrt_theta)?;
+
+    // kappa_ff = 1e-29 * sum * (X/m_H) * P_e (cm^2/g). 1e-29 = 1/(1e15 * 1e14).
+    let inv_1e29 = BigRat::from_i64(1)
+        .div(&BigRat::from_i64(1_000_000_000_000_000))
+        .div(&BigRat::from_i64(100_000_000_000_000));
+    let m_h_cgs = nonneg_fixed_to_bigrat(table.molar_mass_of(&[("H", 1)]).ok()?).div(&n_a); // g
+    let x_over_mh = nonneg_fixed_to_bigrat(hydrogen_mass_fraction).div(&m_h_cgs);
+    let p_e = nonneg_fixed_to_bigrat(electron_pressure_dyn_cm2);
+    let kappa = sum.mul(&inv_1e29).mul(&x_over_mh).mul(&p_e);
+    let bits = kappa.round_to_scale(Fixed::FRAC_BITS)?;
+    if bits < 0 {
+        return Some(Fixed::ZERO); // a rare far-infrared extrapolation dip below zero reads as no opacity
+    }
+    Fixed::from_bits_i128(bits)
+}
+
+/// The assembled MONOCHROMATIC H- opacity `kappa(H-)` (cm^2/g) at dimensionless frequency `x`: the sum of the
+/// bound-free ([`h_minus_bound_free_opacity`]) and free-free ([`h_minus_free_free_opacity`]) terms, the H- gas
+/// term's total spectral contribution. The free-free fills the below-photodetachment-threshold window the
+/// bound-free leaves empty, so within the H- fit domains this is positive and carries the famous H- opacity
+/// MINIMUM near the `1.6419 micron` threshold (the bound-free cutting off while the free-free rises).
+///
+/// IMPORTANT (the fail-loud seam): this is a SPECTRAL PROVIDER for the full Rosseland assembly, NOT a standalone
+/// Rosseland-averageable opacity. Beyond the fit domains (the far ultraviolet `lambda < 0.1823 micron`, reached at
+/// the high-`x` end for `T` above `~3946 K`) BOTH H- fits read zero, so `kappa(H-) = 0` there, and Rosseland-
+/// averaging H- alone would trip the kernel's strict-positivity precondition. That is correct physics: H- is not
+/// the opacity there, the electron-scattering floor is, so the Rosseland mean is taken over the ASSEMBLED total
+/// (H- + electron scattering + the rest), where the floor keeps the sum positive. The assembly is the later slice
+/// (the bounded midplane fixed point); this term supplies its H- spectral piece. `None` on the same conditions as
+/// the two component terms.
+pub fn h_minus_opacity(
+    x: Fixed,
+    temperature_k: Fixed,
+    hydrogen_mass_fraction: Fixed,
+    electron_pressure_dyn_cm2: Fixed,
+    table: &PeriodicTable,
+) -> Option<Fixed> {
+    let bf = h_minus_bound_free_opacity(
+        x,
+        temperature_k,
+        hydrogen_mass_fraction,
+        electron_pressure_dyn_cm2,
+        table,
+    )?;
+    let ff = h_minus_free_free_opacity(
+        x,
+        temperature_k,
+        hydrogen_mass_fraction,
+        electron_pressure_dyn_cm2,
+        table,
+    )?;
+    bf.checked_add(ff)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -879,5 +1154,200 @@ mod tests {
             &t,
         );
         assert_eq!(a, b, "the H- bound-free derivation replays byte for byte");
+    }
+
+    #[test]
+    fn the_h_minus_cross_section_agrees_with_the_bhatia_pesnell_calculation() {
+        // Cross-SOURCE check (the gate values these): the John/Wishart bound-free cross section vs the INDEPENDENT
+        // Ohmura-Ohmura calculation tabulated by Bhatia & Pesnell 2020 (Atoms 8(3), 37, Table 1). In the well-
+        // determined peak region the two agree to a few percent (John 39.2/39.6 vs BP 41.5/41.3 reduced, ~4-6%),
+        // a faithfulness confirmation beyond the Wishart peak gate; the wings differ more (~14%, the cruder
+        // Ohmura-Ohmura analytic vs Wishart's close-coupling), so this anchors the peak region.
+        let at_7594 =
+            h_minus_bound_free_reduced_cross_section(Fixed::from_ratio(7594, 10000)).unwrap();
+        let at_9113 =
+            h_minus_bound_free_reduced_cross_section(Fixed::from_ratio(9113, 10000)).unwrap();
+        assert!(
+            (at_7594.to_f64_lossy() - 41.5).abs() / 41.5 < 0.08,
+            "John bf cross section agrees with Bhatia-Pesnell at 7594 A within 8%, got {}",
+            at_7594.to_f64_lossy()
+        );
+        assert!(
+            (at_9113.to_f64_lossy() - 41.3).abs() / 41.3 < 0.08,
+            "John bf cross section agrees with Bhatia-Pesnell at 9113 A within 8%, got {}",
+            at_9113.to_f64_lossy()
+        );
+    }
+
+    #[test]
+    fn the_h_minus_free_free_opacity_lands_the_reference_magnitude() {
+        // At lambda = 3 micron (x = 0.799 for T = 6000 K, pure free-free beyond the bound-free threshold), X = 0.7,
+        // P_e = 10, the derived free-free opacity is ~0.205 cm^2/g: the cited John eq.6 coefficient (order 1e-26
+        // cm^4/dyn, the Bhatia-Pesnell Fig.1 magnitude anchor) times (X/m_H) P_e.
+        let k = h_minus_free_free_opacity(
+            Fixed::from_ratio(799, 1000),
+            Fixed::from_int(6000),
+            Fixed::from_ratio(7, 10),
+            Fixed::from_int(10),
+            &table(),
+        )
+        .expect("the free-free opacity derives");
+        assert!(
+            (k.to_f64_lossy() - 0.2052).abs() < 0.01,
+            "the H- free-free opacity at 3 micron is ~0.205 cm^2/g, got {}",
+            k.to_f64_lossy()
+        );
+    }
+
+    #[test]
+    fn the_h_minus_free_free_opacity_rises_to_long_wavelength_and_scales_with_pressure() {
+        // The free-free is continuous and rises to the infrared (lower x = longer wavelength), the shape that fills
+        // the below-threshold window; and it is linear in the electron pressure.
+        let t = table();
+        let temp = Fixed::from_int(6000);
+        let x_hi = Fixed::from_ratio(4, 10); // ~6 micron
+        let x_lo = Fixed::from_ratio(8, 10); // ~3 micron
+        let long = h_minus_free_free_opacity(
+            x_hi,
+            temp,
+            Fixed::from_ratio(7, 10),
+            Fixed::from_int(10),
+            &t,
+        )
+        .unwrap();
+        let short = h_minus_free_free_opacity(
+            x_lo,
+            temp,
+            Fixed::from_ratio(7, 10),
+            Fixed::from_int(10),
+            &t,
+        )
+        .unwrap();
+        assert!(
+            long > short,
+            "the free-free opacity rises to long wavelength (the infrared window filler)"
+        );
+        let double_pe = h_minus_free_free_opacity(
+            x_lo,
+            temp,
+            Fixed::from_ratio(7, 10),
+            Fixed::from_int(20),
+            &t,
+        )
+        .unwrap();
+        assert!(
+            (double_pe.to_f64_lossy() / short.to_f64_lossy() - 2.0).abs() < 0.02,
+            "the free-free opacity is linear in the electron pressure"
+        );
+    }
+
+    #[test]
+    fn the_h_minus_free_free_opacity_is_zero_below_the_short_wavelength_bound() {
+        // At x = 20 for T = 6000 K the wavelength is 0.12 micron, below the fit's 0.1823 micron short-wavelength
+        // bound, so the free-free reads zero (and there the bound-free is also zero, the far-UV where H- is not the
+        // opacity and the electron-scattering floor is; this is the fail-loud seam noted at h_minus_opacity).
+        let k = h_minus_free_free_opacity(
+            Fixed::from_int(20),
+            Fixed::from_int(6000),
+            Fixed::from_ratio(7, 10),
+            Fixed::from_int(10),
+            &table(),
+        );
+        assert_eq!(
+            k,
+            Some(Fixed::ZERO),
+            "no free-free below the fit's short-wavelength bound"
+        );
+    }
+
+    #[test]
+    fn the_h_minus_free_free_opacity_is_deterministic() {
+        let t = table();
+        let a = h_minus_free_free_opacity(
+            Fixed::from_ratio(799, 1000),
+            Fixed::from_int(6000),
+            Fixed::from_ratio(7, 10),
+            Fixed::from_int(10),
+            &t,
+        );
+        let b = h_minus_free_free_opacity(
+            Fixed::from_ratio(799, 1000),
+            Fixed::from_int(6000),
+            Fixed::from_ratio(7, 10),
+            Fixed::from_int(10),
+            &t,
+        );
+        assert_eq!(a, b, "the H- free-free derivation replays byte for byte");
+    }
+
+    #[test]
+    fn the_assembled_h_minus_opacity_shows_the_opacity_minimum_at_the_threshold() {
+        // The famous H- opacity MINIMUM near the 1.6419 micron photodetachment threshold, the qualitative feature
+        // no single coefficient can fake (Bhatia-Pesnell 2020 place the total minimum just past threshold): the
+        // assembled bf+ff opacity is lower just past the threshold (x = 1.454, ~1.65 micron, bound-free cut off,
+        // free-free still small) than at the bound-free peak (x = 2.82, ~0.85 micron) or deep in the free-free
+        // infrared (x = 0.799, ~3 micron). And beyond the threshold the opacity is PURE free-free.
+        let t = table();
+        let temp = Fixed::from_int(6000);
+        let x_peak = Fixed::from_ratio(282, 100); // ~0.85 micron, bound-free peak
+        let x_min = Fixed::from_ratio(1454, 1000); // ~1.65 micron, just past threshold
+        let x_ff = Fixed::from_ratio(799, 1000); // ~3 micron, pure free-free
+        let at_peak = h_minus_opacity(
+            x_peak,
+            temp,
+            Fixed::from_ratio(7, 10),
+            Fixed::from_int(10),
+            &t,
+        )
+        .unwrap();
+        let at_min = h_minus_opacity(
+            x_min,
+            temp,
+            Fixed::from_ratio(7, 10),
+            Fixed::from_int(10),
+            &t,
+        )
+        .unwrap();
+        let at_ff = h_minus_opacity(
+            x_ff,
+            temp,
+            Fixed::from_ratio(7, 10),
+            Fixed::from_int(10),
+            &t,
+        )
+        .unwrap();
+        assert!(
+            at_min < at_peak && at_min < at_ff,
+            "the assembled H- opacity has its minimum near the threshold (min {} < peak {}, ff {})",
+            at_min.to_f64_lossy(),
+            at_peak.to_f64_lossy(),
+            at_ff.to_f64_lossy()
+        );
+        // Beyond the threshold the bound-free is exactly zero, so the H- opacity is the free-free alone.
+        let bf = h_minus_bound_free_opacity(
+            x_ff,
+            temp,
+            Fixed::from_ratio(7, 10),
+            Fixed::from_int(10),
+            &t,
+        )
+        .unwrap();
+        let ff = h_minus_free_free_opacity(
+            x_ff,
+            temp,
+            Fixed::from_ratio(7, 10),
+            Fixed::from_int(10),
+            &t,
+        )
+        .unwrap();
+        assert_eq!(
+            bf,
+            Fixed::ZERO,
+            "the bound-free is zero beyond the threshold"
+        );
+        assert_eq!(
+            at_ff, ff,
+            "beyond the threshold the assembled H- opacity is the free-free alone"
+        );
     }
 }
