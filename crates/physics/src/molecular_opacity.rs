@@ -1,14 +1,28 @@
-//! Low-temperature MOLECULAR Rosseland opacity as a REGIME HANDOFF, the occupant of the cold gas gap the
-//! ionized-gas closure exposes.
+//! Low-temperature GAS Rosseland opacity for the disk, on the ratified provenance-ladder architecture: the ÆSOPUS
+//! [M] table is the TOP RUNG and IS the gas total across its whole range.
 //!
-//! When electron scattering is restated as `sigma_T n_e/rho` (linear in the free-electron density), the grey
-//! positive floor disappears, and in the `~1500 to 2500 K` window (grains sublimated, H- not yet risen, es and
-//! free-free Saha-killed) the ionized-gas closure [`crate::opacity::total_gas_rosseland_opacity`] has NO opacity and
-//! returns `None`. The physical occupant of that window is MOLECULAR gas opacity: the vibration-rotation bands of
-//! water, CO, TiO, and their kin. This module supplies it as a TOTAL, a regime handoff, NOT an additive term:
-//! molecular tables already fold in the low-temperature gas continuum, so summing them with es, ff, or H- would
-//! double-count. The handoff SELECTS the molecular total below the gas regime and the gas total above it, blending
-//! across the narrow overlap where both are valid (and, by the convergence check, agree).
+//! The first-principles es/ff/H- closure [`crate::opacity::total_gas_rosseland_opacity`] was validated against the
+//! ÆSOPUS table by the two-point convergence protocol: Point A (the es corner, where `sigma_T` has no convention
+//! freedom) matched to 0.278 vs 0.298, exonerating the Saha/EOS; Point B (the H- minimum) held the never-exceed-one
+//! invariant, exonerating the H- normalization. But Point B also falsified the notion that the closure suffices in
+//! the hot gas: above the H- minimum the Rosseland total is owned by H bound-free (the `n=2` excitation penalty
+//! `e^(-10.2 eV/kT)` lands on the weighting peak) and the atomic-line forest, which the continuum-only closure does
+//! not carry, so it underestimates by up to `~17x` near `7000 K`. The resolution (the ab initio helium pattern run
+//! in reverse, theory certifying the measured object rather than beating it): the disk READS the ÆSOPUS total
+//! in-range; the closure is a SHADOW VALIDATOR that certifies the table where derivation reaches and its Saha solve
+//! feeds the separate consumers (the None verdict, the future MRI dead-zone lever, the ionosphere).
+//!
+//! THE FOUR RIDERS (type-level truths, encoded in [`disk_gas_opacity`] and the grain-addition guard):
+//! - SHADOW RULE: in-range the closure contributes NOTHING additively (ÆSOPUS already holds es, ff, H-, H
+//!   bound-free, lines, molecules, Rayleigh together); the assembly is TABLE + GRAINS, never table + closure.
+//! - FORBIDDEN FALLBACK: an in-range composition miss routes to a loud hold or an on-demand pull, NEVER a silent
+//!   closure substitution, which would be a certified order-of-magnitude underestimate wearing a derived pedigree.
+//! - ADDITION BAND: "grains add on top" is a DECLARED APPROXIMATION (Rosseland means do not add), legal only under
+//!   the banked dominance guard `kappa_grain/kappa_gas > 1e2` through the grain-gas coexistence window (gas alone
+//!   above sublimation); the guard is asserted where the addition happens (the grain slice).
+//! - SCOPE CEILING: the above-table es/ff extension serves transient and shock states; a consumer that needs
+//!   `1e4.5` to `1e6 K` in earnest (stellar-envelope pulsation, the iron Z-bump bound-bound physics) takes OP or
+//!   OPAL as a named [M] fetch, never this extension stretched into stellar interiors.
 //!
 //! THE COORDINATE (definition tag): low-temperature Rosseland tables are indexed by `(log10 T, log10 R)` with the
 //! density proxy `R = rho / (T / 10^6 K)^3` (cgs, `rho` in g/cm^3). `R` is NOT the density and NOT the pressure: it
@@ -234,12 +248,12 @@ pub fn aesopus_solar_gate_grid() -> Option<LowTempRosselandGrid> {
     )
 }
 
-/// The GAS-to-MOLECULAR regime handoff `kappa_R` (cm^2/g): a TOTAL, never a sum. Below the gas regime the ionized-
-/// gas closure returns `None` (the cold molecular gap) and the molecular total owns the opacity; above it (hotter
-/// than the molecular grid's ceiling, or where the grid is unavailable) the gas total owns it; across the narrow
-/// overlap where BOTH are valid, the two are blended in log space (a geometric interpolation weighted by
-/// temperature), which is a SELECTION between regimes, not an addition, so the low-temperature gas continuum the
-/// molecular table already carries is never double-counted with es, ff, or H-.
+/// A GENERAL two-regime geometric-blend primitive `kappa_R` (cm^2/g): a TOTAL, never a sum. Where only one regime
+/// is valid it owns the opacity; across the overlap where BOTH are valid the two are blended in log space (a
+/// geometric interpolation weighted by temperature), which is a SELECTION between regimes, not an addition. This is
+/// retained machinery (its geometric mean-not-sum property is the load-bearing theorem for any regime handoff), but
+/// it is NOT the disk gas dispatcher: the ratified disk architecture is [`disk_gas_opacity`] (the ÆSOPUS table is
+/// the gas total in-range, the closure a shadow validator), which does not blend the closure into the table.
 ///
 /// The overlap bounds `overlap_lo_k` and `overlap_hi_k` are CALLER data, not authored here: they are the reserved
 /// calibration window where the two regimes co-exist, basis the temperature range over which H- rises through the
@@ -272,6 +286,38 @@ pub fn gas_molecular_handoff_opacity(
             let log_g = log10(g)?;
             exp10(lerp(log_m, log_g, w)?)
         }
+    }
+}
+
+/// The disk GAS Rosseland opacity on the ratified architecture: the ÆSOPUS [M] `table` IS the gas total across its
+/// range, and the es/ff/H- closure is a shadow validator that never contributes additively in-range (the SHADOW
+/// RULE). Dispatch is by temperature against the table's OWN range:
+/// - BELOW the table floor (`log_t < table.log_t[0]`, `T < ~1585 K`): `None`. The cold regime the grains own; the
+///   gas opacity is a non-entity there.
+/// - IN-RANGE: the table total by bilinear interpolation ([`LowTempRosselandGrid::rosseland_opacity`]). The closure
+///   is not consulted.
+/// - ABOVE the table ceiling (`log_t > table.log_t[last]`, `T > ~31623 K`): `above_ceiling_closure`, the caller's
+///   es/ff extension for transient and shock states (SCOPE CEILING: not a stellar-interior opacity; `1e4.5` to
+///   `1e6 K` in earnest takes OP/OPAL as a named [M] fetch).
+///
+/// FORBIDDEN FALLBACK: this returns `None` on an empty table, and the composition registry above it must route an
+/// in-range composition miss to a loud hold or an on-demand pull, NEVER a silent closure substitution (a certified
+/// order-of-magnitude underestimate wearing a derived pedigree). `above_ceiling_closure` is `None` when the caller
+/// did not compute the extension (only needed above the ceiling).
+pub fn disk_gas_opacity(
+    log_t: Fixed,
+    log_r: Fixed,
+    table: &LowTempRosselandGrid,
+    above_ceiling_closure: Option<Fixed>,
+) -> Option<Fixed> {
+    let floor = *table.log_t.first()?;
+    let ceiling = *table.log_t.last()?;
+    if log_t < floor {
+        None
+    } else if log_t <= ceiling {
+        table.rosseland_opacity(log_t, log_r)
+    } else {
+        above_ceiling_closure
     }
 }
 
@@ -419,6 +465,46 @@ mod tests {
             k_cold.to_f64_lossy(),
             k_gap.to_f64_lossy(),
             k_hot.to_f64_lossy()
+        );
+    }
+
+    #[test]
+    fn the_disk_gas_opacity_reads_the_table_in_range_and_ignores_the_closure() {
+        // The ratified architecture: in-range the disk reads the ÆSOPUS table total and the closure is NOT
+        // consulted (the shadow rule), so a deliberately absurd above_ceiling_closure changes nothing in-range;
+        // below the table floor the gas opacity is None (grains own the cold regime); above the ceiling the es/ff
+        // extension is returned.
+        let grid = aesopus_solar_gate_grid().unwrap();
+        let in_range = disk_gas_opacity(
+            Fixed::from_int(4),
+            Fixed::from_int(-8),
+            &grid,
+            Some(Fixed::from_int(999)), // an absurd closure value, which must be ignored in-range
+        )
+        .unwrap();
+        let table_only = grid
+            .rosseland_opacity(Fixed::from_int(4), Fixed::from_int(-8))
+            .unwrap();
+        assert_eq!(
+            in_range, table_only,
+            "in-range the disk reads the table total, the closure is a shadow (not consulted)"
+        );
+        // Below the table floor (log T = 3.0 < 3.2): None, the grains own it.
+        assert_eq!(
+            disk_gas_opacity(Fixed::from_int(3), Fixed::from_int(-8), &grid, None),
+            None,
+            "below the table floor the gas opacity is None (the cold grain regime)"
+        );
+        // Above the table ceiling (log T = 4.6 > 4.5): the caller's es/ff extension.
+        assert_eq!(
+            disk_gas_opacity(
+                Fixed::from_ratio(46, 10),
+                Fixed::from_int(-8),
+                &grid,
+                Some(Fixed::from_ratio(4, 10))
+            ),
+            Some(Fixed::from_ratio(4, 10)),
+            "above the ceiling the es/ff extension owns the opacity (transient/shock)"
         );
     }
 
