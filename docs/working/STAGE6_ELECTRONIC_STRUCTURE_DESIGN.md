@@ -190,3 +190,120 @@ Allen 1971, Gunnarsson-Calandra-Han 2003, Ashcroft and Mermin tables 1.2 and 14.
 Build order unchanged: the near-ready entry (`n_e`, `omega_p`) first, then the Drude conductivity on the corrected
 `tau` with `lambda_tr` and its round-trip test, then the `[M]`-plus-Harrison-plus-compute-once gap tier with the
 `U/W` preflight, then DOS and Hund magnetism, then the interband and plasma optics over the banked `10Dq`.
+
+## 10. The band-gap tier: the integration surface and the Harrison-rung premise (design-first, for the gate's ruling)
+
+Building the gap tier ruled in section 9 (Call 1: an `[M]` top rung, a Harrison estimator middle rung, a
+compute-once bottom rung, with the `U/W` preflight of redirect 2) began with grounding the banked machinery the
+tier is to CONSUME rather than rebuild: the correlation classifier (`correlation.rs`), the metallic route
+(`metallic.rs`), the localized route (`localized.rs`), the d-state radius floor (`d_state_radius.rs`), the MIT
+reference set, and the periodic table. That grounding surfaced one premise in Call 1 that does not hold against
+the code, and it changes what the middle rung can be built from. It is surfaced here design-first, on the arc's
+discipline of proving the input before trusting it, most of all when the input is a prior ruling.
+
+### 10.1 The Harrison-rung premise, checked against the code
+
+Call 1 reads the Harrison estimator as half-banked: "the same `V ~ hbar^2 * r_d^3 / (m * d^5)` matrix elements the
+banked Friedel-Harrison cohesion estimator already uses give band widths and gaps at factor grade from table
+columns." Four facts from the code contradict the reusability that premise assumes.
+
+First, there is no banked Friedel-Harrison cohesion estimator. The metallic route (`metallic.rs`) computes the
+elemental cohesive energy from the ROSE universal binding-energy relation (Rose, Smith, Guinea, Ferrante 1984): the
+banked measured `E_coh` and the dimensionless ratio `B_0 * V_m / E_coh`. It reads no Harrison matrix element. The
+cohesion machinery the tier would reuse is a Rose equation of state, not a Harrison tight-binding sum.
+
+Second, the one place the Harrison band-width form does appear, the correlation classifier, uses it as a RATIO with
+the absolute prefactor deliberately unfetched. The classifier's own note is explicit: `U/W = (screening /
+C_Harrison) * U_atomic * d^5 / r_d^3`, where the in-crystal screening and Harrison's prefactor are DEGENERATE in
+the MIT fit (only their ratio is determined), Harrison's prefactor is in his book, unfetchable, and is not
+fabricated. The classifier keys on the raw ratio `rho = U_atomic * d^5 / r_d^3` and never needs an absolute
+bandwidth in eV. So the absolute Harrison prefactor `C_Harrison`, the dimensionless universal coefficient a band
+width in eV requires, is not banked: it was surfaced as unfetchable and left unfabricated, the correct refusal.
+
+Third, the d-state radius that feeds that form is trustworthy only in RELATIVE scale. The d-state radius floor
+states that the absolute `r_d` scale is absorbed by the MIT-calibrated screening (a uniform scaling of `r_d` by `k`
+scales `W` by `k^3`, which the screening re-fits to the same `U/W = 1` boundary), so only the relative contraction
+across the series is load-bearing. An absolute band width built from `r_d` would inherit an absolute scale the
+floor never had to validate and never did.
+
+Fourth, on the target rather than the inputs: the semiconductor gap the tier most needs (the sp-bonded solids,
+silicon, the III-Vs, the covalent and ionic non-metals whose colour and carrier density the sub-arc delivers) is
+not the `d^{-5}` d-band matrix element at all. Harrison's semiconductor gap is the bond-orbital construct `E_gap ~
+2 sqrt(V_2^2 + V_3^2)`, with the covalent energy `V_2 ~ eta * hbar^2 / (m d^2)` (the `d^{-2}` sp matrix element, a
+different power law from the `d^{-5}` d-d form) and the polar energy `V_3` the difference of the two atoms' hybrid
+term values. Building it needs Harrison's dimensionless universal coefficients `eta_{l l' m}` (pure numbers, his
+solid-state table) and a per-element atomic term-value column (`epsilon_s`, `epsilon_p`), neither of which is
+banked. The periodic table carries the first ionization energy and the electron affinity in eV, not the orbital
+term values the bond-orbital model reads.
+
+The conclusion is not that the Harrison rung is impossible. It is that the rung cannot be built by reusing
+already-banked matrix elements as Call 1 assumes: it needs cited pure-number inputs (Harrison's `eta` coefficients
+and a term-value column) that the floor does not yet carry, and the one number a naive build would reach for (the
+absolute Harrison prefactor) is the number the correlation work already ruled unfetchable and refused to fabricate.
+Fabricating it here to make the rung compile would break the value-authoring line the whole arc runs on.
+
+### 10.2 The tier that IS buildable now, fabrication-free
+
+Separating the rungs by what each needs shows most of the tier is buildable now with no fabricated value, and only
+the Harrison middle rung waits on the gate.
+
+The `[M]` top rung is a measured band-gap column, a new cited data file of the same status as the bulk modulus and
+the formation enthalpy: per substance, the measured gap in eV, source-cited, refutable without the sim. This is
+world data read, never a reserved value, and it is the rung the emergent classification of section 4 rides safely
+(redirect 2 confirmed the emergence is clean for the measured-gap case).
+
+The emergent metal / non-metal classification is a pure readout of the gap sign, buildable now: a gap at or below
+zero is a metal, a gap above zero is a non-metal. This carries no threshold to fabricate.
+
+The semiconductor-versus-insulator split, by contrast, should NOT be a hardcoded eV boundary. There is no sharp
+physical line between a semiconductor and an insulator; the distinction is whether the thermally-activated carrier
+density at the world temperature is appreciable, a continuous derived readout of the gap and the temperature rather
+than an authored cutoff. So the tier reports the metal / non-metal boundary (physical, the gap sign) and, for a
+non-metal, the DERIVED carrier activation rather than a discrete semiconductor-or-insulator label with an invented
+boundary. A discrete label, if a consumer needs one, emerges when the activation crosses a stated fraction of a
+reference density (a reserved fraction with a clear basis, the thermal-activation threshold), never a planted eV
+number. This is a derive-first catch on the classification itself.
+
+The thermally-activated carrier density is the section-4 `n_e ~ exp(-E_gap / 2kT)`, and it is the census-flagged
+exp-family piece: for a five-eV insulator at world temperature the factor is `exp(-96)`, far below the fixed-point
+floor, so it is carried in LOG SPACE (the exponent `-E_gap / 2kT`, always representable) on the creep discipline,
+exponentiated only when a consumer needs an in-range ratio. The Boltzmann constant in the working units (eV per
+kelvin) reassembles as `k_B[J/K] / e`, a ratio of two fundamental constants (the dimensionless-constant law's
+fundamental-constant fold), so the eV and the kelvin cancel and the exponent is dimensionless by construction. This
+rung reserves nothing and is buildable now.
+
+The compute-once bottom rung is a provenance LAW, not a computation the engine runs: a compute-once gap must carry
+a hybrid-functional or GW provenance tag, never a plain PBE or LDA gap, because the semilocal functionals
+underestimate the gap by the derivative discontinuity (often by half or more). This is an eigenvalue-routing rule
+stated so no one wires a PBE gap in good faith, buildable now as a tag discipline on the `[M]` and compute-once
+column.
+
+The `U/W` preflight (redirect 2) is the tier's load-bearing integration, and it composes the banked classifier
+exactly: on any NON-measured route (the estimator or compute-once rungs, where a reduced-order band model could
+call NiO a metal), run `CorrelationClassifier::classify` FIRST. A Localized result is an insulator regardless of
+what a naive band model returns (route away from the metal / non-metal gap sort, the Mott insulator the correlation
+turn closed). An Itinerant result proceeds to the gap-based sort. A Window or OutOfScope result escalates
+(estimators forbidden). On the measured-`[M]` route the preflight is unnecessary (the measurement already encodes
+the Mott gap), but running it there too is coherent and cheap, and it keeps one code path. This is the ordering
+that stops the sub-arc from reintroducing the exact failure the Mott turn closed.
+
+### 10.3 The gate's call, and the recommended build order
+
+The one piece that needs the gate is the Harrison middle rung, and the call is a fork. Either the gate delivers the
+verified inputs from the literature (Harrison's dimensionless `eta_{l l' m}` universal coefficients as pure numbers
+and a cited atomic term-value column), as the gate delivered the Slack Leibfried-Schlomann structure when the
+first-principles reassembly did not close, and the sp-bonded bond-orbital gap estimator is built over them; or the
+Harrison rung is deferred as a named follow-on and the tier ships with the `[M]` top rung, the emergent
+classification, the log-space carrier activation, the `U/W` preflight, and the compute-once law, escalating between
+the measured rows and the compute-once floor where an estimator would otherwise sit. Both are honest; neither
+fabricates the Harrison prefactor.
+
+The recommended order, gated per push and independent of the Harrison call: build the fabrication-free core first
+(the log-space carrier activation as the census-discharge piece, then the emergent metal / non-metal classification
+with the `U/W` preflight over the banked classifier, then the measured `[M]` gap column and its cited data file
+with the compute-once provenance law), and take the Harrison rung as the next slice once the gate rules the fork.
+This keeps the tier moving on the pieces that need no ruling while holding the one piece that needs the gate, on the
+arc's rhythm of building the certain part and surfacing the contested part rather than fabricating past it.
+
+Byte-neutrality holds throughout: the gap tier lands in the materials leaf and the new `[M]` gap column in a data
+file, moving no run pin, proven per push as the mechanical and near-ready electronic slices were.
