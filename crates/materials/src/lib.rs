@@ -59,6 +59,7 @@ pub mod magnetism;
 pub mod memo;
 pub mod metallic;
 pub mod nucleation;
+pub mod optics;
 pub mod properties;
 pub mod quench;
 pub mod stoner;
@@ -106,6 +107,7 @@ pub use nucleation::{
     nucleation_prefactor, nucleation_rate, reduced_driving_force, reduced_interfacial_energy,
     reduced_nucleation_barrier, richards_ratio, zeldovich_factor, NucleationRoute,
 };
+pub use optics::{falls_in_observer_window, optical_energies, OpticalEnergy, OpticalFeature};
 pub use properties::{
     chen_tse_hardness_gpa, debye_function, debye_heat_capacity_j_per_mol_k, debye_temperature,
     debye_velocity_km_per_s, density_g_per_cm3, grain_boundary_energy_j_per_m2,
