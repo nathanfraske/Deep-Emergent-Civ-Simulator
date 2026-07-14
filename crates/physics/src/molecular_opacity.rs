@@ -423,6 +423,60 @@ mod tests {
     }
 
     #[test]
+    fn convergence_point_a_the_es_corner_matches_aesopus_isolating_the_saha() {
+        // The two-point differential protocol, POINT A (the es-dominated corner): at log T = 4.0, log R = -8
+        // (T = 10000 K, rho = 1e-14 g/cm^3) electron scattering dominates, and sigma_T carries no convention
+        // freedom, so any factor discrepancy here is pure Saha (EOS) disagreement. He stays neutral at 10000 K, so
+        // n_e = n_H and the es opacity is sigma_T X/m_H ~ 0.278, not the H+He full-ionization 0.59; ÆSOPUS reports
+        // 0.298 (the ~7% residual is metal electrons and lines we do not model). Our closure, fed the shared Saha
+        // n_e, must land there and APPROACH FROM BELOW.
+        let tbl = crate::periodic::PeriodicTable::standard().expect("periodic table");
+        let grid = aesopus_solar_gate_grid().unwrap();
+        let aesopus = grid
+            .rosseland_opacity(Fixed::from_int(4), Fixed::from_int(-8))
+            .unwrap();
+        // rho = 1e-14 g/cm^3 (from log R = -8, log T = 4.0); H + alkali/alkaline-earth donors at AGSS09 ratios,
+        // n_H = X rho/m_H = 4.18e9 cm^-3.
+        let ln_rho = crate::saha::ln_of_decimal("1e-14").unwrap();
+        let species = [
+            ("H", crate::saha::ln_of_decimal("4.182e9").unwrap()),
+            ("Mg", crate::saha::ln_of_decimal("1.664e5").unwrap()),
+            ("Ca", crate::saha::ln_of_decimal("9159").unwrap()),
+            ("Na", crate::saha::ln_of_decimal("7277").unwrap()),
+            ("K", crate::saha::ln_of_decimal("448").unwrap()),
+        ];
+        let state =
+            crate::saha::electron_density_saha(Fixed::from_int(10000), &species, &tbl).unwrap();
+        assert!(
+            !state.no_free_electrons,
+            "10000 K low-density gas is ionized"
+        );
+        let ln_ne = state.ln_electron_density_cm3;
+        let closure = crate::opacity::total_gas_rosseland_opacity(
+            Fixed::from_int(10000),
+            Fixed::ZERO, // rho ~ 1e-14 underflows Fixed; ff is negligible here and es reads ln rho
+            ln_rho,
+            Fixed::from_ratio(7, 10),
+            Fixed::ONE,
+            Fixed::from_ratio(12, 10),
+            ln_ne,
+            ln_ne,
+            state.electron_pressure_dyn_cm2,
+            &tbl,
+        )
+        .expect("the es-dominated closure resolves");
+        let ratio = closure.to_f64_lossy() / aesopus.to_f64_lossy();
+        assert!(
+            ratio > 0.85 && ratio <= 1.03,
+            "Point A: the es closure matches ÆSOPUS within a few percent (no factor discrepancy = Saha agrees): \
+             ours {}, ÆSOPUS {}, ratio {}",
+            closure.to_f64_lossy(),
+            aesopus.to_f64_lossy(),
+            ratio
+        );
+    }
+
+    #[test]
     fn the_handoff_selects_molecular_in_the_cold_gap_and_gas_when_hot() {
         // The regime handoff is a TOTAL, not a sum. In the cold gap the gas closure is None (es/ff Saha-killed, H-
         // asleep), so the molecular total owns the opacity; hot, the gas total owns it; with neither valid the
