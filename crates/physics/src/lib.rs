@@ -37,6 +37,7 @@
 //! never a fabricated default), the same fail-loud discipline as the calibration
 //! manifest. The law kernels themselves are phase 2.
 
+pub mod band_gap;
 pub mod d_state_radius;
 pub mod ewald;
 pub mod floor_provenance;

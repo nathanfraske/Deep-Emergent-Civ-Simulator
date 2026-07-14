@@ -1,0 +1,49 @@
+# The band-gap column (crate::band_gap), the materials gap tier's measured [M] top rung and compute-once bottom
+# rung, keyed per composition. Per substance the band gap in eV with its provenance: a MEASURED [M] value (cited,
+# refutable without the sim, the same status as B_0 and dH_f) or a COMPUTE-ONCE eigenvalue from a hybrid or GW
+# calculation (the loader rejects a semilocal PBE/LDA functional, the eigenvalue-routing law).
+#
+# The mechanism is fixed Rust; the substance MEMBERSHIP is data and grows with the world (Principle 11). This seed
+# spans the gap tier's regimes for a Terran-material spot check: the silicon/germanium/GaAs semiconductors, the
+# wide ionic insulator MgO, and the correlated (charge-transfer) insulator NiO. An alien conductor is a new row
+# carrying its own gap, never a rewrite.
+#
+# HONEST LIMIT: a band gap is a property of a PHASE, so this composition-keyed column is scoped to single-phase
+# substances; a polymorph-bearing composition (diamond versus graphite, both C) needs a phase-keyed column aligned
+# with phase_registry.toml, a named follow-on. Every value is cited reference data surfaced for the owner's
+# verification, never invented.
+
+[[gap]]
+name = "silicon"
+composition = { Si = 1 }
+gap_ev = "1.12"
+provenance = "measured"
+source = "Sze & Ng, Physics of Semiconductor Devices, 3rd ed. (2007), Si indirect gap 1.12 eV at 300 K"
+
+[[gap]]
+name = "germanium"
+composition = { Ge = 1 }
+gap_ev = "0.67"
+provenance = "measured"
+source = "Kittel, Introduction to Solid State Physics, 8th ed. (2005), Ge indirect gap 0.67 eV at 300 K"
+
+[[gap]]
+name = "gallium arsenide"
+composition = { Ga = 1, As = 1 }
+gap_ev = "1.42"
+provenance = "measured"
+source = "Blakemore, J. Appl. Phys. 53, R123 (1982), GaAs direct gap 1.42 eV at 300 K"
+
+[[gap]]
+name = "nickel oxide"
+composition = { Ni = 1, O = 1 }
+gap_ev = "4.3"
+provenance = "measured"
+source = "Sawatzky & Allen, Phys. Rev. Lett. 53, 2339 (1984), NiO charge-transfer gap ~4.3 eV"
+
+[[gap]]
+name = "magnesium oxide"
+composition = { Mg = 1, O = 1 }
+gap_ev = "7.8"
+provenance = "measured"
+source = "Roessler & Walker, Phys. Rev. 159, 733 (1967), MgO optical gap ~7.8 eV"
