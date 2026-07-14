@@ -1281,6 +1281,86 @@ pub fn bruggeman_effective_index(
     Some((n_eff, k_eff))
 }
 
+/// The number of log-spaced wavelength samples the grain Rosseland mean precomputes. The Rosseland weight
+/// is smooth in `ln x`, so the spectral opacity is sampled on this coarse grid once and interpolated
+/// (log-log) at each of the [`ROSSELAND_INTERVALS`] quadrature points, rather than paying a full
+/// size-distribution integral per quadrature point (which would be `ROSSELAND_INTERVALS` times as many Mie
+/// evaluations). An engine-performance bound: the grid is fine enough that its interpolation error sits
+/// below the quadrature's own, not world content.
+const GRAIN_ROSS_GRID: usize = 32;
+
+/// The ROSSELAND-MEAN grain opacity `kappa_R(T)` (cm^2/g), the single temperature-dependent number the disk
+/// midplane solve reads, DERIVED by Rosseland-averaging the size-distribution-averaged spectral opacity
+/// [`grain_size_averaged_opacity`] over the Planck frequency window. Each dimensionless frequency
+/// `x = h*nu/(k_B*T)` maps to a wavelength `lambda = (h c / k_B) / (x T)`, so the spectral opacity is
+/// sampled on a coarse log grid across the window and interpolated (in `ln lambda`, `ln kappa`) at each
+/// quadrature point, then [`rosseland_mean`] takes the harmonic (transparency-weighted) average.
+///
+/// In the Rayleigh regime (a wavelength-independent index, so `kappa_abs ~ 1/lambda ~ x`) this scales
+/// linearly with temperature, the derived `kappa_R ~ T` that a steeper `k(lambda)` would push toward the
+/// `T^2` of the classic dust laws. All inputs are per-composition and per-distribution DATA (the alien and
+/// distribution seams); `None` on a non-positive temperature, a bad distribution, or any overflow.
+pub fn grain_rosseland_opacity(
+    temperature_k: Fixed,
+    n: Fixed,
+    k: Fixed,
+    bulk_density_g_cm3: Fixed,
+    slope: Fixed,
+    a_min_um: Fixed,
+    a_max_um: Fixed,
+) -> Option<Fixed> {
+    if temperature_k <= Fixed::ZERO {
+        return None;
+    }
+    // lambda(x, T) = (h c / k_B) / (x T), in microns (the same constant the Rayleigh term forms).
+    let h = fundamental_bigrat("h")?;
+    let c = fundamental_bigrat("c")?;
+    let k_b = fundamental_bigrat("k_B")?;
+    let alpha_um_k = h.mul(&c).div(&k_b).mul(&BigRat::from_i64(1_000_000));
+    let t_br = nonneg_fixed_to_bigrat(temperature_k);
+
+    // Precompute ln(kappa_abs) on a log-spaced x grid across the Rosseland window.
+    let ln_x_min = rosseland_x_min().ln();
+    let ln_x_max = rosseland_x_max().ln();
+    let span = ln_x_max.checked_sub(ln_x_min)?;
+    let mut ln_kappa = Vec::with_capacity(GRAIN_ROSS_GRID + 1);
+    for j in 0..=GRAIN_ROSS_GRID {
+        let ln_x = ln_x_min
+            .checked_add(span.checked_mul(Fixed::from_ratio(j as i64, GRAIN_ROSS_GRID as i64))?)?;
+        let x = ln_x.exp();
+        let lam_br = alpha_um_k.div(&nonneg_fixed_to_bigrat(x).mul(&t_br));
+        let lam = Fixed::from_bits_i128(lam_br.round_to_scale(Fixed::FRAC_BITS)?)?;
+        let kappa =
+            grain_size_averaged_opacity(lam, n, k, bulk_density_g_cm3, slope, a_min_um, a_max_um)?;
+        ln_kappa.push(kappa.ln());
+    }
+
+    // Rosseland-average, interpolating ln(kappa) linearly in ln(x) at each quadrature frequency.
+    rosseland_mean(|x| {
+        let ln_x = x.ln();
+        // Position on the uniform ln-x grid, clamped to the endpoints.
+        let pos = ln_x
+            .checked_sub(ln_x_min)?
+            .checked_div(span)?
+            .checked_mul(Fixed::from_int(GRAIN_ROSS_GRID as i32))?;
+        let pos = if pos < Fixed::ZERO {
+            Fixed::ZERO
+        } else if pos > Fixed::from_int(GRAIN_ROSS_GRID as i32) {
+            Fixed::from_int(GRAIN_ROSS_GRID as i32)
+        } else {
+            pos
+        };
+        let idx = (pos.to_int() as usize).min(GRAIN_ROSS_GRID - 1);
+        let local = pos.checked_sub(Fixed::from_int(idx as i32))?;
+        let lo = ln_kappa[idx];
+        let hi = ln_kappa[idx + 1];
+        Some(
+            lo.checked_add(hi.checked_sub(lo)?.checked_mul(local)?)?
+                .exp(),
+        )
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2337,6 +2417,46 @@ mod tests {
             bruggeman_effective_index(&[Fixed::from_ratio(-1, 10)], &[sil_index()]),
             None,
             "a negative fraction is rejected"
+        );
+    }
+
+    #[test]
+    fn the_grain_rosseland_opacity_scales_with_temperature() {
+        // For a wavelength-independent index, kappa_abs ~ 1/lambda ~ x, so the Rosseland mean scales
+        // linearly with temperature: doubling T doubles kappa_R. The reference (silicate-like grain) is
+        // ~74.7 cm^2/g at 400 K, matched against the same average composed over the f64 BHMIE.
+        let (n, k, rho, p, amin, amax) = silicate_grain();
+        let k400 = grain_rosseland_opacity(Fixed::from_int(400), n, k, rho, p, amin, amax)
+            .unwrap()
+            .to_f64_lossy();
+        let k800 = grain_rosseland_opacity(Fixed::from_int(800), n, k, rho, p, amin, amax)
+            .unwrap()
+            .to_f64_lossy();
+        assert!(
+            (k400 - 74.7).abs() < 2.0,
+            "kappa_R(400 K) ~ 74.7 cm^2/g, got {}",
+            k400
+        );
+        assert!(
+            (k800 / k400 - 2.0).abs() < 0.06,
+            "doubling T doubles the Rosseland-mean opacity, ratio {}",
+            k800 / k400
+        );
+    }
+
+    #[test]
+    fn the_grain_rosseland_opacity_is_deterministic_and_guards_temperature() {
+        let (n, k, rho, p, amin, amax) = silicate_grain();
+        let t = Fixed::from_int(300);
+        assert_eq!(
+            grain_rosseland_opacity(t, n, k, rho, p, amin, amax),
+            grain_rosseland_opacity(t, n, k, rho, p, amin, amax),
+            "the Rosseland-mean grain opacity replays byte for byte"
+        );
+        assert_eq!(
+            grain_rosseland_opacity(Fixed::ZERO, n, k, rho, p, amin, amax),
+            None,
+            "a non-positive temperature is rejected"
         );
     }
 }
