@@ -88,7 +88,10 @@ pub use electronic::{
     carrier_density_per_nm3, drude_conductivity_from_tau, drude_conductivity_s_per_m,
     drude_scattering_time_fs, plasma_energy_ev, ElectronicRoute,
 };
-pub use harrison::{eta, two_center_matrix_element, TwoCenterBond};
+pub use harrison::{
+    bond_covalency, bond_orbital_average_gap_ev, bond_polarity, covalent_energy_v2, eta,
+    polar_energy_v3, two_center_matrix_element, TwoCenterBond,
+};
 pub use localized::LocalizedRoute;
 pub use log::{VerdictKind, VerdictLog, VerdictRecord};
 pub use magnetism::{
