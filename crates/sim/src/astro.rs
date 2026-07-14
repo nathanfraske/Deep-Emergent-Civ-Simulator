@@ -152,6 +152,46 @@ pub fn stellar_effective_temperature(
     ))
 }
 
+/// The DISK MID-PLANE TEMPERATURE `T(r)` (K) at an orbital distance, DERIVED from irradiation balance: the disk
+/// annulus at distance `r` intercepts the stellar flux `F(r) = L/(4*pi*r^2)` ([`stellar_flux`], the same flux a
+/// world at that orbit receives), absorbs a geometry-set fraction of it, and re-radiates in thermal equilibrium,
+/// so `sigma*T^4 = reprocessing_factor*F(r)` and `T(r) = (reprocessing_factor*F(r)/sigma)^(1/4)`. This is the
+/// radial temperature profile the condensation sequence reads: it sets WHERE each material condenses (its
+/// snow line), because `T` falls with distance as `F^(1/4) ~ r^(-1/2)`, so a volatile that condenses below some
+/// temperature has a condensation front at the radius where `T(r)` crosses it. `sigma` is the CODATA-derived
+/// Stefan-Boltzmann constant ([`crate::physiology::derived_stefan_boltzmann`]), never authored.
+///
+/// Every per-world input is a scenario-set ARGUMENT (the admit-the-alien test): `mass_ratio`, `luminosity_exponent`
+/// (the star's mass and its mass-luminosity residue, together fixing `L`), `distance_au` (the orbit), and
+/// `reprocessing_factor`. The reprocessing factor is the reserved closure-residue of the disk's absorb-to-reradiate
+/// GEOMETRY: `1/4` for a body that absorbs on its cross-section and re-emits isotropically (the fast-rotator /
+/// spherical-grain equilibrium, the value that reproduces a planet's blackbody equilibrium temperature), a
+/// grazing-and-flaring factor for a passive flared disk that intercepts starlight at a shallow angle and radiates
+/// from two faces. Its basis is the disk (or grain) geometry of the world's regime, so a different disk structure
+/// is a data row, never a rewrite. `t_max` is the representable ceiling the fourth-root read caps at (an engine
+/// bound). At Earth's orbit (`mass_ratio = 1`, `distance_au = 1`, `reprocessing_factor = 1/4`) this derives the
+/// ~278 K blackbody equilibrium temperature from `L_sun`, the AU, and the derived `sigma` alone, the derive-not-fit
+/// anchor. `None` on a non-positive distance or a flux past the representable range.
+pub fn disk_midplane_temperature(
+    mass_ratio: Fixed,
+    luminosity_exponent: Fixed,
+    distance_au: Fixed,
+    reprocessing_factor: Fixed,
+    t_max: Fixed,
+) -> Option<Fixed> {
+    // The flux the annulus at r intercepts is the same L/(4*pi*r^2) a world at that orbit receives.
+    let flux = stellar_flux(mass_ratio, luminosity_exponent, distance_au)?;
+    // The absorbed-and-reradiated balance sigma*T^4 = reprocessing_factor*F, inverted by the proven two-sqrt root.
+    let absorbed = reprocessing_factor.checked_mul(flux)?;
+    let sigma = crate::physiology::derived_stefan_boltzmann();
+    Some(civsim_physics::laws::radiative_equilibrium(
+        absorbed,
+        Fixed::ONE,
+        sigma,
+        t_max,
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -293,6 +333,102 @@ mod tests {
                 Fixed::ZERO,
                 Fixed::from_ratio(35, 10),
                 Fixed::from_ratio(8, 10),
+                Fixed::from_int(100_000)
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn earth_orbit_derives_the_blackbody_equilibrium_temperature() {
+        // A body at 1 AU absorbing on its cross-section and re-emitting isotropically (reprocessing_factor = 1/4)
+        // reaches sigma*T^4 = F/4 with F ~1361 W/m^2, so T = (1361/(4 sigma))^(1/4) ~278 K, Earth's textbook
+        // blackbody equilibrium temperature (the ~255 K real value is 278 K reduced by the ~0.3 albedo, which the
+        // atmosphere arc supplies later; here the airless blackbody value is the DERIVED anchor). Nothing tuned:
+        // it falls out of L_sun, the AU, and the CODATA-derived sigma.
+        let t_max = Fixed::from_int(100_000);
+        let t = disk_midplane_temperature(
+            Fixed::ONE,
+            Fixed::from_ratio(35, 10),
+            Fixed::ONE,
+            Fixed::from_ratio(1, 4),
+            t_max,
+        )
+        .expect("the disk temperature derives");
+        let k = t.to_f64_lossy();
+        assert!(
+            (k - 278.0).abs() < 3.0,
+            "a body at 1 AU derives the ~278 K blackbody equilibrium temperature, got {k}"
+        );
+    }
+
+    #[test]
+    fn the_disk_temperature_falls_as_inverse_root_distance() {
+        // F ~ r^-2 and T ~ F^(1/4), so T ~ r^(-1/2): four times the distance is half the temperature. The radial
+        // slope that places the snow lines (a volatile's condensation front is where T(r) crosses its threshold).
+        let (alpha, factor, t_max) = (
+            Fixed::from_ratio(35, 10),
+            Fixed::from_ratio(1, 4),
+            Fixed::from_int(100_000),
+        );
+        let near = disk_midplane_temperature(Fixed::ONE, alpha, Fixed::ONE, factor, t_max).unwrap();
+        let far = disk_midplane_temperature(Fixed::ONE, alpha, Fixed::from_int(4), factor, t_max)
+            .unwrap();
+        let ratio = near.to_f64_lossy() / far.to_f64_lossy();
+        assert!(
+            (ratio - 2.0).abs() < 0.05,
+            "four times the distance halves the temperature (T ~ r^-1/2), got ratio {ratio}"
+        );
+    }
+
+    #[test]
+    fn a_brighter_star_warms_the_disk() {
+        // A more luminous star warms its disk at the same orbit: T ~ L^(1/4) ~ mass^(alpha/4), so a two-solar-mass
+        // star's disk at 1 AU is hotter than the Sun's.
+        let (alpha, factor, t_max) = (
+            Fixed::from_ratio(35, 10),
+            Fixed::from_ratio(1, 4),
+            Fixed::from_int(100_000),
+        );
+        let sun = disk_midplane_temperature(Fixed::ONE, alpha, Fixed::ONE, factor, t_max).unwrap();
+        let heavy = disk_midplane_temperature(Fixed::from_int(2), alpha, Fixed::ONE, factor, t_max)
+            .unwrap();
+        assert!(
+            heavy > sun,
+            "a brighter star warms the disk at the same orbit"
+        );
+    }
+
+    #[test]
+    fn the_reprocessing_factor_scales_the_temperature() {
+        // T ~ reprocessing_factor^(1/4): a sixteen-fold larger factor is a two-fold hotter disk, the geometry
+        // residue entering as a fourth root (so its uncertainty is strongly damped in the temperature).
+        let (alpha, t_max) = (Fixed::from_ratio(35, 10), Fixed::from_int(100_000));
+        let low = disk_midplane_temperature(
+            Fixed::ONE,
+            alpha,
+            Fixed::ONE,
+            Fixed::from_ratio(1, 16),
+            t_max,
+        )
+        .unwrap();
+        let high =
+            disk_midplane_temperature(Fixed::ONE, alpha, Fixed::ONE, Fixed::ONE, t_max).unwrap();
+        let ratio = high.to_f64_lossy() / low.to_f64_lossy();
+        assert!(
+            (ratio - 2.0).abs() < 0.05,
+            "a sixteen-fold larger reprocessing factor doubles the temperature, got {ratio}"
+        );
+    }
+
+    #[test]
+    fn a_non_positive_disk_distance_routes_to_none() {
+        assert_eq!(
+            disk_midplane_temperature(
+                Fixed::ONE,
+                Fixed::from_ratio(35, 10),
+                Fixed::ZERO,
+                Fixed::from_ratio(1, 4),
                 Fixed::from_int(100_000)
             ),
             None
