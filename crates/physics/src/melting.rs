@@ -37,6 +37,14 @@
 //! criterion or measured, `dH_fus` by Richard's rule or measured), so the law here consumes them and derives
 //! the phase diagram above them.
 //!
+//! The PRESSURE extension adds one more number, `dV_fus` (the molar volume change on fusion), from which the
+//! Clapeyron slope `dT_m/dP = dV_fus / (dH_fus/T_m)` DERIVES as a thermodynamic identity (not a fit), so the
+//! solidus moves with depth and the surface machinery runs unchanged on the shifted melting points: the
+//! diopside slope lands near 63 K/GPa (measured 60 to 75), the Di-An eutectic climbs to about 1668 K at 1 GPa,
+//! and the decompression-melting productivity the eruption column reads is `dF/dP` off this. A NEGATIVE
+//! `dV_fus` (water ice, the denser-melt anomaly) lowers the melting point with pressure instead, the derived
+//! root of the cryovolcanism buoyancy problem, on the same law.
+//!
 //! Determinism (Principle 3): the molar gas constant derives once from the CODATA fundamentals
 //! (`R = N_A * k_B`, never an authored decimal), and the arithmetic is fixed-point throughout (the
 //! exponential through the pinned [`Fixed::exp`], a bounded bisection for the eutectic), so every result is a
@@ -73,13 +81,22 @@ fn molar_gas_constant() -> Fixed {
     })
 }
 
-/// An endmember's two-number melting signature, the whole information content of the ideal rung.
+/// An endmember's melting signature. The surface rung reads the two-number `(T_m, dH_fus)`; the pressure
+/// extension adds the third, `dV_fus`, the molar volume change on fusion (a measured `[M]` material property,
+/// the same character as `dH_fus`), from which the Clapeyron slope `dT_m/dP = dV_fus / (dH_fus/T_m)` DERIVES
+/// (a thermodynamic identity, not a fit), so the solidus moves with depth. A positive `dV_fus` (the melt is
+/// less dense, the silicate case) raises the melting point with pressure; a NEGATIVE one (the melt is denser,
+/// the water-ice anomaly) lowers it, the derived root of the cryovolcanism buoyancy problem.
 #[derive(Clone, Copy, Debug)]
 pub struct Endmember {
     /// The pure-endmember melting point `T_m` (kelvin), a banked column (Lindemann or measured).
     pub melting_point_k: Fixed,
     /// The molar enthalpy of fusion `dH_fus` (joules per mole), a banked column (Richard's rule or measured).
     pub fusion_enthalpy_j_per_mol: Fixed,
+    /// The molar volume change on fusion `dV_fus` (cubic centimetres per mole, the petrology convention), a
+    /// measured `[M]` column. Positive for a less-dense melt (raises `T_m` with pressure), negative for a
+    /// denser melt (lowers it). Zero leaves the endmember pressure-insensitive (the surface-only rung).
+    pub fusion_volume_cm3_per_mol: Fixed,
 }
 
 /// The mole fraction `x_i` of endmember `i` in an ideal liquid saturated with the pure solid `i` at a
@@ -307,6 +324,73 @@ pub fn solution_melt_fraction(
     Some(clamp_unit(numer.checked_div(denom)?))
 }
 
+/// The pressure-shifted melting point `T_m(P) = T_m + (dV_fus / dS_fus) * P` of an endmember, the linear
+/// CLAPEYRON law with `dS_fus = dH_fus/T_m` (the rung-0 grade: `dV_fus` and `dS_fus` taken constant). The
+/// pressure is in bar (the petrology convention), the volume in cubic centimetres per mole, and the unit
+/// bridge `1 cm^3.bar = 0.1 J` matches the petrology Gibbs pressure-work term. A positive `dV_fus` raises the
+/// melting point with pressure; a negative one lowers it (the ice anomaly). `None` on a non-physical
+/// endmember (a non-positive melting point or fusion enthalpy, so the entropy of fusion is undefined).
+pub fn melting_point_at_pressure(endmember: Endmember, pressure_bar: Fixed) -> Option<Fixed> {
+    if endmember.melting_point_k <= Fixed::ZERO
+        || endmember.fusion_enthalpy_j_per_mol <= Fixed::ZERO
+    {
+        return None;
+    }
+    // dS_fus = dH_fus / T_m (joules per mole per kelvin).
+    let ds = endmember
+        .fusion_enthalpy_j_per_mol
+        .checked_div(endmember.melting_point_k)?;
+    if ds == Fixed::ZERO {
+        return None;
+    }
+    // dT_m = (dV[cm^3] * P[bar] * 0.1 J/cm^3.bar) / dS.
+    let work = endmember
+        .fusion_volume_cm3_per_mol
+        .checked_mul(pressure_bar)?
+        .checked_mul(Fixed::from_ratio(1, 10))?;
+    let shift = work.checked_div(ds)?;
+    endmember.melting_point_k.checked_add(shift)
+}
+
+/// An endmember with its melting point shifted to the Clapeyron value at a pressure, so the surface machinery
+/// (liquidus, eutectic, melt fraction) runs unchanged at depth: the pressure enters ONLY through the moved
+/// melting point, which reuses every surface derivation rather than duplicating it. `None` if the shift is
+/// non-physical.
+fn at_pressure(endmember: Endmember, pressure_bar: Fixed) -> Option<Endmember> {
+    Some(Endmember {
+        melting_point_k: melting_point_at_pressure(endmember, pressure_bar)?,
+        ..endmember
+    })
+}
+
+/// The binary EUTECTIC at a pressure: [`binary_eutectic`] on the two Clapeyron-shifted endmembers, so the
+/// eutectic temperature rises with depth as the pure melting points do. `None` on a non-physical input.
+pub fn binary_eutectic_at_pressure(
+    a: Endmember,
+    b: Endmember,
+    pressure_bar: Fixed,
+) -> Option<(Fixed, Fixed)> {
+    binary_eutectic(at_pressure(a, pressure_bar)?, at_pressure(b, pressure_bar)?)
+}
+
+/// The batch MELT FRACTION at a pressure: [`batch_melt_fraction`] on the two Clapeyron-shifted endmembers. At
+/// a fixed temperature a positive-`dV` system melts LESS at depth (the solidus has risen past it), the
+/// productivity term the decompression-melting column reads. `None` on a non-physical input.
+pub fn batch_melt_fraction_at_pressure(
+    a: Endmember,
+    b: Endmember,
+    bulk_fraction_b: Fixed,
+    temperature_k: Fixed,
+    pressure_bar: Fixed,
+) -> Option<Fixed> {
+    batch_melt_fraction(
+        at_pressure(a, pressure_bar)?,
+        at_pressure(b, pressure_bar)?,
+        bulk_fraction_b,
+        temperature_k,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -319,12 +403,14 @@ mod tests {
         Endmember {
             melting_point_k: Fixed::from_int(1665),
             fusion_enthalpy_j_per_mol: Fixed::from_int(138_000),
+            fusion_volume_cm3_per_mol: Fixed::from_ratio(52, 10), // ~5.2, less-dense melt
         }
     }
     fn anorthite() -> Endmember {
         Endmember {
             melting_point_k: Fixed::from_int(1830),
             fusion_enthalpy_j_per_mol: Fixed::from_int(133_000),
+            fusion_volume_cm3_per_mol: Fixed::from_int(6),
         }
     }
     // Forsterite and fayalite, the olivine endmembers the second gate's complete solid solution runs on.
@@ -332,12 +418,14 @@ mod tests {
         Endmember {
             melting_point_k: Fixed::from_int(2163),
             fusion_enthalpy_j_per_mol: Fixed::from_int(114_000),
+            fusion_volume_cm3_per_mol: Fixed::from_ratio(39, 10), // ~3.9
         }
     }
     fn fayalite() -> Endmember {
         Endmember {
             melting_point_k: Fixed::from_int(1490),
             fusion_enthalpy_j_per_mol: Fixed::from_int(89_000),
+            fusion_volume_cm3_per_mol: Fixed::from_int(4), // estimate, not pressure-gated here
         }
     }
 
@@ -551,10 +639,12 @@ mod tests {
         let water = Endmember {
             melting_point_k: Fixed::from_ratio(27315, 100),
             fusion_enthalpy_j_per_mol: Fixed::from_int(6010),
+            fusion_volume_cm3_per_mol: Fixed::from_ratio(-16, 10), // ice is DENSER-melt anomaly: dV < 0
         };
         let ammonia = Endmember {
             melting_point_k: Fixed::from_ratio(1954, 10),
             fusion_enthalpy_j_per_mol: Fixed::from_int(5660),
+            fusion_volume_cm3_per_mol: Fixed::from_ratio(25, 10), // ~2.5, estimate, not pressure-gated here
         };
         let (t_e, x_nh3) = binary_eutectic(water, ammonia).expect("the cryogenic curves cross");
         assert!(
@@ -565,6 +655,105 @@ mod tests {
         // It is a cryogenic eutectic, far below the water melting point, and a valid liquid composition.
         assert!(t_e.to_f64_lossy() < 195.0 && t_e.to_f64_lossy() > 150.0);
         assert!(x_nh3.to_f64_lossy() > 0.0 && x_nh3.to_f64_lossy() < 1.0);
+    }
+
+    #[test]
+    fn the_clapeyron_slope_derives_from_the_volume_change() {
+        // The pressure term: dT_m/dP = dV_fus/dS_fus is a thermodynamic identity, so the derived diopside
+        // slope is a self-check against the measured melting curve, not a fit. 10000 bar is 1 GPa; the
+        // diopside slope lands ~63 K/GPa, inside the measured ~60-75 K/GPa band.
+        let di = diopside();
+        let t0 = melting_point_at_pressure(di, Fixed::ZERO).unwrap();
+        let t1 = melting_point_at_pressure(di, Fixed::from_int(10_000)).unwrap();
+        assert_eq!(
+            t0, di.melting_point_k,
+            "at surface pressure the melting point is unshifted"
+        );
+        let slope = t1.to_f64_lossy() - t0.to_f64_lossy();
+        assert!(
+            close(Fixed::from_int(0), slope - 62.7, 3.0),
+            "diopside dT/dP ~ 63 K/GPa, got {slope}"
+        );
+    }
+
+    #[test]
+    fn the_eutectic_rises_with_pressure() {
+        // The eutectic reuses the surface solver on the Clapeyron-shifted endmembers, so it rises with depth:
+        // the Di-An eutectic climbs from ~1608 K at the surface to ~1668 K at 1 GPa. At zero pressure it is
+        // byte-identical to the surface eutectic (nothing is duplicated).
+        let (di, an) = (diopside(), anorthite());
+        assert_eq!(
+            binary_eutectic_at_pressure(di, an, Fixed::ZERO),
+            binary_eutectic(di, an),
+            "at surface pressure the pressure-aware eutectic is the surface eutectic"
+        );
+        let (t_e1, _) = binary_eutectic_at_pressure(di, an, Fixed::from_int(10_000)).unwrap();
+        assert!(
+            close(t_e1, 1667.6, 6.0),
+            "the Di-An eutectic rises to ~1668 K at 1 GPa, got {}",
+            t_e1.to_f64_lossy()
+        );
+        let (t_e0, _) = binary_eutectic(di, an).unwrap();
+        assert!(t_e1 > t_e0, "the eutectic rises with pressure");
+    }
+
+    #[test]
+    fn pressure_suppresses_melting_at_a_fixed_temperature() {
+        // The decompression-melting productivity term: at a fixed temperature above the surface solidus, a
+        // positive-dV system melts LESS as pressure rises (the solidus has climbed past it). An Fo-poor bulk
+        // partly molten at 1625 K and the surface is frozen once the eutectic has risen above it at 0.5 GPa.
+        let (di, an) = (diopside(), anorthite());
+        let x = Fixed::from_ratio(15, 100);
+        let f_surface =
+            batch_melt_fraction_at_pressure(di, an, x, Fixed::from_int(1625), Fixed::ZERO).unwrap();
+        let f_deep = batch_melt_fraction_at_pressure(
+            di,
+            an,
+            x,
+            Fixed::from_int(1625),
+            Fixed::from_int(5000),
+        )
+        .unwrap();
+        assert!(
+            f_surface.to_f64_lossy() > 0.0,
+            "partly molten at 1625 K at the surface"
+        );
+        assert!(
+            f_surface > f_deep,
+            "pressure suppresses melting: F {} at surface, {} at 0.5 GPa",
+            f_surface.to_f64_lossy(),
+            f_deep.to_f64_lossy()
+        );
+    }
+
+    #[test]
+    fn the_ice_anomaly_lowers_the_melting_point_with_pressure() {
+        // Admit-the-alien, derived: water ice is DENSER as a melt (dV_fus < 0), so its Clapeyron slope is
+        // NEGATIVE. Pressure LOWERS the water melting point (the anomaly that makes cryomagma negatively
+        // buoyant), where the silicate diopside's rises. At 1000 bar (0.1 GPa) the water melting point drops
+        // ~7 K, matching the measured ice-Ih slope of about -7.4 K/kbar; the sign is the derived point.
+        let water = Endmember {
+            melting_point_k: Fixed::from_ratio(27315, 100),
+            fusion_enthalpy_j_per_mol: Fixed::from_int(6010),
+            fusion_volume_cm3_per_mol: Fixed::from_ratio(-16, 10),
+        };
+        let t0 = melting_point_at_pressure(water, Fixed::ZERO).unwrap();
+        let t1 = melting_point_at_pressure(water, Fixed::from_int(1000)).unwrap();
+        assert!(
+            t1 < t0,
+            "water's melting point FALLS with pressure (the ice anomaly)"
+        );
+        let drop = t0.to_f64_lossy() - t1.to_f64_lossy();
+        assert!(
+            close(Fixed::from_int(0), drop - 7.3, 1.0),
+            "the ice-Ih drop is ~7 K at 0.1 GPa, got {drop}"
+        );
+        // And the sign is opposite the silicate: diopside's melting point RISES at the same pressure.
+        let di_up = melting_point_at_pressure(diopside(), Fixed::from_int(1000)).unwrap();
+        assert!(
+            di_up > diopside().melting_point_k,
+            "the silicate rises where the ice falls"
+        );
     }
 
     #[test]
