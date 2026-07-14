@@ -461,6 +461,85 @@ pub fn multicomponent_solidus(endmembers: &[Endmember], pressure_bar: Fixed) -> 
     lo.checked_add(hi_b)?.checked_div(two)
 }
 
+/// The result of an adiabatic decompression melting column: the crustal thickness it produces, the melt
+/// fraction at the top of the column, and the pressure at which melting began.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MeltColumn {
+    /// The crustal thickness (kilometres) the pooled melt makes.
+    pub crust_thickness_km: Fixed,
+    /// The melt fraction at the shallowest, most-molten top of the column.
+    pub max_melt_fraction: Fixed,
+    /// The pressure (gigapascals) at which the rising mantle first crossed the solidus and began to melt.
+    pub onset_pressure_gpa: Fixed,
+}
+
+/// The ADIABATIC DECOMPRESSION MELTING column beneath a divergent boundary (McKenzie-Bickle 1988), the closure
+/// that turns the melt machinery into crust. Mantle at potential temperature `T_p` rises on the adiabat
+/// `T(P) = T_p + m_ad * P` and begins to melt where it crosses the solidus `T_sol(P) = T_sol0 + m_sol * P`;
+/// above that depth the melt fraction climbs at the productivity `dF/dP`, and the pooled melt forms a crust of
+/// thickness `crust = (dF/dP) * P0^2 / (2 * rho * g)`. Every physical input is a PARAMETER the caller supplies
+/// (the potential temperature from the interior thermostat, the solidus from [`multicomponent_solidus`], the
+/// productivity and adiabat gradient and densities from the mantle floor), so nothing is authored in the
+/// kernel: the law is fixed Rust, the numbers are the world's. Pressures are gigapascals, slopes kelvin per
+/// gigapascal, the productivity per gigapascal, the density kilograms per cubic metre, gravity metres per
+/// second squared. `None` if the solidus does not rise faster than the adiabat (no melting column forms) or an
+/// input is non-physical; a mantle colder than the surface solidus melts nothing (a zero column). The grade is
+/// the linear-productivity first pass, valid while the peak melt fraction stays well below one.
+///
+/// Validated against McKenzie-Bickle: a normal potential temperature (about 1588 K) on the measured peridotite
+/// solidus (1373 K, 130 K/GPa) makes about 6.5 km of crust at a peak melt fraction near 0.23, and a hotter
+/// mantle thickens it steeply (the Archean komatiite regime, derived rather than tagged). Fed the rung-0
+/// ideal solidus instead (about 1520 K, 150 K high), the same temperature makes far less crust, the honest
+/// signature of the ideal-solution offset the rung-1 calibration closes.
+pub fn adiabatic_melt_column(
+    potential_temperature_k: Fixed,
+    solidus_surface_k: Fixed,
+    solidus_slope_k_per_gpa: Fixed,
+    adiabat_slope_k_per_gpa: Fixed,
+    productivity_per_gpa: Fixed,
+    source_density_kg_per_m3: Fixed,
+    gravity_m_per_s2: Fixed,
+) -> Option<MeltColumn> {
+    if productivity_per_gpa < Fixed::ZERO
+        || source_density_kg_per_m3 <= Fixed::ZERO
+        || gravity_m_per_s2 <= Fixed::ZERO
+    {
+        return None;
+    }
+    // The solidus must rise faster than the adiabat, else the rising mantle never crosses it.
+    let slope_diff = solidus_slope_k_per_gpa.checked_sub(adiabat_slope_k_per_gpa)?;
+    if slope_diff <= Fixed::ZERO {
+        return None;
+    }
+    // The surface superheat above the solidus. A mantle colder than the surface solidus melts nothing.
+    let superheat = potential_temperature_k.checked_sub(solidus_surface_k)?;
+    if superheat <= Fixed::ZERO {
+        return Some(MeltColumn {
+            crust_thickness_km: Fixed::ZERO,
+            max_melt_fraction: Fixed::ZERO,
+            onset_pressure_gpa: Fixed::ZERO,
+        });
+    }
+    // The onset pressure: T_p + m_ad*P0 = T_sol0 + m_sol*P0, so P0 = superheat / (m_sol - m_ad).
+    let p0 = superheat.checked_div(slope_diff)?;
+    let f_max = clamp_unit(productivity_per_gpa.checked_mul(p0)?);
+    // crust (km) = dF/dP * P0^2 * 1e6 / (2 rho g). The 1e6 folds the GPa-to-Pa square and the metre-to-km
+    // conversion into one factor, kept below the fixed-point ceiling by squaring the small P0 first.
+    let p0_sq = p0.checked_mul(p0)?;
+    let numer = productivity_per_gpa
+        .checked_mul(p0_sq)?
+        .checked_mul(Fixed::from_int(1_000_000))?;
+    let denom = Fixed::from_int(2)
+        .checked_mul(source_density_kg_per_m3)?
+        .checked_mul(gravity_m_per_s2)?;
+    let crust = numer.checked_div(denom)?;
+    Some(MeltColumn {
+        crust_thickness_km: crust,
+        max_melt_fraction: f_max,
+        onset_pressure_gpa: p0,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -871,6 +950,109 @@ mod tests {
             close(single, 1665.0, 1.0),
             "a single phase's solidus is its melting point, got {}",
             single.to_f64_lossy()
+        );
+    }
+
+    #[test]
+    fn the_melting_column_reproduces_mckenzie_bickle() {
+        // The crust closure with the MEASURED peridotite solidus (1373 K, 130 K/GPa) and a normal potential
+        // temperature: McKenzie-Bickle's ~6.5 km of oceanic crust at a peak melt fraction near 0.23, melting
+        // beginning near 1.9 GPa. The inputs are the caller's (measured, the self-check); the integrator is
+        // the mechanism.
+        let col = adiabatic_melt_column(
+            Fixed::from_int(1588),      // potential temperature (about 1315 C)
+            Fixed::from_int(1373),      // measured peridotite solidus at the surface
+            Fixed::from_int(130),       // measured solidus slope, K/GPa
+            Fixed::from_ratio(155, 10), // adiabat slope 15.5 K/GPa
+            Fixed::from_ratio(12, 100), // productivity 0.12 /GPa
+            Fixed::from_int(3300),      // mantle source density
+            Fixed::from_ratio(98, 10),  // gravity
+        )
+        .unwrap();
+        assert!(
+            close(col.crust_thickness_km, 6.5, 0.5),
+            "the column makes ~6.5 km of crust, got {}",
+            col.crust_thickness_km.to_f64_lossy()
+        );
+        assert!(
+            close(col.max_melt_fraction, 0.225, 0.03),
+            "peak melt fraction ~0.23, got {}",
+            col.max_melt_fraction.to_f64_lossy()
+        );
+        assert!(
+            close(col.onset_pressure_gpa, 1.88, 0.1),
+            "melting begins near 1.9 GPa, got {}",
+            col.onset_pressure_gpa.to_f64_lossy()
+        );
+    }
+
+    #[test]
+    fn a_hotter_mantle_makes_thicker_crust() {
+        // The Archean komatiite regime, derived rather than tagged: a hotter mantle melts more and pools a
+        // thicker crust. A mantle colder than the surface solidus melts nothing.
+        let col = |tp: i32| {
+            adiabatic_melt_column(
+                Fixed::from_int(tp),
+                Fixed::from_int(1373),
+                Fixed::from_int(130),
+                Fixed::from_ratio(155, 10),
+                Fixed::from_ratio(12, 100),
+                Fixed::from_int(3300),
+                Fixed::from_ratio(98, 10),
+            )
+            .unwrap()
+        };
+        let normal = col(1588);
+        let hot = col(1650);
+        assert!(
+            hot.crust_thickness_km > normal.crust_thickness_km,
+            "a hotter mantle makes thicker crust, got {} vs {}",
+            hot.crust_thickness_km.to_f64_lossy(),
+            normal.crust_thickness_km.to_f64_lossy()
+        );
+        let cold = col(1300);
+        assert_eq!(
+            cold.crust_thickness_km,
+            Fixed::ZERO,
+            "a sub-solidus mantle melts nothing"
+        );
+    }
+
+    #[test]
+    fn the_derived_solidus_feeds_the_column_end_to_end() {
+        // The full derived chain: mineral signatures -> multi-saturation solidus -> crust, no authored
+        // solidus. The derived solidus (about 1520 K) is 150 K high but its ideal slope (~60 K/GPa) is
+        // shallower than the measured 130, and the two errors partly cancel, so the fully-derived chain still
+        // makes a sane ~4 km of oceanic crust at a normal potential temperature (within about 1.5x of McKenzie-
+        // Bickle's 6.5 km), rising with temperature. Closing the residual to the measured value is the rung-1
+        // calibration, plainly labelled.
+        let assemblage = [forsterite(), enstatite(), diopside(), anorthite()];
+        let t_sol0 = multicomponent_solidus(&assemblage, Fixed::ZERO).unwrap();
+        let t_sol1 = multicomponent_solidus(&assemblage, Fixed::from_int(10_000)).unwrap();
+        let slope = t_sol1.checked_sub(t_sol0).unwrap(); // per GPa, since 10000 bar = 1 GPa
+        let col = |tp: i32| {
+            adiabatic_melt_column(
+                Fixed::from_int(tp),
+                t_sol0,
+                slope,
+                Fixed::from_ratio(155, 10),
+                Fixed::from_ratio(12, 100),
+                Fixed::from_int(3300),
+                Fixed::from_ratio(98, 10),
+            )
+            .unwrap()
+        };
+        let normal = col(1588);
+        assert!(
+            normal.crust_thickness_km.to_f64_lossy() > 2.0
+                && normal.crust_thickness_km.to_f64_lossy() < 8.0,
+            "the fully-derived chain makes sane oceanic crust (~4 km), got {}",
+            normal.crust_thickness_km.to_f64_lossy()
+        );
+        let hot = col(1700);
+        assert!(
+            hot.crust_thickness_km > normal.crust_thickness_km,
+            "the derived chain thickens with temperature"
         );
     }
 
