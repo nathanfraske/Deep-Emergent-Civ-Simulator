@@ -26,6 +26,7 @@
 //! terms (which read the measured optical constants, `OPACITY_OPTICAL_CONSTANTS_SOURCES.md`) and the Rosseland
 //! assembly are the later slices.
 
+use crate::optical_constants::OpticalSpecies;
 use crate::periodic::PeriodicTable;
 use civsim_core::Fixed;
 use civsim_units::bignum::{BigRat, BigUint};
@@ -761,6 +762,72 @@ pub fn h_minus_opacity(
     bf.checked_add(ff)
 }
 
+/// The monochromatic small-grain RAYLEIGH absorption opacity `kappa_grain` (cm^2/g of grain material) at
+/// dimensionless frequency `x = h*nu/(k_B*T)`, for one dust species read from the optical-constants library. In the
+/// Rayleigh limit (grain radius << wavelength) a small sphere's mass absorption coefficient is
+/// `kappa_nu = (6*pi/(rho_grain*lambda)) * Im[(m^2-1)/(m^2+2)]` with `m = n + i k` (from the polarizability
+/// `alpha = 4*pi*a^3 (m^2-1)/(m^2+2)`, `C_abs = (2*pi/lambda) Im(alpha)`, over the grain mass), which is GRAIN-SIZE-
+/// INDEPENDENT (the size distribution matters only in the Mie regime). The imaginary part is the analytic real
+/// expression `Im[(m^2-1)/(m^2+2)] = 6nk/((n^2-k^2+2)^2 + 4n^2k^2)`, so no complex arithmetic is needed here (it
+/// enters only at the full Mie kernel, the later sub-slice).
+///
+/// The optical constants `n(lambda),k(lambda)` are the cited [M] library ([`OpticalSpecies`]), composition-keyed
+/// (a carbon-rich or metal-poor grain is a different species membership, admit-the-alien); the bulk density
+/// `rho_grain` is a caller argument, DERIVED upstream from the grain's composition via the materials density kernel,
+/// never authored here (Pollack's per-species densities are the validation target, not a floor value). A metal
+/// (iron) has a small Rayleigh absorption (it scatters more than it absorbs, the `(m^2+2)` denominator large), a
+/// silicate a large one, keyed on the species data.
+///
+/// When the far-infrared optical constants follow the Lorentz-oscillator wing (`k ~ 1/lambda`), `kappa_nu ~
+/// lambda^-2 ~ x^2`, and the Rosseland mean of `x^2` is `(4/5)pi^2`, so `kappa_R ~ T^2` (the standard `beta=2`
+/// small-grain opacity law), which holds in the cold far-infrared and gives way to the full spectral opacity near
+/// the resonance bands. This is a SPECTRAL PROVIDER (monochromatic); the Rosseland mean is taken over the assembled
+/// multi-species total with the gas floor (the 3c-iii assembly), never one species in isolation, whose coverage
+/// gaps and transparent windows would trip the fail-loud kernel. Computed in exact `BigRat` (a metal's `4n^2k^2`
+/// overflows Q32.32) and rounded once. `None` if a fundamental fails to resolve, the wavelength is outside the
+/// species' sampled coverage, or the result leaves the representable range.
+pub fn rayleigh_grain_opacity(
+    x: Fixed,
+    temperature_k: Fixed,
+    bulk_density_g_cm3: Fixed,
+    species: &OpticalSpecies,
+) -> Option<Fixed> {
+    if x <= Fixed::ZERO || temperature_k <= Fixed::ZERO || bulk_density_g_cm3 <= Fixed::ZERO {
+        return None;
+    }
+    let h = fundamental_bigrat("h")?;
+    let c = fundamental_bigrat("c")?;
+    let k_b = fundamental_bigrat("k_B")?;
+    let pi = compute::pi(OPACITY_PI_DIGITS);
+
+    // lambda = (h c/k)/(x T) [micron], as Fixed for the table interpolation and BigRat for the opacity.
+    let alpha_um_k = h.mul(&c).div(&k_b).mul(&BigRat::from_i64(1_000_000));
+    let lambda_br =
+        alpha_um_k.div(&nonneg_fixed_to_bigrat(x).mul(&nonneg_fixed_to_bigrat(temperature_k)));
+    let lambda_fixed = Fixed::from_bits_i128(lambda_br.round_to_scale(Fixed::FRAC_BITS)?)?;
+    let (n, k) = species.interpolate(lambda_fixed)?;
+
+    // Im[(m^2-1)/(m^2+2)] = 6nk/((n^2-k^2+2)^2 + 4n^2k^2), in BigRat (a metal's 4n^2k^2 overflows Fixed; the
+    // n^2-k^2+2 term goes negative for a metal but squares positive).
+    let n_br = nonneg_fixed_to_bigrat(n);
+    let k_br = nonneg_fixed_to_bigrat(k);
+    let n2 = n_br.mul(&n_br);
+    let k2 = k_br.mul(&k_br);
+    let num = BigRat::from_i64(6).mul(&n_br).mul(&k_br);
+    let a = n2.sub(&k2).add(&BigRat::from_i64(2));
+    let denom = a.mul(&a).add(&BigRat::from_i64(4).mul(&n2).mul(&k2));
+    let im = num.div(&denom);
+
+    // kappa_nu = (6*pi/(rho * lambda_cm)) * Im, lambda_cm = lambda_um * 1e-4.
+    let lambda_cm = lambda_br.div(&BigRat::from_i64(10000));
+    let rho = nonneg_fixed_to_bigrat(bulk_density_g_cm3);
+    let kappa = BigRat::from_i64(6)
+        .mul(&pi)
+        .div(&rho.mul(&lambda_cm))
+        .mul(&im);
+    Fixed::from_bits_i128(kappa.round_to_scale(Fixed::FRAC_BITS)?)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1278,6 +1345,113 @@ mod tests {
             &t,
         );
         assert_eq!(a, b, "the H- free-free derivation replays byte for byte");
+    }
+
+    fn optics() -> crate::optical_constants::OpticalConstants {
+        crate::optical_constants::OpticalConstants::standard().expect("the optical library loads")
+    }
+
+    #[test]
+    fn the_rayleigh_grain_opacity_lands_the_silicate_magnitude() {
+        // At the 10 micron Si-O band (x = 2.398 for T = 600 K), silicate (bulk density 3.49 g/cm^3), the Rayleigh
+        // mass absorption is ~2673 cm^2/g: the analytic Im[(m^2-1)/(m^2+2)] over the cited Draine n,k, times
+        // 6*pi/(rho*lambda). A magnitude fixed by the optical constants and the density, nothing tuned.
+        let lib = optics();
+        let sil = lib.species("astronomical_silicate").unwrap();
+        let k = rayleigh_grain_opacity(
+            Fixed::from_ratio(2398, 1000),
+            Fixed::from_int(600),
+            Fixed::from_ratio(349, 100),
+            sil,
+        )
+        .expect("the grain opacity derives");
+        assert!(
+            (k.to_f64_lossy() - 2673.0).abs() < 40.0,
+            "silicate Rayleigh opacity at 10 micron is ~2673 cm^2/g, got {}",
+            k.to_f64_lossy()
+        );
+    }
+
+    #[test]
+    fn the_rayleigh_grain_opacity_falls_as_lambda_squared_in_the_far_infrared() {
+        // The beta=2 small-grain law's basis: where the far-IR follows the Lorentz wing (k ~ 1/lambda), the Rayleigh
+        // opacity falls as lambda^-2, so kappa(100um)/kappa(300um) ~ 3^2 = 9 (a lambda ratio of 3). This is the
+        // spectral slope that Rosseland-averages to the kappa_R ~ T^2 law.
+        let lib = optics();
+        let sil = lib.species("astronomical_silicate").unwrap();
+        let rho = Fixed::from_ratio(349, 100);
+        // lambda = alpha/(x T); at T = 100, x = 1.4388 -> 100 micron, x = 0.4796 -> 300 micron.
+        let at_100 = rayleigh_grain_opacity(
+            Fixed::from_ratio(14388, 10000),
+            Fixed::from_int(100),
+            rho,
+            sil,
+        )
+        .unwrap();
+        let at_300 = rayleigh_grain_opacity(
+            Fixed::from_ratio(4796, 10000),
+            Fixed::from_int(100),
+            rho,
+            sil,
+        )
+        .unwrap();
+        let ratio = at_100.to_f64_lossy() / at_300.to_f64_lossy();
+        assert!(
+            (7.0..=13.0).contains(&ratio),
+            "the far-IR opacity falls ~lambda^-2 (ratio ~9-10 over a lambda ratio of 3), got {ratio}"
+        );
+    }
+
+    #[test]
+    fn a_metal_grain_absorbs_far_less_than_a_silicate_admit_the_alien() {
+        // Composition is species data: a metal (iron) has a small Rayleigh ABSORPTION (it scatters more than it
+        // absorbs, the large (m^2+2) denominator), far below a silicate at the same wavelength. The alien is a
+        // species row, not a rewrite.
+        let lib = optics();
+        let sil = lib.species("astronomical_silicate").unwrap();
+        let fe = lib.species("metallic_iron").unwrap();
+        let x = Fixed::from_ratio(2398, 1000);
+        let t = Fixed::from_int(600);
+        let k_sil = rayleigh_grain_opacity(x, t, Fixed::from_ratio(349, 100), sil).unwrap();
+        let k_fe = rayleigh_grain_opacity(x, t, Fixed::from_ratio(787, 100), fe).unwrap();
+        assert!(
+            k_fe < k_sil,
+            "a metal grain absorbs far less than a silicate in the Rayleigh limit ({} vs {})",
+            k_fe.to_f64_lossy(),
+            k_sil.to_f64_lossy()
+        );
+    }
+
+    #[test]
+    fn the_rayleigh_grain_opacity_is_none_outside_the_species_coverage() {
+        // A wavelength beyond the species' sampled coverage (here ~2877 micron, past silicate's 2000 micron ceiling)
+        // returns None, an honest coverage gap the assembly handles rather than extrapolating the measured table.
+        let lib = optics();
+        let sil = lib.species("astronomical_silicate").unwrap();
+        let k = rayleigh_grain_opacity(
+            Fixed::from_ratio(1, 10),
+            Fixed::from_int(50),
+            Fixed::from_ratio(349, 100),
+            sil,
+        );
+        assert_eq!(
+            k, None,
+            "outside the sampled coverage the grain opacity is None"
+        );
+    }
+
+    #[test]
+    fn the_rayleigh_grain_opacity_is_deterministic() {
+        let lib = optics();
+        let sil = lib.species("astronomical_silicate").unwrap();
+        let x = Fixed::from_ratio(2398, 1000);
+        let t = Fixed::from_int(600);
+        let rho = Fixed::from_ratio(349, 100);
+        assert_eq!(
+            rayleigh_grain_opacity(x, t, rho, sil),
+            rayleigh_grain_opacity(x, t, rho, sil),
+            "the grain opacity replays byte for byte"
+        );
     }
 
     #[test]

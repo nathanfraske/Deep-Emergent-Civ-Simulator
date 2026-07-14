@@ -127,6 +127,46 @@ pub struct OpticalSpecies {
     pub samples: Vec<RefractiveIndex>,
 }
 
+impl OpticalSpecies {
+    /// Interpolate `n` and `k` at wavelength `lambda_um` by linear interpolation in wavelength between the two
+    /// bracketing sampled rows (the grain step reads `m = n + i k` at arbitrary Rosseland-grid wavelengths, which
+    /// fall between the log-sampled rows). The grid is strictly increasing (a load invariant), so a binary search
+    /// brackets the target. `None` outside the sampled coverage (a per-species coverage gap, e.g. iron beyond 286
+    /// micron, which the grain step handles rather than extrapolating a measured table). Linear-in-wavelength is the
+    /// honest interpolation over a dense log-spaced grid; the resonance bands are bracketed by extra sampled rows so
+    /// a feature is not stepped over.
+    pub fn interpolate(&self, lambda_um: Fixed) -> Option<(Fixed, Fixed)> {
+        let s = &self.samples;
+        if lambda_um < s[0].lambda_um || lambda_um > s[s.len() - 1].lambda_um {
+            return None; // outside the sampled coverage
+        }
+        // Bracket: find lo with s[lo].lambda <= lambda <= s[lo+1].lambda.
+        let mut lo = 0usize;
+        let mut hi = s.len() - 1;
+        while hi - lo > 1 {
+            let mid = (lo + hi) / 2;
+            if s[mid].lambda_um <= lambda_um {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+        let a = &s[lo];
+        let b = &s[hi];
+        if lambda_um == a.lambda_um {
+            return Some((a.n, a.k));
+        }
+        if lambda_um == b.lambda_um {
+            return Some((b.n, b.k));
+        }
+        let span = b.lambda_um.checked_sub(a.lambda_um)?;
+        let t = lambda_um.checked_sub(a.lambda_um)?.checked_div(span)?;
+        let n = a.n.checked_add(t.checked_mul(b.n.checked_sub(a.n)?)?)?;
+        let k = a.k.checked_add(t.checked_mul(b.k.checked_sub(a.k)?)?)?;
+        Some((n, k))
+    }
+}
+
 /// The loaded optical-constants library, keyed by species name.
 #[derive(Debug, Clone, Default)]
 pub struct OpticalConstants {
@@ -382,6 +422,27 @@ mod tests {
                 prev = row.lambda_um;
             }
         }
+    }
+
+    #[test]
+    fn the_interpolation_brackets_a_target_and_gaps_outside_coverage() {
+        // At a sampled wavelength it returns that row; between rows it interpolates; outside the sampled coverage it
+        // returns None (the honest gap, not an extrapolation of the measured table).
+        let l = lib();
+        let sil = l.species("astronomical_silicate").unwrap();
+        let (n, _k) = sil.interpolate(Fixed::from_int(10)).unwrap();
+        assert!(
+            (n.to_f64_lossy() - 1.3701).abs() < 1e-2,
+            "at the 10 micron sampled row n=1.3701, got {}",
+            n.to_f64_lossy()
+        );
+        let between = sil.interpolate(Fixed::from_ratio(105, 10));
+        assert!(between.is_some(), "interpolates between sampled rows");
+        assert_eq!(
+            sil.interpolate(Fixed::from_int(5000)),
+            None,
+            "beyond the 2000 micron coverage it gaps to None"
+        );
     }
 
     #[test]
