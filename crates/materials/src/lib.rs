@@ -49,6 +49,7 @@ pub mod band_gap;
 pub mod contract;
 pub mod correlation;
 pub mod creep;
+pub mod definition;
 pub mod electronic;
 pub mod freezer;
 pub mod harrison;
@@ -78,6 +79,10 @@ pub use correlation::{
 pub use creep::{
     creep_dominant_regime, creep_ln_reference_rate, creep_regime_log_rate, creep_selection_gap,
     creep_total_log_rate, CreepComposition, CreepRegime,
+};
+pub use definition::{
+    compound_generation_consistent, require_koopmans_gated, DefinitionMismatch,
+    EigenvalueProvenance, Generation,
 };
 pub use electronic::{
     carrier_density_per_nm3, drude_conductivity_from_tau, drude_conductivity_s_per_m,
