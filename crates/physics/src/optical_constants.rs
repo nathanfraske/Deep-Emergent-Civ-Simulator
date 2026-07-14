@@ -343,6 +343,31 @@ mod tests {
     }
 
     #[test]
+    fn the_refractory_organics_load_as_secondary_and_re_verify() {
+        // The refractory-organics CHON carrier (~25% of the Pollack solids, the largest single dust carrier), the
+        // Henning-Stognienko 1996 "organics" set (via optool, the same confirmed-identity secondary source as
+        // troilite, NOT the identity-ambiguous Zubko amorphous carbon which stays held). The file header confirms
+        // the material is "Organics / CHON", audited against source before loading.
+        let l = lib();
+        let org = l.species("refractory_organics_chon").unwrap();
+        assert_eq!(org.tier, ProvenanceTier::Secondary);
+        let at_1 = nearest(org, 1.0);
+        assert!(
+            (at_1.n.to_f64_lossy() - 1.6343).abs() < 1e-3
+                && (at_1.k.to_f64_lossy() - 0.012467).abs() < 1e-4,
+            "organics 1 micron is n=1.6343 k=0.012467, got n={} k={}",
+            at_1.n.to_f64_lossy(),
+            at_1.k.to_f64_lossy()
+        );
+        let at_100 = nearest(org, 100.0);
+        assert!(
+            (at_100.n.to_f64_lossy() - 2.1448).abs() < 1e-3,
+            "organics 100 micron is n=2.1448, got n={}",
+            at_100.n.to_f64_lossy()
+        );
+    }
+
+    #[test]
     fn every_species_is_physical_and_monotonic() {
         // n > 0 and k >= 0 everywhere, and the wavelength grid strictly increases (the load-time invariants).
         let l = lib();
