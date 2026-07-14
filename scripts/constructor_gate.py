@@ -71,6 +71,7 @@ EXEMPT_MODULES = {
     "crates/physics/src/rose_eos.rs",   # the Rose UBER EOS law (cited floor constants: Avogadro + eV unit conversions)
     "crates/physics/src/tm_oxide_lattice_energy.rs", # the TM-oxide Born-Haber loader (parses cited [M] lattice energies)
     "crates/physics/src/band_gap.rs",   # the band-gap loader (parses cited [M] gaps + compute-once HYBRID/GW eigenvalues)
+    "crates/physics/src/term_values.rs", # the term-value loader (parses cited Herman-Skillman eps_s/eps_p, gated on the fetch)
     "crates/physics/src/quantities.rs", # quantity definitions and the wide-decimal doc reference
     "crates/sim/src/calibration.rs",    # the calibration-manifest loader (parses the owner's reserved values)
     "crates/sim/src/astro.rs",          # the stellar-flux derivation (parses cited astronomical anchors L_sun/AU)

@@ -1,0 +1,17 @@
+# The atomic term-value column (crate::term_values), the Harrison sp bond-orbital gap estimator's polar-energy
+# input. Per element the s and p orbital term values in eV (negative, a bound orbital sits below vacuum),
+# provenance [compute-once, cited, historical Herman-Skillman HF]. The gap estimator reads eps_s/eps_p to form the
+# sp3 hybrid term value eps_h = (eps_s + 3*eps_p)/4 and the polar energy V_3 = (eps_h_A - eps_h_B)/2.
+#
+# GATED ON THE FETCH: this column is seeded EMPTY. The term values are the owner's reserved book fetch
+# (Herman-Skillman Hartree-Fock), cited at delivery and never seeded from memory. The estimator escalates on any
+# element until the fetch populates the column, the same shape as the compute-once guard. Each fetched row carries
+# a Koopmans cross-check (eps_p ~ -IE_1 at the 10-to-20-percent grade) against the banked ionization-energy column,
+# a coherence gate on the fetch.
+#
+# Row shape once the fetch lands (example, NOT a seeded value):
+#   [[term_value]]
+#   symbol = "Si"
+#   eps_s_ev = "..."   # negative, cited Herman-Skillman HF
+#   eps_p_ev = "..."   # negative, cited Herman-Skillman HF
+#   source = "Herman & Skillman 1963 (via Harrison 1980), ..."
