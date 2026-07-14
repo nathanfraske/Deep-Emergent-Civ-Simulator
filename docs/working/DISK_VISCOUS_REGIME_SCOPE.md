@@ -52,8 +52,13 @@ surface density `Sigma(r)` (the deferred stage-2 half) re-enters, as the column 
   source), `M_sun` and the Julian year the cited unit anchors. Derive-not-fit anchor: Mirror's disk at 1 AU
   derives `T_visc` ~85.1 K, below the ~278 K irradiation there (irradiation leads at 1 AU, viscous dominates well
   inside), with the `r^(-3/4)` slope. Reuses the exact pattern `stellar_flux` and the irradiated slice proved.
-- **3b: the regime combination.** `disk_effective_temperature` summing `T_visc_eff^4 + T_irr^4`, so the profile
-  transitions from viscous-inner to irradiated-outer with no authored boundary.
+- **3b: the regime combination. BUILT (byte-neutral).** `disk_effective_temperature` sums the two heat sources
+  at the FLUX level (`sigma*T_eff^4 = D_visc + reprocessing_factor*F_irr`) and inverts once through
+  `radiative_equilibrium`, which sidesteps the unrepresentable `T^4` (`T_irr^4 ~ 6e9` overflows Q32.32 while the
+  fluxes do not). With no accretion it reduces to `irradiated_disk_temperature` exactly; with strong accretion at a
+  close orbit the effective temperature tracks the viscous term. At 1 AU it derives ~278.8 K (the ~278.2 K
+  irradiation plus the ~85 K viscous in quadrature), the transition to viscous-dominated emerging inward with no
+  authored boundary.
 - **3c: the opacity closure and the optically-thick midplane.** The Rosseland opacity `kappa_R(T)` as a
   data-defined piecewise law, the bounded `T <-> kappa` midplane fixed point, and the optical-depth correction,
   reading `Sigma(r)` (built alongside as the surface-density input). The heaviest slice; the fixed-point machinery.

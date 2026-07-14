@@ -282,6 +282,50 @@ pub fn viscous_disk_temperature(
     ))
 }
 
+/// The DISK EFFECTIVE TEMPERATURE `T_eff(r)` (K) of the completed two-regime profile, combining the viscous-inner
+/// and irradiated-outer heat sources. The two sources add in FLUX (`sigma*T_eff^4 = sigma*T_visc^4 + sigma*T_irr^4`),
+/// so the combination is done at the flux level (the viscous dissipation `D(r)` plus the absorbed irradiation
+/// `reprocessing_factor*F(r)`) and inverted once through [`radiative_equilibrium`], which also sidesteps the
+/// unrepresentable `T^4` (`T_irr^4 ~ 6e9` overflows Q32.32 while the fluxes ~340 and ~3 W/m^2 do not). Viscous
+/// dominates the inner disk (steep `r^(-3/4)`), irradiation the outer (`r^(-1/2)`), and the profile transitions
+/// between them at the radius where the two fluxes cross, an EMERGENT boundary (no authored transition, Principle 8).
+///
+/// This is the SURFACE effective temperature (the optically-thick midplane boost is slice 3c). Every per-world
+/// input is a scenario-set ARGUMENT (the admit-the-alien test): the accretion rate, the mass ratio and its
+/// mass-luminosity exponent (fixing `L`), the orbit, the reprocessing factor, and the inner-edge factor. With no
+/// accretion (`accretion_rate = 0`) the viscous flux vanishes and this reduces to [`irradiated_disk_temperature`]
+/// exactly. `None` on a non-positive distance or a flux past the representable range.
+#[allow(clippy::too_many_arguments)]
+pub fn disk_effective_temperature(
+    accretion_rate_msun_myr: Fixed,
+    mass_ratio: Fixed,
+    luminosity_exponent: Fixed,
+    distance_au: Fixed,
+    reprocessing_factor: Fixed,
+    inner_boundary_factor: Fixed,
+    t_max: Fixed,
+) -> Option<Fixed> {
+    let dissipation = viscous_dissipation_flux(
+        accretion_rate_msun_myr,
+        mass_ratio,
+        distance_au,
+        inner_boundary_factor,
+    )?;
+    let absorbed_irradiation = reprocessing_factor.checked_mul(stellar_flux(
+        mass_ratio,
+        luminosity_exponent,
+        distance_au,
+    )?)?;
+    let total_flux = dissipation.checked_add(absorbed_irradiation)?;
+    let sigma = crate::physiology::derived_stefan_boltzmann();
+    Some(civsim_physics::laws::radiative_equilibrium(
+        total_flux,
+        Fixed::ONE,
+        sigma,
+        t_max,
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -628,6 +672,98 @@ mod tests {
                 Fixed::from_ratio(1, 100),
                 Fixed::ONE,
                 Fixed::ZERO,
+                Fixed::ONE,
+                Fixed::from_int(100_000)
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn the_disk_effective_temperature_sums_the_two_regimes() {
+        // At 1 AU irradiation leads (~278 K) and the viscous term (~85 K) adds a little, so the flux-summed
+        // effective temperature sits just above pure irradiation and above pure viscous: T_eff^4 = T_irr^4 + T_visc^4.
+        let t_max = Fixed::from_int(100_000);
+        let (mdot, mass, alpha, reproc, inner) = (
+            Fixed::from_ratio(1, 100),
+            Fixed::ONE,
+            Fixed::from_ratio(35, 10),
+            Fixed::from_ratio(1, 4),
+            Fixed::ONE,
+        );
+        let eff = disk_effective_temperature(mdot, mass, alpha, Fixed::ONE, reproc, inner, t_max)
+            .unwrap();
+        let irr = irradiated_disk_temperature(mass, alpha, Fixed::ONE, reproc, t_max).unwrap();
+        let visc = viscous_disk_temperature(mdot, mass, Fixed::ONE, inner, t_max).unwrap();
+        assert!(eff > irr, "the two-regime sum exceeds pure irradiation");
+        assert!(eff > visc, "the two-regime sum exceeds pure viscous");
+        assert!(
+            (eff.to_f64_lossy() - 278.6).abs() < 2.0,
+            "at 1 AU the sum is ~278.6 K, got {}",
+            eff.to_f64_lossy()
+        );
+    }
+
+    #[test]
+    fn the_two_regime_sum_reduces_to_irradiation_with_no_accretion() {
+        // With no accretion the viscous flux vanishes, so the two-regime profile is pure irradiation, EXACTLY the
+        // same bits as irradiated_disk_temperature (the flux sum adds zero).
+        let t_max = Fixed::from_int(100_000);
+        let (mass, alpha, reproc, inner) = (
+            Fixed::ONE,
+            Fixed::from_ratio(35, 10),
+            Fixed::from_ratio(1, 4),
+            Fixed::ONE,
+        );
+        let eff =
+            disk_effective_temperature(Fixed::ZERO, mass, alpha, Fixed::ONE, reproc, inner, t_max)
+                .unwrap();
+        let irr = irradiated_disk_temperature(mass, alpha, Fixed::ONE, reproc, t_max).unwrap();
+        assert_eq!(
+            eff, irr,
+            "no accretion reduces the two-regime profile to pure irradiation"
+        );
+    }
+
+    #[test]
+    fn the_viscous_regime_dominates_the_close_inner_disk() {
+        // A high accretion rate (10 M_sun/Myr, ~1e-5 M_sun/yr, an early disk) at a close orbit (0.05 AU): the
+        // viscous dissipation overwhelms the irradiation, so the effective temperature tracks the viscous term.
+        // The viscous-inner regime the completed profile adds, dominating where accretional heating is strong.
+        let t_max = Fixed::from_int(100_000);
+        let (mdot, mass, alpha, reproc, inner, dist) = (
+            Fixed::from_int(10),
+            Fixed::ONE,
+            Fixed::from_ratio(35, 10),
+            Fixed::from_ratio(1, 4),
+            Fixed::ONE,
+            Fixed::from_ratio(5, 100),
+        );
+        let eff =
+            disk_effective_temperature(mdot, mass, alpha, dist, reproc, inner, t_max).unwrap();
+        let irr = irradiated_disk_temperature(mass, alpha, dist, reproc, t_max).unwrap();
+        let visc = viscous_disk_temperature(mdot, mass, dist, inner, t_max).unwrap();
+        assert!(
+            eff > irr,
+            "with strong accretion the effective temperature exceeds pure irradiation"
+        );
+        let d_eff_visc = (eff.to_f64_lossy() - visc.to_f64_lossy()).abs();
+        let d_eff_irr = (eff.to_f64_lossy() - irr.to_f64_lossy()).abs();
+        assert!(
+            d_eff_visc < d_eff_irr,
+            "in the strongly-accreting inner disk T_eff tracks the viscous term"
+        );
+    }
+
+    #[test]
+    fn a_non_positive_effective_temperature_distance_routes_to_none() {
+        assert_eq!(
+            disk_effective_temperature(
+                Fixed::from_ratio(1, 100),
+                Fixed::ONE,
+                Fixed::from_ratio(35, 10),
+                Fixed::ZERO,
+                Fixed::from_ratio(1, 4),
                 Fixed::ONE,
                 Fixed::from_int(100_000)
             ),
