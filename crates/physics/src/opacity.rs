@@ -375,6 +375,59 @@ fn free_free_prefactor(
     kappa_ff.checked_div(phi)
 }
 
+/// The free-free monochromatic prefactor `A_ff` for a PARTIALLY IONIZED plasma: free-free is a two-body
+/// electron-ion process, so it carries the PRODUCT `n_e * sum(Z_i^2 n_i)` (QUADRATIC in ionization fraction, since
+/// for hydrogen both the electron and the ion side track the ionized fraction `x`), where [`free_free_prefactor`]'s
+/// fully-ionized coefficient assumed every nucleon donated its charge. Both densities are the SHARED Saha output
+/// (the join law: es, ff, and H- read one `n_e`). Under SINGLE-STAGE ionization `sum(Z_i^2 n_i) = n_e` (every ion
+/// has `Z = 1`), so the ion side collapses to `n_e` and `A_ff ~ n_e^2`; carrying the general `sum(Z_i^2 n_i)`
+/// argument keeps a multi-stage plasma (a doubly-ionized species, `Z = 2`) from silently regressing to the
+/// single-charge form. The Gaunt factor `g_ff` is the caller's plasma datum, physical band `~1.1 to 1.5` over disk
+/// temperatures and frequencies (van Hoof et al. 2014), never fabricated here.
+///
+/// Computed as `A_ff_full * (n_e * sum Z^2 n_i)_actual / (n_e * sum Z^2 n_i)_full`, a DIMENSIONLESS ratio (every
+/// unit cancels) formed in the log domain because the number densities (`~1e17 cm^-3`) overflow Q32.32. The
+/// fully-ionized reference densities are `n_e_full = (1+X)/2 * rho/m_u` and `sum Z^2 n_i_full = <Z^2/A> * rho/m_u`
+/// with `m_u = 1/N_A` g (so `-ln m_u = +ln N_A`). At full ionization the ratio is one and `A_ff` reproduces
+/// [`free_free_prefactor`] exactly, the general `n_e^2` form provably containing the Kramers limit (the reassembly
+/// identity). `None` if the full-ionization prefactor fails to resolve or a constant fails to load.
+#[allow(clippy::too_many_arguments)]
+fn free_free_prefactor_ionized(
+    ln_electron_density_cm3: Fixed,
+    ln_sum_z2_ni_cm3: Fixed,
+    ln_density_g_cm3: Fixed,
+    density_g_per_cm3: Fixed,
+    temperature_k: Fixed,
+    hydrogen_mass_fraction: Fixed,
+    charge_weighted_abundance: Fixed,
+    gaunt_factor: Fixed,
+) -> Option<Fixed> {
+    let a_ff_full = free_free_prefactor(
+        density_g_per_cm3,
+        temperature_k,
+        hydrogen_mass_fraction,
+        charge_weighted_abundance,
+        gaunt_factor,
+    )?;
+    let ln_na = crate::saha::ln_fundamental("N_A")?;
+    // ln of the fully-ionized number densities (cm^-3): n_e_full = (1+X)/2 * rho/m_u, sum Z^2 n_i_full =
+    // <Z^2/A> * rho/m_u, m_u = 1/N_A g so the -ln m_u is a +ln N_A.
+    let ln_half_1px = Fixed::ONE
+        .checked_add(hydrogen_mass_fraction)?
+        .checked_div(Fixed::from_int(2))?
+        .ln();
+    let ln_cwa = charge_weighted_abundance.ln();
+    let ln_ne_full = ln_half_1px
+        .checked_add(ln_density_g_cm3)?
+        .checked_add(ln_na)?;
+    let ln_sum_full = ln_cwa.checked_add(ln_density_g_cm3)?.checked_add(ln_na)?;
+    let ln_ratio = ln_electron_density_cm3
+        .checked_add(ln_sum_z2_ni_cm3)?
+        .checked_sub(ln_ne_full)?
+        .checked_sub(ln_sum_full)?;
+    a_ff_full.checked_mul(ln_ratio.exp())
+}
+
 /// The TOTAL gas/plasma Rosseland-mean opacity `kappa_R` (cm^2/g): the assembly of the gas terms into the single
 /// opacity the disk reads, `kappa_R = rosseland_mean(kappa_es + kappa_H-(x) + kappa_ff(x))`. The MONOCHROMATIC
 /// terms sum at each dimensionless frequency `x`, then the whole is Rosseland-averaged: the Rosseland (harmonic)
@@ -1779,6 +1832,61 @@ mod tests {
         let a = kramers_free_free_opacity(rho, t, Fixed::from_ratio(7, 10), Fixed::ONE, Fixed::ONE);
         let b = kramers_free_free_opacity(rho, t, Fixed::from_ratio(7, 10), Fixed::ONE, Fixed::ONE);
         assert_eq!(a, b, "the free-free derivation replays byte for byte");
+    }
+
+    #[test]
+    fn the_ionized_free_free_prefactor_reproduces_the_kramers_limit_at_full_ionization() {
+        // The reassembly identity for free-free: fed the fully-ionized electron density (pure hydrogen X = 1, where
+        // single-stage ionization IS full ionization and n_e = sum Z^2 n_i = rho/m_u = rho * N_A), the partial-
+        // ionization prefactor reproduces free_free_prefactor exactly (ratio = 1), the general n_e * sum Z^2 n_i
+        // form provably containing the Kramers limit.
+        let rho = Fixed::from_ratio(1, 1_000_000); // 1e-6 g/cm^3
+        let t = Fixed::from_int(100_000); // hot, fully ionized
+        let x = Fixed::ONE; // pure hydrogen
+        let cwa = Fixed::ONE; // <Z^2/A> = 1 for pure hydrogen
+        let g = Fixed::ONE;
+        let ln_rho = crate::saha::ln_of_decimal("1e-6").unwrap();
+        let ln_na = crate::saha::ln_fundamental("N_A").unwrap();
+        // (1+X)/2 = 1 at X = 1, so ln n_e_full = ln rho + ln N_A; sum Z^2 n_i = n_e (single-stage = full for H).
+        let ln_ne_full = ln_rho + ln_na;
+        let a_ff_full = free_free_prefactor(rho, t, x, cwa, g).unwrap();
+        let a_ff_ionized =
+            free_free_prefactor_ionized(ln_ne_full, ln_ne_full, ln_rho, rho, t, x, cwa, g).unwrap();
+        let rel = (a_ff_ionized.to_f64_lossy() - a_ff_full.to_f64_lossy()).abs()
+            / a_ff_full.to_f64_lossy();
+        assert!(
+            rel < 1e-2,
+            "at full ionization the partial-ionization prefactor reproduces Kramers: full {}, ionized {}",
+            a_ff_full.to_f64_lossy(),
+            a_ff_ionized.to_f64_lossy()
+        );
+    }
+
+    #[test]
+    fn the_ionized_free_free_prefactor_is_quadratic_in_ionization_fraction() {
+        // Free-free carries n_e * sum Z^2 n_i, so at ionization fraction x = 0.1 (n_e and the single-stage ion side
+        // both 0.1 of full) the prefactor is 0.01 of the fully-ionized value: QUADRATIC in x, the two-body electron-
+        // ion signature that keeps a cool weakly-ionized gas from radiating like a full plasma.
+        let rho = Fixed::from_ratio(1, 1_000_000);
+        let t = Fixed::from_int(100_000);
+        let x = Fixed::ONE;
+        let cwa = Fixed::ONE;
+        let g = Fixed::ONE;
+        let ln_rho = crate::saha::ln_of_decimal("1e-6").unwrap();
+        let ln_na = crate::saha::ln_fundamental("N_A").unwrap();
+        let ln_ne_full = ln_rho + ln_na;
+        let ln_tenth = crate::saha::ln_of_decimal("0.1").unwrap();
+        let ln_ne_tenth = ln_ne_full + ln_tenth; // n_e = 0.1 n_e_full, single-stage so sum Z^2 n_i = n_e
+        let a_ff_full =
+            free_free_prefactor_ionized(ln_ne_full, ln_ne_full, ln_rho, rho, t, x, cwa, g).unwrap();
+        let a_ff_tenth =
+            free_free_prefactor_ionized(ln_ne_tenth, ln_ne_tenth, ln_rho, rho, t, x, cwa, g)
+                .unwrap();
+        let ratio = a_ff_tenth.to_f64_lossy() / a_ff_full.to_f64_lossy();
+        assert!(
+            (ratio - 0.01).abs() < 1e-3,
+            "free-free is quadratic in ionization fraction: 0.1^2 = 0.01, got {ratio}"
+        );
     }
 
     #[test]
