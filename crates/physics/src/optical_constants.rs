@@ -234,7 +234,7 @@ mod tests {
     }
 
     /// Find the sampled row whose wavelength is closest to `target_um` (a test helper for the reference checks).
-    fn nearest<'a>(sp: &'a OpticalSpecies, target_um: f64) -> &'a RefractiveIndex {
+    fn nearest(sp: &OpticalSpecies, target_um: f64) -> &RefractiveIndex {
         sp.samples
             .iter()
             .min_by(|a, b| {
