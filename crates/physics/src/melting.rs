@@ -553,17 +553,37 @@ pub fn adiabatic_melt_column(
     }
     // The onset pressure: T_p + m_ad*P0 = T_sol0 + m_sol*P0, so P0 = superheat / (m_sol - m_ad).
     let p0 = superheat.checked_div(slope_diff)?;
-    let f_max = clamp_unit(productivity_per_gpa.checked_mul(p0)?);
-    // crust (km) = dF/dP * P0^2 * 1e6 / (2 rho g). The 1e6 folds the GPa-to-Pa square and the metre-to-km
-    // conversion into one factor, kept below the fixed-point ceiling by squaring the small P0 first.
-    let p0_sq = p0.checked_mul(p0)?;
-    let numer = productivity_per_gpa
-        .checked_mul(p0_sq)?
-        .checked_mul(Fixed::from_int(1_000_000))?;
-    let denom = Fixed::from_int(2)
-        .checked_mul(source_density_kg_per_m3)?
-        .checked_mul(gravity_m_per_s2)?;
-    let crust = numer.checked_div(denom)?;
+    // The unclamped surface melt fraction F(0) = dF/dP * P0. It sets both the (clamped) reported melt fraction
+    // and which crust-integral branch applies.
+    let f_surface = productivity_per_gpa.checked_mul(p0)?;
+    let f_max = clamp_unit(f_surface);
+    // The crust is the integrated melt column, crust (km) = I * 1e6 / (rho g), where I = integral over [0, P0] of
+    // min(F(P), 1) dP with F(P) = dF/dP * (P0 - P) rising from 0 at the onset to F(0) at the surface, and the 1e6
+    // folds the GPa-to-Pa and metre-to-km conversions.
+    let crust = if f_surface <= Fixed::ONE {
+        // Unsaturated: the full parabola I = dF/dP * P0^2 / 2, so crust = dF/dP * P0^2 * 1e6 / (2 rho g). The small
+        // P0 is squared first to stay below the fixed-point ceiling. (This branch is unchanged.)
+        let p0_sq = p0.checked_mul(p0)?;
+        let numer = productivity_per_gpa
+            .checked_mul(p0_sq)?
+            .checked_mul(Fixed::from_int(1_000_000))?;
+        let denom = Fixed::from_int(2)
+            .checked_mul(source_density_kg_per_m3)?
+            .checked_mul(gravity_m_per_s2)?;
+        numer.checked_div(denom)?
+    } else {
+        // Saturated (the hot komatiite regime): the melt fraction reaches 1 at the saturation pressure and stays
+        // capped above it, so the parabola is truncated: I = P0 - 1/(2 * dF/dP). Meets the unsaturated branch
+        // continuously at F(0) = 1 (both give P0/2). Using the full parabola here would grow the crust as if the
+        // melt fraction rose past 100%, which is the conservation defect this branch closes. dF/dP > 0 here
+        // (F(0) = dF/dP * P0 > 1), so the reciprocal is safe.
+        let sat_correction =
+            Fixed::ONE.checked_div(Fixed::from_int(2).checked_mul(productivity_per_gpa)?)?;
+        let integral_gpa = p0.checked_sub(sat_correction)?;
+        let numer = integral_gpa.checked_mul(Fixed::from_int(1_000_000))?;
+        let denom = source_density_kg_per_m3.checked_mul(gravity_m_per_s2)?;
+        numer.checked_div(denom)?
+    };
     Some(MeltColumn {
         crust_thickness_km: crust,
         max_melt_fraction: f_max,
@@ -1014,6 +1034,83 @@ mod tests {
             close(col.onset_pressure_gpa, 1.88, 0.1),
             "melting begins near 1.9 GPa, got {}",
             col.onset_pressure_gpa.to_f64_lossy()
+        );
+    }
+
+    #[test]
+    fn a_saturated_melt_column_caps_the_crust_at_full_melt() {
+        // The conservation fix for the hot komatiite regime: once the surface melt fraction would exceed 1, the
+        // melt fraction is physically capped at 1 above the saturation pressure, so the crust integral TRUNCATES
+        // the parabola (I = P0 - 1/(2 dF/dP)) rather than growing as if the melt fraction rose past 100%. A hot
+        // mantle (Tp = 2100 K) with a higher hot-regime productivity (0.3/GPa) saturates.
+        let col = adiabatic_melt_column(
+            Fixed::from_int(2100),
+            Fixed::from_int(1373),
+            Fixed::from_int(130),
+            Fixed::from_ratio(155, 10),
+            Fixed::from_ratio(3, 10), // productivity 0.3 /GPa (hot regime)
+            Fixed::from_int(3300),
+            Fixed::from_ratio(98, 10),
+        )
+        .unwrap();
+        // The melt fraction saturates to 1.
+        assert!(
+            close(col.max_melt_fraction, 1.0, 1e-6),
+            "the melt fraction saturates to 1, got {}",
+            col.max_melt_fraction.to_f64_lossy()
+        );
+        // The crust is the TRUNCATED integral P0 - 1/(2 dF/dP), and strictly below the un-capped parabola the
+        // conservation defect would have produced.
+        let p0 = col.onset_pressure_gpa.to_f64_lossy();
+        let fold = 1e6 / (3300.0 * 9.8);
+        let saturated_km = (p0 - 1.0 / (2.0 * 0.3)) * fold;
+        let parabola_km = (0.3 * p0 * p0 / 2.0) * fold;
+        assert!(
+            close(col.crust_thickness_km, saturated_km, 2.0),
+            "the saturated crust is the truncated integral ~{saturated_km:.0} km, got {}",
+            col.crust_thickness_km.to_f64_lossy()
+        );
+        assert!(
+            col.crust_thickness_km.to_f64_lossy() < parabola_km * 0.95,
+            "the cap reduces the crust below the un-truncated parabola ({} vs ~{parabola_km:.0} km)",
+            col.crust_thickness_km.to_f64_lossy()
+        );
+    }
+
+    #[test]
+    fn the_melt_column_crust_is_continuous_across_saturation() {
+        // The unsaturated and saturated branches meet continuously at the saturation threshold F(0) = 1 (both
+        // give P0/2), so the crust has NO jump as the mantle heats across it (a discontinuity would be a
+        // fixed-point/physical artifact).
+        let col = |tp: i32| {
+            adiabatic_melt_column(
+                Fixed::from_int(tp),
+                Fixed::from_int(1373),
+                Fixed::from_int(130),
+                Fixed::from_ratio(155, 10),
+                Fixed::from_ratio(3, 10),
+                Fixed::from_int(3300),
+                Fixed::from_ratio(98, 10),
+            )
+            .unwrap()
+        };
+        // Saturation is near Tp ~ 1755 K (F(0) = 0.3 * P0 = 1); straddle it by 1 K each side.
+        let below = col(1754);
+        let above = col(1756);
+        let jump = (above.crust_thickness_km.to_f64_lossy()
+            - below.crust_thickness_km.to_f64_lossy())
+        .abs();
+        assert!(
+            jump < 1.0,
+            "the crust is continuous across saturation (jump {jump} km over 2 K)"
+        );
+        assert!(
+            below.max_melt_fraction.to_f64_lossy() < 1.0,
+            "the below-threshold column is unsaturated"
+        );
+        assert!(
+            close(above.max_melt_fraction, 1.0, 1e-6),
+            "the above-threshold column is saturated"
         );
     }
 
