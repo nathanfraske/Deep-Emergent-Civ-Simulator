@@ -67,28 +67,3 @@ enthalpy_formation = "-1479.36"
 standard_entropy = "148.32"
 molar_volume = "46.310"
 source = "Robie & Hemingway 1995, USGS Bulletin 2131 (298.15 K, 1 bar), Fe-olivine end-member"
-
-# EXOTIC / ALIEN crust phases (owner directive: admit the alien as data). Non-silicate rock-formers whose
-# elements the periodic table already carries, so a world built of them resolves through the same
-# Gibbs-minimizing kernel with no code change. Values cross-checked against CODATA/CRC and surfaced for the
-# owner's reconciliation to the production dataset (Robie & Hemingway 1995 / Holland & Powell 2011), the same
-# verification the calibration note above prescribes; the molar volume is M/rho from the cited density, so the
-# derived crustal density returns the phase's own density.
-
-[[phase]]
-name = "iron"
-formula = "Fe"
-enthalpy_formation = "0.00"
-standard_entropy = "27.28"
-molar_volume = "7.092"
-prototype = "body-centered-cubic"
-source = "alpha-iron: dHf = 0 (the element in its reference state, definitional); S = 27.28 J/mol/K (CODATA Key Values, Cox/Wagman/Medvedev 1989; cross-checked 27.2); molar volume = M/rho = 55.845 / 7.874 g/cm^3 (CRC density). A metal-crust world."
-
-[[phase]]
-name = "halite"
-formula = "NaCl"
-enthalpy_formation = "-411.12"
-standard_entropy = "72.11"
-molar_volume = "26.995"
-prototype = "rock-salt"
-source = "halite (rock salt): dHf = -411.12 kJ/mol and S = 72.11 J/mol/K (CODATA/CRC, cross-checked against the NaCl data page); molar volume = M/rho = 58.443 / 2.165 g/cm^3 (CRC density). A salt-crust world."

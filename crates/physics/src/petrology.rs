@@ -501,56 +501,6 @@ mod tests {
     }
 
     #[test]
-    fn an_alien_crust_resolves_through_the_same_kernel_admit_the_alien() {
-        // The exotic phases (metallic iron, halite) resolve through the identical Gibbs-minimizing kernel:
-        // a metal-crust world comes back dense (iron ~7.87 g/cm^3, denser than any silicate, so it founders)
-        // and a salt-crust world comes back light (halite ~2.16, lighter than silica, so it floats high). The
-        // alien is a data row, never a rewrite.
-        let reg = PhaseRegistry::standard().expect("registry loads");
-        let tab = crate::periodic::PeriodicTable::standard().expect("table loads");
-        let t = Fixed::from_int(300);
-        let p = Fixed::from_int(1);
-        let iron = crustal_density(&[("Fe".to_string(), Fixed::from_int(1))], t, p, &reg, &tab)
-            .expect("a metal crust resolves");
-        let halite = crustal_density(
-            &[
-                ("Na".to_string(), Fixed::from_int(1)),
-                ("Cl".to_string(), Fixed::from_int(1)),
-            ],
-            t,
-            p,
-            &reg,
-            &tab,
-        )
-        .expect("a salt crust resolves");
-        let silica = crustal_density(
-            &[
-                ("Si".to_string(), Fixed::from_int(1)),
-                ("O".to_string(), Fixed::from_int(2)),
-            ],
-            t,
-            p,
-            &reg,
-            &tab,
-        )
-        .expect("a silicate crust resolves");
-        assert!(
-            close(iron, 7.874, 0.02),
-            "iron crust density, got {}",
-            iron.to_f64_lossy()
-        );
-        assert!(
-            close(halite, 2.165, 0.02),
-            "halite crust density, got {}",
-            halite.to_f64_lossy()
-        );
-        assert!(
-            iron > silica && silica > halite,
-            "the alien crusts bracket the silicate: iron sinks, salt floats"
-        );
-    }
-
-    #[test]
     fn the_standard_state_gibbs_energy_is_enthalpy_minus_the_entropy_term() {
         // At the reference pressure (1 bar) the pressure work vanishes, so G reduces to dH_f - T * S. For
         // quartz (dH_f = -910.70 kJ/mol, S = 41.46 J/mol/K) at the standard temperature 298.15 K this is
