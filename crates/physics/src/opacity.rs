@@ -384,6 +384,108 @@ pub fn h_minus_bound_free_reduced_cross_section(lambda_um: Fixed) -> Option<Fixe
     lambda3.checked_mul(g3)?.checked_mul(poly)
 }
 
+/// The monochromatic H- BOUND-FREE opacity `kappa_bf` (cm^2/g) at dimensionless frequency `x = h*nu/(k_B*T)`,
+/// DERIVED from the fundamentals, the periodic table, and the cited Wishart/John cross section, never fetched as a
+/// whole. A neutral hydrogen atom binds a second electron (H-) only through electron correlation, and a photon
+/// above the binding threshold photodetaches it, absorbing a continuum. The opacity is the Saha population of H-
+/// per unit electron pressure, times the cross section, times the stimulated-emission correction:
+///   `kappa_bf = (1/4)(h^2/2pi m_e)^(3/2) k^(-5/2) * T^(-5/2) * exp(chi/kT) * (1 - e^-x) * sigma_bf(lambda) *
+///              (X / m_H) * P_e`   [cgs, per John 1988 eq. 3]
+/// with `lambda = (h c/k)/(x T)` the wavelength at `x`. Everything derivable DERIVES: the Saha prefactor is the John
+/// 1988 `0.750` reassembled from the fundamentals as the more precise `0.74989`, the binding `chi` reads the
+/// periodic-table H electron affinity (`0.754 eV`), and `h c/k` is the wavelength fold. The one fetched piece is
+/// `sigma_bf` ([`h_minus_bound_free_reduced_cross_section`], the cited [M] tier). The electron pressure `P_e`
+/// (dyn/cm^2) is the caller's plasma variable rather than the electron density `n_e`, because `P_e = n_e k T` stays
+/// in the representable range (`~1` to `1e5`) where `n_e ~ 1e13` overflows `Fixed`; this is exactly why the stellar-
+/// atmosphere form is per-`P_e`.
+///
+/// The wide-magnitude compute runs in exact `BigRat` with the SQUARING trick (`kappa^2` is a clean rational because
+/// both the `(h^2/2pi m_e)^(3/2)` and the `T^(-5/2)` half-integer powers square away to `T^-5`), then one
+/// `Fixed::sqrt`; the two `exp` factors and the cross section are `Fixed` (order one) folded in as `BigRat`. Every
+/// per-world quantity is a caller argument (admit-the-alien): `x`, `T`, `hydrogen_mass_fraction` X, and
+/// `electron_pressure_dyn_cm2` `P_e` (a cool disk has `P_e -> 0` so H- vanishes, correct). Returns zero below the
+/// photodetachment threshold (where `sigma_bf = 0`, the transparent window the free-free term fills at assembly).
+/// HONEST LIMIT: valid for `T > ~410 K` (below it `chi/kT` leaves the `Fixed::exp` window and `exp(chi/kT)`
+/// saturates, but H- needs free electrons a `<410 K` gas does not supply, so `P_e -> 0` makes the term vanish there
+/// anyway). `None` if a fundamental or the hydrogen data fails to resolve, or the result leaves the representable
+/// range.
+pub fn h_minus_bound_free_opacity(
+    x: Fixed,
+    temperature_k: Fixed,
+    hydrogen_mass_fraction: Fixed,
+    electron_pressure_dyn_cm2: Fixed,
+    table: &PeriodicTable,
+) -> Option<Fixed> {
+    if x <= Fixed::ZERO || temperature_k <= Fixed::ZERO {
+        return None;
+    }
+    let h = fundamental_bigrat("h")?;
+    let c = fundamental_bigrat("c")?;
+    let k_b = fundamental_bigrat("k_B")?;
+    let m_e = fundamental_bigrat("m_e")?;
+    let e = fundamental_bigrat("e")?;
+    let n_a = fundamental_bigrat("N_A")?;
+    let pi = compute::pi(OPACITY_PI_DIGITS);
+
+    // The wavelength fold lambda = (h c/k)/(x T) [micron]: h c/k in SI is m*K, *1e6 -> micron*K.
+    let alpha_um_k = h.mul(&c).div(&k_b).mul(&BigRat::from_i64(1_000_000));
+    let t_br = nonneg_fixed_to_bigrat(temperature_k);
+    let lambda_br = alpha_um_k.div(&nonneg_fixed_to_bigrat(x).mul(&t_br));
+    let lambda = Fixed::from_bits_i128(lambda_br.round_to_scale(Fixed::FRAC_BITS)?)?;
+    let sigma = h_minus_bound_free_reduced_cross_section(lambda)?;
+    if sigma <= Fixed::ZERO {
+        return Some(Fixed::ZERO); // below the photodetachment threshold, no bound-free opacity
+    }
+
+    // The stimulated-emission bracket (1 - e^-x) and the Saha Boltzmann factor exp(chi/kT), both via Fixed::exp:
+    // chi/kT = affinity_eV * (e/k_B) / T, with e/k_B = e_SI/k_SI (K/eV) reading the affinity from the periodic table.
+    let one_minus_e = Fixed::ONE.checked_sub(Fixed::ZERO.checked_sub(x)?.exp())?;
+    let affinity = table.element("H")?.electron_affinity?;
+    let e_over_k = Fixed::from_bits_i128(e.div(&k_b).round_to_scale(Fixed::FRAC_BITS)?)?;
+    let exp_chi = affinity
+        .checked_mul(e_over_k)?
+        .checked_div(temperature_k)?
+        .exp();
+
+    // kappa^2 = C^2 * T^-5 * exp_chi^2 * (1-e^-x)^2 * (sigma*1e-18)^2 * (X/m_H)^2 * P_e^2 (cgs), then Fixed::sqrt.
+    // C^2 = (1/16)(h_cgs^2/(2pi m_e_cgs))^3 k_cgs^-5 (the John 0.74989 squared); cgs = SI * (1e7 for h,k erg;
+    // 1e3 for m_e g). The two half-integer powers square away.
+    let h_cgs = h.mul(&BigRat::from_i64(10_000_000));
+    let m_e_cgs = m_e.mul(&BigRat::from_i64(1000));
+    let k_cgs = k_b.mul(&BigRat::from_i64(10_000_000));
+    let base = h_cgs
+        .mul(&h_cgs)
+        .div(&BigRat::from_i64(2).mul(&pi).mul(&m_e_cgs));
+    let base3 = base.mul(&base).mul(&base);
+    let k_cgs5 = k_cgs.mul(&k_cgs).mul(&k_cgs).mul(&k_cgs).mul(&k_cgs);
+    let c_squared = base3.div(&BigRat::from_i64(16).mul(&k_cgs5));
+
+    let m_h_cgs = nonneg_fixed_to_bigrat(table.molar_mass_of(&[("H", 1)]).ok()?).div(&n_a); // g
+    let x_over_mh = nonneg_fixed_to_bigrat(hydrogen_mass_fraction).div(&m_h_cgs);
+    let p_e = nonneg_fixed_to_bigrat(electron_pressure_dyn_cm2);
+    let sigma_br = nonneg_fixed_to_bigrat(sigma);
+    let exp_chi_br = nonneg_fixed_to_bigrat(exp_chi);
+    let one_minus_br = nonneg_fixed_to_bigrat(one_minus_e);
+    let inv_1e18 = BigRat::from_i64(1).div(&BigRat::from_i64(1_000_000_000_000_000_000));
+    let t5 = t_br.mul(&t_br).mul(&t_br).mul(&t_br).mul(&t_br);
+
+    let kappa_squared = c_squared
+        .mul(&exp_chi_br)
+        .mul(&exp_chi_br)
+        .mul(&one_minus_br)
+        .mul(&one_minus_br)
+        .mul(&sigma_br)
+        .mul(&sigma_br)
+        .mul(&inv_1e18)
+        .mul(&inv_1e18) // (1e-18)^2 = 1e-36
+        .mul(&x_over_mh)
+        .mul(&x_over_mh)
+        .mul(&p_e)
+        .mul(&p_e)
+        .div(&t5);
+    Some(Fixed::from_bits_i128(kappa_squared.round_to_scale(Fixed::FRAC_BITS)?)?.sqrt())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -676,5 +778,106 @@ mod tests {
             h_minus_bound_free_reduced_cross_section(lam),
             "the cross section replays byte for byte"
         );
+    }
+
+    #[test]
+    fn the_h_minus_bound_free_opacity_lands_the_derived_saha_magnitude() {
+        // At the 0.8513 micron cross-section peak (x = 2.817 for T = 6000 K), X = 0.7, P_e = 10 dyn/cm^2, the
+        // derived bound-free opacity is ~0.182 cm^2/g: the John 1988 0.74989 Saha prefactor (reassembled from the
+        // fundamentals) times the cited cross section times the stimulated-emission bracket, a magnitude fixed by
+        // physics, nothing fit.
+        let k = h_minus_bound_free_opacity(
+            Fixed::from_ratio(2817, 1000),
+            Fixed::from_int(6000),
+            Fixed::from_ratio(7, 10),
+            Fixed::from_int(10),
+            &table(),
+        )
+        .expect("the bound-free opacity derives");
+        assert!(
+            (k.to_f64_lossy() - 0.1815).abs() < 0.005,
+            "the H- bound-free opacity at the peak is ~0.182 cm^2/g, got {}",
+            k.to_f64_lossy()
+        );
+    }
+
+    #[test]
+    fn the_h_minus_bound_free_opacity_scales_with_pressure_and_hydrogen() {
+        // Linear in the electron pressure (the Saha H- population per P_e) and in the hydrogen mass fraction (the
+        // neutral-H reservoir): doubling either doubles the opacity.
+        let t = table();
+        let x = Fixed::from_ratio(2817, 1000);
+        let temp = Fixed::from_int(6000);
+        let base = h_minus_bound_free_opacity(
+            x,
+            temp,
+            Fixed::from_ratio(35, 100),
+            Fixed::from_int(10),
+            &t,
+        )
+        .unwrap();
+        let double_pe = h_minus_bound_free_opacity(
+            x,
+            temp,
+            Fixed::from_ratio(35, 100),
+            Fixed::from_int(20),
+            &t,
+        )
+        .unwrap();
+        let double_x = h_minus_bound_free_opacity(
+            x,
+            temp,
+            Fixed::from_ratio(70, 100),
+            Fixed::from_int(10),
+            &t,
+        )
+        .unwrap();
+        assert!(
+            (double_pe.to_f64_lossy() / base.to_f64_lossy() - 2.0).abs() < 0.02,
+            "the bound-free opacity is linear in the electron pressure"
+        );
+        assert!(
+            (double_x.to_f64_lossy() / base.to_f64_lossy() - 2.0).abs() < 0.02,
+            "the bound-free opacity is linear in the hydrogen mass fraction"
+        );
+    }
+
+    #[test]
+    fn the_h_minus_bound_free_opacity_is_zero_below_the_photodetachment_threshold() {
+        // At x = 1.0 for T = 6000 K the wavelength is 2.4 micron, beyond the 1.6419 micron binding threshold, so
+        // the cross section is zero and the bound-free opacity is zero: the transparent window the free-free term
+        // fills at assembly (which is why the bound-free cannot be Rosseland-averaged in isolation).
+        let k = h_minus_bound_free_opacity(
+            Fixed::from_int(1),
+            Fixed::from_int(6000),
+            Fixed::from_ratio(7, 10),
+            Fixed::from_int(10),
+            &table(),
+        );
+        assert_eq!(
+            k,
+            Some(Fixed::ZERO),
+            "no bound-free opacity below the photodetachment threshold"
+        );
+    }
+
+    #[test]
+    fn the_h_minus_bound_free_opacity_is_deterministic() {
+        let t = table();
+        let a = h_minus_bound_free_opacity(
+            Fixed::from_ratio(2817, 1000),
+            Fixed::from_int(6000),
+            Fixed::from_ratio(7, 10),
+            Fixed::from_int(10),
+            &t,
+        );
+        let b = h_minus_bound_free_opacity(
+            Fixed::from_ratio(2817, 1000),
+            Fixed::from_int(6000),
+            Fixed::from_ratio(7, 10),
+            Fixed::from_int(10),
+            &t,
+        );
+        assert_eq!(a, b, "the H- bound-free derivation replays byte for byte");
     }
 }
