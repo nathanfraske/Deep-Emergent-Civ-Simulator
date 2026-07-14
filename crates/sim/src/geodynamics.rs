@@ -39,6 +39,7 @@
 use civsim_core::Fixed;
 use civsim_physics::laws;
 use civsim_world::solve::{fixed_cap_solve, SolveOutcome};
+use civsim_world::terrain::{classify_relief, relief_datum, TerrainRelief};
 
 use crate::material::{GeodynamicColumn, GeodynamicField};
 
@@ -414,6 +415,63 @@ pub fn surface_elevation_from_composition(
         crust_density,
         mantle_density,
         crustal_thickness,
+    )
+}
+
+/// One generated tile's DERIVED terrain: the surface elevation the geology gives it and the relief class it
+/// classifies to. The generated-world tile whose terrain is what the substrate says, never fractal noise (Slice 0,
+/// the R1 override). The surface material (the stable assemblage at the tile's composition) is the render's paired
+/// half, read from the substrate at paint time, not stored here.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DerivedTile {
+    /// The derived surface elevation (metres), from the tile's crust composition through the isostasy.
+    pub elevation: Fixed,
+    /// The relief class, from crossing the derived references (the field datum and the sea-level reference).
+    pub relief: TerrainRelief,
+}
+
+/// Generate a field of DERIVED tiles from a per-tile crust composition (Slice 0, the visible spine's tile wire):
+/// each tile's elevation derives from its composition ([`surface_elevation_from_composition`]), the relief datum is
+/// the field mean ([`civsim_world::terrain::relief_datum`], a derived reference), and each tile's relief classifies
+/// by crossing that datum and the `sea_level` reference (a clearly-labelled Slice-0 fixture, retiring when the water
+/// budget derives). So the generated world's terrain is what the substrate says at each place, never fractal noise
+/// or an authored band table (the R1 override, end to end). `None` when the field is empty or any tile's composition
+/// reaches no elevation (fail-loud, never a fabricated tile). Byte-neutral: no scenario builds a world with this yet
+/// (the render and scenario arming are the next slice).
+pub fn generate_derived_tiles(
+    crust_compositions: &[Vec<(String, Fixed)>],
+    mantle_density: Fixed,
+    crustal_thickness: Fixed,
+    temperature_k: Fixed,
+    pressure_bar: Fixed,
+    sea_level: Fixed,
+    registry: &civsim_physics::petrology_data::PhaseRegistry,
+    table: &civsim_physics::periodic::PeriodicTable,
+) -> Option<Vec<DerivedTile>> {
+    if crust_compositions.is_empty() {
+        return None;
+    }
+    let mut elevations = Vec::with_capacity(crust_compositions.len());
+    for composition in crust_compositions {
+        elevations.push(surface_elevation_from_composition(
+            composition,
+            mantle_density,
+            crustal_thickness,
+            temperature_k,
+            pressure_bar,
+            registry,
+            table,
+        )?);
+    }
+    let datum = relief_datum(&elevations)?;
+    Some(
+        elevations
+            .iter()
+            .map(|&elevation| DerivedTile {
+                elevation,
+                relief: classify_relief(elevation, sea_level, datum),
+            })
+            .collect(),
     )
 }
 
@@ -804,6 +862,65 @@ mod tests {
         assert!(
             got > Fixed::ZERO,
             "a crust lighter than the mantle floats above the reference (elevation positive)"
+        );
+    }
+
+    #[test]
+    fn the_derived_tile_field_classifies_relief_from_the_derived_terrain() {
+        // THE TILE WIRE (Slice 0, end to end): a two-tile field, a light quartz crust and a denser forsterite crust,
+        // derives two elevations, the field-mean datum, and the relief by crossing it. The light crust floats higher
+        // (Upland), the denser crust lower (Lowland), so the terrain is what the substrate says, not fractal noise.
+        // Raising a sea-level fixture above the low crust makes it Submarine, the ocean/land boundary emerging by
+        // crossing the derived-or-fixtured reference. All from composition, no authored terrain.
+        let reg = civsim_physics::petrology_data::PhaseRegistry::standard().expect("registry");
+        let table = civsim_physics::periodic::PeriodicTable::standard().expect("table");
+        let quartz = vec![
+            ("Si".to_string(), Fixed::from_int(1)),
+            ("O".to_string(), Fixed::from_int(2)),
+        ];
+        let forsterite = vec![
+            ("Mg".to_string(), Fixed::from_int(2)),
+            ("Si".to_string(), Fixed::from_int(1)),
+            ("O".to_string(), Fixed::from_int(4)),
+        ];
+        let field = vec![quartz, forsterite];
+        let mantle = Fixed::from_ratio(33, 10);
+        let thickness = Fixed::from_int(30);
+        let t = Fixed::from_int(300);
+        let p = Fixed::from_int(1);
+        // Sea level at 0: both crusts above it, so relief is the light-vs-dense split about the field datum.
+        let tiles =
+            generate_derived_tiles(&field, mantle, thickness, t, p, Fixed::ZERO, &reg, &table)
+                .expect("the derived tile field");
+        assert_eq!(tiles.len(), 2);
+        assert!(
+            tiles[0].elevation > tiles[1].elevation,
+            "the lighter quartz crust floats higher than the denser forsterite"
+        );
+        assert_eq!(
+            tiles[0].relief,
+            TerrainRelief::Upland,
+            "the higher crust is Upland"
+        );
+        assert_eq!(
+            tiles[1].relief,
+            TerrainRelief::Lowland,
+            "the lower crust is Lowland"
+        );
+        // Raise the sea-level fixture above the lower crust: it becomes Submarine (the ocean/land boundary crossing).
+        let sea_above_low = tiles[1].elevation.checked_add(Fixed::ONE).unwrap();
+        let flooded =
+            generate_derived_tiles(&field, mantle, thickness, t, p, sea_above_low, &reg, &table)
+                .expect("flooded field");
+        assert_eq!(
+            flooded[1].relief,
+            TerrainRelief::Submarine,
+            "raising sea level above the low crust submerges it"
+        );
+        // An empty field has no tiles (fail-loud, never a fabricated world).
+        assert!(
+            generate_derived_tiles(&[], mantle, thickness, t, p, Fixed::ZERO, &reg, &table)
+                .is_none()
         );
     }
 }
