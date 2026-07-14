@@ -51,6 +51,12 @@ pub const ASTRONOMICAL_UNIT_M: &str = "149597870700";
 /// the documented reference for computing it, not read in the kernel.
 pub const SOLAR_MASS_KG: &str = "1.989e30";
 
+/// The solar radius `R_sun` in metres, the IAU 2015 Resolution B3 nominal value (6.957e8 m). A cited reference
+/// anchor: the Sun-anchored scale of the mass-radius relation, so at `M = M_sun` the star's radius returns
+/// `R_sun`. Consumed by the effective-temperature solve, not the flux (a world receives flux at its orbit, not
+/// at the stellar surface).
+pub const SOLAR_RADIUS_M: &str = "6.957e8";
+
 /// The number of decimal digits pi is computed to for the flux derivation. Far above the ~10 significant
 /// figures the Q32.32 result carries (a `2^-32` epsilon near a ~1361 magnitude is a relative ~1.7e-13), so
 /// the pi truncation never reaches the result's low bit. An engine-accuracy bound, not a world value.
@@ -90,6 +96,60 @@ pub fn stellar_flux(mass_ratio: Fixed, exponent: Fixed, distance_au: Fixed) -> O
     let flux = luminosity.div(&denom);
     let bits = flux.round_to_scale(Fixed::FRAC_BITS)?;
     Fixed::from_bits_i128(bits)
+}
+
+/// The stellar EFFECTIVE TEMPERATURE `T_eff` (K) a star radiates at, DERIVED from its mass through the
+/// Stefan-Boltzmann law: `T_eff = (L / (4*pi*R_star^2*sigma))^(1/4)`, the luminosity from the mass-luminosity
+/// relation `L = L_sun*(mass_ratio)^luminosity_exponent` and the radius from the mass-radius relation
+/// `R_star = R_sun*(mass_ratio)^radius_exponent`. `sigma` is the Stefan-Boltzmann constant DERIVED from the
+/// CODATA fundamentals (`k_B`, `h`, `c`) through [`crate::physiology::derived_stefan_boltzmann`], never authored.
+///
+/// Every per-world input is a scenario-set ARGUMENT (the admit-the-alien test): `mass_ratio` (Mirror = 1), and
+/// the TWO relation exponents, each a reserved closure-residue passed by the caller so a different opacity or
+/// structure regime is a data row, never a rewrite. `luminosity_exponent` is the mass-luminosity exponent (the
+/// same residue [`stellar_flux`] carries, ~3.5 in the solar regime); `radius_exponent` is the mass-radius
+/// exponent (a SECOND residue this solve needs that the flux does not, ~0.8 on the upper main sequence), its
+/// basis the main-sequence mass-radius slope of the star's regime. `t_max` is the representable ceiling the
+/// fourth-root read caps at (an engine bound the caller sets, not a physical knob). The only fixed parts are the
+/// derivation, the cited anchors (`L_sun`, `R_sun`), and the derived `sigma`.
+///
+/// At `mass_ratio = 1` both exponents drop out (one to any power is one) and `T_eff` returns the Sun's effective
+/// temperature (~5772 K) from `L_sun`, `R_sun`, and `sigma` alone: the derive-not-fit anchor, nothing tuned to
+/// hit it. The stellar surface flux `F = L/(4*pi*R_star^2)` (whose `L` and `R_star^2` overflow Q32.32 while the
+/// ~6.3e7 W/m^2 result fits) runs the wide divide in exact rational arithmetic and rounds once; the fourth root
+/// reuses [`civsim_physics::laws::radiative_equilibrium`] (two nested integer square roots, so the
+/// unrepresentable `T^4` never forms), with emissivity one because a star radiates as a blackbody at its
+/// effective temperature by the definition of `T_eff`. `None` on a non-positive mass ratio or a surface flux past
+/// the representable range.
+pub fn stellar_effective_temperature(
+    mass_ratio: Fixed,
+    luminosity_exponent: Fixed,
+    radius_exponent: Fixed,
+    t_max: Fixed,
+) -> Option<Fixed> {
+    if mass_ratio <= Fixed::ZERO {
+        return None;
+    }
+    // The stellar radius R_star = R_sun*mass_ratio^beta, and the surface flux F = L/(4*pi*R_star^2).
+    let r_sun = BigRat::from_decimal_str(SOLAR_RADIUS_M).ok()?;
+    let r_star = r_sun.mul(&nonneg_fixed_to_bigrat(mass_ratio.powf(radius_exponent)));
+    let r2 = r_star.mul(&r_star);
+    let four_pi = BigRat::from_i64(4).mul(&compute::pi(FLUX_PI_DIGITS));
+    let denom = four_pi.mul(&r2);
+    let l_sun = BigRat::from_decimal_str(SOLAR_LUMINOSITY_W).ok()?;
+    let luminosity = l_sun.mul(&nonneg_fixed_to_bigrat(
+        mass_ratio.powf(luminosity_exponent),
+    ));
+    let surface_flux_bits = luminosity.div(&denom).round_to_scale(Fixed::FRAC_BITS)?;
+    let surface_flux = Fixed::from_bits_i128(surface_flux_bits)?;
+    // T_eff = (F / sigma)^(1/4): the Stefan-Boltzmann inversion, the proven two-sqrt fourth root.
+    let sigma = crate::physiology::derived_stefan_boltzmann();
+    Some(civsim_physics::laws::radiative_equilibrium(
+        surface_flux,
+        Fixed::ONE,
+        sigma,
+        t_max,
+    ))
 }
 
 #[cfg(test)]
@@ -160,6 +220,81 @@ mod tests {
     fn a_non_positive_distance_routes_to_none() {
         assert_eq!(
             stellar_flux(Fixed::ONE, Fixed::from_ratio(35, 10), Fixed::ZERO),
+            None
+        );
+    }
+
+    #[test]
+    fn a_sun_derives_its_effective_temperature() {
+        // mass_ratio = 1: the exponents drop out and T_eff = (L_sun/(4 pi R_sun^2 sigma))^(1/4), which is the
+        // Sun's effective temperature ~5772 K (IAU nominal 5772). This is DERIVED from L_sun, R_sun, and the
+        // CODATA-derived sigma, never fit: nothing here was tuned to land 5772. The measured value is ~5769 K, a
+        // ~3 K (0.05%) offset from the coarse Q32.32 sigma (~8 fractional bits) and the integer-root
+        // discretization, not a knob.
+        let t_max = Fixed::from_int(100_000); // an engine ceiling above any main-sequence T_eff
+        let t_eff = stellar_effective_temperature(
+            Fixed::ONE,
+            Fixed::from_ratio(35, 10),
+            Fixed::from_ratio(8, 10),
+            t_max,
+        )
+        .expect("the sun derives a temperature");
+        let k = t_eff.to_f64_lossy();
+        assert!(
+            (k - 5772.0).abs() < 20.0,
+            "a solar-mass star derives T_eff ~5772 K, got {k}"
+        );
+    }
+
+    #[test]
+    fn the_effective_temperature_is_exponent_independent_at_unit_mass() {
+        // One to any power is one, so at the solar mass ratio neither exponent moves T_eff: the anchor stays on
+        // the Sun's real value whatever the reserved residues, mirroring the flux invariance.
+        let t_max = Fixed::from_int(100_000);
+        let a = stellar_effective_temperature(
+            Fixed::ONE,
+            Fixed::from_ratio(30, 10),
+            Fixed::from_ratio(6, 10),
+            t_max,
+        )
+        .unwrap();
+        let b = stellar_effective_temperature(
+            Fixed::ONE,
+            Fixed::from_ratio(50, 10),
+            Fixed::from_ratio(10, 10),
+            t_max,
+        )
+        .unwrap();
+        assert_eq!(a, b, "at unit mass ratio the exponents do not move T_eff");
+    }
+
+    #[test]
+    fn a_more_massive_star_is_hotter_when_luminosity_outpaces_area() {
+        // A heavier star: L scales as mass^alpha and the emitting area as mass^(2*beta), so T_eff scales as
+        // mass^((alpha - 2*beta)/4). With alpha = 3.5 and beta = 0.8 the exponent is positive (0.475), so a
+        // two-solar-mass star is hotter, by ~2^0.475 = ~1.39. The ordering and rough magnitude are what the
+        // mass-luminosity and mass-radius relations together assert.
+        let (alpha, beta) = (Fixed::from_ratio(35, 10), Fixed::from_ratio(8, 10));
+        let t_max = Fixed::from_int(100_000);
+        let sun = stellar_effective_temperature(Fixed::ONE, alpha, beta, t_max).unwrap();
+        let heavy = stellar_effective_temperature(Fixed::from_int(2), alpha, beta, t_max).unwrap();
+        assert!(heavy > sun, "a heavier star radiates hotter");
+        let ratio = heavy.to_f64_lossy() / sun.to_f64_lossy();
+        assert!(
+            (ratio - 2.0_f64.powf(0.475)).abs() < 0.03,
+            "the T_eff ratio tracks mass^((alpha-2beta)/4) (~1.39), got {ratio}"
+        );
+    }
+
+    #[test]
+    fn a_non_positive_mass_ratio_routes_to_none() {
+        assert_eq!(
+            stellar_effective_temperature(
+                Fixed::ZERO,
+                Fixed::from_ratio(35, 10),
+                Fixed::from_ratio(8, 10),
+                Fixed::from_int(100_000)
+            ),
             None
         );
     }
