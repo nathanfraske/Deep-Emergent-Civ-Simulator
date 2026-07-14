@@ -20,15 +20,31 @@
 //! band strengths depend on the C, N, O, Ti abundances). A different composition is a DIFFERENT grid, a data row,
 //! never a rewrite. The solar-scaled `(X, Z)` grid is one member of the family the loader holds.
 //!
-//! THE DATA (surfaced, not fabricated): the grid VALUES are the [M] tier, the Ferguson et al. 2005 (ApJ 623, 585)
-//! low-temperature Rosseland opacity tables (machine-readable grids over `log T` in `~2.7 to 4.5` and `log R` in
-//! `~-8 to 1`). This module builds the MACHINERY (the coordinate, the deterministic bilinear interpolation, the
-//! handoff selector) and holds the grid as caller data; the bulk grid is a proof-of-fetch [M] dependency, cited to
-//! its primary source per value, that stays reserved until fetched. The convergence acceptance row (that the gas
-//! closure and a solar-composition molecular grid agree across `3000 to 4000 K`) is registered against the fetched
-//! grid.
+//! THE DATA (fetched, not fabricated): the grid VALUES are the [M] tier, the ÆSOPUS gas-only low-temperature
+//! Rosseland tables (Marigo & Aringer 2009, A&A 508, 1539), computed for an arbitrary composition on `(log T, log
+//! R)` with `log T` in `3.2 to 4.5` and `log R` in `-8 to 1`. The GAS-ONLY variant is taken deliberately (the
+//! grain-coupled ÆSOPUS 2.0/2.1 tables run their own dust internally, which would double-count the Mie grain term),
+//! so the molecular total carries only the gas-phase bands and the grain wire adds the condensate opacity
+//! separately. This module builds the MACHINERY (the coordinate, the deterministic bilinear interpolation, the
+//! handoff selector, and [`from_aesopus_rosseland_block`] that parses the vendored table), each grid fetched under
+//! the provenance protocol (query plus service banner plus our checksum plus an immutable vendored copy) and keyed
+//! on its `(X, Z)` composition, admit-the-alien. Ferguson et al. 2005 (ApJ 623, 585) stays the optional second
+//! witness, its published GARSTEC `delta log kappa` against ÆSOPUS importable as the covariance band. The
+//! convergence acceptance row (that the gas closure and a solar-composition ÆSOPUS grid agree across `3000 to 4000
+//! K`) is registered against the fetched grid.
 
 use civsim_core::Fixed;
+use civsim_units::bignum::BigRat;
+
+/// Parse one decimal token (including scientific notation like `1.650000E-02`) to `Fixed` through the exact
+/// `BigRat` path, the way the opacity tables' values are read without float error.
+fn parse_decimal_fixed(s: &str) -> Option<Fixed> {
+    Fixed::from_bits_i128(
+        BigRat::from_decimal_str(s)
+            .ok()?
+            .round_to_scale(Fixed::FRAC_BITS)?,
+    )
+}
 
 /// The base-ten log of `x`, `log10 x = ln x / ln 10`, in the log domain the whole disk-opacity assembly uses.
 fn log10(x: Fixed) -> Option<Fixed> {
@@ -148,6 +164,61 @@ impl LowTempRosselandGrid {
         let log_r = low_temperature_opacity_log_r(ln_density_g_cm3, temperature_k)?;
         self.rosseland_opacity(log_t, log_r)
     }
+}
+
+/// The standard ÆSOPUS 1.0 web-output `log10 R` axis: 19 values from `-8.0` to `1.0` in steps of `0.5` (the density
+/// coordinate the gas-only tables are computed on). Built here so the loader does not depend on parsing the header
+/// wording; the axis and the composition come from the fetch provenance, the numeric block from the table.
+pub fn aesopus_standard_log_r_axis() -> Vec<Fixed> {
+    (0..19)
+        .map(|i| Fixed::from_ratio(-16 + i as i64, 2)) // -8.0, -7.5, ... 1.0
+        .collect()
+}
+
+/// Parse an ÆSOPUS gas-only Rosseland opacity table (Marigo & Aringer 2009 web output) into a
+/// [`LowTempRosselandGrid`]. The output is `#`-commented header lines then data rows
+/// `log10(T)  log10(kappa)_{R_0} ... log10(kappa)_{R_{n-1}}`, with `log10(T)` DESCENDING and each row carrying one
+/// `log10 kappa` per `log10 R` column. The composition `(X, Z)` and the `log10 R` axis are the fetch's provenance
+/// data (recorded in the provenance JSON alongside the vendored table), so this reads only the numeric block, robust
+/// to header wording; the rows are reversed to ascending `log10 T` for the grid's bracketing. `None` if a data
+/// row's column count does not match the R axis, a token fails to parse, or the block holds no data rows.
+pub fn from_aesopus_rosseland_block(
+    content: &str,
+    hydrogen_mass_fraction: Fixed,
+    metallicity: Fixed,
+    log_r_axis: &[Fixed],
+) -> Option<LowTempRosselandGrid> {
+    let mut log_t = Vec::new();
+    let mut rows: Vec<Vec<Fixed>> = Vec::new();
+    for line in content.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let mut toks = line.split_whitespace();
+        let t = parse_decimal_fixed(toks.next()?)?;
+        let kappa = toks
+            .map(parse_decimal_fixed)
+            .collect::<Option<Vec<Fixed>>>()?;
+        if kappa.len() != log_r_axis.len() {
+            return None;
+        }
+        log_t.push(t);
+        rows.push(kappa);
+    }
+    if log_t.is_empty() {
+        return None;
+    }
+    // The ÆSOPUS block runs high-to-low in log T; the grid's bracketing needs ascending axes.
+    log_t.reverse();
+    rows.reverse();
+    Some(LowTempRosselandGrid {
+        hydrogen_mass_fraction,
+        metallicity,
+        log_t,
+        log_r: log_r_axis.to_vec(),
+        log_kappa: rows,
+    })
 }
 
 /// The GAS-to-MOLECULAR regime handoff `kappa_R` (cm^2/g): a TOTAL, never a sum. Below the gas regime the ionized-
@@ -320,6 +391,62 @@ mod tests {
             gas_molecular_handoff_opacity(Fixed::from_int(1800), lo, hi, None, None),
             None,
             "with neither regime valid the handoff is None"
+        );
+    }
+
+    #[test]
+    fn the_standard_aesopus_r_axis_spans_minus_eight_to_one() {
+        let axis = aesopus_standard_log_r_axis();
+        assert_eq!(axis.len(), 19, "19 log R columns");
+        assert!(close(axis[0].to_f64_lossy(), -8.0, 1e-9));
+        assert!(close(axis[18].to_f64_lossy(), 1.0, 1e-9));
+        assert!(close(axis[1].to_f64_lossy(), -7.5, 1e-9));
+    }
+
+    #[test]
+    fn the_aesopus_block_parses_into_an_ascending_grid() {
+        // A miniature ÆSOPUS 1.0 output: header comments, then log10(T)-DESCENDING rows of log10(kappa) per log10 R
+        // column (here two columns). The loader reverses to ascending log10 T and keeps the composition + R axis
+        // from the provenance, and the interpolator reads the top-temperature corner as 10^-0.4265 = 0.3745.
+        let sample = "\
+#  Calculations performed with AESOPUS (Marigo & Aringer 2009)
+#  Zref = 1.650000E-02
+4.500  -0.4265  -0.4139
+4.400  -0.4543  -0.4492
+4.300  -0.4819  -0.4723
+";
+        let axis = vec![Fixed::from_int(-8), Fixed::from_ratio(-15, 2)];
+        let grid = from_aesopus_rosseland_block(
+            sample,
+            Fixed::from_ratio(7, 10),
+            Fixed::from_ratio(165, 10000),
+            &axis,
+        )
+        .expect("the block parses");
+        assert_eq!(grid.log_t.len(), 3, "three temperature rows");
+        assert!(
+            close(grid.log_t[0].to_f64_lossy(), 4.3, 1e-6)
+                && close(grid.log_t[2].to_f64_lossy(), 4.5, 1e-6),
+            "log T is ascending after the reversal, got {:?}",
+            grid.log_t
+                .iter()
+                .map(|t| t.to_f64_lossy())
+                .collect::<Vec<_>>()
+        );
+        // The top-temperature, lowest-R corner is log10 kappa = -0.4265, kappa = 0.3745.
+        let k = grid
+            .rosseland_opacity(Fixed::from_ratio(45, 10), Fixed::from_int(-8))
+            .unwrap();
+        assert!(
+            close(k.to_f64_lossy(), 0.3745, 1e-3),
+            "the corner opacity is 10^-0.4265 = 0.3745, got {}",
+            k.to_f64_lossy()
+        );
+        // A mismatched column count is rejected (fail loud).
+        assert!(
+            from_aesopus_rosseland_block("4.5 -0.4 -0.4 -0.4\n", Fixed::ONE, Fixed::ZERO, &axis)
+                .is_none(),
+            "a row whose column count misses the R axis is rejected"
         );
     }
 
