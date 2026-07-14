@@ -391,6 +391,76 @@ pub fn batch_melt_fraction_at_pressure(
     )
 }
 
+/// The number of bisection steps the multi-component solidus solve takes, the same fixed-point-floor
+/// convergence bound as the eutectic; engine convergence, not world content.
+const SOLIDUS_BISECTION_STEPS: u32 = 52;
+
+/// The MULTI-SATURATION SOLIDUS of an open assemblage of ideal endmembers at a pressure: the temperature at
+/// which a single liquid is simultaneously saturated in EVERY solid, `sum_i x_i(T, P) = 1`, the generalization
+/// of the binary eutectic (`x_A + x_B = 1`) to N components. This is the temperature at which the first liquid
+/// appears in a fertile assemblage, so a peridotite (olivine, pyroxene, an aluminous phase) has its solidus
+/// derived from its mineral signatures rather than authored. The assemblage is a SLICE, so its membership is
+/// data that grows with the world (Principle 11): a new phase is a new row, not a code change, and an alien
+/// assemblage is the same call. Each added component deepens the eutectic depression, so the solidus falls
+/// below every pure melting point. The pressure enters through the Clapeyron shift, so the solidus rises with
+/// depth. `None` on an empty assemblage or a non-physical endmember. The grade is ideal-solution: on the four-
+/// mineral lherzolite assemblage the solidus lands near 1520 K against the measured ~1373 K (about 150 K high,
+/// the ideal-solution band, the rung-1 calibration target), plainly labelled.
+pub fn multicomponent_solidus(endmembers: &[Endmember], pressure_bar: Fixed) -> Option<Fixed> {
+    if endmembers.is_empty() {
+        return None;
+    }
+    // Shift every endmember to the pressure so the surface saturation curves run on the moved melting points.
+    let mut shifted: Vec<Endmember> = Vec::with_capacity(endmembers.len());
+    for em in endmembers {
+        shifted.push(at_pressure(*em, pressure_bar)?);
+    }
+    // The saturation sum over the shifted endmembers; it rises monotonically with temperature.
+    let sat = |t: Fixed| -> Option<Fixed> {
+        let mut s = Fixed::ZERO;
+        for em in &shifted {
+            s = s.checked_add(liquidus_mole_fraction(*em, t)?)?;
+        }
+        Some(s)
+    };
+    // The upper bracket is the lowest shifted melting point: there the lowest phase saturates fully, so the
+    // sum is at least one. The solidus lies at or below it.
+    let mut hi = shifted[0].melting_point_k;
+    for em in &shifted {
+        if em.melting_point_k < hi {
+            hi = em.melting_point_k;
+        }
+    }
+    if hi <= Fixed::ZERO {
+        return None;
+    }
+    let two = Fixed::from_int(2);
+    // Find a lower bracket where the sum drops below one, halving down from the upper bound (more components
+    // push the solidus lower, so the bracket may need to widen).
+    let mut lo = hi;
+    let mut bracketed = false;
+    for _ in 0..16 {
+        lo = lo.checked_div(two)?;
+        if sat(lo)? < Fixed::ONE {
+            bracketed = true;
+            break;
+        }
+    }
+    if !bracketed {
+        return None;
+    }
+    let mut hi_b = hi;
+    for _ in 0..SOLIDUS_BISECTION_STEPS {
+        let mid = lo.checked_add(hi_b)?.checked_div(two)?;
+        if sat(mid)? > Fixed::ONE {
+            hi_b = mid;
+        } else {
+            lo = mid;
+        }
+    }
+    lo.checked_add(hi_b)?.checked_div(two)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -426,6 +496,15 @@ mod tests {
             melting_point_k: Fixed::from_int(1490),
             fusion_enthalpy_j_per_mol: Fixed::from_int(89_000),
             fusion_volume_cm3_per_mol: Fixed::from_int(4), // estimate, not pressure-gated here
+        }
+    }
+    // Enstatite (MgSiO3), the pyroxene of the peridotite assemblage; incongruent, treated as a pseudo-endmember
+    // for the ideal multi-saturation solidus estimate.
+    fn enstatite() -> Endmember {
+        Endmember {
+            melting_point_k: Fixed::from_int(1830),
+            fusion_enthalpy_j_per_mol: Fixed::from_int(73_000),
+            fusion_volume_cm3_per_mol: Fixed::from_int(5), // estimate, not pressure-gated here
         }
     }
 
@@ -753,6 +832,45 @@ mod tests {
         assert!(
             di_up > diopside().melting_point_k,
             "the silicate rises where the ice falls"
+        );
+    }
+
+    #[test]
+    fn the_peridotite_solidus_derives_from_the_multi_saturation_point() {
+        // The N-component generalization: the fertile lherzolite solidus is where a single liquid saturates in
+        // all four minerals at once (sum x_i = 1), derived from their signatures, not authored. It lands near
+        // 1520 K against the measured ~1373 K dry peridotite solidus (about 150 K high, the ideal-solution
+        // band, the rung-1 target), and it sits below every pure melting point.
+        let assemblage = [forsterite(), enstatite(), diopside(), anorthite()];
+        let t_sol = multicomponent_solidus(&assemblage, Fixed::ZERO).unwrap();
+        assert!(
+            close(t_sol, 1520.0, 6.0),
+            "the ideal peridotite solidus lands near 1520 K, got {}",
+            t_sol.to_f64_lossy()
+        );
+        assert!(
+            t_sol.to_f64_lossy() < 1665.0,
+            "the solidus is below the lowest mineral melting point"
+        );
+        // Each added component deepens the eutectic depression: the four-phase solidus is below the Di-An
+        // binary eutectic.
+        let (t_binary, _) = binary_eutectic(diopside(), anorthite()).unwrap();
+        assert!(
+            t_sol < t_binary,
+            "more components lower the solidus, got {} vs binary {}",
+            t_sol.to_f64_lossy(),
+            t_binary.to_f64_lossy()
+        );
+        // The solidus rises with depth through the Clapeyron shift.
+        let t_deep = multicomponent_solidus(&assemblage, Fixed::from_int(10_000)).unwrap();
+        assert!(t_deep > t_sol, "the solidus rises with pressure");
+        // Guards: an empty assemblage has no solidus; a single phase melts at its own point.
+        assert_eq!(multicomponent_solidus(&[], Fixed::ZERO), None);
+        let single = multicomponent_solidus(&[diopside()], Fixed::ZERO).unwrap();
+        assert!(
+            close(single, 1665.0, 1.0),
+            "a single phase's solidus is its melting point, got {}",
+            single.to_f64_lossy()
         );
     }
 
