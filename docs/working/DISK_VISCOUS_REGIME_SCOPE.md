@@ -60,10 +60,30 @@ surface density `Sigma(r)` (the deferred stage-2 half) re-enters, as the column 
   irradiation plus the ~85 K viscous in quadrature), the transition to viscous-dominated emerging inward with no
   authored boundary.
 - **3c: the opacity closure and the optically-thick midplane**, sub-sliced (the gate ratified the shape):
-  - **3c-i: the composition-keyed opacity registry.** The Rosseland `kappa_R(T)` piecewise evaluator, data-defined
-    (TOML sibling to the phase registry), regime boundaries COMPUTED from segment crossings, ladder keyed off the
-    disk COMPOSITION vector. BLOCKED on the cited Bell-Lin 1994 / Semenov 2003 coefficients (requested; never
-    fabricated), and the `kappa_0` magnitude range (2e-4 to 2e16) sets the representation, so it waits for the table.
+  - **3c-i: the opacity GENERATOR (owner redirect, a multi-slice build).** The original plan (fetch the Bell-Lin
+    1994 / Semenov 2003 piecewise fit as the floor) is HELD PERMANENTLY: those fits are solar-composition
+    compressions that bake one grain model and fixed regime boundaries into dimensional coefficients, violating the
+    dimensionless-constant law (dimensional fits hiding derivable structure) and admit-the-alien (a carbide disk
+    cannot consume a solar-ice fit at any coefficient precision). Build the GENERATOR the fits were fitted to:
+    `kappa_R(T, rho) = Rosseland . Mie . (optical constants x size distribution x mixing rule x condensate
+    fractions) + gas terms`. PROVE-BEFORE-TRUST audit (Prime Directive 1/2): the generator factors are SPECCED,
+    NOT built (owner-confirmed) - a codebase search found no Mie kernel, no Clausius-Mossotti / Maxwell-Garnett /
+    Bruggeman effective-medium mixing rule, and no Dohnanyi / MRN collisional-cascade size distribution; the in-tree
+    "impact" is tool-use percussion, the banked `refractive_index` is a scalar eye-property (not spectral
+    n(lambda),k(lambda)), and `optics.rs` is electronic optical energies (not grain scattering). What IS banked: the
+    condensation fronts (the `Verdict` disposer + Clausius-Clapeyron), so the ice-line and dust-sublimation
+    boundaries EMERGE from our own kernel's gas-solid flips, not fixed-temperature proxies. So 3c-i is a multi-slice
+    BUILD: (a) the derivable-to-the-digit gas/plasma terms now (electron scattering `kappa_es = sigma_T(1+X)/(2 m_H)
+    = 0.1989(1+X)`, 0.348 at X=0.75, verified by hand; the `T^2` grain law derived-in-form via Rayleigh + the
+    Lorentz wing; Kramers with Gaunt ~1; H- via Saha + one cross-section + 0.754 eV); (b) the Mie exact-EM kernel;
+    (c) the effective-medium mixing rule; (d) the size-distribution (MRN = the Dohnanyi cascade exponent); (e) the
+    generator composing them with the disposer's condensate fractions (which also makes the dust-to-gas ratio
+    COMPUTED, not authored 0.01). The fetch REDIRECTS from the Bell-Lin fits to the per-species measured optical
+    constants n(lambda),k(lambda) ([M], machine-readable: Draine silicate/graphite, Warren-Brandt ice, Jena
+    iron/troilite/organics, Pollack 1994 solar mix). Bell-Lin/Semenov demote to VALIDATION-BATTERY rows (their
+    factor-2-3 mutual spread the honest band). Three pre-registered gates: solar-composition reproduction inside the
+    Bell-Lin/Semenov envelope, the 0.348 digit match, and the ice-line opacity jump emerging at the disposer's front
+    (not a hardcoded 170 K).
   - **3c-ii: the surface density `Sigma(r)`. BUILT (byte-neutral).** `disk_surface_density`, the Lynden-Bell and
     Pringle self-similar profile `Sigma_c*(r/r_c)^(-gamma)*exp(-(r/r_c)^(2-gamma))`, the column the optical depth
     integrates. Reserved caller residues: the normalization `Sigma_c` (disk-mass fraction), the slope `gamma`
