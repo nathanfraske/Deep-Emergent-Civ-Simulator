@@ -221,6 +221,19 @@ pub fn from_aesopus_rosseland_block(
     })
 }
 
+/// The vendored solar-gate ÆSOPUS gas-only grid (AGSS09, `X = 0.7`, `Z = 0.0165`), the default molecular total for
+/// a solar-composition disk, loaded from the table fetched under the provenance protocol. The `(X, Z)`-keyed family
+/// (the Z ladder, the metal-poor row, the C/O ladder) lives beside it in `data/aesopus_lowt/`; a full registry
+/// selecting by composition is the grain-slice wiring. `None` only if the vendored table fails to parse.
+pub fn aesopus_solar_gate_grid() -> Option<LowTempRosselandGrid> {
+    from_aesopus_rosseland_block(
+        include_str!("../data/aesopus_lowt/aesopus1.0_gasonly_gate_AGSS09_X0.70_Z0.0165.dat"),
+        Fixed::from_ratio(7, 10),
+        Fixed::from_ratio(165, 10000),
+        &aesopus_standard_log_r_axis(),
+    )
+}
+
 /// The GAS-to-MOLECULAR regime handoff `kappa_R` (cm^2/g): a TOTAL, never a sum. Below the gas regime the ionized-
 /// gas closure returns `None` (the cold molecular gap) and the molecular total owns the opacity; above it (hotter
 /// than the molecular grid's ceiling, or where the grid is unavailable) the gas total owns it; across the narrow
@@ -366,6 +379,46 @@ mod tests {
             close(corner.to_f64_lossy(), 0.5623, 1e-3),
             "a query past the grid clamps to the corner (10^-0.25 = 0.562), got {}",
             corner.to_f64_lossy()
+        );
+    }
+
+    #[test]
+    fn the_vendored_gate_grid_is_positive_and_shows_the_molecular_gap() {
+        // The global-positivity acceptance row plus the self-validation of the fetched gate grid: the vendored
+        // AGSS09 gas-only table loads to a 42x19 grid, every interpolated opacity across the whole grid is strictly
+        // positive (the ÆSOPUS Rosseland means never sink to zero, so the handoff has a valid molecular total
+        // everywhere it is queried), and the physical S-curve is present: at log R = -3 the 3162 K opacity sits in
+        // the deep molecular gap, far below both the 1585 K molecular bands and the 10000 K H- wall.
+        let grid = aesopus_solar_gate_grid().expect("the vendored gate grid loads");
+        assert_eq!(grid.log_t.len(), 42, "42 temperature rows");
+        assert_eq!(grid.log_r.len(), 19, "19 density columns");
+        for i in 0..grid.log_t.len() {
+            for j in 0..grid.log_r.len() {
+                let k = grid
+                    .rosseland_opacity(grid.log_t[i], grid.log_r[j])
+                    .unwrap();
+                assert!(
+                    k > Fixed::ZERO,
+                    "opacity is positive at log T = {}, log R = {}",
+                    grid.log_t[i].to_f64_lossy(),
+                    grid.log_r[j].to_f64_lossy()
+                );
+            }
+        }
+        let log_r = Fixed::from_int(-3);
+        let k_cold = grid
+            .rosseland_opacity(Fixed::from_ratio(32, 10), log_r)
+            .unwrap();
+        let k_gap = grid
+            .rosseland_opacity(Fixed::from_ratio(35, 10), log_r)
+            .unwrap();
+        let k_hot = grid.rosseland_opacity(Fixed::from_int(4), log_r).unwrap();
+        assert!(
+            k_gap < k_cold && k_gap < k_hot,
+            "the molecular gap at 3162 K dips below the 1585 K bands and the 10000 K H- wall: cold {}, gap {}, hot {}",
+            k_cold.to_f64_lossy(),
+            k_gap.to_f64_lossy(),
+            k_hot.to_f64_lossy()
         );
     }
 
