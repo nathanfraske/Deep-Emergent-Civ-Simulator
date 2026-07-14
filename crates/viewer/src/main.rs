@@ -37,6 +37,7 @@ use civsim_sim::anatomy::WorldProfile;
 use civsim_sim::clock::PlaybackDriver;
 use civsim_sim::genesis::{genesis, GenesisParams, LivingWorld, WorldGenesis};
 use civsim_sim::located::OccupantId;
+use civsim_world::terrain::TerrainRelief;
 use civsim_world::view::Camera;
 use civsim_world::{BiomeSet, Coord3, QuadTree, Rgb};
 
@@ -159,6 +160,38 @@ fn write_ppm(path: &str, w: usize, h: usize, buf: &[u32]) {
     std::fs::File::create(path)
         .and_then(|mut f| f.write_all(&out))
         .expect("write the PPM");
+}
+
+/// Render the Slice-0 DERIVED-terrain demo to a binary PPM and exit (the capstone's visible spine, headless): the
+/// labelled demo crust field's relief, derived from composition through the substrate, painted by
+/// [`render::paint_derived_tiles`]. Usage: `--derived-terrain <path> [cols] [rows] [tile_px]`. The terrain in the
+/// frame is what the material IS, not fractal noise, and the window is a pure observer (Principle 10).
+fn derived_terrain_cmd(argv: &[String]) {
+    let path = argv
+        .get(2)
+        .cloned()
+        .unwrap_or_else(|| "derived-terrain.ppm".to_string());
+    let cols: usize = parse(argv.get(3), 48);
+    let rows: usize = parse(argv.get(4), 32);
+    let tile_px: usize = parse(argv.get(5), 14);
+    let tiles = match civsim_sim::geodynamics::slice0_demo_field(cols, rows) {
+        Some(t) => t,
+        None => {
+            eprintln!("the derived demo field did not resolve (a data gap); nothing written");
+            return;
+        }
+    };
+    let (w, h) = (cols.max(1) * tile_px.max(3), rows.max(1) * tile_px.max(3));
+    let buf = render::paint_derived_tiles(&tiles, cols, tile_px, w, h, BG);
+    write_ppm(&path, w, h, &buf);
+    let tally = |r: TerrainRelief| tiles.iter().filter(|t| t.relief == r).count();
+    eprintln!(
+        "wrote {path} ({w}x{h}) derived terrain: {} tiles ({} submarine, {} lowland, {} upland), all derived from composition",
+        tiles.len(),
+        tally(TerrainRelief::Submarine),
+        tally(TerrainRelief::Lowland),
+        tally(TerrainRelief::Upland),
+    );
 }
 
 /// The occupied tile nearest the map centre, for centring a superfine frame.
@@ -331,6 +364,16 @@ fn main() {
     // the living world can be inspected without a display.
     if argv.get(1).map(|s| s == "--ppm").unwrap_or(false) {
         snapshot(&argv);
+        return;
+    }
+    // Headless derived-terrain demo: `--derived-terrain <path> [cols] [rows] [tile_px]` writes a frame whose
+    // terrain is derived from the demo crust field's composition (the capstone's visible spine) and exits.
+    if argv
+        .get(1)
+        .map(|s| s == "--derived-terrain")
+        .unwrap_or(false)
+    {
+        derived_terrain_cmd(&argv);
         return;
     }
     // Headless render for the test harness: `--render <path> <mode> <seed> <w> <h>` where mode

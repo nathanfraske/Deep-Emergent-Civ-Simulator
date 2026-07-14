@@ -24,6 +24,8 @@
 
 use civsim_core::{splitmix64, Fixed};
 use civsim_sim::genesis::LivingWorld;
+use civsim_sim::geodynamics::DerivedTile;
+use civsim_world::terrain::TerrainRelief;
 use civsim_world::{BiomeSet, Coord3, Rgb, TopologySpace};
 
 /// The colour of an organism mark: a base hue by trophic layer, jittered per species so each
@@ -418,6 +420,99 @@ pub fn superfine(
     buf
 }
 
+/// The glyph a DERIVED tile shows, keyed by its relief class (the R1-override terrain projected to a mark in the
+/// Dwarf-Fortress-spirit glyph view): submarine reads as water `~`, lowland as flat ground `.`, upland as raised
+/// `^`. Presentation only, a one-way read of the derived relief, never canonical state (Principle 10).
+pub fn derived_tile_glyph(relief: TerrainRelief) -> char {
+    match relief {
+        TerrainRelief::Submarine => '~',
+        TerrainRelief::Lowland => '.',
+        TerrainRelief::Upland => '^',
+    }
+}
+
+/// The colour a DERIVED tile paints in the window, keyed by its relief class. The palette (deep water blue,
+/// basaltic lowland grey, a lighter upland grey) is the tunable visual projection, an aesthetic call the owner
+/// reserves: authored ONLY here in the non-canon renderer, byte-neutral on canon (Principle 10). The relief it
+/// keys off is derived (the substrate's elevation crossing the derived references), so what varies across the
+/// frame is physics; only the swatch is authored.
+pub fn derived_tile_color(relief: TerrainRelief) -> Rgb {
+    match relief {
+        TerrainRelief::Submarine => Rgb::new(28, 78, 156), // deep water
+        TerrainRelief::Lowland => Rgb::new(74, 68, 62),    // basaltic lowland
+        TerrainRelief::Upland => Rgb::new(124, 113, 102),  // lighter raised rock
+    }
+}
+
+/// Draw one glyph centred in a `size` by `size` cell at `(x0, y0)`, the font scaled to the cell. Presentation only.
+fn draw_glyph_centered(
+    buf: &mut [u32],
+    w: usize,
+    x0: usize,
+    y0: usize,
+    size: usize,
+    ch: char,
+    fg: Rgb,
+) {
+    let scale = (size / 8).max(1);
+    let gw = 5 * scale;
+    let gh = 7 * scale;
+    let ix = x0 + size.saturating_sub(gw) / 2;
+    let iy = y0 + size.saturating_sub(gh) / 2;
+    let fgp = fg.pack();
+    for (r, bits) in glyph_rows(ch).iter().enumerate() {
+        for col in 0..5 {
+            if bits & (1 << (4 - col)) != 0 {
+                fill_rect(buf, w, ix + col * scale, iy + r * scale, scale, scale, fgp);
+            }
+        }
+    }
+}
+
+/// Paint a field of DERIVED tiles as a `w` by `h` frame: each tile a `tile_px` block of its relief colour
+/// ([`derived_tile_color`]) with its relief glyph ([`derived_tile_glyph`]) centred, laid out `cols` to a row in
+/// generation order. This is the capstone's visible spine reaching the window: the terrain in the frame is what
+/// the substrate derived (composition -> elevation -> relief), never fractal noise or an authored biome swatch
+/// (the R1 override, end to end). A pure, deterministic read of the derived field, one-way canon -> view, so it
+/// writes no canonical state and adds nothing to the canon hash (Principle 10).
+pub fn paint_derived_tiles(
+    tiles: &[DerivedTile],
+    cols: usize,
+    tile_px: usize,
+    w: usize,
+    h: usize,
+    bg: Rgb,
+) -> Vec<u32> {
+    let tile_px = tile_px.max(3);
+    let cols = cols.max(1);
+    let mut buf = vec![bg.pack(); w * h];
+    for (i, t) in tiles.iter().enumerate() {
+        let cx = (i % cols) * tile_px;
+        let cy = (i / cols) * tile_px;
+        if cx >= w || cy >= h {
+            continue;
+        }
+        let color = derived_tile_color(t.relief);
+        fill_rect(&mut buf, w, cx, cy, tile_px, tile_px, color.pack());
+        // A readable glyph over the block: dark on a light tile, light on a dark one.
+        let fg = if color.luminance() > 128 {
+            Rgb::new(20, 20, 24)
+        } else {
+            Rgb::new(228, 232, 236)
+        };
+        draw_glyph_centered(
+            &mut buf,
+            w,
+            cx,
+            cy,
+            tile_px,
+            derived_tile_glyph(t.relief),
+            fg,
+        );
+    }
+    buf
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -508,6 +603,97 @@ mod tests {
         assert!(
             peak.r > 180 && peak.g > 180 && peak.b > 180,
             "a cold peak reads pale"
+        );
+    }
+
+    #[test]
+    fn the_derived_tile_glyph_and_colour_key_off_relief() {
+        // The render mapping is a pure, distinct read of the relief class: three classes, three glyphs, three
+        // colours. Water reads bluest; the upland reads lighter than the lowland (the raised-rock swatch), so the
+        // frame's contrast tracks the derived relief.
+        assert_eq!(derived_tile_glyph(TerrainRelief::Submarine), '~');
+        assert_eq!(derived_tile_glyph(TerrainRelief::Lowland), '.');
+        assert_eq!(derived_tile_glyph(TerrainRelief::Upland), '^');
+        let sub = derived_tile_color(TerrainRelief::Submarine);
+        let low = derived_tile_color(TerrainRelief::Lowland);
+        let up = derived_tile_color(TerrainRelief::Upland);
+        assert!(sub.b > sub.r && sub.b > sub.g, "submarine reads blue");
+        assert!(
+            up.luminance() > low.luminance(),
+            "the upland reads lighter than the lowland"
+        );
+        assert!(
+            sub != low && low != up && sub != up,
+            "each relief has a distinct swatch"
+        );
+    }
+
+    #[test]
+    fn paint_derived_tiles_replays_and_shows_the_relief() {
+        // The paint is a deterministic pure read: the same derived field paints the same frame, byte for byte. A
+        // hand-built render-test field (labelled test-only) of one submarine and one upland tile shows both relief
+        // swatches in the frame.
+        let field = [
+            DerivedTile {
+                elevation: Fixed::from_int(-5),
+                relief: TerrainRelief::Submarine,
+            },
+            DerivedTile {
+                elevation: Fixed::from_int(9),
+                relief: TerrainRelief::Upland,
+            },
+        ];
+        let (cols, tile_px, w, h) = (2usize, 16usize, 32usize, 16usize);
+        let bg = Rgb::new(8, 9, 14);
+        let frame = paint_derived_tiles(&field, cols, tile_px, w, h, bg);
+        assert_eq!(frame.len(), w * h, "one word per pixel");
+        assert_eq!(
+            frame,
+            paint_derived_tiles(&field, cols, tile_px, w, h, bg),
+            "a pure read replays byte for byte"
+        );
+        assert!(
+            frame.contains(&derived_tile_color(TerrainRelief::Submarine).pack()),
+            "the submarine swatch is in the frame"
+        );
+        assert!(
+            frame.contains(&derived_tile_color(TerrainRelief::Upland).pack()),
+            "the upland swatch is in the frame"
+        );
+    }
+
+    #[test]
+    fn an_authored_composition_yields_a_visible_frame_whose_terrain_is_derived() {
+        // THE VISIBLE SPINE, END TO END: the labelled Slice-0 demo field (its per-tile composition the only authored
+        // input) drives the real substrate to derived elevations, the field datum, and the relief by crossing it,
+        // and that DERIVED field paints a frame. The light silica band floats to Upland, the forsterite to Lowland,
+        // the dense periclase below the datum to Submarine, so the terrain in the window is what the material is,
+        // never fractal noise (the R1 override reaching the viewer). Colour is authored only in the swatch; the
+        // relief that selects it is derived. Generation lives in the sim lane; the viewer only reads and paints.
+        let tiles =
+            civsim_sim::geodynamics::slice0_demo_field(6, 6).expect("the derived demo field");
+        // The frame carries all three DERIVED relief classes.
+        let has = |r: TerrainRelief| tiles.iter().any(|t| t.relief == r);
+        assert!(has(TerrainRelief::Upland), "a light band derives upland");
+        assert!(has(TerrainRelief::Lowland), "a middle band derives lowland");
+        assert!(
+            has(TerrainRelief::Submarine),
+            "a dense band derives submarine"
+        );
+        let bg = Rgb::new(8, 9, 14);
+        let frame = paint_derived_tiles(&tiles, 6, 16, 96, 96, bg);
+        assert_eq!(
+            frame,
+            paint_derived_tiles(&tiles, 6, 16, 96, 96, bg),
+            "the derived-terrain frame is a deterministic pure read"
+        );
+        // The frame shows the three DERIVED relief swatches: the terrain reached the window from composition alone.
+        assert!(frame.contains(&derived_tile_color(TerrainRelief::Upland).pack()));
+        assert!(frame.contains(&derived_tile_color(TerrainRelief::Lowland).pack()));
+        assert!(frame.contains(&derived_tile_color(TerrainRelief::Submarine).pack()));
+        assert!(
+            frame.iter().any(|&p| p != bg.pack()),
+            "a derived frame is painted"
         );
     }
 }
