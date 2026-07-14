@@ -60,6 +60,7 @@ pub mod petrology_data;
 pub mod qeq;
 pub mod quantities;
 pub mod rose_eos;
+pub mod saha;
 pub mod scaled;
 pub mod stoner;
 pub mod term_values;
