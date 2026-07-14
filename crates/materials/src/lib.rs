@@ -54,6 +54,7 @@ pub mod freezer;
 pub mod harrison;
 pub mod localized;
 pub mod log;
+pub mod magnetism;
 pub mod memo;
 pub mod metallic;
 pub mod nucleation;
@@ -85,6 +86,9 @@ pub use electronic::{
 pub use harrison::{eta, two_center_matrix_element, TwoCenterBond};
 pub use localized::LocalizedRoute;
 pub use log::{VerdictKind, VerdictLog, VerdictRecord};
+pub use magnetism::{
+    d_electron_count_3d, hund_local_moment, hund_unpaired_count, spin_only_moment_bohr,
+};
 pub use memo::Memo;
 pub use metallic::MetallicRoute;
 pub use nucleation::{

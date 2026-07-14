@@ -273,6 +273,15 @@ impl<'a> CorrelationClassifier<'a> {
         route_of_class(self.classify(composition))
     }
 
+    /// The correlated cation and its charge-balance-derived charge for a composition (the d-block centre the
+    /// Localized route's Hund local moment keys on), or `None` for a non-correlated composition. Exposes the
+    /// classifier's own pair identification so a consumer (the magnetism dispatch) reads the cation and its charge
+    /// rather than re-deriving them.
+    pub fn correlated_cation(&self, composition: &[(String, u32)]) -> Option<(String, u32)> {
+        let pair = self.identify_correlated_pair(composition)?;
+        Some((pair.cation, pair.cation_charge))
+    }
+
     /// The correlated cation-anion roles of a binary compound: the anion is the element with a negative valence,
     /// the cation is the other AND must carry a d-state radius (a correlated d-block centre); the cation charge
     /// derives from charge balance. `None` for a non-binary, a non-d-block cation, or a non-integer balance.
