@@ -116,6 +116,40 @@ pub fn electron_scattering_opacity(
     Fixed::from_bits_i128(bits)
 }
 
+/// `ln` of the Thomson cross section in cm^2, from the fundamentals in the log domain: `sigma_T ~6.65e-25 cm^2`
+/// underflows `Fixed`, so the `n_e`-linear electron-scattering opacity carries it as its log. `sigma_T = (8 pi/3)
+/// r_e^2`, `r_e = e^2/(4 pi eps_0 m_e c^2)`; `ln r_e` in cm folds the metre-to-cm scaling (`r_e * 100`) as `+2 ln 10`.
+fn ln_thomson_cross_section_cm2() -> Option<Fixed> {
+    let ln_e = crate::saha::ln_fundamental("e")?;
+    let ln_eps0 = crate::saha::ln_fundamental("eps_0")?;
+    let ln_me = crate::saha::ln_fundamental("m_e")?;
+    let ln_c = crate::saha::ln_fundamental("c")?;
+    let ln_4pi = crate::saha::ln_of_decimal("12.56637061")?;
+    let ln_8pi_3 = crate::saha::ln_of_decimal("8.37758041")?;
+    let ln10 = Fixed::from_int(10).ln();
+    // ln r_e in cm = [2 ln e - ln(4 pi) - ln eps_0 - ln m_e - 2 ln c] (SI, m) + 2 ln 10 (m -> cm).
+    let ln_re_cm =
+        Fixed::from_int(2).mul(ln_e) - ln_4pi - ln_eps0 - ln_me - Fixed::from_int(2).mul(ln_c)
+            + Fixed::from_int(2).mul(ln10);
+    Some(ln_8pi_3 + Fixed::from_int(2).mul(ln_re_cm))
+}
+
+/// The electron-scattering opacity `kappa_es = sigma_T * n_e / rho` (cm^2/g), LINEAR in the free-electron density
+/// (electron scattering IS `sigma_T n_e / rho`; the fully-ionized `0.348(1+X)` was only that evaluated at full
+/// ionization, so this computes from `n_e`, never patches the constant with a fraction). Consumes the SHARED Saha
+/// `n_e` (as its log, cm^-3) and `ln rho` (g/cm^3), so es, ff, and H- read ONE electron density (the join law).
+/// Computed in the log domain because `sigma_T * n_e` underflows `Fixed`: `ln kappa_es = ln sigma_T + ln n_e -
+/// ln rho`, then one `exp`. At full ionization `n_e = (1+X) rho / (2 m_H)` it reproduces the restored electron-
+/// scattering constant `0.348(1+X)` exactly, the general form provably containing its old limit (the reassembly
+/// identity). `None` if a constant fails to load.
+pub fn electron_scattering_opacity_from_electron_density(
+    ln_electron_density_cm3: Fixed,
+    ln_density_g_cm3: Fixed,
+) -> Option<Fixed> {
+    let ln_kappa = ln_thomson_cross_section_cm2()? + ln_electron_density_cm3 - ln_density_g_cm3;
+    Some(ln_kappa.exp())
+}
+
 /// The number of quadrature intervals the Rosseland-mean integral takes: a FIXED count (the determinism bound, the
 /// `SURFACE_BALANCE_ITERS` model), integer-only, no until-converged spin. Set so the Planck weighting is well
 /// resolved across its peak and its tails past the bounds are negligible.
@@ -1451,6 +1485,26 @@ mod tests {
             (k.to_f64_lossy() - 0.348).abs() < 1e-3,
             "solar electron scattering is ~0.348 cm^2/g, got {}",
             k.to_f64_lossy()
+        );
+    }
+
+    #[test]
+    fn the_electron_scattering_from_ne_reproduces_the_full_ionization_constant() {
+        // The reassembly identity (the 0.348 row, generalized): kappa_es = sigma_T n_e/rho evaluated at the
+        // fully-ionized electron density n_e = (1+X) rho/(2 m_H) must reproduce the restored 0.348(1+X) constant,
+        // so the general n_e-linear form provably contains its old limit. X = 0.75, rho = 1e-6 g/cm^3:
+        // n_e = 1.75/(2 * 1.674e-24) * 1e-6 = 5.228e17 cm^-3.
+        let es_constant =
+            electron_scattering_opacity(Fixed::from_ratio(75, 100), &table()).unwrap();
+        let ln_ne_full = crate::saha::ln_of_decimal("5.228e17").unwrap();
+        let ln_rho = crate::saha::ln_of_decimal("1e-6").unwrap();
+        let es_from_ne =
+            electron_scattering_opacity_from_electron_density(ln_ne_full, ln_rho).unwrap();
+        assert!(
+            (es_from_ne.to_f64_lossy() - es_constant.to_f64_lossy()).abs() < 0.01,
+            "es(n_e) at full ionization reproduces 0.348(1+X) = {}, got {}",
+            es_constant.to_f64_lossy(),
+            es_from_ne.to_f64_lossy()
         );
     }
 
