@@ -73,9 +73,13 @@ surface density `Sigma(r)` (the deferred stage-2 half) re-enters, as the column 
     n(lambda),k(lambda)), and `optics.rs` is electronic optical energies (not grain scattering). What IS banked: the
     condensation fronts (the `Verdict` disposer + Clausius-Clapeyron), so the ice-line and dust-sublimation
     boundaries EMERGE from our own kernel's gas-solid flips, not fixed-temperature proxies. So 3c-i is a multi-slice
-    BUILD: (a) the derivable-to-the-digit gas/plasma terms now (electron scattering `kappa_es = sigma_T(1+X)/(2 m_H)
-    = 0.1989(1+X)`, 0.348 at X=0.75, verified by hand; the `T^2` grain law derived-in-form via Rayleigh + the
-    Lorentz wing; Kramers with Gaunt ~1; H- via Saha + one cross-section + 0.754 eV); (b) the Mie exact-EM kernel;
+    BUILD: (a) the derivable-to-the-digit gas/plasma terms now. **ELECTRON SCATTERING BUILT** (`physics/opacity.rs`,
+    `electron_scattering_opacity`): `kappa_es = sigma_T(1+X)/(2 m_H)` derived from fundamentals + the periodic table,
+    `sigma_T = (8*pi/3)(e^2/(4*pi*eps_0*m_e*c^2))^2` and `m_H = M_H/N_A`, so the owner grew the register by the
+    electron mass `m_e` (the eighth fundamental, its first consumer). The 0.348 GATE PASSES: at X=0.75 it derives
+    0.34776 cm^2/g (Bell-Lin's printed 0.348, the more precise 0.1989 coefficient), nothing fetched. Remaining gas
+    terms: the `T^2` grain law derived-in-form via Rayleigh + the Lorentz wing; Kramers with Gaunt ~1; H- via Saha +
+    one cross-section + 0.754 eV. Then (b) the Mie exact-EM kernel;
     (c) the effective-medium mixing rule; (d) the size-distribution (MRN = the Dohnanyi cascade exponent); (e) the
     generator composing them with the disposer's condensate fractions (which also makes the dust-to-gas ratio
     COMPUTED, not authored 0.01). The fetch REDIRECTS from the Bell-Lin fits to the per-species measured optical

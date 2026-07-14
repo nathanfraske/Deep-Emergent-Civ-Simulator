@@ -15,10 +15,11 @@
 //! The closed table of fundamental physical constants: the ONE authored universal layer of the
 //! value-authoring line (AGENTIC_ADDENDUM section 9, the fundamental-constants floor). The universal authored
 //! layer reduces to exactly the fundamental constants reality measures and cannot derive from anything deeper
-//! (`c`, `k_B`, `h`, `e`, `eps_0`, `N_A`, `G`, the handful this engine's physics reaches). The list is small
-//! and bounded by reality's own fundamentals: it grows only when the engine's physics reaches a further one of
-//! them (the gravitational constant `G` joined when the genesis-forward stellar and orbital physics arrived as
-//! its first consumer), never an invented number, and never beyond the constants reality measures. Everything
+//! (`c`, `k_B`, `h`, `e`, `eps_0`, `N_A`, `G`, `m_e`, the handful this engine's physics reaches). The list is
+//! small and bounded by reality's own fundamentals: it grows only when the engine's physics reaches a further one
+//! of them (the gravitational constant `G` joined when the genesis-forward stellar and orbital physics arrived as
+//! its first consumer; the electron mass `m_e` joined when the disk-opacity generator reached the Thomson cross
+//! section), never an invented number, and never beyond the constants reality measures. Everything
 //! DERIVABLE derives from these:
 //! a composite such as the Stefan-Boltzmann sigma is COMPUTED from the fundamentals, never authored as its own
 //! number.
@@ -118,10 +119,24 @@ pub const GRAVITATIONAL_CONSTANT: Fundamental = Fundamental {
     provenance: "CODATA 2018 (measured, relative standard uncertainty 2.2e-5)",
 };
 
+/// The electron rest mass. Like `G` it is MEASURED, not SI-defining-exact, so its provenance carries the
+/// relative standard uncertainty. It is the fundamental the disk-opacity generator reaches: the Thomson cross
+/// section `sigma_T = (8*pi/3) * (e^2 / (4*pi*eps_0*m_e*c^2))^2` (the electron-scattering opacity `kappa_es`) and
+/// the Saha ionization balance (H- and Kramers opacity) both read it, joining the floor as its first consumer
+/// arrives.
+pub const ELECTRON_MASS: Fundamental = Fundamental {
+    symbol: "m_e",
+    name: "electron mass",
+    value: "9.1093837015e-31",
+    unit: "kg",
+    provenance: "CODATA 2018 (measured, relative standard uncertainty 3.0e-10)",
+};
+
 /// The list of the fundamental constants this engine's physics reaches, bounded by reality's own set. It
 /// grows only when the physics reaches a further one of reality's measured fundamentals (G joined for the
-/// genesis-forward stellar and orbital physics), never an invented number (AGENTIC_ADDENDUM section 9).
-pub const FUNDAMENTALS: [Fundamental; 7] = [
+/// genesis-forward stellar and orbital physics; m_e for the disk-opacity generator), never an invented number
+/// (AGENTIC_ADDENDUM section 9).
+pub const FUNDAMENTALS: [Fundamental; 8] = [
     SPEED_OF_LIGHT,
     BOLTZMANN,
     PLANCK,
@@ -129,6 +144,7 @@ pub const FUNDAMENTALS: [Fundamental; 7] = [
     VACUUM_PERMITTIVITY,
     AVOGADRO,
     GRAVITATIONAL_CONSTANT,
+    ELECTRON_MASS,
 ];
 
 /// A composite physical constant: computed from the fundamentals, never authored as its own number
@@ -336,8 +352,7 @@ mod tests {
     #[test]
     fn the_gravitational_constant_is_the_seventh_measured_fundamental() {
         assert_eq!(
-            FUNDAMENTALS.len(),
-            7,
+            FUNDAMENTALS[6], GRAVITATIONAL_CONSTANT,
             "G joined the floor as the seventh fundamental"
         );
         let g = fundamental("G").expect("G is in the fundamentals table");
@@ -355,6 +370,29 @@ mod tests {
         assert!(
             (6.6e-11..6.8e-11).contains(&v),
             "G is about 6.674e-11, got {v:e}"
+        );
+    }
+
+    #[test]
+    fn the_electron_mass_is_the_eighth_measured_fundamental() {
+        // m_e joined the floor as the eighth fundamental, reached by the disk-opacity generator (the Thomson
+        // cross section and the Saha balance). Like G it is measured, not SI-defining-exact.
+        assert_eq!(FUNDAMENTALS.len(), 8, "m_e is the eighth fundamental");
+        assert_eq!(FUNDAMENTALS[7], ELECTRON_MASS);
+        let m_e = fundamental("m_e").expect("m_e is in the fundamentals table");
+        assert_eq!(m_e, &ELECTRON_MASS);
+        assert_eq!(m_e.name, "electron mass");
+        assert_eq!(m_e.unit, "kg");
+        assert!(
+            m_e.provenance.contains("measured"),
+            "m_e's provenance must record it as measured, not exact: {}",
+            m_e.provenance
+        );
+        // The value parses and sits at the expected order of magnitude (~9.109e-31). f64 in a test only.
+        let v: f64 = m_e.value.parse().expect("m_e's value parses");
+        assert!(
+            (9.0e-31..9.2e-31).contains(&v),
+            "m_e is about 9.109e-31, got {v:e}"
         );
     }
 }
