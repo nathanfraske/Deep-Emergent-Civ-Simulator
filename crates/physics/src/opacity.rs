@@ -828,6 +828,251 @@ pub fn rayleigh_grain_opacity(
     Fixed::from_bits_i128(kappa.round_to_scale(Fixed::FRAC_BITS)?)
 }
 
+/// The fractional-bit scale of the Mie kernel's internal complex arithmetic. A working value is a plain
+/// `i128` reading `w / 2^MIE_SCALE_BITS`, so it carries ~19 significant decimal figures (well above the
+/// Q32.32 result's ~9.6, which absorbs the recurrence's rounding), and the largest magnitude the field
+/// recurrence reaches over the kernel's valid range (`|chi_n|^2 ~ 2e10` near the small-x end) fits the
+/// `i128` backing with room to spare. Only a product or quotient, which can exceed `i128`, borrows the
+/// exact `BigRat` as its wide intermediate and rounds straight back; every other step is `i128` arithmetic.
+/// An engine-accuracy bound, chosen from the representable-range and precision budget, not world content.
+const MIE_SCALE_BITS: u32 = 64;
+
+/// The `i128` reading of `Fixed::ONE` at the Mie scale.
+const MIE_ONE_W: i128 = 1i128 << MIE_SCALE_BITS;
+
+/// The largest size parameter the Mie kernel evaluates. Above it the geometric-optics limit (`Q_ext -> 2`,
+/// `Q_abs` set by the surface reflectance) is the accurate and cheap description, so the caller uses that
+/// rather than paying the `O(x)` field recurrence. A performance-and-range bound, not a physics claim.
+const MIE_X_SWITCH: i32 = 50;
+
+/// The smallest size parameter the Mie kernel evaluates, as the ratio `MIE_X_MIN_NUM / MIE_X_MIN_DEN`.
+/// Below it the closed dipole (Rayleigh) form [`rayleigh_grain_opacity`] is exact to a fraction of a
+/// percent, and the upward field recurrence's `1/x` amplification would erode the `i128` margin (the
+/// recurrence sits deeper in the unstable small-x regime). The caller uses the Rayleigh form there. A
+/// range bound matched to where the cheaper closed form is accurate, not world content.
+const MIE_X_MIN_NUM: i64 = 1;
+const MIE_X_MIN_DEN: i64 = 10;
+
+/// A `u128` magnitude as a `BigUint` (the register carries `from_u64` only; a Mie intermediate magnitude
+/// reaches ~`2^112`, beyond a single `u64`).
+fn biguint_from_u128(v: u128) -> BigUint {
+    BigUint::from_u64((v >> 64) as u64)
+        .shl_bits(64)
+        .add(&BigUint::from_u64(v as u64))
+}
+
+/// A wide-fixed value (`w / 2^MIE_SCALE_BITS`) as an exact rational, sign preserved.
+fn wfixed_to_bigrat(w: i128) -> BigRat {
+    BigRat::new(
+        w < 0,
+        biguint_from_u128(w.unsigned_abs()),
+        BigUint::from_u64(1).shl_bits(MIE_SCALE_BITS),
+    )
+}
+
+/// A `Fixed` (Q32.32) as a wide-fixed value: an exact left shift by the scale difference, sign preserved.
+fn fixed_to_wfixed(value: Fixed) -> i128 {
+    (value.to_bits() as i128) << (MIE_SCALE_BITS - Fixed::FRAC_BITS)
+}
+
+/// The wide-fixed product `a * b`, formed exactly in `BigRat` and rounded once to the scale. `None` if the
+/// result leaves the `i128` backing (fail-loud: no wrap ever reaches the caller).
+fn wmul(a: i128, b: i128) -> Option<i128> {
+    wfixed_to_bigrat(a)
+        .mul(&wfixed_to_bigrat(b))
+        .round_to_scale(MIE_SCALE_BITS)
+}
+
+/// The wide-fixed quotient `a / b`, formed exactly and rounded once. `None` on a zero divisor or an
+/// out-of-range result (fail-loud).
+fn wdiv(a: i128, b: i128) -> Option<i128> {
+    if b == 0 {
+        return None;
+    }
+    wfixed_to_bigrat(a)
+        .div(&wfixed_to_bigrat(b))
+        .round_to_scale(MIE_SCALE_BITS)
+}
+
+/// A complex number in wide-fixed components (`re + i*im`, each `w / 2^MIE_SCALE_BITS`). The whole
+/// arithmetic is fail-loud: every operation returns `None` the instant a component leaves the `i128`
+/// backing, so the Mie kernel never propagates a wrapped value.
+#[derive(Clone, Copy)]
+struct WCplx {
+    re: i128,
+    im: i128,
+}
+
+impl WCplx {
+    /// A real value (`im = 0`).
+    fn real(re: i128) -> Self {
+        WCplx { re, im: 0 }
+    }
+
+    /// Sum.
+    fn add(self, o: WCplx) -> Option<WCplx> {
+        Some(WCplx {
+            re: self.re.checked_add(o.re)?,
+            im: self.im.checked_add(o.im)?,
+        })
+    }
+
+    /// Difference.
+    fn sub(self, o: WCplx) -> Option<WCplx> {
+        Some(WCplx {
+            re: self.re.checked_sub(o.re)?,
+            im: self.im.checked_sub(o.im)?,
+        })
+    }
+
+    /// Product `(a+bi)(c+di) = (ac-bd) + (ad+bc)i`.
+    fn mul(self, o: WCplx) -> Option<WCplx> {
+        Some(WCplx {
+            re: wmul(self.re, o.re)?.checked_sub(wmul(self.im, o.im)?)?,
+            im: wmul(self.re, o.im)?.checked_add(wmul(self.im, o.re)?)?,
+        })
+    }
+
+    /// Product with a real scalar.
+    fn scale(self, s: i128) -> Option<WCplx> {
+        Some(WCplx {
+            re: wmul(self.re, s)?,
+            im: wmul(self.im, s)?,
+        })
+    }
+
+    /// The squared magnitude `re^2 + im^2` (a real value).
+    fn norm_sq(self) -> Option<i128> {
+        wmul(self.re, self.re)?.checked_add(wmul(self.im, self.im)?)
+    }
+
+    /// Quotient `self / o = self * conj(o) / |o|^2`.
+    fn div(self, o: WCplx) -> Option<WCplx> {
+        let d = o.norm_sq()?;
+        Some(WCplx {
+            re: wdiv(wmul(self.re, o.re)?.checked_add(wmul(self.im, o.im)?)?, d)?,
+            im: wdiv(wmul(self.im, o.re)?.checked_sub(wmul(self.re, o.im)?)?, d)?,
+        })
+    }
+}
+
+/// The Mie absorption efficiency `Q_abs = Q_ext - Q_sca` of a homogeneous sphere of size parameter
+/// `x = 2*pi*a/lambda` and complex refractive index `m = n + i*k`, DERIVED from Mie theory by the
+/// Bohren and Huffman BHMIE recurrence rather than read from a fitted table. `Q_abs` is the dimensionless
+/// absorption cross section per geometric cross section, the quantity the grain opacity integral weights by
+/// the size distribution.
+///
+/// The algorithm is BHMIE (Bohren and Huffman 1983, Appendix A): the logarithmic derivative `D_n(mx)` by
+/// DOWNWARD recurrence seeded at `nmx = max(nstop, |mx|) + 15` with `D_nmx = 0` (downward is the stable
+/// direction for `D_n`), the Riccati-Bessel `psi_n` and `chi_n` by upward recurrence from `psi_0 = sin x`,
+/// `chi_0 = cos x`, then the coefficients `a_n`, `b_n` and the sums `Q_ext = (2/x^2) sum (2n+1) Re(a_n+b_n)`
+/// and `Q_sca = (2/x^2) sum (2n+1) (|a_n|^2 + |b_n|^2)`, truncated at Wiscombe's `nstop = x + 4 x^(1/3) + 2`.
+/// The whole computation runs in deterministic wide-fixed complex arithmetic (see [`MIE_SCALE_BITS`]), so it
+/// is bit-identical on every machine; a component that would leave the `i128` backing returns `None` rather
+/// than wrapping.
+///
+/// Every input is per-particle DATA: `n` and `k` are read from the measured optical constants (the alien
+/// seam, a metal or an exotic condensate is a different `(n, k)` row, never a rewrite), and `x` carries the
+/// grain radius and wavelength. `None` outside the validated range `[MIE_X_MIN, MIE_X_SWITCH]` (below it the
+/// closed Rayleigh form is exact and the caller uses [`rayleigh_grain_opacity`]; above it the geometric
+/// limit applies), on a non-physical index (`n <= 0` or `k < 0`), or on any wide-fixed overflow.
+pub fn mie_q_abs(size_parameter: Fixed, n: Fixed, k: Fixed) -> Option<Fixed> {
+    if n <= Fixed::ZERO || k < Fixed::ZERO {
+        return None;
+    }
+    let x_min = Fixed::from_ratio(MIE_X_MIN_NUM, MIE_X_MIN_DEN);
+    if size_parameter < x_min || size_parameter > Fixed::from_int(MIE_X_SWITCH) {
+        return None;
+    }
+    let x = size_parameter;
+
+    // Wiscombe's truncation nstop = floor(x + 4 x^(1/3) + 2) and the downward-recurrence seed
+    // nmx = max(nstop, |mx|) + 15, |mx| = |m| x = sqrt(n^2 + k^2) x.
+    let ns_fixed = x
+        .checked_add(Fixed::from_int(4).checked_mul(x.cbrt())?)?
+        .checked_add(Fixed::from_int(2))?;
+    let nstop = (ns_fixed.to_bits() >> Fixed::FRAC_BITS) as u32;
+    let abs_m = n.checked_mul(n)?.checked_add(k.checked_mul(k)?)?.sqrt();
+    let abs_mx_int = (x.checked_mul(abs_m)?.to_bits() >> Fixed::FRAC_BITS) as u32;
+    let nmx = nstop.max(abs_mx_int) + 15;
+
+    let x_w = fixed_to_wfixed(x);
+    let n_w = fixed_to_wfixed(n);
+    let k_w = fixed_to_wfixed(k);
+    let m = WCplx { re: n_w, im: k_w };
+    let mx = WCplx {
+        re: wmul(n_w, x_w)?,
+        im: wmul(k_w, x_w)?,
+    };
+
+    // D_n(mx) by downward recurrence: D_{n-1} = n/mx - 1/(D_n + n/mx), from D_nmx = 0.
+    let mut d = vec![WCplx::real(0); (nmx as usize) + 1];
+    for nn in (1..=nmx).rev() {
+        let n_over_mx = WCplx::real((nn as i128) << MIE_SCALE_BITS).div(mx)?;
+        let denom = d[nn as usize].add(n_over_mx)?;
+        d[(nn - 1) as usize] = n_over_mx.sub(WCplx::real(MIE_ONE_W).div(denom)?)?;
+    }
+
+    // psi and chi seeds: psi_{-1} = cos x, psi_0 = sin x; chi_{-1} = -sin x, chi_0 = cos x;
+    // xi_0 = psi_0 - i chi_0.
+    let (sin_x, cos_x) = x.sin_cos();
+    let sin_w = fixed_to_wfixed(sin_x);
+    let cos_w = fixed_to_wfixed(cos_x);
+    let mut psi_prev = cos_w;
+    let mut psi_curr = sin_w;
+    let mut chi_prev = sin_w.checked_neg()?;
+    let mut chi_curr = cos_w;
+    let mut xi_prev = WCplx {
+        re: sin_w,
+        im: cos_w.checked_neg()?,
+    };
+    let mut qsca: i128 = 0;
+    let mut qext: i128 = 0;
+
+    for nn in 1..=nstop {
+        // psi_n and chi_n at the top of the loop, so a_n uses psi_n (new) with psi_{n-1} (prev): the
+        // BHMIE indexing that a naive port gets wrong.
+        let c1 = (2 * nn - 1) as i128;
+        let psi_n = wdiv(c1.checked_mul(psi_curr)?, x_w)?.checked_sub(psi_prev)?;
+        let chi_n = wdiv(c1.checked_mul(chi_curr)?, x_w)?.checked_sub(chi_prev)?;
+        let xi_n = WCplx {
+            re: psi_n,
+            im: chi_n.checked_neg()?,
+        };
+
+        let n_over_x = wdiv((nn as i128) << MIE_SCALE_BITS, x_w)?;
+        let da = d[nn as usize].div(m)?.add(WCplx::real(n_over_x))?;
+        let db = m.mul(d[nn as usize])?.add(WCplx::real(n_over_x))?;
+        let an = da
+            .scale(psi_n)?
+            .sub(WCplx::real(psi_curr))?
+            .div(da.mul(xi_n)?.sub(xi_prev)?)?;
+        let bn = db
+            .scale(psi_n)?
+            .sub(WCplx::real(psi_curr))?
+            .div(db.mul(xi_n)?.sub(xi_prev)?)?;
+
+        let c2 = (2 * nn + 1) as i128;
+        let sca_term = an.norm_sq()?.checked_add(bn.norm_sq()?)?;
+        qsca = qsca.checked_add(c2.checked_mul(sca_term)?)?;
+        let ext_term = an.re.checked_add(bn.re)?;
+        qext = qext.checked_add(c2.checked_mul(ext_term)?)?;
+
+        psi_prev = psi_curr;
+        psi_curr = psi_n;
+        chi_prev = chi_curr;
+        chi_curr = chi_n;
+        xi_prev = xi_n;
+    }
+
+    // Q = (2/x^2) * sum; Q_abs = Q_ext - Q_sca, then rounded once to the Q32.32 result.
+    let two_over_x2 = wdiv(2 * MIE_ONE_W, wmul(x_w, x_w)?)?;
+    let q_sca = wmul(two_over_x2, qsca)?;
+    let q_ext = wmul(two_over_x2, qext)?;
+    let q_abs = q_ext.checked_sub(q_sca)?;
+    Fixed::from_bits_i128(wfixed_to_bigrat(q_abs).round_to_scale(Fixed::FRAC_BITS)?)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1522,6 +1767,126 @@ mod tests {
         assert_eq!(
             at_ff, ff,
             "beyond the threshold the assembled H- opacity is the free-free alone"
+        );
+    }
+
+    // The Mie references below are the BHMIE (Bohren and Huffman 1983, Appendix A) values for Q_abs,
+    // cross-checked against the standard f64 implementation. The kernel runs in wide-fixed arithmetic, so it
+    // reproduces them to within the ~1e-9 seed difference propagated through the recurrence.
+
+    #[test]
+    fn the_mie_q_abs_matches_the_bhmie_reference_at_unit_size() {
+        // x = 1, m = 1.5 + 0.01i: a weakly absorbing dielectric at the resonance-onset size. Q_abs = 0.02884.
+        let q = mie_q_abs(
+            Fixed::from_int(1),
+            Fixed::from_ratio(150, 100),
+            Fixed::from_ratio(1, 100),
+        )
+        .expect("a valid Mie size returns Q_abs");
+        assert!(
+            (q.to_f64_lossy() - 0.02884).abs() < 1e-3,
+            "Q_abs(x=1, m=1.5+0.01i) ~ 0.02884, got {}",
+            q.to_f64_lossy()
+        );
+    }
+
+    #[test]
+    fn the_mie_q_abs_matches_the_bhmie_reference_in_the_resonance_region() {
+        // x = 3, m = 1.5 + 0.1i: the interference-and-absorption region, Q_abs = 0.89525.
+        let q3 = mie_q_abs(
+            Fixed::from_int(3),
+            Fixed::from_ratio(150, 100),
+            Fixed::from_ratio(10, 100),
+        )
+        .expect("a valid Mie size returns Q_abs");
+        assert!(
+            (q3.to_f64_lossy() - 0.89525).abs() < 2e-3,
+            "Q_abs(x=3, m=1.5+0.1i) ~ 0.89525, got {}",
+            q3.to_f64_lossy()
+        );
+        // x = 6, m = 1.68 + 0.03i (an olivine-like index), Q_abs = 0.80626.
+        let q6 = mie_q_abs(
+            Fixed::from_int(6),
+            Fixed::from_ratio(168, 100),
+            Fixed::from_ratio(3, 100),
+        )
+        .expect("a valid Mie size returns Q_abs");
+        assert!(
+            (q6.to_f64_lossy() - 0.80626).abs() < 2e-3,
+            "Q_abs(x=6, m=1.68+0.03i) ~ 0.80626, got {}",
+            q6.to_f64_lossy()
+        );
+    }
+
+    #[test]
+    fn the_mie_q_abs_scales_linearly_in_the_rayleigh_regime() {
+        // For x << 1 the absorption efficiency is the dipole (Rayleigh) form Q_abs = 4x Im[(m^2-1)/(m^2+2)],
+        // linear in x with an index-only prefactor. So doubling x from 0.1 to 0.2 doubles Q_abs. This is the
+        // reduction that a wrong 1/x scaling (the classic BHMIE off-by-one) fails by orders of magnitude.
+        let m = (Fixed::from_ratio(150, 100), Fixed::from_ratio(1, 100));
+        let q1 = mie_q_abs(Fixed::from_ratio(1, 10), m.0, m.1).unwrap();
+        let q2 = mie_q_abs(Fixed::from_ratio(2, 10), m.0, m.1).unwrap();
+        let ratio = q2.to_f64_lossy() / q1.to_f64_lossy();
+        assert!(
+            (ratio - 2.0).abs() < 0.05,
+            "Q_abs doubles from x=0.1 to x=0.2 in the Rayleigh regime, ratio {}",
+            ratio
+        );
+        assert!(
+            q1.to_f64_lossy() > 0.0 && q1.to_f64_lossy() < 0.01,
+            "the Rayleigh-regime Q_abs is small and positive, got {}",
+            q1.to_f64_lossy()
+        );
+    }
+
+    #[test]
+    fn the_mie_q_abs_is_deterministic() {
+        let (x, n, k) = (
+            Fixed::from_int(3),
+            Fixed::from_ratio(150, 100),
+            Fixed::from_ratio(10, 100),
+        );
+        assert_eq!(
+            mie_q_abs(x, n, k),
+            mie_q_abs(x, n, k),
+            "the wide-fixed Mie recurrence replays byte for byte"
+        );
+    }
+
+    #[test]
+    fn the_mie_q_abs_is_none_outside_its_validated_range() {
+        let n = Fixed::from_ratio(150, 100);
+        let k = Fixed::from_ratio(1, 100);
+        // Below MIE_X_MIN (x = 0.1) the Rayleigh form is used instead.
+        assert_eq!(
+            mie_q_abs(Fixed::from_ratio(5, 100), n, k),
+            None,
+            "below the range the kernel declines (Rayleigh handles it)"
+        );
+        // Above MIE_X_SWITCH (x = 50) the geometric limit is used instead.
+        assert_eq!(
+            mie_q_abs(Fixed::from_int(60), n, k),
+            None,
+            "above the range the kernel declines (the geometric limit handles it)"
+        );
+    }
+
+    #[test]
+    fn the_mie_q_abs_rejects_a_non_physical_index() {
+        // n <= 0 or k < 0 is not a physical refractive index.
+        assert_eq!(
+            mie_q_abs(Fixed::from_int(3), Fixed::ZERO, Fixed::from_ratio(1, 100)),
+            None,
+            "a zero real index is rejected"
+        );
+        assert_eq!(
+            mie_q_abs(
+                Fixed::from_int(3),
+                Fixed::from_ratio(150, 100),
+                Fixed::from_ratio(-1, 100)
+            ),
+            None,
+            "a negative absorption index is rejected"
         );
     }
 }
