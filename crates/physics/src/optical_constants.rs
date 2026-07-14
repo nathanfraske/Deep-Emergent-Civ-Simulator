@@ -301,6 +301,48 @@ mod tests {
     }
 
     #[test]
+    fn the_iron_reference_values_re_verify_against_ordal() {
+        // Iron is PRIMARY (Ordal 1988 via the CC0 digitization of the paper's tables); the metal's n,k grow large
+        // into the infrared (n=95, k=182 at 100 micron), which the wide Q32.32 range holds.
+        let l = lib();
+        let fe = l.species("metallic_iron").unwrap();
+        assert_eq!(fe.tier, ProvenanceTier::Primary);
+        let at_1 = nearest(fe, 1.0);
+        assert!(
+            (at_1.n.to_f64_lossy() - 3.1838).abs() < 1e-2
+                && (at_1.k.to_f64_lossy() - 4.1442).abs() < 1e-2,
+            "iron 1 micron is n=3.184 k=4.144, got n={} k={}",
+            at_1.n.to_f64_lossy(),
+            at_1.k.to_f64_lossy()
+        );
+        let at_100 = nearest(fe, 100.0);
+        assert!(
+            (at_100.n.to_f64_lossy() - 95.358).abs() < 0.5
+                && (at_100.k.to_f64_lossy() - 181.95).abs() < 1.0,
+            "iron 100 micron is n=95.36 k=181.95, got n={} k={}",
+            at_100.n.to_f64_lossy(),
+            at_100.k.to_f64_lossy()
+        );
+    }
+
+    #[test]
+    fn the_troilite_loads_as_secondary_and_re_verifies() {
+        // Troilite is SECONDARY (Henning-Stognienko 1996 via the optool compilation, original grid preserved), the
+        // honesty tag one tier below the primary silicate/ice/iron.
+        let l = lib();
+        let fes = l.species("troilite_fes").unwrap();
+        assert_eq!(fes.tier, ProvenanceTier::Secondary);
+        let at_1 = nearest(fes, 1.0);
+        assert!(
+            (at_1.n.to_f64_lossy() - 6.0533).abs() < 1e-2
+                && (at_1.k.to_f64_lossy() - 2.1684).abs() < 1e-2,
+            "troilite 1 micron is n=6.053 k=2.168, got n={} k={}",
+            at_1.n.to_f64_lossy(),
+            at_1.k.to_f64_lossy()
+        );
+    }
+
+    #[test]
     fn every_species_is_physical_and_monotonic() {
         // n > 0 and k >= 0 everywhere, and the wavelength grid strictly increases (the load-time invariants).
         let l = lib();
