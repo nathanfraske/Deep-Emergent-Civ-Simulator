@@ -45,6 +45,7 @@
 pub mod ballistic;
 pub mod celestial;
 pub mod drag_flight;
+pub mod eruption;
 pub mod flood;
 pub mod label;
 pub mod lod;

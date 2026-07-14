@@ -20,15 +20,19 @@
 //! lays a SIZE-SORTED blanket (coarse near, fine far) with no authored fall table. A lava flow runs down one
 //! flank to a runout set by the energy budget.
 //!
-//! What is DERIVED: every fragment trajectory (the drag_flight integrator, the same one the tests pin against
-//! the vacuum parabola), the impact point (arc meets terrain), the impact speed, and the size sorting. What
-//! is an authored, labelled STAND-IN: the cone cross-section geometry, the launch spectrum (speeds, angles,
-//! and the size classes' drag couplings), and the atmosphere parameters, all of which the accretion,
-//! fragmentation, and atmosphere chains will derive later. It is fully deterministic (a fixed hash, no RNG),
-//! so the eruption replays identically. Run: `cargo run -p civsim-world --example eruption`.
+//! What is DERIVED: the eruption exit SPEED (the gas-thrust law [`gas_thrust_exit_velocity`], from the
+//! magma's volatile load, its temperature, and the pressure drop to the surface), every fragment trajectory
+//! (the drag_flight integrator, the same one the tests pin against the vacuum parabola), the impact point
+//! (arc meets terrain), the impact speed, and the size sorting. What is an authored, labelled STAND-IN: the
+//! cone cross-section geometry, the magma source values (the volatile content, temperature, and chamber
+//! pressure that feed the exit-speed law), the angle and size spread, and the atmosphere parameters, all of
+//! which the melt, fragmentation, and atmosphere chains will derive later. It is fully deterministic (a
+//! fixed hash, no RNG), so the eruption replays identically. Run: `cargo run -p civsim-world --example
+//! eruption`.
 
 use civsim_core::Fixed;
 use civsim_world::drag_flight::{drag_flight, Atmosphere, DragForces, DragLaunch, FlightSample};
+use civsim_world::eruption::gas_thrust_exit_velocity;
 
 const WIDTH_M: f64 = 12_000.0;
 const VENT_X: f64 = 6_000.0;
@@ -83,6 +87,20 @@ fn main() {
     };
     let launch_height = fx(SUMMIT_M);
 
+    // The magma source. The volatile load, its species (specific gas constant), and the magma temperature
+    // are labelled stand-ins (a melt + solubility chain will derive them from the interior); the surface
+    // pressure is the derived atmosphere's. The exit SPEED is NOT authored: it DERIVES from these by the
+    // gas-thrust law, so a wetter or hotter magma, or a thinner atmosphere, erupts faster on its own.
+    let v_exit = gas_thrust_exit_velocity(
+        Fixed::from_ratio(35, 1000), // 3.5% dissolved volatiles (n)
+        Fixed::from_int(462),        // water vapour specific gas constant R/M (J/kg/K)
+        Fixed::from_int(1200),       // magma temperature (K), the interior sets this
+        Fixed::from_int(80_000_000), // 80 MPa fragmentation pressure (P0)
+        Fixed::from_int(100_000),    // 0.1 MPa surface pressure (P_atm), the atmosphere sets this
+    )
+    .expect("a valid magma source")
+    .to_f64_lossy();
+
     println!(
         "ERUPTION width={} vent_x={} summit={} slope={} rho0=1.2 H=8000 g=9.81",
         WIDTH_M, VENT_X, SUMMIT_M, FLANK_SLOPE
@@ -98,7 +116,9 @@ fn main() {
     for i in 0..N_PARCELS {
         let h = hash32(i as u32);
         let sign = if h & 1 == 0 { 1.0 } else { -1.0 };
-        let speed = 45.0 + (((h >> 1) % 1000) as f64 / 1000.0) * 195.0; // 45..240 m/s
+        // Each fragment leaves at a fraction of the derived gas-thrust exit velocity (its position in the
+        // jet), so a stronger source throws every fragment proportionally faster.
+        let speed = v_exit * (0.12 + (((h >> 1) % 1000) as f64 / 1000.0) * 0.42); // 0.12..0.54 of v_exit
         let angle_deg = 32.0 + (((h >> 11) % 1000) as f64 / 1000.0) * 55.0; // 32..87 deg
                                                                             // Bias the size mix toward finer fragments (a real fragmentation spectrum has far more ash than
                                                                             // boulders): 1 - (1-u)^2 pushes most parcels into the higher-beta (finer) classes, so the near-vent
