@@ -65,7 +65,10 @@ pub use assemblage::{
     realize_assemblage, CoolingPath, DrawContext, EquilibriumExchange, ExchangeKinetics,
     RealizedAssemblage, RealizedExchange,
 };
-pub use band_gap::ln_thermal_carrier_activation;
+pub use band_gap::{
+    conduction_class_estimated, conduction_class_measured, ln_thermal_carrier_activation,
+    ConductionClass,
+};
 pub use contract::{Disposer, Preflight, Proposer, Quench, RealizedState, Validity};
 pub use correlation::{
     route_of_class, CalibrationError, CorrelationClass, CorrelationClassifier, EnergyRoute,

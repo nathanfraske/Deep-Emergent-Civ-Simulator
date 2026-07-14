@@ -12,9 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Stage 6, the band-gap tier (`docs/working/STAGE6_ELECTRONIC_STRUCTURE_DESIGN.md`, section 10): slice 1, the
-//! log-space thermal carrier activation, the fabrication-free census-discharge piece the tier's design surface
-//! ruled buildable now (independent of the Harrison-rung fork held for the gate).
+//! Stage 6, the band-gap tier (`docs/working/STAGE6_ELECTRONIC_STRUCTURE_DESIGN.md`, section 10): the
+//! fabrication-free core the tier's design surface ruled buildable now (independent of the Harrison-rung fork held
+//! for the gate). Slice 1 is the log-space thermal carrier activation; slice 2 is the emergent conduction
+//! classification with the `U/W` preflight over the banked correlation classifier.
 //!
 //! A semiconductor's intrinsic carrier density is `n_i = N_eff * exp(-E_gap / 2kT)`, thermally activated across
 //! the gap. The activation factor `exp(-E_gap / 2kT)` is the RANGE-CENSUS flag of the electronic sub-arc: for a
@@ -27,15 +28,22 @@
 //! WHAT IS RESERVED HERE: nothing. The gap `E_gap` is caller-supplied (a measured `[M]` datum at the top rung, a
 //! Harrison estimate at the middle rung once the gate rules that fork, a compute-once eigenvalue at the bottom),
 //! and the temperature is the world's. The one constant, the Boltzmann constant in the working units (eV per
-//! kelvin), is not a folded dimensional decimal: it reassembles as `k_B[J/K] / e[C]`, a ratio of two exact SI
-//! fundamental constants (the dimensionless-constant law), so the eV and the kelvin cancel and the activation
-//! exponent is dimensionless by construction. This slice authors no metal/semiconductor/insulator classification:
-//! that rides the `U/W` preflight over the banked correlation classifier (section 10.2), the next slice, and is
-//! never shipped in the preflight-free form redirect 2 warned reintroduces the Mott failure.
+//! kelvin), reassembles as `k_B[J/K] / e[C]`, a ratio of two exact SI fundamental constants rather than a folded
+//! dimensional decimal (the dimensionless-constant law), so the eV and the kelvin cancel and the activation
+//! exponent is dimensionless by construction.
+//!
+//! SLICE 2 adds the EMERGENT conduction classification ([`ConductionClass`]) keyed on the gap, with the `U/W`
+//! PREFLIGHT (section 10.2, redirect 2) run over the banked [`crate::correlation::CorrelationClassifier`] on the
+//! reduced-order route so a Mott insulator is never called a metal. The metal / non-metal boundary is the gap SIGN
+//! (a physical line, no threshold); the semiconductor-versus-insulator distinction is the CONTINUOUS carrier
+//! activation rather than an authored eV boundary; and the classification is never shipped in the preflight-free
+//! form redirect 2 warned reintroduces the Mott failure.
 //!
 //! Byte-neutral: `civsim-materials` is a leaf, not linked into the run_world binary.
 
 use civsim_core::Fixed;
+
+use crate::correlation::{CorrelationClass, CorrelationClassifier};
 
 const ZERO: Fixed = Fixed::ZERO;
 
@@ -79,12 +87,111 @@ pub fn ln_thermal_carrier_activation(e_gap_ev: Fixed, temperature_k: Fixed) -> O
     ZERO.checked_sub(ratio)
 }
 
+/// The conduction class of a substance, an EMERGENT readout of its band gap (never an authored material lookup).
+/// The metal / non-metal boundary is the gap SIGN, a physical line; the semiconductor-versus-insulator distinction
+/// is the CONTINUOUS carrier activation carried in [`ConductionClass::NonMetal`], never a discrete authored eV
+/// boundary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConductionClass {
+    /// A metal: the gap is at or below zero (the bands overlap), so carriers are degenerate and there is no
+    /// thermal-activation suppression.
+    Metal,
+    /// A non-metal (a gap above zero): its intrinsic carriers are thermally activated across the gap. The
+    /// semiconductor-versus-insulator distinction is the CONTINUOUS readout of `ln_activation` against the world
+    /// temperature (a more negative exponent is more insulating), never a discrete authored boundary.
+    NonMetal {
+        /// The natural-log thermal carrier activation `-E_gap / 2kT` (non-positive), the census-safe form.
+        ln_activation: Fixed,
+    },
+    /// A correlated (Mott) insulator, sited by the `U/W` preflight BEFORE any reduced-order band model: it is an
+    /// insulator, and a reduced-order model would wrongly call it a metal, so its gap must come from a measured
+    /// value or a compute-once eigenvalue. The Mott guard, kept closed.
+    CorrelatedInsulator,
+    /// Escalate: the `U/W` window (estimators forbidden), a substance the correlation classifier cannot validate on
+    /// a reduced-order route, or a gap that could not be scored. Route to a measured value or compute-once.
+    Escalate,
+}
+
+/// The gap-SIGN sort (the emergent metal / non-metal boundary, no authored threshold): a gap at or below zero is a
+/// metal, a positive gap is a non-metal whose carriers are thermally activated (the log-space exponent carried).
+fn conduction_class_from_gap(gap_ev: Fixed, temperature_k: Fixed) -> ConductionClass {
+    if gap_ev <= ZERO {
+        return ConductionClass::Metal;
+    }
+    match ln_thermal_carrier_activation(gap_ev, temperature_k) {
+        Some(ln_activation) => ConductionClass::NonMetal { ln_activation },
+        None => ConductionClass::Escalate,
+    }
+}
+
+/// The conduction class from a MEASURED `[M]` band gap: the gap-sign sort directly, no `U/W` preflight. A measured
+/// value is authoritative (it already encodes the correlation gap, a Mott insulator's charge-transfer gap
+/// included), so it outranks the reduced-order `U/W` classifier on the provenance ladder and the preflight is
+/// skipped. Reserves no value: the gap is caller-supplied `[M]` data, the temperature the world's.
+pub fn conduction_class_measured(gap_ev: Fixed, temperature_k: Fixed) -> ConductionClass {
+    conduction_class_from_gap(gap_ev, temperature_k)
+}
+
+/// The conduction class from a REDUCED-ORDER or COMPUTED (non-measured) band gap, with the `U/W` PREFLIGHT
+/// (section 10.2, redirect 2) run FIRST over the banked correlation classifier, so a reduced-order band model can
+/// never call a Mott insulator a metal. The preflight sites the correlation regime before the gap sort:
+/// - Localized: a Mott insulator ([`ConductionClass::CorrelatedInsulator`]), the guard kept closed, regardless of
+///   what the reduced gap says.
+/// - Itinerant: a validated itinerant material, proceed to the gap-sign sort with the supplied gap.
+/// - Window or OutOfScope: escalate (estimators forbidden in the window; a substance the classifier cannot
+///   validate on a reduced-order route is not scored). See the HONEST LIMIT below.
+///
+/// Reserves no value. HONEST LIMIT (a flagged seam, surfaced for the Harrison-rung ruling): the classifier's
+/// OutOfScope collapses two cases the preflight would treat differently once a reduced-order estimator exists, a
+/// non-correlated material (an sp semiconductor, which SHOULD proceed to the gap sort) and a correlated centre
+/// beyond the classifier's seeded 3d rock-salt scope (a 4d/5d/4f Mott insulator, which SHOULD escalate). This
+/// slice takes the conservative-safe choice (escalate both), correct now because the reduced-order estimator (the
+/// held Harrison rung) has no live consumer; distinguishing them needs a per-substance "is this a correlated-oxide
+/// candidate" check, a follow-on tied to the Harrison-rung ruling.
+pub fn conduction_class_estimated(
+    composition: &[(String, u32)],
+    gap_ev: Fixed,
+    classifier: &CorrelationClassifier,
+    temperature_k: Fixed,
+) -> ConductionClass {
+    match classifier.classify(composition) {
+        CorrelationClass::Localized => ConductionClass::CorrelatedInsulator,
+        CorrelationClass::Window | CorrelationClass::OutOfScope => ConductionClass::Escalate,
+        CorrelationClass::Itinerant => conduction_class_from_gap(gap_ev, temperature_k),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use civsim_physics::d_state_radius::DStateRadii;
+    use civsim_physics::ionic_radii::IonicRadii;
+    use civsim_physics::ionization_ladder::IonizationLadder;
+    use civsim_physics::mit_reference::MitReference;
+    use civsim_physics::periodic::PeriodicTable;
 
     fn close(a: Fixed, b: f64, tol: f64) -> bool {
         (a.to_f64_lossy() - b).abs() < tol
+    }
+
+    fn comp(pairs: &[(&str, u32)]) -> Vec<(String, u32)> {
+        pairs.iter().map(|(s, c)| ((*s).to_string(), *c)).collect()
+    }
+
+    fn floors() -> (
+        PeriodicTable,
+        IonizationLadder,
+        DStateRadii,
+        IonicRadii,
+        MitReference,
+    ) {
+        (
+            PeriodicTable::standard().expect("periodic table"),
+            IonizationLadder::standard().expect("ionization ladder"),
+            DStateRadii::standard().expect("d-state radii"),
+            IonicRadii::standard().expect("ionic radii"),
+            MitReference::standard().expect("MIT reference set"),
+        )
     }
 
     #[test]
@@ -177,6 +284,116 @@ mod tests {
             close(factor, 2.35e-6, 5e-7),
             "Ge activation factor ~ 2.35e-6, got {}",
             factor.to_f64_lossy()
+        );
+    }
+
+    #[test]
+    fn the_measured_route_sorts_by_gap_sign_with_no_semiconductor_insulator_threshold() {
+        // The emergent metal / non-metal boundary is the gap SIGN, and the semiconductor-versus-insulator split is
+        // the CONTINUOUS activation, never a threshold. (Cited test fixtures: silicon 1.12 eV, diamond 5.47 eV.)
+        let t300 = Fixed::from_int(300);
+        // A metal: a zero (band-overlap) gap.
+        assert_eq!(
+            conduction_class_measured(ZERO, t300),
+            ConductionClass::Metal
+        );
+        let si = conduction_class_measured(Fixed::from_ratio(112, 100), t300);
+        let diamond = conduction_class_measured(Fixed::from_ratio(547, 100), t300);
+        match (si, diamond) {
+            (
+                ConductionClass::NonMetal {
+                    ln_activation: si_ln,
+                },
+                ConductionClass::NonMetal {
+                    ln_activation: dia_ln,
+                },
+            ) => {
+                // No eV threshold separates them: both are non-metals, and the wider-gap diamond is simply more
+                // suppressed (more negative), so the semiconductor/insulator distinction emerges continuously.
+                assert!(
+                    dia_ln < si_ln,
+                    "the wider-gap diamond is more suppressed than silicon (the thresholdless continuous split)"
+                );
+            }
+            _ => panic!("silicon and diamond are non-metals on the measured route"),
+        }
+    }
+
+    #[test]
+    fn the_uw_preflight_keeps_a_mott_insulator_from_being_called_a_metal() {
+        // THE REDIRECT-2 PAYOFF. On the reduced-order route, a naive band model would hand NiO a metallic (<= 0)
+        // gap. The U/W preflight sites NiO as Localized FIRST and returns CorrelatedInsulator, so the Mott
+        // insulator is never called a metal, the exact failure the correlation turn closed.
+        let (t, l, ds, r, mit) = floors();
+        let c = CorrelationClassifier::calibrate(&t, &l, &ds, &r, &mit).expect("calibrates");
+        let t300 = Fixed::from_int(300);
+        // A bogus metallic gap (0) a reduced-order model might return for NiO; the preflight overrides it.
+        let nio = conduction_class_estimated(&comp(&[("Ni", 1), ("O", 1)]), ZERO, &c, t300);
+        assert_eq!(
+            nio,
+            ConductionClass::CorrelatedInsulator,
+            "the preflight keeps NiO a Mott insulator, never a metal"
+        );
+    }
+
+    #[test]
+    fn the_uw_preflight_lets_an_itinerant_material_through_to_the_gap_sort() {
+        // TiO sites Itinerant, so the preflight lets it through to the gap-sign sort; with a metallic (<= 0) gap it
+        // is a metal, which TiO is (an itinerant early-3d monoxide). The preflight guards the correlated-insulator
+        // case without blocking a validated itinerant.
+        let (t, l, ds, r, mit) = floors();
+        let c = CorrelationClassifier::calibrate(&t, &l, &ds, &r, &mit).expect("calibrates");
+        let t300 = Fixed::from_int(300);
+        let tio = conduction_class_estimated(&comp(&[("Ti", 1), ("O", 1)]), ZERO, &c, t300);
+        assert_eq!(
+            tio,
+            ConductionClass::Metal,
+            "an itinerant TiO passes the preflight and sorts as a metal"
+        );
+    }
+
+    #[test]
+    fn the_measured_route_is_authoritative_and_skips_the_preflight() {
+        // A measured NiO gap (~4.0 eV, a cited charge-transfer-gap test fixture) outranks the reduced-order U/W
+        // classifier: the measured route runs the gap sort directly and calls NiO a non-metal insulator (a huge
+        // suppression, activation ~ -77), with no CorrelatedInsulator interference. The measurement encodes the
+        // Mott gap.
+        let t300 = Fixed::from_int(300);
+        let nio = conduction_class_measured(Fixed::from_int(4), t300);
+        match nio {
+            ConductionClass::NonMetal { ln_activation } => {
+                assert!(
+                    ln_activation.to_f64_lossy() < -70.0,
+                    "a 4 eV gap is deeply insulating (activation ~ -77), got {}",
+                    ln_activation.to_f64_lossy()
+                );
+            }
+            _ => panic!("measured NiO is a non-metal insulator via its measured gap"),
+        }
+    }
+
+    #[test]
+    fn a_non_correlatable_substance_escalates_on_the_reduced_order_route_for_now() {
+        // THE FLAGGED SEAM (surfaced for the Harrison-rung ruling): silicon is OutOfScope for the correlation
+        // classifier (not a rock-salt d-block oxide), so on the reduced-order route the preflight escalates it (the
+        // conservative-safe choice). Correct NOW (the reduced-order estimator is held); when the Harrison rung
+        // lands, an sp semiconductor like silicon must proceed to the gap sort while an out-of-3d correlated centre
+        // must still escalate, the follow-on. On the MEASURED route silicon is a normal semiconductor, unaffected.
+        let (t, l, ds, r, mit) = floors();
+        let c = CorrelationClassifier::calibrate(&t, &l, &ds, &r, &mit).expect("calibrates");
+        let t300 = Fixed::from_int(300);
+        let si_estimated =
+            conduction_class_estimated(&comp(&[("Si", 1)]), Fixed::from_ratio(112, 100), &c, t300);
+        assert_eq!(
+            si_estimated,
+            ConductionClass::Escalate,
+            "silicon (OutOfScope) escalates on the reduced-order route for now"
+        );
+        // But the measured route sorts it as the semiconductor it is.
+        let si_measured = conduction_class_measured(Fixed::from_ratio(112, 100), t300);
+        assert!(
+            matches!(si_measured, ConductionClass::NonMetal { .. }),
+            "measured silicon is a semiconductor"
         );
     }
 }
