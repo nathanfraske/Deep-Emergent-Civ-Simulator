@@ -101,10 +101,13 @@ fn ground_state_degeneracies(symbol: &str) -> Option<(Fixed, Fixed)> {
 
 /// The log of the single-ionization SAHA function `ln S(T)` for one species, where `S = n_ion n_e / n_neutral`,
 /// assembled in the log domain from the underflow-safe log-constants:
-/// `ln S = ln(2 g+/g0) + (3/2) [ln 2pi + ln m_e + ln k_B + ln T - 2 ln h] - chi_eV (e/k_B) / T`,
-/// with `S` in SI number density (per cubic metre, matching the number densities the charge-neutrality solve
-/// sums). The `2 g+/g0` is the electron-spin-times-partition-ratio, `(2 pi m_e k_B T/h^2)^(3/2)` is the quantum
-/// concentration, and the last term is the Boltzmann factor formed from the representable `e/k_B` ratio and the
+/// `ln S = ln(2 g+/g0) + (3/2) [ln 2pi + ln m_e + ln k_B + ln T - 2 ln h] - 6 ln 10 - chi_eV (e/k_B) / T`.
+/// UNIT PIN: `S` is CGS number density (per cubic CENTIMETRE), the single system the export `P_e` (dyn/cm^2) and
+/// the H- / stellar-atmospheres literature (Chandrasekhar, Gray, Wishart) live in, so no mixed-unit `P_e` can
+/// reach the H- consumer; the SI form (per cubic metre) is `6 ln 10 = 13.816` larger, so `ln S(H, 6000 K) = 22.17`
+/// here versus `35.99` in SI. The `2 g+/g0` is the electron-spin-times-partition-ratio, `(2 pi m_e k_B T/h^2)^(3/2)`
+/// the quantum concentration, and the last term the Boltzmann factor formed from the representable `e/k_B` ratio and
+/// the
 /// FIRST ionization energy read from the measured [`PeriodicTable`] (the periodic table carries the first IE per
 /// element; the successive-IE ladder is a separate transition-metal column). `None` if the species lacks a pinned
 /// degeneracy convention or a first ionization energy, or on a non-positive temperature.
@@ -119,10 +122,143 @@ pub fn ln_saha_factor(symbol: &str, temperature_k: Fixed, table: &PeriodicTable)
     let ln_2pi = ln_of_decimal("6.283185307")?;
     let quantum = ln_2pi + ln_fundamental("m_e")? + ln_fundamental("k_B")? + temperature_k.ln()
         - Fixed::from_int(2).mul(ln_fundamental("h")?);
-    let ln_quantum_concentration = Fixed::from_ratio(3, 2).mul(quantum);
+    // (3/2) ln(...) is per cubic metre; subtract 6 ln 10 to land per cubic centimetre (the cgs join system).
+    let ln_quantum_concentration =
+        Fixed::from_ratio(3, 2).mul(quantum) - Fixed::from_int(6).mul(Fixed::from_int(10).ln());
     // chi/(k T) = chi_eV * (e/k_B) / T, from the representable ratio.
     let boltzmann = chi_ev.mul(ev_to_kelvin()?).checked_div(temperature_k)?;
     Some(g_factor + ln_quantum_concentration - boltzmann)
+}
+
+/// The number of bisection steps the charge-neutrality root takes: a FIXED count (the determinism bound, the
+/// `SURFACE_BALANCE_ITERS` model), over an 80-e-fold `ln n_e` bracket, so the bracket collapses far below the
+/// `Fixed` resolution and any count at or above it gives the identical root. Not world content.
+const SAHA_ITERS: u32 = 72;
+
+/// The width in e-folds of the `ln n_e` bracket below full ionization: the root of the weakly-ionized branch,
+/// `n_e ~ sqrt(sum N_i S_i)`, never falls more than this far below `ln(sum N_i)` for any state that has electrons
+/// at resolution (the zero-electron short-circuit takes the states that would).
+const SAHA_BRACKET_EFOLDS: i32 = 80;
+
+/// The resolved outcome of the multi-species Saha solve.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SahaState {
+    /// The free-electron number density `ln n_e` (natural log of the per-cm^3 value; `n_e` itself overflows
+    /// `Fixed` in a warm plasma, so it is carried as its log).
+    pub ln_electron_density_cm3: Fixed,
+    /// The electron PRESSURE `P_e = n_e k_B T` (dyn/cm^2, cgs), the representable export the H- opacity and the
+    /// stellar-atmospheres literature parameterize by. Zero under the no-free-electrons verdict.
+    pub electron_pressure_dyn_cm2: Fixed,
+    /// The rider-1 SINGLE-IONIZATION validity flag: `false` when the ionization degree `n_e / sum N_i` exceeds one
+    /// half, where the neglected next ionization stage (hydrogen's own, helium's first) starts moving the electron
+    /// budget and the single-stage reduction leaves its declared domain. A loud edge, not a silent degrade.
+    pub single_ionization_valid: bool,
+    /// The rider-2 ZERO-ELECTRON verdict: `true` when even the fully-ionized electron budget is below the
+    /// representable floor (the cold outer disk), a LEGAL state (grains and molecular opacity own it there), so the
+    /// bisection is short-circuited rather than chasing a `ln n_e ~ -500` root no bracket should follow.
+    pub no_free_electrons: bool,
+}
+
+/// `ln(k_B)` in CGS (erg/K): the SI `k_B` (J/K) times `1e7`, in the log domain `ln k_B + 7 ln 10`. For `P_e` in
+/// dyn/cm^2 from `n_e` in cm^-3 and `T` in K.
+fn ln_k_boltzmann_cgs() -> Option<Fixed> {
+    Some(ln_fundamental("k_B")? + Fixed::from_int(7).mul(Fixed::from_int(10).ln()))
+}
+
+/// The multi-species SAHA free-electron density from single-stage ionization and charge neutrality. Each `species`
+/// is `(symbol, ln_number_density_cm3)`: its total (neutral plus ionized) number density in cm^-3, carried as a log
+/// because it overflows `Fixed`. The ionization fraction of species `i` is `x_i = S_i / (n_e + S_i)`
+/// ([`ln_saha_factor`] gives `ln S_i`), and charge neutrality `n_e = sum_i N_i x_i` is a monotone (decreasing)
+/// equation in `n_e`, so its root is unique and found by a BOUNDED bisection in `ln n_e` using the log-domain sum
+/// ([`log_sum_exp`], `ln(n_e + S_i) = logsumexp(ln n_e, ln S_i)`). Species without a pinned degeneracy or a first
+/// ionization energy are excluded. Returns the [`SahaState`] with the cgs `P_e` export, the single-ionization
+/// validity flag (rider 1), and the zero-electron verdict (rider 2). `None` if no species resolves or a constant
+/// fails to load.
+pub fn electron_density_saha(
+    temperature_k: Fixed,
+    species: &[(&str, Fixed)],
+    table: &PeriodicTable,
+) -> Option<SahaState> {
+    if temperature_k <= Fixed::ZERO {
+        return None;
+    }
+    // (ln N_i, ln S_i) for each species that carries both a pinned convention and a first ionization energy.
+    let mut terms: Vec<(Fixed, Fixed)> = Vec::with_capacity(species.len());
+    for (symbol, ln_n_i) in species {
+        if let Some(ln_s) = ln_saha_factor(symbol, temperature_k, table) {
+            terms.push((*ln_n_i, ln_s));
+        }
+    }
+    if terms.is_empty() {
+        return None;
+    }
+    // The total nuclei ln(sum N_i) (the full-ionization ceiling on n_e), by a canonical log-domain fold.
+    let ln_n_total = terms
+        .iter()
+        .map(|(ln_n, _)| *ln_n)
+        .reduce(log_sum_exp)
+        .unwrap();
+    // ln RHS(ln n_e) = logsumexp_i [ln N_i + ln S_i - logsumexp(ln n_e, ln S_i)], the charge-neutrality right side.
+    let ln_rhs = |ln_ne: Fixed| -> Fixed {
+        terms
+            .iter()
+            .map(|(ln_n, ln_s)| *ln_n + *ln_s - log_sum_exp(ln_ne, *ln_s))
+            .reduce(log_sum_exp)
+            .unwrap()
+    };
+
+    let ln_k_cgs = ln_k_boltzmann_cgs()?;
+    let ln_t = temperature_k.ln();
+    // ln P_e for a given ln n_e (P_e = n_e k_B T, cgs). The representable floor: P_e must exceed the smallest
+    // positive Fixed, else the electrons are below resolution.
+    let ln_p_e = |ln_ne: Fixed| -> Fixed { ln_ne + ln_k_cgs + ln_t };
+    let ln_p_floor = Fixed::from_bits(1).ln(); // ln of the smallest positive Fixed (~2.3e-10 -> ln ~ -22.2).
+
+    // The max achievable n_e "through each donor's own S": the weakly-ionized estimate n_e ~ sqrt(sum N_i S_i),
+    // i.e. (1/2) logsumexp(ln N_i + ln S_i). Accurate in the cold regime (where the verdict matters), and merely
+    // conservative (over-estimating) in the hot regime (where the bisection solves anyway).
+    let ln_ne_estimate = terms
+        .iter()
+        .map(|(ln_n, ln_s)| *ln_n + *ln_s)
+        .reduce(log_sum_exp)
+        .unwrap()
+        .div(Fixed::from_int(2));
+    // The zero-electron verdict (rider 2): if even that estimate's electron pressure is below the representable
+    // floor, there are no free electrons at resolution (the cold outer disk).
+    if ln_p_e(ln_ne_estimate) < ln_p_floor {
+        return Some(SahaState {
+            ln_electron_density_cm3: Fixed::MIN,
+            electron_pressure_dyn_cm2: Fixed::ZERO,
+            single_ionization_valid: true,
+            no_free_electrons: true,
+        });
+    }
+
+    // Bounded bisection in ln n_e over [ln_n_total - efolds, ln_n_total]: charge neutrality is monotone, so
+    // ln RHS(ln n_e) - ln n_e is decreasing and its unique zero is the root.
+    let mut lo = ln_n_total - Fixed::from_int(SAHA_BRACKET_EFOLDS);
+    let mut hi = ln_n_total;
+    for _ in 0..SAHA_ITERS {
+        let mid = (lo + hi).div(Fixed::from_int(2));
+        if ln_rhs(mid) > mid {
+            lo = mid; // n_e too small, the neutrality right side wants more electrons
+        } else {
+            hi = mid;
+        }
+    }
+    let ln_ne = (lo + hi).div(Fixed::from_int(2));
+
+    // Rider 1: the single-ionization validity edge, ionization degree n_e / N_total > 1/2.
+    let ionization_degree = (ln_ne - ln_n_total).exp();
+    let single_ionization_valid = ionization_degree <= Fixed::from_ratio(1, 2);
+
+    let p_e = ln_p_e(ln_ne).exp();
+    Some(SahaState {
+        ln_electron_density_cm3: ln_ne,
+        electron_pressure_dyn_cm2: p_e,
+        single_ionization_valid,
+        no_free_electrons: false,
+    })
 }
 
 #[cfg(test)]
@@ -207,14 +343,14 @@ mod tests {
 
     #[test]
     fn the_saha_factor_lands_hydrogen_and_makes_potassium_the_readier_donor() {
-        // ln S(H, 6000 K) = ln(2 g+/g0) + (3/2) ln(2pi m_e k_B T/h^2) - chi/(kT), hand-checked: the g factor is 0
-        // (2*1/2 = 1), the quantum-concentration log ~62.29, the Boltzmann term 13.6 * 11605 / 6000 ~26.30, so
-        // ln S ~35.99.
+        // ln S(H, 6000 K) in CGS (per cm^3): the SI value 35.99 (quantum-concentration log ~62.29 minus the
+        // Boltzmann term 13.6 * 11605 / 6000 ~26.30) minus 6 ln 10 = 13.816, so ~22.17. The g factor is 0
+        // (2*1/2 = 1); a ground-state slip to g0 = 1 would shift this by ln 2 ~ 0.69, so the pin is load-bearing here.
         let t = table();
         let ln_s = ln_saha_factor("H", Fixed::from_int(6000), &t).unwrap();
         assert!(
-            close(ln_s, 35.99, 0.3),
-            "ln S(H, 6000K) ~ 35.99, got {}",
+            close(ln_s, 22.17, 0.3),
+            "ln S(H, 6000K) ~ 22.17 cgs, got {}",
             ln_s.to_f64_lossy()
         );
         // The inner-disk character: potassium (IE 4.34 eV) ionizes far more readily than hydrogen (13.6 eV) at the
@@ -229,5 +365,73 @@ mod tests {
         );
         // A species with no pinned degeneracy convention is excluded, not guessed.
         assert_eq!(ln_saha_factor("Xx", Fixed::from_int(6000), &t), None);
+    }
+
+    #[test]
+    fn the_solar_photosphere_ionizes_hydrogen_to_about_1e_minus_4() {
+        // The century-old Saha result (the battery's external anchor): at T = 5800 K and photospheric number
+        // densities (H ~1e17 cm^-3 with trace metal donors), hydrogen is only ~1e-4 ionized despite 13.6 eV
+        // against kT ~ 0.5 eV, because the low-IE metals (Na, K, Mg, Ca) and H's own tail set n_e ~1.4e13 cm^-3.
+        // This exercises the huge-exponent regime the log-space design exists for.
+        let t = table();
+        let temp = Fixed::from_int(5800);
+        let species = [
+            ("H", ln_of_decimal("1e17").unwrap()),
+            ("Na", ln_of_decimal("2e11").unwrap()),
+            ("K", ln_of_decimal("1e10").unwrap()),
+            ("Mg", ln_of_decimal("3e12").unwrap()),
+            ("Ca", ln_of_decimal("2e11").unwrap()),
+        ];
+        let state = electron_density_saha(temp, &species, &t).unwrap();
+        assert!(
+            !state.no_free_electrons,
+            "the photosphere has free electrons"
+        );
+        assert!(
+            state.single_ionization_valid,
+            "the photosphere is well below full ionization"
+        );
+        // x_H = S_H / (S_H + n_e), in the log domain.
+        let ln_s_h = ln_saha_factor("H", temp, &t).unwrap();
+        let x_h = (ln_s_h - log_sum_exp(state.ln_electron_density_cm3, ln_s_h)).exp();
+        assert!(
+            x_h.to_f64_lossy() > 1e-5 && x_h.to_f64_lossy() < 1e-3,
+            "hydrogen is ~1e-4 ionized at the photosphere, got {}",
+            x_h.to_f64_lossy()
+        );
+        // The export is representable and positive (dyn/cm^2), and the solve replays.
+        assert!(state.electron_pressure_dyn_cm2 > Fixed::ZERO);
+        assert_eq!(state, electron_density_saha(temp, &species, &t).unwrap());
+    }
+
+    #[test]
+    fn the_cold_outer_disk_returns_the_no_free_electrons_verdict() {
+        // At 100 K the alkali Boltzmann exponent is ~500, so the true n_e is an ~e^-200 non-entity; the solve
+        // short-circuits to the LEGAL no-free-electrons verdict (grains and molecules own the opacity there) rather
+        // than chasing a -500-class root no bracket should follow.
+        let t = table();
+        let species = [
+            ("H", ln_of_decimal("1e15").unwrap()),
+            ("Na", ln_of_decimal("2e9").unwrap()),
+            ("K", ln_of_decimal("1e8").unwrap()),
+        ];
+        let state = electron_density_saha(Fixed::from_int(100), &species, &t).unwrap();
+        assert!(state.no_free_electrons, "no free electrons at 100 K");
+        assert_eq!(state.electron_pressure_dyn_cm2, Fixed::ZERO);
+    }
+
+    #[test]
+    fn a_hot_ionized_gas_trips_the_single_ionization_validity_flag() {
+        // Push the temperature up until hydrogen is more than half ionized: the single-stage reduction leaves its
+        // declared domain (hydrogen's own ionization and helium's first stage start moving the budget), and the
+        // flag trips LOUDLY rather than degrading silently.
+        let t = table();
+        let species = [("H", ln_of_decimal("1e14").unwrap())];
+        let hot = electron_density_saha(Fixed::from_int(15000), &species, &t).unwrap();
+        assert!(
+            !hot.single_ionization_valid,
+            "a >50%-ionized gas trips the validity flag"
+        );
+        assert!(!hot.no_free_electrons);
     }
 }
