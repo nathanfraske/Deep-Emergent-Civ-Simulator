@@ -384,6 +384,39 @@ pub fn derive_mantle_density(
     )
 }
 
+/// The surface elevation a crust of a given COMPOSITION floats at, the composition-to-terrain wire the generated
+/// world reads (the R1 override the owner ruled: a tile's terrain DERIVES from the substrate, never fractal
+/// noise). It composes the two geology pieces already in the tree: the petrology-derived crustal density of the
+/// composition ([`civsim_physics::petrology::crustal_density`], the general composition-to-density derivation),
+/// and the Airy isostasy law against the mantle ([`civsim_physics::geodynamics::airy_isostatic_elevation`]). So a
+/// tile's elevation is what the material at that place IS, not a noise field. The mantle density and the crustal
+/// thickness are the column's own inputs (the interior lane refines the thickness). `None` when the composition
+/// reaches no assemblage (fail-loud, never a fabricated elevation) or the isostasy inputs are degenerate.
+/// Byte-neutral: no worldgen consumer is wired to it yet (the tile-axis wire is the next capstone slice); this is
+/// the derived-elevation primitive that replaces the fractal-noise axis, the visible spine's foundation.
+pub fn surface_elevation_from_composition(
+    crust_composition: &[(String, Fixed)],
+    mantle_density: Fixed,
+    crustal_thickness: Fixed,
+    temperature_k: Fixed,
+    pressure_bar: Fixed,
+    registry: &civsim_physics::petrology_data::PhaseRegistry,
+    table: &civsim_physics::periodic::PeriodicTable,
+) -> Option<Fixed> {
+    let crust_density = civsim_physics::petrology::crustal_density(
+        crust_composition,
+        temperature_k,
+        pressure_bar,
+        registry,
+        table,
+    )?;
+    civsim_physics::geodynamics::airy_isostatic_elevation(
+        crust_density,
+        mantle_density,
+        crustal_thickness,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -723,6 +756,54 @@ mod tests {
         assert!(
             next.is_empty(),
             "an unarmed geology stays empty and byte-neutral"
+        );
+    }
+
+    #[test]
+    fn the_surface_elevation_derives_from_the_crust_composition() {
+        // THE R1-OVERRIDE WIRE (the capstone's visible spine, foundation): a tile's elevation is what the material
+        // at that place IS, never a noise field. The primitive composes crustal_density (composition -> density)
+        // with the Airy isostasy law, so a crust lighter than the mantle floats above the reference. A resolvable
+        // pure-silica crust (quartz, ~2.65 g/cm^3) on a synthetically denser mantle (3.3) floats positive, and the
+        // primitive equals the two-step composition exactly (no hidden path). The full basaltic-Hadean composition
+        // and the worldgen tile-axis wire are the next slice; this proves the derivation.
+        let reg = civsim_physics::petrology_data::PhaseRegistry::standard()
+            .expect("phase registry loads");
+        let table =
+            civsim_physics::periodic::PeriodicTable::standard().expect("periodic table loads");
+        let crust = [
+            ("Si".to_string(), Fixed::from_int(1)),
+            ("O".to_string(), Fixed::from_int(2)),
+        ];
+        let mantle_density = Fixed::from_ratio(33, 10); // 3.3 g/cm^3, denser than the quartz crust
+        let thickness = Fixed::from_int(30);
+        let t = Fixed::from_int(300);
+        let p = Fixed::from_int(1);
+        let crust_density = civsim_physics::petrology::crustal_density(&crust, t, p, &reg, &table)
+            .expect("the silica composition reaches a density");
+        let expected = civsim_physics::geodynamics::airy_isostatic_elevation(
+            crust_density,
+            mantle_density,
+            thickness,
+        )
+        .expect("the isostasy floats it");
+        let got = surface_elevation_from_composition(
+            &crust,
+            mantle_density,
+            thickness,
+            t,
+            p,
+            &reg,
+            &table,
+        )
+        .expect("the derived elevation wire");
+        assert_eq!(
+            got, expected,
+            "the primitive composes crustal_density + airy exactly, no hidden path"
+        );
+        assert!(
+            got > Fixed::ZERO,
+            "a crust lighter than the mantle floats above the reference (elevation positive)"
         );
     }
 }
