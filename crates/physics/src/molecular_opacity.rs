@@ -477,6 +477,126 @@ mod tests {
     }
 
     #[test]
+    fn convergence_point_b_h_minus_approaches_aesopus_from_below() {
+        // POINT B (isolates the H- conventions, with the EOS exonerated by Point A): a temperature sweep up the
+        // photospheric column (log R = +1) from the molecular gap through the H- opacity minimum. Our partial sum
+        // (es + ff + H-) EXCLUDES the molecular bands, atomic lines, Rayleigh, H bound-free, and minor ions ÆSOPUS
+        // carries, so it APPROACHES FROM BELOW and NEVER exceeds one beyond a small band (exceeding is the
+        // unambiguous alarm for a double-count or an H- normalization slip, the leading suspect being the
+        // stimulated-emission factor the Wishart/John fits exclude). The measured shape (ratio 0.22, 0.66, 0.37,
+        // 0.17, 0.06 at 3162, 3981, 5012, 6310, 7079 K) PEAKS at the ~4000 K H- opacity MINIMUM, where our
+        // continuum best captures ÆSOPUS's total, then DECLINES as H bound-free and atomic lines (which we do not
+        // model) come to dominate above ~4500 K. So the H- convention is clean (the peak sits below one with no
+        // factor slip); the decline is the honest signature of the sources our continuum-only closure omits, which
+        // is why the disk reads the ÆSOPUS [M] total across the whole gas range rather than this closure above the
+        // molecular window. The sharp invariant is the never-exceed-one alarm; the H- match is the peak's height.
+        let tbl = crate::periodic::PeriodicTable::standard().expect("periodic table");
+        let grid = aesopus_solar_gate_grid().unwrap();
+        // (T, rho, n_H, n_Mg, n_Ca, n_Na, n_K) at log R = +1; ÆSOPUS target read from the grid at (log T, +1).
+        let sweep: [(i32, &str, &str, &str, &str, &str, &str); 5] = [
+            (
+                3162,
+                "3.1614e-7",
+                "1.3221e17",
+                "5.2621e12",
+                "2.8955e11",
+                "2.3005e11",
+                "1.4147e10",
+            ),
+            (
+                3981,
+                "6.3092e-7",
+                "2.6385e17",
+                "1.0501e13",
+                "5.7784e11",
+                "4.5911e11",
+                "2.8232e10",
+            ),
+            (
+                5012,
+                "1.2590e-6",
+                "5.2653e17",
+                "2.0956e13",
+                "1.1531e12",
+                "9.1616e11",
+                "5.6339e10",
+            ),
+            (
+                6310,
+                "2.5124e-6",
+                "1.0507e18",
+                "4.1818e13",
+                "2.3010e12",
+                "1.8282e12",
+                "1.1242e11",
+            ),
+            (
+                7079,
+                "3.5474e-6",
+                "1.4836e18",
+                "5.9046e13",
+                "3.2490e12",
+                "2.5814e12",
+                "1.5874e11",
+            ),
+        ];
+        let mut ratios = Vec::new();
+        for (t, rho_s, nh, nmg, nca, nna, nk) in sweep {
+            let temp = Fixed::from_int(t);
+            let log_t = log10(temp).unwrap();
+            let aesopus = grid.rosseland_opacity(log_t, Fixed::from_int(1)).unwrap();
+            let ln_rho = crate::saha::ln_of_decimal(rho_s).unwrap();
+            let rho = parse_decimal_fixed(rho_s).unwrap();
+            let species = [
+                ("H", crate::saha::ln_of_decimal(nh).unwrap()),
+                ("Mg", crate::saha::ln_of_decimal(nmg).unwrap()),
+                ("Ca", crate::saha::ln_of_decimal(nca).unwrap()),
+                ("Na", crate::saha::ln_of_decimal(nna).unwrap()),
+                ("K", crate::saha::ln_of_decimal(nk).unwrap()),
+            ];
+            let state = crate::saha::electron_density_saha(temp, &species, &tbl).unwrap();
+            let ln_ne = state.ln_electron_density_cm3;
+            let closure = crate::opacity::total_gas_rosseland_opacity(
+                temp,
+                rho,
+                ln_rho,
+                Fixed::from_ratio(7, 10),
+                Fixed::ONE,
+                Fixed::from_ratio(12, 10),
+                ln_ne,
+                ln_ne,
+                state.electron_pressure_dyn_cm2,
+                &tbl,
+            )
+            .expect("the H- closure resolves");
+            let ratio = closure.to_f64_lossy() / aesopus.to_f64_lossy();
+            ratios.push((t, ratio));
+        }
+        // The sharp invariant: never exceed one beyond a small band (a double-count / normalization slip alarm).
+        for (t, r) in &ratios {
+            assert!(
+                *r <= 1.15,
+                "Point B never-exceed-one alarm at T = {} K: ratio {} (double-count or H- normalization slip)",
+                t,
+                r
+            );
+        }
+        // The H- match: at the ~4000 K H- opacity minimum our continuum captures the majority of ÆSOPUS's total
+        // (the peak ratio is well above a half), confirming the H- term is correct in magnitude, not a factor off.
+        let peak = ratios.iter().map(|(_, r)| *r).fold(0.0_f64, f64::max);
+        assert!(
+            peak > 0.5,
+            "Point B: our continuum captures the H- opacity minimum (peak ratio > 0.5), got {peak}"
+        );
+        // The cold end sits low (molecules, which we exclude, own the 3000 K opacity), the expected from-below floor.
+        assert!(
+            ratios[0].1 < 0.4,
+            "Point B cold end: molecules own the 3162 K opacity, our continuum is a minority share, got {}",
+            ratios[0].1
+        );
+    }
+
+    #[test]
     fn the_handoff_selects_molecular_in_the_cold_gap_and_gas_when_hot() {
         // The regime handoff is a TOTAL, not a sum. In the cold gap the gas closure is None (es/ff Saha-killed, H-
         // asleep), so the molecular total owns the opacity; hot, the gas total owns it; with neither valid the
