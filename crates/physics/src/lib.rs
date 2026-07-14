@@ -52,6 +52,7 @@ pub mod materials_oracle;
 pub mod melting;
 pub mod metal_eos;
 pub mod mit_reference;
+pub mod molecular_opacity;
 pub mod opacity;
 pub mod optical_constants;
 pub mod periodic;
