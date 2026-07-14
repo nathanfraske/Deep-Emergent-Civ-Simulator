@@ -38,6 +38,7 @@
 //! manifest. The law kernels themselves are phase 2.
 
 pub mod band_gap;
+pub mod crystal_field;
 pub mod d_state_radius;
 pub mod ewald;
 pub mod floor_provenance;

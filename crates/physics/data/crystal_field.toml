@@ -1,0 +1,134 @@
+# The crystal-field column (crate::crystal_field), the magnetism (b) high/low-spin correction and the optics d-d
+# colour input. The octahedral splitting Delta_o factorizes (Jorgensen) as Delta_o = f(ligand) * g(ion), plus the
+# free-ion Racah B (the electron-repulsion / spin-pairing side), plus the DIRECT measured Delta_o for the solid
+# monoxides (which do not factorize: the bare oxide O2- forms no discrete octahedral molecular complex, so there is
+# no f(O2-); the monoxide splitting is the direct solid-state optical measurement). Every value cited; no numerical
+# cross-check exists for Delta_o (the d-d energy IS the splitting), so the back-check is the three-modality trend
+# (multiplicativity holdout, CFSE-vs-calorimetry double hump, R^-5 pressure) verified at fetch and re-asserted in
+# tests. Units cm^-1; the 8065.544 cm^-1/eV conversion is pinned in code and round-trip tested. No run-path consumer
+# yet (byte-neutral).
+#
+# Provenance: the Jorgensen f*g scheme and the free-ion B are from Dalal, "A Textbook of Inorganic Chemistry Vol. 1"
+# Ch. 8 (reproducing C. K. Jorgensen 1971); the direct oxide Delta_o are single-crystal optical / RIXS / neutron
+# studies (NiO: PRB 78, 041102 (2008); CoO: Cowley et al. PRB 88, 205117 (2013); FeO: Schrettle et al. EPJB 85, 164
+# (2012); MnO: Pratt & Coelho PhysRev 116, 281 (1959)). Values surfaced for owner verification, never invented; a
+# f(H2O)=1.00 normalization is PINNED (multiplicativity breaks across sources otherwise).
+
+# --- Jorgensen ligand factor f (dimensionless, f(H2O) = 1.00 pinned) ---
+[[ligand_f]]
+ligand = "acetate"
+f = "0.96"
+source = "Dalal, Inorganic Chemistry Vol.1 Ch.8 Table 12 (Jorgensen 1971): O-donor, near water"
+
+[[ligand_f]]
+ligand = "H2O"
+f = "1.00"
+source = "Dalal, Inorganic Chemistry Vol.1 Ch.8 Table 12 (Jorgensen 1971): the pinned reference"
+
+[[ligand_f]]
+ligand = "acac"
+f = "1.21"
+source = "Dalal, Inorganic Chemistry Vol.1 Ch.8 Table 12 (Jorgensen 1971): acetylacetonate O-donor chelate"
+
+[[ligand_f]]
+ligand = "en"
+f = "1.28"
+source = "Dalal, Inorganic Chemistry Vol.1 Ch.8 Table 12 (Jorgensen 1971): ethylenediamine N-donor"
+
+[[ligand_f]]
+ligand = "Cl"
+f = "0.80"
+source = "Dalal, Inorganic Chemistry Vol.1 Ch.8 Table 12 (Jorgensen 1971)"
+
+[[ligand_f]]
+ligand = "F"
+f = "0.90"
+source = "Dalal, Inorganic Chemistry Vol.1 Ch.8 Table 12 (Jorgensen 1971)"
+
+# --- Jorgensen metal-ion factor g (units 10^3 cm^-1; Delta_o = f * g * 1000 cm^-1) ---
+[[ion_g]]
+ion = "Mn2+"
+g_kilocm = "8.5"
+source = "Dalal, Inorganic Chemistry Vol.1 Ch.8 Table 12 (Jorgensen 1971)"
+
+[[ion_g]]
+ion = "Ni2+"
+g_kilocm = "8.9"
+source = "Dalal, Inorganic Chemistry Vol.1 Ch.8 Table 12 (Jorgensen 1971)"
+
+[[ion_g]]
+ion = "Co2+"
+g_kilocm = "9.3"
+source = "Dalal, Inorganic Chemistry Vol.1 Ch.8 Table 12 (Jorgensen 1971)"
+
+[[ion_g]]
+ion = "Fe2+"
+g_kilocm = "10.0"
+source = "Dalal, Inorganic Chemistry Vol.1 Ch.8 Table 12 (Jorgensen 1971)"
+
+[[ion_g]]
+ion = "Cu2+"
+g_kilocm = "12.0"
+source = "Dalal, Inorganic Chemistry Vol.1 Ch.8 Table 12 (Jorgensen 1971)"
+
+[[ion_g]]
+ion = "Cr3+"
+g_kilocm = "17.0"
+source = "Dalal, Inorganic Chemistry Vol.1 Ch.8 Table 12 (Jorgensen 1971)"
+
+[[ion_g]]
+ion = "Co3+"
+g_kilocm = "19.0"
+source = "Dalal, Inorganic Chemistry Vol.1 Ch.8 Table 12 (Jorgensen 1971)"
+
+# --- Free-ion Racah B (cm^-1; the electron-repulsion / spin-pairing side; C ~ 4B where C is untabulated) ---
+[[racah_b]]
+ion = "Mn2+"
+b_cm = "960"
+source = "Dalal, Inorganic Chemistry Vol.1 Ch.8 Table 14 (free-ion Racah B)"
+
+[[racah_b]]
+ion = "Fe2+"
+b_cm = "1059"
+source = "Dalal, Inorganic Chemistry Vol.1 Ch.8 Table 14 (free-ion Racah B)"
+
+[[racah_b]]
+ion = "Co2+"
+b_cm = "1117"
+source = "Dalal, Inorganic Chemistry Vol.1 Ch.8 Table 14 (free-ion Racah B)"
+
+[[racah_b]]
+ion = "Ni2+"
+b_cm = "1080"
+source = "Dalal, Inorganic Chemistry Vol.1 Ch.8 Table 14 (free-ion Racah B)"
+
+[[racah_b]]
+ion = "Cr3+"
+b_cm = "1030"
+source = "Dalal, Inorganic Chemistry Vol.1 Ch.8 Table 14 (free-ion Racah B)"
+
+# --- Direct measured octahedral Delta_o for the solid monoxides (cm^-1); the magnetism-(b) oxide anchors ---
+# These do NOT factorize (no f(O2-)); they are direct solid-state optical/RIXS/neutron measurements.
+[[oxide_delta]]
+composition = { Ni = 1, O = 1 }
+delta_cm = "8470"
+reliability = "high"
+source = "NiO RIXS PRB 78, 041102 (2008); optical Newman & Chrenko PhysRev 114, 1507 (1959): 3A2g->3T2g band is 10Dq directly"
+
+[[oxide_delta]]
+composition = { Co = 1, O = 1 }
+delta_cm = "7580"
+reliability = "high"
+source = "CoO Cowley et al. PRB 88, 205117 (2013): 0.94(10) eV, neutron/optical"
+
+[[oxide_delta]]
+composition = { Fe = 1, O = 1 }
+delta_cm = "7500"
+reliability = "high"
+source = "FeO Schrettle et al. Eur.Phys.J.B 85, 164 (2012): 5T2g->5Eg"
+
+[[oxide_delta]]
+composition = { Mn = 1, O = 1 }
+delta_cm = "9000"
+reliability = "low"
+source = "MnO Pratt & Coelho PhysRev 116, 281 (1959): model-dependent (d5 all-spin-forbidden), scatter ~8900-10100; midpoint tabulated, flagged low"
