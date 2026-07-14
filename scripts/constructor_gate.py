@@ -78,6 +78,7 @@ EXEMPT_MODULES = {
     "crates/sim/src/calibration.rs",    # the calibration-manifest loader (parses the owner's reserved values)
     "crates/sim/src/astro.rs",          # the stellar-flux derivation (parses cited astronomical anchors L_sun/AU)
     "crates/physics/src/opacity.rs",    # the disk-opacity generator (parses cited fundamentals e/eps_0/m_e/c for the Thomson-scattering derivation)
+    "crates/physics/src/optical_constants.rs", # the optical-constants loader (parses cited per-species n,k tables)
 }
 
 

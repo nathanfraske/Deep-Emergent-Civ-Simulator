@@ -52,6 +52,7 @@ pub mod materials_oracle;
 pub mod metal_eos;
 pub mod mit_reference;
 pub mod opacity;
+pub mod optical_constants;
 pub mod periodic;
 pub mod petrology;
 pub mod petrology_data;
