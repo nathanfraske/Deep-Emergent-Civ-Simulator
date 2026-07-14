@@ -367,6 +367,50 @@ pub fn disk_surface_density(
     Some(density)
 }
 
+/// The FEEDING-ZONE (annulus) DISK MASS a planet accretes from, in `normalization`-units times AU-squared: the
+/// integral `M = integral over [inner, outer] of 2*pi*r*Sigma(r) dr`, the disk mass in the orbital annulus
+/// `[inner_au, outer_au]`. This is the ACCRETION-mass scaffold: the mass follows from the geometry and the surface
+/// density ([`disk_surface_density`]) alone, so it needs no temperature or opacity. The COMPOSITION of that mass
+/// (what condenses at the annulus) waits on the completed disk `T(r)` and the condensation sequence; this is the
+/// how-much, not the what.
+///
+/// The integral is a BOUNDED midpoint Riemann sum over `steps` intervals (a fixed integration resolution, an
+/// engine accuracy bound set by the caller, not a physical knob, so determinism holds by construction: a fixed
+/// count, integer-only `Fixed`). Keeping `r` in AU (order-one) holds the `2*pi*r*Sigma*dr` accumulation in `Fixed`;
+/// the physical mass scale (`AU^2` to `m^2`, the `normalization` units to `kg/m^2`) is a later unit fold. The
+/// annulus bounds are the feeding-zone width, a reserved geometry input (its basis a few Hill radii of the
+/// forming planet, retiring when the Hill-radius/isolation-mass closure lands). `None` on a non-positive inner
+/// radius, `outer <= inner`, zero steps, a `Sigma` that fails to resolve, or an accumulation past the range.
+pub fn feeding_zone_mass(
+    inner_au: Fixed,
+    outer_au: Fixed,
+    characteristic_radius_au: Fixed,
+    gamma: Fixed,
+    normalization: Fixed,
+    steps: u32,
+) -> Option<Fixed> {
+    if inner_au <= Fixed::ZERO || outer_au <= inner_au || steps == 0 {
+        return None;
+    }
+    let span = outer_au.checked_sub(inner_au)?;
+    let dr = span.checked_div(Fixed::from_int(steps as i32))?;
+    let half_dr = dr.checked_div(Fixed::from_int(2))?;
+    let two_pi = Fixed::PI.checked_add(Fixed::PI)?;
+    let mut mass = Fixed::ZERO;
+    for i in 0..steps {
+        // The midpoint of interval i: inner + (i + 1/2)*dr.
+        let offset = dr
+            .checked_mul(Fixed::from_int(i as i32))?
+            .checked_add(half_dr)?;
+        let r = inner_au.checked_add(offset)?;
+        let sigma = disk_surface_density(r, characteristic_radius_au, gamma, normalization)?;
+        // The ring mass 2*pi*r*Sigma*dr for this interval, accumulated.
+        let ring = two_pi.checked_mul(r)?.checked_mul(sigma)?.checked_mul(dr)?;
+        mass = mass.checked_add(ring)?;
+    }
+    Some(mass)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -864,5 +908,85 @@ mod tests {
         // Non-positive distance or characteristic radius routes to None.
         assert!(disk_surface_density(Fixed::ZERO, rc, Fixed::ONE, norm).is_none());
         assert!(disk_surface_density(Fixed::from_int(10), Fixed::ZERO, Fixed::ONE, norm).is_none());
+    }
+
+    #[test]
+    fn the_feeding_zone_mass_matches_the_lynden_bell_pringle_analytic_total() {
+        // For gamma = 1 the annulus mass has a closed form: integral of 2*pi*r*Sigma dr from a to b is
+        // 2*pi*Sigma_c*r_c^2*(exp(-a/r_c) - exp(-b/r_c)), because 2*pi*r*Sigma = 2*pi*Sigma_c*r_c*exp(-r/r_c) when
+        // gamma = 1. The bounded midpoint sum must reproduce this from the surface density alone (the mass-
+        // integration scaffold), never a fitted mass.
+        let (rc, gamma, norm) = (Fixed::from_int(10), Fixed::ONE, Fixed::from_int(1000));
+        let (a, b) = (Fixed::from_ratio(1, 10), Fixed::from_int(100)); // 0.1 to 100 AU
+        let mass =
+            feeding_zone_mass(a, b, rc, gamma, norm, 1000).expect("the annulus mass integrates");
+        let (rc_f, sc_f) = (10.0_f64, 1000.0_f64);
+        let analytic = 2.0
+            * std::f64::consts::PI
+            * sc_f
+            * rc_f
+            * rc_f
+            * ((-0.1 / rc_f).exp() - (-100.0 / rc_f).exp());
+        let got = mass.to_f64_lossy();
+        assert!(
+            (got - analytic).abs() / analytic < 0.01,
+            "the integrated annulus mass ~{analytic:.0} (Lynden-Bell-Pringle closed form), got {got:.0}"
+        );
+    }
+
+    #[test]
+    fn the_feeding_zone_mass_is_deterministic_and_grows_with_the_annulus() {
+        let (rc, gamma, norm) = (Fixed::from_int(10), Fixed::ONE, Fixed::from_int(1000));
+        let a = Fixed::from_ratio(1, 10);
+        let narrow = feeding_zone_mass(a, Fixed::from_int(20), rc, gamma, norm, 400).unwrap();
+        let wide = feeding_zone_mass(a, Fixed::from_int(50), rc, gamma, norm, 400).unwrap();
+        // A pure bounded read replays, and a wider annulus captures more disk mass.
+        assert_eq!(
+            narrow,
+            feeding_zone_mass(a, Fixed::from_int(20), rc, gamma, norm, 400).unwrap(),
+            "the integration replays deterministically"
+        );
+        assert!(wide > narrow, "a wider annulus holds more mass");
+    }
+
+    #[test]
+    fn a_narrow_feeding_zone_reduces_to_the_local_ring() {
+        // Over a narrow annulus around r_c the mass is the local ring 2*pi*r*Sigma(r)*width: at r_c, Sigma = Sigma_c/e
+        // ~367.9, so 2*pi*10*367.9*0.2 ~4623 over the width-0.2 annulus [9.9, 10.1].
+        let (rc, gamma, norm) = (Fixed::from_int(10), Fixed::ONE, Fixed::from_int(1000));
+        let mass = feeding_zone_mass(
+            Fixed::from_ratio(99, 10),
+            Fixed::from_ratio(101, 10),
+            rc,
+            gamma,
+            norm,
+            20,
+        )
+        .unwrap();
+        let local = 2.0 * std::f64::consts::PI * 10.0 * (1000.0 / std::f64::consts::E) * 0.2;
+        let got = mass.to_f64_lossy();
+        assert!(
+            (got - local).abs() / local < 0.01,
+            "a narrow annulus is the local ring ~{local:.0}, got {got:.0}"
+        );
+    }
+
+    #[test]
+    fn the_feeding_zone_mass_guards() {
+        let (rc, gamma, norm) = (Fixed::from_int(10), Fixed::ONE, Fixed::from_int(1000));
+        // Non-positive inner radius, an inverted or degenerate annulus, and zero steps all route to None.
+        assert!(
+            feeding_zone_mass(Fixed::ZERO, Fixed::from_int(10), rc, gamma, norm, 100).is_none()
+        );
+        assert!(feeding_zone_mass(
+            Fixed::from_int(10),
+            Fixed::from_int(5),
+            rc,
+            gamma,
+            norm,
+            100
+        )
+        .is_none());
+        assert!(feeding_zone_mass(Fixed::ONE, Fixed::from_int(10), rc, gamma, norm, 0).is_none());
     }
 }
