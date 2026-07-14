@@ -1475,6 +1475,85 @@ pub fn bruggeman_effective_index(
     Some((n_eff, k_eff))
 }
 
+/// The effective complex refractive index `(n_eff, k_eff)` of a grain built as a HOST MATRIX with embedded
+/// INCLUSIONS, DERIVED by the Maxwell-Garnett effective-medium rule. Unlike [`bruggeman_effective_index`]
+/// (symmetric, no host), Maxwell-Garnett is ASYMMETRIC: it models inclusions dispersed in a continuous matrix, the
+/// topology the condensation history writes below the ice line (Rule 2: refractories arrive as cores inside ice
+/// mantles as the disposer's condensation sequence deposits them, so ICE is the matrix and the refractories are the
+/// inclusions). The two rules give DIFFERENT effective indices for the same components (ice-mantled iron absorbs
+/// differently from a symmetric iron-plus-ice mixture), which is the factor-level distinction Rule 2 keys on: below
+/// the ice line the mantle topology is Maxwell-Garnett, above it the bare mixture is Bruggeman.
+///
+/// Closed form (no iteration): with `eps_m` the matrix and `eps_i` the inclusion permittivities (`eps = (n+i k)^2`),
+///   `beta = sum_i f_i (eps_i - eps_m)/(eps_i + 2 eps_m)`,  `eps_eff = eps_m (1 + 2 beta)/(1 - beta)`,
+/// run in the deterministic wide-fixed complex arithmetic, then `eps_eff` is turned back into `(n, k)`. The
+/// inclusion fractions are the VOLUME fractions from the disposer condensate assemblage (data, admit-the-alien: an
+/// alien mantle carrying a condensate not in the Terran set is a different set of rows and fractions, never a
+/// rewrite); an empty inclusion list or all-zero fractions returns the bare matrix. `None` if the lists differ in
+/// length, on a non-physical index or a negative fraction, or on any overflow or singular denominator (an
+/// over-packed inclusion set driving `1 - beta` through zero is non-physical and fails loud).
+pub fn maxwell_garnett_effective_index(
+    matrix_index: (Fixed, Fixed),
+    inclusion_fractions: &[Fixed],
+    inclusion_indices: &[(Fixed, Fixed)],
+) -> Option<(Fixed, Fixed)> {
+    if inclusion_fractions.len() != inclusion_indices.len() {
+        return None;
+    }
+    let (n_m, k_m) = matrix_index;
+    if n_m <= Fixed::ZERO || k_m < Fixed::ZERO {
+        return None;
+    }
+    let to_eps = |n: Fixed, k: Fixed| -> Option<WCplx> {
+        let n_w = fixed_to_wfixed(n);
+        let k_w = fixed_to_wfixed(k);
+        let re = wmul(n_w, n_w)?.checked_sub(wmul(k_w, k_w)?)?;
+        let im = wmul(n_w, k_w)?.checked_mul(2)?;
+        Some(WCplx { re, im })
+    };
+
+    let eps_m = to_eps(n_m, k_m)?;
+    let two_w = 2 * MIE_ONE_W;
+    let eps_m_two = eps_m.scale(two_w)?; // 2 eps_m
+
+    // beta = sum_i f_i (eps_i - eps_m)/(eps_i + 2 eps_m).
+    let mut beta = WCplx::real(0);
+    for (frac, (n, k)) in inclusion_fractions.iter().zip(inclusion_indices.iter()) {
+        if *frac < Fixed::ZERO || *n <= Fixed::ZERO || *k < Fixed::ZERO {
+            return None;
+        }
+        let f_w = fixed_to_wfixed(*frac);
+        let eps_i = to_eps(*n, *k)?;
+        let denom = eps_i.add(eps_m_two)?; // eps_i + 2 eps_m
+        let term = eps_i.sub(eps_m)?.div(denom)?.scale(f_w)?;
+        beta = beta.add(term)?;
+    }
+
+    // eps_eff = eps_m (1 + 2 beta)/(1 - beta).
+    let one = WCplx::real(MIE_ONE_W);
+    let numer = one.add(beta.scale(two_w)?)?; // 1 + 2 beta
+    let denom = one.sub(beta)?; // 1 - beta
+    let eff = eps_m.mul(numer)?.div(denom)?;
+
+    // eps_eff = re + i im -> (n, k): n = sqrt((|eps| + re)/2), k = sqrt((|eps| - re)/2).
+    let re_f = Fixed::from_bits_i128(wfixed_to_bigrat(eff.re).round_to_scale(Fixed::FRAC_BITS)?)?;
+    let im_f = Fixed::from_bits_i128(wfixed_to_bigrat(eff.im).round_to_scale(Fixed::FRAC_BITS)?)?;
+    let modulus = re_f
+        .checked_mul(re_f)?
+        .checked_add(im_f.checked_mul(im_f)?)?
+        .sqrt();
+    let two = Fixed::from_int(2);
+    let n_eff = modulus.checked_add(re_f)?.checked_div(two)?.sqrt();
+    let k_arg = modulus.checked_sub(re_f)?;
+    let k_arg = if k_arg < Fixed::ZERO {
+        Fixed::ZERO
+    } else {
+        k_arg
+    };
+    let k_eff = k_arg.checked_div(two)?.sqrt();
+    Some((n_eff, k_eff))
+}
+
 /// The number of log-spaced wavelength samples the grain Rosseland mean precomputes. The Rosseland weight
 /// is smooth in `ln x`, so the spectral opacity is sampled on this coarse grid once and interpolated
 /// (log-log) at each of the [`ROSSELAND_INTERVALS`] quadrature points, rather than paying a full
@@ -2826,6 +2905,113 @@ mod tests {
             bruggeman_effective_index(&[Fixed::from_ratio(-1, 10)], &[sil_index()]),
             None,
             "a negative fraction is rejected"
+        );
+    }
+
+    #[test]
+    fn the_maxwell_garnett_mix_matches_the_closed_form() {
+        // A dielectric matrix n_m = 1.5 (eps_m = 2.25) with a single inclusion n_i = 3.0 (eps_i = 9.0) at volume
+        // fraction f = 0.5: beta = 0.5 (9 - 2.25)/(9 + 4.5) = 0.25, eps_eff = 2.25 (1 + 0.5)/(1 - 0.25) = 4.5, so
+        // n_eff = sqrt(4.5) = 2.1213. Pins the closed-form solve against the hand computation.
+        let (n, k) = maxwell_garnett_effective_index(
+            (Fixed::from_ratio(3, 2), Fixed::ZERO),
+            &[Fixed::from_ratio(1, 2)],
+            &[(Fixed::from_int(3), Fixed::ZERO)],
+        )
+        .unwrap();
+        assert!(
+            (n.to_f64_lossy() - 2.1213).abs() < 1e-3,
+            "Maxwell-Garnett n_eff ~ 2.1213, got {}",
+            n.to_f64_lossy()
+        );
+        assert!(
+            k.to_f64_lossy() < 1e-3,
+            "a pure-dielectric mix stays non-absorbing, got k {}",
+            k.to_f64_lossy()
+        );
+    }
+
+    #[test]
+    fn the_maxwell_garnett_mix_of_no_inclusions_is_the_bare_matrix() {
+        // An empty inclusion list (or all-zero fractions) returns the matrix index unchanged: beta = 0, eps_eff =
+        // eps_m.
+        let empty =
+            maxwell_garnett_effective_index(sil_index(), &[], &[]).expect("no inclusions is valid");
+        assert!(
+            (empty.0.to_f64_lossy() - sil_index().0.to_f64_lossy()).abs() < 1e-4
+                && (empty.1.to_f64_lossy() - sil_index().1.to_f64_lossy()).abs() < 1e-4,
+            "no inclusions returns the bare matrix, got {:?}",
+            (empty.0.to_f64_lossy(), empty.1.to_f64_lossy())
+        );
+        let zero = maxwell_garnett_effective_index(sil_index(), &[Fixed::ZERO], &[iron_index()])
+            .expect("a zero fraction is valid");
+        assert!(
+            (zero.0.to_f64_lossy() - sil_index().0.to_f64_lossy()).abs() < 1e-4,
+            "an all-zero inclusion fraction returns the bare matrix, got n {}",
+            zero.0.to_f64_lossy()
+        );
+    }
+
+    #[test]
+    fn the_maxwell_garnett_topology_differs_from_bruggeman() {
+        // Rule 2's whole point: the aggregation topology matters. Iron inclusions in an ice matrix
+        // (Maxwell-Garnett, the below-ice-line mantle structure) give a DIFFERENT effective index from the same
+        // iron and ice mixed symmetrically (Bruggeman, the above-ice-line bare mixture), the factor-level
+        // distinction the condensation history writes.
+        let f = Fixed::from_ratio(3, 10);
+        let one_minus = Fixed::from_ratio(7, 10);
+        let mg = maxwell_garnett_effective_index(ice_index(), &[f], &[iron_index()]).unwrap();
+        let brugg =
+            bruggeman_effective_index(&[one_minus, f], &[ice_index(), iron_index()]).unwrap();
+        assert!(
+            (mg.0.to_f64_lossy() - brugg.0.to_f64_lossy()).abs() > 1e-2
+                || (mg.1.to_f64_lossy() - brugg.1.to_f64_lossy()).abs() > 1e-2,
+            "the two topologies give different effective indices: MG {:?} vs Bruggeman {:?}",
+            (mg.0.to_f64_lossy(), mg.1.to_f64_lossy()),
+            (brugg.0.to_f64_lossy(), brugg.1.to_f64_lossy())
+        );
+        // Iron inclusions raise the absorption above the bare ice matrix (k_eff > k_ice).
+        assert!(
+            mg.1.to_f64_lossy() > ice_index().1.to_f64_lossy(),
+            "iron inclusions make the ice-matrix grain absorbing, k_eff {}",
+            mg.1.to_f64_lossy()
+        );
+    }
+
+    #[test]
+    fn the_maxwell_garnett_mix_rejects_bad_arguments() {
+        assert_eq!(
+            maxwell_garnett_effective_index(sil_index(), &[Fixed::ONE], &[]),
+            None,
+            "a length mismatch is rejected"
+        );
+        assert_eq!(
+            maxwell_garnett_effective_index(
+                (Fixed::ZERO, Fixed::ZERO),
+                &[Fixed::ONE],
+                &[iron_index()]
+            ),
+            None,
+            "a non-physical matrix index is rejected"
+        );
+        assert_eq!(
+            maxwell_garnett_effective_index(
+                sil_index(),
+                &[Fixed::from_ratio(-1, 10)],
+                &[ice_index()]
+            ),
+            None,
+            "a negative inclusion fraction is rejected"
+        );
+    }
+
+    #[test]
+    fn the_maxwell_garnett_mix_is_deterministic() {
+        let f = Fixed::from_ratio(2, 10);
+        assert_eq!(
+            maxwell_garnett_effective_index(ice_index(), &[f], &[iron_index()]),
+            maxwell_garnett_effective_index(ice_index(), &[f], &[iron_index()]),
+            "the closed-form solve replays byte for byte"
         );
     }
 
