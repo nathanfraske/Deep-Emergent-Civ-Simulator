@@ -438,6 +438,7 @@ pub struct DerivedTile {
 /// or an authored band table (the R1 override, end to end). `None` when the field is empty or any tile's composition
 /// reaches no elevation (fail-loud, never a fabricated tile). Byte-neutral: no scenario builds a world with this yet
 /// (the render and scenario arming are the next slice).
+#[allow(clippy::too_many_arguments)]
 pub fn generate_derived_tiles(
     crust_compositions: &[Vec<(String, Fixed)>],
     mantle_density: Fixed,
