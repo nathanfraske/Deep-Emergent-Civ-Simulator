@@ -6,6 +6,12 @@
 # full_post_fields is the canonical reproducible body for the query; the actual-fetch receipts (our_md5, the
 # service banner, the byte count) are the separate result provenance and are never rewritten. Run with --regen once
 # after a deliberate, reviewed builder change to renormalize the recorded bodies to the canonical builder.
+#
+# THE RECIPE/RECEIPT IMMUTABILITY RULE (engine law): query provenance (full_post_fields, the recipe) may be
+# canonicalized only when the service-side semantics are PROVEN identical -- the byte-identical result md5s prove it
+# for the "0.7" vs "0.70" xhmax skew here -- whereas result provenance (our_md5, banner, bytes, the receipt) is
+# immutable forever, no exceptions, because the receipts are the artifacts and the queries are the recipes. A recipe
+# can be re-notated; a receipt cannot be touched. --regen rewrites full_post_fields ONLY and never the receipts.
 import sys, json, glob, os
 
 HERE = os.path.dirname(os.path.abspath(__file__))
