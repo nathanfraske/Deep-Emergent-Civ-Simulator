@@ -46,10 +46,11 @@
 
 use civsim_core::Fixed;
 use civsim_materials::{
-    chen_tse_hardness_gpa, debye_heat_capacity_j_per_mol_k, debye_temperature,
-    debye_velocity_km_per_s, density_g_per_cm3, freezer, grain_boundary_energy_j_per_m2,
-    lattice_thermal_conductivity_w_per_m_k, linear_thermal_expansion_per_k, poisson_ratio,
-    shear_modulus_gpa, surface_energy_j_per_m2, thermal_diffusivity_m2_per_s, youngs_modulus_gpa,
+    carrier_density_per_nm3, chen_tse_hardness_gpa, debye_heat_capacity_j_per_mol_k,
+    debye_temperature, debye_velocity_km_per_s, density_g_per_cm3, drude_conductivity_s_per_m,
+    freezer, grain_boundary_energy_j_per_m2, lattice_thermal_conductivity_w_per_m_k,
+    linear_thermal_expansion_per_k, plasma_energy_ev, poisson_ratio, shear_modulus_gpa,
+    surface_energy_j_per_m2, thermal_diffusivity_m2_per_s, youngs_modulus_gpa, ElectronicRoute,
     PropertyRoute,
 };
 use civsim_physics::metal_eos::MetalEosAnchors;
@@ -564,6 +565,12 @@ fn main() {
     checks += t_checks;
     defects += t_defects;
 
+    // The electronic near-ready layer (the capstone's new derived-from-composition layer): plasma energies and the
+    // Drude conductivity, with the silver d-block failure as a named exhibit.
+    let (e_checks, e_defects) = electronic_ringer(&table, &anchors);
+    checks += e_checks;
+    defects += e_defects;
+
     println!("======================= SUMMARY ========================");
     println!("{checks} checks, {defects} DEFECT(s).");
     if defects == 0 {
@@ -904,6 +911,80 @@ fn thermal_surface_ringer(table: &PeriodicTable, anchors: &MetalEosAnchors) -> (
             &mut checks,
         );
     }
+    println!();
+
+    (checks, defects)
+}
+
+/// The ELECTRONIC near-ready layer (the capstone's new derived-from-composition layer): the free-electron plasma
+/// energy and the Drude conductivity, with the silver d-block failure as a named FLAG exhibit rather than a
+/// DEFECT. Returns `(checks, defects)`.
+fn electronic_ringer(table: &PeriodicTable, anchors: &MetalEosAnchors) -> (usize, usize) {
+    let route = ElectronicRoute::new(table, anchors);
+    let mut checks = 0usize;
+    let mut defects = 0usize;
+
+    println!(
+        "\n============ ELECTRONIC LAYER (near-ready, derived from composition) ============\n"
+    );
+    println!("--- plasma energy hbar*omega_p (eV): sp-metals at few-percent, plus the d-block exhibit ---");
+    // sp-metals through the route (anchored): z from the group, plasma energy within few percent.
+    for (name, z, obs) in [("Na", 1, 5.7), ("Mg", 2, 10.6), ("Al", 3, 15.3)] {
+        let ep = route
+            .plasma_energy(name, Fixed::from_int(z))
+            .expect("plasma energy");
+        let v = grade(ep.to_f64_lossy(), obs, 0.08);
+        report(
+            &format!("plasma[{name}] eV"),
+            ep.to_f64_lossy(),
+            obs,
+            &v,
+            &mut defects,
+            &mut checks,
+        );
+    }
+    // Silver (unanchored -> free functions): the NAMED d-block exhibit. The free-electron value ~9.0 eV overshoots
+    // the observed screened plasmon ~3.8 by the d-screening factor (~2.4x); a FLAG (the model's stated reach), not
+    // a defect. This one row motivates the deep band-structure piece.
+    let n_ag = carrier_density_per_nm3(Fixed::from_int(1), dec(1049, 100), dec(107868, 1000));
+    let ep_ag = plasma_energy_ev(n_ag);
+    let v = Verdict::Flag("d-block: free-electron overestimate (~2.4x d-screening)");
+    report(
+        "plasma[Ag] eV",
+        ep_ag.to_f64_lossy(),
+        3.8,
+        &v,
+        &mut defects,
+        &mut checks,
+    );
+    println!();
+
+    println!("--- Drude conductivity sigma (S/m): one reserved lambda_tr per metal (sigma round-trip tested) ---");
+    // Copper (unanchored -> free functions), lambda_tr ~0.16: the clean noble-metal case, few-percent.
+    let n_cu = carrier_density_per_nm3(Fixed::from_int(1), dec(896, 100), dec(63546, 1000));
+    let sigma_cu = drude_conductivity_s_per_m(n_cu, dec(16, 100), Fixed::from_int(300));
+    let v = grade(sigma_cu.to_f64_lossy(), 5.88e7, 0.10);
+    report(
+        "sigma[Cu] S/m",
+        sigma_cu.to_f64_lossy(),
+        5.88e7,
+        &v,
+        &mut defects,
+        &mut checks,
+    );
+    // Sodium through the route, lambda_tr ~0.11: the reduced-order free-electron grade is wider (~30%).
+    let sigma_na = route
+        .conductivity("Na", Fixed::from_int(1), dec(11, 100), Fixed::from_int(300))
+        .expect("Na conductivity");
+    let v = grade(sigma_na.to_f64_lossy(), 2.13e7, 0.30);
+    report(
+        "sigma[Na] S/m",
+        sigma_na.to_f64_lossy(),
+        2.13e7,
+        &v,
+        &mut defects,
+        &mut checks,
+    );
     println!();
 
     (checks, defects)
