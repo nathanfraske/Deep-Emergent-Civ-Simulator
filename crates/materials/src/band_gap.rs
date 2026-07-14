@@ -40,10 +40,18 @@
 //! activation rather than an authored eV boundary; and the classification is never shipped in the preflight-free
 //! form redirect 2 warned reintroduces the Mott failure.
 //!
+//! THE EXPONENT RIDER (owner ruling): the carrier-density exponent `exp(-E_gap / 2kT)` is exponentially sensitive
+//! to the gap, and the banked escalation law forbids estimator grade in an exponent (a factor-grade `+/-0.4 eV`
+//! miss on a `1 eV` gap is `~2e3` in carrier density). So [`ln_thermal_carrier_activation`] guards on a
+//! [`GapGrade`]: an estimator gap is BARRED from the exponent (escalates), admitted only to classification,
+//! ranking, and optical cast (the sign and linear consumers). A measured or compute-once gap is authoritative and
+//! admitted. So an estimator-grade non-metal classifies but carries no carrier density ([`ConductionClass::NonMetal`]
+//! with `ln_activation: None`).
+//!
 //! Byte-neutral: `civsim-materials` is a leaf, not linked into the run_world binary.
 
 use civsim_core::Fixed;
-use civsim_physics::band_gap::BandGapColumn;
+use civsim_physics::band_gap::{BandGapColumn, GapProvenance};
 
 use crate::correlation::{CorrelationClass, CorrelationClassifier};
 
@@ -67,15 +75,54 @@ fn two_kb_ev_per_k() -> Fixed {
     ratio.checked_div(Fixed::from_int(10_000)).unwrap_or(ZERO)
 }
 
+/// The grade of a band gap on the provenance ladder, the key the EXPONENT RIDER guards on: a measured `[M]` value
+/// or a compute-once hybrid/GW eigenvalue is AUTHORITATIVE (admitted to the carrier-density exponent), a
+/// reduced-order Harrison estimate is ESTIMATOR grade (barred from the exponent, admitted only to classification,
+/// ranking, and optical cast). The coarse routing grade, mapped from the column's provenance and the runtime
+/// estimator.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GapGrade {
+    /// A measured `[M]` gap (the top rung): authoritative, admitted to the exponent.
+    Measured,
+    /// A compute-once hybrid/GW eigenvalue (the bottom rung): authoritative, admitted to the exponent.
+    ComputeOnce,
+    /// A reduced-order estimate (the Harrison middle rung): barred from the carrier-density exponent, admitted to
+    /// classification, ranking, and optical cast only.
+    Estimator,
+}
+
+impl GapGrade {
+    /// Whether this grade is admitted to the carrier-density exponent (the EXPONENT RIDER): only an authoritative
+    /// gap (measured or compute-once). An estimator gap is barred.
+    fn admits_exponent(self) -> bool {
+        matches!(self, GapGrade::Measured | GapGrade::ComputeOnce)
+    }
+}
+
 /// The natural log of the thermal carrier activation factor, `ln(exp(-E_gap / 2kT)) = -E_gap / (2 * k_B * T)`, the
 /// LOG-SPACE form of the semiconductor intrinsic-carrier suppression (the range-census discipline: the bare factor
 /// underflows Q32.32 for a wide gap). The returned exponent is non-positive and always representable; a consumer
 /// exponentiates it only when the value is in the `exp` window, and orders insulators by the log otherwise.
 ///
+/// THE EXPONENT RIDER (owner ruling): the `grade` guards the exponent. Estimator grade is BARRED and escalates
+/// (`None`), because the exponent is exponentially sensitive to the gap and estimator grade is forbidden in
+/// exponents: a factor-grade `+/-0.4 eV` miss on a `1 eV` gap at `300 K` is `exp(0.4 / 0.0517) ~ 2e3` in carrier
+/// density, three orders of magnitude of fabrication wearing a derived pedigree. An estimator gap feeds
+/// classification, ranking, and optical cast (the threshold and linear consumers), never the carrier-density
+/// exponent, which escalates to `[M]` or compute-once.
+///
 /// Reserves no value: `E_gap` (eV) and the temperature (K) are caller-supplied, and the `2 * k_B` fold reassembles
-/// from `k_B` and `e`. `None` (escalate) for a negative gap (a band overlap is a metal, classified upstream, and
-/// its carriers are not thermally activated across a gap) or a non-positive temperature (no thermal population).
-pub fn ln_thermal_carrier_activation(e_gap_ev: Fixed, temperature_k: Fixed) -> Option<Fixed> {
+/// from `k_B` and `e`. `None` (escalate) for an estimator-grade gap (barred from the exponent), a negative gap (a
+/// band overlap is a metal, classified upstream), or a non-positive temperature (no thermal population).
+pub fn ln_thermal_carrier_activation(
+    e_gap_ev: Fixed,
+    temperature_k: Fixed,
+    grade: GapGrade,
+) -> Option<Fixed> {
+    // THE EXPONENT RIDER: an estimator-grade gap is barred from the exponent and escalates to [M]/compute-once.
+    if !grade.admits_exponent() {
+        return None;
+    }
     if e_gap_ev < ZERO || temperature_k <= ZERO {
         return None;
     }
@@ -102,8 +149,10 @@ pub enum ConductionClass {
     /// semiconductor-versus-insulator distinction is the CONTINUOUS readout of `ln_activation` against the world
     /// temperature (a more negative exponent is more insulating), never a discrete authored boundary.
     NonMetal {
-        /// The natural-log thermal carrier activation `-E_gap / 2kT` (non-positive), the census-safe form.
-        ln_activation: Fixed,
+        /// The natural-log thermal carrier activation `-E_gap / 2kT` (non-positive), the census-safe form, or
+        /// `None` when the gap is ESTIMATOR grade (the exponent rider bars an estimator gap from the exponent):
+        /// the non-metal CLASSIFICATION stands, but the carrier density escalates to `[M]` or compute-once.
+        ln_activation: Option<Fixed>,
     },
     /// A correlated (Mott) insulator, sited by the `U/W` preflight BEFORE any reduced-order band model: it is an
     /// insulator, and a reduced-order model would wrongly call it a metal, so its gap must come from a measured
@@ -115,23 +164,30 @@ pub enum ConductionClass {
 }
 
 /// The gap-SIGN sort (the emergent metal / non-metal boundary, no authored threshold): a gap at or below zero is a
-/// metal, a positive gap is a non-metal whose carriers are thermally activated (the log-space exponent carried).
-fn conduction_class_from_gap(gap_ev: Fixed, temperature_k: Fixed) -> ConductionClass {
+/// metal, a positive gap is a non-metal whose carriers are thermally activated. The `grade` guards the exponent
+/// (the rider): a non-metal's `ln_activation` is `Some` for an authoritative gap and `None` for an estimator gap
+/// (the classification stands, the exponent escalates). The metal / non-metal SIGN itself is grade-blind, since the
+/// classification, ranking, and optical cast are the linear consumers an estimator gap is admitted to.
+fn conduction_class_from_gap(
+    gap_ev: Fixed,
+    temperature_k: Fixed,
+    grade: GapGrade,
+) -> ConductionClass {
     if gap_ev <= ZERO {
         return ConductionClass::Metal;
     }
-    match ln_thermal_carrier_activation(gap_ev, temperature_k) {
-        Some(ln_activation) => ConductionClass::NonMetal { ln_activation },
-        None => ConductionClass::Escalate,
+    ConductionClass::NonMetal {
+        ln_activation: ln_thermal_carrier_activation(gap_ev, temperature_k, grade),
     }
 }
 
 /// The conduction class from a MEASURED `[M]` band gap: the gap-sign sort directly, no `U/W` preflight. A measured
 /// value is authoritative (it already encodes the correlation gap, a Mott insulator's charge-transfer gap
-/// included), so it outranks the reduced-order `U/W` classifier on the provenance ladder and the preflight is
-/// skipped. Reserves no value: the gap is caller-supplied `[M]` data, the temperature the world's.
+/// included), so it outranks the reduced-order `U/W` classifier on the provenance ladder, the preflight is skipped,
+/// and its gap is admitted to the carrier-density exponent. Reserves no value: the gap is caller-supplied `[M]`
+/// data, the temperature the world's.
 pub fn conduction_class_measured(gap_ev: Fixed, temperature_k: Fixed) -> ConductionClass {
-    conduction_class_from_gap(gap_ev, temperature_k)
+    conduction_class_from_gap(gap_ev, temperature_k, GapGrade::Measured)
 }
 
 /// The conduction class from a REDUCED-ORDER or COMPUTED (non-measured) band gap, with the `U/W` PREFLIGHT
@@ -159,7 +215,12 @@ pub fn conduction_class_estimated(
     match classifier.classify(composition) {
         CorrelationClass::Localized => ConductionClass::CorrelatedInsulator,
         CorrelationClass::Window | CorrelationClass::OutOfScope => ConductionClass::Escalate,
-        CorrelationClass::Itinerant => conduction_class_from_gap(gap_ev, temperature_k),
+        // Itinerant: the gap-sign sort at ESTIMATOR grade. The metal / non-metal classification stands, but the
+        // exponent rider bars the estimator gap from the carrier density, so a non-metal here carries
+        // `ln_activation: None` (escalate to [M]/compute-once for the carrier density).
+        CorrelationClass::Itinerant => {
+            conduction_class_from_gap(gap_ev, temperature_k, GapGrade::Estimator)
+        }
     }
 }
 
@@ -176,7 +237,15 @@ pub fn conduction_class_from_column(
     temperature_k: Fixed,
 ) -> ConductionClass {
     match column.gap(composition) {
-        Some(band_gap) => conduction_class_measured(band_gap.gap_ev, temperature_k),
+        // Both column provenances are authoritative and admitted to the exponent; map to the routing grade so the
+        // carrier density is computed (never barred). A measured and a compute-once gap route identically here.
+        Some(band_gap) => {
+            let grade = match band_gap.provenance {
+                GapProvenance::Measured => GapGrade::Measured,
+                GapProvenance::ComputeOnce { .. } => GapGrade::ComputeOnce,
+            };
+            conduction_class_from_gap(band_gap.gap_ev, temperature_k, grade)
+        }
         None => ConductionClass::Escalate,
     }
 }
@@ -233,15 +302,17 @@ mod tests {
         let t300 = Fixed::from_int(300);
         // Germanium E_gap = 0.67 eV: -0.67 / 0.05170 = -12.96.
         let ge =
-            ln_thermal_carrier_activation(Fixed::from_ratio(67, 100), t300).expect("Ge activation");
+            ln_thermal_carrier_activation(Fixed::from_ratio(67, 100), t300, GapGrade::Measured)
+                .expect("Ge activation");
         assert!(
             close(ge, -12.96, 0.05),
             "Ge ln-activation ~ -12.96, got {}",
             ge.to_f64_lossy()
         );
         // Silicon E_gap = 1.12 eV: -1.12 / 0.05170 = -21.66.
-        let si = ln_thermal_carrier_activation(Fixed::from_ratio(112, 100), t300)
-            .expect("Si activation");
+        let si =
+            ln_thermal_carrier_activation(Fixed::from_ratio(112, 100), t300, GapGrade::Measured)
+                .expect("Si activation");
         assert!(
             close(si, -21.66, 0.05),
             "Si ln-activation ~ -21.66, got {}",
@@ -253,18 +324,18 @@ mod tests {
     fn a_metal_gap_has_zero_suppression_and_bad_inputs_escalate() {
         let t300 = Fixed::from_int(300);
         // A zero gap (the metal/semimetal boundary): activation exponent 0 (factor 1, no thermal suppression).
-        let metal =
-            ln_thermal_carrier_activation(ZERO, t300).expect("a zero gap has a defined activation");
+        let metal = ln_thermal_carrier_activation(ZERO, t300, GapGrade::Measured)
+            .expect("a zero gap has a defined activation");
         assert_eq!(metal, ZERO, "a zero gap has no thermal suppression");
         // A negative gap (a band overlap, a metal) is classified upstream and escalates here rather than modelling
         // a gap that is not there.
         assert!(
-            ln_thermal_carrier_activation(Fixed::from_int(-1), t300).is_none(),
+            ln_thermal_carrier_activation(Fixed::from_int(-1), t300, GapGrade::Measured).is_none(),
             "a negative gap (overlap) escalates: it is not a thermally-activated semiconductor"
         );
         // A non-positive temperature has no thermal population defined and escalates.
         assert!(
-            ln_thermal_carrier_activation(Fixed::from_int(1), ZERO).is_none(),
+            ln_thermal_carrier_activation(Fixed::from_int(1), ZERO, GapGrade::Measured).is_none(),
             "a non-positive temperature escalates"
         );
     }
@@ -276,8 +347,9 @@ mod tests {
         // exponent -105.8 is representable, so insulators' activations stay ordered without underflow. This is why
         // the carrier density is carried in log space (the range-census verdict of the electronic sub-arc).
         let t300 = Fixed::from_int(300);
-        let diamond = ln_thermal_carrier_activation(Fixed::from_ratio(547, 100), t300)
-            .expect("diamond activation");
+        let diamond =
+            ln_thermal_carrier_activation(Fixed::from_ratio(547, 100), t300, GapGrade::Measured)
+                .expect("diamond activation");
         assert!(
             close(diamond, -105.8, 0.2),
             "diamond ln-activation ~ -105.8, got {}",
@@ -285,7 +357,9 @@ mod tests {
         );
         // And a wider gap is strictly more suppressed (more negative), so the log-space values order correctly: the
         // insulator sits below the semiconductor.
-        let si = ln_thermal_carrier_activation(Fixed::from_ratio(112, 100), t300).expect("Si");
+        let si =
+            ln_thermal_carrier_activation(Fixed::from_ratio(112, 100), t300, GapGrade::Measured)
+                .expect("Si");
         assert!(
             diamond < si,
             "the wider gap is more suppressed (a more negative log-activation)"
@@ -298,7 +372,9 @@ mod tests {
         // exponentiates to ~2.35e-6, the thermal carrier fraction. (The insulator case above stays in log space by
         // design, which is the point of returning the log.)
         let t300 = Fixed::from_int(300);
-        let ge_ln = ln_thermal_carrier_activation(Fixed::from_ratio(67, 100), t300).expect("Ge");
+        let ge_ln =
+            ln_thermal_carrier_activation(Fixed::from_ratio(67, 100), t300, GapGrade::Measured)
+                .expect("Ge");
         let factor = ge_ln.exp();
         assert!(
             close(factor, 2.35e-6, 5e-7),
@@ -319,13 +395,14 @@ mod tests {
         );
         let si = conduction_class_measured(Fixed::from_ratio(112, 100), t300);
         let diamond = conduction_class_measured(Fixed::from_ratio(547, 100), t300);
+        // The measured route is authoritative, so the exponent is present (Some) on both.
         match (si, diamond) {
             (
                 ConductionClass::NonMetal {
-                    ln_activation: si_ln,
+                    ln_activation: Some(si_ln),
                 },
                 ConductionClass::NonMetal {
-                    ln_activation: dia_ln,
+                    ln_activation: Some(dia_ln),
                 },
             ) => {
                 // No eV threshold separates them: both are non-metals, and the wider-gap diamond is simply more
@@ -335,7 +412,9 @@ mod tests {
                     "the wider-gap diamond is more suppressed than silicon (the thresholdless continuous split)"
                 );
             }
-            _ => panic!("silicon and diamond are non-metals on the measured route"),
+            _ => panic!(
+                "silicon and diamond are non-metals with a present exponent on the measured route"
+            ),
         }
     }
 
@@ -381,11 +460,13 @@ mod tests {
         let t300 = Fixed::from_int(300);
         let nio = conduction_class_measured(Fixed::from_int(4), t300);
         match nio {
-            ConductionClass::NonMetal { ln_activation } => {
+            ConductionClass::NonMetal {
+                ln_activation: Some(ln),
+            } => {
                 assert!(
-                    ln_activation.to_f64_lossy() < -70.0,
+                    ln.to_f64_lossy() < -70.0,
                     "a 4 eV gap is deeply insulating (activation ~ -77), got {}",
-                    ln_activation.to_f64_lossy()
+                    ln.to_f64_lossy()
                 );
             }
             _ => panic!("measured NiO is a non-metal insulator via its measured gap"),
@@ -427,13 +508,14 @@ mod tests {
         let t300 = Fixed::from_int(300);
         let si = conduction_class_from_column(&col, &comp(&[("Si", 1)]), t300);
         let nio = conduction_class_from_column(&col, &comp(&[("Ni", 1), ("O", 1)]), t300);
+        // The column rows are measured (authoritative), so the exponent is present (Some) on both.
         match (si, nio) {
             (
                 ConductionClass::NonMetal {
-                    ln_activation: si_ln,
+                    ln_activation: Some(si_ln),
                 },
                 ConductionClass::NonMetal {
-                    ln_activation: nio_ln,
+                    ln_activation: Some(nio_ln),
                 },
             ) => {
                 assert!(
@@ -441,7 +523,7 @@ mod tests {
                     "the 4.3 eV Mott insulator is far more suppressed than the 1.12 eV semiconductor"
                 );
             }
-            _ => panic!("Si and NiO sort as non-metals from their banked measured gaps"),
+            _ => panic!("Si and NiO sort as non-metals with a present exponent from their banked measured gaps"),
         }
     }
 
@@ -476,9 +558,54 @@ source = "test-only fixture"
         let col = BandGapColumn::from_toml_str(fixture).expect("the fixture column loads");
         let t300 = Fixed::from_int(300);
         let xx = conduction_class_from_column(&col, &comp(&[("Xx", 1)]), t300);
+        // Compute-once is authoritative, so the exponent is admitted (Some), like a measurement.
         assert!(
-            matches!(xx, ConductionClass::NonMetal { .. }),
-            "a compute-once GW gap routes authoritatively (a non-metal via its gap), no preflight"
+            matches!(
+                xx,
+                ConductionClass::NonMetal {
+                    ln_activation: Some(_)
+                }
+            ),
+            "a compute-once GW gap routes authoritatively (a non-metal with a present exponent), no preflight"
+        );
+    }
+
+    #[test]
+    fn the_exponent_rider_bars_an_estimator_gap_from_the_carrier_density() {
+        // THE EXPONENT RIDER (owner ruling): an estimator-grade gap is barred from the carrier-density exponent (a
+        // factor-grade gap miss is orders of magnitude in carrier density), while an authoritative gap is admitted.
+        let t300 = Fixed::from_int(300);
+        let gap = Fixed::from_ratio(112, 100); // 1.12 eV
+        assert!(
+            ln_thermal_carrier_activation(gap, t300, GapGrade::Estimator).is_none(),
+            "an estimator gap is barred from the carrier-density exponent"
+        );
+        assert!(
+            ln_thermal_carrier_activation(gap, t300, GapGrade::Measured).is_some(),
+            "a measured gap is admitted to the exponent"
+        );
+        assert!(
+            ln_thermal_carrier_activation(gap, t300, GapGrade::ComputeOnce).is_some(),
+            "a compute-once gap is admitted to the exponent"
+        );
+    }
+
+    #[test]
+    fn an_estimator_route_classifies_but_escalates_the_exponent() {
+        // On the reduced-order route, an itinerant substance with a positive estimator gap is CLASSIFIED a non-metal
+        // (classification and ranking are admitted to the estimator), but its carrier-density exponent escalates
+        // (ln_activation None), so no estimator gap is ever exponentiated into a fabricated carrier density. (A
+        // synthetic positive gap on the itinerant TiO exercises the non-metal-estimator branch; TiO is truly a
+        // metal, but the mechanism under test is the estimator exponent guard.)
+        let (t, l, ds, r, mit) = floors();
+        let c = CorrelationClassifier::calibrate(&t, &l, &ds, &r, &mit).expect("calibrates");
+        let t300 = Fixed::from_int(300);
+        let tio_gapped =
+            conduction_class_estimated(&comp(&[("Ti", 1), ("O", 1)]), Fixed::from_int(1), &c, t300);
+        assert_eq!(
+            tio_gapped,
+            ConductionClass::NonMetal { ln_activation: None },
+            "an estimator-grade non-metal classifies, but the carrier-density exponent escalates (the rider)"
         );
     }
 }

@@ -67,7 +67,7 @@ pub use assemblage::{
 };
 pub use band_gap::{
     conduction_class_estimated, conduction_class_from_column, conduction_class_measured,
-    ln_thermal_carrier_activation, ConductionClass,
+    ln_thermal_carrier_activation, ConductionClass, GapGrade,
 };
 pub use contract::{Disposer, Preflight, Proposer, Quench, RealizedState, Validity};
 pub use correlation::{
