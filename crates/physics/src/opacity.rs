@@ -1073,6 +1073,120 @@ pub fn mie_q_abs(size_parameter: Fixed, n: Fixed, k: Fixed) -> Option<Fixed> {
     Fixed::from_bits_i128(wfixed_to_bigrat(q_abs).round_to_scale(Fixed::FRAC_BITS)?)
 }
 
+/// The number of log-spaced grain-size samples in the size-distribution quadrature. The integrand is
+/// smooth in `ln a` and the trapezoid sum converges to a few parts in 1e5 by this count (checked against a
+/// four-times-finer grid), so the discretization error sits far below the Q32.32 result's low bit. An
+/// engine-accuracy bound, a quadrature resolution, not world content.
+const GRAIN_SIZE_INTERVALS: i32 = 128;
+
+/// The absorption efficiency `Q_abs` of a single sphere of size parameter `x` and index `m = n + i*k`,
+/// dispatched across the three regimes so a caller integrating over a size distribution needs one call:
+/// the closed dipole (Rayleigh) form `4x Im[(m^2-1)/(m^2+2)]` below [`MIE_X_MIN`] (exact for `x << 1`, and
+/// the `Im` runs in `BigRat` because a metal's `4 n^2 k^2` overflows Q32.32), the full [`mie_q_abs`] on
+/// `[MIE_X_MIN, MIE_X_SWITCH]`, and the geometric opaque-sphere limit `Q_abs -> 1` above it. `None` on a
+/// non-physical index or a wide-fixed overflow inside the Mie branch.
+///
+/// The geometric branch carries an honest limit: a large opaque grain absorbs about its geometric cross
+/// section, so `Q_abs -> 1`, which drops the Fresnel surface-reflectance correction (a few percent for a
+/// dielectric). The `a^(2-p)` size weighting suppresses this regime's contribution for the standard grain
+/// bounds (a grain reaches `x > 50` only well above the micron sizes the distribution holds), so the
+/// simplification changes the size-averaged opacity by far less than the reflectance error itself.
+fn grain_qabs(x: Fixed, n: Fixed, k: Fixed) -> Option<Fixed> {
+    if n <= Fixed::ZERO || k < Fixed::ZERO {
+        return None;
+    }
+    let x_min = Fixed::from_ratio(MIE_X_MIN_NUM, MIE_X_MIN_DEN);
+    if x < x_min {
+        // Rayleigh dipole: Q_abs = 4x * Im[(m^2-1)/(m^2+2)], Im = 6nk/((n^2-k^2+2)^2 + 4n^2k^2).
+        let n_br = nonneg_fixed_to_bigrat(n);
+        let k_br = nonneg_fixed_to_bigrat(k);
+        let n2 = n_br.mul(&n_br);
+        let k2 = k_br.mul(&k_br);
+        let num = BigRat::from_i64(6).mul(&n_br).mul(&k_br);
+        let a = n2.sub(&k2).add(&BigRat::from_i64(2));
+        let denom = a.mul(&a).add(&BigRat::from_i64(4).mul(&n2).mul(&k2));
+        let im = num.div(&denom);
+        let four_x = nonneg_fixed_to_bigrat(x).mul(&BigRat::from_i64(4));
+        Fixed::from_bits_i128(four_x.mul(&im).round_to_scale(Fixed::FRAC_BITS)?)
+    } else if x <= Fixed::from_int(MIE_X_SWITCH) {
+        mie_q_abs(x, n, k)
+    } else {
+        Some(Fixed::ONE)
+    }
+}
+
+/// The size-distribution-averaged grain mass absorption coefficient `kappa_abs(lambda)` (cm^2/g), DERIVED
+/// by integrating the single-sphere [`grain_qabs`] over a power-law grain-size distribution rather than
+/// read from a fitted opacity. For a number density `n(a) da ~ a^(-slope) da` between `a_min` and `a_max`,
+/// the mass absorption coefficient is
+/// `kappa_abs = (3 / (4 rho)) * <a^2 Q_abs> / <a^3>`, `<f> = integral a^(-slope) f(a) da`,
+/// the ratio of the absorption cross section per grain to the mass per grain, averaged over the
+/// distribution (the number-scale cancels between numerator and denominator). The integral runs in
+/// `ln a` (the integrand is smooth there) by the trapezoid rule over [`GRAIN_SIZE_INTERVALS`] samples.
+///
+/// The distribution is DATA, not authored: `slope`, `a_min`, and `a_max` are arguments the caller supplies
+/// from the upstream condensation and coagulation physics. The Dohnanyi collisional-cascade steady state
+/// (`slope = 3.5`) is the reserved validation anchor for that upstream, surfaced with its basis, never
+/// inlined here. The index `(n, k)` and bulk density `rho` are per-composition data (the alien seam: a
+/// metal, an ice, or an exotic condensate is a different set of arguments, never a rewrite).
+///
+/// In the small-grain limit (every grain `x << 1`) this reduces exactly to the size-independent Rayleigh
+/// opacity [`rayleigh_grain_opacity`], the closed dipole form. `None` on a non-positive wavelength, density,
+/// or size bound, on `a_max <= a_min`, or on any overflow in the quadrature.
+pub fn grain_size_averaged_opacity(
+    lambda_um: Fixed,
+    n: Fixed,
+    k: Fixed,
+    bulk_density_g_cm3: Fixed,
+    slope: Fixed,
+    a_min_um: Fixed,
+    a_max_um: Fixed,
+) -> Option<Fixed> {
+    if lambda_um <= Fixed::ZERO
+        || bulk_density_g_cm3 <= Fixed::ZERO
+        || a_min_um <= Fixed::ZERO
+        || a_max_um <= a_min_um
+    {
+        return None;
+    }
+    let u_min = a_min_um.ln();
+    let u_max = a_max_um.ln();
+    let du = u_max
+        .checked_sub(u_min)?
+        .checked_div(Fixed::from_int(GRAIN_SIZE_INTERVALS))?;
+    let two_pi = Fixed::PI.checked_mul(Fixed::from_int(2))?;
+    // int a^(-slope) a^2 Q da = int a^(3-slope) Q du and int a^(-slope) a^3 da = int a^(4-slope) du, so the
+    // numerator weight is a^(3-slope) and the denominator weight is a^(4-slope) = a * a^(3-slope).
+    let three_minus_slope = Fixed::from_int(3).checked_sub(slope)?;
+
+    let mut num = Fixed::ZERO;
+    let mut den = Fixed::ZERO;
+    for i in 0..=GRAIN_SIZE_INTERVALS {
+        let u = u_min.checked_add(du.checked_mul(Fixed::from_int(i))?)?;
+        let a = u.exp();
+        let x = two_pi.checked_mul(a)?.checked_div(lambda_um)?;
+        let q = grain_qabs(x, n, k)?;
+        // Trapezoid: half weight at the two endpoints. Halving a^(3-slope) halves both accumulations, so
+        // the du scale cancels in the num/den ratio and is never formed.
+        let a3 = three_minus_slope.checked_mul(u)?.exp();
+        let a3 = if i == 0 || i == GRAIN_SIZE_INTERVALS {
+            a3.checked_div(Fixed::from_int(2))?
+        } else {
+            a3
+        };
+        num = num.checked_add(a3.checked_mul(q)?)?;
+        den = den.checked_add(a3.checked_mul(a)?)?;
+    }
+
+    // kappa_abs = (3/(4 rho)) * (num/den) * 1e4, the last factor converting the 1/micron of a^2/a^3 to
+    // 1/cm (the lengths otherwise cancel in the ratio).
+    let ratio = num.checked_div(den)?;
+    Fixed::from_ratio(3, 4)
+        .checked_div(bulk_density_g_cm3)?
+        .checked_mul(ratio)?
+        .checked_mul(Fixed::from_int(10000))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1887,6 +2001,132 @@ mod tests {
             ),
             None,
             "a negative absorption index is rejected"
+        );
+    }
+
+    // The size-integral references below are the size-distribution-averaged silicate-like grain opacity
+    // (m = 1.68 + 0.03i, rho = 3.3 g/cm^3, MRN slope 3.5, a in [0.005, 0.25] micron), computed by the same
+    // integral composed over the f64 BHMIE. The Rust runs it over Fixed exp/ln and the wide-fixed Mie, so
+    // it reproduces them to a few parts in 1e4.
+    fn silicate_grain() -> (Fixed, Fixed, Fixed, Fixed, Fixed, Fixed) {
+        (
+            Fixed::from_ratio(168, 100), // n
+            Fixed::from_ratio(3, 100),   // k
+            Fixed::from_ratio(33, 10),   // rho g/cm^3
+            Fixed::from_ratio(35, 10),   // MRN slope
+            Fixed::from_ratio(5, 1000),  // a_min micron
+            Fixed::from_ratio(25, 100),  // a_max micron
+        )
+    }
+
+    #[test]
+    fn the_grain_opacity_lands_the_silicate_magnitude_across_the_spectrum() {
+        let (n, k, rho, p, amin, amax) = silicate_grain();
+        // Optical (0.5 micron): the geometric-ish plateau of small grains, ~2832 cm^2/g.
+        let k_opt = grain_size_averaged_opacity(Fixed::from_ratio(5, 10), n, k, rho, p, amin, amax)
+            .unwrap();
+        assert!(
+            (k_opt.to_f64_lossy() - 2832.16).abs() < 2.0,
+            "kappa_abs(0.5um) ~ 2832 cm^2/g, got {}",
+            k_opt.to_f64_lossy()
+        );
+        // Mid-IR (10 micron), ~74.5 cm^2/g.
+        let k_mir =
+            grain_size_averaged_opacity(Fixed::from_int(10), n, k, rho, p, amin, amax).unwrap();
+        assert!(
+            (k_mir.to_f64_lossy() - 74.487).abs() < 0.2,
+            "kappa_abs(10um) ~ 74.5 cm^2/g, got {}",
+            k_mir.to_f64_lossy()
+        );
+    }
+
+    #[test]
+    fn the_grain_opacity_falls_as_one_over_lambda_at_constant_index() {
+        // With a wavelength-independent index every grain is in the size-independent Rayleigh regime at
+        // long wavelength, where kappa_abs = 6 pi Im/(rho lambda), so it falls as 1/lambda: a factor-ten
+        // wavelength is a factor-ten drop. The steeper lambda^-2 of real dust comes from k(lambda) falling,
+        // a wavelength-dependent index, not from this constant-index kernel.
+        let (n, k, rho, p, amin, amax) = silicate_grain();
+        let k100 = grain_size_averaged_opacity(Fixed::from_int(100), n, k, rho, p, amin, amax)
+            .unwrap()
+            .to_f64_lossy();
+        let k1000 = grain_size_averaged_opacity(Fixed::from_int(1000), n, k, rho, p, amin, amax)
+            .unwrap()
+            .to_f64_lossy();
+        let ratio = k100 / k1000;
+        assert!(
+            (ratio - 10.0).abs() < 0.1,
+            "the far-IR opacity falls as 1/lambda (ratio ~ 10), got {}",
+            ratio
+        );
+    }
+
+    #[test]
+    fn the_grain_opacity_is_lower_for_a_less_dense_or_less_absorbing_grain() {
+        // kappa_abs ~ 1/rho, so a less dense grain of the same optics has a higher opacity; and a lower
+        // absorption index k lowers Im and so the opacity. Both key on the per-composition data, the alien
+        // seam: an ice, a metal, or an exotic condensate is a different set of arguments, never a rewrite.
+        let (n, k, rho, p, amin, amax) = silicate_grain();
+        let base = grain_size_averaged_opacity(Fixed::from_int(100), n, k, rho, p, amin, amax)
+            .unwrap()
+            .to_f64_lossy();
+        let denser = grain_size_averaged_opacity(
+            Fixed::from_int(100),
+            n,
+            k,
+            Fixed::from_int(7),
+            p,
+            amin,
+            amax,
+        )
+        .unwrap()
+        .to_f64_lossy();
+        let less_absorbing = grain_size_averaged_opacity(
+            Fixed::from_int(100),
+            n,
+            Fixed::from_ratio(1, 100),
+            rho,
+            p,
+            amin,
+            amax,
+        )
+        .unwrap()
+        .to_f64_lossy();
+        assert!(denser < base, "a denser grain has a lower mass opacity");
+        assert!(
+            less_absorbing < base,
+            "a less absorbing grain (lower k) has a lower opacity"
+        );
+    }
+
+    #[test]
+    fn the_grain_opacity_is_deterministic() {
+        let (n, k, rho, p, amin, amax) = silicate_grain();
+        let lam = Fixed::from_int(10);
+        assert_eq!(
+            grain_size_averaged_opacity(lam, n, k, rho, p, amin, amax),
+            grain_size_averaged_opacity(lam, n, k, rho, p, amin, amax),
+            "the size-distribution quadrature replays byte for byte"
+        );
+    }
+
+    #[test]
+    fn the_grain_opacity_rejects_bad_arguments() {
+        let (n, k, rho, p, amin, amax) = silicate_grain();
+        assert_eq!(
+            grain_size_averaged_opacity(Fixed::ZERO, n, k, rho, p, amin, amax),
+            None,
+            "a non-positive wavelength is rejected"
+        );
+        assert_eq!(
+            grain_size_averaged_opacity(Fixed::from_int(10), n, k, Fixed::ZERO, p, amin, amax),
+            None,
+            "a non-positive density is rejected"
+        );
+        assert_eq!(
+            grain_size_averaged_opacity(Fixed::from_int(10), n, k, rho, p, amax, amin),
+            None,
+            "a_max <= a_min is rejected"
         );
     }
 }
