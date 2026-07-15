@@ -799,6 +799,103 @@ fn print_derived_readout(scene: &DerivedScene) {
 /// the star-lit globe (derived radius, blackbody star colour, day/night terminator, the derived Rayleigh atmosphere
 /// limb); zoomed in it is the derived crust tiles coloured by [`render::material_surface_rgb`]. The window is a pure
 /// observer, canon -> pixels (Principle 10).
+/// The PROVENANCE BREAKDOWN of the derived crust tile: every derived property with its derivation chain and the
+/// grade of each input, so hovering a tile SHOWS whether each value is derived, cited, or a labelled fixture. This
+/// is the sloppy-work catcher the provenance stack exists for: a fixture (a not-yet-derived interim) is surfaced in
+/// amber, never hidden. The cited grades `[M]` are the data files' own citations (AGSS09, NIST-JANAF,
+/// Robie-Hemingway); the derivation grades `[D]` are structural (the named derivation functions); the floor
+/// authoring-surface count is read LIVE from the provenance register ([`civsim_physics::floor_provenance`]), the
+/// global honesty number. Nothing here is fabricated: each line is a real derivation, a cited source, or a labelled
+/// fixture, so a value that is authored where it should be derived shows up as a fixture rather than a clean tag.
+fn provenance_lines(
+    scene: &DerivedScene,
+    floor_prov: Option<&civsim_physics::floor_provenance::FloorProvenance>,
+) -> Vec<(String, Rgb)> {
+    let derived = Rgb::new(150, 220, 150); // green: DERIVED
+    let cited = Rgb::new(150, 190, 235); // blue: [M] cited
+    let fixture = Rgb::new(240, 200, 120); // amber: a labelled FIXTURE (the sloppy-work spot)
+    let head = Rgb::new(238, 238, 238);
+    let crust_phase = scene
+        .crust_phases
+        .first()
+        .cloned()
+        .unwrap_or_else(|| "unresolved".to_string());
+    let mut lines = vec![
+        (
+            "PROVENANCE  (hovered tile: the derived crust)".to_string(),
+            head,
+        ),
+        (format!("material  {crust_phase}"), head),
+        (
+            "  <- condensation of AGSS09 abundances  [M cited]".to_string(),
+            cited,
+        ),
+        (
+            "  <- NIST-JANAF thermochemistry         [M cited]".to_string(),
+            cited,
+        ),
+        (
+            "  <- VCS amounts + differentiation      [D derived]".to_string(),
+            derived,
+        ),
+        (
+            "  <- buoyant partial-melt crust         [D derived]".to_string(),
+            derived,
+        ),
+        ("elevation  (Airy isostasy)".to_string(), head),
+        (
+            "  <- crustal_density, molar volumes     [M Robie-Hemingway]".to_string(),
+            cited,
+        ),
+        (
+            "  <- isostatic float on the mantle      [D derived]".to_string(),
+            derived,
+        ),
+        (
+            format!(
+                "colour  rgb({},{},{})",
+                scene.material.r, scene.material.g, scene.material.b
+            ),
+            head,
+        ),
+        (
+            "  <- absorption spectrum x star light   [D derived]".to_string(),
+            derived,
+        ),
+        (
+            "  <- band gap + crystal-field d-d line  [M cited]".to_string(),
+            cited,
+        ),
+        ("FIXTURES surfaced (not yet derived):".to_string(), head),
+        (
+            "  formation-era T ~1400 K   [fixture: disk history]".to_string(),
+            fixture,
+        ),
+        (
+            "  accretion mass, bulk density  [fixture]".to_string(),
+            fixture,
+        ),
+        (
+            "  atmosphere volatile budget    [fixture #40]".to_string(),
+            fixture,
+        ),
+    ];
+    match floor_prov {
+        Some(fp) => lines.push((
+            format!(
+                "floor authoring surface: {} authored",
+                fp.authoring_surface().len()
+            ),
+            head,
+        )),
+        None => lines.push((
+            "floor provenance register: unavailable".to_string(),
+            fixture,
+        )),
+    }
+    lines
+}
+
 fn run_derived(argv: &[String]) {
     let star_mass = parse_fixed(argv.get(2), Fixed::ONE);
     let orbit_au = parse_fixed(argv.get(3), Fixed::ONE);
@@ -847,12 +944,18 @@ fn run_derived(argv: &[String]) {
     });
     window.set_target_fps(30);
 
+    // The provenance register, loaded once for the hover panel's live authoring-surface count (fail-soft: the panel
+    // shows "register unavailable" rather than fabricating a number).
+    let floor_prov = civsim_physics::floor_provenance::FloorProvenance::embedded().ok();
+    let mut show_provenance = false;
     let mut zoom: u32 = 0;
     while window.is_open() && !window.is_key_down(Key::Escape) {
         for k in window.get_keys_pressed(KeyRepeat::No) {
             match k {
                 Key::Equal | Key::NumPadPlus => zoom = (zoom + 1).min(max_zoom),
                 Key::Minus | Key::NumPadMinus => zoom = zoom.saturating_sub(1),
+                // Toggle the tile provenance panel (the sloppy-work catcher).
+                Key::P => show_provenance = !show_provenance,
                 Key::Home => zoom = 0,
                 _ => {}
             }
@@ -936,7 +1039,7 @@ fn run_derived(argv: &[String]) {
             4,
             20,
             &format!(
-                "crust {}  air {}  +/- zoom  wasd pan  esc quit",
+                "crust {}  air {}  +/- zoom  p provenance  esc quit",
                 crust_line.join("-"),
                 scene
                     .atmosphere
@@ -948,6 +1051,29 @@ fn run_derived(argv: &[String]) {
             Rgb::new(170, 180, 200),
             Rgb::new(10, 12, 20),
         );
+        // The provenance panel: on toggle, over the surface view, list the hovered crust tile's provenance
+        // breakdown on the right edge, so a fixture stands out amber against the derived and cited grades.
+        if show_provenance && zoom >= globe_levels {
+            let lines = provenance_lines(&scene, floor_prov.as_ref());
+            let panel_w = 372usize;
+            let px = win_w.saturating_sub(panel_w);
+            for (i, (text, colour)) in lines.iter().enumerate() {
+                let py = 40 + i * 15;
+                if py + 12 < win_h {
+                    render::draw_label(
+                        &mut buf,
+                        win_w,
+                        win_h,
+                        (px + 6) as i32,
+                        py as i32,
+                        text,
+                        1,
+                        *colour,
+                        Rgb::new(10, 12, 20),
+                    );
+                }
+            }
+        }
         window.set_title(&format!(
             "civsim derived planet  star {:.2} Msun  orbit {:.2} AU  |  {mode}",
             scene.star_mass.to_f64_lossy(),
