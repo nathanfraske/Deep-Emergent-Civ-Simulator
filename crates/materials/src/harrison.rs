@@ -196,6 +196,44 @@ pub fn bond_orbital_average_gap_ev(v2: Fixed, v3: Fixed) -> Option<Fixed> {
     bond_magnitude(v2, v3)?.checked_mul(Fixed::from_int(2))
 }
 
+/// BAND 3 (phonon battery), the covalent-stretch curvature dispatch, DOCUMENTED STUB, BLOCKED ON PRIMARY-SOURCE
+/// VERIFICATION. For a low-`Delta-chi` covalent bond the phonon generator's polar-weighted Badger force constant
+/// under-estimates the stiffness (SiC by ~25%); the fix takes `k` as the second derivative of the bond energy
+/// `E_bond(d) = -2 sqrt(V_2^2 + V_3^2) + V_0(d)`, covalent-plus-polar attraction against overlap repulsion.
+///
+/// THE ATTRACTION IS EXACT off the banked quartet ([`covalent_energy_v2`] gives `V_2 = 2.16 hbar^2/(m d^2)`,
+/// [`polar_energy_v3`] gives `V_3`, d-independent to leading order). With `m = sqrt(V_2^2 + V_3^2)` the slope and
+/// curvature are closed-form (`V_2 ~ d^-2`, so `dV_2/dd = -2 V_2/d`):
+///   `E'_att = 4 V_2^2 / (d m)`,  `E''_att = 4 V_2^2 (-3 V_2^2 - 5 V_3^2) / (d^2 m^3)`.
+///
+/// THE REPULSION EXPONENT IS THE HONESTY BOUNDARY. The overlap repulsion `V_0 ~ 1/d^n` has an exponent `n` that is
+/// NOT uniform across Harrison's editions (the lattice-vibrations argument versus the later refit), and it is the
+/// one coefficient not to guess. A web survey found the `d^-4` law cited in the literature is the p-d MATRIX ELEMENT
+/// `t_pd ~ d^-4`, a DIFFERENT quantity from the overlap repulsion `V_0`, so `n` remains UNVERIFIED to primary. Per
+/// the build ruling, this route is left as a spec, not wired, until `n` is read from Harrison's lattice-vibrations
+/// chapter (Electronic Structure and the Properties of Solids, 1980).
+///
+/// THE PARAMETER-FREE CONSISTENCY CHECK (the acceptance spec, once `n` is verified). At equilibrium `dE/dd = 0` ties
+/// the repulsion's curvature to the attraction's slope for any assumed power `n`, so the stretch constant carries NO
+/// free coefficient: `k = E''_att + ((n+1)/d) |E'_att|`. Silicon's measured `9.2 mdyn/Angstrom` stretch is then the
+/// GATE the route must clear, never a fit it was tuned to (silicon is not a phonon-battery row, so it is independent
+/// validation data). It is a DISPATCH rule on the banked `Delta-chi` columns (low `Delta-chi` -> this curvature,
+/// else Badger), fixing the diatomic and the crystal together.
+///
+/// This stub takes the exponent `n` as an EXPLICIT caller argument (never a baked-in default) and returns `None`:
+/// the mechanism is specified but deliberately not evaluated, because supplying a `n` here would be the guess the
+/// ruling forbids. When `n` is verified, the closed-form attraction above plus this one relation complete it.
+pub fn covalent_stretch_force_constant_gated(
+    _v2: Fixed,
+    _v3: Fixed,
+    _d_angstrom: Fixed,
+    _repulsion_exponent_n: Fixed,
+) -> Option<Fixed> {
+    // BLOCKED: the equilibrium-consistency check runs parameter-free only once `n` is read from the primary. Until
+    // then this returns None rather than evaluate with an unverified exponent (do not guess `n`).
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -434,6 +472,19 @@ mod tests {
         assert!(
             barred.is_none(),
             "an estimator-grade gap is barred from the carrier-density exponent"
+        );
+    }
+
+    #[test]
+    fn the_band_three_covalent_stretch_is_gated_on_the_verified_exponent() {
+        // BAND 3 is BLOCKED ON PRIMARY-SOURCE VERIFICATION of the overlap-repulsion exponent n (the literature d^-4
+        // is the p-d matrix element t_pd, not the repulsion V_0). The stub returns None rather than evaluate with an
+        // unverified exponent: the mechanism is specified, not guessed.
+        let v2 = covalent_energy_v2(Fixed::from_ratio(235, 100)).unwrap();
+        assert!(
+            covalent_stretch_force_constant_gated(v2, ZERO, Fixed::from_ratio(235, 100), Fixed::from_int(4))
+                .is_none(),
+            "the covalent-stretch curvature is gated until n is verified to primary (do not guess n)"
         );
     }
 }
