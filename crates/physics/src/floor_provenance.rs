@@ -107,8 +107,8 @@ mod tests {
         let reg = FloorProvenance::embedded().expect("the embedded floor grade register parses");
         assert_eq!(
             reg.grades.len(),
-            241,
-            "every floor value entry is graded (235 axes/substances/elements plus 6 candidate phases)"
+            242,
+            "every floor value entry is graded (235 axes/substances/elements plus 7 candidate phases)"
         );
         // The floor authoring surface is the handful of genuine owner-reserved biology and chemistry
         // couplings, source-verified; the physics quantity axes and the metrological atomic-weight

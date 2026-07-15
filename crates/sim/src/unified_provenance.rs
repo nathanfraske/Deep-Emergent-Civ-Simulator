@@ -260,17 +260,17 @@ mod tests {
         let floor = real_floor();
         let joined =
             JoinedRegister::build(&cal, &floor).expect("the fold succeeds, no id collision");
-        // 228 calibration entries + 241 floor grades, no calibration/floor id collision.
+        // 228 calibration entries + 242 floor grades, no calibration/floor id collision.
         assert_eq!(
             cal.iter().count(),
             228,
             "the calibration manifest has 228 entries"
         );
-        assert_eq!(floor.grades.len(), 241, "the floor register has 241 grades");
+        assert_eq!(floor.grades.len(), 242, "the floor register has 242 grades");
         assert_eq!(
             joined.len(),
-            469,
-            "the joined register is the two node sets with no id collision (228 + 241)"
+            470,
+            "the joined register is the two node sets with no id collision (228 + 242)"
         );
     }
 
@@ -432,7 +432,7 @@ mod tests {
         let floor = real_floor();
         let joined = JoinedRegister::build(&cal, &floor).expect("the fold succeeds");
 
-        // The 6 candidate phases are measured + derive_first_defect. They must stay OFF the unified authoring
+        // The 7 candidate phases are measured + derive_first_defect. They must stay OFF the unified authoring
         // surface (a measured value is not authored), and the derive-first-defect punch-list (the
         // materials-buildout worklist) is unchanged by the fold.
         for id in joined.authoring_surface() {
@@ -443,9 +443,9 @@ mod tests {
         }
         assert_eq!(
             floor.derive_first_defects().len(),
-            20,
+            21,
             "the derive-first-defect count (13 bulk substances, the elastic-modulus axis the materials \
-             modulus route targets, and 6 phases) survives the fold unchanged"
+             modulus route targets, and 7 phases) survives the fold unchanged"
         );
     }
 }

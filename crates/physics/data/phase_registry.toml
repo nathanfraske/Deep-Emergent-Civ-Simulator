@@ -67,3 +67,11 @@ enthalpy_formation = "-1479.36"
 standard_entropy = "148.32"
 molar_volume = "46.310"
 source = "Robie & Hemingway 1995, USGS Bulletin 2131 (298.15 K, 1 bar), Fe-olivine end-member"
+
+[[phase]]
+name = "spinel"
+formula = "MgAl2O4"
+enthalpy_formation = "-2299.1"
+standard_entropy = "88.70"
+molar_volume = "39.71"
+source = "Robie & Hemingway 1995, USGS Bulletin 2131 (298.15 K, 1 bar), MgAl2O4 spinel"
