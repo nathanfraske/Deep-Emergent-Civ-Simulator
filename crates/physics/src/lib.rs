@@ -70,6 +70,7 @@ pub mod quantities;
 pub mod rose_eos;
 pub mod saha;
 pub mod scaled;
+pub mod solar_abundances;
 pub mod stoner;
 pub mod term_values;
 pub mod tm_oxide_lattice_energy;

@@ -1,0 +1,411 @@
+# AGSS09 present-day solar abundances (Asplund, Grevesse, Sauval & Scott 2009, ARA&A 47, 481), Table 1: the
+# photospheric and CI-carbonaceous-chondrite (meteoritic) elemental abundances on the log-epsilon(H)=12 scale, the
+# disk-condensation composition vector. AGSS09 is the project's pinned solar anchor. CITED: Asplund, M., Grevesse,
+# N., Sauval, A.J. & Scott, P. (2009), Ann. Rev. Astron. Astrophys. 47, 481, Table 1 (p.43); meteoritic column from
+# Lodders, Palme & Gail (2009). Transcribed from the primary arXiv reprint PDF (the Lodders/Pyykko protocol:
+# transcribe the table, fingerprint-check spot rows). SOURCE PDF (the receipt): https://arxiv.org/pdf/0909.0948 ,
+# md5 cfd962fecf59e21b951664d91b1e42eb .
+#
+# COLUMNS: log_eps_photosphere / sigma_photosphere = the photospheric abundance and its 1-sigma (dex); absent for
+# As, Se, Br (no photospheric determination). log_eps_meteorite / sigma_meteorite = the CI-chondrite value and its
+# sigma (the noble-gas meteoritic values carry no sigma, being the depleted residue). photosphere_indirect = true
+# for the noble gases He, Ne, Ar, Kr, whose photospheric values are indirect estimates (AGSS09 Sect. 3.9, bracketed
+# in the source). source = the preferred present-day solar value: "photospheric" where a direct or indirect
+# photospheric determination exists (AGSS09's Z is computed from the photosphere), "meteoritic" only where none
+# does. HONEST LIMITS on the recommendation: AGSS09 report the photospheric and CI values agree to a mean 0.00 +/-
+# 0.05 dex over the 45 non-volatile elements, so a condensation consumer may substitute the lower-sigma CI value for
+# a rock-forming refractory; where the two differ by > 0.1 dex AGSS09 attribute it to uncertain photospheric
+# analyses (so meteoritic is the more reliable there); all volatiles are depleted in meteorites and Li is depleted
+# in the photosphere, so those two columns are not interchangeable. Recommended present-day photospheric mass
+# fractions (AGSS09 Table 4, "Present work"): X = 0.7381, Y = 0.2485, Z = 0.0134, Z/X = 0.0181.
+#
+# SCOPE: every element AGSS09 Table 1 lists from Z=1 (H) through Z=42 (Mo), gapless (Z=43 Tc has no stable isotope
+# and is absent from the source), the abundant-and-refractory span that drives the condensation sequence (it carries
+# every rock-former, every abundant volatile, and the ultrarefractory Zr); the heavier trace elements (Z>=44) are
+# condensation-negligible and are not vendored (a consumer re-fetches them from the same primary).
+#
+# BLOCK KIND [[abundance]], the cited-data-column idiom, NOT the reserved floor [[element]] kind: an immutable
+# transcription of AGSS09 Table 1, out of the floor real/fantasy authorship axis. PROVENANCE: header citation.
+# GRADE: single-grade for each column (photospheric = the AGSS09 3D-model determination; meteoritic = the Lodders-
+# Palme-Gail 2009 CI compilation); the two grades are kept in distinct columns so a consumer never reads one as the
+# other. FINGERPRINTS (owner spot-check, in the loader #[test], photospheric within 0.05 dex): O 8.69, C 8.43,
+# Fe 7.50, Mg 7.60, Si 7.51, Ca 6.34, Al 6.45, Ti 4.95, Na 6.24, Ni 6.22, S 7.12; H = 12.00 exactly (the scale
+# definition).
+
+scale = "log_eps_H12"
+x_mass_fraction = "0.7381"
+y_mass_fraction = "0.2485"
+z_mass_fraction = "0.0134"
+z_over_x = "0.0181"
+
+
+[[abundance]]
+symbol = "H"
+z = 1
+log_eps_photosphere = "12.00"
+log_eps_meteorite = "8.22"
+sigma_meteorite = "0.04"
+source = "photospheric"
+
+[[abundance]]
+symbol = "He"
+z = 2
+log_eps_photosphere = "10.93"
+sigma_photosphere = "0.01"
+photosphere_indirect = true
+log_eps_meteorite = "1.29"
+source = "photospheric"
+
+[[abundance]]
+symbol = "Li"
+z = 3
+log_eps_photosphere = "1.05"
+sigma_photosphere = "0.10"
+log_eps_meteorite = "3.26"
+sigma_meteorite = "0.05"
+source = "photospheric"
+
+[[abundance]]
+symbol = "Be"
+z = 4
+log_eps_photosphere = "1.38"
+sigma_photosphere = "0.09"
+log_eps_meteorite = "1.30"
+sigma_meteorite = "0.03"
+source = "photospheric"
+
+[[abundance]]
+symbol = "B"
+z = 5
+log_eps_photosphere = "2.70"
+sigma_photosphere = "0.20"
+log_eps_meteorite = "2.79"
+sigma_meteorite = "0.04"
+source = "photospheric"
+
+[[abundance]]
+symbol = "C"
+z = 6
+log_eps_photosphere = "8.43"
+sigma_photosphere = "0.05"
+log_eps_meteorite = "7.39"
+sigma_meteorite = "0.04"
+source = "photospheric"
+
+[[abundance]]
+symbol = "N"
+z = 7
+log_eps_photosphere = "7.83"
+sigma_photosphere = "0.05"
+log_eps_meteorite = "6.26"
+sigma_meteorite = "0.06"
+source = "photospheric"
+
+[[abundance]]
+symbol = "O"
+z = 8
+log_eps_photosphere = "8.69"
+sigma_photosphere = "0.05"
+log_eps_meteorite = "8.40"
+sigma_meteorite = "0.04"
+source = "photospheric"
+
+[[abundance]]
+symbol = "F"
+z = 9
+log_eps_photosphere = "4.56"
+sigma_photosphere = "0.30"
+log_eps_meteorite = "4.42"
+sigma_meteorite = "0.06"
+source = "photospheric"
+
+[[abundance]]
+symbol = "Ne"
+z = 10
+log_eps_photosphere = "7.93"
+sigma_photosphere = "0.10"
+photosphere_indirect = true
+log_eps_meteorite = "-1.12"
+source = "photospheric"
+
+[[abundance]]
+symbol = "Na"
+z = 11
+log_eps_photosphere = "6.24"
+sigma_photosphere = "0.04"
+log_eps_meteorite = "6.27"
+sigma_meteorite = "0.02"
+source = "photospheric"
+
+[[abundance]]
+symbol = "Mg"
+z = 12
+log_eps_photosphere = "7.60"
+sigma_photosphere = "0.04"
+log_eps_meteorite = "7.53"
+sigma_meteorite = "0.01"
+source = "photospheric"
+
+[[abundance]]
+symbol = "Al"
+z = 13
+log_eps_photosphere = "6.45"
+sigma_photosphere = "0.03"
+log_eps_meteorite = "6.43"
+sigma_meteorite = "0.01"
+source = "photospheric"
+
+[[abundance]]
+symbol = "Si"
+z = 14
+log_eps_photosphere = "7.51"
+sigma_photosphere = "0.03"
+log_eps_meteorite = "7.51"
+sigma_meteorite = "0.01"
+source = "photospheric"
+
+[[abundance]]
+symbol = "P"
+z = 15
+log_eps_photosphere = "5.41"
+sigma_photosphere = "0.03"
+log_eps_meteorite = "5.43"
+sigma_meteorite = "0.04"
+source = "photospheric"
+
+[[abundance]]
+symbol = "S"
+z = 16
+log_eps_photosphere = "7.12"
+sigma_photosphere = "0.03"
+log_eps_meteorite = "7.15"
+sigma_meteorite = "0.02"
+source = "photospheric"
+
+[[abundance]]
+symbol = "Cl"
+z = 17
+log_eps_photosphere = "5.50"
+sigma_photosphere = "0.30"
+log_eps_meteorite = "5.23"
+sigma_meteorite = "0.06"
+source = "photospheric"
+
+[[abundance]]
+symbol = "Ar"
+z = 18
+log_eps_photosphere = "6.40"
+sigma_photosphere = "0.13"
+photosphere_indirect = true
+log_eps_meteorite = "-0.50"
+source = "photospheric"
+
+[[abundance]]
+symbol = "K"
+z = 19
+log_eps_photosphere = "5.03"
+sigma_photosphere = "0.09"
+log_eps_meteorite = "5.08"
+sigma_meteorite = "0.02"
+source = "photospheric"
+
+[[abundance]]
+symbol = "Ca"
+z = 20
+log_eps_photosphere = "6.34"
+sigma_photosphere = "0.04"
+log_eps_meteorite = "6.29"
+sigma_meteorite = "0.02"
+source = "photospheric"
+
+[[abundance]]
+symbol = "Sc"
+z = 21
+log_eps_photosphere = "3.15"
+sigma_photosphere = "0.04"
+log_eps_meteorite = "3.05"
+sigma_meteorite = "0.02"
+source = "photospheric"
+
+[[abundance]]
+symbol = "Ti"
+z = 22
+log_eps_photosphere = "4.95"
+sigma_photosphere = "0.05"
+log_eps_meteorite = "4.91"
+sigma_meteorite = "0.03"
+source = "photospheric"
+
+[[abundance]]
+symbol = "V"
+z = 23
+log_eps_photosphere = "3.93"
+sigma_photosphere = "0.08"
+log_eps_meteorite = "3.96"
+sigma_meteorite = "0.02"
+source = "photospheric"
+
+[[abundance]]
+symbol = "Cr"
+z = 24
+log_eps_photosphere = "5.64"
+sigma_photosphere = "0.04"
+log_eps_meteorite = "5.64"
+sigma_meteorite = "0.01"
+source = "photospheric"
+
+[[abundance]]
+symbol = "Mn"
+z = 25
+log_eps_photosphere = "5.43"
+sigma_photosphere = "0.05"
+log_eps_meteorite = "5.48"
+sigma_meteorite = "0.01"
+source = "photospheric"
+
+[[abundance]]
+symbol = "Fe"
+z = 26
+log_eps_photosphere = "7.50"
+sigma_photosphere = "0.04"
+log_eps_meteorite = "7.45"
+sigma_meteorite = "0.01"
+source = "photospheric"
+
+[[abundance]]
+symbol = "Co"
+z = 27
+log_eps_photosphere = "4.99"
+sigma_photosphere = "0.07"
+log_eps_meteorite = "4.87"
+sigma_meteorite = "0.01"
+source = "photospheric"
+
+[[abundance]]
+symbol = "Ni"
+z = 28
+log_eps_photosphere = "6.22"
+sigma_photosphere = "0.04"
+log_eps_meteorite = "6.20"
+sigma_meteorite = "0.01"
+source = "photospheric"
+
+[[abundance]]
+symbol = "Cu"
+z = 29
+log_eps_photosphere = "4.19"
+sigma_photosphere = "0.04"
+log_eps_meteorite = "4.25"
+sigma_meteorite = "0.04"
+source = "photospheric"
+
+[[abundance]]
+symbol = "Zn"
+z = 30
+log_eps_photosphere = "4.56"
+sigma_photosphere = "0.05"
+log_eps_meteorite = "4.63"
+sigma_meteorite = "0.04"
+source = "photospheric"
+
+[[abundance]]
+symbol = "Ga"
+z = 31
+log_eps_photosphere = "3.04"
+sigma_photosphere = "0.09"
+log_eps_meteorite = "3.08"
+sigma_meteorite = "0.02"
+source = "photospheric"
+
+[[abundance]]
+symbol = "Ge"
+z = 32
+log_eps_photosphere = "3.65"
+sigma_photosphere = "0.10"
+log_eps_meteorite = "3.58"
+sigma_meteorite = "0.04"
+source = "photospheric"
+
+[[abundance]]
+symbol = "As"
+z = 33
+log_eps_meteorite = "2.30"
+sigma_meteorite = "0.04"
+source = "meteoritic"
+
+[[abundance]]
+symbol = "Se"
+z = 34
+log_eps_meteorite = "3.34"
+sigma_meteorite = "0.03"
+source = "meteoritic"
+
+[[abundance]]
+symbol = "Br"
+z = 35
+log_eps_meteorite = "2.54"
+sigma_meteorite = "0.06"
+source = "meteoritic"
+
+[[abundance]]
+symbol = "Kr"
+z = 36
+log_eps_photosphere = "3.25"
+sigma_photosphere = "0.06"
+photosphere_indirect = true
+log_eps_meteorite = "-2.27"
+source = "photospheric"
+
+[[abundance]]
+symbol = "Rb"
+z = 37
+log_eps_photosphere = "2.52"
+sigma_photosphere = "0.10"
+log_eps_meteorite = "2.36"
+sigma_meteorite = "0.03"
+source = "photospheric"
+
+[[abundance]]
+symbol = "Sr"
+z = 38
+log_eps_photosphere = "2.87"
+sigma_photosphere = "0.07"
+log_eps_meteorite = "2.88"
+sigma_meteorite = "0.03"
+source = "photospheric"
+
+[[abundance]]
+symbol = "Y"
+z = 39
+log_eps_photosphere = "2.21"
+sigma_photosphere = "0.05"
+log_eps_meteorite = "2.17"
+sigma_meteorite = "0.04"
+source = "photospheric"
+
+[[abundance]]
+symbol = "Zr"
+z = 40
+log_eps_photosphere = "2.58"
+sigma_photosphere = "0.04"
+log_eps_meteorite = "2.53"
+sigma_meteorite = "0.04"
+source = "photospheric"
+
+[[abundance]]
+symbol = "Nb"
+z = 41
+log_eps_photosphere = "1.46"
+sigma_photosphere = "0.04"
+log_eps_meteorite = "1.41"
+sigma_meteorite = "0.04"
+source = "photospheric"
+
+[[abundance]]
+symbol = "Mo"
+z = 42
+log_eps_photosphere = "1.88"
+sigma_photosphere = "0.08"
+log_eps_meteorite = "1.94"
+sigma_meteorite = "0.04"
+source = "photospheric"
