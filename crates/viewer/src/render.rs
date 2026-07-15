@@ -44,6 +44,41 @@ pub fn organism_color(layer: u16, species_id: u32) -> Rgb {
     Rgb::new(jitter(br, 0), jitter(bg, 8), jitter(bb, 16))
 }
 
+/// The approximate DISPLAY colour of a blackbody at effective temperature `t_eff_k` (kelvin): the observability
+/// non-canon projection of a star's DERIVED `T_eff` (from [`civsim_sim::astro::stellar_effective_temperature`])
+/// onto a screen colour. A cool ~3000 K star reads orange-red, the Sun (~5772 K) a warm near-white, a hot
+/// ~10000 K star blue-white, tracking the Planckian locus. The mapping is the piecewise fit of Tanner Helland
+/// ("How to Convert Temperature (K) to RGB", 2012), itself a regression to Mitchell Charity's blackbody-colour
+/// datafile (`bbr_color.txt`, computed from the CIE 1931 colour-matching functions). Display-only: it reads a
+/// derived scalar and returns pixels, writes no canonical state (Principle 10), and uses `f64` because a screen
+/// colour needs no fixed-point rigour past per-run determinism.
+// Wired into the solar-system globe compositor in the star-lighting slice; the tests exercise it now.
+#[allow(dead_code)]
+pub fn blackbody_rgb(t_eff_k: Fixed) -> Rgb {
+    // The fit is defined on temperature/100, valid roughly 1000..40000 K; clamp into that band so a derived T_eff
+    // past the fit returns its nearest sensible colour rather than a wild extrapolation.
+    let temp = (t_eff_k.to_f64_lossy() / 100.0).clamp(10.0, 400.0);
+    let clamp255 = |v: f64| v.clamp(0.0, 255.0) as u8;
+    let red = if temp <= 66.0 {
+        255.0
+    } else {
+        329.698_727_446 * (temp - 60.0).powf(-0.133_204_759_2)
+    };
+    let green = if temp <= 66.0 {
+        99.470_802_586_1 * temp.ln() - 161.119_568_166_1
+    } else {
+        288.122_169_528_3 * (temp - 60.0).powf(-0.075_514_849_2)
+    };
+    let blue = if temp >= 66.0 {
+        255.0
+    } else if temp <= 19.0 {
+        0.0
+    } else {
+        138.517_731_223_1 * (temp - 10.0).ln() - 305.044_792_730_7
+    };
+    Rgb::new(clamp255(red), clamp255(green), clamp255(blue))
+}
+
 /// A physics-derived terrain colour: the tile's own `elevation`, `moisture`, and `temperature`
 /// fields (the physical quantities worldgen computed, each in `[0, 1]`) mapped to colour, so terrain
 /// looks like its physics rather than an authored biome swatch. Presentation only, a pure read of
@@ -585,6 +620,34 @@ mod tests {
             "something is drawn"
         );
     }
+    #[test]
+    fn blackbody_colour_tracks_effective_temperature() {
+        // The star colour is a deterministic pure read of the derived T_eff: the same temperature replays the same
+        // colour, and the chromaticity walks the Planckian locus from red through white to blue.
+        let sun = blackbody_rgb(Fixed::from_int(5772));
+        assert_eq!(
+            blackbody_rgb(Fixed::from_int(5772)),
+            sun,
+            "a pure read replays"
+        );
+        // The Sun (~5772 K) reads a warm near-white: every channel high, red the strongest, blue a shade lower.
+        assert!(
+            sun.r > 240 && sun.g > 220 && sun.b > 200,
+            "the Sun is near-white, got {sun:?}"
+        );
+        assert!(sun.r >= sun.g && sun.g >= sun.b, "the Sun leans warm");
+        // A cool M dwarf (~3000 K) reads reddish: red dominant, little blue.
+        let m_dwarf = blackbody_rgb(Fixed::from_int(3000));
+        assert!(
+            m_dwarf.r > m_dwarf.b && m_dwarf.r >= m_dwarf.g,
+            "an M dwarf is reddish, got {m_dwarf:?}"
+        );
+        assert!(m_dwarf.b < 160, "an M dwarf carries little blue");
+        // A hot early-type star (~10000 K) reads blue-white: blue overtakes red.
+        let hot = blackbody_rgb(Fixed::from_int(10000));
+        assert!(hot.b > hot.r, "a hot star is bluish, got {hot:?}");
+    }
+
     #[test]
     fn physics_terrain_colour_reflects_the_fields() {
         let p = |n: i64| Fixed::from_ratio(n, 100);
