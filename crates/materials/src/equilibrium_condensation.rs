@@ -21,6 +21,8 @@
 
 use civsim_core::Fixed;
 use civsim_physics::gas_thermochemistry::molar_gas_constant;
+use civsim_units::bignum::BigRat;
+use std::cmp::Ordering;
 use std::collections::BTreeMap;
 
 /// The dimensionless standard chemical potential `g = mu°(T)/RT` of a species from its JANAF standard Gibbs energy
@@ -350,6 +352,171 @@ pub fn condensed_active_set(
     Some(saturated)
 }
 
+/// The exact conversion of a fixed-point value to a rational: `Fixed` is `bits / 2^FRAC_BITS`, so the rational is
+/// the raw bits over the scale, without rounding. The VCS amount solve carries the stoichiometry and the budget in
+/// exact rationals so the mass balance closes to the bit.
+fn fixed_to_bigrat(value: Fixed) -> BigRat {
+    let scale = BigRat::from_i64(1i64 << Fixed::FRAC_BITS);
+    BigRat::from_i64(value.to_bits()).div(&scale)
+}
+
+/// The outcome of solving the condensed molar amounts against the residual element budget.
+enum AmountSolve {
+    /// A unique amount vector (the phase-rule vertex is well-posed).
+    Unique(Vec<BigRat>),
+    /// The active set does not fix the amounts uniquely (rank-deficient: more active phases than the residual
+    /// budget's independent constraints, a phase-rule boundary). Routed to the Verdict fold-and-draw.
+    Degenerate,
+    /// No amount vector closes the budget (a pivot-free element row carries a nonzero residual, surfaced rather
+    /// than papered over).
+    Inconsistent,
+}
+
+/// Solve the exact linear system `A n = r` for the condensed amounts by Gauss-Jordan elimination in RATIONALS, where
+/// `m` is the augmented matrix `[A | r]` (E element rows, `c + 1` columns). Returns the unique amount vector when
+/// the C columns are independent and the budget is consistent, `Degenerate` when a column has no pivot (the amounts
+/// are not fixed), or `Inconsistent` when a pivot-free row carries a nonzero residual. Exact: rationals never round,
+/// so a `Unique` solution closes `A n = r` to the bit.
+// The row/column indices cross rows of the augmented matrix (eliminating column `col` in every other row `r`, over
+// columns `k`), so the range loops are the clear Gauss-Jordan form; an iterator refactor would obscure the pivoting.
+#[allow(clippy::needless_range_loop)]
+fn solve_amounts(mut m: Vec<Vec<BigRat>>, c: usize) -> AmountSolve {
+    let e = m.len();
+    let mut pivot_row_for_col: Vec<Option<usize>> = vec![None; c];
+    let mut row = 0usize;
+    for col in 0..c {
+        // The pivot: the largest-magnitude nonzero entry at or below `row` in this column (partial pivoting; the
+        // solve is exact for any nonzero pivot, the choice only keeps the intermediate numerators smaller).
+        let mut pivot: Option<usize> = None;
+        for r in row..e {
+            if !m[r][col].is_zero()
+                && pivot
+                    .map(|p| m[r][col].abs().cmp_rat(&m[p][col].abs()) == Ordering::Greater)
+                    .unwrap_or(true)
+            {
+                pivot = Some(r);
+            }
+        }
+        let Some(pivot) = pivot else {
+            continue; // a free column: rank-deficient
+        };
+        m.swap(row, pivot);
+        let d = m[row][col].clone();
+        for k in col..=c {
+            m[row][k] = m[row][k].div(&d);
+        }
+        for r in 0..e {
+            if r != row && !m[r][col].is_zero() {
+                let factor = m[r][col].clone();
+                for k in col..=c {
+                    let t = factor.mul(&m[row][k]);
+                    m[r][k] = m[r][k].sub(&t);
+                }
+            }
+        }
+        pivot_row_for_col[col] = Some(row);
+        row += 1;
+    }
+    if pivot_row_for_col.iter().any(|p| p.is_none()) {
+        return AmountSolve::Degenerate;
+    }
+    for r in row..e {
+        if !m[r][c].is_zero() {
+            return AmountSolve::Inconsistent;
+        }
+    }
+    let mut n = vec![BigRat::from_i64(0); c];
+    for (col, pr) in pivot_row_for_col.iter().enumerate() {
+        n[col] = m[pr.unwrap()][c].clone();
+    }
+    AmountSolve::Unique(n)
+}
+
+/// The VCS amount-redistribution outcome: the condensed molar amounts closing element mass balance exactly, or a
+/// degenerate vertex routed to the Verdict fold-and-draw.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum CondensedAmounts {
+    /// The condensed phases with their derived molar amounts, (species name, moles). Mass balance closes exactly:
+    /// in the exact rational domain the solve runs in, the gas amounts plus these amounts reconstruct the element
+    /// budget to the bit; the `Fixed` amounts here are the rounded readout.
+    Balanced(Vec<(String, Fixed)>),
+    /// A degenerate vertex: the active set does not fix the amounts uniquely (a phase-rule boundary). Carries the
+    /// tied condensed phase names for the Verdict fold-and-draw, which the caller routes rather than bespoke-pivots.
+    Degenerate(Vec<String>),
+}
+
+/// The VCS AMOUNT REDISTRIBUTION (Smith & Missen): fix each active condensed phase's molar amount from the residual
+/// element budget the gas leaves behind, so the condensation is quantified, not merely detected. `gas` is the gas
+/// species (for their stoichiometry), `active_condensates` the precipitating phases ([`condensed_active_set`]),
+/// `equilibrium` the solved gas equilibrium (its `species_amounts` the gas moles), and `abundances` the element
+/// budget `b_e`. The residual `r_e = b_e - sum_gas a_ep x_p` is what the condensates must hold; solving
+/// `sum_c a_ec n_c = r_e` in EXACT rationals fixes the amounts so `sum_p a_ep n_p = b_e` closes to the bit (the
+/// ConservedBudget invariant). A rank-deficient active set (a phase-rule boundary, non-unique amounts) returns
+/// [`CondensedAmounts::Degenerate`] for the Verdict fold-and-draw rather than an arbitrary pivot. `None` if an amount
+/// is negative (the active set over-condensed, surfaced not clamped), the budget is inconsistent, or a conversion
+/// fails.
+pub fn condensed_amounts(
+    gas: &[EquilibriumSpecies],
+    active_condensates: &[EquilibriumSpecies],
+    equilibrium: &GasEquilibrium,
+    abundances: &BTreeMap<String, Fixed>,
+) -> Option<CondensedAmounts> {
+    if abundances.is_empty() {
+        return None;
+    }
+    let elements: Vec<String> = abundances.keys().cloned().collect();
+    let e = elements.len();
+    let c = active_condensates.len();
+    if c == 0 {
+        return Some(CondensedAmounts::Balanced(Vec::new()));
+    }
+    let gas_by_name: BTreeMap<&str, &EquilibriumSpecies> =
+        gas.iter().map(|s| (s.name.as_str(), s)).collect();
+    // The residual budget r_e = b_e - sum_gas a_ep x_p, exact.
+    let mut residual: Vec<BigRat> = Vec::with_capacity(e);
+    for el in &elements {
+        let mut r = fixed_to_bigrat(*abundances.get(el).unwrap());
+        for (name, amount) in &equilibrium.species_amounts {
+            if let Some(sp) = gas_by_name.get(name.as_str()) {
+                let a = coeff(sp, el);
+                if a != Fixed::ZERO {
+                    r = r.sub(&fixed_to_bigrat(a).mul(&fixed_to_bigrat(*amount)));
+                }
+            }
+        }
+        residual.push(r);
+    }
+    // The augmented matrix [A | r]: rows = elements, columns = condensates, the last column the residual.
+    let mut m: Vec<Vec<BigRat>> = Vec::with_capacity(e);
+    for (row, el) in elements.iter().enumerate() {
+        let mut r = Vec::with_capacity(c + 1);
+        for cond in active_condensates {
+            r.push(fixed_to_bigrat(coeff(cond, el)));
+        }
+        r.push(residual[row].clone());
+        m.push(r);
+    }
+    match solve_amounts(m, c) {
+        AmountSolve::Unique(n) => {
+            let mut out = Vec::with_capacity(c);
+            for (cond, n_c) in active_condensates.iter().zip(n.iter()) {
+                // A negative amount means the active set over-condensed this phase: surface it (the full VCS drops
+                // the phase and re-solves), never clamp a negative to zero and hide the mass.
+                if n_c.cmp_rat(&BigRat::from_i64(0)) == Ordering::Less {
+                    return None;
+                }
+                let bits = n_c.round_to_scale(Fixed::FRAC_BITS)?;
+                out.push((cond.name.clone(), Fixed::from_bits_i128(bits)?));
+            }
+            Some(CondensedAmounts::Balanced(out))
+        }
+        AmountSolve::Degenerate => Some(CondensedAmounts::Degenerate(
+            active_condensates.iter().map(|c| c.name.clone()).collect(),
+        )),
+        AmountSolve::Inconsistent => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -374,6 +541,117 @@ mod tests {
             sp("O2", 0.0, &[("O", 2)]),
             sp("H2O", -12.0, &[("H", 2), ("O", 1)]),
         ]
+    }
+
+    // A condensed-phase species for the VCS amount-redistribution tests.
+    fn cond(name: &str, stoich: &[(&str, i32)]) -> EquilibriumSpecies {
+        EquilibriumSpecies {
+            name: name.to_string(),
+            phase: SpeciesPhase::Condensed,
+            g_over_rt: Fixed::ZERO,
+            stoichiometry: stoich.iter().map(|(e, n)| (e.to_string(), *n)).collect(),
+        }
+    }
+
+    fn budget(entries: &[(&str, i64)]) -> BTreeMap<String, Fixed> {
+        entries
+            .iter()
+            .map(|(e, n)| (e.to_string(), Fixed::from_int(*n as i32)))
+            .collect()
+    }
+
+    fn no_gas() -> GasEquilibrium {
+        GasEquilibrium {
+            element_potentials: BTreeMap::new(),
+            species_amounts: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn the_vcs_closes_a_single_condensate_mass_balance_exactly() {
+        // Forsterite Mg2SiO4 absorbing the whole budget: with no gas the residual is the abundances, and the amount
+        // solves 2n = Mg, n = Si, 4n = O simultaneously (n = 2). Mass balance closes to the mole, exactly.
+        let condensates = vec![cond("Mg2SiO4", &[("Mg", 2), ("Si", 1), ("O", 4)])];
+        let b = budget(&[("Mg", 4), ("Si", 2), ("O", 8)]);
+        let out = condensed_amounts(&[], &condensates, &no_gas(), &b).expect("solves");
+        match out {
+            CondensedAmounts::Balanced(amounts) => {
+                assert_eq!(amounts.len(), 1);
+                let n = amounts[0].1;
+                assert!((n.to_f64_lossy() - 2.0).abs() < 1e-9, "n_forsterite = 2");
+                assert_eq!(
+                    n.checked_mul(Fixed::from_int(2)).unwrap(),
+                    *b.get("Mg").unwrap(),
+                    "Mg closes exactly"
+                );
+                assert_eq!(n, *b.get("Si").unwrap(), "Si closes exactly");
+                assert_eq!(
+                    n.checked_mul(Fixed::from_int(4)).unwrap(),
+                    *b.get("O").unwrap(),
+                    "O closes exactly"
+                );
+            }
+            other => panic!("expected Balanced, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn the_vcs_solves_a_two_phase_assemblage() {
+        // Forsterite Mg2SiO4 + periclase MgO sharing a budget: forsterite = 2 (from Si), the leftover Mg is
+        // periclase = 2, and O closes (8 + 2 = 10). Both amounts derived, mass balance exact.
+        let condensates = vec![
+            cond("Mg2SiO4", &[("Mg", 2), ("Si", 1), ("O", 4)]),
+            cond("MgO", &[("Mg", 1), ("O", 1)]),
+        ];
+        let b = budget(&[("Mg", 6), ("Si", 2), ("O", 10)]);
+        let out = condensed_amounts(&[], &condensates, &no_gas(), &b).expect("solves");
+        match out {
+            CondensedAmounts::Balanced(a) => {
+                let get = |name: &str| a.iter().find(|(n, _)| n == name).unwrap().1.to_f64_lossy();
+                assert!((get("Mg2SiO4") - 2.0).abs() < 1e-9);
+                assert!((get("MgO") - 2.0).abs() < 1e-9);
+            }
+            other => panic!("expected Balanced, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_rank_deficient_active_set_routes_to_the_verdict_draw() {
+        // Two proportional phases (forsterite and its double) do not fix the amounts uniquely: the columns are
+        // dependent, so the vertex is degenerate and routes to the Verdict fold-and-draw, never an arbitrary pivot.
+        let condensates = vec![
+            cond("Mg2SiO4", &[("Mg", 2), ("Si", 1), ("O", 4)]),
+            cond("Mg4Si2O8", &[("Mg", 4), ("Si", 2), ("O", 8)]),
+        ];
+        let b = budget(&[("Mg", 6), ("Si", 3), ("O", 12)]);
+        let out = condensed_amounts(&[], &condensates, &no_gas(), &b).expect("returns an outcome");
+        assert!(
+            matches!(out, CondensedAmounts::Degenerate(_)),
+            "dependent phases are a degenerate vertex, got {out:?}"
+        );
+    }
+
+    #[test]
+    fn the_vcs_subtracts_the_gas_hold_before_the_condensate() {
+        // The gas holds part of the budget: one mole of O2(g) holds 2 O, so the residual O the condensate sees is
+        // the budget less 2. Forsterite then closes on the reduced O budget with Mg and Si intact (n = 2).
+        let gas = vec![sp("O2", 0.0, &[("O", 2)])];
+        let eq = GasEquilibrium {
+            element_potentials: BTreeMap::new(),
+            species_amounts: vec![("O2".to_string(), Fixed::ONE)],
+        };
+        let condensates = vec![cond("Mg2SiO4", &[("Mg", 2), ("Si", 1), ("O", 4)])];
+        let b = budget(&[("Mg", 4), ("Si", 2), ("O", 10)]);
+        let out = condensed_amounts(&gas, &condensates, &eq, &b).expect("solves");
+        match out {
+            CondensedAmounts::Balanced(a) => {
+                assert!(
+                    (a[0].1.to_f64_lossy() - 2.0).abs() < 1e-9,
+                    "forsterite n=2 after the gas holds 2 O"
+                );
+            }
+            other => panic!("expected Balanced, got {other:?}"),
+        }
     }
 
     fn abund(pairs: &[(&str, f64)]) -> BTreeMap<String, Fixed> {

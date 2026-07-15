@@ -19,3 +19,7 @@ civsim-core = { path = "../core" }
 # alien chemistry is a data row (Principle 9). The kernel contract (verdict/contract/memo/log) stays
 # physics-free; only the instantiation depends on physics.
 civsim-physics = { path = "../physics" }
+# Exact rational arithmetic (BigRat) for the VCS amount redistribution: the condensed molar amounts solve a
+# linear system whose element mass balance must close EXACTLY (the ConservedBudget bit-invariant), which
+# fixed-point Gaussian elimination cannot guarantee, so the amount solve runs in exact rationals and rounds once.
+civsim-units = { path = "../units" }

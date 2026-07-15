@@ -346,6 +346,7 @@ version = "0.1.0"
 dependencies = [
  "civsim-core",
  "civsim-physics",
+ "civsim-units",
 ]
 
 [[package]]
