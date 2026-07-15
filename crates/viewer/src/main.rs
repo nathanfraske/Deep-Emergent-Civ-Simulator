@@ -24,18 +24,21 @@
 //! ```
 //!
 //! Controls: arrow keys or WASD pan, `+`/`-` (or `=`/`-`) zoom in and out, `Home` recentres,
-//! `Esc` or the window close button quits. Zooming in past the whole-tile view enters the
-//! superfine, where organisms are drawn as marks coloured by kind (plants green, herbivores
-//! amber, carnivores red). The window is an observer: it reads the living world and never
-//! writes it (Principle 10), so the same seed always shows the same world and biosphere.
+//! `Esc` or the window close button quits. The view runs continuously from the most-zoomed-out
+//! star-lit planet globe (the derived planet as a lit sphere in space), through the whole-world
+//! overview, down to the superfine, where organisms are drawn as marks coloured by kind (plants
+//! green, herbivores amber, carnivores red). The window is an observer: it reads the living world
+//! and never writes it (Principle 10), so the same seed always shows the same world and biosphere.
 
 mod render;
 
 use minifb::{Key, KeyRepeat, MouseMode, Scale, ScaleMode, Window, WindowOptions};
 
+use civsim_core::Fixed;
 use civsim_sim::anatomy::WorldProfile;
 use civsim_sim::clock::PlaybackDriver;
 use civsim_sim::genesis::{genesis, GenesisParams, LivingWorld, WorldGenesis};
+use civsim_sim::geodynamics::{slice0_demo_field, DerivedTile};
 use civsim_sim::located::OccupantId;
 use civsim_world::terrain::TerrainRelief;
 use civsim_world::view::Camera;
@@ -50,6 +53,10 @@ const BG: Rgb = Rgb::new(8, 9, 14);
 const CURSOR: Rgb = Rgb::new(255, 240, 90);
 /// How many superfine levels sit past the whole-tile overview (each magnifies the tile more).
 const SUPERFINE_LEVELS: u32 = 4;
+/// How many planet-globe levels sit ABOVE the whole-world overview (the most-zoomed-out view, the star-lit planet
+/// growing closer as you zoom in toward the surface). A view-side count, present only when the derived-planet
+/// fixture builds; it never touches canonical state.
+const GLOBE_LEVELS: u32 = 3;
 /// The default live playback speed, in radiation generations per real second. A view-side
 /// default the observer speeds up or slows down from; it never touches canonical state.
 const DEFAULT_GEN_RATE: f64 = 4.0;
@@ -191,6 +198,49 @@ fn derived_terrain_cmd(argv: &[String]) {
         tally(TerrainRelief::Submarine),
         tally(TerrainRelief::Lowland),
         tally(TerrainRelief::Upland),
+    );
+}
+
+/// Render one zoomed-out planet-globe frame to a binary PPM and exit (a display-free way to see the star-lit derived
+/// planet, the seeable-world payoff headless): the derived-planet fixture drawn by [`render::render_solar_system_view`].
+/// Usage: `--globe <path> [w] [h] [level]`, where `level` is 1..=GLOBE_LEVELS and sets how close the globe sits. The
+/// globe's on-screen size is its DERIVED radius; the star's colour is its derived `T_eff`; the surface is the derived
+/// tiles. A pure observer, canon -> pixels only (Principle 10).
+fn globe_cmd(argv: &[String]) {
+    let path = argv
+        .get(2)
+        .cloned()
+        .unwrap_or_else(|| "globe.ppm".to_string());
+    let w: usize = parse(argv.get(3), 720);
+    let h: usize = parse(argv.get(4), 540);
+    let level: u32 = parse(argv.get(5), GLOBE_LEVELS);
+    let fx = match build_globe_fixture() {
+        Some(f) => f,
+        None => {
+            eprintln!("the derived-planet fixture did not resolve (a data gap); nothing written");
+            return;
+        }
+    };
+    let g = level.clamp(1, GLOBE_LEVELS.max(1)) - 1;
+    let (m_per_px, star_px, star_r) = globe_view_params(&fx, w, h, g);
+    let buf = render::render_solar_system_view(
+        fx.radius_m,
+        fx.t_eff,
+        &fx.tiles,
+        fx.cols,
+        w,
+        h,
+        m_per_px,
+        star_px,
+        star_r,
+        BG,
+    );
+    write_ppm(&path, w, h, &buf);
+    eprintln!(
+        "wrote {path} ({w}x{h}) planet globe: derived radius ~{} km, star ~{} K, on-screen radius {} px",
+        fx.radius_m.to_int() / 1000,
+        fx.t_eff.to_int(),
+        render::globe_radius_px(fx.radius_m, m_per_px),
     );
 }
 
@@ -358,6 +408,66 @@ fn parse<T: std::str::FromStr>(arg: Option<&String>, default: T) -> T {
     .unwrap_or(default)
 }
 
+/// The DERIVED-planet fixture the zoomed-out globe view draws: the planet's derived radius, its star's derived
+/// effective temperature, and the derived-terrain tiles textured onto the sphere. This is a labelled development
+/// fixture (a one-Earth-mass planet at Earth's mean density around a Sun-mass star, the demo crust field for the
+/// surface). The manager wires the real star-plus-orbit integration into these fields; the render entry point
+/// [`render::render_solar_system_view`] takes exactly (radius, T_eff, tiles, cols), so the swap is mechanical.
+struct GlobeFixture {
+    radius_m: Fixed,
+    t_eff: Fixed,
+    tiles: Vec<DerivedTile>,
+    cols: usize,
+}
+
+/// Build the labelled derived-planet fixture, or `None` if any derivation fails (fail-soft: the viewer then simply
+/// offers no globe zoom-out and behaves as before, never a fabricated planet). The radius is
+/// [`civsim_sim::astro::planet_radius_m`] at one Earth mass and Earth's ~5.514 g/cm^3 mean density; the star's
+/// `T_eff` is [`civsim_sim::astro::stellar_effective_temperature`] at a Sun-mass star (the two mass-relation
+/// exponents and the fourth-root ceiling are the labelled Sun fixture); the surface tiles are the Slice-0 demo
+/// crust field. Every value here is DERIVED or a clearly-labelled fixture, none fabricated.
+fn build_globe_fixture() -> Option<GlobeFixture> {
+    let radius_m = civsim_sim::astro::planet_radius_m(Fixed::ONE, Fixed::from_ratio(5514, 1000))?;
+    let t_eff = civsim_sim::astro::stellar_effective_temperature(
+        Fixed::ONE,
+        Fixed::from_ratio(35, 10),
+        Fixed::from_ratio(8, 10),
+        Fixed::from_int(50_000),
+    )?;
+    let cols = 48usize;
+    let rows = 32usize;
+    let tiles = slice0_demo_field(cols, rows)?;
+    Some(GlobeFixture {
+        radius_m,
+        t_eff,
+        tiles,
+        cols,
+    })
+}
+
+/// The globe view scale for level `g` (0-based, closer as it grows) in a `w` by `h` frame: the metres-per-pixel
+/// scale (so the DERIVED radius drives the on-screen size, filling more of the frame as you zoom in toward the
+/// overview), the star's on-screen position, and its on-screen radius. Shared by the interactive loop and the
+/// headless `--globe` command so the two stay in step.
+fn globe_view_params(fx: &GlobeFixture, w: usize, h: usize, g: u32) -> (Fixed, (i32, i32), usize) {
+    let min_dim = w.min(h);
+    let t = if GLOBE_LEVELS > 1 {
+        g.min(GLOBE_LEVELS - 1) as f32 / (GLOBE_LEVELS - 1) as f32
+    } else {
+        1.0
+    };
+    let target_r = ((min_dim as f32) * (0.12 + 0.34 * t)) as i32;
+    let m_per_px = fx
+        .radius_m
+        .checked_div(Fixed::from_int(target_r.max(1)))
+        .unwrap_or(Fixed::ONE);
+    // The star sits off to the upper-left; its screen position is the orbit's projection (a fixture phase until the
+    // manager wires the real orbit), which sets which hemisphere is lit.
+    let star_px = ((w / 5) as i32, (h / 4) as i32);
+    let star_r = (min_dim / 22).max(3);
+    (m_per_px, star_px, star_r)
+}
+
 fn main() {
     let argv: Vec<String> = std::env::args().collect();
     // Headless snapshot: `--ppm <path> [seed] [w] [h]` writes a superfine frame and exits, so
@@ -374,6 +484,12 @@ fn main() {
         .unwrap_or(false)
     {
         derived_terrain_cmd(&argv);
+        return;
+    }
+    // Headless planet-globe frame: `--globe <path> [w] [h] [level]` writes one frame of the star-lit derived planet
+    // (its size the derived radius, its star colour the derived T_eff) and exits.
+    if argv.get(1).map(|s| s == "--globe").unwrap_or(false) {
+        globe_cmd(&argv);
         return;
     }
     // Headless render for the test harness: `--render <path> <mode> <seed> <w> <h>` where mode
@@ -437,7 +553,23 @@ fn main() {
     );
     let biomes = BiomeSet::dev_default();
     let tree = QuadTree::build(&living.map);
-    let max_zoom = tree.depth() + SUPERFINE_LEVELS;
+    // The zoomed-out planet globe sits above the whole-world overview: build the derived-planet fixture, and if it
+    // resolves, prepend GLOBE_LEVELS zoom steps so the view runs continuously from the star-lit globe down to the
+    // tiles. If it fails to derive, the globe is simply absent and the viewer behaves exactly as before.
+    let globe_fixture = build_globe_fixture();
+    let globe_levels = if globe_fixture.is_some() {
+        GLOBE_LEVELS
+    } else {
+        0
+    };
+    if let Some(fx) = globe_fixture.as_ref() {
+        eprintln!(
+            "derived-planet globe: radius ~{} km, star ~{} K (a labelled fixture; zoom out to see it)",
+            fx.radius_m.to_int() / 1000,
+            fx.t_eff.to_int(),
+        );
+    }
+    let max_zoom = globe_levels + tree.depth() + SUPERFINE_LEVELS;
 
     // The observer's time control: a playback speed over the radiation, with pause and single
     // step, decoupled from the render frame rate. The window redraws at its own fps while the
@@ -468,7 +600,7 @@ fn main() {
     });
     window.set_target_fps(30);
 
-    // Start at the whole-world overview, centred.
+    // Start fully zoomed out: at the star-lit planet globe when the fixture built, else the whole-world overview.
     let home = Coord3::ground(width / 2, height / 2);
     let mut cam = Camera::new(home, 0);
     let mut zoom: u32 = 0;
@@ -523,11 +655,17 @@ fn main() {
             zoom = ((frac * (max_zoom as f32 + 0.999)) as u32).min(max_zoom);
             cam.center = target_center;
         } else {
-            // Pan by one node in the overview, one tile in the superfine, so panning is steady.
-            let step = if zoom <= depth {
-                tree.node_side(zoom)
+            // Pan by one node in the overview, one tile in the superfine, so panning is steady. The globe view is
+            // a fixed planet object, so panning is a no-op there.
+            let step = if zoom < globe_levels {
+                0
             } else {
-                1
+                let mz = zoom - globe_levels;
+                if mz <= depth {
+                    tree.node_side(mz)
+                } else {
+                    1
+                }
             };
             let mut dx = 0i32;
             let mut dy = 0i32;
@@ -567,7 +705,10 @@ fn main() {
                 }
             }
         }
-        cam.zoom = zoom.min(depth);
+        // The globe levels sit above the overview; map_zoom indexes the flat map (overview then superfine).
+        let in_globe = zoom < globe_levels;
+        let map_zoom = zoom.saturating_sub(globe_levels);
+        cam.zoom = map_zoom.min(depth);
 
         let (w, h) = window.get_size();
         if w == 0 || h == 0 {
@@ -579,16 +720,46 @@ fn main() {
             win_h = h;
         }
 
-        let level = zoom.min(depth);
-        let (mut buf, cell_px, side, mode) = if zoom <= depth {
+        let level = map_zoom.min(depth);
+        let (mut buf, cell_px, side, mode) = if in_globe {
+            // The most-zoomed-out view: the star-lit planet globe, growing closer across the globe levels. The
+            // on-screen size is the DERIVED radius at a view scale set so the globe fills more of the frame as you
+            // zoom in, then hands off to the whole-world overview at map_zoom 0.
+            let fx = globe_fixture
+                .as_ref()
+                .expect("in_globe implies the fixture built");
+            let (m_per_px, star_px, star_r) = globe_view_params(fx, win_w, win_h, zoom);
+            (
+                render::render_solar_system_view(
+                    fx.radius_m,
+                    fx.t_eff,
+                    &fx.tiles,
+                    fx.cols,
+                    win_w,
+                    win_h,
+                    m_per_px,
+                    star_px,
+                    star_r,
+                    BG,
+                ),
+                CELL as i32,
+                1,
+                format!(
+                    "planet globe ~{}K star {}/{}",
+                    fx.t_eff.to_int(),
+                    zoom + 1,
+                    globe_levels
+                ),
+            )
+        } else if map_zoom <= depth {
             (
                 cam.paint(&tree, &biomes, win_w, win_h, CELL, BG),
                 CELL as i32,
                 tree.node_side(level),
-                format!("overview {zoom}/{depth}"),
+                format!("overview {map_zoom}/{depth}"),
             )
         } else {
-            let sf = zoom - depth; // 1..=SUPERFINE_LEVELS
+            let sf = map_zoom - depth; // 1..=SUPERFINE_LEVELS
             let tile_px = (6 + 6 * sf) as i32;
             (
                 render::superfine(
@@ -607,9 +778,16 @@ fn main() {
         };
 
         // The tile selector: outline the hovered cell and read out what is under it. In demo
-        // mode there is no mouse, so point at the centre of the window (the target tile).
-        let mut detail = "point at a tile".to_string();
-        let mouse = if demo_secs.is_some() {
+        // mode there is no mouse, so point at the centre of the window (the target tile). The globe view is a
+        // planet object with no tiles to select, so the selector is skipped there.
+        let mut detail = if in_globe {
+            "the derived planet: zoom in (+) to reach the surface".to_string()
+        } else {
+            "point at a tile".to_string()
+        };
+        let mouse = if in_globe {
+            None
+        } else if demo_secs.is_some() {
             Some((win_w as f32 / 2.0, win_h as f32 / 2.0))
         } else {
             window.get_mouse_pos(MouseMode::Discard)
@@ -621,7 +799,7 @@ fn main() {
                 let rows = (win_h as i32 / cell_px).max(1);
                 let ccol = (mx / cell_px).min(cols - 1);
                 let crow = (my / cell_px).min(rows - 1);
-                let (unit_x, unit_y) = if zoom <= depth {
+                let (unit_x, unit_y) = if map_zoom <= depth {
                     (cam.center.x.div_euclid(side), cam.center.y.div_euclid(side))
                 } else {
                     (cam.center.x, cam.center.y)
@@ -637,7 +815,7 @@ fn main() {
                     cell_px as usize,
                     CURSOR,
                 );
-                detail = if zoom <= depth {
+                detail = if map_zoom <= depth {
                     match tree.node(level, cell_x, cell_y) {
                         Some(s) => format!(
                             "region ({cell_x},{cell_y}) from tile ({},{}), {}x{} tiles, mostly {}",

@@ -52,8 +52,6 @@ pub fn organism_color(layer: u16, species_id: u32) -> Rgb {
 /// datafile (`bbr_color.txt`, computed from the CIE 1931 colour-matching functions). Display-only: it reads a
 /// derived scalar and returns pixels, writes no canonical state (Principle 10), and uses `f64` because a screen
 /// colour needs no fixed-point rigour past per-run determinism.
-// Wired into the solar-system globe compositor in the star-lighting slice; the tests exercise it now.
-#[allow(dead_code)]
 pub fn blackbody_rgb(t_eff_k: Fixed) -> Rgb {
     // The fit is defined on temperature/100, valid roughly 1000..40000 K; clamp into that band so a derived T_eff
     // past the fit returns its nearest sensible colour rather than a wild extrapolation.
@@ -559,8 +557,6 @@ pub fn paint_derived_tiles(
 /// planet draws a smaller globe and a larger one draws bigger, straight from [`civsim_sim::astro::planet_radius_m`].
 /// All fixed-point, deterministic; a non-positive or overflowing input yields `0` (nothing to draw). Display-only,
 /// a one-way read of the derived radius (Principle 10).
-// Wired into the solar-system globe compositor in the zoom-connection slice; the tests exercise it now.
-#[allow(dead_code)]
 pub fn globe_radius_px(radius_m: Fixed, m_per_px: Fixed) -> usize {
     if radius_m <= Fixed::ZERO || m_per_px <= Fixed::ZERO {
         return 0;
@@ -573,7 +569,6 @@ pub fn globe_radius_px(radius_m: Fixed, m_per_px: Fixed) -> usize {
 
 /// Normalise a 3-vector for display lighting, returning the +z unit vector for a zero input (a safe default facing
 /// the viewer). Non-canon display math, `f32` is fine.
-#[allow(dead_code)]
 fn normalize3(v: [f32; 3]) -> [f32; 3] {
     let m = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
     if m <= 0.0 {
@@ -586,7 +581,6 @@ fn normalize3(v: [f32; 3]) -> [f32; 3] {
 /// Sample the DERIVED-tile surface colour at longitude `u` and latitude `v` (each in `[0, 1)`), an orthographic
 /// read of the derived relief field ([`derived_tile_color`]) wrapped onto the globe. An empty field falls back to a
 /// deep-ocean stand-in so the sphere still draws. Display-only.
-#[allow(dead_code)]
 fn sample_derived_surface(tiles: &[DerivedTile], cols: usize, u: f32, v: f32) -> Rgb {
     if tiles.is_empty() || cols == 0 {
         return Rgb::new(40, 72, 120);
@@ -605,8 +599,6 @@ fn sample_derived_surface(tiles: &[DerivedTile], cols: usize, u: f32, v: f32) ->
 /// is the soft day/night terminator. Pixels outside the disk are left untouched (the caller paints space and, in a
 /// later slice, the atmosphere limb). A pure, deterministic read of the derived radius, tiles, and star direction,
 /// one-way canon -> pixels, so it writes no canonical state (Principle 10).
-// Wired into the solar-system globe compositor in the zoom-connection slice; the tests exercise it now.
-#[allow(dead_code)]
 #[allow(clippy::too_many_arguments)]
 pub fn draw_globe(
     buf: &mut [u32],
@@ -711,7 +703,6 @@ fn draw_star(buf: &mut [u32], w: usize, h: usize, sx: i32, sy: i32, radius_px: u
 // TODO(atmosphere): the real limb colour derives from the Stage-8 gas-mix Rayleigh scattering (the manager is
 // building that substrate); until it lands this pale-blue fixture stands in, clearly labelled so it is not mistaken
 // for physics. When the gas mix is available, replace this constant with a read of the scattered-sky spectrum.
-#[allow(dead_code)]
 pub const PLACEHOLDER_SKY: Rgb = Rgb::new(150, 190, 235);
 
 /// Draw a soft atmosphere haze around the globe's limb: a thin glow just outside the disk (fading out over
@@ -719,7 +710,6 @@ pub const PLACEHOLDER_SKY: Rgb = Rgb::new(150, 190, 235);
 /// star) and dim on the night side. `sky` is the haze colour (a STAND-IN placeholder, see [`PLACEHOLDER_SKY`]; the
 /// real colour derives from the Stage-8 gas-mix Rayleigh scattering when that substrate lands). Blends over whatever
 /// is already drawn, so it tints the globe's edge and glows against space. Display-only, one-way canon -> pixels.
-#[allow(dead_code)]
 #[allow(clippy::too_many_arguments)]
 fn draw_atmosphere_limb(
     buf: &mut [u32],
@@ -785,8 +775,6 @@ fn draw_atmosphere_limb(
 /// dark, a soft terminator between. This is the seeable-world payoff entry point: hand it the derived radius, the
 /// star's derived `T_eff`, the derived tiles, and the star's projected position, and it draws the star-lit planet.
 /// A pure, deterministic read of the derived planet and star (Principle 10); it writes no canonical state.
-// Wired into the viewer's zoom path in the zoom-connection slice; the tests exercise it now.
-#[allow(dead_code)]
 #[allow(clippy::too_many_arguments)]
 pub fn render_solar_system_view(
     radius_m: Fixed,
