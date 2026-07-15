@@ -1,0 +1,98 @@
+# FeO wustite, the REAL nonstoichiometric iron monoxide Fe(1-x)O tabulated by Robie & Hemingway as Fe0.947O (x=0.053).
+# This is the canonical FeO of the iron-wustite (IW) and wustite-magnetite (WM) oxygen buffers. WUSTITE CONVENTION
+# (tagged, per the task): NOT ideal FeO. Robie & Hemingway's 'WUSTITE' entry is Fe0.947O (formula weight 68.887); the
+# hypothetical stoichiometric FeO is a SEPARATE entry (see FeO_stoich.toml, tagged fictive). Do not silently
+# substitute the two. PRIMARY: Robie & Hemingway (1995), USGS Bull. 2131, WUSTITE high-T table p.190 (298.15 K anchor
+# also in the oxide summary p.16, listed as Fe0.947O). Transcribed from the primary USGS PDF (md5
+# 08c3cc7c2d823667c8efadfebcef02de). SECOND WITNESS: PENDING. NIST-JANAF/WebBook FeO(cr) (-272.04 kJ/mol) is the
+# STOICHIOMETRIC FeO, not this wustite, so it is not a witness for this row; Barin tabulates wustite separately and is
+# the owner's step (see manifest.toml). BLOCK KIND [[point]], cited-data-column idiom, header-cited. COLUMNS: t_k (K);
+# delta_f_g_kj / delta_f_h_kj (kJ/mol, per mole of Fe0.947O); s_j / cp_j (J/mol/K) on the 298.15 K anchor only.
+# FINGERPRINT: delta_f G298 = -244.9, delta_f H298 = -266.3 (per mole Fe0.947O). HONEST LIMITS: table runs to the
+# melting point 1652 K (no rows above); values are per mole of the nonstoichiometric formula unit Fe0.947O, so a
+# consumer computing the IW buffer must use this formula unit consistently, not an FeO mole.
+
+substance = "Fe0.947O"
+mineral = "wustite"
+stoichiometry = "nonstoichiometric Fe(1-x)O, x = 0.053 (Robie-Hemingway convention)"
+phase = "cr"
+formula_wt = "68.887"
+reference = "formation-from-elements"
+melting_t_k = "1652"
+
+[[point]]
+t_k = "298.15"
+delta_f_g_kj = "-244.9"
+delta_f_h_kj = "-266.3"
+s_j = "56.60"
+cp_j = "48.13"
+
+[[point]]
+t_k = "300"
+delta_f_g_kj = "-244.8"
+delta_f_h_kj = "-266.3"
+
+[[point]]
+t_k = "400"
+delta_f_g_kj = "-237.8"
+delta_f_h_kj = "-265.2"
+
+[[point]]
+t_k = "500"
+delta_f_g_kj = "-231.1"
+delta_f_h_kj = "-264.2"
+
+[[point]]
+t_k = "600"
+delta_f_g_kj = "-224.6"
+delta_f_h_kj = "-263.4"
+
+[[point]]
+t_k = "700"
+delta_f_g_kj = "-218.1"
+delta_f_h_kj = "-262.8"
+
+[[point]]
+t_k = "800"
+delta_f_g_kj = "-211.8"
+delta_f_h_kj = "-262.6"
+
+[[point]]
+t_k = "900"
+delta_f_g_kj = "-205.4"
+delta_f_h_kj = "-262.7"
+
+[[point]]
+t_k = "1000"
+delta_f_g_kj = "-199.0"
+delta_f_h_kj = "-263.4"
+
+[[point]]
+t_k = "1100"
+delta_f_g_kj = "-192.5"
+delta_f_h_kj = "-264.9"
+
+[[point]]
+t_k = "1200"
+delta_f_g_kj = "-185.9"
+delta_f_h_kj = "-265.6"
+
+[[point]]
+t_k = "1300"
+delta_f_g_kj = "-179.3"
+delta_f_h_kj = "-264.7"
+
+[[point]]
+t_k = "1400"
+delta_f_g_kj = "-172.8"
+delta_f_h_kj = "-263.7"
+
+[[point]]
+t_k = "1500"
+delta_f_g_kj = "-166.3"
+delta_f_h_kj = "-262.7"
+
+[[point]]
+t_k = "1600"
+delta_f_g_kj = "-159.9"
+delta_f_h_kj = "-261.6"

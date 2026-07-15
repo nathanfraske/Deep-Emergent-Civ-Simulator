@@ -1,0 +1,113 @@
+# Fe3O4 magnetite, standard Gibbs energy of formation from the elements, 298.15 to 1800 K. Magnetite of the QFM/FMQ
+# (quartz-fayalite-magnetite), MH (magnetite-hematite), and WM (wustite-magnetite) oxygen buffers. PRIMARY: Robie &
+# Hemingway (1995), USGS Bull. 2131, MAGNETITE high-T table p.193 (298.15 K anchor also in the oxide summary p.16).
+# Transcribed from the primary USGS PDF (md5 08c3cc7c2d823667c8efadfebcef02de). SECOND WITNESS (DISCREPANCY, both
+# recorded): NIST-JANAF (Chase 1998) table Fe-032 Fe3O4(cr): delta_f H298 = -1120.894, S298 = 145.266, delta_f G298 =
+# -1017.438. JANAF is 4.7 kJ/mol MORE NEGATIVE than Robie on delta_f G298 (-1017.4 vs -1012.7) and 5.2 kJ/mol more
+# negative on delta_f H298 (-1120.9 vs -1115.7); this is BEYOND rounding, a known magnetite reconciliation difference,
+# recorded not averaged. The pinned primary here is Robie; the owner should decide which compilation the buffer ladder
+# keys off, and verify against Barin (see manifest.toml). BLOCK KIND [[point]], cited-data-column idiom, header-cited.
+# COLUMNS: t_k (K); delta_f_g_kj / delta_f_h_kj (kJ/mol); s_j / cp_j (J/mol/K) on the 298.15 K anchor only.
+# FINGERPRINT: delta_f G298 = -1012.7, delta_f H298 = -1115.7, S298 = 146.14. HONEST LIMITS: Neel (ferrimagnetic to
+# paramagnetic) transition at 845.5 K, printed as its own row (the Cp spikes there). Melting T = 1870 K.
+
+substance = "Fe3O4"
+mineral = "magnetite"
+phase = "cr"
+formula_wt = "231.539"
+reference = "formation-from-elements"
+neel_transition_k = "845.5"
+melting_t_k = "1870"
+
+[[point]]
+t_k = "298.15"
+delta_f_g_kj = "-1012.7"
+delta_f_h_kj = "-1115.7"
+s_j = "146.14"
+cp_j = "150.90"
+
+[[point]]
+t_k = "300"
+delta_f_g_kj = "-1012.1"
+delta_f_h_kj = "-1114.6"
+
+[[point]]
+t_k = "400"
+delta_f_g_kj = "-977.9"
+delta_f_h_kj = "-1113.0"
+
+[[point]]
+t_k = "500"
+delta_f_g_kj = "-944.5"
+delta_f_h_kj = "-1109.2"
+
+[[point]]
+t_k = "600"
+delta_f_g_kj = "-912.0"
+delta_f_h_kj = "-1104.8"
+
+[[point]]
+t_k = "700"
+delta_f_g_kj = "-880.3"
+delta_f_h_kj = "-1099.5"
+
+[[point]]
+t_k = "800"
+delta_f_g_kj = "-849.4"
+delta_f_h_kj = "-1092.7"
+
+[[point]]
+t_k = "845.5"
+delta_f_g_kj = "-835.3"
+delta_f_h_kj = "-1087.8"
+note = "Neel transition 845.5 K (ferrimagnetic to paramagnetic)"
+
+[[point]]
+t_k = "900"
+delta_f_g_kj = "-819.5"
+delta_f_h_kj = "-1085.1"
+
+[[point]]
+t_k = "1000"
+delta_f_g_kj = "-790.0"
+delta_f_h_kj = "-1085.5"
+
+[[point]]
+t_k = "1100"
+delta_f_g_kj = "-760.3"
+delta_f_h_kj = "-1089.1"
+
+[[point]]
+t_k = "1200"
+delta_f_g_kj = "-730.4"
+delta_f_h_kj = "-1091.0"
+
+[[point]]
+t_k = "1300"
+delta_f_g_kj = "-700.4"
+delta_f_h_kj = "-1088.6"
+
+[[point]]
+t_k = "1400"
+delta_f_g_kj = "-670.6"
+delta_f_h_kj = "-1086.5"
+
+[[point]]
+t_k = "1500"
+delta_f_g_kj = "-641.0"
+delta_f_h_kj = "-1084.6"
+
+[[point]]
+t_k = "1600"
+delta_f_g_kj = "-611.5"
+delta_f_h_kj = "-1082.9"
+
+[[point]]
+t_k = "1700"
+delta_f_g_kj = "-582.0"
+delta_f_h_kj = "-1084.1"
+
+[[point]]
+t_k = "1800"
+delta_f_g_kj = "-552.4"
+delta_f_h_kj = "-1083.7"
