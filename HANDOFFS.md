@@ -3156,3 +3156,22 @@ HELD for owner (MORNING_REVIEW.md): the oxide-thermochemistry [M] data (crates/p
 NEXT after the agents land: gate + wire the Al/Ca crust (feldspar), gate + cherry-pick the runner, verify pins, then the geodynamics lateral-variation (the topography frontier: step_interior_field evolves thermal not composition; the magmatism/composition-transport wire is the next real build). The oxide data waits on owner verification.
 
 GATE DISCIPLINE for the agents: viewer changes are observability-non-canon (leaf, byte-neutral by construction); fetch data is dormant until loader-wired. Cherry-pick the runner onto HEAD, run fmt+clippy+viewer-tests+the two pins, verify the derived colours are physical (basalt dark, quartz light) before landing.
+
+### Overnight final state (2026-07-16, both agents gated, drive-to-finish DELIVERED)
+
+The owner's directive is delivered: star mass + orbit ALONE -> a derived planet you can see (--derived [star] [orbit]), the real differentiated crust, no old sim, no life. HEAD eb70d61 pushed; pins hold (default 40fe8a72, living be94e310); tree clean.
+
+LANDED overnight (all byte-neutral, gated):
+- The real differentiated crust: condensation -> VCS exact amounts -> chemistry differentiation (metal+sulfide sink, silicate float, Goldschmidt re-derived, alien CaS/MgS counter-test) -> buoyant partial-melt crust extraction (crust_and_mantle). surface_composition.rs is the canon chain.
+- The visible finish (--derived, cherry-picked 6706e6d): the globe + optics-coloured crust tiles + derived atmosphere; --derived 1 1 = T_eff 5769, radius 6371, g 9.82, mass 1, density 5.51, enstatite crust rgb(229,255,253), H2O/CO2/N2 air. 19 viewer tests.
+- Al/Ca gas species vendored+wired (34 JANAF species, ff692d3); oxide free energies banked (75818b9, awaiting owner verification).
+
+FOUR HONEST LIMITS, all named follow-ons, none faked (logged in MORNING_REVIEW.md):
+1. Minimizer convergence ceiling: the fixed-point condensation solve does not converge on the full 13-element solar set (Al/Ca held behind MINIMIZER_UNCONVERGED); the feldspar crust waits on the numerical hardening + an anorthite condensate.
+2. Fe-mafic reads LIGHT not dark: the only banked Fe visible feature (d-d line) is near-IR; basalt's real darkening (charge transfer, Fe-Ti opacity) is an optics follow-on, pinned by a test not tuned away.
+3. The crust does not respond to orbit yet (condensation reads a labelled ~1400 K formation-era T; the disk-thermal-history is the follow-on).
+4. Uniform crust (fresh-planet honest); lateral topography = the geodynamics composition-transport follow-on (step_interior_field evolves thermal not composition).
+
+HELD for owner (MORNING_REVIEW.md): the oxide [M] data needs verification against the primary Robie+Barin books before wiring (3 rows lack a second witness, magnetite discrepancy recorded).
+
+NEXT ARCS (owner to direct): the minimizer numerical hardening (feldspar crust), the geodynamics lateral variation (topography), the Fe-optics charge-transfer (dark basalt). All substantial; I stopped at the delivered drive-to-finish rather than start a big arc overnight without your steer.
