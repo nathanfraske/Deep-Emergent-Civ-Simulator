@@ -267,3 +267,118 @@ url = "https://janaf.nist.gov/tables/Ni-002.txt"
 citation = "Chase, M.W. Jr. (1998), NIST-JANAF Thermochemical Tables, 4th ed., J. Phys. Chem. Ref. Data, Monograph 9, 1-1951. Species Ni-002 (Nickel (Ni))."
 md5 = "167b0c90f48d8af552f8d61406385519"
 
+# --- Aluminium and calcium gas-phase carriers (added for the refractory condensates). A gas-phase
+# element-potential condensation solver can include an element only if that element has at least one gas
+# species to balance the gas equilibrium against; the set above carried Mg, Fe, Si, Ti, Na, K gas but no Al
+# or Ca gas, so Al and Ca (and their refractory condensates corundum Al2O3, spinel MgAl2O4, anorthite
+# CaAl2Si2O8, gehlenite, perovskite CaTiO3) were excluded. The rows below add the dominant Al and Ca gas
+# carriers in a cooling solar-composition gas: monatomic Al(g)/Ca(g) (the load-bearing pair, endothermic
+# vapours, positive delta-f H), the hydroxides AlOH(g)/CaOH(g)/Ca(OH)2(g) and sub-oxide Al2O(g) (bound, the
+# species that dominate at solar C/O), and the radicals AlO(g)/CaO(g) and hydride AlH(g). The set is
+# NON-EXHAUSTIVE and extensible: a new gas carrier (for another element, or an alien chemistry) is one more
+# [[species]] row, same idiom, no code change. All rows are NIST-JANAF (Chase 1998), same single grade as
+# the set above. Phase-trap check performed at fetch: Al(g) delta-f H298 = +329.699, Ca(g) = +177.800
+# kJ/mol (positive, the endothermic monatomic vapour, NOT the condensed metal reference at 0). NOTE on the
+# AlOH isomer: JANAF carries two Al1H1O1 gas species at the same formula, Al-057 "Aluminum Hydride Oxide"
+# (the HAlO hydride-oxide, delta-f H298 = +33.472) and Al-058 "Aluminum Hydroxide" (AlOH proper, the Al-O-H
+# carrier, delta-f H298 = -179.912); the dominant solar-gas Al carrier is AlOH, so Al-058 is vendored here.
+
+[[species]]
+name = "Al(g)"
+formula = "Al"
+phase = "g"
+note = "monatomic aluminium vapour; delta-f H298 = +329.699 kJ/mol (endothermic vapour, not Al(cr))"
+janaf_code = "Al-005"
+file = "Al-005.txt"
+url = "https://janaf.nist.gov/tables/Al-005.txt"
+citation = "Chase, M.W. Jr. (1998), NIST-JANAF Thermochemical Tables, 4th ed., J. Phys. Chem. Ref. Data, Monograph 9, 1-1951. Species Al-005 (Aluminum (Al))."
+md5 = "89395ea7386270316c58e439d31374a0"
+
+[[species]]
+name = "AlOH(g)"
+formula = "AlOH"
+phase = "g"
+note = "aluminium hydroxide, Al-O-H; delta-f H298 = -179.912 kJ/mol; distinct from the HAlO hydride-oxide isomer Al-057"
+janaf_code = "Al-058"
+file = "Al-058.txt"
+url = "https://janaf.nist.gov/tables/Al-058.txt"
+citation = "Chase, M.W. Jr. (1998), NIST-JANAF Thermochemical Tables, 4th ed., J. Phys. Chem. Ref. Data, Monograph 9, 1-1951. Species Al-058 (Aluminum Hydroxide (AlOH))."
+md5 = "e1d884171a7f5ae544bf0a03bbb0f09f"
+
+[[species]]
+name = "AlO(g)"
+formula = "AlO"
+phase = "g"
+note = "aluminium monoxide radical; delta-f H298 = +66.944 kJ/mol"
+janaf_code = "Al-074"
+file = "Al-074.txt"
+url = "https://janaf.nist.gov/tables/Al-074.txt"
+citation = "Chase, M.W. Jr. (1998), NIST-JANAF Thermochemical Tables, 4th ed., J. Phys. Chem. Ref. Data, Monograph 9, 1-1951. Species Al-074 (Aluminum Oxide (AlO))."
+md5 = "bd30c77af438fd079fd964a8b21d103e"
+
+[[species]]
+name = "Al2O(g)"
+formula = "Al2O"
+phase = "g"
+note = "aluminium sub-oxide; delta-f H298 = -145.185 kJ/mol; a dominant Al gas carrier at solar C/O"
+janaf_code = "Al-092"
+file = "Al-092.txt"
+url = "https://janaf.nist.gov/tables/Al-092.txt"
+citation = "Chase, M.W. Jr. (1998), NIST-JANAF Thermochemical Tables, 4th ed., J. Phys. Chem. Ref. Data, Monograph 9, 1-1951. Species Al-092 (Aluminum Oxide (Al2O))."
+md5 = "b77657f819f9542ddc9b9d9bc7a1097a"
+
+[[species]]
+name = "AlH(g)"
+formula = "AlH"
+phase = "g"
+note = "aluminium monohydride; delta-f H298 = +259.408 kJ/mol"
+janaf_code = "Al-056"
+file = "Al-056.txt"
+url = "https://janaf.nist.gov/tables/Al-056.txt"
+citation = "Chase, M.W. Jr. (1998), NIST-JANAF Thermochemical Tables, 4th ed., J. Phys. Chem. Ref. Data, Monograph 9, 1-1951. Species Al-056 (Aluminum Hydride (AlH))."
+md5 = "4d0c52a847a7757cd6f0fe813e9c4d57"
+
+[[species]]
+name = "Ca(g)"
+formula = "Ca"
+phase = "g"
+note = "monatomic calcium vapour; delta-f H298 = +177.800 kJ/mol (endothermic vapour, not Ca(cr))"
+janaf_code = "Ca-006"
+file = "Ca-006.txt"
+url = "https://janaf.nist.gov/tables/Ca-006.txt"
+citation = "Chase, M.W. Jr. (1998), NIST-JANAF Thermochemical Tables, 4th ed., J. Phys. Chem. Ref. Data, Monograph 9, 1-1951. Species Ca-006 (Calcium (Ca))."
+md5 = "38962828d508dd4a7249cce5fb92f8e7"
+
+[[species]]
+name = "CaOH(g)"
+formula = "CaOH"
+phase = "g"
+note = "calcium hydroxide monomer; delta-f H298 = -193.877 kJ/mol; a dominant Ca gas carrier at solar C/O"
+janaf_code = "Ca-018"
+file = "Ca-018.txt"
+url = "https://janaf.nist.gov/tables/Ca-018.txt"
+citation = "Chase, M.W. Jr. (1998), NIST-JANAF Thermochemical Tables, 4th ed., J. Phys. Chem. Ref. Data, Monograph 9, 1-1951. Species Ca-018 (Calcium Hydroxide (CaOH))."
+md5 = "f153385a7d264fcae57893a1b6ccc178"
+
+[[species]]
+name = "Ca(OH)2(g)"
+formula = "Ca(OH)2"
+phase = "g"
+note = "calcium dihydroxide; delta-f H298 = -610.764 kJ/mol; a dominant Ca gas carrier at solar C/O"
+janaf_code = "Ca-021"
+file = "Ca-021.txt"
+url = "https://janaf.nist.gov/tables/Ca-021.txt"
+citation = "Chase, M.W. Jr. (1998), NIST-JANAF Thermochemical Tables, 4th ed., J. Phys. Chem. Ref. Data, Monograph 9, 1-1951. Species Ca-021 (Calcium Hydroxide (Ca(OH)2))."
+md5 = "cd855d073df1bbfef740f6abc9f595e1"
+
+[[species]]
+name = "CaO(g)"
+formula = "CaO"
+phase = "g"
+note = "calcium monoxide radical; delta-f H298 = +43.932 kJ/mol"
+janaf_code = "Ca-030"
+file = "Ca-030.txt"
+url = "https://janaf.nist.gov/tables/Ca-030.txt"
+citation = "Chase, M.W. Jr. (1998), NIST-JANAF Thermochemical Tables, 4th ed., J. Phys. Chem. Ref. Data, Monograph 9, 1-1951. Species Ca-030 (Calcium Oxide (CaO))."
+md5 = "f68ac413366d2d90a5c64573772a4c99"
+

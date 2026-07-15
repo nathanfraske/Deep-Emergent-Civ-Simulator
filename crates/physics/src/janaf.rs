@@ -344,6 +344,17 @@ const JANAF_DAT: &[(&str, &str)] = &[
     ("FeS(cr,troilite)", include_str!("../data/janaf/Fe-023.txt")),
     ("H2O(l)", include_str!("../data/janaf/H-063.txt")),
     ("Ni(cr)", include_str!("../data/janaf/Ni-002.txt")),
+    // The aluminium and calcium gas carriers (the refractory-condensate deepening: with Al and Ca gas-balanceable,
+    // corundum and spinel condense, the CAI-first head of the condensation sequence). NIST-JANAF (Chase 1998).
+    ("Al(g)", include_str!("../data/janaf/Al-005.txt")),
+    ("AlOH(g)", include_str!("../data/janaf/Al-058.txt")),
+    ("AlO(g)", include_str!("../data/janaf/Al-074.txt")),
+    ("Al2O(g)", include_str!("../data/janaf/Al-092.txt")),
+    ("AlH(g)", include_str!("../data/janaf/Al-056.txt")),
+    ("Ca(g)", include_str!("../data/janaf/Ca-006.txt")),
+    ("CaOH(g)", include_str!("../data/janaf/Ca-018.txt")),
+    ("Ca(OH)2(g)", include_str!("../data/janaf/Ca-021.txt")),
+    ("CaO(g)", include_str!("../data/janaf/Ca-030.txt")),
 ];
 
 #[cfg(test)]
@@ -367,9 +378,11 @@ mod tests {
     }
 
     #[test]
-    fn the_library_loads_all_25_cited_species() {
+    fn the_library_loads_all_cited_species() {
         let l = lib();
-        assert_eq!(l.names().count(), 25, "25 cited species");
+        // 25 original + the 9 Al/Ca gas carriers (the refractory-condensate deepening: Al lets corundum and spinel
+        // condense, the CAI-first head of the sequence). A new cited species is one more manifest row.
+        assert_eq!(l.names().count(), 34, "34 cited species");
         for name in l.names() {
             let sp = l.species(name).unwrap();
             assert!(!sp.citation.trim().is_empty(), "{name} carries a citation");

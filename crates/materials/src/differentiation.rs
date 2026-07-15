@@ -178,22 +178,29 @@ where
     if floating.is_empty() {
         return None;
     }
-    let mut with_density: Vec<(String, Fixed, Fixed)> = Vec::with_capacity(floating.len());
-    for (name, presence) in floating {
-        with_density.push((name.clone(), *presence, density_of(name)?));
+    // Each phase's density, when the petrology can resolve it. A phase the substrate has no molar volume for (an
+    // exotic refractory like corundum or spinel the density kernel does not yet cover) is placed in the MANTLE as a
+    // refractory rather than assigned a fabricated density: unresolved-density phases are not buoyancy candidates.
+    // Preserve the input order (the condensation precedence) for determinism.
+    let mut resolved: Vec<Option<Fixed>> = Vec::with_capacity(floating.len());
+    let mut min_density: Option<Fixed> = None;
+    for (name, _) in floating {
+        let d = density_of(name);
+        if let Some(d) = d {
+            min_density = Some(match min_density {
+                Some(m) if m.to_bits() <= d.to_bits() => m,
+                _ => d,
+            });
+        }
+        resolved.push(d);
     }
-    // The least-dense floating phase is the buoyant crust; ties broken by name for determinism.
-    let min_density = with_density
-        .iter()
-        .map(|(_, _, d)| *d)
-        .min_by(|a, b| a.to_bits().cmp(&b.to_bits()))?;
+    let min_density = min_density?; // no floating phase has a resolvable density: no crust to float
     let mut crust = Vec::new();
     let mut mantle = Vec::new();
-    for (name, presence, density) in &with_density {
-        if *density <= min_density {
-            crust.push((name.clone(), *presence));
-        } else {
-            mantle.push((name.clone(), *presence));
+    for ((name, presence), density) in floating.iter().zip(resolved.iter()) {
+        match density {
+            Some(d) if *d <= min_density => crust.push((name.clone(), *presence)),
+            _ => mantle.push((name.clone(), *presence)),
         }
     }
     Some((crust, mantle))

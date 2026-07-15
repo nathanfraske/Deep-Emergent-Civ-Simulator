@@ -20,6 +20,8 @@ Interim reversible calls (logged, reversible):
 - The crust/mantle density split evaluates the phase densities at labelled surface conditions (T~300 K, ~1 bar); reversible, a named surface-condition fixture.
 - The current derived crust is the Mg-Si system the JANAF gas species can balance (forsterite/enstatite/Fe/troilite); the dramatic feldspathic crust needs Al and Ca gas species JANAF lacks, so I kicked that gas-species fetch overnight (Al, Ca, Ti gas thermochemistry) to deepen the crust to real anorthite/feldspar; until it lands the crust is the pyroxene the data supports, honestly labelled.
 
+- MINIMIZER CONVERGENCE CEILING (real finding, needs a numerical arc): the Al/Ca fetch landed clean (9 NIST-JANAF species, byte-neutral, gated), but wiring it revealed the fixed-point condensation minimizer does not converge on the full 13-element solar set (Al+Ca added). The surface chain holds Al/Ca out behind a labelled MINIMIZER_UNCONVERGED boundary and runs on the rock-forming majors. The feldspar crust needs (a) the minimizer's fixed-point conditioning hardened for the full solar set, and (b) an anorthite (Ca-Al-silicate) condensate, neither vendored. This is the honest blocker on the dramatic feldspathic crust; the Mg-Si crust is what converges today.
+
 ---
 
 ## 2026-07-13 (overnight status, unattended): A-only arc; provenance floor slice 2a gated clean, nothing needs your ruling

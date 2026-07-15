@@ -132,9 +132,20 @@ pub fn derive_surface_composition(
             }
         }
     }
+    // The MINIMIZER CONVERGENCE CEILING (a numerical-capability boundary, not world content): the fixed-point
+    // element-potential Newton solve converges on the rock-forming majors but does not yet converge on the full
+    // solar element set once aluminium and calcium are added (13 elements, 26 gas species). Their JANAF gas data is
+    // vendored and correct (the library loads them), and the refractory condensates corundum and spinel are ready;
+    // they are held out of THIS solve until the minimizer's fixed-point conditioning is hardened for the full set (a
+    // named numerical follow-on). This is a labelled, reversible boundary: delete this set when the solve converges
+    // at full solar composition.
+    const MINIMIZER_UNCONVERGED: &[&str] = &["Al", "Ca"];
     // The element budget b_e from the solar abundances, normalized to hydrogen: n_X/n_H = 10^(log_eps(X) - 12).
     let mut budget: BTreeMap<String, Fixed> = BTreeMap::new();
     for el in &gas_elements {
+        if MINIMIZER_UNCONVERGED.contains(&el.as_str()) {
+            continue;
+        }
         if let Some(log_eps) = abundances.preferred(el) {
             let exponent = log_eps
                 .checked_sub(Fixed::from_int(12))?
