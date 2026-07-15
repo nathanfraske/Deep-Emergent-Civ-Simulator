@@ -1,0 +1,271 @@
+// Copyright 2026 Nathan M. Fraske
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+//! GRAVITATIONAL DIFFERENTIATION (identity link): the piece between the condensed bulk and the SURFACE (crust)
+//! composition that `slice0_demo_field` named as its authored stand-in ("a stand-in for what accretion and
+//! differentiation will derive"). Under gravity the condensed phases separate into two immiscible fractions that
+//! settle by density: the dense, oxygen-free METAL and SULFIDE melt sinks toward the core, and the light,
+//! oxygen-bearing SILICATE and OXIDE fraction floats as the mantle and crust. So the SURFACE the tile chain reads is
+//! the floating silicate crust, DERIVED from the condensation, not an authored composition banded for visual variety.
+//! This is the banked Stokes-settling differentiation run on the disposer's own output; the anion chemistry is the
+//! proxy for which immiscible melt a phase joins, and the melt densities (metal and sulfide ~5 to 8 against silicate
+//! ~3) do the settling.
+//!
+//! NO AUTHORED GOLDSCHMIDT LIST (Principle 4), and this IS how it admits the alien (Principle 7): the rule reads
+//! whether each condensed phase carries oxygen, which is the fO2 ladder's OWN readout. Siderophile-versus-lithophile
+//! was always downstream physics: "did the oxygen fugacity at this orbit give the element's stable phase an oxygen".
+//! So the SAME rule partitions a world by its OWN redox, never a fixed element table: at oxidizing fugacities calcium
+//! and magnesium condense as silicates (oxygen-bearing) and FLOAT; at reducing, enstatite-chondrite fugacities they
+//! condense as the sulfides oldhamite (CaS) and niningerite (MgS) (oxygen-free) and DEFECT to the sinking set. That
+//! Ca-Mg defection under reduction is the test that proves the link reads chemistry, not a hidden list. The
+//! oxygen-lithophile criterion is the pinned row for oxygen-chemistry worlds; a non-oxygen lithophile chemistry (a
+//! carbon world's carbides and graphite, an icy world's ices) is a NAMED data extension (non-exhaustive), until which
+//! a world with no oxygen-bearing condensate yields no derived crust (fail-loud), never a mis-sorted one.
+//!
+//! Honest grade (ratified as proposed): the IDENTITY of each fraction is derived here (which phases and elements sink
+//! or float), the part that made the authored arrangement arbitrary. The AMOUNTS are pending on the VCS
+//! amount-redistribution (`equilibrium_condensation::condensed_active_set` returns which phases are saturated, not
+//! their moles), so the surface element amounts are carried from the bulk abundances of the crust elements, a
+//! proportion for the petrology to minimize the assemblage, not an exact modal mineralogy. The crust-versus-mantle
+//! split within the floating fraction (the crust is the low-melting PARTIAL MELT, not the whole silicate) needs a
+//! melting model, named, not built.
+
+use civsim_core::Fixed;
+use std::collections::BTreeMap;
+
+/// Parse a condensed-species name (its phase suffix stripped) into element counts. General over any formula, so an
+/// alien condensate is parsed, not special-cased. `None` on a malformed formula.
+fn parse_formula(formula: &str) -> Option<BTreeMap<String, i32>> {
+    let chars: Vec<char> = formula.chars().collect();
+    let mut atoms: BTreeMap<String, i32> = BTreeMap::new();
+    let mut i = 0;
+    while i < chars.len() {
+        if !chars[i].is_ascii_uppercase() {
+            return None;
+        }
+        let mut symbol = String::new();
+        symbol.push(chars[i]);
+        i += 1;
+        while i < chars.len() && chars[i].is_ascii_lowercase() {
+            symbol.push(chars[i]);
+            i += 1;
+        }
+        let mut digits = String::new();
+        while i < chars.len() && chars[i].is_ascii_digit() {
+            digits.push(chars[i]);
+            i += 1;
+        }
+        let count: i32 = if digits.is_empty() {
+            1
+        } else {
+            digits.parse().ok()?
+        };
+        *atoms.entry(symbol).or_insert(0) += count;
+    }
+    if atoms.is_empty() {
+        None
+    } else {
+        Some(atoms)
+    }
+}
+
+/// The elements of a condensed-species name (the formula before its `(cr,...)` or `(l)` phase suffix).
+fn species_elements(name: &str) -> Option<BTreeMap<String, i32>> {
+    let formula = name.split('(').next()?;
+    parse_formula(formula)
+}
+
+/// Whether a condensed phase floats to the crust: it carries a LITHOPHILE anion. Oxygen is the pinned lithophile
+/// anion for oxygen-chemistry worlds (a silicate or oxide floats); an oxygen-free phase (metal or sulfide) sinks.
+/// This reads the fO2 ladder's readout, not an element tag: the SAME check floats a Ca-silicate at oxidizing
+/// fugacity and sinks oldhamite (CaS) at reducing. Non-oxygen lithophile chemistries are the named data extension
+/// (see the module note); until then their phases do not satisfy this and a non-oxygen world yields no crust.
+fn floats_to_crust(name: &str) -> bool {
+    species_elements(name)
+        .map(|atoms| atoms.contains_key("O"))
+        .unwrap_or(false)
+}
+
+/// A differentiated planet: the condensed bulk separated into the fraction that sinks and the fraction that floats.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DifferentiatedPlanet {
+    /// The SINKING fraction (core and metal-sulfide interior): the oxygen-free metal and sulfide condensates,
+    /// (species, presence).
+    pub sinking: Vec<(String, Fixed)>,
+    /// The FLOATING fraction (mantle and crust): the oxygen-bearing silicate and oxide condensates, (species,
+    /// presence).
+    pub floating: Vec<(String, Fixed)>,
+    /// The SURFACE composition as element amounts (the floating-fraction elements at bulk abundance), the input the
+    /// derived-tile chain reads. Deterministic element order.
+    pub surface_composition: Vec<(String, Fixed)>,
+}
+
+/// Differentiate the condensed bulk, deriving the surface composition. `condensed_bulk` is the condensed phases at
+/// the orbit (`equilibrium_condensation::condensed_active_set`), each a (species name, presence) pair. `bulk_
+/// abundances` maps each element to its bulk amount, the source of the surface element amounts (identity-derived,
+/// amounts-pending, see the module note). The oxygen-free metal and sulfide phases sink; the oxygen-bearing silicate
+/// and oxide phases float; the surface carries each element the floating phases claim, at its bulk abundance.
+/// `None` if the bulk is empty or no phase floats (a world with no oxygen-bearing condensate has no derived crust:
+/// fail-loud, never a mis-sorted or fabricated surface).
+pub fn differentiate(
+    condensed_bulk: &[(String, Fixed)],
+    bulk_abundances: &BTreeMap<String, Fixed>,
+) -> Option<DifferentiatedPlanet> {
+    if condensed_bulk.is_empty() {
+        return None;
+    }
+    let mut sinking = Vec::new();
+    let mut floating = Vec::new();
+    let mut surface_elements: BTreeMap<String, Fixed> = BTreeMap::new();
+    for (name, presence) in condensed_bulk {
+        if floats_to_crust(name) {
+            floating.push((name.clone(), *presence));
+            if let Some(atoms) = species_elements(name) {
+                for element in atoms.keys() {
+                    if let Some(abundance) = bulk_abundances.get(element) {
+                        surface_elements.insert(element.clone(), *abundance);
+                    }
+                }
+            }
+        } else {
+            sinking.push((name.clone(), *presence));
+        }
+    }
+    if floating.is_empty() || surface_elements.is_empty() {
+        return None;
+    }
+    Some(DifferentiatedPlanet {
+        sinking,
+        floating,
+        surface_composition: surface_elements.into_iter().collect(),
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn bulk(entries: &[(&str, i64)]) -> BTreeMap<String, Fixed> {
+        entries
+            .iter()
+            .map(|(el, n)| (el.to_string(), Fixed::from_int(*n as i32)))
+            .collect()
+    }
+
+    fn one(name: &str) -> (String, Fixed) {
+        (name.to_string(), Fixed::ONE)
+    }
+
+    fn sink_has(d: &DifferentiatedPlanet, name: &str) -> bool {
+        d.sinking.iter().any(|(n, _)| n == name)
+    }
+    fn float_has(d: &DifferentiatedPlanet, name: &str) -> bool {
+        d.floating.iter().any(|(n, _)| n == name)
+    }
+    fn surface_has(d: &DifferentiatedPlanet, element: &str) -> bool {
+        d.surface_composition.iter().any(|(e, _)| e == element)
+    }
+
+    #[test]
+    fn at_solar_composition_metal_and_sulfide_sink_and_silicates_float() {
+        // The acceptance row, oxidizing (solar) fugacity: the sinking set contains Fe-Ni metal and FeS; the floating
+        // set carries the Mg-silicates and the feldspathic (Ca-Al) component. The surface is the silicate elements.
+        let condensed = vec![
+            one("Fe(cr)"),
+            one("Ni(cr)"),
+            one("FeS(cr,troilite)"),
+            one("Mg2SiO4(cr,forsterite)"),
+            one("MgSiO3(cr,enstatite)"),
+            one("CaAl2Si2O8(cr,anorthite)"),
+        ];
+        let abundances = bulk(&[
+            ("Fe", 90),
+            ("Ni", 5),
+            ("Mg", 100),
+            ("Si", 90),
+            ("O", 340),
+            ("S", 45),
+            ("Ca", 6),
+            ("Al", 9),
+        ]);
+        let d = differentiate(&condensed, &abundances).expect("solar bulk differentiates");
+        assert!(
+            sink_has(&d, "Fe(cr)") && sink_has(&d, "Ni(cr)") && sink_has(&d, "FeS(cr,troilite)")
+        );
+        assert!(
+            float_has(&d, "Mg2SiO4(cr,forsterite)") && float_has(&d, "CaAl2Si2O8(cr,anorthite)"),
+            "the Mg-silicates and feldspathic component float"
+        );
+        assert!(
+            surface_has(&d, "Mg")
+                && surface_has(&d, "Si")
+                && surface_has(&d, "Ca")
+                && surface_has(&d, "Al")
+        );
+        assert!(
+            !surface_has(&d, "Ni") && !surface_has(&d, "S"),
+            "the sinking metal and sulfur are not on the surface"
+        );
+    }
+
+    #[test]
+    fn under_reduction_calcium_and_magnesium_defect_to_the_sinking_set_as_sulfides() {
+        // The counter-test that proves the link reads chemistry, not an element list: at IW-class reducing fugacity
+        // the condensation makes calcium and magnesium as the sulfides oldhamite (CaS) and niningerite (MgS), which
+        // are oxygen-free and so DEFECT to the sinking set, while the same elements floated as silicates at solar
+        // fugacity above. The floating fraction is only the enstatite that stayed oxygen-bearing.
+        let condensed = vec![
+            one("Fe(cr)"),
+            one("CaS(cr,oldhamite)"),
+            one("MgS(cr,niningerite)"),
+            one("MgSiO3(cr,enstatite)"),
+        ];
+        let abundances = bulk(&[
+            ("Fe", 90),
+            ("Ca", 6),
+            ("Mg", 100),
+            ("Si", 60),
+            ("O", 180),
+            ("S", 40),
+        ]);
+        let d = differentiate(&condensed, &abundances).expect("reduced bulk differentiates");
+        assert!(
+            sink_has(&d, "CaS(cr,oldhamite)") && sink_has(&d, "MgS(cr,niningerite)"),
+            "under reduction the Ca and Mg sulfides sink"
+        );
+        // Ca defected entirely to the sink (only present as CaS), so it is not on the surface; Mg still floats in
+        // the enstatite that stayed a silicate, so Mg remains a surface element.
+        assert!(
+            !surface_has(&d, "Ca"),
+            "reduced calcium defected to the core, off the surface"
+        );
+        assert!(
+            surface_has(&d, "Mg") && surface_has(&d, "Si"),
+            "the silicate that stayed floats"
+        );
+    }
+
+    #[test]
+    fn a_world_with_no_oxygen_bearing_condensate_has_no_crust() {
+        // A fully reduced or non-oxygen bulk floats nothing under the pinned oxygen-lithophile row: fail-loud (None),
+        // the honest edge until the non-oxygen lithophile extension lands, never a mis-sorted crust.
+        let condensed = vec![
+            one("Fe(cr)"),
+            one("FeS(cr,troilite)"),
+            one("SiC(cr,moissanite)"),
+        ];
+        let abundances = bulk(&[("Fe", 90), ("Si", 40), ("S", 45), ("C", 60)]);
+        assert!(differentiate(&condensed, &abundances).is_none());
+    }
+}

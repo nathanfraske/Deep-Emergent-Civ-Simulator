@@ -51,6 +51,7 @@ pub mod contract;
 pub mod correlation;
 pub mod creep;
 pub mod definition;
+pub mod differentiation;
 pub mod electronic;
 pub mod equilibrium_condensation;
 pub mod freezer;
