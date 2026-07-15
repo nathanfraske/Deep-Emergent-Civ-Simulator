@@ -101,9 +101,52 @@ def check_ice():
     print(f"PASS: {len(rows)} ice points recompute from the Murphy-Koop coefficients, 180 K fingerprint holds")
 
 
+# Robie-Hemingway 1995 CaTiO3 perovskite fingerprints (kJ/mol), the owner's pre-registered spot rows.
+PEROVSKITE_FINGERPRINTS = {
+    # temperature (K): (delta_f_g_kj, delta_f_h_kj or None)
+    "298.15": (-1574.8, -1660.6),
+    "1200": (-1323.9, -1664.1),
+    "1300": (-1295.6, -1662.5),
+    "1400": (-1267.5, -1660.8),
+    "1500": (-1239.4, -1658.9),
+    "1600": (-1211.8, -1655.3),
+    "1700": (-1184.1, -1654.4),
+}
+
+
+def check_perovskite():
+    path = os.path.join(DATA, "perovskite_robie1995.toml")
+    text = open(path, encoding="utf-8").read()
+    # The cited source-PDF md5 receipt must be recorded in the header.
+    assert re.search(r"md5 [0-9a-f]{32}", text), "perovskite header records no source-PDF md5 receipt"
+    rows = {r["t_k"]: r for r in parse_rows(text, "point") if "t_k" in r}
+    assert len(rows) == 7, f"expected 7 perovskite rows (298.15 + 1200-1700), got {len(rows)}"
+    failures = 0
+    for T, (wg, wh) in PEROVSKITE_FINGERPRINTS.items():
+        row = rows.get(T)
+        if not row:
+            print("PEROVSKITE MISSING", T)
+            failures += 1
+            continue
+        gg = float(row["delta_f_g_kj"])
+        if abs(gg - wg) > 0.1:
+            print("PEROVSKITE delta_f_G DRIFT", T, "want", wg, "got", gg)
+            failures += 1
+        if wh is not None and abs(float(row["delta_f_h_kj"]) - wh) > 0.1:
+            print("PEROVSKITE delta_f_H DRIFT", T, "want", wh, "got", row["delta_f_h_kj"])
+            failures += 1
+    # The refractory fingerprint: delta_f H(298) is the -1660 kJ/mol class.
+    if abs(float(rows["298.15"]["delta_f_h_kj"]) - -1660.6) > 1.0:
+        print("PEROVSKITE FINGERPRINT delta_f_H(298) not -1660 class")
+        failures += 1
+    assert failures == 0, f"{failures} perovskite mismatch(es)"
+    print(f"PASS: {len(rows)} perovskite rows, all {len(PEROVSKITE_FINGERPRINTS)} fingerprints reproduce")
+
+
 def main():
     check_agss09()
     check_ice()
+    check_perovskite()
     print("PASS: condensation mu-fetch provenance battery")
 
 

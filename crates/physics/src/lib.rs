@@ -62,6 +62,7 @@ pub mod molecular_opacity;
 pub mod opacity;
 pub mod optical_constants;
 pub mod periodic;
+pub mod perovskite_gibbs;
 pub mod petrology;
 pub mod petrology_data;
 pub mod phonon;
