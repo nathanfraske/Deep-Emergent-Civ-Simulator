@@ -339,6 +339,68 @@ mod tests {
     }
 
     #[test]
+    fn the_phonon_battery_pass_one_measured_lengths_isolates_the_generator() {
+        // PASS 1 (calibration): the generator run through MEASURED lattice geometry, so a miss is generator error,
+        // never length-estimator error. omega_TO = (1/2 pi c) sqrt(k/mu), k from the Badger column at the measured
+        // r_e. Results and their honest reading:
+        //  - silicate Si-O stretch, quartz r_e = 1.61 A -> ~994 cm^-1 vs the 9.7 um (1031) feature, -4%: VALIDATED.
+        //  - free O-H, r_e = 0.957 A -> ~3818 cm^-1 vs gas-phase ~3700, +3%: VALIDATED (the ice 3.1 um band at 3226
+        //    is H-bond-redshifted, a condensed-phase effect the single-oscillator model does not carry, ~+18%).
+        //  - SiC stretch, r_e = 1.889 A -> ~597 cm^-1 vs the measured TO ~793, -25%: the strongly-covalent Si-C bond
+        //    is stiffer than the polar-weighted Badger (1,2) average, a declared generator band for covalent bonds.
+        let fc = crate::force_constant::ForceConstants::standard().unwrap();
+        let t = crate::periodic::PeriodicTable::standard().unwrap();
+        let wto = |a_z, b_z, a, b, re: Fixed| -> f64 {
+            let k = fc.force_constant_mdyn_per_angstrom(a_z, b_z, re).unwrap();
+            let mu = crate::force_constant::ForceConstants::reduced_mass_amu(&t, a, b).unwrap();
+            omega_to_cm_inverse(k, mu).unwrap().to_f64_lossy()
+        };
+        // The clean validations (the generator where Badger + a single oscillator apply).
+        let si_o = wto(14, 8, "Si", "O", Fixed::from_ratio(161, 100));
+        assert!(
+            (si_o - 1031.0).abs() / 1031.0 < 0.10,
+            "silicate Si-O stretch validates (~1031), got {si_o}"
+        );
+        let o_h = wto(8, 1, "O", "H", Fixed::from_ratio(957, 1000));
+        assert!(
+            (o_h - 3700.0).abs() / 3700.0 < 0.10,
+            "the generator gives the free O-H (~3700), got {o_h}"
+        );
+        // The declared covalent band: SiC underestimates by ~25% (locked so a regression is caught, flagged as the
+        // generator's honest band for strongly-covalent bonds, not a pass).
+        let si_c = wto(14, 6, "Si", "C", Fixed::from_ratio(1889, 1000));
+        assert!(
+            si_c < 700.0 && si_c > 500.0,
+            "SiC sits in the declared covalent underestimate band (~597, -25% vs 793), got {si_c}"
+        );
+    }
+
+    #[test]
+    fn the_phonon_battery_pass_two_estimator_lengths_grades_the_length_rung() {
+        // PASS 2 (alien rung): the SAME features through RADII-SUM lengths, grading the length estimator (a miss
+        // here convicts the length estimator, never the validated frequency core). The tetrahedral Si-C length
+        // (194.9 pm) is longer than the measured 188.9, so it softens omega_TO further below the measured-length
+        // result, the honest length band the production chain carries when no crystal has been measured.
+        let radii = crate::covalent_radii::CovalentRadii::standard().unwrap();
+        let fc = crate::force_constant::ForceConstants::standard().unwrap();
+        let t = crate::periodic::PeriodicTable::standard().unwrap();
+        let re_tet = radii.tetrahedral_bond_length_pm("Si", "C").unwrap(); // pm
+        let re_ang = re_tet.checked_div(Fixed::from_int(100)).unwrap();
+        let k = fc.force_constant_mdyn_per_angstrom(14, 6, re_ang).unwrap();
+        let mu = crate::force_constant::ForceConstants::reduced_mass_amu(&t, "Si", "C").unwrap();
+        let w_tet = omega_to_cm_inverse(k, mu).unwrap().to_f64_lossy();
+        // The measured-length pass-1 result for comparison.
+        let k_meas = fc
+            .force_constant_mdyn_per_angstrom(14, 6, Fixed::from_ratio(1889, 1000))
+            .unwrap();
+        let w_meas = omega_to_cm_inverse(k_meas, mu).unwrap().to_f64_lossy();
+        assert!(
+            w_tet < w_meas,
+            "the tetrahedral length estimator softens omega_TO below the measured-length pass ({w_tet} < {w_meas}), the estimator's band"
+        );
+    }
+
+    #[test]
     fn the_lyddane_sachs_teller_gate_lands_nacl() {
         // The NaCl LST identity (the pre-registered gate): omega_TO ~ 164 cm^-1, eps_0 ~ 5.9, eps_inf = n^2 ~ 2.34
         // predict omega_LO ~ 260 cm^-1 against the measured ~264, ~2%.
