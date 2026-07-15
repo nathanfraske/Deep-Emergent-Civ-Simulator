@@ -451,6 +451,68 @@ pub fn planet_radius_m(mass_earth: Fixed, bulk_density_g_cm3: Fixed) -> Option<F
     Some(ln_r.exp())
 }
 
+/// The DISK MIDPLANE TEMPERATURE `T_mid` (K), the Stage-2 payoff: the optically-thick closure that lifts the disk's
+/// EFFECTIVE (surface) temperature to the interior where condensation happens, and the T-versus-kappa FIXED POINT
+/// that couples the opacity to the temperature. Only the VISCOUS heating is generated in the interior, so it is
+/// boosted by the optical depth, while irradiation heats the surface and is not: the midplane balance is
+/// `sigma T_mid^4 = (3/4) tau_R D_visc + F_irr`, with `tau_R = kappa_R(T_mid) Sigma / 2`. Because `kappa_R` depends
+/// on `T_mid` (dust sublimates as the gas warms, dropping the opacity), this is a self-consistent fixed point,
+/// solved by a BOUNDED BISECTION on `T_mid` (a fixed iteration count, so determinism holds): at each trial `T` the
+/// equilibrium temperature `radiative_equilibrium((3/4) tau_R(T) D_visc + F_irr)` is compared to `T`, and the
+/// bracket halves toward the crossing.
+///
+/// `viscous_flux` is the Shakura-Sunyaev dissipation `D(r)` (W/m^2, one face) and `absorbed_irradiation_flux` the
+/// reprocessed stellar flux (W/m^2); both are the disk's own derived fluxes. `surface_density` and `kappa_of_t`
+/// (the Rosseland opacity as a function of temperature, the #54 grain-plus-gas opacity) carry matching units so
+/// `tau_R = kappa Sigma / 2` is dimensionless. The bracket `[t_lo, t_hi]` is the search interval (the surface
+/// temperature below, an optically-thick ceiling above). HONEST LIMIT: near dust sublimation the opacity cliff can
+/// make three fixed points (the thermal-instability S-curve, the FU-Orionis engine); this bisection returns the
+/// single crossing in the given bracket, so the caller brackets the branch it wants. `None` on a bad input, a
+/// kappa the closure cannot price, or an overflow.
+pub fn disk_midplane_temperature(
+    viscous_flux: Fixed,
+    absorbed_irradiation_flux: Fixed,
+    surface_density: Fixed,
+    kappa_of_t: impl Fn(Fixed) -> Option<Fixed>,
+    t_lo: Fixed,
+    t_hi: Fixed,
+) -> Option<Fixed> {
+    if surface_density <= Fixed::ZERO || t_hi <= t_lo {
+        return None;
+    }
+    let sigma = crate::physiology::derived_stefan_boltzmann();
+    let three_quarters = Fixed::from_ratio(3, 4);
+    let half = Fixed::from_ratio(1, 2);
+    // The equilibrium temperature the disk settles to at a trial midplane temperature `t` (through its opacity).
+    let equilibrium_t = |t: Fixed| -> Option<Fixed> {
+        let tau_r = kappa_of_t(t)?
+            .checked_mul(surface_density)?
+            .checked_mul(half)?; // kappa Sigma / 2
+        let lifted = three_quarters
+            .checked_mul(tau_r)?
+            .checked_mul(viscous_flux)?
+            .checked_add(absorbed_irradiation_flux)?;
+        Some(civsim_physics::laws::radiative_equilibrium(
+            lifted,
+            Fixed::ONE,
+            sigma,
+            t_hi,
+        ))
+    };
+    // Bounded bisection: below the fixed point the disk wants to be hotter (equilibrium_t > t), above it cooler.
+    let mut lo = t_lo;
+    let mut hi = t_hi;
+    for _ in 0..60 {
+        let mid = lo.checked_add(hi)?.checked_div(Fixed::from_int(2))?;
+        if equilibrium_t(mid)? > mid {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    lo.checked_add(hi)?.checked_div(Fixed::from_int(2))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -471,6 +533,61 @@ mod tests {
         assert!(
             dense.to_f64_lossy() < r.to_f64_lossy(),
             "a denser planet of the same mass is smaller"
+        );
+    }
+
+    #[test]
+    fn the_midplane_fixed_point_lifts_the_temperature_and_is_self_consistent() {
+        // The Stage-2 payoff: the optically-thick midplane, hotter than the surface by the viscous optical-depth
+        // lift, at the self-consistent T-versus-kappa fixed point. A dusty opacity that drops with temperature
+        // (dust sublimation): kappa = 2 - T/1000, floored. The midplane balance sigma T^4 = (3/4)(kappa Sigma/2) D
+        // + F must land above the irradiation-only surface temperature, and be self-consistent at T_mid.
+        let sigma = crate::physiology::derived_stefan_boltzmann();
+        let kappa = |t: Fixed| -> Option<Fixed> {
+            let k = Fixed::from_int(2).checked_sub(t.checked_div(Fixed::from_int(1000))?)?;
+            Some(if k < Fixed::from_ratio(1, 100) {
+                Fixed::from_ratio(1, 100)
+            } else {
+                k
+            })
+        };
+        let viscous = Fixed::from_int(50); // D_visc W/m^2
+        let irradiation = Fixed::from_int(100); // F_irr W/m^2
+        let sigma_density = Fixed::from_int(100); // Sigma g/cm^2
+        let t_mid = disk_midplane_temperature(
+            viscous,
+            irradiation,
+            sigma_density,
+            kappa,
+            Fixed::from_int(200),
+            Fixed::from_int(2000),
+        )
+        .unwrap();
+        let t_surface = civsim_physics::laws::radiative_equilibrium(
+            irradiation,
+            Fixed::ONE,
+            sigma,
+            Fixed::from_int(2000),
+        );
+        assert!(
+            t_mid.to_f64_lossy() > t_surface.to_f64_lossy() + 50.0,
+            "the optically-thick midplane is lifted above the surface: {} vs {}",
+            t_mid.to_f64_lossy(),
+            t_surface.to_f64_lossy()
+        );
+        let tau_r = kappa(t_mid).unwrap().to_f64_lossy() * 100.0 / 2.0;
+        let lifted = 0.75 * tau_r * 50.0 + 100.0;
+        let t_check = civsim_physics::laws::radiative_equilibrium(
+            Fixed::from_ratio((lifted * 1000.0) as i64, 1000),
+            Fixed::ONE,
+            sigma,
+            Fixed::from_int(2000),
+        );
+        assert!(
+            (t_mid.to_f64_lossy() - t_check.to_f64_lossy()).abs() < 5.0,
+            "the fixed point is self-consistent: {} vs {}",
+            t_mid.to_f64_lossy(),
+            t_check.to_f64_lossy()
         );
     }
 
