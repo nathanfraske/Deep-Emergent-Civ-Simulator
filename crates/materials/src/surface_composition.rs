@@ -31,22 +31,32 @@
 //! linear amounts normalized to hydrogen (`n_X / n_H = 10^(log_eps(X) - 12)`), so the gas is hydrogen-dominated and
 //! the rock is the trace that condenses, exactly the protoplanetary setting.
 
-use crate::differentiation::{differentiate, DifferentiatedPlanet};
+use crate::differentiation::{
+    crust_and_mantle, differentiate, phase_set_composition, DifferentiatedPlanet,
+};
 use crate::equilibrium_condensation::{
     condensed_active_set, condensed_amounts, gas_equilibrium, janaf_g_over_rt, CondensedAmounts,
     EquilibriumSpecies, SpeciesPhase,
 };
 use civsim_core::Fixed;
 use civsim_physics::janaf::JanafTables;
+use civsim_physics::periodic::PeriodicTable;
+use civsim_physics::petrology::crustal_density;
+use civsim_physics::petrology_data::PhaseRegistry;
 use civsim_physics::solar_abundances::SolarAbundances;
 use std::collections::{BTreeMap, BTreeSet};
 
 /// The derived surface composition and the differentiation it came from.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SurfaceComposition {
-    /// The crust element amounts (element symbol, amount), the input the derived-tile chain reads.
+    /// The SURFACE (crust) element amounts (element symbol, amount), the input the derived-tile chain reads: the
+    /// buoyant partial-melt crust the differentiation floated, not the whole silicate fraction.
     pub surface: Vec<(String, Fixed)>,
-    /// The full differentiation (the sinking and floating fractions), for audit.
+    /// The crust phases (the buoyant partial melt) and the mantle phases (the refractory residue) from the
+    /// partial-melt split, for the isostasy the tile relief reads (crust floats on mantle).
+    pub crust: Vec<(String, Fixed)>,
+    pub mantle: Vec<(String, Fixed)>,
+    /// The full differentiation (the sinking metal-sulfide and floating silicate fractions), for audit.
     pub differentiation: DifferentiatedPlanet,
     /// The condensed molar amounts from the VCS, when the vertex was well-posed; `None` at a degenerate vertex (the
     /// identity still derives, the amounts route to the Verdict draw).
@@ -199,10 +209,29 @@ pub fn derive_surface_composition(
         Some(CondensedAmounts::Balanced(v)) => Some(v.clone()),
         _ => None, // degenerate vertex: the identity still differentiates, amounts route to the draw
     };
-    // Differentiation: float the crust off the sinking metal and sulfide.
+    // Differentiation: float the silicate fraction off the sinking metal and sulfide.
     let differentiation = differentiate(&active, &budget)?;
+    // The partial-melt crust extraction: within the floating silicate fraction, the buoyant (least-dense) phase is
+    // the CRUST, the denser rest the MANTLE residue it floats on. Density comes from the petrology substrate at the
+    // labelled surface conditions (~300 K, ~1 bar), the surface where the isostasy is read.
+    let registry = PhaseRegistry::standard().ok()?;
+    let table = PeriodicTable::standard().ok()?;
+    let surface_t = Fixed::from_int(300);
+    let surface_p = Fixed::ONE;
+    let density_of = |name: &str| -> Option<Fixed> {
+        let atoms = species_elements(name)?;
+        let composition: Vec<(String, Fixed)> = atoms
+            .iter()
+            .map(|(el, n)| (el.clone(), Fixed::from_int(*n)))
+            .collect();
+        crustal_density(&composition, surface_t, surface_p, &registry, &table)
+    };
+    let (crust, mantle) = crust_and_mantle(&differentiation.floating, density_of)?;
+    let surface = phase_set_composition(&crust, &budget);
     Some(SurfaceComposition {
-        surface: differentiation.surface_composition.clone(),
+        surface,
+        crust,
+        mantle,
         differentiation,
         condensed_amounts: condensed_amount_readout,
     })

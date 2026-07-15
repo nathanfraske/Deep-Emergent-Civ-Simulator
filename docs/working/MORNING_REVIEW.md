@@ -7,6 +7,21 @@ to proceed, and log it here. Only a truly owner-only or hard-to-reverse decision
 place to review what happened overnight and what still needs your ruling. Newest entries at the top of each
 section.
 
+## 2026-07-15 -> 16 (overnight autonomous): the real differentiated crust, driven to the finish
+
+You signed off with "give me the real differentiated crust, drive it to the finish. See it through autonomously." I am building it behind the hard gates (pins, clippy, fmt, tests), branch claude/kappa-r-assembly (PR #191). Pins held every commit: default 40fe8a72, living be94e310. Full status is in HANDOFFS.md and the CONSENSUS_ROADMAP board; this section holds only what needs your eyes.
+
+HELD for your ruling (decisions, not gates I bypassed):
+
+1. Oxide-thermochemistry [M] data, verify against the primary books. The fetch agent landed crates/physics/data/oxide_thermochemistry/ (9 simple-oxide delta_f_G(T), data-only, NOT yet loader-wired): cited Robie-Hemingway 1995 USGS Bull 2131 (md5 matches the repo's perovskite receipt), interim second witness (NIST-JANAF/WebBook/CODATA) per row because Barin is not in hand. Needs your verification against the primary Robie AND Barin volumes before it goes load-bearing. FLAGGED, not fabricated: three rows have no second witness in hand (wustite Fe0.947O, NiO, MnO). One discrepancy RECORDED not averaged: magnetite Fe3O4, JANAF 4.7 kJ/mol more negative than Robie, which compilation the IW/QFM buffer keys off is your call. Wustite tagged Fe0.947O with the fictive stoichiometric FeO vendored separately. I have NOT wired this into the redox ladder (awaits your verification); the differentiation and condensation run on the existing JANAF data meanwhile.
+
+Interim reversible calls (logged, reversible):
+
+- The crust/mantle density split evaluates the phase densities at labelled surface conditions (T~300 K, ~1 bar); reversible, a named surface-condition fixture.
+- The current derived crust is the Mg-Si system the JANAF gas species can balance (forsterite/enstatite/Fe/troilite); the dramatic feldspathic crust needs Al and Ca gas species JANAF lacks, so I kicked that gas-species fetch overnight (Al, Ca, Ti gas thermochemistry) to deepen the crust to real anorthite/feldspar; until it lands the crust is the pyroxene the data supports, honestly labelled.
+
+---
+
 ## 2026-07-13 (overnight status, unattended): A-only arc; provenance floor slice 2a gated clean, nothing needs your ruling
 
 Two things happened worth your morning read, neither needing a decision.

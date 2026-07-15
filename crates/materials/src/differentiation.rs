@@ -152,6 +152,72 @@ pub fn differentiate(
     })
 }
 
+/// THE PARTIAL-MELT CRUST EXTRACTION: split the floating silicate fraction into the CRUST (the buoyant partial melt
+/// that floats to the surface) and the MANTLE (the dense refractory residue it leaves). Within the silicate fraction
+/// the split is BUOYANCY, not chemistry: the low-density melt (feldspar ~2.76, silica ~2.65) rises over the dense
+/// refractory (forsterite ~3.27), so the crust is the LEAST-DENSE floating phase and the mantle is the denser rest.
+/// This is the density contrast that gives the crust its isostatic relief (crust ~2.8 floating on mantle ~3.3),
+/// which a crust identical to its mantle cannot. Distinct from and downstream of [`differentiate`]: that set the
+/// metal-sulfide/silicate split by chemistry (immiscibility); this sets the crust/mantle split by density (buoyancy),
+/// the two physical drivers each in their own place.
+///
+/// Admit the alien: the primitive is density, so WHAT floats as crust is a data outcome (feldspathic on a Terran
+/// silicate world, a different light phase elsewhere), never a mineral table. `density_of` returns each floating
+/// phase's DERIVED density (the caller injects it from the petrology substrate). Returns (crust, mantle) as
+/// (species, presence) lists; `None` if a floating-phase density fails to resolve (fail-loud). A single floating
+/// phase is all crust (nothing denser to reject to the mantle).
+// The (crust, mantle) pair of phase lists is the natural return; a named type would not read clearer than the pair.
+#[allow(clippy::type_complexity)]
+pub fn crust_and_mantle<F>(
+    floating: &[(String, Fixed)],
+    density_of: F,
+) -> Option<(Vec<(String, Fixed)>, Vec<(String, Fixed)>)>
+where
+    F: Fn(&str) -> Option<Fixed>,
+{
+    if floating.is_empty() {
+        return None;
+    }
+    let mut with_density: Vec<(String, Fixed, Fixed)> = Vec::with_capacity(floating.len());
+    for (name, presence) in floating {
+        with_density.push((name.clone(), *presence, density_of(name)?));
+    }
+    // The least-dense floating phase is the buoyant crust; ties broken by name for determinism.
+    let min_density = with_density
+        .iter()
+        .map(|(_, _, d)| *d)
+        .min_by(|a, b| a.to_bits().cmp(&b.to_bits()))?;
+    let mut crust = Vec::new();
+    let mut mantle = Vec::new();
+    for (name, presence, density) in &with_density {
+        if *density <= min_density {
+            crust.push((name.clone(), *presence));
+        } else {
+            mantle.push((name.clone(), *presence));
+        }
+    }
+    Some((crust, mantle))
+}
+
+/// The element amounts of a set of phases at their bulk abundances (the surface composition of a crust, or a
+/// mantle): each element the phases claim, carried at its bulk abundance. Deterministic element order.
+pub fn phase_set_composition(
+    phases: &[(String, Fixed)],
+    bulk_abundances: &BTreeMap<String, Fixed>,
+) -> Vec<(String, Fixed)> {
+    let mut elements: BTreeMap<String, Fixed> = BTreeMap::new();
+    for (name, _) in phases {
+        if let Some(atoms) = species_elements(name) {
+            for element in atoms.keys() {
+                if let Some(abundance) = bulk_abundances.get(element) {
+                    elements.insert(element.clone(), *abundance);
+                }
+            }
+        }
+    }
+    elements.into_iter().collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -267,5 +333,29 @@ mod tests {
         ];
         let abundances = bulk(&[("Fe", 90), ("Si", 40), ("S", 45), ("C", 60)]);
         assert!(differentiate(&condensed, &abundances).is_none());
+    }
+
+    #[test]
+    fn the_buoyant_silicate_floats_as_crust_over_the_dense_mantle() {
+        // Within the floating silicate fraction the split is BUOYANCY: the lighter phase (enstatite ~3.20) floats as
+        // the crust over the denser forsterite ~3.27 mantle residue, the density contrast the isostasy needs. A real
+        // feldspathic crust (anorthite ~2.76) floats even more strongly when the data supplies it.
+        let floating = vec![one("Mg2SiO4(cr,forsterite)"), one("MgSiO3(cr,enstatite)")];
+        let density = |name: &str| -> Option<Fixed> {
+            Some(match name.split('(').next()? {
+                "Mg2SiO4" => Fixed::from_ratio(327, 100),
+                "MgSiO3" => Fixed::from_ratio(320, 100),
+                _ => return None,
+            })
+        };
+        let (crust, mantle) = crust_and_mantle(&floating, density).expect("splits");
+        assert!(
+            crust.iter().any(|(n, _)| n.starts_with("MgSiO3")),
+            "the lighter enstatite is the buoyant crust"
+        );
+        assert!(
+            mantle.iter().any(|(n, _)| n.starts_with("Mg2SiO4")),
+            "the denser forsterite is the mantle residue"
+        );
     }
 }
