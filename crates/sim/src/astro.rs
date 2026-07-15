@@ -62,6 +62,12 @@ pub const SOLAR_RADIUS_M: &str = "6.957e8";
 /// kg/s. A unit conversion, not a per-world value.
 pub const JULIAN_YEAR_S: &str = "31557600";
 
+/// The Earth mass in kilograms, the IAU nominal terrestrial mass (~5.9722e24 kg). A cited reference anchor: the
+/// scale a DERIVED planet mass is reported against (the accretion feeding-zone integral yields a mass; a planet's
+/// mass in Earth masses times this anchor is its mass in kg), and the anchor the derived planet radius reads. Not a
+/// per-world value; the derived planet mass is the per-world quantity.
+pub const EARTH_MASS_KG: &str = "5.9722e24";
+
 /// The number of decimal digits pi is computed to for the flux derivation. Far above the ~10 significant
 /// figures the Q32.32 result carries (a `2^-32` epsilon near a ~1361 magnitude is a relative ~1.7e-13), so
 /// the pi truncation never reaches the result's low bit. An engine-accuracy bound, not a world value.
@@ -411,9 +417,62 @@ pub fn feeding_zone_mass(
     Some(mass)
 }
 
+/// The PLANET RADIUS `R` (metres) from its mass and bulk density, DERIVED by inverting the sphere volume
+/// `M = (4/3) pi R^3 rho`, so `R = (3 M / (4 pi rho))^(1/3)`. This is the planet's SHAPE size, the accretion arc's
+/// radius output the render draws the globe from, and the `R` the derived surface gravity `g = G M / R^2` reads
+/// (closing the hardcoded-gravity retirement: the whole-planet `M` and `R` are now derived, so `g` is too).
+/// `mass_earth` is the mass in Earth masses (the accretion integral's output, scaled by [`EARTH_MASS_KG`]);
+/// `bulk_density_g_cm3` is the whole-planet mean density (the differentiated core-plus-mantle mean, ~5.51 for
+/// Earth, NOT the silicate ~3.3), the materials arc's output.
+///
+/// The wide-magnitude cube root runs in LOG-SPACE (`M ~ 6e24 kg` and the `~1e21 m^3` volume overflow Q32.32 while
+/// the ~6.4e6 m radius fits): `ln R = (1/3)(ln(3/(4 pi)) + ln M_kg - ln rho_kg_m3)`, each term assembled from the
+/// register/anchor logs, then exponentiated. At one Earth mass and Earth's ~5.514 g/cm^3 mean density this derives
+/// ~6371 km, the derive-not-fit anchor (the Hadean-gate radius target). `None` on a non-positive input or a
+/// register miss.
+pub fn planet_radius_m(mass_earth: Fixed, bulk_density_g_cm3: Fixed) -> Option<Fixed> {
+    if mass_earth <= Fixed::ZERO || bulk_density_g_cm3 <= Fixed::ZERO {
+        return None;
+    }
+    let four_pi = Fixed::PI.checked_mul(Fixed::from_int(4))?;
+    let ln_3_over_4pi = Fixed::from_int(3).checked_div(four_pi)?.ln();
+    // ln M[kg] = ln(mass_earth) + ln(EARTH_MASS_KG).
+    let ln_m_kg = mass_earth
+        .ln()
+        .checked_add(civsim_physics::saha::ln_of_decimal(EARTH_MASS_KG)?)?;
+    // ln rho[kg/m^3] = ln(rho[g/cm^3]) + ln(1000).
+    let ln_rho_kg_m3 = bulk_density_g_cm3
+        .ln()
+        .checked_add(Fixed::from_int(1000).ln())?;
+    let ln_r = ln_3_over_4pi
+        .checked_add(ln_m_kg)?
+        .checked_sub(ln_rho_kg_m3)?
+        .checked_div(Fixed::from_int(3))?;
+    Some(ln_r.exp())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_planet_radius_derives_earth_from_its_mass_and_density() {
+        // The derive-not-fit shape anchor: one Earth mass at Earth's ~5.514 g/cm^3 whole-planet mean density derives
+        // the ~6371 km radius, from the sphere volume and the mass anchor alone (the Hadean-gate radius target). The
+        // log-space cube root keeps the wide-magnitude compute exact.
+        let r = planet_radius_m(Fixed::ONE, Fixed::from_ratio(5514, 1000)).unwrap();
+        assert!(
+            (r.to_f64_lossy() - 6.371e6).abs() < 1.0e5,
+            "Earth radius ~6371 km, got {:.0} km",
+            r.to_f64_lossy() / 1000.0
+        );
+        // A denser, more refractory planet at the same mass is smaller (the metal-rich inner-planet direction).
+        let dense = planet_radius_m(Fixed::ONE, Fixed::from_int(8)).unwrap();
+        assert!(
+            dense.to_f64_lossy() < r.to_f64_lossy(),
+            "a denser planet of the same mass is smaller"
+        );
+    }
 
     fn close(a: Fixed, b: f64) -> bool {
         (a.to_f64_lossy() - b).abs() < 1e-2
