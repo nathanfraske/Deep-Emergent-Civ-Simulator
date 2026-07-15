@@ -48,6 +48,7 @@ pub mod crater;
 pub mod drag_flight;
 pub mod eruption;
 pub mod flood;
+pub mod impact_event;
 pub mod impact_flux;
 pub mod label;
 pub mod lod;
