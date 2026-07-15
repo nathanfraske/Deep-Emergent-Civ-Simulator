@@ -427,19 +427,33 @@ struct GlobeFixture {
 /// exponents and the fourth-root ceiling are the labelled Sun fixture); the surface tiles are the Slice-0 demo
 /// crust field. Every value here is DERIVED or a clearly-labelled fixture, none fabricated.
 fn build_globe_fixture() -> Option<GlobeFixture> {
-    let radius_m = civsim_sim::astro::planet_radius_m(Fixed::ONE, Fixed::from_ratio(5514, 1000))?;
-    let t_eff = civsim_sim::astro::stellar_effective_temperature(
-        Fixed::ONE,
-        Fixed::from_ratio(35, 10),
-        Fixed::from_ratio(8, 10),
-        Fixed::from_int(50_000),
+    // The DERIVED planet through the integration spine: the authored Sun (mass 1, solar metallicity) at Earth's
+    // orbit (1 AU) -> the stellar L/R/T_eff -> the disk temperature -> the accreted mass and condensed density ->
+    // the radius. The stellar slopes are the grid-extracted values (alpha 3.5, beta 0.8, lambda -0.44, mu -0.018);
+    // the accreted mass and whole-planet mean density are the Hadean-Earth fixtures until the accretion and
+    // condensation arcs wire through. So the globe's on-screen SIZE and the star's blackbody COLOUR are read from the
+    // real star-plus-orbit pipeline, not authored. Fail-soft: a None leaves the globe absent, never a fabricated one.
+    let planet = civsim_sim::planet::derive_planet(
+        Fixed::ONE,                    // Sun mass ratio
+        Fixed::ONE,                    // solar metallicity
+        Fixed::from_ratio(35, 10),     // alpha (mass-luminosity)
+        Fixed::from_ratio(8, 10),      // beta (mass-radius)
+        Fixed::from_ratio(-44, 100),   // lambda (metallicity-luminosity)
+        Fixed::from_ratio(-18, 1000),  // mu (metallicity-radius)
+        Fixed::ONE,                    // 1 AU
+        Fixed::from_ratio(1, 100),     // accretion rate (Mirror fixture)
+        Fixed::from_ratio(1, 4),       // reprocessing factor
+        Fixed::ONE,                    // inner-boundary factor
+        Fixed::ONE,                    // 1 Earth mass (accretion output, fixture)
+        Fixed::from_ratio(5514, 1000), // 5.514 g/cm^3 mean density (condensation output, fixture)
+        Fixed::from_int(100_000),
     )?;
     let cols = 48usize;
     let rows = 32usize;
     let tiles = slice0_demo_field(cols, rows)?;
     Some(GlobeFixture {
-        radius_m,
-        t_eff,
+        radius_m: planet.radius_m,
+        t_eff: planet.star_effective_temperature_k,
         tiles,
         cols,
     })
