@@ -57,6 +57,18 @@ impl CovalentRadius {
     }
 }
 
+/// The provenance GRADE of a covalent radius, the mixed-grade citation this cited column carries. Pyykko's
+/// light-element radii are FITS to measured bond distances (`MeasuredFit`); the heavy, actinide-and-beyond radii are
+/// RELATIVISTIC COMPUTED estimates (`RelativisticComputed`, a compute-once cited grade, not measured [M]). The two
+/// share one citation file, so a grade-sensitive consumer must not read the computed region as if it were measured.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RadiusGrade {
+    /// A fit to measured bond distances (the light rows).
+    MeasuredFit,
+    /// A relativistic computed estimate (the heavy, actinide-and-beyond rows).
+    RelativisticComputed,
+}
+
 /// The loaded covalent-radius column, keyed by element symbol.
 #[derive(Debug, Clone, Default)]
 pub struct CovalentRadii {
@@ -65,12 +77,15 @@ pub struct CovalentRadii {
 
 #[derive(Debug, Default, Deserialize)]
 struct RawFile {
+    // `[[radius]]`, the cited-data-column block kind (the Shannon ionic-radius idiom), NOT the reserved floor
+    // `[[element]]` kind: a cited [M] import never participates in the floor's real/fantasy authorship axis, and an
+    // immutable citation file never receives estimator-tier rows for authored elements (co-location laundering).
     #[serde(default)]
-    element: Vec<RawElement>,
+    radius: Vec<RawRadius>,
 }
 
 #[derive(Debug, Deserialize)]
-struct RawElement {
+struct RawRadius {
     symbol: String,
     single_pm: i32,
     #[serde(default)]
@@ -88,7 +103,7 @@ impl CovalentRadii {
         let file: RawFile =
             toml::from_str(s).map_err(|e| CovalentRadiiError::Parse(e.to_string()))?;
         let mut radii = BTreeMap::new();
-        for raw in file.element {
+        for raw in file.radius {
             if raw.single_pm <= 0
                 || raw.double_pm.is_some_and(|d| d <= 0)
                 || raw.triple_pm.is_some_and(|t| t <= 0)
@@ -128,6 +143,41 @@ impl CovalentRadii {
         let ra = self.radius(a)?.at_order(order)?;
         let rb = self.radius(b)?.at_order(order)?;
         Some(ra + rb)
+    }
+
+    /// The grade of an element's radius, classified by atomic number against the measured-computed boundary: at or
+    /// below the boundary it is a `MeasuredFit`, above it a `RelativisticComputed` estimate. The boundary is a
+    /// data-provenance fact (Pyykko 2015's own fit-versus-computed split, read from the paper's data-source notes,
+    /// flagged until sourced), supplied by the caller rather than read from a world-content manifest.
+    pub fn grade(atomic_number: u32, measured_grade_boundary_z: u32) -> RadiusGrade {
+        if atomic_number <= measured_grade_boundary_z {
+            RadiusGrade::MeasuredFit
+        } else {
+            RadiusGrade::RelativisticComputed
+        }
+    }
+
+    /// The Pyykko-sum bond length, GUARDED to the measured grade: `None` (escalate) if either atom's radius is a
+    /// relativistic computed estimate (its atomic number exceeds the boundary), so a consumer that requires
+    /// measured-grade lengths (the force-constant chain, the grain lattices) never silently ingests a computed
+    /// radius as if it were measured. `z_of` resolves an element symbol to its atomic number (the caller's periodic
+    /// table, keeping this column decoupled from it); `measured_grade_boundary_z` is the reserved boundary. This
+    /// guard costs nothing today (every current consumer reads only light rows) and fails loud the day a consumer
+    /// reads the computed region (einsteinium optics).
+    pub fn bond_length_measured_grade(
+        &self,
+        a: &str,
+        b: &str,
+        order: u8,
+        measured_grade_boundary_z: u32,
+        z_of: impl Fn(&str) -> Option<u32>,
+    ) -> Option<i32> {
+        for sym in [a, b] {
+            if Self::grade(z_of(sym)?, measured_grade_boundary_z) != RadiusGrade::MeasuredFit {
+                return None; // escalate: a computed-grade radius, not measured
+            }
+        }
+        self.bond_length_pm(a, b, order)
     }
 
     /// The tetrahedral-crystal bond length `r_e = r_tet(a) + r_tet(b)` (pm), the length estimator for a
@@ -264,6 +314,37 @@ mod tests {
             Some(113),
             "the CO triple-bond Pyykko sum is 113 pm (measured 112.8)"
         );
+    }
+
+    #[test]
+    fn the_measured_grade_guard_escalates_on_the_computed_region() {
+        // The mixed-grade guard: a light bond (both atoms measured-fit grade) passes; a bond touching the
+        // relativistic-computed region (an atom above the boundary) ESCALATES (None), so a measured-grade consumer
+        // never silently ingests a computed radius. The real boundary is a data-provenance fact flagged until read
+        // from Pyykko 2015; here it is a test boundary at Z = 83 (bismuth, the last stable element).
+        let c = col();
+        let z_of = |s: &str| match s {
+            "C" => Some(6),
+            "O" => Some(8),
+            "U" => Some(92),
+            _ => None,
+        };
+        let boundary = 83u32;
+        assert_eq!(
+            c.bond_length_measured_grade("C", "O", 3, boundary, z_of),
+            Some(113),
+            "a light measured-grade bond passes the guard"
+        );
+        assert!(
+            c.bond_length_measured_grade("C", "U", 1, boundary, z_of)
+                .is_none(),
+            "a bond into the computed region (uranium, Z 92 > 83) escalates, never a silent computed radius"
+        );
+        assert_eq!(
+            CovalentRadii::grade(92, boundary),
+            RadiusGrade::RelativisticComputed
+        );
+        assert_eq!(CovalentRadii::grade(8, boundary), RadiusGrade::MeasuredFit);
     }
 
     #[test]
