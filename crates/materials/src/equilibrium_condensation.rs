@@ -301,6 +301,55 @@ pub fn gas_equilibrium(
     })
 }
 
+/// The SATURATION INDEX of a condensed phase against a gas equilibrium's element potentials: `S = sum_e a_ec
+/// lambda_e - g_c`, the amount by which the element potentials exceed the condensate's dimensionless standard Gibbs.
+/// `S > 0` means the phase is SUPERSATURATED, so it precipitates; `S <= 0` means it stays in the gas. A phase's
+/// condensation front is where `S` crosses zero as the gas cools, so the condensation SEQUENCE (the CAI-first
+/// ordering: corundum before metal before silicates before ices) is the phases sorted by that crossing temperature,
+/// the Verdict log sorted by `T`. `None` if the condensate carries an element the gas equilibrium never balanced (a
+/// coverage failure the caller surfaces, never papers over).
+pub fn saturation_index(
+    condensate_g_over_rt: Fixed,
+    stoichiometry: &BTreeMap<String, i32>,
+    element_potentials: &BTreeMap<String, Fixed>,
+) -> Option<Fixed> {
+    let mut sum = Fixed::ZERO;
+    for (element, count) in stoichiometry {
+        let lambda = element_potentials.get(element)?;
+        sum = sum.checked_add(Fixed::from_int(*count).checked_mul(*lambda)?)?;
+    }
+    sum.checked_sub(condensate_g_over_rt)
+}
+
+/// The condensed active set at a gas equilibrium: the `Condensed`-phase candidates that PRECIPITATE (a positive
+/// saturation index), returned most-supersaturated first (the precipitation order at this temperature; the raw-bit
+/// key gives a deterministic total order, with the name as the stable tiebreak). This is the detection-and-ordering
+/// half of the condensed minimizer: at a temperature it says which phases are stable and in what precedence, and
+/// swept down a cooling path it yields the condensation sequence. The amount redistribution (the full VCS
+/// re-equilibration that fixes each phase's molar amount and the exact 50%-condensation temperature) builds on this.
+/// `None` if a condensate carries an unbalanced element.
+pub fn condensed_active_set(
+    condensates: &[EquilibriumSpecies],
+    equilibrium: &GasEquilibrium,
+) -> Option<Vec<(String, Fixed)>> {
+    let mut saturated = Vec::new();
+    for c in condensates {
+        if c.phase != SpeciesPhase::Condensed {
+            continue;
+        }
+        let s = saturation_index(
+            c.g_over_rt,
+            &c.stoichiometry,
+            &equilibrium.element_potentials,
+        )?;
+        if s > Fixed::ZERO {
+            saturated.push((c.name.clone(), s));
+        }
+    }
+    saturated.sort_by(|a, b| b.1.to_bits().cmp(&a.1.to_bits()).then(a.0.cmp(&b.0)));
+    Some(saturated)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -467,5 +516,42 @@ mod tests {
             (t50 - lodders_fe).abs() < 30.0,
             "the JANAF-derived Fe T50 ({t50:.0} K) reproduces the independently-computed Lodders front ({lodders_fe:.0} K) within the inter-dataset +-30 K band"
         );
+    }
+
+    #[test]
+    fn the_condensed_active_set_precipitates_the_supersaturated_phases_in_order() {
+        // From the H/O gas equilibrium, three candidate condensates of the same stoichiometry {H2, O1} but different
+        // standard Gibbs. The reference potential for that stoichiometry is 2 lambda_H + lambda_O, so a condensate
+        // with g BELOW it is supersaturated (precipitates) and one ABOVE it is undersaturated (stays gaseous). The
+        // active set returns only the supersaturated phases, most-supersaturated first (the precipitation order that,
+        // swept down a cooling path, becomes the condensation sequence).
+        let sys = h_o_system();
+        let b = abund(&[("H", 2.0), ("O", 1.0)]);
+        let eq = gas_equilibrium(&sys, &b).unwrap();
+        let ref_pot = eq.element_potentials["H"].to_f64_lossy() * 2.0
+            + eq.element_potentials["O"].to_f64_lossy();
+        // g = ref_pot - s, so the saturation index S = ref_pot - g = s (the constructed supersaturation).
+        let cond = |name: &str, s: f64| EquilibriumSpecies {
+            name: name.to_string(),
+            phase: SpeciesPhase::Condensed,
+            g_over_rt: Fixed::from_ratio(((ref_pot - s) * 1000.0).round() as i64, 1000),
+            stoichiometry: [("H".to_string(), 2), ("O".to_string(), 1)]
+                .into_iter()
+                .collect(),
+        };
+        let candidates = vec![
+            cond("deep_sat", 10.0),
+            cond("shallow_sat", 3.0),
+            cond("undersat", -4.0),
+        ];
+        let active = condensed_active_set(&candidates, &eq).unwrap();
+        let names: Vec<&str> = active.iter().map(|(n, _)| n.as_str()).collect();
+        assert_eq!(
+            names,
+            vec!["deep_sat", "shallow_sat"],
+            "only the supersaturated phases, most-supersaturated first; the undersaturated one stays gaseous"
+        );
+        assert!((active[0].1.to_f64_lossy() - 10.0).abs() < 0.1);
+        assert!((active[1].1.to_f64_lossy() - 3.0).abs() < 0.1);
     }
 }
