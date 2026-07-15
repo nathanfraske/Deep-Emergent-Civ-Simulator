@@ -149,26 +149,29 @@ pub fn stellar_effective_temperature(
     if mass_ratio <= Fixed::ZERO {
         return None;
     }
-    // The stellar radius R_star = R_sun*mass_ratio^beta, and the surface flux F = L/(4*pi*R_star^2).
+    // The Stefan-Boltzmann inversion in SUN-RELATIVE form, so a massive star whose surface flux overflows fixed
+    // point still derives its T_eff. T_eff = T_sun*(F/F_sun)^(1/4) = T_sun*M^(alpha/4 - beta/2): the flux RATIO to
+    // the Sun (a representable M^~1.9) scales the solar anchor, and the wide-magnitude stellar flux (which crosses
+    // the Q32.32 ceiling near 6.4 M_sun) is never formed, the log-space-census discipline. Mathematically identical
+    // to (F/sigma)^(1/4) and byte-identical at unit mass, but Betelgeuse-mass safe.
     let r_sun = BigRat::from_decimal_str(SOLAR_RADIUS_M).ok()?;
-    let r_star = r_sun.mul(&nonneg_fixed_to_bigrat(mass_ratio.powf(radius_exponent)));
-    let r2 = r_star.mul(&r_star);
-    let four_pi = BigRat::from_i64(4).mul(&compute::pi(FLUX_PI_DIGITS));
-    let denom = four_pi.mul(&r2);
     let l_sun = BigRat::from_decimal_str(SOLAR_LUMINOSITY_W).ok()?;
-    let luminosity = l_sun.mul(&nonneg_fixed_to_bigrat(
-        mass_ratio.powf(luminosity_exponent),
-    ));
-    let surface_flux_bits = luminosity.div(&denom).round_to_scale(Fixed::FRAC_BITS)?;
-    let surface_flux = Fixed::from_bits_i128(surface_flux_bits)?;
-    // T_eff = (F / sigma)^(1/4): the Stefan-Boltzmann inversion, the proven two-sqrt fourth root.
+    let four_pi = BigRat::from_i64(4).mul(&compute::pi(FLUX_PI_DIGITS));
+    // The Sun's OWN surface flux F_sun = L_sun/(4*pi*R_sun^2), ~6.3e7 W/m^2, which IS representable.
+    let solar_flux_bits = l_sun
+        .div(&four_pi.mul(&r_sun.mul(&r_sun)))
+        .round_to_scale(Fixed::FRAC_BITS)?;
+    let solar_flux = Fixed::from_bits_i128(solar_flux_bits)?;
     let sigma = crate::physiology::derived_stefan_boltzmann();
-    Some(civsim_physics::laws::radiative_equilibrium(
-        surface_flux,
-        Fixed::ONE,
-        sigma,
-        t_max,
-    ))
+    let t_sun = civsim_physics::laws::radiative_equilibrium(solar_flux, Fixed::ONE, sigma, t_max);
+    // The mass scaling M^(alpha/4 - beta/2), the Stefan-Boltzmann inversion of L ~ M^alpha and R ~ M^beta, a
+    // representable power at any mass. T_sun already carries the t_max fourth-root ceiling; re-cap the scaled result
+    // so a hot star still saturates at t_max as before.
+    let exponent = luminosity_exponent
+        .checked_div(Fixed::from_int(4))?
+        .checked_sub(radius_exponent.checked_div(Fixed::from_int(2))?)?;
+    let t_eff = t_sun.checked_mul(mass_ratio.powf(exponent))?;
+    Some(if t_eff > t_max { t_max } else { t_eff })
 }
 
 /// The IRRADIATED-DISK (surface-equilibrium) TEMPERATURE `T_irr(r)` (K) at an orbital distance, DERIVED from
