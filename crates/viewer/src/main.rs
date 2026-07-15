@@ -244,6 +244,8 @@ fn globe_cmd(argv: &[String]) {
         star_r,
         BG,
         fx.sky,
+        render::SurfaceStyle::default(),
+        render::GlobeOrientation::IDENTITY,
     );
     write_ppm(&path, w, h, &buf);
     eprintln!(
@@ -255,9 +257,12 @@ fn globe_cmd(argv: &[String]) {
 }
 
 /// Headless render of a DERIVED planet's globe from a star mass and orbit: `--derived-globe <path> [mass] [orbit]
-/// [w] [h]`. Builds the derived scene (the same star-and-orbit chain the interactive `--derived` mode runs) and draws
-/// its globe (the derived radius, the blackbody star colour, the derived atmosphere sky) to a PPM, so the derived
-/// planet is viewable without a display. Prints the derived readout too.
+/// [w] [h] [zoom_frac]`. Builds the derived scene (the same star-and-orbit chain the interactive `--derived` mode runs)
+/// and draws its globe (the derived radius, the blackbody star colour, the derived material surface, the derived
+/// atmosphere sky) to a PPM, so the derived planet is viewable without a display. With no `zoom_frac` it renders the
+/// distant planet; a `zoom_frac` in [0, 1] drills in along the same continuous zoom the interactive viewer uses, so at
+/// `1` the surface fills the frame and the display tile grid shows, letting the drill-in be inspected headlessly.
+/// Prints the derived readout too.
 fn derived_globe_cmd(argv: &[String]) {
     let path = argv
         .get(2)
@@ -282,8 +287,41 @@ fn derived_globe_cmd(argv: &[String]) {
         cols: scene.cols,
         sky: scene.sky,
     };
-    let g = GLOBE_LEVELS.saturating_sub(1);
-    let (m_per_px, star_px, star_r) = globe_view_params(&fx, w, h, g);
+    // With a zoom fraction, use the interactive drill-in scale (and its refining tile grid); without one, the distant
+    // planet framing. So the same PPM path can show either the whole planet or the gridded surface up close.
+    let (m_per_px, star_px, star_r, style) = match argv.get(7).and_then(|s| s.parse::<f32>().ok()) {
+        Some(t) => {
+            let (m_per_px, star_px, star_r) = derived_globe_view(&fx, w, h, t.clamp(0.0, 1.0));
+            let radius_px = render::globe_radius_px(fx.radius_m, m_per_px);
+            let min_dim = w.min(h);
+            let grid = (radius_px as f32 >= min_dim as f32 * 0.5)
+                .then(|| surface_grid_dims(radius_px, min_dim));
+            (
+                m_per_px,
+                star_px,
+                star_r,
+                render::SurfaceStyle {
+                    tint: Some(scene.material),
+                    grid,
+                },
+            )
+        }
+        None => {
+            let g = GLOBE_LEVELS.saturating_sub(1);
+            let (m_per_px, star_px, star_r) = globe_view_params(&fx, w, h, g);
+            (
+                m_per_px,
+                star_px,
+                star_r,
+                render::SurfaceStyle {
+                    tint: Some(scene.material),
+                    grid: None,
+                },
+            )
+        }
+    };
+    // Paint the sphere the crust's DERIVED material colour (the same the interactive `--derived` viewer shows), so the
+    // headless render matches what the owner sees on screen.
     let buf = render::render_solar_system_view(
         fx.radius_m,
         fx.t_eff,
@@ -296,6 +334,8 @@ fn derived_globe_cmd(argv: &[String]) {
         star_r,
         BG,
         fx.sky,
+        style,
+        render::GlobeOrientation::IDENTITY,
     );
     write_ppm(&path, w, h, &buf);
     eprintln!("wrote {path} ({w}x{h})");
@@ -838,7 +878,7 @@ fn print_derived_readout(scene: &DerivedScene) {
     } else {
         eprintln!("  air:    {}", air_top.join(", "));
     }
-    eprintln!("  controls: +/- zoom, wasd/arrows pan, Esc quit");
+    eprintln!("  controls: +/- zoom, wasd/arrows rotate the globe, p provenance, Esc quit");
 }
 
 /// The interactive `--derived [star_mass] [orbit_au]` viewer: derive the planet from the star mass and orbit and show
@@ -857,6 +897,7 @@ fn print_derived_readout(scene: &DerivedScene) {
 fn provenance_lines(
     scene: &DerivedScene,
     floor_prov: Option<&civsim_physics::floor_provenance::FloorProvenance>,
+    hovered: Option<(usize, usize)>,
 ) -> Vec<(String, Rgb)> {
     let derived = Rgb::new(150, 220, 150); // green: DERIVED
     let cited = Rgb::new(150, 190, 235); // blue: [M] cited
@@ -867,11 +908,15 @@ fn provenance_lines(
         .first()
         .cloned()
         .unwrap_or_else(|| "unresolved".to_string());
+    // The header keys off the cursor's surface tile: the (col,row) under the cursor when it sits on the sphere, or a
+    // prompt when it is off the globe. The crust is uniform for now (a named geodynamics follow-on), so every tile
+    // reads the same derivation; naming the tile makes the hover explicit and is ready for lateral variation.
+    let header = match hovered {
+        Some((cu, cv)) => format!("PROVENANCE  tile ({cu},{cv})  the derived crust"),
+        None => "PROVENANCE  (hover the sphere to pick a tile)".to_string(),
+    };
     let mut lines = vec![
-        (
-            "PROVENANCE  (hovered tile: the derived crust)".to_string(),
-            head,
-        ),
+        (header, head),
         (format!("material  {crust_phase}"), head),
         (
             "  <- condensation of AGSS09 abundances  [M cited]".to_string(),
@@ -943,6 +988,48 @@ fn provenance_lines(
     lines
 }
 
+/// The derived viewer's continuous globe scale at zoom fraction `t` in [0, 1]: the metres-per-pixel scale (so the
+/// DERIVED radius drives the on-screen size), the star's on-screen position, and its on-screen radius. The globe
+/// grows from a distant star-lit sphere (t = 0, the star beside it) to the surface filling the frame up close
+/// (t = 1): one continuous zoom, all of it the sphere. The two radius endpoints are non-canon display-framing choices
+/// for the viewer, documented at their site (Principle 10, pixels only).
+fn derived_globe_view(fx: &GlobeFixture, w: usize, h: usize, t: f32) -> (Fixed, (i32, i32), usize) {
+    let min_dim = w.min(h);
+    // The on-screen radius grows geometrically so the zoom reads smoothly: from ~0.12 of the frame (a distant globe
+    // with the star beside it) up to ~8x the frame (a close drill-down onto a small surface patch, where the tile grid
+    // subdivides). Both fractions are non-canon display-framing choices, surfaced here at their definition.
+    const R_MIN_FRAC: f32 = 0.12;
+    const R_MAX_FRAC: f32 = 8.0;
+    let frac = R_MIN_FRAC * (R_MAX_FRAC / R_MIN_FRAC).powf(t.clamp(0.0, 1.0));
+    let target_r = ((min_dim as f32) * frac).max(1.0) as i32;
+    let m_per_px = fx
+        .radius_m
+        .checked_div(Fixed::from_int(target_r.max(1)))
+        .unwrap_or(Fixed::ONE);
+    // The star sits off to the upper-left; it is occluded once the globe grows to fill the frame (you are at the
+    // surface), the honest look for the close view.
+    let star_px = ((w / 5) as i32, (h / 4) as i32);
+    let star_r = (min_dim / 22).max(3);
+    (m_per_px, star_px, star_r)
+}
+
+/// The display surface-tile grid `(cols, rows)` at an on-screen globe `radius_px` in a frame of smallest dimension
+/// `min_dim`: a lat/lon grid whose density DOUBLES each time the globe doubles in on-screen size past the fill radius,
+/// so as you zoom in each tile opens into a 2x2 finer array (a display level-of-detail). Below the fill radius it stays
+/// at the base density (a coarse hover grid on the distant planet). The base density, the fill radius, and the
+/// subdivision cap are non-canon display choices, documented here. The cell COLOUR stays the DERIVED material (uniform
+/// until lateral composition variation lands, a geodynamics follow-on); the grid is a coordinate graticule showing the
+/// tile structure the surface will carry, never fabricated per-cell content.
+fn surface_grid_dims(radius_px: usize, min_dim: usize) -> (usize, usize) {
+    const BASE_COLS: usize = 12;
+    const BASE_ROWS: usize = 8;
+    const MAX_LEVEL: u32 = 5; // cap the subdivision so the grid stays legible and cheap (12<<5 = 384 cols)
+    let fill = (min_dim.max(1) as f32) * 0.5; // the radius at which the base grid density holds
+    let ratio = (radius_px as f32 / fill).max(1.0);
+    let level = (ratio.log2().floor().max(0.0) as u32).min(MAX_LEVEL);
+    (BASE_COLS << level, BASE_ROWS << level)
+}
+
 fn run_derived(argv: &[String]) {
     let star_mass = parse_fixed(argv.get(2), Fixed::ONE);
     let orbit_au = parse_fixed(argv.get(3), Fixed::ONE);
@@ -956,7 +1043,7 @@ fn run_derived(argv: &[String]) {
     };
     print_derived_readout(&scene);
 
-    // The globe fixture reuses the shared globe scale and renderer over the derived scene's fields.
+    // The globe fixture reuses the shared globe renderer over the derived scene's fields.
     let globe = GlobeFixture {
         radius_m: scene.radius_m,
         t_eff: scene.t_eff,
@@ -964,9 +1051,11 @@ fn run_derived(argv: &[String]) {
         cols: scene.cols,
         sky: scene.sky,
     };
-    let globe_levels = GLOBE_LEVELS;
-    let surface_levels = 3u32;
-    let max_zoom = globe_levels + surface_levels;
+    // One continuous zoom, all of it the sphere: from the distant star-lit globe (zoom 0) through the surface filling
+    // the frame and on into a close drill-down where the display tile grid subdivides. This replaces the old
+    // flat-tileset surface levels, so the zoom-in stays ON the sphere's surface.
+    let zoom_levels = 12u32;
+    let max_zoom = zoom_levels.saturating_sub(1);
 
     let mut win_w = 960usize;
     let mut win_h = 640usize;
@@ -975,6 +1064,11 @@ fn run_derived(argv: &[String]) {
         win_w,
         win_h,
         WindowOptions {
+            // A titled, resizable window: a resize reflows the render each frame from window.get_size(). Under WSLg
+            // the Wayland compositor supplies no server-side title-bar decoration (minifb 0.27 has no client-side
+            // fallback), so drag via the WSLg / desktop window chrome (for example Super+drag); that is a compositor
+            // limitation outside the viewer's control, not a viewer bug.
+            title: true,
             resize: true,
             scale: Scale::X1,
             scale_mode: ScaleMode::Stretch,
@@ -996,6 +1090,11 @@ fn run_derived(argv: &[String]) {
     let floor_prov = civsim_physics::floor_provenance::FloorProvenance::embedded().ok();
     let mut show_provenance = false;
     let mut zoom: u32 = 0;
+    // The globe orientation the pan keys steer: a longitude spin (wraps) and a latitude tilt (clamped off the poles).
+    // Rotating brings the far side of the sphere into view, so the whole surface is reachable. Display-only state,
+    // never canon (Principle 10).
+    let mut rot_lon = 0.0f32;
+    let mut rot_lat = 0.0f32;
     while window.is_open() && !window.is_key_down(Key::Escape) {
         for k in window.get_keys_pressed(KeyRepeat::No) {
             match k {
@@ -1003,13 +1102,33 @@ fn run_derived(argv: &[String]) {
                 Key::Minus | Key::NumPadMinus => zoom = zoom.saturating_sub(1),
                 // Toggle the tile provenance panel (the sloppy-work catcher).
                 Key::P => show_provenance = !show_provenance,
-                Key::Home => zoom = 0,
+                Key::Home => {
+                    zoom = 0;
+                    rot_lon = 0.0;
+                    rot_lat = 0.0;
+                }
                 _ => {}
             }
         }
-        // The WASD / arrow keys pan (accepted so the controls match the living-world viewer); the derived crust is
-        // uniform, so a pan over the single-composition surface has no visible effect until lateral variation lands
-        // (a named geodynamics follow-on). The globe is a fixed object, so panning is a no-op there too.
+        // WASD / arrow keys ROTATE the globe: longitude about the polar axis (wraps, so a full spin reaches every
+        // meridian) and latitude tilt (clamped near the poles to avoid the projection singularity). Held keys pan
+        // smoothly. The step and the latitude limit are non-canon display choices, documented at their site.
+        const ROT_STEP: f32 = 0.045; // radians per frame while a pan key is held (display pan-rate)
+        const LAT_LIMIT: f32 = 1.4; // ~80 degrees: keep the sampled centre off the pole singularity
+        use std::f32::consts::TAU;
+        if window.is_key_down(Key::Left) || window.is_key_down(Key::A) {
+            rot_lon -= ROT_STEP;
+        }
+        if window.is_key_down(Key::Right) || window.is_key_down(Key::D) {
+            rot_lon += ROT_STEP;
+        }
+        if window.is_key_down(Key::Up) || window.is_key_down(Key::W) {
+            rot_lat = (rot_lat + ROT_STEP).min(LAT_LIMIT);
+        }
+        if window.is_key_down(Key::Down) || window.is_key_down(Key::S) {
+            rot_lat = (rot_lat - ROT_STEP).max(-LAT_LIMIT);
+        }
+        rot_lon = rot_lon.rem_euclid(TAU); // longitude wraps
 
         let (w, h) = window.get_size();
         if w == 0 || h == 0 {
@@ -1018,41 +1137,73 @@ fn run_derived(argv: &[String]) {
         }
         (win_w, win_h) = (w, h);
 
-        let (buf, mode) = if zoom < globe_levels {
-            let (m_per_px, star_px, star_r) = globe_view_params(&globe, win_w, win_h, zoom);
-            (
-                render::render_solar_system_view(
-                    globe.radius_m,
-                    globe.t_eff,
-                    &globe.tiles,
-                    globe.cols,
-                    win_w,
-                    win_h,
-                    m_per_px,
-                    star_px,
-                    star_r,
-                    BG,
-                    globe.sky,
-                ),
-                format!("derived globe {}/{}", zoom + 1, globe_levels),
+        // One continuous zoom, all sphere: t runs 0 (distant globe) to 1 (surface fills the frame). The whole render
+        // is the star-lit globe (derived radius, blackbody star colour, day/night terminator, atmosphere limb),
+        // sampled at the current orientation so panning rotates the surface.
+        let t = if max_zoom == 0 {
+            1.0
+        } else {
+            zoom as f32 / max_zoom as f32
+        };
+        let orient = render::GlobeOrientation { rot_lon, rot_lat };
+        let (m_per_px, star_px, star_r) = derived_globe_view(&globe, win_w, win_h, t);
+        let radius_px = render::globe_radius_px(globe.radius_m, m_per_px);
+        let min_dim = win_w.min(win_h);
+        // The display tile grid refines with zoom: it holds a coarse base density on the distant planet, then doubles
+        // each time the globe doubles in on-screen size, so once the sphere fills the frame each tile opens into a 2x2
+        // finer array as you keep zooming in. It is overlaid once the sphere is large enough (the distant planet reads
+        // smooth); the pick and highlight always use the current grid, so hovering marks a cell of the visible tiles.
+        let (grid_cols, grid_rows) = surface_grid_dims(radius_px, min_dim);
+        let show_grid = radius_px as f32 >= min_dim as f32 * 0.5;
+        let style = render::SurfaceStyle {
+            tint: Some(scene.material),
+            grid: show_grid.then_some((grid_cols, grid_rows)),
+        };
+        let mut buf = render::render_solar_system_view(
+            globe.radius_m,
+            globe.t_eff,
+            &globe.tiles,
+            globe.cols,
+            win_w,
+            win_h,
+            m_per_px,
+            star_px,
+            star_r,
+            BG,
+            globe.sky,
+            style,
+            orient,
+        );
+        let mode = if show_grid {
+            format!(
+                "derived surface  zoom {}/{}  tiles {grid_cols}x{grid_rows}",
+                zoom + 1,
+                zoom_levels
             )
         } else {
-            let sf = zoom - globe_levels; // 0..surface_levels-1
-            let tile_px = (14 + 10 * sf) as usize;
-            (
-                render::paint_material_tiles(
-                    &scene.tiles,
-                    scene.material,
-                    scene.cols,
-                    tile_px,
-                    win_w,
-                    win_h,
-                    BG,
-                ),
-                format!("derived surface ({tile_px}px/tile)"),
-            )
+            format!("derived globe  zoom {}/{}", zoom + 1, zoom_levels)
         };
-        let mut buf = buf;
+
+        // The cursor -> surface pick: invert the sphere map at the mouse to the tile under it (None off the sphere).
+        // The globe is centred in the frame; its on-screen radius is the derived radius at this zoom.
+        let gcx = (win_w / 2) as i32;
+        let gcy = (win_h / 2) as i32;
+        let picked = window
+            .get_mouse_pos(MouseMode::Discard)
+            .and_then(|(mx, my)| {
+                render::pick_surface_tile(
+                    mx as i32, my as i32, gcx, gcy, radius_px, orient, grid_cols, grid_rows,
+                )
+            });
+        // The highlight box marks the tile under the cursor, projected onto the sphere so it curves with the globe
+        // and stays put as it rotates. Fail-soft: no pick, no highlight.
+        if let Some((cu, cv)) = picked {
+            render::draw_surface_highlight(
+                &mut buf, win_w, win_h, gcx, gcy, radius_px, orient, grid_cols, grid_rows, cu, cv,
+                CURSOR,
+            );
+        }
+
         // The readout HUD: the derived numbers, drawn top-left, so the planet is legible without the terminal.
         let readout = format!(
             "star {:.2} Msun  orbit {:.2} AU  |  T_eff {:.0}K  radius {:.0}km  g {:.2}",
@@ -1086,7 +1237,7 @@ fn run_derived(argv: &[String]) {
             4,
             20,
             &format!(
-                "crust {}  air {}  +/- zoom  p provenance  esc quit",
+                "crust {}  air {}  |  +/- zoom  wasd/arrows rotate  p provenance  esc quit",
                 crust_line.join("-"),
                 scene
                     .atmosphere
@@ -1098,10 +1249,10 @@ fn run_derived(argv: &[String]) {
             Rgb::new(170, 180, 200),
             Rgb::new(10, 12, 20),
         );
-        // The provenance panel: on toggle, over the surface view, list the hovered crust tile's provenance
-        // breakdown on the right edge, so a fixture stands out amber against the derived and cited grades.
-        if show_provenance && zoom >= globe_levels {
-            let lines = provenance_lines(&scene, floor_prov.as_ref());
+        // The provenance panel: on toggle, list the hovered crust tile's provenance breakdown on the right edge, so a
+        // fixture stands out amber against the derived and cited grades. It keys off the cursor's surface tile.
+        if show_provenance {
+            let lines = provenance_lines(&scene, floor_prov.as_ref(), picked);
             let panel_w = 372usize;
             let px = win_w.saturating_sub(panel_w);
             for (i, (text, colour)) in lines.iter().enumerate() {
@@ -1417,6 +1568,8 @@ fn main() {
                     star_r,
                     BG,
                     fx.sky,
+                    render::SurfaceStyle::default(),
+                    render::GlobeOrientation::IDENTITY,
                 ),
                 CELL as i32,
                 1,

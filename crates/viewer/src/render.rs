@@ -908,7 +908,8 @@ pub fn paint_derived_tiles(
 /// A relief-shading brightness for the material-tile paint: upland reads full, lowland a shade dimmer, submarine
 /// dimmest (as if the surface sits deeper / in shadow). The ONE authored display relief scale the non-canon layer is
 /// allowed (documented here at its site), byte-neutral on canon: it modulates the DERIVED material colour's brightness
-/// so relief structure is legible, never inventing a per-relief hue. The relief it keys off is derived.
+/// so relief structure is legible, never inventing a per-relief hue. The relief it keys off is derived. Used by the
+/// sphere's material tint ([`draw_globe`]) and the flat material-tile paint.
 fn relief_shade(relief: TerrainRelief) -> f32 {
     match relief {
         TerrainRelief::Upland => 1.0,
@@ -924,6 +925,11 @@ fn relief_shade(relief: TerrainRelief) -> f32 {
 /// a fresh, uniform crust every tile shares the material colour and the visible variation is the relief shading, the
 /// honest look until lateral composition variation lands (a named geodynamics follow-on). A pure, deterministic read,
 /// one-way canon -> pixels (Principle 10).
+///
+/// Retained for the flat material-tile view, but the derived viewer no longer calls it: that mode now zooms ONTO the
+/// sphere's surface (a continuous globe zoom) rather than a disconnected flat tile field. Kept available (covered by a
+/// unit test) so the material-tile path is not lost.
+#[allow(dead_code)]
 pub fn paint_material_tiles(
     tiles: &[DerivedTile],
     material: Rgb,
@@ -990,27 +996,118 @@ fn normalize3(v: [f32; 3]) -> [f32; 3] {
     }
 }
 
-/// Sample the DERIVED-tile surface colour at longitude `u` and latitude `v` (each in `[0, 1)`), an orthographic
-/// read of the derived relief field ([`derived_tile_color`]) wrapped onto the globe. An empty field falls back to a
-/// deep-ocean stand-in so the sphere still draws. Display-only.
-fn sample_derived_surface(tiles: &[DerivedTile], cols: usize, u: f32, v: f32) -> Rgb {
+/// The DERIVED tile relief at surface coordinate (u, v) (each in `[0, 1)`), an orthographic read of the derived relief
+/// field wrapped onto the globe (the same (u, v) -> cell mapping [`pick_surface_tile`] inverts). `None` for an empty
+/// field, so the caller falls back to a stand-in. Display-only.
+fn sample_derived_relief(
+    tiles: &[DerivedTile],
+    cols: usize,
+    u: f32,
+    v: f32,
+) -> Option<TerrainRelief> {
     if tiles.is_empty() || cols == 0 {
-        return Rgb::new(40, 72, 120);
+        return None;
     }
     let rows = tiles.len().div_ceil(cols);
     let cu = ((u.clamp(0.0, 0.999_9) * cols as f32) as usize).min(cols - 1);
     let cv = ((v.clamp(0.0, 0.999_9) * rows as f32) as usize).min(rows.saturating_sub(1));
     let idx = (cv * cols + cu).min(tiles.len() - 1);
-    derived_tile_color(tiles[idx].relief)
+    Some(tiles[idx].relief)
+}
+
+/// The globe's viewing orientation for the derived-surface explorer: a longitude spin about the polar axis and a
+/// latitude tilt, both in radians. Panning the derived viewer changes these so the far side of the sphere rotates
+/// into view and the whole surface becomes reachable. A display-only orientation (observability non-canon): it steers
+/// which surface coordinate each screen pixel samples and writes no canonical state (Principle 10).
+#[derive(Clone, Copy, Debug)]
+pub struct GlobeOrientation {
+    /// Longitude offset (radians); the caller wraps it, so a full spin reaches every meridian.
+    pub rot_lon: f32,
+    /// Latitude offset (radians); the caller clamps it away from the poles to avoid the projection singularity.
+    pub rot_lat: f32,
+}
+
+impl GlobeOrientation {
+    /// The unrotated orientation: the sphere is sampled straight on, so the render is identical to the
+    /// pre-rotation globe (the headless commands and the living-world globe use this).
+    pub const IDENTITY: Self = Self {
+        rot_lon: 0.0,
+        rot_lat: 0.0,
+    };
+}
+
+/// Rotate a 3-vector about the x axis (screen-horizontal) by `angle` radians. Non-canon display math.
+fn rot_x(p: [f32; 3], angle: f32) -> [f32; 3] {
+    let (s, c) = angle.sin_cos();
+    [p[0], c * p[1] - s * p[2], s * p[1] + c * p[2]]
+}
+
+/// Rotate a 3-vector about the y axis (the polar / up axis) by `angle` radians. Non-canon display math.
+fn rot_y(p: [f32; 3], angle: f32) -> [f32; 3] {
+    let (s, c) = angle.sin_cos();
+    [c * p[0] + s * p[2], p[1], -s * p[0] + c * p[2]]
+}
+
+/// Carry a view-space point (x right, y up, z toward the viewer) on the unit sphere into the globe's BODY frame,
+/// undoing the orientation: `B = R_y(-rot_lon) * R_x(-rot_lat) * P`. So a screen pixel maps to the surface point the
+/// current orientation has rotated under it. At [`GlobeOrientation::IDENTITY`] this is the identity (both rotations
+/// are by 0, so the body point equals the view point exactly). Non-canon display math.
+fn view_to_body(p: [f32; 3], o: GlobeOrientation) -> [f32; 3] {
+    rot_y(rot_x(p, -o.rot_lat), -o.rot_lon)
+}
+
+/// Carry a globe BODY-frame point into view space under the orientation: `P = R_x(rot_lat) * R_y(rot_lon) * B`, the
+/// forward of [`view_to_body`]. Used to project a surface (u, v) back onto the screen for the highlight outline. Non-canon.
+fn body_to_view(b: [f32; 3], o: GlobeOrientation) -> [f32; 3] {
+    rot_x(rot_y(b, o.rot_lon), o.rot_lat)
+}
+
+/// The surface coordinate (u, v) of a BODY-frame point: longitude about the polar (y) axis mapped to `u` in [0, 1)
+/// (wrapping the meridian) and latitude to `v` in [0, 1], matching [`draw_globe`]'s sphere map so the pick and the
+/// paint agree. Non-canon display math.
+fn body_to_uv(b: [f32; 3]) -> (f32, f32) {
+    use std::f32::consts::PI;
+    let lat = b[1].clamp(-1.0, 1.0).asin(); // -pi/2..pi/2
+    let lon = b[0].atan2(b[2]); // -pi..pi
+    let u = ((lon + PI) / (2.0 * PI)).rem_euclid(1.0);
+    let v = (0.5 - lat / PI).clamp(0.0, 1.0);
+    (u, v)
+}
+
+/// The BODY-frame unit point of a surface coordinate (u, v), the inverse of [`body_to_uv`]. Used to project a tile's
+/// (u, v) corners forward onto the screen for the highlight box. Non-canon display math.
+fn uv_to_body(u: f32, v: f32) -> [f32; 3] {
+    use std::f32::consts::PI;
+    let lon = u * 2.0 * PI - PI;
+    let lat = (0.5 - v) * PI;
+    [lat.cos() * lon.sin(), lat.sin(), lat.cos() * lon.cos()]
+}
+
+/// The display styling of the drawn sphere's surface: the DERIVED material tint (the crust's perceived colour under the
+/// star, or `None` for the relief swatch) and an optional lat/lon TILE GRID `(cols, rows)` drawn onto the sphere as thin
+/// seams, so the surface reads as an array of tiles the observer can drill into. Both are observability-non-canon
+/// display choices (Principle 10); `default()` is no tint and no grid (the plain planet view).
+#[derive(Clone, Copy, Default)]
+pub struct SurfaceStyle {
+    /// The DERIVED material colour to paint the surface (scaled per tile by relief shading), or `None` for the swatch.
+    pub tint: Option<Rgb>,
+    /// The display tile grid `(cols, rows)` to overlay as seams, or `None` for a smooth (un-gridded) sphere.
+    pub grid: Option<(usize, usize)>,
 }
 
 /// Draw the planet as a lit sphere: a filled disk of on-screen radius `radius_px` centred at `(cx, cy)`, its
-/// surface textured from the DERIVED tiles (an orthographic sphere map of the relief field) and shaded by a Lambert
-/// diffuse term against the star direction `star_dir`. The sunlit hemisphere is bright and tinted by `light_tint`
-/// (the star's [`blackbody_rgb`]); the night side falls to a faint neutral ambient; the cosine falloff between them
-/// is the soft day/night terminator. Pixels outside the disk are left untouched (the caller paints space and, in a
-/// later slice, the atmosphere limb). A pure, deterministic read of the derived radius, tiles, and star direction,
-/// one-way canon -> pixels, so it writes no canonical state (Principle 10).
+/// surface textured from the DERIVED tiles (an orthographic sphere map of the relief field, sampled at the surface
+/// coordinate the globe `orient`ation has rotated under each pixel) and shaded by a Lambert diffuse term against the
+/// star direction `star_dir`. The sunlit hemisphere is bright and tinted by `light_tint` (the star's
+/// [`blackbody_rgb`]); the night side falls to a faint neutral ambient; the cosine falloff between them is the soft
+/// day/night terminator. The lighting rotates WITH `orient` (camera-orbit semantics), so panning sweeps the terminator
+/// across the surface and the lit part visibly changes as the globe turns, even on a uniform crust. `style.tint`, if
+/// given, is the crust's DERIVED perceived colour under the star ([`material_surface_rgb`]): each tile takes that colour
+/// scaled by its relief shading, so the sphere wears the derived material colour rather than the relief swatch.
+/// `style.grid`, if given, overlays a lat/lon tile grid as thin darkened seams, so the surface reads as an array of
+/// tiles (the caller refines the grid with zoom so a tile opens into finer tiles). Pixels outside the disk are left
+/// untouched (the caller paints space and the atmosphere limb). A pure, deterministic read of the derived radius,
+/// tiles, star direction, style, and orientation, one-way canon -> pixels (Principle 10).
 #[allow(clippy::too_many_arguments)]
 pub fn draw_globe(
     buf: &mut [u32],
@@ -1023,13 +1120,18 @@ pub fn draw_globe(
     tile_cols: usize,
     star_dir: [f32; 3],
     light_tint: Rgb,
+    style: SurfaceStyle,
+    orient: GlobeOrientation,
 ) {
-    use std::f32::consts::PI;
     if radius_px == 0 || w == 0 || h == 0 {
         return;
     }
     let r = radius_px as f32;
-    let l = normalize3(star_dir);
+    // The star direction rotates WITH the orientation (camera-orbit semantics): as the pan spins the globe, the
+    // day/night terminator sweeps across the surface, so panning visibly changes which part faces the star even on a
+    // uniform crust. At GlobeOrientation::IDENTITY this reduces to `star_dir` exactly (rotation by 0), so the headless
+    // and living-world globes render unchanged.
+    let l = normalize3(body_to_view(star_dir, orient));
     let tint = [
         light_tint.r as f32 / 255.0,
         light_tint.g as f32 / 255.0,
@@ -1051,23 +1153,59 @@ pub fn draw_globe(
                 continue; // outside the disk
             }
             let nz = (1.0 - d2).sqrt(); // the front-hemisphere normal, toward the viewer
-                                        // Orthographic sphere map. Screen y points down, so world up is -ny; longitude wraps the meridian.
-            let lat = (-ny).clamp(-1.0, 1.0).asin(); // -pi/2..pi/2
-            let lon = nx.atan2(nz); // -pi..pi
-            let u = (lon + PI) / (2.0 * PI);
-            let v = (0.5 - lat / PI).clamp(0.0, 1.0);
-            let base = sample_derived_surface(tiles, tile_cols, u, v);
+                                        // Orthographic sphere map, rotated by the globe orientation so panning brings
+                                        // the far side into view. Screen y points down, so world up is -ny. At
+                                        // GlobeOrientation::IDENTITY this reduces to the straight-on map exactly.
+            let (u, v) = body_to_uv(view_to_body([nx, -ny, nz], orient));
+            // The surface base colour: when `surface_tint` is given (the derived crust's perceived colour under the
+            // star, from `material_surface_rgb`), each tile is that colour scaled by its relief shading, so the sphere
+            // wears the DERIVED material colour; otherwise the relief swatch ([`derived_tile_color`]). A uniform crust
+            // reads a single shade (the honest look until lateral composition variation lands, a geodynamics
+            // follow-on); an empty field falls back to the tint or a deep-ocean stand-in.
+            let base = match sample_derived_relief(tiles, tile_cols, u, v) {
+                Some(relief) => match style.tint {
+                    Some(m) => {
+                        let s = relief_shade(relief);
+                        let scale = |c: u8| (c as f32 * s).clamp(0.0, 255.0) as u8;
+                        Rgb::new(scale(m.r), scale(m.g), scale(m.b))
+                    }
+                    None => derived_tile_color(relief),
+                },
+                None => style.tint.unwrap_or(Rgb::new(40, 72, 120)),
+            };
             // Lambert diffuse: dot of the surface normal with the star direction, clamped at the terminator.
             let lambert = (nx * l[0] + ny * l[1] + nz * l[2]).max(0.0);
             let shade = |c: u8, t: f32| -> u8 {
                 let day = AMBIENT + (1.0 - AMBIENT) * lambert * t;
                 (c as f32 * day).clamp(0.0, 255.0) as u8
             };
-            let color = Rgb::new(
+            let mut color = Rgb::new(
                 shade(base.r, tint[0]),
                 shade(base.g, tint[1]),
                 shade(base.b, tint[2]),
             );
+            // The display TILE GRID: darken pixels that fall on a lat/lon cell boundary into a thin seam, so the
+            // surface reads as an array of tiles. The seam half-width is set in cell-fraction units to render roughly
+            // one pixel wide near the disk centre (it thickens toward the limb, where the sphere foreshortens); the
+            // grid density is the caller's, refined with zoom so a tile opens into a finer array. Display-only.
+            if let Some((gc, gr)) = style.grid {
+                if gc > 0 && gr > 0 {
+                    let gu = u * gc as f32;
+                    let gv = v * gr as f32;
+                    let du = (gu - gu.round()).abs();
+                    let dv = (gv - gv.round()).abs();
+                    let half_u = (gc as f32 / (2.0 * r) * 0.6).min(0.25);
+                    let half_v = (gr as f32 / (2.0 * r) * 0.6).min(0.25);
+                    if du < half_u || dv < half_v {
+                        // Darken toward a seam; visible on the lit side (the night side is already dark).
+                        color = Rgb::new(
+                            (color.r as f32 * 0.45) as u8,
+                            (color.g as f32 * 0.45) as u8,
+                            (color.b as f32 * 0.5) as u8,
+                        );
+                    }
+                }
+            }
             buf[py as usize * w + px as usize] = color.pack();
         }
     }
@@ -1187,8 +1325,10 @@ fn draw_atmosphere_limb(
 /// dark, a soft terminator between. This is the seeable-world payoff entry point: hand it the derived radius, the
 /// star's derived `T_eff`, the derived tiles, and the star's projected position, and it draws the star-lit planet.
 /// The atmosphere limb is tinted by `sky`, the DERIVED Rayleigh sky colour ([`rayleigh_sky_rgb`]) when the gas
-/// mix resolves, or [`PLACEHOLDER_SKY`] as the fail-soft fallback. A pure, deterministic read of the derived
-/// planet and star (Principle 10); it writes no canonical state.
+/// mix resolves, or [`PLACEHOLDER_SKY`] as the fail-soft fallback. The globe texture is sampled at the `orient`ation
+/// (pass [`GlobeOrientation::IDENTITY`] for the straight-on view), and `style` carries the surface display options (the
+/// DERIVED material tint and the optional drill-in tile grid; [`SurfaceStyle::default`] for the plain planet view). A
+/// pure, deterministic read of the derived planet and star (Principle 10); it writes no canonical state.
 #[allow(clippy::too_many_arguments)]
 pub fn render_solar_system_view(
     radius_m: Fixed,
@@ -1202,6 +1342,8 @@ pub fn render_solar_system_view(
     star_radius_px: usize,
     bg: Rgb,
     sky: Rgb,
+    style: SurfaceStyle,
+    orient: GlobeOrientation,
 ) -> Vec<u32> {
     let mut buf = vec![bg.pack(); w.max(1) * h.max(1)];
     if w == 0 || h == 0 {
@@ -1242,6 +1384,8 @@ pub fn render_solar_system_view(
         tile_cols,
         star_dir,
         star_color,
+        style,
+        orient,
     );
     // The atmosphere haze around the limb, tinted by the caller's `sky` colour: the DERIVED Rayleigh sky from the
     // gas mix ([`rayleigh_sky_rgb`]) when it resolves, or [`PLACEHOLDER_SKY`] as the fail-soft fallback.
@@ -1256,6 +1400,121 @@ pub fn render_solar_system_view(
         sky,
     );
     buf
+}
+
+/// The derived-surface tile (column, row) under a screen pixel, inverting the orthographic sphere map and the globe
+/// orientation: the pixel offset from the globe centre `(cx, cy)` normalized by the on-screen `radius_px` gives the
+/// front-hemisphere view point (`z = sqrt(1 - x^2 - y^2)`), the inverse rotation ([`view_to_body`]) carries it to the
+/// body frame, and its (u, v) selects the tile the same way [`sample_derived_surface`] does (a `cols` by `rows`
+/// field). `None` if the pixel is off the sphere's disk (fail-soft: the caller draws no highlight). A pure inverse of
+/// the sphere map, display-only (Principle 10).
+#[allow(clippy::too_many_arguments)]
+pub fn pick_surface_tile(
+    px: i32,
+    py: i32,
+    cx: i32,
+    cy: i32,
+    radius_px: usize,
+    orient: GlobeOrientation,
+    cols: usize,
+    rows: usize,
+) -> Option<(usize, usize)> {
+    if radius_px == 0 || cols == 0 || rows == 0 {
+        return None;
+    }
+    let r = radius_px as f32;
+    let nx = (px - cx) as f32 / r;
+    let ny = (py - cy) as f32 / r;
+    let d2 = nx * nx + ny * ny;
+    if d2 > 1.0 {
+        return None; // off the disk
+    }
+    let nz = (1.0 - d2).sqrt();
+    let (u, v) = body_to_uv(view_to_body([nx, -ny, nz], orient));
+    let cu = ((u.clamp(0.0, 0.999_9) * cols as f32) as usize).min(cols - 1);
+    let cv = ((v.clamp(0.0, 0.999_9) * rows as f32) as usize).min(rows - 1);
+    Some((cu, cv))
+}
+
+/// Draw a highlight outline around the derived-surface tile `(cu, cv)` of a `cols` by `rows` field: project the four
+/// corners of the tile's (u, v) cell forward onto the sphere ([`uv_to_body`] then [`body_to_view`]) at the given
+/// orientation and connect them, so the marked tile curves with the globe and stays put as it rotates. A corner on
+/// the far hemisphere (view z < 0) drops its segments (fail-soft), so a tile at the limb shows a partial outline
+/// rather than a line flung across the frame. Display-only, one-way canon -> pixels (Principle 10).
+#[allow(clippy::too_many_arguments)]
+pub fn draw_surface_highlight(
+    buf: &mut [u32],
+    w: usize,
+    h: usize,
+    cx: i32,
+    cy: i32,
+    radius_px: usize,
+    orient: GlobeOrientation,
+    cols: usize,
+    rows: usize,
+    cu: usize,
+    cv: usize,
+    color: Rgb,
+) {
+    if radius_px == 0 || cols == 0 || rows == 0 || w == 0 || h == 0 {
+        return;
+    }
+    let r = radius_px as f32;
+    let u0 = cu as f32 / cols as f32;
+    let u1 = (cu + 1) as f32 / cols as f32;
+    let v0 = cv as f32 / rows as f32;
+    let v1 = (cv + 1) as f32 / rows as f32;
+    let corners = [(u0, v0), (u1, v0), (u1, v1), (u0, v1)];
+    // Forward-project each corner; a back-facing corner (view z < 0) yields None so its segments are skipped.
+    let project = |u: f32, v: f32| -> Option<(i32, i32)> {
+        let pv = body_to_view(uv_to_body(u, v), orient);
+        if pv[2] < 0.0 {
+            return None; // far hemisphere
+        }
+        let sx = cx + (pv[0] * r).round() as i32;
+        let sy = cy - (pv[1] * r).round() as i32; // screen y points down, world up is +view.y
+        Some((sx, sy))
+    };
+    let pts: [Option<(i32, i32)>; 4] = [
+        project(corners[0].0, corners[0].1),
+        project(corners[1].0, corners[1].1),
+        project(corners[2].0, corners[2].1),
+        project(corners[3].0, corners[3].1),
+    ];
+    let c = color.pack();
+    for i in 0..4 {
+        if let (Some(a), Some(b)) = (pts[i], pts[(i + 1) % 4]) {
+            draw_line(buf, w, h, a.0, a.1, b.0, b.1, c);
+        }
+    }
+}
+
+/// Draw a 1-pixel line (Bresenham) clipped to the buffer, for the surface highlight outline. Presentation only.
+#[allow(clippy::too_many_arguments)]
+fn draw_line(buf: &mut [u32], w: usize, h: usize, x0: i32, y0: i32, x1: i32, y1: i32, color: u32) {
+    let dx = (x1 - x0).abs();
+    let dy = -(y1 - y0).abs();
+    let sx = if x0 < x1 { 1 } else { -1 };
+    let sy = if y0 < y1 { 1 } else { -1 };
+    let mut err = dx + dy;
+    let (mut x, mut y) = (x0, y0);
+    loop {
+        if x >= 0 && y >= 0 && (x as usize) < w && (y as usize) < h {
+            buf[y as usize * w + x as usize] = color;
+        }
+        if x == x1 && y == y1 {
+            break;
+        }
+        let e2 = 2 * err;
+        if e2 >= dy {
+            err += dy;
+            x += sx;
+        }
+        if e2 <= dx {
+            err += dx;
+            y += sy;
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1445,6 +1704,8 @@ mod tests {
             cols,
             [1.0, 0.0, 0.0],
             Rgb::new(255, 255, 255),
+            SurfaceStyle::default(),
+            GlobeOrientation::IDENTITY,
         );
         assert!(buf.iter().any(|&p| p != bg.pack()), "the globe is drawn");
         let right = half_luminance(&buf, w, cx, cy, radius as i32, true);
@@ -1465,6 +1726,8 @@ mod tests {
             cols,
             [1.0, 0.0, 0.0],
             Rgb::new(255, 255, 255),
+            SurfaceStyle::default(),
+            GlobeOrientation::IDENTITY,
         );
         assert_eq!(buf, replay, "a pure read replays byte for byte");
     }
@@ -1499,6 +1762,8 @@ mod tests {
             10,
             bg,
             PLACEHOLDER_SKY,
+            SurfaceStyle::default(),
+            GlobeOrientation::IDENTITY,
         );
         assert_eq!(frame.len(), w * h, "one word per pixel");
         // The star disk carries the derived blackbody colour at its core.
@@ -1530,6 +1795,8 @@ mod tests {
             10,
             bg,
             PLACEHOLDER_SKY,
+            SurfaceStyle::default(),
+            GlobeOrientation::IDENTITY,
         );
         assert_eq!(frame, replay, "a pure read replays byte for byte");
 
@@ -1562,6 +1829,8 @@ mod tests {
                 10,
                 bg,
                 PLACEHOLDER_SKY,
+                SurfaceStyle::default(),
+                GlobeOrientation::IDENTITY,
             );
             let mut sr = 0f64;
             let mut sb = 0f64;
@@ -1971,5 +2240,300 @@ mod tests {
             upland.luminance(),
             lowland.luminance()
         );
+    }
+
+    #[test]
+    fn surface_pick_inverts_the_sphere_map_and_fails_soft_off_the_disk() {
+        let (cx, cy, r) = (100i32, 100i32, 60usize);
+        let (cols, rows) = (6usize, 6usize);
+        let o = GlobeOrientation::IDENTITY;
+        // A pixel well outside the disk yields no tile (fail-soft: the caller then draws no highlight).
+        assert_eq!(
+            pick_surface_tile(cx + 200, cy, cx, cy, r, o, cols, rows),
+            None,
+            "off the disk, no pick"
+        );
+        // The globe centre maps to the middle of the surface (u ~ 0.5, v ~ 0.5): the centre column and row.
+        let (cu, cv) =
+            pick_surface_tile(cx, cy, cx, cy, r, o, cols, rows).expect("the centre is on the disk");
+        assert_eq!(cu, cols / 2, "the centre pixel samples the middle meridian");
+        assert_eq!(cv, rows / 2, "the centre pixel samples the equator row");
+        // Deterministic pure inverse.
+        assert_eq!(
+            pick_surface_tile(cx, cy, cx, cy, r, o, cols, rows),
+            pick_surface_tile(cx, cy, cx, cy, r, o, cols, rows),
+            "a pure inverse replays"
+        );
+    }
+
+    #[test]
+    fn a_latitude_rotation_brings_the_far_surface_to_the_centre() {
+        // Rotating in latitude pans toward the pole, so the centre pixel samples a higher-latitude row: the far side
+        // of the sphere is reachable by rotation (the pan the derived viewer needs).
+        let (cx, cy, r) = (100i32, 100i32, 60usize);
+        let (cols, rows) = (6usize, 6usize);
+        let straight =
+            pick_surface_tile(cx, cy, cx, cy, r, GlobeOrientation::IDENTITY, cols, rows).unwrap();
+        let tilted = pick_surface_tile(
+            cx,
+            cy,
+            cx,
+            cy,
+            r,
+            GlobeOrientation {
+                rot_lon: 0.0,
+                rot_lat: 1.2,
+            },
+            cols,
+            rows,
+        )
+        .unwrap();
+        assert_ne!(
+            straight.1, tilted.1,
+            "a latitude tilt samples a different row at the centre"
+        );
+        assert!(
+            tilted.1 < straight.1,
+            "tilting toward the north pole samples a lower row index (higher latitude): {} vs {}",
+            tilted.1,
+            straight.1
+        );
+    }
+
+    #[test]
+    fn the_surface_highlight_draws_a_bounded_outline_and_replays() {
+        let (w, h) = (200usize, 200usize);
+        let (cx, cy, r) = (100i32, 100i32, 60usize);
+        let (cols, rows) = (6usize, 6usize);
+        let o = GlobeOrientation::IDENTITY;
+        let bg = Rgb::new(6, 7, 12);
+        let hi = Rgb::new(255, 240, 90);
+        let mut buf = vec![bg.pack(); w * h];
+        // Highlight the centre tile: an outline appears, and the far corner is untouched (the box sits on the tile).
+        draw_surface_highlight(
+            &mut buf,
+            w,
+            h,
+            cx,
+            cy,
+            r,
+            o,
+            cols,
+            rows,
+            cols / 2,
+            rows / 2,
+            hi,
+        );
+        assert!(
+            buf.iter().any(|&p| p == hi.pack()),
+            "the highlight outline is drawn"
+        );
+        assert_eq!(
+            buf[5 * w + 5],
+            bg.pack(),
+            "the highlight stays on the tile, not the far corner"
+        );
+        // Deterministic pure read.
+        let mut replay = vec![bg.pack(); w * h];
+        draw_surface_highlight(
+            &mut replay,
+            w,
+            h,
+            cx,
+            cy,
+            r,
+            o,
+            cols,
+            rows,
+            cols / 2,
+            rows / 2,
+            hi,
+        );
+        assert_eq!(buf, replay, "a pure read replays byte for byte");
+    }
+
+    #[test]
+    fn the_globe_texture_responds_to_orientation() {
+        // Panning must rotate the surface: the same globe drawn at IDENTITY and at a small latitude tilt differs, so a
+        // pan brings the far side of the sphere into view. (The IDENTITY path itself reduces to the pre-rotation map,
+        // which the unchanged `the_globe_is_a_lit_sphere_sized_from_the_derived_radius` render test still pins.)
+        let (w, h) = (160usize, 120usize);
+        let bg = Rgb::new(8, 9, 14);
+        let (tiles, cols) = demo_globe_tiles();
+        let (cx, cy, radius) = (80i32, 60i32, 48usize);
+        let mut a = vec![bg.pack(); w * h];
+        draw_globe(
+            &mut a,
+            w,
+            h,
+            cx,
+            cy,
+            radius,
+            &tiles,
+            cols,
+            [0.3, -0.2, 0.9],
+            Rgb::new(255, 250, 240),
+            SurfaceStyle::default(),
+            GlobeOrientation::IDENTITY,
+        );
+        // A tiny rotation moves at least one pixel: the texture responds to the orientation.
+        let mut b = vec![bg.pack(); w * h];
+        draw_globe(
+            &mut b,
+            w,
+            h,
+            cx,
+            cy,
+            radius,
+            &tiles,
+            cols,
+            [0.3, -0.2, 0.9],
+            Rgb::new(255, 250, 240),
+            SurfaceStyle::default(),
+            GlobeOrientation {
+                rot_lon: 0.0,
+                rot_lat: 0.8,
+            },
+        );
+        assert_ne!(a, b, "a latitude tilt changes the drawn surface");
+    }
+
+    #[test]
+    fn panning_sweeps_the_terminator_and_the_tint_colours_a_uniform_sphere() {
+        // A UNIFORM crust: every tile the same relief, so texture rotation alone is invisible. The frame must still
+        // change when the globe is panned, which proves the lighting rotates with the orientation (the terminator
+        // sweeps across the surface, the owner's "the light changes as I pan"). And the derived material tint must
+        // reach the surface: a red-tinted sphere reads redder on the lit side than a blue-tinted one.
+        let (w, h) = (160usize, 120usize);
+        let bg = Rgb::new(8, 9, 14);
+        let cols = 8usize;
+        let uniform: Vec<DerivedTile> = (0..cols * 8)
+            .map(|_| DerivedTile {
+                elevation: Fixed::from_int(1),
+                relief: TerrainRelief::Lowland,
+            })
+            .collect();
+        let (cx, cy, radius) = (80i32, 60i32, 48usize);
+        let star = [1.0f32, 0.0, 0.3];
+        let white = Rgb::new(255, 255, 255);
+        let mut straight = vec![bg.pack(); w * h];
+        draw_globe(
+            &mut straight,
+            w,
+            h,
+            cx,
+            cy,
+            radius,
+            &uniform,
+            cols,
+            star,
+            white,
+            SurfaceStyle::default(),
+            GlobeOrientation::IDENTITY,
+        );
+        let mut panned = vec![bg.pack(); w * h];
+        draw_globe(
+            &mut panned,
+            w,
+            h,
+            cx,
+            cy,
+            radius,
+            &uniform,
+            cols,
+            star,
+            white,
+            SurfaceStyle::default(),
+            GlobeOrientation {
+                rot_lon: 1.2,
+                rot_lat: 0.0,
+            },
+        );
+        assert_ne!(
+            straight, panned,
+            "panning a uniform sphere still changes the frame (the terminator sweeps)"
+        );
+
+        // The material tint reaches the surface: a red tint reads redder on the lit (+x) side than a blue tint.
+        let lit_red = |tint: Rgb| -> u64 {
+            let mut buf = vec![bg.pack(); w * h];
+            draw_globe(
+                &mut buf,
+                w,
+                h,
+                cx,
+                cy,
+                radius,
+                &uniform,
+                cols,
+                star,
+                white,
+                SurfaceStyle {
+                    tint: Some(tint),
+                    grid: None,
+                },
+                GlobeOrientation::IDENTITY,
+            );
+            let mut sum = 0u64;
+            for py in (cy - radius as i32).max(0)..=(cy + radius as i32) {
+                for px in cx..=(cx + radius as i32) {
+                    let dx = px - cx;
+                    let dy = py - cy;
+                    if dx * dx + dy * dy > (radius as i32).pow(2) {
+                        continue;
+                    }
+                    sum += ((buf[py as usize * w + px as usize] >> 16) & 0xff) as u64;
+                }
+            }
+            sum
+        };
+        assert!(
+            lit_red(Rgb::new(230, 40, 40)) > lit_red(Rgb::new(40, 40, 230)),
+            "the derived material tint colours the sphere (a red tint reads redder than a blue tint)"
+        );
+    }
+
+    #[test]
+    fn the_surface_grid_overlays_seams_and_subdivides_with_density() {
+        // The display tile grid overlays visible seams on the sphere, and a finer grid subdivides into more seams:
+        // each tile opens into a finer array as the caller refines the grid with zoom (the owner's drill-in).
+        let (w, h) = (200usize, 200usize);
+        let bg = Rgb::new(8, 9, 14);
+        let (tiles, cols) = demo_globe_tiles();
+        let (cx, cy, radius) = (100i32, 100i32, 80usize);
+        let star = [0.4f32, -0.2, 0.9];
+        let white = Rgb::new(255, 255, 255);
+        let tint = Some(Rgb::new(200, 210, 205));
+        let draw = |grid: Option<(usize, usize)>| -> Vec<u32> {
+            let mut buf = vec![bg.pack(); w * h];
+            draw_globe(
+                &mut buf,
+                w,
+                h,
+                cx,
+                cy,
+                radius,
+                &tiles,
+                cols,
+                star,
+                white,
+                SurfaceStyle { tint, grid },
+                GlobeOrientation::IDENTITY,
+            );
+            buf
+        };
+        let plain = draw(None);
+        let coarse = draw(Some((8, 6)));
+        let fine = draw(Some((16, 12)));
+        let seam_count = |g: &[u32]| g.iter().zip(plain.iter()).filter(|(a, b)| a != b).count();
+        let coarse_seams = seam_count(&coarse);
+        let fine_seams = seam_count(&fine);
+        assert!(coarse_seams > 0, "the grid overlays visible seams");
+        assert!(
+            fine_seams > coarse_seams,
+            "a finer grid subdivides into more seams (each tile opens into a finer array): {fine_seams} vs {coarse_seams}"
+        );
+        // A None grid leaves the sphere ungridded (the plain planet), and the read replays deterministically.
+        assert_eq!(coarse, draw(Some((8, 6))), "a pure read replays");
     }
 }
