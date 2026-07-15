@@ -123,6 +123,7 @@ pub mod runner;
 pub mod scenario;
 pub mod semantics;
 pub mod sensorium;
+pub mod stellar;
 pub mod stocks;
 pub mod substrate;
 pub mod surface_drivers;
