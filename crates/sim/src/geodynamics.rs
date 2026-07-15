@@ -385,6 +385,52 @@ pub fn derive_mantle_density(
     )
 }
 
+/// The CONVECTING-MANTLE DEPTH (metres): the silicate mantle shell thickness `R_planet - R_core`, DERIVED from the
+/// planet's own structure, never an authored layer thickness. The core is a sphere of the sinking metal-and-sulfide
+/// fraction the differentiation set; from `core_mass / planet_mass = (R_core/R_planet)^3 * (rho_core/rho_mean)` the
+/// core radius is `R_core = R_planet * cbrt(core_mass_fraction * rho_mean / rho_core)`, so the shell the interior
+/// convection evolves over is `R_planet * (1 - cbrt(core_fraction * rho_mean / rho_core))`. Every input is a
+/// capstone derivation: the radius from accretion, and the core mass fraction, the mean density, and the metal-core
+/// density from the differentiation and the bulk-density derivation. `None` on a non-physical input (a non-positive
+/// radius or density, a core fraction outside `[0, 1]`, or a core no denser than the mean, which could not have
+/// sunk) or a degenerate result (a core volume filling the whole planet leaves no mantle), fail-loud, never a
+/// fabricated depth. This is the derivation that retires the authored convecting-layer-depth fixture: the mantle
+/// thickness the convection reads is what the planet's own structure IS. (The convection kernel's `depth` is a
+/// representable-SCALED length, so the run-path wiring scales this SI metres value into the kernel's units; the
+/// physical derivation is here, the scale conversion is the units plan's job.)
+pub fn convecting_mantle_depth_m(
+    planet_radius_m: Fixed,
+    core_mass_fraction: Fixed,
+    mean_density: Fixed,
+    core_density: Fixed,
+) -> Option<Fixed> {
+    if planet_radius_m <= Fixed::ZERO
+        || mean_density <= Fixed::ZERO
+        || core_density <= Fixed::ZERO
+        || core_mass_fraction < Fixed::ZERO
+        || core_mass_fraction > Fixed::ONE
+        || core_density <= mean_density
+    {
+        // A core no denser than the whole-planet mean could not have sunk to a core (differentiation needs the
+        // metal denser than the silicate mean): not a differentiated planet, no distinct mantle shell.
+        return None;
+    }
+    // The core VOLUME fraction, core_mass_fraction * (rho_mean / rho_core). A core no denser than the mean could
+    // not be a sunk metal core, so the fraction must land in (0, 1); at the bounds there is no distinct mantle.
+    let volume_fraction = core_mass_fraction
+        .checked_mul(mean_density)?
+        .checked_div(core_density)?;
+    if volume_fraction <= Fixed::ZERO || volume_fraction >= Fixed::ONE {
+        return None;
+    }
+    let core_radius = planet_radius_m.checked_mul(volume_fraction.cbrt())?;
+    let depth = planet_radius_m.checked_sub(core_radius)?;
+    if depth <= Fixed::ZERO {
+        return None;
+    }
+    Some(depth)
+}
+
 /// The surface elevation a crust of a given COMPOSITION floats at, the composition-to-terrain wire the generated
 /// world reads (the R1 override the owner ruled: a tile's terrain DERIVES from the substrate, never fractal
 /// noise). It composes the two geology pieces already in the tree: the petrology-derived crustal density of the
@@ -1013,5 +1059,63 @@ mod tests {
         assert!(has(TerrainRelief::Submarine), "the dense band is submarine");
         // A degenerate request still yields a valid (non-empty) field.
         assert!(slice0_demo_field(1, 1).is_some());
+    }
+
+    #[test]
+    fn the_convecting_mantle_depth_derives_from_the_planet_structure() {
+        // An Earth-grade planet (radius 6371 km, ~32.5% core mass, mean density 5.51, metal-core density ~13)
+        // derives a silicate mantle shell of the right grade (~2500 to 3200 km), R_planet - R_core, from the core
+        // the differentiation set. Not an authored layer thickness: the mantle depth IS the planet's structure.
+        let depth = convecting_mantle_depth_m(
+            Fixed::from_int(6_371_000),
+            Fixed::from_ratio(325, 1000),
+            Fixed::from_ratio(551, 100),
+            Fixed::from_int(13),
+        )
+        .expect("an Earth-grade planet has a derived mantle shell");
+        let km = depth.to_f64_lossy() / 1000.0;
+        assert!(
+            (2500.0..=3200.0).contains(&km),
+            "the derived mantle shell is Earth-grade, got {km} km"
+        );
+        // A larger core mass fraction sinks a bigger core and thins the mantle shell, monotonically.
+        let bigger_core = convecting_mantle_depth_m(
+            Fixed::from_int(6_371_000),
+            Fixed::from_ratio(500, 1000),
+            Fixed::from_ratio(551, 100),
+            Fixed::from_int(13),
+        )
+        .expect("resolves");
+        assert!(
+            bigger_core < depth,
+            "a larger core mass fraction thins the mantle shell"
+        );
+    }
+
+    #[test]
+    fn a_non_physical_planet_has_no_derived_mantle_depth() {
+        // A core no denser than the mean could not have sunk to a core, so no distinct mantle shell (fail-loud).
+        assert!(convecting_mantle_depth_m(
+            Fixed::from_int(6_371_000),
+            Fixed::from_ratio(325, 1000),
+            Fixed::from_int(6),
+            Fixed::from_int(5),
+        )
+        .is_none());
+        // A non-positive radius and an out-of-range core fraction fail loud.
+        assert!(convecting_mantle_depth_m(
+            Fixed::ZERO,
+            Fixed::from_ratio(3, 10),
+            Fixed::from_int(5),
+            Fixed::from_int(10)
+        )
+        .is_none());
+        assert!(convecting_mantle_depth_m(
+            Fixed::from_int(6_371_000),
+            Fixed::from_int(2),
+            Fixed::from_int(5),
+            Fixed::from_int(10)
+        )
+        .is_none());
     }
 }
