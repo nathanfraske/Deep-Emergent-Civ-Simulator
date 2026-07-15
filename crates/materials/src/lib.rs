@@ -45,6 +45,7 @@
 //! register, keeping the honesty query where the register lives.
 
 pub mod assemblage;
+pub mod atmosphere;
 pub mod band_gap;
 pub mod contract;
 pub mod correlation;
