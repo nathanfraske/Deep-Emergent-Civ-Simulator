@@ -55,3 +55,6 @@
 ::from_decimal_str(	crates/physics/src/phonon.rs	1	deserialization	a register fundamental parsed to BigRat (fundamental_bigrat), reads the floor
 ::from_decimal_str(	crates/physics/src/polarizability.rs	1	deserialization	a register fundamental (Hartree-energy ingredients) parsed to BigRat, reads the floor
 ::from_decimal_str(	crates/physics/src/covalent_radii.rs	2	deserialization	register fundamentals e and N_A parsed to BigRat for the Faraday eV conversion (kj_per_mol_per_ev), reads the floor
+::from_decimal_str(	crates/sim/src/stellar.rs	2	deserialization	the cited reference anchors SOLAR_LUMINOSITY_W and SOLAR_RADIUS_M parsed to BigRat for the wide surface-flux path, reads the anchor never authors
+::from_decimal_str(	crates/physics/src/janaf.rs	1	deserialization	the cited [M] JANAF table values (Chase 1998) parsed to Fixed through BigRat, reads the measured table never authors
+::from_decimal_str(	crates/physics/src/condensation.rs	1	deserialization	the cited [M] Lodders 2003 Table 8 condensation temperatures parsed to Fixed through BigRat, reads the measured table never authors

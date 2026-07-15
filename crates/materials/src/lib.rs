@@ -51,6 +51,7 @@ pub mod correlation;
 pub mod creep;
 pub mod definition;
 pub mod electronic;
+pub mod equilibrium_condensation;
 pub mod freezer;
 pub mod grain_opacity;
 pub mod harrison;
