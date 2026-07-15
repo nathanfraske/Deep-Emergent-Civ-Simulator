@@ -669,6 +669,110 @@ pub fn draw_globe(
     }
 }
 
+/// Draw the star: a solid disk of `color` (its [`blackbody_rgb`]) with a soft radial glow fading to the background
+/// over about three radii, so the star's on-screen colour reads as its temperature. Display-only.
+fn draw_star(buf: &mut [u32], w: usize, h: usize, sx: i32, sy: i32, radius_px: usize, color: Rgb) {
+    if radius_px == 0 || w == 0 || h == 0 {
+        return;
+    }
+    let core = radius_px as i32;
+    let glow = core * 3;
+    let cr = color.r as f32;
+    let cg = color.g as f32;
+    let cb = color.b as f32;
+    let x0 = (sx - glow).max(0);
+    let x1 = (sx + glow).min(w as i32 - 1);
+    let y0 = (sy - glow).max(0);
+    let y1 = (sy + glow).min(h as i32 - 1);
+    for py in y0..=y1 {
+        for px in x0..=x1 {
+            let dx = (px - sx) as f32;
+            let dy = (py - sy) as f32;
+            let dist = (dx * dx + dy * dy).sqrt();
+            let idx = py as usize * w + px as usize;
+            if dist <= core as f32 {
+                buf[idx] = color.pack();
+            } else if dist <= glow as f32 {
+                // The glow falls off quadratically from the core edge and blends over whatever is already there.
+                let t = 1.0 - (dist - core as f32) / (glow - core).max(1) as f32;
+                let a = (t * t).clamp(0.0, 1.0) * 0.8;
+                let word = buf[idx];
+                let er = (word >> 16) as u8 as f32;
+                let eg = (word >> 8) as u8 as f32;
+                let eb = word as u8 as f32;
+                let mix = |e: f32, c: f32| -> u8 { (e + (c - e) * a).clamp(0.0, 255.0) as u8 };
+                buf[idx] = Rgb::new(mix(er, cr), mix(eg, cg), mix(eb, cb)).pack();
+            }
+        }
+    }
+}
+
+/// Compose the zoomed-out solar-system / planet-object view: a `w` by `h` frame of the star and the lit planet
+/// globe over space. The star draws as a [`blackbody_rgb`]-coloured disk at `star_px` (its on-screen position, the
+/// caller's projection of the orbit, so the orbital phase sets which hemisphere is day). The planet sits at the view
+/// centre, its on-screen size the DERIVED radius at this scale ([`globe_radius_px`]), lit from the star direction
+/// with the sunlight tinted by the star's colour ([`draw_globe`]): the star-facing hemisphere bright, the far side
+/// dark, a soft terminator between. This is the seeable-world payoff entry point: hand it the derived radius, the
+/// star's derived `T_eff`, the derived tiles, and the star's projected position, and it draws the star-lit planet.
+/// A pure, deterministic read of the derived planet and star (Principle 10); it writes no canonical state.
+// Wired into the viewer's zoom path in the zoom-connection slice; the tests exercise it now.
+#[allow(dead_code)]
+#[allow(clippy::too_many_arguments)]
+pub fn render_solar_system_view(
+    radius_m: Fixed,
+    t_eff_k: Fixed,
+    tiles: &[DerivedTile],
+    tile_cols: usize,
+    w: usize,
+    h: usize,
+    m_per_px: Fixed,
+    star_px: (i32, i32),
+    star_radius_px: usize,
+    bg: Rgb,
+) -> Vec<u32> {
+    let mut buf = vec![bg.pack(); w.max(1) * h.max(1)];
+    if w == 0 || h == 0 {
+        return buf;
+    }
+    let star_color = blackbody_rgb(t_eff_k);
+    let planet_cx = (w / 2) as i32;
+    let planet_cy = (h / 2) as i32;
+    let planet_radius_px = globe_radius_px(radius_m, m_per_px);
+    // The star direction is the on-screen vector from the planet to the star, lifted out of the screen plane so the
+    // lit hemisphere tilts toward the viewer (a readable terminator rather than an edge-on sliver). The in-plane
+    // part carries the orbit's projected direction; the fixed z-lift is a display framing, not physics.
+    let dx = (star_px.0 - planet_cx) as f32;
+    let dy = (star_px.1 - planet_cy) as f32;
+    let plane = (dx * dx + dy * dy).sqrt();
+    let star_dir = if plane <= 0.0 {
+        [0.0, 0.0, 1.0]
+    } else {
+        [0.72 * dx / plane, 0.72 * dy / plane, 0.70]
+    };
+    draw_star(
+        &mut buf,
+        w,
+        h,
+        star_px.0,
+        star_px.1,
+        star_radius_px,
+        star_color,
+    );
+    draw_globe(
+        &mut buf,
+        w,
+        h,
+        planet_cx,
+        planet_cy,
+        planet_radius_px,
+        tiles,
+        tile_cols,
+        star_dir,
+        star_color,
+    );
+    buf
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -878,6 +982,92 @@ mod tests {
             Rgb::new(255, 255, 255),
         );
         assert_eq!(buf, replay, "a pure read replays byte for byte");
+    }
+
+    #[test]
+    fn the_solar_view_lights_the_globe_from_the_star_and_tints_by_temperature() {
+        use civsim_sim::astro;
+        let (w, h) = (240usize, 180usize);
+        let bg = Rgb::new(6, 7, 12);
+        let (tiles, cols) = demo_globe_tiles();
+        let radius_m = astro::planet_radius_m(Fixed::ONE, Fixed::from_ratio(5514, 1000))
+            .expect("earth radius");
+        // A view scale that draws Earth's globe at a legible size, the star off to the left of the planet.
+        let m_per_px = Fixed::from_int(80_000);
+        let sun_t = astro::stellar_effective_temperature(
+            Fixed::ONE,
+            Fixed::from_ratio(35, 10),
+            Fixed::from_ratio(8, 10),
+            Fixed::from_int(50_000),
+        )
+        .expect("sun T_eff");
+        let star_px = (24i32, 40i32); // upper-left of the centred planet
+        let frame = render_solar_system_view(
+            radius_m, sun_t, &tiles, cols, w, h, m_per_px, star_px, 10, bg,
+        );
+        assert_eq!(frame.len(), w * h, "one word per pixel");
+        // The star disk carries the derived blackbody colour at its core.
+        let star_core = frame[star_px.1 as usize * w + star_px.0 as usize];
+        assert_eq!(
+            star_core,
+            blackbody_rgb(sun_t).pack(),
+            "the star reads its blackbody colour"
+        );
+        // The day side faces the star: with the star upper-left, the globe's LEFT hemisphere is brighter.
+        let (pcx, pcy) = ((w / 2) as i32, (h / 2) as i32);
+        let pr = globe_radius_px(radius_m, m_per_px) as i32;
+        let left = half_luminance(&frame, w, pcx, pcy, pr, false);
+        let right = half_luminance(&frame, w, pcx, pcy, pr, true);
+        assert!(
+            left > right * 1.3,
+            "the star-facing (left) hemisphere is the day side (left {left:.1} vs right {right:.1})"
+        );
+        // Deterministic pure read.
+        let replay = render_solar_system_view(
+            radius_m, sun_t, &tiles, cols, w, h, m_per_px, star_px, 10, bg,
+        );
+        assert_eq!(frame, replay, "a pure read replays byte for byte");
+
+        // The star's blackbody colour tints the sunlight: a cool ~3200 K star warms the day side (a higher
+        // red-to-blue ratio) versus a hot ~9000 K star, at the same geometry.
+        let cool = astro::stellar_effective_temperature(
+            Fixed::from_ratio(6, 10),
+            Fixed::from_ratio(35, 10),
+            Fixed::from_ratio(8, 10),
+            Fixed::from_int(50_000),
+        )
+        .expect("cool T_eff");
+        let hot = astro::stellar_effective_temperature(
+            Fixed::from_int(3),
+            Fixed::from_ratio(35, 10),
+            Fixed::from_ratio(8, 10),
+            Fixed::from_int(50_000),
+        )
+        .expect("hot T_eff");
+        let day_ratio = |t_eff: Fixed| -> f64 {
+            let f = render_solar_system_view(
+                radius_m, t_eff, &tiles, cols, w, h, m_per_px, star_px, 10, bg,
+            );
+            let mut sr = 0f64;
+            let mut sb = 0f64;
+            for py in (pcy - pr).max(0)..=(pcy + pr) {
+                for px in (pcx - pr).max(0)..=(pcx + pr) {
+                    let dx = px - pcx;
+                    let dy = py - pcy;
+                    if dx * dx + dy * dy > pr * pr || dx > 0 {
+                        continue; // the lit (left) hemisphere
+                    }
+                    let word = f[py as usize * w + px as usize];
+                    sr += (word >> 16) as u8 as f64;
+                    sb += (word & 0xff) as f64;
+                }
+            }
+            (sr + 1.0) / (sb + 1.0)
+        };
+        assert!(
+            day_ratio(cool) > day_ratio(hot),
+            "a cool star warms the day side more than a hot star"
+        );
     }
 
     #[test]
