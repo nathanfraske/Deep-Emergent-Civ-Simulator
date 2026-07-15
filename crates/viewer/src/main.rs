@@ -1047,6 +1047,7 @@ fn build_derived_scene(star_mass: Fixed, orbit_au: Fixed) -> Result<DerivedScene
         planet.disk_temperature_k,
         &gaps,
         &crystal,
+        &table,
     )
     .unwrap_or_else(|| render::derived_tile_color(TerrainRelief::Lowland));
 

@@ -115,7 +115,7 @@ pub use nucleation::{
 };
 pub use optics::{
     broadened_step_response, falls_in_observer_window, feature_response_at,
-    lifetime_broadening_width_ev, lorentzian_response, optical_energies,
+    lifetime_broadening_width_ev, lorentzian_response, marcus_hush_width_ev, optical_energies,
     thermal_broadening_width_ev, OpticalEnergy, OpticalFeature,
 };
 pub use properties::{

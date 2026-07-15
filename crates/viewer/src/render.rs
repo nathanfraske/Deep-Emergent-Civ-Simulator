@@ -25,7 +25,8 @@
 use civsim_core::{splitmix64, Fixed};
 use civsim_materials::band_gap::conduction_class_from_column;
 use civsim_materials::optics::{
-    feature_response_at, optical_energies, thermal_broadening_width_ev,
+    feature_response_at, marcus_hush_width_ev, optical_energies, thermal_broadening_width_ev,
+    OpticalFeature,
 };
 use civsim_physics::band_gap::BandGapColumn;
 use civsim_physics::crystal_field::{cm_to_ev, CrystalFieldTables};
@@ -662,6 +663,19 @@ pub fn superfine(
 /// 532 nm ~ 2.33 eV, 465 nm ~ 2.67 eV).
 const MATERIAL_BANDS_NM: [f64; 3] = [630.0, 532.0, 465.0];
 
+/// The class-grade intensity weight of an ALLOWED charge-transfer band relative to the unit-weight sharp features
+/// (the forbidden d-d line and the band-gap / plasma edges), applied in this non-canon projection only. It stands in
+/// for the per-feature oscillator STRENGTH the optics substrate does not yet carry: a symmetry-allowed charge-transfer
+/// transition is orders of magnitude more intense than a Laporte-forbidden d-d line (the Laporte rule), so its huge
+/// absorption coefficient renders a mineral opaque even where its broad Lorentzian / step tail is only a few percent
+/// of the peak. Without it a ferric oxide reads light (the tail alone tops out near forty percent absorption in the
+/// visible); with it a ferric oxide reads dark-red and a mixed-valence oxide near-black. RESERVED, surfaced with its
+/// basis to `docs/working/MORNING_REVIEW.md` (the allowed-to-forbidden oscillator-strength ratio, class-grade, bounded
+/// below where a ferric oxide would stay light and above where hematite would over-darken to black); byte-neutral (a
+/// non-canon presentation weight, like `MATERIAL_BANDS_NM` and the relief palette, with ZERO effect on canon). The
+/// canon fix is a per-feature oscillator-strength column, the named follow-on. NOT authored in the canon.
+const CHARGE_TRANSFER_INTENSITY_WEIGHT: f64 = 3.0;
+
 /// The photon-energy constant `h c` in `eV * nm` (`~1239.8`), DERIVED from the fundamentals register (`h`, `c`, `e`),
 /// never authored: the photon energy at wavelength `lambda` in nm is `E[eV] = hc_ev_nm / lambda`. Parsed to `f64`
 /// because this is a non-canon display value that needs no fixed-point rigour past per-run determinism. `None` on a
@@ -683,39 +697,67 @@ fn hc_ev_nm() -> Option<f64> {
 }
 
 /// Reduce a composition's `(element, amount)` pairs to integer `(element, count)` pairs for the substance lookups (the
-/// band-gap column and the crystal-field oxide table key on integer stoichiometry). The amounts scale to the smallest
-/// positive amount before rounding, so an integer stoichiometry passes through unchanged (SiO2 `{Si:1, O:2}` stays
-/// `{Si:1, O:2}`) while a fractional, solar-abundance-scaled crust still reduces to a non-empty integer ratio rather
-/// than rounding every trace amount to zero. A mixed, non-stoichiometric crust reduces to counts that match no seeded
-/// phase, so it resolves to no optical feature (a pale, featureless read), the honest outcome for a fresh silicate
-/// crust: its constituent phases have no absorption in the human visible window.
+/// band-gap column, the crystal-field oxide table, and the iron oxidation-state derivation key on integer
+/// stoichiometry). When every positive amount is already a whole number the ratio is reduced by its greatest common
+/// divisor, so an EXACT stoichiometry survives intact and distinct (`Fe3O4` stays `{Fe:3, O:4}` rather than rounding
+/// to `{Fe:1, O:1}`, which is what the ferric-versus-mixed-versus-ferrous distinction turns on; `SiO2` stays
+/// `{Si:1, O:2}`). A fractional, solar-abundance-scaled crust instead scales to the smallest positive amount and
+/// rounds, so it still reduces to a non-empty integer ratio rather than rounding every trace amount to zero; a mixed,
+/// non-stoichiometric crust reduces to counts that match no seeded phase and resolves to no optical feature (a pale,
+/// featureless read), the honest outcome for a fresh silicate crust.
 fn composition_counts(composition: &[(String, Fixed)]) -> Vec<(String, u32)> {
-    let min_positive = composition
+    let positives: Vec<(&String, Fixed)> = composition
+        .iter()
+        .filter(|(_, a)| *a > Fixed::ZERO)
+        .map(|(el, a)| (el, *a))
+        .collect();
+    if positives.is_empty() {
+        return Vec::new();
+    }
+    // The exact-integer path: reduce by the greatest common divisor so a whole-number stoichiometry is preserved.
+    let all_integer = positives
+        .iter()
+        .all(|(_, a)| Fixed::from_int(a.to_int()) == *a);
+    if all_integer {
+        let mut g: u64 = 0;
+        for (_, a) in &positives {
+            g = gcd_u64(g, a.to_int() as u64);
+        }
+        let g = g.max(1);
+        return positives
+            .iter()
+            .filter_map(|(el, a)| {
+                let n = (a.to_int() as u64) / g;
+                (n > 0).then(|| ((*el).clone(), n as u32))
+            })
+            .collect();
+    }
+    // The fractional path: scale to the smallest positive amount and round to the nearest integer ratio.
+    let scale = positives
         .iter()
         .map(|(_, a)| *a)
-        .filter(|a| *a > Fixed::ZERO)
-        .min();
-    let Some(scale) = min_positive else {
-        return Vec::new();
-    };
-    composition
+        .min()
+        .unwrap_or(Fixed::ONE);
+    positives
         .iter()
         .filter_map(|(el, amount)| {
-            if *amount <= Fixed::ZERO {
-                return None;
-            }
             let ratio = amount.checked_div(scale)?;
             let n = ratio
                 .checked_add(Fixed::from_ratio(1, 2))
                 .map(|v| v.to_int())
                 .unwrap_or(0);
-            if n > 0 {
-                Some((el.clone(), n as u32))
-            } else {
-                None
-            }
+            (n > 0).then(|| ((*el).clone(), n as u32))
         })
         .collect()
+}
+
+/// The greatest common divisor (Euclid), the stoichiometry reducer for [`composition_counts`].
+fn gcd_u64(a: u64, b: u64) -> u64 {
+    if b == 0 {
+        a
+    } else {
+        gcd_u64(b, a % b)
+    }
 }
 
 /// The observability-non-canon perceived colour of a material under a star's light, DERIVED from the material's own
@@ -750,33 +792,51 @@ fn composition_counts(composition: &[(String, Fixed)]) -> Vec<(String, u32)> {
 /// VALIDITY CEILING: this is FACTOR-GRADE and QUALITATIVE (dark versus light, warm versus cool), not a calibrated
 /// reflectance. A substance whose absorption onset lies within or below the visible window reads dark; a wide-gap or
 /// feature-free substance reads light; and the reflected colour warms under a cooler star. It carries NO Fresnel
-/// surface reflectance (so a small-gap absorber reads pure-dark rather than dark-grey), NO charge-transfer bands, and
-/// only the LEADING crystal-field d-d line at `Delta_o` (the higher visible-range multiplets are a named optics
-/// follow-on). So a first-row transition-metal oxide whose leading `Delta_o` sits in the near-infrared (FeO
-/// `~0.93 eV`) is NOT darkened in the visible by this substrate: the darkening that reddens hematite and blackens
-/// basalt (charge transfer, Fe-Ti-oxide opacity, higher d-d multiplets) is a named substrate gap, surfaced here, not
-/// papered over. `f64` throughout, mirroring [`rayleigh_sky_rgb`] and [`blackbody_rgb`]. `None` when the composition
-/// reduces to nothing or the illuminant does not resolve (fail-soft: the caller keeps the relief swatch).
+/// surface reflectance (so a small-gap absorber reads pure-dark rather than dark-grey), and only the LEADING
+/// crystal-field d-d line at `Delta_o` (the higher visible-range multiplets are a named optics follow-on). Seam 2
+/// adds the iron charge-transfer darkening: a FERRIC oxide (`Fe3+`, hematite) carries the intense `O2- -> Fe3+`
+/// charge-transfer edge whose broad tail reddens and darkens it, and a MIXED-valence oxide (magnetite) adds the
+/// `Fe2+ -> Fe3+` intervalence band and reads near-black; keyed on the DERIVED iron oxidation state, so a FERROUS
+/// oxide (`FeO`, whose only feature is the near-infrared `~0.93 eV` d-d line) correctly stays light, the honest
+/// per-valence outcome. The remaining class-grade limit is the oscillator STRENGTH: the substrate carries the band
+/// energy and its broad width but not a per-feature oscillator strength, so the charge-transfer intensity that makes
+/// the tail opaque in the visible is a class-grade weight applied HERE ([`CHARGE_TRANSFER_INTENSITY_WEIGHT`], the
+/// non-canon projection), never in the canon. `f64` throughout, mirroring [`rayleigh_sky_rgb`] and [`blackbody_rgb`].
+/// `None` when the composition reduces to nothing or the illuminant does not resolve (fail-soft: the caller keeps the
+/// relief swatch).
 pub fn material_surface_rgb(
     composition: &[(String, Fixed)],
     star_t_eff_k: Fixed,
     temperature_k: Fixed,
     gaps: &BandGapColumn,
     crystal: &CrystalFieldTables,
+    table: &PeriodicTable,
 ) -> Option<Rgb> {
     let counts = composition_counts(composition);
     if counts.is_empty() {
         return None;
     }
     // The material's own electronic classification and observer-independent optical characteristic energies: the
-    // interband onset from the banked gap column, the d-d ligand-field line from the crystal-field oxide table. No
+    // interband onset from the banked gap column, the d-d ligand-field line from the crystal-field oxide table, and
+    // the iron charge-transfer / intervalence bands whose presence keys on the composition's DERIVED iron oxidation
+    // state (a ferric phase carries the charge-transfer edge, a mixed-valence phase adds the intervalence band). No
     // plasma edge (no derivable carrier density here, so no fabricated feature). Keyed on the substance's own data.
     let class = conduction_class_from_column(gaps, &counts, temperature_k);
     let band_gap_ev = gaps.gap(&counts).map(|bg| bg.gap_ev);
     let dd_transition_ev = crystal.oxide_delta_cm(&counts).and_then(cm_to_ev);
-    let features = optical_energies(&class, band_gap_ev, None, dd_transition_ev);
-    // The grounded broadening width (thermal ~ k_B T), never an authored linewidth.
-    let width = thermal_broadening_width_ev(temperature_k);
+    let (charge_transfer_ev, intervalence_ev) =
+        crystal.iron_charge_transfer_energies(&counts, table);
+    let features = optical_energies(
+        &class,
+        band_gap_ev,
+        None,
+        dd_transition_ev,
+        charge_transfer_ev,
+        intervalence_ev,
+    );
+    // The grounded broadening widths (thermal ~ k_B T for the sharp features, the broad Marcus-Hush vibronic width for
+    // an allowed charge-transfer band), never an authored linewidth.
+    let thermal = thermal_broadening_width_ev(temperature_k);
     let c2_m_k = second_radiation_constant_m_k()?;
     let hc = hc_ev_nm()?;
     let t_eff = star_t_eff_k.to_f64_lossy();
@@ -787,11 +847,21 @@ pub fn material_surface_rgb(
         // The probe energy back into fixed-point (micro-eV resolution) for the observer-independent feature response.
         let probe_ev = Fixed::from_ratio((probe_ev_f * 1.0e6).round() as i64, 1_000_000);
         // Absorption at this band: the summed feature response of the material's optical energies, capped at full
-        // absorption. Reflectance is its complement (a feature reaching the band darkens it).
+        // absorption. Reflectance is its complement (a feature reaching the band darkens it). Each feature carries its
+        // own grounded width and a class-grade intensity: the forbidden d-d line and the sharp edges take the near-
+        // thermal width at unit weight; the ALLOWED charge-transfer and intervalence bands take the broad Marcus-Hush
+        // vibronic width and the high oscillator-strength weight, so their intense tails flood the visible.
         let mut absorption = 0.0f64;
         for feature in &features {
-            if let Some(r) = feature_response_at(probe_ev, feature, width) {
-                absorption += r.to_f64_lossy();
+            let (feature_width, weight) = match feature.feature {
+                OpticalFeature::ChargeTransferBand | OpticalFeature::IntervalenceBand => (
+                    marcus_hush_width_ev(feature.energy_ev, temperature_k),
+                    CHARGE_TRANSFER_INTENSITY_WEIGHT,
+                ),
+                _ => (thermal, 1.0),
+            };
+            if let Some(r) = feature_response_at(probe_ev, feature, feature_width) {
+                absorption += weight * r.to_f64_lossy();
             }
         }
         let reflectance = (1.0 - absorption).clamp(0.0, 1.0);
@@ -2121,12 +2191,20 @@ mod tests {
         // absorption spectrum, deterministic and replaying.
         let gaps = BandGapColumn::standard().expect("the gap column loads");
         let crystal = CrystalFieldTables::standard().expect("the crystal-field table loads");
+        let table = PeriodicTable::standard().expect("the periodic table loads");
         let sun = Fixed::from_int(5772);
         let t = Fixed::from_int(300);
-        let si = material_surface_rgb(&mat_comp(&[("Si", 1)]), sun, t, &gaps, &crystal)
+        let si = material_surface_rgb(&mat_comp(&[("Si", 1)]), sun, t, &gaps, &crystal, &table)
             .expect("silicon resolves");
-        let mgo = material_surface_rgb(&mat_comp(&[("Mg", 1), ("O", 1)]), sun, t, &gaps, &crystal)
-            .expect("MgO resolves");
+        let mgo = material_surface_rgb(
+            &mat_comp(&[("Mg", 1), ("O", 1)]),
+            sun,
+            t,
+            &gaps,
+            &crystal,
+            &table,
+        )
+        .expect("MgO resolves");
         assert!(
             si.luminance() < mgo.luminance(),
             "the small-gap absorber (Si) is darker than the wide-gap solid (MgO): {} vs {}",
@@ -2138,7 +2216,7 @@ mod tests {
         // A pure read replays byte for byte.
         assert_eq!(
             si,
-            material_surface_rgb(&mat_comp(&[("Si", 1)]), sun, t, &gaps, &crystal).unwrap()
+            material_surface_rgb(&mat_comp(&[("Si", 1)]), sun, t, &gaps, &crystal, &table).unwrap()
         );
     }
 
@@ -2150,11 +2228,18 @@ mod tests {
         // colourless insulator, whose intrinsic band structure gives it no visible-window absorption.
         let gaps = BandGapColumn::standard().expect("the gap column loads");
         let crystal = CrystalFieldTables::standard().expect("the crystal-field table loads");
+        let table = PeriodicTable::standard().expect("the periodic table loads");
         let sun = Fixed::from_int(5772);
         let t = Fixed::from_int(300);
-        let quartz =
-            material_surface_rgb(&mat_comp(&[("Si", 1), ("O", 2)]), sun, t, &gaps, &crystal)
-                .expect("quartz resolves");
+        let quartz = material_surface_rgb(
+            &mat_comp(&[("Si", 1), ("O", 2)]),
+            sun,
+            t,
+            &gaps,
+            &crystal,
+            &table,
+        )
+        .expect("quartz resolves");
         assert!(
             quartz.luminance() > 180,
             "quartz reads light, got {quartz:?}"
@@ -2168,11 +2253,12 @@ mod tests {
         // the illuminant. A featureless silicate (quartz) reflects the star's own colour, the cleanest witness.
         let gaps = BandGapColumn::standard().expect("the gap column loads");
         let crystal = CrystalFieldTables::standard().expect("the crystal-field table loads");
+        let table = PeriodicTable::standard().expect("the periodic table loads");
         let t = Fixed::from_int(300);
         let quartz = mat_comp(&[("Si", 1), ("O", 2)]);
-        let cool = material_surface_rgb(&quartz, Fixed::from_int(3000), t, &gaps, &crystal)
+        let cool = material_surface_rgb(&quartz, Fixed::from_int(3000), t, &gaps, &crystal, &table)
             .expect("cool-star quartz");
-        let hot = material_surface_rgb(&quartz, Fixed::from_int(9000), t, &gaps, &crystal)
+        let hot = material_surface_rgb(&quartz, Fixed::from_int(9000), t, &gaps, &crystal, &table)
             .expect("hot-star quartz");
         let warmth = |c: Rgb| (c.r as f64 + 1.0) / (c.b as f64 + 1.0);
         assert!(
@@ -2184,25 +2270,62 @@ mod tests {
     }
 
     #[test]
-    fn an_iron_oxide_is_not_yet_darkened_in_the_visible_a_named_substrate_limit() {
-        // THE NAMED SUBSTRATE LIMIT, surfaced not papered over (Prime Directive 7): a first-row transition-metal oxide
-        // reads LIGHT here, not dark, because the ONLY optical feature the substrate banks for it is the leading
-        // ligand-field d-d line at Delta_o, and for FeO that is ~0.93 eV (7500 cm^-1), in the NEAR-INFRARED below the
-        // visible window, so its narrow thermally-broadened line barely reaches the red band. The darkening that
-        // blackens basalt and reddens hematite (O -> Fe charge transfer, Fe-Ti-oxide small-gap opacity, the higher
-        // d-d multiplets that fall in the visible) is a named optics follow-on, not in this substrate. This test
-        // pins the honest current behaviour so the gap is not mistaken for a bug: FeO reads about as light as quartz.
+    fn the_iron_oxidation_state_sets_the_crust_colour_ferric_dark_red_mixed_near_black_ferrous_light(
+    ) {
+        // SEAM 2, the iron dark-crust optics, keyed on the DERIVED iron oxidation state (the phase is the state):
+        //  - HEMATITE (Fe2O3, Fe3+): the intense O2- -> Fe3+ charge-transfer edge (3.1 eV) whose broad Marcus-Hush
+        //    tail floods the visible reddens and darkens it (blue absorbed more than red).
+        //  - MAGNETITE (Fe3O4, mixed Fe2+/Fe3+): that edge PLUS the Fe2+ -> Fe3+ intervalence band (0.6 eV) absorbs
+        //    across the visible and reads near-black, darker than hematite.
+        //  - WUSTITE (FeO, Fe2+/ferrous): NO charge-transfer band, only the near-IR d-d line (~0.93 eV) below the
+        //    visible, so it correctly stays LIGHT (the honest per-valence outcome, the old LAW-3 exhibit preserved:
+        //    the ferrous limit is pinned with a test, never tuned away).
+        //  - ENSTATITE (MgSiO3, iron-free): no iron chromophore at all, stays LIGHT.
+        // The colour is a one-way projection of the DERIVED absorption spectrum; the canon authors none of it.
         let gaps = BandGapColumn::standard().expect("the gap column loads");
         let crystal = CrystalFieldTables::standard().expect("the crystal-field table loads");
+        let table = PeriodicTable::standard().expect("the periodic table loads");
         let sun = Fixed::from_int(5772);
         let t = Fixed::from_int(300);
-        let feo = material_surface_rgb(&mat_comp(&[("Fe", 1), ("O", 1)]), sun, t, &gaps, &crystal)
-            .expect("FeO resolves");
+        let surf = |c: &[(&str, i64)]| {
+            material_surface_rgb(&mat_comp(c), sun, t, &gaps, &crystal, &table)
+                .expect("the material resolves")
+        };
+        let hematite = surf(&[("Fe", 2), ("O", 3)]);
+        let magnetite = surf(&[("Fe", 3), ("O", 4)]);
+        let wustite = surf(&[("Fe", 1), ("O", 1)]);
+        let enstatite = surf(&[("Mg", 1), ("Si", 1), ("O", 3)]);
+        // Hematite reads dark and red-dominant (blue absorbed more than red by the charge-transfer tail).
         assert!(
-            feo.luminance() > 180,
-            "FeO reads light (the leading d-d line is in the near-IR; the visible-darkening bands are a named \
-             follow-on), got {feo:?}"
+            hematite.luminance() < 80,
+            "hematite (ferric) reads dark, got {hematite:?}"
         );
+        assert!(
+            hematite.r > hematite.b,
+            "hematite reddens (red reflected over blue), got {hematite:?}"
+        );
+        // Magnetite reads near-black, darker than hematite (the added intervalence band).
+        assert!(
+            magnetite.luminance() < hematite.luminance(),
+            "magnetite (mixed valence) is darker than hematite: {} vs {}",
+            magnetite.luminance(),
+            hematite.luminance()
+        );
+        assert!(
+            magnetite.luminance() < 40,
+            "magnetite reads near-black, got {magnetite:?}"
+        );
+        // Ferrous wustite and iron-free enstatite stay light (no charge-transfer band).
+        assert!(
+            wustite.luminance() > 180,
+            "wustite (ferrous) stays light: only the near-IR d-d line, no charge-transfer band, got {wustite:?}"
+        );
+        assert!(
+            enstatite.luminance() > 180,
+            "iron-free enstatite stays light, got {enstatite:?}"
+        );
+        // A pure read replays byte for byte (deterministic projection).
+        assert_eq!(hematite, surf(&[("Fe", 2), ("O", 3)]));
     }
 
     #[test]

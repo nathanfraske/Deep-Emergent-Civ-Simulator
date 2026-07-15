@@ -14,12 +14,18 @@
 
 //! Stage 6, the optics sub-arc (`docs/working/STAGE6_ELECTRONIC_STRUCTURE_DESIGN.md` section 13, gate-ruled): the
 //! OBSERVER-INDEPENDENT optical characteristic energies of a substance, dispatched on the banked electronic
-//! classification. A substance's optical response emerges from its electronic structure through three routes, keyed
+//! classification. A substance's optical response emerges from its electronic structure through several routes, keyed
 //! on the classification already built (never an authored appearance table):
 //! - INTERBAND ONSET (a non-metal): absorption turns on at the band gap `E_gap`, transparent below and absorbing
 //!   above.
 //! - PLASMA EDGE (a metal): the Drude reflection edge at `hbar * omega_p`, reflecting below and transmitting above.
-//! - D-D LINE (a Localized d-block cation): a ligand-field absorption line at the crystal-field splitting `Delta_o`.
+//! - D-D LINE (a Localized d-block cation): a ligand-field absorption line at the crystal-field splitting `Delta_o`,
+//!   Laporte-forbidden and so weak and narrow.
+//! - CHARGE-TRANSFER EDGE (an oxidized-metal phase, `O2- -> Fe3+` the worked case): a ligand-to-metal charge-transfer
+//!   band whose onset is the derived optical-electronegativity energy; symmetry-ALLOWED, so intense and broad, its
+//!   low-energy tail flooding the visible to redden and darken a ferric oxide.
+//! - INTERVALENCE BAND (a mixed-valence phase, `Fe2+ -> Fe3+` in magnetite the worked case): a metal-to-metal charge-
+//!   transfer band in the visible / near-infrared, broad and allowed, blackening the phase.
 //!
 //! PRINCIPLE 10, THE RULED SEAM. This substrate produces the OBSERVER-INDEPENDENT physical quantity (the
 //! characteristic optical energies, and the reflection/absorption spectrum they define), never a colour. A perceived
@@ -52,15 +58,21 @@
 //! HONEST LIMITS. The metal route emits the plasma edge; the d-band interband transition that reddens copper and
 //! gold (a `d`-band-to-Fermi-level onset, distinct from a gap) is a named follow-on within the metal route. The d-d
 //! line is sited at `Delta_o` (the leading ligand-field transition); the full Tanabe-Sugano multiplet structure over
-//! `Delta_o` and the Racah parameters is a follow-on. Byte-neutral: `civsim-materials` is a leaf.
+//! `Delta_o` and the Racah parameters is a follow-on. The charge-transfer and intervalence routes carry the derived
+//! band ENERGY and a broad Marcus-Hush vibronic WIDTH ([`marcus_hush_width_ev`]), both fabrication-free; the relative
+//! oscillator STRENGTH (an allowed charge-transfer band is orders of magnitude more intense than a forbidden d-d line,
+//! the Laporte rule) is NOT yet carried per feature (every feature response peaks at one here), so the intensity that
+//! makes the charge-transfer tail opaque in the visible is a class-grade weight the observer projection supplies
+//! downstream, and a per-feature oscillator-strength column is the named canon follow-on. Byte-neutral:
+//! `civsim-materials` is a leaf.
 
 use civsim_core::Fixed;
 
 use crate::band_gap::ConductionClass;
 
 /// The physical origin of an optical characteristic energy (observer-independent). The feature says WHAT the energy
-/// is (an absorption onset, a reflection edge, a discrete line), so a downstream observer projection can weight it
-/// correctly without the substrate committing to a colour.
+/// is (an absorption onset, a reflection edge, a discrete line, a charge-transfer band), so a downstream observer
+/// projection can weight it correctly without the substrate committing to a colour.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OpticalFeature {
     /// The interband absorption onset at the band gap: transparent below, absorbing above (a non-metal). A step in
@@ -69,8 +81,21 @@ pub enum OpticalFeature {
     /// The Drude / plasma reflection edge at `hbar * omega_p`: reflecting below, transmitting above (a metal). A step
     /// in reflectivity.
     PlasmaEdge,
-    /// A d-d ligand-field absorption line at `Delta_o` (a Localized d-block cation). A discrete line.
+    /// A d-d ligand-field absorption line at `Delta_o` (a Localized d-block cation). A discrete line, Laporte-
+    /// forbidden and so intrinsically WEAK and narrow (its width is the near-thermal linewidth the caller supplies).
     DdLine,
+    /// A ligand-to-metal charge-transfer absorption EDGE (an LMCT band, an oxide `O2-` donating into an oxidized
+    /// metal `d`-shell, the `O2- -> Fe3+` case that reddens and darkens a ferric oxide). Its onset is the derived
+    /// charge-transfer energy (the Jorgensen optical-electronegativity route). Unlike the Laporte-forbidden `DdLine`
+    /// it is a symmetry-ALLOWED transition, so it is intense and broad: the caller supplies a broad (vibronic-scale)
+    /// width and a high oscillator-strength weight, and the band's low-energy tail floods down into the visible.
+    ChargeTransferBand,
+    /// A metal-to-metal intervalence charge-transfer absorption BAND (an IVCT band, an electron hopping between two
+    /// coexisting valences of the same metal, the `Fe2+ -> Fe3+` case that blackens a mixed-valence oxide such as
+    /// magnetite). Its centre is the derived intervalence energy (the optical-electronegativity difference of the two
+    /// valences). Allowed and broad like the charge-transfer edge, but a BAND (a peak) rather than an edge, sitting in
+    /// the visible / near-infrared, so a strong broad response absorbs across the visible and reads dark.
+    IntervalenceBand,
 }
 
 /// One observer-independent optical characteristic energy (eV) and its physical origin. NOT a colour: which of these
@@ -86,17 +111,22 @@ pub struct OpticalEnergy {
 
 /// The observer-independent optical characteristic energies of a substance, dispatched on the banked electronic
 /// classification (the gate-ruled Q3: dispatch on the existing classification, no new route key). A metal emits its
-/// plasma edge, a non-metal (including a correlated Mott insulator) its interband onset at the gap, and any substance
-/// with a resolved d-d transition (a Localized d-block cation) adds its ligand-field line. Each energy is the
-/// substance's own datum, supplied by the caller from the banked columns: `band_gap_ev` from the gap column or the
-/// Harrison estimator, `plasma_energy_ev` from [`crate::electronic::plasma_energy_ev`], `dd_transition_ev` from the
-/// crystal-field `Delta_o` (converted to eV). A `None` or non-positive input contributes no feature (the substance
-/// has no such edge). Reserves no value, authors no colour.
+/// plasma edge, a non-metal (including a correlated Mott insulator) its interband onset at the gap, any substance
+/// with a resolved d-d transition (a Localized d-block cation) adds its ligand-field line, an oxidized-metal phase
+/// adds its ligand-to-metal charge-transfer edge, and a mixed-valence phase adds its metal-to-metal intervalence
+/// band. Each energy is the substance's own datum, supplied by the caller from the banked columns: `band_gap_ev` from
+/// the gap column or the Harrison estimator, `plasma_energy_ev` from [`crate::electronic::plasma_energy_ev`],
+/// `dd_transition_ev` from the crystal-field `Delta_o` (converted to eV), and `charge_transfer_ev` /
+/// `intervalence_ev` from the crystal-field optical-electronegativity route (present only when the composition's iron
+/// oxidation state, read from its phase, carries an oxidized or mixed-valence cation). A `None` or non-positive input
+/// contributes no feature (the substance has no such edge). Reserves no value, authors no colour.
 pub fn optical_energies(
     class: &ConductionClass,
     band_gap_ev: Option<Fixed>,
     plasma_energy_ev: Option<Fixed>,
     dd_transition_ev: Option<Fixed>,
+    charge_transfer_ev: Option<Fixed>,
+    intervalence_ev: Option<Fixed>,
 ) -> Vec<OpticalEnergy> {
     let mut out = Vec::new();
     match class {
@@ -130,6 +160,25 @@ pub fn optical_energies(
             out.push(OpticalEnergy {
                 feature: OpticalFeature::DdLine,
                 energy_ev: d,
+            });
+        }
+    }
+    // The ligand-to-metal charge-transfer edge, present when the phase carries an oxidized cation (the caller derives
+    // its onset from the optical-electronegativity route and passes `None` when there is no ferric-like centre).
+    if let Some(ct) = charge_transfer_ev {
+        if ct > Fixed::ZERO {
+            out.push(OpticalEnergy {
+                feature: OpticalFeature::ChargeTransferBand,
+                energy_ev: ct,
+            });
+        }
+    }
+    // The metal-to-metal intervalence band, present only for a mixed-valence phase (two coexisting cation valences).
+    if let Some(iv) = intervalence_ev {
+        if iv > Fixed::ZERO {
+            out.push(OpticalEnergy {
+                feature: OpticalFeature::IntervalenceBand,
+                energy_ev: iv,
             });
         }
     }
@@ -248,11 +297,48 @@ pub fn feature_response_at(
     width_ev: Fixed,
 ) -> Option<Fixed> {
     match feature.feature {
-        OpticalFeature::DdLine => lorentzian_response(probe_ev, feature.energy_ev, width_ev),
-        OpticalFeature::InterbandOnset | OpticalFeature::PlasmaEdge => {
+        // A discrete line (`DdLine`) and a peaked band (`IntervalenceBand`) are Lorentzians centred at their energy;
+        // the two differ in the width the caller supplies (near-thermal for the forbidden d-d line, the broad
+        // vibronic width for the allowed intervalence band).
+        OpticalFeature::DdLine | OpticalFeature::IntervalenceBand => {
+            lorentzian_response(probe_ev, feature.energy_ev, width_ev)
+        }
+        // An edge (`InterbandOnset`, `PlasmaEdge`, the `ChargeTransferBand` onset) is a broadened step at its energy;
+        // the charge-transfer edge's broad vibronic width gives it the long low-energy tail that floods the visible.
+        OpticalFeature::InterbandOnset
+        | OpticalFeature::PlasmaEdge
+        | OpticalFeature::ChargeTransferBand => {
             broadened_step_response(probe_ev, feature.energy_ev, width_ev)
         }
     }
+}
+
+/// The charge-transfer / intervalence band width (eV), the classical (high-temperature) Marcus-Hush bandwidth
+/// `FWHM = sqrt(16 * ln2 * lambda * k_B * T)`, with the reorganization energy `lambda` taken as the band's own
+/// characteristic energy (exact for a symmetric intervalence transition where `E_op = lambda`, a class-grade
+/// over-estimate for a ligand-to-metal band where `E_op = lambda + Delta_G`). This is the vibronic (electron-phonon)
+/// broadening that makes an allowed charge-transfer band broad, in contrast to the near-thermal linewidth of a
+/// forbidden d-d line: it consumes only the already-derived Boltzmann factor `k_B T` and the band energy, reserving
+/// no value (`16 * ln2` reassembles from `Fixed::ln`, never a folded decimal). Zero for a non-positive input. The
+/// grounded width the caller supplies to [`feature_response_at`] for a `ChargeTransferBand` or `IntervalenceBand`,
+/// the charge-transfer counterpart to [`thermal_broadening_width_ev`] and [`lifetime_broadening_width_ev`].
+pub fn marcus_hush_width_ev(band_energy_ev: Fixed, temperature_k: Fixed) -> Fixed {
+    if band_energy_ev <= Fixed::ZERO || temperature_k <= Fixed::ZERO {
+        return Fixed::ZERO;
+    }
+    // 16 * ln(2), reassembled from Fixed::ln rather than a folded decimal.
+    let sixteen_ln2 = match Fixed::from_int(2).ln().checked_mul(Fixed::from_int(16)) {
+        Some(v) => v,
+        None => return Fixed::ZERO,
+    };
+    let kt = kb_ev_per_k()
+        .checked_mul(temperature_k)
+        .unwrap_or(Fixed::ZERO);
+    sixteen_ln2
+        .checked_mul(kt)
+        .and_then(|v| v.checked_mul(band_energy_ev))
+        .map(|v| v.sqrt())
+        .unwrap_or(Fixed::ZERO)
 }
 
 #[cfg(test)]
@@ -272,6 +358,8 @@ mod tests {
             None,
             Some(ev(9, 1)), // hbar*omega_p ~ 9 eV (a typical metal plasma energy)
             None,
+            None,
+            None,
         );
         assert_eq!(metal.len(), 1);
         assert_eq!(metal[0].feature, OpticalFeature::PlasmaEdge);
@@ -282,6 +370,8 @@ mod tests {
                 ln_activation: None,
             },
             Some(ev(112, 100)), // Si gap 1.12 eV
+            None,
+            None,
             None,
             None,
         );
@@ -299,6 +389,8 @@ mod tests {
             Some(ev(43, 10)),
             None,
             Some(ev(11, 10)),
+            None,
+            None,
         );
         assert_eq!(features.len(), 2);
         assert!(features
@@ -313,18 +405,26 @@ mod tests {
     fn a_non_positive_or_absent_energy_contributes_no_feature() {
         // A metal with no resolved plasma energy, or an escalated substance, yields no edge feature (never a
         // fabricated zero-energy edge).
-        assert!(optical_energies(&ConductionClass::Metal, None, None, None).is_empty());
+        assert!(optical_energies(&ConductionClass::Metal, None, None, None, None, None).is_empty());
         assert!(optical_energies(
             &ConductionClass::Escalate,
             Some(ev(2, 1)),
             Some(ev(9, 1)),
+            None,
+            None,
             None
         )
         .is_empty());
         // A non-positive energy is not a feature.
-        assert!(
-            optical_energies(&ConductionClass::Metal, None, Some(Fixed::ZERO), None).is_empty()
-        );
+        assert!(optical_energies(
+            &ConductionClass::Metal,
+            None,
+            Some(Fixed::ZERO),
+            None,
+            None,
+            None
+        )
+        .is_empty());
     }
 
     #[test]
@@ -447,5 +547,128 @@ mod tests {
             0.5,
             1e-6
         ));
+    }
+
+    #[test]
+    fn a_ferric_phase_adds_a_charge_transfer_edge_and_a_mixed_valence_phase_adds_an_intervalence_band(
+    ) {
+        // The two new routes emit only from their supplied energies (the caller derives them from the phase's iron
+        // oxidation state): a ferric oxide passes a charge-transfer onset (~4 eV) and gets the edge; a mixed-valence
+        // oxide passes both the charge-transfer onset and the intervalence centre (~1 eV) and gets both. A ferrous
+        // (weak-d-d-only) phase passes neither and gets no new feature. Each energy is the substance's own datum.
+        let ferric = optical_energies(
+            &ConductionClass::CorrelatedInsulator,
+            None,
+            None,
+            None,
+            Some(ev(41, 10)), // O2- -> Fe3+ LMCT onset ~4.1 eV
+            None,
+        );
+        assert!(ferric
+            .iter()
+            .any(|f| f.feature == OpticalFeature::ChargeTransferBand && f.energy_ev == ev(41, 10)));
+        assert!(!ferric
+            .iter()
+            .any(|f| f.feature == OpticalFeature::IntervalenceBand));
+
+        let mixed = optical_energies(
+            &ConductionClass::CorrelatedInsulator,
+            None,
+            None,
+            None,
+            Some(ev(41, 10)),
+            Some(ev(11, 10)), // Fe2+ -> Fe3+ IVCT ~1.1 eV
+        );
+        assert!(mixed
+            .iter()
+            .any(|f| f.feature == OpticalFeature::ChargeTransferBand));
+        assert!(mixed
+            .iter()
+            .any(|f| f.feature == OpticalFeature::IntervalenceBand && f.energy_ev == ev(11, 10)));
+
+        // A ferrous phase (only the weak near-IR d-d line, no oxidized or mixed centre) adds neither charge-transfer
+        // feature: the honest per-phase distinction (ferrous stays light, ferric/mixed darken).
+        let ferrous = optical_energies(
+            &ConductionClass::CorrelatedInsulator,
+            None,
+            None,
+            Some(ev(93, 100)), // FeO d-d ~0.93 eV
+            None,
+            None,
+        );
+        assert!(ferrous
+            .iter()
+            .all(|f| f.feature != OpticalFeature::ChargeTransferBand
+                && f.feature != OpticalFeature::IntervalenceBand));
+    }
+
+    #[test]
+    fn the_marcus_hush_width_is_broad_and_grows_with_the_band_energy_and_temperature() {
+        // The Marcus-Hush vibronic width FWHM = sqrt(16 ln2 * lambda * kT). For a ~4 eV charge-transfer band at 300 K
+        // it is ~1.07 eV (an order of magnitude broader than the ~0.026 eV thermal linewidth of a forbidden d-d
+        // line), so its tail can flood the visible; it grows with both the band energy and the temperature. Derived
+        // from kT and the band energy, reserving no value.
+        let ct = marcus_hush_width_ev(Fixed::from_int(4), Fixed::from_int(300));
+        assert!(
+            close(ct, 1.071, 5e-3),
+            "sqrt(16 ln2 * 4 eV * kT(300)) ~ 1.07 eV, got {}",
+            ct.to_f64_lossy()
+        );
+        // Much broader than the thermal linewidth at the same temperature.
+        assert!(ct > thermal_broadening_width_ev(Fixed::from_int(300)) * Fixed::from_int(10));
+        // Grows with the band energy and with temperature.
+        assert!(
+            marcus_hush_width_ev(Fixed::from_int(4), Fixed::from_int(300))
+                > marcus_hush_width_ev(Fixed::from_int(1), Fixed::from_int(300))
+        );
+        assert!(
+            marcus_hush_width_ev(Fixed::from_int(4), Fixed::from_int(600))
+                > marcus_hush_width_ev(Fixed::from_int(4), Fixed::from_int(300))
+        );
+        assert_eq!(
+            marcus_hush_width_ev(Fixed::ZERO, Fixed::from_int(300)),
+            Fixed::ZERO
+        );
+        assert_eq!(
+            marcus_hush_width_ev(Fixed::from_int(4), Fixed::ZERO),
+            Fixed::ZERO
+        );
+    }
+
+    #[test]
+    fn a_broad_charge_transfer_edge_floods_the_visible_a_narrow_one_does_not() {
+        // THE FLOODING MECHANISM: a charge-transfer edge whose onset sits above the visible (~4.1 eV) reaches down
+        // into the visible ONLY because its Marcus-Hush width is broad. With the broad width the tail at 2.75 eV
+        // (blue) is substantial and stronger than at 1.9 eV (red), so blue is absorbed more than red (the reddening);
+        // with a narrow thermal width the same edge is essentially dark-free in the visible. This is why the intensity
+        // and breadth of the ALLOWED charge-transfer band, not a hardcoded visible wavelength, carries the darkening.
+        let ct = OpticalEnergy {
+            feature: OpticalFeature::ChargeTransferBand,
+            energy_ev: ev(41, 10), // 4.1 eV onset, above the human visible window
+        };
+        let broad = marcus_hush_width_ev(ev(41, 10), Fixed::from_int(300));
+        let blue = feature_response_at(ev(275, 100), &ct, broad)
+            .unwrap()
+            .to_f64_lossy();
+        let red = feature_response_at(ev(19, 10), &ct, broad)
+            .unwrap()
+            .to_f64_lossy();
+        assert!(
+            blue > red,
+            "the tail floods blue more than red (reddening): blue {blue} vs red {red}"
+        );
+        assert!(
+            blue > 0.05,
+            "the broad tail reaches the visible, got {blue}"
+        );
+        // The same edge with only the near-thermal width barely reaches the visible.
+        let narrow = thermal_broadening_width_ev(Fixed::from_int(300));
+        let blue_narrow = feature_response_at(ev(275, 100), &ct, narrow)
+            .unwrap()
+            .to_f64_lossy();
+        assert!(
+            blue_narrow < 1e-3,
+            "a narrow edge does not flood the visible, got {blue_narrow}"
+        );
     }
 }
