@@ -35,14 +35,23 @@ mod render;
 use minifb::{Key, KeyRepeat, MouseMode, Scale, ScaleMode, Window, WindowOptions};
 
 use civsim_core::Fixed;
+use civsim_physics::band_gap::BandGapColumn;
+use civsim_physics::crystal_field::CrystalFieldTables;
+use civsim_physics::janaf::JanafTables;
+use civsim_physics::periodic::PeriodicTable;
+use civsim_physics::petrology_data::PhaseRegistry;
+use civsim_physics::solar_abundances::SolarAbundances;
 use civsim_sim::anatomy::WorldProfile;
 use civsim_sim::clock::PlaybackDriver;
 use civsim_sim::genesis::{genesis, GenesisParams, LivingWorld, WorldGenesis};
-use civsim_sim::geodynamics::{slice0_demo_field, DerivedTile};
+use civsim_sim::geodynamics::{
+    derive_mantle_density, generate_derived_tiles, slice0_demo_field, DerivedTile,
+};
 use civsim_sim::located::OccupantId;
 use civsim_world::terrain::TerrainRelief;
 use civsim_world::view::Camera;
 use civsim_world::{BiomeSet, Coord3, QuadTree, Rgb};
+use std::collections::BTreeMap;
 
 /// Pixels per quadtree node in the overview. Zooming changes which level a node covers, not
 /// the on-screen cell size.
@@ -501,6 +510,455 @@ fn globe_view_params(fx: &GlobeFixture, w: usize, h: usize, g: u32) -> (Fixed, (
     (m_per_px, star_px, star_r)
 }
 
+/// Parse a decimal argument (a star mass in solar masses, an orbit in AU) into fixed-point, defaulting when absent
+/// or malformed. Uses [`Fixed::from_decimal_str`] so `--derived 0.6 1.5` reads a 0.6-solar-mass star at 1.5 AU.
+fn parse_fixed(arg: Option<&String>, default: Fixed) -> Fixed {
+    arg.and_then(|s| Fixed::from_decimal_str(s.trim()).ok())
+        .unwrap_or(default)
+}
+
+/// The DERIVED planet the `--derived` viewer shows: every field DERIVED from a star mass and an orbit through the
+/// built pipeline (the star, the disk temperature, the condensed-and-differentiated crust, the isostatic tiles, the
+/// crust's optical colour, the atmospheric speciation and its Rayleigh sky), never authored. The planet MASS and BULK
+/// DENSITY are the Hadean-Earth fixtures the accretion and condensation arcs will supply (so the radius and gravity
+/// are an Earth-mass body's until those arcs wire through), while the star temperature, disk temperature, crust
+/// composition, tile relief, material colour, and atmosphere all respond to the star and orbit inputs.
+struct DerivedScene {
+    star_mass: Fixed,
+    orbit_au: Fixed,
+    radius_m: Fixed,
+    t_eff: Fixed,
+    disk_t: Fixed,
+    gravity: Fixed,
+    mass_earth: Fixed,
+    density: Fixed,
+    /// The derived crust element composition (the phase stoichiometry the tiles and colour read), sorted descending.
+    crust: Vec<(String, Fixed)>,
+    /// The derived crust phase names (the buoyant partial-melt assemblage), for the readout.
+    crust_phases: Vec<String>,
+    /// The derived atmospheric gas mix (species name, mole fraction), descending by fraction.
+    atmosphere: Vec<(String, Fixed)>,
+    tiles: Vec<DerivedTile>,
+    cols: usize,
+    /// The DERIVED Rayleigh atmosphere-limb sky colour, or [`render::PLACEHOLDER_SKY`] when the mix does not resolve.
+    sky: Rgb,
+    /// The DERIVED perceived colour of the crust material under the star ([`render::material_surface_rgb`]).
+    material: Rgb,
+}
+
+/// The element composition (element, summed count) of a set of phases at their derived amounts: parse each phase name's
+/// formula (the formula before the phase suffix, a small general parser: uppercase opens a symbol, lowercase continues
+/// it, trailing digits are the count) and add `count * amount` per element. This reads the phase STOICHIOMETRY (so the
+/// crust's enstatite comes out `Mg:Si:O = 1:1:3`, its real mineral ratio), which the petrology density and isostasy
+/// consume, unlike the derive_surface_composition `surface` field, whose elements sit at solar bulk abundance
+/// (oxygen-dominated) and reach no mineral assemblage. Deterministic element order.
+fn phase_stoichiometry(phases: &[(String, Fixed)]) -> Vec<(String, Fixed)> {
+    let mut elements: BTreeMap<String, Fixed> = BTreeMap::new();
+    for (name, amount) in phases {
+        let formula = name.split('(').next().unwrap_or(name);
+        let chars: Vec<char> = formula.chars().collect();
+        let mut i = 0;
+        while i < chars.len() {
+            if chars[i].is_ascii_uppercase() {
+                let mut sym = String::new();
+                sym.push(chars[i]);
+                i += 1;
+                while i < chars.len() && chars[i].is_ascii_lowercase() {
+                    sym.push(chars[i]);
+                    i += 1;
+                }
+                let mut digits = String::new();
+                while i < chars.len() && chars[i].is_ascii_digit() {
+                    digits.push(chars[i]);
+                    i += 1;
+                }
+                let count = digits.parse::<i32>().unwrap_or(1).max(1);
+                if let Some(add) = amount.checked_mul(Fixed::from_int(count)) {
+                    let entry = elements.entry(sym).or_insert(Fixed::ZERO);
+                    *entry = entry.checked_add(add).unwrap_or(*entry);
+                }
+            } else {
+                i += 1;
+            }
+        }
+    }
+    elements.into_iter().collect()
+}
+
+/// Build the DERIVED scene from a star mass and an orbit, or an error naming the link that did not resolve (fail-soft:
+/// the viewer prints the message and shows no planet, never a fabricated one). The chain is the built pipeline, each
+/// link a derivation: the star and disk ([`civsim_sim::planet::derive_planet`]), the condensed-and-differentiated
+/// crust at a labelled formation-era condensation temperature ([`derive_surface_composition`], the two-temperature seam
+/// documented at its site), the mantle density from the derived mantle
+/// composition ([`derive_mantle_density`]), the isostatic tiles ([`generate_derived_tiles`]) off a uniform crust field
+/// (uniform is the honest state for a fresh planet; lateral variation is a named geodynamics follow-on), the crust's
+/// optical colour under the star ([`render::material_surface_rgb`]), and the atmospheric speciation
+/// ([`atmosphere_gas_equilibrium`]) with its Rayleigh sky ([`render::rayleigh_sky_rgb`]).
+fn build_derived_scene(star_mass: Fixed, orbit_au: Fixed) -> Result<DerivedScene, String> {
+    // The DERIVED planet: the star's L/R/T_eff, the disk temperature at the orbit, and the radius/gravity from the
+    // accreted mass and bulk density. The stellar slopes are the grid-extracted values; the accretion rate,
+    // reprocessing, inner-boundary factor, accreted mass, and bulk density are the reserved-with-basis residues
+    // (Hadean-Earth fixtures until the accretion and condensation arcs wire through), the same set the labelled globe
+    // fixture uses. So the star colour, disk warmth, and crust respond to the inputs; the radius and gravity are an
+    // Earth-mass body's until those arcs land.
+    let planet = civsim_sim::planet::derive_planet(
+        star_mass,
+        Fixed::ONE,                   // solar metallicity
+        Fixed::from_ratio(35, 10),    // alpha (mass-luminosity)
+        Fixed::from_ratio(8, 10),     // beta (mass-radius)
+        Fixed::from_ratio(-44, 100),  // lambda (metallicity-luminosity)
+        Fixed::from_ratio(-18, 1000), // mu (metallicity-radius)
+        orbit_au,
+        Fixed::from_ratio(1, 100),     // accretion rate (Mirror fixture)
+        Fixed::from_ratio(1, 4),       // reprocessing factor
+        Fixed::ONE,                    // inner-boundary factor
+        Fixed::ONE,                    // accreted mass (Earth fixture, accretion output)
+        Fixed::from_ratio(5514, 1000), // bulk density (Earth fixture, condensation output)
+        Fixed::from_int(100_000),
+    )
+    .ok_or("the star-and-orbit derivation did not resolve")?;
+
+    let janaf = JanafTables::standard().map_err(|_| "the JANAF tables did not load")?;
+    let abundances =
+        SolarAbundances::standard().map_err(|_| "the solar abundances did not load")?;
+    // THE TWO-TEMPERATURE SEAM, surfaced not papered over. The crust CONDENSED during planet formation at the hot
+    // inner-disk midplane (the refractory Mg-silicate condensation front, ~1350 to 1450 K), a formation-era snapshot;
+    // the FINISHED planet's surface warmth (`disk_temperature_k`, ~279 K at 1 AU) is the mature irradiation
+    // equilibrium, far below the condensation window (the condensation solve returns no crust below ~800 K). These are
+    // two distinct physical temperatures, and the built `disk_effective_temperature` supplies only the second
+    // (irradiation-dominated at every reasonable orbit). So the condensation reads a labelled formation-era
+    // condensation temperature, a reserved-with-basis fixture (basis: the forsterite/enstatite condensation front in
+    // the solar nebula, ~1350 to 1450 K at nebular pressures), the SAME pending-arc discipline as the mass and
+    // bulk-density fixtures above; the formation-era disk thermal history that would make this orbit-dependent is the
+    // pending accretion / disk-evolution arc. The mature surface warmth drives the material broadening and the readout.
+    let condensation_temperature_k = Fixed::from_int(1400);
+    let sc = civsim_materials::surface_composition::derive_surface_composition(
+        &janaf,
+        &abundances,
+        condensation_temperature_k,
+    )
+    .ok_or("no crust condensed at the labelled condensation temperature (the gas did not precipitate a surface)")?;
+
+    let registry = PhaseRegistry::standard().map_err(|_| "the phase registry did not load")?;
+    let table = PeriodicTable::standard().map_err(|_| "the periodic table did not load")?;
+
+    // The crust and mantle ELEMENT compositions from their DERIVED phase stoichiometry (the crust's enstatite at its
+    // real Mg:Si:O = 1:1:3, the mantle's forsterite at 2:1:4), which the petrology density and isostasy consume. The
+    // `surface` field is deliberately NOT used here: its elements sit at solar bulk abundance (oxygen-dominated) and
+    // reach no mineral assemblage, so the density and tiles derive from the phase stoichiometry instead.
+    let crust_composition = phase_stoichiometry(&sc.crust);
+    let mantle_composition = phase_stoichiometry(&sc.mantle);
+    if crust_composition.is_empty() {
+        return Err("the derived crust has no phases to read a composition from".to_string());
+    }
+
+    // The mantle density from the DERIVED mantle composition, read as the density of its stable assemblage at the
+    // surface reference (300 K, 1 bar, the reference-pressure first pass the geodynamics substrate documents). The
+    // crust floats on this derived mantle density.
+    let surface_t = Fixed::from_int(300);
+    let surface_p = Fixed::ONE;
+    let mantle_density =
+        derive_mantle_density(&mantle_composition, surface_t, surface_p, &registry, &table)
+            .ok_or("the mantle density did not derive from the mantle composition")?;
+
+    // The isostatic tiles off a UNIFORM derived-crust field: every tile carries the derived crust, so its elevation is
+    // what the material is by Airy isostasy against the derived mantle. A representable column thickness (30 km) and a
+    // zero sea-level datum are the Slice-0 fixtures (retire with the interior and water-budget lanes).
+    let cols = 48usize;
+    let rows = 32usize;
+    let field: Vec<Vec<(String, Fixed)>> = vec![crust_composition.clone(); cols * rows];
+    let crustal_thickness = Fixed::from_int(30);
+    let sea_level = Fixed::ZERO;
+    let tiles = generate_derived_tiles(
+        &field,
+        mantle_density,
+        crustal_thickness,
+        surface_t,
+        surface_p,
+        sea_level,
+        &registry,
+        &table,
+    )
+    .ok_or("the derived tiles did not resolve from the crust composition")?;
+
+    // The crust's perceived colour under the star, DERIVED from its absorption spectrum. The broadening temperature is
+    // the derived disk (surface) warmth. Fail-soft to the relief swatch if the material read returns None.
+    let gaps = BandGapColumn::standard().map_err(|_| "the band-gap column did not load")?;
+    let crystal =
+        CrystalFieldTables::standard().map_err(|_| "the crystal-field table did not load")?;
+    let material = render::material_surface_rgb(
+        &crust_composition,
+        planet.star_effective_temperature_k,
+        planet.disk_temperature_k,
+        &gaps,
+        &crystal,
+    )
+    .unwrap_or_else(|| render::derived_tile_color(TerrainRelief::Lowland));
+
+    // The atmospheric speciation of a labelled volatile OUTGASSING budget (an oxidized volcanic C-N-O-H-S budget, the
+    // pending item-#40 outgassing input), DERIVED through the gas-phase Gibbs solve at the reserved volcanic quench
+    // temperature (~1400 K, the magma-degassing basis the atmosphere substrate states), then its Rayleigh sky. So the
+    // SPECIATION and the sky COLOUR are derived; the elemental budget is the labelled pending input, not fabricated.
+    let atmo_budget: BTreeMap<String, Fixed> =
+        [("H", 160), ("O", 100), ("C", 10), ("N", 4), ("S", 3)]
+            .iter()
+            .map(|(el, n)| (el.to_string(), Fixed::from_int(*n)))
+            .collect();
+    let quench_t = Fixed::from_int(1400);
+    let atmosphere =
+        civsim_materials::atmosphere::atmosphere_gas_equilibrium(&janaf, &atmo_budget, quench_t)
+            .unwrap_or_default();
+    let gas_mix: Vec<(&str, f64)> = atmosphere
+        .iter()
+        .map(|(name, frac)| (name.as_str(), frac.to_f64_lossy()))
+        .collect();
+    let sky = render::rayleigh_sky_rgb(&gas_mix, planet.star_effective_temperature_k, &table)
+        .unwrap_or(render::PLACEHOLDER_SKY);
+
+    // The crust elements (phase stoichiometry), sorted descending by amount (the readout's top few), and the crust
+    // phase names for the readout.
+    let mut crust = crust_composition;
+    crust.sort_by(|a, b| b.1.to_bits().cmp(&a.1.to_bits()).then(a.0.cmp(&b.0)));
+    let crust_phases: Vec<String> = sc.crust.iter().map(|(name, _)| name.clone()).collect();
+
+    Ok(DerivedScene {
+        star_mass,
+        orbit_au,
+        radius_m: planet.radius_m,
+        t_eff: planet.star_effective_temperature_k,
+        disk_t: planet.disk_temperature_k,
+        gravity: planet.surface_gravity_m_s2,
+        mass_earth: planet.mass_earth,
+        density: planet.bulk_density_g_cm3,
+        crust,
+        crust_phases,
+        atmosphere,
+        tiles,
+        cols,
+        sky,
+        material,
+    })
+}
+
+/// Print the DERIVED numbers to the terminal: the star mass and orbit inputs, then the derived radius, gravity, star
+/// effective temperature, disk temperature, the top crust elements, and the atmospheric gas mix. A one-way read of the
+/// derived scene (Principle 10).
+fn print_derived_readout(scene: &DerivedScene) {
+    eprintln!("derived planet from star mass and orbit alone (no worldgen, no life):");
+    eprintln!(
+        "  input:  star mass {:.3} M_sun,  orbit {:.3} AU",
+        scene.star_mass.to_f64_lossy(),
+        scene.orbit_au.to_f64_lossy()
+    );
+    eprintln!(
+        "  star:   T_eff {:.0} K  (blackbody light colour)",
+        scene.t_eff.to_f64_lossy()
+    );
+    eprintln!(
+        "  planet: radius {:.0} km,  gravity {:.2} m/s^2,  mass {:.2} M_earth,  bulk density {:.2} g/cm^3",
+        scene.radius_m.to_f64_lossy() / 1000.0,
+        scene.gravity.to_f64_lossy(),
+        scene.mass_earth.to_f64_lossy(),
+        scene.density.to_f64_lossy()
+    );
+    eprintln!(
+        "  disk:   surface warmth {:.0} K (mature irradiation equilibrium; the crust condensed hotter, ~1400 K)",
+        scene.disk_t.to_f64_lossy()
+    );
+    let crust_top: Vec<String> = scene
+        .crust
+        .iter()
+        .take(5)
+        .map(|(el, amt)| format!("{el} {:.2}", amt.to_f64_lossy()))
+        .collect();
+    eprintln!(
+        "  crust:  {}  ({})",
+        crust_top.join(", "),
+        scene.crust_phases.join(", ")
+    );
+    eprintln!(
+        "  crust colour under the star: rgb({}, {}, {})",
+        scene.material.r, scene.material.g, scene.material.b
+    );
+    let air_top: Vec<String> = scene
+        .atmosphere
+        .iter()
+        .take(6)
+        .map(|(name, frac)| format!("{name} {:.1}%", frac.to_f64_lossy() * 100.0))
+        .collect();
+    if air_top.is_empty() {
+        eprintln!("  air:    (no atmosphere resolved from the labelled outgassing budget)");
+    } else {
+        eprintln!("  air:    {}", air_top.join(", "));
+    }
+    eprintln!("  controls: +/- zoom, wasd/arrows pan, Esc quit");
+}
+
+/// The interactive `--derived [star_mass] [orbit_au]` viewer: derive the planet from the star mass and orbit and show
+/// it, the DERIVED planet alone (no [`WorldGenesis`], no [`LivingWorld`], no radiation, no occupants). Zoomed out it is
+/// the star-lit globe (derived radius, blackbody star colour, day/night terminator, the derived Rayleigh atmosphere
+/// limb); zoomed in it is the derived crust tiles coloured by [`render::material_surface_rgb`]. The window is a pure
+/// observer, canon -> pixels (Principle 10).
+fn run_derived(argv: &[String]) {
+    let star_mass = parse_fixed(argv.get(2), Fixed::ONE);
+    let orbit_au = parse_fixed(argv.get(3), Fixed::ONE);
+    let scene = match build_derived_scene(star_mass, orbit_au) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("the derived planet did not resolve: {e}");
+            eprintln!("(no planet is shown; nothing is fabricated)");
+            return;
+        }
+    };
+    print_derived_readout(&scene);
+
+    // The globe fixture reuses the shared globe scale and renderer over the derived scene's fields.
+    let globe = GlobeFixture {
+        radius_m: scene.radius_m,
+        t_eff: scene.t_eff,
+        tiles: scene.tiles.clone(),
+        cols: scene.cols,
+        sky: scene.sky,
+    };
+    let globe_levels = GLOBE_LEVELS;
+    let surface_levels = 3u32;
+    let max_zoom = globe_levels + surface_levels;
+
+    let mut win_w = 960usize;
+    let mut win_h = 640usize;
+    let mut window = Window::new(
+        "civsim derived-planet viewer",
+        win_w,
+        win_h,
+        WindowOptions {
+            resize: true,
+            scale: Scale::X1,
+            scale_mode: ScaleMode::Stretch,
+            ..WindowOptions::default()
+        },
+    )
+    .unwrap_or_else(|e| {
+        eprintln!(
+            "could not open a window: {e}\n\
+             On WSL this needs WSLg (Windows 11) or an X server. The derived numbers printed above \
+             still describe the planet."
+        );
+        std::process::exit(1);
+    });
+    window.set_target_fps(30);
+
+    let mut zoom: u32 = 0;
+    while window.is_open() && !window.is_key_down(Key::Escape) {
+        for k in window.get_keys_pressed(KeyRepeat::No) {
+            match k {
+                Key::Equal | Key::NumPadPlus => zoom = (zoom + 1).min(max_zoom),
+                Key::Minus | Key::NumPadMinus => zoom = zoom.saturating_sub(1),
+                Key::Home => zoom = 0,
+                _ => {}
+            }
+        }
+        // The WASD / arrow keys pan (accepted so the controls match the living-world viewer); the derived crust is
+        // uniform, so a pan over the single-composition surface has no visible effect until lateral variation lands
+        // (a named geodynamics follow-on). The globe is a fixed object, so panning is a no-op there too.
+
+        let (w, h) = window.get_size();
+        if w == 0 || h == 0 {
+            window.update();
+            continue;
+        }
+        (win_w, win_h) = (w, h);
+
+        let (buf, mode) = if zoom < globe_levels {
+            let (m_per_px, star_px, star_r) = globe_view_params(&globe, win_w, win_h, zoom);
+            (
+                render::render_solar_system_view(
+                    globe.radius_m,
+                    globe.t_eff,
+                    &globe.tiles,
+                    globe.cols,
+                    win_w,
+                    win_h,
+                    m_per_px,
+                    star_px,
+                    star_r,
+                    BG,
+                    globe.sky,
+                ),
+                format!("derived globe {}/{}", zoom + 1, globe_levels),
+            )
+        } else {
+            let sf = zoom - globe_levels; // 0..surface_levels-1
+            let tile_px = (14 + 10 * sf) as usize;
+            (
+                render::paint_material_tiles(
+                    &scene.tiles,
+                    scene.material,
+                    scene.cols,
+                    tile_px,
+                    win_w,
+                    win_h,
+                    BG,
+                ),
+                format!("derived surface ({tile_px}px/tile)"),
+            )
+        };
+        let mut buf = buf;
+        // The readout HUD: the derived numbers, drawn top-left, so the planet is legible without the terminal.
+        let readout = format!(
+            "star {:.2} Msun  orbit {:.2} AU  |  T_eff {:.0}K  radius {:.0}km  g {:.2}",
+            scene.star_mass.to_f64_lossy(),
+            scene.orbit_au.to_f64_lossy(),
+            scene.t_eff.to_f64_lossy(),
+            scene.radius_m.to_f64_lossy() / 1000.0,
+            scene.gravity.to_f64_lossy(),
+        );
+        render::draw_label(
+            &mut buf,
+            win_w,
+            win_h,
+            4,
+            4,
+            &readout,
+            2,
+            Rgb::new(240, 240, 170),
+            Rgb::new(10, 12, 20),
+        );
+        let crust_line: Vec<String> = scene
+            .crust
+            .iter()
+            .take(4)
+            .map(|(el, _)| el.clone())
+            .collect();
+        render::draw_label(
+            &mut buf,
+            win_w,
+            win_h,
+            4,
+            20,
+            &format!(
+                "crust {}  air {}  +/- zoom  wasd pan  esc quit",
+                crust_line.join("-"),
+                scene
+                    .atmosphere
+                    .first()
+                    .map(|(n, _)| n.as_str())
+                    .unwrap_or("none")
+            ),
+            1,
+            Rgb::new(170, 180, 200),
+            Rgb::new(10, 12, 20),
+        );
+        window.set_title(&format!(
+            "civsim derived planet  star {:.2} Msun  orbit {:.2} AU  |  {mode}",
+            scene.star_mass.to_f64_lossy(),
+            scene.orbit_au.to_f64_lossy()
+        ));
+        window
+            .update_with_buffer(&buf, win_w, win_h)
+            .expect("blit the frame");
+    }
+}
+
 fn main() {
     let argv: Vec<String> = std::env::args().collect();
     // Headless snapshot: `--ppm <path> [seed] [w] [h]` writes a superfine frame and exits, so
@@ -523,6 +981,13 @@ fn main() {
     // (its size the derived radius, its star colour the derived T_eff) and exits.
     if argv.get(1).map(|s| s == "--globe").unwrap_or(false) {
         globe_cmd(&argv);
+        return;
+    }
+    // Interactive derived-planet viewer: `--derived [star_mass] [orbit_au]` derives a planet from a star mass and an
+    // orbit alone (no worldgen, no life) and shows it: the star-lit globe zoomed out, the derived crust tiles coloured
+    // by their material's optics zoomed in. A pure observer, canon -> pixels (Principle 10).
+    if argv.get(1).map(|s| s == "--derived").unwrap_or(false) {
+        run_derived(&argv);
         return;
     }
     // Headless render for the test harness: `--render <path> <mode> <seed> <w> <h>` where mode

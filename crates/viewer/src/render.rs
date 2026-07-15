@@ -23,6 +23,12 @@
 //! world, not an author of it (Principle 10).
 
 use civsim_core::{splitmix64, Fixed};
+use civsim_materials::band_gap::conduction_class_from_column;
+use civsim_materials::optics::{
+    feature_response_at, optical_energies, thermal_broadening_width_ev,
+};
+use civsim_physics::band_gap::BandGapColumn;
+use civsim_physics::crystal_field::{cm_to_ev, CrystalFieldTables};
 use civsim_physics::periodic::PeriodicTable;
 use civsim_physics::polarizability::element_electronic_polarizability_a0_cubed;
 use civsim_sim::genesis::LivingWorld;
@@ -648,6 +654,164 @@ pub fn superfine(
     buf
 }
 
+/// The three photoreceptor band centres (nm) the non-canon material projection samples: red, green, blue. AUTHORED
+/// display choices, the observability-layer allowance the optics substrate reserves for the downstream observer
+/// projection (`optics.rs`: the perceived colour is the observer's projection, not in the substrate). They are the
+/// only wavelengths the reflectance is sampled at, and they match the sky's `BANDS_NM` so the two non-canon
+/// projections read the same spectrum. Each lies inside a human's `~1.6-3.1 eV` visible window (630 nm ~ 1.97 eV,
+/// 532 nm ~ 2.33 eV, 465 nm ~ 2.67 eV).
+const MATERIAL_BANDS_NM: [f64; 3] = [630.0, 532.0, 465.0];
+
+/// The photon-energy constant `h c` in `eV * nm` (`~1239.8`), DERIVED from the fundamentals register (`h`, `c`, `e`),
+/// never authored: the photon energy at wavelength `lambda` in nm is `E[eV] = hc_ev_nm / lambda`. Parsed to `f64`
+/// because this is a non-canon display value that needs no fixed-point rigour past per-run determinism. `None` on a
+/// register miss.
+fn hc_ev_nm() -> Option<f64> {
+    let h: f64 = civsim_units::fundamentals::fundamental("h")?
+        .value
+        .parse()
+        .ok()?;
+    let c: f64 = civsim_units::fundamentals::fundamental("c")?
+        .value
+        .parse()
+        .ok()?;
+    let e: f64 = civsim_units::fundamentals::fundamental("e")?
+        .value
+        .parse()
+        .ok()?;
+    Some(h * c / e * 1.0e9)
+}
+
+/// Reduce a composition's `(element, amount)` pairs to integer `(element, count)` pairs for the substance lookups (the
+/// band-gap column and the crystal-field oxide table key on integer stoichiometry). The amounts scale to the smallest
+/// positive amount before rounding, so an integer stoichiometry passes through unchanged (SiO2 `{Si:1, O:2}` stays
+/// `{Si:1, O:2}`) while a fractional, solar-abundance-scaled crust still reduces to a non-empty integer ratio rather
+/// than rounding every trace amount to zero. A mixed, non-stoichiometric crust reduces to counts that match no seeded
+/// phase, so it resolves to no optical feature (a pale, featureless read), the honest outcome for a fresh silicate
+/// crust: its constituent phases have no absorption in the human visible window.
+fn composition_counts(composition: &[(String, Fixed)]) -> Vec<(String, u32)> {
+    let min_positive = composition
+        .iter()
+        .map(|(_, a)| *a)
+        .filter(|a| *a > Fixed::ZERO)
+        .min();
+    let Some(scale) = min_positive else {
+        return Vec::new();
+    };
+    composition
+        .iter()
+        .filter_map(|(el, amount)| {
+            if *amount <= Fixed::ZERO {
+                return None;
+            }
+            let ratio = amount.checked_div(scale)?;
+            let n = ratio
+                .checked_add(Fixed::from_ratio(1, 2))
+                .map(|v| v.to_int())
+                .unwrap_or(0);
+            if n > 0 {
+                Some((el.clone(), n as u32))
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+/// The observability-non-canon perceived colour of a material under a star's light, DERIVED from the material's own
+/// absorption spectrum and the star's Planck spectrum, never an authored per-mineral swatch. This is exactly the
+/// downstream observer projection the optics substrate (`civsim_materials::optics`) reserves and refuses to author:
+/// the substrate produces the observer-INDEPENDENT characteristic energies, and this renderer projects them against a
+/// human-baseline visible window and three photoreceptor bands into a screen colour, one-way (canon physics ->
+/// pixels), writing no canonical state (Principle 10).
+///
+/// The derivation chain, each step read from the material's own data, never a colour lookup:
+///   1. The composition reduces to integer counts, and the material's electronic classification and optical
+///      characteristic energies come from the banked substrate: the band gap (an INTERBAND ONSET) from the band-gap
+///      column ([`conduction_class_from_column`] / [`BandGapColumn::gap`]) and the ligand-field d-d line from the
+///      crystal-field oxide table ([`CrystalFieldTables::oxide_delta_cm`] converted to eV by [`cm_to_ev`]). No plasma
+///      edge is emitted: a carrier density is not derivable for an arbitrary composition here, so a metal carries no
+///      plasma feature rather than a fabricated one (a stated limit, not a guessed value).
+///   2. At each of the three photoreceptor bands the ABSORPTION is the summed feature response
+///      ([`feature_response_at`]) of the material's optical energies, broadened by the grounded thermal width
+///      ([`thermal_broadening_width_ev`], `~ k_B T`, never an authored linewidth), capped at full absorption. The
+///      REFLECTANCE is its complement, `1 - absorption`: a feature that reaches the band darkens it.
+///   3. The reflected radiance per band is the star's relative Planck spectral radiance ([`planck_relative`], the
+///      incident starlight colour, derived from the second radiation constant) times the reflectance, and the three
+///      bands normalize against the ILLUMINANT reference (the brightest band at full reflectance), so absorption reads
+///      as DARKNESS: a fully-absorbing material is dark, a fully-reflecting one takes the star's colour at full
+///      brightness, never renormalized back to full intensity per material.
+///
+/// Admit-the-alien: the mix is keyed on the composition and per-substance banked data (the gap column, the oxide d-d
+/// table), so a new material is a data row, and the visible window and band centres are the OBSERVER's property
+/// (`MATERIAL_BANDS_NM`), never the material's. A being with a different eye would read the same spectrum a different
+/// colour, a data-row difference.
+///
+/// VALIDITY CEILING: this is FACTOR-GRADE and QUALITATIVE (dark versus light, warm versus cool), not a calibrated
+/// reflectance. A substance whose absorption onset lies within or below the visible window reads dark; a wide-gap or
+/// feature-free substance reads light; and the reflected colour warms under a cooler star. It carries NO Fresnel
+/// surface reflectance (so a small-gap absorber reads pure-dark rather than dark-grey), NO charge-transfer bands, and
+/// only the LEADING crystal-field d-d line at `Delta_o` (the higher visible-range multiplets are a named optics
+/// follow-on). So a first-row transition-metal oxide whose leading `Delta_o` sits in the near-infrared (FeO
+/// `~0.93 eV`) is NOT darkened in the visible by this substrate: the darkening that reddens hematite and blackens
+/// basalt (charge transfer, Fe-Ti-oxide opacity, higher d-d multiplets) is a named substrate gap, surfaced here, not
+/// papered over. `f64` throughout, mirroring [`rayleigh_sky_rgb`] and [`blackbody_rgb`]. `None` when the composition
+/// reduces to nothing or the illuminant does not resolve (fail-soft: the caller keeps the relief swatch).
+pub fn material_surface_rgb(
+    composition: &[(String, Fixed)],
+    star_t_eff_k: Fixed,
+    temperature_k: Fixed,
+    gaps: &BandGapColumn,
+    crystal: &CrystalFieldTables,
+) -> Option<Rgb> {
+    let counts = composition_counts(composition);
+    if counts.is_empty() {
+        return None;
+    }
+    // The material's own electronic classification and observer-independent optical characteristic energies: the
+    // interband onset from the banked gap column, the d-d ligand-field line from the crystal-field oxide table. No
+    // plasma edge (no derivable carrier density here, so no fabricated feature). Keyed on the substance's own data.
+    let class = conduction_class_from_column(gaps, &counts, temperature_k);
+    let band_gap_ev = gaps.gap(&counts).map(|bg| bg.gap_ev);
+    let dd_transition_ev = crystal.oxide_delta_cm(&counts).and_then(cm_to_ev);
+    let features = optical_energies(&class, band_gap_ev, None, dd_transition_ev);
+    // The grounded broadening width (thermal ~ k_B T), never an authored linewidth.
+    let width = thermal_broadening_width_ev(temperature_k);
+    let c2_m_k = second_radiation_constant_m_k()?;
+    let hc = hc_ev_nm()?;
+    let t_eff = star_t_eff_k.to_f64_lossy();
+    let mut band_radiance = [0.0f64; 3];
+    let mut illum_ref = 0.0f64;
+    for (i, &lambda_nm) in MATERIAL_BANDS_NM.iter().enumerate() {
+        let probe_ev_f = hc / lambda_nm;
+        // The probe energy back into fixed-point (micro-eV resolution) for the observer-independent feature response.
+        let probe_ev = Fixed::from_ratio((probe_ev_f * 1.0e6).round() as i64, 1_000_000);
+        // Absorption at this band: the summed feature response of the material's optical energies, capped at full
+        // absorption. Reflectance is its complement (a feature reaching the band darkens it).
+        let mut absorption = 0.0f64;
+        for feature in &features {
+            if let Some(r) = feature_response_at(probe_ev, feature, width) {
+                absorption += r.to_f64_lossy();
+            }
+        }
+        let reflectance = (1.0 - absorption).clamp(0.0, 1.0);
+        let illum = planck_relative(lambda_nm, t_eff, c2_m_k);
+        band_radiance[i] = illum * reflectance;
+        if illum > illum_ref {
+            illum_ref = illum;
+        }
+    }
+    if illum_ref <= 0.0 {
+        return None;
+    }
+    let to_u8 = |v: f64| (v / illum_ref * 255.0).round().clamp(0.0, 255.0) as u8;
+    Some(Rgb::new(
+        to_u8(band_radiance[0]),
+        to_u8(band_radiance[1]),
+        to_u8(band_radiance[2]),
+    ))
+}
+
 /// The glyph a DERIVED tile shows, keyed by its relief class (the R1-override terrain projected to a mark in the
 /// Dwarf-Fortress-spirit glyph view): submarine reads as water `~`, lowland as flat ground `.`, upland as raised
 /// `^`. Presentation only, a one-way read of the derived relief, never canonical state (Principle 10).
@@ -723,6 +887,65 @@ pub fn paint_derived_tiles(
         let color = derived_tile_color(t.relief);
         fill_rect(&mut buf, w, cx, cy, tile_px, tile_px, color.pack());
         // A readable glyph over the block: dark on a light tile, light on a dark one.
+        let fg = if color.luminance() > 128 {
+            Rgb::new(20, 20, 24)
+        } else {
+            Rgb::new(228, 232, 236)
+        };
+        draw_glyph_centered(
+            &mut buf,
+            w,
+            cx,
+            cy,
+            tile_px,
+            derived_tile_glyph(t.relief),
+            fg,
+        );
+    }
+    buf
+}
+
+/// A relief-shading brightness for the material-tile paint: upland reads full, lowland a shade dimmer, submarine
+/// dimmest (as if the surface sits deeper / in shadow). The ONE authored display relief scale the non-canon layer is
+/// allowed (documented here at its site), byte-neutral on canon: it modulates the DERIVED material colour's brightness
+/// so relief structure is legible, never inventing a per-relief hue. The relief it keys off is derived.
+fn relief_shade(relief: TerrainRelief) -> f32 {
+    match relief {
+        TerrainRelief::Upland => 1.0,
+        TerrainRelief::Lowland => 0.82,
+        TerrainRelief::Submarine => 0.55,
+    }
+}
+
+/// Paint a field of DERIVED tiles coloured by their MATERIAL's perceived colour under the star
+/// ([`material_surface_rgb`]), each tile a `tile_px` block of that colour scaled by the relief shading
+/// ([`relief_shade`]) with the relief glyph centred. This is the zoom-in surface of the derived planet: the crust the
+/// physics condensed and differentiated, painted its own optical colour under the star, never an authored swatch. For
+/// a fresh, uniform crust every tile shares the material colour and the visible variation is the relief shading, the
+/// honest look until lateral composition variation lands (a named geodynamics follow-on). A pure, deterministic read,
+/// one-way canon -> pixels (Principle 10).
+pub fn paint_material_tiles(
+    tiles: &[DerivedTile],
+    material: Rgb,
+    cols: usize,
+    tile_px: usize,
+    w: usize,
+    h: usize,
+    bg: Rgb,
+) -> Vec<u32> {
+    let tile_px = tile_px.max(3);
+    let cols = cols.max(1);
+    let mut buf = vec![bg.pack(); w * h];
+    for (i, t) in tiles.iter().enumerate() {
+        let cx = (i % cols) * tile_px;
+        let cy = (i / cols) * tile_px;
+        if cx >= w || cy >= h {
+            continue;
+        }
+        let s = relief_shade(t.relief);
+        let scale = |c: u8| (c as f32 * s).clamp(0.0, 255.0) as u8;
+        let color = Rgb::new(scale(material.r), scale(material.g), scale(material.b));
+        fill_rect(&mut buf, w, cx, cy, tile_px, tile_px, color.pack());
         let fg = if color.luminance() > 128 {
             Rgb::new(20, 20, 24)
         } else {
@@ -1610,6 +1833,143 @@ mod tests {
             rayleigh_sky_rgb(&[("Ar", 1.0)], sun, &tbl),
             None,
             "an all-unresolvable mix is None"
+        );
+    }
+
+    fn mat_comp(pairs: &[(&str, i64)]) -> Vec<(String, Fixed)> {
+        pairs
+            .iter()
+            .map(|(s, n)| (s.to_string(), Fixed::from_int(*n as i32)))
+            .collect()
+    }
+
+    #[test]
+    fn a_small_gap_absorber_reads_dark_and_a_wide_gap_solid_reads_light() {
+        // THE DARK-VERSUS-LIGHT MECHANISM, from the material's OWN banked gap, no authored swatch: silicon's cited
+        // 1.12 eV gap sits BELOW the human visible window (~1.6-3.1 eV), so its interband onset absorbs across the
+        // whole window and it reads dark; magnesium oxide's cited 7.8 eV gap sits far ABOVE the window, so it has no
+        // visible absorption and reads light (it takes the star's colour). The colour is a pure read of the DERIVED
+        // absorption spectrum, deterministic and replaying.
+        let gaps = BandGapColumn::standard().expect("the gap column loads");
+        let crystal = CrystalFieldTables::standard().expect("the crystal-field table loads");
+        let sun = Fixed::from_int(5772);
+        let t = Fixed::from_int(300);
+        let si = material_surface_rgb(&mat_comp(&[("Si", 1)]), sun, t, &gaps, &crystal)
+            .expect("silicon resolves");
+        let mgo = material_surface_rgb(&mat_comp(&[("Mg", 1), ("O", 1)]), sun, t, &gaps, &crystal)
+            .expect("MgO resolves");
+        assert!(
+            si.luminance() < mgo.luminance(),
+            "the small-gap absorber (Si) is darker than the wide-gap solid (MgO): {} vs {}",
+            si.luminance(),
+            mgo.luminance()
+        );
+        assert!(si.luminance() < 40, "silicon reads dark, got {si:?}");
+        assert!(mgo.luminance() > 180, "MgO reads light, got {mgo:?}");
+        // A pure read replays byte for byte.
+        assert_eq!(
+            si,
+            material_surface_rgb(&mat_comp(&[("Si", 1)]), sun, t, &gaps, &crystal).unwrap()
+        );
+    }
+
+    #[test]
+    fn quartz_reads_light() {
+        // Quartz (SiO2) is not a seeded gap-column phase and carries no crystal-field d-d line (no d-block cation),
+        // so it has NO optical feature in the visible window: its reflectance is unity across the bands and it takes
+        // the star's colour at full brightness (a light, warm-white silicate under the Sun). The honest read for a
+        // colourless insulator, whose intrinsic band structure gives it no visible-window absorption.
+        let gaps = BandGapColumn::standard().expect("the gap column loads");
+        let crystal = CrystalFieldTables::standard().expect("the crystal-field table loads");
+        let sun = Fixed::from_int(5772);
+        let t = Fixed::from_int(300);
+        let quartz =
+            material_surface_rgb(&mat_comp(&[("Si", 1), ("O", 2)]), sun, t, &gaps, &crystal)
+                .expect("quartz resolves");
+        assert!(
+            quartz.luminance() > 180,
+            "quartz reads light, got {quartz:?}"
+        );
+    }
+
+    #[test]
+    fn the_same_material_warms_under_a_cooler_star() {
+        // STAR WARMTH: the reflected colour is the material's reflectance times the star's Planck spectrum, so the
+        // SAME material reflects a warmer (higher red-to-blue) colour under a cool star than under a hot one, tracking
+        // the illuminant. A featureless silicate (quartz) reflects the star's own colour, the cleanest witness.
+        let gaps = BandGapColumn::standard().expect("the gap column loads");
+        let crystal = CrystalFieldTables::standard().expect("the crystal-field table loads");
+        let t = Fixed::from_int(300);
+        let quartz = mat_comp(&[("Si", 1), ("O", 2)]);
+        let cool = material_surface_rgb(&quartz, Fixed::from_int(3000), t, &gaps, &crystal)
+            .expect("cool-star quartz");
+        let hot = material_surface_rgb(&quartz, Fixed::from_int(9000), t, &gaps, &crystal)
+            .expect("hot-star quartz");
+        let warmth = |c: Rgb| (c.r as f64 + 1.0) / (c.b as f64 + 1.0);
+        assert!(
+            warmth(cool) > warmth(hot),
+            "a cool star reflects warmer than a hot star (red/blue {:.2} vs {:.2})",
+            warmth(cool),
+            warmth(hot)
+        );
+    }
+
+    #[test]
+    fn an_iron_oxide_is_not_yet_darkened_in_the_visible_a_named_substrate_limit() {
+        // THE NAMED SUBSTRATE LIMIT, surfaced not papered over (Prime Directive 7): a first-row transition-metal oxide
+        // reads LIGHT here, not dark, because the ONLY optical feature the substrate banks for it is the leading
+        // ligand-field d-d line at Delta_o, and for FeO that is ~0.93 eV (7500 cm^-1), in the NEAR-INFRARED below the
+        // visible window, so its narrow thermally-broadened line barely reaches the red band. The darkening that
+        // blackens basalt and reddens hematite (O -> Fe charge transfer, Fe-Ti-oxide small-gap opacity, the higher
+        // d-d multiplets that fall in the visible) is a named optics follow-on, not in this substrate. This test
+        // pins the honest current behaviour so the gap is not mistaken for a bug: FeO reads about as light as quartz.
+        let gaps = BandGapColumn::standard().expect("the gap column loads");
+        let crystal = CrystalFieldTables::standard().expect("the crystal-field table loads");
+        let sun = Fixed::from_int(5772);
+        let t = Fixed::from_int(300);
+        let feo = material_surface_rgb(&mat_comp(&[("Fe", 1), ("O", 1)]), sun, t, &gaps, &crystal)
+            .expect("FeO resolves");
+        assert!(
+            feo.luminance() > 180,
+            "FeO reads light (the leading d-d line is in the near-IR; the visible-darkening bands are a named \
+             follow-on), got {feo:?}"
+        );
+    }
+
+    #[test]
+    fn paint_material_tiles_replays_and_shades_by_relief() {
+        // The material-tile paint is a deterministic pure read: the same tiles and material paint the same frame, byte
+        // for byte, and the relief shading dims the material colour (an upland tile is brighter than a lowland tile of
+        // the same material). A hand-built two-tile field (labelled test-only) exercises both relief shadings.
+        let field = [
+            DerivedTile {
+                elevation: Fixed::from_int(9),
+                relief: TerrainRelief::Upland,
+            },
+            DerivedTile {
+                elevation: Fixed::from_int(1),
+                relief: TerrainRelief::Lowland,
+            },
+        ];
+        let material = Rgb::new(200, 210, 220);
+        let bg = Rgb::new(8, 9, 14);
+        let (cols, tile_px, w, h) = (2usize, 16usize, 32usize, 16usize);
+        let frame = paint_material_tiles(&field, material, cols, tile_px, w, h, bg);
+        assert_eq!(frame.len(), w * h, "one word per pixel");
+        assert_eq!(
+            frame,
+            paint_material_tiles(&field, material, cols, tile_px, w, h, bg),
+            "a pure read replays byte for byte"
+        );
+        // The upland block (left) is brighter than the lowland block (right): read a pixel inside each block.
+        let unpack = |word: u32| Rgb::new((word >> 16) as u8, (word >> 8) as u8, word as u8);
+        let upland = unpack(frame[8 * w + 4]);
+        let lowland = unpack(frame[8 * w + 20]);
+        assert!(
+            upland.luminance() > lowland.luminance(),
+            "the upland tile is brighter than the lowland tile (relief shading): {} vs {}",
+            upland.luminance(),
+            lowland.luminance()
         );
     }
 }
