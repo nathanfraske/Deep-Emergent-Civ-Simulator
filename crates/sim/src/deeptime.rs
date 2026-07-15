@@ -32,6 +32,16 @@
 //! luminosity climbing over the star's life warms the surface). Each is a step term added here; slice 1 is the
 //! interior spine they hang on.
 //!
+//! The STAR-AGING slice (this): the star ages on the SAME deep-time clock and BRIGHTENS. A main-sequence star's
+//! core hydrogen fuses to helium, the core's mean molecular weight rises, so the core contracts and heats and the
+//! luminosity CLIMBS over the star's life. The brightening is DERIVED, never an authored curve: the star's
+//! main-sequence lifetime `t_ms` is the nuclear timescale (fuel over burn rate, `t_sun * (M/M_sun) / (L_zams/L_sun)`)
+//! from the star's mass and its zero-age luminosity, which the stellar front-end ([`crate::stellar`]) already
+//! gives, and the current luminosity is the ZAMS anchor climbed by the Gough factor `1 / (1 - c * t/t_ms)`. The
+//! surface warmth reads [`DeepTimeState::stellar_luminosity_ratio`] each step and warms as it climbs. Past `t_ms`
+//! the star LEAVES the main sequence (the post-main-sequence giant branch is a separate stellar-evolution arc), so
+//! the brightening caps there rather than extrapolating a regime this law does not describe.
+//!
 //! Determinism (Principle 3, Principle 10): [`convection_step`] is a pure function and the columns are walked in
 //! index order, so the tick is a pure function of the state and the parameters, worker-invariant. Dormant: no
 //! scenario or viewer drives it yet (the time control is the next slice), so it is byte-neutral over the run
@@ -44,8 +54,8 @@ use civsim_physics::melting::adiabatic_melt_column;
 /// The deep-time state of a derived planet: a lateral field of interior mantle columns (one per surface cell or
 /// province), the crust each column has BUILT so far, and the geological time elapsed. The field is the spatial
 /// extent the lateral variation lives in: each column carries its own thermal state and its own accumulated
-/// crust, so provinces emerge from columns that evolve differently, never an authored arrangement. The impact
-/// record and the star's age join this state in the later slices.
+/// crust, so provinces emerge from columns that evolve differently, never an authored arrangement. The star's age
+/// rides this same clock (`star_age_start_myr + elapsed_myr`); the impact record joins the state in a later slice.
 #[derive(Clone, Debug, PartialEq)]
 pub struct DeepTimeState {
     /// The interior mantle columns, one per lateral cell, each evolving by its own convection over deep time.
@@ -57,6 +67,12 @@ pub struct DeepTimeState {
     pub crust_thickness_km: Vec<Fixed>,
     /// The geological time elapsed (megayears), the clock the provinces are written against.
     pub elapsed_myr: Fixed,
+    /// The star's main-sequence AGE (megayears) when this run began: the star and the planet share one clock, so
+    /// the star's current age is this start age plus `elapsed_myr` ([`DeepTimeState::star_age_myr`]). A fresh
+    /// planet co-forming with a zero-age star begins at zero; a run beginning around an already-aged star carries
+    /// the star's prior age here. This is the per-run start age the brightening is measured against, not an
+    /// authored map.
+    pub star_age_start_myr: Fixed,
 }
 
 impl DeepTimeState {
@@ -76,7 +92,31 @@ impl DeepTimeState {
             ],
             crust_thickness_km: vec![Fixed::ZERO; n_cells],
             elapsed_myr: Fixed::ZERO,
+            star_age_start_myr: Fixed::ZERO,
         }
+    }
+
+    /// The same young planet, but around a star that already carries `age_myr` of main-sequence life at the run's
+    /// start (a run beginning mid-life rather than at the star's zero-age main sequence). The planet's own history
+    /// still begins fresh (uniform columns, no crust); only the star's clock is offset. Returns the state so it
+    /// chains off [`DeepTimeState::young`].
+    pub fn with_star_start_age(mut self, age_myr: Fixed) -> Self {
+        self.star_age_start_myr = age_myr;
+        self
+    }
+
+    /// The star's CURRENT main-sequence age (megayears): its age when the run began plus the geological time
+    /// elapsed since. The star and the planet share one deep-time clock, so as the run steps the star ages with it.
+    pub fn star_age_myr(&self) -> Fixed {
+        self.star_age_start_myr.saturating_add(self.elapsed_myr)
+    }
+
+    /// The CURRENT stellar luminosity ratio `L(t)/L_sun` the deep-time surface reads at this run's present age.
+    /// This is the thread from the star's aging to the planet's warmth: the surface reads this each step and warms
+    /// as it climbs ([`current_luminosity_ratio`]). `None` once the star has left the main sequence at `t_ms`, the
+    /// post-main-sequence regime being a separate stellar-evolution arc.
+    pub fn stellar_luminosity_ratio(&self, aging: &StarAgingParams) -> Option<Fixed> {
+        current_luminosity_ratio(aging, self.star_age_myr())
     }
 }
 
@@ -180,7 +220,84 @@ pub fn step_deep_time(
         columns,
         crust_thickness_km,
         elapsed_myr: state.elapsed_myr.saturating_add(dt_myr),
+        // The star's start age is a per-run constant; its CURRENT age advances through `elapsed_myr` above, so the
+        // star ages on the same clock as the interior without a separate step term.
+        star_age_start_myr: state.star_age_start_myr,
     })
+}
+
+/// The star-aging parameters the deep-time run reads to derive the main-sequence brightening: the star's ZAMS
+/// ANCHOR (its zero-age luminosity ratio and its mass ratio, both the stellar front-end's outputs at age 0), plus
+/// the two reserved-with-basis constants of the nuclear-timescale-and-brightening law. The mechanism derives the
+/// lifetime and the current luminosity from these four values; nothing here is an authored brightening curve. Both
+/// constants are per-star DATA (a field, not a hardcoded inline value), so a world's star with different nuclear
+/// physics is a data row, never a rewrite (admit-the-alien).
+#[derive(Clone, Copy, Debug)]
+pub struct StarAgingParams {
+    /// `L_zams / L_sun`, the star's ZERO-AGE main-sequence luminosity ratio: the stellar front-end's output at age
+    /// 0 ([`crate::stellar::luminosity_ratio`]), the anchor the brightening climbs from and recovers at age 0.
+    pub zams_luminosity_ratio: Fixed,
+    /// `M / M_sun`, the star's mass ratio: the FUEL term of the nuclear timescale (hydrogen fuel scales with mass).
+    pub mass_ratio: Fixed,
+    /// The SOLAR nuclear timescale (megayears): `t_sun`, the fuel-over-luminosity constant that sets the Sun's
+    /// main-sequence lifetime, so every star's lifetime scales from it. Reserved-with-basis (the basis: the Sun's
+    /// hydrogen fuel divided by its luminosity, the classic nuclear-timescale figure of order ten gigayears, cited
+    /// rather than fabricated). Surfaced, not set here.
+    pub solar_nuclear_timescale_myr: Fixed,
+    /// The Gough brightening COEFFICIENT (dimensionless): the fraction the rising core mean-molecular-weight drives
+    /// the luminosity up over a full main-sequence lifetime, expected positive (a main-sequence star brightens).
+    /// Reserved-with-basis (the basis: the Gough 1981 solar-luminosity form `L(t)/L_zams = 1 / (1 - c * t/t_ms)`,
+    /// with `c` of order 0.4 reproducing the ~30 to 40 percent zero-age-to-present solar brightening; per-star so a
+    /// differently structured star can carry its own). Surfaced, not set here.
+    pub brightening_coefficient: Fixed,
+}
+
+/// The star's main-sequence LIFETIME (megayears), DERIVED from the nuclear timescale: `t_ms = t_sun * (M/M_sun) /
+/// (L_zams/L_sun)`, the fuel (proportional to mass) divided by the burn rate (the luminosity), anchored to the
+/// Sun's `t_sun`. Because the ZAMS luminosity climbs steeply with mass (the mass-luminosity relation the stellar
+/// front-end derives, `L ~ M^alpha` with `alpha ~ 3.5`), a heavier star has a SHORTER main-sequence life: it holds
+/// more fuel but burns it far faster, so the lifetime shrinks as `M / M^alpha`. The lifetime is thus not authored:
+/// it emerges from the mass and the ZAMS luminosity the stellar model already supplies, times the one reserved
+/// nuclear-timescale anchor. `None` if the mass or the ZAMS luminosity ratio is non-positive (no fuel, or no burn
+/// rate to divide by), or the product overflows.
+pub fn main_sequence_lifetime_myr(aging: &StarAgingParams) -> Option<Fixed> {
+    if aging.mass_ratio <= Fixed::ZERO || aging.zams_luminosity_ratio <= Fixed::ZERO {
+        return None;
+    }
+    aging
+        .solar_nuclear_timescale_myr
+        .checked_mul(aging.mass_ratio)
+        .and_then(|fuel| fuel.checked_div(aging.zams_luminosity_ratio))
+}
+
+/// The star's CURRENT luminosity ratio `L(t)/L_sun` at a main-sequence age `star_age_myr`, DERIVED from the ZAMS
+/// anchor and the Gough brightening: `L(t)/L_sun = (L_zams/L_sun) / (1 - c * t/t_ms)`, with `t` the star's age,
+/// `t_ms` its derived main-sequence lifetime ([`main_sequence_lifetime_myr`]), and `c` the Gough brightening
+/// coefficient. As core hydrogen fuses to helium the core's mean molecular weight rises, the core contracts and
+/// heats, and the luminosity climbs; the burnt fraction `f = t/t_ms` drives the climb, so the brightening EMERGES
+/// from the age against the derived lifetime, never an authored curve. At age 0 the factor is exactly one, so the
+/// ZAMS anchor is recovered. `None` once `t >= t_ms`: the star has exhausted its core hydrogen and LEAVES the main
+/// sequence, the post-main-sequence giant branch being a separate stellar-evolution arc, capped here rather than
+/// extrapolating a regime this law does not describe. Also `None` on a negative age, an undefined lifetime, or a
+/// coefficient so large the denominator would hit zero before `t_ms` (a divergent regime the first-grade law does
+/// not cover).
+pub fn current_luminosity_ratio(aging: &StarAgingParams, star_age_myr: Fixed) -> Option<Fixed> {
+    if star_age_myr < Fixed::ZERO {
+        return None;
+    }
+    let t_ms = main_sequence_lifetime_myr(aging)?;
+    if t_ms <= Fixed::ZERO || star_age_myr >= t_ms {
+        // The star has left the main sequence (or has no defined lifetime): the post-main-sequence arc, not here.
+        return None;
+    }
+    let fraction = star_age_myr.checked_div(t_ms)?; // f = t/t_ms, in [0, 1)
+    let drop = aging.brightening_coefficient.checked_mul(fraction)?; // c * f
+    let denom = Fixed::ONE.checked_sub(drop)?; // 1 - c * f
+    if denom <= Fixed::ZERO {
+        // A coefficient large enough to zero the denominator before t_ms diverges: outside the first-grade law.
+        return None;
+    }
+    aging.zams_luminosity_ratio.checked_div(denom)
 }
 
 #[cfg(test)]
@@ -228,6 +345,193 @@ mod tests {
             gravity_m_per_s2: Fixed::from_int(10),
             processing_time_myr: Fixed::from_int(100),
         }
+    }
+
+    // The star-aging parameters. The two constants are ILLUSTRATIVE stand-ins for the owner's reserved values,
+    // chosen at the physically-anchored figures only to exercise the mechanism: `t_sun` = 10 Gyr (10,000 Myr, the
+    // solar nuclear timescale) and `c` = 0.4 (the Gough 1981 coefficient). The ZAMS luminosity and mass ratios are
+    // the per-star anchors the caller feeds from the stellar front-end.
+    fn aging_params(zams_luminosity_ratio: Fixed, mass_ratio: Fixed) -> StarAgingParams {
+        StarAgingParams {
+            zams_luminosity_ratio,
+            mass_ratio,
+            solar_nuclear_timescale_myr: Fixed::from_int(10_000),
+            brightening_coefficient: Fixed::from_ratio(4, 10),
+        }
+    }
+
+    #[test]
+    fn the_star_brightens_monotonically_over_its_main_sequence_life() {
+        // The core burns hydrogen, its mean molecular weight rises, and the luminosity climbs: at every later age
+        // the star is brighter than before, the surface-warming drive of the deep-time run.
+        let star = aging_params(Fixed::ONE, Fixed::ONE); // Sun-like: t_ms = 10,000 Myr
+        let mut prev = current_luminosity_ratio(&star, Fixed::ZERO).expect("on the main sequence");
+        for age_myr in [500, 1000, 2000, 4000, 6000, 8000, 9000, 9500, 9900] {
+            let l = current_luminosity_ratio(&star, Fixed::from_int(age_myr))
+                .expect("still on the main sequence before t_ms");
+            assert!(
+                l > prev,
+                "the star brightens as it ages: at {age_myr} Myr L/L_sun = {} was not above the prior {}",
+                l.to_f64_lossy(),
+                prev.to_f64_lossy()
+            );
+            prev = l;
+        }
+    }
+
+    #[test]
+    fn the_zams_anchor_is_recovered_at_age_zero() {
+        // At age 0 the Gough factor is exactly one, so the current luminosity is the stellar front-end's ZAMS
+        // output unchanged: the brightening climbs FROM the anchor, it does not replace it.
+        let star = aging_params(Fixed::from_ratio(7, 4), Fixed::from_ratio(6, 5));
+        assert_eq!(
+            current_luminosity_ratio(&star, Fixed::ZERO),
+            Some(Fixed::from_ratio(7, 4)),
+            "at age 0 the ZAMS anchor is recovered exactly"
+        );
+    }
+
+    #[test]
+    fn a_more_massive_star_leaves_the_main_sequence_faster() {
+        // t_ms ~ M / L and L climbs steeply with M (the mass-luminosity relation the stellar front-end derives), so
+        // a heavier star holds more fuel but burns it far faster and leaves the main sequence sooner. The ZAMS
+        // luminosities come from the real stellar model to show the derivation composes end to end.
+        use crate::stellar::luminosity_ratio;
+        let alpha = Fixed::from_ratio(35, 10); // illustrative mass-luminosity slope (~3.5), as the stellar tests use
+        let lambda = Fixed::ZERO; // solar metallicity: the metallicity factor is one
+        let sun_l = luminosity_ratio(Fixed::ONE, Fixed::ONE, alpha, lambda).expect("sun L");
+        let heavy_l =
+            luminosity_ratio(Fixed::from_int(2), Fixed::ONE, alpha, lambda).expect("heavy L");
+        let sun = aging_params(sun_l, Fixed::ONE);
+        let heavy = aging_params(heavy_l, Fixed::from_int(2));
+        let sun_life = main_sequence_lifetime_myr(&sun).expect("sun lifetime");
+        let heavy_life = main_sequence_lifetime_myr(&heavy).expect("heavy lifetime");
+        assert!(
+            heavy_life < sun_life,
+            "a heavier star burns its fuel faster and leaves the main sequence sooner, got heavy {} vs sun {}",
+            heavy_life.to_f64_lossy(),
+            sun_life.to_f64_lossy()
+        );
+        // And the heavier star, having a shorter t_ms, brightens FASTER: at the same age it is a larger fraction of
+        // the way through its life, so a larger fraction of the way up the brightening curve.
+        let age = Fixed::from_int(1000);
+        let sun_f = current_luminosity_ratio(&sun, age)
+            .expect("sun still on MS")
+            .checked_div(sun_l)
+            .expect("sun brightening factor");
+        let heavy_f = current_luminosity_ratio(&heavy, age)
+            .expect("heavy still on MS")
+            .checked_div(heavy_l)
+            .expect("heavy brightening factor");
+        assert!(
+            heavy_f > sun_f,
+            "the shorter-lived heavier star brightens faster per unit time, got {} vs {}",
+            heavy_f.to_f64_lossy(),
+            sun_f.to_f64_lossy()
+        );
+    }
+
+    #[test]
+    fn the_star_leaves_the_main_sequence_at_its_lifetime() {
+        // Just before t_ms the star is still on the main sequence; at and past t_ms it has exhausted its core
+        // hydrogen and LEAVES, so the brightening caps to None (the post-main-sequence branch is a separate arc).
+        let star = aging_params(Fixed::ONE, Fixed::ONE); // t_ms = 10,000 Myr
+        assert!(
+            current_luminosity_ratio(&star, Fixed::from_int(9_999)).is_some(),
+            "just before t_ms the star is still on the main sequence"
+        );
+        assert!(
+            current_luminosity_ratio(&star, Fixed::from_int(10_000)).is_none(),
+            "at t_ms the star leaves the main sequence"
+        );
+        assert!(
+            current_luminosity_ratio(&star, Fixed::from_int(12_000)).is_none(),
+            "past t_ms is the post-main-sequence regime, not extrapolated here"
+        );
+    }
+
+    #[test]
+    fn the_brightening_is_deterministic() {
+        // A pure derivation replays bit-for-bit, the determinism the canon requires.
+        let star = aging_params(Fixed::from_ratio(3, 2), Fixed::from_ratio(5, 4));
+        let a = current_luminosity_ratio(&star, Fixed::from_int(3_000));
+        let b = current_luminosity_ratio(&star, Fixed::from_int(3_000));
+        assert_eq!(a, b, "the brightening replays deterministically");
+    }
+
+    #[test]
+    fn the_star_ages_on_the_deep_time_clock() {
+        // The star and the planet share one clock: as the run steps, the star's age advances through elapsed_myr
+        // and its luminosity climbs, the drive that warms the surface over the run.
+        let star = aging_params(Fixed::ONE, Fixed::ONE);
+        let params = [mantle_params(5)];
+        let mut state = DeepTimeState::young(2, Fixed::from_int(2000));
+        let l0 = state
+            .stellar_luminosity_ratio(&star)
+            .expect("on the main sequence at the start");
+        assert_eq!(
+            l0,
+            Fixed::ONE,
+            "a fresh run begins at the star's ZAMS anchor"
+        );
+        for _ in 0..20 {
+            state = step_deep_time(&state, &params, &melt_params(), Fixed::from_int(100))
+                .expect("steps");
+        }
+        assert_eq!(
+            state.star_age_myr(),
+            Fixed::from_int(2000),
+            "the star's age tracks the deep-time clock (20 ticks of 100 Myr)"
+        );
+        let l1 = state
+            .stellar_luminosity_ratio(&star)
+            .expect("still on the main sequence");
+        assert!(
+            l1 > l0,
+            "the star brightens as the deep-time run advances, warming the surface, got {} vs {}",
+            l1.to_f64_lossy(),
+            l0.to_f64_lossy()
+        );
+    }
+
+    #[test]
+    fn a_run_can_begin_with_an_already_aged_star() {
+        // The per-run start age: a run beginning mid-life carries the star's prior age, so at the same elapsed time
+        // its star is further up the brightening curve than a run around a zero-age star.
+        let star = aging_params(Fixed::ONE, Fixed::ONE);
+        let fresh = DeepTimeState::young(1, Fixed::from_int(1800));
+        let aged = fresh.clone().with_star_start_age(Fixed::from_int(5000));
+        assert_eq!(
+            aged.star_age_myr(),
+            Fixed::from_int(5000),
+            "the run begins with the star already aged"
+        );
+        assert!(
+            aged.stellar_luminosity_ratio(&star).expect("aged, on MS")
+                > fresh.stellar_luminosity_ratio(&star).expect("fresh, on MS"),
+            "the already-aged star is brighter at the same elapsed time"
+        );
+    }
+
+    #[test]
+    fn a_massless_or_dark_star_has_no_defined_lifetime() {
+        // Fail-loud guards: a non-positive mass (no fuel) or a non-positive ZAMS luminosity (no burn rate) has no
+        // defined main-sequence lifetime, routed to None rather than a fabricated value.
+        assert_eq!(
+            main_sequence_lifetime_myr(&aging_params(Fixed::ONE, Fixed::ZERO)),
+            None,
+            "no mass, no fuel, no lifetime"
+        );
+        assert_eq!(
+            main_sequence_lifetime_myr(&aging_params(Fixed::ZERO, Fixed::ONE)),
+            None,
+            "no luminosity, no burn rate, no lifetime"
+        );
+        assert_eq!(
+            current_luminosity_ratio(&aging_params(Fixed::ONE, Fixed::ONE), Fixed::from_int(-100)),
+            None,
+            "a negative age is not a main-sequence age"
+        );
     }
 
     #[test]
