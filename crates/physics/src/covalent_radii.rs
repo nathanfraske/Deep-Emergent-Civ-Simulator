@@ -6,10 +6,13 @@
 //!
 //! SCOPE (the definition tag, enforced by the caller's dispatch, not this loader): agreement is good only when the
 //! bond is not too ionic and the coordination is near the fit's input; an IONIC bond routes through the Shannon
-//! ionic-radius column instead (the ionic-dispatch line). These are MOLECULAR bond radii; the tetrahedral-crystal
-//! set that fits solid lattices to subpicometre accuracy is a pending refinement (a flagged SI fetch), so grain-
-//! lattice bond lengths use the molecular radii as a first cut.
+//! ionic-radius column instead (the ionic-dispatch line). Two length sets: the MOLECULAR single/double/triple radii,
+//! and the TETRAHEDRAL-crystal radii (Pyykkö 2015 Figure 2, the ~30 elements that form tetrahedral crystals) that
+//! estimate a solid-lattice bond length additively. The tetrahedral set is the production chain's alien length
+//! rung; the calibration battery reads MEASURED crystal geometry instead, so generator error is never convolved
+//! with the length estimator's error (a second battery pass grades the estimator through the tetrahedral sum).
 
+use civsim_core::Fixed;
 use serde::Deserialize;
 use std::collections::BTreeMap;
 
@@ -25,7 +28,8 @@ pub enum CovalentRadiiError {
 }
 
 /// The covalent radii of one element at each bond order (picometres). The single-bond radius is always present;
-/// double and triple are absent for elements the fit did not cover at that order.
+/// double and triple are absent for elements the fit did not cover at that order; the tetrahedral radius is present
+/// only for the ~30 elements that form tetrahedrally-bonded crystals.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CovalentRadius {
     /// Single-bond covalent radius (pm).
@@ -34,6 +38,8 @@ pub struct CovalentRadius {
     pub double_pm: Option<i32>,
     /// Triple-bond covalent radius (pm), if the fit covered it.
     pub triple_pm: Option<i32>,
+    /// Tetrahedral-crystal covalent radius (pm, sub-picometre), if the element forms tetrahedral crystals.
+    pub tetrahedral_pm: Option<Fixed>,
 }
 
 impl CovalentRadius {
@@ -69,6 +75,8 @@ struct RawElement {
     double_pm: Option<i32>,
     #[serde(default)]
     triple_pm: Option<i32>,
+    #[serde(default)]
+    tetrahedral_pm: Option<f64>,
 }
 
 impl CovalentRadii {
@@ -85,10 +93,14 @@ impl CovalentRadii {
             {
                 return Err(CovalentRadiiError::NotPhysical(raw.symbol));
             }
+            let tetrahedral_pm = raw
+                .tetrahedral_pm
+                .map(|v| Fixed::from_ratio((v * 10.0).round() as i64, 10));
             let entry = CovalentRadius {
                 single_pm: raw.single_pm,
                 double_pm: raw.double_pm,
                 triple_pm: raw.triple_pm,
+                tetrahedral_pm,
             };
             if radii.insert(raw.symbol.clone(), entry).is_some() {
                 return Err(CovalentRadiiError::Duplicate(raw.symbol));
@@ -114,6 +126,17 @@ impl CovalentRadii {
         let ra = self.radius(a)?.at_order(order)?;
         let rb = self.radius(b)?.at_order(order)?;
         Some(ra + rb)
+    }
+
+    /// The tetrahedral-crystal bond length `r_e = r_tet(a) + r_tet(b)` (pm), the length estimator for a
+    /// tetrahedrally-bonded crystal (the production chain's alien rung when no crystal has been measured). Additive
+    /// for tetrahedral crystals (SiC lands ~195 pm vs the measured 188.9); a strongly polar bond (silicate Si-O)
+    /// needs an ionicity correction the sum omits, which the second battery pass measures as the estimator's honest
+    /// band. `None` if either element lacks a tetrahedral radius.
+    pub fn tetrahedral_bond_length_pm(&self, a: &str, b: &str) -> Option<Fixed> {
+        let ra = self.radius(a)?.tetrahedral_pm?;
+        let rb = self.radius(b)?.tetrahedral_pm?;
+        ra.checked_add(rb)
     }
 }
 
@@ -141,6 +164,31 @@ mod tests {
             c.radius("H").unwrap().double_pm.is_none(),
             "H has no double-bond radius"
         );
+    }
+
+    #[test]
+    fn the_tetrahedral_crystal_radii_load() {
+        // The alien-rung length estimator (Pyykko 2015 Figure 2): Si = 117.6, C = 77.3 pm, so the tetrahedral Si-C
+        // sum is 194.9 pm (vs the measured 188.9, the pre-registered production-chain band). Only tetrahedral-crystal
+        // formers carry a tetrahedral radius; sodium does not.
+        let c = col();
+        let si = c.radius("Si").unwrap().tetrahedral_pm.unwrap();
+        assert!(
+            (si.to_f64_lossy() - 117.6).abs() < 0.05,
+            "Si tetrahedral 117.6, got {}",
+            si.to_f64_lossy()
+        );
+        let sic = c.tetrahedral_bond_length_pm("Si", "C").unwrap();
+        assert!(
+            (sic.to_f64_lossy() - 194.9).abs() < 0.1,
+            "the tetrahedral Si-C length is 194.9 pm, got {}",
+            sic.to_f64_lossy()
+        );
+        assert!(
+            c.radius("Na").unwrap().tetrahedral_pm.is_none(),
+            "Na forms no tetrahedral crystal"
+        );
+        assert!(c.tetrahedral_bond_length_pm("Na", "Cl").is_none());
     }
 
     #[test]
