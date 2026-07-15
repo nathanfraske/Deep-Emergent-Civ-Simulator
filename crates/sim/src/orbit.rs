@@ -104,26 +104,74 @@ pub fn orbital_state(mean_anomaly: Fixed, eccentricity: Fixed) -> Option<Orbital
     })
 }
 
+/// The unit vector pointing from the body TOWARD the star, in the orbital plane, from a solved
+/// [`OrbitalState`]. The body sits at `(x/a, y/a)` and the star at the origin, so the direction is
+/// `-(x/a, y/a)` normalised by the star distance `r/a`. This is the raw sun direction the lighting reads
+/// (the seasons then fold in the axial tilt, [`solar_declination`]). `None` on a degenerate zero radius.
+pub fn star_unit_orbital_plane(state: &OrbitalState) -> Option<(Fixed, Fixed)> {
+    let r = state.radius_over_semimajor;
+    if r <= Fixed::ZERO {
+        return None;
+    }
+    let dx = Fixed::ZERO.checked_sub(state.position_x_over_a.checked_div(r)?)?;
+    let dy = Fixed::ZERO.checked_sub(state.position_y_over_a.checked_div(r)?)?;
+    Some((dx, dy))
+}
+
+/// The SOLAR DECLINATION (the sub-solar latitude, the seasons): the latitude on the body directly under
+/// the star at this orbital moment, `sin(declination) = sin(obliquity)*sin(season_angle)`, with the
+/// season angle the body's true longitude `true_anomaly + perihelion_longitude` measured from the
+/// equinox. It swings between plus and minus the obliquity over one orbit (the tropics), passing through
+/// zero at the equinoxes: that swing IS the seasons, and because the season angle carries the true
+/// anomaly it carries the eccentric orbit's uneven season lengths for free. `obliquity` (the axial tilt)
+/// and `perihelion_longitude` (where perihelion sits relative to the equinox, the axial-orientation
+/// element) are per-world scenario ARGUMENTS, so a different tilt or a precessed axis is a data row (the
+/// admit-the-alien test). `None` on an intermediate past the representable range.
+pub fn solar_declination(
+    state: &OrbitalState,
+    obliquity: Fixed,
+    perihelion_longitude: Fixed,
+) -> Option<Fixed> {
+    let season_angle = state.true_anomaly.checked_add(perihelion_longitude)?;
+    let (sin_theta, _) = season_angle.sin_cos();
+    let (sin_obliquity, _) = obliquity.sin_cos();
+    let sin_declination = sin_obliquity.checked_mul(sin_theta)?;
+    Some(sin_declination.asin())
+}
+
 /// The full-circle arctangent `atan2(y, x)` in `[-pi, pi]`, built from the single-argument [`Fixed::atan`]
-/// (which returns `[-pi/2, pi/2]`) plus the quadrant correction from the signs of `x` and `y`. `None`
-/// only on an intermediate past the representable range.
+/// (which returns `[-pi/2, pi/2]`) plus a quadrant correction. It always divides the SMALLER magnitude by
+/// the larger, so the argument handed to `atan` stays within `[-1, 1]` and the near-vertical case
+/// (`x` approaching zero, where a naive `y/x` would overflow fixed point) is exact. `None` only on an
+/// intermediate past the representable range.
 fn atan2(y: Fixed, x: Fixed) -> Option<Fixed> {
+    let zero = Fixed::ZERO;
     let pi = Fixed::PI;
-    if x > Fixed::ZERO {
-        Some(y.checked_div(x)?.atan())
-    } else if x < Fixed::ZERO {
+    let half_pi = pi.checked_div(Fixed::from_int(2))?;
+    if x == zero && y == zero {
+        return Some(zero);
+    }
+    // Sign-normalised magnitudes, to pick the numerically safe quotient.
+    let ax = if x < zero { zero.checked_sub(x)? } else { x };
+    let ay = if y < zero { zero.checked_sub(y)? } else { y };
+    if ax >= ay {
+        // The near-horizontal case: atan(y/x) lands in [-pi/4, pi/4], then the quadrant from x, y.
         let base = y.checked_div(x)?.atan();
-        if y >= Fixed::ZERO {
+        if x > zero {
+            Some(base)
+        } else if y >= zero {
             base.checked_add(pi)
         } else {
             base.checked_sub(pi)
         }
-    } else if y > Fixed::ZERO {
-        pi.checked_div(Fixed::from_int(2))
-    } else if y < Fixed::ZERO {
-        Fixed::ZERO.checked_sub(pi.checked_div(Fixed::from_int(2))?)
     } else {
-        Some(Fixed::ZERO)
+        // The near-vertical case: atan2 = sign(y)*pi/2 - atan(x/y), with atan(x/y) in [-pi/4, pi/4].
+        let base = x.checked_div(y)?.atan();
+        if y > zero {
+            half_pi.checked_sub(base)
+        } else {
+            zero.checked_sub(half_pi)?.checked_sub(base)
+        }
     }
 }
 
@@ -258,6 +306,90 @@ mod tests {
             )
             .is_none(),
             "e < 0 fails loud"
+        );
+    }
+
+    #[test]
+    fn the_star_direction_is_a_unit_vector_pointing_at_the_focus() {
+        // At perihelion (M=0) the body sits on the +x axis at (1-e, 0), so the star (at the origin) lies
+        // in the -x direction: the unit vector is (-1, 0). And it is always unit length.
+        let e = Fixed::from_ratio(3, 10);
+        let peri = orbital_state(Fixed::ZERO, e).unwrap();
+        let (dx, dy) = star_unit_orbital_plane(&peri).unwrap();
+        assert!(
+            (dx.to_f64_lossy() + 1.0).abs() < 1e-4,
+            "points to -x at perihelion, got dx={}",
+            dx.to_f64_lossy()
+        );
+        assert!(
+            dy.to_f64_lossy().abs() < 1e-4,
+            "no y component at perihelion, got {}",
+            dy.to_f64_lossy()
+        );
+        // An off-axis phase: still unit length.
+        let s = orbital_state(Fixed::from_ratio(23, 10), e).unwrap();
+        let (ux, uy) = star_unit_orbital_plane(&s).unwrap();
+        let mag = (ux.to_f64_lossy().powi(2) + uy.to_f64_lossy().powi(2)).sqrt();
+        assert!(
+            (mag - 1.0).abs() < 1e-4,
+            "star direction is unit length, got {mag}"
+        );
+    }
+
+    #[test]
+    fn the_solar_declination_traces_the_seasons() {
+        // The seasons: with the axis untilted the sun stays on the equator; with a 0.4 rad tilt and
+        // perihelion at the equinox (perihelion_longitude = 0) on a circular orbit (so nu = M), the
+        // sub-solar latitude is zero at the equinoxes (M = 0, pi), reaches +tilt at the northern solstice
+        // (M = pi/2) and -tilt at the southern (M = 3pi/2), and never leaves the tropics.
+        let tilt = Fixed::from_ratio(4, 10); // 0.4 rad obliquity
+        let perihelion = Fixed::ZERO;
+        let half_pi = Fixed::PI.checked_div(Fixed::from_int(2)).unwrap();
+        let three_half_pi = half_pi.checked_mul(Fixed::from_int(3)).unwrap();
+        // Untilted: declination is zero everywhere.
+        let s = orbital_state(half_pi, Fixed::ZERO).unwrap();
+        assert!(
+            solar_declination(&s, Fixed::ZERO, perihelion)
+                .unwrap()
+                .to_f64_lossy()
+                .abs()
+                < 1e-4,
+            "no tilt gives no seasons"
+        );
+        // Equinoxes at M = 0 and M = pi.
+        for &m in &[Fixed::ZERO, Fixed::PI] {
+            let st = orbital_state(m, Fixed::ZERO).unwrap();
+            assert!(
+                solar_declination(&st, tilt, perihelion)
+                    .unwrap()
+                    .to_f64_lossy()
+                    .abs()
+                    < 1e-3,
+                "equinox declination is zero at M={}",
+                m.to_f64_lossy()
+            );
+        }
+        // Northern solstice at M = pi/2: declination equals +obliquity.
+        let summer = orbital_state(half_pi, Fixed::ZERO).unwrap();
+        assert!(
+            (solar_declination(&summer, tilt, perihelion)
+                .unwrap()
+                .to_f64_lossy()
+                - 0.4)
+                .abs()
+                < 1e-3,
+            "northern solstice declination is +tilt"
+        );
+        // Southern solstice at M = 3pi/2: declination equals -obliquity.
+        let winter = orbital_state(three_half_pi, Fixed::ZERO).unwrap();
+        assert!(
+            (solar_declination(&winter, tilt, perihelion)
+                .unwrap()
+                .to_f64_lossy()
+                + 0.4)
+                .abs()
+                < 1e-3,
+            "southern solstice declination is -tilt"
         );
     }
 }
