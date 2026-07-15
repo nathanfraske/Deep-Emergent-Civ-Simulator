@@ -554,6 +554,121 @@ pub fn paint_derived_tiles(
     buf
 }
 
+/// The on-screen radius (pixels) a planet's DERIVED radius projects to at a view scale of `m_per_px` metres per
+/// pixel: `radius_px = radius_m / m_per_px`. This is the seeable-world size law, so a denser (smaller-radius)
+/// planet draws a smaller globe and a larger one draws bigger, straight from [`civsim_sim::astro::planet_radius_m`].
+/// All fixed-point, deterministic; a non-positive or overflowing input yields `0` (nothing to draw). Display-only,
+/// a one-way read of the derived radius (Principle 10).
+// Wired into the solar-system globe compositor in the zoom-connection slice; the tests exercise it now.
+#[allow(dead_code)]
+pub fn globe_radius_px(radius_m: Fixed, m_per_px: Fixed) -> usize {
+    if radius_m <= Fixed::ZERO || m_per_px <= Fixed::ZERO {
+        return 0;
+    }
+    radius_m
+        .checked_div(m_per_px)
+        .map(|v| v.to_int().max(0) as usize)
+        .unwrap_or(0)
+}
+
+/// Normalise a 3-vector for display lighting, returning the +z unit vector for a zero input (a safe default facing
+/// the viewer). Non-canon display math, `f32` is fine.
+#[allow(dead_code)]
+fn normalize3(v: [f32; 3]) -> [f32; 3] {
+    let m = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+    if m <= 0.0 {
+        [0.0, 0.0, 1.0]
+    } else {
+        [v[0] / m, v[1] / m, v[2] / m]
+    }
+}
+
+/// Sample the DERIVED-tile surface colour at longitude `u` and latitude `v` (each in `[0, 1)`), an orthographic
+/// read of the derived relief field ([`derived_tile_color`]) wrapped onto the globe. An empty field falls back to a
+/// deep-ocean stand-in so the sphere still draws. Display-only.
+#[allow(dead_code)]
+fn sample_derived_surface(tiles: &[DerivedTile], cols: usize, u: f32, v: f32) -> Rgb {
+    if tiles.is_empty() || cols == 0 {
+        return Rgb::new(40, 72, 120);
+    }
+    let rows = tiles.len().div_ceil(cols);
+    let cu = ((u.clamp(0.0, 0.999_9) * cols as f32) as usize).min(cols - 1);
+    let cv = ((v.clamp(0.0, 0.999_9) * rows as f32) as usize).min(rows.saturating_sub(1));
+    let idx = (cv * cols + cu).min(tiles.len() - 1);
+    derived_tile_color(tiles[idx].relief)
+}
+
+/// Draw the planet as a lit sphere: a filled disk of on-screen radius `radius_px` centred at `(cx, cy)`, its
+/// surface textured from the DERIVED tiles (an orthographic sphere map of the relief field) and shaded by a Lambert
+/// diffuse term against the star direction `star_dir`. The sunlit hemisphere is bright and tinted by `light_tint`
+/// (the star's [`blackbody_rgb`]); the night side falls to a faint neutral ambient; the cosine falloff between them
+/// is the soft day/night terminator. Pixels outside the disk are left untouched (the caller paints space and, in a
+/// later slice, the atmosphere limb). A pure, deterministic read of the derived radius, tiles, and star direction,
+/// one-way canon -> pixels, so it writes no canonical state (Principle 10).
+// Wired into the solar-system globe compositor in the zoom-connection slice; the tests exercise it now.
+#[allow(dead_code)]
+#[allow(clippy::too_many_arguments)]
+pub fn draw_globe(
+    buf: &mut [u32],
+    w: usize,
+    h: usize,
+    cx: i32,
+    cy: i32,
+    radius_px: usize,
+    tiles: &[DerivedTile],
+    tile_cols: usize,
+    star_dir: [f32; 3],
+    light_tint: Rgb,
+) {
+    use std::f32::consts::PI;
+    if radius_px == 0 || w == 0 || h == 0 {
+        return;
+    }
+    let r = radius_px as f32;
+    let l = normalize3(star_dir);
+    let tint = [
+        light_tint.r as f32 / 255.0,
+        light_tint.g as f32 / 255.0,
+        light_tint.b as f32 / 255.0,
+    ];
+    // A faint neutral ambient so the night hemisphere reads dark but not pure black (skyglow and starlight).
+    const AMBIENT: f32 = 0.10;
+    let rp = radius_px as i32;
+    let x0 = (cx - rp).max(0);
+    let x1 = (cx + rp).min(w as i32 - 1);
+    let y0 = (cy - rp).max(0);
+    let y1 = (cy + rp).min(h as i32 - 1);
+    for py in y0..=y1 {
+        for px in x0..=x1 {
+            let nx = (px - cx) as f32 / r;
+            let ny = (py - cy) as f32 / r;
+            let d2 = nx * nx + ny * ny;
+            if d2 > 1.0 {
+                continue; // outside the disk
+            }
+            let nz = (1.0 - d2).sqrt(); // the front-hemisphere normal, toward the viewer
+                                        // Orthographic sphere map. Screen y points down, so world up is -ny; longitude wraps the meridian.
+            let lat = (-ny).clamp(-1.0, 1.0).asin(); // -pi/2..pi/2
+            let lon = nx.atan2(nz); // -pi..pi
+            let u = (lon + PI) / (2.0 * PI);
+            let v = (0.5 - lat / PI).clamp(0.0, 1.0);
+            let base = sample_derived_surface(tiles, tile_cols, u, v);
+            // Lambert diffuse: dot of the surface normal with the star direction, clamped at the terminator.
+            let lambert = (nx * l[0] + ny * l[1] + nz * l[2]).max(0.0);
+            let shade = |c: u8, t: f32| -> u8 {
+                let day = AMBIENT + (1.0 - AMBIENT) * lambert * t;
+                (c as f32 * day).clamp(0.0, 255.0) as u8
+            };
+            let color = Rgb::new(
+                shade(base.r, tint[0]),
+                shade(base.g, tint[1]),
+                shade(base.b, tint[2]),
+            );
+            buf[py as usize * w + px as usize] = color.pack();
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -646,6 +761,123 @@ mod tests {
         // A hot early-type star (~10000 K) reads blue-white: blue overtakes red.
         let hot = blackbody_rgb(Fixed::from_int(10000));
         assert!(hot.b > hot.r, "a hot star is bluish, got {hot:?}");
+    }
+
+    /// A small hand-built DERIVED-tile field for the globe-texture tests: a 6-wide grid banded by relief, so the
+    /// sphere has a surface to wrap without loading the petrology registry.
+    fn demo_globe_tiles() -> (Vec<DerivedTile>, usize) {
+        let cols = 6usize;
+        let rows = 6usize;
+        let mut tiles = Vec::with_capacity(cols * rows);
+        for r in 0..rows {
+            let relief = match r {
+                0 | 1 => TerrainRelief::Upland,
+                2 | 3 => TerrainRelief::Lowland,
+                _ => TerrainRelief::Submarine,
+            };
+            for _ in 0..cols {
+                tiles.push(DerivedTile {
+                    elevation: Fixed::from_int(r as i32),
+                    relief,
+                });
+            }
+        }
+        (tiles, cols)
+    }
+
+    /// The mean luminance of the disk pixels on one side of the vertical centre line at `cx`.
+    fn half_luminance(buf: &[u32], w: usize, cx: i32, cy: i32, r: i32, right: bool) -> f64 {
+        let mut sum = 0f64;
+        let mut n = 0f64;
+        for py in (cy - r).max(0)..=(cy + r) {
+            for px in (cx - r).max(0)..=(cx + r) {
+                let dx = px - cx;
+                let dy = py - cy;
+                if dx * dx + dy * dy > r * r {
+                    continue;
+                }
+                if right != (dx > 0) {
+                    continue;
+                }
+                let word = buf[py as usize * w + px as usize];
+                let rgb = Rgb::new((word >> 16) as u8, (word >> 8) as u8, word as u8);
+                sum += rgb.luminance() as f64;
+                n += 1.0;
+            }
+        }
+        if n == 0.0 {
+            0.0
+        } else {
+            sum / n
+        }
+    }
+
+    #[test]
+    fn the_globe_is_a_lit_sphere_sized_from_the_derived_radius() {
+        use civsim_sim::astro;
+        // The on-screen size scales from the DERIVED planet radius: a denser planet of the same mass has a smaller
+        // derived radius and draws a smaller disk at the same view scale (a pure read of planet_radius_m).
+        let m_per_px = Fixed::from_int(30_000);
+        let earth = astro::planet_radius_m(Fixed::ONE, Fixed::from_ratio(5514, 1000))
+            .expect("earth radius");
+        let dense = astro::planet_radius_m(Fixed::ONE, Fixed::from_int(8)).expect("dense radius");
+        let earth_px = globe_radius_px(earth, m_per_px);
+        let dense_px = globe_radius_px(dense, m_per_px);
+        assert!(
+            earth_px > 0 && dense_px > 0,
+            "both globes have an on-screen size"
+        );
+        assert!(
+            earth_px > dense_px,
+            "a denser, smaller planet draws a smaller globe"
+        );
+        assert_eq!(
+            globe_radius_px(Fixed::ZERO, m_per_px),
+            0,
+            "no radius, no globe"
+        );
+
+        // Draw the Earth globe lit from the right (+x). The star-facing (right) hemisphere reads brighter than the
+        // night (left) side, the terminator running down the middle, and the render replays byte for byte.
+        let (w, h) = (200usize, 160usize);
+        let bg = Rgb::new(8, 9, 14);
+        let (tiles, cols) = demo_globe_tiles();
+        let (cx, cy) = (100i32, 80i32);
+        let radius = 64usize;
+        let mut buf = vec![bg.pack(); w * h];
+        draw_globe(
+            &mut buf,
+            w,
+            h,
+            cx,
+            cy,
+            radius,
+            &tiles,
+            cols,
+            [1.0, 0.0, 0.0],
+            Rgb::new(255, 255, 255),
+        );
+        assert!(buf.iter().any(|&p| p != bg.pack()), "the globe is drawn");
+        let right = half_luminance(&buf, w, cx, cy, radius as i32, true);
+        let left = half_luminance(&buf, w, cx, cy, radius as i32, false);
+        assert!(
+            right > left * 1.5,
+            "the sunlit hemisphere is brighter than the night side (right {right:.1} vs left {left:.1})"
+        );
+        let mut replay = vec![bg.pack(); w * h];
+        draw_globe(
+            &mut replay,
+            w,
+            h,
+            cx,
+            cy,
+            radius,
+            &tiles,
+            cols,
+            [1.0, 0.0, 0.0],
+            Rgb::new(255, 255, 255),
+        );
+        assert_eq!(buf, replay, "a pure read replays byte for byte");
     }
 
     #[test]
