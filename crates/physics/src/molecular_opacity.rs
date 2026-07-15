@@ -248,6 +248,115 @@ pub fn aesopus_solar_gate_grid() -> Option<LowTempRosselandGrid> {
     )
 }
 
+/// A vendored ÆSOPUS grid with its composition key (X, Z, C/O) from the manifest, which the up-stack registry
+/// consumes to select by composition. The composition is DERIVED from the fetch POST parameters (the recipe), not
+/// the filename.
+#[derive(Clone, Debug)]
+pub struct VendoredOpacityGrid {
+    /// Hydrogen mass fraction `X` (the `xhmin` POST parameter).
+    pub hydrogen_mass_fraction: Fixed,
+    /// Metallicity `Z` (the `zeta_ref` POST parameter).
+    pub metallicity: Fixed,
+    /// Carbon-to-oxygen ratio `C/O` (`(C/O)_ref * 10^fco1`).
+    pub carbon_to_oxygen: Fixed,
+    /// The parsed grid.
+    pub grid: LowTempRosselandGrid,
+}
+
+#[derive(serde::Deserialize)]
+struct GridManifest {
+    grid: Vec<ManifestEntry>,
+}
+
+#[derive(serde::Deserialize)]
+struct ManifestEntry {
+    file: String,
+    hydrogen_mass_fraction: String,
+    metallicity: String,
+    carbon_to_oxygen: String,
+}
+
+/// The fixture manifest (file / composition / receipt), the composition keyed on the POST parameters.
+const AESOPUS_MANIFEST: &str = include_str!("../data/aesopus_lowt/manifest.toml");
+
+/// The embedded gas-only tables, joined to the manifest by filename (the `include_str!` mechanism; the manifest is
+/// the composition source of truth).
+const AESOPUS_VENDORED_DAT: &[(&str, &str)] = &[
+    (
+        "aesopus1.0_gasonly_CO_0.55_X0.70_Zsol.dat",
+        include_str!("../data/aesopus_lowt/aesopus1.0_gasonly_CO_0.55_X0.70_Zsol.dat"),
+    ),
+    (
+        "aesopus1.0_gasonly_CO_0.80_X0.70_Zsol.dat",
+        include_str!("../data/aesopus_lowt/aesopus1.0_gasonly_CO_0.80_X0.70_Zsol.dat"),
+    ),
+    (
+        "aesopus1.0_gasonly_CO_1.00_X0.70_Zsol.dat",
+        include_str!("../data/aesopus_lowt/aesopus1.0_gasonly_CO_1.00_X0.70_Zsol.dat"),
+    ),
+    (
+        "aesopus1.0_gasonly_CO_1.20_X0.70_Zsol.dat",
+        include_str!("../data/aesopus_lowt/aesopus1.0_gasonly_CO_1.20_X0.70_Zsol.dat"),
+    ),
+    (
+        "aesopus1.0_gasonly_Zladder_0.1sol_X0.70_Z0.001337.dat",
+        include_str!("../data/aesopus_lowt/aesopus1.0_gasonly_Zladder_0.1sol_X0.70_Z0.001337.dat"),
+    ),
+    (
+        "aesopus1.0_gasonly_Zladder_0.3sol_X0.70_Z0.004011.dat",
+        include_str!("../data/aesopus_lowt/aesopus1.0_gasonly_Zladder_0.3sol_X0.70_Z0.004011.dat"),
+    ),
+    (
+        "aesopus1.0_gasonly_Zladder_1.0sol_X0.70_Z0.01337.dat",
+        include_str!("../data/aesopus_lowt/aesopus1.0_gasonly_Zladder_1.0sol_X0.70_Z0.01337.dat"),
+    ),
+    (
+        "aesopus1.0_gasonly_Zladder_2.0sol_X0.70_Z0.02674.dat",
+        include_str!("../data/aesopus_lowt/aesopus1.0_gasonly_Zladder_2.0sol_X0.70_Z0.02674.dat"),
+    ),
+    (
+        "aesopus1.0_gasonly_gate_AGSS09_X0.70_Z0.0165.dat",
+        include_str!("../data/aesopus_lowt/aesopus1.0_gasonly_gate_AGSS09_X0.70_Z0.0165.dat"),
+    ),
+    (
+        "aesopus1.0_gasonly_metalpoor_X0.75_Z0.001337.dat",
+        include_str!("../data/aesopus_lowt/aesopus1.0_gasonly_metalpoor_X0.75_Z0.001337.dat"),
+    ),
+    (
+        "aesopus1.0_gasonly_protosolar_AGSS09_X0.7154_Z0.0142.dat",
+        include_str!(
+            "../data/aesopus_lowt/aesopus1.0_gasonly_protosolar_AGSS09_X0.7154_Z0.0142.dat"
+        ),
+    ),
+];
+
+/// Load every vendored ÆSOPUS gas-only grid with its composition key, from the manifest joined to the embedded
+/// tables by filename. The composition (X, Z, C/O) is read from the manifest (keyed on the POST parameters); the
+/// grid is parsed from the embedded table. `None` on a manifest parse failure, a manifest entry with no embedded
+/// file, a malformed composition value, or an unparsable table (fail loud, never a partial registry).
+pub fn aesopus_vendored_grids() -> Option<Vec<VendoredOpacityGrid>> {
+    let manifest: GridManifest = toml::from_str(AESOPUS_MANIFEST).ok()?;
+    let axis = aesopus_standard_log_r_axis();
+    let mut out = Vec::with_capacity(manifest.grid.len());
+    for entry in &manifest.grid {
+        let content = AESOPUS_VENDORED_DAT
+            .iter()
+            .find(|(f, _)| *f == entry.file)
+            .map(|(_, c)| *c)?;
+        let x = parse_decimal_fixed(&entry.hydrogen_mass_fraction)?;
+        let z = parse_decimal_fixed(&entry.metallicity)?;
+        let carbon_to_oxygen = parse_decimal_fixed(&entry.carbon_to_oxygen)?;
+        let grid = from_aesopus_rosseland_block(content, x, z, &axis)?;
+        out.push(VendoredOpacityGrid {
+            hydrogen_mass_fraction: x,
+            metallicity: z,
+            carbon_to_oxygen,
+            grid,
+        });
+    }
+    Some(out)
+}
+
 /// A GENERAL two-regime geometric-blend primitive `kappa_R` (cm^2/g): a TOTAL, never a sum. Where only one regime
 /// is valid it owns the opacity; across the overlap where BOTH are valid the two are blended in log space (a
 /// geometric interpolation weighted by temperature), which is a SELECTION between regimes, not an addition. This is
@@ -425,6 +534,28 @@ mod tests {
             close(corner.to_f64_lossy(), 0.5623, 1e-3),
             "a query past the grid clamps to the corner (10^-0.25 = 0.562), got {}",
             corner.to_f64_lossy()
+        );
+    }
+
+    #[test]
+    fn the_vendored_grids_load_from_the_manifest_with_their_compositions() {
+        // The manifest joins to the embedded tables by filename and keys the composition on the POST parameters:
+        // all 11 grids load, each a full 42x19 grid, with the C/O ladder spanning the carbide flip (0.55 to 1.2).
+        let grids = aesopus_vendored_grids().expect("the manifest loads all vendored grids");
+        assert_eq!(grids.len(), 11, "11 vendored compositions");
+        for g in &grids {
+            assert_eq!(g.grid.log_t.len(), 42);
+            assert_eq!(g.grid.log_r.len(), 19);
+        }
+        // The C/O ladder is present and straddles the flip (a registry query near 1.0 must escalate).
+        let cos: Vec<f64> = grids
+            .iter()
+            .map(|g| g.carbon_to_oxygen.to_f64_lossy())
+            .collect();
+        assert!(
+            cos.iter().any(|c| (*c - 1.2).abs() < 0.01)
+                && cos.iter().any(|c| (*c - 0.55).abs() < 0.01),
+            "the C/O ladder spans 0.55 to 1.2, got {cos:?}"
         );
     }
 

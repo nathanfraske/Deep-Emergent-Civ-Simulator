@@ -189,6 +189,23 @@ impl OpacityGridRegistry {
     pub fn grid(&self, comp: &GridComposition) -> &LowTempRosselandGrid {
         &self.table[comp.index].1
     }
+
+    /// The standard registry over the vendored ÆSOPUS grids (loaded from the physics manifest, keyed on the POST
+    /// parameters). `None` if the manifest fails to load (fail loud, never a partial registry).
+    pub fn standard() -> Option<Self> {
+        let grids = civsim_physics::molecular_opacity::aesopus_vendored_grids()?
+            .into_iter()
+            .map(|v| {
+                (
+                    v.hydrogen_mass_fraction,
+                    v.metallicity,
+                    v.carbon_to_oxygen,
+                    v.grid,
+                )
+            })
+            .collect();
+        Some(OpacityGridRegistry::new(grids))
+    }
 }
 
 #[cfg(test)]
@@ -305,6 +322,36 @@ mod tests {
                 Verdict::Escalate(_)
             ),
             "a carbon-rich query with no in-regime grid escalates (pull-on-miss), never substitutes"
+        );
+    }
+
+    #[test]
+    fn the_standard_registry_selects_over_the_vendored_grids() {
+        // The real registry over the 11 vendored ÆSOPUS grids: a solar-ish water-rich query resolves to a grid (not
+        // a miss), a carbon-rich query (C/O = 1.2) resolves to the carbon-rich ladder grid, and a bistable query
+        // (C/O = 0.9) escalates.
+        let reg = OpacityGridRegistry::standard().expect("the vendored registry loads");
+        assert_eq!(reg.len(), 11, "11 vendored grids");
+        let solar = reg.select(co(7, 10), co(165, 10000), co(55, 100));
+        assert!(
+            matches!(solar, Verdict::Decided(_) | Verdict::Trivial(_)),
+            "a solar water-rich query resolves to a grid"
+        );
+        let carbon = reg.select(co(7, 10), co(1337, 100000), co(12, 10));
+        match carbon {
+            Verdict::Decided(d) => assert!(
+                d.winner().carbon_to_oxygen.to_f64_lossy() > 1.0,
+                "a carbon-rich query stays carbon-rich"
+            ),
+            Verdict::Trivial(t) => assert!(t.winner().carbon_to_oxygen.to_f64_lossy() > 1.0),
+            other => panic!("expected a carbon-rich grid, got {other:?}"),
+        }
+        assert!(
+            matches!(
+                reg.select(co(7, 10), co(1337, 100000), co(9, 10)),
+                Verdict::Escalate(_)
+            ),
+            "a bistable C/O escalates even over the real registry"
         );
     }
 

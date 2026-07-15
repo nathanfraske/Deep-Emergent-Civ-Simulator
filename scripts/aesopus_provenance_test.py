@@ -29,6 +29,49 @@ def reconstruct(prov, form_html):
     )
 
 
+# The opacity manifest's composition must be DERIVABLE from the fetch POST parameters (keyed on the recipe, not the
+# filename): X = xhmin, Z = zeta_ref, C/O = (C/O)_ref * 10^fco1. This cross-check keeps the manifest from drifting
+# away from the queries it claims to describe.
+REF_CO = {"7": 0.54954}  # AGSS09 (C/O)sun; all vendored pulls use solmix=7
+
+
+def parse_manifest():
+    import re
+
+    text = open(os.path.join(DATA, "manifest.toml")).read()
+    entries = {}
+    for block in re.split(r"\[\[grid\]\]", text)[1:]:
+        g = dict(re.findall(r'(\w+)\s*=\s*"([^"]*)"', block))
+        entries[g["file"]] = g
+    return entries
+
+
+def check_manifest(provs):
+    manifest = parse_manifest()
+    failures = 0
+    for p in provs:
+        prov = json.load(open(p))
+        q = prov["query"]
+        fname = "aesopus1.0_gasonly_%s.dat" % prov["label"]
+        m = manifest.get(fname)
+        if not m:
+            print("MANIFEST MISSING", fname)
+            failures += 1
+            continue
+        fco1 = float(q["fco1"]) if q["fco1"] not in ("", "-") else 0.0
+        want = {
+            "hydrogen_mass_fraction": float(q["xhmin"]),
+            "metallicity": float(q["zeta_ref"]),
+            "carbon_to_oxygen": REF_CO[q["solmix"]] * (10**fco1),
+        }
+        for k, v in want.items():
+            if abs(float(m[k]) - v) > 1e-4 * max(1.0, abs(v)):
+                print("MANIFEST DRIFT", fname, k, "manifest", m[k], "recipe", v)
+                failures += 1
+    assert failures == 0, f"{failures} manifest/recipe mismatch(es)"
+    print(f"PASS: {len(provs)} manifest compositions derive from their POST parameters")
+
+
 def main():
     regen = "--regen" in sys.argv
     form_html = open(FORM).read()
@@ -57,6 +100,7 @@ def main():
     if not regen:
         assert failures == 0, f"{failures} provenance byte-equality mismatch(es)"
         print(f"PASS: {len(provs)} provenance records reproduce byte-identically")
+        check_manifest(provs)
 
 
 if __name__ == "__main__":
