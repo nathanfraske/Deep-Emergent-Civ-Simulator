@@ -23,6 +23,8 @@
 //! world, not an author of it (Principle 10).
 
 use civsim_core::{splitmix64, Fixed};
+use civsim_physics::periodic::PeriodicTable;
+use civsim_physics::polarizability::element_electronic_polarizability_a0_cubed;
 use civsim_sim::genesis::LivingWorld;
 use civsim_sim::geodynamics::DerivedTile;
 use civsim_world::terrain::TerrainRelief;
@@ -75,6 +77,193 @@ pub fn blackbody_rgb(t_eff_k: Fixed) -> Rgb {
         138.517_731_223_1 * (temp - 10.0).ln() - 305.044_792_730_7
     };
     Rgb::new(clamp255(red), clamp255(green), clamp255(blue))
+}
+
+/// The observability-non-canon DISPLAY colour of a daytime sky, DERIVED from the atmosphere's molecular
+/// polarizability by Rayleigh scattering: the scattered-light colour of a star of effective temperature
+/// `star_t_eff_k` filtered through an atmosphere of `gas_mix` (each entry a chemical formula and its mole
+/// fraction, for example `[("N2", 0.78), ("O2", 0.21), ("Ar", 0.01)]` for modern Earth air). Short wavelengths
+/// scatter more strongly (the Rayleigh cross-section goes as `alpha^2 / lambda^4`), so a thin N2/O2 atmosphere
+/// paints a blue sky; a more polarizable, denser CO2 atmosphere drives the short bands toward saturation and
+/// desaturates the sky, the qualitative Hadean/Venusian shift.
+///
+/// The derivation chain, every physical step DERIVED from the banked polarizability substrate, never authored
+/// RGB: a formula string parses to `(element, count)` pairs (a general parser, no hardcoded gas list) ->
+/// each atom's static electronic polarizability comes from
+/// [`civsim_physics::polarizability::element_electronic_polarizability_a0_cubed`] (the cited-ionization-energy
+/// Unsold single-oscillator estimate, in Bohr-volume units `a_0^3`) -> the molecular polarizability is their
+/// additive sum `alpha_mol = sum(count * alpha_atom)` -> each band's Rayleigh weight is
+/// `w(lambda) = sum_gas moleFraction * alpha_mol^2 / lambda^4` -> the scattered sky per band is the star's
+/// Planck spectral radiance times the Rayleigh transmittance `1 - exp(-tau(lambda))` -> the three bands are
+/// normalized so the brightest is 255, preserving hue. The absolute Rayleigh prefactor `128 pi^5 / 3` and the
+/// unit conversions cancel from that normalized ratio, so only the RELATIVE `alpha^2 / lambda^4` across bands
+/// and gases matters.
+///
+/// Admit-the-alien: the mix is keyed on the formula string and per-element cited data, so a new gas is a data
+/// row (a formula), never a code change. An element the polarizability substrate cannot resolve (for example a
+/// transition metal with no main-group valence count) sinks its gas (fail-soft, no guessed value); if the whole
+/// mix resolves to nothing, this returns `None` so the caller falls back to no atmosphere tint.
+///
+/// VALIDITY CEILING: this is FACTOR-GRADE and QUALITATIVE, not a calibrated radiance. It distinguishes a blue
+/// N2/O2 sky from a desaturated CO2 sky, no finer. Its cited top rung is the ionization energy (the
+/// polarizability's input); the Unsold estimate runs ~11% low, and the additivity approximation for molecular
+/// `alpha` is itself factor-grade. This is acceptable ONLY because the render is observability-non-canon:
+/// display-only, one-way (canon physics -> pixels), with zero effect on simulation state (Principle 10). The
+/// model carries no absorption and a wavelength-independent polarizability, so it spans blue (thin) to
+/// desaturated near-white (thick) and cannot render a true red/butterscotch sky; "less blue" is the honest
+/// limit of the qualitative shift. `f64` throughout, mirroring [`blackbody_rgb`]: a screen colour needs no
+/// fixed-point rigour past per-run determinism.
+///
+/// The observability-layer display choices this non-canon render is allowed (like [`blackbody_rgb`]'s fit): the
+/// three sampling wavelengths (`BANDS_NM`, the R/G/B band centres, definitional) and one opacity scale
+/// (`DISPLAY_OPACITY_UNIT`, documented at its definition). Every other quantity is derived or a cited fundamental.
+pub fn rayleigh_sky_rgb(
+    gas_mix: &[(&str, f64)],
+    star_t_eff_k: Fixed,
+    table: &PeriodicTable,
+) -> Option<Rgb> {
+    // The three display sampling wavelengths in nm: the R, G, B band centres. Definitional display choices for a
+    // non-canon render (the observability layer's allowance), the only colours the sky is sampled at.
+    const BANDS_NM: [f64; 3] = [630.0, 532.0, 465.0];
+    // The reference wavelength for the dimensionless lambda^-4 factor: the mid (green) band. A relative anchor
+    // that cancels from the normalized ratio; it only sets what "unit optical depth" is measured against, so the
+    // band weights stay order-one rather than the ~1e-8 raw `alpha^2 / lambda_nm^4` would give.
+    const LAMBDA_REF_NM: f64 = BANDS_NM[1];
+    // The one opacity display knob: the optical depth per `a_0^6` of mole-fraction-weighted molecular
+    // polarizability-squared at the reference (green) band. It stands in for the atmospheric column density times
+    // the Rayleigh prefactor (128 pi^5 / 3) times the `a_0^3`-to-length unit conversion, none of which the viewer
+    // has (the Stage-8 atmospheric column is unwired) and all of which cancel from a normalized band ratio. Its
+    // basis: set so modern Earth air (weighted `alpha^2` on the order of a thousand `a_0^6` from the substrate)
+    // lands near unit optical depth in the green band, moderate, so the short band is blue-dominant while no band
+    // fully saturates. The single definitional display opacity, surfaced not hidden.
+    const DISPLAY_OPACITY_UNIT: f64 = 1.0e-3;
+
+    // Per gas: additive molecular polarizability from the formula, then the mole-fraction-weighted `alpha^2` that
+    // scales every band's Rayleigh weight. An unresolvable gas contributes nothing (fail-soft, no guess).
+    let mut weighted_alpha_sq = 0.0f64;
+    for &(formula, mole_fraction) in gas_mix {
+        if mole_fraction <= 0.0 {
+            continue;
+        }
+        let Some(alpha_mol) = molecular_polarizability_a0_cubed(formula, table) else {
+            continue;
+        };
+        weighted_alpha_sq += mole_fraction * alpha_mol * alpha_mol;
+    }
+    if weighted_alpha_sq <= 0.0 {
+        return None; // nothing resolved: the caller falls back to no atmosphere tint
+    }
+
+    // The Planck exponent constant, DERIVED from the register (never authored): the incident starlight colour is
+    // the star's Planck spectrum, and the Rayleigh weighting filters it.
+    let c2_m_k = second_radiation_constant_m_k()?;
+    let t_eff = star_t_eff_k.to_f64_lossy();
+    let mut band = [0.0f64; 3];
+    for (i, &lambda) in BANDS_NM.iter().enumerate() {
+        let lambda_factor = (LAMBDA_REF_NM / lambda).powi(4); // the dimensionless lambda^-4 Rayleigh weighting
+        let tau = DISPLAY_OPACITY_UNIT * weighted_alpha_sq * lambda_factor;
+        let scattered = 1.0 - (-tau).exp(); // the Rayleigh single-scatter transmittance factor
+        band[i] = planck_relative(lambda, t_eff, c2_m_k) * scattered;
+    }
+
+    // Normalize to the brightest band so the hue is preserved and the sky reads at full intensity.
+    let max = band[0].max(band[1]).max(band[2]);
+    if max <= 0.0 {
+        return None;
+    }
+    let to_u8 = |v: f64| (v / max * 255.0).round().clamp(0.0, 255.0) as u8;
+    Some(Rgb::new(to_u8(band[0]), to_u8(band[1]), to_u8(band[2])))
+}
+
+/// The additive molecular polarizability (Bohr-volume units `a_0^3`) of a gas from its chemical formula:
+/// `alpha_mol = sum over atoms alpha_atom`, the standard atomic-additivity approximation summed over the
+/// formula's `(element, count)` pairs. Returns `None` if the formula parses to no atoms or if any element's
+/// polarizability is unavailable (fail-soft: an unresolvable element sinks the whole molecule rather than
+/// contributing a guessed zero). Keyed on the formula string and per-element cited data, so a new gas is a data
+/// row (admit-the-alien), never a code change.
+fn molecular_polarizability_a0_cubed(formula: &str, table: &PeriodicTable) -> Option<f64> {
+    let atoms = parse_formula(formula);
+    if atoms.is_empty() {
+        return None;
+    }
+    let mut alpha = 0.0f64;
+    for (symbol, count) in atoms {
+        let a = element_electronic_polarizability_a0_cubed(&symbol, table)?.to_f64_lossy();
+        alpha += a * count as f64;
+    }
+    Some(alpha)
+}
+
+/// Parse a chemical formula into `(element symbol, count)` pairs by a GENERAL rule (no hardcoded gas list,
+/// admit-the-alien): an uppercase ASCII letter opens a symbol, following lowercase ASCII letters continue it,
+/// and an optional run of ASCII digits is the count (default 1). "CO2" -> `[("C",1),("O",2)]`, "H2O" ->
+/// `[("H",2),("O",1)]`, "CH4" -> `[("C",1),("H",4)]`. A character that opens no symbol (a leading digit,
+/// whitespace, punctuation) is skipped, so a malformed fragment yields no atoms for that fragment, never a panic.
+fn parse_formula(formula: &str) -> Vec<(String, u32)> {
+    let chars: Vec<char> = formula.chars().collect();
+    let mut atoms = Vec::new();
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i].is_ascii_uppercase() {
+            let mut symbol = String::new();
+            symbol.push(chars[i]);
+            i += 1;
+            while i < chars.len() && chars[i].is_ascii_lowercase() {
+                symbol.push(chars[i]);
+                i += 1;
+            }
+            let mut count: u32 = 0;
+            let mut has_digit = false;
+            while i < chars.len() && chars[i].is_ascii_digit() {
+                count = count
+                    .saturating_mul(10)
+                    .saturating_add(chars[i].to_digit(10).unwrap_or(0));
+                has_digit = true;
+                i += 1;
+            }
+            atoms.push((symbol, if has_digit { count } else { 1 }));
+        } else {
+            i += 1;
+        }
+    }
+    atoms
+}
+
+/// The second radiation constant `c_2 = h c / k_B` in metre-kelvin, DERIVED from the fundamentals register
+/// (`civsim_units::fundamentals`), never authored: it sets the Planck exponent `hc / (lambda k T)`. Parsed to
+/// `f64` because this is a non-canon display value that needs no fixed-point rigour. `None` on a register miss.
+fn second_radiation_constant_m_k() -> Option<f64> {
+    let h: f64 = civsim_units::fundamentals::fundamental("h")?
+        .value
+        .parse()
+        .ok()?;
+    let c: f64 = civsim_units::fundamentals::fundamental("c")?
+        .value
+        .parse()
+        .ok()?;
+    let k_b: f64 = civsim_units::fundamentals::fundamental("k_B")?
+        .value
+        .parse()
+        .ok()?;
+    Some(h * c / k_b)
+}
+
+/// The star's RELATIVE Planck spectral radiance at wavelength `lambda_nm` and temperature `t_k`: Planck's law
+/// `B(lambda, T) proportional to lambda^-5 / (exp(c_2 / (lambda T)) - 1)`, with the second radiation constant
+/// `c_2 = h c / k_B` passed in (`c2_m_k`, in metre-kelvin). Only the RATIO across the three bands is used, so the
+/// leading `2 h c^2` prefactor drops and the result carries no absolute unit. This is the incident starlight
+/// colour the Rayleigh weighting then filters. Falls back to a flat spectrum on a non-physical temperature.
+fn planck_relative(lambda_nm: f64, t_k: f64, c2_m_k: f64) -> f64 {
+    if t_k <= 0.0 {
+        return 1.0;
+    }
+    let lambda_m = lambda_nm * 1.0e-9;
+    let x = c2_m_k / (lambda_m * t_k);
+    let denom = x.exp() - 1.0;
+    if denom <= 0.0 {
+        return 0.0;
+    }
+    lambda_m.powi(-5) / denom
 }
 
 /// A physics-derived terrain colour: the tile's own `elevation`, `moisture`, and `temperature`
@@ -774,7 +963,9 @@ fn draw_atmosphere_limb(
 /// with the sunlight tinted by the star's colour ([`draw_globe`]): the star-facing hemisphere bright, the far side
 /// dark, a soft terminator between. This is the seeable-world payoff entry point: hand it the derived radius, the
 /// star's derived `T_eff`, the derived tiles, and the star's projected position, and it draws the star-lit planet.
-/// A pure, deterministic read of the derived planet and star (Principle 10); it writes no canonical state.
+/// The atmosphere limb is tinted by `sky`, the DERIVED Rayleigh sky colour ([`rayleigh_sky_rgb`]) when the gas
+/// mix resolves, or [`PLACEHOLDER_SKY`] as the fail-soft fallback. A pure, deterministic read of the derived
+/// planet and star (Principle 10); it writes no canonical state.
 #[allow(clippy::too_many_arguments)]
 pub fn render_solar_system_view(
     radius_m: Fixed,
@@ -787,6 +978,7 @@ pub fn render_solar_system_view(
     star_px: (i32, i32),
     star_radius_px: usize,
     bg: Rgb,
+    sky: Rgb,
 ) -> Vec<u32> {
     let mut buf = vec![bg.pack(); w.max(1) * h.max(1)];
     if w == 0 || h == 0 {
@@ -828,7 +1020,8 @@ pub fn render_solar_system_view(
         star_dir,
         star_color,
     );
-    // The atmosphere haze around the limb, a STAND-IN sky colour until the Stage-8 gas mix derives it.
+    // The atmosphere haze around the limb, tinted by the caller's `sky` colour: the DERIVED Rayleigh sky from the
+    // gas mix ([`rayleigh_sky_rgb`]) when it resolves, or [`PLACEHOLDER_SKY`] as the fail-soft fallback.
     draw_atmosphere_limb(
         &mut buf,
         w,
@@ -837,7 +1030,7 @@ pub fn render_solar_system_view(
         planet_cy,
         planet_radius_px,
         star_dir,
-        PLACEHOLDER_SKY,
+        sky,
     );
     buf
 }
@@ -1072,7 +1265,17 @@ mod tests {
         .expect("sun T_eff");
         let star_px = (24i32, 40i32); // upper-left of the centred planet
         let frame = render_solar_system_view(
-            radius_m, sun_t, &tiles, cols, w, h, m_per_px, star_px, 10, bg,
+            radius_m,
+            sun_t,
+            &tiles,
+            cols,
+            w,
+            h,
+            m_per_px,
+            star_px,
+            10,
+            bg,
+            PLACEHOLDER_SKY,
         );
         assert_eq!(frame.len(), w * h, "one word per pixel");
         // The star disk carries the derived blackbody colour at its core.
@@ -1093,7 +1296,17 @@ mod tests {
         );
         // Deterministic pure read.
         let replay = render_solar_system_view(
-            radius_m, sun_t, &tiles, cols, w, h, m_per_px, star_px, 10, bg,
+            radius_m,
+            sun_t,
+            &tiles,
+            cols,
+            w,
+            h,
+            m_per_px,
+            star_px,
+            10,
+            bg,
+            PLACEHOLDER_SKY,
         );
         assert_eq!(frame, replay, "a pure read replays byte for byte");
 
@@ -1115,7 +1328,17 @@ mod tests {
         .expect("hot T_eff");
         let day_ratio = |t_eff: Fixed| -> f64 {
             let f = render_solar_system_view(
-                radius_m, t_eff, &tiles, cols, w, h, m_per_px, star_px, 10, bg,
+                radius_m,
+                t_eff,
+                &tiles,
+                cols,
+                w,
+                h,
+                m_per_px,
+                star_px,
+                10,
+                bg,
+                PLACEHOLDER_SKY,
             );
             let mut sr = 0f64;
             let mut sb = 0f64;
@@ -1302,6 +1525,91 @@ mod tests {
         assert!(
             frame.iter().any(|&p| p != bg.pack()),
             "a derived frame is painted"
+        );
+    }
+
+    #[test]
+    fn the_formula_parser_is_general() {
+        // No hardcoded gas list: an uppercase letter opens a symbol, lowercase continues it, trailing digits are
+        // the count (default 1). A new gas is a data row (a formula string), never a code change.
+        assert_eq!(
+            parse_formula("CO2"),
+            vec![("C".to_string(), 1), ("O".to_string(), 2)]
+        );
+        assert_eq!(
+            parse_formula("H2O"),
+            vec![("H".to_string(), 2), ("O".to_string(), 1)]
+        );
+        assert_eq!(
+            parse_formula("CH4"),
+            vec![("C".to_string(), 1), ("H".to_string(), 4)]
+        );
+        assert_eq!(parse_formula("N2"), vec![("N".to_string(), 2)]);
+        // A two-letter symbol continues through its lowercase tail.
+        assert_eq!(parse_formula("Ar"), vec![("Ar".to_string(), 1)]);
+        // A malformed fragment yields no atoms rather than a panic.
+        assert!(parse_formula("").is_empty());
+        assert!(parse_formula("123").is_empty());
+    }
+
+    #[test]
+    fn modern_earth_air_derives_a_blue_sky() {
+        // Modern Earth air (N2/O2/Ar) at the Sun's effective temperature scatters into a blue sky: the DERIVED
+        // Rayleigh weighting (alpha^2 / lambda^4 from the banked polarizability substrate) drives the blue band
+        // above the red. Assert the RELATIVE relationship only, never an absolute RGB.
+        let tbl = PeriodicTable::standard().expect("the periodic table loads");
+        let sun = Fixed::from_int(5772);
+        let sky = rayleigh_sky_rgb(&[("N2", 0.78), ("O2", 0.21), ("Ar", 0.01)], sun, &tbl)
+            .expect("modern air resolves through N and O");
+        assert!(
+            sky.b > sky.r,
+            "modern Earth air derives a blue sky (blue {} exceeds red {})",
+            sky.b,
+            sky.r
+        );
+        // Deterministic pure read: the same mix replays byte for byte.
+        assert_eq!(
+            sky,
+            rayleigh_sky_rgb(&[("N2", 0.78), ("O2", 0.21), ("Ar", 0.01)], sun, &tbl).unwrap()
+        );
+    }
+
+    #[test]
+    fn a_co2_atmosphere_is_less_blue_than_earth_air() {
+        // The qualitative Hadean/Venusian shift: a CO2-dominated atmosphere is more polarizable, so its short
+        // bands push toward saturation and the sky DESATURATES, a lower blue-to-red ratio than modern air. Assert
+        // the RATIO ORDERING, never absolute values.
+        let tbl = PeriodicTable::standard().expect("the periodic table loads");
+        let sun = Fixed::from_int(5772);
+        let air = rayleigh_sky_rgb(&[("N2", 0.78), ("O2", 0.21), ("Ar", 0.01)], sun, &tbl)
+            .expect("air resolves");
+        let co2 =
+            rayleigh_sky_rgb(&[("CO2", 0.95), ("N2", 0.05)], sun, &tbl).expect("CO2 resolves");
+        let ratio = |c: Rgb| (c.b as f64 + 1.0) / (c.r as f64 + 1.0);
+        assert!(
+            ratio(co2) < ratio(air),
+            "a CO2 sky is less blue-dominant than air (CO2 blue/red {:.2} below air {:.2})",
+            ratio(co2),
+            ratio(air)
+        );
+    }
+
+    #[test]
+    fn an_unresolvable_mix_returns_none() {
+        // Fail-soft: an empty mix, or one whose every element the substrate cannot resolve (no cited ionization
+        // energy), returns None so the caller falls back to no atmosphere tint rather than a fabricated colour.
+        let tbl = PeriodicTable::standard().expect("the periodic table loads");
+        let sun = Fixed::from_int(5772);
+        assert_eq!(
+            rayleigh_sky_rgb(&[], sun, &tbl),
+            None,
+            "an empty mix is None"
+        );
+        // Argon carries no cited ionization energy in the table, so an Ar-only atmosphere resolves to nothing.
+        assert_eq!(
+            rayleigh_sky_rgb(&[("Ar", 1.0)], sun, &tbl),
+            None,
+            "an all-unresolvable mix is None"
         );
     }
 }

@@ -234,6 +234,7 @@ fn globe_cmd(argv: &[String]) {
         star_px,
         star_r,
         BG,
+        fx.sky,
     );
     write_ppm(&path, w, h, &buf);
     eprintln!(
@@ -409,15 +410,19 @@ fn parse<T: std::str::FromStr>(arg: Option<&String>, default: T) -> T {
 }
 
 /// The DERIVED-planet fixture the zoomed-out globe view draws: the planet's derived radius, its star's derived
-/// effective temperature, and the derived-terrain tiles textured onto the sphere. This is a labelled development
-/// fixture (a one-Earth-mass planet at Earth's mean density around a Sun-mass star, the demo crust field for the
-/// surface). The manager wires the real star-plus-orbit integration into these fields; the render entry point
-/// [`render::render_solar_system_view`] takes exactly (radius, T_eff, tiles, cols), so the swap is mechanical.
+/// effective temperature, the derived-terrain tiles textured onto the sphere, and the derived Rayleigh sky tint.
+/// This is a labelled development fixture (a one-Earth-mass planet at Earth's mean density around a Sun-mass star,
+/// the demo crust field for the surface, modern-Earth air for the sky). The manager wires the real
+/// star-plus-orbit and atmospheric-composition integration into these fields; the render entry point
+/// [`render::render_solar_system_view`] reads them directly, so the swap is mechanical.
 struct GlobeFixture {
     radius_m: Fixed,
     t_eff: Fixed,
     tiles: Vec<DerivedTile>,
     cols: usize,
+    /// The atmosphere-limb tint: the DERIVED Rayleigh sky colour ([`render::rayleigh_sky_rgb`]) computed from a
+    /// FIXTURE gas mix (the pending Stage-8 input), or [`render::PLACEHOLDER_SKY`] when the mix does not resolve.
+    sky: Rgb,
 }
 
 /// Build the labelled derived-planet fixture, or `None` if any derivation fails (fail-soft: the viewer then simply
@@ -451,11 +456,25 @@ fn build_globe_fixture() -> Option<GlobeFixture> {
     let cols = 48usize;
     let rows = 32usize;
     let tiles = slice0_demo_field(cols, rows)?;
+    // The atmosphere-limb tint, DERIVED from the gas mix by Rayleigh scattering ([`render::rayleigh_sky_rgb`]).
+    // The gas mix is a labelled FIXTURE (the pending Stage-8 atmospheric-composition input, the same
+    // fixture-until-derived pattern as the accreted mass and mean density above): modern-Earth air, which the
+    // physics scatters into a recognizably blue sky. When the composition arc wires through, this slice becomes a
+    // read of the derived atmosphere. Fail-soft: an unresolvable mix (None) falls back to the labelled placeholder
+    // sky, never a fabricated colour. The colour is observability-non-canon: it tints pixels only, never canon.
+    const AIR_FIXTURE: [(&str, f64); 3] = [("N2", 0.78), ("O2", 0.21), ("Ar", 0.01)];
+    let sky = civsim_physics::periodic::PeriodicTable::standard()
+        .ok()
+        .and_then(|table| {
+            render::rayleigh_sky_rgb(&AIR_FIXTURE, planet.star_effective_temperature_k, &table)
+        })
+        .unwrap_or(render::PLACEHOLDER_SKY);
     Some(GlobeFixture {
         radius_m: planet.radius_m,
         t_eff: planet.star_effective_temperature_k,
         tiles,
         cols,
+        sky,
     })
 }
 
@@ -755,6 +774,7 @@ fn main() {
                     star_px,
                     star_r,
                     BG,
+                    fx.sky,
                 ),
                 CELL as i32,
                 1,

@@ -14,6 +14,14 @@ civsim-world = { path = "../world" }
 # The superfine zoom draws the living world: the biosphere the simulation genesis produces
 # and places on the map. sim depends on core/world/physics only, no GPU or ECS stack.
 civsim-sim = { path = "../sim" }
+# The observability-non-canon Rayleigh sky colour reads the banked polarizability substrate
+# (element_electronic_polarizability_a0_cubed) to DERIVE the atmosphere's scattered-light hue
+# from the gas mix, never an authored RGB. A one-way display read (Principle 10); no
+# determinism-critical crate depends on the viewer.
+civsim-physics = { path = "../physics" }
+# The fundamentals register supplies the second radiation constant (h c / k_B) the sky's
+# Planck star-spectrum weighting derives from, so no physical constant is authored inline.
+civsim-units = { path = "../units" }
 # minifb opens a simple framebuffer window with keyboard input on Windows, macOS, Linux,
 # and WSLg, and takes a buffer of 0x00RRGGBB pixels directly, which is exactly the shape
 # `Camera::paint` produces. It is an observer-side rendering dependency only; no
