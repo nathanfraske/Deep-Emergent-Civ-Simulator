@@ -13,7 +13,22 @@
 // limitations under the License.
 
 //! The crystal-field column (`crates/physics/data/crystal_field.toml`, Stage 6): the octahedral splitting
-//! `Delta_o` and the Racah `B`, the inputs to the magnetism (b) high/low-spin correction and the optics d-d colour.
+//! `Delta_o` and the Racah `B`, the inputs to the magnetism (b) high/low-spin correction and the optics d-d colour,
+//! plus (seam 2, the iron dark-crust optics) the direct-measured charge-transfer band energies that darken an
+//! oxidized iron crust.
+//!
+//! THE CHARGE-TRANSFER COLUMN (seam 2). A ferric or mixed-valence iron oxide reads DARK, not the warm-white of a
+//! ferrous or iron-free silicate, because of two intense charge-transfer bands the weak Laporte-forbidden d-d line
+//! does not carry: the `O2- -> Fe3+` ligand-to-metal band (LMCT, ~3.1 eV, its intense tail flooding the visible to
+//! redden hematite) and the `Fe2+ -> Fe3+` intervalence band (IVCT, ~0.6 eV, blackening magnetite). Which band a
+//! phase carries keys on its DERIVED iron oxidation state ([`iron_valence_state`], charge balance over the phase's
+//! own composition, the same primitive the correlation classifier uses). The IDEAL is to DERIVE the band energy from
+//! the banked ligand-field machinery by Jorgensen's optical-electronegativity relation
+//! (`E_CT = 30000 cm^-1 * (chi_opt(ligand) - chi_opt(metal))`); the scale constant is primary-cited, but the per-
+//! species optical electronegativities `chi_opt(O2-)`, `chi_opt(Fe3+)`, `chi_opt(Fe2+)` are in Jorgensen's 1969-1971
+//! books (not web-open), so that derivation is FLAGGED (see `docs/working/MORNING_REVIEW.md`) and the band energies
+//! are instead supplied as DIRECT single-crystal optical measurements (the same idiom as the monoxide `Delta_o`
+//! below, a per-chromophore cited datum, never a factorization, never fabricated).
 //!
 //! `Delta_o` FACTORIZES (Jorgensen): `Delta_o = f(ligand) * g(ion)`, with `f` dimensionless (`f(H2O) = 1.00`
 //! PINNED, since multiplicativity breaks across sources otherwise) and `g` in `10^3 cm^-1`. The free-ion Racah `B`
@@ -36,6 +51,8 @@ use civsim_core::Fixed;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt;
+
+use crate::periodic::PeriodicTable;
 
 /// The canonical key of a composition: the elements in sorted order with their counts, so `{Ni:1, O:1}` and the
 /// reverse both key the same row (the same shape the sibling `[M]` columns use).
@@ -62,6 +79,8 @@ pub enum CrystalFieldError {
     NonPositive(String),
     /// The `f(H2O)` normalization is not pinned to `1.00` (multiplicativity would break across sources).
     UnpinnedReference(String),
+    /// A charge-transfer row is malformed (an unknown `kind`, or a missing metal/ligand/donor/acceptor key).
+    ChargeTransfer(String),
 }
 
 impl fmt::Display for CrystalFieldError {
@@ -76,6 +95,9 @@ impl fmt::Display for CrystalFieldError {
             CrystalFieldError::NonPositive(m) => write!(f, "crystal-field non-positive value: {m}"),
             CrystalFieldError::UnpinnedReference(m) => {
                 write!(f, "crystal-field f(H2O) not pinned to 1.00: {m}")
+            }
+            CrystalFieldError::ChargeTransfer(m) => {
+                write!(f, "crystal-field charge-transfer row error: {m}")
             }
         }
     }
@@ -114,6 +136,13 @@ pub struct CrystalFieldTables {
     ion_g_kilocm: BTreeMap<String, Fixed>,
     racah_b_cm: BTreeMap<String, Fixed>,
     oxide_delta_cm: BTreeMap<String, Fixed>,
+    /// The direct-measured ligand-to-metal charge-transfer band energy (eV), keyed by (metal species, ligand
+    /// species), the same DIRECT-MEASUREMENT idiom as [`Self::oxide_delta_cm`] (a per-chromophore cited optical
+    /// energy, not a factorization). The `O2- -> Fe3+` LMCT that reddens a ferric oxide.
+    lmct_ev: BTreeMap<(String, String), Fixed>,
+    /// The direct-measured metal-to-metal intervalence charge-transfer band energy (eV), keyed by (donor species,
+    /// acceptor species). The `Fe2+ -> Fe3+` IVCT that blackens a mixed-valence oxide.
+    ivct_ev: BTreeMap<(String, String), Fixed>,
 }
 
 #[derive(Debug, Default, Deserialize, Serialize)]
@@ -126,6 +155,8 @@ struct CrystalFieldFile {
     racah_b: Vec<RacahBDef>,
     #[serde(default)]
     oxide_delta: Vec<OxideDeltaDef>,
+    #[serde(default)]
+    charge_transfer: Vec<ChargeTransferDef>,
 }
 
 #[derive(Debug, Default, Deserialize, Serialize)]
@@ -161,6 +192,28 @@ struct OxideDeltaDef {
     composition: BTreeMap<String, u32>,
     #[serde(default)]
     delta_cm: String,
+    #[serde(default)]
+    reliability: String,
+    #[serde(default)]
+    source: String,
+}
+
+#[derive(Debug, Default, Deserialize, Serialize)]
+struct ChargeTransferDef {
+    /// The transfer kind: `"lmct"` (ligand-to-metal, keyed by `metal`/`ligand`) or `"ivct"` (metal-to-metal
+    /// intervalence, keyed by `donor`/`acceptor`).
+    #[serde(default)]
+    kind: String,
+    #[serde(default)]
+    metal: String,
+    #[serde(default)]
+    ligand: String,
+    #[serde(default)]
+    donor: String,
+    #[serde(default)]
+    acceptor: String,
+    #[serde(default)]
+    band_ev: String,
     #[serde(default)]
     reliability: String,
     #[serde(default)]
@@ -232,11 +285,59 @@ impl CrystalFieldTables {
                 return Err(CrystalFieldError::Duplicate(key));
             }
         }
+        let mut lmct_ev = BTreeMap::new();
+        let mut ivct_ev = BTreeMap::new();
+        for c in file.charge_transfer {
+            if c.source.trim().is_empty() {
+                return Err(CrystalFieldError::MissingSource(
+                    "charge_transfer".to_string(),
+                ));
+            }
+            match c.kind.trim() {
+                "lmct" => {
+                    let (metal, ligand) = (c.metal.trim(), c.ligand.trim());
+                    if metal.is_empty() || ligand.is_empty() {
+                        return Err(CrystalFieldError::ChargeTransfer(
+                            "an lmct row needs both `metal` and `ligand`".to_string(),
+                        ));
+                    }
+                    let val = parse_positive(&c.band_ev, &format!("E_LMCT({metal}<-{ligand})"))?;
+                    let key = (metal.to_string(), ligand.to_string());
+                    if lmct_ev.insert(key, val).is_some() {
+                        return Err(CrystalFieldError::Duplicate(format!(
+                            "lmct {metal}<-{ligand}"
+                        )));
+                    }
+                }
+                "ivct" => {
+                    let (donor, acceptor) = (c.donor.trim(), c.acceptor.trim());
+                    if donor.is_empty() || acceptor.is_empty() {
+                        return Err(CrystalFieldError::ChargeTransfer(
+                            "an ivct row needs both `donor` and `acceptor`".to_string(),
+                        ));
+                    }
+                    let val = parse_positive(&c.band_ev, &format!("E_IVCT({donor}->{acceptor})"))?;
+                    let key = (donor.to_string(), acceptor.to_string());
+                    if ivct_ev.insert(key, val).is_some() {
+                        return Err(CrystalFieldError::Duplicate(format!(
+                            "ivct {donor}->{acceptor}"
+                        )));
+                    }
+                }
+                other => {
+                    return Err(CrystalFieldError::ChargeTransfer(format!(
+                        "unknown charge-transfer kind '{other}' (expected 'lmct' or 'ivct')"
+                    )));
+                }
+            }
+        }
         Ok(CrystalFieldTables {
             ligand_f,
             ion_g_kilocm,
             racah_b_cm,
             oxide_delta_cm,
+            lmct_ev,
+            ivct_ev,
         })
     }
 
@@ -276,6 +377,167 @@ impl CrystalFieldTables {
     pub fn racah_b_cm(&self, ion: &str) -> Option<Fixed> {
         self.racah_b_cm.get(ion).copied()
     }
+
+    /// The direct-measured ligand-to-metal charge-transfer band energy (eV) for a (metal species, ligand species)
+    /// chromophore, or `None` when the pair is not tabulated. The `("Fe3+", "O2-")` LMCT anchors the ferric-oxide
+    /// darkening.
+    pub fn lmct_ev(&self, metal: &str, ligand: &str) -> Option<Fixed> {
+        self.lmct_ev
+            .get(&(metal.to_string(), ligand.to_string()))
+            .copied()
+    }
+
+    /// The direct-measured metal-to-metal intervalence charge-transfer band energy (eV) for a (donor species,
+    /// acceptor species) pair, or `None` when the pair is not tabulated. The `("Fe2+", "Fe3+")` IVCT anchors the
+    /// mixed-valence-oxide darkening.
+    pub fn ivct_ev(&self, donor: &str, acceptor: &str) -> Option<Fixed> {
+        self.ivct_ev
+            .get(&(donor.to_string(), acceptor.to_string()))
+            .copied()
+    }
+
+    /// The charge-transfer and intervalence band energies (eV) a composition carries, keyed on its DERIVED iron
+    /// oxidation state (the phase's own charge balance, [`iron_valence_state`]): a ferric phase carries the
+    /// ligand-to-metal charge-transfer band of its `Fe3+`-anion chromophore; a mixed-valence phase carries that band
+    /// AND the `Fe2+ -> Fe3+` intervalence band. Returned as `(charge_transfer_ev, intervalence_ev)`, either `None`
+    /// when the phase does not carry that feature or when the chromophore is not yet a tabulated data row (fail-soft,
+    /// the honest data gap: a novel iron-bearing phase is classified but its band energy is a cited row that grows
+    /// with the world, never fabricated). The observer-independent energies the optics substrate emits as features.
+    pub fn iron_charge_transfer_energies(
+        &self,
+        composition: &[(String, u32)],
+        table: &PeriodicTable,
+    ) -> (Option<Fixed>, Option<Fixed>) {
+        let state = iron_valence_state(composition, table);
+        match state {
+            IronValence::Ferric | IronValence::Mixed => {
+                // The charge-transfer ligand is the phase's anion at its formal charge (`O` at `-2` -> `"O2-"`),
+                // keyed off the composition so an alien anion is a data row.
+                let ligand = dominant_anion_species(composition, table);
+                let ct = ligand.and_then(|l| self.lmct_ev("Fe3+", &l));
+                let ivct = if state == IronValence::Mixed {
+                    self.ivct_ev("Fe2+", "Fe3+")
+                } else {
+                    None
+                };
+                (ct, ivct)
+            }
+            IronValence::NoIron
+            | IronValence::Metallic
+            | IronValence::Ferrous
+            | IronValence::Unresolved => (None, None),
+        }
+    }
+}
+
+/// The iron oxidation state of a phase, read from the phase's own composition (the phase IS the state; there is no
+/// separate continuous `Fe2+/Fe3+` ratio). The band a ferric or mixed-valence oxide carries in the optics substrate
+/// keys on this.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IronValence {
+    /// No iron in the phase.
+    NoIron,
+    /// Iron present but reduced (no oxidizing anion, or an average charge at or below zero): metallic iron, no
+    /// iron-oxide chromophore.
+    Metallic,
+    /// Ferrous, average iron charge `<= 2` (`FeO`, fayalite): only the weak near-infrared d-d line, no charge-
+    /// transfer band, so a ferrous phase reads light.
+    Ferrous,
+    /// Mixed valence, average iron charge strictly between 2 and 3 (`Fe3O4` magnetite): both `Fe2+` and `Fe3+` are
+    /// present, so the phase carries the intervalence band (and the charge-transfer band of its `Fe3+`).
+    Mixed,
+    /// Ferric, average iron charge `>= 3` (`Fe2O3` hematite): the `O2- -> Fe3+` charge-transfer band reddens and
+    /// darkens the phase.
+    Ferric,
+    /// Iron present but the valence is not cleanly derivable here (a multi-cation phase where iron's charge cannot be
+    /// isolated from the other cations by charge balance alone, a scoped follow-on): emit no charge-transfer band.
+    Unresolved,
+}
+
+/// The average iron oxidation state of a phase, DERIVED by charge balance against the phase's anions (the same
+/// periodic-valence charge-balance primitive the correlation classifier's `identify_correlated_pair` uses, extended
+/// to admit the non-integer average of a mixed-valence phase). An element's role is read from its PRIMARY (first-
+/// listed) valence: a negative primary valence is an anion at that charge, a positive primary valence is a cation.
+/// Iron must be the sole cation for the balance to isolate its charge; a phase with another cation is `Unresolved`
+/// (a scoped follow-on). Reserves no value; keyed entirely on the composition and the banked periodic valence, so a
+/// novel iron-bearing phase (an alien anion, an unusual stoichiometry) is a data row.
+pub fn iron_valence_state(composition: &[(String, u32)], table: &PeriodicTable) -> IronValence {
+    let mut n_fe: i64 = 0;
+    let mut anion_charge_total: i64 = 0; // negative: the total anion charge iron must balance
+    let mut has_other_cation = false;
+    let mut saw_iron = false;
+    for (symbol, count) in composition {
+        if *count == 0 {
+            continue;
+        }
+        let primary = table
+            .element(symbol)
+            .and_then(|e| e.valence.first().copied());
+        let primary = match primary {
+            Some(v) => v,
+            None => continue, // an element with no tabulated valence contributes no charge (out of scope)
+        };
+        if symbol == "Fe" {
+            saw_iron = true;
+            n_fe += *count as i64;
+        } else if primary < 0 {
+            anion_charge_total += primary as i64 * *count as i64;
+        } else if primary > 0 {
+            has_other_cation = true;
+        }
+    }
+    if !saw_iron || n_fe == 0 {
+        return IronValence::NoIron;
+    }
+    // No oxidizing anion (a metal or an alloy): iron carries no oxide chromophore.
+    if anion_charge_total == 0 {
+        return IronValence::Metallic;
+    }
+    // Another cation shares the anion budget, so charge balance cannot isolate iron's charge alone.
+    if has_other_cation {
+        return IronValence::Unresolved;
+    }
+    // The positive charge iron must supply, and the class boundaries at the integer valences q = 2 and q = 3
+    // (comparisons kept in integers: q = supply / n_fe, so `supply <= 2 n_fe` is `q <= 2`, and so on).
+    let supply = -anion_charge_total; // > 0
+    if supply <= 2 * n_fe {
+        IronValence::Ferrous
+    } else if supply < 3 * n_fe {
+        IronValence::Mixed
+    } else {
+        IronValence::Ferric
+    }
+}
+
+/// The species string of the phase's dominant anion (the anion contributing the most negative charge), formatted as
+/// symbol + magnitude + sign (`O` at `-2` -> `"O2-"`), the key the charge-transfer ligand column uses. `None` when
+/// the phase has no anion. Keyed off the composition, so an alien anion is a data row.
+fn dominant_anion_species(composition: &[(String, u32)], table: &PeriodicTable) -> Option<String> {
+    let mut best: Option<(String, i8, i64)> = None; // (symbol, charge, total_magnitude)
+    for (symbol, count) in composition {
+        if *count == 0 || symbol == "Fe" {
+            continue;
+        }
+        let primary = table
+            .element(symbol)
+            .and_then(|e| e.valence.first().copied());
+        if let Some(v) = primary {
+            if v < 0 {
+                let magnitude = (-(v as i64)) * *count as i64;
+                if best.as_ref().map(|b| magnitude > b.2).unwrap_or(true) {
+                    best = Some((symbol.clone(), v, magnitude));
+                }
+            }
+        }
+    }
+    best.map(|(symbol, charge, _)| species_key(&symbol, charge))
+}
+
+/// A species key: the element symbol, the charge magnitude, and the sign (`("O", -2) -> "O2-"`,
+/// `("Fe", 3) -> "Fe3+"`), the format the charge-transfer column keys its metal and ligand species by.
+fn species_key(symbol: &str, charge: i8) -> String {
+    let sign = if charge < 0 { "-" } else { "+" };
+    format!("{symbol}{}{sign}", charge.unsigned_abs())
 }
 
 #[cfg(test)]
@@ -400,6 +662,155 @@ source = ""
         assert!(matches!(
             CrystalFieldTables::from_toml_str(bad),
             Err(CrystalFieldError::MissingSource(_))
+        ));
+    }
+
+    fn periodic() -> PeriodicTable {
+        PeriodicTable::standard().expect("the periodic table loads")
+    }
+
+    #[test]
+    fn the_iron_oxidation_state_derives_from_charge_balance() {
+        // THE PHASE IS THE STATE: the average iron charge is derived by charge balance against the phase's anions
+        // (O at -2), and the class boundaries are the integer valences 2 and 3. FeO -> Fe2+ (ferrous), Fe2O3 -> Fe3+
+        // (ferric), Fe3O4 -> 8/3 (mixed valence), pure iron -> metallic, an iron-free oxide -> no iron. A multi-cation
+        // phase (fayalite, with the Si4+ cation) cannot isolate iron's charge here and is Unresolved (a scoped limit).
+        let t = periodic();
+        assert_eq!(
+            iron_valence_state(&comp(&[("Fe", 1), ("O", 1)]), &t),
+            IronValence::Ferrous
+        );
+        assert_eq!(
+            iron_valence_state(&comp(&[("Fe", 2), ("O", 3)]), &t),
+            IronValence::Ferric
+        );
+        assert_eq!(
+            iron_valence_state(&comp(&[("Fe", 3), ("O", 4)]), &t),
+            IronValence::Mixed
+        );
+        assert_eq!(
+            iron_valence_state(&comp(&[("Fe", 1)]), &t),
+            IronValence::Metallic
+        );
+        assert_eq!(
+            iron_valence_state(&comp(&[("Mg", 1), ("O", 1)]), &t),
+            IronValence::NoIron
+        );
+        assert_eq!(
+            iron_valence_state(&comp(&[("Fe", 2), ("Si", 1), ("O", 4)]), &t),
+            IronValence::Unresolved
+        );
+    }
+
+    #[test]
+    fn the_charge_transfer_column_carries_the_cited_hematite_and_magnetite_bands() {
+        // The direct-measured charge-transfer band energies (eV), keyed by chromophore pair: the O2- -> Fe3+ LMCT
+        // (~3.1 eV, hematite) and the Fe2+ -> Fe3+ IVCT (~0.6 eV, magnetite). An untabulated pair is None.
+        let t = tables();
+        assert!(
+            close(t.lmct_ev("Fe3+", "O2-").expect("Fe3+ LMCT"), 3.1, 1e-6),
+            "O2- -> Fe3+ LMCT 3.1 eV"
+        );
+        assert!(
+            close(t.ivct_ev("Fe2+", "Fe3+").expect("Fe IVCT"), 0.6, 1e-6),
+            "Fe2+ -> Fe3+ IVCT 0.6 eV"
+        );
+        assert!(
+            t.lmct_ev("Fe2+", "O2-").is_none(),
+            "ferrous has no LMCT row"
+        );
+        assert!(
+            t.ivct_ev("Ni2+", "Ni3+").is_none(),
+            "an untabulated pair is None"
+        );
+    }
+
+    #[test]
+    fn the_charge_transfer_energies_key_on_the_derived_oxidation_state() {
+        // The bridge from a composition to the optics substrate's feature energies: a ferric oxide carries the LMCT
+        // only; a mixed-valence oxide carries the LMCT AND the IVCT; a ferrous oxide and metallic iron carry neither
+        // (the honest per-valence distinction that darkens ferric/mixed and leaves ferrous light).
+        let t = tables();
+        let p = periodic();
+        assert_eq!(
+            t.iron_charge_transfer_energies(&comp(&[("Fe", 2), ("O", 3)]), &p),
+            (Some(Fixed::from_ratio(31, 10)), None),
+            "hematite: LMCT only"
+        );
+        assert_eq!(
+            t.iron_charge_transfer_energies(&comp(&[("Fe", 3), ("O", 4)]), &p),
+            (
+                Some(Fixed::from_ratio(31, 10)),
+                Some(Fixed::from_ratio(6, 10))
+            ),
+            "magnetite: LMCT and IVCT"
+        );
+        assert_eq!(
+            t.iron_charge_transfer_energies(&comp(&[("Fe", 1), ("O", 1)]), &p),
+            (None, None),
+            "wustite (ferrous): neither"
+        );
+        assert_eq!(
+            t.iron_charge_transfer_energies(&comp(&[("Fe", 1)]), &p),
+            (None, None),
+            "metallic iron: neither"
+        );
+    }
+
+    #[test]
+    fn an_alien_iron_bearing_phase_is_a_data_row() {
+        // ADMIT THE ALIEN: the mechanism keys on the DERIVED valence and the chromophore, never a hardcoded phase
+        // list, so a novel iron-oxide stoichiometry not in any mineral table (here Fe5O7, average charge 14/5 = 2.8,
+        // a mixed valence) is classified and carries its bands as a data row, no code change.
+        let t = tables();
+        let p = periodic();
+        assert_eq!(
+            iron_valence_state(&comp(&[("Fe", 5), ("O", 7)]), &p),
+            IronValence::Mixed
+        );
+        assert_eq!(
+            t.iron_charge_transfer_energies(&comp(&[("Fe", 5), ("O", 7)]), &p),
+            (
+                Some(Fixed::from_ratio(31, 10)),
+                Some(Fixed::from_ratio(6, 10))
+            ),
+            "the alien mixed-valence oxide carries both bands via the chromophore column"
+        );
+    }
+
+    #[test]
+    fn a_malformed_charge_transfer_row_is_rejected() {
+        // An unknown kind and a missing key are load errors (never a silently dropped row).
+        let unknown = r#"
+[[ligand_f]]
+ligand = "H2O"
+f = "1.00"
+source = "test"
+[[charge_transfer]]
+kind = "mmct"
+metal = "Fe3+"
+ligand = "O2-"
+band_ev = "3.1"
+source = "test"
+"#;
+        assert!(matches!(
+            CrystalFieldTables::from_toml_str(unknown),
+            Err(CrystalFieldError::ChargeTransfer(_))
+        ));
+        let missing_key = r#"
+[[ligand_f]]
+ligand = "H2O"
+f = "1.00"
+source = "test"
+[[charge_transfer]]
+kind = "lmct"
+metal = "Fe3+"
+band_ev = "3.1"
+source = "test"
+"#;
+        assert!(matches!(
+            CrystalFieldTables::from_toml_str(missing_key),
+            Err(CrystalFieldError::ChargeTransfer(_))
         ));
     }
 }

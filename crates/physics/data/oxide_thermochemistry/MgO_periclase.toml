@@ -1,0 +1,104 @@
+# MgO periclase, standard Gibbs energy of formation from the elements, 298.15 to 1800 K. Refractory oxide end-member
+# (no fO2 buffer). PRIMARY: Robie & Hemingway (1995), USGS Bull. 2131, PERICLASE high-T table p.197 (298.15 K anchor
+# also in the oxide summary p.17). Transcribed from the primary USGS PDF (md5 08c3cc7c2d823667c8efadfebcef02de). SECOND
+# WITNESS: NIST-JANAF (Chase 1998) table Mg-008, delta_f G298 = -568.945 (Robie -569.3), agrees within rounding; Barin
+# pending (see manifest.toml). BLOCK KIND [[point]], cited-data-column idiom, header-cited, out of the floor
+# authorship axis. COLUMNS: t_k (K); delta_f_g_kj / delta_f_h_kj (kJ/mol, formation from elements); s_j / cp_j
+# (J/mol/K) on the 298.15 K anchor only. FINGERPRINT (spot-check): delta_f G298 = -569.3, rising smoothly to -361.1 at
+# 1800 K; delta_f H298 = -601.6. HONEST LIMITS: delta_f H steps at 1000 K (Mg melts ~923 K) and again at 1400 K (Mg
+# boils ~1363 K) as the magnesium reference state changes; these are reference-element features, delta_f G stays
+# smooth. Melting T(MgO) = 3125 K.
+
+substance = "MgO"
+mineral = "periclase"
+phase = "cr"
+formula_wt = "40.304"
+reference = "formation-from-elements"
+melting_t_k = "3125"
+
+[[point]]
+t_k = "298.15"
+delta_f_g_kj = "-569.3"
+delta_f_h_kj = "-601.6"
+s_j = "26.90"
+cp_j = "37.26"
+
+[[point]]
+t_k = "300"
+delta_f_g_kj = "-569.1"
+delta_f_h_kj = "-601.6"
+
+[[point]]
+t_k = "400"
+delta_f_g_kj = "-558.3"
+delta_f_h_kj = "-601.6"
+
+[[point]]
+t_k = "500"
+delta_f_g_kj = "-547.4"
+delta_f_h_kj = "-601.4"
+
+[[point]]
+t_k = "600"
+delta_f_g_kj = "-536.7"
+delta_f_h_kj = "-601.1"
+
+[[point]]
+t_k = "700"
+delta_f_g_kj = "-526.0"
+delta_f_h_kj = "-600.8"
+
+[[point]]
+t_k = "800"
+delta_f_g_kj = "-515.3"
+delta_f_h_kj = "-600.5"
+
+[[point]]
+t_k = "900"
+delta_f_g_kj = "-504.7"
+delta_f_h_kj = "-600.4"
+
+[[point]]
+t_k = "1000"
+delta_f_g_kj = "-493.3"
+delta_f_h_kj = "-608.9"
+
+[[point]]
+t_k = "1100"
+delta_f_g_kj = "-481.8"
+delta_f_h_kj = "-608.9"
+
+[[point]]
+t_k = "1200"
+delta_f_g_kj = "-470.2"
+delta_f_h_kj = "-609.0"
+
+[[point]]
+t_k = "1300"
+delta_f_g_kj = "-458.6"
+delta_f_h_kj = "-609.0"
+
+[[point]]
+t_k = "1400"
+delta_f_g_kj = "-443.9"
+delta_f_h_kj = "-736.4"
+
+[[point]]
+t_k = "1500"
+delta_f_g_kj = "-423.1"
+delta_f_h_kj = "-735.0"
+
+[[point]]
+t_k = "1600"
+delta_f_g_kj = "-402.3"
+delta_f_h_kj = "-733.5"
+
+[[point]]
+t_k = "1700"
+delta_f_g_kj = "-381.7"
+delta_f_h_kj = "-732.1"
+
+[[point]]
+t_k = "1800"
+delta_f_g_kj = "-361.1"
+delta_f_h_kj = "-730.6"

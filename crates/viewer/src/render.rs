@@ -23,6 +23,15 @@
 //! world, not an author of it (Principle 10).
 
 use civsim_core::{splitmix64, Fixed};
+use civsim_materials::band_gap::conduction_class_from_column;
+use civsim_materials::optics::{
+    feature_response_at, marcus_hush_width_ev, optical_energies, thermal_broadening_width_ev,
+    OpticalFeature,
+};
+use civsim_physics::band_gap::BandGapColumn;
+use civsim_physics::crystal_field::{cm_to_ev, CrystalFieldTables};
+use civsim_physics::periodic::PeriodicTable;
+use civsim_physics::polarizability::element_electronic_polarizability_a0_cubed;
 use civsim_sim::genesis::LivingWorld;
 use civsim_sim::geodynamics::DerivedTile;
 use civsim_world::terrain::TerrainRelief;
@@ -42,6 +51,226 @@ pub fn organism_color(layer: u16, species_id: u32) -> Rgb {
         (base + d).clamp(0, 255) as u8
     };
     Rgb::new(jitter(br, 0), jitter(bg, 8), jitter(bb, 16))
+}
+
+/// The approximate DISPLAY colour of a blackbody at effective temperature `t_eff_k` (kelvin): the observability
+/// non-canon projection of a star's DERIVED `T_eff` (from [`civsim_sim::astro::stellar_effective_temperature`])
+/// onto a screen colour. A cool ~3000 K star reads orange-red, the Sun (~5772 K) a warm near-white, a hot
+/// ~10000 K star blue-white, tracking the Planckian locus. The mapping is the piecewise fit of Tanner Helland
+/// ("How to Convert Temperature (K) to RGB", 2012), itself a regression to Mitchell Charity's blackbody-colour
+/// datafile (`bbr_color.txt`, computed from the CIE 1931 colour-matching functions). Display-only: it reads a
+/// derived scalar and returns pixels, writes no canonical state (Principle 10), and uses `f64` because a screen
+/// colour needs no fixed-point rigour past per-run determinism.
+pub fn blackbody_rgb(t_eff_k: Fixed) -> Rgb {
+    // The fit is defined on temperature/100, valid roughly 1000..40000 K; clamp into that band so a derived T_eff
+    // past the fit returns its nearest sensible colour rather than a wild extrapolation.
+    let temp = (t_eff_k.to_f64_lossy() / 100.0).clamp(10.0, 400.0);
+    let clamp255 = |v: f64| v.clamp(0.0, 255.0) as u8;
+    let red = if temp <= 66.0 {
+        255.0
+    } else {
+        329.698_727_446 * (temp - 60.0).powf(-0.133_204_759_2)
+    };
+    let green = if temp <= 66.0 {
+        99.470_802_586_1 * temp.ln() - 161.119_568_166_1
+    } else {
+        288.122_169_528_3 * (temp - 60.0).powf(-0.075_514_849_2)
+    };
+    let blue = if temp >= 66.0 {
+        255.0
+    } else if temp <= 19.0 {
+        0.0
+    } else {
+        138.517_731_223_1 * (temp - 10.0).ln() - 305.044_792_730_7
+    };
+    Rgb::new(clamp255(red), clamp255(green), clamp255(blue))
+}
+
+/// The observability-non-canon DISPLAY colour of a daytime sky, DERIVED from the atmosphere's molecular
+/// polarizability by Rayleigh scattering: the scattered-light colour of a star of effective temperature
+/// `star_t_eff_k` filtered through an atmosphere of `gas_mix` (each entry a chemical formula and its mole
+/// fraction, for example `[("N2", 0.78), ("O2", 0.21), ("Ar", 0.01)]` for modern Earth air). Short wavelengths
+/// scatter more strongly (the Rayleigh cross-section goes as `alpha^2 / lambda^4`), so a thin N2/O2 atmosphere
+/// paints a blue sky; a more polarizable, denser CO2 atmosphere drives the short bands toward saturation and
+/// desaturates the sky, the qualitative Hadean/Venusian shift.
+///
+/// The derivation chain, every physical step DERIVED from the banked polarizability substrate, never authored
+/// RGB: a formula string parses to `(element, count)` pairs (a general parser, no hardcoded gas list) ->
+/// each atom's static electronic polarizability comes from
+/// [`civsim_physics::polarizability::element_electronic_polarizability_a0_cubed`] (the cited-ionization-energy
+/// Unsold single-oscillator estimate, in Bohr-volume units `a_0^3`) -> the molecular polarizability is their
+/// additive sum `alpha_mol = sum(count * alpha_atom)` -> each band's Rayleigh weight is
+/// `w(lambda) = sum_gas moleFraction * alpha_mol^2 / lambda^4` -> the scattered sky per band is the star's
+/// Planck spectral radiance times the Rayleigh transmittance `1 - exp(-tau(lambda))` -> the three bands are
+/// normalized so the brightest is 255, preserving hue. The absolute Rayleigh prefactor `128 pi^5 / 3` and the
+/// unit conversions cancel from that normalized ratio, so only the RELATIVE `alpha^2 / lambda^4` across bands
+/// and gases matters.
+///
+/// Admit-the-alien: the mix is keyed on the formula string and per-element cited data, so a new gas is a data
+/// row (a formula), never a code change. An element the polarizability substrate cannot resolve (for example a
+/// transition metal with no main-group valence count) sinks its gas (fail-soft, no guessed value); if the whole
+/// mix resolves to nothing, this returns `None` so the caller falls back to no atmosphere tint.
+///
+/// VALIDITY CEILING: this is FACTOR-GRADE and QUALITATIVE, not a calibrated radiance. It distinguishes a blue
+/// N2/O2 sky from a desaturated CO2 sky, no finer. Its cited top rung is the ionization energy (the
+/// polarizability's input); the Unsold estimate runs ~11% low, and the additivity approximation for molecular
+/// `alpha` is itself factor-grade. This is acceptable ONLY because the render is observability-non-canon:
+/// display-only, one-way (canon physics -> pixels), with zero effect on simulation state (Principle 10). The
+/// model carries no absorption and a wavelength-independent polarizability, so it spans blue (thin) to
+/// desaturated near-white (thick) and cannot render a true red/butterscotch sky; "less blue" is the honest
+/// limit of the qualitative shift. `f64` throughout, mirroring [`blackbody_rgb`]: a screen colour needs no
+/// fixed-point rigour past per-run determinism.
+///
+/// The observability-layer display choices this non-canon render is allowed (like [`blackbody_rgb`]'s fit): the
+/// three sampling wavelengths (`BANDS_NM`, the R/G/B band centres, definitional) and one opacity scale
+/// (`DISPLAY_OPACITY_UNIT`, documented at its definition). Every other quantity is derived or a cited fundamental.
+pub fn rayleigh_sky_rgb(
+    gas_mix: &[(&str, f64)],
+    star_t_eff_k: Fixed,
+    table: &PeriodicTable,
+) -> Option<Rgb> {
+    // The three display sampling wavelengths in nm: the R, G, B band centres. Definitional display choices for a
+    // non-canon render (the observability layer's allowance), the only colours the sky is sampled at.
+    const BANDS_NM: [f64; 3] = [630.0, 532.0, 465.0];
+    // The reference wavelength for the dimensionless lambda^-4 factor: the mid (green) band. A relative anchor
+    // that cancels from the normalized ratio; it only sets what "unit optical depth" is measured against, so the
+    // band weights stay order-one rather than the ~1e-8 raw `alpha^2 / lambda_nm^4` would give.
+    const LAMBDA_REF_NM: f64 = BANDS_NM[1];
+    // The one opacity display knob: the optical depth per `a_0^6` of mole-fraction-weighted molecular
+    // polarizability-squared at the reference (green) band. It stands in for the atmospheric column density times
+    // the Rayleigh prefactor (128 pi^5 / 3) times the `a_0^3`-to-length unit conversion, none of which the viewer
+    // has (the Stage-8 atmospheric column is unwired) and all of which cancel from a normalized band ratio. Its
+    // basis: set so modern Earth air (weighted `alpha^2` on the order of a thousand `a_0^6` from the substrate)
+    // lands near unit optical depth in the green band, moderate, so the short band is blue-dominant while no band
+    // fully saturates. The single definitional display opacity, surfaced not hidden.
+    const DISPLAY_OPACITY_UNIT: f64 = 1.0e-3;
+
+    // Per gas: additive molecular polarizability from the formula, then the mole-fraction-weighted `alpha^2` that
+    // scales every band's Rayleigh weight. An unresolvable gas contributes nothing (fail-soft, no guess).
+    let mut weighted_alpha_sq = 0.0f64;
+    for &(formula, mole_fraction) in gas_mix {
+        if mole_fraction <= 0.0 {
+            continue;
+        }
+        let Some(alpha_mol) = molecular_polarizability_a0_cubed(formula, table) else {
+            continue;
+        };
+        weighted_alpha_sq += mole_fraction * alpha_mol * alpha_mol;
+    }
+    if weighted_alpha_sq <= 0.0 {
+        return None; // nothing resolved: the caller falls back to no atmosphere tint
+    }
+
+    // The Planck exponent constant, DERIVED from the register (never authored): the incident starlight colour is
+    // the star's Planck spectrum, and the Rayleigh weighting filters it.
+    let c2_m_k = second_radiation_constant_m_k()?;
+    let t_eff = star_t_eff_k.to_f64_lossy();
+    let mut band = [0.0f64; 3];
+    for (i, &lambda) in BANDS_NM.iter().enumerate() {
+        let lambda_factor = (LAMBDA_REF_NM / lambda).powi(4); // the dimensionless lambda^-4 Rayleigh weighting
+        let tau = DISPLAY_OPACITY_UNIT * weighted_alpha_sq * lambda_factor;
+        let scattered = 1.0 - (-tau).exp(); // the Rayleigh single-scatter transmittance factor
+        band[i] = planck_relative(lambda, t_eff, c2_m_k) * scattered;
+    }
+
+    // Normalize to the brightest band so the hue is preserved and the sky reads at full intensity.
+    let max = band[0].max(band[1]).max(band[2]);
+    if max <= 0.0 {
+        return None;
+    }
+    let to_u8 = |v: f64| (v / max * 255.0).round().clamp(0.0, 255.0) as u8;
+    Some(Rgb::new(to_u8(band[0]), to_u8(band[1]), to_u8(band[2])))
+}
+
+/// The additive molecular polarizability (Bohr-volume units `a_0^3`) of a gas from its chemical formula:
+/// `alpha_mol = sum over atoms alpha_atom`, the standard atomic-additivity approximation summed over the
+/// formula's `(element, count)` pairs. Returns `None` if the formula parses to no atoms or if any element's
+/// polarizability is unavailable (fail-soft: an unresolvable element sinks the whole molecule rather than
+/// contributing a guessed zero). Keyed on the formula string and per-element cited data, so a new gas is a data
+/// row (admit-the-alien), never a code change.
+fn molecular_polarizability_a0_cubed(formula: &str, table: &PeriodicTable) -> Option<f64> {
+    let atoms = parse_formula(formula);
+    if atoms.is_empty() {
+        return None;
+    }
+    let mut alpha = 0.0f64;
+    for (symbol, count) in atoms {
+        let a = element_electronic_polarizability_a0_cubed(&symbol, table)?.to_f64_lossy();
+        alpha += a * count as f64;
+    }
+    Some(alpha)
+}
+
+/// Parse a chemical formula into `(element symbol, count)` pairs by a GENERAL rule (no hardcoded gas list,
+/// admit-the-alien): an uppercase ASCII letter opens a symbol, following lowercase ASCII letters continue it,
+/// and an optional run of ASCII digits is the count (default 1). "CO2" -> `[("C",1),("O",2)]`, "H2O" ->
+/// `[("H",2),("O",1)]`, "CH4" -> `[("C",1),("H",4)]`. A character that opens no symbol (a leading digit,
+/// whitespace, punctuation) is skipped, so a malformed fragment yields no atoms for that fragment, never a panic.
+fn parse_formula(formula: &str) -> Vec<(String, u32)> {
+    let chars: Vec<char> = formula.chars().collect();
+    let mut atoms = Vec::new();
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i].is_ascii_uppercase() {
+            let mut symbol = String::new();
+            symbol.push(chars[i]);
+            i += 1;
+            while i < chars.len() && chars[i].is_ascii_lowercase() {
+                symbol.push(chars[i]);
+                i += 1;
+            }
+            let mut count: u32 = 0;
+            let mut has_digit = false;
+            while i < chars.len() && chars[i].is_ascii_digit() {
+                count = count
+                    .saturating_mul(10)
+                    .saturating_add(chars[i].to_digit(10).unwrap_or(0));
+                has_digit = true;
+                i += 1;
+            }
+            atoms.push((symbol, if has_digit { count } else { 1 }));
+        } else {
+            i += 1;
+        }
+    }
+    atoms
+}
+
+/// The second radiation constant `c_2 = h c / k_B` in metre-kelvin, DERIVED from the fundamentals register
+/// (`civsim_units::fundamentals`), never authored: it sets the Planck exponent `hc / (lambda k T)`. Parsed to
+/// `f64` because this is a non-canon display value that needs no fixed-point rigour. `None` on a register miss.
+fn second_radiation_constant_m_k() -> Option<f64> {
+    let h: f64 = civsim_units::fundamentals::fundamental("h")?
+        .value
+        .parse()
+        .ok()?;
+    let c: f64 = civsim_units::fundamentals::fundamental("c")?
+        .value
+        .parse()
+        .ok()?;
+    let k_b: f64 = civsim_units::fundamentals::fundamental("k_B")?
+        .value
+        .parse()
+        .ok()?;
+    Some(h * c / k_b)
+}
+
+/// The star's RELATIVE Planck spectral radiance at wavelength `lambda_nm` and temperature `t_k`: Planck's law
+/// `B(lambda, T) proportional to lambda^-5 / (exp(c_2 / (lambda T)) - 1)`, with the second radiation constant
+/// `c_2 = h c / k_B` passed in (`c2_m_k`, in metre-kelvin). Only the RATIO across the three bands is used, so the
+/// leading `2 h c^2` prefactor drops and the result carries no absolute unit. This is the incident starlight
+/// colour the Rayleigh weighting then filters. Falls back to a flat spectrum on a non-physical temperature.
+fn planck_relative(lambda_nm: f64, t_k: f64, c2_m_k: f64) -> f64 {
+    if t_k <= 0.0 {
+        return 1.0;
+    }
+    let lambda_m = lambda_nm * 1.0e-9;
+    let x = c2_m_k / (lambda_m * t_k);
+    let denom = x.exp() - 1.0;
+    if denom <= 0.0 {
+        return 0.0;
+    }
+    lambda_m.powi(-5) / denom
 }
 
 /// A physics-derived terrain colour: the tile's own `elevation`, `moisture`, and `temperature`
@@ -426,6 +655,233 @@ pub fn superfine(
     buf
 }
 
+/// The three photoreceptor band centres (nm) the non-canon material projection samples: red, green, blue. AUTHORED
+/// display choices, the observability-layer allowance the optics substrate reserves for the downstream observer
+/// projection (`optics.rs`: the perceived colour is the observer's projection, not in the substrate). They are the
+/// only wavelengths the reflectance is sampled at, and they match the sky's `BANDS_NM` so the two non-canon
+/// projections read the same spectrum. Each lies inside a human's `~1.6-3.1 eV` visible window (630 nm ~ 1.97 eV,
+/// 532 nm ~ 2.33 eV, 465 nm ~ 2.67 eV).
+const MATERIAL_BANDS_NM: [f64; 3] = [630.0, 532.0, 465.0];
+
+/// The class-grade intensity weight of an ALLOWED charge-transfer band relative to the unit-weight sharp features
+/// (the forbidden d-d line and the band-gap / plasma edges), applied in this non-canon projection only. It stands in
+/// for the per-feature oscillator STRENGTH the optics substrate does not yet carry: a symmetry-allowed charge-transfer
+/// transition is orders of magnitude more intense than a Laporte-forbidden d-d line (the Laporte rule), so its huge
+/// absorption coefficient renders a mineral opaque even where its broad Lorentzian / step tail is only a few percent
+/// of the peak. Without it a ferric oxide reads light (the tail alone tops out near forty percent absorption in the
+/// visible); with it a ferric oxide reads dark-red and a mixed-valence oxide near-black. RESERVED, surfaced with its
+/// basis to `docs/working/MORNING_REVIEW.md` (the allowed-to-forbidden oscillator-strength ratio, class-grade, bounded
+/// below where a ferric oxide would stay light and above where hematite would over-darken to black); byte-neutral (a
+/// non-canon presentation weight, like `MATERIAL_BANDS_NM` and the relief palette, with ZERO effect on canon). The
+/// canon fix is a per-feature oscillator-strength column, the named follow-on. NOT authored in the canon.
+const CHARGE_TRANSFER_INTENSITY_WEIGHT: f64 = 3.0;
+
+/// The photon-energy constant `h c` in `eV * nm` (`~1239.8`), DERIVED from the fundamentals register (`h`, `c`, `e`),
+/// never authored: the photon energy at wavelength `lambda` in nm is `E[eV] = hc_ev_nm / lambda`. Parsed to `f64`
+/// because this is a non-canon display value that needs no fixed-point rigour past per-run determinism. `None` on a
+/// register miss.
+fn hc_ev_nm() -> Option<f64> {
+    let h: f64 = civsim_units::fundamentals::fundamental("h")?
+        .value
+        .parse()
+        .ok()?;
+    let c: f64 = civsim_units::fundamentals::fundamental("c")?
+        .value
+        .parse()
+        .ok()?;
+    let e: f64 = civsim_units::fundamentals::fundamental("e")?
+        .value
+        .parse()
+        .ok()?;
+    Some(h * c / e * 1.0e9)
+}
+
+/// Reduce a composition's `(element, amount)` pairs to integer `(element, count)` pairs for the substance lookups (the
+/// band-gap column, the crystal-field oxide table, and the iron oxidation-state derivation key on integer
+/// stoichiometry). When every positive amount is already a whole number the ratio is reduced by its greatest common
+/// divisor, so an EXACT stoichiometry survives intact and distinct (`Fe3O4` stays `{Fe:3, O:4}` rather than rounding
+/// to `{Fe:1, O:1}`, which is what the ferric-versus-mixed-versus-ferrous distinction turns on; `SiO2` stays
+/// `{Si:1, O:2}`). A fractional, solar-abundance-scaled crust instead scales to the smallest positive amount and
+/// rounds, so it still reduces to a non-empty integer ratio rather than rounding every trace amount to zero; a mixed,
+/// non-stoichiometric crust reduces to counts that match no seeded phase and resolves to no optical feature (a pale,
+/// featureless read), the honest outcome for a fresh silicate crust.
+fn composition_counts(composition: &[(String, Fixed)]) -> Vec<(String, u32)> {
+    let positives: Vec<(&String, Fixed)> = composition
+        .iter()
+        .filter(|(_, a)| *a > Fixed::ZERO)
+        .map(|(el, a)| (el, *a))
+        .collect();
+    if positives.is_empty() {
+        return Vec::new();
+    }
+    // The exact-integer path: reduce by the greatest common divisor so a whole-number stoichiometry is preserved.
+    let all_integer = positives
+        .iter()
+        .all(|(_, a)| Fixed::from_int(a.to_int()) == *a);
+    if all_integer {
+        let mut g: u64 = 0;
+        for (_, a) in &positives {
+            g = gcd_u64(g, a.to_int() as u64);
+        }
+        let g = g.max(1);
+        return positives
+            .iter()
+            .filter_map(|(el, a)| {
+                let n = (a.to_int() as u64) / g;
+                (n > 0).then(|| ((*el).clone(), n as u32))
+            })
+            .collect();
+    }
+    // The fractional path: scale to the smallest positive amount and round to the nearest integer ratio.
+    let scale = positives
+        .iter()
+        .map(|(_, a)| *a)
+        .min()
+        .unwrap_or(Fixed::ONE);
+    positives
+        .iter()
+        .filter_map(|(el, amount)| {
+            let ratio = amount.checked_div(scale)?;
+            let n = ratio
+                .checked_add(Fixed::from_ratio(1, 2))
+                .map(|v| v.to_int())
+                .unwrap_or(0);
+            (n > 0).then(|| ((*el).clone(), n as u32))
+        })
+        .collect()
+}
+
+/// The greatest common divisor (Euclid), the stoichiometry reducer for [`composition_counts`].
+fn gcd_u64(a: u64, b: u64) -> u64 {
+    if b == 0 {
+        a
+    } else {
+        gcd_u64(b, a % b)
+    }
+}
+
+/// The observability-non-canon perceived colour of a material under a star's light, DERIVED from the material's own
+/// absorption spectrum and the star's Planck spectrum, never an authored per-mineral swatch. This is exactly the
+/// downstream observer projection the optics substrate (`civsim_materials::optics`) reserves and refuses to author:
+/// the substrate produces the observer-INDEPENDENT characteristic energies, and this renderer projects them against a
+/// human-baseline visible window and three photoreceptor bands into a screen colour, one-way (canon physics ->
+/// pixels), writing no canonical state (Principle 10).
+///
+/// The derivation chain, each step read from the material's own data, never a colour lookup:
+///   1. The composition reduces to integer counts, and the material's electronic classification and optical
+///      characteristic energies come from the banked substrate: the band gap (an INTERBAND ONSET) from the band-gap
+///      column ([`conduction_class_from_column`] / [`BandGapColumn::gap`]) and the ligand-field d-d line from the
+///      crystal-field oxide table ([`CrystalFieldTables::oxide_delta_cm`] converted to eV by [`cm_to_ev`]). No plasma
+///      edge is emitted: a carrier density is not derivable for an arbitrary composition here, so a metal carries no
+///      plasma feature rather than a fabricated one (a stated limit, not a guessed value).
+///   2. At each of the three photoreceptor bands the ABSORPTION is the summed feature response
+///      ([`feature_response_at`]) of the material's optical energies, broadened by the grounded thermal width
+///      ([`thermal_broadening_width_ev`], `~ k_B T`, never an authored linewidth), capped at full absorption. The
+///      REFLECTANCE is its complement, `1 - absorption`: a feature that reaches the band darkens it.
+///   3. The reflected radiance per band is the star's relative Planck spectral radiance ([`planck_relative`], the
+///      incident starlight colour, derived from the second radiation constant) times the reflectance, and the three
+///      bands normalize against the ILLUMINANT reference (the brightest band at full reflectance), so absorption reads
+///      as DARKNESS: a fully-absorbing material is dark, a fully-reflecting one takes the star's colour at full
+///      brightness, never renormalized back to full intensity per material.
+///
+/// Admit-the-alien: the mix is keyed on the composition and per-substance banked data (the gap column, the oxide d-d
+/// table), so a new material is a data row, and the visible window and band centres are the OBSERVER's property
+/// (`MATERIAL_BANDS_NM`), never the material's. A being with a different eye would read the same spectrum a different
+/// colour, a data-row difference.
+///
+/// VALIDITY CEILING: this is FACTOR-GRADE and QUALITATIVE (dark versus light, warm versus cool), not a calibrated
+/// reflectance. A substance whose absorption onset lies within or below the visible window reads dark; a wide-gap or
+/// feature-free substance reads light; and the reflected colour warms under a cooler star. It carries NO Fresnel
+/// surface reflectance (so a small-gap absorber reads pure-dark rather than dark-grey), and only the LEADING
+/// crystal-field d-d line at `Delta_o` (the higher visible-range multiplets are a named optics follow-on). Seam 2
+/// adds the iron charge-transfer darkening: a FERRIC oxide (`Fe3+`, hematite) carries the intense `O2- -> Fe3+`
+/// charge-transfer edge whose broad tail reddens and darkens it, and a MIXED-valence oxide (magnetite) adds the
+/// `Fe2+ -> Fe3+` intervalence band and reads near-black; keyed on the DERIVED iron oxidation state, so a FERROUS
+/// oxide (`FeO`, whose only feature is the near-infrared `~0.93 eV` d-d line) correctly stays light, the honest
+/// per-valence outcome. The remaining class-grade limit is the oscillator STRENGTH: the substrate carries the band
+/// energy and its broad width but not a per-feature oscillator strength, so the charge-transfer intensity that makes
+/// the tail opaque in the visible is a class-grade weight applied HERE ([`CHARGE_TRANSFER_INTENSITY_WEIGHT`], the
+/// non-canon projection), never in the canon. `f64` throughout, mirroring [`rayleigh_sky_rgb`] and [`blackbody_rgb`].
+/// `None` when the composition reduces to nothing or the illuminant does not resolve (fail-soft: the caller keeps the
+/// relief swatch).
+pub fn material_surface_rgb(
+    composition: &[(String, Fixed)],
+    star_t_eff_k: Fixed,
+    temperature_k: Fixed,
+    gaps: &BandGapColumn,
+    crystal: &CrystalFieldTables,
+    table: &PeriodicTable,
+) -> Option<Rgb> {
+    let counts = composition_counts(composition);
+    if counts.is_empty() {
+        return None;
+    }
+    // The material's own electronic classification and observer-independent optical characteristic energies: the
+    // interband onset from the banked gap column, the d-d ligand-field line from the crystal-field oxide table, and
+    // the iron charge-transfer / intervalence bands whose presence keys on the composition's DERIVED iron oxidation
+    // state (a ferric phase carries the charge-transfer edge, a mixed-valence phase adds the intervalence band). No
+    // plasma edge (no derivable carrier density here, so no fabricated feature). Keyed on the substance's own data.
+    let class = conduction_class_from_column(gaps, &counts, temperature_k);
+    let band_gap_ev = gaps.gap(&counts).map(|bg| bg.gap_ev);
+    let dd_transition_ev = crystal.oxide_delta_cm(&counts).and_then(cm_to_ev);
+    let (charge_transfer_ev, intervalence_ev) =
+        crystal.iron_charge_transfer_energies(&counts, table);
+    let features = optical_energies(
+        &class,
+        band_gap_ev,
+        None,
+        dd_transition_ev,
+        charge_transfer_ev,
+        intervalence_ev,
+    );
+    // The grounded broadening widths (thermal ~ k_B T for the sharp features, the broad Marcus-Hush vibronic width for
+    // an allowed charge-transfer band), never an authored linewidth.
+    let thermal = thermal_broadening_width_ev(temperature_k);
+    let c2_m_k = second_radiation_constant_m_k()?;
+    let hc = hc_ev_nm()?;
+    let t_eff = star_t_eff_k.to_f64_lossy();
+    let mut band_radiance = [0.0f64; 3];
+    let mut illum_ref = 0.0f64;
+    for (i, &lambda_nm) in MATERIAL_BANDS_NM.iter().enumerate() {
+        let probe_ev_f = hc / lambda_nm;
+        // The probe energy back into fixed-point (micro-eV resolution) for the observer-independent feature response.
+        let probe_ev = Fixed::from_ratio((probe_ev_f * 1.0e6).round() as i64, 1_000_000);
+        // Absorption at this band: the summed feature response of the material's optical energies, capped at full
+        // absorption. Reflectance is its complement (a feature reaching the band darkens it). Each feature carries its
+        // own grounded width and a class-grade intensity: the forbidden d-d line and the sharp edges take the near-
+        // thermal width at unit weight; the ALLOWED charge-transfer and intervalence bands take the broad Marcus-Hush
+        // vibronic width and the high oscillator-strength weight, so their intense tails flood the visible.
+        let mut absorption = 0.0f64;
+        for feature in &features {
+            let (feature_width, weight) = match feature.feature {
+                OpticalFeature::ChargeTransferBand | OpticalFeature::IntervalenceBand => (
+                    marcus_hush_width_ev(feature.energy_ev, temperature_k),
+                    CHARGE_TRANSFER_INTENSITY_WEIGHT,
+                ),
+                _ => (thermal, 1.0),
+            };
+            if let Some(r) = feature_response_at(probe_ev, feature, feature_width) {
+                absorption += weight * r.to_f64_lossy();
+            }
+        }
+        let reflectance = (1.0 - absorption).clamp(0.0, 1.0);
+        let illum = planck_relative(lambda_nm, t_eff, c2_m_k);
+        band_radiance[i] = illum * reflectance;
+        if illum > illum_ref {
+            illum_ref = illum;
+        }
+    }
+    if illum_ref <= 0.0 {
+        return None;
+    }
+    let to_u8 = |v: f64| (v / illum_ref * 255.0).round().clamp(0.0, 255.0) as u8;
+    Some(Rgb::new(
+        to_u8(band_radiance[0]),
+        to_u8(band_radiance[1]),
+        to_u8(band_radiance[2]),
+    ))
+}
+
 /// The glyph a DERIVED tile shows, keyed by its relief class (the R1-override terrain projected to a mark in the
 /// Dwarf-Fortress-spirit glyph view): submarine reads as water `~`, lowland as flat ground `.`, upland as raised
 /// `^`. Presentation only, a one-way read of the derived relief, never canonical state (Principle 10).
@@ -519,6 +975,618 @@ pub fn paint_derived_tiles(
     buf
 }
 
+/// A relief-shading brightness for the material-tile paint: upland reads full, lowland a shade dimmer, submarine
+/// dimmest (as if the surface sits deeper / in shadow). The ONE authored display relief scale the non-canon layer is
+/// allowed (documented here at its site), byte-neutral on canon: it modulates the DERIVED material colour's brightness
+/// so relief structure is legible, never inventing a per-relief hue. The relief it keys off is derived. Used by the
+/// sphere's material tint ([`draw_globe`]) and the flat material-tile paint.
+fn relief_shade(relief: TerrainRelief) -> f32 {
+    match relief {
+        TerrainRelief::Upland => 1.0,
+        TerrainRelief::Lowland => 0.82,
+        TerrainRelief::Submarine => 0.55,
+    }
+}
+
+/// Paint a field of DERIVED tiles coloured by their MATERIAL's perceived colour under the star
+/// ([`material_surface_rgb`]), each tile a `tile_px` block of that colour scaled by the relief shading
+/// ([`relief_shade`]) with the relief glyph centred. This is the zoom-in surface of the derived planet: the crust the
+/// physics condensed and differentiated, painted its own optical colour under the star, never an authored swatch. For
+/// a fresh, uniform crust every tile shares the material colour and the visible variation is the relief shading, the
+/// honest look until lateral composition variation lands (a named geodynamics follow-on). A pure, deterministic read,
+/// one-way canon -> pixels (Principle 10).
+///
+/// Retained for the flat material-tile view, but the derived viewer no longer calls it: that mode now zooms ONTO the
+/// sphere's surface (a continuous globe zoom) rather than a disconnected flat tile field. Kept available (covered by a
+/// unit test) so the material-tile path is not lost.
+#[allow(dead_code)]
+pub fn paint_material_tiles(
+    tiles: &[DerivedTile],
+    material: Rgb,
+    cols: usize,
+    tile_px: usize,
+    w: usize,
+    h: usize,
+    bg: Rgb,
+) -> Vec<u32> {
+    let tile_px = tile_px.max(3);
+    let cols = cols.max(1);
+    let mut buf = vec![bg.pack(); w * h];
+    for (i, t) in tiles.iter().enumerate() {
+        let cx = (i % cols) * tile_px;
+        let cy = (i / cols) * tile_px;
+        if cx >= w || cy >= h {
+            continue;
+        }
+        let s = relief_shade(t.relief);
+        let scale = |c: u8| (c as f32 * s).clamp(0.0, 255.0) as u8;
+        let color = Rgb::new(scale(material.r), scale(material.g), scale(material.b));
+        fill_rect(&mut buf, w, cx, cy, tile_px, tile_px, color.pack());
+        let fg = if color.luminance() > 128 {
+            Rgb::new(20, 20, 24)
+        } else {
+            Rgb::new(228, 232, 236)
+        };
+        draw_glyph_centered(
+            &mut buf,
+            w,
+            cx,
+            cy,
+            tile_px,
+            derived_tile_glyph(t.relief),
+            fg,
+        );
+    }
+    buf
+}
+
+/// The on-screen radius (pixels) a planet's DERIVED radius projects to at a view scale of `m_per_px` metres per
+/// pixel: `radius_px = radius_m / m_per_px`. This is the seeable-world size law, so a denser (smaller-radius)
+/// planet draws a smaller globe and a larger one draws bigger, straight from [`civsim_sim::astro::planet_radius_m`].
+/// All fixed-point, deterministic; a non-positive or overflowing input yields `0` (nothing to draw). Display-only,
+/// a one-way read of the derived radius (Principle 10).
+pub fn globe_radius_px(radius_m: Fixed, m_per_px: Fixed) -> usize {
+    if radius_m <= Fixed::ZERO || m_per_px <= Fixed::ZERO {
+        return 0;
+    }
+    radius_m
+        .checked_div(m_per_px)
+        .map(|v| v.to_int().max(0) as usize)
+        .unwrap_or(0)
+}
+
+/// Normalise a 3-vector for display lighting, returning the +z unit vector for a zero input (a safe default facing
+/// the viewer). Non-canon display math, `f32` is fine.
+fn normalize3(v: [f32; 3]) -> [f32; 3] {
+    let m = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+    if m <= 0.0 {
+        [0.0, 0.0, 1.0]
+    } else {
+        [v[0] / m, v[1] / m, v[2] / m]
+    }
+}
+
+/// The DERIVED tile relief at surface coordinate (u, v) (each in `[0, 1)`), an orthographic read of the derived relief
+/// field wrapped onto the globe (the same (u, v) -> cell mapping [`pick_surface_tile`] inverts). `None` for an empty
+/// field, so the caller falls back to a stand-in. Display-only.
+fn sample_derived_relief(
+    tiles: &[DerivedTile],
+    cols: usize,
+    u: f32,
+    v: f32,
+) -> Option<TerrainRelief> {
+    if tiles.is_empty() || cols == 0 {
+        return None;
+    }
+    let rows = tiles.len().div_ceil(cols);
+    let cu = ((u.clamp(0.0, 0.999_9) * cols as f32) as usize).min(cols - 1);
+    let cv = ((v.clamp(0.0, 0.999_9) * rows as f32) as usize).min(rows.saturating_sub(1));
+    let idx = (cv * cols + cu).min(tiles.len() - 1);
+    Some(tiles[idx].relief)
+}
+
+/// The globe's viewing orientation for the derived-surface explorer: a longitude spin about the polar axis and a
+/// latitude tilt, both in radians. Panning the derived viewer changes these so the far side of the sphere rotates
+/// into view and the whole surface becomes reachable. A display-only orientation (observability non-canon): it steers
+/// which surface coordinate each screen pixel samples and writes no canonical state (Principle 10).
+#[derive(Clone, Copy, Debug)]
+pub struct GlobeOrientation {
+    /// Longitude offset (radians); the caller wraps it, so a full spin reaches every meridian.
+    pub rot_lon: f32,
+    /// Latitude offset (radians); the caller clamps it away from the poles to avoid the projection singularity.
+    pub rot_lat: f32,
+}
+
+impl GlobeOrientation {
+    /// The unrotated orientation: the sphere is sampled straight on, so the render is identical to the
+    /// pre-rotation globe (the headless commands and the living-world globe use this).
+    pub const IDENTITY: Self = Self {
+        rot_lon: 0.0,
+        rot_lat: 0.0,
+    };
+}
+
+/// Rotate a 3-vector about the x axis (screen-horizontal) by `angle` radians. Non-canon display math.
+fn rot_x(p: [f32; 3], angle: f32) -> [f32; 3] {
+    let (s, c) = angle.sin_cos();
+    [p[0], c * p[1] - s * p[2], s * p[1] + c * p[2]]
+}
+
+/// Rotate a 3-vector about the y axis (the polar / up axis) by `angle` radians. Non-canon display math.
+fn rot_y(p: [f32; 3], angle: f32) -> [f32; 3] {
+    let (s, c) = angle.sin_cos();
+    [c * p[0] + s * p[2], p[1], -s * p[0] + c * p[2]]
+}
+
+/// Carry a view-space point (x right, y up, z toward the viewer) on the unit sphere into the globe's BODY frame,
+/// undoing the orientation: `B = R_y(-rot_lon) * R_x(-rot_lat) * P`. So a screen pixel maps to the surface point the
+/// current orientation has rotated under it. At [`GlobeOrientation::IDENTITY`] this is the identity (both rotations
+/// are by 0, so the body point equals the view point exactly). Non-canon display math.
+fn view_to_body(p: [f32; 3], o: GlobeOrientation) -> [f32; 3] {
+    rot_y(rot_x(p, -o.rot_lat), -o.rot_lon)
+}
+
+/// Carry a globe BODY-frame point into view space under the orientation: `P = R_x(rot_lat) * R_y(rot_lon) * B`, the
+/// forward of [`view_to_body`]. Used to project a surface (u, v) back onto the screen for the highlight outline. Non-canon.
+fn body_to_view(b: [f32; 3], o: GlobeOrientation) -> [f32; 3] {
+    rot_x(rot_y(b, o.rot_lon), o.rot_lat)
+}
+
+/// The surface coordinate (u, v) of a BODY-frame point: longitude about the polar (y) axis mapped to `u` in [0, 1)
+/// (wrapping the meridian) and latitude to `v` in [0, 1], matching [`draw_globe`]'s sphere map so the pick and the
+/// paint agree. Non-canon display math.
+fn body_to_uv(b: [f32; 3]) -> (f32, f32) {
+    use std::f32::consts::PI;
+    let lat = b[1].clamp(-1.0, 1.0).asin(); // -pi/2..pi/2
+    let lon = b[0].atan2(b[2]); // -pi..pi
+    let u = ((lon + PI) / (2.0 * PI)).rem_euclid(1.0);
+    let v = (0.5 - lat / PI).clamp(0.0, 1.0);
+    (u, v)
+}
+
+/// The BODY-frame unit point of a surface coordinate (u, v), the inverse of [`body_to_uv`]. Used to project a tile's
+/// (u, v) corners forward onto the screen for the highlight box. Non-canon display math.
+fn uv_to_body(u: f32, v: f32) -> [f32; 3] {
+    use std::f32::consts::PI;
+    let lon = u * 2.0 * PI - PI;
+    let lat = (0.5 - v) * PI;
+    [lat.cos() * lon.sin(), lat.sin(), lat.cos() * lon.cos()]
+}
+
+/// The display styling of the drawn sphere's surface: the DERIVED material tint (the crust's perceived colour under the
+/// star, or `None` for the relief swatch) and an optional lat/lon TILE GRID `(cols, rows)` drawn onto the sphere as thin
+/// seams, so the surface reads as an array of tiles the observer can drill into. Both are observability-non-canon
+/// display choices (Principle 10); `default()` is no tint and no grid (the plain planet view).
+#[derive(Clone, Copy, Default)]
+pub struct SurfaceStyle {
+    /// The DERIVED material colour to paint the surface (scaled per tile by relief shading), or `None` for the swatch.
+    pub tint: Option<Rgb>,
+    /// The display tile grid `(cols, rows)` to overlay as seams, or `None` for a smooth (un-gridded) sphere.
+    pub grid: Option<(usize, usize)>,
+}
+
+/// Draw the planet as a lit sphere: a filled disk of on-screen radius `radius_px` centred at `(cx, cy)`, its
+/// surface textured from the DERIVED tiles (an orthographic sphere map of the relief field, sampled at the surface
+/// coordinate the globe `orient`ation has rotated under each pixel) and shaded by a Lambert diffuse term against the
+/// star direction `star_dir`. The sunlit hemisphere is bright and tinted by `light_tint` (the star's
+/// [`blackbody_rgb`]); the night side falls to a faint neutral ambient; the cosine falloff between them is the soft
+/// day/night terminator. The lighting rotates WITH `orient` (camera-orbit semantics), so panning sweeps the terminator
+/// across the surface and the lit part visibly changes as the globe turns, even on a uniform crust. `style.tint`, if
+/// given, is the crust's DERIVED perceived colour under the star ([`material_surface_rgb`]): each tile takes that colour
+/// scaled by its relief shading, so the sphere wears the derived material colour rather than the relief swatch.
+/// `style.grid`, if given, overlays a lat/lon tile grid as thin darkened seams, so the surface reads as an array of
+/// tiles (the caller refines the grid with zoom so a tile opens into finer tiles). Pixels outside the disk are left
+/// untouched (the caller paints space and the atmosphere limb). A pure, deterministic read of the derived radius,
+/// tiles, star direction, style, and orientation, one-way canon -> pixels (Principle 10).
+#[allow(clippy::too_many_arguments)]
+pub fn draw_globe(
+    buf: &mut [u32],
+    w: usize,
+    h: usize,
+    cx: i32,
+    cy: i32,
+    radius_px: usize,
+    tiles: &[DerivedTile],
+    tile_cols: usize,
+    star_dir: [f32; 3],
+    light_tint: Rgb,
+    style: SurfaceStyle,
+    orient: GlobeOrientation,
+) {
+    if radius_px == 0 || w == 0 || h == 0 {
+        return;
+    }
+    let r = radius_px as f32;
+    // The star direction rotates WITH the orientation (camera-orbit semantics): as the pan spins the globe, the
+    // day/night terminator sweeps across the surface, so panning visibly changes which part faces the star even on a
+    // uniform crust. At GlobeOrientation::IDENTITY this reduces to `star_dir` exactly (rotation by 0), so the headless
+    // and living-world globes render unchanged.
+    let l = normalize3(body_to_view(star_dir, orient));
+    let tint = [
+        light_tint.r as f32 / 255.0,
+        light_tint.g as f32 / 255.0,
+        light_tint.b as f32 / 255.0,
+    ];
+    // A faint neutral ambient so the night hemisphere reads dark but not pure black (skyglow and starlight).
+    const AMBIENT: f32 = 0.10;
+    let rp = radius_px as i32;
+    let x0 = (cx - rp).max(0);
+    let x1 = (cx + rp).min(w as i32 - 1);
+    let y0 = (cy - rp).max(0);
+    let y1 = (cy + rp).min(h as i32 - 1);
+    for py in y0..=y1 {
+        for px in x0..=x1 {
+            let nx = (px - cx) as f32 / r;
+            let ny = (py - cy) as f32 / r;
+            let d2 = nx * nx + ny * ny;
+            if d2 > 1.0 {
+                continue; // outside the disk
+            }
+            let nz = (1.0 - d2).sqrt(); // the front-hemisphere normal, toward the viewer
+                                        // Orthographic sphere map, rotated by the globe orientation so panning brings
+                                        // the far side into view. Screen y points down, so world up is -ny. At
+                                        // GlobeOrientation::IDENTITY this reduces to the straight-on map exactly.
+            let (u, v) = body_to_uv(view_to_body([nx, -ny, nz], orient));
+            // The surface base colour: when `surface_tint` is given (the derived crust's perceived colour under the
+            // star, from `material_surface_rgb`), each tile is that colour scaled by its relief shading, so the sphere
+            // wears the DERIVED material colour; otherwise the relief swatch ([`derived_tile_color`]). A uniform crust
+            // reads a single shade (the honest look until lateral composition variation lands, a geodynamics
+            // follow-on); an empty field falls back to the tint or a deep-ocean stand-in.
+            let base = match sample_derived_relief(tiles, tile_cols, u, v) {
+                Some(relief) => match style.tint {
+                    Some(m) => {
+                        let s = relief_shade(relief);
+                        let scale = |c: u8| (c as f32 * s).clamp(0.0, 255.0) as u8;
+                        Rgb::new(scale(m.r), scale(m.g), scale(m.b))
+                    }
+                    None => derived_tile_color(relief),
+                },
+                None => style.tint.unwrap_or(Rgb::new(40, 72, 120)),
+            };
+            // Lambert diffuse: dot of the surface normal with the star direction, clamped at the terminator.
+            let lambert = (nx * l[0] + ny * l[1] + nz * l[2]).max(0.0);
+            let shade = |c: u8, t: f32| -> u8 {
+                let day = AMBIENT + (1.0 - AMBIENT) * lambert * t;
+                (c as f32 * day).clamp(0.0, 255.0) as u8
+            };
+            let mut color = Rgb::new(
+                shade(base.r, tint[0]),
+                shade(base.g, tint[1]),
+                shade(base.b, tint[2]),
+            );
+            // The display TILE GRID: darken pixels that fall on a lat/lon cell boundary into a thin seam, so the
+            // surface reads as an array of tiles. The seam half-width is set in cell-fraction units to render roughly
+            // one pixel wide near the disk centre (it thickens toward the limb, where the sphere foreshortens); the
+            // grid density is the caller's, refined with zoom so a tile opens into a finer array. Display-only.
+            if let Some((gc, gr)) = style.grid {
+                if gc > 0 && gr > 0 {
+                    let gu = u * gc as f32;
+                    let gv = v * gr as f32;
+                    let du = (gu - gu.round()).abs();
+                    let dv = (gv - gv.round()).abs();
+                    let half_u = (gc as f32 / (2.0 * r) * 0.6).min(0.25);
+                    let half_v = (gr as f32 / (2.0 * r) * 0.6).min(0.25);
+                    if du < half_u || dv < half_v {
+                        // Darken toward a seam; visible on the lit side (the night side is already dark).
+                        color = Rgb::new(
+                            (color.r as f32 * 0.45) as u8,
+                            (color.g as f32 * 0.45) as u8,
+                            (color.b as f32 * 0.5) as u8,
+                        );
+                    }
+                }
+            }
+            buf[py as usize * w + px as usize] = color.pack();
+        }
+    }
+}
+
+/// Draw the star: a solid disk of `color` (its [`blackbody_rgb`]) with a soft radial glow fading to the background
+/// over about three radii, so the star's on-screen colour reads as its temperature. Display-only.
+fn draw_star(buf: &mut [u32], w: usize, h: usize, sx: i32, sy: i32, radius_px: usize, color: Rgb) {
+    if radius_px == 0 || w == 0 || h == 0 {
+        return;
+    }
+    let core = radius_px as i32;
+    let glow = core * 3;
+    let cr = color.r as f32;
+    let cg = color.g as f32;
+    let cb = color.b as f32;
+    let x0 = (sx - glow).max(0);
+    let x1 = (sx + glow).min(w as i32 - 1);
+    let y0 = (sy - glow).max(0);
+    let y1 = (sy + glow).min(h as i32 - 1);
+    for py in y0..=y1 {
+        for px in x0..=x1 {
+            let dx = (px - sx) as f32;
+            let dy = (py - sy) as f32;
+            let dist = (dx * dx + dy * dy).sqrt();
+            let idx = py as usize * w + px as usize;
+            if dist <= core as f32 {
+                buf[idx] = color.pack();
+            } else if dist <= glow as f32 {
+                // The glow falls off quadratically from the core edge and blends over whatever is already there.
+                let t = 1.0 - (dist - core as f32) / (glow - core).max(1) as f32;
+                let a = (t * t).clamp(0.0, 1.0) * 0.8;
+                let word = buf[idx];
+                let er = (word >> 16) as u8 as f32;
+                let eg = (word >> 8) as u8 as f32;
+                let eb = word as u8 as f32;
+                let mix = |e: f32, c: f32| -> u8 { (e + (c - e) * a).clamp(0.0, 255.0) as u8 };
+                buf[idx] = Rgb::new(mix(er, cr), mix(eg, cg), mix(eb, cb)).pack();
+            }
+        }
+    }
+}
+
+/// A STAND-IN sky colour for the atmosphere limb: a pale blue placeholder, NOT a derived value.
+// TODO(atmosphere): the real limb colour derives from the Stage-8 gas-mix Rayleigh scattering (the manager is
+// building that substrate); until it lands this pale-blue fixture stands in, clearly labelled so it is not mistaken
+// for physics. When the gas mix is available, replace this constant with a read of the scattered-sky spectrum.
+pub const PLACEHOLDER_SKY: Rgb = Rgb::new(150, 190, 235);
+
+/// Draw a soft atmosphere haze around the globe's limb: a thin glow just outside the disk (fading out over
+/// `HALO_FRAC` of the radius) plus a faint rim just inside it, brighter on the day side (where the limb faces the
+/// star) and dim on the night side. `sky` is the haze colour (a STAND-IN placeholder, see [`PLACEHOLDER_SKY`]; the
+/// real colour derives from the Stage-8 gas-mix Rayleigh scattering when that substrate lands). Blends over whatever
+/// is already drawn, so it tints the globe's edge and glows against space. Display-only, one-way canon -> pixels.
+#[allow(clippy::too_many_arguments)]
+fn draw_atmosphere_limb(
+    buf: &mut [u32],
+    w: usize,
+    h: usize,
+    cx: i32,
+    cy: i32,
+    radius_px: usize,
+    star_dir: [f32; 3],
+    sky: Rgb,
+) {
+    if radius_px == 0 || w == 0 || h == 0 {
+        return;
+    }
+    // The haze extends this fraction of the radius beyond the limb, and tints this fraction just inside it.
+    const HALO_FRAC: f32 = 0.14;
+    const RIM_FRAC: f32 = 0.10;
+    let r = radius_px as f32;
+    let l = normalize3(star_dir);
+    let sr = sky.r as f32;
+    let sg = sky.g as f32;
+    let sb = sky.b as f32;
+    let outer = (r * (1.0 + HALO_FRAC)) as i32;
+    let x0 = (cx - outer).max(0);
+    let x1 = (cx + outer).min(w as i32 - 1);
+    let y0 = (cy - outer).max(0);
+    let y1 = (cy + outer).min(h as i32 - 1);
+    for py in y0..=y1 {
+        for px in x0..=x1 {
+            let nx = (px - cx) as f32 / r;
+            let ny = (py - cy) as f32 / r;
+            let d = (nx * nx + ny * ny).sqrt(); // radial distance in radius units
+                                                // A band peaking at the limb (d = 1): ramps up over the inner rim, fades out over the outer halo.
+            let profile = if d <= 1.0 {
+                ((d - (1.0 - RIM_FRAC)) / RIM_FRAC).max(0.0)
+            } else {
+                (1.0 - (d - 1.0) / HALO_FRAC).max(0.0)
+            };
+            if profile <= 0.0 {
+                continue;
+            }
+            // The limb point's outward direction, and how much it faces the star (day limb bright, night limb dim).
+            let inv = if d > 0.0 { 1.0 / d } else { 0.0 };
+            let facing = (nx * inv * l[0] + ny * inv * l[1]).max(0.0);
+            let day = 0.15 + 0.85 * facing; // a faint glow survives on the night limb
+            let a = (profile * day * 0.6).clamp(0.0, 1.0);
+            let idx = py as usize * w + px as usize;
+            let word = buf[idx];
+            let er = (word >> 16) as u8 as f32;
+            let eg = (word >> 8) as u8 as f32;
+            let eb = word as u8 as f32;
+            let mix = |e: f32, c: f32| -> u8 { (e + (c - e) * a).clamp(0.0, 255.0) as u8 };
+            buf[idx] = Rgb::new(mix(er, sr), mix(eg, sg), mix(eb, sb)).pack();
+        }
+    }
+}
+
+/// Compose the zoomed-out solar-system / planet-object view: a `w` by `h` frame of the star and the lit planet
+/// globe over space. The star draws as a [`blackbody_rgb`]-coloured disk at `star_px` (its on-screen position, the
+/// caller's projection of the orbit, so the orbital phase sets which hemisphere is day). The planet sits at the view
+/// centre, its on-screen size the DERIVED radius at this scale ([`globe_radius_px`]), lit from the star direction
+/// with the sunlight tinted by the star's colour ([`draw_globe`]): the star-facing hemisphere bright, the far side
+/// dark, a soft terminator between. This is the seeable-world payoff entry point: hand it the derived radius, the
+/// star's derived `T_eff`, the derived tiles, and the star's projected position, and it draws the star-lit planet.
+/// The atmosphere limb is tinted by `sky`, the DERIVED Rayleigh sky colour ([`rayleigh_sky_rgb`]) when the gas
+/// mix resolves, or [`PLACEHOLDER_SKY`] as the fail-soft fallback. The globe texture is sampled at the `orient`ation
+/// (pass [`GlobeOrientation::IDENTITY`] for the straight-on view), and `style` carries the surface display options (the
+/// DERIVED material tint and the optional drill-in tile grid; [`SurfaceStyle::default`] for the plain planet view). A
+/// pure, deterministic read of the derived planet and star (Principle 10); it writes no canonical state.
+#[allow(clippy::too_many_arguments)]
+pub fn render_solar_system_view(
+    radius_m: Fixed,
+    t_eff_k: Fixed,
+    tiles: &[DerivedTile],
+    tile_cols: usize,
+    w: usize,
+    h: usize,
+    m_per_px: Fixed,
+    star_px: (i32, i32),
+    star_radius_px: usize,
+    bg: Rgb,
+    sky: Rgb,
+    style: SurfaceStyle,
+    orient: GlobeOrientation,
+) -> Vec<u32> {
+    let mut buf = vec![bg.pack(); w.max(1) * h.max(1)];
+    if w == 0 || h == 0 {
+        return buf;
+    }
+    let star_color = blackbody_rgb(t_eff_k);
+    let planet_cx = (w / 2) as i32;
+    let planet_cy = (h / 2) as i32;
+    let planet_radius_px = globe_radius_px(radius_m, m_per_px);
+    // The star direction is the on-screen vector from the planet to the star, lifted out of the screen plane so the
+    // lit hemisphere tilts toward the viewer (a readable terminator rather than an edge-on sliver). The in-plane
+    // part carries the orbit's projected direction; the fixed z-lift is a display framing, not physics.
+    let dx = (star_px.0 - planet_cx) as f32;
+    let dy = (star_px.1 - planet_cy) as f32;
+    let plane = (dx * dx + dy * dy).sqrt();
+    let star_dir = if plane <= 0.0 {
+        [0.0, 0.0, 1.0]
+    } else {
+        [0.72 * dx / plane, 0.72 * dy / plane, 0.70]
+    };
+    draw_star(
+        &mut buf,
+        w,
+        h,
+        star_px.0,
+        star_px.1,
+        star_radius_px,
+        star_color,
+    );
+    draw_globe(
+        &mut buf,
+        w,
+        h,
+        planet_cx,
+        planet_cy,
+        planet_radius_px,
+        tiles,
+        tile_cols,
+        star_dir,
+        star_color,
+        style,
+        orient,
+    );
+    // The atmosphere haze around the limb, tinted by the caller's `sky` colour: the DERIVED Rayleigh sky from the
+    // gas mix ([`rayleigh_sky_rgb`]) when it resolves, or [`PLACEHOLDER_SKY`] as the fail-soft fallback.
+    draw_atmosphere_limb(
+        &mut buf,
+        w,
+        h,
+        planet_cx,
+        planet_cy,
+        planet_radius_px,
+        star_dir,
+        sky,
+    );
+    buf
+}
+
+/// The derived-surface tile (column, row) under a screen pixel, inverting the orthographic sphere map and the globe
+/// orientation: the pixel offset from the globe centre `(cx, cy)` normalized by the on-screen `radius_px` gives the
+/// front-hemisphere view point (`z = sqrt(1 - x^2 - y^2)`), the inverse rotation ([`view_to_body`]) carries it to the
+/// body frame, and its (u, v) selects the tile the same way [`sample_derived_surface`] does (a `cols` by `rows`
+/// field). `None` if the pixel is off the sphere's disk (fail-soft: the caller draws no highlight). A pure inverse of
+/// the sphere map, display-only (Principle 10).
+#[allow(clippy::too_many_arguments)]
+pub fn pick_surface_tile(
+    px: i32,
+    py: i32,
+    cx: i32,
+    cy: i32,
+    radius_px: usize,
+    orient: GlobeOrientation,
+    cols: usize,
+    rows: usize,
+) -> Option<(usize, usize)> {
+    if radius_px == 0 || cols == 0 || rows == 0 {
+        return None;
+    }
+    let r = radius_px as f32;
+    let nx = (px - cx) as f32 / r;
+    let ny = (py - cy) as f32 / r;
+    let d2 = nx * nx + ny * ny;
+    if d2 > 1.0 {
+        return None; // off the disk
+    }
+    let nz = (1.0 - d2).sqrt();
+    let (u, v) = body_to_uv(view_to_body([nx, -ny, nz], orient));
+    let cu = ((u.clamp(0.0, 0.999_9) * cols as f32) as usize).min(cols - 1);
+    let cv = ((v.clamp(0.0, 0.999_9) * rows as f32) as usize).min(rows - 1);
+    Some((cu, cv))
+}
+
+/// Draw a highlight outline around the derived-surface tile `(cu, cv)` of a `cols` by `rows` field: project the four
+/// corners of the tile's (u, v) cell forward onto the sphere ([`uv_to_body`] then [`body_to_view`]) at the given
+/// orientation and connect them, so the marked tile curves with the globe and stays put as it rotates. A corner on
+/// the far hemisphere (view z < 0) drops its segments (fail-soft), so a tile at the limb shows a partial outline
+/// rather than a line flung across the frame. Display-only, one-way canon -> pixels (Principle 10).
+#[allow(clippy::too_many_arguments)]
+pub fn draw_surface_highlight(
+    buf: &mut [u32],
+    w: usize,
+    h: usize,
+    cx: i32,
+    cy: i32,
+    radius_px: usize,
+    orient: GlobeOrientation,
+    cols: usize,
+    rows: usize,
+    cu: usize,
+    cv: usize,
+    color: Rgb,
+) {
+    if radius_px == 0 || cols == 0 || rows == 0 || w == 0 || h == 0 {
+        return;
+    }
+    let r = radius_px as f32;
+    let u0 = cu as f32 / cols as f32;
+    let u1 = (cu + 1) as f32 / cols as f32;
+    let v0 = cv as f32 / rows as f32;
+    let v1 = (cv + 1) as f32 / rows as f32;
+    let corners = [(u0, v0), (u1, v0), (u1, v1), (u0, v1)];
+    // Forward-project each corner; a back-facing corner (view z < 0) yields None so its segments are skipped.
+    let project = |u: f32, v: f32| -> Option<(i32, i32)> {
+        let pv = body_to_view(uv_to_body(u, v), orient);
+        if pv[2] < 0.0 {
+            return None; // far hemisphere
+        }
+        let sx = cx + (pv[0] * r).round() as i32;
+        let sy = cy - (pv[1] * r).round() as i32; // screen y points down, world up is +view.y
+        Some((sx, sy))
+    };
+    let pts: [Option<(i32, i32)>; 4] = [
+        project(corners[0].0, corners[0].1),
+        project(corners[1].0, corners[1].1),
+        project(corners[2].0, corners[2].1),
+        project(corners[3].0, corners[3].1),
+    ];
+    let c = color.pack();
+    for i in 0..4 {
+        if let (Some(a), Some(b)) = (pts[i], pts[(i + 1) % 4]) {
+            draw_line(buf, w, h, a.0, a.1, b.0, b.1, c);
+        }
+    }
+}
+
+/// Draw a 1-pixel line (Bresenham) clipped to the buffer, for the surface highlight outline. Presentation only.
+#[allow(clippy::too_many_arguments)]
+fn draw_line(buf: &mut [u32], w: usize, h: usize, x0: i32, y0: i32, x1: i32, y1: i32, color: u32) {
+    let dx = (x1 - x0).abs();
+    let dy = -(y1 - y0).abs();
+    let sx = if x0 < x1 { 1 } else { -1 };
+    let sy = if y0 < y1 { 1 } else { -1 };
+    let mut err = dx + dy;
+    let (mut x, mut y) = (x0, y0);
+    loop {
+        if x >= 0 && y >= 0 && (x as usize) < w && (y as usize) < h {
+            buf[y as usize * w + x as usize] = color;
+        }
+        if x == x1 && y == y1 {
+            break;
+        }
+        let e2 = 2 * err;
+        if e2 >= dy {
+            err += dy;
+            x += sx;
+        }
+        if e2 <= dx {
+            err += dx;
+            y += sy;
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -585,6 +1653,325 @@ mod tests {
             "something is drawn"
         );
     }
+    #[test]
+    fn blackbody_colour_tracks_effective_temperature() {
+        // The star colour is a deterministic pure read of the derived T_eff: the same temperature replays the same
+        // colour, and the chromaticity walks the Planckian locus from red through white to blue.
+        let sun = blackbody_rgb(Fixed::from_int(5772));
+        assert_eq!(
+            blackbody_rgb(Fixed::from_int(5772)),
+            sun,
+            "a pure read replays"
+        );
+        // The Sun (~5772 K) reads a warm near-white: every channel high, red the strongest, blue a shade lower.
+        assert!(
+            sun.r > 240 && sun.g > 220 && sun.b > 200,
+            "the Sun is near-white, got {sun:?}"
+        );
+        assert!(sun.r >= sun.g && sun.g >= sun.b, "the Sun leans warm");
+        // A cool M dwarf (~3000 K) reads reddish: red dominant, little blue.
+        let m_dwarf = blackbody_rgb(Fixed::from_int(3000));
+        assert!(
+            m_dwarf.r > m_dwarf.b && m_dwarf.r >= m_dwarf.g,
+            "an M dwarf is reddish, got {m_dwarf:?}"
+        );
+        assert!(m_dwarf.b < 160, "an M dwarf carries little blue");
+        // A hot early-type star (~10000 K) reads blue-white: blue overtakes red.
+        let hot = blackbody_rgb(Fixed::from_int(10000));
+        assert!(hot.b > hot.r, "a hot star is bluish, got {hot:?}");
+    }
+
+    /// A small hand-built DERIVED-tile field for the globe-texture tests: a 6-wide grid banded by relief, so the
+    /// sphere has a surface to wrap without loading the petrology registry.
+    fn demo_globe_tiles() -> (Vec<DerivedTile>, usize) {
+        let cols = 6usize;
+        let rows = 6usize;
+        let mut tiles = Vec::with_capacity(cols * rows);
+        for r in 0..rows {
+            let relief = match r {
+                0 | 1 => TerrainRelief::Upland,
+                2 | 3 => TerrainRelief::Lowland,
+                _ => TerrainRelief::Submarine,
+            };
+            for _ in 0..cols {
+                tiles.push(DerivedTile {
+                    elevation: Fixed::from_int(r as i32),
+                    relief,
+                });
+            }
+        }
+        (tiles, cols)
+    }
+
+    /// The mean luminance of the disk pixels on one side of the vertical centre line at `cx`.
+    fn half_luminance(buf: &[u32], w: usize, cx: i32, cy: i32, r: i32, right: bool) -> f64 {
+        let mut sum = 0f64;
+        let mut n = 0f64;
+        for py in (cy - r).max(0)..=(cy + r) {
+            for px in (cx - r).max(0)..=(cx + r) {
+                let dx = px - cx;
+                let dy = py - cy;
+                if dx * dx + dy * dy > r * r {
+                    continue;
+                }
+                if right != (dx > 0) {
+                    continue;
+                }
+                let word = buf[py as usize * w + px as usize];
+                let rgb = Rgb::new((word >> 16) as u8, (word >> 8) as u8, word as u8);
+                sum += rgb.luminance() as f64;
+                n += 1.0;
+            }
+        }
+        if n == 0.0 {
+            0.0
+        } else {
+            sum / n
+        }
+    }
+
+    #[test]
+    fn the_globe_is_a_lit_sphere_sized_from_the_derived_radius() {
+        use civsim_sim::astro;
+        // The on-screen size scales from the DERIVED planet radius: a denser planet of the same mass has a smaller
+        // derived radius and draws a smaller disk at the same view scale (a pure read of planet_radius_m).
+        let m_per_px = Fixed::from_int(30_000);
+        let earth = astro::planet_radius_m(Fixed::ONE, Fixed::from_ratio(5514, 1000))
+            .expect("earth radius");
+        let dense = astro::planet_radius_m(Fixed::ONE, Fixed::from_int(8)).expect("dense radius");
+        let earth_px = globe_radius_px(earth, m_per_px);
+        let dense_px = globe_radius_px(dense, m_per_px);
+        assert!(
+            earth_px > 0 && dense_px > 0,
+            "both globes have an on-screen size"
+        );
+        assert!(
+            earth_px > dense_px,
+            "a denser, smaller planet draws a smaller globe"
+        );
+        assert_eq!(
+            globe_radius_px(Fixed::ZERO, m_per_px),
+            0,
+            "no radius, no globe"
+        );
+
+        // Draw the Earth globe lit from the right (+x). The star-facing (right) hemisphere reads brighter than the
+        // night (left) side, the terminator running down the middle, and the render replays byte for byte.
+        let (w, h) = (200usize, 160usize);
+        let bg = Rgb::new(8, 9, 14);
+        let (tiles, cols) = demo_globe_tiles();
+        let (cx, cy) = (100i32, 80i32);
+        let radius = 64usize;
+        let mut buf = vec![bg.pack(); w * h];
+        draw_globe(
+            &mut buf,
+            w,
+            h,
+            cx,
+            cy,
+            radius,
+            &tiles,
+            cols,
+            [1.0, 0.0, 0.0],
+            Rgb::new(255, 255, 255),
+            SurfaceStyle::default(),
+            GlobeOrientation::IDENTITY,
+        );
+        assert!(buf.iter().any(|&p| p != bg.pack()), "the globe is drawn");
+        let right = half_luminance(&buf, w, cx, cy, radius as i32, true);
+        let left = half_luminance(&buf, w, cx, cy, radius as i32, false);
+        assert!(
+            right > left * 1.5,
+            "the sunlit hemisphere is brighter than the night side (right {right:.1} vs left {left:.1})"
+        );
+        let mut replay = vec![bg.pack(); w * h];
+        draw_globe(
+            &mut replay,
+            w,
+            h,
+            cx,
+            cy,
+            radius,
+            &tiles,
+            cols,
+            [1.0, 0.0, 0.0],
+            Rgb::new(255, 255, 255),
+            SurfaceStyle::default(),
+            GlobeOrientation::IDENTITY,
+        );
+        assert_eq!(buf, replay, "a pure read replays byte for byte");
+    }
+
+    #[test]
+    fn the_solar_view_lights_the_globe_from_the_star_and_tints_by_temperature() {
+        use civsim_sim::astro;
+        let (w, h) = (240usize, 180usize);
+        let bg = Rgb::new(6, 7, 12);
+        let (tiles, cols) = demo_globe_tiles();
+        let radius_m = astro::planet_radius_m(Fixed::ONE, Fixed::from_ratio(5514, 1000))
+            .expect("earth radius");
+        // A view scale that draws Earth's globe at a legible size, the star off to the left of the planet.
+        let m_per_px = Fixed::from_int(80_000);
+        let sun_t = astro::stellar_effective_temperature(
+            Fixed::ONE,
+            Fixed::from_ratio(35, 10),
+            Fixed::from_ratio(8, 10),
+            Fixed::from_int(50_000),
+        )
+        .expect("sun T_eff");
+        let star_px = (24i32, 40i32); // upper-left of the centred planet
+        let frame = render_solar_system_view(
+            radius_m,
+            sun_t,
+            &tiles,
+            cols,
+            w,
+            h,
+            m_per_px,
+            star_px,
+            10,
+            bg,
+            PLACEHOLDER_SKY,
+            SurfaceStyle::default(),
+            GlobeOrientation::IDENTITY,
+        );
+        assert_eq!(frame.len(), w * h, "one word per pixel");
+        // The star disk carries the derived blackbody colour at its core.
+        let star_core = frame[star_px.1 as usize * w + star_px.0 as usize];
+        assert_eq!(
+            star_core,
+            blackbody_rgb(sun_t).pack(),
+            "the star reads its blackbody colour"
+        );
+        // The day side faces the star: with the star upper-left, the globe's LEFT hemisphere is brighter.
+        let (pcx, pcy) = ((w / 2) as i32, (h / 2) as i32);
+        let pr = globe_radius_px(radius_m, m_per_px) as i32;
+        let left = half_luminance(&frame, w, pcx, pcy, pr, false);
+        let right = half_luminance(&frame, w, pcx, pcy, pr, true);
+        assert!(
+            left > right * 1.3,
+            "the star-facing (left) hemisphere is the day side (left {left:.1} vs right {right:.1})"
+        );
+        // Deterministic pure read.
+        let replay = render_solar_system_view(
+            radius_m,
+            sun_t,
+            &tiles,
+            cols,
+            w,
+            h,
+            m_per_px,
+            star_px,
+            10,
+            bg,
+            PLACEHOLDER_SKY,
+            SurfaceStyle::default(),
+            GlobeOrientation::IDENTITY,
+        );
+        assert_eq!(frame, replay, "a pure read replays byte for byte");
+
+        // The star's blackbody colour tints the sunlight: a cool ~3200 K star warms the day side (a higher
+        // red-to-blue ratio) versus a hot ~9000 K star, at the same geometry.
+        let cool = astro::stellar_effective_temperature(
+            Fixed::from_ratio(6, 10),
+            Fixed::from_ratio(35, 10),
+            Fixed::from_ratio(8, 10),
+            Fixed::from_int(50_000),
+        )
+        .expect("cool T_eff");
+        let hot = astro::stellar_effective_temperature(
+            Fixed::from_int(3),
+            Fixed::from_ratio(35, 10),
+            Fixed::from_ratio(8, 10),
+            Fixed::from_int(50_000),
+        )
+        .expect("hot T_eff");
+        let day_ratio = |t_eff: Fixed| -> f64 {
+            let f = render_solar_system_view(
+                radius_m,
+                t_eff,
+                &tiles,
+                cols,
+                w,
+                h,
+                m_per_px,
+                star_px,
+                10,
+                bg,
+                PLACEHOLDER_SKY,
+                SurfaceStyle::default(),
+                GlobeOrientation::IDENTITY,
+            );
+            let mut sr = 0f64;
+            let mut sb = 0f64;
+            for py in (pcy - pr).max(0)..=(pcy + pr) {
+                for px in (pcx - pr).max(0)..=(pcx + pr) {
+                    let dx = px - pcx;
+                    let dy = py - pcy;
+                    if dx * dx + dy * dy > pr * pr || dx > 0 {
+                        continue; // the lit (left) hemisphere
+                    }
+                    let word = f[py as usize * w + px as usize];
+                    sr += (word >> 16) as u8 as f64;
+                    sb += (word & 0xff) as f64;
+                }
+            }
+            (sr + 1.0) / (sb + 1.0)
+        };
+        assert!(
+            day_ratio(cool) > day_ratio(hot),
+            "a cool star warms the day side more than a hot star"
+        );
+    }
+
+    #[test]
+    fn the_atmosphere_limb_is_a_day_bright_haze_ring() {
+        let unpack = |word: u32| Rgb::new((word >> 16) as u8, (word >> 8) as u8, word as u8);
+        let (w, h) = (200usize, 200usize);
+        let bg = Rgb::new(6, 7, 12);
+        let (cx, cy) = (100i32, 100i32);
+        let radius = 60usize;
+        let mut buf = vec![bg.pack(); w * h];
+        // Star to the right (+x): the day limb is on the right, the night limb on the left.
+        draw_atmosphere_limb(
+            &mut buf,
+            w,
+            h,
+            cx,
+            cy,
+            radius,
+            [1.0, 0.0, 0.2],
+            PLACEHOLDER_SKY,
+        );
+        // Just outside the day (right) limb the pixel is tinted toward the sky colour: bluer and brighter than space.
+        let day = unpack(buf[cy as usize * w + (cx + radius as i32 + 3) as usize]);
+        assert!(
+            day.b > bg.b + 10 && day.b > day.r,
+            "the day limb glows sky-blue, got {day:?}"
+        );
+        // The night (left) limb at the same offset is dimmer than the day limb.
+        let night = unpack(buf[cy as usize * w + (cx - radius as i32 - 3) as usize]);
+        assert!(
+            day.b > night.b,
+            "the day limb is brighter than the night limb"
+        );
+        // The far background is untouched: the haze is confined to the limb.
+        assert_eq!(buf[5 * w + 5], bg.pack(), "the haze stays at the limb");
+        // Deterministic pure read.
+        let mut replay = vec![bg.pack(); w * h];
+        draw_atmosphere_limb(
+            &mut replay,
+            w,
+            h,
+            cx,
+            cy,
+            radius,
+            [1.0, 0.0, 0.2],
+            PLACEHOLDER_SKY,
+        );
+        assert_eq!(buf, replay, "a pure read replays byte for byte");
+    }
+
     #[test]
     fn physics_terrain_colour_reflects_the_fields() {
         let p = |n: i64| Fixed::from_ratio(n, 100);
@@ -701,5 +2088,575 @@ mod tests {
             frame.iter().any(|&p| p != bg.pack()),
             "a derived frame is painted"
         );
+    }
+
+    #[test]
+    fn the_formula_parser_is_general() {
+        // No hardcoded gas list: an uppercase letter opens a symbol, lowercase continues it, trailing digits are
+        // the count (default 1). A new gas is a data row (a formula string), never a code change.
+        assert_eq!(
+            parse_formula("CO2"),
+            vec![("C".to_string(), 1), ("O".to_string(), 2)]
+        );
+        assert_eq!(
+            parse_formula("H2O"),
+            vec![("H".to_string(), 2), ("O".to_string(), 1)]
+        );
+        assert_eq!(
+            parse_formula("CH4"),
+            vec![("C".to_string(), 1), ("H".to_string(), 4)]
+        );
+        assert_eq!(parse_formula("N2"), vec![("N".to_string(), 2)]);
+        // A two-letter symbol continues through its lowercase tail.
+        assert_eq!(parse_formula("Ar"), vec![("Ar".to_string(), 1)]);
+        // A malformed fragment yields no atoms rather than a panic.
+        assert!(parse_formula("").is_empty());
+        assert!(parse_formula("123").is_empty());
+    }
+
+    #[test]
+    fn modern_earth_air_derives_a_blue_sky() {
+        // Modern Earth air (N2/O2/Ar) at the Sun's effective temperature scatters into a blue sky: the DERIVED
+        // Rayleigh weighting (alpha^2 / lambda^4 from the banked polarizability substrate) drives the blue band
+        // above the red. Assert the RELATIVE relationship only, never an absolute RGB.
+        let tbl = PeriodicTable::standard().expect("the periodic table loads");
+        let sun = Fixed::from_int(5772);
+        let sky = rayleigh_sky_rgb(&[("N2", 0.78), ("O2", 0.21), ("Ar", 0.01)], sun, &tbl)
+            .expect("modern air resolves through N and O");
+        assert!(
+            sky.b > sky.r,
+            "modern Earth air derives a blue sky (blue {} exceeds red {})",
+            sky.b,
+            sky.r
+        );
+        // Deterministic pure read: the same mix replays byte for byte.
+        assert_eq!(
+            sky,
+            rayleigh_sky_rgb(&[("N2", 0.78), ("O2", 0.21), ("Ar", 0.01)], sun, &tbl).unwrap()
+        );
+    }
+
+    #[test]
+    fn a_co2_atmosphere_is_less_blue_than_earth_air() {
+        // The qualitative Hadean/Venusian shift: a CO2-dominated atmosphere is more polarizable, so its short
+        // bands push toward saturation and the sky DESATURATES, a lower blue-to-red ratio than modern air. Assert
+        // the RATIO ORDERING, never absolute values.
+        let tbl = PeriodicTable::standard().expect("the periodic table loads");
+        let sun = Fixed::from_int(5772);
+        let air = rayleigh_sky_rgb(&[("N2", 0.78), ("O2", 0.21), ("Ar", 0.01)], sun, &tbl)
+            .expect("air resolves");
+        let co2 =
+            rayleigh_sky_rgb(&[("CO2", 0.95), ("N2", 0.05)], sun, &tbl).expect("CO2 resolves");
+        let ratio = |c: Rgb| (c.b as f64 + 1.0) / (c.r as f64 + 1.0);
+        assert!(
+            ratio(co2) < ratio(air),
+            "a CO2 sky is less blue-dominant than air (CO2 blue/red {:.2} below air {:.2})",
+            ratio(co2),
+            ratio(air)
+        );
+    }
+
+    #[test]
+    fn an_unresolvable_mix_returns_none() {
+        // Fail-soft: an empty mix, or one whose every element the substrate cannot resolve (no cited ionization
+        // energy), returns None so the caller falls back to no atmosphere tint rather than a fabricated colour.
+        let tbl = PeriodicTable::standard().expect("the periodic table loads");
+        let sun = Fixed::from_int(5772);
+        assert_eq!(
+            rayleigh_sky_rgb(&[], sun, &tbl),
+            None,
+            "an empty mix is None"
+        );
+        // Argon carries no cited ionization energy in the table, so an Ar-only atmosphere resolves to nothing.
+        assert_eq!(
+            rayleigh_sky_rgb(&[("Ar", 1.0)], sun, &tbl),
+            None,
+            "an all-unresolvable mix is None"
+        );
+    }
+
+    fn mat_comp(pairs: &[(&str, i64)]) -> Vec<(String, Fixed)> {
+        pairs
+            .iter()
+            .map(|(s, n)| (s.to_string(), Fixed::from_int(*n as i32)))
+            .collect()
+    }
+
+    #[test]
+    fn a_small_gap_absorber_reads_dark_and_a_wide_gap_solid_reads_light() {
+        // THE DARK-VERSUS-LIGHT MECHANISM, from the material's OWN banked gap, no authored swatch: silicon's cited
+        // 1.12 eV gap sits BELOW the human visible window (~1.6-3.1 eV), so its interband onset absorbs across the
+        // whole window and it reads dark; magnesium oxide's cited 7.8 eV gap sits far ABOVE the window, so it has no
+        // visible absorption and reads light (it takes the star's colour). The colour is a pure read of the DERIVED
+        // absorption spectrum, deterministic and replaying.
+        let gaps = BandGapColumn::standard().expect("the gap column loads");
+        let crystal = CrystalFieldTables::standard().expect("the crystal-field table loads");
+        let table = PeriodicTable::standard().expect("the periodic table loads");
+        let sun = Fixed::from_int(5772);
+        let t = Fixed::from_int(300);
+        let si = material_surface_rgb(&mat_comp(&[("Si", 1)]), sun, t, &gaps, &crystal, &table)
+            .expect("silicon resolves");
+        let mgo = material_surface_rgb(
+            &mat_comp(&[("Mg", 1), ("O", 1)]),
+            sun,
+            t,
+            &gaps,
+            &crystal,
+            &table,
+        )
+        .expect("MgO resolves");
+        assert!(
+            si.luminance() < mgo.luminance(),
+            "the small-gap absorber (Si) is darker than the wide-gap solid (MgO): {} vs {}",
+            si.luminance(),
+            mgo.luminance()
+        );
+        assert!(si.luminance() < 40, "silicon reads dark, got {si:?}");
+        assert!(mgo.luminance() > 180, "MgO reads light, got {mgo:?}");
+        // A pure read replays byte for byte.
+        assert_eq!(
+            si,
+            material_surface_rgb(&mat_comp(&[("Si", 1)]), sun, t, &gaps, &crystal, &table).unwrap()
+        );
+    }
+
+    #[test]
+    fn quartz_reads_light() {
+        // Quartz (SiO2) is not a seeded gap-column phase and carries no crystal-field d-d line (no d-block cation),
+        // so it has NO optical feature in the visible window: its reflectance is unity across the bands and it takes
+        // the star's colour at full brightness (a light, warm-white silicate under the Sun). The honest read for a
+        // colourless insulator, whose intrinsic band structure gives it no visible-window absorption.
+        let gaps = BandGapColumn::standard().expect("the gap column loads");
+        let crystal = CrystalFieldTables::standard().expect("the crystal-field table loads");
+        let table = PeriodicTable::standard().expect("the periodic table loads");
+        let sun = Fixed::from_int(5772);
+        let t = Fixed::from_int(300);
+        let quartz = material_surface_rgb(
+            &mat_comp(&[("Si", 1), ("O", 2)]),
+            sun,
+            t,
+            &gaps,
+            &crystal,
+            &table,
+        )
+        .expect("quartz resolves");
+        assert!(
+            quartz.luminance() > 180,
+            "quartz reads light, got {quartz:?}"
+        );
+    }
+
+    #[test]
+    fn the_same_material_warms_under_a_cooler_star() {
+        // STAR WARMTH: the reflected colour is the material's reflectance times the star's Planck spectrum, so the
+        // SAME material reflects a warmer (higher red-to-blue) colour under a cool star than under a hot one, tracking
+        // the illuminant. A featureless silicate (quartz) reflects the star's own colour, the cleanest witness.
+        let gaps = BandGapColumn::standard().expect("the gap column loads");
+        let crystal = CrystalFieldTables::standard().expect("the crystal-field table loads");
+        let table = PeriodicTable::standard().expect("the periodic table loads");
+        let t = Fixed::from_int(300);
+        let quartz = mat_comp(&[("Si", 1), ("O", 2)]);
+        let cool = material_surface_rgb(&quartz, Fixed::from_int(3000), t, &gaps, &crystal, &table)
+            .expect("cool-star quartz");
+        let hot = material_surface_rgb(&quartz, Fixed::from_int(9000), t, &gaps, &crystal, &table)
+            .expect("hot-star quartz");
+        let warmth = |c: Rgb| (c.r as f64 + 1.0) / (c.b as f64 + 1.0);
+        assert!(
+            warmth(cool) > warmth(hot),
+            "a cool star reflects warmer than a hot star (red/blue {:.2} vs {:.2})",
+            warmth(cool),
+            warmth(hot)
+        );
+    }
+
+    #[test]
+    fn the_iron_oxidation_state_sets_the_crust_colour_ferric_dark_red_mixed_near_black_ferrous_light(
+    ) {
+        // SEAM 2, the iron dark-crust optics, keyed on the DERIVED iron oxidation state (the phase is the state):
+        //  - HEMATITE (Fe2O3, Fe3+): the intense O2- -> Fe3+ charge-transfer edge (3.1 eV) whose broad Marcus-Hush
+        //    tail floods the visible reddens and darkens it (blue absorbed more than red).
+        //  - MAGNETITE (Fe3O4, mixed Fe2+/Fe3+): that edge PLUS the Fe2+ -> Fe3+ intervalence band (0.6 eV) absorbs
+        //    across the visible and reads near-black, darker than hematite.
+        //  - WUSTITE (FeO, Fe2+/ferrous): NO charge-transfer band, only the near-IR d-d line (~0.93 eV) below the
+        //    visible, so it correctly stays LIGHT (the honest per-valence outcome, the old LAW-3 exhibit preserved:
+        //    the ferrous limit is pinned with a test, never tuned away).
+        //  - ENSTATITE (MgSiO3, iron-free): no iron chromophore at all, stays LIGHT.
+        // The colour is a one-way projection of the DERIVED absorption spectrum; the canon authors none of it.
+        let gaps = BandGapColumn::standard().expect("the gap column loads");
+        let crystal = CrystalFieldTables::standard().expect("the crystal-field table loads");
+        let table = PeriodicTable::standard().expect("the periodic table loads");
+        let sun = Fixed::from_int(5772);
+        let t = Fixed::from_int(300);
+        let surf = |c: &[(&str, i64)]| {
+            material_surface_rgb(&mat_comp(c), sun, t, &gaps, &crystal, &table)
+                .expect("the material resolves")
+        };
+        let hematite = surf(&[("Fe", 2), ("O", 3)]);
+        let magnetite = surf(&[("Fe", 3), ("O", 4)]);
+        let wustite = surf(&[("Fe", 1), ("O", 1)]);
+        let enstatite = surf(&[("Mg", 1), ("Si", 1), ("O", 3)]);
+        // Hematite reads dark and red-dominant (blue absorbed more than red by the charge-transfer tail).
+        assert!(
+            hematite.luminance() < 80,
+            "hematite (ferric) reads dark, got {hematite:?}"
+        );
+        assert!(
+            hematite.r > hematite.b,
+            "hematite reddens (red reflected over blue), got {hematite:?}"
+        );
+        // Magnetite reads near-black, darker than hematite (the added intervalence band).
+        assert!(
+            magnetite.luminance() < hematite.luminance(),
+            "magnetite (mixed valence) is darker than hematite: {} vs {}",
+            magnetite.luminance(),
+            hematite.luminance()
+        );
+        assert!(
+            magnetite.luminance() < 40,
+            "magnetite reads near-black, got {magnetite:?}"
+        );
+        // Ferrous wustite and iron-free enstatite stay light (no charge-transfer band).
+        assert!(
+            wustite.luminance() > 180,
+            "wustite (ferrous) stays light: only the near-IR d-d line, no charge-transfer band, got {wustite:?}"
+        );
+        assert!(
+            enstatite.luminance() > 180,
+            "iron-free enstatite stays light, got {enstatite:?}"
+        );
+        // A pure read replays byte for byte (deterministic projection).
+        assert_eq!(hematite, surf(&[("Fe", 2), ("O", 3)]));
+    }
+
+    #[test]
+    fn paint_material_tiles_replays_and_shades_by_relief() {
+        // The material-tile paint is a deterministic pure read: the same tiles and material paint the same frame, byte
+        // for byte, and the relief shading dims the material colour (an upland tile is brighter than a lowland tile of
+        // the same material). A hand-built two-tile field (labelled test-only) exercises both relief shadings.
+        let field = [
+            DerivedTile {
+                elevation: Fixed::from_int(9),
+                relief: TerrainRelief::Upland,
+            },
+            DerivedTile {
+                elevation: Fixed::from_int(1),
+                relief: TerrainRelief::Lowland,
+            },
+        ];
+        let material = Rgb::new(200, 210, 220);
+        let bg = Rgb::new(8, 9, 14);
+        let (cols, tile_px, w, h) = (2usize, 16usize, 32usize, 16usize);
+        let frame = paint_material_tiles(&field, material, cols, tile_px, w, h, bg);
+        assert_eq!(frame.len(), w * h, "one word per pixel");
+        assert_eq!(
+            frame,
+            paint_material_tiles(&field, material, cols, tile_px, w, h, bg),
+            "a pure read replays byte for byte"
+        );
+        // The upland block (left) is brighter than the lowland block (right): read a pixel inside each block.
+        let unpack = |word: u32| Rgb::new((word >> 16) as u8, (word >> 8) as u8, word as u8);
+        let upland = unpack(frame[8 * w + 4]);
+        let lowland = unpack(frame[8 * w + 20]);
+        assert!(
+            upland.luminance() > lowland.luminance(),
+            "the upland tile is brighter than the lowland tile (relief shading): {} vs {}",
+            upland.luminance(),
+            lowland.luminance()
+        );
+    }
+
+    #[test]
+    fn surface_pick_inverts_the_sphere_map_and_fails_soft_off_the_disk() {
+        let (cx, cy, r) = (100i32, 100i32, 60usize);
+        let (cols, rows) = (6usize, 6usize);
+        let o = GlobeOrientation::IDENTITY;
+        // A pixel well outside the disk yields no tile (fail-soft: the caller then draws no highlight).
+        assert_eq!(
+            pick_surface_tile(cx + 200, cy, cx, cy, r, o, cols, rows),
+            None,
+            "off the disk, no pick"
+        );
+        // The globe centre maps to the middle of the surface (u ~ 0.5, v ~ 0.5): the centre column and row.
+        let (cu, cv) =
+            pick_surface_tile(cx, cy, cx, cy, r, o, cols, rows).expect("the centre is on the disk");
+        assert_eq!(cu, cols / 2, "the centre pixel samples the middle meridian");
+        assert_eq!(cv, rows / 2, "the centre pixel samples the equator row");
+        // Deterministic pure inverse.
+        assert_eq!(
+            pick_surface_tile(cx, cy, cx, cy, r, o, cols, rows),
+            pick_surface_tile(cx, cy, cx, cy, r, o, cols, rows),
+            "a pure inverse replays"
+        );
+    }
+
+    #[test]
+    fn a_latitude_rotation_brings_the_far_surface_to_the_centre() {
+        // Rotating in latitude pans toward the pole, so the centre pixel samples a higher-latitude row: the far side
+        // of the sphere is reachable by rotation (the pan the derived viewer needs).
+        let (cx, cy, r) = (100i32, 100i32, 60usize);
+        let (cols, rows) = (6usize, 6usize);
+        let straight =
+            pick_surface_tile(cx, cy, cx, cy, r, GlobeOrientation::IDENTITY, cols, rows).unwrap();
+        let tilted = pick_surface_tile(
+            cx,
+            cy,
+            cx,
+            cy,
+            r,
+            GlobeOrientation {
+                rot_lon: 0.0,
+                rot_lat: 1.2,
+            },
+            cols,
+            rows,
+        )
+        .unwrap();
+        assert_ne!(
+            straight.1, tilted.1,
+            "a latitude tilt samples a different row at the centre"
+        );
+        assert!(
+            tilted.1 < straight.1,
+            "tilting toward the north pole samples a lower row index (higher latitude): {} vs {}",
+            tilted.1,
+            straight.1
+        );
+    }
+
+    #[test]
+    fn the_surface_highlight_draws_a_bounded_outline_and_replays() {
+        let (w, h) = (200usize, 200usize);
+        let (cx, cy, r) = (100i32, 100i32, 60usize);
+        let (cols, rows) = (6usize, 6usize);
+        let o = GlobeOrientation::IDENTITY;
+        let bg = Rgb::new(6, 7, 12);
+        let hi = Rgb::new(255, 240, 90);
+        let mut buf = vec![bg.pack(); w * h];
+        // Highlight the centre tile: an outline appears, and the far corner is untouched (the box sits on the tile).
+        draw_surface_highlight(
+            &mut buf,
+            w,
+            h,
+            cx,
+            cy,
+            r,
+            o,
+            cols,
+            rows,
+            cols / 2,
+            rows / 2,
+            hi,
+        );
+        assert!(
+            buf.iter().any(|&p| p == hi.pack()),
+            "the highlight outline is drawn"
+        );
+        assert_eq!(
+            buf[5 * w + 5],
+            bg.pack(),
+            "the highlight stays on the tile, not the far corner"
+        );
+        // Deterministic pure read.
+        let mut replay = vec![bg.pack(); w * h];
+        draw_surface_highlight(
+            &mut replay,
+            w,
+            h,
+            cx,
+            cy,
+            r,
+            o,
+            cols,
+            rows,
+            cols / 2,
+            rows / 2,
+            hi,
+        );
+        assert_eq!(buf, replay, "a pure read replays byte for byte");
+    }
+
+    #[test]
+    fn the_globe_texture_responds_to_orientation() {
+        // Panning must rotate the surface: the same globe drawn at IDENTITY and at a small latitude tilt differs, so a
+        // pan brings the far side of the sphere into view. (The IDENTITY path itself reduces to the pre-rotation map,
+        // which the unchanged `the_globe_is_a_lit_sphere_sized_from_the_derived_radius` render test still pins.)
+        let (w, h) = (160usize, 120usize);
+        let bg = Rgb::new(8, 9, 14);
+        let (tiles, cols) = demo_globe_tiles();
+        let (cx, cy, radius) = (80i32, 60i32, 48usize);
+        let mut a = vec![bg.pack(); w * h];
+        draw_globe(
+            &mut a,
+            w,
+            h,
+            cx,
+            cy,
+            radius,
+            &tiles,
+            cols,
+            [0.3, -0.2, 0.9],
+            Rgb::new(255, 250, 240),
+            SurfaceStyle::default(),
+            GlobeOrientation::IDENTITY,
+        );
+        // A tiny rotation moves at least one pixel: the texture responds to the orientation.
+        let mut b = vec![bg.pack(); w * h];
+        draw_globe(
+            &mut b,
+            w,
+            h,
+            cx,
+            cy,
+            radius,
+            &tiles,
+            cols,
+            [0.3, -0.2, 0.9],
+            Rgb::new(255, 250, 240),
+            SurfaceStyle::default(),
+            GlobeOrientation {
+                rot_lon: 0.0,
+                rot_lat: 0.8,
+            },
+        );
+        assert_ne!(a, b, "a latitude tilt changes the drawn surface");
+    }
+
+    #[test]
+    fn panning_sweeps_the_terminator_and_the_tint_colours_a_uniform_sphere() {
+        // A UNIFORM crust: every tile the same relief, so texture rotation alone is invisible. The frame must still
+        // change when the globe is panned, which proves the lighting rotates with the orientation (the terminator
+        // sweeps across the surface, the owner's "the light changes as I pan"). And the derived material tint must
+        // reach the surface: a red-tinted sphere reads redder on the lit side than a blue-tinted one.
+        let (w, h) = (160usize, 120usize);
+        let bg = Rgb::new(8, 9, 14);
+        let cols = 8usize;
+        let uniform: Vec<DerivedTile> = (0..cols * 8)
+            .map(|_| DerivedTile {
+                elevation: Fixed::from_int(1),
+                relief: TerrainRelief::Lowland,
+            })
+            .collect();
+        let (cx, cy, radius) = (80i32, 60i32, 48usize);
+        let star = [1.0f32, 0.0, 0.3];
+        let white = Rgb::new(255, 255, 255);
+        let mut straight = vec![bg.pack(); w * h];
+        draw_globe(
+            &mut straight,
+            w,
+            h,
+            cx,
+            cy,
+            radius,
+            &uniform,
+            cols,
+            star,
+            white,
+            SurfaceStyle::default(),
+            GlobeOrientation::IDENTITY,
+        );
+        let mut panned = vec![bg.pack(); w * h];
+        draw_globe(
+            &mut panned,
+            w,
+            h,
+            cx,
+            cy,
+            radius,
+            &uniform,
+            cols,
+            star,
+            white,
+            SurfaceStyle::default(),
+            GlobeOrientation {
+                rot_lon: 1.2,
+                rot_lat: 0.0,
+            },
+        );
+        assert_ne!(
+            straight, panned,
+            "panning a uniform sphere still changes the frame (the terminator sweeps)"
+        );
+
+        // The material tint reaches the surface: a red tint reads redder on the lit (+x) side than a blue tint.
+        let lit_red = |tint: Rgb| -> u64 {
+            let mut buf = vec![bg.pack(); w * h];
+            draw_globe(
+                &mut buf,
+                w,
+                h,
+                cx,
+                cy,
+                radius,
+                &uniform,
+                cols,
+                star,
+                white,
+                SurfaceStyle {
+                    tint: Some(tint),
+                    grid: None,
+                },
+                GlobeOrientation::IDENTITY,
+            );
+            let mut sum = 0u64;
+            for py in (cy - radius as i32).max(0)..=(cy + radius as i32) {
+                for px in cx..=(cx + radius as i32) {
+                    let dx = px - cx;
+                    let dy = py - cy;
+                    if dx * dx + dy * dy > (radius as i32).pow(2) {
+                        continue;
+                    }
+                    sum += ((buf[py as usize * w + px as usize] >> 16) & 0xff) as u64;
+                }
+            }
+            sum
+        };
+        assert!(
+            lit_red(Rgb::new(230, 40, 40)) > lit_red(Rgb::new(40, 40, 230)),
+            "the derived material tint colours the sphere (a red tint reads redder than a blue tint)"
+        );
+    }
+
+    #[test]
+    fn the_surface_grid_overlays_seams_and_subdivides_with_density() {
+        // The display tile grid overlays visible seams on the sphere, and a finer grid subdivides into more seams:
+        // each tile opens into a finer array as the caller refines the grid with zoom (the owner's drill-in).
+        let (w, h) = (200usize, 200usize);
+        let bg = Rgb::new(8, 9, 14);
+        let (tiles, cols) = demo_globe_tiles();
+        let (cx, cy, radius) = (100i32, 100i32, 80usize);
+        let star = [0.4f32, -0.2, 0.9];
+        let white = Rgb::new(255, 255, 255);
+        let tint = Some(Rgb::new(200, 210, 205));
+        let draw = |grid: Option<(usize, usize)>| -> Vec<u32> {
+            let mut buf = vec![bg.pack(); w * h];
+            draw_globe(
+                &mut buf,
+                w,
+                h,
+                cx,
+                cy,
+                radius,
+                &tiles,
+                cols,
+                star,
+                white,
+                SurfaceStyle { tint, grid },
+                GlobeOrientation::IDENTITY,
+            );
+            buf
+        };
+        let plain = draw(None);
+        let coarse = draw(Some((8, 6)));
+        let fine = draw(Some((16, 12)));
+        let seam_count = |g: &[u32]| g.iter().zip(plain.iter()).filter(|(a, b)| a != b).count();
+        let coarse_seams = seam_count(&coarse);
+        let fine_seams = seam_count(&fine);
+        assert!(coarse_seams > 0, "the grid overlays visible seams");
+        assert!(
+            fine_seams > coarse_seams,
+            "a finer grid subdivides into more seams (each tile opens into a finer array): {fine_seams} vs {coarse_seams}"
+        );
+        // A None grid leaves the sphere ungridded (the plain planet), and the read replays deterministically.
+        assert_eq!(coarse, draw(Some((8, 6))), "a pure read replays");
     }
 }

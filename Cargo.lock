@@ -346,6 +346,7 @@ version = "0.1.0"
 dependencies = [
  "civsim-core",
  "civsim-physics",
+ "civsim-units",
 ]
 
 [[package]]
@@ -386,7 +387,10 @@ name = "civsim-viewer"
 version = "0.1.0"
 dependencies = [
  "civsim-core",
+ "civsim-materials",
+ "civsim-physics",
  "civsim-sim",
+ "civsim-units",
  "civsim-world",
  "minifb",
 ]

@@ -1,0 +1,629 @@
+# Pyykko covalent radii (single / double / triple bond, picometres), the covalent bond-length substrate the
+# Badger force-constant column sums (r_e = r_a + r_b at the bond order). CITED: Pyykko 2015 (J. Phys. Chem. A 119,
+# 2326) consolidation, over Pyykko & Atsumi 2009 (Chem. Eur. J. 15, 186 single-bond; 15, 12770 double-bond) and
+# Pyykko, Riedel & Patzschke 2005 (Chem. Eur. J. 11, 3511 triple-bond). Machine-readable conduit: mendeleev 1.1.0.
+# QUALITY BAND: single-bond fit mean-square deviation < 3 pm (~400 primary distances per set); the CO triple-bond
+# sum 60+53 = 113 pm against the measured 112.8 pm is the closure check.
+# SCOPE TAG (definition, verbatim intent): agreement is good provided the bond is NOT too ionic and the coordination
+# numbers are near the fit's input data; transition-metal halides are excluded from the single-bond set for partial
+# multiple-bond character. IONIC bonds route through the Shannon ionic-radius column instead (the ionic-dispatch
+# line), never through this covalent set.
+# TETRAHEDRAL set: tetrahedral_pm is the tetrahedral covalent radius for tetrahedrally-bonded crystals (zincblende/
+# wurtzite/diamond), Pyykko 2015 Figure 2 (ref 4, APS 2012 refit), read from the primary. Additive for tetrahedral
+# crystals (SiC ~195 pm vs measured 188); a polar bond (silicate Si-O) needs an ionicity correction, so the battery
+# reads such lengths from the measured crystal structure. Only ~30 elements form tetrahedral crystals (others absent).
+#
+# BLOCK KIND: [[radius]], the cited-data-column idiom (matching the Shannon ionic-radius column in ionic_radii.toml),
+# NOT the reserved floor [[element]] kind. This file is an IMMUTABLE transcription of Pyykko 2015; it does not
+# participate in the floor's real/fantasy authorship axis, and procgen radii for an authored element come from the
+# estimator tier at runtime, NEVER written here (inserting computed rows into a file whose header cites Pyykko 2015
+# would be laundering by co-location). The column's provenance is this header citation, not a per-row real/fantasy tag.
+#
+# GRADE BOUNDARY (mixed-grade citation, FLAGGED until sourced): Pyykko's light-element radii are FITS to measured
+# bond distances; the heavy, actinide-and-beyond radii are RELATIVISTIC COMPUTED estimates (a compute-once cited
+# grade, not measured [M]). The exact atomic number where the fit gives way to the computed values is a data-
+# provenance fact to be read from Pyykko 2015's own data-source notes, FLAGGED until sourced (a vendoring-checklist
+# classification item, not a world-content reserved value). The force-constant chain and grain lattices read only
+# light rows today, so the loader guard (CovalentRadii::bond_length_measured_grade) takes the boundary from its
+# caller, costs nothing now, and fails loud the day a consumer reads the computed region.
+
+[[radius]]
+symbol = "H"
+single_pm = 32
+tetrahedral_pm = 137
+
+[[radius]]
+symbol = "He"
+single_pm = 46
+
+[[radius]]
+symbol = "Li"
+single_pm = 133
+double_pm = 124
+tetrahedral_pm = 137
+
+[[radius]]
+symbol = "Be"
+single_pm = 102
+double_pm = 90
+triple_pm = 85
+tetrahedral_pm = 106.1
+
+[[radius]]
+symbol = "B"
+single_pm = 85
+double_pm = 78
+triple_pm = 73
+tetrahedral_pm = 88.2
+
+[[radius]]
+symbol = "C"
+single_pm = 75
+double_pm = 67
+triple_pm = 60
+tetrahedral_pm = 77.3
+
+[[radius]]
+symbol = "N"
+single_pm = 71
+double_pm = 60
+triple_pm = 54
+tetrahedral_pm = 68.9
+
+[[radius]]
+symbol = "O"
+single_pm = 63
+double_pm = 57
+triple_pm = 53
+tetrahedral_pm = 67.4
+
+[[radius]]
+symbol = "F"
+single_pm = 64
+double_pm = 59
+triple_pm = 53
+tetrahedral_pm = 57.5
+
+[[radius]]
+symbol = "Ne"
+single_pm = 67
+double_pm = 96
+
+[[radius]]
+symbol = "Na"
+single_pm = 155
+double_pm = 160
+
+[[radius]]
+symbol = "Mg"
+single_pm = 139
+double_pm = 132
+triple_pm = 127
+tetrahedral_pm = 141.2
+
+[[radius]]
+symbol = "Al"
+single_pm = 126
+double_pm = 113
+triple_pm = 111
+tetrahedral_pm = 128.5
+
+[[radius]]
+symbol = "Si"
+single_pm = 116
+double_pm = 107
+triple_pm = 102
+tetrahedral_pm = 117.6
+
+[[radius]]
+symbol = "P"
+single_pm = 111
+double_pm = 102
+triple_pm = 94
+tetrahedral_pm = 108.4
+
+[[radius]]
+symbol = "S"
+single_pm = 103
+double_pm = 94
+triple_pm = 95
+tetrahedral_pm = 104.2
+
+[[radius]]
+symbol = "Cl"
+single_pm = 99
+double_pm = 95
+triple_pm = 93
+tetrahedral_pm = 107.6
+
+[[radius]]
+symbol = "Ar"
+single_pm = 96
+double_pm = 107
+triple_pm = 96
+
+[[radius]]
+symbol = "K"
+single_pm = 196
+double_pm = 193
+
+[[radius]]
+symbol = "Ca"
+single_pm = 171
+double_pm = 147
+triple_pm = 133
+
+[[radius]]
+symbol = "Sc"
+single_pm = 148
+double_pm = 116
+triple_pm = 114
+tetrahedral_pm = 138.6
+
+[[radius]]
+symbol = "Ti"
+single_pm = 136
+double_pm = 117
+triple_pm = 108
+
+[[radius]]
+symbol = "V"
+single_pm = 134
+double_pm = 112
+triple_pm = 106
+
+[[radius]]
+symbol = "Cr"
+single_pm = 122
+double_pm = 111
+triple_pm = 103
+
+[[radius]]
+symbol = "Mn"
+single_pm = 119
+double_pm = 105
+triple_pm = 103
+tetrahedral_pm = 140.3
+
+[[radius]]
+symbol = "Fe"
+single_pm = 116
+double_pm = 109
+triple_pm = 102
+tetrahedral_pm = 120.9
+
+[[radius]]
+symbol = "Co"
+single_pm = 111
+double_pm = 103
+triple_pm = 96
+tetrahedral_pm = 125.6
+
+[[radius]]
+symbol = "Ni"
+single_pm = 110
+double_pm = 101
+triple_pm = 101
+
+[[radius]]
+symbol = "Cu"
+single_pm = 112
+double_pm = 115
+triple_pm = 120
+tetrahedral_pm = 127.1
+
+[[radius]]
+symbol = "Zn"
+single_pm = 118
+double_pm = 120
+tetrahedral_pm = 130.4
+
+[[radius]]
+symbol = "Ga"
+single_pm = 124
+double_pm = 117
+triple_pm = 121
+tetrahedral_pm = 127.5
+
+[[radius]]
+symbol = "Ge"
+single_pm = 121
+double_pm = 111
+triple_pm = 114
+tetrahedral_pm = 122.5
+
+[[radius]]
+symbol = "As"
+single_pm = 121
+double_pm = 114
+triple_pm = 106
+tetrahedral_pm = 117.4
+
+[[radius]]
+symbol = "Se"
+single_pm = 116
+double_pm = 107
+triple_pm = 107
+tetrahedral_pm = 114.5
+
+[[radius]]
+symbol = "Br"
+single_pm = 114
+double_pm = 109
+triple_pm = 110
+tetrahedral_pm = 119.5
+
+[[radius]]
+symbol = "Kr"
+single_pm = 117
+double_pm = 121
+triple_pm = 108
+
+[[radius]]
+symbol = "Rb"
+single_pm = 210
+double_pm = 202
+
+[[radius]]
+symbol = "Sr"
+single_pm = 185
+double_pm = 157
+triple_pm = 139
+
+[[radius]]
+symbol = "Y"
+single_pm = 163
+double_pm = 130
+triple_pm = 124
+
+[[radius]]
+symbol = "Zr"
+single_pm = 154
+double_pm = 127
+triple_pm = 121
+
+[[radius]]
+symbol = "Nb"
+single_pm = 147
+double_pm = 125
+triple_pm = 116
+
+[[radius]]
+symbol = "Mo"
+single_pm = 138
+double_pm = 121
+triple_pm = 113
+
+[[radius]]
+symbol = "Tc"
+single_pm = 128
+double_pm = 120
+triple_pm = 110
+
+[[radius]]
+symbol = "Ru"
+single_pm = 125
+double_pm = 114
+triple_pm = 103
+
+[[radius]]
+symbol = "Rh"
+single_pm = 125
+double_pm = 110
+triple_pm = 106
+
+[[radius]]
+symbol = "Pd"
+single_pm = 120
+double_pm = 117
+triple_pm = 112
+
+[[radius]]
+symbol = "Ag"
+single_pm = 128
+double_pm = 139
+triple_pm = 137
+tetrahedral_pm = 147.3
+
+[[radius]]
+symbol = "Cd"
+single_pm = 136
+double_pm = 144
+tetrahedral_pm = 148.2
+
+[[radius]]
+symbol = "In"
+single_pm = 142
+double_pm = 136
+triple_pm = 146
+tetrahedral_pm = 145.5
+
+[[radius]]
+symbol = "Sn"
+single_pm = 140
+double_pm = 130
+triple_pm = 132
+tetrahedral_pm = 140.0
+
+[[radius]]
+symbol = "Sb"
+single_pm = 140
+double_pm = 133
+triple_pm = 127
+tetrahedral_pm = 136.3
+
+[[radius]]
+symbol = "Te"
+single_pm = 136
+double_pm = 128
+triple_pm = 121
+tetrahedral_pm = 133.5
+
+[[radius]]
+symbol = "I"
+single_pm = 133
+double_pm = 129
+triple_pm = 125
+tetrahedral_pm = 134.5
+
+[[radius]]
+symbol = "Xe"
+single_pm = 131
+double_pm = 135
+triple_pm = 122
+
+[[radius]]
+symbol = "Cs"
+single_pm = 232
+double_pm = 209
+
+[[radius]]
+symbol = "Ba"
+single_pm = 196
+double_pm = 161
+triple_pm = 149
+
+[[radius]]
+symbol = "La"
+single_pm = 180
+double_pm = 139
+triple_pm = 139
+
+[[radius]]
+symbol = "Ce"
+single_pm = 163
+double_pm = 137
+triple_pm = 131
+
+[[radius]]
+symbol = "Pr"
+single_pm = 176
+double_pm = 138
+triple_pm = 128
+
+[[radius]]
+symbol = "Nd"
+single_pm = 174
+double_pm = 137
+
+[[radius]]
+symbol = "Pm"
+single_pm = 173
+double_pm = 135
+
+[[radius]]
+symbol = "Sm"
+single_pm = 172
+double_pm = 134
+
+[[radius]]
+symbol = "Eu"
+single_pm = 168
+double_pm = 134
+
+[[radius]]
+symbol = "Gd"
+single_pm = 169
+double_pm = 135
+triple_pm = 132
+
+[[radius]]
+symbol = "Tb"
+single_pm = 168
+double_pm = 135
+
+[[radius]]
+symbol = "Dy"
+single_pm = 167
+double_pm = 133
+
+[[radius]]
+symbol = "Ho"
+single_pm = 166
+double_pm = 133
+
+[[radius]]
+symbol = "Er"
+single_pm = 165
+double_pm = 133
+
+[[radius]]
+symbol = "Tm"
+single_pm = 164
+double_pm = 131
+
+[[radius]]
+symbol = "Yb"
+single_pm = 170
+double_pm = 129
+
+[[radius]]
+symbol = "Lu"
+single_pm = 162
+double_pm = 131
+triple_pm = 131
+
+[[radius]]
+symbol = "Hf"
+single_pm = 152
+double_pm = 128
+triple_pm = 122
+
+[[radius]]
+symbol = "Ta"
+single_pm = 146
+double_pm = 126
+triple_pm = 119
+
+[[radius]]
+symbol = "W"
+single_pm = 137
+double_pm = 120
+triple_pm = 115
+
+[[radius]]
+symbol = "Re"
+single_pm = 131
+double_pm = 119
+triple_pm = 110
+
+[[radius]]
+symbol = "Os"
+single_pm = 129
+double_pm = 116
+triple_pm = 109
+
+[[radius]]
+symbol = "Ir"
+single_pm = 122
+double_pm = 115
+triple_pm = 107
+
+[[radius]]
+symbol = "Pt"
+single_pm = 123
+double_pm = 112
+triple_pm = 110
+
+[[radius]]
+symbol = "Au"
+single_pm = 124
+double_pm = 121
+triple_pm = 123
+
+[[radius]]
+symbol = "Hg"
+single_pm = 133
+double_pm = 142
+tetrahedral_pm = 147.8
+
+[[radius]]
+symbol = "Tl"
+single_pm = 144
+double_pm = 142
+triple_pm = 150
+tetrahedral_pm = 138
+
+[[radius]]
+symbol = "Pb"
+single_pm = 144
+double_pm = 135
+triple_pm = 137
+tetrahedral_pm = 144.1
+
+[[radius]]
+symbol = "Bi"
+single_pm = 151
+double_pm = 141
+triple_pm = 135
+tetrahedral_pm = 146.0
+
+[[radius]]
+symbol = "Po"
+single_pm = 145
+double_pm = 135
+triple_pm = 129
+tetrahedral_pm = 141.6
+
+[[radius]]
+symbol = "At"
+single_pm = 147
+double_pm = 138
+triple_pm = 138
+
+[[radius]]
+symbol = "Rn"
+single_pm = 142
+double_pm = 145
+triple_pm = 133
+
+[[radius]]
+symbol = "Fr"
+single_pm = 223
+double_pm = 218
+
+[[radius]]
+symbol = "Ra"
+single_pm = 201
+double_pm = 173
+triple_pm = 159
+
+[[radius]]
+symbol = "Ac"
+single_pm = 186
+double_pm = 153
+triple_pm = 140
+
+[[radius]]
+symbol = "Th"
+single_pm = 175
+double_pm = 143
+triple_pm = 136
+
+[[radius]]
+symbol = "Pa"
+single_pm = 169
+double_pm = 138
+triple_pm = 129
+
+[[radius]]
+symbol = "U"
+single_pm = 170
+double_pm = 134
+triple_pm = 118
+
+[[radius]]
+symbol = "Np"
+single_pm = 171
+double_pm = 136
+triple_pm = 116
+
+[[radius]]
+symbol = "Pu"
+single_pm = 172
+double_pm = 135
+
+[[radius]]
+symbol = "Am"
+single_pm = 166
+double_pm = 135
+
+[[radius]]
+symbol = "Cm"
+single_pm = 166
+double_pm = 136
+
+[[radius]]
+symbol = "Bk"
+single_pm = 168
+double_pm = 139
+
+[[radius]]
+symbol = "Cf"
+single_pm = 168
+double_pm = 140
+
+[[radius]]
+symbol = "Es"
+single_pm = 165
+double_pm = 140

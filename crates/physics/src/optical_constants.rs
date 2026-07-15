@@ -263,7 +263,271 @@ impl OpticalConstants {
     pub fn names(&self) -> impl Iterator<Item = &str> + '_ {
         self.species.keys().map(String::as_str)
     }
+
+    /// The ÆSOPUS dust optical-constants library: 45 cited species (Zenodo DOI 10.5281/zenodo.8221362), each n,k
+    /// table header-cited to its primary source, loaded from the vendored `.dat` files joined to the fixture
+    /// manifest (`name`/`citation`/`md5`) by name. This is the phonon-estimator calibration set (its measured bands
+    /// are the battery targets) and the grain wire's Rule-1 measured membership. `None` on a manifest parse failure,
+    /// a manifest entry with no embedded file, or a file that yields no valid rows (fail loud, never a partial
+    /// library).
+    pub fn aesopus_library() -> Option<Self> {
+        let manifest: OpticalManifest = toml::from_str(AESOPUS_OPTICAL_MANIFEST).ok()?;
+        let mut species = BTreeMap::new();
+        for entry in &manifest.species {
+            let content = AESOPUS_OPTICAL_DAT
+                .iter()
+                .find(|(n, _)| *n == entry.name)
+                .map(|(_, c)| *c)?;
+            let sp = OpticalSpecies::from_aesopus_dat(&entry.name, &entry.citation, content)?;
+            species.insert(entry.name.clone(), sp);
+        }
+        Some(OpticalConstants { species })
+    }
 }
+
+impl OpticalSpecies {
+    /// Parse one ÆSOPUS dust `.dat` file into a species: a `#`-commented header (the primary citation) then rows of
+    /// `lambda_um  n  k`. A row out of wavelength order (a rare source formatting glitch) is DROPPED so the grid
+    /// stays strictly increasing for the binary-search interpolation; a `n <= 0` or `k < 0` row is skipped as
+    /// non-physical. The provenance tier is `Primary` (each file is the original author's own data). `None` if the
+    /// citation is empty or the file yields no valid rows.
+    pub fn from_aesopus_dat(name: &str, citation: &str, content: &str) -> Option<OpticalSpecies> {
+        if citation.trim().is_empty() {
+            return None;
+        }
+        let mut samples: Vec<RefractiveIndex> = Vec::new();
+        for line in content.lines() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            let mut t = line.split_whitespace();
+            let (Some(a), Some(b), Some(c)) = (t.next(), t.next(), t.next()) else {
+                continue;
+            };
+            let (Ok(lambda_um), Ok(n), Ok(k)) = (
+                fixed_from_decimal(a),
+                fixed_from_decimal(b),
+                fixed_from_decimal(c),
+            ) else {
+                continue;
+            };
+            if n <= Fixed::ZERO || k < Fixed::ZERO {
+                continue; // non-physical row, skip
+            }
+            if let Some(last) = samples.last() {
+                if lambda_um <= last.lambda_um {
+                    continue; // out-of-order source row, keep the grid strictly increasing
+                }
+            }
+            samples.push(RefractiveIndex { lambda_um, n, k });
+        }
+        if samples.is_empty() {
+            return None;
+        }
+        Some(OpticalSpecies {
+            name: name.to_string(),
+            citation: citation.to_string(),
+            tier: ProvenanceTier::Primary,
+            samples,
+        })
+    }
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct OpticalManifest {
+    #[serde(default)]
+    species: Vec<OpticalManifestEntry>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct OpticalManifestEntry {
+    name: String,
+    #[serde(default)]
+    citation: String,
+}
+
+/// The ÆSOPUS optical-constants fixture manifest (name / citation / md5).
+const AESOPUS_OPTICAL_MANIFEST: &str =
+    include_str!("../data/optical_constants_aesopus/manifest.toml");
+
+/// The embedded dust n,k tables, joined to the manifest by species name.
+const AESOPUS_OPTICAL_DAT: &[(&str, &str)] = &[
+    (
+        "Ca2Al2SiO7",
+        include_str!("../data/optical_constants_aesopus/Ca2Al2SiO7.dat"),
+    ),
+    (
+        "CaMgC2O6",
+        include_str!("../data/optical_constants_aesopus/CaMgC2O6.dat"),
+    ),
+    (
+        "CaSiO3",
+        include_str!("../data/optical_constants_aesopus/CaSiO3.dat"),
+    ),
+    (
+        "CaTiO3",
+        include_str!("../data/optical_constants_aesopus/CaTiO3.dat"),
+    ),
+    (
+        "Cr",
+        include_str!("../data/optical_constants_aesopus/Cr.dat"),
+    ),
+    (
+        "Cu",
+        include_str!("../data/optical_constants_aesopus/Cu.dat"),
+    ),
+    (
+        "Fe",
+        include_str!("../data/optical_constants_aesopus/Fe.dat"),
+    ),
+    (
+        "Fe2O3",
+        include_str!("../data/optical_constants_aesopus/Fe2O3.dat"),
+    ),
+    (
+        "Fe2SiO4",
+        include_str!("../data/optical_constants_aesopus/Fe2SiO4.dat"),
+    ),
+    (
+        "Fe3O4",
+        include_str!("../data/optical_constants_aesopus/Fe3O4.dat"),
+    ),
+    (
+        "FeO",
+        include_str!("../data/optical_constants_aesopus/FeO.dat"),
+    ),
+    (
+        "FeS",
+        include_str!("../data/optical_constants_aesopus/FeS.dat"),
+    ),
+    (
+        "KCl",
+        include_str!("../data/optical_constants_aesopus/KCl.dat"),
+    ),
+    (
+        "MgAl2O4",
+        include_str!("../data/optical_constants_aesopus/MgAl2O4.dat"),
+    ),
+    (
+        "MgCaSi2O6",
+        include_str!("../data/optical_constants_aesopus/MgCaSi2O6.dat"),
+    ),
+    (
+        "MgO",
+        include_str!("../data/optical_constants_aesopus/MgO.dat"),
+    ),
+    (
+        "MgTiO3",
+        include_str!("../data/optical_constants_aesopus/MgTiO3.dat"),
+    ),
+    (
+        "Mn",
+        include_str!("../data/optical_constants_aesopus/Mn.dat"),
+    ),
+    (
+        "MnS",
+        include_str!("../data/optical_constants_aesopus/MnS.dat"),
+    ),
+    (
+        "NH3",
+        include_str!("../data/optical_constants_aesopus/NH3.dat"),
+    ),
+    (
+        "Na2S",
+        include_str!("../data/optical_constants_aesopus/Na2S.dat"),
+    ),
+    (
+        "NaAlSi2O6",
+        include_str!("../data/optical_constants_aesopus/NaAlSi2O6.dat"),
+    ),
+    (
+        "NaAlSi3O8",
+        include_str!("../data/optical_constants_aesopus/NaAlSi3O8.dat"),
+    ),
+    (
+        "NaCl",
+        include_str!("../data/optical_constants_aesopus/NaCl.dat"),
+    ),
+    (
+        "Ni",
+        include_str!("../data/optical_constants_aesopus/Ni.dat"),
+    ),
+    (
+        "SiC",
+        include_str!("../data/optical_constants_aesopus/SiC.dat"),
+    ),
+    (
+        "SiO",
+        include_str!("../data/optical_constants_aesopus/SiO.dat"),
+    ),
+    (
+        "SiO2_alpha",
+        include_str!("../data/optical_constants_aesopus/SiO2_alpha.dat"),
+    ),
+    (
+        "SiO2_amorph",
+        include_str!("../data/optical_constants_aesopus/SiO2_amorph.dat"),
+    ),
+    (
+        "Ti",
+        include_str!("../data/optical_constants_aesopus/Ti.dat"),
+    ),
+    (
+        "TiC",
+        include_str!("../data/optical_constants_aesopus/TiC.dat"),
+    ),
+    (
+        "TiO2_anatase",
+        include_str!("../data/optical_constants_aesopus/TiO2_anatase.dat"),
+    ),
+    (
+        "TiO2_rutile",
+        include_str!("../data/optical_constants_aesopus/TiO2_rutile.dat"),
+    ),
+    ("V", include_str!("../data/optical_constants_aesopus/V.dat")),
+    ("W", include_str!("../data/optical_constants_aesopus/W.dat")),
+    (
+        "Zn",
+        include_str!("../data/optical_constants_aesopus/Zn.dat"),
+    ),
+    (
+        "ZnS",
+        include_str!("../data/optical_constants_aesopus/ZnS.dat"),
+    ),
+    (
+        "Zr",
+        include_str!("../data/optical_constants_aesopus/Zr.dat"),
+    ),
+    (
+        "ZrO2",
+        include_str!("../data/optical_constants_aesopus/ZrO2.dat"),
+    ),
+    (
+        "am-Al2O3",
+        include_str!("../data/optical_constants_aesopus/am-Al2O3.dat"),
+    ),
+    (
+        "am-C",
+        include_str!("../data/optical_constants_aesopus/am-C.dat"),
+    ),
+    (
+        "am-Mg2SiO4",
+        include_str!("../data/optical_constants_aesopus/am-Mg2SiO4.dat"),
+    ),
+    (
+        "am-MgSiO3",
+        include_str!("../data/optical_constants_aesopus/am-MgSiO3.dat"),
+    ),
+    (
+        "graphite",
+        include_str!("../data/optical_constants_aesopus/graphite.dat"),
+    ),
+    (
+        "waterice",
+        include_str!("../data/optical_constants_aesopus/waterice.dat"),
+    ),
+];
 
 #[cfg(test)]
 mod tests {
@@ -271,6 +535,33 @@ mod tests {
 
     fn lib() -> OpticalConstants {
         OpticalConstants::standard().expect("the optical-constants library loads")
+    }
+
+    #[test]
+    fn the_aesopus_library_loads_all_45_cited_species() {
+        // The vendored calibration set: all 45 dust species load from the manifest-joined .dat files, each with a
+        // non-empty primary citation and a strictly-increasing n,k grid, including the phonon-battery targets (SiC,
+        // the silicates, water ice). SiC absorbs in the infrared (its ~11 micron Reststrahlen band), so its k is
+        // positive there.
+        let lib = OpticalConstants::aesopus_library().expect("the AESOPUS optical library loads");
+        assert_eq!(lib.names().count(), 45, "45 cited species");
+        for name in ["SiC", "waterice", "am-Mg2SiO4", "NaCl", "Fe", "graphite"] {
+            let sp = lib
+                .species(name)
+                .unwrap_or_else(|| panic!("{name} present"));
+            assert!(!sp.citation.trim().is_empty(), "{name} carries a citation");
+            assert!(sp.samples.len() > 10, "{name} has a real grid");
+            for w in sp.samples.windows(2) {
+                assert!(
+                    w[1].lambda_um > w[0].lambda_um,
+                    "{name} grid is strictly increasing"
+                );
+            }
+        }
+        // SiC at ~11.3 micron (the Reststrahlen band) is absorbing.
+        let sic = lib.species("SiC").unwrap();
+        let (_, k) = sic.interpolate(Fixed::from_ratio(113, 10)).unwrap();
+        assert!(k > Fixed::ZERO, "SiC absorbs at its ~11.3 micron band");
     }
 
     /// Find the sampled row whose wavelength is closest to `target_um` (a test helper for the reference checks).

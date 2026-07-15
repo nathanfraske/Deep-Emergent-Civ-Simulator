@@ -1,0 +1,109 @@
+# SiO2 alpha-quartz, standard Gibbs energy of formation from the elements, 298.15 to 1800 K. Quartz component of the
+# QFM/FMQ (quartz-fayalite-magnetite) oxygen buffer. PRIMARY: Robie & Hemingway (1995), USGS Bull. 2131, QUARTZ high-T
+# table p.214 (298.15 K anchor also in the oxide summary p.18). Transcribed from the primary USGS PDF (md5
+# 08c3cc7c2d823667c8efadfebcef02de). SECOND WITNESS: NIST-JANAF (Chase 1998) table O-037 SiO2(cr) quartz, delta_f G298
+# = -856.443 (Robie -856.3), delta_f H298 = -910.857 (Robie -910.7), agrees within rounding; Barin pending (see
+# manifest.toml). POLYMORPH: alpha-quartz (the reference silica phase; cristobalite and amorphous SiO2 are separate
+# phases, not vendored here). BLOCK KIND [[point]], cited-data-column idiom, header-cited. COLUMNS: t_k (K);
+# delta_f_g_kj / delta_f_h_kj (kJ/mol); s_j / cp_j (J/mol/K) on the 298.15 K anchor only. FINGERPRINT: delta_f G298 =
+# -856.3, delta_f H298 = -910.7. HONEST LIMITS: alpha-beta quartz transition at 844 K (a Cp feature between the 800 and
+# 900 K rows); melting point estimated 1700 K, so the 1700 K row and the liquid 1800 K row carry the delta_f H
+# reference step (-949.6, -938.5) of the silica reference-phase change; delta_f G stays smooth.
+
+substance = "SiO2"
+mineral = "quartz"
+polymorph = "alpha-quartz"
+phase = "cr"
+formula_wt = "60.084"
+reference = "formation-from-elements"
+alpha_beta_transition_k = "844"
+melting_t_k = "1700 (estimated)"
+
+[[point]]
+t_k = "298.15"
+delta_f_g_kj = "-856.3"
+delta_f_h_kj = "-910.7"
+s_j = "41.46"
+cp_j = "44.59"
+
+[[point]]
+t_k = "300"
+delta_f_g_kj = "-855.9"
+delta_f_h_kj = "-910.7"
+
+[[point]]
+t_k = "400"
+delta_f_g_kj = "-837.7"
+delta_f_h_kj = "-910.9"
+
+[[point]]
+t_k = "500"
+delta_f_g_kj = "-819.4"
+delta_f_h_kj = "-910.5"
+
+[[point]]
+t_k = "600"
+delta_f_g_kj = "-801.2"
+delta_f_h_kj = "-909.8"
+
+[[point]]
+t_k = "700"
+delta_f_g_kj = "-783.2"
+delta_f_h_kj = "-908.8"
+
+[[point]]
+t_k = "800"
+delta_f_g_kj = "-765.3"
+delta_f_h_kj = "-907.4"
+
+[[point]]
+t_k = "900"
+delta_f_g_kj = "-747.7"
+delta_f_h_kj = "-905.6"
+
+[[point]]
+t_k = "1000"
+delta_f_g_kj = "-730.2"
+delta_f_h_kj = "-904.8"
+
+[[point]]
+t_k = "1100"
+delta_f_g_kj = "-712.8"
+delta_f_h_kj = "-904.1"
+
+[[point]]
+t_k = "1200"
+delta_f_g_kj = "-695.4"
+delta_f_h_kj = "-903.3"
+
+[[point]]
+t_k = "1300"
+delta_f_g_kj = "-678.1"
+delta_f_h_kj = "-902.5"
+
+[[point]]
+t_k = "1400"
+delta_f_g_kj = "-660.9"
+delta_f_h_kj = "-901.8"
+
+[[point]]
+t_k = "1500"
+delta_f_g_kj = "-643.7"
+delta_f_h_kj = "-901.0"
+
+[[point]]
+t_k = "1600"
+delta_f_g_kj = "-626.6"
+delta_f_h_kj = "-900.2"
+
+[[point]]
+t_k = "1700"
+delta_f_g_kj = "-609.0"
+delta_f_h_kj = "-949.6"
+note = "melting point (estimated 1700 K); delta_f H reference-phase step"
+
+[[point]]
+t_k = "1800"
+delta_f_g_kj = "-589.6"
+delta_f_h_kj = "-938.5"
+note = "liquid SiO2"

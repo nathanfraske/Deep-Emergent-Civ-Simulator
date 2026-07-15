@@ -1,0 +1,274 @@
+# ÆSOPUS 2.0 dust optical-constants fixture manifest (the shared idiom: species / citation / md5).
+# Source: Zenodo DOI 10.5281/zenodo.8221362 (optical_constants.tgz, md5 6d71141d1d943a3bfb8e3447e9130113).
+# Each species' n,k table is header-cited to its PRIMARY source. The phonon-estimator battery validates
+# against these measured bands; the grain wire reads them as Rule-1 measured membership.
+
+[[species]]
+name = "Ca2Al2SiO7"
+file = "Ca2Al2SiO7.dat"
+citation = "Mutschke et al. 1998, Astron. Astrophys. 333, 188. Database of Optical Constants for Cosmic Dust, Laboratory Astrophysics Group of the AIU Jena"
+md5 = "7cd48ccb538b0de739e6c09d4cbe58b7"
+
+[[species]]
+name = "CaMgC2O6"
+file = "CaMgC2O6.dat"
+citation = "\"M. R. Querry. Optical constants of minerals and other materials from the millimeter to the ultraviolet, <a href=\\\"https://apps.dtic.mil/sti/citations/ADA192210\\\"><i>Contractor Report</i> CRDEC-CR-88009 (1987)</a>\""
+md5 = "2f9de7ba325cc43e4d4c1a9daf8a531b"
+
+[[species]]
+name = "CaSiO3"
+file = "CaSiO3.dat"
+citation = "Shaker J. Edrees, Majid M. Shukur, Mohammed M. Obeid, First-principle analysis of the structural, mechanical, optical and electronic properties of wollastonite monoclinic polymorph, Computational Condensed Matter, Volume 14, 2018, Pages 20-26"
+md5 = "7922107c4be49289619b4d84cb613e23"
+
+[[species]]
+name = "CaTiO3"
+file = "CaTiO3.dat"
+citation = "Posch et al. (2003), Ap&SS, 149:437; Ueda et al 1998 J. Phys.: Condens. Matter 10 3669; Database of Optical Constants for Cosmic Dust, Laboratory Astrophysics Group of the AIU Jena"
+md5 = "c6d8fb009c30503ea353c122dbec64dd"
+
+[[species]]
+name = "Cr"
+file = "Cr.dat"
+citation = "Lynch&Hunter (1991) in Palik: \"Handbook of Optical Constants of Solids\"; Rakic et al. (1998) Applied Optics Vol. 37, Issue 22"
+md5 = "19e54c2954540906bdb352c6d99f4194"
+
+[[species]]
+name = "Cu"
+file = "Cu.dat"
+citation = "M. A. Ordal, R. J. Bell, R. W. Alexander, L. L. Long, M. R. Querry. Optical properties of fourteen metals in the infrared and far infrared: Al, Co, Cu, Au, Fe, Pb, Mo, Ni, Pd, Pt, Ag, Ti, V, and W, <a href=\\\"https://doi.org/10.1364/AO.24.004493\\\"><i>Appl. Opt.</i> <b>24</b>, 4493-4499 (1985)</a>\""
+md5 = "7ed44e0fea993a3d219405c23d722a65"
+
+[[species]]
+name = "Fe"
+file = "Fe.dat"
+citation = "Lynch & Hunter (1991) in Palik: \"Handbook of Optical Constants of Solids\""
+md5 = "21b2fa85fc2dd905529243743a3a9dfe"
+
+[[species]]
+name = "Fe2O3"
+file = "Fe2O3.dat"
+citation = "Amaury H.M.J. Triaud, in Database of Optical Constants for Cosmic Dust, Laboratory Astrophysics Group of the AIU Jena"
+md5 = "0e751cbc97044f14e9f8648222d48805"
+
+[[species]]
+name = "Fe2SiO4"
+file = "Fe2SiO4.dat"
+citation = "Fabian et al. (2001), A&A Vol. 378; Database of Optical Constants for Cosmic Dust, Laboratory Astrophysics Group of the AIU Jena"
+md5 = "e9fb67813e9013a2850c6b62d1766915"
+
+[[species]]
+name = "Fe3O4"
+file = "Fe3O4.dat"
+citation = "Amaury H.M.J. Triaud, in Database of Optical Constants for Cosmic Dust, Laboratory Astrophysics Group of the AIU Jena"
+md5 = "505d359fc544699acf442e355f7e0d52"
+
+[[species]]
+name = "FeO"
+file = "FeO.dat"
+citation = "Henning et al. (1995), Astronomy and Astrophysics Supplement, v.112, p.143; Database of Optical Constants for Cosmic Dust, Laboratory Astrophysics Group of the AIU Jena"
+md5 = "4f0443f2d1cfb25a23d284e049f6f606"
+
+[[species]]
+name = "FeS"
+file = "FeS.dat"
+citation = "Pollack et al. (1994) ApJ, 421:615; Henning&Mutschke (1997), A&A, 327:743"
+md5 = "6df9df5319da4cacd15910d840edb2cf"
+
+[[species]]
+name = "KCl"
+file = "KCl.dat"
+citation = "Palik (1985) in Palik: \"Handbook of Optical Constants of Solids\""
+md5 = "96978c5a1e766f6cd9ffcc089b5dde51"
+
+[[species]]
+name = "MgAl2O4"
+file = "MgAl2O4.dat"
+citation = "Zeidler et al. (2011), A&A 526:A68; Tropf & Thomas (1991) in Palik: \"Handbook of Optical Constants of Solids\"; Database of Optical Constants for Cosmic Dust, Laboratory Astrophysics Group of the AIU Jena"
+md5 = "ad06f76b206a0b0a5dedafa7495be9d8"
+
+[[species]]
+name = "MgCaSi2O6"
+file = "MgCaSi2O6.dat"
+citation = "Arnold et al. (2014), American Mineralogist, Volume 99, pages 1942–1955"
+md5 = "a1874fd151beb27de8eb6bb6910d39a6"
+
+[[species]]
+name = "MgO"
+file = "MgO.dat"
+citation = "Roessler & Huffman (1981) in Palik: \"Handbook of Optical Constants of Solids\""
+md5 = "b96d1103bbfdd618d3377b0061449d0f"
+
+[[species]]
+name = "MgTiO3"
+file = "MgTiO3.dat"
+citation = "Hsiao, C.-Y., Shih, C.-F., Chien, C.-H. and Huang, C.-L. (2011), MgTiO3 (003) Thin Film Deposited on Sapphire (0001) by Sputtering. Journal of the American Ceramic Society, 94: 363-366. https://doi.org/10.1111/j.1551-2916.2010.04331.x"
+md5 = "72ebcde6a3d94949c7b31e2fbc55fffe"
+
+[[species]]
+name = "Mn"
+file = "Mn.dat"
+citation = "M. R. Querry. Optical constants of minerals and other materials from the millimeter to the ultraviolet, Contractor Report CRDEC-CR-88009 (1987)"
+md5 = "f224705d7a299edfd6b7436b28a70ba6"
+
+[[species]]
+name = "MnS"
+file = "MnS.dat"
+citation = "Huffman&Wild (1967) Phys. Rev., Vol 156:989; Montaner et al. (1979) Phys. Status Solidi Appl. Res., Vol. 52:597"
+md5 = "0fdc007dd6104c9ace37e64e708a94f0"
+
+[[species]]
+name = "NH3"
+file = "NH3.dat"
+citation = "Reggie L. Hudson1, Perry A. Gerakines1, and Yukiko Y. Yarnall,  Ammonia Ices Revisited: New IR Intensities and Optical Constants for Solid NH3, 2022 ApJ, 925,  156"
+md5 = "44ca6499846b8a852fb01cc601636aab"
+
+[[species]]
+name = "Na2S"
+file = "Na2S.dat"
+citation = "Khachai et al. (2009) J. Phys. Condens. Matter; Vol 21:095404; Montaner et al. (1979) Phys. Status Solidi Appl. Res., Vol. 52:597"
+md5 = "7ef23ac1af11bb618387dd7141895d0b"
+
+[[species]]
+name = "NaAlSi2O6"
+file = "NaAlSi2O6.dat"
+citation = "Mutschke et al. 1998, Astron. Astrophys. 333, 188. Database of Optical Constants for Cosmic Dust, Laboratory Astrophysics Group of the AIU Jena"
+md5 = "aa544c73d3355982b298ad2f4a6e5bf4"
+
+[[species]]
+name = "NaAlSi3O8"
+file = "NaAlSi3O8.dat"
+citation = "Mutschke et al. 1998, Astron. Astrophys. 333, 188. Database of Optical Constants for Cosmic Dust, Laboratory Astrophysics Group of the AIU Jena"
+md5 = "a2eb131d8f394a6cbc69a91cdb4d6c79"
+
+[[species]]
+name = "NaCl"
+file = "NaCl.dat"
+citation = "Eldrige & Palik (1985) in Palik: \"Handbook of Optical Constants of Solids\""
+md5 = "6337486257e3cd52c0dd2728a0769f49"
+
+[[species]]
+name = "Ni"
+file = "Ni.dat"
+citation = "M. A. Ordal, R. J. Bell, R. W. Alexander, L. L. Long, M. R. Querry. Optical properties of Au, Ni, and Pb at submillimeter wavelengths, <a href=\\\"https://doi.org/10.1364/AO.26.000744\\\"><i>Appl. Opt.</i> <b>26</b>, 744-752 (1987)</a>\""
+md5 = "1f6874e5222b07c0297fa72031381a2d"
+
+[[species]]
+name = "SiC"
+file = "SiC.dat"
+citation = "Laor & Draine (1993), ApJ 402:441"
+md5 = "6c22569ea84e054fb1c49c053f2c2927"
+
+[[species]]
+name = "SiO"
+file = "SiO.dat"
+citation = "Philipp (1985) in Palik: \"Handbook of Optical Constants of Solids\"; Wetzel et al. (2013) A&A, Vol 553:A92"
+md5 = "10681fc6e0fa3f860b294007756f451c"
+
+[[species]]
+name = "SiO2_alpha"
+file = "SiO2_alpha.dat"
+citation = "Zeidler et al. (2013), A&A, Vol. 553:A81; Philipp (1985) in Palik: \"Handbook of Optical Constants of Solids\"; Database of Optical Constants for Cosmic Dust, Laboratory Astrophysics Group of the AIU Jena"
+md5 = "8314463ae1050275ac734a8ef8a59b16"
+
+[[species]]
+name = "SiO2_amorph"
+file = "SiO2_amorph.dat"
+citation = "Henning&Mutschke (1997), A&A Vol. 327; Philipp (1985) in Palik: \"Handbook of Optical Constants of Solids\"; Database of Optical Constants for Cosmic Dust, Laboratory Astrophysics Group of the AIU Jena"
+md5 = "f52766cbc3679f973184cc3cb5ca7e30"
+
+[[species]]
+name = "Ti"
+file = "Ti.dat"
+citation = "M. A. Ordal, R. J. Bell, R. W. Alexander, L. A. Newquist, M. R. Querry. Optical properties of Al, Fe, Ti, Ta, W, and Mo at submillimeter wavelengths, Appl. Opt. 27, 1203-1209 (1988)"
+md5 = "6f25bf238ac64b9c32a5e0b1eb7d0c97"
+
+[[species]]
+name = "TiC"
+file = "TiC.dat"
+citation = "Koide et al 1990, Phys Rev B, 42,4979; Henning & Mutschke 2001, Spec. Acta Part A57, 815"
+md5 = "4560211c5499298bf9b5e7bae0222fc5"
+
+[[species]]
+name = "TiO2_anatase"
+file = "TiO2_anatase.dat"
+citation = "Zeidler et al. (2011), A&A 526:A68; Posch et al. (2003), Ap&SS, 149:437; Siefke et al. (2016),  Adv. Opt. Mater. 4:1780; Database of Optical Constants for Cosmic Dust, Laboratory Astrophysics Group of the AIU Jena"
+md5 = "ec981f6196122c086a09ca9ad5eb2b9f"
+
+[[species]]
+name = "TiO2_rutile"
+file = "TiO2_rutile.dat"
+citation = "Zeidler et al. (2011), A&A 526:A68; Posch et al. (2003), Ap&SS, 149:437; Ribarsky, M.W., 1985, in: Palik E. D. (ed.), Handbook of Optical Constants of Solids I, Academic Press, Boston, p. 795; Database of Optical Constants for Cosmic Dust, Laboratory Astrophysics Group of the AIU Jena"
+md5 = "a28e38389a228e0343b1f669e6d88d3c"
+
+[[species]]
+name = "V"
+file = "V.dat"
+citation = "W. S. M. Werner, K. Glantschnig, C. Ambrosch-Draxl. Optical constants and inelastic electron-scattering data for 17 elemental metals, J. Phys Chem Ref. Data 38, 1013-1092 (2009)"
+md5 = "0fc599651f87b7cfb3250495a4060129"
+
+[[species]]
+name = "W"
+file = "W.dat"
+citation = "M. A. Ordal, R. J. Bell, R. W. Alexander, L. A. Newquist, M. R. Querry. Optical properties of Al, Fe, Ti, Ta, W, and Mo at submillimeter wavelengths, Appl. Opt. 27, 1203-1209 (1988)"
+md5 = "d69171bdb8eed50bc9b30499586421ef"
+
+[[species]]
+name = "Zn"
+file = "Zn.dat"
+citation = "M. R. Querry. Optical constants of minerals and other materials from the millimeter to the ultraviolet, Contractor Report CRDEC-CR-88009 (1987)"
+md5 = "d7e50d65ea3a89ef4ffdf6bbfb11f2f1"
+
+[[species]]
+name = "ZnS"
+file = "ZnS.dat"
+citation = "Palik & Addamiano (1985) in Palik: \"Handbook of Optical Constants of Solids\""
+md5 = "c673a94b44647bb92115acc6289e1314"
+
+[[species]]
+name = "Zr"
+file = "Zr.dat"
+citation = "M. R. Querry. Optical constants of minerals and other materials from the millimeter to the ultraviolet, Contractor Report CRDEC-CR-88009 (1987)"
+md5 = "8e30797d6cb5eb8ce9dabf5950a8f390"
+
+[[species]]
+name = "ZrO2"
+file = "ZrO2.dat"
+citation = "Dowling & Randall (1977) in Infrared Emissivities of Micron-Sized Particles of C, MgO, Al2O3, and ZrO2."
+md5 = "3d7796c8cc12e094d8bb7663d59a8d98"
+
+[[species]]
+name = "am-Al2O3"
+file = "am-Al2O3.dat"
+citation = "Begemann et al. (1997) ApJ; Vol 476:1; Koike et al. (1995) Icarus, Vol 114:1; Database of Optical Constants for Cosmic Dust, Laboratory Astrophysics Group of the AIU Jena"
+md5 = "1afe348ab91aba9965201a962ad0c126"
+
+[[species]]
+name = "am-C"
+file = "am-C.dat"
+citation = "Refractive index of amorphous carbon at T=400 K Jaeger et al. 1998, Astronomy and Astrophysics, v.332, p.291-299. Database of Optical Constants for Cosmic Dust, Laboratory Astrophysics Group of the AIU Jena"
+md5 = "57d848c984994d6ae862f3d0935ceae7"
+
+[[species]]
+name = "am-Mg2SiO4"
+file = "am-Mg2SiO4.dat"
+citation = "Jäger et al. (2003), A&A Vol. 408; Database of Optical Constants for Cosmic Dust, Laboratory Astrophysics Group of the AIU Jena"
+md5 = "068f49d677fda8a4dacf046330a0f739"
+
+[[species]]
+name = "am-MgSiO3"
+file = "am-MgSiO3.dat"
+citation = "Jäger et al. (2003), A&A Vol. 408; Database of Optical Constants for Cosmic Dust, Laboratory Astrophysics Group of the AIU Jena"
+md5 = "371837f7a7ef6fa0d48126803891263a"
+
+[[species]]
+name = "graphite"
+file = "graphite.dat"
+citation = "Draine (2003), ApJ., 598:1026"
+md5 = "22575ca4014cd7c19468c8ed189b167a"
+
+[[species]]
+name = "waterice"
+file = "waterice.dat"
+citation = "Warren & Brandt (2008), Optical constants of ice from the ultraviolet to the microwave: A revised compilation. J. Geophys. Res., 113, D14220, doi:10.1029/2007JD009744."
+md5 = "615bde41ad225607344025de5397ac0e"

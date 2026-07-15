@@ -889,10 +889,13 @@ fn medium_sample(
     })
 }
 
-/// Standard gravity, the reference gravitational acceleration (NIST standard gravity 9.80665 m/s^2,
-/// the terran default `mech.gravitational_acceleration` cites), the datum the carry-load weight physics
-/// reads (material-substrate arc, cascade item 3). A cited physical constant, not a reserved tunable; a
-/// per-world gravity override rides Part 40, a documented follow-on.
+/// Standard gravity for the carry-load weight physics: the NIST standard-gravity CONVENTION 9.80665 m/s^2 (the 1901
+/// CGPM sea-level-45-degree definition), used here as the Terran-default `mech.gravitational_acceleration` for weight
+/// (material-substrate arc, cascade item 3). Tagged [convention, Terran-default], NOT a per-world physical gravity:
+/// the honest per-world value is the DERIVED surface gravity `g = G M/R^2` from the planet's own mass and radius
+/// (see [`crate::planet::surface_gravity`], ~9.82 for Earth), which supersedes this convention when the per-world
+/// gravity override wires through (Part 40, a documented follow-on). This datum is NOT the capstone's gravity anchor;
+/// the Hadean gate checks the derived gravity against the cited G M/R^2, never against this convention.
 fn standard_gravity() -> Fixed {
     Fixed::from_ratio(980665, 100000)
 }

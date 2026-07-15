@@ -1,0 +1,93 @@
+# AESOPUS 1.0 gas-only opacity grid manifest (the fixture-manifest idiom: file / composition / receipt).
+# Composition DERIVED from the fetch POST parameters (the recipe): X = xhmin, Z = zeta_ref,
+# C/O = (C/O)_ref * 10^fco1, (C/O)_ref the solar-mixture reference (AGSS09 solmix=7 -> 0.54954).
+# md5 is the vendored .dat's receipt (immutable); citation is the primary source. Cross-checked against
+# the provenance JSONs by scripts/aesopus_provenance_test.py.
+
+[[grid]]
+file = "aesopus1.0_gasonly_CO_0.55_X0.70_Zsol.dat"
+hydrogen_mass_fraction = "0.70"
+metallicity = "0.01337"
+carbon_to_oxygen = "0.54954"
+md5 = "d1480507be44d835106f5b346d1f0809"
+citation = "AESOPUS 1.0 (Marigo & Aringer 2009, A&A 508, 1539), gas-only, solmix=7 fco1=0.00"
+
+[[grid]]
+file = "aesopus1.0_gasonly_CO_0.80_X0.70_Zsol.dat"
+hydrogen_mass_fraction = "0.70"
+metallicity = "0.01337"
+carbon_to_oxygen = "0.799833"
+md5 = "c73ad42b92a0100e121407c0f176be16"
+citation = "AESOPUS 1.0 (Marigo & Aringer 2009, A&A 508, 1539), gas-only, solmix=7 fco1=0.163"
+
+[[grid]]
+file = "aesopus1.0_gasonly_CO_1.00_X0.70_Zsol.dat"
+hydrogen_mass_fraction = "0.70"
+metallicity = "0.01337"
+carbon_to_oxygen = "0.999998"
+md5 = "a2d7c488c41e56d453d1460dc42ed531"
+citation = "AESOPUS 1.0 (Marigo & Aringer 2009, A&A 508, 1539), gas-only, solmix=7 fco1=0.260"
+
+[[grid]]
+file = "aesopus1.0_gasonly_CO_1.20_X0.70_Zsol.dat"
+hydrogen_mass_fraction = "0.70"
+metallicity = "0.01337"
+carbon_to_oxygen = "1.1995"
+md5 = "e88099649ac895c27efb4ae7a0b2797a"
+citation = "AESOPUS 1.0 (Marigo & Aringer 2009, A&A 508, 1539), gas-only, solmix=7 fco1=0.339"
+
+[[grid]]
+file = "aesopus1.0_gasonly_Zladder_0.1sol_X0.70_Z0.001337.dat"
+hydrogen_mass_fraction = "0.70"
+metallicity = "0.001337"
+carbon_to_oxygen = "0.54954"
+md5 = "88621bd74d5bab2d8fcdd3505290e73d"
+citation = "AESOPUS 1.0 (Marigo & Aringer 2009, A&A 508, 1539), gas-only, solmix=7 fco1=0"
+
+[[grid]]
+file = "aesopus1.0_gasonly_Zladder_0.3sol_X0.70_Z0.004011.dat"
+hydrogen_mass_fraction = "0.70"
+metallicity = "0.004011"
+carbon_to_oxygen = "0.54954"
+md5 = "28ef30e6c13762ad4d88d4b811d009f4"
+citation = "AESOPUS 1.0 (Marigo & Aringer 2009, A&A 508, 1539), gas-only, solmix=7 fco1=0"
+
+[[grid]]
+file = "aesopus1.0_gasonly_Zladder_1.0sol_X0.70_Z0.01337.dat"
+hydrogen_mass_fraction = "0.70"
+metallicity = "0.01337"
+carbon_to_oxygen = "0.54954"
+md5 = "0cf6b95aea0268fc8a8d091ec9aaad56"
+citation = "AESOPUS 1.0 (Marigo & Aringer 2009, A&A 508, 1539), gas-only, solmix=7 fco1=0"
+
+[[grid]]
+file = "aesopus1.0_gasonly_Zladder_2.0sol_X0.70_Z0.02674.dat"
+hydrogen_mass_fraction = "0.70"
+metallicity = "0.02674"
+carbon_to_oxygen = "0.54954"
+md5 = "8507c99ecc493a79df9a7d7d03d7c1a5"
+citation = "AESOPUS 1.0 (Marigo & Aringer 2009, A&A 508, 1539), gas-only, solmix=7 fco1=0"
+
+[[grid]]
+file = "aesopus1.0_gasonly_gate_AGSS09_X0.70_Z0.0165.dat"
+hydrogen_mass_fraction = "0.70"
+metallicity = "0.0165"
+carbon_to_oxygen = "0.54954"
+md5 = "ca79fcd676562ce08a991056f9f9f0ea"
+citation = "AESOPUS 1.0 (Marigo & Aringer 2009, A&A 508, 1539), gas-only, solmix=7 fco1=0"
+
+[[grid]]
+file = "aesopus1.0_gasonly_metalpoor_X0.75_Z0.001337.dat"
+hydrogen_mass_fraction = "0.75"
+metallicity = "0.001337"
+carbon_to_oxygen = "0.54954"
+md5 = "26c84da523427409b75ca8e114856d7f"
+citation = "AESOPUS 1.0 (Marigo & Aringer 2009, A&A 508, 1539), gas-only, solmix=7 fco1=0"
+
+[[grid]]
+file = "aesopus1.0_gasonly_protosolar_AGSS09_X0.7154_Z0.0142.dat"
+hydrogen_mass_fraction = "0.7154"
+metallicity = "0.0142"
+carbon_to_oxygen = "0.54954"
+md5 = "2a1e2cb7a79cbfb7f74f7925cf4049d2"
+citation = "AESOPUS 1.0 (Marigo & Aringer 2009, A&A 508, 1539), gas-only, solmix=7 fco1=0"

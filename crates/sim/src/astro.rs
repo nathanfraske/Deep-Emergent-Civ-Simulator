@@ -62,6 +62,20 @@ pub const SOLAR_RADIUS_M: &str = "6.957e8";
 /// kg/s. A unit conversion, not a per-world value.
 pub const JULIAN_YEAR_S: &str = "31557600";
 
+/// The Earth mass in kilograms, the IAU nominal terrestrial mass (~5.9722e24 kg). A cited reference anchor: the
+/// scale a DERIVED planet mass is reported against (the accretion feeding-zone integral yields a mass; a planet's
+/// mass in Earth masses times this anchor is its mass in kg), and the anchor the derived planet radius reads. Not a
+/// per-world value; the derived planet mass is the per-world quantity.
+pub const EARTH_MASS_KG: &str = "5.9722e24";
+
+/// The Earth mean radius in metres, the IUGG/IAU arithmetic mean radius `R_1 = (2a + b)/3 = 6371.0 km`. A cited
+/// reference anchor (not a per-world value): the honest gravity gate is `g_ref = G M_earth / R_earth^2` computed from
+/// this and [`EARTH_MASS_KG`], which lands ~9.82 m/s^2, the value Earth's own mass and radius give. This anchor
+/// replaces the standard-gravity CONVENTION `9.80665` (the 1901 CGPM sea-level-45-degree definition), which is a
+/// bureaucratic datum, not Earth's derived surface gravity; a derived quantity must be checked against the physics,
+/// not against a convention. Held as an integer-metre value so it constructs exactly in fixed-point.
+pub const EARTH_MEAN_RADIUS_M: i32 = 6_371_000;
+
 /// The number of decimal digits pi is computed to for the flux derivation. Far above the ~10 significant
 /// figures the Q32.32 result carries (a `2^-32` epsilon near a ~1361 magnitude is a relative ~1.7e-13), so
 /// the pi truncation never reaches the result's low bit. An engine-accuracy bound, not a world value.
@@ -135,26 +149,29 @@ pub fn stellar_effective_temperature(
     if mass_ratio <= Fixed::ZERO {
         return None;
     }
-    // The stellar radius R_star = R_sun*mass_ratio^beta, and the surface flux F = L/(4*pi*R_star^2).
+    // The Stefan-Boltzmann inversion in SUN-RELATIVE form, so a massive star whose surface flux overflows fixed
+    // point still derives its T_eff. T_eff = T_sun*(F/F_sun)^(1/4) = T_sun*M^(alpha/4 - beta/2): the flux RATIO to
+    // the Sun (a representable M^~1.9) scales the solar anchor, and the wide-magnitude stellar flux (which crosses
+    // the Q32.32 ceiling near 6.4 M_sun) is never formed, the log-space-census discipline. Mathematically identical
+    // to (F/sigma)^(1/4) and byte-identical at unit mass, but Betelgeuse-mass safe.
     let r_sun = BigRat::from_decimal_str(SOLAR_RADIUS_M).ok()?;
-    let r_star = r_sun.mul(&nonneg_fixed_to_bigrat(mass_ratio.powf(radius_exponent)));
-    let r2 = r_star.mul(&r_star);
-    let four_pi = BigRat::from_i64(4).mul(&compute::pi(FLUX_PI_DIGITS));
-    let denom = four_pi.mul(&r2);
     let l_sun = BigRat::from_decimal_str(SOLAR_LUMINOSITY_W).ok()?;
-    let luminosity = l_sun.mul(&nonneg_fixed_to_bigrat(
-        mass_ratio.powf(luminosity_exponent),
-    ));
-    let surface_flux_bits = luminosity.div(&denom).round_to_scale(Fixed::FRAC_BITS)?;
-    let surface_flux = Fixed::from_bits_i128(surface_flux_bits)?;
-    // T_eff = (F / sigma)^(1/4): the Stefan-Boltzmann inversion, the proven two-sqrt fourth root.
+    let four_pi = BigRat::from_i64(4).mul(&compute::pi(FLUX_PI_DIGITS));
+    // The Sun's OWN surface flux F_sun = L_sun/(4*pi*R_sun^2), ~6.3e7 W/m^2, which IS representable.
+    let solar_flux_bits = l_sun
+        .div(&four_pi.mul(&r_sun.mul(&r_sun)))
+        .round_to_scale(Fixed::FRAC_BITS)?;
+    let solar_flux = Fixed::from_bits_i128(solar_flux_bits)?;
     let sigma = crate::physiology::derived_stefan_boltzmann();
-    Some(civsim_physics::laws::radiative_equilibrium(
-        surface_flux,
-        Fixed::ONE,
-        sigma,
-        t_max,
-    ))
+    let t_sun = civsim_physics::laws::radiative_equilibrium(solar_flux, Fixed::ONE, sigma, t_max);
+    // The mass scaling M^(alpha/4 - beta/2), the Stefan-Boltzmann inversion of L ~ M^alpha and R ~ M^beta, a
+    // representable power at any mass. T_sun already carries the t_max fourth-root ceiling; re-cap the scaled result
+    // so a hot star still saturates at t_max as before.
+    let exponent = luminosity_exponent
+        .checked_div(Fixed::from_int(4))?
+        .checked_sub(radius_exponent.checked_div(Fixed::from_int(2))?)?;
+    let t_eff = t_sun.checked_mul(mass_ratio.powf(exponent))?;
+    Some(if t_eff > t_max { t_max } else { t_eff })
 }
 
 /// The IRRADIATED-DISK (surface-equilibrium) TEMPERATURE `T_irr(r)` (K) at an orbital distance, DERIVED from
@@ -411,9 +428,273 @@ pub fn feeding_zone_mass(
     Some(mass)
 }
 
+/// The feeding-zone mass in EARTH MASSES, the accretion arc's mass output in a physical unit: the
+/// [`feeding_zone_mass`] integral (in `normalization`-units times AU^2, the `normalization` being the surface-density
+/// scale `Sigma_c` in kg/m^2) folded to kilograms by the AU-to-metre conversion, then to Earth masses. This is the
+/// `M` the planet radius and the surface gravity read, so the whole accretion-to-gravity chain is now derived. The
+/// caller passes the `feeding_zone_mass` result computed with `Sigma_c` in kg/m^2 (its basis the disk-mass fraction,
+/// a reserved residue). The wide-magnitude fold (`AU^2 ~ 2.2e22 m^2`, `EARTH_MASS ~ 6e24 kg` overflow Q32.32 while
+/// the order-one Earth-mass result fits) runs in exact rational arithmetic and rounds once, the same `BigRat` path
+/// [`stellar_flux`] uses: `M_earth = output * AU_m^2 / EARTH_MASS_KG`. `None` on a non-positive input or a bad
+/// anchor.
+pub fn feeding_zone_mass_earth(feeding_zone_mass_output: Fixed) -> Option<Fixed> {
+    if feeding_zone_mass_output <= Fixed::ZERO {
+        return None;
+    }
+    let au = BigRat::from_decimal_str(ASTRONOMICAL_UNIT_M).ok()?;
+    let au2 = au.mul(&au);
+    let earth = BigRat::from_decimal_str(EARTH_MASS_KG).ok()?;
+    let mass_kg = nonneg_fixed_to_bigrat(feeding_zone_mass_output).mul(&au2);
+    let mass_earth = mass_kg.div(&earth);
+    Fixed::from_bits_i128(mass_earth.round_to_scale(Fixed::FRAC_BITS)?)
+}
+
+/// The PLANET RADIUS `R` (metres) from its mass and bulk density, DERIVED by inverting the sphere volume
+/// `M = (4/3) pi R^3 rho`, so `R = (3 M / (4 pi rho))^(1/3)`. This is the planet's SHAPE size, the accretion arc's
+/// radius output the render draws the globe from, and the `R` the derived surface gravity `g = G M / R^2` reads
+/// (closing the hardcoded-gravity retirement: the whole-planet `M` and `R` are now derived, so `g` is too).
+/// `mass_earth` is the mass in Earth masses (the accretion integral's output, scaled by [`EARTH_MASS_KG`]);
+/// `bulk_density_g_cm3` is the whole-planet mean density (the differentiated core-plus-mantle mean, ~5.51 for
+/// Earth, NOT the silicate ~3.3), the materials arc's output.
+///
+/// The wide-magnitude cube root runs in LOG-SPACE (`M ~ 6e24 kg` and the `~1e21 m^3` volume overflow Q32.32 while
+/// the ~6.4e6 m radius fits): `ln R = (1/3)(ln(3/(4 pi)) + ln M_kg - ln rho_kg_m3)`, each term assembled from the
+/// register/anchor logs, then exponentiated. At one Earth mass and Earth's ~5.514 g/cm^3 mean density this derives
+/// ~6371 km, the derive-not-fit anchor (the Hadean-gate radius target). `None` on a non-positive input or a
+/// register miss.
+pub fn planet_radius_m(mass_earth: Fixed, bulk_density_g_cm3: Fixed) -> Option<Fixed> {
+    if mass_earth <= Fixed::ZERO || bulk_density_g_cm3 <= Fixed::ZERO {
+        return None;
+    }
+    let four_pi = Fixed::PI.checked_mul(Fixed::from_int(4))?;
+    let ln_3_over_4pi = Fixed::from_int(3).checked_div(four_pi)?.ln();
+    // ln M[kg] = ln(mass_earth) + ln(EARTH_MASS_KG).
+    let ln_m_kg = mass_earth
+        .ln()
+        .checked_add(civsim_physics::saha::ln_of_decimal(EARTH_MASS_KG)?)?;
+    // ln rho[kg/m^3] = ln(rho[g/cm^3]) + ln(1000).
+    let ln_rho_kg_m3 = bulk_density_g_cm3
+        .ln()
+        .checked_add(Fixed::from_int(1000).ln())?;
+    let ln_r = ln_3_over_4pi
+        .checked_add(ln_m_kg)?
+        .checked_sub(ln_rho_kg_m3)?
+        .checked_div(Fixed::from_int(3))?;
+    Some(ln_r.exp())
+}
+
+/// The DISK MIDPLANE TEMPERATURE `T_mid` (K), the Stage-2 payoff: the optically-thick closure that lifts the disk's
+/// EFFECTIVE (surface) temperature to the interior where condensation happens, and the T-versus-kappa FIXED POINT
+/// that couples the opacity to the temperature. Only the VISCOUS heating is generated in the interior, so it is
+/// boosted by the optical depth, while irradiation heats the surface and is not: the midplane balance is
+/// `sigma T_mid^4 = (3/4) tau_R D_visc + F_irr`, with `tau_R = kappa_R(T_mid) Sigma / 2`. Because `kappa_R` depends
+/// on `T_mid` (dust sublimates as the gas warms, dropping the opacity), this is a self-consistent fixed point,
+/// solved by a BOUNDED BISECTION on `T_mid` (a fixed iteration count, so determinism holds): at each trial `T` the
+/// equilibrium temperature `radiative_equilibrium((3/4) tau_R(T) D_visc + F_irr)` is compared to `T`, and the
+/// bracket halves toward the crossing.
+///
+/// `viscous_flux` is the Shakura-Sunyaev dissipation `D(r)` (W/m^2, one face) and `absorbed_irradiation_flux` the
+/// reprocessed stellar flux (W/m^2); both are the disk's own derived fluxes. `surface_density` and `kappa_of_t`
+/// (the Rosseland opacity as a function of temperature, the #54 grain-plus-gas opacity) carry matching units so
+/// `tau_R = kappa Sigma / 2` is dimensionless. The bracket `[t_lo, t_hi]` is the search interval (the surface
+/// temperature below, an optically-thick ceiling above). HONEST LIMIT: near dust sublimation the opacity cliff can
+/// make three fixed points (the thermal-instability S-curve, the FU-Orionis engine); this bisection returns the
+/// single crossing in the given bracket, so the caller brackets the branch it wants. `None` on a bad input, a
+/// kappa the closure cannot price, or an overflow.
+pub fn disk_midplane_temperature(
+    viscous_flux: Fixed,
+    absorbed_irradiation_flux: Fixed,
+    surface_density: Fixed,
+    kappa_of_t: impl Fn(Fixed) -> Option<Fixed>,
+    t_lo: Fixed,
+    t_hi: Fixed,
+) -> Option<Fixed> {
+    if surface_density <= Fixed::ZERO || t_hi <= t_lo {
+        return None;
+    }
+    let sigma = crate::physiology::derived_stefan_boltzmann();
+    let three_quarters = Fixed::from_ratio(3, 4);
+    let half = Fixed::from_ratio(1, 2);
+    // The equilibrium temperature the disk settles to at a trial midplane temperature `t` (through its opacity).
+    let equilibrium_t = |t: Fixed| -> Option<Fixed> {
+        let tau_r = kappa_of_t(t)?
+            .checked_mul(surface_density)?
+            .checked_mul(half)?; // kappa Sigma / 2
+        let lifted = three_quarters
+            .checked_mul(tau_r)?
+            .checked_mul(viscous_flux)?
+            .checked_add(absorbed_irradiation_flux)?;
+        Some(civsim_physics::laws::radiative_equilibrium(
+            lifted,
+            Fixed::ONE,
+            sigma,
+            t_hi,
+        ))
+    };
+    // Bounded bisection: below the fixed point the disk wants to be hotter (equilibrium_t > t), above it cooler.
+    let mut lo = t_lo;
+    let mut hi = t_hi;
+    for _ in 0..60 {
+        let mid = lo.checked_add(hi)?.checked_div(Fixed::from_int(2))?;
+        if equilibrium_t(mid)? > mid {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    lo.checked_add(hi)?.checked_div(Fixed::from_int(2))
+}
+
+/// The FORMATION-ERA disk midplane temperature `T_mid(r)` (K) at an orbital distance: the condensation epoch's
+/// temperature, DISTINCT from the mature surface warmth [`disk_effective_temperature`] gives. THE EPOCH JOIN-LAW,
+/// enforced by keeping the two derivations apart: the crust CONDENSES against THIS (the hot, optically-thick,
+/// accreting formation midplane), and the FINISHED planet's surface reads the MATURE
+/// [`disk_effective_temperature`] (the cooled irradiation equilibrium). The two are separate epochs and are never
+/// conflated under one variable.
+///
+/// This assembles the three inputs the optically-thick midplane closure ([`disk_midplane_temperature`]) needs and
+/// calls it: the viscous dissipation flux ([`viscous_dissipation_flux`], from the FORMATION-era accretion rate, so
+/// it is the hot accreting disk), the absorbed irradiation flux (`reprocessing_factor` times [`stellar_flux`]), and
+/// the dust surface density `Sigma_dust(r)` ([`disk_surface_density`], the optical column the depth integrates),
+/// with the caller's Rosseland-opacity closure `kappa_of_t` (kept a parameter so this stays free of any
+/// materials-crate dependency and admits any opacity law). Because the viscous dissipation steepens as `r^(-3)` and
+/// `Sigma` falls with distance, `T_mid(r)` falls steeply with orbit, so a closer orbit condenses a more refractory
+/// crust and a farther orbit a cooler assemblage: the condensation staircase is DERIVED, not authored. Every
+/// per-world input is a scenario-set ARGUMENT (the admit-the-alien test); the reserved disk residues (the
+/// formation accretion rate, the surface-density normalization, the reprocessing and inner-edge factors, the
+/// bisection bracket) are the caller's, each surfaced with a basis. `None` if any link fails to resolve.
+#[allow(clippy::too_many_arguments)]
+pub fn formation_midplane_temperature(
+    accretion_rate_msun_myr: Fixed,
+    mass_ratio: Fixed,
+    luminosity_exponent: Fixed,
+    distance_au: Fixed,
+    reprocessing_factor: Fixed,
+    inner_boundary_factor: Fixed,
+    characteristic_radius_au: Fixed,
+    gamma: Fixed,
+    dust_surface_density_normalization: Fixed,
+    kappa_of_t: impl Fn(Fixed) -> Option<Fixed>,
+    t_lo: Fixed,
+    t_hi: Fixed,
+) -> Option<Fixed> {
+    let viscous_flux = viscous_dissipation_flux(
+        accretion_rate_msun_myr,
+        mass_ratio,
+        distance_au,
+        inner_boundary_factor,
+    )?;
+    let absorbed_irradiation_flux = reprocessing_factor.checked_mul(stellar_flux(
+        mass_ratio,
+        luminosity_exponent,
+        distance_au,
+    )?)?;
+    let dust_surface_density = disk_surface_density(
+        distance_au,
+        characteristic_radius_au,
+        gamma,
+        dust_surface_density_normalization,
+    )?;
+    disk_midplane_temperature(
+        viscous_flux,
+        absorbed_irradiation_flux,
+        dust_surface_density,
+        kappa_of_t,
+        t_lo,
+        t_hi,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_planet_radius_derives_earth_from_its_mass_and_density() {
+        // The derive-not-fit shape anchor: one Earth mass at Earth's ~5.514 g/cm^3 whole-planet mean density derives
+        // the ~6371 km radius, from the sphere volume and the mass anchor alone (the Hadean-gate radius target). The
+        // log-space cube root keeps the wide-magnitude compute exact.
+        let r = planet_radius_m(Fixed::ONE, Fixed::from_ratio(5514, 1000)).unwrap();
+        assert!(
+            (r.to_f64_lossy() - 6.371e6).abs() < 1.0e5,
+            "Earth radius ~6371 km, got {:.0} km",
+            r.to_f64_lossy() / 1000.0
+        );
+        // A denser, more refractory planet at the same mass is smaller (the metal-rich inner-planet direction).
+        let dense = planet_radius_m(Fixed::ONE, Fixed::from_int(8)).unwrap();
+        assert!(
+            dense.to_f64_lossy() < r.to_f64_lossy(),
+            "a denser planet of the same mass is smaller"
+        );
+    }
+
+    #[test]
+    fn the_feeding_zone_mass_folds_to_earth_masses() {
+        // The accretion mass fold: a feeding-zone integral of ~266.5 (Sigma_c in kg/m^2 times AU^2) reaches one Earth
+        // mass, EARTH_MASS / AU^2 = 5.97e24 / 2.24e22 = 266.5. This is the M the radius and gravity read, so the
+        // accretion-to-gravity chain is fully derived.
+        let m = feeding_zone_mass_earth(Fixed::from_ratio(2665, 10)).unwrap();
+        assert!(
+            (m.to_f64_lossy() - 1.0).abs() < 0.05,
+            "the fold reaches ~1 Earth mass, got {}",
+            m.to_f64_lossy()
+        );
+    }
+
+    #[test]
+    fn the_midplane_fixed_point_lifts_the_temperature_and_is_self_consistent() {
+        // The Stage-2 payoff: the optically-thick midplane, hotter than the surface by the viscous optical-depth
+        // lift, at the self-consistent T-versus-kappa fixed point. A dusty opacity that drops with temperature
+        // (dust sublimation): kappa = 2 - T/1000, floored. The midplane balance sigma T^4 = (3/4)(kappa Sigma/2) D
+        // + F must land above the irradiation-only surface temperature, and be self-consistent at T_mid.
+        let sigma = crate::physiology::derived_stefan_boltzmann();
+        let kappa = |t: Fixed| -> Option<Fixed> {
+            let k = Fixed::from_int(2).checked_sub(t.checked_div(Fixed::from_int(1000))?)?;
+            Some(if k < Fixed::from_ratio(1, 100) {
+                Fixed::from_ratio(1, 100)
+            } else {
+                k
+            })
+        };
+        let viscous = Fixed::from_int(50); // D_visc W/m^2
+        let irradiation = Fixed::from_int(100); // F_irr W/m^2
+        let sigma_density = Fixed::from_int(100); // Sigma g/cm^2
+        let t_mid = disk_midplane_temperature(
+            viscous,
+            irradiation,
+            sigma_density,
+            kappa,
+            Fixed::from_int(200),
+            Fixed::from_int(2000),
+        )
+        .unwrap();
+        let t_surface = civsim_physics::laws::radiative_equilibrium(
+            irradiation,
+            Fixed::ONE,
+            sigma,
+            Fixed::from_int(2000),
+        );
+        assert!(
+            t_mid.to_f64_lossy() > t_surface.to_f64_lossy() + 50.0,
+            "the optically-thick midplane is lifted above the surface: {} vs {}",
+            t_mid.to_f64_lossy(),
+            t_surface.to_f64_lossy()
+        );
+        let tau_r = kappa(t_mid).unwrap().to_f64_lossy() * 100.0 / 2.0;
+        let lifted = 0.75 * tau_r * 50.0 + 100.0;
+        let t_check = civsim_physics::laws::radiative_equilibrium(
+            Fixed::from_ratio((lifted * 1000.0) as i64, 1000),
+            Fixed::ONE,
+            sigma,
+            Fixed::from_int(2000),
+        );
+        assert!(
+            (t_mid.to_f64_lossy() - t_check.to_f64_lossy()).abs() < 5.0,
+            "the fixed point is self-consistent: {} vs {}",
+            t_mid.to_f64_lossy(),
+            t_check.to_f64_lossy()
+        );
+    }
 
     fn close(a: Fixed, b: f64) -> bool {
         (a.to_f64_lossy() - b).abs() < 1e-2
@@ -988,5 +1269,78 @@ mod tests {
         )
         .is_none());
         assert!(feeding_zone_mass(Fixed::ONE, Fixed::from_int(10), rc, gamma, norm, 0).is_none());
+    }
+
+    #[test]
+    fn the_formation_midplane_lands_in_the_condensation_window_and_falls_with_orbit() {
+        // The SEAM-3 formation epoch: the FORMATION-era midplane temperature, DERIVED at the orbit from the
+        // viscous-plus-irradiation optically-thick fixed point with a representative constant silicate-dust Rosseland
+        // opacity. It must (1) land in the silicate condensation window (~1300 to 1500 K) at 1 AU with the reserved
+        // disk residues, and (2) FALL with orbit (a closer orbit hotter, a farther one cooler), the driver of the
+        // orbit-dependent condensation staircase the crust reads. With a constant opacity the midplane is the direct
+        // optically-thick equilibrium; the bisection returns it in the bracket.
+        let kappa = |_t: Fixed| Some(Fixed::from_int(600)); // representative silicate-dust Rosseland opacity, cm^2/g
+        let mid = |orbit: Fixed| {
+            formation_midplane_temperature(
+                Fixed::from_ratio(19, 100), // formation accretion rate (reserved, pinned to the 1 AU front)
+                Fixed::ONE,
+                Fixed::from_ratio(35, 10),
+                orbit,
+                Fixed::from_ratio(1, 4),
+                Fixed::ONE,
+                Fixed::from_int(30),
+                Fixed::ONE,
+                Fixed::from_ratio(586, 1000),
+                kappa,
+                Fixed::from_int(100),
+                Fixed::from_int(1950),
+            )
+            .unwrap()
+            .to_f64_lossy()
+        };
+        let close = mid(Fixed::from_ratio(8, 10));
+        let one = mid(Fixed::ONE);
+        let far = mid(Fixed::from_int(2));
+        assert!(
+            one > 1300.0 && one < 1500.0,
+            "the 1 AU formation midplane lands in the condensation window (~1400 K), got {one}"
+        );
+        assert!(
+            close > one,
+            "a closer orbit condenses hotter: {close} vs {one} K"
+        );
+        assert!(
+            one > far,
+            "a farther orbit condenses cooler: {one} vs {far} K"
+        );
+    }
+
+    #[test]
+    fn the_formation_midplane_rises_with_the_accretion_rate() {
+        // A higher FORMATION accretion rate is a hotter midplane (more viscous dissipation to trap), the monotone the
+        // reserved formation rate is calibrated along to pin the 1 AU condensation front.
+        let kappa = |_t: Fixed| Some(Fixed::from_int(600));
+        let at = |mdot: Fixed| {
+            formation_midplane_temperature(
+                mdot,
+                Fixed::ONE,
+                Fixed::from_ratio(35, 10),
+                Fixed::ONE,
+                Fixed::from_ratio(1, 4),
+                Fixed::ONE,
+                Fixed::from_int(30),
+                Fixed::ONE,
+                Fixed::from_ratio(586, 1000),
+                kappa,
+                Fixed::from_int(100),
+                Fixed::from_int(1950),
+            )
+            .unwrap()
+            .to_f64_lossy()
+        };
+        assert!(
+            at(Fixed::from_ratio(25, 100)) > at(Fixed::from_ratio(10, 100)),
+            "a higher accretion rate warms the formation midplane"
+        );
     }
 }

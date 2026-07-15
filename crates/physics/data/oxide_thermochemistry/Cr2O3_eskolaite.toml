@@ -1,0 +1,104 @@
+# Cr2O3 eskolaite, standard Gibbs energy of formation from the elements, 298.15 to 1800 K. Cr2O3 of the
+# chromium-eskolaite (Cr-Cr2O3) buffer, a very reducing experimental oxygen buffer (needs Cr metal + this Cr2O3).
+# PRIMARY: Robie & Hemingway (1995), USGS Bull. 2131, ESKOLAITE high-T table p.187 (298.15 K anchor also in the oxide
+# summary p.16). Transcribed from the primary USGS PDF (md5 08c3cc7c2d823667c8efadfebcef02de). SECOND WITNESS: NIST
+# WebBook / NIST-JANAF (Chase 1998) Cr2O3(cr): delta_f H298 = -1134.70 (IDENTICAL to Robie), S298 = 80.65 (Robie 81.2,
+# within uncertainty); agrees; Barin pending (see manifest.toml). BLOCK KIND [[point]], cited-data-column idiom,
+# header-cited. COLUMNS: t_k (K); delta_f_g_kj / delta_f_h_kj (kJ/mol); s_j / cp_j (J/mol/K) on the 298.15 K anchor
+# only. FINGERPRINT: delta_f G298 = -1053.1, delta_f H298 = -1134.7. HONEST LIMITS: rhombohedral crystals across the
+# whole range; the delta_f H is nearly flat (a weak minimum near 1300-1400 K) reflecting the Cr reference-state
+# behaviour. Melting T = 2603 K.
+
+substance = "Cr2O3"
+mineral = "eskolaite"
+phase = "cr"
+formula_wt = "151.990"
+reference = "formation-from-elements"
+melting_t_k = "2603"
+
+[[point]]
+t_k = "298.15"
+delta_f_g_kj = "-1053.1"
+delta_f_h_kj = "-1134.7"
+s_j = "81.20"
+cp_j = "105.41"
+
+[[point]]
+t_k = "300"
+delta_f_g_kj = "-1052.6"
+delta_f_h_kj = "-1134.7"
+
+[[point]]
+t_k = "400"
+delta_f_g_kj = "-1025.4"
+delta_f_h_kj = "-1133.1"
+
+[[point]]
+t_k = "500"
+delta_f_g_kj = "-998.7"
+delta_f_h_kj = "-1131.3"
+
+[[point]]
+t_k = "600"
+delta_f_g_kj = "-972.4"
+delta_f_h_kj = "-1129.5"
+
+[[point]]
+t_k = "700"
+delta_f_g_kj = "-946.3"
+delta_f_h_kj = "-1127.8"
+
+[[point]]
+t_k = "800"
+delta_f_g_kj = "-920.5"
+delta_f_h_kj = "-1126.2"
+
+[[point]]
+t_k = "900"
+delta_f_g_kj = "-894.9"
+delta_f_h_kj = "-1124.8"
+
+[[point]]
+t_k = "1000"
+delta_f_g_kj = "-869.4"
+delta_f_h_kj = "-1123.7"
+
+[[point]]
+t_k = "1100"
+delta_f_g_kj = "-844.1"
+delta_f_h_kj = "-1122.7"
+
+[[point]]
+t_k = "1200"
+delta_f_g_kj = "-818.7"
+delta_f_h_kj = "-1122.1"
+
+[[point]]
+t_k = "1300"
+delta_f_g_kj = "-793.5"
+delta_f_h_kj = "-1121.7"
+
+[[point]]
+t_k = "1400"
+delta_f_g_kj = "-768.2"
+delta_f_h_kj = "-1121.7"
+
+[[point]]
+t_k = "1500"
+delta_f_g_kj = "-743.0"
+delta_f_h_kj = "-1122.0"
+
+[[point]]
+t_k = "1600"
+delta_f_g_kj = "-717.7"
+delta_f_h_kj = "-1122.6"
+
+[[point]]
+t_k = "1700"
+delta_f_g_kj = "-692.4"
+delta_f_h_kj = "-1123.6"
+
+[[point]]
+t_k = "1800"
+delta_f_g_kj = "-666.9"
+delta_f_h_kj = "-1125.0"

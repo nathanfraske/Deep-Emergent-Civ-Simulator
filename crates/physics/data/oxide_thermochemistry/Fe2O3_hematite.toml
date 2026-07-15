@@ -1,0 +1,111 @@
+# Fe2O3 hematite, standard Gibbs energy of formation from the elements, 298.15 to 1800 K. Hematite of the
+# magnetite-hematite (MH) oxygen buffer (needs Fe3O4 + this Fe2O3). PRIMARY: Robie & Hemingway (1995), USGS Bull. 2131,
+# HEMATITE high-T table p.192 (298.15 K anchor also in the oxide summary p.16). Transcribed from the primary USGS PDF
+# (md5 08c3cc7c2d823667c8efadfebcef02de). SECOND WITNESS: NIST WebBook / NIST-JANAF (Chase 1998) Fe2O3(cr): delta_f
+# H298 = -825.503, S298 = 87.28; agrees with Robie (-826.2, 87.4) within rounding (~0.7 kJ/mol); Barin pending (see
+# manifest.toml). BLOCK KIND [[point]], cited-data-column idiom, header-cited. COLUMNS: t_k (K); delta_f_g_kj /
+# delta_f_h_kj (kJ/mol); s_j / cp_j (J/mol/K) on the 298.15 K anchor only. FINGERPRINT: delta_f G298 = -744.4, delta_f
+# H298 = -826.2. HONEST LIMITS: Neel (magnetic) transition at 950 K, where Robie prints two rows (rhombohedral and
+# hexagonal); the 950 K row here carries both delta_f H values in its note (delta_f G is -575.3 on both sides). Rhomb
+# below 950 K, hexagonal 950 to 1800 K. Melting T = 1895 K.
+
+substance = "Fe2O3"
+mineral = "hematite"
+phase = "cr"
+formula_wt = "159.692"
+reference = "formation-from-elements"
+neel_transition_k = "950"
+melting_t_k = "1895"
+
+[[point]]
+t_k = "298.15"
+delta_f_g_kj = "-744.4"
+delta_f_h_kj = "-826.2"
+s_j = "87.40"
+cp_j = "104.05"
+
+[[point]]
+t_k = "300"
+delta_f_g_kj = "-743.9"
+delta_f_h_kj = "-826.2"
+
+[[point]]
+t_k = "400"
+delta_f_g_kj = "-716.6"
+delta_f_h_kj = "-824.6"
+
+[[point]]
+t_k = "500"
+delta_f_g_kj = "-689.9"
+delta_f_h_kj = "-822.3"
+
+[[point]]
+t_k = "600"
+delta_f_g_kj = "-663.6"
+delta_f_h_kj = "-819.6"
+
+[[point]]
+t_k = "700"
+delta_f_g_kj = "-637.8"
+delta_f_h_kj = "-816.9"
+
+[[point]]
+t_k = "800"
+delta_f_g_kj = "-612.4"
+delta_f_h_kj = "-814.0"
+
+[[point]]
+t_k = "900"
+delta_f_g_kj = "-587.4"
+delta_f_h_kj = "-810.9"
+
+[[point]]
+t_k = "950"
+delta_f_g_kj = "-575.3"
+delta_f_h_kj = "-807.9"
+note = "Neel transition 950 K; delta_f H = -809.3 (rhombohedral, low-T side) / -807.9 (hexagonal, high-T side); delta_f G = -575.3 on both"
+
+[[point]]
+t_k = "1000"
+delta_f_g_kj = "-562.8"
+delta_f_h_kj = "-808.9"
+
+[[point]]
+t_k = "1100"
+delta_f_g_kj = "-538.0"
+delta_f_h_kj = "-810.8"
+
+[[point]]
+t_k = "1200"
+delta_f_g_kj = "-513.2"
+delta_f_h_kj = "-811.9"
+
+[[point]]
+t_k = "1300"
+delta_f_g_kj = "-488.4"
+delta_f_h_kj = "-810.1"
+
+[[point]]
+t_k = "1400"
+delta_f_g_kj = "-463.8"
+delta_f_h_kj = "-808.5"
+
+[[point]]
+t_k = "1500"
+delta_f_g_kj = "-439.2"
+delta_f_h_kj = "-806.9"
+
+[[point]]
+t_k = "1600"
+delta_f_g_kj = "-414.7"
+delta_f_h_kj = "-805.2"
+
+[[point]]
+t_k = "1700"
+delta_f_g_kj = "-390.3"
+delta_f_h_kj = "-804.9"
+
+[[point]]
+t_k = "1800"
+delta_f_g_kj = "-366.0"
+delta_f_h_kj = "-803.1"

@@ -1,0 +1,176 @@
+# Simple-oxide thermochemistry [M]-data column: the standard Gibbs free energies of formation (formation from the
+# elements) of the rock-forming and buffer-forming simple oxides, over ~298 to ~2000 K. These curves ARE the
+# oxygen-buffer ladder (IW iron-wustite, WM wustite-magnetite, QFM/FMQ quartz-fayalite-magnetite, MH
+# magnetite-hematite, NNO nickel-nickel-oxide, Cr-Cr2O3 eskolaite) that the redox machinery consumes across three
+# consumers (the protoplanetary disk, mantle differentiation, and the atmosphere). Landing them cited upgrades that
+# ladder from estimator-grade to [M]-pinned.
+#
+# PRIMARY, owner-pinned (public domain): Robie, R.A. & Hemingway, B.S. (1995), Thermodynamic Properties of Minerals
+# and Related Substances at 298.15 K and 1 Bar Pressure and at Higher Temperatures, USGS Bulletin 2131. Each species'
+# full temperature progression is transcribed per-file from the primary USGS PDF (the Lodders/perovskite protocol:
+# transcribe the table, fingerprint-check spot rows). SOURCE PDF (the receipt): https://pubs.usgs.gov/bul/2131/report.pdf ,
+# md5 08c3cc7c2d823667c8efadfebcef02de (byte-identical to the receipt already pinned in perovskite_robie1995.toml, so
+# this vendoring shares that verified artifact). The 298.15 K anchors come from the Robie oxide-and-hydroxide summary
+# table (pp. 15-18); the T-progressions come from the individual high-temperature phase tables (page per species below).
+#
+# SECOND WITNESS (the standing pair rule, two independent sources per load-bearing value): the owner-named second
+# witness is Barin, "Thermochemical Data of Pure Substances". The Barin volume is NOT in hand here, so for each species
+# the interim independent cross-check recorded below is NIST-JANAF (Chase 1998) and/or the NIST WebBook / CODATA, each
+# retrieved and cited at the species row. Where that cross-check agrees with Robie within rounding it is noted as
+# agreeing; where it disagrees beyond rounding (magnetite) BOTH values are recorded and the discrepancy is called out,
+# never averaged. Three rows carry NO retrievable independent second witness (the nonstoichiometric wustite Fe0.947O,
+# bunsenite NiO, and manganosite MnO): these are FLAGGED "second_witness = pending" and require the owner's Barin
+# volume before the pair rule is satisfied. The named Barin verification against the primary book is the owner's step
+# for EVERY row; the cross-checks below are the interim witness, not a substitute for it.
+#
+# WUSTITE CONVENTION (tagged, per the task): wustite is nonstoichiometric, Fe(1-x)O. Robie & Hemingway tabulate it as
+# Fe0.947O (their "WUSTITE" entry, p.190, formula weight 68.887), and that is the FeO the iron-wustite (IW) and
+# wustite-magnetite (WM) buffers are built on. Robie ALSO tabulate a separate hypothetical stoichiometric FeO, which
+# they label "FERROUS OXIDE (STOICHIOMETRIC)" in the summary and "FERROUS OXIDE (Fictive)" in the high-T section
+# (p.191, formula weight 71.846). Both are vendored as distinct rows and tagged; the ideal stoichiometric FeO is the
+# "fictive" end-member, never silently substituted for the real wustite. NIST-JANAF/WebBook FeO(cr) (-272.04 kJ/mol,
+# S 60.75) matches Robie's STOICHIOMETRIC FeO, not the wustite Fe0.947O; so the stoichiometric row has a second
+# witness while the wustite row's second witness is pending (Barin tabulates wustite separately).
+#
+# BLOCK KIND [[species]], the cited-data-column idiom (matching the janaf/ and optical_constants_aesopus/ manifests),
+# NOT the reserved floor [[element]]/[[substance]] kind: an immutable transcription of the Robie-Hemingway tables, out
+# of the floor real/fantasy authorship axis. An authored/fantasy oxide draws its formation energy from the estimator
+# tier at runtime, never written here (co-location laundering). PROVENANCE: header citation. GRADE: single-grade
+# primary (one compilation, Robie 1995) plus an interim second-witness annotation per row.
+#
+# EXTENSIBLE BY DATA, admit the alien: this set is NON-EXHAUSTIVE by design. A new oxide (any element, any world,
+# including one with no Terran analogue) is a NEW ROW here plus a NEW per-species file, never a code change. The loader
+# (built separately) keys off the per-species data, so the membership grows with the world while the mechanism stays
+# fixed Rust.
+#
+# COLUMNS per species file: t_k = temperature (K); delta_f_g_kj = standard Gibbs energy of formation from the elements
+# (kJ/mol), the load-bearing value the buffer consumes; delta_f_h_kj = standard enthalpy of formation from the elements
+# (kJ/mol); s_j / cp_j = standard entropy and heat capacity (J/mol/K) on the 298.15 K anchor row. The mid-table steps
+# in delta_f_H (Mg boil, Ca melt, Ni melt, and similar) are reference-element phase-change features of "formation from
+# the elements", not errors; delta_f_G stays smooth through them.
+
+reference = "formation-from-elements"
+temperature_range_k = "298.15 to 1600-2000 (per species; see melting_t)"
+source_pdf_md5 = "08c3cc7c2d823667c8efadfebcef02de"
+
+[[species]]
+name = "MgO(cr,periclase)"
+formula = "MgO"
+mineral = "periclase"
+phase = "cr"
+formula_wt = "40.304"
+file = "MgO_periclase.toml"
+buffers = []
+buffer_note = "not an fO2 buffer; refractory oxide end-member (activity of MgO in silicate/oxide solutions)"
+primary = "Robie & Hemingway (1995), USGS Bull. 2131: summary p.17, high-T table p.197. delta_f H298 = -601.6 kJ/mol, S298 = 26.9 J/mol/K, delta_f G298 = -569.3 kJ/mol."
+second_witness = "NIST-JANAF (Chase 1998), table Mg-008, MgO(cr): delta_f H298 = -601.241 kJ/mol, S298 = 26.924 J/mol/K, delta_f G298 = -568.945 kJ/mol. AGREES with Robie within rounding (~0.3 kJ/mol). Barin verification pending (owner)."
+
+[[species]]
+name = "SiO2(cr,quartz)"
+formula = "SiO2"
+mineral = "quartz (alpha; alpha-beta transition 844 K)"
+phase = "cr"
+formula_wt = "60.084"
+file = "SiO2_quartz.toml"
+buffers = ["QFM", "FMQ"]
+buffer_note = "quartz component of the quartz-fayalite-magnetite (QFM/FMQ) buffer (needs SiO2 + Fe2SiO4 fayalite + Fe3O4)"
+primary = "Robie & Hemingway (1995), USGS Bull. 2131: summary p.18, high-T table p.214. delta_f H298 = -910.7 kJ/mol, S298 = 41.5 J/mol/K (41.46 in the high-T table), delta_f G298 = -856.3 kJ/mol. Polymorph: alpha-quartz."
+second_witness = "NIST-JANAF (Chase 1998), table O-037, SiO2(cr) quartz: delta_f H298 = -910.857 kJ/mol, S298 = 41.463 J/mol/K, delta_f G298 = -856.443 kJ/mol (WebBook condensed-phase gives delta_f H298 = -910.86). AGREES with Robie within rounding. Barin verification pending (owner)."
+
+[[species]]
+name = "FeO(cr,wustite)"
+formula = "Fe0.947O"
+mineral = "wustite (nonstoichiometric Fe(1-x)O, x=0.053)"
+phase = "cr"
+formula_wt = "68.887"
+file = "FeO_wustite.toml"
+buffers = ["IW", "WM"]
+buffer_note = "the FeO of the iron-wustite (IW) and wustite-magnetite (WM) buffers; IW needs Fe metal + this wustite"
+wustite_convention = "Robie & Hemingway tabulate wustite as Fe0.947O (the real nonstoichiometric mineral), NOT ideal FeO. This is the canonical FeO row for the buffers; the stoichiometric end-member is the separate FeO_stoich row, tagged fictive."
+primary = "Robie & Hemingway (1995), USGS Bull. 2131: summary p.16 ('WUSTITE', Fe0.947O), high-T table p.190. delta_f H298 = -266.3 kJ/mol, S298 = 56.6 J/mol/K, delta_f G298 = -244.9 kJ/mol. Table runs to melting point 1652 K."
+second_witness = "PENDING. NIST-JANAF/WebBook FeO(cr) (-272.04 kJ/mol, S 60.75) is the STOICHIOMETRIC FeO, not this nonstoichiometric wustite, so it is NOT a witness for this row. Barin tabulates wustite separately; owner to supply/verify the Barin wustite entry."
+
+[[species]]
+name = "FeO(cr,stoichiometric-fictive)"
+formula = "FeO"
+mineral = "ferrous oxide, stoichiometric (Robie label: 'fictive'; hypothetical ideal end-member)"
+phase = "cr"
+formula_wt = "71.846"
+file = "FeO_stoich.toml"
+buffers = ["IW-ideal"]
+buffer_note = "the ideal stoichiometric FeO end-member; used when a buffer is idealized to stoichiometric FeO rather than real wustite. NOT a substitute for the wustite row."
+wustite_convention = "This is the fictive stoichiometric FeO, provided by Robie as a separate hypothetical end-member; it is included because JANAF and many buffer formulations use ideal FeO. Tagged fictive; the real mineral is the FeO_wustite row."
+primary = "Robie & Hemingway (1995), USGS Bull. 2131: summary p.16 ('FERROUS OXIDE (STOICHIOMETRIC)', FeO), high-T table p.191 ('FERROUS OXIDE (Fictive)'). delta_f H298 = -272.0 kJ/mol, S298 = 60.6 J/mol/K, delta_f G298 = -251.4 kJ/mol."
+second_witness = "NIST-JANAF (Chase 1998) / NIST WebBook, FeO(cr): delta_f H298 = -272.04 kJ/mol, S298 = 60.75 J/mol/K. AGREES with Robie's stoichiometric FeO within rounding. Barin verification pending (owner)."
+
+[[species]]
+name = "CaO(cr,lime)"
+formula = "CaO"
+mineral = "lime"
+phase = "cr"
+formula_wt = "56.077"
+file = "CaO_lime.toml"
+buffers = []
+buffer_note = "not an fO2 buffer; oxide end-member (activity of CaO in silicate/carbonate solutions)"
+primary = "Robie & Hemingway (1995), USGS Bull. 2131: summary p.15, high-T table p.182. delta_f H298 = -635.1 kJ/mol, S298 = 38.1 J/mol/K, delta_f G298 = -603.1 kJ/mol."
+second_witness = "NIST WebBook condensed-phase: delta_f H298 = -635.09 kJ/mol, S298 = 38.19 J/mol/K (Chase 1998); AND delta_f H298 = -634.92 +/- 0.90 kJ/mol, S298 = 38.1 +/- 0.4 J/mol/K (Cox, Wagman et al. 1984, CODATA Review). AGREES with Robie within rounding. Barin verification pending (owner)."
+
+[[species]]
+name = "NiO(cr,bunsenite)"
+formula = "NiO"
+mineral = "bunsenite (Neel transition 519 K)"
+phase = "cr"
+formula_wt = "74.689"
+file = "NiO_bunsenite.toml"
+buffers = ["NNO"]
+buffer_note = "the NiO of the nickel-nickel-oxide (NNO) buffer, a common experimental reference oxygen buffer (needs Ni metal + this NiO)"
+primary = "Robie & Hemingway (1995), USGS Bull. 2131: summary p.18, high-T table p.207. delta_f H298 = -239.3 kJ/mol, S298 = 38.0 J/mol/K, delta_f G298 = -211.1 kJ/mol."
+second_witness = "PENDING. NIST WebBook has no condensed-phase thermochemistry page for NiO (gas-phase ion data only), and the JANAF condensed NiO(cr) table code was not locatable via web retrieval. Owner to supply/verify the Barin NiO entry (widely cited literature anchor delta_f H298 ~ -239.7 kJ/mol; NOT recorded as a sourced witness here pending retrieval)."
+
+[[species]]
+name = "Fe3O4(cr,magnetite)"
+formula = "Fe3O4"
+mineral = "magnetite (Neel transition 845.5 K)"
+phase = "cr"
+formula_wt = "231.539"
+file = "Fe3O4_magnetite.toml"
+buffers = ["QFM", "FMQ", "MH", "WM"]
+buffer_note = "the magnetite of QFM/FMQ (quartz-fayalite-magnetite), MH (magnetite-hematite), and WM (wustite-magnetite) buffers"
+primary = "Robie & Hemingway (1995), USGS Bull. 2131: summary p.16, high-T table p.193. delta_f H298 = -1115.7 kJ/mol, S298 = 146.1 J/mol/K (146.14 in the high-T table), delta_f G298 = -1012.7 kJ/mol."
+second_witness = "NIST-JANAF (Chase 1998), table Fe-032, Fe3O4(cr): delta_f H298 = -1120.894 kJ/mol, S298 = 145.266 J/mol/K, delta_f G298 = -1017.438 kJ/mol. DISCREPANCY BEYOND ROUNDING: JANAF delta_f G298 is 4.7 kJ/mol more negative than Robie (-1017.4 vs -1012.7), and delta_f H298 is 5.2 kJ/mol more negative (-1120.9 vs -1115.7). BOTH recorded, not averaged. This is a known magnetite reconciliation difference; the owner should decide which compilation the buffer ladder keys off (Robie is the pinned primary here). Barin verification pending (owner)."
+
+[[species]]
+name = "Fe2O3(cr,hematite)"
+formula = "Fe2O3"
+mineral = "hematite (Neel transition 950 K)"
+phase = "cr"
+formula_wt = "159.692"
+file = "Fe2O3_hematite.toml"
+buffers = ["MH"]
+buffer_note = "the hematite of the magnetite-hematite (MH) buffer (needs Fe3O4 + this Fe2O3)"
+primary = "Robie & Hemingway (1995), USGS Bull. 2131: summary p.16, high-T table p.192. delta_f H298 = -826.2 kJ/mol, S298 = 87.4 J/mol/K, delta_f G298 = -744.4 kJ/mol."
+second_witness = "NIST WebBook / NIST-JANAF (Chase 1998), Fe2O3(cr) hematite: delta_f H298 = -825.503 kJ/mol, S298 = 87.28 J/mol/K. AGREES with Robie within rounding (~0.7 kJ/mol on delta_f H). Barin verification pending (owner)."
+
+[[species]]
+name = "Cr2O3(cr,eskolaite)"
+formula = "Cr2O3"
+mineral = "eskolaite"
+phase = "cr"
+formula_wt = "151.990"
+file = "Cr2O3_eskolaite.toml"
+buffers = ["Cr-Cr2O3"]
+buffer_note = "the Cr2O3 of the chromium-eskolaite (Cr-Cr2O3) buffer, used as a very reducing experimental oxygen buffer (needs Cr metal + this Cr2O3)"
+primary = "Robie & Hemingway (1995), USGS Bull. 2131: summary p.16, high-T table p.187. delta_f H298 = -1134.7 kJ/mol, S298 = 81.2 J/mol/K, delta_f G298 = -1053.1 kJ/mol."
+second_witness = "NIST WebBook / NIST-JANAF (Chase 1998), Cr2O3(cr): delta_f H298 = -1134.70 kJ/mol (IDENTICAL to Robie), S298 = 80.65 J/mol/K (Robie 81.2, within uncertainty). AGREES. Barin verification pending (owner)."
+
+[[species]]
+name = "MnO(cr,manganosite)"
+formula = "MnO"
+mineral = "manganosite"
+phase = "cr"
+formula_wt = "70.937"
+file = "MnO_manganosite.toml"
+buffers = ["MnO-Mn"]
+buffer_note = "the MnO of manganese oxygen buffers (MnO-Mn, and the MnO/Mn3O4 pair); an oxide end-member for Mn-silicate activities"
+primary = "Robie & Hemingway (1995), USGS Bull. 2131: summary p.17, high-T table p.199. delta_f H298 = -385.2 kJ/mol, S298 = 59.7 J/mol/K, delta_f G298 = -362.9 kJ/mol."
+second_witness = "PENDING. NIST WebBook has no condensed-phase thermochemistry page for MnO (gas-phase ion data only), and the JANAF condensed MnO(cr) table code was not locatable via web retrieval. Owner to supply/verify the Barin MnO entry (widely cited literature anchor delta_f H298 ~ -385.2 kJ/mol; NOT recorded as a sourced witness here pending retrieval)."

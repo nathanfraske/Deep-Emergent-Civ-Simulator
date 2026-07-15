@@ -45,13 +45,17 @@
 //! register, keeping the honesty query where the register lives.
 
 pub mod assemblage;
+pub mod atmosphere;
 pub mod band_gap;
 pub mod contract;
 pub mod correlation;
 pub mod creep;
 pub mod definition;
+pub mod differentiation;
 pub mod electronic;
+pub mod equilibrium_condensation;
 pub mod freezer;
+pub mod grain_opacity;
 pub mod harrison;
 pub mod localized;
 pub mod log;
@@ -59,10 +63,12 @@ pub mod magnetism;
 pub mod memo;
 pub mod metallic;
 pub mod nucleation;
+pub mod opacity_registry;
 pub mod optics;
 pub mod properties;
 pub mod quench;
 pub mod stoner;
+pub mod surface_composition;
 pub mod thermochemical;
 pub mod verdict;
 
@@ -109,7 +115,7 @@ pub use nucleation::{
 };
 pub use optics::{
     broadened_step_response, falls_in_observer_window, feature_response_at,
-    lifetime_broadening_width_ev, lorentzian_response, optical_energies,
+    lifetime_broadening_width_ev, lorentzian_response, marcus_hush_width_ev, optical_energies,
     thermal_broadening_width_ev, OpticalEnergy, OpticalFeature,
 };
 pub use properties::{

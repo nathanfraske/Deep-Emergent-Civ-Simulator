@@ -132,3 +132,30 @@ composition = { Mn = 1, O = 1 }
 delta_cm = "9000"
 reliability = "low"
 source = "MnO Pratt & Coelho PhysRev 116, 281 (1959): model-dependent (d5 all-spin-forbidden), scatter ~8900-10100; midpoint tabulated, flagged low"
+
+# --- Direct-measured charge-transfer band energies (eV); the seam-2 iron dark-crust optics ---
+# These are DIRECT single-crystal / optical-conductivity measurements of the charge-transfer band that darkens an
+# OXIDIZED iron crust, the same direct-measurement idiom as the monoxide Delta_o above (a per-chromophore cited
+# optical energy, NOT a factorization). Which band a phase carries keys on its DERIVED iron oxidation state (charge
+# balance over the phase's composition): a ferric phase (Fe3+, hematite) carries the O2- -> Fe3+ ligand-to-metal band
+# (lmct), a mixed-valence phase (Fe2+/Fe3+, magnetite) carries that band AND the Fe2+ -> Fe3+ intervalence band
+# (ivct). The IDEAL derivation (Jorgensen's E_CT = 30000 cm^-1 * (chi_opt(ligand) - chi_opt(metal))) is FLAGGED, not
+# built: the 30 kK scale constant is primary-cited (Jorgensen, Mol.Phys. 6, 43 (1963); Prog.Inorg.Chem. 12, 101
+# (1970)) but the per-species optical electronegativities chi_opt(O2-)/chi_opt(Fe3+)/chi_opt(Fe2+) are in Jorgensen's
+# 1969-1971 books (not web-open) and could not be secured with a primary cite, so they are surfaced to MORNING_REVIEW
+# rather than fabricated. Each energy below is a cited measurement, surfaced for owner verification, never invented.
+[[charge_transfer]]
+kind = "lmct"
+metal = "Fe3+"
+ligand = "O2-"
+band_ev = "3.1"
+reliability = "medium"
+source = "Ellis et al. Phys. Rev. B 106, 075101 (2022) (arXiv:2202.07232): hematite's main optical absorption feature at 3.1 eV is of predominantly O2p->Fe3d LMCT character (the charge-transfer-insulator picture); the Fe3+-oxide chromophore anchor, transferable across ferric oxides per Sherman & Waite Am.Mineral. 70, 1262 (1985). Onset is uncertain (literature 2 to >5 eV); the main-feature energy is tabulated, flagged medium."
+
+[[charge_transfer]]
+kind = "ivct"
+donor = "Fe2+"
+acceptor = "Fe3+"
+band_ev = "0.6"
+reliability = "high"
+source = "Park, Ishikawa & Tokura Phys. Rev. B 58, 3717 (1998): the ~0.6 eV intersite optical transition between B-site Fe t2g states, the Fe2+->Fe3+ intervalence band that opacifies and blackens magnetite (mineral-spectroscopy literature quotes ~0.5-0.6 eV)."

@@ -116,6 +116,40 @@ pub fn electron_scattering_opacity(
     Fixed::from_bits_i128(bits)
 }
 
+/// `ln` of the Thomson cross section in cm^2, from the fundamentals in the log domain: `sigma_T ~6.65e-25 cm^2`
+/// underflows `Fixed`, so the `n_e`-linear electron-scattering opacity carries it as its log. `sigma_T = (8 pi/3)
+/// r_e^2`, `r_e = e^2/(4 pi eps_0 m_e c^2)`; `ln r_e` in cm folds the metre-to-cm scaling (`r_e * 100`) as `+2 ln 10`.
+fn ln_thomson_cross_section_cm2() -> Option<Fixed> {
+    let ln_e = crate::saha::ln_fundamental("e")?;
+    let ln_eps0 = crate::saha::ln_fundamental("eps_0")?;
+    let ln_me = crate::saha::ln_fundamental("m_e")?;
+    let ln_c = crate::saha::ln_fundamental("c")?;
+    let ln_4pi = crate::saha::ln_of_decimal("12.56637061")?;
+    let ln_8pi_3 = crate::saha::ln_of_decimal("8.37758041")?;
+    let ln10 = Fixed::from_int(10).ln();
+    // ln r_e in cm = [2 ln e - ln(4 pi) - ln eps_0 - ln m_e - 2 ln c] (SI, m) + 2 ln 10 (m -> cm).
+    let ln_re_cm =
+        Fixed::from_int(2).mul(ln_e) - ln_4pi - ln_eps0 - ln_me - Fixed::from_int(2).mul(ln_c)
+            + Fixed::from_int(2).mul(ln10);
+    Some(ln_8pi_3 + Fixed::from_int(2).mul(ln_re_cm))
+}
+
+/// The electron-scattering opacity `kappa_es = sigma_T * n_e / rho` (cm^2/g), LINEAR in the free-electron density
+/// (electron scattering IS `sigma_T n_e / rho`; the fully-ionized `0.348(1+X)` was only that evaluated at full
+/// ionization, so this computes from `n_e`, never patches the constant with a fraction). Consumes the SHARED Saha
+/// `n_e` (as its log, cm^-3) and `ln rho` (g/cm^3), so es, ff, and H- read ONE electron density (the join law).
+/// Computed in the log domain because `sigma_T * n_e` underflows `Fixed`: `ln kappa_es = ln sigma_T + ln n_e -
+/// ln rho`, then one `exp`. At full ionization `n_e = (1+X) rho / (2 m_H)` it reproduces the restored electron-
+/// scattering constant `0.348(1+X)` exactly, the general form provably containing its old limit (the reassembly
+/// identity). `None` if a constant fails to load.
+pub fn electron_scattering_opacity_from_electron_density(
+    ln_electron_density_cm3: Fixed,
+    ln_density_g_cm3: Fixed,
+) -> Option<Fixed> {
+    let ln_kappa = ln_thomson_cross_section_cm2()? + ln_electron_density_cm3 - ln_density_g_cm3;
+    Some(ln_kappa.exp())
+}
+
 /// The number of quadrature intervals the Rosseland-mean integral takes: a FIXED count (the determinism bound, the
 /// `SURFACE_BALANCE_ITERS` model), integer-only, no until-converged spin. Set so the Planck weighting is well
 /// resolved across its peak and its tails past the bounds are negligible.
@@ -215,9 +249,13 @@ fn free_free_shape(x: Fixed) -> Option<Fixed> {
     one_minus.checked_div(x3)
 }
 
-/// The KRAMERS FREE-FREE (bremsstrahlung) Rosseland opacity `kappa_ff` (cm^2/g), DERIVED from the fundamentals
-/// through the shared Rosseland kernel, never read from the Bell-Lin fit. A free electron accelerating past an ion
-/// radiates a continuum; the bound-free-corrected absorption coefficient carries the spectral shape
+/// The KRAMERS FREE-FREE (bremsstrahlung) Rosseland opacity `kappa_ff_ion` (cm^2/g), DERIVED from the fundamentals
+/// through the shared Rosseland kernel, never read from the Bell-Lin fit. DEFINITION TAG: this is `kappa_ff_ion`,
+/// an electron scattering off a POSITIVE ION, scaling as `n_e sum(Z_i^2 n_i)`; it is a DIFFERENT channel from the
+/// H- free-free [`h_minus_free_free_opacity`] (`kappa_ff_Hminus`, an electron off a NEUTRAL hydrogen, scaling as
+/// `(X/m_H) P_e`). Both are additive in the monochromatic sum but key off different densities and must never be
+/// merged. A free electron accelerating past an ion radiates a continuum; the bound-free-corrected absorption
+/// coefficient carries the spectral shape
 /// [`free_free_shape`] `x^-3 (1 - e^-x)`, and its Rosseland mean is the classic
 /// `kappa_ff = C_ff * (1+X) * <Z^2/A> * g_ff * rho * T^(-7/2)` (cgs). The whole point of the generator is that
 /// `C_ff` is NOT the fitted `~3.68e22`: it reassembles from the bremsstrahlung prefactor and the kernel's Rosseland
@@ -293,7 +331,8 @@ pub fn kramers_free_free_opacity(
     let t = nonneg_fixed_to_bigrat(temperature_k);
 
     // kappa_ff^2 = RAT^2 * SQ * Phi^2 * comp^2 * rho^2 * g^2 * T^-7 (the squaring removes both sqrt(SQ) and the
-    // T^(-1/2), leaving a clean rational), then a single Fixed::sqrt. T^7 = T^4 * T^2 * T.
+    // T^(-1/2), leaving a clean rational), then a single Fixed::sqrt. T^7 = T^4 * T^2 * T. The whole product is
+    // formed together so the small ~kappa_ff^2 never forms the overflowing A_ff^2 alone.
     let t2 = t.mul(&t);
     let t7 = t2.mul(&t2).mul(&t2).mul(&t);
     let kappa_squared = rat
@@ -311,6 +350,250 @@ pub fn kramers_free_free_opacity(
 
     let bits = kappa_squared.round_to_scale(Fixed::FRAC_BITS)?;
     Some(Fixed::from_bits_i128(bits)?.sqrt())
+}
+
+/// The frequency-INDEPENDENT free-free (bremsstrahlung) opacity prefactor `A_ff` (cgs), so the monochromatic
+/// H-plasma free-free opacity is `kappa_ff_nu(x) = A_ff * free_free_shape(x)`, which the total-opacity assembly
+/// sums with the other monochromatic terms BEFORE Rosseland-averaging (the Rosseland mean is not additive, so the
+/// per-term means cannot be summed). It is recovered as `A_ff = kappa_ff / Phi` from the Rosseland free-free
+/// ([`kramers_free_free_opacity`]) and `Phi = rosseland_mean(free_free_shape)`, because the Rosseland mean is
+/// homogeneous of degree one (`rosseland_mean(A_ff * shape) = A_ff * Phi`). Recovered this way rather than from
+/// `sqrt(A_ff^2)` because `A_ff ~ 1e5` overflows Q32.32 when squared, while `A_ff` and `kappa_ff` are both
+/// representable: `kramers` forms the small `kappa_ff^2 = A_ff^2 * Phi^2` together and never `A_ff^2` alone.
+/// `None` if the free-free or the shape mean fails to resolve.
+fn free_free_prefactor(
+    density_g_per_cm3: Fixed,
+    temperature_k: Fixed,
+    hydrogen_mass_fraction: Fixed,
+    charge_weighted_abundance: Fixed,
+    gaunt_factor: Fixed,
+) -> Option<Fixed> {
+    let phi = rosseland_mean(free_free_shape)?;
+    let kappa_ff = kramers_free_free_opacity(
+        density_g_per_cm3,
+        temperature_k,
+        hydrogen_mass_fraction,
+        charge_weighted_abundance,
+        gaunt_factor,
+    )?;
+    kappa_ff.checked_div(phi)
+}
+
+/// The free-free monochromatic prefactor `A_ff` for a PARTIALLY IONIZED plasma: free-free is a two-body
+/// electron-ion process, so it carries the PRODUCT `n_e * sum(Z_i^2 n_i)` (QUADRATIC in ionization fraction, since
+/// for hydrogen both the electron and the ion side track the ionized fraction `x`), where [`free_free_prefactor`]'s
+/// fully-ionized coefficient assumed every nucleon donated its charge. Both densities are the SHARED Saha output
+/// (the join law: es, ff, and H- read one `n_e`). Under SINGLE-STAGE ionization `sum(Z_i^2 n_i) = n_e` (every ion
+/// has `Z = 1`), so the ion side collapses to `n_e` and `A_ff ~ n_e^2`; carrying the general `sum(Z_i^2 n_i)`
+/// argument keeps a multi-stage plasma (a doubly-ionized species, `Z = 2`) from silently regressing to the
+/// single-charge form. The Gaunt factor `g_ff` is the caller's plasma datum, physical band `~1.1 to 1.5` over disk
+/// temperatures and frequencies (van Hoof et al. 2014), never fabricated here.
+///
+/// Computed as `A_ff_full * (n_e * sum Z^2 n_i)_actual / (n_e * sum Z^2 n_i)_full`, a DIMENSIONLESS ratio (every
+/// unit cancels) formed in the log domain because the number densities (`~1e17 cm^-3`) overflow Q32.32. The
+/// fully-ionized reference densities are `n_e_full = (1+X)/2 * rho/m_u` and `sum Z^2 n_i_full = <Z^2/A> * rho/m_u`
+/// with `m_u = 1/N_A` g (so `-ln m_u = +ln N_A`). At full ionization the ratio is one and `A_ff` reproduces
+/// [`free_free_prefactor`] exactly, the general `n_e^2` form provably containing the Kramers limit (the reassembly
+/// identity). `None` if the full-ionization prefactor fails to resolve or a constant fails to load.
+#[allow(clippy::too_many_arguments)]
+fn free_free_prefactor_ionized(
+    ln_electron_density_cm3: Fixed,
+    ln_sum_z2_ni_cm3: Fixed,
+    ln_density_g_cm3: Fixed,
+    density_g_per_cm3: Fixed,
+    temperature_k: Fixed,
+    hydrogen_mass_fraction: Fixed,
+    charge_weighted_abundance: Fixed,
+    gaunt_factor: Fixed,
+) -> Option<Fixed> {
+    let a_ff_full = free_free_prefactor(
+        density_g_per_cm3,
+        temperature_k,
+        hydrogen_mass_fraction,
+        charge_weighted_abundance,
+        gaunt_factor,
+    )?;
+    let ln_na = crate::saha::ln_fundamental("N_A")?;
+    // ln of the fully-ionized number densities (cm^-3): n_e_full = (1+X)/2 * rho/m_u, sum Z^2 n_i_full =
+    // <Z^2/A> * rho/m_u, m_u = 1/N_A g so the -ln m_u is a +ln N_A.
+    let ln_half_1px = Fixed::ONE
+        .checked_add(hydrogen_mass_fraction)?
+        .checked_div(Fixed::from_int(2))?
+        .ln();
+    let ln_cwa = charge_weighted_abundance.ln();
+    let ln_ne_full = ln_half_1px
+        .checked_add(ln_density_g_cm3)?
+        .checked_add(ln_na)?;
+    let ln_sum_full = ln_cwa.checked_add(ln_density_g_cm3)?.checked_add(ln_na)?;
+    let ln_ratio = ln_electron_density_cm3
+        .checked_add(ln_sum_z2_ni_cm3)?
+        .checked_sub(ln_ne_full)?
+        .checked_sub(ln_sum_full)?;
+    a_ff_full.checked_mul(ln_ratio.exp())
+}
+
+/// The TOTAL ionized-gas Rosseland-mean opacity `kappa_R` (cm^2/g): the assembly of the three gas terms into the
+/// single opacity the disk reads, `kappa_R = rosseland_mean(kappa_es + kappa_H-(x) + kappa_ff(x))`. The
+/// MONOCHROMATIC terms sum at each dimensionless frequency `x`, then the whole is Rosseland-averaged: the Rosseland
+/// (harmonic) mean is NOT additive, so the per-term Rosseland means cannot be summed, the monochromatic opacities
+/// must be.
+///
+/// THE JOIN LAW: all three terms read ONE electron density from ONE Saha solve. Electron scattering is
+/// [`electron_scattering_opacity_from_electron_density`] (`sigma_T n_e/rho`, linear in `n_e`); free-free is
+/// `A_ff * free_free_shape(x)` with the partial-ionization prefactor [`free_free_prefactor_ionized`] (the
+/// `n_e sum Z^2 n_i` product); H- ([`h_minus_opacity`]) reads the same solve's electron pressure `P_e`. Passing
+/// three implicit electron densities to three terms is the definition-mismatch class this assembly legislates
+/// against.
+///
+/// Because electron scattering is now `n_e`-linear (not the grey `0.348(1+X)` constant), the grey POSITIVE FLOOR
+/// is gone: in cold weakly-ionized gas `n_e -> 0`, es and ff vanish and H- sleeps, so the summed monochromatic
+/// opacity reaches zero and the strict-positivity Rosseland kernel returns `None`. That is the physical singularity
+/// (grains sublimated ~1500 K, H- not yet risen ~2500 K) whose occupant is MOLECULAR opacity, supplied by the
+/// Ferguson regime handoff, NOT by this ionized-gas assembly. This function is therefore the HOT-REGIME closure;
+/// its `None` in the cold gap is the handoff signal, not a failure. `ln n_e`, `ln sum Z^2 n_i`, `ln rho`, and
+/// `P_e` are the Saha state; `T`, `rho`, `X`, `<Z^2/A>`, and the Gaunt factor are the plasma data (admit-the-alien).
+/// `None` if a term or the mean fails to resolve (including the cold molecular gap).
+#[allow(clippy::too_many_arguments)]
+pub fn total_gas_rosseland_opacity(
+    temperature_k: Fixed,
+    density_g_per_cm3: Fixed,
+    ln_density_g_cm3: Fixed,
+    hydrogen_mass_fraction: Fixed,
+    charge_weighted_abundance: Fixed,
+    gaunt_factor: Fixed,
+    ln_electron_density_cm3: Fixed,
+    ln_sum_z2_ni_cm3: Fixed,
+    electron_pressure_dyn_cm2: Fixed,
+    table: &PeriodicTable,
+) -> Option<Fixed> {
+    let kappa_es = electron_scattering_opacity_from_electron_density(
+        ln_electron_density_cm3,
+        ln_density_g_cm3,
+    )?;
+    let a_ff = free_free_prefactor_ionized(
+        ln_electron_density_cm3,
+        ln_sum_z2_ni_cm3,
+        ln_density_g_cm3,
+        density_g_per_cm3,
+        temperature_k,
+        hydrogen_mass_fraction,
+        charge_weighted_abundance,
+        gaunt_factor,
+    )?;
+    rosseland_mean(|x| {
+        let ff = a_ff.checked_mul(free_free_shape(x)?)?;
+        let hm = h_minus_opacity(
+            x,
+            temperature_k,
+            hydrogen_mass_fraction,
+            electron_pressure_dyn_cm2,
+            table,
+        )?;
+        kappa_es.checked_add(ff)?.checked_add(hm)
+    })
+}
+
+/// The TOTAL gas-plus-grain Rosseland-mean opacity `kappa_R` (cm^2/g): [`total_gas_rosseland_opacity`] with the
+/// monochromatic GRAIN term joined into the same sum, `kappa_R = rosseland_mean(kappa_es + kappa_H-(x) +
+/// kappa_ff(x) + kappa_grain(x))`. The grain opacity is supplied as a closure `grain_kappa_at(lambda_um)` (the
+/// materials-crate wire builds it from the realized condensate assemblage: Rule-1 optical dispatch, Rule-2
+/// effective-medium topology, Rule-3 shared size distribution, then [`grain_size_averaged_opacity`] at each
+/// wavelength). Keeping the grain term a closure keeps this physics primitive composition-agnostic and off the
+/// dependency cycle (physics does not depend on materials).
+///
+/// The sum is MONOCHROMATIC, then Rosseland-averaged: the harmonic mean is not additive, so a caller MUST NOT
+/// Rosseland-average gas and grains separately and add the two means. Adding the grain term also repairs the cold
+/// molecular gap for a condensed disk: where es and ff are Saha-killed and H- sleeps, [`total_gas_rosseland_opacity`]
+/// returns `None` (its handoff signal), but grains at the ice line carry the opacity, so the summed monochromatic
+/// opacity is positive and the mean resolves. The ice-line opacity CLIFF is therefore an emergent output of this
+/// sum (grains present below the front dominate the budget, absent above it), never a coded regime boundary. The
+/// gas arguments are exactly [`total_gas_rosseland_opacity`]'s; `None` if a term or the mean fails to resolve.
+#[allow(clippy::too_many_arguments)]
+pub fn total_gas_and_grain_rosseland_opacity(
+    temperature_k: Fixed,
+    density_g_per_cm3: Fixed,
+    ln_density_g_cm3: Fixed,
+    hydrogen_mass_fraction: Fixed,
+    charge_weighted_abundance: Fixed,
+    gaunt_factor: Fixed,
+    ln_electron_density_cm3: Fixed,
+    ln_sum_z2_ni_cm3: Fixed,
+    electron_pressure_dyn_cm2: Fixed,
+    table: &PeriodicTable,
+    grain_kappa_at: impl Fn(Fixed) -> Option<Fixed>,
+) -> Option<Fixed> {
+    let kappa_es = electron_scattering_opacity_from_electron_density(
+        ln_electron_density_cm3,
+        ln_density_g_cm3,
+    )?;
+    let a_ff = free_free_prefactor_ionized(
+        ln_electron_density_cm3,
+        ln_sum_z2_ni_cm3,
+        ln_density_g_cm3,
+        density_g_per_cm3,
+        temperature_k,
+        hydrogen_mass_fraction,
+        charge_weighted_abundance,
+        gaunt_factor,
+    )?;
+    // lambda(x, T) = (h c / k_B) / (x T), in microns: the wavelength the grain closure is priced at.
+    let h = fundamental_bigrat("h")?;
+    let c = fundamental_bigrat("c")?;
+    let k_b = fundamental_bigrat("k_B")?;
+    let alpha_um_k = h.mul(&c).div(&k_b).mul(&BigRat::from_i64(1_000_000));
+    let t_br = nonneg_fixed_to_bigrat(temperature_k);
+
+    // Precompute the monochromatic grain opacity on the coarse Rosseland-window grid (the same grid the grain-only
+    // spectral mean uses), so the possibly-expensive grain closure is evaluated GRAIN_ROSS_GRID+1 times, not once
+    // per Rosseland quadrature point (the disk fixed-point solve calls this repeatedly, so the closure cost must
+    // not multiply by ROSSELAND_INTERVALS). The grain term is then interpolated LINEARLY in ln(x) at each
+    // quadrature frequency: linear rather than log-log because the additive grain term is zero where no grains are
+    // present (ln 0 is undefined), and the gas terms stay exact per point.
+    let ln_x_min = rosseland_x_min().ln();
+    let ln_x_max = rosseland_x_max().ln();
+    let span = ln_x_max.checked_sub(ln_x_min)?;
+    let mut grain_grid = Vec::with_capacity(GRAIN_ROSS_GRID + 1);
+    for j in 0..=GRAIN_ROSS_GRID {
+        let ln_x = ln_x_min
+            .checked_add(span.checked_mul(Fixed::from_ratio(j as i64, GRAIN_ROSS_GRID as i64))?)?;
+        let x = ln_x.exp();
+        let lam_br = alpha_um_k.div(&nonneg_fixed_to_bigrat(x).mul(&t_br));
+        let lam = Fixed::from_bits_i128(lam_br.round_to_scale(Fixed::FRAC_BITS)?)?;
+        grain_grid.push(grain_kappa_at(lam)?);
+    }
+
+    rosseland_mean(|x| {
+        let ff = a_ff.checked_mul(free_free_shape(x)?)?;
+        let hm = h_minus_opacity(
+            x,
+            temperature_k,
+            hydrogen_mass_fraction,
+            electron_pressure_dyn_cm2,
+            table,
+        )?;
+        // Interpolate the precomputed grain term linearly in ln(x), clamped to the grid endpoints.
+        let ln_x = x.ln();
+        let pos = ln_x
+            .checked_sub(ln_x_min)?
+            .checked_div(span)?
+            .checked_mul(Fixed::from_int(GRAIN_ROSS_GRID as i32))?;
+        let pos = if pos < Fixed::ZERO {
+            Fixed::ZERO
+        } else if pos > Fixed::from_int(GRAIN_ROSS_GRID as i32) {
+            Fixed::from_int(GRAIN_ROSS_GRID as i32)
+        } else {
+            pos
+        };
+        let idx = (pos.to_int() as usize).min(GRAIN_ROSS_GRID - 1);
+        let local = pos.checked_sub(Fixed::from_int(idx as i32))?;
+        let lo = grain_grid[idx];
+        let hi = grain_grid[idx + 1];
+        let grain = lo.checked_add(hi.checked_sub(lo)?.checked_mul(local)?)?;
+        kappa_es
+            .checked_add(ff)?
+            .checked_add(hm)?
+            .checked_add(grain)
+    })
 }
 
 /// The John 1988 photodetachment threshold wavelength `lambda_0` (micron) of the H- bound-free cross-section fit:
@@ -649,14 +932,28 @@ fn h_minus_ff_sum(
     Some(sum)
 }
 
-/// The monochromatic H- FREE-FREE opacity `kappa_ff` (cm^2/g) at dimensionless frequency `x = h*nu/(k_B*T)`, the H-
-/// gas term that fills the below-photodetachment-threshold window the bound-free leaves empty (so the assembled
-/// bf+ff H- opacity is positive at every frequency and can be Rosseland-averaged). A neutral hydrogen, a free
-/// electron, and a photon interact (`H0 + e- + photon`) with no threshold, so this term is continuous across all
-/// wavelengths and rises to the infrared. The absorption coefficient is the cited John 1988 eq. 6 fit
+/// The monochromatic H- FREE-FREE opacity `kappa_ff_Hminus` (cm^2/g) at dimensionless frequency `x = h*nu/(k_B*T)`,
+/// the H- gas term that fills the below-photodetachment-threshold window the bound-free leaves empty (so the
+/// assembled bf+ff H- opacity is positive at every frequency and can be Rosseland-averaged). A neutral hydrogen, a
+/// free electron, and a photon interact (`H0 + e- + photon`) with no threshold, so this term is continuous across
+/// all wavelengths and rises to the infrared. The absorption coefficient is the cited John 1988 eq. 6 fit
 /// (`kappa_ff_coeff = 1e-29 * sum_n (5040/T)^((n+1)/2) * poly_n(lambda)`, cm^4/dyn per neutral H per electron
 /// pressure, [`h_minus_ff_region1`]/[`h_minus_ff_region2`]) times `(X / m_H) * P_e`, so
-/// `kappa_ff = kappa_ff_coeff * (X / m_H) * P_e`.
+/// `kappa_ff_Hminus = kappa_ff_coeff * (X / m_H) * P_e`.
+///
+/// DEFINITION TAG (the two free-free channels are DISTINCT physics and must never be merged): this is
+/// `kappa_ff_Hminus`, an electron scattering off a NEUTRAL hydrogen atom (the transient H- during the encounter),
+/// so it scales as the neutral-H density times the electron pressure, `(X/m_H) P_e`. It is NOT the electron-ION
+/// bremsstrahlung [`kramers_free_free_opacity`] (`kappa_ff_ion`), which is an electron scattering off a POSITIVE
+/// ion and scales as `n_e sum(Z_i^2 n_i)`. Both are real and ADDITIVE in the monochromatic sum, but they key off
+/// different densities (neutral H versus ions) and different ionization powers; joining them, or feeding one's
+/// density to the other, is the definition-mismatch class this codebase legislates against.
+///
+/// DECLARED REDUCTION: this per-`P_e` form is exact BECAUSE the actual H- number density is a negligible fraction
+/// of the electrons, `n(H-)/n_e ~ 1e-8` (the Saha population of a 0.754 eV binding at stellar temperatures). H- is
+/// never a bulk species to track; the opacity is a per-encounter cross section carried by the neutral-H population
+/// and the electron pressure, which is exactly why the stellar-atmosphere form is written per neutral H per `P_e`
+/// rather than over an explicit H- density.
 ///
 /// The only fetched piece is the fit's coefficients (the cited [M] tier); the `5040/T` temperature scaling, the
 /// `hc/k` wavelength fold, and the `m_H` from the periodic table all derive. The polynomial sum runs in exact
@@ -1281,6 +1578,85 @@ pub fn bruggeman_effective_index(
     Some((n_eff, k_eff))
 }
 
+/// The effective complex refractive index `(n_eff, k_eff)` of a grain built as a HOST MATRIX with embedded
+/// INCLUSIONS, DERIVED by the Maxwell-Garnett effective-medium rule. Unlike [`bruggeman_effective_index`]
+/// (symmetric, no host), Maxwell-Garnett is ASYMMETRIC: it models inclusions dispersed in a continuous matrix, the
+/// topology the condensation history writes below the ice line (Rule 2: refractories arrive as cores inside ice
+/// mantles as the disposer's condensation sequence deposits them, so ICE is the matrix and the refractories are the
+/// inclusions). The two rules give DIFFERENT effective indices for the same components (ice-mantled iron absorbs
+/// differently from a symmetric iron-plus-ice mixture), which is the factor-level distinction Rule 2 keys on: below
+/// the ice line the mantle topology is Maxwell-Garnett, above it the bare mixture is Bruggeman.
+///
+/// Closed form (no iteration): with `eps_m` the matrix and `eps_i` the inclusion permittivities (`eps = (n+i k)^2`),
+///   `beta = sum_i f_i (eps_i - eps_m)/(eps_i + 2 eps_m)`,  `eps_eff = eps_m (1 + 2 beta)/(1 - beta)`,
+/// run in the deterministic wide-fixed complex arithmetic, then `eps_eff` is turned back into `(n, k)`. The
+/// inclusion fractions are the VOLUME fractions from the disposer condensate assemblage (data, admit-the-alien: an
+/// alien mantle carrying a condensate not in the Terran set is a different set of rows and fractions, never a
+/// rewrite); an empty inclusion list or all-zero fractions returns the bare matrix. `None` if the lists differ in
+/// length, on a non-physical index or a negative fraction, or on any overflow or singular denominator (an
+/// over-packed inclusion set driving `1 - beta` through zero is non-physical and fails loud).
+pub fn maxwell_garnett_effective_index(
+    matrix_index: (Fixed, Fixed),
+    inclusion_fractions: &[Fixed],
+    inclusion_indices: &[(Fixed, Fixed)],
+) -> Option<(Fixed, Fixed)> {
+    if inclusion_fractions.len() != inclusion_indices.len() {
+        return None;
+    }
+    let (n_m, k_m) = matrix_index;
+    if n_m <= Fixed::ZERO || k_m < Fixed::ZERO {
+        return None;
+    }
+    let to_eps = |n: Fixed, k: Fixed| -> Option<WCplx> {
+        let n_w = fixed_to_wfixed(n);
+        let k_w = fixed_to_wfixed(k);
+        let re = wmul(n_w, n_w)?.checked_sub(wmul(k_w, k_w)?)?;
+        let im = wmul(n_w, k_w)?.checked_mul(2)?;
+        Some(WCplx { re, im })
+    };
+
+    let eps_m = to_eps(n_m, k_m)?;
+    let two_w = 2 * MIE_ONE_W;
+    let eps_m_two = eps_m.scale(two_w)?; // 2 eps_m
+
+    // beta = sum_i f_i (eps_i - eps_m)/(eps_i + 2 eps_m).
+    let mut beta = WCplx::real(0);
+    for (frac, (n, k)) in inclusion_fractions.iter().zip(inclusion_indices.iter()) {
+        if *frac < Fixed::ZERO || *n <= Fixed::ZERO || *k < Fixed::ZERO {
+            return None;
+        }
+        let f_w = fixed_to_wfixed(*frac);
+        let eps_i = to_eps(*n, *k)?;
+        let denom = eps_i.add(eps_m_two)?; // eps_i + 2 eps_m
+        let term = eps_i.sub(eps_m)?.div(denom)?.scale(f_w)?;
+        beta = beta.add(term)?;
+    }
+
+    // eps_eff = eps_m (1 + 2 beta)/(1 - beta).
+    let one = WCplx::real(MIE_ONE_W);
+    let numer = one.add(beta.scale(two_w)?)?; // 1 + 2 beta
+    let denom = one.sub(beta)?; // 1 - beta
+    let eff = eps_m.mul(numer)?.div(denom)?;
+
+    // eps_eff = re + i im -> (n, k): n = sqrt((|eps| + re)/2), k = sqrt((|eps| - re)/2).
+    let re_f = Fixed::from_bits_i128(wfixed_to_bigrat(eff.re).round_to_scale(Fixed::FRAC_BITS)?)?;
+    let im_f = Fixed::from_bits_i128(wfixed_to_bigrat(eff.im).round_to_scale(Fixed::FRAC_BITS)?)?;
+    let modulus = re_f
+        .checked_mul(re_f)?
+        .checked_add(im_f.checked_mul(im_f)?)?
+        .sqrt();
+    let two = Fixed::from_int(2);
+    let n_eff = modulus.checked_add(re_f)?.checked_div(two)?.sqrt();
+    let k_arg = modulus.checked_sub(re_f)?;
+    let k_arg = if k_arg < Fixed::ZERO {
+        Fixed::ZERO
+    } else {
+        k_arg
+    };
+    let k_eff = k_arg.checked_div(two)?.sqrt();
+    Some((n_eff, k_eff))
+}
+
 /// The number of log-spaced wavelength samples the grain Rosseland mean precomputes. The Rosseland weight
 /// is smooth in `ln x`, so the spectral opacity is sampled on this coarse grid once and interpolated
 /// (log-log) at each of the [`ROSSELAND_INTERVALS`] quadrature points, rather than paying a full
@@ -1309,6 +1685,40 @@ pub fn grain_rosseland_opacity(
     a_min_um: Fixed,
     a_max_um: Fixed,
 ) -> Option<Fixed> {
+    // A wavelength-independent index is the constant closure; the spectral form is the general one below.
+    grain_rosseland_opacity_spectral(
+        temperature_k,
+        |_lambda_um| Some((n, k)),
+        bulk_density_g_cm3,
+        slope,
+        a_min_um,
+        a_max_um,
+    )
+}
+
+/// The ROSSELAND-MEAN grain opacity `kappa_R(T)` (cm^2/g) for a grain whose complex index VARIES with wavelength,
+/// the generalization of [`grain_rosseland_opacity`] that the disposer-condensate wire needs: the effective
+/// `(n, k)` of a mixed grain is a function of wavelength (each condensate's optical constants are wavelength
+/// tables, and the effective-medium mix of them is evaluated at each wavelength), so the index is supplied as a
+/// closure `index_at(lambda_um)` rather than a pair of constants. At each Rosseland-window wavelength the closure
+/// returns the effective `(n, k)` there, the size-distribution average [`grain_size_averaged_opacity`] turns it
+/// into a monochromatic opacity, and [`rosseland_mean`] takes the transparency-weighted average.
+///
+/// The wire (up-stack, in the materials crate, since it consumes the realized assemblage) supplies `index_at` as
+/// the Rule-1 optical dispatch (measured constants where the species is in the library, the phonon estimator for
+/// an alien phase) composed with the Rule-2 effective-medium topology (Maxwell-Garnett below the ice line,
+/// Bruggeman above). This physics primitive stays composition-agnostic: it is handed an index-versus-wavelength
+/// function and a shared size distribution and knows nothing of which condensates produced them (admit-the-alien
+/// by construction). `None` on a non-positive temperature, a wavelength the closure cannot price, a bad
+/// distribution, or any overflow.
+pub fn grain_rosseland_opacity_spectral(
+    temperature_k: Fixed,
+    index_at: impl Fn(Fixed) -> Option<(Fixed, Fixed)>,
+    bulk_density_g_cm3: Fixed,
+    slope: Fixed,
+    a_min_um: Fixed,
+    a_max_um: Fixed,
+) -> Option<Fixed> {
     if temperature_k <= Fixed::ZERO {
         return None;
     }
@@ -1330,6 +1740,7 @@ pub fn grain_rosseland_opacity(
         let x = ln_x.exp();
         let lam_br = alpha_um_k.div(&nonneg_fixed_to_bigrat(x).mul(&t_br));
         let lam = Fixed::from_bits_i128(lam_br.round_to_scale(Fixed::FRAC_BITS)?)?;
+        let (n, k) = index_at(lam)?;
         let kappa =
             grain_size_averaged_opacity(lam, n, k, bulk_density_g_cm3, slope, a_min_um, a_max_um)?;
         ln_kappa.push(kappa.ln());
@@ -1380,6 +1791,26 @@ mod tests {
             (k.to_f64_lossy() - 0.348).abs() < 1e-3,
             "solar electron scattering is ~0.348 cm^2/g, got {}",
             k.to_f64_lossy()
+        );
+    }
+
+    #[test]
+    fn the_electron_scattering_from_ne_reproduces_the_full_ionization_constant() {
+        // The reassembly identity (the 0.348 row, generalized): kappa_es = sigma_T n_e/rho evaluated at the
+        // fully-ionized electron density n_e = (1+X) rho/(2 m_H) must reproduce the restored 0.348(1+X) constant,
+        // so the general n_e-linear form provably contains its old limit. X = 0.75, rho = 1e-6 g/cm^3:
+        // n_e = 1.75/(2 * 1.674e-24) * 1e-6 = 5.228e17 cm^-3.
+        let es_constant =
+            electron_scattering_opacity(Fixed::from_ratio(75, 100), &table()).unwrap();
+        let ln_ne_full = crate::saha::ln_of_decimal("5.228e17").unwrap();
+        let ln_rho = crate::saha::ln_of_decimal("1e-6").unwrap();
+        let es_from_ne =
+            electron_scattering_opacity_from_electron_density(ln_ne_full, ln_rho).unwrap();
+        assert!(
+            (es_from_ne.to_f64_lossy() - es_constant.to_f64_lossy()).abs() < 0.01,
+            "es(n_e) at full ionization reproduces 0.348(1+X) = {}, got {}",
+            es_constant.to_f64_lossy(),
+            es_from_ne.to_f64_lossy()
         );
     }
 
@@ -1556,6 +1987,196 @@ mod tests {
     }
 
     #[test]
+    fn the_total_gas_opacity_joins_the_three_terms_on_one_saha_solve() {
+        // The JOIN LAW end to end: ONE Saha solve at T = 6000 K (photospheric H with trace metal donors) sets the
+        // electron density and pressure, and es (sigma_T n_e/rho), free-free (n_e sum Z^2 n_i), and H- (P_e) all
+        // read that single solve. The monochromatic terms sum at each frequency and the whole is Rosseland-averaged.
+        // In this hot ionized state the sum is positive, so the strict-positivity kernel succeeds and the assembly
+        // sits at or above the n_e-linear electron-scattering floor.
+        let tbl = table();
+        let temp = Fixed::from_int(6000);
+        let species = [
+            ("H", crate::saha::ln_of_decimal("1e17").unwrap()),
+            ("Na", crate::saha::ln_of_decimal("2e11").unwrap()),
+            ("K", crate::saha::ln_of_decimal("1e10").unwrap()),
+            ("Mg", crate::saha::ln_of_decimal("3e12").unwrap()),
+            ("Ca", crate::saha::ln_of_decimal("2e11").unwrap()),
+        ];
+        let state = crate::saha::electron_density_saha(temp, &species, &tbl).unwrap();
+        assert!(
+            !state.no_free_electrons,
+            "the 6000 K gas has free electrons"
+        );
+        // rho ~ n_H m_H / X for n_H = 1e17, X = 0.7: ~2.4e-7 g/cm^3.
+        let rho = Fixed::from_ratio(24, 100_000_000);
+        let ln_rho = crate::saha::ln_of_decimal("2.4e-7").unwrap();
+        let (x, z2a, g) = (
+            Fixed::from_ratio(7, 10),
+            Fixed::ONE,
+            Fixed::from_ratio(12, 10),
+        );
+        // Single-stage: sum Z^2 n_i = n_e, so ln n_e feeds both the electron and the ion side (the general
+        // interface, collapsed for the single-charge regime).
+        let ln_ne = state.ln_electron_density_cm3;
+        let total = total_gas_rosseland_opacity(
+            temp,
+            rho,
+            ln_rho,
+            x,
+            z2a,
+            g,
+            ln_ne,
+            ln_ne,
+            state.electron_pressure_dyn_cm2,
+            &tbl,
+        )
+        .expect("the hot-regime gas closure assembles");
+        let es_floor = electron_scattering_opacity_from_electron_density(ln_ne, ln_rho).unwrap();
+        assert!(
+            total > Fixed::ZERO,
+            "the assembled gas opacity is positive in the hot regime"
+        );
+        assert!(
+            total >= es_floor,
+            "the assembly is at least the n_e-linear electron-scattering floor ({} vs {})",
+            total.to_f64_lossy(),
+            es_floor.to_f64_lossy()
+        );
+        // Deterministic replay.
+        assert_eq!(
+            total,
+            total_gas_rosseland_opacity(
+                temp,
+                rho,
+                ln_rho,
+                x,
+                z2a,
+                g,
+                ln_ne,
+                ln_ne,
+                state.electron_pressure_dyn_cm2,
+                &tbl,
+            )
+            .unwrap(),
+            "the assembly replays byte for byte"
+        );
+    }
+
+    #[test]
+    fn the_grain_term_joins_the_monochromatic_sum() {
+        // The gas-plus-grain join at the same 6000 K Saha state. A zero grain closure must reproduce the gas-only
+        // Rosseland mean EXACTLY (the grain term enters as an additive monochromatic contribution, so adding zero is
+        // an identity, the consistency the byte pins would otherwise have to guard). A positive grain closure must
+        // raise the total: the grain opacity joins the sum at each frequency before the Rosseland average, never as
+        // a separate mean added after.
+        let tbl = table();
+        let temp = Fixed::from_int(6000);
+        let species = [
+            ("H", crate::saha::ln_of_decimal("1e17").unwrap()),
+            ("Na", crate::saha::ln_of_decimal("2e11").unwrap()),
+            ("K", crate::saha::ln_of_decimal("1e10").unwrap()),
+            ("Mg", crate::saha::ln_of_decimal("3e12").unwrap()),
+            ("Ca", crate::saha::ln_of_decimal("2e11").unwrap()),
+        ];
+        let state = crate::saha::electron_density_saha(temp, &species, &tbl).unwrap();
+        let rho = Fixed::from_ratio(24, 100_000_000);
+        let ln_rho = crate::saha::ln_of_decimal("2.4e-7").unwrap();
+        let (x, z2a, g) = (
+            Fixed::from_ratio(7, 10),
+            Fixed::ONE,
+            Fixed::from_ratio(12, 10),
+        );
+        let ln_ne = state.ln_electron_density_cm3;
+        let gas_only = total_gas_rosseland_opacity(
+            temp,
+            rho,
+            ln_rho,
+            x,
+            z2a,
+            g,
+            ln_ne,
+            ln_ne,
+            state.electron_pressure_dyn_cm2,
+            &tbl,
+        )
+        .expect("the gas-only closure assembles");
+        let with_zero_grains = total_gas_and_grain_rosseland_opacity(
+            temp,
+            rho,
+            ln_rho,
+            x,
+            z2a,
+            g,
+            ln_ne,
+            ln_ne,
+            state.electron_pressure_dyn_cm2,
+            &tbl,
+            |_lambda| Some(Fixed::ZERO),
+        )
+        .expect("the gas-plus-grain closure assembles");
+        assert_eq!(
+            gas_only, with_zero_grains,
+            "a zero grain term reproduces the gas-only Rosseland mean exactly"
+        );
+        let with_grains = total_gas_and_grain_rosseland_opacity(
+            temp,
+            rho,
+            ln_rho,
+            x,
+            z2a,
+            g,
+            ln_ne,
+            ln_ne,
+            state.electron_pressure_dyn_cm2,
+            &tbl,
+            |_lambda| Some(Fixed::from_ratio(1, 10)),
+        )
+        .expect("the gas-plus-grain closure assembles with grains");
+        assert!(
+            with_grains > gas_only,
+            "a positive monochromatic grain term raises the total ({} vs {})",
+            with_grains.to_f64_lossy(),
+            gas_only.to_f64_lossy()
+        );
+    }
+
+    #[test]
+    fn the_gas_closure_returns_none_in_the_cold_molecular_gap() {
+        // The singularity the n_e-linear restatement exposes: with the grey electron-scattering floor gone, a cold
+        // weakly-ionized gas (T = 1200 K, grains sublimating, H- not yet risen) has n_e -> 0 from the Saha solve,
+        // so es and ff vanish and H- sleeps, the summed monochromatic opacity reaches zero, and the strict-
+        // positivity Rosseland kernel returns None. That None is the MOLECULAR handoff signal (the Ferguson term's
+        // window), not a failure of the ionized-gas closure.
+        let tbl = table();
+        let temp = Fixed::from_int(1200);
+        let species = [
+            ("H", crate::saha::ln_of_decimal("1e17").unwrap()),
+            ("K", crate::saha::ln_of_decimal("1e10").unwrap()),
+        ];
+        let state = crate::saha::electron_density_saha(temp, &species, &tbl).unwrap();
+        let rho = Fixed::from_ratio(24, 100_000_000);
+        let ln_rho = crate::saha::ln_of_decimal("2.4e-7").unwrap();
+        let ln_ne = state.ln_electron_density_cm3;
+        let total = total_gas_rosseland_opacity(
+            temp,
+            rho,
+            ln_rho,
+            Fixed::from_ratio(7, 10),
+            Fixed::ONE,
+            Fixed::from_ratio(12, 10),
+            ln_ne,
+            ln_ne,
+            state.electron_pressure_dyn_cm2,
+            &tbl,
+        );
+        assert!(
+            total.is_none(),
+            "the cold molecular gap has no ionized-gas opacity: the closure hands off to the molecular term, got {:?}",
+            total.map(|k| k.to_f64_lossy())
+        );
+    }
+
+    #[test]
     fn the_free_free_opacity_scales_as_density_and_inverse_temperature() {
         // kappa_ff ~ rho * T^(-7/2): doubling the density doubles the opacity (linear), and raising the temperature
         // lowers it steeply. This is the Kramers signature the disk-thermal profile reads.
@@ -1597,6 +2218,61 @@ mod tests {
         let a = kramers_free_free_opacity(rho, t, Fixed::from_ratio(7, 10), Fixed::ONE, Fixed::ONE);
         let b = kramers_free_free_opacity(rho, t, Fixed::from_ratio(7, 10), Fixed::ONE, Fixed::ONE);
         assert_eq!(a, b, "the free-free derivation replays byte for byte");
+    }
+
+    #[test]
+    fn the_ionized_free_free_prefactor_reproduces_the_kramers_limit_at_full_ionization() {
+        // The reassembly identity for free-free: fed the fully-ionized electron density (pure hydrogen X = 1, where
+        // single-stage ionization IS full ionization and n_e = sum Z^2 n_i = rho/m_u = rho * N_A), the partial-
+        // ionization prefactor reproduces free_free_prefactor exactly (ratio = 1), the general n_e * sum Z^2 n_i
+        // form provably containing the Kramers limit.
+        let rho = Fixed::from_ratio(1, 1_000_000); // 1e-6 g/cm^3
+        let t = Fixed::from_int(100_000); // hot, fully ionized
+        let x = Fixed::ONE; // pure hydrogen
+        let cwa = Fixed::ONE; // <Z^2/A> = 1 for pure hydrogen
+        let g = Fixed::ONE;
+        let ln_rho = crate::saha::ln_of_decimal("1e-6").unwrap();
+        let ln_na = crate::saha::ln_fundamental("N_A").unwrap();
+        // (1+X)/2 = 1 at X = 1, so ln n_e_full = ln rho + ln N_A; sum Z^2 n_i = n_e (single-stage = full for H).
+        let ln_ne_full = ln_rho + ln_na;
+        let a_ff_full = free_free_prefactor(rho, t, x, cwa, g).unwrap();
+        let a_ff_ionized =
+            free_free_prefactor_ionized(ln_ne_full, ln_ne_full, ln_rho, rho, t, x, cwa, g).unwrap();
+        let rel = (a_ff_ionized.to_f64_lossy() - a_ff_full.to_f64_lossy()).abs()
+            / a_ff_full.to_f64_lossy();
+        assert!(
+            rel < 1e-2,
+            "at full ionization the partial-ionization prefactor reproduces Kramers: full {}, ionized {}",
+            a_ff_full.to_f64_lossy(),
+            a_ff_ionized.to_f64_lossy()
+        );
+    }
+
+    #[test]
+    fn the_ionized_free_free_prefactor_is_quadratic_in_ionization_fraction() {
+        // Free-free carries n_e * sum Z^2 n_i, so at ionization fraction x = 0.1 (n_e and the single-stage ion side
+        // both 0.1 of full) the prefactor is 0.01 of the fully-ionized value: QUADRATIC in x, the two-body electron-
+        // ion signature that keeps a cool weakly-ionized gas from radiating like a full plasma.
+        let rho = Fixed::from_ratio(1, 1_000_000);
+        let t = Fixed::from_int(100_000);
+        let x = Fixed::ONE;
+        let cwa = Fixed::ONE;
+        let g = Fixed::ONE;
+        let ln_rho = crate::saha::ln_of_decimal("1e-6").unwrap();
+        let ln_na = crate::saha::ln_fundamental("N_A").unwrap();
+        let ln_ne_full = ln_rho + ln_na;
+        let ln_tenth = crate::saha::ln_of_decimal("0.1").unwrap();
+        let ln_ne_tenth = ln_ne_full + ln_tenth; // n_e = 0.1 n_e_full, single-stage so sum Z^2 n_i = n_e
+        let a_ff_full =
+            free_free_prefactor_ionized(ln_ne_full, ln_ne_full, ln_rho, rho, t, x, cwa, g).unwrap();
+        let a_ff_tenth =
+            free_free_prefactor_ionized(ln_ne_tenth, ln_ne_tenth, ln_rho, rho, t, x, cwa, g)
+                .unwrap();
+        let ratio = a_ff_tenth.to_f64_lossy() / a_ff_full.to_f64_lossy();
+        assert!(
+            (ratio - 0.01).abs() < 1e-3,
+            "free-free is quadratic in ionization fraction: 0.1^2 = 0.01, got {ratio}"
+        );
     }
 
     #[test]
@@ -1878,6 +2554,34 @@ mod tests {
             &t,
         );
         assert_eq!(a, b, "the H- free-free derivation replays byte for byte");
+    }
+
+    #[test]
+    fn the_h_minus_opacity_has_its_minimum_near_the_photodetachment_threshold() {
+        // The pre-registered 1.64 micron battery row: the assembled bf+ff H- opacity has its MINIMUM near the
+        // 1.6419 micron photodetachment threshold, where the bound-free (peaking near 0.85 micron) has cut off and
+        // the free-free (rising to the infrared) has not yet climbed. This is the famous H- opacity window that lets
+        // us see deepest into a star near 1.6 micron. At T = 6000 K, x = (hc/k)/(lambda T) = 2.398/lambda_um, so
+        // lambda = 1.0, 1.6419, 3.0 micron are x = 2.398, 1.4605, 0.799.
+        let t = table();
+        let temp = Fixed::from_int(6000);
+        let (x_val, p_e) = (Fixed::from_ratio(7, 10), Fixed::from_int(100));
+        let short = h_minus_opacity(Fixed::from_ratio(2398, 1000), temp, x_val, p_e, &t).unwrap();
+        let minimum =
+            h_minus_opacity(Fixed::from_ratio(14605, 10000), temp, x_val, p_e, &t).unwrap();
+        let long = h_minus_opacity(Fixed::from_ratio(799, 1000), temp, x_val, p_e, &t).unwrap();
+        assert!(
+            minimum < short,
+            "H- opacity at the 1.64 micron threshold is below the bound-free peak side ({} vs {})",
+            minimum.to_f64_lossy(),
+            short.to_f64_lossy()
+        );
+        assert!(
+            minimum < long,
+            "H- opacity at the 1.64 micron threshold is below the infrared free-free side ({} vs {})",
+            minimum.to_f64_lossy(),
+            long.to_f64_lossy()
+        );
     }
 
     fn optics() -> crate::optical_constants::OpticalConstants {
@@ -2417,6 +3121,113 @@ mod tests {
             bruggeman_effective_index(&[Fixed::from_ratio(-1, 10)], &[sil_index()]),
             None,
             "a negative fraction is rejected"
+        );
+    }
+
+    #[test]
+    fn the_maxwell_garnett_mix_matches_the_closed_form() {
+        // A dielectric matrix n_m = 1.5 (eps_m = 2.25) with a single inclusion n_i = 3.0 (eps_i = 9.0) at volume
+        // fraction f = 0.5: beta = 0.5 (9 - 2.25)/(9 + 4.5) = 0.25, eps_eff = 2.25 (1 + 0.5)/(1 - 0.25) = 4.5, so
+        // n_eff = sqrt(4.5) = 2.1213. Pins the closed-form solve against the hand computation.
+        let (n, k) = maxwell_garnett_effective_index(
+            (Fixed::from_ratio(3, 2), Fixed::ZERO),
+            &[Fixed::from_ratio(1, 2)],
+            &[(Fixed::from_int(3), Fixed::ZERO)],
+        )
+        .unwrap();
+        assert!(
+            (n.to_f64_lossy() - 2.1213).abs() < 1e-3,
+            "Maxwell-Garnett n_eff ~ 2.1213, got {}",
+            n.to_f64_lossy()
+        );
+        assert!(
+            k.to_f64_lossy() < 1e-3,
+            "a pure-dielectric mix stays non-absorbing, got k {}",
+            k.to_f64_lossy()
+        );
+    }
+
+    #[test]
+    fn the_maxwell_garnett_mix_of_no_inclusions_is_the_bare_matrix() {
+        // An empty inclusion list (or all-zero fractions) returns the matrix index unchanged: beta = 0, eps_eff =
+        // eps_m.
+        let empty =
+            maxwell_garnett_effective_index(sil_index(), &[], &[]).expect("no inclusions is valid");
+        assert!(
+            (empty.0.to_f64_lossy() - sil_index().0.to_f64_lossy()).abs() < 1e-4
+                && (empty.1.to_f64_lossy() - sil_index().1.to_f64_lossy()).abs() < 1e-4,
+            "no inclusions returns the bare matrix, got {:?}",
+            (empty.0.to_f64_lossy(), empty.1.to_f64_lossy())
+        );
+        let zero = maxwell_garnett_effective_index(sil_index(), &[Fixed::ZERO], &[iron_index()])
+            .expect("a zero fraction is valid");
+        assert!(
+            (zero.0.to_f64_lossy() - sil_index().0.to_f64_lossy()).abs() < 1e-4,
+            "an all-zero inclusion fraction returns the bare matrix, got n {}",
+            zero.0.to_f64_lossy()
+        );
+    }
+
+    #[test]
+    fn the_maxwell_garnett_topology_differs_from_bruggeman() {
+        // Rule 2's whole point: the aggregation topology matters. Iron inclusions in an ice matrix
+        // (Maxwell-Garnett, the below-ice-line mantle structure) give a DIFFERENT effective index from the same
+        // iron and ice mixed symmetrically (Bruggeman, the above-ice-line bare mixture), the factor-level
+        // distinction the condensation history writes.
+        let f = Fixed::from_ratio(3, 10);
+        let one_minus = Fixed::from_ratio(7, 10);
+        let mg = maxwell_garnett_effective_index(ice_index(), &[f], &[iron_index()]).unwrap();
+        let brugg =
+            bruggeman_effective_index(&[one_minus, f], &[ice_index(), iron_index()]).unwrap();
+        assert!(
+            (mg.0.to_f64_lossy() - brugg.0.to_f64_lossy()).abs() > 1e-2
+                || (mg.1.to_f64_lossy() - brugg.1.to_f64_lossy()).abs() > 1e-2,
+            "the two topologies give different effective indices: MG {:?} vs Bruggeman {:?}",
+            (mg.0.to_f64_lossy(), mg.1.to_f64_lossy()),
+            (brugg.0.to_f64_lossy(), brugg.1.to_f64_lossy())
+        );
+        // Iron inclusions raise the absorption above the bare ice matrix (k_eff > k_ice).
+        assert!(
+            mg.1.to_f64_lossy() > ice_index().1.to_f64_lossy(),
+            "iron inclusions make the ice-matrix grain absorbing, k_eff {}",
+            mg.1.to_f64_lossy()
+        );
+    }
+
+    #[test]
+    fn the_maxwell_garnett_mix_rejects_bad_arguments() {
+        assert_eq!(
+            maxwell_garnett_effective_index(sil_index(), &[Fixed::ONE], &[]),
+            None,
+            "a length mismatch is rejected"
+        );
+        assert_eq!(
+            maxwell_garnett_effective_index(
+                (Fixed::ZERO, Fixed::ZERO),
+                &[Fixed::ONE],
+                &[iron_index()]
+            ),
+            None,
+            "a non-physical matrix index is rejected"
+        );
+        assert_eq!(
+            maxwell_garnett_effective_index(
+                sil_index(),
+                &[Fixed::from_ratio(-1, 10)],
+                &[ice_index()]
+            ),
+            None,
+            "a negative inclusion fraction is rejected"
+        );
+    }
+
+    #[test]
+    fn the_maxwell_garnett_mix_is_deterministic() {
+        let f = Fixed::from_ratio(2, 10);
+        assert_eq!(
+            maxwell_garnett_effective_index(ice_index(), &[f], &[iron_index()]),
+            maxwell_garnett_effective_index(ice_index(), &[f], &[iron_index()]),
+            "the closed-form solve replays byte for byte"
         );
     }
 

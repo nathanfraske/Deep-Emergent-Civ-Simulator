@@ -1,0 +1,113 @@
+# NiO bunsenite, standard Gibbs energy of formation from the elements, 298.15 to 1800 K. NiO of the
+# nickel-nickel-oxide (NNO) buffer, a common experimental reference oxygen buffer (needs Ni metal + this NiO).
+# PRIMARY: Robie & Hemingway (1995), USGS Bull. 2131, BUNSENITE high-T table p.207 (298.15 K anchor also in the oxide
+# summary p.18). Transcribed from the primary USGS PDF (md5 08c3cc7c2d823667c8efadfebcef02de). SECOND WITNESS:
+# PENDING. The NIST WebBook has no condensed-phase thermochemistry page for NiO (gas-phase ion data only), and the
+# JANAF condensed NiO(cr) table code was not locatable via web retrieval; the owner's Barin volume is the second
+# witness (widely cited literature anchor delta_f H298 ~ -239.7, consistent with Robie, but NOT recorded as a sourced
+# witness here pending retrieval). See manifest.toml. BLOCK KIND [[point]], cited-data-column idiom, header-cited.
+# COLUMNS: t_k (K); delta_f_g_kj / delta_f_h_kj (kJ/mol); s_j / cp_j (J/mol/K) on the 298.15 K anchor only.
+# FINGERPRINT: delta_f G298 = -211.1, delta_f H298 = -239.3. HONEST LIMITS: Neel (antiferromagnetic) transition at 519
+# K, printed as its own row; delta_f H steps at 1800 K as the Ni reference state changes (Ni melts ~1728 K). Melting
+# T(NiO) = 2257 K.
+
+substance = "NiO"
+mineral = "bunsenite"
+phase = "cr"
+formula_wt = "74.689"
+reference = "formation-from-elements"
+neel_transition_k = "519"
+melting_t_k = "2257"
+
+[[point]]
+t_k = "298.15"
+delta_f_g_kj = "-211.1"
+delta_f_h_kj = "-239.3"
+s_j = "37.99"
+cp_j = "44.49"
+
+[[point]]
+t_k = "300"
+delta_f_g_kj = "-211.0"
+delta_f_h_kj = "-239.3"
+
+[[point]]
+t_k = "400"
+delta_f_g_kj = "-201.6"
+delta_f_h_kj = "-238.6"
+
+[[point]]
+t_k = "500"
+delta_f_g_kj = "-192.5"
+delta_f_h_kj = "-237.3"
+
+[[point]]
+t_k = "519"
+delta_f_g_kj = "-190.9"
+delta_f_h_kj = "-236.8"
+note = "Neel transition 519 K (antiferromagnetic); rhombohedral below, cubic above"
+
+[[point]]
+t_k = "600"
+delta_f_g_kj = "-183.6"
+delta_f_h_kj = "-236.2"
+
+[[point]]
+t_k = "700"
+delta_f_g_kj = "-175.0"
+delta_f_h_kj = "-235.6"
+
+[[point]]
+t_k = "800"
+delta_f_g_kj = "-166.8"
+delta_f_h_kj = "-235.1"
+
+[[point]]
+t_k = "900"
+delta_f_g_kj = "-157.8"
+delta_f_h_kj = "-234.5"
+
+[[point]]
+t_k = "1000"
+delta_f_g_kj = "-149.3"
+delta_f_h_kj = "-234.0"
+
+[[point]]
+t_k = "1100"
+delta_f_g_kj = "-140.8"
+delta_f_h_kj = "-233.5"
+
+[[point]]
+t_k = "1200"
+delta_f_g_kj = "-132.4"
+delta_f_h_kj = "-233.1"
+
+[[point]]
+t_k = "1300"
+delta_f_g_kj = "-124.0"
+delta_f_h_kj = "-232.6"
+
+[[point]]
+t_k = "1400"
+delta_f_g_kj = "-115.7"
+delta_f_h_kj = "-232.1"
+
+[[point]]
+t_k = "1500"
+delta_f_g_kj = "-107.4"
+delta_f_h_kj = "-231.6"
+
+[[point]]
+t_k = "1600"
+delta_f_g_kj = "-99.1"
+delta_f_h_kj = "-231.1"
+
+[[point]]
+t_k = "1700"
+delta_f_g_kj = "-90.9"
+delta_f_h_kj = "-230.6"
+
+[[point]]
+t_k = "1800"
+delta_f_g_kj = "-82.0"
+delta_f_h_kj = "-247.3"

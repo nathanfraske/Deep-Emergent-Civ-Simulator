@@ -830,4 +830,50 @@ source = "synthetic test: the dense, high-pressure polymorph"
             "mafic crust derives a higher density than felsic, so it floats lower"
         );
     }
+
+    #[test]
+    fn crustal_density_resolves_the_refractory_oxides_corundum_and_spinel() {
+        // Seam 7: the condensation precipitates corundum (Al2O3) and spinel (MgAl2O4) at the refractory
+        // 13-element set. With both carried in the registry (corundum already seeded, spinel now vendored from
+        // Robie & Hemingway 1995), the density kernel resolves them, where it returned None while spinel had no
+        // molar volume. A pure-Al2O3 bulk minimizes to corundum; a pure-MgAl2O4 bulk minimizes to spinel, which
+        // sits below periclase-plus-corundum in apparent Gibbs energy by the reaction free energy, so the
+        // stoichiometric oxide does not disproportionate. Each reproduces its refractory density: corundum near
+        // 3.99 and spinel near 3.58, both denser than the near-3.21 forsterite Mg-silicate, so the
+        // differentiation routes them toward the interior rather than defaulting them into the crust.
+        let r = PhaseRegistry::standard().expect("registry loads");
+        let t = PeriodicTable::standard().expect("table loads");
+        let corundum = crustal_density(
+            &[el("Al", 2), el("O", 3)],
+            Fixed::from_int(300),
+            Fixed::from_int(1),
+            &r,
+            &t,
+        )
+        .expect("the Al2O3 composition resolves to corundum");
+        assert!(
+            close(corundum, 3.99, 0.03),
+            "corundum reproduces its density near 3.99 g/cm3, got {}",
+            corundum.to_f64_lossy()
+        );
+        let spinel = crustal_density(
+            &[el("Mg", 1), el("Al", 2), el("O", 4)],
+            Fixed::from_int(300),
+            Fixed::from_int(1),
+            &r,
+            &t,
+        )
+        .expect("the MgAl2O4 composition resolves to spinel");
+        assert!(
+            close(spinel, 3.58, 0.03),
+            "spinel reproduces its density near 3.58 g/cm3, got {}",
+            spinel.to_f64_lossy()
+        );
+        assert!(
+            spinel.to_f64_lossy() > 3.2 && corundum > spinel,
+            "both refractories are denser than forsterite (~3.21), corundum densest: corundum {}, spinel {}",
+            corundum.to_f64_lossy(),
+            spinel.to_f64_lossy()
+        );
+    }
 }

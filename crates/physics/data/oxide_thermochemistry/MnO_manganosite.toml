@@ -1,0 +1,106 @@
+# MnO manganosite, standard Gibbs energy of formation from the elements, 298.15 to 1800 K. MnO of manganese oxygen
+# buffers (MnO-Mn, and the MnO/Mn3O4 pair); oxide end-member for Mn-silicate activities. PRIMARY: Robie & Hemingway
+# (1995), USGS Bull. 2131, MANGANOSITE high-T table p.199 (298.15 K anchor also in the oxide summary p.17).
+# Transcribed from the primary USGS PDF (md5 08c3cc7c2d823667c8efadfebcef02de). SECOND WITNESS: PENDING. The NIST
+# WebBook has no condensed-phase thermochemistry page for MnO (gas-phase ion data only), and the JANAF condensed
+# MnO(cr) table code was not locatable via web retrieval; the owner's Barin volume is the second witness (widely cited
+# literature anchor delta_f H298 ~ -385.2, consistent with Robie, but NOT recorded as a sourced witness here pending
+# retrieval). See manifest.toml. BLOCK KIND [[point]], cited-data-column idiom, header-cited. COLUMNS: t_k (K);
+# delta_f_g_kj / delta_f_h_kj (kJ/mol); s_j / cp_j (J/mol/K) on the 298.15 K anchor only. FINGERPRINT: delta_f G298 =
+# -362.9, delta_f H298 = -385.2. HONEST LIMITS: delta_f H steps near 1400-1600 K (Mn reference-state changes: Mn has
+# several solid allotropes and melts ~1519 K); reference-element features, delta_f G stays smooth. Melting T(MnO) =
+# 2054 K.
+
+substance = "MnO"
+mineral = "manganosite"
+phase = "cr"
+formula_wt = "70.937"
+reference = "formation-from-elements"
+melting_t_k = "2054"
+
+[[point]]
+t_k = "298.15"
+delta_f_g_kj = "-362.9"
+delta_f_h_kj = "-385.2"
+s_j = "59.71"
+cp_j = "44.10"
+
+[[point]]
+t_k = "300"
+delta_f_g_kj = "-362.8"
+delta_f_h_kj = "-385.2"
+
+[[point]]
+t_k = "400"
+delta_f_g_kj = "-355.3"
+delta_f_h_kj = "-384.9"
+
+[[point]]
+t_k = "500"
+delta_f_g_kj = "-348.0"
+delta_f_h_kj = "-384.5"
+
+[[point]]
+t_k = "600"
+delta_f_g_kj = "-340.7"
+delta_f_h_kj = "-384.3"
+
+[[point]]
+t_k = "700"
+delta_f_g_kj = "-333.4"
+delta_f_h_kj = "-384.1"
+
+[[point]]
+t_k = "800"
+delta_f_g_kj = "-326.2"
+delta_f_h_kj = "-384.0"
+
+[[point]]
+t_k = "900"
+delta_f_g_kj = "-319.0"
+delta_f_h_kj = "-383.9"
+
+[[point]]
+t_k = "1000"
+delta_f_g_kj = "-311.7"
+delta_f_h_kj = "-386.2"
+
+[[point]]
+t_k = "1100"
+delta_f_g_kj = "-304.3"
+delta_f_h_kj = "-386.2"
+
+[[point]]
+t_k = "1200"
+delta_f_g_kj = "-296.8"
+delta_f_h_kj = "-386.3"
+
+[[point]]
+t_k = "1300"
+delta_f_g_kj = "-289.4"
+delta_f_h_kj = "-386.3"
+
+[[point]]
+t_k = "1400"
+delta_f_g_kj = "-281.9"
+delta_f_h_kj = "-388.6"
+
+[[point]]
+t_k = "1500"
+delta_f_g_kj = "-274.1"
+delta_f_h_kj = "-391.1"
+
+[[point]]
+t_k = "1600"
+delta_f_g_kj = "-265.6"
+delta_f_h_kj = "-403.8"
+
+[[point]]
+t_k = "1700"
+delta_f_g_kj = "-256.9"
+delta_f_h_kj = "-404.4"
+
+[[point]]
+t_k = "1800"
+delta_f_g_kj = "-248.3"
+delta_f_h_kj = "-404.9"

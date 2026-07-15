@@ -1,0 +1,76 @@
+# CaTiO3 perovskite standard Gibbs energy of formation (formation from the elements), for the CaTiO3 condensation
+# front. NIST-JANAF has NO Ca-Ti-O species (see janaf.rs), so this fills the beyond-JANAF gap: perovskite is the
+# high-temperature titanium condensate (condenses ~1582 K at 1e-4 bar solar, Lodders Ti = 1582 K), the front a
+# Gibbs-minimization over the loaded potentials must reproduce, a calibration target rather than a run input.
+# PRIMARY, owner-pinned (public domain): Robie, R.A. & Hemingway, B.S. (1995), Thermodynamic Properties of Minerals
+# and Related Substances at 298.15 K and 1 Bar Pressure and at Higher Temperatures, USGS Bulletin 2131, PEROVSKITE
+# table, p.232. Transcribed from the primary USGS PDF (the Lodders protocol: transcribe the table, fingerprint-check
+# spot rows). SOURCE PDF (the receipt): https://pubs.usgs.gov/bul/2131/report.pdf ,
+# md5 08c3cc7c2d823667c8efadfebcef02de .
+#
+# SECOND WITNESS: Barin, Thermochemical Data of Pure Substances, gives delta_f H(298) ~ -1660.6 kJ/mol, S(298) ~
+# 93.64 J/mol/K, delta_f G(298) ~ -1575.3 kJ/mol, essentially identical to Robie (the Barin figures via a secondary
+# database report, not the Barin primary volume; the Robie values below ARE verified directly in the USGS PDF).
+# CROSS-CHECK (compilation-of-compilations, tagged as such): the GGchem open condensate file lists CaTiO3[s]
+# PEROVSKITE with a Sharp & Huebner (1990) atom-referenced dG fit, confirming perovskite as the Ti high-temperature
+# condensate; it is not a numeric [M] here (a different reference state), only a membership confirmation.
+# SOURCE-LADDER (owner ruling): for a measurable terrestrial mineral the alternative [M] (Robie) PRECEDES any
+# estimator; a Born-Lande estimate is the alien rung, for a species no compilation tabulates, never used here.
+#
+# COLUMNS: t_k = temperature (K); delta_f_g_kj = standard Gibbs energy of formation from the elements (kJ/mol), the
+# load-bearing value; delta_f_h_kj = standard enthalpy of formation from the elements (kJ/mol); s_j / cp_j = the
+# standard entropy and heat capacity (J/mol/K), carried only on the 298.15 K anchor row. FINGERPRINT (owner
+# spot-check, in the loader #[test]): perovskite is very refractory, so delta_f H(298) ~ -1660 kJ/mol class
+# (-1660.6) and delta_f G is strongly negative throughout (-1574.8 at 298 K rising to -1184.1 at 1700 K).
+#
+# BLOCK KIND [[point]], the cited-data-column idiom, NOT a reserved floor kind: an immutable transcription of the
+# Robie-Hemingway perovskite table, out of the floor real/fantasy authorship axis. PROVENANCE: header citation.
+# GRADE: single (one compilation, one phase progression). HONEST LIMITS: the reference is "formation from the
+# elements", so delta_f H steps at 1200 K (~12 kJ) as the calcium reference state changes when Ca melts near 1115 K
+# (a reference-element feature, not an error; delta_f G stays smooth); perovskite is orthorhombic below 1530 K and
+# cubic 1530-1800 K (the Cp discontinuity there); melting T = 2188 K. No consumer is wired in any pinned run path
+# (byte-neutral).
+
+substance = "CaTiO3"
+mineral = "perovskite"
+phase = "cr"
+formula_wt = "135.956"
+reference = "formation-from-elements"
+
+
+[[point]]
+t_k = "298.15"
+delta_f_g_kj = "-1574.8"
+delta_f_h_kj = "-1660.6"
+s_j = "93.64"
+cp_j = "97.65"
+
+[[point]]
+t_k = "1200"
+delta_f_g_kj = "-1323.9"
+delta_f_h_kj = "-1664.1"
+
+[[point]]
+t_k = "1300"
+delta_f_g_kj = "-1295.6"
+delta_f_h_kj = "-1662.5"
+
+[[point]]
+t_k = "1400"
+delta_f_g_kj = "-1267.5"
+delta_f_h_kj = "-1660.8"
+
+[[point]]
+t_k = "1500"
+delta_f_g_kj = "-1239.4"
+delta_f_h_kj = "-1658.9"
+
+[[point]]
+t_k = "1600"
+delta_f_g_kj = "-1211.8"
+delta_f_h_kj = "-1655.3"
+
+[[point]]
+t_k = "1700"
+delta_f_g_kj = "-1184.1"
+delta_f_h_kj = "-1654.4"

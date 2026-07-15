@@ -1029,3 +1029,8 @@ derive_first_defect = true
 id = "phase.fayalite"
 grade = "measured"
 derive_first_defect = true
+
+[[grade]]
+id = "phase.spinel"
+grade = "measured"
+derive_first_defect = true
