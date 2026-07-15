@@ -68,6 +68,7 @@ pub mod optics;
 pub mod properties;
 pub mod quench;
 pub mod stoner;
+pub mod surface_composition;
 pub mod thermochemical;
 pub mod verdict;
 
