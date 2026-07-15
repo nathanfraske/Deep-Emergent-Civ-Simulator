@@ -1243,8 +1243,12 @@ pub fn draw_globe(
                 },
                 None => style.tint.unwrap_or(Rgb::new(40, 72, 120)),
             };
-            // Lambert diffuse: dot of the surface normal with the star direction, clamped at the terminator.
-            let lambert = (nx * l[0] + ny * l[1] + nz * l[2]).max(0.0);
+            // Lambert diffuse: dot of the surface normal with the star direction, clamped at the terminator. The
+            // normal uses WORLD-UP y (-ny, since screen y points down), the SAME frame the tile sample above uses
+            // ([nx, -ny, nz]) and the frame `l` is carried into; without this the brightness was computed in
+            // screen-down y while the tiles were placed in world-up y, so the terminator did not line up with the
+            // tiles (an inverted-vertical mismatch).
+            let lambert = (nx * l[0] - ny * l[1] + nz * l[2]).max(0.0);
             let shade = |c: u8, t: f32| -> u8 {
                 let day = AMBIENT + (1.0 - AMBIENT) * lambert * t;
                 (c as f32 * day).clamp(0.0, 255.0) as u8
@@ -1429,10 +1433,13 @@ pub fn render_solar_system_view(
     let dx = (star_px.0 - planet_cx) as f32;
     let dy = (star_px.1 - planet_cy) as f32;
     let plane = (dx * dx + dy * dy).sqrt();
+    // The y is WORLD-UP (-dy, since screen y points down), the same frame draw_globe's tile sample and Lambert
+    // normal use, so the terminator tracks the tiles as you pan (at IDENTITY the two sign flips cancel, so the
+    // straight-on globe is byte-identical to before).
     let star_dir = if plane <= 0.0 {
         [0.0, 0.0, 1.0]
     } else {
-        [0.72 * dx / plane, 0.72 * dy / plane, 0.70]
+        [0.72 * dx / plane, -0.72 * dy / plane, 0.70]
     };
     draw_star(
         &mut buf,
