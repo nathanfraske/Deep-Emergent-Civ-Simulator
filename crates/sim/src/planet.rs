@@ -64,6 +64,9 @@ pub struct DerivedPlanet {
     pub star_luminosity_ratio: Fixed,
     /// The star's effective temperature (K), the render's blackbody light colour.
     pub star_effective_temperature_k: Fixed,
+    /// The star's radius `R / R_sun`, so the observer can derive the star's apparent angular size from the radius
+    /// and the orbit distance (a big or close star subtends more sky than a small or far one).
+    pub star_radius_ratio: Fixed,
     /// The disk temperature at the orbit (K), the condensation input and the surface warmth.
     pub disk_temperature_k: Fixed,
     /// The planet mass in Earth masses (the accretion output).
@@ -123,6 +126,7 @@ pub fn derive_planet(
     Some(DerivedPlanet {
         star_luminosity_ratio: star.luminosity_ratio,
         star_effective_temperature_k: star.effective_temperature_k,
+        star_radius_ratio: star.radius_ratio,
         disk_temperature_k,
         mass_earth: planet_mass_earth,
         bulk_density_g_cm3: planet_bulk_density_g_cm3,

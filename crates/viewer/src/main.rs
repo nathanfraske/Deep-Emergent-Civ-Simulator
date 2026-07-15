@@ -286,6 +286,8 @@ fn derived_globe_cmd(argv: &[String]) {
     let fx = GlobeFixture {
         radius_m: scene.radius_m,
         t_eff: scene.t_eff,
+        star_radius_ratio: scene.star_radius_ratio,
+        orbit_au: scene.orbit_au,
         tiles: scene.tiles.clone(),
         cols: scene.cols,
         sky: scene.sky,
@@ -517,6 +519,10 @@ fn parse<T: std::str::FromStr>(arg: Option<&String>, default: T) -> T {
 struct GlobeFixture {
     radius_m: Fixed,
     t_eff: Fixed,
+    /// The star's radius `R / R_sun` and the orbit distance (AU), so the on-screen star size derives from its
+    /// apparent angular diameter (`~ R_star / distance`) rather than a fixed dot.
+    star_radius_ratio: Fixed,
+    orbit_au: Fixed,
     tiles: Vec<DerivedTile>,
     cols: usize,
     /// The atmosphere-limb tint: the DERIVED Rayleigh sky colour ([`render::rayleigh_sky_rgb`]) computed from a
@@ -571,10 +577,30 @@ fn build_globe_fixture() -> Option<GlobeFixture> {
     Some(GlobeFixture {
         radius_m: planet.radius_m,
         t_eff: planet.star_effective_temperature_k,
+        star_radius_ratio: planet.star_radius_ratio,
+        orbit_au: Fixed::ONE,
         tiles,
         cols,
         sky,
     })
+}
+
+/// The on-screen star radius (pixels), DERIVED from the star's apparent angular diameter. The star subtends
+/// `~ 2 R_star / distance` of sky, so relative to the Sun seen from Earth (`R_sun / 1 AU`) the apparent size
+/// scales as `radius_ratio / orbit_au`; that scales the reference on-screen dot (`min_dim / 22`, the Sun-at-1-AU
+/// look). So a bigger or closer star draws larger and a smaller or farther one smaller: a massive main-sequence
+/// star at a wide orbit is honestly small in the sky, a giant or a close star large. Clamped to stay visible and
+/// not swamp the frame. A non-canon display projection (the star's real angular size is the physics; the pixel
+/// scale is the view's).
+fn derived_star_radius_px(fx: &GlobeFixture, min_dim: usize) -> usize {
+    let base = (min_dim as f64 / 22.0).max(2.0);
+    let orbit = fx.orbit_au.to_f64_lossy();
+    let apparent = if orbit > 0.0 {
+        fx.star_radius_ratio.to_f64_lossy() / orbit
+    } else {
+        1.0
+    };
+    (base * apparent).round().clamp(2.0, min_dim as f64 * 0.9) as usize
 }
 
 /// The globe view scale for level `g` (0-based, closer as it grows) in a `w` by `h` frame: the metres-per-pixel
@@ -596,7 +622,7 @@ fn globe_view_params(fx: &GlobeFixture, w: usize, h: usize, g: u32) -> (Fixed, (
     // The star sits off to the upper-left; its screen position is the orbit's projection (a fixture phase until the
     // manager wires the real orbit), which sets which hemisphere is lit.
     let star_px = ((w / 5) as i32, (h / 4) as i32);
-    let star_r = (min_dim / 22).max(3);
+    let star_r = derived_star_radius_px(fx, min_dim);
     (m_per_px, star_px, star_r)
 }
 
@@ -618,6 +644,8 @@ struct DerivedScene {
     orbit_au: Fixed,
     radius_m: Fixed,
     t_eff: Fixed,
+    /// The star's radius `R / R_sun`, for the derived on-screen star size (its angular diameter at the orbit).
+    star_radius_ratio: Fixed,
     /// The MATURE disk surface warmth (K), the finished-planet irradiation equilibrium (one epoch of the join-law).
     disk_t: Fixed,
     /// The DERIVED FORMATION-era midplane condensation temperature (K) the crust condensed against (the OTHER epoch).
@@ -1082,6 +1110,7 @@ fn build_derived_scene(star_mass: Fixed, orbit_au: Fixed) -> Result<DerivedScene
         orbit_au,
         radius_m: planet.radius_m,
         t_eff: planet.star_effective_temperature_k,
+        star_radius_ratio: planet.star_radius_ratio,
         disk_t: planet.disk_temperature_k,
         condensation_t: condensation_temperature_k,
         gravity: planet.surface_gravity_m_s2,
@@ -1280,7 +1309,7 @@ fn derived_globe_view(fx: &GlobeFixture, w: usize, h: usize, t: f32) -> (Fixed, 
     // The star sits off to the upper-left; it is occluded once the globe grows to fill the frame (you are at the
     // surface), the honest look for the close view.
     let star_px = ((w / 5) as i32, (h / 4) as i32);
-    let star_r = (min_dim / 22).max(3);
+    let star_r = derived_star_radius_px(fx, min_dim);
     (m_per_px, star_px, star_r)
 }
 
@@ -1318,6 +1347,8 @@ fn run_derived(argv: &[String]) {
     let globe = GlobeFixture {
         radius_m: scene.radius_m,
         t_eff: scene.t_eff,
+        star_radius_ratio: scene.star_radius_ratio,
+        orbit_au: scene.orbit_au,
         tiles: scene.tiles.clone(),
         cols: scene.cols,
         sky: scene.sky,
