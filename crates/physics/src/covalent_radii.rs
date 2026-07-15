@@ -13,6 +13,8 @@
 //! with the length estimator's error (a second battery pass grades the estimator through the tetrahedral sum).
 
 use civsim_core::Fixed;
+use civsim_units::bignum::BigRat;
+use civsim_units::fundamentals;
 use serde::Deserialize;
 use std::collections::BTreeMap;
 
@@ -138,6 +140,68 @@ impl CovalentRadii {
         let rb = self.radius(b)?.tetrahedral_pm?;
         ra.checked_add(rb)
     }
+
+    /// BAND 4, the Schomaker-Stevenson partially-ionic correction on the tetrahedral-crystal radius sum:
+    /// `r_AB = r_tet(a) + r_tet(b) - 9 |Delta-chi_P|` pm (Schomaker & Stevenson, J. Am. Chem. Soc. 63, 37 (1941)).
+    /// The `9 pm / |Delta-chi|` is ONE class-universal constant, fit by Schomaker and Stevenson on a broad
+    /// bond-length compilation that never saw this battery (the legality line: we fit nothing, the constant is
+    /// class-universal). It shortens the polar-bond length the additive covalent sum over-estimates, because the
+    /// more electronegative atom draws charge and contracts the bond. `Delta-chi_P` is Pauling's OWN thermochemical
+    /// electronegativity difference (see [`pauling_electronegativity_difference`]), the scale the 9 pm constant was
+    /// published against, so no cross-scale conversion enters. SiC (194.9 pm sum, `Delta-chi_P ~ 0.59-0.65`) lands
+    /// ~189 pm against the measured 188.9, closing the pass-2 length band to the few-picometre class grade a 1941
+    /// two-constant rule earns (never the decimal). `None` if either element lacks a tetrahedral radius or on
+    /// overflow.
+    pub fn schomaker_stevenson_tetrahedral_length_pm(
+        &self,
+        a: &str,
+        b: &str,
+        delta_chi_pauling: Fixed,
+    ) -> Option<Fixed> {
+        let sum = self.tetrahedral_bond_length_pm(a, b)?;
+        let shift = Fixed::from_int(9).checked_mul(delta_chi_pauling.abs())?;
+        sum.checked_sub(shift)
+    }
+}
+
+/// The energy conversion `1 eV = e * N_A = 96.485 kJ/mol` (the Faraday constant per volt), DERIVED from the register
+/// (`e`, `N_A`), so Pauling's thermochemical identity reads dissociation energies in the repo's kJ/mol with no bare
+/// literal. `None` if a fundamental fails to resolve or the value leaves the representable range.
+fn kj_per_mol_per_ev() -> Option<Fixed> {
+    let e = BigRat::from_decimal_str(fundamentals::fundamental("e")?.value).ok()?;
+    let n_a = BigRat::from_decimal_str(fundamentals::fundamental("N_A")?.value).ok()?;
+    // e * N_A is J/mol per eV; / 1000 -> kJ/mol per eV.
+    let v = e.mul(&n_a).div(&BigRat::from_i64(1000));
+    Fixed::from_bits_i128(v.round_to_scale(Fixed::FRAC_BITS)?)
+}
+
+/// BAND 4, Pauling's thermochemical electronegativity DIFFERENCE from single-bond dissociation energies:
+/// `|chi_A - chi_B| = sqrt(Delta_AB / eV)`, with the extra-ionic ("resonance") energy
+/// `Delta_AB = D(AB) - (1/2)[D(AA) + D(BB)]` (Pauling, J. Am. Chem. Soc. 54, 3570 (1932), the arithmetic-mean form).
+/// The three bond dissociation energies are in kJ/mol; the eV conversion is the register-derived Faraday constant
+/// ([`kj_per_mol_per_ev`]). This lands `chi_P` on Pauling's OWN thermochemical scale, the reason to DERIVE it rather
+/// than rescale a Mulliken `chi = (IE + EA)/2`: the scales measure different physics, so a conversion would smuggle
+/// a fit (the Allred-Rochow lesson), and the Schomaker-Stevenson 9 pm constant was published against this scale.
+///
+/// The geometric-mean variant `Delta_AB = D(AB) - sqrt(D(AA) D(BB))` is Pauling's later refinement, FLAGGED not
+/// built (build arithmetic first). HONEST LIMIT: for a near-nonpolar bond the arithmetic-mean postulate can fail
+/// (`D(AB)` below the homonuclear mean, so `Delta_AB < 0`); this returns `None` there rather than fabricate an
+/// imaginary root (Si-H is the worked case, which is why Si's `chi_P` anchors through a polar bond, not hydrogen).
+/// `None` also on a bad conversion or overflow.
+pub fn pauling_electronegativity_difference(
+    d_ab_kj_per_mol: Fixed,
+    d_aa_kj_per_mol: Fixed,
+    d_bb_kj_per_mol: Fixed,
+) -> Option<Fixed> {
+    let mean = d_aa_kj_per_mol
+        .checked_add(d_bb_kj_per_mol)?
+        .checked_div(Fixed::from_int(2))?;
+    let delta = d_ab_kj_per_mol.checked_sub(mean)?;
+    if delta < Fixed::ZERO {
+        return None; // the arithmetic-mean postulate fails; escalate, never an imaginary root
+    }
+    let delta_ev = delta.checked_div(kj_per_mol_per_ev()?)?;
+    Some(delta_ev.sqrt())
 }
 
 #[cfg(test)]
@@ -221,6 +285,86 @@ mod tests {
             c.radius("C").unwrap().at_order(4),
             None,
             "order 4 is unsupported"
+        );
+    }
+
+    // BAND 4 acceptance. The single-bond dissociation energies (kJ/mol) are CITED literature fixtures, standard
+    // thermochemical single-bond values (Pauling, "The Nature of the Chemical Bond", 3rd ed. 1960; Cottrell,
+    // "The Strengths of Chemical Bonds", 1958; Darwent, NSRDS-NBS 31, 1970): H-H 436, C-C 346, Si-Si 222, Si-C 318,
+    // C-H 413, Si-H 318, O-O 146, O-H 463. INPUT-AUDIT SEAM (reported): the repo's atomization column supplies only
+    // D(H-H) = 2*atomization(H) = 436 cleanly; C/O/N atomization are graphite sublimation, half the O=O double, and
+    // half the N triple, none the single-bond D-value, and no heteronuclear D-value is in the repo. A production
+    // chi_P column needs a vendored single-bond D-value table (a named small build), so these live as cited [M]
+    // fixtures, never seeded from memory.
+    const D_HH: i32 = 436;
+    const D_CC: i32 = 346;
+    const D_SISI: i32 = 222;
+    const D_SIC: i32 = 318;
+    const D_CH: i32 = 413;
+    const D_SIH: i32 = 318;
+    const D_OO: i32 = 146;
+    const D_OH: i32 = 463;
+
+    #[test]
+    fn the_band_four_pauling_difference_reproduces_the_scale_at_class_grade() {
+        // Pauling's identity |chi_A - chi_B| = sqrt(Delta/eV), Delta = D(AB) - (1/2)[D(AA)+D(BB)]. Anchored at
+        // chi_H = 2.20, the derived values reproduce the standard Pauling table (C 2.55, O 3.44) to the few-tenths
+        // CLASS grade of the arithmetic-mean scheme, never the decimal.
+        let d = |z: i32| Fixed::from_int(z);
+        // chi_C - chi_H: sqrt((413 - (346+436)/2)/96.485) = sqrt(22/96.485) = 0.478; chi_C ~ 2.68 vs table 2.55.
+        let dc_h = pauling_electronegativity_difference(d(D_CH), d(D_CC), d(D_HH)).unwrap();
+        let chi_c = 2.20 + dc_h.to_f64_lossy();
+        assert!(
+            (chi_c - 2.55).abs() < 0.15,
+            "derived chi_C ~ 2.55 at class grade, got {chi_c}"
+        );
+        // chi_O - chi_H: sqrt((463 - (146+436)/2)/96.485) = sqrt(172/96.485) = 1.335; chi_O ~ 3.54 vs table 3.44.
+        let do_h = pauling_electronegativity_difference(d(D_OH), d(D_OO), d(D_HH)).unwrap();
+        let chi_o = 2.20 + do_h.to_f64_lossy();
+        assert!(
+            (chi_o - 3.44).abs() < 0.15,
+            "derived chi_O ~ 3.44 at class grade, got {chi_o}"
+        );
+        // The Si-H HONEST LIMIT: Delta(Si,H) = 318 - (222+436)/2 = -11 < 0, the arithmetic-mean postulate fails for
+        // the near-nonpolar Si-H bond, so the identity returns None (escalate) rather than an imaginary root. Si's
+        // chi_P must anchor through a polar bond (Si-C below), not hydrogen.
+        assert!(
+            pauling_electronegativity_difference(d(D_SIH), d(D_SISI), d(D_HH)).is_none(),
+            "Si-H below the homonuclear mean returns None (no fabricated imaginary root)"
+        );
+    }
+
+    #[test]
+    fn the_band_four_schomaker_stevenson_closes_the_sic_length_band() {
+        // The pass-2 SiC length re-grade. Delta-chi_P(Si,C) is DERIVED from the Si-C/Si-Si/C-C dissociation energies
+        // (not looked up): sqrt((318 - (222+346)/2)/96.485) = sqrt(34/96.485) = 0.594 (vs the standard-table 0.65,
+        // within the class grade). Schomaker-Stevenson then shortens the 194.9 pm additive sum by 9*0.594 = 5.3 pm to
+        // ~189.6, against the measured 188.9. The acceptance is the FEW-PICOMETRE class grade of a 1941 two-constant
+        // rule, NOT the 189.0 decimal (one lucky point must not masquerade as the estimator's band).
+        let radii = col();
+        let d = |z: i32| Fixed::from_int(z);
+        let delta_chi = pauling_electronegativity_difference(d(D_SIC), d(D_SISI), d(D_CC)).unwrap();
+        assert!(
+            (delta_chi.to_f64_lossy() - 0.65).abs() < 0.1,
+            "derived Delta-chi_P(Si,C) ~ 0.65 at class grade, got {}",
+            delta_chi.to_f64_lossy()
+        );
+        let corrected = radii
+            .schomaker_stevenson_tetrahedral_length_pm("Si", "C", delta_chi)
+            .unwrap()
+            .to_f64_lossy();
+        let uncorrected = radii
+            .tetrahedral_bond_length_pm("Si", "C")
+            .unwrap()
+            .to_f64_lossy();
+        let measured = 188.9;
+        assert!(
+            (corrected - measured).abs() < 3.0,
+            "the Schomaker-Stevenson SiC length lands within the few-pm class grade of 188.9, got {corrected}"
+        );
+        assert!(
+            (corrected - measured).abs() < (uncorrected - measured).abs(),
+            "the correction (over)closes the +6 pm additive miss ({corrected} vs sum {uncorrected}, measured {measured})"
         );
     }
 }
