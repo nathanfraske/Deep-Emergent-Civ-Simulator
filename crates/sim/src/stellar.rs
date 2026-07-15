@@ -501,42 +501,46 @@ mod tests {
 
     #[test]
     fn the_subdwarf_sign_and_stefan_boltzmann_slope_are_the_pre_registered_receipt() {
-        // The Population II subdwarf receipt (owner, a battery row for free): with lambda < 0 and mu > 0, a metal-
-        // POOR halo star at fixed mass is MORE luminous, SMALLER, and HOTTER than the solar-metallicity star, the
-        // measured sign the halo subdwarfs carry. And the exact Stefan-Boltzmann tie fixes the temperature slope to
-        // d ln T_eff / d ln Z = lambda/4 - mu/2, the joint cross-check any grid-extracted (lambda, mu) must satisfy
-        // (the same identity the metallicity grid agent verifies against MIST and PARSEC's own T_eff).
-        let solar = main_sequence_star(
-            Fixed::ONE,
-            Fixed::ONE,
-            alpha(),
-            beta(),
-            lambda(),
-            mu(),
-            t_max(),
-        )
-        .unwrap();
+        // The Population II subdwarf receipt, CORRECTED to the grid-extracted exponents (owner ruling, anomaly 2).
+        // The naive "lambda < 0, mu > 0" assumption was FALSIFIED: MIST and PARSEC agree mu is small and slightly
+        // NEGATIVE (~-0.018), because the grids couple helium to metals (Y rises with Z along the Galactic-
+        // enrichment trajectory), and the mean-molecular-weight radius SHRINK outweighs the opacity SWELL. So at
+        // fixed mass a metal-poor halo star is MORE LUMINOUS and HOTTER (robust, |lambda/4| dominates the T_eff
+        // slope) and its radius is NEARLY FLAT, very slightly LARGER, not smaller. Both-clause receipt so the
+        // corrected row is not misread against the name: subdwarfs are SUB-LUMINOUS at fixed COLOUR (the naming),
+        // while BRIGHTER at fixed MASS (this row); both hold because the hotter metal-poor star slides blueward
+        // along the colour axis. The exact Stefan-Boltzmann tie fixes d ln T_eff/d ln Z = lambda/4 - mu/2 = -0.101,
+        // the joint cross-check the two independent grids closed to 0.001.
+        let lam = Fixed::from_ratio(-44, 100); // lambda = -0.44, MIST + PARSEC banded, inside (-1, 0)
+        let m = Fixed::from_ratio(-18, 1000); // mu = -0.018 along Y(Z), the Galactic-composition definition (b)
+        let solar =
+            main_sequence_star(Fixed::ONE, Fixed::ONE, alpha(), beta(), lam, m, t_max()).unwrap();
         let poor = main_sequence_star(
             Fixed::ONE,
             Fixed::from_ratio(1, 10),
             alpha(),
             beta(),
-            lambda(),
-            mu(),
+            lam,
+            m,
             t_max(),
         )
         .unwrap();
         assert!(
             poor.luminosity_ratio > solar.luminosity_ratio,
-            "the metal-poor subdwarf is more luminous"
-        );
-        assert!(
-            poor.radius_ratio < solar.radius_ratio,
-            "the metal-poor subdwarf is smaller"
+            "metal-poor is more luminous at fixed mass (brighter clause)"
         );
         assert!(
             poor.effective_temperature_k > solar.effective_temperature_k,
-            "the metal-poor subdwarf is hotter"
+            "metal-poor is hotter"
+        );
+        // Radius nearly flat, very slightly larger with mu < 0 (0.1^-0.018 ~ 1.04), never the old "smaller".
+        assert!(
+            poor.radius_ratio > solar.radius_ratio,
+            "metal-poor radius is slightly larger, not smaller (the falsified half)"
+        );
+        assert!(
+            poor.radius_ratio.to_f64_lossy() / solar.radius_ratio.to_f64_lossy() < 1.1,
+            "the radius is nearly metallicity-independent (|mu| ~ 0.02)"
         );
         // The Stefan-Boltzmann slope identity by finite difference of ln T_eff over ln Z at fixed mass.
         let s1 = main_sequence_star(
@@ -544,8 +548,8 @@ mod tests {
             Fixed::from_ratio(9, 10),
             alpha(),
             beta(),
-            lambda(),
-            mu(),
+            lam,
+            m,
             t_max(),
         )
         .unwrap();
@@ -554,15 +558,15 @@ mod tests {
             Fixed::from_ratio(11, 10),
             alpha(),
             beta(),
-            lambda(),
-            mu(),
+            lam,
+            m,
             t_max(),
         )
         .unwrap();
         let slope = (s2.effective_temperature_k.to_f64_lossy().ln()
             - s1.effective_temperature_k.to_f64_lossy().ln())
             / (1.1_f64.ln() - 0.9_f64.ln());
-        let expected = -0.5 / 4.0 - 0.25 / 2.0; // lambda/4 - mu/2 = -0.25
+        let expected = -0.44 / 4.0 - (-0.018) / 2.0; // lambda/4 - mu/2 = -0.101
         assert!(
             (slope - expected).abs() < 0.01,
             "d ln T_eff/d ln Z = lambda/4 - mu/2 = {expected}, got {slope}"

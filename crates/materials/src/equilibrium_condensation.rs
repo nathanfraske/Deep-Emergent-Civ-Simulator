@@ -20,7 +20,23 @@
 //! survives the switch to gas-phase, fixed-elemental-abundance condensation, wired as a test rather than asserted.
 
 use civsim_core::Fixed;
+use civsim_physics::gas_thermochemistry::molar_gas_constant;
 use std::collections::BTreeMap;
+
+/// The dimensionless standard chemical potential `g = mu°(T)/RT` of a species from its JANAF standard Gibbs energy
+/// of formation `delta_f G(T)` in kJ/mol (the [M] TOTAL top rung of the source ladder): `g = delta_f_G * 1000 /
+/// (R T)`. This is the `g_over_rt` [`gas_equilibrium`] and the condensation saturation read for a JANAF-tabulated
+/// species; the RRHO estimator is the certifier and alien rung for a species with no row. `None` on a non-positive
+/// temperature or a register miss.
+pub fn janaf_g_over_rt(delta_f_g_kj_mol: Fixed, temperature_k: Fixed) -> Option<Fixed> {
+    if temperature_k <= Fixed::ZERO {
+        return None;
+    }
+    let rt = molar_gas_constant()?.checked_mul(temperature_k)?; // J/mol
+    delta_f_g_kj_mol
+        .checked_mul(Fixed::from_int(1000))?
+        .checked_div(rt)
+}
 
 /// The phase of a candidate species: an ideal gas (its amount is a free equilibrium variable) or a condensed phase
 /// (a solid or liquid, whose activity is one when present, the active-set member the fuller minimizer routes to the
@@ -410,6 +426,46 @@ mod tests {
         assert!(
             gas_equilibrium(&sys, &b).is_none(),
             "an unspanned element escalates"
+        );
+    }
+
+    #[test]
+    fn the_iron_condensation_temperature_reproduces_the_lodders_front() {
+        // THE FIRST LODDERS GATE, a genuine cross-check: Lodders 2003 computed her 50%-condensation temperatures
+        // with her OWN thermochemical set, so a JANAF-derived front is an independent-dataset agreement, not a
+        // tautology. The Fe(cr) <-> Fe(g) vapor-solid saturation: the reaction Gibbs g(gas) - g(solid) = mu°(Fe,g)/RT
+        // - mu°(Fe,cr)/RT (both from janaf_g_over_rt, the mu-standard [M] wire), and the 50%-condensation T is where
+        // it equals ln(P0/P_Fe) + ln 2 (the ln 2 because at T50 half the iron is condensed, so the remaining gas
+        // partial pressure is halved). P_Fe is the solar iron partial pressure at the disk 1e-4 bar: a labelled [M]
+        // fixture, solar log-eps(Fe) = 7.50 (AGSS09), in a mostly-H2/He gas x_Fe ~ 5.4e-5, so P_Fe ~ 5.4e-9 bar.
+        // OWNER BAND: the ordering is demanded exact, the absolute temperature carries an inter-dataset +-30 K class
+        // band; anything larger convicts the build, not the literature.
+        let janaf = civsim_physics::janaf::JanafTables::standard().expect("JANAF loads");
+        let fe_g = janaf.species("Fe(g)").expect("Fe(g) in JANAF");
+        let fe_cr = janaf.species("Fe(cr)").expect("Fe(cr) in JANAF");
+        // f(T) = g(gas) - g(solid), the dimensionless reaction Gibbs through the mu-standard wire.
+        let f = |t: f64| -> f64 {
+            let tf = Fixed::from_int(t as i32);
+            let g_gas = janaf_g_over_rt(fe_g.delta_f_g_at(tf).unwrap(), tf).unwrap();
+            let g_sol = janaf_g_over_rt(fe_cr.delta_f_g_at(tf).unwrap(), tf).unwrap();
+            g_gas.checked_sub(g_sol).unwrap().to_f64_lossy()
+        };
+        // target = ln(P0/P_Fe) + ln 2, P0 = 1 bar, P_Fe = 5.4e-9 bar.
+        let target = (1.0_f64 / 5.4e-9).ln() + 2.0_f64.ln();
+        let f_lo = f(1300.0);
+        let f_hi = f(1400.0);
+        assert!(
+            f_lo > target && target > f_hi,
+            "the Fe T50 is bracketed by [1300, 1400] K: f(1300)={f_lo:.2} > target={target:.2} > f(1400)={f_hi:.2}"
+        );
+        let t50 = 1300.0 + 100.0 * (f_lo - target) / (f_lo - f_hi);
+        // The vendored Lodders T50 for iron (own-thermochemistry witness), the cross-check target.
+        let lodders =
+            civsim_physics::condensation::CondensationTable::standard().expect("Lodders loads");
+        let lodders_fe = lodders.t50_k("Fe").expect("Fe in Lodders").to_f64_lossy();
+        assert!(
+            (t50 - lodders_fe).abs() < 30.0,
+            "the JANAF-derived Fe T50 ({t50:.0} K) reproduces the independently-computed Lodders front ({lodders_fe:.0} K) within the inter-dataset +-30 K band"
         );
     }
 }
