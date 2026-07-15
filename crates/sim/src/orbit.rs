@@ -139,6 +139,46 @@ pub fn solar_declination(
     Some(sin_declination.asin())
 }
 
+/// The SUB-SOLAR LONGITUDE (the meridian the star stands over, the time of day) from the body's rotation
+/// phase. As the body spins eastward the sub-solar point sweeps west, so the longitude is `-spin_phase`,
+/// folded into `[-pi, pi]`. `spin_phase` is the rotation angle in radians (`2*pi` times the fraction of
+/// the day elapsed), the fast spin clock, unit-free like the orbital mean anomaly. `None` on an
+/// intermediate past the representable range. Assumes `spin_phase` in `[0, 2*pi)`, the one-rotation range.
+pub fn subsolar_longitude(spin_phase: Fixed) -> Option<Fixed> {
+    let pi = Fixed::PI;
+    let tau = pi.checked_add(pi)?;
+    let west = Fixed::ZERO.checked_sub(spin_phase)?;
+    if west < Fixed::ZERO.checked_sub(pi)? {
+        west.checked_add(tau)
+    } else {
+        Some(west)
+    }
+}
+
+/// The SOLAR ELEVATION COSINE at a surface point: the cosine of the star's zenith angle there, which is
+/// the Lambert illumination factor the lighting reads. `cos(zenith) = sin(lat)*sin(decl) +
+/// cos(lat)*cos(decl)*cos(lon - subsolar_lon)`, the standard solar-geometry identity. It is `+1` with the
+/// star straight overhead (the sub-solar point), `0` on the terminator (the day-night line, where the star
+/// sits on the horizon), and negative on the night side. A renderer lights a tile at `(lat, lon)` by the
+/// positive part of this, so the derived sun position (declination from the orbit and tilt, sub-solar
+/// longitude from the spin) replaces any authored light direction. Every input is an ARGUMENT: the surface
+/// point, and the star's derived declination and sub-solar longitude. `None` on an intermediate past the
+/// representable range.
+pub fn solar_elevation_cosine(
+    latitude: Fixed,
+    longitude: Fixed,
+    declination: Fixed,
+    subsolar_longitude: Fixed,
+) -> Option<Fixed> {
+    let (sin_lat, cos_lat) = latitude.sin_cos();
+    let (sin_decl, cos_decl) = declination.sin_cos();
+    let hour_angle = longitude.checked_sub(subsolar_longitude)?;
+    let (_, cos_hour) = hour_angle.sin_cos();
+    let polar = sin_lat.checked_mul(sin_decl)?;
+    let equatorial = cos_lat.checked_mul(cos_decl)?.checked_mul(cos_hour)?;
+    polar.checked_add(equatorial)
+}
+
 /// The full-circle arctangent `atan2(y, x)` in `[-pi, pi]`, built from the single-argument [`Fixed::atan`]
 /// (which returns `[-pi/2, pi/2]`) plus a quadrant correction. It always divides the SMALLER magnitude by
 /// the larger, so the argument handed to `atan` stays within `[-1, 1]` and the near-vertical case
@@ -390,6 +430,89 @@ mod tests {
                 .abs()
                 < 1e-3,
             "southern solstice declination is -tilt"
+        );
+    }
+
+    #[test]
+    fn the_subsolar_longitude_sweeps_west_with_the_spin() {
+        // At spin phase 0 the star is over the prime meridian; a quarter turn east puts it a quarter west
+        // (-pi/2); three-quarters east wraps to +pi/2. All folded into [-pi, pi].
+        let half_pi = Fixed::PI.checked_div(Fixed::from_int(2)).unwrap();
+        let three_half_pi = half_pi.checked_mul(Fixed::from_int(3)).unwrap();
+        assert!(
+            subsolar_longitude(Fixed::ZERO)
+                .unwrap()
+                .to_f64_lossy()
+                .abs()
+                < 1e-4,
+            "noon at meridian 0"
+        );
+        assert!(
+            (subsolar_longitude(half_pi).unwrap().to_f64_lossy() + std::f64::consts::FRAC_PI_2)
+                .abs()
+                < 1e-4,
+            "a quarter turn puts the sun a quarter west"
+        );
+        assert!(
+            (subsolar_longitude(three_half_pi).unwrap().to_f64_lossy()
+                - std::f64::consts::FRAC_PI_2)
+                .abs()
+                < 1e-4,
+            "three-quarters turn wraps to +pi/2"
+        );
+    }
+
+    #[test]
+    fn the_solar_elevation_is_overhead_at_the_subsolar_point_and_underfoot_at_the_antipode() {
+        // The star is straight overhead at the sub-solar point (cosine 1), on the horizon at the terminator
+        // (cosine 0), and straight underfoot at the antipode (cosine -1), for a tilted declination.
+        let decl = Fixed::from_ratio(3, 10); // sub-solar latitude 0.3 rad
+        let sslon = Fixed::from_ratio(1, 2); // sub-solar longitude 0.5 rad
+                                             // Sub-solar point: lat = decl, lon = sslon.
+        let overhead = solar_elevation_cosine(decl, sslon, decl, sslon).unwrap();
+        assert!(
+            (overhead.to_f64_lossy() - 1.0).abs() < 1e-3,
+            "overhead at the sub-solar point, got {}",
+            overhead.to_f64_lossy()
+        );
+        // Antipode: lat = -decl, lon = sslon + pi.
+        let anti_lat = Fixed::ZERO.checked_sub(decl).unwrap();
+        let anti_lon = sslon.checked_add(Fixed::PI).unwrap();
+        let underfoot = solar_elevation_cosine(anti_lat, anti_lon, decl, sslon).unwrap();
+        assert!(
+            (underfoot.to_f64_lossy() + 1.0).abs() < 1e-3,
+            "underfoot at the antipode, got {}",
+            underfoot.to_f64_lossy()
+        );
+    }
+
+    #[test]
+    fn the_solar_elevation_traces_day_and_night_at_the_equinox_equator() {
+        // Equinox (declination 0), sub-solar longitude 0, on the equator: noon overhead (cosine 1), sunset
+        // at a quarter turn (cosine 0), midnight underfoot (cosine -1), a full day-night cycle in longitude.
+        let noon =
+            solar_elevation_cosine(Fixed::ZERO, Fixed::ZERO, Fixed::ZERO, Fixed::ZERO).unwrap();
+        assert!(
+            (noon.to_f64_lossy() - 1.0).abs() < 1e-4,
+            "noon overhead at the equinox equator"
+        );
+        let quarter = Fixed::PI.checked_div(Fixed::from_int(2)).unwrap();
+        let dusk = solar_elevation_cosine(Fixed::ZERO, quarter, Fixed::ZERO, Fixed::ZERO).unwrap();
+        assert!(
+            dusk.to_f64_lossy().abs() < 1e-3,
+            "sun on the horizon a quarter turn from noon"
+        );
+        let midnight =
+            solar_elevation_cosine(Fixed::ZERO, Fixed::PI, Fixed::ZERO, Fixed::ZERO).unwrap();
+        assert!(
+            (midnight.to_f64_lossy() + 1.0).abs() < 1e-3,
+            "underfoot at midnight"
+        );
+        // A polar point at the equinox sits on the terminator all day (cosine 0).
+        let pole = solar_elevation_cosine(quarter, Fixed::ZERO, Fixed::ZERO, Fixed::ZERO).unwrap();
+        assert!(
+            pole.to_f64_lossy().abs() < 1e-3,
+            "the pole is on the terminator at the equinox"
         );
     }
 }
