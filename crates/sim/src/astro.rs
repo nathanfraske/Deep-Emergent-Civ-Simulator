@@ -417,6 +417,27 @@ pub fn feeding_zone_mass(
     Some(mass)
 }
 
+/// The feeding-zone mass in EARTH MASSES, the accretion arc's mass output in a physical unit: the
+/// [`feeding_zone_mass`] integral (in `normalization`-units times AU^2, the `normalization` being the surface-density
+/// scale `Sigma_c` in kg/m^2) folded to kilograms by the AU-to-metre conversion, then to Earth masses. This is the
+/// `M` the planet radius and the surface gravity read, so the whole accretion-to-gravity chain is now derived. The
+/// caller passes the `feeding_zone_mass` result computed with `Sigma_c` in kg/m^2 (its basis the disk-mass fraction,
+/// a reserved residue). The wide-magnitude fold (`AU^2 ~ 2.2e22 m^2`, `EARTH_MASS ~ 6e24 kg` overflow Q32.32 while
+/// the order-one Earth-mass result fits) runs in exact rational arithmetic and rounds once, the same `BigRat` path
+/// [`stellar_flux`] uses: `M_earth = output * AU_m^2 / EARTH_MASS_KG`. `None` on a non-positive input or a bad
+/// anchor.
+pub fn feeding_zone_mass_earth(feeding_zone_mass_output: Fixed) -> Option<Fixed> {
+    if feeding_zone_mass_output <= Fixed::ZERO {
+        return None;
+    }
+    let au = BigRat::from_decimal_str(ASTRONOMICAL_UNIT_M).ok()?;
+    let au2 = au.mul(&au);
+    let earth = BigRat::from_decimal_str(EARTH_MASS_KG).ok()?;
+    let mass_kg = nonneg_fixed_to_bigrat(feeding_zone_mass_output).mul(&au2);
+    let mass_earth = mass_kg.div(&earth);
+    Fixed::from_bits_i128(mass_earth.round_to_scale(Fixed::FRAC_BITS)?)
+}
+
 /// The PLANET RADIUS `R` (metres) from its mass and bulk density, DERIVED by inverting the sphere volume
 /// `M = (4/3) pi R^3 rho`, so `R = (3 M / (4 pi rho))^(1/3)`. This is the planet's SHAPE size, the accretion arc's
 /// radius output the render draws the globe from, and the `R` the derived surface gravity `g = G M / R^2` reads
@@ -533,6 +554,19 @@ mod tests {
         assert!(
             dense.to_f64_lossy() < r.to_f64_lossy(),
             "a denser planet of the same mass is smaller"
+        );
+    }
+
+    #[test]
+    fn the_feeding_zone_mass_folds_to_earth_masses() {
+        // The accretion mass fold: a feeding-zone integral of ~266.5 (Sigma_c in kg/m^2 times AU^2) reaches one Earth
+        // mass, EARTH_MASS / AU^2 = 5.97e24 / 2.24e22 = 266.5. This is the M the radius and gravity read, so the
+        // accretion-to-gravity chain is fully derived.
+        let m = feeding_zone_mass_earth(Fixed::from_ratio(2665, 10)).unwrap();
+        assert!(
+            (m.to_f64_lossy() - 1.0).abs() < 0.05,
+            "the fold reaches ~1 Earth mass, got {}",
+            m.to_f64_lossy()
         );
     }
 
