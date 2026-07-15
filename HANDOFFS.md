@@ -3114,3 +3114,45 @@ OTHER OPEN FOLLOW-ONS (each its own slice, derive-first, gate the number):
 DISCIPLINE (per push): `cargo fmt --check`; `cargo clippy --all-targets -- -D warnings` (MUST be --all-targets); FULL `cargo test -p civsim-physics` (not --lib); `python3 scripts/{constructor_gate,provenance_gate,floor_provenance_gate,determinism_gate}.py`; determinism pins `cargo test -p civsim-sim --test world_determinism --test determinism_harness` (= 14 + 3); prose 0 em-dash / 0 banned adverbs (genuinely/honestly/actually). NEVER add cited values to the floor (a floor-gate failure means "stop, you are authoring where you should derive" - do NOT work around it). NEVER put the model id in commits/PRs. Push `git push -u origin claude/property-emission` with 2/4/8/16s backoff. Commit trailers: `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>` + `Claude-Session: https://claude.ai/code/session_016ik54kyjpjaLxkn62cdxE2`.
 
 STATE: melt phase rung 0 COMPLETE with all 3 gates + the derived-composition primitive + the runnable animation, all pushed. NEXT (owner-directed): make the density/assemblage DERIVE from the materials substrate instead of the registered phase list (retire phase_registry.toml as a stand-in) - his explicit question. Then the felsic-continental derivation, the moving-plate convection, and arming the Runner tick loop.
+
+
+---
+
+## 2026-07-15 (session): the star-to-seeable-world capstone spine + the Hadean gate + Stage 8 gas mix
+
+CAPSTONE FRONT-END COMPLETE, THE SEEABLE WORLD IS LIVE. Branch claude/kappa-r-assembly (PR #191), HEAD 1992c7d, pushed. Pins hold (default 40fe8a72, living be94e310) every commit. This session delivered the entire generative-and-visible front-end plus the acceptance-gate scaffold.
+
+Landed:
+- INTEGRATION SPINE: derive_planet(star, orbit) -> DerivedPlanet (crates/sim/src/planet.rs), chaining stellar L/R/T_eff -> disk temperature -> accreted mass -> planet radius -> surface gravity (g=GM/R^2, the 9.80665 hardcode retired). Sun+1AU derives T_eff~5772, radius~6371km, g~9.8.
+- THE SEEABLE WORLD (crates/viewer, observability-non-canon, byte-neutral): blackbody star colour + derived-radius globe (lit sphere, day/night terminator, relief tiles) + atmosphere limb + zoom-to-tiles. build_globe_fixture wired to derive_planet(Sun,1AU); a --globe render shows the derived ~6370km globe lit by the ~5769K star. Cherry-picked from a worktree agent (5 commits), gated, wired. I viewed the rendered frame: it is right.
+- HADEAN-EARTH ACCEPTANCE BATTERY (#63, planet.rs the_capstone_derives_a_hadean_earth_within_grade): the living scoreboard. Derived rows pass at grade (T_eff/radius/g/disk-warmth); pending rows pre-registered with the closing stage.
+- STAGE 8 GAS-PHASE COMPOSITION (#61 core, crates/materials/src/atmosphere.rs): atmosphere_gas_equilibrium CONSUMES the condensation minimizer; gas set emerges from JANAF-over-budget-elements; oxidized budget->H2O/CO2/N2, removing O->CO (redox response). Honest limits: gas-phase not partitioning #40, quench T, redox rides the budget.
+
+IN FLIGHT at session end: worktree agent claude/rayleigh-sky deriving the Rayleigh sky colour from the banked polarizability substrate (molecular alpha ~ sum atomic alpha -> sigma ~ alpha^2/lambda^4), to replace PLACEHOLDER_SKY. ON LAND: cherry-pick + gate + wire the atmosphere gas mix -> the sky colour into build_globe_fixture + verify pins + push.
+
+REMAINING capstone stages, each a real arc: composition->bulk-density needs the interior-structure integration (uncompressed rho_0 -> compressed bulk rho, the EoS/mass-radius self-consistent solve); the accretion mass wire needs the Sigma_c calibration (reserved-with-basis, owner call); the full Stage 8 atmosphere-ocean-crust PARTITIONING (#40); Stage 6 geology wiring (#59); Stage 7 tile re-derivation (#60). The full-capstone verification panel (Hadean gate + section-9 lenses + section-11 smoke test) is the standing pre-merge gate.
+
+COHERENCE proven twice this arc: Stage 8 consumes the condensation minimizer; the sky colour consumes the polarizability substrate. Also earlier this session: the CI/provenance remediation (covalent_radii_pyykko.toml reclassified [[element]] -> [[radius]], the citation-file-immutability principle) and the #53/#54 grain-opacity + phonon tightenings.
+
+
+---
+
+## 2026-07-15 -> 16 (overnight autonomous): the real differentiated crust + the visible finish
+
+Owner signed off overnight: "give me the real differentiated crust, drive it to the finish. See it through autonomously." Building behind the hard gates (pins default 40fe8a72 / living be94e310 held every commit, clippy 0, fmt, tests). Branch claude/kappa-r-assembly (PR #191), HEAD b953314 pushed.
+
+LANDED this arc (all dormant, byte-neutral):
+- differentiation.rs (5f1a5b6): the identity link, chemistry partition (metal+sulfide sink, oxide float), Goldschmidt re-derived, alien CaS/MgS counter-test passing.
+- VCS condensed_amounts (1ccade7): exact-rational amounts, mass balance to the bit, degenerate -> Verdict draw.
+- surface_composition.rs (0fb9a7f): the CANON CHAIN star+orbit -> condensation -> VCS -> differentiation -> derived crust; verified solar abundances at 1000 K -> forsterite/enstatite/Fe/troilite -> Mg-silicate crust over iron core.
+- crust_and_mantle + wired (b953314): the PARTIAL-MELT crust extraction (buoyant least-dense silicate = crust, denser = mantle), so the surface is the real differentiated crust with an isostatic density contrast. Enstatite-grade now, feldspathic when Al/Ca land.
+
+IN FLIGHT (overnight agents, I gate on completion):
+- Al/Ca gas-species fetch (agent ad27126d): JANAF Al(g)/Ca(g) + oxides/hydroxides, so the condensation includes corundum/spinel/anorthite/perovskite -> the feldspathic crust. Data-only, gate + wire on land.
+- Derived-planet visible runner (agent a7f4d6f0, worktree claude/derived-runner): material_surface_rgb (optics -> tile colour) + the crust-fed derived tiles + a --derived [star_mass] [orbit_au] interactive mode (globe + derived crust tiles + derived atmosphere, NO old sim, no life). Cherry-pick + gate on land.
+
+HELD for owner (MORNING_REVIEW.md): the oxide-thermochemistry [M] data (crates/physics/data/oxide_thermochemistry/, Robie-Hemingway, 3 missing-Barin-witness rows flagged, magnetite discrepancy recorded) needs owner verification against the primary books before it goes load-bearing; NOT wired yet.
+
+NEXT after the agents land: gate + wire the Al/Ca crust (feldspar), gate + cherry-pick the runner, verify pins, then the geodynamics lateral-variation (the topography frontier: step_interior_field evolves thermal not composition; the magmatism/composition-transport wire is the next real build). The oxide data waits on owner verification.
+
+GATE DISCIPLINE for the agents: viewer changes are observability-non-canon (leaf, byte-neutral by construction); fetch data is dormant until loader-wired. Cherry-pick the runner onto HEAD, run fmt+clippy+viewer-tests+the two pins, verify the derived colours are physical (basalt dark, quartz light) before landing.
