@@ -1,0 +1,577 @@
+# Pyykko covalent radii (single / double / triple bond, picometres), the covalent bond-length substrate the
+# Badger force-constant column sums (r_e = r_a + r_b at the bond order). CITED: Pyykko 2015 (J. Phys. Chem. A 119,
+# 2326) consolidation, over Pyykko & Atsumi 2009 (Chem. Eur. J. 15, 186 single-bond; 15, 12770 double-bond) and
+# Pyykko, Riedel & Patzschke 2005 (Chem. Eur. J. 11, 3511 triple-bond). Machine-readable conduit: mendeleev 1.1.0.
+# QUALITY BAND: single-bond fit mean-square deviation < 3 pm (~400 primary distances per set); the CO triple-bond
+# sum 60+53 = 113 pm against the measured 112.8 pm is the closure check.
+# SCOPE TAG (definition, verbatim intent): agreement is good provided the bond is NOT too ionic and the coordination
+# numbers are near the fit's input data; transition-metal halides are excluded from the single-bond set for partial
+# multiple-bond character. IONIC bonds route through the Shannon ionic-radius column instead (the ionic-dispatch
+# line), never through this covalent set.
+# REFINEMENT FLAG: these are MOLECULAR bond radii. The tetrahedral-CRYSTAL covalent radii (Pyykko 2015, 30 elements
+# in 48 crystals) that fit solid lattices (SiC, the silicates) to subpicometre accuracy are the preferred input for
+# grain-lattice omega_TO and are a pending SI fetch; the molecular radii are the first-cut input until then.
+
+[[element]]
+symbol = "H"
+single_pm = 32
+
+[[element]]
+symbol = "He"
+single_pm = 46
+
+[[element]]
+symbol = "Li"
+single_pm = 133
+double_pm = 124
+
+[[element]]
+symbol = "Be"
+single_pm = 102
+double_pm = 90
+triple_pm = 85
+
+[[element]]
+symbol = "B"
+single_pm = 85
+double_pm = 78
+triple_pm = 73
+
+[[element]]
+symbol = "C"
+single_pm = 75
+double_pm = 67
+triple_pm = 60
+
+[[element]]
+symbol = "N"
+single_pm = 71
+double_pm = 60
+triple_pm = 54
+
+[[element]]
+symbol = "O"
+single_pm = 63
+double_pm = 57
+triple_pm = 53
+
+[[element]]
+symbol = "F"
+single_pm = 64
+double_pm = 59
+triple_pm = 53
+
+[[element]]
+symbol = "Ne"
+single_pm = 67
+double_pm = 96
+
+[[element]]
+symbol = "Na"
+single_pm = 155
+double_pm = 160
+
+[[element]]
+symbol = "Mg"
+single_pm = 139
+double_pm = 132
+triple_pm = 127
+
+[[element]]
+symbol = "Al"
+single_pm = 126
+double_pm = 113
+triple_pm = 111
+
+[[element]]
+symbol = "Si"
+single_pm = 116
+double_pm = 107
+triple_pm = 102
+
+[[element]]
+symbol = "P"
+single_pm = 111
+double_pm = 102
+triple_pm = 94
+
+[[element]]
+symbol = "S"
+single_pm = 103
+double_pm = 94
+triple_pm = 95
+
+[[element]]
+symbol = "Cl"
+single_pm = 99
+double_pm = 95
+triple_pm = 93
+
+[[element]]
+symbol = "Ar"
+single_pm = 96
+double_pm = 107
+triple_pm = 96
+
+[[element]]
+symbol = "K"
+single_pm = 196
+double_pm = 193
+
+[[element]]
+symbol = "Ca"
+single_pm = 171
+double_pm = 147
+triple_pm = 133
+
+[[element]]
+symbol = "Sc"
+single_pm = 148
+double_pm = 116
+triple_pm = 114
+
+[[element]]
+symbol = "Ti"
+single_pm = 136
+double_pm = 117
+triple_pm = 108
+
+[[element]]
+symbol = "V"
+single_pm = 134
+double_pm = 112
+triple_pm = 106
+
+[[element]]
+symbol = "Cr"
+single_pm = 122
+double_pm = 111
+triple_pm = 103
+
+[[element]]
+symbol = "Mn"
+single_pm = 119
+double_pm = 105
+triple_pm = 103
+
+[[element]]
+symbol = "Fe"
+single_pm = 116
+double_pm = 109
+triple_pm = 102
+
+[[element]]
+symbol = "Co"
+single_pm = 111
+double_pm = 103
+triple_pm = 96
+
+[[element]]
+symbol = "Ni"
+single_pm = 110
+double_pm = 101
+triple_pm = 101
+
+[[element]]
+symbol = "Cu"
+single_pm = 112
+double_pm = 115
+triple_pm = 120
+
+[[element]]
+symbol = "Zn"
+single_pm = 118
+double_pm = 120
+
+[[element]]
+symbol = "Ga"
+single_pm = 124
+double_pm = 117
+triple_pm = 121
+
+[[element]]
+symbol = "Ge"
+single_pm = 121
+double_pm = 111
+triple_pm = 114
+
+[[element]]
+symbol = "As"
+single_pm = 121
+double_pm = 114
+triple_pm = 106
+
+[[element]]
+symbol = "Se"
+single_pm = 116
+double_pm = 107
+triple_pm = 107
+
+[[element]]
+symbol = "Br"
+single_pm = 114
+double_pm = 109
+triple_pm = 110
+
+[[element]]
+symbol = "Kr"
+single_pm = 117
+double_pm = 121
+triple_pm = 108
+
+[[element]]
+symbol = "Rb"
+single_pm = 210
+double_pm = 202
+
+[[element]]
+symbol = "Sr"
+single_pm = 185
+double_pm = 157
+triple_pm = 139
+
+[[element]]
+symbol = "Y"
+single_pm = 163
+double_pm = 130
+triple_pm = 124
+
+[[element]]
+symbol = "Zr"
+single_pm = 154
+double_pm = 127
+triple_pm = 121
+
+[[element]]
+symbol = "Nb"
+single_pm = 147
+double_pm = 125
+triple_pm = 116
+
+[[element]]
+symbol = "Mo"
+single_pm = 138
+double_pm = 121
+triple_pm = 113
+
+[[element]]
+symbol = "Tc"
+single_pm = 128
+double_pm = 120
+triple_pm = 110
+
+[[element]]
+symbol = "Ru"
+single_pm = 125
+double_pm = 114
+triple_pm = 103
+
+[[element]]
+symbol = "Rh"
+single_pm = 125
+double_pm = 110
+triple_pm = 106
+
+[[element]]
+symbol = "Pd"
+single_pm = 120
+double_pm = 117
+triple_pm = 112
+
+[[element]]
+symbol = "Ag"
+single_pm = 128
+double_pm = 139
+triple_pm = 137
+
+[[element]]
+symbol = "Cd"
+single_pm = 136
+double_pm = 144
+
+[[element]]
+symbol = "In"
+single_pm = 142
+double_pm = 136
+triple_pm = 146
+
+[[element]]
+symbol = "Sn"
+single_pm = 140
+double_pm = 130
+triple_pm = 132
+
+[[element]]
+symbol = "Sb"
+single_pm = 140
+double_pm = 133
+triple_pm = 127
+
+[[element]]
+symbol = "Te"
+single_pm = 136
+double_pm = 128
+triple_pm = 121
+
+[[element]]
+symbol = "I"
+single_pm = 133
+double_pm = 129
+triple_pm = 125
+
+[[element]]
+symbol = "Xe"
+single_pm = 131
+double_pm = 135
+triple_pm = 122
+
+[[element]]
+symbol = "Cs"
+single_pm = 232
+double_pm = 209
+
+[[element]]
+symbol = "Ba"
+single_pm = 196
+double_pm = 161
+triple_pm = 149
+
+[[element]]
+symbol = "La"
+single_pm = 180
+double_pm = 139
+triple_pm = 139
+
+[[element]]
+symbol = "Ce"
+single_pm = 163
+double_pm = 137
+triple_pm = 131
+
+[[element]]
+symbol = "Pr"
+single_pm = 176
+double_pm = 138
+triple_pm = 128
+
+[[element]]
+symbol = "Nd"
+single_pm = 174
+double_pm = 137
+
+[[element]]
+symbol = "Pm"
+single_pm = 173
+double_pm = 135
+
+[[element]]
+symbol = "Sm"
+single_pm = 172
+double_pm = 134
+
+[[element]]
+symbol = "Eu"
+single_pm = 168
+double_pm = 134
+
+[[element]]
+symbol = "Gd"
+single_pm = 169
+double_pm = 135
+triple_pm = 132
+
+[[element]]
+symbol = "Tb"
+single_pm = 168
+double_pm = 135
+
+[[element]]
+symbol = "Dy"
+single_pm = 167
+double_pm = 133
+
+[[element]]
+symbol = "Ho"
+single_pm = 166
+double_pm = 133
+
+[[element]]
+symbol = "Er"
+single_pm = 165
+double_pm = 133
+
+[[element]]
+symbol = "Tm"
+single_pm = 164
+double_pm = 131
+
+[[element]]
+symbol = "Yb"
+single_pm = 170
+double_pm = 129
+
+[[element]]
+symbol = "Lu"
+single_pm = 162
+double_pm = 131
+triple_pm = 131
+
+[[element]]
+symbol = "Hf"
+single_pm = 152
+double_pm = 128
+triple_pm = 122
+
+[[element]]
+symbol = "Ta"
+single_pm = 146
+double_pm = 126
+triple_pm = 119
+
+[[element]]
+symbol = "W"
+single_pm = 137
+double_pm = 120
+triple_pm = 115
+
+[[element]]
+symbol = "Re"
+single_pm = 131
+double_pm = 119
+triple_pm = 110
+
+[[element]]
+symbol = "Os"
+single_pm = 129
+double_pm = 116
+triple_pm = 109
+
+[[element]]
+symbol = "Ir"
+single_pm = 122
+double_pm = 115
+triple_pm = 107
+
+[[element]]
+symbol = "Pt"
+single_pm = 123
+double_pm = 112
+triple_pm = 110
+
+[[element]]
+symbol = "Au"
+single_pm = 124
+double_pm = 121
+triple_pm = 123
+
+[[element]]
+symbol = "Hg"
+single_pm = 133
+double_pm = 142
+
+[[element]]
+symbol = "Tl"
+single_pm = 144
+double_pm = 142
+triple_pm = 150
+
+[[element]]
+symbol = "Pb"
+single_pm = 144
+double_pm = 135
+triple_pm = 137
+
+[[element]]
+symbol = "Bi"
+single_pm = 151
+double_pm = 141
+triple_pm = 135
+
+[[element]]
+symbol = "Po"
+single_pm = 145
+double_pm = 135
+triple_pm = 129
+
+[[element]]
+symbol = "At"
+single_pm = 147
+double_pm = 138
+triple_pm = 138
+
+[[element]]
+symbol = "Rn"
+single_pm = 142
+double_pm = 145
+triple_pm = 133
+
+[[element]]
+symbol = "Fr"
+single_pm = 223
+double_pm = 218
+
+[[element]]
+symbol = "Ra"
+single_pm = 201
+double_pm = 173
+triple_pm = 159
+
+[[element]]
+symbol = "Ac"
+single_pm = 186
+double_pm = 153
+triple_pm = 140
+
+[[element]]
+symbol = "Th"
+single_pm = 175
+double_pm = 143
+triple_pm = 136
+
+[[element]]
+symbol = "Pa"
+single_pm = 169
+double_pm = 138
+triple_pm = 129
+
+[[element]]
+symbol = "U"
+single_pm = 170
+double_pm = 134
+triple_pm = 118
+
+[[element]]
+symbol = "Np"
+single_pm = 171
+double_pm = 136
+triple_pm = 116
+
+[[element]]
+symbol = "Pu"
+single_pm = 172
+double_pm = 135
+
+[[element]]
+symbol = "Am"
+single_pm = 166
+double_pm = 135
+
+[[element]]
+symbol = "Cm"
+single_pm = 166
+double_pm = 136
+
+[[element]]
+symbol = "Bk"
+single_pm = 168
+double_pm = 139
+
+[[element]]
+symbol = "Cf"
+single_pm = 168
+double_pm = 140
+
+[[element]]
+symbol = "Es"
+single_pm = 165
+double_pm = 140
