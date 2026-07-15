@@ -1,0 +1,624 @@
+# Lodders (2003) Table 8: equilibrium 50% condensation temperatures for a solar-system composition gas at
+# 1e-4 bar total pressure. The pre-registered condensation battery for the disk-condensation arc: the
+# temperature at which 50% of an element has condensed out of the gas is the ground truth a Gibbs-minimization
+# over the JANAF potentials must reproduce. CITED: Lodders, K. (2003), ApJ 591, 1220, Table 8 (pp. 1240-1241).
+# Transcribed from the primary reprint PDF (the Pyykko-figure protocol: transcribe the table, fingerprint-check
+# spot rows). SOURCE PDF (the receipt): https://solarsystem.wustl.edu/wp-content/uploads/reprints/2003/
+# Lodders%202003%20ApJ%20Elemental%20abundances.pdf , md5 6c5c71656907b2d3abab01b5e7178c8f .
+#
+# COLUMNS: t_first_k = col (2) TC, the temperature of the element's first condensate (absent for a trace
+# element that only dissolves into a host, and for He/H where 50% is never reached in range); initial_phase =
+# col (3), the first-condensate or {dissolving} phase; t50_k = col (4) 50% TC, the load-bearing value; host =
+# col (5) major host phase(s). Where col (2) lists two onsets (Mg first solid spinel then forsterite; Si first
+# gehlenite then forsterite), t_first_k is the FIRST onset and host is the 50% reservoir. Water ice's onset is
+# H/O t_first_k = 182 K (the water-ice line). FINGERPRINTS (owner spot-check, in the loader #[test]): Al 1653,
+# Ca 1517, Ti 1582, Fe 1334, Mg 1336, Si 1310, S 664, water ice 182.
+#
+# BLOCK KIND [[condensation]], the cited-data-column idiom, NOT the reserved floor [[element]] kind: an immutable
+# transcription of Lodders 2003 Table 8, out of the floor real/fantasy authorship axis. PROVENANCE: header
+# citation. GRADE: single (one table, one composition, one pressure). HONEST LIMITS: this is the solar-system
+# composition gas (Table 8); the solar-photosphere variant (Table 9) differs by a few K and is not vendored; the
+# phase/host strings are descriptive annotation (the load-bearing checksummed values are the temperatures).
+
+pressure_bar = "1e-4"
+composition = "solar-system"
+
+[[condensation]]
+element = "H"
+z = 1
+t_first_k = "182"
+initial_phase = "H2O ice"
+host = "..."
+
+[[condensation]]
+element = "He"
+z = 2
+initial_phase = "He ice"
+host = "..."
+
+[[condensation]]
+element = "Li"
+z = 3
+initial_phase = "Li4SiO4, Li2SiO3"
+t50_k = "1142"
+host = "Forsterite + enstatite"
+
+[[condensation]]
+element = "Be"
+z = 4
+initial_phase = "BeCa2Si2O7"
+t50_k = "1452"
+host = "Melilite"
+
+[[condensation]]
+element = "B"
+z = 5
+initial_phase = "CaB2Si2O8"
+t50_k = "908"
+host = "Feldspar"
+
+[[condensation]]
+element = "C"
+z = 6
+t_first_k = "78"
+initial_phase = "CH4·7H2O"
+t50_k = "40"
+host = "CH4·7H2O + CH4 ice"
+
+[[condensation]]
+element = "N"
+z = 7
+t_first_k = "131"
+initial_phase = "NH3·H2O"
+t50_k = "123"
+host = "NH3·H2O"
+
+[[condensation]]
+element = "O"
+z = 8
+t_first_k = "182"
+initial_phase = "Water ice"
+t50_k = "180"
+host = "rock + water ice"
+
+[[condensation]]
+element = "F"
+z = 9
+t_first_k = "739"
+initial_phase = "Ca5[PO4]3F"
+t50_k = "734"
+host = "F apatite"
+
+[[condensation]]
+element = "Ne"
+z = 10
+t_first_k = "9.3"
+initial_phase = "Ne ice"
+t50_k = "9.1"
+host = "Ne ice"
+
+[[condensation]]
+element = "Na"
+z = 11
+initial_phase = "NaAlSi3O8"
+t50_k = "958"
+host = "Feldspar"
+
+[[condensation]]
+element = "Mg"
+z = 12
+t_first_k = "1397"
+initial_phase = "Spinel"
+t50_k = "1336"
+host = "Forsterite"
+
+[[condensation]]
+element = "Al"
+z = 13
+t_first_k = "1677"
+initial_phase = "Al2O3"
+t50_k = "1653"
+host = "Hibonite"
+
+[[condensation]]
+element = "Si"
+z = 14
+t_first_k = "1529"
+initial_phase = "Gehlenite"
+t50_k = "1310"
+host = "Forsterite + enstatite"
+
+[[condensation]]
+element = "P"
+z = 15
+t_first_k = "1248"
+initial_phase = "Fe3P"
+t50_k = "1229"
+host = "Schreibersite"
+
+[[condensation]]
+element = "S"
+z = 16
+t_first_k = "704"
+initial_phase = "FeS"
+t50_k = "664"
+host = "Troilite"
+
+[[condensation]]
+element = "Cl"
+z = 17
+t_first_k = "954"
+initial_phase = "Na4[Al3Si3O12]Cl"
+t50_k = "948"
+host = "Sodalite"
+
+[[condensation]]
+element = "Ar"
+z = 18
+t_first_k = "48"
+initial_phase = "Ar·6H2O"
+t50_k = "47"
+host = "Ar·6H2O"
+
+[[condensation]]
+element = "K"
+z = 19
+initial_phase = "KAlSi3O8"
+t50_k = "1006"
+host = "Feldspar"
+
+[[condensation]]
+element = "Ca"
+z = 20
+t_first_k = "1659"
+initial_phase = "CaAl12O19"
+t50_k = "1517"
+host = "Hibonite + gehlenite"
+
+[[condensation]]
+element = "Sc"
+z = 21
+initial_phase = "Sc2O3"
+t50_k = "1659"
+host = "Hibonite"
+
+[[condensation]]
+element = "Ti"
+z = 22
+t_first_k = "1593"
+initial_phase = "CaTiO3"
+t50_k = "1582"
+host = "Titanate"
+
+[[condensation]]
+element = "V"
+z = 23
+initial_phase = "VO, V2O3"
+t50_k = "1429"
+host = "Titanate"
+
+[[condensation]]
+element = "Cr"
+z = 24
+initial_phase = "Cr"
+t50_k = "1296"
+host = "Fe alloy"
+
+[[condensation]]
+element = "Mn"
+z = 25
+initial_phase = "Mn2SiO4, MnSiO3"
+t50_k = "1158"
+host = "Forsterite + enstatite"
+
+[[condensation]]
+element = "Fe"
+z = 26
+t_first_k = "1357"
+initial_phase = "Fe metal"
+t50_k = "1334"
+host = "Fe alloy"
+
+[[condensation]]
+element = "Co"
+z = 27
+initial_phase = "Co"
+t50_k = "1352"
+host = "Fe alloy"
+
+[[condensation]]
+element = "Ni"
+z = 28
+initial_phase = "Ni"
+t50_k = "1353"
+host = "Fe alloy"
+
+[[condensation]]
+element = "Cu"
+z = 29
+initial_phase = "Cu"
+t50_k = "1037"
+host = "Fe alloy"
+
+[[condensation]]
+element = "Zn"
+z = 30
+initial_phase = "Zn2SiO4, ZnSiO3"
+t50_k = "726"
+host = "Forsterite + enstatite"
+
+[[condensation]]
+element = "Ga"
+z = 31
+initial_phase = "Ga, Ga2O3"
+t50_k = "968"
+host = "Fe alloy + feldspar"
+
+[[condensation]]
+element = "Ge"
+z = 32
+initial_phase = "Ge"
+t50_k = "883"
+host = "Fe alloy"
+
+[[condensation]]
+element = "As"
+z = 33
+initial_phase = "As"
+t50_k = "1065"
+host = "Fe alloy"
+
+[[condensation]]
+element = "Se"
+z = 34
+initial_phase = "FeSe0.96"
+t50_k = "697"
+host = "Troilite"
+
+[[condensation]]
+element = "Br"
+z = 35
+initial_phase = "CaBr2"
+t50_k = "546"
+host = "Cl apatite"
+
+[[condensation]]
+element = "Kr"
+z = 36
+t_first_k = "53"
+initial_phase = "Kr·6H2O"
+t50_k = "52"
+host = "Kr·6H2O"
+
+[[condensation]]
+element = "Rb"
+z = 37
+initial_phase = "Rb silicate"
+t50_k = "800"
+host = "Feldspar"
+
+[[condensation]]
+element = "Sr"
+z = 38
+initial_phase = "SrTiO3"
+t50_k = "1464"
+host = "Titanate"
+
+[[condensation]]
+element = "Y"
+z = 39
+initial_phase = "Y2O3"
+t50_k = "1659"
+host = "Hibonite"
+
+[[condensation]]
+element = "Zr"
+z = 40
+t_first_k = "1764"
+initial_phase = "ZrO2"
+t50_k = "1741"
+host = "ZrO2"
+
+[[condensation]]
+element = "Nb"
+z = 41
+initial_phase = "NbO, NbO2"
+t50_k = "1559"
+host = "Titanate"
+
+[[condensation]]
+element = "Mo"
+z = 42
+initial_phase = "Mo"
+t50_k = "1590"
+host = "Refractory metal alloy"
+
+[[condensation]]
+element = "Ru"
+z = 44
+initial_phase = "Ru"
+t50_k = "1551"
+host = "Refractory metal alloy"
+
+[[condensation]]
+element = "Rh"
+z = 45
+initial_phase = "Rh"
+t50_k = "1392"
+host = "Refractory metal alloy"
+
+[[condensation]]
+element = "Pd"
+z = 46
+initial_phase = "Pd"
+t50_k = "1324"
+host = "Fe alloy"
+
+[[condensation]]
+element = "Ag"
+z = 47
+initial_phase = "Ag"
+t50_k = "996"
+host = "Fe alloy"
+
+[[condensation]]
+element = "Cd"
+z = 48
+initial_phase = "CdSiO3, CdS"
+t50_k = "652"
+host = "Enstatite + troilite"
+
+[[condensation]]
+element = "In"
+z = 49
+initial_phase = "InS, InSe, InTe"
+t50_k = "536"
+host = "FeS"
+
+[[condensation]]
+element = "Sn"
+z = 50
+initial_phase = "Sn"
+t50_k = "704"
+host = "Fe alloy"
+
+[[condensation]]
+element = "Sb"
+z = 51
+initial_phase = "Sb"
+t50_k = "979"
+host = "Fe alloy"
+
+[[condensation]]
+element = "Te"
+z = 52
+initial_phase = "Te"
+t50_k = "709"
+host = "Fe alloy"
+
+[[condensation]]
+element = "I"
+z = 53
+initial_phase = "CaI2"
+t50_k = "535"
+host = "Cl apatite"
+
+[[condensation]]
+element = "Xe"
+z = 54
+t_first_k = "69"
+initial_phase = "Xe·6H2O"
+t50_k = "68"
+host = "Xe·6H2O"
+
+[[condensation]]
+element = "Cs"
+z = 55
+initial_phase = "Cs silicate"
+t50_k = "799"
+host = "Feldspar"
+
+[[condensation]]
+element = "Ba"
+z = 56
+initial_phase = "BaTiO3"
+t50_k = "1455"
+host = "Titanate"
+
+[[condensation]]
+element = "La"
+z = 57
+initial_phase = "La2O3"
+t50_k = "1578"
+host = "Hibonite + titanate"
+
+[[condensation]]
+element = "Ce"
+z = 58
+initial_phase = "CeO2, Ce2O3"
+t50_k = "1478"
+host = "Hibonite + titanate"
+
+[[condensation]]
+element = "Pr"
+z = 59
+initial_phase = "Pr2O3"
+t50_k = "1582"
+host = "Hibonite + titanate"
+
+[[condensation]]
+element = "Nd"
+z = 60
+initial_phase = "Nd2O3"
+t50_k = "1602"
+host = "Hibonite"
+
+[[condensation]]
+element = "Sm"
+z = 62
+initial_phase = "Sm2O3"
+t50_k = "1590"
+host = "Hibonite + titanate"
+
+[[condensation]]
+element = "Eu"
+z = 63
+initial_phase = "EuO, Eu2O3"
+t50_k = "1356"
+host = "Hibonite + titanate + feldspar"
+
+[[condensation]]
+element = "Gd"
+z = 64
+initial_phase = "Gd2O3"
+t50_k = "1659"
+host = "Hibonite"
+
+[[condensation]]
+element = "Tb"
+z = 65
+initial_phase = "Tb2O3"
+t50_k = "1659"
+host = "Hibonite"
+
+[[condensation]]
+element = "Dy"
+z = 66
+initial_phase = "Dy2O3"
+t50_k = "1659"
+host = "Hibonite"
+
+[[condensation]]
+element = "Ho"
+z = 67
+initial_phase = "Ho2O3"
+t50_k = "1659"
+host = "Hibonite"
+
+[[condensation]]
+element = "Er"
+z = 68
+initial_phase = "Er2O3"
+t50_k = "1659"
+host = "Hibonite"
+
+[[condensation]]
+element = "Tm"
+z = 69
+initial_phase = "Tm2O3"
+t50_k = "1659"
+host = "Hibonite"
+
+[[condensation]]
+element = "Yb"
+z = 70
+initial_phase = "Yb2O3"
+t50_k = "1487"
+host = "Hibonite + titanate"
+
+[[condensation]]
+element = "Lu"
+z = 71
+initial_phase = "Lu2O3"
+t50_k = "1659"
+host = "Hibonite"
+
+[[condensation]]
+element = "Hf"
+z = 72
+t_first_k = "1703"
+initial_phase = "HfO2"
+t50_k = "1684"
+host = "HfO2"
+
+[[condensation]]
+element = "Ta"
+z = 73
+initial_phase = "Ta2O5"
+t50_k = "1573"
+host = "Hibonite + titanate"
+
+[[condensation]]
+element = "W"
+z = 74
+initial_phase = "W"
+t50_k = "1789"
+host = "Refractory metal alloy"
+
+[[condensation]]
+element = "Re"
+z = 75
+initial_phase = "Re"
+t50_k = "1821"
+host = "Refractory metal alloy"
+
+[[condensation]]
+element = "Os"
+z = 76
+initial_phase = "Os"
+t50_k = "1812"
+host = "Refractory metal alloy"
+
+[[condensation]]
+element = "Ir"
+z = 77
+initial_phase = "Ir"
+t50_k = "1603"
+host = "Refractory metal alloy"
+
+[[condensation]]
+element = "Pt"
+z = 78
+initial_phase = "Pt"
+t50_k = "1408"
+host = "Refractory metal alloy"
+
+[[condensation]]
+element = "Au"
+z = 79
+initial_phase = "Au"
+t50_k = "1060"
+host = "Fe alloy"
+
+[[condensation]]
+element = "Hg"
+z = 80
+initial_phase = "HgS, HgSe, HgTe"
+t50_k = "252"
+host = "Troilite"
+
+[[condensation]]
+element = "Tl"
+z = 81
+initial_phase = "Tl2S, Tl2Se, Tl2Te"
+t50_k = "532"
+host = "Troilite"
+
+[[condensation]]
+element = "Pb"
+z = 82
+initial_phase = "Pb"
+t50_k = "727"
+host = "Fe alloy"
+
+[[condensation]]
+element = "Bi"
+z = 83
+initial_phase = "Bi"
+t50_k = "746"
+host = "Fe alloy"
+
+[[condensation]]
+element = "Th"
+z = 90
+initial_phase = "ThO2"
+t50_k = "1659"
+host = "Hibonite"
+
+[[condensation]]
+element = "U"
+z = 92
+initial_phase = "UO2"
+t50_k = "1610"
+host = "Hibonite"
+

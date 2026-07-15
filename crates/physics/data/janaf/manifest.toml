@@ -1,0 +1,269 @@
+# NIST-JANAF thermochemical tables fixture manifest (the mu-standard total [M] top rung: name / formula /
+# phase / janaf_code / citation / md5). Each per-species table is header-cited to Chase 1998 and fetched
+# verbatim from janaf.nist.gov/tables/<code>.txt (the artifact-native machine-readable form). The tabulated
+# columns give the standard chemical potential mu-standard(T) as a MEASURED total: the Gibbs energy function
+# -[G(T)-H(Tr)]/T, the standard entropy S(T), the enthalpy increment H(T)-H(Tr), and the formation delta-f H and
+# delta-f G. BLOCK KIND: [[species]], the cited-data-column idiom (matching the optical-constants column), NOT the
+# reserved floor [[element]]/[[substance]] kind: this is an immutable transcription of Chase 1998 and does not
+# participate in the floor real/fantasy authorship axis; an authored species draws its mu from the estimator tier
+# at runtime, never written here (co-location laundering). PROVENANCE: header citation (out of floor-Element
+# policing). GRADE: single-grade, all rows are the JANAF 4th-ed critically-evaluated compilation (Chase 1998).
+# The md5 is the receipt of the fetched source bytes; the dry-run battery (janaf_provenance_test.py) re-checks it.
+
+[[species]]
+name = "H2(ref)"
+formula = "H2"
+phase = "ref"
+janaf_code = "H-050"
+file = "H-050.txt"
+url = "https://janaf.nist.gov/tables/H-050.txt"
+citation = "Chase, M.W. Jr. (1998), NIST-JANAF Thermochemical Tables, 4th ed., J. Phys. Chem. Ref. Data, Monograph 9, 1-1951. Species H-050 (Hydrogen (H2))."
+md5 = "f618992f4f5818b38ef59b9593afc9a8"
+
+[[species]]
+name = "H2O(g)"
+formula = "H2O"
+phase = "g"
+janaf_code = "H-064"
+file = "H-064.txt"
+url = "https://janaf.nist.gov/tables/H-064.txt"
+citation = "Chase, M.W. Jr. (1998), NIST-JANAF Thermochemical Tables, 4th ed., J. Phys. Chem. Ref. Data, Monograph 9, 1-1951. Species H-064 (Water (H2O))."
+md5 = "ca805cf8d1650bdd896764ec5d591217"
+
+[[species]]
+name = "CO(g)"
+formula = "CO"
+phase = "g"
+janaf_code = "C-093"
+file = "C-093.txt"
+url = "https://janaf.nist.gov/tables/C-093.txt"
+citation = "Chase, M.W. Jr. (1998), NIST-JANAF Thermochemical Tables, 4th ed., J. Phys. Chem. Ref. Data, Monograph 9, 1-1951. Species C-093 (Carbon Monoxide (CO))."
+md5 = "5fd906448cdd3780b3038f2a43eef868"
+
+[[species]]
+name = "CO2(g)"
+formula = "CO2"
+phase = "g"
+janaf_code = "C-095"
+file = "C-095.txt"
+url = "https://janaf.nist.gov/tables/C-095.txt"
+citation = "Chase, M.W. Jr. (1998), NIST-JANAF Thermochemical Tables, 4th ed., J. Phys. Chem. Ref. Data, Monograph 9, 1-1951. Species C-095 (Carbon Dioxide (CO2))."
+md5 = "a4aa113b8ae1c33c794e86ff96c66e21"
+
+[[species]]
+name = "CH4(g)"
+formula = "CH4"
+phase = "g"
+janaf_code = "C-067"
+file = "C-067.txt"
+url = "https://janaf.nist.gov/tables/C-067.txt"
+citation = "Chase, M.W. Jr. (1998), NIST-JANAF Thermochemical Tables, 4th ed., J. Phys. Chem. Ref. Data, Monograph 9, 1-1951. Species C-067 (Methane (CH4))."
+md5 = "0be0f4cde773d30e5fe3e51d5e8a330b"
+
+[[species]]
+name = "N2(ref)"
+formula = "N2"
+phase = "ref"
+janaf_code = "N-023"
+file = "N-023.txt"
+url = "https://janaf.nist.gov/tables/N-023.txt"
+citation = "Chase, M.W. Jr. (1998), NIST-JANAF Thermochemical Tables, 4th ed., J. Phys. Chem. Ref. Data, Monograph 9, 1-1951. Species N-023 (Nitrogen (N2))."
+md5 = "22a9ab524494dbf1f42b8fb2e06a3e17"
+
+[[species]]
+name = "NH3(g)"
+formula = "NH3"
+phase = "g"
+janaf_code = "H-083"
+file = "H-083.txt"
+url = "https://janaf.nist.gov/tables/H-083.txt"
+citation = "Chase, M.W. Jr. (1998), NIST-JANAF Thermochemical Tables, 4th ed., J. Phys. Chem. Ref. Data, Monograph 9, 1-1951. Species H-083 (Ammonia (NH3))."
+md5 = "d880b8686cc62b1f09b39be33c393345"
+
+[[species]]
+name = "O2(ref)"
+formula = "O2"
+phase = "ref"
+janaf_code = "O-029"
+file = "O-029.txt"
+url = "https://janaf.nist.gov/tables/O-029.txt"
+citation = "Chase, M.W. Jr. (1998), NIST-JANAF Thermochemical Tables, 4th ed., J. Phys. Chem. Ref. Data, Monograph 9, 1-1951. Species O-029 (Oxygen (O2))."
+md5 = "006935e98fd6459addceab4e26f0a915"
+
+[[species]]
+name = "SiO(g)"
+formula = "SiO"
+phase = "g"
+janaf_code = "O-012"
+file = "O-012.txt"
+url = "https://janaf.nist.gov/tables/O-012.txt"
+citation = "Chase, M.W. Jr. (1998), NIST-JANAF Thermochemical Tables, 4th ed., J. Phys. Chem. Ref. Data, Monograph 9, 1-1951. Species O-012 (Silicon Oxide (SiO))."
+md5 = "1f4b184b2cdda68cbefaf5692c6a0df7"
+
+[[species]]
+name = "TiO(g)"
+formula = "TiO"
+phase = "g"
+janaf_code = "O-022"
+file = "O-022.txt"
+url = "https://janaf.nist.gov/tables/O-022.txt"
+citation = "Chase, M.W. Jr. (1998), NIST-JANAF Thermochemical Tables, 4th ed., J. Phys. Chem. Ref. Data, Monograph 9, 1-1951. Species O-022 (Titanium Oxide (TiO))."
+md5 = "b540c5c17b8d5f0165eff08e62086b48"
+
+[[species]]
+name = "S2(g)"
+formula = "S2"
+phase = "g"
+janaf_code = "S-012"
+file = "S-012.txt"
+url = "https://janaf.nist.gov/tables/S-012.txt"
+citation = "Chase, M.W. Jr. (1998), NIST-JANAF Thermochemical Tables, 4th ed., J. Phys. Chem. Ref. Data, Monograph 9, 1-1951. Species S-012 (Sulfur (S2))."
+md5 = "72f1dab9756040ee6f6cf07a57101ba8"
+
+[[species]]
+name = "H2S(g)"
+formula = "H2S"
+phase = "g"
+janaf_code = "H-080"
+file = "H-080.txt"
+url = "https://janaf.nist.gov/tables/H-080.txt"
+citation = "Chase, M.W. Jr. (1998), NIST-JANAF Thermochemical Tables, 4th ed., J. Phys. Chem. Ref. Data, Monograph 9, 1-1951. Species H-080 (Hydrogen Sulfide (H2S))."
+md5 = "53f94d216adf6f9c208b43fb68242c19"
+
+[[species]]
+name = "Mg(g)"
+formula = "Mg"
+phase = "g"
+janaf_code = "Mg-005"
+file = "Mg-005.txt"
+url = "https://janaf.nist.gov/tables/Mg-005.txt"
+citation = "Chase, M.W. Jr. (1998), NIST-JANAF Thermochemical Tables, 4th ed., J. Phys. Chem. Ref. Data, Monograph 9, 1-1951. Species Mg-005 (Magnesium (Mg))."
+md5 = "54cde7709bc8baf1045cf24185565f4a"
+
+[[species]]
+name = "Fe(g)"
+formula = "Fe"
+phase = "g"
+janaf_code = "Fe-008"
+file = "Fe-008.txt"
+url = "https://janaf.nist.gov/tables/Fe-008.txt"
+citation = "Chase, M.W. Jr. (1998), NIST-JANAF Thermochemical Tables, 4th ed., J. Phys. Chem. Ref. Data, Monograph 9, 1-1951. Species Fe-008 (Iron (Fe))."
+md5 = "dfb7f8ce621856f63d89dc5bdeeb2259"
+
+[[species]]
+name = "SiS(g)"
+formula = "SiS"
+phase = "g"
+janaf_code = "S-009"
+file = "S-009.txt"
+url = "https://janaf.nist.gov/tables/S-009.txt"
+citation = "Chase, M.W. Jr. (1998), NIST-JANAF Thermochemical Tables, 4th ed., J. Phys. Chem. Ref. Data, Monograph 9, 1-1951. Species S-009 (Silicon Sulfide (SiS))."
+md5 = "476d726b8666576890206d45bed6d540"
+
+[[species]]
+name = "Na(g)"
+formula = "Na"
+phase = "g"
+janaf_code = "Na-005"
+file = "Na-005.txt"
+url = "https://janaf.nist.gov/tables/Na-005.txt"
+citation = "Chase, M.W. Jr. (1998), NIST-JANAF Thermochemical Tables, 4th ed., J. Phys. Chem. Ref. Data, Monograph 9, 1-1951. Species Na-005 (Sodium (Na))."
+md5 = "48c0ed69350772e65a4e7d5c80e901cb"
+
+[[species]]
+name = "K(g)"
+formula = "K"
+phase = "g"
+janaf_code = "K-005"
+file = "K-005.txt"
+url = "https://janaf.nist.gov/tables/K-005.txt"
+citation = "Chase, M.W. Jr. (1998), NIST-JANAF Thermochemical Tables, 4th ed., J. Phys. Chem. Ref. Data, Monograph 9, 1-1951. Species K-005 (Potassium (K))."
+md5 = "f981f35eeada73e9355c63efe6b2d5a8"
+
+[[species]]
+name = "Al2O3(cr,corundum)"
+formula = "Al2O3"
+phase = "cr"
+note = "corundum, alpha"
+janaf_code = "Al-096"
+file = "Al-096.txt"
+url = "https://janaf.nist.gov/tables/Al-096.txt"
+citation = "Chase, M.W. Jr. (1998), NIST-JANAF Thermochemical Tables, 4th ed., J. Phys. Chem. Ref. Data, Monograph 9, 1-1951. Species Al-096 (Aluminum Oxide, Alpha (Al2O3))."
+md5 = "d6d642fd2fa7880297d0da3042317a0f"
+
+[[species]]
+name = "MgAl2O4(cr,spinel)"
+formula = "MgAl2O4"
+phase = "cr"
+note = "spinel"
+janaf_code = "Al-089"
+file = "Al-089.txt"
+url = "https://janaf.nist.gov/tables/Al-089.txt"
+citation = "Chase, M.W. Jr. (1998), NIST-JANAF Thermochemical Tables, 4th ed., J. Phys. Chem. Ref. Data, Monograph 9, 1-1951. Species Al-089 (Magnesium Aluminum Oxide (MgAl2O4))."
+md5 = "791a5f8c813b3b829ca13eaf5aae18b5"
+
+[[species]]
+name = "Mg2SiO4(cr,forsterite)"
+formula = "Mg2SiO4"
+phase = "cr"
+note = "forsterite"
+janaf_code = "Mg-028"
+file = "Mg-028.txt"
+url = "https://janaf.nist.gov/tables/Mg-028.txt"
+citation = "Chase, M.W. Jr. (1998), NIST-JANAF Thermochemical Tables, 4th ed., J. Phys. Chem. Ref. Data, Monograph 9, 1-1951. Species Mg-028 (Magnesium Silicate (Mg2SiO4))."
+md5 = "4f2a85cbb887594b36dd2b20cdbd9c6f"
+
+[[species]]
+name = "MgSiO3(cr,enstatite)"
+formula = "MgSiO3"
+phase = "cr"
+note = "enstatite"
+janaf_code = "Mg-012"
+file = "Mg-012.txt"
+url = "https://janaf.nist.gov/tables/Mg-012.txt"
+citation = "Chase, M.W. Jr. (1998), NIST-JANAF Thermochemical Tables, 4th ed., J. Phys. Chem. Ref. Data, Monograph 9, 1-1951. Species Mg-012 (Magnesium Silicate (MgSiO3))."
+md5 = "68b53e63002b034c0e929a976f188b4b"
+
+[[species]]
+name = "Fe(cr)"
+formula = "Fe"
+phase = "cr"
+note = "alpha-delta"
+janaf_code = "Fe-004"
+file = "Fe-004.txt"
+url = "https://janaf.nist.gov/tables/Fe-004.txt"
+citation = "Chase, M.W. Jr. (1998), NIST-JANAF Thermochemical Tables, 4th ed., J. Phys. Chem. Ref. Data, Monograph 9, 1-1951. Species Fe-004 (Iron, Alpha-Delta (Fe))."
+md5 = "fb3277c5b981ab0ece7243b08a23e2be"
+
+[[species]]
+name = "FeS(cr,troilite)"
+formula = "FeS"
+phase = "cr"
+note = "troilite"
+janaf_code = "Fe-023"
+file = "Fe-023.txt"
+url = "https://janaf.nist.gov/tables/Fe-023.txt"
+citation = "Chase, M.W. Jr. (1998), NIST-JANAF Thermochemical Tables, 4th ed., J. Phys. Chem. Ref. Data, Monograph 9, 1-1951. Species Fe-023 (Iron Sulfide, Troilite (FeS))."
+md5 = "6de4538467558b4847a89d67d01f3d84"
+
+[[species]]
+name = "H2O(l)"
+formula = "H2O"
+phase = "l"
+note = "liquid; solid ice H2O(cr) absent from NIST-JANAF"
+janaf_code = "H-063"
+file = "H-063.txt"
+url = "https://janaf.nist.gov/tables/H-063.txt"
+citation = "Chase, M.W. Jr. (1998), NIST-JANAF Thermochemical Tables, 4th ed., J. Phys. Chem. Ref. Data, Monograph 9, 1-1951. Species H-063 (Water (H2O))."
+md5 = "82069ea9587e5774ba90d37f3d85ed88"
+
+[[species]]
+name = "Ni(cr)"
+formula = "Ni"
+phase = "cr"
+janaf_code = "Ni-002"
+file = "Ni-002.txt"
+url = "https://janaf.nist.gov/tables/Ni-002.txt"
+citation = "Chase, M.W. Jr. (1998), NIST-JANAF Thermochemical Tables, 4th ed., J. Phys. Chem. Ref. Data, Monograph 9, 1-1951. Species Ni-002 (Nickel (Ni))."
+md5 = "167b0c90f48d8af552f8d61406385519"
+

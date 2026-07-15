@@ -38,6 +38,7 @@
 //! manifest. The law kernels themselves are phase 2.
 
 pub mod band_gap;
+pub mod condensation;
 pub mod covalent_radii;
 pub mod crystal_field;
 pub mod d_state_radius;
@@ -49,6 +50,7 @@ pub mod geodynamics;
 pub mod graph;
 pub mod ionic_radii;
 pub mod ionization_ladder;
+pub mod janaf;
 pub mod lattice_modulus;
 pub mod laws;
 pub mod materials_oracle;
