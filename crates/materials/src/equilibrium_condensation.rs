@@ -76,6 +76,9 @@ fn max_exp_argument() -> Fixed {
 /// Solve a dense linear system `A x = b` by Gaussian elimination with partial pivoting, in fixed-point. `A` is
 /// consumed. `None` on a singular (or numerically singular) matrix or an overflow. Small `n` only (the element
 /// count), so the cubic cost is negligible.
+// The range indices cross two rows (`a[row][k]` against `a[col][k]`) and index `b`, so the range loop is the clear
+// linear-algebra form; an iterator refactor would obscure it.
+#[allow(clippy::needless_range_loop)]
 fn solve_dense(mut a: Vec<Vec<Fixed>>, mut b: Vec<Fixed>) -> Option<Vec<Fixed>> {
     let n = b.len();
     if n == 0 || a.len() != n || a.iter().any(|row| row.len() != n) {
@@ -127,6 +130,8 @@ fn coeff(species: &EquilibriumSpecies, element: &str) -> Fixed {
 /// the initial element potentials a shift-COVARIANT function of the `g_p` (`M^T lambda = g_ref`), which is what
 /// makes the shift-invariance gate byte-identical. `None` if the gas species do not span the elements (an
 /// under-determined system, a genuine coverage failure the caller must surface, never paper over).
+// The elimination indexes the stoichiometry matrix by row and column together; the range loops are the clear form.
+#[allow(clippy::needless_range_loop)]
 fn reference_basis(elements: &[String], gas: &[&EquilibriumSpecies]) -> Option<Vec<usize>> {
     let e = elements.len();
     // Column-reduce a copy of the stoichiometry matrix (rows = elements, cols = species), recording pivot species.
