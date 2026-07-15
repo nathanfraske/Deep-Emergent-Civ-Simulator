@@ -1393,11 +1393,14 @@ fn run_derived(argv: &[String]) {
         if window.is_key_down(Key::Right) || window.is_key_down(Key::D) {
             rot_lon += ROT_STEP;
         }
+        // Up/W tilts the view toward the north (the surface pans DOWN so higher latitudes come into view), the
+        // natural sense; the latitude tilt of the sampled centre therefore DECREASES as you press up. Down/S the
+        // mirror. (This corrects the earlier inverted mapping.)
         if window.is_key_down(Key::Up) || window.is_key_down(Key::W) {
-            rot_lat = (rot_lat + ROT_STEP).min(LAT_LIMIT);
+            rot_lat = (rot_lat - ROT_STEP).max(-LAT_LIMIT);
         }
         if window.is_key_down(Key::Down) || window.is_key_down(Key::S) {
-            rot_lat = (rot_lat - ROT_STEP).max(-LAT_LIMIT);
+            rot_lat = (rot_lat + ROT_STEP).min(LAT_LIMIT);
         }
         rot_lon = rot_lon.rem_euclid(TAU); // longitude wraps
 
