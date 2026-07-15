@@ -197,4 +197,66 @@ mod tests {
             planet.disk_temperature_k.to_f64_lossy()
         );
     }
+
+    // THE HADEAN-EARTH ACCEPTANCE BATTERY, pre-registered (#63): the materials-ringer discipline lifted to
+    // planetary scale. Feed the pipeline the SUN (mass 1, solar metallicity) and EARTH'S ORBIT (1 AU), author
+    // nothing else, and the DERIVED planet must land a Hadean Earth WITHIN GRADE (derive-not-fit). The battery is
+    // a living scoreboard: the rows the pipeline already derives are asserted here at acceptance grade; the rows
+    // still pending are pre-registered with the stage that will supply each, so the gate closes as the pipeline
+    // does rather than being back-fit at the end.
+    //   DERIVED now (asserted below):
+    //     - star T_eff ~5772 K            <- stellar::main_sequence_star (L, R; Stefan-Boltzmann)
+    //     - planet radius ~6371 km        <- astro::planet_radius_m (accreted mass, condensed bulk density)
+    //     - surface gravity ~9.80 m/s^2   <- surface_gravity (g = G M / R^2, the 9.80665 hardcode retired)
+    //     - disk warmth at 1 AU plausible <- astro::disk_effective_temperature (irradiation + viscous)
+    //   PENDING, pre-registered (the stage that closes each):
+    //     - mass ~1 Earth                 <- Stage 4 accretion (astro::feeding_zone_mass_earth; Sigma_c reserved)
+    //     - bulk density ~5.51 g/cm^3     <- Stage 3 condensation (iron core + silicate mantle, dry inner disk)
+    //     - differentiated interior       <- Stage 6 geology (core/mantle/crust from the condensed composition)
+    //     - CO2/N2/H2O outgassed air      <- Stage 8 atmosphere (the coupled gas-mix Gibbs solve)
+    //     - basaltic surface tiles        <- Stage 7 tile re-derivation from the materials substrate
+    #[test]
+    fn the_capstone_derives_a_hadean_earth_within_grade() {
+        let earth = derive_planet(
+            Fixed::ONE,
+            Fixed::ONE,
+            r(35, 10),
+            r(8, 10),
+            r(-44, 100),
+            r(-18, 1000),
+            Fixed::ONE,
+            r(1, 100),
+            r(1, 4),
+            Fixed::ONE,
+            Fixed::ONE,    // mass: the accretion-output fixture (PENDING row, Stage 4)
+            r(5514, 1000), // bulk density: the condensation-output fixture (PENDING row, Stage 3)
+            Fixed::from_int(100_000),
+        )
+        .expect("the Sun-Earth capstone derives");
+        // Derived row: the Sun's effective temperature, at acceptance grade (the render's light colour).
+        let t_eff = earth.star_effective_temperature_k.to_f64_lossy();
+        assert!(
+            (t_eff - 5772.0).abs() < 40.0,
+            "Hadean gate: star T_eff within grade of 5772 K, got {t_eff:.0}"
+        );
+        // Derived row: the shape, radius within ~1 percent of 6371 km.
+        let radius_km = earth.radius_m.to_f64_lossy() / 1000.0;
+        assert!(
+            (radius_km - 6371.0).abs() < 70.0,
+            "Hadean gate: radius within grade of 6371 km, got {radius_km:.0}"
+        );
+        // Derived row: the surface gravity within ~2 percent of 9.80 m/s^2 (the hardcode gone).
+        let g = earth.surface_gravity_m_s2.to_f64_lossy();
+        assert!(
+            (g - 9.80).abs() < 0.2,
+            "Hadean gate: surface gravity within grade of 9.80 m/s^2, got {g:.3}"
+        );
+        // Derived row: the disk warmth at 1 AU is a plausible early-Hadean value (a warm accreting disk, not the
+        // cold ~255 K equilibrium of the evolved atmosphere-free planet).
+        let disk = earth.disk_temperature_k.to_f64_lossy();
+        assert!(
+            disk > 150.0 && disk < 400.0,
+            "Hadean gate: disk warmth at 1 AU plausible, got {disk:.0}"
+        );
+    }
 }
