@@ -254,6 +254,53 @@ fn globe_cmd(argv: &[String]) {
     );
 }
 
+/// Headless render of a DERIVED planet's globe from a star mass and orbit: `--derived-globe <path> [mass] [orbit]
+/// [w] [h]`. Builds the derived scene (the same star-and-orbit chain the interactive `--derived` mode runs) and draws
+/// its globe (the derived radius, the blackbody star colour, the derived atmosphere sky) to a PPM, so the derived
+/// planet is viewable without a display. Prints the derived readout too.
+fn derived_globe_cmd(argv: &[String]) {
+    let path = argv
+        .get(2)
+        .cloned()
+        .unwrap_or_else(|| "derived-globe.ppm".to_string());
+    let star_mass = parse_fixed(argv.get(3), Fixed::ONE);
+    let orbit_au = parse_fixed(argv.get(4), Fixed::ONE);
+    let w: usize = parse(argv.get(5), 720);
+    let h: usize = parse(argv.get(6), 540);
+    let scene = match build_derived_scene(star_mass, orbit_au) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("the derived planet did not resolve: {e}; nothing written");
+            return;
+        }
+    };
+    print_derived_readout(&scene);
+    let fx = GlobeFixture {
+        radius_m: scene.radius_m,
+        t_eff: scene.t_eff,
+        tiles: scene.tiles.clone(),
+        cols: scene.cols,
+        sky: scene.sky,
+    };
+    let g = GLOBE_LEVELS.saturating_sub(1);
+    let (m_per_px, star_px, star_r) = globe_view_params(&fx, w, h, g);
+    let buf = render::render_solar_system_view(
+        fx.radius_m,
+        fx.t_eff,
+        &fx.tiles,
+        fx.cols,
+        w,
+        h,
+        m_per_px,
+        star_px,
+        star_r,
+        BG,
+        fx.sky,
+    );
+    write_ppm(&path, w, h, &buf);
+    eprintln!("wrote {path} ({w}x{h})");
+}
+
 /// The occupied tile nearest the map centre, for centring a superfine frame.
 fn populated_center(living: &LivingWorld, w: i32, h: i32) -> Coord3 {
     let home = Coord3::ground(w / 2, h / 2);
@@ -1105,6 +1152,10 @@ fn main() {
     }
     // Headless planet-globe frame: `--globe <path> [w] [h] [level]` writes one frame of the star-lit derived planet
     // (its size the derived radius, its star colour the derived T_eff) and exits.
+    if argv.get(1).map(|s| s == "--derived-globe").unwrap_or(false) {
+        derived_globe_cmd(&argv);
+        return;
+    }
     if argv.get(1).map(|s| s == "--globe").unwrap_or(false) {
         globe_cmd(&argv);
         return;
