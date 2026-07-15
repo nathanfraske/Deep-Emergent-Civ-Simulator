@@ -81,6 +81,54 @@ pub fn wavenumber_from_ev(energy_ev: Fixed) -> Option<Fixed> {
     energy_ev.checked_mul(wavenumber_per_ev()?)
 }
 
+/// BAND 1, the Morse well depth `D_e` (cm^-1) from a diatomic's harmonic frequency `omega_e` and anharmonicity
+/// `omega_e x_e`, by the Morse identity `x_e = omega_e / (4 D_e)`, equivalently `D_e = omega_e^2 / (4 omega_e x_e)`.
+/// For OH (`omega_e = 3737.761`, `omega_e x_e = 84.8813` cm^-1, Huber & Herzberg 1979 via NIST WebBook) this lands
+/// `41,148 cm^-1 = 5.10 eV`.
+///
+/// DEFINITION TAG (join-law enforced): this returns `D_e[Morse]`, the SPECTROSCOPIC (Morse-fit) well depth, which
+/// is NOT the thermochemical `D_e[thermochemical]` and must never be joined to one without conversion. The Morse
+/// inversion OVER-ESTIMATES the true depth by the known Birge-Sponer-class overshoot (real potentials soften faster
+/// than Morse toward dissociation): NIST reports the actual OH `D_e[thermochemical] = 4.621 eV` (and `D_0 = 4.392
+/// eV`, the two differing by the zero-point half-quantum `0.229 eV = omega_e/2 - omega_e x_e/4`, the real internal
+/// check), while this identity gives `5.10 eV`, ~10% high and systematically so. A downstream consumer that eats
+/// well depths (a photolysis or bond-breaking threshold) must read `D_e[thermochemical]`, or it inherits a 10% bias
+/// wearing a measured pedigree (the mixed-provenance defect the Stoner incident taught us to type against). Band 1
+/// itself is unharmed: the fundamental correction reads `omega_e x_e` straight off the table (exact by
+/// construction), and the alien direction puts a 10-20% error on a 3-5% correction, sub-percent at the output.
+///
+/// The quantity is two-directional: for a calibrated pair it is READ from the measured `omega_e x_e` (this
+/// function); for an alien bond it is SUPPLIED by the Harrison gap, the reverse direction, the ALIEN rung (correctly
+/// two-tier). `None` on a non-positive anharmonicity or overflow.
+pub fn morse_well_depth_cm_inverse(omega_e_cm: Fixed, omega_e_xe_cm: Fixed) -> Option<Fixed> {
+    if omega_e_xe_cm <= Fixed::ZERO {
+        return None;
+    }
+    omega_e_cm
+        .checked_mul(omega_e_cm)?
+        .checked_div(Fixed::from_int(4).checked_mul(omega_e_xe_cm)?)
+}
+
+/// BAND 1, the anharmonic FUNDAMENTAL `nu_01` (cm^-1) from a HARMONIC frequency estimate and the Morse well depth
+/// `D_e` (cm^-1): `nu_01 = omega - omega^2 / (2 D_e)`. The Badger rule targets the harmonic `omega_e`, but spectra
+/// report the fundamental `nu_01 = omega_e - 2 omega_e x_e`; when `D_e` is the same bond's the Morse identity makes
+/// `omega^2 / (2 D_e) = 2 omega_e x_e`, so this is the exact harmonic-to-fundamental offset. Feeding Badger's
+/// force-constant estimate through it converts a harmonic prediction to the observed fundamental (and the same
+/// `D_e` sets the near-IR overtone positions the opacity consumer wants). Pre-registered post-correction grade on
+/// the clean diatomics: `+-1%`. `None` on a non-positive `D_e` or overflow.
+pub fn anharmonic_fundamental_cm_inverse(
+    harmonic_omega_cm: Fixed,
+    well_depth_cm: Fixed,
+) -> Option<Fixed> {
+    if well_depth_cm <= Fixed::ZERO {
+        return None;
+    }
+    let offset = harmonic_omega_cm
+        .checked_mul(harmonic_omega_cm)?
+        .checked_div(Fixed::from_int(2).checked_mul(well_depth_cm)?)?;
+    harmonic_omega_cm.checked_sub(offset)
+}
+
 /// The longitudinal-optical mode wavenumber `omega_LO` (cm^-1) by the Lyddane-Sachs-Teller relation
 /// `omega_LO = omega_TO sqrt(eps_0/eps_inf)`, the LO-TO splitting the static and high-frequency permittivities set.
 /// `None` on a non-positive `eps_inf` or an overflow.
@@ -397,6 +445,119 @@ mod tests {
         assert!(
             w_tet < w_meas,
             "the tetrahedral length estimator softens omega_TO below the measured-length pass ({w_tet} < {w_meas}), the estimator's band"
+        );
+    }
+
+    #[test]
+    fn the_band_one_morse_correction_is_the_exact_fundamental_offset() {
+        // BAND 1, mechanism correctness. The two functions compose to the Morse level formula
+        // nu_01 = omega_e - 2 omega_e x_e: feeding a molecule's own MEASURED omega_e through
+        // anharmonic_fundamental_cm_inverse with D_e[Morse] from its measured anharmonicity must reproduce the
+        // measured fundamental exactly. Cited [M] (Huber & Herzberg 1979 via the NIST Chemistry WebBook): CO omega_e
+        // = 2169.814, omega_e x_e = 13.288 cm^-1; OH omega_e = 3737.761, omega_e x_e = 84.881 cm^-1.
+        let check = |omega_e: f64, wexe: f64| -> (f64, f64) {
+            let we = Fixed::from_ratio((omega_e * 1000.0) as i64, 1000);
+            let wx = Fixed::from_ratio((wexe * 1000.0) as i64, 1000);
+            let d_e = morse_well_depth_cm_inverse(we, wx).unwrap();
+            let nu01 = anharmonic_fundamental_cm_inverse(we, d_e).unwrap();
+            (nu01.to_f64_lossy(), omega_e - 2.0 * wexe)
+        };
+        for (omega_e, wexe) in [(2169.814, 13.288), (3737.761, 84.881), (1241.557, 5.966)] {
+            let (got, expect) = check(omega_e, wexe);
+            assert!(
+                (got - expect).abs() < 0.5,
+                "the Morse correction is the exact fundamental omega_e - 2 omega_e x_e = {expect}, got {got}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_band_one_de_sanity_and_the_morse_overestimate() {
+        // BAND 1, the D_e[Morse] sanity and its DEFINITION TAG. For OH the Morse identity D_e = omega_e^2 / (4
+        // omega_e x_e) = 3737.761^2 / (4 * 84.881) lands ~41,148 cm^-1 = 5.10 eV. Sanity: it exceeds the OH radical's
+        // dissociation D_0 = 4.392 eV. HONEST LIMIT: it OVER-ESTIMATES the true well depth (NIST D_e[thermochemical]
+        // = 4.621 eV) by ~10%, the systematic Birge-Sponer overshoot; the true D_e - D_0 = 0.229 eV is the zero-point
+        // half-quantum, the real internal check that the Morse-fit value does NOT satisfy. Cited [M] Huber & Herzberg
+        // 1979 / NIST.
+        let we = Fixed::from_ratio(3737761, 1000);
+        let wx = Fixed::from_ratio(84881, 1000);
+        let d_e_cm = morse_well_depth_cm_inverse(we, wx).unwrap();
+        let d_e_ev = ev_from_wavenumber(d_e_cm).unwrap().to_f64_lossy();
+        assert!(
+            (d_e_ev - 5.10).abs() < 0.05,
+            "OH D_e[Morse] ~ 5.10 eV, got {d_e_ev}"
+        );
+        assert!(
+            d_e_ev > 4.392,
+            "D_e[Morse] exceeds D_0 = 4.392 eV (a well depth must)"
+        );
+        assert!(
+            d_e_ev > 4.621,
+            "D_e[Morse] over-estimates the true D_e[thermochemical] 4.621 eV (the ~10% Morse bias, documented)"
+        );
+    }
+
+    #[test]
+    fn the_band_one_regrades_the_free_o_h_stretch_toward_the_fundamental() {
+        // BAND 1, the pass-1 re-grade. The free O-H row read Badger's HARMONIC omega_TO ~ 3818 against the measured
+        // water fundamental ~3700, +3.2%. The Morse correction (D_e[Morse] from OH's anharmonicity) subtracts the
+        // harmonic-to-fundamental offset, moving it to ~3641, -1.6%: the systematic +3% bias collapses. The residual
+        // that remains is Badger's own force-constant error, which the anharmonic correction does not touch.
+        //
+        // The FULL diatomic set, applied to Badger's INDEPENDENT omega_TO (each residual reported, never a curated
+        // subset, the mechanism-shopping guard): CO (r_e 1.128) 2173 -> 2147 vs fundamental 2143.2, +0.15%; SiO (r_e
+        // 1.510) 1235 -> 1223 vs 1229.6, -0.53%; N2 (r_e 1.098) 2329 -> 2301 vs 2329.9, -1.2%; OH (r_e 0.957) 3818 ->
+        // 3641 vs the water 3700, -1.6%. The correction is the exact Morse offset; the spread is Badger's per-molecule
+        // k error (for N2 Badger's k under-predicts omega_e, so its raw value already sat near the fundamental and the
+        // principled correction reveals that under-prediction). The +-1% grade holds where Badger's harmonic estimate
+        // is accurate (CO, SiO).
+        let fc = crate::force_constant::ForceConstants::standard().unwrap();
+        let t = crate::periodic::PeriodicTable::standard().unwrap();
+        // OH D_e[Morse] from the cited anharmonicity.
+        let d_e_oh = morse_well_depth_cm_inverse(
+            Fixed::from_ratio(3737761, 1000),
+            Fixed::from_ratio(84881, 1000),
+        )
+        .unwrap();
+        let k_oh = fc
+            .force_constant_mdyn_per_angstrom(8, 1, Fixed::from_ratio(957, 1000))
+            .unwrap();
+        let mu_oh = crate::force_constant::ForceConstants::reduced_mass_amu(&t, "O", "H").unwrap();
+        let harmonic = omega_to_cm_inverse(k_oh, mu_oh).unwrap();
+        let corrected = anharmonic_fundamental_cm_inverse(harmonic, d_e_oh).unwrap();
+        let harmonic = harmonic.to_f64_lossy();
+        let corrected = corrected.to_f64_lossy();
+        // The harmonic reading is the +3% band; the correction lowers it (removes the positive offset).
+        assert!(
+            corrected < harmonic,
+            "the correction subtracts the harmonic-to-fundamental offset ({corrected} < {harmonic})"
+        );
+        // The re-grade improves on the measured water fundamental 3700.
+        assert!(
+            (corrected - 3700.0).abs() < (harmonic - 3700.0).abs(),
+            "the corrected O-H ({corrected}) is closer to the fundamental 3700 than the harmonic ({harmonic})"
+        );
+        assert!(
+            (corrected - 3700.0).abs() / 3700.0 < 0.02,
+            "the corrected O-H lands within 2% of the fundamental (from +3.2% to -1.6%), got {corrected}"
+        );
+        // The clean-diatomic +-1% demonstration: CO, where Badger's harmonic estimate is accurate.
+        let d_e_co = morse_well_depth_cm_inverse(
+            Fixed::from_ratio(2169814, 1000),
+            Fixed::from_ratio(13288, 1000),
+        )
+        .unwrap();
+        let k_co = fc
+            .force_constant_mdyn_per_angstrom(6, 8, Fixed::from_ratio(1128, 1000))
+            .unwrap();
+        let mu_co = crate::force_constant::ForceConstants::reduced_mass_amu(&t, "C", "O").unwrap();
+        let co_corrected =
+            anharmonic_fundamental_cm_inverse(omega_to_cm_inverse(k_co, mu_co).unwrap(), d_e_co)
+                .unwrap()
+                .to_f64_lossy();
+        assert!(
+            (co_corrected - 2143.24).abs() / 2143.24 < 0.01,
+            "the CO fundamental lands within +-1% (2143.24), got {co_corrected}"
         );
     }
 
