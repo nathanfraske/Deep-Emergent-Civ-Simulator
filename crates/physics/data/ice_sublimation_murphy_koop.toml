@@ -1,0 +1,74 @@
+# Murphy & Koop (2005) ice-Ih saturation vapor pressure, for the H2O(gas) <-> H2O(ice) snow-line front. NIST-JANAF
+# tabulates only liquid water (H2O(l)); this fills the solid-ice gap the condensation sequence needs below the
+# freezing point. PRIMARY (the recipe/source of truth, natural log, T in K, p in Pa, valid T > 110 K):
+#   ln p_ice = 9.550426 - 5723.265/T + 3.53068*ln(T) - 0.00728332*T
+# CITED: Murphy, D.M. & Koop, T. (2005), Q. J. R. Meteorol. Soc. 131, 1539, the ice saturation-pressure equation
+# (their eq. 7), built for the sub-freezing range. SECOND WITNESS: the IAPWS ice-Ih Gibbs function (Feistel &
+# Wagner 2006, J. Phys. Chem. Ref. Data 35, 1021, release R10-06), from which the sublimation pressure derives; the
+# Murphy-Koop and Feistel-Wagner curves agree to well under a percent over this range, which is the band. The
+# equation IS the load-bearing datum (no fetched byte column exists to md5); the tabulated points below are its
+# evaluation, reproducible byte-free from the four header coefficients (scripts/condensation_mu_provenance_test.py).
+#
+# IN-HOUSE CERTIFIER (source-ladder note, owner ruling: alternative [M] precedes estimator): the Murphy-Koop /
+# Feistel-Wagner [M] is the primary; the Clausius-Clapeyron relation on the sublimation branch (L_sub = L_vap +
+# L_fus) is the in-house certifier that shadow-validates the fetch, never the source of the numbers.
+#
+# COLUMNS: t_k = temperature (K); p_sat_pa = ice saturation vapor pressure (Pa), 3 significant figures. FINGERPRINT
+# (owner spot-check, in the loader #[test]): p_sat at 180 K ~ 5.40e-3 Pa = 5.4e-8 bar, of order the solar water
+# partial pressure at 1e-4 bar (~1e-8 bar), i.e. the water snow line sits near 180 K (Lodders water-ice = 182 K).
+#
+# BLOCK KIND [[point]], the cited-data-column idiom, NOT a reserved floor kind: an immutable transcription of the
+# Murphy-Koop equation's output, out of the floor real/fantasy authorship axis. PROVENANCE: header citation. GRADE:
+# single (one equation, one phase, ice Ih). HONEST LIMITS: the tabulated points are a 3-sig-fig rounding of the
+# equation; the smallest points (below ~1e-6 Pa) carry reduced Q32.32 precision (the ~1.2e-8 Pa point at 130 K
+# stores to ~2 sig figs, near the fixed-point epsilon), so the header equation is the full-resolution source. The
+# curve is ice Ih only (the stable phase in this range); no consumer is wired in any pinned run path (byte-neutral).
+
+phase = "ice-Ih"
+temperature_unit = "K"
+pressure_unit = "Pa"
+eq_a = "9.550426"
+eq_b = "-5723.265"
+eq_c = "3.53068"
+eq_d = "-0.00728332"
+
+
+[[point]]
+t_k = "130"
+p_sat_pa = "1.20e-8"
+
+[[point]]
+t_k = "140"
+p_sat_pa = "3.37e-7"
+
+[[point]]
+t_k = "150"
+p_sat_pa = "6.11e-6"
+
+[[point]]
+t_k = "160"
+p_sat_pa = "7.74e-5"
+
+[[point]]
+t_k = "170"
+p_sat_pa = "7.31e-4"
+
+[[point]]
+t_k = "180"
+p_sat_pa = "5.40e-3"
+
+[[point]]
+t_k = "190"
+p_sat_pa = "3.24e-2"
+
+[[point]]
+t_k = "200"
+p_sat_pa = "0.163"
+
+[[point]]
+t_k = "210"
+p_sat_pa = "0.702"
+
+[[point]]
+t_k = "220"
+p_sat_pa = "2.65"

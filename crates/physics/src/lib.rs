@@ -48,6 +48,7 @@ pub mod force_constant;
 pub mod gas_thermochemistry;
 pub mod geodynamics;
 pub mod graph;
+pub mod ice_sublimation;
 pub mod ionic_radii;
 pub mod ionization_ladder;
 pub mod janaf;

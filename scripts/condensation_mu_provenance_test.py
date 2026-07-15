@@ -67,8 +67,43 @@ def check_agss09():
     print(f"PASS: {len(rows)} AGSS09 rows, all {len(AGSS09_FINGERPRINTS)} fingerprints reproduce")
 
 
+def check_ice():
+    import math
+
+    path = os.path.join(DATA, "ice_sublimation_murphy_koop.toml")
+    text = open(path, encoding="utf-8").read()
+    coeff = dict(re.findall(r'(eq_[abcd])\s*=\s*"(-?[0-9.]+)"', text))
+    for k in ("eq_a", "eq_b", "eq_c", "eq_d"):
+        assert k in coeff, f"ice header records no {k} coefficient (the recipe receipt)"
+    a, b, c, d = (float(coeff[k]) for k in ("eq_a", "eq_b", "eq_c", "eq_d"))
+
+    def p_eq(T):
+        # Murphy-Koop 2005 ice equation (natural log), recomputed from the recorded coefficients.
+        return math.exp(a + b / T + c * math.log(T) + d * T)
+
+    rows = [r for r in parse_rows(text, "point") if "t_k" in r]
+    assert len(rows) == 10, f"expected 10 ice points (130-220 K), got {len(rows)}"
+    failures = 0
+    for r in rows:
+        T = float(r["t_k"])
+        want = p_eq(T)
+        got = float(r["p_sat_pa"])
+        # The stored value is a 3-sig-fig rounding of the equation; allow 1% relative drift.
+        if abs(got - want) / want > 0.01:
+            print("ICE RECOMPUTE DRIFT", T, "want", want, "got", got)
+            failures += 1
+    # The 180 K snow-line fingerprint.
+    p180 = next(float(r["p_sat_pa"]) for r in rows if float(r["t_k"]) == 180.0)
+    if abs(p180 - 5.40e-3) > 1e-4:
+        print("ICE FINGERPRINT DRIFT 180 K want 5.40e-3 got", p180)
+        failures += 1
+    assert failures == 0, f"{failures} ice sublimation mismatch(es)"
+    print(f"PASS: {len(rows)} ice points recompute from the Murphy-Koop coefficients, 180 K fingerprint holds")
+
+
 def main():
     check_agss09()
+    check_ice()
     print("PASS: condensation mu-fetch provenance battery")
 
 
