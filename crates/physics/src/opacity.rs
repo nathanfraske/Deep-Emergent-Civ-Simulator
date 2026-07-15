@@ -493,6 +493,109 @@ pub fn total_gas_rosseland_opacity(
     })
 }
 
+/// The TOTAL gas-plus-grain Rosseland-mean opacity `kappa_R` (cm^2/g): [`total_gas_rosseland_opacity`] with the
+/// monochromatic GRAIN term joined into the same sum, `kappa_R = rosseland_mean(kappa_es + kappa_H-(x) +
+/// kappa_ff(x) + kappa_grain(x))`. The grain opacity is supplied as a closure `grain_kappa_at(lambda_um)` (the
+/// materials-crate wire builds it from the realized condensate assemblage: Rule-1 optical dispatch, Rule-2
+/// effective-medium topology, Rule-3 shared size distribution, then [`grain_size_averaged_opacity`] at each
+/// wavelength). Keeping the grain term a closure keeps this physics primitive composition-agnostic and off the
+/// dependency cycle (physics does not depend on materials).
+///
+/// The sum is MONOCHROMATIC, then Rosseland-averaged: the harmonic mean is not additive, so a caller MUST NOT
+/// Rosseland-average gas and grains separately and add the two means. Adding the grain term also repairs the cold
+/// molecular gap for a condensed disk: where es and ff are Saha-killed and H- sleeps, [`total_gas_rosseland_opacity`]
+/// returns `None` (its handoff signal), but grains at the ice line carry the opacity, so the summed monochromatic
+/// opacity is positive and the mean resolves. The ice-line opacity CLIFF is therefore an emergent output of this
+/// sum (grains present below the front dominate the budget, absent above it), never a coded regime boundary. The
+/// gas arguments are exactly [`total_gas_rosseland_opacity`]'s; `None` if a term or the mean fails to resolve.
+#[allow(clippy::too_many_arguments)]
+pub fn total_gas_and_grain_rosseland_opacity(
+    temperature_k: Fixed,
+    density_g_per_cm3: Fixed,
+    ln_density_g_cm3: Fixed,
+    hydrogen_mass_fraction: Fixed,
+    charge_weighted_abundance: Fixed,
+    gaunt_factor: Fixed,
+    ln_electron_density_cm3: Fixed,
+    ln_sum_z2_ni_cm3: Fixed,
+    electron_pressure_dyn_cm2: Fixed,
+    table: &PeriodicTable,
+    grain_kappa_at: impl Fn(Fixed) -> Option<Fixed>,
+) -> Option<Fixed> {
+    let kappa_es = electron_scattering_opacity_from_electron_density(
+        ln_electron_density_cm3,
+        ln_density_g_cm3,
+    )?;
+    let a_ff = free_free_prefactor_ionized(
+        ln_electron_density_cm3,
+        ln_sum_z2_ni_cm3,
+        ln_density_g_cm3,
+        density_g_per_cm3,
+        temperature_k,
+        hydrogen_mass_fraction,
+        charge_weighted_abundance,
+        gaunt_factor,
+    )?;
+    // lambda(x, T) = (h c / k_B) / (x T), in microns: the wavelength the grain closure is priced at.
+    let h = fundamental_bigrat("h")?;
+    let c = fundamental_bigrat("c")?;
+    let k_b = fundamental_bigrat("k_B")?;
+    let alpha_um_k = h.mul(&c).div(&k_b).mul(&BigRat::from_i64(1_000_000));
+    let t_br = nonneg_fixed_to_bigrat(temperature_k);
+
+    // Precompute the monochromatic grain opacity on the coarse Rosseland-window grid (the same grid the grain-only
+    // spectral mean uses), so the possibly-expensive grain closure is evaluated GRAIN_ROSS_GRID+1 times, not once
+    // per Rosseland quadrature point (the disk fixed-point solve calls this repeatedly, so the closure cost must
+    // not multiply by ROSSELAND_INTERVALS). The grain term is then interpolated LINEARLY in ln(x) at each
+    // quadrature frequency: linear rather than log-log because the additive grain term is zero where no grains are
+    // present (ln 0 is undefined), and the gas terms stay exact per point.
+    let ln_x_min = rosseland_x_min().ln();
+    let ln_x_max = rosseland_x_max().ln();
+    let span = ln_x_max.checked_sub(ln_x_min)?;
+    let mut grain_grid = Vec::with_capacity(GRAIN_ROSS_GRID + 1);
+    for j in 0..=GRAIN_ROSS_GRID {
+        let ln_x = ln_x_min
+            .checked_add(span.checked_mul(Fixed::from_ratio(j as i64, GRAIN_ROSS_GRID as i64))?)?;
+        let x = ln_x.exp();
+        let lam_br = alpha_um_k.div(&nonneg_fixed_to_bigrat(x).mul(&t_br));
+        let lam = Fixed::from_bits_i128(lam_br.round_to_scale(Fixed::FRAC_BITS)?)?;
+        grain_grid.push(grain_kappa_at(lam)?);
+    }
+
+    rosseland_mean(|x| {
+        let ff = a_ff.checked_mul(free_free_shape(x)?)?;
+        let hm = h_minus_opacity(
+            x,
+            temperature_k,
+            hydrogen_mass_fraction,
+            electron_pressure_dyn_cm2,
+            table,
+        )?;
+        // Interpolate the precomputed grain term linearly in ln(x), clamped to the grid endpoints.
+        let ln_x = x.ln();
+        let pos = ln_x
+            .checked_sub(ln_x_min)?
+            .checked_div(span)?
+            .checked_mul(Fixed::from_int(GRAIN_ROSS_GRID as i32))?;
+        let pos = if pos < Fixed::ZERO {
+            Fixed::ZERO
+        } else if pos > Fixed::from_int(GRAIN_ROSS_GRID as i32) {
+            Fixed::from_int(GRAIN_ROSS_GRID as i32)
+        } else {
+            pos
+        };
+        let idx = (pos.to_int() as usize).min(GRAIN_ROSS_GRID - 1);
+        let local = pos.checked_sub(Fixed::from_int(idx as i32))?;
+        let lo = grain_grid[idx];
+        let hi = grain_grid[idx + 1];
+        let grain = lo.checked_add(hi.checked_sub(lo)?.checked_mul(local)?)?;
+        kappa_es
+            .checked_add(ff)?
+            .checked_add(hm)?
+            .checked_add(grain)
+    })
+}
+
 /// The John 1988 photodetachment threshold wavelength `lambda_0` (micron) of the H- bound-free cross-section fit:
 /// the fit's internal threshold, implying a binding `hc/lambda_0 = 0.7551 eV`, ~1 meV above the measured H- electron
 /// affinity (`0.754 eV`, read from the periodic table for the physical Saha binding). It stays here only inside the
@@ -1582,6 +1685,40 @@ pub fn grain_rosseland_opacity(
     a_min_um: Fixed,
     a_max_um: Fixed,
 ) -> Option<Fixed> {
+    // A wavelength-independent index is the constant closure; the spectral form is the general one below.
+    grain_rosseland_opacity_spectral(
+        temperature_k,
+        |_lambda_um| Some((n, k)),
+        bulk_density_g_cm3,
+        slope,
+        a_min_um,
+        a_max_um,
+    )
+}
+
+/// The ROSSELAND-MEAN grain opacity `kappa_R(T)` (cm^2/g) for a grain whose complex index VARIES with wavelength,
+/// the generalization of [`grain_rosseland_opacity`] that the disposer-condensate wire needs: the effective
+/// `(n, k)` of a mixed grain is a function of wavelength (each condensate's optical constants are wavelength
+/// tables, and the effective-medium mix of them is evaluated at each wavelength), so the index is supplied as a
+/// closure `index_at(lambda_um)` rather than a pair of constants. At each Rosseland-window wavelength the closure
+/// returns the effective `(n, k)` there, the size-distribution average [`grain_size_averaged_opacity`] turns it
+/// into a monochromatic opacity, and [`rosseland_mean`] takes the transparency-weighted average.
+///
+/// The wire (up-stack, in the materials crate, since it consumes the realized assemblage) supplies `index_at` as
+/// the Rule-1 optical dispatch (measured constants where the species is in the library, the phonon estimator for
+/// an alien phase) composed with the Rule-2 effective-medium topology (Maxwell-Garnett below the ice line,
+/// Bruggeman above). This physics primitive stays composition-agnostic: it is handed an index-versus-wavelength
+/// function and a shared size distribution and knows nothing of which condensates produced them (admit-the-alien
+/// by construction). `None` on a non-positive temperature, a wavelength the closure cannot price, a bad
+/// distribution, or any overflow.
+pub fn grain_rosseland_opacity_spectral(
+    temperature_k: Fixed,
+    index_at: impl Fn(Fixed) -> Option<(Fixed, Fixed)>,
+    bulk_density_g_cm3: Fixed,
+    slope: Fixed,
+    a_min_um: Fixed,
+    a_max_um: Fixed,
+) -> Option<Fixed> {
     if temperature_k <= Fixed::ZERO {
         return None;
     }
@@ -1603,6 +1740,7 @@ pub fn grain_rosseland_opacity(
         let x = ln_x.exp();
         let lam_br = alpha_um_k.div(&nonneg_fixed_to_bigrat(x).mul(&t_br));
         let lam = Fixed::from_bits_i128(lam_br.round_to_scale(Fixed::FRAC_BITS)?)?;
+        let (n, k) = index_at(lam)?;
         let kappa =
             grain_size_averaged_opacity(lam, n, k, bulk_density_g_cm3, slope, a_min_um, a_max_um)?;
         ln_kappa.push(kappa.ln());
@@ -1921,6 +2059,84 @@ mod tests {
             )
             .unwrap(),
             "the assembly replays byte for byte"
+        );
+    }
+
+    #[test]
+    fn the_grain_term_joins_the_monochromatic_sum() {
+        // The gas-plus-grain join at the same 6000 K Saha state. A zero grain closure must reproduce the gas-only
+        // Rosseland mean EXACTLY (the grain term enters as an additive monochromatic contribution, so adding zero is
+        // an identity, the consistency the byte pins would otherwise have to guard). A positive grain closure must
+        // raise the total: the grain opacity joins the sum at each frequency before the Rosseland average, never as
+        // a separate mean added after.
+        let tbl = table();
+        let temp = Fixed::from_int(6000);
+        let species = [
+            ("H", crate::saha::ln_of_decimal("1e17").unwrap()),
+            ("Na", crate::saha::ln_of_decimal("2e11").unwrap()),
+            ("K", crate::saha::ln_of_decimal("1e10").unwrap()),
+            ("Mg", crate::saha::ln_of_decimal("3e12").unwrap()),
+            ("Ca", crate::saha::ln_of_decimal("2e11").unwrap()),
+        ];
+        let state = crate::saha::electron_density_saha(temp, &species, &tbl).unwrap();
+        let rho = Fixed::from_ratio(24, 100_000_000);
+        let ln_rho = crate::saha::ln_of_decimal("2.4e-7").unwrap();
+        let (x, z2a, g) = (
+            Fixed::from_ratio(7, 10),
+            Fixed::ONE,
+            Fixed::from_ratio(12, 10),
+        );
+        let ln_ne = state.ln_electron_density_cm3;
+        let gas_only = total_gas_rosseland_opacity(
+            temp,
+            rho,
+            ln_rho,
+            x,
+            z2a,
+            g,
+            ln_ne,
+            ln_ne,
+            state.electron_pressure_dyn_cm2,
+            &tbl,
+        )
+        .expect("the gas-only closure assembles");
+        let with_zero_grains = total_gas_and_grain_rosseland_opacity(
+            temp,
+            rho,
+            ln_rho,
+            x,
+            z2a,
+            g,
+            ln_ne,
+            ln_ne,
+            state.electron_pressure_dyn_cm2,
+            &tbl,
+            |_lambda| Some(Fixed::ZERO),
+        )
+        .expect("the gas-plus-grain closure assembles");
+        assert_eq!(
+            gas_only, with_zero_grains,
+            "a zero grain term reproduces the gas-only Rosseland mean exactly"
+        );
+        let with_grains = total_gas_and_grain_rosseland_opacity(
+            temp,
+            rho,
+            ln_rho,
+            x,
+            z2a,
+            g,
+            ln_ne,
+            ln_ne,
+            state.electron_pressure_dyn_cm2,
+            &tbl,
+            |_lambda| Some(Fixed::from_ratio(1, 10)),
+        )
+        .expect("the gas-plus-grain closure assembles with grains");
+        assert!(
+            with_grains > gas_only,
+            "a positive monochromatic grain term raises the total ({} vs {})",
+            with_grains.to_f64_lossy(),
+            gas_only.to_f64_lossy()
         );
     }
 

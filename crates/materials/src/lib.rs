@@ -52,6 +52,7 @@ pub mod creep;
 pub mod definition;
 pub mod electronic;
 pub mod freezer;
+pub mod grain_opacity;
 pub mod harrison;
 pub mod localized;
 pub mod log;
