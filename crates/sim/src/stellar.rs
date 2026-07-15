@@ -208,9 +208,19 @@ pub fn effective_temperature(
 
 /// The Stefan-Boltzmann inversion shared by [`effective_temperature`] and [`main_sequence_star`]: the surface flux
 /// `F = L_sun*luminosity_ratio / (4*pi*(R_sun*radius_ratio)^2)` runs in exact rational arithmetic (its `L` and
-/// `R^2` overflow Q32.32 while the ~6.3e7 W/m^2 result fits) and rounds once, then the fourth root reuses
+/// `R^2` overflow Q32.32) and rounds once, then the fourth root reuses
 /// [`civsim_physics::laws::radiative_equilibrium`] with emissivity one (a star radiates as a blackbody at its
-/// effective temperature by the definition of `T_eff`). `None` on a surface flux past the representable range.
+/// effective temperature by the definition of `T_eff`).
+///
+/// A Sun-grade surface flux (~6.3e7 W/m^2) fits Q32.32, so that path rounds the absolute flux and is taken
+/// unchanged. But a hot massive star's SURFACE flux itself crosses the ceiling (an 18 M_sun star radiates
+/// ~1.5e10 W/m^2, above the ~2.1e9 Q32.32 max, because a hotter photosphere is genuinely brighter per unit area),
+/// so the absolute-flux read returns `None`. When it does, the SUN-RELATIVE form takes over without ever forming
+/// the wide flux: `T_eff = T_sun*(F/F_sun)^(1/4)`, where the flux RATIO `F/F_sun = luminosity_ratio/radius_ratio^2`
+/// is representable (~240 for 18 M_sun) and `T_sun` derives from the Sun's OWN representable surface flux. This is
+/// the same log-space-census discipline as [`stellar_effective_temperature`], and it is strictly additive: every
+/// star whose absolute surface flux fits is byte-identical to before, and only the massive stars that used to fail
+/// now resolve. `None` only if even the flux RATIO passes the representable range (far above any real stellar mass).
 fn effective_temperature_from_ratios(
     luminosity_ratio: Fixed,
     radius_ratio: Fixed,
@@ -218,20 +228,34 @@ fn effective_temperature_from_ratios(
 ) -> Option<Fixed> {
     let l_sun = BigRat::from_decimal_str(SOLAR_LUMINOSITY_W).ok()?;
     let r_sun = BigRat::from_decimal_str(SOLAR_RADIUS_M).ok()?;
+    let four_pi = BigRat::from_i64(4).mul(&compute::pi(FLUX_PI_DIGITS));
+    let sigma = crate::physiology::derived_stefan_boltzmann();
     let luminosity = l_sun.mul(&nonneg_fixed_to_bigrat(luminosity_ratio));
     let r_star = r_sun.mul(&nonneg_fixed_to_bigrat(radius_ratio));
     let r2 = r_star.mul(&r_star);
-    let four_pi = BigRat::from_i64(4).mul(&compute::pi(FLUX_PI_DIGITS));
     let denom = four_pi.mul(&r2);
     let surface_flux_bits = luminosity.div(&denom).round_to_scale(Fixed::FRAC_BITS)?;
-    let surface_flux = Fixed::from_bits_i128(surface_flux_bits)?;
-    let sigma = crate::physiology::derived_stefan_boltzmann();
-    Some(civsim_physics::laws::radiative_equilibrium(
-        surface_flux,
-        Fixed::ONE,
-        sigma,
-        t_max,
-    ))
+    // The Sun-grade path: when the absolute surface flux fits Q32.32, round it and invert directly (byte-identical
+    // to the pre-fix form for every star that used to resolve).
+    if let Some(surface_flux) = Fixed::from_bits_i128(surface_flux_bits) {
+        return Some(civsim_physics::laws::radiative_equilibrium(
+            surface_flux,
+            Fixed::ONE,
+            sigma,
+            t_max,
+        ));
+    }
+    // The massive-star path: the absolute surface flux overflowed, so scale the Sun's effective temperature by the
+    // representable flux ratio's fourth root, never forming the wide flux. F_sun = L_sun/(4*pi*R_sun^2) IS
+    // representable (~6.3e7 W/m^2), so T_sun derives; F/F_sun = luminosity_ratio/radius_ratio^2.
+    let solar_flux_bits = l_sun
+        .div(&four_pi.mul(&r_sun.mul(&r_sun)))
+        .round_to_scale(Fixed::FRAC_BITS)?;
+    let solar_flux = Fixed::from_bits_i128(solar_flux_bits)?;
+    let t_sun = civsim_physics::laws::radiative_equilibrium(solar_flux, Fixed::ONE, sigma, t_max);
+    let flux_ratio = luminosity_ratio.checked_div(radius_ratio.checked_mul(radius_ratio)?)?;
+    let t_eff = t_sun.checked_mul(flux_ratio.powf(Fixed::from_ratio(1, 4)))?;
+    Some(if t_eff > t_max { t_max } else { t_eff })
 }
 
 /// The full main-sequence star the front-end hands the disk: the luminosity ratio, the radius ratio, and the
@@ -394,6 +418,70 @@ mod tests {
         assert!(
             (t_ratio - 2.0_f64.powf(0.475)).abs() < 0.03,
             "T_eff tracks 2^((alpha-2beta)/4) (~1.39), got {t_ratio}"
+        );
+    }
+
+    #[test]
+    fn a_massive_star_resolves_its_hot_effective_temperature() {
+        // The massive-star T_eff path (the regression guard for the Betelgeuse-mass hole). An 18 M_sun star's
+        // ABSOLUTE surface flux (~1.5e10 W/m^2, a hotter photosphere radiating more per unit area) crosses the
+        // Q32.32 ceiling, so the absolute-flux read returns None and the star used to fail to resolve entirely.
+        // The sun-relative fallback (T_eff = T_sun*(L_ratio/R_ratio^2)^(1/4)) resolves it without forming the wide
+        // flux. The expected T_eff is T_sun*18^((alpha-2beta)/4) = ~5769*18^0.475 = ~22800 K, a hot blue star.
+        let star = main_sequence_star(
+            Fixed::from_int(18),
+            Fixed::ONE,
+            alpha(),
+            beta(),
+            lambda(),
+            mu(),
+            t_max(),
+        )
+        .expect("an 18 M_sun (Betelgeuse-mass) star resolves its T_eff");
+        let t_eff = star.effective_temperature_k.to_f64_lossy();
+        assert!(
+            (t_eff - 5769.0 * 18.0_f64.powf(0.475)).abs() < 400.0,
+            "the 18 M_sun star reads a hot ~22800 K blue T_eff, got {t_eff}"
+        );
+        assert!(
+            t_eff > 15000.0,
+            "a Betelgeuse-mass star is far hotter than the Sun, got {t_eff}"
+        );
+    }
+
+    #[test]
+    fn the_massive_and_sun_grade_paths_agree_across_the_flux_ceiling() {
+        // The sun-relative fallback and the absolute-flux read agree where both are valid (no seam at the crossover).
+        // Just below the ceiling (a ~5 M_sun star, absolute surface flux still representable) the absolute path is
+        // taken; the sun-relative form must land within a few kelvin of it, proving the two branches are the same
+        // physics and the fix is strictly additive rather than a second, divergent model.
+        let five = main_sequence_star(
+            Fixed::from_int(5),
+            Fixed::ONE,
+            alpha(),
+            beta(),
+            lambda(),
+            mu(),
+            t_max(),
+        )
+        .unwrap();
+        // The sun-relative prediction T_sun*5^((alpha-2beta)/4) for the same star.
+        let sun = main_sequence_star(
+            Fixed::ONE,
+            Fixed::ONE,
+            alpha(),
+            beta(),
+            lambda(),
+            mu(),
+            t_max(),
+        )
+        .unwrap();
+        let predicted = sun.effective_temperature_k.to_f64_lossy() * 5.0_f64.powf(0.475);
+        assert!(
+            (five.effective_temperature_k.to_f64_lossy() - predicted).abs() < 20.0,
+            "the absolute-flux and sun-relative T_eff agree at 5 M_sun: got {}, predicted {}",
+            five.effective_temperature_k.to_f64_lossy(),
+            predicted
         );
     }
 
