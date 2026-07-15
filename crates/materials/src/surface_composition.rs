@@ -51,8 +51,13 @@ use std::collections::{BTreeMap, BTreeSet};
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SurfaceComposition {
     /// The SURFACE (crust) element amounts (element symbol, amount), the input the derived-tile chain reads: the
-    /// buoyant partial-melt crust the differentiation floated, not the whole silicate fraction.
+    /// ASSEMBLAGE the buoyant partial-melt crust forms (seam 5), each element at the sum over the crust phases of
+    /// the phase's modal amount times its stoichiometric count, so it is the rock (enstatite `Mg:Si:O = 1:1:3`) and
+    /// not the oxygen-heavy solar element budget it condensed from.
     pub surface: Vec<(String, Fixed)>,
+    /// The MANTLE (refractory residue) element amounts, the same assemblage composition as `surface` but for the
+    /// dense phases the crust floats on: the silicate density the isostasy and the bulk-density derivation read.
+    pub mantle_composition: Vec<(String, Fixed)>,
     /// The crust phases (the buoyant partial melt) and the mantle phases (the refractory residue) from the
     /// partial-melt split, for the isostasy the tile relief reads (crust floats on mantle).
     pub crust: Vec<(String, Fixed)>,
@@ -239,9 +244,19 @@ pub fn derive_surface_composition(
         crustal_density(&composition, surface_t, surface_p, &registry, &table)
     };
     let (crust, mantle) = crust_and_mantle(&differentiation.floating, density_of)?;
-    let surface = phase_set_composition(&crust, &budget);
+    // The surface is the ASSEMBLAGE (seam 5): each element at the sum over the crust phases of the phase's modal
+    // amount (the VCS redistribution) times its stoichiometry, the rock the crust forms and not the oxygen-heavy
+    // solar budget. A degenerate VCS vertex leaves `condensed_amount_readout` None, so the assemblage falls back to
+    // each phase's saturation presence (still a stoichiometric rock, never the solar budget).
+    let amounts_map: BTreeMap<String, Fixed> = condensed_amount_readout
+        .as_ref()
+        .map(|v| v.iter().cloned().collect())
+        .unwrap_or_default();
+    let surface = phase_set_composition(&crust, &amounts_map);
+    let mantle_composition = phase_set_composition(&mantle, &amounts_map);
     Some(SurfaceComposition {
         surface,
+        mantle_composition,
         crust,
         mantle,
         differentiation,
@@ -444,6 +459,42 @@ mod tests {
                 .any(|(n, _)| n.starts_with("Fe(")),
             "iron metal is in the sinking fraction, got {:?}",
             sc.differentiation.sinking
+        );
+    }
+
+    #[test]
+    fn the_surface_reads_the_crust_assemblage_not_the_solar_budget() {
+        // SEAM 5 end to end: the derived surface must be the crust's mineral assemblage (its silicate stoichiometry),
+        // not the oxygen-heavy solar element budget. The solar budget has O:Si ~ 340:90 ~ 3.8; a Mg-silicate crust
+        // (enstatite MgSiO3 at O:Si = 3, or forsterite Mg2SiO4 at O:Si = 4) reads its own ratio. Whichever silicate
+        // the buoyancy split floats, the surface O:Si must equal that phase's stoichiometry, distinct from the solar
+        // ratio, proving the assemblage replaced the budget.
+        let janaf = JanafTables::standard().expect("JANAF loads");
+        let abundances = SolarAbundances::standard().expect("abundances load");
+        let sc = derive_surface_composition(&janaf, &abundances, Fixed::from_int(1000))
+            .expect("the inner disk derives a surface");
+        let get = |el: &str| -> Option<f64> {
+            sc.surface
+                .iter()
+                .find(|(e, _)| e == el)
+                .map(|(_, a)| a.to_bits() as f64)
+        };
+        let (o, si) = (
+            get("O").expect("O on surface"),
+            get("Si").expect("Si on surface"),
+        );
+        let o_over_si = o / si;
+        // The crust is a single Mg-silicate here, so O:Si is exactly 3 (enstatite) or 4 (forsterite), never the
+        // solar 3.8+. Assert it sits at an integer silicate ratio well away from solar.
+        assert!(
+            (o_over_si - 3.0).abs() < 0.05 || (o_over_si - 4.0).abs() < 0.05,
+            "the surface O:Si {o_over_si} is a silicate stoichiometry (3 or 4), not the solar budget"
+        );
+        // And the surface equals the assemblage of the crust phases (the substrate now provides what the viewer used
+        // to re-derive): the same rock the crust is.
+        assert!(
+            !sc.surface.is_empty() && !sc.mantle_composition.is_empty(),
+            "both the crust surface and the mantle composition are derived assemblages"
         );
     }
 }

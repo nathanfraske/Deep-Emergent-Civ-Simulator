@@ -33,13 +33,16 @@
 //! carbon world's carbides and graphite, an icy world's ices) is a NAMED data extension (non-exhaustive), until which
 //! a world with no oxygen-bearing condensate yields no derived crust (fail-loud), never a mis-sorted one.
 //!
-//! Honest grade (ratified as proposed): the IDENTITY of each fraction is derived here (which phases and elements sink
-//! or float), the part that made the authored arrangement arbitrary. The AMOUNTS are pending on the VCS
-//! amount-redistribution (`equilibrium_condensation::condensed_active_set` returns which phases are saturated, not
-//! their moles), so the surface element amounts are carried from the bulk abundances of the crust elements, a
-//! proportion for the petrology to minimize the assemblage, not an exact modal mineralogy. The crust-versus-mantle
-//! split within the floating fraction (the crust is the low-melting PARTIAL MELT, not the whole silicate) needs a
-//! melting model, named, not built.
+//! Honest grade: the IDENTITY of each fraction is derived here (which phases and elements sink or float), the part
+//! that made the authored arrangement arbitrary. The ASSEMBLAGE composition ([`phase_set_composition`], seam 5) is
+//! the rock the phases form: each element carried at the sum over the phases of the phase's modal amount (from the
+//! VCS redistribution, `equilibrium_condensation::condensed_amounts`) times its stoichiometric count, so a crust of
+//! enstatite reads `Mg:Si:O = 1:1:3` and not the oxygen-heavy solar element budget it condensed from. The
+//! `DifferentiatedPlanet::surface_composition` field below is a coarser AUDIT view (the floating-fraction elements
+//! at their bulk abundance, an at-a-glance which-elements-floated, distinct from the crust assemblage the tiles
+//! read). The crust-versus-mantle split within the floating fraction (the crust is the low-melting PARTIAL MELT,
+//! not the whole silicate) is a buoyancy split here; the melting model that would set the melt fraction is named,
+//! not built (the seam-6 melt rung).
 
 use civsim_core::Fixed;
 use std::collections::BTreeMap;
@@ -106,8 +109,10 @@ pub struct DifferentiatedPlanet {
     /// The FLOATING fraction (mantle and crust): the oxygen-bearing silicate and oxide condensates, (species,
     /// presence).
     pub floating: Vec<(String, Fixed)>,
-    /// The SURFACE composition as element amounts (the floating-fraction elements at bulk abundance), the input the
-    /// derived-tile chain reads. Deterministic element order.
+    /// An AUDIT view of the floating fraction: its elements at their bulk abundance, an at-a-glance which-elements-
+    /// floated. This is NOT the surface the tile chain reads (that is the crust ASSEMBLAGE, `SurfaceComposition::
+    /// surface` via [`phase_set_composition`], seam 5); it is the coarse floating-fraction summary. Deterministic
+    /// element order.
     pub surface_composition: Vec<(String, Fixed)>,
 }
 
@@ -206,20 +211,32 @@ where
     Some((crust, mantle))
 }
 
-/// The element amounts of a set of phases at their bulk abundances (the surface composition of a crust, or a
-/// mantle): each element the phases claim, carried at its bulk abundance. Deterministic element order.
+/// THE ASSEMBLAGE COMPOSITION (seam 5): the element amounts of a phase set as the ROCK it is, the sum over the
+/// phases of each phase's modal amount times the element's stoichiometric count in that phase. A pure enstatite
+/// (MgSiO3) crust comes out `Mg:Si:O = 1:1:3`, its real mineral ratio, not the oxygen-heavy solar element budget
+/// the phases condensed from (which was never a rock). `amounts` gives each phase's modal amount from the VCS
+/// redistribution ([`crate::equilibrium_condensation::condensed_amounts`]); a phase absent from `amounts` (a
+/// degenerate VCS vertex where the moles did not resolve) falls back to its own saturation presence, the
+/// best-available proxy, still a stoichiometric rock rather than the solar budget. Deterministic element order.
 pub fn phase_set_composition(
     phases: &[(String, Fixed)],
-    bulk_abundances: &BTreeMap<String, Fixed>,
+    amounts: &BTreeMap<String, Fixed>,
 ) -> Vec<(String, Fixed)> {
     let mut elements: BTreeMap<String, Fixed> = BTreeMap::new();
-    for (name, _) in phases {
-        if let Some(atoms) = species_elements(name) {
-            for element in atoms.keys() {
-                if let Some(abundance) = bulk_abundances.get(element) {
-                    elements.insert(element.clone(), *abundance);
-                }
-            }
+    for (name, presence) in phases {
+        let Some(atoms) = species_elements(name) else {
+            continue;
+        };
+        // The phase's modal amount when the VCS vertex was well-posed, its saturation presence otherwise. Never the
+        // solar element budget: the composition is the assemblage the phases form, weighted by how much of each.
+        let weight = amounts.get(name).copied().unwrap_or(*presence);
+        for (element, count) in &atoms {
+            let contribution = match weight.checked_mul(Fixed::from_int(*count)) {
+                Some(c) => c,
+                None => continue,
+            };
+            let entry = elements.entry(element.clone()).or_insert(Fixed::ZERO);
+            *entry = entry.checked_add(contribution).unwrap_or(*entry);
         }
     }
     elements.into_iter().collect()
@@ -340,6 +357,64 @@ mod tests {
         ];
         let abundances = bulk(&[("Fe", 90), ("Si", 40), ("S", 45), ("C", 60)]);
         assert!(differentiate(&condensed, &abundances).is_none());
+    }
+
+    #[test]
+    fn the_surface_is_the_rock_assemblage_not_the_solar_budget() {
+        // SEAM 5: a crust of pure enstatite MgSiO3 must read its mineral stoichiometry Mg:Si:O = 1:1:3, not the
+        // oxygen-heavy solar element budget it condensed from. With the enstatite phase at unit modal amount the
+        // element amounts are exactly (Mg 1, Si 1, O 3).
+        let crust = vec![one("MgSiO3(cr,enstatite)")];
+        let amounts: BTreeMap<String, Fixed> = [("MgSiO3(cr,enstatite)".to_string(), Fixed::ONE)]
+            .into_iter()
+            .collect();
+        let comp: BTreeMap<String, Fixed> = phase_set_composition(&crust, &amounts)
+            .into_iter()
+            .collect();
+        assert_eq!(comp.get("Mg"), Some(&Fixed::ONE));
+        assert_eq!(comp.get("Si"), Some(&Fixed::ONE));
+        assert_eq!(comp.get("O"), Some(&Fixed::from_int(3)));
+        // The solar budget is oxygen-heavy (O ~ 340 against Si ~ 90); the assemblage must NOT reproduce that ratio.
+        let o_over_si =
+            comp.get("O").unwrap().to_bits() as f64 / comp.get("Si").unwrap().to_bits() as f64;
+        assert!(
+            (o_over_si - 3.0).abs() < 1e-6,
+            "the crust reads its enstatite O:Si = 3, not the solar ~3.8+"
+        );
+    }
+
+    #[test]
+    fn a_two_phase_crust_weights_by_modal_amount() {
+        // A crust of forsterite (Mg2SiO4) and enstatite (MgSiO3): the element amounts sum each phase's modal amount
+        // times its stoichiometry. At forsterite 1, enstatite 2: Mg = 2*1 + 1*2 = 4, Si = 1*1 + 1*2 = 3,
+        // O = 4*1 + 3*2 = 10. Doubling enstatite must shift the ratios, proving the modal weighting is live.
+        let crust = vec![one("Mg2SiO4(cr,forsterite)"), one("MgSiO3(cr,enstatite)")];
+        let amounts: BTreeMap<String, Fixed> = [
+            ("Mg2SiO4(cr,forsterite)".to_string(), Fixed::ONE),
+            ("MgSiO3(cr,enstatite)".to_string(), Fixed::from_int(2)),
+        ]
+        .into_iter()
+        .collect();
+        let comp: BTreeMap<String, Fixed> = phase_set_composition(&crust, &amounts)
+            .into_iter()
+            .collect();
+        assert_eq!(comp.get("Mg"), Some(&Fixed::from_int(4)));
+        assert_eq!(comp.get("Si"), Some(&Fixed::from_int(3)));
+        assert_eq!(comp.get("O"), Some(&Fixed::from_int(10)));
+    }
+
+    #[test]
+    fn a_degenerate_vertex_falls_back_to_the_phase_presence_not_the_budget() {
+        // When the VCS moles did not resolve (the phase is absent from `amounts`), the assemblage falls back to the
+        // phase's own saturation presence, still a stoichiometric rock. Enstatite at presence 2 reads Mg:Si:O =
+        // 2:2:6, the enstatite ratio scaled by the presence, never the solar budget.
+        let crust = vec![("MgSiO3(cr,enstatite)".to_string(), Fixed::from_int(2))];
+        let empty: BTreeMap<String, Fixed> = BTreeMap::new();
+        let comp: BTreeMap<String, Fixed> =
+            phase_set_composition(&crust, &empty).into_iter().collect();
+        assert_eq!(comp.get("Mg"), Some(&Fixed::from_int(2)));
+        assert_eq!(comp.get("Si"), Some(&Fixed::from_int(2)));
+        assert_eq!(comp.get("O"), Some(&Fixed::from_int(6)));
     }
 
     #[test]

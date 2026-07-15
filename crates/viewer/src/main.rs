@@ -639,45 +639,6 @@ struct DerivedScene {
     material: Rgb,
 }
 
-/// The element composition (element, summed count) of a set of phases at their derived amounts: parse each phase name's
-/// formula (the formula before the phase suffix, a small general parser: uppercase opens a symbol, lowercase continues
-/// it, trailing digits are the count) and add `count * amount` per element. This reads the phase STOICHIOMETRY (so the
-/// crust's enstatite comes out `Mg:Si:O = 1:1:3`, its real mineral ratio), which the petrology density and isostasy
-/// consume, unlike the derive_surface_composition `surface` field, whose elements sit at solar bulk abundance
-/// (oxygen-dominated) and reach no mineral assemblage. Deterministic element order.
-fn phase_stoichiometry(phases: &[(String, Fixed)]) -> Vec<(String, Fixed)> {
-    let mut elements: BTreeMap<String, Fixed> = BTreeMap::new();
-    for (name, amount) in phases {
-        let formula = name.split('(').next().unwrap_or(name);
-        let chars: Vec<char> = formula.chars().collect();
-        let mut i = 0;
-        while i < chars.len() {
-            if chars[i].is_ascii_uppercase() {
-                let mut sym = String::new();
-                sym.push(chars[i]);
-                i += 1;
-                while i < chars.len() && chars[i].is_ascii_lowercase() {
-                    sym.push(chars[i]);
-                    i += 1;
-                }
-                let mut digits = String::new();
-                while i < chars.len() && chars[i].is_ascii_digit() {
-                    digits.push(chars[i]);
-                    i += 1;
-                }
-                let count = digits.parse::<i32>().unwrap_or(1).max(1);
-                if let Some(add) = amount.checked_mul(Fixed::from_int(count)) {
-                    let entry = elements.entry(sym).or_insert(Fixed::ZERO);
-                    *entry = entry.checked_add(add).unwrap_or(*entry);
-                }
-            } else {
-                i += 1;
-            }
-        }
-    }
-    elements.into_iter().collect()
-}
-
 /// The natural log of ten, for the `log_eps` (base-10) solar-abundance scale to natural-exponent conversion (the same
 /// constant [`derive_surface_composition`] uses).
 const LN_TEN: Fixed = Fixed::from_int(2_302_585).div(Fixed::from_int(1_000_000)); // 2.302585
@@ -959,12 +920,13 @@ fn build_derived_scene(star_mass: Fixed, orbit_au: Fixed) -> Result<DerivedScene
     let table = PeriodicTable::standard().map_err(|_| "the periodic table did not load")?;
     let eos = MetalEosAnchors::standard().map_err(|_| "the metal EOS anchors did not load")?;
 
-    // The crust and mantle ELEMENT compositions from their DERIVED phase stoichiometry (the crust's enstatite at its
-    // real Mg:Si:O = 1:1:3, the mantle's forsterite at 2:1:4), which the petrology density and isostasy consume. The
-    // `surface` field is deliberately NOT used here: its elements sit at solar bulk abundance (oxygen-dominated) and
-    // reach no mineral assemblage, so the density and tiles derive from the phase stoichiometry instead.
-    let crust_composition = phase_stoichiometry(&sc.crust);
-    let mantle_composition = phase_stoichiometry(&sc.mantle);
+    // The crust and mantle ELEMENT compositions are now the ASSEMBLAGE the substrate derives (seam 5): the crust's
+    // enstatite at its real Mg:Si:O = 1:1:3, the mantle's forsterite at 2:1:4, each phase weighted by its VCS modal
+    // amount, which the petrology density and isostasy consume. `sc.surface` and `sc.mantle_composition` are the rock
+    // (no longer the oxygen-heavy solar budget), so the viewer reads them directly rather than re-deriving the
+    // stoichiometry here.
+    let crust_composition = sc.surface.clone();
+    let mantle_composition = sc.mantle_composition.clone();
     if crust_composition.is_empty() {
         return Err("the derived crust has no phases to read a composition from".to_string());
     }
