@@ -562,6 +562,49 @@ mod tests {
     }
 
     #[test]
+    fn the_band_two_measured_geometry_rung_partially_regrades_the_ice_redshift() {
+        // BAND 2 (FORKED, measured-geometry rung only). The free O-H stretch model gives Badger omega ~3818, ~+18%
+        // above the observed ice band at 3226 cm^-1. The measured rung needs no new substrate: it feeds a per-phase
+        // MEASURED in-crystal O-H length into the existing Badger API, softening k. The cited length is the neutron
+        // covalent O-H of ice Ih, 0.98 A (Kuhs & Lehmann, J. Phys. Chem. 87, 4312 (1983), the disorder-CORRECTED
+        // intramolecular distance; the raw apparent 1.01-1.02 A is inflated by orientational disorder and is NOT the
+        // covalent bond length, so feeding it would smuggle the disorder artifact into Badger).
+        //
+        // INPUT-AUDIT FINDING (reported): the ice redshift is dominated by H-BOND ELECTRONIC COUPLING, not bond
+        // lengthening. The true covalent O-H lengthens only ~0.02 A (0.957 -> 0.98) from vapor to ice, so Badger's
+        // length softening captures only ~1/3 of the ~490 cm^-1 redshift; the residual is the H...O coupling. The
+        // measured rung IMPROVES the ice row (3818 -> ~3662, toward 3226) but does NOT close it. The closure is the
+        // ALIEN fork: the bond-valence substrate (a Brown-lineage R_0 table + valence-sum solver, a named small build
+        // not in the repo) or the compute-once dimer-curve tier, neither built here.
+        let fc = crate::force_constant::ForceConstants::standard().unwrap();
+        let t = crate::periodic::PeriodicTable::standard().unwrap();
+        let mu = crate::force_constant::ForceConstants::reduced_mass_amu(&t, "O", "H").unwrap();
+        let omega_at = |r_e: Fixed| -> f64 {
+            let k = fc.force_constant_mdyn_per_angstrom(8, 1, r_e).unwrap();
+            omega_to_cm_inverse(k, mu).unwrap().to_f64_lossy()
+        };
+        let free = omega_at(Fixed::from_ratio(957, 1000)); // vapor r_e ~3818
+        let ice = omega_at(Fixed::from_ratio(980, 1000)); // ice covalent O-H 0.98 A (Kuhs & Lehmann 1983)
+        let observed_ice = 3226.0;
+        // The measured in-crystal geometry redshifts the stretch (softer, longer bond).
+        assert!(
+            ice < free,
+            "the measured ice O-H length softens the stretch below the free-length model ({ice} < {free})"
+        );
+        // It moves toward the observed ice band, a partial re-grade (not a closure).
+        assert!(
+            (ice - observed_ice).abs() < (free - observed_ice).abs(),
+            "the measured rung improves the ice row ({ice} vs free {free}, observed {observed_ice})"
+        );
+        // Honest partial: the length effect alone leaves a large residual (~+13%), the H-bond coupling the substrate
+        // fork owns; it does NOT reach the observed band.
+        assert!(
+            ice > observed_ice + 200.0,
+            "the length effect alone under-shifts the redshift (residual is H-bond coupling), got {ice}"
+        );
+    }
+
+    #[test]
     fn the_lyddane_sachs_teller_gate_lands_nacl() {
         // The NaCl LST identity (the pre-registered gate): omega_TO ~ 164 cm^-1, eps_0 ~ 5.9, eps_inf = n^2 ~ 2.34
         // predict omega_LO ~ 260 cm^-1 against the measured ~264, ~2%.
