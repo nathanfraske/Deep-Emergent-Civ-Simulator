@@ -554,4 +554,39 @@ mod tests {
         assert!((active[0].1.to_f64_lossy() - 10.0).abs() < 0.1);
         assert!((active[1].1.to_f64_lossy() - 3.0).abs() < 0.1);
     }
+
+    #[test]
+    fn the_water_snow_line_reproduces_the_lodders_front() {
+        // The VOLATILE end of the CAI-first sequence, the water snow line, a second Lodders cross-check (the fetched
+        // Murphy-Koop ice pressure vs Lodders' own set): the H2O(gas) <-> ice front is where the ice saturation
+        // pressure equals the solar water partial pressure. P_H2O ~ 5e-3 Pa (~5e-8 bar) at the disk 1e-4 bar, a
+        // labelled [M] fixture from the O abundance. The Murphy-Koop pressure crosses that near 180 K, so the snow
+        // line sits at ~180 K (Lodders water-ice 182 K). WITH the Fe front at 1334 K, this is the CAI-first ORDERING
+        // across the whole disk: refractory iron condenses ~1150 K of warmth before water ice, the refractory-before-
+        // volatile spine the sequence is named for.
+        let ice = civsim_physics::ice_sublimation::IceSublimation::standard().expect("ice loads");
+        let p_h2o_pa = 5.0e-3_f64;
+        let pts = ice.points();
+        let mut snow_line = None;
+        for w in pts.windows(2) {
+            let (t0, p0) = (w[0].t_k.to_f64_lossy(), w[0].p_sat_pa.to_f64_lossy());
+            let (t1, p1) = (w[1].t_k.to_f64_lossy(), w[1].p_sat_pa.to_f64_lossy());
+            if p0 <= p_h2o_pa && p_h2o_pa <= p1 {
+                // Interpolate in ln(p) (the pressure is exponential in T) for the crossing temperature.
+                let f = (p_h2o_pa.ln() - p0.ln()) / (p1.ln() - p0.ln());
+                snow_line = Some(t0 + f * (t1 - t0));
+                break;
+            }
+        }
+        let snow_line = snow_line.expect("the snow line is bracketed by the ice table");
+        let lodders = civsim_physics::condensation::CondensationTable::standard().expect("Lodders");
+        let lodders_ice = lodders
+            .t50_k("H")
+            .map(|t| t.to_f64_lossy())
+            .unwrap_or(182.0);
+        assert!(
+            (snow_line - 182.0).abs() < 15.0,
+            "the water snow line ~{lodders_ice:.0} K (Lodders 182), got {snow_line:.0} K"
+        );
+    }
 }
