@@ -20,12 +20,13 @@
 //!
 //! The species set EMERGES from the data, not an authored list (as the atmosphere set does): the element budget is
 //! every element that has a JANAF gas species (so the gas equilibrium can balance it), and the candidate phases are
-//! every JANAF species whose atoms lie within that budget. Today that is the Mg-Si-Fe-S system (forsterite,
-//! enstatite, iron metal, troilite over H, C, N, O, Mg, Si, S, Fe): a refractory whose element has no gas species
-//! yet (aluminium in corundum and spinel, calcium in perovskite, nickel metal) is OUT of the balanceable set until
-//! its gas species lands, at which point it joins as a data row, never a code change. So the derived crust is the
-//! Mg-silicate the current data can balance, deepening toward the full CAI-first sequence as the gas-species fetches
-//! extend the budget. This is a data ceiling, named, not a hidden simplification.
+//! every JANAF species whose atoms lie within that budget. Today that is the full solar rock-forming set (H, C, N, O,
+//! Na, Mg, Al, Si, S, K, Ca, Ti, Fe): the Mg-silicates forsterite and enstatite, the aluminium and calcium
+//! refractories corundum and spinel, and iron metal and troilite. A refractory whose element has no gas species yet
+//! (nickel metal, for one) is OUT of the balanceable set until its gas species lands, at which point it joins as a
+//! data row, never a code change. So the derived crust is the refractory assemblage the current data can balance,
+//! deepening toward the full CAI-first sequence as the gas-species fetches extend the budget. This is a data ceiling,
+//! named, not a hidden simplification.
 //!
 //! Abundances are the cited solar photosphere (`SolarAbundances`), the astronomical `log_eps` scale converted to
 //! linear amounts normalized to hydrogen (`n_X / n_H = 10^(log_eps(X) - 12)`), so the gas is hydrogen-dominated and
@@ -132,14 +133,14 @@ pub fn derive_surface_composition(
             }
         }
     }
-    // The MINIMIZER CONVERGENCE CEILING (a numerical-capability boundary, not world content): the fixed-point
-    // element-potential Newton solve converges on the rock-forming majors but does not yet converge on the full
-    // solar element set once aluminium and calcium are added (13 elements, 26 gas species). Their JANAF gas data is
-    // vendored and correct (the library loads them), and the refractory condensates corundum and spinel are ready;
-    // they are held out of THIS solve until the minimizer's fixed-point conditioning is hardened for the full set (a
-    // named numerical follow-on). This is a labelled, reversible boundary: delete this set when the solve converges
-    // at full solar composition.
-    const MINIMIZER_UNCONVERGED: &[&str] = &["Al", "Ca"];
+    // The MINIMIZER CONVERGENCE CEILING is retired: the element-potential solve now converges on the full solar
+    // element set including aluminium and calcium (13 elements, 26 gas species), whose ~6-decade-below-hydrogen gas
+    // abundances made the undamped fixed-point Newton overshoot the trace rows and diverge. The solve keys the
+    // iteration budget on the seed conditioning and drives the ill-conditioned wide-span set with an exact-rational
+    // damped Newton (see `gas_equilibrium`); aluminium and calcium condense as the refractory corundum and spinel, so
+    // the derived crust deepens toward the full CAI-first sequence. The hold-out set is now empty (kept named so a
+    // future element that is not yet balanceable can be re-added as data, never a code change).
+    const MINIMIZER_UNCONVERGED: &[&str] = &[];
     // The element budget b_e from the solar abundances, normalized to hydrogen: n_X/n_H = 10^(log_eps(X) - 12).
     let mut budget: BTreeMap<String, Fixed> = BTreeMap::new();
     for el in &gas_elements {
@@ -251,6 +252,168 @@ pub fn derive_surface_composition(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The condensation inputs (gas species, condensed species, element budget) a test drives the solve with.
+    type CondensationInputs = (
+        Vec<EquilibriumSpecies>,
+        Vec<EquilibriumSpecies>,
+        BTreeMap<String, Fixed>,
+    );
+
+    // A capture harness: build the condensation inputs (gas, condensed, budget) at a disk temperature, EXCLUDING a
+    // given element set, exactly as `derive_surface_composition` builds them, so the byte-stability proof can pin the
+    // 11-element subset (exclude Al, Ca) independent of the production cap. Returns None on the same failure paths as
+    // the production builder.
+    fn capture_inputs(
+        janaf: &JanafTables,
+        abundances: &SolarAbundances,
+        disk_temperature_k: Fixed,
+        exclude: &[&str],
+    ) -> Option<CondensationInputs> {
+        let mut gas_elements: BTreeSet<String> = BTreeSet::new();
+        for name in janaf.names() {
+            if is_gas_phase(name) {
+                if let Some(atoms) = species_elements(name) {
+                    for el in atoms.keys() {
+                        gas_elements.insert(el.clone());
+                    }
+                }
+            }
+        }
+        let mut budget: BTreeMap<String, Fixed> = BTreeMap::new();
+        for el in &gas_elements {
+            if exclude.contains(&el.as_str()) {
+                continue;
+            }
+            if let Some(log_eps) = abundances.preferred(el) {
+                let exponent = log_eps
+                    .checked_sub(Fixed::from_int(12))?
+                    .checked_mul(ln_ten())?;
+                let amount = exponent.exp();
+                if amount > Fixed::ZERO {
+                    budget.insert(el.clone(), amount);
+                }
+            }
+        }
+        if budget.is_empty() {
+            return None;
+        }
+        let mut gas: Vec<EquilibriumSpecies> = Vec::new();
+        let mut condensed: Vec<EquilibriumSpecies> = Vec::new();
+        let mut names: Vec<String> = janaf.names().map(|s| s.to_string()).collect();
+        names.sort();
+        for name in &names {
+            let atoms = match species_elements(name) {
+                Some(a) => a,
+                None => continue,
+            };
+            if !atoms.keys().all(|el| budget.contains_key(el)) {
+                continue;
+            }
+            let table = match janaf.species(name) {
+                Some(t) => t,
+                None => continue,
+            };
+            let dfg = match table.delta_f_g_at(disk_temperature_k) {
+                Some(d) => d,
+                None => continue,
+            };
+            let g_over_rt = match janaf_g_over_rt(dfg, disk_temperature_k) {
+                Some(g) => g,
+                None => continue,
+            };
+            let phase = if is_gas_phase(name) {
+                SpeciesPhase::Gas
+            } else {
+                SpeciesPhase::Condensed
+            };
+            let species = EquilibriumSpecies {
+                name: name.clone(),
+                phase,
+                g_over_rt,
+                stoichiometry: atoms,
+            };
+            match phase {
+                SpeciesPhase::Gas => gas.push(species),
+                SpeciesPhase::Condensed => condensed.push(species),
+            }
+        }
+        Some((gas, condensed, budget))
+    }
+
+    #[test]
+    fn the_eleven_element_subset_assemblage_is_byte_pinned() {
+        // THE MINIMIZER-REPAIR BYTE GATE. The rock-forming 11-element subset (the solar set with aluminium and calcium
+        // held out) is well-conditioned and converged before the damped-Newton repair; the repair MUST NOT move its
+        // answer by a single bit. These are the raw-bit element potentials and condensed-active-set saturation indices
+        // captured on the pre-repair solver at the disk 1000 K; the repair keeps the well-conditioned subset on the
+        // legacy fixed-point path, so they reproduce exactly. A drift here is a repair regression, not a recalibration.
+        let janaf = JanafTables::standard().expect("JANAF loads");
+        let abundances = SolarAbundances::standard().expect("abundances load");
+        let (gas, condensed, budget) =
+            capture_inputs(&janaf, &abundances, Fixed::from_int(1000), &["Al", "Ca"])
+                .expect("the 11-element subset builds");
+        assert_eq!(budget.len(), 11, "the held-out subset is 11 elements");
+        let eq = gas_equilibrium(&gas, &budget).expect("the 11-element subset converges");
+        let lam = |el: &str| eq.element_potentials.get(el).unwrap().to_bits();
+        assert_eq!(lam("C"), -19646438972);
+        assert_eq!(lam("Fe"), 92207809417);
+        assert_eq!(lam("H"), -1492572748);
+        assert_eq!(lam("K"), -67359544753);
+        assert_eq!(lam("Mg"), -25434124549);
+        assert_eq!(lam("N"), -22146172389);
+        assert_eq!(lam("Na"), -49604957980);
+        assert_eq!(lam("O"), -129723459587);
+        assert_eq!(lam("S"), -67381068957);
+        assert_eq!(lam("Si"), -11857409479);
+        assert_eq!(lam("Ti"), 38517351736);
+        let active = condensed_active_set(&condensed, &eq).expect("the active set resolves");
+        let active_bits: Vec<(&str, i64)> = active
+            .iter()
+            .map(|(n, s)| (n.as_str(), s.to_bits()))
+            .collect();
+        assert_eq!(
+            active_bits,
+            vec![
+                ("Mg2SiO4(cr,forsterite)", 337143458422),
+                ("MgSiO3(cr,enstatite)", 223356207878),
+                ("Fe(cr)", 92207809417),
+                ("FeS(cr,troilite)", 75279725254),
+            ],
+            "the 11-element active set is byte-identical to the pre-repair solver"
+        );
+    }
+
+    #[test]
+    fn the_full_thirteen_element_solar_set_converges_with_silicates() {
+        // The repair's purpose: the full 13-element solar set (aluminium and calcium added, their gas abundances ~6
+        // decades below hydrogen) now CONVERGES where the undamped Newton diverged. The converged assemblage is the
+        // physical refractory sequence: the Mg-silicates forsterite and enstatite (the crust formers), plus the
+        // aluminium condensates corundum and spinel and the iron metal and sulfide. This is what removing the
+        // MINIMIZER_UNCONVERGED cap depends on.
+        let janaf = JanafTables::standard().expect("JANAF loads");
+        let abundances = SolarAbundances::standard().expect("abundances load");
+        let (gas, condensed, budget) =
+            capture_inputs(&janaf, &abundances, Fixed::from_int(1000), &[])
+                .expect("the full set builds");
+        assert_eq!(budget.len(), 13, "the full set is 13 elements");
+        let eq = gas_equilibrium(&gas, &budget)
+            .expect("the 13-element set now converges (was None before)");
+        let active = condensed_active_set(&condensed, &eq).expect("the active set resolves");
+        let names: Vec<&str> = active.iter().map(|(n, _)| n.as_str()).collect();
+        for phase in [
+            "Mg2SiO4(cr,forsterite)",
+            "MgSiO3(cr,enstatite)",
+            "Al2O3(cr,corundum)",
+            "MgAl2O4(cr,spinel)",
+            "Fe(cr)",
+        ] {
+            assert!(
+                names.contains(&phase),
+                "the converged 13-element assemblage precipitates {phase}, got {names:?}"
+            );
+        }
+    }
 
     #[test]
     fn the_inner_disk_derives_a_silicate_crust_over_an_iron_core() {

@@ -206,6 +206,20 @@ impl BigUint {
         (quotient, remainder)
     }
 
+    /// The greatest common divisor of two magnitudes, by the Euclidean algorithm (repeated `divmod`). Deterministic.
+    /// Used to reduce a rational to lowest terms so a long chain of exact operations does not grow the limb count
+    /// without bound.
+    pub fn gcd(&self, other: &BigUint) -> BigUint {
+        let mut a = self.clone();
+        let mut b = other.clone();
+        while !b.is_zero() {
+            let (_, r) = a.divmod(&b);
+            a = b;
+            b = r;
+        }
+        a
+    }
+
     /// Set bit `i` to one (used only by `divmod` to build the quotient).
     fn set_bit(&mut self, i: u32) {
         let limb = (i / 32) as usize;
@@ -353,6 +367,20 @@ impl BigRat {
     /// The absolute value.
     pub fn abs(&self) -> BigRat {
         BigRat::new(false, self.num.clone(), self.den.clone())
+    }
+
+    /// Reduce to lowest terms by dividing numerator and denominator by their gcd. The VALUE is unchanged (so
+    /// `cmp_rat`, `round_to_scale`, and every other observation return exactly the same result); this only bounds the
+    /// limb count so a long chain of exact operations (a Gaussian elimination over many rows) keeps the numerator and
+    /// denominator from growing without bound. Deterministic.
+    pub fn reduce(&self) -> BigRat {
+        if self.num.is_zero() {
+            return BigRat::from_i64(0);
+        }
+        let g = self.num.gcd(&self.den);
+        let (num, _) = self.num.divmod(&g);
+        let (den, _) = self.den.divmod(&g);
+        BigRat::new(self.neg, num, den)
     }
 
     /// Round `self` to a signed integer magnitude at fixed-point scale `scale_bits`, i.e. the nearest

@@ -78,10 +78,26 @@ pub struct GasEquilibrium {
     pub species_amounts: Vec<(String, Fixed)>,
 }
 
-/// The Newton iteration count for the element-potential solve, fixed for determinism (a convergence bound, not world
-/// content). The Newton step is quadratically convergent from the reference-basis seed, so a converged root is well
-/// inside this count; the surplus holds the root fixed.
+/// The Newton iteration count for a WELL-CONDITIONED element-potential solve (the legacy rock-forming subset), fixed
+/// for determinism (a convergence bound, not world content). The Newton step is quadratically convergent from the
+/// reference-basis seed once inside the basin, so a converged root is well inside this count; the surplus holds the
+/// root fixed. This is the exact count the pre-repair solver used, so a converging subset stays byte-identical.
 const NEWTON_ITERS: u32 = 60;
+
+/// The Newton iteration count for an ILL-CONDITIONED solve (the wide-abundance-span solar set, aluminium and calcium
+/// ~6 decades below hydrogen). Such a set is seeded far from a trace species' root, and Newton corrects a species that
+/// is `exp(k)` off at a log-linear `~1` per damped step, so it needs many more iterations than the well-conditioned
+/// subset; the damped exact-rational solve reaches a stable fixed point well inside this bound. A determinism cap, not
+/// world content: the root is a true fixed point (`dlambda` rounds to zero once there), so the answer does not depend
+/// on the exact count above the convergence point.
+const ROBUST_ITERS: u32 = 200;
+
+/// The maximum number of line-search backtracks per Newton step: the damping fraction `alpha` runs `1, 1/2, 1/4, ...`
+/// down to `2^-LINE_SEARCH_BACKTRACKS`. A damped step needs only a few halvings to pull an overshoot back inside the
+/// convergence basin (the Newton direction is a descent direction for the scale-invariant residual, so a small enough
+/// `alpha` always reduces it); the bound is a determinism cap on the search, not world content, and `30` keeps `alpha`
+/// strictly positive in Q32.32 across the whole sweep.
+const LINE_SEARCH_BACKTRACKS: u32 = 30;
 
 /// The largest exp argument the amount `x_p = exp(...)` is allowed before it is clamped, a fixed-point overflow guard
 /// (`exp(20) ~ 4.9e8` stays inside the representable range with headroom for the Jacobian sums). A transient iterate
@@ -194,6 +210,160 @@ fn reference_basis(elements: &[String], gas: &[&EquilibriumSpecies]) -> Option<V
     }
 }
 
+/// The gas-species amounts `x_p = exp(sum_e a_ep lambda_e - g_p)` at the element potentials `lambda`, clamped by the
+/// fixed-point overflow guard `max_exp_argument`. Shared by the Newton loop, the line search, and the final readout
+/// so all three evaluate the identical expression (the byte-identity of the line search's `alpha = 1` path rests on
+/// this). `None` on an arithmetic overflow.
+fn amounts_at(
+    gas: &[&EquilibriumSpecies],
+    elements: &[String],
+    lambda: &[Fixed],
+) -> Option<Vec<Fixed>> {
+    let mut x = Vec::with_capacity(gas.len());
+    for sp in gas {
+        let mut arg = Fixed::ZERO.checked_sub(sp.g_over_rt)?;
+        for (f, el) in elements.iter().enumerate() {
+            arg = arg.checked_add(coeff(sp, el).checked_mul(lambda[f])?)?;
+        }
+        if arg > max_exp_argument() {
+            arg = max_exp_argument();
+        }
+        x.push(arg.exp());
+    }
+    Some(x)
+}
+
+/// The per-element mass sums `f_e = sum_p a_ep x_p` at the amounts `x`. `None` on an overflow (a divergent iterate,
+/// which the caller reads as "not an improvement" and backtracks past).
+fn mass_sums(gas: &[&EquilibriumSpecies], elements: &[String], x: &[Fixed]) -> Option<Vec<Fixed>> {
+    let mut f = vec![Fixed::ZERO; elements.len()];
+    for (p, sp) in gas.iter().enumerate() {
+        for (row, el) in elements.iter().enumerate() {
+            let a = coeff(sp, el);
+            if a == Fixed::ZERO {
+                continue;
+            }
+            f[row] = f[row].checked_add(a.checked_mul(x[p])?)?;
+        }
+    }
+    Some(f)
+}
+
+/// The SCALE-INVARIANT residual norm `sum_e |f_e - b_e| / b_e`: each element's mass-balance miss normalized by that
+/// element's own budget, so a trace element (whose gas abundance sits orders below hydrogen's) and a major contribute
+/// on the same order-one scale. This is the physically correct metric (the solve's job is FRACTIONAL closure per
+/// element, not absolute moles), and normalizing by `b_e` conditions the wide-abundance-span system so the damped
+/// line search sees a well-scaled objective. `b_e` is strictly positive (checked by the caller), so the division is
+/// total. `None` if any term overflows, which the line search reads as an infinitely bad trial and backtracks past.
+fn scaled_residual_norm(f: &[Fixed], b: &[Fixed]) -> Option<Fixed> {
+    let mut norm = Fixed::ZERO;
+    for (fe, be) in f.iter().zip(b.iter()) {
+        let miss = fe.checked_sub(*be)?.abs();
+        let frac = miss.checked_div(*be)?;
+        norm = norm.checked_add(frac)?;
+    }
+    Some(norm)
+}
+
+/// The SCALE-INVARIANT residual norm `sum_e |f_e - b_e| / b_e` in EXACT rationals, the non-overflowing twin of
+/// [`scaled_residual_norm`]. For the wide-abundance-span solar set a trace element's fractional residual `F_e/b_e`
+/// (its budget sits orders below hydrogen's) runs far past the Q32.32 range during a transient, so the `Fixed` metric
+/// overflows and cannot drive the line search; the rational metric holds it exactly and stays deterministic. This is
+/// the metric the DAMPING branch minimizes; the `Fixed` metric is used only as the well-conditioned/overshoot gate.
+/// `b_e` is strictly positive (checked by the caller), so the division is total.
+fn scaled_residual_norm_bigrat(f: &[Fixed], b: &[Fixed]) -> BigRat {
+    let mut norm = BigRat::from_i64(0);
+    for (fe, be) in f.iter().zip(b.iter()) {
+        let be_rat = fixed_to_bigrat(*be);
+        let miss = fixed_to_bigrat(*fe).sub(&be_rat).abs();
+        norm = norm.add(&miss.div(&be_rat));
+    }
+    norm
+}
+
+/// Solve the Newton system `J dlambda = neg_f` in EXACT rationals (Gaussian elimination with partial pivoting over
+/// `BigRat`, each entry reduced to lowest terms after every operation), returning `dlambda` rounded to `Fixed`. This
+/// is the CONDITIONING for the wide-abundance-span set: the trace rows' tiny pivots underflow the fixed-point
+/// elimination, and lifting them by `1/b_e` (the row-scaling that would recover the same solution) overflows Q32.32,
+/// so the linear solve is done exactly. Exact elimination is row-scaling invariant, so it subsumes the `1/b_e`
+/// row-scaling the fixed-point solver cannot represent. Run only on ill-conditioned iterates, so the well-conditioned
+/// subset keeps the byte-identical `Fixed` [`solve_dense`] path. `None` if the Jacobian is truly rank-deficient (not a
+/// fixed-point artifact) or the step rounds out of range.
+// The augmented matrix rows cross columns in forward elimination and back-substitution; the range loops are the
+// clear linear-algebra form, as in `solve_dense`.
+#[allow(clippy::needless_range_loop)]
+fn solve_newton_exact(jac: &[Vec<Fixed>], neg_f: &[Fixed]) -> Option<Vec<Fixed>> {
+    let n = neg_f.len();
+    // The augmented matrix [J | neg_f] in EXACT rationals, reduced after every operation so the limb count stays
+    // bounded through the elimination (an unreduced Gauss-Jordan on 13 rows explodes the denominators).
+    let mut a: Vec<Vec<BigRat>> = jac
+        .iter()
+        .zip(neg_f.iter())
+        .map(|(row, be)| {
+            let mut r: Vec<BigRat> = row.iter().map(|v| fixed_to_bigrat(*v)).collect();
+            r.push(fixed_to_bigrat(*be));
+            r
+        })
+        .collect();
+    for col in 0..n {
+        // Partial pivot: the largest-magnitude entry in this column at or below the diagonal.
+        let mut piv = col;
+        for row in (col + 1)..n {
+            if a[row][col].abs().cmp_rat(&a[piv][col].abs()) == Ordering::Greater {
+                piv = row;
+            }
+        }
+        a.swap(col, piv);
+        if a[col][col].is_zero() {
+            return None; // truly rank-deficient (not a fixed-point artifact)
+        }
+        for row in (col + 1)..n {
+            if a[row][col].is_zero() {
+                continue;
+            }
+            let factor = a[row][col].div(&a[col][col]).reduce();
+            for k in col..=n {
+                let t = factor.mul(&a[col][k]);
+                a[row][k] = a[row][k].sub(&t).reduce();
+            }
+        }
+    }
+    // Back-substitution, exact.
+    let mut x = vec![BigRat::from_i64(0); n];
+    for row in (0..n).rev() {
+        let mut s = a[row][n].clone();
+        for k in (row + 1)..n {
+            s = s.sub(&a[row][k].mul(&x[k])).reduce();
+        }
+        x[row] = s.div(&a[row][row]).reduce();
+    }
+    // The single terminal rounding of the exact step back to Q32.32.
+    let mut out = Vec::with_capacity(n);
+    for v in &x {
+        out.push(Fixed::from_bits_i128(v.round_to_scale(Fixed::FRAC_BITS)?)?);
+    }
+    Some(out)
+}
+
+/// The shift-covariant seed: the element potentials from solving `M^T lambda = g_ref` over a reference basis of `E`
+/// gas species (the basis that makes the initial potentials a shift-covariant function of the `g_p`, which is what
+/// keeps the invariance gate byte-exact). Factored so the Newton loop can reseed from it if a damped iterate still
+/// hits a singular Jacobian (the reference-species reseed, in place of a bespoke pivot). `None` on a coverage failure
+/// (the gas does not span the elements) or a singular basis.
+fn reference_seed(elements: &[String], gas: &[&EquilibriumSpecies]) -> Option<Vec<Fixed>> {
+    let e = elements.len();
+    let basis = reference_basis(elements, gas)?;
+    let mut mt = vec![vec![Fixed::ZERO; e]; e]; // rows = basis species j, cols = element f
+    let mut g_ref = vec![Fixed::ZERO; e];
+    for (j, &sp_idx) in basis.iter().enumerate() {
+        for (f, el) in elements.iter().enumerate() {
+            mt[j][f] = coeff(gas[sp_idx], el);
+        }
+        g_ref[j] = gas[sp_idx].g_over_rt;
+    }
+    solve_dense(mt, g_ref)
+}
+
 /// Solve the gas-phase element-potential equilibrium: the element potentials `lambda_e` and the amounts
 /// `x_p = exp(sum_e a_ep lambda_e - g_p)` such that the mass balance `sum_p a_ep x_p = b_e` holds for every element.
 /// `abundances` is the fixed elemental total `b_e` per element symbol (arbitrary consistent unit; only ratios
@@ -202,8 +372,14 @@ fn reference_basis(elements: &[String], gas: &[&EquilibriumSpecies]) -> Option<V
 ///
 /// The seed is shift-covariant (the reference-basis solve `M^T lambda = g_ref`), so the Newton iteration is
 /// shift-equivariant and the converged assemblage is byte-identical under a reference-state shift (the invariance
-/// gate). `None` on a coverage failure (the gas species do not span the elements, or an abundance names an element
-/// no species carries), a singular Newton step, or an overflow.
+/// gate): a reference shift by `c` adds `c` to `lambda`, and the SCALE-INVARIANT residual (`sum_e |F_e|/b_e`, the
+/// fractional closure per element) and its norm are shift-invariant, so the same step is chosen and the equivariance
+/// survives. The step is keyed on conditioning: a WELL-CONDITIONED iterate (every `F_e/b_e` representable in the
+/// canonical Q32.32 metric, the rock-forming subset) takes the plain fixed-point full Newton step, bit-for-bit the
+/// legacy solver; an ILL-CONDITIONED iterate (some `F_e/b_e` overflows Q32.32, the wide-abundance-span solar set
+/// whose undamped step overshoots the trace rows and diverges) takes an EXACT-rational Newton step with a DAMPED
+/// backtracking line search on the exact residual. `None` on a coverage failure (the gas species do not span the
+/// elements, or an abundance names an element no species carries), a truly rank-deficient Jacobian, or an overflow.
 pub fn gas_equilibrium(
     species: &[EquilibriumSpecies],
     abundances: &BTreeMap<String, Fixed>,
@@ -227,33 +403,34 @@ pub fn gas_equilibrium(
     }
 
     // Shift-covariant seed: solve M^T lambda = g_ref over a reference basis of E gas species.
-    let basis = reference_basis(&elements, &gas)?;
-    let mut mt = vec![vec![Fixed::ZERO; e]; e]; // rows = basis species j, cols = element f
-    let mut g_ref = vec![Fixed::ZERO; e];
-    for (j, &sp_idx) in basis.iter().enumerate() {
-        for (f, el) in elements.iter().enumerate() {
-            mt[j][f] = coeff(gas[sp_idx], el);
-        }
-        g_ref[j] = gas[sp_idx].g_over_rt;
-    }
-    let mut lambda = solve_dense(mt, g_ref)?;
+    let mut lambda = reference_seed(&elements, &gas)?;
 
-    // Newton on the mass-balance residual F_e = sum_p a_ep x_p - b_e, Jacobian J_ef = sum_p a_ep a_fp x_p.
-    for _ in 0..NEWTON_ITERS {
-        // x_p = exp(sum_e a_ep lambda_e - g_p), clamped for the fixed-point overflow guard.
-        let mut x = Vec::with_capacity(gas.len());
-        for sp in &gas {
-            let mut arg = Fixed::ZERO.checked_sub(sp.g_over_rt)?;
-            for (f, el) in elements.iter().enumerate() {
-                arg = arg.checked_add(coeff(sp, el).checked_mul(lambda[f])?)?;
-            }
-            if arg > max_exp_argument() {
-                arg = max_exp_argument();
-            }
-            x.push(arg.exp());
-        }
-        // Residual and Jacobian.
-        let mut f = vec![Fixed::ZERO; e];
+    // The iteration budget is keyed on the SEED conditioning: a WELL-CONDITIONED seed (every element's fractional
+    // residual F_e/b_e representable in the canonical Q32.32 metric, the rock-forming subset) runs the legacy
+    // NEWTON_ITERS undamped fixed-point steps, bit-for-bit the pre-repair solver, so its converged answer (including
+    // its post-convergence fixed-point-floor tail) does not move. An ILL-CONDITIONED seed (some F_e/b_e overflows
+    // Q32.32, the signature of the wide-abundance-span solar set, aluminium and calcium ~6 decades below hydrogen) is
+    // seeded far from a trace species' root and needs the larger ROBUST_ITERS budget.
+    let seed_x = amounts_at(&gas, &elements, &lambda)?;
+    let seed_f = mass_sums(&gas, &elements, &seed_x)?;
+    let iters = if scaled_residual_norm(&seed_f, &b).is_some() {
+        NEWTON_ITERS
+    } else {
+        ROBUST_ITERS
+    };
+
+    // Newton on the mass-balance residual F_e = sum_p a_ep x_p - b_e, Jacobian J_ef = sum_p a_ep a_fp x_p, keyed on
+    // the CONDITIONING of the current iterate. When the iterate is WELL-CONDITIONED, take the legacy fixed-point full
+    // Newton step: this is bit-for-bit the undamped solver, so an already-converging subset (the rock-forming set,
+    // including its post-convergence fixed-point-floor tail where the full step overshoots a tiny residual) does not
+    // move. When the iterate is ILL-CONDITIONED (some F_e/b_e overflows Q32.32, the wide-span set whose undamped step
+    // overshoots the trace rows and diverges), take an EXACT-rational Newton step (row-scaling invariant, so it
+    // subsumes the 1/b_e row-scaling the fixed-point elimination cannot represent) with a DAMPED line search on the
+    // exact scale-invariant residual: this keeps lambda bounded and converges the trace rows to the physical root.
+    for _ in 0..iters {
+        let x = amounts_at(&gas, &elements, &lambda)?;
+        // Mass sums f_e = sum_p a_ep x_p and Jacobian J_ef = sum_p a_ep a_fp x_p (same accumulation order as before).
+        let f = mass_sums(&gas, &elements, &x)?;
         let mut jac = vec![vec![Fixed::ZERO; e]; e];
         for (p, sp) in gas.iter().enumerate() {
             for (row, el_e) in elements.iter().enumerate() {
@@ -261,7 +438,6 @@ pub fn gas_equilibrium(
                 if a_ep == Fixed::ZERO {
                     continue;
                 }
-                f[row] = f[row].checked_add(a_ep.checked_mul(x[p])?)?;
                 for (col, el_f) in elements.iter().enumerate() {
                     let a_fp = coeff(sp, el_f);
                     if a_fp == Fixed::ZERO {
@@ -272,30 +448,76 @@ pub fn gas_equilibrium(
                 }
             }
         }
-        // Residual: F_e = (sum_p a_ep x_p) - b_e; Newton step J dlambda = -F.
+        // Newton step J dlambda = -F, so neg_f = b - f.
         let neg_f: Vec<Fixed> = f
             .iter()
             .zip(b.iter())
             .map(|(fe, be)| be.checked_sub(*fe))
             .collect::<Option<Vec<_>>>()?;
-        let dlambda = solve_dense(jac, neg_f)?;
-        for (l, d) in lambda.iter_mut().zip(dlambda.iter()) {
-            *l = l.checked_add(*d)?;
+        // WELL-CONDITIONED: the legacy full fixed-point Newton step, bit-for-bit the undamped solver.
+        if scaled_residual_norm(&f, &b).is_some() {
+            let dlambda = solve_dense(jac, neg_f)?;
+            lambda = lambda
+                .iter()
+                .zip(dlambda.iter())
+                .map(|(l, d)| l.checked_add(*d))
+                .collect::<Option<Vec<_>>>()?;
+            continue;
         }
+        // ILL-CONDITIONED: the exact-rational Newton direction (the conditioning that lets the trace rows survive).
+        // A truly rank-deficient Jacobian (not a fixed-point artifact) reseeds from the reference basis rather than a
+        // bespoke pivot.
+        let dlambda = match solve_newton_exact(&jac, &neg_f) {
+            Some(d) => d,
+            None => {
+                lambda = reference_seed(&elements, &gas)?;
+                continue;
+            }
+        };
+        // DAMPED backtracking line search on the EXACT (BigRat) scale-invariant residual, which does not overflow for
+        // the wide-span set. Accept the FIRST alpha in 1, 1/2, 1/4, ... whose residual is strictly less than the
+        // current one; the Newton direction is a descent direction for this residual, so a small enough alpha always
+        // qualifies, and the damping keeps lambda bounded so the trace rows stay out of the singular region.
+        let cur_big = scaled_residual_norm_bigrat(&f, &b);
+        let mut alpha = Fixed::ONE;
+        let mut stepped: Option<Vec<Fixed>> = None;
+        for _ in 0..=LINE_SEARCH_BACKTRACKS {
+            let trial: Option<Vec<Fixed>> = lambda
+                .iter()
+                .zip(dlambda.iter())
+                .map(|(l, d)| alpha.checked_mul(*d).and_then(|ad| l.checked_add(ad)))
+                .collect();
+            if let Some(trial) = trial {
+                if let Some(tx) = amounts_at(&gas, &elements, &trial) {
+                    if let Some(tf) = mass_sums(&gas, &elements, &tx) {
+                        if scaled_residual_norm_bigrat(&tf, &b).cmp_rat(&cur_big) == Ordering::Less
+                        {
+                            stepped = Some(trial);
+                            break;
+                        }
+                    }
+                }
+            }
+            alpha = alpha.checked_div(Fixed::from_int(2))?;
+        }
+        // If no alpha strictly reduced the residual (a stalled iterate), take the full exact step.
+        lambda = match stepped {
+            Some(t) => t,
+            None => lambda
+                .iter()
+                .zip(dlambda.iter())
+                .map(|(l, d)| l.checked_add(*d))
+                .collect::<Option<Vec<_>>>()?,
+        };
     }
 
     // Final amounts at the converged element potentials.
-    let mut amounts = Vec::with_capacity(gas.len());
-    for sp in &gas {
-        let mut arg = Fixed::ZERO.checked_sub(sp.g_over_rt)?;
-        for (f, el) in elements.iter().enumerate() {
-            arg = arg.checked_add(coeff(sp, el).checked_mul(lambda[f])?)?;
-        }
-        if arg > max_exp_argument() {
-            arg = max_exp_argument();
-        }
-        amounts.push((sp.name.clone(), arg.exp()));
-    }
+    let amounts_vec = amounts_at(&gas, &elements, &lambda)?;
+    let amounts: Vec<(String, Fixed)> = gas
+        .iter()
+        .zip(amounts_vec)
+        .map(|(sp, a)| (sp.name.clone(), a))
+        .collect();
     let element_potentials = elements.into_iter().zip(lambda).collect();
     Some(GasEquilibrium {
         element_potentials,
