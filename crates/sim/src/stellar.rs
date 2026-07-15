@@ -53,6 +53,18 @@
 //! arguments), never a rewrite. Nothing keys on the Sun as a hidden default; the Sun is the anchor the ratios are
 //! measured against, exactly as the scenario supplies the mass ratio in [`crate::astro`].
 //!
+//! THE SOLAR-METALLICITY CONVENTION (owner ruling, a JOIN-LAW anchor). `Z/Z_sun` is dimensionless, so no `Z_sun`
+//! value lives in this kernel: the scenario passes the ratio (Mirror = 1). But the adopted solar-abundance scale is
+//! a project-wide CONVENTION that the stellar module's `Z/Z_sun` and the disk module's composition reference MUST
+//! cite identically, or the ratio silently means different things across crates (a definition-mismatch across the
+//! join). The project pins ASPLUND, GREVESSE, SAUVAL & SCOTT 2009 (AGSS09, `Z_sun ~ 0.0134`) as that anchor, the de
+//! facto standard already: the AESOPUS opacity pulls and the Lodders-era condensation chain are AGSS09-referenced.
+//! The scale has drifted across generations (Anders-Grevesse 1989 ~0.020, Grevesse-Sauval 1998 ~0.0170, Asplund-
+//! Grevesse-Sauval 2005 (AGS05) ~0.0122, AGSS09 ~0.0134, Magg 2022 revising back toward ~0.016), so the anchor is
+//! generation-pinned, not a bare number. HONEST TENSION (carried, not hidden): the low-`Z` Asplund scale conflicts
+//! with helioseismic sound-speed inversions, the standing solar-modelling problem, partially eased by the Magg 2022
+//! revision; the anchor carries this open tension rather than false settledness.
+//!
 //! The determinism and scale discipline. The dimensionless ratios (`L/L_sun`, `R/R_sun`) are order-one and stay
 //! `Fixed`, formed by [`civsim_core::Fixed::powf`], the pinned transcendental. The effective temperature reuses the
 //! proven wide path of [`crate::astro`]: the absolute surface flux `F = L/(4*pi*R^2)` (whose `L ~ 3.8e26 W` and
@@ -484,6 +496,76 @@ mod tests {
         assert!(
             (ratio - expected).abs() < 0.01,
             "the metallicity cooling is 2^((lambda-2mu)/4) ~{expected:.4}, got {ratio:.4}"
+        );
+    }
+
+    #[test]
+    fn the_subdwarf_sign_and_stefan_boltzmann_slope_are_the_pre_registered_receipt() {
+        // The Population II subdwarf receipt (owner, a battery row for free): with lambda < 0 and mu > 0, a metal-
+        // POOR halo star at fixed mass is MORE luminous, SMALLER, and HOTTER than the solar-metallicity star, the
+        // measured sign the halo subdwarfs carry. And the exact Stefan-Boltzmann tie fixes the temperature slope to
+        // d ln T_eff / d ln Z = lambda/4 - mu/2, the joint cross-check any grid-extracted (lambda, mu) must satisfy
+        // (the same identity the metallicity grid agent verifies against MIST and PARSEC's own T_eff).
+        let solar = main_sequence_star(
+            Fixed::ONE,
+            Fixed::ONE,
+            alpha(),
+            beta(),
+            lambda(),
+            mu(),
+            t_max(),
+        )
+        .unwrap();
+        let poor = main_sequence_star(
+            Fixed::ONE,
+            Fixed::from_ratio(1, 10),
+            alpha(),
+            beta(),
+            lambda(),
+            mu(),
+            t_max(),
+        )
+        .unwrap();
+        assert!(
+            poor.luminosity_ratio > solar.luminosity_ratio,
+            "the metal-poor subdwarf is more luminous"
+        );
+        assert!(
+            poor.radius_ratio < solar.radius_ratio,
+            "the metal-poor subdwarf is smaller"
+        );
+        assert!(
+            poor.effective_temperature_k > solar.effective_temperature_k,
+            "the metal-poor subdwarf is hotter"
+        );
+        // The Stefan-Boltzmann slope identity by finite difference of ln T_eff over ln Z at fixed mass.
+        let s1 = main_sequence_star(
+            Fixed::ONE,
+            Fixed::from_ratio(9, 10),
+            alpha(),
+            beta(),
+            lambda(),
+            mu(),
+            t_max(),
+        )
+        .unwrap();
+        let s2 = main_sequence_star(
+            Fixed::ONE,
+            Fixed::from_ratio(11, 10),
+            alpha(),
+            beta(),
+            lambda(),
+            mu(),
+            t_max(),
+        )
+        .unwrap();
+        let slope = (s2.effective_temperature_k.to_f64_lossy().ln()
+            - s1.effective_temperature_k.to_f64_lossy().ln())
+            / (1.1_f64.ln() - 0.9_f64.ln());
+        let expected = -0.5 / 4.0 - 0.25 / 2.0; // lambda/4 - mu/2 = -0.25
+        assert!(
+            (slope - expected).abs() < 0.01,
+            "d ln T_eff/d ln Z = lambda/4 - mu/2 = {expected}, got {slope}"
         );
     }
 
