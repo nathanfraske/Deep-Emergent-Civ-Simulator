@@ -110,6 +110,7 @@ pub mod material_percept;
 pub mod medium;
 pub mod morphogen;
 pub mod nonlocal_coupling;
+pub mod orbit;
 pub mod perceivable_feature;
 pub mod percept;
 pub mod perception_percept;
