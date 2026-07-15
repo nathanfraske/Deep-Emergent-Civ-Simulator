@@ -46,6 +46,13 @@ rayon = "1"
 # on an explicit runtime toggle, so the default state hash is untouched (docs/working/GPU_BLUEPRINT.md).
 civsim-gpu = { path = "../gpu", optional = true }
 
+[build-dependencies]
+# Stone 0, the local-firing provenance gate (task #79). The build script calls it so the fixture-
+# provenance scan fires on every `cargo build`/`check`/`test`/`clippy` of this crate, hard-blocking a
+# violation unless the owner supplies the password override. Build-only, so it never enters the compiled
+# crate and cannot move the state hash. Dependency-free, so it adds no third-party build surface.
+civsim-stone0 = { path = "../stone0" }
+
 [features]
 # Wire the GPU field-stencil offload into the runner. Off by default; opt in with `--features gpu`.
 gpu = ["dep:civsim-gpu"]
