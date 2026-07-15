@@ -343,6 +343,56 @@ pub fn disk_effective_temperature(
     ))
 }
 
+/// Kepler's third law REFERENCE PERIOD: the orbital period in world-seconds at ONE AU around a ONE-solar-mass
+/// star, DERIVED from the cited astronomical unit, solar mass, and the fundamental gravitational constant.
+/// `T_ref = 2*pi*sqrt(AU^3/(G*M_sun))`, the sidereal-year anchor (~3.156e7 s, ~365.25 days). It is computed, not
+/// fit: this is the Kepler period the floor gives, distinct from the round 365-day calendar fixture the run path
+/// currently carries and that this arc retires. The wide radicand `AU^3/(G*M_sun)` (~2.5e13, over the Q32.32
+/// ceiling) is formed in exact rational arithmetic and rooted once by the scale-aware Tier-2 integer square root
+/// ([`civsim_units::tier2::isqrt`]), so no float and no unrepresentable intermediate enters, the same
+/// wide-magnitude discipline the stellar flux uses. `None` only if the derivation exceeds the representable
+/// range, which it does not for the solar reference.
+fn reference_orbital_period_seconds() -> Option<Fixed> {
+    let au = BigRat::from_decimal_str(ASTRONOMICAL_UNIT_M).ok()?;
+    let m_sun = BigRat::from_decimal_str(SOLAR_MASS_KG).ok()?;
+    let g =
+        BigRat::from_decimal_str(civsim_units::fundamentals::GRAVITATIONAL_CONSTANT.value).ok()?;
+    let pi = compute::pi(FLUX_PI_DIGITS);
+    let four_pi2 = BigRat::from_i64(4).mul(&pi).mul(&pi);
+    let a3 = au.mul(&au).mul(&au);
+    // The squared period T^2 = 4*pi^2*AU^3/(G*M_sun), in seconds^2 (~9.96e14). Rounded to the integer-second^2
+    // scale (its ~15 significant figures are far finer than a period needs) and rooted once at Q32.32.
+    let t_squared = four_pi2.mul(&a3).div(&g.mul(&m_sun));
+    let t2_bits = i64::try_from(t_squared.round_to_scale(0)?).ok()?;
+    let t_bits = civsim_units::tier2::isqrt(t2_bits, 0, Fixed::FRAC_BITS)?;
+    Fixed::from_bits_i128(t_bits as i128)
+}
+
+/// The ORBITAL PERIOD in world-seconds of a planet at `orbit_au` around a star of `star_mass_ratio` solar
+/// masses, DERIVED from Kepler's third law `T^2 = 4*pi^2*a^3/(G*M_star)`. It factors as
+/// `T = T_ref*sqrt(orbit_au^3/star_mass_ratio)` around the derived one-AU one-solar-mass reference
+/// ([`reference_orbital_period_seconds`]), so the per-orbit factor stays in Q32.32 (the cube of the orbit and
+/// the mass ratio are order-one across the terrestrial zone) while the wide constant is derived once. The
+/// factorisation is the exact Kepler identity, not an approximation. This is the year a world's time cadences
+/// derive from, retiring the reserved year scalar in the celestial substrate.
+///
+/// Every input is a scenario-set ARGUMENT (the admit-the-alien test): a different orbit or a different star mass
+/// is a data row, never a rewrite. `None` on a non-positive orbit or star mass, or a period past the
+/// representable range: a far orbit whose year in seconds crosses the Q32.32 ceiling (~16 AU around a solar-mass
+/// star) fails loud rather than wrapping, the log-space period representation being the units follow-on, flagged
+/// not faked.
+pub fn kepler_orbital_period_seconds(orbit_au: Fixed, star_mass_ratio: Fixed) -> Option<Fixed> {
+    if orbit_au <= Fixed::ZERO || star_mass_ratio <= Fixed::ZERO {
+        return None;
+    }
+    let t_ref = reference_orbital_period_seconds()?;
+    let a3 = orbit_au.checked_mul(orbit_au)?.checked_mul(orbit_au)?;
+    let factor = a3.checked_div(star_mass_ratio)?;
+    // sqrt of an order-one-to-order-thousand Q32.32 value; the wide magnitude lives only in T_ref.
+    let root = factor.sqrt();
+    t_ref.checked_mul(root)
+}
+
 /// The DISK SURFACE DENSITY `Sigma(r)` (in the normalization's units) at an orbital distance, the Lynden-Bell and
 /// Pringle self-similar profile `Sigma(r) = Sigma_c * (r/r_c)^(-gamma) * exp(-(r/r_c)^(2-gamma))`: a power-law
 /// interior steepened by an exponential cutoff beyond the characteristic radius `r_c`. This is the second half of
@@ -626,6 +676,69 @@ mod tests {
             dense.to_f64_lossy() < r.to_f64_lossy(),
             "a denser planet of the same mass is smaller"
         );
+    }
+
+    #[test]
+    fn the_kepler_period_derives_earths_year() {
+        // Kepler's third law at 1 AU around 1 M_sun derives the sidereal-grade year (~3.156e7 s, ~365.25 days)
+        // from the cited AU, solar mass, and G alone, the derive-not-fit year anchor. It matches the Julian year
+        // (31,557,600 s, 365.25 days) to ~0.01%, distinct from the round 365.0-day calendar fixture (31,536,000 s)
+        // the run path currently carries: the derivation gives the true orbital year, not the round approximation.
+        let year = kepler_orbital_period_seconds(Fixed::ONE, Fixed::ONE).unwrap();
+        let julian = 31_557_600.0;
+        assert!(
+            (year.to_f64_lossy() - julian).abs() < 50_000.0,
+            "the 1 AU / 1 M_sun period is Earth's year ~3.156e7 s, got {}",
+            year.to_f64_lossy()
+        );
+    }
+
+    #[test]
+    fn the_kepler_period_follows_the_third_law_scaling() {
+        // T^2 proportional to a^3 / M_star: quadrupling the orbit multiplies the period by 4^1.5 = 8; quadrupling
+        // the star mass divides it by sqrt(4) = 2. The scaling is the law, checked as ratios so the constants drop.
+        let base = kepler_orbital_period_seconds(Fixed::ONE, Fixed::ONE)
+            .unwrap()
+            .to_f64_lossy();
+        let wider = kepler_orbital_period_seconds(Fixed::from_int(4), Fixed::ONE)
+            .unwrap()
+            .to_f64_lossy();
+        let heavier = kepler_orbital_period_seconds(Fixed::ONE, Fixed::from_int(4))
+            .unwrap()
+            .to_f64_lossy();
+        assert!(
+            (wider / base - 8.0).abs() < 0.02,
+            "T scales as a^1.5 (4^1.5 = 8), got {}",
+            wider / base
+        );
+        assert!(
+            (heavier / base - 0.5).abs() < 0.005,
+            "T scales as M^-0.5 (1/2), got {}",
+            heavier / base
+        );
+    }
+
+    #[test]
+    fn the_kepler_period_matches_jupiter() {
+        // An independent real-world check: Jupiter at 5.203 AU around the Sun has an 11.86-year period. The
+        // derivation reproduces it from the orbit and the solar mass alone, with no fit to Jupiter.
+        let t = kepler_orbital_period_seconds(Fixed::from_ratio(5203, 1000), Fixed::ONE).unwrap();
+        let expected = 11.86 * 31_557_600.0;
+        assert!(
+            (t.to_f64_lossy() - expected).abs() / expected < 0.01,
+            "Jupiter's period ~11.86 yr, got {} yr",
+            t.to_f64_lossy() / 31_557_600.0
+        );
+    }
+
+    #[test]
+    fn the_kepler_period_fails_loud_on_bad_inputs_and_far_orbits() {
+        // Non-positive orbit or star mass has no period; a far orbit whose year in seconds crosses the Q32.32
+        // ceiling (here 100 AU, ~1000 years) fails loud rather than wrapping, the honest units limit. The
+        // log-space period representation for the outer system is the timestepping-arc follow-on, flagged not faked.
+        assert!(kepler_orbital_period_seconds(Fixed::ZERO, Fixed::ONE).is_none());
+        assert!(kepler_orbital_period_seconds(Fixed::ONE, Fixed::ZERO).is_none());
+        assert!(kepler_orbital_period_seconds(Fixed::from_int(100), Fixed::ONE).is_none());
     }
 
     #[test]
