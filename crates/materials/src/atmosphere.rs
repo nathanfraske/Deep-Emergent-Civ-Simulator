@@ -98,8 +98,12 @@ fn is_gas_phase(name: &str) -> bool {
 ///
 /// `equilibration_temperature_k` is the temperature at which the gas last reached equilibrium: the volcanic quench
 /// temperature for a quenched outgassed atmosphere (its basis, ~1200 to 1500 K, the magma-degassing range), or a
-/// hot planet's surface temperature where the atmosphere sits near surface equilibrium. It is a reserved input with
-/// that basis, never fabricated here.
+/// hot planet's surface temperature where the atmosphere sits near surface equilibrium. It is RESERVED-NOW with its
+/// DERIVE-DOWN NAMED (the class of the H-bond shift, a reservation carrying its own expiry condition): the quench
+/// point is not authored, it is where the chemical relaxation time crosses the cooling time (tau_chem = tau_cool,
+/// the Dodson-closure machinery the archive turn built), with the reaction rates from the Prinn-Barshay gas-kinetics
+/// the atmosphere kernel already cites. When that derive-down lands the ~1200 to 1500 K placement emerges from the
+/// rates rather than being supplied; until then the caller supplies it with the basis above, never a fabricated value.
 pub fn atmosphere_gas_equilibrium(
     janaf: &JanafTables,
     budget: &BTreeMap<String, Fixed>,

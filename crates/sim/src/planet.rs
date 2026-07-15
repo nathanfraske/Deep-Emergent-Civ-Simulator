@@ -31,8 +31,8 @@ use civsim_core::Fixed;
 
 /// The surface gravity `g` (m/s^2) of a planet from its mass and radius: `g = G M / R^2`, both DERIVED (the mass
 /// from accretion, the radius from mass and bulk density), so the hardcoded `9.80665` retires. The wide-magnitude
-/// product runs in LOG-SPACE (`G ~ 6.67e-11`, `M ~ 6e24 kg`, `R^2 ~ 4e13 m^2` each leave Q32.32 while the ~9.8
-/// result fits): `ln g = ln G + ln M_kg - 2 ln R`. At one Earth mass and ~6371 km this derives ~9.8 m/s^2, the
+/// product runs in LOG-SPACE (`G ~ 6.67e-11`, `M ~ 6e24 kg`, `R^2 ~ 4e13 m^2` each leave Q32.32 while the ~9.82
+/// result fits): `ln g = ln G + ln M_kg - 2 ln R`. At one Earth mass and ~6371 km this derives ~9.82 m/s^2, the
 /// Hadean-gate gravity target and the mandatory sanity check. `None` on a non-positive input or a register miss.
 pub fn surface_gravity(mass_earth: Fixed, radius_m: Fixed) -> Option<Fixed> {
     if mass_earth <= Fixed::ZERO || radius_m <= Fixed::ZERO {
@@ -139,15 +139,28 @@ mod tests {
         Fixed::from_ratio(n, d)
     }
 
+    /// The honest gravity anchor `g = G M_earth / R_earth^2` from the cited IAU/IUGG Earth mass and mean radius
+    /// ([`crate::astro::EARTH_MASS_KG`], [`crate::astro::EARTH_MEAN_RADIUS_M`]), ~9.82 m/s^2. The derived surface
+    /// gravity is checked against this (the value Earth's own mass and radius give), never against the standard-
+    /// gravity CONVENTION 9.80665, which is a 1901 CGPM sea-level-45-degree datum, not a derived quantity.
+    fn earth_reference_gravity() -> f64 {
+        surface_gravity(
+            Fixed::ONE,
+            Fixed::from_int(crate::astro::EARTH_MEAN_RADIUS_M),
+        )
+        .expect("the cited Earth reference gravity resolves")
+        .to_f64_lossy()
+    }
+
     #[test]
     fn the_surface_gravity_derives_earth() {
-        // g = G M / R^2 at one Earth mass and ~6371 km derives ~9.8 m/s^2 (the Hadean-gate sanity check), the
-        // hardcoded 9.80665 retired now that both M and R are derived.
+        // g = G M / R^2 at one Earth mass and ~6371 km derives ~9.82 m/s^2, checked against the cited G M/R^2 anchor
+        // (the value Earth's own mass and radius give), never the standard-gravity convention 9.80665.
         let radius = crate::astro::planet_radius_m(Fixed::ONE, r(5514, 1000)).unwrap();
         let g = surface_gravity(Fixed::ONE, radius).unwrap();
         assert!(
-            (g.to_f64_lossy() - 9.8).abs() < 0.2,
-            "Earth surface gravity ~9.8 m/s^2, got {}",
+            (g.to_f64_lossy() - earth_reference_gravity()).abs() < 0.05,
+            "surface gravity matches the cited G M/R^2 anchor (~9.82), got {}",
             g.to_f64_lossy()
         );
     }
@@ -156,7 +169,7 @@ mod tests {
     fn the_spine_derives_a_sun_earth_planet_end_to_end() {
         // The capstone spine, Sun + 1 AU + Earth's accreted mass and mean density: the star reads its ~5772 K T_eff
         // (the render's light colour), the disk its ~equilibrium surface warmth at 1 AU, the planet its ~6371 km
-        // radius and ~9.8 m/s^2 gravity. The stellar slopes are the grid-extracted values (alpha ~3.5, beta ~0.8,
+        // radius and ~9.82 m/s^2 gravity. The stellar slopes are the grid-extracted values (alpha ~3.5, beta ~0.8,
         // lambda -0.44, mu -0.018); the disk residues are Mirror fixtures. This is the generative chain end to end;
         // the exact Hadean-Earth match is the acceptance gate, not this smoke test.
         let planet = derive_planet(
@@ -186,8 +199,8 @@ mod tests {
             planet.radius_m.to_f64_lossy() / 1000.0
         );
         assert!(
-            (planet.surface_gravity_m_s2.to_f64_lossy() - 9.8).abs() < 0.2,
-            "the surface gravity ~9.8 m/s^2, got {}",
+            (planet.surface_gravity_m_s2.to_f64_lossy() - earth_reference_gravity()).abs() < 0.05,
+            "the surface gravity matches the cited G M/R^2 anchor (~9.82), got {}",
             planet.surface_gravity_m_s2.to_f64_lossy()
         );
         assert!(
@@ -207,11 +220,20 @@ mod tests {
     //   DERIVED now (asserted below):
     //     - star T_eff ~5772 K            <- stellar::main_sequence_star (L, R; Stefan-Boltzmann)
     //     - planet radius ~6371 km        <- astro::planet_radius_m (accreted mass, condensed bulk density)
-    //     - surface gravity ~9.80 m/s^2   <- surface_gravity (g = G M / R^2, the 9.80665 hardcode retired)
+    //     - surface gravity ~9.82 m/s^2   <- surface_gravity (g = G M/R^2 vs the cited anchor, not the 9.80665 convention)
     //     - disk warmth at 1 AU plausible <- astro::disk_effective_temperature (irradiation + viscous)
     //   PENDING, pre-registered (the stage that closes each):
-    //     - mass ~1 Earth                 <- Stage 4 accretion (astro::feeding_zone_mass_earth; Sigma_c reserved)
-    //     - bulk density ~5.51 g/cm^3     <- Stage 3 condensation (iron core + silicate mantle, dry inner disk)
+    //     - isolation mass ~0.1 M_earth (Mars-class) <- Stage 4 accretion at the CITED MMSN Sigma_c (Hayashi 1981,
+    //       Weidenschilling 1977 second witness, their factor-few spread the band). This row is DELIBERATELY not
+    //       "mass = 1 M_earth from Sigma_c": that gate is unpassable by any honest disk theory (the 1 AU isolation
+    //       mass under classic MMSN is Mars-class ~0.05 to 0.1 M_earth, the founding observation of late-stage
+    //       accretion), and fitting Sigma_c to recover 1 M_earth would author the acceptance answer. The honest gate
+    //       is "isolation mass lands in the Mars-class band"; the FINAL ~1 M_earth closes only at the EVENT tier.
+    //     - final mass ~1 M_earth          <- the event tier (giant-impact merger of ~10 oligarchic embryos, the
+    //       layer-4 contingency draws). The gap from isolation to final mass is the pipeline discovering Earth needs
+    //       its collision history, the emergence thesis passing its own test, not a failure to derive Earth.
+    //     - bulk density ~5.51 g/cm^3     <- Stage 3 condensation (iron core + silicate mantle, dry inner disk) plus
+    //       the interior-structure EoS (uncompressed rho_0 -> gravitationally compressed bulk rho)
     //     - differentiated interior       <- Stage 6 geology (core/mantle/crust from the condensed composition)
     //     - CO2/N2/H2O outgassed air      <- Stage 8 atmosphere (the coupled gas-mix Gibbs solve)
     //     - basaltic surface tiles        <- Stage 7 tile re-derivation from the materials substrate
@@ -245,11 +267,11 @@ mod tests {
             (radius_km - 6371.0).abs() < 70.0,
             "Hadean gate: radius within grade of 6371 km, got {radius_km:.0}"
         );
-        // Derived row: the surface gravity within ~2 percent of 9.80 m/s^2 (the hardcode gone).
+        // Derived row: the surface gravity against the cited G M/R^2 anchor (~9.82), not the 9.80665 convention.
         let g = earth.surface_gravity_m_s2.to_f64_lossy();
         assert!(
-            (g - 9.80).abs() < 0.2,
-            "Hadean gate: surface gravity within grade of 9.80 m/s^2, got {g:.3}"
+            (g - earth_reference_gravity()).abs() < 0.05,
+            "Hadean gate: surface gravity matches the cited G M/R^2 anchor (~9.82, not the 9.80665 convention), got {g:.3}"
         );
         // Derived row: the disk warmth at 1 AU is a plausible early-Hadean value (a warm accreting disk, not the
         // cold ~255 K equilibrium of the evolved atmosphere-free planet).

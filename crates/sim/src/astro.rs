@@ -68,6 +68,14 @@ pub const JULIAN_YEAR_S: &str = "31557600";
 /// per-world value; the derived planet mass is the per-world quantity.
 pub const EARTH_MASS_KG: &str = "5.9722e24";
 
+/// The Earth mean radius in metres, the IUGG/IAU arithmetic mean radius `R_1 = (2a + b)/3 = 6371.0 km`. A cited
+/// reference anchor (not a per-world value): the honest gravity gate is `g_ref = G M_earth / R_earth^2` computed from
+/// this and [`EARTH_MASS_KG`], which lands ~9.82 m/s^2, the value Earth's own mass and radius give. This anchor
+/// replaces the standard-gravity CONVENTION `9.80665` (the 1901 CGPM sea-level-45-degree definition), which is a
+/// bureaucratic datum, not Earth's derived surface gravity; a derived quantity must be checked against the physics,
+/// not against a convention. Held as an integer-metre value so it constructs exactly in fixed-point.
+pub const EARTH_MEAN_RADIUS_M: i32 = 6_371_000;
+
 /// The number of decimal digits pi is computed to for the flux derivation. Far above the ~10 significant
 /// figures the Q32.32 result carries (a `2^-32` epsilon near a ~1361 magnitude is a relative ~1.7e-13), so
 /// the pi truncation never reaches the result's low bit. An engine-accuracy bound, not a world value.
