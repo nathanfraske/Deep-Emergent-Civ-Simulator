@@ -542,6 +542,66 @@ pub fn disk_midplane_temperature(
     lo.checked_add(hi)?.checked_div(Fixed::from_int(2))
 }
 
+/// The FORMATION-ERA disk midplane temperature `T_mid(r)` (K) at an orbital distance: the condensation epoch's
+/// temperature, DISTINCT from the mature surface warmth [`disk_effective_temperature`] gives. THE EPOCH JOIN-LAW,
+/// enforced by keeping the two derivations apart: the crust CONDENSES against THIS (the hot, optically-thick,
+/// accreting formation midplane), and the FINISHED planet's surface reads the MATURE
+/// [`disk_effective_temperature`] (the cooled irradiation equilibrium). The two are separate epochs and are never
+/// conflated under one variable.
+///
+/// This assembles the three inputs the optically-thick midplane closure ([`disk_midplane_temperature`]) needs and
+/// calls it: the viscous dissipation flux ([`viscous_dissipation_flux`], from the FORMATION-era accretion rate, so
+/// it is the hot accreting disk), the absorbed irradiation flux (`reprocessing_factor` times [`stellar_flux`]), and
+/// the dust surface density `Sigma_dust(r)` ([`disk_surface_density`], the optical column the depth integrates),
+/// with the caller's Rosseland-opacity closure `kappa_of_t` (kept a parameter so this stays free of any
+/// materials-crate dependency and admits any opacity law). Because the viscous dissipation steepens as `r^(-3)` and
+/// `Sigma` falls with distance, `T_mid(r)` falls steeply with orbit, so a closer orbit condenses a more refractory
+/// crust and a farther orbit a cooler assemblage: the condensation staircase is DERIVED, not authored. Every
+/// per-world input is a scenario-set ARGUMENT (the admit-the-alien test); the reserved disk residues (the
+/// formation accretion rate, the surface-density normalization, the reprocessing and inner-edge factors, the
+/// bisection bracket) are the caller's, each surfaced with a basis. `None` if any link fails to resolve.
+#[allow(clippy::too_many_arguments)]
+pub fn formation_midplane_temperature(
+    accretion_rate_msun_myr: Fixed,
+    mass_ratio: Fixed,
+    luminosity_exponent: Fixed,
+    distance_au: Fixed,
+    reprocessing_factor: Fixed,
+    inner_boundary_factor: Fixed,
+    characteristic_radius_au: Fixed,
+    gamma: Fixed,
+    dust_surface_density_normalization: Fixed,
+    kappa_of_t: impl Fn(Fixed) -> Option<Fixed>,
+    t_lo: Fixed,
+    t_hi: Fixed,
+) -> Option<Fixed> {
+    let viscous_flux = viscous_dissipation_flux(
+        accretion_rate_msun_myr,
+        mass_ratio,
+        distance_au,
+        inner_boundary_factor,
+    )?;
+    let absorbed_irradiation_flux = reprocessing_factor.checked_mul(stellar_flux(
+        mass_ratio,
+        luminosity_exponent,
+        distance_au,
+    )?)?;
+    let dust_surface_density = disk_surface_density(
+        distance_au,
+        characteristic_radius_au,
+        gamma,
+        dust_surface_density_normalization,
+    )?;
+    disk_midplane_temperature(
+        viscous_flux,
+        absorbed_irradiation_flux,
+        dust_surface_density,
+        kappa_of_t,
+        t_lo,
+        t_hi,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1206,5 +1266,78 @@ mod tests {
         )
         .is_none());
         assert!(feeding_zone_mass(Fixed::ONE, Fixed::from_int(10), rc, gamma, norm, 0).is_none());
+    }
+
+    #[test]
+    fn the_formation_midplane_lands_in_the_condensation_window_and_falls_with_orbit() {
+        // The SEAM-3 formation epoch: the FORMATION-era midplane temperature, DERIVED at the orbit from the
+        // viscous-plus-irradiation optically-thick fixed point with a representative constant silicate-dust Rosseland
+        // opacity. It must (1) land in the silicate condensation window (~1300 to 1500 K) at 1 AU with the reserved
+        // disk residues, and (2) FALL with orbit (a closer orbit hotter, a farther one cooler), the driver of the
+        // orbit-dependent condensation staircase the crust reads. With a constant opacity the midplane is the direct
+        // optically-thick equilibrium; the bisection returns it in the bracket.
+        let kappa = |_t: Fixed| Some(Fixed::from_int(600)); // representative silicate-dust Rosseland opacity, cm^2/g
+        let mid = |orbit: Fixed| {
+            formation_midplane_temperature(
+                Fixed::from_ratio(19, 100), // formation accretion rate (reserved, pinned to the 1 AU front)
+                Fixed::ONE,
+                Fixed::from_ratio(35, 10),
+                orbit,
+                Fixed::from_ratio(1, 4),
+                Fixed::ONE,
+                Fixed::from_int(30),
+                Fixed::ONE,
+                Fixed::from_ratio(586, 1000),
+                kappa,
+                Fixed::from_int(100),
+                Fixed::from_int(1950),
+            )
+            .unwrap()
+            .to_f64_lossy()
+        };
+        let close = mid(Fixed::from_ratio(8, 10));
+        let one = mid(Fixed::ONE);
+        let far = mid(Fixed::from_int(2));
+        assert!(
+            one > 1300.0 && one < 1500.0,
+            "the 1 AU formation midplane lands in the condensation window (~1400 K), got {one}"
+        );
+        assert!(
+            close > one,
+            "a closer orbit condenses hotter: {close} vs {one} K"
+        );
+        assert!(
+            one > far,
+            "a farther orbit condenses cooler: {one} vs {far} K"
+        );
+    }
+
+    #[test]
+    fn the_formation_midplane_rises_with_the_accretion_rate() {
+        // A higher FORMATION accretion rate is a hotter midplane (more viscous dissipation to trap), the monotone the
+        // reserved formation rate is calibrated along to pin the 1 AU condensation front.
+        let kappa = |_t: Fixed| Some(Fixed::from_int(600));
+        let at = |mdot: Fixed| {
+            formation_midplane_temperature(
+                mdot,
+                Fixed::ONE,
+                Fixed::from_ratio(35, 10),
+                Fixed::ONE,
+                Fixed::from_ratio(1, 4),
+                Fixed::ONE,
+                Fixed::from_int(30),
+                Fixed::ONE,
+                Fixed::from_ratio(586, 1000),
+                kappa,
+                Fixed::from_int(100),
+                Fixed::from_int(1950),
+            )
+            .unwrap()
+            .to_f64_lossy()
+        };
+        assert!(
+            at(Fixed::from_ratio(25, 100)) > at(Fixed::from_ratio(10, 100)),
+            "a higher accretion rate warms the formation midplane"
+        );
     }
 }

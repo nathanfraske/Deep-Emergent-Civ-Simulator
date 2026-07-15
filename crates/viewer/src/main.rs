@@ -35,9 +35,12 @@ mod render;
 use minifb::{Key, KeyRepeat, MouseMode, Scale, ScaleMode, Window, WindowOptions};
 
 use civsim_core::Fixed;
+use civsim_materials::grain_opacity::{GrainConstituent, GrainMixture, GrainOpticalEstimator};
 use civsim_physics::band_gap::BandGapColumn;
 use civsim_physics::crystal_field::CrystalFieldTables;
 use civsim_physics::janaf::JanafTables;
+use civsim_physics::metal_eos::MetalEosAnchors;
+use civsim_physics::optical_constants::OpticalConstants;
 use civsim_physics::periodic::PeriodicTable;
 use civsim_physics::petrology_data::PhaseRegistry;
 use civsim_physics::solar_abundances::SolarAbundances;
@@ -615,7 +618,10 @@ struct DerivedScene {
     orbit_au: Fixed,
     radius_m: Fixed,
     t_eff: Fixed,
+    /// The MATURE disk surface warmth (K), the finished-planet irradiation equilibrium (one epoch of the join-law).
     disk_t: Fixed,
+    /// The DERIVED FORMATION-era midplane condensation temperature (K) the crust condensed against (the OTHER epoch).
+    condensation_t: Fixed,
     gravity: Fixed,
     mass_earth: Fixed,
     density: Fixed,
@@ -672,6 +678,247 @@ fn phase_stoichiometry(phases: &[(String, Fixed)]) -> Vec<(String, Fixed)> {
     elements.into_iter().collect()
 }
 
+/// The natural log of ten, for the `log_eps` (base-10) solar-abundance scale to natural-exponent conversion (the same
+/// constant [`derive_surface_composition`] uses).
+const LN_TEN: Fixed = Fixed::from_int(2_302_585).div(Fixed::from_int(1_000_000)); // 2.302585
+
+// THE EPOCH JOIN-LAW, the SEAM-3 fix, made concrete as reserved disk residues. The crust CONDENSES against the
+// FORMATION-era midplane temperature (the hot, optically-thick, accreting inner disk), and the FINISHED planet's
+// surface reads the MATURE `disk_effective_temperature` (the cooled irradiation equilibrium). The two are separate
+// epochs and must never be conflated under one variable. These constants are the FORMATION epoch's disk residues,
+// each reserved-with-basis (never fabricated), surfaced here; the reserved list is carried in the report.
+
+/// RESERVED, the FORMATION-era mass-accretion rate `Mdot` (solar masses per megayear), the primary calibration knob of
+/// the condensation epoch. Basis: pinned so the DERIVED 1 AU formation midplane reconstructs the forsterite/enstatite
+/// silicate condensation front (~1400 K, the cited landmark the retired 1400 K fixture carried); ~1.9e-8 M_sun/yr, the
+/// declining-disk accretion rate at the epoch the 1 AU midplane sits at that front. NOTE the degeneracy the owner
+/// re-partitions: only the PRODUCT (this rate times the dust column times the opacity) is fixed by the 1 AU landmark,
+/// so a lower dust column trades for a higher rate. DISTINCT from the MATURE surface-warmth accretion rate below.
+const FORMATION_ACCRETION_RATE_MSUN_MYR: Fixed = Fixed::from_int(19).div(Fixed::from_int(100)); // 0.19
+
+/// RESERVED, the MATURE mass-accretion rate (solar masses per megayear) that drives the finished planet's SURFACE
+/// warmth ([`disk_effective_temperature`]). Basis: the observed class-II disk value ~1e-8 M_sun/yr (0.01 M_sun/Myr),
+/// the epoch the planet's surface equilibrates in; kept the Mirror fixture. The MATURE epoch, not the formation one.
+const MATURE_ACCRETION_RATE_MSUN_MYR: Fixed = Fixed::from_int(1).div(Fixed::from_int(100)); // 0.01
+
+/// RESERVED, the disk characteristic (cutoff) radius `r_c` in AU. Basis: observed class-II disk radii ~30 to 100 AU
+/// (Andrews et al. 2010, the sub-mm dust-continuum sizes). Shared by the dust (opacity) and solid (accretion) columns.
+const DISK_CHARACTERISTIC_RADIUS_AU: Fixed = Fixed::from_int(30);
+
+/// RESERVED, the DUST surface-density normalization `Sigma_c` (g/cm^2) of the Lynden-Bell-Pringle profile, the optical
+/// column the midplane depth integrates. Basis: the Hayashi 1981 MMSN gas column ~1700 g/cm^2 at 1 AU times a
+/// dust-to-gas ratio ~0.01, giving Sigma_dust(1 AU) ~17 g/cm^2 on this profile (`r_c` = 30 AU, `gamma` = 1).
+const DUST_SURFACE_DENSITY_NORM_G_CM2: Fixed = Fixed::from_int(586).div(Fixed::from_int(1000)); // 0.586
+
+/// RESERVED, the dust surface-density slope `gamma` (viscous-spreading exponent). Basis: the Lynden-Bell-Pringle
+/// self-similar disk with viscosity `nu ~ r` (gamma = 1), the fiducial viscous profile.
+const DUST_SURFACE_DENSITY_GAMMA: Fixed = Fixed::ONE;
+
+/// RESERVED, the reference temperature (K) the grain Rosseland opacity is evaluated at to derive `kappa_ref`. Basis:
+/// the silicate condensation front (~1400 K); IMMATERIAL to within the fourth-root damping because the single-component
+/// silicate dust's Rosseland opacity is nearly FLAT across the condensation window (~500 to 660 cm^2/g per g dust).
+const CONDENSATION_OPACITY_REFERENCE_K: Fixed = Fixed::from_int(1400);
+
+/// RESERVED, the bisection bracket floor and ceiling (K) for the midplane fixed point. Basis: engine bounds spanning
+/// the condensation window; the ceiling caps the fourth-root read at a refractory upper edge (above which nothing
+/// condenses in the current data).
+const MIDPLANE_BRACKET_LO_K: Fixed = Fixed::from_int(100);
+const MIDPLANE_BRACKET_HI_K: Fixed = Fixed::from_int(1950);
+
+/// RESERVED, the SOLID surface-density normalization `Sigma_c` (kg/m^2) for the accretion feeding-zone integral. Basis:
+/// the Hayashi 1981 MMSN ROCK column ~7.1 g/cm^2 (= 71 kg/m^2) at 1 AU INSIDE the ice line (NOT the gas 1700, which
+/// would overmass the planet ~30x, and NOT the 30 g/cm^2 beyond-ice-line rock+ice figure), giving Sigma_solid(1 AU)
+/// ~7.1 g/cm^2 on this profile (`r_c` = 30 AU, `gamma` = 1.5, the MMSN `r^-3/2` solid slope).
+const SOLID_SURFACE_DENSITY_NORM_KG_M2: Fixed = Fixed::from_int(519).div(Fixed::from_int(1000)); // 0.519
+
+/// RESERVED, the solid surface-density slope `gamma`. Basis: the Hayashi 1981 MMSN solid column `Sigma ~ r^-3/2`.
+const SOLID_SURFACE_DENSITY_GAMMA: Fixed = Fixed::from_int(15).div(Fixed::from_int(10)); // 1.5
+
+/// RESERVED, the feeding-zone full width as a FRACTION of the orbit. Basis: ~10 Hill radii of a Mars-class embryo at
+/// 1 AU (`R_H` ~0.0046 AU each), the isolation-mass feeding-zone width; retires when the Hill-radius/isolation-mass
+/// closure lands. Scaled by the orbit because `R_H ~ r`.
+const FEEDING_ZONE_WIDTH_FRACTION: Fixed = Fixed::from_int(5).div(Fixed::from_int(100)); // 0.05
+
+/// The feeding-zone integration resolution (a fixed midpoint-sum step count, an engine accuracy bound, not a physical
+/// knob; determinism holds by construction).
+const FEEDING_ZONE_STEPS: u32 = 64;
+
+/// The single-component disk dust the opacity is derived from: astronomical silicate, the canonical protoplanetary
+/// disk-opacity carrier, present in the standard optical library. HONEST LIMIT (a named #54 grain-wire follow-on): the
+/// full condensate mixture (silicate + metallic iron + troilite) cannot yet be Rosseland-averaged in production, both
+/// because the Bruggeman effective-medium solve returns `None` for those index combinations across the window and
+/// because metallic iron's optical table under-covers the Rosseland window, and the missing production optical
+/// estimator is the deeper gap; so the disk opacity is a first-grade single-component silicate dust.
+const DUST_SPECIES: &str = "astronomical_silicate";
+/// RESERVED, the astronomical-silicate bulk density (g/cm^3) for the grain mass-to-volume conversion (only the single
+/// grain's density, which the size-average consumes). Basis: the standard astronomical-silicate density ~3.3 g/cm^3.
+const DUST_BULK_DENSITY_G_CM3: Fixed = Fixed::from_int(33).div(Fixed::from_int(10)); // 3.3
+/// RESERVED, the grain size-distribution slope (Dohnanyi collisional-cascade steady state 3.5) and radius bounds
+/// (micron), the #54 wire's reserved size-distribution residues reused here.
+const DUST_SIZE_SLOPE: Fixed = Fixed::from_int(35).div(Fixed::from_int(10)); // 3.5
+const DUST_A_MIN_UM: Fixed = Fixed::from_int(1).div(Fixed::from_int(10)); // 0.1
+const DUST_A_MAX_UM: Fixed = Fixed::from_int(10);
+
+/// A loud-miss optical estimator: the single-component silicate dust is entirely in the measured optical library, so
+/// this estimator is never reached; if it were, a `None` is the loud miss (never a silent zero). The production
+/// phonon-backed estimator is the named #54 follow-on.
+struct LoudMissEstimator;
+impl GrainOpticalEstimator for LoudMissEstimator {
+    fn index(&self, _species: &str, _lambda_um: Fixed) -> Option<(Fixed, Fixed)> {
+        None
+    }
+}
+
+/// Snap a derived temperature to the nearest condensation-grid node (nearest 100 K). THE CONDENSATION-GRID DATA-CEILING
+/// (named, not hidden): the equilibrium-condensation element-potential minimizer converges only at the JANAF
+/// tabulation grid (multiples of 100 K); at intermediate temperatures the ill-conditioned trace-abundance solve
+/// diverges (returns no crust). So the DERIVED orbit-dependent midplane temperature is evaluated at the nearest
+/// tabulated node, its ~100 K resolution the honest grain of the condensation staircase. Retires when the minimizer is
+/// hardened to converge off-grid.
+fn snap_to_condensation_grid(t: Fixed) -> Fixed {
+    let rounded = t.checked_add(Fixed::from_int(50)).unwrap_or(t).to_int();
+    Fixed::from_int((rounded / 100) * 100)
+}
+
+/// The solar-abundance linear amount for an element, `n_X/n_H = 10^(log_eps(X) - 12)`, or `None` if the element carries
+/// no cited abundance (the same conversion [`derive_surface_composition`] uses).
+fn abundance_amount(abundances: &SolarAbundances, element: &str) -> Option<Fixed> {
+    let log_eps = abundances.preferred(element)?;
+    let exponent = log_eps
+        .checked_sub(Fixed::from_int(12))?
+        .checked_mul(LN_TEN)?;
+    Some(exponent.exp())
+}
+
+/// The DERIVED FORMATION-era condensation temperature at the orbit (K), snapped to the condensation grid, or `None` if a
+/// link does not resolve. It derives the disk opacity `kappa_ref` from the #54 grain wire (the astronomical-silicate
+/// dust's Rosseland mean, evaluated ONCE at the reference because it is nearly flat in T; calling it inside the
+/// 60-step bisection would be both far too slow and, for a fixed composition, without the sublimation cliff that a
+/// T-dependent condensate set would add, a named #54 follow-on), then calls the banked optically-thick midplane fixed
+/// point ([`civsim_sim::astro::formation_midplane_temperature`]) with the FORMATION accretion rate and the reserved
+/// disk residues. This is the condensation epoch of the join-law, kept apart from the mature surface warmth.
+fn derive_formation_condensation_temperature(
+    star_mass: Fixed,
+    orbit_au: Fixed,
+    optical: &OpticalConstants,
+) -> Option<Fixed> {
+    let estimator = LoudMissEstimator;
+    let dust = GrainMixture::new(
+        vec![GrainConstituent {
+            species: DUST_SPECIES.to_string(),
+            amount: Fixed::ONE,
+            bulk_density_g_cm3: DUST_BULK_DENSITY_G_CM3,
+            condensation_rank: 0,
+        }],
+        DUST_SIZE_SLOPE,
+        DUST_A_MIN_UM,
+        DUST_A_MAX_UM,
+        optical,
+        &estimator,
+    )?;
+    let kappa_ref = dust.rosseland_opacity(CONDENSATION_OPACITY_REFERENCE_K)?;
+    let raw = civsim_sim::astro::formation_midplane_temperature(
+        FORMATION_ACCRETION_RATE_MSUN_MYR,
+        star_mass,
+        Fixed::from_ratio(35, 10), // alpha (mass-luminosity), the grid-extracted stellar slope
+        orbit_au,
+        Fixed::from_ratio(1, 4), // reprocessing factor (spherical-grain equilibrium)
+        Fixed::ONE,              // inner-boundary factor (~1 in the bulk disk)
+        DISK_CHARACTERISTIC_RADIUS_AU,
+        DUST_SURFACE_DENSITY_GAMMA,
+        DUST_SURFACE_DENSITY_NORM_G_CM2,
+        |_t| Some(kappa_ref),
+        MIDPLANE_BRACKET_LO_K,
+        MIDPLANE_BRACKET_HI_K,
+    )?;
+    Some(snap_to_condensation_grid(raw))
+}
+
+/// The DERIVED isolation (feeding-zone) mass at the orbit, in Earth masses, or `None` if the integral fails. It sweeps
+/// the accretion feeding zone (a few Hill radii around the orbit) over the MMSN SOLID column (not the gas, which would
+/// overmass the planet ~30x) and folds to Earth masses ([`feeding_zone_mass`] then [`feeding_zone_mass_earth`]). The
+/// honest output is Mars-class (~0.08 to 0.11 M_earth): a pure accretion isolation mass, the Earth-size deferred to the
+/// Layer-4 event tier (the giant-impact merger), never authored here.
+fn derive_isolation_mass_earth(orbit_au: Fixed) -> Option<Fixed> {
+    let half = orbit_au
+        .checked_mul(FEEDING_ZONE_WIDTH_FRACTION)?
+        .checked_div(Fixed::from_int(2))?;
+    let inner_au = orbit_au.checked_sub(half)?;
+    let outer_au = orbit_au.checked_add(half)?;
+    let feeding = civsim_sim::astro::feeding_zone_mass(
+        inner_au,
+        outer_au,
+        DISK_CHARACTERISTIC_RADIUS_AU,
+        SOLID_SURFACE_DENSITY_GAMMA,
+        SOLID_SURFACE_DENSITY_NORM_KG_M2,
+        FEEDING_ZONE_STEPS,
+    )?;
+    civsim_sim::astro::feeding_zone_mass_earth(feeding)
+}
+
+/// The DERIVED UNCOMPRESSED bulk density (g/cm^3) from the differentiated composition: the volume-weighted mean of the
+/// sinking METAL core (density from the Fe EOS anchor, atomic weight over molar volume) and the floating SILICATE
+/// mantle (`rho_silicate`, the derived mantle assemblage density), split by the solar core:silicate MASS ratio. FIRST
+/// GRADE (the coordinator-endorsed fallback, because the VCS modal amounts are degenerate at these vertices): the mass
+/// split is derived from the solar bulk abundances with a normative-oxide rock stoichiometry (O per rock cation: Si and
+/// Ti 2, Al 1.5, Mg and Ca 1, Na and K 0.5) and all Fe assigned to the metal-plus-troilite core; the COMPRESSED density
+/// (the interior-structure EOS integration, hydrostatic against the Vinet EOS on the metal anchors, ~5% higher for a
+/// Mars-class body) is a NAMED refinement, not fabricated. `None` if an abundance, atomic weight, or the Fe anchor is
+/// missing. For solar composition this lands ~4.2 g/cm^3, the Earth-uncompressed grade.
+fn derive_uncompressed_bulk_density(
+    abundances: &SolarAbundances,
+    table: &PeriodicTable,
+    eos: &MetalEosAnchors,
+    rho_silicate: Fixed,
+) -> Option<Fixed> {
+    let oxygen_mass = table.element("O")?.standard_atomic_weight;
+    // The sinking metal-plus-sulfide core: all Fe (metal), Ni (metal), and S (troilite sulfur), at bulk abundance.
+    let mut core_mass = Fixed::ZERO;
+    for element in ["Fe", "Ni", "S"] {
+        if let (Some(n), Some(e)) = (
+            abundance_amount(abundances, element),
+            table.element(element),
+        ) {
+            core_mass = core_mass.checked_add(n.checked_mul(e.standard_atomic_weight)?)?;
+        }
+    }
+    // The floating silicate-plus-oxide mantle: the rock cations at bulk abundance, each with its normative oxide oxygen.
+    let mut mantle_mass = Fixed::ZERO;
+    for (element, o_num, o_den) in [
+        ("Mg", 1, 1),
+        ("Si", 2, 1),
+        ("Al", 3, 2),
+        ("Ca", 1, 1),
+        ("Na", 1, 2),
+        ("K", 1, 2),
+        ("Ti", 2, 1),
+    ] {
+        if let (Some(n), Some(e)) = (
+            abundance_amount(abundances, element),
+            table.element(element),
+        ) {
+            let oxide_o = oxygen_mass.checked_mul(Fixed::from_ratio(o_num, o_den))?;
+            let oxide_mass = e.standard_atomic_weight.checked_add(oxide_o)?;
+            mantle_mass = mantle_mass.checked_add(n.checked_mul(oxide_mass)?)?;
+        }
+    }
+    let total = core_mass.checked_add(mantle_mass)?;
+    if total <= Fixed::ZERO {
+        return None;
+    }
+    let core_fraction = core_mass.checked_div(total)?;
+    let mantle_fraction = Fixed::ONE.checked_sub(core_fraction)?;
+    // The core (metal) density from the Fe EOS anchor: atomic weight over measured molar volume.
+    let iron_mass = table.element("Fe")?.standard_atomic_weight;
+    let iron_molar_volume = eos.molar_volume("Fe")?;
+    let rho_metal = iron_mass.checked_div(iron_molar_volume)?;
+    // Volume-weighted mean: rho = total mass / total volume = 1 / (f_core/rho_metal + f_mantle/rho_silicate).
+    let inverse = core_fraction
+        .checked_div(rho_metal)?
+        .checked_add(mantle_fraction.checked_div(rho_silicate)?)?;
+    Fixed::ONE.checked_div(inverse)
+}
+
 /// Build the DERIVED scene from a star mass and an orbit, or an error naming the link that did not resolve (fail-soft:
 /// the viewer prints the message and shows no planet, never a fabricated one). The chain is the built pipeline, each
 /// link a derivation: the star and disk ([`civsim_sim::planet::derive_planet`]), the condensed-and-differentiated
@@ -682,52 +929,35 @@ fn phase_stoichiometry(phases: &[(String, Fixed)]) -> Vec<(String, Fixed)> {
 /// optical colour under the star ([`render::material_surface_rgb`]), and the atmospheric speciation
 /// ([`atmosphere_gas_equilibrium`]) with its Rayleigh sky ([`render::rayleigh_sky_rgb`]).
 fn build_derived_scene(star_mass: Fixed, orbit_au: Fixed) -> Result<DerivedScene, String> {
-    // The DERIVED planet: the star's L/R/T_eff, the disk temperature at the orbit, and the radius/gravity from the
-    // accreted mass and bulk density. The stellar slopes are the grid-extracted values; the accretion rate,
-    // reprocessing, inner-boundary factor, accreted mass, and bulk density are the reserved-with-basis residues
-    // (Hadean-Earth fixtures until the accretion and condensation arcs wire through), the same set the labelled globe
-    // fixture uses. So the star colour, disk warmth, and crust respond to the inputs; the radius and gravity are an
-    // Earth-mass body's until those arcs land.
-    let planet = civsim_sim::planet::derive_planet(
-        star_mass,
-        Fixed::ONE,                   // solar metallicity
-        Fixed::from_ratio(35, 10),    // alpha (mass-luminosity)
-        Fixed::from_ratio(8, 10),     // beta (mass-radius)
-        Fixed::from_ratio(-44, 100),  // lambda (metallicity-luminosity)
-        Fixed::from_ratio(-18, 1000), // mu (metallicity-radius)
-        orbit_au,
-        Fixed::from_ratio(1, 100),     // accretion rate (Mirror fixture)
-        Fixed::from_ratio(1, 4),       // reprocessing factor
-        Fixed::ONE,                    // inner-boundary factor
-        Fixed::ONE,                    // accreted mass (Earth fixture, accretion output)
-        Fixed::from_ratio(5514, 1000), // bulk density (Earth fixture, condensation output)
-        Fixed::from_int(100_000),
-    )
-    .ok_or("the star-and-orbit derivation did not resolve")?;
-
     let janaf = JanafTables::standard().map_err(|_| "the JANAF tables did not load")?;
     let abundances =
         SolarAbundances::standard().map_err(|_| "the solar abundances did not load")?;
-    // THE TWO-TEMPERATURE SEAM, surfaced not papered over. The crust CONDENSED during planet formation at the hot
-    // inner-disk midplane (the refractory Mg-silicate condensation front, ~1350 to 1450 K), a formation-era snapshot;
-    // the FINISHED planet's surface warmth (`disk_temperature_k`, ~279 K at 1 AU) is the mature irradiation
-    // equilibrium, far below the condensation window (the condensation solve returns no crust below ~800 K). These are
-    // two distinct physical temperatures, and the built `disk_effective_temperature` supplies only the second
-    // (irradiation-dominated at every reasonable orbit). So the condensation reads a labelled formation-era
-    // condensation temperature, a reserved-with-basis fixture (basis: the forsterite/enstatite condensation front in
-    // the solar nebula, ~1350 to 1450 K at nebular pressures), the SAME pending-arc discipline as the mass and
-    // bulk-density fixtures above; the formation-era disk thermal history that would make this orbit-dependent is the
-    // pending accretion / disk-evolution arc. The mature surface warmth drives the material broadening and the readout.
-    let condensation_temperature_k = Fixed::from_int(1400);
+    let optical =
+        OpticalConstants::standard().map_err(|_| "the optical-constants library did not load")?;
+
+    // THE EPOCH JOIN-LAW (the SEAM-3 fix), no longer a single conflated temperature. The crust CONDENSED during
+    // planet formation against the FORMATION-era midplane: the hot, optically-thick, accreting inner disk, DERIVED at
+    // the orbit from the banked viscous-plus-irradiation midplane fixed point
+    // ([`civsim_sim::astro::formation_midplane_temperature`], consuming the #54 grain opacity), then snapped to the
+    // condensation grid. This is orbit-DEPENDENT (a closer orbit condenses a more refractory crust, a farther one a
+    // cooler assemblage), the free payoff the two-temperature seam had blocked. The FINISHED planet's surface warmth
+    // (`planet.disk_temperature_k`, ~279 K at 1 AU below) is the MATURE irradiation equilibrium, a distinct epoch; the
+    // two are never conflated. `derive_formation_condensation_temperature` and the reserved disk residues carry the
+    // basis.
+    let condensation_temperature_k = derive_formation_condensation_temperature(
+        star_mass, orbit_au, &optical,
+    )
+    .ok_or("the formation-era midplane condensation temperature did not derive at this orbit")?;
     let sc = civsim_materials::surface_composition::derive_surface_composition(
         &janaf,
         &abundances,
         condensation_temperature_k,
     )
-    .ok_or("no crust condensed at the labelled condensation temperature (the gas did not precipitate a surface)")?;
+    .ok_or("no crust condensed at the derived formation-era midplane temperature (the gas did not precipitate a surface)")?;
 
     let registry = PhaseRegistry::standard().map_err(|_| "the phase registry did not load")?;
     let table = PeriodicTable::standard().map_err(|_| "the periodic table did not load")?;
+    let eos = MetalEosAnchors::standard().map_err(|_| "the metal EOS anchors did not load")?;
 
     // The crust and mantle ELEMENT compositions from their DERIVED phase stoichiometry (the crust's enstatite at its
     // real Mg:Si:O = 1:1:3, the mantle's forsterite at 2:1:4), which the petrology density and isostasy consume. The
@@ -741,12 +971,46 @@ fn build_derived_scene(star_mass: Fixed, orbit_au: Fixed) -> Result<DerivedScene
 
     // The mantle density from the DERIVED mantle composition, read as the density of its stable assemblage at the
     // surface reference (300 K, 1 bar, the reference-pressure first pass the geodynamics substrate documents). The
-    // crust floats on this derived mantle density.
+    // crust floats on this derived mantle density, and it is the silicate density the bulk-density derivation reads.
     let surface_t = Fixed::from_int(300);
     let surface_p = Fixed::ONE;
     let mantle_density =
         derive_mantle_density(&mantle_composition, surface_t, surface_p, &registry, &table)
             .ok_or("the mantle density did not derive from the mantle composition")?;
+
+    // THE ACCRETED MASS and the UNCOMPRESSED BULK DENSITY, both now DERIVED (the Fixed::ONE and 5.514 fixtures are
+    // retired). The mass is the accretion feeding-zone ISOLATION mass over the MMSN SOLID column: honestly Mars-class
+    // (~0.08 to 0.11 M_earth), the pure accretion output, with the Earth-size deferred to the Layer-4 event tier (the
+    // giant-impact merger), never authored here. The bulk density is the volume-weighted metal-core-plus-silicate-
+    // mantle mean from the differentiated composition (~4.2 g/cm^3, the Earth-uncompressed grade). Each reserved disk
+    // residue carries its basis at its definition above.
+    let planet_mass_earth = derive_isolation_mass_earth(orbit_au)
+        .ok_or("the accretion isolation mass did not derive at this orbit")?;
+    let planet_bulk_density =
+        derive_uncompressed_bulk_density(&abundances, &table, &eos, mantle_density).ok_or(
+            "the uncompressed bulk density did not derive from the differentiated composition",
+        )?;
+
+    // The DERIVED planet: the star's L/R/T_eff, the MATURE surface warmth at the orbit (the finished-planet epoch of
+    // the join-law), and the radius/gravity from the DERIVED accreted mass and uncompressed bulk density. The stellar
+    // slopes are the grid-extracted values; the MATURE accretion rate, reprocessing, and inner-boundary factor are the
+    // reserved-with-basis residues (the surface-warmth epoch, distinct from the formation accretion rate above).
+    let planet = civsim_sim::planet::derive_planet(
+        star_mass,
+        Fixed::ONE,                   // solar metallicity
+        Fixed::from_ratio(35, 10),    // alpha (mass-luminosity)
+        Fixed::from_ratio(8, 10),     // beta (mass-radius)
+        Fixed::from_ratio(-44, 100),  // lambda (metallicity-luminosity)
+        Fixed::from_ratio(-18, 1000), // mu (metallicity-radius)
+        orbit_au,
+        MATURE_ACCRETION_RATE_MSUN_MYR, // the MATURE surface-warmth accretion rate (not the formation one)
+        Fixed::from_ratio(1, 4),        // reprocessing factor
+        Fixed::ONE,                     // inner-boundary factor
+        planet_mass_earth,              // DERIVED accretion isolation mass (Mars-class)
+        planet_bulk_density,            // DERIVED uncompressed bulk density
+        Fixed::from_int(100_000),
+    )
+    .ok_or("the star-and-orbit derivation did not resolve")?;
 
     // The isostatic tiles off a UNIFORM derived-crust field: every tile carries the derived crust, so its elevation is
     // what the material is by Airy isostasy against the derived mantle. A representable column thickness (30 km) and a
@@ -814,6 +1078,7 @@ fn build_derived_scene(star_mass: Fixed, orbit_au: Fixed) -> Result<DerivedScene
         radius_m: planet.radius_m,
         t_eff: planet.star_effective_temperature_k,
         disk_t: planet.disk_temperature_k,
+        condensation_t: condensation_temperature_k,
         gravity: planet.surface_gravity_m_s2,
         mass_earth: planet.mass_earth,
         density: planet.bulk_density_g_cm3,
@@ -849,8 +1114,9 @@ fn print_derived_readout(scene: &DerivedScene) {
         scene.density.to_f64_lossy()
     );
     eprintln!(
-        "  disk:   surface warmth {:.0} K (mature irradiation equilibrium; the crust condensed hotter, ~1400 K)",
-        scene.disk_t.to_f64_lossy()
+        "  disk:   surface warmth {:.0} K (mature irradiation equilibrium) | crust condensed at {:.0} K (derived formation midplane)",
+        scene.disk_t.to_f64_lossy(),
+        scene.condensation_t.to_f64_lossy()
     );
     let crust_top: Vec<String> = scene
         .crust
@@ -1741,5 +2007,86 @@ fn main() {
         window
             .update_with_buffer(&buf, win_w, win_h)
             .expect("blit the frame");
+    }
+}
+
+#[cfg(test)]
+mod seam3_tests {
+    use super::*;
+
+    #[test]
+    fn the_hadean_orbit_derives_a_silicate_crust_and_a_mars_class_planet() {
+        // SEAM-3 Hadean gate: Sun + 1 AU. The crust condenses at the DERIVED formation midplane (~1400 K, close to the
+        // retired fixture because 1 AU sits at the silicate front), a SILICATE (enstatite); the accreted mass is the
+        // Mars-class isolation mass (NOT the retired 1 Earth); the uncompressed bulk density is Earth-uncompressed
+        // grade (NOT the retired 5.514). The two epoch temperatures are distinct (condensation hot, surface warmth
+        // cold), the join-law the seam enforces.
+        let scene = build_derived_scene(Fixed::ONE, Fixed::ONE).expect("the Hadean scene derives");
+        assert!(
+            scene.crust_phases.iter().any(|p| p.contains("enstatite")),
+            "the 1 AU crust is a silicate (enstatite), got {:?}",
+            scene.crust_phases
+        );
+        let cond = scene.condensation_t.to_f64_lossy();
+        let surf = scene.disk_t.to_f64_lossy();
+        assert!(
+            (1300.0..=1500.0).contains(&cond),
+            "the derived formation condensation T lands ~1400 K, got {cond}"
+        );
+        assert!(
+            surf < 400.0 && cond > surf + 500.0,
+            "the condensation ({cond} K) and mature surface ({surf} K) are distinct epochs, never conflated"
+        );
+        let m = scene.mass_earth.to_f64_lossy();
+        assert!(
+            (0.03..=0.20).contains(&m),
+            "the accretion isolation mass is Mars-class, got {m} M_earth"
+        );
+        assert!(
+            (m - 1.0).abs() > 0.5,
+            "the 1 M_earth mass fixture is retired (got {m})"
+        );
+        let rho = scene.density.to_f64_lossy();
+        assert!(
+            (3.5..=5.0).contains(&rho),
+            "the uncompressed bulk density is in grade, got {rho} g/cm^3"
+        );
+        assert!(
+            (rho - 5.514).abs() > 0.3,
+            "the 5.514 g/cm^3 density fixture is retired (got {rho})"
+        );
+    }
+
+    #[test]
+    fn the_crust_is_orbit_dependent_a_close_orbit_condenses_the_more_refractory_assemblage() {
+        // SEAM-3 free payoff: the crust is now ORBIT-DEPENDENT (the acceptance the two-temperature seam had blocked). A
+        // CLOSE, hot formation midplane condenses the more refractory Al-Mg oxide (spinel); a FAR, cool one condenses
+        // the Mg silicate (enstatite). The dominant crust phase differs, and the close orbit condensed hotter.
+        let close = build_derived_scene(Fixed::ONE, Fixed::from_ratio(8, 10))
+            .expect("the close scene derives");
+        let far = build_derived_scene(Fixed::ONE, Fixed::from_ratio(15, 10))
+            .expect("the far scene derives");
+        assert_ne!(
+            close.crust_phases, far.crust_phases,
+            "the crust differs across orbit: close {:?} vs far {:?}",
+            close.crust_phases, far.crust_phases
+        );
+        assert!(
+            close.condensation_t.to_f64_lossy() > far.condensation_t.to_f64_lossy(),
+            "the closer orbit condenses against a hotter midplane ({} vs {} K)",
+            close.condensation_t.to_f64_lossy(),
+            far.condensation_t.to_f64_lossy()
+        );
+        let has = |s: &DerivedScene, el: &str| s.crust.iter().any(|(e, _)| e == el);
+        assert!(
+            has(&close, "Al"),
+            "the close refractory crust carries aluminium (spinel/corundum), got {:?}",
+            close.crust_phases
+        );
+        assert!(
+            has(&far, "Si"),
+            "the far silicate crust carries silicon (enstatite), got {:?}",
+            far.crust_phases
+        );
     }
 }
