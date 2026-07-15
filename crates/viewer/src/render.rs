@@ -707,6 +707,76 @@ fn draw_star(buf: &mut [u32], w: usize, h: usize, sx: i32, sy: i32, radius_px: u
     }
 }
 
+/// A STAND-IN sky colour for the atmosphere limb: a pale blue placeholder, NOT a derived value.
+// TODO(atmosphere): the real limb colour derives from the Stage-8 gas-mix Rayleigh scattering (the manager is
+// building that substrate); until it lands this pale-blue fixture stands in, clearly labelled so it is not mistaken
+// for physics. When the gas mix is available, replace this constant with a read of the scattered-sky spectrum.
+#[allow(dead_code)]
+pub const PLACEHOLDER_SKY: Rgb = Rgb::new(150, 190, 235);
+
+/// Draw a soft atmosphere haze around the globe's limb: a thin glow just outside the disk (fading out over
+/// `HALO_FRAC` of the radius) plus a faint rim just inside it, brighter on the day side (where the limb faces the
+/// star) and dim on the night side. `sky` is the haze colour (a STAND-IN placeholder, see [`PLACEHOLDER_SKY`]; the
+/// real colour derives from the Stage-8 gas-mix Rayleigh scattering when that substrate lands). Blends over whatever
+/// is already drawn, so it tints the globe's edge and glows against space. Display-only, one-way canon -> pixels.
+#[allow(dead_code)]
+#[allow(clippy::too_many_arguments)]
+fn draw_atmosphere_limb(
+    buf: &mut [u32],
+    w: usize,
+    h: usize,
+    cx: i32,
+    cy: i32,
+    radius_px: usize,
+    star_dir: [f32; 3],
+    sky: Rgb,
+) {
+    if radius_px == 0 || w == 0 || h == 0 {
+        return;
+    }
+    // The haze extends this fraction of the radius beyond the limb, and tints this fraction just inside it.
+    const HALO_FRAC: f32 = 0.14;
+    const RIM_FRAC: f32 = 0.10;
+    let r = radius_px as f32;
+    let l = normalize3(star_dir);
+    let sr = sky.r as f32;
+    let sg = sky.g as f32;
+    let sb = sky.b as f32;
+    let outer = (r * (1.0 + HALO_FRAC)) as i32;
+    let x0 = (cx - outer).max(0);
+    let x1 = (cx + outer).min(w as i32 - 1);
+    let y0 = (cy - outer).max(0);
+    let y1 = (cy + outer).min(h as i32 - 1);
+    for py in y0..=y1 {
+        for px in x0..=x1 {
+            let nx = (px - cx) as f32 / r;
+            let ny = (py - cy) as f32 / r;
+            let d = (nx * nx + ny * ny).sqrt(); // radial distance in radius units
+                                                // A band peaking at the limb (d = 1): ramps up over the inner rim, fades out over the outer halo.
+            let profile = if d <= 1.0 {
+                ((d - (1.0 - RIM_FRAC)) / RIM_FRAC).max(0.0)
+            } else {
+                (1.0 - (d - 1.0) / HALO_FRAC).max(0.0)
+            };
+            if profile <= 0.0 {
+                continue;
+            }
+            // The limb point's outward direction, and how much it faces the star (day limb bright, night limb dim).
+            let inv = if d > 0.0 { 1.0 / d } else { 0.0 };
+            let facing = (nx * inv * l[0] + ny * inv * l[1]).max(0.0);
+            let day = 0.15 + 0.85 * facing; // a faint glow survives on the night limb
+            let a = (profile * day * 0.6).clamp(0.0, 1.0);
+            let idx = py as usize * w + px as usize;
+            let word = buf[idx];
+            let er = (word >> 16) as u8 as f32;
+            let eg = (word >> 8) as u8 as f32;
+            let eb = word as u8 as f32;
+            let mix = |e: f32, c: f32| -> u8 { (e + (c - e) * a).clamp(0.0, 255.0) as u8 };
+            buf[idx] = Rgb::new(mix(er, sr), mix(eg, sg), mix(eb, sb)).pack();
+        }
+    }
+}
+
 /// Compose the zoomed-out solar-system / planet-object view: a `w` by `h` frame of the star and the lit planet
 /// globe over space. The star draws as a [`blackbody_rgb`]-coloured disk at `star_px` (its on-screen position, the
 /// caller's projection of the orbit, so the orbital phase sets which hemisphere is day). The planet sits at the view
@@ -769,6 +839,17 @@ pub fn render_solar_system_view(
         tile_cols,
         star_dir,
         star_color,
+    );
+    // The atmosphere haze around the limb, a STAND-IN sky colour until the Stage-8 gas mix derives it.
+    draw_atmosphere_limb(
+        &mut buf,
+        w,
+        h,
+        planet_cx,
+        planet_cy,
+        planet_radius_px,
+        star_dir,
+        PLACEHOLDER_SKY,
     );
     buf
 }
@@ -1068,6 +1149,54 @@ mod tests {
             day_ratio(cool) > day_ratio(hot),
             "a cool star warms the day side more than a hot star"
         );
+    }
+
+    #[test]
+    fn the_atmosphere_limb_is_a_day_bright_haze_ring() {
+        let unpack = |word: u32| Rgb::new((word >> 16) as u8, (word >> 8) as u8, word as u8);
+        let (w, h) = (200usize, 200usize);
+        let bg = Rgb::new(6, 7, 12);
+        let (cx, cy) = (100i32, 100i32);
+        let radius = 60usize;
+        let mut buf = vec![bg.pack(); w * h];
+        // Star to the right (+x): the day limb is on the right, the night limb on the left.
+        draw_atmosphere_limb(
+            &mut buf,
+            w,
+            h,
+            cx,
+            cy,
+            radius,
+            [1.0, 0.0, 0.2],
+            PLACEHOLDER_SKY,
+        );
+        // Just outside the day (right) limb the pixel is tinted toward the sky colour: bluer and brighter than space.
+        let day = unpack(buf[cy as usize * w + (cx + radius as i32 + 3) as usize]);
+        assert!(
+            day.b > bg.b + 10 && day.b > day.r,
+            "the day limb glows sky-blue, got {day:?}"
+        );
+        // The night (left) limb at the same offset is dimmer than the day limb.
+        let night = unpack(buf[cy as usize * w + (cx - radius as i32 - 3) as usize]);
+        assert!(
+            day.b > night.b,
+            "the day limb is brighter than the night limb"
+        );
+        // The far background is untouched: the haze is confined to the limb.
+        assert_eq!(buf[5 * w + 5], bg.pack(), "the haze stays at the limb");
+        // Deterministic pure read.
+        let mut replay = vec![bg.pack(); w * h];
+        draw_atmosphere_limb(
+            &mut replay,
+            w,
+            h,
+            cx,
+            cy,
+            radius,
+            [1.0, 0.0, 0.2],
+            PLACEHOLDER_SKY,
+        );
+        assert_eq!(buf, replay, "a pure read replays byte for byte");
     }
 
     #[test]
