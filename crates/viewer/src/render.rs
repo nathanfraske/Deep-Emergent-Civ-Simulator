@@ -1165,6 +1165,27 @@ pub struct SurfaceStyle {
     pub grid: Option<(usize, usize)>,
 }
 
+/// The DERIVED body-frame sun direction for [`draw_globe`], the unit vector pointing from the body's centre toward the
+/// SUB-SOLAR POINT, given the sub-solar latitude (`declination`, the seasons, from [`civsim_sim::orbit::solar_declination`])
+/// and the sub-solar longitude (`subsolar_longitude`, the time of day, from [`civsim_sim::orbit::subsolar_longitude`]),
+/// both in radians. Because [`draw_globe`]'s Lambert term is the dot of the surface normal with this vector, feeding it
+/// the sub-solar direction makes the shading read out the physical solar elevation cosine
+/// (`sin(lat)sin(decl) + cos(lat)cos(decl)cos(lon - subsolar_lon)`, [`civsim_sim::orbit::solar_elevation_cosine`])
+/// automatically, so the lit hemisphere and the day/night terminator are DERIVED, never an authored light direction.
+///
+/// The vector is expressed in [`draw_globe`]'s BODY frame, whose axes come from [`body_to_uv`]: `y` is the north pole
+/// (`lat = asin(b.y)`), and longitude is `atan2(b.x, b.z)`, so the prime meridian (`lon = 0`) is `+z` (facing the viewer
+/// at [`GlobeOrientation::IDENTITY`]) and `lon = +pi/2` is `+x`. A surface point at geographic `(lat, lon)` is therefore
+/// `(cos lat sin lon, sin lat, cos lat cos lon)` in this frame, and the sub-solar direction is the same with
+/// `(decl, subsolar_lon)`: `(cos decl sin sslon, sin decl, cos decl cos sslon)`. At [`GlobeOrientation::IDENTITY`] a
+/// positive declination lifts the lit pole toward screen-up and a positive sub-solar longitude lights the screen-right
+/// (east) face, the expected faces. Display-only, one-way canon -> pixels (Principle 10).
+pub fn sub_solar_body_dir(declination: f32, subsolar_longitude: f32) -> [f32; 3] {
+    let (sin_decl, cos_decl) = declination.sin_cos();
+    let (sin_sslon, cos_sslon) = subsolar_longitude.sin_cos();
+    [cos_decl * sin_sslon, sin_decl, cos_decl * cos_sslon]
+}
+
 /// Draw the planet as a lit sphere: a filled disk of on-screen radius `radius_px` centred at `(cx, cy)`, its
 /// surface textured from the DERIVED tiles (an orthographic sphere map of the relief field, sampled at the surface
 /// coordinate the globe `orient`ation has rotated under each pixel) and shaded by a Lambert diffuse term against the
@@ -1403,6 +1424,12 @@ fn draw_atmosphere_limb(
 /// (pass [`GlobeOrientation::IDENTITY`] for the straight-on view), and `style` carries the surface display options (the
 /// DERIVED material tint and the optional drill-in tile grid; [`SurfaceStyle::default`] for the plain planet view). A
 /// pure, deterministic read of the derived planet and star (Principle 10); it writes no canonical state.
+///
+/// `derived_star_dir`, when `Some`, is the DERIVED body-frame sun direction ([`sub_solar_body_dir`], from the orbit and
+/// the body's attitude): the globe is then lit by the physical sub-solar direction rather than the screen-space vector to
+/// the star disk, so the lit hemisphere and terminator track the real sun. When `None`, the light falls back to the
+/// on-screen star position (the living-world globe, which has no orbit plumbed), byte-identical to the pre-derivation
+/// render.
 #[allow(clippy::too_many_arguments)]
 pub fn render_solar_system_view(
     radius_m: Fixed,
@@ -1418,6 +1445,7 @@ pub fn render_solar_system_view(
     sky: Rgb,
     style: SurfaceStyle,
     orient: GlobeOrientation,
+    derived_star_dir: Option<[f32; 3]>,
 ) -> Vec<u32> {
     let mut buf = vec![bg.pack(); w.max(1) * h.max(1)];
     if w == 0 || h == 0 {
@@ -1436,11 +1464,14 @@ pub fn render_solar_system_view(
     // The y is WORLD-UP (-dy, since screen y points down), the same frame draw_globe's tile sample and Lambert
     // normal use, so the terminator tracks the tiles as you pan (at IDENTITY the two sign flips cancel, so the
     // straight-on globe is byte-identical to before).
-    let star_dir = if plane <= 0.0 {
+    let fallback_star_dir = if plane <= 0.0 {
         [0.0, 0.0, 1.0]
     } else {
         [0.72 * dx / plane, -0.72 * dy / plane, 0.70]
     };
+    // The DERIVED body-frame sun direction lights the globe when supplied; otherwise the screen-space fallback keeps
+    // the living-world globe byte-identical.
+    let star_dir = derived_star_dir.unwrap_or(fallback_star_dir);
     draw_star(
         &mut buf,
         w,
@@ -1465,7 +1496,15 @@ pub fn render_solar_system_view(
         orient,
     );
     // The atmosphere haze around the limb, tinted by the caller's `sky` colour: the DERIVED Rayleigh sky from the
-    // gas mix ([`rayleigh_sky_rgb`]) when it resolves, or [`PLACEHOLDER_SKY`] as the fail-soft fallback.
+    // gas mix ([`rayleigh_sky_rgb`]) when it resolves, or [`PLACEHOLDER_SKY`] as the fail-soft fallback. The limb wants
+    // the VIEW-space sun direction (it brightens the day-facing edge in screen x, y): for the derived body-frame vector
+    // that is its projection through the orientation, and for the screen-space fallback it is the vector itself (at
+    // IDENTITY the two coincide, so the fallback path stays byte-identical).
+    let limb_dir = if derived_star_dir.is_some() {
+        normalize3(body_to_view(star_dir, orient))
+    } else {
+        star_dir
+    };
     draw_atmosphere_limb(
         &mut buf,
         w,
@@ -1473,10 +1512,216 @@ pub fn render_solar_system_view(
         planet_cx,
         planet_cy,
         planet_radius_px,
-        star_dir,
+        limb_dir,
         sky,
     );
     buf
+}
+
+/// Compose one planet-globe scene at an ARBITRARY on-screen centre `(cx, cy)` and `radius_px` over the caller's
+/// already-filled `buf` (unlike [`render_solar_system_view`], which allocates and centres the globe itself). This is the
+/// primitive the interactive derived viewer and its woosh transition share: the woosh grows the globe from a map dot to
+/// the frame centre by animating `(cx, cy, radius_px)` each frame, and the settled globe view is the same call at the
+/// centre. It draws the optional `star` disk (`(sx, sy, radius)`, or `None` to omit it), the derived-lit globe
+/// (`star_dir_body` is the DERIVED body-frame sun direction, [`sub_solar_body_dir`]), and the atmosphere limb (lit from
+/// the view-space projection of the sun so the day edge glows). Display-only, one-way canon -> pixels (Principle 10).
+#[allow(clippy::too_many_arguments)]
+pub fn draw_globe_scene(
+    buf: &mut [u32],
+    w: usize,
+    h: usize,
+    cx: i32,
+    cy: i32,
+    radius_px: usize,
+    tiles: &[DerivedTile],
+    tile_cols: usize,
+    t_eff_k: Fixed,
+    star_dir_body: [f32; 3],
+    star: Option<(i32, i32, usize)>,
+    sky: Rgb,
+    style: SurfaceStyle,
+    orient: GlobeOrientation,
+) {
+    if w == 0 || h == 0 {
+        return;
+    }
+    let light_tint = blackbody_rgb(t_eff_k);
+    if let Some((sx, sy, sr)) = star {
+        draw_star(buf, w, h, sx, sy, sr, light_tint);
+    }
+    draw_globe(
+        buf,
+        w,
+        h,
+        cx,
+        cy,
+        radius_px,
+        tiles,
+        tile_cols,
+        star_dir_body,
+        light_tint,
+        style,
+        orient,
+    );
+    // The limb wants the VIEW-space sun direction (screen x, y), the projection of the derived body-frame vector.
+    let limb_dir = normalize3(body_to_view(star_dir_body, orient));
+    draw_atmosphere_limb(buf, w, h, cx, cy, radius_px, limb_dir, sky);
+}
+
+/// One body on the zoomed-out SYSTEM MAP: its orbit's semi-major axis (AU) and eccentricity (which trace the ellipse
+/// through [`civsim_sim::orbit::orbital_state`]), its current mean anomaly (the phase that places the dot on the ellipse),
+/// and the display colour and pixel size of its dot. The orbit geometry is DERIVED from `orbit.rs`; the dot colour is the
+/// planet's derived material colour and the size is a non-canon display choice the caller sets.
+#[derive(Clone, Copy)]
+pub struct MapBody {
+    /// The orbit semi-major axis in AU (scales the perifocal `orbital_state` position to a real distance).
+    pub semi_major_au: Fixed,
+    /// The orbit eccentricity (the ellipse's shape; `0` is a circle).
+    pub eccentricity: Fixed,
+    /// The current mean anomaly (radians) placing the planet dot on its ellipse.
+    pub mean_anomaly: Fixed,
+    /// The dot's display colour (the planet's DERIVED material colour).
+    pub dot_color: Rgb,
+    /// The dot's on-screen radius in pixels (a non-canon display size).
+    pub dot_px: usize,
+}
+
+/// The system-map projection scale (AU per pixel) that fits every body's aphelion inside `fit_frac` of the frame's
+/// smaller dimension, with the star at the centre. A pure display projection (Principle 10).
+fn system_map_au_per_px(w: usize, h: usize, bodies: &[MapBody], fit_frac: f64) -> f64 {
+    let min_dim = w.min(h) as f64;
+    let max_extent_au = bodies
+        .iter()
+        .map(|b| {
+            let a = b.semi_major_au.to_f64_lossy();
+            let e = b.eccentricity.to_f64_lossy();
+            a * (1.0 + e.max(0.0))
+        })
+        .fold(0.0_f64, f64::max)
+        .max(1e-6);
+    let fit_px = (min_dim * fit_frac).max(1.0);
+    max_extent_au / fit_px
+}
+
+/// Project a perifocal position (in units of the semi-major axis) at semi-major axis `a_au` to a screen pixel, with the
+/// star (the orbit focus) at the frame centre `(cx, cy)` and screen y pointing down. A pure display projection.
+fn system_map_project(
+    px_over_a: f64,
+    py_over_a: f64,
+    a_au: f64,
+    cx: i32,
+    cy: i32,
+    au_per_px: f64,
+) -> (i32, i32) {
+    let au_x = px_over_a * a_au;
+    let au_y = py_over_a * a_au;
+    let sx = cx + (au_x / au_per_px).round() as i32;
+    let sy = cy - (au_y / au_per_px).round() as i32; // screen y points down, so orbit +y is up
+    (sx, sy)
+}
+
+/// Fill a small filled disk of `color` (an opaque dot) centred at `(cx, cy)`. Display-only.
+fn fill_disk(buf: &mut [u32], w: usize, h: usize, cx: i32, cy: i32, radius_px: usize, color: u32) {
+    let r = radius_px as i32;
+    let x0 = (cx - r).max(0);
+    let x1 = (cx + r).min(w as i32 - 1);
+    let y0 = (cy - r).max(0);
+    let y1 = (cy + r).min(h as i32 - 1);
+    for py in y0..=y1 {
+        for px in x0..=x1 {
+            let dx = px - cx;
+            let dy = py - cy;
+            if dx * dx + dy * dy <= r * r {
+                buf[py as usize * w + px as usize] = color;
+            }
+        }
+    }
+}
+
+/// Render the zoomed-out SYSTEM MAP: the star (its [`blackbody_rgb`] colour) at the frame centre, each body's ORBIT
+/// ELLIPSE traced from `orbit.rs` (`orbital_state` swept over a full turn of mean anomaly, scaled by the semi-major axis
+/// and projected with the star at one focus), and each body's dot at its current phase. Returns the frame and the
+/// on-screen dot centres (so the caller can hit-test clicks and place labels). The map is a display projection of DERIVED
+/// orbit geometry; it does NOT model a gravitationally-assembled multi-body system (that is the solar-system generator,
+/// task #72). The set of orbits is a viewer input, not a canonical layout. Display-only (Principle 10).
+pub fn render_system_map(
+    w: usize,
+    h: usize,
+    bg: Rgb,
+    star_t_eff: Fixed,
+    star_radius_px: usize,
+    bodies: &[MapBody],
+) -> (Vec<u32>, Vec<(i32, i32)>) {
+    let mut buf = vec![bg.pack(); w.max(1) * h.max(1)];
+    let mut dots = Vec::with_capacity(bodies.len());
+    if w == 0 || h == 0 {
+        return (buf, dots);
+    }
+    let cx = (w / 2) as i32;
+    let cy = (h / 2) as i32;
+    // Fit every aphelion inside ~0.42 of the smaller dimension (a non-canon display framing).
+    let au_per_px = system_map_au_per_px(w, h, bodies, 0.42);
+    // A dim graticule colour for the orbit lines, and the number of samples per ellipse (a display resolution).
+    let orbit_color = Rgb::new(70, 78, 96).pack();
+    const ORBIT_SAMPLES: usize = 160;
+    for b in bodies {
+        let a_au = b.semi_major_au.to_f64_lossy();
+        // Trace the ellipse: sweep the mean anomaly over a full turn, projecting each solved position; connect
+        // consecutive points, closing the loop. The star sits at the focus (the perifocal origin), so the ellipse is
+        // offset the way a real orbit is, not centred on the star.
+        let mut prev: Option<(i32, i32)> = None;
+        let mut first: Option<(i32, i32)> = None;
+        for k in 0..=ORBIT_SAMPLES {
+            let frac = k as f64 / ORBIT_SAMPLES as f64;
+            let m = Fixed::from_ratio((frac * 1_000_000.0) as i64, 1_000_000)
+                .checked_mul(Fixed::PI.checked_add(Fixed::PI).unwrap_or(Fixed::PI));
+            let point = m.and_then(|m| {
+                civsim_sim::orbit::orbital_state(m, b.eccentricity).map(|s| {
+                    system_map_project(
+                        s.position_x_over_a.to_f64_lossy(),
+                        s.position_y_over_a.to_f64_lossy(),
+                        a_au,
+                        cx,
+                        cy,
+                        au_per_px,
+                    )
+                })
+            });
+            if let Some((sx, sy)) = point {
+                if let Some((psx, psy)) = prev {
+                    draw_line(&mut buf, w, h, psx, psy, sx, sy, orbit_color);
+                }
+                prev = Some((sx, sy));
+                first.get_or_insert((sx, sy));
+            }
+        }
+        // The planet dot at its current phase; fail-soft to the frame centre if the state does not resolve.
+        let dot = civsim_sim::orbit::orbital_state(b.mean_anomaly, b.eccentricity)
+            .map(|s| {
+                system_map_project(
+                    s.position_x_over_a.to_f64_lossy(),
+                    s.position_y_over_a.to_f64_lossy(),
+                    a_au,
+                    cx,
+                    cy,
+                    au_per_px,
+                )
+            })
+            .unwrap_or((cx, cy));
+        fill_disk(&mut buf, w, h, dot.0, dot.1, b.dot_px, b.dot_color.pack());
+        dots.push(dot);
+    }
+    // The star last, so its glow sits over the orbit lines near the centre.
+    draw_star(
+        &mut buf,
+        w,
+        h,
+        cx,
+        cy,
+        star_radius_px,
+        blackbody_rgb(star_t_eff),
+    );
+    (buf, dots)
 }
 
 /// The derived-surface tile (column, row) under a screen pixel, inverting the orthographic sphere map and the globe
@@ -1810,6 +2055,154 @@ mod tests {
     }
 
     #[test]
+    fn the_derived_sun_direction_lights_the_sub_solar_face_and_reads_the_solar_elevation() {
+        use civsim_sim::orbit;
+        // The load-bearing identity: the body-frame sun vector dotted with a surface point's body-frame normal is the
+        // physical solar-elevation cosine, so draw_globe's Lambert term yields the derived illumination for free. Check
+        // it against orbit::solar_elevation_cosine at several surface points, for a tilted, off-meridian sub-solar point.
+        let decl_f = 0.30f32;
+        let sslon_f = 0.50f32;
+        let s = sub_solar_body_dir(decl_f, sslon_f);
+        let mag = (s[0] * s[0] + s[1] * s[1] + s[2] * s[2]).sqrt();
+        assert!(
+            (mag - 1.0).abs() < 1e-4,
+            "the derived sun direction is unit length, got {mag}"
+        );
+        let decl = Fixed::from_ratio(3, 10);
+        let sslon = Fixed::from_ratio(1, 2);
+        for &(lat_i, lon_i) in &[(1i64, 5i64), (-3, 2), (7, -4), (0, 0)] {
+            let lat_f = lat_i as f32 / 10.0;
+            let lon_f = lon_i as f32 / 5.0;
+            // The surface normal in draw_globe's body frame: (cos lat sin lon, sin lat, cos lat cos lon).
+            let (sl, cl) = lat_f.sin_cos();
+            let (slon, clon) = lon_f.sin_cos();
+            let n = [cl * slon, sl, cl * clon];
+            let dot = n[0] * s[0] + n[1] * s[1] + n[2] * s[2];
+            let expected = orbit::solar_elevation_cosine(
+                Fixed::from_ratio(lat_i, 10),
+                Fixed::from_ratio(lon_i, 5),
+                decl,
+                sslon,
+            )
+            .expect("solar elevation")
+            .to_f64_lossy() as f32;
+            assert!(
+                (dot - expected).abs() < 2e-3,
+                "N.S is the solar-elevation cosine at ({lat_f},{lon_f}): {dot} vs {expected}"
+            );
+        }
+        // At IDENTITY the derived light lands on the expected face: a positive declination (northern sub-solar point)
+        // and a positive sub-solar longitude (eastern) light the NORTH-EAST of the disk, so the brightest disk pixel
+        // sits up (smaller screen y) and to the right (larger screen x) of the globe centre.
+        let (w, h) = (160usize, 160usize);
+        let bg = Rgb::new(6, 7, 12);
+        let (tiles, cols) = demo_globe_tiles();
+        let (cx, cy) = (80i32, 80i32);
+        let radius = 60usize;
+        let mut buf = vec![bg.pack(); w * h];
+        draw_globe(
+            &mut buf,
+            w,
+            h,
+            cx,
+            cy,
+            radius,
+            &tiles,
+            cols,
+            s,
+            Rgb::new(255, 255, 255),
+            SurfaceStyle::default(),
+            GlobeOrientation::IDENTITY,
+        );
+        let mut best = (-1.0f32, cx, cy);
+        for py in (cy - radius as i32).max(0)..=(cy + radius as i32) {
+            for px in (cx - radius as i32).max(0)..=(cx + radius as i32) {
+                let dx = px - cx;
+                let dy = py - cy;
+                if dx * dx + dy * dy > (radius as i32) * (radius as i32) {
+                    continue;
+                }
+                let word = buf[py as usize * w + px as usize];
+                let lum = Rgb::new((word >> 16) as u8, (word >> 8) as u8, word as u8).luminance();
+                if (lum as f32) > best.0 {
+                    best = (lum as f32, px, py);
+                }
+            }
+        }
+        assert!(
+            best.1 > cx && best.2 < cy,
+            "the derived sun lights the north-east face (brightest at ({},{}) vs centre ({cx},{cy}))",
+            best.1,
+            best.2
+        );
+    }
+
+    #[test]
+    fn the_system_map_traces_orbit_ellipses_and_places_the_planet_dots() {
+        // The system map draws a dim orbit ellipse and a dot for each body, with the star at the centre. Two bodies at
+        // different semi-major axes place their dots at different radii from the centre, and each dot reads its own
+        // colour. A pure display read of orbit.rs geometry.
+        let (w, h) = (240usize, 200usize);
+        let bg = Rgb::new(8, 9, 14);
+        let inner = Rgb::new(200, 120, 90);
+        let outer = Rgb::new(120, 160, 220);
+        let bodies = [
+            MapBody {
+                semi_major_au: Fixed::from_ratio(7, 10),
+                eccentricity: Fixed::from_ratio(1, 10),
+                mean_anomaly: Fixed::ZERO,
+                dot_color: inner,
+                dot_px: 4,
+            },
+            MapBody {
+                semi_major_au: Fixed::from_ratio(15, 10),
+                eccentricity: Fixed::from_ratio(1, 10),
+                mean_anomaly: Fixed::ZERO,
+                dot_color: outer,
+                dot_px: 4,
+            },
+        ];
+        let sun_t = Fixed::from_int(5772);
+        let (buf, dots) = render_system_map(w, h, bg, sun_t, 8, &bodies);
+        assert_eq!(buf.len(), w * h, "one word per pixel");
+        assert_eq!(dots.len(), 2, "one dot centre per body");
+        // The star sits at the centre in its blackbody colour.
+        let (cx, cy) = ((w / 2) as i32, (h / 2) as i32);
+        assert_eq!(
+            buf[cy as usize * w + cx as usize],
+            blackbody_rgb(sun_t).pack(),
+            "the star reads its blackbody colour at the centre"
+        );
+        // Both dots are at perihelion (mean anomaly 0): the outer planet's dot is farther from the centre than the
+        // inner planet's, along the same axis.
+        let inner_dx = (dots[0].0 - cx).abs();
+        let outer_dx = (dots[1].0 - cx).abs();
+        assert!(
+            outer_dx > inner_dx,
+            "the wider orbit places its dot farther out ({outer_dx} vs {inner_dx})"
+        );
+        // The dot pixels carry their bodies' colours.
+        assert_eq!(
+            buf[dots[0].1 as usize * w + dots[0].0 as usize],
+            inner.pack(),
+            "the inner dot reads its colour"
+        );
+        assert_eq!(
+            buf[dots[1].1 as usize * w + dots[1].0 as usize],
+            outer.pack(),
+            "the outer dot reads its colour"
+        );
+        // Some orbit-line pixels are drawn (the ellipse is visible against the background).
+        let orbit_pixels = buf
+            .iter()
+            .filter(|&&p| p == Rgb::new(70, 78, 96).pack())
+            .count();
+        assert!(orbit_pixels > 50, "the orbit ellipses are traced");
+        let (replay, _) = render_system_map(w, h, bg, sun_t, 8, &bodies);
+        assert_eq!(buf, replay, "a pure display read replays byte for byte");
+    }
+
+    #[test]
     fn the_solar_view_lights_the_globe_from_the_star_and_tints_by_temperature() {
         use civsim_sim::astro;
         let (w, h) = (240usize, 180usize);
@@ -1841,6 +2234,7 @@ mod tests {
             PLACEHOLDER_SKY,
             SurfaceStyle::default(),
             GlobeOrientation::IDENTITY,
+            None,
         );
         assert_eq!(frame.len(), w * h, "one word per pixel");
         // The star disk carries the derived blackbody colour at its core.
@@ -1874,6 +2268,7 @@ mod tests {
             PLACEHOLDER_SKY,
             SurfaceStyle::default(),
             GlobeOrientation::IDENTITY,
+            None,
         );
         assert_eq!(frame, replay, "a pure read replays byte for byte");
 
@@ -1908,6 +2303,7 @@ mod tests {
                 PLACEHOLDER_SKY,
                 SurfaceStyle::default(),
                 GlobeOrientation::IDENTITY,
+                None,
             );
             let mut sr = 0f64;
             let mut sb = 0f64;

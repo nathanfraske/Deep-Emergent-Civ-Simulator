@@ -32,7 +32,7 @@
 
 mod render;
 
-use minifb::{Key, KeyRepeat, MouseMode, Scale, ScaleMode, Window, WindowOptions};
+use minifb::{Key, KeyRepeat, MouseButton, MouseMode, Scale, ScaleMode, Window, WindowOptions};
 
 use civsim_core::Fixed;
 use civsim_materials::grain_opacity::{GrainConstituent, GrainMixture, GrainOpticalEstimator};
@@ -72,6 +72,180 @@ const GLOBE_LEVELS: u32 = 3;
 /// The default live playback speed, in radiation generations per real second. A view-side
 /// default the observer speeds up or slows down from; it never touches canonical state.
 const DEFAULT_GEN_RATE: f64 = 4.0;
+
+// The DERIVED-globe LIGHTING attitude is READ PER-WORLD from the scene, never authored inline. The observability layer
+// lights the sphere from the DERIVED sub-solar direction (the orbit's declination and the spin's sub-solar longitude,
+// read straight out of `civsim_sim::orbit`). The attitude and orbital elements it needs (axial tilt, axis orientation,
+// orbital phase, orbit eccentricity, rotation period, initial spin phase) are PER-WORLD inputs carried as fields on
+// [`DerivedScene`] (see [`SceneAttitude`]); the pipeline fills them, and when the spin/tilt derivation lands (task #44 /
+// Part 18.1) the values flow into the viewer with no viewer change. NO obliquity, spin, tilt, or phase value is a literal
+// here. What remains below are pure display choices (dot size, transition length, and how fast the OBSERVER watches the
+// day pass), the observability layer's own allowance (Principle 10); none is a physical attitude value.
+
+/// NON-CANON display: the on-screen planet-dot radius on the system map (pixels).
+const DEMO_MAP_DOT_PX: usize = 5;
+/// NON-CANON display: how many frames the woosh zoom between the system map and a planet globe takes (30 to 45 range).
+const WOOSH_FRAMES: u32 = 38;
+/// NON-CANON VIEWING sweep: how many animation frames the observer takes to watch the day/night terminator sweep once
+/// around the globe. This is a PLAYBACK rate (how fast the observer watches time pass), a sibling of the manual rotate
+/// pan-rate and the [`DEFAULT_GEN_RATE`] playback speed, NOT a physical rotation rate. The physical rotation period is
+/// the per-world `scene.attitude.rotation_period_s` (reserved, pending task #44); when it and a wall-clock are wired, the
+/// sweep can be timed to it. Until then the observer watches the day pass at this display rate.
+const TERMINATOR_SWEEP_FRAMES: i64 = 240;
+/// NON-CANON VIEWING sweep: how many animation frames the observer takes to watch one year (the seasonal cycle) pass, so
+/// the DERIVED axial tilt read from the world shows as the sub-solar latitude swinging through the seasons. A PLAYBACK
+/// rate like [`TERMINATOR_SWEEP_FRAMES`], not a physical orbital period; the seasons drift slower than the day.
+const SEASON_SWEEP_FRAMES: i64 = 1920;
+
+/// The DERIVED per-world attitude and orbital elements the observability lighting reads: the axial tilt, axis
+/// orientation, orbital phase, orbit eccentricity, rotation period, and initial spin phase. Each is a per-world input the
+/// pipeline fills; `None` means "not yet supplied by a derivation in this path" (reserved per-world input,
+/// R-CELESTIAL-SECULAR, pending the spin/tilt derivation, task #44 / Part 18.1). The viewer READS these; it never authors
+/// them. When the derivation is wired the fields carry real values and the viewer is unchanged. Display-only consumer
+/// (Principle 10).
+#[derive(Clone, Copy, Default)]
+struct SceneAttitude {
+    /// The axial tilt (obliquity, radians): the seasonal amplitude. READ per-world from the world's
+    /// [`civsim_sim::environ::DiurnalSky`] (`sky.obliquity`), whose value lives in `civsim_sim::environ` as Earth's
+    /// cited measurement; never authored here.
+    obliquity: Option<Fixed>,
+    /// The axis orientation (perihelion longitude, radians): where perihelion sits relative to the equinox. Reserved
+    /// per-world input (R-CELESTIAL-SECULAR, task #44 / Part 18.1); the sky's `perihelion_phase` uses a different
+    /// seasonal-phase convention than `orbit.rs`, so it is not cross-wired here.
+    perihelion_longitude: Option<Fixed>,
+    /// The orbital phase (mean anomaly, radians): where the body sits on its orbit (the current season). Reserved
+    /// per-world input (R-CELESTIAL-SECULAR, task #44 / Part 18.1); until supplied, the observer's viewing year-sweep
+    /// animates through the seasons so the DERIVED tilt is visible.
+    orbital_phase: Option<Fixed>,
+    /// The orbit eccentricity (the ellipse's shape; the orbit lines and the season length read it). READ per-world from
+    /// the world's [`civsim_sim::environ::DiurnalSky`] (`sky.eccentricity`), whose value lives in `civsim_sim::environ`
+    /// as Earth's cited measurement; never authored here.
+    orbit_eccentricity: Option<Fixed>,
+    /// The rotation period (seconds per rotation, the spin rate). Reserved per-world input (R-CELESTIAL-SECULAR, task
+    /// #44 / Part 18.1); the derived-planet path does not load the world manifest (`world.rotation_period_seconds`), so
+    /// the day/night animation runs at the display viewing-sweep rate ([`TERMINATOR_SWEEP_FRAMES`]) and will time to this
+    /// period when it and a wall-clock are wired.
+    rotation_period_s: Option<Fixed>,
+    /// The initial spin phase (radians): the sub-solar meridian at the start of viewing. Reserved per-world input
+    /// (R-CELESTIAL-SECULAR, task #44 / Part 18.1).
+    initial_spin_phase: Option<Fixed>,
+}
+
+/// The world sky the derived viewer READS its per-world lighting attitude from: the Mirror (Earth-calibrated) world's
+/// [`civsim_sim::environ::DiurnalSky`], the current default world. The viewer reads this sky's per-world attitude
+/// (`obliquity`, `eccentricity`) and never authors it, so a different world's tilt flows through as data. The
+/// rotation/orbital TICK cadences the constructor takes drive the run-path diurnal calendar, which needs a world manifest
+/// the derived-planet path does not load; the viewer does not read them (its day/night and season motions are viewing
+/// sweeps, an observability playback), so a placeholder cadence is passed and only the attitude is read.
+fn derived_world_sky() -> civsim_sim::environ::DiurnalSky {
+    civsim_sim::environ::DiurnalSky::mirror(1, 1)
+}
+
+/// The per-world [`SceneAttitude`] for the derived viewer, READ from the world sky. Obliquity and eccentricity come from
+/// the Mirror [`civsim_sim::environ::DiurnalSky`] (their values live in `civsim_sim::environ`, cited as Earth's
+/// measurements); the axis orientation, orbital phase, rotation period, and initial spin phase are reserved per-world
+/// inputs the derived-planet path does not yet supply (R-CELESTIAL-SECULAR, task #44 / Part 18.1). No tilt, spin, or
+/// eccentricity value is authored here.
+fn derived_scene_attitude() -> SceneAttitude {
+    let sky = derived_world_sky();
+    SceneAttitude {
+        obliquity: Some(sky.obliquity),
+        orbit_eccentricity: Some(sky.eccentricity),
+        perihelion_longitude: None,
+        orbital_phase: None,
+        rotation_period_s: None,
+        initial_spin_phase: None,
+    }
+}
+
+/// A VIEWING-sweep phase (radians, in `[0, 2*pi)`) at animation `frame`: the observer's clock marches once around over
+/// `frames` animation frames. A NON-CANON display playback clock (how fast the observer watches time pass), NOT a
+/// physical rate.
+fn sweep_phase(frame: u64, frames: i64) -> Fixed {
+    let frames = frames.max(1);
+    let step = (frame % frames as u64) as i64;
+    let frac = Fixed::from_ratio(step, frames);
+    let tau = Fixed::PI.checked_add(Fixed::PI).unwrap_or(Fixed::PI);
+    tau.checked_mul(frac).unwrap_or(Fixed::ZERO)
+}
+
+/// The eccentricity to draw an orbit with: the per-world value when supplied, else the neutral circle (`0`) when the
+/// orbital element is not available in this path (task #44). Reads the scene; authors nothing.
+fn attitude_eccentricity(attitude: &SceneAttitude) -> Fixed {
+    attitude.orbit_eccentricity.unwrap_or(Fixed::ZERO)
+}
+
+/// The DERIVED body-frame sun direction for the globe lighting, consuming `civsim_sim::orbit` and the PER-WORLD attitude
+/// read from the scene. `day_sweep` is the observer's day clock (feeds the sub-solar longitude, the time of day);
+/// `year_sweep` is the observer's year clock (feeds the orbital phase for the declination when the per-world phase is not
+/// yet supplied, so the DERIVED tilt shows as the seasons pass). The sub-solar latitude comes from
+/// [`civsim_sim::orbit::solar_declination`] at the per-world obliquity (else declination zero when the tilt is not
+/// available), and the sub-solar longitude from [`civsim_sim::orbit::subsolar_longitude`]. Mapped into
+/// [`render::draw_globe`]'s body frame by [`render::sub_solar_body_dir`], it makes the lit hemisphere DERIVED, never an
+/// authored light direction. Every physical input is READ from `attitude`; the only inline value is the neutral zero used
+/// when a per-world field is not yet available. `None` on a link that does not resolve (fail-soft).
+fn derived_sun_body_dir(
+    attitude: &SceneAttitude,
+    day_sweep: Fixed,
+    year_sweep: Fixed,
+) -> Option<[f32; 3]> {
+    let eccentricity = attitude_eccentricity(attitude);
+    // The orbital phase (the season): the per-world value when supplied, else the observer's viewing year-sweep so the
+    // DERIVED tilt shows as the sub-solar latitude swings through the seasons. The tilt AMPLITUDE is the per-world
+    // obliquity read from the sky.
+    let phase = attitude.orbital_phase.unwrap_or(year_sweep);
+    let declination = match attitude.obliquity {
+        Some(obliquity) => {
+            let state = civsim_sim::orbit::orbital_state(phase, eccentricity)?;
+            // The axis orientation: the per-world value when supplied, else the neutral (perihelion at the equinox), the
+            // same reference choice the sky's reference world uses. Not an authored per-world value.
+            let perihelion = attitude.perihelion_longitude.unwrap_or(Fixed::ZERO);
+            civsim_sim::orbit::solar_declination(&state, obliquity, perihelion)?
+        }
+        None => Fixed::ZERO,
+    };
+    // The spin phase is the per-world initial phase plus the observer's day sweep, folded into one rotation.
+    let tau = Fixed::PI.checked_add(Fixed::PI)?;
+    let mut spin = attitude
+        .initial_spin_phase
+        .unwrap_or(Fixed::ZERO)
+        .checked_add(day_sweep)?;
+    if spin >= tau {
+        spin = spin.checked_sub(tau)?;
+    }
+    let subsolar_longitude = civsim_sim::orbit::subsolar_longitude(spin)?;
+    Some(render::sub_solar_body_dir(
+        declination.to_f64_lossy() as f32,
+        subsolar_longitude.to_f64_lossy() as f32,
+    ))
+}
+
+/// A smooth ease-in-out (smoothstep) of a `[0, 1]` progress, for the woosh transition (no linear-motion snap at the
+/// ends). Display-only.
+fn smoothstep(t: f32) -> f32 {
+    let t = t.clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
+/// Linear interpolation of two `f32`, for the woosh centre. Display-only.
+fn lerp(a: f32, b: f32, t: f32) -> f32 {
+    a + (b - a) * t
+}
+
+/// Blend two packed `0x00RRGGBB` pixels by `t` in `[0, 1]` (`0` yields `a`, `1` yields `b`), for the woosh's fade of the
+/// system map toward empty space. Display-only.
+fn blend_u32(a: u32, b: u32, t: f32) -> u32 {
+    let t = t.clamp(0.0, 1.0);
+    let mix = |sa: u32, sb: u32| -> u32 {
+        let fa = sa as f32;
+        let fb = sb as f32;
+        (fa + (fb - fa) * t).round().clamp(0.0, 255.0) as u32
+    };
+    let r = mix((a >> 16) & 0xff, (b >> 16) & 0xff);
+    let g = mix((a >> 8) & 0xff, (b >> 8) & 0xff);
+    let bl = mix(a & 0xff, b & 0xff);
+    (r << 16) | (g << 8) | bl
+}
 
 /// The selector readout for a tile's occupants: the selected creature inspected in full (its
 /// derived trophic label, temperament, natural weapons, covering, and senses, named from the
@@ -249,6 +423,8 @@ fn globe_cmd(argv: &[String]) {
         fx.sky,
         render::SurfaceStyle::default(),
         render::GlobeOrientation::IDENTITY,
+        // The demo `--globe` fixture carries no orbital phase; keep the screen-space light (byte-identical).
+        None,
     );
     write_ppm(&path, w, h, &buf);
     eprintln!(
@@ -325,8 +501,36 @@ fn derived_globe_cmd(argv: &[String]) {
             )
         }
     };
+    // The DERIVED sun direction lights the globe (Part 1): the sub-solar direction built from the orbit's declination
+    // (seasons, at the PER-WORLD obliquity READ from the world sky) and the spin's sub-solar longitude (time of day). The
+    // day and season phases are the observer's viewing sweeps, sampled off-noon and off-equinox so the terminator sits
+    // off-centre and the tilt shows; the derived numbers are printed so the tracking is checkable without a display.
+    let day_sweep = sweep_phase(TERMINATOR_SWEEP_FRAMES as u64 / 8, TERMINATOR_SWEEP_FRAMES);
+    let year_sweep = sweep_phase(SEASON_SWEEP_FRAMES as u64 / 4, SEASON_SWEEP_FRAMES);
+    let star_dir = derived_sun_body_dir(&scene.attitude, day_sweep, year_sweep);
+    let phase = scene.attitude.orbital_phase.unwrap_or(year_sweep);
+    if let Some(state) =
+        civsim_sim::orbit::orbital_state(phase, attitude_eccentricity(&scene.attitude))
+    {
+        let decl = match scene.attitude.obliquity {
+            Some(obliquity) => civsim_sim::orbit::solar_declination(
+                &state,
+                obliquity,
+                scene.attitude.perihelion_longitude.unwrap_or(Fixed::ZERO),
+            )
+            .map(|d| d.to_f64_lossy())
+            .unwrap_or(f64::NAN),
+            None => 0.0,
+        };
+        eprintln!(
+            "  derived sun (per-world attitude READ from DiurnalSky): obliquity {:.4} rad, eccentricity {:.4}, declination {decl:.3} rad, body-frame star_dir {:?}",
+            scene.attitude.obliquity.map(|o| o.to_f64_lossy()).unwrap_or(f64::NAN),
+            scene.attitude.orbit_eccentricity.map(|e| e.to_f64_lossy()).unwrap_or(f64::NAN),
+            star_dir
+        );
+    }
     // Paint the sphere the crust's DERIVED material colour (the same the interactive `--derived` viewer shows), so the
-    // headless render matches what the owner sees on screen.
+    // headless render matches what the owner sees on screen. The globe is lit by the DERIVED sun direction above.
     let buf = render::render_solar_system_view(
         fx.radius_m,
         fx.t_eff,
@@ -341,6 +545,7 @@ fn derived_globe_cmd(argv: &[String]) {
         fx.sky,
         style,
         render::GlobeOrientation::IDENTITY,
+        star_dir,
     );
     write_ppm(&path, w, h, &buf);
     eprintln!("wrote {path} ({w}x{h})");
@@ -665,6 +870,11 @@ struct DerivedScene {
     sky: Rgb,
     /// The DERIVED perceived colour of the crust material under the star ([`render::material_surface_rgb`]).
     material: Rgb,
+    /// The PER-WORLD attitude and orbital elements the observability lighting reads (axial tilt, axis orientation,
+    /// orbital phase, orbit eccentricity, rotation period, initial spin phase). Each is a reserved per-world input the
+    /// pipeline fills; `None` means "not yet supplied by a derivation" (pending the spin/tilt derivation, task #44 /
+    /// Part 18.1). The viewer READS these and never authors them, so wiring the derivation needs no viewer change.
+    attitude: SceneAttitude,
 }
 
 /// The natural log of ten, for the `log_eps` (base-10) solar-abundance scale to natural-exponent conversion (the same
@@ -1123,6 +1333,10 @@ fn build_derived_scene(star_mass: Fixed, orbit_au: Fixed) -> Result<DerivedScene
         cols,
         sky,
         material,
+        // The per-world lighting attitude, READ from the world's DiurnalSky (obliquity, eccentricity), with the axis
+        // orientation, orbital phase, rotation period, and initial spin phase reserved per-world inputs the pipeline
+        // fills (R-CELESTIAL-SECULAR, task #44 / Part 18.1). No tilt or spin value is authored in the viewer.
+        attitude: derived_scene_attitude(),
     })
 }
 
@@ -1178,6 +1392,21 @@ fn print_derived_readout(scene: &DerivedScene) {
     } else {
         eprintln!("  air:    {}", air_top.join(", "));
     }
+    // The per-world lighting attitude, READ from the world sky (obliquity, eccentricity) with the axis orientation,
+    // orbital phase, rotation period, and initial spin phase reserved per-world inputs the pipeline fills (task #44).
+    let fmt_attitude = |v: Option<Fixed>| {
+        v.map(|x| format!("{:.4}", x.to_f64_lossy()))
+            .unwrap_or_else(|| "reserved(#44)".to_string())
+    };
+    eprintln!(
+        "  attitude (per-world, read from DiurnalSky): obliquity {} rad, eccentricity {}, perihelion {}, orbital phase {}, rotation period {} s, initial spin {}",
+        fmt_attitude(scene.attitude.obliquity),
+        fmt_attitude(scene.attitude.orbit_eccentricity),
+        fmt_attitude(scene.attitude.perihelion_longitude),
+        fmt_attitude(scene.attitude.orbital_phase),
+        fmt_attitude(scene.attitude.rotation_period_s),
+        fmt_attitude(scene.attitude.initial_spin_phase),
+    );
     eprintln!("  controls: +/- zoom, wasd/arrows rotate the globe, p provenance, Esc quit");
 }
 
@@ -1293,19 +1522,29 @@ fn provenance_lines(
 /// grows from a distant star-lit sphere (t = 0, the star beside it) to the surface filling the frame up close
 /// (t = 1): one continuous zoom, all of it the sphere. The two radius endpoints are non-canon display-framing choices
 /// for the viewer, documented at their site (Principle 10, pixels only).
-fn derived_globe_view(fx: &GlobeFixture, w: usize, h: usize, t: f32) -> (Fixed, (i32, i32), usize) {
+/// The metres-per-pixel scale for the derived globe at zoom fraction `t` in [0, 1]: the on-screen radius grows
+/// geometrically from ~0.12 of the frame (a distant globe) up to ~8x the frame (a close drill-down where the tile grid
+/// subdivides). Both fractions are non-canon display-framing choices. Shared by the interactive globe view and the woosh
+/// so their framings stay in step (Principle 10, pixels only).
+fn derived_globe_m_per_px(radius_m: Fixed, w: usize, h: usize, t: f32) -> Fixed {
     let min_dim = w.min(h);
-    // The on-screen radius grows geometrically so the zoom reads smoothly: from ~0.12 of the frame (a distant globe
-    // with the star beside it) up to ~8x the frame (a close drill-down onto a small surface patch, where the tile grid
-    // subdivides). Both fractions are non-canon display-framing choices, surfaced here at their definition.
     const R_MIN_FRAC: f32 = 0.12;
     const R_MAX_FRAC: f32 = 8.0;
     let frac = R_MIN_FRAC * (R_MAX_FRAC / R_MIN_FRAC).powf(t.clamp(0.0, 1.0));
     let target_r = ((min_dim as f32) * frac).max(1.0) as i32;
-    let m_per_px = fx
-        .radius_m
+    radius_m
         .checked_div(Fixed::from_int(target_r.max(1)))
-        .unwrap_or(Fixed::ONE);
+        .unwrap_or(Fixed::ONE)
+}
+
+/// The derived viewer's continuous globe scale at zoom fraction `t` in [0, 1]: the metres-per-pixel scale (so the
+/// DERIVED radius drives the on-screen size), the star's on-screen position, and its on-screen radius. The globe
+/// grows from a distant star-lit sphere (t = 0, the star beside it) to the surface filling the frame up close
+/// (t = 1): one continuous zoom, all of it the sphere. The two radius endpoints are non-canon display-framing choices
+/// for the viewer, documented at their site (Principle 10, pixels only).
+fn derived_globe_view(fx: &GlobeFixture, w: usize, h: usize, t: f32) -> (Fixed, (i32, i32), usize) {
+    let min_dim = w.min(h);
+    let m_per_px = derived_globe_m_per_px(fx.radius_m, w, h, t);
     // The star sits off to the upper-left; it is occluded once the globe grows to fill the frame (you are at the
     // surface), the honest look for the close view.
     let star_px = ((w / 5) as i32, (h / 4) as i32);
@@ -1330,41 +1569,174 @@ fn surface_grid_dims(radius_px: usize, min_dim: usize) -> (usize, usize) {
     (BASE_COLS << level, BASE_ROWS << level)
 }
 
+/// One planet sampled for the system map: its DERIVED scene (radius, star temperature, crust, colour, all from
+/// build_derived_scene) and the mean anomaly that places its dot on the map. The scene is a real derivation; the mean
+/// anomaly is a NON-CANON display phase spread so the dots do not all sit at perihelion.
+struct SampledPlanet {
+    scene: DerivedScene,
+    mean_anomaly: Fixed,
+}
+
+/// Sample a small set of orbits across the terrestrial zone and DERIVE a planet at each (fail-soft: an orbit that does
+/// not resolve is skipped, never fabricated). NON-CANON viewer input: this is a chosen set of sample orbits, NOT a
+/// gravitationally-assembled multi-body system (that is the solar-system generator, task #72); each planet is an
+/// independent derivation, and the map places them together for viewing only. `extra_orbit`, if given (the `--derived`
+/// orbit argument), is added to the set so a specific orbit can be viewed alongside the samples.
+fn build_sampled_planets(star_mass: Fixed, extra_orbit: Option<Fixed>) -> Vec<SampledPlanet> {
+    let mut orbits: Vec<Fixed> = [(7, 10), (9, 10), (11, 10), (13, 10), (15, 10)]
+        .iter()
+        .map(|(n, d)| Fixed::from_ratio(*n, *d))
+        .collect();
+    if let Some(o) = extra_orbit {
+        if !orbits
+            .iter()
+            .any(|x| (x.to_f64_lossy() - o.to_f64_lossy()).abs() < 1e-3)
+        {
+            orbits.push(o);
+        }
+    }
+    orbits.sort_by_key(|a| a.to_bits());
+    let n = orbits.len().max(1);
+    let tau = Fixed::PI.checked_add(Fixed::PI).unwrap_or(Fixed::PI);
+    let mut planets = Vec::new();
+    for (i, orbit) in orbits.iter().enumerate() {
+        match build_derived_scene(star_mass, *orbit) {
+            Ok(scene) => {
+                let frac = Fixed::from_ratio(i as i64, n as i64);
+                let mean_anomaly = tau.checked_mul(frac).unwrap_or(Fixed::ZERO);
+                planets.push(SampledPlanet {
+                    scene,
+                    mean_anomaly,
+                });
+            }
+            Err(e) => eprintln!(
+                "  (orbit {:.2} AU did not resolve: {e}; skipped)",
+                orbit.to_f64_lossy()
+            ),
+        }
+    }
+    planets
+}
+
+/// The [`render::MapBody`] for a sampled planet: its DERIVED orbit (semi-major axis), the demo eccentricity, its map
+/// phase, and its DERIVED material colour as the dot. The `dot_px` size is a NON-CANON display choice.
+fn map_body(p: &SampledPlanet, dot_px: usize) -> render::MapBody {
+    render::MapBody {
+        semi_major_au: p.scene.orbit_au,
+        // The orbit eccentricity is READ per-world from the scene attitude (the world sky's value), else the neutral
+        // circle when not available; never an authored literal.
+        eccentricity: attitude_eccentricity(&p.scene.attitude),
+        mean_anomaly: p.mean_anomaly,
+        dot_color: p.scene.material,
+        dot_px,
+    }
+}
+
+/// NON-CANON display: the on-screen star radius on the system map (pixels), scaled to the frame.
+fn system_map_star_radius_px(min_dim: usize) -> usize {
+    (min_dim / 40).max(3)
+}
+
+/// Render one woosh transition frame: the system map (`map_buf`) fades toward empty space as the planet globe grows from
+/// its map dot to the frame centre. `s` in [0, 1] is the eased progress (0 at the dot, 1 at the settled globe); the
+/// globe centre lerps from the dot to the frame centre and its radius grows geometrically from the dot size to
+/// `target_radius`. `star_dir` is the DERIVED sun direction and `orient` the globe orientation (so a woosh out of a
+/// rotated globe keeps its rotation). Display-only (Principle 10).
+#[allow(clippy::too_many_arguments)]
+fn draw_woosh_frame(
+    w: usize,
+    h: usize,
+    scene: &DerivedScene,
+    map_buf: &[u32],
+    dot: (i32, i32),
+    target_radius: usize,
+    s: f32,
+    star_dir: [f32; 3],
+    orient: render::GlobeOrientation,
+) -> Vec<u32> {
+    let mut buf: Vec<u32> = map_buf
+        .iter()
+        .map(|&p| blend_u32(p, BG.pack(), s))
+        .collect();
+    let cx = lerp(dot.0 as f32, (w / 2) as f32, s).round() as i32;
+    let cy = lerp(dot.1 as f32, (h / 2) as f32, s).round() as i32;
+    let dot_r = DEMO_MAP_DOT_PX as f32;
+    let radius_px = (dot_r * (target_radius.max(1) as f32 / dot_r).powf(s))
+        .round()
+        .max(1.0) as usize;
+    let style = render::SurfaceStyle {
+        tint: Some(scene.material),
+        grid: None,
+    };
+    render::draw_globe_scene(
+        &mut buf,
+        w,
+        h,
+        cx,
+        cy,
+        radius_px,
+        &scene.tiles,
+        scene.cols,
+        scene.t_eff,
+        star_dir,
+        None,
+        scene.sky,
+        style,
+        orient,
+    );
+    buf
+}
+
+/// The interactive derived viewer's current view (display state, never canon): the zoomed-out SYSTEM MAP, a woosh
+/// transition zooming in or out, or a settled PLANET GLOBE (Principle 10).
+#[derive(Clone, Copy)]
+enum DerivedView {
+    Map,
+    WooshIn { planet: usize, frame: u32 },
+    Globe { planet: usize },
+    WooshOut { planet: usize, frame: u32 },
+}
+
 fn run_derived(argv: &[String]) {
     let star_mass = parse_fixed(argv.get(2), Fixed::ONE);
-    let orbit_au = parse_fixed(argv.get(3), Fixed::ONE);
-    let scene = match build_derived_scene(star_mass, orbit_au) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("the derived planet did not resolve: {e}");
-            eprintln!("(no planet is shown; nothing is fabricated)");
-            return;
-        }
-    };
-    print_derived_readout(&scene);
+    let orbit_arg = argv
+        .get(3)
+        .and_then(|s| Fixed::from_decimal_str(s.trim()).ok());
+    eprintln!("deriving the system map (a planet at each sampled orbit)...");
+    let planets = build_sampled_planets(star_mass, orbit_arg);
+    if planets.is_empty() {
+        eprintln!("no derived planets resolved at the sampled orbits; nothing is shown (nothing is fabricated)");
+        return;
+    }
+    eprintln!(
+        "system map: {} independently-derived planets sampled across the terrestrial zone",
+        planets.len()
+    );
+    eprintln!(
+        "  (a viewer input, NOT an emergent multi-body system; that is the solar-system generator, task #72)"
+    );
+    for p in &planets {
+        eprintln!(
+            "  orbit {:.2} AU: radius {:.0} km, T_eff {:.0} K, crust rgb({},{},{})",
+            p.scene.orbit_au.to_f64_lossy(),
+            p.scene.radius_m.to_f64_lossy() / 1000.0,
+            p.scene.t_eff.to_f64_lossy(),
+            p.scene.material.r,
+            p.scene.material.g,
+            p.scene.material.b,
+        );
+    }
+    eprintln!("  controls: click a planet to fly to it, esc/backspace to fly back, esc on the map to quit");
+    let star_t_eff = planets[0].scene.t_eff;
 
-    // The globe fixture reuses the shared globe renderer over the derived scene's fields.
-    let globe = GlobeFixture {
-        radius_m: scene.radius_m,
-        t_eff: scene.t_eff,
-        star_radius_ratio: scene.star_radius_ratio,
-        orbit_au: scene.orbit_au,
-        tiles: scene.tiles.clone(),
-        cols: scene.cols,
-        sky: scene.sky,
-    };
-    // One continuous zoom, all of it the sphere: from the distant star-lit globe (zoom 0) through the surface filling
-    // the frame and on into a close drill-down where the display tile grid subdivides. This replaces the old
-    // flat-tileset surface levels, so the zoom-in stays ON the sphere's surface.
+    // One continuous zoom, all of it the sphere, once you are on a planet globe.
     let zoom_levels = 12u32;
     let max_zoom = zoom_levels.saturating_sub(1);
 
-    let mut win_w = 960usize;
-    let mut win_h = 640usize;
     let mut window = Window::new(
         "civsim derived-planet viewer",
-        win_w,
-        win_h,
+        960,
+        640,
         WindowOptions {
             // A titled, resizable window: a resize reflows the render each frame from window.get_size(). Under WSLg
             // the Wayland compositor supplies no server-side title-bar decoration (minifb 0.27 has no client-side
@@ -1381,210 +1753,444 @@ fn run_derived(argv: &[String]) {
         eprintln!(
             "could not open a window: {e}\n\
              On WSL this needs WSLg (Windows 11) or an X server. The derived numbers printed above \
-             still describe the planet."
+             still describe the planets."
         );
         std::process::exit(1);
     });
     window.set_target_fps(30);
 
-    // The provenance register, loaded once for the hover panel's live authoring-surface count (fail-soft: the panel
-    // shows "register unavailable" rather than fabricating a number).
+    // The provenance register, loaded once for the globe view's hover panel (fail-soft: it shows "register unavailable"
+    // rather than fabricating a number).
     let floor_prov = civsim_physics::floor_provenance::FloorProvenance::embedded().ok();
     let mut show_provenance = false;
     let mut zoom: u32 = 0;
-    // The globe orientation the pan keys steer: a longitude spin (wraps) and a latitude tilt (clamped off the poles).
-    // Rotating brings the far side of the sphere into view, so the whole surface is reachable. Display-only state,
-    // never canon (Principle 10).
+    // The globe orientation the pan keys steer (display-only state, never canon, Principle 10).
     let mut rot_lon = 0.0f32;
     let mut rot_lat = 0.0f32;
-    while window.is_open() && !window.is_key_down(Key::Escape) {
-        for k in window.get_keys_pressed(KeyRepeat::No) {
-            match k {
-                Key::Equal | Key::NumPadPlus => zoom = (zoom + 1).min(max_zoom),
-                Key::Minus | Key::NumPadMinus => zoom = zoom.saturating_sub(1),
-                // Toggle the tile provenance panel (the sloppy-work catcher).
-                Key::P => show_provenance = !show_provenance,
-                Key::Home => {
-                    zoom = 0;
-                    rot_lon = 0.0;
-                    rot_lat = 0.0;
-                }
-                _ => {}
-            }
-        }
-        // WASD / arrow keys ROTATE the globe: longitude about the polar axis (wraps, so a full spin reaches every
-        // meridian) and latitude tilt (clamped near the poles to avoid the projection singularity). Held keys pan
-        // smoothly. The step and the latitude limit are non-canon display choices, documented at their site.
-        const ROT_STEP: f32 = 0.045; // radians per frame while a pan key is held (display pan-rate)
-        const LAT_LIMIT: f32 = 1.4; // ~80 degrees: keep the sampled centre off the pole singularity
-        use std::f32::consts::TAU;
-        if window.is_key_down(Key::Left) || window.is_key_down(Key::A) {
-            rot_lon -= ROT_STEP;
-        }
-        if window.is_key_down(Key::Right) || window.is_key_down(Key::D) {
-            rot_lon += ROT_STEP;
-        }
-        // Up/W tilts the view toward the north (the surface pans DOWN so higher latitudes come into view), the
-        // natural sense; the latitude tilt of the sampled centre therefore DECREASES as you press up. Down/S the
-        // mirror. (This corrects the earlier inverted mapping.)
-        if window.is_key_down(Key::Up) || window.is_key_down(Key::W) {
-            rot_lat = (rot_lat - ROT_STEP).max(-LAT_LIMIT);
-        }
-        if window.is_key_down(Key::Down) || window.is_key_down(Key::S) {
-            rot_lat = (rot_lat + ROT_STEP).min(LAT_LIMIT);
-        }
-        rot_lon = rot_lon.rem_euclid(TAU); // longitude wraps
+    let mut view = DerivedView::Map;
+    // The globe's on-screen radius at the moment a woosh-out begins, so the transition starts from the exact framing the
+    // globe was in (any zoom), for a smooth zoom back out.
+    let mut woosh_from_radius = 0usize;
+    // A frame clock for the derived spin animation (the day/night terminator sweep) and a mouse-edge tracker for clicks.
+    let mut spin_frame: u64 = 0;
+    let mut was_mouse_down = false;
 
+    while window.is_open() {
         let (w, h) = window.get_size();
         if w == 0 || h == 0 {
             window.update();
             continue;
         }
-        (win_w, win_h) = (w, h);
+        let keys: Vec<Key> = window.get_keys_pressed(KeyRepeat::No);
+        let min_dim = w.min(h);
+        let star_r = system_map_star_radius_px(min_dim);
+        let mouse_down = window.get_mouse_down(MouseButton::Left);
+        let mouse_pos = window.get_mouse_pos(MouseMode::Discard);
 
-        // One continuous zoom, all sphere: t runs 0 (distant globe) to 1 (surface fills the frame). The whole render
-        // is the star-lit globe (derived radius, blackbody star colour, day/night terminator, atmosphere limb),
-        // sampled at the current orientation so panning rotates the surface.
-        let t = if max_zoom == 0 {
-            1.0
-        } else {
-            zoom as f32 / max_zoom as f32
-        };
-        let orient = render::GlobeOrientation { rot_lon, rot_lat };
-        let (m_per_px, star_px, star_r) = derived_globe_view(&globe, win_w, win_h, t);
-        let radius_px = render::globe_radius_px(globe.radius_m, m_per_px);
-        let min_dim = win_w.min(win_h);
-        // The display tile grid refines with zoom: it holds a coarse base density on the distant planet, then doubles
-        // each time the globe doubles in on-screen size, so once the sphere fills the frame each tile opens into a 2x2
-        // finer array as you keep zooming in. It is overlaid once the sphere is large enough (the distant planet reads
-        // smooth); the pick and highlight always use the current grid, so hovering marks a cell of the visible tiles.
-        let (grid_cols, grid_rows) = surface_grid_dims(radius_px, min_dim);
-        let show_grid = radius_px as f32 >= min_dim as f32 * 0.5;
-        let style = render::SurfaceStyle {
-            tint: Some(scene.material),
-            grid: show_grid.then_some((grid_cols, grid_rows)),
-        };
-        let mut buf = render::render_solar_system_view(
-            globe.radius_m,
-            globe.t_eff,
-            &globe.tiles,
-            globe.cols,
-            win_w,
-            win_h,
-            m_per_px,
-            star_px,
-            star_r,
-            BG,
-            globe.sky,
-            style,
-            orient,
-        );
-        let mode = if show_grid {
-            format!(
-                "derived surface  zoom {}/{}  tiles {grid_cols}x{grid_rows}",
-                zoom + 1,
-                zoom_levels
-            )
-        } else {
-            format!("derived globe  zoom {}/{}", zoom + 1, zoom_levels)
-        };
-
-        // The cursor -> surface pick: invert the sphere map at the mouse to the tile under it (None off the sphere).
-        // The globe is centred in the frame; its on-screen radius is the derived radius at this zoom.
-        let gcx = (win_w / 2) as i32;
-        let gcy = (win_h / 2) as i32;
-        let picked = window
-            .get_mouse_pos(MouseMode::Discard)
-            .and_then(|(mx, my)| {
-                render::pick_surface_tile(
-                    mx as i32, my as i32, gcx, gcy, radius_px, orient, grid_cols, grid_rows,
-                )
-            });
-        // The highlight box marks the tile under the cursor, projected onto the sphere so it curves with the globe
-        // and stays put as it rotates. Fail-soft: no pick, no highlight.
-        if let Some((cu, cv)) = picked {
-            render::draw_surface_highlight(
-                &mut buf, win_w, win_h, gcx, gcy, radius_px, orient, grid_cols, grid_rows, cu, cv,
-                CURSOR,
-            );
-        }
-
-        // The readout HUD: the derived numbers, drawn top-left, so the planet is legible without the terminal.
-        let readout = format!(
-            "star {:.2} Msun  orbit {:.2} AU  |  T_eff {:.0}K  radius {:.0}km  g {:.2}",
-            scene.star_mass.to_f64_lossy(),
-            scene.orbit_au.to_f64_lossy(),
-            scene.t_eff.to_f64_lossy(),
-            scene.radius_m.to_f64_lossy() / 1000.0,
-            scene.gravity.to_f64_lossy(),
-        );
-        render::draw_label(
-            &mut buf,
-            win_w,
-            win_h,
-            4,
-            4,
-            &readout,
-            2,
-            Rgb::new(240, 240, 170),
-            Rgb::new(10, 12, 20),
-        );
-        let crust_line: Vec<String> = scene
-            .crust
-            .iter()
-            .take(4)
-            .map(|(el, _)| el.clone())
-            .collect();
-        render::draw_label(
-            &mut buf,
-            win_w,
-            win_h,
-            4,
-            20,
-            &format!(
-                "crust {}  air {}  |  +/- zoom  wasd/arrows rotate  p provenance  esc quit",
-                crust_line.join("-"),
-                scene
-                    .atmosphere
-                    .first()
-                    .map(|(n, _)| n.as_str())
-                    .unwrap_or("none")
-            ),
-            1,
-            Rgb::new(170, 180, 200),
-            Rgb::new(10, 12, 20),
-        );
-        // The provenance panel: on toggle, list the hovered crust tile's provenance breakdown on the right edge, so a
-        // fixture stands out amber against the derived and cited grades. It keys off the cursor's surface tile.
-        if show_provenance {
-            let lines = provenance_lines(&scene, floor_prov.as_ref(), picked);
-            let panel_w = 372usize;
-            let px = win_w.saturating_sub(panel_w);
-            for (i, (text, colour)) in lines.iter().enumerate() {
-                let py = 40 + i * 15;
-                if py + 12 < win_h {
+        let buf = match view {
+            DerivedView::Map => {
+                // Escape quits from the map.
+                if keys.contains(&Key::Escape) {
+                    break;
+                }
+                let bodies: Vec<render::MapBody> = planets
+                    .iter()
+                    .map(|p| map_body(p, DEMO_MAP_DOT_PX))
+                    .collect();
+                let (mut buf, dots) =
+                    render::render_system_map(w, h, BG, star_t_eff, star_r, &bodies);
+                // A fresh left click on a planet dot flies down to it (nearest dot within a small hit radius).
+                if mouse_down && !was_mouse_down {
+                    if let Some((mx, my)) = mouse_pos {
+                        let hit_r = DEMO_MAP_DOT_PX as i32 + 6;
+                        let mut best: Option<(i32, usize)> = None;
+                        for (i, (dx, dy)) in dots.iter().enumerate() {
+                            let ddx = mx as i32 - dx;
+                            let ddy = my as i32 - dy;
+                            let d2 = ddx * ddx + ddy * ddy;
+                            if d2 <= hit_r * hit_r && best.is_none_or(|(bd, _)| d2 < bd) {
+                                best = Some((d2, i));
+                            }
+                        }
+                        if let Some((_, i)) = best {
+                            zoom = 0;
+                            rot_lon = 0.0;
+                            rot_lat = 0.0;
+                            view = DerivedView::WooshIn {
+                                planet: i,
+                                frame: 0,
+                            };
+                        }
+                    }
+                }
+                // Labels: the star, each planet's orbit, and the two HUD lines (with the honesty caveat).
+                let (cx, cy) = ((w / 2) as i32, (h / 2) as i32);
+                render::draw_label(
+                    &mut buf,
+                    w,
+                    h,
+                    cx + star_r as i32 + 4,
+                    cy - 4,
+                    &format!(
+                        "star {:.2} Msun  {:.0}K",
+                        star_mass.to_f64_lossy(),
+                        star_t_eff.to_f64_lossy()
+                    ),
+                    1,
+                    Rgb::new(240, 230, 170),
+                    Rgb::new(10, 12, 20),
+                );
+                for (p, (dx, dy)) in planets.iter().zip(dots.iter()) {
                     render::draw_label(
                         &mut buf,
-                        win_w,
-                        win_h,
-                        (px + 6) as i32,
-                        py as i32,
-                        text,
+                        w,
+                        h,
+                        dx + DEMO_MAP_DOT_PX as i32 + 3,
+                        dy - 4,
+                        &format!("{:.2} AU", p.scene.orbit_au.to_f64_lossy()),
                         1,
-                        *colour,
+                        Rgb::new(190, 200, 220),
                         Rgb::new(10, 12, 20),
                     );
                 }
+                render::draw_label(
+                    &mut buf,
+                    w,
+                    h,
+                    4,
+                    4,
+                    &format!(
+                        "SYSTEM MAP  {} independently-derived worlds at sampled orbits (a viewer input, not an emergent system; task #72)",
+                        planets.len()
+                    ),
+                    1,
+                    Rgb::new(230, 230, 240),
+                    Rgb::new(10, 12, 20),
+                );
+                render::draw_label(
+                    &mut buf,
+                    w,
+                    h,
+                    4,
+                    18,
+                    "click a planet to fly down to it   esc quit",
+                    1,
+                    Rgb::new(170, 180, 200),
+                    Rgb::new(10, 12, 20),
+                );
+                window.set_title(&format!(
+                    "civsim system map  star {:.2} Msun  {} sampled worlds",
+                    star_mass.to_f64_lossy(),
+                    planets.len()
+                ));
+                buf
             }
-        }
-        window.set_title(&format!(
-            "civsim derived planet  star {:.2} Msun  orbit {:.2} AU  |  {mode}",
-            scene.star_mass.to_f64_lossy(),
-            scene.orbit_au.to_f64_lossy()
-        ));
+            DerivedView::WooshIn { planet, frame } => {
+                let scene = &planets[planet].scene;
+                let bodies: Vec<render::MapBody> = planets
+                    .iter()
+                    .map(|p| map_body(p, DEMO_MAP_DOT_PX))
+                    .collect();
+                let (map_buf, dots) =
+                    render::render_system_map(w, h, BG, star_t_eff, star_r, &bodies);
+                let dot = dots
+                    .get(planet)
+                    .copied()
+                    .unwrap_or(((w / 2) as i32, (h / 2) as i32));
+                // The globe's settled (zoom 0) on-screen radius is the woosh target.
+                let m_per_px = derived_globe_m_per_px(scene.radius_m, w, h, 0.0);
+                let target_radius = render::globe_radius_px(scene.radius_m, m_per_px);
+                let s = smoothstep(frame as f32 / WOOSH_FRAMES as f32);
+                let day_sweep = sweep_phase(spin_frame, TERMINATOR_SWEEP_FRAMES);
+                let year_sweep = sweep_phase(spin_frame, SEASON_SWEEP_FRAMES);
+                let star_dir = derived_sun_body_dir(&scene.attitude, day_sweep, year_sweep)
+                    .unwrap_or([0.0, 0.0, 1.0]);
+                let buf = draw_woosh_frame(
+                    w,
+                    h,
+                    scene,
+                    &map_buf,
+                    dot,
+                    target_radius,
+                    s,
+                    star_dir,
+                    render::GlobeOrientation::IDENTITY,
+                );
+                view = if frame + 1 >= WOOSH_FRAMES {
+                    DerivedView::Globe { planet }
+                } else {
+                    DerivedView::WooshIn {
+                        planet,
+                        frame: frame + 1,
+                    }
+                };
+                window.set_title("civsim derived planet  flying in...");
+                buf
+            }
+            DerivedView::WooshOut { planet, frame } => {
+                let scene = &planets[planet].scene;
+                let bodies: Vec<render::MapBody> = planets
+                    .iter()
+                    .map(|p| map_body(p, DEMO_MAP_DOT_PX))
+                    .collect();
+                let (map_buf, dots) =
+                    render::render_system_map(w, h, BG, star_t_eff, star_r, &bodies);
+                let dot = dots
+                    .get(planet)
+                    .copied()
+                    .unwrap_or(((w / 2) as i32, (h / 2) as i32));
+                // Reverse of the woosh-in: s runs from 1 (the globe framing it left) down to 0 (the dot), starting from
+                // the exact radius and orientation the globe was in, so any zoom flies back out smoothly.
+                let s = smoothstep(1.0 - frame as f32 / WOOSH_FRAMES as f32);
+                let day_sweep = sweep_phase(spin_frame, TERMINATOR_SWEEP_FRAMES);
+                let year_sweep = sweep_phase(spin_frame, SEASON_SWEEP_FRAMES);
+                let star_dir = derived_sun_body_dir(&scene.attitude, day_sweep, year_sweep)
+                    .unwrap_or([0.0, 0.0, 1.0]);
+                let buf = draw_woosh_frame(
+                    w,
+                    h,
+                    scene,
+                    &map_buf,
+                    dot,
+                    woosh_from_radius,
+                    s,
+                    star_dir,
+                    render::GlobeOrientation { rot_lon, rot_lat },
+                );
+                view = if frame + 1 >= WOOSH_FRAMES {
+                    DerivedView::Map
+                } else {
+                    DerivedView::WooshOut {
+                        planet,
+                        frame: frame + 1,
+                    }
+                };
+                window.set_title("civsim system map  flying out...");
+                buf
+            }
+            DerivedView::Globe { planet } => {
+                let scene = &planets[planet].scene;
+                // Discrete keys: zoom, provenance, recentre.
+                for k in &keys {
+                    match k {
+                        Key::Equal | Key::NumPadPlus => zoom = (zoom + 1).min(max_zoom),
+                        Key::Minus | Key::NumPadMinus => zoom = zoom.saturating_sub(1),
+                        Key::P => show_provenance = !show_provenance,
+                        Key::Home => {
+                            zoom = 0;
+                            rot_lon = 0.0;
+                            rot_lat = 0.0;
+                        }
+                        _ => {}
+                    }
+                }
+                // WASD / arrow keys rotate the globe (held keys pan smoothly). The step and latitude limit are non-canon
+                // display choices.
+                const ROT_STEP: f32 = 0.045;
+                const LAT_LIMIT: f32 = 1.4; // ~80 degrees: keep the sampled centre off the pole singularity
+                use std::f32::consts::TAU;
+                if window.is_key_down(Key::Left) || window.is_key_down(Key::A) {
+                    rot_lon -= ROT_STEP;
+                }
+                if window.is_key_down(Key::Right) || window.is_key_down(Key::D) {
+                    rot_lon += ROT_STEP;
+                }
+                if window.is_key_down(Key::Up) || window.is_key_down(Key::W) {
+                    rot_lat = (rot_lat - ROT_STEP).max(-LAT_LIMIT);
+                }
+                if window.is_key_down(Key::Down) || window.is_key_down(Key::S) {
+                    rot_lat = (rot_lat + ROT_STEP).min(LAT_LIMIT);
+                }
+                rot_lon = rot_lon.rem_euclid(TAU);
+
+                let t = if max_zoom == 0 {
+                    1.0
+                } else {
+                    zoom as f32 / max_zoom as f32
+                };
+                let orient = render::GlobeOrientation { rot_lon, rot_lat };
+                let m_per_px = derived_globe_m_per_px(scene.radius_m, w, h, t);
+                let radius_px = render::globe_radius_px(scene.radius_m, m_per_px);
+                let (grid_cols, grid_rows) = surface_grid_dims(radius_px, min_dim);
+                let show_grid = radius_px as f32 >= min_dim as f32 * 0.5;
+                let style = render::SurfaceStyle {
+                    tint: Some(scene.material),
+                    grid: show_grid.then_some((grid_cols, grid_rows)),
+                };
+                // The DERIVED sun direction, animated by the spin so the terminator sweeps as you watch.
+                let day_sweep = sweep_phase(spin_frame, TERMINATOR_SWEEP_FRAMES);
+                let year_sweep = sweep_phase(spin_frame, SEASON_SWEEP_FRAMES);
+                let star_dir = derived_sun_body_dir(&scene.attitude, day_sweep, year_sweep)
+                    .unwrap_or([0.0, 0.0, 1.0]);
+                let gcx = (w / 2) as i32;
+                let gcy = (h / 2) as i32;
+                let mut buf = vec![BG.pack(); w * h];
+                render::draw_globe_scene(
+                    &mut buf,
+                    w,
+                    h,
+                    gcx,
+                    gcy,
+                    radius_px,
+                    &scene.tiles,
+                    scene.cols,
+                    scene.t_eff,
+                    star_dir,
+                    None,
+                    scene.sky,
+                    style,
+                    orient,
+                );
+                // Cursor -> surface pick and highlight (fail-soft off the sphere).
+                let picked = mouse_pos.and_then(|(mx, my)| {
+                    render::pick_surface_tile(
+                        mx as i32, my as i32, gcx, gcy, radius_px, orient, grid_cols, grid_rows,
+                    )
+                });
+                if let Some((cu, cv)) = picked {
+                    render::draw_surface_highlight(
+                        &mut buf, w, h, gcx, gcy, radius_px, orient, grid_cols, grid_rows, cu, cv,
+                        CURSOR,
+                    );
+                }
+                // The readout HUD (derived numbers), drawn top-left.
+                render::draw_label(
+                    &mut buf,
+                    w,
+                    h,
+                    4,
+                    4,
+                    &format!(
+                        "star {:.2} Msun  orbit {:.2} AU  |  T_eff {:.0}K  radius {:.0}km  g {:.2}",
+                        scene.star_mass.to_f64_lossy(),
+                        scene.orbit_au.to_f64_lossy(),
+                        scene.t_eff.to_f64_lossy(),
+                        scene.radius_m.to_f64_lossy() / 1000.0,
+                        scene.gravity.to_f64_lossy(),
+                    ),
+                    2,
+                    Rgb::new(240, 240, 170),
+                    Rgb::new(10, 12, 20),
+                );
+                let crust_line: Vec<String> = scene
+                    .crust
+                    .iter()
+                    .take(4)
+                    .map(|(el, _)| el.clone())
+                    .collect();
+                render::draw_label(
+                    &mut buf,
+                    w,
+                    h,
+                    4,
+                    20,
+                    &format!(
+                        "crust {}  air {}  |  +/- zoom  wasd rotate  p provenance  esc/backspace map",
+                        crust_line.join("-"),
+                        scene
+                            .atmosphere
+                            .first()
+                            .map(|(n, _)| n.as_str())
+                            .unwrap_or("none")
+                    ),
+                    1,
+                    Rgb::new(170, 180, 200),
+                    Rgb::new(10, 12, 20),
+                );
+                if show_provenance {
+                    let lines = provenance_lines(scene, floor_prov.as_ref(), picked);
+                    let panel_w = 372usize;
+                    let px = w.saturating_sub(panel_w);
+                    for (i, (text, colour)) in lines.iter().enumerate() {
+                        let py = 40 + i * 15;
+                        if py + 12 < h {
+                            render::draw_label(
+                                &mut buf,
+                                w,
+                                h,
+                                (px + 6) as i32,
+                                py as i32,
+                                text,
+                                1,
+                                *colour,
+                                Rgb::new(10, 12, 20),
+                            );
+                        }
+                    }
+                }
+                let mode = if show_grid {
+                    format!(
+                        "derived surface  zoom {}/{}  tiles {grid_cols}x{grid_rows}",
+                        zoom + 1,
+                        zoom_levels
+                    )
+                } else {
+                    format!("derived globe  zoom {}/{}", zoom + 1, zoom_levels)
+                };
+                window.set_title(&format!(
+                    "civsim derived planet  orbit {:.2} AU  |  {mode}",
+                    scene.orbit_au.to_f64_lossy()
+                ));
+                // Escape or Backspace flies back out to the map, starting from the current on-screen radius so the woosh
+                // begins from exactly this framing.
+                if keys.contains(&Key::Escape) || keys.contains(&Key::Backspace) {
+                    woosh_from_radius = radius_px;
+                    view = DerivedView::WooshOut { planet, frame: 0 };
+                }
+                buf
+            }
+        };
+
         window
-            .update_with_buffer(&buf, win_w, win_h)
+            .update_with_buffer(&buf, w, h)
             .expect("blit the frame");
+        was_mouse_down = mouse_down;
+        spin_frame = spin_frame.wrapping_add(1);
+    }
+}
+
+/// Headless system-map render: `--system-map <path> [star_mass] [w] [h]` derives a planet at each sampled orbit, draws
+/// the zoomed-out system map (the star, the orbit ellipses, the planet dots) to a binary PPM, and prints the derived
+/// star and per-planet numbers. Mirrors the `--derived-globe` headless pattern so the map is checkable without a display.
+fn system_map_cmd(argv: &[String]) {
+    let path = argv
+        .get(2)
+        .cloned()
+        .unwrap_or_else(|| "system-map.ppm".to_string());
+    let star_mass = parse_fixed(argv.get(3), Fixed::ONE);
+    let w: usize = parse(argv.get(4), 900);
+    let h: usize = parse(argv.get(5), 700);
+    let planets = build_sampled_planets(star_mass, None);
+    if planets.is_empty() {
+        eprintln!("no derived planets resolved at the sampled orbits; nothing written");
+        return;
+    }
+    let star_t_eff = planets[0].scene.t_eff;
+    let min_dim = w.min(h);
+    let star_r = system_map_star_radius_px(min_dim);
+    let bodies: Vec<render::MapBody> = planets
+        .iter()
+        .map(|p| map_body(p, DEMO_MAP_DOT_PX))
+        .collect();
+    let (buf, dots) = render::render_system_map(w, h, BG, star_t_eff, star_r, &bodies);
+    write_ppm(&path, w, h, &buf);
+    eprintln!(
+        "wrote {path} ({w}x{h}) system map: star T_eff {:.0} K, {} independently-derived planets (sampled orbits, NOT an emergent system; task #72):",
+        star_t_eff.to_f64_lossy(),
+        planets.len()
+    );
+    for (p, dot) in planets.iter().zip(dots.iter()) {
+        eprintln!(
+            "  orbit {:.2} AU  radius {:.0} km  T_eff {:.0} K  crust rgb({},{},{})  dot@({},{})",
+            p.scene.orbit_au.to_f64_lossy(),
+            p.scene.radius_m.to_f64_lossy() / 1000.0,
+            p.scene.t_eff.to_f64_lossy(),
+            p.scene.material.r,
+            p.scene.material.g,
+            p.scene.material.b,
+            dot.0,
+            dot.1,
+        );
     }
 }
 
@@ -1614,6 +2220,12 @@ fn main() {
     }
     if argv.get(1).map(|s| s == "--globe").unwrap_or(false) {
         globe_cmd(&argv);
+        return;
+    }
+    // Headless system map: `--system-map <path> [star_mass] [w] [h]` writes the zoomed-out system map (star, orbit
+    // ellipses, planet dots) of the sampled derived planets to a PPM and exits.
+    if argv.get(1).map(|s| s == "--system-map").unwrap_or(false) {
+        system_map_cmd(&argv);
         return;
     }
     // Interactive derived-planet viewer: `--derived [star_mass] [orbit_au]` derives a planet from a star mass and an
@@ -1875,6 +2487,8 @@ fn main() {
                     fx.sky,
                     render::SurfaceStyle::default(),
                     render::GlobeOrientation::IDENTITY,
+                    // The living-world globe carries no orbital phase; keep the screen-space light (byte-identical).
+                    None,
                 ),
                 CELL as i32,
                 1,
