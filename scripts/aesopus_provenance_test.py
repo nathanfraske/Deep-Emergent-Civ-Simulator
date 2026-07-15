@@ -72,6 +72,31 @@ def check_manifest(provs):
     print(f"PASS: {len(provs)} manifest compositions derive from their POST parameters")
 
 
+def check_optical_manifest():
+    # The optical-constants fixture manifest's md5 (the receipt) must match the vendored .dat it names, so a corrupted
+    # or swapped n,k file fails the integrity gate. Same fixture-manifest idiom as the opacity grids.
+    import re, hashlib
+
+    oc = os.path.join(HERE, "..", "crates", "physics", "data", "optical_constants_aesopus")
+    text = open(os.path.join(oc, "manifest.toml")).read()
+    failures = 0
+    n = 0
+    for block in re.split(r"\[\[species\]\]", text)[1:]:
+        g = dict(re.findall(r'(\w+)\s*=\s*"((?:[^"\\]|\\.)*)"', block))
+        n += 1
+        path = os.path.join(oc, g["file"])
+        if not os.path.exists(path):
+            print("OPTICAL MISSING", g["file"])
+            failures += 1
+            continue
+        got = hashlib.md5(open(path, "rb").read()).hexdigest()
+        if got != g["md5"]:
+            print("OPTICAL MD5 DRIFT", g["file"], "manifest", g["md5"], "file", got)
+            failures += 1
+    assert failures == 0, f"{failures} optical-fixture md5 mismatch(es)"
+    print(f"PASS: {n} optical-fixture species match their manifest md5")
+
+
 def main():
     regen = "--regen" in sys.argv
     form_html = open(FORM).read()
@@ -101,6 +126,7 @@ def main():
         assert failures == 0, f"{failures} provenance byte-equality mismatch(es)"
         print(f"PASS: {len(provs)} provenance records reproduce byte-identically")
         check_manifest(provs)
+        check_optical_manifest()
 
 
 if __name__ == "__main__":
