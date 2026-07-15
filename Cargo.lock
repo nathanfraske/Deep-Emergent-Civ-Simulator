@@ -375,6 +375,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "civsim-stone0"
+version = "0.1.0"
+
+[[package]]
 name = "civsim-units"
 version = "0.1.0"
 dependencies = [

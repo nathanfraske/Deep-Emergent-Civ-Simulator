@@ -117,3 +117,31 @@ jobs:
         run: cargo nextest run --workspace
       - name: Doctests
         run: cargo test --workspace --doc
+
+  # Q1 Stone 0: the provenance gate, run in CI as a backstop to the local-firing gate (the build.rs
+  # wiring is a separate owner-gated step). CI has no secrets directory, so the gate's --ci mode runs the
+  # provenance, tombstone (tracked-tree), and override-env scans only and NEVER attempts the live-password
+  # scan. The extra step greps the pushed range for every retired tombstone phrase, and the full history
+  # whenever the tombstone list itself changed. fetch-depth: 0 is required for those range and history
+  # greps.
+  stone0:
+    name: Stone 0 gate
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Install the pinned toolchain
+        run: rustup show
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@v2
+      - name: Stone 0 self-test (prove every detector fires)
+        run: cargo run -p civsim-stone0 --bin stone0-gate -- --self-test
+      - name: Stone 0 gate (provenance + tombstone tree + override-env scans; no secrets on the runner)
+        run: cargo run -p civsim-stone0 --bin stone0-gate -- --ci
+      - name: Stone 0 tombstone range and full-history grep
+        env:
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
+        run: bash scripts/stone0-ci-tombstone-scan.sh

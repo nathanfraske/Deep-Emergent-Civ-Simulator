@@ -1,0 +1,30 @@
+# Copyright 2026 Nathan M. Fraske
+# Licensed under the Apache License, Version 2.0; see LICENSE.
+[package]
+name = "civsim-stone0"
+description = "Q1 Stone 0: the local-firing provenance gate. A dependency-free enforcement gate that runs the existing provenance discipline (the python gates) as a violation predicate, checks a human-password override against the local secrets directory, and scans the tracked tree for laundered credentials, retired tombstone phrases, and a baked-in override. Fails OPEN on any operational error and CLOSED only on a positive detection. Not yet wired into any build script (increment 4 is the owner's to gate)."
+authors.workspace = true
+license.workspace = true
+edition.workspace = true
+version.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+# The gate has no external dependencies on purpose: base64 is implemented inline, hashing is a small
+# native FNV, and every scan is std-only. Nothing here can pull a version that perturbs a build, and the
+# crate is deliberately depended on by nothing (increment 4, the build.rs wiring, is reserved).
+[dependencies]
+
+# The library is the gate; the binary is a thin CLI over it, named stone0-gate for CI and local use.
+[lib]
+name = "civsim_stone0"
+path = "src/lib.rs"
+
+[[bin]]
+name = "stone0-gate"
+path = "src/main.rs"
+
+[lints.clippy]
+# R-CANON-WALK is scoped to the canonical tick-state crates (core, sim, world); this gate holds no
+# simulation state, so the ordered-container lint is off here. The gate uses only BTree* regardless.
+disallowed_types = "allow"

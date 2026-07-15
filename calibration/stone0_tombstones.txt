@@ -1,0 +1,19 @@
+# Stone 0 tombstone list: RETIRED (now-declassified) override phrases.
+#
+# Each non-empty, non-comment line below is a single override password that WAS live and has since been
+# retired. Retirement declassifies a phrase: a retired password opens nothing, so it is safe to commit
+# here in plaintext. The list exists so a phrase laundered into the repo while it was live is caught
+# retroactively, on the first run after that phrase is retired.
+#
+# How it is used:
+#   - The local gate and CI grep the tracked tree for every phrase below (excluding this file itself). A
+#     hit is a stale laundered credential and fails the build, so the owner learns a copy was persisted.
+#   - CI greps the pushed commit range for every phrase on every run, and greps the FULL history whenever
+#     this file itself changes in a push (so adding a phrase re-checks everything for it).
+#
+# The rotate-on-grant ritual (see docs/working/Q1_STONE0_PROVENANCE_GATE_DESIGN.md, "Owner ritual and
+# setup"): when the owner grants an override, in the same sitting the owner retires that phrase by
+# appending it here (one per line) and memorizes a fresh, unrelated password in the secrets file.
+#
+# Do NOT invent phrases. Only the owner appends a truly retired phrase, and only after it has been
+# rotated out of the secrets file. This file starts empty of phrases on purpose.
