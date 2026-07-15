@@ -60,6 +60,7 @@ pub mod optical_constants;
 pub mod periodic;
 pub mod petrology;
 pub mod petrology_data;
+pub mod phonon;
 pub mod polarizability;
 pub mod qeq;
 pub mod quantities;
