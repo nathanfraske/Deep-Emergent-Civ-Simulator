@@ -43,6 +43,7 @@ pub mod crystal_field;
 pub mod d_state_radius;
 pub mod ewald;
 pub mod floor_provenance;
+pub mod force_constant;
 pub mod geodynamics;
 pub mod graph;
 pub mod ionic_radii;
