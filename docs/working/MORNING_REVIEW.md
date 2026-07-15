@@ -21,6 +21,7 @@ Resolved since the last review (no ruling needed, noted for your tracking): the 
 
 Interim reversible calls (logged, reversible):
 
+- FLAG (owner 2026-07-15, leave labelled until seam 4): the 30 km crustal-thickness LITERAL in the viewer build_derived_scene (main.rs ~1025) is the sub-solidus buoyancy-fallback that seam 6's derived McKenzie-Bickle thickness does not cover for the refractory solar mantle. It is authorship in the runpath. FULL retirement is seam 4 (the deep-time run: the crust builds up from accumulated melt extraction over the mantle's thermal history, spatially varying = the real topography); pinned as an explicit line item on that task so it cannot slide. On a uniform snapshot the absolute value barely shows (uniform crust = uniform relief). Owner elected to leave it labelled until seam 4 subsumes it rather than the interim honest-limit fail-soft.
 - The crust/mantle density split evaluates the phase densities at labelled surface conditions (T~300 K, ~1 bar); reversible, a named surface-condition fixture.
 - The current derived crust is the Mg-Si system the JANAF gas species can balance (forsterite/enstatite/Fe/troilite); the dramatic feldspathic crust needs Al and Ca gas species JANAF lacks, so I kicked that gas-species fetch overnight (Al, Ca, Ti gas thermochemistry) to deepen the crust to real anorthite/feldspar; until it lands the crust is the pyroxene the data supports, honestly labelled.
 
