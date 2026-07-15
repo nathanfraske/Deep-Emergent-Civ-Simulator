@@ -40,11 +40,16 @@
 //! enstatite reads `Mg:Si:O = 1:1:3` and not the oxygen-heavy solar element budget it condensed from. The
 //! `DifferentiatedPlanet::surface_composition` field below is a coarser AUDIT view (the floating-fraction elements
 //! at their bulk abundance, an at-a-glance which-elements-floated, distinct from the crust assemblage the tiles
-//! read). The crust-versus-mantle split within the floating fraction (the crust is the low-melting PARTIAL MELT,
-//! not the whole silicate) is a buoyancy split here; the melting model that would set the melt fraction is named,
-//! not built (the seam-6 melt rung).
+//! read). The crust-versus-mantle split within the floating fraction is now the PARTIAL-MELT MECHANISM (seam 6,
+//! [`partial_melt_crust_and_mantle`]): the crust is the low-melting FIRST MELT the banked Schroeder-van Laar melt
+//! rung ([`civsim_physics::melting`]) extracts, enriched in the fusible phases, and the mantle is the refractory
+//! residue it leaves; the earlier pure-buoyancy split ([`crust_and_mantle`]) remains as the named fail-soft
+//! fallback for a floating set with no melting data or a sub-solidus mantle.
 
 use civsim_core::Fixed;
+use civsim_physics::melting::{
+    adiabatic_melt_column, eutectic_liquid_composition, multicomponent_solidus, Endmember,
+};
 use std::collections::BTreeMap;
 
 /// Parse a condensed-species name (its phase suffix stripped) into element counts. General over any formula, so an
@@ -209,6 +214,192 @@ where
         }
     }
     Some((crust, mantle))
+}
+
+/// One gigapascal in bars, the petrology pressure unit the melt rung reads (the solidus slope is taken as the
+/// solidus at 1 GPa minus at the surface). An engine unit bridge, not world content.
+const ONE_GPA_IN_BAR: i32 = 10_000;
+
+/// The McKenzie-Bickle (1988) adiabatic-decompression-melting-column parameters the crustal-thickness closure
+/// reads, gathered so the mechanism stays a pure function of data (nothing authored in the kernel). The solidus
+/// (surface value and slope) is NOT here: it is DERIVED from the endmember signatures inside
+/// [`partial_melt_crust_and_mantle`] (consuming the melt rung). These are the interior-thermostat and mantle-
+/// floor inputs the caller supplies (each reserved-with-basis and cited, or itself derived), so an alien mantle
+/// is a different set of numbers, never a code path.
+#[derive(Clone, Copy, Debug)]
+pub struct MeltColumnParams {
+    /// The mantle POTENTIAL TEMPERATURE (kelvin): the adiabat projected to the surface, the interior thermostat's
+    /// output. Below the derived solidus the mantle melts nothing (a sub-solidus mantle yields no partial-melt
+    /// crust, the fail-soft to buoyancy).
+    pub potential_temperature_k: Fixed,
+    /// The mantle ADIABAT slope (kelvin per gigapascal), dT/dP along the isentrope.
+    pub adiabat_slope_k_per_gpa: Fixed,
+    /// The isentropic melting PRODUCTIVITY dF/dP (per gigapascal) near the solidus.
+    pub productivity_per_gpa: Fixed,
+    /// The mantle SOURCE DENSITY (kilograms per cubic metre) the pooled-melt thickness divides by.
+    pub source_density_kg_per_m3: Fixed,
+    /// The surface GRAVITY (metres per second squared).
+    pub gravity_m_per_s2: Fixed,
+}
+
+/// The result of the partial-melt crust extraction: the CRUST (the extracted first melt) and the MANTLE (the
+/// refractory residue) as weighted phase lists, plus the McKenzie-Bickle crustal thickness. When the melt rung
+/// cannot run (a floating phase with no melting datum, an unsolvable eutectic, or a sub-solidus mantle),
+/// `used_partial_melt` is false and the split is the pure-buoyancy fallback with no thickness (fail-soft, named).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PartialMeltCrust {
+    /// The CRUST phases as `(name, liquid mole fraction x_i)`: the extracted first melt, enriched in the fusible
+    /// phases (the incompatible-element enrichment falls out of this weighting, no separate model). Weights sum
+    /// to one. On the buoyancy fallback these are the least-dense floating phases at their input presence.
+    pub crust: Vec<(String, Fixed)>,
+    /// The MANTLE phases as `(name, residue weight)`: the refractory residue the melt leaves (the source share
+    /// minus the melt it gave up), enriched in the small-liquid-fraction refractory phases (olivine). On the
+    /// buoyancy fallback these are the denser floating phases at their input presence.
+    pub mantle: Vec<(String, Fixed)>,
+    /// The McKenzie-Bickle crustal thickness (kilometres), `None` on the buoyancy fallback (no melt column).
+    pub crust_thickness_km: Option<Fixed>,
+    /// The peak melt fraction at the top of the column, for audit; `None` on the buoyancy fallback.
+    pub max_melt_fraction: Option<Fixed>,
+    /// The pressure (gigapascals) at which the rising mantle first crossed the solidus; `None` on the fallback.
+    pub onset_pressure_gpa: Option<Fixed>,
+    /// Whether the PARTIAL-MELT mechanism ran (`true`) or the split fell back to buoyancy (`false`).
+    pub used_partial_melt: bool,
+}
+
+/// THE PARTIAL-MELT CRUST EXTRACTION (seam 6): split the floating silicate fraction into the CRUST (the low-
+/// melting first melt) and the MANTLE (the refractory residue) by the banked Schroeder-van Laar melt rung
+/// ([`civsim_physics::melting`]), the physically-correct partial-melt mechanism that replaces "least-dense whole
+/// phase = crust" with "the melt = crust". The crust is the eutectic FIRST-MELT liquid composition at the
+/// crustal reference pressure: enriched in the fusible phases (clinopyroxene, plagioclase: a basalt) and
+/// depleted in the refractory olivine, so the incompatible-element enrichment is an OUTPUT of the eutectic
+/// weighting, never a separate model. The mantle is the batch-melt residue, `residue_i = source_i - F * x_i`,
+/// enriched in the refractory phases the melt left behind. The crustal THICKNESS is the McKenzie-Bickle
+/// decompression-melting column, `crust = (dF/dP) P0^2 / (2 rho g)`, whose solidus (surface value and slope) is
+/// DERIVED from the endmember signatures here (consuming the rung), the rest of its inputs the caller's data.
+///
+/// FAIL-SOFT (named): a floating phase with no `Endmember` (missing melting datum), an unsolvable eutectic, or a
+/// SUB-SOLIDUS mantle (the potential temperature does not cross the derived solidus, so no melt forms) falls
+/// back to the pure-buoyancy split ([`crust_and_mantle`]) with `used_partial_melt = false` and no thickness, so
+/// the chain never aborts on incomplete data or a cold mantle. Admit-the-alien: the mechanism keys off each
+/// phase's own `Endmember` signature (via `endmember_of`), so any endmember set (an alien crust) is a data row.
+///
+/// `floating` is the oxygen-bearing silicate fraction ([`DifferentiatedPlanet::floating`]); `source_amounts`
+/// gives each phase's VCS modal amount (the saturation presence otherwise), the residue mass balance's source
+/// weights; `endmember_of` reads a phase's melting signature by species name (the melting registry);
+/// `density_of` is the buoyancy fallback's density read; `reference_pressure_bar` is where the first-melt
+/// composition is taken (the surface, where the pooled melt sits); `params` are the McKenzie-Bickle inputs.
+/// `None` only if the buoyancy fallback itself cannot resolve (no floating-phase density), the same fail-loud as
+/// [`crust_and_mantle`].
+pub fn partial_melt_crust_and_mantle<E, D>(
+    floating: &[(String, Fixed)],
+    source_amounts: &BTreeMap<String, Fixed>,
+    endmember_of: E,
+    density_of: D,
+    reference_pressure_bar: Fixed,
+    params: &MeltColumnParams,
+) -> Option<PartialMeltCrust>
+where
+    E: Fn(&str) -> Option<Endmember>,
+    D: Fn(&str) -> Option<Fixed>,
+{
+    if floating.is_empty() {
+        return None;
+    }
+    // Gather each floating phase's endmember. A single missing melting datum trips the fail-soft buoyancy
+    // fallback (named), so the chain never aborts on incomplete data. Input order preserved (determinism).
+    let mut endmembers: Vec<Endmember> = Vec::with_capacity(floating.len());
+    for (name, _) in floating {
+        match endmember_of(name) {
+            Some(em) => endmembers.push(em),
+            None => return buoyancy_fallback(floating, density_of),
+        }
+    }
+    // The FIRST-MELT (eutectic) liquid composition at the crustal reference pressure = the CRUST (the extracted
+    // partial melt, enriched in the fusible phases). The mole fractions come back in the input order.
+    let x_liq = match eutectic_liquid_composition(&endmembers, reference_pressure_bar) {
+        Some((_t_sol, xs)) => xs,
+        None => return buoyancy_fallback(floating, density_of),
+    };
+    // The crustal THICKNESS via the McKenzie-Bickle column. The solidus surface value and slope are DERIVED from
+    // the endmember signatures (consuming the rung), never authored: the multi-saturation solidus at the surface
+    // and at one gigapascal.
+    let solidus_surface = multicomponent_solidus(&endmembers, Fixed::ZERO)?;
+    let solidus_deep = multicomponent_solidus(&endmembers, Fixed::from_int(ONE_GPA_IN_BAR))?;
+    let solidus_slope = solidus_deep.checked_sub(solidus_surface)?;
+    let column = adiabatic_melt_column(
+        params.potential_temperature_k,
+        solidus_surface,
+        solidus_slope,
+        params.adiabat_slope_k_per_gpa,
+        params.productivity_per_gpa,
+        params.source_density_kg_per_m3,
+        params.gravity_m_per_s2,
+    );
+    // A sub-solidus mantle (no melt) has no partial-melt crust: fall back to buoyancy (the pre-melt density
+    // sorting, the honest state when the mantle is too cold to melt).
+    let column = match column {
+        Some(c) if c.crust_thickness_km > Fixed::ZERO && c.max_melt_fraction > Fixed::ZERO => c,
+        _ => return buoyancy_fallback(floating, density_of),
+    };
+    let f = column.max_melt_fraction;
+    // The normalized source weights (the VCS modal amount, the saturation presence otherwise), for the batch-
+    // melt residue.
+    let mut source_weights: Vec<Fixed> = Vec::with_capacity(floating.len());
+    let mut total = Fixed::ZERO;
+    for (name, presence) in floating {
+        let w = source_amounts.get(name).copied().unwrap_or(*presence);
+        let w = if w < Fixed::ZERO { Fixed::ZERO } else { w };
+        total = total.checked_add(w)?;
+        source_weights.push(w);
+    }
+    if total <= Fixed::ZERO {
+        return buoyancy_fallback(floating, density_of);
+    }
+    // The crust is the melt (weight = liquid mole fraction); the mantle is the residue,
+    // residue_i = source_share_i - F * x_i, clamped at zero (a fusible phase can be fully consumed into the melt).
+    let mut crust: Vec<(String, Fixed)> = Vec::with_capacity(floating.len());
+    let mut mantle: Vec<(String, Fixed)> = Vec::with_capacity(floating.len());
+    for (i, (name, _)) in floating.iter().enumerate() {
+        let x = x_liq[i];
+        if x > Fixed::ZERO {
+            crust.push((name.clone(), x));
+        }
+        let share = source_weights[i].checked_div(total)?;
+        let removed = f.checked_mul(x)?;
+        let residue = share.checked_sub(removed).unwrap_or(Fixed::ZERO);
+        if residue > Fixed::ZERO {
+            mantle.push((name.clone(), residue));
+        }
+    }
+    if crust.is_empty() || mantle.is_empty() {
+        return buoyancy_fallback(floating, density_of);
+    }
+    Some(PartialMeltCrust {
+        crust,
+        mantle,
+        crust_thickness_km: Some(column.crust_thickness_km),
+        max_melt_fraction: Some(column.max_melt_fraction),
+        onset_pressure_gpa: Some(column.onset_pressure_gpa),
+        used_partial_melt: true,
+    })
+}
+
+/// The pure-buoyancy fallback packaged as a [`PartialMeltCrust`] with no melt column, so the partial-melt
+/// caller degrades to the earlier split without a special-case return type. `None` only if the buoyancy split
+/// cannot resolve a single floating-phase density (the same fail-loud as [`crust_and_mantle`]).
+fn buoyancy_fallback<D>(floating: &[(String, Fixed)], density_of: D) -> Option<PartialMeltCrust>
+where
+    D: Fn(&str) -> Option<Fixed>,
+{
+    let (crust, mantle) = crust_and_mantle(floating, density_of)?;
+    Some(PartialMeltCrust {
+        crust,
+        mantle,
+        crust_thickness_km: None,
+        max_melt_fraction: None,
+        onset_pressure_gpa: None,
+        used_partial_melt: false,
+    })
 }
 
 /// THE ASSEMBLAGE COMPOSITION (seam 5): the element amounts of a phase set as the ROCK it is, the sum over the
@@ -439,5 +630,306 @@ mod tests {
             mantle.iter().any(|(n, _)| n.starts_with("Mg2SiO4")),
             "the denser forsterite is the mantle residue"
         );
+    }
+
+    // The fertile lherzolite endmember signatures (the cited data-file values, `data/melting_endmembers.toml`)
+    // as a species-name lookup, so the partial-melt tests key off each phase's own melting data (the admit-the-
+    // alien mechanism) and exercise the real primary-cited signatures. Anorthite's fusion volume is the unsourced
+    // zero (the surface-only rung), flagged not fabricated.
+    fn fertile_endmember(name: &str) -> Option<Endmember> {
+        let formula = name.split('(').next()?;
+        Some(match formula {
+            "Mg2SiO4" => Endmember {
+                melting_point_k: Fixed::from_int(2163),
+                fusion_enthalpy_j_per_mol: Fixed::from_int(142_000),
+                fusion_volume_cm3_per_mol: Fixed::from_ratio(384, 100),
+            },
+            "MgSiO3" => Endmember {
+                melting_point_k: Fixed::from_int(1830),
+                fusion_enthalpy_j_per_mol: Fixed::from_int(73_000),
+                fusion_volume_cm3_per_mol: Fixed::from_ratio(481, 100),
+            },
+            "CaMgSi2O6" => Endmember {
+                melting_point_k: Fixed::from_int(1665),
+                fusion_enthalpy_j_per_mol: Fixed::from_int(138_500),
+                fusion_volume_cm3_per_mol: Fixed::from_ratio(132, 10),
+            },
+            "CaAl2Si2O8" => Endmember {
+                melting_point_k: Fixed::from_int(1830),
+                fusion_enthalpy_j_per_mol: Fixed::from_int(135_600),
+                fusion_volume_cm3_per_mol: Fixed::ZERO,
+            },
+            _ => return None,
+        })
+    }
+
+    // A normal-mantle McKenzie-Bickle parameter set (potential temperature 1588 K, adiabat 15.5 K/GPa,
+    // productivity 0.12/GPa, source density 3300 kg/m3, gravity 9.8), the melt rung's validated inputs.
+    fn normal_params() -> MeltColumnParams {
+        MeltColumnParams {
+            potential_temperature_k: Fixed::from_int(1588),
+            adiabat_slope_k_per_gpa: Fixed::from_ratio(155, 10),
+            productivity_per_gpa: Fixed::from_ratio(12, 100),
+            source_density_kg_per_m3: Fixed::from_int(3300),
+            gravity_m_per_s2: Fixed::from_ratio(98, 10),
+        }
+    }
+
+    fn fertile_floating() -> (Vec<(String, Fixed)>, BTreeMap<String, Fixed>) {
+        let floating = vec![
+            one("Mg2SiO4(cr,forsterite)"),
+            one("MgSiO3(cr,enstatite)"),
+            one("CaMgSi2O6(cr,diopside)"),
+            one("CaAl2Si2O8(cr,anorthite)"),
+        ];
+        let amounts: BTreeMap<String, Fixed> = floating
+            .iter()
+            .map(|(n, _)| (n.clone(), Fixed::ONE))
+            .collect();
+        (floating, amounts)
+    }
+
+    #[test]
+    fn the_derived_crust_is_the_fusible_first_melt_not_the_least_dense_whole_phase() {
+        // SEAM 6: the crust is the eutectic FIRST MELT, enriched in the fusible clinopyroxene and depleted in the
+        // refractory olivine (a basalt), and the mantle is the refractory residue, both from the endmember
+        // signatures. This replaces "least-dense whole phase = crust" (the buoyancy proxy) with the partial-melt
+        // mechanism.
+        let (floating, amounts) = fertile_floating();
+        let density = |_: &str| Some(Fixed::from_int(3));
+        let pm = partial_melt_crust_and_mantle(
+            &floating,
+            &amounts,
+            fertile_endmember,
+            density,
+            Fixed::ZERO,
+            &normal_params(),
+        )
+        .expect("the fertile assemblage splits");
+        assert!(pm.used_partial_melt, "the partial-melt mechanism engaged");
+        let crust_w = |formula: &str| {
+            pm.crust
+                .iter()
+                .find(|(n, _)| n.starts_with(formula))
+                .map(|(_, w)| w.to_f64_lossy())
+                .unwrap_or(0.0)
+        };
+        let fo = crust_w("Mg2SiO4");
+        let di = crust_w("CaMgSi2O6");
+        // The source is four phases at equal share (0.25 each); the melt depletes olivine below and enriches
+        // clinopyroxene above that, the incompatible-element enrichment out of the eutectic weighting alone.
+        assert!(
+            fo < 0.25 && di > 0.25,
+            "the crust melt is depleted in olivine ({fo}) and enriched in clinopyroxene ({di}) vs the equal-share source"
+        );
+        assert!(
+            di > fo,
+            "the crust is basalt-leaning (clinopyroxene over olivine), di {di} vs fo {fo}"
+        );
+        // The mantle residue retains and is enriched in the refractory olivine relative to the crust melt.
+        let mantle_fo = pm
+            .mantle
+            .iter()
+            .find(|(n, _)| n.starts_with("Mg2SiO4"))
+            .map(|(_, w)| w.to_f64_lossy())
+            .unwrap_or(0.0);
+        let mantle_total: f64 = pm.mantle.iter().map(|(_, w)| w.to_f64_lossy()).sum();
+        assert!(
+            mantle_fo / mantle_total > fo,
+            "the refractory olivine is enriched in the mantle residue ({}) over the crust melt ({fo})",
+            mantle_fo / mantle_total
+        );
+    }
+
+    #[test]
+    fn the_derived_chain_makes_a_sane_oceanic_crust_thickness() {
+        // The McKenzie-Bickle column threaded through the derived solidus: the fully-derived chain (endmember
+        // signatures -> multi-saturation solidus -> crust) makes a thin-but-sane oceanic crust at a normal
+        // potential temperature. The rung-0 ideal solidus is ~150 K high, and with the cited (large, correct)
+        // diopside fusion volume the solidus slope steepens toward the measured ~130 K/GPa, shrinking the melt
+        // column, so the derived chain lands near ~2 km, UNDER McKenzie-Bickle's 6.5 km by the ideal-solution
+        // offset the rung-1 Margules calibration closes (measured directly by the closure test below). The gate
+        // is that the derived crust is positive, non-degenerate, and physically plausible (not 0, not tens of km).
+        let (floating, amounts) = fertile_floating();
+        let density = |_: &str| Some(Fixed::from_int(3));
+        let pm = partial_melt_crust_and_mantle(
+            &floating,
+            &amounts,
+            fertile_endmember,
+            density,
+            Fixed::ZERO,
+            &normal_params(),
+        )
+        .expect("the fertile chain splits");
+        let t = pm
+            .crust_thickness_km
+            .expect("the melt column resolved a thickness")
+            .to_f64_lossy();
+        assert!(
+            (1.0..8.0).contains(&t),
+            "the derived-solidus chain makes a thin-but-sane oceanic crust (~2 km, the ideal-solution grade under McKenzie-Bickle's 6.5 km), got {t} km"
+        );
+    }
+
+    #[test]
+    fn the_mckenzie_bickle_closure_reproduces_the_six_and_a_half_km_ocean_crust() {
+        // The consumed closure, fed the MEASURED peridotite solidus (1373 K, 130 K/GPa) at a normal potential
+        // temperature, reproduces McKenzie-Bickle's ~6.5 km of oceanic crust. This is the banked rung's own
+        // validation, exercised here through the seam-6 consumer to prove the wiring reads the closure unchanged.
+        let column = adiabatic_melt_column(
+            Fixed::from_int(1588),
+            Fixed::from_int(1373),
+            Fixed::from_int(130),
+            Fixed::from_ratio(155, 10),
+            Fixed::from_ratio(12, 100),
+            Fixed::from_int(3300),
+            Fixed::from_ratio(98, 10),
+        )
+        .expect("the measured-solidus column resolves");
+        assert!(
+            (6.0..=7.0).contains(&column.crust_thickness_km.to_f64_lossy()),
+            "the closure reproduces ~6.5 km, got {}",
+            column.crust_thickness_km.to_f64_lossy()
+        );
+    }
+
+    #[test]
+    fn an_alien_endmember_set_is_a_data_row_not_a_code_path() {
+        // Admit-the-alien: two fictional refractory endmembers (elements the silicate world never carries) run
+        // through the SAME partial-melt mechanism, because it keys off each phase's own Endmember signature, not a
+        // silicate mineral table. The alien crust is a data row.
+        let floating = vec![one("Xx2O3(cr,alienite)"), one("YyO2(cr,alienon)")];
+        let amounts: BTreeMap<String, Fixed> = floating
+            .iter()
+            .map(|(n, _)| (n.clone(), Fixed::ONE))
+            .collect();
+        let alien = |name: &str| -> Option<Endmember> {
+            let formula = name.split('(').next()?;
+            Some(match formula {
+                "Xx2O3" => Endmember {
+                    melting_point_k: Fixed::from_int(1600),
+                    fusion_enthalpy_j_per_mol: Fixed::from_int(90_000),
+                    fusion_volume_cm3_per_mol: Fixed::from_int(4),
+                },
+                "YyO2" => Endmember {
+                    melting_point_k: Fixed::from_int(1400),
+                    fusion_enthalpy_j_per_mol: Fixed::from_int(70_000),
+                    fusion_volume_cm3_per_mol: Fixed::from_int(5),
+                },
+                _ => return None,
+            })
+        };
+        let density = |_: &str| Some(Fixed::from_int(3));
+        let params = MeltColumnParams {
+            potential_temperature_k: Fixed::from_int(1450),
+            ..normal_params()
+        };
+        let pm = partial_melt_crust_and_mantle(
+            &floating,
+            &amounts,
+            alien,
+            density,
+            Fixed::ZERO,
+            &params,
+        )
+        .expect("the alien endmember set splits through the same mechanism");
+        assert!(
+            pm.used_partial_melt,
+            "the alien endmember set runs the same partial-melt mechanism, no code path"
+        );
+        // The lower-melting YyO2 dominates the alien first melt (the fusible component), the same emergence.
+        let crust_w = |formula: &str| {
+            pm.crust
+                .iter()
+                .find(|(n, _)| n.starts_with(formula))
+                .map(|(_, w)| w.to_f64_lossy())
+                .unwrap_or(0.0)
+        };
+        assert!(
+            crust_w("YyO2") > crust_w("Xx2O3"),
+            "the lower-melting alien phase dominates its first melt, the same eutectic emergence"
+        );
+    }
+
+    #[test]
+    fn a_missing_melting_datum_falls_back_to_the_buoyancy_proxy() {
+        // Fail-soft (named): an endmember lookup that knows forsterite but not enstatite (a missing melting datum)
+        // falls back to the pure-buoyancy split, so the chain never aborts on incomplete data. The buoyancy crust
+        // is the lighter enstatite, the mantle the denser forsterite, and no melt-column thickness is set.
+        let floating = vec![one("Mg2SiO4(cr,forsterite)"), one("MgSiO3(cr,enstatite)")];
+        let amounts: BTreeMap<String, Fixed> = floating
+            .iter()
+            .map(|(n, _)| (n.clone(), Fixed::ONE))
+            .collect();
+        let partial = |name: &str| -> Option<Endmember> {
+            let formula = name.split('(').next()?;
+            match formula {
+                "Mg2SiO4" => Some(Endmember {
+                    melting_point_k: Fixed::from_int(2163),
+                    fusion_enthalpy_j_per_mol: Fixed::from_int(114_000),
+                    fusion_volume_cm3_per_mol: Fixed::from_ratio(39, 10),
+                }),
+                _ => None, // enstatite's datum is missing
+            }
+        };
+        let density = |name: &str| -> Option<Fixed> {
+            Some(match name.split('(').next()? {
+                "Mg2SiO4" => Fixed::from_ratio(327, 100),
+                "MgSiO3" => Fixed::from_ratio(320, 100),
+                _ => return None,
+            })
+        };
+        let pm = partial_melt_crust_and_mantle(
+            &floating,
+            &amounts,
+            partial,
+            density,
+            Fixed::ZERO,
+            &normal_params(),
+        )
+        .expect("the fail-soft buoyancy split resolves");
+        assert!(
+            !pm.used_partial_melt,
+            "a missing melting datum falls back to the buoyancy proxy"
+        );
+        assert!(
+            pm.crust_thickness_km.is_none(),
+            "the buoyancy fallback carries no melt-column thickness"
+        );
+        assert!(
+            pm.crust.iter().any(|(n, _)| n.starts_with("MgSiO3")),
+            "the lighter enstatite is the buoyancy crust"
+        );
+        assert!(
+            pm.mantle.iter().any(|(n, _)| n.starts_with("Mg2SiO4")),
+            "the denser forsterite is the buoyancy mantle"
+        );
+    }
+
+    #[test]
+    fn the_partial_melt_split_is_deterministic() {
+        // The melt split replays byte-for-byte (fixed-point throughout, deterministic order), the canonical-path
+        // discipline even though this chain is off the run path.
+        let (floating, amounts) = fertile_floating();
+        let density = |_: &str| Some(Fixed::from_int(3));
+        let a = partial_melt_crust_and_mantle(
+            &floating,
+            &amounts,
+            fertile_endmember,
+            density,
+            Fixed::ZERO,
+            &normal_params(),
+        )
+        .unwrap();
+        let b = partial_melt_crust_and_mantle(
+            &floating,
+            &amounts,
+            fertile_endmember,
+            density,
+            Fixed::ZERO,
+            &normal_params(),
+        )
+        .unwrap();
+        assert_eq!(a, b, "the partial-melt split is deterministic");
     }
 }

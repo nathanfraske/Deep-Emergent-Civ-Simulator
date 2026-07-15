@@ -56,6 +56,7 @@ pub mod lattice_modulus;
 pub mod laws;
 pub mod materials_oracle;
 pub mod melting;
+pub mod melting_data;
 pub mod metal_eos;
 pub mod mit_reference;
 pub mod molecular_opacity;

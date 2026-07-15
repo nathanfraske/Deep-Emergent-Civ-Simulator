@@ -704,6 +704,35 @@ const FEEDING_ZONE_WIDTH_FRACTION: Fixed = Fixed::from_int(5).div(Fixed::from_in
 /// knob; determinism holds by construction).
 const FEEDING_ZONE_STEPS: u32 = 64;
 
+// THE SEAM-6 PARTIAL-MELT (McKenzie-Bickle 1988) reserved interior inputs the crustal-thickness closure reads. The
+// SOLIDUS (surface value and slope) and the SOURCE DENSITY are DERIVED inside the melt wiring (from the endmember
+// signatures and the floating source assemblage), so only these interior-thermostat and mantle-floor values are
+// reserved-with-basis here (never fabricated; the reserved list is in docs/working/MORNING_REVIEW.md). For the
+// current solar-condensed floating set (a ~1680 K refractory ideal solidus) the normal potential temperature is
+// sub-solidus, so the viewer scene falls back to buoyancy and these values are dormant until a fertile or hotter
+// mantle engages the melt; they are wired so the payoff is live the moment the physics reaches it.
+
+/// RESERVED, the mantle POTENTIAL TEMPERATURE (K) the adiabat projects to the surface. Basis: McKenzie-Bickle's
+/// normal-MORB value ~1553 K, the melt rung validated at 1588 K; a per-world and per-epoch value (a hotter
+/// Hadean/Archean mantle melts a more refractory set). Cited: McKenzie & Bickle (1988) J. Petrology 29, 625.
+const MANTLE_POTENTIAL_TEMPERATURE_K: Fixed = Fixed::from_int(1588);
+
+/// RESERVED, the mantle ADIABAT slope (K/GPa) along the isentrope. Basis: dT/dP|_S = alpha T V / Cp ~ 0.5 K/km ~
+/// 15.5 K/GPa; a flagged derive-down (from the mantle assemblage's thermal expansion, density, and heat capacity
+/// once those land in the petrology substrate). Cited: McKenzie & Bickle (1988).
+const MANTLE_ADIABAT_SLOPE_K_PER_GPA: Fixed = Fixed::from_int(155).div(Fixed::from_int(10)); // 15.5
+
+/// RESERVED, the isentropic melting PRODUCTIVITY dF/dP (per GPa) near the solidus. Basis: ~0.12/GPa; a flagged
+/// derive-down (from the entropy of fusion and the heat capacity once the full McKenzie 1984 productivity lands).
+/// Cited: McKenzie & Bickle (1988).
+const MELT_PRODUCTIVITY_PER_GPA: Fixed = Fixed::from_int(12).div(Fixed::from_int(100)); // 0.12
+
+/// RESERVED, the surface GRAVITY (m/s^2) the pooled-melt thickness divides by. Basis: the planet's surface gravity
+/// g = G M / R^2, which DERIVES from the planet mass and radius; reserved here only because the surface chain
+/// precedes the planet-gravity derivation in the scene ordering (a flagged derive-down, the g = 9.80665 convention
+/// is not a canon anchor). Dormant while the viewer set is sub-solidus. Cited: derived planet gravity / CODATA G.
+const MELT_COLUMN_GRAVITY_M_S2: Fixed = Fixed::from_int(98).div(Fixed::from_int(10)); // 9.8
+
 /// The single-component disk dust the opacity is derived from: astronomical silicate, the canonical protoplanetary
 /// disk-opacity carrier, present in the standard optical library. HONEST LIMIT (a named #54 grain-wire follow-on): the
 /// full condensate mixture (silicate + metallic iron + troilite) cannot yet be Rosseland-averaged in production, both
@@ -909,10 +938,20 @@ fn build_derived_scene(star_mass: Fixed, orbit_au: Fixed) -> Result<DerivedScene
         star_mass, orbit_au, &optical,
     )
     .ok_or("the formation-era midplane condensation temperature did not derive at this orbit")?;
+    // The seam-6 partial-melt interior inputs (reserved-with-basis McKenzie-Bickle values; the solidus and source
+    // density derive inside the chain). For the refractory solar set these are dormant (sub-solidus, buoyancy
+    // fallback); they engage the moment a fertile or hotter mantle crosses the derived solidus.
+    let reserved_melt = civsim_materials::surface_composition::ReservedMeltParams {
+        potential_temperature_k: MANTLE_POTENTIAL_TEMPERATURE_K,
+        adiabat_slope_k_per_gpa: MANTLE_ADIABAT_SLOPE_K_PER_GPA,
+        productivity_per_gpa: MELT_PRODUCTIVITY_PER_GPA,
+        gravity_m_per_s2: MELT_COLUMN_GRAVITY_M_S2,
+    };
     let sc = civsim_materials::surface_composition::derive_surface_composition(
         &janaf,
         &abundances,
         condensation_temperature_k,
+        &reserved_melt,
     )
     .ok_or("no crust condensed at the derived formation-era midplane temperature (the gas did not precipitate a surface)")?;
 
@@ -980,7 +1019,10 @@ fn build_derived_scene(star_mass: Fixed, orbit_au: Fixed) -> Result<DerivedScene
     let cols = 48usize;
     let rows = 32usize;
     let field: Vec<Vec<(String, Fixed)>> = vec![crust_composition.clone(); cols * rows];
-    let crustal_thickness = Fixed::from_int(30);
+    // The crustal thickness: the seam-6 McKenzie-Bickle DERIVED partial-melt thickness when the melt mechanism
+    // engaged, else the Slice-0 representable fixture (30 km, retires with the interior lane). For the refractory
+    // solar set the melt is sub-solidus (buoyancy fallback, `crust_thickness_km` None), so the fixture stands.
+    let crustal_thickness = sc.crust_thickness_km.unwrap_or_else(|| Fixed::from_int(30));
     let sea_level = Fixed::ZERO;
     let tiles = generate_derived_tiles(
         &field,

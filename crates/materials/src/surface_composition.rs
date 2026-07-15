@@ -33,7 +33,8 @@
 //! the rock is the trace that condenses, exactly the protoplanetary setting.
 
 use crate::differentiation::{
-    crust_and_mantle, differentiate, phase_set_composition, DifferentiatedPlanet,
+    crust_and_mantle, differentiate, partial_melt_crust_and_mantle, phase_set_composition,
+    DifferentiatedPlanet, MeltColumnParams, PartialMeltCrust,
 };
 use crate::equilibrium_condensation::{
     condensed_active_set, condensed_amounts, gas_equilibrium, janaf_g_over_rt, CondensedAmounts,
@@ -41,11 +42,40 @@ use crate::equilibrium_condensation::{
 };
 use civsim_core::Fixed;
 use civsim_physics::janaf::JanafTables;
+use civsim_physics::melting::Endmember;
+use civsim_physics::melting_data::MeltingRegistry;
 use civsim_physics::periodic::PeriodicTable;
 use civsim_physics::petrology::crustal_density;
 use civsim_physics::petrology_data::PhaseRegistry;
 use civsim_physics::solar_abundances::SolarAbundances;
 use std::collections::{BTreeMap, BTreeSet};
+
+/// THE RESERVED McKenzie-Bickle (1988) INTERIOR INPUTS the caller supplies for the seam-6 crustal-thickness
+/// closure. These are the interior-thermostat and mantle-floor values the partial-melt column reads that the
+/// surface chain cannot itself derive (the SOLIDUS is derived from the endmember signatures inside the melt
+/// wiring, and the SOURCE DENSITY is derived from the floating source assemblage; only these four are supplied).
+/// Each is reserved-with-basis and cited, never authored inline (the reserved list is in
+/// `docs/working/MORNING_REVIEW.md`).
+#[derive(Clone, Copy, Debug)]
+pub struct ReservedMeltParams {
+    /// The mantle POTENTIAL TEMPERATURE (kelvin). Basis: the adiabat projected to the surface, the interior
+    /// thermostat's output; McKenzie-Bickle's normal-MORB value ~1553 K, the melt rung validated at 1588 K. A
+    /// per-world (and per-epoch: a hotter Hadean/Archean mantle) reserved value. Cited: McKenzie & Bickle (1988).
+    pub potential_temperature_k: Fixed,
+    /// The mantle ADIABAT slope (kelvin per gigapascal). Basis: dT/dP|_S = alpha T V / Cp, ~0.5 K/km ~ 15.5
+    /// K/GPa; derives from the mantle assemblage's thermal expansion, density, and heat capacity once those land
+    /// in the petrology substrate (a flagged derive-down). Cited: McKenzie & Bickle (1988).
+    pub adiabat_slope_k_per_gpa: Fixed,
+    /// The isentropic melting PRODUCTIVITY dF/dP (per gigapascal). Basis: the near-solidus melting productivity,
+    /// ~0.12/GPa; derives from the entropy of fusion and the heat capacity once the full McKenzie (1984)
+    /// productivity lands (a flagged derive-down). Cited: McKenzie & Bickle (1988).
+    pub productivity_per_gpa: Fixed,
+    /// The surface GRAVITY (metres per second squared). Basis: the planet's surface gravity g = G M / R^2;
+    /// DERIVES from the planet mass and radius, reserved here only because the surface chain precedes the
+    /// planet-gravity derivation in the scene ordering (a flagged derive-down, the g = 9.80665 convention is not
+    /// a canon anchor). Cited: derived planet gravity / CODATA G.
+    pub gravity_m_per_s2: Fixed,
+}
 
 /// The derived surface composition and the differentiation it came from.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -58,10 +88,19 @@ pub struct SurfaceComposition {
     /// The MANTLE (refractory residue) element amounts, the same assemblage composition as `surface` but for the
     /// dense phases the crust floats on: the silicate density the isostasy and the bulk-density derivation read.
     pub mantle_composition: Vec<(String, Fixed)>,
-    /// The crust phases (the buoyant partial melt) and the mantle phases (the refractory residue) from the
-    /// partial-melt split, for the isostasy the tile relief reads (crust floats on mantle).
+    /// The crust phases and the mantle phases from the seam-6 PARTIAL-MELT split: the crust is the extracted
+    /// first melt (each phase at its liquid mole fraction), the mantle the refractory residue, for the isostasy
+    /// the tile relief reads (crust floats on mantle). On the buoyancy fallback (a floating set with no melting
+    /// data or a sub-solidus mantle) these are the least-dense and denser floating phases at their presence.
     pub crust: Vec<(String, Fixed)>,
     pub mantle: Vec<(String, Fixed)>,
+    /// The McKenzie-Bickle DERIVED crustal thickness (kilometres) the partial-melt column pooled, `None` when the
+    /// split fell back to buoyancy (no melt column). The geodynamics lane reads it for the crust thickness where
+    /// the melt mechanism engaged; the viewer uses it when present, else its Slice-0 thickness fixture.
+    pub crust_thickness_km: Option<Fixed>,
+    /// Whether the seam-6 PARTIAL-MELT mechanism ran (`true`) or the split fell back to buoyancy (`false`), for
+    /// audit and the provenance readout.
+    pub used_partial_melt: bool,
     /// The full differentiation (the sinking metal-sulfide and floating silicate fractions), for audit.
     pub differentiation: DifferentiatedPlanet,
     /// The condensed molar amounts from the VCS, when the vertex was well-posed; `None` at a degenerate vertex (the
@@ -115,13 +154,17 @@ fn ln_ten() -> Fixed {
 }
 
 /// Derive the surface composition at an orbit from the disk temperature there. Runs the condensation of the solar
-/// gas at `disk_temperature_k`, the VCS amount redistribution, and the differentiation, returning the crust the
-/// tile chain reads. `None` if the JANAF read fails, no element is gas-balanceable, the equilibrium does not solve,
-/// or nothing floats (a world with no oxygen-bearing condensate has no derived crust, fail-loud).
+/// gas at `disk_temperature_k`, the VCS amount redistribution, the differentiation, and the seam-6 PARTIAL-MELT
+/// crust extraction (the crust is the first melt, the mantle the residue), returning the crust the tile chain
+/// reads. `reserved` supplies the McKenzie-Bickle interior inputs the crustal-thickness closure needs (the
+/// solidus and the source density are derived here, not supplied). `None` if the JANAF read fails, no element is
+/// gas-balanceable, the equilibrium does not solve, or nothing floats (a world with no oxygen-bearing condensate
+/// has no derived crust, fail-loud).
 pub fn derive_surface_composition(
     janaf: &JanafTables,
     abundances: &SolarAbundances,
     disk_temperature_k: Fixed,
+    reserved: &ReservedMeltParams,
 ) -> Option<SurfaceComposition> {
     if disk_temperature_k <= Fixed::ZERO {
         return None;
@@ -228,9 +271,8 @@ pub fn derive_surface_composition(
     };
     // Differentiation: float the silicate fraction off the sinking metal and sulfide.
     let differentiation = differentiate(&active, &budget)?;
-    // The partial-melt crust extraction: within the floating silicate fraction, the buoyant (least-dense) phase is
-    // the CRUST, the denser rest the MANTLE residue it floats on. Density comes from the petrology substrate at the
-    // labelled surface conditions (~300 K, ~1 bar), the surface where the isostasy is read.
+    // The petrology density read at the labelled surface conditions (~300 K, ~1 bar, where the isostasy is read),
+    // the buoyancy fallback's density and the source-density derivation both consume it.
     let registry = PhaseRegistry::standard().ok()?;
     let table = PeriodicTable::standard().ok()?;
     let surface_t = Fixed::from_int(300);
@@ -243,22 +285,82 @@ pub fn derive_surface_composition(
             .collect();
         crustal_density(&composition, surface_t, surface_p, &registry, &table)
     };
-    let (crust, mantle) = crust_and_mantle(&differentiation.floating, density_of)?;
-    // The surface is the ASSEMBLAGE (seam 5): each element at the sum over the crust phases of the phase's modal
-    // amount (the VCS redistribution) times its stoichiometry, the rock the crust forms and not the oxygen-heavy
-    // solar budget. A degenerate VCS vertex leaves `condensed_amount_readout` None, so the assemblage falls back to
-    // each phase's saturation presence (still a stoichiometric rock, never the solar budget).
+    // The assemblage weights (seam 5): the VCS modal amounts, each phase's saturation presence at a degenerate
+    // vertex (still a stoichiometric rock, never the solar budget).
     let amounts_map: BTreeMap<String, Fixed> = condensed_amount_readout
         .as_ref()
         .map(|v| v.iter().cloned().collect())
         .unwrap_or_default();
-    let surface = phase_set_composition(&crust, &amounts_map);
-    let mantle_composition = phase_set_composition(&mantle, &amounts_map);
+
+    // THE SEAM-6 PARTIAL-MELT CRUST EXTRACTION: the crust is the first melt the banked Schroeder-van Laar rung
+    // extracts (enriched in the fusible phases), the mantle the refractory residue. The SOURCE DENSITY the
+    // McKenzie-Bickle column divides by is DERIVED from the floating (fertile) source assemblage (g/cm3 to kg/m3),
+    // not authored; the interior inputs (potential temperature, adiabat slope, productivity, gravity) are the
+    // caller's reserved-with-basis values. The reference pressure for the first-melt composition is the surface,
+    // where the pooled melt sits. A floating set with no melting data or a sub-solidus mantle falls back to the
+    // buoyancy split (fail-soft), so the chain never aborts.
+    let melting = MeltingRegistry::standard().ok();
+    let endmember_of =
+        |name: &str| -> Option<Endmember> { melting.as_ref()?.endmember_for_species(name) };
+    let source_elements = phase_set_composition(&differentiation.floating, &amounts_map);
+    let source_density_kg_m3 =
+        crustal_density(&source_elements, surface_t, surface_p, &registry, &table)
+            .and_then(|d_gcm3| d_gcm3.checked_mul(Fixed::from_int(1000)));
+    let crustal_reference_pressure = Fixed::ZERO;
+    let pm: PartialMeltCrust = match source_density_kg_m3 {
+        Some(source_density) => partial_melt_crust_and_mantle(
+            &differentiation.floating,
+            &amounts_map,
+            endmember_of,
+            density_of,
+            crustal_reference_pressure,
+            &MeltColumnParams {
+                potential_temperature_k: reserved.potential_temperature_k,
+                adiabat_slope_k_per_gpa: reserved.adiabat_slope_k_per_gpa,
+                productivity_per_gpa: reserved.productivity_per_gpa,
+                source_density_kg_per_m3: source_density,
+                gravity_m_per_s2: reserved.gravity_m_per_s2,
+            },
+        )?,
+        None => {
+            // The source density did not derive (a floating phase the petrology cannot resolve), so the melt
+            // column cannot run: the buoyancy split alone, no thickness.
+            let (crust, mantle) = crust_and_mantle(&differentiation.floating, density_of)?;
+            PartialMeltCrust {
+                crust,
+                mantle,
+                crust_thickness_km: None,
+                max_melt_fraction: None,
+                onset_pressure_gpa: None,
+                used_partial_melt: false,
+            }
+        }
+    };
+
+    // The surface is the ASSEMBLAGE (seam 5) of the crust phases. On the melt path the phases are weighted by
+    // their melt (liquid mole fraction) and residue weights the split returned, so the surface is the melt's rock
+    // and the mantle the residue's rock. On the buoyancy fallback the weights are the VCS modal amounts, the
+    // byte-preserving prior behavior.
+    let (surface, mantle_composition) = if pm.used_partial_melt {
+        let crust_weights: BTreeMap<String, Fixed> = pm.crust.iter().cloned().collect();
+        let mantle_weights: BTreeMap<String, Fixed> = pm.mantle.iter().cloned().collect();
+        (
+            phase_set_composition(&pm.crust, &crust_weights),
+            phase_set_composition(&pm.mantle, &mantle_weights),
+        )
+    } else {
+        (
+            phase_set_composition(&pm.crust, &amounts_map),
+            phase_set_composition(&pm.mantle, &amounts_map),
+        )
+    };
     Some(SurfaceComposition {
         surface,
         mantle_composition,
-        crust,
-        mantle,
+        crust: pm.crust,
+        mantle: pm.mantle,
+        crust_thickness_km: pm.crust_thickness_km,
+        used_partial_melt: pm.used_partial_melt,
         differentiation,
         condensed_amounts: condensed_amount_readout,
     })
@@ -267,6 +369,19 @@ pub fn derive_surface_composition(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The normal-mantle McKenzie-Bickle interior inputs (potential temperature 1588 K, adiabat 15.5 K/GPa,
+    /// productivity 0.12/GPa, gravity 9.8), the reserved-with-basis set the viewer supplies. At this potential
+    /// temperature the refractory solar-condensed floating set (a ~1680 K solidus) is sub-solidus, so the chain
+    /// falls back to buoyancy, byte-preserving the pre-seam-6 crust.
+    fn normal_reserved() -> ReservedMeltParams {
+        ReservedMeltParams {
+            potential_temperature_k: Fixed::from_int(1588),
+            adiabat_slope_k_per_gpa: Fixed::from_ratio(155, 10),
+            productivity_per_gpa: Fixed::from_ratio(12, 100),
+            gravity_m_per_s2: Fixed::from_ratio(98, 10),
+        }
+    }
 
     /// The condensation inputs (gas species, condensed species, element budget) a test drives the solve with.
     type CondensationInputs = (
@@ -439,8 +554,13 @@ mod tests {
         let abundances = SolarAbundances::standard().expect("abundances load");
         // A hot inner-disk temperature where the Mg-silicates and iron are condensed (well below their ~1350 K
         // condensation fronts, above the volatile ices).
-        let sc = derive_surface_composition(&janaf, &abundances, Fixed::from_int(1000))
-            .expect("the inner disk derives a surface");
+        let sc = derive_surface_composition(
+            &janaf,
+            &abundances,
+            Fixed::from_int(1000),
+            &normal_reserved(),
+        )
+        .expect("the inner disk derives a surface");
         let surface: Vec<&str> = sc.surface.iter().map(|(e, _)| e.as_str()).collect();
         assert!(
             surface.contains(&"Mg") && surface.contains(&"Si") && surface.contains(&"O"),
@@ -471,8 +591,13 @@ mod tests {
         // ratio, proving the assemblage replaced the budget.
         let janaf = JanafTables::standard().expect("JANAF loads");
         let abundances = SolarAbundances::standard().expect("abundances load");
-        let sc = derive_surface_composition(&janaf, &abundances, Fixed::from_int(1000))
-            .expect("the inner disk derives a surface");
+        let sc = derive_surface_composition(
+            &janaf,
+            &abundances,
+            Fixed::from_int(1000),
+            &normal_reserved(),
+        )
+        .expect("the inner disk derives a surface");
         let get = |el: &str| -> Option<f64> {
             sc.surface
                 .iter()
@@ -496,5 +621,45 @@ mod tests {
             !sc.surface.is_empty() && !sc.mantle_composition.is_empty(),
             "both the crust surface and the mantle composition are derived assemblages"
         );
+    }
+
+    #[test]
+    fn the_refractory_solar_set_is_sub_solidus_and_falls_back_to_buoyancy() {
+        // SEAM 6 fail-soft: the solar-condensed floating set at 1000 K is the refractory Mg-Al assemblage (a
+        // ~1680 K ideal solidus), so a normal potential temperature (1588 K) does not melt it; the chain falls
+        // back to the pure-buoyancy split (used_partial_melt = false, no derived thickness), byte-preserving the
+        // pre-seam-6 crust. The partial-melt mechanism engages only for a fertile, warm-enough mantle (exercised
+        // in the differentiation-module tests on the lherzolite assemblage), the honest per-world outcome.
+        let janaf = JanafTables::standard().expect("JANAF loads");
+        let abundances = SolarAbundances::standard().expect("abundances load");
+        let sc = derive_surface_composition(
+            &janaf,
+            &abundances,
+            Fixed::from_int(1000),
+            &normal_reserved(),
+        )
+        .expect("the inner disk derives a surface");
+        assert!(
+            !sc.used_partial_melt,
+            "the refractory solar set is sub-solidus at a normal potential temperature, buoyancy fallback"
+        );
+        assert!(
+            sc.crust_thickness_km.is_none(),
+            "the buoyancy fallback carries no McKenzie-Bickle thickness"
+        );
+        // A hotter potential temperature (a Hadean/Archean mantle, a per-epoch reserved value) crosses the solidus
+        // and engages the partial-melt mechanism on the SAME set, the derived crust thickness appearing.
+        let hot = ReservedMeltParams {
+            potential_temperature_k: Fixed::from_int(1900),
+            ..normal_reserved()
+        };
+        let sc_hot = derive_surface_composition(&janaf, &abundances, Fixed::from_int(1000), &hot)
+            .expect("the hot-mantle scene derives");
+        if sc_hot.used_partial_melt {
+            assert!(
+                sc_hot.crust_thickness_km.is_some(),
+                "the engaged partial-melt column reports a derived crustal thickness"
+            );
+        }
     }
 }
