@@ -976,9 +976,25 @@ const FEEDING_ZONE_STEPS: u32 = 64;
 // sub-solidus, so the viewer scene falls back to buoyancy and these values are dormant until a fertile or hotter
 // mantle engages the melt; they are wired so the payoff is live the moment the physics reaches it.
 
-/// RESERVED, the mantle POTENTIAL TEMPERATURE (K) the adiabat projects to the surface. Basis: McKenzie-Bickle's
-/// normal-MORB value ~1553 K, the melt rung validated at 1588 K; a per-world and per-epoch value (a hotter
-/// Hadean/Archean mantle melts a more refractory set). Cited: McKenzie & Bickle (1988) J. Petrology 29, 625.
+/// RESERVED, the mantle POTENTIAL TEMPERATURE (K) the adiabat projects to the surface, and the CO-DETERMINANT of the
+/// deep-time flat-versus-textured verdict (the melt fires where the derived solidus falls below this). Basis:
+/// McKenzie-Bickle's normal-MORB value ~1553 K, the melt rung validated at 1588 K. But 1588 K is 1315 C, a
+/// modern-ambient value, and this is an EPOCH ERROR for a YOUNG world: the petrological record runs the other way,
+/// the mantle potential temperature rising from ~1350 C today to a ~1500 to 1600 C maximum at 2.5 to 3.0 Ga (internal
+/// heating exceeding surface loss through the Archean and Hadean), so a young world sat at or above the shipped
+/// solidus, the opposite side of the inequality. This anchor cannot decide the young verdict; the endmember set does.
+/// It is a flagged DERIVE-DOWN (R-YOUNG-TEMPERATURE, the next real slice, gated on the assembly impact list): the
+/// young potential temperature derives from the accretion energy and the short-lived-radionuclide (SLR) FAMILY heat
+/// (26Al plus 60Fe, one birth-environment draw, 60Fe subdominant and banded, not a 26Al-only slot) through a
+/// magma-ocean-cooling handoff, pinned at rheological lock-up to the world's own solidus-side boundary. Two clauses
+/// from the audit-of-the-audit ride the slice: the magma-ocean RADIATION CEILING derives per-world from the outgassed
+/// blanket composition through the existing radiative machinery (a H2, CO, or N2 blanket has a different ceiling and
+/// lifetime than water steam), so the water-class ~280 W/m2 number DEMOTES from mechanism to an Earth-draw validation
+/// anchor; and the rheological critical melt fraction phi_c is a class constant at suspension-rheology grade (its band
+/// covering crystal shape and polydispersity), alien-admissible, not a silicate-only fact. On shipping, this constant
+/// retires from an INPUT to two battery hindcast rows (the Earth draw's derived T_p(t) passing through ~1350 C today
+/// and the ~1500 to 1600 C Archean window). Cited: McKenzie & Bickle (1988) J. Petrology 29, 625; Herzberg et al.
+/// (2010) for the secular T_p trajectory.
 const MANTLE_POTENTIAL_TEMPERATURE_K: Fixed = Fixed::from_int(1588);
 
 /// RESERVED, the mantle ADIABAT slope (K/GPa) along the isentrope. Basis: dT/dP|_S = alpha T V / Cp ~ 0.5 K/km ~
@@ -1020,8 +1036,15 @@ const MANTLE_CONVECTION_CELL_ASPECT: Fixed =
 // endmember signatures ([`civsim_physics::melting::multicomponent_solidus`], already run inside the
 // surface-composition melt wiring on this very scene) and threaded into the deep-time volcanism through
 // `SurfaceComposition::{solidus_surface_k, solidus_slope_k_per_gpa}`. The former reserved peridotite anchors
-// (1373 K surface, 130 K/GPa slope, Earth's dry-peridotite values) are RETIRED: relief emerges where-and-when the
-// world's own mantle crosses its own derived solidus, never Earth's.
+// (1373 K surface, 130 K/GPa slope, Earth's dry-peridotite values) are RETIRED. But the flat-versus-textured
+// verdict is a comparison, `derived_solidus > MANTLE_POTENTIAL_TEMPERATURE_K`, and the OTHER side of that inequality
+// is still an authored Earth-MORB anchor (1588 K, below): the derived solidus is one side, not the whole verdict.
+// So this is CO-DETERMINED, and the deciding margin for the default refractory scene (~1680 K solidus vs 1588 K, ~92
+// K) sits INSIDE the solidus model's own declared ideal-solution bias (~150 K, `civsim_physics::melting`), which
+// makes the default flat outcome a REGIME-MARGINAL verdict: surfaced, carried, not asserted (per the error-band
+// discipline). Retiring the potential-temperature anchor to a derived young magma-ocean temperature is the next real
+// slice (R-YOUNG-TEMPERATURE), gated on the assembly impact list; until then the flatness is not a claim about the
+// world, only the output of one authored anchor against a derived one.
 
 /// RESERVED, the mantle PROCESSING TIME (Myr): the overturn / melt-delivery timescale one melt column's worth of
 /// crust reaches the surface over, converting the column crust to a per-tick production rate. A flagged
@@ -1033,19 +1056,71 @@ const MANTLE_CONVECTION_CELL_ASPECT: Fixed =
 /// overturn timescale (Turcotte & Schubert, Geodynamics).
 const MANTLE_PROCESSING_TIME_MYR: Fixed = Fixed::from_int(100);
 
-/// RESERVED (universal, dimensionless), the convective HOMOGENIZATION residual: the fraction of a melt-extraction
+/// PER-SYSTEM derive-down (dimensionless), the convective HOMOGENIZATION residual: the fraction of a melt-extraction
 /// incompatible-element enrichment contrast that survives convective stirring to remain as lateral mantle
-/// heterogeneity. This is the ONLY reserved piece of the radiogenic-heterogeneity amplitude; the amplitude ITSELF
-/// is now DERIVED per-system from the world's own formation melt fraction F (U, Th, K are highly incompatible, so
-/// batch melting enriches the extracted melt over its source by ~1/F in the D-to-zero limit, a fractional
-/// enrichment of `1/F - 1`), retiring the former Earth-observed 0.3 reservoir spread. The residual is a UNIVERSAL
-/// property of mantle convection (how well stirring erases a contrast), NEVER Earth's value: its basis is the
-/// ratio of the melt-processing timescale to the convective-homogenization timescale, a flagged derive-down
-/// coupled to the same SI convection operating point that unblocks the processing time. Surfaced default O(0.1),
-/// reserved for calibration, never fabricated as a world outcome. The seed PATTERN (which province is enriched)
-/// stays the deterministic world hash (Principle 8), so only the AMPLITUDE moved from an Earth const to a
-/// per-system derivation.
-const RADIOGENIC_MIXING_EFFICIENCY: Fixed = Fixed::from_int(1).div(Fixed::from_int(10)); // O(0.1), surfaced-reserved
+/// heterogeneity. The heterogeneity AMPLITUDE is derived per-system from the world's own formation melt fraction F
+/// and partition behaviour (the batch-melting enrichment, [`heterogeneity_amplitude`]), retiring the former Earth
+/// 0.3 reservoir spread. This residual is NOT universal (the R-ASSEMBLY-panel ruling corrects an earlier claim): what
+/// is universal is the FORM (every convecting silicate mantle has this efficiency), never the value (none has
+/// Earth's). Its own basis convicts it, being the ratio of the melt-processing timescale to the convective-
+/// homogenization timescale, and both timescales are per-system (they carry the Rayleigh number, viscosity, and
+/// Stokes velocity this deep-time kernel marks SI-blocked). The derive-down is cheap because the ratio partially
+/// cancels: the homogenization time is overturn-counted from the convective velocity, the melt-cycling time is the
+/// same velocity times the supra-solidus column fraction times F, so the velocity divides out to leading order and
+/// leaves melt-zone geometry and F, both of which the world computes at its SI operating point. Until that wiring
+/// lands the O(0.1) default is an [E]-band placeholder, reserved for calibration, never fabricated and never
+/// universal. The seed PATTERN (which province is enriched) stays the deterministic world hash (Principle 8). VALIDITY
+/// DOMAIN (the audit-of-the-audit refinement): O(0.1) is an EARTH-INSTANCE evaluation of the universal form, admissible
+/// as an [E] prior only within a declared band; a tidally pumped Io-class mantle or a sluggish stagnant-lid world
+/// leaves the band, and outside it the default must ESCALATE to the derive-down, never stretch. PROPAGATION: the
+/// residual sits in a prefactor (the exponent rider holds locally), but its band flows through the radiogenic budget
+/// into temperature and thence into the viscosity exponential over Gyr, so it can flip lid-regime and dynamo verdicts
+/// downstream; those verdicts must CONSUME the propagated band per the error-band DAG, not read a point value.
+const RADIOGENIC_MIXING_EFFICIENCY: Fixed = Fixed::from_int(1).div(Fixed::from_int(10)); // [E]-band placeholder, per-system derive-down
+
+/// RESERVED-with-basis ([M class], the calibrated Terran instance), the bulk PARTITION COEFFICIENT D of the heat-
+/// producing elements (U, Th, K) over the world's own melting assemblage: the share that stays in the solid residue
+/// rather than entering the melt. It closes the batch-melting enrichment `E = 1/(D + F*(1-D))` (Shaw 1970), so the
+/// heterogeneity amplitude reads the world's own partition behaviour, not the Terran D-to-zero sign. SIGN HAZARD (the
+/// R-ASSEMBLY-panel ruling): U, Th, K are incompatible (D much below 1) in oxidized silicate melting, so the melt is
+/// enriched; but under reducing, sulfur-rich conditions (silicate FeO below about 1 wt%) they turn CHALCOPHILE and
+/// partition into metal or sulfide (Wohlers-Wood 2015), D above 1, and the melt is DEPLETED, the contrast sign
+/// flipping. The full form admits both; the former inline `1/F` wired the Terran sign in as mechanism (a Principle 4
+/// and 7 defect). LADDER (the audit-of-the-audit refinement): the derive-down is a 3a-style ESTIMATOR entry, measured
+/// rungs first. The [M] anchors are experimental partition data (the Wohlers-Wood reduced-sulfide points among them);
+/// the lattice-strain interpolation across un-measured element-phase pairs is the estimator, running on the banked
+/// Shannon radii and charges against aristotype site parameters, banded at factor level (the Trouton or Miedema
+/// pattern); the fO2-and-sulfur regime switch keys on the world's own computed state. The batch equation is algebraic,
+/// so nothing enters an exponent (the rider is clean). DOMAIN GUARD: this default is the oxidized-silicate lithophile
+/// instance; outside the calibrated assemblage and fO2 range a per-world derivation supplies D and escalates rather
+/// than silently applying the placeholder. Fetch: Blundy-Wood 1994 and Wood-Kiseeva 2015 before coefficients land.
+const RADIOGENIC_BULK_PARTITION_D: Fixed = Fixed::from_int(3).div(Fixed::from_int(1000)); // ~0.003, [M class] placeholder pending Blundy-Wood
+
+/// The radiogenic HETEROGENEITY amplitude from the world's own formation melt fraction `f` and the bulk partition
+/// coefficient `d` of the heat producers, through Shaw batch-melting enrichment `E = 1/(d + f*(1 - d))`. The lateral
+/// spread amplitude is the mixing-efficiency residual times the MAGNITUDE of the enrichment contrast `|E - 1|`, so a
+/// compatible-element world (`d > 1`, the reduced-chalcophile sign flip) gets a real inverted spread rather than the
+/// zero the old `1/F` clamp produced, and the enrichment is capped at `1/d` as `f -> 0` (no blow-up, which removes the
+/// small-`f` landmine as well). The sign of which province is enriched belongs to the seed pattern, not this
+/// magnitude. `None` on a non-positive `f` (no formation melt) or an arithmetic failure.
+fn heterogeneity_amplitude(f: Fixed, d: Fixed, efficiency: Fixed) -> Option<Fixed> {
+    if f <= Fixed::ZERO {
+        return None;
+    }
+    // E = 1 / (d + f*(1 - d)), the batch-melting enrichment of the melt over the bulk source.
+    let denom = d.checked_add(f.checked_mul(Fixed::ONE.checked_sub(d)?)?)?;
+    if denom <= Fixed::ZERO {
+        return None;
+    }
+    let enrichment = Fixed::ONE.checked_div(denom)?;
+    let contrast = enrichment.checked_sub(Fixed::ONE)?;
+    let magnitude = if contrast < Fixed::ZERO {
+        Fixed::ZERO.checked_sub(contrast)?
+    } else {
+        contrast
+    };
+    efficiency.checked_mul(magnitude)
+}
 
 /// NON-CANON display: the deep-time geological duration one playback tick advances (megayears per playback
 /// tick). A viewing-sweep cadence (how fast the observer watches deep time pass), a sibling of the frame-rate
@@ -1340,7 +1415,8 @@ fn province_seed_perturbation(star_mass: Fixed, orbit_au: Fixed, index: usize) -
 /// radiogenic budget, cooling as the sources decay), so relief emerges where-and-when a hot mantle crosses its
 /// own solidus and stops as it cools. `formation_melt_fraction` is the world's own formation-era partial-melt
 /// fraction F (`None` on a sub-solidus formation that sorted no incompatibles), from which the radiogenic
-/// heterogeneity AMPLITUDE derives per-system (~`1/F` enrichment), retiring the former Earth 0.3 spread.
+/// heterogeneity AMPLITUDE derives per-system (the Shaw batch-melting enrichment over F and the heat-producers'
+/// partition, [`heterogeneity_amplitude`]), retiring the former Earth 0.3 spread.
 #[allow(clippy::too_many_arguments)]
 fn build_deep_time_provinces(
     star_mass: Fixed,
@@ -1407,19 +1483,17 @@ fn build_deep_time_provinces(
     let base_heat =
         loss_coeff.checked_mul(solidus_surface_k.checked_sub(reference_temperature)?)?;
 
-    // The radiogenic HETEROGENEITY amplitude, DERIVED per-system from the world's own formation melt fraction F,
-    // retiring the Earth 0.3 reservoir-spread const. U, Th, K are highly incompatible, so batch melting enriches
-    // the extracted melt over its source by ~1/F (D-to-zero limit), a fractional enrichment of (1/F - 1); the
-    // share that survives convective homogenization is the universal reserved mixing-efficiency residual, never
-    // Earth's spread. A world with no formation melt (sub-solidus, the refractory solar-condensed scene) sorted no
-    // incompatibles, so its melt-driven spread is zero: an unprocessed mantle, the honest result, never
-    // re-inflated. A primordial/accretional heterogeneity is a flagged derive-down (a future accretion-mixing
-    // substrate), per-system contingent, never Earth's 0.3.
+    // The radiogenic HETEROGENEITY amplitude, DERIVED per-system from the world's own formation melt fraction F and
+    // the heat-producers' bulk partition D, through the full Shaw batch-melting enrichment E = 1/(D + F(1-D)) rather
+    // than the former Terran-sign 1/F (D-to-zero) shortcut, so a reduced chalcophile world (D above 1) gets its
+    // inverted spread and a small-F world is capped at 1/D rather than diverging. The share that survives convective
+    // homogenization is the per-system mixing-efficiency residual. A world with no formation melt (sub-solidus, the
+    // refractory solar-condensed scene) sorted no incompatibles, so its melt-driven spread is zero: an unprocessed
+    // mantle. A primordial/accretional heterogeneity is a flagged derive-down (a future accretion-mixing substrate),
+    // per-system contingent, never Earth's 0.3.
     let heterogeneity = match formation_melt_fraction {
         Some(f) if f > Fixed::ZERO => {
-            let inv_f = Fixed::ONE.checked_div(f)?;
-            let enrichment_contrast = inv_f.checked_sub(Fixed::ONE)?.max(Fixed::ZERO);
-            RADIOGENIC_MIXING_EFFICIENCY.checked_mul(enrichment_contrast)?
+            heterogeneity_amplitude(f, RADIOGENIC_BULK_PARTITION_D, RADIOGENIC_MIXING_EFFICIENCY)?
         }
         _ => Fixed::ZERO,
     };
@@ -3486,7 +3560,41 @@ mod province_tests {
         };
         assert!(
             spread(Fixed::from_ratio(1, 20)) > spread(Fixed::from_ratio(1, 4)),
-            "a lower melt fraction (stronger 1/F enrichment) makes a wider radiogenic spread"
+            "a lower melt fraction (stronger batch-melting enrichment) makes a wider radiogenic spread"
+        );
+    }
+
+    #[test]
+    fn the_batch_melting_amplitude_admits_the_partition_and_caps_the_blow_up() {
+        let eff = Fixed::ONE; // isolate the enrichment contrast
+        let f = Fixed::from_ratio(1, 10); // 10 percent melt
+                                          // Incompatible D -> 0 recovers the (1/F - 1) limit: at F = 0.1, about 9.
+        let tiny_d = Fixed::from_ratio(1, 100_000);
+        let incompatible = heterogeneity_amplitude(f, tiny_d, eff)
+            .unwrap()
+            .to_f64_lossy();
+        assert!(
+            (incompatible - 9.0).abs() < 0.05,
+            "D->0 recovers the 1/F - 1 limit (~9 at F=0.1), got {incompatible}"
+        );
+        // A compatible world (D > 1, the reduced-chalcophile sign flip) still has a REAL spread, where the old
+        // `1/F` clamp gave zero. At D = 2, F = 0.1: E = 1/(2 + 0.1*(1-2)) = 1/1.9 ~ 0.526, |E-1| ~ 0.474.
+        let compatible = heterogeneity_amplitude(f, Fixed::from_int(2), eff)
+            .unwrap()
+            .to_f64_lossy();
+        assert!(
+            compatible > 0.4 && compatible < 0.55,
+            "a compatible (D>1) world gets a non-zero inverted spread, got {compatible}"
+        );
+        // The F -> 0 blow-up is capped at 1/D - 1 (here D = 0.01 -> ~99), not divergent.
+        let d = Fixed::from_ratio(1, 100);
+        let tiny_f = Fixed::from_ratio(1, 1_000_000);
+        let capped = heterogeneity_amplitude(tiny_f, d, eff)
+            .unwrap()
+            .to_f64_lossy();
+        assert!(
+            capped < 100.0,
+            "as F->0 the enrichment is capped at 1/D (~99), not a 1/F blow-up, got {capped}"
         );
     }
 
