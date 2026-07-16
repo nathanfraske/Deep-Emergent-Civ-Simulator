@@ -659,6 +659,114 @@ pub fn viscous_similarity_surface_density(
     Some(ln_sigma.exp())
 }
 
+/// The DISK ACCRETION-RATE CLOCK (the disk-evolution arc, slice 1): the Lynden-Bell-Pringle self-similar decline
+/// (Hartmann et al. 1998), `Mdot(t) = Mdot_0 * (1 + t / t_visc) ^ (-p)` with the decline exponent
+/// `p = (5/2 - gamma) / (2 - gamma)` set by the viscous-spreading exponent `gamma` (the same `gamma ~ 1` gate-G
+/// retired the disk profile onto, giving `p = 3/2`). At `t = 0` the rate is `Mdot_0` (the hot accreting formation
+/// epoch); it declines monotonically toward zero as `t` grows, so the disk lifetime becomes a derived output of
+/// the clock rather than a consulted constant.
+///
+/// The value line, per the arc ruling: NONE of these is an owner-set scalar. `mdot_0_msun_myr` is the per-disk
+/// `M_star`-conditioned draw (interim: the solar pin, loudly tagged; destination: the layer-4 accretion draw),
+/// `t_visc_myr` is DERIVED from the disk's alpha closure and thermal structure (`R_1^2 / (3 nu(R_1))`), and
+/// `gamma` is the disk's own viscous-spreading exponent. This function is fixed Rust, PARAMETRIC over all three,
+/// with the sources upgraded behind the signature. It is a viscous-transport instance of the declared
+/// model-structure band (the MHD wind-driven rival carries a different decline); the caller owns which branch.
+///
+/// Computed in the log domain for determinism (the `viscous_similarity_surface_density` precedent): `base >= 1`
+/// so `base^p >= 1` and the rate never exceeds `Mdot_0`, so the only bound is underflow, and past the
+/// representable `exp` ceiling the rate has declined below the representation floor and the disk has dispersed, so
+/// it returns `ZERO` rather than a saturated value. `None` on a non-positive `Mdot_0` or `t_visc`, a negative
+/// `age`, or a `gamma` outside `[0, 2)` (where the exponent is undefined).
+pub fn viscous_similarity_accretion_rate(
+    mdot_0_msun_myr: Fixed,
+    t_visc_myr: Fixed,
+    gamma: Fixed,
+    age_myr: Fixed,
+) -> Option<Fixed> {
+    if mdot_0_msun_myr <= Fixed::ZERO
+        || t_visc_myr <= Fixed::ZERO
+        || age_myr < Fixed::ZERO
+        || gamma < Fixed::ZERO
+        || gamma >= Fixed::from_int(2)
+    {
+        return None;
+    }
+    // p = (5/2 - gamma) / (2 - gamma); p = 3/2 at gamma = 1.
+    let p = Fixed::from_ratio(5, 2)
+        .checked_sub(gamma)?
+        .checked_div(Fixed::from_int(2).checked_sub(gamma)?)?;
+    // base = 1 + age / t_visc >= 1, so ln(base) >= 0 and base^p >= 1.
+    let base = Fixed::ONE.checked_add(age_myr.checked_div(t_visc_myr)?)?;
+    let exponent = p.checked_mul(base.ln())?;
+    // Past the exp ceiling the rate is below the representation floor: a dispersed disk, ZERO not a saturated
+    // value. `ln(2^31) = 31 * ln 2` is the representation's own bound (the surface-density precedent).
+    let ln_ceiling = Fixed::from_int(31).checked_mul(Fixed::from_int(2).ln())?;
+    if exponent >= ln_ceiling {
+        return Some(Fixed::ZERO);
+    }
+    mdot_0_msun_myr.checked_div(exponent.exp())
+}
+
+/// One (epoch, rate) LANDMARK the accretion clock is hindcast against, with the fractional band it must sit
+/// within. The 0.19 formation-epoch and 0.01 mature-epoch rates are the two the arc retires, each a CHORD point
+/// carrying its own epoch (the formation rate at the condensation-front epoch, the mature rate at the class-II
+/// epoch); `band_frac` is the observational band on the rate (a reserved-with-basis chord variable), not authored
+/// here.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct AccretionLandmark {
+    /// The epoch (Myr since `t = 0`) at which the landmark rate was measured.
+    pub epoch_myr: Fixed,
+    /// The measured accretion rate at that epoch (solar masses per Myr).
+    pub rate_msun_myr: Fixed,
+    /// The fractional band the derived rate must fall within (for example `0.1` for ten percent).
+    pub band_frac: Fixed,
+}
+
+/// The INVERTED two-landmark HINDCAST gate (the arc ruling): with `Mdot_0` DRAWN and `t_visc` DERIVED, the two
+/// landmarks no longer PIN the parameters, they VALIDATE them. This asks whether the clock built from the
+/// independently-sourced `(mdot_0, t_visc, gamma)` passes through every landmark within its band, returning
+/// `Some(true)` if so. It is a stronger check than the joint pin, which would have made the parameters exactly as
+/// reserved as the numbers they retire (a change of coordinates wearing a derivation's clothes); as a consistency
+/// check over independent inputs it can fail. `None` if the clock cannot be evaluated at a landmark epoch or a
+/// band is non-positive.
+///
+/// BLINDNESS SET (rule 1): discriminating power is that it convicts any `(mdot_0, t_visc, gamma)` whose curve
+/// misses a landmark epoch by more than its band; blind to a joint error that shifts `Mdot_0` and every landmark
+/// rate together by the same factor (a wrong overall normalization consistent with the whole chord), covered by
+/// anchoring `Mdot_0` to the independently-observed class-0/I peak-accretion band rather than to the landmarks.
+pub fn accretion_clock_hindcasts(
+    mdot_0_msun_myr: Fixed,
+    t_visc_myr: Fixed,
+    gamma: Fixed,
+    landmarks: &[AccretionLandmark],
+) -> Option<bool> {
+    for landmark in landmarks {
+        if landmark.band_frac <= Fixed::ZERO || landmark.rate_msun_myr <= Fixed::ZERO {
+            return None;
+        }
+        let derived = viscous_similarity_accretion_rate(
+            mdot_0_msun_myr,
+            t_visc_myr,
+            gamma,
+            landmark.epoch_myr,
+        )?;
+        // |derived - stated| <= band_frac * stated: the derived rate sits within the landmark's band. Take the
+        // gap as high-minus-low so no negation is needed (Fixed carries no abs).
+        let (hi, lo) = if derived >= landmark.rate_msun_myr {
+            (derived, landmark.rate_msun_myr)
+        } else {
+            (landmark.rate_msun_myr, derived)
+        };
+        let deviation = hi.checked_sub(lo)?;
+        let allowed = landmark.band_frac.checked_mul(landmark.rate_msun_myr)?;
+        if deviation > allowed {
+            return Some(false);
+        }
+    }
+    Some(true)
+}
+
 /// The FEEDING-ZONE (annulus) DISK MASS a planet accretes from, in `normalization`-units times AU-squared: the
 /// integral `M = integral over [inner, outer] of 2*pi*r*Sigma(r) dr`, the disk mass in the orbital annulus
 /// `[inner_au, outer_au]`. This is the ACCRETION-mass scaffold: the mass follows from the geometry and the surface
@@ -1980,5 +2088,101 @@ mod tests {
         assert!(viscous_similarity_surface_density(o, m, mdot, Fixed::ZERO, a, mu).is_none());
         assert!(viscous_similarity_surface_density(o, m, mdot, t, Fixed::ZERO, mu).is_none());
         assert!(viscous_similarity_surface_density(o, m, mdot, t, a, Fixed::ZERO).is_none());
+    }
+
+    #[test]
+    fn the_accretion_clock_starts_at_mdot_0_and_declines() {
+        // At t = 0 the rate is Mdot_0 exactly (base = 1, no decline), then it falls monotonically. Test fixtures,
+        // not authored physics: the math is what is checked.
+        let mdot_0 = Fixed::ONE;
+        let t_visc = Fixed::ONE;
+        let gamma = Fixed::ONE; // p = 3/2
+        let at_zero =
+            viscous_similarity_accretion_rate(mdot_0, t_visc, gamma, Fixed::ZERO).unwrap();
+        assert!(
+            (at_zero.to_f64_lossy() - 1.0).abs() < 1e-3,
+            "Mdot(0) reproduces Mdot_0, got {}",
+            at_zero.to_f64_lossy()
+        );
+        let early = viscous_similarity_accretion_rate(mdot_0, t_visc, gamma, Fixed::ONE).unwrap();
+        let late =
+            viscous_similarity_accretion_rate(mdot_0, t_visc, gamma, Fixed::from_int(4)).unwrap();
+        assert!(
+            early < at_zero && late < early,
+            "the rate declines monotonically (0: {}, 1: {}, 4: {})",
+            at_zero.to_f64_lossy(),
+            early.to_f64_lossy(),
+            late.to_f64_lossy()
+        );
+    }
+
+    #[test]
+    fn the_accretion_clock_decline_matches_the_viscous_exponent() {
+        // At gamma = 1 the exponent p = 3/2, so at one viscous time (base = 2) the rate is Mdot_0 / 2^(3/2).
+        let mdot_0 = Fixed::from_int(4);
+        let t_visc = Fixed::from_int(2);
+        let gamma = Fixed::ONE;
+        let at_t_visc = viscous_similarity_accretion_rate(mdot_0, t_visc, gamma, t_visc).unwrap();
+        let expected = 4.0 / 2.0_f64.powf(1.5);
+        assert!(
+            (at_t_visc.to_f64_lossy() - expected).abs() / expected < 1e-3,
+            "Mdot(t_visc) = Mdot_0 / 2^1.5 (expected {expected}, got {})",
+            at_t_visc.to_f64_lossy()
+        );
+    }
+
+    #[test]
+    fn the_hindcast_validates_on_curve_landmarks_and_convicts_off_curve() {
+        // The inverted gate: on-curve landmarks pass, an off-curve one (beyond its band) fails. This is the
+        // discriminating power, the property that makes the hindcast a gate rather than a tautology.
+        let mdot_0 = Fixed::ONE;
+        let t_visc = Fixed::ONE;
+        let gamma = Fixed::ONE;
+        let band = Fixed::from_ratio(1, 10); // 10 percent
+        let epoch_a = Fixed::ONE;
+        let epoch_b = Fixed::from_int(3);
+        // Sample the curve itself, so these two landmarks sit exactly on it.
+        let rate_a = viscous_similarity_accretion_rate(mdot_0, t_visc, gamma, epoch_a).unwrap();
+        let rate_b = viscous_similarity_accretion_rate(mdot_0, t_visc, gamma, epoch_b).unwrap();
+        let on_curve = [
+            AccretionLandmark {
+                epoch_myr: epoch_a,
+                rate_msun_myr: rate_a,
+                band_frac: band,
+            },
+            AccretionLandmark {
+                epoch_myr: epoch_b,
+                rate_msun_myr: rate_b,
+                band_frac: band,
+            },
+        ];
+        assert_eq!(
+            accretion_clock_hindcasts(mdot_0, t_visc, gamma, &on_curve),
+            Some(true),
+            "the curve hindcasts its own landmarks within band"
+        );
+        // Move landmark A's rate to double its on-curve value, far outside the ten percent band.
+        let off_curve = [
+            AccretionLandmark {
+                epoch_myr: epoch_a,
+                rate_msun_myr: rate_a.checked_mul(Fixed::from_int(2)).unwrap(),
+                band_frac: band,
+            },
+            on_curve[1],
+        ];
+        assert_eq!(
+            accretion_clock_hindcasts(mdot_0, t_visc, gamma, &off_curve),
+            Some(false),
+            "an off-curve landmark convicts the hindcast"
+        );
+    }
+
+    #[test]
+    fn the_accretion_clock_fails_loud_on_bad_inputs() {
+        let (m, t, g, a) = (Fixed::ONE, Fixed::ONE, Fixed::ONE, Fixed::ONE);
+        assert!(viscous_similarity_accretion_rate(Fixed::ZERO, t, g, a).is_none());
+        assert!(viscous_similarity_accretion_rate(m, Fixed::ZERO, g, a).is_none());
+        assert!(viscous_similarity_accretion_rate(m, t, Fixed::from_int(2), a).is_none());
+        assert!(viscous_similarity_accretion_rate(m, t, g, Fixed::from_int(-1)).is_none());
     }
 }
