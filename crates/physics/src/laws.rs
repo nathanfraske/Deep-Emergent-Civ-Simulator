@@ -4044,14 +4044,19 @@ mod tests {
             let tau = convective_stress(eta, v, l, cap);
             let eps_dot = convective_strain_rate(v, l).expect("a positive length yields a rate");
             let scaled = eta.checked_mul(eps_dot).expect("in-window");
-            // The derived bound: u * (E + 1/L + 2), formed in raw bits to keep the comparison exact.
+            // The derived bound `u * (E + 1/L + 2)`, formed in raw bits so the comparison is exact.
+            // `u = 1` bit, so the bound in bits is the REAL number `E + 1/L + 2` rounded UP: the ceiling
+            // is the derivation's own (a bound must not round down to below itself), and it is the only
+            // rounding here. An earlier form took `floor(E) + floor(1/L)` through `>> FRAC_BITS` and then
+            // added a hand-chosen `+2` to cover what the flooring lost. That `+2` was an AUTHORED constant
+            // wearing a derived bound's name, which is the defect this project convicts, sitting inside
+            // the one number this test rests on. Ceiling the exact sum removes it.
             let one_over_l = Fixed::ONE
                 .checked_div(l)
                 .expect("a positive length inverts");
-            let bound = u
-                * (2 + (eta.to_bits() as i128 >> Fixed::FRAC_BITS)
-                    + (one_over_l.to_bits() as i128 >> Fixed::FRAC_BITS)
-                    + 2);
+            let sum_bits = eta.to_bits() as i128 + one_over_l.to_bits() as i128;
+            let one_bit: i128 = 1 << Fixed::FRAC_BITS;
+            let bound = u * (((sum_bits + one_bit - 1) >> Fixed::FRAC_BITS) + 2);
             let gap = (tau.to_bits() as i128 - scaled.to_bits() as i128).abs();
             assert!(
                 gap <= bound,
