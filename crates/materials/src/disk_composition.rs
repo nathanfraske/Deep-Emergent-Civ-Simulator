@@ -273,10 +273,23 @@ const ALPHA_THIN_DEX: Fixed = Fixed::ZERO;
 /// The THICK-DISK-BRANCH FRACTION at a metallicity `fe_h`: the probability a drawn world sits on the high-alpha
 /// (old, thick-disk) branch rather than the low-alpha (thin-disk) branch. The population transitions from
 /// thick-dominated below the alpha knee to thin-dominated at solar, so the fraction is 1 at or below the knee
-/// (`[Fe/H] <= -0.4`) and declines to 0 at solar (`[Fe/H] = 0`), a linear interpolation between the two
-/// fetched/definitional anchors (the minimal non-fabricated form; the exact population-resolved shape is a flagged
-/// refinement pending thin-versus-thick MDFs). It is this changing mixture that turns the population MEAN over at the
-/// knee, so the two discrete branch levels reproduce the measured bimodal gap a single Gaussian would erase.
+/// (`[Fe/H] <= -0.4`) and declines to 0 at solar (`[Fe/H] = 0`), a linear interpolation between the two anchors.
+/// It is this changing mixture that turns the population MEAN over at the knee, so the two discrete branch levels
+/// reproduce the measured bimodal gap a single Gaussian would erase.
+///
+/// LOUD INTERIM, THE BRANCH WEIGHT IS AN AUTHORED SILENT PARAMETER (surfaced 2026-07-16, the card audit). The
+/// branch LEVELS, the knee, and the band are fetched and cited, but this WEIGHT, `p(high-alpha | [Fe/H], epoch)`,
+/// is not: it is the shape above, chosen by this implementation, and a silent mixing fraction is an authored one.
+/// Worse, the card's own source CANNOT legally supply it: Bensby, Feltzing & Oey 2014 is a KINEMATICALLY SELECTED
+/// sample that deliberately over-harvests thick-disk stars to get good statistics on the sequence, so the branch
+/// MORPHOLOGY is selection-robust (which is what the card correctly claims) while the branch FRACTIONS are the
+/// quantity that selection distorted MOST, by design. Reading a weight off that sample would bake the selection
+/// function into the draw.
+///
+/// WHAT RETIRES IT: a SEPARATE fetch of the SELECTION-CORRECTED branch weight from a VOLUME-COMPLETE sample, and it
+/// must condition on EPOCH, because the high-alpha population is uniformly old, so a young draw landing on the thick
+/// branch is exactly the chemical anachronism the conditional-chain ruling exists to forbid. Until that fetch lands,
+/// this weight is interim and any world it decides carries that provenance.
 fn thick_disk_fraction(fe_h: Fixed) -> Fixed {
     // clamp(fe_h / knee, 0, 1): the knee is negative, so a more-negative fe_h gives a ratio > 1 (clamped to all-thick),
     // and a solar-or-above fe_h gives <= 0 (clamped to all-thin).
