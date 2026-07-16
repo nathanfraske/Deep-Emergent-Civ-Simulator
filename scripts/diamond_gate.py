@@ -28,6 +28,32 @@ decides. Human authors the claim; the machine referees it.
 RENDER-ON-DEMAND: every finding ships with its LOCAL SUBGRAPH drawn, because the moment a diamond fires the
 first thing anyone wants is the neighbourhood, not a browser.
 
+THIS GATE'S BLINDNESS SET, STATED BESIDE ITS DISCRIMINATING POWER, because a gate that knows what it cannot see
+is a gate and a gate that does not is a comfort. Measured against the THREE instances that motivated building
+it, THIS GATE CATCHES ONE:
+
+  CATCHES: a quantity with a laws.rs kernel AND a pub struct field OF THE SAME NAME (k/kappa, found).
+
+  BLIND 1, DIFFERENT-NAMED PROVIDERS: Slack (`lattice_thermal_conductivity_w_per_m_k`) versus Hofmeister
+    (`hofmeister_lattice_conductivity`) are two models of one quantity under two names, and NEITHER is a laws.rs
+    kernel. This gate cannot see that collision at all. COVERED BY: the census-before-build habit, which is what
+    caught it in the event, and by the ladder registry below once a quantity is registered. NOT covered mechanically.
+
+  BLIND 2, LOCAL-VARIABLE DUPLICATES: the viewer re-declares `kernel_conductivity = 2` and `kernel_density = 1`
+    as LOCALS, the same fixture cluster ColumnParams carries. Not a pub field, so this gate cannot see it.
+    COVERED BY: nothing mechanical today. It was found by a one-line check a human ran, which is precisely the
+    control this gate exists to replace and does not yet replace here.
+
+  BLIND 3, SHARED-SOURCE ERRORS: this gate certifies that two providers are ARBITRATED. It says NOTHING about
+    whether either provider is RIGHT. Two rungs that agree because they share a wrong input pass silently, the
+    same structural blindness a conservation gate has to an error in its opening (which cancels on both sides of
+    the identity: misquadrature a profile 2x and the books balance while the world is wrong). COVERED BY: the
+    derivation and source-truth tests, which are DIFFERENT MACHINERY guarding a DIFFERENT CLAIM, and which is
+    why they are never redundant with a bookkeeping gate.
+
+So the honest scorecard is one of three, and the two it misses were both caught by a person running a grep. This
+gate narrows the class; it does not close it. Claiming otherwise would make it a comfort.
+
 Usage:  python3 scripts/diamond_gate.py [--strict] [--self-test]
         --self-test proves the detector still FIRES on its known-bad fixture (the project's standing gate
           convention, matching determinism_gate/constructor_gate/provenance_gate/stone0: "prove every
