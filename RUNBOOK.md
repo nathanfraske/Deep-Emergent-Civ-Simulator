@@ -177,3 +177,44 @@ Every analytic derivative in the substrate ships with its NUMERICAL TWIN in the 
 The twin has its own hygiene, which the test must pin so the validator cannot pass on noise: use central differences, and sweep the step size to confirm the error sits in the second-order (`h`-squared) plateau. Too large a step leaves truncation error, too small a step leaves floating-point or fixed-point roundoff error; only the plateau in between measures the derivative, so the sweep proves the check is reading the derivative rather than one of the two error regimes. The Rose EOS twin already does this in spirit (a numerical second derivative of `E(V)` recovers the cited `B0`, which the analytic length scale was built from, so the twin exercises the whole unit chain); as the derivative-carrying mechanisms grow, each carries the same twin-plus-sweep.
 
 Siting rule (learned on the rate-law kernel, 2026-07-13): a numerical-twin test that uses float (`to_f64_lossy` for the finite-difference arithmetic) lives in a test FILE, never inline in a canonical-path module, because the integer-only steering scan (`the_canonical_kernel_path_is_integer_only`) reads the whole `laws.rs` source, test module included, and rejects any `f32`/`f64` there. The two disciplines pair cleanly once the twin is sited right: the kernel PATH stays integer-only, and the twin's float lives in `crates/physics/tests/*.rs` where it is sanctioned. A twin whose finite differences can be formed in `Fixed` may stay inline, but the float form is usually clearer for the differentiation and belongs in the test file regardless. The rate-law twin (`crates/physics/tests/rate_law.rs`, recovering `d ln(rate)/d(1/T) = -E*/k_B`) is the first sited this way.
+
+---
+
+## 6. Tool verdicts are read through the machine interface, never by grepping their prose (owner-ruled, 2026-07-16)
+
+A tool's verdict is consumed through its MACHINE INTERFACE: exit codes, deny lists, structured output. NEVER by pattern-matching its human-readable text. This is source-verbatim entry's sibling for tooling: the hand between a source and a struct has a cousin, the regex between a tool and a decision, and both get REMOVED rather than supervised.
+
+The rule was earned. Six narrow-grep convictions landed in twenty-four hours, which is a class rather than a streak. The one that named the rule: a sweep of `rustdoc`'s broken-link findings was counted with `grep -c "unresolved link"`, and the count came back 149. The lint emits 151. Two findings (`field_step_kernel`, "private or doc(hidden)", and `promote`, "is both a function and a module") ARE `broken_intra_doc_links` firings that do not carry that phrase, so the grep missed exactly the cases whose wording was unusual, which is the population a grep is least able to enumerate and most likely to be asked about. Both would have blocked the gate.
+
+So: deny the lint and read `$?`. Do not grep its output. The same applies to `cargo test` (read the exit code, not "test result: ok"), to `clippy` (`-D warnings` and the exit code, never a grep for "^error"), and to any gate script (an exit code, never a phrase in its report). A grep is a fine instrument for EXPLORING. It is never the instrument for DECIDING, because a tool's prose is prose, and prose greps are now six-time losers.
+
+The sibling failure, same day, same class: a search for a convective velocity ran `grep "fn .*(velocity|overturn|timescale)"` over the laws, read its output, and concluded no convective velocity existed. `laws::stokes_velocity` WAS IN THAT OUTPUT. It is the convective velocity, named for its physics rather than for its role. So the second half of the rule: SEARCH FOR THE PHYSICS NAME, NOT THE WORD YOU EXPECT, and when a search returns "absent", ask whether the thing is present under a name you did not think of.
+
+---
+
+## 7. Mutation testing on the tests that guard physics (owner-ruled, 2026-07-16)
+
+Mutation testing runs STANDING on evaluator and gate tests, the tests that guard physics, as a PRE-MERGE TIER for every new evaluator. A test that has never been shown to FAIL has not been shown to test anything.
+
+Two incidents on one day settled it, and neither was caught by review:
+
+1. The ductile evaluator's parallel-property test ("the composite is weaker than either row alone") was VACUOUS: the property is true of the derived lower bracket BY CONSTRUCTION, so the test passed WITH THE BISECTION DELETED. Mutation said so; reading it did not.
+2. Its first replacement re-summed the rows with `ln_sum_exp`, THE SAME FUNCTION UNDER TEST, so a max-only sum satisfied it. That is the self-comparing sentinel rebuilt by accident, on the same day the phantom E_coh sentinel was killed for being one.
+3. The convective strain rate's BINDING TEST survived a mutant that dropped the magnitude and returned a signed rate, because every fixture had a rising flow. The binding was blind to the exact convention it existed to bind, and a signed rate breaks `tau = eta * eps_dot` for every sinking parcel.
+
+THE TWIN-INDEPENDENCE RULE APPLIES TO TESTS EXPLICITLY. A test whose EXPECTED VALUE shares a route with the code under test asserts nothing. Pinned expectations come from OUTSIDE: the ductile evaluator's come from Hirth and Kohlstedt's own worked examples, which the primary computed by hand decades before this codebase existed, which is the perfect independent route. When no external number exists, pin the expectation from a root computed by a different construction (two rows sharing an intercept give `sigma^3.5 + sigma = 13.313708` at `sigma = 2`), and say in the test which route the expectation came from.
+
+A SURVIVING MUTANT IS NOT AUTOMATICALLY A DEFECT. Some survive BY CONSTRUCTION and must be stated rather than chased: a 1-ULP mutant survives the reassociation binding test because THE BOUND IS THE RESIDUE, so a deviation below it is indistinguishable from the reassociation the test licenses. Report those in the blindness set. Chase the rest.
+
+---
+
+## 8. When a doc link breaks, ask whether the prose survived its target (owner-ruled, 2026-07-16)
+
+THE TRIAGE QUESTION for every broken doc link, and it decides the repair:
+
+- **Prose whose target merely MOVED gets a RELINK.** The mechanism is alive, the name changed. Point at the real item and prove the target (a rename verified at the commit that did it, never a plausible-looking neighbour).
+- **Prose that OUTLIVED ITS MECHANISM gets a REWRITE, with a TOMBSTONE.** The doc describes something the project no longer does, and often something it DELETED ON PURPOSE.
+
+The founding case for the second branch: `sim/material.rs` described the tool edge as derived from the worked stone's fracture strength UNDER THE BEING'S FORMING FORCE, over `laws::edge_area_at`. That function was purged in `8f34b31` because "at USE the same force cancelled ... a dependence on the maker with no physical basis at use time". A RELINK WOULD HAVE BEEN THE WORST REPAIR AVAILABLE: it would have pointed rejected reasoning at the new mechanism, so the doc would teach maker-dependence while linking to the intrinsic scale. Rewrite teaches the living mechanism; the tombstone keeps the purge rationale FINDABLE rather than re-derivable, because "an edge that remembers its maker's force is history where physics should be" is itself a keeper lesson, and the next person to reach for a formation dependence that cancels at use time should find it already answered.
+
+The gate that surfaces these (`RUSTDOCFLAGS="-D rustdoc::broken_intra_doc_links" cargo doc --workspace --no-deps --document-private-items`) runs WITH PRIVATE ITEMS IN SCOPE, because a gate blind to privacy modifiers audits the API surface rather than the codebase: the founding phantom (`ductile_strength_mpa`) fired only by the accident of being public, and twenty-four more broken links were hiding inside private items when the gate was first measured.
