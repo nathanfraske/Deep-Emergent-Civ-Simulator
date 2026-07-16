@@ -7,15 +7,17 @@
 # edit of a maintained document, it runs the fast checks on the changed file (em
 # dashes, banned adverbs, fence balance) and surfaces any slip so the agent fixes it
 # immediately rather than discovering it at the end. It cannot undo the edit; it
-# reports. The hook JSON is read into an environment variable for the same reason as
-# the customs guard.
+# reports. The hook JSON is piped straight into Python's stdin. It used to travel in an
+# environment variable, which capped it at MAX_ARG_STRLEN (131072 bytes) and made this
+# check die with E2BIG on any long edit, reporting "argument list too long" and
+# checking nothing. A check that errors without checking is a check that did not run.
 
 set -u
-HOOK_INPUT="$(cat)" python3 -c '
-import json, os, re, sys
+python3 -c '
+import json, re, sys
 
 try:
-    data = json.loads(os.environ.get("HOOK_INPUT", "") or "{}")
+    data = json.loads(sys.stdin.read() or "{}")
 except Exception:
     sys.exit(0)
 

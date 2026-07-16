@@ -11,16 +11,29 @@
 # papers and every other file alone. A PreToolUse deny blocks even under bypass
 # mode, so this holds regardless of permission settings.
 #
-# The hook JSON is read from stdin into an environment variable so the Python below
-# can be passed with -c; piping the JSON straight into a heredoc would feed the
-# script to Python's stdin instead of the payload.
+# The hook JSON is piped STRAIGHT INTO Python's stdin. The script itself rides in
+# argv via -c, so stdin is free for the payload; the heredoc problem this guard used
+# to dodge (a heredoc feeds the SCRIPT to stdin, leaving nowhere for the payload) does
+# not apply to -c at all.
+#
+# IT USED TO PASS THE JSON IN AN ENVIRONMENT VARIABLE, AND THAT MADE THIS GUARD FAIL
+# OPEN ON EXACTLY THE EDITS IT MATTERED MOST FOR. An env var is capped at
+# MAX_ARG_STRLEN (32 pages, 131072 bytes), so any tool_input past ~128 KB made the
+# exec fail with E2BIG, "argument list too long". The hook then exited 126, and a
+# PreToolUse hook blocks ONLY on exit 2, so a non-2 exit is a non-blocking error: the
+# guard vanished and the edit proceeded unchecked. Measured before the fix: a 147-byte
+# payload carrying an em dash was blocked, a 25 KB payload was blocked, and a 200 KB
+# payload FAILED OPEN and would have landed the em dash. The claim "a PreToolUse deny
+# blocks even under bypass mode, so this holds regardless of permission settings" was
+# true of every edit except the long ones, which are the ones most likely to hide a
+# violation. A pipe has no such limit. Read from stdin; never from the environment.
 
 set -u
-HOOK_INPUT="$(cat)" python3 -c '
-import json, os, re, sys
+python3 -c '
+import json, re, sys
 
 try:
-    data = json.loads(os.environ.get("HOOK_INPUT", "") or "{}")
+    data = json.loads(sys.stdin.read() or "{}")
 except Exception:
     sys.exit(0)
 

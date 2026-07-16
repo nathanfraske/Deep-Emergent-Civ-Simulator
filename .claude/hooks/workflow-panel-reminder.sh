@@ -22,11 +22,11 @@
 # script to Python's stdin instead of the payload.
 
 set -u
-HOOK_INPUT="$(cat)" python3 -c '
-import json, os, re, sys
+python3 -c '
+import json, re, sys
 
 try:
-    data = json.loads(os.environ.get("HOOK_INPUT", "") or "{}")
+    data = json.loads(sys.stdin.read() or "{}")
 except Exception:
     sys.exit(0)
 
