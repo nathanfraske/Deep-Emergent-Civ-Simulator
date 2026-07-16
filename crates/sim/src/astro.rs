@@ -552,6 +552,102 @@ pub fn disk_surface_density(
     Some(density)
 }
 
+/// The DISK GAS SURFACE DENSITY `Sigma(r)` (kg/m^2) at an orbital distance, DERIVED from the STEADY-STATE VISCOUS
+/// SIMILARITY rather than read as a free normalization. A steady accretion disk carries the same mass-flux `Mdot`
+/// through every radius, so `Sigma = Mdot / (3*pi*nu)` with the kinematic viscosity `nu = alpha*c_s*H`
+/// (Shakura-Sunyaev 1973), the isothermal sound speed `c_s^2 = k_B*T/(mu*m_H)`, the scale height `H = c_s/Omega`,
+/// and the Keplerian frequency `Omega = sqrt(G*M_star/r^3)`. Composing these the sound speed cancels
+/// (`nu = alpha*k_B*T/(mu*m_H*Omega)`), leaving
+/// `Sigma(r) = Mdot*mu*m_H*Omega(r) / (3*pi*alpha*k_B*T(r))`. This retires the Lynden-Bell and Pringle residues
+/// `Sigma_c`, `gamma`, and `r_c` to VIEWS of the disk realization (the accretion rate, the viscosity, the star
+/// mass, and the derived disk temperature): zero new per-system initial conditions (the R-ASSEMBLY gate-G target).
+///
+/// The surface-density slope `gamma ~ 1` is now EMERGENT, not authored: `Sigma ~ Omega/T ~ r^(-3/2)/r^(-1/2) =
+/// r^(-1)` wherever the disk temperature follows the irradiated `T ~ r^(-1/2)` (the inner viscous regime
+/// `T ~ r^(-3/4)` steepens it toward `r^(-3/4)`), so the ~1 slope falls out of the viscous physics rather than
+/// being a residue (a test asserts the `r^(-1)` fall-off under an irradiated `T(r)`).
+///
+/// DERIVED / read from the floor: `Mdot` from `accretion_rate_msun_myr` (the same `M_sun/Myr -> kg/s` conversion
+/// [`viscous_dissipation_flux`] uses), `Omega(r)` from the CODATA `G` (`fundamentals::GRAVITATIONAL_CONSTANT`), the
+/// star mass ([`SOLAR_MASS_KG`] times `star_mass_ratio`) and `r = orbit_au * AU`, `k_B`
+/// (`fundamentals::BOLTZMANN`), and `m_H` as one atomic mass unit (`1e-3 / N_A` kg, one gram-per-mole per amu, from
+/// `fundamentals::AVOGADRO`); `disk_temperature_k` is the caller's derived disk temperature `T(r)`.
+/// RESERVED-with-basis, surfaced rather than fabricated: `alpha_viscosity`, the Shakura-Sunyaev turbulent-viscosity
+/// parameter (basis ~0.001 to 0.01, Shakura & Sunyaev 1973; a per-disk datum, so a quiescent dead-zone disk and an
+/// MRI-active disk are data rows), and `mean_molecular_weight` `mu`, the disk-gas mean molecular weight (basis
+/// ~2.34 for a solar H2+He mix; a per-composition datum, so a carbon-rich or a metal-poor disk is a data row).
+///
+/// The product spans many decades (`Mdot ~ 1e15 kg/s`, `Omega ~ 1e-7 rad/s`, `m_H ~ 1e-27 kg`, `k_B ~ 1e-23 J/K`),
+/// so the whole assembly runs in LOG-SPACE (the [`isolation_mass_earth`] precedent): `ln Sigma = ln Mdot + ln mu +
+/// ln m_H + ln Omega - ln(3*pi) - ln alpha - ln k_B - ln T`, with `ln Omega = 0.5*(ln G + ln M_star - 3*ln r)`, the
+/// decimal-string constants entering as [`civsim_physics::saha::ln_of_decimal`] logs and the order-one `Fixed`
+/// inputs through `Fixed::ln`, exponentiated once at the end. No wide-magnitude product is ever formed outside the
+/// log domain. `None` on a non-positive input or a result past the representable exp window (it fails loud rather
+/// than saturating, the honest units bound, the same style as the neighbours).
+pub fn viscous_similarity_surface_density(
+    orbit_au: Fixed,
+    star_mass_ratio: Fixed,
+    accretion_rate_msun_myr: Fixed,
+    disk_temperature_k: Fixed,
+    alpha_viscosity: Fixed,
+    mean_molecular_weight: Fixed,
+) -> Option<Fixed> {
+    if orbit_au <= Fixed::ZERO
+        || star_mass_ratio <= Fixed::ZERO
+        || accretion_rate_msun_myr <= Fixed::ZERO
+        || disk_temperature_k <= Fixed::ZERO
+        || alpha_viscosity <= Fixed::ZERO
+        || mean_molecular_weight <= Fixed::ZERO
+    {
+        return None;
+    }
+    // ln Mdot [kg/s] = ln(accretion_rate) + ln(M_sun) - ln(1e6 * Julian year), the M_sun/Myr -> kg/s conversion in
+    // the log domain (the same conversion `viscous_dissipation_flux` forms in BigRat).
+    let ln_megayear_s = civsim_physics::saha::ln_of_decimal(JULIAN_YEAR_S)?
+        .checked_add(civsim_physics::saha::ln_of_decimal("1e6")?)?;
+    let ln_mdot = accretion_rate_msun_myr
+        .ln()
+        .checked_add(civsim_physics::saha::ln_of_decimal(SOLAR_MASS_KG)?)?
+        .checked_sub(ln_megayear_s)?;
+    // ln Omega = 0.5*(ln G + ln M_star - 3*ln r), with M_star = star_mass_ratio*M_sun and r = orbit_au*AU.
+    let ln_m_star = star_mass_ratio
+        .ln()
+        .checked_add(civsim_physics::saha::ln_of_decimal(SOLAR_MASS_KG)?)?;
+    let ln_r = orbit_au
+        .ln()
+        .checked_add(civsim_physics::saha::ln_of_decimal(ASTRONOMICAL_UNIT_M)?)?;
+    let ln_g = civsim_physics::saha::ln_of_decimal(
+        civsim_units::fundamentals::GRAVITATIONAL_CONSTANT.value,
+    )?;
+    let ln_omega = Fixed::from_ratio(1, 2).checked_mul(
+        ln_g.checked_add(ln_m_star)?
+            .checked_sub(Fixed::from_int(3).checked_mul(ln_r)?)?,
+    )?;
+    // ln m_H = ln(1e-3) - ln(N_A): one atomic mass unit, one gram-per-mole per amu (`fundamentals::AVOGADRO`).
+    let ln_m_h = civsim_physics::saha::ln_of_decimal("1e-3")?.checked_sub(
+        civsim_physics::saha::ln_of_decimal(civsim_units::fundamentals::AVOGADRO.value)?,
+    )?;
+    let ln_k_b = civsim_physics::saha::ln_of_decimal(civsim_units::fundamentals::BOLTZMANN.value)?;
+    let ln_three_pi = Fixed::from_int(3).checked_mul(Fixed::PI)?.ln();
+    // ln Sigma = ln Mdot + ln mu + ln m_H + ln Omega - ln(3*pi) - ln alpha - ln k_B - ln T.
+    let ln_sigma = ln_mdot
+        .checked_add(mean_molecular_weight.ln())?
+        .checked_add(ln_m_h)?
+        .checked_add(ln_omega)?
+        .checked_sub(ln_three_pi)?
+        .checked_sub(alpha_viscosity.ln())?
+        .checked_sub(ln_k_b)?
+        .checked_sub(disk_temperature_k.ln())?;
+    // Fail loud past the representable exp ceiling rather than let `exp` saturate to the maximum (the
+    // `kepler_orbital_period_years` precedent): `ln(2^31) = 31*ln2` is the log of the representation's own maximum,
+    // an engine bound, not an owner value.
+    let ln_ceiling = Fixed::from_int(31).checked_mul(Fixed::from_int(2).ln())?;
+    if ln_sigma >= ln_ceiling {
+        return None;
+    }
+    Some(ln_sigma.exp())
+}
+
 /// The FEEDING-ZONE (annulus) DISK MASS a planet accretes from, in `normalization`-units times AU-squared: the
 /// integral `M = integral over [inner, outer] of 2*pi*r*Sigma(r) dr`, the disk mass in the orbital annulus
 /// `[inner_au, outer_au]`. This is the ACCRETION-mass scaffold: the mass follows from the geometry and the surface
@@ -1792,5 +1888,86 @@ mod tests {
             at(Fixed::from_ratio(25, 100)) > at(Fixed::from_ratio(10, 100)),
             "a higher accretion rate warms the formation midplane"
         );
+    }
+
+    // A Mirror-grade viscous-similarity disk realization: Mdot ~ 0.01 M_sun/Myr (~1e-8 M_sun/yr), alpha 0.01, mu 2.34
+    // (a solar H2+He mix). The temperature is passed as the caller's derived disk T(r).
+    fn mirror_visc(orbit_au: Fixed, temperature_k: Fixed) -> Option<Fixed> {
+        viscous_similarity_surface_density(
+            orbit_au,
+            Fixed::ONE,                // solar-mass star
+            Fixed::from_ratio(1, 100), // Mdot = 0.01 M_sun/Myr
+            temperature_k,
+            Fixed::from_ratio(1, 100),   // alpha = 0.01
+            Fixed::from_ratio(234, 100), // mu = 2.34
+        )
+    }
+
+    #[test]
+    fn the_viscous_similarity_gives_an_mmsn_grade_gas_column_at_one_au() {
+        // A Mirror-grade steady viscous disk at 1 AU with T ~ 280 K derives ~1341 kg/m^2 of gas (about 134 g/cm^2),
+        // an order 1e3 to 1e4 kg/m^2 minimum-mass-nebula-grade column, with no Sigma_c input: the scale is a VIEW of
+        // the accretion rate, the viscosity, and the disk temperature.
+        let sigma = mirror_visc(Fixed::ONE, Fixed::from_int(280)).expect("derives");
+        let v = sigma.to_f64_lossy();
+        assert!(
+            (1.0e3..=1.0e4).contains(&v),
+            "an MMSN-grade viscous disk carries an order 1e3 to 1e4 kg/m^2 gas column at 1 AU, got {v}"
+        );
+    }
+
+    #[test]
+    fn the_viscous_similarity_slope_derives_gamma_near_one() {
+        // Sigma ~ Omega/T ~ r^(-3/2)/r^(-1/2) = r^(-1): where the disk temperature follows the irradiated
+        // T ~ r^(-1/2) (T halves when the orbit quadruples: 280 K at 1 AU, 140 K at 4 AU), the surface density
+        // should fall as r^(-1), a quarter over a 4x orbit, so the slope gamma ~ 1 DERIVES from the viscous physics
+        // rather than being an authored residue.
+        let inner = mirror_visc(Fixed::ONE, Fixed::from_int(280)).unwrap();
+        let outer = mirror_visc(Fixed::from_int(4), Fixed::from_int(140)).unwrap();
+        let ratio = inner.to_f64_lossy() / outer.to_f64_lossy();
+        assert!(
+            (ratio - 4.0).abs() < 0.05,
+            "Sigma falls as r^(-1) under an irradiated T(r): the 1-AU to 4-AU ratio is ~4 (gamma ~ 1), got {ratio}"
+        );
+    }
+
+    #[test]
+    fn the_viscous_gas_column_rises_with_the_accretion_rate() {
+        // The steady-state column is linear in the mass-flux (Sigma ~ Mdot at fixed T): doubling the accretion rate
+        // doubles the gas surface density, so a denser disk is a higher-Mdot realization, not a bigger Sigma_c knob.
+        let base = mirror_visc(Fixed::ONE, Fixed::from_int(280)).unwrap();
+        let fed = viscous_similarity_surface_density(
+            Fixed::ONE,
+            Fixed::ONE,
+            Fixed::from_ratio(2, 100), // 2x the accretion rate
+            Fixed::from_int(280),
+            Fixed::from_ratio(1, 100),
+            Fixed::from_ratio(234, 100),
+        )
+        .unwrap();
+        let ratio = fed.to_f64_lossy() / base.to_f64_lossy();
+        assert!(
+            (ratio - 2.0).abs() < 0.02,
+            "doubling the accretion rate doubles the steady-state gas column (Sigma ~ Mdot), got {ratio}"
+        );
+    }
+
+    #[test]
+    fn the_viscous_similarity_fails_loud_on_bad_inputs() {
+        // Each non-positive input routes to None rather than a wrapped or saturated density (the fail-loud units bound).
+        let (o, m, mdot, t, a, mu) = (
+            Fixed::ONE,
+            Fixed::ONE,
+            Fixed::from_ratio(1, 100),
+            Fixed::from_int(280),
+            Fixed::from_ratio(1, 100),
+            Fixed::from_ratio(234, 100),
+        );
+        assert!(viscous_similarity_surface_density(Fixed::ZERO, m, mdot, t, a, mu).is_none());
+        assert!(viscous_similarity_surface_density(o, Fixed::ZERO, mdot, t, a, mu).is_none());
+        assert!(viscous_similarity_surface_density(o, m, Fixed::ZERO, t, a, mu).is_none());
+        assert!(viscous_similarity_surface_density(o, m, mdot, Fixed::ZERO, a, mu).is_none());
+        assert!(viscous_similarity_surface_density(o, m, mdot, t, Fixed::ZERO, mu).is_none());
+        assert!(viscous_similarity_surface_density(o, m, mdot, t, a, Fixed::ZERO).is_none());
     }
 }

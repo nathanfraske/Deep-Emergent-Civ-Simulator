@@ -15,9 +15,9 @@
 //! The MULTI-BODY SYSTEM GENERATOR (the solar-system arc, task #72): from a star and its disk, DERIVE the field of
 //! proto-planets, so a whole system EMERGES rather than one authored planet. Nothing here places a planet by hand or
 //! fixes a count: the number, the masses, and the spacing all fall out of the disk's own surface-density profile and
-//! the physics primitives already built (`astro::disk_surface_density` the mass reservoir, `astro::isolation_mass_earth`
-//! the Kokubo-Ida oligarchic mass, `astro::hill_radius_au` the feeding-zone width, `astro::disk_effective_temperature`
-//! the temperature that locates the ice line). This slice derives the OLIGARCHIC EMBRYO FIELD (the proto-planets left
+//! the physics primitives already built (`astro::viscous_similarity_surface_density` the DERIVED gas reservoir,
+//! `astro::isolation_mass_earth` the Kokubo-Ida oligarchic mass, `astro::hill_radius_au` the feeding-zone width,
+//! `astro::disk_effective_temperature` the temperature that locates the ice line and scales the gas density). This slice derives the OLIGARCHIC EMBRYO FIELD (the proto-planets left
 //! when each feeding zone has swept its isolation mass); the giant-impact assembly that merges the embryos into final
 //! planets is the next slice (the deterministic realisation of a chaotic phase, flagged for grounding, item R-ASSEMBLY).
 //!
@@ -39,14 +39,20 @@
 //! refractory fraction of the metals that condenses inside the ice line (basis: the rock and metal formers as a share
 //! of the disk metals, about half for a solar pattern; derive-down: the condensation substrate's own condensed-mass
 //! fraction at the disk temperature, `condensed_amounts`). The disk surface-density residues `r_c`, `gamma`, `Sigma_c`
-//! are the GATE-G derivation target (R-ASSEMBLY): zero new per-system initial conditions, they are VIEWS of the disk
-//! realization (the accretion rate `Mdot`, `alpha_disk`, age, and `M_star` through the viscous similarity family),
-//! flagged here as free inputs pending that wiring, not authored world content.
+//! are now RETIRED (the GATE-G derivation, R-ASSEMBLY): the local gas surface density is DERIVED at each orbit from the
+//! disk realization through the steady-state viscous similarity `Sigma = Mdot / (3*pi*nu)`
+//! ([`crate::astro::viscous_similarity_surface_density`]), so it carries zero new per-system initial conditions, being
+//! a VIEW of the accretion rate `Mdot`, the viscosity `alpha`, the star mass `M_star`, and the derived disk temperature
+//! `T(r)`; the slope `gamma ~ 1` emerges from the viscous physics rather than being an authored residue. Still
+//! RESERVED-with-basis at the disk level: `alpha` (the Shakura-Sunyaev turbulent viscosity, ~0.001 to 0.01, cited
+//! Shakura & Sunyaev 1973) and `mu` (the disk-gas mean molecular weight, ~2.34 for a solar H2+He mix), each a per-disk
+//! or per-composition datum, so a quiescent disk or a carbon-rich disk is a data row.
 
 use civsim_core::Fixed;
 
 use crate::astro::{
-    disk_effective_temperature, disk_surface_density, hill_radius_au, isolation_mass_earth,
+    disk_effective_temperature, hill_radius_au, isolation_mass_earth,
+    viscous_similarity_surface_density,
 };
 
 /// The oligarchic embryo spacing `b`, in mutual Hill radii: a class constant with a band ([M class] per the R-ASSEMBLY
@@ -61,21 +67,6 @@ use crate::astro::{
 /// pebble-branch embryo field is its own calibration target or a declared wall until bought. The constant's name
 /// scopes it honestly.
 pub const OLIGARCHIC_SPACING_HILL_WIDTHS: Fixed = Fixed::from_int(10);
-
-/// A protoplanetary disk's SURFACE-DENSITY residues (the Lynden-Bell and Pringle self-similar profile the built
-/// `disk_surface_density` reads): the characteristic radius `r_c`, the slope `gamma`, and the scale `Sigma_c` in
-/// kg/m^2. These are held as free inputs in this slice but are the GATE-G derivation target (R-ASSEMBLY): they carry
-/// ZERO new per-system initial conditions, being views of the disk realization (`Mdot`, `alpha_disk`, age, `M_star`
-/// through the viscous similarity, `Sigma_c = Mdot / (3*pi*nu)`), and retire to that derivation when it is wired.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub struct DiskProfile {
-    /// The characteristic (cutoff) radius `r_c` in AU.
-    pub characteristic_radius_au: Fixed,
-    /// The surface-density slope `gamma` (the viscosity power law), below 2 for finite mass.
-    pub gamma: Fixed,
-    /// The gas surface-density scale `Sigma_c` at `r_c`, in kg/m^2.
-    pub gas_surface_density_norm_kg_m2: Fixed,
-}
 
 /// The disk's THERMAL residues, the arguments the two-regime `disk_effective_temperature` reads to place the ice line:
 /// the accretion rate (solar masses per Myr), the star's mass ratio and mass-luminosity exponent (its irradiation),
@@ -97,14 +88,23 @@ pub struct DiskThermalParams {
     pub t_max: Fixed,
 }
 
-/// The DERIVED solid disk: the surface-density profile plus the two facts that turn gas into a solid reservoir, the
-/// metal fraction `Z` (per system, the disk composition's own) and the ice-line orbit (where the disk cools past the
-/// water snow line and ice joins the solids). Inside the ice line only the refractory share of the metals is solid;
-/// beyond it the full metal fraction condenses. Build it through [`SolidDisk::derive`], which locates the ice line.
+/// The DERIVED solid disk: the disk's thermal and viscosity realization plus the two facts that turn gas into a solid
+/// reservoir, the metal fraction `Z` (per system, the disk composition's own) and the ice-line orbit (where the disk
+/// cools past the water snow line and ice joins the solids). Inside the ice line only the refractory share of the
+/// metals is solid; beyond it the full metal fraction condenses. The gas surface density at each orbit is DERIVED from
+/// the viscous similarity (no `Sigma_c`, `gamma`, or `r_c` residues, the retired GATE-G target). Build it through
+/// [`SolidDisk::derive`], which locates the ice line.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct SolidDisk {
-    /// The surface-density residues.
-    pub profile: DiskProfile,
+    /// The disk's thermal realization (accretion rate, star mass, irradiation geometry), read to derive both the disk
+    /// temperature `T(r)` and, through it, the local gas surface density at each orbit.
+    pub thermal: DiskThermalParams,
+    /// The Shakura-Sunyaev turbulent-viscosity parameter `alpha` (reserved-with-basis: ~0.001 to 0.01, cited Shakura &
+    /// Sunyaev 1973; a per-disk datum), passed to [`crate::astro::viscous_similarity_surface_density`].
+    pub alpha_viscosity: Fixed,
+    /// The disk-gas mean molecular weight `mu` (reserved-with-basis: ~2.34 for a solar H2+He mix; a per-composition
+    /// datum, so a carbon-rich or metal-poor disk is a data row), passed to the viscous-similarity gas density.
+    pub mean_molecular_weight: Fixed,
     /// The disk metal (heavy-element) mass fraction `Z`, the disk composition's own, per system.
     pub metal_fraction: Fixed,
     /// The refractory share of the metals that is solid inside the ice line (reserved-with-basis: the rock and metal
@@ -118,12 +118,14 @@ pub struct SolidDisk {
 impl SolidDisk {
     /// Derive the solid disk, locating the ice line by the disk temperature: the orbit where the two-regime disk
     /// temperature crosses `snow_line_temperature_k` (the caller reads the water-ice onset from the condensation
-    /// table, `t_first_k = 182 K`, never authored here). `inner_au` and `outer_au` bound the search. `None` if the
-    /// ice line does not bracket in range or a temperature fails to resolve.
+    /// table, `t_first_k = 182 K`, never authored here). `alpha_viscosity` and `mean_molecular_weight` are the two
+    /// reserved-with-basis disk data the viscous-similarity gas density reads. `inner_au` and `outer_au` bound the
+    /// search. `None` if the ice line does not bracket in range or a temperature fails to resolve.
     #[allow(clippy::too_many_arguments)]
     pub fn derive(
-        profile: DiskProfile,
         thermal: DiskThermalParams,
+        alpha_viscosity: Fixed,
+        mean_molecular_weight: Fixed,
         metal_fraction: Fixed,
         refractory_fraction: Fixed,
         snow_line_temperature_k: Fixed,
@@ -132,23 +134,38 @@ impl SolidDisk {
     ) -> Option<SolidDisk> {
         let ice_line_au = ice_line_au(&thermal, snow_line_temperature_k, inner_au, outer_au)?;
         Some(SolidDisk {
-            profile,
+            thermal,
+            alpha_viscosity,
+            mean_molecular_weight,
             metal_fraction,
             refractory_fraction,
             ice_line_au,
         })
     }
 
-    /// The SOLID surface density (kg/m^2) at an orbit: the gas surface density times the condensed metal fraction,
-    /// which is the full metal fraction beyond the ice line (ice condensed) and the refractory share inside it. The
-    /// ice-line jump is the ratio of the two, so the outer disk carries the larger solid reservoir. `None` if the gas
-    /// density fails to resolve (past the disk edge) or a product overflows.
+    /// The SOLID surface density (kg/m^2) at an orbit: the DERIVED gas surface density (the viscous similarity read at
+    /// this orbit's disk temperature) times the condensed metal fraction, which is the full metal fraction beyond the
+    /// ice line (ice condensed) and the refractory share inside it. The ice-line jump is the ratio of the two, so the
+    /// outer disk carries the larger solid reservoir. The gas density is a VIEW of the disk realization, no `Sigma_c`
+    /// input. `None` if the disk temperature or the gas density fails to resolve (past the disk edge, or a
+    /// non-positive accretion rate) or a product overflows.
     pub fn solid_surface_density_kg_m2(&self, orbit_au: Fixed) -> Option<Fixed> {
-        let gas = disk_surface_density(
+        let temperature = disk_effective_temperature(
+            self.thermal.accretion_rate_msun_myr,
+            self.thermal.star_mass_ratio,
+            self.thermal.mass_luminosity_exponent,
             orbit_au,
-            self.profile.characteristic_radius_au,
-            self.profile.gamma,
-            self.profile.gas_surface_density_norm_kg_m2,
+            self.thermal.reprocessing_factor,
+            self.thermal.inner_boundary_factor,
+            self.thermal.t_max,
+        )?;
+        let gas = viscous_similarity_surface_density(
+            orbit_au,
+            self.thermal.star_mass_ratio,
+            self.thermal.accretion_rate_msun_myr,
+            temperature,
+            self.alpha_viscosity,
+            self.mean_molecular_weight,
         )?;
         let condensed_fraction = if orbit_au < self.ice_line_au {
             self.metal_fraction.checked_mul(self.refractory_fraction)?
@@ -287,18 +304,13 @@ mod tests {
         Fixed::from_ratio(n, d)
     }
 
-    /// A representative Mirror-like disk: a solar metal fraction, a self-similar profile with an order-30-AU cutoff, a
-    /// kg/m^2 scale in the minimum-mass reservoir range, and the two-regime thermal residues `derive_planet` uses. The
-    /// numbers are the per-system disk's own data (a scenario), the test asserting EMERGENCE (how the field responds),
-    /// not any absolute calibration.
+    /// A representative Mirror-like disk: a solar metal fraction, a Shakura-Sunyaev viscosity and a solar-mix mean
+    /// molecular weight, and the two-regime thermal residues `derive_planet` uses. The gas surface density is now
+    /// DERIVED from the viscous similarity (no `Sigma_c` input). The numbers are the per-system disk's own data (a
+    /// scenario), the test asserting EMERGENCE (how the field responds), not any absolute calibration.
     fn mirror_solid_disk() -> SolidDisk {
-        let profile = DiskProfile {
-            characteristic_radius_au: Fixed::from_int(30),
-            gamma: Fixed::ONE,
-            gas_surface_density_norm_kg_m2: Fixed::from_int(2000),
-        };
         let thermal = DiskThermalParams {
-            accretion_rate_msun_myr: r(1, 100_000),
+            accretion_rate_msun_myr: r(1, 100), // 0.01 M_sun/Myr (~1e-8 M_sun/yr, the class-II range)
             star_mass_ratio: Fixed::ONE,
             mass_luminosity_exponent: r(35, 10),
             reprocessing_factor: r(5, 100),
@@ -306,8 +318,9 @@ mod tests {
             t_max: Fixed::from_int(2_000_000),
         };
         SolidDisk::derive(
-            profile,
             thermal,
+            r(1, 100),            // alpha = 0.01 (Shakura-Sunyaev, reserved-with-basis)
+            r(234, 100),          // mu = 2.34 (solar H2+He mix, reserved-with-basis)
             r(134, 10_000), // Z = 0.0134, the AGSS09 solar metal mass fraction (per-system datum)
             r(1, 2),        // refractory fraction ~ 0.5 (reserved-with-basis)
             Fixed::from_int(182), // the water snow-line temperature (K), read from the condensation table
@@ -376,11 +389,15 @@ mod tests {
 
     #[test]
     fn a_denser_disk_grows_more_massive_embryos() {
+        // A denser disk is now a higher-accretion-rate realization (the steady-state column rises with `Mdot`), so
+        // tripling the accretion rate raises the derived gas (and thus solid) surface density at a fixed orbit. The
+        // ice line is unchanged between the two, so the condensed fraction at the sample orbit is identical and the
+        // solid ratio is the gas ratio.
         let base = mirror_solid_disk();
         let mut denser = base;
-        denser.profile.gas_surface_density_norm_kg_m2 = base
-            .profile
-            .gas_surface_density_norm_kg_m2
+        denser.thermal.accretion_rate_msun_myr = base
+            .thermal
+            .accretion_rate_msun_myr
             .checked_mul(Fixed::from_int(3))
             .unwrap();
         let m_base = base
@@ -405,12 +422,15 @@ mod tests {
 
     #[test]
     fn the_embryo_count_is_not_authored() {
-        // Two disks of different mass yield different embryo counts: the number is read off the disk, never fixed.
+        // Two disks of different mass yield different embryo counts: the number is read off the disk, never fixed. The
+        // denser disk is a higher-accretion-rate realization, whose larger embryos carry wider Hill radii and so
+        // wider oligarchic spacing, changing how many fit across the disk. The loop bound is set high enough that
+        // neither field saturates it, so the count reflects the disk rather than the cap.
         let a = mirror_solid_disk();
         let mut b = a;
-        b.profile.gas_surface_density_norm_kg_m2 = a
-            .profile
-            .gas_surface_density_norm_kg_m2
+        b.thermal.accretion_rate_msun_myr = a
+            .thermal
+            .accretion_rate_msun_myr
             .checked_mul(Fixed::from_int(8))
             .unwrap();
         let field_a = oligarchic_embryo_field(
@@ -420,7 +440,7 @@ mod tests {
             Fixed::from_int(5),
             Fixed::ONE,
             Fixed::from_int(40),
-            64,
+            4096,
         );
         let field_b = oligarchic_embryo_field(
             &b,
@@ -429,7 +449,7 @@ mod tests {
             Fixed::from_int(5),
             Fixed::ONE,
             Fixed::from_int(40),
-            64,
+            4096,
         );
         assert!(!field_a.is_empty() && !field_b.is_empty());
         assert_ne!(
@@ -467,8 +487,10 @@ mod tests {
 
     #[test]
     fn an_empty_disk_yields_no_embryos() {
+        // A steady viscous disk with no mass flux carries no gas (`Sigma = Mdot / (3*pi*nu) = 0` at `Mdot = 0`), so
+        // the viscous similarity routes to None and no embryo forms: no disk, no planets.
         let mut disk = mirror_solid_disk();
-        disk.profile.gas_surface_density_norm_kg_m2 = Fixed::ZERO;
+        disk.thermal.accretion_rate_msun_myr = Fixed::ZERO;
         let field = oligarchic_embryo_field(
             &disk,
             Fixed::ONE,
