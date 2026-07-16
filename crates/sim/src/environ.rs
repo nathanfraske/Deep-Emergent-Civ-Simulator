@@ -464,7 +464,7 @@ pub struct EnvironFields {
     /// The standing-food COMPOSITION of the producer on each cell (chemistry arc, T3; magnitudes CORRECTED-T3):
     /// the fixed per-unit-biomass axis vector a producer's food carries at its REAL magnitudes (no longer a
     /// sum-to-one simplex, so an energy-dense plant feeds more than a woody one), seeded once from the
-    /// biosphere ([`crate::genesis::WorldGenesis::producer_compositions`]). `None` where
+    /// biosphere ([`crate::genesis::LivingWorld::producer_compositions`]). `None` where
     /// no producer composition is seeded, in which case the standing food is the single `bio.energy_density`
     /// class exactly as before (byte-identical). Where `Some`, `regrow_supply` writes each food axis's supply
     /// as the logistic biomass VOLUME times that axis's density, and reads the remaining volume back as the
@@ -1478,7 +1478,7 @@ impl EnvironFields {
     /// double-buffered and conservative except at map-edge outflow, then cap. Salt accumulates in
     /// endorheic basins (which route to themselves, so they retain all their salt) and washes from
     /// well-drained cells, so a basin whose water evaporates concentrates its salt into a salt flat. The
-    /// concentration a being suffers is derived in [`Self::salinity_at`] from this salt and the standing
+    /// concentration a being suffers is derived in [`Self::salinity_dose`] from this salt and the standing
     /// water; salinity does not limit productivity here (it is an animal toxin, the halophile-selection
     /// gradient, not a plant factor). Pinned integer folds in canonical order, so it replays (Principle 3).
     fn step_salinity(&mut self, calib: &EnvironCalib) {

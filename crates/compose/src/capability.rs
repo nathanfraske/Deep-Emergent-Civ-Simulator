@@ -629,7 +629,8 @@ fn crush(
 /// [`laws::elastic_recoil_energy`]), and the HYDRAULIC pressure-over-volume work (its `fluid.driving_pressure` over
 /// the piston cross-section, over its stroke, `P dV = F d`, which composes from the same [`laws::stress_force`] and
 /// [`laws::actuator_work`], no new law). This is the SAME aggregate the delivery path resolves
-/// ([`civsim_sim::contact_transfer::resolve_delivered_energy`]), so the grade and the delivery stay in LOCKSTEP
+/// (`civsim_sim::contact_transfer::resolve_delivered_energy`, named and not linked: compose does not depend on
+/// sim, by design, so rustdoc cannot check this cross-crate cite), so the grade and the delivery stay in LOCKSTEP
 /// (the gate's slice-3 ruling): a springy or hydraulic actuator is graded on its recoil or pressure work, not
 /// mis-graded as rigid-only. If the delivered energy clears the reserved reference strike energy the part strikes,
 /// graded above the threshold. A STRONG, thick, long-stroked part, a SPRINGY one, or a HYDRAULIC one reads a high

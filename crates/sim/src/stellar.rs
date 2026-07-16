@@ -218,7 +218,8 @@ pub fn effective_temperature(
 /// so the absolute-flux read returns `None`. When it does, the SUN-RELATIVE form takes over without ever forming
 /// the wide flux: `T_eff = T_sun*(F/F_sun)^(1/4)`, where the flux RATIO `F/F_sun = luminosity_ratio/radius_ratio^2`
 /// is representable (~240 for 18 M_sun) and `T_sun` derives from the Sun's OWN representable surface flux. This is
-/// the same log-space-census discipline as [`stellar_effective_temperature`], and it is strictly additive: every
+/// the same log-space-census discipline as [`crate::astro::stellar_effective_temperature`], and it is strictly
+/// additive: every
 /// star whose absolute surface flux fits is byte-identical to before, and only the massive stars that used to fail
 /// now resolve. `None` only if even the flux RATIO passes the representable range (far above any real stellar mass).
 fn effective_temperature_from_ratios(

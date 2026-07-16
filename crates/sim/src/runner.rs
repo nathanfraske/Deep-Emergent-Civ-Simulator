@@ -930,7 +930,7 @@ fn being_muscle_force(w: &Walker, phys: &EmbodiedPhysiology) -> Fixed {
 /// Build a being's per-axis DERIVED drain vector (R-METABOLIZE) from its anatomy against the installed
 /// physiology. The metabolic axis (the one backed by the `bio.energy_density` floor axis, keyed off the
 /// floor id rather than a hardcoded axis constant, so the choice is data not a special case) drains at
-/// the Kleiber basal rate plus the thermoregulatory replacement ([`derive_base_drain`], read against the
+/// the Kleiber basal rate plus the thermoregulatory replacement ([`crate::physiology::derive_base_drain`], read against the
 /// live `ambient` and the being's `setpoint`) with a work-derived exertion coupling
 /// ([`derive_exertion_coupling`]); every other axis keeps its authored per-axis rate from the registry
 /// (water lost slower, an oxygen demand, or the zero-drain derived axes temperature and integrity), so
@@ -1443,7 +1443,7 @@ pub struct Embodiment {
     /// the composition of the cell UNDERFOOT (the physical-trace persistence loop). TRUE by default, so every
     /// existing scenario that arms the reward learner keeps this credit exactly as before (this is a gate on
     /// an existing mechanism, not a new opt-in, so its default preserves the keystone's behaviour). A world
-    /// sets it FALSE to run the eaten-side [`nutrition_learning`] credit in isolation, so a being learns which
+    /// sets it FALSE to run the eaten-side [`Embodiment::nutrition_learning`] credit in isolation, so a being learns which
     /// food nourishes it without also crediting every material it merely stands on. Never folded into
     /// `state_hash`; the crucible and default world arm no reward learner, so this gate leaves them
     /// byte-identical whatever its value.
@@ -1954,9 +1954,9 @@ impl Embodiment {
 
     /// Rebuild the controller layout from the current percept registry, appetitive flag, material percepts,
     /// attraction flag, and conviction percepts (all opt-in, each feeding an input block the founder weights
-    /// ignore until selection lifts them). Called by [`set_percepts`], [`set_appetitive`],
-    /// [`set_material_percepts`], [`set_attraction`], and [`set_conviction_percepts`], so the flags compose:
-    /// setting one preserves the others.
+    /// ignore until selection lifts them). Called by [`Self::set_percepts`], [`Self::set_appetitive`],
+    /// [`Self::set_material_percepts`], [`Self::set_attraction`], and [`Self::set_conviction_percepts`], so the
+    /// flags compose: setting one preserves the others.
     fn rebuild_layout(&mut self) {
         self.layout =
             ControllerLayout::with_percepts_appetitive_material_attraction_conviction_being_and_resource_features(
@@ -3665,9 +3665,10 @@ pub struct Runner {
     body_temp: BTreeMap<StableId, Fixed>,
     /// The being-signal subjects each perceiver formed of the OTHER beings it perceived THIS tick (the
     /// being-percept keystone, step 6), keyed by perceiver id. A within-tick scratchpad rebuilt each tick in
-    /// [`step_embodiment`]'s perceive phase (before movement, so the learning correlates the SAME perception
-    /// the being acted on) and consumed by the being-signal learning ([`advance_eligibility_traces`] records
-    /// them into the harm-eligibility trace, [`couple_conversation`] credits them). NOT folded into
+    /// [`Runner::step_embodiment`]'s perceive phase (before movement, so the learning correlates the SAME
+    /// perception the being acted on) and consumed by the being-signal learning
+    /// ([`Runner::advance_eligibility_traces`] records them into the harm-eligibility trace,
+    /// [`Runner::couple_conversation`] credits them). NOT folded into
     /// `state_hash` (it is a derived per-tick read, like the percept-direction maps); the behaviour and belief
     /// it drives is what the hash folds. Empty unless the being-percept feature is armed, so an unarmed run
     /// never populates it and is byte-identical.
@@ -5031,7 +5032,7 @@ impl Runner {
     }
 
     /// Snapshot each being's reserve levels BEFORE the embodiment step when the felt-conviction learner is
-    /// armed (Branch 1, `docs/working/OWNER_DECISIONS_LOG.md` R2/R4), so [`fold_conviction_experience`] can read
+    /// armed (Branch 1, `docs/working/OWNER_DECISIONS_LOG.md` R2/R4), so [`Self::fold_conviction_experience`] can read
     /// this tick's interoceptive delta even when no other experiential learner (the harm/reward percept and
     /// eligibility signals that otherwise trigger the snapshot inside the embodiment step) is armed. A no-op
     /// unless the learner is armed, so an opted-out run never snapshots and folds nothing (byte-identical);
@@ -5107,7 +5108,7 @@ impl Runner {
 
     /// Move each being's convictions under its own accumulated felt experience (Branch 2, the credit-assignment
     /// half of the learned experience-to-conviction coupling, `docs/working/OWNER_DECISIONS_LOG.md` R2/R5). Runs
-    /// after [`fold_conviction_experience`] (so it consumes this tick's updated record) only when the learner is
+    /// after [`Self::fold_conviction_experience`] (so it consumes this tick's updated record) only when the learner is
     /// armed WITH move parameters (the RECORD-only calib leaves this a no-op, so Branch 1 stays inert). For each
     /// being that holds convictions and a nonzero per-race epistemic polarity, each held axiom is moved through
     /// [`crate::axiom::Axiom::apply_felt_experience`]: the felt drive is `polarity * association` (the being's

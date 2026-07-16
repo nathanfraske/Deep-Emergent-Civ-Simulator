@@ -149,7 +149,7 @@ pub struct GrownBodies {
 
 impl LivingWorld {
     /// A species' whole-body composition VECTOR (Arc 6), forking on the body tier: a catalog species reads
-    /// its sampled [`BodyPlan`] against the registry (byte-identical to pre-Arc-6); a grown species regrows
+    /// its sampled [`crate::anatomy::BodyPlan`] against the registry (byte-identical to pre-Arc-6); a grown species regrows
     /// its representative [`crate::morphogen::Structure`] from its pool against the world's shared program and
     /// reads its composition directly off the grown tissue. Fail-loud if a grown species is present without
     /// the world's grown-body context (an invariant violation, never a silent Terran default).

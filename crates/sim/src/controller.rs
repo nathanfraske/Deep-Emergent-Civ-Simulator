@@ -80,7 +80,7 @@ const NEG_ONE: Fixed = Fixed::from_int(-1);
 /// interoceptive percept of which side of the comfort band the axis sits on: for a two-sided axis such
 /// as temperature, whether the body is too hot (+) or too cold (-), the bit the even level cannot
 /// carry). The signed deviation is supplied per being alongside the field-derived directions
-/// ([`build_input`]'s `signed`), zero where no such percept exists (a one-sided axis, or a being whose
+/// ([`ControllerLayout::build_input`]'s `signed`), zero where no such percept exists (a one-sided axis, or a being whose
 /// physiology does not surface it), so an axis with no signed percept reads the same as before.
 const INPUTS_PER_AXIS: usize = 5;
 

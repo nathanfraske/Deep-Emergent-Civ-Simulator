@@ -613,7 +613,7 @@ fn h_minus_bf_lambda_lo_um() -> Fixed {
 /// The John 1988 (A&A 193, 189, eq. 5) polynomial coefficients `C_1..C_6` of the H- bound-free (photodetachment)
 /// cross section, the compact representation of the primary Wishart 1979 (MNRAS 187, 59P) close-coupling computed
 /// cross section (H- is bound only by electron correlation, so the two-electron calculation IS the physics, not
-/// derivable at this level; this is the measured [M] tier, like the grain optical constants).
+/// derivable at this level; this is the measured `[M]` tier, like the grain optical constants).
 ///
 /// PROVENANCE (tier-honest, the standard met not bent): [Wishart 1979 primary computed cross-section; John 1988 A&A
 /// 193 189 eq.5 fit; cross-validated 5-code open-source transcription; peak-validated 3.99e-17 at 8513A]. The John
@@ -776,7 +776,7 @@ pub fn h_minus_bound_free_opacity(
 /// `kappa_ff = 1e-29 * sum_n (5040/T)^((n+1)/2) * poly_n(lambda)` (cm^4/dyn, per neutral H per electron pressure).
 /// The fit represents the primary Bell & Berrington 1987 (J.Phys.B 20, 801) R-matrix free-free calculation.
 ///
-/// PROVENANCE (tier-honest, the same [M] secondary-transcription class ruled load-able as the bound-free): [Bell &
+/// PROVENANCE (tier-honest, the same `[M]` secondary-transcription class ruled load-able as the bound-free): [Bell &
 /// Berrington 1987 primary R-matrix free-free; John 1988 A&A 193 189 eq.6 fit; cross-validated pyratbay+BeAR
 /// open-source transcription; validated via the assembled H- opacity in the free-free-dominated regime]. The
 /// Bell-Berrington table and the John PDF are paywalled, so these coefficients are byte-identical across the two
@@ -1378,7 +1378,7 @@ const GRAIN_SIZE_INTERVALS: i32 = 128;
 
 /// The absorption efficiency `Q_abs` of a single sphere of size parameter `x` and index `m = n + i*k`,
 /// dispatched across the three regimes so a caller integrating over a size distribution needs one call:
-/// the closed dipole (Rayleigh) form `4x Im[(m^2-1)/(m^2+2)]` below [`MIE_X_MIN`] (exact for `x << 1`, and
+/// the closed dipole (Rayleigh) form `4x Im[(m^2-1)/(m^2+2)]` below `MIE_X_MIN` (exact for `x << 1`, and
 /// the `Im` runs in `BigRat` because a metal's `4 n^2 k^2` overflows Q32.32), the full [`mie_q_abs`] on
 /// `[MIE_X_MIN, MIE_X_SWITCH]`, and the geometric opaque-sphere limit `Q_abs -> 1` above it. `None` on a
 /// non-physical index or a wide-fixed overflow inside the Mie branch.

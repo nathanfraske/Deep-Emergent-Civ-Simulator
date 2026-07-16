@@ -1390,7 +1390,8 @@ const DEEP_TIME_INITIAL_STEPS: usize = 80;
 
 /// NON-CANON display: the per-face resolution of the derived globe's CUBE-SPHERE surface sample cache. The cache is
 /// six cube faces, each `FACE_RES` by `FACE_RES` cells projected onto the sphere by the equi-angular cube map
-/// ([`render::cube_face_dir_fixed`]), so the cells are near-uniform in solid angle with NO pole pinch (the lat-lon
+/// ([`cube_local_dirs`] for the face-local cell directions, carried to the body frame by
+/// [`render::cube_face_local_to_world_fixed`]), so the cells are near-uniform in solid angle with NO pole pinch (the lat-lon
 /// grid the cache used before crowded its budget at the poles and under-resolved the equator). It is the memoized
 /// sample cache of the composed surface function (the province crust PLUS the analytic crater-row stamps,
 /// [`derive_province_tiles`]), so this is how finely the discrete craters resolve: a coarse cache shows the big

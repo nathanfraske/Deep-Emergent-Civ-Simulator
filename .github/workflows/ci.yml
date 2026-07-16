@@ -84,6 +84,42 @@ jobs:
         run: cargo fmt --all --check
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
+      # THE DOC-LINK GATE: a doc may not cite an item into being. `rustdoc::broken_intra_doc_links` is ON BY
+      # DEFAULT and had been firing into a void, because nothing in CI ran `cargo doc`. The founding case
+      # (`creep_rows.rs` claiming a condition was REALIZED by `ductile_strength_mpa`, a function that existed
+      # nowhere but that sentence) WAS detected by the machine, and the detection was discarded. A check whose
+      # output nobody reads is a check that does not exist. RUSTDOCFLAGS promotes the lint to an error, so the
+      # verdict is consumed through the EXIT CODE. Never grep this lint's prose: it emits findings that do not
+      # carry the words "unresolved link" (`field_step_kernel`, `promote`, and every "is both a function and a
+      # module" ambiguity), so a grep for that phrase undercounts it.
+      #
+      # `--document-private-items` IS LOAD-BEARING here, not thoroughness: a gate blind to privacy modifiers
+      # audits the API surface rather than the codebase. The founding case fired ONLY by the accident of being
+      # public; had it been private, the machine would have been silent. Measured when this gate landed: the
+      # default scope saw 3 findings, the private scope 34, so 31 broken links were hiding inside private items.
+      #
+      # THIS GATE'S BLINDNESS SET, stated beside its discriminating power, because a gate that knows what it
+      # cannot see is a gate and one that does not is a comfort. It CATCHES bracketed links to items that do not
+      # exist, on public AND private items, in crates in the doc graph. It is BLIND to:
+      #   - Prose claims naming no item in link syntax (the "Rose's EOS route provides E_coh" class). Nothing
+      #     mechanical covers this; only the blind panel does.
+      #   - BACKTICKED names, which are not links, so backticking SILENCES the lint. The sweep's own notation
+      #     fixes deliberately blind it at ~8 sites and this commit adds 4 more (3 that name no item: the `[M]`
+      #     provenance tag twice and the `MIE_X_MIN` NUM/DEN concept; 1 that names a real item: the cross-crate
+      #     cite below). That is the honest cost of those fixes.
+      #   - Items that EXIST but whose body is a stub: the link resolves and the claim is still false.
+      #   - `#[cfg(test)]` items, which are unlinkable, so "the falsifier proves it" claims cannot be
+      #     link-checked at exactly the sites that cite proofs.
+      #   - Cross-crate claims where the crate is not a dependency, which must be backticked and are hence
+      #     invisible. The live case: `crates/compose` names a `civsim_sim` item, and compose does not depend on
+      #     sim BY DESIGN (the authored-physics side must not learn of the emergent side), so rustdoc can never
+      #     check that cite and only a reader can.
+      # CLOSED by this gate, and formerly the sharp one: "private items are not scanned at all".
+      #
+      # `rustdoc::private_intra_doc_links` is a DIFFERENT lint (a public doc linking a private item, ~91
+      # warnings) and is deliberately NOT denied: those items exist, so they are not phantom claims.
+      - name: Doc-link gate (a doc may not cite an item into being)
+        run: RUSTDOCFLAGS="-D rustdoc::broken_intra_doc_links" cargo doc --workspace --no-deps --document-private-items
       # nextest parallelises tests across one global pool (faster than cargo's
       # per-binary-sequential run) and emits a SLOW marker for any test over 60s, so the
       # slow tests are visible in the log and can be trimmed. It does not run doctests, so

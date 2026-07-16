@@ -3944,7 +3944,7 @@ impl World {
     }
 
     /// Gather the perception hits for one trace across all located, sensing beings: the inner pass of
-    /// [`perceive`], a pure read of `&self` (the minds, places, sensoria, clock, and seed), so it runs
+    /// [`Self::perceive`], a pure read of `&self` (the minds, places, sensoria, clock, and seed), so it runs
     /// on a worker thread with no contention. Each being's notice roll is draw-keyed by
     /// `(being, trace, clock, PERCEPTION)`, so the hit set is a pure function of the state, independent
     /// of the worker that computed it.

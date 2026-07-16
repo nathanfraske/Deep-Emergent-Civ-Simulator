@@ -53,7 +53,7 @@ fn shl_var(v: i64, amt: u32) -> i64 {
     s
 }
 
-/// Variable arithmetic right shift by a runtime amount (< 64), the barrel counterpart of [`shl_var`].
+/// Variable arithmetic right shift by a runtime amount (< 64), the barrel counterpart of [`fn@shl_var`].
 #[cube]
 fn shr_var(v: i64, amt: u32) -> i64 {
     let mut s = v;

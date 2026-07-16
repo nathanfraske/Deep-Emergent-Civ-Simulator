@@ -2565,12 +2565,16 @@ pub fn render_system_map(
     (buf, dots)
 }
 
-/// The derived-surface tile (column, row) under a screen pixel, inverting the orthographic sphere map and the globe
+/// The DISPLAY tile (column, row) under a screen pixel, inverting the orthographic sphere map and the globe
 /// orientation: the pixel offset from the globe centre `(cx, cy)` normalized by the on-screen `radius_px` gives the
 /// front-hemisphere view point (`z = sqrt(1 - x^2 - y^2)`), the inverse rotation ([`view_to_body`]) carries it to the
-/// body frame, and its (u, v) selects the tile the same way [`sample_derived_surface`] does (a `cols` by `rows`
-/// field). `None` if the pixel is off the sphere's disk (fail-soft: the caller draws no highlight). A pure inverse of
-/// the sphere map, display-only (Principle 10).
+/// body frame, and its (u, v) selects the cell of the `cols` by `rows` equirectangular display grid, by the same cell
+/// arithmetic [`sample_derived_tile`] applies to a [`SurfaceParam::LatLon`] cache. That grid is the OBSERVER's tile
+/// addressing (the seams [`SurfaceStyle::grid`] overlays, the cell [`draw_surface_highlight`] outlines, the
+/// `tile (col,row)` the provenance readout names), NOT the sample cache index: a [`SurfaceParam::CubeSphere`] cache is
+/// parameterized by `face_res` over six faces and this pick does not address it. `None` if the pixel is off the
+/// sphere's disk (fail-soft: the caller draws no highlight). A pure inverse of the sphere map, display-only
+/// (Principle 10).
 #[allow(clippy::too_many_arguments)]
 pub fn pick_surface_tile(
     px: i32,

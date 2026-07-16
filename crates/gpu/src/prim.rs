@@ -129,10 +129,10 @@ pub(crate) fn q32_mul(a: i64, b: i64) -> i64 {
     (i64::cast_from(hi) << 32u32) | i64::cast_from(lo)
 }
 
-/// The shared checked Q32.32 limb multiply behind [`sat_mul`] and [`checked_mul_zero`]: it returns a
+/// The shared checked Q32.32 limb multiply behind [`fn@sat_mul`] and [`fn@checked_mul_zero`]: it returns a
 /// 3-element array `[fit, overflow, use_neg]`. `fit` is the wrapped [32, 96) result (the correct value
 /// when the product fits `i64`); `overflow` is 1 when the true Q32.32 product does not fit `i64`; and
-/// `use_neg` is 1 when the result is negative. Same sign-magnitude limb product as [`q32_mul`], but it
+/// `use_neg` is 1 when the result is negative. Same sign-magnitude limb product as [`fn@q32_mul`], but it
 /// also keeps the top word `w3` (bits [96, 128) of the product magnitude, which `q32_mul` discards) so
 /// an overflow of the [32, 96) result window is detectable: the Q32.32 magnitude is the 96-bit value
 /// `(w3 : w2 : w1)`, and it fits iff `w3 == 0` and the sign bit is not forced by `w2`. No `i128`.
@@ -246,7 +246,7 @@ pub(crate) fn sat_mul(a: i64, b: i64) -> i64 {
 
 /// Checked Q32.32 multiply returning ZERO on overflow rather than saturating, matching the physiology
 /// path's `Fixed::checked_mul(...).unwrap_or(Fixed::ZERO)` (the homeostasis drain and the logistic
-/// regen). Shares [`mul_checked`]'s overflow decision with [`sat_mul`], so the two cannot drift.
+/// regen). Shares [`fn@mul_checked`]'s overflow decision with [`fn@sat_mul`], so the two cannot drift.
 #[cube]
 pub(crate) fn checked_mul_zero(a: i64, b: i64) -> i64 {
     let r = mul_checked(a, b);

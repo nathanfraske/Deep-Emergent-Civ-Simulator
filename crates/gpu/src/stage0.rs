@@ -323,7 +323,7 @@ fn emu_mul_i64_kernel(a: &Array<i64>, b: &Array<i64>, out: &mut Array<i64>) {
 }
 
 /// The pinned Q32.32 divide over the native-i64 transport, the divide counterpart of
-/// [`emu_mul_i64_kernel`]: single-`i64` operand arrays, an in-register limb split through the shared
+/// [`fn@emu_mul_i64_kernel`]: single-`i64` operand arrays, an in-register limb split through the shared
 /// `q32_div`, and a single-`i64` output. Same 96-step sign-magnitude restoring long division as
 /// `emu_div_kernel`, so it equals `Fixed::div` bit-for-bit. The divisor must be non-zero (the oracle
 /// precondition).

@@ -137,7 +137,7 @@ impl SubstanceMix {
 
     /// The extensive volume-weighted sum of a floor axis over the mixture: sum of volume times the
     /// substance's axis value, overflow-saturating so a pathological volume cannot panic. For the
-    /// density axis this is the cell's total matter MASS; the intensive per-volume form is [`bulk`].
+    /// density axis this is the cell's total matter MASS; the intensive per-volume form is [`Self::bulk`].
     fn weighted_sum(&self, reg: &PhysicsRegistry, axis: &str) -> Fixed {
         Fixed::saturating_sum(self.volumes.iter().map(|(substance, volume)| {
             let value = SubstanceMix::axis_value(reg, substance, axis);
@@ -146,7 +146,7 @@ impl SubstanceMix {
     }
 
     /// The intensive volume-weighted mean of a floor axis over the mixture: the extensive
-    /// [`weighted_sum`] divided by the total volume. An empty cell reads zero (the absence convention).
+    /// [`Self::weighted_sum`] divided by the total volume. An empty cell reads zero (the absence convention).
     /// This is the bulk property a contest works against (a bulk density, a bulk hardness); for a
     /// single-substance cell it is exactly that substance's own registry value.
     fn bulk(&self, reg: &PhysicsRegistry, axis: &str) -> Fixed {
@@ -319,10 +319,18 @@ impl ExtractionParams {
 pub struct CraftParams {
     /// The VOLUME of carried matter a tool consumes to make (m^3). RESERVED. Basis: the material a shaped
     /// tool of the working size embodies; a being that carries less than this cannot make the tool. A
-    /// geometry-and-scale datum, surfaced for the owner. The working-edge AREA is no longer carried here: it
-    /// is DERIVED from the worked stone's own fracture strength under the being's forming force
-    /// ([`crate::runner::Embodiment::craft_from_carried`] over [`civsim_physics::laws::edge_area_at`]), so a
-    /// hard tough stone holds a fine edge and a soft one a blunt one, by physics not a reserved constant.
+    /// geometry-and-scale datum, surfaced for the owner. The working-edge AREA is not carried here and is not
+    /// reserved: it is INTRINSIC to the worked stone, the finest working edge its microstructure holds
+    /// (the `mat.edge_length_scale` floor axis), and the contact area is that edge length squared
+    /// ([`crate::runner::Embodiment::craft_from_carried`]). A fine-grained stone therefore holds a fine edge
+    /// whoever knaps it, and the cut pressure at USE stays a real function of the WIELDER's current force.
+    ///
+    /// TOMBSTONE (`8f34b31`, which removed `civsim_physics::laws::edge_area_at`): the edge was once derived
+    /// from the CRAFTER's forming force, so at use the same force cancelled and the cut pressure came out
+    /// identically the tool's own fracture strength however hard the wielder pressed, while across beings the
+    /// cut power tracked the ratio of the wielder's force to the maker's. An edge that remembers its maker's
+    /// force is history where physics should be: a formation dependence entering through a variable that
+    /// cancels at use time. The rejected reasoning is recorded here so it is found rather than re-derived.
     pub tool_volume: Fixed,
     /// The characteristic LENGTH (m) of the shaped tool's body, the long dimension a being knaps (the
     /// tool-geometry expansion, root R2). RESERVED. Basis: the reach-scale length of a hand tool (a blade, a
