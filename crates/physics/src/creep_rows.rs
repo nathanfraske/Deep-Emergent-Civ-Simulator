@@ -108,10 +108,53 @@ pub enum Modality {
     /// would be WRONG the moment the gate's scope reaches the estimator rung, failing that leg against a test
     /// written for its neighbour.
     ///
-    /// It weakens nothing today: NO H&K row carries this grade (their values are measured, fitted, or assumed),
-    /// so the measured rung's gate is untouched. This is the diamond-gate lesson applied in advance, that a gate
-    /// must not convict the design it exists to protect, rather than after a green suite has to be explained.
-    ClassDerived,
+    /// It weakens nothing: NO H&K row carries this grade, so the measured rung's gate is untouched. This is the
+    /// diamond-gate lesson applied in advance, that a gate must not convict the design it exists to protect,
+    /// rather than after a green suite has to be explained.
+    ///
+    /// CONSTRUCTOR-GATED, which is this grade's graduation from DETECTION to IMPOSSIBILITY. The variant carries a
+    /// [`ClassDerivedWitness`] whose only field is private, so it cannot be written as a literal annotation from
+    /// outside this module: the ONLY way to obtain it is [`class_derived_activation_energy`], which COMPUTES
+    /// `g * R * T_m`. A future convenient constant therefore cannot dress itself in the grade to walk past the
+    /// exponent gate. The test that used to guard this by proving no row wore the tag is now guarding something
+    /// the type system already forbids, which is where a defense belongs once its shape permits it.
+    ClassDerived(ClassDerivedWitness),
+}
+
+/// The private witness that a value came from the `g * R * T_m` route. Its field is private, so only this module
+/// can mint one, and [`class_derived_activation_energy`] is the only place that does.
+///
+/// This is the seal that turns [`Modality::ClassDerived`] from a tag anyone can apply into a receipt only the
+/// computation can issue. Without it, the grade is an honour system guarded by a test, and an honour system in
+/// front of an Arrhenius exponent is exactly the shape this project keeps convicting.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct ClassDerivedWitness(());
+
+/// THE ESTIMATOR RUNG'S ACTIVATION ENERGY, and the only source of [`Modality::ClassDerived`]:
+/// `E* = g * R * T_m`, the 3b class constant against the world's OWN melting temperature.
+///
+/// This is what makes any material's creep derivable from its own solidus rather than from a table that only
+/// exists for olivine, so it is the leg an alien phase stands on. `g` is measured-class and `T_m` is derived, so
+/// the product is CLASS-GRADE IN THE EXPONENT, the same legal status the freezer relies on, band propagated.
+///
+/// `None` on a non-positive melting temperature or gas constant (no solidus, no route) or overflow. The returned
+/// [`ExponentInput`] carries the witness, so it is admitted to the exponent BECAUSE it was computed here, never
+/// because someone said so.
+pub fn class_derived_activation_energy(
+    class_constant_g: Fixed,
+    gas_constant_r: Fixed,
+    melting_point_k: Fixed,
+) -> Option<ExponentInput> {
+    if melting_point_k <= Fixed::ZERO || gas_constant_r <= Fixed::ZERO {
+        return None;
+    }
+    let value = class_constant_g
+        .checked_mul(gas_constant_r)?
+        .checked_mul(melting_point_k)?;
+    Some(ExponentInput {
+        value,
+        modality: Modality::ClassDerived(ClassDerivedWitness(())),
+    })
 }
 
 impl Modality {
@@ -130,7 +173,7 @@ impl Modality {
     pub fn admitted_to_exponent(self) -> bool {
         matches!(
             self,
-            Modality::Measured | Modality::Fitted | Modality::ClassDerived
+            Modality::Measured | Modality::Fitted | Modality::ClassDerived(_)
         )
     }
 }
@@ -437,10 +480,19 @@ mod tests {
         // gate accepting only Measured|Fitted is right for H&K ingestion and would fail the ladder's OTHER LEG
         // against a test written for its neighbour. This is the diamond-gate lesson applied BEFORE the fact: do
         // not build a gate that convicts your own ladder.
+        // The grade is obtainable ONLY by computing it. There is no literal to write.
+        let e_star = class_derived_activation_energy(
+            Fixed::from_ratio(23, 10), // a class-grade g
+            Fixed::from_ratio(8314, 1000),
+            Fixed::from_int(1600), // the world's own T_m
+        )
+        .expect("the g*R*T_m route resolves");
         assert!(
-            Modality::ClassDerived.admitted_to_exponent(),
+            e_star.modality.admitted_to_exponent(),
             "the estimator rung's g*R*T_m route must cross, or the ladder's other leg fails its neighbour's test"
         );
+        // The route REFUSES rather than fabricating when the world has no solidus to key on.
+        assert!(class_derived_activation_energy(Fixed::ONE, Fixed::ONE, Fixed::ZERO).is_none());
         // AND IT WEAKENS NOTHING HERE, which is the half that makes the pre-emption safe rather than a loophole:
         // no H&K row carries the class-derived grade, so the measured rung's gate is untouched, and the row that
         // must fail still fails.
@@ -455,9 +507,8 @@ mod tests {
             hk_wet_dislocation_fugacity(),
             hk_dry_gbs_below_1250c(),
         ] {
-            assert_ne!(
-                row.activation_energy.modality,
-                Modality::ClassDerived,
+            assert!(
+                !matches!(row.activation_energy.modality, Modality::ClassDerived(_)),
                 "no measured row may wear the estimator's grade; that would launder the ladder's rungs together"
             );
         }
@@ -546,22 +597,29 @@ mod tests {
         // all. Carrying ln(A) is not an optimization, it is the only representable form. And the unit hazard
         // rides with it: the table's header prints NO UNIT for A, so any unit string downstream is a consumer's
         // derivation, and it is NOT interchangeable with the MBD form's dimensionless prefactor.
+        // THE TWIN ROUTE, STATED, because a twin whose independence is accidental asserts nothing. Each pinned
+        // value below comes from a DIFFERENT ROUTE than the entry: the entry builds `ln(m) + p*ln(10)` through
+        // the fixed-point `ln`, while the pin is the decimal logarithm read off the printed value by an outside
+        // computation and typed as a literal. Different method, different representation. If the pin were
+        // re-derived from the same expression it would be the same hand typing twice, and the 10x power-of-ten
+        // error this test caught would have passed.
         let dry = hk_dry_dislocation();
-        // ln(1.1e5) ~ 11.61
+        // TWIN: ln(1.1e5) = 11.6083... by external decimal log, against the entry's ln_scientific(11, 10, 5).
         assert!(
             (dry.ln_prefactor - Fixed::from_ratio(1161, 100)).abs() < Fixed::from_ratio(1, 10),
             "ln(1.1e5) ~ 11.61, got {:?}",
             dry.ln_prefactor
         );
-        // ln(1600) ~ 7.38
+        // TWIN: ln(1600) = 7.3778... by external decimal log, against the entry's ln_scientific(16, 10, 3).
         let wet = hk_wet_dislocation_fugacity();
         assert!(
             (wet.ln_prefactor - Fixed::from_ratio(738, 100)).abs() < Fixed::from_ratio(1, 10),
             "ln(1600) ~ 7.38, got {:?}",
             wet.ln_prefactor
         );
-        // ln(6500) ~ 8.78. PINNED because this row carried the SAME off-by-one power of ten as the dry
-        // dislocation row did, and both were caught by this test rather than by review.
+        // TWIN: ln(6500) = 8.7794... by external decimal log, against the entry's ln_scientific(65, 10, 3).
+        // PINNED because this row carried the SAME off-by-one power of ten as the dry dislocation row did, and
+        // both were caught by this test rather than by review.
         let gbs = hk_dry_gbs_below_1250c();
         assert!(
             (gbs.ln_prefactor - Fixed::from_ratio(878, 100)).abs() < Fixed::from_ratio(1, 10),
