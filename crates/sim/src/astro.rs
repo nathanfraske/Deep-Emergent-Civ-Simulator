@@ -674,10 +674,16 @@ pub fn viscous_similarity_surface_density(
 /// model-structure band (the MHD wind-driven rival carries a different decline); the caller owns which branch.
 ///
 /// Computed in the log domain for determinism (the `viscous_similarity_surface_density` precedent): `base >= 1`
-/// so `base^p >= 1` and the rate never exceeds `Mdot_0`, so the only bound is underflow, and past the
-/// representable `exp` ceiling the rate has declined below the representation floor and the disk has dispersed, so
-/// it returns `ZERO` rather than a saturated value. `None` on a non-positive `Mdot_0` or `t_visc`, a negative
-/// `age`, or a `gamma` outside `[0, 2)` (where the exponent is undefined).
+/// so `base^p >= 1` and the rate never exceeds `Mdot_0`, so the only bound is underflow. Past the representable
+/// `exp` ceiling the rate has fallen below what the fixed-point format can hold, so it returns `ZERO` rather than
+/// a saturated value. That ceiling is a REPRESENTATION-FLOOR event, not physical dispersal: it sits about six
+/// orders of magnitude below any physical disk-clearing threshold and is unreachable in real operation, and
+/// dispersal (the disk clearing) is the slice-2 wind-versus-accretion race, never the number format. The
+/// `ZERO` return is graceful arithmetic degradation; a fully declined rate is a readable physical zero, whereas an
+/// out-of-domain orbit in the surface-density function is an error, which is why this returns `ZERO` and that one
+/// returns `None`. At `age = 0` the rate is `Mdot_0` exactly, special-cased so the identity is exact by
+/// construction rather than within the ln/exp round-trip. `None` on a non-positive `Mdot_0` or `t_visc`, a
+/// negative `age`, or a `gamma` outside `[0, 2)` (where the exponent is undefined).
 pub fn viscous_similarity_accretion_rate(
     mdot_0_msun_myr: Fixed,
     t_visc_myr: Fixed,
@@ -692,6 +698,11 @@ pub fn viscous_similarity_accretion_rate(
     {
         return None;
     }
+    // Identity by construction at t = 0: base would be 1 and the rate Mdot_0, but the ln/exp round-trip of 1 is
+    // exact only to a ULP, so the zero-age case returns Mdot_0 directly.
+    if age_myr == Fixed::ZERO {
+        return Some(mdot_0_msun_myr);
+    }
     // p = (5/2 - gamma) / (2 - gamma); p = 3/2 at gamma = 1.
     let p = Fixed::from_ratio(5, 2)
         .checked_sub(gamma)?
@@ -699,8 +710,10 @@ pub fn viscous_similarity_accretion_rate(
     // base = 1 + age / t_visc >= 1, so ln(base) >= 0 and base^p >= 1.
     let base = Fixed::ONE.checked_add(age_myr.checked_div(t_visc_myr)?)?;
     let exponent = p.checked_mul(base.ln())?;
-    // Past the exp ceiling the rate is below the representation floor: a dispersed disk, ZERO not a saturated
-    // value. `ln(2^31) = 31 * ln 2` is the representation's own bound (the surface-density precedent).
+    // A REPRESENTATION-FLOOR guard, not physical dispersal (which the slice-2 race owns): past the exp ceiling the
+    // rate is below what the format can hold, so return ZERO rather than a saturated value. `ln(2^31) = 31 * ln 2`
+    // is the representation's own bound (the surface-density precedent). Unreachable in real operation, ~6 orders
+    // below any physical dispersal threshold.
     let ln_ceiling = Fixed::from_int(31).checked_mul(Fixed::from_int(2).ln())?;
     if exponent >= ln_ceiling {
         return Some(Fixed::ZERO);
@@ -732,9 +745,13 @@ pub struct AccretionLandmark {
 /// band is non-positive.
 ///
 /// BLINDNESS SET (rule 1): discriminating power is that it convicts any `(mdot_0, t_visc, gamma)` whose curve
-/// misses a landmark epoch by more than its band; blind to a joint error that shifts `Mdot_0` and every landmark
-/// rate together by the same factor (a wrong overall normalization consistent with the whole chord), covered by
-/// anchoring `Mdot_0` to the independently-observed class-0/I peak-accretion band rather than to the landmarks.
+/// misses a landmark epoch by more than its band. Blind, first, to a joint error that shifts `Mdot_0` and every
+/// landmark rate together by the same factor (a wrong overall normalization consistent with the whole chord),
+/// covered by anchoring `Mdot_0` to the independently-observed class-0/I peak-accretion band rather than to the
+/// landmarks. Blind, second, to the family SHAPE: two landmarks cannot distinguish the decline family, since a
+/// different `gamma` with refit `(mdot_0, t_visc)` can pass the same two points, covered by `gamma`'s own
+/// provenance from gate-G (the exponent is derived, not free to refit) and by the model-structure band being
+/// DECLARED rather than inferred from these landmarks.
 pub fn accretion_clock_hindcasts(
     mdot_0_msun_myr: Fixed,
     t_visc_myr: Fixed,
@@ -2092,17 +2109,16 @@ mod tests {
 
     #[test]
     fn the_accretion_clock_starts_at_mdot_0_and_declines() {
-        // At t = 0 the rate is Mdot_0 exactly (base = 1, no decline), then it falls monotonically. Test fixtures,
-        // not authored physics: the math is what is checked.
+        // At t = 0 the rate is Mdot_0 BIT-EXACTLY (the zero-age special case), then it falls monotonically. Test
+        // fixtures, not authored physics: the math is what is checked.
         let mdot_0 = Fixed::ONE;
         let t_visc = Fixed::ONE;
         let gamma = Fixed::ONE; // p = 3/2
         let at_zero =
             viscous_similarity_accretion_rate(mdot_0, t_visc, gamma, Fixed::ZERO).unwrap();
-        assert!(
-            (at_zero.to_f64_lossy() - 1.0).abs() < 1e-3,
-            "Mdot(0) reproduces Mdot_0, got {}",
-            at_zero.to_f64_lossy()
+        assert_eq!(
+            at_zero, mdot_0,
+            "Mdot(0) is Mdot_0 exactly by construction, not within a round-trip tolerance"
         );
         let early = viscous_similarity_accretion_rate(mdot_0, t_visc, gamma, Fixed::ONE).unwrap();
         let late =
@@ -2123,7 +2139,13 @@ mod tests {
         let t_visc = Fixed::from_int(2);
         let gamma = Fixed::ONE;
         let at_t_visc = viscous_similarity_accretion_rate(mdot_0, t_visc, gamma, t_visc).unwrap();
+        // The expected value is computed OUTSIDE the engine, by the f64 standard library (`2.0_f64.powf(1.5)`),
+        // NOT by the fixed-point `exp` under test, so this is an external oracle rather than a self-comparison.
         let expected = 4.0 / 2.0_f64.powf(1.5);
+        // DEFAULTS-TAKEN, the 1e-3 relative tolerance: a numerical-accuracy bound on the fixed-point ln/exp
+        // round-trip against the f64 oracle, not a residue budget and not a physical band. Basis: the Q32.32
+        // transcendentals hold roughly six to seven significant digits, so a thousandth is loose headroom over
+        // their round-trip error at this magnitude.
         assert!(
             (at_t_visc.to_f64_lossy() - expected).abs() / expected < 1e-3,
             "Mdot(t_visc) = Mdot_0 / 2^1.5 (expected {expected}, got {})",
