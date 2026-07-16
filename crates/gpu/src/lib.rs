@@ -68,7 +68,9 @@ pub use being::{gpu_activate, gpu_body_thermal, gpu_metabolize, gpu_sat_mul};
 pub use field::{gpu_diffuse, gpu_diffuse_tiled, gpu_field_step, gpu_fixed_mul, FieldResident};
 pub use perceive::gpu_notice;
 pub use stage0::{
-    cpu_client, cuda_client, gpu_div, gpu_mul, wgpu_client, CpuClient, CudaClient, WgpuClient,
+    cpu_client, cuda_client, gpu_div, gpu_div_limb_u32, gpu_div_native_i64, gpu_mul,
+    gpu_mul_limb_u32, gpu_mul_native_i64, wgpu_client, CpuClient, CudaClient, Stage0Transport,
+    WgpuClient,
 };
 pub use transcendental::{
     gpu_asin, gpu_atan, gpu_cos, gpu_exp, gpu_ln, gpu_powf, gpu_powi, gpu_sin, gpu_sqrt,

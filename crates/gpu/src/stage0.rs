@@ -37,6 +37,8 @@ use cubecl::cuda::{CudaDevice, CudaRuntime};
 use cubecl::prelude::*;
 use cubecl::wgpu::{init_setup, RuntimeOptions, Vulkan, WgpuDevice, WgpuRuntime};
 
+use crate::prim::{q32_div, q32_mul};
+
 /// The concrete CUDA compute client type used by the launchers in this crate.
 pub type CudaClient = ComputeClient<CudaRuntime>;
 
@@ -70,6 +72,48 @@ pub fn wgpu_client() -> WgpuClient {
     // Force the Vulkan backend and register the client for this device key (synchronous).
     let _ = init_setup::<Vulkan>(&device, RuntimeOptions::default());
     WgpuRuntime::client(&device)
+}
+
+/// Whether a CubeCL backend has a proven-safe native 64-bit integer path for the Stage 0 transport.
+///
+/// The pinned Q32.32 multiply and divide are defined over `i64` Fixed bit patterns. Two transports
+/// carry those patterns across the host/device boundary, and both run the identical sign-magnitude
+/// limb arithmetic (bit-identical to `Fixed::mul`/`Fixed::div` by the unique-result argument):
+///
+/// - the u32-limb transport ([`gpu_mul_limb_u32`], [`gpu_div_limb_u32`]), which splits each `i64` into
+///   its low and high `u32` halves on the host and carries four input arrays. It stays inside the
+///   confined u32 op set, so it is backend-general on every CubeCL target: the portable floor.
+/// - the native-i64 transport ([`gpu_mul_native_i64`], [`gpu_div_native_i64`]), which carries each
+///   operand as a single `i64` array (a reinterpret, zero per-element host arithmetic) and splits into
+///   limbs in-register on the device. It removes the host split and halves the input buffer traffic,
+///   but it uses a native 64-bit type inside the kernel, so it is sound only where the backend has one.
+///
+/// This trait's const records, per backend, whether that native path is PROVEN by the device gate,
+/// never assumed. A backend is routed to the native path only once its gate confirms bit-identity
+/// there; otherwise it stays on the u32-limb floor, which is correct on every target. The CubeCL CPU
+/// backend is held at `false` deliberately: it trips a constant-propagation overflow bug on `i64`.
+pub trait Stage0Transport: Runtime {
+    /// True when the native-i64 transport is gate-proven bit-identical to the oracle on this backend.
+    const SAFE_NATIVE_I64: bool;
+}
+
+impl Stage0Transport for CudaRuntime {
+    // Proven on this box's RTX 5090 by `tests/stage0_gate.rs` (corners + a 1M sweep) and
+    // `tests/cross_backend.rs`: the native-i64 multiply and divide equal the `Fixed` oracle bit-for-bit.
+    const SAFE_NATIVE_I64: bool = true;
+}
+
+impl Stage0Transport for CpuRuntime {
+    // Held on the u32-limb floor: cubecl-cpu's constant-propagation pass has an i64 overflow bug (the
+    // class the cross-backend note records), so the native transport is not sound on this backend.
+    const SAFE_NATIVE_I64: bool = false;
+}
+
+impl Stage0Transport for WgpuRuntime {
+    // SPIR-V has Int64 (a native-i64 probe ran in milliseconds), but the native transport is not yet
+    // gate-proven on a hardware Vulkan device from here (the only local adapter is software lavapipe),
+    // so it stays on the u32-limb floor until `tests/cross_backend.rs` confirms it: correct, just slower.
+    const SAFE_NATIVE_I64: bool = false;
 }
 
 /// The pinned Q32.32 multiply, `emu_mul` (see `crates/core/tests/gpu_emulation.rs`) as a `#[cube]`
@@ -264,6 +308,33 @@ fn emu_div_kernel(
     }
 }
 
+/// The pinned Q32.32 multiply over the native-i64 transport. Each operand arrives as a single `i64`
+/// array (a reinterpret of the Fixed bit patterns, no host split), and the `i64`->limb decomposition
+/// happens in-register through the shared `q32_mul`. The limb arithmetic is the same sign-magnitude
+/// schoolbook product as `emu_mul_kernel` above (proven bit-identical to `Fixed::mul`); only the
+/// boundary layout differs. Launched on a `SAFE_NATIVE_I64` backend (CUDA today); the u32-limb kernel
+/// is the fallback elsewhere.
+#[cube(launch)]
+fn emu_mul_i64_kernel(a: &Array<i64>, b: &Array<i64>, out: &mut Array<i64>) {
+    let pos = ABSOLUTE_POS;
+    if pos < out.len() {
+        out[pos] = q32_mul(a[pos], b[pos]);
+    }
+}
+
+/// The pinned Q32.32 divide over the native-i64 transport, the divide counterpart of
+/// [`emu_mul_i64_kernel`]: single-`i64` operand arrays, an in-register limb split through the shared
+/// `q32_div`, and a single-`i64` output. Same 96-step sign-magnitude restoring long division as
+/// `emu_div_kernel`, so it equals `Fixed::div` bit-for-bit. The divisor must be non-zero (the oracle
+/// precondition).
+#[cube(launch)]
+fn emu_div_i64_kernel(a: &Array<i64>, b: &Array<i64>, out: &mut Array<i64>) {
+    let pos = ABSOLUTE_POS;
+    if pos < out.len() {
+        out[pos] = q32_div(a[pos], b[pos]);
+    }
+}
+
 /// Split a slice of `i64` Fixed bit patterns into low and high `u32` limbs.
 fn split(v: &[i64]) -> (Vec<u32>, Vec<u32>) {
     let lo = v.iter().map(|&x| x as u64 as u32).collect();
@@ -281,8 +352,59 @@ fn join(lo: &[u32], hi: &[u32]) -> Vec<i64> {
 
 /// Elementwise pinned Q32.32 multiply on the GPU: `out[i]` = Fixed::mul bits of `a[i]` and `b[i]`,
 /// with `a`, `b`, and the result carried as raw `i64` Fixed bit patterns. Bit-identical to
-/// `Fixed::mul` (the Stage 0 contract). `a` and `b` must have equal length.
-pub fn gpu_mul<R: Runtime>(client: &ComputeClient<R>, a: &[i64], b: &[i64]) -> Vec<i64> {
+/// `Fixed::mul` (the Stage 0 contract). Dispatches by backend: a target with a gate-proven native
+/// 64-bit path (`SAFE_NATIVE_I64`, CUDA today) takes the [`gpu_mul_native_i64`] transport, which does
+/// zero per-element host work; every other backend (the CubeCL CPU backend, any target without proven
+/// native i64) takes the backend-general [`gpu_mul_limb_u32`] transport. Both run the identical limb
+/// arithmetic and are gate-proven bit-identical to the oracle. `a` and `b` must have equal length.
+pub fn gpu_mul<R: Stage0Transport>(client: &ComputeClient<R>, a: &[i64], b: &[i64]) -> Vec<i64> {
+    if R::SAFE_NATIVE_I64 {
+        gpu_mul_native_i64(client, a, b)
+    } else {
+        gpu_mul_limb_u32(client, a, b)
+    }
+}
+
+/// The native-i64 transport for the Stage 0 multiply (see [`gpu_mul`]): `a` and `b` each cross the
+/// boundary as a single `i64` array (a reinterpret of the Fixed bit patterns, so the host does no
+/// per-element arithmetic), the kernel splits into limbs in-register, and one `i64` output array comes
+/// back. Two input buffers and one output buffer, half the traffic of the u32-limb form. Sound only on
+/// a backend where `SAFE_NATIVE_I64` holds; call it directly to benchmark the transport, otherwise use
+/// [`gpu_mul`], which routes by backend. `a` and `b` must have equal length.
+pub fn gpu_mul_native_i64<R: Runtime>(client: &ComputeClient<R>, a: &[i64], b: &[i64]) -> Vec<i64> {
+    assert_eq!(a.len(), b.len(), "gpu_mul: mismatched input lengths");
+    let n = a.len();
+    if n == 0 {
+        return Vec::new();
+    }
+    // Reinterpret the i64 slices as raw bytes: no per-element split, no limb arrays.
+    let a_h = client.create_from_slice(i64::as_bytes(a));
+    let b_h = client.create_from_slice(i64::as_bytes(b));
+    let out_h = client.empty(core::mem::size_of_val(a));
+
+    let threads = 256u32;
+    let blocks = (n as u32).div_ceil(threads);
+    unsafe {
+        emu_mul_i64_kernel::launch::<R>(
+            client,
+            CubeCount::Static(blocks, 1, 1),
+            CubeDim::new_1d(threads),
+            ArrayArg::from_raw_parts(a_h.clone(), n),
+            ArrayArg::from_raw_parts(b_h.clone(), n),
+            ArrayArg::from_raw_parts(out_h.clone(), n),
+        );
+    }
+    let bytes = client.read_one_unchecked(out_h);
+    i64::from_bytes(&bytes).to_vec()
+}
+
+/// The backend-general u32-limb transport for the Stage 0 multiply (see [`gpu_mul`]): each `i64`
+/// operand is split into its low and high `u32` halves on the host and carried as four input arrays,
+/// staying inside the confined u32 op set so it is bit-identical on every CubeCL target (the portable
+/// floor, and the fallback for any backend without proven native i64). The per-element host split and
+/// the doubled input traffic are its cost; prefer [`gpu_mul`], which takes the native transport where
+/// the backend supports it. `a` and `b` must have equal length.
+pub fn gpu_mul_limb_u32<R: Runtime>(client: &ComputeClient<R>, a: &[i64], b: &[i64]) -> Vec<i64> {
     assert_eq!(a.len(), b.len(), "gpu_mul: mismatched input lengths");
     let n = a.len();
     if n == 0 {
@@ -319,8 +441,53 @@ pub fn gpu_mul<R: Runtime>(client: &ComputeClient<R>, a: &[i64], b: &[i64]) -> V
 
 /// Elementwise pinned Q32.32 divide on the GPU: `out[i]` = Fixed::div bits of `a[i]` by `b[i]`,
 /// carried as raw `i64` Fixed bit patterns. Bit-identical to `Fixed::div`. Every `b[i]` must be
-/// non-zero (the divide-by-zero precondition mirrors `Fixed::div`). `a` and `b` must have equal length.
-pub fn gpu_div<R: Runtime>(client: &ComputeClient<R>, a: &[i64], b: &[i64]) -> Vec<i64> {
+/// non-zero (the divide-by-zero precondition mirrors `Fixed::div`). Dispatches by backend exactly as
+/// [`gpu_mul`]: [`gpu_div_native_i64`] where `SAFE_NATIVE_I64` holds (CUDA today), the backend-general
+/// [`gpu_div_limb_u32`] otherwise. `a` and `b` must have equal length.
+pub fn gpu_div<R: Stage0Transport>(client: &ComputeClient<R>, a: &[i64], b: &[i64]) -> Vec<i64> {
+    if R::SAFE_NATIVE_I64 {
+        gpu_div_native_i64(client, a, b)
+    } else {
+        gpu_div_limb_u32(client, a, b)
+    }
+}
+
+/// The native-i64 transport for the Stage 0 divide (see [`gpu_div`] and [`gpu_mul_native_i64`]): `a`
+/// and `b` cross as a single `i64` array each (a reinterpret, zero per-element host work), the kernel
+/// splits into limbs in-register, and one `i64` output array comes back. Sound only where
+/// `SAFE_NATIVE_I64` holds. Every `b[i]` must be non-zero. `a` and `b` must have equal length.
+pub fn gpu_div_native_i64<R: Runtime>(client: &ComputeClient<R>, a: &[i64], b: &[i64]) -> Vec<i64> {
+    assert_eq!(a.len(), b.len(), "gpu_div: mismatched input lengths");
+    let n = a.len();
+    if n == 0 {
+        return Vec::new();
+    }
+    let a_h = client.create_from_slice(i64::as_bytes(a));
+    let b_h = client.create_from_slice(i64::as_bytes(b));
+    let out_h = client.empty(core::mem::size_of_val(a));
+
+    let threads = 256u32;
+    let blocks = (n as u32).div_ceil(threads);
+    unsafe {
+        emu_div_i64_kernel::launch::<R>(
+            client,
+            CubeCount::Static(blocks, 1, 1),
+            CubeDim::new_1d(threads),
+            ArrayArg::from_raw_parts(a_h.clone(), n),
+            ArrayArg::from_raw_parts(b_h.clone(), n),
+            ArrayArg::from_raw_parts(out_h.clone(), n),
+        );
+    }
+    let bytes = client.read_one_unchecked(out_h);
+    i64::from_bytes(&bytes).to_vec()
+}
+
+/// The backend-general u32-limb transport for the Stage 0 divide (see [`gpu_div`] and
+/// [`gpu_mul_limb_u32`]): each `i64` operand is split into its low and high `u32` halves on the host
+/// and carried as four input arrays, staying inside the confined u32 op set so it is bit-identical on
+/// every CubeCL target (the portable floor and the fallback for any backend without proven native
+/// i64). Every `b[i]` must be non-zero. `a` and `b` must have equal length.
+pub fn gpu_div_limb_u32<R: Runtime>(client: &ComputeClient<R>, a: &[i64], b: &[i64]) -> Vec<i64> {
     assert_eq!(a.len(), b.len(), "gpu_div: mismatched input lengths");
     let n = a.len();
     if n == 0 {
