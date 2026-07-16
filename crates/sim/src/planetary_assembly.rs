@@ -522,6 +522,14 @@ pub fn assemble_system_with_giants(
 /// quantity (the `L_z`-plus-AMD combination the near-circular reduction folds into one number). The true
 /// `L_z`-and-AMD double entry, where collisions damp AMD into heat while `L_z` survives, is the already-ruled
 /// future refinement; this proxy is the honest interim as long as it is named as one.
+///
+/// TERMS DROPPED: `m * sqrt(a)` is the Keplerian circular specific angular momentum times mass. It drops the
+/// eccentricity factor `sqrt(1 - e^2)` (the AMD term above) and all pressure or magnetic support on the orbit,
+/// so it is the pure gravitational two-body circular value. This is harmless while EVERY term on both sides of a
+/// gate uses the same convention (the residual cancels), and it becomes load-bearing the day an edge posts with
+/// a different lever arm, the disk-wind edge above all, which carries `L` per unit mass that is not `sqrt(a)` of
+/// any single orbit. The independent `(delta_mass, delta_l)` edge schema (see [`DiskGasLedger::post_edge`]) is
+/// what lets that edge post its own lever arm rather than being forced through this proxy.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Default)]
 pub struct AngularMomentumProxy(pub Fixed);
 
@@ -549,10 +557,17 @@ pub fn orbital_angular_momentum(
 /// `the_disk_gas_ledger_restores_mass_conservation`): the conserved boundary is {this GAS account + the
 /// assembled planets}. Explicitly OUTSIDE it: the planetesimal reservoir (`crate::smallbody::residual_disk_mass`)
 /// and the assembly's fragmentation debris (`PlanetarySystem::debris_mass_earth`), which are two other reservoirs
-/// that stay separate. PRE-REGISTERED FUTURE EDGE that will breach this boundary and must extend it deliberately
-/// rather than break the gate a second time: LATE ACCRETION, a mass flux from the planetesimal reservoir into
-/// the planets, which crosses the boundary from outside and so needs the boundary widened to include that
-/// reservoir when it lands, not a silent tolerance.
+/// that stay separate. TWO PRE-REGISTERED FUTURE EDGES will breach this boundary and must extend it
+/// deliberately rather than break the gate a second time. FIRST, LATE ACCRETION, a mass flux from the
+/// planetesimal reservoir into the planets, which crosses the boundary from outside and so needs the boundary
+/// widened to include that reservoir when it lands, not a silent tolerance. SECOND, ENVELOPE ENRICHMENT: this
+/// slice books the drawn envelope as `final mass - core mass`, which is exactly the accreted GAS today because
+/// #73 grows a giant by feeding-zone gas alone past the core (`giants.rs`, `final_mass_earth = core_mass_earth +
+/// gas_mass_earth`, the gas reservoir only). When envelope solid enrichment arrives (heavy elements dredged into
+/// the envelope, first-order for real giant composition), that formula must become `final mass - core mass -
+/// envelope solids`, and the solid part must post as a SEPARATE edge across the boundary from the planetesimal
+/// account, so the gas edge stays gas and the solids are conserved against their own reservoir rather than
+/// silently counted as gas here.
 ///
 /// THE MINIMAL SCOPE (ruled): the account opens at a snapshot of the disk's post-infall gas content DERIVED by
 /// quadrature over the static profile ([`DiskGasLedger::from_disk_profile`]), and the only edge is the envelope
@@ -582,7 +597,12 @@ pub enum DiskGasError {
     /// invented as a tiebreak in the static slice. The account-level overdraw is itself a diagnostic: adjacent
     /// giants with overlapping feeding annuli can DOUBLE-DRAW the same gas, so an overdraw against a
     /// profile-derived snapshot flags that #73's feeding zones are not de-overlapped, which this gate exists to
-    /// catch (the honest limit, not silently absorbed).
+    /// catch (the honest limit, not silently absorbed). WORLD-LEVEL SEMANTICS (per the guard ruling that a gate
+    /// stops the computation and never touches the vector): on `Overdrawn` the edge returns without having
+    /// mutated the account (the `checked_sub` happens before the commit, so a rejected debit leaves both fields
+    /// as they were), and the caller HOLDS the result rather than aborting the run or writing a clamped world
+    /// state. The account is not advanced, no world vector is touched, and the flag surfaces for the run to
+    /// decide; it is a stopped computation, never a partial mutation.
     Overdrawn,
     /// A non-positive input, or an overflow.
     Arithmetic,
@@ -603,6 +623,18 @@ impl DiskGasLedger {
     /// (`[inner_au, outer_au]`, `steps` rings) via [`crate::giants::disk_gas_content`], so the opening mass and
     /// angular momentum both fall out of the same `Sigma(r)` the rest of the disk code reads rather than being
     /// two independently reserved scalars. `None` on a degenerate domain or a disk-edge miss.
+    ///
+    /// THE DOMAIN IS THE CALLER'S, AND IT IS NOT YET DERIVED. The formula is derived, but `[inner_au, outer_au]`
+    /// is the account's DOMAIN, and a derived account needs a derived domain too. The physical bounds are the
+    /// disk's own: the inner MAGNETOSPHERIC TRUNCATION (a few stellar radii, sub-tenth-AU) and the outer taper
+    /// set by the characteristic radius `r_c`. The current viscous-similarity gas density
+    /// ([`crate::astro::viscous_similarity_surface_density`]) carries NO `r_c` taper: it is a declining power law
+    /// whose midplane mass integral `integral 2*pi*r*Sigma dr` GROWS with the outer bound (in the irradiated
+    /// regime `Sigma ~ r^-1`, so the enclosed mass `~ r`), so the outer cutoff is load-bearing and there is no
+    /// natural edge to read. Until the profile arc lands `r_c` in the gas density, a caller must supply the
+    /// bounds as a reserved-with-basis interim, named as such (see the test's `PLANET_ZONE_*` constants), never
+    /// as bare call-site literals borrowed from the planet zone. This is the half-derived case the audit named:
+    /// the account is fully derived only when both its formula and its domain are.
     pub fn from_disk_profile(
         disk: &SolidDisk,
         inner_au: Fixed,
@@ -693,6 +725,29 @@ mod tests {
     fn r(n: i64, d: i64) -> Fixed {
         Fixed::from_ratio(n, d)
     }
+
+    // RESERVED-with-basis INTERIM, the gas-integration DOMAIN (finding: the opening bounds are the account's
+    // domain and must be derived, not authored). These are NOT the disk's own bounds: they are the PLANET-ZONE
+    // PROXY, the region the Mirror embryo field occupies, borrowed as the gas domain until the profile arc lands
+    // the physical bounds. The physical inner bound is the magnetospheric truncation (a few stellar radii); the
+    // physical outer bound is the characteristic radius `r_c` taper, which the viscous-similarity gas density
+    // does not yet carry (so the midplane mass integral has no natural outer cutoff and the bound is
+    // load-bearing, see `DiskGasLedger::from_disk_profile`). Named here so the tests do not hide the domain in
+    // call-site literals; a world whose account size shifts across a plausible widening of this band is a world
+    // whose Overdrawn verdict is not yet trustworthy.
+    const PLANET_ZONE_INNER_AU: Fixed = Fixed::from_int(1); // planet-zone proxy, NOT the magnetospheric edge
+    const PLANET_ZONE_OUTER_AU: Fixed = Fixed::from_int(30); // planet-zone proxy, NOT the derived r_c taper
+    const GAS_INTEGRATION_STEPS: u32 = 128; // midpoint rings; the convergence twin checks 128 against 256
+
+    // The residue-derived tolerance budget for the `sum(m*sqrt(a))` proxy gates (finding: the tolerance must be
+    // derived from the rounding budget, not a chosen epsilon). Each terrestrial merge reconstructs the merged
+    // orbit through a bounded fixed-point chain (a div, a sqrt, and the proxy mul), each rounding at most a
+    // handful of ULP, scaled by the proxy magnitude. The measured worst case is ~12 bits per merge (the
+    // oligarchic giant field); this budget is 64 bits per merge, roughly 5x headroom over the measured maximum
+    // for field-to-field variation in the proxy magnitudes, and still 2^26 below one Earth-mass-sqrt-AU
+    // (2^32 bits). A gate tolerance is then `budget * merges`, so it SCALES with the rounding events rather than
+    // sitting as a flat epsilon, and its discriminating power is asserted at each use.
+    const PROXY_L_ULP_BITS_PER_MERGE: i128 = 64;
 
     fn shape() -> GaussApprox {
         // The stamped world-identity scatter shape (design 25.10): the sum-of-12-uniforms unit Gaussian,
@@ -1237,6 +1292,7 @@ mod tests {
         // sum(m*sqrt(a)) to fixed-point tolerance (the sqrt(a) reconstruction rounds, so it is not bit-exact
         // like mass). Institutional-fix entry #2 discharged.
         let embryos = mirror_embryos(Fixed::ONE, Fixed::from_int(30));
+        let embryo_count = embryos.len();
         let age = Fixed::from_int(4500);
         let seed = 0xA17E_A17Eu64;
         let opening = total_angular_momentum_bits(embryos.len(), |i| {
@@ -1246,12 +1302,31 @@ mod tests {
         let closing = total_angular_momentum_bits(system.planets.len(), |i| {
             (system.planets[i].mass_earth, system.planets[i].orbit_au)
         });
-        // Tolerance: a few fixed-point units per merge accumulate through the sqrt/div/mul rounding of the
-        // merged orbit; a hundredth of an Earth-mass-sqrt-AU over the whole field is the honest bound.
-        let tol = Fixed::from_ratio(1, 100).to_bits() as i128;
+        // Residue-derived tolerance (finding 4): the per-merge rounding budget times the merge count, so the
+        // bound scales with the rounding events rather than being a chosen epsilon. Each merge reconstructs the
+        // merged orbit through a bounded fixed-point chain.
+        let merges = (embryo_count - system.planets.len()) as i128;
+        let tol = PROXY_L_ULP_BITS_PER_MERGE * merges;
+        let residual = (opening - closing).abs();
         assert!(
-            (opening - closing).abs() <= tol,
-            "the merge conserves sum(m*sqrt(a)) to tolerance (opening {opening}, closing {closing}, tol {tol})"
+            residual <= tol,
+            "the merge conserves sum(m*sqrt(a)) within the rounding budget (residual {residual}, tol {tol}, merges {merges})"
+        );
+        // Discriminating power: the tolerance is far below the smallest single body's proxy L, so a debit
+        // misattributed to the wrong orbit by even a small fraction of one body would exceed it. If the bound
+        // were vacuous (a loose epsilon) this would fail.
+        let smallest_body_l = (0..system.planets.len())
+            .map(|i| {
+                orbital_angular_momentum(system.planets[i].mass_earth, system.planets[i].orbit_au)
+                    .unwrap()
+                    .0
+                    .to_bits() as i128
+            })
+            .min()
+            .unwrap();
+        assert!(
+            tol * 16 < smallest_body_l,
+            "the tolerance discriminates: it is under a sixteenth of the smallest body proxy L, so a wrong-orbit debit at that scale is caught (tol {tol}, smallest_body_l {smallest_body_l})"
         );
     }
 
@@ -1295,8 +1370,13 @@ mod tests {
         );
         // Open the account at the profile-DERIVED snapshot (steer 3: not two free scalars), which resolves to a
         // positive gas mass and momentum and covers the draw for this non-overlapping oligarchic field.
-        let opened =
-            DiskGasLedger::from_disk_profile(&disk, Fixed::ONE, Fixed::from_int(30), 128).unwrap();
+        let opened = DiskGasLedger::from_disk_profile(
+            &disk,
+            PLANET_ZONE_INNER_AU,
+            PLANET_ZONE_OUTER_AU,
+            GAS_INTEGRATION_STEPS,
+        )
+        .unwrap();
         assert!(
             opened.mass_earth > Fixed::ZERO && opened.angular_momentum.0 > Fixed::ZERO,
             "the profile derives a positive gas mass and angular momentum"
@@ -1321,6 +1401,7 @@ mod tests {
         let (disk, field) = giant_field();
         let age = Fixed::from_int(4500);
         let seed = 0x1A16_1A16u64;
+        let embryo_count = field.len();
         let embryo_l =
             total_angular_momentum_bits(field.len(), |i| (field[i].mass_earth, field[i].orbit_au));
         let system = assemble_system_with_giants(
@@ -1336,8 +1417,13 @@ mod tests {
         // Open at the profile-DERIVED snapshot (steer 3): the momentum floor comes from the same quadrature
         // that sets the mass floor, so the account holds enough proxy L to cover the drain rather than a free
         // reserved scalar.
-        let opened =
-            DiskGasLedger::from_disk_profile(&disk, Fixed::ONE, Fixed::from_int(30), 128).unwrap();
+        let opened = DiskGasLedger::from_disk_profile(
+            &disk,
+            PLANET_ZONE_INNER_AU,
+            PLANET_ZONE_OUTER_AU,
+            GAS_INTEGRATION_STEPS,
+        )
+        .unwrap();
         let l_gas0 = opened.angular_momentum.0;
         let ledger = drain_envelopes(opened, &system).unwrap();
         let planet_l = total_angular_momentum_bits(system.planets.len(), |i| {
@@ -1345,10 +1431,32 @@ mod tests {
         });
         let opening = l_gas0.to_bits() as i128 + embryo_l;
         let closing = ledger.angular_momentum.0.to_bits() as i128 + planet_l;
-        let tol = Fixed::from_ratio(1, 100).to_bits() as i128;
+        // Residue-derived tolerance (finding 4): the giant-drain part is exact (the account debits exactly
+        // gas*sqrt(a), the giant gains exactly that, and the quadrature-derived l_gas0 cancels between the
+        // opening and the drained account), so the ONLY residual is the terrestrial merges' sqrt-reconstruction
+        // rounding plus the per-giant distributivity gap. The bound is the same per-merge budget times the merge
+        // count, scaling with the rounding events.
+        let merges = embryo_count.saturating_sub(system.planets.len()) as i128;
+        let tol = PROXY_L_ULP_BITS_PER_MERGE * merges;
+        let residual = (opening - closing).abs();
         assert!(
-            (opening - closing).abs() <= tol,
-            "total angular momentum conserved to tolerance over the boundary (opening {opening}, closing {closing}, tol {tol})"
+            residual <= tol,
+            "total angular momentum conserved within the rounding budget over the boundary (residual {residual}, tol {tol}, merges {merges})"
+        );
+        // Discriminating power: the tolerance is far under the smallest planet's proxy L, so a drained envelope
+        // posted at the wrong orbit would blow the gate rather than pass unnoticed.
+        let smallest_body_l = (0..system.planets.len())
+            .map(|i| {
+                orbital_angular_momentum(system.planets[i].mass_earth, system.planets[i].orbit_au)
+                    .unwrap()
+                    .0
+                    .to_bits() as i128
+            })
+            .min()
+            .unwrap();
+        assert!(
+            tol * 16 < smallest_body_l,
+            "the tolerance discriminates: under a sixteenth of the smallest body proxy L (tol {tol}, smallest_body_l {smallest_body_l})"
         );
     }
 
@@ -1375,6 +1483,93 @@ mod tests {
             drain_envelopes(tiny, &system),
             Err(DiskGasError::Overdrawn),
             "an under-filled snapshot fails soft, never fabricates gas"
+        );
+    }
+
+    #[test]
+    fn the_opening_is_profile_derived_not_a_reserved_snapshot() {
+        // Finding 2: the mass gate proves the ledger BALANCES (arithmetic); this proves the opening is DERIVED
+        // (provenance). They are different claims: a reserved snapshot would balance just as well, conservation
+        // of a fiction. This BINDS the opener to the quadrature, so reverting `from_disk_profile` to an authored
+        // constant tomorrow fails here even while the mass gate stays green. It also confirms the derived
+        // opening covers the draw for this non-overlapping oligarchic field.
+        let (disk, field) = giant_field();
+        let system = assemble_system_with_giants(
+            field,
+            &disk,
+            Fixed::ONE,
+            Fixed::from_int(4500),
+            0xD15C_0FFEu64,
+            shape(),
+            &gas_params(),
+            &kh_params(),
+        );
+        let opened = DiskGasLedger::from_disk_profile(
+            &disk,
+            PLANET_ZONE_INNER_AU,
+            PLANET_ZONE_OUTER_AU,
+            GAS_INTEGRATION_STEPS,
+        )
+        .unwrap();
+        // The opener is the quadrature, not a constant: it equals `disk_gas_content` over the same domain to the
+        // bit. An authored snapshot would not.
+        let (quad_mass, quad_l) = crate::giants::disk_gas_content(
+            &disk,
+            PLANET_ZONE_INNER_AU,
+            PLANET_ZONE_OUTER_AU,
+            GAS_INTEGRATION_STEPS,
+        )
+        .unwrap();
+        assert_eq!(
+            opened.mass_earth, quad_mass,
+            "the opening mass is the profile quadrature, not a reserved number"
+        );
+        assert_eq!(
+            opened.angular_momentum.0, quad_l,
+            "the opening angular momentum is the profile quadrature, not a reserved number"
+        );
+        assert!(
+            opened.mass_earth > Fixed::ZERO && opened.angular_momentum.0 > Fixed::ZERO,
+            "the profile derives a positive gas mass and angular momentum"
+        );
+        // And it covers the draw: the derived account drains without overdraw.
+        assert!(
+            drain_envelopes(opened, &system).is_ok(),
+            "the profile-derived opening covers the envelope draw for this field"
+        );
+    }
+
+    #[test]
+    fn the_gas_quadrature_converges() {
+        // Numerical-twin rule (minor): the midpoint quadrature at the shipped 128 rings agrees with 256 rings
+        // within tolerance, so the account size is a converged integral, not a step-count artifact. A smooth
+        // declining integrand halves its midpoint error each doubling, so the two should sit within a percent.
+        let (disk, _field) = giant_field();
+        let (m128, l128) = crate::giants::disk_gas_content(
+            &disk,
+            PLANET_ZONE_INNER_AU,
+            PLANET_ZONE_OUTER_AU,
+            GAS_INTEGRATION_STEPS,
+        )
+        .unwrap();
+        let (m256, l256) = crate::giants::disk_gas_content(
+            &disk,
+            PLANET_ZONE_INNER_AU,
+            PLANET_ZONE_OUTER_AU,
+            2 * GAS_INTEGRATION_STEPS,
+        )
+        .unwrap();
+        let mass_gap = (m128.to_bits() as i128 - m256.to_bits() as i128).abs();
+        let l_gap = (l128.to_bits() as i128 - l256.to_bits() as i128).abs();
+        assert!(
+            mass_gap * 100 < m256.to_bits() as i128,
+            "the gas-mass quadrature converges: 128 vs 256 rings within 1% (gap {mass_gap}, m256 {})",
+            m256.to_bits()
+        );
+        assert!(
+            l_gap * 100 < l256.to_bits() as i128,
+            "the proxy-L quadrature converges: 128 vs 256 rings within 1% (gap {l_gap}, l256 {})",
+            l256.to_bits()
         );
     }
 }
