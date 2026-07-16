@@ -133,6 +133,7 @@ pub mod semantics;
 pub mod sensorium;
 pub mod smallbody;
 pub mod stellar;
+pub mod stellar_evolution;
 pub mod stocks;
 pub mod substrate;
 pub mod surface_drivers;
