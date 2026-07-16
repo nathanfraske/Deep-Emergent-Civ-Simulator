@@ -60,4 +60,5 @@
 ::from_decimal_str(	crates/physics/src/condensation.rs	1	deserialization	the cited [M] Lodders 2003 Table 8 condensation temperatures parsed to Fixed through BigRat, reads the measured table never authors
 ::from_decimal_str(	crates/physics/src/solar_abundances.rs	1	deserialization	the cited [M] AGSS09 solar log-eps abundances parsed to Fixed through BigRat, reads the compilation never authors
 ::from_decimal_str(	crates/physics/src/ice_sublimation.rs	1	deserialization	the cited [M] Murphy-Koop ice saturation pressures parsed to Fixed through BigRat, reads the equation values never authors
+::from_decimal_str(	crates/sim/src/smallbody.rs	1	deserialization	the cited [M] Murphy-Koop (2005) ice saturation equation coefficients (a,b,c,d), read from the physics ice_sublimation column via equation_coefficients(), parsed to Fixed to evaluate ln p_sat at an arbitrary disk temperature for the small-body snow-line split; reads the cited equation never authors
 ::from_decimal_str(	crates/physics/src/perovskite_gibbs.rs	1	deserialization	the cited [M] Robie-Hemingway perovskite Gibbs energies parsed to Fixed through BigRat, reads the compilation never authors

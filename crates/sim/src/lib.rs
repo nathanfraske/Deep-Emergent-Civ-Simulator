@@ -126,6 +126,7 @@ pub mod runner;
 pub mod scenario;
 pub mod semantics;
 pub mod sensorium;
+pub mod smallbody;
 pub mod stellar;
 pub mod stocks;
 pub mod substrate;
