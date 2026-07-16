@@ -2209,8 +2209,24 @@ fn derive_mean_atomic_mass_kg_per_mol(
 /// ([`atmosphere_gas_equilibrium`]) with its Rayleigh sky ([`render::rayleigh_sky_rgb`]).
 fn build_derived_scene(star_mass: Fixed, orbit_au: Fixed) -> Result<DerivedScene, String> {
     let janaf = JanafTables::standard().map_err(|_| "the JANAF tables did not load")?;
-    let abundances =
-        SolarAbundances::standard().map_err(|_| "the solar abundances did not load")?;
+    // COMPOSITION comes from a SINGLE per-world datum, not three hardcoded solar literals. The condensation (the
+    // crust chemistry), the uncompressed bulk density (the differentiation), and the star model (its Z/Z_sun axis)
+    // now all read this one slot, `DiskComposition`. NON-CANON PLACEHOLDER: the datum RESOLVES TO THE SOLAR INSTANCE
+    // (`DiskComposition::mirror`, the Sun's own measured pattern), so every derived world stays composition-identical
+    // to the Mirror case FOR NOW, and that is correct for this commit: it chooses no value. This is the
+    // letter-versus-substance gap held open ON PURPOSE, the same discipline as AIR_FIXTURE. What makes worlds DIFFER
+    // is the abundance-DRAW generator (the slice-2 generator commit, gated on the dispersion fetch now running): it
+    // draws a per-system [Fe/H] and abundance pattern into THIS SAME slot, at which point the condensation roster,
+    // the accretion mass, and the bulk density all condition on the drawn Z. Until it lands, the composition is the
+    // solar instance and nothing here is fabricated.
+    let disk_composition = civsim_materials::disk_composition::DiskComposition::mirror()
+        .map_err(|_| "the per-world disk composition did not load")?;
+    let abundances = disk_composition.pattern().clone();
+    // Z/Z_sun the star model reads, sourced from the SAME per-world datum (not a bare `Fixed::ONE`): unity now
+    // because the datum is the solar instance, the drawn ratio once the generator fills a non-solar Z.
+    let star_metallicity_ratio = disk_composition
+        .metallicity_ratio_to_solar()
+        .ok_or("the per-world metallicity ratio did not resolve (a non-solar draw awaits the generator commit)")?;
     let optical =
         OpticalConstants::standard().map_err(|_| "the optical-constants library did not load")?;
 
@@ -2287,10 +2303,10 @@ fn build_derived_scene(star_mass: Fixed, orbit_au: Fixed) -> Result<DerivedScene
     // reserved-with-basis residues (the surface-warmth epoch, distinct from the formation accretion rate above).
     let planet = civsim_sim::planet::derive_planet(
         star_mass,
-        Fixed::ONE,                   // solar metallicity
-        Fixed::from_ratio(35, 10),    // alpha (mass-luminosity)
-        Fixed::from_ratio(8, 10),     // beta (mass-radius)
-        Fixed::from_ratio(-44, 100),  // lambda (metallicity-luminosity)
+        star_metallicity_ratio, // Z/Z_sun from the per-world composition datum (unity: the solar instance)
+        Fixed::from_ratio(35, 10), // alpha (mass-luminosity)
+        Fixed::from_ratio(8, 10), // beta (mass-radius)
+        Fixed::from_ratio(-44, 100), // lambda (metallicity-luminosity)
         Fixed::from_ratio(-18, 1000), // mu (metallicity-radius)
         orbit_au,
         MATURE_ACCRETION_RATE_MSUN_MYR, // the MATURE surface-warmth accretion rate (not the formation one)

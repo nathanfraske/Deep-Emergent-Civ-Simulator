@@ -49,6 +49,7 @@
 //! on stellar mass, generation, and metallicity history); this datum is the initial-condition rung beneath it, the
 //! seam where such a derivation would plug in. Until it lands, the pattern is read as per-world data.
 
+use civsim_core::Fixed;
 use civsim_physics::solar_abundances::{SolarAbundanceError, SolarAbundances};
 
 /// A world's DISK COMPOSITION: the elemental abundance pattern its star and disk formed from, the initial condition
@@ -98,6 +99,24 @@ impl DiskComposition {
     pub fn label(&self) -> &str {
         &self.label
     }
+
+    /// The star model's metallicity ratio `Z / Z_sun` for this datum, the composition axis `derive_planet`
+    /// reads, sourced from THIS per-world datum rather than a hardcoded `Fixed::ONE` at the call site. The
+    /// SOLAR INSTANCE ([`DiskComposition::mirror`]) returns exactly [`Fixed::ONE`]: its heavy-element mass
+    /// fraction IS the pinned solar anchor's (`Z == Z_sun`), so the ratio is UNITY BY CONSTRUCTION, no value
+    /// chosen and none fabricated. A datum carrying a DIFFERENT, drawn `Z` has no numeric ratio here yet
+    /// (`None`): supplying `Z / Z_sun` for a drawn composition is the abundance-DRAW generator's work (a
+    /// separate commit gated on the dispersion fetch), the honest letter-versus-substance gap held open at this
+    /// seam rather than papered over. `None` also if the solar anchor fails to load.
+    pub fn metallicity_ratio_to_solar(&self) -> Option<Fixed> {
+        let solar = SolarAbundances::standard().ok()?;
+        if self.abundances.z_mass_fraction() == solar.z_mass_fraction() {
+            // The solar instance: Z / Z_sun = 1 exactly, unity forced by the datum resolving to the anchor.
+            return Some(Fixed::ONE);
+        }
+        // A drawn, non-solar Z: the numeric ratio arrives with the generator commit (path 1). Held open, never faked.
+        None
+    }
 }
 
 #[cfg(test)]
@@ -135,6 +154,48 @@ mod tests {
             "the solar pattern is oxygen-rich (C/O < 1): O {} > C {}",
             o.to_f64_lossy(),
             c.to_f64_lossy()
+        );
+    }
+
+    #[test]
+    fn the_solar_instance_metallicity_ratio_is_unity() {
+        // The per-world metallicity ratio the star model reads, sourced from the datum rather than a bare
+        // `Fixed::ONE` literal. The Mirror (solar) datum resolves to Z == Z_sun, so the ratio is exactly ONE
+        // (unity by construction, no value chosen). This is the seam that will carry a DRAWN Z / Z_sun once the
+        // abundance-draw generator lands.
+        let disk = DiskComposition::mirror().expect("the Mirror disk composition loads");
+        assert_eq!(
+            disk.metallicity_ratio_to_solar(),
+            Some(Fixed::ONE),
+            "the solar-instance datum's metallicity ratio Z/Z_sun is unity"
+        );
+    }
+
+    #[test]
+    fn a_drawn_non_solar_metallicity_has_no_ratio_until_the_generator() {
+        // A datum whose Z differs from the solar anchor (here a pattern that carries no Z, standing in for a
+        // drawn composition) has no numeric ratio at this seam yet: the generator commit supplies it. The honest
+        // gap is a None, never a fabricated ratio.
+        let no_z_pattern = r#"
+[[abundance]]
+symbol = "H"
+z = 1
+log_eps_photosphere = "12.00"
+source = "photospheric"
+
+[[abundance]]
+symbol = "Fe"
+z = 26
+log_eps_photosphere = "7.50"
+source = "photospheric"
+"#;
+        let pattern =
+            SolarAbundances::from_toml_str(no_z_pattern).expect("the stand-in pattern parses");
+        let disk = DiskComposition::from_pattern("drawn-stand-in", pattern);
+        assert_eq!(
+            disk.metallicity_ratio_to_solar(),
+            None,
+            "a non-solar Z has no ratio until the generator commit fills it"
         );
     }
 
