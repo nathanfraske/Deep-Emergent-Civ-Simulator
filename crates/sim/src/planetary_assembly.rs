@@ -579,12 +579,31 @@ pub fn orbital_angular_momentum(
 /// claim), but it does NOT buy the gas-era feedback, which needs a live account. Composition columns are the
 /// flagged follow-on (the envelope edge eventually carrying the local gas composition, the #73 atmospheric-
 /// composition rider), not a mass edge here.
+/// The provenance of the account's DOMAIN, carried so a verdict inherits the grade of its inputs (the same
+/// discipline as [`civsim_physics::young_thermal::ThermalProvenance`]). A ledger opened by integrating over the
+/// planet-zone PROXY bounds is a proxy account, and any `Overdrawn` it raises is a PROXY verdict, not a physical
+/// gas shortage: the account was sized over the wrong domain (no `r_c` taper, no magnetospheric inner edge), so
+/// the shortfall may be an artifact of the missing gas outside the proxy window. A held world carrying such a
+/// verdict must be re-evaluated when the profile arc lands the derived domain, not trusted as a settled physical
+/// hold. A ledger opened over the disk's own derived domain raises a physical verdict.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum DiskGasProvenance {
+    /// The domain was the planet-zone proxy (the reserved-with-basis interim bounds, not the disk's own edges).
+    /// Verdicts are interim-grade and must be re-evaluated when the derived domain lands.
+    ProxyBounds,
+    /// The domain was the disk's own derived edges (the magnetospheric inner truncation and the `r_c` taper).
+    /// Verdicts are physical.
+    DerivedDomain,
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct DiskGasLedger {
     /// The disk's total gas mass (Earth masses).
     pub mass_earth: Fixed,
     /// The disk's total gas angular-momentum proxy (see [`AngularMomentumProxy`]).
     pub angular_momentum: AngularMomentumProxy,
+    /// The grade of the account's domain, inherited by every verdict it raises (see [`DiskGasProvenance`]).
+    pub provenance: DiskGasProvenance,
 }
 
 /// A failure of an edge posted against the ledger: the account cannot cover the debit, or the arithmetic is
@@ -602,8 +621,11 @@ pub enum DiskGasError {
     /// mutated the account (the `checked_sub` happens before the commit, so a rejected debit leaves both fields
     /// as they were), and the caller HOLDS the result rather than aborting the run or writing a clamped world
     /// state. The account is not advanced, no world vector is touched, and the flag surfaces for the run to
-    /// decide; it is a stopped computation, never a partial mutation.
-    Overdrawn,
+    /// decide; it is a stopped computation, never a partial mutation. It carries `bound_provenance`, the grade of
+    /// the account it was drawn against (see [`DiskGasProvenance`]): an overdraw against a proxy-bounded account
+    /// is a PROXY verdict, so a held world must re-evaluate it when the derived domain lands rather than treat it
+    /// as a settled physical gas shortage.
+    Overdrawn { bound_provenance: DiskGasProvenance },
     /// A non-positive input, or an overflow.
     Arithmetic,
 }
@@ -612,10 +634,15 @@ impl DiskGasLedger {
     /// Open the ledger at an explicit snapshot of the gas mass and angular-momentum proxy. Lower-level; prefer
     /// [`DiskGasLedger::from_disk_profile`], which derives the snapshot from the profile so the two are not two
     /// free scalars (a correlated pair, since `L_proxy / m` encodes the disk's characteristic lever arm).
-    pub fn from_snapshot(mass_earth: Fixed, angular_momentum: AngularMomentumProxy) -> Self {
+    pub fn from_snapshot(
+        mass_earth: Fixed,
+        angular_momentum: AngularMomentumProxy,
+        provenance: DiskGasProvenance,
+    ) -> Self {
         DiskGasLedger {
             mass_earth,
             angular_momentum,
+            provenance,
         }
     }
 
@@ -634,17 +661,22 @@ impl DiskGasLedger {
     /// natural edge to read. Until the profile arc lands `r_c` in the gas density, a caller must supply the
     /// bounds as a reserved-with-basis interim, named as such (see the test's `PLANET_ZONE_*` constants), never
     /// as bare call-site literals borrowed from the planet zone. This is the half-derived case the audit named:
-    /// the account is fully derived only when both its formula and its domain are.
+    /// the account is fully derived only when both its formula and its domain are. The caller declares
+    /// `provenance` to MATCH the bounds it passes ([`DiskGasProvenance::ProxyBounds`] for the planet-zone proxy,
+    /// [`DiskGasProvenance::DerivedDomain`] once the disk's own edges are read), so every verdict the account
+    /// raises inherits that grade.
     pub fn from_disk_profile(
         disk: &SolidDisk,
         inner_au: Fixed,
         outer_au: Fixed,
         steps: u32,
+        provenance: DiskGasProvenance,
     ) -> Option<Self> {
         let (mass_earth, proxy_l) = disk_gas_content(disk, inner_au, outer_au, steps)?;
         Some(DiskGasLedger {
             mass_earth,
             angular_momentum: AngularMomentumProxy(proxy_l),
+            provenance,
         })
     }
 
@@ -668,7 +700,9 @@ impl DiskGasLedger {
             .checked_sub(delta_l.0)
             .ok_or(DiskGasError::Arithmetic)?;
         if new_mass < Fixed::ZERO || new_l < Fixed::ZERO {
-            return Err(DiskGasError::Overdrawn);
+            return Err(DiskGasError::Overdrawn {
+                bound_provenance: self.provenance,
+            });
         }
         self.mass_earth = new_mass;
         self.angular_momentum = AngularMomentumProxy(new_l);
@@ -1314,7 +1348,9 @@ mod tests {
         );
         // Discriminating power: the tolerance is far below the smallest single body's proxy L, so a debit
         // misattributed to the wrong orbit by even a small fraction of one body would exceed it. If the bound
-        // were vacuous (a loose epsilon) this would fail.
+        // were vacuous (a loose epsilon) this would fail. DEFAULTS-TAKEN, the factor 16: a conservative
+        // non-vacuity margin (the gate catches a wrong-orbit debit above a sixteenth of the smallest body's L);
+        // the true discriminating power is orders finer, this is the floor the assertion proves.
         let smallest_body_l = (0..system.planets.len())
             .map(|i| {
                 orbital_angular_momentum(system.planets[i].mass_earth, system.planets[i].orbit_au)
@@ -1375,6 +1411,7 @@ mod tests {
             PLANET_ZONE_INNER_AU,
             PLANET_ZONE_OUTER_AU,
             GAS_INTEGRATION_STEPS,
+            DiskGasProvenance::ProxyBounds,
         )
         .unwrap();
         assert!(
@@ -1422,6 +1459,7 @@ mod tests {
             PLANET_ZONE_INNER_AU,
             PLANET_ZONE_OUTER_AU,
             GAS_INTEGRATION_STEPS,
+            DiskGasProvenance::ProxyBounds,
         )
         .unwrap();
         let l_gas0 = opened.angular_momentum.0;
@@ -1444,7 +1482,9 @@ mod tests {
             "total angular momentum conserved within the rounding budget over the boundary (residual {residual}, tol {tol}, merges {merges})"
         );
         // Discriminating power: the tolerance is far under the smallest planet's proxy L, so a drained envelope
-        // posted at the wrong orbit would blow the gate rather than pass unnoticed.
+        // posted at the wrong orbit would blow the gate rather than pass unnoticed. DEFAULTS-TAKEN, the factor
+        // 16: a conservative non-vacuity margin (the gate catches a debit above a sixteenth of the smallest
+        // body's L); the true discriminating power is orders finer, this is the floor the assertion proves.
         let smallest_body_l = (0..system.planets.len())
             .map(|i| {
                 orbital_angular_momentum(system.planets[i].mass_earth, system.planets[i].orbit_au)
@@ -1461,9 +1501,12 @@ mod tests {
     }
 
     #[test]
-    fn the_ledger_fails_soft_on_overdraw_never_fabricating_gas() {
+    fn the_ledger_fails_soft_on_overdraw_and_inherits_the_bound_provenance() {
         // Guard holds, never reroll: a snapshot that held less gas than the giants drew returns Overdrawn
-        // rather than fabricating gas or driving the account negative.
+        // rather than fabricating gas or driving the account negative. And the verdict INHERITS the account's
+        // bound provenance (directive: a hold against a proxy-bounded account is a proxy verdict, not a physical
+        // gas shortage), so a proxy-graded account raises a proxy-graded Overdrawn to be re-evaluated when the
+        // derived domain lands.
         let (disk, field) = giant_field();
         let system = assemble_system_with_giants(
             field,
@@ -1478,11 +1521,14 @@ mod tests {
         let tiny = DiskGasLedger::from_snapshot(
             Fixed::from_ratio(1, 100),
             AngularMomentumProxy(Fixed::from_int(1)),
+            DiskGasProvenance::ProxyBounds,
         );
         assert_eq!(
             drain_envelopes(tiny, &system),
-            Err(DiskGasError::Overdrawn),
-            "an under-filled snapshot fails soft, never fabricates gas"
+            Err(DiskGasError::Overdrawn {
+                bound_provenance: DiskGasProvenance::ProxyBounds
+            }),
+            "an under-filled proxy account fails soft and the verdict carries the proxy provenance"
         );
     }
 
@@ -1509,6 +1555,7 @@ mod tests {
             PLANET_ZONE_INNER_AU,
             PLANET_ZONE_OUTER_AU,
             GAS_INTEGRATION_STEPS,
+            DiskGasProvenance::ProxyBounds,
         )
         .unwrap();
         // The opener is the quadrature, not a constant: it equals `disk_gas_content` over the same domain to the
@@ -1544,6 +1591,10 @@ mod tests {
         // Numerical-twin rule (minor): the midpoint quadrature at the shipped 128 rings agrees with 256 rings
         // within tolerance, so the account size is a converged integral, not a step-count artifact. A smooth
         // declining integrand halves its midpoint error each doubling, so the two should sit within a percent.
+        // DEFAULTS-TAKEN, the 1% convergence bound: not a residue budget but a numerical-convergence witness,
+        // its basis the midpoint rule's O(1/n^2) error (256 rings is ~4x tighter than 128, so a 1% gap between
+        // them is generous headroom over the true difference for this smooth integrand). It gates the step count,
+        // not a physical quantity.
         let (disk, _field) = giant_field();
         let (m128, l128) = crate::giants::disk_gas_content(
             &disk,
