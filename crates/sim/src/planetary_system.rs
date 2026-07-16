@@ -65,7 +65,7 @@ use crate::astro::{
 /// embryo halts the inward pebble flux) rather than feeding-zone exhaustion, at a different spacing. Which branch a
 /// world takes is itself DERIVED per-system from the planetesimal-to-pebble surface-density (flux) ratio; the
 /// pebble-branch embryo field is its own calibration target or a declared wall until bought. The constant's name
-/// scopes it honestly.
+/// scopes it plainly.
 pub const OLIGARCHIC_SPACING_HILL_WIDTHS: Fixed = Fixed::from_int(10);
 
 /// The disk's THERMAL residues, the arguments the two-regime `disk_effective_temperature` reads to place the ice line:
