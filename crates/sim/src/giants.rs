@@ -368,6 +368,45 @@ fn feeding_zone_gas_mass_earth(
     crate::astro::feeding_zone_mass_earth(integral)
 }
 
+/// The DISK GAS CONTENT over `[inner_au, outer_au]`: the total gas mass in Earth masses AND its angular
+/// momentum in the assembly's `m * sqrt(a)` proxy (Earth-mass times sqrt(AU)), both by midpoint quadrature over
+/// the SAME static viscous-similarity surface density `Sigma(r)` the temperature and giant-drain code already
+/// read. Each ring `2*pi*r*Sigma(r)*dr` folds to Earth masses through [`crate::astro::feeding_zone_mass_earth`],
+/// then the ring carries `ring_mass * sqrt(r)` of proxy angular momentum. This is arithmetic over data in hand,
+/// not the time-evolving disk (that arc is separate), so it lets the DiskGas ledger open its (mass, momentum)
+/// snapshot DERIVED from the profile rather than as two free reserved scalars. `None` on a degenerate domain, a
+/// disk-edge miss, or an accumulation past the representable range.
+pub fn disk_gas_content(
+    disk: &SolidDisk,
+    inner_au: Fixed,
+    outer_au: Fixed,
+    steps: u32,
+) -> Option<(Fixed, Fixed)> {
+    if inner_au <= Fixed::ZERO || outer_au <= inner_au || steps == 0 {
+        return None;
+    }
+    let span = outer_au.checked_sub(inner_au)?;
+    let dr = span.checked_div(Fixed::from_int(steps as i32))?;
+    let half_dr = dr.checked_div(Fixed::from_int(2))?;
+    let two_pi = Fixed::PI.checked_add(Fixed::PI)?;
+    let mut mass = Fixed::ZERO;
+    let mut proxy_l = Fixed::ZERO;
+    for i in 0..steps {
+        let r = inner_au
+            .checked_add(dr.checked_mul(Fixed::from_int(i as i32))?)?
+            .checked_add(half_dr)?;
+        let sigma_gas = gas_surface_density_kg_m2(disk, r)?;
+        let ring = two_pi
+            .checked_mul(r)?
+            .checked_mul(sigma_gas)?
+            .checked_mul(dr)?;
+        let ring_mass = crate::astro::feeding_zone_mass_earth(ring)?;
+        mass = mass.checked_add(ring_mass)?;
+        proxy_l = proxy_l.checked_add(ring_mass.checked_mul(r.sqrt())?)?;
+    }
+    Some((mass, proxy_l))
+}
+
 /// The GIANT-FORMATION VERDICT for one embryo (task #73, slice 1). It derives the core accretion rate, the
 /// critical mass, the envelope opacity, and the Kelvin-Helmholtz time, then declares GIANT when the core is
 /// super-critical AND the envelope contracts before the disk gas disperses; otherwise TERRESTRIAL. For a giant it
