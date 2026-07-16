@@ -1003,41 +1003,49 @@ const MELT_COLUMN_GRAVITY_M_S2: Fixed = Fixed::from_int(98).div(Fixed::from_int(
 // history, never a painted height field. The province SCALE derives from the convective physics, the crust
 // AMPLITUDE from the melt and the isostasy; only the values below are reserved, each with its basis.
 
-/// RESERVED, the mantle-convection CELL ASPECT RATIO (cell width / convecting-layer depth), which sets the
-/// lateral province SCALE (the province width is this times the DERIVED convecting-mantle depth, and the
-/// province count is the planet circumference over that width, [`provinces_across`]). Basis: the
-/// Rayleigh-Benard critical-mode cell aspect, of order one; the free-free critical wavenumber a_c = pi/sqrt(2)
-/// gives a half-wavelength cell width of sqrt(2) times the depth, a rigid-boundary mantle nearer 1.0, so the
-/// value is set by the mantle's convective boundary regime. Reserved here (never an inline grid size); the
-/// free-free critical mode sqrt(2) is the surfaced default. Cited: Chandrasekhar (1961), Hydrodynamic and
-/// Hydromagnetic Stability, ch. II.
-const MANTLE_CONVECTION_CELL_ASPECT: Fixed = Fixed::from_int(1414).div(Fixed::from_int(1000)); // ~sqrt(2)
+/// The mantle-convection CELL ASPECT RATIO (cell half-wavelength / convecting-layer depth), which sets the
+/// lateral province SCALE (the province width is this times the DERIVED convecting-mantle depth, and the province
+/// count is the planet circumference over that width, [`provinces_across`]). DERIVED from the marginal-stability
+/// critical WAVENUMBER a_c as `pi / a_c`, so it is the SAME boundary regime as the convection kernel's onset
+/// threshold `ra_crit` by construction: both are the rigid-rigid Rayleigh-Benard eigenvalue PAIR {Ra_crit ~ 1708,
+/// a_c ~ 3.117}, read from [`civsim_sim::deeptime::RIGID_RIGID_CRITICAL_WAVENUMBER`], giving `pi / 3.117 ~ 1.008`,
+/// not the free-free `sqrt(2) ~ 1.414` that a rigid `ra_crit` would contradict. This is an analytic-eigenvalue
+/// consistency fix, not an authored pick. A full marginal-stability eigenvalue solver jointly deriving {Ra_crit,
+/// a_c, regime} from the mantle's actual mechanical boundaries is a future substrate arc. Cited: Chandrasekhar
+/// (1961), Hydrodynamic and Hydromagnetic Stability, ch. II.
+const MANTLE_CONVECTION_CELL_ASPECT: Fixed =
+    Fixed::PI.div(civsim_sim::deeptime::RIGID_RIGID_CRITICAL_WAVENUMBER);
 
-/// RESERVED, the peridotitic MANTLE SOLIDUS surface temperature (K) the deep-time volcanism melts against
-/// (the crust-building partial melting of the convecting peridotite mantle, distinct from the refractory
-/// solar-crust re-melting the surface-composition path derives). Basis: the McKenzie-Bickle dry peridotite
-/// solidus, ~1373 K at the surface; a flagged derive-down (the endmember-signature solidus the
-/// surface-composition melt wiring already derives, reused standalone here is the follow-on). Cited:
-/// McKenzie & Bickle (1988) J. Petrology 29, 625.
-const MANTLE_SOLIDUS_SURFACE_K: Fixed = Fixed::from_int(1373);
+// THE MANTLE SOLIDUS (surface value and slope) is no longer authored here. It is DERIVED from the world's OWN
+// endmember signatures ([`civsim_physics::melting::multicomponent_solidus`], already run inside the
+// surface-composition melt wiring on this very scene) and threaded into the deep-time volcanism through
+// `SurfaceComposition::{solidus_surface_k, solidus_slope_k_per_gpa}`. The former reserved peridotite anchors
+// (1373 K surface, 130 K/GPa slope, Earth's dry-peridotite values) are RETIRED: relief emerges where-and-when the
+// world's own mantle crosses its own derived solidus, never Earth's.
 
-/// RESERVED, the peridotite solidus SLOPE (K/GPa), the Clausius-Clapeyron slope of the dry peridotite
-/// solidus. Basis: McKenzie-Bickle ~130 K/GPa. Cited: McKenzie & Bickle (1988).
-const MANTLE_SOLIDUS_SLOPE_K_PER_GPA: Fixed = Fixed::from_int(130);
-
-/// RESERVED, the mantle PROCESSING TIME (Myr): the overturn / melt-delivery timescale one melt column's
-/// worth of crust reaches the surface over, converting the column crust to a per-tick production rate. Basis:
-/// the silicate-mantle overturn time, ~100 Myr to 1 Gyr (the deeptime MeltParams documents the same basis).
-/// Cited: mantle-convection overturn timescale (Turcotte & Schubert, Geodynamics).
+/// RESERVED, the mantle PROCESSING TIME (Myr): the overturn / melt-delivery timescale one melt column's worth of
+/// crust reaches the surface over, converting the column crust to a per-tick production rate. A flagged
+/// DERIVE-DOWN, not an independent knob: it is `convecting_depth / convective_velocity`, and both ingredients are
+/// in the convection kernel ([`civsim_sim::geodynamics::convecting_mantle_depth_m`] and the Stokes velocity), so
+/// it derives the moment the kernel runs at physical SI scale. It stays reserved only until the SI / Tier-2 units
+/// wiring retires the kernel's representable-scaled operating point (the same coupling the deeptime `MeltParams`
+/// documents). Basis value: the silicate-mantle overturn time, ~100 Myr to 1 Gyr. Cited: mantle-convection
+/// overturn timescale (Turcotte & Schubert, Geodynamics).
 const MANTLE_PROCESSING_TIME_MYR: Fixed = Fixed::from_int(100);
 
-/// RESERVED, the mantle radiogenic HETEROGENEITY amplitude (fractional): the lateral spread of the mantle's
-/// radiogenic budget around its mean, the symmetry the deterministic world seed breaks and the convection
-/// amplifies into provinces. Basis: the observed lateral heterogeneity of the mantle's heat-producing
-/// elements (U, Th, K) between depleted and enriched reservoirs, order tens of percent; ~0.3. Only the
-/// AMPLITUDE is reserved: the PATTERN (which province is enriched) is the deterministic seed, and the relief
-/// AMPLITUDE emerges from the melt and the isostasy, so nothing about the terrain is authored.
-const MANTLE_RADIOGENIC_HETEROGENEITY: Fixed = Fixed::from_int(3).div(Fixed::from_int(10)); // 0.3
+/// RESERVED (universal, dimensionless), the convective HOMOGENIZATION residual: the fraction of a melt-extraction
+/// incompatible-element enrichment contrast that survives convective stirring to remain as lateral mantle
+/// heterogeneity. This is the ONLY reserved piece of the radiogenic-heterogeneity amplitude; the amplitude ITSELF
+/// is now DERIVED per-system from the world's own formation melt fraction F (U, Th, K are highly incompatible, so
+/// batch melting enriches the extracted melt over its source by ~1/F in the D-to-zero limit, a fractional
+/// enrichment of `1/F - 1`), retiring the former Earth-observed 0.3 reservoir spread. The residual is a UNIVERSAL
+/// property of mantle convection (how well stirring erases a contrast), NEVER Earth's value: its basis is the
+/// ratio of the melt-processing timescale to the convective-homogenization timescale, a flagged derive-down
+/// coupled to the same SI convection operating point that unblocks the processing time. Surfaced default O(0.1),
+/// reserved for calibration, never fabricated as a world outcome. The seed PATTERN (which province is enriched)
+/// stays the deterministic world hash (Principle 8), so only the AMPLITUDE moved from an Earth const to a
+/// per-system derivation.
+const RADIOGENIC_MIXING_EFFICIENCY: Fixed = Fixed::from_int(1).div(Fixed::from_int(10)); // O(0.1), surfaced-reserved
 
 /// NON-CANON display: the deep-time geological duration one playback tick advances (megayears per playback
 /// tick). A viewing-sweep cadence (how fast the observer watches deep time pass), a sibling of the frame-rate
@@ -1319,12 +1327,20 @@ fn province_seed_perturbation(star_mass: Fixed, orbit_au: Fixed, index: usize) -
 /// resolve (fail-soft: the globe then shows the uniform crust, never a fabricated texture). The chain is all
 /// derivation: the convecting-mantle DEPTH from the planet's interior structure ([`convecting_mantle_depth_m`],
 /// retiring the depth fixture), the province COUNT from that depth and the planet circumference over the
-/// reserved convective cell aspect ([`provinces_across`]), the per-province radiogenic budget as the
-/// thermostat base (set so the mean province's steady state sits at its solidus, the mantle-thermostat
-/// closure) times one-plus the reserved heterogeneity times the deterministic seed, the volcanism source
-/// density and gravity DERIVED (the mantle density and the planet's surface gravity), and the columns started
-/// laterally uniform at the mantle potential temperature (a fresh planet has no thermal history; the
+/// eigenvalue-derived convective cell aspect ([`provinces_across`]), the per-province radiogenic budget as the
+/// thermostat base (set so the mean province's steady state sits at its DERIVED solidus, the mantle-thermostat
+/// closure) times one-plus the PER-SYSTEM-derived heterogeneity times the deterministic seed, the volcanism
+/// source density and gravity DERIVED (the mantle density and the planet's surface gravity), and the columns
+/// started laterally uniform at the mantle potential temperature (a fresh planet has no thermal history; the
 /// provinces are what the run produces).
+///
+/// `solidus_surface_k` and `solidus_slope_k_per_gpa` are the world's OWN derived mantle solidus, threaded from
+/// the surface-composition melt wiring on this same scene (never an authored peridotite value). The melt is
+/// driven against each column's OWN evolving interior temperature (the kernel steps it: hotter early from the
+/// radiogenic budget, cooling as the sources decay), so relief emerges where-and-when a hot mantle crosses its
+/// own solidus and stops as it cools. `formation_melt_fraction` is the world's own formation-era partial-melt
+/// fraction F (`None` on a sub-solidus formation that sorted no incompatibles), from which the radiogenic
+/// heterogeneity AMPLITUDE derives per-system (~`1/F` enrichment), retiring the former Earth 0.3 spread.
 #[allow(clippy::too_many_arguments)]
 fn build_deep_time_provinces(
     star_mass: Fixed,
@@ -1336,6 +1352,9 @@ fn build_deep_time_provinces(
     mean_density: Fixed,
     mantle_density: Fixed,
     crust_density: Fixed,
+    solidus_surface_k: Fixed,
+    solidus_slope_k_per_gpa: Fixed,
+    formation_melt_fraction: Option<Fixed>,
 ) -> Option<DeepTimeProvinces> {
     // The convecting-mantle DEPTH from the interior structure (SI metres), and its megametre form for the
     // representable-scaled convection kernel (retiring the depth = 1 fixture).
@@ -1354,13 +1373,14 @@ fn build_deep_time_provinces(
         return None;
     }
 
-    // The volcanism parameters: the reserved peridotite solidus, the DERIVED source density (the mantle
-    // density in kg/m^3) and gravity (the planet's surface gravity), and the reserved interior-thermostat and
-    // processing-time values.
+    // The volcanism parameters: the world's OWN DERIVED solidus (surface value and slope, threaded from the
+    // surface-composition melt wiring, never an authored peridotite value), the DERIVED source density (the
+    // mantle density in kg/m^3) and gravity (the planet's surface gravity), and the reserved interior-thermostat
+    // adiabat/productivity and the derive-down processing time.
     let source_density = mantle_density.checked_mul(Fixed::from_int(1000))?;
     let melt = MeltParams {
-        solidus_surface_k: MANTLE_SOLIDUS_SURFACE_K,
-        solidus_slope_k_per_gpa: MANTLE_SOLIDUS_SLOPE_K_PER_GPA,
+        solidus_surface_k,
+        solidus_slope_k_per_gpa,
         adiabat_slope_k_per_gpa: MANTLE_ADIABAT_SLOPE_K_PER_GPA,
         productivity_per_gpa: MELT_PRODUCTIVITY_PER_GPA,
         source_density_kg_per_m3: source_density,
@@ -1369,26 +1389,49 @@ fn build_deep_time_provinces(
     };
 
     // The interior-thermostat BASE radiogenic budget: set so a mean-seed province's conductive steady-state
-    // temperature sits at the solidus (the observed mantle self-regulation near its solidus). At the scaled
-    // operating point the steady state is T_ref + heat_production / loss_coeff with loss_coeff =
+    // temperature sits at the world's OWN DERIVED solidus (the observed mantle self-regulation near its solidus).
+    // At the scaled operating point the steady state is T_ref + heat_production / loss_coeff with loss_coeff =
     // conductivity / (density * depth^2) (the convection kernel's conductive balance), so the base that lands
     // T_ss on the solidus is loss_coeff * (solidus - reference). This is a CLOSURE (the thermostat), not an
-    // authored value: it derives the base from the solidus and the operating point.
+    // authored value: it derives the base from the DERIVED solidus and the operating point, so the mean budget is
+    // per-system (it targets the world's own solidus). A deeper absolute derivation from the disk U/Th/K
+    // abundances times per-isotope heat production is blocked by a data gap (the AGSS09 abundance table stops at
+    // Z=42, so U and Th are absent, and no per-isotope specific-heat-production column is vendored); both are
+    // flagged as cited [M] columns to source, and until they land the self-regulation closure is the per-system
+    // mean.
     let reference_temperature = Fixed::from_int(300);
     let kernel_conductivity = Fixed::from_int(2);
     let kernel_density = Fixed::ONE;
     let loss_coeff = kernel_conductivity
         .checked_div(kernel_density.checked_mul(depth_mm.checked_mul(depth_mm)?)?)?;
     let base_heat =
-        loss_coeff.checked_mul(MANTLE_SOLIDUS_SURFACE_K.checked_sub(reference_temperature)?)?;
+        loss_coeff.checked_mul(solidus_surface_k.checked_sub(reference_temperature)?)?;
+
+    // The radiogenic HETEROGENEITY amplitude, DERIVED per-system from the world's own formation melt fraction F,
+    // retiring the Earth 0.3 reservoir-spread const. U, Th, K are highly incompatible, so batch melting enriches
+    // the extracted melt over its source by ~1/F (D-to-zero limit), a fractional enrichment of (1/F - 1); the
+    // share that survives convective homogenization is the universal reserved mixing-efficiency residual, never
+    // Earth's spread. A world with no formation melt (sub-solidus, the refractory solar-condensed scene) sorted no
+    // incompatibles, so its melt-driven spread is zero: an unprocessed mantle, the honest result, never
+    // re-inflated. A primordial/accretional heterogeneity is a flagged derive-down (a future accretion-mixing
+    // substrate), per-system contingent, never Earth's 0.3.
+    let heterogeneity = match formation_melt_fraction {
+        Some(f) if f > Fixed::ZERO => {
+            let inv_f = Fixed::ONE.checked_div(f)?;
+            let enrichment_contrast = inv_f.checked_sub(Fixed::ONE)?.max(Fixed::ZERO);
+            RADIOGENIC_MIXING_EFFICIENCY.checked_mul(enrichment_contrast)?
+        }
+        _ => Fixed::ZERO,
+    };
 
     // One column parameter set per province: the derived depth and gravity, and the seeded radiogenic budget
-    // base * (1 + heterogeneity * seed). The seed is the deterministic per-province perturbation.
+    // base * (1 + heterogeneity * seed). The seed is the deterministic per-province perturbation (Principle 8: the
+    // PATTERN is the world hash, only the AMPLITUDE is the per-system derivation above).
     let mut column_params = Vec::with_capacity(n);
     for index in 0..n {
         let seed = province_seed_perturbation(star_mass, orbit_au, index);
         let factor = Fixed::ONE
-            .checked_add(MANTLE_RADIOGENIC_HETEROGENEITY.checked_mul(seed)?)?
+            .checked_add(heterogeneity.checked_mul(seed)?)?
             .max(Fixed::ZERO);
         let heat_production = base_heat.checked_mul(factor)?;
         column_params.push(province_column_params(
@@ -1629,9 +1672,10 @@ fn build_derived_scene(star_mass: Fixed, orbit_au: Fixed) -> Result<DerivedScene
     // deep-time volcanism ([`civsim_sim::deeptime`]) builds over a lateral field of mantle columns. The columns
     // start uniform (a fresh planet has no thermal history) and DIVERGE as each province's own radiogenic
     // history plays out, so the surface is the written record of the interior, never a painted map. The
-    // province SCALE derives from the convective physics (depth times the reserved cell aspect, over the
-    // circumference); the crust AMPLITUDE from the melt and the isostasy. Fail-soft: if the convective scale
-    // does not resolve, the globe shows the uniform crust (the prior behaviour), never a fabricated texture.
+    // province SCALE derives from the convective physics (depth times the eigenvalue-derived cell aspect, over
+    // the circumference); the crust AMPLITUDE from the melt and the isostasy. Fail-soft: if the convective scale
+    // or the DERIVED solidus does not resolve, the globe shows the uniform crust (the prior behaviour), never a
+    // fabricated texture and never an authored solidus.
     let cols = 48usize;
     let rows = 32usize;
     let sea_level = Fixed::ZERO;
@@ -1645,8 +1689,22 @@ fn build_derived_scene(star_mass: Fixed, orbit_au: Fixed) -> Result<DerivedScene
         &table,
     );
     let core_structure = derive_core_fraction_and_metal_density(&abundances, &table, &eos);
-    let provinces = match (crust_density, core_structure) {
-        (Some(crust_density), Some((core_fraction, core_density))) => build_deep_time_provinces(
+    // The world's OWN derived mantle solidus (surface value and slope) from the surface-composition melt wiring
+    // on this scene; the province path builds only when it resolved (else fail-soft to uniform crust, never an
+    // authored solidus). The formation melt fraction F seeds the per-system heterogeneity amplitude (`None` on a
+    // sub-solidus formation, which then yields no melt-driven lateral spread, the honest unprocessed-mantle case).
+    let provinces = match (
+        crust_density,
+        core_structure,
+        sc.solidus_surface_k,
+        sc.solidus_slope_k_per_gpa,
+    ) {
+        (
+            Some(crust_density),
+            Some((core_fraction, core_density)),
+            Some(solidus_surface_k),
+            Some(solidus_slope_k_per_gpa),
+        ) => build_deep_time_provinces(
             star_mass,
             orbit_au,
             planet.radius_m,
@@ -1656,6 +1714,9 @@ fn build_derived_scene(star_mass: Fixed, orbit_au: Fixed) -> Result<DerivedScene
             planet_bulk_density,
             mantle_density,
             crust_density,
+            solidus_surface_k,
+            solidus_slope_k_per_gpa,
+            sc.max_melt_fraction,
         ),
         _ => None,
     };
@@ -3301,6 +3362,134 @@ mod province_tests {
         );
     }
 
+    #[test]
+    fn the_cell_aspect_is_the_rigid_rigid_eigenvalue_pair_not_the_free_free_mode() {
+        // FIX 2: the province cell aspect and the convection onset threshold must be ONE boundary regime. The
+        // aspect derives from the rigid-rigid critical wavenumber as pi / a_c (the same regime as ra_crit = 1708),
+        // ~1.008, NOT the free-free sqrt(2) ~ 1.414 that the rigid onset would contradict.
+        let expected = Fixed::PI.div(civsim_sim::deeptime::RIGID_RIGID_CRITICAL_WAVENUMBER);
+        assert_eq!(
+            MANTLE_CONVECTION_CELL_ASPECT, expected,
+            "the aspect is pi / a_c, derived from the rigid-rigid critical wavenumber"
+        );
+        let a = MANTLE_CONVECTION_CELL_ASPECT.to_f64_lossy();
+        assert!(
+            (0.99..=1.03).contains(&a),
+            "the rigid-rigid cell aspect is ~1.008, got {a}"
+        );
+        assert!(
+            MANTLE_CONVECTION_CELL_ASPECT < Fixed::from_ratio(1414, 1000),
+            "the rigid aspect is below the free-free sqrt(2) (the regime the onset threshold requires)"
+        );
+    }
+
+    // Synthetic Mars-class interior inputs that resolve a province field, for the derive-first province tests
+    // (no heavy scene build): the depth, count, and densities are plausible, the derived solidus and formation
+    // melt fraction are supplied as the surface-composition chain would.
+    fn mars_class_provinces(
+        solidus_surface_k: Fixed,
+        solidus_slope_k_per_gpa: Fixed,
+        formation_melt_fraction: Option<Fixed>,
+    ) -> DeepTimeProvinces {
+        build_deep_time_provinces(
+            Fixed::ONE,                 // star mass
+            Fixed::ONE,                 // orbit AU
+            Fixed::from_int(3_400_000), // Mars-class radius (m)
+            Fixed::from_ratio(37, 10),  // Mars-class surface gravity
+            Fixed::from_ratio(25, 100), // core mass fraction
+            Fixed::from_int(7),         // core density (g/cm3)
+            Fixed::from_ratio(39, 10),  // mean density (g/cm3)
+            Fixed::from_ratio(35, 10),  // mantle density (g/cm3)
+            Fixed::from_ratio(30, 10),  // crust density (g/cm3)
+            solidus_surface_k,
+            solidus_slope_k_per_gpa,
+            formation_melt_fraction,
+        )
+        .expect("the Mars-class interior resolves a province field")
+    }
+
+    #[test]
+    fn the_derived_solidus_flows_into_the_deep_time_melt_params() {
+        // FIX 1: the world's OWN derived solidus (surface value and slope) is what the deep-time volcanism melts
+        // against, never an authored 1373 K / 130 K/GPa pair. The value the caller threads is exactly the value
+        // the MeltParams carries.
+        let prov = mars_class_provinces(
+            Fixed::from_int(1680),
+            Fixed::from_int(120),
+            Some(Fixed::from_ratio(1, 10)),
+        );
+        assert_eq!(
+            prov.melt.solidus_surface_k,
+            Fixed::from_int(1680),
+            "the derived solidus surface value flows into the melt params"
+        );
+        assert_eq!(
+            prov.melt.solidus_slope_k_per_gpa,
+            Fixed::from_int(120),
+            "the derived solidus slope flows into the melt params"
+        );
+    }
+
+    #[test]
+    fn the_heterogeneity_amplitude_derives_per_system_from_the_formation_melt_fraction() {
+        // FIX 4: the radiogenic-heterogeneity AMPLITUDE is per-system, derived from the world's own formation melt
+        // fraction F (~1/F incompatible-element enrichment), never Earth's 0.3. A melting world (F present) sorts
+        // incompatibles, so its provinces DIVERGE in radiogenic budget; a sub-solidus world (F None) sorted none,
+        // so its provinces are UNIFORM (the honest unprocessed mantle), no melt-driven spread.
+        let melting = mars_class_provinces(
+            Fixed::from_int(1500),
+            Fixed::from_int(120),
+            Some(Fixed::from_ratio(1, 10)), // F = 0.1, a strongly enriching low-degree melt
+        );
+        let heats: Vec<Fixed> = melting
+            .column_params
+            .iter()
+            .map(|c| c.heat_production)
+            .collect();
+        let first = heats[0];
+        assert!(
+            heats.iter().any(|&h| h != first),
+            "a melting world's provinces diverge in radiogenic budget (per-system heterogeneity > 0)"
+        );
+
+        let unprocessed = mars_class_provinces(
+            Fixed::from_int(1680),
+            Fixed::from_int(120),
+            None, // sub-solidus formation: no melt, no incompatible sorting
+        );
+        let heats0: Vec<Fixed> = unprocessed
+            .column_params
+            .iter()
+            .map(|c| c.heat_production)
+            .collect();
+        let base = heats0[0];
+        assert!(
+            heats0.iter().all(|&h| h == base),
+            "an unprocessed (sub-solidus formation) world has a UNIFORM radiogenic field, never Earth's 0.3 spread"
+        );
+    }
+
+    #[test]
+    fn a_lower_formation_melt_fraction_makes_a_stronger_heterogeneity() {
+        // The per-system amplitude scales with the enrichment 1/F: a lower-degree melt (smaller F) sorts
+        // incompatibles more strongly, so its provinces spread WIDER. This is the world's own physics, keyed on F.
+        let spread = |f: Fixed| -> f64 {
+            let prov = mars_class_provinces(Fixed::from_int(1500), Fixed::from_int(120), Some(f));
+            let heats: Vec<f64> = prov
+                .column_params
+                .iter()
+                .map(|c| c.heat_production.to_f64_lossy())
+                .collect();
+            let max = heats.iter().cloned().fold(f64::MIN, f64::max);
+            let min = heats.iter().cloned().fold(f64::MAX, f64::min);
+            max - min
+        };
+        assert!(
+            spread(Fixed::from_ratio(1, 20)) > spread(Fixed::from_ratio(1, 4)),
+            "a lower melt fraction (stronger 1/F enrichment) makes a wider radiogenic spread"
+        );
+    }
+
     // A minimal province field with a chosen crust-thickness field, for the relief-emergence tests (no heavy
     // scene build): the densities and melt params are representative, only the thickness field varies.
     fn provinces_with(thicknesses: Vec<Fixed>, pcols: usize) -> DeepTimeProvinces {
@@ -3320,9 +3509,11 @@ mod province_tests {
                     )
                 })
                 .collect(),
+            // Representative test-scaffold melt params (a peridotite-grade solidus, only to exercise the tile
+            // relief; the real scene derives the solidus and heterogeneity, this helper just varies the field).
             melt: MeltParams {
-                solidus_surface_k: MANTLE_SOLIDUS_SURFACE_K,
-                solidus_slope_k_per_gpa: MANTLE_SOLIDUS_SLOPE_K_PER_GPA,
+                solidus_surface_k: Fixed::from_int(1373),
+                solidus_slope_k_per_gpa: Fixed::from_int(130),
                 adiabat_slope_k_per_gpa: MANTLE_ADIABAT_SLOPE_K_PER_GPA,
                 productivity_per_gpa: MELT_PRODUCTIVITY_PER_GPA,
                 source_density_kg_per_m3: Fixed::from_int(3300),

@@ -262,6 +262,18 @@ pub struct PartialMeltCrust {
     pub max_melt_fraction: Option<Fixed>,
     /// The pressure (gigapascals) at which the rising mantle first crossed the solidus; `None` on the fallback.
     pub onset_pressure_gpa: Option<Fixed>,
+    /// The DERIVED solidus surface temperature (K): the multi-saturation solidus of the floating assemblage's own
+    /// endmember signatures at zero pressure ([`multicomponent_solidus`]), consumed here for the melt column and
+    /// EXPOSED for a downstream deep-time volcanism that melts the same mantle. `Some` whenever the endmembers and
+    /// their eutectic resolved (including the sub-solidus buoyancy fallback, where the solidus is still derived but
+    /// the potential temperature does not cross it); `None` only when a missing melting datum or an unsolvable
+    /// eutectic aborted before the solidus could be taken. This retires an authored peridotite solidus downstream:
+    /// the solidus is the world's own, keyed on its endmembers, never Earth's 1373 K.
+    pub solidus_surface_k: Option<Fixed>,
+    /// The DERIVED solidus SLOPE (K per GPa): the Clausius-Clapeyron slope of the same assemblage's solidus (the
+    /// derived one-gigapascal solidus minus the surface value). `Some`/`None` on the same condition as
+    /// `solidus_surface_k`. Retires an authored ~130 K/GPa downstream: the slope is the world's own.
+    pub solidus_slope_k_per_gpa: Option<Fixed>,
     /// Whether the PARTIAL-MELT mechanism ran (`true`) or the split fell back to buoyancy (`false`).
     pub used_partial_melt: bool,
 }
@@ -311,14 +323,16 @@ where
     for (name, _) in floating {
         match endmember_of(name) {
             Some(em) => endmembers.push(em),
-            None => return buoyancy_fallback(floating, density_of),
+            // No melting datum for this phase: the solidus cannot be derived, so the fallback carries no solidus.
+            None => return buoyancy_fallback(floating, density_of, None),
         }
     }
     // The FIRST-MELT (eutectic) liquid composition at the crustal reference pressure = the CRUST (the extracted
     // partial melt, enriched in the fusible phases). The mole fractions come back in the input order.
     let x_liq = match eutectic_liquid_composition(&endmembers, reference_pressure_bar) {
         Some((_t_sol, xs)) => xs,
-        None => return buoyancy_fallback(floating, density_of),
+        // No solvable eutectic: the solidus cannot be derived, so the fallback carries no solidus.
+        None => return buoyancy_fallback(floating, density_of, None),
     };
     // The crustal THICKNESS via the McKenzie-Bickle column. The solidus surface value and slope are DERIVED from
     // the endmember signatures (consuming the rung), never authored: the multi-saturation solidus at the surface
@@ -326,6 +340,10 @@ where
     let solidus_surface = multicomponent_solidus(&endmembers, Fixed::ZERO)?;
     let solidus_deep = multicomponent_solidus(&endmembers, Fixed::from_int(ONE_GPA_IN_BAR))?;
     let solidus_slope = solidus_deep.checked_sub(solidus_surface)?;
+    // The derived solidus travels to every downstream return, INCLUDING the sub-solidus buoyancy fallback: the
+    // solidus is a property of the assemblage, computed whether or not the potential temperature crosses it, so a
+    // deep-time volcanism melting the same mantle reads the world's own solidus rather than an authored one.
+    let solidus = Some((solidus_surface, solidus_slope));
     let column = adiabatic_melt_column(
         params.potential_temperature_k,
         solidus_surface,
@@ -339,7 +357,7 @@ where
     // sorting, the honest state when the mantle is too cold to melt).
     let column = match column {
         Some(c) if c.crust_thickness_km > Fixed::ZERO && c.max_melt_fraction > Fixed::ZERO => c,
-        _ => return buoyancy_fallback(floating, density_of),
+        _ => return buoyancy_fallback(floating, density_of, solidus),
     };
     let f = column.max_melt_fraction;
     // The normalized source weights (the VCS modal amount, the saturation presence otherwise), for the batch-
@@ -353,7 +371,7 @@ where
         source_weights.push(w);
     }
     if total <= Fixed::ZERO {
-        return buoyancy_fallback(floating, density_of);
+        return buoyancy_fallback(floating, density_of, solidus);
     }
     // The crust is the melt (weight = liquid mole fraction); the mantle is the residue,
     // residue_i = source_share_i - F * x_i, clamped at zero (a fusible phase can be fully consumed into the melt).
@@ -372,7 +390,7 @@ where
         }
     }
     if crust.is_empty() || mantle.is_empty() {
-        return buoyancy_fallback(floating, density_of);
+        return buoyancy_fallback(floating, density_of, solidus);
     }
     Some(PartialMeltCrust {
         crust,
@@ -380,24 +398,40 @@ where
         crust_thickness_km: Some(column.crust_thickness_km),
         max_melt_fraction: Some(column.max_melt_fraction),
         onset_pressure_gpa: Some(column.onset_pressure_gpa),
+        solidus_surface_k: Some(solidus_surface),
+        solidus_slope_k_per_gpa: Some(solidus_slope),
         used_partial_melt: true,
     })
 }
 
 /// The pure-buoyancy fallback packaged as a [`PartialMeltCrust`] with no melt column, so the partial-melt
 /// caller degrades to the earlier split without a special-case return type. `None` only if the buoyancy split
-/// cannot resolve a single floating-phase density (the same fail-loud as [`crust_and_mantle`]).
-fn buoyancy_fallback<D>(floating: &[(String, Fixed)], density_of: D) -> Option<PartialMeltCrust>
+/// cannot resolve a single floating-phase density (the same fail-loud as [`crust_and_mantle`]). `solidus`
+/// carries the DERIVED solidus (surface value, slope) when the endmembers and their eutectic resolved before the
+/// fallback (a sub-solidus mantle, the common case), so the derived solidus survives the fallback for a
+/// downstream consumer; it is `None` only when the fallback fired before the solidus could be taken (a missing
+/// melting datum or an unsolvable eutectic).
+fn buoyancy_fallback<D>(
+    floating: &[(String, Fixed)],
+    density_of: D,
+    solidus: Option<(Fixed, Fixed)>,
+) -> Option<PartialMeltCrust>
 where
     D: Fn(&str) -> Option<Fixed>,
 {
     let (crust, mantle) = crust_and_mantle(floating, density_of)?;
+    let (solidus_surface_k, solidus_slope_k_per_gpa) = match solidus {
+        Some((surface, slope)) => (Some(surface), Some(slope)),
+        None => (None, None),
+    };
     Some(PartialMeltCrust {
         crust,
         mantle,
         crust_thickness_km: None,
         max_melt_fraction: None,
         onset_pressure_gpa: None,
+        solidus_surface_k,
+        solidus_slope_k_per_gpa,
         used_partial_melt: false,
     })
 }

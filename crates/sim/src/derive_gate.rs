@@ -658,6 +658,7 @@ fn probe_column_convection(_m: &CalibrationManifest) -> Result<ProbeReading, Str
         specific_heat: Fixed::from_int(10),
         heat_production,
         ra_crit: Fixed::from_int(2000),
+        ra_crit_wavenumber: Fixed::from_ratio(3117, 1000),
         ra_max: Fixed::from_int(1_000_000),
         v_max: Fixed::from_int(1_000_000),
         flux_max: Fixed::from_int(1_000_000),

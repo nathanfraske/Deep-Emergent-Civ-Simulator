@@ -98,6 +98,20 @@ pub struct SurfaceComposition {
     /// split fell back to buoyancy (no melt column). The geodynamics lane reads it for the crust thickness where
     /// the melt mechanism engaged; the viewer uses it when present, else its Slice-0 thickness fixture.
     pub crust_thickness_km: Option<Fixed>,
+    /// The DERIVED mantle solidus surface temperature (K), keyed on the floating assemblage's own endmember
+    /// signatures ([`crate::differentiation::PartialMeltCrust::solidus_surface_k`]). Carried up so a downstream
+    /// deep-time volcanism that melts the same mantle reads the world's OWN solidus, not an authored 1373 K.
+    /// `Some` whenever the endmembers and their eutectic resolved (the melt path AND the sub-solidus fallback);
+    /// `None` only when a missing melting datum or an unsolvable eutectic aborted before the solidus could be taken.
+    pub solidus_surface_k: Option<Fixed>,
+    /// The DERIVED mantle solidus SLOPE (K per GPa), the Clausius-Clapeyron slope of the same derived solidus.
+    /// `Some`/`None` on the same condition as `solidus_surface_k`. Retires an authored ~130 K/GPa downstream.
+    pub solidus_slope_k_per_gpa: Option<Fixed>,
+    /// The peak melt FRACTION F the formation-era partial melt extracted, `None` on the buoyancy fallback (a
+    /// sub-solidus or non-melting formation). Carried up because F sets the incompatible-element enrichment (~1/F
+    /// in the D-to-zero limit) that a downstream consumer derives a per-system radiogenic-heterogeneity amplitude
+    /// from, retiring an authored Earth spread.
+    pub max_melt_fraction: Option<Fixed>,
     /// Whether the seam-6 PARTIAL-MELT mechanism ran (`true`) or the split fell back to buoyancy (`false`), for
     /// audit and the provenance readout.
     pub used_partial_melt: bool,
@@ -332,6 +346,9 @@ pub fn derive_surface_composition(
                 crust_thickness_km: None,
                 max_melt_fraction: None,
                 onset_pressure_gpa: None,
+                // The melt column never ran (no source density), so no solidus was derived here.
+                solidus_surface_k: None,
+                solidus_slope_k_per_gpa: None,
                 used_partial_melt: false,
             }
         }
@@ -360,6 +377,9 @@ pub fn derive_surface_composition(
         crust: pm.crust,
         mantle: pm.mantle,
         crust_thickness_km: pm.crust_thickness_km,
+        solidus_surface_k: pm.solidus_surface_k,
+        solidus_slope_k_per_gpa: pm.solidus_slope_k_per_gpa,
+        max_melt_fraction: pm.max_melt_fraction,
         used_partial_melt: pm.used_partial_melt,
         differentiation,
         condensed_amounts: condensed_amount_readout,
@@ -659,6 +679,67 @@ mod tests {
             assert!(
                 sc_hot.crust_thickness_km.is_some(),
                 "the engaged partial-melt column reports a derived crustal thickness"
+            );
+        }
+    }
+
+    #[test]
+    fn the_derived_solidus_survives_the_sub_solidus_fallback_for_the_deep_time_volcanism() {
+        // FIX 1: the deep-time volcanism must read the world's OWN derived solidus, never an authored 1373 K. The
+        // solidus is a property of the assemblage's endmembers, computed whether or not the potential temperature
+        // crosses it, so even on the sub-solidus BUOYANCY FALLBACK (the refractory solar-condensed scene) the
+        // derived solidus is EXPOSED on the SurfaceComposition for the downstream consumer.
+        let janaf = JanafTables::standard().expect("JANAF loads");
+        let abundances = SolarAbundances::standard().expect("abundances load");
+        let sc = derive_surface_composition(
+            &janaf,
+            &abundances,
+            Fixed::from_int(1000),
+            &normal_reserved(),
+        )
+        .expect("the inner disk derives a surface");
+        // Sub-solidus fallback, yet the derived solidus is present (surface value and slope), and no melt fraction.
+        assert!(
+            !sc.used_partial_melt,
+            "the refractory solar set is sub-solidus (buoyancy fallback)"
+        );
+        let solidus = sc
+            .solidus_surface_k
+            .expect("the derived solidus is exposed even on the sub-solidus fallback");
+        assert!(
+            sc.solidus_slope_k_per_gpa.expect("the derived slope is exposed") > Fixed::ZERO,
+            "the derived Clausius-Clapeyron solidus slope is positive (the solidus rises with pressure)"
+        );
+        assert!(
+            sc.max_melt_fraction.is_none(),
+            "no melt formed, so no formation melt fraction (the honest unprocessed case)"
+        );
+        // The physical reason it is sub-solidus: the world's own derived surface solidus sits ABOVE the normal
+        // potential temperature (1588 K). This is the world's OWN solidus, not the retired Earth 1373 K anchor.
+        assert!(
+            solidus > Fixed::from_int(1588),
+            "the derived solidus {} K is above the potential temperature, the honest reason for no melt",
+            solidus.to_f64_lossy()
+        );
+        // A hotter mantle on the SAME set melts: the derived solidus is unchanged (same endmembers), but now a melt
+        // fraction appears, the per-system input the downstream heterogeneity amplitude reads.
+        let hot = ReservedMeltParams {
+            potential_temperature_k: Fixed::from_int(1900),
+            ..normal_reserved()
+        };
+        let sc_hot = derive_surface_composition(&janaf, &abundances, Fixed::from_int(1000), &hot)
+            .expect("the hot-mantle scene derives");
+        assert_eq!(
+            sc_hot.solidus_surface_k, sc.solidus_surface_k,
+            "the derived solidus is the same for the same endmember set, hot or cold"
+        );
+        if sc_hot.used_partial_melt {
+            let f = sc_hot
+                .max_melt_fraction
+                .expect("the engaged melt column reports a melt fraction");
+            assert!(
+                f > Fixed::ZERO,
+                "the engaged partial-melt fraction is positive, the per-system heterogeneity input"
             );
         }
     }

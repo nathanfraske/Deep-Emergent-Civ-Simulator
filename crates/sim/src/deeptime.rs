@@ -123,12 +123,21 @@ impl DeepTimeState {
 /// The per-world melt-and-crust parameters the deep-time volcanism reads: the seam-6 adiabatic-melt-column
 /// closure's inputs (the solidus surface value and slope, the adiabat slope, the melt productivity, the source
 /// density, and gravity), plus the mantle PROCESSING TIME over which one melt column's worth of crust is
-/// delivered to the surface. Every field is a floor value or a per-world datum; the processing time is
-/// reserved-with-basis (the mantle overturn / melt-delivery timescale that converts the column's total crust to
-/// a per-tick production rate, ~100 Myr to 1 Gyr for a silicate mantle), surfaced not fabricated.
+/// delivered to the surface. The solidus surface value and slope are DERIVED from the world's own endmember
+/// signatures upstream ([`civsim_materials::surface_composition::SurfaceComposition::solidus_surface_k`]), never
+/// an authored peridotite value; the adiabat, productivity, source density, and gravity are floor values or
+/// per-world data. The processing time is a flagged DERIVE-DOWN, not an independent knob: it is the overturn /
+/// melt-delivery timescale `convecting_depth / convective_velocity`, and BOTH ingredients already exist in the
+/// convection kernel ([`crate::geodynamics::convecting_mantle_depth_m`] and the Stokes velocity
+/// [`civsim_physics::laws::stokes_velocity`]), so it derives the moment those run at physical SI scale. It stays
+/// reserved-with-basis only because the kernel currently runs on the representable-scaled interim operating point
+/// (the Stokes velocity is physical only in SI), so the derive-down is coupled to the same SI / Tier-2 units
+/// wiring that retires that operating point ([`province_column_params`]); ~100 Myr to 1 Gyr for a silicate
+/// mantle is its surfaced-basis value, not a fabricated one.
 #[derive(Clone, Copy, Debug)]
 pub struct MeltParams {
-    /// The solidus surface temperature (K), the seam-6 melt-column input.
+    /// The solidus surface temperature (K), the seam-6 melt-column input. DERIVED upstream from the world's own
+    /// endmember signatures, never an authored solidus.
     pub solidus_surface_k: Fixed,
     /// The solidus slope (K per GPa).
     pub solidus_slope_k_per_gpa: Fixed,
@@ -141,6 +150,8 @@ pub struct MeltParams {
     /// Gravity (m per second squared).
     pub gravity_m_per_s2: Fixed,
     /// The mantle processing time (megayears), the overturn timescale one melt column's crust is delivered over.
+    /// A flagged DERIVE-DOWN (`convecting_depth / convective_velocity`, both in the convection kernel), reserved
+    /// only until the SI / Tier-2 units wiring lets the Stokes velocity run at physical scale; not an independent knob.
     pub processing_time_myr: Fixed,
 }
 
@@ -319,6 +330,22 @@ pub fn provinces_across(span_m: Fixed, mantle_depth_m: Fixed, cell_aspect: Fixed
     Some(count.to_int().max(1) as usize)
 }
 
+/// The rigid-rigid Rayleigh-Benard marginal-stability CRITICAL RAYLEIGH NUMBER, the onset threshold for a mantle
+/// layer bounded by rigid (no-slip) top and bottom. Paired with [`RIGID_RIGID_CRITICAL_WAVENUMBER`] as ONE
+/// boundary regime: the classical rigid-rigid eigenvalue is {Ra_crit ~ 1707.76, a_c ~ 3.117}. This is an
+/// analytic eigenvalue, not an authored knob (Chandrasekhar 1961, Hydrodynamic and Hydromagnetic Stability, ch.
+/// II). A future marginal-stability solver would derive {Ra_crit, a_c, regime} jointly from the mantle's actual
+/// mechanical boundaries; here the two are the cited rigid-rigid pair, kept together so the onset and the cell
+/// scale can never drift into different regimes.
+pub const RIGID_RIGID_RA_CRIT: Fixed = Fixed::from_int(1708);
+
+/// The rigid-rigid Rayleigh-Benard marginal-stability CRITICAL WAVENUMBER a_c (inverse layer depths), the pair
+/// mate of [`RIGID_RIGID_RA_CRIT`]. The horizontal mode that goes unstable first has a_c ~ 3.117 for rigid
+/// boundaries (versus a_c = pi/sqrt(2) ~ 2.221 for free-free), so the convecting-cell half-wavelength is `pi /
+/// a_c` ~ 1.008 layer depths (versus ~1.414 free-free). The province lateral SCALE reads `pi / a_c` for the cell
+/// aspect, so the aspect and the onset threshold are the SAME regime by construction. Cited: Chandrasekhar (1961).
+pub const RIGID_RIGID_CRITICAL_WAVENUMBER: Fixed = Fixed::from_int(3117).div(Fixed::from_int(1000));
+
 /// One province's convection [`ColumnParams`], composed from the DERIVED per-planet inputs and the
 /// convection kernel's REPRESENTABLE-SCALED operating point. The DERIVED inputs are threaded in where they
 /// are physical and safe: the temperatures are real kelvin (so the solidus comparison the volcanism makes
@@ -328,12 +355,17 @@ pub fn provinces_across(span_m: Fixed, mantle_depth_m: Fixed, cell_aspect: Fixed
 /// fixture), and `heat_production` is the per-province radiogenic budget (its lateral spread is what makes
 /// the provinces diverge). The kernel's remaining DYNAMICAL quantities (viscosity, diffusivity, the
 /// representable caps) are engine-scaled illustrative values, the documented interim the units plan retires
-/// with the SI wiring: the raw SI mantle viscosity and the depth-cubed Rayleigh term overflow Q32.32, so
-/// the kernel runs on a self-consistent scaled operating point rather than SI (a labelled fixture, not an
-/// authored world-content value). `ra_crit` is the classical Rayleigh-Benard critical number (the
-/// marginal-stability eigenvalue, ~1708 for rigid boundaries), so as the units plan lifts the operating
-/// point to SI a hot radiogenic province crosses it and convects while a cold one conducts, the
-/// bifurcation that amplifies the seed. Deterministic (a pure function of its inputs).
+/// with the SI / Tier-2 units wiring: the raw SI mantle viscosity and the depth-cubed Rayleigh term overflow
+/// Q32.32, so the kernel runs on a self-consistent scaled operating point rather than SI (a labelled fixture,
+/// not an authored world-content value). This scaled operating point retires TOGETHER with the same SI /
+/// Tier-2 arc that unblocks the mantle PROCESSING-TIME derive-down (`MeltParams::processing_time_myr`): both
+/// wait on the SI-valued Stokes velocity, so the two are one unit-wiring dependency, not two independent knobs.
+/// `ra_crit` and `ra_crit_wavenumber` are the classical Rayleigh-Benard critical PAIR (the marginal-stability
+/// eigenvalue for rigid boundaries, {~1708, a_c ~ 3.117}, from [`RIGID_RIGID_RA_CRIT`] and
+/// [`RIGID_RIGID_CRITICAL_WAVENUMBER`]), so the onset threshold and the lateral cell scale share one regime; as
+/// the units plan lifts the operating point to SI a hot radiogenic province crosses `ra_crit` and convects
+/// while a cold one conducts, the bifurcation that amplifies the seed. Deterministic (a pure function of its
+/// inputs).
 pub fn province_column_params(
     convecting_depth_mm: Fixed,
     surface_gravity_m_s2: Fixed,
@@ -353,7 +385,8 @@ pub fn province_column_params(
         thermal_diffusivity: Fixed::from_ratio(1, 100),
         specific_heat: Fixed::from_int(10),
         heat_production,
-        ra_crit: Fixed::from_int(1708),
+        ra_crit: RIGID_RIGID_RA_CRIT,
+        ra_crit_wavenumber: RIGID_RIGID_CRITICAL_WAVENUMBER,
         ra_max: Fixed::from_int(1_000_000),
         v_max: Fixed::from_int(1_000_000),
         flux_max: Fixed::from_int(1_000_000),
@@ -385,6 +418,7 @@ mod tests {
             specific_heat: Fixed::from_int(10),
             heat_production: Fixed::from_int(heat_production),
             ra_crit: Fixed::from_int(1_000_000_000),
+            ra_crit_wavenumber: RIGID_RIGID_CRITICAL_WAVENUMBER,
             ra_max: Fixed::from_int(1_000_000),
             v_max: Fixed::from_int(1_000_000),
             flux_max: Fixed::from_int(1_000_000),

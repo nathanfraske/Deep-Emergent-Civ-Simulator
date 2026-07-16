@@ -86,6 +86,15 @@ pub struct ColumnParams {
     pub heat_production: Fixed,
     /// The derived critical Rayleigh number (marginal-stability eigenvalue), the onset threshold.
     pub ra_crit: Fixed,
+    /// The critical WAVENUMBER a_c of the SAME marginal-stability eigenvalue as `ra_crit`: the horizontal mode
+    /// that goes unstable first, in units of inverse layer depth. It is carried alongside `ra_crit` so the two
+    /// describe ONE boundary regime by construction (a rigid-rigid layer has the pair {Ra_crit ~ 1708, a_c ~
+    /// 3.117}, a free-free layer {~657.5, ~2.221}), never a rigid `ra_crit` paired with a free-free aspect. The
+    /// convecting-cell half-wavelength is `pi / a_c` layer depths, so a downstream lateral-scale derivation
+    /// (the province cell aspect) reads `pi / a_c` rather than an independently-authored aspect. The convection
+    /// step itself does not read this field; it is the wavenumber half of the eigenvalue, kept with the number
+    /// half so a future marginal-stability solver can supply {Ra_crit, a_c, regime} jointly.
+    pub ra_crit_wavenumber: Fixed,
     /// The representable Rayleigh cap (an engine bound).
     pub ra_max: Fixed,
     /// The representable velocity cap (an engine bound).
@@ -608,6 +617,9 @@ mod tests {
             specific_heat: Fixed::from_int(10),
             heat_production: Fixed::from_int(100),
             ra_crit,
+            // The rigid-rigid critical wavenumber, the pair mate of the classical rigid Ra_crit; the convection
+            // step does not read it, so any value compiles, but the coherent rigid-rigid a_c ~ 3.117 is used.
+            ra_crit_wavenumber: Fixed::from_ratio(3117, 1000),
             ra_max: Fixed::from_int(1_000_000),
             v_max: Fixed::from_int(1_000_000),
             flux_max: Fixed::from_int(1_000_000),
