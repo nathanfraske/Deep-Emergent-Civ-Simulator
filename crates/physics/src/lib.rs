@@ -43,6 +43,7 @@ pub mod covalent_radii;
 pub mod crystal_field;
 pub mod d_state_radius;
 pub mod ewald;
+pub mod flexure;
 pub mod floor_provenance;
 pub mod force_constant;
 pub mod gas_thermochemistry;
