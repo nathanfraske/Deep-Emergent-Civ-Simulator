@@ -65,10 +65,12 @@ jobs:
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     env:
-      # The slow evolutionary-selection tests (nextest flagged them >60s, one >9min); excluded from
-      # the per-PR lane by this filterset and run in full in nightly-full. Excluded by NAME, never
+      # The slow evolutionary-selection tests (nextest flagged them >60s, one >9min), plus the sampled-planet
+      # spawn's byte-identity gate (~109s: it derives the whole sampled set TWICE, serially and in parallel, and
+      # compares every derived bit including the full tile field, so its cost IS the thing it proves). Excluded
+      # from the per-PR lane by this filterset and run in full in nightly-full. Excluded by NAME, never
       # #[ignore]d, so the #[ignore]d unimplemented Stage-N placeholder tests are never swept in.
-      SLOW_TESTS: "test(a_recurrent_controller_evolves_to_survive_the_food_vs_water_trap_better_than_a_linear_one) | test(the_dawn_bootstrap_pre_adapts_the_grazer_founders_own_physiology) | test(bidirectional_thermotaxis_emerges_and_rests_on_the_signed_thermoreceptor) | test(a_recurrent_controller_graduates_the_plumbing_and_evolves) | test(behaviour_evolves_under_homeostatic_selection) | test(the_evolved_best_follows_the_water_percept_in_every_direction)"
+      SLOW_TESTS: "test(a_recurrent_controller_evolves_to_survive_the_food_vs_water_trap_better_than_a_linear_one) | test(the_dawn_bootstrap_pre_adapts_the_grazer_founders_own_physiology) | test(bidirectional_thermotaxis_emerges_and_rests_on_the_signed_thermoreceptor) | test(a_recurrent_controller_graduates_the_plumbing_and_evolves) | test(behaviour_evolves_under_homeostatic_selection) | test(the_evolved_best_follows_the_water_percept_in_every_direction) | test(the_sampled_planet_set_is_byte_identical_to_a_serial_derivation)"
     steps:
       - uses: actions/checkout@v4
       - name: Install the pinned toolchain

@@ -3437,7 +3437,11 @@ struct SampledPlanet {
 /// gravitationally-assembled multi-body system (that is the solar-system generator, task #72); each planet is an
 /// independent derivation, and the map places them together for viewing only. `extra_orbit`, if given (the `--derived`
 /// orbit argument), is added to the set so a specific orbit can be viewed alongside the samples.
-fn build_sampled_planets(star_mass: Fixed, extra_orbit: Option<Fixed>) -> Vec<SampledPlanet> {
+/// The ORBITS the derived-planet view samples, in ascending order: the fixed terrestrial-zone set plus the caller's
+/// `--derived <star_mass> <orbit_au>` orbit when it is not already one of them. Split out of
+/// [`build_sampled_planets`] so the parallel derivation and its serial reference test read the SAME list rather than
+/// two copies that could drift apart. NON-CANON viewer input (a chosen sample set, not an assembled system).
+fn sampled_orbits(extra_orbit: Option<Fixed>) -> Vec<Fixed> {
     let mut orbits: Vec<Fixed> = [(7, 10), (9, 10), (11, 10), (13, 10), (15, 10)]
         .iter()
         .map(|(n, d)| Fixed::from_ratio(*n, *d))
@@ -3451,19 +3455,41 @@ fn build_sampled_planets(star_mass: Fixed, extra_orbit: Option<Fixed>) -> Vec<Sa
         }
     }
     orbits.sort_by_key(|a| a.to_bits());
-    let n = orbits.len().max(1);
+    orbits
+}
+
+/// The MEAN ANOMALY that spreads the sampled planets around the map, a pure function of an orbit's INDEX in
+/// [`sampled_orbits`] and the sample count, so it is identical whether the set derived serially or in parallel (it
+/// keys on the orbit's position in the list, never on the order the derivations happened to finish). A NON-CANON
+/// display spread: these orbits are sampled, not assembled, so no physical phase relation exists to read.
+fn sampled_mean_anomaly(index: usize, count: usize) -> Fixed {
     let tau = Fixed::PI.checked_add(Fixed::PI).unwrap_or(Fixed::PI);
+    let frac = Fixed::from_ratio(index as i64, count.max(1) as i64);
+    tau.checked_mul(frac).unwrap_or(Fixed::ZERO)
+}
+
+fn build_sampled_planets(star_mass: Fixed, extra_orbit: Option<Fixed>) -> Vec<SampledPlanet> {
+    use rayon::prelude::*;
+    let orbits = sampled_orbits(extra_orbit);
+    let n = orbits.len().max(1);
+    // THE SAMPLED-SET SPAWN: each orbit's planet is an INDEPENDENT derivation ([`build_derived_scene`] is a pure
+    // function of the star mass and the orbit, sharing no state across orbits), so the set derives in parallel. This
+    // is ORCHESTRATION ONLY: it reorders no arithmetic and changes no result. rayon's `collect` into a `Vec` is
+    // INDEX-ORDERED, so `derived[i]` is orbit `i`'s outcome whatever order the workers finished in; the mean anomaly
+    // keys on that index ([`sampled_mean_anomaly`]), and the fail-soft skip messages print BELOW, serially, in orbit
+    // order. So the parallel build is byte-identical to the serial one and its log is line-identical, both pinned by
+    // a standing test. Nested rayon is safe here: an inner per-planet cache build joins this pool by work-stealing.
+    let derived: Vec<Result<DerivedScene, String>> = orbits
+        .par_iter()
+        .map(|orbit| build_derived_scene(star_mass, *orbit))
+        .collect();
     let mut planets = Vec::new();
-    for (i, orbit) in orbits.iter().enumerate() {
-        match build_derived_scene(star_mass, *orbit) {
-            Ok(scene) => {
-                let frac = Fixed::from_ratio(i as i64, n as i64);
-                let mean_anomaly = tau.checked_mul(frac).unwrap_or(Fixed::ZERO);
-                planets.push(SampledPlanet {
-                    scene,
-                    mean_anomaly,
-                });
-            }
+    for (i, (orbit, outcome)) in orbits.iter().zip(derived).enumerate() {
+        match outcome {
+            Ok(scene) => planets.push(SampledPlanet {
+                scene,
+                mean_anomaly: sampled_mean_anomaly(i, n),
+            }),
             Err(e) => eprintln!(
                 "  (orbit {:.2} AU did not resolve: {e}; skipped)",
                 orbit.to_f64_lossy()
@@ -5247,6 +5273,89 @@ mod province_tests {
             "a varied province field textures the surface with more than one relief, got {}",
             count_variants(&vt)
         );
+    }
+
+    /// Every DERIVED bit of one sampled planet, for the spawn's byte-identity gate: the scene's scalars, its derived
+    /// colours, its crust assemblage, and the full derived tile field (elevation and relief class per cell, the bulk
+    /// of the derivation). Compared as a whole, so the gate cannot pass on a subset of fields that happened to match.
+    fn sampled_planet_digest(p: &SampledPlanet) -> Vec<i64> {
+        let s = &p.scene;
+        let mut d = vec![
+            p.mean_anomaly.to_bits(),
+            s.star_mass.to_bits(),
+            s.orbit_au.to_bits(),
+            s.radius_m.to_bits(),
+            s.t_eff.to_bits(),
+            s.star_radius_ratio.to_bits(),
+            s.disk_t.to_bits(),
+            s.condensation_t.to_bits(),
+            s.gravity.to_bits(),
+            s.mass_earth.to_bits(),
+            s.density.to_bits(),
+            s.material.r as i64,
+            s.material.g as i64,
+            s.material.b as i64,
+            s.sky.r as i64,
+            s.sky.g as i64,
+            s.sky.b as i64,
+        ];
+        // The derived crust assemblage (the composition the colour and the tiles read).
+        for (name, frac) in &s.crust {
+            d.push(frac.to_bits());
+            d.extend(name.bytes().map(i64::from));
+        }
+        // The full derived tile field: elevation and relief class per cell.
+        for t in &s.tiles {
+            d.push(t.elevation.to_bits());
+            d.push(t.relief as i64);
+        }
+        d
+    }
+
+    #[test]
+    fn the_sampled_planet_set_is_byte_identical_to_a_serial_derivation() {
+        // THE SPAWN'S GATE (the owner's condition on parallelising the sampled set): deriving the orbits in parallel
+        // must produce, PER PLANET, the same bytes as deriving them one at a time. The spawn is ORCHESTRATION ONLY,
+        // so this is the whole of its contract: same bytes, fewer seconds. The reference below reads the SAME
+        // `sampled_orbits` list and the SAME `sampled_mean_anomaly` the parallel path uses, so the test cannot drift
+        // from the thing it gates; what it independently exercises is the EVALUATION ORDER (that rayon's collect is
+        // index-ordered, so a planet's mean anomaly keys on its orbit's position rather than on which worker finished
+        // first) and that `build_derived_scene` shares no state across orbits.
+        let star = Fixed::ONE;
+        let orbits = sampled_orbits(None);
+        let n = orbits.len().max(1);
+        let mut serial: Vec<SampledPlanet> = Vec::new();
+        for (i, orbit) in orbits.iter().enumerate() {
+            if let Ok(scene) = build_derived_scene(star, *orbit) {
+                serial.push(SampledPlanet {
+                    scene,
+                    mean_anomaly: sampled_mean_anomaly(i, n),
+                });
+            }
+        }
+        let parallel = build_sampled_planets(star, None);
+        assert!(
+            !parallel.is_empty(),
+            "the sampled set derives at least one planet (else the gate proves nothing)"
+        );
+        assert_eq!(
+            serial.len(),
+            parallel.len(),
+            "the parallel set derives the same planets as the serial one (the same orbits resolve and the same ones skip)"
+        );
+        for (s, p) in serial.iter().zip(&parallel) {
+            assert_eq!(
+                s.scene.orbit_au.to_bits(),
+                p.scene.orbit_au.to_bits(),
+                "the parallel set keeps the serial ORDER (orbit ascending), so a planet's mean anomaly is its own"
+            );
+            assert_eq!(
+                sampled_planet_digest(s),
+                sampled_planet_digest(p),
+                "the planet derived at orbit {:.2} AU is byte-identical serial vs parallel",
+                s.scene.orbit_au.to_f64_lossy()
+            );
+        }
     }
 
     #[test]
