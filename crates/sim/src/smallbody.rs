@@ -14,8 +14,9 @@
 
 //! The SMALL-BODY residue (asteroids and comets, task #74): the un-accreted planetesimals the planet did not
 //! sweep up, instantiated as DISCRETE bodies whose orbit and composition DERIVE from the same disk state the
-//! planet pipeline reads, never authored. This is the first slice of the small-body buildout; the moon-capture,
-//! dwarf-planet, and emergent-multi-body arrangements are flagged follow-ons (see the module tail).
+//! planet pipeline reads, never authored. This module holds the per-body derivation (slice 1) and the
+//! belt-population sampler (slice 2, [`sample_belt`]); the resonance-sculpted gaps, moon-capture, and
+//! dwarf-planet arrangements are flagged follow-ons (see the module tail).
 //!
 //! The derivation chain, each link a built substrate this module CONSUMES rather than re-deriving:
 //!
@@ -58,12 +59,14 @@
 //! module is DORMANT: nothing here is wired into a pinned run path, so the run pins hold bit-exact.
 //!
 //! The DISCRETE bodies are instantiated by DETERMINISTIC QUANTILES (three per body: the residual-mass quantile
-//! for the orbit, the stirring quantile for the eccentricity, the cascade quantile for the size). In the run
-//! wire those quantiles come from the same content-keyed seeded draw the impact chain uses (the contingency
-//! machinery), so the population is a deterministic sample of the reservoir; this slice supplies the derivations
-//! the draw feeds, keeping the module free of any scheduler dependency.
+//! for the orbit, the stirring quantile for the eccentricity, the cascade quantile for the size). The
+//! belt-population sampler [`sample_belt`] draws `count` representative bodies, each body's three quantiles a pure
+//! function of the world seed and the body's sampling index through the core [`Rng`] SplitMix64 counter stream
+//! (the same seeded-draw machinery the run's contingency draws use), so the population is a deterministic,
+//! reproducible sample of the reservoir with no scheduler dependency. The `count` is a labeled DISPLAY BUDGET,
+//! distinct from the physical population, which scales with the DERIVED residual disk mass ([`residual_disk_mass`]).
 
-use civsim_core::Fixed;
+use civsim_core::{Fixed, Rng};
 use civsim_physics::ice_sublimation::IceSublimation;
 use civsim_world::impact_flux;
 
@@ -269,19 +272,41 @@ pub fn snow_line_orbit_au(reservoir: &DiskReservoir, ice: &IceSublimation) -> Op
     lo.checked_add(hi)?.checked_div(Fixed::from_int(2))
 }
 
-/// Whether an orbit lies in the planet's swept feeding zone (where the residue was accreted, so no small body
-/// survives). A degenerate zone (`inner >= outer`) means no feeding zone was swept.
+/// Whether an orbit lies in the reservoir's OWN swept feeding zone (where the residue was accreted, so no small
+/// body survives). A degenerate zone (`inner >= outer`) means no feeding zone was swept.
 fn in_feeding_zone(reservoir: &DiskReservoir, orbit_au: Fixed) -> bool {
     reservoir.feeding_zone_inner_au < reservoir.feeding_zone_outer_au
         && orbit_au >= reservoir.feeding_zone_inner_au
         && orbit_au <= reservoir.feeding_zone_outer_au
 }
 
-/// The residual disk mass in a ring at an orbit, `2*pi*r*Sigma(r)` masked to zero inside the swept feeding zone.
-/// This is the per-radius density of the residual-mass distribution the orbit quantile inverts. `None` on a bad
-/// surface density.
-fn residual_ring_density(reservoir: &DiskReservoir, orbit_au: Fixed) -> Option<Fixed> {
+/// Whether an orbit lies in ANY swept zone: the reservoir's own feeding zone (the single-planet residue slice 1
+/// masks) OR any of the caller-supplied `swept_zones` (a population's several cleared feeding zones). A body in any
+/// accreted gap has no residue, so the mask is the UNION of the two; an empty `swept_zones` recovers the
+/// single-planet behaviour. Each swept zone is an `(inner_au, outer_au)` annulus; a degenerate one (`inner >=
+/// outer`) masks nothing.
+fn orbit_is_swept(
+    reservoir: &DiskReservoir,
+    swept_zones: &[(Fixed, Fixed)],
+    orbit_au: Fixed,
+) -> bool {
     if in_feeding_zone(reservoir, orbit_au) {
+        return true;
+    }
+    swept_zones
+        .iter()
+        .any(|&(inner, outer)| inner < outer && orbit_au >= inner && orbit_au <= outer)
+}
+
+/// The residual disk mass in a ring at an orbit, `2*pi*r*Sigma(r)` masked to zero inside any swept zone (the
+/// reservoir's own feeding zone and every caller-supplied `swept_zones` annulus). This is the per-radius density of
+/// the residual-mass distribution the orbit quantile inverts. `None` on a bad surface density.
+fn residual_ring_density(
+    reservoir: &DiskReservoir,
+    swept_zones: &[(Fixed, Fixed)],
+    orbit_au: Fixed,
+) -> Option<Fixed> {
+    if orbit_is_swept(reservoir, swept_zones, orbit_au) {
         return Some(Fixed::ZERO);
     }
     let sigma = astro::disk_surface_density(
@@ -294,17 +319,24 @@ fn residual_ring_density(reservoir: &DiskReservoir, orbit_au: Fixed) -> Option<F
     two_pi.checked_mul(orbit_au)?.checked_mul(sigma)
 }
 
-/// The semi-major axis (AU) of a small body at a residual-mass quantile in `[0, 1)`: the inverse of the
-/// cumulative residual disk-mass distribution. A body's orbit is the radius that encloses that fraction of the
-/// residual mass, so the reservoir is dense where the disk mass is and empty across the swept feeding zone (no
-/// body lands in the accreted gap). The cumulative mass is a bounded midpoint Riemann sum over
-/// `integration_steps` cells (a fixed resolution, an engine-accuracy bound, so determinism holds); the
-/// normalization `Sigma_c` cancels because the quantile reads a mass RATIO. `None` on a quantile outside
-/// `[0, 1)`, a degenerate disk range, zero steps, or a surface density that fails to resolve.
-pub fn residual_semi_major_axis(quantile: Fixed, reservoir: &DiskReservoir) -> Option<Fixed> {
-    if quantile < Fixed::ZERO || quantile >= Fixed::ONE {
-        return None;
-    }
+/// The total residual disk mass (in the surface-density normalization's units, `Sigma_c * AU^2`): the integral
+/// `int 2*pi*r*Sigma(r) dr` over the residual disk with the reservoir's own feeding zone masked, a bounded
+/// midpoint Riemann sum over `integration_steps` cells. This is the DERIVED size of the reservoir the belt samples
+/// from, the mass the un-accreted planetesimals carry (the "later mass readout" the `surface_density_normalization`
+/// field anticipates). The PHYSICAL body count is this mass divided by a characteristic body mass (a materials
+/// read the reservoir does not yet carry, so the physical count is flagged rather than fabricated), and a belt's
+/// `count` is a DISPLAY sample of that population, never the population itself. `None` on a degenerate disk range,
+/// zero steps, or a surface density that fails to resolve; `Some(0)` when the residual disk is fully swept.
+pub fn residual_disk_mass(reservoir: &DiskReservoir) -> Option<Fixed> {
+    residual_disk_mass_masked(reservoir, &[])
+}
+
+/// The total residual disk mass with an additional set of `swept_zones` masked alongside the reservoir's own
+/// feeding zone (the union of masks). Shared first pass of the residual-mass integration.
+fn residual_disk_mass_masked(
+    reservoir: &DiskReservoir,
+    swept_zones: &[(Fixed, Fixed)],
+) -> Option<Fixed> {
     let inner = reservoir.inner_disk_edge_au;
     let outer = reservoir.outer_disk_edge_au;
     if inner <= Fixed::ZERO || outer <= inner || reservoir.integration_steps == 0 {
@@ -314,23 +346,59 @@ pub fn residual_semi_major_axis(quantile: Fixed, reservoir: &DiskReservoir) -> O
     let span = outer.checked_sub(inner)?;
     let dr = span.checked_div(Fixed::from_int(steps as i32))?;
     let half_dr = dr.checked_div(Fixed::from_int(2))?;
-    // First pass: the total residual mass (the cumulative ring masses).
     let mut total = Fixed::ZERO;
     for i in 0..steps {
         let r = inner.checked_add(
             dr.checked_mul(Fixed::from_int(i as i32))?
                 .checked_add(half_dr)?,
         )?;
-        let ring = residual_ring_density(reservoir, r)?.checked_mul(dr)?;
+        let ring = residual_ring_density(reservoir, swept_zones, r)?.checked_mul(dr)?;
         total = total.checked_add(ring)?;
     }
+    Some(total)
+}
+
+/// The semi-major axis (AU) of a small body at a residual-mass quantile in `[0, 1)`: the inverse of the
+/// cumulative residual disk-mass distribution, with the reservoir's own feeding zone masked. `None` on a quantile
+/// outside `[0, 1)`, a degenerate disk range, zero steps, no residual mass, or a surface density that fails to
+/// resolve.
+pub fn residual_semi_major_axis(quantile: Fixed, reservoir: &DiskReservoir) -> Option<Fixed> {
+    residual_semi_major_axis_masked(quantile, reservoir, &[])
+}
+
+/// The semi-major axis (AU) at a residual-mass quantile in `[0, 1)`, with an additional set of `swept_zones`
+/// masked alongside the reservoir's own feeding zone: the inverse of the cumulative residual disk-mass
+/// distribution over the un-swept disk. A body's orbit is the radius that encloses that fraction of the residual
+/// mass, so the reservoir is dense where the disk mass is and empty across every accreted gap (no body lands in a
+/// swept zone). The cumulative mass is a bounded midpoint Riemann sum over `integration_steps` cells (a fixed
+/// resolution, an engine-accuracy bound, so determinism holds); the normalization `Sigma_c` cancels because the
+/// quantile reads a mass RATIO. `None` on a quantile outside `[0, 1)`, a degenerate disk range, zero steps, no
+/// residual mass, or a surface density that fails to resolve.
+pub fn residual_semi_major_axis_masked(
+    quantile: Fixed,
+    reservoir: &DiskReservoir,
+    swept_zones: &[(Fixed, Fixed)],
+) -> Option<Fixed> {
+    if quantile < Fixed::ZERO || quantile >= Fixed::ONE {
+        return None;
+    }
+    let inner = reservoir.inner_disk_edge_au;
+    let outer = reservoir.outer_disk_edge_au;
+    if inner <= Fixed::ZERO || outer <= inner || reservoir.integration_steps == 0 {
+        return None;
+    }
+    let total = residual_disk_mass_masked(reservoir, swept_zones)?;
     if total <= Fixed::ZERO {
         return None; // no residual mass to place a body in
     }
+    let steps = reservoir.integration_steps;
+    let span = outer.checked_sub(inner)?;
+    let dr = span.checked_div(Fixed::from_int(steps as i32))?;
+    let half_dr = dr.checked_div(Fixed::from_int(2))?;
     let target = quantile.checked_mul(total)?;
-    // Second pass: the first cell whose cumulative mass reaches the target. A zero-mass (swept) cell never
-    // becomes the first cell to reach the target, because the cell before it already holds the same cumulative
-    // mass, so no body is placed in the feeding zone.
+    // The first cell whose cumulative mass reaches the target. A zero-mass (swept) cell never becomes the first
+    // cell to reach the target, because the cell before it already holds the same cumulative mass, so no body is
+    // placed in a swept zone.
     let mut cumulative = Fixed::ZERO;
     let mut last_r = inner.checked_add(half_dr)?;
     for i in 0..steps {
@@ -338,7 +406,7 @@ pub fn residual_semi_major_axis(quantile: Fixed, reservoir: &DiskReservoir) -> O
             dr.checked_mul(Fixed::from_int(i as i32))?
                 .checked_add(half_dr)?,
         )?;
-        let ring = residual_ring_density(reservoir, r)?.checked_mul(dr)?;
+        let ring = residual_ring_density(reservoir, swept_zones, r)?.checked_mul(dr)?;
         cumulative = cumulative.checked_add(ring)?;
         last_r = r;
         if cumulative >= target {
@@ -418,7 +486,29 @@ pub fn derive_small_body(
     reservoir: &DiskReservoir,
     ice: &IceSublimation,
 ) -> Option<SmallBody> {
-    let semi_major_axis_au = residual_semi_major_axis(mass_quantile, reservoir)?;
+    derive_small_body_masked(
+        mass_quantile,
+        stirring_quantile,
+        size_quantile,
+        reservoir,
+        &[],
+        ice,
+    )
+}
+
+/// Assemble a discrete small body as [`derive_small_body`], but with an additional set of `swept_zones` masked
+/// alongside the reservoir's own feeding zone (the union of cleared feeding zones a population of planets sweeps),
+/// so no body lands in any accreted gap. `None` if any link fails to resolve.
+pub fn derive_small_body_masked(
+    mass_quantile: Fixed,
+    stirring_quantile: Fixed,
+    size_quantile: Fixed,
+    reservoir: &DiskReservoir,
+    swept_zones: &[(Fixed, Fixed)],
+    ice: &IceSublimation,
+) -> Option<SmallBody> {
+    let semi_major_axis_au =
+        residual_semi_major_axis_masked(mass_quantile, reservoir, swept_zones)?;
     let eccentricity =
         stirred_eccentricity(stirring_quantile, reservoir.eccentricity_stirring_scale)?;
     let diameter_ratio = residual_diameter_ratio(
@@ -435,15 +525,76 @@ pub fn derive_small_body(
     })
 }
 
+/// The hash-domain separator for the belt-sampling stream, a STRUCTURAL constant (like the `phase` argument to
+/// [`Rng::for_entity`]) that namespaces the belt draws away from any other subsystem keyed on the same world seed.
+/// It carries no physical meaning and is not a world value; it is the ASCII tag `BELTSMPL`.
+const BELT_SAMPLE_DOMAIN: u64 = u64::from_be_bytes(*b"BELTSMPL");
+
+/// Sample a POPULATION of small bodies (the emergent asteroid-and-comet belt) from the reservoir: `count`
+/// representative bodies, each fully DERIVED through [`derive_small_body_masked`]. The belt EMERGES, never
+/// authored: the asteroid-versus-comet split falls out of the snow line (refractory inside, icy beyond), the orbit
+/// spread out of the residual disk mass with every swept zone masked, and the small-dominated size distribution
+/// out of the Dohnanyi collisional cascade. The count of asteroids versus comets, the orbit spread, and the size
+/// distribution are all consequences of the reservoir and the snow line, not inputs.
+///
+/// `count` IS A LABELED SAMPLING / DISPLAY BUDGET: how many representative bodies to instantiate for the belt view,
+/// NOT the physical number of bodies. The physical population is a SEPARATE quantity that scales with the DERIVED
+/// [`residual_disk_mass`] (that mass divided by a characteristic body mass, the latter a materials read the
+/// reservoir does not yet carry, so the physical count is flagged rather than fabricated); the sampled `count` is a
+/// display draw from that population. One number is the world's, the other is the viewer's budget.
+///
+/// `swept_zones` are the planets' cleared feeding zones (each an `(inner_au, outer_au)` annulus), caller-supplied
+/// from the assembly's final planet orbits and Hill radii; the mask is the UNION of these and the reservoir's own
+/// feeding zone, so no body lands in any accreted gap. For this dormant slice the zones are an input; the assembly
+/// wiring is the follow-on. The resonance-sculpted gaps (Kirkwood gaps) are a SEPARATE follow-on: one planet's
+/// swept zone is not a mean-motion resonance, so those gaps need the multi-body generator (#72) and the secular
+/// resonances (#44), flagged at the module tail.
+///
+/// DETERMINISM (Principle 3, Principle 10): each body's three quantiles are a pure function of
+/// `(world_seed, BELT_SAMPLE_DOMAIN, index)` through the [`Rng`] SplitMix64 counter stream, so the same reservoir,
+/// seed, and count reproduce the belt bit-for-bit on any machine and at any thread count. FAIL-SOFT: a body whose
+/// derivation does not resolve (a pathological reservoir) is dropped rather than fabricated, so the returned belt
+/// may be shorter than `count`, never a fabricated body.
+pub fn sample_belt(
+    reservoir: &DiskReservoir,
+    swept_zones: &[(Fixed, Fixed)],
+    count: usize,
+    world_seed: u64,
+    ice: &IceSublimation,
+) -> Vec<SmallBody> {
+    let mut belt = Vec::with_capacity(count);
+    for index in 0..count {
+        // Three quantiles per body, keyed on the world seed plus the body's sampling index through the core
+        // seeded-draw stream (the belt domain tag namespaces the stream from other subsystems on the same seed).
+        let stream = Rng::for_coords(world_seed, &[BELT_SAMPLE_DOMAIN, index as u64]);
+        let mass_quantile = stream.unit_fixed(0);
+        let stirring_quantile = stream.unit_fixed(1);
+        let size_quantile = stream.unit_fixed(2);
+        if let Some(body) = derive_small_body_masked(
+            mass_quantile,
+            stirring_quantile,
+            size_quantile,
+            reservoir,
+            swept_zones,
+            ice,
+        ) {
+            belt.push(body);
+        }
+    }
+    belt
+}
+
 // FLAGGED FOLLOW-ONS (the next small-body slices, grounded and flagged here, not forced into this one because
 // each needs a substrate this slice does not yet reach):
 //
 //  - The RESONANCE-SCULPTED belt structure (Kirkwood gaps, the belt as a swept gap between two planets, the
-//    Trojan clouds). This slice places bodies by the residual disk mass and the single planet's feeding zone, so
-//    it derives a rocky-inner and icy-outer reservoir but NOT the mean-motion-resonance gaps a second planet
-//    (a Jupiter) carves. Those need the emergent MULTI-BODY arrangement (the solar-system generator, task #72),
-//    where several planets' resonances sculpt the reservoir; the belt gap is that arc's payoff, not authorable
-//    here from one planet.
+//    Trojan clouds). The slice-2 population sampler ([`sample_belt`]) places bodies by the residual disk mass with
+//    the union of the planets' swept feeding zones masked, so it derives a rocky-inner and icy-outer belt with the
+//    accreted gaps empty, but NOT the mean-motion-resonance gaps a resonant planet (a Jupiter) carves: a swept
+//    feeding zone is a cleared annulus, not a resonance. Those gaps need the emergent MULTI-BODY arrangement (the
+//    solar-system generator, task #72) that supplies the several planets' orbits AND the secular / mean-motion
+//    resonances (task #44) that sculpt the reservoir; the Kirkwood gap is that arc's payoff, not authorable here
+//    from one planet or from a static swept-zone mask.
 //
 //  - The FORMATION-EPOCH condensation temperature. The composition split reads the mature two-regime disk
 //    surface temperature ([`disk_temperature_at_orbit`]); the epoch-correct condensation temperature is the hot
@@ -772,6 +923,153 @@ mod tests {
         assert!(
             residual_diameter_ratio(Fixed::from_ratio(1, 2), Fixed::ONE, res.dohnanyi_slope)
                 .is_none()
+        );
+    }
+
+    #[test]
+    fn the_belt_sample_is_deterministic() {
+        // The reproducibility contract: the same reservoir, seed, and count draw the same belt bit-for-bit, and a
+        // different world seed draws a different belt. This is the seeded-draw determinism (Principle 3).
+        let res = sun_reservoir();
+        let ice = ice_table();
+        let seed = 0xBEEF_CAFE_1234_5678u64;
+        let a = sample_belt(&res, &[], 64, seed, &ice);
+        let b = sample_belt(&res, &[], 64, seed, &ice);
+        assert_eq!(
+            a, b,
+            "the same reservoir + seed + count reproduces the belt bit-for-bit"
+        );
+        assert_eq!(a.len(), 64, "a valid reservoir resolves every sampled body");
+        let c = sample_belt(&res, &[], 64, seed ^ 1, &ice);
+        assert_ne!(a, c, "a different world seed draws a different belt");
+    }
+
+    #[test]
+    fn a_swept_zone_masks_out_bodies_in_the_belt() {
+        // The swept-zone mask: a caller-supplied cleared feeding zone holds no residue, so no sampled body lands in
+        // it. Proven against an unmasked belt that DOES populate the band (the mask has work to do), and the
+        // reservoir's own feeding zone is avoided by the union even with an empty caller list.
+        let res = sun_reservoir();
+        let ice = ice_table();
+        let seed = 0x5A17_BEE7_0000_0001u64;
+        let band = (Fixed::from_int(8), Fixed::from_int(16));
+        let in_band =
+            |b: &SmallBody| b.semi_major_axis_au >= band.0 && b.semi_major_axis_au <= band.1;
+        let open = sample_belt(&res, &[], 400, seed, &ice);
+        assert!(
+            open.iter().any(in_band),
+            "without a mask the belt populates the 8-16 AU band"
+        );
+        let masked = sample_belt(&res, &[band], 400, seed, &ice);
+        assert!(
+            !masked.iter().any(in_band),
+            "the swept zone masks every body out of the 8-16 AU band"
+        );
+        // The union also masks the reservoir's OWN feeding zone (0.9-1.1 AU), with or without a caller zone.
+        assert!(
+            !masked
+                .iter()
+                .any(|b| in_feeding_zone(&res, b.semi_major_axis_au)),
+            "no body lands in the reservoir's own swept feeding zone"
+        );
+    }
+
+    #[test]
+    fn the_belt_split_follows_the_snow_line() {
+        // The emergent asteroid-versus-comet split: every sampled body inside the derived snow line is refractory
+        // (a rocky asteroid), every body beyond it is icy (a comet), and a disk that spans the line yields BOTH.
+        // The split is a consequence of the snow line and the orbit spread, never an authored roster.
+        let res = sun_reservoir();
+        let ice = ice_table();
+        let a_snow = snow_line_orbit_au(&res, &ice).expect("a snow line sits inside the disk");
+        let belt = sample_belt(&res, &[], 300, 0x01CE_A57E_0000_0002u64, &ice);
+        let mut refractory = 0;
+        let mut icy = 0;
+        for body in &belt {
+            match body.volatile_class {
+                VolatileClass::Refractory => {
+                    assert!(
+                        body.semi_major_axis_au <= a_snow,
+                        "a refractory body sits inside the snow line, got {} AU",
+                        body.semi_major_axis_au.to_f64_lossy()
+                    );
+                    refractory += 1;
+                }
+                VolatileClass::Icy => {
+                    assert!(
+                        body.semi_major_axis_au >= a_snow,
+                        "an icy body sits beyond the snow line, got {} AU",
+                        body.semi_major_axis_au.to_f64_lossy()
+                    );
+                    icy += 1;
+                }
+            }
+        }
+        assert!(
+            refractory > 0 && icy > 0,
+            "the belt spans the snow line: both asteroids ({refractory}) and comets ({icy}) emerge"
+        );
+    }
+
+    #[test]
+    fn the_belt_size_distribution_is_small_dominated() {
+        // The Dohnanyi collisional-cascade signature carried into the population: the overwhelming majority of the
+        // number lies at the small end, so nearly every sampled body is a small fraction of the largest. The bound
+        // (four-fifths under a tenth) is conservative; the cumulative number above a tenth is ~1e-5 here.
+        let res = sun_reservoir();
+        let ice = ice_table();
+        let belt = sample_belt(&res, &[], 400, 0x0051_2E00_0000_0003u64, &ice);
+        assert!(!belt.is_empty(), "the belt is populated");
+        let tenth = Fixed::from_ratio(1, 10);
+        let small = belt.iter().filter(|b| b.diameter_ratio < tenth).count();
+        assert!(
+            small * 5 > belt.len() * 4,
+            "at least four-fifths of the belt is under a tenth of the largest body, got {small}/{}",
+            belt.len()
+        );
+    }
+
+    #[test]
+    fn the_count_is_a_display_budget_over_the_derived_physical_mass() {
+        // The count-versus-population distinction: `count` is a labeled DISPLAY budget, distinct from the DERIVED
+        // residual disk mass (the physical size of the reservoir). Different budgets draw different-length belts
+        // from the same reservoir, the derived mass does not move with the budget, and a smaller budget is the
+        // same seeded sub-sample (a prefix), the reproducibility that lets a viewer draw fewer or more at will.
+        let res = sun_reservoir();
+        let ice = ice_table();
+        let mass = residual_disk_mass(&res).expect("the residual disk mass resolves");
+        assert!(
+            mass > Fixed::ZERO,
+            "the reservoir carries a positive derived residual mass"
+        );
+        let seed = 0xB0D9_E700_0000_0004u64;
+        let small = sample_belt(&res, &[], 16, seed, &ice);
+        let large = sample_belt(&res, &[], 128, seed, &ice);
+        assert_eq!(small.len(), 16);
+        assert_eq!(large.len(), 128);
+        assert_eq!(
+            residual_disk_mass(&res).unwrap(),
+            mass,
+            "the physical mass is independent of the display count"
+        );
+        assert_eq!(
+            &large[..16],
+            &small[..],
+            "a smaller budget is the same seeded sub-sample, a prefix of a larger"
+        );
+    }
+
+    #[test]
+    fn an_over_swept_disk_yields_a_short_belt_not_a_fabricated_one() {
+        // Fail-soft under an aggressive mask: a swept zone covering the whole residual disk leaves no residue, so
+        // every draw fails to resolve and the belt is empty rather than fabricating a body in an accreted gap.
+        let res = sun_reservoir();
+        let ice = ice_table();
+        let whole_disk = (Fixed::ZERO, Fixed::from_int(1000));
+        let belt = sample_belt(&res, &[whole_disk], 32, 0x0DEA_D000_0000_0005u64, &ice);
+        assert!(
+            belt.is_empty(),
+            "a fully swept disk yields no bodies, never a fabricated one"
         );
     }
 }
