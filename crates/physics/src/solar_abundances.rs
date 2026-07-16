@@ -334,6 +334,48 @@ impl SolarAbundances {
             z_over_x: self.z_over_x.clone(),
         }
     }
+
+    /// A COPY of this pattern with the ALPHA-CAPTURE elements (the symbols in `alpha_symbols`) shifted by `delta_dex`
+    /// on the `log-epsilon` scale, EVERY OTHER element (iron, the iron-peak, hydrogen, helium) held fixed. This is the
+    /// `[alpha/Fe]` enhancement the alpha-knee link owns: `[alpha/Fe]` moves the alpha-process elements (O, Mg, Si, Ca,
+    /// Ti) UP relative to iron, so a draw of `[alpha/Fe] = +0.3` adds `+0.3` dex to each alpha element (a factor
+    /// `10^0.3` more alpha at fixed iron), lifting the rock-former-to-iron ratio and, through it, the
+    /// silicate-mantle-to-metal-core mass balance the bulk density reads. Iron is NOT shifted (the ratio is
+    /// alpha-OVER-iron), so this is the first KIND-changing link: it moves the core mass fraction and hence the derived
+    /// DENSITY, where [`SolarAbundances::scaled_metals_by_dex`] (the `[Fe/H]` amount-scaling) left every inter-metal
+    /// ratio, and so the density, fixed. Both the photospheric and meteoritic columns shift together so the two grades
+    /// stay consistent; the per-element `sigma` uncertainties are untouched (a shift of the value, not of its error).
+    /// `delta_dex = 0` returns a byte-identical copy (adding the fixed-point zero is exact), which pins the solar/Mirror
+    /// instance (`[alpha/Fe] = 0` at the solar pin) to the unshifted pattern through the same call.
+    ///
+    /// KEYED ON ELEMENT IDENTITY (Prime Directive 7, admit the alien). The alpha membership is DATA (`alpha_symbols`,
+    /// the nucleosynthetic alpha-element set the caller supplies), never a fixed rule on `Z`: the metals are every
+    /// `Z >= 3`, but the alpha elements are a specific cited set of alpha-capture products, so the membership grows as
+    /// data and an alien pattern that names other elements is a data row, not a code change. A symbol absent from this
+    /// pattern is skipped (an alien pattern missing an element is not an error), and this holds Mg/Si (both alpha)
+    /// fixed under a uniform lift, so the silicate-family (olivine-versus-pyroxene) channel is a later element-
+    /// differential refinement, not this uniform link.
+    pub fn scaled_alpha_by_dex(&self, delta_dex: Fixed, alpha_symbols: &[&str]) -> SolarAbundances {
+        let mut rows = self.rows.clone();
+        for symbol in alpha_symbols {
+            if let Some(row) = rows.get_mut(*symbol) {
+                if let Some(v) = row.log_eps_photosphere {
+                    row.log_eps_photosphere = Some(v + delta_dex);
+                }
+                if let Some(v) = row.log_eps_meteorite {
+                    row.log_eps_meteorite = Some(v + delta_dex);
+                }
+            }
+        }
+        SolarAbundances {
+            rows,
+            scale: self.scale.clone(),
+            x_mass_fraction: self.x_mass_fraction.clone(),
+            y_mass_fraction: self.y_mass_fraction.clone(),
+            z_mass_fraction: self.z_mass_fraction.clone(),
+            z_over_x: self.z_over_x.clone(),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -553,6 +595,80 @@ source = "photospheric"
             (fe1 - o1).to_bits(),
             (fe0 - o0).to_bits(),
             "the Fe/O ratio (an inter-metal contrast) is preserved by uniform metal scaling"
+        );
+    }
+
+    // The nucleosynthetic alpha-capture set the [alpha/Fe] enhancement lifts (mirrors the const the draw supplies).
+    const ALPHA: &[&str] = &["O", "Mg", "Si", "Ca", "Ti"];
+
+    #[test]
+    fn scaling_alpha_by_zero_dex_is_byte_identical() {
+        // The [alpha/Fe] = 0 (solar/Mirror pin) alpha scaling is a byte-identical copy: adding the fixed-point zero to
+        // each alpha element is exact, and every other element is untouched. This is what keeps the pinned globe and
+        // the run pins bit-exact once the alpha link lands.
+        let solar = table();
+        let scaled = solar.scaled_alpha_by_dex(Fixed::ZERO, ALPHA);
+        for sym in solar.elements() {
+            assert_eq!(
+                scaled.log_eps_photosphere(sym).map(|f| f.to_bits()),
+                solar.log_eps_photosphere(sym).map(|f| f.to_bits()),
+                "photospheric byte-identical at 0 dex for {sym}"
+            );
+            assert_eq!(
+                scaled.log_eps_meteorite(sym).map(|f| f.to_bits()),
+                solar.log_eps_meteorite(sym).map(|f| f.to_bits()),
+                "meteoritic byte-identical at 0 dex for {sym}"
+            );
+        }
+    }
+
+    #[test]
+    fn scaling_alpha_lifts_the_alpha_elements_relative_to_iron_and_holds_mg_over_si() {
+        // A nonzero [alpha/Fe] shift moves each alpha element (O, Mg, Si, Ca, Ti) UP by exactly delta and leaves iron
+        // (the ratio's denominator), the iron-peak Ni, hydrogen, and helium fixed: the [alpha/Fe] enhancement. Unlike
+        // the uniform [Fe/H] metal scaling, this CHANGES an inter-metal ratio, Mg/Fe, which is the KIND lever (the
+        // silicate-mantle-to-metal-core balance). But Mg/Si (both alpha) is HELD, so the uniform lift does not touch the
+        // olivine-versus-pyroxene family (a later element-differential refinement).
+        let solar = table();
+        let delta = Fixed::from_ratio(3, 10); // +0.3 dex, the fetched alpha plateau
+        let scaled = solar.scaled_alpha_by_dex(delta, ALPHA);
+        // Iron unchanged (the denominator of [alpha/Fe]).
+        assert_eq!(
+            scaled.preferred("Fe").map(|f| f.to_bits()),
+            solar.preferred("Fe").map(|f| f.to_bits()),
+            "iron is not an alpha element and is the ratio denominator, unchanged"
+        );
+        // The iron-peak Ni, hydrogen, and helium unchanged.
+        for held in ["Ni", "H", "He"] {
+            assert_eq!(
+                scaled.preferred(held).map(|f| f.to_bits()),
+                solar.preferred(held).map(|f| f.to_bits()),
+                "{held} is not an alpha element and is unchanged"
+            );
+        }
+        // Magnesium shifted by exactly delta.
+        let mg0 = solar.preferred("Mg").expect("Mg present");
+        let mg1 = scaled.preferred("Mg").expect("Mg present scaled");
+        assert_eq!(
+            mg1.to_bits(),
+            (mg0 + delta).to_bits(),
+            "magnesium lifted by exactly +0.3 dex (an alpha element)"
+        );
+        // Mg/Fe (the KIND lever) CHANGED: magnesium rose relative to iron by delta.
+        let fe = scaled.preferred("Fe").expect("Fe present");
+        let fe0 = solar.preferred("Fe").expect("Fe present unscaled");
+        assert_eq!(
+            (mg1 - fe).to_bits(),
+            (mg0 - fe0 + delta).to_bits(),
+            "the Mg/Fe ratio rose by the alpha enhancement (the density-moving KIND lever)"
+        );
+        // Mg/Si (both alpha) HELD: the silicate family is untouched by the uniform lift.
+        let si1 = scaled.preferred("Si").expect("Si present scaled");
+        let mg0si0 = mg0 - solar.preferred("Si").expect("Si present unscaled");
+        assert_eq!(
+            (mg1 - si1).to_bits(),
+            mg0si0.to_bits(),
+            "Mg/Si (both alpha) is preserved by a uniform alpha lift (olivine/pyroxene untouched)"
         );
     }
 }

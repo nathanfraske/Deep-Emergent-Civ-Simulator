@@ -109,26 +109,37 @@ impl DiskComposition {
     /// compositions for a DERIVED reason (their `[Fe/H]` differs), so worlds stop looking the same the moment they stop
     /// being fed the one authored solar pattern.
     ///
-    /// The chain is ordered by nucleosynthetic causality (never independent marginals). This builds the two OUTERMOST
-    /// links: LINK 0 the birth ENVIRONMENT (the `environment` argument, the local disk the tagged default), and LINK 1
-    /// the metallicity `[Fe/H]` drawn from that environment's selection-corrected MDF ([`Environment::draw_fe_h`]). The
-    /// draw becomes a composition by the definitional conversion `Z / Z_sun = 10^[Fe/H]` (stored as the datum's
-    /// metallicity ratio) and by scaling the solar pattern's metals by `[Fe/H]`
-    /// ([`SolarAbundances::scaled_metals_by_dex`]), so the condensation, the accretion mass, and the bulk density all
-    /// read the drawn `Z`. The later links (`[alpha/Fe]`, C/O, s/r) differentiate individual elements on top of this
-    /// amount-scaling.
+    /// The chain is ordered by nucleosynthetic causality (never independent marginals). This builds the three OUTERMOST
+    /// links: LINK 0 the birth ENVIRONMENT (the `environment` argument, the local disk the tagged default), LINK 1 the
+    /// metallicity `[Fe/H]` drawn from that environment's selection-corrected MDF ([`Environment::draw_fe_h`]), and
+    /// LINK 2 the alpha enhancement `[alpha/Fe]` drawn from the two-branch knee conditioned on `[Fe/H]`
+    /// ([`Environment::draw_alpha_fe`]). The draw becomes a composition by the definitional conversion
+    /// `Z / Z_sun = 10^[Fe/H]` (stored as the datum's metallicity ratio), by scaling the solar pattern's metals by
+    /// `[Fe/H]` ([`SolarAbundances::scaled_metals_by_dex`], the AMOUNT), and by lifting the alpha rock-formers by
+    /// `[alpha/Fe]` ([`SolarAbundances::scaled_alpha_by_dex`], the KIND), so the condensation, the accretion mass, the
+    /// bulk density, and now the metal-core mass fraction all read the drawn pattern. The later links (C/O, s/r)
+    /// differentiate further elements on top. `[Fe/H]` moves the amount (density fixed); `[alpha/Fe]` moves the
+    /// rock-former-to-iron ratio (the first DENSITY lever).
     ///
-    /// THE MIRROR PINS THROUGH THIS SAME PATH: [`Environment::local_disk_solar_pin`] pins `[Fe/H] = 0`, so
-    /// `Z / Z_sun = 10^0 = 1` exactly ([`ten_pow`] guarantees the identity) and the metal shift is `+0` (byte-identical
-    /// to the solar pattern). The solar instance is thus the chain evaluated at its pin, not a bypass. `None` (error)
-    /// only if the solar anchor fails to load.
+    /// THE MIRROR PINS THROUGH THIS SAME PATH: [`Environment::local_disk_solar_pin`] pins `[Fe/H] = 0` (so
+    /// `Z / Z_sun = 10^0 = 1` exactly, [`ten_pow`] guarantees the identity, and the metal shift is `+0`) AND pins
+    /// `[alpha/Fe] = 0` (so the alpha shift is `+0`), both byte-identical to the solar pattern. The solar instance is
+    /// thus the chain evaluated at its pins, not a bypass. `None` (error) only if the solar anchor fails to load.
     pub fn draw(environment: &Environment, world_seed: u64) -> Result<Self, SolarAbundanceError> {
         let fe_h = environment.draw_fe_h(world_seed);
         // Z / Z_sun = 10^[Fe/H], the definitional conversion; exactly ONE when [Fe/H] pins to 0.
         let z_ratio = ten_pow(fe_h);
-        // Scale the solar pattern's metals by [Fe/H] (the amount-scaling this link owns); a +0 shift for the pin is
+        // LINK 2, [alpha/Fe] CONDITIONED ON [Fe/H]: the two-branch alpha knee (the thick-disk plateau and the
+        // thin-disk solar level), drawn from its OWN named slot, pinned to 0 for the Mirror. This is the first
+        // KIND-changing link: it lifts the alpha rock-formers relative to iron, which moves the metal-core mass
+        // fraction and so the derived DENSITY (where [Fe/H] moved only the amount).
+        let alpha_fe = environment.draw_alpha_fe(world_seed, fe_h);
+        // Scale the solar pattern's metals by [Fe/H] (the amount-scaling), THEN lift the alpha elements by [alpha/Fe]
+        // (the ratio-changing enhancement, keyed on the alpha-element identity). Both +0 shifts for the pin are
         // byte-identical to the solar pattern.
-        let pattern = SolarAbundances::standard()?.scaled_metals_by_dex(fe_h);
+        let pattern = SolarAbundances::standard()?
+            .scaled_metals_by_dex(fe_h)
+            .scaled_alpha_by_dex(alpha_fe, ALPHA_ELEMENTS);
         Ok(DiskComposition {
             // Provenance only (non-canonical): the environment and the world seed that produced this draw.
             label: format!("{}-seed-{world_seed:016x}", environment.label()),
@@ -161,7 +172,7 @@ impl DiskComposition {
     }
 }
 
-// ── The composition-draw chain: LINK 0 (environment) and LINK 1 ([Fe/H]) ─────────────────────────────────────────
+// ── The composition-draw chain: LINK 0 (environment), LINK 1 ([Fe/H]), LINK 2 ([alpha/Fe]) ───────────────────────
 
 /// The `[Fe/H]` MDF PEAK (dex) for the LOCAL Milky Way thin-plus-thick disk (the tagged default environment). FETCHED:
 /// the recalibrated Geneva-Copenhagen survey MDF (the largest kinematically-unbiased solar-neighbourhood sample) peaks
@@ -211,6 +222,82 @@ fn link_slot_key(name: &str) -> u64 {
     splitmix64(h)
 }
 
+// ── LINK 2: [alpha/Fe] conditioned on [Fe/H], the two-branch alpha knee ───────────────────────────────────────────
+
+/// The name of the `[alpha/Fe]` link, hashed to key its OWN draw slot (steer 2, the per-link named sub-slot). It must
+/// key a slot DISTINCT from `[Fe/H]`, so landing this link never shifts an existing seed's already-drawn `[Fe/H]`; the
+/// existing `[Fe/H]` slot-invariant test forward-references this exact name.
+const LINK_ALPHA_FE: &str = "alpha_fe";
+
+/// The nucleosynthetic ALPHA-CAPTURE element set the `[alpha/Fe]` enhancement lifts: oxygen, magnesium, silicon,
+/// calcium, and titanium, the alpha-process products (even-`Z` nuclei built by successive He-4 capture and released
+/// promptly by Type-II supernovae) that `[alpha/Fe]` measures against the delayed Type-Ia iron. This is a DATA-defined
+/// membership (Principle 11): the enhancement MECHANISM is fixed Rust ([`SolarAbundances::scaled_alpha_by_dex`]), the
+/// SET is the cited nucleosynthetic classification and grows as data (the further alpha products S, Ar, Ne plug in as
+/// rows with no code change). Iron and the iron-peak Ni are NOT alpha elements: iron is the ratio's denominator and the
+/// Type-Ia species the knee tracks. Keyed on element identity so an alien pattern is a data row (Prime Directive 7).
+const ALPHA_ELEMENTS: &[&str] = &["O", "Mg", "Si", "Ca", "Ti"];
+
+/// The `[alpha/Fe]` ALPHA-PLATEAU (dex), the high-alpha value the old thick-disk (and halo) branch holds at sub-solar
+/// `[Fe/H]` from fast Type-II enrichment before the Type-Ia iron dilutes it. FETCHED: `[alpha/Fe] ~ +0.3`
+/// (Bensby, Feltzing & Oey 2014, A&A 562 A71, arXiv 1309.2631, their `[alpha/Fe]`-`[Fe/H]` plane, section 9.3 of the
+/// fetch record). `+0.3 = 3/10`.
+const ALPHA_PLATEAU_DEX: Fixed = Fixed::from_int(3).div(Fixed::from_int(10));
+
+/// The `[Fe/H]` metallicity of the alpha KNEE (dex): the turnover where delayed Type-Ia iron enters and `[alpha/Fe]`
+/// begins declining from the plateau. FETCHED: `[Fe/H] ~ -0.4` (Bensby et al. 2014; the fetch flags this as read from
+/// their figures, the standard reading). Below the knee the alpha branch sits on the plateau; above it the thick track
+/// declines. `-0.4 = -4/10`.
+const ALPHA_KNEE_FE_H_DEX: Fixed = Fixed::from_int(-4).div(Fixed::from_int(10));
+
+/// The `[alpha/Fe]` of the thick-disk (high-alpha) branch AT solar metallicity (dex), the declined end of its knee
+/// track. FETCHED: `[alpha/Fe] ~ +0.1` at `[Fe/H] = 0` (Bensby et al. 2014, "declining toward `[alpha/Fe] ~ +0.1` at
+/// solar metallicity"). `+0.1 = 1/10`. (The thick fraction is ~0 at solar, so this contributes only across the knee.)
+const ALPHA_THICK_AT_SOLAR_DEX: Fixed = Fixed::from_int(1).div(Fixed::from_int(10));
+
+/// The `[alpha/Fe]` of the thin-disk (low-alpha) branch (dex), the young solar-track level. Solar `[alpha/Fe]` is 0 BY
+/// DEFINITION (the scale's zero), which is the low end of the fetched thin-disk band (`[alpha/Fe] ~ 0.0` to `+0.05`,
+/// Bensby et al. 2014). Using the definitional 0 makes a thin-disk world carry solar alpha ratios, and it is the value
+/// the Mirror pins to. This is the "high-iron ~0" the population reaches once the thin disk dominates.
+const ALPHA_THIN_DEX: Fixed = Fixed::ZERO;
+
+// The knee constants above are the LOCAL MILKY WAY DISK instance (the tagged default the generator draws from, the same
+// standing as the local MDF), NOT a universal alpha law. Other Galactic populations carry a DIFFERENT alpha structure
+// the fetch names as the convicting bodies: the halo holds a constant `[alpha/Fe] ~ +0.3` plateau over a far wider
+// low-`[Fe/H]` range with a separate low-alpha declining sequence (Nissen & Schuster 2010/2011), and the bulge puts the
+// knee at a higher `[Fe/H]` with high `[alpha/Fe]` coexisting (Bensby 2017). A per-environment alpha knee (these params
+// moved onto [`Environment`] beside the MDF, the way `from_mdf` already carries the per-environment `[Fe/H]` mean and
+// scatter) is the flagged extension; this slice ships the local-disk knee, and a halo or bulge environment plugs its own
+// knee in as data with no change to the mechanism below.
+
+/// The THICK-DISK-BRANCH FRACTION at a metallicity `fe_h`: the probability a drawn world sits on the high-alpha
+/// (old, thick-disk) branch rather than the low-alpha (thin-disk) branch. The population transitions from
+/// thick-dominated below the alpha knee to thin-dominated at solar, so the fraction is 1 at or below the knee
+/// (`[Fe/H] <= -0.4`) and declines to 0 at solar (`[Fe/H] = 0`), a linear interpolation between the two
+/// fetched/definitional anchors (the minimal non-fabricated form; the exact population-resolved shape is a flagged
+/// refinement pending thin-versus-thick MDFs). It is this changing mixture that turns the population MEAN over at the
+/// knee, so the two discrete branch levels reproduce the measured bimodal gap a single Gaussian would erase.
+fn thick_disk_fraction(fe_h: Fixed) -> Fixed {
+    // clamp(fe_h / knee, 0, 1): the knee is negative, so a more-negative fe_h gives a ratio > 1 (clamped to all-thick),
+    // and a solar-or-above fe_h gives <= 0 (clamped to all-thin).
+    fe_h.div(ALPHA_KNEE_FE_H_DEX).clamp(Fixed::ZERO, Fixed::ONE)
+}
+
+/// The `[alpha/Fe]` of the THICK-DISK (high-alpha) branch at a metallicity `fe_h`: the alpha knee TRACK. It holds the
+/// plateau (`+0.3`) at or below the knee (`[Fe/H] <= -0.4`), then declines LINEARLY to the fetched thick-at-solar
+/// value (`+0.1`) at `[Fe/H] = 0`, the line through the two fetched anchors `(-0.4, +0.3)` and `(0, +0.1)`. Above
+/// solar the fraction is 0, so the track is held at the solar value (it never fires there). The slope is DERIVED from
+/// the fetched anchors, nothing invented.
+fn thick_branch_alpha(fe_h: Fixed) -> Fixed {
+    if fe_h <= ALPHA_KNEE_FE_H_DEX {
+        return ALPHA_PLATEAU_DEX;
+    }
+    // frac = fe_h / knee in [0, 1] as fe_h goes knee -> 0 (clamped to 0 above solar). alpha = thick_at_solar +
+    // (plateau - thick_at_solar) * frac, so alpha = plateau at the knee and thick_at_solar at solar.
+    let frac = fe_h.div(ALPHA_KNEE_FE_H_DEX).clamp(Fixed::ZERO, Fixed::ONE);
+    ALPHA_THICK_AT_SOLAR_DEX + (ALPHA_PLATEAU_DEX - ALPHA_THICK_AT_SOLAR_DEX).mul(frac)
+}
+
 /// LINK 0, the birth ENVIRONMENT: the outermost link of the composition-draw chain, the chemical environment the natal
 /// cloud belonged to. It carries the conditioning the `[Fe/H]` link reads: the MDF peak and scatter, and (for the
 /// Mirror) the solar pin. This is a REAL AXIS, not a variant with one inhabitant: the local Milky Way disk is the
@@ -234,6 +321,10 @@ pub struct Environment {
     /// When `Some`, `[Fe/H]` is PINNED to this value and NOT drawn: the solar/Mirror pin routes through the chain at
     /// its pinned value rather than around it.
     fe_h_pin: Option<Fixed>,
+    /// When `Some`, `[alpha/Fe]` is PINNED to this value and NOT drawn: the solar/Mirror pin returns exactly this on
+    /// the alpha link too, so the pinned pattern is byte-identical to the unshifted solar pattern. Every axis exposes
+    /// this same pin interface, so the Mirror pins THROUGH the chain on every link.
+    alpha_fe_pin: Option<Fixed>,
 }
 
 impl Environment {
@@ -247,6 +338,7 @@ impl Environment {
             fe_h_mean: LOCAL_DISK_FE_H_PEAK_DEX,
             fe_h_sigma: LOCAL_DISK_FE_H_SIGMA_DEX,
             fe_h_pin: None,
+            alpha_fe_pin: None,
         }
     }
 
@@ -259,6 +351,9 @@ impl Environment {
             fe_h_mean: LOCAL_DISK_FE_H_PEAK_DEX,
             fe_h_sigma: LOCAL_DISK_FE_H_SIGMA_DEX,
             fe_h_pin: Some(Fixed::ZERO),
+            // The solar pin also pins [alpha/Fe] = 0 (solar), so the alpha shift is +0 and the Mirror pattern is
+            // byte-identical to the unshifted solar pattern on every link.
+            alpha_fe_pin: Some(Fixed::ZERO),
         }
     }
 
@@ -272,6 +367,7 @@ impl Environment {
             fe_h_mean,
             fe_h_sigma,
             fe_h_pin: None,
+            alpha_fe_pin: None,
         }
     }
 
@@ -295,6 +391,38 @@ impl Environment {
         }
         let slot = Rng::for_coords(world_seed, &[link_slot_key(LINK_FE_H)]);
         gaussian(&slot, 0, self.fe_h_mean, self.fe_h_sigma, FE_H_GAUSS_METHOD)
+    }
+
+    /// LINK 2: draw (or read the pin for) the alpha enhancement `[alpha/Fe]` for a world, CONDITIONED on the already
+    /// drawn `[Fe/H]` (`fe_h`) and keyed on the `world_seed`. When the environment pins `[alpha/Fe]` (the Mirror), the
+    /// pin is returned and NO draw is consumed. Otherwise the value is drawn from the fetched TWO-BRANCH ALPHA KNEE
+    /// (Bensby, Feltzing & Oey 2014): a SINGLE Bernoulli picks the high-alpha thick-disk branch with probability
+    /// [`thick_disk_fraction`] (near 1 below the knee, 0 at solar) else the low-alpha thin-disk branch, and the value
+    /// is that branch's level ([`thick_branch_alpha`], the plateau/knee track, or the solar thin level
+    /// [`ALPHA_THIN_DEX`]). This is a CONDITIONAL on `[Fe/H]` with a knee shape and a two-branch (bimodal) band, never a
+    /// single Gaussian: the discrete gap between the plateau and the thin level is the measured thick-disk sequence a
+    /// Gaussian would erase.
+    ///
+    /// DETERMINISM AND THE SLOT. The draw is a pure function of `(world_seed, fe_h)`: the branch coin is a single
+    /// [`Rng::unit_fixed`] on THIS link's OWN content-hash-keyed slot ([`LINK_ALPHA_FE`], distinct from `[Fe/H]`'s
+    /// slot), so landing this link never shifts an already-drawn `[Fe/H]`, and adding a later link never shifts this
+    /// `[alpha/Fe]`. There is NO accept/reject loop: the Bernoulli SELECTS a branch, it never resamples a draw (the
+    /// guards-hold-never-reroll discipline). The band is the measured inter-branch span (the intra-branch broadening is
+    /// the flagged refinement pending a fetched per-branch dispersion).
+    pub fn draw_alpha_fe(&self, world_seed: u64, fe_h: Fixed) -> Fixed {
+        if let Some(pin) = self.alpha_fe_pin {
+            return pin;
+        }
+        let slot = Rng::for_coords(world_seed, &[link_slot_key(LINK_ALPHA_FE)]);
+        let f_thick = thick_disk_fraction(fe_h);
+        // ONE Bernoulli branch draw (a uniform in [0, ONE)): the thick (high-alpha) branch with probability f_thick,
+        // else the thin (solar-alpha) branch. Not a reroll: a single draw selects a branch.
+        let u = slot.unit_fixed(0);
+        if u < f_thick {
+            thick_branch_alpha(fe_h)
+        } else {
+            ALPHA_THIN_DEX
+        }
     }
 }
 
@@ -686,6 +814,172 @@ source = "photospheric"
         assert_eq!(
             env.fe_h_sigma.to_bits(),
             LOCAL_DISK_FE_H_SIGMA_DEX.to_bits()
+        );
+    }
+
+    // ── LINK 2: the [alpha/Fe] two-branch alpha knee, conditioned on [Fe/H] ──────────────────────────────────────
+
+    #[test]
+    fn the_alpha_ensemble_reproduces_the_two_branch_knee_within_band() {
+        // STEER 1, the LOAD-BEARING test: acceptance is DISTRIBUTIONAL. An ensemble of [alpha/Fe] draws conditioned on
+        // a LOW [Fe/H] must reproduce the fetched alpha-PLATEAU (~+0.3), and on a HIGH [Fe/H] the DECLINED value (~0),
+        // the two ends of the fetched Bensby knee. And at an INTERMEDIATE [Fe/H] the draw is BIMODAL (every draw is one
+        // of the two discrete branch levels, never a value in the gap between them): the thick-disk sequence a single
+        // Gaussian would erase. A single-Gaussian sampler centred on the mean would fail the bimodality assertion.
+        let env = Environment::local_disk();
+        let n = 20_000u64;
+        let ens_mean = |fe_h: Fixed| -> f64 {
+            let mut s = 0.0f64;
+            for seed in 0..n {
+                s += env.draw_alpha_fe(seed, fe_h).to_f64_lossy();
+            }
+            s / n as f64
+        };
+        // Low [Fe/H] (below the knee): all-thick, reproduces the plateau +0.3.
+        let low = ens_mean(Fixed::from_ratio(-6, 10));
+        assert!(
+            (low - 0.30).abs() < 0.01,
+            "the low-[Fe/H] ensemble reproduces the fetched alpha plateau +0.3: got {low:.4}"
+        );
+        // High [Fe/H] (solar): all-thin, the declined value ~0.
+        let high = ens_mean(Fixed::ZERO);
+        assert!(
+            high.abs() < 0.01,
+            "the solar-[Fe/H] ensemble reproduces the declined high-iron value ~0: got {high:.4}"
+        );
+        // Intermediate [Fe/H] = -0.2: BIMODAL. Every draw is either the thick track value or the thin (0) level, and
+        // BOTH appear. The thick value at -0.2 is 0.1 + 0.2 * (0.2/0.4) = 0.2.
+        let fe_h_mid = Fixed::from_ratio(-2, 10);
+        let thick_here = thick_branch_alpha(fe_h_mid).to_f64_lossy();
+        let (mut saw_thick, mut saw_thin) = (false, false);
+        for seed in 0..n {
+            let a = env.draw_alpha_fe(seed, fe_h_mid).to_f64_lossy();
+            let is_thick = (a - thick_here).abs() < 1e-9;
+            let is_thin = a.abs() < 1e-9;
+            assert!(
+                is_thick || is_thin,
+                "a bimodal draw is one of the two branch levels ({thick_here:.4} or 0), got {a:.6} (a Gaussian would land in the gap)"
+            );
+            saw_thick |= is_thick;
+            saw_thin |= is_thin;
+        }
+        assert!(
+            saw_thick && saw_thin,
+            "both branches appear at intermediate [Fe/H] (the measured bimodal gap, not a single spread)"
+        );
+    }
+
+    #[test]
+    fn the_alpha_knee_reconditions_on_fe_h() {
+        // STEER 3: the knee is REAL and conditioned, not a constant. The drawn [alpha/Fe] ensemble mean must be HIGH at
+        // low [Fe/H] and LOW at high [Fe/H] (it turns over through the knee). If [alpha/Fe] ignored [Fe/H] the two
+        // ensemble means would coincide; the assertion that low >> high is what proves the conditioning.
+        let env = Environment::local_disk();
+        let n = 12_000u64;
+        let ens_mean = |fe_h: Fixed| -> f64 {
+            let mut s = 0.0f64;
+            for seed in 0..n {
+                s += env.draw_alpha_fe(seed, fe_h).to_f64_lossy();
+            }
+            s / n as f64
+        };
+        let low = ens_mean(Fixed::from_ratio(-6, 10)); // below the knee: alpha-enhanced
+        let high = ens_mean(Fixed::from_ratio(-1, 20)); // -0.05, near solar: alpha-poor
+        assert!(
+            low > high + 0.2,
+            "the [alpha/Fe] ensemble mean is HIGH at low [Fe/H] ({low:.4}) and LOW near solar ({high:.4}): the knee re-conditions"
+        );
+    }
+
+    #[test]
+    fn adding_a_later_link_never_shifts_the_drawn_alpha_fe_for_a_seed() {
+        // STEER 2 (the reverse invariant): a seed's [alpha/Fe] is STABLE when a still-later link (its own named slot)
+        // is added. Simulate landing an unrelated later link (C/O) by consuming a draw from ITS slot, and assert
+        // [alpha/Fe] is bit-identical with and without that consumption, because each link is a pure function of the
+        // seed and its own name-key with no shared cursor. Also assert the alpha slot keys distinctly from [Fe/H] and
+        // C/O, so no link can alias another.
+        let env = Environment::local_disk();
+        let seed = 0x0fed_cba9_8765_4321u64;
+        let fe_h = env.draw_fe_h(seed);
+        let alpha_alone = env.draw_alpha_fe(seed, fe_h);
+        let co_slot = Rng::for_coords(seed, &[link_slot_key("c_over_o")]);
+        let _later = gaussian(&co_slot, 0, Fixed::ZERO, Fixed::ONE, FE_H_GAUSS_METHOD);
+        let alpha_after = env.draw_alpha_fe(seed, fe_h);
+        assert_eq!(
+            alpha_alone.to_bits(),
+            alpha_after.to_bits(),
+            "the [alpha/Fe] realization is bit-identical whether or not a later link's slot is consumed"
+        );
+        assert_ne!(
+            link_slot_key(LINK_ALPHA_FE),
+            link_slot_key(LINK_FE_H),
+            "the alpha slot keys distinctly from the [Fe/H] slot"
+        );
+        assert_ne!(
+            link_slot_key(LINK_ALPHA_FE),
+            link_slot_key("c_over_o"),
+            "the alpha slot keys distinctly from the C/O slot"
+        );
+    }
+
+    #[test]
+    fn the_mirror_pins_the_alpha_link_to_solar_zero_byte_identical() {
+        // STEER 4: the Mirror pins the alpha link too. The solar-pin environment returns [alpha/Fe] = 0 exactly (no
+        // draw consumed, seed-invariant), so the alpha scaling is +0 and the drawn pattern is byte-identical to the
+        // unshifted solar pattern on every element. The already-present chain-pin test proves the whole datum is
+        // byte-identical to mirror(); this isolates the alpha link's pin.
+        let pin = Environment::local_disk_solar_pin();
+        assert_eq!(
+            pin.draw_alpha_fe(0xDEAD_BEEF, Fixed::ZERO).to_bits(),
+            0,
+            "the solar pin returns [alpha/Fe] = 0 exactly"
+        );
+        assert_eq!(
+            pin.draw_alpha_fe(0x1234_5678, Fixed::from_ratio(-6, 10))
+                .to_bits(),
+            0,
+            "the pin is seed- and [Fe/H]-invariant (no draw consumed): still exactly 0"
+        );
+        // The pinned draw's pattern is byte-identical to the unshifted solar pattern on every element (the +0 alpha
+        // shift is exact), the alpha-link half of the full byte-identity the run pins prove end to end.
+        let pinned = DiskComposition::draw(&pin, 0xABCD).expect("the pinned draw resolves");
+        let solar = SolarAbundances::standard().expect("solar loads");
+        for sym in solar.elements() {
+            assert_eq!(
+                pinned
+                    .pattern()
+                    .log_eps_photosphere(sym)
+                    .map(|f| f.to_bits()),
+                solar.log_eps_photosphere(sym).map(|f| f.to_bits()),
+                "pinned photospheric log-eps is byte-identical to solar for {sym} (alpha shift +0)"
+            );
+        }
+    }
+
+    #[test]
+    fn the_alpha_knee_matches_its_verify_on_pull_fingerprint() {
+        // VERIFY-ON-PULL: the loaded alpha-knee numbers are FETCHED (Bensby, Feltzing & Oey 2014, A&A 562 A71,
+        // arXiv 1309.2631): the plateau +0.3, the knee metallicity -0.4, the thick-at-solar +0.1, and the thin/solar
+        // level 0. This fingerprint catches any SILENT edit to those cited numbers: change a constant and the recorded
+        // hash breaks, forcing a re-citation.
+        assert_eq!(
+            ALPHA_THIN_DEX.to_bits(),
+            0,
+            "the thin/solar alpha level is 0"
+        );
+        let fingerprint = Rng::for_coords(
+            0x414C_5041, // "ALPA"
+            &[
+                ALPHA_PLATEAU_DEX.to_bits() as u64,
+                ALPHA_KNEE_FE_H_DEX.to_bits() as u64,
+                ALPHA_THICK_AT_SOLAR_DEX.to_bits() as u64,
+                ALPHA_THIN_DEX.to_bits() as u64,
+            ],
+        )
+        .key();
+        assert_eq!(
+            fingerprint, 0xe8ac_feb8_792c_8ace,
+            "the fetched alpha-knee numbers match their recorded verify-on-pull fingerprint"
         );
     }
 }

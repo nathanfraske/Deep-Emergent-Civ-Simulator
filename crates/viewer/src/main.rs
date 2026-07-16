@@ -4526,6 +4526,116 @@ mod composition_draw_tests {
     }
 
     #[test]
+    fn alpha_enhancement_lowers_the_derived_bulk_density_the_first_density_lever() {
+        // THE DENSITY PAYOFF, isolated. [alpha/Fe] is the first KIND lever: lifting the alpha rock-formers (O, Mg, Si,
+        // Ca, Ti) relative to iron raises the silicate-mantle mass against the metal core, lowering the core mass
+        // FRACTION and so the volume-weighted uncompressed bulk density. Held at the SAME formation conditions and the
+        // SAME [Fe/H] (only [alpha/Fe] differs), so the density change is the alpha lever ALONE, retiring the [Fe/H]
+        // link's honest limit that uniform metal scaling left the density fixed. The Mg/Si-selects-olivine-vs-pyroxene
+        // channel stays a later element-differential refinement (a uniform alpha lift holds Mg/Si); the moving channel
+        // here is the metal-core-to-silicate-mantle mass balance.
+        const ALPHA: &[&str] = &["O", "Mg", "Si", "Ca", "Ti"];
+        let janaf = JanafTables::standard().expect("janaf");
+        let optical = OpticalConstants::standard().expect("optical");
+        let registry = PhaseRegistry::standard().expect("registry");
+        let table = PeriodicTable::standard().expect("table");
+        let eos = MetalEosAnchors::standard().expect("eos");
+        let cond_t = derive_formation_condensation_temperature(Fixed::ONE, Fixed::ONE, &optical)
+            .expect("the formation condensation temperature derives");
+        let reserved_melt = civsim_materials::surface_composition::ReservedMeltParams {
+            potential_temperature_k: MANTLE_POTENTIAL_TEMPERATURE_K,
+            adiabat_slope_k_per_gpa: MANTLE_ADIABAT_SLOPE_K_PER_GPA,
+            productivity_per_gpa: MELT_PRODUCTIVITY_PER_GPA,
+            gravity_m_per_s2: MELT_COLUMN_GRAVITY_M_S2,
+        };
+        let density_of = |abund: &SolarAbundances| -> Fixed {
+            let sc = civsim_materials::surface_composition::derive_surface_composition(
+                &janaf,
+                abund,
+                cond_t,
+                &reserved_melt,
+            )
+            .expect("the surface composition derives");
+            let mantle_density = derive_mantle_density(
+                &sc.mantle_composition,
+                Fixed::from_int(300),
+                Fixed::ONE,
+                &registry,
+                &table,
+            )
+            .expect("the mantle density derives");
+            derive_uncompressed_bulk_density(abund, &table, &eos, mantle_density)
+                .expect("the bulk density derives")
+        };
+        let solar = SolarAbundances::standard().expect("solar loads");
+        // The fetched thick-disk alpha plateau, +0.3 dex, lifted onto the alpha elements.
+        let alpha_rich = solar.scaled_alpha_by_dex(Fixed::from_ratio(3, 10), ALPHA);
+        let rho_solar = density_of(&solar);
+        let rho_alpha = density_of(&alpha_rich);
+        let spread = (rho_solar - rho_alpha).to_f64_lossy();
+        println!(
+            "DENSITY LEVER: solar [alpha/Fe]=0 rho={:.5} g/cm3, thick [alpha/Fe]=+0.3 rho={:.5} g/cm3, spread={:.5} g/cm3",
+            rho_solar.to_f64_lossy(),
+            rho_alpha.to_f64_lossy(),
+            spread
+        );
+        assert!(
+            rho_alpha < rho_solar,
+            "the alpha-enhanced world is LESS dense (the alpha lift lowers the metal-core fraction): alpha {} vs solar {}",
+            rho_alpha.to_f64_lossy(),
+            rho_solar.to_f64_lossy()
+        );
+        assert!(
+            spread > 0.05,
+            "the [alpha/Fe] density lever is meaningful (not a rounding wobble): spread {spread} g/cm3"
+        );
+    }
+
+    #[test]
+    fn two_unpinned_seeds_now_derive_different_densities_via_alpha() {
+        // THE THESIS, upgraded: with the [alpha/Fe] link two unpinned seeds derive DIFFERENT densities (a density spread
+        // beyond the mass spread), because a seed that lands on the high-alpha thick branch derives a lower core
+        // fraction and so a lower density than a solar-alpha seed. Same star and orbit; the only difference is the
+        // per-world composition draw. We scan
+        // seeds for the first that draws a thick-branch [alpha/Fe] > 0 (a metal-poor, alpha-enhanced world), build its
+        // scene and the solar Mirror, and show the alpha-enhanced world is the less dense one (the derived reason
+        // worlds now differ in density). Two scene builds, so the suite stays fast.
+        use civsim_materials::disk_composition::Environment;
+        let s = Fixed::ONE;
+        let o = Fixed::ONE;
+        let env = Environment::local_disk();
+        let mut thick = None;
+        for seed in 0..400u64 {
+            let fe_h = env.draw_fe_h(seed);
+            let alpha = env.draw_alpha_fe(seed, fe_h).to_f64_lossy();
+            if alpha > 0.05 {
+                thick = Some((seed, fe_h.to_f64_lossy(), alpha));
+                break;
+            }
+        }
+        let (seed, fe_h, alpha) =
+            thick.expect("some unpinned seed draws the high-alpha thick branch");
+        let alpha_world =
+            build_derived_scene_seeded(s, o, seed).expect("thick-branch world derives");
+        let solar_world = build_derived_scene(s, o).expect("the solar Mirror derives");
+        let rho_alpha = alpha_world.density.to_f64_lossy();
+        let rho_solar = solar_world.density.to_f64_lossy();
+        println!(
+            "THESIS: seed {seed} draws [Fe/H]={fe_h:+.3} [alpha/Fe]={alpha:+.3} -> rho={rho_alpha:.5} vs solar rho={rho_solar:.5} g/cm3 (spread {:.5})",
+            rho_solar - rho_alpha
+        );
+        assert_ne!(
+            alpha_world.density.to_bits(),
+            solar_world.density.to_bits(),
+            "an unpinned alpha-enhanced seed derives a DIFFERENT density from the solar Mirror"
+        );
+        assert!(
+            rho_alpha < rho_solar,
+            "the alpha-enhanced (thick-branch) world is the LESS dense one: {rho_alpha} vs solar {rho_solar}"
+        );
+    }
+
+    #[test]
     fn the_pinned_mirror_is_byte_identical_to_the_solar_pin_draw() {
         // The default globe (build_derived_scene) is the chain at the solar pin. Prove it is byte-identical, on the
         // load-bearing derived fields, to a scene built from the explicitly solar-pinned composition, so the Mirror
