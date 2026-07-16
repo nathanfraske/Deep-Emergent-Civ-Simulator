@@ -118,6 +118,7 @@ pub mod perception_reach;
 pub mod personality;
 pub mod physiology;
 pub mod planet;
+pub mod planetary_assembly;
 pub mod planetary_system;
 pub mod planning;
 pub mod primes;

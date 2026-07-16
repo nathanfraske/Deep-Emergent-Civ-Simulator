@@ -425,6 +425,17 @@ pub fn kepler_orbital_period_years(orbit_au: Fixed, star_mass_ratio: Fixed) -> O
     Some(ln_period.exp())
 }
 
+/// The Earth-to-Sun mass ratio `M_earth / M_sun` (~3.0e-6) as a `Fixed`, folded once from the two cited reference
+/// anchors [`EARTH_MASS_KG`] and [`SOLAR_MASS_KG`]. It is the dimensionless bridge a body's mass in Earth masses
+/// crosses to reach a fraction of the star mass, the ratio the Hill radius and the resonance-overlap survival time
+/// both need. Not a per-world value: a view of the two cited anchors, exactly the fold [`hill_radius_au`] forms
+/// inline. `None` only on a decimal-parse or scale miss, which the fixed anchors do not produce.
+pub fn earth_to_sun_mass_ratio() -> Option<Fixed> {
+    let earth = BigRat::from_decimal_str(EARTH_MASS_KG).ok()?;
+    let sun = BigRat::from_decimal_str(SOLAR_MASS_KG).ok()?;
+    Fixed::from_bits_i128(earth.div(&sun).round_to_scale(Fixed::FRAC_BITS)?)
+}
+
 /// The HILL RADIUS in AU, the reach of a body's own gravity against the star's tide: the distance out to which
 /// the body dominates, `R_H = a * (M_planet / (3*M_star))^(1/3)`. It is the ruler the whole multi-body system is
 /// built on: the feeding zone a planet clears (a few `R_H`, the isolation mass), the spacing between neighbouring
