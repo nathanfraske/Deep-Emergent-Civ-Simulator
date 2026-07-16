@@ -1,0 +1,46 @@
+# Disk-evolution arc scope: the Mdot(t) clock and the wind-versus-accretion dispersal race
+
+Status: scoped, premise-checked, awaiting the reserved-value sign-off before the build. This is the separate authorized arc the owner named PIPELINE-STAGE DEBT WITH MULTIPLE CREDITORS, not a DiskGas feature. It is the mechanism the dispersal race needs, the gas-era feedback needs, and the one that turns `tau_disk` from a CONSULTED CLOCK into a DERIVED OUTPUT. The minimal DiskGas ledger (the account, the envelope-drain edge, both conservation gates) landed first and against a static account; this arc makes that account live.
+
+## The carried premise-check (done first, per the coordinator's instruction)
+
+The instruction was to verify how the formation-era clock slice landed before trusting its outputs: if it consulted a clock that does not tick, its outputs are suspect, and that is a finding rather than a fix. Two formation-era slices read the disk; they land differently.
+
+### Slice one, the 26Al young-thermal clock (R-YOUNG-TEMPERATURE): CLEAN
+
+`young_thermal_verdict` reads `formation_time_myr` as the time from CAI to accretion, the short-lived-radionuclide decay clock. The run path (`crates/viewer/src/main.rs`) wires it from the reserved constant `FORMATION_TIME_MYR` (1 Myr, with a swept 0.5 to 4 Myr band), tagged `ThermalProvenance::Interim`. Its stated basis is the oligarchic ISOLATION-MASS growth time (Kokubo and Ida 1998; Lambrechts and Johansen 2012), which is a SNAPSHOT quantity: given the current solid surface density, how fast an embryo grows to isolation mass. That is readable from the static profile and does not require the gas disk to evolve. The module reads no `Mdot`, no gas lifetime, no dispersal time (verified: `young_thermal.rs` carries none of those terms). The reset epoch reads a seeded impact draw, not a disk clock. So the young-thermal outputs (the default world derives MELTED, the young temperature pinned at the magma-ocean handoff) are trustworthy under the static profile. No finding.
+
+### Slice two, the formation-era condensation temperature (the SEAM-3 epoch join-law): THE FINDING
+
+The crust condenses against the formation-era midplane temperature, and the finished planet's surface reads the mature irradiation equilibrium. These are two epochs, and the code carries two reserved accretion rates to separate them: `FORMATION_ACCRETION_RATE_MSUN_MYR` (0.19 solar masses per Myr, feeding `astro::formation_midplane_temperature` at `main.rs:1494`, pinned so the derived 1 AU midplane reconstructs the ~1400 K forsterite-enstatite condensation front) and `MATURE_ACCRETION_RATE_MSUN_MYR` (0.01, feeding the surface warmth at `main.rs:2592`, the observed class-II value). The formation rate is documented in the code as "the DECLINING-DISK accretion rate at the epoch the 1 AU midplane sits at that front."
+
+That is a time-evolving-disk premise landed on a static profile. The two rates are two snapshots of one declining Mdot(t), a 19-to-1 ratio across two epochs, but they sit in the code as two independent reserved scalars with no clock tying them. Each is a reserved-with-basis value calibrated to its own landmark, so the OUTPUTS are honest as a snapshot pair, not wrong. The PREMISE is the suspect part: a formation epoch hotter than a mature epoch by a fixed Mdot ratio presupposes a decline curve that no clock produces. This is a clock that does not tick.
+
+The finding is therefore a constraint the disk arc must satisfy, not an error to patch now. When the Mdot(t) clock lands, `FORMATION_ACCRETION_RATE` and `MATURE_ACCRETION_RATE` must RETIRE onto that one clock, evaluated at t_formation and t_mature respectively, rather than remain two free scalars. Otherwise the two rates plus the clock's own decline law over-parameterize the disk (the redundant-parameter class the owner already named, k-and-kappa's sibling): the decline law and the two epoch times already determine both rates, so carrying both as independent inputs is one degree of freedom too many. The formation-era temperature is the clock's FIRST CONSUMER, and reproducing both landmarks (0.19 at t_formation and 0.01 at t_mature) from a single Mdot_0 and a single viscous time is a gate this arc must pass before it can claim to have absorbed them. Until it does, the two independent rates are the honest interim, each hitting its landmark.
+
+## The mechanism to build
+
+### The Mdot(t) clock (the viscous-similarity decline)
+
+The substrate is in place: `astro::viscous_similarity_surface_density` already takes `accretion_rate_msun_myr` as a parameter and scales the whole surface density linearly with it. The arc adds the time dependence the parameter has lacked: the Lynden-Bell-Pringle self-similar decline (Hartmann et al. 1998), `Mdot(t) = Mdot_0 * (1 + t / t_visc) ^ (-(5/2 - gamma) / (2 - gamma))`, with `gamma ~ 1` the same viscous-spreading exponent gate-G already retired the free profile onto. At `t = 0` the rate is `Mdot_0` (the hot accreting formation epoch); as `t` grows it declines toward the class-II mature value. This is arithmetic in the log domain over quantities the disk code already forms, so it is deterministic and adds no floating path.
+
+### The wind-versus-accretion dispersal race (tau_disk as a derived output)
+
+The disk does not fade smoothly to zero; it clears in a two-timescale race (Clarke, Gendrin and Sotomayor 2001; Alexander, Clarke and Pringle 2006, the UV-switch). While the viscous accretion rate exceeds the integrated photoevaporative wind loss, the disk drains through the star. When the declining accretion rate falls to the wind rate at the gap radius, the wind opens a gap, starves the inner disk, and clears it on the much shorter local viscous time. The disk lifetime `tau_disk` is the time this race tips, a DERIVED output of `Mdot_0`, `t_visc`, and the wind mass-loss rate, never a consulted constant. This is the piece that lets a giant's Kelvin-Helmholtz contraction (the #73 gate) race a REAL gas clock instead of a reserved lifetime, and it is what turns the DiskGas ledger's static account into a live one that feeds and disperses.
+
+## The value line (surfaced as reserved, none authored here)
+
+The mechanism is fixed Rust; the reserved values it needs, each surfaced with its basis for the owner to set, never invented:
+
+- `Mdot_0`, the initial accretion rate. Basis: the class-0/I peak accretion rate (~1e-6 to 1e-7 solar masses per year), constrained further by the premise-check gate that `Mdot(t_formation)` reproduce the 0.19 the ~1400 K condensation front already fixes.
+- `t_visc`, the viscous time. Basis: the alpha-viscosity and the disk radius already reserved (`alpha`, `r_c`), set so `Mdot(t_mature)` reaches the 0.01 class-II value at the mature epoch, closing the same premise-check gate from the other end. The pair `(Mdot_0, t_visc)` is jointly pinned by the two landmarks, so it is two values against two constraints, not two free scalars.
+- The photoevaporative wind mass-loss rate. Basis: the X-ray or FUV-driven wind rate for the star's luminosity class (Owen, Ercolano and Clarke 2011 for the X-ray branch), the loss integrated over the wind-launching region. Per-star differentiable through the luminosity.
+- The gap radius (the critical radius where the wind first wins). Basis: the gravitational radius scaled by the wind's launching physics, derived from the stellar mass and the wind temperature rather than authored.
+
+The dispersal band (the alpha-viscous-versus-wind-driven regime) the giant arc already flagged is the closure condition on which branch dominates, and it conditions Mdot_0's meaning.
+
+## Couplings and the build order
+
+This arc RETIRES the two formation-era accretion-rate constants onto the clock (the premise-check gate), makes the DiskGas ledger's `from_disk_profile` opening a function of epoch rather than a single static snapshot, and hands the #73 giant gate a derived `tau_disk` in place of the reserved gas lifetime it races the Kelvin-Helmholtz time against. It does not touch the assembly projector (still a stability projector, no time integration) and does not make the assembly's causal merge order into a physical time. The clock is the disk's own, distinct from the assembly's ordering.
+
+Slice one: the Mdot(t) clock alone, retiring the two formation-era rates onto it and passing the two-landmark gate, byte-neutral until a consumer reads the epoch. Slice two: the wind-versus-accretion race deriving `tau_disk`. Slice three: wiring `tau_disk` into the #73 giant gate and the DiskGas opening, the first run-path behaviour change, gated with both pins re-pinned deliberately.
