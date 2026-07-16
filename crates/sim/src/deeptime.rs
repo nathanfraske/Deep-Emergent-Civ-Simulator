@@ -81,6 +81,12 @@ impl DeepTimeState {
     /// fresh planet has no accumulated crust, it is what the melt history produces). A young planet has NO lateral
     /// thermal history, so the field starts uniform; the variation is what the deep-time run produces, not an
     /// authored initial map.
+    ///
+    /// `initial_temperature` is the YOUNG POTENTIAL TEMPERATURE the R-YOUNG-TEMPERATURE verdict pins
+    /// ([`civsim_physics::young_thermal::young_thermal_verdict`]): for a MELTED world the magma-ocean lock-up
+    /// handoff (the world's own derived solidus plus the phi_c superheat, so the columns start super-solidus and
+    /// the melt engages), and for a NEVER-MELTED or MARGINAL world the sub-solidus cold peak. This retires the
+    /// fixed 1588 K Earth-MORB anchor as the melted-world initial condition; the caller supplies the derived value.
     pub fn young(n_cells: usize, initial_temperature: Fixed) -> Self {
         DeepTimeState {
             columns: vec![

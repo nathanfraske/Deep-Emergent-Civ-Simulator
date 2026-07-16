@@ -901,6 +901,10 @@ struct DerivedScene {
     /// The DEEP-TIME PROVINCE FIELD the globe's texture is re-derived from, and the observer's time control steps
     /// forward so the surface evolves. `None` when the convective scale did not resolve (the uniform-crust fallback).
     provinces: Option<DeepTimeProvinces>,
+    /// The R-YOUNG-TEMPERATURE verdict summary for the readout: the regime (Melted / Never-melted / Marginal),
+    /// whether it is decidable now (GAPPED) or impact-list-pending, the SLR temperature rise, and the young
+    /// potential temperature the deep-time run started from. `None` when the solidus did not resolve.
+    young: Option<civsim_physics::young_thermal::YoungThermalVerdict>,
 }
 
 /// The natural log of ten, for the `log_eps` (base-10) solar-abundance scale to natural-exponent conversion (the same
@@ -1095,6 +1099,73 @@ const RADIOGENIC_MIXING_EFFICIENCY: Fixed = Fixed::from_int(1).div(Fixed::from_i
 /// instance; outside the calibrated assemblage and fO2 range a per-world derivation supplies D and escalates rather
 /// than silently applying the placeholder. Fetch: Blundy-Wood 1994 and Wood-Kiseeva 2015 before coefficients land.
 const RADIOGENIC_BULK_PARTITION_D: Fixed = Fixed::from_int(3).div(Fixed::from_int(1000)); // ~0.003, [M class] placeholder pending Blundy-Wood
+
+// THE YOUNG-THERMAL (R-YOUNG-TEMPERATURE) reserved inputs. These retire the fixed 1588 K mantle potential
+// temperature for a MELTED world: the young potential temperature is DERIVED from the world's own solidus (the
+// magma-ocean lock-up handoff) rather than read as an authored Earth-MORB anchor. The verdict itself
+// ([`civsim_physics::young_thermal::young_thermal_verdict`]) is fixed Rust; the values below are the reserved
+// per-world data it reads, each with its basis, surfaced rather than fabricated. Cited fetches carry the source
+// at the use site.
+
+/// RESERVED-with-basis, data-driven: the rheological CRITICAL (lock-up) melt fraction phi_c, the melt fraction at
+/// which a cooling magma ocean's rheology switches from a liquid-like suspension to a solid-like crystal
+/// framework. Basis: ~0.4 (crystal fraction ~0.6), experimental range ~0.3 to 0.4, shape- and
+/// polydispersity-dependent, so a per-world/per-assemblage datum with 0.4 the default, not a silicate-only
+/// constant (alien-admissible). Cited: Abe (1993), Geophys. Monogr. 74, DOI 10.1029/GM074p0041; Solomatov (2015),
+/// Treatise on Geophysics (2nd ed.) Vol. 9.
+const PHI_C_LOCKUP_MELT_FRACTION: Fixed = Fixed::from_int(4).div(Fixed::from_int(10)); // 0.4
+
+/// RESERVED-with-basis: the silicate SPECIFIC HEAT capacity (J/(kg*K)) the SLR and cold-accretion budgets divide
+/// by. Basis: the silicate-mantle heat capacity ~1000 J/(kg*K); a flagged derive-down (from the assemblage's own
+/// heat capacity once the petrology heat-capacity substrate lands, the same substrate the adiabat-slope
+/// derive-down waits on). Cited: silicate-mantle specific heat (Turcotte & Schubert, Geodynamics).
+const YOUNG_SPECIFIC_HEAT_J_PER_KG_K: Fixed = Fixed::from_int(1000);
+
+/// RESERVED-with-basis: the accretional-energy GEOMETRY factor `k_geom` for the retained-heat budget `k_geom*g*R`.
+/// Basis: the gravitational binding energy per unit mass of a uniform sphere, `(3/5) G M / R = (3/5) g R`; a
+/// geometry constant, not a fitted knob.
+const ACCRETION_GEOMETRY_FACTOR: Fixed = Fixed::from_int(3).div(Fixed::from_int(5)); // 0.6
+
+/// RESERVED-with-basis, the cold-accretion energy-RETENTION efficiency band (dimensionless, a PREFACTOR entry,
+/// legal because it is prefactor-resident and never exponent-resident). Basis: the fraction of accretional/impact
+/// energy retained as heat rather than radiated between deposits, from the cold-accretion retention literature
+/// (the fetch doc lacks the exact number, so it is reserved, never fabricated). The BAND is the [E] entry the
+/// self-test sweeps: a verdict that flips across it is MARGINAL, not GAPPED. Placeholder edges pending the fetch.
+const RETENTION_EFFICIENCY_LO: Fixed = Fixed::from_int(1).div(Fixed::from_int(100)); // 0.01, [E]-band placeholder
+const RETENTION_EFFICIENCY_HI: Fixed = Fixed::from_int(4).div(Fixed::from_int(10)); // 0.40, [E]-band placeholder
+
+/// RESERVED-with-basis interim (a birth/assembly DRAW): the body's FORMATION TIME relative to CAI (megayears),
+/// the short-lived-radionuclide decay clock. Basis: the oligarchic ISOLATION-MASS growth time at the inner disk,
+/// sub-megayear to a few megayears (Kokubo & Ida 1998; Lambrechts & Johansen 2012 Hill-regime growth ~4e4 yr at
+/// 5 AU, faster closer in), within the 26Al mean life. This is the TEXTURE-ONSET formation time, DISTINCT from the
+/// reset epoch below (the last giant impact); the impact list upgrades it to the world's own draw. Tagged interim.
+const FORMATION_TIME_MYR: Fixed = Fixed::from_int(1);
+
+/// RESERVED-with-basis: the mass (Earth masses) at and above which giant impacts are class-generic, the MELTED
+/// giant-impact gate. Basis: the Earth-mass terrestrial-embryo-merger regime where the assembly statistics
+/// guarantee ~two dozen giant impacts per system (Izidoro et al. 2017/2021 break-the-chains ensembles). A
+/// Mars-class isolation mass sits below it, so a Mars-class world's verdict is decided by the SLR branch, never
+/// forced melted by mass.
+const GIANT_IMPACT_MASS_THRESHOLD_EARTH: Fixed = Fixed::ONE;
+
+/// RESERVED-with-basis, the birth-environment SLR-family DRAW: the initial 26Al/27Al atomic ratio. Basis: the
+/// canonical CAI 26Al/27Al ~5.2e-5 (the Lodders solar-abundance lineage / meteoritic record), the default Mirror
+/// value; a per-cloud draw (higher in a freshly supernova-enriched region). Cited: canonical solar-system initial
+/// 26Al/27Al (Lodders 2003 lineage).
+const AL26_OVER_AL27_INITIAL: Fixed = Fixed::from_int(52).div(Fixed::from_int(1_000_000)); // 5.2e-5
+
+/// RESERVED-with-basis, the birth-environment SLR-family DRAW: the initial 60Fe/56Fe atomic ratio. Basis: the
+/// solar-system initial 60Fe/56Fe, banded ~1e-8 (the fetch doc's "60Fe subdominant and banded"), the least
+/// certain and most birth-environment-variable of the two. A subdominant contributor; the default Mirror value.
+const FE60_OVER_FE56_INITIAL: Fixed = Fixed::from_int(1).div(Fixed::from_int(100_000_000)); // 1e-8
+
+/// RESERVED-with-basis interim: the RESET EPOCH t0 (megayears), the young-clock zero the deep-time run ages from.
+/// Basis: the last-giant-impact time in the standard assembly ensembles, 73 +/- 74 Myr, tagged INTERIM and
+/// upgraded to the world's own draw when the assembly impact list lands. SCOPE FENCE: this interim writes TEXTURE
+/// ONSET and THERMAL INITIAL CONDITIONS only, never impact-coupled archives (spin/obliquity resets, per-event
+/// atmosphere blow-off, late-veneer chemistry, event chronology), which the impact list uniquely provides.
+const RESET_EPOCH_MYR: Fixed = Fixed::from_int(73);
+const RESET_EPOCH_HALF_BAND_MYR: Fixed = Fixed::from_int(74);
 
 /// The radiogenic HETEROGENEITY amplitude from the world's own formation melt fraction `f` and the bulk partition
 /// coefficient `d` of the heat producers, through Shaw batch-melting enrichment `E = 1/(d + f*(1 - d))`. The lateral
@@ -1366,6 +1437,11 @@ struct DeepTimeProvinces {
     crust_density: Fixed,
     /// The derived mantle density the crust floats ON.
     mantle_density: Fixed,
+    /// The YOUNG POTENTIAL TEMPERATURE (K) the columns start laterally uniform at: the R-YOUNG-TEMPERATURE
+    /// magma-ocean lock-up handoff for a melted world (super-solidus, so the melt engages), else the cold peak.
+    /// Stored so a rewind to the fresh young state ([`age_provinces_from_young`]) reuses the same young initial
+    /// condition rather than the retired 1588 K anchor.
+    young_potential_temperature_k: Fixed,
     /// The sea-level datum (Slice-0 zero, retires with the water budget).
     sea_level: Fixed,
 }
@@ -1431,6 +1507,7 @@ fn build_deep_time_provinces(
     solidus_surface_k: Fixed,
     solidus_slope_k_per_gpa: Fixed,
     formation_melt_fraction: Option<Fixed>,
+    young_potential_temperature_k: Fixed,
 ) -> Option<DeepTimeProvinces> {
     // The convecting-mantle DEPTH from the interior structure (SI metres), and its megametre form for the
     // representable-scaled convection kernel (retiring the depth = 1 fixture).
@@ -1517,9 +1594,11 @@ fn build_deep_time_provinces(
         ));
     }
 
-    // The columns start laterally UNIFORM at the mantle potential temperature (super-solidus, so the melt
-    // engages): a fresh planet has no thermal history, and the provinces are what the run writes.
-    let state = DeepTimeState::young(n, MANTLE_POTENTIAL_TEMPERATURE_K);
+    // The columns start laterally UNIFORM at the YOUNG POTENTIAL TEMPERATURE (the R-YOUNG-TEMPERATURE magma-ocean
+    // lock-up handoff for a melted world, super-solidus so the melt engages, else the cold peak): a fresh planet
+    // has no thermal history, and the provinces are what the run writes. This retires the fixed 1588 K anchor as
+    // the young initial condition for a melted world.
+    let state = DeepTimeState::young(n, young_potential_temperature_k);
 
     Some(DeepTimeProvinces {
         state,
@@ -1529,16 +1608,18 @@ fn build_deep_time_provinces(
         prows,
         crust_density,
         mantle_density,
+        young_potential_temperature_k,
         sea_level: Fixed::ZERO,
     })
 }
 
-/// Reset the province field to its fresh young state (laterally uniform at the mantle potential temperature)
-/// and age it to `total_steps` deep-time ticks, so the surface can be re-derived at any point on the deep-time
-/// clock (the headless two-point evolution check, and a rewind of the observer's playback). Deterministic.
+/// Reset the province field to its fresh young state (laterally uniform at the world's young potential
+/// temperature, the R-YOUNG-TEMPERATURE handoff) and age it to `total_steps` deep-time ticks, so the surface can
+/// be re-derived at any point on the deep-time clock (the headless two-point evolution check, and a rewind of the
+/// observer's playback). Deterministic.
 fn age_provinces_from_young(prov: &mut DeepTimeProvinces, total_steps: usize) {
     let n = prov.column_params.len();
-    prov.state = DeepTimeState::young(n, MANTLE_POTENTIAL_TEMPERATURE_K);
+    prov.state = DeepTimeState::young(n, prov.young_potential_temperature_k);
     step_provinces(prov, total_steps);
 }
 
@@ -1636,6 +1717,81 @@ fn sample_province_thickness(prov: &DeepTimeProvinces, fu: f32, fv: f32) -> Fixe
     let top = lerp_fx(at(x0i, y0i), at(x0i + 1, y0i), tx);
     let bot = lerp_fx(at(x0i, y0i + 1), at(x0i + 1, y0i + 1), tx);
     lerp_fx(top, bot, ty)
+}
+
+/// Parse a JANAF/condensate phase name (the formula before the `(phase)` suffix) into element atom counts, for
+/// the bulk-composition mass-fraction read. `None` on a name that is not a parseable formula.
+fn phase_element_counts(name: &str) -> Option<BTreeMap<String, u32>> {
+    let formula = name.split('(').next()?;
+    let chars: Vec<char> = formula.chars().collect();
+    let mut atoms: BTreeMap<String, u32> = BTreeMap::new();
+    let mut i = 0;
+    while i < chars.len() {
+        if !chars[i].is_ascii_uppercase() {
+            return None;
+        }
+        let mut symbol = String::new();
+        symbol.push(chars[i]);
+        i += 1;
+        while i < chars.len() && chars[i].is_ascii_lowercase() {
+            symbol.push(chars[i]);
+            i += 1;
+        }
+        let mut digits = String::new();
+        while i < chars.len() && chars[i].is_ascii_digit() {
+            digits.push(chars[i]);
+            i += 1;
+        }
+        let count: u32 = if digits.is_empty() {
+            1
+        } else {
+            digits.parse().ok()?
+        };
+        *atoms.entry(symbol).or_insert(0) += count;
+    }
+    if atoms.is_empty() {
+        None
+    } else {
+        Some(atoms)
+    }
+}
+
+/// The mass fraction of an element in the world's bulk CONDENSED assemblage (the whole rock, before
+/// differentiation), DERIVED from the VCS condensed molar amounts and the periodic-table molar masses: the
+/// element's summed mass (its atoms across every condensed phase, each phase weighted by its molar amount, times
+/// the element's molar mass) over the total condensed mass. This is the SLR parent-element fuel (aluminium for
+/// 26Al, iron for 60Fe), so the young-thermal heat source keys on the world's own composition, never an authored
+/// abundance. `None` if the amounts are absent (a degenerate condensation vertex) or a molar mass does not
+/// resolve; the caller then falls back to the reserved canonical mass fraction.
+fn derive_bulk_element_mass_fraction(
+    condensed_amounts: &[(String, Fixed)],
+    element: &str,
+    table: &PeriodicTable,
+) -> Option<Fixed> {
+    let mut element_mass = Fixed::ZERO;
+    let mut total_mass = Fixed::ZERO;
+    for (phase, amount) in condensed_amounts {
+        let counts = match phase_element_counts(phase) {
+            Some(c) => c,
+            None => continue,
+        };
+        let phase_molar_mass = table.molar_mass(&counts).ok()?;
+        let phase_mass = amount.checked_mul(phase_molar_mass)?;
+        total_mass = total_mass.checked_add(phase_mass)?;
+        if let Some(&n) = counts.get(element) {
+            let mut single = BTreeMap::new();
+            single.insert(element.to_string(), 1u32);
+            let element_molar_mass = table.molar_mass(&single).ok()?;
+            let contribution = amount
+                .checked_mul(Fixed::from_int(n as i32))?
+                .checked_mul(element_molar_mass)?;
+            element_mass = element_mass.checked_add(contribution)?;
+        }
+    }
+    if total_mass <= Fixed::ZERO {
+        return None;
+    }
+    element_mass.checked_div(total_mass)
 }
 
 /// Build the DERIVED scene from a star mass and an orbit, or an error naming the link that did not resolve (fail-soft:
@@ -1742,6 +1898,93 @@ fn build_derived_scene(star_mass: Fixed, orbit_au: Fixed) -> Result<DerivedScene
     )
     .ok_or("the star-and-orbit derivation did not resolve")?;
 
+    // R-YOUNG-TEMPERATURE: THE YOUNG-THERMAL REGIME VERDICT retires the fixed 1588 K mantle potential temperature.
+    // The bootstrap surface derivation above ran on the anchor only to expose the world's OWN derived solidus (which
+    // is potential-temperature-independent, a property of the endmembers). Now the young-thermal verdict decides
+    // whether this world's formation crosses that solidus (short-lived-radionuclide heat on an early-formed body, or
+    // giant impacts on an Earth-mass body), and, for a MELTED world, pins the young potential temperature at the
+    // magma-ocean lock-up handoff (the world's own solidus plus the phi_c superheat). The surface is then RE-DERIVED
+    // at that young temperature, so a melted world forms super-solidus with a nonzero melt fraction F, the input the
+    // per-province radiogenic heterogeneity (and therefore the relief) reads. A NEVER-MELTED or MARGINAL world keeps
+    // its sub-solidus (smooth) surface, the honest per-world outcome. The SLR parent-element fuel (aluminium, iron)
+    // is DERIVED from the world's own condensed assemblage; the birth-environment SLR ratios, the rheology, the heat
+    // capacity, the retention band, the formation time, and the reset epoch are the reserved-with-basis inputs above.
+    let al_mass_fraction = sc
+        .condensed_amounts
+        .as_ref()
+        .and_then(|amounts| derive_bulk_element_mass_fraction(amounts, "Al", &table))
+        // Reserved-with-basis fallback at a degenerate condensation vertex: the canonical bulk-silicate aluminium
+        // mass fraction ~0.02 (McDonough & Sun 1995 BSE Al2O3 ~4.5 wt%). The normal path derives it.
+        .unwrap_or_else(|| Fixed::from_int(2).div(Fixed::from_int(100)));
+    let fe_mass_fraction = sc
+        .condensed_amounts
+        .as_ref()
+        .and_then(|amounts| derive_bulk_element_mass_fraction(amounts, "Fe", &table))
+        // Reserved-with-basis fallback: the canonical bulk (silicate-plus-metal) iron mass fraction ~0.19 (the
+        // solar Fe/rock ratio, Lodders 2003 lineage). The normal path derives it.
+        .unwrap_or_else(|| Fixed::from_int(19).div(Fixed::from_int(100)));
+    let slr_family = civsim_physics::young_thermal::solar_system_slr_family(
+        al_mass_fraction,
+        fe_mass_fraction,
+        AL26_OVER_AL27_INITIAL,
+        FE60_OVER_FE56_INITIAL,
+    );
+    // The young-thermal verdict when the solidus resolves. The solidus is threaded from the bootstrap surface
+    // (potential-temperature-independent). `None` (fail-soft, dormant as before) when the solidus did not derive.
+    let young_verdict = match (sc.solidus_surface_k, sc.solidus_slope_k_per_gpa) {
+        (Some(solidus_surface_k), Some(solidus_slope_k_per_gpa)) => {
+            let young_inputs = civsim_physics::young_thermal::YoungThermalInputs {
+                solidus_surface_k,
+                solidus_slope_k_per_gpa,
+                adiabat_slope_k_per_gpa: MANTLE_ADIABAT_SLOPE_K_PER_GPA,
+                productivity_per_gpa: MELT_PRODUCTIVITY_PER_GPA,
+                lockup_melt_fraction: PHI_C_LOCKUP_MELT_FRACTION,
+                specific_heat_j_per_kg_k: YOUNG_SPECIFIC_HEAT_J_PER_KG_K,
+                reference_temperature_k: planet.disk_temperature_k,
+                surface_gravity_m_per_s2: planet.surface_gravity_m_s2,
+                radius_m: planet.radius_m,
+                binding_energy_geometry: ACCRETION_GEOMETRY_FACTOR,
+                retention_efficiency_lo: RETENTION_EFFICIENCY_LO,
+                retention_efficiency_hi: RETENTION_EFFICIENCY_HI,
+                formation_time_myr: FORMATION_TIME_MYR,
+                planet_mass_earth,
+                giant_impact_mass_threshold_earth: GIANT_IMPACT_MASS_THRESHOLD_EARTH,
+                reset_epoch_myr: RESET_EPOCH_MYR,
+                reset_epoch_half_band_myr: RESET_EPOCH_HALF_BAND_MYR,
+            };
+            civsim_physics::young_thermal::young_thermal_verdict(&young_inputs, &slr_family)
+        }
+        _ => None,
+    };
+    // The young potential temperature the deep-time run starts from: the verdict's value when it resolves (the
+    // solidus-pinned handoff for a MELTED world, the cold peak otherwise), else the anchor (fail-soft).
+    let young_potential_temperature_k = young_verdict
+        .map(|v| v.young_potential_temperature_k)
+        .unwrap_or(MANTLE_POTENTIAL_TEMPERATURE_K);
+    // RE-DERIVE the surface at the young potential temperature. A MELTED world (young temperature super-solidus)
+    // now extracts a partial melt (F = phi_c > 0), the crust becomes that first melt, and the mantle the residue.
+    // Fail-soft to the bootstrap surface if the re-derivation does not resolve. Every written-state row below that
+    // consumes this carries the INTERIM provenance of the young-thermal inputs (the reset epoch and formation-time
+    // bands); the scope fence binds them to texture onset and thermal initial conditions only.
+    let reserved_melt_young = civsim_materials::surface_composition::ReservedMeltParams {
+        potential_temperature_k: young_potential_temperature_k,
+        adiabat_slope_k_per_gpa: MANTLE_ADIABAT_SLOPE_K_PER_GPA,
+        productivity_per_gpa: MELT_PRODUCTIVITY_PER_GPA,
+        gravity_m_per_s2: MELT_COLUMN_GRAVITY_M_S2,
+    };
+    let sc = civsim_materials::surface_composition::derive_surface_composition(
+        &janaf,
+        &abundances,
+        condensation_temperature_k,
+        &reserved_melt_young,
+    )
+    .unwrap_or(sc);
+    let crust_composition = sc.surface.clone();
+    let mantle_composition = sc.mantle_composition.clone();
+    let mantle_density =
+        derive_mantle_density(&mantle_composition, surface_t, surface_p, &registry, &table)
+            .unwrap_or(mantle_density);
+
     // THE DEEP-TIME PROVINCE TEXTURE (the visible-world payoff): the surface relief is the DERIVED crust the
     // deep-time volcanism ([`civsim_sim::deeptime`]) builds over a lateral field of mantle columns. The columns
     // start uniform (a fresh planet has no thermal history) and DIVERGE as each province's own radiogenic
@@ -1795,6 +2038,7 @@ fn build_derived_scene(star_mass: Fixed, orbit_au: Fixed) -> Result<DerivedScene
                 solidus_surface_k,
                 solidus_slope_k_per_gpa,
                 sc.max_melt_fraction,
+                young_potential_temperature_k,
             )
         }
         _ => None,
@@ -1894,6 +2138,7 @@ fn build_derived_scene(star_mass: Fixed, orbit_au: Fixed) -> Result<DerivedScene
         // fills (R-CELESTIAL-SECULAR, task #44 / Part 18.1). No tilt or spin value is authored in the viewer.
         attitude: derived_scene_attitude(),
         provinces,
+        young: young_verdict,
     })
 }
 
@@ -1964,7 +2209,81 @@ fn print_derived_readout(scene: &DerivedScene) {
         fmt_attitude(scene.attitude.rotation_period_s),
         fmt_attitude(scene.attitude.initial_spin_phase),
     );
+    // R-YOUNG-TEMPERATURE: the young-thermal regime verdict (Melted / Never-melted / Marginal), and the
+    // neighbor-contrast of the derived surface relief that a melted world textures with. A smooth condensed ball
+    // sits near the ~2 percent floor; a melted world stands well above it.
+    if let Some(v) = &scene.young {
+        let regime = match v.regime {
+            civsim_physics::young_thermal::YoungThermalRegime::Melted => "MELTED",
+            civsim_physics::young_thermal::YoungThermalRegime::NeverMelted => "NEVER-MELTED",
+            civsim_physics::young_thermal::YoungThermalRegime::Marginal => "MARGINAL",
+        };
+        let grade = if v.gapped {
+            "GAPPED (decidable now)"
+        } else {
+            "MARGINAL (impact-list-pending)"
+        };
+        eprintln!(
+            "  young-thermal (R-YOUNG-TEMPERATURE): {regime}, {grade};  SLR rise {:.0} K,  young potential T {:.0} K,  reset epoch {:.0} +/- {:.0} Myr (interim)",
+            v.slr_temperature_rise_k.to_f64_lossy(),
+            v.young_potential_temperature_k.to_f64_lossy(),
+            v.reset_epoch_myr.to_f64_lossy(),
+            v.reset_epoch_half_band_myr.to_f64_lossy(),
+        );
+        if let Some(handoff) = v.handoff_potential_temperature_k {
+            eprintln!(
+                "    magma-ocean lock-up handoff (solidus + phi_c superheat): {:.0} K",
+                handoff.to_f64_lossy()
+            );
+        }
+    }
+    if let Some(contrast) = tile_relief_neighbor_contrast(&scene.tiles, scene.cols) {
+        eprintln!(
+            "  surface relief neighbor-contrast: {:.1}%  (a smooth condensed ball sits near ~2%)",
+            contrast * 100.0
+        );
+    }
     eprintln!("  controls: +/- zoom, wasd/arrows rotate the globe, p provenance, Esc quit");
+}
+
+/// The NEIGHBOR-CONTRAST of the derived surface relief: the mean absolute elevation difference between
+/// grid-adjacent tiles, normalized by the elevation scale (the range of the field). A smooth condensed ball
+/// (uniform provinces) sits near the ~2 percent floor; a MELTED world, whose provinces diverge in radiogenic
+/// budget and crust thickness, textures well above it. `None` for an empty or degenerate field.
+fn tile_relief_neighbor_contrast(tiles: &[DerivedTile], cols: usize) -> Option<f64> {
+    if tiles.is_empty() || cols == 0 {
+        return None;
+    }
+    let rows = tiles.len() / cols;
+    if rows == 0 {
+        return None;
+    }
+    let elev: Vec<f64> = tiles.iter().map(|t| t.elevation.to_f64_lossy()).collect();
+    let max = elev.iter().cloned().fold(f64::MIN, f64::max);
+    let min = elev.iter().cloned().fold(f64::MAX, f64::min);
+    let mean = elev.iter().sum::<f64>() / elev.len() as f64;
+    // The scale the contrast is measured against: the mean elevation magnitude (the isostatic relief amplitude),
+    // floored to a small positive so a flat field does not divide by zero.
+    let scale = mean.abs().max((max - min).abs()).max(1e-6);
+    let mut total = 0.0;
+    let mut pairs = 0u64;
+    for r in 0..rows {
+        for c in 0..cols {
+            let i = r * cols + c;
+            if c + 1 < cols {
+                total += (elev[i] - elev[i + 1]).abs();
+                pairs += 1;
+            }
+            if r + 1 < rows {
+                total += (elev[i] - elev[i + cols]).abs();
+                pairs += 1;
+            }
+        }
+    }
+    if pairs == 0 {
+        return None;
+    }
+    Some((total / pairs as f64) / scale)
 }
 
 /// The interactive `--derived [star_mass] [orbit_au]` viewer: derive the planet from the star mass and orbit and show
@@ -3470,6 +3789,16 @@ mod province_tests {
         solidus_slope_k_per_gpa: Fixed,
         formation_melt_fraction: Option<Fixed>,
     ) -> DeepTimeProvinces {
+        // The young potential temperature the R-YOUNG-TEMPERATURE handoff pins for a melted world (super-solidus,
+        // so the melt engages) off the supplied derived solidus, fail-soft to the solidus itself.
+        let young_t = civsim_physics::young_thermal::magma_ocean_handoff_temperature(
+            solidus_surface_k,
+            solidus_slope_k_per_gpa,
+            MANTLE_ADIABAT_SLOPE_K_PER_GPA,
+            MELT_PRODUCTIVITY_PER_GPA,
+            PHI_C_LOCKUP_MELT_FRACTION,
+        )
+        .unwrap_or(solidus_surface_k);
         build_deep_time_provinces(
             Fixed::ONE,                 // star mass
             Fixed::ONE,                 // orbit AU
@@ -3483,6 +3812,7 @@ mod province_tests {
             solidus_surface_k,
             solidus_slope_k_per_gpa,
             formation_melt_fraction,
+            young_t,
         )
         .expect("the Mars-class interior resolves a province field")
     }
@@ -3611,6 +3941,7 @@ mod province_tests {
         state.crust_thickness_km = thicknesses;
         DeepTimeProvinces {
             state,
+            young_potential_temperature_k: Fixed::from_int(1588),
             column_params: (0..n)
                 .map(|_| {
                     province_column_params(
@@ -3676,6 +4007,43 @@ mod province_tests {
             count_variants(&vt) >= 2,
             "a varied province field textures the surface with more than one relief, got {}",
             count_variants(&vt)
+        );
+    }
+
+    #[test]
+    fn a_melted_world_textures_above_the_smooth_ball_floor() {
+        // R-YOUNG-TEMPERATURE payoff: a MELTED world (the young potential temperature pinned super-solidus at the
+        // magma-ocean lock-up handoff, a nonzero formation melt fraction F seeding the per-province radiogenic
+        // heterogeneity) develops real relief as its provinces diverge and thicken, so the derived surface
+        // neighbor-contrast stands well above the smooth-ball floor an unprocessed (F None) world sits at. The
+        // young handoff is derived inside mars_class_provinces from the supplied solidus.
+        let steps = 225usize;
+        let contrast_of = |formation_melt_fraction: Option<Fixed>| -> f64 {
+            let mut prov = mars_class_provinces(
+                Fixed::from_int(1680),
+                Fixed::from_int(130),
+                formation_melt_fraction,
+            );
+            step_provinces(&mut prov, steps);
+            let tiles = derive_province_tiles(&prov, prov.pcols, prov.prows)
+                .expect("province tiles derive");
+            tile_relief_neighbor_contrast(&tiles, prov.pcols).expect("the contrast resolves")
+        };
+        // The unprocessed (sub-solidus formation, F None) world sorted no incompatibles: uniform provinces, the
+        // smooth-ball floor.
+        let smooth_floor = contrast_of(None);
+        // The melted world (F = 0.1, a strongly enriching low-degree melt) diverges: real relief.
+        let melted = contrast_of(Some(Fixed::from_ratio(1, 10)));
+        assert!(
+            smooth_floor < 0.03,
+            "an unprocessed world sits near the smooth-ball floor, got {:.3}",
+            smooth_floor
+        );
+        assert!(
+            melted > smooth_floor * 2.0 && melted > 0.03,
+            "a melted world textures well above the smooth floor (melted {:.3} vs floor {:.3})",
+            melted,
+            smooth_floor
         );
     }
 
