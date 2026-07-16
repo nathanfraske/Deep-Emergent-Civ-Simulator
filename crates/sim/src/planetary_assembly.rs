@@ -1580,6 +1580,8 @@ mod tests {
         // The extended boundary {ledger + system} conserves total mass BIT-EXACTLY, restoring the gate-b
         // invariant the giant step broke: the gas the giants gained is booked against the account, so nothing
         // appears from nowhere.
+        // BLINDNESS SET (rule 1): blind to opening-source errors and to mass-and-L-proportional errors; covered
+        // by the opener-binds-to-quadrature test and the convergence twin.
         let (disk, field) = giant_field();
         let age = Fixed::from_int(4500);
         let seed = 0x6A5_6A50u64;
@@ -1629,6 +1631,8 @@ mod tests {
         // sum(m*sqrt(a)) conserves to fixed-point tolerance. The giant-drain part is exact (the account debits
         // exactly gas*sqrt(a), the giant gains exactly that); the residual is the terrestrial merge's own
         // sqrt-reconstruction rounding.
+        // BLINDNESS SET (rule 1): blind to opening-source errors and to mass-and-L-proportional errors; covered
+        // by the opener-binds-to-quadrature test and the convergence twin.
         let (disk, field) = giant_field();
         let age = Fixed::from_int(4500);
         let seed = 0x1A16_1A16u64;
