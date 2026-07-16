@@ -37,7 +37,7 @@
 //! ([`crate::laws::thermal_boundary_layer`], `L = d * Ra^(-1/3)`, the SAME derivation the convective driving
 //! stress shears over, so the stress and the geotherm cannot disagree about how thick the lid is).
 //!
-//! TWO FORMS, dispatched on what the world's lid actually is rather than on a named regime:
+//! TWO FORMS, dispatched on what the world's lid is rather than on a named regime:
 //! [`halfspace_geotherm`] where a lid has an AGE (it cools from the surface down, the profile a growing erf),
 //! and [`steady_conductive_geotherm`] where it does not (a stagnant lid in equilibrium between the surface
 //! above and the convecting interior below, with its own radiogenic heat bending the profile). A stagnant-lid
@@ -45,17 +45,50 @@
 //! take the half-space form. Neither is selected by an authored threshold.
 //!
 //! ADMIT THE ALIEN. Every input is a per-world datum or a derived quantity, so an ice shell is a DATA ROW
-//! rather than a rewrite. The named deviant is the conductivity itself: ice conductivity is strongly
-//! temperature-dependent where rock's is nearly not, so `k` must key on MATERIAL CLASS before a Europa-class
-//! world renders. THAT ROW DOES NOT EXIST YET (`ColumnParams::thermal_conductivity` is a single scalar), and
-//! this module reads `k` as the caller's per-world datum rather than reaching for a rock value, so the class
-//! keying lands as data when the row arrives, with no change to any function here.
+//! rather than a rewrite. The conductivity is where the classes truly differ, and the difference is NOT
+//! presence-versus-absence of temperature dependence, which is a framing this arc carried until the fetch
+//! corrected it. LATTICE CONDUCTIVITY DECLINES AS 1/T IN BOTH silicate and ice, from the same phonon Umklapp
+//! scattering, and that shared physics is precisely why the SHAPE was derivable before any constant arrived.
+//! The per-class difference is the ANCHOR CONSTANTS plus a RADIATIVE RECOVERY that silicates gain above roughly
+//! 1200 to 1500 K and ice has no analogue for. Ice's measured row is `k = 612/T` over 30 to 273 K (Carnahan
+//! 2021): the 1/T form CONFIRMED by a fetch that could only confirm or refute it, because the shape was fixed
+//! before the number had a home.
+//!
+//! THE CLASS-KEYED ROW DOES NOT EXIST YET (`ColumnParams::thermal_conductivity` is a single scalar), and the
+//! convicting instance is sharper than one world against another: it is WITHIN ONE SHELL. The 1/T law means the
+//! cold top of an icy shell conducts several times better than its warm base, so even an honest PER-MATERIAL
+//! CONSTANT fails inside a single Europa, and the shell-thickness verdicts this arc feeds are exactly what that
+//! error would move. This module reads `k` as the caller's per-world datum rather than reaching for a rock
+//! value, so `k(material, T)` lands as data with no change to any function here.
+//!
+//! REGOLITH IS A DIFFERENT ROW, kept apart deliberately: its conductivity is orders of magnitude lower under
+//! vacuum, and it is scoped to the DIURNAL THERMAL SKIN rather than the lithospheric geotherm. Airless-surface
+//! physics must never leak into `T_e`.
 //!
 //! WHAT THIS MODULE DOES NOT DO. It does not derive `T_e`. `T_e` falls out of the YIELD-STRENGTH ENVELOPE, the
 //! brittle curve (Byerlee, pressure-dependent) meeting the ductile curve (creep, on the world's own derived
-//! strain rate), and both branches are later steps in this arc. The famous ~600 K limiting isotherm is NOT an
-//! input here and never will be: it is the Earth-olivine INSTANCE of that construction, and it is demoted to a
-//! hindcast cross-check (the derived Earth `T_e` must reproduce the oceanic `T_e`-versus-plate-age data).
+//! strain rate), and both branches are later steps in this arc.
+//!
+//! THE HINDCAST TARGET IS A DATASET, NEVER A SUMMARY STATISTIC (owner ruling, after the limiting isotherm was
+//! fetched and did not survive contact with its own sources). The derived Earth `T_e` is checked against the
+//! MEASURED `T_e`-versus-age data directly, each compiled entry carrying its AGE CONVENTION and its LOADING
+//! ENVIRONMENT (oceanic interior loads are the primary set; trench loads are a separate tagged environment,
+//! because they diverge). No isotherm enters this arc, as an input or as a target.
+//!
+//! WHY THE ISOTHERM DIED, recorded because it is the silent-parameter class living inside the LITERATURE rather
+//! than inside our code, which is a place this project had not yet thought to look. A "limiting isotherm" is
+//! not a property of the lithosphere. It is a property of the lithosphere JOINED TO AN AGE CONVENTION: the SAME
+//! measurements imply 550 to 600 C against thermal age and 350 to 450 C against isochron age (McNutt 1984, via
+//! Calmant et al. 1990), and trench loads land near 340 C again. A single number quoted without its convention
+//! is a statistic with a hidden conditioning variable, so it could never have been a target; it would have
+//! validated whichever convention it was silently born under. The classical commentary value is 450 +/- 150 C,
+//! in CELSIUS, and it may appear as commentary only, with that rider, and nowhere else.
+//!
+//! (This arc's own prose carried "~600 K" through three documents and into this file, which is 327 C, BELOW
+//! every measured band; Calmant et al. state plainly that "no estimate is close to the 600 C isotherm". The
+//! error entered as a ruling's summary statistic, propagated verbatim through scope docs into code, and was
+//! caught by a fetch agent reading the primaries. Hence the standing rule: hindcast targets name DATASETS.)
+//!
 //! Nothing in this module authors a scalar.
 
 use civsim_core::Fixed;
@@ -279,7 +312,7 @@ mod tests {
         // NOT exact, and the reason is documented on the function: A&S 7.1.26's coefficients sum to
         // 0.999999999, so erf(0) is ~1.16e-9 rather than a clean zero, and the surface reads
         // `T_s + 1.16e-9 * (T_i - T_s)`, about two microkelvin high on this 1300 K contrast. Asserted as the
-        // residual it is; widening this to `assert_eq` would be a lie and tightening it would fail honestly.
+        // residual it is; widening this to `assert_eq` would be a lie and tightening it would fail for a real reason.
         let surface_residual = (at_surface - f(300)).abs();
         assert!(
             surface_residual < Fixed::from_ratio(1, 1000),
@@ -290,7 +323,7 @@ mod tests {
         // That is the sqrt(kappa t) thickening, the same growth the oceanic T_e-versus-age hindcast is stated
         // against, and it is what makes the age a real input rather than decoration.
         // The probe must sit where the similarity variable eta = z / (2 sqrt(kappa t)) is of order one, which is
-        // where the profile actually varies. Deeper than that and BOTH ages saturate erf to one and read the
+        // where the profile varies. Deeper than that and BOTH ages saturate erf to one and read the
         // interior, so the comparison would pass or fail on nothing. With kappa = 1e-6, z = 5e-3 puts eta at
         // ~2.5 for the young lid and ~0.25 for the old one: on opposite sides of the transition, so the age is
         // doing real work here rather than being decoration the test cannot see.
@@ -325,7 +358,7 @@ mod tests {
         // THE NUMERICAL TWIN, and it is required because VALIDATION DOES NOT TRANSFER ACROSS DOMAINS. The A&S
         // 7.1.26 fit was twinned over EWALD's real-space argument range (`alpha r`); the geotherm exercises a
         // DIFFERENT range, the similarity variable `eta = z / (2 sqrt(kappa t))`, which runs from zero through
-        // the order-one transition where the profile actually varies and out toward saturation. Reusing Ewald's
+        // the order-one transition where the profile varies and out toward saturation. Reusing Ewald's
         // validation here would be borrowing evidence from a range this consumer never visits.
         //
         // The twin is INDEPENDENT by construction: composite Simpson quadrature of erf's OWN DEFINITION,
@@ -370,7 +403,7 @@ mod tests {
         // fixed-point floor and tight enough to catch a wrong series.
         let tol = Fixed::from_ratio(1, 1000);
         // erf(0) = 0 ANALYTICALLY, but the fit's coefficients sum to 0.999999999, so it returns ~1.16e-9 (five
-        // bits in Q32.32). Pinned at the residual it actually has: this test is the one that measured it, and
+        // bits in Q32.32). Pinned at the residual it carries: this test is the one that measured it, and
         // the half-space geotherm's surface boundary inherits exactly this much error and says so.
         let e0 = ZERO.erf();
         assert!(
