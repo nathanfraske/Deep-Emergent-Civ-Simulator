@@ -42,14 +42,30 @@
 //! the star LEAVES the main sequence (the post-main-sequence giant branch is a separate stellar-evolution arc), so
 //! the brightening caps there rather than extrapolating a regime this law does not describe.
 //!
+//! THE BOMBARDMENT slice (this): the impact chain wires onto the same clock. Each tick, after the interior
+//! steps, [`bombard_tick`] draws this tick's impacts from the accretion-tail flux ([`civsim_world::impact_flux`])
+//! and composes each onto the surface through the already-built impact chain (the crater-scaling law, the
+//! ballistic ejecta fan, the conservative redistribution). The flux DECLINES with epoch, so early epochs are
+//! heavily cratered and late ones quiescent (the honest late-heavy-bombardment history, never an authored
+//! curve); the impact sizes are DRAWN from the collisional-cascade size-frequency distribution (large basins
+//! rare, small craters common), never a fixed size; and every impact conserves mass exactly (the excavated bowl
+//! equals the deposited blanket), so the crater bowls and ejecta blankets accumulate onto the SAME surface the
+//! provinces build. The draw is a deterministic seeded draw keyed on the world identity and the tick (the
+//! splitmix64 counter stream, never floating randomness), bounded by a per-tick cap. It is a term SEPARATE from
+//! [`step_deep_time`] so a run that does not bombard replays bit-for-bit.
+//!
 //! Determinism (Principle 3, Principle 10): [`convection_step`] is a pure function and the columns are walked in
 //! index order, so the tick is a pure function of the state and the parameters, worker-invariant. Dormant: no
 //! scenario or viewer drives it yet (the time control is the next slice), so it is byte-neutral over the run
 //! path.
 
 use crate::geodynamics::{convection_step, ColumnParams, ColumnState};
-use civsim_core::Fixed;
+use civsim_core::{Fixed, Rng};
 use civsim_physics::melting::adiabatic_melt_column;
+use civsim_world::ballistic::{BallisticForces, EjectaFan};
+use civsim_world::crater::{CraterCoupling, Impactor, Target};
+use civsim_world::impact_event::apply_impact;
+use civsim_world::impact_flux::{size_at_number_fraction, tail_rate_fraction};
 
 /// The deep-time state of a derived planet: a lateral field of interior mantle columns (one per surface cell or
 /// province), the crust each column has BUILT so far, and the geological time elapsed. The field is the spatial
@@ -67,6 +83,22 @@ pub struct DeepTimeState {
     pub crust_thickness_km: Vec<Fixed>,
     /// The geological time elapsed (megayears), the clock the provinces are written against.
     pub elapsed_myr: Fixed,
+    /// The accumulated BOMBARDMENT RELIEF (metres), one per lateral cell, that the deep-time impact chain has
+    /// carved and blanketed onto the surface so far ([`bombard_tick`]). It co-evolves with the volcanic
+    /// `crust_thickness_km` on the SAME grid and clock: the two compose into one surface relief, the crater bowls
+    /// and ejecta blankets riding on the crust the provinces build (the surface the viewer reads is
+    /// `crust_thickness_km * 1000 + impact_relief_m`, in metres; a downstream viewer slice composes and draws it).
+    /// It is in METRES, the crater law's own length units (the impactor radius, crater diameter, and depth are
+    /// one length scale), whereas the volcanic crust is in kilometres, so the two carry their own units and the
+    /// composition converts. A fresh planet has none; every impact adds a conservative delta (the excavated bowl
+    /// equals the deposited blanket, so an impact never changes this field's sum), so the accumulated relief is
+    /// the written record of the world's bombardment history, never an authored map.
+    pub impact_relief_m: Vec<Fixed>,
+    /// The number of impacts that have carved a crater on the surface over the run so far (an impact that
+    /// resolved on the grid and moved material), the bombardment-history count. Heavily struck early (the
+    /// accretion tail is intense) and quiescent late (the reservoir is swept up), the honest decline the flux
+    /// model drives; the derived record, not an authored intensity.
+    pub impact_count: u64,
     /// The star's main-sequence AGE (megayears) when this run began: the star and the planet share one clock, so
     /// the star's current age is this start age plus `elapsed_myr` ([`DeepTimeState::star_age_myr`]). A fresh
     /// planet co-forming with a zero-age star begins at zero; a run beginning around an already-aged star carries
@@ -98,6 +130,8 @@ impl DeepTimeState {
             ],
             crust_thickness_km: vec![Fixed::ZERO; n_cells],
             elapsed_myr: Fixed::ZERO,
+            impact_relief_m: vec![Fixed::ZERO; n_cells],
+            impact_count: 0,
             star_age_start_myr: Fixed::ZERO,
         }
     }
@@ -237,10 +271,229 @@ pub fn step_deep_time(
         columns,
         crust_thickness_km,
         elapsed_myr: state.elapsed_myr.saturating_add(dt_myr),
+        // The bombardment is a SEPARATE step term ([`bombard_tick`]), applied by the caller after this one, so the
+        // interior tick carries the impact record forward unchanged and stays byte-identical for a run that does
+        // not bombard (the viewer's existing interior-and-volcanism step is untouched).
+        impact_relief_m: state.impact_relief_m.clone(),
+        impact_count: state.impact_count,
         // The star's start age is a per-run constant; its CURRENT age advances through `elapsed_myr` above, so the
         // star ages on the same clock as the interior without a separate step term.
         star_age_start_myr: state.star_age_start_myr,
     })
+}
+
+/// The per-world impact-flux configuration the deep-time bombardment reads, every field a datum (Principle 11,
+/// admit-the-alien): the accretion-tail reservoir and the collisional-cascade size-frequency distribution the
+/// flux model draws from, the per-event physical state the crater law and ejecta fan read, and one determinism
+/// and cost bound. A different disk, a captured swarm, or an alien impactor population is a different set of
+/// numbers through the SAME wiring, not a new code path. Nothing here is authored inline; the fields are the
+/// world's own reserved-with-basis data.
+#[derive(Clone, Copy, Debug)]
+pub struct ImpactFluxParams {
+    /// The reservoir's total impacting-body count over the whole accretion tail (the number of bodies above
+    /// `min_impactor_radius_m` the leftover-planetesimal reservoir holds). The tail spreads this count over deep
+    /// time as `exp(-t/tau)`, so the expected strikes in a tick are this count times the tail's decline across
+    /// the tick. Reserved-with-basis: the leftover-planetesimal count the world's disk delivers (the residual
+    /// reservoir mass over the mean body mass of the size-frequency distribution), derived-down when the disk
+    /// model supplies the residual mass; a per-world datum, never fabricated.
+    pub reservoir_body_count: Fixed,
+    /// The accretion-tail sweep-up timescale `tau` (megayears), the flux model's own decay constant. Reserved-
+    /// with-basis (the planet's gravitational-focusing sweep-up time over the reservoir's dynamical spreading,
+    /// the flux model's per-world dynamical value, near tens of megayears for late accretion).
+    pub sweep_timescale_myr: Fixed,
+    /// The collisional-cascade differential size-frequency slope `p` (the Dohnanyi slope, near 3.5). Cited to the
+    /// cascade literature (Dohnanyi 1969), the same slope the grain-opacity cascade reads.
+    pub differential_slope: Fixed,
+    /// The smallest impactor radius the reservoir delivers (metres), the size-frequency lower bound. A per-world
+    /// reservoir datum.
+    pub min_impactor_radius_m: Fixed,
+    /// The largest impactor radius the reservoir delivers (metres), the size-frequency upper bound (the
+    /// reservoir's biggest surviving body). A per-world reservoir datum.
+    pub max_impactor_radius_m: Fixed,
+    /// The impact closing speed `U` (metres per second) the crater law reads; the encounter geometry and the
+    /// world's gravity deliver it. Reserved-with-basis (the reservoir's mean surface encounter speed, the escape
+    /// speed folded with the approach velocity). A per-world datum.
+    pub impact_velocity_m_s: Fixed,
+    /// The impactor bulk density (kilograms per cubic metre), the reservoir's composition. A per-world datum.
+    pub impactor_density: Fixed,
+    /// The target's surface material and world state the crater law reads (gravity, effective strength, bulk
+    /// density), each a floor axis or a per-world datum.
+    pub target: Target,
+    /// The target material's crater coupling row (the coupling exponents and fit coefficients), reserved-with-
+    /// basis per material as the crater law documents.
+    pub coupling: CraterCoupling,
+    /// The ejecta ballistic launch (speed, elevation angle, azimuth count) the isotropic fan fires. Physical
+    /// launch data, reserved-with-basis (the characteristic ejecta launch speed, a fraction of the impact speed
+    /// near the 45-degree maximum-range angle; the azimuth count a resolution-and-determinism bound). One
+    /// characteristic launch for every event this world, the honest first-slice limit: a per-event ejecta speed
+    /// scaling with the crater's own excavation velocity is the named refinement.
+    pub ejecta: EjectaFan,
+    /// The world force parameters the ballistic arc reads: gravity (the floor value, in metres per second
+    /// squared), the cell edge length (metres, the province grid's own spatial scale), and the march step cap.
+    pub forces: BallisticForces,
+    /// The maximum number of impacts applied in one tick, a determinism-and-cost bound (the per-tick work is
+    /// bounded however intense the early bombardment is), never a physical limit. Reserved-with-basis: the
+    /// per-tick impact budget, set so the earliest, most intense ticks stay inside the tick's compute envelope;
+    /// the accumulated relief is still heavily cratered early.
+    pub per_tick_impact_cap: u32,
+}
+
+/// THE BOMBARDMENT: draw this tick's impacts from the accretion-tail flux and apply each onto the deep-time
+/// surface, returning the next state with the crater bowls and ejecta blankets accumulated into
+/// [`DeepTimeState::impact_relief_m`] and the [`DeepTimeState::impact_count`] advanced. Call it AFTER
+/// [`step_deep_time`] each tick, so `state.elapsed_myr` is the tick's END: the flux interval is
+/// `[elapsed_myr - dt_myr, elapsed_myr]`, and the fraction of the reservoir swept across it (the accretion
+/// tail's own decline, `rate(t0) - rate(t1)`) is the expected strike count once scaled by the reservoir's body
+/// count. Because that decline is steep early and flat late, an early tick draws many impacts and a late one
+/// few (the honest late-heavy-bombardment history), never an authored bombardment curve. Each impact's size is
+/// DRAWN from the collisional-cascade size-frequency distribution ([`size_at_number_fraction`], large basins
+/// rare and small craters common), its location a uniform cell (the maximum-entropy prior, no authored spatial
+/// pattern), and it is composed onto the surface through the already-built [`apply_impact`] (the crater-scaling
+/// law, the ballistic ejecta fan, the conservative redistribution); the returned delta sums to exactly zero, so
+/// the impact relief's sum never changes (mass is moved, never created or lost).
+///
+/// Determinism and the bound (Principle 3, Principle 10): the strike count and every location and size draw come
+/// from ONE seeded stream keyed on the world identity and the tick index ([`Rng::for_coords`], the observer-safe
+/// coordinate path, the splitmix64 counter style), never floating randomness; the integer strike count is the
+/// expected value's floor plus a seeded Bernoulli on its fractional remainder (deterministic stochastic
+/// rounding, so the run delivers the expected total without authoring a per-tick count), capped at
+/// `per_tick_impact_cap` so the per-tick work is bounded. A degenerate call (a zero-area grid, a grid that does
+/// not match the province field, a non-positive tick duration) or a non-drawable reservoir falls SOFT to the
+/// unchanged state, never a panic and never a fabricated impact.
+pub fn bombard_tick(
+    state: &DeepTimeState,
+    width: usize,
+    height: usize,
+    flux: &ImpactFluxParams,
+    world_seed: u64,
+    tick_index: u64,
+    dt_myr: Fixed,
+) -> DeepTimeState {
+    let mut next = state.clone();
+    let n_cells = width.saturating_mul(height);
+    // Dormant and soft on a degenerate call or a grid-versus-field mismatch: no change, never a panic.
+    if width == 0
+        || height == 0
+        || n_cells != state.columns.len()
+        || state.impact_relief_m.len() != n_cells
+        || dt_myr <= Fixed::ZERO
+    {
+        return next;
+    }
+
+    // The flux DECLINES with epoch. The fraction of the reservoir swept across this tick's interval
+    // [t0, t1] = [elapsed - dt, elapsed] is `rate(t0) - rate(t1)` (the accretion tail's own decline over the
+    // interval, since the cumulative accreted fraction is `1 - rate`), so an early tick (steep decline) captures
+    // many bodies and a late tick (flat, spent tail) few. Clamp the interval start to zero for the first tick.
+    let t1 = state.elapsed_myr;
+    let mut t0 = state.elapsed_myr.checked_sub(dt_myr).unwrap_or(Fixed::ZERO);
+    if t0 < Fixed::ZERO {
+        t0 = Fixed::ZERO;
+    }
+    let rate0 = match tail_rate_fraction(t0, flux.sweep_timescale_myr) {
+        Some(r) => r,
+        None => return next, // a non-positive sweep timescale: no decay defined, no draw
+    };
+    let rate1 = tail_rate_fraction(t1, flux.sweep_timescale_myr).unwrap_or(Fixed::ZERO);
+    let swept_fraction = match rate0.checked_sub(rate1) {
+        Some(f) if f > Fixed::ZERO => f,
+        _ => return next, // no reservoir swept this tick (a spent tail): nothing to draw
+    };
+    // The expected strike count = the reservoir's body count times the fraction swept across the interval.
+    let expected = match flux.reservoir_body_count.checked_mul(swept_fraction) {
+        Some(e) if e > Fixed::ZERO => e,
+        _ => return next,
+    };
+
+    // The integer strike count for the tick: the floor plus a SEEDED Bernoulli on the fractional remainder
+    // (deterministic stochastic rounding, so the run delivers the expected total without authoring a per-tick
+    // count), capped at the determinism-and-cost bound. The stream is keyed on the world identity and the tick,
+    // the observer-safe coordinate path, never floating randomness.
+    let rng = Rng::for_coords(world_seed, &[tick_index]);
+    let floor_count = expected.to_int().max(0) as u64;
+    let remainder = expected
+        .checked_sub(Fixed::from_int(expected.to_int()))
+        .unwrap_or(Fixed::ZERO);
+    let extra = u64::from(rng.unit_fixed(0) < remainder);
+    let count = floor_count
+        .saturating_add(extra)
+        .min(flux.per_tick_impact_cap as u64);
+    if count == 0 {
+        return next;
+    }
+
+    // The running surface the ejecta arcs fly over: the volcanic crust (kilometres, converted to metres) plus
+    // the bombardment relief built so far, so an impact clears the real relief (volcanic highlands AND earlier
+    // craters), and a later strike this tick sees the craters the earlier ones dug.
+    let mut surface_m: Vec<Fixed> = (0..n_cells)
+        .map(|i| {
+            let crust_m = next.crust_thickness_km[i]
+                .checked_mul(Fixed::from_int(1000))
+                .unwrap_or(Fixed::ZERO);
+            crust_m.saturating_add(next.impact_relief_m[i])
+        })
+        .collect();
+
+    for i in 0..count {
+        // Distinct counters per strike keep the location and size draws independent within the tick stream.
+        let source = rng.range_u32(2 * i + 1, n_cells as u32) as usize;
+        let u = rng.unit_fixed(2 * i + 2);
+        let radius = match size_at_number_fraction(
+            u,
+            flux.min_impactor_radius_m,
+            flux.max_impactor_radius_m,
+            flux.differential_slope,
+        ) {
+            Some(r) => r,
+            None => continue, // a non-drawable reservoir (a degenerate range): skip, never fabricate a size
+        };
+        let impactor = Impactor {
+            radius,
+            velocity: flux.impact_velocity_m_s,
+            density: flux.impactor_density,
+        };
+        // Compose the impact onto the surface through the already-built chain: the crater law's paraboloid bowl,
+        // the isotropic ballistic ejecta fan, the conservative redistribution. The returned delta (metres, in the
+        // field's raw bits) sums to exactly zero (the excavated bowl equals the deposited blanket).
+        let delta = apply_impact(
+            width,
+            height,
+            &surface_m,
+            source,
+            impactor,
+            flux.target,
+            flux.coupling,
+            flux.ejecta,
+            flux.forces,
+        );
+        // Land the bowl and blanket in the bombardment-relief field, and keep the running surface in step so the
+        // next strike this tick flies over the updated terrain. Adding the identical conservative delta to both
+        // preserves the impact field's sum exactly (mass is moved, never created or lost).
+        let mut moved = false;
+        for (cell, &d) in delta.iter().enumerate() {
+            if d != 0 {
+                next.impact_relief_m[cell] =
+                    Fixed::from_bits(next.impact_relief_m[cell].to_bits().saturating_add(d));
+                surface_m[cell] = Fixed::from_bits(surface_m[cell].to_bits().saturating_add(d));
+                moved = true;
+            }
+        }
+        if moved {
+            next.impact_count = next.impact_count.saturating_add(1);
+        }
+
+        // HEAT-LEDGER HOOK (a deep-time interior heat ledger does not exist yet, so this posts nowhere). The
+        // impactor delivers kinetic energy `E = 1/2 * m * U^2`, with `m = (4/3) pi radius^3 * impactor_density`,
+        // from THIS event's own data (`impactor` and `flux.impact_velocity_m_s`, both in scope). That energy is
+        // the bombardment heating a young, heavily-struck surface carries, and would post to a deep-time heat
+        // ledger here. It is deliberately NOT formed or accumulated as a fixed-point value: a real impactor's
+        // kinetic energy overflows Q32.32 by many orders (the same reason the crater law returns the ejecta as a
+        // mass RATIO and never forms the impactor mass), so the posting awaits the wide-magnitude energy substrate
+        // (the log-space / Tier-2 units wiring), a sibling to the assembly binding-energy posting gap already
+        // flagged. The hook is this site; the impactor state the energy needs is in scope.
+    }
+
+    next
 }
 
 /// The star-aging parameters the deep-time run reads to derive the main-sequence brightening: the star's ZAMS
@@ -829,6 +1082,228 @@ mod tests {
             "the more-radiogenic province stays hotter after a step, got {} vs {}",
             hot_state.temperature.to_f64_lossy(),
             cool_state.temperature.to_f64_lossy()
+        );
+    }
+
+    // --- the bombardment slice ---
+
+    // A moon-like target and a competent-rock coupling, the crater law's own illustrative fixtures (reserved
+    // rows the law reads, not authored floor values). Mirrors the impact_event and crater tests.
+    fn impact_target() -> Target {
+        Target {
+            gravity: Fixed::from_ratio(162, 100),
+            strength: Fixed::from_int(10_000_000),
+            density: Fixed::from_int(2500),
+        }
+    }
+    fn impact_coupling() -> CraterCoupling {
+        CraterCoupling {
+            velocity_exponent: Fixed::from_ratio(55, 100),
+            density_exponent: Fixed::from_ratio(4, 10),
+            efficiency_coefficient: Fixed::from_ratio(2, 10),
+            strength_coefficient: Fixed::ONE,
+            bowl_aspect: Fixed::from_ratio(2, 10),
+            eject_fraction: Fixed::from_ratio(5, 10),
+        }
+    }
+    // A flux config whose size range resolves on the test grid (2 km cells): impactor radii 300..1500 m open
+    // few-cell to ~ten-cell craters, so every drawn impact leaves a mark. `reservoir` and `tau` set the
+    // bombardment intensity and its decline; `cap` is the determinism-and-cost bound.
+    fn flux_params(reservoir: i32, tau_myr: i32, cap: u32) -> ImpactFluxParams {
+        ImpactFluxParams {
+            reservoir_body_count: Fixed::from_int(reservoir),
+            sweep_timescale_myr: Fixed::from_int(tau_myr),
+            differential_slope: Fixed::from_ratio(35, 10),
+            min_impactor_radius_m: Fixed::from_int(300),
+            max_impactor_radius_m: Fixed::from_int(1500),
+            impact_velocity_m_s: Fixed::from_int(17_000),
+            impactor_density: Fixed::from_int(3000),
+            target: impact_target(),
+            coupling: impact_coupling(),
+            ejecta: EjectaFan {
+                speed: Fixed::from_int(200),
+                elevation_angle: Fixed::HALF_PI.div(Fixed::from_int(2)), // 45 degrees, the max-range angle
+                azimuths: 24,
+            },
+            forces: BallisticForces {
+                gravity: Fixed::from_ratio(162, 100),
+                cell_size: Fixed::from_int(2000),
+                step_cap: 200,
+            },
+            per_tick_impact_cap: cap,
+        }
+    }
+
+    #[test]
+    fn the_bombardment_accumulates_craters_and_conserves_mass() {
+        let (w, h) = (41usize, 41usize);
+        let n = w * h;
+        let flux = flux_params(30, 100, 64);
+        let params = [mantle_params(50)];
+        let mut state = DeepTimeState::young(n, Fixed::from_int(2000));
+        for tick in 0..20u64 {
+            state = step_deep_time(&state, &params, &melt_params(), Fixed::from_int(50))
+                .expect("steps");
+            state = bombard_tick(&state, w, h, &flux, 0x00C0_FFEE, tick, Fixed::from_int(50));
+        }
+        assert!(
+            state.impact_count > 0,
+            "the bombardment carved craters over deep time"
+        );
+        assert!(
+            state.impact_relief_m.iter().any(|&r| r != Fixed::ZERO),
+            "the surface carries the accumulated craters and blankets"
+        );
+        // Mass conserves to the bit: every impact delta sums to exactly zero, so the accumulated impact relief,
+        // starting from zero, sums to exactly zero (the bowls balance the blankets, in raw field bits).
+        let sum: i128 = state
+            .impact_relief_m
+            .iter()
+            .map(|r| r.to_bits() as i128)
+            .sum();
+        assert_eq!(sum, 0, "the impact relief conserves mass to the bit");
+        // Both signs are present: a crater bowl dug below the datum and an ejecta blanket rose above it, so
+        // material was MOVED, never merely added.
+        assert!(
+            state.impact_relief_m.iter().any(|&r| r < Fixed::ZERO),
+            "a crater bowl dug below the datum"
+        );
+        assert!(
+            state.impact_relief_m.iter().any(|&r| r > Fixed::ZERO),
+            "an ejecta blanket rose above the datum"
+        );
+    }
+
+    #[test]
+    fn the_flux_declines_with_epoch_early_heavy_late_quiescent() {
+        let (w, h) = (41usize, 41usize);
+        let n = w * h;
+        // Cap high so it does not bind; the decline is the accretion tail's own, tau = 100 Myr over a 1 Gyr run.
+        let flux = flux_params(24, 100, 100);
+        let params = [mantle_params(50)];
+        let mut state = DeepTimeState::young(n, Fixed::from_int(1600));
+        let (mut early, mut late) = (0u64, 0u64);
+        for tick in 0..20u64 {
+            let before = state.impact_count;
+            state = step_deep_time(&state, &params, &melt_params(), Fixed::from_int(50))
+                .expect("steps");
+            state = bombard_tick(&state, w, h, &flux, 0x0000_BEEF, tick, Fixed::from_int(50));
+            let added = state.impact_count - before;
+            if tick < 5 {
+                early += added;
+            }
+            if tick >= 15 {
+                late += added;
+            }
+        }
+        assert!(early > 0, "the early accretion tail delivers impacts");
+        assert!(
+            early > late,
+            "the bombardment is heavy early and quiescent late (early {early} vs late {late})"
+        );
+    }
+
+    #[test]
+    fn the_bombardment_is_deterministic() {
+        let (w, h) = (41usize, 41usize);
+        let n = w * h;
+        let flux = flux_params(30, 100, 64);
+        let params = [mantle_params(50)];
+        let base = DeepTimeState::young(n, Fixed::from_int(1800));
+        let run = |seed: u64| {
+            let mut s = base.clone();
+            for tick in 0..10u64 {
+                s = step_deep_time(&s, &params, &melt_params(), Fixed::from_int(50))
+                    .expect("steps");
+                s = bombard_tick(&s, w, h, &flux, seed, tick, Fixed::from_int(50));
+            }
+            s
+        };
+        let a = run(0x0000_ABCD);
+        let b = run(0x0000_ABCD);
+        assert_eq!(
+            a.impact_relief_m, b.impact_relief_m,
+            "the same world reproduces the same crater field"
+        );
+        assert_eq!(a.impact_count, b.impact_count, "and the same crater count");
+        let c = run(0x0000_1234);
+        assert!(
+            c.impact_relief_m != a.impact_relief_m || c.impact_count != a.impact_count,
+            "a different world seed bombards differently"
+        );
+    }
+
+    #[test]
+    fn the_bombardment_shares_the_surface_with_the_volcanism() {
+        let (w, h) = (41usize, 41usize);
+        let n = w * h;
+        let flux = flux_params(30, 100, 64);
+        let params = [mantle_params(50)];
+        let base = DeepTimeState::young(n, Fixed::from_int(1800));
+        // Without bombardment: pure interior-and-volcanism evolution.
+        let mut quiet = base.clone();
+        for _ in 0..10 {
+            quiet = step_deep_time(&quiet, &params, &melt_params(), Fixed::from_int(50))
+                .expect("steps");
+        }
+        // With bombardment on the same clock.
+        let mut struck = base.clone();
+        for tick in 0..10u64 {
+            struck = step_deep_time(&struck, &params, &melt_params(), Fixed::from_int(50))
+                .expect("steps");
+            struck = bombard_tick(&struck, w, h, &flux, 0x0000_5EED, tick, Fixed::from_int(50));
+        }
+        // The bombardment touches NEITHER the interior nor the volcanic crust (it is a separate step term).
+        assert_eq!(
+            quiet.columns, struck.columns,
+            "bombardment leaves the interior untouched"
+        );
+        assert_eq!(
+            quiet.crust_thickness_km, struck.crust_thickness_km,
+            "bombardment leaves the volcanic crust untouched"
+        );
+        // But the surface relief differs: the quiet world has no craters, the struck one does.
+        assert!(
+            quiet.impact_relief_m.iter().all(|&r| r == Fixed::ZERO),
+            "the un-bombarded surface has no craters"
+        );
+        assert!(
+            struck.impact_relief_m.iter().any(|&r| r != Fixed::ZERO),
+            "the bombarded surface carries craters"
+        );
+        // Impacts and volcanism co-exist on ONE surface: the provinces built crust AND the impacts carved it.
+        assert!(
+            struck.crust_thickness_km.iter().any(|&c| c > Fixed::ZERO),
+            "the provinces built volcanic crust over the same run"
+        );
+    }
+
+    #[test]
+    fn the_bombardment_is_bounded_and_soft_on_degenerate_input() {
+        let (w, h) = (20usize, 20usize);
+        let n = w * h;
+        let flux = flux_params(1000, 100, 5); // a huge reservoir against a tiny per-tick cap
+        let params = [mantle_params(50)];
+        let mut state = DeepTimeState::young(n, Fixed::from_int(1800));
+        state =
+            step_deep_time(&state, &params, &melt_params(), Fixed::from_int(50)).expect("steps");
+        let struck = bombard_tick(&state, w, h, &flux, 0x1, 0, Fixed::from_int(50));
+        assert!(
+            struck.impact_count - state.impact_count <= 5,
+            "the per-tick cap bounds the strike count regardless of the flux intensity"
+        );
+        // A grid that does not match the province field: no change (soft, never a panic).
+        let mismatch = bombard_tick(&state, w + 1, h, &flux, 0x1, 0, Fixed::from_int(50));
+        assert_eq!(
+            mismatch.impact_relief_m, state.impact_relief_m,
+            "a grid mismatch leaves the surface unchanged"
+        );
+        assert_eq!(mismatch.impact_count, state.impact_count);
+        // A non-positive tick duration draws nothing.
+        let zero = bombard_tick(&state, w, h, &flux, 0x1, 0, Fixed::ZERO);
+        assert_eq!(
+            zero.impact_count, state.impact_count,
+            "a zero-duration tick draws nothing"
         );
     }
 }

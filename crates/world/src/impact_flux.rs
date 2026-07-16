@@ -109,6 +109,50 @@ pub fn mass_fraction_above_size(
     fraction_above(size, min_size, max_size, exponent, false)
 }
 
+/// Draw the body SIZE at a given cumulative number-fraction-above, the INVERSE of
+/// [`number_fraction_above_size`]: given a target fraction `f` in `[0, 1]` (a uniform deviate, for
+/// inverse-transform sampling), return the size `D` whose fraction of bodies above it is exactly `f`. A
+/// uniform draw over `f` therefore samples the size-frequency distribution BY NUMBER, so the drawn size is
+/// small far more often than large (the Dohnanyi swarm: `f = 0` returns `max_size`, no body is larger; `f = 1`
+/// returns `min_size`, every body is larger; monotone in between). The size is not authored: it is a draw from
+/// the world's own reservoir distribution. Formed in ratios to `max_size` so the absolute sizes never enter
+/// fixed point. `None` under the same conditions as [`number_fraction_above_size`]: a slope not above one (the
+/// small end would not converge), non-physical or disordered sizes, a degenerate single-size reservoir, a
+/// fraction outside `[0, 1]`, or a ratio power that overflows (a size range too wide, the log-space refinement).
+pub fn size_at_number_fraction(
+    fraction: Fixed,
+    min_size: Fixed,
+    max_size: Fixed,
+    differential_slope: Fixed,
+) -> Option<Fixed> {
+    if min_size <= Fixed::ZERO || max_size <= Fixed::ZERO || min_size > max_size {
+        return None;
+    }
+    if fraction < Fixed::ZERO || fraction > Fixed::ONE {
+        return None;
+    }
+    // The cumulative-number exponent is `e = 1 - p`; convergence on the small end needs `p > 1`, so `e < 0`.
+    let exponent = Fixed::ONE.checked_sub(differential_slope)?;
+    if exponent >= Fixed::ZERO {
+        return None;
+    }
+    // With `u = D/max_size`, the survival function is `f = (u^e - 1)/(umin^e - 1)`. Invert it: `umin^e > 1`
+    // (since `umin < 1` and `e < 0`), so the span `umin^e - 1` is positive and `u^e = 1 + f (umin^e - 1)` runs
+    // from 1 (at `f = 0`, size `= max_size`) up to `umin^e` (at `f = 1`, size `= min_size`).
+    let umin = min_size.checked_div(max_size)?;
+    let umin_e = umin.powf(exponent);
+    let span = umin_e.checked_sub(Fixed::ONE)?;
+    if span <= Fixed::ZERO {
+        // A degenerate single-size reservoir (`min_size == max_size`): no distribution to draw from.
+        return None;
+    }
+    let u_e = Fixed::ONE.checked_add(fraction.checked_mul(span)?)?;
+    // Invert the power: `u = (u^e)^(1/e)`. The base `u_e >= 1 > 0`, so `powf` is well-defined; `1/e < 0`.
+    let inv_exponent = Fixed::ONE.checked_div(exponent)?;
+    let u = u_e.powf(inv_exponent);
+    u.checked_mul(max_size)
+}
+
 /// The shared cumulative-fraction-above-size kernel for the power-law distribution, in ratios to `max_size`.
 /// With `u = size/max_size` and `umin = min_size/max_size`, a NEGATIVE `exponent` (the number case, `1 - p`)
 /// gives `(u^e - 1) / (umin^e - 1)` and a POSITIVE `exponent` (the mass case, `4 - p`) gives
@@ -285,6 +329,77 @@ mod tests {
         )
         .expect("an alien reservoir resolves");
         assert!(n > Fixed::ZERO && n < Fixed::ONE, "a finite size fraction");
+    }
+
+    #[test]
+    fn the_size_draw_inverts_the_survival_function() {
+        // size_at_number_fraction is the inverse of number_fraction_above_size: drawing the size at a target
+        // fraction and asking its fraction-above recovers the target. The endpoints are exact (f=0 -> max, f=1
+        // -> min); interior fractions round-trip within the fixed-point and powf tolerance.
+        let max =
+            size_at_number_fraction(Fixed::ZERO, dmin(), dmax(), slope()).expect("f=0 resolves");
+        let min =
+            size_at_number_fraction(Fixed::ONE, dmin(), dmax(), slope()).expect("f=1 resolves");
+        assert!(
+            (max.to_f64_lossy() - dmax().to_f64_lossy()).abs() / dmax().to_f64_lossy() < 1e-6,
+            "the fraction-above-zero size is the largest body"
+        );
+        assert!(
+            (min.to_f64_lossy() - dmin().to_f64_lossy()).abs() / dmin().to_f64_lossy() < 1e-3,
+            "the fraction-above-one size is the smallest body, got {}",
+            min.to_f64_lossy()
+        );
+        for &(num, den) in &[(1i64, 10i64), (1, 4), (1, 2), (3, 4), (9, 10)] {
+            let f = Fixed::from_ratio(num, den);
+            let size = size_at_number_fraction(f, dmin(), dmax(), slope()).expect("draws a size");
+            let back =
+                number_fraction_above_size(size, dmin(), dmax(), slope()).expect("its fraction");
+            assert!(
+                (back.to_f64_lossy() - f.to_f64_lossy()).abs() < 0.01,
+                "round-trip f={} recovered {} (size {})",
+                f.to_f64_lossy(),
+                back.to_f64_lossy(),
+                size.to_f64_lossy()
+            );
+        }
+    }
+
+    #[test]
+    fn a_uniform_draw_over_the_survival_function_yields_mostly_small_bodies() {
+        // Inverse-transform sampling: uniform fractions map to sizes concentrated near the small end (the
+        // collisional-cascade swarm), so the median drawn size is far below the geometric mean of the range.
+        let geo_mean = 3162.0; // sqrt(100 * 100000)
+        let mut below = 0;
+        let n = 21;
+        for k in 1..n {
+            let f = Fixed::from_ratio(k as i64, n as i64);
+            let size = size_at_number_fraction(f, dmin(), dmax(), slope()).expect("draws");
+            if size.to_f64_lossy() < geo_mean {
+                below += 1;
+            }
+        }
+        assert!(
+            below > (n - 1) * 3 / 4,
+            "most uniform draws land below the geometric mean (small bodies dominate), got {below}/{}",
+            n - 1
+        );
+    }
+
+    #[test]
+    fn the_size_draw_fails_soft_on_non_physical_inputs() {
+        // A slope not above one, a fraction outside [0,1], and a degenerate single-size reservoir each refuse.
+        assert!(size_at_number_fraction(
+            Fixed::from_ratio(1, 2),
+            dmin(),
+            dmax(),
+            Fixed::from_ratio(5, 10)
+        )
+        .is_none());
+        assert!(size_at_number_fraction(Fixed::from_int(2), dmin(), dmax(), slope()).is_none());
+        assert!(size_at_number_fraction(Fixed::from_int(-1), dmin(), dmax(), slope()).is_none());
+        assert!(
+            size_at_number_fraction(Fixed::from_ratio(1, 2), dmin(), dmin(), slope()).is_none()
+        );
     }
 
     #[test]
