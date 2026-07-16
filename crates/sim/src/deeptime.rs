@@ -44,15 +44,21 @@
 //!
 //! THE BOMBARDMENT slice (this): the impact chain wires onto the same clock. Each tick, after the interior
 //! steps, [`bombard_tick`] draws this tick's impacts from the accretion-tail flux ([`civsim_world::impact_flux`])
-//! and composes each onto the surface through the already-built impact chain (the crater-scaling law, the
-//! ballistic ejecta fan, the conservative redistribution). The flux DECLINES with epoch, so early epochs are
-//! heavily cratered and late ones quiescent (the honest late-heavy-bombardment history, never an authored
+//! and, for each, derives the crater the crater-scaling law opens. Discrete craters are RECORDED AS ROWS, never
+//! rasters: each drawn impact emits a [`CraterRow`] (its position, its true derived rim diameter and bowl depth,
+//! its age) into [`DeepTimeState::craters`], the individual the renderer stamps analytically at the viewport's
+//! own resolution (so a sub-cell crater is a discrete object at its real size, not smeared across a whole coarse
+//! convective cell). The CROSS-SCALE WRITE RULE keeps the large-basin feedback: a crater whose rim diameter is at
+//! or above the convective cell size (the province grid spacing) ALSO rasterizes into the province relief field
+//! ([`DeepTimeState::impact_relief_m`]) through the already-built conservative [`apply_impact`] (the basin that
+//! resurfaces a province, its thermal/province feedback), while a sub-cell crater writes a ROW only. A process
+//! writes into a field only at or above that field's derived scale. The flux DECLINES with epoch, so early epochs
+//! are heavily cratered and late ones quiescent (the honest late-heavy-bombardment history, never an authored
 //! curve); the impact sizes are DRAWN from the collisional-cascade size-frequency distribution (large basins
-//! rare, small craters common), never a fixed size; and every impact conserves mass exactly (the excavated bowl
-//! equals the deposited blanket), so the crater bowls and ejecta blankets accumulate onto the SAME surface the
-//! provinces build. The draw is a deterministic seeded draw keyed on the world identity and the tick (the
-//! splitmix64 counter stream, never floating randomness), bounded by a per-tick cap. It is a term SEPARATE from
-//! [`step_deep_time`] so a run that does not bombard replays bit-for-bit.
+//! rare, small craters common), never a fixed size; the large-basin raster conserves mass exactly (the excavated
+//! bowl equals the deposited blanket). The draw is a deterministic seeded draw keyed on the world identity and the
+//! tick (the splitmix64 counter stream, never floating randomness), bounded by a per-tick cap. It is a term
+//! SEPARATE from [`step_deep_time`] so a run that does not bombard replays bit-for-bit.
 //!
 //! THE SUPPORT-BOUND COLLAPSE slice (this): the mechanical-strength BOUND on topography. The volcanic crust and
 //! the impact record compose into a surface relief the Airy isostasy floats ([`airy_isostatic_elevation`]), and a
@@ -82,17 +88,41 @@ use civsim_materials::properties::operative_shear_strength_gpa;
 use civsim_physics::geodynamics::airy_isostatic_elevation;
 use civsim_physics::melting::adiabatic_melt_column;
 use civsim_world::ballistic::{BallisticForces, EjectaFan};
-use civsim_world::crater::{CraterCoupling, Impactor, Target};
+use civsim_world::crater::{crater, CraterCoupling, Impactor, Target};
 use civsim_world::impact_event::apply_impact;
 use civsim_world::impact_flux::{size_at_number_fraction, tail_rate_fraction};
 use civsim_world::redistribute::{redistribute, Redistribution, Weighted};
 use civsim_world::terrain::relief_datum;
 
+/// One DISCRETE crater the bombardment drew, recorded as a ROW (never a raster): its position on the surface, the
+/// crater law's own derived rim diameter and transient bowl depth, and its age. The renderer stamps it
+/// analytically at the viewport's resolution (the viewer's crater stamp), so the crater is a discrete object at
+/// its true derived size down to the finest scale any zoom resolves, rather than a sub-cell feature smeared
+/// across a whole coarse convective cell. The position is the drawn cell's centre as a normalized surface
+/// coordinate `(u, v)` (longitude fraction in `[0, 1)`, latitude fraction in `[0, 1]`), resolution-independent so
+/// a finer display grid resolves it. The diameter and depth are the crater-scaling law's outputs
+/// ([`civsim_world::crater::crater`]), so the morphology conditions on the world (a low-gravity or weak-target
+/// world craters differently). The age is the geological time (megayears) at the strike, carried for a later
+/// age-dependent degradation (a fresh crater is sharp, an old one relaxed); this slice stamps every row fresh.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CraterRow {
+    /// The crater centre's longitude fraction in `[0, 1)` (the drawn cell's centre).
+    pub u: Fixed,
+    /// The crater centre's latitude fraction in `[0, 1]` (the drawn cell's centre).
+    pub v: Fixed,
+    /// The transient rim diameter (metres), the crater-scaling law's own output.
+    pub diameter_m: Fixed,
+    /// The transient bowl depth (metres), the crater-scaling law's own output (`bowl_aspect * diameter`).
+    pub depth_m: Fixed,
+    /// The geological time at the strike (megayears), carried for a later age-dependent crater degradation.
+    pub age_myr: Fixed,
+}
+
 /// The deep-time state of a derived planet: a lateral field of interior mantle columns (one per surface cell or
-/// province), the crust each column has BUILT so far, and the geological time elapsed. The field is the spatial
-/// extent the lateral variation lives in: each column carries its own thermal state and its own accumulated
-/// crust, so provinces emerge from columns that evolve differently, never an authored arrangement. The star's age
-/// rides this same clock (`star_age_start_myr + elapsed_myr`); the impact record joins the state in a later slice.
+/// province), the crust each column has BUILT so far, the geological time elapsed, and the discrete crater ROWS
+/// the bombardment drew. The field is the spatial extent the lateral variation lives in: each column carries its
+/// own thermal state and its own accumulated crust, so provinces emerge from columns that evolve differently,
+/// never an authored arrangement. The star's age rides this same clock (`star_age_start_myr + elapsed_myr`).
 #[derive(Clone, Debug, PartialEq)]
 pub struct DeepTimeState {
     /// The interior mantle columns, one per lateral cell, each evolving by its own convection over deep time.
@@ -104,21 +134,27 @@ pub struct DeepTimeState {
     pub crust_thickness_km: Vec<Fixed>,
     /// The geological time elapsed (megayears), the clock the provinces are written against.
     pub elapsed_myr: Fixed,
-    /// The accumulated BOMBARDMENT RELIEF (metres), one per lateral cell, that the deep-time impact chain has
-    /// carved and blanketed onto the surface so far ([`bombard_tick`]). It co-evolves with the volcanic
-    /// `crust_thickness_km` on the SAME grid and clock: the two compose into one surface relief, the crater bowls
-    /// and ejecta blankets riding on the crust the provinces build (the surface the viewer reads is
-    /// `crust_thickness_km * 1000 + impact_relief_m`, in metres; a downstream viewer slice composes and draws it).
-    /// It is in METRES, the crater law's own length units (the impactor radius, crater diameter, and depth are
-    /// one length scale), whereas the volcanic crust is in kilometres, so the two carry their own units and the
-    /// composition converts. A fresh planet has none; every impact adds a conservative delta (the excavated bowl
-    /// equals the deposited blanket, so an impact never changes this field's sum), so the accumulated relief is
-    /// the written record of the world's bombardment history, never an authored map.
+    /// The accumulated LARGE-BASIN bombardment relief (metres), one per lateral cell, the province-scale
+    /// topography the CROSS-SCALE WRITE RULE deposits: only a crater at or above the convective cell size (a
+    /// basin that resurfaces a province) rasterizes here, through the conservative [`apply_impact`], for its
+    /// thermal/province feedback. A sub-cell crater writes a [`CraterRow`] only and never touches this field, so
+    /// the coarse province field is no longer smeared with sub-cell craters (rows not rasters). It is in METRES
+    /// (the crater law's own length units), whereas the volcanic crust is in kilometres, so the two carry their
+    /// own units. A fresh planet has none; each large-basin impact adds a conservative delta (the excavated bowl
+    /// equals the deposited blanket, so an impact never changes this field's sum). By default (sub-cell craters at
+    /// the ~thousand-km province scale) this field stays zero and the whole crater record lives in `craters`; a
+    /// basin-scale impactor restores its own province feedback here.
     pub impact_relief_m: Vec<Fixed>,
-    /// The number of impacts that have carved a crater on the surface over the run so far (an impact that
-    /// resolved on the grid and moved material), the bombardment-history count. Heavily struck early (the
-    /// accretion tail is intense) and quiescent late (the reservoir is swept up), the honest decline the flux
-    /// model drives; the derived record, not an authored intensity.
+    /// The discrete crater ROWS the bombardment drew over the run so far ([`CraterRow`]), the individual-crater
+    /// record the renderer stamps analytically at the viewport's resolution (rows not rasters, down to the finest
+    /// scale any zoom resolves). Each drawn impact whose crater the law resolves appends one row here, at its true
+    /// derived size and position. Heavily struck early and quiescent late (the flux declines with epoch), the
+    /// derived record, not an authored map.
+    pub craters: Vec<CraterRow>,
+    /// The number of discrete craters the bombardment has drawn over the run so far (`craters.len()`, an impact
+    /// whose crater the law resolved), the bombardment-history count. Heavily struck early (the accretion tail is
+    /// intense) and quiescent late (the reservoir is swept up), the honest decline the flux model drives; the
+    /// derived record, not an authored intensity.
     pub impact_count: u64,
     /// The star's main-sequence AGE (megayears) when this run began: the star and the planet share one clock, so
     /// the star's current age is this start age plus `elapsed_myr` ([`DeepTimeState::star_age_myr`]). A fresh
@@ -152,6 +188,7 @@ impl DeepTimeState {
             crust_thickness_km: vec![Fixed::ZERO; n_cells],
             elapsed_myr: Fixed::ZERO,
             impact_relief_m: vec![Fixed::ZERO; n_cells],
+            craters: Vec::new(),
             impact_count: 0,
             star_age_start_myr: Fixed::ZERO,
         }
@@ -320,6 +357,7 @@ pub fn step_deep_time(
         // interior tick carries the impact record forward unchanged and stays byte-identical for a run that does
         // not bombard (the viewer's existing interior-and-volcanism step is untouched).
         impact_relief_m: state.impact_relief_m.clone(),
+        craters: state.craters.clone(),
         impact_count: state.impact_count,
         // The star's start age is a per-run constant; its CURRENT age advances through `elapsed_myr` above, so the
         // star ages on the same clock as the interior without a separate step term.
@@ -383,19 +421,22 @@ pub struct ImpactFluxParams {
     pub per_tick_impact_cap: u32,
 }
 
-/// THE BOMBARDMENT: draw this tick's impacts from the accretion-tail flux and apply each onto the deep-time
-/// surface, returning the next state with the crater bowls and ejecta blankets accumulated into
-/// [`DeepTimeState::impact_relief_m`] and the [`DeepTimeState::impact_count`] advanced. Call it AFTER
-/// [`step_deep_time`] each tick, so `state.elapsed_myr` is the tick's END: the flux interval is
+/// THE BOMBARDMENT: draw this tick's impacts from the accretion-tail flux and record each as a discrete crater
+/// ROW ([`DeepTimeState::craters`], the individual the renderer stamps analytically), applying the CROSS-SCALE
+/// WRITE RULE so a crater at or above the convective cell size ALSO rasterizes into
+/// [`DeepTimeState::impact_relief_m`] (the large-basin province feedback) while a sub-cell crater writes a ROW
+/// only. Returns the next state with the crater rows appended and the [`DeepTimeState::impact_count`] advanced.
+/// Call it AFTER [`step_deep_time`] each tick, so `state.elapsed_myr` is the tick's END: the flux interval is
 /// `[elapsed_myr - dt_myr, elapsed_myr]`, and the fraction of the reservoir swept across it (the accretion
 /// tail's own decline, `rate(t0) - rate(t1)`) is the expected strike count once scaled by the reservoir's body
 /// count. Because that decline is steep early and flat late, an early tick draws many impacts and a late one
 /// few (the honest late-heavy-bombardment history), never an authored bombardment curve. Each impact's size is
 /// DRAWN from the collisional-cascade size-frequency distribution ([`size_at_number_fraction`], large basins
 /// rare and small craters common), its location a uniform cell (the maximum-entropy prior, no authored spatial
-/// pattern), and it is composed onto the surface through the already-built [`apply_impact`] (the crater-scaling
-/// law, the ballistic ejecta fan, the conservative redistribution); the returned delta sums to exactly zero, so
-/// the impact relief's sum never changes (mass is moved, never created or lost).
+/// pattern), and the crater-scaling law ([`crater`]) derives its rim diameter and bowl depth (the row's size).
+/// A large basin's raster goes through the already-built [`apply_impact`] (the crater-scaling law, the ballistic
+/// ejecta fan, the conservative redistribution); the returned delta sums to exactly zero, so the impact relief's
+/// sum never changes (mass is moved, never created or lost).
 ///
 /// Determinism and the bound (Principle 3, Principle 10): the strike count and every location and size draw come
 /// from ONE seeded stream keyed on the world identity and the tick index ([`Rng::for_coords`], the observer-safe
@@ -497,34 +538,59 @@ pub fn bombard_tick(
             velocity: flux.impact_velocity_m_s,
             density: flux.impactor_density,
         };
-        // Compose the impact onto the surface through the already-built chain: the crater law's paraboloid bowl,
-        // the isotropic ballistic ejecta fan, the conservative redistribution. The returned delta (metres, in the
-        // field's raw bits) sums to exactly zero (the excavated bowl equals the deposited blanket).
-        let delta = apply_impact(
-            width,
-            height,
-            &surface_m,
-            source,
-            impactor,
-            flux.target,
-            flux.coupling,
-            flux.ejecta,
-            flux.forces,
-        );
-        // Land the bowl and blanket in the bombardment-relief field, and keep the running surface in step so the
-        // next strike this tick flies over the updated terrain. Adding the identical conservative delta to both
-        // preserves the impact field's sum exactly (mass is moved, never created or lost).
-        let mut moved = false;
-        for (cell, &d) in delta.iter().enumerate() {
-            if d != 0 {
-                next.impact_relief_m[cell] =
-                    Fixed::from_bits(next.impact_relief_m[cell].to_bits().saturating_add(d));
-                surface_m[cell] = Fixed::from_bits(surface_m[cell].to_bits().saturating_add(d));
-                moved = true;
+        // The crater the scaling law derives for this strike: its rim diameter and transient bowl depth, the
+        // row's true size and the cross-scale threshold's comparand. A non-physical or unbounded impact yields no
+        // crater; skip it, never fabricate a size.
+        let bowl = match crater(impactor, flux.target, flux.coupling) {
+            Some(c) => c,
+            None => continue,
+        };
+
+        // EMIT THE ROW: the discrete crater individual, recorded at its true derived size (rows not rasters). The
+        // position is the drawn cell's CENTRE as a normalized surface coordinate `(u, v)`, resolution-independent
+        // so a finer display grid resolves it; the diameter and depth are the crater law's own outputs, so the
+        // morphology conditions on the world. The renderer stamps it analytically at the viewport's resolution.
+        let col = (source % width) as i64;
+        let row = (source / width) as i64;
+        next.craters.push(CraterRow {
+            u: Fixed::from_ratio(2 * col + 1, 2 * width as i64),
+            v: Fixed::from_ratio(2 * row + 1, 2 * height as i64),
+            diameter_m: bowl.diameter,
+            depth_m: bowl.depth,
+            age_myr: t1,
+        });
+        next.impact_count = next.impact_count.saturating_add(1);
+
+        // THE CROSS-SCALE WRITE RULE: a process writes into a field only at or above that field's derived scale.
+        // A crater whose rim diameter is at or above the convective cell size (`flux.forces.cell_size`, the
+        // province grid spacing) STILL rasterizes into the province relief field, through the built conservative
+        // [`apply_impact`] (the basin that resurfaces a province, its thermal/province feedback). A sub-cell
+        // crater has written its ROW above and touches this coarse field no further (rows not rasters), so the
+        // province field is no longer smeared with sub-cell craters.
+        if bowl.diameter >= flux.forces.cell_size {
+            // Compose the basin onto the province surface through the already-built chain: the crater law's
+            // paraboloid bowl, the isotropic ballistic ejecta fan, the conservative redistribution. The returned
+            // delta (metres, in the field's raw bits) sums to exactly zero (excavated bowl equals deposited
+            // blanket). Land it in the relief field and keep the running surface in step so a later basin this
+            // tick flies over the updated terrain; adding the identical delta to both preserves the sum exactly.
+            let delta = apply_impact(
+                width,
+                height,
+                &surface_m,
+                source,
+                impactor,
+                flux.target,
+                flux.coupling,
+                flux.ejecta,
+                flux.forces,
+            );
+            for (cell, &d) in delta.iter().enumerate() {
+                if d != 0 {
+                    next.impact_relief_m[cell] =
+                        Fixed::from_bits(next.impact_relief_m[cell].to_bits().saturating_add(d));
+                    surface_m[cell] = Fixed::from_bits(surface_m[cell].to_bits().saturating_add(d));
+                }
             }
-        }
-        if moved {
-            next.impact_count = next.impact_count.saturating_add(1);
         }
 
         // HEAT-LEDGER HOOK (a deep-time interior heat ledger does not exist yet, so this posts nowhere). The
@@ -1526,10 +1592,14 @@ mod tests {
             a.impact_relief_m, b.impact_relief_m,
             "the same world reproduces the same crater field"
         );
+        assert_eq!(
+            a.craters, b.craters,
+            "the same world reproduces the same discrete crater rows"
+        );
         assert_eq!(a.impact_count, b.impact_count, "and the same crater count");
         let c = run(0x0000_1234);
         assert!(
-            c.impact_relief_m != a.impact_relief_m || c.impact_count != a.impact_count,
+            c.craters != a.craters || c.impact_count != a.impact_count,
             "a different world seed bombards differently"
         );
     }
@@ -1605,6 +1675,63 @@ mod tests {
         assert_eq!(
             zero.impact_count, state.impact_count,
             "a zero-duration tick draws nothing"
+        );
+    }
+
+    #[test]
+    fn every_impact_records_a_row_and_the_cross_scale_rule_gates_the_raster() {
+        // THE CROSS-SCALE WRITE RULE (rows not rasters, keep the large-basin feedback). Every drawn impact whose
+        // crater resolves records a discrete ROW; only a crater at or above the convective cell size ALSO
+        // rasterizes into the coarse province field. Run the same bombardment against two cell sizes.
+        let (w, h) = (41usize, 41usize);
+        let n = w * h;
+        let params = [mantle_params(50)];
+        let run = |cell_size: Fixed| -> DeepTimeState {
+            let mut flux = flux_params(30, 100, 64);
+            flux.forces.cell_size = cell_size;
+            let mut state = DeepTimeState::young(n, Fixed::from_int(1800));
+            for tick in 0..10u64 {
+                state = step_deep_time(&state, &params, &melt_params(), Fixed::from_int(50))
+                    .expect("steps");
+                state = bombard_tick(&state, w, h, &flux, 0x00C0_FFEE, tick, Fixed::from_int(50));
+            }
+            state
+        };
+        // A cell far larger than any crater the flux draws (the ~thousand-km province scale against kilometre-
+        // class craters): every crater is SUB-CELL, so it writes a ROW only and the coarse field stays untouched.
+        let sub_cell = run(Fixed::from_int(10_000_000)); // a 10,000 km cell: no crater reaches it
+        assert!(
+            !sub_cell.craters.is_empty(),
+            "a sub-cell impact still records a discrete crater row"
+        );
+        assert_eq!(
+            sub_cell.craters.len() as u64,
+            sub_cell.impact_count,
+            "the crater count is the number of rows"
+        );
+        assert!(
+            sub_cell.impact_relief_m.iter().all(|&r| r == Fixed::ZERO),
+            "a sub-cell crater writes NO raster into the coarse province field (rows not rasters)"
+        );
+        // A cell far below the crater sizes (a 2 km cell against kilometre-class craters): the SAME craters now
+        // exceed the cell size, so each ALSO rasterizes into the province field (the large-basin feedback path).
+        let basin = run(Fixed::from_int(2000));
+        assert!(!basin.craters.is_empty(), "the same impacts record rows");
+        assert!(
+            basin.impact_relief_m.iter().any(|&r| r != Fixed::ZERO),
+            "a crater at or above the cell size rasterizes into the province field (the cross-scale feedback)"
+        );
+        // The large-basin raster still conserves mass to the bit (the excavated bowl equals the deposited blanket).
+        let sum: i128 = basin
+            .impact_relief_m
+            .iter()
+            .map(|r| r.to_bits() as i128)
+            .sum();
+        assert_eq!(sum, 0, "the large-basin raster conserves mass to the bit");
+        // The two runs drew the SAME craters (same seed and draw stream); only the raster gating differs.
+        assert_eq!(
+            sub_cell.craters, basin.craters,
+            "the cross-scale rule gates the raster, not the row draw: the rows are identical"
         );
     }
 

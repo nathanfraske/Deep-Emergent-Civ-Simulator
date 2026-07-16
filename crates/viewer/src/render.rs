@@ -32,6 +32,7 @@ use civsim_physics::band_gap::BandGapColumn;
 use civsim_physics::crystal_field::{cm_to_ev, CrystalFieldTables};
 use civsim_physics::periodic::PeriodicTable;
 use civsim_physics::polarizability::element_electronic_polarizability_a0_cubed;
+use civsim_sim::deeptime::CraterRow;
 use civsim_sim::genesis::LivingWorld;
 use civsim_sim::geodynamics::DerivedTile;
 use civsim_world::terrain::TerrainRelief;
@@ -1066,6 +1067,136 @@ fn normalize3(v: [f32; 3]) -> [f32; 3] {
     }
 }
 
+/// The radius, in rim-radii, out to which the ejecta blanket is stamped: a display COMPUTE bound (how far the
+/// `x^-3` blanket is worth evaluating: by three rim-radii it is `1/27` of the rim height, under one percent of
+/// the bowl depth), never a physical range. Its sibling is the crater law's ballistic step cap, a like bound.
+const CRATER_STAMP_REACH: Fixed = Fixed::from_int(3);
+
+/// The BODY-frame unit point of a crater/sample normalized surface coordinate `(u, v)` (longitude fraction in
+/// `[0, 1)`, latitude fraction in `[0, 1]`), the same `lon = u*2pi - pi`, `lat = (0.5 - v)*pi` sphere map
+/// [`uv_to_body`] uses, so a crater centre and a sampled surface point land in one frame. Fixed-point (Principle
+/// 3), display-only math (Principle 10).
+fn crater_uv_unit(u: Fixed, v: Fixed) -> [Fixed; 3] {
+    let tau = Fixed::PI.mul(Fixed::from_int(2));
+    let lon = u.mul(tau) - Fixed::PI;
+    let lat = (Fixed::from_ratio(1, 2) - v).mul(Fixed::PI);
+    let (sin_lat, cos_lat) = lat.sin_cos();
+    let (sin_lon, cos_lon) = lon.sin_cos();
+    [cos_lat.mul(sin_lon), sin_lat, cos_lat.mul(cos_lon)]
+}
+
+/// A crater ROW prepared for the analytic surface stamp: its centre as a unit vector on the globe, its angular
+/// rim radius (radians), its bowl depth (kilometres), and the cosine of its reach cone (the bound a distant
+/// sample fails cheaply, without the great-circle angle). Precomputed once per crater from a [`CraterRow`] and
+/// the body radius, so the per-sample stamp is a dot product for the far majority and one great-circle angle
+/// near the crater. Display-only (Principle 10): the canon is the row (position, diameter, depth, age); this is
+/// its rendering form.
+#[derive(Clone, Copy, Debug)]
+pub struct CraterStamp {
+    center: [Fixed; 3],
+    /// alpha = (diameter / 2) / R_planet, the crater's rim radius as an angle on the sphere (radians).
+    angular_radius: Fixed,
+    /// The crater law's transient bowl depth, in kilometres (the tile field's unit).
+    depth_km: Fixed,
+    /// cos(CRATER_STAMP_REACH * alpha): a sample whose centre-dot is below this lies outside the reach cone.
+    cos_reach: Fixed,
+}
+
+impl CraterStamp {
+    /// Prepare a crater row for the analytic stamp against a body of radius `radius_m` (metres). `None` on a
+    /// degenerate row (a non-positive radius or diameter), so a bad row is skipped rather than fabricated.
+    pub fn from_row(row: &CraterRow, radius_m: Fixed) -> Option<CraterStamp> {
+        if radius_m <= Fixed::ZERO || row.diameter_m <= Fixed::ZERO {
+            return None;
+        }
+        // alpha = (D/2) / R: the rim radius as an angle on the sphere. A low-g or weak-target world's larger
+        // crater subtends a larger angle by its own crater-law diameter, so the morphology conditions on the world.
+        let angular_radius = row
+            .diameter_m
+            .checked_div(Fixed::from_int(2))?
+            .checked_div(radius_m)?;
+        if angular_radius <= Fixed::ZERO {
+            return None;
+        }
+        let depth_km = row.depth_m.checked_div(Fixed::from_int(1000))?;
+        let cos_reach = angular_radius.checked_mul(CRATER_STAMP_REACH)?.cos();
+        Some(CraterStamp {
+            center: crater_uv_unit(row.u, row.v),
+            angular_radius,
+            depth_km,
+            cos_reach,
+        })
+    }
+}
+
+/// Prepare the crater rows of a deep-time state as analytic stamps against a body of radius `radius_m` (metres),
+/// dropping any degenerate row. The caller builds this once, then samples it across the display tile grid (the
+/// sample cache) through [`crater_relief_km`]. Display-only (Principle 10).
+pub fn crater_stamps(craters: &[CraterRow], radius_m: Fixed) -> Vec<CraterStamp> {
+    craters
+        .iter()
+        .filter_map(|row| CraterStamp::from_row(row, radius_m))
+        .collect()
+}
+
+/// THE ANALYTIC CRATER STAMP: the summed elevation offset (kilometres) of every crater row covering the surface
+/// sample point `p` (its unit vector on the globe, from [`crater_uv_unit`] on the sample's `(u, v)`). Each crater
+/// contributes the crater law's OWN shape at the angular distance `d` from its centre, in rim-radii `x = d /
+/// alpha`: inside the rim (`x <= 1`) the paraboloid excavation bowl `-h (1 - x^2)` (the same shape the built
+/// impact composer digs, deepest `h` at the centre, zero at the rim), and outside the rim (`1 < x <= reach`) the
+/// ejecta rim/blanket `(h/4) x^-3`, whose `x^-3` falloff is the cited lunar ejecta-thickness law (McGetchin 1973)
+/// and whose amplitude `h/4` is DERIVED (no authored value) by conserving the excavated bowl volume `(pi/2) h R^2`
+/// against the blanket integral `2 pi (h/4) R^2`. This is the stamp the ruling prescribes: at a coarse sample the
+/// big craters show, at a fine sample the small ones resolve, from ONE row list; the existing hillshade shades the
+/// stamped relief. `h` is the crater law's transient bowl depth, so a large fresh crater reads deep (the
+/// simple-crater `bowl_aspect` with no complex-crater depth flattening is the crater law's own honest limit, off
+/// this display path). The great-circle angle uses the small-crater domain (a sample inside the reach cone, so
+/// `d <= reach*alpha`); a basin-scale row's rim stays within a hemisphere. The caller passes `p` precomputed (a
+/// grid sampler builds it separably, one latitude sin/cos per row and one longitude sin/cos per column, so the
+/// per-sample cost is a dot product, not trig). Deterministic fixed-point display math (Principle 3, Principle 10).
+pub fn crater_relief_km(stamps: &[CraterStamp], p: [Fixed; 3]) -> Fixed {
+    if stamps.is_empty() {
+        return Fixed::ZERO;
+    }
+    let mut z = Fixed::ZERO;
+    for s in stamps {
+        // The reach-cone bound: cos(great-circle angle) is the dot product, so a sample below cos_reach lies
+        // outside the crater's blanket and is skipped without the great-circle angle (the cheap far-majority path).
+        let dot = p[0].mul(s.center[0]) + p[1].mul(s.center[1]) + p[2].mul(s.center[2]);
+        if dot < s.cos_reach {
+            continue;
+        }
+        // The great-circle central angle from the cross-product magnitude (|p x c| = sin(angle)), precise for the
+        // small crater angles here (dot >= cos_reach >= 0, so the angle is at most the reach, within a hemisphere).
+        let cx = p[1].mul(s.center[2]) - p[2].mul(s.center[1]);
+        let cy = p[2].mul(s.center[0]) - p[0].mul(s.center[2]);
+        let cz = p[0].mul(s.center[1]) - p[1].mul(s.center[0]);
+        let cross_mag = (cx.mul(cx) + cy.mul(cy) + cz.mul(cz)).sqrt();
+        let angle = cross_mag.asin();
+        let x = match angle.checked_div(s.angular_radius) {
+            Some(x) => x,
+            None => continue,
+        };
+        let contribution = if x <= Fixed::ONE {
+            // The paraboloid excavation bowl: -h (1 - x^2), the built impact composer's own dig shape.
+            Fixed::ZERO - s.depth_km.mul(Fixed::ONE - x.mul(x))
+        } else {
+            // The ejecta rim/blanket: (h/4) x^-3, the McGetchin falloff at the bowl-conserving amplitude h/4.
+            let x3 = x.mul(x).mul(x);
+            match s
+                .depth_km
+                .checked_div(Fixed::from_int(4))
+                .and_then(|q| q.checked_div(x3))
+            {
+                Some(e) => e,
+                None => continue,
+            }
+        };
+        z += contribution;
+    }
+    z
+}
+
 /// The DERIVED tile relief at surface coordinate (u, v) (each in `[0, 1)`), an orthographic read of the derived relief
 /// field wrapped onto the globe (the same (u, v) -> cell mapping [`pick_surface_tile`] inverts). `None` for an empty
 /// field, so the caller falls back to a stand-in. Display-only.
@@ -2037,6 +2168,105 @@ fn draw_line(buf: &mut [u32], w: usize, h: usize, x0: i32, y0: i32, x1: i32, y1:
 mod tests {
     use super::*;
     use civsim_sim::genesis::{genesis, GenesisParams};
+
+    // A crater row centred at (u, v) = (0.5, 0.5) (the sub-solar-frame equator, prime facing), with a given rim
+    // diameter and bowl depth (metres), for the analytic-stamp shape tests.
+    fn crater_row(diameter_m: i32, depth_m: i32) -> CraterRow {
+        CraterRow {
+            u: Fixed::from_ratio(1, 2),
+            v: Fixed::from_ratio(1, 2),
+            diameter_m: Fixed::from_int(diameter_m),
+            depth_m: Fixed::from_int(depth_m),
+            age_myr: Fixed::ZERO,
+        }
+    }
+
+    #[test]
+    fn the_crater_stamp_is_a_bowl_inside_the_rim_and_an_ejecta_rim_outside() {
+        // A 60 km crater 6 km deep on a 3000 km body: the stamp is the crater law's own shape. At the centre it is
+        // the full bowl depth below the surface; at the rim it returns to the surface; just outside it rises as the
+        // ejecta rim; far away it is zero. This proves the analytic stamp the renderer composes (rows not rasters).
+        let radius_m = Fixed::from_int(3_000_000);
+        let stamps = crater_stamps(&[crater_row(60_000, 6_000)], radius_m);
+        assert_eq!(stamps.len(), 1, "the crater row prepares one stamp");
+        let center = crater_uv_unit(Fixed::from_ratio(1, 2), Fixed::from_ratio(1, 2));
+        let bottom = crater_relief_km(&stamps, center).to_f64_lossy();
+        assert!(
+            (bottom - (-6.0)).abs() < 0.2,
+            "the bowl centre sits at minus the crater depth (~-6 km), got {bottom:.3} km"
+        );
+        // A point one rim-radius away (alpha = (30 km)/(3000 km) = 0.01 rad in longitude, at the equator lon =
+        // u*2pi - pi so du = alpha/(2pi)): the paraboloid returns to zero at the rim.
+        let alpha = 30_000.0 / 3_000_000.0; // 0.01 rad
+        let du_rim = alpha / (2.0 * std::f64::consts::PI);
+        let u_rim = Fixed::from_ratio(((0.5 + du_rim) * 1_000_000.0) as i64, 1_000_000);
+        let at_rim = crater_relief_km(&stamps, crater_uv_unit(u_rim, Fixed::from_ratio(1, 2)))
+            .to_f64_lossy();
+        assert!(
+            at_rim.abs() < 0.6,
+            "the paraboloid bowl returns to the surface at the rim, got {at_rim:.3} km"
+        );
+        // Just outside the rim (1.5 rim-radii): the ejecta rim/blanket is positive (raised).
+        let du_out = 1.5 * alpha / (2.0 * std::f64::consts::PI);
+        let u_out = Fixed::from_ratio(((0.5 + du_out) * 1_000_000.0) as i64, 1_000_000);
+        let outside = crater_relief_km(&stamps, crater_uv_unit(u_out, Fixed::from_ratio(1, 2)))
+            .to_f64_lossy();
+        assert!(
+            outside > 0.0,
+            "the ejecta rim outside the crater is raised (positive), got {outside:.3} km"
+        );
+        // Far away (the opposite side of the globe): no contribution.
+        let far = crater_relief_km(
+            &stamps,
+            crater_uv_unit(Fixed::ZERO, Fixed::from_ratio(1, 2)),
+        )
+        .to_f64_lossy();
+        assert_eq!(
+            far, 0.0,
+            "a crater contributes nothing to the far side of the globe"
+        );
+    }
+
+    #[test]
+    fn a_bigger_crater_stamps_a_deeper_wider_bowl() {
+        // The morphology conditions on the crater law's outputs: a larger, deeper crater stamps a deeper bowl over a
+        // wider footprint, from the SAME analytic function (rows carry the derived size).
+        let radius_m = Fixed::from_int(3_000_000);
+        let small = crater_stamps(&[crater_row(30_000, 3_000)], radius_m);
+        let big = crater_stamps(&[crater_row(90_000, 9_000)], radius_m);
+        let center = crater_uv_unit(Fixed::from_ratio(1, 2), Fixed::from_ratio(1, 2));
+        let ds = crater_relief_km(&small, center).to_f64_lossy();
+        let db = crater_relief_km(&big, center).to_f64_lossy();
+        assert!(
+            db < ds && db < -8.0 && ds > -4.0,
+            "the bigger crater stamps a deeper bowl ({db:.2} km vs {ds:.2} km)"
+        );
+        // A point at a fixed small angular distance sits inside the big crater but outside the small one, so the big
+        // crater still digs there while the small one is already past its rim (a wider footprint).
+        let du = 20_000.0 / 3_000_000.0 / (2.0 * std::f64::consts::PI); // ~0.67 small-rim-radii, 0.44 big
+        let off = crater_uv_unit(
+            Fixed::from_ratio(((0.5 + du) * 1_000_000.0) as i64, 1_000_000),
+            Fixed::from_ratio(1, 2),
+        );
+        assert!(
+            crater_relief_km(&big, off).to_f64_lossy()
+                < crater_relief_km(&small, off).to_f64_lossy(),
+            "the wider crater digs at a distance where the narrow one has ended"
+        );
+    }
+
+    #[test]
+    fn a_degenerate_crater_row_prepares_no_stamp() {
+        let radius_m = Fixed::from_int(3_000_000);
+        assert!(
+            crater_stamps(&[crater_row(0, 6_000)], radius_m).is_empty(),
+            "a zero-diameter row prepares no stamp (skipped, not fabricated)"
+        );
+        assert!(
+            crater_stamps(&[crater_row(60_000, 6_000)], Fixed::ZERO).is_empty(),
+            "a zero-radius body prepares no stamp"
+        );
+    }
 
     #[test]
     fn organism_colour_is_deterministic_and_layer_keyed() {
