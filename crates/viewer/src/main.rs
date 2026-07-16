@@ -434,6 +434,9 @@ fn globe_cmd(argv: &[String]) {
         None,
         // The demo fixture carries no deep-time province temperatures, so no lava glow (byte-identical).
         None,
+        // The demo fixture carries no province field, so no analytic Sample: the hillshade falls back to the
+        // cache's finite difference, byte-identical to before the analytic normals.
+        None,
     );
     write_ppm(&path, w, h, &buf);
     eprintln!(
@@ -564,6 +567,13 @@ fn derived_globe_cmd(argv: &[String]) {
     }
     // Paint the sphere the crust's DERIVED material colour (the same the interactive `--derived` viewer shows), so the
     // headless render matches what the owner sees on screen. The globe is lit by the DERIVED sun direction above.
+    // THE ANALYTIC SAMPLE FIELD: the shading takes its normal as the analytic GRADIENT of this superposition,
+    // rather than finite-differencing the cache, so the relief is lit at the true slope of the canonical field.
+    let stamps = scene.crater_stamps();
+    let field = scene
+        .provinces
+        .as_ref()
+        .map(|p| province_surface_field(p, &stamps));
     let buf = render::render_solar_system_view(
         fx.radius_m,
         fx.t_eff,
@@ -582,6 +592,7 @@ fn derived_globe_cmd(argv: &[String]) {
         // The DERIVED lava glow: actively-molten provinces emit their incandescent colour (bright on the night side
         // too). Empty on the uniform-crust fallback, so the render adds nothing there.
         (!scene.lava.is_empty()).then_some(scene.lava.as_slice()),
+        field.as_ref(),
     );
     write_ppm(&path, w, h, &buf);
     eprintln!("wrote {path} ({w}x{h})");
@@ -929,6 +940,19 @@ struct DerivedScene {
     /// whether it is decidable now (GAPPED) or impact-list-pending, the SLR temperature rise, and the young
     /// potential temperature the deep-time run started from. `None` when the solidus did not resolve.
     young: Option<civsim_physics::young_thermal::YoungThermalVerdict>,
+}
+
+impl DerivedScene {
+    /// This scene's crater ROWS prepared as analytic stamps ([`render::crater_stamps`]), the crater layer of the
+    /// Sample superposition. The caller holds them so a [`render::SurfaceField`] can borrow them alongside the
+    /// province field ([`province_surface_field`]). Empty on the uniform-crust fallback (no province field) or a
+    /// world that drew no craters, in which case the crater layer contributes exactly zero. Display-only.
+    fn crater_stamps(&self) -> Vec<render::CraterStamp> {
+        self.provinces
+            .as_ref()
+            .map(|p| render::crater_stamps(&p.state.craters, p.radius_m))
+            .unwrap_or_default()
+    }
 }
 
 /// The natural log of ten, for the `log_eps` (base-10) solar-abundance scale to natural-exponent conversion (the same
@@ -2006,10 +2030,11 @@ fn derive_province_lava(
     // The self-emitted glow at a normalized surface coordinate: the incandescent colour of the resampled interior
     // temperature, and the resampled melt fraction as the intensity. A pure function of the immutable province fields.
     let glow_at = |fu: f32, fv: f32| -> render::LavaGlow {
-        let temp_k = sample_province_field(&temps, prov.pcols, prov.prows, fu, fv);
-        let intensity = (sample_province_field(&melt_fraction, prov.pcols, prov.prows, fu, fv)
-            .to_f64_lossy() as f32)
-            .clamp(0.0, 1.0);
+        let temp_k = render::sample_province_field(&temps, prov.pcols, prov.prows, fu, fv);
+        let intensity =
+            (render::sample_province_field(&melt_fraction, prov.pcols, prov.prows, fu, fv)
+                .to_f64_lossy() as f32)
+                .clamp(0.0, 1.0);
         render::LavaGlow {
             emission: render::blackbody_rgb(temp_k),
             intensity,
@@ -2046,7 +2071,7 @@ fn derive_province_lava(
                         idx / face_cells,
                         local[idx % face_cells],
                     );
-                    let (fu, fv) = dir_to_latlon_fraction(dir);
+                    let (fu, fv) = render::dir_to_latlon_fraction(dir);
                     glow_at(fu, fv)
                 })
                 .collect()
@@ -2200,9 +2225,13 @@ fn cube_elevations(
     prov: &DeepTimeProvinces,
     stamps: &[render::CraterStamp],
     face_res: usize,
-    with_impacts: bool,
+    _with_impacts: bool,
 ) -> Option<Vec<Fixed>> {
     use rayon::prelude::*;
+    // THE ONE SAMPLE DEFINITION: the cache is the memoized [`render::SurfaceField::height_km`], the SAME function
+    // the shading takes its ANALYTIC GRADIENT of, so the normals can never drift from the heights they shade. A
+    // crust-only field passes no stamps, and the crater layer of an empty stamp list contributes exactly zero.
+    let field = province_surface_field(prov, stamps);
     // The face_res x face_res normalized FACE-LOCAL cube-cell directions, shared across all six faces (no per-cell
     // trig: the per-axis angle sin/cos is precomputed once, so building this is O(face_res^2), and the face rotation
     // per cell is sign swaps). Read-only across the parallel map below.
@@ -2213,22 +2242,30 @@ fn cube_elevations(
         .map(|idx| -> Option<Fixed> {
             let dir =
                 render::cube_face_local_to_world_fixed(idx / face_cells, local[idx % face_cells]);
-            // Sample the coarse province crust field at this cell's direction (converted to the lat-lon fraction the
-            // province grid indexes), float it by Airy isostasy, then compose the analytic crater stamp on top.
-            let (fu, fv) = dir_to_latlon_fraction(dir);
-            let thickness = sample_province_thickness(prov, fu, fv);
-            let airy_km = civsim_physics::geodynamics::airy_isostatic_elevation(
-                prov.crust_density,
-                prov.mantle_density,
-                thickness,
-            )?;
-            if with_impacts {
-                airy_km.checked_add(render::crater_relief_km(stamps, dir))
-            } else {
-                Some(airy_km)
-            }
+            field.height_km(dir)
         })
         .collect()
+}
+
+/// The ANALYTIC SAMPLE FIELD of a derived province world ([`render::SurfaceField`]): the superposition the cache
+/// memoizes and the shading differentiates, borrowing the province crust field and the prepared crater `stamps`.
+/// One definition, two readers, so the rendered heights and the analytic normals cannot disagree. Display-only
+/// (Principle 10).
+fn province_surface_field<'a>(
+    prov: &'a DeepTimeProvinces,
+    stamps: &'a [render::CraterStamp],
+) -> render::SurfaceField<'a> {
+    render::SurfaceField {
+        thickness_km: &prov.state.crust_thickness_km,
+        pcols: prov.pcols,
+        prows: prov.prows,
+        crust_density: prov.crust_density,
+        mantle_density: prov.mantle_density,
+        stamps,
+        // The tile elevations are in KILOMETRES (the Airy derivation's unit), so the radius is taken in the same
+        // unit and the gradient's rise-over-arc comes out dimensionless. The 1000 is the km-to-m unit factor.
+        radius_km: (prov.radius_m.to_f64_lossy() / 1000.0) as f32,
+    }
 }
 
 /// The `face_res` by `face_res` normalized FACE-LOCAL direction of each EQUI-ANGULAR cube-sphere cell centre (shared
@@ -2266,63 +2303,16 @@ fn cube_local_dirs(face_res: usize) -> Vec<[Fixed; 3]> {
     local
 }
 
-/// The lat-lon fraction `(u, v)` in `[0, 1)` of a BODY-frame direction, matching [`render`]'s sphere map, so a cube-
-/// sphere cell's direction indexes the coarse lat-lon province field it must resample. f32 display math (Principle 10).
-fn dir_to_latlon_fraction(dir: [Fixed; 3]) -> (f32, f32) {
-    use std::f32::consts::PI;
-    let x = dir[0].to_f64_lossy() as f32;
-    let y = dir[1].to_f64_lossy() as f32;
-    let z = dir[2].to_f64_lossy() as f32;
-    let lat = y.clamp(-1.0, 1.0).asin();
-    let lon = x.atan2(z);
-    let u = ((lon + PI) / (2.0 * PI)).rem_euclid(1.0);
-    let v = (0.5 - lat / PI).clamp(0.0, 1.0);
-    (u, v)
-}
-
 /// Bilinearly sample the province crust-thickness field (kilometres) at a normalized surface coordinate
 /// `(fu, fv)`. A display resampling of the DERIVED field (Principle 10), never fabricated content.
 fn sample_province_thickness(prov: &DeepTimeProvinces, fu: f32, fv: f32) -> Fixed {
-    sample_province_field(
+    render::sample_province_field(
         &prov.state.crust_thickness_km,
         prov.pcols,
         prov.prows,
         fu,
         fv,
     )
-}
-
-/// Bilinearly sample a coarse per-province `field` (one value per province, row-major `pcols` by `prows`) at a
-/// normalized surface coordinate `(fu, fv)`, treating each province as a sample at its cell centre. Longitude
-/// WRAPS (the globe is periodic east to west) and latitude CLAMPS (the poles), so the coarse DERIVED province
-/// field reads as a smooth heightfield across province boundaries. A display resampling of the derived field
-/// (Principle 10), never fabricated content.
-fn sample_province_field(field: &[Fixed], pcols: usize, prows: usize, fu: f32, fv: f32) -> Fixed {
-    let pc = pcols as i64;
-    let pr = prows as i64;
-    let gx = fu * pc as f32 - 0.5;
-    let gy = fv * pr as f32 - 0.5;
-    let x0 = gx.floor();
-    let y0 = gy.floor();
-    let tx = gx - x0;
-    let ty = gy - y0;
-    let x0i = x0 as i64;
-    let y0i = y0 as i64;
-    let at = |xi: i64, yi: i64| -> Fixed {
-        let x = xi.rem_euclid(pc) as usize; // wrap longitude
-        let y = yi.clamp(0, pr - 1) as usize; // clamp latitude
-        field.get(y * pcols + x).copied().unwrap_or(Fixed::ZERO)
-    };
-    let lerp_fx = |a: Fixed, b: Fixed, t: f32| -> Fixed {
-        let tf = Fixed::from_ratio((t.clamp(0.0, 1.0) * 4096.0) as i64, 4096);
-        b.checked_sub(a)
-            .and_then(|d| d.checked_mul(tf))
-            .and_then(|d| a.checked_add(d))
-            .unwrap_or(a)
-    };
-    let top = lerp_fx(at(x0i, y0i), at(x0i + 1, y0i), tx);
-    let bot = lerp_fx(at(x0i, y0i + 1), at(x0i + 1, y0i + 1), tx);
-    lerp_fx(top, bot, ty)
 }
 
 /// Parse a JANAF/condensate phase name (the formula before the `(phase)` suffix) into element atom counts, for
@@ -3560,6 +3550,12 @@ fn draw_woosh_frame(
         // The DERIVED body radius the hillshade reads to light the relief at its true physical slope.
         surface_radius_m: scene.radius_m,
     };
+    // The ANALYTIC Sample field the hillshade differentiates for its normal.
+    let stamps = scene.crater_stamps();
+    let field = scene
+        .provinces
+        .as_ref()
+        .map(|p| province_surface_field(p, &stamps));
     render::draw_globe_scene(
         &mut buf,
         w,
@@ -3577,6 +3573,7 @@ fn draw_woosh_frame(
         orient,
         // The DERIVED lava glow rides the woosh in, so a molten world already glows as it grows from the map dot.
         (!scene.lava.is_empty()).then_some(scene.lava.as_slice()),
+        field.as_ref(),
     );
     buf
 }
@@ -3988,6 +3985,12 @@ fn run_derived(argv: &[String]) {
                 let gcx = (w / 2) as i32;
                 let gcy = (h / 2) as i32;
                 let mut buf = vec![BG.pack(); w * h];
+                // The ANALYTIC Sample field the hillshade differentiates for its normal.
+                let stamps = scene.crater_stamps();
+                let field = scene
+                    .provinces
+                    .as_ref()
+                    .map(|p| province_surface_field(p, &stamps));
                 render::draw_globe_scene(
                     &mut buf,
                     w,
@@ -4006,6 +4009,7 @@ fn run_derived(argv: &[String]) {
                     // The DERIVED lava glow: molten provinces emit their incandescent colour, bright on the night side
                     // too, and it fades as the deep-time clock cools the world. Empty (no glow) on the uniform crust.
                     (!scene.lava.is_empty()).then_some(scene.lava.as_slice()),
+                    field.as_ref(),
                 );
                 // Cursor -> surface pick and highlight (fail-soft off the sphere).
                 let picked = mouse_pos.and_then(|(mx, my)| {
@@ -4487,6 +4491,9 @@ fn main() {
                     // The living-world globe carries no orbital phase; keep the screen-space light (byte-identical).
                     None,
                     // The living-world globe has no deep-time province temperatures, so no lava glow (byte-identical).
+                    None,
+                    // The living-world globe carries no province field, so no analytic Sample: the hillshade keeps
+                    // the cache's finite difference, byte-identical to before the analytic normals.
                     None,
                 ),
                 CELL as i32,

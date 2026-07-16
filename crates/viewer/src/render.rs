@@ -1197,6 +1197,284 @@ pub fn crater_relief_km(stamps: &[CraterStamp], p: [Fixed; 3]) -> Fixed {
     z
 }
 
+/// The lat-lon surface fraction `(fu, fv)` of a BODY-frame direction: `fu` the longitude fraction in `[0, 1)`
+/// (wrapping the meridian) and `fv` the latitude fraction in `[0, 1]`, the same `lon = u*2pi - pi`,
+/// `lat = (0.5 - v)*pi` sphere map [`crater_uv_unit`] inverts. This is the coordinate the COARSE province field is
+/// indexed in, so the Sample reads that field at the direction it is sampling. Display-only (Principle 10).
+pub fn dir_to_latlon_fraction(dir: [Fixed; 3]) -> (f32, f32) {
+    use std::f32::consts::PI;
+    let x = dir[0].to_f64_lossy() as f32;
+    let y = dir[1].to_f64_lossy() as f32;
+    let z = dir[2].to_f64_lossy() as f32;
+    let lat = y.clamp(-1.0, 1.0).asin();
+    let lon = x.atan2(z);
+    let u = ((lon + PI) / (2.0 * PI)).rem_euclid(1.0);
+    let v = (0.5 - lat / PI).clamp(0.0, 1.0);
+    (u, v)
+}
+
+/// Bilinearly sample a coarse per-province `field` (one value per province, row-major `pcols` by `prows`) at a
+/// normalized surface coordinate `(fu, fv)`, treating each province as a sample at its cell centre. Longitude
+/// WRAPS (the globe is periodic east to west) and latitude CLAMPS (the poles), so the coarse DERIVED province
+/// field reads as a smooth heightfield across province boundaries. A display resampling of the derived field
+/// (Principle 10), never fabricated content.
+///
+/// The interpolation weight is carried at a 1/4096 quantization ([`PROVINCE_LERP_STEPS`]), so the implemented
+/// surface is a fine staircase about the mathematical bilinear one. That step is far below any cache cell the
+/// render samples at, so it is invisible in the picture, but it is the floor the analytic gradient's numerical
+/// twin measures against (see [`SurfaceField::gradient`]).
+pub fn sample_province_field(
+    field: &[Fixed],
+    pcols: usize,
+    prows: usize,
+    fu: f32,
+    fv: f32,
+) -> Fixed {
+    let pc = pcols as i64;
+    let pr = prows as i64;
+    let gx = fu * pc as f32 - 0.5;
+    let gy = fv * pr as f32 - 0.5;
+    let x0 = gx.floor();
+    let y0 = gy.floor();
+    let tx = gx - x0;
+    let ty = gy - y0;
+    let x0i = x0 as i64;
+    let y0i = y0 as i64;
+    let at = |xi: i64, yi: i64| -> Fixed {
+        let x = xi.rem_euclid(pc) as usize; // wrap longitude
+        let y = yi.clamp(0, pr - 1) as usize; // clamp latitude
+        field.get(y * pcols + x).copied().unwrap_or(Fixed::ZERO)
+    };
+    let lerp_fx = |a: Fixed, b: Fixed, t: f32| -> Fixed {
+        let tf = Fixed::from_ratio(
+            (t.clamp(0.0, 1.0) * PROVINCE_LERP_STEPS as f32) as i64,
+            PROVINCE_LERP_STEPS,
+        );
+        b.checked_sub(a)
+            .and_then(|d| d.checked_mul(tf))
+            .and_then(|d| a.checked_add(d))
+            .unwrap_or(a)
+    };
+    let top = lerp_fx(at(x0i, y0i), at(x0i + 1, y0i), tx);
+    let bot = lerp_fx(at(x0i, y0i + 1), at(x0i + 1, y0i + 1), tx);
+    lerp_fx(top, bot, ty)
+}
+
+/// The quantization of the province-field interpolation weight (1/4096 of a cell): a display REPRESENTATION step
+/// carried over from the pre-existing sample path, not a physical value. It sets the floor below which the
+/// implemented height stops varying smoothly, and hence the smallest finite-difference step the analytic
+/// gradient's numerical twin can resolve before it reads staircase noise rather than truncation error.
+const PROVINCE_LERP_STEPS: i64 = 4096;
+
+/// THE SAMPLE FUNCTION, in the analytic form both the cache build and the shading read it: the surface is the
+/// SUPERPOSITION `Sample(dir) = airy(province crust) + sum(crater-row stamps)`, each layer at its own derived
+/// scale (`docs/working/CONSOLIDATED_SURFACE_PIPELINE.md`, stages 4 and 5). It carries no raster of its own: the
+/// display tile grid is only the memoized cache of [`SurfaceField::height_km`], so a finer cache resolves finer
+/// craters from the SAME row list.
+///
+/// Its reason for existing beyond the height is [`SurfaceField::gradient`]: because every layer is ANALYTIC, the
+/// surface normal is the ANALYTIC GRADIENT of the same superposition, evaluated at query time with no baking and
+/// no finite differencing. The shading is then a derivative of the canonical field rather than of a resampling of
+/// it, which is derive-first in the renderer.
+///
+/// THE FLEXURAL MIDDLE IS ABSENT, and its absence is loud rather than papered over. The band between the coarse
+/// provinces and the fine crater rows (the moats, peripheral bulges, and terrain-scale swells a human reads as
+/// terrain) is the elastic plate's flexure under its load list, and the kernel for it is BUILT and dormant
+/// ([`civsim_physics::flexure`]). It is not wired here because its rigidity `D = E T_e^3 / (12 (1 - nu^2))` needs
+/// the elastic lid thickness `T_e`, and NOTHING BUILT DERIVES `T_e` today: the deep-time thermal state carries one
+/// lumped temperature per column ([`civsim_sim::geodynamics::ColumnState`]) and no depth-resolved geotherm, so
+/// there is no profile against which a mechanical lid base can be located. Authoring a lid thickness, or pinning
+/// it to the thermal boundary layer through an invented ratio, would cross the value-authoring line, so the layer
+/// is left out and the gap is surfaced. When `T_e` derives, the flexure enters here as one more analytic layer:
+/// its deflection adds to [`SurfaceField::height_km`] and its Green's function's analytic derivative adds to
+/// [`SurfaceField::gradient`], with no change to either function's shape.
+///
+/// Display-only, one-way canon -> pixels (Principle 10): the canon is the province field and the crater rows; this
+/// is their rendering form.
+pub struct SurfaceField<'a> {
+    /// The coarse DERIVED province crust-thickness field (kilometres), row-major `pcols` by `prows`, the field the
+    /// Airy flotation floats. The PHYSICAL grid is the derived one; the cache samples it.
+    pub thickness_km: &'a [Fixed],
+    /// The province field's column count.
+    pub pcols: usize,
+    /// The province field's row count.
+    pub prows: usize,
+    /// The DERIVED crust density the province crust floats at.
+    pub crust_density: Fixed,
+    /// The DERIVED mantle density the crust floats ON.
+    pub mantle_density: Fixed,
+    /// The crater rows prepared as analytic stamps ([`crater_stamps`]); empty for a crust-only field.
+    pub stamps: &'a [CraterStamp],
+    /// The body's DERIVED radius in KILOMETRES, the arc length the gradient's rise is taken over (the tile
+    /// elevations are in kilometres, so the radius is in the same unit and the slope comes out dimensionless).
+    pub radius_km: f32,
+}
+
+impl SurfaceField<'_> {
+    /// THE SAMPLE at a BODY-frame direction: `airy(province crust) + crater-row stamps`, in kilometres. The
+    /// province crust is bilinearly resampled at this direction and floated by Airy isostasy
+    /// ([`civsim_physics::geodynamics::airy_isostatic_elevation`], so a thicker-crust province stands higher),
+    /// then the analytic crater stamp adds the bowls and ejecta rims covering the point ([`crater_relief_km`],
+    /// surface topography rather than isostatically-compensated crust). `None` if the flotation does not resolve
+    /// (a non-positive mantle density) or a fixed-point intermediate leaves the window, never a fabricated height.
+    /// Deterministic fixed-point (Principle 3); pure over immutable inputs, so a parallel cache build is
+    /// thread-count-independent.
+    pub fn height_km(&self, dir: [Fixed; 3]) -> Option<Fixed> {
+        let (fu, fv) = dir_to_latlon_fraction(dir);
+        let thickness = sample_province_field(self.thickness_km, self.pcols, self.prows, fu, fv);
+        let airy = civsim_physics::geodynamics::airy_isostatic_elevation(
+            self.crust_density,
+            self.mantle_density,
+            thickness,
+        )?;
+        airy.checked_add(crater_relief_km(self.stamps, dir))
+    }
+
+    /// THE ANALYTIC GRADIENT of the Sample superposition at a BODY-frame direction `b`, returned as the
+    /// TANGENT-PLANE gradient vector: a 3-vector lying in the tangent plane at `b` whose components are
+    /// DIMENSIONLESS slope (kilometres of rise per kilometre of arc, at the field's own amplitude, no vertical
+    /// exaggeration). The terrain normal is then `normalize(b - gradient(b))`, the heightfield normal
+    /// `(-grad(h), 1)` carried into body coordinates ([`hillshade_normal`]).
+    ///
+    /// Each layer contributes its OWN derivative, summed, so no finite differencing and no baking is involved:
+    ///
+    /// - THE PROVINCE LAYER. The Airy elevation is LINEAR in the crust thickness
+    ///   (`airy = T * (rho_m - rho_c) / rho_m`), so its gradient is the buoyant fraction times the gradient of the
+    ///   bilinear interpolant through the province thicknesses ([`province_grad_uv`]), carried from per-unit-`u`
+    ///   and per-unit-`v` into the east/north frame through the body radius (east arc `2 pi R cos(lat)`, south arc
+    ///   `pi R`). The `cos(lat)` is floored at the poleward-most PROVINCE row's centre, the grid's own resolution
+    ///   limit, never an authored constant.
+    /// - THE CRATER LAYER. Each stamp within its reach cone contributes the derivative of the crater law's own
+    ///   shape in rim-radii `x`: inside the rim the excavation paraboloid `-h (1 - x^2)` differentiates to
+    ///   `df/dx = 2 h x`, outside it the McGetchin ejecta blanket `(h/4) x^-3` differentiates to
+    ///   `df/dx = -3 h / (4 x^4)`. The chain rule carries `x` to arc length through the crater's angular radius
+    ///   and the body radius (`df/ds = (df/dx) / (alpha_c R)`), and the gradient points along the great circle
+    ///   AWAY from the crater centre, which is regular everywhere (at the centre `df/dx = 0`, so the vanishing
+    ///   direction carries a vanishing slope).
+    ///
+    /// HONEST LIMITS, both of them real and neither papered over. The composed surface is only PIECEWISE smooth,
+    /// so at two kinds of place no gradient exists and this returns the one-sided value the layer's own form
+    /// gives: at a crater RIM (`x = 1`, where the bowl's `+2h` slope meets the blanket's `-3h/4`, which is what
+    /// makes it a rim) and across a province CELL EDGE (where the bilinear interpolant's gradient steps). A
+    /// finite-difference twin straddling either reads a chord and cannot converge; that is a property of the
+    /// surface, not an error in the derivative. And the east gradient inherits the province field's own POLE
+    /// SINGULARITY, because that field is still a lat-lon grid whose columns converge at the pole; the guard
+    /// bounds it, and the field's migration off lat-lon is the chartered slice 9.
+    ///
+    /// Display-only `f32` math (Principle 10), the same tier the Lambert term it feeds already uses.
+    pub fn gradient(&self, b: [f32; 3]) -> [f32; 3] {
+        use std::f32::consts::PI;
+        if self.radius_km <= 0.0 {
+            return [0.0, 0.0, 0.0];
+        }
+        let mut g = [0.0f32; 3];
+        // THE PROVINCE LAYER: the buoyant fraction times the bilinear thickness gradient, in the east/north frame.
+        if self.pcols > 0 && self.prows > 0 && !self.thickness_km.is_empty() {
+            let mantle = self.mantle_density.to_f64_lossy() as f32;
+            if mantle > 0.0 {
+                let buoyant = (mantle - self.crust_density.to_f64_lossy() as f32) / mantle;
+                let lat = b[1].clamp(-1.0, 1.0).asin();
+                let lon = b[0].atan2(b[2]);
+                let (sin_lon, cos_lon) = lon.sin_cos();
+                let sin_lat = lat.sin();
+                let cos_lat = lat.cos();
+                let east = [cos_lon, 0.0, -sin_lon];
+                let north = [-sin_lat * sin_lon, cos_lat, -sin_lat * cos_lon];
+                let (u, v) = body_to_uv(b);
+                let (dt_du, dt_dv) =
+                    province_grad_uv(self.thickness_km, self.pcols, self.prows, u, v);
+                // The province grid's OWN poleward-most row centre: below that latitude it resolves no distinct
+                // columns, so the east gradient there is degenerate. Grid-derived, not an authored constant.
+                let pole_floor = (PI / (2.0 * self.prows as f32)).sin();
+                let cos_lat_denom = cos_lat.abs().max(pole_floor);
+                let g_east = buoyant * dt_du / (2.0 * PI * self.radius_km * cos_lat_denom);
+                // v increases SOUTHWARD, so the northward slope negates the per-unit-v gradient over the meridian.
+                let g_north = -buoyant * dt_dv / (PI * self.radius_km);
+                for i in 0..3 {
+                    g[i] += g_east * east[i] + g_north * north[i];
+                }
+            }
+        }
+        // THE CRATER LAYER: each stamp's own analytic profile derivative, along the great circle away from it.
+        for s in self.stamps {
+            let c = [
+                s.center[0].to_f64_lossy() as f32,
+                s.center[1].to_f64_lossy() as f32,
+                s.center[2].to_f64_lossy() as f32,
+            ];
+            let dot = b[0] * c[0] + b[1] * c[1] + b[2] * c[2];
+            if dot < s.cos_reach.to_f64_lossy() as f32 {
+                continue; // outside the reach cone, the same cheap bound the stamp uses
+            }
+            let alpha_c = s.angular_radius.to_f64_lossy() as f32;
+            if alpha_c <= 0.0 {
+                continue;
+            }
+            let angle = dot.clamp(-1.0, 1.0).acos(); // the great-circle central angle
+            let x = angle / alpha_c;
+            let h = s.depth_km.to_f64_lossy() as f32;
+            // The crater law's own shape, differentiated in rim-radii x.
+            let df_dx = if x <= 1.0 {
+                2.0 * h * x // the excavation paraboloid -h(1 - x^2)
+            } else {
+                -3.0 * h / (4.0 * x * x * x * x) // the McGetchin blanket (h/4) x^-3
+            };
+            // Chain rule to arc length: x = angle / alpha_c, s = R * angle.
+            let df_ds = df_dx / (alpha_c * self.radius_km);
+            // The unit tangent at b pointing AWAY from the crater centre (s increases away from it).
+            let toward = [c[0] - dot * b[0], c[1] - dot * b[1], c[2] - dot * b[2]];
+            let m = (toward[0] * toward[0] + toward[1] * toward[1] + toward[2] * toward[2]).sqrt();
+            if m <= 0.0 {
+                continue; // at the crater centre the profile is flat (df/dx = 0), so no contribution
+            }
+            for i in 0..3 {
+                g[i] += df_ds * (-toward[i] / m);
+            }
+        }
+        g
+    }
+}
+
+/// The ANALYTIC gradient of the bilinear interpolant through a coarse province `field`, at surface coordinate
+/// `(u, v)`, returned as the field's unit per-unit-`u` (eastward) and per-unit-`v` (southward) rate. The
+/// interpolant is the straight ramp between province-cell centres (longitude wraps, latitude clamps at the poles),
+/// the least-committed surface through the DERIVED values, and this is its exact derivative, so it invents no
+/// relief. Its gradient STEPS across a cell edge (the interpolant is only piecewise smooth), which the caller's
+/// honest limits name. Display-only (Principle 10).
+fn province_grad_uv(field: &[Fixed], pcols: usize, prows: usize, u: f32, v: f32) -> (f32, f32) {
+    if pcols == 0 || prows == 0 || field.is_empty() {
+        return (0.0, 0.0);
+    }
+    let pc = pcols as i64;
+    let pr = prows as i64;
+    // Cell-centre-aligned fractional coordinates: province (r, c) is centred at ((c+0.5)/pcols, (r+0.5)/prows).
+    let gx = u.rem_euclid(1.0) * pc as f32 - 0.5;
+    let gy = v.clamp(0.0, 1.0) * pr as f32 - 0.5;
+    let x0 = gx.floor();
+    let y0 = gy.floor();
+    let tx = (gx - x0).clamp(0.0, 1.0);
+    let ty = (gy - y0).clamp(0.0, 1.0);
+    let x0i = x0 as i64;
+    let y0i = y0 as i64;
+    let at = |xi: i64, yi: i64| -> f32 {
+        let x = xi.rem_euclid(pc) as usize; // wrap longitude
+        let y = yi.clamp(0, pr - 1) as usize; // clamp latitude
+        field
+            .get(y * pcols + x)
+            .copied()
+            .unwrap_or(Fixed::ZERO)
+            .to_f64_lossy() as f32
+    };
+    let e00 = at(x0i, y0i);
+    let e10 = at(x0i + 1, y0i);
+    let e01 = at(x0i, y0i + 1);
+    let e11 = at(x0i + 1, y0i + 1);
+    // The bilinear partials in cell-fraction units, scaled to per-unit-u and per-unit-v.
+    let df_dtx = (e10 - e00) * (1.0 - ty) + (e11 - e01) * ty;
+    let df_dty = (e01 - e00) * (1.0 - tx) + (e11 - e10) * tx;
+    (df_dtx * pc as f32, df_dty * pr as f32)
+}
+
 /// The DERIVED tile relief at BODY-frame direction `b` (its lat-lon coordinate `(u, v)` precomputed for the LatLon
 /// path), under the cache parameterization `param`: the cube-sphere cell for a `CubeSphere` cache, the equirectangular
 /// cell for a `LatLon` cache (the same pick [`pick_surface_tile`] inverts). `None` for an empty field, so the caller
@@ -1283,16 +1561,27 @@ fn elevation_grad_uv(
 }
 
 /// The sun-direction HILLSHADE normal at a surface point: the sphere normal `b` (body frame) tilted by the DERIVED
-/// terrain slope, so slopes facing the star are bright and slopes facing away are dark. The physical east/north slope
-/// (dimensionless, km rise over arc length at the field's OWN amplitude, no vertical exaggeration) perturbs the normal
-/// as `Up - g_east*East - g_north*North` (the heightfield normal `(-de, -dn, 1)` in the local east/north/up frame),
-/// carried into body coordinates and renormalised. The slope is read from the cache under `param`: for a `LatLon`
-/// cache the analytic gradient of the bilinear interpolant ([`elevation_grad_uv`]) in the east/north frame, converted
-/// through the body radius (east arc `2*pi*R*cos(lat)`, south arc `pi*R`, `cos(lat)` floored at the poleward row to
-/// guard the polar singularity); for a `CubeSphere` cache the central difference of the cached height over one cell's
-/// angle along a tangent pair that is REGULAR everywhere (the east/north frame is not: it collapses at the poles, and
-/// using it would put the pole singularity back into the shading of a cache built to have none). The tilt is
-/// basis-independent, so both compute the same physical quantity: the real slope tilts the normal, at the field's own
+/// terrain slope, so slopes facing the star are bright and slopes facing away are dark. The slope is dimensionless
+/// (km rise over arc length at the field's OWN amplitude, no vertical exaggeration) and perturbs the normal as
+/// `Up - grad(h)` (the heightfield normal `(-grad(h), 1)` in the local tangent frame), carried into body
+/// coordinates and renormalised.
+///
+/// The slope comes from one of two sources, in order of fidelity:
+///
+/// - THE ANALYTIC GRADIENT of the Sample superposition ([`SurfaceField::gradient`]), when the caller supplies the
+///   `field`. Each layer contributes its own derivative, evaluated at query time, so the normal is a derivative of
+///   the CANONICAL field rather than of a resampling of it: no baking, no finite differencing, and the shading
+///   carries relief the cache's own cell spacing cannot resolve. This is the derived-planet globe's path.
+/// - THE CACHE'S FINITE DIFFERENCE, when no field is supplied (the living-world / fixture globe, byte-identical to
+///   before): for a `LatLon` cache the gradient of the bilinear interpolant through the cached heights
+///   ([`elevation_grad_uv`]) in the east/north frame, converted through the body radius (east arc
+///   `2*pi*R*cos(lat)`, south arc `pi*R`, `cos(lat)` floored at the poleward row to guard the polar singularity);
+///   for a `CubeSphere` cache the central difference of the cached height over one cell's angle along a tangent
+///   pair REGULAR everywhere (the east/north frame is not: it collapses at the poles, and using it would put the
+///   pole singularity back into the shading of a cache built to have none).
+///
+/// The tilt is basis-independent (the tangent slopes are the components of ONE gradient vector in the tangent
+/// plane), so every path computes the same physical quantity: the real slope tilts the normal, at the field's own
 /// amplitude. Display-only math (Principle 10).
 fn hillshade_normal(
     b: [f32; 3],
@@ -1301,10 +1590,16 @@ fn hillshade_normal(
     u: f32,
     v: f32,
     radius_m: f32,
+    field: Option<&SurfaceField>,
 ) -> [f32; 3] {
     use std::f32::consts::{FRAC_PI_2, PI};
     if radius_m <= 0.0 {
         return b;
+    }
+    // THE ANALYTIC PATH: the gradient of the Sample superposition itself, each layer's own derivative summed.
+    if let Some(f) = field {
+        let g = f.gradient(b);
+        return normalize3([b[0] - g[0], b[1] - g[1], b[2] - g[2]]);
     }
     // The tile elevation is in KILOMETRES (the Airy isostatic derivation's unit), while the body radius arrives in
     // metres, so the radius is taken in the SAME km unit to form a dimensionless slope. The 1000 is the km-to-m unit
@@ -1686,6 +1981,7 @@ pub fn draw_globe(
     style: SurfaceStyle,
     orient: GlobeOrientation,
     lava: Option<&[LavaGlow]>,
+    field: Option<&SurfaceField>,
 ) {
     if radius_px == 0 || w == 0 || h == 0 {
         return;
@@ -1780,7 +2076,7 @@ pub fn draw_globe(
             // against the body-frame `star_dir` (a rotation preserves the dot, so this matches the sphere term when
             // the ground is flat); the relief then lights only where the surface truly slopes.
             let lambert = if hillshade_on {
-                let n = hillshade_normal(b, tiles, param, u, v, surface_radius_m);
+                let n = hillshade_normal(b, tiles, param, u, v, surface_radius_m, field);
                 (n[0] * star_dir[0] + n[1] * star_dir[1] + n[2] * star_dir[2]).max(0.0)
             } else {
                 (nx * l[0] - ny * l[1] + nz * l[2]).max(0.0)
@@ -1984,6 +2280,7 @@ pub fn render_solar_system_view(
     orient: GlobeOrientation,
     derived_star_dir: Option<[f32; 3]>,
     lava: Option<&[LavaGlow]>,
+    field: Option<&SurfaceField>,
 ) -> Vec<u32> {
     let mut buf = vec![bg.pack(); w.max(1) * h.max(1)];
     if w == 0 || h == 0 {
@@ -2033,6 +2330,7 @@ pub fn render_solar_system_view(
         style,
         orient,
         lava,
+        field,
     );
     // The atmosphere haze around the limb, tinted by the caller's `sky` colour: the DERIVED Rayleigh sky from the
     // gas mix ([`rayleigh_sky_rgb`]) when it resolves, or [`PLACEHOLDER_SKY`] as the fail-soft fallback. The limb wants
@@ -2081,6 +2379,7 @@ pub fn draw_globe_scene(
     style: SurfaceStyle,
     orient: GlobeOrientation,
     lava: Option<&[LavaGlow]>,
+    field: Option<&SurfaceField>,
 ) {
     if w == 0 || h == 0 {
         return;
@@ -2103,6 +2402,7 @@ pub fn draw_globe_scene(
         style,
         orient,
         lava,
+        field,
     );
     // The limb wants the VIEW-space sun direction (screen x, y), the projection of the derived body-frame vector.
     let limb_dir = normalize3(body_to_view(star_dir_body, orient));
@@ -2810,6 +3110,7 @@ mod tests {
             SurfaceStyle::default(),
             GlobeOrientation::IDENTITY,
             None,
+            None,
         );
         assert!(buf.iter().any(|&p| p != bg.pack()), "the globe is drawn");
         let right = half_luminance(&buf, w, cx, cy, radius as i32, true);
@@ -2832,6 +3133,7 @@ mod tests {
             Rgb::new(255, 255, 255),
             SurfaceStyle::default(),
             GlobeOrientation::IDENTITY,
+            None,
             None,
         );
         assert_eq!(buf, replay, "a pure read replays byte for byte");
@@ -2896,6 +3198,7 @@ mod tests {
             Rgb::new(255, 255, 255),
             SurfaceStyle::default(),
             GlobeOrientation::IDENTITY,
+            None,
             None,
         );
         let mut best = (-1.0f32, cx, cy);
@@ -3020,6 +3323,7 @@ mod tests {
             GlobeOrientation::IDENTITY,
             None,
             None,
+            None,
         );
         assert_eq!(frame.len(), w * h, "one word per pixel");
         // The star disk carries the derived blackbody colour at its core.
@@ -3053,6 +3357,7 @@ mod tests {
             PLACEHOLDER_SKY,
             SurfaceStyle::default(),
             GlobeOrientation::IDENTITY,
+            None,
             None,
             None,
         );
@@ -3089,6 +3394,7 @@ mod tests {
                 PLACEHOLDER_SKY,
                 SurfaceStyle::default(),
                 GlobeOrientation::IDENTITY,
+                None,
                 None,
                 None,
             );
@@ -3689,6 +3995,7 @@ mod tests {
             SurfaceStyle::default(),
             GlobeOrientation::IDENTITY,
             None,
+            None,
         );
         // A tiny rotation moves at least one pixel: the texture responds to the orientation.
         let mut b = vec![bg.pack(); w * h];
@@ -3708,6 +4015,7 @@ mod tests {
                 rot_lon: 0.0,
                 rot_lat: 0.8,
             },
+            None,
             None,
         );
         assert_ne!(a, b, "a latitude tilt changes the drawn surface");
@@ -3746,6 +4054,7 @@ mod tests {
             SurfaceStyle::default(),
             GlobeOrientation::IDENTITY,
             None,
+            None,
         );
         let mut panned = vec![bg.pack(); w * h];
         draw_globe(
@@ -3764,6 +4073,7 @@ mod tests {
                 rot_lon: 1.2,
                 rot_lat: 0.0,
             },
+            None,
             None,
         );
         assert_ne!(
@@ -3791,6 +4101,7 @@ mod tests {
                     ..Default::default()
                 },
                 GlobeOrientation::IDENTITY,
+                None,
                 None,
             );
             let mut sum = 0u64;
@@ -3842,6 +4153,7 @@ mod tests {
                     ..Default::default()
                 },
                 GlobeOrientation::IDENTITY,
+                None,
                 None,
             );
             buf
@@ -3907,6 +4219,7 @@ mod tests {
                 },
                 GlobeOrientation::IDENTITY,
                 None,
+                None,
             );
             let mut s = 0u64;
             for py in (cy - 6)..=(cy + 6) {
@@ -3931,6 +4244,286 @@ mod tests {
         assert!(
             relief_diff > none_diff * 8 + 8,
             "the hillshade (driven by the body radius) creates the directional relief: with-radius diff {relief_diff} vs no-radius diff {none_diff}"
+        );
+    }
+
+    // ---- THE ANALYTIC SAMPLE GRADIENT AND ITS NUMERICAL TWIN ----
+
+    /// A varied DERIVED province crust-thickness field (kilometres), 4 by 2, for the gradient twins.
+    fn twin_thickness() -> Vec<Fixed> {
+        vec![
+            Fixed::from_int(2),
+            Fixed::from_int(60),
+            Fixed::from_int(5),
+            Fixed::from_int(40),
+            Fixed::from_int(80),
+            Fixed::from_int(3),
+            Fixed::from_int(50),
+            Fixed::from_int(8),
+        ]
+    }
+
+    /// A Mars-class body radius for the twins: the derived default world's own scale (2990 km).
+    const TWIN_RADIUS_KM: f32 = 2990.0;
+
+    /// One crater row for the twins, big enough that its bowl and blanket span a resolvable angle.
+    fn twin_crater_rows() -> Vec<CraterRow> {
+        vec![CraterRow {
+            u: Fixed::from_ratio(1, 5),
+            v: Fixed::from_ratio(2, 5),
+            diameter_m: Fixed::from_int(400_000),
+            depth_m: Fixed::from_int(20_000),
+            age_myr: Fixed::ZERO,
+        }]
+    }
+
+    /// A great-circle step from `b` by angle `h` along the unit tangent `t`. The step stays ON the sphere (unit
+    /// norm), so the finite difference is taken over a true ARC length `R*h`, never a chord: the twin measures the
+    /// same slope the analytic gradient reports, rather than a secant through the ball.
+    fn arc_step(b: [f32; 3], t: [f32; 3], h: f32) -> [Fixed; 3] {
+        let (s, c) = h.sin_cos();
+        let p = normalize3([
+            c * b[0] + s * t[0],
+            c * b[1] + s * t[1],
+            c * b[2] + s * t[2],
+        ]);
+        [
+            Fixed::from_ratio((p[0] as f64 * 1e9) as i64, 1_000_000_000),
+            Fixed::from_ratio((p[1] as f64 * 1e9) as i64, 1_000_000_000),
+            Fixed::from_ratio((p[2] as f64 * 1e9) as i64, 1_000_000_000),
+        ]
+    }
+
+    /// An orthonormal tangent pair at `b`, regular at every direction (the same never-degenerate construction the
+    /// cube-sphere hillshade uses).
+    fn twin_tangents(b: [f32; 3]) -> ([f32; 3], [f32; 3]) {
+        let (ax, ay, az) = (b[0].abs(), b[1].abs(), b[2].abs());
+        let axis = if ax <= ay && ax <= az {
+            [1.0, 0.0, 0.0]
+        } else if ay <= az {
+            [0.0, 1.0, 0.0]
+        } else {
+            [0.0, 0.0, 1.0]
+        };
+        let t1 = normalize3(cross3(axis, b));
+        let t2 = cross3(b, t1);
+        (t1, t2)
+    }
+
+    /// The CENTRAL-DIFFERENCE slope of the Sample along tangent `t` at `b`, over an angular step `h`: the
+    /// numerical twin of `gradient(b) . t`. Rise in kilometres over the arc `2 R h`, the same dimensionless slope
+    /// the analytic gradient returns.
+    fn twin_fd_slope(field: &SurfaceField, b: [f32; 3], t: [f32; 3], h: f32) -> Option<f64> {
+        let hp = field.height_km(arc_step(b, t, h))?.to_f64_lossy();
+        let hm = field.height_km(arc_step(b, t, -h))?.to_f64_lossy();
+        Some((hp - hm) / (2.0 * TWIN_RADIUS_KM as f64 * h as f64))
+    }
+
+    /// A point at `x` rim-radii from the crater centre, along the crater's own tangent: the probe point for the
+    /// bowl (`x < 1`) and blanket (`x > 1`) twins.
+    fn twin_point_at_rim_radii(stamps: &[CraterStamp], x: f32) -> [f32; 3] {
+        let c = [
+            stamps[0].center[0].to_f64_lossy() as f32,
+            stamps[0].center[1].to_f64_lossy() as f32,
+            stamps[0].center[2].to_f64_lossy() as f32,
+        ];
+        let (t1, _) = twin_tangents(c);
+        let ang = x * stamps[0].angular_radius.to_f64_lossy() as f32;
+        let (s, co) = ang.sin_cos();
+        normalize3([
+            co * c[0] + s * t1[0],
+            co * c[1] + s * t1[1],
+            co * c[2] + s * t1[2],
+        ])
+    }
+
+    #[test]
+    fn the_analytic_crater_gradient_converges_second_order_against_its_numerical_twin() {
+        // THE NUMERICAL TWIN (the standing rule): the ANALYTIC gradient of the Sample is checked against a
+        // FINITE-DIFFERENCE gradient of the SAME Sample over a STEP SWEEP, and must show the central difference's
+        // expected SECOND-ORDER convergence as h shrinks. An analytic-recovers-analytic check would be circular.
+        //
+        // The convergence ORDER is measured on the crater EJECTA BLANKET, and that choice is forced rather than
+        // convenient: it is the only layer of the built Sample with a genuine non-vanishing third derivative. The
+        // excavation bowl is EXACTLY quadratic in the rim-radius x, so a central difference of it carries no
+        // truncation error to converge (its twin is checked at the representation floor below), and the province
+        // layer's interpolation weight is quantized, which floors its twin before the truncation term is reached
+        // (also below). The blanket is where a rate can be measured at all.
+        let rows = twin_crater_rows();
+        let stamps = crater_stamps(&rows, Fixed::from_int(2_990_000));
+        let flat: Vec<Fixed> = vec![Fixed::ZERO; 8];
+        // A FLAT crust isolates the crater layer: the province layer contributes an exactly zero gradient.
+        let field = SurfaceField {
+            thickness_km: &flat,
+            pcols: 4,
+            prows: 2,
+            crust_density: Fixed::from_ratio(29, 10),
+            mantle_density: Fixed::from_ratio(33, 10),
+            stamps: &stamps,
+            radius_km: TWIN_RADIUS_KM,
+        };
+        let b = twin_point_at_rim_radii(&stamps, 2.0); // out in the blanket, clear of the rim kink
+        let (t1, t2) = twin_tangents(b);
+        let g = field.gradient(b);
+        for (which, t) in [("t1", t1), ("t2", t2)] {
+            let analytic = (g[0] * t[0] + g[1] * t[1] + g[2] * t[2]) as f64;
+            // The truncation-dominated window: coarse enough that the fixed-point floor is far below the
+            // truncation term, fine enough to stay clear of the rim. Each halving must quarter the error.
+            let mut orders = Vec::new();
+            let mut h = 2.5e-2f32;
+            let mut prev = (twin_fd_slope(&field, b, t, h).expect("fd") - analytic).abs();
+            for _ in 0..4 {
+                h *= 0.5;
+                let err = (twin_fd_slope(&field, b, t, h).expect("fd") - analytic).abs();
+                // order = log2(err(h) / err(h/2)); a second-order scheme gives 2.
+                orders.push((prev / err).log2());
+                prev = err;
+            }
+            let mean: f64 = orders.iter().sum::<f64>() / orders.len() as f64;
+            assert!(
+                (1.8..=2.2).contains(&mean),
+                "the {which} twin must converge at the central difference's second order, got {mean} from {orders:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_analytic_gradient_matches_its_numerical_twin_across_every_sample_layer() {
+        // The twin's other half: the analytic gradient must AGREE with the finite difference, layer by layer and
+        // in superposition, not merely converge at the right rate. Each probe sits where the surface is SMOOTH
+        // (the composed surface is only piecewise smooth: no gradient exists at a crater rim or across a province
+        // cell edge, so a difference straddling either reads a chord and is not a fair twin).
+        let rows = twin_crater_rows();
+        let stamps = crater_stamps(&rows, Fixed::from_int(2_990_000));
+        let no_stamps: Vec<CraterStamp> = Vec::new();
+        let thickness = twin_thickness();
+        let flat: Vec<Fixed> = vec![Fixed::ZERO; 8];
+        let crater_only = SurfaceField {
+            thickness_km: &flat,
+            pcols: 4,
+            prows: 2,
+            crust_density: Fixed::from_ratio(29, 10),
+            mantle_density: Fixed::from_ratio(33, 10),
+            stamps: &stamps,
+            radius_km: TWIN_RADIUS_KM,
+        };
+        let province_only = SurfaceField {
+            thickness_km: &thickness,
+            pcols: 4,
+            prows: 2,
+            crust_density: Fixed::from_ratio(29, 10),
+            mantle_density: Fixed::from_ratio(33, 10),
+            stamps: &no_stamps,
+            radius_km: TWIN_RADIUS_KM,
+        };
+        let composed = SurfaceField {
+            thickness_km: &thickness,
+            pcols: 4,
+            prows: 2,
+            crust_density: Fixed::from_ratio(29, 10),
+            mantle_density: Fixed::from_ratio(33, 10),
+            stamps: &stamps,
+            radius_km: TWIN_RADIUS_KM,
+        };
+
+        // Each probe carries the step at which its OWN twin is cleanest, and the tolerance measured there. The
+        // steps differ by nearly two decades because the layers' resolvable windows really do differ, and each
+        // window is a property of the layer rather than a tolerance chosen to pass:
+        //   - the BOWL is exactly quadratic in the rim-radius x, so the central difference carries no truncation
+        //     error and the residual is the fixed-point representation floor (~4e-7). The step must stay INSIDE
+        //     the rim, which at x = 0.5 rim-radii is 0.033 rad away, so h = 5e-3 is safely clear of the kink.
+        //   - the BLANKET has a genuine non-vanishing third derivative, so its error is the h^2 truncation term
+        //     and it wants a FINE step.
+        //   - the PROVINCE interior wants a COARSE step, the opposite of the usual story: the bilinear
+        //     interpolant is near-linear along the probe path (so truncation is tiny even at h = 5e-2), while its
+        //     interpolation weight is quantized to 1/PROVINCE_LERP_STEPS of a cell, so a FINE step reads the
+        //     staircase rather than the slope. That floor is a measured property of the pre-existing sample path,
+        //     named rather than hidden. The probe sits MID-CELL (tx = ty = 0.5): a point near an interpolation
+        //     cell boundary would straddle the interpolant's gradient step, where no gradient exists.
+        //   - the COMPOSED Sample must satisfy BOTH layers at once, so it sits in their overlap (h = 6.25e-3) and
+        //     holds a tolerance that is the sum of the two floors there, wider than either alone. That is the
+        //     honest cost of the two windows, not a slackened gate.
+        let bowl = twin_point_at_rim_radii(&stamps, 0.5);
+        let blanket = twin_point_at_rim_radii(&stamps, 2.0);
+        let interior = uv_to_body(0.25, 0.5);
+        for (name, field, b, h, tol) in [
+            ("crater bowl", &crater_only, bowl, 5.0e-3f32, 1e-5f64),
+            ("crater blanket", &crater_only, blanket, 1.0e-3f32, 1e-5f64),
+            (
+                "province interior",
+                &province_only,
+                interior,
+                5.0e-2f32,
+                1e-6f64,
+            ),
+            (
+                "the composed Sample",
+                &composed,
+                blanket,
+                6.25e-3f32,
+                5e-5f64,
+            ),
+        ] {
+            let (t1, t2) = twin_tangents(b);
+            let g = field.gradient(b);
+            for t in [t1, t2] {
+                let analytic = (g[0] * t[0] + g[1] * t[1] + g[2] * t[2]) as f64;
+                let fd = twin_fd_slope(field, b, t, h).expect("the twin resolves");
+                assert!(
+                    (fd - analytic).abs() < tol,
+                    "{name}: analytic slope {analytic} vs numerical twin {fd} at h = {h}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_flat_world_has_no_slope_and_a_crater_gradient_points_downhill() {
+        // The gradient's own sanity: a flat crust with no craters has exactly zero gradient everywhere (the
+        // analytic derivative invents no relief), and inside a crater bowl the surface rises AWAY from the centre
+        // (the bowl is a depression), so the gradient points away from it.
+        let no_stamps: Vec<CraterStamp> = Vec::new();
+        let flat: Vec<Fixed> = vec![Fixed::from_int(30); 8]; // a UNIFORM crust: thick, but no lateral contrast
+        let flat_field = SurfaceField {
+            thickness_km: &flat,
+            pcols: 4,
+            prows: 2,
+            crust_density: Fixed::from_ratio(29, 10),
+            mantle_density: Fixed::from_ratio(33, 10),
+            stamps: &no_stamps,
+            radius_km: TWIN_RADIUS_KM,
+        };
+        for (u, v) in [(0.1f32, 0.2f32), (0.5, 0.5), (0.9, 0.8)] {
+            let g = flat_field.gradient(uv_to_body(u, v));
+            let m = (g[0] * g[0] + g[1] * g[1] + g[2] * g[2]).sqrt();
+            assert_eq!(m, 0.0, "a laterally uniform crust has no slope, got {g:?}");
+        }
+        // Inside the bowl the gradient points AWAY from the crater centre (uphill toward the rim).
+        let rows = twin_crater_rows();
+        let stamps = crater_stamps(&rows, Fixed::from_int(2_990_000));
+        let zero: Vec<Fixed> = vec![Fixed::ZERO; 8];
+        let crater_field = SurfaceField {
+            thickness_km: &zero,
+            pcols: 4,
+            prows: 2,
+            crust_density: Fixed::from_ratio(29, 10),
+            mantle_density: Fixed::from_ratio(33, 10),
+            stamps: &stamps,
+            radius_km: TWIN_RADIUS_KM,
+        };
+        let b = twin_point_at_rim_radii(&stamps, 0.5);
+        let c = [
+            stamps[0].center[0].to_f64_lossy() as f32,
+            stamps[0].center[1].to_f64_lossy() as f32,
+            stamps[0].center[2].to_f64_lossy() as f32,
+        ];
+        let g = crater_field.gradient(b);
+        let dot = b[0] * c[0] + b[1] * c[1] + b[2] * c[2];
+        let toward = normalize3([c[0] - dot * b[0], c[1] - dot * b[1], c[2] - dot * b[2]]);
+        let along_toward = g[0] * toward[0] + g[1] * toward[1] + g[2] * toward[2];
+        assert!(
+            along_toward < 0.0,
+            "inside the bowl the surface rises away from the centre, so the gradient points away: got {along_toward}"
         );
     }
 }
