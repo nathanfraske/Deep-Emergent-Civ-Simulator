@@ -1069,12 +1069,7 @@ fn normalize3(v: [f32; 3]) -> [f32; 3] {
 /// The DERIVED tile relief at surface coordinate (u, v) (each in `[0, 1)`), an orthographic read of the derived relief
 /// field wrapped onto the globe (the same (u, v) -> cell mapping [`pick_surface_tile`] inverts). `None` for an empty
 /// field, so the caller falls back to a stand-in. Display-only.
-fn sample_derived_relief(
-    tiles: &[DerivedTile],
-    cols: usize,
-    u: f32,
-    v: f32,
-) -> Option<TerrainRelief> {
+fn sample_derived_tile(tiles: &[DerivedTile], cols: usize, u: f32, v: f32) -> Option<DerivedTile> {
     if tiles.is_empty() || cols == 0 {
         return None;
     }
@@ -1082,7 +1077,17 @@ fn sample_derived_relief(
     let cu = ((u.clamp(0.0, 0.999_9) * cols as f32) as usize).min(cols - 1);
     let cv = ((v.clamp(0.0, 0.999_9) * rows as f32) as usize).min(rows.saturating_sub(1));
     let idx = (cv * cols + cu).min(tiles.len() - 1);
-    Some(tiles[idx].relief)
+    Some(tiles[idx])
+}
+
+/// The CONTINUOUS relief brightness multiplier for a tile's DERIVED elevation, normalized to the field's own
+/// `[lo, hi]` range: a compressive square-root curve lifts the low end so a skewed heightfield still shows its
+/// lowlands, then a wide ramp maps the range to `[0.5, 1.25]`, so dark basins grade up to bright highlands and
+/// the derived topography reads as relief rather than a two-tone swatch. Display-only.
+fn elevation_shade(elevation: f32, lo: f32, hi: f32) -> f32 {
+    let span = (hi - lo).max(f32::EPSILON);
+    let t = ((elevation - lo) / span).clamp(0.0, 1.0).sqrt();
+    0.5 + 0.75 * t
 }
 
 /// The globe's viewing orientation for the derived-surface explorer: a longitude spin about the polar axis and a
@@ -1163,6 +1168,11 @@ pub struct SurfaceStyle {
     pub tint: Option<Rgb>,
     /// The display tile grid `(cols, rows)` to overlay as seams, or `None` for a smooth (un-gridded) sphere.
     pub grid: Option<(usize, usize)>,
+    /// CONTINUOUS relief shading: when set, each tile is shaded by its DERIVED ELEVATION on a smooth ramp
+    /// (highlands bright, lowlands dark, normalized to the field's own range), rather than the three discrete
+    /// relief classes, so a rich derived heightfield reads as topographic relief instead of a two-tone
+    /// swatch. `default()` is `false` (the discrete relief swatch, so the living-world globe is unchanged).
+    pub relief_shading: bool,
 }
 
 /// The DERIVED body-frame sun direction for [`draw_globe`], the unit vector pointing from the body's centre toward the
@@ -1230,6 +1240,21 @@ pub fn draw_globe(
     ];
     // A faint neutral ambient so the night hemisphere reads dark but not pure black (skyglow and starlight).
     const AMBIENT: f32 = 0.10;
+    // For CONTINUOUS relief shading, the DERIVED elevation range of the field, so each tile's height maps onto
+    // a smooth brightness ramp (dark basins to bright highlands). `None` when discrete relief shading is used
+    // (the living-world globe, byte-identical) or the field is flat.
+    let relief_range: Option<(f32, f32)> = if style.relief_shading && !tiles.is_empty() {
+        let mut lo = f32::INFINITY;
+        let mut hi = f32::NEG_INFINITY;
+        for t in tiles {
+            let e = t.elevation.to_f64_lossy() as f32;
+            lo = lo.min(e);
+            hi = hi.max(e);
+        }
+        (hi > lo).then_some((lo, hi))
+    } else {
+        None
+    };
     let rp = radius_px as i32;
     let x0 = (cx - rp).max(0);
     let x1 = (cx + rp).min(w as i32 - 1);
@@ -1253,14 +1278,21 @@ pub fn draw_globe(
             // wears the DERIVED material colour; otherwise the relief swatch ([`derived_tile_color`]). A uniform crust
             // reads a single shade (the honest look until lateral composition variation lands, a geodynamics
             // follow-on); an empty field falls back to the tint or a deep-ocean stand-in.
-            let base = match sample_derived_relief(tiles, tile_cols, u, v) {
-                Some(relief) => match style.tint {
+            let base = match sample_derived_tile(tiles, tile_cols, u, v) {
+                Some(tile) => match style.tint {
                     Some(m) => {
-                        let s = relief_shade(relief);
+                        // Continuous elevation shading when the caller asked for it and the field has relief;
+                        // otherwise the three discrete relief classes (the prior, byte-identical behaviour).
+                        let s = match relief_range {
+                            Some((lo, hi)) => {
+                                elevation_shade(tile.elevation.to_f64_lossy() as f32, lo, hi)
+                            }
+                            None => relief_shade(tile.relief),
+                        };
                         let scale = |c: u8| (c as f32 * s).clamp(0.0, 255.0) as u8;
                         Rgb::new(scale(m.r), scale(m.g), scale(m.b))
                     }
-                    None => derived_tile_color(relief),
+                    None => derived_tile_color(tile.relief),
                 },
                 None => style.tint.unwrap_or(Rgb::new(40, 72, 120)),
             };
@@ -2997,6 +3029,7 @@ mod tests {
                 SurfaceStyle {
                     tint: Some(tint),
                     grid: None,
+                    ..Default::default()
                 },
                 GlobeOrientation::IDENTITY,
             );
@@ -3043,7 +3076,11 @@ mod tests {
                 cols,
                 star,
                 white,
-                SurfaceStyle { tint, grid },
+                SurfaceStyle {
+                    tint,
+                    grid,
+                    ..Default::default()
+                },
                 GlobeOrientation::IDENTITY,
             );
             buf

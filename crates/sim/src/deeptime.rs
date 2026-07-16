@@ -300,6 +300,68 @@ pub fn current_luminosity_ratio(aging: &StarAgingParams, star_age_myr: Fixed) ->
     aging.zams_luminosity_ratio.checked_div(denom)
 }
 
+/// The number of convection PROVINCES that span a lateral distance, DERIVED from the convective cell
+/// width. Rayleigh-Benard convection cells have a horizontal width of order the convecting-layer DEPTH
+/// (an aspect ratio of order one), so the province width is `mantle_depth_m * cell_aspect` and the count
+/// spanning `span_m` is `span_m / width`, floored, and at least one. The lateral province SCALE is thus
+/// DERIVED from the convective physics, never a hand-set grid size: a deeper mantle makes fewer, wider
+/// provinces and a larger planet more of them, so the texture's spatial scale is what the convection IS.
+/// `cell_aspect` (the convective cell aspect ratio) is the CALLER's reserved-with-basis value (its basis:
+/// the Rayleigh-Benard critical-mode cell aspect, order one, set by the mantle's convective boundary
+/// regime), threaded in, never authored here. `None` on a non-physical input (a non-positive span, depth,
+/// or aspect, or an overflow).
+pub fn provinces_across(span_m: Fixed, mantle_depth_m: Fixed, cell_aspect: Fixed) -> Option<usize> {
+    if span_m <= Fixed::ZERO || mantle_depth_m <= Fixed::ZERO || cell_aspect <= Fixed::ZERO {
+        return None;
+    }
+    let width = mantle_depth_m.checked_mul(cell_aspect)?;
+    let count = span_m.checked_div(width)?;
+    Some(count.to_int().max(1) as usize)
+}
+
+/// One province's convection [`ColumnParams`], composed from the DERIVED per-planet inputs and the
+/// convection kernel's REPRESENTABLE-SCALED operating point. The DERIVED inputs are threaded in where they
+/// are physical and safe: the temperatures are real kelvin (so the solidus comparison the volcanism makes
+/// is physical), `surface_gravity_m_s2` is the planet's DERIVED surface gravity, `convecting_depth_mm` is
+/// the DERIVED convecting-mantle depth ([`crate::geodynamics::convecting_mantle_depth_m`]) expressed in
+/// megametres (an O(1) length the depth-cubed Rayleigh term does not overflow, RETIRING the depth = 1
+/// fixture), and `heat_production` is the per-province radiogenic budget (its lateral spread is what makes
+/// the provinces diverge). The kernel's remaining DYNAMICAL quantities (viscosity, diffusivity, the
+/// representable caps) are engine-scaled illustrative values, the documented interim the units plan retires
+/// with the SI wiring: the raw SI mantle viscosity and the depth-cubed Rayleigh term overflow Q32.32, so
+/// the kernel runs on a self-consistent scaled operating point rather than SI (a labelled fixture, not an
+/// authored world-content value). `ra_crit` is the classical Rayleigh-Benard critical number (the
+/// marginal-stability eigenvalue, ~1708 for rigid boundaries), so as the units plan lifts the operating
+/// point to SI a hot radiogenic province crosses it and convects while a cold one conducts, the
+/// bifurcation that amplifies the seed. Deterministic (a pure function of its inputs).
+pub fn province_column_params(
+    convecting_depth_mm: Fixed,
+    surface_gravity_m_s2: Fixed,
+    heat_production: Fixed,
+    reference_temperature_k: Fixed,
+    dt: Fixed,
+) -> ColumnParams {
+    ColumnParams {
+        reference_temperature: reference_temperature_k,
+        density: Fixed::ONE,
+        thermal_conductivity: Fixed::from_int(2),
+        thermal_expansion_ppm: Fixed::from_int(30),
+        gravity: surface_gravity_m_s2,
+        depth: convecting_depth_mm,
+        radius: Fixed::ONE,
+        viscosity: Fixed::ONE,
+        thermal_diffusivity: Fixed::from_ratio(1, 100),
+        specific_heat: Fixed::from_int(10),
+        heat_production,
+        ra_crit: Fixed::from_int(1708),
+        ra_max: Fixed::from_int(1_000_000),
+        v_max: Fixed::from_int(1_000_000),
+        flux_max: Fixed::from_int(1_000_000),
+        stress_max: Fixed::from_int(1_000_000),
+        dt,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -650,6 +712,83 @@ mod tests {
         assert!(
             step_deep_time(&start, &[], &melt_params(), Fixed::from_int(100)).is_none(),
             "no parameters to step against fails loud, never a silent no-op"
+        );
+    }
+
+    #[test]
+    fn the_province_count_derives_from_the_convective_scale() {
+        // The lateral province scale is DERIVED, not a hand-set grid: the count spanning a distance is the
+        // distance over the convective cell width (mantle depth times the aspect ratio). A deeper mantle
+        // makes fewer, wider provinces; a larger span more of them.
+        let depth = Fixed::from_int(1_500_000); // ~1500 km convecting mantle
+        let aspect = Fixed::from_ratio(141, 100); // ~sqrt(2), the free-free critical-mode aspect
+        let circumference = Fixed::from_int(21_000_000); // ~2*pi*3340 km
+        let n = provinces_across(circumference, depth, aspect).expect("derives");
+        assert!(
+            (7..=12).contains(&n),
+            "the province count is circumference / (depth * aspect), got {n}"
+        );
+        // A deeper mantle (wider cells) yields strictly fewer provinces across the same span.
+        let deeper = provinces_across(circumference, Fixed::from_int(3_000_000), aspect).unwrap();
+        assert!(
+            deeper < n,
+            "a deeper mantle makes fewer, wider provinces, got {deeper} vs {n}"
+        );
+        // Degenerate inputs fail loud rather than fabricating a scale.
+        assert!(provinces_across(Fixed::ZERO, depth, aspect).is_none());
+        assert!(provinces_across(circumference, Fixed::ZERO, aspect).is_none());
+        assert!(provinces_across(circumference, depth, Fixed::ZERO).is_none());
+    }
+
+    #[test]
+    fn the_province_column_wires_the_derived_depth_gravity_and_heat() {
+        // The derived per-planet inputs thread into the column params (the depth retires the depth = 1
+        // fixture), and a hotter radiogenic budget is carried through so the provinces can diverge.
+        let depth_mm = Fixed::from_ratio(15, 10); // 1.5 Mm derived convecting depth
+        let g = Fixed::from_ratio(37, 10); // Mars-class surface gravity
+        let cool = province_column_params(
+            depth_mm,
+            g,
+            Fixed::from_int(5),
+            Fixed::from_int(300),
+            Fixed::ONE,
+        );
+        let hot = province_column_params(
+            depth_mm,
+            g,
+            Fixed::from_int(400),
+            Fixed::from_int(300),
+            Fixed::ONE,
+        );
+        assert_eq!(
+            cool.depth, depth_mm,
+            "the derived depth is wired in, not a fixture"
+        );
+        assert_eq!(cool.gravity, g, "the derived surface gravity is wired in");
+        assert!(
+            hot.heat_production > cool.heat_production,
+            "the per-province radiogenic budget varies"
+        );
+        // The two share the same operating point apart from the varied heat, so a step diverges them.
+        let cool_state = convection_step(
+            &ColumnState {
+                temperature: Fixed::from_int(1588),
+                convecting: false,
+            },
+            &cool,
+        );
+        let hot_state = convection_step(
+            &ColumnState {
+                temperature: Fixed::from_int(1588),
+                convecting: false,
+            },
+            &hot,
+        );
+        assert!(
+            hot_state.temperature > cool_state.temperature,
+            "the more-radiogenic province stays hotter after a step, got {} vs {}",
+            hot_state.temperature.to_f64_lossy(),
+            cool_state.temperature.to_f64_lossy()
         );
     }
 }

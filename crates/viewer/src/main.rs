@@ -46,9 +46,13 @@ use civsim_physics::petrology_data::PhaseRegistry;
 use civsim_physics::solar_abundances::SolarAbundances;
 use civsim_sim::anatomy::WorldProfile;
 use civsim_sim::clock::PlaybackDriver;
+use civsim_sim::deeptime::{
+    province_column_params, provinces_across, step_deep_time, DeepTimeState, MeltParams,
+};
 use civsim_sim::genesis::{genesis, GenesisParams, LivingWorld, WorldGenesis};
 use civsim_sim::geodynamics::{
-    derive_mantle_density, generate_derived_tiles, slice0_demo_field, DerivedTile,
+    convecting_mantle_depth_m, derive_mantle_density, generate_derived_tiles, slice0_demo_field,
+    ColumnParams, DerivedTile,
 };
 use civsim_sim::located::OccupantId;
 use civsim_world::terrain::TerrainRelief;
@@ -451,13 +455,30 @@ fn derived_globe_cmd(argv: &[String]) {
     let orbit_au = parse_fixed(argv.get(4), Fixed::ONE);
     let w: usize = parse(argv.get(5), 720);
     let h: usize = parse(argv.get(6), 540);
-    let scene = match build_derived_scene(star_mass, orbit_au) {
+    let mut scene = match build_derived_scene(star_mass, orbit_au) {
         Ok(s) => s,
         Err(e) => {
             eprintln!("the derived planet did not resolve: {e}; nothing written");
             return;
         }
     };
+    // An optional deep-time step count (argv[8]) ages the province field to that point on the deep-time clock,
+    // re-deriving the surface, so the globe can be rendered at any epoch (the headless evolution check: render
+    // two step counts and the tile field differs, the provinces having formed and thickened).
+    if let Some(total_steps) = argv.get(8).and_then(|s| s.parse::<usize>().ok()) {
+        if let Some(prov) = scene.provinces.as_mut() {
+            age_provinces_from_young(prov, total_steps);
+            if let Some(tiles) =
+                derive_province_tiles(prov, scene.cols, scene.tiles.len() / scene.cols.max(1))
+            {
+                scene.tiles = tiles;
+            }
+            eprintln!(
+                "  deep-time: aged the province field to {total_steps} ticks ({:.0} Myr)",
+                (total_steps as f64) * DEEP_TIME_MYR_PER_TICK.to_f64_lossy()
+            );
+        }
+    }
     print_derived_readout(&scene);
     let fx = GlobeFixture {
         radius_m: scene.radius_m,
@@ -484,6 +505,7 @@ fn derived_globe_cmd(argv: &[String]) {
                 render::SurfaceStyle {
                     tint: Some(scene.material),
                     grid,
+                    relief_shading: true,
                 },
             )
         }
@@ -497,6 +519,7 @@ fn derived_globe_cmd(argv: &[String]) {
                 render::SurfaceStyle {
                     tint: Some(scene.material),
                     grid: None,
+                    relief_shading: true,
                 },
             )
         }
@@ -875,6 +898,9 @@ struct DerivedScene {
     /// pipeline fills; `None` means "not yet supplied by a derivation" (pending the spin/tilt derivation, task #44 /
     /// Part 18.1). The viewer READS these and never authors them, so wiring the derivation needs no viewer change.
     attitude: SceneAttitude,
+    /// The DEEP-TIME PROVINCE FIELD the globe's texture is re-derived from, and the observer's time control steps
+    /// forward so the surface evolves. `None` when the convective scale did not resolve (the uniform-crust fallback).
+    provinces: Option<DeepTimeProvinces>,
 }
 
 /// The natural log of ten, for the `log_eps` (base-10) solar-abundance scale to natural-exponent conversion (the same
@@ -970,6 +996,80 @@ const MELT_PRODUCTIVITY_PER_GPA: Fixed = Fixed::from_int(12).div(Fixed::from_int
 /// precedes the planet-gravity derivation in the scene ordering (a flagged derive-down, the g = 9.80665 convention
 /// is not a canon anchor). Dormant while the viewer set is sub-solidus. Cited: derived planet gravity / CODATA G.
 const MELT_COLUMN_GRAVITY_M_S2: Fixed = Fixed::from_int(98).div(Fixed::from_int(10)); // 9.8
+
+// THE DEEP-TIME PROVINCE TEXTURE reserved inputs. The globe's relief is the DERIVED crust the deep-time
+// volcanism ([`civsim_sim::deeptime`]) builds over a lateral field of mantle columns: each province's crust
+// thickness is the melt its interior delivers, so the surface is the written record of the interior's
+// history, never a painted height field. The province SCALE derives from the convective physics, the crust
+// AMPLITUDE from the melt and the isostasy; only the values below are reserved, each with its basis.
+
+/// RESERVED, the mantle-convection CELL ASPECT RATIO (cell width / convecting-layer depth), which sets the
+/// lateral province SCALE (the province width is this times the DERIVED convecting-mantle depth, and the
+/// province count is the planet circumference over that width, [`provinces_across`]). Basis: the
+/// Rayleigh-Benard critical-mode cell aspect, of order one; the free-free critical wavenumber a_c = pi/sqrt(2)
+/// gives a half-wavelength cell width of sqrt(2) times the depth, a rigid-boundary mantle nearer 1.0, so the
+/// value is set by the mantle's convective boundary regime. Reserved here (never an inline grid size); the
+/// free-free critical mode sqrt(2) is the surfaced default. Cited: Chandrasekhar (1961), Hydrodynamic and
+/// Hydromagnetic Stability, ch. II.
+const MANTLE_CONVECTION_CELL_ASPECT: Fixed = Fixed::from_int(1414).div(Fixed::from_int(1000)); // ~sqrt(2)
+
+/// RESERVED, the peridotitic MANTLE SOLIDUS surface temperature (K) the deep-time volcanism melts against
+/// (the crust-building partial melting of the convecting peridotite mantle, distinct from the refractory
+/// solar-crust re-melting the surface-composition path derives). Basis: the McKenzie-Bickle dry peridotite
+/// solidus, ~1373 K at the surface; a flagged derive-down (the endmember-signature solidus the
+/// surface-composition melt wiring already derives, reused standalone here is the follow-on). Cited:
+/// McKenzie & Bickle (1988) J. Petrology 29, 625.
+const MANTLE_SOLIDUS_SURFACE_K: Fixed = Fixed::from_int(1373);
+
+/// RESERVED, the peridotite solidus SLOPE (K/GPa), the Clausius-Clapeyron slope of the dry peridotite
+/// solidus. Basis: McKenzie-Bickle ~130 K/GPa. Cited: McKenzie & Bickle (1988).
+const MANTLE_SOLIDUS_SLOPE_K_PER_GPA: Fixed = Fixed::from_int(130);
+
+/// RESERVED, the mantle PROCESSING TIME (Myr): the overturn / melt-delivery timescale one melt column's
+/// worth of crust reaches the surface over, converting the column crust to a per-tick production rate. Basis:
+/// the silicate-mantle overturn time, ~100 Myr to 1 Gyr (the deeptime MeltParams documents the same basis).
+/// Cited: mantle-convection overturn timescale (Turcotte & Schubert, Geodynamics).
+const MANTLE_PROCESSING_TIME_MYR: Fixed = Fixed::from_int(100);
+
+/// RESERVED, the mantle radiogenic HETEROGENEITY amplitude (fractional): the lateral spread of the mantle's
+/// radiogenic budget around its mean, the symmetry the deterministic world seed breaks and the convection
+/// amplifies into provinces. Basis: the observed lateral heterogeneity of the mantle's heat-producing
+/// elements (U, Th, K) between depleted and enriched reservoirs, order tens of percent; ~0.3. Only the
+/// AMPLITUDE is reserved: the PATTERN (which province is enriched) is the deterministic seed, and the relief
+/// AMPLITUDE emerges from the melt and the isostasy, so nothing about the terrain is authored.
+const MANTLE_RADIOGENIC_HETEROGENEITY: Fixed = Fixed::from_int(3).div(Fixed::from_int(10)); // 0.3
+
+/// NON-CANON display: the deep-time geological duration one playback tick advances (megayears per playback
+/// tick). A viewing-sweep cadence (how fast the observer watches deep time pass), a sibling of the frame-rate
+/// sweep constants, NOT a physical time written to canon: the deep-time evolution it drives is a real derived
+/// physics step ([`step_deep_time`]), only the CADENCE is the observer's. Scaled so the surface visibly
+/// evolves over a few real seconds when the clock is sped up.
+const DEEP_TIME_MYR_PER_TICK: Fixed = Fixed::from_int(20);
+
+/// NON-CANON display: the number of deep-time steps the initial scene is aged to, so the globe opens on a
+/// planet that already carries relief (an evolved present-day surface) rather than a fresh molten sphere. A
+/// display framing of where the deep-time clock starts; the observer's time control runs it on from here.
+const DEEP_TIME_INITIAL_STEPS: usize = 80;
+
+/// NON-CANON display: the orbital sweep rate (radians per playback-second at 1 AU) the system-map animation
+/// advances a planet's mean anomaly by at playback rate 1. A viewing-sweep cadence (how fast the observer
+/// watches the planets orbit), a sibling of the frame-rate sweep constants, NOT a physical rate: the per-planet
+/// RELATIVE rate is the Kepler rate (a^-3/2, so inner planets sweep faster), which is derived; only this base
+/// cadence is the observer's. Chosen so a 1 AU planet circles in about ten real seconds at rate 1.
+const ORBIT_SWEEP_RATE_RAD_PER_S: f64 = 0.6;
+
+/// The Kepler sweep factor for a semi-major axis (astronomical units): the orbital angular rate scales as
+/// `a^(-3/2)` (Kepler's third law, `T` proportional to `a^(3/2)` about the same star), so an inner planet
+/// sweeps faster than an outer one. This is the DERIVED relative rate the animation reads; the absolute base
+/// cadence is [`ORBIT_SWEEP_RATE_RAD_PER_S`]. A non-positive axis falls back to unity (fail-soft).
+fn kepler_sweep_factor(orbit_au: Fixed) -> f64 {
+    let a = orbit_au.to_f64_lossy();
+    if a > 0.0 {
+        a.powf(-1.5)
+    } else {
+        1.0
+    }
+}
 
 /// The single-component disk dust the opacity is derived from: astronomical silicate, the canonical protoplanetary
 /// disk-opacity carrier, present in the standard optical library. HONEST LIMIT (a named #54 grain-wire follow-on): the
@@ -1099,6 +1199,27 @@ fn derive_uncompressed_bulk_density(
     eos: &MetalEosAnchors,
     rho_silicate: Fixed,
 ) -> Option<Fixed> {
+    let (core_fraction, rho_metal) =
+        derive_core_fraction_and_metal_density(abundances, table, eos)?;
+    let mantle_fraction = Fixed::ONE.checked_sub(core_fraction)?;
+    // Volume-weighted mean: rho = total mass / total volume = 1 / (f_core/rho_metal + f_mantle/rho_silicate).
+    let inverse = core_fraction
+        .checked_div(rho_metal)?
+        .checked_add(mantle_fraction.checked_div(rho_silicate)?)?;
+    Fixed::ONE.checked_div(inverse)
+}
+
+/// The metal-core MASS FRACTION and the core (metal) DENSITY (g/cm^3), the two interior-structure inputs the
+/// convecting-mantle-depth derivation ([`convecting_mantle_depth_m`]) needs, from the same differentiation
+/// [`derive_uncompressed_bulk_density`] uses: all Fe and Ni (metal) and troilite S (sulfur) sink to the core,
+/// the rock cations float as their normative oxides, and the core density is the Fe EOS anchor (atomic
+/// weight over measured molar volume). Shared with the bulk-density derivation, so the two never disagree.
+/// `None` on a missing abundance, atomic weight, or the Fe anchor.
+fn derive_core_fraction_and_metal_density(
+    abundances: &SolarAbundances,
+    table: &PeriodicTable,
+    eos: &MetalEosAnchors,
+) -> Option<(Fixed, Fixed)> {
     let oxygen_mass = table.element("O")?.standard_atomic_weight;
     // The sinking metal-plus-sulfide core: all Fe (metal), Ni (metal), and S (troilite sulfur), at bulk abundance.
     let mut core_mass = Fixed::ZERO;
@@ -1135,16 +1256,269 @@ fn derive_uncompressed_bulk_density(
         return None;
     }
     let core_fraction = core_mass.checked_div(total)?;
-    let mantle_fraction = Fixed::ONE.checked_sub(core_fraction)?;
     // The core (metal) density from the Fe EOS anchor: atomic weight over measured molar volume.
     let iron_mass = table.element("Fe")?.standard_atomic_weight;
     let iron_molar_volume = eos.molar_volume("Fe")?;
     let rho_metal = iron_mass.checked_div(iron_molar_volume)?;
-    // Volume-weighted mean: rho = total mass / total volume = 1 / (f_core/rho_metal + f_mantle/rho_silicate).
-    let inverse = core_fraction
-        .checked_div(rho_metal)?
-        .checked_add(mantle_fraction.checked_div(rho_silicate)?)?;
-    Fixed::ONE.checked_div(inverse)
+    Some((core_fraction, rho_metal))
+}
+
+/// The deep-time PROVINCE FIELD the derived globe's texture is re-derived from each playback step: a lateral
+/// grid of interior mantle columns (at the DERIVED province scale), their per-province convection params (the
+/// radiogenic seed patterned into them), the volcanism params, and the derived densities the isostasy reads.
+/// Stepping it ([`step_deep_time`]) evolves the interior and grows the crust, so the surface relief EMERGES
+/// and CHANGES over deep time (the provinces form, thicken, and diverge), never a painted map. Display-side
+/// state driven by the non-canon playback clock (Principle 10); nothing here touches canon.
+struct DeepTimeProvinces {
+    /// The evolving interior state (stepped each playback tick).
+    state: DeepTimeState,
+    /// One convection parameter set per province (the radiogenic seed carried in `heat_production`).
+    column_params: Vec<ColumnParams>,
+    /// The shared volcanism parameters (the derived solidus, source density, gravity; reserved processing time).
+    melt: MeltParams,
+    /// The province grid width and height, DERIVED from the convective scale ([`provinces_across`]).
+    pcols: usize,
+    prows: usize,
+    /// The crust density (derived once from the crust composition) each province's crust floats at.
+    crust_density: Fixed,
+    /// The derived mantle density the crust floats ON.
+    mantle_density: Fixed,
+    /// The sea-level datum (Slice-0 zero, retires with the water budget).
+    sea_level: Fixed,
+}
+
+/// A deterministic per-province symmetry-breaking perturbation in `[-1, 1)`, hashed from the world identity
+/// (the star mass and orbit that DEFINE this derived planet) and the province index. This is the seed the
+/// convection amplifies into provinces (Principle 8): it is deterministic (a pure splitmix64 hash, replays
+/// bit-for-bit) and it perturbs an INPUT (the radiogenic budget), never the output terrain, so the province
+/// pattern EMERGES from the physics rather than a painted height field. Only the pattern comes from here; the
+/// spread's amplitude is the reserved radiogenic heterogeneity and the relief amplitude is the melt physics.
+fn province_seed_perturbation(star_mass: Fixed, orbit_au: Fixed, index: usize) -> Fixed {
+    let mut z = (star_mass.to_bits() as u64)
+        .wrapping_mul(0x9E37_79B9_7F4A_7C15)
+        .wrapping_add((orbit_au.to_bits() as u64).wrapping_mul(0xD1B5_4A32_D192_ED03))
+        .wrapping_add(
+            (index as u64)
+                .wrapping_add(1)
+                .wrapping_mul(0xCA5A_8E62_1B4C_9F3D),
+        );
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    z ^= z >> 31;
+    // Map the top 24 bits to [0, 1), then to [-1, 1). A fixed denominator keeps the quantization deterministic.
+    let frac = (z >> 40) as i32; // 0 .. 2^24 - 1, fits i32
+    let unit = Fixed::from_int(frac)
+        .checked_div(Fixed::from_int(1 << 24))
+        .unwrap_or(Fixed::ZERO);
+    unit.checked_mul(Fixed::from_int(2))
+        .and_then(|x| x.checked_sub(Fixed::ONE))
+        .unwrap_or(Fixed::ZERO)
+}
+
+/// Build the deep-time PROVINCE FIELD for a derived planet, or `None` if the convective scale does not
+/// resolve (fail-soft: the globe then shows the uniform crust, never a fabricated texture). The chain is all
+/// derivation: the convecting-mantle DEPTH from the planet's interior structure ([`convecting_mantle_depth_m`],
+/// retiring the depth fixture), the province COUNT from that depth and the planet circumference over the
+/// reserved convective cell aspect ([`provinces_across`]), the per-province radiogenic budget as the
+/// thermostat base (set so the mean province's steady state sits at its solidus, the mantle-thermostat
+/// closure) times one-plus the reserved heterogeneity times the deterministic seed, the volcanism source
+/// density and gravity DERIVED (the mantle density and the planet's surface gravity), and the columns started
+/// laterally uniform at the mantle potential temperature (a fresh planet has no thermal history; the
+/// provinces are what the run produces).
+#[allow(clippy::too_many_arguments)]
+fn build_deep_time_provinces(
+    star_mass: Fixed,
+    orbit_au: Fixed,
+    radius_m: Fixed,
+    surface_gravity_m_s2: Fixed,
+    core_fraction: Fixed,
+    core_density: Fixed,
+    mean_density: Fixed,
+    mantle_density: Fixed,
+    crust_density: Fixed,
+) -> Option<DeepTimeProvinces> {
+    // The convecting-mantle DEPTH from the interior structure (SI metres), and its megametre form for the
+    // representable-scaled convection kernel (retiring the depth = 1 fixture).
+    let depth_m = convecting_mantle_depth_m(radius_m, core_fraction, mean_density, core_density)?;
+    let depth_mm = depth_m.checked_div(Fixed::from_int(1_000_000))?;
+
+    // The province SCALE, DERIVED: the count around the equator (circumference / cell width) and pole-to-pole
+    // (half that circumference), each from the convective cell width (depth times the reserved aspect).
+    let tau = Fixed::PI.checked_add(Fixed::PI)?;
+    let circumference = tau.checked_mul(radius_m)?;
+    let meridian = Fixed::PI.checked_mul(radius_m)?;
+    let pcols = provinces_across(circumference, depth_m, MANTLE_CONVECTION_CELL_ASPECT)?;
+    let prows = provinces_across(meridian, depth_m, MANTLE_CONVECTION_CELL_ASPECT)?;
+    let n = pcols.checked_mul(prows)?;
+    if n == 0 {
+        return None;
+    }
+
+    // The volcanism parameters: the reserved peridotite solidus, the DERIVED source density (the mantle
+    // density in kg/m^3) and gravity (the planet's surface gravity), and the reserved interior-thermostat and
+    // processing-time values.
+    let source_density = mantle_density.checked_mul(Fixed::from_int(1000))?;
+    let melt = MeltParams {
+        solidus_surface_k: MANTLE_SOLIDUS_SURFACE_K,
+        solidus_slope_k_per_gpa: MANTLE_SOLIDUS_SLOPE_K_PER_GPA,
+        adiabat_slope_k_per_gpa: MANTLE_ADIABAT_SLOPE_K_PER_GPA,
+        productivity_per_gpa: MELT_PRODUCTIVITY_PER_GPA,
+        source_density_kg_per_m3: source_density,
+        gravity_m_per_s2: surface_gravity_m_s2,
+        processing_time_myr: MANTLE_PROCESSING_TIME_MYR,
+    };
+
+    // The interior-thermostat BASE radiogenic budget: set so a mean-seed province's conductive steady-state
+    // temperature sits at the solidus (the observed mantle self-regulation near its solidus). At the scaled
+    // operating point the steady state is T_ref + heat_production / loss_coeff with loss_coeff =
+    // conductivity / (density * depth^2) (the convection kernel's conductive balance), so the base that lands
+    // T_ss on the solidus is loss_coeff * (solidus - reference). This is a CLOSURE (the thermostat), not an
+    // authored value: it derives the base from the solidus and the operating point.
+    let reference_temperature = Fixed::from_int(300);
+    let kernel_conductivity = Fixed::from_int(2);
+    let kernel_density = Fixed::ONE;
+    let loss_coeff = kernel_conductivity
+        .checked_div(kernel_density.checked_mul(depth_mm.checked_mul(depth_mm)?)?)?;
+    let base_heat =
+        loss_coeff.checked_mul(MANTLE_SOLIDUS_SURFACE_K.checked_sub(reference_temperature)?)?;
+
+    // One column parameter set per province: the derived depth and gravity, and the seeded radiogenic budget
+    // base * (1 + heterogeneity * seed). The seed is the deterministic per-province perturbation.
+    let mut column_params = Vec::with_capacity(n);
+    for index in 0..n {
+        let seed = province_seed_perturbation(star_mass, orbit_au, index);
+        let factor = Fixed::ONE
+            .checked_add(MANTLE_RADIOGENIC_HETEROGENEITY.checked_mul(seed)?)?
+            .max(Fixed::ZERO);
+        let heat_production = base_heat.checked_mul(factor)?;
+        column_params.push(province_column_params(
+            depth_mm,
+            surface_gravity_m_s2,
+            heat_production,
+            reference_temperature,
+            Fixed::ONE,
+        ));
+    }
+
+    // The columns start laterally UNIFORM at the mantle potential temperature (super-solidus, so the melt
+    // engages): a fresh planet has no thermal history, and the provinces are what the run writes.
+    let state = DeepTimeState::young(n, MANTLE_POTENTIAL_TEMPERATURE_K);
+
+    Some(DeepTimeProvinces {
+        state,
+        column_params,
+        melt,
+        pcols,
+        prows,
+        crust_density,
+        mantle_density,
+        sea_level: Fixed::ZERO,
+    })
+}
+
+/// Reset the province field to its fresh young state (laterally uniform at the mantle potential temperature)
+/// and age it to `total_steps` deep-time ticks, so the surface can be re-derived at any point on the deep-time
+/// clock (the headless two-point evolution check, and a rewind of the observer's playback). Deterministic.
+fn age_provinces_from_young(prov: &mut DeepTimeProvinces, total_steps: usize) {
+    let n = prov.column_params.len();
+    prov.state = DeepTimeState::young(n, MANTLE_POTENTIAL_TEMPERATURE_K);
+    step_provinces(prov, total_steps);
+}
+
+/// Advance the deep-time province field by `steps` playback ticks (each `DEEP_TIME_MYR_PER_TICK` of geological
+/// time), stepping the interior convection and growing the crust. A no-op past a step that fails to resolve
+/// (fail-soft, the field simply stops advancing). Deterministic.
+fn step_provinces(prov: &mut DeepTimeProvinces, steps: usize) {
+    for _ in 0..steps {
+        match step_deep_time(
+            &prov.state,
+            &prov.column_params,
+            &prov.melt,
+            DEEP_TIME_MYR_PER_TICK,
+        ) {
+            Some(next) => prov.state = next,
+            None => break,
+        }
+    }
+}
+
+/// Re-derive the display TILE field from the current province state: each display tile reads its province's
+/// accumulated crust thickness, floats it by Airy isostasy on the derived mantle
+/// ([`civsim_physics::geodynamics::airy_isostatic_elevation`]), and classifies its relief against the field
+/// datum. So the surface is the province crust in relief: thicker-crust provinces stand as highlands, thinner
+/// as lowlands, and the pattern is what the deep-time run wrote, never a painted map. The display grid
+/// (`cols` by `rows`) is a viewer resolution; the PHYSICAL province grid is the derived one, and each display
+/// tile samples the province it falls in. `None` if the field is empty or an elevation does not resolve.
+fn derive_province_tiles(
+    prov: &DeepTimeProvinces,
+    cols: usize,
+    rows: usize,
+) -> Option<Vec<DerivedTile>> {
+    if prov.pcols == 0 || prov.prows == 0 || cols == 0 || rows == 0 {
+        return None;
+    }
+    let mut elevations = Vec::with_capacity(cols * rows);
+    for r in 0..rows {
+        let fv = (r as f32 + 0.5) / rows as f32;
+        for c in 0..cols {
+            let fu = (c as f32 + 0.5) / cols as f32;
+            // Bilinearly sample the coarse province field so it reads as a smooth heightfield across province
+            // boundaries rather than hard blocks (a display resampling of the DERIVED field, never new content).
+            let thickness = sample_province_thickness(prov, fu, fv);
+            let elevation = civsim_physics::geodynamics::airy_isostatic_elevation(
+                prov.crust_density,
+                prov.mantle_density,
+                thickness,
+            )?;
+            elevations.push(elevation);
+        }
+    }
+    let datum = civsim_world::terrain::relief_datum(&elevations)?;
+    Some(
+        elevations
+            .iter()
+            .map(|&elevation| DerivedTile {
+                elevation,
+                relief: civsim_world::terrain::classify_relief(elevation, prov.sea_level, datum),
+            })
+            .collect(),
+    )
+}
+
+/// Bilinearly sample the province crust-thickness field at a normalized surface coordinate `(fu, fv)`, treating
+/// each province as a sample at its cell centre. Longitude WRAPS (the globe is periodic east to west) and
+/// latitude CLAMPS (the poles), so the coarse DERIVED province field reads as a smooth heightfield across
+/// province boundaries. A display resampling of the derived field (Principle 10), never fabricated content.
+fn sample_province_thickness(prov: &DeepTimeProvinces, fu: f32, fv: f32) -> Fixed {
+    let pc = prov.pcols as i64;
+    let pr = prov.prows as i64;
+    let gx = fu * pc as f32 - 0.5;
+    let gy = fv * pr as f32 - 0.5;
+    let x0 = gx.floor();
+    let y0 = gy.floor();
+    let tx = gx - x0;
+    let ty = gy - y0;
+    let x0i = x0 as i64;
+    let y0i = y0 as i64;
+    let at = |xi: i64, yi: i64| -> Fixed {
+        let x = xi.rem_euclid(pc) as usize; // wrap longitude
+        let y = yi.clamp(0, pr - 1) as usize; // clamp latitude
+        prov.state
+            .crust_thickness_km
+            .get(y * prov.pcols + x)
+            .copied()
+            .unwrap_or(Fixed::ZERO)
+    };
+    let lerp_fx = |a: Fixed, b: Fixed, t: f32| -> Fixed {
+        let tf = Fixed::from_ratio((t.clamp(0.0, 1.0) * 4096.0) as i64, 4096);
+        b.checked_sub(a)
+            .and_then(|d| d.checked_mul(tf))
+            .and_then(|d| a.checked_add(d))
+            .unwrap_or(a)
+    };
+    let top = lerp_fx(at(x0i, y0i), at(x0i + 1, y0i), tx);
+    let bot = lerp_fx(at(x0i, y0i + 1), at(x0i + 1, y0i + 1), tx);
+    lerp_fx(top, bot, ty)
 }
 
 /// Build the DERIVED scene from a star mass and an orbit, or an error naming the link that did not resolve (fail-soft:
@@ -1251,28 +1625,70 @@ fn build_derived_scene(star_mass: Fixed, orbit_au: Fixed) -> Result<DerivedScene
     )
     .ok_or("the star-and-orbit derivation did not resolve")?;
 
-    // The isostatic tiles off a UNIFORM derived-crust field: every tile carries the derived crust, so its elevation is
-    // what the material is by Airy isostasy against the derived mantle. A representable column thickness (30 km) and a
-    // zero sea-level datum are the Slice-0 fixtures (retire with the interior and water-budget lanes).
+    // THE DEEP-TIME PROVINCE TEXTURE (the visible-world payoff): the surface relief is the DERIVED crust the
+    // deep-time volcanism ([`civsim_sim::deeptime`]) builds over a lateral field of mantle columns. The columns
+    // start uniform (a fresh planet has no thermal history) and DIVERGE as each province's own radiogenic
+    // history plays out, so the surface is the written record of the interior, never a painted map. The
+    // province SCALE derives from the convective physics (depth times the reserved cell aspect, over the
+    // circumference); the crust AMPLITUDE from the melt and the isostasy. Fail-soft: if the convective scale
+    // does not resolve, the globe shows the uniform crust (the prior behaviour), never a fabricated texture.
     let cols = 48usize;
     let rows = 32usize;
-    let field: Vec<Vec<(String, Fixed)>> = vec![crust_composition.clone(); cols * rows];
-    // The crustal thickness: the seam-6 McKenzie-Bickle DERIVED partial-melt thickness when the melt mechanism
-    // engaged, else the Slice-0 representable fixture (30 km, retires with the interior lane). For the refractory
-    // solar set the melt is sub-solidus (buoyancy fallback, `crust_thickness_km` None), so the fixture stands.
-    let crustal_thickness = sc.crust_thickness_km.unwrap_or_else(|| Fixed::from_int(30));
     let sea_level = Fixed::ZERO;
-    let tiles = generate_derived_tiles(
-        &field,
-        mantle_density,
-        crustal_thickness,
+    // The crust density (once) each province's crust floats at, and the interior-structure inputs the
+    // convecting-depth derivation reads.
+    let crust_density = civsim_physics::petrology::crustal_density(
+        &crust_composition,
         surface_t,
         surface_p,
-        sea_level,
         &registry,
         &table,
-    )
-    .ok_or("the derived tiles did not resolve from the crust composition")?;
+    );
+    let core_structure = derive_core_fraction_and_metal_density(&abundances, &table, &eos);
+    let provinces = match (crust_density, core_structure) {
+        (Some(crust_density), Some((core_fraction, core_density))) => build_deep_time_provinces(
+            star_mass,
+            orbit_au,
+            planet.radius_m,
+            planet.surface_gravity_m_s2,
+            core_fraction,
+            core_density,
+            planet_bulk_density,
+            mantle_density,
+            crust_density,
+        ),
+        _ => None,
+    };
+    // Age the initial scene to a present-day surface (the observer's time control runs it on from here), and
+    // read the display tiles off it. If the province field did not resolve, fall back to the uniform crust
+    // (the seam-6 DERIVED thickness where the melt engaged, else the Slice-0 30 km fixture).
+    let (tiles, provinces) = match provinces {
+        Some(mut prov) => {
+            step_provinces(&mut prov, DEEP_TIME_INITIAL_STEPS);
+            match derive_province_tiles(&prov, cols, rows) {
+                Some(t) => (t, Some(prov)),
+                None => (Vec::new(), Some(prov)),
+            }
+        }
+        None => (Vec::new(), None),
+    };
+    let tiles = if tiles.is_empty() {
+        let field: Vec<Vec<(String, Fixed)>> = vec![crust_composition.clone(); cols * rows];
+        let crustal_thickness = sc.crust_thickness_km.unwrap_or_else(|| Fixed::from_int(30));
+        generate_derived_tiles(
+            &field,
+            mantle_density,
+            crustal_thickness,
+            surface_t,
+            surface_p,
+            sea_level,
+            &registry,
+            &table,
+        )
+        .ok_or("the derived tiles did not resolve from the crust composition")?
+    } else {
+        tiles
+    };
 
     // The crust's perceived colour under the star, DERIVED from its absorption spectrum. The broadening temperature is
     // the derived disk (surface) warmth. Fail-soft to the relief swatch if the material read returns None.
@@ -1337,6 +1753,7 @@ fn build_derived_scene(star_mass: Fixed, orbit_au: Fixed) -> Result<DerivedScene
         // orientation, orbital phase, rotation period, and initial spin phase reserved per-world inputs the pipeline
         // fills (R-CELESTIAL-SECULAR, task #44 / Part 18.1). No tilt or spin value is authored in the viewer.
         attitude: derived_scene_attitude(),
+        provinces,
     })
 }
 
@@ -1618,23 +2035,47 @@ fn build_sampled_planets(star_mass: Fixed, extra_orbit: Option<Fixed>) -> Vec<Sa
     planets
 }
 
-/// The [`render::MapBody`] for a sampled planet: its DERIVED orbit (semi-major axis), the demo eccentricity, its map
-/// phase, and its DERIVED material colour as the dot. The `dot_px` size is a NON-CANON display choice.
-fn map_body(p: &SampledPlanet, dot_px: usize) -> render::MapBody {
+/// The [`render::MapBody`] for a sampled planet: its DERIVED orbit (semi-major axis), the per-world eccentricity, the
+/// mean anomaly placing its dot on the ellipse, and its DERIVED material colour as the dot. `mean_anomaly` is the
+/// CURRENT phase (the animation advances it at the planet's Kepler rate); the `dot_px` size is a NON-CANON display
+/// choice. Passing the anomaly in lets the still map use the static display spread and the live map use the clock.
+fn map_body(p: &SampledPlanet, dot_px: usize, mean_anomaly: Fixed) -> render::MapBody {
     render::MapBody {
         semi_major_au: p.scene.orbit_au,
         // The orbit eccentricity is READ per-world from the scene attitude (the world sky's value), else the neutral
         // circle when not available; never an authored literal.
         eccentricity: attitude_eccentricity(&p.scene.attitude),
-        mean_anomaly: p.mean_anomaly,
+        mean_anomaly,
         dot_color: p.scene.material,
         dot_px,
     }
 }
 
+/// The CURRENT animated mean anomaly of a sampled planet: its static display-spread phase advanced by the observer's
+/// orbital sweep at the planet's DERIVED Kepler rate ([`kepler_sweep_factor`], inner planets faster), folded into one
+/// turn. The Keplerian speed-up at perihelion falls out for free downstream in the mean-to-true-anomaly solve
+/// ([`civsim_sim::orbit::orbital_state`]); this only sets the mean-anomaly phase. Display-only (Principle 10).
+fn animated_mean_anomaly(p: &SampledPlanet, orbit_phase: f64) -> Fixed {
+    let tau = std::f64::consts::TAU;
+    let base = p.mean_anomaly.to_f64_lossy();
+    let swept = (base + orbit_phase * kepler_sweep_factor(p.scene.orbit_au)).rem_euclid(tau);
+    Fixed::from_ratio((swept * 1_000_000.0) as i64, 1_000_000)
+}
+
 /// NON-CANON display: the on-screen star radius on the system map (pixels), scaled to the frame.
 fn system_map_star_radius_px(min_dim: usize) -> usize {
     (min_dim / 40).max(3)
+}
+
+/// The time-control HUD string: the paused state or the current playback speed, and the key legend, so the owner
+/// sees the clock that governs both the orbital motion and the deep-time surface evolution. Display-only.
+fn time_status(playback: &PlaybackDriver) -> String {
+    let state = if playback.is_paused() {
+        "PAUSED".to_string()
+    } else {
+        format!("{:.2}x", playback.rate())
+    };
+    format!("TIME {state}  [space pause  <,> or [,] slower/faster  0 normal]")
 }
 
 /// Render one woosh transition frame: the system map (`map_buf`) fades toward empty space as the planet globe grows from
@@ -1667,6 +2108,7 @@ fn draw_woosh_frame(
     let style = render::SurfaceStyle {
         tint: Some(scene.material),
         grid: None,
+        relief_shading: true,
     };
     render::draw_globe_scene(
         &mut buf,
@@ -1703,7 +2145,7 @@ fn run_derived(argv: &[String]) {
         .get(3)
         .and_then(|s| Fixed::from_decimal_str(s.trim()).ok());
     eprintln!("deriving the system map (a planet at each sampled orbit)...");
-    let planets = build_sampled_planets(star_mass, orbit_arg);
+    let mut planets = build_sampled_planets(star_mass, orbit_arg);
     if planets.is_empty() {
         eprintln!("no derived planets resolved at the sampled orbits; nothing is shown (nothing is fabricated)");
         return;
@@ -1774,6 +2216,14 @@ fn run_derived(argv: &[String]) {
     // A frame clock for the derived spin animation (the day/night terminator sweep) and a mouse-edge tracker for clicks.
     let mut spin_frame: u64 = 0;
     let mut was_mouse_down = false;
+    // THE OBSERVER'S TIME CONTROL: one non-canon playback clock ([`civsim_sim::clock::PlaybackDriver`], the banked
+    // pause/rate/scale holder) governs BOTH the planets' orbital motion on the map and the deep-time surface
+    // evolution on the globe. Space pauses (freezing both so the owner can inspect), and the speed keys slow it
+    // down or crank it up. `orbit_phase` is the continuous orbital sweep (radians at 1 AU); the per-planet rate is
+    // the Kepler rate (inner planets sweep faster), and the deep-time field steps by the same clock's whole ticks.
+    let mut playback = PlaybackDriver::new(1.0);
+    let mut orbit_phase = 0.0f64;
+    let mut last_instant = std::time::Instant::now();
 
     while window.is_open() {
         let (w, h) = window.get_size();
@@ -1782,6 +2232,27 @@ fn run_derived(argv: &[String]) {
             continue;
         }
         let keys: Vec<Key> = window.get_keys_pressed(KeyRepeat::No);
+        // The real seconds since the last frame, clamped so a stall does not lurch the playback; and the time keys
+        // (Space pause, the bracket / comma-period speed controls, 0 to reset to normal), live in every view.
+        let dt_real = last_instant.elapsed().as_secs_f64().min(0.1);
+        last_instant = std::time::Instant::now();
+        for k in &keys {
+            match k {
+                Key::Space => {
+                    playback.toggle_pause();
+                }
+                Key::RightBracket | Key::Period => playback.scale_rate(2.0),
+                Key::LeftBracket | Key::Comma => playback.scale_rate(0.5),
+                Key::Key0 => playback.set_rate(1.0),
+                _ => {}
+            }
+        }
+        // Advance the orbital sweep continuously (smooth), gated by pause and rate; the deep-time whole-tick count
+        // for this frame comes from the same driver (used in the globe view to step the surface forward).
+        if !playback.is_paused() {
+            orbit_phase += dt_real * playback.rate() * ORBIT_SWEEP_RATE_RAD_PER_S;
+        }
+        let deep_ticks = playback.advance(dt_real) as usize;
         let min_dim = w.min(h);
         let star_r = system_map_star_radius_px(min_dim);
         let mouse_down = window.get_mouse_down(MouseButton::Left);
@@ -1795,7 +2266,7 @@ fn run_derived(argv: &[String]) {
                 }
                 let bodies: Vec<render::MapBody> = planets
                     .iter()
-                    .map(|p| map_body(p, DEMO_MAP_DOT_PX))
+                    .map(|p| map_body(p, DEMO_MAP_DOT_PX, animated_mean_anomaly(p, orbit_phase)))
                     .collect();
                 let (mut buf, dots) =
                     render::render_system_map(w, h, BG, star_t_eff, star_r, &bodies);
@@ -1878,6 +2349,17 @@ fn run_derived(argv: &[String]) {
                     Rgb::new(170, 180, 200),
                     Rgb::new(10, 12, 20),
                 );
+                render::draw_label(
+                    &mut buf,
+                    w,
+                    h,
+                    4,
+                    32,
+                    &time_status(&playback),
+                    1,
+                    Rgb::new(210, 200, 150),
+                    Rgb::new(10, 12, 20),
+                );
                 window.set_title(&format!(
                     "civsim system map  star {:.2} Msun  {} sampled worlds",
                     star_mass.to_f64_lossy(),
@@ -1889,7 +2371,7 @@ fn run_derived(argv: &[String]) {
                 let scene = &planets[planet].scene;
                 let bodies: Vec<render::MapBody> = planets
                     .iter()
-                    .map(|p| map_body(p, DEMO_MAP_DOT_PX))
+                    .map(|p| map_body(p, DEMO_MAP_DOT_PX, animated_mean_anomaly(p, orbit_phase)))
                     .collect();
                 let (map_buf, dots) =
                     render::render_system_map(w, h, BG, star_t_eff, star_r, &bodies);
@@ -1931,7 +2413,7 @@ fn run_derived(argv: &[String]) {
                 let scene = &planets[planet].scene;
                 let bodies: Vec<render::MapBody> = planets
                     .iter()
-                    .map(|p| map_body(p, DEMO_MAP_DOT_PX))
+                    .map(|p| map_body(p, DEMO_MAP_DOT_PX, animated_mean_anomaly(p, orbit_phase)))
                     .collect();
                 let (map_buf, dots) =
                     render::render_system_map(w, h, BG, star_t_eff, star_r, &bodies);
@@ -1969,6 +2451,24 @@ fn run_derived(argv: &[String]) {
                 buf
             }
             DerivedView::Globe { planet } => {
+                // THE DEEP-TIME ACTIVITY: advance the province field by the playback clock's whole ticks this
+                // frame and re-derive the surface, so the provinces form, the crust grows, and the relief changes
+                // as the owner watches (paused freezes it; speeding up runs deep time fast). A real derived
+                // physics step ([`step_deep_time`]), never a painted animation.
+                if deep_ticks > 0 {
+                    let cols = planets[planet].scene.cols;
+                    let rows = planets[planet].scene.tiles.len() / cols.max(1);
+                    let new_tiles = match planets[planet].scene.provinces.as_mut() {
+                        Some(prov) => {
+                            step_provinces(prov, deep_ticks);
+                            derive_province_tiles(prov, cols, rows)
+                        }
+                        None => None,
+                    };
+                    if let Some(t) = new_tiles {
+                        planets[planet].scene.tiles = t;
+                    }
+                }
                 let scene = &planets[planet].scene;
                 // Discrete keys: zoom, provenance, recentre.
                 for k in &keys {
@@ -2016,6 +2516,7 @@ fn run_derived(argv: &[String]) {
                 let style = render::SurfaceStyle {
                     tint: Some(scene.material),
                     grid: show_grid.then_some((grid_cols, grid_rows)),
+                    relief_shading: true,
                 };
                 // The DERIVED sun direction, animated by the spin so the terminator sweeps as you watch.
                 let day_sweep = sweep_phase(spin_frame, TERMINATOR_SWEEP_FRAMES);
@@ -2097,6 +2598,27 @@ fn run_derived(argv: &[String]) {
                     Rgb::new(170, 180, 200),
                     Rgb::new(10, 12, 20),
                 );
+                // The time control and the deep-time age, so the owner sees the surface evolve on the clock.
+                let age_myr = scene
+                    .provinces
+                    .as_ref()
+                    .map(|p| p.state.elapsed_myr.to_f64_lossy())
+                    .unwrap_or(0.0);
+                render::draw_label(
+                    &mut buf,
+                    w,
+                    h,
+                    4,
+                    34,
+                    &format!(
+                        "deep time {:.0} Myr  |  {}",
+                        age_myr,
+                        time_status(&playback)
+                    ),
+                    1,
+                    Rgb::new(210, 200, 150),
+                    Rgb::new(10, 12, 20),
+                );
                 if show_provenance {
                     let lines = provenance_lines(scene, floor_prov.as_ref(), picked);
                     let panel_w = 372usize;
@@ -2170,7 +2692,7 @@ fn system_map_cmd(argv: &[String]) {
     let star_r = system_map_star_radius_px(min_dim);
     let bodies: Vec<render::MapBody> = planets
         .iter()
-        .map(|p| map_body(p, DEMO_MAP_DOT_PX))
+        .map(|p| map_body(p, DEMO_MAP_DOT_PX, p.mean_anomaly))
         .collect();
     let (buf, dots) = render::render_system_map(w, h, BG, star_t_eff, star_r, &bodies);
     write_ppm(&path, w, h, &buf);
@@ -2740,6 +3262,135 @@ mod seam3_tests {
             has(&far, "Si"),
             "the far silicate crust carries silicon (enstatite), got {:?}",
             far.crust_phases
+        );
+    }
+}
+
+#[cfg(test)]
+mod province_tests {
+    use super::*;
+
+    #[test]
+    fn the_province_seed_is_deterministic_and_spreads() {
+        // The symmetry-breaking seed is a pure hash: the same world and province index replay bit-for-bit, the
+        // perturbation lies in [-1, 1), and different provinces get different values, so the field is not uniform.
+        let a = province_seed_perturbation(Fixed::ONE, Fixed::ONE, 7);
+        let b = province_seed_perturbation(Fixed::ONE, Fixed::ONE, 7);
+        assert_eq!(a, b, "the seed replays deterministically");
+        for i in 0..60 {
+            let s = province_seed_perturbation(Fixed::ONE, Fixed::ONE, i);
+            assert!(
+                s >= Fixed::from_int(-1) && s < Fixed::ONE,
+                "seed {i} is in [-1, 1): {}",
+                s.to_f64_lossy()
+            );
+        }
+        let distinct: std::collections::BTreeSet<i64> = (0..60)
+            .map(|i| province_seed_perturbation(Fixed::ONE, Fixed::ONE, i).to_bits())
+            .collect();
+        assert!(
+            distinct.len() > 50,
+            "the seed spreads across provinces, got {} distinct of 60",
+            distinct.len()
+        );
+        // A different world (a different orbit) derives a different province pattern, not a fixed map.
+        assert_ne!(
+            province_seed_perturbation(Fixed::ONE, Fixed::ONE, 3),
+            province_seed_perturbation(Fixed::ONE, Fixed::from_ratio(3, 2), 3),
+            "a different world derives a different province pattern"
+        );
+    }
+
+    // A minimal province field with a chosen crust-thickness field, for the relief-emergence tests (no heavy
+    // scene build): the densities and melt params are representative, only the thickness field varies.
+    fn provinces_with(thicknesses: Vec<Fixed>, pcols: usize) -> DeepTimeProvinces {
+        let n = thicknesses.len();
+        let mut state = DeepTimeState::young(n, Fixed::from_int(1588));
+        state.crust_thickness_km = thicknesses;
+        DeepTimeProvinces {
+            state,
+            column_params: (0..n)
+                .map(|_| {
+                    province_column_params(
+                        Fixed::ONE,
+                        Fixed::from_int(10),
+                        Fixed::ONE,
+                        Fixed::from_int(300),
+                        Fixed::ONE,
+                    )
+                })
+                .collect(),
+            melt: MeltParams {
+                solidus_surface_k: MANTLE_SOLIDUS_SURFACE_K,
+                solidus_slope_k_per_gpa: MANTLE_SOLIDUS_SLOPE_K_PER_GPA,
+                adiabat_slope_k_per_gpa: MANTLE_ADIABAT_SLOPE_K_PER_GPA,
+                productivity_per_gpa: MELT_PRODUCTIVITY_PER_GPA,
+                source_density_kg_per_m3: Fixed::from_int(3300),
+                gravity_m_per_s2: Fixed::from_int(10),
+                processing_time_myr: MANTLE_PROCESSING_TIME_MYR,
+            },
+            pcols,
+            prows: n / pcols,
+            crust_density: Fixed::from_ratio(30, 10),
+            mantle_density: Fixed::from_ratio(35, 10),
+            sea_level: Fixed::ZERO,
+        }
+    }
+
+    #[test]
+    fn the_texture_emerges_only_from_a_varied_field() {
+        // The relief EMERGES from the province crust field: a uniform field classifies to one relief (a smooth
+        // ball), a varied field to a mix (texture). No field variation, no texture; nothing is painted on.
+        let count_variants = |tiles: &[DerivedTile]| -> usize {
+            let up = tiles.iter().any(|t| t.relief == TerrainRelief::Upland);
+            let low = tiles.iter().any(|t| t.relief == TerrainRelief::Lowland);
+            let sub = tiles.iter().any(|t| t.relief == TerrainRelief::Submarine);
+            up as usize + low as usize + sub as usize
+        };
+        let uniform = provinces_with(vec![Fixed::from_int(10); 8], 4);
+        let ut = derive_province_tiles(&uniform, 16, 8).expect("uniform tiles");
+        assert_eq!(
+            count_variants(&ut),
+            1,
+            "a uniform province field is a single relief (a smooth ball)"
+        );
+        let varied = provinces_with(
+            vec![
+                Fixed::from_int(2),
+                Fixed::from_int(60),
+                Fixed::from_int(5),
+                Fixed::from_int(40),
+                Fixed::from_int(80),
+                Fixed::from_int(3),
+                Fixed::from_int(50),
+                Fixed::from_int(8),
+            ],
+            4,
+        );
+        let vt = derive_province_tiles(&varied, 16, 8).expect("varied tiles");
+        assert!(
+            count_variants(&vt) >= 2,
+            "a varied province field textures the surface with more than one relief, got {}",
+            count_variants(&vt)
+        );
+    }
+
+    #[test]
+    fn the_bilinear_sampler_wraps_longitude_and_smooths() {
+        // The province field is sampled with wrapping longitude (so the globe has no east-west seam) and it
+        // smooths across boundaries: a coordinate between two provinces reads a value between their thicknesses.
+        let prov = provinces_with(vec![Fixed::from_int(10), Fixed::from_int(30)], 2); // 2x1, thin then thick
+                                                                                      // The seam at fu just under 1 wraps back toward province 0, so it is between the two, not a hard jump.
+        let mid = sample_province_thickness(&prov, 0.5, 0.5).to_f64_lossy();
+        assert!(
+            (10.0..=30.0).contains(&mid),
+            "a coordinate between provinces reads a blended thickness, got {mid}"
+        );
+        // Determinism: the same coordinate replays exactly.
+        assert_eq!(
+            sample_province_thickness(&prov, 0.42, 0.5),
+            sample_province_thickness(&prov, 0.42, 0.5),
+            "the sampler replays deterministically"
         );
     }
 }
