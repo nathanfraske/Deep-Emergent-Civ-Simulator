@@ -938,6 +938,13 @@ pub fn province_column_params(
 ) -> ColumnParams {
     ColumnParams {
         reference_temperature: reference_temperature_k,
+        // THE FIXTURE CLUSTER, TAGGED (owner ruling 2026-07-16): these four are a DECLARED CONFLICT, not a
+        // settled parameterization. `thermal_diffusivity` is redundant against `k / (rho * c_p)`, and the two
+        // disagree by 20x here (stored 0.01, derived 0.2), which nothing compares. The question is undecidable
+        // at the site because no per-quantity scale is declared, and a bare value with no declared scale carries
+        // no correctness, only a value. NOT corrected by fiat: the geotherm arc REPLACES the whole cluster
+        // (rho derived, c_p Dulong-Petit, k the Hofmeister form, kappa computed-never-stored), and the pins move
+        // ONCE then, with a ledger entry. See `ColumnParams::thermal_diffusivity` for the full ruling.
         density: Fixed::ONE,
         thermal_conductivity: Fixed::from_int(2),
         thermal_expansion_ppm: Fixed::from_int(30),

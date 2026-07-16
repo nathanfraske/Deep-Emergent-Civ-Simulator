@@ -79,6 +79,31 @@ pub struct ColumnParams {
     /// Dynamic viscosity (representable-scaled Pa*s).
     pub viscosity: Fixed,
     /// Thermal diffusivity (m^2/s), k/(rho*c).
+    ///
+    /// DECLARED CONFLICT, TAGGED NOT FIXED (owner ruling 2026-07-16). This field is REDUNDANT: `kappa` is
+    /// `k / (rho * c_p)`, and [`civsim_physics::laws::thermal_diffusivity`] already derives it from three
+    /// fields this same struct carries. So the struct stores a SECOND, INDEPENDENT answer to a question it
+    /// already contains the answer to, which is the redundant-parameter case: two numbers encoding one fact,
+    /// with no gate comparing them.
+    ///
+    /// THEY DISAGREE BY 20x, the first time anyone looked. Every caller (including the production
+    /// [`crate::deeptime::province_column_params`]) passes `density = 1`, `thermal_conductivity = 2`,
+    /// `specific_heat = 10`, and `thermal_diffusivity = 0.01`. The banked law gives `2 / (1 * 10) = 0.2`.
+    ///
+    /// THE QUESTION IS UNDECIDABLE AT THIS SITE, AND THAT UNDECIDABILITY IS THE FINDING: no per-quantity scale
+    /// is declared here, and a bare value with no declared scale carries no correctness at all, only a value.
+    /// Four quantities in four undeclared scale systems is not a unit system; it is four independent claims
+    /// with no shared referee. So neither 0.01 nor 0.2 can be called right from here, and no scale archaeology
+    /// is owed on a fixture that was never anchored to anything.
+    ///
+    /// THE RESOLUTION IS REPLACEMENT, NOT ARBITRATION, and it lands with the geotherm arc rather than now:
+    /// `rho` derives (the composition wire), `c_p` is Dulong-Petit on the banked mean atomic mass, `k` is the
+    /// Hofmeister derived form, and `kappa` becomes COMPUTED-NEVER-STORED with this field RETIRED, all SI and
+    /// newtyped. Correcting the fixture by fiat first would move production output TWICE for one truth, so the
+    /// conflict is tagged here, the arc lands, and the pins move ONCE with a ledger entry recording the fixture
+    /// cluster it replaced. The resulting shift (roughly 2.7x on the derived lid thickness, since `Ra` goes as
+    /// `1/kappa` and the boundary layer as `Ra^(-1/3)`) is EXPECTED, and it is refereed by the relief and lid
+    /// hindcast rows, never by either fixture value.
     pub thermal_diffusivity: Fixed,
     /// Specific heat capacity (J/(kg*K)).
     pub specific_heat: Fixed,
