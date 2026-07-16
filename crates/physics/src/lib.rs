@@ -40,6 +40,7 @@
 pub mod band_gap;
 pub mod condensation;
 pub mod covalent_radii;
+pub mod creep_rows;
 pub mod crystal_field;
 pub mod d_state_radius;
 pub mod ewald;

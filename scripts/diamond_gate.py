@@ -63,6 +63,12 @@ REGISTERED_RELATIONSHIPS = {
         "crates/materials/src/conductivity.rs",
         "measured rung before estimator rung, with rung_disagreement_ratio as the overlap sentinel",
     ),
+    "creep_rate": (
+        "ladder-order",
+        "crates/physics/src/creep_rows.rs",
+        "H&K measured rows (anchor rung) before the MBD form in civsim_materials::creep (estimator rung); "
+        "their prefactors are NOT interchangeable, so the ladder is the arbitration",
+    ),
     "convective_stress": (
         "cache-of",
         "crates/physics/src/laws.rs::convective_stress",
