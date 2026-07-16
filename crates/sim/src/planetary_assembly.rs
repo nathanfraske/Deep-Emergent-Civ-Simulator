@@ -86,6 +86,35 @@ pub struct PlanetarySystem {
     pub debris_mass_earth: Fixed,
 }
 
+/// One recorded GIANT IMPACT from the assembly's merge history: the two parent bodies that collided, the
+/// merged body they produced, and the merge epoch. The assembly drops these by default (returning only the
+/// final planets); [`assemble_system_with_history`] records them, which the giant-impact moon branch reads
+/// (each merge is an impact with a mass ratio and a merged orbit) and the "watch it build" construction
+/// montage replays (task #80). Both parents are captured by their full canonical state ([`SystemPlanet`]
+/// carries the orbit and the mass), so a consumer reads the two bodies AND their masses AND the merge orbit
+/// from one event.
+///
+/// The `epoch` is the CAUSAL MERGE ORDER (0 for the first merge, then 1, 2, ...), not a physical age. The
+/// chaos-protocol assembly is a stability PROJECTOR (merge the most unstable pair until every survivor is
+/// stable), not a time integration, and the R-ASSEMBLY ruling forbids the N-body time-domain path integral,
+/// so no per-merge wall-clock time exists in the mechanism to record. The order is the only time-like
+/// quantity the projector produces, and it is what the montage and the "late giant impact" reading of the
+/// moon branch need. Because the body list stays strictly increasing in orbit at every step (merges produce
+/// an orbit strictly between the parents), the parents are matched to the current list by their orbit
+/// unambiguously, so the ordered events plus the embryo field replay the whole assembly.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct MergeEvent {
+    /// The inner parent body (orbit and mass) as it was immediately before the merge.
+    pub inner: SystemPlanet,
+    /// The outer parent body (orbit and mass) as it was immediately before the merge.
+    pub outer: SystemPlanet,
+    /// The merged body the impact produced: the merge orbit (angular-momentum-conserving, between the
+    /// parents) and the summed mass (`inner.mass_earth + outer.mass_earth`, exact).
+    pub merged: SystemPlanet,
+    /// The causal merge order, 0-based (see the type docs: the sequence index, not a physical time).
+    pub epoch: usize,
+}
+
 /// The mean of the base-ten logarithm of a pair's survival time in units of the inner orbital period,
 /// `<log10(T_surv / P1)>`, from the Petit et al. 2020 (A&A 641, A176; arXiv:2006.14903) Eq. (83)
 /// resonance-overlap surface. This is the DERIVED MEASURE'S MEAN (gate a); the seeded 0.43-dex scatter
@@ -325,6 +354,55 @@ pub fn assemble_system(
     world_seed: u64,
     scatter_shape: GaussApprox,
 ) -> PlanetarySystem {
+    assemble_system_recording(
+        embryos,
+        star_mass_ratio,
+        system_age_myr,
+        world_seed,
+        scatter_shape,
+        None,
+    )
+}
+
+/// THE GIANT-IMPACT ASSEMBLY, recording its MERGE HISTORY: identical to [`assemble_system`] and bit-exact
+/// with it (the same shared merge loop, the history recorded alongside), returning the final system AND the
+/// ordered list of [`MergeEvent`]s, one per giant impact. This is the opt-in variant the giant-impact moon
+/// branch and the "watch it build" construction montage (task #80) consume; a caller that does not want the
+/// history calls [`assemble_system`] and pays nothing. The recording changes no arithmetic and no result:
+/// the returned `PlanetarySystem` equals `assemble_system(...)` bit for bit (asserted in the tests), so this
+/// is byte-neutral against the assembly's output.
+pub fn assemble_system_with_history(
+    embryos: Vec<Embryo>,
+    star_mass_ratio: Fixed,
+    system_age_myr: Fixed,
+    world_seed: u64,
+    scatter_shape: GaussApprox,
+) -> (PlanetarySystem, Vec<MergeEvent>) {
+    let mut history = Vec::new();
+    let system = assemble_system_recording(
+        embryos,
+        star_mass_ratio,
+        system_age_myr,
+        world_seed,
+        scatter_shape,
+        Some(&mut history),
+    );
+    (system, history)
+}
+
+/// The shared merge-until-stable core both public entry points run, so the merge math is written once and
+/// the recording cannot drift from the plain assembly. When `history` is `Some`, each merge appends a
+/// [`MergeEvent`] (the two parents as they were, the merged body, the causal epoch); when it is `None` the
+/// loop is exactly the original [`assemble_system`] body, the only difference an optional push that touches
+/// no orbit or mass arithmetic, so the returned system is identical either way.
+fn assemble_system_recording(
+    embryos: Vec<Embryo>,
+    star_mass_ratio: Fixed,
+    system_age_myr: Fixed,
+    world_seed: u64,
+    scatter_shape: GaussApprox,
+    mut history: Option<&mut Vec<MergeEvent>>,
+) -> PlanetarySystem {
     let mut planets: Vec<SystemPlanet> = embryos
         .iter()
         .map(|e| SystemPlanet {
@@ -381,10 +459,22 @@ pub fn assemble_system(
             None => break,
         };
         let a_merged = sqrt_a_merged.mul(sqrt_a_merged);
-        planets[i] = SystemPlanet {
+        let merged = SystemPlanet {
             orbit_au: a_merged,
             mass_earth: merged_mass,
         };
+        // Record the giant impact when a history is requested. This touches no orbit or mass arithmetic
+        // (the merged body is already computed), so the assembly result is unchanged, only observed.
+        if let Some(h) = history.as_mut() {
+            let epoch = h.len();
+            h.push(MergeEvent {
+                inner: a,
+                outer: b,
+                merged,
+                epoch,
+            });
+        }
+        planets[i] = merged;
         planets.remove(i + 1);
     }
     PlanetarySystem {
@@ -702,6 +792,110 @@ mod tests {
         assert!(
             system_is_stable(&system.planets, Fixed::ONE, age, seed, shape()),
             "the reported system is stable"
+        );
+    }
+
+    #[test]
+    fn the_recording_variant_matches_the_plain_assembly_bit_for_bit() {
+        // The neutrality guarantee: recording the merge history changes no arithmetic, so the returned
+        // system is identical to the plain assembly bit for bit. This is what keeps the slice byte-neutral.
+        let embryos = mirror_embryos(Fixed::ONE, Fixed::from_int(30));
+        let age = Fixed::from_int(4500);
+        let seed = 0xF00D_F00Du64;
+        let plain = assemble_system(embryos.clone(), Fixed::ONE, age, seed, shape());
+        let (recorded, _history) =
+            assemble_system_with_history(embryos, Fixed::ONE, age, seed, shape());
+        assert_eq!(
+            plain, recorded,
+            "recording the history does not change the assembled system"
+        );
+    }
+
+    #[test]
+    fn the_merge_history_records_every_merge_in_causal_order() {
+        // Completeness: each merge reduces the planet count by exactly one, so the number of recorded
+        // events equals embryos minus survivors, and the epochs are the causal sequence 0, 1, 2, ...
+        let embryos = mirror_embryos(Fixed::ONE, Fixed::from_int(30));
+        let n_embryos = embryos.len();
+        let age = Fixed::from_int(4500);
+        let seed = 0x0A0B_0C0Du64;
+        let (system, history) =
+            assemble_system_with_history(embryos, Fixed::ONE, age, seed, shape());
+        assert_eq!(
+            history.len(),
+            n_embryos - system.planets.len(),
+            "one recorded event per merge (embryos {} - survivors {} = {} merges)",
+            n_embryos,
+            system.planets.len(),
+            history.len()
+        );
+        assert!(!history.is_empty(), "the Mirror field merges at least once");
+        for (i, event) in history.iter().enumerate() {
+            assert_eq!(event.epoch, i, "the epoch is the causal merge order");
+        }
+    }
+
+    #[test]
+    fn each_merge_event_conserves_mass_and_orders_the_orbit() {
+        // Per-event conservation and ordering, the properties the moon branch reads: the merged mass is the
+        // exact sum of the parents (mass conserved to the bit), and the merged orbit lies strictly between
+        // the two parents (angular-momentum-conserving, so the body list stays strictly increasing).
+        let embryos = mirror_embryos(Fixed::ONE, Fixed::from_int(30));
+        let age = Fixed::from_int(4500);
+        let seed = 0x1357_9BDFu64;
+        let (_system, history) =
+            assemble_system_with_history(embryos, Fixed::ONE, age, seed, shape());
+        for event in &history {
+            assert_eq!(
+                event.merged.mass_earth,
+                event.inner.mass_earth + event.outer.mass_earth,
+                "the merged mass is the exact sum of the parents"
+            );
+            assert!(
+                event.inner.orbit_au < event.merged.orbit_au
+                    && event.merged.orbit_au < event.outer.orbit_au,
+                "the merged orbit lies between the parents (inner {:?} merged {:?} outer {:?})",
+                event.inner.orbit_au,
+                event.merged.orbit_au,
+                event.outer.orbit_au
+            );
+        }
+    }
+
+    #[test]
+    fn replaying_the_history_reconstructs_the_final_system() {
+        // The construction-montage guarantee (task #80): the ordered events plus the embryo field replay
+        // the whole assembly. Because the body list stays strictly increasing in orbit, each parent pair is
+        // matched to the current list by the inner parent's canonical state, and applying the recorded merges
+        // in order reproduces the final planets bit for bit.
+        let embryos = mirror_embryos(Fixed::ONE, Fixed::from_int(30));
+        let age = Fixed::from_int(4500);
+        let seed = 0x2468_ACE0u64;
+        let (system, history) =
+            assemble_system_with_history(embryos.clone(), Fixed::ONE, age, seed, shape());
+        let mut replay: Vec<SystemPlanet> = embryos
+            .iter()
+            .map(|e| SystemPlanet {
+                orbit_au: e.orbit_au,
+                mass_earth: e.mass_earth,
+            })
+            .collect();
+        for event in &history {
+            let pos = replay
+                .iter()
+                .position(|p| *p == event.inner)
+                .expect("the inner parent is present in the replayed list");
+            assert_eq!(
+                replay[pos + 1],
+                event.outer,
+                "the outer parent is the next body, as at merge time"
+            );
+            replay[pos] = event.merged;
+            replay.remove(pos + 1);
+        }
+        assert_eq!(
+            replay, system.planets,
+            "replaying the merge events reconstructs the final system"
         );
     }
 }
