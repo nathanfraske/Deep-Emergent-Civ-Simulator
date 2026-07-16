@@ -1080,14 +1080,93 @@ fn sample_derived_tile(tiles: &[DerivedTile], cols: usize, u: f32, v: f32) -> Op
     Some(tiles[idx])
 }
 
-/// The CONTINUOUS relief brightness multiplier for a tile's DERIVED elevation, normalized to the field's own
-/// `[lo, hi]` range: a compressive square-root curve lifts the low end so a skewed heightfield still shows its
-/// lowlands, then a wide ramp maps the range to `[0.5, 1.25]`, so dark basins grade up to bright highlands and
-/// the derived topography reads as relief rather than a two-tone swatch. Display-only.
-fn elevation_shade(elevation: f32, lo: f32, hi: f32) -> f32 {
-    let span = (hi - lo).max(f32::EPSILON);
-    let t = ((elevation - lo) / span).clamp(0.0, 1.0).sqrt();
-    0.5 + 0.75 * t
+/// The DERIVED elevation field's finite-difference gradient at surface coordinate (u, v), returned as metres of
+/// elevation per unit-u (eastward) and per unit-v (southward) so the caller can convert it to a true physical slope
+/// with the body radius. It is the analytic gradient of the BILINEAR interpolant through the four surrounding
+/// tile-centre elevations (longitude wraps, latitude clamps at the poles), so the shading grades smoothly across a
+/// cell rather than jumping at each tile edge; it invents no relief, since between two samples the interpolant is the
+/// straight ramp, the least-committed surface through the DERIVED heights. Display-only (Principle 10).
+fn elevation_grad_uv(
+    tiles: &[DerivedTile],
+    cols: usize,
+    rows: usize,
+    u: f32,
+    v: f32,
+) -> (f32, f32) {
+    if cols == 0 || rows == 0 || tiles.is_empty() {
+        return (0.0, 0.0);
+    }
+    // Cell-centre-aligned fractional coordinates: tile (r, c) is centred at ((c + 0.5)/cols, (r + 0.5)/rows).
+    let fu = u.rem_euclid(1.0) * cols as f32 - 0.5;
+    let fv = v.clamp(0.0, 1.0) * rows as f32 - 0.5;
+    let u0 = fu.floor();
+    let v0 = fv.floor();
+    let tu = (fu - u0).clamp(0.0, 1.0);
+    let tv = (fv - v0).clamp(0.0, 1.0);
+    let c0 = (u0 as i64).rem_euclid(cols as i64) as usize; // longitude wraps
+    let c1 = (u0 as i64 + 1).rem_euclid(cols as i64) as usize;
+    let r0 = (v0 as i64).clamp(0, rows as i64 - 1) as usize; // latitude clamps at the poles
+    let r1 = (v0 as i64 + 1).clamp(0, rows as i64 - 1) as usize;
+    let e = |r: usize, c: usize| -> f32 {
+        let idx = (r * cols + c).min(tiles.len() - 1);
+        tiles[idx].elevation.to_f64_lossy() as f32
+    };
+    let e00 = e(r0, c0);
+    let e10 = e(r0, c1);
+    let e01 = e(r1, c0);
+    let e11 = e(r1, c1);
+    // The bilinear partials in cell-fraction units, scaled to per-unit-u and per-unit-v.
+    let dh_dtu = (e10 - e00) * (1.0 - tv) + (e11 - e01) * tv;
+    let dh_dtv = (e01 - e00) * (1.0 - tu) + (e11 - e10) * tu;
+    (dh_dtu * cols as f32, dh_dtv * rows as f32)
+}
+
+/// The sun-direction HILLSHADE normal at a surface point: the sphere normal `b` (body frame) tilted by the DERIVED
+/// terrain slope. The elevation gradient ([`elevation_grad_uv`]) is turned into a true physical slope through the body
+/// `radius_m` (east arc length per unit-u is `2*pi*R*cos(lat)`, south arc length per unit-v is `pi*R`), then the
+/// perturbed surface normal is `Up - g_east*East - g_north*North` (the heightfield normal `(-de, -dn, 1)` in the local
+/// east/north/up frame), carried into body coordinates and renormalised. The slope is the real one at the field's own
+/// amplitude, so there is no vertical exaggeration: the relief lights where the ground truly slopes, brightest where
+/// the star grazes. `cos(lat)` is floored at the poleward-most row's cosine (the finest latitude the grid resolves), a
+/// numerical guard against the polar singularity rather than an authored value. Display-only math (Principle 10).
+fn hillshade_normal(
+    b: [f32; 3],
+    tiles: &[DerivedTile],
+    cols: usize,
+    rows: usize,
+    u: f32,
+    v: f32,
+    radius_m: f32,
+) -> [f32; 3] {
+    if radius_m <= 0.0 || rows == 0 {
+        return b;
+    }
+    use std::f32::consts::PI;
+    let lat = b[1].clamp(-1.0, 1.0).asin();
+    let lon = b[0].atan2(b[2]);
+    let (dz_du, dz_dv) = elevation_grad_uv(tiles, cols, rows, u, v);
+    // The tile elevation is in KILOMETRES (the Airy isostatic derivation's unit; the elevation span is read as km by
+    // `tile_relief_amplitude_km`), while the body radius arrives in metres, so the radius is taken in the SAME km unit
+    // to form a dimensionless slope (elevation over horizontal distance). The 1000 is the km-to-m unit factor, not a
+    // physics tuneable; getting it wrong makes the relief read 1000x too flat.
+    let radius_km = radius_m / 1000.0;
+    let cos_lat = lat.cos();
+    // Floor at the cosine of the poleward-most tile-row centre: below that latitude the grid resolves no distinct
+    // cells, so the east gradient there is degenerate. Grid-derived, not an authored constant.
+    let pole_floor = (PI / (2.0 * rows as f32)).sin();
+    let cos_lat_denom = cos_lat.abs().max(pole_floor);
+    let g_east = dz_du / (2.0 * PI * radius_km * cos_lat_denom);
+    // v increases southward, so the northward slope is the negation of the per-unit-v gradient over the meridian arc.
+    let g_north = -dz_dv / (PI * radius_km);
+    let (sin_lon, cos_lon) = lon.sin_cos();
+    let sin_lat = lat.sin();
+    let east = [cos_lon, 0.0, -sin_lon];
+    let north = [-sin_lat * sin_lon, cos_lat, -sin_lat * cos_lon];
+    normalize3([
+        b[0] - g_east * east[0] - g_north * north[0],
+        b[1] - g_east * east[1] - g_north * north[1],
+        b[2] - g_east * east[2] - g_north * north[2],
+    ])
 }
 
 /// The globe's viewing orientation for the derived-surface explorer: a longitude spin about the polar axis and a
@@ -1168,11 +1247,18 @@ pub struct SurfaceStyle {
     pub tint: Option<Rgb>,
     /// The display tile grid `(cols, rows)` to overlay as seams, or `None` for a smooth (un-gridded) sphere.
     pub grid: Option<(usize, usize)>,
-    /// CONTINUOUS relief shading: when set, each tile is shaded by its DERIVED ELEVATION on a smooth ramp
-    /// (highlands bright, lowlands dark, normalized to the field's own range), rather than the three discrete
-    /// relief classes, so a rich derived heightfield reads as topographic relief instead of a two-tone
-    /// swatch. `default()` is `false` (the discrete relief swatch, so the living-world globe is unchanged).
+    /// SUN-DIRECTION relief shading (a hillshade): when set, each surface point is lit by the dot of its terrain
+    /// normal (the sphere normal tilted by the DERIVED elevation slope) with the star direction, so slopes facing the
+    /// star are bright and slopes facing away are dark and a rich derived heightfield reads as lit topography rather
+    /// than a two-tone swatch. `default()` is `false` (the discrete relief swatch, so the living-world globe is
+    /// unchanged). The hillshade needs the physical body radius ([`SurfaceStyle::surface_radius_m`]) to turn the
+    /// elevation gradient into a true slope; without it the lighting falls back to the bare sphere normal.
     pub relief_shading: bool,
+    /// The physical body radius (metres) the hillshade uses to convert the elevation gradient into a true physical
+    /// slope (no vertical exaggeration): it is READ from the caller's DERIVED scene, never authored. `default()` is
+    /// `0` (no physical scale supplied), which skips the terrain tilt and keeps the bare-sphere lighting. Only the
+    /// relief-shading derived paths set it; the living-world globe and the tests leave it `0`, byte-identical.
+    pub surface_radius_m: Fixed,
 }
 
 /// The DERIVED body-frame sun direction for [`draw_globe`], the unit vector pointing from the body's centre toward the
@@ -1240,21 +1326,19 @@ pub fn draw_globe(
     ];
     // A faint neutral ambient so the night hemisphere reads dark but not pure black (skyglow and starlight).
     const AMBIENT: f32 = 0.10;
-    // For CONTINUOUS relief shading, the DERIVED elevation range of the field, so each tile's height maps onto
-    // a smooth brightness ramp (dark basins to bright highlands). `None` when discrete relief shading is used
-    // (the living-world globe, byte-identical) or the field is flat.
-    let relief_range: Option<(f32, f32)> = if style.relief_shading && !tiles.is_empty() {
-        let mut lo = f32::INFINITY;
-        let mut hi = f32::NEG_INFINITY;
-        for t in tiles {
-            let e = t.elevation.to_f64_lossy() as f32;
-            lo = lo.min(e);
-            hi = hi.max(e);
-        }
-        (hi > lo).then_some((lo, hi))
+    // SUN-DIRECTION HILLSHADE (the seeable-relief payoff): when relief shading is on and the physical body radius is
+    // supplied, the shading normal at each pixel is the sphere normal TILTED by the DERIVED terrain slope, so slopes
+    // facing the star are bright and slopes facing away are dark. The relief is lit at its real (unexaggerated)
+    // amplitude and reads where the light grazes (near the terminator and at surface zoom), the honest look. A zero
+    // radius (the living-world globe, or a caller that supplies none) skips the tilt for the bare sphere, byte-identical.
+    let surface_radius_m = style.surface_radius_m.to_f64_lossy() as f32;
+    let tile_rows = if tile_cols > 0 {
+        tiles.len() / tile_cols
     } else {
-        None
+        0
     };
+    let hillshade_on =
+        style.relief_shading && surface_radius_m > 0.0 && tile_cols > 0 && tile_rows > 0;
     let rp = radius_px as i32;
     let x0 = (cx - rp).max(0);
     let x1 = (cx + rp).min(w as i32 - 1);
@@ -1272,7 +1356,8 @@ pub fn draw_globe(
                                         // Orthographic sphere map, rotated by the globe orientation so panning brings
                                         // the far side into view. Screen y points down, so world up is -ny. At
                                         // GlobeOrientation::IDENTITY this reduces to the straight-on map exactly.
-            let (u, v) = body_to_uv(view_to_body([nx, -ny, nz], orient));
+            let b = view_to_body([nx, -ny, nz], orient);
+            let (u, v) = body_to_uv(b);
             // The surface base colour: when `surface_tint` is given (the derived crust's perceived colour under the
             // star, from `material_surface_rgb`), each tile is that colour scaled by its relief shading, so the sphere
             // wears the DERIVED material colour; otherwise the relief swatch ([`derived_tile_color`]). A uniform crust
@@ -1281,16 +1366,17 @@ pub fn draw_globe(
             let base = match sample_derived_tile(tiles, tile_cols, u, v) {
                 Some(tile) => match style.tint {
                     Some(m) => {
-                        // Continuous elevation shading when the caller asked for it and the field has relief;
-                        // otherwise the three discrete relief classes (the prior, byte-identical behaviour).
-                        let s = match relief_range {
-                            Some((lo, hi)) => {
-                                elevation_shade(tile.elevation.to_f64_lossy() as f32, lo, hi)
-                            }
-                            None => relief_shade(tile.relief),
-                        };
-                        let scale = |c: u8| (c as f32 * s).clamp(0.0, 255.0) as u8;
-                        Rgb::new(scale(m.r), scale(m.g), scale(m.b))
+                        if style.relief_shading {
+                            // The DERIVED material colour is the base albedo; the sun-direction hillshade (the
+                            // perturbed normal in the Lambert term below) carries the relief, so a rich heightfield
+                            // reads as lit topography rather than a flat swatch (no authored brightness ramp).
+                            m
+                        } else {
+                            // The three discrete relief classes (the prior living-world behaviour, byte-identical).
+                            let s = relief_shade(tile.relief);
+                            let scale = |c: u8| (c as f32 * s).clamp(0.0, 255.0) as u8;
+                            Rgb::new(scale(m.r), scale(m.g), scale(m.b))
+                        }
                     }
                     None => derived_tile_color(tile.relief),
                 },
@@ -1300,8 +1386,16 @@ pub fn draw_globe(
             // normal uses WORLD-UP y (-ny, since screen y points down), the SAME frame the tile sample above uses
             // ([nx, -ny, nz]) and the frame `l` is carried into; without this the brightness was computed in
             // screen-down y while the tiles were placed in world-up y, so the terminator did not line up with the
-            // tiles (an inverted-vertical mismatch).
-            let lambert = (nx * l[0] - ny * l[1] + nz * l[2]).max(0.0);
+            // tiles (an inverted-vertical mismatch). When the hillshade is on, the shading normal is the sphere
+            // normal TILTED by the DERIVED terrain slope, computed in the body frame so the dot is taken directly
+            // against the body-frame `star_dir` (a rotation preserves the dot, so this matches the sphere term when
+            // the ground is flat); the relief then lights only where the surface truly slopes.
+            let lambert = if hillshade_on {
+                let n = hillshade_normal(b, tiles, tile_cols, tile_rows, u, v, surface_radius_m);
+                (n[0] * star_dir[0] + n[1] * star_dir[1] + n[2] * star_dir[2]).max(0.0)
+            } else {
+                (nx * l[0] - ny * l[1] + nz * l[2]).max(0.0)
+            };
             let shade = |c: u8, t: f32| -> u8 {
                 let day = AMBIENT + (1.0 - AMBIENT) * lambert * t;
                 (c as f32 * day).clamp(0.0, 255.0) as u8
@@ -3098,5 +3192,77 @@ mod tests {
         );
         // A None grid leaves the sphere ungridded (the plain planet), and the read replays deterministically.
         assert_eq!(coarse, draw(Some((8, 6))), "a pure read replays");
+    }
+
+    #[test]
+    fn the_hillshade_lights_sun_facing_slopes_and_needs_the_body_radius() {
+        // A field whose elevation rises steadily eastward is a slope that FACES WEST: its surface normal leans west,
+        // so it reads brighter lit from the west than from the east. The sun-direction hillshade must resolve that,
+        // and only when the physical body radius is supplied (the slope is elevation over horizontal distance, so a
+        // zero radius cannot form a slope and the directional signal collapses). This pins the hillshade direction and
+        // the km-to-metre unit bridge in one test.
+        let (w, h) = (120usize, 120usize);
+        let (cx, cy, radius) = (60i32, 60i32, 50usize);
+        let cols = 8usize;
+        let rows = 4usize;
+        // Elevation in km, rising with the column index (an eastward ramp); the relief class is not used here.
+        let tiles: Vec<DerivedTile> = (0..cols * rows)
+            .map(|i| DerivedTile {
+                elevation: Fixed::from_int((i % cols) as i32 * 400),
+                relief: TerrainRelief::Lowland,
+            })
+            .collect();
+        let tint = Rgb::new(200, 200, 200);
+        let white = Rgb::new(255, 255, 255);
+        let radius_m = Fixed::from_int(1_000_000); // a 1000 km body
+                                                   // Two near-zenith suns tilted slightly west and slightly east, so the sphere macro term is about equal at the
+                                                   // disk centre and only the terrain slope distinguishes them.
+        let west_sun = [-0.25f32, 0.0, 0.968]; // horizontal component toward -x (west at the prime meridian)
+        let east_sun = [0.25f32, 0.0, 0.968];
+        let centre_red = |sun: [f32; 3], radius_m: Fixed| -> u64 {
+            let mut buf = vec![Rgb::new(0, 0, 0).pack(); w * h];
+            draw_globe(
+                &mut buf,
+                w,
+                h,
+                cx,
+                cy,
+                radius,
+                &tiles,
+                cols,
+                sun,
+                white,
+                SurfaceStyle {
+                    tint: Some(tint),
+                    grid: None,
+                    relief_shading: true,
+                    surface_radius_m: radius_m,
+                },
+                GlobeOrientation::IDENTITY,
+            );
+            let mut s = 0u64;
+            for py in (cy - 6)..=(cy + 6) {
+                for px in (cx - 6)..=(cx + 6) {
+                    s += ((buf[py as usize * w + px as usize] >> 16) & 0xff) as u64;
+                }
+            }
+            s
+        };
+        let west = centre_red(west_sun, radius_m);
+        let east = centre_red(east_sun, radius_m);
+        assert!(
+            west > east,
+            "an eastward-rising ramp faces west, so it is brighter lit from the west: west {west} east {east}"
+        );
+        // With a zero body radius the hillshade cannot form a slope, so the two suns light the centre equally: the
+        // directional relief is gone. This is the failure the km-to-metre unit bug caused (a 1000x-too-flat slope).
+        let none_west = centre_red(west_sun, Fixed::ZERO);
+        let none_east = centre_red(east_sun, Fixed::ZERO);
+        let relief_diff = (west as i64 - east as i64).abs();
+        let none_diff = (none_west as i64 - none_east as i64).abs();
+        assert!(
+            relief_diff > none_diff * 8 + 8,
+            "the hillshade (driven by the body radius) creates the directional relief: with-radius diff {relief_diff} vs no-radius diff {none_diff}"
+        );
     }
 }

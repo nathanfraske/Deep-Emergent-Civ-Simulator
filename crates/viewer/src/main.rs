@@ -506,6 +506,8 @@ fn derived_globe_cmd(argv: &[String]) {
                     tint: Some(scene.material),
                     grid,
                     relief_shading: true,
+                    // The DERIVED body radius the hillshade reads to light the relief at its true physical slope.
+                    surface_radius_m: fx.radius_m,
                 },
             )
         }
@@ -520,6 +522,7 @@ fn derived_globe_cmd(argv: &[String]) {
                     tint: Some(scene.material),
                     grid: None,
                     relief_shading: true,
+                    surface_radius_m: fx.radius_m,
                 },
             )
         }
@@ -2580,13 +2583,16 @@ fn provenance_lines(
 /// (t = 1): one continuous zoom, all of it the sphere. The two radius endpoints are non-canon display-framing choices
 /// for the viewer, documented at their site (Principle 10, pixels only).
 /// The metres-per-pixel scale for the derived globe at zoom fraction `t` in [0, 1]: the on-screen radius grows
-/// geometrically from ~0.12 of the frame (a distant globe) up to ~8x the frame (a close drill-down where the tile grid
-/// subdivides). Both fractions are non-canon display-framing choices. Shared by the interactive globe view and the woosh
-/// so their framings stay in step (Principle 10, pixels only).
+/// geometrically from ~0.12 of the frame (a distant globe) up to ~40x the frame (a deep surface drill-down, where a
+/// patch of the derived elevation field spans the frame and the sun-direction hillshade reads the km-scale relief).
+/// Both fractions are non-canon display-framing choices (the zoom endpoints, pixels only), the only display tuneables
+/// the drill-in allows. Shared by the interactive globe view and the woosh so their framings stay in step (Principle 10).
 fn derived_globe_m_per_px(radius_m: Fixed, w: usize, h: usize, t: f32) -> Fixed {
     let min_dim = w.min(h);
+    // NON-CANON display-framing zoom endpoints (pixels only): the distant globe (~0.12 of the frame) and the deep
+    // surface patch (~40x the frame). No physics value; extending R_MAX_FRAC only drills the camera closer.
     const R_MIN_FRAC: f32 = 0.12;
-    const R_MAX_FRAC: f32 = 8.0;
+    const R_MAX_FRAC: f32 = 40.0;
     let frac = R_MIN_FRAC * (R_MAX_FRAC / R_MIN_FRAC).powf(t.clamp(0.0, 1.0));
     let target_r = ((min_dim as f32) * frac).max(1.0) as i32;
     radius_m
@@ -2624,6 +2630,94 @@ fn surface_grid_dims(radius_px: usize, min_dim: usize) -> (usize, usize) {
     let ratio = (radius_px as f32 / fill).max(1.0);
     let level = (ratio.log2().floor().max(0.0) as u32).min(MAX_LEVEL);
     (BASE_COLS << level, BASE_ROWS << level)
+}
+
+/// A "nice" round distance (metres) at or below `raw`, snapped to 1, 2, or 5 times a power of ten, so the scale bar
+/// reads "500 km" rather than "473 km". Display-only formatting (Principle 10), no physics value.
+fn nice_round_distance_m(raw: f64) -> f64 {
+    if !raw.is_finite() || raw <= 0.0 {
+        return 1.0;
+    }
+    let base = 10f64.powf(raw.log10().floor());
+    let mantissa = raw / base;
+    let nice = if mantissa >= 5.0 {
+        5.0
+    } else if mantissa >= 2.0 {
+        2.0
+    } else {
+        1.0
+    };
+    nice * base
+}
+
+/// A short human label for a ground distance in metres ("420 km", "1.5 km", "800 m"). Display-only.
+fn format_distance_m(m: f64) -> String {
+    if m >= 1000.0 {
+        let km = m / 1000.0;
+        if km >= 10.0 {
+            format!("{km:.0} km")
+        } else {
+            format!("{km:.1} km")
+        }
+    } else {
+        format!("{m:.0} m")
+    }
+}
+
+/// A short label for the view scale (metres, else kilometres, per pixel). Display-only.
+fn format_scale_per_px(m_per_px: f64) -> String {
+    if m_per_px >= 1000.0 {
+        format!("{:.2} km/px", m_per_px / 1000.0)
+    } else {
+        format!("{m_per_px:.0} m/px")
+    }
+}
+
+/// The ZOOM READOUT the owner asked for (bottom-left): a scale bar of a round ground distance with its length, the
+/// view scale in metres-per-pixel, and the named zoom tier, so the current level of zoom is always legible and updates
+/// as the zoom changes. The scale is the metres-per-pixel at the disk CENTRE (the orthographic sphere foreshortens
+/// toward the limb), a pure read of the DERIVED-radius view scale ([`derived_globe_m_per_px`]); the round-distance snap
+/// is display formatting, not a physics value (Principle 10, pixels only).
+fn draw_zoom_readout(buf: &mut [u32], w: usize, h: usize, m_per_px: f64, tier: &str) {
+    if w == 0 || h == 0 || !m_per_px.is_finite() || m_per_px <= 0.0 {
+        return;
+    }
+    let target_px = (w as f64 / 5.0).max(40.0);
+    let bar_m = nice_round_distance_m(target_px * m_per_px);
+    let bar_px = ((bar_m / m_per_px).round() as i32).clamp(1, w as i32 - 24);
+    let x0 = 12i32;
+    let y = h as i32 - 20;
+    let ink = Rgb::new(235, 235, 245).pack();
+    let mut put = |x: i32, py: i32| {
+        if x >= 0 && x < w as i32 && py >= 0 && py < h as i32 {
+            buf[py as usize * w + x as usize] = ink;
+        }
+    };
+    // The bar itself (two rows) and the two end ticks.
+    for x in x0..=(x0 + bar_px) {
+        put(x, y);
+        put(x, y + 1);
+    }
+    for &tx in &[x0, x0 + bar_px] {
+        for dy in -3..=3i32 {
+            put(tx, y + dy);
+        }
+    }
+    render::draw_label(
+        buf,
+        w,
+        h,
+        x0,
+        y - 16,
+        &format!(
+            "ZOOM {tier}  |  bar {}  |  {}",
+            format_distance_m(bar_m),
+            format_scale_per_px(m_per_px)
+        ),
+        1,
+        Rgb::new(235, 235, 245),
+        Rgb::new(10, 12, 20),
+    );
 }
 
 /// One planet sampled for the system map: its DERIVED scene (radius, star temperature, crust, colour, all from
@@ -2749,6 +2843,8 @@ fn draw_woosh_frame(
         tint: Some(scene.material),
         grid: None,
         relief_shading: true,
+        // The DERIVED body radius the hillshade reads to light the relief at its true physical slope.
+        surface_radius_m: scene.radius_m,
     };
     render::draw_globe_scene(
         &mut buf,
@@ -2811,8 +2907,10 @@ fn run_derived(argv: &[String]) {
     eprintln!("  controls: click a planet to fly to it, esc/backspace to fly back, esc on the map to quit");
     let star_t_eff = planets[0].scene.t_eff;
 
-    // One continuous zoom, all of it the sphere, once you are on a planet globe.
-    let zoom_levels = 12u32;
+    // One continuous zoom, all of it the sphere, once you are on a planet globe: from the distant globe down onto a
+    // surface patch of the derived elevation field. The level count is a NON-CANON display choice (how finely the +/-
+    // keys step the continuous scale); it is set high enough that the deeper surface regime keeps comfortable steps.
+    let zoom_levels = 18u32;
     let max_zoom = zoom_levels.saturating_sub(1);
 
     let mut window = Window::new(
@@ -3157,6 +3255,8 @@ fn run_derived(argv: &[String]) {
                     tint: Some(scene.material),
                     grid: show_grid.then_some((grid_cols, grid_rows)),
                     relief_shading: true,
+                    // The DERIVED body radius the hillshade reads to light the relief at its true physical slope.
+                    surface_radius_m: scene.radius_m,
                 };
                 // The DERIVED sun direction, animated by the spin so the terminator sweeps as you watch.
                 let day_sweep = sweep_phase(spin_frame, TERMINATOR_SWEEP_FRAMES);
@@ -3259,6 +3359,11 @@ fn run_derived(argv: &[String]) {
                     Rgb::new(210, 200, 150),
                     Rgb::new(10, 12, 20),
                 );
+                // The zoom READOUT (scale bar + tier + m/px), so the owner always sees how far in the view is. The tier
+                // names the regime the continuous zoom is in: SURFACE once the globe has grown past filling the frame
+                // (the drill-down onto the elevation field), else GLOBE (the whole planet still fits).
+                let tier = if show_grid { "SURFACE" } else { "GLOBE" };
+                draw_zoom_readout(&mut buf, w, h, m_per_px.to_f64_lossy(), tier);
                 if show_provenance {
                     let lines = provenance_lines(scene, floor_prov.as_ref(), picked);
                     let panel_w = 372usize;
@@ -3307,7 +3412,12 @@ fn run_derived(argv: &[String]) {
             .update_with_buffer(&buf, w, h)
             .expect("blit the frame");
         was_mouse_down = mouse_down;
-        spin_frame = spin_frame.wrapping_add(1);
+        // Advance the day/night terminator and the seasonal sweep ONLY when time is running: pause holds `spin_frame`
+        // so `day_sweep` and `year_sweep` freeze, and the terminator stops mid-sweep while the owner inspects (the same
+        // pause that already freezes the orbital motion and the deep-time surface evolution). Unpausing resumes it.
+        if !playback.is_paused() {
+            spin_frame = spin_frame.wrapping_add(1);
+        }
     }
 }
 
