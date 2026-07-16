@@ -27,6 +27,12 @@ civsim-world = { path = "../world" }
 # the Stefan-Boltzmann sigma DERIVES from the fundamentals here rather than being an authored decimal.
 # units depends only on core, so it adds no heavy or fast-moving dependency and reaches no float.
 civsim-units = { path = "../units" }
+# The materials strength floor: the deep-time surface-relief collapse (deeptime.rs) reads the crust's OWN
+# derived operative shear (yield) strength through the Frenkel-ideal-times-per-class-knockdown chain
+# (properties::operative_shear_strength_gpa), the derive-down that retires the reserved 1e8 Pa crustal-yield
+# literal on the support-bound path. materials is a leaf (core + physics + units) and only the DORMANT
+# deep-time term reads it, so the run path and both pins stay byte-identical.
+civsim-materials = { path = "../materials" }
 # serde and toml are mature, stable crates (not the fast-moving GPU/ECS stack of
 # design Part 61), used only to parse the calibration manifest and the data-driven
 # substrate definitions. No floating point reaches canonical state through them.

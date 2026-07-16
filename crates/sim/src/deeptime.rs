@@ -54,6 +54,23 @@
 //! splitmix64 counter stream, never floating randomness), bounded by a per-tick cap. It is a term SEPARATE from
 //! [`step_deep_time`] so a run that does not bombard replays bit-for-bit.
 //!
+//! THE SUPPORT-BOUND COLLAPSE slice (this): the mechanical-strength BOUND on topography. The volcanic crust and
+//! the impact record compose into a surface relief the Airy isostasy floats ([`airy_isostatic_elevation`]), and a
+//! crustal column can hold only so much topography above the surrounding datum before its own weight overcomes
+//! its deviatoric strength and it FLOWS (lower-crustal flow / gravitational collapse). That ceiling is the
+//! support bound `sigma_y / (rho * g)`, the yield strength over the buoyant gravitational load, and relief taller
+//! than it is unphysical. [`relax_to_support_bound`] models the collapse: each tick, after the interior steps, it
+//! projects each column's isostatic relief, caps it at the derived support bound, and FLOWS the excess crust to
+//! the columns below the cap (the accommodation space) through the built conservative redistribution
+//! ([`civsim_world::redistribute`]), so total crust mass is conserved to the bit and the relief relaxes to the
+//! bound. The yield strength is DERIVED, never the reserved 1e8 Pa literal: it reads the crust's OWN operative
+//! shear strength from the mechanical floor (the Frenkel ideal scaled by the per-class knockdown,
+//! [`civsim_materials::properties::operative_shear_strength_gpa`]), the derive-down that retires the authored
+//! bound on this path. The collapse is the INSTANTANEOUS-COLLAPSE idealization (within a tick the over-bound
+//! relief flows to the bound); a viscous flow RATE would be a reserved value, so the instantaneous limit is the
+//! derive-first floor and needs none. It is a term SEPARATE from [`step_deep_time`], applied by the caller after
+//! it, so a run that does not collapse replays bit-for-bit.
+//!
 //! Determinism (Principle 3, Principle 10): [`convection_step`] is a pure function and the columns are walked in
 //! index order, so the tick is a pure function of the state and the parameters, worker-invariant. Dormant: no
 //! scenario or viewer drives it yet (the time control is the next slice), so it is byte-neutral over the run
@@ -61,11 +78,15 @@
 
 use crate::geodynamics::{convection_step, ColumnParams, ColumnState};
 use civsim_core::{Fixed, Rng};
+use civsim_materials::properties::operative_shear_strength_gpa;
+use civsim_physics::geodynamics::airy_isostatic_elevation;
 use civsim_physics::melting::adiabatic_melt_column;
 use civsim_world::ballistic::{BallisticForces, EjectaFan};
 use civsim_world::crater::{CraterCoupling, Impactor, Target};
 use civsim_world::impact_event::apply_impact;
 use civsim_world::impact_flux::{size_at_number_fraction, tail_rate_fraction};
+use civsim_world::redistribute::{redistribute, Redistribution, Weighted};
+use civsim_world::terrain::relief_datum;
 
 /// The deep-time state of a derived planet: a lateral field of interior mantle columns (one per surface cell or
 /// province), the crust each column has BUILT so far, and the geological time elapsed. The field is the spatial
@@ -517,6 +538,199 @@ pub fn bombard_tick(
         // flagged. The hook is this site; the impactor state the energy needs is in scope.
     }
 
+    next
+}
+
+/// The GPa-to-Pa unit bridge (`1 GPa = 1e9 Pa`), the exact factor the derived operative shear strength (in GPa)
+/// converts through to the pascals the support bound reads. A fundamental unit conversion (Principle 11), never
+/// an authored world-content value.
+const PA_PER_GPA: Fixed = Fixed::from_int(1_000_000_000);
+
+/// The per-world crust MECHANICAL-STRENGTH parameters the support-bound relief collapse reads: the crust and
+/// mantle densities the Airy isostasy floats the relief on, the crust's OWN derived shear modulus and the
+/// reserved-with-basis per-class strength knockdown its operative yield strength comes through, and the derived
+/// surface gravity. Every field is derived or read (Principle 11): a different crust chemistry, a different
+/// world, is a different set of numbers through the SAME wiring, never a new code path (admit-the-alien).
+#[derive(Clone, Copy, Debug)]
+pub struct SupportBoundParams {
+    /// The DERIVED crust density (grams per cubic centimetre): the load density `rho` in the support bound AND
+    /// the Airy flotation density the relief floats at, one value, never authored here.
+    pub crust_density: Fixed,
+    /// The DERIVED mantle density (grams per cubic centimetre) the crust floats on, the Airy reference.
+    pub mantle_density: Fixed,
+    /// The crust's OWN DERIVED shear modulus `G` (gigapascals), read from the crust's composition upstream (the
+    /// ionic/metal bulk-modulus tier times the reserved-with-basis Pugh ratio). The operative yield strength
+    /// derives from it through the Frenkel ideal and the knockdown below, so the bound reads the crust's own
+    /// strength, NOT the reserved 1e8 Pa literal.
+    pub crust_shear_modulus_gpa: Fixed,
+    /// The reserved-with-basis per-class strength KNOCKDOWN (dimensionless, in `(0, 1]`): the ratio of the
+    /// operative (measured yield/flow) shear strength to the ideal Frenkel strength `G / (2*pi)`, from mobile
+    /// dislocations ([`civsim_materials::properties::operative_shear_strength_gpa`], `~1e-2` for a soft annealed
+    /// metal up to `~0.7` for a covalent solid). Reserved-with-basis per bonding class, surfaced not authored.
+    pub strength_knockdown: Fixed,
+    /// The DERIVED surface gravity `g` (metres per second squared), `g = G M / R^2` from the planet mass and
+    /// radius, the gravitational load the topography stands against.
+    pub gravity_m_per_s2: Fixed,
+}
+
+/// The crust's DERIVED operative yield strength (pascals): the deviatoric strength a crustal column holds before
+/// it flows, from the crust's OWN derived shear modulus through the Frenkel ideal shear strength `G / (2*pi)`
+/// scaled by the reserved-with-basis per-class knockdown ([`operative_shear_strength_gpa`]), converted to pascals
+/// by the [`PA_PER_GPA`] unit bridge. This is the DERIVE-DOWN that RETIRES the reserved 1e8 Pa crustal-yield
+/// literal on the collapse path: `sigma_y` reads the crust's composition-grounded strength, never an authored
+/// constant. `None` on a non-positive derivation (a shear modulus or knockdown the operative law rejects) or an
+/// overflow (an unboundedly stiff crust, which routes to no collapse, the correct outcome, rather than a panic).
+fn derived_crust_yield_pa(shear_modulus_gpa: Fixed, knockdown: Fixed) -> Option<Fixed> {
+    let operative_gpa = operative_shear_strength_gpa(shear_modulus_gpa, knockdown);
+    if operative_gpa <= Fixed::ZERO {
+        return None;
+    }
+    operative_gpa.checked_mul(PA_PER_GPA)
+}
+
+/// THE SUPPORT-BOUND COLLAPSE: relax each column's isostatic relief to the mechanical support bound by flowing
+/// the excess crust to the lows, mass conserved to the bit. For each column the isostatic relief is its Airy
+/// elevation ([`airy_isostatic_elevation`]) above the field DATUM (the mean elevation, [`relief_datum`], the same
+/// reference the viewer's relief amplitude reads), and the support bound is `sigma_y / (rho * g)` with `sigma_y`
+/// the crust's DERIVED operative yield strength ([`derived_crust_yield_pa`], retiring the reserved 1e8 Pa
+/// literal), `rho` the derived crust density, and `g` the derived surface gravity. Because the Airy elevation is
+/// linear in the crust thickness (`elevation = k * thickness`, `k = (rho_m - rho_c) / rho_m` the buoyant
+/// fraction), the bound maps to a single THICKNESS CAP `T_cap = (bound + datum) / k`: a column thicker than the
+/// cap holds unsupportable topography. The excess thickness of every over-cap column FLOWS to the columns below
+/// the cap (the accommodation space), apportioned by each low's available room, through the built conservative
+/// redistribution ([`redistribute`]), so the crust bit-sum is invariant (mass is moved, never created or lost),
+/// the datum is unchanged (the mean thickness is conserved), and every column ends at or below the cap, so all
+/// relief ends at or below the bound.
+///
+/// This is the INSTANTANEOUS-COLLAPSE idealization: within the tick the whole over-bound excess flows to the
+/// bound. A viscous flow RATE (a partial collapse per tick) would be a reserved value, so the instantaneous limit
+/// is the derive-first floor and needs none; a rate, and a LOCAL grid-neighbour (downhill) flow in place of the
+/// accommodation-space fill, are the named reserved-with-basis refinements, flagged not authored. A crust denser
+/// than the mantle (`k <= 0`) FOUNDERS rather than standing as topography, a delamination regime this tall-relief
+/// collapse does not cover, so it is left unchanged. Call it AFTER [`step_deep_time`] (and after [`bombard_tick`])
+/// each tick, so the interior tick stays byte-identical and a run that never collapses replays bit-for-bit.
+/// Fail-soft (the state returned unchanged) on a degenerate density, gravity, or yield, a relief already inside
+/// the bound (nothing to relax), or a redistribution refusal; never a panic and never a fabricated relief.
+/// Deterministic and worker-invariant (a pure function of the state and the parameters).
+pub fn relax_to_support_bound(state: &DeepTimeState, params: &SupportBoundParams) -> DeepTimeState {
+    let n = state.crust_thickness_km.len();
+    if n == 0 {
+        return state.clone();
+    }
+    // The Airy buoyant fraction k = (rho_m - rho_c) / rho_m, the elevation a unit of crust thickness stands at.
+    // A non-positive mantle density, or a crust at or above the mantle density (k <= 0, a foundering column), has
+    // no standing topography to collapse: the support bound is a TALL-relief mechanism, so leave it unchanged.
+    if params.mantle_density <= Fixed::ZERO {
+        return state.clone();
+    }
+    let contrast = match params.mantle_density.checked_sub(params.crust_density) {
+        Some(c) if c > Fixed::ZERO => c,
+        _ => return state.clone(),
+    };
+    let k = match contrast.checked_div(params.mantle_density) {
+        Some(k) if k > Fixed::ZERO => k,
+        _ => return state.clone(),
+    };
+
+    // The DERIVED yield strength (pascals), the reserved 1e8 literal retired on this path.
+    let sigma_y_pa =
+        match derived_crust_yield_pa(params.crust_shear_modulus_gpa, params.strength_knockdown) {
+            Some(s) => s,
+            None => return state.clone(),
+        };
+    // The support bound sigma_y / (rho * g): rho in kg/m^3 (the crust density in g/cm^3 times 1000), g in m/s^2,
+    // the bound in metres, converted to the kilometres the crust thickness and relief carry.
+    if params.gravity_m_per_s2 <= Fixed::ZERO {
+        return state.clone();
+    }
+    let bound_km = match params
+        .crust_density
+        .checked_mul(Fixed::from_int(1000))
+        .and_then(|rho_kg| rho_kg.checked_mul(params.gravity_m_per_s2))
+        .filter(|rho_g| *rho_g > Fixed::ZERO)
+        .and_then(|rho_g| sigma_y_pa.checked_div(rho_g))
+        .and_then(|bound_m| bound_m.checked_div(Fixed::from_int(1000)))
+    {
+        Some(b) if b > Fixed::ZERO => b,
+        _ => return state.clone(),
+    };
+
+    // The field DATUM (mean isostatic elevation), the reference the relief is measured against. elevation_i =
+    // airy(rho_c, rho_m, thickness_i); a non-flotation input (a non-positive mantle density) is already guarded.
+    let mut elevations = Vec::with_capacity(n);
+    for t in &state.crust_thickness_km {
+        match airy_isostatic_elevation(params.crust_density, params.mantle_density, *t) {
+            Some(e) => elevations.push(e),
+            None => return state.clone(),
+        }
+    }
+    let datum = match relief_datum(&elevations) {
+        Some(d) => d,
+        None => return state.clone(),
+    };
+    // The support CAP on thickness: the thickness whose relief equals the bound. relief = k*T - datum = bound, so
+    // T_cap = (bound + datum) / k. A column above the cap sheds its excess; a column below has room to receive.
+    let t_cap = match bound_km
+        .checked_add(datum)
+        .and_then(|numer| numer.checked_div(k))
+    {
+        Some(t) => t,
+        None => return state.clone(),
+    };
+
+    // The destinations: every under-cap column, weighted by its available room (the deficit to the cap) in raw
+    // field bits, so the shed crust flows preferentially into the deepest lows and no receiver overshoots the cap
+    // (each receiver's share of the excess is at most its room, since the total excess is strictly below the
+    // total room for a mean-centred relief field). The weight ratios are what redistribute reads.
+    let mut dests: Vec<Weighted> = Vec::new();
+    for (i, t) in state.crust_thickness_km.iter().enumerate() {
+        if let Some(deficit) = t_cap.checked_sub(*t) {
+            let bits = deficit.to_bits();
+            if deficit > Fixed::ZERO && bits > 0 {
+                dests.push(Weighted {
+                    dest: i,
+                    weight: bits as u64,
+                });
+            }
+        }
+    }
+    // The sources: every over-cap column sheds its excess thickness (in raw field bits) across the shared
+    // accommodation-space destinations. INSTANTANEOUS collapse: the whole excess moves this tick.
+    let mut moves: Vec<Redistribution> = Vec::new();
+    for (i, t) in state.crust_thickness_km.iter().enumerate() {
+        if let Some(excess) = t.checked_sub(t_cap) {
+            let bits = excess.to_bits();
+            if excess > Fixed::ZERO && bits > 0 {
+                moves.push(Redistribution {
+                    source: i,
+                    mass: bits,
+                    dests: dests.clone(),
+                });
+            }
+        }
+    }
+    // Nothing over the bound: the relief is already supportable, so the term is a no-op (dormant), never a move.
+    if moves.is_empty() {
+        return state.clone();
+    }
+
+    // The conservative delta (raw field bits, summing to exactly zero). A refusal (no destination for a source, an
+    // overflow) falls soft to the unchanged state rather than dropping or fabricating crust.
+    let delta = match redistribute(n, &moves) {
+        Ok(d) => d,
+        Err(_) => return state.clone(),
+    };
+    let mut next = state.clone();
+    for (i, d) in delta.iter().enumerate() {
+        if *d != 0 {
+            // The bit-space move: the crust thickness is nudged by the conservative delta in its own raw bits, the
+            // same bit-arithmetic redistribution the bombardment applies. The delta sums to zero, so the crust
+            // bit-sum is invariant (mass conserved to the bit); the magnitudes are far inside i64, so the
+            // saturating add never saturates and the conservation is exact.
+            next.crust_thickness_km[i] =
+                Fixed::from_bits(next.crust_thickness_km[i].to_bits().saturating_add(*d));
+        }
+    }
     next
 }
 
@@ -1391,6 +1605,247 @@ mod tests {
         assert_eq!(
             zero.impact_count, state.impact_count,
             "a zero-duration tick draws nothing"
+        );
+    }
+
+    // --- the support-bound collapse slice ---
+
+    // The crust MECHANICAL-STRENGTH parameters for the support-bound collapse tests. The crust and mantle
+    // densities are representative silicate values; the crust shear modulus (~44 GPa) and the per-class strength
+    // knockdown (~0.015) are ILLUSTRATIVE stand-ins for the crust's own DERIVED shear modulus and the owner's
+    // reserved-with-basis knockdown, chosen at physically-anchored crustal-rock figures only to exercise the
+    // derive-down: they drive [`derived_crust_yield_pa`] through the REAL [`operative_shear_strength_gpa`], so the
+    // chain is proven and the reserved 1e8 Pa literal is not used. g is Mars-class. This lands a support bound of
+    // order the ~8 to 10 km class-grade value the reserved 1e8 gave, now from the crust's OWN strength.
+    fn support_bound_params() -> SupportBoundParams {
+        SupportBoundParams {
+            crust_density: Fixed::from_ratio(29, 10), // 2.9 g/cm^3, mafic crust
+            mantle_density: Fixed::from_ratio(33, 10), // 3.3 g/cm^3
+            crust_shear_modulus_gpa: Fixed::from_int(44), // ~44 GPa (illustrative crustal shear modulus)
+            strength_knockdown: Fixed::from_ratio(15, 1000), // ~0.015 (illustrative reserved-with-basis stand-in)
+            gravity_m_per_s2: Fixed::from_ratio(37, 10),     // 3.7 m/s^2, Mars-class
+        }
+    }
+
+    // Each column's Airy isostatic relief (elevation above the field datum, kilometres): (max relief, min relief,
+    // amplitude), the physical relief the support bound governs.
+    fn relief_stats(s: &DeepTimeState, p: &SupportBoundParams) -> (f64, f64, f64) {
+        let elev: Vec<Fixed> = s
+            .crust_thickness_km
+            .iter()
+            .map(|t| {
+                airy_isostatic_elevation(p.crust_density, p.mantle_density, *t)
+                    .expect("the crust floats")
+            })
+            .collect();
+        let datum = relief_datum(&elev)
+            .expect("the datum resolves")
+            .to_f64_lossy();
+        let mut max = f64::MIN;
+        let mut min = f64::MAX;
+        for e in &elev {
+            let r = e.to_f64_lossy() - datum;
+            max = max.max(r);
+            min = min.min(r);
+        }
+        (max, min, max - min)
+    }
+
+    // The support bound (km) the derived crust yield lands at, recomputed independently for the assertions.
+    fn support_bound_km(p: &SupportBoundParams) -> f64 {
+        let sigma_y_pa = derived_crust_yield_pa(p.crust_shear_modulus_gpa, p.strength_knockdown)
+            .expect("the crust yield derives")
+            .to_f64_lossy();
+        sigma_y_pa
+            / (p.crust_density.to_f64_lossy() * 1000.0 * p.gravity_m_per_s2.to_f64_lossy())
+            / 1000.0
+    }
+
+    #[test]
+    fn the_support_bound_reads_the_crust_derived_yield_not_the_reserved_literal() {
+        // THE DERIVE-DOWN: the bound reads the crust's OWN operative shear strength (the Frenkel ideal G/(2*pi)
+        // scaled by the per-class knockdown), NOT the reserved 1e8 Pa literal. A stiffer crust derives a higher
+        // yield, so the bound TRACKS the crust's strength rather than a constant.
+        let soft = derived_crust_yield_pa(Fixed::from_int(44), Fixed::from_ratio(15, 1000))
+            .expect("derives");
+        let stiff = derived_crust_yield_pa(Fixed::from_int(80), Fixed::from_ratio(15, 1000))
+            .expect("derives");
+        assert!(
+            stiff > soft,
+            "a stiffer crust derives a higher yield strength, got {} vs {}",
+            stiff.to_f64_lossy(),
+            soft.to_f64_lossy()
+        );
+        // The derived value is of order the class-grade crustal yield (~1e8 Pa ~ 100 MPa, the frictional-brittle
+        // bound the reserved literal encoded), now READ from the crust's own strength: a cross-validation.
+        assert!(
+            soft.to_f64_lossy() > 1e7 && soft.to_f64_lossy() < 1e9,
+            "the derived crustal yield lands at the ~1e8 Pa class-grade scale, got {} Pa",
+            soft.to_f64_lossy()
+        );
+        // A degenerate strength routes to None (no fabricated yield), the fail-loud escalation.
+        assert!(
+            derived_crust_yield_pa(Fixed::ZERO, Fixed::from_ratio(15, 1000)).is_none(),
+            "no shear modulus, no derived yield"
+        );
+        assert!(
+            derived_crust_yield_pa(Fixed::from_int(44), Fixed::ZERO).is_none(),
+            "no knockdown, no derived yield"
+        );
+    }
+
+    #[test]
+    fn the_support_bound_collapse_relaxes_relief_and_conserves_mass() {
+        let params = support_bound_params();
+        let bound_km = support_bound_km(&params);
+        // A physical crustal bound of order the class-grade value, from the crust's OWN strength.
+        assert!(
+            bound_km > 1.0 && bound_km < 30.0,
+            "the derived support bound is a physical few-to-tens-of-km relief, got {bound_km:.2} km"
+        );
+
+        // A relief field with one column standing far above the datum (a tall volcanic province) over a baseline
+        // crust, so its isostatic relief exceeds the support bound and must collapse.
+        let n = 25usize;
+        let mut thicknesses = vec![Fixed::from_int(30); n]; // 30 km baseline crust
+        thicknesses[12] = Fixed::from_int(200); // a 200 km province, unsupportably tall
+        let mut state = DeepTimeState::young(n, Fixed::from_int(1800));
+        state.crust_thickness_km = thicknesses;
+
+        let (max_before, _min_before, amp_before) = relief_stats(&state, &params);
+        assert!(
+            max_before > bound_km,
+            "the tall province starts OVER the support bound ({max_before:.2} km relief vs {bound_km:.2} km bound)"
+        );
+
+        // The conserved crust bit-sum before the collapse.
+        let sum_before: i128 = state
+            .crust_thickness_km
+            .iter()
+            .map(|t| t.to_bits() as i128)
+            .sum();
+
+        let relaxed = relax_to_support_bound(&state, &params);
+
+        // MASS conserved to the bit: the redistribution moves crust between columns, never creating or destroying
+        // it (the same discipline the bombardment delta uses, the bit-sum invariant).
+        let sum_after: i128 = relaxed
+            .crust_thickness_km
+            .iter()
+            .map(|t| t.to_bits() as i128)
+            .sum();
+        assert_eq!(
+            sum_before, sum_after,
+            "the support-bound collapse conserves the crust bit-sum exactly (mass moved, never created or lost)"
+        );
+
+        // The relief is now WITHIN the support bound: the over-bound province collapsed to the bound (to within
+        // the sub-nanometre apportionment residual), the tall topography relaxed by lower-crustal flow.
+        let (max_after, _min_after, amp_after) = relief_stats(&relaxed, &params);
+        assert!(
+            max_after <= bound_km + 1e-6,
+            "every column's relief is within the derived support bound after the collapse, got {max_after:.4} km vs {bound_km:.4} km"
+        );
+        // It collapsed TO the bound (not far below): the province relaxed to the supportable height, not to zero.
+        assert!(
+            max_after > bound_km - 1e-2,
+            "the province relaxed to the bound, not far below it, got {max_after:.4} km vs {bound_km:.4} km"
+        );
+        // The relief amplitude fell (the peak came down and the lows filled with the shed crust).
+        assert!(
+            amp_after < amp_before,
+            "the collapse reduced the relief amplitude, got {amp_after:.2} km vs {amp_before:.2} km"
+        );
+    }
+
+    #[test]
+    fn the_collapse_is_deterministic() {
+        let params = support_bound_params();
+        let mut state = DeepTimeState::young(16, Fixed::from_int(1800));
+        let mut th = vec![Fixed::from_int(25); 16];
+        th[3] = Fixed::from_int(180);
+        th[10] = Fixed::from_int(150);
+        state.crust_thickness_km = th;
+        let a = relax_to_support_bound(&state, &params);
+        let b = relax_to_support_bound(&state, &params);
+        assert_eq!(
+            a.crust_thickness_km, b.crust_thickness_km,
+            "the collapse is a pure function of the state and parameters, replaying bit-for-bit"
+        );
+    }
+
+    #[test]
+    fn a_relief_already_within_the_bound_is_a_no_op() {
+        // A gently varying crust whose isostatic relief is already below the support bound: no column collapses,
+        // so the field returns unchanged (dormant), never a fabricated move.
+        let params = support_bound_params();
+        let mut state = DeepTimeState::young(9, Fixed::from_int(1800));
+        state.crust_thickness_km = vec![
+            Fixed::from_int(30),
+            Fixed::from_int(32),
+            Fixed::from_int(31),
+            Fixed::from_int(29),
+            Fixed::from_int(33),
+            Fixed::from_int(30),
+            Fixed::from_int(31),
+            Fixed::from_int(32),
+            Fixed::from_int(30),
+        ];
+        let (max_before, _, _) = relief_stats(&state, &params);
+        assert!(
+            max_before < support_bound_km(&params),
+            "the field starts within the support bound"
+        );
+        let relaxed = relax_to_support_bound(&state, &params);
+        assert_eq!(
+            relaxed.crust_thickness_km, state.crust_thickness_km,
+            "a supportable relief is left unchanged"
+        );
+    }
+
+    #[test]
+    fn a_foundering_crust_denser_than_the_mantle_is_left_unchanged() {
+        // A crust denser than the mantle (k <= 0) FOUNDERS rather than standing as topography: the tall-relief
+        // collapse does not apply (delamination is a separate regime), so the field is returned unchanged.
+        let mut params = support_bound_params();
+        params.crust_density = Fixed::from_ratio(36, 10); // 3.6 > 3.3 mantle: founders
+        let mut state = DeepTimeState::young(9, Fixed::from_int(1800));
+        let mut th = vec![Fixed::from_int(30); 9];
+        th[4] = Fixed::from_int(200);
+        state.crust_thickness_km = th;
+        let relaxed = relax_to_support_bound(&state, &params);
+        assert_eq!(
+            relaxed.crust_thickness_km, state.crust_thickness_km,
+            "a foundering crust is not collapsed as topography"
+        );
+    }
+
+    #[test]
+    fn the_collapse_is_soft_on_a_degenerate_yield_or_gravity() {
+        let base = support_bound_params();
+        let mut state = DeepTimeState::young(9, Fixed::from_int(1800));
+        let mut th = vec![Fixed::from_int(30); 9];
+        th[4] = Fixed::from_int(200);
+        state.crust_thickness_km = th;
+        // A zero shear modulus: no derived yield, so no bound, so no collapse (soft, unchanged).
+        let no_strength = SupportBoundParams {
+            crust_shear_modulus_gpa: Fixed::ZERO,
+            ..base
+        };
+        assert_eq!(
+            relax_to_support_bound(&state, &no_strength).crust_thickness_km,
+            state.crust_thickness_km,
+            "a crust with no derived strength is left unchanged (fail-soft, no fabricated bound)"
+        );
+        // A non-positive gravity: no gravitational load, no bound, unchanged.
+        let no_g = SupportBoundParams {
+            gravity_m_per_s2: Fixed::ZERO,
+            ..base
+        };
+        assert_eq!(
+            relax_to_support_bound(&state, &no_g).crust_thickness_km,
+            state.crust_thickness_km,
+            "a non-positive gravity is left unchanged"
         );
     }
 }
