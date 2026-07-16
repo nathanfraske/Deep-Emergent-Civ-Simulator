@@ -393,6 +393,38 @@ pub fn kepler_orbital_period_seconds(orbit_au: Fixed, star_mass_ratio: Fixed) ->
     t_ref.checked_mul(root)
 }
 
+/// The ORBITAL PERIOD in YEARS (sidereal), the representable-across-the-whole-system companion to
+/// [`kepler_orbital_period_seconds`]. Kepler's third law in astronomical units (AU, solar mass, sidereal year)
+/// is `T^2 = a^3 / M`, so `T[yr] = sqrt(orbit_au^3 / star_mass_ratio)` with Earth (`a = 1`, `M = 1`) at exactly
+/// one year, the natural unit the sidereal year already anchors. It is computed in LOG-SPACE (the
+/// [`planet_radius_m`] cube-root precedent), `ln T = (3*ln(orbit_au) - ln(star_mass_ratio)) / 2`, so `orbit_au^3`
+/// never forms: the period stays representable out past the Oort cloud (about a million years at 1e5 AU) where
+/// the seconds form overflows Q32.32 near 16 AU. This is the unit the multi-body system map carries, the fix for
+/// the seconds ceiling the orbits arc surfaced.
+///
+/// Every input is a scenario ARGUMENT (admit the alien). `None` on a non-positive orbit or star mass, or a period
+/// past the representable-years ceiling (about 1.6e6 AU, where the result reaches the Q32.32 maximum): it fails
+/// loud rather than saturating, the honest units bound (the log-space exp window and the fixed-point ceiling
+/// coincide there). The ceiling is `ln(2^31)`, the log of the representable maximum itself, an engine
+/// representability bound derived from the representation, not a physical value.
+pub fn kepler_orbital_period_years(orbit_au: Fixed, star_mass_ratio: Fixed) -> Option<Fixed> {
+    if orbit_au <= Fixed::ZERO || star_mass_ratio <= Fixed::ZERO {
+        return None;
+    }
+    let ln_period = Fixed::from_int(3)
+        .checked_mul(orbit_au.ln())?
+        .checked_sub(star_mass_ratio.ln())?
+        .checked_div(Fixed::from_int(2))?;
+    // Fail loud past the representable ceiling rather than let `exp` saturate to the maximum: the Q32.32 positive
+    // ceiling is ~2^31, so a result fits only while `ln_period < ln(2^31) = 31*ln(2)`. This is the log of the
+    // representation's own maximum, an engine bound, not an owner value.
+    let ln_ceiling = Fixed::from_int(31).checked_mul(Fixed::from_int(2).ln())?;
+    if ln_period >= ln_ceiling {
+        return None;
+    }
+    Some(ln_period.exp())
+}
+
 /// The DISK SURFACE DENSITY `Sigma(r)` (in the normalization's units) at an orbital distance, the Lynden-Bell and
 /// Pringle self-similar profile `Sigma(r) = Sigma_c * (r/r_c)^(-gamma) * exp(-(r/r_c)^(2-gamma))`: a power-law
 /// interior steepened by an exponential cutoff beyond the characteristic radius `r_c`. This is the second half of
@@ -739,6 +771,79 @@ mod tests {
         assert!(kepler_orbital_period_seconds(Fixed::ZERO, Fixed::ONE).is_none());
         assert!(kepler_orbital_period_seconds(Fixed::ONE, Fixed::ZERO).is_none());
         assert!(kepler_orbital_period_seconds(Fixed::from_int(100), Fixed::ONE).is_none());
+    }
+
+    #[test]
+    fn the_period_in_years_derives_earths_year_and_the_outer_system() {
+        // The years form derives Earth at exactly one year, and reaches the orbits the seconds form cannot: Neptune
+        // (~30 AU, 165 yr) is past the ~16 AU seconds ceiling, and an Oort body at 1e4 AU (~1e6 yr) is far past it,
+        // both representable in years. Jupiter cross-checks the real 11.86 yr.
+        let earth = kepler_orbital_period_years(Fixed::ONE, Fixed::ONE).unwrap();
+        assert!(
+            (earth.to_f64_lossy() - 1.0).abs() < 1e-3,
+            "Earth is one year, got {}",
+            earth.to_f64_lossy()
+        );
+        let jupiter =
+            kepler_orbital_period_years(Fixed::from_ratio(5203, 1000), Fixed::ONE).unwrap();
+        assert!(
+            (jupiter.to_f64_lossy() - 11.86).abs() / 11.86 < 0.01,
+            "Jupiter ~11.86 yr, got {}",
+            jupiter.to_f64_lossy()
+        );
+        // Neptune at ~30.07 AU: past where the SECONDS form overflows, but fine in years.
+        assert!(
+            kepler_orbital_period_seconds(Fixed::from_ratio(3007, 100), Fixed::ONE).is_none(),
+            "seconds overflows at Neptune"
+        );
+        let neptune =
+            kepler_orbital_period_years(Fixed::from_ratio(3007, 100), Fixed::ONE).unwrap();
+        assert!(
+            (neptune.to_f64_lossy() - 165.0).abs() / 165.0 < 0.02,
+            "Neptune ~165 yr, got {}",
+            neptune.to_f64_lossy()
+        );
+        // An Oort-cloud body at 1e4 AU: ~1e6 years, still representable.
+        let oort = kepler_orbital_period_years(Fixed::from_int(10_000), Fixed::ONE).unwrap();
+        assert!(
+            (oort.to_f64_lossy() - 1.0e6).abs() / 1.0e6 < 0.02,
+            "1e4 AU is ~1e6 yr, got {}",
+            oort.to_f64_lossy()
+        );
+    }
+
+    #[test]
+    fn the_period_in_years_agrees_with_the_seconds_form_and_scales_and_fails_loud() {
+        // Where both are valid, years times the sidereal year equals seconds (one physics, two units); the third-law
+        // scaling holds; and past the representable-years ceiling (~1.6e6 AU) it fails loud rather than saturating.
+        let a = Fixed::from_int(5);
+        let secs = kepler_orbital_period_seconds(a, Fixed::ONE)
+            .unwrap()
+            .to_f64_lossy();
+        let yrs = kepler_orbital_period_years(a, Fixed::ONE)
+            .unwrap()
+            .to_f64_lossy();
+        assert!(
+            (yrs * 31_557_600.0 - secs).abs() / secs < 0.001,
+            "years*sidereal == seconds at 5 AU"
+        );
+        let base = kepler_orbital_period_years(Fixed::ONE, Fixed::ONE)
+            .unwrap()
+            .to_f64_lossy();
+        let wider = kepler_orbital_period_years(Fixed::from_int(4), Fixed::ONE)
+            .unwrap()
+            .to_f64_lossy();
+        assert!(
+            (wider / base - 8.0).abs() < 0.05,
+            "T scales as a^1.5 (4^1.5 = 8), got {}",
+            wider / base
+        );
+        assert!(kepler_orbital_period_years(Fixed::ZERO, Fixed::ONE).is_none());
+        assert!(kepler_orbital_period_years(Fixed::ONE, Fixed::ZERO).is_none());
+        assert!(
+            kepler_orbital_period_years(Fixed::from_int(2_000_000), Fixed::ONE).is_none(),
+            "past the years ceiling fails loud"
+        );
     }
 
     #[test]
