@@ -42,16 +42,64 @@ use civsim_units::fundamentals;
 /// defined, and the exponent term carries the decades the raw value cannot hold. `None` if the string does not
 /// parse or the mantissa is non-positive.
 pub fn ln_of_decimal(s: &str) -> Option<Fixed> {
-    let (mantissa_str, exp) = match s.split_once(['e', 'E']) {
-        Some((m, e)) => (m, e.trim().parse::<i32>().ok()?),
-        None => (s, 0),
-    };
-    let mantissa = Fixed::from_decimal_str(mantissa_str.trim()).ok()?;
+    let s = s.trim();
+    let ln_ten = Fixed::from_int(10).ln();
+    // Scientific notation: the mantissa already sits near [1, 10), the exponent carries the decades.
+    if let Some((m, e)) = s.split_once(['e', 'E']) {
+        let exp = e.trim().parse::<i32>().ok()?;
+        let mantissa = Fixed::from_decimal_str(m.trim()).ok()?;
+        if mantissa <= Fixed::ZERO {
+            return None;
+        }
+        return Some(mantissa.ln() + Fixed::from_int(exp).mul(ln_ten));
+    }
+    // A plain number that fits Q32.32: take its log directly.
+    if let Ok(mantissa) = Fixed::from_decimal_str(s) {
+        if mantissa > Fixed::ZERO {
+            return Some(mantissa.ln());
+        }
+        return None;
+    }
+    // A plain number too wide for Q32.32 (a large plain integer like the AU in metres): normalize it to
+    // mantissa in [1, 10) times 10^exp, so the mantissa's `Fixed::ln` is defined and the exponent carries the
+    // decades the raw value cannot hold. This is the same identity as the scientific-notation branch, applied
+    // after normalizing a wide plain decimal.
+    let (mantissa_str, exp) = normalize_wide_plain(s)?;
+    let mantissa = Fixed::from_decimal_str(&mantissa_str).ok()?;
     if mantissa <= Fixed::ZERO {
         return None;
     }
-    let ln_ten = Fixed::from_int(10).ln();
     Some(mantissa.ln() + Fixed::from_int(exp).mul(ln_ten))
+}
+
+/// Normalize a positive plain decimal string (no exponent) to `(mantissa in [1, 10), exp)` so that the value is
+/// `mantissa * 10^exp`. The integer-part length fixes where the decimal point sits, and the first significant
+/// digit fixes the exponent. `None` on a negative sign, a non-digit character, or an all-zero string (whose log
+/// is undefined).
+fn normalize_wide_plain(s: &str) -> Option<(String, i32)> {
+    if s.starts_with('-') {
+        return None;
+    }
+    let s = s.strip_prefix('+').unwrap_or(s);
+    let (int_part, frac_part) = match s.split_once('.') {
+        Some((i, f)) => (i, f),
+        None => (s, ""),
+    };
+    let digits: String = format!("{int_part}{frac_part}");
+    if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    // The decimal point sits after `int_part.len()` digits; the first nonzero digit fixes the mantissa's leading
+    // place, so the exponent is that offset less one (a `d.ddd` mantissa).
+    let first_sig = digits.bytes().position(|b| b != b'0')?;
+    let exp = int_part.len() as i32 - first_sig as i32 - 1;
+    let sig = &digits[first_sig..];
+    let mantissa_str = if sig.len() == 1 {
+        sig.to_string()
+    } else {
+        format!("{}.{}", &sig[..1], &sig[1..])
+    };
+    Some((mantissa_str, exp))
 }
 
 /// The natural log of a registered fundamental constant's value (its underflow-safe log, via [`ln_of_decimal`]).
@@ -302,6 +350,16 @@ mod tests {
         );
         assert_eq!(ln_fundamental("m_e"), ln_of_decimal("9.1093837015e-31"));
         assert_eq!(ln_fundamental("not_a_constant"), None);
+        // A WIDE plain integer that overflows Q32.32 as a plain value (the AU in metres, 1.496e11): the normalize
+        // branch expresses it as mantissa times 10^exp so its log is defined. ln(149597870700) ~ 25.73.
+        assert!(
+            close(ln_of_decimal("149597870700").unwrap(), 25.731, 0.01),
+            "ln(AU_m) ~ 25.73, got {}",
+            ln_of_decimal("149597870700").unwrap().to_f64_lossy()
+        );
+        // An all-zero string has no log; a negative sign is rejected.
+        assert_eq!(ln_of_decimal("000"), None);
+        assert_eq!(ln_of_decimal("-149597870700"), None);
     }
 
     #[test]

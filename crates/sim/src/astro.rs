@@ -460,6 +460,57 @@ pub fn hill_radius_au(
     orbit_au.checked_mul(cube_argument.cbrt())
 }
 
+/// The oligarchic ISOLATION MASS in Earth masses: the mass a growing embryo reaches once it has swept its feeding
+/// zone clear, DERIVED self-consistently from the Hill radius, so the feeding-zone WIDTH is no longer a reserved
+/// geometry input. An embryo accretes a zone `Delta a = C*R_H` wide (`R_H` the Hill radius), and the zone mass
+/// `M_iso = 2*pi*a*Delta a*Sigma` and `R_H` both depend on `M`; the self-consistent solve closes to
+/// `M_iso = (2*pi*C*a^2*Sigma)^(3/2) / sqrt(3*M_star)`, the Kokubo-Ida oligarchic isolation mass. This retires the
+/// reserved feeding-zone width [`feeding_zone_mass`] carried: the width now DERIVES as `C` Hill radii.
+///
+/// `orbit_au` the orbit, `star_mass_ratio` the star mass in solar masses, `sigma_kg_m2` the disk SOLID surface
+/// density at the orbit ([`disk_surface_density`], kg/m^2), `feeding_zone_hill_widths` the width `C` in Hill radii
+/// (a reserved-with-basis residue, its basis the oligarchic feeding-zone width, a few to ~10 mutual Hill radii,
+/// Kokubo-Ida 1998/2000). The wide product runs in LOG-SPACE (the [`planet_radius_m`] precedent): the AU, solar
+/// mass, and Earth mass anchors enter as their decimal-string logs, so no unrepresentable intermediate forms. The
+/// honest result is SUB-EARTH at Earth's orbit (a Mars-class oligarch, which is why Earth needs oligarch mergers
+/// to reach one mass, the Layer-4 giant-impact tier). `None` on a non-positive input or a register miss.
+pub fn isolation_mass_earth(
+    orbit_au: Fixed,
+    star_mass_ratio: Fixed,
+    sigma_kg_m2: Fixed,
+    feeding_zone_hill_widths: Fixed,
+) -> Option<Fixed> {
+    if orbit_au <= Fixed::ZERO
+        || star_mass_ratio <= Fixed::ZERO
+        || sigma_kg_m2 <= Fixed::ZERO
+        || feeding_zone_hill_widths <= Fixed::ZERO
+    {
+        return None;
+    }
+    let two_pi_c = Fixed::PI
+        .checked_add(Fixed::PI)?
+        .checked_mul(feeding_zone_hill_widths)?;
+    let three_halves = Fixed::from_ratio(3, 2);
+    let half = Fixed::from_ratio(1, 2);
+    // ln(a[m]) = ln(orbit_au) + ln(AU_m); ln(M_star[kg]) = ln(star_mass_ratio) + ln(M_sun_kg), the wide anchors
+    // entering as their decimal-string logs.
+    let ln_a_m = orbit_au
+        .ln()
+        .checked_add(civsim_physics::saha::ln_of_decimal(ASTRONOMICAL_UNIT_M)?)?;
+    let ln_m_star = star_mass_ratio
+        .ln()
+        .checked_add(civsim_physics::saha::ln_of_decimal(SOLAR_MASS_KG)?)?;
+    // ln M_iso[kg] = 1.5*ln(2*pi*C) + 3*ln(a) + 1.5*ln(Sigma) - 0.5*(ln 3 + ln M_star).
+    let ln_m_iso_kg = three_halves
+        .checked_mul(two_pi_c.ln())?
+        .checked_add(Fixed::from_int(3).checked_mul(ln_a_m)?)?
+        .checked_add(three_halves.checked_mul(sigma_kg_m2.ln())?)?
+        .checked_sub(half.checked_mul(Fixed::from_int(3).ln().checked_add(ln_m_star)?)?)?;
+    let ln_m_iso_earth =
+        ln_m_iso_kg.checked_sub(civsim_physics::saha::ln_of_decimal(EARTH_MASS_KG)?)?;
+    Some(ln_m_iso_earth.exp())
+}
+
 /// The DISK SURFACE DENSITY `Sigma(r)` (in the normalization's units) at an orbital distance, the Lynden-Bell and
 /// Pringle self-similar profile `Sigma(r) = Sigma_c * (r/r_c)^(-gamma) * exp(-(r/r_c)^(2-gamma))`: a power-law
 /// interior steepened by an exponential cutoff beyond the characteristic radius `r_c`. This is the second half of
@@ -938,6 +989,93 @@ mod tests {
         assert!(hill_radius_au(Fixed::ZERO, Fixed::ONE, Fixed::ONE).is_none());
         assert!(hill_radius_au(Fixed::ONE, Fixed::ZERO, Fixed::ONE).is_none());
         assert!(hill_radius_au(Fixed::ONE, Fixed::ONE, Fixed::ZERO).is_none());
+    }
+
+    #[test]
+    fn the_isolation_mass_is_sub_earth_at_one_au() {
+        // The honest oligarchic result: at Earth's orbit with an MMSN-grade solid surface density (~266 kg/m^2)
+        // and a few-Hill-radii feeding zone, the isolation mass is SUB-EARTH (a Mars-class oligarch, ~0.05 to 0.2
+        // Earth masses). This is the physics of why Earth needed oligarch mergers to reach one mass, and it
+        // exercises the wide-AU log in the fold.
+        let m = isolation_mass_earth(
+            Fixed::ONE,                // 1 AU
+            Fixed::ONE,                // 1 solar mass
+            Fixed::from_ratio(266, 1), // ~266 kg/m^2 MMSN-grade solid density
+            Fixed::from_ratio(35, 10), // C = 3.5 Hill radii (a classic feeding-zone width)
+        )
+        .unwrap();
+        assert!(
+            m.to_f64_lossy() > 0.02 && m.to_f64_lossy() < 0.5,
+            "the 1 AU isolation mass is a sub-Earth Mars-class oligarch, got {} M_earth",
+            m.to_f64_lossy()
+        );
+    }
+
+    #[test]
+    fn the_isolation_mass_follows_its_power_laws_and_fails_loud() {
+        // M_iso proportional to a^3, Sigma^(3/2), M_star^(-1/2), (2*pi*C)^(3/2): each checked as a ratio so the
+        // wide unit fold drops out. Fail-loud on any non-positive input.
+        let base = isolation_mass_earth(
+            Fixed::ONE,
+            Fixed::ONE,
+            Fixed::from_int(200),
+            Fixed::from_int(5),
+        )
+        .unwrap()
+        .to_f64_lossy();
+        let wider_orbit = isolation_mass_earth(
+            Fixed::from_int(2),
+            Fixed::ONE,
+            Fixed::from_int(200),
+            Fixed::from_int(5),
+        )
+        .unwrap()
+        .to_f64_lossy();
+        assert!(
+            (wider_orbit / base - 8.0).abs() / 8.0 < 0.02,
+            "M_iso scales as a^3 (2^3=8), got {}",
+            wider_orbit / base
+        );
+        let denser = isolation_mass_earth(
+            Fixed::ONE,
+            Fixed::ONE,
+            Fixed::from_int(800),
+            Fixed::from_int(5),
+        )
+        .unwrap()
+        .to_f64_lossy();
+        assert!(
+            (denser / base - 8.0).abs() / 8.0 < 0.02,
+            "M_iso scales as Sigma^1.5 (4^1.5=8), got {}",
+            denser / base
+        );
+        let heavier_star = isolation_mass_earth(
+            Fixed::ONE,
+            Fixed::from_int(4),
+            Fixed::from_int(200),
+            Fixed::from_int(5),
+        )
+        .unwrap()
+        .to_f64_lossy();
+        assert!(
+            (heavier_star / base - 0.5).abs() < 0.02,
+            "M_iso scales as M_star^-0.5 (1/2), got {}",
+            heavier_star / base
+        );
+        assert!(isolation_mass_earth(
+            Fixed::ZERO,
+            Fixed::ONE,
+            Fixed::from_int(200),
+            Fixed::from_int(5)
+        )
+        .is_none());
+        assert!(
+            isolation_mass_earth(Fixed::ONE, Fixed::ONE, Fixed::ZERO, Fixed::from_int(5)).is_none()
+        );
+        assert!(
+            isolation_mass_earth(Fixed::ONE, Fixed::ONE, Fixed::from_int(200), Fixed::ZERO)
+                .is_none()
+        );
     }
 
     #[test]
