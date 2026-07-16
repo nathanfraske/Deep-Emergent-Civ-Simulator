@@ -26,7 +26,7 @@ use std::cmp::Ordering;
 use std::collections::BTreeMap;
 
 /// The dimensionless standard chemical potential `g = mu°(T)/RT` of a species from its JANAF standard Gibbs energy
-/// of formation `delta_f G(T)` in kJ/mol (the [M] TOTAL top rung of the source ladder): `g = delta_f_G * 1000 /
+/// of formation `delta_f G(T)` in kJ/mol (the `[M]` TOTAL top rung of the source ladder): `g = delta_f_G * 1000 /
 /// (R T)`. This is the `g_over_rt` [`gas_equilibrium`] and the condensation saturation read for a JANAF-tabulated
 /// species; the RRHO estimator is the certifier and alien rung for a species with no row. `None` on a non-positive
 /// temperature or a register miss.
@@ -52,7 +52,7 @@ pub enum SpeciesPhase {
 }
 
 /// One candidate species in the equilibrium: its name, phase, dimensionless standard Gibbs energy
-/// `g = mu°(T)/RT` (from JANAF as the [M] total, or the RRHO estimator as the certifier / alien rung), and its
+/// `g = mu°(T)/RT` (from JANAF as the `[M]` total, or the RRHO estimator as the certifier / alien rung), and its
 /// element stoichiometry (element symbol to atom count). The `g` is dimensionless because the whole solve runs in
 /// `mu/RT` units, where the element potentials and the log-abundances are natural.
 #[derive(Clone, Debug)]

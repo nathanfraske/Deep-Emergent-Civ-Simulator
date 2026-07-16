@@ -1,6 +1,6 @@
 //! The phonon-mode generator, the estimator that turns a grain's lattice into its infrared optical constants
 //! `n(lambda), k(lambda)` for the phases the measured library does not cover (Rule 1's admit-the-alien fallback).
-//! It feeds the existing Lorentzian lineshape ([`crate::materials`]'s `lorentzian_response`, up-stack) with the
+//! It feeds the existing Lorentzian lineshape (`civsim-materials`'s `lorentzian_response`, up-stack) with the
 //! four vibrational parameters this module derives:
 //!
 //! - `omega_TO`, the transverse-optical mode wavenumber, from the force constant and the reduced mass:
@@ -193,7 +193,7 @@ pub fn oscillator_strength(
     bare_strength.checked_mul(local_field.checked_mul(local_field)?)
 }
 
-/// The crystalline damping `gamma = 0.05 omega_TO` (cm^-1), a declared residue [C] (memory-grade `~0.05` of the
+/// The crystalline damping `gamma = 0.05 omega_TO` (cm^-1), a declared residue `[C]` (memory-grade `~0.05` of the
 /// mode frequency for an ordered lattice). An amorphous phase broadens it: passing a larger `fractional_width`
 /// smears the band, which is how a glassy grain's fictive temperature reaches the sky (written state in the
 /// spectrum). The `0.05` is reserved calibration (basis: the crystalline linewidth class; broadened per phase).

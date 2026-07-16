@@ -18,13 +18,13 @@
 //! (condenses ~1582 K at `1e-4` bar solar, Lodders Ti = 1582 K), the front a Gibbs-minimization over the loaded
 //! potentials must reproduce, a calibration target rather than a run input.
 //!
-//! Cited [M], owner-pinned to the public-domain primary: Robie, R.A. & Hemingway, B.S. (1995), USGS Bulletin 2131,
+//! Cited `[M]`, owner-pinned to the public-domain primary: Robie, R.A. & Hemingway, B.S. (1995), USGS Bulletin 2131,
 //! the PEROVSKITE table (p.232), formation from the elements. Transcribed from the primary USGS PDF (the Lodders
 //! protocol: transcribe the table, fingerprint-check spot rows). The second witness is Barin (Thermochemical Data of
 //! Pure Substances), giving `delta-f H(298) ~ -1660.6`, `S(298) ~ 93.64`, `delta-f G(298) ~ -1575.3`, essentially
-//! identical to Robie. The GGchem open condensate file lists CaTiO3[s] with a Sharp & Huebner (1990) atom-referenced
+//! identical to Robie. The GGchem open condensate file lists `CaTiO3[s]` with a Sharp & Huebner (1990) atom-referenced
 //! fit, confirming perovskite as the Ti condensate (a compilation-of-compilations membership cross-check, not a
-//! numeric [M] here). Source-ladder (owner ruling): for a measurable terrestrial mineral the alternative [M] (Robie)
+//! numeric `[M]` here). Source-ladder (owner ruling): for a measurable terrestrial mineral the alternative `[M]` (Robie)
 //! precedes any estimator; a Born-Lande estimate is the alien rung, never used here.
 //!
 //! The parse routes every value through the exact `BigRat` conduit to `Fixed` (no floating point reaches canonical

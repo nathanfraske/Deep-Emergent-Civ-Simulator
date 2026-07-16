@@ -36,7 +36,7 @@
 //!
 //! This resolve is the one currency the run path already fractures matter by: the energy limb of
 //! [`civsim_physics::laws::fracture_onset`] (delivered energy against `mat.fracture_energy` times the struck
-//! area), the same criterion [`crate::runner::Runner::strike_underfoot`] fractures a cell's constituents with,
+//! area), the same criterion [`crate::runner::Embodiment::strike_underfoot`] fractures a cell's constituents with,
 //! so a struck being is wounded by exactly the law a struck rock is broken by, keyed on each material's own
 //! resistance. It admits the alien as data: the resistance is the struck segment's OWN `mat.fracture_energy`
 //! (a tougher body is harder to wound because its material reads tougher, never a per-species number), and the
@@ -60,7 +60,7 @@ use civsim_core::Fixed;
 use crate::morphogen::Segment;
 
 /// The physics-floor geometry axis a segment's presented bearing (contact) area is read from. The same axis
-/// [`crate::runner::Runner::strike_underfoot`] reads a wielded tool's struck face from, so an acting body part
+/// [`crate::runner::Embodiment::strike_underfoot`] reads a wielded tool's struck face from, so an acting body part
 /// and a wielded tool present a contact patch by the identical convention.
 pub const CONTACT_AREA_AXIS: &str = "mech.contact_area";
 

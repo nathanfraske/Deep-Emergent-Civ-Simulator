@@ -48,9 +48,9 @@
 //! boundary-layer relation), so the per-medium value is a LUMPED interim and the full derive of `h` from the
 //! medium's k/rho/c and the flow past the being's surface is DEFERRED (the reviewer-approved interim). HONEST
 //! LIMIT (the two `h` consumers are not yet spatially consistent): the resting thermoregulatory DRAIN reads
-//! `h` at the being's CURRENT cell every tick ([`base_drain_from`] via [`being_derived_drains`]), while the
+//! `h` at the being's CURRENT cell every tick ([`base_drain_from`] via `being_derived_drains`), while the
 //! body-temperature Newton-cooling exchange RATE caches `h` at the being's SPAWN cell
-//! ([`crate::runner::walker_exchange_rate`], stored once per being). Under a spatially-uniform medium (the
+//! (`crate::runner::walker_exchange_rate`, stored once per being). Under a spatially-uniform medium (the
 //! current dev fixtures carry a uniform `h`) they agree; on a world with spatially-varying `h` a being that
 //! moves between media has a current-cell drain and a stale spawn-cell exchange rate until the rate is
 //! recomputed, which is deferred with the same per-cell-flow work. The caps below are representability bounds

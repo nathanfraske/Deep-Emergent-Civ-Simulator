@@ -1,5 +1,5 @@
 //! Low-temperature GAS Rosseland opacity for the disk, on the ratified provenance-ladder architecture: the ÆSOPUS
-//! [M] table is the TOP RUNG and IS the gas total across its whole range.
+//! `[M]` table is the TOP RUNG and IS the gas total across its whole range.
 //!
 //! The first-principles es/ff/H- closure [`crate::opacity::total_gas_rosseland_opacity`] was validated against the
 //! ÆSOPUS table by the two-point convergence protocol: Point A (the es corner, where `sigma_T` has no convention
@@ -22,7 +22,7 @@
 //!   above sublimation); the guard is asserted where the addition happens (the grain slice).
 //! - SCOPE CEILING: the above-table es/ff extension serves transient and shock states; a consumer that needs
 //!   `1e4.5` to `1e6 K` in earnest (stellar-envelope pulsation, the iron Z-bump bound-bound physics) takes OP or
-//!   OPAL as a named [M] fetch, never this extension stretched into stellar interiors.
+//!   OPAL as a named `[M]` fetch, never this extension stretched into stellar interiors.
 //!
 //! THE COORDINATE (definition tag): low-temperature Rosseland tables are indexed by `(log10 T, log10 R)` with the
 //! density proxy `R = rho / (T / 10^6 K)^3` (cgs, `rho` in g/cm^3). `R` is NOT the density and NOT the pressure: it
@@ -34,7 +34,7 @@
 //! band strengths depend on the C, N, O, Ti abundances). A different composition is a DIFFERENT grid, a data row,
 //! never a rewrite. The solar-scaled `(X, Z)` grid is one member of the family the loader holds.
 //!
-//! THE DATA (fetched, not fabricated): the grid VALUES are the [M] tier, the ÆSOPUS gas-only low-temperature
+//! THE DATA (fetched, not fabricated): the grid VALUES are the `[M]` tier, the ÆSOPUS gas-only low-temperature
 //! Rosseland tables (Marigo & Aringer 2009, A&A 508, 1539), computed for an arbitrary composition on `(log T, log
 //! R)` with `log T` in `3.2 to 4.5` and `log R` in `-8 to 1`. The GAS-ONLY variant is taken deliberately (the
 //! grain-coupled ÆSOPUS 2.0/2.1 tables run their own dust internally, which would double-count the Mie grain term),
@@ -137,7 +137,7 @@ fn bracket(axis: &[Fixed], q: Fixed) -> Option<(usize, usize, Fixed)> {
 }
 
 /// A low-temperature Rosseland opacity grid for ONE composition, indexed on `(log10 T, log10 R)` and storing
-/// `log10 kappa` (cm^2/g). The membership is data (the Ferguson-style [M] grid), the interpolation is fixed Rust.
+/// `log10 kappa` (cm^2/g). The membership is data (the Ferguson-style `[M]` grid), the interpolation is fixed Rust.
 /// The composition tags `(X, Z)` are the admit-the-alien key: a different composition is a different grid.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LowTempRosselandGrid {
@@ -398,7 +398,7 @@ pub fn gas_molecular_handoff_opacity(
     }
 }
 
-/// The disk GAS Rosseland opacity on the ratified architecture: the ÆSOPUS [M] `table` IS the gas total across its
+/// The disk GAS Rosseland opacity on the ratified architecture: the ÆSOPUS `[M]` `table` IS the gas total across its
 /// range, and the es/ff/H- closure is a shadow validator that never contributes additively in-range (the SHADOW
 /// RULE). Dispatch is by temperature against the table's OWN range:
 /// - BELOW the table floor (`log_t < table.log_t[0]`, `T < ~1585 K`): `None`. The cold regime the grains own; the
@@ -407,7 +407,7 @@ pub fn gas_molecular_handoff_opacity(
 ///   is not consulted.
 /// - ABOVE the table ceiling (`log_t > table.log_t[last]`, `T > ~31623 K`): `above_ceiling_closure`, the caller's
 ///   es/ff extension for transient and shock states (SCOPE CEILING: not a stellar-interior opacity; `1e4.5` to
-///   `1e6 K` in earnest takes OP/OPAL as a named [M] fetch).
+///   `1e6 K` in earnest takes OP/OPAL as a named `[M]` fetch).
 ///
 /// FORBIDDEN FALLBACK: this returns `None` on an empty table, and the composition registry above it must route an
 /// in-range composition miss to a loud hold or an on-demand pull, NEVER a silent closure substitution (a certified

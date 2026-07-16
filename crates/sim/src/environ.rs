@@ -2470,7 +2470,7 @@ pub struct SurfaceThermal {
     /// temperature is below `freeze_temp`), so a frozen surface lags by ice's inertia rather than water's.
     /// RESERVED, from the floor ice profile (dev fixture: ~1.919e6, ice rho 917 * c_p 2093, CRC).
     pub ice: Fixed,
-    /// The water FREEZING temperature (K): below it a cell's standing water is ice (the [`therm.melting_temperature`]
+    /// The water FREEZING temperature (K): below it a cell's standing water is ice (the `therm.melting_temperature`
     /// floor phase boundary, read as data, not an authored branch). RESERVED, from the floor water melting point
     /// (dev fixture: 273.15 K, Mirror's real value).
     pub freeze_temp: Fixed,

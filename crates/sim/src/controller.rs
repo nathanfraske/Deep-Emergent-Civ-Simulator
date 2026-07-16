@@ -280,7 +280,7 @@ impl ControllerLayout {
 
     /// Build a layout that also feeds a block of raw perceived-feature channels, one per class the
     /// percept registry declares (harm-learning arc slice a). The feature block sits between the
-    /// per-axis blocks and the bias, so the per-axis input bases ([`axis_input_base`]) and the
+    /// per-axis blocks and the bias, so the per-axis input bases ([`Self::axis_input_base`]) and the
     /// bias-as-last-input convention the seed helpers rely on both hold unchanged; an EMPTY percept
     /// registry yields exactly [`ControllerLayout::new`]'s layout (`n_features` zero), so the feature
     /// substrate is opt-in and a world that declares no percepts is bit-identical. The feature channels
@@ -296,7 +296,7 @@ impl ControllerLayout {
         ControllerLayout::with_percepts_and_appetitive(homeo, afford, percept, false, hidden)
     }
 
-    /// As [`with_percepts`], plus the being-directed input block when `being` is true (the being-percept
+    /// As [`Self::with_percepts`], plus the being-directed input block when `being` is true (the being-percept
     /// keystone, step 6): the percept layout with no appetitive, material, attraction, or conviction block
     /// but with the being block. A harness that seeds a genome against a layout (a flat `o * n_in + i`
     /// weight index, [`taxis_move_weights`]) must build that layout at the SAME width the run embodiment
@@ -304,7 +304,7 @@ impl ControllerLayout {
     /// being block ([`crate::runner::Embodiment::set_being_percept`], with no appetitive, material,
     /// attraction, or conviction block) rebuilds its layout through the full builder with exactly those
     /// flags, so this convenience builds the matching layout for the seeding side. Delegates to the full
-    /// builder; a `being = false` call is identical to [`with_percepts`].
+    /// builder; a `being = false` call is identical to [`Self::with_percepts`].
     pub fn with_percepts_and_being(
         homeo: &HomeostaticRegistry,
         afford: &AffordanceRegistry,
@@ -325,7 +325,7 @@ impl ControllerLayout {
         )
     }
 
-    /// As [`with_percepts_and_being`], plus the RESOURCE-FEATURE input block (the creature-selection loop,
+    /// As [`Self::with_percepts_and_being`], plus the RESOURCE-FEATURE input block (the creature-selection loop,
     /// slice 3): the percept-and-being layout that ALSO carries the resource-density percept, so a being both
     /// perceives other beings (the being block) and senses the identity-blind matter content of the cells
     /// around it (the resource-feature block, the slice-2 union of the producer field and any located corpse).
@@ -333,7 +333,7 @@ impl ControllerLayout {
     /// SAME width the run embodiment expresses against once it arms both the being-percept and the resource
     /// features, or the seeded weights land in the wrong slots. Delegates to the full builder with only the
     /// being and resource-feature blocks enabled; an EMPTY `resource_features` is exactly
-    /// [`with_percepts_and_being`] (`n_resource_feature` zero), so this is opt-in and hash-neutral by default.
+    /// [`Self::with_percepts_and_being`] (`n_resource_feature` zero), so this is opt-in and hash-neutral by default.
     pub fn with_percepts_being_and_resource_features(
         homeo: &HomeostaticRegistry,
         afford: &AffordanceRegistry,
@@ -360,7 +360,7 @@ impl ControllerLayout {
     /// Build a layout that also feeds an APPETITIVE belief block, one channel per affordance in canonical
     /// id order (ideation / experiential-discovery arc, piece 1, the belief-to-behaviour feedback). The
     /// block sits AFTER the feature block and before the bias, so the per-axis input bases
-    /// ([`axis_input_base`]), the feature base ([`feature_input_base`]), and the bias-as-last convention
+    /// ([`Self::axis_input_base`]), the feature base ([`Self::feature_input_base`]), and the bias-as-last convention
     /// all hold unchanged; `appetitive = false` yields exactly [`ControllerLayout::with_percepts`]'s layout
     /// (`n_appetitive` zero), so the block is opt-in and a world that does not enable reward repetition is
     /// bit-identical. Each channel carries the being's committed reward-belief signal about that
@@ -388,8 +388,8 @@ impl ControllerLayout {
 
     /// Build a layout that also feeds a raw MATERIAL-feature block, one channel per substance the material-
     /// percept registry declares (the lifetime/demography keystone, pillar 2, trace slice C). The block sits
-    /// AFTER the appetitive block and before the bias, so the per-axis input bases ([`axis_input_base`]), the
-    /// feature base ([`feature_input_base`]), the appetitive base ([`appetitive_input_base`]), and the
+    /// AFTER the appetitive block and before the bias, so the per-axis input bases ([`Self::axis_input_base`]), the
+    /// feature base ([`Self::feature_input_base`]), the appetitive base ([`Self::appetitive_input_base`]), and the
     /// bias-as-last convention all hold unchanged; an EMPTY material registry yields exactly
     /// [`ControllerLayout::with_percepts_and_appetitive`]'s layout (`n_material` zero), so the material
     /// substrate is opt-in and a world that declares no material percepts is bit-identical. Each channel
@@ -448,9 +448,9 @@ impl ControllerLayout {
 
     /// Build a layout that also feeds a CONVICTION block, one channel per conviction axis the registry exposes
     /// (Prereq B for the learned experience-to-conviction coupling, `OWNER_DECISIONS_LOG.md` R2). The block
-    /// sits AFTER the attraction block and before the bias, so the per-axis input bases ([`axis_input_base`]),
-    /// every earlier block base ([`feature_input_base`], [`appetitive_input_base`], [`material_input_base`],
-    /// [`attraction_input_base`]), and the bias-as-last convention all hold unchanged; an EMPTY conviction
+    /// sits AFTER the attraction block and before the bias, so the per-axis input bases ([`Self::axis_input_base`]),
+    /// every earlier block base ([`Self::feature_input_base`], [`Self::appetitive_input_base`], [`Self::material_input_base`],
+    /// [`Self::attraction_input_base`]), and the bias-as-last convention all hold unchanged; an EMPTY conviction
     /// registry yields exactly [`ControllerLayout::with_percepts_appetitive_material_and_attraction`]'s layout
     /// (`n_conviction` zero), so the conviction substrate is opt-in and a world that exposes no conviction is
     /// bit-identical. Each channel carries the being's own STANCE on that conviction axis, written by the
@@ -486,13 +486,13 @@ impl ControllerLayout {
         )
     }
 
-    /// As [`with_percepts_appetitive_material_attraction_and_conviction`], plus the being-FEATURE input block
+    /// As [`Self::with_percepts_appetitive_material_attraction_and_conviction`], plus the being-FEATURE input block
     /// (creature-selection step 2b, the percept kind-feature floor arc): the discrimination-bucket toward
     /// directions of the emitter optical features a world's perceivers can sense on a being-signal beyond its
     /// strength scalar. The block sits AFTER the being block and before the bias, so every earlier base and the
     /// bias-as-last convention hold unchanged. Its width is [`PerceivableFeatureRegistry::layout_width`] (two
     /// slots, a `(dx, dy)` toward-direction pair, per discrimination bucket per channel), so an EMPTY registry
-    /// yields exactly [`with_percepts_appetitive_material_attraction_and_conviction`]'s layout (`n_being_feature`
+    /// yields exactly [`Self::with_percepts_appetitive_material_attraction_and_conviction`]'s layout (`n_being_feature`
     /// zero), an input vector, weight count, and genome expression identical to a world without it: the
     /// perceivable feature is opt-in and hash-neutral by default, the same discipline as the earlier blocks. A
     /// founder expresses zero for the being-feature weights, and each per-bucket weight is FREELY SIGNED, so
@@ -527,7 +527,7 @@ impl ControllerLayout {
         )
     }
 
-    /// As [`with_percepts_appetitive_material_attraction_conviction_and_being_features`], plus the
+    /// As [`Self::with_percepts_appetitive_material_attraction_conviction_and_being_features`], plus the
     /// RESOURCE-FEATURE input block (the foraging arc): the discrimination-bucket toward-directions of the
     /// IDENTITY-BLIND matter content of the CELLS a perceiver senses. It reuses the same
     /// [`PerceivableFeatureRegistry`] machinery the being-feature block uses (the gate's reframe: extend the
@@ -646,7 +646,7 @@ impl ControllerLayout {
     /// output weight (for a reaction norm, the weight feeding output `o` from input `i` is
     /// [`ControllerParamId`] `o * n_in + i`) reads this so it never hardcodes the slot, which the
     /// affordance registry's membership and canonical id order set (Principle 11): the base follows the
-    /// data, exactly as [`axis_input_base`] does for the input side.
+    /// data, exactly as [`Self::axis_input_base`] does for the input side.
     pub fn output_base(&self, affordance: AffordanceId) -> Option<usize> {
         self.outputs
             .iter()
@@ -669,7 +669,7 @@ impl ControllerLayout {
 
     /// The number of appetitive belief channels this layout feeds (zero unless the world opts into reward
     /// repetition; ideation arc, piece 1). When positive it is one channel per affordance, in the same
-    /// canonical id order as [`affordance_ids`] and the output slots.
+    /// canonical id order as [`Self::affordance_ids`] and the output slots.
     pub fn n_appetitive(&self) -> usize {
         self.n_appetitive
     }
@@ -807,11 +807,11 @@ impl ControllerLayout {
     }
 
     /// Build the input vector including the raw perceived-feature block (harm-learning arc slice a):
-    /// the per-axis blocks and bias exactly as [`build_input`], plus each declared feature channel's
-    /// raw value written into the feature block ([`feature_input_base`] onward, in registry order).
+    /// the per-axis blocks and bias exactly as [`Self::build_input`], plus each declared feature channel's
+    /// raw value written into the feature block ([`Self::feature_input_base`] onward, in registry order).
     /// `features` is the [`crate::percept::PerceptRegistry::perceive`] read of the cell the being stands
     /// on; a shorter slice leaves the unfilled channels zero (clean degrade). With no features (an empty
-    /// slice and `n_features` zero) the result is byte-identical to [`build_input`] before the feature
+    /// slice and `n_features` zero) the result is byte-identical to [`Self::build_input`] before the feature
     /// substrate existed, so an opted-out world is unchanged. A pure read of physiology, earned
     /// knowledge, and the physical feature underfoot (Principles 9, 10).
     pub fn build_input_with_features(
@@ -834,11 +834,11 @@ impl ControllerLayout {
 
     /// Build the input vector including both the raw perceived-feature block and the APPETITIVE belief block
     /// (ideation arc, piece 1, the belief-to-behaviour feedback): the per-axis blocks, feature block, and
-    /// bias exactly as [`build_input_with_features`], plus each appetitive channel's belief signal written
-    /// into the appetitive block ([`appetitive_input_base`] onward, in canonical affordance order).
+    /// bias exactly as [`Self::build_input_with_features`], plus each appetitive channel's belief signal written
+    /// into the appetitive block ([`Self::appetitive_input_base`] onward, in canonical affordance order).
     /// `appetitive` is the [`crate::learn::appetitive_salience`] read over this being's reward beliefs; a
     /// shorter slice leaves the unfilled channels zero (clean degrade), and an empty slice with `n_appetitive`
-    /// zero is byte-identical to [`build_input_with_features`] before the appetitive block existed, so an
+    /// zero is byte-identical to [`Self::build_input_with_features`] before the appetitive block existed, so an
     /// opted-out world is unchanged. A pure read of physiology, earned knowledge, the feature underfoot, and
     /// the being's own reward beliefs (Principles 9, 10).
     pub fn build_input_with_features_and_appetitive(
@@ -863,11 +863,11 @@ impl ControllerLayout {
 
     /// Build the input vector including the raw MATERIAL-feature block (the lifetime/demography keystone,
     /// pillar 2, trace slice C): the per-axis blocks, feature block, appetitive block, and bias exactly as
-    /// [`build_input_with_features_and_appetitive`], plus each material-feature channel's raw amount written
-    /// into the material block ([`material_input_base`] onward, in canonical registry order). `material` is
+    /// [`Self::build_input_with_features_and_appetitive`], plus each material-feature channel's raw amount written
+    /// into the material block ([`Self::material_input_base`] onward, in canonical registry order). `material` is
     /// the [`crate::material_percept::MaterialPerceptRegistry::perceive`] read of the cell the being stands
     /// on; a shorter slice leaves the unfilled channels zero (clean degrade), and an empty slice with
-    /// `n_material` zero is byte-identical to [`build_input_with_features_and_appetitive`] before the material
+    /// `n_material` zero is byte-identical to [`Self::build_input_with_features_and_appetitive`] before the material
     /// block existed, so an opted-out world is unchanged. A pure read of physiology, earned knowledge, the
     /// biology feature underfoot, the being's reward beliefs, and the matter underfoot (Principles 9, 10).
     #[allow(clippy::too_many_arguments)]
@@ -895,8 +895,8 @@ impl ControllerLayout {
 
     /// Build the input vector including the belief-derived ATTRACTION-direction input (the lifetime/demography
     /// keystone, pillar 2, trace slice C3): the per-axis blocks, feature block, appetitive block, material
-    /// block, and bias exactly as [`build_input_with_features_appetitive_and_material`], plus the two
-    /// attraction components (dx, dy) written into the attraction block ([`attraction_input_base`] onward).
+    /// block, and bias exactly as [`Self::build_input_with_features_appetitive_and_material`], plus the two
+    /// attraction components (dx, dy) written into the attraction block ([`Self::attraction_input_base`] onward).
     /// `attraction` is the unit-normalised [`crate::learn::attraction_gradient`] read; a shorter slice leaves
     /// the unfilled channels zero (clean degrade), and an empty slice with `n_attraction` zero is byte-
     /// identical to the material builder before the attraction input existed, so an opted-out world is
@@ -931,11 +931,11 @@ impl ControllerLayout {
 
     /// Build the input vector including the CONVICTION block (Prereq B, `OWNER_DECISIONS_LOG.md` R2): the
     /// per-axis blocks and the feature, appetitive, material, and attraction blocks and bias exactly as
-    /// [`build_input_full`], plus each conviction channel's own stance written into the conviction block
-    /// ([`conviction_input_base`] onward, in the registry's canonical axis order). `conviction` is the being's
+    /// [`Self::build_input_full`], plus each conviction channel's own stance written into the conviction block
+    /// ([`Self::conviction_input_base`] onward, in the registry's canonical axis order). `conviction` is the being's
     /// own stance on each exposed conviction axis, read from its intrinsic beliefs by the runner; a shorter
     /// slice leaves the unfilled channels zero (clean degrade), and an empty slice with `n_conviction` zero is
-    /// byte-identical to [`build_input_full`] before the conviction block existed, so an opted-out world is
+    /// byte-identical to [`Self::build_input_full`] before the conviction block existed, so an opted-out world is
     /// unchanged. A pure read of the being's own physiology, earned knowledge, and convictions (Principles 9,
     /// 10); the controller, not this builder, decides whether a conviction moves behaviour (Principle 8).
     #[allow(clippy::too_many_arguments)]
@@ -967,12 +967,12 @@ impl ControllerLayout {
         )
     }
 
-    /// As [`build_input_full_with_conviction`], plus the being-FEATURE block (creature-selection step 2b): each
-    /// `(channel, bucket)` toward-direction written into the being-feature block ([`being_feature_input_base`]
+    /// As [`Self::build_input_full_with_conviction`], plus the being-FEATURE block (creature-selection step 2b): each
+    /// `(channel, bucket)` toward-direction written into the being-feature block ([`Self::being_feature_input_base`]
     /// onward, in the registry's channel-then-bucket order). `being_features` is the runner's per-perceiver
     /// discrimination of the perceived emitters' optical features into buckets, each bucket carrying the unit
     /// toward-direction over its emitters; a shorter slice leaves the unfilled slots zero (clean degrade), and
-    /// an empty slice with `n_being_feature` zero is byte-identical to [`build_input_full_with_conviction`]
+    /// an empty slice with `n_being_feature` zero is byte-identical to [`Self::build_input_full_with_conviction`]
     /// before the being-feature block existed, so an opted-out world is unchanged. A pure read; the controller,
     /// not this builder, decides how each feature-bucket direction moves behaviour (Principle 9).
     #[allow(clippy::too_many_arguments)]
@@ -1006,13 +1006,13 @@ impl ControllerLayout {
         )
     }
 
-    /// As [`build_input_full_with_conviction_and_being_features`], plus the RESOURCE-FEATURE block (the
+    /// As [`Self::build_input_full_with_conviction_and_being_features`], plus the RESOURCE-FEATURE block (the
     /// foraging arc): each `(channel, bucket)` toward-direction over the perceived CELLS whose identity-blind
-    /// content falls in that bucket, written into the resource-feature block ([`resource_feature_input_base`]
+    /// content falls in that bucket, written into the resource-feature block ([`Self::resource_feature_input_base`]
     /// onward). `resource_features` is the runner's per-perceiver discrimination of the sensed cells'
     /// [`crate::locomotion::ResourceField::cell_content`] into buckets; a shorter slice leaves the unfilled
     /// slots zero (clean degrade), and an empty slice with `n_resource_feature` zero is byte-identical to
-    /// [`build_input_full_with_conviction_and_being_features`] before the block existed, so an opted-out world
+    /// [`Self::build_input_full_with_conviction_and_being_features`] before the block existed, so an opted-out world
     /// is unchanged. A pure read; the controller, not this builder, decides how each content-bucket direction
     /// moves behaviour, so foraging and dispersal emerge from selection (Principle 8).
     #[allow(clippy::too_many_arguments)]

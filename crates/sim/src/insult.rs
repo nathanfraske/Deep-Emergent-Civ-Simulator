@@ -183,7 +183,7 @@ impl InsultRegistry {
     }
 
     /// Build a registry from data names, FAILING LOUD on an unknown name (naming the offender) rather
-    /// than silently dropping it, and leaking no partial registry. Delegates to [`from_kinds`] once
+    /// than silently dropping it, and leaking no partial registry. Delegates to [`Self::from_kinds`] once
     /// every name resolves, so the two paths produce byte-identical registries. `from_kinds` is
     /// [`InsultRegistry::from_kinds`].
     pub fn from_names(names: &[&str]) -> Result<InsultRegistry, String> {

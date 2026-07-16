@@ -1836,7 +1836,7 @@ fn cube_face_dir_f32(face: usize, s: f32, t: f32) -> [f32; 3] {
 
 /// The INVERSE cube-sphere map: the `(face, s, t)` of a BODY-frame direction `dir` (need not be unit), with `s, t` in
 /// `[0, 1)`. The face is the axis of largest magnitude (with sign); the face-local `(dx, dy, dz)` is read off by the
-/// exact inverse of [`cube_face_local_to_world_f32`]; and the equi-angular coordinates invert the warp,
+/// exact inverse of `cube_face_local_to_world_f32`; and the equi-angular coordinates invert the warp,
 /// `alpha = atan(dx / dz)`, `s = alpha / (pi/2) + 1/2`. A corner direction lands on a face by a deterministic first-
 /// max tie-break. Display-only f32 math (Principle 10).
 fn cube_dir_to_face_st(dir: [f32; 3]) -> (usize, f32, f32) {

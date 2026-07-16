@@ -41,7 +41,7 @@
 //!   behaviour. This registry is where the evaluator's reach is bounded.
 //! - [`eval`]: [`evaluate_node`], the memoised bottom-up fold. Evaluating with a warm cache equals
 //!   evaluating with none, to the bit ([`evaluate_uncached`]).
-//! - [`promote`]: the three-gate promotion predicate (viability, transmission stability, reuse
+//! - [`mod@promote`]: the three-gate promotion predicate (viability, transmission stability, reuse
 //!   compression), producing the per-culture promoted-primitive library.
 //!
 //! Every owner number the evaluator needs is reserved fail-loud, never fabricated: the viability

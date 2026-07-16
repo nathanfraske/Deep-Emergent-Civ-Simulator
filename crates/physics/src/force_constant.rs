@@ -1,7 +1,7 @@
 //! The Badger / Herschbach-Laurie force-constant column, the second phonon-generator input (with the electronic
 //! polarizability column). It turns a bond's equilibrium length into its STRETCHING force constant `k` by the
 //! generalized Badger rule, `k [mdyn/Angstrom] = 10^((a_ij - r_e[Angstrom]) / b_ij)`, with `(a_ij, b_ij)` the
-//! per-row-pair parameters cited [M] to Herschbach & Laurie UCRL-9694 (1961) Table III. A row is a periodic-table
+//! per-row-pair parameters cited `[M]` to Herschbach & Laurie UCRL-9694 (1961) Table III. A row is a periodic-table
 //! period (row 0 = hydrogen, row 1 = period 2, ... row 5 = period 6); transition metals bonded to hydrogen or a
 //! first-row atom take the separate `tm` parameters (partial multiple-bond character).
 //!

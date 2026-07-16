@@ -31,8 +31,8 @@
 //! The single clamp is correct against the merged contract (confirmed at source, PR #174): `reconcile_column`
 //! applies ADDITIONS in full and apportions only REMOVALS, so the destination side needs no clamp and the
 //! second seam (a destination rejecting arriving mass under an addition cap) does not exist here. A non-local
-//! move relocates mass WITHIN the [`MassReservoir::ColumnSolid`] fate (a spatial move, not a change of fate),
-//! so it needs no [`SurfaceMassBudget`] transfer: the per-cell delta sums to zero and the fate's global total
+//! move relocates mass WITHIN the [`crate::surface_transport::MassReservoir::ColumnSolid`] fate (a spatial move, not a change of fate),
+//! so it needs no [`crate::surface_transport::SurfaceMassBudget`] transfer: the per-cell delta sums to zero and the fate's global total
 //! is preserved, which is what keeps the budget conserved across the move.
 //!
 //! Byte-neutral: this binding is built and tested but armed by no scenario (no run-path caller), so the

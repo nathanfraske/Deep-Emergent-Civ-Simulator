@@ -956,7 +956,7 @@ impl DerivedScene {
 }
 
 /// The natural log of ten, for the `log_eps` (base-10) solar-abundance scale to natural-exponent conversion (the same
-/// constant [`derive_surface_composition`] uses).
+/// constant [`civsim_materials::surface_composition::derive_surface_composition`] uses).
 const LN_TEN: Fixed = Fixed::from_int(2_302_585).div(Fixed::from_int(1_000_000)); // 2.302585
 
 // THE EPOCH JOIN-LAW, the SEAM-3 fix, made concrete as reserved disk residues. The crust CONDENSES against the
@@ -974,7 +974,7 @@ const LN_TEN: Fixed = Fixed::from_int(2_302_585).div(Fixed::from_int(1_000_000))
 const FORMATION_ACCRETION_RATE_MSUN_MYR: Fixed = Fixed::from_int(19).div(Fixed::from_int(100)); // 0.19
 
 /// RESERVED, the MATURE mass-accretion rate (solar masses per megayear) that drives the finished planet's SURFACE
-/// warmth ([`disk_effective_temperature`]). Basis: the observed class-II disk value ~1e-8 M_sun/yr (0.01 M_sun/Myr),
+/// warmth ([`civsim_sim::astro::disk_effective_temperature`]). Basis: the observed class-II disk value ~1e-8 M_sun/yr (0.01 M_sun/Myr),
 /// the epoch the planet's surface equilibrates in; kept the Mirror fixture. The MATURE epoch, not the formation one.
 const MATURE_ACCRETION_RATE_MSUN_MYR: Fixed = Fixed::from_int(1).div(Fixed::from_int(100)); // 0.01
 
@@ -1208,10 +1208,10 @@ const IMPACT_PER_TICK_CAP: u32 = 64;
 /// cancels: the homogenization time is overturn-counted from the convective velocity, the melt-cycling time is the
 /// same velocity times the supra-solidus column fraction times F, so the velocity divides out to leading order and
 /// leaves melt-zone geometry and F, both of which the world computes at its SI operating point. Until that wiring
-/// lands the O(0.1) default is an [E]-band placeholder, reserved for calibration, never fabricated and never
+/// lands the O(0.1) default is an `[E]`-band placeholder, reserved for calibration, never fabricated and never
 /// universal. The seed PATTERN (which province is enriched) stays the deterministic world hash (Principle 8). VALIDITY
 /// DOMAIN (the audit-of-the-audit refinement): O(0.1) is an EARTH-INSTANCE evaluation of the universal form, admissible
-/// as an [E] prior only within a declared band; a tidally pumped Io-class mantle or a sluggish stagnant-lid world
+/// as an `[E]` prior only within a declared band; a tidally pumped Io-class mantle or a sluggish stagnant-lid world
 /// leaves the band, and outside it the default must ESCALATE to the derive-down, never stretch. PROPAGATION: the
 /// residual sits in a prefactor (the exponent rider holds locally), but its band flows through the radiogenic budget
 /// into temperature and thence into the viscosity exponential over Gyr, so it can flip lid-regime and dynamo verdicts
@@ -1227,7 +1227,7 @@ const RADIOGENIC_MIXING_EFFICIENCY: Fixed = Fixed::from_int(1).div(Fixed::from_i
 /// partition into metal or sulfide (Wohlers-Wood 2015), D above 1, and the melt is DEPLETED, the contrast sign
 /// flipping. The full form admits both; the former inline `1/F` wired the Terran sign in as mechanism (a Principle 4
 /// and 7 defect). LADDER (the audit-of-the-audit refinement): the derive-down is a 3a-style ESTIMATOR entry, measured
-/// rungs first. The [M] anchors are experimental partition data (the Wohlers-Wood reduced-sulfide points among them);
+/// rungs first. The `[M]` anchors are experimental partition data (the Wohlers-Wood reduced-sulfide points among them);
 /// the lattice-strain interpolation across un-measured element-phase pairs is the estimator, running on the banked
 /// Shannon radii and charges against aristotype site parameters, banded at factor level (the Trouton or Miedema
 /// pattern); the fO2-and-sulfur regime switch keys on the world's own computed state. The batch equation is algebraic,
@@ -1275,7 +1275,7 @@ const ACCRETION_GEOMETRY_FACTOR: Fixed = Fixed::from_int(3).div(Fixed::from_int(
 /// RESERVED-with-basis, the cold-accretion energy-RETENTION efficiency band (dimensionless, a PREFACTOR entry,
 /// legal because it is prefactor-resident and never exponent-resident). Basis: the fraction of accretional/impact
 /// energy retained as heat rather than radiated between deposits, from the cold-accretion retention literature
-/// (the fetch doc lacks the exact number, so it is reserved, never fabricated). The BAND is the [E] entry the
+/// (the fetch doc lacks the exact number, so it is reserved, never fabricated). The BAND is the `[E]` entry the
 /// self-test sweeps: a verdict that flips across it is MARGINAL, not GAPPED. Placeholder edges pending the fetch.
 const RETENTION_EFFICIENCY_LO: Fixed = Fixed::from_int(1).div(Fixed::from_int(100)); // 0.01, [E]-band placeholder
 const RETENTION_EFFICIENCY_HI: Fixed = Fixed::from_int(4).div(Fixed::from_int(10)); // 0.40, [E]-band placeholder
@@ -1478,7 +1478,7 @@ fn snap_to_condensation_grid(t: Fixed) -> Fixed {
 }
 
 /// The solar-abundance linear amount for an element, `n_X/n_H = 10^(log_eps(X) - 12)`, or `None` if the element carries
-/// no cited abundance (the same conversion [`derive_surface_composition`] uses).
+/// no cited abundance (the same conversion [`civsim_materials::surface_composition::derive_surface_composition`] uses).
 fn abundance_amount(abundances: &SolarAbundances, element: &str) -> Option<Fixed> {
     let log_eps = abundances.preferred(element)?;
     let exponent = log_eps
@@ -1533,7 +1533,7 @@ fn derive_formation_condensation_temperature(
 
 /// The DERIVED isolation (feeding-zone) mass at the orbit, in Earth masses, or `None` if the integral fails. It sweeps
 /// the accretion feeding zone (a few Hill radii around the orbit) over the SOLID column and folds to Earth masses
-/// ([`feeding_zone_mass`] then [`feeding_zone_mass_earth`]). The honest output is Mars-class (~0.08 to 0.11 M_earth): a
+/// ([`civsim_sim::astro::feeding_zone_mass`] then [`civsim_sim::astro::feeding_zone_mass_earth`]). The honest output is Mars-class (~0.08 to 0.11 M_earth): a
 /// pure accretion isolation mass, the Earth-size deferred to the Layer-4 event tier (the giant-impact merger), never
 /// authored here.
 ///
@@ -2425,12 +2425,12 @@ fn derive_mean_atomic_mass_kg_per_mol(
 /// Build the DERIVED scene from a star mass and an orbit, or an error naming the link that did not resolve (fail-soft:
 /// the viewer prints the message and shows no planet, never a fabricated one). The chain is the built pipeline, each
 /// link a derivation: the star and disk ([`civsim_sim::planet::derive_planet`]), the condensed-and-differentiated
-/// crust at a labelled formation-era condensation temperature ([`derive_surface_composition`], the two-temperature seam
+/// crust at a labelled formation-era condensation temperature ([`civsim_materials::surface_composition::derive_surface_composition`], the two-temperature seam
 /// documented at its site), the mantle density from the derived mantle
 /// composition ([`derive_mantle_density`]), the isostatic tiles ([`generate_derived_tiles`]) off a uniform crust field
 /// (uniform is the honest state for a fresh planet; lateral variation is a named geodynamics follow-on), the crust's
 /// optical colour under the star ([`render::material_surface_rgb`]), and the atmospheric speciation
-/// ([`atmosphere_gas_equilibrium`]) with its Rayleigh sky ([`render::rayleigh_sky_rgb`]).
+/// ([`civsim_materials::atmosphere::atmosphere_gas_equilibrium`]) with its Rayleigh sky ([`render::rayleigh_sky_rgb`]).
 fn build_derived_scene(star_mass: Fixed, orbit_au: Fixed) -> Result<DerivedScene, String> {
     // THE MIRROR (pinned solar) path, the default derived-planet view. The composition routes through the draw CHAIN at
     // the SOLAR PIN ([Fe/H] = 0, the local-disk environment's pin), so the Mirror is the chain evaluated at its pinned
@@ -2468,15 +2468,15 @@ fn build_derived_scene_seeded(
     build_derived_scene_with_composition(star_mass, orbit_au, &disk_composition)
 }
 
-/// Build the DERIVED scene from a star mass, an orbit, and a per-world [`DiskComposition`] datum, or an error naming the
+/// Build the DERIVED scene from a star mass, an orbit, and a per-world [`civsim_materials::disk_composition::DiskComposition`] datum, or an error naming the
 /// link that did not resolve (fail-soft: the viewer prints the message and shows no planet, never a fabricated one).
 /// The chain is the built pipeline, each link a derivation: the star and disk ([`civsim_sim::planet::derive_planet`]),
 /// the condensed-and-differentiated crust at a labelled formation-era condensation temperature
-/// ([`derive_surface_composition`], the two-temperature seam documented at its site), the mantle density from the
+/// ([`civsim_materials::surface_composition::derive_surface_composition`], the two-temperature seam documented at its site), the mantle density from the
 /// derived mantle composition ([`derive_mantle_density`]), the isostatic tiles ([`generate_derived_tiles`]) off a
 /// uniform crust field (uniform is the honest state for a fresh planet; lateral variation is a named geodynamics
 /// follow-on), the crust's optical colour under the star ([`render::material_surface_rgb`]), and the atmospheric
-/// speciation ([`atmosphere_gas_equilibrium`]) with its Rayleigh sky ([`render::rayleigh_sky_rgb`]).
+/// speciation ([`civsim_materials::atmosphere::atmosphere_gas_equilibrium`]) with its Rayleigh sky ([`render::rayleigh_sky_rgb`]).
 ///
 /// COMPOSITION comes from the SINGLE per-world datum passed in. The condensation (the crust chemistry), the uncompressed
 /// bulk density (the differentiation), the accretion isolation mass (the solid-dust column), and the star model (its

@@ -135,7 +135,7 @@ pub fn byerlee_branch_point_mpa() -> Fixed {
 /// reference that prints the intercept in MPa. The half-kilobar intercept is 50 MPa, and the row does not have
 /// to take that on faith: THE TWO BRANCHES ARE CONTINUOUS AT THE BRANCH POINT ONLY IF THE INTERCEPT IS 50 MPa,
 /// since `0.85 * 200 = 170 = 50 + 0.6 * 200`. That identity is this module's self-test
-/// ([`tests::the_branches_are_continuous_which_is_the_rows_own_unit_proof`]): a mis-converted intercept breaks
+/// (`tests::the_branches_are_continuous_which_is_the_rows_own_unit_proof`): a mis-converted intercept breaks
 /// continuity by a factor of 100 and the test fires. The row carries its own arithmetic referee, so the unit
 /// cannot silently rot.
 pub fn byerlee_cohesion_mpa() -> Fixed {

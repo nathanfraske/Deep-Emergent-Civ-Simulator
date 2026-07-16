@@ -76,7 +76,7 @@ pub struct EpochParams {
     /// from its parent (design 25.7, the declared speciation rule): a daughter species is recorded
     /// only where the fork's allele frequencies have diverged by at least this, so speciation tracks
     /// real genetic divergence rather than firing on every cadence. RESERVED
-    /// (`speciation.distance_threshold`), fed to [`GenePool::reproductively_isolated`].
+    /// (`speciation.distance_threshold`), fed to [`crate::genome::GenePool::reproductively_isolated`].
     pub speciation_dist_threshold: Fixed,
     /// The count of active Dobzhansky-Muller incompatibilities at which two pools are reproductively
     /// isolated regardless of distance (the discrete genetic firewall a complementary allele pair

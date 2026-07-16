@@ -43,15 +43,15 @@
 //! interim band lets it fall to the sub-solidus branch, so keying the tag on any single axis over-claims. The
 //! verdict therefore band-sweeps every input carried as an interim/reserved band (retention, formation time, the
 //! SLR draw, mass) and demotes GAPPED to MARGINAL on any flip ([`young_thermal_verdict`], the self-test
-//! [`retention_band_cannot_flip_a_gapped_verdict`]). A world that melts at its best point estimate but flips
+//! `retention_band_cannot_flip_a_gapped_verdict`). A world that melts at its best point estimate but flips
 //! across the interim band is carried MARGINAL at that best estimate (never asserted GAPPED, and not forced to the
 //! cold branch either), pending the per-world impact list that collapses the bands to the world's own draw.
 //!
 //! THE PROVENANCE-DAG-WALK FOLLOW-ON. The general containment rule is that no input carried as a band (interim /
-//! [E] prefactor / [C] closure) may flip a GAPPED verdict. This module hard-codes the four banded axes that reach
+//! `[E]` prefactor / `[C]` closure) may flip a GAPPED verdict. This module hard-codes the four banded axes that reach
 //! the melt budget today (retention, formation time, the SLR draw, mass). The standing-machinery form is a
-//! GAPPED-tag writer that WALKS the verdict's provenance DAG and band-sweeps every ancestor tagged interim / [E] /
-//! [C] automatically, so a new banded input cannot silently sneak past the containment rule without a panel. That
+//! GAPPED-tag writer that WALKS the verdict's provenance DAG and band-sweeps every ancestor tagged interim / `[E]` /
+//! `[C]` automatically, so a new banded input cannot silently sneak past the containment rule without a panel. That
 //! generalization is the flagged follow-on; this pass sweeps the four named axes explicitly.
 //!
 //! ALIEN-ADMISSIBLE BY DATA. The heat source is a birth-environment SLR-family DRAW (the isotope inventory, the
@@ -208,7 +208,7 @@ pub fn magma_ocean_lifetime_for_blanket(dominant_volatile: &str) -> MagmaOceanLi
 
 /// The magma-ocean handoff potential temperature: the world's own derived solidus plus the superheat at which
 /// the adiabatic decompression melt column reaches the rheological lock-up fraction phi_c. This INVERTS the
-/// banked [`adiabatic_melt_column`]: that column's peak melt fraction is
+/// banked [`crate::melting::adiabatic_melt_column`]: that column's peak melt fraction is
 /// `F = (dF/dP) * (T_p - T_sol0) / (m_sol - m_ad)`, so pinning `F = phi_c` gives
 /// `T_p = T_sol0 + phi_c * (m_sol - m_ad) / (dF/dP)`. Feeding this temperature back into the same column
 /// reproduces `F = phi_c` by construction, so a melted world forms exactly at its own lock-up boundary: the

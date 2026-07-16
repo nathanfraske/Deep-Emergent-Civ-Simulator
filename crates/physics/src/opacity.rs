@@ -678,7 +678,7 @@ pub fn h_minus_bound_free_reduced_cross_section(lambda_um: Fixed) -> Option<Fixe
 /// with `lambda = (h c/k)/(x T)` the wavelength at `x`. Everything derivable DERIVES: the Saha prefactor is the John
 /// 1988 `0.750` reassembled from the fundamentals as the more precise `0.74989`, the binding `chi` reads the
 /// periodic-table H electron affinity (`0.754 eV`), and `h c/k` is the wavelength fold. The one fetched piece is
-/// `sigma_bf` ([`h_minus_bound_free_reduced_cross_section`], the cited [M] tier). The electron pressure `P_e`
+/// `sigma_bf` ([`h_minus_bound_free_reduced_cross_section`], the cited `[M]` tier). The electron pressure `P_e`
 /// (dyn/cm^2) is the caller's plasma variable rather than the electron density `n_e`, because `P_e = n_e k T` stays
 /// in the representable range (`~1` to `1e5`) where `n_e ~ 1e13` overflows `Fixed`; this is exactly why the stellar-
 /// atmosphere form is per-`P_e`.
@@ -955,7 +955,7 @@ fn h_minus_ff_sum(
 /// and the electron pressure, which is exactly why the stellar-atmosphere form is written per neutral H per `P_e`
 /// rather than over an explicit H- density.
 ///
-/// The only fetched piece is the fit's coefficients (the cited [M] tier); the `5040/T` temperature scaling, the
+/// The only fetched piece is the fit's coefficients (the cited `[M]` tier); the `5040/T` temperature scaling, the
 /// `hc/k` wavelength fold, and the `m_H` from the periodic table all derive. The polynomial sum runs in exact
 /// `BigRat` (its large-coefficient cancellation loses no precision), with a single `Fixed::sqrt` for the
 /// `sqrt(5040/T)` root that serves the fit's half-integer temperature powers. Every per-world quantity is a caller
@@ -1068,7 +1068,7 @@ pub fn h_minus_opacity(
 /// expression `Im[(m^2-1)/(m^2+2)] = 6nk/((n^2-k^2+2)^2 + 4n^2k^2)`, so no complex arithmetic is needed here (it
 /// enters only at the full Mie kernel, the later sub-slice).
 ///
-/// The optical constants `n(lambda),k(lambda)` are the cited [M] library ([`OpticalSpecies`]), composition-keyed
+/// The optical constants `n(lambda),k(lambda)` are the cited `[M]` library ([`OpticalSpecies`]), composition-keyed
 /// (a carbon-rich or metal-poor grain is a different species membership, admit-the-alien); the bulk density
 /// `rho_grain` is a caller argument, DERIVED upstream from the grain's composition via the materials density kernel,
 /// never authored here (Pollack's per-species densities are the validation target, not a floor value). A metal

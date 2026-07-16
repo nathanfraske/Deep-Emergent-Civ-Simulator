@@ -46,7 +46,7 @@ const AXIS_HARDNESS: &str = "mat.indentation_hardness";
 /// (`AXIS_HARDNESS`) a plastic-indentation cut gates on.
 const AXIS_FRACTURE: &str = "mat.fracture_strength";
 
-/// The substance a single cell is made of: a mixture keyed by physics [`Substance`] id, each carrying
+/// The substance a single cell is made of: a mixture keyed by physics [`civsim_physics::Substance`] id, each carrying
 /// the VOLUME of that substance present in the cell (a fantasy or real substance alike, whatever the
 /// registry declares). A substance the cell bears none of is simply absent (reads as zero, the
 /// substrate absence convention shared with [`crate::edibility::Composition`] and
@@ -216,7 +216,7 @@ impl SubstanceMix {
     /// The cell's FRACTURE-GATING hardness: the GREATEST [`AXIS_FRACTURE`] among its constituents (the
     /// hardest load-bearing phase), read from the registry (material-substrate arc, cascade item 4). This
     /// is the resistance the extraction contest must clear to break any matter loose, and it is NOT the
-    /// volume-weighted mean [`bulk_hardness`] uses: hardness does not average linearly, and a composite
+    /// volume-weighted mean [`Self::bulk_hardness`] uses: hardness does not average linearly, and a composite
     /// breaks at its strongest bond, so ore embedded in granite breaks at the granite, not at a blend of
     /// the two. A single-substance cell reads that substance's own fracture strength; a cell of a substance
     /// carrying no fracture datum reads zero (the absence convention: matter with no declared fracture
@@ -712,7 +712,7 @@ impl MaterialField {
     /// The FRACTURE-GATING hardness of a cell's matter, derived from the registry: the greatest fracture
     /// strength among its constituents, the resistance an extraction contest must clear to break matter
     /// loose (material-substrate arc, cascade item 4). This is the hardest load-bearing phase, not the
-    /// bulk mean [`bulk_hardness`] takes, so ore in rock breaks at the rock (see
+    /// bulk mean [`Self::bulk_hardness`] takes, so ore in rock breaks at the rock (see
     /// [`SubstanceMix::fracture_hardness`]). An empty cell reads zero (no matter to break).
     pub fn fracture_hardness(&self, coord: Coord3, reg: &PhysicsRegistry) -> Fixed {
         self.matter

@@ -1,6 +1,6 @@
 //! The Pyykkö covalent-radius column (`crates/physics/data/covalent_radii_pyykko.toml`), the covalent bond-length
 //! substrate the Badger force-constant column sums: a bond's equilibrium length is the sum of the two atoms'
-//! covalent radii at the bond order, `r_e = r_a + r_b`. Cited [M] (Pyykkö 2015, J. Phys. Chem. A 119, 2326, over
+//! covalent radii at the bond order, `r_e = r_a + r_b`. Cited `[M]` (Pyykkö 2015, J. Phys. Chem. A 119, 2326, over
 //! the Pyykkö & Atsumi 2009 and Pyykkö-Riedel-Patzschke 2005 primaries), the single-bond fit good to a
 //! mean-square deviation under 3 pm.
 //!
@@ -59,7 +59,7 @@ impl CovalentRadius {
 
 /// The provenance GRADE of a covalent radius, the mixed-grade citation this cited column carries. Pyykko's
 /// light-element radii are FITS to measured bond distances (`MeasuredFit`); the heavy, actinide-and-beyond radii are
-/// RELATIVISTIC COMPUTED estimates (`RelativisticComputed`, a compute-once cited grade, not measured [M]). The two
+/// RELATIVISTIC COMPUTED estimates (`RelativisticComputed`, a compute-once cited grade, not measured `[M]`). The two
 /// share one citation file, so a grade-sensitive consumer must not read the computed region as if it were measured.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RadiusGrade {

@@ -1,4 +1,4 @@
-//! The composition-selecting ÆSOPUS opacity-grid registry: given a disk composition (X, Z, C/O), select the [M]
+//! The composition-selecting ÆSOPUS opacity-grid registry: given a disk composition (X, Z, C/O), select the `[M]`
 //! low-temperature opacity grid to read, as a [`Verdict`] (the Gap Law typestate), with the no-cross-C/O=1 rule
 //! encoded in the TYPE rather than a comment.
 //!

@@ -13,7 +13,7 @@
 // limitations under the License.
 
 //! The surface isostatic-relaxation consumer (genesis-forward Stage 3, the surface lane). This reads the
-//! per-column [`GeodynamicColumn::isostatic_elevation`] the producer derives (the interior convection lane, or
+//! per-column [`crate::material::GeodynamicColumn::isostatic_elevation`] the producer derives (the interior convection lane, or
 //! the surface seed-crust pass, both through the Airy flotation law in
 //! [`civsim_physics::geodynamics::airy_isostatic_elevation`]) and relaxes the EFFECTIVE elevation toward it by
 //! writing the geological delta into the [`EarthworkField`]. It is the consumer end of the producer-consumer

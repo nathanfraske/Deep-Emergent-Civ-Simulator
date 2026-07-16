@@ -269,7 +269,7 @@ fn viscous_dissipation_flux(
 
 /// The VISCOUS-DISK EFFECTIVE TEMPERATURE `T_visc(r)` (K) at an orbital distance, DERIVED from the accretional
 /// heating: each face of the disk radiates `sigma*T_visc^4 = D(r)`, so `T_visc = (D(r)/sigma)^(1/4)`, the same
-/// Stefan-Boltzmann inversion the irradiated regime uses ([`radiative_equilibrium`], the proven two-sqrt fourth
+/// Stefan-Boltzmann inversion the irradiated regime uses ([`civsim_physics::laws::radiative_equilibrium`], the proven two-sqrt fourth
 /// root). `D(r)` is the viscous dissipation ([`viscous_dissipation_flux`]), `sigma` the CODATA-derived
 /// Stefan-Boltzmann constant. This is the VISCOUS-INNER term of the two-regime disk-thermal profile: it falls
 /// with distance as `D^(1/4) ~ r^(-3/4)`, steeper than the irradiated `r^(-1/2)`, so it dominates the inner disk
@@ -302,7 +302,7 @@ pub fn viscous_disk_temperature(
 /// The DISK EFFECTIVE TEMPERATURE `T_eff(r)` (K) of the completed two-regime profile, combining the viscous-inner
 /// and irradiated-outer heat sources. The two sources add in FLUX (`sigma*T_eff^4 = sigma*T_visc^4 + sigma*T_irr^4`),
 /// so the combination is done at the flux level (the viscous dissipation `D(r)` plus the absorbed irradiation
-/// `reprocessing_factor*F(r)`) and inverted once through [`radiative_equilibrium`], which also sidesteps the
+/// `reprocessing_factor*F(r)`) and inverted once through [`civsim_physics::laws::radiative_equilibrium`], which also sidesteps the
 /// unrepresentable `T^4` (`T_irr^4 ~ 6e9` overflows Q32.32 while the fluxes ~340 and ~3 W/m^2 do not). Viscous
 /// dominates the inner disk (steep `r^(-3/4)`), irradiation the outer (`r^(-1/2)`), and the profile transitions
 /// between them at the radius where the two fluxes cross, an EMERGENT boundary (no authored transition, Principle 8).

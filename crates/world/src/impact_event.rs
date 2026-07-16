@@ -48,7 +48,7 @@
 //! delta field (no change), never a fabricated crater or a silent loss of mass.
 //!
 //! What this slice does not yet model: the transient bowl's collapse. The crater law's escaping-ejecta fraction
-//! ([`Crater::ejecta_mass_ratio`], the part that clears the rim as opposed to the breccia that slumps back)
+//! ([`crate::crater::Crater::ejecta_mass_ratio`], the part that clears the rim as opposed to the breccia that slumps back)
 //! would split the blanket outside the rim from the fallback inside it in a later crater-collapse slice; here
 //! the whole excavated bowl is redeposited so the field conserves exactly. This composer is dormant until the
 //! deep-time run loop draws impacts into it (a later wiring slice), so it does not move the run-loop byte pins.

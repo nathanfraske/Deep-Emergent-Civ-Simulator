@@ -17,7 +17,7 @@
 //!
 //! A Mott insulator (NiO/CoO/FeO/MnO, the correlation guard's Localized class) is ionically bonded, so its lattice
 //! energy would in principle route to the D1 Born-Lande ionic estimator. But D1 cannot score a TM oxide: the Born
-//! exponent keys on the ion's isoelectronic noble-gas core, and a 3d cation (Ni2+ = [Ar]3d8, 26 electrons) is not
+//! exponent keys on the ion's isoelectronic noble-gas core, and a 3d cation (Ni2+ = `[Ar]3d8`, 26 electrons) is not
 //! isoelectronic with any noble gas, so it falls through, and the d-electron Born exponent is not cleanly
 //! derivable (compressibility-fitting is circular; the Ar-core value is wrong for a 3d-mediated repulsion). So the
 //! honest fill is the MEASURED Born-Haber lattice energy, the TOP rung of the provenance ladder (measured row,

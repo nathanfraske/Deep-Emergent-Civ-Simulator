@@ -19,7 +19,7 @@
 //! Gibbs-minimization over the JANAF standard potentials (see `janaf.rs`) must reproduce, so this column is a
 //! calibration target rather than a run input.
 //!
-//! Cited [M], transcribed from the primary reprint PDF (the Pyykkö-figure protocol: transcribe the table and
+//! Cited `[M]`, transcribed from the primary reprint PDF (the Pyykkö-figure protocol: transcribe the table and
 //! fingerprint-check spot rows). The parse routes every temperature through the exact `BigRat` conduit to `Fixed`
 //! (no floating point reaches canonical state). BLOCK KIND `[[condensation]]`, the cited-data-column idiom, NOT the
 //! reserved floor `[[element]]` kind: an immutable transcription out of the floor's real/fantasy authorship axis.

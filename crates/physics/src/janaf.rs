@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The NIST-JANAF thermochemical tables (`crates/physics/data/janaf/`), the mu-standard total [M] top rung the
+//! The NIST-JANAF thermochemical tables (`crates/physics/data/janaf/`), the mu-standard total `[M]` top rung the
 //! disk-condensation arc consumes: per species the temperature-tabulated standard chemical potential. Each species'
 //! table is fetched verbatim from `janaf.nist.gov/tables/<code>.txt` (the artifact-native machine-readable form) and
 //! header-cited to Chase 1998 (NIST-JANAF 4th ed., J. Phys. Chem. Ref. Data Monograph 9). The tabulated columns
@@ -23,7 +23,7 @@
 //! function when it needs it.
 //!
 //! This is a two-electron-quantum-hard measured quantity (a critically evaluated thermochemical compilation, not
-//! derivable at the floor level), so it enters as cited [M] data, the tier the optical constants and the H- cross
+//! derivable at the floor level), so it enters as cited `[M]` data, the tier the optical constants and the H- cross
 //! section set the precedent for. The condensation sequence's whole thesis over an authored ladder is that a
 //! carbon-rich or metal-poor disk is a different MEMBERSHIP over this same species library (which condensate wins is
 //! a Gibbs-minimization over the loaded potentials), never a rewrite, and a species with no measured table is

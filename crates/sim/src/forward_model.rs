@@ -24,7 +24,7 @@
 //! holds a committed REWARDS belief about a sequence PREDICTS that enacting it pays off (a supra-recovery
 //! reserve rise); one with no such belief predicts nothing beyond recovery. There is no new learned
 //! magnitude and no new engine: the prediction reads [`crate::agent::Mind::belief`] on the exact
-//! [`sequence_subject`] the piece-1 credit pass commits and the piece-2 sampler weights, and the felt side
+//! [`crate::learn::sequence_subject`] the piece-1 credit pass commits and the piece-2 sampler weights, and the felt side
 //! reduces the being's own reserve delta through the shipped [`is_reward_tick`] predicate, so the two sit on
 //! one normalised reward scale and their difference is the signed surprise.
 //!
@@ -50,7 +50,7 @@ use crate::homeostasis::is_reward_tick;
 use crate::learn::{step_belief_subject, SequenceStep, REWARDS, REWARD_ATTR};
 
 /// The forward model's predicted interoceptive outcome for a candidate action step, in `[0, 1]`: `Fixed::ONE`
-/// when the being holds a committed REWARDS belief about the step's [`sequence_subject`] (it PREDICTS the
+/// when the being holds a committed REWARDS belief about the step's [`crate::learn::sequence_subject`] (it PREDICTS the
 /// action pays off, a supra-recovery reserve rise), `Fixed::ZERO` otherwise (it predicts nothing beyond
 /// recovery). This is [`crate::learn::appetitive_salience`]'s committed-belief test generalised from a
 /// single-primitive subject to a full [`SequenceStep`] subject (primitive, target channel, and param

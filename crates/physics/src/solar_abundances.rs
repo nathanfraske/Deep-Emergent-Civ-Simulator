@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The AGSS09 solar abundance pattern (`crates/physics/data/solar_abundances_agss09.toml`), the [M]-tier SOLAR
+//! The AGSS09 solar abundance pattern (`crates/physics/data/solar_abundances_agss09.toml`), the `[M]`-tier SOLAR
 //! CROSS-CHECKER: the Sun's measured elemental composition, the reference the solar (Mirror) case is VALIDATED
 //! against. It is NOT the disk-composition input for every world. Per element the present-day solar photospheric and
 //! CI-chondrite (meteoritic) abundance on the `log-epsilon(H) = 12` scale (Asplund, Grevesse, Sauval & Scott 2009,
@@ -26,7 +26,7 @@
 //! disk composition for all worlds is the SOLAR-BIAS DEFECT to retire (the composition-as-per-world-input arc): the
 //! reference validates, it is not the input. The viewer's derived-planet path is the current such consumer, flagged.
 //!
-//! Cited [M], transcribed from the primary arXiv reprint PDF (the Lodders-figure protocol: transcribe the table and
+//! Cited `[M]`, transcribed from the primary arXiv reprint PDF (the Lodders-figure protocol: transcribe the table and
 //! fingerprint-check spot rows). The parse routes every abundance through the exact `BigRat` conduit to `Fixed` (no
 //! floating point reaches canonical state). BLOCK KIND `[[abundance]]`, the cited-data-column idiom, NOT the reserved
 //! floor `[[element]]` kind: an immutable transcription out of the floor's real/fantasy authorship axis. The

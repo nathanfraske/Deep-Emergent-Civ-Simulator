@@ -4,12 +4,12 @@
 //! the sky (atomic masses, the Pyykko bond lengths, the Badger force constants) ARE the gas thermochemistry, and
 //! `R = N_A k_B` and the second radiation constant `c_2 = h c / k_B` derive from the register, nothing fetched.
 //!
-//! THE mu-STANDARD SOURCE LADDER (owner ruling, the ÆSOPUS architecture rerun verbatim): JANAF [M] is the mu°(T)
+//! THE mu-STANDARD SOURCE LADDER (owner ruling, the ÆSOPUS architecture rerun verbatim): JANAF `[M]` is the mu°(T)
 //! TOTAL top rung, not merely a reference-energy anchor, because the JANAF Gibbs-energy functions were themselves
 //! computed from spectroscopic constants, so for any species with a row the whole temperature-dependent mu° is
 //! measured. This RRHO estimator is then exactly what the es/ff/H- closure turned out to be for opacity: the
 //! CERTIFIER of the table where derivation reaches, and the ALIEN RUNG where no JANAF row exists. Ladder:
-//! JANAF [M] total -> RRHO estimator -> compute-once. The load-bearing polyatomics (H2O, CO2, SO2, the silicate
+//! JANAF `[M]` total -> RRHO estimator -> compute-once. The load-bearing polyatomics (H2O, CO2, SO2, the silicate
 //! vapors) carry JANAF rows, so the full inertia-tensor-plus-Hessian substrate is the POLYATOMIC alien rung, a
 //! named follow-on (VSEPR angles, the force-constant column for stretches, the phonon bend-ratio class constant for
 //! bends, a valence-force-field assembly at factor grade, compute-once behind it), NOT on #57's critical path.
@@ -25,7 +25,7 @@
 //! ELECTRONIC degeneracy (owner ruling, split derive-first): a molecular ground term is `g_0` from Huber-Herzberg
 //! (CO 1-Sigma+ -> 1, O2 3-Sigma- -> 3), the caller's datum here. An ATOMIC gas species with low-lying fine
 //! structure (carbon 3-P, iron 5-D, spaced at few-hundred-kelvin) needs the ground MULTIPLET with Boltzmann weights,
-//! not a bare `g_0`, at condensation temperatures; those level energies are a small NIST ASD [M] column, the atomic
+//! not a bare `g_0`, at condensation temperatures; those level energies are a small NIST ASD `[M]` column, the atomic
 //! electronic follow-on. This module takes `g_0` as a caller argument so both cases are expressible.
 
 use crate::saha::{ln_fundamental, ln_of_decimal};

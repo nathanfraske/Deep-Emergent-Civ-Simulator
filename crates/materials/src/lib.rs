@@ -30,7 +30,7 @@
 //!   [`verdict::SeededDraw`] (a content-hash-keyed draw into a named contingency slot). Neither carries a
 //!   winner, so the resolution-ladder rule is a state that cannot be constructed.
 //! - [`contract`]: the [`contract::Proposer`] and [`contract::Disposer`] traits (pure functions of
-//!   `(x, E, seed)`), [`contract::preflight`]-shaped [`contract::Preflight`]/[`contract::Validity`]
+//!   `(x, E, seed)`), [`contract::Preflight::preflight`]-shaped [`contract::Preflight`]/[`contract::Validity`]
 //!   (representation theorems run before propose), and [`contract::Quench`]/[`contract::RealizedState`] (the
 //!   freezer as a fold over the trajectory in the time-marching layer, never inlined into the pure oracle).
 //! - [`memo`]: the kernel-provided canonically-iterated [`memo::Memo`] (R-CANON-WALK: key-ordered iteration,

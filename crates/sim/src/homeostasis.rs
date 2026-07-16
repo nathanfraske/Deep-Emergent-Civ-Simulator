@@ -734,10 +734,10 @@ impl AffordanceRegistry {
     }
 
     /// A DEVELOPMENT FIXTURE for a world that carries BOTH mineral-eaters and a striking predator: move,
-    /// ingest, geophage (the unconditional consume-the-matter-underfoot of [`dev_geophage`]), and strike
-    /// (gated on the PIERCE capability of [`dev_predator`]). Composed because the two live capabilities of the
-    /// predation-integration world are disjoint in the existing fixtures: [`dev_geophage`] carries no STRIKE
-    /// and [`dev_predator`] carries no GEOPHAGE, yet the world needs the grazer/scavenger GEOPHAGE (for every
+    /// ingest, geophage (the unconditional consume-the-matter-underfoot of [`Self::dev_geophage`]), and strike
+    /// (gated on the PIERCE capability of [`Self::dev_predator`]). Composed because the two live capabilities of the
+    /// predation-integration world are disjoint in the existing fixtures: [`Self::dev_geophage`] carries no STRIKE
+    /// and [`Self::dev_predator`] carries no GEOPHAGE, yet the world needs the grazer/scavenger GEOPHAGE (for every
     /// prey and for a predator sustaining on a corpse) AND STRIKE (for a PIERCE-bearing predator). The
     /// affordance set is shared across one embodiment, so a body that reads no PIERCE still cannot strike
     /// (the capability gate, not a role tag), and a body that never decides GEOPHAGE never eats: membership is

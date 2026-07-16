@@ -273,7 +273,7 @@ pub fn gpu_field_step(
 
 /// Cross-tick resident context for the field stencil: the split form of [`gpu_field_step`] with
 /// `iters = 1` per dispatch. The baseline is uploaded once and held resident; [`dispatch`](Self::dispatch)
-/// uploads one temperature snapshot, launches [`field_step_kernel`] once, and returns WITHOUT reading
+/// uploads one temperature snapshot, launches `field_step_kernel` once, and returns WITHOUT reading
 /// back; [`readback`](Self::readback) is the single CUDA-event-fenced sync point. This is what licenses
 /// the cross-tick software pipeline (design `docs/working/GPU_BLUEPRINT.md`): tick N dispatches the frozen
 /// post-combustion field, tick N's remaining CPU tail runs concurrently with the GPU stencil, and tick

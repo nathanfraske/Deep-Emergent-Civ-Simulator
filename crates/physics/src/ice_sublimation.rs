@@ -19,7 +19,7 @@
 //! is where this saturation pressure meets the solar water partial pressure, so this column is the ground truth a
 //! Gibbs-minimization water condensate must reproduce, a calibration target rather than a run input.
 //!
-//! Cited [M]. The load-bearing datum is the Murphy-Koop equation itself (natural log, T in K, p in Pa, valid above
+//! Cited `[M]`. The load-bearing datum is the Murphy-Koop equation itself (natural log, T in K, p in Pa, valid above
 //! 110 K): `ln p_ice = 9.550426 - 5723.265/T + 3.53068*ln(T) - 0.00728332*T` (Murphy & Koop 2005, Q. J. R. Meteorol.
 //! Soc. 131, 1539, their ice eq. 7). The second witness is the IAPWS ice-Ih Gibbs function (Feistel & Wagner 2006,
 //! J. Phys. Chem. Ref. Data 35, 1021, release R10-06), from which the sublimation pressure derives and which agrees
@@ -31,8 +31,8 @@
 //! HONEST LIMITS: the points are a 3-significant-figure rounding of the equation; the smallest (below ~1e-6 Pa)
 //! carry reduced Q32.32 precision (the ~1.2e-8 Pa point at 130 K stores to ~2 sig figs, near the fixed-point
 //! epsilon), so the header equation is the full-resolution source. The curve is ice Ih only, the stable phase in
-//! this range. The source-ladder rule (owner ruling: alternative [M] precedes estimator) makes Murphy-Koop /
-//! Feistel-Wagner the [M], with Clausius-Clapeyron on the sublimation branch (`L_sub = L_vap + L_fus`) the in-house
+//! this range. The source-ladder rule (owner ruling: alternative `[M]` precedes estimator) makes Murphy-Koop /
+//! Feistel-Wagner the `[M]`, with Clausius-Clapeyron on the sublimation branch (`L_sub = L_vap + L_fus`) the in-house
 //! certifier that shadow-validates the fetch, never the source of the numbers. No consumer is wired in any pinned
 //! run path (byte-neutral).
 

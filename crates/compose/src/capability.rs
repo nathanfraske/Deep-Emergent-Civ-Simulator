@@ -15,7 +15,7 @@
 //! The function-law dispatch: derive a part's FUNCTION from its own geometry and material through the
 //! physics floor, never from a label (emergent-anatomy arc, step one).
 //!
-//! The existing leaf ([`crate::eval::eval_leaf`]) already reads a designed artifact's STRUCTURAL
+//! The existing leaf (`crate::eval::eval_leaf`) already reads a designed artifact's STRUCTURAL
 //! viability from physics over geometry and material, blind to any substance name. This module extends
 //! the same move to CAPABILITY: a part is a weapon because a hard point at small contact area drives a
 //! cut into a reference target, a sense because a transducer couples a field, locomotion because a vane
@@ -701,7 +701,7 @@ fn normalize(value: Fixed, reference: Fixed) -> Fixed {
 pub struct CapabilityRefs {
     /// The reference striking force a part concentrates over its contact area (`capability.strike_force`,
     /// N). Basis: the force a muscle-driven strike delivers at the whole-body muscle-force scale
-    /// ([`whole_body_muscle_force`]); larger reads more parts as weapons, smaller fewer.
+    /// (`whole_body_muscle_force`); larger reads more parts as weapons, smaller fewer.
     pub reference_strike_force: Fixed,
     /// The indentation hardness of the reference target a weapon must defeat (`capability.target_hardness`,
     /// MPa). Basis: the Vickers/Brinell hardness of the reference prey's hide or tissue (the

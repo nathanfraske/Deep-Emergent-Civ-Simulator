@@ -2229,7 +2229,7 @@ pub fn radiant_emission(
 /// difference-of-quartics cancellation is lossless, unlike forming each quartic in Q32.32 and subtracting the
 /// two rounded values), sigma multiplies in at its fine scale, and the chain rounds ONCE to Q32.32. That
 /// net radiant power then scales by emissivity and area in Q32.32, exactly as `radiant_emission` does (both
-/// are O(1)-range factors the canonical fixed-point holds without loss), and the same [`FLUX_MAX`] cap
+/// are O(1)-range factors the canonical fixed-point holds without loss), and the same `flux_max` cap
 /// applies. A surface cooler than its surroundings (`t_hot < t_cold`) emits nothing net, and a plasma-hot
 /// surface whose net term overruns the Q32.32 range routes to the cap, both the same zero-branch and
 /// representability-cap semantics as `radiant_emission` (a directional match on the caps, which sit well above
@@ -3437,7 +3437,7 @@ pub fn stokes_velocity(
 /// Thermal density anomaly, the buoyancy SOURCE: `delta_rho = -rho * alpha * dT`, the density excess a
 /// thermal parcel carries relative to its surroundings, the source [`stokes_velocity`] and the buoyancy laws
 /// consume. `rho` is the material density (kg/m^3), `alpha` the volumetric thermal expansion read from
-/// [`therm.expansion`] in ppm/K (so the per-kelvin fraction is `alpha_ppm * 1e-6`), and `dT = T_parcel -
+/// `therm.expansion` in ppm/K (so the per-kelvin fraction is `alpha_ppm * 1e-6`), and `dT = T_parcel -
 /// T_ambient` the temperature contrast (a caller-composed difference of two `therm.temperature` samples, the
 /// sensible-energy convention). Signed by the physics: a warmer parcel (`dT > 0`) is LESS dense, so its
 /// density excess is NEGATIVE and it rises, exactly the sign [`stokes_velocity`] reads (a negative excess

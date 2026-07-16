@@ -12,13 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The OPTICAL-CONSTANTS library (`crates/physics/data/optical_constants.toml`), the measured [M] inputs the
+//! The OPTICAL-CONSTANTS library (`crates/physics/data/optical_constants.toml`), the measured `[M]` inputs the
 //! disk-opacity GENERATOR's grain terms consume: per dust species the complex refractive index `n(lambda),
 //! k(lambda)` sampled across the protoplanetary-disk wavelength range. The grain absorption (the Rayleigh/Mie step,
 //! later slices) reads `m = n + i k` at each wavelength; this module only LOADS and validates the cited tables.
 //!
 //! These are a two-electron-quantum-hard measured quantity for each material (the dielectric response is not
-//! derivable at the floor level), so they enter as cited [M] data, the same tier the H- cross section set the
+//! derivable at the floor level), so they enter as cited `[M]` data, the same tier the H- cross section set the
 //! precedent for. The generator's whole thesis over a fitted opacity ladder is that a carbon-rich or metal-poor
 //! disk is a different MEMBERSHIP over this same library (composition-keyed on the disposer's condensate fractions),
 //! not a rewrite, and an exotic condensate with no measured `n,k` is handled later by a Lorentz-Drude ESTIMATOR

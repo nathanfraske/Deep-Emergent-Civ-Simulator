@@ -744,7 +744,7 @@ const RESPIRATION_FLUX_MAX: Fixed = Fixed::from_int(1_000_000_000);
 /// (R-METABOLIZE, design Part 15, Part 20, Part 35, Part 41; Principles 9, 11). Installed on an
 /// [`Embodiment`] through [`Embodiment::set_physiology`], it switches the embodiment's beings from the
 /// labelled scalar `metabolize` to the physics-derived producers: the per-being resting drain
-/// ([`derive_base_drain`], the Kleiber basal rate plus the thermoregulatory replacement), the exertion
+/// ([`crate::physiology::derive_base_drain`], the Kleiber basal rate plus the thermoregulatory replacement), the exertion
 /// coupling ([`derive_exertion_coupling`]), the body-to-medium exchange rate ([`derive_body_exchange_rate`]),
 /// and, where the physiology registry carries a [`RESPIRATION`] axis, medium respiration
 /// ([`crate::medium::respire_at`]). So two beings with different body plans diverge in survival from their
@@ -1695,7 +1695,7 @@ impl Embodiment {
 
     /// Install the MATERIAL-percept registry and REBUILD the controller layout to feed its material-feature
     /// block (the lifetime/demography keystone, pillar 2, trace slice C). Set BEFORE the embodiment's beings
-    /// are built, exactly like [`set_percepts`]: the beings' controllers are expressed against
+    /// are built, exactly like [`Self::set_percepts`]: the beings' controllers are expressed against
     /// [`Embodiment::layout`], so a material percept added after they exist would leave their weight vectors
     /// the wrong length. With an empty registry this is a no-op that leaves the layout and every run hash
     /// unchanged (opt-in). The new material-feature weights a founder then expresses are zero (unseeded
@@ -1708,7 +1708,7 @@ impl Embodiment {
 
     /// Install the CONVICTION-percept registry and REBUILD the controller layout to feed its conviction block
     /// (Prereq B for the learned experience-to-conviction coupling, `docs/working/OWNER_DECISIONS_LOG.md` R2).
-    /// Set BEFORE the embodiment's beings are built, exactly like [`set_material_percepts`]: the beings'
+    /// Set BEFORE the embodiment's beings are built, exactly like [`Self::set_material_percepts`]: the beings'
     /// controllers are expressed against [`Embodiment::layout`], so a conviction channel added after they exist
     /// would leave their weight vectors the wrong length. With an empty registry this is a no-op that leaves the
     /// layout and every run hash unchanged (opt-in). The new conviction weights a founder then expresses are
@@ -1724,7 +1724,7 @@ impl Embodiment {
     /// Enable (or disable) the belief-derived ATTRACTION-direction input in the controller layout, so a being
     /// can sense the direction toward the nearest believed-rewarding material it senses and evolve to approach
     /// it (the lifetime/demography keystone, pillar 2, trace slice C3, the behaviour half). Set BEFORE the
-    /// embodiment's beings are built, exactly like [`set_appetitive`] and [`set_material_percepts`], because
+    /// embodiment's beings are built, exactly like [`Self::set_appetitive`] and [`Self::set_material_percepts`], because
     /// the beings' controllers are expressed against [`Embodiment::layout`], so a block added after they exist
     /// would leave their weight vectors the wrong length. FALSE (the default) leaves the layout and every run
     /// hash unchanged (opt-in). The new attraction weights a founder then expresses are zero (unseeded
@@ -1738,7 +1738,7 @@ impl Embodiment {
     /// Enable (or disable) the BEING-DIRECTED input block in the controller layout (the being-percept
     /// keystone, step 6), so a being can sense the direction toward believed-rewarding perceived emitters and
     /// away from believed-harmful ones and evolve to approach (predation) or avoid (fleeing) them. Set BEFORE
-    /// the embodiment's beings are built, exactly like [`set_attraction`], because the beings' controllers are
+    /// the embodiment's beings are built, exactly like [`Self::set_attraction`], because the beings' controllers are
     /// expressed against [`Embodiment::layout`], so a block added after they exist would leave their weight
     /// vectors the wrong length. FALSE (the default) leaves the layout and every run hash unchanged (opt-in).
     /// The new being weights a founder expresses are zero (unseeded, freely-signed channels), so the gradient
@@ -1752,7 +1752,7 @@ impl Embodiment {
     /// channel, reach binding, transduction, reach caps, activation cap, and the two reserved values the
     /// perceive-phase being-directed wire and the being-signal learning read. `None` (the default) leaves the
     /// wire inert, so this is opt-in and adds no controller block (no layout rebuild): the wire is separately
-    /// gated by the `being_percept` flag ([`set_being_percept`]), and a world arms both together at the feature
+    /// gated by the `being_percept` flag ([`Self::set_being_percept`]), and a world arms both together at the feature
     /// arming, reading the reserved values fail-loud from the manifest before installing the field.
     pub fn set_being_field(&mut self, field: Option<BeingPerceptField>) {
         self.being_field = field;
@@ -1821,7 +1821,7 @@ impl Embodiment {
     /// reward learner is armed, a being re-earns a reward belief from the perceived composition of what it
     /// ATE this tick, so it learns which foods nourish it from its own felt reward rather than a handed
     /// "this is food" percept. FALSE (the default) leaves the ingested-matter credit inert and every run
-    /// hash unchanged (opt-in). Unlike [`set_attraction`] and [`set_material_percepts`] this adds NO
+    /// hash unchanged (opt-in). Unlike [`Self::set_attraction`] and [`Self::set_material_percepts`] this adds NO
     /// controller block, so it needs no layout rebuild and may be set at any time: it is a learning credit
     /// (the LEARN half), and the behaviour half (approaching a food believed to nourish) rides the existing
     /// attraction gradient over the shared reward frame. The world still declares the food substances in the
@@ -1833,7 +1833,7 @@ impl Embodiment {
 
     /// Enable (or disable) the PLACE-side (trace) material reward credit (the lifetime/demography keystone,
     /// pillar 2). TRUE by default, so a world that arms the reward learner keeps the ground-composition credit
-    /// the keystone built; a world sets it FALSE to run the eaten-side [`set_nutrition_learning`] credit in
+    /// the keystone built; a world sets it FALSE to run the eaten-side [`Self::set_nutrition_learning`] credit in
     /// isolation (learning which food nourishes without crediting the material merely underfoot). A gate on an
     /// existing mechanism, so its default preserves the keystone's behaviour rather than opting a new one in.
     pub fn set_place_reward_learning(&mut self, enabled: bool) {
@@ -1914,7 +1914,7 @@ impl Embodiment {
 
     /// Install the perceived-feature registry and REBUILD the controller layout to feed its feature
     /// block (harm-learning arc slice a). Set BEFORE the embodiment's beings are built, exactly like
-    /// [`set_organs`] and [`set_physiology`]: the beings' controllers are expressed against
+    /// [`Self::set_organs`] and [`Self::set_physiology`]: the beings' controllers are expressed against
     /// [`Embodiment::layout`], so a percept added after they exist would leave their weight vectors the
     /// wrong length. With an empty registry this is a no-op that leaves the layout and every run hash
     /// unchanged (opt-in). The new feature weights a founder then expresses are zero (unseeded
@@ -1928,7 +1928,7 @@ impl Embodiment {
     /// Enable (or disable) the APPETITIVE belief block in the controller layout, so a being can act on its
     /// reward beliefs and REPEAT a rewarded action (ideation / experiential-discovery arc, piece 1, the
     /// belief-to-behaviour feedback). Set BEFORE the embodiment's beings are built, exactly like
-    /// [`set_percepts`], because the beings' controllers are expressed against [`Embodiment::layout`], so a
+    /// [`Self::set_percepts`], because the beings' controllers are expressed against [`Embodiment::layout`], so a
     /// block added after they exist would leave their weight vectors the wrong length. FALSE (the default)
     /// leaves the layout and every run hash unchanged (opt-in). The new appetitive weights a founder then
     /// expresses are zero (unseeded channels), so a reward belief moves no behaviour until selection lifts a
@@ -1993,8 +1993,8 @@ impl Embodiment {
     }
 
     /// Install the located material substrate the world is made of (material-substrate arc, cascade
-    /// item 1): the per-cell substance mixture the ground is built from. Opt-in, like [`set_percepts`]
-    /// and [`set_physiology`]: an embodiment without it keeps an empty material layer, so folding the
+    /// item 1): the per-cell substance mixture the ground is built from. Opt-in, like [`Self::set_percepts`]
+    /// and [`Self::set_physiology`]: an embodiment without it keeps an empty material layer, so folding the
     /// substrate into `state_hash` is byte-identical and every existing scenario replays bit-for-bit.
     /// A populated layer becomes canonical dynamic state (matter is moved, deposited, and consumed as
     /// the cascade wires up), so it folds into the hash from here.
@@ -2347,7 +2347,7 @@ impl Embodiment {
     /// Install the byproduct map an enacted bite deposits (the physical-trace cultural-persistence
     /// substrate, the lifetime/demography keystone, pillar 2, trace slice B): a map from an eaten substance
     /// id to the (byproduct substance id, deposit fraction) it leaves behind. Opt-in, like
-    /// [`set_extraction_params`] and [`set_craft_params`]: an empty map (the default) deposits nothing, so the
+    /// [`Self::set_extraction_params`] and [`Self::set_craft_params`]: an empty map (the default) deposits nothing, so the
     /// material field stays empty and every existing scenario is byte-identical. The membership is world data
     /// (Principle 11); a world opts a technique into leaving a physical trace by mapping its eaten substance to
     /// a residue. The deposit fraction is a real physical mass ratio surfaced reserved-with-basis, not a code
@@ -3984,7 +3984,7 @@ impl Runner {
     /// on the field. This is the first constructor to break the mutual exclusion the two run paths held
     /// (`with_world` forced `embodiment = None`, `with_embodiment` forced `world = None`); it composes
     /// them under one shared id space, which the caller (`build_dawn_runner`) guarantees by minting
-    /// every id from the world's one [`crate::world::Registry`] and reusing those ids for the walkers,
+    /// every id from the world's one [`civsim_core::id::Registry`] and reusing those ids for the walkers,
     /// never a second registry.
     ///
     /// The canonical steering boundary survives verbatim: the world must carry no authored decision
@@ -7272,7 +7272,7 @@ impl Runner {
     /// mind-less `Walker` carrying `body` (which MUST read a positive PIERCE capability, or STRIKE is never
     /// afforded and there is no hazard to spawn) and an always-STRIKE controller expressed against the
     /// embodiment's OWN widened layout: every weight is zero except a positive bias on the STRIKE activation, so
-    /// [`Controller::decide`] issues STRIKE every tick (it is the only positive activation, so it beats the zero
+    /// [`crate::controller::ControllerLayout::decide`] issues STRIKE every tick (it is the only positive activation, so it beats the zero
     /// MOVE/INGEST/GEOPHAGE and the predator never moves, a fixed ambush). Each tick it DECIDES STRIKE and calls
     /// the existing [`Embodiment::strike_occupant`], which wounds a co-located being through the one INTEGRITY
     /// cull; nothing reads a species, role, or relatedness (Principle 8). The wound law reads the TARGET's body

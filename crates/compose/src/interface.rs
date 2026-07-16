@@ -15,7 +15,7 @@
 //! The interface substrate: the axes a composed design exposes as composition ports.
 //!
 //! An [`InterfaceRegistry`] is an OPEN DATA REGISTRY of interface axes (the owner's decision, baked
-//! in). Each [`InterfaceAxisDef`] binds an interface-axis id to a physics [`QuantityAxis`] id (the
+//! in). Each [`InterfaceAxisDef`] binds an interface-axis id to a physics [`civsim_physics::QuantityAxis`] id (the
 //! LawPort role-to-axis pattern of the physics substrate), tags it with a [`Direction`] (whether the
 //! design offers capacity on the axis or demands it) and a free-form `role`, and names the
 //! [`CombinatorKey`] topology by which a composite folds that axis across its children. The registry is

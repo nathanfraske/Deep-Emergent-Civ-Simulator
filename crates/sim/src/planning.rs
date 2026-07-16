@@ -23,7 +23,7 @@
 //! `attr` and the `value` the being wants to hold about it) and returns the committed beliefs that match,
 //! ranked by the frame's own confidence (the commit margin, how decisively the being holds the belief) and
 //! its support (how much evidence backs it), bounded by a reserved planning depth cap. It reads only
-//! [`crate::agent::Mind::frames`] and each frame's [`InferenceFrame::clamped_total`], `commit`, and
+//! [`crate::agent::Mind::frames`] and each frame's [`crate::evidence::InferenceFrame::clamped_total`], `commit`, and
 //! `support`, never an affordance's authored valence, a race id, or a goal-to-action table.
 //!
 //! MULTI-HOP through the RELATIONAL substrate (relational-belief substrate, arc 2). The one-hop primitive,
