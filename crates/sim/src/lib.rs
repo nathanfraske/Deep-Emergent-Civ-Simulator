@@ -126,6 +126,7 @@ pub mod profile;
 pub mod race;
 pub mod runner;
 pub mod scenario;
+pub mod secular;
 pub mod semantics;
 pub mod sensorium;
 pub mod smallbody;
