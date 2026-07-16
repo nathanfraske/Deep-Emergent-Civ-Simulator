@@ -47,6 +47,7 @@
 pub mod assemblage;
 pub mod atmosphere;
 pub mod band_gap;
+pub mod conductivity;
 pub mod contract;
 pub mod correlation;
 pub mod creep;

@@ -44,6 +44,33 @@ The deeper finding is the load-bearing one, and it is why no corrected number re
 
 THE HINDCAST ROW IS THE DATASET, per the standing rule this produced (hindcast targets in rulings name DATASETS, never summary statistics). The derived `T_e` is checked against the MEASURED `T_e`-versus-age data directly, with a MANDATORY AGE-CONVENTION FIELD per compiled entry and the LOADING ENVIRONMENT SPLIT: oceanic interior loads are the primary set, trenches are a separate tagged environment. Mars (13 regions with epochs, Ruiz 2014 Table 1) and Venus (trimodal, 47 percent below 20 km, Smrekar and Anderson 2005) are the second and third rows. The classical 450 +/- 150 C may appear in prose as commentary, in Celsius, with the convention rider, and nowhere else.
 
+## The conductivity ladder, and the collision that produced it
+
+A ruling ordered Hofmeister's `k(material, T)` built as new machinery. A check for an existing conductivity found SLACK ALREADY BANKED (`properties.rs:692`), from the same estimator roster the ruling channel had itself written down. The build stopped there. The coordinator's refusal, recorded as written because it is the refuse-guard culture stated plainly:
+
+> I am not picking between two physical models of one quantity on my own.
+
+THE THREE-WAY CONFLICT ANALYSIS that produced the stop, also as written:
+
+1. ANCHORS. Slack needs NO room-temperature anchor: it derives the magnitude outright. Hofmeister needs `kappa_298` PER MINERAL, a measured datum per row. Slack is the more derived form, so ordering Hofmeister trades derivation for accuracy.
+2. THE EXPONENT DISAGREES ON THE EXACT TARGET CLASS. Slack's form is `1/T` (`a = 1`), the answer the ruling itself called "still too coarse" before correcting to `a = 0.33` for complex silicates. So Slack's temperature dependence is wrong for silicates by a factor that grows with T, while being right for simple lattices, which is precisely the class split the correction identified.
+3. SLACK'S OWN HONEST LIMIT CONVICTS IT ON THAT CLASS. Its docstring: within ~3x for simple crystals (diamond 2108 vs 2200, NaCl 7.1 vs 6.5, MgO 110 vs 60) but it OVERSTATES strongly-anharmonic or complex-cell crystals (rutile TiO2 ~43 against a measured ~9), naming such classes "an intrinsic upper bound, not a trusted value". Complex-cell silicates are the target.
+
+THE RULING: none of the options as posed, because the two were never competitors. They are RUNGS of the lookup order the engine already runs for every other quantity, MEASURED BEFORE ESTIMATOR, dispatched per material on ANCHOR AVAILABILITY. Nobody at a call site ever picks a physical model again. Built in `crates/materials/src/conductivity.rs`.
+
+- TOP RUNG: Hofmeister with a measured `kappa_298`, carrying derived temperature and pressure dependence off banked Grueneisen, bulk modulus, and expansivity.
+- ESTIMATOR RUNG: Slack, no anchor needed, carrying its own declared band (~3x symmetric on simple cells, ONE-SIDED on complex cells).
+- Where no measurement exists, Slack's magnitude serves as the `[E]`-grade anchor with the one-sided upper bound declared, and Hofmeister's class-keyed exponent governs the temperature shape ON BOTH RUNGS, because the exponent split IS the same physics as the validity split.
+- THE CLASS VARIABLE was already banked and already in Slack's own signature: ATOMS PER PRIMITIVE CELL.
+
+THE DOCTRINE, standing and general: SAME-RUNG duplicates are the redundant-parameter defect at MODEL level and stay forbidden. DIFFERENT-RUNG models with a DECLARED ORDER are the ladder. And the ladder carries a free integrity mechanism: WHEREVER BOTH RUNGS CAN EVALUATE, THE DISAGREEMENT IS COMPUTED AND LOGGED, NEVER SILENTLY RESOLVED. MgO-class minerals are PERMANENT OVERLAP SENTINELS, two models compared by construction on every run, which turns "never compared" from a risk into an impossibility.
+
+THE PREMISE LINE COMPLETES SYMMETRICALLY (standing, effective now): existence claims and ABSENCE claims are ONE CLASS. A ruling that says "WIRE X" verifies PRESENCE; a ruling that says "BUILD X" verifies ABSENCE. One line either way. The first time the check ran in the build direction it prevented a ~5x silent disagreement from shipping.
+
+WHY THE COLLISION PAID. The geotherm's minerals have measured anchors, so the top rung serves the front lane and the "Hofmeister replaces Slack" outcome emerges without its defect. But the carbide slice is coming, and exotic condensates will have no `kappa_298` rows at all, so SLACK'S RUNG IS THE ONLY LEGAL CONDUCTIVITY PATH AN ALIEN PHASE WILL EVER HAVE. The ladder built this week is the machinery carbon worlds require next month; Hofmeister bolted beside Slack would have served Earth minerals and stranded every alien one.
+
+ONE FINDING SURFACED BY THE BUILD: the cell-count boundary is UNDERDETERMINED in `2 < n < 6`. The cited set places `n = 2` inside Slack's band and `n = 6` outside it, and says nothing between. `lattice_exponent_for_cell` REFUSES in that gap rather than picking a number the calibration does not support, because a boundary chosen there would author a scalar invisibly, inside a classifier.
+
 ## Fetch list (this round)
 
 - Hirth and Kohlstedt olivine flow-law rows (the calibrated creep anchors).
