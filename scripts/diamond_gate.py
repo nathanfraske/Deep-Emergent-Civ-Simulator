@@ -63,6 +63,19 @@ REGISTERED_RELATIONSHIPS = {
         "crates/materials/src/conductivity.rs",
         "measured rung before estimator rung, with rung_disagreement_ratio as the overlap sentinel",
     ),
+    "cohesive_energy": (
+        "ladder-order",
+        "crates/materials/src/rose_eos.rs + (pending) the atomization identity over banked formation enthalpies",
+        "PRE-REGISTERED BEFORE THE SECOND RUNG EXISTS. Today only Rose's EOS route provides E_coh, so this is "
+        "not a diamond yet. It becomes one the moment the atomization fetch lands (E_coh(compound) = "
+        "sum(elemental atomization) - delta_f_H(compound)), which is a SECOND CARRIER of one fact. The class "
+        "same-fact-two-doors was named as a post-mortem and then used as a FORECAST, and the correct response to "
+        "a forecast defect is PREVENTION SCHEDULED BEFORE THE COLLISION, not detection after it. So the "
+        "arbitration is registered NOW: measured thermochemistry the anchor rung, Rose the estimator rung it "
+        "always was, and the fetch returns into an order that predates it. OVERLAP SENTINEL, which comes free "
+        "and doubles as the fetch's own referee: ELEMENTAL METALS are the overlap set, Rose's cohesive energy "
+        "against the element's own direct atomization row, agreement within Rose's band asserted every run.",
+    ),
     "creep_rate": (
         "ladder-order",
         "crates/physics/src/creep_rows.rs",
