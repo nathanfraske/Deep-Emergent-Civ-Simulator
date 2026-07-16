@@ -1778,20 +1778,25 @@ fn build_derived_scene(star_mass: Fixed, orbit_au: Fixed) -> Result<DerivedScene
             Some((core_fraction, core_density)),
             Some(solidus_surface_k),
             Some(solidus_slope_k_per_gpa),
-        ) => build_deep_time_provinces(
-            star_mass,
-            orbit_au,
-            planet.radius_m,
-            planet.surface_gravity_m_s2,
-            core_fraction,
-            core_density,
-            planet_bulk_density,
-            mantle_density,
-            crust_density,
-            solidus_surface_k,
-            solidus_slope_k_per_gpa,
-            sc.max_melt_fraction,
-        ),
+        ) if sc.melt_status != civsim_materials::differentiation::MeltStatus::Degenerate => {
+            // A SubSolidus or Melted scene is a valid world: build its province field. A Degenerate melt status
+            // (no source weight, an empty split, a missing melting datum) is a near-failure, not a physical
+            // sub-solidus mantle, so it falls through to the uniform crust rather than a fabricated flat texture.
+            build_deep_time_provinces(
+                star_mass,
+                orbit_au,
+                planet.radius_m,
+                planet.surface_gravity_m_s2,
+                core_fraction,
+                core_density,
+                planet_bulk_density,
+                mantle_density,
+                crust_density,
+                solidus_surface_k,
+                solidus_slope_k_per_gpa,
+                sc.max_melt_fraction,
+            )
+        }
         _ => None,
     };
     // Age the initial scene to a present-day surface (the observer's time control runs it on from here), and

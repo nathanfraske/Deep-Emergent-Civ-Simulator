@@ -34,7 +34,7 @@
 
 use crate::differentiation::{
     crust_and_mantle, differentiate, partial_melt_crust_and_mantle, phase_set_composition,
-    DifferentiatedPlanet, MeltColumnParams, PartialMeltCrust,
+    DifferentiatedPlanet, MeltColumnParams, MeltStatus, PartialMeltCrust,
 };
 use crate::equilibrium_condensation::{
     condensed_active_set, condensed_amounts, gas_equilibrium, janaf_g_over_rt, CondensedAmounts,
@@ -115,6 +115,9 @@ pub struct SurfaceComposition {
     /// Whether the seam-6 PARTIAL-MELT mechanism ran (`true`) or the split fell back to buoyancy (`false`), for
     /// audit and the provenance readout.
     pub used_partial_melt: bool,
+    /// WHY there was no melt column (`Melted`, `SubSolidus`, or `Degenerate`), so a downstream reader (the deep-time
+    /// volcanism) can tell an honest sub-solidus mantle from a degenerate near-failure input.
+    pub melt_status: MeltStatus,
     /// The full differentiation (the sinking metal-sulfide and floating silicate fractions), for audit.
     pub differentiation: DifferentiatedPlanet,
     /// The condensed molar amounts from the VCS, when the vertex was well-posed; `None` at a degenerate vertex (the
@@ -350,6 +353,8 @@ pub fn derive_surface_composition(
                 solidus_surface_k: None,
                 solidus_slope_k_per_gpa: None,
                 used_partial_melt: false,
+                // A valid assemblage whose melt was not evaluated (no source density), not a near-failure input.
+                melt_status: MeltStatus::SubSolidus,
             }
         }
     };
@@ -381,6 +386,7 @@ pub fn derive_surface_composition(
         solidus_slope_k_per_gpa: pm.solidus_slope_k_per_gpa,
         max_melt_fraction: pm.max_melt_fraction,
         used_partial_melt: pm.used_partial_melt,
+        melt_status: pm.melt_status,
         differentiation,
         condensed_amounts: condensed_amount_readout,
     })

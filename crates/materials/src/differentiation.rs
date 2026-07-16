@@ -242,10 +242,24 @@ pub struct MeltColumnParams {
     pub gravity_m_per_s2: Fixed,
 }
 
+/// WHY a partial-melt extraction produced no melt column, so a downstream reader can tell an honest sub-solidus
+/// mantle from a degenerate near-failure input rather than painting both as "unprocessed". `Melted`: the column ran
+/// and built crust. `SubSolidus`: a valid assemblage sat below its solidus (or the melt was not evaluated), the
+/// honest unprocessed mantle. `Degenerate`: a near-failure reached the fallback (a phase with no melting datum, an
+/// unsolvable eutectic, no source weight, or an empty crust-or-mantle split), which should NOT be read as a physical
+/// sub-solidus outcome.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MeltStatus {
+    Melted,
+    SubSolidus,
+    Degenerate,
+}
+
 /// The result of the partial-melt crust extraction: the CRUST (the extracted first melt) and the MANTLE (the
 /// refractory residue) as weighted phase lists, plus the McKenzie-Bickle crustal thickness. When the melt rung
 /// cannot run (a floating phase with no melting datum, an unsolvable eutectic, or a sub-solidus mantle),
-/// `used_partial_melt` is false and the split is the pure-buoyancy fallback with no thickness (fail-soft, named).
+/// `used_partial_melt` is false and the split is the pure-buoyancy fallback with no thickness (fail-soft, named);
+/// `melt_status` says WHICH of those it was (a sub-solidus mantle versus a degenerate input).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PartialMeltCrust {
     /// The CRUST phases as `(name, liquid mole fraction x_i)`: the extracted first melt, enriched in the fusible
@@ -276,6 +290,9 @@ pub struct PartialMeltCrust {
     pub solidus_slope_k_per_gpa: Option<Fixed>,
     /// Whether the PARTIAL-MELT mechanism ran (`true`) or the split fell back to buoyancy (`false`).
     pub used_partial_melt: bool,
+    /// WHY there was no melt column (`Melted`, `SubSolidus`, or `Degenerate`), so a sub-solidus mantle is not
+    /// confused with a near-failure input downstream.
+    pub melt_status: MeltStatus,
 }
 
 /// THE PARTIAL-MELT CRUST EXTRACTION (seam 6): split the floating silicate fraction into the CRUST (the low-
@@ -324,7 +341,7 @@ where
         match endmember_of(name) {
             Some(em) => endmembers.push(em),
             // No melting datum for this phase: the solidus cannot be derived, so the fallback carries no solidus.
-            None => return buoyancy_fallback(floating, density_of, None),
+            None => return buoyancy_fallback(floating, density_of, None, MeltStatus::Degenerate),
         }
     }
     // The FIRST-MELT (eutectic) liquid composition at the crustal reference pressure = the CRUST (the extracted
@@ -332,7 +349,7 @@ where
     let x_liq = match eutectic_liquid_composition(&endmembers, reference_pressure_bar) {
         Some((_t_sol, xs)) => xs,
         // No solvable eutectic: the solidus cannot be derived, so the fallback carries no solidus.
-        None => return buoyancy_fallback(floating, density_of, None),
+        None => return buoyancy_fallback(floating, density_of, None, MeltStatus::Degenerate),
     };
     // The crustal THICKNESS via the McKenzie-Bickle column. The solidus surface value and slope are DERIVED from
     // the endmember signatures (consuming the rung), never authored: the multi-saturation solidus at the surface
@@ -357,7 +374,7 @@ where
     // sorting, the honest state when the mantle is too cold to melt).
     let column = match column {
         Some(c) if c.crust_thickness_km > Fixed::ZERO && c.max_melt_fraction > Fixed::ZERO => c,
-        _ => return buoyancy_fallback(floating, density_of, solidus),
+        _ => return buoyancy_fallback(floating, density_of, solidus, MeltStatus::SubSolidus),
     };
     let f = column.max_melt_fraction;
     // The normalized source weights (the VCS modal amount, the saturation presence otherwise), for the batch-
@@ -371,7 +388,7 @@ where
         source_weights.push(w);
     }
     if total <= Fixed::ZERO {
-        return buoyancy_fallback(floating, density_of, solidus);
+        return buoyancy_fallback(floating, density_of, solidus, MeltStatus::Degenerate);
     }
     // The crust is the melt (weight = liquid mole fraction); the mantle is the residue,
     // residue_i = source_share_i - F * x_i, clamped at zero (a fusible phase can be fully consumed into the melt).
@@ -390,7 +407,7 @@ where
         }
     }
     if crust.is_empty() || mantle.is_empty() {
-        return buoyancy_fallback(floating, density_of, solidus);
+        return buoyancy_fallback(floating, density_of, solidus, MeltStatus::Degenerate);
     }
     Some(PartialMeltCrust {
         crust,
@@ -401,6 +418,7 @@ where
         solidus_surface_k: Some(solidus_surface),
         solidus_slope_k_per_gpa: Some(solidus_slope),
         used_partial_melt: true,
+        melt_status: MeltStatus::Melted,
     })
 }
 
@@ -415,6 +433,7 @@ fn buoyancy_fallback<D>(
     floating: &[(String, Fixed)],
     density_of: D,
     solidus: Option<(Fixed, Fixed)>,
+    status: MeltStatus,
 ) -> Option<PartialMeltCrust>
 where
     D: Fn(&str) -> Option<Fixed>,
@@ -433,6 +452,7 @@ where
         solidus_surface_k,
         solidus_slope_k_per_gpa,
         used_partial_melt: false,
+        melt_status: status,
     })
 }
 
