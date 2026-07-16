@@ -29,14 +29,19 @@
 //! DERIVED here, per system: the metal fraction Z (the disk composition's own, per-system, admitting the alien), the
 //! ice-line orbit (where the derived disk temperature crosses the water snow-line temperature the condensation table
 //! carries), the isolation mass at each orbit (from the local solid surface density), and the oligarchic spacing step
-//! (from the embryo's own Hill radius). RESERVED-with-basis, surfaced not fabricated: the oligarchic spacing width in
-//! Hill radii `b` (basis: the Kokubo-Ida balance of orbital repulsion against viscous and planetesimal stirring, about
-//! 10 mutual Hill radii; derive-down: the feeding-zone dynamics, item R-ASSEMBLY, the research seam), the feeding-zone
-//! width `C` (already reserved in `isolation_mass_earth`), the refractory fraction of the metals that condenses inside
-//! the ice line (basis: the rock and metal formers as a share of the disk metals, about half for a solar pattern;
-//! derive-down: the condensation substrate's own condensed-mass fraction at the disk temperature, `condensed_amounts`),
-//! and the disk surface-density residues `r_c`, `gamma`, `Sigma_c` (already reserved in `disk_surface_density`, the
-//! per-system disk mass and viscous-spreading data).
+//! (from the embryo's own Hill radius). The oligarchic spacing width `b` ([`OLIGARCHIC_SPACING_HILL_WIDTHS`]) is a
+//! UNIVERSAL class constant with a band ([M class] per the R-ASSEMBLY ruling), about 10 mutual Hill radii (the 5 to 10
+//! band), pinned by the timescale-ratio equilibrium of orbital repulsion against dynamical friction whose steepness
+//! makes the level set near-universal, weakly dependent on mass and orbit; it is not a per-system knob. The derived
+//! repulsion-versus-friction form (calibrated to the Kokubo-Ida ensembles, fetch Goldreich-Lithwick-Sari 2004) is the
+//! optional alien-admitting upgrade that gives the weak per-system modulation from the form rather than a bare number.
+//! Still RESERVED-with-basis: the feeding-zone width `C` (already reserved in `isolation_mass_earth`), and the
+//! refractory fraction of the metals that condenses inside the ice line (basis: the rock and metal formers as a share
+//! of the disk metals, about half for a solar pattern; derive-down: the condensation substrate's own condensed-mass
+//! fraction at the disk temperature, `condensed_amounts`). The disk surface-density residues `r_c`, `gamma`, `Sigma_c`
+//! are the GATE-G derivation target (R-ASSEMBLY): zero new per-system initial conditions, they are VIEWS of the disk
+//! realization (the accretion rate `Mdot`, `alpha_disk`, age, and `M_star` through the viscous similarity family),
+//! flagged here as free inputs pending that wiring, not authored world content.
 
 use civsim_core::Fixed;
 
@@ -44,9 +49,18 @@ use crate::astro::{
     disk_effective_temperature, disk_surface_density, hill_radius_au, isolation_mass_earth,
 };
 
+/// The oligarchic embryo spacing `b`, in mutual Hill radii: a UNIVERSAL class constant with a band ([M class] per the
+/// R-ASSEMBLY ruling, about 10, the 5 to 10 band), pinned by the timescale-ratio equilibrium of orbital repulsion
+/// against dynamical friction, weakly dependent on protoplanet mass and orbit. It is not a per-system knob; the derived
+/// repulsion-versus-friction form (fetch Goldreich-Lithwick-Sari 2004) is the optional alien-admitting upgrade. Passed
+/// to [`oligarchic_embryo_field`] as `spacing_hill_widths`, so a scenario can still probe the band.
+pub const OLIGARCHIC_SPACING_HILL_WIDTHS: Fixed = Fixed::from_int(10);
+
 /// A protoplanetary disk's SURFACE-DENSITY residues (the Lynden-Bell and Pringle self-similar profile the built
 /// `disk_surface_density` reads): the characteristic radius `r_c`, the slope `gamma`, and the scale `Sigma_c` in
-/// kg/m^2. These are the per-system disk's own data (a different disk is a different row), not authored world content.
+/// kg/m^2. These are held as free inputs in this slice but are the GATE-G derivation target (R-ASSEMBLY): they carry
+/// ZERO new per-system initial conditions, being views of the disk realization (`Mdot`, `alpha_disk`, age, `M_star`
+/// through the viscous similarity, `Sigma_c = Mdot / (3*pi*nu)`), and retire to that derivation when it is wired.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct DiskProfile {
     /// The characteristic (cutoff) radius `r_c` in AU.
@@ -205,10 +219,11 @@ pub struct Embryo {
 /// Nothing fixes the count; `max_embryos` is only a loop bound (a determinism and cost cap, not a physical limit),
 /// and the field stops early at the disk edge (where the solid density fails to resolve) or on a non-positive mass.
 ///
-/// `spacing_hill_widths` is the oligarchic width `b` (reserved-with-basis, about 10 mutual Hill radii, Kokubo-Ida;
-/// derive-down: the feeding-zone dynamics, item R-ASSEMBLY). `feeding_zone_hill_widths` is the width `C` the isolation
-/// mass integrates over (already reserved). The spacing step uses the embryo's own Hill radius as a forward proxy for
-/// the mutual Hill radius (the next embryo's mass is not yet known); the exact mutual form is a refinement.
+/// `spacing_hill_widths` is the oligarchic width `b`, the universal class constant [`OLIGARCHIC_SPACING_HILL_WIDTHS`]
+/// (about 10 mutual Hill radii, the 5 to 10 band, [M class] per R-ASSEMBLY); it is passed as an argument so a scenario
+/// can probe the band, but it is not a per-system knob. `feeding_zone_hill_widths` is the width `C` the isolation mass
+/// integrates over (already reserved). The spacing step uses the embryo's own Hill radius as a forward proxy for the
+/// mutual Hill radius (the next embryo's mass is not yet known); the exact mutual form is a refinement.
 pub fn oligarchic_embryo_field(
     disk: &SolidDisk,
     star_mass_ratio: Fixed,
