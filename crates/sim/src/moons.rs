@@ -295,6 +295,117 @@ pub fn tidal_recession_rate(
     Some(ln_rate.exp())
 }
 
+/// The TIDAL-SURVIVAL verdict for a candidate moon over the system age, the shared post-condition every branch
+/// of the moon dispatch closes on (circumplanetary-disk, giant-impact, capture). A moon is [`Retained`] only if
+/// it forms in the stable band (above the Roche disruption floor, below the Domingos stable Hill fraction) and
+/// stays there as its orbit tidally evolves over the age.
+///
+/// [`Retained`]: MoonSurvival::Retained
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum MoonSurvival {
+    /// The moon forms in the stable band and stays there over the age: a real satellite.
+    Retained,
+    /// The moon forms at or inside the Roche limit and is sheared apart at formation (a ring, not a moon).
+    DisruptedAtFormation,
+    /// The moon forms at or beyond the stable Hill fraction and is stripped by the star at formation.
+    UnstableAtFormation,
+    /// The moon starts outside corotation and its orbit recedes past the stable Hill fraction within the age
+    /// (tidal outspiral to instability, the far-future fate of a receding moon).
+    RecedesToInstability,
+    /// The moon starts inside corotation and its orbit decays to the Roche limit within the age (tidal inspiral
+    /// to disruption, the Phobos fate).
+    DecaysToDisruption,
+}
+
+/// The TIDAL-SURVIVAL FILTER: evolve a candidate moon's orbit over the system age and return whether it is
+/// [`MoonSurvival::Retained`] (see the enum for the failure modes). This is the geometry-and-evolution close of
+/// the moon dispatch, built on the module's primitives; the branch that produces the candidate (the
+/// circumplanetary disk, the giant impact, a capture) supplies the moon and the planet, and every branch runs
+/// its candidate through this same filter.
+///
+/// All lengths (`moon_orbit`, `roche_limit`, `stable_axis`, `corotation_radius`) are in ONE consistent unit the
+/// caller chooses, and `recession_rate` (the tidal `da/dt` magnitude at `moon_orbit`, from
+/// [`tidal_recession_rate`]) and `system_age` share ONE time unit (pick the unit so the age is representable,
+/// megayears for a Gyr-age system, since bare years overflow the Q32.32 range). Keying off the caller's
+/// pre-computed bounds keeps this kernel unit-agnostic and free of `G` (the corotation radius, derived from the
+/// planet's spin, is a per-world datum the caller supplies, reserved-with-basis at the call site, as `k2` and
+/// `Q` are for [`tidal_recession_rate`]).
+///
+/// The static band is checked first (a moon at or inside the Roche limit is `DisruptedAtFormation`, at or beyond
+/// the stable fraction is `UnstableAtFormation`). Then the orbit evolves under the closed-form tidal solution of
+/// `da/dt = C * a^(-11/2)`: `a(t) = a0 * (1 +- X)^(2/13)` with `X = (13/2) * (rate/a0) * age`, the sign positive
+/// outside corotation (recession) and negative inside it (decay). `X` is assembled in LOG-SPACE and exponentiated
+/// once, because `rate/a0` is ~1e-10 for a Moon-like case (below the Q32.32 floor in a direct product), the same
+/// discipline the recession rate itself uses. A decaying orbit whose `(1 - X)` term reaches zero within the age
+/// has spiralled into the planet, so it is `DecaysToDisruption`. `None` on a non-positive input or a value past
+/// the representable range (fail-soft, never a fabricated verdict).
+pub fn tidal_survival(
+    moon_orbit: Fixed,
+    roche_limit: Fixed,
+    stable_axis: Fixed,
+    corotation_radius: Fixed,
+    recession_rate: Fixed,
+    system_age: Fixed,
+) -> Option<MoonSurvival> {
+    if moon_orbit <= Fixed::ZERO
+        || roche_limit <= Fixed::ZERO
+        || stable_axis <= Fixed::ZERO
+        || corotation_radius <= Fixed::ZERO
+        || recession_rate <= Fixed::ZERO
+        || system_age <= Fixed::ZERO
+    {
+        return None;
+    }
+    // The static band: disrupted at or inside the Roche floor, stripped at or beyond the stable Hill fraction.
+    if moon_orbit <= roche_limit {
+        return Some(MoonSurvival::DisruptedAtFormation);
+    }
+    if moon_orbit >= stable_axis {
+        return Some(MoonSurvival::UnstableAtFormation);
+    }
+    // X = (13/2) * (rate/a0) * age, assembled in log-space (rate/a0 ~1e-10 underflows a direct product):
+    // ln X = ln(13/2) + ln(rate) - ln(a0) + ln(age). The (13/2) is the standard algebra of the a^(-11/2) tidal
+    // integral (integrating a^(11/2) da gives (2/13) a^(13/2)), not an authored parameter.
+    let thirteen_halves = Fixed::from_ratio(13, 2);
+    let ln_x = thirteen_halves
+        .ln()
+        .checked_add(recession_rate.ln())?
+        .checked_sub(moon_orbit.ln())?
+        .checked_add(system_age.ln())?;
+    let ln_ceiling = Fixed::from_int(31).checked_mul(Fixed::from_int(2).ln())?;
+    if ln_x >= ln_ceiling {
+        return None; // the evolution term is past the representable range; fail soft
+    }
+    let x = ln_x.exp();
+    // The exponent 2/13 of the closed-form tidal solution a(t) = a0 * (1 +- X)^(2/13).
+    let two_thirteenths = Fixed::from_ratio(2, 13);
+    if moon_orbit > corotation_radius {
+        // Recession: a grows. a_final = a0 * (1 + X)^(2/13). Past the stable bound within the age is instability.
+        let factor = Fixed::ONE.checked_add(x)?.powf(two_thirteenths);
+        let a_final = moon_orbit.checked_mul(factor)?;
+        if a_final >= stable_axis {
+            Some(MoonSurvival::RecedesToInstability)
+        } else {
+            Some(MoonSurvival::Retained)
+        }
+    } else if moon_orbit < corotation_radius {
+        // Decay: a shrinks. If (1 - X) has reached zero the moon has spiralled into the planet within the age.
+        let inner = Fixed::ONE.checked_sub(x)?;
+        if inner <= Fixed::ZERO {
+            return Some(MoonSurvival::DecaysToDisruption);
+        }
+        let a_final = moon_orbit.checked_mul(inner.powf(two_thirteenths))?;
+        if a_final <= roche_limit {
+            Some(MoonSurvival::DecaysToDisruption)
+        } else {
+            Some(MoonSurvival::Retained)
+        }
+    } else {
+        // Exactly at corotation: no tidal torque, the orbit is locked, so it stays in the band it formed in.
+        Some(MoonSurvival::Retained)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -558,5 +669,94 @@ mod tests {
         assert!((retrograde_e_planet_coeff().to_f64_lossy() - 1.0764).abs() < 1e-4);
         assert!((retrograde_e_sat_coeff().to_f64_lossy() - 0.9812).abs() < 1e-4);
         assert!((fluid_roche_coefficient().to_f64_lossy() - 2.44).abs() < 1e-4);
+    }
+
+    // The Earth-Moon survival inputs, all lengths in metres and the rate/age in the megayear time unit (so the
+    // 4.5 Gyr age is representable). The bounds are composed from the module's own primitives, so the test
+    // exercises the whole filter end to end. The Hill radius is passed in metres (~0.0098 AU) directly rather
+    // than converted through the AU constant, which exceeds the Q32.32 range.
+    fn earth_moon_case() -> (Fixed, Fixed, Fixed, Fixed, Fixed, Fixed) {
+        let r_planet = Fixed::from_int(6_371_000); // R_Earth, metres
+        let a = Fixed::from_int(384_400_000); // Earth-Moon distance, metres
+        let roche = roche_limit(Fixed::from_int(3344), Fixed::from_int(5514), r_planet).unwrap();
+        let r_hill_m = Fixed::from_int(1_466_000_000); // Earth Hill radius ~0.0098 AU, in metres
+        let stable = stable_semimajor_axis(r_hill_m, true, Fixed::ZERO, Fixed::ZERO).unwrap();
+        // The recession rate in metres per megayear (mean motion in radians per megayear: 84 rad/yr * 1e6).
+        let rate = tidal_recession_rate(
+            r(30, 100),
+            Fixed::from_int(12),
+            r(123, 10000),
+            Fixed::ONE,
+            r_planet,
+            a,
+            Fixed::from_int(84_000_000),
+        )
+        .unwrap();
+        let corotation = Fixed::from_int(20_000_000); // fast early-Earth synchronous radius, well inside the Moon
+        let age = Fixed::from_int(4500); // 4.5 Gyr in Myr
+        (a, roche, stable, corotation, rate, age)
+    }
+
+    /// The Earth-Moon system is RETAINED: the Moon forms above the Roche limit and below the stable Hill
+    /// fraction, and over 4.5 Gyr its outward tidal recession does not carry it past the stable bound. The whole
+    /// filter is composed from the module's own primitives (Roche, the Domingos band, the recession rate).
+    #[test]
+    fn the_earth_moon_survives_the_tidal_filter() {
+        let (a, roche, stable, corotation, rate, age) = earth_moon_case();
+        assert_eq!(
+            tidal_survival(a, roche, stable, corotation, rate, age).unwrap(),
+            MoonSurvival::Retained,
+            "the Moon survives 4.5 Gyr in the stable band"
+        );
+    }
+
+    /// The static band rejects the two formation-time failures: a moon at or inside the Roche limit is disrupted
+    /// into a ring, and a moon at or beyond the stable Hill fraction is stripped by the star.
+    #[test]
+    fn a_moon_outside_the_static_band_does_not_survive() {
+        let (_a, roche, stable, corotation, rate, age) = earth_moon_case();
+        // Inside the Roche limit: disrupted at formation.
+        let inside_roche = Fixed::from_int(5_000_000); // < ~9.48e6 m Roche
+        assert_eq!(
+            tidal_survival(inside_roche, roche, stable, corotation, rate, age).unwrap(),
+            MoonSurvival::DisruptedAtFormation
+        );
+        // Beyond the stable Hill fraction: stripped at formation.
+        let beyond_stable = Fixed::from_int(800_000_000); // > ~7.18e8 m stable bound
+        assert_eq!(
+            tidal_survival(beyond_stable, roche, stable, corotation, rate, age).unwrap(),
+            MoonSurvival::UnstableAtFormation
+        );
+    }
+
+    /// A close-in moon inside corotation decays: its orbit spirals inward under the tide and reaches the Roche
+    /// limit within the age (the Phobos fate), so it does not survive.
+    #[test]
+    fn a_close_moon_inside_corotation_decays_to_disruption() {
+        // A moon just above the Roche floor, inside a wide corotation radius, with enough tidal decay over the
+        // age that the (1 - X) term drives it inward to disruption.
+        let roche = Fixed::from_int(9_480_000);
+        let stable = Fixed::from_int(700_000_000);
+        let corotation = Fixed::from_int(100_000_000); // the moon at 1.2e7 m sits well inside corotation
+        let moon = Fixed::from_int(12_000_000);
+        let rate = Fixed::from_int(1000); // metres per megayear
+        let age = Fixed::from_int(4500);
+        assert_eq!(
+            tidal_survival(moon, roche, stable, corotation, rate, age).unwrap(),
+            MoonSurvival::DecaysToDisruption
+        );
+    }
+
+    /// Determinism (Principle 3) and fail-soft: the same inputs give the same verdict, and a non-positive input
+    /// returns `None` rather than a fabricated verdict.
+    #[test]
+    fn the_survival_filter_is_deterministic_and_fails_soft() {
+        let (a, roche, stable, corotation, rate, age) = earth_moon_case();
+        assert_eq!(
+            tidal_survival(a, roche, stable, corotation, rate, age),
+            tidal_survival(a, roche, stable, corotation, rate, age)
+        );
+        assert!(tidal_survival(Fixed::ZERO, roche, stable, corotation, rate, age).is_none());
+        assert!(tidal_survival(a, roche, stable, corotation, rate, Fixed::ZERO).is_none());
     }
 }
