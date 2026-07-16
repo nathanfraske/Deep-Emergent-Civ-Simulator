@@ -24,8 +24,8 @@
 //! - `civsim_materials::creep` (Mukherjee-Bird-Dorn): `eps_dot = A (sigma/G)^n (b/d)^p [D G b / (kT)]`, with `A`
 //!   DIMENSIONLESS, stress normalized by the shear modulus, grain size by the Burgers vector, and the Arrhenius
 //!   carried inside `D` (the freezer's jump rate). This is the DERIVED/ESTIMATOR rung: it evaluates for any
-//!   material with banked columns, and the owner's route makes its activation energy derive from the world's own
-//!   solidus (`E*` through the 3b class constant `g R T_m`).
+//!   material with banked columns, and its activation energy derives from the world's own material
+//!   through Form B (`E* = f * E_coh`, ruling #187), never the retired composite `g * R * T_m`.
 //! - THIS MODULE (Hirth and Kohlstedt): `eps_dot = A sigma^n d^-p f_H2O^r exp(-(E* + P V*)/(R T))`, with `A` in
 //!   the TABLE'S OWN UNITS, raw stress, an explicit Arrhenius, and a WATER-FUGACITY TERM the MBD form does not
 //!   have at all. This is the MEASURED/ANCHOR rung.
@@ -102,9 +102,9 @@ pub enum Modality {
     /// CLASS-DERIVED: a class-grade constant times a derived quantity, which the standing exponent rider ADMITS.
     ///
     /// THIS VARIANT IS A PRE-EMPTION, added before the gate could convict its own ladder's other leg. The
-    /// ESTIMATOR rung's activation energy is `E* = g * R * T_m`: `g` is measured-class and `T_m` is derived, so
-    /// the product is CLASS-GRADE IN THE EXPONENT, which is the same legal status the freezer already relies on,
-    /// with the band propagated. A gate admitting only `Measured | Fitted` is correct for H&K ROW INGESTION and
+    /// ESTIMATOR rung's activation energy is Form B's `E* = f * E_coh` (ruling #187): `f` is the per-class
+    /// vacancy fraction (reserved-with-basis, cited, keyed on bonding class) and `E_coh` is derived, so the
+    /// product is CLASS-GRADE IN THE EXPONENT, the same legal status the freezer already relies on, band propagated. A gate admitting only `Measured | Fitted` is correct for H&K ROW INGESTION and
     /// would be WRONG the moment the gate's scope reaches the estimator rung, failing that leg against a test
     /// written for its neighbour.
     ///
@@ -130,33 +130,6 @@ pub enum Modality {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct ClassDerivedWitness(());
 
-/// THE ESTIMATOR RUNG'S ACTIVATION ENERGY, and the only source of [`Modality::ClassDerived`]:
-/// `E* = g * R * T_m`, the 3b class constant against the world's OWN melting temperature.
-///
-/// This is what makes any material's creep derivable from its own solidus rather than from a table that only
-/// exists for olivine, so it is the leg an alien phase stands on. `g` is measured-class and `T_m` is derived, so
-/// the product is CLASS-GRADE IN THE EXPONENT, the same legal status the freezer relies on, band propagated.
-///
-/// `None` on a non-positive melting temperature or gas constant (no solidus, no route) or overflow. The returned
-/// [`ExponentInput`] carries the witness, so it is admitted to the exponent BECAUSE it was computed here, never
-/// because someone said so.
-pub fn class_derived_activation_energy(
-    class_constant_g: Fixed,
-    gas_constant_r: Fixed,
-    melting_point_k: Fixed,
-) -> Option<ExponentInput> {
-    if melting_point_k <= Fixed::ZERO || gas_constant_r <= Fixed::ZERO {
-        return None;
-    }
-    let value = class_constant_g
-        .checked_mul(gas_constant_r)?
-        .checked_mul(melting_point_k)?;
-    Some(ExponentInput {
-        value,
-        modality: Modality::ClassDerived(ClassDerivedWitness(())),
-    })
-}
-
 impl Modality {
     /// Whether a value of this modality may cross into the ARRHENIUS EXPONENT without escalation.
     ///
@@ -164,9 +137,11 @@ impl Modality {
     /// exponential: a 10 percent error in `E*` is a factor at lid temperatures, not a 10 percent shift. So the
     /// bar here is higher than elsewhere in the engine, deliberately, and it is checked at INGESTION rather than
     /// trusted at the call site.
+    ///
     /// The admitted set is `Measured | Fitted | ClassDerived`. The first two are the measured rung's; the third
-    /// is the ESTIMATOR rung's, pre-admitted per the standing exponent rider (a class-grade constant times a
-    /// derived quantity is class-grade in the exponent, the freezer's own precedent, band propagated).
+    /// is the ESTIMATOR rung's, pre-admitted per the standing exponent rider (Form B's `f * E_coh` is a
+    /// per-class reserved fraction times a derived cohesive energy, class-grade in the exponent, the freezer's
+    /// own precedent, band propagated).
     ///
     /// REFUSED: `Assumed`, `Hypothetical`, and bare `Estimated`. An assumed value inside an Arrhenius exponent
     /// is not a small sin, and a hypothetical one is a sentence someone turned into a number.
@@ -176,6 +151,49 @@ impl Modality {
             Modality::Measured | Modality::Fitted | Modality::ClassDerived(_)
         )
     }
+}
+
+/// THE ESTIMATOR RUNG'S ACTIVATION ENERGY, and the only source of [`Modality::ClassDerived`].
+///
+/// TAKES THE FORM-B BARRIER, `E* = f * E_coh`: the per-class vacancy fraction `f` times the derived Rose
+/// cohesive energy, computed by `civsim_materials::freezer::diffusion_barrier`.
+///
+/// # THE COMPOSITE `g * R * T_m` WAS RETIRED HERE, AND WHY MATTERS MORE THAN THAT IT WAS
+///
+/// This function first shipped computing `E* = g * R * T_m` from a caller-supplied `g`. That form was ALREADY
+/// SUPERSEDED by the project's own ruling #187 before it was written, which the freezer's header records: Form B
+/// "reuses the derived `E_coh` directly rather than routing through the composite `g * R * T_m`", because
+/// `g = k * f` with `k = E_coh/(R * T_m)`, so pulling `k` out is ONE DERIVATION HOP SHORTER AND ONE CORRELATION
+/// FEWER.
+///
+/// THE CORRELATION IS THE POINT, and it names a defect class: SAME-FACT-TWO-DOORS. `E_coh` and `T_m` are ONE
+/// PHYSICAL FACT, cohesion, wearing two variables. The composite `g` carries that fact inside its own
+/// calibration while `T_m` re-delivers it beside, so `g * R * T_m` consumes the same provenance THROUGH TWO
+/// DOORS. It is the derivation-level sibling of the diamond: two CARRIERS of one fact inside a single FORMULA,
+/// rather than two PROVIDERS of one fact across a codebase. Keying `g` per bonding class, which was the
+/// alternative on the table, would have HARDENED that hidden correlation under a per-class band worn as
+/// reassurance.
+///
+/// # THE SEAL'S HONEST REACH
+///
+/// [`ClassDerivedWitness`] still gates the grade: only this function mints it, so a convenient constant cannot
+/// dress itself in `ClassDerived` to walk past the exponent gate. But the seal CANNOT VERIFY ITS INPUT'S
+/// PROVENANCE, and the reason is structural: `civsim_materials` depends on `civsim_physics`, so this crate
+/// cannot call the freezer, and the barrier must arrive as a value. The witness therefore certifies HOW THE
+/// GRADE WAS OBTAINED (through this constructor) and NOT WHERE THE BARRIER CAME FROM. A caller passing a number
+/// that did not come from `diffusion_barrier` is lying to the type, and the type cannot catch it. That limit is
+/// named rather than papered over; closing it means moving this rung beside the freezer, which is a later
+/// question than this retirement.
+///
+/// `None` on a non-positive barrier (no barrier, no route) rather than a fabricated energy.
+pub fn class_derived_activation_energy(form_b_barrier: Fixed) -> Option<ExponentInput> {
+    if form_b_barrier <= Fixed::ZERO {
+        return None;
+    }
+    Some(ExponentInput {
+        value: form_b_barrier,
+        modality: Modality::ClassDerived(ClassDerivedWitness(())),
+    })
 }
 
 /// WATER CONTENT, CARRYING ITS REFERENCE FRAME IN ITS TYPE.
@@ -481,18 +499,15 @@ mod tests {
         // against a test written for its neighbour. This is the diamond-gate lesson applied BEFORE the fact: do
         // not build a gate that convicts your own ladder.
         // The grade is obtainable ONLY by computing it. There is no literal to write.
-        let e_star = class_derived_activation_energy(
-            Fixed::from_ratio(23, 10), // a class-grade g
-            Fixed::from_ratio(8314, 1000),
-            Fixed::from_int(1600), // the world's own T_m
-        )
-        .expect("the g*R*T_m route resolves");
+        // Form B's barrier, as freezer::diffusion_barrier(E_coh, f) would return it.
+        let e_star = class_derived_activation_energy(Fixed::from_int(240))
+            .expect("the Form B route resolves");
         assert!(
             e_star.modality.admitted_to_exponent(),
             "the estimator rung's g*R*T_m route must cross, or the ladder's other leg fails its neighbour's test"
         );
-        // The route REFUSES rather than fabricating when the world has no solidus to key on.
-        assert!(class_derived_activation_energy(Fixed::ONE, Fixed::ONE, Fixed::ZERO).is_none());
+        // The route REFUSES rather than fabricating when there is no barrier to key on.
+        assert!(class_derived_activation_energy(Fixed::ZERO).is_none());
         // AND IT WEAKENS NOTHING HERE, which is the half that makes the pre-emption safe rather than a loophole:
         // no H&K row carries the class-derived grade, so the measured rung's gate is untouched, and the row that
         // must fail still fails.
