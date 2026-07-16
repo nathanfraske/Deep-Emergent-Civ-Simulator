@@ -113,24 +113,16 @@ fn cross(u: &[Fixed; 3], v: &[Fixed; 3]) -> [Fixed; 3] {
     ]
 }
 
-/// The complementary error function for `x >= 0`, by Abramowitz and Stegun 7.1.26 (a fixed five-term rational
-/// times `exp(-x^2)`, maximum error 1.5e-7), fixed-form and deterministic. The Ewald real-space argument
-/// `alpha r` is always non-negative, so only this branch is needed; a negative input is reflected by
-/// `erfc(-x) = 2 - erfc(x)`.
+/// The complementary error function for `x >= 0`, by Abramowitz and Stegun 7.1.26. The implementation MOVED to
+/// [`Fixed::erfc`], the transcendental's proper home beside `exp`/`ln`/`sqrt`/`cbrt`/`powf`, because a second
+/// consumer arrived (the half-space cooling geotherm's `erf(z / (2 sqrt(kappa t)))`) and two copies of a fitted
+/// series are two things that can drift apart. This is now the delegation: the arithmetic is the same operations
+/// in the same order, so the Ewald sum and the Madelung constants are byte-identical across the move.
+///
+/// The Ewald real-space argument `alpha r` is always non-negative, so only that branch is exercised here; the
+/// reflection `erfc(-x) = 2 - erfc(x)` rides along in the shared implementation.
 fn erfc_nonneg(x: Fixed) -> Fixed {
-    if x < Fixed::ZERO {
-        return Fixed::from_int(2) - erfc_nonneg(Fixed::ZERO - x);
-    }
-    let p = Fixed::from_ratio(3_275_911, 10_000_000);
-    let a1 = Fixed::from_ratio(254_829_592, 1_000_000_000);
-    let a2 = Fixed::from_ratio(-284_496_736, 1_000_000_000);
-    let a3 = Fixed::from_ratio(1_421_413_741, 1_000_000_000);
-    let a4 = Fixed::from_ratio(-1_453_152_027, 1_000_000_000);
-    let a5 = Fixed::from_ratio(1_061_405_429, 1_000_000_000);
-    let t = Fixed::ONE / (Fixed::ONE + p * x);
-    // Horner: t * (a1 + t*(a2 + t*(a3 + t*(a4 + t*a5)))).
-    let poly = t * (a1 + t * (a2 + t * (a3 + t * (a4 + t * a5))));
-    poly * (Fixed::ZERO - x * x).exp()
+    x.erfc()
 }
 
 /// The electrostatic (Madelung) energy of the cell in reduced units (Coulomb constant 1), by Ewald's split.

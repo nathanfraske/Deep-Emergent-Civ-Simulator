@@ -3546,6 +3546,33 @@ pub fn heat_advection(
     }
 }
 
+/// The THERMAL BOUNDARY LAYER thickness, the conductive lid riding on a convecting interior:
+/// `L = d * Ra^(-1/3)`, written as `d / Ra^(1/3)`.
+///
+/// This is the classical boundary-layer scaling: convection carries heat through the interior efficiently, so
+/// the temperature drop concentrates into a thin conductive skin at the top, and the skin THINS as the flow
+/// grows more vigorous. A mantle at `Ra ~ 1e6` shears over a layer about a hundredth of its depth. The `-1/3`
+/// is the scaling's own exponent (it falls out of the boundary layer sitting at its own marginal stability),
+/// never an authored knob, and the cube root is the deterministic fixed-point [`Fixed::powf`].
+///
+/// TWO CONSUMERS SHARE THIS, which is why it is a named law rather than an inline expression: the convective
+/// driving stress reads it as the length over which the interior flow shears against the lid
+/// ([`convective_stress`]), and the LID GEOTHERM reads it as the depth over which the conductive profile spans
+/// from the surface to the interior's potential temperature ([`crate::geotherm`]). The stress and the geotherm
+/// must agree about how thick the lid is, so they read ONE derivation.
+///
+/// Clamped to at most the layer depth (a boundary layer cannot exceed the layer it forms in, a geometric
+/// bound), and falling back to the full depth when `Ra` is non-positive (no convection, so no boundary layer
+/// forms and the whole layer is the conductive one). Deterministic fixed-point.
+pub fn thermal_boundary_layer(depth: Fixed, rayleigh: Fixed) -> Fixed {
+    let ra_cube_root = rayleigh.powf(Fixed::from_ratio(1, 3));
+    if ra_cube_root > ZERO {
+        depth.checked_div(ra_cube_root).unwrap_or(depth).min(depth)
+    } else {
+        depth
+    }
+}
+
 /// The convective driving stress the interior flow exerts on the base of the lithosphere:
 /// `tau = eta * |v| / L`. The buoyant convective flow ([`stokes_velocity`]) shears against the overlying
 /// rigid lid, and the resulting stress competes with the lid's own yield strength (`mat.yield_strength`):

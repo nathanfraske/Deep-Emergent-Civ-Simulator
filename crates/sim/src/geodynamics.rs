@@ -200,24 +200,13 @@ pub fn column_readout(state: &ColumnState, p: &ColumnParams) -> ColumnReadout {
         p.ra_max,
     );
     let velocity = laws::stokes_velocity(delta_rho, p.gravity, p.radius, p.viscosity, p.v_max);
-    // The shear length is the thermal BOUNDARY LAYER thickness, DERIVED (gate ruling, #176): the boundary
-    // layer thins with convective vigor as `depth * Ra^(-1/3)`, so a vigorous mantle (Ra of order 1e6) shears
-    // over a layer about a hundredth of its depth, concentrating the driving stress. The cube root is the
-    // deterministic fixed-point `Fixed::powf(1/3)` the merged Sherwood and surface-tension laws already use
-    // (task #45 is a later GPU-shader-parity refinement of `powf`, not a blocker for this CPU derivation, and
-    // the interior is a deep-time cold path). Written as `depth / Ra^(1/3)` (`powf` takes a positive
-    // exponent), clamped to at most the layer depth (a boundary layer cannot exceed its own layer, a geometric
-    // bound) and falling back to the depth when Ra is non-positive (no convection, where the stress is zero
-    // regardless).
-    let ra_cube_root = rayleigh.powf(Fixed::from_ratio(1, 3));
-    let length_scale = if ra_cube_root > Fixed::ZERO {
-        p.depth
-            .checked_div(ra_cube_root)
-            .unwrap_or(p.depth)
-            .min(p.depth)
-    } else {
-        p.depth
-    };
+    // The shear length is the thermal BOUNDARY LAYER thickness, DERIVED (gate ruling, #176): the boundary layer
+    // thins with convective vigor as `depth * Ra^(-1/3)`, so a vigorous mantle (Ra of order 1e6) shears over a
+    // layer about a hundredth of its depth, concentrating the driving stress. The derivation MOVED to
+    // `laws::thermal_boundary_layer` when the LID GEOTHERM became its second consumer: the driving stress and
+    // the geotherm must agree about how thick the lid is, so they read ONE law rather than two copies of the
+    // same expression. Byte-identical across the move (the same operations in the same order).
+    let length_scale = laws::thermal_boundary_layer(p.depth, rayleigh);
     let convective_stress =
         laws::convective_stress(p.viscosity, velocity, length_scale, p.stress_max);
     let next = convection_step(state, p);

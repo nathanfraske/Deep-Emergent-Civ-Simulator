@@ -577,6 +577,42 @@ impl Fixed {
         }
         y.mul(self.ln()).exp()
     }
+
+    /// The COMPLEMENTARY ERROR FUNCTION `erfc(x) = 1 - erf(x)`, by Abramowitz and Stegun 7.1.26 (a
+    /// fixed five-term rational in `t = 1/(1 + p x)` times `exp(-x^2)`, maximum error 1.5e-7),
+    /// fixed-form and deterministic. Negative arguments reflect through `erfc(-x) = 2 - erfc(x)`,
+    /// so the whole real line is covered by the one non-negative branch the fit is stated for.
+    ///
+    /// The coefficients are the A&S 7.1.26 fit itself, the form's own numbers rather than authored
+    /// values: this is a named approximation carrying its citation, the same standing as the Petit
+    /// surface's ensemble constants or the Kelvin series' Euler-Mascheroni gamma.
+    ///
+    /// It lives here, beside `exp`/`ln`/`sqrt`/`cbrt`/`powf`, because it is a transcendental of the
+    /// numeric type rather than a fact about any one domain. Two consumers need it and must not
+    /// drift apart: Ewald's real-space sum (where the argument `alpha r` is always non-negative) and
+    /// the half-space cooling geotherm (`erf(z / (2 sqrt(kappa t)))`, the lid profile).
+    pub fn erfc(self) -> Fixed {
+        if self < Fixed::ZERO {
+            return Fixed::from_int(2) - (Fixed::ZERO - self).erfc();
+        }
+        let p = Fixed::from_ratio(3_275_911, 10_000_000);
+        let a1 = Fixed::from_ratio(254_829_592, 1_000_000_000);
+        let a2 = Fixed::from_ratio(-284_496_736, 1_000_000_000);
+        let a3 = Fixed::from_ratio(1_421_413_741, 1_000_000_000);
+        let a4 = Fixed::from_ratio(-1_453_152_027, 1_000_000_000);
+        let a5 = Fixed::from_ratio(1_061_405_429, 1_000_000_000);
+        let t = Fixed::ONE / (Fixed::ONE + p * self);
+        // Horner: t * (a1 + t*(a2 + t*(a3 + t*(a4 + t*a5)))).
+        let poly = t * (a1 + t * (a2 + t * (a3 + t * (a4 + t * a5))));
+        poly * (Fixed::ZERO - self * self).exp()
+    }
+
+    /// The ERROR FUNCTION `erf(x) = 1 - erfc(x)`, composed from the pinned [`Fixed::erfc`] so the
+    /// two are one implementation and cannot disagree. `erf(0) = 0`, `erf(x) -> 1` as `x` grows, and
+    /// it is odd (`erf(-x) = -erf(x)`, inherited from `erfc`'s reflection).
+    pub fn erf(self) -> Fixed {
+        Fixed::ONE - self.erfc()
+    }
 }
 
 impl Add for Fixed {
