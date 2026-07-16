@@ -297,6 +297,43 @@ impl SolarAbundances {
     pub fn elements(&self) -> impl Iterator<Item = &str> + '_ {
         self.rows.keys().map(String::as_str)
     }
+
+    /// A COPY of this pattern with every METAL (atomic number `Z >= 3`, everything heavier than helium) shifted by
+    /// `delta_dex` on the `log-epsilon` scale, hydrogen (`Z = 1`) and helium (`Z = 2`) held fixed. This is the
+    /// first-order `[Fe/H]` metallicity scaling: `[Fe/H]` moves the AMOUNT of metals relative to hydrogen, so a draw of
+    /// `[Fe/H] = +0.2` adds `+0.2` dex to every metal's abundance (a factor `10^0.2` more metal), and `[Fe/H] = -0.5`
+    /// subtracts `0.5` dex (a metal-poor pattern). Both the photospheric and meteoritic columns shift together so the
+    /// two grades stay consistent; the per-element `sigma` uncertainties are untouched (a shift of the value, not of its
+    /// error). `delta_dex = 0` returns a byte-identical copy (adding the fixed-point zero is exact), which is what pins
+    /// the solar/Mirror instance to the unshifted AGSS09 pattern through the same call.
+    ///
+    /// SCOPE. This is the UNIFORM amount-scaling the `[Fe/H]` link owns: it leaves every inter-metal RATIO (Fe/Si,
+    /// Mg/Si, C/O) unchanged, so the KIND of world (its silicate family, its core fraction, its carbide-versus-silicate
+    /// branch) is untouched here. Those are the later conditional-chain links (`[alpha/Fe]`, Mg/Si, C/O), which
+    /// differentiate individual elements on top of this scaling. Keying on `Z` (not a fixed element list) means an
+    /// alien pattern with unusual elements scales as data, never a rewrite (Prime Directive 7).
+    pub fn scaled_metals_by_dex(&self, delta_dex: Fixed) -> SolarAbundances {
+        let mut rows = self.rows.clone();
+        for row in rows.values_mut() {
+            // Metals are everything heavier than helium (Z >= 3); H (Z=1) and He (Z=2) are not scaled by [Fe/H].
+            if row.z >= 3 {
+                if let Some(v) = row.log_eps_photosphere {
+                    row.log_eps_photosphere = Some(v + delta_dex);
+                }
+                if let Some(v) = row.log_eps_meteorite {
+                    row.log_eps_meteorite = Some(v + delta_dex);
+                }
+            }
+        }
+        SolarAbundances {
+            rows,
+            scale: self.scale.clone(),
+            x_mass_fraction: self.x_mass_fraction.clone(),
+            y_mass_fraction: self.y_mass_fraction.clone(),
+            z_mass_fraction: self.z_mass_fraction.clone(),
+            z_over_x: self.z_over_x.clone(),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -458,5 +495,64 @@ source = "photospheric"
             SolarAbundances::from_toml_str(bad),
             Err(SolarAbundanceError::Duplicate(_))
         ));
+    }
+
+    #[test]
+    fn scaling_metals_by_zero_dex_is_byte_identical() {
+        // The [Fe/H] = 0 (solar/Mirror pin) scaling is a byte-identical copy: adding the fixed-point zero to every
+        // metal is exact, and hydrogen and helium are never touched. This is what keeps the pinned globe and the run
+        // pins bit-exact.
+        let solar = table();
+        let scaled = solar.scaled_metals_by_dex(Fixed::ZERO);
+        for sym in solar.elements() {
+            assert_eq!(
+                scaled.log_eps_photosphere(sym).map(|f| f.to_bits()),
+                solar.log_eps_photosphere(sym).map(|f| f.to_bits()),
+                "photospheric byte-identical at 0 dex for {sym}"
+            );
+            assert_eq!(
+                scaled.log_eps_meteorite(sym).map(|f| f.to_bits()),
+                solar.log_eps_meteorite(sym).map(|f| f.to_bits()),
+                "meteoritic byte-identical at 0 dex for {sym}"
+            );
+        }
+    }
+
+    #[test]
+    fn scaling_metals_shifts_metals_and_holds_hydrogen_and_helium() {
+        // A nonzero shift moves every metal (Z >= 3) by exactly delta on the log-eps scale and leaves H (Z=1) and He
+        // (Z=2) fixed: the first-order [Fe/H] amount-scaling. Inter-metal ratios (here Fe - O) are preserved, so the
+        // KIND of world is untouched (that is the later links' job).
+        let solar = table();
+        let delta = Fixed::from_ratio(3, 10); // +0.3 dex
+        let scaled = solar.scaled_metals_by_dex(delta);
+        // Hydrogen unchanged.
+        assert_eq!(
+            scaled.preferred("H").map(|f| f.to_bits()),
+            solar.preferred("H").map(|f| f.to_bits()),
+            "hydrogen is not a metal and is unchanged"
+        );
+        // Helium unchanged.
+        assert_eq!(
+            scaled.preferred("He").map(|f| f.to_bits()),
+            solar.preferred("He").map(|f| f.to_bits()),
+            "helium is not a metal and is unchanged"
+        );
+        // Iron shifted by exactly delta.
+        let fe0 = solar.preferred("Fe").expect("Fe present");
+        let fe1 = scaled.preferred("Fe").expect("Fe present scaled");
+        assert_eq!(
+            fe1.to_bits(),
+            (fe0 + delta).to_bits(),
+            "iron shifted by exactly +0.3 dex"
+        );
+        // The Fe - O contrast (an inter-metal ratio) is preserved: both shifted by the same delta.
+        let o0 = solar.preferred("O").expect("O present");
+        let o1 = scaled.preferred("O").expect("O present scaled");
+        assert_eq!(
+            (fe1 - o1).to_bits(),
+            (fe0 - o0).to_bits(),
+            "the Fe/O ratio (an inter-metal contrast) is preserved by uniform metal scaling"
+        );
     }
 }

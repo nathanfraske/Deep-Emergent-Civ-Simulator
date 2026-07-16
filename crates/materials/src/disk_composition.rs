@@ -49,7 +49,8 @@
 //! on stellar mass, generation, and metallicity history); this datum is the initial-condition rung beneath it, the
 //! seam where such a derivation would plug in. Until it lands, the pattern is read as per-world data.
 
-use civsim_core::Fixed;
+use civsim_core::gauss::{gaussian, GaussApprox};
+use civsim_core::{splitmix64, Fixed, Rng};
 use civsim_physics::solar_abundances::{SolarAbundanceError, SolarAbundances};
 
 /// A world's DISK COMPOSITION: the elemental abundance pattern its star and disk formed from, the initial condition
@@ -62,6 +63,12 @@ use civsim_physics::solar_abundances::{SolarAbundanceError, SolarAbundances};
 pub struct DiskComposition {
     label: String,
     abundances: SolarAbundances,
+    /// The star model's metallicity ratio `Z / Z_sun` for this datum, when the datum DECLARES one: [`Fixed::ONE`] for
+    /// the solar/Mirror instance, `10^[Fe/H]` for a DRAWN composition (the generator), and `None` for a bare
+    /// [`DiskComposition::from_pattern`] pattern that carries no declared metallicity (the honest gap the plumbing
+    /// commit held open, now filled by the draw for drawn worlds). [`DiskComposition::metallicity_ratio_to_solar`]
+    /// returns it directly, so a drawn `Z` is a stored datum rather than an inference off the abundance metadata.
+    metallicity_ratio: Option<Fixed>,
 }
 
 impl DiskComposition {
@@ -73,6 +80,10 @@ impl DiskComposition {
         DiskComposition {
             label: label.into(),
             abundances,
+            // A bare pattern declares no metallicity ratio: the honest `None` the plumbing commit held open. A world
+            // that wants a declared `Z / Z_sun` uses [`DiskComposition::mirror`] (unity) or [`DiskComposition::draw`]
+            // (the generator's `10^[Fe/H]`).
+            metallicity_ratio: None,
         }
     }
 
@@ -86,6 +97,43 @@ impl DiskComposition {
         Ok(DiskComposition {
             label: "mirror-solar".to_string(),
             abundances: SolarAbundances::standard()?,
+            // The solar instance: Z == Z_sun, so the ratio is unity BY CONSTRUCTION, no value chosen. This equals the
+            // value the pinned chain produces ([`Environment::local_disk_solar_pin`] draws [Fe/H] = 0, so 10^0 = 1),
+            // so `mirror()` and the pinned draw are byte-identical (proven by test).
+            metallicity_ratio: Some(Fixed::ONE),
+        })
+    }
+
+    /// DRAW a per-world disk composition from the composition-draw CHAIN, conditioned on the birth `environment` and
+    /// keyed on the `world_seed`. This is the GENERATOR (Stage-0, path 1): two unpinned seeds draw DIFFERENT
+    /// compositions for a DERIVED reason (their `[Fe/H]` differs), so worlds stop looking the same the moment they stop
+    /// being fed the one authored solar pattern.
+    ///
+    /// The chain is ordered by nucleosynthetic causality (never independent marginals). This builds the two OUTERMOST
+    /// links: LINK 0 the birth ENVIRONMENT (the `environment` argument, the local disk the tagged default), and LINK 1
+    /// the metallicity `[Fe/H]` drawn from that environment's selection-corrected MDF ([`Environment::draw_fe_h`]). The
+    /// draw becomes a composition by the definitional conversion `Z / Z_sun = 10^[Fe/H]` (stored as the datum's
+    /// metallicity ratio) and by scaling the solar pattern's metals by `[Fe/H]`
+    /// ([`SolarAbundances::scaled_metals_by_dex`]), so the condensation, the accretion mass, and the bulk density all
+    /// read the drawn `Z`. The later links (`[alpha/Fe]`, C/O, s/r) differentiate individual elements on top of this
+    /// amount-scaling.
+    ///
+    /// THE MIRROR PINS THROUGH THIS SAME PATH: [`Environment::local_disk_solar_pin`] pins `[Fe/H] = 0`, so
+    /// `Z / Z_sun = 10^0 = 1` exactly ([`ten_pow`] guarantees the identity) and the metal shift is `+0` (byte-identical
+    /// to the solar pattern). The solar instance is thus the chain evaluated at its pin, not a bypass. `None` (error)
+    /// only if the solar anchor fails to load.
+    pub fn draw(environment: &Environment, world_seed: u64) -> Result<Self, SolarAbundanceError> {
+        let fe_h = environment.draw_fe_h(world_seed);
+        // Z / Z_sun = 10^[Fe/H], the definitional conversion; exactly ONE when [Fe/H] pins to 0.
+        let z_ratio = ten_pow(fe_h);
+        // Scale the solar pattern's metals by [Fe/H] (the amount-scaling this link owns); a +0 shift for the pin is
+        // byte-identical to the solar pattern.
+        let pattern = SolarAbundances::standard()?.scaled_metals_by_dex(fe_h);
+        Ok(DiskComposition {
+            // Provenance only (non-canonical): the environment and the world seed that produced this draw.
+            label: format!("{}-seed-{world_seed:016x}", environment.label()),
+            abundances: pattern,
+            metallicity_ratio: Some(z_ratio),
         })
     }
 
@@ -104,18 +152,149 @@ impl DiskComposition {
     /// reads, sourced from THIS per-world datum rather than a hardcoded `Fixed::ONE` at the call site. The
     /// SOLAR INSTANCE ([`DiskComposition::mirror`]) returns exactly [`Fixed::ONE`]: its heavy-element mass
     /// fraction IS the pinned solar anchor's (`Z == Z_sun`), so the ratio is UNITY BY CONSTRUCTION, no value
-    /// chosen and none fabricated. A datum carrying a DIFFERENT, drawn `Z` has no numeric ratio here yet
-    /// (`None`): supplying `Z / Z_sun` for a drawn composition is the abundance-DRAW generator's work (a
-    /// separate commit gated on the dispersion fetch), the honest letter-versus-substance gap held open at this
-    /// seam rather than papered over. `None` also if the solar anchor fails to load.
+    /// chosen and none fabricated. A DRAWN composition ([`DiskComposition::draw`]) returns `10^[Fe/H]`, the
+    /// drawn metallicity ratio (the generator, this commit). A bare [`DiskComposition::from_pattern`] pattern
+    /// declares no ratio and returns `None` (the honest gap, unchanged). The value is a STORED datum, read
+    /// straight from the field rather than inferred from the abundance metadata.
     pub fn metallicity_ratio_to_solar(&self) -> Option<Fixed> {
-        let solar = SolarAbundances::standard().ok()?;
-        if self.abundances.z_mass_fraction() == solar.z_mass_fraction() {
-            // The solar instance: Z / Z_sun = 1 exactly, unity forced by the datum resolving to the anchor.
-            return Some(Fixed::ONE);
+        self.metallicity_ratio
+    }
+}
+
+// ── The composition-draw chain: LINK 0 (environment) and LINK 1 ([Fe/H]) ─────────────────────────────────────────
+
+/// The `[Fe/H]` MDF PEAK (dex) for the LOCAL Milky Way thin-plus-thick disk (the tagged default environment). FETCHED:
+/// the recalibrated Geneva-Copenhagen survey MDF (the largest kinematically-unbiased solar-neighbourhood sample) peaks
+/// NEAR THE SOLAR value, and the SEGUE selection-corrected reference MDF concurs (Casagrande et al. 2011, A&A 530 A138,
+/// arXiv 1103.4651; Schlesinger et al. 2012, ApJ 761 160). On the `[Fe/H]` scale the solar value is 0 by definition, so
+/// the near-solar peak IS `[Fe/H] = 0`. The Sun sits at the mode of its own neighbourhood's distribution, which is why
+/// the Mirror pin (`[Fe/H] = 0`) coincides with the peak. This is the population machinery's one calibrated instance
+/// (the MMSN-pattern discipline), not a per-world knob.
+const LOCAL_DISK_FE_H_PEAK_DEX: Fixed = Fixed::ZERO;
+
+/// The intrinsic 1-sigma SCATTER (dex) of the local `[Fe/H]` MDF, ~0.20 dex, real and present at all ages (Casagrande
+/// et al. 2011; the SEGUE selection-corrected reference concurs, Schlesinger et al. 2012). This is the band the draw
+/// carries; the metal-poor and metal-rich tails ship with it, never clipped. `0.20 = 20/100`.
+const LOCAL_DISK_FE_H_SIGMA_DEX: Fixed = Fixed::from_int(20).div(Fixed::from_int(100));
+
+/// The name of the `[Fe/H]` link, hashed to key its OWN draw slot (steer 2, the per-link named sub-slot).
+const LINK_FE_H: &str = "metallicity_fe_h";
+
+/// The Gaussian approximation the `[Fe/H]` draw uses: the project's stamped canonical method (design 25.10), the sum of
+/// 12 counter-keyed unit draws (unit variance, mean zero, +-6 sigma bound). This is the sampler's numerical METHOD (a
+/// project identity, the same `k = 12` the genome spine uses), NOT a distribution parameter; the distribution's mean
+/// and scatter are the fetched MDF values above.
+const FE_H_GAUSS_METHOD: GaussApprox = GaussApprox::SumOfUniforms { k: 12 };
+
+/// `10^x` in fixed point, with the exact identity `10^0 = 1` guaranteed so the Mirror pin (`[Fe/H] = 0`) yields exactly
+/// [`Fixed::ONE`] (byte-identity of the pinned globe and the run pins). For a nonzero draw it is the deterministic
+/// [`Fixed::powf`] (`Fixed::powf` already returns exactly ONE at 0, but the guard states the identity and removes any
+/// dependence on the series edge).
+fn ten_pow(x: Fixed) -> Fixed {
+    if x == Fixed::ZERO {
+        return Fixed::ONE;
+    }
+    Fixed::from_int(10).powf(x)
+}
+
+/// A CONTENT-HASH key for a chain link's draw slot: an FNV-1a fold of the link NAME, mixed through the SplitMix64
+/// finalizer. Each link draws from `Rng::for_coords(world_seed, &[link_slot_key(name)])`, a stream keyed on the world
+/// seed AND the link's own name, so the links are mutually independent: adding a new link (a new name, a new key)
+/// cannot touch an existing link's realization for an existing seed (steer 2, proven by the per-link-slot invariant
+/// test).
+fn link_slot_key(name: &str) -> u64 {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325; // FNV-1a offset basis
+    for b in name.bytes() {
+        h ^= b as u64;
+        h = h.wrapping_mul(0x0000_0100_0000_01b3); // FNV-1a prime
+    }
+    splitmix64(h)
+}
+
+/// LINK 0, the birth ENVIRONMENT: the outermost link of the composition-draw chain, the chemical environment the natal
+/// cloud belonged to. It carries the conditioning the `[Fe/H]` link reads: the MDF peak and scatter, and (for the
+/// Mirror) the solar pin. This is a REAL AXIS, not a variant with one inhabitant: the local Milky Way disk is the
+/// tagged DEFAULT, and the halo (alpha-enhanced, s-poor at low iron), the bulge (high `[Fe/H]` with high
+/// `[alpha/Fe]`), and the Magellanic / dwarf-galaxy metallicities (mineralogy-class-flipping) are the other values,
+/// each a fetched MDF that CONVICTS a local-only draw (PIPELINE_FETCHES.md section 9.1). This slice ships the local-disk
+/// default and its solar pin, plus [`Environment::from_mdf`], a test-input constructor the suite uses to prove the axis
+/// re-conditions; the other environments plug in as data (their fetched mean and scatter) with no code change.
+///
+/// Abundances condition on ENVIRONMENT and EPOCH, never on stellar mass (the natal cloud is upstream of the stellar
+/// IMF), so an FGK-measured MDF legally serves a draw for a star of any mass, an M dwarf included. EPOCH is the next
+/// conditioner (the birth-environment slot the 26Al draw already uses is where it plugs in); this slice conditions on
+/// environment alone and flags epoch as that next link.
+#[derive(Debug, Clone)]
+pub struct Environment {
+    label: String,
+    /// The `[Fe/H]` MDF peak (dex) for this environment (fetched).
+    fe_h_mean: Fixed,
+    /// The `[Fe/H]` MDF 1-sigma scatter (dex) for this environment (fetched); the tail ships with it, never clipped.
+    fe_h_sigma: Fixed,
+    /// When `Some`, `[Fe/H]` is PINNED to this value and NOT drawn: the solar/Mirror pin routes through the chain at
+    /// its pinned value rather than around it.
+    fe_h_pin: Option<Fixed>,
+}
+
+impl Environment {
+    /// The tagged DEFAULT environment: the local Milky Way thin-plus-thick disk (the solar neighbourhood). Its
+    /// `[Fe/H]` draws from the fetched selection-corrected MDF (peak near solar, ~0.20 dex scatter). The population
+    /// machinery is universal; the solar-neighbourhood values are its one calibrated instance (the MMSN-pattern
+    /// discipline).
+    pub fn local_disk() -> Self {
+        Environment {
+            label: "local-disk".to_string(),
+            fe_h_mean: LOCAL_DISK_FE_H_PEAK_DEX,
+            fe_h_sigma: LOCAL_DISK_FE_H_SIGMA_DEX,
+            fe_h_pin: None,
         }
-        // A drawn, non-solar Z: the numeric ratio arrives with the generator commit (path 1). Held open, never faked.
-        None
+    }
+
+    /// The local-disk environment with `[Fe/H]` PINNED to the solar value (0), the Mirror's pin. The chain evaluates at
+    /// the pin (`10^0 = 1`, the solar pattern unshifted), so the solar instance is the chain at its pinned value, never
+    /// a bypass. Every axis exposes this same pin interface, so the Mirror pins THROUGH the chain on every link.
+    pub fn local_disk_solar_pin() -> Self {
+        Environment {
+            label: "local-disk-solar-pin".to_string(),
+            fe_h_mean: LOCAL_DISK_FE_H_PEAK_DEX,
+            fe_h_sigma: LOCAL_DISK_FE_H_SIGMA_DEX,
+            fe_h_pin: Some(Fixed::ZERO),
+        }
+    }
+
+    /// A TEST-INPUT environment with an explicit MDF mean and scatter (authored-and-legal by definition: a test input,
+    /// not world content). The suite uses it to prove the `[Fe/H]` link RE-CONDITIONS on the environment (a shifted
+    /// mean shifts the ensemble), the difference between a real axis and a comment promising one. It is also the shape
+    /// the fetched halo / bulge / Magellanic environments take when they land (their own fetched mean and scatter).
+    pub fn from_mdf(label: impl Into<String>, fe_h_mean: Fixed, fe_h_sigma: Fixed) -> Self {
+        Environment {
+            label: label.into(),
+            fe_h_mean,
+            fe_h_sigma,
+            fe_h_pin: None,
+        }
+    }
+
+    /// This environment's provenance label.
+    pub fn label(&self) -> &str {
+        &self.label
+    }
+
+    /// LINK 1: draw (or read the pin for) the metallicity `[Fe/H]` for a world, conditioned on THIS environment and
+    /// keyed on the `world_seed`. When the environment pins `[Fe/H]` (the Mirror), the pin is returned and NO draw is
+    /// consumed. Otherwise `[Fe/H]` is a Gaussian deviate at the environment's MDF peak and scatter, drawn from THIS
+    /// link's own content-hash-keyed slot (the world seed folded with the link-name hash, [`link_slot_key`]), so
+    /// landing a later link never shifts an already-drawn `[Fe/H]` for an existing seed. The Gaussian is the project's
+    /// canonical deterministic approximation ([`FE_H_GAUSS_METHOD`]): mean-zero, unit-variance, bit-identical on any
+    /// machine, tails bounded to +-6 sigma (+-1.2 dex here, far beyond the physical local MDF range, so the physical
+    /// metal-poor and metal-rich tails are carried, not clipped). There is NO accept/reject loop: a draw is never
+    /// resampled (the guards-hold-never-reroll discipline).
+    pub fn draw_fe_h(&self, world_seed: u64) -> Fixed {
+        if let Some(pin) = self.fe_h_pin {
+            return pin;
+        }
+        let slot = Rng::for_coords(world_seed, &[link_slot_key(LINK_FE_H)]);
+        gaussian(&slot, 0, self.fe_h_mean, self.fe_h_sigma, FE_H_GAUSS_METHOD)
     }
 }
 
@@ -172,10 +351,10 @@ mod tests {
     }
 
     #[test]
-    fn a_drawn_non_solar_metallicity_has_no_ratio_until_the_generator() {
-        // A datum whose Z differs from the solar anchor (here a pattern that carries no Z, standing in for a
-        // drawn composition) has no numeric ratio at this seam yet: the generator commit supplies it. The honest
-        // gap is a None, never a fabricated ratio.
+    fn a_bare_from_pattern_datum_declares_no_metallicity_ratio() {
+        // A BARE `from_pattern` datum declares no metallicity ratio: `None`, the honest gap, never a fabricated ratio.
+        // The generator fills the ratio through `DiskComposition::draw` (10^[Fe/H]), NOT through `from_pattern`, so a
+        // hand-built pattern that names no Z stays `None`. (Proven still-honest after the generator landed.)
         let no_z_pattern = r#"
 [[abundance]]
 symbol = "H"
@@ -195,7 +374,7 @@ source = "photospheric"
         assert_eq!(
             disk.metallicity_ratio_to_solar(),
             None,
-            "a non-solar Z has no ratio until the generator commit fills it"
+            "a bare from_pattern datum declares no ratio (the generator's draw supplies one)"
         );
     }
 
@@ -319,6 +498,194 @@ source = "photospheric"
         assert!(
             (t50 - lodders_fe).abs() < 30.0,
             "the Mirror-datum-sourced Fe T50 ({t50:.0} K) reproduces the held-out Lodders front ({lodders_fe:.0} K) within the inter-dataset +-30 K band"
+        );
+    }
+
+    // ── The composition-draw chain: LINK 0 (environment) and LINK 1 ([Fe/H]) ─────────────────────────────────────
+
+    #[test]
+    fn the_fe_h_ensemble_reproduces_the_local_disk_mdf_within_band() {
+        // STEER 1, the LOAD-BEARING test: acceptance is DISTRIBUTIONAL, not two-seeds-differ. An ensemble of [Fe/H]
+        // draws over many seeds must reproduce the FETCHED selection-corrected local MDF (its near-solar mean and
+        // ~0.20 dex scatter) WITHIN its band: the generator hindcasting its own source (Casagrande 2011 / Schlesinger
+        // 2012). A broken sampler with the wrong dispersion fails HERE even though it would pass a smoke test.
+        let env = Environment::local_disk();
+        let n = 20_000u64;
+        let mut sum = 0.0f64;
+        let mut sumsq = 0.0f64;
+        for seed in 0..n {
+            let fe_h = env.draw_fe_h(seed).to_f64_lossy();
+            sum += fe_h;
+            sumsq += fe_h * fe_h;
+        }
+        let nf = n as f64;
+        let mean = sum / nf;
+        let sigma = (sumsq / nf - mean * mean).sqrt();
+        assert!(
+            mean.abs() < 0.02,
+            "the ensemble [Fe/H] mean reconstructs the near-solar MDF peak (0.0): got {mean:.4}"
+        );
+        assert!(
+            (sigma - 0.20).abs() < 0.02,
+            "the ensemble [Fe/H] scatter reconstructs the fetched ~0.20 dex intrinsic scatter: got {sigma:.4}"
+        );
+    }
+
+    #[test]
+    fn adding_a_later_link_never_shifts_the_drawn_fe_h_for_a_seed() {
+        // STEER 2: per-link NAMED sub-slots, never a shared sequential stream. Adding a chain link (its own
+        // name-keyed slot) must NEVER change an already-drawn [Fe/H] for an existing seed. Simulate landing an
+        // unrelated later link ([alpha/Fe]) by consuming a draw from ITS slot, and assert [Fe/H] is bit-identical
+        // with and without that consumption (it is, because each link is a pure function of the seed and its own
+        // name-key, with no shared cursor).
+        let env = Environment::local_disk();
+        let seed = 0x1234_5678_9abc_def0u64;
+        let fe_h_alone = env.draw_fe_h(seed);
+        let alpha_slot = Rng::for_coords(seed, &[link_slot_key("alpha_fe")]);
+        let _later = gaussian(&alpha_slot, 0, Fixed::ZERO, Fixed::ONE, FE_H_GAUSS_METHOD);
+        let fe_h_after = env.draw_fe_h(seed);
+        assert_eq!(
+            fe_h_alone.to_bits(),
+            fe_h_after.to_bits(),
+            "the [Fe/H] realization is bit-identical whether or not a later link's slot is consumed"
+        );
+        assert_ne!(
+            link_slot_key(LINK_FE_H),
+            link_slot_key("alpha_fe"),
+            "each named link keys a distinct slot, so they cannot alias"
+        );
+    }
+
+    #[test]
+    fn the_fe_h_link_reconditions_on_the_environment() {
+        // STEER 3: environment is an INTERFACE the tests exercise, not a variant with one inhabitant. A test-input
+        // environment with a SHIFTED mean must shift the ENSEMBLE mean of the [Fe/H] draw (the link re-conditions on
+        // the environment), the difference between a real axis and a comment promising one. This is the shape the
+        // fetched halo/bulge/Magellanic environments take when they land.
+        let default_env = Environment::local_disk();
+        let shifted = Environment::from_mdf(
+            "test-metal-poor",
+            Fixed::from_int(-1).div(Fixed::from_int(2)), // mean [Fe/H] = -0.5, a test input (authored-and-legal)
+            LOCAL_DISK_FE_H_SIGMA_DEX,
+        );
+        let n = 8000u64;
+        let ens_mean = |env: &Environment| -> f64 {
+            let mut s = 0.0f64;
+            for seed in 0..n {
+                s += env.draw_fe_h(seed).to_f64_lossy();
+            }
+            s / n as f64
+        };
+        let m_default = ens_mean(&default_env);
+        let m_shifted = ens_mean(&shifted);
+        assert!(
+            m_default.abs() < 0.02,
+            "the default environment centers the ensemble near solar: {m_default:.4}"
+        );
+        assert!(
+            (m_shifted - (-0.5)).abs() < 0.02,
+            "the shifted-mean environment re-conditions the ensemble to its own mean -0.5: {m_shifted:.4}"
+        );
+        assert!(
+            m_shifted < m_default - 0.4,
+            "the shifted-mean environment moves the ensemble metal-poor (real re-conditioning, not a no-op)"
+        );
+    }
+
+    #[test]
+    fn the_mirror_pins_through_the_chain_byte_identical_to_mirror() {
+        // STEER 4: the Mirror pins THROUGH the chain, not around it. Drawing with the solar-pin environment yields
+        // exactly the solar pattern and Z/Z_sun = ONE, byte-identical to DiskComposition::mirror() (so the default
+        // globe and the run pins stay byte-identical). The seed is irrelevant under the pin (no draw is consumed).
+        let pinned = DiskComposition::draw(&Environment::local_disk_solar_pin(), 0xDEAD_BEEF)
+            .expect("the pinned draw resolves");
+        let mirror = DiskComposition::mirror().expect("mirror loads");
+        assert_eq!(
+            pinned.metallicity_ratio_to_solar(),
+            Some(Fixed::ONE),
+            "the pinned draw's Z/Z_sun is exactly ONE (10^0)"
+        );
+        assert_eq!(mirror.metallicity_ratio_to_solar(), Some(Fixed::ONE));
+        // The abundance pattern is byte-identical to the solar pattern on every element and both columns.
+        let solar = SolarAbundances::standard().expect("solar loads");
+        for sym in solar.elements() {
+            assert_eq!(
+                pinned
+                    .pattern()
+                    .log_eps_photosphere(sym)
+                    .map(|f| f.to_bits()),
+                mirror
+                    .pattern()
+                    .log_eps_photosphere(sym)
+                    .map(|f| f.to_bits()),
+                "pinned photospheric log-eps is byte-identical to mirror for {sym}"
+            );
+            assert_eq!(
+                pinned.pattern().log_eps_meteorite(sym).map(|f| f.to_bits()),
+                mirror.pattern().log_eps_meteorite(sym).map(|f| f.to_bits()),
+                "pinned meteoritic log-eps is byte-identical to mirror for {sym}"
+            );
+        }
+        // The pin is seed-invariant (no draw consumed): a second seed yields the identical pinned ratio.
+        let pinned2 = DiskComposition::draw(&Environment::local_disk_solar_pin(), 0x1111_2222)
+            .expect("second pinned draw resolves");
+        assert_eq!(pinned2.metallicity_ratio_to_solar(), Some(Fixed::ONE));
+    }
+
+    #[test]
+    fn two_unpinned_seeds_draw_different_compositions() {
+        // THE THESIS SMOKE TEST (steer 1 notes this is ONLY the smoke test; the distributional test above is the
+        // load-bearing one). Two UNPINNED world seeds draw DIFFERENT [Fe/H], hence different Z/Z_sun and different
+        // scaled patterns, for a DERIVED reason (the MDF draw), not an authored one.
+        let env = Environment::local_disk();
+        let a = DiskComposition::draw(&env, 1).expect("seed 1 draws");
+        let b = DiskComposition::draw(&env, 2).expect("seed 2 draws");
+        let za = a.metallicity_ratio_to_solar().expect("seed 1 has a ratio");
+        let zb = b.metallicity_ratio_to_solar().expect("seed 2 has a ratio");
+        assert_ne!(
+            za.to_bits(),
+            zb.to_bits(),
+            "two unpinned seeds draw different Z/Z_sun (the derived reason worlds diverge)"
+        );
+        // The scaled patterns differ too: a metal's abundance moved by the draw.
+        let fe_a = a.pattern().preferred("Fe").expect("Fe in seed 1");
+        let fe_b = b.pattern().preferred("Fe").expect("Fe in seed 2");
+        assert_ne!(
+            fe_a.to_bits(),
+            fe_b.to_bits(),
+            "the drawn iron abundance differs between the two seeds"
+        );
+    }
+
+    #[test]
+    fn the_local_disk_mdf_matches_its_verify_on_pull_fingerprint() {
+        // VERIFY-ON-PULL: the loaded MDF numbers are FETCHED (Casagrande et al. 2011, A&A 530 A138; Schlesinger et al.
+        // 2012, ApJ 761 160): a near-solar peak and ~0.20 dex intrinsic scatter. This fingerprint catches any SILENT
+        // edit to those cited numbers: change a constant and the recorded hash breaks, forcing a re-citation. The peak
+        // is [Fe/H] = 0 (solar is 0 by definition, so the near-solar peak sits at 0); the scatter is 0.20 dex.
+        assert_eq!(
+            LOCAL_DISK_FE_H_PEAK_DEX.to_bits(),
+            0,
+            "the near-solar MDF peak is [Fe/H] = 0"
+        );
+        let fingerprint = Rng::for_coords(
+            0x004D_4446, // "MDF"
+            &[
+                LOCAL_DISK_FE_H_PEAK_DEX.to_bits() as u64,
+                LOCAL_DISK_FE_H_SIGMA_DEX.to_bits() as u64,
+            ],
+        )
+        .key();
+        assert_eq!(
+            fingerprint, 0x0fec_40cc_bc94_7e30,
+            "the fetched MDF numbers match their recorded verify-on-pull fingerprint"
+        );
+        // The local-disk environment carries the fetched numbers, not a stale copy.
+        let env = Environment::local_disk();
+        assert_eq!(env.fe_h_mean.to_bits(), LOCAL_DISK_FE_H_PEAK_DEX.to_bits());
+        assert_eq!(
+            env.fe_h_sigma.to_bits(),
+            LOCAL_DISK_FE_H_SIGMA_DEX.to_bits()
         );
     }
 }

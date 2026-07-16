@@ -1494,22 +1494,31 @@ fn derive_formation_condensation_temperature(
 }
 
 /// The DERIVED isolation (feeding-zone) mass at the orbit, in Earth masses, or `None` if the integral fails. It sweeps
-/// the accretion feeding zone (a few Hill radii around the orbit) over the MMSN SOLID column (not the gas, which would
-/// overmass the planet ~30x) and folds to Earth masses ([`feeding_zone_mass`] then [`feeding_zone_mass_earth`]). The
-/// honest output is Mars-class (~0.08 to 0.11 M_earth): a pure accretion isolation mass, the Earth-size deferred to the
-/// Layer-4 event tier (the giant-impact merger), never authored here.
-fn derive_isolation_mass_earth(orbit_au: Fixed) -> Option<Fixed> {
+/// the accretion feeding zone (a few Hill radii around the orbit) over the SOLID column and folds to Earth masses
+/// ([`feeding_zone_mass`] then [`feeding_zone_mass_earth`]). The honest output is Mars-class (~0.08 to 0.11 M_earth): a
+/// pure accretion isolation mass, the Earth-size deferred to the Layer-4 event tier (the giant-impact merger), never
+/// authored here.
+///
+/// CONDITIONS ON THE DRAWN METALLICITY (the accretion-mass flag retiring in substance). The solid-column normalization
+/// is the SOLAR MMSN rock column scaled by `metallicity_ratio` = `Z / Z_sun`: a metal-rich disk carries proportionally
+/// more solid dust, so it sweeps a larger isolation mass, and a metal-poor disk a smaller one. This is a DERIVATION
+/// (the dust column scales with the disk's heavy-element fraction), not an authored value; for the solar/Mirror
+/// instance the ratio is exactly ONE, so the norm and the mass are byte-identical to the pre-draw fixture.
+fn derive_isolation_mass_earth(orbit_au: Fixed, metallicity_ratio: Fixed) -> Option<Fixed> {
     let half = orbit_au
         .checked_mul(FEEDING_ZONE_WIDTH_FRACTION)?
         .checked_div(Fixed::from_int(2))?;
     let inner_au = orbit_au.checked_sub(half)?;
     let outer_au = orbit_au.checked_add(half)?;
+    // The solar MMSN rock column scaled by the disk's Z/Z_sun (the dust reservoir scales with heavy-element fraction);
+    // exactly the solar norm when metallicity_ratio == ONE (the Mirror pin), so the pinned mass is byte-identical.
+    let solid_norm = SOLID_SURFACE_DENSITY_NORM_KG_M2.checked_mul(metallicity_ratio)?;
     let feeding = civsim_sim::astro::feeding_zone_mass(
         inner_au,
         outer_au,
         DISK_CHARACTERISTIC_RADIUS_AU,
         SOLID_SURFACE_DENSITY_GAMMA,
-        SOLID_SURFACE_DENSITY_NORM_KG_M2,
+        solid_norm,
         FEEDING_ZONE_STEPS,
     )?;
     civsim_sim::astro::feeding_zone_mass_earth(feeding)
@@ -2272,25 +2281,69 @@ fn derive_mean_atomic_mass_kg_per_mol(
 /// optical colour under the star ([`render::material_surface_rgb`]), and the atmospheric speciation
 /// ([`atmosphere_gas_equilibrium`]) with its Rayleigh sky ([`render::rayleigh_sky_rgb`]).
 fn build_derived_scene(star_mass: Fixed, orbit_au: Fixed) -> Result<DerivedScene, String> {
+    // THE MIRROR (pinned solar) path, the default derived-planet view. The composition routes through the draw CHAIN at
+    // the SOLAR PIN ([Fe/H] = 0, the local-disk environment's pin), so the Mirror is the chain evaluated at its pinned
+    // value, byte-identical to the pre-generator solar fixture, NOT a bypass (the pins-condition-the-remainder
+    // discipline, exercised by the standing regression). The seed is irrelevant under the pin (no draw is consumed).
+    let disk_composition = civsim_materials::disk_composition::DiskComposition::draw(
+        &civsim_materials::disk_composition::Environment::local_disk_solar_pin(),
+        MIRROR_WORLD_SEED,
+    )
+    .map_err(|_| "the per-world disk composition did not load")?;
+    build_derived_scene_with_composition(star_mass, orbit_au, &disk_composition)
+}
+
+/// The pinned Mirror's world seed. Under the solar pin the seed is IRRELEVANT (no [Fe/H] draw is consumed), so any
+/// value pins to the solar composition; a named zero makes that visible.
+const MIRROR_WORLD_SEED: u64 = 0;
+
+/// Build the DERIVED scene for an UNPINNED world SEED: the composition is DRAWN from the local-disk environment (the
+/// generator, Stage-0 path 1), so two seeds yield different `[Fe/H]`, hence different `Z / Z_sun`, isolation mass, and
+/// star luminosity, for a DERIVED reason. This is the thesis path; the interactive and headless Mirror entries stay
+/// pinned through [`build_derived_scene`]. The real generator entry points are [`DiskComposition::draw`] (the chain)
+/// and [`build_derived_scene_with_composition`] (consumes any composition), both live on the bin path; this thin
+/// local-disk wrapper is exercised by the thesis test, and a future CLI or worldgen consumer drops the `cfg(test)`.
+#[cfg(test)]
+fn build_derived_scene_seeded(
+    star_mass: Fixed,
+    orbit_au: Fixed,
+    world_seed: u64,
+) -> Result<DerivedScene, String> {
+    let disk_composition = civsim_materials::disk_composition::DiskComposition::draw(
+        &civsim_materials::disk_composition::Environment::local_disk(),
+        world_seed,
+    )
+    .map_err(|_| "the per-world disk composition did not load")?;
+    build_derived_scene_with_composition(star_mass, orbit_au, &disk_composition)
+}
+
+/// Build the DERIVED scene from a star mass, an orbit, and a per-world [`DiskComposition`] datum, or an error naming the
+/// link that did not resolve (fail-soft: the viewer prints the message and shows no planet, never a fabricated one).
+/// The chain is the built pipeline, each link a derivation: the star and disk ([`civsim_sim::planet::derive_planet`]),
+/// the condensed-and-differentiated crust at a labelled formation-era condensation temperature
+/// ([`derive_surface_composition`], the two-temperature seam documented at its site), the mantle density from the
+/// derived mantle composition ([`derive_mantle_density`]), the isostatic tiles ([`generate_derived_tiles`]) off a
+/// uniform crust field (uniform is the honest state for a fresh planet; lateral variation is a named geodynamics
+/// follow-on), the crust's optical colour under the star ([`render::material_surface_rgb`]), and the atmospheric
+/// speciation ([`atmosphere_gas_equilibrium`]) with its Rayleigh sky ([`render::rayleigh_sky_rgb`]).
+///
+/// COMPOSITION comes from the SINGLE per-world datum passed in. The condensation (the crust chemistry), the uncompressed
+/// bulk density (the differentiation), the accretion isolation mass (the solid-dust column), and the star model (its
+/// `Z / Z_sun` axis) all read this ONE slot, so a drawn `[Fe/H]` conditions the whole chain, and the solar/Mirror pin
+/// conditions it at unity (byte-identical). This is what retires the accretion-mass and bulk-density solar fixtures in
+/// substance: the inputs are per-world, not universal.
+fn build_derived_scene_with_composition(
+    star_mass: Fixed,
+    orbit_au: Fixed,
+    disk_composition: &civsim_materials::disk_composition::DiskComposition,
+) -> Result<DerivedScene, String> {
     let janaf = JanafTables::standard().map_err(|_| "the JANAF tables did not load")?;
-    // COMPOSITION comes from a SINGLE per-world datum, not three hardcoded solar literals. The condensation (the
-    // crust chemistry), the uncompressed bulk density (the differentiation), and the star model (its Z/Z_sun axis)
-    // now all read this one slot, `DiskComposition`. NON-CANON PLACEHOLDER: the datum RESOLVES TO THE SOLAR INSTANCE
-    // (`DiskComposition::mirror`, the Sun's own measured pattern), so every derived world stays composition-identical
-    // to the Mirror case FOR NOW, and that is correct for this commit: it chooses no value. This is the
-    // letter-versus-substance gap held open ON PURPOSE, the same discipline as AIR_FIXTURE. What makes worlds DIFFER
-    // is the abundance-DRAW generator (the slice-2 generator commit, gated on the dispersion fetch now running): it
-    // draws a per-system [Fe/H] and abundance pattern into THIS SAME slot, at which point the condensation roster,
-    // the accretion mass, and the bulk density all condition on the drawn Z. Until it lands, the composition is the
-    // solar instance and nothing here is fabricated.
-    let disk_composition = civsim_materials::disk_composition::DiskComposition::mirror()
-        .map_err(|_| "the per-world disk composition did not load")?;
     let abundances = disk_composition.pattern().clone();
-    // Z/Z_sun the star model reads, sourced from the SAME per-world datum (not a bare `Fixed::ONE`): unity now
-    // because the datum is the solar instance, the drawn ratio once the generator fills a non-solar Z.
+    // Z/Z_sun the star model AND the isolation mass read, sourced from the per-world datum (not a bare `Fixed::ONE`):
+    // exactly unity for the solar/Mirror pin, the drawn `10^[Fe/H]` for an unpinned seed.
     let star_metallicity_ratio = disk_composition
         .metallicity_ratio_to_solar()
-        .ok_or("the per-world metallicity ratio did not resolve (a non-solar draw awaits the generator commit)")?;
+        .ok_or("the per-world metallicity ratio did not resolve (a bare pattern declares none)")?;
     let optical =
         OpticalConstants::standard().map_err(|_| "the optical-constants library did not load")?;
 
@@ -2354,7 +2407,9 @@ fn build_derived_scene(star_mass: Fixed, orbit_au: Fixed) -> Result<DerivedScene
     // giant-impact merger), never authored here. The bulk density is the volume-weighted metal-core-plus-silicate-
     // mantle mean from the differentiated composition (~4.2 g/cm^3, the Earth-uncompressed grade). Each reserved disk
     // residue carries its basis at its definition above.
-    let planet_mass_earth = derive_isolation_mass_earth(orbit_au)
+    // The isolation mass CONDITIONS ON the drawn metallicity: the solid-dust column scales with Z/Z_sun (a metal-rich
+    // disk sweeps a larger mass), exactly the solar norm for the Mirror pin (ratio == ONE, byte-identical).
+    let planet_mass_earth = derive_isolation_mass_earth(orbit_au, star_metallicity_ratio)
         .ok_or("the accretion isolation mass did not derive at this orbit")?;
     let planet_bulk_density =
         derive_uncompressed_bulk_density(&abundances, &table, &eos, mantle_density).ok_or(
@@ -4425,6 +4480,70 @@ fn main() {
         window
             .update_with_buffer(&buf, win_w, win_h)
             .expect("blit the frame");
+    }
+}
+
+#[cfg(test)]
+mod composition_draw_tests {
+    use super::*;
+
+    #[test]
+    fn two_unpinned_seeds_derive_different_worlds() {
+        // THE THESIS at the viewer level: two unpinned world seeds derive planets with DIFFERENT accretion MASS and
+        // star luminosity (T_eff), for the DERIVED reason that their drawn [Fe/H] (hence Z/Z_sun) differs. Same star
+        // mass and same orbit; the only difference is the per-world composition draw. The MASS lever is direct (the
+        // solid-dust column scales with Z/Z_sun); the DENSITY moves only slightly here (the metal/silicate core split
+        // is Z-invariant under uniform metal scaling, and the small shift is the condensation assemblage responding to
+        // the scaled absolute abundances), because the strong density levers are the later Mg/Si and iron-fraction
+        // links (the ruling's conditioning line: [Fe/H] scales amount, the iron fraction selects density). We assert
+        // the robust levers (mass, T_eff); the small density difference is measured, not asserted.
+        let s = Fixed::ONE;
+        let o = Fixed::ONE;
+        let a = build_derived_scene_seeded(s, o, 1).expect("seed 1 world derives");
+        let b = build_derived_scene_seeded(s, o, 7).expect("seed 7 world derives");
+        println!(
+            "seed1: mass={:.5} M_earth density={:.4} g/cm3 T_eff={:.2} K",
+            a.mass_earth.to_f64_lossy(),
+            a.density.to_f64_lossy(),
+            a.t_eff.to_f64_lossy()
+        );
+        println!(
+            "seed7: mass={:.5} M_earth density={:.4} g/cm3 T_eff={:.2} K",
+            b.mass_earth.to_f64_lossy(),
+            b.density.to_f64_lossy(),
+            b.t_eff.to_f64_lossy()
+        );
+        assert_ne!(
+            a.mass_earth.to_bits(),
+            b.mass_earth.to_bits(),
+            "two seeds derive DIFFERENT accretion mass (Z/Z_sun scales the solid-dust column)"
+        );
+        assert_ne!(
+            a.t_eff.to_bits(),
+            b.t_eff.to_bits(),
+            "two seeds derive DIFFERENT star T_eff (Z/Z_sun conditions the stellar luminosity)"
+        );
+    }
+
+    #[test]
+    fn the_pinned_mirror_is_byte_identical_to_the_solar_pin_draw() {
+        // The default globe (build_derived_scene) is the chain at the solar pin. Prove it is byte-identical, on the
+        // load-bearing derived fields, to a scene built from the explicitly solar-pinned composition, so the Mirror
+        // pins THROUGH the chain with no numeric drift (the run pins prove the full byte-identity end to end).
+        let s = Fixed::ONE;
+        let o = Fixed::ONE;
+        let mirror = build_derived_scene(s, o).expect("mirror derives");
+        let pinned_composition = civsim_materials::disk_composition::DiskComposition::draw(
+            &civsim_materials::disk_composition::Environment::local_disk_solar_pin(),
+            12345,
+        )
+        .expect("the pinned composition draws");
+        let pinned = build_derived_scene_with_composition(s, o, &pinned_composition)
+            .expect("pinned derives");
+        assert_eq!(mirror.mass_earth.to_bits(), pinned.mass_earth.to_bits());
+        assert_eq!(mirror.density.to_bits(), pinned.density.to_bits());
+        assert_eq!(mirror.t_eff.to_bits(), pinned.t_eff.to_bits());
+        assert_eq!(mirror.radius_m.to_bits(), pinned.radius_m.to_bits());
     }
 }
 
