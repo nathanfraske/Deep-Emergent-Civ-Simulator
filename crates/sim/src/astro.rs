@@ -425,6 +425,41 @@ pub fn kepler_orbital_period_years(orbit_au: Fixed, star_mass_ratio: Fixed) -> O
     Some(ln_period.exp())
 }
 
+/// The HILL RADIUS in AU, the reach of a body's own gravity against the star's tide: the distance out to which
+/// the body dominates, `R_H = a * (M_planet / (3*M_star))^(1/3)`. It is the ruler the whole multi-body system is
+/// built on: the feeding zone a planet clears (a few `R_H`, the isolation mass), the spacing between neighbouring
+/// planets (mutual Hill radii, dynamical stability), and the sphere within which a moon stays bound (satellite
+/// capture, task #75) are all measured in it. `orbit_au` the orbit, `planet_mass_earth` the body mass in Earth
+/// masses, `star_mass_ratio` the star mass in solar masses.
+///
+/// The mass ratio `M_planet / M_star` is formed in consistent units by folding the cited Earth-to-Sun mass ratio
+/// once (`EARTH_MASS_KG / SOLAR_MASS_KG`, ~3.0e-6, from the two cited anchors), so no wide intermediate forms and
+/// the cube root runs on an order-`1e-6` Q32.32 value. At one Earth mass, 1 AU, one solar mass this derives
+/// ~0.0098 AU (Earth's real Hill radius), and Jupiter (318 Earth masses, 5.2 AU) derives ~0.35 AU, both matched
+/// without a fit. `None` on a non-positive input or a register miss.
+pub fn hill_radius_au(
+    orbit_au: Fixed,
+    planet_mass_earth: Fixed,
+    star_mass_ratio: Fixed,
+) -> Option<Fixed> {
+    if orbit_au <= Fixed::ZERO || planet_mass_earth <= Fixed::ZERO || star_mass_ratio <= Fixed::ZERO
+    {
+        return None;
+    }
+    // The Earth-to-Sun mass ratio from the two cited anchors, folded once (~3.0e-6, well inside Q32.32).
+    let earth_per_sun = {
+        let earth = BigRat::from_decimal_str(EARTH_MASS_KG).ok()?;
+        let sun = BigRat::from_decimal_str(SOLAR_MASS_KG).ok()?;
+        Fixed::from_bits_i128(earth.div(&sun).round_to_scale(Fixed::FRAC_BITS)?)?
+    };
+    // M_planet / M_star = (planet_mass_earth * (M_earth/M_sun)) / star_mass_ratio, then the (.../3)^(1/3) factor.
+    let mass_ratio = planet_mass_earth
+        .checked_mul(earth_per_sun)?
+        .checked_div(star_mass_ratio)?;
+    let cube_argument = mass_ratio.checked_div(Fixed::from_int(3))?;
+    orbit_au.checked_mul(cube_argument.cbrt())
+}
+
 /// The DISK SURFACE DENSITY `Sigma(r)` (in the normalization's units) at an orbital distance, the Lynden-Bell and
 /// Pringle self-similar profile `Sigma(r) = Sigma_c * (r/r_c)^(-gamma) * exp(-(r/r_c)^(2-gamma))`: a power-law
 /// interior steepened by an exponential cutoff beyond the characteristic radius `r_c`. This is the second half of
@@ -844,6 +879,65 @@ mod tests {
             kepler_orbital_period_years(Fixed::from_int(2_000_000), Fixed::ONE).is_none(),
             "past the years ceiling fails loud"
         );
+    }
+
+    #[test]
+    fn the_hill_radius_matches_earth_and_jupiter() {
+        // Two independent real-world anchors: Earth (1 Earth mass, 1 AU, 1 solar mass) has a Hill radius of
+        // ~0.0098 AU, and Jupiter (318 Earth masses, 5.203 AU) ~0.355 AU. The derivation reproduces both from the
+        // mass and orbit alone, no fit.
+        let earth = hill_radius_au(Fixed::ONE, Fixed::ONE, Fixed::ONE).unwrap();
+        assert!(
+            (earth.to_f64_lossy() - 0.0098).abs() < 0.0005,
+            "Earth's Hill radius ~0.0098 AU, got {}",
+            earth.to_f64_lossy()
+        );
+        let jupiter = hill_radius_au(
+            Fixed::from_ratio(5203, 1000),
+            Fixed::from_int(318),
+            Fixed::ONE,
+        )
+        .unwrap();
+        assert!(
+            (jupiter.to_f64_lossy() - 0.355).abs() / 0.355 < 0.03,
+            "Jupiter's Hill radius ~0.355 AU, got {}",
+            jupiter.to_f64_lossy()
+        );
+    }
+
+    #[test]
+    fn the_hill_radius_scales_and_fails_loud() {
+        // R_H grows with the orbit (linearly) and with the body mass (as the cube root), and shrinks as the star
+        // mass grows (a heavier star's tide reaches in closer). Fail-loud on any non-positive input.
+        let base = hill_radius_au(Fixed::ONE, Fixed::ONE, Fixed::ONE)
+            .unwrap()
+            .to_f64_lossy();
+        let farther = hill_radius_au(Fixed::from_int(2), Fixed::ONE, Fixed::ONE)
+            .unwrap()
+            .to_f64_lossy();
+        assert!(
+            (farther / base - 2.0).abs() < 0.01,
+            "R_H scales linearly with orbit, got {}",
+            farther / base
+        );
+        let heavier_planet = hill_radius_au(Fixed::ONE, Fixed::from_int(8), Fixed::ONE)
+            .unwrap()
+            .to_f64_lossy();
+        assert!(
+            (heavier_planet / base - 2.0).abs() < 0.02,
+            "R_H scales as the cube root of mass (8^(1/3)=2), got {}",
+            heavier_planet / base
+        );
+        let heavier_star = hill_radius_au(Fixed::ONE, Fixed::ONE, Fixed::from_int(8))
+            .unwrap()
+            .to_f64_lossy();
+        assert!(
+            heavier_star < base,
+            "a heavier star shrinks the Hill radius"
+        );
+        assert!(hill_radius_au(Fixed::ZERO, Fixed::ONE, Fixed::ONE).is_none());
+        assert!(hill_radius_au(Fixed::ONE, Fixed::ZERO, Fixed::ONE).is_none());
+        assert!(hill_radius_au(Fixed::ONE, Fixed::ONE, Fixed::ZERO).is_none());
     }
 
     #[test]
