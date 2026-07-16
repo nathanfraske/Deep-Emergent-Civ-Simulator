@@ -20,6 +20,18 @@
 //! definition instead of carrying private copies. These use native `i64` at the boundary (the
 //! per-kernel layout the proposal leaves to the author), so bit-identity is proven on the CUDA backend
 //! and cross-vendor identity on a backend without native 64-bit is a Stage 0 gate matter. No float.
+//!
+//! Why the sign-magnitude limb product rather than the one-line `((a as i128) * (b as i128)) >> 32`
+//! that `Fixed::mul` uses on the host: CubeCL has no 128-bit integer type. Its `IntKind` is
+//! `I8`/`I16`/`I32`/`I64` only (verified in cubecl-ir 0.10 and on the current cubecl `main`), and `i128`
+//! implements neither `CubePrimitive` nor `CubeType`, so `a as i128` inside a `#[cube]` kernel fails to
+//! compile ("the trait bound `i128: CubePrimitive` is not satisfied"). This is a CubeCL plumbing gap, not
+//! a hardware limit: NVRTC itself compiles `__int128` device code when passed `--device-int128` (the
+//! direct Q32.32 multiply lowers to a `mul.wide` + `mul.lo` + carry chain in PTX), but CubeCL 0.10 has no
+//! 128-bit kind in its IR, no frontend trait impls for it, and no 128-bit path in any of its three
+//! codegen backends (and SPIR-V has no native 128-bit integer at all). Wiring i128 would mean forking
+//! that dependency stack for no correctness gain, since the limb product already matches `Fixed::mul`
+//! bit-for-bit and stays backend-general. The limb form is load-bearing, not a workaround to retire.
 
 use cubecl::prelude::*;
 
