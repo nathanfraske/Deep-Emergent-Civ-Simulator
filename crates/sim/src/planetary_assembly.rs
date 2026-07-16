@@ -61,7 +61,8 @@ use civsim_core::gauss::{gaussian_unit, GaussApprox};
 use civsim_core::{Fixed, Rng};
 
 use crate::astro::{earth_to_sun_mass_ratio, kepler_orbital_period_years};
-use crate::planetary_system::Embryo;
+use crate::giants::{giant_formation, GiantGasParams, GiantKhParams, GiantOutcome, GiantVerdict};
+use crate::planetary_system::{Embryo, SolidDisk};
 
 /// One FINAL PLANET of the assembled system: an orbit and a mass, both emergent from the relaxation of
 /// the embryo field, nothing authored.
@@ -394,6 +395,120 @@ pub fn assemble_system(
     }
 }
 
+/// One planet of a giant-aware assembled system: its orbit and mass, and, when it ran away into a gas giant
+/// during the disk phase, the [`GiantVerdict`] that produced it (`None` for a terrestrial). The giant data lives
+/// ON the planet it describes (the API Option A ruling), so the giant-or-terrestrial association is STRUCTURAL:
+/// a later reorder, sort, or filter of the planet list cannot leave it pointing at the wrong body, unlike a
+/// parallel index-keyed vector.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct AssembledPlanet {
+    /// The orbit (AU).
+    pub orbit_au: Fixed,
+    /// The mass (Earth masses). For a giant this is the verdict's first-cut final mass (core plus accreted disk
+    /// gas); for a terrestrial it is the assembled planet mass.
+    pub mass_earth: Fixed,
+    /// The giant-formation verdict when this planet is a gas giant, `None` for a terrestrial.
+    pub giant: Option<GiantVerdict>,
+}
+
+/// A giant-aware assembled planetary system: the final planets (terrestrials assembled by the merge-until-stable
+/// projector, giants carried through from the disk phase) each tagged giant or terrestrial and ordered by orbit,
+/// plus the assembly's debris residual (the same conservation edge [`PlanetarySystem`] carries).
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct AssembledSystem {
+    /// The final planets, ordered by orbit (strictly increasing).
+    pub planets: Vec<AssembledPlanet>,
+    /// The debris (Earth masses) the terrestrial assembly did not retain (zero for the perfect-merge pass).
+    pub debris_mass_earth: Fixed,
+}
+
+/// THE GIANT-AWARE ASSEMBLY (#73, giants into the assembly): run the giant-formation verdict on the embryo field
+/// FIRST (the gas-disk phase), splitting it into gas giants and terrestrial cores, then relax ONLY the
+/// terrestrial cores through the existing merge-until-stable projector ([`assemble_system`], unchanged), and
+/// carry the giants through as fixed bodies, interleaving both by orbit into the final system, each tagged.
+///
+/// THE SEQUENCING (ruled). Giant formation is the gas-disk phase and the giant-impact assembly is the gas-free
+/// phase that follows it, so giants form from embryos first and the leftover terrestrials assemble afterward. A
+/// giant, once formed, is far more massive than a terrestrial and dynamically dominant; it is carried through
+/// rather than merged.
+///
+/// THE VALIDITY-DOMAIN CONTRACT (the delicate seam, ruled). The Petit Eq. (83) surface [`assemble_system`] uses
+/// is calibrated for a near-equal-mass oligarchic field; a giant+terrestrial pair is a strongly unequal mass
+/// ratio, off that surface's domain (its own declared Eq. (82) wall), where it would return a confident nonsense
+/// survival time. The protection here is STRUCTURAL: the giants never enter the merge loop (only the terrestrial
+/// cores are passed to [`assemble_system`]), so the off-domain pair is never evaluated, and the merge loop
+/// operates on a near-equal-mass field by construction. An ENFORCED guard INSIDE [`assemble_system`] that
+/// REFUSES an off-domain pair (extending its existing validity-domain escape, never clamping or dropping a body)
+/// is a flagged FOLLOW-ON: its boundary must be CITED (Petit's stated Eq. (83) validity range) or DERIVED (where
+/// the equal-mass form's departure from the general Eq. (82) form exceeds the 0.43-dex scatter band), never a
+/// hand-picked ratio. The derive route needs the Eq. (82) mass-partition form the module header names as a
+/// deferred follow-on, so the guard's boundary is surfaced here rather than authored.
+///
+/// CONSERVATION. A giant's mass includes accreted DISK GAS (new mass from the nebula, not from the embryo
+/// cores), so the terrestrial cores' mass is conserved through the merge but the total system mass is not (the
+/// giants add gas), the correct physics of gas accretion. The giant-terrestrial dynamical interaction and the
+/// overlapping-feeding-zone gas budget are the declared walls ([`crate::giants`] names the latter). `disk` is the
+/// solid disk the embryos and the giant verdict both read; `gas` and `kh` are the giant verdict's reserved-with-
+/// basis parameter structs. Byte-neutral: dormant, no run-path caller, both pins hold.
+#[allow(clippy::too_many_arguments)]
+pub fn assemble_system_with_giants(
+    embryos: Vec<Embryo>,
+    disk: &SolidDisk,
+    star_mass_ratio: Fixed,
+    system_age_myr: Fixed,
+    world_seed: u64,
+    scatter_shape: GaussApprox,
+    gas: &GiantGasParams,
+    kh: &GiantKhParams,
+) -> AssembledSystem {
+    // Split the embryo field by the giant verdict (the gas phase). A giant is carried through; a terrestrial
+    // core, or a fail-soft verdict that did not run away, goes to the assembly. Guards hold, never reroll: a
+    // fail-soft `None` is treated as a terrestrial (it did not become a giant), not a resampled draw.
+    let mut giants: Vec<AssembledPlanet> = Vec::new();
+    let mut terrestrials: Vec<Embryo> = Vec::new();
+    for embryo in &embryos {
+        match giant_formation(embryo, disk, star_mass_ratio, gas, kh) {
+            Some(verdict) => match verdict.outcome {
+                GiantOutcome::Giant { final_mass_earth } => giants.push(AssembledPlanet {
+                    orbit_au: embryo.orbit_au,
+                    mass_earth: final_mass_earth,
+                    giant: Some(verdict),
+                }),
+                GiantOutcome::Terrestrial => terrestrials.push(*embryo),
+            },
+            None => terrestrials.push(*embryo),
+        }
+    }
+    // Relax ONLY the terrestrial cores through the unchanged merge-until-stable projector. The giants never
+    // enter, so no off-domain pair is evaluated: the structural guarantee.
+    let assembled = assemble_system(
+        terrestrials,
+        star_mass_ratio,
+        system_age_myr,
+        world_seed,
+        scatter_shape,
+    );
+    // Interleave the assembled terrestrials (tagged None) and the carried-through giants by orbit.
+    let mut planets: Vec<AssembledPlanet> = assembled
+        .planets
+        .iter()
+        .map(|p| AssembledPlanet {
+            orbit_au: p.orbit_au,
+            mass_earth: p.mass_earth,
+            giant: None,
+        })
+        .collect();
+    planets.extend(giants);
+    // A total order on the orbit. The bodies have distinct orbits by construction (the embryo field is strictly
+    // increasing, the terrestrial merges keep the survivors strictly increasing and produce orbits strictly
+    // between parents, and the giants sit at their own embryo orbits), so the sort is deterministic.
+    planets.sort_by(|a, b| a.orbit_au.cmp(&b.orbit_au));
+    AssembledSystem {
+        planets,
+        debris_mass_earth: assembled.debris_mass_earth,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -703,5 +818,229 @@ mod tests {
             system_is_stable(&system.planets, Fixed::ONE, age, seed, shape()),
             "the reported system is stable"
         );
+    }
+
+    // A dense Mirror disk (accretion boosted so the outer cores grow past the Ikoma critical mass), the input
+    // that splits into giants and terrestrials, the same construction the giant-branch tests use.
+    fn dense_disk(boost: Fixed) -> SolidDisk {
+        let thermal = DiskThermalParams {
+            accretion_rate_msun_myr: r(1, 100).checked_mul(boost).unwrap(),
+            star_mass_ratio: Fixed::ONE,
+            mass_luminosity_exponent: r(35, 10),
+            reprocessing_factor: r(5, 100),
+            inner_boundary_factor: Fixed::from_int(4),
+            t_max: Fixed::from_int(2_000_000),
+        };
+        SolidDisk::derive(
+            thermal,
+            r(1, 100),
+            r(234, 100),
+            r(134, 10_000),
+            r(1, 2),
+            Fixed::from_int(182),
+            Fixed::ONE,
+            Fixed::from_int(40),
+        )
+        .expect("the dense Mirror disk locates its ice line")
+    }
+
+    fn gas_params() -> crate::giants::GiantGasParams {
+        crate::giants::GiantGasParams {
+            disk_gas_lifetime_myr: Fixed::from_int(3),
+            collision_coefficient: Fixed::ONE,
+            core_bulk_density_g_cm3: r(4, 1),
+            feeding_zone_hill_widths: Fixed::from_int(5),
+            gas_integration_steps: 64,
+        }
+    }
+
+    fn kh_params() -> crate::giants::GiantKhParams {
+        crate::giants::GiantKhParams {
+            kh_log10_yr_c: Fixed::from_int(9),
+            kh_mass_exponent_d: Fixed::from_int(3),
+            reference_opacity_cm2_g: Fixed::ONE,
+            reference_metal_fraction: r(134, 10_000),
+        }
+    }
+
+    #[test]
+    fn the_giant_aware_assembly_splits_and_tags_giants() {
+        // A dense disk grows a field that splits: the inner cores stay terrestrial (tagged None) and the outer
+        // ice-line cores run away into giants (tagged Some), and a giant's mass exceeds its own core (the
+        // feeding-zone gas added). The giant/terrestrial split is read off the disk, never authored.
+        let disk = dense_disk(Fixed::from_int(30));
+        let field = oligarchic_embryo_field(
+            &disk,
+            Fixed::ONE,
+            crate::planetary_system::OLIGARCHIC_SPACING_HILL_WIDTHS,
+            Fixed::from_int(5),
+            Fixed::ONE,
+            Fixed::from_int(30),
+            256,
+        );
+        assert!(field.len() >= 4, "the dense disk seeds several embryos");
+        let age = Fixed::from_int(4500);
+        let seed = 0x511A_A115u64;
+        let system = assemble_system_with_giants(
+            field,
+            &disk,
+            Fixed::ONE,
+            age,
+            seed,
+            shape(),
+            &gas_params(),
+            &kh_params(),
+        );
+        let giants = system.planets.iter().filter(|p| p.giant.is_some()).count();
+        let terrestrials = system.planets.len() - giants;
+        assert!(
+            giants >= 1,
+            "the dense disk grows at least one giant, got {giants}"
+        );
+        assert!(
+            terrestrials >= 1,
+            "the inner disk stays terrestrial, got {terrestrials}"
+        );
+        for p in system.planets.iter().filter(|p| p.giant.is_some()) {
+            let v = p.giant.unwrap();
+            assert!(
+                p.mass_earth > v.core_mass_earth,
+                "a giant's mass ({}) exceeds its core ({}) by the accreted gas",
+                p.mass_earth.to_f64_lossy(),
+                v.core_mass_earth.to_f64_lossy()
+            );
+        }
+    }
+
+    #[test]
+    fn the_giants_are_carried_through_not_merged() {
+        // The structural guarantee: the giants never enter the merge loop, so every giant verdict over the field
+        // survives to a tagged giant planet at its own embryo orbit (the giant count equals the number of giant
+        // verdicts, and each giant sits at an embryo orbit, unmerged).
+        let disk = dense_disk(Fixed::from_int(30));
+        let field = oligarchic_embryo_field(
+            &disk,
+            Fixed::ONE,
+            crate::planetary_system::OLIGARCHIC_SPACING_HILL_WIDTHS,
+            Fixed::from_int(5),
+            Fixed::ONE,
+            Fixed::from_int(30),
+            256,
+        );
+        let embryo_orbits: Vec<Fixed> = field.iter().map(|e| e.orbit_au).collect();
+        let expected_giants = crate::giants::giant_formation_field(
+            &field,
+            &disk,
+            Fixed::ONE,
+            &gas_params(),
+            &kh_params(),
+        )
+        .iter()
+        .filter(|v| matches!(v.outcome, GiantOutcome::Giant { .. }))
+        .count();
+        let system = assemble_system_with_giants(
+            field,
+            &disk,
+            Fixed::ONE,
+            Fixed::from_int(4500),
+            0x600D_600Du64,
+            shape(),
+            &gas_params(),
+            &kh_params(),
+        );
+        let giant_planets: Vec<&AssembledPlanet> = system
+            .planets
+            .iter()
+            .filter(|p| p.giant.is_some())
+            .collect();
+        assert_eq!(
+            giant_planets.len(),
+            expected_giants,
+            "every giant verdict is carried through to a tagged planet, none merged away"
+        );
+        for p in giant_planets {
+            assert!(
+                embryo_orbits.contains(&p.orbit_au),
+                "a carried-through giant sits at its own embryo orbit (unmerged)"
+            );
+        }
+    }
+
+    #[test]
+    fn a_field_with_no_giants_matches_the_plain_assembly() {
+        // Composition neutrality: on a field where no embryo runs away (the sparse terrestrial zone), the
+        // giant-aware assembly reduces to the plain assembly, every planet tagged terrestrial with the same
+        // orbit and mass, so the giant path adds nothing when there are no giants.
+        let disk = mirror_solid_disk();
+        let field = mirror_embryos(r(7, 10), r(17, 10)); // the terrestrial zone: small cores, no giants
+        let age = Fixed::from_int(4500);
+        let seed = 0x7E44_E571u64;
+        let plain = assemble_system(field.clone(), Fixed::ONE, age, seed, shape());
+        let giant_aware = assemble_system_with_giants(
+            field,
+            &disk,
+            Fixed::ONE,
+            age,
+            seed,
+            shape(),
+            &gas_params(),
+            &kh_params(),
+        );
+        assert!(
+            giant_aware.planets.iter().all(|p| p.giant.is_none()),
+            "no embryo in the terrestrial zone runs away to a giant"
+        );
+        assert_eq!(
+            plain.planets.len(),
+            giant_aware.planets.len(),
+            "the same number of planets as the plain assembly"
+        );
+        for (a, b) in plain.planets.iter().zip(giant_aware.planets.iter()) {
+            assert_eq!(a.orbit_au, b.orbit_au, "same orbits");
+            assert_eq!(a.mass_earth, b.mass_earth, "same masses");
+        }
+    }
+
+    #[test]
+    fn the_giant_aware_planets_are_ordered_by_orbit_and_deterministic() {
+        let disk = dense_disk(Fixed::from_int(30));
+        let field = oligarchic_embryo_field(
+            &disk,
+            Fixed::ONE,
+            crate::planetary_system::OLIGARCHIC_SPACING_HILL_WIDTHS,
+            Fixed::from_int(5),
+            Fixed::ONE,
+            Fixed::from_int(30),
+            256,
+        );
+        let age = Fixed::from_int(4500);
+        let seed = 0x0DDD_0DDDu64; // any fixed seed
+        let a = assemble_system_with_giants(
+            field.clone(),
+            &disk,
+            Fixed::ONE,
+            age,
+            seed,
+            shape(),
+            &gas_params(),
+            &kh_params(),
+        );
+        let b = assemble_system_with_giants(
+            field,
+            &disk,
+            Fixed::ONE,
+            age,
+            seed,
+            shape(),
+            &gas_params(),
+            &kh_params(),
+        );
+        assert_eq!(a, b, "same inputs, same system, bit for bit");
+        for pair in a.planets.windows(2) {
+            assert!(
+                pair[0].orbit_au < pair[1].orbit_au,
+                "the final planets are strictly increasing in orbit"
+            );
+        }
     }
 }
