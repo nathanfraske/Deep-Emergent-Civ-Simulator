@@ -3607,6 +3607,41 @@ pub fn convective_stress(
     }
 }
 
+/// The CONVECTIVE STRAIN RATE `eps_dot = |v| / L` (per time): the shear rate the buoyant convective flow
+/// ([`stokes_velocity`]) imposes across the length `L` it shears over (the boundary-layer or layer depth). For a
+/// Newtonian fluid `tau = eta * eps_dot`, so this is the rate [`convective_stress`] has ALWAYS FORMED AND
+/// DISCARDED: that law computes `tau = eta * |v| / L` and returns only the stress, dropping the rate itself on
+/// the floor. This law exposes it, because two consumers must agree about it.
+///
+/// WHY IT IS EXPOSED RATHER THAN RECOMPUTED BY EACH CALLER. The precedent is this arc's own: the boundary layer
+/// `L = d * Ra^(-1/3)` was derived inline inside `column_readout` and was extracted to
+/// [`thermal_boundary_layer`] once the geotherm became its second consumer, because the driving stress and the
+/// geotherm must agree about lid thickness. The identical argument binds here and binds harder: the lid's
+/// DRIVING STRESS and the lid's STRENGTH must be evaluated against ONE strain rate, or they are two carriers of
+/// one physical fact.
+///
+/// THIS RATE IS THE MANTLE-AND-THERMAL CHORD, AND PLUMBING IT INTO A FLEXURAL CONSUMER IS FORBIDDEN (owner
+/// ruling 2026-07-16). Two strain rates live in this engine and they are DIFFERENT CHORDS. This one is the
+/// CONVECTIVE rate: it serves mantle viscosity and the thermal side. The FLEXURAL yield-strength envelope, from
+/// which `T_e` and `T_mech` are read, evaluates at THE LOAD'S OWN RATE, because `T_e` is a chord over load
+/// timescale and a load is not the mantle. A builder reaching for the nearest available rate is exactly how the
+/// load-timescale finding would re-enter through the door it was evicted from, so the two are named at their
+/// definition sites and neither is plumbed into the other's consumer. If you are evaluating a creep row for a
+/// LOAD, this is the wrong function.
+///
+/// FAIL-LOUD, DELIBERATELY UNLIKE ITS SIBLING. [`convective_stress`] clamps and saturates because a stress past
+/// the representable range is overwhelmingly strong and reads as such. A strain rate cannot take that
+/// convention: its consumer is a creep law, where the rate enters through a LOGARITHM and the activation term
+/// sits inside an ARRHENIUS EXPONENTIAL, so a saturated stand-in does not read as "very fast", it multiplies
+/// through an exp and returns a confident wrong strength. `None` on a non-positive length (the absence
+/// convention) or an unrepresentable quotient, never a fabricated rate. Deterministic fixed-point.
+pub fn convective_strain_rate(velocity: Fixed, length_scale: Fixed) -> Option<Fixed> {
+    if length_scale <= ZERO {
+        return None;
+    }
+    sat_abs(velocity).checked_div(length_scale)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3920,6 +3955,110 @@ mod tests {
             Fixed::from_int(50),
             "the stress pins at the representable cap"
         );
+    }
+
+    #[test]
+    fn the_convective_strain_rate_is_the_flow_speed_over_the_shear_length() {
+        // eps_dot = |v|/L = 6/2 = 3, exactly representable.
+        assert_eq!(
+            convective_strain_rate(Fixed::from_int(6), Fixed::from_int(2)),
+            Some(Fixed::from_int(3)),
+            "the strain rate is the flow speed over the length it shears across"
+        );
+        // A downward (negative) flow shears at the same rate: the magnitude carries it.
+        assert_eq!(
+            convective_strain_rate(Fixed::from_int(-6), Fixed::from_int(2)),
+            Some(Fixed::from_int(3)),
+            "the rate magnitude is independent of the flow's sign"
+        );
+        // A still interior shears at no rate.
+        assert_eq!(
+            convective_strain_rate(ZERO, Fixed::from_int(2)),
+            Some(ZERO),
+            "no flow, no shear"
+        );
+        // REFUSES rather than fabricating, unlike its clamping sibling: this rate's consumer takes its
+        // logarithm and puts the result beside an Arrhenius exponential, so a saturated stand-in would not
+        // read as "very fast", it would multiply through an exp into a confident wrong strength.
+        assert_eq!(
+            convective_strain_rate(Fixed::from_int(6), ZERO),
+            None,
+            "a zero (open) shear length reads the absence convention and refuses"
+        );
+        assert_eq!(
+            convective_strain_rate(Fixed::from_int(6), Fixed::from_int(-2)),
+            None,
+            "a negative shear length is not a length"
+        );
+    }
+
+    #[test]
+    fn the_driving_stress_binds_to_this_strain_rate_within_the_derived_reassociation_residue() {
+        // THE BINDING TEST, and it is the whole reason this law may exist beside `convective_stress`
+        // without being a second carrier of one fact (the coherence protocol's step one, owner ruling
+        // 2026-07-16). `convective_stress` computes `(eta * |v|) / L` and keeps that association, so no
+        // bytes move; this law computes `|v| / L`. In EXACT arithmetic `tau = eta * eps_dot` identically.
+        // In FIXED POINT the two orders disagree, because `checked_mul` truncates through `>> FRAC_BITS`
+        // and `checked_div` truncates through integer division, so each op loses up to one unit in the
+        // last place and the two paths lose it in different places.
+        //
+        // THE RESIDUE IS DERIVED FROM THE REPRESENTATION, NEVER AN AUTHORED TOLERANCE. With `u =
+        // Fixed::EPSILON` and every truncation error in `[0, u)`:
+        //   path A (the stress's own order): fl(fl(E*V)/L) = T - d1/L - d2
+        //   path B (this law, then scaled):  fl(E*fl(V/L)) = T - E*e1 - e2
+        // so `|A - B| < u * (E + 1/L + 2)`. The bound is a property of Q32.32 and the operands, and it
+        // is what makes the reassociation EXPLAINED change rather than unexplained drift.
+        //
+        // BLINDNESS SET, measured by mutation rather than asserted. It KILLS a wrong operator (`v*L`), a
+        // dead return, a dropped magnitude, and a 2x scale error. It is BLIND to:
+        //  - AN ERROR SMALLER THAN THE RESIDUE, and this is BY CONSTRUCTION, not a hole: a 1-ULP mutant
+        //    survives because the bound IS the reassociation residue, so a deviation below it is
+        //    indistinguishable from the reassociation this test exists to license. That is the price of
+        //    the byte-neutral door, and it is precisely why step two (the delegation that makes agreement
+        //    structural) exists and belongs to a scheduled re-pin window.
+        //  - ANY POINT NOT SAMPLED. It binds the two where tested and nowhere else.
+        //  - WHETHER EITHER PATH IS RIGHT. It certifies that two providers AGREE, and says nothing about
+        //    the physics of either, which is the shared-source blindness every agreement check carries.
+        let cap = Fixed::from_int(1_000_000);
+        let u = Fixed::EPSILON.to_bits() as i128;
+        // SINKING FLOWS ARE IN THE FIXTURE SET ON PURPOSE, and mutation testing is why. With rising flows
+        // only, this test SURVIVED a mutant that dropped the magnitude and returned a SIGNED rate: the two
+        // paths agree for `v > 0` whether or not the abs is there, so the binding was blind to exactly the
+        // convention it exists to bind. `convective_stress` takes `|v|`, so a signed rate breaks
+        // `tau = eta * eps_dot` for every sinking parcel, which is half the convection cells in any world.
+        for (e_i, v_i, l_num, l_den) in [
+            (4, 6, 2, 1),
+            (7, 3, 5, 1),
+            (1, 1, 3, 1),
+            (10, 9, 7, 1),
+            (2, 5, 1, 4),
+            (13, 11, 9, 2),
+            (4, -6, 2, 1),
+            (7, -3, 5, 1),
+            (13, -11, 9, 2),
+            (2, -5, 1, 4),
+        ] {
+            let eta = Fixed::from_int(e_i);
+            let v = Fixed::from_int(v_i);
+            let l = Fixed::from_ratio(l_num, l_den);
+            let tau = convective_stress(eta, v, l, cap);
+            let eps_dot = convective_strain_rate(v, l).expect("a positive length yields a rate");
+            let scaled = eta.checked_mul(eps_dot).expect("in-window");
+            // The derived bound: u * (E + 1/L + 2), formed in raw bits to keep the comparison exact.
+            let one_over_l = Fixed::ONE
+                .checked_div(l)
+                .expect("a positive length inverts");
+            let bound = u
+                * (2 + (eta.to_bits() as i128 >> Fixed::FRAC_BITS)
+                    + (one_over_l.to_bits() as i128 >> Fixed::FRAC_BITS)
+                    + 2);
+            let gap = (tau.to_bits() as i128 - scaled.to_bits() as i128).abs();
+            assert!(
+                gap <= bound,
+                "eta={e_i} v={v_i} L={l_num}/{l_den}: the stress and eta*(strain rate) part by {gap} bits, \
+                 past the derived reassociation residue {bound}"
+            );
+        }
     }
 
     // Dev fixtures: representable caps for the determinism harness, never canon. The
