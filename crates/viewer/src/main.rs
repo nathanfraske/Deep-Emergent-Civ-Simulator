@@ -432,6 +432,8 @@ fn globe_cmd(argv: &[String]) {
         render::GlobeOrientation::IDENTITY,
         // The demo `--globe` fixture carries no orbital phase; keep the screen-space light (byte-identical).
         None,
+        // The demo fixture carries no deep-time province temperatures, so no lava glow (byte-identical).
+        None,
     );
     write_ppm(&path, w, h, &buf);
     eprintln!(
@@ -469,13 +471,16 @@ fn derived_globe_cmd(argv: &[String]) {
     // re-deriving the surface, so the globe can be rendered at any epoch (the headless evolution check: render
     // two step counts and the tile field differs, the provinces having formed and thickened).
     if let Some(total_steps) = argv.get(8).and_then(|s| s.parse::<usize>().ok()) {
+        let cols = scene.cols;
+        let rows = scene.tiles.len() / cols.max(1);
         if let Some(prov) = scene.provinces.as_mut() {
             age_provinces_from_young(prov, total_steps);
-            if let Some(tiles) =
-                derive_province_tiles(prov, scene.cols, scene.tiles.len() / scene.cols.max(1))
-            {
+            if let Some(tiles) = derive_province_tiles(prov, cols, rows) {
                 scene.tiles = tiles;
             }
+            // Re-derive the lava glow at this epoch too, so the headless render shows the volcanism fade: a young
+            // world glows broadly (super-solidus provinces), an aged one only at hot-spots as the mantle cools.
+            scene.lava = derive_province_lava(prov, cols, rows);
             eprintln!(
                 "  deep-time: aged the province field to {total_steps} ticks ({:.0} Myr)",
                 (total_steps as f64) * DEEP_TIME_MYR_PER_TICK.to_f64_lossy()
@@ -575,6 +580,9 @@ fn derived_globe_cmd(argv: &[String]) {
         style,
         render::GlobeOrientation::IDENTITY,
         star_dir,
+        // The DERIVED lava glow: actively-molten provinces emit their incandescent colour (bright on the night side
+        // too). Empty on the uniform-crust fallback, so the render adds nothing there.
+        (!scene.lava.is_empty()).then_some(scene.lava.as_slice()),
     );
     write_ppm(&path, w, h, &buf);
     eprintln!("wrote {path} ({w}x{h})");
@@ -907,6 +915,11 @@ struct DerivedScene {
     /// The DEEP-TIME PROVINCE FIELD the globe's texture is re-derived from, and the observer's time control steps
     /// forward so the surface evolves. `None` when the convective scale did not resolve (the uniform-crust fallback).
     provinces: Option<DeepTimeProvinces>,
+    /// The per-display-tile LAVA GLOW field, aligned with `tiles`, re-derived alongside them: each entry is the
+    /// incandescent colour of the tile's DERIVED interior temperature and its DERIVED melt fraction (zero below the
+    /// world's own solidus). The globe render ADDS this as self-emitted light, so an actively-molten tile glows on
+    /// the night side too. Empty on the uniform-crust fallback (no province temperatures), so the render adds nothing.
+    lava: Vec<render::LavaGlow>,
     /// The R-YOUNG-TEMPERATURE verdict summary for the readout: the regime (Melted / Never-melted / Marginal),
     /// whether it is decidable now (GAPPED) or impact-list-pending, the SLR temperature rise, and the young
     /// potential temperature the deep-time run started from. `None` when the solidus did not resolve.
@@ -1890,6 +1903,59 @@ fn step_provinces(prov: &mut DeepTimeProvinces, steps: usize) {
     }
 }
 
+/// Re-derive the per-display-tile LAVA GLOW field from the current province state, the visible-volcanism read: for
+/// each display tile, bilinearly sample the province's DERIVED interior temperature (the mantle potential temperature
+/// each column carries, the SAME field the crust and craters are sampled off), run the world's OWN derived-solidus
+/// melt column against it ([`civsim_physics::melting::adiabatic_melt_column`], the `crust_growth` closure's kernel),
+/// and pair the DERIVED melt fraction (the glow intensity, zero for a sub-solidus tile) with the blackbody colour of
+/// that temperature (the incandescence hue). A tile below the world's solidus makes no melt and does not glow (solid
+/// crust); a super-solidus tile glows the colour of its temperature, brighter the more it melts. So a young/hot world
+/// glows broadly and an aged, cooled world is dark crust with hot-spots only where a province stays super-solidus. No
+/// authored glow threshold: the threshold is the DERIVED solidus the `MeltParams` carries, and the intensity is the
+/// DERIVED melt fraction. Aligned with [`derive_province_tiles`]'s tile field (same `cols` by `rows`, same sampling),
+/// so the render adds each tile's glow to the crust it rides on. Empty when the field is degenerate. Display-only,
+/// one-way canon -> pixels (Principle 10).
+fn derive_province_lava(
+    prov: &DeepTimeProvinces,
+    cols: usize,
+    rows: usize,
+) -> Vec<render::LavaGlow> {
+    if prov.pcols == 0 || prov.prows == 0 || cols == 0 || rows == 0 {
+        return Vec::new();
+    }
+    // The province interior temperatures (one per province), for the smooth bilinear sample the crust and craters use.
+    let temps: Vec<Fixed> = prov.state.columns.iter().map(|c| c.temperature).collect();
+    let mut glow = Vec::with_capacity(cols * rows);
+    for r in 0..rows {
+        let fv = (r as f32 + 0.5) / rows as f32;
+        for c in 0..cols {
+            let fu = (c as f32 + 0.5) / cols as f32;
+            let temp_k = sample_province_field(&temps, prov.pcols, prov.prows, fu, fv);
+            // The DERIVED melt fraction of this tile's mantle against the world's OWN solidus (the MeltParams the
+            // deep-time volcanism already carries): zero for a sub-solidus tile (a mantle colder than its surface
+            // solidus melts nothing, so no glow), rising with the superheat above it. Fail-soft to zero (no glow) if
+            // the column does not resolve. The threshold is the derived solidus, never an authored glow cutoff.
+            let intensity = civsim_physics::melting::adiabatic_melt_column(
+                temp_k,
+                prov.melt.solidus_surface_k,
+                prov.melt.solidus_slope_k_per_gpa,
+                prov.melt.adiabat_slope_k_per_gpa,
+                prov.melt.productivity_per_gpa,
+                prov.melt.source_density_kg_per_m3,
+                prov.melt.gravity_m_per_s2,
+            )
+            .map(|col| col.max_melt_fraction.to_f64_lossy() as f32)
+            .unwrap_or(0.0)
+            .clamp(0.0, 1.0);
+            glow.push(render::LavaGlow {
+                emission: render::blackbody_rgb(temp_k),
+                intensity,
+            });
+        }
+    }
+    glow
+}
+
 /// Re-derive the display TILE field from the current province state, COMPOSING the bombardment relief onto the
 /// isostatic crust: each display tile reads its province's accumulated crust thickness, floats it by Airy isostasy
 /// on the derived mantle ([`civsim_physics::geodynamics::airy_isostatic_elevation`]), ADDS the bombardment relief
@@ -2488,6 +2554,16 @@ fn build_derived_scene(star_mass: Fixed, orbit_au: Fixed) -> Result<DerivedScene
     crust.sort_by(|a, b| b.1.to_bits().cmp(&a.1.to_bits()).then(a.0.cmp(&b.0)));
     let crust_phases: Vec<String> = sc.crust.iter().map(|(name, _)| name.clone()).collect();
 
+    // THE LAVA GLOW field, aligned one-to-one with the display tiles: each tile's DERIVED melt-glow (the incandescent
+    // colour of its province's interior temperature and its DERIVED melt fraction against the world's own solidus).
+    // Empty on the uniform-crust fallback (no province temperatures), so the render adds no emission. Re-derived
+    // alongside the tiles as the deep-time clock steps, so the glow fades as the world cools (the volcanism arc).
+    let lava_rows = tiles.len() / cols.max(1);
+    let lava = provinces
+        .as_ref()
+        .map(|p| derive_province_lava(p, cols, lava_rows))
+        .unwrap_or_default();
+
     Ok(DerivedScene {
         star_mass,
         orbit_au,
@@ -2512,6 +2588,7 @@ fn build_derived_scene(star_mass: Fixed, orbit_au: Fixed) -> Result<DerivedScene
         attitude: derived_scene_attitude(),
         provinces,
         young: young_verdict,
+        lava,
     })
 }
 
@@ -2664,6 +2741,20 @@ fn print_derived_readout(scene: &DerivedScene) {
             p.flux.reservoir_body_count.to_f64_lossy(),
             p.flux.sweep_timescale_myr.to_f64_lossy(),
             p.flux.impact_velocity_m_s.to_f64_lossy(),
+        );
+    }
+    // THE LAVA GLOW arc (the visible-volcanism payoff): the fraction of the surface still super-solidus (molten and
+    // self-emitting incandescence) and the mean melt-glow intensity, both DERIVED per tile from the province interior
+    // temperature against the world's OWN solidus. A young/hot world glows broadly (most tiles molten); an aged world
+    // is mostly solid crust with only the hottest provinces still glowing, so stepping the deep-time clock fades this.
+    if !scene.lava.is_empty() {
+        let molten = scene.lava.iter().filter(|g| g.intensity > 0.0).count();
+        let mean =
+            scene.lava.iter().map(|g| g.intensity as f64).sum::<f64>() / scene.lava.len() as f64;
+        eprintln!(
+            "  lava glow: {:.0}% of the surface molten (super-solidus, self-emitting), mean melt-glow intensity {:.2}; a young world glows broadly, an aged one only at hot-spots (fades as the deep-time clock cools the world)",
+            100.0 * molten as f64 / scene.lava.len() as f64,
+            mean,
         );
     }
     eprintln!("  controls: +/- zoom, wasd/arrows rotate the globe, p provenance, Esc quit");
@@ -3144,6 +3235,8 @@ fn draw_woosh_frame(
         scene.sky,
         style,
         orient,
+        // The DERIVED lava glow rides the woosh in, so a molten world already glows as it grows from the map dot.
+        (!scene.lava.is_empty()).then_some(scene.lava.as_slice()),
     );
     buf
 }
@@ -3479,15 +3572,22 @@ fn run_derived(argv: &[String]) {
                 if deep_ticks > 0 {
                     let cols = planets[planet].scene.cols;
                     let rows = planets[planet].scene.tiles.len() / cols.max(1);
-                    let new_tiles = match planets[planet].scene.provinces.as_mut() {
+                    let stepped = match planets[planet].scene.provinces.as_mut() {
                         Some(prov) => {
                             step_provinces(prov, deep_ticks);
-                            derive_province_tiles(prov, cols, rows)
+                            // Re-derive the surface AND the lava glow off the stepped provinces, so the owner watches
+                            // the volcanism fade as the world cools (the glow follows the interior temperature down).
+                            let tiles = derive_province_tiles(prov, cols, rows);
+                            let lava = derive_province_lava(prov, cols, rows);
+                            Some((tiles, lava))
                         }
                         None => None,
                     };
-                    if let Some(t) = new_tiles {
-                        planets[planet].scene.tiles = t;
+                    if let Some((tiles, lava)) = stepped {
+                        if let Some(t) = tiles {
+                            planets[planet].scene.tiles = t;
+                        }
+                        planets[planet].scene.lava = lava;
                     }
                 }
                 let scene = &planets[planet].scene;
@@ -3564,6 +3664,9 @@ fn run_derived(argv: &[String]) {
                     scene.sky,
                     style,
                     orient,
+                    // The DERIVED lava glow: molten provinces emit their incandescent colour, bright on the night side
+                    // too, and it fades as the deep-time clock cools the world. Empty (no glow) on the uniform crust.
+                    (!scene.lava.is_empty()).then_some(scene.lava.as_slice()),
                 );
                 // Cursor -> surface pick and highlight (fail-soft off the sphere).
                 let picked = mouse_pos.and_then(|(mx, my)| {
@@ -4043,6 +4146,8 @@ fn main() {
                     render::SurfaceStyle::default(),
                     render::GlobeOrientation::IDENTITY,
                     // The living-world globe carries no orbital phase; keep the screen-space light (byte-identical).
+                    None,
+                    // The living-world globe has no deep-time province temperatures, so no lava glow (byte-identical).
                     None,
                 ),
                 CELL as i32,
@@ -4617,6 +4722,74 @@ mod province_tests {
             count_variants(&vt) >= 2,
             "a varied province field textures the surface with more than one relief, got {}",
             count_variants(&vt)
+        );
+    }
+
+    #[test]
+    fn the_lava_glow_fades_as_the_deep_time_world_cools() {
+        // The visible-volcanism arc: a fresh (young, super-solidus) world glows broadly, and as the deep-time clock
+        // cools it toward its conductive steady state the glow FADES (fewer molten tiles, lower mean intensity). The
+        // threshold is the world's OWN derived solidus the MeltParams carries, never an authored glow cutoff, and a
+        // glowing tile carries a warm incandescent emission (the blackbody of its interior temperature).
+        let mut prov = mars_class_provinces(
+            Fixed::from_int(1680),
+            Fixed::from_int(120),
+            Some(Fixed::from_ratio(1, 10)),
+        );
+        let (cols, rows) = (32usize, 16usize);
+        // The fresh young field starts laterally uniform at the super-solidus magma-ocean handoff, so it glows broadly.
+        let young = derive_province_lava(&prov, cols, rows);
+        assert_eq!(young.len(), cols * rows, "one glow entry per display tile");
+        let young_molten = young.iter().filter(|g| g.intensity > 0.0).count();
+        let young_mean = young.iter().map(|g| g.intensity as f64).sum::<f64>() / young.len() as f64;
+        assert!(
+            young_molten as f64 / young.len() as f64 > 0.9,
+            "a fresh super-solidus world glows broadly, got {young_molten} of {} molten",
+            young.len()
+        );
+        let hot = young
+            .iter()
+            .find(|g| g.intensity > 0.0)
+            .expect("a molten tile");
+        assert!(
+            hot.emission.r >= hot.emission.b,
+            "the incandescent emission is warm (red >= blue), got rgb({},{},{})",
+            hot.emission.r,
+            hot.emission.g,
+            hot.emission.b
+        );
+        // Cool the world over deep time: the interior relaxes toward its (near-solidus) steady state, so the glow fades.
+        step_provinces(&mut prov, 200);
+        let aged = derive_province_lava(&prov, cols, rows);
+        let aged_molten = aged.iter().filter(|g| g.intensity > 0.0).count();
+        let aged_mean = aged.iter().map(|g| g.intensity as f64).sum::<f64>() / aged.len() as f64;
+        assert!(
+            aged_mean < young_mean,
+            "the glow fades as the world cools: aged mean {aged_mean:.3} < young mean {young_mean:.3}"
+        );
+        assert!(
+            aged_molten < young_molten,
+            "fewer tiles stay molten as the world cools: aged {aged_molten} < young {young_molten}"
+        );
+    }
+
+    #[test]
+    fn a_solid_sub_solidus_world_does_not_glow() {
+        // A world whose interior never crosses its own solidus makes no melt and so no lava glow: every tile's
+        // intensity is zero (solid crust). This pins the threshold on the DERIVED solidus, not an authored cutoff.
+        let mut prov = mars_class_provinces(
+            Fixed::from_int(1680),
+            Fixed::from_int(120),
+            None, // no formation melt: an unprocessed, uniform mantle
+        );
+        // Force the whole interior below the solidus (a cold world), then check that nothing glows.
+        for col in prov.state.columns.iter_mut() {
+            col.temperature = Fixed::from_int(1000);
+        }
+        let glow = derive_province_lava(&prov, 24, 12);
+        assert!(
+            glow.iter().all(|g| g.intensity == 0.0),
+            "a sub-solidus world does not glow (every tile intensity is zero)"
         );
     }
 

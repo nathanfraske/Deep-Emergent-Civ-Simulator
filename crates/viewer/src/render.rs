@@ -1080,6 +1080,36 @@ fn sample_derived_tile(tiles: &[DerivedTile], cols: usize, u: f32, v: f32) -> Op
     Some(tiles[idx])
 }
 
+/// The self-emitted LAVA GLOW of one surface tile: the incandescent colour of the tile's DERIVED interior
+/// temperature ([`blackbody_rgb`], cooler melt deep-red, hotter melt orange-to-yellow) paired with a melt-glow
+/// INTENSITY in `[0, 1]` (the DERIVED melt fraction, zero for solid crust below the world's own solidus, rising as
+/// the interior climbs above it). Unlike the sun-lit crust albedo, this EMITS: [`draw_globe`] ADDS `emission *
+/// intensity` to the shaded tile, so a molten tile is bright on the NIGHT side too (lava glows in the dark, the
+/// giveaway that it radiates rather than reflects). A per-display-tile field the caller derives, laid out to match
+/// the tiles ([`sample_glow`] wraps it onto the sphere the same way [`sample_derived_tile`] wraps the relief).
+/// Display-only, one-way canon -> pixels (Principle 10).
+#[derive(Clone, Copy, Default)]
+pub struct LavaGlow {
+    /// The incandescent emission colour: the blackbody of the tile's DERIVED interior temperature.
+    pub emission: Rgb,
+    /// The melt-glow intensity in `[0, 1]`: the DERIVED melt fraction (zero below the world's solidus, no glow).
+    pub intensity: f32,
+}
+
+/// Sample the per-display-tile [`LavaGlow`] field at surface coordinate (u, v), the SAME (u, v) -> cell mapping
+/// [`sample_derived_tile`] uses, so the glow registers with the crust tile it rides on. `None` for an empty field
+/// (a world with no molten record, so the caller adds no emission and the render is byte-identical). Display-only.
+fn sample_glow(glow: &[LavaGlow], cols: usize, u: f32, v: f32) -> Option<LavaGlow> {
+    if glow.is_empty() || cols == 0 {
+        return None;
+    }
+    let rows = glow.len().div_ceil(cols);
+    let cu = ((u.clamp(0.0, 0.999_9) * cols as f32) as usize).min(cols - 1);
+    let cv = ((v.clamp(0.0, 0.999_9) * rows as f32) as usize).min(rows.saturating_sub(1));
+    let idx = (cv * cols + cu).min(glow.len() - 1);
+    Some(glow[idx])
+}
+
 /// The DERIVED elevation field's finite-difference gradient at surface coordinate (u, v), returned as metres of
 /// elevation per unit-u (eastward) and per unit-v (southward) so the caller can convert it to a true physical slope
 /// with the body radius. It is the analytic gradient of the BILINEAR interpolant through the four surrounding
@@ -1309,6 +1339,7 @@ pub fn draw_globe(
     light_tint: Rgb,
     style: SurfaceStyle,
     orient: GlobeOrientation,
+    lava: Option<&[LavaGlow]>,
 ) {
     if radius_px == 0 || w == 0 || h == 0 {
         return;
@@ -1326,6 +1357,17 @@ pub fn draw_globe(
     ];
     // A faint neutral ambient so the night hemisphere reads dark but not pure black (skyglow and starlight).
     const AMBIENT: f32 = 0.10;
+    // NON-CANON DISPLAY: the lava-glow emission brightness gain, the one display scale the self-emitted incandescence
+    // is allowed (a sibling of `AMBIENT`, the relief palette, and the sky's `DISPLAY_OPACITY_UNIT`: the observability
+    // layer's allowance, Principle 10). The glow add per channel is `emission_channel * intensity * GAIN`, where the
+    // emission colour is the blackbody of the tile's DERIVED interior temperature (physics, the hue) and the intensity
+    // is its DERIVED melt fraction (physics, zero below the world's own solidus). This scale maps that physical
+    // partial-melt fraction, which for a silicate mantle saturates near the rheological lock-up (~0.4, the melt
+    // fraction above which the surface behaves as a mobile magma ocean), onto the display's incandescent range: at
+    // ~0.4 melt the tile emits at roughly full brightness (a mobile magma ocean glows fully), so `GAIN ~ 1 / 0.4`. It
+    // scales BRIGHTNESS only; it never moves the threshold (the derived solidus) or the hue (the derived temperature),
+    // and it has zero effect on canon (byte-neutral). Kept modest.
+    const LAVA_EMISSION_GAIN: f32 = 2.5;
     // SUN-DIRECTION HILLSHADE (the seeable-relief payoff): when relief shading is on and the physical body radius is
     // supplied, the shading normal at each pixel is the sphere normal TILTED by the DERIVED terrain slope, so slopes
     // facing the star are bright and slopes facing away are dark. The relief is lit at its real (unexaggerated)
@@ -1423,6 +1465,28 @@ pub fn draw_globe(
                             (color.r as f32 * 0.45) as u8,
                             (color.g as f32 * 0.45) as u8,
                             (color.b as f32 * 0.5) as u8,
+                        );
+                    }
+                }
+            }
+            // SELF-EMITTED LAVA GLOW (the visible-volcanism payoff): an actively-molten tile RADIATES on its own, so
+            // its emission ADDS to the sun-lit albedo above and survives on the NIGHT side (lava glows in the dark,
+            // the giveaway that it emits rather than reflects, unlike the shaded crust). The emission colour is the
+            // blackbody of the tile's DERIVED interior temperature (the incandescence ramp: deep-red cool melt to
+            // orange-yellow hot melt) and the intensity is its DERIVED melt fraction (zero below the world's own
+            // solidus, so solid crust stays its shaded albedo), sampled at the SAME tile the albedo used so glow and
+            // crust register. A young/hot world glows broadly; an aged world is dark crust with super-solidus hot-spots.
+            if let Some(glow) = lava {
+                if let Some(g) = sample_glow(glow, tile_cols, u, v) {
+                    if g.intensity > 0.0 {
+                        let add = |c: u8, e: u8| -> u8 {
+                            (c as f32 + e as f32 * g.intensity * LAVA_EMISSION_GAIN)
+                                .clamp(0.0, 255.0) as u8
+                        };
+                        color = Rgb::new(
+                            add(color.r, g.emission.r),
+                            add(color.g, g.emission.g),
+                            add(color.b, g.emission.b),
                         );
                     }
                 }
@@ -1572,6 +1636,7 @@ pub fn render_solar_system_view(
     style: SurfaceStyle,
     orient: GlobeOrientation,
     derived_star_dir: Option<[f32; 3]>,
+    lava: Option<&[LavaGlow]>,
 ) -> Vec<u32> {
     let mut buf = vec![bg.pack(); w.max(1) * h.max(1)];
     if w == 0 || h == 0 {
@@ -1620,6 +1685,7 @@ pub fn render_solar_system_view(
         star_color,
         style,
         orient,
+        lava,
     );
     // The atmosphere haze around the limb, tinted by the caller's `sky` colour: the DERIVED Rayleigh sky from the
     // gas mix ([`rayleigh_sky_rgb`]) when it resolves, or [`PLACEHOLDER_SKY`] as the fail-soft fallback. The limb wants
@@ -1667,6 +1733,7 @@ pub fn draw_globe_scene(
     sky: Rgb,
     style: SurfaceStyle,
     orient: GlobeOrientation,
+    lava: Option<&[LavaGlow]>,
 ) {
     if w == 0 || h == 0 {
         return;
@@ -1688,6 +1755,7 @@ pub fn draw_globe_scene(
         light_tint,
         style,
         orient,
+        lava,
     );
     // The limb wants the VIEW-space sun direction (screen x, y), the projection of the derived body-frame vector.
     let limb_dir = normalize3(body_to_view(star_dir_body, orient));
@@ -2154,6 +2222,7 @@ mod tests {
             Rgb::new(255, 255, 255),
             SurfaceStyle::default(),
             GlobeOrientation::IDENTITY,
+            None,
         );
         assert!(buf.iter().any(|&p| p != bg.pack()), "the globe is drawn");
         let right = half_luminance(&buf, w, cx, cy, radius as i32, true);
@@ -2176,6 +2245,7 @@ mod tests {
             Rgb::new(255, 255, 255),
             SurfaceStyle::default(),
             GlobeOrientation::IDENTITY,
+            None,
         );
         assert_eq!(buf, replay, "a pure read replays byte for byte");
     }
@@ -2239,6 +2309,7 @@ mod tests {
             Rgb::new(255, 255, 255),
             SurfaceStyle::default(),
             GlobeOrientation::IDENTITY,
+            None,
         );
         let mut best = (-1.0f32, cx, cy);
         for py in (cy - radius as i32).max(0)..=(cy + radius as i32) {
@@ -2361,6 +2432,7 @@ mod tests {
             SurfaceStyle::default(),
             GlobeOrientation::IDENTITY,
             None,
+            None,
         );
         assert_eq!(frame.len(), w * h, "one word per pixel");
         // The star disk carries the derived blackbody colour at its core.
@@ -2394,6 +2466,7 @@ mod tests {
             PLACEHOLDER_SKY,
             SurfaceStyle::default(),
             GlobeOrientation::IDENTITY,
+            None,
             None,
         );
         assert_eq!(frame, replay, "a pure read replays byte for byte");
@@ -2429,6 +2502,7 @@ mod tests {
                 PLACEHOLDER_SKY,
                 SurfaceStyle::default(),
                 GlobeOrientation::IDENTITY,
+                None,
                 None,
             );
             let mut sr = 0f64;
@@ -3027,6 +3101,7 @@ mod tests {
             Rgb::new(255, 250, 240),
             SurfaceStyle::default(),
             GlobeOrientation::IDENTITY,
+            None,
         );
         // A tiny rotation moves at least one pixel: the texture responds to the orientation.
         let mut b = vec![bg.pack(); w * h];
@@ -3046,6 +3121,7 @@ mod tests {
                 rot_lon: 0.0,
                 rot_lat: 0.8,
             },
+            None,
         );
         assert_ne!(a, b, "a latitude tilt changes the drawn surface");
     }
@@ -3082,6 +3158,7 @@ mod tests {
             white,
             SurfaceStyle::default(),
             GlobeOrientation::IDENTITY,
+            None,
         );
         let mut panned = vec![bg.pack(); w * h];
         draw_globe(
@@ -3100,6 +3177,7 @@ mod tests {
                 rot_lon: 1.2,
                 rot_lat: 0.0,
             },
+            None,
         );
         assert_ne!(
             straight, panned,
@@ -3126,6 +3204,7 @@ mod tests {
                     ..Default::default()
                 },
                 GlobeOrientation::IDENTITY,
+                None,
             );
             let mut sum = 0u64;
             for py in (cy - radius as i32).max(0)..=(cy + radius as i32) {
@@ -3176,6 +3255,7 @@ mod tests {
                     ..Default::default()
                 },
                 GlobeOrientation::IDENTITY,
+                None,
             );
             buf
         };
@@ -3239,6 +3319,7 @@ mod tests {
                     surface_radius_m: radius_m,
                 },
                 GlobeOrientation::IDENTITY,
+                None,
             );
             let mut s = 0u64;
             for py in (cy - 6)..=(cy + 6) {
