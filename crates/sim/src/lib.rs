@@ -109,6 +109,7 @@ pub mod mate_choice;
 pub mod material;
 pub mod material_percept;
 pub mod medium;
+pub mod moons;
 pub mod morphogen;
 pub mod nonlocal_coupling;
 pub mod orbit;
