@@ -420,7 +420,7 @@ fn globe_cmd(argv: &[String]) {
         fx.radius_m,
         fx.t_eff,
         &fx.tiles,
-        fx.cols,
+        fx.param,
         w,
         h,
         m_per_px,
@@ -471,16 +471,15 @@ fn derived_globe_cmd(argv: &[String]) {
     // re-deriving the surface, so the globe can be rendered at any epoch (the headless evolution check: render
     // two step counts and the tile field differs, the provinces having formed and thickened).
     if let Some(total_steps) = argv.get(8).and_then(|s| s.parse::<usize>().ok()) {
-        let cols = scene.cols;
-        let rows = scene.tiles.len() / cols.max(1);
+        let param = scene.param;
         if let Some(prov) = scene.provinces.as_mut() {
             age_provinces_from_young(prov, total_steps);
-            if let Some(tiles) = derive_province_tiles(prov, cols, rows) {
+            if let Some(tiles) = derive_province_tiles(prov, param) {
                 scene.tiles = tiles;
             }
             // Re-derive the lava glow at this epoch too, so the headless render shows the volcanism fade: a young
             // world glows broadly (super-solidus provinces), an aged one only at hot-spots as the mantle cools.
-            scene.lava = derive_province_lava(prov, cols, rows);
+            scene.lava = derive_province_lava(prov, param);
             eprintln!(
                 "  deep-time: aged the province field to {total_steps} ticks ({:.0} Myr)",
                 (total_steps as f64) * DEEP_TIME_MYR_PER_TICK.to_f64_lossy()
@@ -494,7 +493,7 @@ fn derived_globe_cmd(argv: &[String]) {
         star_radius_ratio: scene.star_radius_ratio,
         orbit_au: scene.orbit_au,
         tiles: scene.tiles.clone(),
-        cols: scene.cols,
+        param: scene.param,
         sky: scene.sky,
     };
     // With a zoom fraction, use the interactive drill-in scale (and its refining tile grid); without one, the distant
@@ -569,7 +568,7 @@ fn derived_globe_cmd(argv: &[String]) {
         fx.radius_m,
         fx.t_eff,
         &fx.tiles,
-        fx.cols,
+        fx.param,
         w,
         h,
         m_per_px,
@@ -766,7 +765,9 @@ struct GlobeFixture {
     star_radius_ratio: Fixed,
     orbit_au: Fixed,
     tiles: Vec<DerivedTile>,
-    cols: usize,
+    /// How `tiles` maps to sphere directions: the fixture demo crust is a lat-lon grid (byte-identical to before the
+    /// cube-sphere migration); a derived scene rebuilt into a fixture carries its cube-sphere parameterization.
+    param: render::SurfaceParam,
     /// The atmosphere-limb tint: the DERIVED Rayleigh sky colour ([`render::rayleigh_sky_rgb`]) computed from a
     /// FIXTURE gas mix (the pending Stage-8 input), or [`render::PLACEHOLDER_SKY`] when the mix does not resolve.
     sky: Rgb,
@@ -822,7 +823,8 @@ fn build_globe_fixture() -> Option<GlobeFixture> {
         star_radius_ratio: planet.star_radius_ratio,
         orbit_au: Fixed::ONE,
         tiles,
-        cols,
+        // The demo crust field is a plain lat-lon grid (the living-world / fixture globe stays byte-identical).
+        param: render::SurfaceParam::LatLon { cols, rows },
         sky,
     })
 }
@@ -902,7 +904,10 @@ struct DerivedScene {
     /// The derived atmospheric gas mix (species name, mole fraction), descending by fraction.
     atmosphere: Vec<(String, Fixed)>,
     tiles: Vec<DerivedTile>,
-    cols: usize,
+    /// How `tiles` (and the aligned `lava` field) map to sphere directions: `CubeSphere` for the province-textured
+    /// surface (the pole-pinch-free sample cache), `LatLon` for the rare uniform-crust fallback. The globe render
+    /// and the deep-time re-derivation both read this, so the sampling and the build always agree.
+    param: render::SurfaceParam,
     /// The DERIVED Rayleigh atmosphere-limb sky colour, or [`render::PLACEHOLDER_SKY`] when the mix does not resolve.
     sky: Rgb,
     /// The DERIVED perceived colour of the crust material under the star ([`render::material_surface_rgb`]).
@@ -1359,16 +1364,25 @@ const DEEP_TIME_MYR_PER_TICK: Fixed = Fixed::from_int(20);
 /// display framing of where the deep-time clock starts; the observer's time control runs it on from here.
 const DEEP_TIME_INITIAL_STEPS: usize = 80;
 
-/// NON-CANON display: the sample-cache resolution (columns, and paired half-count rows for a 2:1 equirectangular
-/// grid) of the derived globe's surface. The display tile grid is the memoized sample cache of the composed
-/// surface function (the province crust PLUS the analytic crater-row stamps, [`derive_province_tiles`]), so this
-/// is how finely the discrete craters resolve: a coarse cache shows the big craters, a fine one resolves the
-/// small ones, from ONE row list. It is a VIEWPORT / megapixel budget that CONDITIONS ON NOTHING: it authors no
-/// physics (the crater positions, sizes, and profile are all derived), it sets display density only (Principle
-/// 10). Raised well past the former 48x32 so the sub-cell craters resolve as discrete features (the smooth grey
-/// ball is gone); the cost of a finer cache falls only on an active deep-time step (a paused view samples the
-/// already-baked tiles). Per-zoom cache refinement (finer only when zoomed in, the true level-of-detail) is the
-/// named follow-on.
+/// NON-CANON display: the per-face resolution of the derived globe's CUBE-SPHERE surface sample cache. The cache is
+/// six cube faces, each `FACE_RES` by `FACE_RES` cells projected onto the sphere by the equi-angular cube map
+/// ([`render::cube_face_dir_fixed`]), so the cells are near-uniform in solid angle with NO pole pinch (the lat-lon
+/// grid the cache used before crowded its budget at the poles and under-resolved the equator). It is the memoized
+/// sample cache of the composed surface function (the province crust PLUS the analytic crater-row stamps,
+/// [`derive_province_tiles`]), so this is how finely the discrete craters resolve: a coarse cache shows the big
+/// craters, a fine one resolves the small ones, from ONE row list. It is a VIEWPORT / megapixel budget that
+/// CONDITIONS ON NOTHING: it authors no physics (the crater positions, sizes, and profile are all derived), it sets
+/// display density only (Principle 10). At 416 the total budget is `6 * 416 * 416 = 1,038,336` cells, comparable to
+/// the former `1440 * 720 = 1,036,800` lat-lon grid, but spread uniformly over the sphere. The cost of building the
+/// cache falls only on an active deep-time step (a paused view samples the already-baked tiles) and the build is
+/// data-parallel (each cell independent). Per-zoom cache refinement (a cube-sphere quadtree, finer only where the
+/// camera looks) is the named follow-on this parameterization is the substrate for.
+const SURFACE_SAMPLE_CACHE_FACE_RES: usize = 416;
+
+/// NON-CANON display: the lat-lon dimensions of the UNIFORM-CRUST FALLBACK surface (the smooth-ball field
+/// [`civsim_sim::geodynamics::generate_derived_tiles`] produces when the province texture does not resolve). A
+/// uniform crust reads a single shade regardless of parameterization, so this rare fallback keeps the plain
+/// equirectangular grid; the province-textured render uses the cube-sphere cache above.
 const SURFACE_SAMPLE_CACHE_COLS: usize = 1440;
 const SURFACE_SAMPLE_CACHE_ROWS: usize = 720;
 
@@ -1959,10 +1973,10 @@ fn step_provinces(prov: &mut DeepTimeProvinces, steps: usize) {
 /// one-way canon -> pixels (Principle 10).
 fn derive_province_lava(
     prov: &DeepTimeProvinces,
-    cols: usize,
-    rows: usize,
+    param: render::SurfaceParam,
 ) -> Vec<render::LavaGlow> {
-    if prov.pcols == 0 || prov.prows == 0 || cols == 0 || rows == 0 {
+    use rayon::prelude::*;
+    if prov.pcols == 0 || prov.prows == 0 {
         return Vec::new();
     }
     // The province interior temperatures (one per province), for the smooth bilinear sample the crust and craters use.
@@ -1971,8 +1985,8 @@ fn derive_province_lava(
     // carries): zero for a sub-solidus province (a mantle colder than its surface solidus melts nothing, so no
     // glow), rising with the superheat above it. The threshold is the derived solidus, never an authored glow
     // cutoff. It is computed at the PROVINCE resolution (only `pcols * prows` melt columns) and resampled to the
-    // display tile grid below, so the fine sample-cache resolution costs no per-tile melt column (a smooth-field
-    // display resample, Principle 10), while the crust and craters still read the tile grid.
+    // display sample cache below, so the fine cache resolution costs no per-cell melt column (a smooth-field
+    // display resample, Principle 10), while the crust and craters still read the cache cells.
     let melt_fraction: Vec<Fixed> = temps
         .iter()
         .map(|&t| {
@@ -1989,22 +2003,55 @@ fn derive_province_lava(
             .unwrap_or(Fixed::ZERO)
         })
         .collect();
-    let mut glow = Vec::with_capacity(cols * rows);
-    for r in 0..rows {
-        let fv = (r as f32 + 0.5) / rows as f32;
-        for c in 0..cols {
-            let fu = (c as f32 + 0.5) / cols as f32;
-            let temp_k = sample_province_field(&temps, prov.pcols, prov.prows, fu, fv);
-            let intensity = (sample_province_field(&melt_fraction, prov.pcols, prov.prows, fu, fv)
-                .to_f64_lossy() as f32)
-                .clamp(0.0, 1.0);
-            glow.push(render::LavaGlow {
-                emission: render::blackbody_rgb(temp_k),
-                intensity,
-            });
+    // The self-emitted glow at a normalized surface coordinate: the incandescent colour of the resampled interior
+    // temperature, and the resampled melt fraction as the intensity. A pure function of the immutable province fields.
+    let glow_at = |fu: f32, fv: f32| -> render::LavaGlow {
+        let temp_k = sample_province_field(&temps, prov.pcols, prov.prows, fu, fv);
+        let intensity = (sample_province_field(&melt_fraction, prov.pcols, prov.prows, fu, fv)
+            .to_f64_lossy() as f32)
+            .clamp(0.0, 1.0);
+        render::LavaGlow {
+            emission: render::blackbody_rgb(temp_k),
+            intensity,
+        }
+    };
+    match param {
+        render::SurfaceParam::LatLon { cols, rows } => {
+            if cols == 0 || rows == 0 {
+                return Vec::new();
+            }
+            let mut glow = Vec::with_capacity(cols * rows);
+            for r in 0..rows {
+                let fv = (r as f32 + 0.5) / rows as f32;
+                for c in 0..cols {
+                    let fu = (c as f32 + 0.5) / cols as f32;
+                    glow.push(glow_at(fu, fv));
+                }
+            }
+            glow
+        }
+        render::SurfaceParam::CubeSphere { face_res } => {
+            if face_res == 0 {
+                return Vec::new();
+            }
+            // Each cube cell is INDEPENDENT: its glow is a pure function of the immutable province fields at its
+            // direction. The index-ordered parallel collect makes the result BIT-IDENTICAL to a serial build for any
+            // thread count (the reproducibility the render relies on). Display-only, off the canon path (Principle 10).
+            let local = cube_local_dirs(face_res);
+            let face_cells = face_res * face_res;
+            (0..6 * face_cells)
+                .into_par_iter()
+                .map(|idx| {
+                    let dir = render::cube_face_local_to_world_fixed(
+                        idx / face_cells,
+                        local[idx % face_cells],
+                    );
+                    let (fu, fv) = dir_to_latlon_fraction(dir);
+                    glow_at(fu, fv)
+                })
+                .collect()
         }
     }
-    glow
 }
 
 /// Re-derive the display TILE field from the current province state, COMPOSING the analytic crater stamps onto the
@@ -2019,52 +2066,89 @@ fn derive_province_lava(
 /// resolve.
 fn derive_province_tiles(
     prov: &DeepTimeProvinces,
-    cols: usize,
-    rows: usize,
+    param: render::SurfaceParam,
 ) -> Option<Vec<DerivedTile>> {
-    derive_province_tiles_core(prov, cols, rows, true)
+    derive_province_tiles_core(prov, param, true)
 }
 
 /// The CRUST-ONLY tile field (the isostatic, melt-driven relief WITHOUT the bombardment), for the isostatic
 /// diagnostics that must not conflate the two: the melt-texture-engaged indicator and the isostatic-support-bound
 /// check read the crust's OWN relief, while the render reads the composed field ([`derive_province_tiles`]). The
 /// craters are a SEPARATE surface-topography record, reported on their own (the bombardment readout), so they do
-/// not dilute the melt-texture diagnostic's normalization or masquerade as isostatic relief.
+/// not dilute the melt-texture diagnostic's normalization or masquerade as isostatic relief. This diagnostic path
+/// stays on the LAT-LON grid (`cols` by `rows`) the heterogeneity indicator was calibrated against.
 fn derive_province_crust_tiles(
     prov: &DeepTimeProvinces,
     cols: usize,
     rows: usize,
 ) -> Option<Vec<DerivedTile>> {
-    derive_province_tiles_core(prov, cols, rows, false)
+    derive_province_tiles_core(prov, render::SurfaceParam::LatLon { cols, rows }, false)
 }
 
-/// The shared tile-field derivation. Each display tile bilinearly samples the coarse DERIVED province crust field
-/// (`cols` by `rows` is a viewer resolution; the PHYSICAL province grid is the derived one, each display tile
-/// sampling the province it falls in), floats it by Airy isostasy, and, when `with_impacts`, composes the
-/// bombardment relief on top. `None` if the field is empty or an elevation does not resolve.
+/// The shared tile-field derivation. Each cache cell bilinearly samples the coarse DERIVED province crust field (the
+/// cache is a viewer resolution; the PHYSICAL province grid is the derived one, each cell sampling the province it
+/// falls in), floats it by Airy isostasy, and, when `with_impacts`, composes the bombardment relief on top. The cell
+/// directions come from `param`: the equirectangular grid ([`render::SurfaceParam::LatLon`], the diagnostic path,
+/// serial and byte-identical to before the migration) or the six-face equi-angular cube-sphere
+/// ([`render::SurfaceParam::CubeSphere`], the render path, built in PARALLEL, [`cube_elevations`]). `None` if the
+/// field is empty or an elevation does not resolve. Display-only (Principle 10).
 fn derive_province_tiles_core(
     prov: &DeepTimeProvinces,
-    cols: usize,
-    rows: usize,
+    param: render::SurfaceParam,
     with_impacts: bool,
 ) -> Option<Vec<DerivedTile>> {
-    if prov.pcols == 0 || prov.prows == 0 || cols == 0 || rows == 0 {
+    if prov.pcols == 0 || prov.prows == 0 {
         return None;
     }
     // THE CRATER STAMPS (rows not rasters): the discrete crater rows the bombardment drew, prepared once as
-    // analytic stamps against the planet radius. The display TILE GRID is the sample cache of the composed surface
-    // function: each tile samples the province crust PLUS this analytic crater sum at its own coordinate, so a
-    // finer grid (`cols` x `rows`) resolves finer craters from the SAME row list. Empty when `with_impacts` is
-    // false (the crust-only isostatic field) or the world drew no craters.
+    // analytic stamps against the planet radius. The sample cache is the memoized composed surface function: each
+    // cell samples the province crust PLUS this analytic crater sum at its own DIRECTION, so a finer cache resolves
+    // finer craters from the SAME row list. Empty when `with_impacts` is false (the crust-only isostatic field) or
+    // the world drew no craters. The stamps are read-only, shared across every cell (the parallel build below).
     let stamps = if with_impacts {
         render::crater_stamps(&prov.state.craters, prov.radius_m)
     } else {
         Vec::new()
     };
-    // The sample point's unit vector is built SEPARABLY: one latitude sin/cos per row and one longitude sin/cos per
-    // column (`lon = u*2pi - pi`, `lat = (0.5 - v)*pi`, the same sphere map the crater centres use), so each tile's
-    // `p = [cos_lat*sin_lon, sin_lat, cos_lat*cos_lon]` is two multiplies, not trig. This keeps the crater stamp
-    // cheap even at the fine sample-cache resolution (the transcendental cost is `rows + cols`, not `rows * cols`).
+    // The composed surface elevation `airy(crust) + crater_stamp` (km) at every cache cell, in cache order.
+    let elevations: Vec<Fixed> = match param {
+        render::SurfaceParam::LatLon { cols, rows } => {
+            if cols == 0 || rows == 0 {
+                return None;
+            }
+            latlon_elevations(prov, &stamps, cols, rows, with_impacts)?
+        }
+        render::SurfaceParam::CubeSphere { face_res } => {
+            if face_res == 0 {
+                return None;
+            }
+            cube_elevations(prov, &stamps, face_res, with_impacts)?
+        }
+    };
+    let datum = civsim_world::terrain::relief_datum(&elevations)?;
+    Some(
+        elevations
+            .iter()
+            .map(|&elevation| DerivedTile {
+                elevation,
+                relief: civsim_world::terrain::classify_relief(elevation, prov.sea_level, datum),
+            })
+            .collect(),
+    )
+}
+
+/// The composed surface elevations over a LAT-LON cache (`cols` by `rows`, row-major), the diagnostic path. The
+/// sample point's unit vector is built SEPARABLY: one latitude sin/cos per row and one longitude sin/cos per column
+/// (`lon = u*2pi - pi`, `lat = (0.5 - v)*pi`, the same sphere map the crater centres use), so each cell's
+/// `p = [cos_lat*sin_lon, sin_lat, cos_lat*cos_lon]` is two multiplies, not trig. Serial and byte-identical to the
+/// pre-migration grid build. `None` if an elevation does not resolve. Display-only (Principle 10).
+fn latlon_elevations(
+    prov: &DeepTimeProvinces,
+    stamps: &[render::CraterStamp],
+    cols: usize,
+    rows: usize,
+    with_impacts: bool,
+) -> Option<Vec<Fixed>> {
     let tau = Fixed::PI.mul(Fixed::from_int(2));
     let lat_sin_cos: Vec<(Fixed, Fixed)> = (0..rows)
         .map(|r| {
@@ -2093,30 +2177,107 @@ fn derive_province_tiles_core(
             )?;
             let elevation = if with_impacts {
                 // COMPOSE the analytic crater stamp onto the isostatic elevation: the crater bowls and ejecta rims
-                // the deep-time impact chain drew are SURFACE topography (not isostatically-compensated crust), so
-                // they add DIRECTLY to the elevation rather than through the Airy law. The stamp returns kilometres
-                // (the tile field's unit) at this tile's own sample point, so the composed surface is
-                // `airy(crust) + crater_stamp`, in km. This is the "Sample = crust field + rows" surface function,
-                // memoized in the tile grid.
+                // add DIRECTLY to the elevation (surface topography, not isostatically-compensated crust), the
+                // "Sample = crust field + rows" surface function at this cell's own direction.
                 let p = [cos_lat.mul(sin_lon), sin_lat, cos_lat.mul(cos_lon)];
-                let crater_km = render::crater_relief_km(&stamps, p);
-                airy_km.checked_add(crater_km)?
+                airy_km.checked_add(render::crater_relief_km(stamps, p))?
             } else {
                 airy_km
             };
             elevations.push(elevation);
         }
     }
-    let datum = civsim_world::terrain::relief_datum(&elevations)?;
-    Some(
-        elevations
-            .iter()
-            .map(|&elevation| DerivedTile {
-                elevation,
-                relief: civsim_world::terrain::classify_relief(elevation, prov.sea_level, datum),
-            })
-            .collect(),
-    )
+    Some(elevations)
+}
+
+/// The composed surface elevations over the six-face equi-angular CUBE-SPHERE cache (face-major,
+/// `index = face * face_res^2 + t_row * face_res + s_col`), the render path. Each cell is INDEPENDENT: its elevation
+/// is a pure function of the immutable province field and crater stamps at its own direction, so the cells are
+/// computed in PARALLEL with rayon. The index-ordered `collect` makes the result BIT-IDENTICAL to a serial build for
+/// any thread count (the fixed-point per-cell math is deterministic and there is no shared accumulator), so two views
+/// of the same spot always agree (Principle 10). `None` if an elevation does not resolve. Display-only.
+fn cube_elevations(
+    prov: &DeepTimeProvinces,
+    stamps: &[render::CraterStamp],
+    face_res: usize,
+    with_impacts: bool,
+) -> Option<Vec<Fixed>> {
+    use rayon::prelude::*;
+    // The face_res x face_res normalized FACE-LOCAL cube-cell directions, shared across all six faces (no per-cell
+    // trig: the per-axis angle sin/cos is precomputed once, so building this is O(face_res^2), and the face rotation
+    // per cell is sign swaps). Read-only across the parallel map below.
+    let local = cube_local_dirs(face_res);
+    let face_cells = face_res * face_res;
+    (0..6 * face_cells)
+        .into_par_iter()
+        .map(|idx| -> Option<Fixed> {
+            let dir =
+                render::cube_face_local_to_world_fixed(idx / face_cells, local[idx % face_cells]);
+            // Sample the coarse province crust field at this cell's direction (converted to the lat-lon fraction the
+            // province grid indexes), float it by Airy isostasy, then compose the analytic crater stamp on top.
+            let (fu, fv) = dir_to_latlon_fraction(dir);
+            let thickness = sample_province_thickness(prov, fu, fv);
+            let airy_km = civsim_physics::geodynamics::airy_isostatic_elevation(
+                prov.crust_density,
+                prov.mantle_density,
+                thickness,
+            )?;
+            if with_impacts {
+                airy_km.checked_add(render::crater_relief_km(stamps, dir))
+            } else {
+                Some(airy_km)
+            }
+        })
+        .collect()
+}
+
+/// The `face_res` by `face_res` normalized FACE-LOCAL direction of each EQUI-ANGULAR cube-sphere cell centre (shared
+/// by all six faces; the world direction is [`render::cube_face_local_to_world_fixed`] of these). The equi-angular
+/// map warps the face angle `alpha = (s - 1/2) * pi/2` (and `beta` from `t`) so equal steps in `(s, t)` subtend
+/// near-equal solid angle (Ronchi, Iacono, Paolucci 1996, "The Cubed Sphere"): the face-local direction is
+/// `(sin a cos b, cos a sin b, cos a cos b)` normalized. No per-cell trig: the per-axis angle sin/cos is precomputed
+/// once (`face_res` entries) and each cell is two multiplies plus a normalize, so the parallel cache build pays the
+/// trig once. Fixed-point, display-only re-parameterization (Principle 10).
+fn cube_local_dirs(face_res: usize) -> Vec<[Fixed; 3]> {
+    let half = Fixed::from_ratio(1, 2);
+    let frac_pi_2 = Fixed::PI.mul(half);
+    let axis_sc: Vec<(Fixed, Fixed)> = (0..face_res)
+        .map(|i| {
+            let s = Fixed::from_ratio((2 * i + 1) as i64, (2 * face_res) as i64);
+            (s - half).mul(frac_pi_2).sin_cos()
+        })
+        .collect();
+    let mut local = Vec::with_capacity(face_res * face_res);
+    for &(sb, cb) in &axis_sc {
+        // t axis (beta), the outer / row index
+        for &(sa, ca) in &axis_sc {
+            // s axis (alpha), the inner / column index
+            let lx = sa.mul(cb);
+            let ly = ca.mul(sb);
+            let lz = ca.mul(cb);
+            let n = (lx.mul(lx) + ly.mul(ly) + lz.mul(lz)).sqrt();
+            let d = match (lx.checked_div(n), ly.checked_div(n), lz.checked_div(n)) {
+                (Some(a), Some(b), Some(c)) => [a, b, c],
+                _ => [Fixed::ZERO, Fixed::ZERO, Fixed::ONE],
+            };
+            local.push(d);
+        }
+    }
+    local
+}
+
+/// The lat-lon fraction `(u, v)` in `[0, 1)` of a BODY-frame direction, matching [`render`]'s sphere map, so a cube-
+/// sphere cell's direction indexes the coarse lat-lon province field it must resample. f32 display math (Principle 10).
+fn dir_to_latlon_fraction(dir: [Fixed; 3]) -> (f32, f32) {
+    use std::f32::consts::PI;
+    let x = dir[0].to_f64_lossy() as f32;
+    let y = dir[1].to_f64_lossy() as f32;
+    let z = dir[2].to_f64_lossy() as f32;
+    let lat = y.clamp(-1.0, 1.0).asin();
+    let lon = x.atan2(z);
+    let u = ((lon + PI) / (2.0 * PI)).rem_euclid(1.0);
+    let v = (0.5 - lat / PI).clamp(0.0, 1.0);
+    (u, v)
 }
 
 /// Bilinearly sample the province crust-thickness field (kilometres) at a normalized surface coordinate
@@ -2566,10 +2727,12 @@ fn build_derived_scene_with_composition(
     // province SCALE derives from the convective physics (depth times the eigenvalue-derived cell aspect, over
     // the circumference); the crust AMPLITUDE from the melt and the isostasy. Fail-soft: if the convective scale
     // or the DERIVED solidus does not resolve, the globe shows the uniform crust (the prior behaviour), never a
-    // fabricated texture and never an authored solidus. The tile grid is the display SAMPLE CACHE of the composed
-    // surface (crust + crater-row stamps), so its resolution is the viewport budget that resolves the craters.
-    let cols = SURFACE_SAMPLE_CACHE_COLS;
-    let rows = SURFACE_SAMPLE_CACHE_ROWS;
+    // fabricated texture and never an authored solidus. The SAMPLE CACHE of the composed surface (crust + crater-row
+    // stamps) is a CUBE-SPHERE (six faces, no pole pinch); the rare uniform-crust fallback keeps the plain lat-lon
+    // grid. `param` records which so the render and the deep-time re-derivation always agree with the build.
+    let cube_param = render::SurfaceParam::CubeSphere {
+        face_res: SURFACE_SAMPLE_CACHE_FACE_RES,
+    };
     let sea_level = Fixed::ZERO;
     // The crust density (once) each province's crust floats at, and the interior-structure inputs the
     // convecting-depth derivation reads.
@@ -2624,17 +2787,20 @@ fn build_derived_scene_with_composition(
     let (tiles, provinces) = match provinces {
         Some(mut prov) => {
             step_provinces(&mut prov, DEEP_TIME_INITIAL_STEPS);
-            match derive_province_tiles(&prov, cols, rows) {
+            match derive_province_tiles(&prov, cube_param) {
                 Some(t) => (t, Some(prov)),
                 None => (Vec::new(), Some(prov)),
             }
         }
         None => (Vec::new(), None),
     };
-    let tiles = if tiles.is_empty() {
-        let field: Vec<Vec<(String, Fixed)>> = vec![crust_composition.clone(); cols * rows];
+    // The province-textured cube-sphere cache, or the uniform-crust lat-lon fallback (a smooth ball, so the plain
+    // grid reads the same). `param` follows the tiles, so the render sampling and the lava field stay aligned.
+    let (tiles, param) = if tiles.is_empty() {
+        let field: Vec<Vec<(String, Fixed)>> =
+            vec![crust_composition.clone(); SURFACE_SAMPLE_CACHE_COLS * SURFACE_SAMPLE_CACHE_ROWS];
         let crustal_thickness = sc.crust_thickness_km.unwrap_or_else(|| Fixed::from_int(30));
-        generate_derived_tiles(
+        let t = generate_derived_tiles(
             &field,
             mantle_density,
             crustal_thickness,
@@ -2644,9 +2810,16 @@ fn build_derived_scene_with_composition(
             &registry,
             &table,
         )
-        .ok_or("the derived tiles did not resolve from the crust composition")?
+        .ok_or("the derived tiles did not resolve from the crust composition")?;
+        (
+            t,
+            render::SurfaceParam::LatLon {
+                cols: SURFACE_SAMPLE_CACHE_COLS,
+                rows: SURFACE_SAMPLE_CACHE_ROWS,
+            },
+        )
     } else {
-        tiles
+        (tiles, cube_param)
     };
 
     // The crust's perceived colour under the star, DERIVED from its absorption spectrum. The broadening temperature is
@@ -2694,10 +2867,9 @@ fn build_derived_scene_with_composition(
     // colour of its province's interior temperature and its DERIVED melt fraction against the world's own solidus).
     // Empty on the uniform-crust fallback (no province temperatures), so the render adds no emission. Re-derived
     // alongside the tiles as the deep-time clock steps, so the glow fades as the world cools (the volcanism arc).
-    let lava_rows = tiles.len() / cols.max(1);
     let lava = provinces
         .as_ref()
-        .map(|p| derive_province_lava(p, cols, lava_rows))
+        .map(|p| derive_province_lava(p, param))
         .unwrap_or_default();
 
     Ok(DerivedScene {
@@ -2715,7 +2887,7 @@ fn build_derived_scene_with_composition(
         crust_phases,
         atmosphere,
         tiles,
-        cols,
+        param,
         sky,
         material,
         // The per-world lighting attitude, READ from the world's DiurnalSky (obliquity, eccentricity), with the axis
@@ -2839,7 +3011,15 @@ fn print_derived_readout(scene: &DerivedScene) {
         .and_then(|p| derive_province_crust_tiles(p, DIAGNOSTIC_TILE_COLS, DIAGNOSTIC_TILE_ROWS));
     let (iso_tiles, iso_cols): (&[DerivedTile], usize) = match crust_tiles.as_deref() {
         Some(t) => (t, DIAGNOSTIC_TILE_COLS),
-        None => (scene.tiles.as_slice(), scene.cols),
+        // The uniform-crust fallback is a lat-lon field; read its column count from the parameterization. (A cube
+        // cache always carries a province field, so `crust_tiles` resolves above and this branch is the lat-lon one.)
+        None => {
+            let cols = match scene.param {
+                render::SurfaceParam::LatLon { cols, .. } => cols,
+                render::SurfaceParam::CubeSphere { face_res } => face_res,
+            };
+            (scene.tiles.as_slice(), cols)
+        }
     };
     if let Some(amplitude_km) = tile_relief_amplitude_km(iso_tiles) {
         let bound = scene.provinces.as_ref().and_then(|p| {
@@ -3388,7 +3568,7 @@ fn draw_woosh_frame(
         cy,
         radius_px,
         &scene.tiles,
-        scene.cols,
+        scene.param,
         scene.t_eff,
         star_dir,
         None,
@@ -3730,15 +3910,14 @@ fn run_derived(argv: &[String]) {
                 // as the owner watches (paused freezes it; speeding up runs deep time fast). A real derived
                 // physics step ([`step_deep_time`]), never a painted animation.
                 if deep_ticks > 0 {
-                    let cols = planets[planet].scene.cols;
-                    let rows = planets[planet].scene.tiles.len() / cols.max(1);
+                    let param = planets[planet].scene.param;
                     let stepped = match planets[planet].scene.provinces.as_mut() {
                         Some(prov) => {
                             step_provinces(prov, deep_ticks);
                             // Re-derive the surface AND the lava glow off the stepped provinces, so the owner watches
                             // the volcanism fade as the world cools (the glow follows the interior temperature down).
-                            let tiles = derive_province_tiles(prov, cols, rows);
-                            let lava = derive_province_lava(prov, cols, rows);
+                            let tiles = derive_province_tiles(prov, param);
+                            let lava = derive_province_lava(prov, param);
                             Some((tiles, lava))
                         }
                         None => None,
@@ -3817,7 +3996,7 @@ fn run_derived(argv: &[String]) {
                     gcy,
                     radius_px,
                     &scene.tiles,
-                    scene.cols,
+                    scene.param,
                     scene.t_eff,
                     star_dir,
                     None,
@@ -4295,7 +4474,7 @@ fn main() {
                     fx.radius_m,
                     fx.t_eff,
                     &fx.tiles,
-                    fx.cols,
+                    fx.param,
                     win_w,
                     win_h,
                     m_per_px,
@@ -5035,7 +5214,8 @@ mod province_tests {
             up as usize + low as usize + sub as usize
         };
         let uniform = provinces_with(vec![Fixed::from_int(10); 8], 4);
-        let ut = derive_province_tiles(&uniform, 16, 8).expect("uniform tiles");
+        let cube = render::SurfaceParam::CubeSphere { face_res: 8 };
+        let ut = derive_province_tiles(&uniform, cube).expect("uniform tiles");
         assert_eq!(
             count_variants(&ut),
             1,
@@ -5054,11 +5234,102 @@ mod province_tests {
             ],
             4,
         );
-        let vt = derive_province_tiles(&varied, 16, 8).expect("varied tiles");
+        let vt = derive_province_tiles(&varied, cube).expect("varied tiles");
         assert!(
             count_variants(&vt) >= 2,
             "a varied province field textures the surface with more than one relief, got {}",
             count_variants(&vt)
+        );
+    }
+
+    #[test]
+    fn the_parallel_cube_cache_is_thread_count_independent() {
+        // THE DETERMINISM GATE for the rayon-parallel cube-sphere cache: the build must be BIT-IDENTICAL regardless
+        // of the thread count. Each cell is computed purely from immutable inputs (the crater rows and the province
+        // field) with no shared mutable state, and the index-ordered `collect` preserves order, so a 1-thread build
+        // and an 8-thread build agree to the bit. This is the reproducibility "two views of the same spot agree"
+        // (Principle 10) relies on: the viewer stays deterministic even parallelized.
+        let mut prov = provinces_with(
+            vec![
+                Fixed::from_int(2),
+                Fixed::from_int(60),
+                Fixed::from_int(5),
+                Fixed::from_int(40),
+                Fixed::from_int(80),
+                Fixed::from_int(3),
+                Fixed::from_int(50),
+                Fixed::from_int(8),
+            ],
+            4,
+        );
+        // Seed discrete crater rows so the parallel build exercises the O(cells x craters) crater stamp too.
+        prov.state.craters = vec![
+            civsim_sim::deeptime::CraterRow {
+                u: Fixed::from_ratio(1, 5),
+                v: Fixed::from_ratio(2, 5),
+                diameter_m: Fixed::from_int(400_000),
+                depth_m: Fixed::from_int(20_000),
+                age_myr: Fixed::ZERO,
+            },
+            civsim_sim::deeptime::CraterRow {
+                u: Fixed::from_ratio(7, 10),
+                v: Fixed::from_ratio(1, 2),
+                diameter_m: Fixed::from_int(250_000),
+                depth_m: Fixed::from_int(12_000),
+                age_myr: Fixed::ZERO,
+            },
+            civsim_sim::deeptime::CraterRow {
+                u: Fixed::from_ratio(9, 10),
+                v: Fixed::from_ratio(1, 10),
+                diameter_m: Fixed::from_int(600_000),
+                depth_m: Fixed::from_int(30_000),
+                age_myr: Fixed::ZERO,
+            },
+        ];
+        let cube = render::SurfaceParam::CubeSphere { face_res: 24 };
+        let tiles_at = |threads: usize| -> Vec<i64> {
+            rayon::ThreadPoolBuilder::new()
+                .num_threads(threads)
+                .build()
+                .expect("a rayon pool")
+                .install(|| derive_province_tiles(&prov, cube).expect("cube tiles"))
+                .iter()
+                .map(|t| t.elevation.to_bits())
+                .collect()
+        };
+        let one = tiles_at(1);
+        let many = tiles_at(8);
+        assert_eq!(
+            one.len(),
+            6 * 24 * 24,
+            "the cube cache is six faces of face_res^2 cells"
+        );
+        assert_eq!(
+            one, many,
+            "the parallel cube-sphere elevation cache is bit-identical across thread counts"
+        );
+        // The lava field is the other parallel cube build; it must be thread-count independent as well.
+        let lava_at = |threads: usize| -> Vec<(u8, u8, u8, u32)> {
+            rayon::ThreadPoolBuilder::new()
+                .num_threads(threads)
+                .build()
+                .expect("a rayon pool")
+                .install(|| derive_province_lava(&prov, cube))
+                .iter()
+                .map(|g| {
+                    (
+                        g.emission.r,
+                        g.emission.g,
+                        g.emission.b,
+                        g.intensity.to_bits(),
+                    )
+                })
+                .collect()
+        };
+        assert_eq!(
+            lava_at(1),
+            lava_at(8),
+            "the parallel cube-sphere lava field is bit-identical across thread counts"
         );
     }
 
@@ -5074,8 +5345,9 @@ mod province_tests {
             Some(Fixed::from_ratio(1, 10)),
         );
         let (cols, rows) = (32usize, 16usize);
+        let param = render::SurfaceParam::LatLon { cols, rows };
         // The fresh young field starts laterally uniform at the super-solidus magma-ocean handoff, so it glows broadly.
-        let young = derive_province_lava(&prov, cols, rows);
+        let young = derive_province_lava(&prov, param);
         assert_eq!(young.len(), cols * rows, "one glow entry per display tile");
         let young_molten = young.iter().filter(|g| g.intensity > 0.0).count();
         let young_mean = young.iter().map(|g| g.intensity as f64).sum::<f64>() / young.len() as f64;
@@ -5097,7 +5369,7 @@ mod province_tests {
         );
         // Cool the world over deep time: the interior relaxes toward its (near-solidus) steady state, so the glow fades.
         step_provinces(&mut prov, 200);
-        let aged = derive_province_lava(&prov, cols, rows);
+        let aged = derive_province_lava(&prov, param);
         let aged_molten = aged.iter().filter(|g| g.intensity > 0.0).count();
         let aged_mean = aged.iter().map(|g| g.intensity as f64).sum::<f64>() / aged.len() as f64;
         assert!(
@@ -5123,7 +5395,7 @@ mod province_tests {
         for col in prov.state.columns.iter_mut() {
             col.temperature = Fixed::from_int(1000);
         }
-        let glow = derive_province_lava(&prov, 24, 12);
+        let glow = derive_province_lava(&prov, render::SurfaceParam::CubeSphere { face_res: 12 });
         assert!(
             glow.iter().all(|g| g.intensity == 0.0),
             "a sub-solidus world does not glow (every tile intensity is zero)"

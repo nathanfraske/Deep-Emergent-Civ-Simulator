@@ -1197,18 +1197,18 @@ pub fn crater_relief_km(stamps: &[CraterStamp], p: [Fixed; 3]) -> Fixed {
     z
 }
 
-/// The DERIVED tile relief at surface coordinate (u, v) (each in `[0, 1)`), an orthographic read of the derived relief
-/// field wrapped onto the globe (the same (u, v) -> cell mapping [`pick_surface_tile`] inverts). `None` for an empty
-/// field, so the caller falls back to a stand-in. Display-only.
-fn sample_derived_tile(tiles: &[DerivedTile], cols: usize, u: f32, v: f32) -> Option<DerivedTile> {
-    if tiles.is_empty() || cols == 0 {
-        return None;
-    }
-    let rows = tiles.len().div_ceil(cols);
-    let cu = ((u.clamp(0.0, 0.999_9) * cols as f32) as usize).min(cols - 1);
-    let cv = ((v.clamp(0.0, 0.999_9) * rows as f32) as usize).min(rows.saturating_sub(1));
-    let idx = (cv * cols + cu).min(tiles.len() - 1);
-    Some(tiles[idx])
+/// The DERIVED tile relief at BODY-frame direction `b` (its lat-lon coordinate `(u, v)` precomputed for the LatLon
+/// path), under the cache parameterization `param`: the cube-sphere cell for a `CubeSphere` cache, the equirectangular
+/// cell for a `LatLon` cache (the same pick [`pick_surface_tile`] inverts). `None` for an empty field, so the caller
+/// falls back to a stand-in. Display-only.
+fn sample_derived_tile(
+    tiles: &[DerivedTile],
+    param: SurfaceParam,
+    b: [f32; 3],
+    u: f32,
+    v: f32,
+) -> Option<DerivedTile> {
+    surface_cell_index(param, b, u, v, tiles.len()).map(|i| tiles[i])
 }
 
 /// The self-emitted LAVA GLOW of one surface tile: the incandescent colour of the tile's DERIVED interior
@@ -1227,18 +1227,18 @@ pub struct LavaGlow {
     pub intensity: f32,
 }
 
-/// Sample the per-display-tile [`LavaGlow`] field at surface coordinate (u, v), the SAME (u, v) -> cell mapping
-/// [`sample_derived_tile`] uses, so the glow registers with the crust tile it rides on. `None` for an empty field
-/// (a world with no molten record, so the caller adds no emission and the render is byte-identical). Display-only.
-fn sample_glow(glow: &[LavaGlow], cols: usize, u: f32, v: f32) -> Option<LavaGlow> {
-    if glow.is_empty() || cols == 0 {
-        return None;
-    }
-    let rows = glow.len().div_ceil(cols);
-    let cu = ((u.clamp(0.0, 0.999_9) * cols as f32) as usize).min(cols - 1);
-    let cv = ((v.clamp(0.0, 0.999_9) * rows as f32) as usize).min(rows.saturating_sub(1));
-    let idx = (cv * cols + cu).min(glow.len() - 1);
-    Some(glow[idx])
+/// Sample the per-cell [`LavaGlow`] field at BODY-frame direction `b` (its `(u, v)` precomputed for the LatLon path),
+/// the SAME cache index [`sample_derived_tile`] uses, so the glow registers with the crust cell it rides on. `None`
+/// for an empty field (a world with no molten record, so the caller adds no emission and the render is byte-identical
+/// there). Display-only.
+fn sample_glow(
+    glow: &[LavaGlow],
+    param: SurfaceParam,
+    b: [f32; 3],
+    u: f32,
+    v: f32,
+) -> Option<LavaGlow> {
+    surface_cell_index(param, b, u, v, glow.len()).map(|i| glow[i])
 }
 
 /// The DERIVED elevation field's finite-difference gradient at surface coordinate (u, v), returned as metres of
@@ -1283,51 +1283,120 @@ fn elevation_grad_uv(
 }
 
 /// The sun-direction HILLSHADE normal at a surface point: the sphere normal `b` (body frame) tilted by the DERIVED
-/// terrain slope. The elevation gradient ([`elevation_grad_uv`]) is turned into a true physical slope through the body
-/// `radius_m` (east arc length per unit-u is `2*pi*R*cos(lat)`, south arc length per unit-v is `pi*R`), then the
-/// perturbed surface normal is `Up - g_east*East - g_north*North` (the heightfield normal `(-de, -dn, 1)` in the local
-/// east/north/up frame), carried into body coordinates and renormalised. The slope is the real one at the field's own
-/// amplitude, so there is no vertical exaggeration: the relief lights where the ground truly slopes, brightest where
-/// the star grazes. `cos(lat)` is floored at the poleward-most row's cosine (the finest latitude the grid resolves), a
-/// numerical guard against the polar singularity rather than an authored value. Display-only math (Principle 10).
+/// terrain slope, so slopes facing the star are bright and slopes facing away are dark. The physical east/north slope
+/// (dimensionless, km rise over arc length at the field's OWN amplitude, no vertical exaggeration) perturbs the normal
+/// as `Up - g_east*East - g_north*North` (the heightfield normal `(-de, -dn, 1)` in the local east/north/up frame),
+/// carried into body coordinates and renormalised. The slope is read from the cache under `param`: for a `LatLon`
+/// cache the analytic gradient of the bilinear interpolant ([`elevation_grad_uv`]) in the east/north frame, converted
+/// through the body radius (east arc `2*pi*R*cos(lat)`, south arc `pi*R`, `cos(lat)` floored at the poleward row to
+/// guard the polar singularity); for a `CubeSphere` cache the central difference of the cached height over one cell's
+/// angle along a tangent pair that is REGULAR everywhere (the east/north frame is not: it collapses at the poles, and
+/// using it would put the pole singularity back into the shading of a cache built to have none). The tilt is
+/// basis-independent, so both compute the same physical quantity: the real slope tilts the normal, at the field's own
+/// amplitude. Display-only math (Principle 10).
 fn hillshade_normal(
     b: [f32; 3],
     tiles: &[DerivedTile],
-    cols: usize,
-    rows: usize,
+    param: SurfaceParam,
     u: f32,
     v: f32,
     radius_m: f32,
 ) -> [f32; 3] {
-    if radius_m <= 0.0 || rows == 0 {
+    use std::f32::consts::{FRAC_PI_2, PI};
+    if radius_m <= 0.0 {
         return b;
     }
-    use std::f32::consts::PI;
-    let lat = b[1].clamp(-1.0, 1.0).asin();
-    let lon = b[0].atan2(b[2]);
-    let (dz_du, dz_dv) = elevation_grad_uv(tiles, cols, rows, u, v);
-    // The tile elevation is in KILOMETRES (the Airy isostatic derivation's unit; the elevation span is read as km by
-    // `tile_relief_amplitude_km`), while the body radius arrives in metres, so the radius is taken in the SAME km unit
-    // to form a dimensionless slope (elevation over horizontal distance). The 1000 is the km-to-m unit factor, not a
-    // physics tuneable; getting it wrong makes the relief read 1000x too flat.
+    // The tile elevation is in KILOMETRES (the Airy isostatic derivation's unit), while the body radius arrives in
+    // metres, so the radius is taken in the SAME km unit to form a dimensionless slope. The 1000 is the km-to-m unit
+    // factor, not a physics tuneable; getting it wrong makes the relief read 1000x too flat.
     let radius_km = radius_m / 1000.0;
-    let cos_lat = lat.cos();
-    // Floor at the cosine of the poleward-most tile-row centre: below that latitude the grid resolves no distinct
-    // cells, so the east gradient there is degenerate. Grid-derived, not an authored constant.
-    let pole_floor = (PI / (2.0 * rows as f32)).sin();
-    let cos_lat_denom = cos_lat.abs().max(pole_floor);
-    let g_east = dz_du / (2.0 * PI * radius_km * cos_lat_denom);
-    // v increases southward, so the northward slope is the negation of the per-unit-v gradient over the meridian arc.
-    let g_north = -dz_dv / (PI * radius_km);
-    let (sin_lon, cos_lon) = lon.sin_cos();
-    let sin_lat = lat.sin();
-    let east = [cos_lon, 0.0, -sin_lon];
-    let north = [-sin_lat * sin_lon, cos_lat, -sin_lat * cos_lon];
-    normalize3([
-        b[0] - g_east * east[0] - g_north * north[0],
-        b[1] - g_east * east[1] - g_north * north[1],
-        b[2] - g_east * east[2] - g_north * north[2],
-    ])
+    if radius_km <= 0.0 {
+        return b;
+    }
+    match param {
+        SurfaceParam::LatLon { cols, rows } => {
+            if cols == 0 || rows == 0 {
+                return b;
+            }
+            // The lat-lon frame: east and north from the sphere coordinate, with the cos(lat) pole guard the
+            // equirectangular grid needs. Unchanged from before the cube-sphere migration (byte-identical).
+            let lat = b[1].clamp(-1.0, 1.0).asin();
+            let lon = b[0].atan2(b[2]);
+            let (sin_lon, cos_lon) = lon.sin_cos();
+            let sin_lat = lat.sin();
+            let cos_lat = lat.cos();
+            let east = [cos_lon, 0.0, -sin_lon];
+            let north = [-sin_lat * sin_lon, cos_lat, -sin_lat * cos_lon];
+            let (dz_du, dz_dv) = elevation_grad_uv(tiles, cols, rows, u, v);
+            // Floor cos(lat) at the poleward-most tile-row centre: below that latitude the grid resolves no distinct
+            // cells, so the east gradient there is degenerate. Grid-derived, not an authored constant.
+            let pole_floor = (PI / (2.0 * rows as f32)).sin();
+            let cos_lat_denom = cos_lat.abs().max(pole_floor);
+            let g_east = dz_du / (2.0 * PI * radius_km * cos_lat_denom);
+            // v increases southward, so the northward slope negates the per-unit-v gradient over the meridian arc.
+            let g_north = -dz_dv / (PI * radius_km);
+            normalize3([
+                b[0] - g_east * east[0] - g_north * north[0],
+                b[1] - g_east * east[1] - g_north * north[1],
+                b[2] - g_east * east[2] - g_north * north[2],
+            ])
+        }
+        SurfaceParam::CubeSphere { face_res } => {
+            if face_res == 0 {
+                return b;
+            }
+            // A tangent basis REGULAR at every direction. The east/north frame above collapses at the poles (there
+            // every direction is south, and the frame spins), which is the very singularity the cube-sphere cache
+            // exists to retire, so the cube path must not reintroduce it in the shading. Instead take the world axis
+            // least aligned with `b` and build an orthonormal tangent pair from it: the tilt `Up - grad(h)` is
+            // basis-INDEPENDENT (the two tangent slopes are the components of ONE gradient vector in the tangent
+            // plane), so any orthonormal pair yields the same physical normal, and this one never degenerates.
+            let (ax, ay, az) = (b[0].abs(), b[1].abs(), b[2].abs());
+            let axis = if ax <= ay && ax <= az {
+                [1.0, 0.0, 0.0]
+            } else if ay <= az {
+                [0.0, 1.0, 0.0]
+            } else {
+                [0.0, 0.0, 1.0]
+            };
+            let t1 = normalize3(cross3(axis, b));
+            let t2 = cross3(b, t1);
+            // Central-difference the cached elevation along the tangent pair by ~one cube cell's angle (a face spans
+            // pi/2 across face_res cells), so the slope is the real cell-to-cell grade over the true arc length, with
+            // no cos(lat) factor anywhere. Each sample reads the cell the SAME way the base colour does.
+            let dtheta = FRAC_PI_2 / face_res as f32;
+            let height_km = |dir: [f32; 3]| -> f32 {
+                match surface_cell_index(param, normalize3(dir), 0.0, 0.0, tiles.len()) {
+                    Some(i) => tiles[i].elevation.to_f64_lossy() as f32,
+                    None => 0.0,
+                }
+            };
+            let step = |sign: f32, axis: [f32; 3]| {
+                [
+                    b[0] + sign * dtheta * axis[0],
+                    b[1] + sign * dtheta * axis[1],
+                    b[2] + sign * dtheta * axis[2],
+                ]
+            };
+            let denom = 2.0 * dtheta * radius_km;
+            let g1 = (height_km(step(1.0, t1)) - height_km(step(-1.0, t1))) / denom;
+            let g2 = (height_km(step(1.0, t2)) - height_km(step(-1.0, t2))) / denom;
+            normalize3([
+                b[0] - g1 * t1[0] - g2 * t2[0],
+                b[1] - g1 * t1[1] - g2 * t2[1],
+                b[2] - g1 * t1[2] - g2 * t2[2],
+            ])
+        }
+    }
+}
+
+/// The cross product of two 3-vectors. Non-canon display math (the hillshade's tangent basis).
+fn cross3(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
+    [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ]
 }
 
 /// The globe's viewing orientation for the derived-surface explorer: a longitude spin about the polar axis and a
@@ -1398,6 +1467,146 @@ fn uv_to_body(u: f32, v: f32) -> [f32; 3] {
     [lat.cos() * lon.sin(), lat.sin(), lat.cos() * lon.cos()]
 }
 
+/// The parameterization of the surface SAMPLE CACHE: how the flat `tiles` slice (and the aligned lava-glow field)
+/// maps to directions on the sphere. `LatLon` is the legacy equirectangular grid (`cols` by `rows`), whose cells
+/// PINCH at the poles (their solid angle collapses to zero as `cos(lat) -> 0`), wasting the budget there and under-
+/// resolving the equator. `CubeSphere` is the six-face equi-angular cube projection: each face is a `face_res` by
+/// `face_res` grid, the cells near-uniform in solid angle (they vary by only about a factor of `sqrt(2)` across a
+/// face and there is NO pole singularity). The living-world / fixture globe keeps `LatLon` (byte-identical); the
+/// DERIVED-planet globe uses `CubeSphere`. Display-only: this re-parameterizes WHERE the Sample height function is
+/// read, never the physics it reads (Principle 10).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SurfaceParam {
+    /// The equirectangular grid: `cols` columns of longitude by `rows` rows of latitude (row-major). Pole-pinched.
+    LatLon { cols: usize, rows: usize },
+    /// The equi-angular cube-sphere: six faces, each `face_res` by `face_res`, face-major
+    /// (`index = face * face_res * face_res + t_row * face_res + s_col`). No pole pinch.
+    CubeSphere { face_res: usize },
+}
+
+/// The per-face basis of the cube-sphere: for face `f`, carry a FACE-LOCAL direction `d = (dx, dy, dz)` (with `dz`
+/// the outward-normal component) into the BODY frame. The six faces tile the sphere (dominant `+x, -x, +y, -y, +z,
+/// -z`), and this rotation is the exact inverse of the axis selection in [`cube_dir_to_face_st`]. Public so the
+/// cache builder can evaluate the Sample function at each cube cell's world direction. Fixed-point (Principle 3),
+/// display-only re-parameterization (Principle 10).
+pub fn cube_face_local_to_world_fixed(face: usize, d: [Fixed; 3]) -> [Fixed; 3] {
+    let (dx, dy, dz) = (d[0], d[1], d[2]);
+    match face {
+        0 => [dz, dy, -dx],  // +x dominant
+        1 => [-dz, dy, dx],  // -x
+        2 => [dx, dz, -dy],  // +y
+        3 => [dx, -dz, dy],  // -y
+        4 => [dx, dy, dz],   // +z
+        _ => [-dx, dy, -dz], // -z
+    }
+}
+
+/// The f32 sibling of [`cube_face_local_to_world_fixed`], for the round-trip test.
+#[cfg(test)]
+fn cube_face_local_to_world_f32(face: usize, d: [f32; 3]) -> [f32; 3] {
+    let (dx, dy, dz) = (d[0], d[1], d[2]);
+    match face {
+        0 => [dz, dy, -dx],
+        1 => [-dz, dy, dx],
+        2 => [dx, dz, -dy],
+        3 => [dx, -dz, dy],
+        4 => [dx, dy, dz],
+        _ => [-dx, dy, -dz],
+    }
+}
+
+/// The f32 EQUI-ANGULAR forward map (for the round-trip test; the render path needs only the inverse, and the cache
+/// builder uses the fixed-point [`cube_face_local_to_world_fixed`] with the precomputed face-local directions). The
+/// equi-angular map warps the face angle `alpha = (s - 1/2) * pi/2` (and `beta` from `t`) so equal steps in `(s, t)`
+/// subtend near-equal solid angle (Ronchi, Iacono, Paolucci 1996, "The Cubed Sphere"), removing the gnomonic cube's
+/// centre-to-corner area bias and the lat-lon grid's pole collapse. The face-local direction is
+/// `(sin a cos b, cos a sin b, cos a cos b)` normalized (equal to `(tan a, tan b, 1)` normalized, but using only
+/// sin/cos/sqrt so it needs no `tan`), then rotated into the body frame by the face basis.
+#[cfg(test)]
+fn cube_face_dir_f32(face: usize, s: f32, t: f32) -> [f32; 3] {
+    use std::f32::consts::FRAC_PI_2;
+    let (sa, ca) = ((s - 0.5) * FRAC_PI_2).sin_cos();
+    let (sb, cb) = ((t - 0.5) * FRAC_PI_2).sin_cos();
+    let lx = sa * cb;
+    let ly = ca * sb;
+    let lz = ca * cb;
+    let n = (lx * lx + ly * ly + lz * lz).sqrt();
+    let d = if n > 0.0 {
+        [lx / n, ly / n, lz / n]
+    } else {
+        [0.0, 0.0, 1.0]
+    };
+    cube_face_local_to_world_f32(face, d)
+}
+
+/// The INVERSE cube-sphere map: the `(face, s, t)` of a BODY-frame direction `dir` (need not be unit), with `s, t` in
+/// `[0, 1)`. The face is the axis of largest magnitude (with sign); the face-local `(dx, dy, dz)` is read off by the
+/// exact inverse of [`cube_face_local_to_world_f32`]; and the equi-angular coordinates invert the warp,
+/// `alpha = atan(dx / dz)`, `s = alpha / (pi/2) + 1/2`. A corner direction lands on a face by a deterministic first-
+/// max tie-break. Display-only f32 math (Principle 10).
+fn cube_dir_to_face_st(dir: [f32; 3]) -> (usize, f32, f32) {
+    use std::f32::consts::FRAC_PI_2;
+    let (x, y, z) = (dir[0], dir[1], dir[2]);
+    let (ax, ay, az) = (x.abs(), y.abs(), z.abs());
+    let (face, dx, dy, dz) = if ax >= ay && ax >= az {
+        if x > 0.0 {
+            (0usize, -z, y, x)
+        } else {
+            (1, z, y, -x)
+        }
+    } else if ay >= az {
+        if y > 0.0 {
+            (2, x, -z, y)
+        } else {
+            (3, x, z, -y)
+        }
+    } else if z > 0.0 {
+        (4, x, y, z)
+    } else {
+        (5, -x, y, -z)
+    };
+    let inv = if dz != 0.0 { 1.0 / dz } else { 0.0 };
+    let s = (dx * inv).atan() / FRAC_PI_2 + 0.5;
+    let t = (dy * inv).atan() / FRAC_PI_2 + 0.5;
+    (face, s.clamp(0.0, 0.999_9), t.clamp(0.0, 0.999_9))
+}
+
+/// The flat cache index of a BODY-frame direction `b` (with its lat-lon coordinate `(u, v)` precomputed by the
+/// caller, used only by the [`SurfaceParam::LatLon`] path), under the cache parameterization `param`, for a field of
+/// `field_len` cells. `None` for a degenerate cache (empty field, zero columns/rows or face resolution). For
+/// `LatLon` this reproduces the former equirectangular cell pick exactly (byte-identical); for `CubeSphere` it maps
+/// the direction to `(face, s, t)` and thence the face cell. Display-only (Principle 10).
+fn surface_cell_index(
+    param: SurfaceParam,
+    b: [f32; 3],
+    u: f32,
+    v: f32,
+    field_len: usize,
+) -> Option<usize> {
+    if field_len == 0 {
+        return None;
+    }
+    match param {
+        SurfaceParam::LatLon { cols, rows } => {
+            if cols == 0 || rows == 0 {
+                return None;
+            }
+            let cu = ((u.clamp(0.0, 0.999_9) * cols as f32) as usize).min(cols - 1);
+            let cv = ((v.clamp(0.0, 0.999_9) * rows as f32) as usize).min(rows - 1);
+            Some((cv * cols + cu).min(field_len - 1))
+        }
+        SurfaceParam::CubeSphere { face_res } => {
+            if face_res == 0 {
+                return None;
+            }
+            let (face, s, t) = cube_dir_to_face_st(b);
+            let ci = ((s * face_res as f32) as usize).min(face_res - 1);
+            let cj = ((t * face_res as f32) as usize).min(face_res - 1);
+            Some((face * face_res * face_res + cj * face_res + ci).min(field_len - 1))
+        }
+    }
+}
+
 /// The display styling of the drawn sphere's surface: the DERIVED material tint (the crust's perceived colour under the
 /// star, or `None` for the relief swatch) and an optional lat/lon TILE GRID `(cols, rows)` drawn onto the sphere as thin
 /// seams, so the surface reads as an array of tiles the observer can drill into. Both are observability-non-canon
@@ -1445,17 +1654,23 @@ pub fn sub_solar_body_dir(declination: f32, subsolar_longitude: f32) -> [f32; 3]
 
 /// Draw the planet as a lit sphere: a filled disk of on-screen radius `radius_px` centred at `(cx, cy)`, its
 /// surface textured from the DERIVED tiles (an orthographic sphere map of the relief field, sampled at the surface
-/// coordinate the globe `orient`ation has rotated under each pixel) and shaded by a Lambert diffuse term against the
-/// star direction `star_dir`. The sunlit hemisphere is bright and tinted by `light_tint` (the star's
+/// direction the globe `orient`ation has rotated under each pixel) and shaded by a Lambert diffuse term against the
+/// star direction `star_dir`. `param` says how `tiles` (and the aligned `lava` field) map to sphere directions: the
+/// DERIVED-planet globe passes [`SurfaceParam::CubeSphere`] (the six-face cache, so the poles carry the same cell
+/// density as the equator and neither pinches nor seams), the living-world / fixture globe passes
+/// [`SurfaceParam::LatLon`] (the equirectangular cache, byte-identical to before the cube-sphere migration). The
+/// sunlit hemisphere is bright and tinted by `light_tint` (the star's
 /// [`blackbody_rgb`]); the night side falls to a faint neutral ambient; the cosine falloff between them is the soft
 /// day/night terminator. The lighting rotates WITH `orient` (camera-orbit semantics), so panning sweeps the terminator
 /// across the surface and the lit part visibly changes as the globe turns, even on a uniform crust. `style.tint`, if
 /// given, is the crust's DERIVED perceived colour under the star ([`material_surface_rgb`]): each tile takes that colour
 /// scaled by its relief shading, so the sphere wears the derived material colour rather than the relief swatch.
-/// `style.grid`, if given, overlays a lat/lon tile grid as thin darkened seams, so the surface reads as an array of
-/// tiles (the caller refines the grid with zoom so a tile opens into finer tiles). Pixels outside the disk are left
-/// untouched (the caller paints space and the atmosphere limb). A pure, deterministic read of the derived radius,
-/// tiles, star direction, style, and orientation, one-way canon -> pixels (Principle 10).
+/// `style.grid`, if given, overlays the drill-in SELECTION grid as thin darkened seams, so the surface reads as an
+/// array of tiles the cursor can pick (the caller refines it with zoom). That overlay stays lat/lon to match
+/// [`pick_surface_tile`], independent of how the sample cache underneath is parameterized; the level-of-detail
+/// quadtree slice replaces both together. Pixels outside the disk are left untouched (the caller paints space and the
+/// atmosphere limb). A pure, deterministic read of the derived radius, tiles, star direction, style, and orientation,
+/// one-way canon -> pixels (Principle 10).
 #[allow(clippy::too_many_arguments)]
 pub fn draw_globe(
     buf: &mut [u32],
@@ -1465,7 +1680,7 @@ pub fn draw_globe(
     cy: i32,
     radius_px: usize,
     tiles: &[DerivedTile],
-    tile_cols: usize,
+    param: SurfaceParam,
     star_dir: [f32; 3],
     light_tint: Rgb,
     style: SurfaceStyle,
@@ -1505,13 +1720,14 @@ pub fn draw_globe(
     // amplitude and reads where the light grazes (near the terminator and at surface zoom), the honest look. A zero
     // radius (the living-world globe, or a caller that supplies none) skips the tilt for the bare sphere, byte-identical.
     let surface_radius_m = style.surface_radius_m.to_f64_lossy() as f32;
-    let tile_rows = if tile_cols > 0 {
-        tiles.len() / tile_cols
-    } else {
-        0
+    // The cache carries cells only if its parameterization resolves at least one (a `LatLon` grid needs both columns
+    // and rows; a `CubeSphere` cache needs a positive face resolution). The hillshade needs that plus a physical body
+    // radius; otherwise it falls back to the bare sphere normal (the living-world globe, byte-identical).
+    let param_has_cells = match param {
+        SurfaceParam::LatLon { cols, rows } => cols > 0 && rows > 0,
+        SurfaceParam::CubeSphere { face_res } => face_res > 0,
     };
-    let hillshade_on =
-        style.relief_shading && surface_radius_m > 0.0 && tile_cols > 0 && tile_rows > 0;
+    let hillshade_on = style.relief_shading && surface_radius_m > 0.0 && param_has_cells;
     let rp = radius_px as i32;
     let x0 = (cx - rp).max(0);
     let x1 = (cx + rp).min(w as i32 - 1);
@@ -1536,7 +1752,7 @@ pub fn draw_globe(
             // wears the DERIVED material colour; otherwise the relief swatch ([`derived_tile_color`]). A uniform crust
             // reads a single shade (the honest look until lateral composition variation lands, a geodynamics
             // follow-on); an empty field falls back to the tint or a deep-ocean stand-in.
-            let base = match sample_derived_tile(tiles, tile_cols, u, v) {
+            let base = match sample_derived_tile(tiles, param, b, u, v) {
                 Some(tile) => match style.tint {
                     Some(m) => {
                         if style.relief_shading {
@@ -1564,7 +1780,7 @@ pub fn draw_globe(
             // against the body-frame `star_dir` (a rotation preserves the dot, so this matches the sphere term when
             // the ground is flat); the relief then lights only where the surface truly slopes.
             let lambert = if hillshade_on {
-                let n = hillshade_normal(b, tiles, tile_cols, tile_rows, u, v, surface_radius_m);
+                let n = hillshade_normal(b, tiles, param, u, v, surface_radius_m);
                 (n[0] * star_dir[0] + n[1] * star_dir[1] + n[2] * star_dir[2]).max(0.0)
             } else {
                 (nx * l[0] - ny * l[1] + nz * l[2]).max(0.0)
@@ -1608,7 +1824,7 @@ pub fn draw_globe(
             // solidus, so solid crust stays its shaded albedo), sampled at the SAME tile the albedo used so glow and
             // crust register. A young/hot world glows broadly; an aged world is dark crust with super-solidus hot-spots.
             if let Some(glow) = lava {
-                if let Some(g) = sample_glow(glow, tile_cols, u, v) {
+                if let Some(g) = sample_glow(glow, param, b, u, v) {
                     if g.intensity > 0.0 {
                         let add = |c: u8, e: u8| -> u8 {
                             (c as f32 + e as f32 * g.intensity * LAVA_EMISSION_GAIN)
@@ -1756,7 +1972,7 @@ pub fn render_solar_system_view(
     radius_m: Fixed,
     t_eff_k: Fixed,
     tiles: &[DerivedTile],
-    tile_cols: usize,
+    param: SurfaceParam,
     w: usize,
     h: usize,
     m_per_px: Fixed,
@@ -1811,7 +2027,7 @@ pub fn render_solar_system_view(
         planet_cy,
         planet_radius_px,
         tiles,
-        tile_cols,
+        param,
         star_dir,
         star_color,
         style,
@@ -1857,7 +2073,7 @@ pub fn draw_globe_scene(
     cy: i32,
     radius_px: usize,
     tiles: &[DerivedTile],
-    tile_cols: usize,
+    param: SurfaceParam,
     t_eff_k: Fixed,
     star_dir_body: [f32; 3],
     star: Option<(i32, i32, usize)>,
@@ -1881,7 +2097,7 @@ pub fn draw_globe_scene(
         cy,
         radius_px,
         tiles,
-        tile_cols,
+        param,
         star_dir_body,
         light_tint,
         style,
@@ -2379,6 +2595,147 @@ mod tests {
         (tiles, cols)
     }
 
+    /// Wrap a lat-lon demo tile field as a [`SurfaceParam`] (rows derived from the field), so the globe-render tests
+    /// drive the equirectangular sampling path exactly as before the cube-sphere migration (byte-identical).
+    fn latlon(tiles: &[DerivedTile], cols: usize) -> SurfaceParam {
+        SurfaceParam::LatLon {
+            cols,
+            rows: tiles.len() / cols,
+        }
+    }
+
+    #[test]
+    fn the_cube_sphere_map_round_trips_and_selects_the_expected_face() {
+        // The forward map (face, s, t) -> direction and the inverse direction -> (face, s, t) are consistent: a cell
+        // centre sampled forward and inverted returns its own face and coordinate. This is the load-bearing identity:
+        // the cache writes a cell at forward(face, s, t) and the render reads it back by inverting the pixel direction,
+        // so they MUST agree for the surface to sample correctly.
+        let res = 32usize;
+        for face in 0..6usize {
+            for &(i, j) in &[(0usize, 0usize), (5, 9), (16, 16), (31, 31), (7, 24)] {
+                let s = (i as f32 + 0.5) / res as f32;
+                let t = (j as f32 + 0.5) / res as f32;
+                let dir = cube_face_dir_f32(face, s, t);
+                // The forward direction is a unit vector.
+                let n = (dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2]).sqrt();
+                assert!(
+                    (n - 1.0).abs() < 1e-4,
+                    "the cube direction is unit, got {n}"
+                );
+                let (f2, s2, t2) = cube_dir_to_face_st(dir);
+                assert_eq!(
+                    f2, face,
+                    "the inverse recovers the face (face {face}, cell {i},{j})"
+                );
+                assert!(
+                    (s2 - s).abs() < 1e-4 && (t2 - t).abs() < 1e-4,
+                    "the inverse recovers (s, t): ({s},{t}) vs ({s2},{t2}) on face {face}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_cube_sphere_spreads_the_budget_where_the_lat_lon_grid_pinches_at_the_pole() {
+        // THE POLE-PINCH FIX, MEASURED rather than asserted. Count how many CACHE CELLS fall inside two caps of the
+        // SAME solid angle, one centred on the north pole and one on the equator, at the two comparable budgets: the
+        // lat-lon 1440x720 = 1,036,800 grid the cache used before, and the 6 x 416^2 = 1,038,336 cube-sphere it uses
+        // now. The lat-lon grid CROWDS the pole (its cell area collapses as cos(lat)), so the polar cap swallows
+        // several times its fair share of the budget while the equator is under-resolved; the cube-sphere spreads the
+        // cells evenly, so the two caps hold comparable counts. One measurement, both parameterizations.
+        const CAP_COS: f32 = 0.984_807_7; // cos(10 degrees)
+        let pole = [0.0f32, 1.0, 0.0];
+        let equator = [0.0f32, 0.0, 1.0];
+        let in_cap = |d: [f32; 3], axis: [f32; 3]| {
+            d[0] * axis[0] + d[1] * axis[1] + d[2] * axis[2] >= CAP_COS
+        };
+        // The lat-lon cache: each cell's centre direction is the sphere map at the cell centre.
+        let (cols, rows) = (1440usize, 720usize);
+        let (mut ll_pole, mut ll_eq) = (0usize, 0usize);
+        for r in 0..rows {
+            let v = (r as f32 + 0.5) / rows as f32;
+            for c in 0..cols {
+                let u = (c as f32 + 0.5) / cols as f32;
+                let d = uv_to_body(u, v);
+                ll_pole += in_cap(d, pole) as usize;
+                ll_eq += in_cap(d, equator) as usize;
+            }
+        }
+        // The cube-sphere cache: each cell's centre direction is the equi-angular forward map at the cell centre.
+        let res = 416usize;
+        let (mut cs_pole, mut cs_eq) = (0usize, 0usize);
+        for face in 0..6usize {
+            for j in 0..res {
+                let t = (j as f32 + 0.5) / res as f32;
+                for i in 0..res {
+                    let s = (i as f32 + 0.5) / res as f32;
+                    let d = cube_face_dir_f32(face, s, t);
+                    cs_pole += in_cap(d, pole) as usize;
+                    cs_eq += in_cap(d, equator) as usize;
+                }
+            }
+        }
+        let ll_ratio = ll_pole as f64 / ll_eq as f64;
+        let cs_ratio = cs_pole as f64 / cs_eq as f64;
+        eprintln!(
+            "budget in a 10-degree cap: lat-lon pole {ll_pole} equator {ll_eq} (ratio {ll_ratio:.2}); \
+             cube-sphere pole {cs_pole} equator {cs_eq} (ratio {cs_ratio:.2})"
+        );
+        assert!(
+            ll_ratio > 5.0,
+            "the lat-lon grid pinches: its polar cap swallows {ll_ratio:.1}x the equatorial cap's cells"
+        );
+        assert!(
+            (0.6..1.6).contains(&cs_ratio),
+            "the cube-sphere budget is uniform from pole to equator, got ratio {cs_ratio:.2}"
+        );
+    }
+
+    #[test]
+    fn the_cube_sphere_covers_the_poles_without_a_singularity() {
+        // The lat-lon grid PINCHES at the poles (its cells collapse to zero area there). The cube-sphere does not: the
+        // north pole (+y) and south pole (-y) map cleanly onto the +y / -y faces at their centres, and the six faces
+        // tile the whole sphere. Sample a spread of directions (including both poles) and confirm each lands on a valid
+        // face cell of a res x res x 6 field, so no direction is unmapped or pinched.
+        let res = 16usize;
+        let field_len = 6 * res * res;
+        // Both poles land at the centre of their polar face (s ~ t ~ 0.5), never crowded onto a seam.
+        let (fnorth, sn, tn) = cube_dir_to_face_st([0.0, 1.0, 0.0]);
+        assert_eq!(fnorth, 2, "the north pole is the +y face");
+        assert!(
+            (sn - 0.5).abs() < 1e-3 && (tn - 0.5).abs() < 1e-3,
+            "the north pole sits at the +y face centre, got ({sn},{tn})"
+        );
+        let (fsouth, _, _) = cube_dir_to_face_st([0.0, -1.0, 0.0]);
+        assert_eq!(fsouth, 3, "the south pole is the -y face");
+        // Every direction on a lattice over the sphere resolves to a valid, in-range cell (all six faces are exercised).
+        let mut faces_hit = [false; 6];
+        for a in 0..24 {
+            for b in 0..12 {
+                let lon = (a as f32 + 0.5) / 24.0 * std::f32::consts::TAU - std::f32::consts::PI;
+                let lat = (0.5 - (b as f32 + 0.5) / 12.0) * std::f32::consts::PI;
+                let dir = [lat.cos() * lon.sin(), lat.sin(), lat.cos() * lon.cos()];
+                let (face, s, t) = cube_dir_to_face_st(dir);
+                assert!(face < 6, "the direction lands on a valid face");
+                faces_hit[face] = true;
+                let idx = surface_cell_index(
+                    SurfaceParam::CubeSphere { face_res: res },
+                    dir,
+                    0.0,
+                    0.0,
+                    field_len,
+                )
+                .expect("a direction maps to a cube cell");
+                assert!(idx < field_len, "the cube cell index is in range");
+                assert!((0.0..1.0).contains(&s) && (0.0..1.0).contains(&t));
+            }
+        }
+        assert!(
+            faces_hit.iter().all(|&h| h),
+            "a full lattice exercises all six cube faces: {faces_hit:?}"
+        );
+    }
+
     /// The mean luminance of the disk pixels on one side of the vertical centre line at `cx`.
     fn half_luminance(buf: &[u32], w: usize, cx: i32, cy: i32, r: i32, right: bool) -> f64 {
         let mut sum = 0f64;
@@ -2447,7 +2804,7 @@ mod tests {
             cy,
             radius,
             &tiles,
-            cols,
+            latlon(&tiles, cols),
             [1.0, 0.0, 0.0],
             Rgb::new(255, 255, 255),
             SurfaceStyle::default(),
@@ -2470,7 +2827,7 @@ mod tests {
             cy,
             radius,
             &tiles,
-            cols,
+            latlon(&tiles, cols),
             [1.0, 0.0, 0.0],
             Rgb::new(255, 255, 255),
             SurfaceStyle::default(),
@@ -2534,7 +2891,7 @@ mod tests {
             cy,
             radius,
             &tiles,
-            cols,
+            latlon(&tiles, cols),
             s,
             Rgb::new(255, 255, 255),
             SurfaceStyle::default(),
@@ -2651,7 +3008,7 @@ mod tests {
             radius_m,
             sun_t,
             &tiles,
-            cols,
+            latlon(&tiles, cols),
             w,
             h,
             m_per_px,
@@ -2686,7 +3043,7 @@ mod tests {
             radius_m,
             sun_t,
             &tiles,
-            cols,
+            latlon(&tiles, cols),
             w,
             h,
             m_per_px,
@@ -2722,7 +3079,7 @@ mod tests {
                 radius_m,
                 t_eff,
                 &tiles,
-                cols,
+                latlon(&tiles, cols),
                 w,
                 h,
                 m_per_px,
@@ -3326,7 +3683,7 @@ mod tests {
             cy,
             radius,
             &tiles,
-            cols,
+            latlon(&tiles, cols),
             [0.3, -0.2, 0.9],
             Rgb::new(255, 250, 240),
             SurfaceStyle::default(),
@@ -3343,7 +3700,7 @@ mod tests {
             cy,
             radius,
             &tiles,
-            cols,
+            latlon(&tiles, cols),
             [0.3, -0.2, 0.9],
             Rgb::new(255, 250, 240),
             SurfaceStyle::default(),
@@ -3383,7 +3740,7 @@ mod tests {
             cy,
             radius,
             &uniform,
-            cols,
+            latlon(&uniform, cols),
             star,
             white,
             SurfaceStyle::default(),
@@ -3399,7 +3756,7 @@ mod tests {
             cy,
             radius,
             &uniform,
-            cols,
+            latlon(&uniform, cols),
             star,
             white,
             SurfaceStyle::default(),
@@ -3425,7 +3782,7 @@ mod tests {
                 cy,
                 radius,
                 &uniform,
-                cols,
+                latlon(&uniform, cols),
                 star,
                 white,
                 SurfaceStyle {
@@ -3476,7 +3833,7 @@ mod tests {
                 cy,
                 radius,
                 &tiles,
-                cols,
+                latlon(&tiles, cols),
                 star,
                 white,
                 SurfaceStyle {
@@ -3539,7 +3896,7 @@ mod tests {
                 cy,
                 radius,
                 &tiles,
-                cols,
+                latlon(&tiles, cols),
                 sun,
                 white,
                 SurfaceStyle {

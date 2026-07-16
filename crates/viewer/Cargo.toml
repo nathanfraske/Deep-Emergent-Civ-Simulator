@@ -33,6 +33,13 @@ civsim-materials = { path = "../materials" }
 # `Camera::paint` produces. It is an observer-side rendering dependency only; no
 # determinism-critical crate (core, physics, sim) depends on it.
 minifb = "0.27"
+# The DERIVED-planet globe builds a ~1M-cell surface SAMPLE CACHE (the cube-sphere height field: Airy
+# elevation plus the O(cells x craters) crater-row stamp, plus the resampled province fields). Each cell is
+# INDEPENDENT and computed from immutable inputs, so the cache is built with a data-parallel `par_iter().map().
+# collect::<Vec<_>>()` (index-ordered, so the result is BIT-IDENTICAL to the serial build regardless of thread
+# count). Display-only work off the canon run path (Principle 10); no determinism-critical crate depends on the
+# viewer, and the fixed-point per-cell math is thread-count-independent.
+rayon = "1"
 
 [lints.clippy]
 # R-CANON-WALK is scoped to the canonical tick-state crates (core, sim, world);

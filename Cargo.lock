@@ -399,6 +399,7 @@ dependencies = [
  "civsim-units",
  "civsim-world",
  "minifb",
+ "rayon",
 ]
 
 [[package]]
