@@ -195,15 +195,26 @@ pub struct MeltParams {
     pub processing_time_myr: Fixed,
 }
 
-/// THE VOLCANISM: the crust a column's interior melt delivers in one tick. The column's current interior
-/// temperature is the mantle potential temperature the seam-6 [`adiabatic_melt_column`] (McKenzie-Bickle)
-/// crosses against the solidus; the crust a full melt column makes is delivered over the mantle processing time,
-/// so a tick of `dt_myr` adds `crust_thickness_km * dt_myr / processing_time`. A sub-solidus column (a mantle
-/// colder than its surface solidus) makes no melt and no crust: zero, never negative, never a fabricated crust.
-/// This is derive-first (the crust is the melt the interior produces, keyed on the column's own temperature) and
-/// the province-builder: a hotter, longer-lived column accumulates more crust than its neighbour, so the surface
-/// crust becomes the written readout of the interior's melt history. Returns the crust increment (kilometres).
-pub fn crust_growth(potential_temperature_k: Fixed, melt: &MeltParams, dt_myr: Fixed) -> Fixed {
+/// THE VOLCANISM: the crust increment a column's interior melt delivers in one tick, RELAXING the crust toward
+/// the equilibrium thickness the melt column supports rather than accumulating a flux without bound. The column's
+/// current interior temperature is the mantle potential temperature the seam-6 [`adiabatic_melt_column`]
+/// (McKenzie-Bickle) crosses against the solidus, and the crust that a full melt column makes is the EQUILIBRIUM
+/// the column can support: the fusible source is finite, so as the crust approaches that equilibrium the source
+/// depletes and production falls to zero. The tick closes the remaining deficit over the mantle processing time,
+/// `(equilibrium - prev_crust_km) * dt_myr / processing_time`, CLAMPED non-negative: a crust already at or above
+/// the column's equilibrium builds no more (the saturation, the physics of a finite source, not an authored cap),
+/// and a made crust does not un-form when the mantle cools. A sub-solidus column (a mantle colder than its
+/// surface solidus) makes no melt and no crust: zero, never negative, never a fabricated crust. This is
+/// derive-first (the equilibrium is the melt the interior produces, keyed on the column's own temperature) and
+/// the province-builder AND the province bound: a hotter, longer-lived column relaxes to a thicker equilibrium
+/// than its neighbour, so the surface crust spread is the BOUNDED readout of the interior's melt history rather
+/// than an unbounded integral. Returns the crust increment (kilometres), non-negative.
+pub fn crust_growth(
+    potential_temperature_k: Fixed,
+    prev_crust_km: Fixed,
+    melt: &MeltParams,
+    dt_myr: Fixed,
+) -> Fixed {
     if melt.processing_time_myr <= Fixed::ZERO || dt_myr <= Fixed::ZERO {
         return Fixed::ZERO;
     }
@@ -216,11 +227,21 @@ pub fn crust_growth(potential_temperature_k: Fixed, melt: &MeltParams, dt_myr: F
         melt.source_density_kg_per_m3,
         melt.gravity_m_per_s2,
     ) {
-        Some(column) => column
-            .crust_thickness_km
-            .checked_mul(dt_myr)
-            .and_then(|c| c.checked_div(melt.processing_time_myr))
-            .unwrap_or(Fixed::ZERO),
+        // The deficit toward the equilibrium crust the column supports. Clamped non-negative: at or above the
+        // equilibrium the finite source is spent (saturation) and the crust does not un-form, so no negative step.
+        Some(column) => {
+            let deficit = column
+                .crust_thickness_km
+                .checked_sub(prev_crust_km)
+                .unwrap_or(Fixed::ZERO);
+            if deficit <= Fixed::ZERO {
+                return Fixed::ZERO;
+            }
+            deficit
+                .checked_mul(dt_myr)
+                .and_then(|c| c.checked_div(melt.processing_time_myr))
+                .unwrap_or(Fixed::ZERO)
+        }
         None => Fixed::ZERO,
     }
 }
@@ -230,11 +251,13 @@ pub fn crust_growth(potential_temperature_k: Fixed, melt: &MeltParams, dt_myr: F
 /// geological time. `column_params` is either ONE entry broadcast to every column (a laterally uniform world) or
 /// one per column (each cell's own composition and radiogenic budget, the source of lateral variation); any other
 /// length is a caller mismatch and the column falls back to the first entry so the tick never panics. `melt` is
-/// the shared per-world volcanism parameters. `dt_myr` is the tick's geological duration. The crust ACCUMULATES:
-/// a crust the interior once built stays, so the surface thickness is the integrated melt history, hot columns
-/// building thicker crust (the provinces, and the derived thickness that retires the 30 km fixture). Returns the
-/// next state. Deterministic and worker-invariant (a pure per-column map in index order). `None` if
-/// `column_params` is empty (nothing to step against), fail-loud rather than a silent no-op.
+/// the shared per-world volcanism parameters. `dt_myr` is the tick's geological duration. The crust GROWS TOWARD
+/// EACH COLUMN'S EQUILIBRIUM and saturates there: a crust the interior once built stays, but the finite fusible
+/// source cannot push it past the equilibrium the column supports ([`crust_growth`]), so the surface thickness is
+/// the BOUNDED melt history, hot columns building thicker crust (the provinces, and the derived thickness that
+/// retires the 30 km fixture) without an unbounded runaway. Returns the next state. Deterministic and
+/// worker-invariant (a pure per-column map in index order). `None` if `column_params` is empty (nothing to step
+/// against), fail-loud rather than a silent no-op.
 pub fn step_deep_time(
     state: &DeepTimeState,
     column_params: &[ColumnParams],
@@ -258,14 +281,15 @@ pub fn step_deep_time(
             convection_step(col, p)
         })
         .collect();
-    // The volcanism: each column's stepped interior temperature delivers crust over the tick, added to the crust
-    // it has already built (a made crust stays; it does not un-form when the mantle cools). The accumulated
-    // thickness is the derived crust, laterally varying by each column's own melt history.
+    // The volcanism: each column's stepped interior temperature delivers crust over the tick, relaxing the crust
+    // it has already built toward the equilibrium the column supports (a made crust stays and does not un-form when
+    // the mantle cools, and the finite source saturates it at the equilibrium). The bounded thickness is the
+    // derived crust, laterally varying by each column's own melt history.
     let crust_thickness_km: Vec<Fixed> = state
         .crust_thickness_km
         .iter()
         .zip(columns.iter())
-        .map(|(prev, col)| prev.saturating_add(crust_growth(col.temperature, melt, dt_myr)))
+        .map(|(prev, col)| prev.saturating_add(crust_growth(col.temperature, *prev, melt, dt_myr)))
         .collect();
     Some(DeepTimeState {
         columns,
@@ -977,13 +1001,76 @@ mod tests {
         // A mantle colder than its surface solidus (1373 K) makes no melt, so it builds no crust: the volcanism is
         // the interior's own readout, not an authored floor of crust.
         assert_eq!(
-            crust_growth(Fixed::from_int(1000), &melt_params(), Fixed::from_int(100)),
+            crust_growth(
+                Fixed::from_int(1000),
+                Fixed::ZERO,
+                &melt_params(),
+                Fixed::from_int(100)
+            ),
             Fixed::ZERO,
             "a sub-solidus column makes no melt and no crust"
         );
         assert!(
-            crust_growth(Fixed::from_int(1800), &melt_params(), Fixed::from_int(100)) > Fixed::ZERO,
-            "a super-solidus column does build crust"
+            crust_growth(
+                Fixed::from_int(1800),
+                Fixed::ZERO,
+                &melt_params(),
+                Fixed::from_int(100)
+            ) > Fixed::ZERO,
+            "a super-solidus column with no crust yet does build crust"
+        );
+    }
+
+    #[test]
+    fn the_crust_saturates_at_the_columns_equilibrium_and_never_un_forms() {
+        // The derive-first bound: a super-solidus column relaxes toward the equilibrium crust the melt column
+        // supports and stops there (the finite fusible source depletes), so the surface relief cannot run away.
+        // First find the equilibrium the column supports (the full melt-column crust the FIRST increment closes
+        // toward from zero), then prove a crust already at or above it builds no more.
+        let hot = Fixed::from_int(1800);
+        let melt = melt_params();
+        let dt = Fixed::from_int(100);
+        // The equilibrium crust the column supports, read straight from the melt column.
+        let equilibrium = adiabatic_melt_column(
+            hot,
+            melt.solidus_surface_k,
+            melt.solidus_slope_k_per_gpa,
+            melt.adiabat_slope_k_per_gpa,
+            melt.productivity_per_gpa,
+            melt.source_density_kg_per_m3,
+            melt.gravity_m_per_s2,
+        )
+        .expect("a super-solidus column has a melt column")
+        .crust_thickness_km;
+        assert!(
+            equilibrium > Fixed::ZERO,
+            "the hot column supports some crust"
+        );
+        // AT the equilibrium: the source is spent, no more crust.
+        assert_eq!(
+            crust_growth(hot, equilibrium, &melt, dt),
+            Fixed::ZERO,
+            "a crust at the column's equilibrium builds no more (the finite source is depleted)"
+        );
+        // ABOVE the equilibrium (a column that has since cooled): no negative step, the crust does not un-form.
+        assert_eq!(
+            crust_growth(
+                hot,
+                equilibrium.saturating_add(Fixed::from_int(50)),
+                &melt,
+                dt
+            ),
+            Fixed::ZERO,
+            "a crust above the equilibrium neither grows nor un-forms"
+        );
+        // BELOW the equilibrium: it grows, but by a bounded step (never overshooting the equilibrium in one tick
+        // for dt <= processing_time), the relaxation the province spread stays finite under.
+        let below = equilibrium.checked_div(Fixed::from_int(2)).unwrap();
+        let step = crust_growth(hot, below, &melt, dt);
+        assert!(step > Fixed::ZERO, "a thin hot column still grows");
+        assert!(
+            below.saturating_add(step) <= equilibrium.saturating_add(Fixed::from_ratio(1, 1000)),
+            "one tick does not overshoot the equilibrium (bounded relaxation)"
         );
     }
 
