@@ -34,10 +34,25 @@
 //! sub-solidus even at the top of the energy-retention band. MARGINAL: a near-degenerate world the retention
 //! band can flip either way, carried and surfaced, never asserted, until the per-world impact list resolves it.
 //!
-//! THE MELT CRITERION is monotone in the retention efficiency eta (more retained energy is hotter), so a verdict
-//! is GAPPED (decidable now) exactly when both ends of the reserved retention band agree, and MARGINAL when they
-//! disagree. That makes the mandatory self-test structural: varying eta inside its band cannot flip a GAPPED
-//! verdict ([`retention_band_cannot_flip_a_gapped_verdict`]).
+//! THE MELT CRITERION is monotone in each banded budget input: hotter at higher retention efficiency eta, hotter
+//! at a shorter formation time (less short-lived-radionuclide decay), hotter at a larger initial SLR draw, and
+//! (through the giant-impact gate) melted at a larger mass. So a verdict is GAPPED (decidable given these inputs)
+//! exactly when the COLDEST corner and the HOTTEST corner of the joint band agree, and MARGINAL when they
+//! disagree. The grade is NOT a one-axis read of the retention band alone: a world whose point formation time
+//! makes the SLR heat dominant can look robustly melted while a formation time slower within its own reserved
+//! interim band lets it fall to the sub-solidus branch, so keying the tag on any single axis over-claims. The
+//! verdict therefore band-sweeps every input carried as an interim/reserved band (retention, formation time, the
+//! SLR draw, mass) and demotes GAPPED to MARGINAL on any flip ([`young_thermal_verdict`], the self-test
+//! [`retention_band_cannot_flip_a_gapped_verdict`]). A world that melts at its best point estimate but flips
+//! across the interim band is carried MARGINAL at that best estimate (never asserted GAPPED, and not forced to the
+//! cold branch either), pending the per-world impact list that collapses the bands to the world's own draw.
+//!
+//! THE PROVENANCE-DAG-WALK FOLLOW-ON. The general containment rule is that no input carried as a band (interim /
+//! [E] prefactor / [C] closure) may flip a GAPPED verdict. This module hard-codes the four banded axes that reach
+//! the melt budget today (retention, formation time, the SLR draw, mass). The standing-machinery form is a
+//! GAPPED-tag writer that WALKS the verdict's provenance DAG and band-sweeps every ancestor tagged interim / [E] /
+//! [C] automatically, so a new banded input cannot silently sneak past the containment rule without a panel. That
+//! generalization is the flagged follow-on; this pass sweeps the four named axes explicitly.
 //!
 //! ALIEN-ADMISSIBLE BY DATA. The heat source is a birth-environment SLR-family DRAW (the isotope inventory, the
 //! initial abundance ratios), the parent-element mass fractions are DERIVED from the world's own condensed
@@ -93,6 +108,15 @@ pub struct ShortLivedRadionuclide {
 /// Ruedas 2017 Table 2 values; the initial abundance ratios are the canonical solar-system values, reserved as a
 /// per-world birth-environment draw with their basis. The parent (aluminium, iron) mass fractions are supplied
 /// DERIVED from the world's condensed composition.
+///
+/// FOLLOW-ON, THE CLOSED PAIR (the alien-admitting seam). This constructor hard-codes exactly `[26Al, 60Fe]`,
+/// the correct pair for the Mirror default, and the caller reads the two parent elements (aluminium, iron)
+/// explicitly. The consuming mechanism ([`slr_family_temperature_rise`], [`young_thermal_verdict`]) already takes
+/// an OPEN `&[ShortLivedRadionuclide]` slice, so only this constructor and its parent-element reads are closed. The
+/// general form is a data-driven SLR REGISTRY (sibling to the species set), the isotope inventory READ per birth
+/// environment with each isotope's specific power, half-life, reference isotope, and parent element cited, so a
+/// world born in an r-process-enriched cloud with live 244Pu or 182Hf, or one poor in 26Al, is a data row rather
+/// than a code edit. Flagged here; the solar pair is not fabricated (it is the cited Mirror default).
 ///
 /// Reserved-with-basis (the birth-environment draw, defaulting to the canonical solar-system value, never
 /// fabricated):
@@ -257,6 +281,34 @@ pub fn slr_family_temperature_rise(
     Some(total)
 }
 
+/// The DERIVED specific heat capacity `c_p` (J/(kg*K)) of an assemblage at magma-ocean temperature, from the
+/// Dulong-Petit law on the world's OWN mean atomic mass: each mole of ATOMS contributes `3R` to the molar heat
+/// capacity, so the specific heat is `c_p = 3R / <m_atom>` where `<m_atom>` is the mean atomic molar mass
+/// (kg/mol). `R` is the cited molar gas constant (`civsim_units::fundamentals::GAS_CONSTANT`, itself the exact
+/// product `N_A * k_B`). This is a `[D]`-form derivation with ZERO new reserved rows: it reads only the
+/// assemblage's composition, so an iron world (mean atomic mass ~0.0559 kg/mol, `c_p ~447 J/(kg*K)`) and a
+/// forsterite-class silicate world (mean atomic mass ~0.0201 kg/mol, `c_p ~1240 J/(kg*K)`) each judge their own
+/// melt budget by construction, both reproducing the measured high-temperature specific heats. This `c_p` is
+/// LOAD-BEARING: it divides both the SLR rise and the cold-accretion rise, the whole budget the regime decision
+/// rests on, so an iron world at ~447 rather than a silicate-fixed ~1000 heats ~2.2x more for the same energy and
+/// can flip regime, which is why it is derived rather than authored. `None` on a non-positive mean atomic mass or
+/// an arithmetic failure.
+///
+/// HONEST LIMIT (the Debye follow-on): Dulong-Petit is the high-temperature (`T` above the Debye temperature)
+/// plateau, which the magma-ocean operating point sits on for silicates and iron. Below the Debye temperature the
+/// specific heat falls off as the Debye integral, a banded correction keyed on the assemblage's own Debye
+/// temperature; that correction is the flagged follow-on, not needed at the melt-decision temperature.
+pub fn dulong_petit_specific_heat(mean_atomic_mass_kg_per_mol: Fixed) -> Option<Fixed> {
+    if mean_atomic_mass_kg_per_mol <= Fixed::ZERO {
+        return None;
+    }
+    // 3R, from the molar gas constant DERIVED from the register fundamentals (R = N_A * k_B), never an authored
+    // decimal: the same floor-read the gas thermochemistry uses.
+    let r = crate::gas_thermochemistry::molar_gas_constant()?;
+    let three_r = r.checked_mul(Fixed::from_int(3))?;
+    three_r.checked_div(mean_atomic_mass_kg_per_mol)
+}
+
 /// The specific accretional energy retained as heat, `k_geom * g * R`, the gravitational binding energy per unit
 /// mass of a body of surface gravity `g` and radius `R` scaled by the geometry factor `k_geom` (3/5 for a uniform
 /// sphere, `(3/5) G M / R = (3/5) g R`). Expressed through the DERIVED surface gravity and radius so no
@@ -309,12 +361,34 @@ pub struct YoungThermalInputs {
     pub retention_efficiency_lo: Fixed,
     /// The high edge of the reserved energy-retention efficiency band.
     pub retention_efficiency_hi: Fixed,
-    /// The body's formation time relative to CAI (megayears), the SLR decay clock. Reserved-with-basis interim
-    /// band: the oligarchic isolation-mass growth time at the orbit (sub-megayear for the inner disk), a birth /
-    /// assembly draw, upgraded to the world's own draw when the impact list lands.
+    /// The body's formation time relative to CAI (megayears), the SLR decay clock, the POINT best estimate the
+    /// reported SLR rise and the carried initial condition read. Reserved-with-basis interim band: the oligarchic
+    /// isolation-mass growth time at the orbit (sub-megayear for the inner disk), a birth / assembly draw, upgraded
+    /// to the world's own draw when the impact list lands.
     pub formation_time_myr: Fixed,
-    /// The DERIVED (or reserved-interim) planet mass in Earth masses, for the giant-impact class gate.
+    /// The SHORT (fast-accretion) edge of the interim formation-time band (megayears), the HOTTEST-corner input
+    /// (least SLR decay). The band is swept for the GAPPED / MARGINAL grade; set equal to `formation_time_myr` to
+    /// assert the formation time is known (a point band, no formation-time contingency).
+    pub formation_time_myr_lo: Fixed,
+    /// The LONG (slow-accretion) edge of the interim formation-time band (megayears), the COLDEST-corner input
+    /// (most SLR decay).
+    pub formation_time_myr_hi: Fixed,
+    /// The low edge of the birth-environment SLR-DRAW band, as a dimensionless SCALE on the family's initial
+    /// abundance ratios (1.0 = the supplied canonical draw). The COLDEST-corner input for the draw axis. Basis: the
+    /// star-forming region's supernova/AGB enrichment spread; set equal to the high edge (1.0/1.0) to assert the
+    /// draw is known.
+    pub slr_initial_ratio_scale_lo: Fixed,
+    /// The high edge of the birth-environment SLR-draw band (the HOTTEST-corner input for the draw axis).
+    pub slr_initial_ratio_scale_hi: Fixed,
+    /// The DERIVED (or reserved-interim) planet mass in Earth masses, for the giant-impact class gate, the POINT
+    /// best estimate.
     pub planet_mass_earth: Fixed,
+    /// The low edge of the interim planet-mass band (Earth masses), the input to the giant-impact gate at the light
+    /// end. Set equal to the high edge to assert the mass is known.
+    pub planet_mass_earth_lo: Fixed,
+    /// The high edge of the interim planet-mass band (Earth masses), the input to the giant-impact gate at the
+    /// heavy end.
+    pub planet_mass_earth_hi: Fixed,
     /// The mass (Earth masses) at and above which giant impacts are class-generic. Reserved-with-basis: the
     /// Earth-mass terrestrial-embryo-merger regime where the assembly statistics guarantee ~two dozen giant
     /// impacts per system.
@@ -333,15 +407,19 @@ pub struct YoungThermalInputs {
 pub struct YoungThermalVerdict {
     /// The three-branch regime.
     pub regime: YoungThermalRegime,
-    /// True when the regime cannot flip within the reserved retention band (or is decided by the class-generic
-    /// giant-impact gate): decidable without the impact list. False for a MARGINAL world.
+    /// True when the regime cannot flip across ANY of the banded budget inputs (retention, formation time, the SLR
+    /// draw, mass): both the coldest and the hottest corner of the joint band agree, so the regime is decidable
+    /// without the per-world impact list. False for a MARGINAL world, whose joint band straddles the solidus (or
+    /// the giant-impact mass threshold).
     pub gapped: bool,
     /// The young potential temperature (K) the deep-time province run starts from: the solidus-pinned handoff for
-    /// a MELTED world, the cold peak for a NEVER-MELTED world, and the carried lower branch for a MARGINAL world
-    /// (never asserted hot until the impact list resolves it).
+    /// a MELTED world, the cold peak for a NEVER-MELTED world, and, for a MARGINAL world, the CARRIED best estimate
+    /// at the point inputs (the handoff when the point estimate melts, else the point cold peak). A MARGINAL world
+    /// is carried at its best estimate, its grade surfaced as near-degenerate; it is never asserted GAPPED, and it
+    /// is not forced to the cold branch either (the "MARGINAL-carried, not cold" discipline).
     pub young_potential_temperature_k: Fixed,
-    /// The solidus-pinned lock-up handoff (K), `Some` iff the regime is MELTED and the decompression column
-    /// resolves.
+    /// The solidus-pinned lock-up handoff (K), `Some` when the carried young temperature IS that handoff (a MELTED
+    /// world, or a MARGINAL world whose point estimate melts), the diagnostic the readout prints; `None` otherwise.
     pub handoff_potential_temperature_k: Option<Fixed>,
     /// The SLR-family temperature rise (K), the eta-independent part of the budget.
     pub slr_temperature_rise_k: Fixed,
@@ -376,40 +454,51 @@ fn peak_temperature_at(
 }
 
 /// The young-thermal regime verdict for a world. Combines the SLR-family heat (decayed over the formation time),
-/// the cold-accretion budget (over the reserved retention band), and the class-generic giant-impact gate, all
-/// against the world's own derived solidus, and pins the melted handoff at the solidus-plus-lock-up temperature.
+/// the cold-accretion budget (over the retention band), and the class-generic giant-impact gate, all against the
+/// world's own derived solidus, and pins the melted handoff at the solidus-plus-lock-up temperature.
 ///
-/// The decision is monotone in the retention efficiency eta, so: MELTED and GAPPED when the world melts even at
-/// the low edge of the band (or is Earth-mass-and-up); NEVER-MELTED and GAPPED when it stays sub-solidus even at
-/// the high edge; MARGINAL (not gapped) when the band straddles the solidus. `None` on an arithmetic failure or a
-/// non-physical input.
+/// THE GRADE band-sweeps every budget input carried as a band. The peak temperature is monotone in each: hotter
+/// at higher retention eta, hotter at a shorter formation time (less SLR decay), hotter at a larger SLR draw, and
+/// (through the mass gate) melted at a larger mass. So the COLDEST corner is the slow-formation, small-draw,
+/// low-retention combination and the HOTTEST corner is the fast-formation, large-draw, high-retention combination,
+/// and a world is GAPPED MELTED when even the coldest corner melts (or is robustly Earth-mass-and-up), GAPPED
+/// NEVER-MELTED when even the hottest corner stays sub-solidus (and is robustly below the giant-impact mass), and
+/// MARGINAL when the joint band straddles. A world graded MELTED or NEVER-MELTED only because a single input was
+/// pinned to its point value, while a plausible value elsewhere in that input's reserved band would flip it, is
+/// MARGINAL: the containment rule is that no banded input may flip a GAPPED verdict. Setting an input's band edges
+/// equal to its point value asserts that input is known and removes it from the sweep.
+///
+/// THE CARRIED young temperature is the best point estimate: a world that melts at its point inputs is carried at
+/// the super-solidus handoff, one that does not at its point cold peak. A MARGINAL world is carried at that best
+/// estimate (not forced to the cold branch), its grade surfaced as near-degenerate. `None` on an arithmetic
+/// failure or a non-physical input.
 pub fn young_thermal_verdict(
     inputs: &YoungThermalInputs,
     slr_family: &[ShortLivedRadionuclide],
 ) -> Option<YoungThermalVerdict> {
-    let slr_rise = slr_family_temperature_rise(
-        slr_family,
-        inputs.formation_time_myr,
-        inputs.specific_heat_j_per_kg_k,
-    )?;
+    let cp = inputs.specific_heat_j_per_kg_k;
+    // The POINT-estimate SLR rise (the reported rise and the input to the carried initial condition): the family
+    // decayed over the point formation time at the supplied (unscaled) draw.
+    let slr_rise = slr_family_temperature_rise(slr_family, inputs.formation_time_myr, cp)?;
     let accretional_energy = accretional_specific_energy(
         inputs.binding_energy_geometry,
         inputs.surface_gravity_m_per_s2,
         inputs.radius_m,
     )?;
+    // The POINT retention-band cold peaks (reported diagnostics, and the carried-IC melt test).
     let peak_lo = peak_temperature_at(
         inputs.reference_temperature_k,
         slr_rise,
         accretional_energy,
         inputs.retention_efficiency_lo,
-        inputs.specific_heat_j_per_kg_k,
+        cp,
     )?;
     let peak_hi = peak_temperature_at(
         inputs.reference_temperature_k,
         slr_rise,
         accretional_energy,
         inputs.retention_efficiency_hi,
-        inputs.specific_heat_j_per_kg_k,
+        cp,
     )?;
     let handoff = magma_ocean_handoff_temperature(
         inputs.solidus_surface_k,
@@ -418,33 +507,71 @@ pub fn young_thermal_verdict(
         inputs.productivity_per_gpa,
         inputs.lockup_melt_fraction,
     );
-    let melts_lo = peak_lo >= inputs.solidus_surface_k;
-    let melts_hi = peak_hi >= inputs.solidus_surface_k;
-    let giant_impact_class = inputs.planet_mass_earth >= inputs.giant_impact_mass_threshold_earth;
 
-    let (regime, gapped, young_t) = if giant_impact_class || melts_lo {
-        // Melts even at the low edge of the retention band, or is Earth-mass-and-up (giant impacts class-generic):
-        // robustly MELTED, and the retention band cannot flip it (monotone: hotter at higher eta).
-        let young_t = handoff.unwrap_or(inputs.solidus_surface_k);
-        (YoungThermalRegime::Melted, true, young_t)
-    } else if !melts_hi {
-        // Stays sub-solidus even at the high edge: robustly NEVER-MELTED, the retention band cannot flip it.
-        (YoungThermalRegime::NeverMelted, true, peak_hi)
+    // THE JOINT-BAND CORNERS. Coldest: the slow-formation edge (most SLR decay), the small-draw edge, the
+    // low-retention edge. Hottest: the fast-formation edge, the large-draw edge, the high-retention edge. The SLR
+    // rise is linear in the initial draw, so a uniform scale on the family scales it directly.
+    let slr_cold = slr_family_temperature_rise(slr_family, inputs.formation_time_myr_hi, cp)?
+        .checked_mul(inputs.slr_initial_ratio_scale_lo)?;
+    let slr_hot = slr_family_temperature_rise(slr_family, inputs.formation_time_myr_lo, cp)?
+        .checked_mul(inputs.slr_initial_ratio_scale_hi)?;
+    let cold_peak = peak_temperature_at(
+        inputs.reference_temperature_k,
+        slr_cold,
+        accretional_energy,
+        inputs.retention_efficiency_lo,
+        cp,
+    )?;
+    let hot_peak = peak_temperature_at(
+        inputs.reference_temperature_k,
+        slr_hot,
+        accretional_energy,
+        inputs.retention_efficiency_hi,
+        cp,
+    )?;
+    let melts_cold = cold_peak >= inputs.solidus_surface_k;
+    let melts_hot = hot_peak >= inputs.solidus_surface_k;
+    // The giant-impact gate over the mass band: robustly class-generic when even the light mass edge crosses the
+    // threshold, possibly class-generic when the heavy edge does.
+    let gate_robust = inputs.planet_mass_earth_lo >= inputs.giant_impact_mass_threshold_earth;
+    let gate_possible = inputs.planet_mass_earth_hi >= inputs.giant_impact_mass_threshold_earth;
+
+    // THE GRADE from the joint-band corners.
+    let (regime, gapped) = if gate_robust || melts_cold {
+        (YoungThermalRegime::Melted, true)
+    } else if !melts_hot && !gate_possible {
+        (YoungThermalRegime::NeverMelted, true)
     } else {
-        // The band straddles the solidus: MARGINAL, carried at the cold lower branch (never asserted hot) until
-        // the per-world impact list resolves it.
-        (YoungThermalRegime::Marginal, false, peak_lo)
+        (YoungThermalRegime::Marginal, false)
+    };
+
+    // THE CARRIED best estimate at the point inputs. A world that ROBUSTLY melts at its point formation time (even
+    // at the low-retention edge, or is class-generic at its point mass) is carried at the super-solidus handoff.
+    // A MARGINAL world that robustly melts at its point estimate is carried hot (the default case: it melts at its
+    // point formation, only a slower formation within its interim band would un-melt it), never forced to the cold
+    // branch. One that does NOT robustly melt at its point estimate is carried at a sub-solidus temperature (the
+    // point cold peak for a MARGINAL world, the warmest sub-solidus peak for a NEVER-MELTED one), never a
+    // fabricated hot start. For a point-band world this reduces exactly to the point melt test.
+    let point_gate = inputs.planet_mass_earth >= inputs.giant_impact_mass_threshold_earth;
+    let point_melts = point_gate || peak_lo >= inputs.solidus_surface_k;
+    let carried_from_handoff = match regime {
+        YoungThermalRegime::Melted => true,
+        YoungThermalRegime::NeverMelted => false,
+        YoungThermalRegime::Marginal => point_melts,
+    };
+    let young_t = if carried_from_handoff {
+        handoff.unwrap_or(inputs.solidus_surface_k)
+    } else if regime == YoungThermalRegime::NeverMelted {
+        peak_hi
+    } else {
+        peak_lo
     };
 
     Some(YoungThermalVerdict {
         regime,
         gapped,
         young_potential_temperature_k: young_t,
-        handoff_potential_temperature_k: if regime == YoungThermalRegime::Melted {
-            handoff
-        } else {
-            None
-        },
+        handoff_potential_temperature_k: if carried_from_handoff { handoff } else { None },
         slr_temperature_rise_k: slr_rise,
         cold_peak_temperature_k_lo: peak_lo,
         cold_peak_temperature_k_hi: peak_hi,
@@ -479,7 +606,15 @@ mod tests {
             retention_efficiency_lo: Fixed::from_ratio(1, 100),
             retention_efficiency_hi: Fixed::from_ratio(4, 10),
             formation_time_myr,
+            // The base inputs assert every other banded axis as a POINT (band edges equal to the point value), so
+            // only the axis a given test varies is in play; the banded-regrade and hindcast tests set real bands.
+            formation_time_myr_lo: formation_time_myr,
+            formation_time_myr_hi: formation_time_myr,
+            slr_initial_ratio_scale_lo: Fixed::ONE,
+            slr_initial_ratio_scale_hi: Fixed::ONE,
             planet_mass_earth: mass_earth,
+            planet_mass_earth_lo: mass_earth,
+            planet_mass_earth_hi: mass_earth,
             giant_impact_mass_threshold_earth: Fixed::ONE,
             reset_epoch_myr: Fixed::from_int(73),
             reset_epoch_half_band_myr: Fixed::from_int(74),
@@ -589,9 +724,11 @@ mod tests {
 
     #[test]
     fn retention_band_cannot_flip_a_gapped_verdict() {
-        // THE MANDATORY SELF-TEST. For every world, sweeping the energy-retention efficiency across its full
-        // reserved band must not flip a verdict tagged GAPPED. A verdict that CAN flip is marginal and must be
-        // tagged MARGINAL instead. Swept over a grid of formation times and masses spanning all three branches.
+        // THE MANDATORY SELF-TEST, GENERALIZED. The containment rule is that NO input carried as a band may flip a
+        // verdict tagged GAPPED. For every world, collapsing ANY of the four banded budget axes (retention,
+        // formation time, the SLR draw, and mass) to any interior point of its band must not change the regime of a
+        // GAPPED verdict; a verdict that CAN be flipped by any axis is MARGINAL and must be tagged so. The base
+        // worlds carry REAL bands on every axis so the sweep is exercised, not asserted away with point bands.
         let masses = [
             Fixed::from_ratio(1, 10),
             Fixed::from_ratio(5, 10),
@@ -607,45 +744,234 @@ mod tests {
             Fixed::from_int(20),
             Fixed::from_int(73),
         ];
-        // The sweep points across the retention band [lo, hi] the self-test probes at.
-        let band_lo = Fixed::from_ratio(1, 100);
-        let band_hi = Fixed::from_ratio(4, 10);
-        let sweep = [
-            band_lo,
+        // The interior sweep points across each axis's band, the self-test probes with.
+        let retention_band = [
+            Fixed::from_ratio(1, 100),
             Fixed::from_ratio(5, 100),
             Fixed::from_ratio(1, 10),
             Fixed::from_ratio(2, 10),
             Fixed::from_ratio(3, 10),
-            band_hi,
+            Fixed::from_ratio(4, 10),
         ];
+        let formation_band = [
+            Fixed::from_ratio(3, 10),
+            Fixed::ONE,
+            Fixed::from_int(2),
+            Fixed::from_int(4),
+        ];
+        let draw_band = [Fixed::from_ratio(1, 2), Fixed::ONE, Fixed::from_int(2)];
         for &mass in &masses {
             for &t_form in &formation_times {
-                let base = base_inputs(t_form, mass);
+                // A world with a real band on every axis: retention [0.01, 0.4], formation [0.3 Myr, 4 Myr]
+                // bracketing the point, the SLR draw [0.5, 2] around canonical, and the mass held at its point.
+                let base = YoungThermalInputs {
+                    formation_time_myr_lo: Fixed::from_ratio(3, 10),
+                    formation_time_myr_hi: Fixed::from_int(4),
+                    slr_initial_ratio_scale_lo: Fixed::from_ratio(1, 2),
+                    slr_initial_ratio_scale_hi: Fixed::from_int(2),
+                    ..base_inputs(t_form, mass)
+                };
                 let verdict = young_thermal_verdict(&base, &canonical_family()).unwrap();
                 if !verdict.gapped {
                     continue; // a MARGINAL verdict is allowed to flip; that is what MARGINAL means
                 }
-                for &eta in &sweep {
-                    let probed = YoungThermalInputs {
-                        retention_efficiency_lo: eta,
-                        retention_efficiency_hi: eta,
-                        ..base
-                    };
+                // Collapse EACH axis in turn to each interior point and confirm the GAPPED regime holds.
+                let mut probes: Vec<(YoungThermalInputs, String)> = Vec::new();
+                for &eta in &retention_band {
+                    probes.push((
+                        YoungThermalInputs {
+                            retention_efficiency_lo: eta,
+                            retention_efficiency_hi: eta,
+                            ..base
+                        },
+                        format!("retention {}", eta.to_f64_lossy()),
+                    ));
+                }
+                for &tf in &formation_band {
+                    probes.push((
+                        YoungThermalInputs {
+                            formation_time_myr_lo: tf,
+                            formation_time_myr_hi: tf,
+                            ..base
+                        },
+                        format!("formation {} Myr", tf.to_f64_lossy()),
+                    ));
+                }
+                for &scale in &draw_band {
+                    probes.push((
+                        YoungThermalInputs {
+                            slr_initial_ratio_scale_lo: scale,
+                            slr_initial_ratio_scale_hi: scale,
+                            ..base
+                        },
+                        format!("draw scale {}", scale.to_f64_lossy()),
+                    ));
+                }
+                for (probed, label) in &probes {
                     let probed_verdict =
-                        young_thermal_verdict(&probed, &canonical_family()).unwrap();
+                        young_thermal_verdict(probed, &canonical_family()).unwrap();
                     assert_eq!(
                         probed_verdict.regime, verdict.regime,
-                        "a GAPPED verdict ({:?}) flipped to {:?} at eta = {} (mass {} M_earth, t_form {} Myr): \
-                         it was marginal and mis-tagged",
+                        "a GAPPED verdict ({:?}) flipped to {:?} collapsing {} (point mass {} M_earth, point \
+                         t_form {} Myr): it was marginal and mis-tagged",
                         verdict.regime,
                         probed_verdict.regime,
-                        eta.to_f64_lossy(),
+                        label,
                         mass.to_f64_lossy(),
                         t_form.to_f64_lossy(),
                     );
                 }
             }
         }
+    }
+
+    #[test]
+    fn a_banded_formation_time_regrades_a_point_gapped_world_marginal() {
+        // THE RE-GRADE (fix 1 / the panel catch). A world that is GAPPED MELTED when its formation time is pinned
+        // to a fast point value (26Al alive, the SLR heat dominant) is MARGINAL once the formation time carries its
+        // real interim band up to a few megayears (26Al largely decayed at the slow edge, so the retention band
+        // alone straddles the solidus). The verdict must not over-claim GAPPED on the fast point value alone. This
+        // is the default Mars-class scene's honest grade.
+        let point = base_inputs(Fixed::ONE, Fixed::from_ratio(1, 10));
+        let point_verdict = young_thermal_verdict(&point, &canonical_family()).unwrap();
+        assert_eq!(
+            point_verdict.regime,
+            YoungThermalRegime::Melted,
+            "pinned to a 1 Myr formation, the SLR heat makes it look robustly melted"
+        );
+        assert!(
+            point_verdict.gapped,
+            "the point-value verdict over-claims GAPPED"
+        );
+
+        let banded = YoungThermalInputs {
+            formation_time_myr_lo: Fixed::from_ratio(1, 2),
+            formation_time_myr_hi: Fixed::from_int(4),
+            ..point
+        };
+        let banded_verdict = young_thermal_verdict(&banded, &canonical_family()).unwrap();
+        assert_eq!(
+            banded_verdict.regime,
+            YoungThermalRegime::Marginal,
+            "with the real formation-time band the grade is MARGINAL, not GAPPED"
+        );
+        assert!(
+            !banded_verdict.gapped,
+            "a band-straddling world is not gapped"
+        );
+        // MARGINAL-carried, not cold: the world melts at its point formation (1 Myr), so it is carried at the
+        // super-solidus handoff, its grade surfaced as near-degenerate, never forced to the cold branch.
+        assert!(
+            banded_verdict.young_potential_temperature_k > banded.solidus_surface_k,
+            "the MARGINAL world is carried at its best-estimate super-solidus handoff, not forced cold"
+        );
+    }
+
+    #[test]
+    fn a_mars_class_world_at_mars_like_formation_is_not_never_melted_the_hindcast() {
+        // THE HINDCAST ROW (the empirical anchor). Real Mars IS differentiated, has a metallic core, carries
+        // crustal remanence from an early dynamo, and Hf/W dates its accretion to a few megayears. So any
+        // parameterization that leaves a Mars-class world UNMELTED at Mars-like formation times fails the hindcast:
+        // at a 2-4 Myr formation the melted outcome must remain reachable (the hot edge of the retention band
+        // crosses the solidus), the verdict never GAPPED NEVER-MELTED. Here the formation band is Mars-like and the
+        // retention band is the reserved [0.01, 0.4]; the grade may be MELTED or MARGINAL but never cold.
+        for &t_form in &[Fixed::from_int(2), Fixed::from_int(3), Fixed::from_int(4)] {
+            let inputs = YoungThermalInputs {
+                formation_time_myr_lo: Fixed::from_int(2),
+                formation_time_myr_hi: Fixed::from_int(4),
+                ..base_inputs(t_form, Fixed::from_ratio(1, 10))
+            };
+            let verdict = young_thermal_verdict(&inputs, &canonical_family()).unwrap();
+            assert_ne!(
+                verdict.regime,
+                YoungThermalRegime::NeverMelted,
+                "hindcast: a Mars-class world at a {} Myr formation must not be graded categorically cold \
+                 (real Mars is differentiated)",
+                t_form.to_f64_lossy()
+            );
+            // The melted outcome is reachable: even the coldest corner is not asserted, and the hot edge melts.
+            let hot_edge = YoungThermalInputs {
+                retention_efficiency_lo: inputs.retention_efficiency_hi,
+                formation_time_myr_lo: Fixed::from_int(2),
+                formation_time_myr_hi: Fixed::from_int(2),
+                ..inputs
+            };
+            let hot_verdict = young_thermal_verdict(&hot_edge, &canonical_family()).unwrap();
+            assert_eq!(
+                hot_verdict.regime,
+                YoungThermalRegime::Melted,
+                "hindcast: a fast-formed Mars-class world at the hot retention edge melts, so a melted Mars is \
+                 a reachable, hindcast-consistent outcome"
+            );
+        }
+    }
+
+    #[test]
+    fn the_dulong_petit_specific_heat_matches_the_measured_high_temperature_values() {
+        // c_p = 3R / <m_atom>, the DERIVED specific heat at magma-ocean temperature keyed on the assemblage's own
+        // mean atomic mass, so an iron world and a silicate world each judge their own budget by construction.
+        // Iron: mean atomic mass 55.845 g/mol = 0.055845 kg/mol -> ~447 J/(kg*K), the measured high-T value.
+        let iron = dulong_petit_specific_heat(Fixed::from_ratio(55_845, 1_000_000)).unwrap();
+        assert!(
+            (iron.to_f64_lossy() - 447.0).abs() < 5.0,
+            "an iron world's c_p is ~447 J/(kg*K), got {}",
+            iron.to_f64_lossy()
+        );
+        // Forsterite Mg2SiO4: molar mass 140.69 g/mol over 7 atoms = 20.098 g/mol = 0.020098 kg/mol -> ~1240.
+        let forsterite = dulong_petit_specific_heat(Fixed::from_ratio(20_098, 1_000_000)).unwrap();
+        assert!(
+            (forsterite.to_f64_lossy() - 1240.0).abs() < 15.0,
+            "a forsterite-class silicate world's c_p is ~1240 J/(kg*K), got {}",
+            forsterite.to_f64_lossy()
+        );
+        // The lighter assemblage has the larger specific heat (more atoms per unit mass), and a non-physical mean
+        // atomic mass fails loud.
+        assert!(
+            forsterite > iron,
+            "the lighter assemblage holds more heat per kg"
+        );
+        assert!(dulong_petit_specific_heat(Fixed::ZERO).is_none());
+    }
+
+    #[test]
+    fn the_derived_c_p_can_flip_the_melt_regime_it_is_load_bearing() {
+        // c_p divides the whole budget, so a heavier (iron-rich) assemblage at ~447 heats far more than a silicate
+        // default at ~1000 for the same energy: the melt decision is load-bearing on c_p, which is why it is
+        // derived from the assemblage rather than fixed. Same world, two heat capacities, opposite melt outcomes.
+        let acc_only_family: [ShortLivedRadionuclide; 2] = solar_system_slr_family(
+            Fixed::ZERO, // no aluminium: kill the SLR term so the accretion budget alone decides
+            Fixed::ZERO,
+            Fixed::from_ratio(52, 1_000_000),
+            Fixed::from_ratio(1, 100_000_000),
+        );
+        // A retention efficiency and a solidus tuned so a silicate c_p (1000) stays sub-solidus but an iron c_p
+        // (447) crosses it, from the same accretional energy.
+        let base = YoungThermalInputs {
+            retention_efficiency_lo: Fixed::from_ratio(5, 100),
+            retention_efficiency_hi: Fixed::from_ratio(5, 100),
+            reference_temperature_k: Fixed::from_int(300),
+            solidus_surface_k: Fixed::from_int(900),
+            ..base_inputs(Fixed::from_int(100), Fixed::from_ratio(1, 10))
+        };
+        let silicate = YoungThermalInputs {
+            specific_heat_j_per_kg_k: Fixed::from_int(1000),
+            ..base
+        };
+        let iron = YoungThermalInputs {
+            specific_heat_j_per_kg_k: Fixed::from_int(447),
+            ..base
+        };
+        let sv = young_thermal_verdict(&silicate, &acc_only_family).unwrap();
+        let iv = young_thermal_verdict(&iron, &acc_only_family).unwrap();
+        assert_ne!(
+            sv.regime, iv.regime,
+            "the same world flips regime between a silicate and an iron specific heat: c_p is load-bearing \
+             (silicate {:?} at {} K peak, iron {:?} at {} K peak)",
+            sv.regime,
+            sv.cold_peak_temperature_k_hi.to_f64_lossy(),
+            iv.regime,
+            iv.cold_peak_temperature_k_hi.to_f64_lossy(),
+        );
     }
 
     #[test]

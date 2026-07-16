@@ -1100,9 +1100,15 @@ const RADIOGENIC_MIXING_EFFICIENCY: Fixed = Fixed::from_int(1).div(Fixed::from_i
 /// than silently applying the placeholder. Fetch: Blundy-Wood 1994 and Wood-Kiseeva 2015 before coefficients land.
 const RADIOGENIC_BULK_PARTITION_D: Fixed = Fixed::from_int(3).div(Fixed::from_int(1000)); // ~0.003, [M class] placeholder pending Blundy-Wood
 
-// THE YOUNG-THERMAL (R-YOUNG-TEMPERATURE) reserved inputs. These retire the fixed 1588 K mantle potential
-// temperature for a MELTED world: the young potential temperature is DERIVED from the world's own solidus (the
-// magma-ocean lock-up handoff) rather than read as an authored Earth-MORB anchor. The verdict itself
+// THE YOUNG-THERMAL (R-YOUNG-TEMPERATURE) reserved inputs. For a MELTED world these supply a young potential
+// temperature DERIVED from the world's own solidus (the magma-ocean lock-up handoff) rather than the authored
+// Earth-MORB anchor. THE WIRING IS VIEWER-SIDE, NOT a materials change: `crates/materials` is untouched; the
+// `MANTLE_POTENTIAL_TEMPERATURE_K` (1588 K) const below still seeds the BOOTSTRAP surface call, and
+// `build_derived_scene` then makes a SECOND viewer-side call to the existing
+// [`civsim_materials::surface_composition::derive_surface_composition`] with the young potential temperature in a
+// fresh [`civsim_materials::surface_composition::ReservedMeltParams`], re-deriving the surface at the young
+// temperature. So the anchor is not deleted; a melted world's DEEP-TIME initial condition reads the derived young
+// temperature in place of it, viewer-side. The verdict itself
 // ([`civsim_physics::young_thermal::young_thermal_verdict`]) is fixed Rust; the values below are the reserved
 // per-world data it reads, each with its basis, surfaced rather than fabricated. Cited fetches carry the source
 // at the use site.
@@ -1115,10 +1121,14 @@ const RADIOGENIC_BULK_PARTITION_D: Fixed = Fixed::from_int(3).div(Fixed::from_in
 /// Treatise on Geophysics (2nd ed.) Vol. 9.
 const PHI_C_LOCKUP_MELT_FRACTION: Fixed = Fixed::from_int(4).div(Fixed::from_int(10)); // 0.4
 
-/// RESERVED-with-basis: the silicate SPECIFIC HEAT capacity (J/(kg*K)) the SLR and cold-accretion budgets divide
-/// by. Basis: the silicate-mantle heat capacity ~1000 J/(kg*K); a flagged derive-down (from the assemblage's own
-/// heat capacity once the petrology heat-capacity substrate lands, the same substrate the adiabat-slope
-/// derive-down waits on). Cited: silicate-mantle specific heat (Turcotte & Schubert, Geodynamics).
+/// The FALLBACK specific heat capacity (J/(kg*K)) the SLR and cold-accretion budgets divide by, used only when the
+/// assemblage's mean atomic mass does not resolve. The live path now DERIVES c_p from the world's OWN assemblage
+/// through the Dulong-Petit law ([`civsim_physics::young_thermal::dulong_petit_specific_heat`], c_p = 3R over the
+/// mean atomic mass), so an iron world judges its melt budget at ~447 J/(kg*K) and a silicate world at ~1240, each
+/// by construction; this fixed value is the loud-miss fallback only. Basis for the fallback: the silicate-mantle
+/// heat capacity ~1000 J/(kg*K) (Turcotte & Schubert, Geodynamics). HONEST LIMIT (the flagged follow-on): the
+/// Dulong-Petit derivation is the high-temperature plateau the magma-ocean operating point sits on; a banded Debye
+/// correction below the assemblage's Debye temperature is the follow-on, not needed at the melt-decision temperature.
 const YOUNG_SPECIFIC_HEAT_J_PER_KG_K: Fixed = Fixed::from_int(1000);
 
 /// RESERVED-with-basis: the accretional-energy GEOMETRY factor `k_geom` for the retained-heat budget `k_geom*g*R`.
@@ -1135,11 +1145,48 @@ const RETENTION_EFFICIENCY_LO: Fixed = Fixed::from_int(1).div(Fixed::from_int(10
 const RETENTION_EFFICIENCY_HI: Fixed = Fixed::from_int(4).div(Fixed::from_int(10)); // 0.40, [E]-band placeholder
 
 /// RESERVED-with-basis interim (a birth/assembly DRAW): the body's FORMATION TIME relative to CAI (megayears),
-/// the short-lived-radionuclide decay clock. Basis: the oligarchic ISOLATION-MASS growth time at the inner disk,
-/// sub-megayear to a few megayears (Kokubo & Ida 1998; Lambrechts & Johansen 2012 Hill-regime growth ~4e4 yr at
-/// 5 AU, faster closer in), within the 26Al mean life. This is the TEXTURE-ONSET formation time, DISTINCT from the
-/// reset epoch below (the last giant impact); the impact list upgrades it to the world's own draw. Tagged interim.
+/// the short-lived-radionuclide decay clock, the POINT best estimate. Basis: the oligarchic ISOLATION-MASS growth
+/// time at the inner disk, sub-megayear to a few megayears (Kokubo & Ida 1998; Lambrechts & Johansen 2012
+/// Hill-regime growth ~4e4 yr at 5 AU, faster closer in), within the 26Al mean life. This is the TEXTURE-ONSET
+/// formation time, DISTINCT from the reset epoch below (the last giant impact); the impact list upgrades it to the
+/// world's own draw. Tagged interim.
 const FORMATION_TIME_MYR: Fixed = Fixed::from_int(1);
+
+/// RESERVED-with-basis interim, the FORMATION-TIME BAND the young-thermal verdict SWEEPS for its GAPPED / MARGINAL
+/// grade (the panel re-grade catch: pinning the formation time to a fast point value over-claims GAPPED, because
+/// the 26Al heat that dominates at a sub-megayear formation is largely decayed a few megayears later, so the melt
+/// verdict is formation-time contingent). Basis: the class-grade oligarchic-growth spread, a fast sub-megayear
+/// edge to a slow few-megayear edge (the same Kokubo & Ida / Lambrechts & Johansen sources as the point above), the
+/// honest interim uncertainty until the per-world impact list collapses it to the world's own draw. Placeholder
+/// edges pending the fetch; a world whose grade flips across this band is MARGINAL, never asserted GAPPED.
+const FORMATION_TIME_MYR_LO: Fixed = Fixed::from_int(1).div(Fixed::from_int(2)); // 0.5 Myr, fast (hot) edge
+const FORMATION_TIME_MYR_HI: Fixed = Fixed::from_int(4); // 4 Myr, slow (cold) edge
+
+/// RESERVED-with-basis interim, the birth-environment SLR-DRAW BAND, as a dimensionless SCALE on the canonical
+/// initial abundance ratios (1.0 = the canonical solar draw below). Swept for the grade. Basis: the star-forming
+/// region's recent supernova/AGB enrichment spread, which moves the initial 26Al/27Al and 60Fe/56Fe by a factor of
+/// a few above and below the solar value; a conservative factor-of-two band, reserved, never fabricated. The
+/// formation-time band dominates the default scene's re-grade; this band admits a supernova-rich or evolved-region
+/// birth as data.
+const SLR_INITIAL_RATIO_SCALE_LO: Fixed = Fixed::from_int(1).div(Fixed::from_int(2)); // 0.5x, evolved region
+const SLR_INITIAL_RATIO_SCALE_HI: Fixed = Fixed::from_int(2); // 2x, supernova-enriched region
+
+/// RESERVED-with-basis interim, the fractional HALF-WIDTH of the planet-MASS band the giant-impact gate is swept
+/// over, around the DERIVED isolation mass. Basis: the accretion-model spread in the feeding-zone isolation mass
+/// (the feeding-zone width and the surface-density normalization), a ~30 percent half-width, reserved. For a
+/// Mars-class world the whole band sits well below the giant-impact threshold, so the gate is off across it; it
+/// bites only for a world whose derived mass sits near the Earth-mass threshold.
+const MASS_BAND_HALF_WIDTH_FRACTION: Fixed = Fixed::from_int(3).div(Fixed::from_int(10)); // 0.3
+
+/// RESERVED-with-basis: the crustal YIELD STRENGTH (Pa) the support-bound check reads, the deviatoric strength a
+/// crustal column can hold before it flows, so the maximum supportable topography is `sigma_y / (rho * g)`. Basis:
+/// the deviatoric strength of cold crustal rock, ~1e8 Pa (~100 MPa), the frictional-brittle bound of the upper
+/// crust (Byerlee's-law frictional strength at crustal confining pressures; Byerlee 1978, Pure Appl. Geophys. 116,
+/// 615). A DERIVE-DOWN: it should read the crust's own `mat.yield_strength` from the mechanical floor once that is
+/// threaded to the viewer; the reserved value is the check's class-grade bound, used only to FLAG an unphysically
+/// tall derived relief, never to render or scale one. As an f64 (the support-bound arithmetic is a display-side
+/// validity read, not canon).
+const CRUST_YIELD_STRENGTH_PA: f64 = 1.0e8;
 
 /// RESERVED-with-basis: the mass (Earth masses) at and above which giant impacts are class-generic, the MELTED
 /// giant-impact gate. Basis: the Earth-mass terrestrial-embryo-merger regime where the assembly statistics
@@ -1794,6 +1841,38 @@ fn derive_bulk_element_mass_fraction(
     element_mass.checked_div(total_mass)
 }
 
+/// The MEAN ATOMIC MASS (kg/mol) of the world's bulk CONDENSED assemblage, the total condensed mass over the total
+/// condensed atom count, DERIVED from the VCS condensed molar amounts and the periodic-table molar masses. This is
+/// the one input the Dulong-Petit specific heat needs (c_p = 3R / mean atomic mass), so an iron-rich world reads a
+/// heavier mean atomic mass (a lower c_p) and a silicate world a lighter one (a higher c_p), each keyed on its own
+/// composition. The table's molar masses are relative atomic weights (g/mol), so the result is divided by 1000 to
+/// reach kg/mol. `None` if the amounts are absent or a molar mass does not resolve.
+fn derive_mean_atomic_mass_kg_per_mol(
+    condensed_amounts: &[(String, Fixed)],
+    table: &PeriodicTable,
+) -> Option<Fixed> {
+    let mut total_mass_g = Fixed::ZERO;
+    let mut total_atoms = Fixed::ZERO;
+    for (phase, amount) in condensed_amounts {
+        let counts = match phase_element_counts(phase) {
+            Some(c) => c,
+            None => continue,
+        };
+        let phase_molar_mass = table.molar_mass(&counts).ok()?;
+        total_mass_g = total_mass_g.checked_add(amount.checked_mul(phase_molar_mass)?)?;
+        let atoms_in_phase: u32 = counts.values().sum();
+        total_atoms =
+            total_atoms.checked_add(amount.checked_mul(Fixed::from_int(atoms_in_phase as i32))?)?;
+    }
+    if total_atoms <= Fixed::ZERO {
+        return None;
+    }
+    // Mean atomic mass in g/mol, then to kg/mol for c_p = 3R / M with R in J/(mol*K).
+    total_mass_g
+        .checked_div(total_atoms)?
+        .checked_div(Fixed::from_int(1000))
+}
+
 /// Build the DERIVED scene from a star mass and an orbit, or an error naming the link that did not resolve (fail-soft:
 /// the viewer prints the message and shows no planet, never a fabricated one). The chain is the built pipeline, each
 /// link a derivation: the star and disk ([`civsim_sim::planet::derive_planet`]), the condensed-and-differentiated
@@ -1898,17 +1977,21 @@ fn build_derived_scene(star_mass: Fixed, orbit_au: Fixed) -> Result<DerivedScene
     )
     .ok_or("the star-and-orbit derivation did not resolve")?;
 
-    // R-YOUNG-TEMPERATURE: THE YOUNG-THERMAL REGIME VERDICT retires the fixed 1588 K mantle potential temperature.
-    // The bootstrap surface derivation above ran on the anchor only to expose the world's OWN derived solidus (which
-    // is potential-temperature-independent, a property of the endmembers). Now the young-thermal verdict decides
-    // whether this world's formation crosses that solidus (short-lived-radionuclide heat on an early-formed body, or
-    // giant impacts on an Earth-mass body), and, for a MELTED world, pins the young potential temperature at the
-    // magma-ocean lock-up handoff (the world's own solidus plus the phi_c superheat). The surface is then RE-DERIVED
-    // at that young temperature, so a melted world forms super-solidus with a nonzero melt fraction F, the input the
-    // per-province radiogenic heterogeneity (and therefore the relief) reads. A NEVER-MELTED or MARGINAL world keeps
-    // its sub-solidus (smooth) surface, the honest per-world outcome. The SLR parent-element fuel (aluminium, iron)
-    // is DERIVED from the world's own condensed assemblage; the birth-environment SLR ratios, the rheology, the heat
-    // capacity, the retention band, the formation time, and the reset epoch are the reserved-with-basis inputs above.
+    // R-YOUNG-TEMPERATURE: THE YOUNG-THERMAL REGIME VERDICT supplies a MELTED world's deep-time initial condition
+    // in place of the fixed 1588 K mantle potential-temperature anchor. This is a VIEWER-SIDE re-derivation, not a
+    // change to `crates/materials`: the bootstrap surface derivation above ran on the `MANTLE_POTENTIAL_TEMPERATURE_K`
+    // anchor only to expose the world's OWN derived solidus (which is potential-temperature-independent, a property
+    // of the endmembers). The young-thermal verdict then decides whether this world's formation crosses that solidus
+    // (short-lived-radionuclide heat on an early-formed body, or giant impacts on an Earth-mass body), and, when its
+    // best estimate melts, pins the young potential temperature at the magma-ocean lock-up handoff (the world's own
+    // solidus plus the phi_c superheat). The surface is then RE-DERIVED here in `build_derived_scene` by a SECOND
+    // call to `derive_surface_composition` with that young temperature (below), so a melted world forms super-solidus
+    // with a nonzero melt fraction F, the input the per-province radiogenic heterogeneity (and therefore the relief)
+    // reads. A NEVER-MELTED world keeps its sub-solidus (smooth) surface; a MARGINAL world is carried at its best
+    // estimate with its grade surfaced. The SLR parent-element fuel (aluminium, iron) is DERIVED from the world's own
+    // condensed assemblage and the specific heat c_p from its own mean atomic mass; the birth-environment SLR ratios
+    // and draw band, the rheology, the retention band, the formation-time band, and the reset epoch are the
+    // reserved-with-basis inputs above.
     let al_mass_fraction = sc
         .condensed_amounts
         .as_ref()
@@ -1929,8 +2012,33 @@ fn build_derived_scene(star_mass: Fixed, orbit_au: Fixed) -> Result<DerivedScene
         AL26_OVER_AL27_INITIAL,
         FE60_OVER_FE56_INITIAL,
     );
+    // The DERIVED specific heat c_p (Dulong-Petit on the world's OWN mean atomic mass), so an iron world judges its
+    // melt budget at ~447 J/(kg*K) and a silicate world at ~1240, each by construction (c_p is load-bearing: it
+    // divides the whole budget the regime decision rests on). Fail-soft to the reserved silicate fallback if the
+    // assemblage's mean atomic mass does not resolve.
+    let young_specific_heat = sc
+        .condensed_amounts
+        .as_ref()
+        .and_then(|amounts| derive_mean_atomic_mass_kg_per_mol(amounts, &table))
+        .and_then(civsim_physics::young_thermal::dulong_petit_specific_heat)
+        .unwrap_or(YOUNG_SPECIFIC_HEAT_J_PER_KG_K);
+    // The planet-mass band the giant-impact gate is swept over, a fractional half-width around the derived
+    // isolation mass (reserved-with-basis). For a Mars-class world the whole band sits below the threshold.
+    let mass_half_width = planet_mass_earth
+        .checked_mul(MASS_BAND_HALF_WIDTH_FRACTION)
+        .unwrap_or(Fixed::ZERO);
+    let planet_mass_earth_lo = planet_mass_earth
+        .checked_sub(mass_half_width)
+        .unwrap_or(planet_mass_earth);
+    let planet_mass_earth_hi = planet_mass_earth
+        .checked_add(mass_half_width)
+        .unwrap_or(planet_mass_earth);
     // The young-thermal verdict when the solidus resolves. The solidus is threaded from the bootstrap surface
     // (potential-temperature-independent). `None` (fail-soft, dormant as before) when the solidus did not derive.
+    // The formation-time, SLR-draw, and mass BANDS are swept for the GAPPED / MARGINAL grade: the default
+    // Mars-class scene, robustly melted only if its formation time is pinned to the fast point value, is MARGINAL
+    // once the real interim formation-time band (up to a few megayears, 26Al largely decayed) is admitted. It is
+    // carried at its best-estimate super-solidus handoff (MARGINAL-carried, not cold), its grade surfaced.
     let young_verdict = match (sc.solidus_surface_k, sc.solidus_slope_k_per_gpa) {
         (Some(solidus_surface_k), Some(solidus_slope_k_per_gpa)) => {
             let young_inputs = civsim_physics::young_thermal::YoungThermalInputs {
@@ -1939,7 +2047,7 @@ fn build_derived_scene(star_mass: Fixed, orbit_au: Fixed) -> Result<DerivedScene
                 adiabat_slope_k_per_gpa: MANTLE_ADIABAT_SLOPE_K_PER_GPA,
                 productivity_per_gpa: MELT_PRODUCTIVITY_PER_GPA,
                 lockup_melt_fraction: PHI_C_LOCKUP_MELT_FRACTION,
-                specific_heat_j_per_kg_k: YOUNG_SPECIFIC_HEAT_J_PER_KG_K,
+                specific_heat_j_per_kg_k: young_specific_heat,
                 reference_temperature_k: planet.disk_temperature_k,
                 surface_gravity_m_per_s2: planet.surface_gravity_m_s2,
                 radius_m: planet.radius_m,
@@ -1947,7 +2055,13 @@ fn build_derived_scene(star_mass: Fixed, orbit_au: Fixed) -> Result<DerivedScene
                 retention_efficiency_lo: RETENTION_EFFICIENCY_LO,
                 retention_efficiency_hi: RETENTION_EFFICIENCY_HI,
                 formation_time_myr: FORMATION_TIME_MYR,
+                formation_time_myr_lo: FORMATION_TIME_MYR_LO,
+                formation_time_myr_hi: FORMATION_TIME_MYR_HI,
+                slr_initial_ratio_scale_lo: SLR_INITIAL_RATIO_SCALE_LO,
+                slr_initial_ratio_scale_hi: SLR_INITIAL_RATIO_SCALE_HI,
                 planet_mass_earth,
+                planet_mass_earth_lo,
+                planet_mass_earth_hi,
                 giant_impact_mass_threshold_earth: GIANT_IMPACT_MASS_THRESHOLD_EARTH,
                 reset_epoch_myr: RESET_EPOCH_MYR,
                 reset_epoch_half_band_myr: RESET_EPOCH_HALF_BAND_MYR,
@@ -2209,9 +2323,8 @@ fn print_derived_readout(scene: &DerivedScene) {
         fmt_attitude(scene.attitude.rotation_period_s),
         fmt_attitude(scene.attitude.initial_spin_phase),
     );
-    // R-YOUNG-TEMPERATURE: the young-thermal regime verdict (Melted / Never-melted / Marginal), and the
-    // neighbor-contrast of the derived surface relief that a melted world textures with. A smooth condensed ball
-    // sits near the ~2 percent floor; a melted world stands well above it.
+    // R-YOUNG-TEMPERATURE: the young-thermal regime verdict (Melted / Never-melted / Marginal) and whether it is
+    // decidable now (GAPPED) or band-contingent (MARGINAL), band-swept over the interim inputs.
     if let Some(v) = &scene.young {
         let regime = match v.regime {
             civsim_physics::young_thermal::YoungThermalRegime::Melted => "MELTED",
@@ -2219,9 +2332,9 @@ fn print_derived_readout(scene: &DerivedScene) {
             civsim_physics::young_thermal::YoungThermalRegime::Marginal => "MARGINAL",
         };
         let grade = if v.gapped {
-            "GAPPED (decidable now)"
+            "GAPPED (decidable across the interim bands)"
         } else {
-            "MARGINAL (impact-list-pending)"
+            "band-contingent (MARGINAL, carried at the best estimate, impact-list-pending)"
         };
         eprintln!(
             "  young-thermal (R-YOUNG-TEMPERATURE): {regime}, {grade};  SLR rise {:.0} K,  young potential T {:.0} K,  reset epoch {:.0} +/- {:.0} Myr (interim)",
@@ -2237,20 +2350,47 @@ fn print_derived_readout(scene: &DerivedScene) {
             );
         }
     }
-    if let Some(contrast) = tile_relief_neighbor_contrast(&scene.tiles, scene.cols) {
+    // THE DERIVED RELIEF, three SEPARATED and TAGGED quantities (fix 2): the physical km amplitude, the
+    // support-bound validity check, and the (dimensionless) heterogeneity-engaged indicator. The km amplitude is
+    // the honest visible measure; the indicator only reports whether the melt-driven texture is on, never how tall.
+    if let Some(amplitude_km) = tile_relief_amplitude_km(&scene.tiles) {
+        let bound = scene.provinces.as_ref().and_then(|p| {
+            supportable_relief_km(
+                CRUST_YIELD_STRENGTH_PA,
+                p.crust_density.to_f64_lossy(),
+                scene.gravity.to_f64_lossy(),
+            )
+        });
+        match bound {
+            Some(bound_km) if amplitude_km > bound_km => eprintln!(
+                "  derived isostatic relief amplitude: {amplitude_km:.2} km  [FLAG: exceeds the support bound \
+                 {bound_km:.2} km = yield/(rho*g); an unsupportable relief, not rendered as real]"
+            ),
+            Some(bound_km) => eprintln!(
+                "  derived isostatic relief amplitude: {amplitude_km:.2} km  (within the support bound {bound_km:.2} km = yield/(rho*g); real planetary relief is sub-1% of radius, so this reads nearly smooth at physical scale)"
+            ),
+            None => eprintln!(
+                "  derived isostatic relief amplitude: {amplitude_km:.2} km  (support bound unavailable: no province crust density)"
+            ),
+        }
+    }
+    if let Some(indicator) = tile_relief_heterogeneity_indicator(&scene.tiles, scene.cols) {
         eprintln!(
-            "  surface relief neighbor-contrast: {:.1}%  (a smooth condensed ball sits near ~2%)",
-            contrast * 100.0
+            "  relief heterogeneity-engaged indicator: {:.1}%  (a normalized roughness ratio: is the melt-driven texture ON, not a relief magnitude; smooth-ball floor near ~2%)",
+            indicator * 100.0
         );
     }
     eprintln!("  controls: +/- zoom, wasd/arrows rotate the globe, p provenance, Esc quit");
 }
 
-/// The NEIGHBOR-CONTRAST of the derived surface relief: the mean absolute elevation difference between
-/// grid-adjacent tiles, normalized by the elevation scale (the range of the field). A smooth condensed ball
-/// (uniform provinces) sits near the ~2 percent floor; a MELTED world, whose provinces diverge in radiogenic
-/// budget and crust thickness, textures well above it. `None` for an empty or degenerate field.
-fn tile_relief_neighbor_contrast(tiles: &[DerivedTile], cols: usize) -> Option<f64> {
+/// A HETEROGENEITY-ENGAGED indicator (NOT a relief magnitude): the mean absolute elevation difference between
+/// grid-adjacent tiles, normalized by the field's OWN elevation scale. Because it divides by the field's scale, it
+/// measures the spatial ROUGHNESS of the province pattern (whether the melt-driven heterogeneity is engaged at
+/// all, so the value is above the smooth-ball floor), NOT the physical amplitude of the relief. A uniform
+/// (unprocessed) field sits near the small-roughness floor; a processed, province-diverged field stands above it.
+/// It answers "is the texture on?", never "how tall are the mountains?": the physical measure is the km amplitude
+/// ([`tile_relief_amplitude_km`]). `None` for an empty or degenerate field.
+fn tile_relief_heterogeneity_indicator(tiles: &[DerivedTile], cols: usize) -> Option<f64> {
     if tiles.is_empty() || cols == 0 {
         return None;
     }
@@ -2262,8 +2402,9 @@ fn tile_relief_neighbor_contrast(tiles: &[DerivedTile], cols: usize) -> Option<f
     let max = elev.iter().cloned().fold(f64::MIN, f64::max);
     let min = elev.iter().cloned().fold(f64::MAX, f64::min);
     let mean = elev.iter().sum::<f64>() / elev.len() as f64;
-    // The scale the contrast is measured against: the mean elevation magnitude (the isostatic relief amplitude),
-    // floored to a small positive so a flat field does not divide by zero.
+    // The scale the roughness is normalized by: the field's own elevation scale, floored to a small positive so a
+    // flat field does not divide by zero. This normalization is exactly why the result is a heterogeneity-engaged
+    // indicator and not a relief amplitude.
     let scale = mean.abs().max((max - min).abs()).max(1e-6);
     let mut total = 0.0;
     let mut pairs = 0u64;
@@ -2284,6 +2425,46 @@ fn tile_relief_neighbor_contrast(tiles: &[DerivedTile], cols: usize) -> Option<f
         return None;
     }
     Some((total / pairs as f64) / scale)
+}
+
+/// The TRUE ISOSTATIC RELIEF AMPLITUDE in kilometres: the span (max minus min) of the derived tile elevations, the
+/// Airy float of the derived crust-thickness spread the provinces carry. The tiles' elevations are already in km
+/// (the province crust thickness is in km and [`civsim_physics::geodynamics::airy_isostatic_elevation`] is
+/// unit-preserving), so this is the honest physical relief the world stands in, the number the render shows at
+/// physical scale. HONEST NOTE: real planetary relief is SUB-1 percent of the radius (Mars ~30 km over 3390 km,
+/// Earth ~20 km over 6371 km), so a correctly-derived world reads a few kilometres of amplitude and looks nearly
+/// smooth from globe distance; that is sound physics, not a defect, and the honest bumpiness test is whether this
+/// amplitude lands inside the Mars/Earth hindcast band, never the unexaggerated eyeball. `None` for an empty field.
+fn tile_relief_amplitude_km(tiles: &[DerivedTile]) -> Option<f64> {
+    if tiles.is_empty() {
+        return None;
+    }
+    let mut max = f64::MIN;
+    let mut min = f64::MAX;
+    for t in tiles {
+        let e = t.elevation.to_f64_lossy();
+        max = max.max(e);
+        min = min.min(e);
+    }
+    Some(max - min)
+}
+
+/// The SUPPORT-BOUND on relief (km): the maximum topography a crust of yield strength `sigma_y`, density `rho`, and
+/// surface gravity `g` can hold against its own weight before it flows, `h_max = sigma_y / (rho * g)` (the
+/// strength-over-buoyant-weight bound). A derived relief amplitude at or below this is physically supportable; an
+/// amplitude ABOVE it is unphysical (the crust would relax) and is surfaced as a FLAG, never rendered as real
+/// relief. `crust_density_g_cm3` is the DERIVED crust density; `sigma_y` is the reserved crustal yield strength.
+/// `None` on a non-physical density or gravity.
+fn supportable_relief_km(
+    yield_strength_pa: f64,
+    crust_density_g_cm3: f64,
+    gravity_m_per_s2: f64,
+) -> Option<f64> {
+    let rho_kg_m3 = crust_density_g_cm3 * 1000.0;
+    if rho_kg_m3 <= 0.0 || gravity_m_per_s2 <= 0.0 {
+        return None;
+    }
+    Some(yield_strength_pa / (rho_kg_m3 * gravity_m_per_s2) / 1000.0)
 }
 
 /// The interactive `--derived [star_mass] [orbit_au]` viewer: derive the planet from the star mass and orbit and show
@@ -4011,40 +4192,109 @@ mod province_tests {
     }
 
     #[test]
-    fn a_melted_world_textures_above_the_smooth_ball_floor() {
-        // R-YOUNG-TEMPERATURE payoff: a MELTED world (the young potential temperature pinned super-solidus at the
-        // magma-ocean lock-up handoff, a nonzero formation melt fraction F seeding the per-province radiogenic
-        // heterogeneity) develops real relief as its provinces diverge and thicken, so the derived surface
-        // neighbor-contrast stands well above the smooth-ball floor an unprocessed (F None) world sits at. The
-        // young handoff is derived inside mars_class_provinces from the supplied solidus.
-        let steps = 225usize;
-        let contrast_of = |formation_melt_fraction: Option<Fixed>| -> f64 {
-            let mut prov = mars_class_provinces(
-                Fixed::from_int(1680),
-                Fixed::from_int(130),
-                formation_melt_fraction,
-            );
-            step_provinces(&mut prov, steps);
-            let tiles = derive_province_tiles(&prov, prov.pcols, prov.prows)
-                .expect("province tiles derive");
-            tile_relief_neighbor_contrast(&tiles, prov.pcols).expect("the contrast resolves")
+    fn a_melted_world_drives_the_verdict_end_to_end_and_stands_in_km_relief() {
+        // R-YOUNG-TEMPERATURE payoff, driven END TO END through the real wiring (fix 3): build_derived_scene runs
+        // the young-thermal verdict itself, and for a world whose best estimate melts it pins the young potential
+        // temperature at the magma-ocean lock-up handoff, RE-DERIVES the surface at that temperature by the real
+        // second `derive_surface_composition` call (F = phi_c by construction, proven in the physics test
+        // `the_handoff_pins_the_lock_up_melt_fraction`), and textures the deep-time relief off the resulting
+        // formation melt fraction. No hand-fed F: the verdict and the re-derivation are in the loop.
+        let scene =
+            build_derived_scene(Fixed::ONE, Fixed::ONE).expect("the derived scene resolves");
+        let v = scene.young.expect("the young-thermal verdict resolves");
+        // The Sun/1AU world melts at its best estimate, so it is carried at the super-solidus handoff (its grade is
+        // MARGINAL: the interim formation-time band up to a few megayears straddles the solidus, the honest catch).
+        assert!(
+            v.handoff_potential_temperature_k.is_some(),
+            "a best-estimate-melting world is carried at the super-solidus handoff"
+        );
+        assert_eq!(
+            v.young_potential_temperature_k,
+            v.handoff_potential_temperature_k.unwrap(),
+            "the carried young temperature IS the lock-up handoff (the re-derivation ran at it)"
+        );
+        // The verdict drove a real, nonzero isostatic relief through the re-derived surface: the honest km amplitude
+        // is the physical measure the render shows at physical scale (never a normalized ratio).
+        let amplitude_km =
+            tile_relief_amplitude_km(&scene.tiles).expect("the relief amplitude resolves");
+        assert!(
+            amplitude_km > 0.0,
+            "a melted world stands in real, nonzero km-scale isostatic relief, got {amplitude_km} km"
+        );
+        // The melt-driven heterogeneity is ENGAGED (the indicator stands above the smooth-ball floor): the texture
+        // is on, which the amplitude confirms is real relief rather than a normalized artifact.
+        let indicator = tile_relief_heterogeneity_indicator(&scene.tiles, scene.cols)
+            .expect("the heterogeneity indicator resolves");
+        assert!(
+            indicator > 0.03,
+            "the melt-driven texture is engaged above the smooth-ball floor, got {indicator:.3}"
+        );
+        // THE SUPPORT-BOUND CHECK runs and REPORTS (never asserts the direction away): the derived amplitude is
+        // reported against yield/(rho*g), any excess flagged. Today the deep-time crust growth accumulates an
+        // unphysically large relief over the aged span, so the check FLAGS it (a surfaced follow-on in the sim
+        // deep-time crust-growth model, outside this slice's scope, which the km amplitude + support bound exposed
+        // where the normalized roughness indicator had hidden it). The check firing is the honest behaviour.
+        let bound_km = scene.provinces.as_ref().and_then(|p| {
+            supportable_relief_km(
+                CRUST_YIELD_STRENGTH_PA,
+                p.crust_density.to_f64_lossy(),
+                scene.gravity.to_f64_lossy(),
+            )
+        });
+        let bound_note = match bound_km {
+            Some(b) if amplitude_km > b => {
+                format!("EXCEEDS support bound {b:.2} km (flagged: deep-time crust over-growth follow-on)")
+            }
+            Some(b) => format!("within support bound {b:.2} km"),
+            None => "support bound unavailable".to_string(),
         };
-        // The unprocessed (sub-solidus formation, F None) world sorted no incompatibles: uniform provinces, the
-        // smooth-ball floor.
-        let smooth_floor = contrast_of(None);
-        // The melted world (F = 0.1, a strongly enriching low-degree melt) diverges: real relief.
-        let melted = contrast_of(Some(Fixed::from_ratio(1, 10)));
-        assert!(
-            smooth_floor < 0.03,
-            "an unprocessed world sits near the smooth-ball floor, got {:.3}",
-            smooth_floor
+        eprintln!(
+            "R-YOUNG-TEMPERATURE payoff: {:?}, young T {:.0} K; derived relief amplitude {:.2} km ({}), heterogeneity indicator {:.1}%",
+            v.regime,
+            v.young_potential_temperature_k.to_f64_lossy(),
+            amplitude_km,
+            bound_note,
+            indicator * 100.0
         );
+    }
+
+    #[test]
+    fn the_relief_amplitude_and_support_bound_are_physical_quantities() {
+        // The km amplitude is the elevation span (max minus min), a real magnitude, NOT a normalized ratio: a field
+        // spanning -2 to +3 km is a 5 km amplitude. The support bound is yield/(rho*g): 1e8 Pa over 3000 kg/m^3 at
+        // 3.7 m/s^2 is ~9 km, and an amplitude above it is flagged unsupportable.
+        let tiles = vec![
+            DerivedTile {
+                elevation: Fixed::from_int(-2),
+                relief: TerrainRelief::Submarine,
+            },
+            DerivedTile {
+                elevation: Fixed::from_int(3),
+                relief: TerrainRelief::Upland,
+            },
+            DerivedTile {
+                elevation: Fixed::ZERO,
+                relief: TerrainRelief::Lowland,
+            },
+        ];
+        let amplitude = tile_relief_amplitude_km(&tiles).expect("the amplitude resolves");
         assert!(
-            melted > smooth_floor * 2.0 && melted > 0.03,
-            "a melted world textures well above the smooth floor (melted {:.3} vs floor {:.3})",
-            melted,
-            smooth_floor
+            (amplitude - 5.0).abs() < 1e-6,
+            "the amplitude is the elevation span (3 - (-2) = 5 km), got {amplitude}"
         );
+        // Mars-class support bound: sigma_y 1e8 Pa, crust 3.0 g/cm^3, g 3.7 -> ~9 km.
+        let bound = supportable_relief_km(1.0e8, 3.0, 3.7).expect("the bound resolves");
+        assert!(
+            (bound - 9.009).abs() < 0.1,
+            "the support bound is yield/(rho*g) ~9 km for Mars-class, got {bound}"
+        );
+        // A taller relief than the bound is caught; a non-physical density fails soft.
+        assert!(
+            amplitude < bound,
+            "a 5 km relief is supportable under a 9 km bound"
+        );
+        assert!(supportable_relief_km(1.0e8, 0.0, 3.7).is_none());
+        assert!(tile_relief_amplitude_km(&[]).is_none());
     }
 
     #[test]
