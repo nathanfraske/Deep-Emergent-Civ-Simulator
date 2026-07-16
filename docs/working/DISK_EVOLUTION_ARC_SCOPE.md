@@ -1,6 +1,10 @@
 # Disk-evolution arc scope: the Mdot(t) clock and the wind-versus-accretion dispersal race
 
-Status: scoped, premise-checked, awaiting the reserved-value sign-off before the build. This is the separate authorized arc the owner named PIPELINE-STAGE DEBT WITH MULTIPLE CREDITORS, not a DiskGas feature. It is the mechanism the dispersal race needs, the gas-era feedback needs, and the one that turns `tau_disk` from a CONSULTED CLOCK into a DERIVED OUTPUT. The minimal DiskGas ledger (the account, the envelope-drain edge, both conservation gates) landed first and against a static account; this arc makes that account live.
+Status: design posted, build authorized, premise-check done, awaiting the reserved-value sign-off before slice-1 code. This is the separate authorized arc the owner named PIPELINE-STAGE DEBT WITH MULTIPLE CREDITORS, not a DiskGas feature. It is the mechanism the dispersal race needs, the gas-era feedback needs, and the one that turns `tau_disk` from a CONSULTED CLOCK into a DERIVED OUTPUT. The minimal DiskGas ledger (the account, the envelope-drain edge, both conservation gates) landed first and against a static account; this arc makes that account live.
+
+## Check-outranks-order clearance (done before building)
+
+The standing rule (the check outranks the order, no matter whose order it is) requires checking the project's prior rulings for a superseding form and the codebase for an existing one before building an ordered mechanism. Both checked. No prior ruling in the design records or the audit log supersedes the time-evolving disk (the disk-evolution physics is engine implementation, not spelled out in the design parts, and gate-G retired the free `DiskProfile` onto the static viscous-similarity form without ordering its time evolution). No `Mdot(t)` or `tau_disk` implementation exists in the codebase. The one adjacent thing is `giants.rs`'s reserved `disk_gas_lifetime_myr` (~1 to 10 Myr, the class-II median the Kelvin-Helmholtz time races against): that is the CONSUMER this arc's derived `tau_disk` replaces, not a duplicate of it. The order stands, and the arc is new work.
 
 ## The carried premise-check (done first, per the coordinator's instruction)
 
@@ -38,6 +42,16 @@ The mechanism is fixed Rust; the reserved values it needs, each surfaced with it
 - The gap radius (the critical radius where the wind first wins). Basis: the gravitational radius scaled by the wind's launching physics, derived from the stellar mass and the wind temperature rather than authored.
 
 The dispersal band (the alpha-viscous-versus-wind-driven regime) the giant arc already flagged is the closure condition on which branch dominates, and it conditions Mdot_0's meaning.
+
+## Gate blindness sets (rule 1, standing): every gate states what it cannot see
+
+The blindness-set rule: every gate's doc names its BLINDNESS SET beside its discriminating power, one line, naming the guard that covers each blind spot. A gate that knows what it cannot see is a gate; a gate that does not is a comfort. The physics reason it binds this arc: a conservation gate certifies FLOW BOOKKEEPING and is structurally BLIND to SHARED-SOURCE errors, because an error in the opening appears on both sides of the identity and cancels (misquadrature the profile by 2x and both DiskGas gates pass serenely, opening wrong, closing wrong by the same amount, books balanced, world wrong). Source truth and flow consistency are different claims guarded by different machinery, which is why the opener-binds-to-quadrature and convergence-twin tests are never redundant with the conservation gates.
+
+The DiskGas gates gain this line verbatim, in this arc's FIRST code commit (after #194 lands and this branch rebases onto the ledger): "blind to opening-source errors and to mass-and-L-proportional errors; covered by the opener-binds-to-quadrature test and the convergence twin." The arc's own new gates carry their blindness sets from birth. The TWO-LANDMARK gate (that one `Mdot_0` and one `t_visc` reproduce both the 0.19 formation-epoch and the 0.01 mature-epoch rates): discriminating power is that it convicts any decline law that cannot hit both landmarks at once; blind to a joint error that shifts both landmarks together (a wrong overall normalization consistent with both), covered by anchoring `Mdot_0` to the independently-observed class-0/I peak-accretion band. The TAU_DISK RACE gate (that the derived dispersal time falls in the observed class-II lifetime band): discriminating power is that it convicts a wind rate or viscous time that disperses too fast or too slow to match observation; blind to a compensating pair of errors in the wind rate and the viscous time that cross at the right lifetime, covered by checking each rate against its own observed band rather than their crossing alone.
+
+## The three rules that bind this arc (from the ruling)
+
+Rule 1, the blindness-set rule, is applied above. Rule 2: the same-fact-two-doors flag on the DiskGas ledger was ruled CLEAN (mass and the sqrt(r)-weighted first moment are different moments of one distribution, and the L gate discriminates a wrong-orbit debit the mass gate cannot see), and the suspicion is what produced rule 1; the carried defect class below stands for the live account. Rule 3: rulings cite their evidence channel (brief or commit), and this arc keeps auditing them against the repository, which is how the premise-check finding was grounded in the actual constants rather than taken on report.
 
 ## Couplings and the build order
 
