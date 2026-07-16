@@ -32,9 +32,28 @@ The three quantities that bound the profile already exist. The surface temperatu
 
    EXPONENT RIDER (checked, since `E*` lives in an Arrhenius exponential): `g` is measured-class and `T_m` is derived, so the product is class-grade in the exponent, the same legal status the freezer already relies on. Band propagated.
 
-## The payoff: T_e falls out, and the isotherm is demoted
+## The payoff: T_mech and T_e both fall out, and the isotherm is demoted
 
-`T_e` emerges from the YIELD-STRENGTH ENVELOPE: the brittle curve intersecting the ductile curve at the world's own STRAIN RATE, itself derived from the convective timescale. Nothing in the arc authors a scalar.
+CORRECTED 2026-07-16 (owner ruling, after a fresh-context sweep). The line that stood here read: "`T_e` emerges from the YIELD-STRENGTH ENVELOPE: the brittle curve intersecting the ductile curve at the world's own STRAIN RATE, itself derived from the convective timescale." It carried two errors, and the first dissolved a three-document disagreement rather than settling it.
+
+**ONE NAME HELD TWO QUANTITIES, AND BOTH SHIP.** This document said the crossing was `T_e`; the roadmap said the honest route was McNutt 1984 moment-equivalence; the fetch (`GEOTHERM_FETCHES.md` section 2.5) said "Te is not a depth to a boundary ... a geometric analogue of the lithosphere's integrated strength". All three were right about different things. The reconciliation is a RENAME, never a winner:
+
+- **`T_mech`, the MECHANICAL thickness**: the crossing of the brittle and ductile curves, the DEPTH EXTENT OF STRENGTH. A real output, and it feeds the faulting depth and the thermal architecture. This is what the sentence above described, under the wrong name.
+- **`T_e`, the ELASTIC thickness**: McNutt's MOMENT-EQUIVALENCE, the uniform elastic plate reproducing the envelope's BENDING MOMENT at a given CURVATURE. This is what the flexure kernel and the hindcast data mean by `T_e`, and it is the only one `D = E T_e^3 / (12 (1 - nu^2))` may be fed. `T_e` FALLS AS CURVATURE RISES: more of the real plate yields and the moment saturates.
+
+That is how honest documents disagree without anyone lying: one symbol bound to two constructions across three files. The ledger-shape defect dissolves with the rename.
+
+**`T_e` IS PER LOAD, AND THE LOOP IS THE CONSTRUCTION.** `T_e` sets `D`, `D` sets the deflection, the deflection sets the curvature, and the curvature sets `T_e`. That circle is a SCALAR FIXED-POINT SOLVE PER LOAD, not a problem to design around: evaluate the elastic deflection at a trial `T_e`, read the PEAK curvature, recompute `T_e` from the moment integral, iterate. It is cheap, deterministic under the fold rule, and it carries its own convergence test. Three consequences, all favourable:
+
+1. **Silent-curvature authorship dies STRUCTURALLY.** The load supplies its own curvature through the solve, so no reference bending is ever chosen. `T_e` is not a property of the lithosphere; it is the lithosphere JOINED TO A LOAD, the same shape as the isotherm's hidden conditioning variable below, and this is that class's third strike.
+2. **"The world's `T_e`" demotes to a STATISTIC**, evaluated at the world's own volcanic edifices, which are already rows in the object lists. Those are seamount-class loads, so the hindcast's conditioning is matched BY CONSTRUCTION rather than by an authored analogue: the engine's seamounts against Earth's seamounts, like against like.
+3. **The failure branch is already built.** A non-converging fixed point means the load exceeds what the envelope can elastically carry, which routes to the support-bound and viscous-relaxation branch that landed weeks ago. The Gap Law's near-degenerate zone at the supportability edge CARRIES instead of asserting, and nothing new is built for it.
+
+Every `T_e` output carries its CHORD FIELDS, LOAD CLASS and LOAD TIMESCALE.
+
+**THE SECOND ERROR: TWO RATES, TWO CHORDS, AND THE PROXIMITY-PLUMBING IS FORBIDDEN.** The old line sourced the envelope's strain rate from the convective timescale. That is the wrong chord for the flexural question. The FLEXURAL YSE evaluates at THE LOAD'S OWN RATE; the CONVECTIVE rate (extracted from `laws::convective_stress`, where `|v|/L` was already being formed and discarded) serves MANTLE VISCOSITY AND THE THERMAL SIDE. Both are named at their definition sites and neither may be plumbed into the other's consumer, because a builder reaching for the nearest available rate is exactly how the load-timescale finding would re-enter through the door it was evicted from. The envelope carries the chord; `T_mech` and `T_e` both inherit it from the envelope they are read off.
+
+Nothing in the arc authors a scalar.
 
 THE ISOTHERM IS DEAD, AND NOTHING NUMERIC REPLACES IT (owner ruling 2026-07-16, after the fetch read the primaries). This document previously called it "the ~600 K class number" and demoted it to a hindcast cross-check. Both the number and the demotion were wrong.
 

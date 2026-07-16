@@ -33,8 +33,26 @@
 //!   `G = k K` (the Pugh chain `civsim_materials::properties::shear_modulus_gpa`, the same shear route the
 //!   support-bound yield uses). Materials depends on physics, so this crate is UPSTREAM of that derivation and
 //!   takes `E` and `nu` as inputs rather than importing the (downstream) relation.
-//! - `T_e` (the elastic lid thickness), a PER-WORLD input the caller supplies from the deep-time thermal state
-//!   (a young hot world has a thin lid, an aged cool world a thick one). The kernel does not author it.
+//! - `T_e` (the elastic thickness), a PER-LOAD input the caller supplies. The kernel does not author it.
+//!
+//!   THIS LINE CARRIED A FALSE IMPLEMENTATION-STATUS CLAIM FOR FOUR GENERATIONS OF ITS OWN DESCENDANTS, and it
+//!   is recorded rather than quietly swapped, because the claim propagated from here into two scope documents by
+//!   transcription. It said `T_e` was supplied "from the deep-time thermal state", which asserted a DERIVED
+//!   ELASTIC LID THE CODEBASE NEVER HAD: `ColumnState` is `{temperature, convecting}`, one lumped scalar per
+//!   column, and nothing carried temperature on a depth axis. The thermal state is an ANCESTOR of `T_e` (it sets
+//!   the geotherm `T(z)`, which sets the ductile branch of the yield envelope), and it was never the CARRIER.
+//!
+//!   WHAT `T_e` IS (owner ruling 2026-07-16, after one symbol was found bound to two constructions across three
+//!   documents): the MOMENT-EQUIVALENT thickness, McNutt 1984. It is the uniform elastic plate that reproduces
+//!   the yield-strength envelope's BENDING MOMENT at a given CURVATURE, which is why `T_e` FALLS AS CURVATURE
+//!   RISES: more of the real plate yields and the moment saturates. It is therefore NOT a property of the
+//!   lithosphere alone and NOT per-world; it is the lithosphere JOINED TO A LOAD, and it is solved per load by a
+//!   scalar fixed point (trial `T_e`, elastic deflection, peak curvature, recompute `T_e` from the moment
+//!   integral, iterate). Every `T_e` carries its chord fields, LOAD CLASS and LOAD TIMESCALE.
+//!
+//!   DO NOT CONFUSE IT WITH `T_mech`, the MECHANICAL thickness, which is the crossing of the brittle and ductile
+//!   curves and is the depth extent of strength. Both are real and both ship; they are two quantities, and the
+//!   defect was one name.
 //! - The RESTORING TERM `(rho_mantle - rho_infill) g`: the mantle and infill densities and the surface gravity
 //!   are per-world inputs the caller supplies (derived upstream from composition and the body). The kernel
 //!   reads the density contrast `delta_rho` and the gravity `g`, never authors them.
@@ -309,7 +327,11 @@ pub struct PlateInputs {
     pub youngs_modulus: Fixed,
     /// Poisson's ratio `nu` (dimensionless), the banked isotropic-elastic companion.
     pub poisson_ratio: Fixed,
-    /// The elastic lid thickness `T_e` (length unit), from the deep-time thermal state.
+    /// The MOMENT-EQUIVALENT elastic thickness `T_e` (length unit), PER LOAD: the uniform elastic plate that
+    /// reproduces the yield envelope's bending moment at THIS load's own curvature (McNutt 1984). It is not read
+    /// off the thermal state and it is not a per-world constant; see the module doc for the correction and for
+    /// its distinction from `T_mech`, the brittle-ductile crossing. Still the SOLE unsupplied input to `D`: the
+    /// geotherm arc derives it, and until that lands `PlateInputs` has no production caller.
     pub elastic_thickness: Fixed,
     /// The density contrast `delta_rho = rho_mantle - rho_infill` (density unit) the deflection floats against.
     pub density_contrast: Fixed,
