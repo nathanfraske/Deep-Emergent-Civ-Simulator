@@ -47,7 +47,8 @@ use civsim_physics::solar_abundances::SolarAbundances;
 use civsim_sim::anatomy::WorldProfile;
 use civsim_sim::clock::PlaybackDriver;
 use civsim_sim::deeptime::{
-    province_column_params, provinces_across, step_deep_time, DeepTimeState, MeltParams,
+    bombard_tick, province_column_params, provinces_across, step_deep_time, DeepTimeState,
+    ImpactFluxParams, MeltParams,
 };
 use civsim_sim::genesis::{genesis, GenesisParams, LivingWorld, WorldGenesis};
 use civsim_sim::geodynamics::{
@@ -55,6 +56,8 @@ use civsim_sim::geodynamics::{
     ColumnParams, DerivedTile,
 };
 use civsim_sim::located::OccupantId;
+use civsim_world::ballistic::{BallisticForces, EjectaFan};
+use civsim_world::crater::{CraterCoupling, Target};
 use civsim_world::terrain::TerrainRelief;
 use civsim_world::view::Camera;
 use civsim_world::{BiomeSet, Coord3, QuadTree, Rgb};
@@ -1063,6 +1066,91 @@ const MANTLE_CONVECTION_CELL_ASPECT: Fixed =
 /// overturn timescale (Turcotte & Schubert, Geodynamics).
 const MANTLE_PROCESSING_TIME_MYR: Fixed = Fixed::from_int(100);
 
+// THE DEEP-TIME BOMBARDMENT flux configuration (the leftover-planetesimal reservoir the accretion-tail impact
+// chain draws from). Every field of the flux is per-world DATA (Principle 11, admit-the-alien): a different disk,
+// a captured swarm, or an alien impactor population is a different set of numbers through the same wiring, never a
+// new code path. Most of the flux is DERIVED at the build site from the scene's own numbers and never appears
+// here: the impact closing speed (the escape velocity `sqrt(2 g R)` from the derived gravity and radius), the
+// impactor bulk density (the planet's derived uncompressed bulk density, the same reservoir it accreted from), the
+// target gravity and bulk density (the derived surface gravity and crust density), the ballistic gravity and cell
+// size (the derived gravity and the province grid's own spacing, circumference / pcols), and the ejecta launch
+// speed (the reserved fraction below of the derived closing speed). What remains below are the reservoir's OWN
+// residual data, each RESERVED-WITH-BASIS (a named constant, its basis stated, surfaced for the owner, never an
+// unlabeled inline literal) or CITED. When the disk model supplies the residual reservoir mass and size-frequency
+// bounds these derive down; until then they are the surfaced reservoir data.
+
+/// CITED, the collisional-cascade differential size-frequency slope `p` (the Dohnanyi slope). Basis: the steady-
+/// state collisional cascade slope, near 3.5 (Dohnanyi 1969), the same cascade the grain-opacity wire reads; a
+/// cited physical constant of the fragmentation cascade, not a reserved tuneable.
+const IMPACT_DOHNANYI_SLOPE: Fixed = Fixed::from_int(35).div(Fixed::from_int(10)); // 3.5
+/// RESERVED-WITH-BASIS, the reservoir's total impacting-body count over the whole accretion tail (bodies above the
+/// minimum radius). Basis: the residual leftover-planetesimal reservoir mass the world's disk delivers divided by
+/// the mean body mass of the size-frequency distribution; a per-world datum, derived-down when the disk model
+/// supplies the residual mass. The placeholder is held to a MODEST late-accretion tail (order tens of surviving
+/// bodies) so the accumulated relief stays near the observed heavily-cratered-surface roughness the owner
+/// calibrates against, rather than saturating the coarse province grid (see the honest-limit note at the flux
+/// construction site: at the derived ~thousand-km province cells the built impact chain deposits each crater's full
+/// transient depth into one cell, so a dense bombardment over-inflates the per-cell relief until the finer-impact-
+/// grid refinement lands).
+const IMPACT_RESERVOIR_BODY_COUNT: Fixed = Fixed::from_int(40);
+/// RESERVED-WITH-BASIS, the accretion-tail sweep-up timescale `tau` (Myr), the flux's own decay constant. Basis:
+/// the planet's gravitational-focusing sweep-up time over the reservoir's dynamical spreading, near tens of Myr for
+/// late accretion (Wetherill; Chambers late-accretion), a per-world dynamical value.
+const IMPACT_SWEEP_TIMESCALE_MYR: Fixed = Fixed::from_int(30);
+/// RESERVED-WITH-BASIS, the smallest impactor radius the reservoir delivers (m), the size-frequency lower bound.
+/// Basis: the reservoir's small-end cutoff, at or above the crater resolvable on the derived province grid (a
+/// resolution floor at the ~thousand-km province spacing); a per-world reservoir datum.
+const IMPACT_MIN_IMPACTOR_RADIUS_M: Fixed = Fixed::from_int(2000);
+/// RESERVED-WITH-BASIS, the largest impactor radius the reservoir delivers (m), the size-frequency upper bound (the
+/// biggest surviving body). Physical basis: the largest leftover planetesimal below the giant-impact embryo tier (a
+/// planetary embryo merger is the separate Layer-4 event tier, not this population), a per-world reservoir datum of
+/// order tens to hundreds of km. The placeholder is held to the LOW end of that range because two first-slice
+/// limits of the BUILT impact chain (crates/world, off-limits here) over-deepen a large crater at the coarse
+/// province grid: the crater law uses one `bowl_aspect` (the simple-crater depth-to-diameter ~0.2, with no complex-
+/// crater depth flattening for basins), and `apply_impact` deposits a crater's full transient depth into a single
+/// province cell (the sub-cell concentration). Until the crater-collapse slice (flagged in `impact_event.rs`) and a
+/// finer impact grid land, the modest bound keeps the fresh relief physical; the real large end is a per-world
+/// datum the owner restores once those refinements exist.
+const IMPACT_MAX_IMPACTOR_RADIUS_M: Fixed = Fixed::from_int(8000);
+/// RESERVED-WITH-BASIS, the target's effective (cohesive) yield strength `Y` (Pa) the crater law's strength term
+/// reads. Basis: the crust's frictional-brittle cohesive strength, the ~1e8 Pa (~100 MPa) class-grade value; the
+/// derive-down to the crust's OWN operative shear strength (the Frenkel ideal scaled by the per-class knockdown,
+/// as the deep-time support-bound collapse already derives) is the named refinement. A per-world datum.
+const IMPACT_TARGET_STRENGTH_PA: Fixed = Fixed::from_int(100_000_000);
+/// RESERVED-WITH-BASIS per material (the competent-silicate crust row), the crater-scaling coupling constants,
+/// cited to Holsapple (1993), Schmidt and Housen (1987), and Melosh (1989). Basis for each: the velocity-coupling
+/// exponent `mu ~ 0.55` (competent silicate, bounded by the momentum limit 1/3 and the energy limit 2/3); the
+/// density-coupling exponent `nu ~ 0.4`; the efficiency intercept `K1 ~ 0.2`; the strength weight `K2 ~ 1`; the
+/// transient bowl depth-to-diameter `h/D ~ 0.2`; the escaping-ejecta fraction `f_eject ~ 0.5`. A world's material
+/// carries its own row; a soft ice or an alien substrate differs by data, not by code (admit-the-alien).
+const IMPACT_COUPLING_VELOCITY_EXPONENT: Fixed = Fixed::from_int(55).div(Fixed::from_int(100)); // 0.55
+const IMPACT_COUPLING_DENSITY_EXPONENT: Fixed = Fixed::from_int(4).div(Fixed::from_int(10)); // 0.4
+const IMPACT_COUPLING_EFFICIENCY_COEFFICIENT: Fixed = Fixed::from_int(2).div(Fixed::from_int(10)); // 0.2
+const IMPACT_COUPLING_STRENGTH_COEFFICIENT: Fixed = Fixed::ONE; // 1.0
+const IMPACT_COUPLING_BOWL_ASPECT: Fixed = Fixed::from_int(2).div(Fixed::from_int(10)); // 0.2
+const IMPACT_COUPLING_EJECT_FRACTION: Fixed = Fixed::from_int(5).div(Fixed::from_int(10)); // 0.5
+/// RESERVED-WITH-BASIS, the characteristic ejecta launch speed as a FRACTION of the derived impact closing speed
+/// (so the launch speed scales with the world, not an inline literal). Basis: the near-rim ejecta launch speed, a
+/// modest fraction of the impact speed near the 45-degree maximum-range angle (Melosh 1989). HONEST LIMIT: at the
+/// coarse province grid the true near-rim ejecta range is far below one cell, so the fan lays a coarse ring at the
+/// grid's own resolution rather than a resolved ejecta profile; a per-event ejecta speed scaling with the crater's
+/// excavation velocity, and a finer grid, are the named refinements.
+const IMPACT_EJECTA_SPEED_FRACTION: Fixed = Fixed::from_int(3).div(Fixed::from_int(10)); // 0.3
+/// The ejecta launch ELEVATION ANGLE: 45 degrees, the ballistic maximum-range angle on flat ground (an analytic
+/// geometric optimum, `HALF_PI / 2`, not an authored knob).
+const IMPACT_EJECTA_ELEVATION_ANGLE: Fixed = Fixed::HALF_PI.div(Fixed::from_int(2));
+/// RESERVED-WITH-BASIS, the number of evenly spaced ejecta launch azimuths (a resolution-and-determinism bound, not
+/// a physical value). Basis: the fewest azimuths at which the blanket's shape stops changing beyond the grid
+/// resolution (a resolution-versus-cost bound).
+const IMPACT_EJECTA_AZIMUTHS: u32 = 24;
+/// RESERVED-WITH-BASIS, the ballistic-march step cap (a determinism-and-performance bound, never a physical range).
+/// Basis: the fewest steps that let a maximum-range arc cross the grid before the cap bites.
+const IMPACT_BALLISTIC_STEP_CAP: u32 = 200;
+/// RESERVED-WITH-BASIS, the maximum number of impacts applied in one deep-time tick (a determinism-and-cost bound,
+/// never a physical limit). Basis: the per-tick impact budget set so the earliest, most intense ticks stay inside
+/// the tick's compute envelope; the accumulated relief is still heavily cratered early.
+const IMPACT_PER_TICK_CAP: u32 = 64;
+
 /// PER-SYSTEM derive-down (dimensionless), the convective HOMOGENIZATION residual: the fraction of a melt-extraction
 /// incompatible-element enrichment contrast that survives convective stirring to remain as lateral mantle
 /// heterogeneity. The heterogeneity AMPLITUDE is derived per-system from the world's own formation melt fraction F
@@ -1494,6 +1582,14 @@ struct DeepTimeProvinces {
     young_potential_temperature_k: Fixed,
     /// The sea-level datum (Slice-0 zero, retires with the water budget).
     sea_level: Fixed,
+    /// The per-world impact-flux configuration the deep-time bombardment draws from (the accretion-tail reservoir
+    /// and the collisional-cascade size-frequency distribution), constructed derive-first at build time. Its
+    /// crater bowls and ejecta blankets accumulate into `state.impact_relief_m` on the same grid and clock as the
+    /// volcanic crust ([`bombard_tick`], a SEPARATE step term after the interior/volcanism step).
+    flux: ImpactFluxParams,
+    /// The stable per-world seed the bombardment draws are keyed on (a hash of the star mass and orbit that DEFINE
+    /// this derived planet), so the same world renders the same craters every run (Principle 3, Principle 10).
+    world_seed: u64,
 }
 
 /// A deterministic per-province symmetry-breaking perturbation in `[-1, 1)`, hashed from the world identity
@@ -1650,6 +1746,70 @@ fn build_deep_time_provinces(
     // the young initial condition for a melted world.
     let state = DeepTimeState::young(n, young_potential_temperature_k);
 
+    // THE BOMBARDMENT flux, constructed DERIVE-FIRST from this scene's own numbers. The impact CLOSING SPEED is the
+    // escape velocity `v_esc = sqrt(2 g R)`, the least speed a body falling from rest strikes at (the derive-first
+    // floor; the encounter/orbital speed only adds to it), from the derived gravity and radius. The impactor BULK
+    // density is the planet's derived uncompressed bulk density (the leftover planetesimals are the same reservoir
+    // it accreted from), and the TARGET bulk density is the derived crust density, both converted g/cm^3 -> kg/m^3.
+    // The ballistic CELL SIZE is the province grid's own spacing (circumference / pcols, metres). The ejecta launch
+    // speed is the reserved fraction of the derived closing speed. Everything not derived here is the reserved-with-
+    // basis reservoir data above (Principle 11).
+    //
+    // HONEST LIMIT (resolution). The bombardment runs on the DERIVED province grid, whose cells are the convective
+    // cell width (~thousand km for a Mars-class mantle), so it is coarse by physics, not by choice. Two consequences
+    // are surfaced, not hidden. (1) The built `apply_impact` (crates/world, off-limits) deposits a sub-cell crater's
+    // full transient depth into ONE cell (the sub-cell concentration), and the crater law uses one simple-crater
+    // `bowl_aspect` with no complex-crater depth flattening, so a large fresh crater's per-cell relief is inflated;
+    // the reserved size and count above are held modest to keep the accumulated relief physical, pending the crater-
+    // collapse slice (flagged in `impact_event.rs`) and a finer impact grid decoupled from the convective province
+    // scale. (2) The composed relief IS shaded by the sun-direction hillshade, but a crater spanning a ~thousand-km
+    // cell makes only a ~degree slope, so it reads FAINTLY (the same "reads subtly" bound the hillshade slice
+    // documented); per the owner's no-exaggeration override the lever is finer upstream resolution, never a display
+    // ramp. The craters are present and mass-conserving in the derived elevation field regardless (the readout
+    // reports the impact count and the relief amplitude).
+    let escape_velocity_m_s = surface_gravity_m_s2
+        .checked_mul(Fixed::from_int(2))?
+        .checked_mul(radius_m)?
+        .sqrt();
+    let impactor_density_kg_m3 = mean_density.checked_mul(Fixed::from_int(1000))?;
+    let target_density_kg_m3 = crust_density.checked_mul(Fixed::from_int(1000))?;
+    let cell_size_m = circumference.checked_div(Fixed::from_int(pcols as i32))?;
+    let ejecta_speed_m_s = escape_velocity_m_s.checked_mul(IMPACT_EJECTA_SPEED_FRACTION)?;
+    let flux = ImpactFluxParams {
+        reservoir_body_count: IMPACT_RESERVOIR_BODY_COUNT,
+        sweep_timescale_myr: IMPACT_SWEEP_TIMESCALE_MYR,
+        differential_slope: IMPACT_DOHNANYI_SLOPE,
+        min_impactor_radius_m: IMPACT_MIN_IMPACTOR_RADIUS_M,
+        max_impactor_radius_m: IMPACT_MAX_IMPACTOR_RADIUS_M,
+        impact_velocity_m_s: escape_velocity_m_s,
+        impactor_density: impactor_density_kg_m3,
+        target: Target {
+            gravity: surface_gravity_m_s2,
+            strength: IMPACT_TARGET_STRENGTH_PA,
+            density: target_density_kg_m3,
+        },
+        coupling: CraterCoupling {
+            velocity_exponent: IMPACT_COUPLING_VELOCITY_EXPONENT,
+            density_exponent: IMPACT_COUPLING_DENSITY_EXPONENT,
+            efficiency_coefficient: IMPACT_COUPLING_EFFICIENCY_COEFFICIENT,
+            strength_coefficient: IMPACT_COUPLING_STRENGTH_COEFFICIENT,
+            bowl_aspect: IMPACT_COUPLING_BOWL_ASPECT,
+            eject_fraction: IMPACT_COUPLING_EJECT_FRACTION,
+        },
+        ejecta: EjectaFan {
+            speed: ejecta_speed_m_s,
+            elevation_angle: IMPACT_EJECTA_ELEVATION_ANGLE,
+            azimuths: IMPACT_EJECTA_AZIMUTHS,
+        },
+        forces: BallisticForces {
+            gravity: surface_gravity_m_s2,
+            cell_size: cell_size_m,
+            step_cap: IMPACT_BALLISTIC_STEP_CAP,
+        },
+        per_tick_impact_cap: IMPACT_PER_TICK_CAP,
+    };
+    let world_seed = impact_world_seed(star_mass, orbit_au);
+
     Some(DeepTimeProvinces {
         state,
         column_params,
@@ -1660,7 +1820,22 @@ fn build_deep_time_provinces(
         mantle_density,
         young_potential_temperature_k,
         sea_level: Fixed::ZERO,
+        flux,
+        world_seed,
     })
+}
+
+/// A stable per-world bombardment SEED (splitmix64) from the star mass and orbit that DEFINE this derived planet,
+/// so the same world renders the same crater field every run (Principle 3, Principle 10). The sibling of
+/// [`province_seed_perturbation`] without a per-index term: it keys the whole bombardment stream, and
+/// [`bombard_tick`] mixes in the per-tick index and per-strike counters itself.
+fn impact_world_seed(star_mass: Fixed, orbit_au: Fixed) -> u64 {
+    let mut z = (star_mass.to_bits() as u64)
+        .wrapping_mul(0x9E37_79B9_7F4A_7C15)
+        .wrapping_add((orbit_au.to_bits() as u64).wrapping_mul(0xD1B5_4A32_D192_ED03));
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    z ^ (z >> 31)
 }
 
 /// Reset the province field to its fresh young state (laterally uniform at the world's young potential
@@ -1674,10 +1849,20 @@ fn age_provinces_from_young(prov: &mut DeepTimeProvinces, total_steps: usize) {
 }
 
 /// Advance the deep-time province field by `steps` playback ticks (each `DEEP_TIME_MYR_PER_TICK` of geological
-/// time), stepping the interior convection and growing the crust. A no-op past a step that fails to resolve
-/// (fail-soft, the field simply stops advancing). Deterministic.
+/// time), stepping the interior convection, growing the crust, and drawing that tick's BOMBARDMENT onto the same
+/// surface. A no-op past a step that fails to resolve (fail-soft, the field simply stops advancing). Deterministic.
 fn step_provinces(prov: &mut DeepTimeProvinces, steps: usize) {
     for _ in 0..steps {
+        // The tick INDEX the bombardment seeds its draw on and the flux epoch measures against: the number of
+        // ticks already elapsed (`elapsed_myr / dt`), an exact integer since the clock accumulates one `dt` per
+        // tick and starts at zero. Reading it off the state keeps the same world's crater field stable and resets
+        // it correctly when `age_provinces_from_young` rewinds the clock to zero.
+        let tick_index = prov
+            .state
+            .elapsed_myr
+            .checked_div(DEEP_TIME_MYR_PER_TICK)
+            .map(|t| t.to_int().max(0) as u64)
+            .unwrap_or(0);
         match step_deep_time(
             &prov.state,
             &prov.column_params,
@@ -1687,20 +1872,62 @@ fn step_provinces(prov: &mut DeepTimeProvinces, steps: usize) {
             Some(next) => prov.state = next,
             None => break,
         }
+        // THE BOMBARDMENT is a SEPARATE step term after the interior/volcanism step (deeptime keeps them apart so a
+        // non-bombarding run replays bit-for-bit): it draws this tick's impacts from the accretion-tail flux and
+        // composes the crater bowls and ejecta blankets onto `state.impact_relief_m`, on the PHYSICAL province grid
+        // (`pcols` x `prows`), seeded on the world identity and the tick. The flux DECLINES with epoch (measured
+        // off the stepped `elapsed_myr`), so early ticks are heavily cratered and late ones quiescent. Off the run
+        // path (viewer + deeptime), so byte-neutral.
+        prov.state = bombard_tick(
+            &prov.state,
+            prov.pcols,
+            prov.prows,
+            &prov.flux,
+            prov.world_seed,
+            tick_index,
+            DEEP_TIME_MYR_PER_TICK,
+        );
     }
 }
 
-/// Re-derive the display TILE field from the current province state: each display tile reads its province's
-/// accumulated crust thickness, floats it by Airy isostasy on the derived mantle
-/// ([`civsim_physics::geodynamics::airy_isostatic_elevation`]), and classifies its relief against the field
-/// datum. So the surface is the province crust in relief: thicker-crust provinces stand as highlands, thinner
-/// as lowlands, and the pattern is what the deep-time run wrote, never a painted map. The display grid
-/// (`cols` by `rows`) is a viewer resolution; the PHYSICAL province grid is the derived one, and each display
-/// tile samples the province it falls in. `None` if the field is empty or an elevation does not resolve.
+/// Re-derive the display TILE field from the current province state, COMPOSING the bombardment relief onto the
+/// isostatic crust: each display tile reads its province's accumulated crust thickness, floats it by Airy isostasy
+/// on the derived mantle ([`civsim_physics::geodynamics::airy_isostatic_elevation`]), ADDS the bombardment relief
+/// (the crater bowls and ejecta blankets the deep-time impact chain carved onto the same surface), and classifies
+/// the composed relief against the field datum. So the rendered surface is the COMPOSED derived record: thicker-
+/// crust provinces stand as highlands, thinner as lowlands, and the bombardment history pits and blankets it, the
+/// pattern the deep-time run wrote, never a painted map. This is the field the globe RENDER reads. `None` if the
+/// field is empty or an elevation does not resolve.
 fn derive_province_tiles(
     prov: &DeepTimeProvinces,
     cols: usize,
     rows: usize,
+) -> Option<Vec<DerivedTile>> {
+    derive_province_tiles_core(prov, cols, rows, true)
+}
+
+/// The CRUST-ONLY tile field (the isostatic, melt-driven relief WITHOUT the bombardment), for the isostatic
+/// diagnostics that must not conflate the two: the melt-texture-engaged indicator and the isostatic-support-bound
+/// check read the crust's OWN relief, while the render reads the composed field ([`derive_province_tiles`]). The
+/// craters are a SEPARATE surface-topography record, reported on their own (the bombardment readout), so they do
+/// not dilute the melt-texture diagnostic's normalization or masquerade as isostatic relief.
+fn derive_province_crust_tiles(
+    prov: &DeepTimeProvinces,
+    cols: usize,
+    rows: usize,
+) -> Option<Vec<DerivedTile>> {
+    derive_province_tiles_core(prov, cols, rows, false)
+}
+
+/// The shared tile-field derivation. Each display tile bilinearly samples the coarse DERIVED province crust field
+/// (`cols` by `rows` is a viewer resolution; the PHYSICAL province grid is the derived one, each display tile
+/// sampling the province it falls in), floats it by Airy isostasy, and, when `with_impacts`, composes the
+/// bombardment relief on top. `None` if the field is empty or an elevation does not resolve.
+fn derive_province_tiles_core(
+    prov: &DeepTimeProvinces,
+    cols: usize,
+    rows: usize,
+    with_impacts: bool,
 ) -> Option<Vec<DerivedTile>> {
     if prov.pcols == 0 || prov.prows == 0 || cols == 0 || rows == 0 {
         return None;
@@ -1713,11 +1940,24 @@ fn derive_province_tiles(
             // Bilinearly sample the coarse province field so it reads as a smooth heightfield across province
             // boundaries rather than hard blocks (a display resampling of the DERIVED field, never new content).
             let thickness = sample_province_thickness(prov, fu, fv);
-            let elevation = civsim_physics::geodynamics::airy_isostatic_elevation(
+            let airy_km = civsim_physics::geodynamics::airy_isostatic_elevation(
                 prov.crust_density,
                 prov.mantle_density,
                 thickness,
             )?;
+            let elevation = if with_impacts {
+                // COMPOSE the bombardment relief onto the isostatic elevation. The impact chain carves craters and
+                // ejecta as SURFACE topography (not isostatically-compensated crust), so it adds DIRECTLY to the
+                // elevation rather than through the Airy law. WATCH THE UNITS: the Airy elevation is in KILOMETRES
+                // (the crust thickness's unit, `k * thickness`), while `impact_relief_m` is in METRES (the crater
+                // law's own length scale), so the relief is converted to km before it adds (the same class of unit
+                // bug the hillshade slice caught). The composed surface is `airy(crust) + impact_relief`, in km.
+                let impact_relief_m = sample_province_impact_relief_m(prov, fu, fv);
+                let impact_relief_km = impact_relief_m.checked_div(Fixed::from_int(1000))?;
+                airy_km.checked_add(impact_relief_km)?
+            } else {
+                airy_km
+            };
             elevations.push(elevation);
         }
     }
@@ -1733,13 +1973,33 @@ fn derive_province_tiles(
     )
 }
 
-/// Bilinearly sample the province crust-thickness field at a normalized surface coordinate `(fu, fv)`, treating
-/// each province as a sample at its cell centre. Longitude WRAPS (the globe is periodic east to west) and
-/// latitude CLAMPS (the poles), so the coarse DERIVED province field reads as a smooth heightfield across
-/// province boundaries. A display resampling of the derived field (Principle 10), never fabricated content.
+/// Bilinearly sample the province crust-thickness field (kilometres) at a normalized surface coordinate
+/// `(fu, fv)`. A display resampling of the DERIVED field (Principle 10), never fabricated content.
 fn sample_province_thickness(prov: &DeepTimeProvinces, fu: f32, fv: f32) -> Fixed {
-    let pc = prov.pcols as i64;
-    let pr = prov.prows as i64;
+    sample_province_field(
+        &prov.state.crust_thickness_km,
+        prov.pcols,
+        prov.prows,
+        fu,
+        fv,
+    )
+}
+
+/// Bilinearly sample the province BOMBARDMENT-RELIEF field (metres, [`DeepTimeState::impact_relief_m`]) at a
+/// normalized surface coordinate `(fu, fv)`, the SAME resampling the crust thickness uses so the craters ride on
+/// the crust on one grid. A display resampling of the derived impact record (Principle 10), never new content.
+fn sample_province_impact_relief_m(prov: &DeepTimeProvinces, fu: f32, fv: f32) -> Fixed {
+    sample_province_field(&prov.state.impact_relief_m, prov.pcols, prov.prows, fu, fv)
+}
+
+/// Bilinearly sample a coarse per-province `field` (one value per province, row-major `pcols` by `prows`) at a
+/// normalized surface coordinate `(fu, fv)`, treating each province as a sample at its cell centre. Longitude
+/// WRAPS (the globe is periodic east to west) and latitude CLAMPS (the poles), so the coarse DERIVED province
+/// field reads as a smooth heightfield across province boundaries. A display resampling of the derived field
+/// (Principle 10), never fabricated content.
+fn sample_province_field(field: &[Fixed], pcols: usize, prows: usize, fu: f32, fv: f32) -> Fixed {
+    let pc = pcols as i64;
+    let pr = prows as i64;
     let gx = fu * pc as f32 - 0.5;
     let gy = fv * pr as f32 - 0.5;
     let x0 = gx.floor();
@@ -1751,11 +2011,7 @@ fn sample_province_thickness(prov: &DeepTimeProvinces, fu: f32, fv: f32) -> Fixe
     let at = |xi: i64, yi: i64| -> Fixed {
         let x = xi.rem_euclid(pc) as usize; // wrap longitude
         let y = yi.clamp(0, pr - 1) as usize; // clamp latitude
-        prov.state
-            .crust_thickness_km
-            .get(y * prov.pcols + x)
-            .copied()
-            .unwrap_or(Fixed::ZERO)
+        field.get(y * pcols + x).copied().unwrap_or(Fixed::ZERO)
     };
     let lerp_fx = |a: Fixed, b: Fixed, t: f32| -> Fixed {
         let tf = Fixed::from_ratio((t.clamp(0.0, 1.0) * 4096.0) as i64, 4096);
@@ -2356,7 +2612,18 @@ fn print_derived_readout(scene: &DerivedScene) {
     // THE DERIVED RELIEF, three SEPARATED and TAGGED quantities (fix 2): the physical km amplitude, the
     // support-bound validity check, and the (dimensionless) heterogeneity-engaged indicator. The km amplitude is
     // the honest visible measure; the indicator only reports whether the melt-driven texture is on, never how tall.
-    if let Some(amplitude_km) = tile_relief_amplitude_km(&scene.tiles) {
+    // These ISOSTATIC diagnostics read the CRUST-ONLY relief (the melt-driven, Airy-floated crust), NOT the composed
+    // surface: the bombardment is a separate surface-topography record reported below, so it neither dilutes the
+    // melt-texture indicator's normalization nor masquerades as isostatic relief. The rendered globe still shows the
+    // composed surface ([`derive_province_tiles`]); this fall back to the rendered tiles only on the uniform-crust
+    // path where there is no province field.
+    let iso_rows = scene.tiles.len() / scene.cols.max(1);
+    let crust_tiles = scene
+        .provinces
+        .as_ref()
+        .and_then(|p| derive_province_crust_tiles(p, scene.cols, iso_rows));
+    let iso_tiles = crust_tiles.as_deref().unwrap_or(&scene.tiles);
+    if let Some(amplitude_km) = tile_relief_amplitude_km(iso_tiles) {
         let bound = scene.provinces.as_ref().and_then(|p| {
             supportable_relief_km(
                 CRUST_YIELD_STRENGTH_PA,
@@ -2377,10 +2644,26 @@ fn print_derived_readout(scene: &DerivedScene) {
             ),
         }
     }
-    if let Some(indicator) = tile_relief_heterogeneity_indicator(&scene.tiles, scene.cols) {
+    if let Some(indicator) = tile_relief_heterogeneity_indicator(iso_tiles, scene.cols) {
         eprintln!(
             "  relief heterogeneity-engaged indicator: {:.1}%  (a normalized roughness ratio: is the melt-driven texture ON, not a relief magnitude; smooth-ball floor near ~2%)",
             indicator * 100.0
+        );
+    }
+    // THE DEEP-TIME BOMBARDMENT record: the impacts the accretion-tail flux drew and composed onto the surface over
+    // the run so far, on the DERIVED province grid. A read of the derived crater history (Principle 10); the flux
+    // DECLINES with epoch, so the count is a heavy-early, quiescent-late record, never an authored intensity.
+    if let Some(p) = scene.provinces.as_ref() {
+        let cell_km = p.flux.forces.cell_size.to_f64_lossy() / 1000.0;
+        eprintln!(
+            "  deep-time bombardment: {} impacts on the {}x{} derived province grid (~{:.0} km cells); accretion-tail reservoir {:.0} bodies, sweep-up tau {:.0} Myr, closing speed {:.0} m/s (escape floor); heavy early, quiescent late",
+            p.state.impact_count,
+            p.pcols,
+            p.prows,
+            cell_km,
+            p.flux.reservoir_body_count.to_f64_lossy(),
+            p.flux.sweep_timescale_myr.to_f64_lossy(),
+            p.flux.impact_velocity_m_s.to_f64_lossy(),
         );
     }
     eprintln!("  controls: +/- zoom, wasd/arrows rotate the globe, p provenance, Esc quit");
@@ -4260,6 +4543,42 @@ mod province_tests {
             crust_density: Fixed::from_ratio(30, 10),
             mantle_density: Fixed::from_ratio(35, 10),
             sea_level: Fixed::ZERO,
+            // A flux built from the reserved-with-basis constants plus plausible test-scaffold derived values (this
+            // helper's tests read the crust field and do not step the bombardment, so impact_relief_m stays zero).
+            flux: ImpactFluxParams {
+                reservoir_body_count: IMPACT_RESERVOIR_BODY_COUNT,
+                sweep_timescale_myr: IMPACT_SWEEP_TIMESCALE_MYR,
+                differential_slope: IMPACT_DOHNANYI_SLOPE,
+                min_impactor_radius_m: IMPACT_MIN_IMPACTOR_RADIUS_M,
+                max_impactor_radius_m: IMPACT_MAX_IMPACTOR_RADIUS_M,
+                impact_velocity_m_s: Fixed::from_int(5000),
+                impactor_density: Fixed::from_int(3000),
+                target: Target {
+                    gravity: Fixed::from_int(10),
+                    strength: IMPACT_TARGET_STRENGTH_PA,
+                    density: Fixed::from_int(3000),
+                },
+                coupling: CraterCoupling {
+                    velocity_exponent: IMPACT_COUPLING_VELOCITY_EXPONENT,
+                    density_exponent: IMPACT_COUPLING_DENSITY_EXPONENT,
+                    efficiency_coefficient: IMPACT_COUPLING_EFFICIENCY_COEFFICIENT,
+                    strength_coefficient: IMPACT_COUPLING_STRENGTH_COEFFICIENT,
+                    bowl_aspect: IMPACT_COUPLING_BOWL_ASPECT,
+                    eject_fraction: IMPACT_COUPLING_EJECT_FRACTION,
+                },
+                ejecta: EjectaFan {
+                    speed: Fixed::from_int(1500),
+                    elevation_angle: IMPACT_EJECTA_ELEVATION_ANGLE,
+                    azimuths: IMPACT_EJECTA_AZIMUTHS,
+                },
+                forces: BallisticForces {
+                    gravity: Fixed::from_int(10),
+                    cell_size: Fixed::from_int(2000),
+                    step_cap: IMPACT_BALLISTIC_STEP_CAP,
+                },
+                per_tick_impact_cap: IMPACT_PER_TICK_CAP,
+            },
+            world_seed: 0,
         }
     }
 
@@ -4323,21 +4642,45 @@ mod province_tests {
             v.handoff_potential_temperature_k.unwrap(),
             "the carried young temperature IS the lock-up handoff (the re-derivation ran at it)"
         );
+        // The ISOSTATIC diagnostics (the melt-driven relief) read the CRUST-ONLY tile field, not the composed
+        // surface: the bombardment is a SEPARATE surface-topography record, so it must not dilute the melt-texture
+        // indicator's normalization or masquerade as isostatic relief ([`derive_province_crust_tiles`]).
+        let rows = scene.tiles.len() / scene.cols.max(1);
+        let crust_tiles = scene
+            .provinces
+            .as_ref()
+            .and_then(|p| derive_province_crust_tiles(p, scene.cols, rows))
+            .expect("the crust-only tiles resolve");
         // The verdict drove a real, nonzero isostatic relief through the re-derived surface: the honest km amplitude
         // is the physical measure the render shows at physical scale (never a normalized ratio).
         let amplitude_km =
-            tile_relief_amplitude_km(&scene.tiles).expect("the relief amplitude resolves");
+            tile_relief_amplitude_km(&crust_tiles).expect("the relief amplitude resolves");
         assert!(
             amplitude_km > 0.0,
             "a melted world stands in real, nonzero km-scale isostatic relief, got {amplitude_km} km"
         );
         // The melt-driven heterogeneity is ENGAGED (the indicator stands above the smooth-ball floor): the texture
         // is on, which the amplitude confirms is real relief rather than a normalized artifact.
-        let indicator = tile_relief_heterogeneity_indicator(&scene.tiles, scene.cols)
+        let indicator = tile_relief_heterogeneity_indicator(&crust_tiles, scene.cols)
             .expect("the heterogeneity indicator resolves");
         assert!(
             indicator > 0.03,
             "the melt-driven texture is engaged above the smooth-ball floor, got {indicator:.3}"
+        );
+        // THE BOMBARDMENT composed additional surface relief onto the same tiles: the deep-time impact chain drew
+        // craters over the aged span, so the RENDERED (composed) relief stands ABOVE the crust-only isostatic
+        // relief. The craters are in the derived elevation field the render reads.
+        let impacts = scene
+            .provinces
+            .as_ref()
+            .map(|p| p.state.impact_count)
+            .unwrap_or(0);
+        assert!(impacts > 0, "the deep-time bombardment carved craters");
+        let composed_amplitude_km =
+            tile_relief_amplitude_km(&scene.tiles).expect("the composed relief amplitude resolves");
+        assert!(
+            composed_amplitude_km > amplitude_km,
+            "the bombardment composed relief onto the crust ({composed_amplitude_km:.2} km composed vs {amplitude_km:.2} km isostatic)"
         );
         // THE SUPPORT-BOUND CHECK runs and REPORTS (never asserts the direction away): the derived amplitude is
         // reported against yield/(rho*g), any excess flagged. Today the deep-time crust growth accumulates an
