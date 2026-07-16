@@ -187,6 +187,48 @@ mod tests {
         PhaseRegistry::standard().expect("the embedded phase registry loads")
     }
 
+    #[test]
+    fn the_gas_elements_atomization_rows_are_per_atom_from_their_diatomic_references() {
+        // THE CHECK THAT GATES TRUST IN EVERY OXIDE THIS ORACLE SERVES, and it is cheap enough that running it
+        // once by hand would have been the waste, not the test.
+        //
+        // The atomization column stores the standard enthalpy of formation of the MONATOMIC GAS, which is by
+        // definition measured from each element's OWN declared reference state. That single definition carries
+        // TWO conventions at once, and they are not interchangeable:
+        //   - Mg, Si, Fe, Al, Ca, Na, K, Ti: the reference is the SOLID, so the row is a SUBLIMATION enthalpy.
+        //   - O, N, H: the reference is the DIATOMIC GAS, so the row is HALF A DISSOCIATION enthalpy.
+        //
+        // A consumer that read the gas rows as sublimation enthalpies, or a fetch that asked for "sublimation
+        // enthalpies" across the board, would take the WRONG QUANTITY for exactly the elements oxides are made
+        // of, and every silicate E_coh this oracle derives would be wrong by a term with no symptom.
+        //
+        // THE PROOF IS ARITHMETIC AND INDEPENDENT: if the gas rows are per-atom, DOUBLING each must recover its
+        // molecule's bond dissociation enthalpy. Those totals come from outside this column, so this is a twin
+        // by a different route rather than the column checked against itself.
+        let t = table();
+        let cases = [
+            // (element, the X2 bond dissociation enthalpy, kJ/mol)
+            ("H", 435.996_f64),
+            ("N", 945.360_f64),
+            ("O", 498.360_f64),
+        ];
+        for (sym, dissociation) in cases {
+            let per_atom = t
+                .element(sym)
+                .expect("the gas element is in the table")
+                .atomization_enthalpy
+                .expect("it carries an atomization enthalpy")
+                .to_f64_lossy();
+            let doubled = 2.0 * per_atom;
+            assert!(
+                (doubled - dissociation).abs() < 0.05,
+                "{sym}: the row must be PER-ATOM (half the dissociation), so 2 x {per_atom} should be \
+                 {dissociation}, got {doubled}. A mismatch means the gas rows are being read against the wrong \
+                 reference state, and every oxide this oracle derives is wrong."
+            );
+        }
+    }
+
     // A test-only float readout, exactly as the petrology and periodic tests use `to_f64_lossy`: no float
     // touches the canonical integer path; this only compares a derived Fixed against a hand-computed decimal.
     fn close(a: Fixed, b: f64, tol: f64) -> bool {
