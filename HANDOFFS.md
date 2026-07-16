@@ -3177,3 +3177,29 @@ FOUR HONEST LIMITS, all named follow-ons, none faked (logged in MORNING_REVIEW.m
 HELD for owner (MORNING_REVIEW.md): the oxide [M] data needs verification against the primary Robie+Barin books before wiring (3 rows lack a second witness, magnetite discrepancy recorded).
 
 NEXT ARCS (owner to direct): the minimizer numerical hardening (feldspar crust), the geodynamics lateral variation (topography), the Fe-optics charge-transfer (dark basalt). All substantial; I stopped at the delivered drive-to-finish rather than start a big arc overnight without your steer.
+
+---
+
+## 2026-07-16: the capstone north star built (the multi-planet system generator) + the research fully closed
+
+MAJOR MILESTONE. The capstone crossed from "derives one planet" to "derives a whole SYSTEM," and its research went from six open blockers to zero. The spine is now end-to-end derived: star -> disk (viscous-similarity Sigma, gate-G, gamma~1 emergent) -> condensation -> oligarchic embryo field -> the seeded-draw ASSEMBLY (a system of final planets) -> per-planet deep-time geology -> the seeable viewer.
+
+LANDED + integrated (both pins held bit-exact throughout: default 40fe8a72..., living be94e310...):
+- GATE-G (7028e1d): `astro::viscous_similarity_surface_density`, the disk gas Sigma DERIVED (~1338 kg/m^2 at 1 AU), the whole free DiskProfile (Sigma_c/gamma/r_c) RETIRED, zero new per-system ICs.
+- The ASSEMBLY, #72 slice 2 (786300a, `planetary_assembly.rs`): the seeded-draw giant-impact merge on the Petit t_inst surface (3.56/-6.51), the Chaos-Protocol SeededDraw from a derived measure, 5 gates, mass-conserving to the bit, stable, deterministic. Mirror: 99 embryos -> 41 planets, mean 13.7 mutual Hill radii (the honest read-back of a 10x embryo-mass deficit; the fix is UPSTREAM in the Sigma calibration, the assembly stays untouched). The agent caught a Delta unit error in the manager's prompt (Eq.83's Delta is fractional orbital separation, not Hill radii) and verified against the primary source.
+- R-YOUNG-TEMPERATURE (b3c638b, `crates/physics/src/young_thermal.rs`): the young magma-ocean regime verdict on the attractor license; the default world derives MELTED/super-solidus (26Al crosses its solidus, young T pinned at the 1831 K handoff = solidus + phi_c superheat). Held under a five-lens audit (verdict FIX: sound mechanism, labeling over-claims). Being hardened now.
+- ALL SIX RESEARCH BLOCKERS RESOLVED (owner packet, `docs/working/CAPSTONE_RESEARCH_RESOLUTIONS.md`, zero new authored scalars): the Petit assembly coefficients, the carbide branch + C/O bistable window, the post-MS attractors-plus-clocks stellar track (#77), the Ikoma KH band (#73), the cold-branch retention form, the Laplace-Lagrange secular method (#44). Two fetch docs primary-cited; one Petit reconstruction corrected (delta_ov = 1.16, not 0.85; the Eq.83 surface unaffected).
+
+IN FLIGHT (three agents, disjoint files, no workflows per owner): the R-YOUNG hardening (a57e: km amplitude + support bound + MARGINAL-not-cold regrade + DAG self-test + Dulong-Petit c_p, NO exaggeration per owner); visible impacts (aabc: impact flux -> deep-time crater history); the secular spectrum #44 (adc2: Laplace-Lagrange eigenproblem -> the Milankovitch mode table).
+
+OWNER STEERS + STANDING RULES (in `CAPSTONE_STEERING_NOTES.md`):
+- NO workflows from here; single agents, build to spec, verify by pins/tests/diff.
+- The gate-G Sigma CALIBRATION is OWNER-GATED (needs precision): surface it before per-planet world generation (~4-5x in Sigma_solid, zone-scoped target ~20 planets over [1,30] AU, never "four").
+- "Visibly bumpy" is NOT exaggeration (owner): real relief is sub-1% of radius, so zoom-to-surface + a relief map + sun-direction shadowing is the fix; the honest deliverable is the km amplitude in a Mars/Earth hindcast band.
+- The containment self-test generalizes to a provenance-DAG band-sweep (demote GAPPED to MARGINAL on any interim/[E]/[C] ancestor flip).
+- R-DIMENSIONS: SEMANTIC newtypes (ContrastRatio vs ReliefFraction vs Meters), the failure class that surfaced 3x this wave (the Delta convention, the ratio-as-magnitude readout, the unreported km).
+- Confirmed gap: the assembly merge conserves mass to the bit but does NOT post binding energy to a heat ledger (the missing double-entry, and the impact-energy series R-YOUNG's fold-in consumes; needs radii, a follow-on).
+
+VISIBLE-WORLD BUILDOUT (owner directive, started): visible impacts (in flight) -> the viewer foundation (zoom + relief map + shadowing, after the hardening clears the viewer) -> visible geodynamics (volcanism/lava, mostly derived, render) -> moons + asteroids (#74/#75, the asteroid belt is the assembly's own residue) -> erosion (after fluids). WATER + WEATHER + EROSION surfaced as a research question (`R_HYDROSPHERE_WEATHER_RESEARCH_QUESTION.md`, the Chaos-Protocol climate seam), owner to rule like the six blockers.
+
+NEXT: land + integrate the three in-flight agents (hands-on verify, no panels); the viewer foundation + polish queue; surface the Sigma calibration to the owner; then per-planet worlds + the system render; the exotic breadth (carbides/#73/#77); the systemic arcs (R-DIMENSIONS, the DAG self-test, the heat-ledger); the fluids-weather ruling.
