@@ -12,12 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The AGSS09 solar abundance pattern (`crates/physics/data/solar_abundances_agss09.toml`), the disk-condensation
-//! composition vector: per element the present-day solar photospheric and CI-chondrite (meteoritic) abundance on the
-//! `log-epsilon(H) = 12` scale (Asplund, Grevesse, Sauval & Scott 2009, ARA&A 47, 481, Table 1). AGSS09 is the
-//! project's pinned solar anchor (recommended photospheric `Z = 0.0134`). The composition vector fixes how much of
-//! each element the cooling disk gas carries, so a Gibbs-minimization condensation sequence (see `janaf.rs` and
-//! `condensation.rs`) reads it as the elemental inventory it partitions between gas and condensate.
+//! The AGSS09 solar abundance pattern (`crates/physics/data/solar_abundances_agss09.toml`), the [M]-tier SOLAR
+//! CROSS-CHECKER: the Sun's measured elemental composition, the reference the solar (Mirror) case is VALIDATED
+//! against. It is NOT the disk-composition input for every world. Per element the present-day solar photospheric and
+//! CI-chondrite (meteoritic) abundance on the `log-epsilon(H) = 12` scale (Asplund, Grevesse, Sauval & Scott 2009,
+//! ARA&A 47, 481, Table 1); AGSS09 is the project's pinned solar anchor (recommended photospheric `Z = 0.0134`).
+//!
+//! ROLE (owner ruling, 2026-07-15). The disk-condensation composition is a PER-WORLD INPUT, the star's own abundance
+//! pattern (admit-the-alien: a carbon star with `C/O > 1` is a data row that condenses carbides and graphite, not
+//! silicates, and the Gibbs-minimization condensation sequence in `janaf.rs` and `condensation.rs` reads THAT
+//! per-world pattern). The AGSS09 values are the Sun's data row AND the cross-check that the solar case reconstructs
+//! reality; they never author the composition of an alien world. A consumer that reads this table as the universal
+//! disk composition for all worlds is the SOLAR-BIAS DEFECT to retire (the composition-as-per-world-input arc): the
+//! reference validates, it is not the input. The viewer's derived-planet path is the current such consumer, flagged.
 //!
 //! Cited [M], transcribed from the primary arXiv reprint PDF (the Lodders-figure protocol: transcribe the table and
 //! fingerprint-check spot rows). The parse routes every abundance through the exact `BigRat` conduit to `Fixed` (no

@@ -1,6 +1,8 @@
 # AGSS09 present-day solar abundances (Asplund, Grevesse, Sauval & Scott 2009, ARA&A 47, 481), Table 1: the
 # photospheric and CI-carbonaceous-chondrite (meteoritic) elemental abundances on the log-epsilon(H)=12 scale, the
-# disk-condensation composition vector. AGSS09 is the project's pinned solar anchor. CITED: Asplund, M., Grevesse,
+# [M]-tier SOLAR CROSS-CHECKER (the reference the solar case is VALIDATED against, NOT the disk-composition input for
+# every world; the disk composition is a PER-WORLD input, the star's own abundance pattern, admit-the-alien, and
+# these values are the Sun's data row plus the cross-check). AGSS09 is the project's pinned solar anchor. CITED: Asplund, M., Grevesse,
 # N., Sauval, A.J. & Scott, P. (2009), Ann. Rev. Astron. Astrophys. 47, 481, Table 1 (p.43); meteoritic column from
 # Lodders, Palme & Gail (2009). Transcribed from the primary arXiv reprint PDF (the Lodders/Pyykko protocol:
 # transcribe the table, fingerprint-check spot rows). SOURCE PDF (the receipt): https://arxiv.org/pdf/0909.0948 ,
