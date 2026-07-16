@@ -97,8 +97,21 @@ pub enum Modality {
     Assumed,
     /// A HYPOTHETICAL: a sensitivity statement, an illustration, a "suppose". The `+/- 0.5` was one of these.
     Hypothetical,
-    /// ESTIMATED by a model rather than a measurement (the estimator rung's grade).
+    /// ESTIMATED by a model rather than a measurement (a bare estimator output).
     Estimated,
+    /// CLASS-DERIVED: a class-grade constant times a derived quantity, which the standing exponent rider ADMITS.
+    ///
+    /// THIS VARIANT IS A PRE-EMPTION, added before the gate could convict its own ladder's other leg. The
+    /// ESTIMATOR rung's activation energy is `E* = g * R * T_m`: `g` is measured-class and `T_m` is derived, so
+    /// the product is CLASS-GRADE IN THE EXPONENT, which is the same legal status the freezer already relies on,
+    /// with the band propagated. A gate admitting only `Measured | Fitted` is correct for H&K ROW INGESTION and
+    /// would be WRONG the moment the gate's scope reaches the estimator rung, failing that leg against a test
+    /// written for its neighbour.
+    ///
+    /// It weakens nothing today: NO H&K row carries this grade (their values are measured, fitted, or assumed),
+    /// so the measured rung's gate is untouched. This is the diamond-gate lesson applied in advance, that a gate
+    /// must not convict the design it exists to protect, rather than after a green suite has to be explained.
+    ClassDerived,
 }
 
 impl Modality {
@@ -108,8 +121,17 @@ impl Modality {
     /// exponential: a 10 percent error in `E*` is a factor at lid temperatures, not a 10 percent shift. So the
     /// bar here is higher than elsewhere in the engine, deliberately, and it is checked at INGESTION rather than
     /// trusted at the call site.
+    /// The admitted set is `Measured | Fitted | ClassDerived`. The first two are the measured rung's; the third
+    /// is the ESTIMATOR rung's, pre-admitted per the standing exponent rider (a class-grade constant times a
+    /// derived quantity is class-grade in the exponent, the freezer's own precedent, band propagated).
+    ///
+    /// REFUSED: `Assumed`, `Hypothetical`, and bare `Estimated`. An assumed value inside an Arrhenius exponent
+    /// is not a small sin, and a hypothetical one is a sentence someone turned into a number.
     pub fn admitted_to_exponent(self) -> bool {
-        matches!(self, Modality::Measured | Modality::Fitted)
+        matches!(
+            self,
+            Modality::Measured | Modality::Fitted | Modality::ClassDerived
+        )
     }
 }
 
@@ -397,12 +419,52 @@ mod tests {
             ..measured_v
         };
         assert!(!hk_dry_dislocation().exponent_admits(&estimated_v));
-        // And the modality ladder itself: only measured and fitted cross.
+        // The admitted set. Measured and Fitted are the measured rung's.
         assert!(Modality::Measured.admitted_to_exponent());
         assert!(Modality::Fitted.admitted_to_exponent());
         assert!(!Modality::Assumed.admitted_to_exponent());
         assert!(!Modality::Hypothetical.admitted_to_exponent());
-        assert!(!Modality::Estimated.admitted_to_exponent());
+        assert!(
+            !Modality::Estimated.admitted_to_exponent(),
+            "a bare estimator output does not cross"
+        );
+    }
+
+    #[test]
+    fn the_class_derived_preemption_admits_the_estimator_leg_without_weakening_this_one() {
+        // THE PRE-EMPTION, and its own proof. The estimator rung's E* = g*R*T_m is a class-grade constant times
+        // a derived melting point, which the standing exponent rider and the freezer precedent both ADMIT. A
+        // gate accepting only Measured|Fitted is right for H&K ingestion and would fail the ladder's OTHER LEG
+        // against a test written for its neighbour. This is the diamond-gate lesson applied BEFORE the fact: do
+        // not build a gate that convicts your own ladder.
+        assert!(
+            Modality::ClassDerived.admitted_to_exponent(),
+            "the estimator rung's g*R*T_m route must cross, or the ladder's other leg fails its neighbour's test"
+        );
+        // AND IT WEAKENS NOTHING HERE, which is the half that makes the pre-emption safe rather than a loophole:
+        // no H&K row carries the class-derived grade, so the measured rung's gate is untouched, and the row that
+        // must fail still fails.
+        let v = ActivationVolume {
+            cm3_per_mol: Fixed::from_int(15),
+            interval_min_gpa: Fixed::ZERO,
+            interval_max_gpa: Fixed::from_int(2),
+            modality: Modality::Fitted,
+        };
+        for row in [
+            hk_dry_dislocation(),
+            hk_wet_dislocation_fugacity(),
+            hk_dry_gbs_below_1250c(),
+        ] {
+            assert_ne!(
+                row.activation_energy.modality,
+                Modality::ClassDerived,
+                "no measured row may wear the estimator's grade; that would launder the ladder's rungs together"
+            );
+        }
+        assert!(
+            !hk_dry_gbs_below_1250c().exponent_admits(&v),
+            "the ASSUMED GBS energy is still refused after the pre-emption: nothing was loosened"
+        );
     }
 
     #[test]
