@@ -49,11 +49,17 @@ use crate::astro::{
     disk_effective_temperature, disk_surface_density, hill_radius_au, isolation_mass_earth,
 };
 
-/// The oligarchic embryo spacing `b`, in mutual Hill radii: a UNIVERSAL class constant with a band ([M class] per the
-/// R-ASSEMBLY ruling, about 10, the 5 to 10 band), pinned by the timescale-ratio equilibrium of orbital repulsion
-/// against dynamical friction, weakly dependent on protoplanet mass and orbit. It is not a per-system knob; the derived
+/// The oligarchic embryo spacing `b`, in mutual Hill radii: a class constant with a band ([M class] per the R-ASSEMBLY
+/// ruling, about 10, the 5 to 10 band), pinned by the timescale-ratio equilibrium of orbital repulsion against
+/// dynamical friction, weakly dependent on protoplanet mass and orbit. It is not a per-system knob; the derived
 /// repulsion-versus-friction form (fetch Goldreich-Lithwick-Sari 2004) is the optional alien-admitting upgrade. Passed
-/// to [`oligarchic_embryo_field`] as `spacing_hill_widths`, so a scenario can still probe the band.
+/// to [`oligarchic_embryo_field`] as `spacing_hill_widths`, so a scenario can still probe the band. BRANCH SCOPE (the
+/// R-ASSEMBLY self-audit): this is the class constant of the PLANETESIMAL-driven oligarchic branch specifically, not
+/// universal across all accretion; the rival is pebble accretion, which terminates at the pebble isolation mass (the
+/// embryo halts the inward pebble flux) rather than feeding-zone exhaustion, at a different spacing. Which branch a
+/// world takes is itself DERIVED per-system from the planetesimal-to-pebble surface-density (flux) ratio; the
+/// pebble-branch embryo field is its own calibration target or a declared wall until bought. The constant's name
+/// scopes it honestly.
 pub const OLIGARCHIC_SPACING_HILL_WIDTHS: Fixed = Fixed::from_int(10);
 
 /// A protoplanetary disk's SURFACE-DENSITY residues (the Lynden-Bell and Pringle self-similar profile the built
