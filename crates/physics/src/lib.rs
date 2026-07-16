@@ -79,6 +79,7 @@ pub mod solar_abundances;
 pub mod stoner;
 pub mod term_values;
 pub mod tm_oxide_lattice_energy;
+pub mod yield_envelope;
 pub mod young_thermal;
 
 use civsim_core::{Fixed, StateHasher};
