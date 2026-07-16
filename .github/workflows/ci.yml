@@ -94,6 +94,14 @@ jobs:
           tool: nextest
       - name: Test (per-PR lane; the slow evolutionary tests run in nightly-full)
         run: cargo nextest run --workspace -E "not ($SLOW_TESTS)"
+      # THE DIAMOND GATE'S CANARY, the prove-ALWAYS half of the blindness rule. The sweep itself is a
+      # reporting tool and is NOT --strict (it would fail on output caches and cross-domain name
+      # collisions today). What CI enforces is that the gate CAN STILL SEE: the canary fixture is a set
+      # of known-bad cases the detector must always flag, and the gate exits 2 if any stops flagging.
+      # A refinement that quietly re-blinds the detector fails here instead of shipping, because a
+      # gate's noise is visible and annoying while a gate's blindness is invisible and comfortable.
+      - name: Diamond gate self-test (prove the detector still fires)
+        run: python3 scripts/diamond_gate.py --self-test
       - name: Doctests
         run: cargo test --workspace --doc
 
