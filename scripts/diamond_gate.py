@@ -91,16 +91,41 @@ REGISTERED_RELATIONSHIPS = {
     ),
     "cohesive_energy": (
         "ladder-order",
-        "crates/materials/src/rose_eos.rs + (pending) the atomization identity over banked formation enthalpies",
-        "PRE-REGISTERED BEFORE THE SECOND RUNG EXISTS. Today only Rose's EOS route provides E_coh, so this is "
-        "not a diamond yet. It becomes one the moment the atomization fetch lands (E_coh(compound) = "
-        "sum(elemental atomization) - delta_f_H(compound)), which is a SECOND CARRIER of one fact. The class "
-        "same-fact-two-doors was named as a post-mortem and then used as a FORECAST, and the correct response to "
-        "a forecast defect is PREVENTION SCHEDULED BEFORE THE COLLISION, not detection after it. So the "
-        "arbitration is registered NOW: measured thermochemistry the anchor rung, Rose the estimator rung it "
-        "always was, and the fetch returns into an order that predates it. OVERLAP SENTINEL, which comes free "
-        "and doubles as the fetch's own referee: ELEMENTAL METALS are the overlap set, Rose's cohesive energy "
-        "against the element's own direct atomization row, agreement within Rose's band asserted every run.",
+        "ANCHOR RUNG BUILT: crates/physics/src/materials_oracle.rs::phase_cohesive_energy. "
+        "ESTIMATOR RUNG PENDING (not built): the Miedema-class prediction of delta_f_H.",
+        "RE-REGISTERED 2026-07-16 AFTER THE PRIOR REGISTRATION WAS REFUTED. The correction is recorded here "
+        "rather than deleted, because the next reader will otherwise re-derive the phantom from the same "
+        "plausible reasoning. WHAT WAS WRONG: the prior entry claimed 'only Rose's EOS route provides E_coh' and "
+        "scheduled an arbitration against it. Rose never provided E_coh. MetallicRoute::cohesive_energy has, "
+        "since its birth commit, READ the measured atomization column (its body is an anchor-presence check whose "
+        "value is discarded, then table.element(symbol).atomization_enthalpy), and metallic.rs's own doc says so: "
+        "'the metallic cohesive energy is the banked atomization enthalpy' and 'at its equilibrium volume the "
+        "Rose EOS reproduces E_coh BY CONSTRUCTION (the depth of the binding well)'. Rose CONSUMES E_coh. The "
+        "declared overlap set (elemental metals) does not exist as phases in phase_registry.toml, which holds "
+        "only oxides and silicates; and an element's delta_f_H is zero in its reference state, so the Hess route "
+        "returns the column itself for an element. The sentinel would have compared the column against its own "
+        "reflection and agreed to the bit forever. It was billed as the fetch's referee and could not have caught "
+        "the one defect the fetch had (the Fe row cited to a CODATA table containing no iron row, caught by a "
+        "human census). A TEST THAT CANNOT FAIL, BILLED AS A REFEREE, IS THE COMFORT CLASS IN ITS PUREST FORM. "
+        "THE TRUE LADDER, with each rung's code state verified at the site rather than asserted: ANCHOR RUNG "
+        "(BUILT) Hess over banked rows, E_coh = sum(elemental atomization) - delta_f_H(compound), measured "
+        "thermochemistry throughout. ESTIMATOR RUNG (NOT BUILT, named blocker) the Miedema-class prediction of "
+        "delta_f_H for compounds carrying no measured formation-enthalpy row: its form and its carbide extension "
+        "are fetched and primary-cited (docs/working/CAPSTONE_FETCH_VALUES_2.md item 4, Niessen and de Boer 1981), "
+        "but its phi* and n_ws element parameters are book-pinned and unsourced, which metal_eos.rs records as a "
+        "deliberate absence rather than an oversight. OVERLAP SENTINEL (NOT RUNNABLE YET, falsifiable trigger) "
+        "MEASURED CARBIDES: SiC and TiC each carry a measured formation-enthalpy row AND a Miedema prediction, "
+        "which are two independent derivations of one quantity, so the sentinel becomes runnable the day a carbide "
+        "phase and a Miedema prediction both exist. Neither exists today: phase_registry.toml carries no carbide. "
+        "BLINDNESS SET, stated beside the discriminating power per the standing rule. The sentinel DISCRIMINATES "
+        "errors in delta_f_H (a calorimetric row against a model prediction from element parameters). It is BLIND "
+        "to errors in the ATOMIZATION COLUMN, which BOTH rungs read and which therefore cancels out of the "
+        "comparison: the same shared-source blindness that killed the phantom, now named rather than hidden. So "
+        "WHO REFEREES THE ATOMIZATION COLUMN remains OPEN and is not served by this ladder. Its only independent "
+        "twin today is the diatomic per-atom check (doubling each banked O/N/H gas row recovers its molecule's "
+        "dissociation enthalpy, a total sourced outside the column); Mg, Si, Al, Ca, Ti and Fe, the elements "
+        "silicate E_coh most needs, have none. ROSE reclassifies to what the code always had it as: a form fed by "
+        "the column, never a provider of it.",
     ),
     "creep_rate": (
         "ladder-order",
