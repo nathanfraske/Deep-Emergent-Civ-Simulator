@@ -44,8 +44,21 @@ Fetch-gated, write the arc while the fetch runs:
 Relay-gated:
 8. Hydrosphere against the Shields-form seam ruling (once `R_HYDROSPHERE_WEATHER_RESEARCH_QUESTION.md` returns from relay).
 
-Trailing:
-9. Planform-seeded province geometry.
+PROMOTED TO LOAD-BEARING (2026-07-16, by the cube-sphere agent's finding), the NEXT SIM ARC:
+9. PLANFORM-SEEDED PROVINCE GEOMETRY, the province-field migration off lat-lon. The finding: the display cache no longer pinches at the poles, but a faint polar wedge SURVIVES with the hillshade off, because the SIM's province field is itself still a lat-lon grid whose columns converge at the pole. This is the LAST SURVIVING AUTHORED GRID after the coarseness ruling abolished the others, and it is the worst kind, because it AUTHORS A PREFERRED AXIS: mantle convection is effectively non-rotating at mantle viscosities, so nothing in the physics knows where the rotation pole is, which makes the wedge a PURE COORDINATE ARTIFACT and gives every world in the catalog the same pole-anchored tectonic structure. That is the same-look fixture class in geometric clothing, a sibling of `Fixed::ONE`.
+
+THE PIN-CULTURE CORRECTION (record it, it protects the institution): the pins are NOT moving because they were set by a deprecated world. Pins never go stale in their authority to detect change; they went off precisely BECAUSE this change is real physics-representation scope, which means they DID THEIR JOB. The yes is easy because the RE-BASELINE PROCEDURE EXISTS, never because these pins earned less respect. "The pins are old, moving them is easy" is one short step from "pins that inconvenience us are old," and then the determinism institution is dead.
+
+THE MIGRATION DISCIPLINE (five requirements, all binding):
+1. THE TARGET REPRESENTATION is the one the coarseness ruling already specified, not a nicer raster: province geometry becomes the WAVELENGTH-CONSTRAINED TESSELLATION seeded from the PLANFORM DRAW, the derived cell scale untouched (it comes from mantle depth and the aspect ratio, and is grid-independent). Two HARD requirements on whatever carries the field: NO PREFERRED AXIS, and RESOLUTION EQUAL TO THE FIELD'S OWN DERIVED CUTOFF, registered in the resolution ledger. Spherical harmonics or quasi-uniform node sets satisfy both; lat-lon does not; and NEITHER does porting the sim onto the display's cube-sphere, which would swap an authored grid for a prettier authored grid and put a physics field on viewer infrastructure besides. THE CUBE-SPHERE STAYS DISPLAY-ONLY.
+2. REPRESENTATION-ONLY: no physics formula changes ride along, so when the pins move the move is attributable to EXACTLY ONE CAUSE.
+3. THE EQUIVALENCE BRIDGE, its acceptance invariants DECLARED BEFORE the migration runs (the generator's distributional-acceptance pattern): BYTES may change, PHYSICS may not. On the pinned seeds, re-run deep time on BOTH representations and require the conserved budgets to close on both, the derived scales to be identical, the verdict statistics across the full history to agree within bands, and the province AREA DISTRIBUTION to lose its latitude dependence entirely (the wedge's absence is itself a test, with a sharp null).
+4. VECTOR IMMUTABILITY: the pinned seeds keep their EXACT layer-4 realizations (star, composition, impact list, all of it). The one new named slot is the PLANFORM LAYOUT SEED, which the coarseness ruling already priced. What changes is realized geometry DOWNSTREAM of the vector, nothing upstream.
+5. THE PIN MOVE IS AN AUDITABLE EVENT, not a re-bake: a PIN-LEDGER entry recording the old hashes, the new hashes, the bridge results, and the reason, with a PIN-FREEZE WINDOW for the arc's duration so no other pin-touching work merges mid-move and muddies attribution.
+
+LANES: this does NOT block the cloud agent (its queue is assembly-side, this is geodynamics-side). Release the cloud lane and schedule this as the next sim arc with the freeze window declared.
+
+THE META, worth keeping: the cube-sphere agent fixed its own layer, noticed the artifact SURVIVED, traced it across the display-physics boundary into canon, and ESCALATED instead of resampling it away, which a blur would have done invisibly. An honest display turned out to be an INSTRUMENT, and the separation of display from physics is what let it measure the sim. Fifth instance of the discipline running below its authors, and the first to cross a lane boundary to do it.
 
 Mirror re-run and zone-scoped rows after slice 2.
 
