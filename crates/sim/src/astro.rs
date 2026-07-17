@@ -4667,13 +4667,23 @@ mod tests {
 
     #[test]
     fn the_pre_ms_turnover_saturates_the_disk_era_rossby() {
-        // THE SATURATION ASSERTION (RIDER 1), the claim the gate required proven rather than assumed and wants
-        // mutation-tested. With the CORRECT pre-MS turnover and a disk-locked rotation (P_rot ~ 8 days), the Rossby
-        // number sits BELOW the saturation knee (ro_sat = 0.13) by a margin exceeding the coefficient's own
-        // uncertainty, across the disk-era mass range. This is what makes the blindness true on the right
-        // substrate; with the MAIN-SEQUENCE turnover it FAILS for the solar-and-above masses (the finding).
+        // THE WRONG-RO TRACE CLEARANCE (the saturation assertion, RIDER 1), now the CI fact that closes the
+        // coordinator's slice-3 gate rather than a clearance in anyone's head. THE TRACE: a MAIN-SEQUENCE turnover
+        // on a pre-main-sequence star pushes Ro onto the DECAY branch instead of the saturated plateau, so L_X
+        // evaluates wrong, so the wind rate is wrong, so tau_disk is wrong, so the #73 giant gate decides
+        // giant-hood on a corrupt clock. THE CLOSURE (the standing saturation-margin ruling, evaluated with the
+        // pre-main-sequence tau_conv in place): disk-era Ro sits BELOW the knee (ro_sat = 0.13) by MORE THAN the
+        // turnover's own error band, across the disk-era mass and rotation range. When this is green the trace is
+        // cleared BY MACHINERY. With the MAIN-SEQUENCE turnover it FAILS for the solar-and-above masses (the
+        // original finding), which is why the fix was load-bearing.
         let ro_sat = Fixed::from_ratio(13, 100);
         let c = Fixed::from_ratio(3, 2);
+        // The turnover's own error band: the pre-MS coefficient C is anchorable only to a factor ~2 (the reserved
+        // basis, tau ~ 250 to 400 d), and the Wright MS fit RMS is 0.028 dex (~7 percent). The factor-TWO margin
+        // asserted below is a 0.30 dex band, so it exceeds BOTH: a wrong turnover cannot push Ro to the decay
+        // branch within any plausible turnover uncertainty. Ro scales as 1/tau, so a factor-2 Ro margin tolerates a
+        // factor-2 turnover error, the coefficient band itself.
+        let fit_error_band_factor = Fixed::from_int(2);
         for mass in [
             Fixed::from_ratio(3, 10),
             Fixed::from_ratio(1, 2),
@@ -4683,12 +4693,12 @@ mod tests {
             let tau =
                 pre_main_sequence_convective_turnover_days(mass, Fixed::from_int(4000), c).unwrap();
             // Cover the disk-era ROTATION range, not one value: the representative disk-locked ~8 days sits below
-            // the knee with a factor-two margin (exceeding the coefficient uncertainty), and even the SLOW-rotation
-            // end (~15 days, the worst case for saturation) stays below the knee, so ANY disk-era rotation saturates.
+            // the knee by more than the error-band factor, and even the SLOW-rotation end (~15 days, the worst case
+            // for saturation) stays below the knee, so ANY disk-era rotation saturates.
             let ro_locked = stellar_rossby_number(Fixed::from_int(8), tau).unwrap();
             assert!(
-                ro_locked.checked_mul(Fixed::from_int(2)).unwrap() < ro_sat,
-                "disk-locked (8 d) is saturated with margin at M = {} (Ro {}, knee {})",
+                ro_locked.checked_mul(fit_error_band_factor).unwrap() < ro_sat,
+                "disk-locked (8 d) Ro is below the knee by more than the turnover error band at M = {} (Ro {}, knee {})",
                 mass.to_f64_lossy(),
                 ro_locked.to_f64_lossy(),
                 ro_sat.to_f64_lossy()
