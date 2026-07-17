@@ -875,6 +875,94 @@ pub fn derive_viscous_time_myr(
     Some(ln_t_myr.exp())
 }
 
+/// The CONVECTIVE TURNOVER TIME (days) as a function of stellar mass, the denominator of the Rossby number and
+/// half of the shared rotation state (the L_X slice). An empirical polynomial in `log10(M/M_sun)`:
+/// `log10(tau) = c0 + c1*log10(M) + c2*log10(M)^2`. PARAMETRIC over the three fit coefficients, which are
+/// reserved-with-basis measured data (the third floor pillar), not authored. ANOMALY, surfaced not silently
+/// resolved: the mass-based polynomial `(1.16, -1.49, -0.54)` traces to Wright et al. 2018 (the fully-convective
+/// M-dwarf extension), while Wright et al. 2011 parameterizes `tau` by `V-Ks` COLOUR, so the exact coefficient
+/// source needs confirmation before the values are trusted; the FUNCTION (a quadratic in `log10 M`) is correct
+/// either way, the VALUES are the reserved data pending that confirmation. Longer for lower masses, so an M dwarf
+/// sits at a longer turnover and a lower Rossby number at fixed rotation, which is why M dwarfs stay saturated for
+/// gigayears (the convicting population for a mass-universal formulation). `None` on a non-positive mass or an
+/// intermediate past the representable range.
+pub fn convective_turnover_time_days(
+    mass_ratio: Fixed,
+    log_tau_c0: Fixed,
+    log_tau_c1: Fixed,
+    log_tau_c2: Fixed,
+) -> Option<Fixed> {
+    if mass_ratio <= Fixed::ZERO {
+        return None;
+    }
+    let ln10 = Fixed::from_int(10).ln();
+    let log10_m = mass_ratio.ln().checked_div(ln10)?;
+    let log10_tau = log_tau_c0
+        .checked_add(log_tau_c1.checked_mul(log10_m)?)?
+        .checked_add(log_tau_c2.checked_mul(log10_m.checked_mul(log10_m)?)?)?;
+    let ln_tau = log10_tau.checked_mul(ln10)?;
+    let ln_ceiling = Fixed::from_int(31).checked_mul(Fixed::from_int(2).ln())?;
+    if ln_tau >= ln_ceiling {
+        return None;
+    }
+    Some(ln_tau.exp())
+}
+
+/// The stellar ROSSBY NUMBER `Ro = P_rot / tau_conv`, the SHARED ROTATION STATE both high-energy bands read (the
+/// L_X slice, ruled). Rotation is the causal upstream (the dynamo is driven by rotation against convection), the
+/// activity bands are windows on the dynamo's output, so the Rossby number is the state variable and each band
+/// maps it to a luminosity by its OWN measured law. It is mass-universal by construction: the mass enters only
+/// through `tau_conv` ([`convective_turnover_time_days`]), so two stars of different mass at the same Rossby
+/// number show the same fractional activity, which is the admit-the-alien property that gets the M dwarfs (the
+/// galaxy's commonest planet hosts) right. `P_rot` is the draw-pending rotation state (the layer-4 `Omega_star_0`
+/// draw plus the gyrochronology `Omega(t)` spin-down, design-only today, solar interim). `None` on a non-positive
+/// input.
+pub fn stellar_rossby_number(rotation_period_days: Fixed, tau_conv_days: Fixed) -> Option<Fixed> {
+    if rotation_period_days <= Fixed::ZERO || tau_conv_days <= Fixed::ZERO {
+        return None;
+    }
+    rotation_period_days.checked_div(tau_conv_days)
+}
+
+/// The X-RAY BAND MAPPING: the X-ray-to-bolometric ratio `L_X / L_bol` from the Rossby number, the X-ray window on
+/// the shared rotation state (Wright et al. 2011). Two regimes: SATURATED below the critical Rossby `ro_sat`, at a
+/// constant `10^saturated_log10_fraction`; and UNSATURATED above it, declining as `(Ro / ro_sat)^beta`. The band
+/// carries its OWN saturated level and slope, distinct from the EUV band's, which is what lets `L_X / L_EUV`
+/// evolve rather than be welded to a constant (see the welded-bands defect: one state with two measured mappings
+/// DERIVES the ratio; one shape for two bands would AUTHOR it). To get `L_X`, multiply by the bolometric
+/// luminosity ([`crate::stellar::luminosity_ratio`] times `L_sun`); this returns the dimensionless ratio.
+///
+/// PARAMETRIC over the reserved-with-basis coefficients, each Wright et al. 2011 (arXiv:1109.4634, ar5iv HTML,
+/// native text so no OCR risk on the exponent), cited with its conditioning (824 solar and late-type stars,
+/// F-M dwarfs): `ro_sat = 0.13 +/- 0.02`; `saturated_log10_fraction = -3.13 +/- 0.22` (almost spectral-type
+/// independent); `beta = -2.70 +/- 0.13` (inconsistent with the canonical -2 at 5 sigma). The age decay is
+/// DERIVED not authored: with `P_rot ~ t^(1/2)` (Skumanich), `L_X / L_bol ~ Ro^beta ~ t^(beta/2)`, so the X-ray
+/// age index is `beta/2 ~ -1.35`, which matches the independent direct measurement `-1.37 +/- 0.47` (Aldarondo
+/// Quinones et al. 2025), a cross-check, not a second input. The EUV band is the NAMED SIBLING on the same Rossby
+/// state with its OWN coefficients, and its rows carry a reconstruction-modality flag (EUV is largely
+/// unobservable through the interstellar medium, its indices proxy-reconstructed); this slice does not build it.
+/// `None` on a non-positive Rossby or `ro_sat`.
+pub fn xray_luminosity_fraction(
+    rossby: Fixed,
+    ro_sat: Fixed,
+    saturated_log10_fraction: Fixed,
+    beta: Fixed,
+) -> Option<Fixed> {
+    if rossby <= Fixed::ZERO || ro_sat <= Fixed::ZERO {
+        return None;
+    }
+    let ln10 = Fixed::from_int(10).ln();
+    let ln_saturated = saturated_log10_fraction.checked_mul(ln10)?;
+    let ln_fraction = if rossby <= ro_sat {
+        ln_saturated
+    } else {
+        // Unsaturated: multiply the saturated level by (Ro / ro_sat)^beta, in the log domain.
+        let ln_ratio = rossby.ln().checked_sub(ro_sat.ln())?;
+        ln_saturated.checked_add(beta.checked_mul(ln_ratio)?)?
+    };
+    Some(ln_fraction.exp())
+}
+
 /// The FEEDING-ZONE (annulus) DISK MASS a planet accretes from, in `normalization`-units times AU-squared: the
 /// integral `M = integral over [inner, outer] of 2*pi*r*Sigma(r) dr`, the disk mass in the orbital annulus
 /// `[inner_au, outer_au]`. This is the ACCRETION-mass scaffold: the mass follows from the geometry and the surface
@@ -2366,5 +2454,113 @@ mod tests {
         assert!(derive_viscous_time_myr(r, m, Fixed::ZERO, a, mu).is_none());
         assert!(derive_viscous_time_myr(r, m, t, Fixed::ZERO, mu).is_none());
         assert!(derive_viscous_time_myr(r, m, t, a, Fixed::ZERO).is_none());
+    }
+
+    // Wright et al. 2011 coefficients as test fixtures (cited at the function docs).
+    fn tau_poly() -> (Fixed, Fixed, Fixed) {
+        (
+            Fixed::from_ratio(116, 100),  // c0 = 1.16
+            Fixed::from_ratio(-149, 100), // c1 = -1.49
+            Fixed::from_ratio(-54, 100),  // c2 = -0.54
+        )
+    }
+
+    #[test]
+    fn the_convective_turnover_matches_the_polynomial_and_lengthens_for_lower_mass() {
+        // External f64 oracle (twin-independence): 10^(1.16 + c1 log M + c2 log^2 M), computed outside the engine.
+        // At the solar mass log M = 0 so tau = 10^1.16 ~ 14.45 days.
+        let (c0, c1, c2) = tau_poly();
+        let solar = convective_turnover_time_days(Fixed::ONE, c0, c1, c2).unwrap();
+        let expected_solar = 10f64.powf(1.16);
+        // DEFAULTS-TAKEN, 2 percent: numerical-accuracy on the ln/exp round-trip, not a residue budget.
+        assert!(
+            (solar.to_f64_lossy() - expected_solar).abs() / expected_solar < 0.02,
+            "solar turnover ~14.45 d (expected {expected_solar}, got {})",
+            solar.to_f64_lossy()
+        );
+        // An M dwarf sits at a LONGER turnover, so it stays saturated longer (the convicting population).
+        let m_dwarf = convective_turnover_time_days(Fixed::from_ratio(3, 10), c0, c1, c2).unwrap();
+        assert!(
+            m_dwarf > solar,
+            "the M dwarf turnover exceeds the solar one (M dwarf {}, solar {})",
+            m_dwarf.to_f64_lossy(),
+            solar.to_f64_lossy()
+        );
+    }
+
+    #[test]
+    fn the_xray_fraction_is_mass_universal_at_fixed_rossby() {
+        // Admit-the-alien: the X-ray fraction depends ONLY on the Rossby number, so two stars of different mass
+        // that reach the same Rossby show the same fractional activity. Build the same Ro two ways and compare.
+        let (c0, c1, c2) = tau_poly();
+        let ro_sat = Fixed::from_ratio(13, 100);
+        let sat = Fixed::from_ratio(-313, 100);
+        let beta = Fixed::from_ratio(-27, 10);
+        let tau_g = convective_turnover_time_days(Fixed::ONE, c0, c1, c2).unwrap();
+        let tau_m = convective_turnover_time_days(Fixed::from_ratio(3, 10), c0, c1, c2).unwrap();
+        // Choose rotation periods so both give the same Rossby number Ro = 1.0 (P_rot = tau).
+        let ro_g = stellar_rossby_number(tau_g, tau_g).unwrap();
+        let ro_m = stellar_rossby_number(tau_m, tau_m).unwrap();
+        let frac_g = xray_luminosity_fraction(ro_g, ro_sat, sat, beta).unwrap();
+        let frac_m = xray_luminosity_fraction(ro_m, ro_sat, sat, beta).unwrap();
+        assert_eq!(
+            frac_g, frac_m,
+            "same Rossby gives the same fractional activity regardless of mass"
+        );
+    }
+
+    #[test]
+    fn the_xray_fraction_saturates_declines_and_convicts_a_mutated_slope() {
+        // The band mapping, mutation-tested. External f64 oracle: saturated 10^-3.13 below ro_sat; unsaturated
+        // 10^-3.13 * (Ro/ro_sat)^beta above. Then MUTATE the slope (the canonical -2 Wright rejects at 5 sigma)
+        // and the value must move outside the band, so the mapping is shown to depend on the slope it claims.
+        let ro_sat = Fixed::from_ratio(13, 100);
+        let sat = Fixed::from_ratio(-313, 100);
+        let beta = Fixed::from_ratio(-27, 10);
+        // Saturated regime: Ro below ro_sat returns the plateau exactly.
+        let saturated =
+            xray_luminosity_fraction(Fixed::from_ratio(5, 100), ro_sat, sat, beta).unwrap();
+        let expected_plateau = 10f64.powf(-3.13);
+        assert!(
+            (saturated.to_f64_lossy() - expected_plateau).abs() / expected_plateau < 0.02,
+            "saturated plateau 10^-3.13 (expected {expected_plateau}, got {})",
+            saturated.to_f64_lossy()
+        );
+        // Unsaturated, at a solar-like Rossby of 1.757, against the f64 oracle.
+        let ro = Fixed::from_ratio(1757, 1000);
+        let ro_f = 1.757_f64;
+        let expected = 10f64.powf(-3.13) * (ro_f / 0.13).powf(-2.70);
+        let derived = xray_luminosity_fraction(ro, ro_sat, sat, beta).unwrap();
+        assert!(
+            (derived.to_f64_lossy() - expected).abs() / expected < 0.02,
+            "unsaturated fraction matches the oracle (expected {expected:e}, got {:e})",
+            derived.to_f64_lossy()
+        );
+        assert!(
+            derived < saturated,
+            "the unsaturated fraction is below the plateau"
+        );
+        // MUTATION: the canonical -2 slope, which Wright rejects. It lands far outside the 2 percent band.
+        let mutant = xray_luminosity_fraction(ro, ro_sat, sat, Fixed::from_int(-2)).unwrap();
+        assert!(
+            (mutant.to_f64_lossy() - expected).abs() / expected > 0.5,
+            "a mutated slope is convicted, off by more than half (mutant {:e}, true {expected:e})",
+            mutant.to_f64_lossy()
+        );
+    }
+
+    #[test]
+    fn the_xray_functions_fail_loud_on_bad_inputs() {
+        let (c0, c1, c2) = tau_poly();
+        assert!(convective_turnover_time_days(Fixed::ZERO, c0, c1, c2).is_none());
+        assert!(stellar_rossby_number(Fixed::ZERO, Fixed::ONE).is_none());
+        assert!(stellar_rossby_number(Fixed::ONE, Fixed::ZERO).is_none());
+        let (ro_sat, sat, beta) = (
+            Fixed::from_ratio(13, 100),
+            Fixed::from_ratio(-313, 100),
+            Fixed::from_ratio(-27, 10),
+        );
+        assert!(xray_luminosity_fraction(Fixed::ZERO, ro_sat, sat, beta).is_none());
+        assert!(xray_luminosity_fraction(Fixed::ONE, Fixed::ZERO, sat, beta).is_none());
     }
 }
