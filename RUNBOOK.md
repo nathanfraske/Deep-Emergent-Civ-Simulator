@@ -234,3 +234,18 @@ THE SIBLING PROHIBITION, ratified the same day: DO NOT REACH FOR THE NEAREST AVA
 THE PAYOFF, and the reason this rule is not merely a prohibition: refusing the circular calibration usually reveals that the quantity was DERIVABLE ALL ALONG. The same ruling dissolved two reserved epochs into physics. A basis line reading "the epoch the 1 AU midplane sits at that front" is an IMPLICIT EQUATION, `T_mid(1 AU, t) = T_condensation`, whose root IS the epoch, solvable on machinery the engine already runs. A basis line reading "the observed class-II value" names a SAMPLE, and samples have AGES, so the epoch is a fetchable chord endpoint rather than a reserved number. READ A BASIS LINE AS PHYSICS RATHER THAN AS PROSE, and the value it justifies often stops being a value.
 
 AND THE DEGENERACY CAN SHARPEN WITH TIME, so a landmark refused today may referee tomorrow. The `0.19` formation rate was a PARTITION SHARE, never a measurement: its own basis says the 1400 K landmark fixes only the PRODUCT of rate, dust column, and opacity. That made it useless as a referee, since a hindcast on it passes on a compensating dust error and fails on a correct rate. But the engine has SINCE DERIVED two of those three factors through the composition wire and the opacity machinery, so the same physical condition has sharpened from an under-determined product into a genuine referee. When a landmark is refused for degeneracy, RECORD WHICH FACTORS WERE FREE, because deriving them is what promotes the constraint back to a gate.
+
+---
+
+## 10. The premise line binds BUILDERS, not designs (owner correction, 2026-07-17)
+
+A correction earned by overapplying section 6's sibling. THE PREMISE LINE EXISTS TO STOP A BUILDER WIRING AN UNBUILT UPSTREAM. It does not exist to convict a design of being a design.
+
+The distinction, and it is the whole rule: RULING PROSE AND EXPLORATION PROSE ARE WRITTEN AT THE SPEC LEVEL, and a spec is where a north star belongs. When a scoping brief says the engine "already carries" a thing that lives in the design documents, that is A RUNG TO PRICE, not a false claim to refute. The right output is A FLAG ON WHAT MUST BE BUILT, worded so a builder cannot mistake it for a shelf to reach for. The wrong output is "REFUTED AS BUILT", which is what this file's author wrote about a temporal-LoD north star that was never claimed as code.
+
+SO THE TEST IS THE CONSEQUENCE, NOT THE TENSE. Ask what the claim is about to license:
+
+- IF A BUILDER IS ABOUT TO WIRE IT, the premise line fires at full strength: verify in the code, and STOP if it is absent. Designed-exists does not imply built-exists, and this project has paid for that lesson repeatedly (an arbitration scheduled against a provider that never provided; a condition claimed realized by a function that existed nowhere but its own sentence; a value called "banked" that lived only in a contingency-vector spec).
+- IF A DESIGN IS BEING PRICED, the same finding is a RUNG: name it, price it, say plainly that it is spec-real and code-absent, and move on. Nothing is being authored into being, so nothing needs convicting.
+
+The failure mode this corrects is a real one and it has a cost: an agent that debunks its owner's exploration prose spends the channel's goodwill on a defect that was never a defect, and it trains the owner to write less freely, which is the opposite of what the check is for. VERIFY EVERY PREMISE; CONVICT ONLY THE ONES A BUILD WOULD REST ON.
