@@ -673,6 +673,13 @@ pub fn viscous_similarity_surface_density(
 /// with the sources upgraded behind the signature. It is a viscous-transport instance of the declared
 /// model-structure band (the MHD wind-driven rival carries a different decline); the caller owns which branch.
 ///
+/// TERMS DROPPED: the Lynden-Bell-Pringle similarity assumes the viscosity `nu(r)` is STATIONARY in time. A real
+/// disk's viscous heating declines with the accretion rate, so the temperature and therefore `nu` decline too,
+/// which steepens the true decline past this similarity form. The omission is VALID where irradiation sets the
+/// temperature, the outer disk where the scale radius `R_1` lives, and INVALID in the viscously-heated inner
+/// disk, which contributes little to `t_visc` at the scale radius. The assumption is chosen out loud here,
+/// alongside the already-declared wind-driven model-structure band, so the domain is stated rather than implied.
+///
 /// Computed in the log domain for determinism (the `viscous_similarity_surface_density` precedent): `base >= 1`
 /// so `base^p >= 1` and the rate never exceeds `Mdot_0`, so the only bound is underflow. Past the representable
 /// `exp` ceiling the rate has fallen below what the fixed-point format can hold, so it returns `ZERO` rather than
@@ -803,8 +810,15 @@ pub fn accretion_clock_hindcasts(
 /// `nu = alpha * c_s * H`. Reducing the disk's own relations (`H = c_s / Omega`, `c_s^2 = k_B * T / (mu * m_H)`,
 /// `Omega = sqrt(G * M_star / R_1^3)`) collapses it to
 /// `t_visc = sqrt(R_1) * sqrt(G * M_star) * mu * m_H / (3 * alpha * k_B * T(R_1))`, so it reads the already-banked
-/// `alpha`, the disk temperature at the scale radius, and the mean molecular weight, and derives from them. The
-/// scale radius `R_1` is the disk's characteristic radius `r_c`. Computed in the log domain (the
+/// `alpha`, the disk temperature at the scale radius, and the mean molecular weight, and derives from them.
+///
+/// FOUR of the five inputs have named sources (the banked `alpha`, the disk temperature, the mean molecular
+/// weight from the composition chain, and the stellar mass). THE FIFTH, `scale_radius_au` (`R_1`), HAS NONE, and
+/// it cannot be derived inside this arc: `R_1` is the similarity solution's INITIAL CONDITION, the disk's birth
+/// size, so it is a per-system DRAW from measured disk-size demographics conditioned on stellar mass (the
+/// resolved-disk size distributions, the fetch target), with the solar pin as the interim exactly like `Mdot_0`.
+/// It is `r_c` today, and landing `r_c` in the gas density is this arc's own finding-1 closure, so `R_1` is on
+/// slice 1's closure list draw-pending, not a settled derivation. Computed in the log domain (the
 /// `viscous_similarity_surface_density` precedent), converting seconds to megayears at the end. `None` on a
 /// non-positive input or an intermediate past the representable range.
 pub fn derive_viscous_time_myr(
