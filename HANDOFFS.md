@@ -3285,6 +3285,16 @@ NEXT: gate the three running agents; continue the composition chain (C/O, s/r li
 
 ---
 
+## 2026-07-17 (session, branch claude/disk-evolution-arc, PR #195): the disk-evolution arc, slice-1 closure + slice 2
+
+Agent C's arc (the owner named it PIPELINE-STAGE DEBT WITH MULTIPLE CREDITORS): turning the disk's accretion rate into a clock and `tau_disk` into a DERIVED output. The detailed design record and build log live in `docs/working/DISK_EVOLUTION_ARC_SCOPE.md` (its own build-log section); this is the pointer. Both pins held bit-exact on every commit (default `40fe8a7269ee4da8974eb1787338c3a0`, living `be94e3100b9db82f7c1aea1d8091956d`); every addition is dormant. All in `crates/sim/src/astro.rs`, each with twin-independent oracle tests, a fail-loud test, and a mutation check.
+
+BUILT THIS SESSION (dormant): the FORMATION ROOT-FINDER (`derive_formation_epoch_myr`, slice-1 closure item 1, `t_formation` as the root of `T_mid(1 AU, t) = T_condensation`, retiring the 0.19 landmark onto a derived root); slice 2's DISPERSAL RACE end to end, in three pieces: the GAP RADIUS (`gravitational_radius_au`, `r_g = G M_star mu m_H / (k_B T_wind)`), the `tau_disk` RACE (`derive_disk_lifetime_myr`, the closed-form crossing `Mdot(t) = Mdot_wind`, zero new values), and the WIND RATE (`photoevaporative_wind_rate_msun_myr` + `XrayWindFit`, the Owen X-ray photoevaporation power law, log-domain).
+
+ANOMALY SURFACED (input-audit catch on my own recollection): the Owen wind-rate MODEL BAND. My recalled fractional-exponent form is appendix-B, NOT the paper's eq. 9 (a strictly linear, mass-independent form), so the fit ships as a DECLARED three-row band (Owen appendix-B near-linear; Owen eq. 9 linear; Sellek 2024 PLUTO+PRIZMO, rates ~10x lower from enhanced cooling). The caller/owner picks the row.
+
+OPEN for the owner's batch audit and the gate: the EUV `ro_sat`-sharing question; the wind-rate band membership; slice 3 (wiring `tau_disk` into the #73 giant gate and the DiskGas opening, the first run-path change, both pins re-pinned deliberately); and the L_X-chain composition (folding L_bol, the activity fraction, and the Skumanich spin-down into one `L_X(M_star, age)`, retiring the wind rate's solar-interim `log10(L_X)`). Slice-1 closure items 2 to 4 (the `t_mature` locus fetch, the `Mdot_0` draw, the `R_1` draw) remain design-only with tagged solar interims.
+
 ## 2026-07-16 (session): the mid-band arc, and the night the audit loop closed
 
 Owner directive: "Continue on the mid-band arc. Task it out and continue on." The mid-band arc is the GEOTHERM ARC (`docs/working/GEOTHERM_ARC_SCOPE.md`: "deriving T_e so the mid-scale relief band can exist"). Branch `claude/seam4-deeptime`, HEAD `5544b44`, pushed. BOTH PINS BYTE-EXACT ON EVERY COMMIT (default `40fe8a7269ee4da8974eb1787338c3a0`, living `be94e3100b9db82f7c1aea1d8091956d`).
