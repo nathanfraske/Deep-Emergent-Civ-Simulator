@@ -55,6 +55,40 @@ pub struct FrictionLaw {
     /// The lower limit of the STATED DOMAIN of the high-stress branch (megapascals). EQUAL to `low_domain_max`
     /// for a crossover law (rock); GREATER for a law with a gap (ice).
     pub high_domain_min: Fixed,
+    /// The low-stress regime's ROUGHNESS AND COHESION BAND, the scatter the central low fit is a line through.
+    ///
+    /// RESERVED, SURFACED NOT BAKED, and this field is what gives the reserve a home. Byerlee's own abstract says
+    /// the low branch scatters WIDELY between experiments because friction there is dominated by surface roughness,
+    /// so a single `low_coefficient` reports a fit as a measurement (the sin
+    /// [`byerlee_low_stress_coefficient`] names). `None` is the honest unset state: the low branch emits its central
+    /// fit alone, never a fabricated zero band. `Some` is the owner's set scatter, at which point
+    /// [`crate::moment_equivalence::brittle_differential_mpa`] emits a BRACKET wherever the low branch is operative
+    /// and the interval-of-mins
+    /// carries it to the `T_e` band with no new composition. Its basis is Byerlee 1978's low-stress data envelope
+    /// (the coefficient range the experiments span) and the reserved roughness-cohesion floor; the owner sets it
+    /// and validates the widened `T_e` band against measured elastic thicknesses on small, low-gravity bodies,
+    /// where the band is the whole answer.
+    pub low_stress_band: Option<LowStressBand>,
+}
+
+/// The LOW-STRESS ROUGHNESS AND COHESION BAND: the scatter the central low fit is a line through, as the interval
+/// its two edges span. RESERVED (surfaced not baked); the owner sets the edges from the source's low-stress data
+/// envelope, and until then a law carries `None` rather than a fabricated width.
+///
+/// The coefficient edges are the roughness-scattered friction (near material-INDEPENDENCE is a high-stress
+/// property, so the low regime scatters); the cohesion edges are the roughness-induced apparent cohesion from
+/// asperity interlock (megapascals). Both edges ride so an asymmetric envelope is representable, since a central
+/// fit need not sit at the midpoint of its own scatter.
+#[derive(Clone, Copy, Debug)]
+pub struct LowStressBand {
+    /// The low edge of the roughness-scattered friction coefficient.
+    pub coefficient_lo: Fixed,
+    /// The high edge of the roughness-scattered friction coefficient.
+    pub coefficient_hi: Fixed,
+    /// The low edge of the roughness-induced cohesion (megapascals).
+    pub cohesion_lo: Fixed,
+    /// The high edge of the roughness-induced cohesion (megapascals).
+    pub cohesion_hi: Fixed,
 }
 
 /// The shear strength a friction law reports at a normal stress.
@@ -93,6 +127,10 @@ pub fn rock_friction_law() -> FrictionLaw {
         high_coefficient: Fixed::from_ratio(6, 10),
         high_cohesion: Fixed::from_int(50),
         high_domain_min: Fixed::from_int(200),
+        // RESERVED, surfaced not baked: the low branch's roughness-and-cohesion scatter (basis in the field doc).
+        // `None` is the honest unset state, the central low fit alone, never a fabricated zero band. The wire that
+        // renders a `T_e` waits on the owner setting this, so a rendered number is never the un-banded low edge.
+        low_stress_band: None,
     }
 }
 
@@ -117,6 +155,9 @@ pub fn ice_friction_law() -> FrictionLaw {
         high_coefficient: Fixed::from_ratio(20, 100),
         high_cohesion: Fixed::from_ratio(83, 10),
         high_domain_min: Fixed::from_int(10),
+        // RESERVED like rock's: Beeman's low-fit scatter is its own reserve, unset here rather than assumed equal
+        // to rock's. `None` keeps ice's low branch its central fit until a source pins the ice-specific band.
+        low_stress_band: None,
     }
 }
 

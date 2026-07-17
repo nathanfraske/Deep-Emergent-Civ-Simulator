@@ -483,10 +483,56 @@ pub fn brittle_differential_mpa(
     )?;
     let low_licensed = low_n < law.low_domain_max;
     let high_licensed = high_n >= law.high_domain_min;
+    // THE LOW BRANCH'S ROUGHNESS BAND, if the owner has set it. Byerlee's low fit is a central line through
+    // roughness scatter, so where that fit is operative the honest strength is the INTERVAL the scatter spans,
+    // resolved through the SAME Mohr-Coulomb construction at the band's coefficient and cohesion edges. `None` is
+    // the reserved-unset state: the central fit alone, never a fabricated width. Strength rises with both
+    // coefficient and cohesion, so the lo-lo edge is the weak end and the hi-hi edge the strong one; ordered here
+    // so a consumer reads low before high without re-sorting.
+    let low_band = match law.low_stress_band {
+        Some(b) => {
+            let (weak, _) = mohr_coulomb_differential_mpa(
+                b.coefficient_lo,
+                b.cohesion_lo,
+                vertical_stress_mpa,
+                sense,
+            )?;
+            let (strong, _) = mohr_coulomb_differential_mpa(
+                b.coefficient_hi,
+                b.cohesion_hi,
+                vertical_stress_mpa,
+                sense,
+            )?;
+            Some(if weak <= strong {
+                (weak, strong)
+            } else {
+                (strong, weak)
+            })
+        }
+        None => None,
+    };
+    // A (lo, hi) interval collapses to a determined strength when its ends coincide, else it is the ordered bracket.
+    let interval = |lo: Fixed, hi: Fixed| {
+        if lo == hi {
+            DifferentialStrength::Determined(lo)
+        } else {
+            DifferentialStrength::Bracket { low: lo, high: hi }
+        }
+    };
     match (low_licensed, high_licensed) {
-        // First yielding is the smallest circle, so the minimum of the licensed branches is operative.
-        (true, true) => Some(DifferentialStrength::Determined(low_d.min(high_d))),
-        (true, false) => Some(DifferentialStrength::Determined(low_d)),
+        // First yielding is the smallest circle, so the minimum of the licensed branches is operative. Where the
+        // low branch carries a roughness band, "first yielding" is the interval-min of that band with the high
+        // POINT, endpoint-wise. A bracket-versus-scalar min is exact regardless of correlation, so no covariance
+        // question arises here (that would need two brackets meeting).
+        (true, true) => Some(match low_band {
+            Some((lo, hi)) => interval(lo.min(high_d), hi.min(high_d)),
+            None => DifferentialStrength::Determined(low_d.min(high_d)),
+        }),
+        // Only the low branch is licensed: the roughness-scattered regime, where the band (once set) IS the strength.
+        (true, false) => Some(match low_band {
+            Some((lo, hi)) => interval(lo, hi),
+            None => DifferentialStrength::Determined(low_d),
+        }),
         (false, true) => Some(DifferentialStrength::Determined(high_d)),
         // Neither fit is in its stated domain: report the envelope the two span, choose nothing.
         (false, false) => Some(if low_d <= high_d {
@@ -2450,7 +2496,7 @@ mod tests {
         ActivationVolume, Modality, VolumeConstraint,
     };
     use crate::geotherm::steady_conductive_geotherm;
-    use crate::yield_envelope::{ice_friction_law, rock_friction_law};
+    use crate::yield_envelope::{ice_friction_law, rock_friction_law, LowStressBand};
 
     // McNutt and Menard's Table 1, printed under the heading "Assumed values for physical parameters", and the
     // same pair Watts and Burov assume. These are the LITERATURE's moduli, entered here because the tests
@@ -5116,6 +5162,86 @@ mod tests {
             )
             .is_none(),
             "an ice shell with no creep row refuses: the honest empty middle until ice rows land"
+        );
+    }
+
+    #[test]
+    fn the_low_stress_roughness_band_widens_the_silicate_te() {
+        // STEER ONE, EXECUTABLE. Byerlee's low branch is a central line through roughness scatter, and the shallow
+        // fibres it governs (above the ~6 km crossover for an Earth-gravity silicate lid) carry real moment share
+        // through their long lever arm about the neutral surface. So a low-stress band widens the silicate T_e band
+        // on the EARTH-LIKE default, where the Mars-class lid is only the sharpest case. This proves the MECHANISM.
+        // The band values here are an ILLUSTRATIVE FIXTURE, not the canonical reserved scatter (which stays `None`
+        // on the shipped law until the owner sets it); the test asserts the band WIDENS the T_e, never a number.
+        let volumes = hk_dry_dislocation_activation_volumes();
+        let creep = [CreepCandidate {
+            row: hk_dry_dislocation(),
+            volumes: &volumes,
+        }];
+        let silicate = LidColumn {
+            friction: rock_friction_law(),
+            creep: &creep,
+            surface_temperature_k: Fixed::from_int(273),
+            interior_temperature_k: Fixed::from_int(1600),
+            density_kg_m3: Fixed::from_int(3300),
+            heat_production: ZERO,
+            thermal_conductivity: Fixed::from_int(3),
+            gravity_m_s2: Fixed::from_ratio(981, 100),
+            convecting_depth_km: Fixed::from_int(2890),
+            rayleigh: Fixed::from_int(100_000),
+            chord: test_chord(),
+        };
+        let (lo0, hi0) = silicate
+            .elastic_thickness_band_km(
+                lit_e(),
+                lit_nu(),
+                Fixed::from_ratio(33, 10),
+                Fixed::from_int(64),
+                600,
+            )
+            .expect("the un-banded silicate lid derives a T_e band");
+
+        // The same column with an illustrative roughness band on the low branch: friction scattered from 0.6 to 1.0
+        // (a round fixture spanning the observed low-stress spread), no cohesion offset. The weak edge softens the
+        // shallow brittle limb and the strong edge stiffens it, so first yielding brackets there and the interval-
+        // of-mins in `edge_yield` carries it, low with low and high with high, to the T_e band.
+        let banded_law = FrictionLaw {
+            low_stress_band: Some(LowStressBand {
+                coefficient_lo: Fixed::from_ratio(6, 10),
+                coefficient_hi: Fixed::ONE,
+                cohesion_lo: Fixed::ZERO,
+                cohesion_hi: Fixed::ZERO,
+            }),
+            ..rock_friction_law()
+        };
+        let banded = LidColumn {
+            friction: banded_law,
+            ..silicate
+        };
+        let (lo1, hi1) = banded
+            .elastic_thickness_band_km(
+                lit_e(),
+                lit_nu(),
+                Fixed::from_ratio(33, 10),
+                Fixed::from_int(64),
+                600,
+            )
+            .expect("the banded silicate lid still derives");
+
+        // The banded T_e band is a STRICT SUPERSET: its low edge drops below the un-banded low edge (the honest
+        // widening the arithmetic predicts, from the softened shallow limb), and its high edge does not fall below
+        // the un-banded one. This is the too-narrow band the wire must not render before the reserved scatter is set.
+        assert!(
+            lo1 < lo0,
+            "the roughness band drops the low edge of the silicate T_e: {} < {}",
+            f64_of(lo1),
+            f64_of(lo0)
+        );
+        assert!(
+            hi1 >= hi0,
+            "the roughness band does not lower the high edge: {} >= {}",
+            f64_of(hi1),
+            f64_of(hi0)
         );
     }
 
