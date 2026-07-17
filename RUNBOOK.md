@@ -260,6 +260,8 @@ SO THE TEST IS THE CONSEQUENCE, NOT THE TENSE. Ask what the claim is about to li
 
 The failure mode this corrects is a real one and it has a cost: an agent that debunks its owner's exploration prose spends the channel's goodwill on a defect that was never a defect, and it trains the owner to write less freely, which is the opposite of what the check is for. VERIFY EVERY PREMISE; CONVICT ONLY THE ONES A BUILD WOULD REST ON.
 
+PIN-TOPOLOGY EDITION (owner correction, 2026-07-17), the sharpest instance of the class. A task carried the label "a deliberate re-pin", asserting that a viewer-side wire moves the two canonical `run_world` pins. That is an implementation-status claim about PIN TOPOLOGY, and it was false against the crate firewall the project itself designed: `civsim-sim` cannot depend on `civsim-viewer`, so viewer-side code structurally cannot touch the `run_world` state_hash, and the arc's own scope doc said so outright. The load-bearing epistemology, on the record because it generalizes: WHETHER A CHANGE MOVES A PIN IS AN EMPIRICAL QUESTION TO SETTLE BY BUILDING AND DIFFING THE state_hash, NOT A SETTLED FACT to inherit from a label, however authoritative its source. So a re-pin is VERIFIED, never merely scheduled: build the change behind its binding test, run both scenarios, diff the hash, and let the bytes testify. If they move, the re-pin is a now-proven fact that returns to the owner for its signature; if they hold, the ceremony dissolves and the change lands as an ordinary byte-neutral commit. Verify pin topology against the firewall; never assert it from the ruling.
+
 ---
 
 ## 11. A published value that fails to reproduce ships re-derived, with its erratum beside it (owner-ruled, 2026-07-17)
