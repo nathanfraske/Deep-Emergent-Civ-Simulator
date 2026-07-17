@@ -249,3 +249,25 @@ SO THE TEST IS THE CONSEQUENCE, NOT THE TENSE. Ask what the claim is about to li
 - IF A DESIGN IS BEING PRICED, the same finding is a RUNG: name it, price it, say plainly that it is spec-real and code-absent, and move on. Nothing is being authored into being, so nothing needs convicting.
 
 The failure mode this corrects is a real one and it has a cost: an agent that debunks its owner's exploration prose spends the channel's goodwill on a defect that was never a defect, and it trains the owner to write less freely, which is the opposite of what the check is for. VERIFY EVERY PREMISE; CONVICT ONLY THE ONES A BUILD WOULD REST ON.
+
+---
+
+## 11. A published value that fails to reproduce ships re-derived, with its erratum beside it (owner-ruled, 2026-07-17)
+
+THE STANDARD. A published value that FAILS TO REPRODUCE FROM ITS OWN SOURCE'S DEFINITIONS ships as THE RE-DERIVED VALUE, with the erratum documented beside it. NEVER silently. NEVER from memory. ALWAYS from the source's own mathematics. Three conditions must ALL hold before the re-derivation ships:
+
+1. THE RE-DERIVATION IS INDEPENDENTLY TWINNED. Two routes that share no code (two libraries, or a closed form against a numerical twin).
+2. THE SURROUNDING CONTROLS VALIDATE. The same machinery reproduces the source's OTHER values, so THE METHOD STANDS WHILE THE CONSTANT FALLS. A re-derivation that cannot reproduce the source's controls is a bug in the reader, not an erratum in the source.
+3. THE SLIP'S CAUSE IS NAMED OR MARKED UNATTRIBUTED. "Unattributed" is an honest finding; a guessed cause is a second error.
+
+THE FOUNDING CASE. McNutt and Menard 1982 print `K(x_0) = -0.0289`. Their own printed definition applied to their own printed equation (A8) gives `0.0389`, confirmed through two independent libraries plus a finite-difference twin, WITH THE LINE-LOAD CONTROLS REPRODUCING TO 0.05 PERCENT. It propagates into their `C_2`, so their published seamount curvatures run about 26 PERCENT LOW. The cause is UNATTRIBUTED: no natural reading at `x_0` produces 0.0289. The re-derived constant ships; the 26 percent correction applies wherever their curvature-derived quantities enter a row; BOTH VALUES ARE CARRIED.
+
+ITS SIBLING, RESOLVED THE SAME WAY BY THE SOURCE'S OWN INTERNAL CONSISTENCY: the primary prints `tau = 80 + 600 sigma_n (MPa)`, and three channels agree the page says 600, while the paper's OWN equations (7) and (8) back-solve to `mu ~ 0.6` and `S_0 = 80 MPa`, excluding `S_0 = 50` outright at 177 against a printed 283. THE SELF-CONSISTENT READING IS `tau = 80 + 0.6 sigma_n`: the published value lost a decimal point, and the source settles it against itself.
+
+AND THE THIRD SHAPE, WHICH IS A UNIT RATHER THAN A DIGIT: Calmant's Table 1 prints `E = 10^12 N/m^2`, refuted by their own `D` range against their own Table 2. The value is right in dyn/cm^2. A printed unit is a claim like any other and gets checked against the source's own numbers.
+
+AN UNEXPLAINED RESIDUAL SHIPS AS EXACTLY THAT. Their `C_1` carries an unexplained 2 percent, and it ships as a DECLARED RESIDUAL IN THE BAND, because AN UNEXPLAINED TWO PERCENT STATED IS HONEST AND AN UNEXPLAINED TWO PERCENT ABSORBED IS THE SILENT-PARAMETER CLASS.
+
+WHY THIS IS NOT LICENCE TO EDIT SOURCES. The standard reads the source's OWN definitions against the source's OWN printed results, and the arbiter is always the source's internal consistency, never our preference, never a modern value, never a memory. Condition 2 is what keeps it honest: if the controls do not reproduce, the reader is wrong. This is the same instrument as the citation-coverage discipline pointed the other way: there, a value wearing a citation it could not cash was retired (the Fe row, cited to a CODATA table containing no iron); here, a value contradicting its own paper's mathematics is corrected. BOTH ASK ONE QUESTION: does the number keep the promise its source made about it?
+
+AND THE COROLLARY THE Fe ROW PAID FOR: RE-VALUING IS INCOMPLETE UNTIL ITS PINS MOVE WITH IT, IN THE SAME COMMIT, FOR THE SAME CITED REASON. That commit named its live consumer in its own message and did not check it, so the suite asserted the retired value until a stranger's failing test surfaced it. NAMING A CONSUMER IS NOT CHECKING IT. And watch the quiet half: a sibling assertion pinned the Rose ratio at 2.895 with a tolerance of 0.01 while the correction moved it 0.0058, so THE TOLERANCE ABSORBED THE REPAIR and that test sat green throughout while its comment kept teaching the retired number. A tolerance wide enough to absorb a change is blind to it, which is legitimate for a physical band, and is exactly why THE COMMENT rather than the assertion is what the next reader inherits.
