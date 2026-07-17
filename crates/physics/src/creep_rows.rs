@@ -550,9 +550,19 @@ pub struct CreepConditions {
     /// a bare `Fixed`, and a law fed that zero returns an infinite strength with no symptom. Build it with
     /// [`ln_scientific`], which reaches the logarithm without passing through the unrepresentable value.
     ///
-    /// THE RATE IS THE LOAD'S OWN (condition 4). `T_e` is a chord over the load's timescale, so this is derived
-    /// from the world's convective timescale by the caller and is REQUIRED. No default exists to fall back to,
-    /// and inventing one would author the very quantity the elastic thickness is a chord over.
+    /// THE RATE IS THE LOAD'S OWN (condition 4). `T_e` is a chord over the load's timescale, so the caller
+    /// supplies THE RATE ITS LOAD IMPOSES, and it is REQUIRED. No default exists to fall back to, and inventing
+    /// one would author the very quantity the elastic thickness is a chord over.
+    ///
+    /// NOT THE CONVECTIVE RATE, and this sentence used to say otherwise IN THE SAME BREATH AS FORBIDDING IT.
+    /// It read "the rate is the load's own ... so this is derived from THE WORLD'S CONVECTIVE TIMESCALE by the
+    /// caller", which names the right rule and then points at the wrong rate, in one sentence. The convective
+    /// rate (`laws::convective_strain_rate`, which exposes the `|v|/L` that `convective_stress` had always
+    /// formed and discarded) is the MANTLE-AND-THERMAL chord: it serves mantle viscosity and the thermal side.
+    /// A LOAD IS NOT THE MANTLE. A seamount's flexure and an interior convection cell impose different rates on
+    /// different timescales, and evaluating a lid's STRENGTH against the mantle's rate while its DRIVING STRESS
+    /// answers to the load would compare two chords and call the difference physics. Found by the slice that
+    /// consumes this function, which is the reader most able to be misled by it.
     pub ln_strain_rate_per_s: Fixed,
     /// Temperature (kelvin).
     pub temperature_k: Fixed,

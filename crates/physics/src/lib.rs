@@ -63,6 +63,7 @@ pub mod melting_data;
 pub mod metal_eos;
 pub mod mit_reference;
 pub mod molecular_opacity;
+pub mod moment_equivalence;
 pub mod opacity;
 pub mod optical_constants;
 pub mod periodic;
