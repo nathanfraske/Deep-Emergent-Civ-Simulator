@@ -890,6 +890,15 @@ pub fn derive_viscous_time_myr(
 /// `sqrt(f)` band (a ten-to-twenty percent class effect) through [`derive_viscous_time_myr`] (`t_visc ~
 /// sqrt(R_1)`), the machinery already built rather than a new path.
 ///
+/// SEPARATION CONVENTION: `separation_au` is the SEMI-MAJOR AXIS `a`, so this is the Roche lobe at the mean
+/// separation. In an eccentric binary the tide is strongest at periastron, where the instantaneous lobe is
+/// smaller (the periastron lobe sits inside the semi-major lobe), and the real truncation sits inside that, so a
+/// semi-major evaluation is the OUTER, most conservative edge: eccentricity only LOOSENS this bound further above
+/// the true truncation, never tightens it past the true value. The bound's conservative character therefore
+/// SURVIVES eccentricity, which is why the eccentricity dependence is a doc convention here and not a code term.
+/// The tightening arrives with the fetched `f(q, e, viscosity)` fraction, which turns the one-sided bound into a
+/// band.
+///
 /// ZERO new per-system free values: the Roche fraction derives from the mass ratio, and the truncation fraction
 /// `f` enters as a fetched (q, e, viscosity)-conditioned banded class row, not an owner scalar. `c_num` (~0.49)
 /// and `c_log` (~0.6) are Eggleton's cited fit to the Roche-potential volume radius: cited-universal and
