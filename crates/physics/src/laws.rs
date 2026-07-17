@@ -3546,6 +3546,7 @@ pub fn heat_advection(
     }
 }
 
+/// @provides thermal_boundary_layer
 /// The THERMAL BOUNDARY LAYER thickness, the conductive lid riding on a convecting interior:
 /// `L = d * Ra^(-1/3)`, written as `d / Ra^(1/3)`.
 ///
@@ -3607,6 +3608,7 @@ pub fn convective_stress(
     }
 }
 
+/// @provides convective_strain_rate
 /// The CONVECTIVE STRAIN RATE `eps_dot = |v| / L` (per time): the shear rate the buoyant convective flow
 /// ([`stokes_velocity`]) imposes across the length `L` it shears over (the boundary-layer or layer depth). For a
 /// Newtonian fluid `tau = eta * eps_dot`, so this is the rate [`convective_stress`] has ALWAYS FORMED AND

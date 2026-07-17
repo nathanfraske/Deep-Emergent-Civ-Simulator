@@ -170,12 +170,38 @@ CANARIES = [
 
 
 def law_providers():
-    """Every `pub fn` in laws.rs: a DERIVING provider of the quantity its name states."""
+    """Every `pub fn` in laws.rs: a DERIVING provider. The quantity it provides is ITS NAME by default, or the
+    quantity an `@provides` annotation in its doc comment names when it carries one.
+
+    WHY THE ANNOTATION EXISTS (owner ruling 2026-07-16). This gate's UNIT OF ANALYSIS IS THE
+    QUANTITY-TO-PROVIDER MAPPING, and a function's NAME is only the default GUESS at the quantity it supplies.
+    That guess is what made the gate blind to its own worst miss: Slack and Hofmeister are two providers of ONE
+    quantity under TWO names, so a name-keyed gate cannot see the collision at all. `@provides` decouples the
+    two, so a quantity's providers can be counted even when they disagree about what to call themselves.
+
+    The route considered and rejected was a `[[law]]` block, which is the floor data's marker. It cannot carry
+    these: a law block's ports are AXES, and the `[direct]` extractions take only caller-composed values, which
+    is precisely what `[direct]` MEANS in the floor registry. There is no portless precedent, and inventing one
+    would have forced portless functions into a marker built for axes. Authorship stays human (a human writes
+    `@provides` and defends it); the checking stays mechanical.
+    """
     out = {}
+    pending = None
     for i, line in enumerate(LAWS.read_text().splitlines(), 1):
+        ann = re.search(r"@provides\s+(\w+)", line)
+        if ann:
+            pending = ann.group(1)
+            continue
         m = re.match(r"pub fn (\w+)\s*\(", line)
         if m:
-            out[m.group(1)] = f"crates/physics/src/laws.rs:{i}"
+            out.setdefault(pending or m.group(1), []).append(
+                (m.group(1), f"crates/physics/src/laws.rs:{i}")
+            )
+            pending = None
+        elif line.strip() and not line.strip().startswith("///"):
+            # The annotation binds to the NEXT `pub fn`, so any non-doc line between them breaks the binding.
+            # An annotation that could drift onto a function it does not describe would be worse than none.
+            pending = None
     return out
 
 
@@ -240,14 +266,38 @@ def detect(laws, fields, registry):
     """THE DETECTOR, pure so the canary can run it against a fixture. A quantity with a deriving law AND a
     storing field, and no registered relationship, is an unarbitrated diamond."""
     findings = []
-    for quantity, law_site in sorted(laws.items()):
+    for quantity, providers in sorted(laws.items()):
         sites = fields.get(quantity)
         if not sites:
             continue
         if quantity in registry:
             continue  # a registered relationship of any kind: legal by construction, not a defect
-        findings.append((quantity, law_site, sites))
+        findings.append((quantity, providers[0][1], sites))
     return findings
+
+
+def detect_twin_providers(laws, registry):
+    """THE SECOND SHAPE, and the one this gate was BLIND to until `@provides` made the mapping explicit: a
+    quantity with TWO OR MORE DERIVING providers, under any names, and no registered arbitration.
+
+    The gate's honest scorecard named this miss: Slack's `lattice_thermal_conductivity_w_per_m_k` and
+    `hofmeister_lattice_conductivity` are two models of ONE quantity under TWO names, and a name-keyed sweep
+    cannot see the collision at all. It was covered by the census-before-build habit and by nothing mechanical.
+    A quantity whose providers declare themselves through `@provides` can be COUNTED, so the habit gains a
+    machine that does not get tired.
+
+    ITS OWN BLINDNESS, stated beside its power: it sees only providers that DECLARE themselves, so an
+    undeclared twin is still invisible, and the annotation is hand-authored, so this converts a silent
+    collision into a visible one ONLY where a human wrote the claim down. It reads `laws.rs` alone, so a
+    provider in another crate (which is exactly where Slack and Hofmeister live) is still outside its reach.
+    The census habit remains the guard for both; this narrows the class, it does not close it.
+    """
+    out = []
+    for quantity, providers in sorted(laws.items()):
+        if len(providers) < 2 or quantity in registry:
+            continue
+        out.append((quantity, providers))
+    return out
 
 
 def canary_check():
@@ -258,12 +308,33 @@ def canary_check():
     """
     failures = []
     for name, law_site, field_sites, must_flag, why in CANARIES:
-        laws = {name: law_site}
+        # One provider per canary quantity: the fixture predates `@provides` and exercises the
+        # deriving-plus-storing shape, which is the shape it was written to pin.
+        laws = {name: [(name, law_site)]}
         fields = {name: field_sites} if field_sites else {}
         flagged = bool(detect(laws, fields, {}))
         if flagged != must_flag:
             verb = "FAILED TO FLAG" if must_flag else "WRONGLY FLAGGED"
             failures.append(f"{verb} `{name}`: {why}")
+
+    # THE TWIN CANARY, and it is prove-ALWAYS like its sibling: a quantity with two declared providers and no
+    # arbitration MUST flag, and the same pair MUST fall silent once registered. A detector nobody has watched
+    # fail is a detector nobody has watched.
+    twin_laws = {
+        "canary_twin_quantity": [
+            ("canary_provider_alpha", "fixture:1"),
+            ("canary_provider_beta", "fixture:2"),
+        ]
+    }
+    if not detect_twin_providers(twin_laws, {}):
+        failures.append(
+            "FAILED TO FLAG `canary_twin_quantity`: two declared providers of one quantity, unregistered, "
+            "is the different-named-providers class this detector exists for"
+        )
+    if detect_twin_providers(twin_laws, {"canary_twin_quantity": ("ladder-order", "fixture", "why")}):
+        failures.append(
+            "WRONGLY FLAGGED `canary_twin_quantity`: a registered arbitration is legal by construction"
+        )
     return failures
 
 
@@ -290,17 +361,26 @@ def main():
     laws = law_providers()
     fields = stored_providers()
     findings = detect(laws, fields, REGISTERED_RELATIONSHIPS)
+    twins = detect_twin_providers(laws, REGISTERED_RELATIONSHIPS)
 
     print("THE DIAMOND GATE: quantities with a DERIVING law and a STORING field, unarbitrated.")
     print(f"canary fixture: {len(CANARIES)} known cases, all behaved (the gate can still see)")
     print(f"scanned {len(laws)} laws.rs kernels against every pub struct field under crates/")
+    aliased = sum(1 for q, ps in laws.items() for fn, _ in ps if fn != q)
+    print(
+        f"quantity-to-provider mapping: {sum(len(p) for p in laws.values())} providers over {len(laws)} "
+        f"quantities ({aliased} supplying a quantity under a name other than their own)"
+    )
     for q, (kind, where, why) in sorted(REGISTERED_RELATIONSHIPS.items()):
         print(f"registered [{kind}] {q}: {why}")
     print()
 
+    report_twins(twins)
+    print()
+
     if not findings:
         print("no unarbitrated diamonds found.")
-        return 0
+        return 1 if (strict and twins) else 0
 
     for quantity, law_site, sites in findings:
         print(f"UNARBITRATED DIAMOND: `{quantity}`")
@@ -318,6 +398,23 @@ def main():
     print("  3. SHOW IT IS NOT ONE: the name collides but the quantities differ. Then rename, because a name")
     print("     that reads as a diamond will be read as one by the next person too.")
     return 1 if strict else 0
+
+
+def report_twins(twins):
+    """The second finding shape, reported beside the first: one quantity, two declared providers."""
+    if not twins:
+        print("no twin providers: every `@provides` quantity has exactly one declaring kernel.")
+        return
+    for quantity, providers in twins:
+        print(f"UNARBITRATED TWIN PROVIDERS: `{quantity}`")
+        print(f"    ({quantity})")
+        print("     |")
+        for fn, site in providers:
+            print(f"     +-- [DERIVED]  laws::{fn}()            {site}")
+        print("     |")
+        print("     +-- ARBITRATION: none registered  <-- the defect")
+        print()
+    print(f"{len(twins)} quantity(s) with two or more declared providers and no arbitration.")
 
 
 if __name__ == "__main__":
