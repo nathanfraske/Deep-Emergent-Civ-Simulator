@@ -933,6 +933,82 @@ pub fn convective_turnover_time_days(
     Some(ln_tau.exp())
 }
 
+/// The PRE-MAIN-SEQUENCE LUMINOSITY `L_bol / L_sun` at a stellar age, the disk-era bolometric luminosity the L_X
+/// chain reads (and the race's wind rate runs through). A disk-hosting star is not a main-sequence object: it is
+/// a pre-main-sequence star still descending the Hayashi track, fully convective and BRIGHTER than its
+/// main-sequence instance, contracting under gravity. It sits at the H-minus opacity wall's own effective
+/// temperature (the [`crate::stellar_evolution::hayashi_effective_temperature`] band, direction-agnostic: the same
+/// wall serves the pre-main-sequence descent and the post-main-sequence giant ascent), so `L = 4 pi sigma T_H^4 R^2`
+/// with `T_H` fixed and `R` shrinking.
+///
+/// FULLY DERIVED, ZERO NEW VALUES. The star is an `n = 3/2` polytrope (a fully convective, adiabatic monatomic
+/// envelope, `gamma = 5/3` giving `n = 1/(gamma - 1) = 3/2`), whose total energy `E = -(3/(2(5-n))) G M^2 / R =
+/// -(3/7) G M^2 / R` carries the structure coefficient `3/7`, DERIVED from the polytrope index, not fetched.
+/// Kelvin-Helmholtz balance `L = -dE/dt` with `L = 4 pi sigma T_H^4 R^2` gives `dR/dt = -(28 pi sigma T_H^4 /
+/// (3 G M^2)) R^4`, whose solution once the birth radius is forgotten is `R^3 = G M^2 / (28 pi sigma T_H^4 t)`, so
+/// `R ~ t^(-1/3)` and `L ~ t^(-2/3)` in closed form. The luminosity reads only the stellar mass, the Hayashi wall
+/// temperature (the existing banded anchor), the age, and the floor constants `G`, `sigma` (the derived
+/// Stefan-Boltzmann), and `M_sun`, `L_sun`; the `n = 3/2` index and its `3/7` coefficient are bare-algebra physics
+/// results. Computed in the log domain (`L ~ 1e26 W` overflows the format; `L / L_sun` is order one).
+///
+/// This is the CONSUMER the race's wind rate needed: `L_X = plateau * L_bol` in the saturated disk era, so the
+/// `t^(-2/3)` decline of `L_bol` (a factor ~5 across a 1-to-10 Myr window) is the wind's own time dependence, the
+/// term the race's constant-wind statement had dropped (see [`derive_disk_lifetime_myr`]).
+///
+/// DOMAIN: valid while the star is FULLY CONVECTIVE on the Hayashi track and past its initial contraction (the
+/// birth radius forgotten, which for the disk era holds since the Kelvin-Helmholtz time is well under a megayear).
+/// The boundary is where the star leaves full convection for the radiative Henyey leg; for the disk era at FGKM
+/// masses that boundary stays comfortably distant, and for the A-class masses it hands off to the radiative-envelope
+/// wind branch (a named future dispatch, its own gate). Past the representable range (an unphysically small age
+/// where the forgotten-birth-radius asymptote diverges) it returns `None`. `None` also on a non-positive input.
+pub fn pre_main_sequence_luminosity_lsun(
+    mass_ratio: Fixed,
+    hayashi_temp_k: Fixed,
+    age_myr: Fixed,
+) -> Option<Fixed> {
+    if mass_ratio <= Fixed::ZERO || hayashi_temp_k <= Fixed::ZERO || age_myr <= Fixed::ZERO {
+        return None;
+    }
+    let ln_pi = Fixed::PI.ln();
+    let ln_sigma = crate::physiology::derived_stefan_boltzmann().ln();
+    let ln_g = civsim_physics::saha::ln_of_decimal(
+        civsim_units::fundamentals::GRAVITATIONAL_CONSTANT.value,
+    )?;
+    let ln_m = mass_ratio
+        .ln()
+        .checked_add(civsim_physics::saha::ln_of_decimal(SOLAR_MASS_KG)?)?;
+    let ln_t_h = hayashi_temp_k.ln();
+    // Age in seconds: age(Myr) * 1e6 * Julian year.
+    let ln_t = age_myr
+        .ln()
+        .checked_add(civsim_physics::saha::ln_of_decimal("1e6")?)?
+        .checked_add(civsim_physics::saha::ln_of_decimal(JULIAN_YEAR_S)?)?;
+    // ln R^3 = ln(G M^2 / (28 pi sigma T_H^4 t)) = ln G + 2 ln M - ln 28 - ln pi - ln sigma - 4 ln T_H - ln t.
+    let four_ln_t_h = Fixed::from_int(4).checked_mul(ln_t_h)?;
+    let ln_r3 = ln_g
+        .checked_add(Fixed::from_int(2).checked_mul(ln_m)?)?
+        .checked_sub(Fixed::from_int(28).ln())?
+        .checked_sub(ln_pi)?
+        .checked_sub(ln_sigma)?
+        .checked_sub(four_ln_t_h)?
+        .checked_sub(ln_t)?;
+    let ln_r = ln_r3.checked_div(Fixed::from_int(3))?;
+    // ln L = ln(4 pi sigma T_H^4 R^2) = ln 4 + ln pi + ln sigma + 4 ln T_H + 2 ln R.
+    let ln_l = Fixed::from_int(4)
+        .ln()
+        .checked_add(ln_pi)?
+        .checked_add(ln_sigma)?
+        .checked_add(four_ln_t_h)?
+        .checked_add(Fixed::from_int(2).checked_mul(ln_r)?)?;
+    let ln_l_over_lsun =
+        ln_l.checked_sub(civsim_physics::saha::ln_of_decimal(SOLAR_LUMINOSITY_W)?)?;
+    let ln_ceiling = Fixed::from_int(31).checked_mul(Fixed::from_int(2).ln())?;
+    if ln_l_over_lsun >= ln_ceiling {
+        return None;
+    }
+    Some(ln_l_over_lsun.exp())
+}
+
 /// The ROTATION PERIOD `P_rot` (days) at a stellar age, the SPIN-DOWN that closes the last interim in the L_X
 /// chain: it supplies the numerator of the Rossby number ([`stellar_rossby_number`]) the whole activity-and-wind
 /// chain reads. Magnetized stars shed angular momentum in their winds and spin down, and the empirical law is
@@ -956,6 +1032,17 @@ pub fn convective_turnover_time_days(
 /// The `skumanich_exponent` is reserved-with-basis (the Skumanich-to-gyrochrone band, its basis the chosen
 /// gyrochrone's age index), not authored inline. `None` on a non-positive age, reference period, reference age, or
 /// exponent, or an intermediate past the representable range.
+///
+/// CONSUMER SPLIT (a domain statement, the gate ruling). This function's two honest limits cancel by their
+/// domains: the Skumanich law's validity begins where rotation CONVERGES onto the gyrochrone (gigayears in), and
+/// the disk arc's window ends at dispersal (a few Myr), so they do not overlap, and that is fine. Within the disk
+/// era every plausible rotation sits DEEP in saturation (`Ro` well below `ro_sat`), so the whole Rossby chain is
+/// plateau-pinned: the DISK ARC consumes only the saturated branch and needs nothing from this function but the
+/// confirmation that `Ro` is below the knee, which any disk-era rotation supplies. The PRECISION machinery, both
+/// this spin-down law and the unsaturated activity slope, serves the ATMOSPHERE-ESCAPE arc gigayears later, where
+/// stars leave saturation. So this and [`convective_turnover_time_days`] are built for that future consumer,
+/// correctly dormant and correctly labelled, and the disk arc's insensitivity to their precision is a declared
+/// blindness with its consumer named.
 pub fn stellar_rotation_period_days(
     age_myr: Fixed,
     reference_period_days: Fixed,
@@ -1202,11 +1289,20 @@ pub fn gravitational_radius_au(
 /// replacement-circularity rule: it never calibrates against the lifetime it replaces). Zero reserved values of
 /// its own: it composes the clock's parameters with the wind rate the caller supplies.
 ///
-/// TERMS-DROPPED: the wind rate is held CONSTANT across the crossing, the caller's `wind_rate_msun_myr` evaluated
-/// at the era of dispersal. The age-evolution of the wind rate during the race (through the star's declining
-/// `L_X`) is omitted; the omission is valid because the disk clears within the few-Myr class-II window, well
-/// inside the saturated-activity regime where `L_X` varies slowly, so the wind rate is near-constant over the
-/// dispersal. EXTERNAL photoevaporation (birth-environment irradiation) is likewise omitted, its validity domain
+/// TERMS-DROPPED, with the chord discipline the gate ruling requires. The wind rate is held CONSTANT across the
+/// crossing, so the caller's `wind_rate_msun_myr` is the wind evaluated at ONE declared epoch: an undeclared
+/// evaluation age is the chord class (a value standing at an implicit time), so the constant-wind instance must
+/// state which age its wind was read at. Holding it constant is only HALF justified by the saturated plateau, and
+/// naming the other half is the correction the gate caught: `L_X = plateau * L_bol`, and while the activity
+/// fraction (the plateau) does vary slowly in the saturated disk era, the bolometric multiplicand does NOT.
+/// A disk-era star is a pre-main-sequence contractor whose `L_bol ~ t^(-2/3)` ([`pre_main_sequence_luminosity_lsun`])
+/// falls by a factor ~5 across a 1-to-10 Myr window, which through the wind's ~1.14 luminosity exponent moves the
+/// rate by a comparable factor. That time dependence is therefore folded INTO the wind band, not dropped: the band
+/// is already order-of-magnitude wide from the model-structure ensemble (see [`XrayWindFit`]), and a factor-five
+/// decline belongs inside that statement rather than outside it. The self-consistent alternative, solving
+/// `Mdot(t) = W(L_bol(t))` with the bisection pattern [`derive_formation_epoch_myr`] already carries (this closed
+/// form is then the constant-wind instance the bisection brackets), is the sharper follow-on when the band is
+/// tightened. EXTERNAL photoevaporation (birth-environment irradiation) is likewise omitted, its validity domain
 /// the isolated star-forming environment, the dense-cluster term named for the environment-hook follow-on.
 ///
 /// Returns `Fixed::ZERO` (immediate dispersal, no viscous era) when the wind rate already meets or exceeds the
@@ -3492,6 +3588,86 @@ mod tests {
             "the younger star sits at a lower Rossby number (young {}, old {})",
             ro_young.to_f64_lossy(),
             ro_old.to_f64_lossy()
+        );
+    }
+
+    #[test]
+    fn the_pre_main_sequence_luminosity_matches_the_hayashi_contraction_oracle() {
+        // Twin-independent oracle, computed OUTSIDE the code from the closed form R^3 = G M^2/(28 pi sigma T_H^4 t)
+        // and L = 4 pi sigma T_H^4 R^2: a solar-mass star at the Hayashi wall (T_H = 4000 K) at age 1 Myr sits at
+        // R ~ 2.69 R_sun and L ~ 1.669 L_sun, brighter than the main-sequence Sun, exactly as a pre-main-sequence
+        // contracting star should be.
+        let l = pre_main_sequence_luminosity_lsun(
+            Fixed::ONE,
+            Fixed::from_int(4000),
+            Fixed::ONE, // 1 Myr
+        )
+        .unwrap();
+        assert!(
+            (l.to_f64_lossy() - 1.6686).abs() / 1.6686 < 0.02,
+            "the 1 Myr solar pre-MS luminosity is ~1.669 L_sun (got {})",
+            l.to_f64_lossy()
+        );
+    }
+
+    #[test]
+    fn the_pre_main_sequence_luminosity_declines_as_age_to_the_minus_two_thirds() {
+        // The contraction signature the race's wind time-dependence runs through: L ~ t^(-2/3), so across the
+        // 1-to-8 Myr window the luminosity falls by 8^(2/3) = 4 (and ~10^(2/3) ~ 4.64 across 1-to-10 Myr, the
+        // "factor of five" the race band must now carry). Checked against the base rather than a second oracle.
+        let young =
+            pre_main_sequence_luminosity_lsun(Fixed::ONE, Fixed::from_int(4000), Fixed::ONE)
+                .unwrap()
+                .to_f64_lossy();
+        let older = pre_main_sequence_luminosity_lsun(
+            Fixed::ONE,
+            Fixed::from_int(4000),
+            Fixed::from_int(8),
+        )
+        .unwrap()
+        .to_f64_lossy();
+        assert!(
+            (young / older - 4.0).abs() < 0.1,
+            "the luminosity falls by 8^(2/3) = 4 across 1 to 8 Myr (young {}, older {}, ratio {})",
+            young,
+            older,
+            young / older
+        );
+    }
+
+    #[test]
+    fn the_pre_main_sequence_luminosity_scales_mass_to_the_four_thirds() {
+        // L ~ R^2 ~ (M^2)^(2/3) = M^(4/3), so a half-solar star sits at 0.5^(4/3) ~ 0.397 of the solar value,
+        // a second independent scaling law over the same closed form.
+        let solar =
+            pre_main_sequence_luminosity_lsun(Fixed::ONE, Fixed::from_int(4000), Fixed::ONE)
+                .unwrap()
+                .to_f64_lossy();
+        let half = pre_main_sequence_luminosity_lsun(
+            Fixed::from_ratio(1, 2),
+            Fixed::from_int(4000),
+            Fixed::ONE,
+        )
+        .unwrap()
+        .to_f64_lossy();
+        assert!(
+            (half / solar - 0.39685).abs() < 0.01,
+            "half the mass gives 0.5^(4/3) ~ 0.397 of the luminosity (ratio {})",
+            half / solar
+        );
+    }
+
+    #[test]
+    fn the_pre_main_sequence_luminosity_refuses_nonphysical_inputs() {
+        // Fail-loud on each non-positive axis: no mass, no wall temperature, no age, no contraction luminosity.
+        assert!(
+            pre_main_sequence_luminosity_lsun(Fixed::ZERO, Fixed::from_int(4000), Fixed::ONE)
+                .is_none()
+        );
+        assert!(pre_main_sequence_luminosity_lsun(Fixed::ONE, Fixed::ZERO, Fixed::ONE).is_none());
+        assert!(
+            pre_main_sequence_luminosity_lsun(Fixed::ONE, Fixed::from_int(4000), Fixed::ZERO)
+                .is_none()
         );
     }
 }
