@@ -1893,6 +1893,53 @@ pub fn photoevaporative_wind_rate_msun_myr(
     Some(ln_rate.exp())
 }
 
+/// THE COMPOSED DISK CLOCK (Myr), CONVECTIVE (X-ray-driven) BRANCH: the disk lifetime `tau_disk` DERIVED end to
+/// end from a disk-hosting star's own state, the payoff the whole arc built toward, turning `tau_disk` from a
+/// consulted constant into a derived output. It chains the built pieces:
+/// pre-main-sequence turnover ([`pre_main_sequence_convective_turnover_days`]) -> Rossby number
+/// ([`stellar_rossby_number`]) -> X-ray activity fraction ([`activity_luminosity_fraction`]) folded with the
+/// pre-main-sequence bolometric luminosity ([`pre_main_sequence_luminosity_lsun`]) into the absolute X-ray
+/// luminosity ([`stellar_xray_luminosity_log10_erg_s`]) -> the photoevaporative wind rate
+/// ([`photoevaporative_wind_rate_msun_myr`]) -> the accretion-versus-wind dispersal race
+/// ([`derive_disk_lifetime_myr`]). This is the CONVECTIVE branch, a T Tauri star with a rotation-driven dynamo;
+/// a radiative-envelope (Herbig) star has no dynamo and takes the EUV branch instead
+/// ([`radiative_euv_luminosity_bracket`]), dispatched on the star's envelope structure at the Kraft break, its
+/// sibling.
+///
+/// DORMANT: no run-path caller yet; the consumer wire that feeds this `tau_disk` into the #73 giant gate and the
+/// DiskGas opening lands behind a flag, presented for audit before it flips. Each link keeps its own domain
+/// door, so a `None` here is one link refusing (a non-physical star, a mass outside the wind fit, an overflow),
+/// propagated rather than swallowed. INTERIMS still standing, each interim-plus-destination: the rotation period
+/// `P_rot` (the `Omega_star_0` birth-rotation gyrochronology, a layer-4 draw), `Mdot_0` (the disk's initial
+/// accretion rate), and `t_visc` (derived from the scale radius `R_1`, itself the disk-size-demographics draw).
+/// The activity fit (`ro_sat`, `saturated_log10_fraction`, `beta`) and the wind fit are the reserved-with-basis
+/// data the base arc already carries. `None` if any link refuses.
+#[allow(clippy::too_many_arguments)]
+pub fn disk_era_xray_disk_lifetime_myr(
+    mass_ratio: Fixed,
+    hayashi_temp_k: Fixed,
+    age_myr: Fixed,
+    rotation_period_days: Fixed,
+    mlt_coefficient: Fixed,
+    ro_sat: Fixed,
+    saturated_log10_fraction: Fixed,
+    beta: Fixed,
+    xray_fit: &XrayWindFit,
+    mdot_0_msun_myr: Fixed,
+    t_visc_myr: Fixed,
+    decline_gamma: Fixed,
+) -> Option<Fixed> {
+    let tau_conv =
+        pre_main_sequence_convective_turnover_days(mass_ratio, hayashi_temp_k, mlt_coefficient)?;
+    let rossby = stellar_rossby_number(rotation_period_days, tau_conv)?;
+    let activity_fraction =
+        activity_luminosity_fraction(rossby, ro_sat, saturated_log10_fraction, beta)?;
+    let bolometric_ratio = pre_main_sequence_luminosity_lsun(mass_ratio, hayashi_temp_k, age_myr)?;
+    let log10_l_x = stellar_xray_luminosity_log10_erg_s(bolometric_ratio, activity_fraction)?;
+    let wind_rate = photoevaporative_wind_rate_msun_myr(log10_l_x, mass_ratio, xray_fit)?;
+    derive_disk_lifetime_myr(mdot_0_msun_myr, t_visc_myr, decline_gamma, wind_rate)
+}
+
 /// The FEEDING-ZONE (annulus) DISK MASS a planet accretes from, in `normalization`-units times AU-squared: the
 /// integral `M = integral over [inner, outer] of 2*pi*r*Sigma(r) dr`, the disk mass in the orbital annulus
 /// `[inner_au, outer_au]`. This is the ACCRETION-mass scaffold: the mass follows from the geometry and the surface
@@ -4729,5 +4776,168 @@ mod tests {
             Fixed::ZERO
         )
         .is_none());
+    }
+
+    #[test]
+    fn the_composed_disk_clock_byte_equals_the_hand_chained_pieces() {
+        // TWIN-INDEPENDENCE for the composed clock: the end-to-end `disk_era_xray_disk_lifetime_myr` must return
+        // exactly what a hand-chain of the seven links returns, byte for byte, with no hidden transform between the
+        // links. A solar-analogue disk-hosting star at 1 Myr: convective (T Tauri) branch, disk-locked rotation.
+        let hayashi = Fixed::from_int(4000);
+        let mlt_c = Fixed::from_ratio(3, 2);
+        let age = Fixed::ONE;
+        let p_rot = Fixed::from_int(8);
+        let ro_sat = Fixed::from_ratio(13, 100);
+        let sat = Fixed::from_ratio(-313, 100);
+        let beta = Fixed::from_ratio(-27, 10);
+        let gamma = Fixed::ONE;
+        let t_visc = Fixed::ONE;
+        let fit = owen_appendix_b_fit();
+        // Hand-chain the pieces, each an independent function, to the wind rate.
+        let tau_conv =
+            pre_main_sequence_convective_turnover_days(Fixed::ONE, hayashi, mlt_c).unwrap();
+        let rossby = stellar_rossby_number(p_rot, tau_conv).unwrap();
+        let activity = activity_luminosity_fraction(rossby, ro_sat, sat, beta).unwrap();
+        let l_bol = pre_main_sequence_luminosity_lsun(Fixed::ONE, hayashi, age).unwrap();
+        let log10_l_x = stellar_xray_luminosity_log10_erg_s(l_bol, activity).unwrap();
+        let wind = photoevaporative_wind_rate_msun_myr(log10_l_x, Fixed::ONE, &fit).unwrap();
+        // Peak accretion set a hundredfold above the derived wind so the race tips to a positive lifetime; the same
+        // triple feeds both the hand-chain and the composed clock, so any wind magnitude reproduces this.
+        let mdot_0 = wind.checked_mul(Fixed::from_int(100)).unwrap();
+        let expected = derive_disk_lifetime_myr(mdot_0, t_visc, gamma, wind).unwrap();
+        let composed = disk_era_xray_disk_lifetime_myr(
+            Fixed::ONE,
+            hayashi,
+            age,
+            p_rot,
+            mlt_c,
+            ro_sat,
+            sat,
+            beta,
+            &fit,
+            mdot_0,
+            t_visc,
+            gamma,
+        )
+        .unwrap();
+        assert_eq!(
+            composed, expected,
+            "the composed clock byte-equals the hand-chained pieces (composed {}, hand {})",
+            composed, expected
+        );
+        // MECHANISM (the race crosses): a solar-analogue disk-hosting star yields a positive lifetime, not zero (the
+        // wind-beats-birth case) or a refusal. This asserts the race tips, nothing about where.
+        assert!(
+            composed > Fixed::ZERO,
+            "the race crosses to a positive lifetime (got {})",
+            composed.to_f64_lossy()
+        );
+    }
+
+    #[test]
+    fn the_composed_disk_clock_is_mechanistic_not_calibrated() {
+        // THE ORACLE, REDESIGNED to the replacement-circularity ruling: this arc RETIRES the observed disk lifetime,
+        // so no CI assert may key off the Haisch-Lada few-Myr range. A test that the derived value lands in the
+        // retiree's band would encode the calibration where it can never be argued with, the I_Fitting lens firing
+        // on a constant. Instead: falsifiable mechanics, a units-catastrophe bracket orders of magnitude wider than
+        // any observational claim, and a determinism pin. The few-Myr comparison lives in the ensemble validator,
+        // band-aware and out of CI's reach, where the ruling homed it: it validates the ENSEMBLE output, never an
+        // input, never a median. If the derived solar value comes out at half a Myr or thirty, that is a Residual
+        // finding to surface, not a red X to make green.
+        let hayashi = Fixed::from_int(4000);
+        let mlt_c = Fixed::from_ratio(3, 2);
+        let p_rot = Fixed::from_int(8);
+        let ro_sat = Fixed::from_ratio(13, 100);
+        let sat = Fixed::from_ratio(-313, 100);
+        let beta = Fixed::from_ratio(-27, 10);
+        let gamma = Fixed::ONE;
+        let t_visc = Fixed::ONE;
+        let fit = owen_appendix_b_fit();
+        let clock = |age: Fixed, mdot_0: Fixed| {
+            disk_era_xray_disk_lifetime_myr(
+                Fixed::ONE,
+                hayashi,
+                age,
+                p_rot,
+                mlt_c,
+                ro_sat,
+                sat,
+                beta,
+                &fit,
+                mdot_0,
+                t_visc,
+                gamma,
+            )
+        };
+        // A clock whose peak accretion is a hundredfold over the young star's wind, held fixed across the age sweep.
+        let young_wind = {
+            let tau_conv =
+                pre_main_sequence_convective_turnover_days(Fixed::ONE, hayashi, mlt_c).unwrap();
+            let rossby = stellar_rossby_number(p_rot, tau_conv).unwrap();
+            let activity = activity_luminosity_fraction(rossby, ro_sat, sat, beta).unwrap();
+            let l_bol = pre_main_sequence_luminosity_lsun(Fixed::ONE, hayashi, Fixed::ONE).unwrap();
+            let log10_l_x = stellar_xray_luminosity_log10_erg_s(l_bol, activity).unwrap();
+            photoevaporative_wind_rate_msun_myr(log10_l_x, Fixed::ONE, &fit).unwrap()
+        };
+        let mdot_0 = young_wind.checked_mul(Fixed::from_int(100)).unwrap();
+        let solar = clock(Fixed::ONE, mdot_0).unwrap();
+        // MECHANISM, monotone in the wind at fixed clock: an OLDER pre-MS star is dimmer (L ~ t^-2/3), so lower L_X,
+        // so a weaker wind, so the race tips LATER and the disk lives LONGER. Same clock, same activity (turnover is
+        // age-independent), only the bolometric luminosity moves, so this isolates the wind monotonicity end to end.
+        let older = clock(Fixed::from_int(8), mdot_0).unwrap();
+        assert!(
+            older > solar,
+            "a dimmer (older) star drives a weaker wind and a longer disk life (solar {}, older {})",
+            solar.to_f64_lossy(),
+            older.to_f64_lossy()
+        );
+        // UNITS-CATASTROPHE BRACKET: bounds orders of magnitude wider than any observational claim (the retiree
+        // spans ~0.5 to 10 Myr), so this asserts nothing the retiree owns yet still catches a kilobar-class units
+        // slip cold. A derived value outside [1e-6, 1e6] Myr is a units break, not a physics result.
+        assert!(
+            solar > Fixed::from_ratio(1, 1_000_000) && solar < Fixed::from_int(1_000_000),
+            "the derived lifetime is finite and units-sane, not a scale catastrophe (got {} Myr)",
+            solar.to_f64_lossy()
+        );
+        // DETERMINISM PIN: once twin-checked (the byte-equal test above), pin the exact computed value so the code
+        // keeps producing what it produced. This asserts the pipeline is reproducible, NOT that nature agrees. The
+        // value, ~20.5 Myr, runs on the tagged solar INTERIMS (the disk-locked P_rot, the hundredfold-over-wind peak
+        // accretion, the unit t_visc), so it is NOT the disk lifetime of the real Sun and is not meant to match the
+        // retired few-Myr band: a Residual finding surfaced, not a miss to tune away. It moves, deliberately, when
+        // the Omega_star_0, Mdot_0, and R_1 draws land, and the pin moves with it under a recorded re-pin.
+        assert_eq!(
+            solar.to_bits(),
+            88_237_297_984_i64,
+            "the solar-analogue lifetime is reproducible (got bits {}, ~{} Myr)",
+            solar.to_bits(),
+            solar.to_f64_lossy()
+        );
+    }
+
+    #[test]
+    fn the_composed_disk_clock_propagates_a_link_refusal() {
+        // FAIL-LOUD propagation: a refusal at any link (here the turnover, on a zero mass) surfaces as a `None` from
+        // the whole composition rather than a swallowed error or a plausible-looking number.
+        let fit = owen_appendix_b_fit();
+        let call = |mass: Fixed, hayashi: Fixed| {
+            disk_era_xray_disk_lifetime_myr(
+                mass,
+                hayashi,
+                Fixed::ONE,
+                Fixed::from_int(8),
+                Fixed::from_ratio(3, 2),
+                Fixed::from_ratio(13, 100),
+                Fixed::from_ratio(-313, 100),
+                Fixed::from_ratio(-27, 10),
+                &fit,
+                Fixed::ONE,
+                Fixed::ONE,
+                Fixed::ONE,
+            )
+        };
+        // A zero mass refuses at the turnover (the first link); a zero wall temperature refuses at the turnover and
+        // the luminosity both. Each must propagate to a whole-chain None.
+        assert!(call(Fixed::ZERO, Fixed::from_int(4000)).is_none());
+        assert!(call(Fixed::ONE, Fixed::ZERO).is_none());
     }
 }
