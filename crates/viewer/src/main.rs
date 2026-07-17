@@ -1519,6 +1519,7 @@ fn derive_formation_condensation_temperature(
         FORMATION_ACCRETION_RATE_MSUN_MYR,
         star_mass,
         Fixed::from_ratio(35, 10), // alpha (mass-luminosity), the grid-extracted stellar slope
+        None, // pre-MS bolometric override (slice 3b-ii wires the pre-MS L_bol here); None keeps the MS power law
         orbit_au,
         Fixed::from_ratio(1, 4), // reprocessing factor (spherical-grain equilibrium)
         Fixed::ONE,              // inner-boundary factor (~1 in the bulk disk)
