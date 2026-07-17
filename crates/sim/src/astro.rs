@@ -1002,6 +1002,107 @@ pub fn activity_luminosity_fraction(
     Some(ln_fraction.exp())
 }
 
+/// The FORMATION EPOCH `t_formation` (Myr): the DERIVED ROOT of `T_mid(1 AU, t) = T_condensation`, the referee
+/// that replaces the retired 0.19 formation-rate landmark (slice 1's closure). The formation-era midplane
+/// temperature RISES with the accretion rate, and the clock's `Mdot(t)` DECLINES with age, so the midplane cools
+/// monotonically and crosses the condensation front exactly once; this bisects for that crossing. ZERO NEW
+/// VALUES: `condensation_temperature_k` is the banked condensation front (the ~1400 K forsterite-enstatite
+/// landmark), `Mdot(t)` is [`viscous_similarity_accretion_rate`], and `midplane_temp_at_rate` maps a rate to the
+/// 1 AU midplane temperature (the caller composes [`formation_midplane_temperature`] with its fixed disk
+/// parameters, keeping the many-argument disk state out of this signature). Unlike a hindcast on the 0.19 rate,
+/// this convicts `Mdot` because the dust column and opacity inside the temperature map are now derived, so the
+/// front fixes a temperature rather than a degenerate product.
+///
+/// DETERMINISM: a fixed-iteration bisection (no unbounded loop), all fixed-point. `None` on a degenerate bracket,
+/// a non-positive condensation temperature, or a bracket that does not STRADDLE the front (temperature at `t_lo`
+/// below it or at `t_hi` above it means no crossing in range, surfaced rather than extrapolated).
+#[allow(clippy::too_many_arguments)]
+pub fn derive_formation_epoch_myr(
+    mdot_0_msun_myr: Fixed,
+    t_visc_myr: Fixed,
+    decline_gamma: Fixed,
+    condensation_temperature_k: Fixed,
+    midplane_temp_at_rate: impl Fn(Fixed) -> Option<Fixed>,
+    t_lo_myr: Fixed,
+    t_hi_myr: Fixed,
+    iterations: u32,
+) -> Option<Fixed> {
+    if t_lo_myr < Fixed::ZERO || t_hi_myr <= t_lo_myr || condensation_temperature_k <= Fixed::ZERO {
+        return None;
+    }
+    let temp_at = |age: Fixed| -> Option<Fixed> {
+        let rate =
+            viscous_similarity_accretion_rate(mdot_0_msun_myr, t_visc_myr, decline_gamma, age)?;
+        midplane_temp_at_rate(rate)
+    };
+    // Temperature declines with age, so the bracket must straddle: T(t_lo) >= T_cond >= T(t_hi).
+    if temp_at(t_lo_myr)? < condensation_temperature_k
+        || temp_at(t_hi_myr)? > condensation_temperature_k
+    {
+        return None;
+    }
+    let mut lo = t_lo_myr;
+    let mut hi = t_hi_myr;
+    let two = Fixed::from_int(2);
+    for _ in 0..iterations {
+        let mid = lo.checked_add(hi)?.checked_div(two)?;
+        // Still too hot at the midpoint: the crossing is at a later (larger) age.
+        if temp_at(mid)? > condensation_temperature_k {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    lo.checked_add(hi)?.checked_div(two)
+}
+
+/// The GRAVITATIONAL RADIUS `r_g` (AU): the disk radius beyond which the photoevaporative wind's thermal energy
+/// exceeds the star's gravitational binding, so the heated gas escapes (the slice-2 dispersal race). It DERIVES
+/// from the stellar mass and the wind's sound speed, `r_g = G * M_star / c_s^2` with `c_s^2 = k_B * T / (mu * m_H)`,
+/// so `r_g = G * M_star * mu * m_H / (k_B * T_wind)`. No reserved number of its own: it reads the stellar mass,
+/// the wind temperature (a banded class value, the EUV-heated ~1e4 K wind or the harder X-ray-heated wind, per the
+/// band the giant arc flagged), and the mean molecular weight of the launched gas. The GAP RADIUS where the wind
+/// first opens a gap is `r_g` times a wind-physics prefactor (~0.1 to 0.2, the banded class constant the caller
+/// supplies), so this returns `r_g` and the caller scales it. Computed in the log domain (the
+/// `viscous_similarity_surface_density` precedent). `None` on a non-positive input or an intermediate past the
+/// representable range.
+pub fn gravitational_radius_au(
+    star_mass_ratio: Fixed,
+    wind_temperature_k: Fixed,
+    mean_molecular_weight: Fixed,
+) -> Option<Fixed> {
+    if star_mass_ratio <= Fixed::ZERO
+        || wind_temperature_k <= Fixed::ZERO
+        || mean_molecular_weight <= Fixed::ZERO
+    {
+        return None;
+    }
+    let ln_g = civsim_physics::saha::ln_of_decimal(
+        civsim_units::fundamentals::GRAVITATIONAL_CONSTANT.value,
+    )?;
+    let ln_m_star = star_mass_ratio
+        .ln()
+        .checked_add(civsim_physics::saha::ln_of_decimal(SOLAR_MASS_KG)?)?;
+    let ln_m_h = civsim_physics::saha::ln_of_decimal("1e-3")?.checked_sub(
+        civsim_physics::saha::ln_of_decimal(civsim_units::fundamentals::AVOGADRO.value)?,
+    )?;
+    let ln_k_b = civsim_physics::saha::ln_of_decimal(civsim_units::fundamentals::BOLTZMANN.value)?;
+    let ln_au = civsim_physics::saha::ln_of_decimal(ASTRONOMICAL_UNIT_M)?;
+    // ln r_g[AU] = ln G + ln M_star + ln mu + ln m_H - ln k_B - ln T - ln AU.
+    let ln_rg = ln_g
+        .checked_add(ln_m_star)?
+        .checked_add(mean_molecular_weight.ln())?
+        .checked_add(ln_m_h)?
+        .checked_sub(ln_k_b)?
+        .checked_sub(wind_temperature_k.ln())?
+        .checked_sub(ln_au)?;
+    let ln_ceiling = Fixed::from_int(31).checked_mul(Fixed::from_int(2).ln())?;
+    if ln_rg >= ln_ceiling {
+        return None;
+    }
+    Some(ln_rg.exp())
+}
+
 /// The FEEDING-ZONE (annulus) DISK MASS a planet accretes from, in `normalization`-units times AU-squared: the
 /// integral `M = integral over [inner, outer] of 2*pi*r*Sigma(r) dr`, the disk mass in the orbital annulus
 /// `[inner_au, outer_au]`. This is the ACCRETION-mass scaffold: the mass follows from the geometry and the surface
@@ -2648,6 +2749,124 @@ mod tests {
         assert!(
             ratio_old < ratio_young * 0.9,
             "L_X/L_EUV evolves with Rossby (X-ray fades faster), not welded (young {ratio_young:e}, old {ratio_old:e})"
+        );
+    }
+
+    #[test]
+    fn the_formation_epoch_root_reproduces_the_condensation_front() {
+        // A monotone stub midplane map (viscous scaling T = 2000 * rate^(1/4)), so temperature declines with age
+        // as the clock's rate declines and crosses the ~1400 K front once. The found t_formation must, fed back
+        // through the same clock and map, reproduce the condensation temperature: that is what makes it a root.
+        let midplane =
+            |rate: Fixed| Fixed::from_int(2000).checked_mul(rate.powf(Fixed::from_ratio(1, 4)));
+        let cond = Fixed::from_int(1400);
+        let t_form = derive_formation_epoch_myr(
+            Fixed::ONE, // mdot_0
+            Fixed::ONE, // t_visc
+            Fixed::ONE, // decline gamma (p = 3/2)
+            cond,
+            midplane,
+            Fixed::ZERO,
+            Fixed::from_int(10),
+            48,
+        )
+        .unwrap();
+        assert!(
+            t_form > Fixed::ZERO && t_form < Fixed::from_int(10),
+            "the root lands inside the bracket (t_form {})",
+            t_form.to_f64_lossy()
+        );
+        let rate_at_form =
+            viscous_similarity_accretion_rate(Fixed::ONE, Fixed::ONE, Fixed::ONE, t_form).unwrap();
+        let temp_at_form = midplane(rate_at_form).unwrap();
+        // DEFAULTS-TAKEN, 1 K: the 48-iteration bisection converges far tighter than a kelvin over this bracket.
+        assert!(
+            (temp_at_form.to_f64_lossy() - 1400.0).abs() < 1.0,
+            "T_mid(t_formation) reproduces the condensation front (got {})",
+            temp_at_form.to_f64_lossy()
+        );
+    }
+
+    #[test]
+    fn the_formation_epoch_refuses_a_non_straddling_bracket() {
+        // If the front is never reached in range (here the map is always hotter than a 100 K target across the
+        // bracket), there is no crossing, so None rather than an extrapolated root.
+        let midplane =
+            |rate: Fixed| Fixed::from_int(2000).checked_mul(rate.powf(Fixed::from_ratio(1, 4)));
+        assert!(
+            derive_formation_epoch_myr(
+                Fixed::ONE,
+                Fixed::ONE,
+                Fixed::ONE,
+                Fixed::from_int(100),
+                midplane,
+                Fixed::ZERO,
+                Fixed::from_int(10),
+                48,
+            )
+            .is_none(),
+            "a bracket that never crosses the front returns None"
+        );
+    }
+
+    #[test]
+    fn the_gravitational_radius_matches_the_solar_euv_wind_oracle() {
+        // Twin-independent oracle, computed OUTSIDE the code under test: for the solar EUV-heated wind
+        // (M_star = 1 M_sun, T_wind = 1e4 K, mu = 1), r_g = G M_star mu m_H / (k_B T_wind) works out to
+        // ~10.673 AU in an f64 hand-computation. The log-domain derivation must land on the same value.
+        let r_g = gravitational_radius_au(Fixed::ONE, Fixed::from_int(10_000), Fixed::ONE).unwrap();
+        // DEFAULTS-TAKEN, 0.05 AU: the log/exp round trip holds the ~10.67 AU result well inside a hundredth
+        // of the radius; the tolerance is the log-table resolution, not a physical margin.
+        assert!(
+            (r_g.to_f64_lossy() - 10.672_862).abs() < 0.05,
+            "solar EUV wind r_g reproduces the oracle (got {})",
+            r_g.to_f64_lossy()
+        );
+    }
+
+    #[test]
+    fn the_gravitational_radius_scales_inverse_temperature_and_linear_mass() {
+        // Two independent scaling laws the closed form must obey, each checked against the base case rather
+        // than against a second hand-number: r_g is inverse in T_wind (a ten-times-colder wind unbinds ten
+        // times farther out) and linear in M_star (half the mass binds half as far).
+        let base = gravitational_radius_au(Fixed::ONE, Fixed::from_int(10_000), Fixed::ONE)
+            .unwrap()
+            .to_f64_lossy();
+        let colder = gravitational_radius_au(Fixed::ONE, Fixed::from_int(1_000), Fixed::ONE)
+            .unwrap()
+            .to_f64_lossy();
+        let lighter =
+            gravitational_radius_au(Fixed::from_ratio(1, 2), Fixed::from_int(10_000), Fixed::ONE)
+                .unwrap()
+                .to_f64_lossy();
+        assert!(
+            (colder - base * 10.0).abs() < 0.5,
+            "a ten-times-colder wind gives a ten-times-larger r_g (base {}, colder {})",
+            base,
+            colder
+        );
+        assert!(
+            (lighter - base / 2.0).abs() < 0.05,
+            "half the stellar mass halves r_g (base {}, lighter {})",
+            base,
+            lighter
+        );
+    }
+
+    #[test]
+    fn the_gravitational_radius_refuses_nonphysical_inputs() {
+        // Fail-loud on each non-positive axis rather than returning a plausible-looking radius: a zero or
+        // negative mass, wind temperature, or molecular weight has no gravitational radius.
+        assert!(
+            gravitational_radius_au(Fixed::ZERO, Fixed::from_int(10_000), Fixed::ONE).is_none()
+        );
+        assert!(gravitational_radius_au(Fixed::ONE, Fixed::ZERO, Fixed::ONE).is_none());
+        assert!(
+            gravitational_radius_au(Fixed::ONE, Fixed::from_int(10_000), Fixed::ZERO).is_none()
+        );
+        assert!(
+            gravitational_radius_au(Fixed::from_int(-1), Fixed::from_int(10_000), Fixed::ONE)
+                .is_none()
         );
     }
 }
