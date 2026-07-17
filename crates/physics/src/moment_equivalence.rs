@@ -2335,6 +2335,112 @@ pub fn referee_conductive_lid_base(
     })
 }
 
+/// A LITHOSPHERIC COLUMN'S OWN DATA, enough to derive its elastic thickness. This is the glue the render's flexural
+/// middle needs: it composes the geotherm, the friction row, the creep rows, and the derived conductive lid into a
+/// [`LithosphereEnvelope`] and solves the banded moment equivalence for the `T_e` band.
+///
+/// # THE ALIEN IS A DATA ROW
+///
+/// Every input is per-material or per-body: `friction` and `creep` are the MATERIAL's (a silicate lid passes
+/// [`crate::yield_envelope::rock_friction_law`] with olivine creep; a Europa shell passes
+/// [`crate::yield_envelope::ice_friction_law`] with ice creep rows once they are built), and the geotherm,
+/// densities, and gravity are the WORLD's. Nothing here is silicate-shaped: there is no material enum and no
+/// rock-versus-ice dispatch, so the material is a data row, which is material-agnosticism BY CONSTRUCTION. What is
+/// demonstrated today is the silicate deriving; the ice shell REFUSES (no ice creep row is built yet), so the
+/// deriving-alien half of "one code path" awaits the ice rows rather than being shown here.
+///
+/// # THE TYPED REFUSAL IS A FEATURE GATE
+///
+/// [`Self::elastic_thickness_band_km`] returns `None` where the column cannot yield a `T_e`: a material with no
+/// admitted creep row (its ductile branch refuses, which is the honest state of a material whose creep rows are not
+/// yet built), a geotherm that refuses, or a load the envelope cannot elastically carry. A consumer renders ZERO
+/// flexure with a stated reason there, never a fabricated relief. This is the honest empty middle, not a painted
+/// one.
+pub struct LidColumn<'a> {
+    /// The material's friction row.
+    pub friction: FrictionLaw,
+    /// The material's creep candidates (the ductile branch). An empty or all-refusing set refuses the column.
+    pub creep: &'a [CreepCandidate<'a>],
+    /// The steady conductive geotherm's inputs (see [`crate::geotherm::steady_conductive_geotherm`]).
+    pub surface_temperature_k: Fixed,
+    /// The interior (potential) temperature (K).
+    pub interior_temperature_k: Fixed,
+    /// The lid density (kg/m^3), for both the geotherm and the envelope's lithostatic axis (raw SI).
+    pub density_kg_m3: Fixed,
+    /// The radiogenic heat production the geotherm carries.
+    pub heat_production: Fixed,
+    /// The thermal conductivity the geotherm carries.
+    pub thermal_conductivity: Fixed,
+    /// The body's surface gravity (m/s^2), for the envelope's lithostatic axis (raw SI).
+    pub gravity_m_s2: Fixed,
+    /// The convecting layer's depth (km), for the DERIVED conductive lid base.
+    pub convecting_depth_km: Fixed,
+    /// The world's Rayleigh number, for the DERIVED conductive lid base.
+    pub rayleigh: Fixed,
+    /// The load's chord (its strain rate and timescale), which the envelope evaluates creep at.
+    pub chord: LoadChord,
+}
+
+impl LidColumn<'_> {
+    /// Derive this column's elastic-thickness BAND (km), low edge below high, or `None` where the envelope refuses.
+    /// The band is the `V*` scatter propagated through the moment equivalence. `youngs_modulus_gpa` and
+    /// `poisson_ratio` are the column's own moduli (a `T_e` is a chord over them, so they ride explicitly),
+    /// `delta_rho` is the density contrast the deflection floats against (in `1000 kg/m^3`), `v0` the line load
+    /// (`GPa km`), `steps` the grid sampling. The flexure kernel's `km/s^2` gravity is DERIVED from the body's own
+    /// `gravity_m_s2`, never supplied a second time (one gravity, two unit systems).
+    pub fn elastic_thickness_band_km(
+        &self,
+        youngs_modulus_gpa: Fixed,
+        poisson_ratio: Fixed,
+        delta_rho: Fixed,
+        v0: Fixed,
+        steps: u32,
+    ) -> Option<(Fixed, Fixed)> {
+        // ONE LID DERIVATION. The conductive lid base sets BOTH the moment-integral domain AND the depth over which
+        // the geotherm ramps from the surface to the interior temperature. The stress and the geotherm must agree
+        // about how thick the lid is (the `thermal_boundary_layer` "one derivation" invariant, laws.rs), so the
+        // geotherm's ramp IS the derived lid base, never a second free input that could disagree with it. A free
+        // ramp length longer than the derived base would read the geotherm too cold at the base and bias `T_e` high.
+        let lid_base = ConductiveLidBase::from_rayleigh(self.convecting_depth_km, self.rayleigh)?;
+        let lid_thickness_km = lid_base.depth_km();
+        let geotherm = |depth_km: Fixed| {
+            crate::geotherm::steady_conductive_geotherm(
+                self.surface_temperature_k,
+                self.interior_temperature_k,
+                lid_thickness_km,
+                depth_km,
+                self.density_kg_m3,
+                self.heat_production,
+                self.thermal_conductivity,
+            )
+        };
+        // ONE GRAVITY: the flexure kernel's `km/s^2` gravity is the body's own `m/s^2` gravity converted once, never
+        // a second free copy that could disagree with the lithostatic axis's.
+        let gravity_km_s2 = self.gravity_m_s2.checked_div(Fixed::from_int(M_PER_KM))?;
+        let envelope = LithosphereEnvelope {
+            friction: self.friction,
+            density_kg_m3: self.density_kg_m3,
+            gravity_m_s2: self.gravity_m_s2,
+            geotherm_k: &geotherm,
+            creep: self.creep,
+            chord: self.chord,
+            lid_base,
+        };
+        let banded = solve_line_load_banded(
+            &envelope,
+            steps,
+            youngs_modulus_gpa,
+            poisson_ratio,
+            delta_rho,
+            gravity_km_s2,
+            v0,
+            self.chord,
+        )
+        .ok()?;
+        banded.elastic_thickness_band_km(youngs_modulus_gpa, poisson_ratio)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -4918,6 +5024,98 @@ mod tests {
             straddle.te_bias(),
             Some(TeBias::PossiblyBiasedLow),
             "the straddle surfaces as possibly biased low, never laundered to unflagged"
+        );
+    }
+
+    #[test]
+    fn the_lid_column_assembles_te_for_silicate_and_refuses_ice() {
+        // THE ASSEMBLER END TO END, on both a silicate lid and an ice shell, through ONE code path. The silicate
+        // column composes rock friction with olivine creep and derives a T_e band; the ice column composes ice
+        // friction with NO creep row (none is built yet) and REFUSES, which a render reads as the honest empty
+        // middle rather than a fabricated relief. The alien and the Earth-like differ only by their data rows.
+        let volumes = hk_dry_dislocation_activation_volumes();
+        let creep = [CreepCandidate {
+            row: hk_dry_dislocation(),
+            volumes: &volumes,
+        }];
+        let silicate = LidColumn {
+            friction: rock_friction_law(),
+            creep: &creep,
+            surface_temperature_k: Fixed::from_int(273),
+            interior_temperature_k: Fixed::from_int(1600),
+            density_kg_m3: Fixed::from_int(3300),
+            heat_production: ZERO,
+            thermal_conductivity: Fixed::from_int(3),
+            gravity_m_s2: Fixed::from_ratio(981, 100),
+            convecting_depth_km: Fixed::from_int(2890),
+            rayleigh: Fixed::from_int(100_000),
+            chord: test_chord(),
+        };
+        let (lo, hi) = silicate
+            .elastic_thickness_band_km(
+                lit_e(),
+                lit_nu(),
+                Fixed::from_ratio(33, 10),
+                Fixed::from_int(64),
+                600,
+            )
+            .expect("a silicate lid derives a T_e band on the shipped friction and creep rows");
+        // The band is a real elastic thickness INSIDE the derived lid (the ~62 km conductive base), and its edges
+        // are ordered. The geotherm now ramps over the SAME derived lid base the moment integral stops at (one
+        // derivation), so this is the coherent value, not the too-cold-at-base overestimate a free ramp gave.
+        assert!(
+            lo < hi && f64_of(lo) > 2.0 && f64_of(hi) < 62.3,
+            "the silicate T_e band is a real elastic thickness inside the lid: {} to {} km",
+            f64_of(lo),
+            f64_of(hi)
+        );
+
+        // POSITIVE MATERIAL-AGNOSTIC EVIDENCE, not merely silicate-derives / alien-refuses: a NON-silicate friction
+        // row still traverses the derive path. Swapping rock friction for ice friction (Beeman, far weaker) while
+        // keeping the rest still derives a T_e band, which proves the friction axis is a free data row rather than a
+        // silicate-hardcoded assumption. The ice-friction lid is weaker so its band is lower, but it DERIVES.
+        let chimera = LidColumn {
+            friction: ice_friction_law(),
+            ..silicate
+        };
+        assert!(
+            chimera
+                .elastic_thickness_band_km(
+                    lit_e(),
+                    lit_nu(),
+                    Fixed::from_ratio(33, 10),
+                    Fixed::from_int(64),
+                    600,
+                )
+                .is_some(),
+            "a non-silicate friction row still traverses the derive path: the friction axis is a free input"
+        );
+
+        // An ice shell with NO creep row: the ductile branch has no admitted candidate, so the column refuses.
+        let no_creep: [CreepCandidate; 0] = [];
+        let ice = LidColumn {
+            friction: ice_friction_law(),
+            creep: &no_creep,
+            surface_temperature_k: Fixed::from_int(100),
+            interior_temperature_k: Fixed::from_int(260),
+            density_kg_m3: Fixed::from_int(920),
+            heat_production: ZERO,
+            thermal_conductivity: Fixed::from_ratio(22, 10),
+            gravity_m_s2: Fixed::from_ratio(131, 100),
+            convecting_depth_km: Fixed::from_int(30),
+            rayleigh: Fixed::from_int(100_000),
+            chord: test_chord(),
+        };
+        assert!(
+            ice.elastic_thickness_band_km(
+                lit_e(),
+                lit_nu(),
+                Fixed::from_ratio(8, 100),
+                Fixed::from_int(2),
+                600,
+            )
+            .is_none(),
+            "an ice shell with no creep row refuses: the honest empty middle until ice rows land"
         );
     }
 
