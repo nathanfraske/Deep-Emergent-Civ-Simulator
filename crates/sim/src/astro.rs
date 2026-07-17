@@ -1002,6 +1002,40 @@ pub fn activity_luminosity_fraction(
     Some(ln_fraction.exp())
 }
 
+/// The ABSOLUTE X-RAY LUMINOSITY as `log10(L_X in erg/s)`, the destination the wind rate's interim `log10(L_X)`
+/// retires onto (the L_X-chain composition). It folds two dimensionless ratios the star already carries into an
+/// absolute luminosity: the bolometric ratio `L_bol/L_sun` ([`crate::stellar::luminosity_ratio`]) and the
+/// activity fraction `L_X/L_bol` ([`activity_luminosity_fraction`] on the star's Rossby number), through the solar
+/// luminosity, `L_X = (L_bol/L_sun) * L_sun * (L_X/L_bol)`. Returned as a `log10` because `L_X ~ 1e30 erg/s`
+/// overflows the fixed-point range outright, and because the wind rate consumes exactly this `log10(L_X)`, so the
+/// two compose without ever forming the raw value.
+///
+/// ZERO NEW VALUES: `L_sun` is the floor's solar-luminosity constant ([`SOLAR_LUMINOSITY_W`], in watts, folded to
+/// erg/s by the `1 W = 1e7 erg/s` decade), and the two ratios are derived upstream. This retires the
+/// L_bol-times-fraction step of the wind rate's interim; the LAST remaining interim is the Rossby number's own
+/// input, the rotation period `P_rot(age)` through the gyrochronology spin-down, which stays draw-pending (the
+/// `Omega_star_0` birth rotation is a layer-4 spec, not yet built, the same interim-plus-destination status as
+/// `Mdot_0`). So this closes the composition down to that one remaining draw. `None` on a non-positive ratio.
+pub fn stellar_xray_luminosity_log10_erg_s(
+    bolometric_ratio: Fixed,
+    activity_fraction: Fixed,
+) -> Option<Fixed> {
+    if bolometric_ratio <= Fixed::ZERO || activity_fraction <= Fixed::ZERO {
+        return None;
+    }
+    let ln10 = Fixed::from_int(10).ln();
+    // log10(L_sun in erg/s) = log10(L_sun in W) + 7 (the watt-to-erg/s decade).
+    let log10_l_sun_erg_s = civsim_physics::saha::ln_of_decimal(SOLAR_LUMINOSITY_W)?
+        .checked_div(ln10)?
+        .checked_add(Fixed::from_int(7))?;
+    let log10_bol = bolometric_ratio.ln().checked_div(ln10)?;
+    let log10_fraction = activity_fraction.ln().checked_div(ln10)?;
+    // log10(L_X) = log10(L_bol/L_sun) + log10(L_sun) + log10(L_X/L_bol); it is a log, so it stays in range.
+    log10_bol
+        .checked_add(log10_l_sun_erg_s)?
+        .checked_add(log10_fraction)
+}
+
 /// The FORMATION EPOCH `t_formation` (Myr): the DERIVED ROOT of `T_mid(1 AU, t) = T_condensation`, the referee
 /// that replaces the retired 0.19 formation-rate landmark (slice 1's closure). The formation-era midplane
 /// temperature RISES with the accretion rate, and the clock's `Mdot(t)` DECLINES with age, so the midplane cools
@@ -3207,5 +3241,80 @@ mod tests {
             "the wind rate feeding the race gives a finite positive lifetime (tau {})",
             tau.to_f64_lossy()
         );
+    }
+
+    #[test]
+    fn the_absolute_xray_luminosity_folds_to_the_solar_oracle() {
+        // Twin-independent oracle: a solar-bolometric star (L_bol/L_sun = 1) at the saturated young-sun activity
+        // fraction L_X/L_bol = 1e-3 gives log10(L_X) = log10(L_sun in erg/s) - 3 = 33.583 - 3 = 30.583, a few
+        // times 1e30 erg/s, the observed young-solar-analogue X-ray level. Computed outside the code under test.
+        let saturated_young_sun =
+            stellar_xray_luminosity_log10_erg_s(Fixed::ONE, Fixed::from_ratio(1, 1000)).unwrap();
+        assert!(
+            (saturated_young_sun.to_f64_lossy() - 30.582_972).abs() < 0.01,
+            "the young sun sits at log10(L_X) ~ 30.583 (got {})",
+            saturated_young_sun.to_f64_lossy()
+        );
+        // At the full bolometric luminosity (fraction 1) the result is log10(L_sun in erg/s) itself, 33.583.
+        let full = stellar_xray_luminosity_log10_erg_s(Fixed::ONE, Fixed::ONE).unwrap();
+        assert!(
+            (full.to_f64_lossy() - 33.582_972).abs() < 0.01,
+            "the full-bolometric fold reproduces log10(L_sun in erg/s) (got {})",
+            full.to_f64_lossy()
+        );
+    }
+
+    #[test]
+    fn the_absolute_xray_luminosity_is_a_decade_per_decade() {
+        // Each ratio enters as a log10, so a ten-times-brighter bolometric star and a ten-times-more-active star
+        // each raise log10(L_X) by exactly one, checked against the base rather than a second hand-number.
+        let base = stellar_xray_luminosity_log10_erg_s(Fixed::ONE, Fixed::from_ratio(1, 1000))
+            .unwrap()
+            .to_f64_lossy();
+        let brighter =
+            stellar_xray_luminosity_log10_erg_s(Fixed::from_int(10), Fixed::from_ratio(1, 1000))
+                .unwrap()
+                .to_f64_lossy();
+        let more_active =
+            stellar_xray_luminosity_log10_erg_s(Fixed::ONE, Fixed::from_ratio(1, 100))
+                .unwrap()
+                .to_f64_lossy();
+        assert!(
+            (brighter - base - 1.0).abs() < 0.01 && (more_active - base - 1.0).abs() < 0.01,
+            "a decade in either ratio adds one to log10(L_X) (base {}, brighter {}, more_active {})",
+            base,
+            brighter,
+            more_active
+        );
+    }
+
+    #[test]
+    fn the_absolute_xray_luminosity_closes_the_chain_into_the_wind_rate() {
+        // The end-to-end L_X-chain-into-wind-rate composition: the derived log10(L_X) for a saturated young sun,
+        // fed straight into the Owen wind rate, gives a positive finite rate. This is the interim log10(L_X)
+        // retired into a derived quantity, the destination the coordinator's L_X-first ruling named.
+        let log10_l_x =
+            stellar_xray_luminosity_log10_erg_s(Fixed::ONE, Fixed::from_ratio(1, 1000)).unwrap();
+        let fit = owen_appendix_b_fit();
+        let wind = photoevaporative_wind_rate_msun_myr(log10_l_x, Fixed::ONE, &fit).unwrap();
+        assert!(
+            wind > Fixed::ZERO,
+            "the derived L_X feeds the wind rate to a positive value (got {})",
+            wind.to_f64_lossy()
+        );
+    }
+
+    #[test]
+    fn the_absolute_xray_luminosity_refuses_nonphysical_ratios() {
+        // Fail-loud on a non-positive bolometric ratio or activity fraction: neither has a logarithm.
+        assert!(
+            stellar_xray_luminosity_log10_erg_s(Fixed::ZERO, Fixed::from_ratio(1, 1000)).is_none()
+        );
+        assert!(stellar_xray_luminosity_log10_erg_s(Fixed::ONE, Fixed::ZERO).is_none());
+        assert!(stellar_xray_luminosity_log10_erg_s(
+            Fixed::from_int(-1),
+            Fixed::from_ratio(1, 1000)
+        )
+        .is_none());
     }
 }
