@@ -35,6 +35,7 @@
 //! yet, so the pins hold. `mat.elastic_modulus` (Young's) is retired only by the principled `B` derived plus `G`
 //! class-dispatched route, not by this quick-screen scale alone.
 
+use crate::mineral_moduli::MineralModuli;
 use crate::periodic::PeriodicTable;
 use crate::petrology::Assemblage;
 use crate::petrology_data::{Phase, PhaseRegistry};
@@ -171,6 +172,219 @@ pub fn assemblage_elastic_modulus(
         value: hill,
         band,
         provenance: Provenance::Estimator,
+    })
+}
+
+// ----- The principled aggregate: a rock's moduli DERIVED from its census of cited MINERAL moduli -----
+//
+// This is the doctrine route (RUNBOOK section 14), distinct from the quick-screen scale above. The floor is a
+// cited MINERAL modulus (measured in ignorance of any rock, so it cannot fit an outcome, `crate::mineral_moduli`);
+// the DERIVATION is the Voigt-Reuss aggregation over the world's own mineral census; the OUTPUT is the rock's
+// moduli, which a handbook basalt or granite then referees from OUTSIDE. Nothing cited ever substitutes for the
+// aggregation step: a rock modulus is derived here or it is refused, never read from a table.
+
+/// A rock's DERIVED bulk and shear moduli, each a [`PropertyEstimate`] carrying the derived value, its combined
+/// texture-and-measurement band, and the `Derived` provenance (the Voigt-Reuss aggregation is an exact `[D]`
+/// step over MEASURED `[M]` mineral inputs, so the honest composite tag is `[D]`, unlike the quick-screen
+/// [`assemblage_elastic_modulus`] whose estimator inputs make it `[E]`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AggregateModuli {
+    /// The aggregate bulk modulus `K` (GPa), derived.
+    pub bulk: PropertyEstimate,
+    /// The aggregate shear modulus `G` (GPa), derived.
+    pub shear: PropertyEstimate,
+}
+
+/// The Voigt-Reuss-Hill aggregate of one property over a census, given the four accumulated sums: the
+/// volume-fraction-weighted Voigt (arithmetic) and Reuss (harmonic) means at the phases' CENTRAL moduli, and the
+/// same two at the phases' outer measurement edges (Voigt over the stiff edges `M_i + band_i`, Reuss over the
+/// soft edges `M_i - band_i`). The value is the conventional Hill best estimate (the midpoint of the central
+/// Voigt-Reuss gap); the band is the symmetric half-width that covers the OUTER interval `[reuss_lo, voigt_hi]`,
+/// so it folds the texture uncertainty (Voigt versus Reuss, the rock's unknown grain geometry) and the input
+/// measurement uncertainty (each mineral's own band) into one rigorous interval. When every measurement band is
+/// zero this reduces exactly to the classic Hill value with the half-gap band.
+fn vrh_banded(
+    voigt_center: Fixed,
+    reuss_recip_center: Fixed,
+    voigt_hi: Fixed,
+    reuss_recip_lo: Fixed,
+) -> Option<PropertyEstimate> {
+    if reuss_recip_center <= Fixed::ZERO || reuss_recip_lo <= Fixed::ZERO {
+        return None;
+    }
+    let two = Fixed::from_int(2);
+    let reuss_center = Fixed::ONE.checked_div(reuss_recip_center)?;
+    let reuss_lo = Fixed::ONE.checked_div(reuss_recip_lo)?;
+    // The conventional Hill best estimate: the midpoint of the central Voigt-Reuss bounds.
+    let hill = (voigt_center + reuss_center).checked_div(two)?;
+    // The band covers the outer texture-times-measurement interval [reuss_lo, voigt_hi]. Voigt_hi >= voigt_center
+    // >= hill and reuss_lo <= reuss_center <= hill, so both gaps are non-negative and the larger is the covering
+    // half-width.
+    let up = voigt_hi - hill;
+    let down = hill - reuss_lo;
+    let band = if up >= down { up } else { down };
+    Some(PropertyEstimate {
+        value: hill,
+        band,
+        provenance: Provenance::Derived,
+    })
+}
+
+/// A rock's bulk and shear moduli DERIVED by Voigt-Reuss-Hill aggregation over its stable mineral
+/// [`Assemblage`], reading each phase's CITED measured moduli from the [`MineralModuli`] floor and each phase's
+/// VOLUME FRACTION from its registry molar volume. This is the doctrine route: a world's rock stiffness falls
+/// out of the moduli of the minerals the world's own petrology drew, never a per-rock-type table.
+///
+/// The aggregation weights each phase by its volume fraction (the elastically correct weighting), takes the
+/// Voigt arithmetic mean (the rigorous upper bound, iso-strain) and the Reuss harmonic mean (the rigorous lower
+/// bound, iso-stress), and reports the Hill midpoint with a band that covers the texture gap widened by the
+/// input measurement bands (see [`vrh_banded`]).
+///
+/// TERMS DROPPED, BY NAME (each a chord this aggregate does not carry, surfaced rather than silently absorbed):
+///   - THE TEXTURE TERM. The true aggregate depends on grain geometry between the Voigt and Reuss bounds; the
+///     rock's actual texture is unknown, so the Hill midpoint is the maximum-ignorance estimate and the V-R gap
+///     is carried AS the band. A measured texture (a foliation, a shape-preferred orientation) would tighten
+///     this toward one bound; that tightening is a future term, not dropped silently but named here.
+///   - THE CRACK AND POROSITY TERM. The mineral moduli are the intact crack-free frame (the row's declared
+///     `frame`); a real rock's cracks and pores lower its moduli below this intact aggregate. That softening is
+///     a separate poroelastic term keyed on a porosity field, dropped here and named, not folded into the band.
+///   - THE PRESSURE-TEMPERATURE CHORD. The mineral moduli are measured at their row's `(P, T)` (the seed rows
+///     are ambient); a rock at depth sits at a different chord, where `K` and `G` are stiffer (pressure) and
+///     softer (temperature). That `(P, T)` correction rides the moduli's own derivatives (a future column on the
+///     mineral floor), dropped here and named.
+///
+/// Returns `None` (a banded REFUSAL, never a silent phase drop) if any census phase has no cited measured row,
+/// is missing from the registry, or the assemblage has no volume. An unmeasured phase is refused rather than
+/// dropped because dropping it would bias the aggregate toward the measured remainder; the honest output is a
+/// refusal that says the census is not yet fully grounded. (The future tightening: an unmeasured but clean ionic
+/// phase could contribute a bulk modulus through the lattice-curvature carve rung, `crate::lattice_modulus`,
+/// rather than refusing the whole aggregate; the shear modulus has no floor route yet, so it would still refuse.)
+///
+/// Byte-neutral: no consumer reads this yet, so the pins hold.
+pub fn assemblage_bulk_shear_moduli(
+    assemblage: &Assemblage,
+    moduli: &MineralModuli,
+    registry: &PhaseRegistry,
+) -> Option<AggregateModuli> {
+    // First pass: the total volume, so the per-phase volume fractions are exact.
+    let mut total_volume = Fixed::ZERO;
+    for (name, amt) in &assemblage.phases {
+        let phase = registry.phase(name)?;
+        total_volume += amt.checked_mul(phase.molar_volume)?;
+    }
+    if total_volume <= Fixed::ZERO {
+        return None;
+    }
+    // Second pass: the Voigt and Reuss accumulators for K and G, at the central moduli and at the outer
+    // measurement edges. The loader guarantees each soft edge (modulus minus band) is strictly positive, so the
+    // harmonic Reuss reciprocals never divide through zero.
+    let mut k_voigt_c = Fixed::ZERO;
+    let mut k_reuss_recip_c = Fixed::ZERO;
+    let mut k_voigt_hi = Fixed::ZERO;
+    let mut k_reuss_recip_lo = Fixed::ZERO;
+    let mut g_voigt_c = Fixed::ZERO;
+    let mut g_reuss_recip_c = Fixed::ZERO;
+    let mut g_voigt_hi = Fixed::ZERO;
+    let mut g_reuss_recip_lo = Fixed::ZERO;
+    for (name, amt) in &assemblage.phases {
+        let phase = registry.phase(name)?;
+        let row = moduli.row(name)?; // banded refusal: an unmeasured census phase refuses the whole aggregate.
+        let phase_volume = amt.checked_mul(phase.molar_volume)?;
+        let fraction = phase_volume.checked_div(total_volume)?;
+        let k_soft = row.bulk_gpa - row.bulk_band_gpa;
+        let g_soft = row.shear_gpa - row.shear_band_gpa;
+        if k_soft <= Fixed::ZERO || g_soft <= Fixed::ZERO {
+            return None;
+        }
+        k_voigt_c += fraction.checked_mul(row.bulk_gpa)?;
+        k_reuss_recip_c += fraction.checked_div(row.bulk_gpa)?;
+        k_voigt_hi += fraction.checked_mul(row.bulk_gpa + row.bulk_band_gpa)?;
+        k_reuss_recip_lo += fraction.checked_div(k_soft)?;
+        g_voigt_c += fraction.checked_mul(row.shear_gpa)?;
+        g_reuss_recip_c += fraction.checked_div(row.shear_gpa)?;
+        g_voigt_hi += fraction.checked_mul(row.shear_gpa + row.shear_band_gpa)?;
+        g_reuss_recip_lo += fraction.checked_div(g_soft)?;
+    }
+    let bulk = vrh_banded(k_voigt_c, k_reuss_recip_c, k_voigt_hi, k_reuss_recip_lo)?;
+    let shear = vrh_banded(g_voigt_c, g_reuss_recip_c, g_voigt_hi, g_reuss_recip_lo)?;
+    Some(AggregateModuli { bulk, shear })
+}
+
+/// The four isotropic elastic constants of a solid, the full closure from a bulk and shear modulus: an isotropic
+/// material has two independent elastic constants, so `K` and `G` fix `E` (Young's) and `nu` (Poisson's) exactly.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct IsotropicClosure {
+    /// The bulk modulus `K` (GPa), the input.
+    pub bulk: Fixed,
+    /// The shear modulus `G` (GPa), the input.
+    pub shear: Fixed,
+    /// Young's modulus `E` (GPa), derived: `E = 9 K G / (3 K + G)`.
+    pub young: Fixed,
+    /// Poisson's ratio `nu` (dimensionless), derived: `nu = (3 K - 2 G) / (2 (3 K + G))`.
+    pub poisson: Fixed,
+}
+
+/// The fixed-point consistency budget for the two Poisson-ratio routes. The direct route `nu = (3K - 2G) /
+/// (2(3K + G))` and the through-`E` twin `nu = (3K - E) / (6K)` are one algebraic identity, so their difference
+/// is pure Q32.32 rounding across two division orders (a few ULP), never a physical disagreement. A divergence
+/// beyond this budget signals an arithmetic defect and refuses the closure. This is a REPRESENTATION tolerance
+/// (the fixed-point grid's rounding), not a world value: `1e-6`, thousands of ULP above the real rounding and far
+/// below any bug's signature.
+fn isotropic_twin_tolerance() -> Fixed {
+    Fixed::from_ratio(1, 1_000_000)
+}
+
+/// The isotropic elastic closure from a bulk and shear modulus: `E` and `nu` derived by the exact isotropic
+/// relations, with a two-route consistency twin on `nu` and a thermodynamic guard. Returns `None` if either
+/// input modulus is non-positive, if `nu` falls outside the thermodynamic range `(-1, 1/2)` (a corrupted input),
+/// or if the two `nu` routes diverge beyond the fixed-point budget (an arithmetic defect). The caller passes the
+/// central aggregate values (a [`PropertyEstimate`]'s `value`); propagating the `K` and `G` bands through this
+/// nonlinear closure into `E` and `nu` bands is a documented follow-on, the bands being carried on
+/// [`AggregateModuli`] until then.
+pub fn assemblage_isotropic_closure(bulk_gpa: Fixed, shear_gpa: Fixed) -> Option<IsotropicClosure> {
+    if bulk_gpa <= Fixed::ZERO || shear_gpa <= Fixed::ZERO {
+        return None;
+    }
+    let two = Fixed::from_int(2);
+    let three = Fixed::from_int(3);
+    let six = Fixed::from_int(6);
+    let nine = Fixed::from_int(9);
+    let three_k = three.checked_mul(bulk_gpa)?;
+    let three_k_plus_g = three_k + shear_gpa;
+    if three_k_plus_g <= Fixed::ZERO {
+        return None;
+    }
+    // Young's modulus E = 9 K G / (3K + G).
+    let young = nine
+        .checked_mul(bulk_gpa)?
+        .checked_mul(shear_gpa)?
+        .checked_div(three_k_plus_g)?;
+    // Poisson's ratio, direct route: nu = (3K - 2G) / (2 (3K + G)).
+    let two_g = two.checked_mul(shear_gpa)?;
+    let poisson = (three_k - two_g).checked_div(two.checked_mul(three_k_plus_g)?)?;
+    // Poisson's ratio, through-E twin: nu = (3K - E) / (6K). Algebraically identical; a fixed-point cross-check.
+    let poisson_twin = (three_k - young).checked_div(six.checked_mul(bulk_gpa)?)?;
+    // Thermodynamic guard: an isotropic solid has nu in (-1, 1/2). For K, G > 0 this holds by construction; the
+    // guard catches a corrupted input rather than shaping a real one.
+    let half = Fixed::from_ratio(1, 2);
+    let neg_one = Fixed::from_int(-1);
+    if poisson <= neg_one || poisson >= half {
+        return None;
+    }
+    // Fixed-point consistency: the two routes are one identity, so a divergence is a defect, not physics.
+    let diff = if poisson >= poisson_twin {
+        poisson - poisson_twin
+    } else {
+        poisson_twin - poisson
+    };
+    if diff > isotropic_twin_tolerance() {
+        return None;
+    }
+    Some(IsotropicClosure {
+        bulk: bulk_gpa,
+        shear: shear_gpa,
+        young,
+        poisson,
     })
 }
 
@@ -364,6 +578,153 @@ mod tests {
         assert!(
             phase_cohesive_energy(&phantom, &t).is_none(),
             "an element with no atomization enthalpy surfaces the data gap as None"
+        );
+    }
+
+    // ----- The principled aggregate (cited mineral moduli -> derived rock moduli) -----
+
+    /// Synthetic mineral moduli for the machinery tests: ROUND numbers over real registry phase names so the
+    /// Voigt-Reuss math is hand-verifiable. These are NOT a citation load (the source string says so); the real
+    /// cited values live in `data/mineral_moduli.toml`, and these prove only that the aggregator computes the
+    /// bounds and the closure correctly given known inputs.
+    fn synthetic_moduli() -> MineralModuli {
+        let toml = r#"
+[[mineral]]
+name = "periclase"
+bulk_modulus_gpa = "200"
+bulk_band_gpa = "2"
+shear_modulus_gpa = "120"
+shear_band_gpa = "1"
+source = "SYNTHETIC test fixture, round numbers, not a citation"
+[[mineral]]
+name = "quartz"
+bulk_modulus_gpa = "100"
+shear_modulus_gpa = "60"
+source = "SYNTHETIC test fixture, round numbers, not a citation"
+"#;
+        MineralModuli::from_toml_str(toml).expect("the synthetic fixture loads")
+    }
+
+    #[test]
+    fn the_isotropic_closure_is_the_textbook_relation() {
+        // K = 100, G = 75 gives, by the exact isotropic relations, nu = (300 - 150) / (2 * 375) = 0.2 and
+        // E = 9 * 100 * 75 / 375 = 180. Both routes for nu must agree and the guard must pass.
+        let closure = assemblage_isotropic_closure(Fixed::from_int(100), Fixed::from_int(75))
+            .expect("a real K and G close to E and nu");
+        let tol = Fixed::from_ratio(1, 100_000);
+        assert!(
+            (closure.poisson - Fixed::from_ratio(2, 10)).abs() < tol,
+            "Poisson's ratio is 0.2, got {}",
+            closure.poisson.to_f64_lossy()
+        );
+        assert!(
+            (closure.young - Fixed::from_int(180)).abs() < tol,
+            "Young's modulus is 180 GPa, got {}",
+            closure.young.to_f64_lossy()
+        );
+        // A non-physical input (zero shear) is refused, not closed.
+        assert!(assemblage_isotropic_closure(Fixed::from_int(100), Fixed::ZERO).is_none());
+    }
+
+    #[test]
+    fn a_single_phase_rock_takes_the_minerals_own_moduli_and_band() {
+        // A rock of one mineral has that mineral's moduli exactly, and the aggregate band is the mineral's own
+        // measurement band (there is no texture gap with one phase).
+        let reg = registry();
+        let moduli = synthetic_moduli();
+        let asm = Assemblage {
+            phases: vec![("periclase".to_string(), Fixed::from_int(1))],
+            total_gibbs: Fixed::ZERO,
+            truncated: false,
+        };
+        let agg = assemblage_bulk_shear_moduli(&asm, &moduli, &reg)
+            .expect("a measured single phase aggregates");
+        // The aggregation divides by the total volume and takes a harmonic reciprocal, so a single phase returns
+        // its own moduli to within fixed-point rounding (a few parts per million), not bit-exactly.
+        let tol = Fixed::from_ratio(1, 1000);
+        assert!(
+            (agg.bulk.value - Fixed::from_int(200)).abs() < tol,
+            "bulk is periclase's 200 GPa, got {}",
+            agg.bulk.value.to_f64_lossy()
+        );
+        assert!(
+            (agg.bulk.band - Fixed::from_int(2)).abs() < tol,
+            "bulk band is periclase's 2 GPa, got {}",
+            agg.bulk.band.to_f64_lossy()
+        );
+        assert!(
+            (agg.shear.value - Fixed::from_int(120)).abs() < tol,
+            "shear is periclase's 120 GPa, got {}",
+            agg.shear.value.to_f64_lossy()
+        );
+        assert!(
+            (agg.shear.band - Fixed::from_int(1)).abs() < tol,
+            "shear band is periclase's 1 GPa, got {}",
+            agg.shear.band.to_f64_lossy()
+        );
+        assert_eq!(
+            agg.bulk.provenance,
+            Provenance::Derived,
+            "the aggregate is derived, not estimator"
+        );
+    }
+
+    #[test]
+    fn a_two_phase_rock_lands_between_its_minerals_and_is_volume_weighted() {
+        // Periclase (K 200) plus quartz (K 100) at one mole each: quartz's larger molar volume (22.688 vs
+        // 11.248 cm^3/mol) gives it the larger VOLUME fraction, so the aggregate is pulled below the equal-weight
+        // midpoint of 150 toward quartz's 100, and it stays strictly inside the [100, 200] bracket with a
+        // positive texture band.
+        let reg = registry();
+        let moduli = synthetic_moduli();
+        let asm = Assemblage {
+            phases: vec![
+                ("periclase".to_string(), Fixed::from_int(1)),
+                ("quartz".to_string(), Fixed::from_int(1)),
+            ],
+            total_gibbs: Fixed::ZERO,
+            truncated: false,
+        };
+        let agg = assemblage_bulk_shear_moduli(&asm, &moduli, &reg)
+            .expect("a two-phase measured rock aggregates");
+        assert!(
+            agg.bulk.value > Fixed::from_int(100) && agg.bulk.value < Fixed::from_int(200),
+            "the aggregate bulk is bracketed by its minerals, got {}",
+            agg.bulk.value.to_f64_lossy()
+        );
+        assert!(
+            agg.bulk.value < Fixed::from_int(150),
+            "quartz has the larger volume fraction, so the aggregate is pulled below the equal-weight 150, got {}",
+            agg.bulk.value.to_f64_lossy()
+        );
+        assert!(
+            agg.bulk.band > Fixed::ZERO,
+            "a two-phase rock carries a positive texture band"
+        );
+        // The whole closure runs end to end on the derived aggregate.
+        let closure = assemblage_isotropic_closure(agg.bulk.value, agg.shear.value)
+            .expect("the derived rock moduli close to E and nu");
+        assert!(closure.poisson > Fixed::ZERO && closure.poisson < Fixed::from_ratio(1, 2));
+    }
+
+    #[test]
+    fn an_unmeasured_census_phase_refuses_the_aggregate() {
+        // Forsterite is in the registry but NOT in the synthetic moduli table, an unmeasured census member. The
+        // aggregator refuses (None) rather than silently dropping it and biasing the result toward the measured
+        // remainder.
+        let reg = registry();
+        let moduli = synthetic_moduli();
+        let asm = Assemblage {
+            phases: vec![
+                ("periclase".to_string(), Fixed::from_int(1)),
+                ("forsterite".to_string(), Fixed::from_int(1)),
+            ],
+            total_gibbs: Fixed::ZERO,
+            truncated: false,
+        };
+        assert!(
+            assemblage_bulk_shear_moduli(&asm, &moduli, &reg).is_none(),
+            "an unmeasured census phase is a banded refusal, never a silent drop"
         );
     }
 }
