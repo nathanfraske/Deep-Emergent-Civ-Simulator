@@ -70,6 +70,11 @@ pub enum ComparisonRefusal {
 /// WHICH RUNG OF THE RESIDUAL LAW a miss lands on. NEVER a verdict, NEVER a fit: a miss is the residual law firing,
 /// reported. The rung names the next ACTION in order, and the action is analysis, never a code correction toward the
 /// row. A comparison always reports the FIRST rung; walking the ladder is the analyst's step, not this function's.
+///
+/// THE LICENSE (ratified on review): encoding the FIRST rung is LAW, not judgment. Every miss begins as a defect
+/// hunt by the Residual Law, so machine-encoding that entry point prevents the hurried-consumer failure where a
+/// miss reads as an invitation to calibrate. The later rungs (band-narrowing, then the licensed channel) stay
+/// correctly EXTERNAL, because they are the analyst's judgment rather than the law's fixed first move.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ResidualRung {
     /// FIRST: hunt a defect. A miss is a claim about the engine or the transcribed row before it is a claim about
@@ -121,6 +126,11 @@ pub fn compare_to_row(derived: RigidityBand, row: &ElasticThicknessRow) -> Hindc
             }
         }
     };
+    // THE ONE-SIDED-BOUND LICENSE (ratified on review): every arm below is the SAME rule, band intersection over
+    // the row's STATED SUPPORT, never a variant. A two-sided interval claims both edges; an upper-bound row claims
+    // exactly one edge and the comparison honors exactly that claim, inconsistent only when the derived band lies
+    // entirely beyond it, with the open side never invented. That is band intersection applied to the row's actual
+    // epistemic shape, not a different test for bounds.
     let consistent = match row.observed {
         // A TWO-SIDED INTERVAL: exact band overlap through the row's own pair.
         ObservedElasticThickness::Interval { low_km, high_km } => {

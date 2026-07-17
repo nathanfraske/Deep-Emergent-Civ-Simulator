@@ -198,6 +198,8 @@ AND THE QUIETER LESSON FROM THE SAME HOUR: RUN A GATE CHECK IN A CLEAN TREE, and
 
 The sibling failure, same day, same class: a search for a convective velocity ran `grep "fn .*(velocity|overturn|timescale)"` over the laws, read its output, and concluded no convective velocity existed. `laws::stokes_velocity` WAS IN THAT OUTPUT. It is the convective velocity, named for its physics rather than for its role. So the second half of the rule: SEARCH FOR THE PHYSICS NAME, NOT THE WORD YOU EXPECT, and when a search returns "absent", ask whether the thing is present under a name you did not think of.
 
+A GATE'S RED IS ATTRIBUTED AGAINST A BASELINE, NEVER COUNTED IN ISOLATION (owner-ratified as standing practice, 2026-07-17). When a shared gate is red on a branch, a "my changes add none" claim is a DELTA claim, and a delta is measured against the baseline, not asserted from a count. Read the ACTUAL errors, check `origin/main` (or the branch's merge base) for each one, and distinguish INHERITED from INTRODUCED. A delta-zero earned by inheriting two reds and adding none is a different fact from a clean file, and the audit must say which: the doc-link gate on the disk-evolution branch showed two broken links into `astro.rs`, and reading the errors and checking main proved both pre-existed at the identical lines, so the branch introduced zero. This is the same discipline as the pipe and grep rules one level up: a count is rendered prose, the per-error origin is the machine fact. It is also why a count alone once mis-attributed astro.rs's inherited debt as clean, the failure this rule retires.
+
 ---
 
 ## 7. Mutation testing on the tests that guard physics (owner-ruled, 2026-07-16)

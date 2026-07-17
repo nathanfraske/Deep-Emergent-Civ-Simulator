@@ -1161,6 +1161,11 @@ impl MomentEquivalentPlate {
 /// step size `final_delta_gpa_km3` so a caller sees how close it came rather than reading a numerical stall as a
 /// physical support bound.
 ///
+/// THE LICENSE (ratified on review): a stalled end is a NUMERICAL EVENT TO SURFACE, never an open interval side.
+/// Turning a solver stall into epistemic half-knowledge (a band the caller treats as physical spread) would
+/// launder arithmetic into physics, so the numerical variant propagates as itself and never becomes a band edge or
+/// a support-straddle.
+///
 /// CONVERGENCE IS TESTED AT THE LAST BIT: the walk stops when successive rigidities differ by at most
 /// `Fixed::EPSILON`, the accumulator's own resolution, which is the same currency as every other tolerance here.
 ///
@@ -1575,10 +1580,29 @@ pub struct BandedMomentEquivalentPlate {
     /// THE LID REFEREE'S VERDICT, RIDING THE PLATE rather than computed and discarded. The pure solve leaves this
     /// `None`; [`BandedMomentEquivalentPlate::with_lid_referee`] attaches it from the envelope and a declared
     /// convective stress. `None` means the plate was not refereed, or the referee refused at the lid base. When a
-    /// verdict is present, [`BandedMomentEquivalentPlate::te_biased_low`] reads whether it is the one the referee
-    /// convicts a too-shallow lid with, so a `T_e` that a truncated moment integral biased low travels with the
-    /// flag that says so.
+    /// verdict is present, [`BandedMomentEquivalentPlate::te_bias`] maps it to the three-valued [`TeBias`] a
+    /// truncated moment integral implies, so a `T_e` that the lid may or does bias low travels with the flag that
+    /// says which.
     lid_referee: Option<LidReferee>,
+}
+
+/// THE `T_e` BIAS a lid referee's verdict implies, THREE-VALUED because the verdict is. A `T_e` read from a moment
+/// integral bounded at the derived lid base is biased LOW when that lid is too shallow (the integral was cut short
+/// of the deeper column it should have summed). The verdict maps to this bias one for one, so the ambiguity in the
+/// verdict SURFACES here rather than collapsing to clean: a two-valued flag on a three-valued verdict would have to
+/// fold the straddle into "unflagged", which launders ambiguity into a clean answer, the wrong direction.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TeBias {
+    /// The lid is confirmed at both `V*` ends: the moment integral reached the mechanical boundary, so `T_e` is not
+    /// biased by a truncated lid.
+    Unbiased,
+    /// The `V*` bracket STRADDLES the convective stress: one end says the lid truncated the integral and the other
+    /// does not, so the high edge of the `T_e` band carries the suspicion and the low edge does not. Reported as
+    /// possibly biased low rather than collapsed to either answer.
+    PossiblyBiasedLow,
+    /// The strength exceeds the convective stress at BOTH ends: the lid base is derived too shallow, the integral
+    /// was cut short, and `T_e` reads low. The one-sidedness (blind to a too-DEEP lid) is the referee's own limit.
+    BiasedLow,
 }
 
 impl BandedMomentEquivalentPlate {
@@ -1645,21 +1669,19 @@ impl BandedMomentEquivalentPlate {
         self.lid_referee.as_ref()
     }
 
-    /// WHETHER THE ATTACHED VERDICT CONVICTS A TOO-SHALLOW LID, hence a `T_e` biased low. The referee fires
-    /// [`LidVerdict::StrengthExceedsConvectiveStress`] where the ductile strength at the derived lid base still
-    /// exceeds the convective driving stress, which its own doc reads as a lid base derived TOO SHALLOW: the
-    /// moment integral, bounded at that lid base, was cut short of the deeper column it should have summed, so the
-    /// equivalent rigidity and its `T_e` read LOW. This is the flag the review asked ride the output. `false` when
-    /// no verdict is attached, when the lid is confirmed, or when the bracket straddles: only the convicting
-    /// verdict raises it, and its one-sidedness (blind to a too-DEEP lid) is the referee's own stated limit.
-    pub fn te_biased_low(&self) -> bool {
-        matches!(
-            self.lid_referee,
-            Some(LidReferee {
-                verdict: LidVerdict::StrengthExceedsConvectiveStress,
-                ..
-            })
-        )
+    /// THE `T_e` BIAS the attached verdict implies, three-valued to match the referee's three-valued verdict, or
+    /// `None` when no verdict is attached (the plate was not refereed, or the referee refused at the lid base). A
+    /// `Confirmed` lid is [`TeBias::Unbiased`]; a bracket that STRADDLES the convective stress is
+    /// [`TeBias::PossiblyBiasedLow`], so the `V*` ends' disagreement about whether the lid truncated the integral
+    /// surfaces rather than laundering to clean; strength exceeding the stress at both ends is [`TeBias::BiasedLow`],
+    /// the too-shallow-lid conviction. A two-valued flag would have to collapse the straddle into unflagged, the
+    /// wrong direction, so the bias carries the verdict's own three values and ambiguity is reported, never hidden.
+    pub fn te_bias(&self) -> Option<TeBias> {
+        self.lid_referee.map(|referee| match referee.verdict {
+            LidVerdict::Confirmed => TeBias::Unbiased,
+            LidVerdict::BracketStraddlesConvectiveStress => TeBias::PossiblyBiasedLow,
+            LidVerdict::StrengthExceedsConvectiveStress => TeBias::BiasedLow,
+        })
     }
 }
 
@@ -2100,6 +2122,13 @@ impl LithosphereEnvelope<'_> {
         // shell's brittle zone. Refusing there composed the envelope for every rock lid and silenced every icy one
         // at mid-shell, Terran bias expressed as an unhandled match arm. `VolumeEnd` (Low the weaker end, High the
         // stronger) carries the same sense for both limbs, so the mirrored end parameter is the whole fix.
+        //
+        // THE INDEPENDENCE LICENSE (ratified on review): endpoint-wise min, low with low and high with high, is the
+        // EXACT interval arithmetic for the min of INDEPENDENT intervals, so this composes rather than averages. The
+        // two ignorance sources here are independent: the Beeman friction gap is a friction-calibration bracket, the
+        // V* spread is the creep rows' own scatter, and neither conditions the other. The boundary is named so it is
+        // not crossed unseen: the day two CORRELATED brackets meet in a min, the covariance rule applies instead of
+        // endpoint-wise min, and this arm would be wrong for that case.
         let brittle_mpa = match self.brittle(depth_km, sense)? {
             DifferentialStrength::Determined(d) => d,
             DifferentialStrength::Bracket { low, high } => match end {
@@ -4804,16 +4833,17 @@ mod tests {
                 .expect("both edges of the V* band converge on this deep lid")
         };
 
-        // THE PURE SOLVE CARRIES NO VERDICT: the field is absent and the flag is down, so the attach below is what
-        // raises it and not the solve always speaking.
+        // THE PURE SOLVE CARRIES NO VERDICT: the field is absent and the bias is None (not Unbiased, since with no
+        // referee we cannot say), so the attach below is what raises it and not the solve always speaking.
         let bare = solve();
         assert!(
             bare.lid_referee().is_none(),
             "the pure banded solve attaches no referee"
         );
-        assert!(
-            !bare.te_biased_low(),
-            "with no verdict attached the bias flag is down"
+        assert_eq!(
+            bare.te_bias(),
+            None,
+            "with no verdict attached the bias is unknown, reported None rather than Unbiased"
         );
 
         // The measured strength at the derived lid base, both V* ends determinate and ordered, is the pivot the two
@@ -4847,13 +4877,14 @@ mod tests {
             LidVerdict::StrengthExceedsConvectiveStress,
             "a stress the lid's strength exceeds at both ends convicts the base"
         );
-        assert!(
-            biased.te_biased_low(),
-            "the convicting verdict raises the T_e-biased-low flag on the plate"
+        assert_eq!(
+            biased.te_bias(),
+            Some(TeBias::BiasedLow),
+            "the convicting verdict reads as biased low on the plate"
         );
 
-        // A CONVECTIVE STRESS ABOVE BOTH ENDS confirms the base: the verdict still rides, but the bias flag is
-        // down, so the flag tracks the convicting verdict alone and not merely the presence of a verdict.
+        // A CONVECTIVE STRESS ABOVE BOTH ENDS confirms the base: the verdict rides and the bias is Unbiased, so the
+        // bias tracks the verdict and not merely the presence of one.
         let above_both = Fixed::from_ratio((hi * 2.0 * 1e6) as i64, 1_000_000);
         let confirmed = solve().with_lid_referee(&env, above_both);
         assert_eq!(
@@ -4861,9 +4892,32 @@ mod tests {
             LidVerdict::Confirmed,
             "a stress above the lid's strength at both ends confirms the base"
         );
+        assert_eq!(
+            confirmed.te_bias(),
+            Some(TeBias::Unbiased),
+            "a confirmed base is unbiased, though a verdict is attached"
+        );
+
+        // A CONVECTIVE STRESS BETWEEN THE TWO ENDS is the straddle: the weaker V* end has fallen to the stress and
+        // the stronger has not, so the ends DISAGREE about whether the lid truncated the integral. The amendment is
+        // that this surfaces as PossiblyBiasedLow rather than collapsing to unflagged (which a two-valued flag would
+        // have done, laundering the ambiguity to clean). The deep band gives distinct base strengths, so a midpoint
+        // straddles.
         assert!(
-            !confirmed.te_biased_low(),
-            "a confirmed base does not bias T_e low, though a verdict is attached"
+            lo < hi,
+            "the deep band's two ends give distinct base strengths, so a midpoint can straddle: {lo}, {hi}"
+        );
+        let between = Fixed::from_ratio(((lo + hi) / 2.0 * 1e6) as i64, 1_000_000);
+        let straddle = solve().with_lid_referee(&env, between);
+        assert_eq!(
+            straddle.lid_referee().expect("attached").verdict,
+            LidVerdict::BracketStraddlesConvectiveStress,
+            "a stress between the two ends leaves the question open: the referee straddles"
+        );
+        assert_eq!(
+            straddle.te_bias(),
+            Some(TeBias::PossiblyBiasedLow),
+            "the straddle surfaces as possibly biased low, never laundered to unflagged"
         );
     }
 
