@@ -124,12 +124,23 @@ pub fn cohesive_energy_at_volume(
 mod tests {
     use super::*;
 
-    // Fe's D3-a anchors and banked cohesive energy: B0 = 170 GPa, V0 = 7.09 cm^3/mol, E_coh = 416.3 kJ/mol.
+    // Fe's D3-a anchors and banked cohesive energy: B0 = 170 GPa, V0 = 7.09 cm^3/mol, E_coh = 415.471 kJ/mol.
+    //
+    // THIS FIXTURE CLAIMED TO MIRROR THE BANK AND CARRIED A RETIRED VALUE. It read 416.3 until this fix,
+    // and 416.3 was retired by `a91954b`: it was cited to CODATA Key Values, which CONTAINS NO IRON ROW,
+    // so it wore a citation it could not cash. The banked row is now 415.471, from the repository's own
+    // md5-verified `data/janaf/Fe-008.txt`.
+    //
+    // IT PASSED THE WHOLE TIME, WHICH IS WHY NOTHING CAUGHT IT: the fixture is self-consistent, so its
+    // tests never read the column they claim to mirror and could not notice the column moving. The commit
+    // that re-valued the row NAMED ITS LIVE CONSUMER (`metallic.rs`) and touched neither that consumer's
+    // pins nor this mirror. A FIXTURE THAT SAYS "BANKED" IS A CLAIM ABOUT THE BANK, and a claim about the
+    // bank that cannot fail when the bank changes is a copy, not a mirror.
     fn fe() -> (Fixed, Fixed, Fixed) {
         (
-            Fixed::from_decimal_str("416.3").unwrap(), // E_coh kJ/mol
-            Fixed::from_decimal_str("7.09").unwrap(),  // V0 cm^3/mol
-            Fixed::from_int(170),                      // B0 GPa
+            Fixed::from_decimal_str("415.471").unwrap(), // E_coh kJ/mol
+            Fixed::from_decimal_str("7.09").unwrap(),    // V0 cm^3/mol
+            Fixed::from_int(170),                        // B0 GPa
         )
     }
 
@@ -169,8 +180,8 @@ mod tests {
         let (e_coh, v0, b0) = fe();
         let e = cohesive_energy_at_volume(e_coh, v0, b0, v0).expect("Fe E(V0)");
         assert!(
-            close(e, -416.3, 0.01),
-            "Fe E(V0) = -E_coh = -416.3 kJ/mol, got {}",
+            close(e, -415.471, 0.01),
+            "Fe E(V0) = -E_coh = -415.471 kJ/mol, got {}",
             e.to_f64_lossy()
         );
     }

@@ -182,10 +182,21 @@ mod tests {
         let (t, a) = floors();
         let route = MetallicRoute::new(&t, &a);
         // Fe's banked atomization enthalpy is its cohesive energy (kJ/mol).
+        //
+        // THIS PIN WAS ASSERTING A RETIRED VALUE, and it is worth the paragraph. It read 416.3, which was
+        // the Fe row's value until `a91954b` re-valued it to 415.471: the 416.3 was cited to CODATA Key
+        // Values, and CODATA CONTAINS NO IRON ROW, so it wore a citation it could not cash. The row now
+        // takes the repository's own md5-verified `data/janaf/Fe-008.txt`.
+        //
+        // The data moved and the assertion did not, so this suite spent that whole time ASSERTING THE
+        // DEFECT. The commit that fixed the row NAMED THIS CONSUMER IN ITS OWN MESSAGE ("the column is
+        // LIVE: metallic.rs reads it for Rose's own cohesive-energy route") and changed only the TOML.
+        // Naming a consumer is not checking it. A DATA PIN IS A TEST OF THE DATA, so re-valuing a row is
+        // incomplete until its pins move with it, in the same commit, for the same cited reason.
         let fe = route.cohesive_energy("Fe").expect("Fe cohesive energy");
         assert!(
-            close(fe, 416.3, 0.1),
-            "Fe E_coh = 416.3 kJ/mol, got {}",
+            close(fe, 415.471, 0.1),
+            "Fe E_coh = 415.471 kJ/mol (JANAF Fe-008, delta-f H at 298.15 K), got {}",
             fe.to_f64_lossy()
         );
         // An element without an EOS anchor is out of the metallic route's scope (escalate).
@@ -203,11 +214,18 @@ mod tests {
     fn the_rose_ratio_is_the_bulk_energy_over_the_cohesive_energy() {
         let (t, a) = floors();
         let route = MetallicRoute::new(&t, &a);
-        // Fe: B_0 * V_m / E_coh = 170 * 7.09 / 416.3 = 2.895.
+        // Fe: B_0 * V_m / E_coh = 170 * 7.09 / 415.471 = 2.901.
+        //
+        // THIS TEST NEVER FAILED AND NEVER WOULD HAVE, which is the quiet half of the same defect. The
+        // retired 416.3 gives 2.8953 and the cited 415.471 gives 2.9010: a shift of 0.0058 under a
+        // tolerance of 0.01. THE TOLERANCE ABSORBED THE CORRECTION, so this assertion sat green across a
+        // data repair while its comment kept teaching the retired value. A tolerance wide enough to
+        // absorb a change is blind to it, which is legitimate for a physical band and is exactly why the
+        // COMMENT, not the assertion, is what a reader inherits.
         let fe = route.rose_ratio("Fe").expect("Fe rose ratio");
         assert!(
-            close(fe, 2.895, 0.01),
-            "Fe Rose ratio ~ 2.895, got {}",
+            close(fe, 2.901, 0.01),
+            "Fe Rose ratio ~ 2.901, got {}",
             fe.to_f64_lossy()
         );
     }
@@ -238,8 +256,8 @@ mod tests {
             .metallic_energy(&comp(&[("Fe", 1)]))
             .expect("elemental Fe scores");
         assert!(
-            close(fe, -416.3, 0.1),
-            "elemental Fe lattice energy = -416.3 kJ/mol, got {}",
+            close(fe, -415.471, 0.1),
+            "elemental Fe lattice energy = -415.471 kJ/mol (JANAF Fe-008), got {}",
             fe.to_f64_lossy()
         );
         // A binary (an oxide) escalates: elemental anchors do not give an oxide's energy.
@@ -265,8 +283,8 @@ mod tests {
         let v0 = a.molar_volume("Fe").expect("Fe V0");
         let at_equilibrium = route.cohesive_energy_at_volume("Fe", v0).expect("Fe E(V0)");
         assert!(
-            close(at_equilibrium, -416.3, 0.01),
-            "Fe E(V0) = -E_coh, got {}",
+            close(at_equilibrium, -415.471, 0.01),
+            "Fe E(V0) = -E_coh (415.471 kJ/mol, JANAF Fe-008), got {}",
             at_equilibrium.to_f64_lossy()
         );
         let compressed = route
