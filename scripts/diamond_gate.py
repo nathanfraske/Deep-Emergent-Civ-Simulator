@@ -324,7 +324,7 @@ def detect_twin_providers(laws, registry):
     the `log_sum_exp` twin (`saha.rs` and `materials/creep.rs`), the one a human census found by hand, so a
     DECLARED cross-crate collision IS now mechanically visible.
 
-    ITS OWN BLINDNESS, stated beside its power and now honestly: it sees only providers that DECLARE themselves
+    ITS OWN BLINDNESS, stated beside its power and named plainly: it sees only providers that DECLARE themselves
     with `@provides`, so an UNDECLARED twin is still invisible, and the annotation is hand-authored, so this
     converts a silent collision into a visible one ONLY where a human wrote the claim down. That is the remaining
     reach the census-before-build habit still guards; the crate boundary is no longer the limit, the annotation is.
