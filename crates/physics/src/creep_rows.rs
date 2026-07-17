@@ -331,26 +331,139 @@ pub struct ActivationVolume {
 
 impl ActivationVolume {
     /// Whether this determination's chord covers a pressure, which is the only question that makes a bare `V*`
-    /// meaningful. A consumer outside every determination's interval is EXTRAPOLATING a chord, and the honest
-    /// answer there is `None` from [`select_activation_volume`] rather than the nearest number.
+    /// meaningful. A consumer outside every determination's interval is EXTRAPOLATING a chord, and what
+    /// [`select_activation_volume`] reports there is the TABLE'S OWN EXTREMES rather than the nearest number.
     pub fn covers(&self, pressure_gpa: Fixed) -> bool {
         pressure_gpa >= self.interval_min_gpa && pressure_gpa <= self.interval_max_gpa
     }
 }
 
-/// Select the activation-volume determination whose CHORD COVERS the consumer's pressure regime.
+/// WHETHER THE SOURCE'S OWN CHORDS REACH the pressure a `V*` bracket was drawn at. Carried with every bracket,
+/// so a consumer can never read a span without learning whether the table had anything to say there.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum VolumeConstraint {
+    /// At least one determination's chord COVERS the pressure, and the bracket spans exactly the covering ones.
+    CoveredBySource,
+    /// NO determination's chord covers the pressure. The bracket is the TABLE'S OWN EXTREMES, and the source
+    /// constrains nothing at this pressure: the span is what the table supports, never a measurement of it.
+    UnconstrainedBySource,
+}
+
+/// WHICH END of a `V*` bracket an evaluation is taken at. There is no default and no midpoint: a caller naming
+/// neither end would be collapsing a span the primary declines to collapse, which is the whole defect the
+/// bracket exists to prevent.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum VolumeEnd {
+    /// The smallest `V*` the bracket spans. At a positive pressure this is the WEAKEST the row can be, since
+    /// `P V*` raises the Arrhenius numerator.
+    Low,
+    /// The largest `V*` the bracket spans, and hence the STRONGEST the row can be at a positive pressure.
+    High,
+}
+
+/// THE `V*` SELECTION'S ANSWER: A BRACKET over the determinations, never the point the primary declines to pick.
 ///
-/// `None` when no determination covers it: the consumer is outside every measured interval, and reaching for
-/// the nearest value would be extrapolating a chord past its endpoints, which is the exact defect the interval
-/// tagging exists to prevent. Escalate rather than extrapolate.
+/// # THE FIRST-MATCH DEFECT THIS RETIRES
+///
+/// This selection used to be a `.find()`. With one determination banked that was invisible; with H&K's Table 2
+/// banked (nine determinations, several of which cover any lid pressure) it would have become an
+/// ORDER-DEPENDENT AUTHORED SELECTION of the very number the primary declines to choose, made silently, by
+/// slice position. The bracket answers that: it reports the span and picks no point inside it, and a min and a
+/// max over a SET cannot read the order the set was listed in (Principle 3).
+///
+/// # THE GAP CASE IS THE SAME SHAPE, AND IT IS WHY THE SPAN REACHES OUTSIDE THE CHORDS
+///
+/// The banked chords start at 0.3 GPa, about nine kilometres on Earth, so a lid sampled FROM THE SURFACE sits
+/// outside every interval through its whole brittle top. Refusing there blocks the full-column solve over a
+/// quantity that cannot move the answer; reaching for the nearest determination authors one. So outside every
+/// chord the bracket is the TABLE'S OWN EXTREMES, tagged [`VolumeConstraint::UnconstrainedBySource`]: it does
+/// not invent and it does not refuse, it reports what the table supports and leaves the consumer to prove the
+/// width cannot reach its answer.
+///
+/// THAT PROOF IS THE CONSUMER'S, AND IT IS ASSERTED RATHER THAN ASSUMED. `P V*` tops out near 8 kJ/mol at
+/// 0.3 GPa against `E*`'s 530, so in the shallow column the span cannot change WHICH BRANCH of the yield
+/// envelope wins, and the envelope's minimum is identical at both ends
+/// ([`crate::moment_equivalence::LithosphereEnvelope`], whose `yield_in_sense` evaluates both ends and reports
+/// no single number where they disagree).
+#[derive(Clone, Copy, Debug)]
+pub struct ActivationVolumeBracket {
+    /// The smallest `V*` the bracketed set reports (cubic centimetres per mole).
+    low_cm3_per_mol: Fixed,
+    /// The largest. Equal to `low_cm3_per_mol` where one determination stands alone, which is the DEGENERATE
+    /// bracket: a span of zero width is a determination rather than a band, and it evaluates identically at
+    /// both ends.
+    high_cm3_per_mol: Fixed,
+    constraint: VolumeConstraint,
+    /// Whether EVERY determination the bracket was drawn from may cross into the Arrhenius exponent.
+    ///
+    /// ASKED OVER THE SET RATHER THAN THE TWO ENDS, which is what keeps the gate order-free. Two determinations
+    /// can report the same `V*` under different modalities, and then which one lands at an end is a fact about
+    /// the slice's order rather than about the table. The span is ONE claim, so every member of it is graded and
+    /// the answer is a pure function of the SET (Principle 3).
+    admitted_to_exponent: bool,
+}
+
+impl ActivationVolumeBracket {
+    /// The `V*` at one end of the span (cubic centimetres per mole).
+    pub fn at(&self, end: VolumeEnd) -> Fixed {
+        match end {
+            VolumeEnd::Low => self.low_cm3_per_mol,
+            VolumeEnd::High => self.high_cm3_per_mol,
+        }
+    }
+
+    /// Whether the source's own chords reach the pressure this bracket was drawn at.
+    pub fn constraint(&self) -> VolumeConstraint {
+        self.constraint
+    }
+
+    /// Whether the span has zero width, which is one determination standing alone and is a determination rather
+    /// than a band.
+    pub fn is_degenerate(&self) -> bool {
+        self.low_cm3_per_mol == self.high_cm3_per_mol
+    }
+
+    /// Whether every determination the span was drawn from may cross into the Arrhenius exponent.
+    pub fn admitted_to_exponent(&self) -> bool {
+        self.admitted_to_exponent
+    }
+}
+
+/// Bracket the activation-volume determinations at the consumer's pressure: the COVERING ones where the
+/// source's chords reach it, the WHOLE TABLE where they do not. See [`ActivationVolumeBracket`].
+///
+/// `None` only where there is no determination at all to bracket. An empty table is the one case with no span
+/// to report, and it is distinct from a table whose chords miss: the latter still supports its own extremes.
 pub fn select_activation_volume(
     determinations: &[ActivationVolume],
     pressure_gpa: Fixed,
-) -> Option<ActivationVolume> {
-    determinations
+) -> Option<ActivationVolumeBracket> {
+    let covers_any = determinations.iter().any(|d| d.covers(pressure_gpa));
+    let constraint = if covers_any {
+        VolumeConstraint::CoveredBySource
+    } else {
+        VolumeConstraint::UnconstrainedBySource
+    };
+    // THE BRACKETED SET: the covering determinations where the chords reach the pressure, the whole table where
+    // none does. Both ends and the grade are taken over that set with a min, a max, and an `all`, none of which
+    // can read the slice's order.
+    let mut low: Option<Fixed> = None;
+    let mut high: Option<Fixed> = None;
+    let mut admitted = true;
+    for d in determinations
         .iter()
-        .copied()
-        .find(|d| d.covers(pressure_gpa))
+        .filter(|d| !covers_any || d.covers(pressure_gpa))
+    {
+        low = Some(low.map_or(d.cm3_per_mol, |l: Fixed| l.min(d.cm3_per_mol)));
+        high = Some(high.map_or(d.cm3_per_mol, |h: Fixed| h.max(d.cm3_per_mol)));
+        admitted = admitted && d.modality.admitted_to_exponent();
+    }
+    Some(ActivationVolumeBracket {
+        low_cm3_per_mol: low?,
+        high_cm3_per_mol: high?,
+        constraint,
+        admitted_to_exponent: admitted,
+    })
 }
 
 /// ONE ROW OF H&K TABLE 1, ATOMIC BY CONSTRUCTION.
@@ -387,15 +500,18 @@ pub struct CreepRow {
 }
 
 impl CreepRow {
-    /// THE EXPONENT GATE, RUN AT INGESTION (condition 1). Whether this row's activation energy and the selected
+    /// THE EXPONENT GATE, RUN AT INGESTION (condition 1). Whether this row's activation energy and the bracketed
     /// activation volume may both cross into `exp(-(E* + P V*)/(R T))` without escalation.
     ///
-    /// Returns `false` for a row whose `E*` is Assumed or Hypothetical, or whose `V*` determination is. H&K's
-    /// two GBS rows fail this by construction, which is correct and is the gate working: their energies were
-    /// never fitted to GBS.
-    pub fn exponent_admits(&self, volume: &ActivationVolume) -> bool {
-        self.activation_energy.modality.admitted_to_exponent()
-            && volume.modality.admitted_to_exponent()
+    /// Returns `false` for a row whose `E*` is Assumed or Hypothetical, or where ANY determination the `V*`
+    /// bracket spans is. H&K's two GBS rows fail this by construction, which is correct and is the gate working:
+    /// their energies were never fitted to GBS.
+    ///
+    /// THE VOLUME'S HALF IS ASKED OVER THE WHOLE SPAN, never the two ends alone, which is what stops the grade
+    /// from depending on the order a caller listed its determinations in. See
+    /// [`ActivationVolumeBracket::admitted_to_exponent`].
+    pub fn exponent_admits(&self, volume: &ActivationVolumeBracket) -> bool {
+        self.activation_energy.modality.admitted_to_exponent() && volume.admitted_to_exponent()
     }
 
     /// Whether a water measurement is in the REFERENCE FRAME this row is stated against (condition 2).
@@ -595,8 +711,9 @@ pub struct CreepConditions {
 ///
 /// The determinations arrive as a SET rather than a value because `V*` is a chord (see [`ActivationVolume`]):
 /// H&K's Table 1 prints no dry-dislocation `V*` at all and defers to a Table 2 of nine determinations over
-/// nine different pressure intervals. [`select_activation_volume`] picks the chord covering the caller's own
-/// pressure, and a caller outside every interval is refused rather than served the nearest number.
+/// nine different pressure intervals. [`select_activation_volume`] BRACKETS them at the caller's own pressure,
+/// spanning the covering chords where they reach it and the table's own extremes where none does, so no point
+/// inside the span is ever chosen and no slice order can move which one is read.
 #[derive(Clone, Copy, Debug)]
 pub struct CreepCandidate<'a> {
     pub row: CreepRow,
@@ -627,9 +744,14 @@ pub enum CreepRefusal {
     /// The exponent gate refused: an `Assumed`, `Hypothetical` or bare `Estimated` value tried to cross into
     /// `exp(-(E* + P V*)/(R T))` without escalation. H&K's two GBS rows fail here by construction.
     ExponentGrade,
-    /// No `V*` determination's chord covers the caller's pressure. Escalate rather than extrapolate a chord
-    /// past its endpoints.
-    PressureOutsideEveryChord,
+    /// NO `V*` DETERMINATION EXISTS AT ALL for this row, so there is no span to bracket and no exponent to
+    /// evaluate.
+    ///
+    /// THIS IS NOT THE OUT-OF-CHORD CASE, and the difference is the third application of the gap precedent. A
+    /// caller whose pressure sits outside every banked chord is served the TABLE'S OWN EXTREMES, tagged
+    /// [`VolumeConstraint::UnconstrainedBySource`], because the table still supports its own span there. Only an
+    /// EMPTY table has nothing to report, and that is this variant.
+    NoActivationVolumeBanked,
     /// No candidate survived admission, so there is no composite to solve.
     NoAdmittedRow,
     /// A condition is outside the law's domain (a non-positive temperature, water, or stress).
@@ -654,16 +776,20 @@ pub enum CreepRefusal {
 /// invent. So the wet rows stay banked, cited, and unfed until a water substrate derives their input, and this
 /// gate loosens by deleting a branch rather than by anyone rewriting a law.
 ///
-/// It also runs the two gates the ROW itself states, which are a different thing and are the source's rather
-/// than ours: the chord must cover the pressure ([`ActivationVolume::covers`], through
-/// [`select_activation_volume`]) and every quantity entering the Arrhenius exponent must be graded for it
-/// ([`CreepRow::exponent_admits`]).
+/// It also runs the gate the ROW itself states, which is a different thing and is the source's rather than
+/// ours: every quantity entering the Arrhenius exponent must be graded for it ([`CreepRow::exponent_admits`]).
 ///
-/// Returns the selected activation volume, which is what an admitted row needs to be evaluated.
+/// THE CHORD-COVERAGE GATE IS GONE FROM HERE, and its absence is the ruling rather than an omission. It used to
+/// refuse a caller whose pressure sat outside every banked interval, which blocked a lid from being sampled at
+/// its own surface: the banked chords start at 0.3 GPa, about nine kilometres down. Coverage is now REPORTED on
+/// the bracket ([`VolumeConstraint`]) instead of being a refusal, so the consumer learns what the source
+/// constrains and proves for itself whether the span can reach its answer.
+///
+/// Returns the bracketed activation volume, which is what an admitted row needs to be evaluated at either end.
 pub fn admit_candidate(
     candidate: &CreepCandidate<'_>,
     pressure_gpa: Fixed,
-) -> Result<ActivationVolume, CreepRefusal> {
+) -> Result<ActivationVolumeBracket, CreepRefusal> {
     // THE ENGINE-CAPABILITY GATES, first, because they are about our inputs rather than the row's validity.
     if candidate.row.water_state != WaterState::Dry {
         return Err(CreepRefusal::WaterNotDerived);
@@ -671,9 +797,9 @@ pub fn admit_candidate(
     if candidate.row.grain_size_exponent != 0 {
         return Err(CreepRefusal::GrainSizeNotDerived);
     }
-    // THE ROW'S OWN GATES, which are the source's.
+    // THE ROW'S OWN GATE, which is the source's.
     let volume = select_activation_volume(candidate.volumes, pressure_gpa)
-        .ok_or(CreepRefusal::PressureOutsideEveryChord)?;
+        .ok_or(CreepRefusal::NoActivationVolumeBanked)?;
     if !candidate.row.exponent_admits(&volume) {
         return Err(CreepRefusal::ExponentGrade);
     }
@@ -708,7 +834,7 @@ pub fn admit_candidate(
 ///   own arithmetic is not performable in this type in the source's own order.
 fn ln_rate_intercept(
     row: &CreepRow,
-    volume: &ActivationVolume,
+    volume_cm3_per_mol: Fixed,
     conditions: &CreepConditions,
 ) -> Result<Fixed, CreepRefusal> {
     if conditions.temperature_k <= Fixed::ZERO {
@@ -771,7 +897,7 @@ fn ln_rate_intercept(
         .checked_mul(Fixed::from_int(1000))
         .ok_or(CreepRefusal::NotRepresentable)?;
     let pv_j_per_mol = pressure_mpa
-        .checked_mul(volume.cm3_per_mol)
+        .checked_mul(volume_cm3_per_mol)
         .ok_or(CreepRefusal::NotRepresentable)?;
     let numerator = e_star_j_per_mol
         .checked_add(pv_j_per_mol)
@@ -795,11 +921,11 @@ fn ln_rate_intercept(
 /// bake an engine limitation into a citation.
 fn ln_row_strain_rate(
     row: &CreepRow,
-    volume: &ActivationVolume,
+    volume_cm3_per_mol: Fixed,
     conditions: &CreepConditions,
     ln_stress_mpa: Fixed,
 ) -> Result<Fixed, CreepRefusal> {
-    let intercept = ln_rate_intercept(row, volume, conditions)?;
+    let intercept = ln_rate_intercept(row, volume_cm3_per_mol, conditions)?;
     let slope = ln_stress_mpa
         .checked_mul(row.stress_exponent)
         .ok_or(CreepRefusal::NotRepresentable)?;
@@ -814,11 +940,11 @@ fn ln_row_strain_rate(
 /// the composite's answer, and it is the composite's BRACKET: see [`ductile_strength_mpa`].
 fn ln_row_stress_mpa(
     row: &CreepRow,
-    volume: &ActivationVolume,
+    volume_cm3_per_mol: Fixed,
     conditions: &CreepConditions,
     ln_strain_rate_per_s: Fixed,
 ) -> Result<Fixed, CreepRefusal> {
-    let intercept = ln_rate_intercept(row, volume, conditions)?;
+    let intercept = ln_rate_intercept(row, volume_cm3_per_mol, conditions)?;
     if row.stress_exponent <= Fixed::ZERO {
         return Err(CreepRefusal::ConditionOutOfDomain);
     }
@@ -916,21 +1042,36 @@ fn ln_total_strain_rate(terms: &mut [Fixed]) -> Option<Fixed> {
 /// COMPOSITE SUM IS NOT REFEREED BY ANY SOURCE: H&K work single rows only, so the parallel sum rests on the
 /// derived bracket, the monotonicity above, and this module's own tests. That is a real gap and it is named
 /// rather than covered.
+///
+/// # THE `V*` END IS AN EXPLICIT ARGUMENT, WHICH IS THE BRACKET REACHING THE CALL SITE
+///
+/// `V*` is a span rather than a value ([`ActivationVolumeBracket`]), so a strength is a span too, and this
+/// evaluates ONE END of it per call. The end is named by the caller because there is no end to default to: the
+/// answer at the low end is the weakest the source's own table permits and the answer at the high end the
+/// strongest, and collapsing them here would author the number the primary declines to choose.
+///
+/// The composite is MONOTONE IN `V*` at a non-negative pressure (a larger `V*` raises `E* + P V*`, which lowers
+/// every row's rate at a given stress and therefore raises the stress the target rate needs), so the two ends
+/// bracket the truth rather than merely differing from it. At zero pressure the `P V*` term vanishes and the
+/// two ends return the same bits, which is the span costing nothing exactly where the source constrains it
+/// least.
 pub fn ductile_strength_mpa(
     candidates: &[CreepCandidate<'_>],
     conditions: CreepConditions,
+    end: VolumeEnd,
 ) -> Result<Fixed, CreepRefusal> {
     if conditions.temperature_k <= Fixed::ZERO {
         return Err(CreepRefusal::ConditionOutOfDomain);
     }
 
-    // ADMIT, then take each admitted row's exact single-row inverse. The bracket below is built from MINIMA and
-    // the sum from a SORTED fold ([`ln_total_strain_rate`]), so neither reads the caller's slice order: the
-    // result is a pure function of the candidate SET (Principle 3), never of how it was arranged.
-    let mut admitted: Vec<(CreepRow, ActivationVolume)> = Vec::new();
+    // ADMIT, then take each admitted row's exact single-row inverse at the named end of its own `V*` bracket.
+    // The bracket below is built from MINIMA and the sum from a SORTED fold ([`ln_total_strain_rate`]), so
+    // neither reads the caller's slice order: the result is a pure function of the candidate SET (Principle 3),
+    // never of how it was arranged.
+    let mut admitted: Vec<(CreepRow, Fixed)> = Vec::new();
     for candidate in candidates {
         if let Ok(volume) = admit_candidate(candidate, conditions.pressure_gpa) {
-            admitted.push((candidate.row, volume));
+            admitted.push((candidate.row, volume.at(end)));
         }
     }
     if admitted.is_empty() {
@@ -946,8 +1087,8 @@ pub fn ductile_strength_mpa(
     let mut ln_hi: Option<Fixed> = None;
     let mut ln_lo: Option<Fixed> = None;
     for (row, volume) in &admitted {
-        let hi = ln_row_stress_mpa(row, volume, &conditions, conditions.ln_strain_rate_per_s)?;
-        let lo = ln_row_stress_mpa(row, volume, &conditions, ln_target_shared)?;
+        let hi = ln_row_stress_mpa(row, *volume, &conditions, conditions.ln_strain_rate_per_s)?;
+        let lo = ln_row_stress_mpa(row, *volume, &conditions, ln_target_shared)?;
         ln_hi = Some(match ln_hi {
             Some(current) if current <= hi => current,
             _ => hi,
@@ -973,7 +1114,7 @@ pub fn ductile_strength_mpa(
             .ok_or(CreepRefusal::NotRepresentable)?;
         let mut terms: Vec<Fixed> = Vec::with_capacity(admitted.len());
         for (row, volume) in &admitted {
-            terms.push(ln_row_strain_rate(row, volume, &conditions, mid)?);
+            terms.push(ln_row_strain_rate(row, *volume, &conditions, mid)?);
         }
         let total = ln_total_strain_rate(&mut terms).ok_or(CreepRefusal::NotRepresentable)?;
         if total < conditions.ln_strain_rate_per_s {
@@ -1091,7 +1232,7 @@ mod tests {
         let ln_sigma = ln_scientific(3, 10, 0); // "sigma = 0.3 MPa", the footnotes' stated stress.
 
         let (row, volume, conditions) = footnote_c_wet_diffusion();
-        let ln_rate = ln_row_strain_rate(&row, &volume, &conditions, ln_sigma)
+        let ln_rate = ln_row_strain_rate(&row, volume.cm3_per_mol, &conditions, ln_sigma)
             .expect("footnote c's own inputs must evaluate");
         assert!(
             (ln_rate - conditions.ln_strain_rate_per_s).abs() < ln_tolerance,
@@ -1101,7 +1242,7 @@ mod tests {
         );
 
         let (row, volume, conditions) = footnote_e_wet_dislocation();
-        let ln_rate = ln_row_strain_rate(&row, &volume, &conditions, ln_sigma)
+        let ln_rate = ln_row_strain_rate(&row, volume.cm3_per_mol, &conditions, ln_sigma)
             .expect("footnote e's own inputs must evaluate");
         assert!(
             (ln_rate - conditions.ln_strain_rate_per_s).abs() < ln_tolerance,
@@ -1129,9 +1270,13 @@ mod tests {
             ("footnote c", footnote_c_wet_diffusion()),
             ("footnote e", footnote_e_wet_dislocation()),
         ] {
-            let ln_sigma =
-                ln_row_stress_mpa(&row, &volume, &conditions, conditions.ln_strain_rate_per_s)
-                    .expect("the source's own worked example must invert");
+            let ln_sigma = ln_row_stress_mpa(
+                &row,
+                volume.cm3_per_mol,
+                &conditions,
+                conditions.ln_strain_rate_per_s,
+            )
+            .expect("the source's own worked example must invert");
             let sigma = ln_sigma.exp();
             assert!(
                 (sigma - target).abs() < tolerance,
@@ -1211,17 +1356,49 @@ mod tests {
         )
         .is_ok());
 
-        // OUTSIDE EVERY CHORD: escalate rather than extrapolate. The fixture's chord stops at 2 GPa.
+        // OUTSIDE EVERY CHORD THE TABLE STILL SUPPORTS ITS OWN EXTREMES, tagged so the consumer knows the source
+        // said nothing here. This is the ruling rather than a loosening: refusing instead blocked a lid from
+        // being sampled at its own SURFACE, since the banked chords start at 0.3 GPa (about nine kilometres
+        // down), and the consumer proves for itself that the span cannot reach its answer there. The fixture's
+        // chord stops at 2 GPa, so 9 GPa is outside it.
+        let far = admit_candidate(
+            &CreepCandidate {
+                row: hk_dry_dislocation(),
+                volumes: &volumes,
+            },
+            Fixed::from_int(9),
+        )
+        .expect("the table supports its own extremes even where no chord reaches");
+        assert_eq!(
+            far.constraint(),
+            VolumeConstraint::UnconstrainedBySource,
+            "outside every chord the source constrains nothing, and the bracket must say so"
+        );
+        // AND INSIDE ONE IT IS TAGGED THE OTHER WAY, which is what makes the tag a claim rather than a constant.
         assert_eq!(
             admit_candidate(
                 &CreepCandidate {
                     row: hk_dry_dislocation(),
                     volumes: &volumes
                 },
-                Fixed::from_int(9)
+                p
+            )
+            .expect("covered")
+            .constraint(),
+            VolumeConstraint::CoveredBySource
+        );
+        // AN EMPTY TABLE IS THE ONE CASE WITH NOTHING TO REPORT, and it is a different answer from a table whose
+        // chords merely miss. No determination, no span, no exponent.
+        assert_eq!(
+            admit_candidate(
+                &CreepCandidate {
+                    row: hk_dry_dislocation(),
+                    volumes: &[]
+                },
+                p
             )
             .err(),
-            Some(CreepRefusal::PressureOutsideEveryChord)
+            Some(CreepRefusal::NoActivationVolumeBanked)
         );
     }
 
@@ -1246,11 +1423,12 @@ mod tests {
                 volumes: &volumes,
             }],
             conditions,
+            VolumeEnd::Low,
         )
         .expect("the one admitted row resolves");
         let single = ln_row_stress_mpa(
             &row,
-            &volumes[0],
+            volumes[0].cm3_per_mol,
             &conditions,
             conditions.ln_strain_rate_per_s,
         )
@@ -1268,7 +1446,8 @@ mod tests {
                     row: hk_wet_dislocation_fugacity(),
                     volumes: &volumes
                 }],
-                conditions
+                conditions,
+                VolumeEnd::Low
             ),
             Err(CreepRefusal::NoAdmittedRow)
         );
@@ -1319,14 +1498,16 @@ mod tests {
             })
             .collect();
 
-        let sigma = ductile_strength_mpa(&candidates, conditions).expect("the composite resolves");
+        let sigma = ductile_strength_mpa(&candidates, conditions, VolumeEnd::Low)
+            .expect("the composite resolves");
         let ln_sigma = sigma.ln();
 
         // Re-sum the mechanisms at the answer and demand the target back.
         let terms: Vec<Fixed> = rows
             .iter()
             .map(|row| {
-                ln_row_strain_rate(row, &volumes[0], &conditions, ln_sigma).expect("evaluates")
+                ln_row_strain_rate(row, volumes[0].cm3_per_mol, &conditions, ln_sigma)
+                    .expect("evaluates")
             })
             .collect();
         let mut terms = terms;
@@ -1371,10 +1552,11 @@ mod tests {
             grain_size_um: None,
             water: None,
         };
-        let intercept = ln_rate_intercept(&rows[0], &volumes[0], &conditions).expect("resolves");
+        let intercept =
+            ln_rate_intercept(&rows[0], volumes[0].cm3_per_mol, &conditions).expect("resolves");
         assert_eq!(
             intercept,
-            ln_rate_intercept(&rows[1], &volumes[0], &conditions).expect("resolves"),
+            ln_rate_intercept(&rows[1], volumes[0].cm3_per_mol, &conditions).expect("resolves"),
             "the two rows must share an intercept exactly, or the closed-form root below is not the root"
         );
         // ln( exp(I) * (2^3.5 + 2) ) = I + ln(13.313708...)
@@ -1387,7 +1569,8 @@ mod tests {
                 volumes: &volumes,
             })
             .collect();
-        let sigma = ductile_strength_mpa(&candidates, conditions).expect("the composite resolves");
+        let sigma = ductile_strength_mpa(&candidates, conditions, VolumeEnd::Low)
+            .expect("the composite resolves");
         assert!(
             (sigma - Fixed::from_int(2)).abs() < Fixed::from_ratio(2, 1000),
             "the composite's root is 2 MPa by construction (2^3.5 + 2 = 13.3137); it returned {}",
@@ -1426,9 +1609,12 @@ mod tests {
             volumes: &volumes,
         };
 
-        let alone_real = ductile_strength_mpa(&[real], conditions).expect("resolves");
-        let alone_synthetic = ductile_strength_mpa(&[synthetic], conditions).expect("resolves");
-        let together = ductile_strength_mpa(&[real, synthetic], conditions).expect("resolves");
+        let alone_real =
+            ductile_strength_mpa(&[real], conditions, VolumeEnd::Low).expect("resolves");
+        let alone_synthetic =
+            ductile_strength_mpa(&[synthetic], conditions, VolumeEnd::Low).expect("resolves");
+        let together =
+            ductile_strength_mpa(&[real, synthetic], conditions, VolumeEnd::Low).expect("resolves");
 
         assert!(
             together < alone_real && together < alone_synthetic,
@@ -1441,7 +1627,7 @@ mod tests {
         // THE ORDER OF THE CANDIDATES CANNOT MOVE THE ANSWER (Principle 3): a sum is a sum.
         assert_eq!(
             together,
-            ductile_strength_mpa(&[synthetic, real], conditions).expect("resolves"),
+            ductile_strength_mpa(&[synthetic, real], conditions, VolumeEnd::Low).expect("resolves"),
             "the composite must be a pure function of the candidate SET, not of the slice order"
         );
     }
@@ -1467,6 +1653,7 @@ mod tests {
                     grain_size_um: None,
                     water: None,
                 },
+                VolumeEnd::Low,
             )
             .expect("resolves")
         };
@@ -1502,6 +1689,7 @@ mod tests {
                 grain_size_um: None,
                 water: None,
             },
+            VolumeEnd::Low,
         );
         match cold {
             Err(CreepRefusal::StressNotRepresentable { ln_stress_mpa }) => assert!(
@@ -1546,6 +1734,14 @@ mod tests {
         );
     }
 
+    /// A bracket over ONE determination, read at a pressure its own chord covers, for the tests that are about
+    /// the GRADE rather than the span. It routes through the real [`select_activation_volume`] rather than
+    /// building a bracket by hand, so a test cannot drift from the selection it is meant to be testing against.
+    fn bracket_of(v: ActivationVolume) -> ActivationVolumeBracket {
+        select_activation_volume(&[v], v.interval_min_gpa)
+            .expect("one determination still brackets")
+    }
+
     #[test]
     fn the_exponent_gate_refuses_assumed_values_at_ingestion() {
         // CONDITION 1. exp(-(E* + P V*)/(R T)) multiplies a grade error through an exponential, so the bar is
@@ -1557,11 +1753,11 @@ mod tests {
             modality: Modality::Fitted,
         };
         // A fitted row passes.
-        assert!(hk_dry_dislocation().exponent_admits(&measured_v));
+        assert!(hk_dry_dislocation().exponent_admits(&bracket_of(measured_v)));
         // THE GBS ROW FAILS BY CONSTRUCTION, and that is the gate working: H&K's GBS energies are ASSUMED,
         // transferred from easy-slip data (their footnote f), never fitted to GBS at all.
         assert!(
-            !hk_dry_gbs_below_1250c().exponent_admits(&measured_v),
+            !hk_dry_gbs_below_1250c().exponent_admits(&bracket_of(measured_v)),
             "an ASSUMED activation energy must not cross into an Arrhenius exponent without escalation"
         );
         // An estimated V* also fails, even under a fitted E*: the gate checks EVERY quantity entering the
@@ -1570,7 +1766,17 @@ mod tests {
             modality: Modality::Estimated,
             ..measured_v
         };
-        assert!(!hk_dry_dislocation().exponent_admits(&estimated_v));
+        assert!(!hk_dry_dislocation().exponent_admits(&bracket_of(estimated_v)));
+        // AND THE GRADE IS ASKED OVER THE WHOLE SPAN, never the two ends alone. A table pairing a fitted
+        // determination with an estimated one is refused wherever the span reaches both, IN EITHER ORDER, which
+        // is what stops the gate's answer from being a fact about how a caller listed its rows.
+        for pair in [[measured_v, estimated_v], [estimated_v, measured_v]] {
+            let spanning = select_activation_volume(&pair, Fixed::ONE).expect("both cover 1 GPa");
+            assert!(
+                !hk_dry_dislocation().exponent_admits(&spanning),
+                "an estimated determination anywhere in the span refuses it, whatever order it was listed in"
+            );
+        }
         // The admitted set. Measured and Fitted are the measured rung's.
         assert!(Modality::Measured.admitted_to_exponent());
         assert!(Modality::Fitted.admitted_to_exponent());
@@ -1621,7 +1827,7 @@ mod tests {
             );
         }
         assert!(
-            !hk_dry_gbs_below_1250c().exponent_admits(&v),
+            !hk_dry_gbs_below_1250c().exponent_admits(&bracket_of(v)),
             "the ASSUMED GBS energy is still refused after the pre-emption: nothing was loosened"
         );
     }
@@ -1645,17 +1851,45 @@ mod tests {
         };
         let rows = [low, high];
         // THE LID reads the low-pressure determination; THE DEEP INTERIOR reads the high-pressure one. Same
-        // quantity, same table, different chords, and the difference is physics rather than disagreement.
+        // quantity, same table, different chords, and the difference is physics rather than disagreement. Each
+        // is covered by exactly one chord, so each bracket is DEGENERATE: a span of zero width, which is a
+        // determination rather than a band.
         let lid = select_activation_volume(&rows, Fixed::ONE).expect("the lid's regime is covered");
-        assert_eq!(lid.cm3_per_mol, Fixed::from_int(20));
+        assert!(lid.is_degenerate() && lid.at(VolumeEnd::Low) == Fixed::from_int(20));
+        assert_eq!(lid.constraint(), VolumeConstraint::CoveredBySource);
         let deep = select_activation_volume(&rows, Fixed::from_int(5))
             .expect("the deep regime is covered");
-        assert_eq!(deep.cm3_per_mol, Fixed::from_int(6));
-        // OUTSIDE every interval: escalate rather than extrapolate. Reaching for the nearest value would be
-        // extrapolating a chord past its endpoints, which is the defect the tagging exists to prevent.
+        assert!(deep.is_degenerate() && deep.at(VolumeEnd::High) == Fixed::from_int(6));
+
+        // WHERE TWO CHORDS OVERLAP, THE FIRST-MATCH DEFECT IS VISIBLE, and this is the case the ruling names.
+        // Both chords are closed at 2 GPa, so both cover it, and a `.find()` would have returned whichever the
+        // caller happened to list first: an ORDER-DEPENDENT AUTHORED SELECTION of the very number the primary
+        // declines to choose. The bracket spans them both instead, and it is the same span in EITHER ORDER.
+        for order in [[low, high], [high, low]] {
+            let both =
+                select_activation_volume(&order, Fixed::from_int(2)).expect("both cover 2 GPa");
+            assert_eq!(both.constraint(), VolumeConstraint::CoveredBySource);
+            assert_eq!(both.at(VolumeEnd::Low), Fixed::from_int(6));
+            assert_eq!(both.at(VolumeEnd::High), Fixed::from_int(20));
+            assert!(
+                !both.is_degenerate(),
+                "two determinations cover 2 GPa: that is a band"
+            );
+        }
+
+        // OUTSIDE EVERY INTERVAL, the source constrains nothing and the bracket says so: it reports the TABLE'S
+        // OWN EXTREMES tagged unconstrained, which is neither the nearest value (extrapolating a chord past its
+        // endpoints) nor a refusal (which would block a lid from being sampled at its own surface).
+        let far = select_activation_volume(&rows, Fixed::from_int(40))
+            .expect("no chord covers 40 GPa, and the table still supports its own extremes");
+        assert_eq!(far.constraint(), VolumeConstraint::UnconstrainedBySource);
+        assert_eq!(far.at(VolumeEnd::Low), Fixed::from_int(6));
+        assert_eq!(far.at(VolumeEnd::High), Fixed::from_int(20));
+
+        // AN EMPTY TABLE HAS NO SPAN, which is the one case that reports nothing at all.
         assert!(
-            select_activation_volume(&rows, Fixed::from_int(40)).is_none(),
-            "no determination covers 40 GPa; the honest answer is None, never the nearest number"
+            select_activation_volume(&[], Fixed::ONE).is_none(),
+            "no determination banked, no bracket to report"
         );
     }
 

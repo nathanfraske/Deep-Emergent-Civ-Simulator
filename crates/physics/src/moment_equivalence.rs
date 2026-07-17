@@ -153,7 +153,26 @@
 //! # HONEST LIMITS
 //!
 //! - THE MOMENT INTEGRAL DOES NOT ALWAYS SELF-TRUNCATE, and this contradicts the premise it was specified under.
-//!   See [`bending_moment`], which measures the tail rather than assuming it dies.
+//!   See [`bending_moment`], which measures the tail rather than assuming it dies. Where the tail lives, the
+//!   integral is bounded at the CONDUCTIVE-LID BASE, derived from the world's own Rayleigh number and refereed
+//!   against the convective stress scale ([`ConductiveLidBase`], [`referee_conductive_lid_base`]), because below
+//!   that depth the mantle overturns and a static load's stresses are not sustained across it.
+//! - THE LID REFEREE IS ONE-SIDED. It convicts a lid base too SHALLOW to have reached the convective stress
+//!   scale and is blind to one too DEEP, since deeper material is weaker and passes more easily. A two-sided
+//!   check needs a band around the crossing, and a band is a tolerance someone chose.
+//! - `V*` IS A SPAN AND THE ENVELOPE ONLY ANSWERS WHERE THE SPAN CANNOT REACH THE ANSWER. The bracket is the
+//!   covering determinations where the source's chords reach, and the table's own extremes where they do not
+//!   ([`crate::creep_rows::ActivationVolumeBracket`]); [`LithosphereEnvelope`] reports a strength only where both
+//!   ends agree to the bit. In the SHALLOW column they always do, which is what lets a lid be sampled from its
+//!   own surface, and it is asserted rather than assumed.
+//! - THE DEEP COLUMN IS THE COUPLED CONSEQUENCE, and it is a real one rather than a caveat. Today one `V*`
+//!   determination is in play per fixture, so every bracket is degenerate and the whole column answers. BANKING
+//!   H&K'S TABLE 2 IN FULL WOULD CHANGE THAT: several of its nine determinations cover any given lid pressure and
+//!   they disagree by a factor of several in the resulting strength (its full -2 to 27 span is worth about six,
+//!   41 MPa against 253, at 60 km on the Earth-like fixture below), so wherever the ductile branch binds the two
+//!   ends part company and the envelope reports nothing. That is the primary declining to choose, carried
+//!   faithfully rather than papered over, and what it costs is a deep ductile strength. Whether the deep envelope
+//!   should then report a BAND (and `T_e` with it) rather than refuse is a ruling this module does not make.
 //! - The curvature is read at ONE point, so the reported rigidity is a per-point quantity. McNutt and Menard
 //!   state that "`D_eff` varies as the curvature changes along the profile" (their p. 369), so a single rigidity
 //!   per load is a MATCHING CONVENTION shared with the literature rather than a property of the plate. Curvature
@@ -170,7 +189,9 @@
 //!   is the single-layer oceanic case the primaries call the simple one. A world whose lid decouples is
 //!   over-stiffened by this construction, and detecting decoupling is not attempted here.
 
-use crate::creep_rows::{ductile_strength_mpa, CreepCandidate, CreepConditions, CreepRefusal};
+use crate::creep_rows::{
+    ductile_strength_mpa, CreepCandidate, CreepConditions, CreepRefusal, VolumeEnd,
+};
 use crate::yield_envelope::{lithostatic_normal_stress_mpa, FrictionLaw};
 use civsim_core::Fixed;
 
@@ -477,6 +498,12 @@ pub trait YieldEnvelope {
     /// convects and carries no long-term fibre stress). The moment integral runs over it and REPORTS whether the
     /// answer depended on it ([`MomentReading::self_truncated`]), so a domain-limited moment can never be
     /// mistaken for a converged one.
+    ///
+    /// THE TRAIT TAKES THE DOMAIN ON TRUST AND THE LANDED ASSEMBLY DOES NOT. [`LithosphereEnvelope`] DERIVES
+    /// this from the world's own Rayleigh number ([`ConductiveLidBase`]) and cannot be built with a declared
+    /// one. The trait stays open because a world whose lid base is set by something this arc has not met (an ice
+    /// shell floored by its own ocean, say) implements it directly, and that is the alien arriving as a data row
+    /// rather than a rewrite.
     fn domain_max_depth_km(&self) -> Fixed;
 }
 
@@ -643,10 +670,12 @@ pub struct MomentReading {
     pub moment: Fixed,
     /// The neutral surface the moment was taken about (km).
     pub neutral_depth_km: Fixed,
-    /// WHETHER THE INTEGRAL SELF-TRUNCATED on its own residue budget, which is the question the owner's ruling
-    /// turns on. `true` means the integrand died inside the envelope's domain and the moment is INDEPENDENT of
-    /// where the domain was declared. `false` means the integral ran to the domain edge with the tail still
-    /// above the budget, so THE MOMENT DEPENDS ON THE CALLER'S DECLARED LID and that dependence is real.
+    /// WHETHER THE INTEGRAL SELF-TRUNCATED on its own residue budget, and it STAYS as the honest flag now that
+    /// the domain is derived rather than declared. `true` means the integrand died inside the envelope's domain,
+    /// so the moment is INDEPENDENT of where that domain sits. `false` means the integral ran to the domain edge
+    /// with the tail still above the budget, so THE MOMENT'S SECOND PARENT IS THE DOMAIN, and for the landed lid
+    /// assembly that domain is the derived conductive-lid base ([`ConductiveLidBase`]). The dependence is real
+    /// either way; the flag is what keeps it from being absorbed silently.
     pub self_truncated: bool,
     /// The depth (km) at which the integrand's remaining tail fell below the residue budget, where it did.
     pub truncation_depth_km: Option<Fixed>,
@@ -688,11 +717,18 @@ pub struct MomentReading {
 /// strength to zero. Ours is not.
 ///
 /// So the honest structure is: the budget truncates where the integrand does die (a brittle-capped or
-/// synthetic envelope), and where it does not, the integral runs to the envelope's DECLARED DOMAIN and says so
-/// through [`MomentReading::self_truncated`]. A domain-limited moment is a real dependence on the caller's
-/// declared lid, and it is surfaced rather than hidden. This module does not reach for the lid itself: the engine
-/// already derives one ([`crate::laws::thermal_boundary_layer`]), and reaching for the nearest available depth is
-/// the same defect as reaching for the nearest available strain rate.
+/// synthetic envelope), and where it does not, the integral runs to the envelope's own domain and says so
+/// through [`MomentReading::self_truncated`]. THE FLAG STAYS, and it stays honest in both directions: where the
+/// integrand dies before the domain, the moment is independent of where the domain sits and the flag says so;
+/// where it does not, the domain IS the answer's second parent and the flag says that instead of absorbing it.
+///
+/// THE DOMAIN IS NO LONGER A DECLARED NUMBER, which is the half this function used to have to confess. For the
+/// lid assembly it is the CONDUCTIVE-LID BASE, derived from the world's own Rayleigh number and refereed against
+/// the convective stress scale ([`ConductiveLidBase`], [`referee_conductive_lid_base`]), and the justification
+/// is physical rather than proximal: below `delta` the mantle overturns, so a static load's stresses are not
+/// sustained there and there is no fibre stress left to integrate. This function still asks only the
+/// [`YieldEnvelope`] trait for a domain, so a world whose lid is something this arc has not met supplies its own
+/// and is served unchanged.
 ///
 /// `None` on an out-of-range intermediate or a degenerate modulus.
 pub fn bending_moment(
@@ -1146,6 +1182,81 @@ pub fn solve_circular_load() -> Result<MomentEquivalentPlate, MomentEquivalenceR
     Err(MomentEquivalenceRefusal::CircularLoadNotConstructed)
 }
 
+/// THE CONDUCTIVE-LID BASE `delta`, CARRYING ITS DERIVATION IN ITS TYPE: the depth below which the interior
+/// convects, which is the moment integral's own domain.
+///
+/// # WHY THE INTEGRAL NEEDS A DOMAIN AT ALL, WHICH IS THE PREMISE THAT DIED
+///
+/// The slice below was specified under the claim that ductile strength decays exponentially with depth, so the
+/// moment integrand's tail is bounded and the integration self-truncates. THAT CLAIM IS FALSE, and
+/// [`bending_moment`] measures its falsity rather than assuming past it: a power-law creep row has a STRENGTH
+/// FLOOR (`sigma` tends to `(epsilon-dot / A)^(1/n)`, about 2 pascals for the banked dry-olivine row at 1e-15
+/// per second, never zero), the lever arm grows LINEARLY, so the integrand tends to a linearly GROWING function
+/// and the integral DIVERGES. Under [`crate::geotherm::halfspace_geotherm`], whose temperature saturates at the
+/// interior, it is worse: with `T` fixed the `P V*` term makes deep material STRONGER with depth, the integrand
+/// turns and CLIMBS, and about 13 percent of the moment sits in the 200 to 300 km tail, rising. McNutt and
+/// Menard's own integral converges only because THEIR GEOTHERM IS LINEAR in depth and therefore unphysically hot
+/// below the lid, which drives their creep strength to zero. Ours is not, so ours needs a real domain.
+///
+/// # WHY THIS DEPTH, AND WHY THE EARLIER REFUSAL WAS RIGHT
+///
+/// This slice REFUSED to reach for [`crate::laws::thermal_boundary_layer`] when it first landed, on the ground
+/// that "reaching for the nearest available depth is the same defect as reaching for the nearest available
+/// strain rate". THAT REFUSAL WAS CORRECT AND IS NOT OVERTURNED HERE. Nearest and justified were different
+/// properties, and the refusal was waiting for the justification rather than for a second opinion. The
+/// justification has since arrived, and it is a fact about the physics rather than about the call graph:
+/// `delta` IS THE CONDUCTIVE-CONVECTIVE BOUNDARY, and BELOW IT A STATIC LOAD'S STRESSES ARE NOT SUSTAINED,
+/// because the material there overturns. A bending moment is the integral of a stress the column HOLDS, and
+/// mantle that convects away holds nothing on a load's timescale. So the domain is not the nearest depth that
+/// happened to be derivable; it is the depth at which the quantity being integrated stops existing.
+///
+/// # AND IT IS NOT ASSERTED, IT IS REFEREED
+///
+/// `delta` here is derived from the THERMAL structure alone (`d / Ra^(1/3)`: buoyancy, viscosity, diffusivity,
+/// depth). Nothing in that derivation knows what creep is. So the choice is CHECKED against the stress scale
+/// that defines the same boundary mechanically, by [`referee_conductive_lid_base`]: at `delta` the ductile
+/// strength AT THE LOAD'S OWN RATE must have fallen to the convective driving stress
+/// ([`crate::laws::convective_stress`]), which is the same competition lid mobilization already emerges from.
+/// Two routes to one boundary, and their agreement is evidence rather than a restatement.
+///
+/// THE TYPE IS THE DEFENCE, and it is [`FibreCurvature`]'s pattern wearing the lid's coat: there is no
+/// constructor from a bare depth, so a caller cannot DECLARE a lid base, only derive one. A declared lid is
+/// exactly what the honest-limits note used to have to confess.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct ConductiveLidBase {
+    depth_km: Fixed,
+}
+
+impl ConductiveLidBase {
+    /// DERIVE the lid base from the world's own convecting layer: `delta = d / Ra^(1/3)`, through
+    /// [`crate::laws::thermal_boundary_layer`], which is the SAME derivation the convective driving stress
+    /// shears over and the lid geotherm spans, so the three cannot disagree about how thick the lid is.
+    ///
+    /// `convecting_depth_km` is the convecting layer's own depth and `rayleigh` its Rayleigh number, both the
+    /// world's. A NON-CONVECTING layer (a non-positive Rayleigh number) reads back the whole layer, which is the
+    /// law's own documented convention and is the physics: with no convection there is no conductive-convective
+    /// boundary, the whole layer conducts, and the lid is all of it. That case is honest rather than degenerate,
+    /// and the moment integral over it is bounded by the layer's own base.
+    ///
+    /// `None` on a non-positive layer depth, or where the derived lid rounds away to nothing: a lid with no
+    /// thickness has no column to integrate, and reporting one would be reporting a plate that is not there.
+    pub fn from_rayleigh(convecting_depth_km: Fixed, rayleigh: Fixed) -> Option<Self> {
+        if convecting_depth_km <= ZERO {
+            return None;
+        }
+        let depth_km = crate::laws::thermal_boundary_layer(convecting_depth_km, rayleigh);
+        if depth_km <= ZERO {
+            return None;
+        }
+        Some(ConductiveLidBase { depth_km })
+    }
+
+    /// The lid base `delta` (km).
+    pub fn depth_km(self) -> Fixed {
+        self.depth_km
+    }
+}
+
 /// THE LID'S YIELD ENVELOPE: the brittle branch above, the ductile branch below, assembled from the landed rows.
 ///
 /// # WHAT IT CONSUMES RATHER THAN REBUILDS
@@ -1175,7 +1286,16 @@ pub fn solve_circular_load() -> Result<MomentEquivalentPlate, MomentEquivalenceR
 ///
 /// It arrives inside [`LoadChord`] and is passed through to the creep rows unmodified. This module never reads
 /// [`crate::laws::convective_strain_rate`], which is the mantle-and-thermal chord and forbidden to this consumer
-/// by its own doc.
+/// by its own doc. [`referee_conductive_lid_base`] reads that law's SIBLING, the convective STRESS, which is a
+/// different act: the stress locates the boundary, the rate would have evaluated the strength, and only the
+/// second is the defect this arc evicted.
+///
+/// # THE DOMAIN IS DERIVED, AND THE `V*` SPAN STOPS AT THE ENVELOPE
+///
+/// The lid base is [`ConductiveLidBase`], derived from the world's Rayleigh number and refereed against the
+/// convective stress scale, so no caller declares where this envelope stops. And because `V*` is a span the
+/// primary declines to collapse, `yield_in_sense` evaluates the ductile branch at BOTH ends of it and reports a
+/// strength only where they agree to the bit.
 pub struct LithosphereEnvelope<'a> {
     /// The material's own friction row.
     pub friction: FrictionLaw,
@@ -1190,10 +1310,14 @@ pub struct LithosphereEnvelope<'a> {
     pub creep: &'a [CreepCandidate<'a>],
     /// The load's chord, which carries the strain rate the envelope evaluates at.
     pub chord: LoadChord,
-    /// The depth (km) below which this envelope stops describing anything. Physically the base of the lid: the
-    /// interior below convects and carries no long-term fibre stress. A caller-derived quantity; this module
-    /// never authors it and never reaches for one.
-    pub domain_max_depth_km: Fixed,
+    /// THE CONDUCTIVE-LID BASE, DERIVED, which is the depth below which this envelope stops describing anything:
+    /// the interior below convects and carries no long-term fibre stress.
+    ///
+    /// IT USED TO BE A DECLARED `Fixed` AND THAT WAS THE ARC'S ONE ASTERISK. A bare depth here meant the moment
+    /// depended on a number the caller named, so "nothing in the arc authors a scalar" held only as far as the
+    /// caller's own discipline. [`ConductiveLidBase`] has no constructor from a bare depth, so the dependence is
+    /// now on the world's own Rayleigh number and layer depth, and the asterisk is gone rather than documented.
+    pub lid_base: ConductiveLidBase,
 }
 
 /// What the ductile branch reported at a depth, including the two representability edges the creep module names.
@@ -1221,10 +1345,16 @@ impl LithosphereEnvelope<'_> {
         lithostatic_normal_stress_mpa(self.density_kg_m3, self.gravity_m_s2, depth_m)
     }
 
-    /// The ductile branch at a depth: the creep composite at the LOAD's strain rate, the geotherm's temperature,
-    /// and the lithostatic pressure. The megapascal-to-gigapascal conversion for the pressure happens HERE, once,
-    /// at the boundary with rows whose pressure currency is gigapascals.
-    pub fn ductile(&self, depth_km: Fixed) -> DuctileReading {
+    /// The ductile branch at a depth, at ONE END of the creep rows' `V*` bracket: the composite at the LOAD's
+    /// strain rate, the geotherm's temperature, and the lithostatic pressure. The megapascal-to-gigapascal
+    /// conversion for the pressure happens HERE, once, at the boundary with rows whose pressure currency is
+    /// gigapascals.
+    ///
+    /// THE END IS NAMED BY THE CALLER because `V*` is a span the primary declines to collapse
+    /// ([`crate::creep_rows::ActivationVolumeBracket`]). [`Self::yield_in_sense`] reads BOTH ends and reports no
+    /// single number where they disagree, which is what lets the shallow column be sampled from the surface
+    /// (where no banked chord reaches) without anyone inventing a determination for it.
+    pub fn ductile(&self, depth_km: Fixed, end: VolumeEnd) -> DuctileReading {
         let t_k = match (self.geotherm_k)(depth_km) {
             Some(t) => t,
             None => return DuctileReading::Refused(CreepRefusal::ConditionOutOfDomain),
@@ -1244,7 +1374,7 @@ impl LithosphereEnvelope<'_> {
             grain_size_um: None,
             water: None,
         };
-        match ductile_strength_mpa(self.creep, conditions) {
+        match ductile_strength_mpa(self.creep, conditions, end) {
             Ok(s) => DuctileReading::Determined(s),
             Err(CreepRefusal::StressNotRepresentable { ln_stress_mpa }) => {
                 if ln_stress_mpa > Fixed::MAX.ln() {
@@ -1264,7 +1394,24 @@ impl LithosphereEnvelope<'_> {
         brittle_differential_mpa(&self.friction, sigma_v, sense)
     }
 
-    /// The envelope in one sense (GPa): the lesser of the brittle and ductile branches.
+    /// The envelope in one sense (GPa): the lesser of the brittle and ductile branches, PROVEN INVARIANT across
+    /// the creep rows' `V*` bracket rather than read at an end someone picked.
+    ///
+    /// # THE BRACKET REACHES HERE, AND HERE IS WHERE IT IS SETTLED OR REPORTED
+    ///
+    /// `V*` is a span ([`crate::creep_rows::ActivationVolumeBracket`]), so the ductile branch is a span, so
+    /// `min(brittle, ductile)` is evaluated at BOTH ENDS and the two are compared. Where they agree the envelope
+    /// reports the number, and the agreement is a PROOF that the span could not have moved it. Where they
+    /// disagree the span has reached the answer and there is no single number to report, so this refuses, which
+    /// is the same treatment the brittle branch's own gap already gets a few lines above.
+    ///
+    /// THE SHALLOW COLUMN IS WHY THIS IS NOT A REFUSAL EVERYWHERE. The banked chords start at 0.3 GPa, so from
+    /// the surface down to about nine kilometres on an Earth-like world the bracket is the table's whole span
+    /// ([`crate::creep_rows::VolumeConstraint::UnconstrainedBySource`]). It costs nothing there: `P V*` tops out
+    /// near 8 kJ/mol against `E*`'s 530, the cold shallow rock is not creeping at a geological rate at either
+    /// end, and the brittle branch floors the envelope identically both ways. That is what lets a real envelope
+    /// be sampled FROM THE SURFACE, which is the full-column solve this unblocks, and it is asserted rather than
+    /// asserted-about (`the_shallow_envelope_is_invariant_across_the_v_star_bracket`).
     fn yield_in_sense(&self, depth_km: Fixed, sense: FaultingSense) -> Option<Fixed> {
         if depth_km < ZERO {
             return None;
@@ -1276,15 +1423,24 @@ impl LithosphereEnvelope<'_> {
             // nothing about.
             DifferentialStrength::Bracket { .. } => return None,
         };
-        let mpa = match self.ductile(depth_km) {
-            DuctileReading::Determined(d) => brittle_mpa.min(d),
-            // Creep is irrelevant here; the brittle branch floors the envelope.
-            DuctileReading::AboveRepresentable => brittle_mpa,
-            // The material sustains nothing representable.
-            DuctileReading::BelowRepresentable => return Some(ZERO),
-            DuctileReading::Refused(_) => return None,
+        let at_end = |end: VolumeEnd| -> Option<Fixed> {
+            match self.ductile(depth_km, end) {
+                DuctileReading::Determined(d) => Some(brittle_mpa.min(d)),
+                // Creep is irrelevant here; the brittle branch floors the envelope.
+                DuctileReading::AboveRepresentable => Some(brittle_mpa),
+                // The material sustains nothing representable.
+                DuctileReading::BelowRepresentable => Some(ZERO),
+                DuctileReading::Refused(_) => None,
+            }
         };
-        mpa.checked_div(Fixed::from_int(MPA_PER_GPA))
+        let low = at_end(VolumeEnd::Low)?;
+        let high = at_end(VolumeEnd::High)?;
+        // THE INVARIANCE, CHECKED RATHER THAN TRUSTED. Where the two ends of the span disagree, the source's own
+        // scatter in `V*` has reached the envelope and no single strength is licensed.
+        if low != high {
+            return None;
+        }
+        low.checked_div(Fixed::from_int(MPA_PER_GPA))
     }
 }
 
@@ -1298,14 +1454,136 @@ impl YieldEnvelope for LithosphereEnvelope<'_> {
     }
 
     fn domain_max_depth_km(&self) -> Fixed {
-        self.domain_max_depth_km
+        self.lid_base.depth_km()
     }
+}
+
+/// WHAT THE LID REFEREE FOUND: the ductile strength at the lid base, at the load's own rate, set beside the
+/// convective driving stress that defines the boundary.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LidReferee {
+    /// The verdict.
+    pub verdict: LidVerdict,
+    /// The lid base the verdict is about (km).
+    pub lid_base_km: Fixed,
+    /// The ductile branch's reading at the lid base at the LOW end of the `V*` bracket, MEASURED rather than
+    /// summarized, so a caller sees the margin rather than the verdict alone.
+    pub strength_low: DuctileReading,
+    /// The same at the HIGH end. Identical to `strength_low` where the bracket is degenerate.
+    pub strength_high: DuctileReading,
+    /// The convective driving stress the strengths were refereed against (MPa), as the caller declared it.
+    pub convective_stress_mpa: Fixed,
+}
+
+/// THE LID REFEREE'S VERDICT.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LidVerdict {
+    /// The ductile strength at the lid base has fallen TO OR BELOW the convective driving stress at BOTH ends of
+    /// the `V*` bracket. The thermally derived lid and the mechanical boundary agree, and the lid choice is
+    /// refereed rather than asserted.
+    Confirmed,
+    /// The strength at the lid base is ABOVE the convective stress at both ends: the material there still
+    /// sustains more than the interior flow can shear, so this envelope's strength has not reached the
+    /// boundary's own stress scale by the depth the Rayleigh number puts it at. A FINDING, reported rather than
+    /// absorbed, and the two derivations disagreeing is a fact about the world's data rather than a fault here.
+    StrengthExceedsConvectiveStress,
+    /// The `V*` bracket's two ends STRADDLE the convective stress, so the source's own span does not settle the
+    /// question. Reported rather than collapsed to whichever end was read first.
+    BracketStraddlesConvectiveStress,
+}
+
+/// REFEREE THE DERIVED LID BASE against the stress scale that defines the boundary: at `delta`, the ductile
+/// strength AT THE LOAD'S OWN RATE must have fallen to the convective driving stress.
+///
+/// # WHY THIS IS EVIDENCE AND NOT A RESTATEMENT
+///
+/// [`ConductiveLidBase`] derives `delta` from the THERMAL structure alone (`d / Ra^(1/3)`: buoyancy, viscosity,
+/// diffusivity, layer depth). Nothing in that expression knows what creep is, what `E*` is, or what rate the
+/// load imposes. This check asks the MECHANICAL question at that depth, through the creep rows, and it is the
+/// same competition that lid mobilization already emerges from: [`crate::laws::convective_stress`]'s own doc
+/// states that "the lid mobilizes LOCALLY where the convective stress exceeds the yield strength". So the lid
+/// base is where the lid's strength stops exceeding it, and two independent routes to one boundary either agree
+/// or produce a finding.
+///
+/// # THE RATE IS THE LOAD'S, AND THE SIBLING LAW IS STILL FORBIDDEN
+///
+/// [`crate::laws::convective_strain_rate`] is [`crate::laws::convective_stress`]'s sibling and is THE
+/// MANTLE-AND-THERMAL CHORD; its own doc forbids this consumer by name. Nothing here reads it. The strength this
+/// referees is the envelope's own, evaluated at the LOAD's rate out of [`LoadChord`], which is the chord `T_e`
+/// is drawn over. Refereeing the lid against the convective STRESS is not the same act as evaluating the lid's
+/// strength at the convective RATE, and the difference is the whole distinction this arc evicted a defect over:
+/// the stress is a property of the boundary being located, the rate is a property of the load doing the bending.
+///
+/// # THE STRESS ARRIVES IN A DECLARED UNIT BECAUSE IT CANNOT BE INFERRED
+///
+/// `laws::convective_stress` is unit-agnostic over a consistent set, and the engine's own caller composes it out
+/// of REPRESENTABLE-SCALED inputs (`civsim_sim::geodynamics::ColumnParams` declares that its viscosity and depth
+/// are scaled and that its own scale system is an open conflict). So a stress read from there carries no unit
+/// this module could infer. It is therefore an EXPLICIT ARGUMENT IN MEGAPASCALS, the ductile branch's own
+/// currency, exactly as [`elastic_thickness_km`] takes its modulus pair explicitly and for the same reason: a
+/// convention that cannot be stated silently cannot be got wrong silently.
+///
+/// # THE CHECK IS ONE-SIDED, AND THAT IS STATED RATHER THAN HIDDEN
+///
+/// "Has fallen to" is `<=`, which convicts a lid base that is TOO SHALLOW (the material there is still strong)
+/// and is BLIND to one that is TOO DEEP (deeper material is weaker still, so it passes more easily). Making it
+/// two-sided would need a band around the crossing, a band is a tolerance, and a tolerance is a number someone
+/// chose. So the one-sided form is what the physics licenses with nothing authored, and the blindness is named
+/// here rather than left for a reader to find.
+///
+/// `None` where the ductile branch refuses at the lid base, which refuses the referee rather than guessing a
+/// verdict.
+/// WHETHER A DUCTILE READING HAS FALLEN TO THE CONVECTIVE-STRESS SCALE: at or below it.
+///
+/// A NAMED FUNCTION RATHER THAN A CLOSURE, because its two representability arms each carry a physical claim
+/// that a fixture reaching only the ordinary arm would never put on trial. Both survived a mutation run as an
+/// inline closure, which is what named them.
+///
+/// - A `Determined` strength answers the question directly.
+/// - `AboveRepresentable` is a strength past `Fixed::MAX` MEGAPASCALS, which is the flow law saying creep is
+///   irrelevant at this depth. It is astronomically above any convective driving stress, so it has NOT fallen,
+///   and this is the reading a lid base derived far too shallow returns: the referee's whole purpose.
+/// - `BelowRepresentable` is a strength under `Fixed::EPSILON` megapascals, which is below any positive stress,
+///   so it HAS fallen.
+/// - A refusal answers nothing, and refuses the referee rather than guessing.
+fn strength_has_fallen_to(reading: DuctileReading, convective_stress_mpa: Fixed) -> Option<bool> {
+    match reading {
+        DuctileReading::Determined(s) => Some(s <= convective_stress_mpa),
+        DuctileReading::AboveRepresentable => Some(false),
+        DuctileReading::BelowRepresentable => Some(true),
+        DuctileReading::Refused(_) => None,
+    }
+}
+
+pub fn referee_conductive_lid_base(
+    envelope: &LithosphereEnvelope<'_>,
+    convective_stress_mpa: Fixed,
+) -> Option<LidReferee> {
+    let lid_base_km = envelope.lid_base.depth_km();
+    let strength_low = envelope.ductile(lid_base_km, VolumeEnd::Low);
+    let strength_high = envelope.ductile(lid_base_km, VolumeEnd::High);
+    let fallen = |reading: DuctileReading| strength_has_fallen_to(reading, convective_stress_mpa);
+    let verdict = match (fallen(strength_low)?, fallen(strength_high)?) {
+        (true, true) => LidVerdict::Confirmed,
+        (false, false) => LidVerdict::StrengthExceedsConvectiveStress,
+        _ => LidVerdict::BracketStraddlesConvectiveStress,
+    };
+    Some(LidReferee {
+        verdict,
+        lid_base_km,
+        strength_low,
+        strength_high,
+        convective_stress_mpa,
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::creep_rows::{hk_dry_dislocation, ln_scientific, ActivationVolume, Modality};
+    use crate::creep_rows::{
+        hk_dry_dislocation, ln_scientific, select_activation_volume, ActivationVolume, Modality,
+        VolumeConstraint,
+    };
     use crate::geotherm::steady_conductive_geotherm;
     use crate::yield_envelope::{ice_friction_law, rock_friction_law};
 
@@ -2016,6 +2294,24 @@ mod tests {
         }
     }
 
+    /// THE TABLE'S OWN EXTREMES as a FIXTURE: H&K's Table 2 offers nine determinations from -2 to 27 cm^3/mol,
+    /// and this is that span's two ends carrying the banked chord's own lower limit of 0.3 GPa.
+    ///
+    /// IT BANKS NOTHING AND ENDORSES NOTHING. The nine values fail to overlap because `V*` is a chord that
+    /// decreases with pressure, and picking one is a decision the primary declines to make. What this fixture is
+    /// for is the OPPOSITE of picking: it is the widest span the source supports, so a test can prove the width
+    /// cannot reach the shallow envelope's answer. Every assertion it appears in is a RELATION, and neither
+    /// endpoint can move one.
+    fn table2_span_fixture() -> [ActivationVolume; 2] {
+        let chord = |v: i32| ActivationVolume {
+            cm3_per_mol: Fixed::from_int(v),
+            interval_min_gpa: Fixed::from_ratio(3, 10),
+            interval_max_gpa: Fixed::from_int(2),
+            modality: Modality::Fitted,
+        };
+        [chord(-2), chord(27)]
+    }
+
     fn test_chord() -> LoadChord {
         LoadChord {
             class: LoadClassId(1),
@@ -2049,6 +2345,18 @@ mod tests {
                 Fixed::from_int(3),
             )
         };
+        // THE LID BASE IS DERIVED, not declared: a 2890 km convecting layer at Ra = 1e5 puts the conductive
+        // boundary layer at `2890 / (1e5)^(1/3)` = about 62 km, which is deep enough to contain the
+        // brittle-ductile crossover this test is about. The pair is the FIXTURE'S; what the engine passes is the
+        // world's own layer depth and Rayleigh number.
+        let lid_base =
+            ConductiveLidBase::from_rayleigh(Fixed::from_int(2890), Fixed::from_int(100_000))
+                .expect("a convecting layer has a boundary layer");
+        assert!(
+            (f64_of(lid_base.depth_km()) - 62.3).abs() < 0.5,
+            "the derived lid base is d / Ra^(1/3): {} km",
+            f64_of(lid_base.depth_km())
+        );
         let env = LithosphereEnvelope {
             friction: rock_friction_law(),
             density_kg_m3: Fixed::from_int(3300),
@@ -2056,18 +2364,21 @@ mod tests {
             geotherm_k: &geotherm,
             creep: &creep,
             chord: test_chord(),
-            domain_max_depth_km: Fixed::from_int(60),
+            lid_base,
         };
 
         // SHALLOW (15 km, about 470 K): the creep law says deformation at a geological rate is IRRELEVANT here,
         // running the strength past what the type can hold, and the brittle branch floors the envelope. That is
         // the creep module's own documented edge behaving, not an error.
         let shallow = Fixed::from_int(15);
-        assert_eq!(
-            env.ductile(shallow),
-            DuctileReading::AboveRepresentable,
-            "a cold shallow lid is not creeping at a geological rate"
-        );
+        // The V* fixture's chord covers this depth, so the bracket is degenerate and both ends read alike.
+        for end in [VolumeEnd::Low, VolumeEnd::High] {
+            assert_eq!(
+                env.ductile(shallow, end),
+                DuctileReading::AboveRepresentable,
+                "a cold shallow lid is not creeping at a geological rate"
+            );
+        }
         let shallow_brittle = env
             .brittle(shallow, FaultingSense::Thrust)
             .expect("brittle");
@@ -2085,7 +2396,7 @@ mod tests {
         // DEEP (60 km, about 1070 K): the creep law now determines, and it is far WEAKER than the brittle
         // branch, so the ductile branch is the envelope.
         let deep = Fixed::from_int(60);
-        let deep_ductile = match env.ductile(deep) {
+        let deep_ductile = match env.ductile(deep, VolumeEnd::Low) {
             DuctileReading::Determined(d) => d,
             other => panic!("a hot deep lid creeps at a determinate strength, got {other:?}"),
         };
@@ -2126,6 +2437,482 @@ mod tests {
             "the ductile limb falls with depth: {} then {}",
             at(30),
             at(60)
+        );
+    }
+
+    /// The Earth-like lid the two new checks share: a 2890 km convecting layer, a conductive ramp from 273 K to
+    /// 1600 K over 100 km, the dry-olivine row, and the load's own 1e-15 per second. Every number is the
+    /// FIXTURE'S; the engine's caller passes the world's.
+    fn earth_like_lid<'a>(
+        creep: &'a [CreepCandidate<'a>],
+        geotherm: &'a dyn Fn(Fixed) -> Option<Fixed>,
+        rayleigh: Fixed,
+    ) -> LithosphereEnvelope<'a> {
+        LithosphereEnvelope {
+            friction: rock_friction_law(),
+            density_kg_m3: Fixed::from_int(3300),
+            gravity_m_s2: Fixed::from_ratio(981, 100),
+            geotherm_k: geotherm,
+            creep,
+            chord: test_chord(),
+            lid_base: ConductiveLidBase::from_rayleigh(Fixed::from_int(2890), rayleigh)
+                .expect("a convecting layer has a boundary layer"),
+        }
+    }
+
+    fn ramp_geotherm(z_km: Fixed) -> Option<Fixed> {
+        steady_conductive_geotherm(
+            Fixed::from_int(273),
+            Fixed::from_int(1600),
+            Fixed::from_int(100),
+            z_km,
+            Fixed::from_int(3300),
+            ZERO,
+            Fixed::from_int(3),
+        )
+    }
+
+    #[test]
+    fn the_conductive_lid_base_is_derived_and_carries_that_derivation_in_its_type() {
+        // THE DOMAIN THE MOMENT INTEGRAL NEEDS, and the reason it needs one: the integrand does NOT die (see
+        // `bending_moment`), so the integral is bounded at the conductive-lid base, below which the mantle
+        // overturns and a static load's stresses are not sustained.
+        //
+        // THE TWIN IS EXTERNAL: `2890 / (1e5)^(1/3)` = 2890 / 46.4159 = 62.263 km, a cube root taken outside
+        // this codebase and typed here as a literal, against the fixed-point `powf` the law reaches for. The
+        // tolerance is that function's own series accuracy, which the module header already names as the price
+        // of `powf` over the exact `sqrt`.
+        let delta =
+            ConductiveLidBase::from_rayleigh(Fixed::from_int(2890), Fixed::from_int(100_000))
+                .expect("a convecting layer has a boundary layer");
+        assert!(
+            (f64_of(delta.depth_km()) - 62.263).abs() < 0.05,
+            "delta = d / Ra^(1/3): got {} km against the external 62.263",
+            f64_of(delta.depth_km())
+        );
+        // AND IT IS THE LAW'S OWN NUMBER, not a second copy of the same expression: the driving stress, the lid
+        // geotherm, and this domain must agree about lid thickness, so they read ONE derivation.
+        assert_eq!(
+            delta.depth_km(),
+            crate::laws::thermal_boundary_layer(Fixed::from_int(2890), Fixed::from_int(100_000)),
+            "the lid base IS the banked boundary layer, to the bit, rather than a reimplementation of it"
+        );
+        // THE LID THINS AS THE FLOW QUICKENS, which is the scaling's whole content and is what makes the
+        // Rayleigh number load-bearing here rather than decorative.
+        let vigorous =
+            ConductiveLidBase::from_rayleigh(Fixed::from_int(2890), Fixed::from_int(1_000_000))
+                .expect("a vigorous layer has a thinner one");
+        assert!(
+            vigorous.depth_km() < delta.depth_km(),
+            "a more vigorous mantle shears over a thinner lid: {} against {}",
+            f64_of(vigorous.depth_km()),
+            f64_of(delta.depth_km())
+        );
+        // A LAYER THAT DOES NOT CONVECT IS ITS OWN LID, which is the law's documented convention and is the
+        // physics: no convection, no conductive-convective boundary, so the whole layer conducts.
+        assert_eq!(
+            ConductiveLidBase::from_rayleigh(Fixed::from_int(30), ZERO)
+                .expect("a still layer is its own lid")
+                .depth_km(),
+            Fixed::from_int(30)
+        );
+        // AND THERE IS NO LID WITHOUT A LAYER: refuse rather than report a plate that is not there.
+        assert!(ConductiveLidBase::from_rayleigh(ZERO, Fixed::from_int(100_000)).is_none());
+        assert!(
+            ConductiveLidBase::from_rayleigh(Fixed::from_int(-1), Fixed::from_int(100)).is_none()
+        );
+    }
+
+    #[test]
+    fn the_shallow_envelope_is_invariant_across_the_v_star_bracket() {
+        // THE ASSERTION THAT MAKES THE UNCONSTRAINED BRACKET SAFE, put on trial rather than assumed. The banked
+        // `V*` chords start at 0.3 GPa, about nine kilometres down, so a lid sampled FROM THE SURFACE is outside
+        // every chord through its whole brittle top and is served the TABLE'S OWN EXTREMES. That span is enormous
+        // (-2 to 27 cm^3/mol) and it costs nothing there, because `P V*` tops out near 8 kJ/mol at 0.3 GPa
+        // against `E*`'s 530: the cold shallow rock is not creeping at a geological rate at EITHER end, the
+        // brittle branch floors the envelope both ways, and the minimum is identical to the bit.
+        let volumes = table2_span_fixture();
+        let creep = [CreepCandidate {
+            row: hk_dry_dislocation(),
+            volumes: &volumes,
+        }];
+        let geotherm = ramp_geotherm;
+        let env = earth_like_lid(&creep, &geotherm, Fixed::from_int(100_000));
+
+        // THE PREMISE FIRST, or the invariance below would be a fact about a degenerate bracket. At 5 km the
+        // pressure is about 0.16 GPa, under every chord's 0.3 GPa floor, so the span is the table's own and it is
+        // 29 cm^3/mol wide.
+        let shallow = Fixed::from_int(5);
+        let p_gpa = f64_of(env.vertical_stress_mpa(shallow).expect("lithostatic")) / 1000.0;
+        assert!(
+            p_gpa < 0.3,
+            "5 km sits under the banked chords' 0.3 GPa floor: {p_gpa} GPa"
+        );
+        let bracket =
+            select_activation_volume(&volumes, Fixed::from_ratio((p_gpa * 1e6) as i64, 1_000_000))
+                .expect("the table supports its own extremes");
+        assert_eq!(
+            bracket.constraint(),
+            VolumeConstraint::UnconstrainedBySource,
+            "no chord reaches 5 km, so the source constrains nothing there"
+        );
+        assert!(
+            !bracket.is_degenerate()
+                && f64_of(bracket.at(VolumeEnd::High)) - f64_of(bracket.at(VolumeEnd::Low)) > 28.0,
+            "the span really is the table's whole width, or this test proves nothing: [{}, {}]",
+            f64_of(bracket.at(VolumeEnd::Low)),
+            f64_of(bracket.at(VolumeEnd::High))
+        );
+
+        // THE CLAIM. Both ends agree, so the envelope reports a number, and the agreement is the PROOF that the
+        // span could not have moved it.
+        for z in [0, 1, 3, 5, 8] {
+            let z = Fixed::from_int(z);
+            for sense in [FaultingSense::Thrust, FaultingSense::Normal] {
+                assert_eq!(
+                    env.ductile(z, VolumeEnd::Low),
+                    DuctileReading::AboveRepresentable,
+                    "the shallow column is not creeping at a geological rate at the low end either"
+                );
+                assert_eq!(
+                    env.ductile(z, VolumeEnd::High),
+                    DuctileReading::AboveRepresentable
+                );
+                // WHICH BRANCH WINS is what the bracket cannot change: the envelope IS the brittle branch here.
+                let envelope = env
+                    .yield_in_sense(z, sense)
+                    .expect("both ends agree, so the envelope reports a strength");
+                let brittle = match env.brittle(z, sense).expect("rock determines") {
+                    DifferentialStrength::Determined(b) => b,
+                    other => panic!("rock determines everywhere, got {other:?}"),
+                };
+                assert_eq!(
+                    envelope,
+                    brittle
+                        .checked_div(Fixed::from_int(MPA_PER_GPA))
+                        .expect("to GPa"),
+                    "the brittle branch floors the shallow envelope at both ends of the span"
+                );
+            }
+        }
+
+        // AND THE INVARIANCE IS NOT A PROPERTY OF THE CODE ALWAYS SAYING YES, which is the half that makes the
+        // check above evidence. DEEP in the same column the ductile branch binds, the same span reaches the
+        // answer, the two ends disagree by a factor of several, and the envelope REFUSES rather than choosing an
+        // end. The shallow invariance is a fact about the shallow column, and here is the proof it can fail.
+        let deep = Fixed::from_int(60);
+        let low = match env.ductile(deep, VolumeEnd::Low) {
+            DuctileReading::Determined(d) => f64_of(d),
+            other => panic!("a hot deep lid creeps at a determinate strength, got {other:?}"),
+        };
+        let high = match env.ductile(deep, VolumeEnd::High) {
+            DuctileReading::Determined(d) => f64_of(d),
+            other => panic!("a hot deep lid creeps at a determinate strength, got {other:?}"),
+        };
+        assert!(
+            high > low * 2.0,
+            "deep, the span is worth a factor of several in strength: {low} against {high}"
+        );
+        assert!(
+            env.compressive_yield_gpa(deep).is_none(),
+            "where the span reaches the answer there is no single strength to report, got {:?}",
+            env.compressive_yield_gpa(deep)
+        );
+    }
+
+    #[test]
+    fn the_lid_referee_checks_the_derived_base_against_the_convective_stress_scale() {
+        // THE CROSS-CHECK, and why it is evidence rather than a restatement. `ConductiveLidBase` derives delta
+        // from the THERMAL structure alone (`d / Ra^(1/3)`: buoyancy, viscosity, diffusivity, depth) and nothing
+        // in that expression knows what creep is. This asks the MECHANICAL question at that depth, through the
+        // creep rows at the LOAD's own rate, against the stress scale lid mobilization already emerges from.
+        //
+        // THIS TEST PROVES THE COMPARATOR AND NOT THE PHYSICS, and the division of labour is deliberate: the
+        // strength's own arithmetic is refereed against H&K's printed worked examples, which are back-solved from
+        // nothing. Here the pivot is the MEASURED strength at the lid base, and the verdict must flip around it,
+        // which is what a live check does and a constant cannot.
+        let volumes = [table2_volume_fixture()];
+        let creep = [CreepCandidate {
+            row: hk_dry_dislocation(),
+            volumes: &volumes,
+        }];
+        let geotherm = ramp_geotherm;
+        let env = earth_like_lid(&creep, &geotherm, Fixed::from_int(100_000));
+
+        // The measured strength at the derived base, which is what the referee reports rather than summarizes.
+        let probe =
+            referee_conductive_lid_base(&env, Fixed::ONE).expect("the ductile branch answers");
+        let at_base = match probe.strength_low {
+            DuctileReading::Determined(s) => f64_of(s),
+            other => panic!("the lid base creeps at a determinate strength, got {other:?}"),
+        };
+        assert!(
+            at_base > 0.0,
+            "the strength at the base is a real number to pivot on: {at_base} MPa"
+        );
+        assert_eq!(probe.lid_base_km, env.lid_base.depth_km());
+
+        // BELOW the strength, the lid has NOT reached the convective stress scale: a finding, reported.
+        let refuted = referee_conductive_lid_base(
+            &env,
+            Fixed::from_ratio((at_base * 0.5 * 1e6) as i64, 1_000_000),
+        )
+        .expect("answers");
+        assert_eq!(
+            refuted.verdict,
+            LidVerdict::StrengthExceedsConvectiveStress,
+            "a convective stress the lid's own strength exceeds does not confirm the base"
+        );
+        // ABOVE it, the strength HAS fallen to the scale and the two derivations agree.
+        let confirmed = referee_conductive_lid_base(
+            &env,
+            Fixed::from_ratio((at_base * 2.0 * 1e6) as i64, 1_000_000),
+        )
+        .expect("answers");
+        assert_eq!(
+            confirmed.verdict,
+            LidVerdict::Confirmed,
+            "a convective stress above the lid's strength at its base confirms it"
+        );
+
+        // AND THE SPAN CAN STRADDLE, which is the third answer and is honest rather than a fudge: where the V*
+        // bracket's two ends land on opposite sides of the stress, the source's own scatter does not settle the
+        // question, and saying so beats collapsing to whichever end was read first.
+        let wide = table2_span_fixture();
+        let creep_wide = [CreepCandidate {
+            row: hk_dry_dislocation(),
+            volumes: &wide,
+        }];
+        let env_wide = earth_like_lid(&creep_wide, &geotherm, Fixed::from_int(100_000));
+        let straddle = referee_conductive_lid_base(&env_wide, Fixed::ONE).expect("answers");
+        let (lo, hi) = match (straddle.strength_low, straddle.strength_high) {
+            (DuctileReading::Determined(l), DuctileReading::Determined(h)) => {
+                (f64_of(l), f64_of(h))
+            }
+            other => panic!("both ends determine at the base, got {other:?}"),
+        };
+        assert!(
+            hi > lo,
+            "the span is ordered at a positive pressure: {lo}, {hi}"
+        );
+        let between = Fixed::from_ratio(((lo + hi) / 2.0 * 1e6) as i64, 1_000_000);
+        assert_eq!(
+            referee_conductive_lid_base(&env_wide, between)
+                .expect("answers")
+                .verdict,
+            LidVerdict::BracketStraddlesConvectiveStress,
+            "a stress between the span's two ends leaves the question open, and the referee says so"
+        );
+
+        // THE CASE THE REFEREE EXISTS FOR, end to end, and the one a `Determined` fixture never reaches. A
+        // VIGOROUS mantle (Ra = 1e9) puts the derived lid base at `2890 / 1000` = 2.9 km, where the rock is
+        // about 311 K and IS NOT CREEPING AT A GEOLOGICAL RATE AT ALL: the flow law runs its strength past what
+        // the type can hold. No convective stress, however large, confirms a lid base whose rock creep is
+        // irrelevant, so the thermal derivation and the mechanical boundary DISAGREE and the referee reports it
+        // rather than absorbing it. That disagreement is a fact about this fixture's inconsistent Rayleigh
+        // number and geotherm, which is exactly the class of thing the cross-check is here to surface.
+        let thin = earth_like_lid(&creep, &geotherm, Fixed::from_int(1_000_000_000));
+        assert!(
+            f64_of(thin.lid_base.depth_km()) < 3.0,
+            "Ra = 1e9 shears over a very thin lid: {} km",
+            f64_of(thin.lid_base.depth_km())
+        );
+        let vigorous = referee_conductive_lid_base(&thin, Fixed::from_int(1000)).expect("answers");
+        assert_eq!(vigorous.strength_low, DuctileReading::AboveRepresentable);
+        assert_eq!(
+            vigorous.verdict,
+            LidVerdict::StrengthExceedsConvectiveStress,
+            "rock that is not creeping at all has not fallen to any stress scale, however large"
+        );
+    }
+
+    #[test]
+    fn the_full_column_solves_from_the_surface_to_the_derived_lid_base() {
+        // THE TWO FINDINGS, CLOSED, IN ONE READING. This is the thing that could not be done before, and each
+        // half was blocked by a different one:
+        //
+        // - THE SURFACE END was blocked by the `V*` chords, which start at 0.3 GPa (about nine kilometres down).
+        //   The selection refused above that, so the composite had no admitted row, so the envelope refused, so
+        //   the profile could not be sampled AT ALL from the surface. The bracket retires that: outside every
+        //   chord the table's own extremes are reported, tagged unconstrained.
+        // - THE DEEP END was blocked by the integral having no domain but a declared one, since the integrand
+        //   does not die. It is now the derived conductive-lid base, below which the mantle overturns and a
+        //   static load's stresses are not sustained.
+        let volumes = [table2_volume_fixture()];
+        let creep = [CreepCandidate {
+            row: hk_dry_dislocation(),
+            volumes: &volumes,
+        }];
+        let geotherm = ramp_geotherm;
+        let env = earth_like_lid(&creep, &geotherm, Fixed::from_int(100_000));
+        let delta = env.lid_base.depth_km();
+
+        // THE LID IS A SKIN ON THE LAYER RATHER THAN THE LAYER, which is what the Rayleigh number buys: a
+        // convecting mantle carries heat through its interior efficiently, so the temperature drop concentrates
+        // into a thin conductive top. Asserted here because without it this test sits through a "lid" that
+        // silently swallowed the whole 2890 km column, which is a mutation run's finding rather than a worry.
+        assert!(
+            delta < Fixed::from_int(2890),
+            "a convecting layer's conductive lid is thinner than the layer: {} km of 2890",
+            f64_of(delta)
+        );
+
+        // THE SURFACE IS OUTSIDE EVERY CHORD, which is the blocker made concrete rather than recalled.
+        assert!(
+            f64_of(env.vertical_stress_mpa(ZERO).expect("lithostatic")) / 1000.0 < 0.3,
+            "the surface sits under the banked chords' 0.3 GPa floor, which is what used to refuse it"
+        );
+        assert!(
+            env.compressive_yield_gpa(ZERO).is_some() && env.tensile_yield_gpa(ZERO).is_some(),
+            "the envelope answers AT THE SURFACE, which is the whole of what B7 unblocks"
+        );
+
+        // AND THE WHOLE COLUMN SAMPLES, surface to derived lid base, with no declared depth anywhere in it.
+        let steps = 600;
+        let profile = EnvelopeProfile::sample(&env, steps).expect("the full column samples");
+        // THE GRID REALIZES THE DOMAIN RATHER THAN REPRODUCING IT, and the gap has a derived bound rather than a
+        // chosen one. `step = trunc(delta / steps)` truncates, losing under one ULP, and the deepest node is
+        // `step * steps`, so the node sits at or below `delta` by at most ONE ULP PER STEP: `steps *
+        // Fixed::EPSILON`, read off the representation. Asserting equality here would be asserting that
+        // fixed-point division is exact, and asserting a hand-picked epsilon would be a tolerance someone chose.
+        //
+        // THIS ASSERTION'S OWN BLINDNESS, stated because a mutation run measured it: widening the bound a
+        // thousandfold does not fail this test, since the realized gap (about 388 ULP against the bound's 600)
+        // sits well inside either. A test that a value lies within a bound cannot tell a derived bound from a
+        // looser authored one, BY CONSTRUCTION. What guards that is the derivation being written here where a
+        // reader checks it, which is how this project caught an authored `+2` hiding inside a "derived" bound:
+        // by reading it, never by a test going red.
+        let quantization = Fixed::EPSILON * Fixed::from_int(steps as i32);
+        let realized = profile.domain_max_depth_km();
+        assert!(
+            realized <= delta && delta - realized <= quantization,
+            "the profile's deepest node is the derived lid base as its own grid realizes it: {} against {}",
+            f64_of(realized),
+            f64_of(delta)
+        );
+        // The envelope turns over inside the column, which is what makes this a real yield envelope rather than
+        // one branch: brittle rising with rho g z, then creep taking over as the geotherm climbs.
+        let at = |z: i32| {
+            f64_of(
+                env.compressive_yield_gpa(Fixed::from_int(z))
+                    .expect("envelope"),
+            )
+        };
+        assert!(
+            at(5) < at(30) && at(60) < at(30),
+            "the envelope rises on the brittle limb and falls on the ductile one: {}, {}, {}",
+            at(5),
+            at(30),
+            at(60)
+        );
+
+        // THE MOMENT INTEGRATES OVER IT.
+        let k = mm_illustration_curvature();
+        let z_n = neutral_surface_depth_km(&profile, k, lit_e(), lit_nu()).expect("z_n");
+        assert!(
+            z_n > ZERO && z_n < delta,
+            "the neutral surface is solved inside the derived lid: {} km of {}",
+            f64_of(z_n),
+            f64_of(delta)
+        );
+        let m = bending_moment(&profile, k, z_n, lit_e(), lit_nu()).expect("M");
+        let d = equivalent_rigidity(m.moment, k).expect("D");
+        assert!(
+            d > ZERO,
+            "a bent lid has a positive rigidity: {}",
+            f64_of(d)
+        );
+
+        // AND THE FLAG STAYS HONEST, which is the ruling's own condition. This envelope's integrand does NOT die
+        // (a power-law row keeps a strength floor and the lever arm grows), so the integral runs to the domain
+        // and says so. The domain is derived now rather than declared, and that is stated rather than absorbed:
+        // the moment's second parent is the lid base, and `self_truncated = false` is how a reader learns it.
+        assert!(
+            !m.self_truncated,
+            "the creep envelope's tail does not die, and the reading must not claim otherwise: {m:?}"
+        );
+        assert_eq!(m.truncation_depth_km, None);
+        assert!(
+            m.final_interval_contribution > Fixed::EPSILON,
+            "the last interval at the lid base still contributes, which is the tail measured rather than assumed"
+        );
+    }
+
+    #[test]
+    fn a_refused_ductile_branch_refuses_the_envelope_rather_than_reading_as_no_strength() {
+        // A REFUSAL IS NOT A ZERO, and the distance between them is the whole envelope. A ductile branch that
+        // cannot answer (no admitted row, a geotherm that refuses, a pressure past the type) means the envelope
+        // has NO ANSWER; reading it as zero strength would report a column that sustains nothing, which is a
+        // confident wrong answer in the direction that looks like physics (a hot weak lid) rather than like a
+        // bug. Found by a mutation run: this branch was reachable and no test drove it.
+        let geotherm = ramp_geotherm;
+        // An envelope with NO creep candidates: the composite refuses with `NoAdmittedRow`.
+        let env = earth_like_lid(&[], &geotherm, Fixed::from_int(100_000));
+        let z = Fixed::from_int(15);
+        assert_eq!(
+            env.ductile(z, VolumeEnd::Low),
+            DuctileReading::Refused(CreepRefusal::NoAdmittedRow),
+            "no admitted row, no ductile branch"
+        );
+        // THE BRITTLE BRANCH DETERMINES HERE, so the refusal below is the ductile branch's own and this test
+        // cannot pass because the wrong gate fired.
+        assert!(matches!(
+            env.brittle(z, FaultingSense::Thrust),
+            Some(DifferentialStrength::Determined(_))
+        ));
+        assert!(
+            env.compressive_yield_gpa(z).is_none() && env.tensile_yield_gpa(z).is_none(),
+            "a refused ductile branch refuses the envelope, in both senses"
+        );
+        // AND THE REFUSAL PROPAGATES rather than being interpolated across: a profile cannot be sampled over a
+        // column the envelope cannot describe.
+        assert!(
+            EnvelopeProfile::sample(&env, 100).is_none(),
+            "a profile over an envelope that refuses at a node is refused, never patched"
+        );
+    }
+
+    #[test]
+    fn the_lid_referees_two_representability_edges_carry_their_own_physical_claim() {
+        // THE TWO ARMS A FIXTURE AT AN ORDINARY DEPTH NEVER REACHES, which is how a mutation run found them:
+        // both survived as an inline closure because every fixture's lid base returned a `Determined` strength.
+        // Each arm is a real claim about the flow law's own documented edges, so each is asserted rather than
+        // left to a fixture that happens to land on it.
+        let stress = Fixed::from_int(5);
+        // A strength past `Fixed::MAX` MPa is the flow law saying creep is IRRELEVANT here. It is astronomically
+        // above any convective stress, so it has not fallen, and no stress can make it so.
+        assert_eq!(
+            strength_has_fallen_to(DuctileReading::AboveRepresentable, stress),
+            Some(false)
+        );
+        assert_eq!(
+            strength_has_fallen_to(DuctileReading::AboveRepresentable, Fixed::MAX),
+            Some(false),
+            "not even the largest representable stress confirms rock that is not creeping"
+        );
+        // A strength below `Fixed::EPSILON` MPa is under any positive stress, so it has fallen.
+        assert_eq!(
+            strength_has_fallen_to(DuctileReading::BelowRepresentable, stress),
+            Some(true)
+        );
+        // The ordinary arm, on both sides of its own boundary, which is where the comparison lives.
+        assert_eq!(
+            strength_has_fallen_to(DuctileReading::Determined(Fixed::from_int(4)), stress),
+            Some(true)
+        );
+        assert_eq!(
+            strength_has_fallen_to(DuctileReading::Determined(Fixed::from_int(6)), stress),
+            Some(false)
+        );
+        assert_eq!(
+            strength_has_fallen_to(DuctileReading::Determined(stress), stress),
+            Some(true),
+            "'has fallen TO the scale' includes reaching it"
+        );
+        // A refusal answers nothing rather than guessing a verdict.
+        assert_eq!(
+            strength_has_fallen_to(DuctileReading::Refused(CreepRefusal::NoAdmittedRow), stress),
+            None
         );
     }
 
@@ -2176,6 +2963,17 @@ mod tests {
             volumes: &volumes,
         }];
         let geotherm = |_z: Fixed| Some(Fixed::from_int(100));
+        // A CONDUCTIVE (non-convecting) shell, which is the law's own documented convention doing real work: with
+        // no convection there is no conductive-convective boundary, so the lid is THE WHOLE SHELL and the derived
+        // base reads back its full 30 km. A shell that convects would read a thin skin instead, and neither case
+        // is a number anyone here declares.
+        let lid_base = ConductiveLidBase::from_rayleigh(Fixed::from_int(30), ZERO)
+            .expect("a non-convecting layer is its own lid");
+        assert_eq!(
+            lid_base.depth_km(),
+            Fixed::from_int(30),
+            "a layer that does not convect conducts throughout, so its lid is all of it"
+        );
         let shell = LithosphereEnvelope {
             friction: ice_friction_law(),
             density_kg_m3: Fixed::from_int(920),
@@ -2183,7 +2981,7 @@ mod tests {
             geotherm_k: &geotherm,
             creep: &creep,
             chord: test_chord(),
-            domain_max_depth_km: Fixed::from_int(30),
+            lid_base,
         };
         // 15 MPa of overburden on a Europa-class shell sits near 12.4 km down.
         assert!(
