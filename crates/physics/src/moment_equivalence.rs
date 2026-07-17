@@ -2498,6 +2498,30 @@ impl LidColumn<'_> {
         .ok()?;
         banded.elastic_thickness_band_km(youngs_modulus_gpa, poisson_ratio)
     }
+
+    /// D_mech (`GPa km^3`), THE MECHANICAL RIGIDITY the field filter runs at: the fully-elastic rigidity of the
+    /// lid's own domain, `D = E * domain^3 / (12 (1 - nu^2))` with the domain the conductive lid base. This is the
+    /// linear-response rigidity a linear transfer function is only valid at, the `v0 -> 0` limit of the
+    /// load-conditioned rigidity [`Self::elastic_thickness_band_km`] reads.
+    ///
+    /// THE LIMIT HAS A CLOSED ANSWER, so this is a derivation and not an evaluation at zero (which the
+    /// load-conditioned solve cannot do: no load, no moment, no `T_e`). As curvature `K -> 0` the yielded skins
+    /// shrink as `O(K)`, the top because fibre stress and near-surface brittle strength vanish together, the bottom
+    /// because vanishing stress falls below the creep floor, so the elastic core is the FULL lid domain and the
+    /// mechanical rigidity is the fully-elastic rigidity of that domain. This is verbatim [`solve_line_load`]'s
+    /// derived initial trial, the stiffest the column could be (the `D0` its fixed-point walk starts from), reused
+    /// here rather than re-derived. The load-conditioned rigidity can only be softer, so D_mech is the elastic
+    /// ceiling, and everything the field filter's linearity excludes routes to the load-conditioned solve instead.
+    ///
+    /// `None` where the conductive lid base or the rigidity does not resolve.
+    pub fn mechanical_rigidity(
+        &self,
+        youngs_modulus_gpa: Fixed,
+        poisson_ratio: Fixed,
+    ) -> Option<Fixed> {
+        let lid_base = ConductiveLidBase::from_rayleigh(self.convecting_depth_km, self.rayleigh)?;
+        crate::flexure::flexural_rigidity(youngs_modulus_gpa, poisson_ratio, lid_base.depth_km())
+    }
 }
 
 #[cfg(test)]
@@ -5182,6 +5206,68 @@ mod tests {
             )
             .is_none(),
             "an ice shell with no creep row refuses: the honest empty middle until ice rows land"
+        );
+    }
+
+    #[test]
+    fn the_mechanical_rigidity_is_the_elastic_ceiling_over_the_full_lid_domain() {
+        // OPTION B, EXECUTABLE: the field filter's linear-response rigidity is D_mech, the fully-elastic rigidity of
+        // the lid domain and the v0 -> 0 limit, so the stiffest the column can be. Two properties pin it. It
+        // round-trips to the FULL lid domain: a T_e read back from D_mech through the moduli recovers the conductive
+        // lid base, so D_mech is the rigidity of the whole competent lid. And it is the CEILING the load-conditioned
+        // rigidity sits under: a plate that yields is softer, never stiffer, so the assembler's T_e-band rigidity
+        // stays at or below D_mech. This is the linearity license the transfer function runs on.
+        let volumes = hk_dry_dislocation_activation_volumes();
+        let creep = [CreepCandidate {
+            row: hk_dry_dislocation(),
+            volumes: &volumes,
+        }];
+        let silicate = LidColumn {
+            friction: rock_friction_law(),
+            creep: &creep,
+            surface_temperature_k: Fixed::from_int(273),
+            interior_temperature_k: Fixed::from_int(1600),
+            density_kg_m3: Fixed::from_int(3300),
+            heat_production: ZERO,
+            thermal_conductivity: Fixed::from_int(3),
+            gravity_m_s2: Fixed::from_ratio(981, 100),
+            convecting_depth_km: Fixed::from_int(2890),
+            rayleigh: Fixed::from_int(100_000),
+            chord: test_chord(),
+        };
+        let d_mech = silicate
+            .mechanical_rigidity(lit_e(), lit_nu())
+            .expect("D_mech resolves");
+        assert!(f64_of(d_mech) > 0.0, "D_mech is positive");
+
+        // Round-trip: D_mech's own T_e IS the conductive lid base, the full competent domain.
+        let lid_base =
+            ConductiveLidBase::from_rayleigh(silicate.convecting_depth_km, silicate.rayleigh)
+                .unwrap();
+        let te_mech = elastic_thickness_km(d_mech, lit_e(), lit_nu()).unwrap();
+        assert!(
+            (f64_of(te_mech) - f64_of(lid_base.depth_km())).abs() < 0.05,
+            "D_mech round-trips to the full lid domain: T_e {} vs lid base {} km",
+            f64_of(te_mech),
+            f64_of(lid_base.depth_km())
+        );
+
+        // Ceiling: the assembler's load-conditioned rigidity, at its stiffest T_e edge, sits at or below D_mech.
+        let (_lo, hi) = silicate
+            .elastic_thickness_band_km(
+                lit_e(),
+                lit_nu(),
+                Fixed::from_ratio(33, 10),
+                Fixed::from_int(64),
+                600,
+            )
+            .unwrap();
+        let d_load_stiffest = crate::flexure::flexural_rigidity(lit_e(), lit_nu(), hi).unwrap();
+        assert!(
+            d_load_stiffest <= d_mech,
+            "D_mech is the elastic ceiling: load-conditioned {} <= mechanical {}",
+            f64_of(d_load_stiffest),
+            f64_of(d_mech)
         );
     }
 
