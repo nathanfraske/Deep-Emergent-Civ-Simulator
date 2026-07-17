@@ -1453,7 +1453,7 @@ pub fn disc_point_rigidity_band(rigidity_gpa_km3: Fixed) -> Option<RigidityBand>
 ///
 /// A downstream verdict that FLIPS across `[low, high]` is NEAR-DEGENERATE (it carries and escalates); one
 /// insensitive to the band PROCEEDS on either edge. That is the project's Gap Law, and its machinery is the
-/// [`civsim_materials::verdict`] typestate (`dispose` reads a `delta` against a resolution and returns `Decided`
+/// `civsim_materials::verdict` typestate (`dispose` reads a `delta` against a resolution and returns `Decided`
 /// or `Escalate`). This crate is BELOW `materials` in the layering (`core -> physics -> materials -> sim`) and
 /// cannot reach it, so this ships the band and the [`Self::overlaps`] and [`Self::is_degenerate`] queries a
 /// sim-layer consumer feeds to that machinery. Building a second Gap Law here would be the twin-provider defect
@@ -1947,8 +1947,9 @@ impl LithosphereEnvelope<'_> {
     /// # WHERE THE ENDS DISAGREE THIS REFUSES, AND THE BANDED VIEW IS ITS SIBLING
     ///
     /// This is the SETTLED view: it reports a strength only where the span could not have moved it. The DEEP
-    /// column, where the ductile branch binds and the two ends part company, is served instead by [`edge_yield`]
-    /// through an [`EnvelopeEdge`], which reads ONE edge of the interval-of-mins rather than demanding the two
+    /// column, where the ductile branch binds and the two ends part company, is served instead by
+    /// [`LithosphereEnvelope::edge_yield`] through an [`EnvelopeEdge`], which reads ONE edge of the
+    /// interval-of-mins rather than demanding the two
     /// agree. Refusing here and banding there are the two halves of the same ruling: honesty changes what the
     /// answer LOOKS LIKE (a point becomes an interval), never whether there is one.
     fn yield_in_sense(&self, depth_km: Fixed, sense: FaultingSense) -> Option<Fixed> {
