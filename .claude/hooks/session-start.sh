@@ -46,7 +46,7 @@ method="Method available: the fully-blind audit (AGENTIC_ADDENDUM.md section 7).
 
 # The raw sections are passed by environment (never re-expanded, so quotes/backticks in the
 # content are inert) and clipped once in Python on codepoint boundaries.
-fetch="Fetch discipline, a STANDING RULE read at session start (AGENTIC_ADDENDUM.md section 12): if you produce a load-bearing number you MUST vendor its source at fetch time. Download the document or data file, md5 it, hold it behind the manifest (docs/working/VENDORING_CHECKLIST.md); a URL citation is NOT provenance (a link rots, and the number is then a claim with no held witness). Read the primary's figures and tables, not the abstract, and carry each value's anchor, a dual-channel agreement where the standard needs it, and its SCOPE (the regime it applies to). A fetch that has not vendored, anchored, and scoped its value is not finished."
+fetch="Fetch discipline, a STANDING RULE read at session start (AGENTIC_ADDENDUM.md section 12): if you produce a load-bearing number you MUST vendor its source at fetch time. Download the document or data file, SHA256 it, hold it behind the manifest (docs/working/VENDORING_CHECKLIST.md); a URL citation is NOT provenance (a link rots, and the number is then a claim with no held witness). Read the primary's figures and tables, not the abstract, and carry each value's anchor, a dual-channel agreement where the standard needs it, and its SCOPE (the regime it applies to). A fetch that has not vendored, anchored, and scoped its value is not finished."
 
 export SS_METHOD="$method" SS_FETCH="$fetch" SS_ROADMAP="$roadmap" SS_HANDOFF="$handoff" SS_TODOS="$todos" SS_VERIFY="$verify_out"
 
