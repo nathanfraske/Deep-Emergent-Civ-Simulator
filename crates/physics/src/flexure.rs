@@ -176,6 +176,27 @@ pub fn flexural_parameter(d: Fixed, delta_rho: Fixed, g: Fixed) -> Option<Fixed>
     Some(inner.sqrt()) // sqrt(alpha^2) = alpha
 }
 
+/// The AXISYMMETRIC (point/disc load) flexural length `l = (D / (delta_rho g))^(1/4)`, DISTINCT from the
+/// line-load [`flexural_parameter`] `alpha = (4D / (delta_rho g))^(1/4) = sqrt(2) l`. The factor of 4 belongs to
+/// the one-dimensional line-load ODE; the axisymmetric plate equation `D grad^4 w + delta_rho g w = 0` has natural
+/// length `l`, since `grad^4 kei(r/l) = -(1/l^4) kei(r/l)` cancels the restoring term only when `l^4 = D/(delta_rho g)`
+/// (McNutt and Menard 1982 eq. A8; TAFI point-load row, Brotchie and Silvester 1969, no factor of 4). Naming this
+/// separately keeps the two length scales from being welded, the exact confusion PIPELINE_FETCHES.md section 1 made.
+pub fn flexural_length_axisymmetric(d: Fixed, delta_rho: Fixed, g: Fixed) -> Option<Fixed> {
+    if d <= Fixed::ZERO || delta_rho <= Fixed::ZERO || g <= Fixed::ZERO {
+        return None;
+    }
+    let ratio = d.checked_div(delta_rho.checked_mul(g)?)?; // D / (delta_rho g) = l^4
+    Some(ratio.sqrt().sqrt()) // (l^4)^(1/4) = l
+}
+
+/// The axisymmetric length from the already-computed line-load `alpha`, exactly `l = alpha / sqrt(2)` (since
+/// `alpha^4 = 4 l^4`). Used by [`point_load_deflection`] so a caller that has `alpha` need not re-thread the
+/// densities, and the conversion happens in one audited place.
+fn flexural_length_axisymmetric_from_alpha(alpha: Fixed) -> Option<Fixed> {
+    alpha.checked_div(Fixed::from_int(2).sqrt())
+}
+
 /// The LINE-LOAD deflection `w(x) = (V0 alpha^3 / (8 D)) e^(-|x|/alpha) (cos(|x|/alpha) + sin(|x|/alpha))`
 /// (Turcotte & Schubert eq. 3-130 / TAFI eq. 4, the continuous-plate solution; PIPELINE_FETCHES.md section 1),
 /// the flexure at perpendicular distance `perp_dist` from a line load of magnitude `v0`, given the flexural
@@ -213,13 +234,23 @@ pub fn point_load_deflection(q0: Fixed, alpha: Fixed, d: Fixed, r: Fixed) -> Opt
     if alpha <= Fixed::ZERO || d <= Fixed::ZERO || r < Fixed::ZERO {
         return None;
     }
-    // coefficient Q0 alpha^2 / (2 pi D)
-    let a2 = alpha.checked_mul(alpha)?;
+    // THE AXISYMMETRIC LENGTH IS NOT alpha. The caller passes `alpha = (4D/dpg)^(1/4)`, the LINE-LOAD flexural
+    // parameter, and the axisymmetric point-load Green's function `w = -(P l^2/2 pi D) kei(r/l)` runs on
+    // `l = (D/dpg)^(1/4) = alpha/sqrt(2)`, verified three ways (the plate ODE `grad^4 kei = -kei` forces
+    // `l^4 = D/dpg`; McNutt and Menard 1982 eq. A8; the point-load row of TAFI Table 1, whose parameter carries
+    // no factor of 4). The factor of 4 is the 1-D line-load ODE's, not the axisymmetric one's. Reading `kei(r/alpha)`
+    // and scaling by `alpha^2` (as this did until 2026-07-17) made the moat sqrt(2) too wide and 2x too deep; the
+    // origin was a misread of TAFI Table 1 in PIPELINE_FETCHES.md that welded one `alpha` to both load types.
+    // Converting once here, from the parameter every caller already has, keeps the line-load `alpha` from
+    // reaching this function under the wrong meaning: this function OWNS the conversion.
+    let l = flexural_length_axisymmetric_from_alpha(alpha)?;
+    // coefficient Q0 l^2 / (2 pi D)
+    let l2 = l.checked_mul(l)?;
     let two_pi_d = Fixed::from_int(2)
         .checked_mul(Fixed::PI)
         .and_then(|x| x.checked_mul(d))?;
-    let coef = q0.checked_mul(a2).and_then(|x| x.checked_div(two_pi_d))?;
-    let arg = r.checked_div(alpha)?; // r / alpha
+    let coef = q0.checked_mul(l2).and_then(|x| x.checked_div(two_pi_d))?;
+    let arg = r.checked_div(l)?; // r / l
     coef.checked_mul(kelvin_kei(arg))
 }
 
@@ -907,14 +938,17 @@ mod tests {
 
     #[test]
     fn the_point_load_central_deflection_is_the_analytic_magnitude() {
-        // w(0) = Q0 alpha^2 / (2 pi D) * kei(0) = -Q0 alpha^2 / (8 D), the central depression, magnitude parallel
-        // to the line load's w0. The depression is deepest at the load and decays radially.
+        // w(0) = Q0 l^2 / (2 pi D) * kei(0) = -Q0 l^2 / (8 D), on the AXISYMMETRIC length l = alpha/sqrt(2), so
+        // the central depression is -Q0 alpha^2 / (16 D), HALF the old (wrong) -Q0 alpha^2 / (8 D). This assertion
+        // mirrors the code's own amplitude and so does not by itself catch a length-scale error; the zero-crossing
+        // test below does, from a physical property the algebra cannot fake.
         let t_e = Fixed::from_int(40);
         let d = flexural_rigidity(earth_e(), earth_nu(), t_e).expect("D");
         let alpha = flexural_parameter(d, earth_drho(), earth_g()).expect("alpha");
+        let l = flexural_length_axisymmetric(d, earth_drho(), earth_g()).expect("l");
         let q0 = Fixed::from_int(500);
         let w_center = point_load_deflection(q0, alpha, d, Fixed::ZERO).expect("w(0)");
-        let expect = -500.0 * alpha.to_f64_lossy().powi(2) / (8.0 * d.to_f64_lossy());
+        let expect = -500.0 * l.to_f64_lossy().powi(2) / (8.0 * d.to_f64_lossy());
         assert!(
             close(w_center, expect, expect.abs() * 1e-4),
             "central point-load deflection {} vs analytic {expect}",
@@ -925,6 +959,41 @@ mod tests {
         assert!(
             w_out.to_f64_lossy().abs() < w_center.to_f64_lossy().abs(),
             "the point-load depression decays radially"
+        );
+    }
+
+    #[test]
+    fn the_point_load_first_zero_crossing_is_at_the_axisymmetric_length() {
+        // THE NON-CIRCULAR CHECK the amplitude test cannot be: the deflection's first zero crossing is a PHYSICAL
+        // property, the first zero of kei, at r/l = 3.91467 where l = (D/dpg)^(1/4). The old code put it at
+        // r = 3.91467 alpha, sqrt(2) too far out; the fix puts it at r = 3.91467 l = 3.91467 alpha/sqrt(2). This
+        // pins the LENGTH SCALE, not the amplitude, so it fails for the sqrt(2)-wrong length regardless of the
+        // coefficient (which is exactly how the length bug hid: the central-magnitude test mirrors the code's own
+        // algebra and passed either way). x0 = 3.91467 is the cited first zero of kei (A&S 1965).
+        let t_e = Fixed::from_int(40);
+        let d = flexural_rigidity(earth_e(), earth_nu(), t_e).expect("D");
+        let alpha = flexural_parameter(d, earth_drho(), earth_g()).expect("alpha");
+        let l = flexural_length_axisymmetric(d, earth_drho(), earth_g()).expect("l");
+        let q0 = Fixed::from_int(500);
+        let x0 = Fixed::from_ratio(391467, 100000); // 3.91467, the first zero of kei
+                                                    // At the correct zero (r = x0 * l) the deflection vanishes to the fixed-point floor of kei's own zero.
+        let r_correct = x0.checked_mul(l).unwrap();
+        let w_zero = point_load_deflection(q0, alpha, d, r_correct).expect("w(x0 l)");
+        let w_center = point_load_deflection(q0, alpha, d, Fixed::ZERO).expect("w(0)");
+        assert!(
+            w_zero.to_f64_lossy().abs() < w_center.to_f64_lossy().abs() * 1e-3,
+            "the deflection vanishes at r = x0 l = {}, got {} against a central {}",
+            r_correct.to_f64_lossy(),
+            w_zero.to_f64_lossy(),
+            w_center.to_f64_lossy()
+        );
+        // And at the OLD (wrong) location r = x0 * alpha it is decidedly NOT zero: this is what the sqrt(2) error
+        // shipped, and this half of the assertion is what a regression to it would trip.
+        let r_wrong = x0.checked_mul(alpha).unwrap();
+        let w_wrong = point_load_deflection(q0, alpha, d, r_wrong).expect("w(x0 alpha)");
+        assert!(
+            w_wrong.to_f64_lossy().abs() > w_center.to_f64_lossy().abs() * 1e-2,
+            "the sqrt(2)-wrong zero location must not read as a zero"
         );
     }
 
