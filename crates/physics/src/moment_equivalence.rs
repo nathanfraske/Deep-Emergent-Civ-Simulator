@@ -857,6 +857,16 @@ pub enum MomentEquivalenceRefusal {
     /// to the lows, mass conserved to the bit). That module is DOWNSTREAM of this crate, so this refusal NAMES
     /// the branch and stops. The routing is a later slice's wiring; no support bound is recomputed here.
     LoadExceedsElasticSupport,
+    /// THE FIXED POINT DID NOT CONVERGE, a NUMERICAL state, distinct from [`Self::LoadExceedsElasticSupport`]
+    /// which is a PHYSICAL one. The iteration was exhausted without the D-trajectory ever going non-positive, so
+    /// the load is NOT known to exceed elastic support; the map simply did not settle within one ulp. In
+    /// deterministic fixed-point arithmetic a near-marginal load presents exactly this way, oscillating in a
+    /// limit cycle between adjacent representable rigidities wider than the absolute one-ulp convergence test can
+    /// close. Filing that as `LoadExceedsElasticSupport` would route a numerical residual to the support-bound
+    /// branch and relax topography a converged solve would have carried, so the two are split. The field carries
+    /// the FINAL delta (the last step's `|D_new - D|`), surfaced per the residual discipline so the non-closure
+    /// is inspectable rather than invisible; a delta a few ulp wide is the two-cycle signature.
+    FixedPointDidNotConverge { final_delta_gpa_km3: Fixed },
     /// The curvature read at the evaluation point was zero, so the moment equivalence has no rigidity to report
     /// (`D = M / K` is undefined at zero curvature, and an unbent plate reveals nothing about its own strength).
     ZeroCurvature,
@@ -1138,13 +1148,18 @@ impl MomentEquivalentPlate {
 /// nowhere. Every yielded plate is weaker, so the walk descends from a bound the envelope itself supplies rather
 /// than from a number anyone chose.
 ///
-/// # NON-CONVERGENCE IS THE FAILURE SIGNAL
+/// # TWO WAYS TO FAIL, KEPT APART
 ///
-/// It means the load exceeds what the envelope can elastically carry, and it routes to the SUPPORT-BOUND AND
-/// VISCOUS-RELAXATION branch that already exists (`civsim_sim::deeptime::relax_to_support_bound`). Nothing is
-/// built here for that branch and nothing is routed here: this returns
-/// [`MomentEquivalenceRefusal::LoadExceedsElasticSupport`] and the wiring is a later slice's, since that module
-/// is downstream of this crate.
+/// The walk has two distinct exits, and conflating them would route a numerical residual to a physical branch.
+/// The PHYSICAL exit is a trial rigidity that has fallen to zero or below (`d_new <= 0`): the envelope holds no
+/// bending moment against the curvature the load imposes, so the load exceeds what it can elastically carry. That
+/// is [`MomentEquivalenceRefusal::LoadExceedsElasticSupport`], and it routes to the SUPPORT-BOUND AND
+/// VISCOUS-RELAXATION branch that already exists (`civsim_sim::deeptime::relax_to_support_bound`); nothing is
+/// built here for that branch and nothing is routed here, since that module is downstream of this crate. The
+/// NUMERICAL exit is iteration exhaustion with the rigidity still positive: the map has not settled to the last
+/// bit inside the budget. That is [`MomentEquivalenceRefusal::FixedPointDidNotConverge`], which carries the final
+/// step size `final_delta_gpa_km3` so a caller sees how close it came rather than reading a numerical stall as a
+/// physical support bound.
 ///
 /// CONVERGENCE IS TESTED AT THE LAST BIT: the walk stops when successive rigidities differ by at most
 /// `Fixed::EPSILON`, the accumulator's own resolution, which is the same currency as every other tolerance here.
@@ -1169,6 +1184,7 @@ pub fn solve_line_load(
     let mut d = crate::flexure::flexural_rigidity(youngs_modulus_gpa, poisson_ratio, domain)
         .ok_or(MomentEquivalenceRefusal::NotRepresentable)?;
 
+    let mut last_delta = Fixed::MAX; // sentinel until the first step computes one
     for iteration in 1..=MAX_FIXED_POINT_ITERATIONS {
         let alpha = crate::flexure::flexural_parameter(d, delta_rho, gravity)
             .ok_or(MomentEquivalenceRefusal::NotRepresentable)?;
@@ -1190,6 +1206,7 @@ pub fn solve_line_load(
             .ok_or(MomentEquivalenceRefusal::NotRepresentable)?
             .abs();
         d = d_new;
+        last_delta = delta;
         if delta <= Fixed::EPSILON {
             return Ok(MomentEquivalentPlate {
                 rigidity_gpa_km3: d,
@@ -1201,7 +1218,9 @@ pub fn solve_line_load(
             });
         }
     }
-    Err(MomentEquivalenceRefusal::LoadExceedsElasticSupport)
+    Err(MomentEquivalenceRefusal::FixedPointDidNotConverge {
+        final_delta_gpa_km3: last_delta,
+    })
 }
 
 /// The first zero crossing of the axisymmetric point-load deflection, `r/l = 3.91467`, which is the first zero
@@ -1353,8 +1372,11 @@ pub fn point_load_reported_curvature_at_first_zero_crossing(
 /// ([`point_load_curvature_at_first_zero_crossing`], carrying `nu/r`), the neutral surface, the yield-limited
 /// moment, `D_eq = M / kappa_eff`, iterate. The load supplies its own curvature through the solve, so no
 /// reference bending is chosen, exactly as for the line load. The fixed point in curvature space seeks
-/// `M_yield(kappa) = |bracket| P / (2 pi)`: a load whose yield-limited moment scale exceeds what the envelope
-/// can carry does not converge and reports [`MomentEquivalenceRefusal::LoadExceedsElasticSupport`].
+/// `M_yield(kappa) = |bracket| P / (2 pi)`: a load whose yield-limited moment scale exceeds what the envelope can
+/// carry crushes the trial rigidity to zero and reports [`MomentEquivalenceRefusal::LoadExceedsElasticSupport`],
+/// the physical exit; a load that merely fails to settle to the last bit inside the iteration budget reports
+/// [`MomentEquivalenceRefusal::FixedPointDidNotConverge`] carrying its final step size, the numerical one. The
+/// two exits are kept apart for the same reason [`solve_line_load`] keeps them apart.
 ///
 /// # NO DENSITY OR GRAVITY, AND WHY
 ///
@@ -1383,6 +1405,7 @@ pub fn solve_point_load(
     let mut d = crate::flexure::flexural_rigidity(youngs_modulus_gpa, poisson_ratio, domain)
         .ok_or(MomentEquivalenceRefusal::NotRepresentable)?;
 
+    let mut last_delta = Fixed::MAX; // sentinel until the first step computes one
     for iteration in 1..=MAX_FIXED_POINT_ITERATIONS {
         let curvature = point_load_curvature_at_first_zero_crossing(p, d, poisson_ratio)
             .ok_or(MomentEquivalenceRefusal::NotRepresentable)?;
@@ -1402,6 +1425,7 @@ pub fn solve_point_load(
             .ok_or(MomentEquivalenceRefusal::NotRepresentable)?
             .abs();
         d = d_new;
+        last_delta = delta;
         if delta <= Fixed::EPSILON {
             return Ok(MomentEquivalentPlate {
                 rigidity_gpa_km3: d,
@@ -1413,7 +1437,9 @@ pub fn solve_point_load(
             });
         }
     }
-    Err(MomentEquivalenceRefusal::LoadExceedsElasticSupport)
+    Err(MomentEquivalenceRefusal::FixedPointDidNotConverge {
+        final_delta_gpa_km3: last_delta,
+    })
 }
 
 /// THE DISC-POINT ACCURACY BAND on an axisymmetric rigidity: `[D (1 - b), D (1 + b)]` with `b` the primary's own
@@ -2017,9 +2043,19 @@ impl LithosphereEnvelope<'_> {
         if depth_km < ZERO {
             return None;
         }
+        // BAND-NEVER-REFUSE, SYMMETRICALLY. The ductile limb is read at the named `end` below; the brittle limb
+        // is read at the SAME end here, so the interval-of-mins composes over both limbs rather than going silent
+        // the moment the brittle limb is itself a bracket. It brackets for ice: Beeman's laws leave a gap from
+        // 5 to 10 MPa, which at Europa's gravity is roughly four to eight kilometres down, the heart of an ice
+        // shell's brittle zone. Refusing there composed the envelope for every rock lid and silenced every icy one
+        // at mid-shell, Terran bias expressed as an unhandled match arm. `VolumeEnd` (Low the weaker end, High the
+        // stronger) carries the same sense for both limbs, so the mirrored end parameter is the whole fix.
         let brittle_mpa = match self.brittle(depth_km, sense)? {
             DifferentialStrength::Determined(d) => d,
-            DifferentialStrength::Bracket { .. } => return None,
+            DifferentialStrength::Bracket { low, high } => match end {
+                VolumeEnd::Low => low,
+                VolumeEnd::High => high,
+            },
         };
         let mpa = match self.ductile(depth_km, end) {
             DuctileReading::Determined(d) => brittle_mpa.min(d),
@@ -4819,15 +4855,40 @@ mod tests {
             combine_band_edges(other(), Ok(plate(300_000))).unwrap_err(),
             MomentEquivalenceRefusal::ZeroCurvature
         );
+
+        // A NUMERICAL non-convergence is structural, NOT a support disagreement. This is the Finding-1 guarantee at
+        // the combinator: `FixedPointDidNotConverge` is a numerical residual and must never be laundered into
+        // `BandEdgeSupportDisagrees` (the physical straddle) the way `LoadExceedsElasticSupport` is. It propagates
+        // as itself, carrying its final step size, so a caller reads a numerical stall as a numerical stall.
+        let unconverged = || {
+            Err(MomentEquivalenceRefusal::FixedPointDidNotConverge {
+                final_delta_gpa_km3: Fixed::from_int(7),
+            })
+        };
+        assert_eq!(
+            combine_band_edges(Ok(plate(300_000)), unconverged()).unwrap_err(),
+            MomentEquivalenceRefusal::FixedPointDidNotConverge {
+                final_delta_gpa_km3: Fixed::from_int(7),
+            },
+            "a numerical non-convergence on one edge propagates as itself, never a support straddle"
+        );
+        assert_eq!(
+            combine_band_edges(unconverged(), Ok(plate(300_000))).unwrap_err(),
+            MomentEquivalenceRefusal::FixedPointDidNotConverge {
+                final_delta_gpa_km3: Fixed::from_int(7),
+            }
+        );
     }
 
     #[test]
-    fn the_edge_yield_refuses_inside_the_friction_gap_at_both_ends() {
-        // THE BRITTLE GAP IS NOT THE DUCTILE SPAN, on trial. An ice shell has a depth band where NEITHER of its
-        // friction fits is licensed, so the brittle branch is itself a bracket the calibration declines to
-        // collapse. A V* edge cannot speak for that gap, so `edge_yield` refuses there at BOTH ends, exactly as
-        // the settled view does; reading an edge of the creep span as the friction gap's answer would be laundering
-        // one band into another. Without this the refusal arm is untested, which a mutation run showed.
+    fn the_edge_yield_composes_inside_the_friction_gap_at_both_ends() {
+        // BAND NEVER REFUSE, SYMMETRICALLY, on trial. An ice shell has a depth band where the brittle branch is
+        // itself a bracket, because Beeman's two friction fits leave a gap from 5 to 10 MPa that the calibration
+        // declines to collapse. The settled view refused there at both ends, which silenced every icy lid at
+        // mid-shell: Terran bias expressed as an unhandled match arm. `edge_yield` now reads the SAME named end of
+        // the brittle bracket that it reads of the ductile limb, so the interval of mins composes over both limbs
+        // rather than going None. The Low edge reads the weaker friction limb, the High edge the stronger, and the
+        // band stays ordered. A mutation run showed the composition arm was untested.
         let volumes = hk_dry_dislocation_activation_volumes();
         let creep = [CreepCandidate {
             row: hk_dry_dislocation(),
@@ -4847,25 +4908,50 @@ mod tests {
             lid_base,
         };
         // 15 MPa of overburden sits near 12.4 km on this shell, inside its NORMAL-faulting friction gap (the
-        // sense the two Beeman fits straddle over 5 to 10 MPa). The brittle branch brackets there, so both V* ends
-        // of `edge_yield` refuse in that sense.
+        // sense the two Beeman fits straddle over 5 to 10 MPa). The brittle branch brackets there.
         let in_gap = Fixed::from_int(12);
-        assert!(
-            matches!(
-                shell.brittle(in_gap, FaultingSense::Normal),
-                Some(DifferentialStrength::Bracket { .. })
+        let (low_mpa, high_mpa) = match shell.brittle(in_gap, FaultingSense::Normal) {
+            Some(DifferentialStrength::Bracket { low, high }) => (low, high),
+            other => panic!(
+                "the premise: the friction branch is a bracket at 12 km in the normal sense, got {other:?}"
             ),
-            "the premise: the friction branch is a bracket at 12 km in the normal sense, or this proves nothing"
-        );
+        };
+        // The cold column does not creep, so the ductile limb is above representable at BOTH ends and the brittle
+        // bracket floors the envelope unchanged. This premise licenses the exact equality below: `edge_yield`
+        // returns the named brittle limb, converted to GPa, with no ductile minimum biting.
         for end in [VolumeEnd::Low, VolumeEnd::High] {
-            assert!(
-                shell.edge_yield(in_gap, FaultingSense::Normal, end).is_none(),
-                "inside the friction gap the edge refuses rather than reading a creep edge, {end:?}"
+            assert_eq!(
+                shell.ductile(in_gap, end),
+                DuctileReading::AboveRepresentable,
+                "the premise: the cold shell does not creep at 12 km, {end:?}"
             );
         }
-        // AND WHERE THE FRICTION BRANCH DETERMINES, the edge answers, so the refusal above is the gap and not the
-        // function simply never speaking. Deep in the shell (about 30 MPa overburden at 25 km, well past the
-        // 10 MPa gap top) the brittle branch determines and floors the cold, non-creeping column.
+        // THE FIX: the edge no longer refuses in the gap. It composes symmetrically, the Low edge reading the
+        // weaker friction limb and the High edge the stronger, each floored by the non-creeping brittle branch.
+        let low_edge = shell
+            .edge_yield(in_gap, FaultingSense::Normal, VolumeEnd::Low)
+            .expect("the low edge composes the gap rather than refusing");
+        let high_edge = shell
+            .edge_yield(in_gap, FaultingSense::Normal, VolumeEnd::High)
+            .expect("the high edge composes the gap rather than refusing");
+        assert_eq!(
+            low_edge,
+            low_mpa.checked_div(Fixed::from_int(MPA_PER_GPA)).unwrap(),
+            "the low edge reads the low limb of the friction bracket, in GPa"
+        );
+        assert_eq!(
+            high_edge,
+            high_mpa.checked_div(Fixed::from_int(MPA_PER_GPA)).unwrap(),
+            "the high edge reads the high limb of the friction bracket, in GPa"
+        );
+        assert!(
+            low_edge <= high_edge,
+            "the composed band stays ordered: the weak edge is no stronger than the strong edge"
+        );
+        // AND WHERE THE FRICTION BRANCH DETERMINES, the edge still answers, so the composition above is the gap
+        // being read and not the function simply always speaking. Deep in the shell (about 30 MPa overburden at
+        // 25 km, well past the 10 MPa gap top) the brittle branch determines and floors the cold, non-creeping
+        // column.
         let determinate = Fixed::from_int(25); // ~30 MPa on a 920 kg/m^3, 1.31 m/s^2 shell, inside the 30 km lid
         assert!(
             matches!(

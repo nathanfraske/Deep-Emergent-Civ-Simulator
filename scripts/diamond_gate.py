@@ -317,11 +317,18 @@ def detect_twin_providers(laws, registry):
     A quantity whose providers declare themselves through `@provides` can be COUNTED, so the habit gains a
     machine that does not get tired.
 
-    ITS OWN BLINDNESS, stated beside its power: it sees only providers that DECLARE themselves, so an
-    undeclared twin is still invisible, and the annotation is hand-authored, so this converts a silent
-    collision into a visible one ONLY where a human wrote the claim down. It reads `laws.rs` alone, so a
-    provider in another crate (which is exactly where Slack and Hofmeister live) is still outside its reach.
-    The census habit remains the guard for both; this narrows the class, it does not close it.
+    THE SWEEP IS CROSS-CRATE (`law_providers` reads every `.rs` under `crates/`, not `laws.rs` alone). This
+    docstring said "reads laws.rs alone ... a provider in another crate is outside its reach" until 2026-07-17,
+    which was STALE: true of the first laws.rs-only version, false once the cross-crate sweep landed, and a
+    doc-drift defect sitting in the very gate whose job is to catch doc-drift. The cross-crate sweep is what finds
+    the `log_sum_exp` twin (`saha.rs` and `materials/creep.rs`), the one a human census found by hand, so a
+    DECLARED cross-crate collision IS now mechanically visible.
+
+    ITS OWN BLINDNESS, stated beside its power and now honestly: it sees only providers that DECLARE themselves
+    with `@provides`, so an UNDECLARED twin is still invisible, and the annotation is hand-authored, so this
+    converts a silent collision into a visible one ONLY where a human wrote the claim down. That is the remaining
+    reach the census-before-build habit still guards; the crate boundary is no longer the limit, the annotation is.
+    This narrows the class; it does not close it.
     """
     out = []
     for quantity, providers in sorted(laws.items()):
