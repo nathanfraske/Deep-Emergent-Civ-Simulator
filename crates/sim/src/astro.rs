@@ -1165,6 +1165,92 @@ pub fn derive_disk_lifetime_myr(
     t_visc_myr.checked_mul(ln_factor.exp().checked_sub(Fixed::ONE)?)
 }
 
+/// An X-ray photoevaporation wind-rate FIT: the coefficient, the two power-law exponents, the luminosity
+/// normalization, and the stellar-mass range over which it holds. It carries what the wind rate the dispersal
+/// race consumes needs, as data rather than an inline constant (the [`ConvectiveTurnoverFit`] precedent). The
+/// coefficient is stored as a `log10` because the physical value (`~6e-9 M_sun/yr`) sits near the fixed-point
+/// floor, and the luminosity normalization as a `log10` because `L_X ~ 1e30 erg/s` overflows the format outright,
+/// so the whole rate is computed in the log domain.
+///
+/// THE FIT IS ONE INSTANCE OF A CONTESTED FAMILY (the model-structure band the arc declares, the same treatment
+/// as the alpha-viscous-versus-MHD-wind transport dispute), so which coefficient set the caller supplies is a
+/// declared choice, not a settled law. Three rows are on the table, each reserved-with-basis and cited: (1) the
+/// Owen, Clarke and Ercolano 2012 APPENDIX-B population-synthesis fit, the near-linear
+/// `Mdot_w = 6.25e-9 (M_star/M_sun)^-0.068 (L_X/1e30)^1.14 M_sun/yr` (the widely-used primordial-disc row); (2) the
+/// same paper's EQUATION-9 analytic estimate, the strictly linear mass-independent `Mdot_w = 8e-9 (L_X/1e30)`
+/// (`l_x_exponent = 1`, `mass_exponent = 0`), the paper's own order-of-magnitude form; (3) the Sellek et al. 2024
+/// PLUTO+PRIZMO radiation-hydro revision, which finds integrated rates roughly an order of magnitude LOWER from
+/// enhanced molecular cooling (a live rival, a lower coefficient on the same shape). The mechanism below applies
+/// whichever row is passed; the arc ships the band DECLARED rather than silently picking one.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct XrayWindFit {
+    /// `log10` of the wind-rate coefficient (solar masses per YEAR) at the reference `L_X` and one solar mass.
+    pub log10_coefficient_msun_yr: Fixed,
+    /// `log10` of the reference X-ray luminosity (erg/s) the fit normalizes to (30 for the `1e30` normalization).
+    pub log10_l_x_reference_erg_s: Fixed,
+    /// The exponent on `(L_X / L_X_reference)` (near 1: the rate scales almost linearly with X-ray luminosity).
+    pub l_x_exponent: Fixed,
+    /// The exponent on `(M_star / M_sun)` (near 0: the rate depends only weakly on stellar mass).
+    pub mass_exponent: Fixed,
+    /// Fit validity lower bound (solar masses), the low-mass edge of the sample the fit was measured over.
+    pub mass_min_msun: Fixed,
+    /// Fit validity upper bound (solar masses); Owen's sample is low-mass stars, so above it the fit is unproven.
+    pub mass_max_msun: Fixed,
+}
+
+/// The PHOTOEVAPORATIVE WIND MASS-LOSS RATE (solar masses per Myr), the input the dispersal race
+/// ([`derive_disk_lifetime_myr`]) crosses the declining accretion rate against. It wires to the star's own
+/// high-energy output: the wind is X-ray-driven, so the rate is a power law on the stellar X-ray luminosity `L_X`
+/// (and a weak power on stellar mass), read from the [`XrayWindFit`] the caller supplies:
+/// `Mdot_w = C (M_star/M_sun)^a (L_X/L_X_ref)^b`, converted from the fit's per-year coefficient to the per-Myr
+/// units the accretion clock uses (a factor `1e6`). Computed entirely in the log domain, since both `L_X` and the
+/// coefficient sit outside the fixed-point range: `L_X` is passed as `log10(L_X in erg/s)` (about 30 for a young
+/// solar analogue), never a raw value.
+///
+/// `L_X` ITSELF IS A DRAW-PENDING DERIVATION, the interim-plus-destination treatment `Mdot_0` takes: the
+/// destination is `L_X = L_bol * (L_X/L_bol)` with the fraction from [`activity_luminosity_fraction`] on the
+/// star's Rossby number and the bolometric luminosity from [`crate::stellar::luminosity_ratio`], the activity
+/// chain this arc's L_X slice already built as dormant pieces; until that chain is composed and the rotation state
+/// is drawn, the caller passes a solar-interim `log10(L_X)`. So this function homes the wind rate in the engine's
+/// own activity physics rather than a reserved number, with only the fit coefficients (Owen 2012 or its rivals)
+/// reserved-with-basis.
+///
+/// DOMAIN GUARD: the fit is measured over low-mass stars, so this returns `None` for a stellar mass outside
+/// `[mass_min, mass_max]` rather than extrapolate the wind physics into the intermediate-mass regime where the
+/// X-ray driver and the disc structure both change. `None` also on a non-positive mass or an intermediate past the
+/// representable range.
+pub fn photoevaporative_wind_rate_msun_myr(
+    log10_l_x_erg_s: Fixed,
+    star_mass_ratio: Fixed,
+    fit: &XrayWindFit,
+) -> Option<Fixed> {
+    if star_mass_ratio <= Fixed::ZERO
+        || star_mass_ratio < fit.mass_min_msun
+        || star_mass_ratio > fit.mass_max_msun
+    {
+        return None;
+    }
+    let ln10 = Fixed::from_int(10).ln();
+    let log10_m = star_mass_ratio.ln().checked_div(ln10)?;
+    // log10(Mdot in M_sun/yr) = log10(C) + a*log10(M_star) + b*(log10(L_X) - log10(L_X_ref)).
+    let log10_l_x_term = fit
+        .l_x_exponent
+        .checked_mul(log10_l_x_erg_s.checked_sub(fit.log10_l_x_reference_erg_s)?)?;
+    let log10_rate_yr = fit
+        .log10_coefficient_msun_yr
+        .checked_add(fit.mass_exponent.checked_mul(log10_m)?)?
+        .checked_add(log10_l_x_term)?;
+    // Convert per-year to per-Myr: add log10(1e6) = 6.
+    let log10_rate_myr = log10_rate_yr.checked_add(Fixed::from_int(6))?;
+    let ln_rate = log10_rate_myr.checked_mul(ln10)?;
+    // Fail loud past the representable exp ceiling rather than saturate (the surface-density precedent).
+    let ln_ceiling = Fixed::from_int(31).checked_mul(Fixed::from_int(2).ln())?;
+    if ln_rate >= ln_ceiling {
+        return None;
+    }
+    Some(ln_rate.exp())
+}
+
 /// The FEEDING-ZONE (annulus) DISK MASS a planet accretes from, in `normalization`-units times AU-squared: the
 /// integral `M = integral over [inner, outer] of 2*pi*r*Sigma(r) dr`, the disk mass in the orbital annulus
 /// `[inner_au, outer_au]`. This is the ACCRETION-mass scaffold: the mass follows from the geometry and the surface
@@ -3023,5 +3109,103 @@ mod tests {
             Fixed::ONE
         )
         .is_none());
+    }
+
+    fn owen_appendix_b_fit() -> XrayWindFit {
+        // The Owen, Clarke and Ercolano 2012 appendix-B population-synthesis fit, as reserved-with-basis data.
+        XrayWindFit {
+            log10_coefficient_msun_yr: Fixed::from_ratio(-820412, 100_000), // log10(6.25e-9)
+            log10_l_x_reference_erg_s: Fixed::from_int(30),                 // L_X_ref = 1e30 erg/s
+            l_x_exponent: Fixed::from_ratio(114, 100),                      // 1.14
+            mass_exponent: Fixed::from_ratio(-68, 1000),                    // -0.068
+            mass_min_msun: Fixed::from_ratio(1, 10), // 0.1 M_sun (sample low-mass edge)
+            mass_max_msun: Fixed::from_ratio(15, 10), // 1.5 M_sun (low-mass sample edge)
+        }
+    }
+
+    #[test]
+    fn the_wind_rate_matches_the_owen_solar_oracle() {
+        // Twin-independent oracle: for the solar analogue at the reference luminosity (log10 L_X = 30, M = 1) the
+        // Owen fit gives 6.25e-9 M_sun/yr, which is 6.25e-3 M_sun/Myr in the clock's units, computed outside the
+        // code under test. A half-solar star adds a weak mass factor 0.5^-0.068 ~ 1.048, giving ~6.552e-3.
+        let fit = owen_appendix_b_fit();
+        let solar =
+            photoevaporative_wind_rate_msun_myr(Fixed::from_int(30), Fixed::ONE, &fit).unwrap();
+        assert!(
+            (solar.to_f64_lossy() - 6.25e-3).abs() / 6.25e-3 < 0.02,
+            "solar wind rate ~6.25e-3 M_sun/Myr (got {})",
+            solar.to_f64_lossy()
+        );
+        let half =
+            photoevaporative_wind_rate_msun_myr(Fixed::from_int(30), Fixed::from_ratio(1, 2), &fit)
+                .unwrap();
+        assert!(
+            (half.to_f64_lossy() - 6.551_64e-3).abs() / 6.551_64e-3 < 0.02,
+            "half-solar wind rate ~6.552e-3 M_sun/Myr (got {})",
+            half.to_f64_lossy()
+        );
+    }
+
+    #[test]
+    fn the_wind_rate_scales_near_linearly_with_luminosity() {
+        // A ten-times-brighter X-ray star (log10 L_X 30 -> 31) raises the rate by 10^1.14 ~ 13.80, the near-linear
+        // L_X scaling checked against the base case rather than a second hand-number.
+        let fit = owen_appendix_b_fit();
+        let base = photoevaporative_wind_rate_msun_myr(Fixed::from_int(30), Fixed::ONE, &fit)
+            .unwrap()
+            .to_f64_lossy();
+        let bright = photoevaporative_wind_rate_msun_myr(Fixed::from_int(31), Fixed::ONE, &fit)
+            .unwrap()
+            .to_f64_lossy();
+        let expected = 10f64.powf(1.14);
+        assert!(
+            (bright / base - expected).abs() / expected < 0.02,
+            "a decade brighter in X-rays raises the rate by 10^1.14 ~ {} (got ratio {})",
+            expected,
+            bright / base
+        );
+    }
+
+    #[test]
+    fn the_wind_rate_guards_the_mass_domain_and_refuses_nonphysical_inputs() {
+        // The fit is measured over low-mass stars, so an intermediate-mass star (above mass_max) returns None
+        // rather than an extrapolated rate; a non-positive mass likewise.
+        let fit = owen_appendix_b_fit();
+        assert!(
+            photoevaporative_wind_rate_msun_myr(Fixed::from_int(30), Fixed::from_int(2), &fit)
+                .is_none(),
+            "a 2 M_sun star is outside the low-mass fit domain"
+        );
+        assert!(photoevaporative_wind_rate_msun_myr(
+            Fixed::from_int(30),
+            Fixed::from_ratio(1, 100),
+            &fit
+        )
+        .is_none());
+        assert!(
+            photoevaporative_wind_rate_msun_myr(Fixed::from_int(30), Fixed::ZERO, &fit).is_none()
+        );
+    }
+
+    #[test]
+    fn the_wind_rate_feeds_the_dispersal_race() {
+        // The end-to-end slice-2 chain: a derived wind rate feeds the race and yields a finite disk lifetime.
+        // With a solar wind rate of ~6.25e-3 M_sun/Myr well below a peak accretion of 0.1 M_sun/Myr, the race
+        // tips at a positive, finite tau_disk (the arc's output), not immediate dispersal or overflow.
+        let fit = owen_appendix_b_fit();
+        let wind =
+            photoevaporative_wind_rate_msun_myr(Fixed::from_int(30), Fixed::ONE, &fit).unwrap();
+        let tau = derive_disk_lifetime_myr(
+            Fixed::from_ratio(1, 10), // Mdot_0 = 0.1 M_sun/Myr
+            Fixed::ONE,               // t_visc = 1 Myr
+            Fixed::ONE,               // gamma = 1
+            wind,
+        )
+        .unwrap();
+        assert!(
+            tau > Fixed::ZERO,
+            "the wind rate feeding the race gives a finite positive lifetime (tau {})",
+            tau.to_f64_lossy()
+        );
     }
 }
