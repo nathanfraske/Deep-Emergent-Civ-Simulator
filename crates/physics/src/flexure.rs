@@ -319,6 +319,240 @@ pub fn kelvin_kei(x: Fixed) -> Fixed {
     log_part.saturating_add(pi_part).saturating_add(bei_phi)
 }
 
+/// The zeroth-order Kelvin function `ker(x)`, the SECOND axisymmetric point-load Green's-function shape (the
+/// companion of [`kelvin_kei`]), evaluated from the Abramowitz & Stegun 9.9 ascending series in fixed point:
+///
+/// `ker(x) = -(ln(x/2) + gamma) ber(x) + (pi/4) bei(x) + sum_{k>=1} (-1)^k H_{2k}/((2k)!)^2 (x/2)^(4k)`,
+///
+/// with `ber` and `bei` exactly as in [`kelvin_kei`], `gamma` the Euler-Mascheroni constant ([`euler_gamma`]),
+/// and `H_n` the `n`-th harmonic number. `H_0 = 0`, so the `k = 0` term of the harmonic sum vanishes and the
+/// sum starts at `k = 1`. The `ber`, `bei`, and harmonic-weighted sums are accumulated by the same TERM
+/// RECURRENCE [`kelvin_kei`] uses, so no standalone `(x/2)^(4k)` power is ever formed.
+///
+/// # WHY THE AXISYMMETRIC MOMENT EQUIVALENCE NEEDS IT
+///
+/// The point-load deflection is `w(r) = -(P l^2 / 2 pi D) kei(r/l)` (McNutt and Menard 1982 eq. A8, with
+/// `l = (D / (delta_rho g))^(1/4)`). Its LAPLACIAN CURVATURE `K = d2w/dr2 + (1/r) dw/dr` reduces, through the
+/// Kelvin identity `kei'' + kei'/x = ker`, to `K = -(P / 2 pi D) ker(r/l)`. So `ker` at the deflection's first
+/// zero crossing is the axisymmetric plate's reported curvature, the sibling of the line load's own read at
+/// `x = 3 pi / 4`. See `crate::moment_equivalence::point_load_curvature_at_first_zero_crossing`.
+///
+/// Domain and accuracy: `ker` has a LOGARITHMIC SINGULARITY at the origin (`ker(x) -> +inf` as `x -> 0`), so a
+/// non-positive argument has no value and returns [`Fixed::MIN`] as a fail-loud sentinel, the same convention
+/// [`Fixed::ln`] uses; a caller guards its domain. For `0 < x <= KEI_SERIES_MAX` the series is evaluated and
+/// matches tabulated reference values (`ker(1) ~ 0.286706`, `ker(2) ~ -0.041665`, `ker(3.91467) ~ -0.038899`)
+/// to within the fixed-point floor. The last is the value at the first zero crossing that McNutt and Menard's
+/// own printed `-0.0289` fails to reproduce (their erratum; see `crate::moment_equivalence`). Beyond
+/// `KEI_SERIES_MAX` it returns zero (the far field where `ker` decays as `e^(-x/sqrt2)` and is negligible while
+/// the `ber`/`bei` partial sums would leave the Q32.32 window). Deterministic.
+pub fn kelvin_ker(x: Fixed) -> Fixed {
+    let pi_over_4 = Fixed::PI
+        .checked_div(Fixed::from_int(4))
+        .unwrap_or(Fixed::ZERO);
+    if x <= Fixed::ZERO {
+        // ker has no value at or below the origin (a logarithmic singularity at 0), so fail loud.
+        return Fixed::MIN;
+    }
+    if x > Fixed::from_int(KEI_SERIES_MAX) {
+        return Fixed::ZERO;
+    }
+    let xh = match x.checked_div(Fixed::from_int(2)) {
+        Some(v) => v,
+        None => return Fixed::ZERO,
+    };
+    let xh2 = match xh.checked_mul(xh) {
+        Some(v) => v,
+        None => return Fixed::ZERO,
+    };
+    let xh4 = match xh2.checked_mul(xh2) {
+        Some(v) => v,
+        None => return Fixed::ZERO,
+    };
+    // b_k: the ber term (b_0 = 1); c_k: the bei term (c_0 = (x/2)^2).
+    let mut b = Fixed::ONE;
+    let mut c = xh2;
+    let mut ber = b;
+    let mut bei = c;
+    // ber_phi = sum_{k>=1} b_k * H_{2k}; h_even tracks H_{2k} (H_0 = 0, so the k=0 term is skipped).
+    let mut h_even = Fixed::ZERO;
+    let mut ber_phi = Fixed::ZERO;
+    let mut k = 1i32;
+    while k <= KEI_MAX_TERMS {
+        // ber recurrence: b_k = b_{k-1} * (-(x/2)^4 / ((2k)(2k-1))^2)
+        let m_ber = (2 * k) * (2 * k - 1);
+        let d_ber = match Fixed::from_int(m_ber).checked_mul(Fixed::from_int(m_ber)) {
+            Some(v) => v,
+            None => break,
+        };
+        b = match b.checked_mul(xh4).and_then(|x| x.checked_div(d_ber)) {
+            Some(v) => Fixed::ZERO - v,
+            None => break,
+        };
+        ber = ber.checked_add(b).unwrap_or(ber);
+        // bei recurrence: c_k = c_{k-1} * (-(x/2)^4 / ((2k+1)(2k))^2)
+        let m_bei = (2 * k + 1) * (2 * k);
+        let d_bei = match Fixed::from_int(m_bei).checked_mul(Fixed::from_int(m_bei)) {
+            Some(v) => v,
+            None => break,
+        };
+        c = match c.checked_mul(xh4).and_then(|x| x.checked_div(d_bei)) {
+            Some(v) => Fixed::ZERO - v,
+            None => break,
+        };
+        bei = bei.checked_add(c).unwrap_or(bei);
+        // H_{2k} = H_{2k-2} + 1/(2k-1) + 1/(2k)
+        let inv_odd = Fixed::ONE
+            .checked_div(Fixed::from_int(2 * k - 1))
+            .unwrap_or(Fixed::ZERO);
+        let inv_even = Fixed::ONE
+            .checked_div(Fixed::from_int(2 * k))
+            .unwrap_or(Fixed::ZERO);
+        h_even = h_even.saturating_add(inv_odd).saturating_add(inv_even);
+        if let Some(term) = b.checked_mul(h_even) {
+            ber_phi = ber_phi.checked_add(term).unwrap_or(ber_phi);
+        }
+        // Converged once both leading increments fall below the fixed-point floor.
+        if b.abs() <= Fixed::EPSILON && c.abs() <= Fixed::EPSILON {
+            break;
+        }
+        k += 1;
+    }
+    // ker = -(ln(x/2) + gamma) ber + (pi/4) bei + ber_phi
+    let ln_term = xh.ln().saturating_add(euler_gamma());
+    let log_part = Fixed::ZERO - ln_term.mul(ber);
+    let pi_part = pi_over_4.mul(bei);
+    log_part.saturating_add(pi_part).saturating_add(ber_phi)
+}
+
+/// The derivative `kei'(x)` of the zeroth-order Kelvin function, evaluated from the term-by-term derivative of
+/// [`kelvin_kei`]'s Abramowitz & Stegun 9.9 series:
+///
+/// `kei'(x) = -(1/x) bei(x) - (ln(x/2) + gamma) bei'(x) - (pi/4) ber'(x) + [d/dx of the harmonic-weighted sum]`,
+///
+/// where each power's derivative is `d/dx (x/2)^p = (p / (2 (x/2))) (x/2)^p`, so `ber'(x)` is
+/// `sum_{k>=1} (2k / (x/2)) b_k`, `bei'(x)` is `sum_{k>=0} ((2k+1) / (x/2)) c_k`, and the harmonic sum's
+/// derivative is `sum_{k>=0} ((2k+1) / (x/2)) c_k H_{2k+1}`, each accumulated from the same `b_k`, `c_k` term
+/// recurrence [`kelvin_kei`] uses. The `-(1/x) bei(x)` term is the derivative of the `-(ln(x/2) + gamma)`
+/// prefactor, whose `d/dx` is `-(1/x)`.
+///
+/// # WHY THE AXISYMMETRIC MOMENT EQUIVALENCE NEEDS IT
+///
+/// The point-load deflection's TANGENTIAL (hoop) curvature is `kappa_theta = (1/r) dw/dr = -(P/2 pi D)(1/x) kei'(x)`,
+/// so the radial fibre's driving curvature `kappa_r + nu kappa_theta` (McNutt and Menard 1982's `M` operator,
+/// the one carrying `nu/r` against the Laplacian's `1/r`) reads `kei'` at the first zero crossing. See
+/// `crate::moment_equivalence::point_load_curvature_at_first_zero_crossing`.
+///
+/// Domain and accuracy: `kei'(x)` is finite at the origin (the odd-power derivative series vanishes there), and
+/// `0` is returned for `x <= 0`, a negative radius being meaningless. For `0 < x <= KEI_SERIES_MAX` the series
+/// matches tabulated values (`kei'(1) ~ 0.352370`, `kei'(3.91467) ~ 0.027669`, `kei'(4.93181) ~ 0` at the arch
+/// peak where `kei` is extremal) to within the fixed-point floor; beyond `KEI_SERIES_MAX` it returns zero (the
+/// far field where `kei'` is negligible). Deterministic.
+pub fn kelvin_kei_prime(x: Fixed) -> Fixed {
+    let pi_over_4 = Fixed::PI
+        .checked_div(Fixed::from_int(4))
+        .unwrap_or(Fixed::ZERO);
+    if x <= Fixed::ZERO {
+        return Fixed::ZERO;
+    }
+    if x > Fixed::from_int(KEI_SERIES_MAX) {
+        return Fixed::ZERO;
+    }
+    let xh = match x.checked_div(Fixed::from_int(2)) {
+        Some(v) => v,
+        None => return Fixed::ZERO,
+    };
+    let xh2 = match xh.checked_mul(xh) {
+        Some(v) => v,
+        None => return Fixed::ZERO,
+    };
+    let xh4 = match xh2.checked_mul(xh2) {
+        Some(v) => v,
+        None => return Fixed::ZERO,
+    };
+    // b_k: the ber term (b_0 = 1); c_k: the bei term (c_0 = (x/2)^2).
+    let mut b = Fixed::ONE;
+    let mut c = xh2;
+    let mut bei = c;
+    // The k=0 contributions to the derivative sums. ber'(0-term) = 0 (the constant b_0 has zero derivative);
+    // bei' and the harmonic-sum derivative carry the c_0 term at factor (1/(x/2)) with H_1 = 1.
+    let inv_xh = match Fixed::ONE.checked_div(xh) {
+        Some(v) => v,
+        None => return Fixed::ZERO,
+    };
+    let mut berp = Fixed::ZERO;
+    let mut beip = c.checked_mul(inv_xh).unwrap_or(Fixed::ZERO); // (1/xh) c_0
+    let mut h_odd = Fixed::ONE; // H_{2k+1}, starting at H_1 = 1
+    let mut beiphip = beip; // (1/xh) c_0 H_1, and H_1 = 1
+    let mut k = 1i32;
+    while k <= KEI_MAX_TERMS {
+        // ber recurrence and its derivative contribution (2k / xh) b_k.
+        let m_ber = (2 * k) * (2 * k - 1);
+        let d_ber = match Fixed::from_int(m_ber).checked_mul(Fixed::from_int(m_ber)) {
+            Some(v) => v,
+            None => break,
+        };
+        b = match b.checked_mul(xh4).and_then(|x| x.checked_div(d_ber)) {
+            Some(v) => Fixed::ZERO - v,
+            None => break,
+        };
+        if let Some(term) = Fixed::from_int(2 * k)
+            .checked_mul(b)
+            .and_then(|t| t.checked_mul(inv_xh))
+        {
+            berp = berp.checked_add(term).unwrap_or(berp);
+        }
+        // bei recurrence and its derivative contribution ((2k+1) / xh) c_k.
+        let m_bei = (2 * k + 1) * (2 * k);
+        let d_bei = match Fixed::from_int(m_bei).checked_mul(Fixed::from_int(m_bei)) {
+            Some(v) => v,
+            None => break,
+        };
+        c = match c.checked_mul(xh4).and_then(|x| x.checked_div(d_bei)) {
+            Some(v) => Fixed::ZERO - v,
+            None => break,
+        };
+        bei = bei.checked_add(c).unwrap_or(bei);
+        let deriv_factor = match Fixed::from_int(2 * k + 1).checked_mul(inv_xh) {
+            Some(v) => v,
+            None => break,
+        };
+        if let Some(term) = c.checked_mul(deriv_factor) {
+            beip = beip.checked_add(term).unwrap_or(beip);
+        }
+        // H_{2k+1} = H_{2k-1} + 1/(2k) + 1/(2k+1)
+        let inv_even = Fixed::ONE
+            .checked_div(Fixed::from_int(2 * k))
+            .unwrap_or(Fixed::ZERO);
+        let inv_odd = Fixed::ONE
+            .checked_div(Fixed::from_int(2 * k + 1))
+            .unwrap_or(Fixed::ZERO);
+        h_odd = h_odd.saturating_add(inv_even).saturating_add(inv_odd);
+        if let Some(term) = c
+            .checked_mul(deriv_factor)
+            .and_then(|t| t.checked_mul(h_odd))
+        {
+            beiphip = beiphip.checked_add(term).unwrap_or(beiphip);
+        }
+        if b.abs() <= Fixed::EPSILON && c.abs() <= Fixed::EPSILON {
+            break;
+        }
+        k += 1;
+    }
+    // kei'(x) = -(1/x) bei - (ln(x/2) + gamma) bei' - (pi/4) ber' + [harmonic sum]'
+    let inv_x = match Fixed::ONE.checked_div(x) {
+        Some(v) => v,
+        None => return Fixed::ZERO,
+    };
+    let ln_term = xh.ln().saturating_add(euler_gamma());
+    let bei_part = Fixed::ZERO - inv_x.mul(bei);
+    let log_part = Fixed::ZERO - ln_term.mul(beip);
+    let pi_part = Fixed::ZERO - pi_over_4.mul(berp);
+    bei_part
+        .saturating_add(log_part)
+        .saturating_add(pi_part)
+        .saturating_add(beiphip)
+}
+
 /// The per-world plate inputs the deflection evaluator reads, all caller-supplied in one coherent unit system
 /// (see the module unit contract). Every field is DERIVED UPSTREAM; the kernel authors none of them.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -841,6 +1075,209 @@ mod tests {
                 (fp - kei_f64(x)).abs() < 5e-4,
                 "kei fixed-point {fp} vs f64 twin {} at x = {x}",
                 kei_f64(x)
+            );
+            x += 0.5;
+        }
+    }
+
+    #[test]
+    fn the_kelvin_ker_matches_reference_values() {
+        // ker anchored at INDEPENDENT tabulated values (Abramowitz & Stegun 9.10; cross-checked here with
+        // scipy.special.kelvin and mpmath, two libraries with different algorithms that agree to seven
+        // digits). These are literature values, not a restatement of this module's own series.
+        //   ker(1) ~  0.2867062, ker(2) ~ -0.0416645, ker(3) ~ -0.0670292, ker(3.91467) ~ -0.0388994.
+        let at = |num: i64, den: i64| kelvin_ker(Fixed::from_ratio(num, den)).to_f64_lossy();
+        assert!(
+            close(kelvin_ker(Fixed::from_int(1)), 0.2867062, 5e-5),
+            "ker(1) ~ 0.2867062, got {}",
+            at(1, 1)
+        );
+        assert!(
+            close(kelvin_ker(Fixed::from_int(2)), -0.0416645, 5e-5),
+            "ker(2) ~ -0.0416645, got {}",
+            at(2, 1)
+        );
+        assert!(
+            close(kelvin_ker(Fixed::from_int(3)), -0.0670292, 5e-5),
+            "ker(3) ~ -0.0670292, got {}",
+            at(3, 1)
+        );
+        // THE VALUE AT THE FIRST ZERO CROSSING, which is the axisymmetric plate's reported curvature
+        // coefficient and the site of McNutt and Menard's printed erratum. The re-derived value is
+        // -0.0388994; the paper prints a curvature that back-solves to -0.0289, about 26 per cent low. The
+        // fixed-point series lands on the re-derived value, not the printed one, which is the whole point of
+        // recomputing the constant rather than copying it.
+        let ker_x0 = kelvin_ker(Fixed::from_ratio(391467, 100000)).to_f64_lossy();
+        assert!(
+            (ker_x0 - (-0.0388994)).abs() < 5e-5,
+            "ker(3.91467) ~ -0.0388994 (re-derived), got {ker_x0}"
+        );
+        assert!(
+            (ker_x0 - (-0.0289)).abs() > 5e-3,
+            "the re-derived value is decisively NOT the paper's printed -0.0289: {ker_x0}"
+        );
+        // A NON-POSITIVE ARGUMENT FAILS LOUD: ker has a logarithmic singularity at the origin.
+        assert_eq!(kelvin_ker(Fixed::ZERO), Fixed::MIN);
+        assert_eq!(kelvin_ker(Fixed::from_int(-1)), Fixed::MIN);
+    }
+
+    #[test]
+    fn the_kelvin_ker_reproduces_the_ascending_series_numerical_twin() {
+        // Numerical twin: the fixed-point ker equals an independent f64 evaluation of the same A&S 9.9 series
+        // (including the Euler-Mascheroni gamma and the H_{2k} harmonic weights), catching any fixed-point
+        // precision or overflow drift across the near-to-mid field.
+        let gamma = 0.5772156649_f64;
+        let ker_f64 = |x: f64| -> f64 {
+            let xh = x / 2.0;
+            let xh4 = xh.powi(4);
+            let (mut b, mut c) = (1.0_f64, xh * xh);
+            let (mut ber, mut bei) = (b, c);
+            let mut h_even = 0.0_f64;
+            let mut ber_phi = 0.0_f64;
+            for k in 1..40 {
+                let mb = ((2 * k) * (2 * k - 1)) as f64;
+                b = -b * xh4 / (mb * mb);
+                ber += b;
+                let mc = ((2 * k + 1) * (2 * k)) as f64;
+                c = -c * xh4 / (mc * mc);
+                bei += c;
+                h_even += 1.0 / (2 * k - 1) as f64 + 1.0 / (2 * k) as f64;
+                ber_phi += b * h_even;
+            }
+            -(xh.ln() + gamma) * ber + std::f64::consts::FRAC_PI_4 * bei + ber_phi
+        };
+        let mut x = 0.5_f64;
+        while x <= 11.5 {
+            let fp = kelvin_ker(Fixed::from_ratio((x * 1000.0) as i64, 1000)).to_f64_lossy();
+            assert!(
+                (fp - ker_f64(x)).abs() < 5e-4,
+                "ker fixed-point {fp} vs f64 twin {} at x = {x}",
+                ker_f64(x)
+            );
+            x += 0.5;
+        }
+    }
+
+    #[test]
+    fn the_kelvin_functions_satisfy_the_laplacian_identity() {
+        // THE LOAD-BEARING STRUCTURAL CHECK, and it is independent by construction: the axisymmetric moment
+        // equivalence rests on `nabla^2 kei = ker`, i.e. `kei''(x) + (1/x) kei'(x) = ker(x)` (the identity
+        // that turns the point-load deflection's Laplacian into `-(P/2 pi D) ker`, and the one the fetch
+        // verified numerically). The LEFT side is formed by SECOND-DIFFERENCING an independent f64 evaluation
+        // of kei's own A&S series (a different route from the fixed-point `kelvin_ker`), and the RIGHT side is
+        // the fixed-point `kelvin_ker`. They share no arithmetic, so agreement is evidence rather than a
+        // series checked against itself. The finite difference runs on the SMOOTH f64 series rather than the
+        // fixed-point `kelvin_kei` on purpose: a second difference divides by `h^2`, which would amplify the
+        // fixed-point quantization (about `1e-9`) into the answer, so differencing the exact f64 form isolates
+        // the identity from the representation. This is the Kelvin analogue of the line load's force-balance
+        // identity: a relation the functions must satisfy, not a restatement of either one.
+        let gamma = 0.5772156649_f64;
+        let kei_f64 = |x: f64| -> f64 {
+            let xh = x / 2.0;
+            let xh4 = xh.powi(4);
+            let (mut b, mut c) = (1.0_f64, xh * xh);
+            let (mut ber, mut bei) = (b, c);
+            let mut h = 1.0_f64;
+            let mut bei_phi = c * h;
+            for k in 1..40 {
+                let mb = ((2 * k) * (2 * k - 1)) as f64;
+                b = -b * xh4 / (mb * mb);
+                ber += b;
+                let mc = ((2 * k + 1) * (2 * k)) as f64;
+                c = -c * xh4 / (mc * mc);
+                bei += c;
+                h += 1.0 / (2 * k) as f64 + 1.0 / (2 * k + 1) as f64;
+                bei_phi += c * h;
+            }
+            -(xh.ln() + gamma) * bei - std::f64::consts::FRAC_PI_4 * ber + bei_phi
+        };
+        // h swept to the O(h^2) plateau: on the exact f64 form the only errors are truncation (O(h^2)) and
+        // f64 roundoff (O(eps/h^2) ~ 2e-8 at h=1e-3), so 1e-3 sits in the plateau far below the tolerance.
+        let h = 1e-3_f64;
+        for &x in &[1.5_f64, 2.5, 3.91467, 5.0, 6.5] {
+            let kei_pp = (kei_f64(x + h) - 2.0 * kei_f64(x) + kei_f64(x - h)) / (h * h);
+            let kei_p = (kei_f64(x + h) - kei_f64(x - h)) / (2.0 * h);
+            let laplacian = kei_pp + kei_p / x;
+            let ker = kelvin_ker(Fixed::from_ratio((x * 1e6) as i64, 1_000_000)).to_f64_lossy();
+            assert!(
+                (laplacian - ker).abs() < 5e-4,
+                "nabla^2 kei = ker at x = {x}: {laplacian} (finite-diff of kei) against {ker} (ker series)"
+            );
+        }
+    }
+
+    #[test]
+    fn the_kelvin_kei_prime_matches_reference_values() {
+        // kei' anchored at INDEPENDENT values (scipy.special.kelvin's Kep imaginary part, cross-checked with
+        // mpmath's derivative). Literature-grade, not a restatement of the derivative series.
+        //   kei'(1) ~ 0.3523699, kei'(2) ~ 0.2198079, kei'(3.91467) ~ 0.0276690.
+        assert!(
+            close(kelvin_kei_prime(Fixed::from_int(1)), 0.3523699, 5e-5),
+            "kei'(1) ~ 0.3523699, got {}",
+            kelvin_kei_prime(Fixed::from_int(1)).to_f64_lossy()
+        );
+        assert!(
+            close(kelvin_kei_prime(Fixed::from_int(2)), 0.2198079, 5e-5),
+            "kei'(2) ~ 0.2198079, got {}",
+            kelvin_kei_prime(Fixed::from_int(2)).to_f64_lossy()
+        );
+        let keip_x0 = kelvin_kei_prime(Fixed::from_ratio(391467, 100000)).to_f64_lossy();
+        assert!(
+            (keip_x0 - 0.0276690).abs() < 5e-5,
+            "kei'(3.91467) ~ 0.0276690, got {keip_x0}"
+        );
+        // THE ARCH PEAK, where kei is extremal so kei' vanishes: kei'(4.93181) ~ 0. An independent anchor
+        // (the peak location is a cited root, A&S), and it pins the derivative's zero rather than its value.
+        let keip_peak = kelvin_kei_prime(Fixed::from_ratio(493181, 100000)).to_f64_lossy();
+        assert!(
+            keip_peak.abs() < 5e-5,
+            "kei'(4.93181) ~ 0 at the arch peak, got {keip_peak}"
+        );
+        // Positive on the depression side (kei rising through its first zero crossing), which is the sign the
+        // hoop curvature carries into the axisymmetric moment.
+        assert!(
+            keip_x0 > 0.0,
+            "kei' is positive where kei rises through zero, got {keip_x0}"
+        );
+    }
+
+    #[test]
+    fn the_kelvin_kei_prime_reproduces_the_derivative_series_numerical_twin() {
+        // Numerical twin: the fixed-point kei' equals an independent f64 evaluation of the term-by-term
+        // derivative of the A&S 9.9 series (a different code path from the fixed-point recurrence), catching
+        // precision or overflow drift.
+        let gamma = 0.5772156649_f64;
+        let keip_f64 = |x: f64| -> f64 {
+            let xh = x / 2.0;
+            let xh4 = xh.powi(4);
+            let (mut b, mut c) = (1.0_f64, xh * xh);
+            let mut bei = c;
+            let mut berp = 0.0_f64;
+            let mut beip = c / xh; // (1/xh) c_0
+            let mut h_odd = 1.0_f64;
+            let mut beiphip = beip; // (1/xh) c_0 H_1
+            for k in 1..40 {
+                let mb = ((2 * k) * (2 * k - 1)) as f64;
+                b = -b * xh4 / (mb * mb);
+                berp += (2 * k) as f64 * b / xh;
+                let mc = ((2 * k + 1) * (2 * k)) as f64;
+                c = -c * xh4 / (mc * mc);
+                bei += c;
+                let factor = (2 * k + 1) as f64 / xh;
+                beip += factor * c;
+                h_odd += 1.0 / (2 * k) as f64 + 1.0 / (2 * k + 1) as f64;
+                beiphip += factor * c * h_odd;
+            }
+            -(1.0 / x) * bei - (xh.ln() + gamma) * beip - std::f64::consts::FRAC_PI_4 * berp
+                + beiphip
+        };
+        let mut x = 0.5_f64;
+        while x <= 11.5 {
+            let fp = kelvin_kei_prime(Fixed::from_ratio((x * 1000.0) as i64, 1000)).to_f64_lossy();
+            assert!(
+                (fp - keip_f64(x)).abs() < 5e-4,
+                "kei' fixed-point {fp} vs f64 twin {} at x = {x}",
+                keip_f64(x)
             );
             x += 0.5;
         }

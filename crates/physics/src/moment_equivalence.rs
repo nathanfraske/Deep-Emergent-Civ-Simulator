@@ -100,20 +100,49 @@
 //! is one more reason it is the canonical output, and [`equivalent_rigidity`] returns it positive from a moment
 //! and curvature of matching sign.
 //!
-//! # THE LINE-LOAD FORM ONLY, AND THE CIRCULAR LOAD REFUSED
+//! # TWO GEOMETRIES, ONE SCALAR YIELD LAW: THE LINE LOAD AND THE AXISYMMETRIC POINT LOAD
 //!
 //! `M = -D K` IS THE LINE-LOAD (cylindrical-bending, plane-strain) FORM AND IT IS NOT GENERAL. McNutt and
-//! Menard's Appendix A prints, for the axisymmetric case, `M = -D (d2w/dr2 + (nu/r) dw/dr)` while defining
-//! `K = d2w/dr2 + (1/r) dw/dr`: the `nu/r` and the `1/r` DIFFER, so the moment is not `-D K` for a circular load
-//! (fetch section 6.4). This module therefore ships the LINE-LOAD construction and REFUSES the circular one
-//! ([`MomentEquivalenceRefusal::CircularLoadNotConstructed`]) rather than applying the line-load algebra to a
-//! geometry it does not describe.
+//! Menard's Appendix A prints, for the axisymmetric case, `M = -D (d2w/dr2 + (nu/r) dw/dr)` while the reported
+//! curvature is the Laplacian `K = d2w/dr2 + (1/r) dw/dr`: the `nu/r` and the `1/r` DIFFER, so the moment is not
+//! `-D K` for a circular load (fetch section 3, verified against the page at 230 and 500 dpi). An earlier slice
+//! REFUSED the circular load rather than mixing the two geometries, and that refusal was CORRECT: this module
+//! still never applies the line-load algebra to an axisymmetric geometry.
 //!
-//! The refusal is not a stub, and what it costs is stated plainly. The axisymmetric plate's fibre state is
-//! BIAXIAL (a radial and a hoop fibre both yield), so its elastic-plastic construction needs a two-dimensional
-//! yield surface over `(sigma_r, sigma_theta)`, which is a different object from the scalar envelope this module
-//! integrates. The arc's own stated primary hindcast target is seamount-class loads, which are circular, so that
-//! construction is a real and named gap rather than a convenience this slice skipped.
+//! What the primary-source fetch then settled, and what this module now ships beside the line load, is the true
+//! axisymmetric construction. Two findings make it a GEOMETRY change rather than a new yield law. First, McNutt
+//! and Menard solve the TRUE AXISYMMETRIC PLATE in `ker`/`kei` Bessel functions (their "cylindrical load" is an
+//! axisymmetric disc, their word for the two-dimensional case is "rectangular"), and all three of their published
+//! seamount rows back-solve onto the circular constants. Second, the fibre YIELD LAW is UNIAXIAL in both
+//! primaries: the words "biaxial", "von Mises", "Tresca" and "hoop" appear nowhere in their yield formulation,
+//! whose measure is the scalar differential stress `sigma_h - sigma_v`. So the earlier note that the axisymmetric
+//! case "needs a two-dimensional yield surface" was the one thing the primaries refute: they use the same scalar
+//! envelope this module already integrates, over the axisymmetric geometry. Building a biaxial surface would ship
+//! a model the rows never used.
+//!
+//! So the axisymmetric path ([`solve_point_load`]) changes only the GEOMETRY: the deflection is `ker`/`kei`
+//! (McNutt and Menard eq. A8), the DRIVING curvature at the first zero crossing is
+//! `kappa_r + nu kappa_theta = d2w/dr2 + (nu/r) dw/dr` (the `M` operator; see
+//! [`point_load_curvature_at_first_zero_crossing`]), and the rigidity is `D_eq = M_yield / kappa_eff`, which
+//! recovers `D` in the elastic limit exactly as the line load does. The scalar yield envelope, the neutral-surface
+//! solve, and the moment integral are all reused unchanged. Whether the uniaxial envelope is adequate at seamount
+//! curvatures is a MEASURED cost, not an assumed one: at the hindcast curvatures (4 to 8 by 1e-8 per metre) the
+//! competent plate is NEAR-ELASTIC on this engine's own envelope, the yielding ratio `T_e(YSE)/T_e(elastic)`
+//! sitting within about six per cent of one (`the_uniaxial_cost_is_measured_at_the_hindcast_curvatures`), so the
+//! plate yields only modestly and the two-dimensional yield surface stays the high-curvature refinement it always
+//! was rather than a hindcast one. The exact departure is reported by that measurement rather than assumed away,
+//! which is the shortcut-validity rule: the uniaxial law's cost is its measured departure from elastic, never a
+//! claim of zero. The comparison against the oceanic `T_e`-versus-age rows stays in RIGIDITY SPACE (the rows are
+//! `T_e(elastic)` fits, never moment-equivalence outputs), which is another slice's concern.
+//!
+//! THE ERRATUM THE AXISYMMETRIC FORM CARRIES. McNutt and Menard print the Laplacian curvature coefficient at the
+//! first zero crossing as `-0.0289`; their own printed definition applied to their own printed deflection gives
+//! `ker(x_0) = -0.0388994`, confirmed by two libraries and a finite-difference twin with the line-load controls
+//! reproducing, so their published seamount curvatures run about 26 per cent low, cause UNATTRIBUTED. This module
+//! recomputes the coefficient from the series ([`point_load_reported_curvature_coefficient`]) and never copies
+//! the printed number, carrying the published value only for a consumer of the paper's own curvature-derived
+//! constants (see [`mcnutt_menard_published_laplacian_coefficient`]). The finite disc is approximated by the
+//! point load within the primary's own 2 per cent ([`disc_point_rigidity_band`]).
 //!
 //! # THE STRAIN RATE IS THE LOAD'S OWN, AND IT ARRIVES WITH ITS CHORD
 //!
@@ -836,10 +865,6 @@ pub enum MomentEquivalenceRefusal {
     /// envelope is asymmetric, so a pinned mid-plate neutral surface is an assumption they do not make and their
     /// own text contradicts.
     NeutralSurfaceNotBracketed,
-    /// A CIRCULAR load was presented. `M = -D K` is the LINE-LOAD form; the axisymmetric case carries `nu/r` in
-    /// the moment against `1/r` in the curvature, and its fibre state is biaxial, so it needs a two-dimensional
-    /// yield surface this scalar construction does not have. Refused rather than mixed.
-    CircularLoadNotConstructed,
     /// The envelope refused, or the profile could not be sampled.
     EnvelopeRefused,
     /// A BANDED SOLVE'S TWO EDGES DISAGREED ABOUT WHETHER THE PLATE HOLDS: one edge of the `V*` band converged to
@@ -1179,21 +1204,238 @@ pub fn solve_line_load(
     Err(MomentEquivalenceRefusal::LoadExceedsElasticSupport)
 }
 
-/// THE CIRCULAR (AXISYMMETRIC) LOAD, REFUSED RATHER THAN MIXED.
+/// The first zero crossing of the axisymmetric point-load deflection, `r/l = 3.91467`, which is the first zero
+/// of `kei` (Abramowitz and Stegun 1965; McNutt and Menard 1982 p. 387). A CITED root of a special function, the
+/// same status as a mathematical constant, and the axisymmetric sibling of the line load's own `x = 3 pi / 4`.
+/// The deflection `w(r) = -(P l^2 / 2 pi D) kei(r/l)` vanishes here, so the axial-load term drops out and the
+/// curvature is rheology-insensitive, exactly the property the line load reads at its own zero crossing.
+fn point_load_first_zero_crossing() -> Fixed {
+    Fixed::from_ratio(391467, 100000)
+}
+
+/// THE POINT-LOAD-TO-DISC EQUIVALENCE, the axisymmetric form's own accuracy band, as a fraction (0.02 = 2 per
+/// cent). McNutt and Menard 1982 (pp. 389-390) show the finite cylindrical (disc) load's asymptotic factor `C_c`
+/// is within 2 per cent of the point load's `C_p` at the nodal ring and beyond, so `M` and `K` from the
+/// point-load approximation apply to a distributed disc within 2 per cent. A CITED number from the primary, the
+/// cost of approximating the finite disc by the point load, never an authored tolerance. It ships as the band on
+/// the axisymmetric rigidity ([`disc_point_rigidity_band`]).
+fn disc_point_equivalence_band() -> Fixed {
+    Fixed::from_ratio(2, 100)
+}
+
+/// McNutt and Menard's PUBLISHED Laplacian-curvature coefficient at the first zero crossing, `-0.0289`, carried
+/// so both values ride together per the re-derivation standard (RUNBOOK section 11). Their own printed
+/// definition of `K` applied to their own printed deflection (A8) gives `ker(x_0) = -0.0388994` instead
+/// ([`point_load_reported_curvature_coefficient`]), confirmed by [`crate::flexure::kelvin_ker`] and
+/// independently by scipy and mpmath plus a finite-difference twin, WITH the line-load controls reproducing to
+/// 0.05 per cent. So their published seamount curvatures run about 26 per cent LOW and a correct coefficient
+/// raises them 34 per cent; the cause is UNATTRIBUTED, no natural reading at `x_0` producing `0.0289`. This
+/// module ships the RE-DERIVED value inherently (the curvature reads `ker(x_0)` from the series, never the
+/// printed constant); the published value is carried only so a consumer of the paper's own `C_2` or Table 3
+/// seamount curvatures can apply the correction.
+pub fn mcnutt_menard_published_laplacian_coefficient() -> Fixed {
+    Fixed::from_ratio(-289, 10000)
+}
+
+/// THE RE-DERIVED LAPLACIAN CURVATURE COEFFICIENT at the first zero crossing, `ker(x_0) = -0.0388994`, computed
+/// from [`crate::flexure::kelvin_ker`] rather than copied from the page. It is the coefficient in the REPORTED
+/// (Laplacian) curvature `K = -(P / 2 pi D) ker(x_0)`, the one the seamount literature quotes as "the curvature".
 ///
-/// A point or circular load does not obey `M = -D K`: McNutt and Menard's Appendix A carries `nu/r` in the
-/// moment against `1/r` in the curvature, so the line-load algebra this module ships describes a different
-/// geometry. Applying it anyway is the mixing the ruling forbids by name, and it would not announce itself: it
-/// returns a plausible thickness for the arc's own primary hindcast target.
+/// This module's canonical output uses the DRIVING curvature instead (the `M` operator, carrying `nu/r`; see
+/// [`point_load_curvature_at_first_zero_crossing`]), because the moment equivalence needs the curvature that
+/// drives the radial fibre stress. The Laplacian coefficient is exposed for the ERRATUM record and for a
+/// consumer comparing an engine rigidity against a published Laplacian curvature: that consumer inherits the
+/// paper's 26 per cent unless it recomputes from this value, which is what
+/// [`mcnutt_menard_published_laplacian_coefficient`] documents.
+pub fn point_load_reported_curvature_coefficient() -> Fixed {
+    crate::flexure::kelvin_ker(point_load_first_zero_crossing())
+}
+
+/// THE AXISYMMETRIC POINT-LOAD DRIVING CURVATURE AT THE FIRST ZERO CROSSING, analytic, carrying its deflection
+/// convention in the returned [`FibreCurvature`].
 ///
-/// This function exists so the refusal is REACHABLE and TESTED rather than a sentence in a doc comment. What the
-/// circular construction needs, stated so the gap is sized rather than gestured at: the fibre state under an
-/// axisymmetric load is BIAXIAL (radial and hoop fibres yield together), so its elastic-plastic moment needs a
-/// two-dimensional yield surface over `(sigma_r, sigma_theta)`, and the curvature that drives the radial fibre
-/// stress is `d2w/dr2 + (nu/r) dw/dr` rather than the Laplacian `d2w/dr2 + (1/r) dw/dr` that the literature
-/// reports as "the curvature". Both are real work and neither is faked here.
-pub fn solve_circular_load() -> Result<MomentEquivalentPlate, MomentEquivalenceRefusal> {
-    Err(MomentEquivalenceRefusal::CircularLoadNotConstructed)
+/// # WHICH CURVATURE, AND WHY IT IS NOT THE LINE LOAD'S
+///
+/// A circular load does NOT obey `M = -D K`. McNutt and Menard's Appendix A gives, for the axisymmetric plate,
+/// `M = -D (d2w/dr2 + (nu/r) dw/dr)` while the reported curvature is the Laplacian `K = d2w/dr2 + (1/r) dw/dr`:
+/// the `nu/r` and the `1/r` differ, so the moment is not `-D K` (fetch section 3, verified against the page at
+/// 230 and 500 dpi). This slice's earlier refusal to apply the line-load algebra was CORRECT and is confirmed
+/// from the primary; what the fetch settled is that the fibre YIELD LAW stays uniaxial (no biaxial surface, no
+/// von Mises, no Tresca, no hoop stress in either primary's yield integral), so only the GEOMETRY changes, not
+/// the scalar envelope this module already integrates.
+///
+/// So the driving curvature is `kappa_eff = kappa_r + nu kappa_theta = d2w/dr2 + (nu/r) dw/dr`, the operator in
+/// `M`. This is the curvature that multiplies `(z - z_n)` in the radial fibre stress `[E/(1-nu^2)] kappa_eff
+/// (z - z_n)`, so feeding it to [`bending_moment`] and [`equivalent_rigidity`] gives `D_eq = M_yield / kappa_eff`,
+/// and in the elastic limit that recovers `D` exactly (the same identity the line load satisfies). Reading the
+/// Laplacian `K` instead would give `D_eq = M/K`, which is wrong by the ratio `kappa_eff / K` (about 1.136 at
+/// `nu = 0.25`) and would not recover `D` in the elastic limit.
+///
+/// # THE ALGEBRA
+///
+/// With `w(r) = -(P l^2 / 2 pi D) kei(r/l)`, `x = r/l`, the two curvatures at the zero crossing `x_0` are
+/// `kappa_r = -(P / 2 pi D) kei''(x_0)` and `kappa_theta = -(P / 2 pi D) (1/x_0) kei'(x_0)`. Using the Kelvin
+/// identity `kei'' = ker - kei'/x`,
+///
+/// `kappa_eff = -(P / 2 pi D) [ker(x_0) - (1 - nu) (1/x_0) kei'(x_0)]`,
+///
+/// whose bracket is McNutt and Menard's own eq. A10: it evaluates to `-0.04420` at `nu = 0.25`, giving
+/// `M(x_0)/P = -0.007035`, their printed `-0.00704` (A9). The bracket carries `(1 - nu)`, so `nu` is baked into
+/// the seamount constant just as the fetch found. `ker` and `kei'` are read from
+/// [`crate::flexure::kelvin_ker`] and [`crate::flexure::kelvin_kei_prime`]; `x_0` is the cited zero crossing.
+///
+/// The result is in the deflection's DOWNWARD-positive convention (`w > 0` under the load, since `kei(0) < 0`),
+/// so it is built through [`FibreCurvature::from_downward_deflection`] and the flip into the construction's
+/// upward convention happens in the type, exactly as the line load does. A downward load reads a negative
+/// (concave-down) curvature in the upward convention. `p` is the point-load weight (`GPa km^2` in the kernel's
+/// coherent system) and `rigidity_gpa_km3` the trial rigidity; the curvature is INDEPENDENT of the density
+/// contrast and gravity, because the flexural length `l` cancels between the deflection's `l^2` amplitude and the
+/// `1/l^2` of the second derivative (unlike the line load, whose curvature scales with its own length scale).
+///
+/// `None` on a non-positive rigidity or an out-of-range intermediate.
+pub fn point_load_curvature_at_first_zero_crossing(
+    p: Fixed,
+    rigidity_gpa_km3: Fixed,
+    poisson_ratio: Fixed,
+) -> Option<FibreCurvature> {
+    if rigidity_gpa_km3 <= ZERO {
+        return None;
+    }
+    let x0 = point_load_first_zero_crossing();
+    let ker_x0 = crate::flexure::kelvin_ker(x0);
+    let kei_prime_x0 = crate::flexure::kelvin_kei_prime(x0);
+    // bracket = ker(x0) - (1 - nu) (1/x0) kei'(x0), the M operator's coefficient (McNutt and Menard A10).
+    let one_minus_nu = Fixed::ONE.checked_sub(poisson_ratio)?;
+    let hoop = one_minus_nu.checked_mul(kei_prime_x0)?.checked_div(x0)?;
+    let bracket = ker_x0.checked_sub(hoop)?;
+    // kappa_eff = -(P / (2 pi D)) * bracket, in the downward-positive deflection convention.
+    let two_pi_d = Fixed::from_int(2)
+        .checked_mul(Fixed::PI)?
+        .checked_mul(rigidity_gpa_km3)?;
+    let coeff = p.checked_div(two_pi_d)?;
+    let kappa_eff_down = (ZERO - coeff).checked_mul(bracket)?;
+    Some(FibreCurvature::from_downward_deflection(kappa_eff_down))
+}
+
+/// THE REPORTED (LAPLACIAN) CURVATURE AT THE FIRST ZERO CROSSING, `K = -(P / 2 pi D) ker(x_0)`, the axisymmetric
+/// plate's rheology-insensitive observable and the quantity the seamount literature calls "the curvature".
+///
+/// This is NOT the curvature the moment equivalence drives its fibre stress with (that is
+/// [`point_load_curvature_at_first_zero_crossing`], the `nu/r` operator). It is exposed so a hindcast comparison
+/// against a PUBLISHED Laplacian curvature has a like quantity to compare, and it ships the RE-DERIVED
+/// coefficient `ker(x_0) = -0.0388994` rather than the paper's printed `-0.0289`
+/// ([`mcnutt_menard_published_laplacian_coefficient`]). Returned in the same downward convention and
+/// [`FibreCurvature`] type as the driving curvature. `None` on a non-positive rigidity or an out-of-range
+/// intermediate.
+pub fn point_load_reported_curvature_at_first_zero_crossing(
+    p: Fixed,
+    rigidity_gpa_km3: Fixed,
+) -> Option<FibreCurvature> {
+    if rigidity_gpa_km3 <= ZERO {
+        return None;
+    }
+    let ker_x0 = point_load_reported_curvature_coefficient();
+    let two_pi_d = Fixed::from_int(2)
+        .checked_mul(Fixed::PI)?
+        .checked_mul(rigidity_gpa_km3)?;
+    let coeff = p.checked_div(two_pi_d)?;
+    // K = -(P / 2 pi D) ker(x0), downward-positive convention.
+    let k_down = (ZERO - coeff).checked_mul(ker_x0)?;
+    Some(FibreCurvature::from_downward_deflection(k_down))
+}
+
+/// THE AXISYMMETRIC (POINT-LOAD) PER-LOAD FIXED POINT, the sibling of [`solve_line_load`] with the geometry
+/// changed and the scalar yield envelope unchanged.
+///
+/// # THE LOOP IS THE SAME, THE CURVATURE IS AXISYMMETRIC
+///
+/// Trial rigidity `D`, the driving curvature at the first zero crossing
+/// ([`point_load_curvature_at_first_zero_crossing`], carrying `nu/r`), the neutral surface, the yield-limited
+/// moment, `D_eq = M / kappa_eff`, iterate. The load supplies its own curvature through the solve, so no
+/// reference bending is chosen, exactly as for the line load. The fixed point in curvature space seeks
+/// `M_yield(kappa) = |bracket| P / (2 pi)`: a load whose yield-limited moment scale exceeds what the envelope
+/// can carry does not converge and reports [`MomentEquivalenceRefusal::LoadExceedsElasticSupport`].
+///
+/// # NO DENSITY OR GRAVITY, AND WHY
+///
+/// The point-load curvature is `-(P / 2 pi D) bracket`, independent of the flexural length `l`, so this solve
+/// takes neither the density contrast nor the gravity that [`solve_line_load`] needs for its `alpha`. The length
+/// scale cancels between the deflection's `l^2` amplitude and the `1/l^2` of its curvature, a real difference
+/// between the two geometries rather than an omission.
+///
+/// # THE INITIAL TRIAL IS DERIVED
+///
+/// The walk starts at the fully elastic rigidity of the envelope's own domain, the stiffest the column could be,
+/// the same bound [`solve_line_load`] uses. `p` is the point-load weight in `GPa km^2` (the kernel's coherent
+/// system). The disc-point 2 per cent band the axisymmetric form ships is [`disc_point_rigidity_band`], applied
+/// to the converged rigidity by a consumer.
+pub fn solve_point_load(
+    profile: &EnvelopeProfile,
+    youngs_modulus_gpa: Fixed,
+    poisson_ratio: Fixed,
+    p: Fixed,
+    chord: LoadChord,
+) -> Result<MomentEquivalentPlate, MomentEquivalenceRefusal> {
+    let domain = profile.domain_max_depth_km();
+    if domain <= ZERO {
+        return Err(MomentEquivalenceRefusal::EnvelopeRefused);
+    }
+    let mut d = crate::flexure::flexural_rigidity(youngs_modulus_gpa, poisson_ratio, domain)
+        .ok_or(MomentEquivalenceRefusal::NotRepresentable)?;
+
+    for iteration in 1..=MAX_FIXED_POINT_ITERATIONS {
+        let curvature = point_load_curvature_at_first_zero_crossing(p, d, poisson_ratio)
+            .ok_or(MomentEquivalenceRefusal::NotRepresentable)?;
+        if curvature.upward_per_km() == ZERO {
+            return Err(MomentEquivalenceRefusal::ZeroCurvature);
+        }
+        let z_n = neutral_surface_depth_km(profile, curvature, youngs_modulus_gpa, poisson_ratio)?;
+        let reading = bending_moment(profile, curvature, z_n, youngs_modulus_gpa, poisson_ratio)
+            .ok_or(MomentEquivalenceRefusal::NotRepresentable)?;
+        let d_new = equivalent_rigidity(reading.moment, curvature)
+            .ok_or(MomentEquivalenceRefusal::ZeroCurvature)?;
+        if d_new <= ZERO {
+            return Err(MomentEquivalenceRefusal::LoadExceedsElasticSupport);
+        }
+        let delta = d_new
+            .checked_sub(d)
+            .ok_or(MomentEquivalenceRefusal::NotRepresentable)?
+            .abs();
+        d = d_new;
+        if delta <= Fixed::EPSILON {
+            return Ok(MomentEquivalentPlate {
+                rigidity_gpa_km3: d,
+                curvature,
+                neutral_depth_km: z_n,
+                moment: reading,
+                chord,
+                iterations: iteration,
+            });
+        }
+    }
+    Err(MomentEquivalenceRefusal::LoadExceedsElasticSupport)
+}
+
+/// THE DISC-POINT ACCURACY BAND on an axisymmetric rigidity: `[D (1 - b), D (1 + b)]` with `b` the primary's own
+/// 2 per cent point-load-to-disc equivalence ([`disc_point_equivalence_band`]).
+///
+/// This is the band the axisymmetric FORM ships, the cost of approximating the finite disc by the point load,
+/// cited from McNutt and Menard pp. 389-390 rather than chosen. It is a SEPARATE band from the `V*` rigidity band
+/// ([`RigidityBand`] from [`solve_line_load_banded`]): that one is the source's activation-volume scatter, this
+/// one is the geometry approximation. A consumer comparing an axisymmetric rigidity against a hindcast should
+/// widen by this band before testing overlap. `C_1`'s own unexplained 2 per cent (fetch section 5.2) is a
+/// DECLARED RESIDUAL that ships beside it rather than absorbed into it: it conditions the paper's published
+/// moment constant, which this module does not consume, so it is documented rather than folded in here.
+///
+/// `None` on a non-positive rigidity.
+pub fn disc_point_rigidity_band(rigidity_gpa_km3: Fixed) -> Option<RigidityBand> {
+    if rigidity_gpa_km3 <= ZERO {
+        return None;
+    }
+    let band = disc_point_equivalence_band();
+    let lo = rigidity_gpa_km3.checked_mul(Fixed::ONE.checked_sub(band)?)?;
+    let hi = rigidity_gpa_km3.checked_mul(Fixed::ONE.checked_add(band)?)?;
+    RigidityBand::new(lo, hi)
 }
 
 /// A RIGIDITY BAND: an ordered interval of moment-equivalent flexural rigidity (`GPa km^3`), `low <= high`.
@@ -3669,15 +3911,397 @@ mod tests {
     }
 
     #[test]
-    fn the_circular_load_is_refused_rather_than_mixed() {
-        // `M = -D K` is the LINE-LOAD form. The axisymmetric case carries nu/r in the moment against 1/r in the
-        // curvature and its fibre state is biaxial, so the line-load algebra describes a different geometry.
-        // The ruling says do not mix them, and a refusal is the only honest alternative to a construction this
-        // slice does not have.
-        assert!(matches!(
-            solve_circular_load(),
-            Err(MomentEquivalenceRefusal::CircularLoadNotConstructed)
-        ));
+    fn the_point_load_curvature_twins_and_reproduces_the_printed_moment() {
+        // THE NUMERICAL TWIN for the axisymmetric driving curvature, independent by construction: the analytic
+        // form here reads `ker` and `kei'` from the fixed-point series, while the twin builds the point-load
+        // deflection `w(r) = -(P l^2 / 2 pi D) kei(r/l)` from an f64 evaluation of kei's OWN A&S series and takes
+        // finite differences of it. They share no arithmetic, so agreement convicts a sign slip, a lost factor,
+        // or a wrong bracket. The deflection is differenced in f64 rather than through the fixed-point kelvin_kei
+        // because a second difference divides by h^2 and would amplify the representation's quantization.
+        let gamma = 0.5772156649_f64;
+        let kei_f64 = |x: f64| -> f64 {
+            let xh = x / 2.0;
+            let xh4 = xh.powi(4);
+            let (mut b, mut c) = (1.0_f64, xh * xh);
+            let (mut ber, mut bei) = (b, c);
+            let mut h = 1.0_f64;
+            let mut bei_phi = c * h;
+            for k in 1..40 {
+                let mb = ((2 * k) * (2 * k - 1)) as f64;
+                b = -b * xh4 / (mb * mb);
+                ber += b;
+                let mc = ((2 * k + 1) * (2 * k)) as f64;
+                c = -c * xh4 / (mc * mc);
+                bei += c;
+                h += 1.0 / (2 * k) as f64 + 1.0 / (2 * k + 1) as f64;
+                bei_phi += c * h;
+            }
+            -(xh.ln() + gamma) * bei - std::f64::consts::FRAC_PI_4 * ber + bei_phi
+        };
+        // The curvature is length-scale independent, so l = 1 loses nothing; P and D are the shared inputs.
+        let (p, d, l, nu) = (1000.0_f64, 400_000.0_f64, 1.0_f64, 0.25_f64);
+        let w = |r: f64| -(p * l * l / (2.0 * std::f64::consts::PI * d)) * kei_f64(r / l);
+        let x0 = 3.91467_f64;
+        let r0 = x0 * l;
+        let hh = 1e-3_f64;
+        // Central differences at the first zero crossing.
+        let kappa_r = (w(r0 + hh) - 2.0 * w(r0) + w(r0 - hh)) / (hh * hh); // d2w/dr2
+        let kappa_theta = ((w(r0 + hh) - w(r0 - hh)) / (2.0 * hh)) / r0; // (1/r) dw/dr
+        let kappa_eff_twin = kappa_r + nu * kappa_theta; // the M operator, downward convention
+        let laplacian_twin = kappa_r + kappa_theta; // the reported Laplacian K, downward convention
+
+        // FIRST, the deflection really vanishes at the read location, which is what makes it the right x.
+        assert!(
+            w(r0).abs() < w(r0 + l).abs() * 0.02,
+            "the point-load deflection vanishes at x0 = 3.91467: w = {} against {}",
+            w(r0),
+            w(r0 + l)
+        );
+
+        // The analytic driving curvature (my construction), converted back to the downward convention.
+        let curv = point_load_curvature_at_first_zero_crossing(
+            Fixed::from_int(1000),
+            Fixed::from_int(400_000),
+            lit_nu(),
+        )
+        .expect("curvature");
+        let kappa_eff_analytic_down = -f64_of(curv.upward_per_km());
+        assert!(
+            (kappa_eff_analytic_down - kappa_eff_twin).abs() < kappa_eff_twin.abs() * 0.02,
+            "analytic kappa_eff {kappa_eff_analytic_down} against the finite-difference twin {kappa_eff_twin}"
+        );
+        // THE SIGN, load-bearing: a downward point load bends the plate concave-down at its first zero crossing,
+        // so the curvature is NEGATIVE in the upward convention, the same sign the line load carries.
+        assert!(
+            curv.upward_per_km() < ZERO,
+            "a downward point load reads a negative (concave-down) curvature, got {:?}",
+            curv.upward_per_km()
+        );
+
+        // THE CONTROL, which is what makes the twin an erratum check rather than a self-comparison:
+        // M(x0)/P = bracket/(2 pi) must reproduce McNutt and Menard's printed A9 (-0.00704). M = -D kappa_eff.
+        let moment_over_p = -d * kappa_eff_twin / p;
+        assert!(
+            (moment_over_p - (-0.007035)).abs() < 5e-5,
+            "M(x0)/P reproduces the primary's printed A9 (-0.00704): got {moment_over_p}"
+        );
+        // AND THE ERRATUM: the Laplacian coefficient the twin recovers is ker(x0) = -0.0388994, NOT the paper's
+        // printed -0.0289. laplacian = -(P/2 pi D) ker(x0), so ker(x0) = -laplacian * 2 pi D / P.
+        let ker_x0_twin = -laplacian_twin * 2.0 * std::f64::consts::PI * d / p;
+        assert!(
+            (ker_x0_twin - (-0.0388994)).abs() < 5e-4,
+            "the twin recovers the re-derived ker(x0) = -0.0388994, got {ker_x0_twin}"
+        );
+        assert!(
+            (ker_x0_twin - (-0.0289)).abs() > 5e-3,
+            "and it is decisively NOT the paper's printed -0.0289 (their 26 per cent erratum): {ker_x0_twin}"
+        );
+        // THE REPORTED (LAPLACIAN) CURVATURE the module exposes is the twin's Laplacian, and it DIFFERS from the
+        // driving curvature above by the (1-nu) hoop term: the reported K reads ker(x0) alone, the driving one
+        // reads the M operator. Exercising it here ties the exposed quantity to the same finite-difference twin.
+        let reported = point_load_reported_curvature_at_first_zero_crossing(
+            Fixed::from_int(1000),
+            Fixed::from_int(400_000),
+        )
+        .expect("reported curvature");
+        let reported_down = -f64_of(reported.upward_per_km());
+        assert!(
+            (reported_down - laplacian_twin).abs() < laplacian_twin.abs() * 0.02,
+            "the reported Laplacian curvature matches the twin: {reported_down} against {laplacian_twin}"
+        );
+        assert!(
+            (reported_down - kappa_eff_twin).abs() > kappa_eff_twin.abs() * 0.05,
+            "and the reported curvature is a DIFFERENT quantity from the driving one: {reported_down} against {kappa_eff_twin}"
+        );
+    }
+
+    #[test]
+    fn the_axisymmetric_curvature_reproduces_the_primarys_printed_seamount_bracket() {
+        // THE PRIMARY'S OWN PRINTED CONSTANT, reproduced from the construction. McNutt and Menard's A10 prints
+        // the moment bracket [ker(x0) - (1-nu)/x0 kei'(x0)] = -0.04421 at nu = 0.25, giving M(x0)/P = -0.00704
+        // (A9). The bracket is `-2 pi D kappa_eff / P`, and nu is baked into it through the (1-nu) factor, which
+        // is the fetch's finding that the seamount constant is conditioned on nu.
+        let bracket_at = |nu: Fixed| -> f64 {
+            // Use P = 1, D = 1 so the bracket reads directly: kappa_eff = -(1/2 pi) bracket.
+            let curv = point_load_curvature_at_first_zero_crossing(Fixed::ONE, Fixed::ONE, nu)
+                .expect("curvature");
+            let kappa_eff_down = -f64_of(curv.upward_per_km());
+            -2.0 * std::f64::consts::PI * kappa_eff_down // bracket
+        };
+        let b25 = bracket_at(Fixed::from_ratio(1, 4));
+        assert!(
+            (b25 - (-0.04420)).abs() < 5e-4,
+            "the bracket at nu = 0.25 reproduces the primary's A10 (-0.04421): got {b25}"
+        );
+        assert!(
+            ((b25 / (2.0 * std::f64::consts::PI)) - (-0.007035)).abs() < 5e-5,
+            "M(x0)/P at nu = 0.25 reproduces A9 (-0.00704): got {}",
+            b25 / (2.0 * std::f64::consts::PI)
+        );
+        // THE nu SPREAD the fetch reports: M(x0)/P is -0.007316 at nu = 0, -0.006753 at nu = 0.5. Only nu = 0.25
+        // reproduces A9, which is what proves nu sits inside the constant.
+        let m0 = bracket_at(ZERO) / (2.0 * std::f64::consts::PI);
+        let m5 = bracket_at(Fixed::from_ratio(1, 2)) / (2.0 * std::f64::consts::PI);
+        assert!(
+            (m0 - (-0.007316)).abs() < 5e-5,
+            "M(x0)/P at nu = 0 is -0.007316: got {m0}"
+        );
+        assert!(
+            (m5 - (-0.006753)).abs() < 5e-5,
+            "M(x0)/P at nu = 0.5 is -0.006753: got {m5}"
+        );
+        assert!(
+            m0 < b25 / (2.0 * std::f64::consts::PI) && b25 / (2.0 * std::f64::consts::PI) < m5,
+            "the moment magnitude falls as nu rises, the (1-nu) dependence: {m0} then {m5}"
+        );
+    }
+
+    #[test]
+    fn the_erratum_carries_both_curvature_values_with_the_correction() {
+        // THE RE-DERIVATION STANDARD, at the site. The re-derived Laplacian coefficient is ker(x0) = -0.0388994
+        // (from the series), the paper prints -0.0289, and both are carried. The published value is about 26 per
+        // cent low in magnitude and a correct one raises it by 34 per cent.
+        let rederived = f64_of(point_load_reported_curvature_coefficient());
+        let published = f64_of(mcnutt_menard_published_laplacian_coefficient());
+        assert!(
+            (rederived - (-0.0388994)).abs() < 5e-5,
+            "the re-derived coefficient is ker(x0) = -0.0388994, got {rederived}"
+        );
+        assert!(
+            (published - (-0.0289)).abs() < 1e-6,
+            "the published coefficient is carried verbatim (-0.0289), got {published}"
+        );
+        // 26 per cent low: |published| / |rederived| ~ 0.743.
+        let ratio = published.abs() / rederived.abs();
+        assert!(
+            (ratio - 0.743).abs() < 0.01,
+            "the published value runs about 26 per cent low: ratio {ratio}"
+        );
+        // The correction factor a consumer of the paper's own C_2 applies: |rederived| / |published| ~ 1.346.
+        let correction = rederived.abs() / published.abs();
+        assert!(
+            (correction - 1.346).abs() < 0.01,
+            "a correct coefficient raises the paper's by 34 per cent: factor {correction}"
+        );
+    }
+
+    #[test]
+    fn the_point_load_fixed_point_recovers_the_elastic_limit_and_yields_under_load() {
+        // THE AXISYMMETRIC LOOP, end to end, on the primary's own fixture. Two limits pin it.
+        let chord = test_chord();
+        // ELASTIC LIMIT: an envelope nothing reaches must return the fully elastic rigidity, so T_e = H = 40, and
+        // the answer is independent of the load P (a plate that yields nowhere is its own uniform elastic plate).
+        let strong = mm_illustration_profile(Fixed::from_int(100_000));
+        let elastic = solve_point_load(&strong, lit_e(), lit_nu(), Fixed::from_int(100), chord)
+            .expect("the elastic point-load solve converges");
+        let te_elastic = f64_of(
+            elastic
+                .elastic_thickness_km(lit_e(), lit_nu())
+                .expect("T_e"),
+        );
+        assert!(
+            (te_elastic - 40.0).abs() < 0.05,
+            "a point load too gentle to yield reads the plate's own thickness: T_e = {te_elastic}"
+        );
+        let elastic_big =
+            solve_point_load(&strong, lit_e(), lit_nu(), Fixed::from_int(5000), chord)
+                .expect("converges");
+        // Independent of the load to quadrature precision: the elastic moment scales linearly with the
+        // curvature, so `M / kappa_eff` is load-free up to the trapezoid's and the neutral-surface bisection's
+        // own last-bit rounding (a few parts in 1e6), not a physical load dependence.
+        assert!(
+            (f64_of(elastic.rigidity_gpa_km3) - f64_of(elastic_big.rigidity_gpa_km3)).abs()
+                < f64_of(elastic.rigidity_gpa_km3) * 1e-4,
+            "the elastic limit is independent of the load magnitude: {} against {}",
+            f64_of(elastic.rigidity_gpa_km3),
+            f64_of(elastic_big.rigidity_gpa_km3)
+        );
+
+        // YIELDING: a large point load bends the 500 MPa / 40 km plate into its own yielding, so the rigidity
+        // sits below the unyielded ceiling and the fixed point is a fixed point. The load is sized to yield the
+        // plate while staying inside its support: a still larger load drives the fixed point toward a vanishing
+        // rigidity and leaves the Q32.32 window (`NotRepresentable`) before the physical support limit is crossed,
+        // the same representability ceiling `solve_line_load_banded` documents for its own edges.
+        let profile = mm_illustration_profile(Fixed::from_ratio(1, 2));
+        let load = Fixed::from_int(24_000);
+        let plate = solve_point_load(&profile, lit_e(), lit_nu(), load, chord)
+            .expect("the yielding point-load solve converges");
+        let ceiling =
+            crate::flexure::flexural_rigidity(lit_e(), lit_nu(), Fixed::from_int(40)).unwrap();
+        assert!(
+            f64_of(plate.rigidity_gpa_km3) < f64_of(ceiling) * 0.95,
+            "this point load yields the plate: {} against the unyielded ceiling {}",
+            f64_of(plate.rigidity_gpa_km3),
+            f64_of(ceiling)
+        );
+        assert!(
+            plate.curvature.upward_per_km() < ZERO,
+            "the converged curvature is concave-down"
+        );
+        // The fixed point re-enters: recompute the curvature at the converged rigidity and re-solve; the rigidity
+        // reproduces, which is the property the loop claims rather than the number it stopped at.
+        let k = point_load_curvature_at_first_zero_crossing(load, plate.rigidity_gpa_km3, lit_nu())
+            .unwrap();
+        let z_n = neutral_surface_depth_km(&profile, k, lit_e(), lit_nu()).unwrap();
+        let m = bending_moment(&profile, k, z_n, lit_e(), lit_nu()).unwrap();
+        let d_again = equivalent_rigidity(m.moment, k).unwrap();
+        assert!(
+            (f64_of(d_again) - f64_of(plate.rigidity_gpa_km3)).abs()
+                < f64_of(plate.rigidity_gpa_km3) * 1e-6,
+            "re-entering the converged rigidity reproduces it: {} against {}",
+            f64_of(d_again),
+            f64_of(plate.rigidity_gpa_km3)
+        );
+        // The chord rides with the answer.
+        assert_eq!(plate.chord.class, LoadClassId(1));
+    }
+
+    #[test]
+    fn the_disc_point_band_widens_by_the_cited_two_percent() {
+        // THE FORM'S OWN BAND, cited from the primary (C_c within 2 per cent of C_p, pp. 389-390). It widens the
+        // axisymmetric rigidity by 2 per cent either way and is a SEPARATE band from the V* scatter.
+        let d = Fixed::from_int(400_000);
+        let band = disc_point_rigidity_band(d).expect("band");
+        assert!(
+            (f64_of(band.low()) - 392_000.0).abs() < 1.0
+                && (f64_of(band.high()) - 408_000.0).abs() < 1.0,
+            "the disc-point band is [0.98 D, 1.02 D]: [{}, {}]",
+            f64_of(band.low()),
+            f64_of(band.high())
+        );
+        // A non-plate refuses rather than reporting a band.
+        assert!(disc_point_rigidity_band(ZERO).is_none());
+    }
+
+    #[test]
+    fn the_uniaxial_cost_is_measured_at_the_hindcast_curvatures() {
+        // THE OWNER-RULED SHORTCUT-VALIDITY MEASUREMENT. The uniaxial yield law is what BOTH primaries use, so
+        // its cost is the DEPARTURE of the plate from elastic at the hindcast curvatures, measured on this
+        // engine's OWN envelope rather than assumed. If the competent plate is effectively elastic there, the
+        // biaxial (2-D yield surface) question is moot for the hindcast; if the ratio departs, it reopens with a
+        // number attached. The number is reported either way.
+        //
+        // The measurement is Watts and Burov's ratio T_e(YSE)/T_e(elastic), read here as the moment the plate
+        // carries over the moment a FULLY ELASTIC plate of the same competent thickness would carry at the same
+        // curvature: R = M_yield / (D(T_mech) kappa). R ~ 1 means the caps do not bind (effectively elastic).
+        let volumes = hk_dry_dislocation_activation_volumes();
+        let creep = [CreepCandidate {
+            row: hk_dry_dislocation(),
+            volumes: &volumes,
+        }];
+        let geotherm = ramp_geotherm;
+        let env = earth_like_banded_lid(&creep, &geotherm);
+        // Use the LOW V* edge as a definite surface (the competent layer is shallow, where the V* span cannot
+        // move the answer, so the edge equals the settled view there).
+        let edge = EnvelopeEdge::low(&env);
+        let delta = env.lid_base.depth_km();
+
+        // T_mech: the depth of maximum envelope strength, which is the brittle-ductile crossing (brittle rising
+        // meets ductile falling). Scanned on the low edge in the tensile sense (the weaker branch, which yields
+        // first and so bounds the competent behaviour).
+        let mut t_mech = Fixed::ZERO;
+        let mut peak = Fixed::ZERO;
+        let mut z = Fixed::from_ratio(1, 2);
+        while z < delta {
+            if let Some(y) = edge.tensile_yield_gpa(z) {
+                if y > peak {
+                    peak = y;
+                    t_mech = z;
+                }
+            }
+            z = z.checked_add(Fixed::from_ratio(1, 2)).unwrap();
+        }
+        assert!(
+            t_mech > Fixed::from_int(10) && t_mech < delta,
+            "the mechanical thickness is a real competent layer inside the lid: {} km of {}",
+            f64_of(t_mech),
+            f64_of(delta)
+        );
+
+        // The competent-layer profile: the low-edge envelope capped at T_mech.
+        struct CappedDomain<'a> {
+            edge: EnvelopeEdge<'a>,
+            cap_km: Fixed,
+        }
+        impl YieldEnvelope for CappedDomain<'_> {
+            fn tensile_yield_gpa(&self, z: Fixed) -> Option<Fixed> {
+                self.edge.tensile_yield_gpa(z)
+            }
+            fn compressive_yield_gpa(&self, z: Fixed) -> Option<Fixed> {
+                self.edge.compressive_yield_gpa(z)
+            }
+            fn domain_max_depth_km(&self) -> Fixed {
+                self.cap_km
+            }
+        }
+        let competent = EnvelopeProfile::sample(
+            &CappedDomain {
+                edge: EnvelopeEdge::low(&env),
+                cap_km: t_mech,
+            },
+            2000,
+        )
+        .expect("the competent layer samples");
+        let d_mech = crate::flexure::flexural_rigidity(lit_e(), lit_nu(), t_mech)
+            .expect("the competent elastic rigidity");
+
+        // R(kappa) = M_yield / (D(T_mech) kappa): the moment the competent plate carries over the fully elastic
+        // moment at the same curvature, concave-down (the seamount sign). Watts and Burov's T_e ratio is the cube
+        // root of this. The curvature is in km^-1: 1e-8 per metre = 1e-5 per km.
+        let ratio_at = |num: i64, den: i64| -> f64 {
+            let k = FibreCurvature::from_upward_deflection(Fixed::from_ratio(num, den));
+            let z_n = neutral_surface_depth_km(&competent, k, lit_e(), lit_nu()).expect("z_n");
+            let m = bending_moment(&competent, k, z_n, lit_e(), lit_nu()).expect("M");
+            let m_elastic = f64_of(d_mech) * f64_of(k.upward_per_km());
+            f64_of(m.moment) / m_elastic
+        };
+        // THE ELASTIC-LIMIT SANITY: at a vanishing curvature nothing yields, so R must be 1 to the trapezoid's
+        // own precision. This is what proves the ratio is measuring yielding rather than a quadrature offset.
+        let r_tiny = ratio_at(-1, 100_000_000); // 1e-8 per km, effectively unbent
+        assert!(
+            (r_tiny - 1.0).abs() < 5e-3,
+            "an unbent competent plate carries its full elastic moment: R = {r_tiny}"
+        );
+        let r_low = ratio_at(-4, 100_000); // 4e-8 per metre
+        let r_high = ratio_at(-8, 100_000); // 8e-8 per metre
+        let r_sharp = ratio_at(-8, 10_000); // 8e-7 per metre, an order harder
+        println!(
+            "UNIAXIAL COST: T_mech = {:.1} km, peak envelope = {:.0} MPa | \
+             R_moment(4e-8/m)={r_low:.4} (T_e {:.4}), R_moment(8e-8/m)={r_high:.4} (T_e {:.4}), \
+             R_moment(8e-7/m)={r_sharp:.4} (T_e {:.4})",
+            f64_of(t_mech),
+            f64_of(peak) * 1000.0,
+            r_low.powf(1.0 / 3.0),
+            r_high.powf(1.0 / 3.0),
+            r_sharp.powf(1.0 / 3.0),
+        );
+        // THE MEASUREMENT'S STRUCTURE, asserted; the VERDICT is reported rather than pre-decided. Yielding only
+        // ever REDUCES the moment (R <= 1), and MORE curvature yields MORE, so R falls monotonically. If it did
+        // not, the measurement would be reading noise rather than yielding.
+        assert!(
+            r_low <= 1.0 + 5e-3 && r_high <= 1.0 + 5e-3,
+            "yielding does not increase the moment: R = {r_low}, {r_high}"
+        );
+        assert!(
+            r_low > r_high && r_high > r_sharp,
+            "the ratio falls monotonically as curvature rises: {r_low} > {r_high} > {r_sharp}"
+        );
+        // AND THE SEAMOUNT REGIME IS NEAR-ELASTIC, distinguishing it from trench-wall curvatures: in Watts and
+        // Burov's own T_e convention (the cube root) the seamount ratio sits within about ten per cent of one,
+        // while the order-harder plate departs decisively. So the plate yields only modestly at seamount loads,
+        // which is what makes the biaxial refinement a high-curvature effect rather than a hindcast one. The
+        // exact percentage is the number reopening the question, reported above, not asserted to be zero.
+        assert!(
+            r_low.powf(1.0 / 3.0) > 0.9,
+            "the seamount T_e ratio is near-elastic (within ten per cent of one): {}",
+            r_low.powf(1.0 / 3.0)
+        );
+        assert!(
+            r_sharp.powf(1.0 / 3.0) < r_high.powf(1.0 / 3.0) - 0.02,
+            "an order-harder plate departs decisively further from elastic: {} against {}",
+            r_sharp.powf(1.0 / 3.0),
+            r_high.powf(1.0 / 3.0)
+        );
     }
 
     #[test]
