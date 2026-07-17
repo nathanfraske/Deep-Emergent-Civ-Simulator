@@ -2384,6 +2384,73 @@ pub fn formation_midplane_temperature(
     )
 }
 
+/// [`formation_midplane_temperature`] for a CONSTANT Rosseland opacity, in CLOSED FORM (no bisection). When the
+/// opacity does not depend on temperature (a fixed-composition dust evaluated once at a reference, the viewer's
+/// case), [`disk_midplane_temperature`]'s `equilibrium_t` is independent of the trial temperature, so its fixed
+/// point is DIRECT: `T_mid = radiative_equilibrium((3/4)(kappa Sigma/2) F_visc + F_irr, sigma)`. This returns that
+/// value in O(1) instead of the 60-step inner bisection, so a ROOT-FINDER that evaluates the midplane at many
+/// rates for ONE composition (the formation-epoch root) is not quadratic in the two nested bisections. It
+/// assembles the same three inputs as the parent from the same functions, so it matches the parent (with a
+/// constant `kappa_of_t`) to within the bisection residual (well under a kelvin); the DISPLAYED midplane keeps the
+/// exact bisection form, so nothing a consumer reads changes. `None` on the same domain refusals as the parent, or
+/// a non-positive `kappa`.
+#[allow(clippy::too_many_arguments)]
+pub fn formation_midplane_temperature_constant_opacity(
+    accretion_rate_msun_myr: Fixed,
+    mass_ratio: Fixed,
+    luminosity_exponent: Fixed,
+    bolometric_luminosity_lsun: Option<Fixed>,
+    distance_au: Fixed,
+    reprocessing_factor: Fixed,
+    inner_boundary_factor: Fixed,
+    characteristic_radius_au: Fixed,
+    gamma: Fixed,
+    dust_surface_density_normalization: Fixed,
+    kappa: Fixed,
+    t_hi: Fixed,
+) -> Option<Fixed> {
+    if kappa <= Fixed::ZERO {
+        return None;
+    }
+    let viscous_flux = viscous_dissipation_flux(
+        accretion_rate_msun_myr,
+        mass_ratio,
+        distance_au,
+        inner_boundary_factor,
+    )?;
+    let stellar_flux_wm2 = match bolometric_luminosity_lsun {
+        Some(l_bol_lsun) => stellar_flux_from_luminosity_lsun(l_bol_lsun, distance_au)?,
+        None => stellar_flux(mass_ratio, luminosity_exponent, distance_au)?,
+    };
+    let absorbed_irradiation_flux = reprocessing_factor.checked_mul(stellar_flux_wm2)?;
+    let dust_surface_density = disk_surface_density(
+        distance_au,
+        characteristic_radius_au,
+        gamma,
+        dust_surface_density_normalization,
+    )?;
+    if dust_surface_density <= Fixed::ZERO {
+        return None;
+    }
+    let sigma = crate::physiology::derived_stefan_boltzmann();
+    // tau_r = kappa * Sigma / 2, the optical half-depth; lifted = (3/4) tau_r F_visc + F_irr, the same combination
+    // disk_midplane_temperature's equilibrium_t forms. With kappa constant this does not depend on the midplane
+    // temperature, so the fixed point is this value directly.
+    let tau_r = kappa
+        .checked_mul(dust_surface_density)?
+        .checked_mul(Fixed::from_ratio(1, 2))?;
+    let lifted = Fixed::from_ratio(3, 4)
+        .checked_mul(tau_r)?
+        .checked_mul(viscous_flux)?
+        .checked_add(absorbed_irradiation_flux)?;
+    Some(civsim_physics::laws::radiative_equilibrium(
+        lifted,
+        Fixed::ONE,
+        sigma,
+        t_hi,
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3487,6 +3554,81 @@ mod tests {
             mid(Some(Fixed::from_int(4))).to_f64_lossy(),
             mid(None).to_f64_lossy()
         );
+    }
+
+    #[test]
+    fn the_constant_opacity_closed_form_matches_the_bisection_midplane() {
+        // The CLOSED-FORM midplane (no bisection) must reproduce the 60-step bisection when the opacity is constant,
+        // which is what lets the formation-epoch root evaluate the midplane cheaply without the nested bisection.
+        // Across a rate sweep and the MS-versus-pre-MS luminosity door, the two forms agree to within the bisection
+        // residual (well under a kelvin). The DISPLAYED midplane keeps the bisection form, so nothing a consumer
+        // reads changes; this only backs the root's cheap inner evaluation.
+        let kappa_val = Fixed::from_int(600);
+        let kappa = |_t: Fixed| Some(kappa_val);
+        for &rate in &[
+            Fixed::from_ratio(19, 100),
+            Fixed::ONE,
+            Fixed::from_int(4),
+            Fixed::from_ratio(1, 100),
+        ] {
+            for l_bol in [None, Some(Fixed::from_int(4))] {
+                let bisected = formation_midplane_temperature(
+                    rate,
+                    Fixed::ONE,
+                    Fixed::from_ratio(35, 10),
+                    l_bol,
+                    Fixed::ONE,
+                    Fixed::from_ratio(1, 4),
+                    Fixed::ONE,
+                    Fixed::from_int(30),
+                    Fixed::ONE,
+                    Fixed::from_ratio(586, 1000),
+                    kappa,
+                    Fixed::from_int(100),
+                    Fixed::from_int(1950),
+                )
+                .unwrap();
+                let closed = formation_midplane_temperature_constant_opacity(
+                    rate,
+                    Fixed::ONE,
+                    Fixed::from_ratio(35, 10),
+                    l_bol,
+                    Fixed::ONE,
+                    Fixed::from_ratio(1, 4),
+                    Fixed::ONE,
+                    Fixed::from_int(30),
+                    Fixed::ONE,
+                    Fixed::from_ratio(586, 1000),
+                    kappa_val,
+                    Fixed::from_int(1950),
+                )
+                .unwrap();
+                assert!(
+                    (bisected.to_f64_lossy() - closed.to_f64_lossy()).abs() < 0.01,
+                    "closed form matches the bisection at rate {} l_bol {:?} (bisected {}, closed {})",
+                    rate.to_f64_lossy(),
+                    l_bol.map(|l| l.to_f64_lossy()),
+                    bisected.to_f64_lossy(),
+                    closed.to_f64_lossy()
+                );
+            }
+        }
+        // Fail-loud on a non-positive opacity, the new domain edge.
+        assert!(formation_midplane_temperature_constant_opacity(
+            Fixed::ONE,
+            Fixed::ONE,
+            Fixed::from_ratio(35, 10),
+            None,
+            Fixed::ONE,
+            Fixed::from_ratio(1, 4),
+            Fixed::ONE,
+            Fixed::from_int(30),
+            Fixed::ONE,
+            Fixed::from_ratio(586, 1000),
+            Fixed::ZERO,
+            Fixed::from_int(1950),
+        )
+        .is_none());
     }
 
     // A Mirror-grade viscous-similarity disk realization: Mdot ~ 0.01 M_sun/Myr (~1e-8 M_sun/yr), alpha 0.01, mu 2.34
