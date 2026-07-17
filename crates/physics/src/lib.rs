@@ -43,6 +43,7 @@ pub mod covalent_radii;
 pub mod creep_rows;
 pub mod crystal_field;
 pub mod d_state_radius;
+pub mod elastic_thickness_rows;
 pub mod ewald;
 pub mod flexure;
 pub mod floor_provenance;
