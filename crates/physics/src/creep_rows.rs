@@ -655,6 +655,95 @@ pub fn hk_wet_diffusion_hydroxyl() -> CreepRow {
     }
 }
 
+/// H&K 2003 TABLE 2, all NINE activation-volume determinations, verbatim at source precision (transcribed in
+/// `docs/working/HK2003_VERIFICATION.md` section 2, read from the primary twice by independent extraction paths).
+///
+/// # WHY THIS EXISTS: THE FIRST-MATCH DEFECT WAS INVISIBLE WITH ONE DETERMINATION BANKED
+///
+/// Table 1's dry-dislocation and GBS rows print NO `V*`; they defer to this table. Until now the engine banked one
+/// determination as a test fixture, and with one value a `.find()` and a bracket are indistinguishable. This banks
+/// the whole table, and the whole table is the point: SEVERAL of its determinations cover any given lid pressure
+/// WHILE DISAGREEING, so at a lid pressure the bracket is a real band rather than a degenerate point. The nine fail
+/// to overlap because `V*` is a CHORD that decreases with pressure (the primary states this, its page 93), and each
+/// determination was drawn over a different pressure interval, so a bare `V*` is a chord with its endpoints
+/// dropped. Every determination therefore carries the interval it was drawn over, and [`select_activation_volume`]
+/// keeps only the ones whose chord reaches the consumer's pressure.
+///
+/// # THE MODALITY IS `Fitted`, AND THAT IS A READING WITH A BASIS RATHER THAN A CONVENIENCE
+///
+/// Each row is a DETERMINATION of `V*` from the pressure dependence of deformation or recovery data in a named
+/// experiment (the caption is "Determination of Activation Volumes"). That is a fit to measurements, which is
+/// [`Modality::Fitted`], never [`Modality::Assumed`] (assumed is transferred-from-elsewhere, like the GBS energies
+/// of footnote f) and never a bare estimator. The grade is load-bearing: it admits these into the Arrhenius
+/// exponent, which is correct, because the dry-dislocation row they determine is itself `Fitted`. Two rows print a
+/// footnoted correction (the "(18)" for thermocouple-emf pressure effect, footnote a); the primary printed value
+/// is banked and the correction is noted, and neither is the band's edge so the choice cannot move a result.
+///
+/// # ORDER IS TABLE ORDER, AND THE SELECTION DOES NOT READ IT
+///
+/// The array is in the primary's own row order for auditability against the transcription. Nothing downstream may
+/// depend on it: [`select_activation_volume`] takes a min, a max, and an `all` over the covering SET, none of
+/// which can read the slice's order (Principle 3).
+pub fn hk_table2_activation_volume_determinations() -> [ActivationVolume; 9] {
+    // A determination: the chord value, then the pressure interval it was drawn over (both endpoints), all Fitted.
+    let d = |cm3_num: i64, cm3_den: i64, lo_num: i64, lo_den: i64, hi_num: i64, hi_den: i64| {
+        ActivationVolume {
+            cm3_per_mol: Fixed::from_ratio(cm3_num, cm3_den),
+            interval_min_gpa: Fixed::from_ratio(lo_num, lo_den),
+            interval_max_gpa: Fixed::from_ratio(hi_num, hi_den),
+            modality: Modality::Fitted,
+        }
+    };
+    [
+        // Deformation | 23        | 0.2-0.4  | Kohlstedt and Wang [2001]
+        d(23, 1, 2, 10, 4, 10),
+        // Deformation | 13.4 (18) | 0.5-1.5  | Ross et al. [1979]  (primary value 13.4; 18 is the emf-corrected)
+        d(134, 10, 5, 10, 15, 10),
+        // Deformation | 14 (18)   | 0.3-2    | Karato and Jung [2002]  (primary value 14; 18 is the emf-corrected)
+        d(14, 1, 3, 10, 2, 1),
+        // Deformation | 14        | 0.3-15   | Karato and Rubie [1997]
+        d(14, 1, 3, 10, 15, 1),
+        // Deformation | 27        | 0.6-2.0  | Borch and Green [1989]
+        d(27, 1, 6, 10, 2, 1),
+        // Recovery    | 19        | 1e-4-0.5 | Kohlstedt et al. [1980]  (corrected value from Karato [1981])
+        d(19, 1, 1, 10_000, 5, 10),
+        // Recovery    | 14        | 1e-4-2.0 | Karato and Ogawa [1982]
+        d(14, 1, 1, 10_000, 2, 1),
+        // Recovery    | 6         | 1e-4-10  | Karato et al. [1993]
+        d(6, 1, 1, 10_000, 10, 1),
+        // Diffusion (Si) | -2     | 5-10     | Bejina et al. [1997]  (Si SELF-DIFFUSION, a different mechanism; see
+        // `hk_dry_dislocation_activation_volumes`, which excludes it)
+        d(-2, 1, 5, 1, 10, 1),
+    ]
+}
+
+/// THE DRY-DISLOCATION VOLUME SET: the eight of H&K Table 2's determinations that are mechanism-matched to
+/// dislocation creep, which is the set the dry-dislocation and dry-GBS rows read.
+///
+/// # WHAT IS EXCLUDED, AND WHY IT IS THE ROW-ATOMICITY DISCIPLINE ONE STEP FURTHER
+///
+/// The Si self-diffusion determination (Bejina et al. 1997, `V* = -2` over 5 to 10 GPa) is dropped, for two
+/// independent reasons either of which suffices. FIRST, MECHANISM: it measures Silicon self-diffusion, a different
+/// deformation mechanism from the dislocation creep whose `V*` the dry-dislocation row needs; the other eight are
+/// deformation and recovery determinations of the dislocation-creep `V*`. This is the covering-set conditioning
+/// the ruling names, done where the engine already keys a volume set to a row (a caller takes a whole row and its
+/// own matched volumes, never a cross-mechanism weld), rather than by reading a mechanism tag off the chord.
+/// SECOND, the primary CONTRADICTS ITSELF on the value: its page-92 text prints `V* = 1.9x10^6` for this row while
+/// Table 2 prints `-2`, a typesetting inconsistency the verification records (`HK2003_VERIFICATION.md`, its own
+/// "does not ship" note), and the standing rule blocks a row a source disagrees with itself about.
+///
+/// At a LID pressure the exclusion changes nothing, because the Si row's chord (5 to 10 GPa) does not cover the
+/// lid and pressure-conditioning drops it there anyway; it is the DEEP interior (5 to 10 GPa) where mechanism
+/// conditioning is what keeps a diffusion determination out of a dislocation column's band. The exclusion is
+/// stated here so a deep-interior consumer inherits it rather than rediscovering it.
+pub fn hk_dry_dislocation_activation_volumes() -> [ActivationVolume; 8] {
+    let all = hk_table2_activation_volume_determinations();
+    // The first eight are the deformation and recovery determinations; the ninth is the Si self-diffusion row.
+    [
+        all[0], all[1], all[2], all[3], all[4], all[5], all[6], all[7],
+    ]
+}
+
 /// THE CONDITIONS a load presents to the creep rows. Every field is an input the caller must supply; there is
 /// no default anywhere in this struct, which is condition 4 wearing a type.
 #[derive(Clone, Copy, Debug)]
@@ -1988,6 +2077,126 @@ mod tests {
                 < Fixed::from_ratio(1, 10),
             "ln(1.0e6) ~ 13.82, got {:?}",
             hk_wet_diffusion_hydroxyl().ln_prefactor
+        );
+    }
+
+    #[test]
+    fn the_table2_determinations_are_banked_verbatim_and_graded_fitted() {
+        // THE TRANSCRIPTION ON TRIAL, and the pins are twin-independent: each expected value below is typed from
+        // `HK2003_VERIFICATION.md` section 2 (the primary read twice by independent extraction paths), while the
+        // constructor builds it through `Fixed::from_ratio`. The value reaches the assertion by the decimal
+        // `to_f64_lossy`, a different route than the ratio the entry uses, so agreement is evidence rather than
+        // one hand typing twice. A mistyped V* or a dropped interval endpoint fails here.
+        let dets = hk_table2_activation_volume_determinations();
+        // (V*, P_lo, P_hi) in the primary's own row order, verbatim from the transcription.
+        let expect: [(f64, f64, f64); 9] = [
+            (23.0, 0.2, 0.4),    // Kohlstedt and Wang 2001, deformation
+            (13.4, 0.5, 1.5),    // Ross et al. 1979, deformation
+            (14.0, 0.3, 2.0),    // Karato and Jung 2002, deformation
+            (14.0, 0.3, 15.0),   // Karato and Rubie 1997, deformation
+            (27.0, 0.6, 2.0),    // Borch and Green 1989, deformation
+            (19.0, 0.0001, 0.5), // Kohlstedt et al. 1980, recovery
+            (14.0, 0.0001, 2.0), // Karato and Ogawa 1982, recovery
+            (6.0, 0.0001, 10.0), // Karato et al. 1993, recovery
+            (-2.0, 5.0, 10.0),   // Bejina et al. 1997, Si self-diffusion
+        ];
+        for (i, (v, lo, hi)) in expect.iter().enumerate() {
+            assert!(
+                (dets[i].cm3_per_mol.to_f64_lossy() - v).abs() < 1e-6,
+                "determination {i}: V* banked {} against transcription {v}",
+                dets[i].cm3_per_mol.to_f64_lossy()
+            );
+            assert!(
+                (dets[i].interval_min_gpa.to_f64_lossy() - lo).abs() < 1e-6
+                    && (dets[i].interval_max_gpa.to_f64_lossy() - hi).abs() < 1e-6,
+                "determination {i}: interval banked [{}, {}] against transcription [{lo}, {hi}]",
+                dets[i].interval_min_gpa.to_f64_lossy(),
+                dets[i].interval_max_gpa.to_f64_lossy()
+            );
+            // THE GRADE ADMITS THE EXPONENT, which is load-bearing: a determination is a FIT, not an assumption
+            // transferred from elsewhere, so it crosses into the Arrhenius exponent, exactly as the dry-dislocation
+            // row it determines does. Grading these `Assumed` would refuse the whole ductile branch.
+            assert!(
+                dets[i].modality.admitted_to_exponent(),
+                "a Table 2 determination is Fitted and must reach the exponent"
+            );
+            assert_eq!(dets[i].modality, Modality::Fitted);
+        }
+        // THE INTERVALS ARE ORDERED, or `covers` is meaningless.
+        for d in &dets {
+            assert!(
+                d.interval_min_gpa <= d.interval_max_gpa,
+                "a chord's low endpoint is at or below its high one"
+            );
+        }
+    }
+
+    #[test]
+    fn the_dislocation_set_excludes_the_si_self_diffusion_determination() {
+        // THE MECHANISM CONDITIONING, done where the engine keys volumes to rows. The dry-dislocation set is the
+        // eight deformation-and-recovery determinations of the DISLOCATION-creep V*; the ninth, Bejina's Si
+        // SELF-DIFFUSION (-2 over 5 to 10 GPa), is a different mechanism and is dropped. Two independent bases: the
+        // mechanism mismatch, and the primary contradicting itself on the value (`V* = 1.9e6` in its text against
+        // `-2` in Table 2), which the standing self-contradiction rule blocks.
+        let eight = hk_dry_dislocation_activation_volumes();
+        assert_eq!(eight.len(), 8);
+        // The excluded row is the only negative determination in the table, so its absence is checkable by value.
+        assert!(
+            eight.iter().all(|d| d.cm3_per_mol > Fixed::ZERO),
+            "the Si self-diffusion determination (-2) is not in the dislocation set"
+        );
+        // AND THE EXCLUSION IS EXACTLY ONE ROW: the eight are the first eight of the nine, in order.
+        let nine = hk_table2_activation_volume_determinations();
+        for i in 0..8 {
+            assert_eq!(eight[i].cm3_per_mol, nine[i].cm3_per_mol);
+            assert_eq!(eight[i].interval_min_gpa, nine[i].interval_min_gpa);
+            assert_eq!(eight[i].interval_max_gpa, nine[i].interval_max_gpa);
+        }
+        // The Si row really is the one left out, identified by its negative V* AND its 5-to-10 GPa chord.
+        assert_eq!(nine[8].cm3_per_mol, Fixed::from_int(-2));
+        assert_eq!(nine[8].interval_min_gpa, Fixed::from_int(5));
+    }
+
+    #[test]
+    fn the_covering_set_conditions_the_band_on_the_chords_own_pressure_interval() {
+        // THE DIVIDEND THE CHORD DISCIPLINE PAYS. The pressure interval each determination carries is the
+        // legitimate band-narrower: at a lid pressure only the determinations whose chord REACHES it contribute,
+        // and the rest drop out because their chord was drawn elsewhere. This is the conditioning the ruling names,
+        // and it is already the selection's own behaviour; here it is measured on the banked table.
+        let eight = hk_dry_dislocation_activation_volumes();
+        // A lid pressure near 60 km on an Earth-like world: about 1.94 GPa (3300 kg/m^3, 9.81 m/s^2). Typed here as
+        // the pressure, not derived, because this test is about the SELECTION at a pressure, not the lithostat.
+        let p_lid = Fixed::from_ratio(194, 100);
+        let covered =
+            select_activation_volume(&eight, p_lid).expect("the table brackets at a lid pressure");
+        assert_eq!(
+            covered.constraint(),
+            VolumeConstraint::CoveredBySource,
+            "at 1.94 GPa several chords reach the pressure, so the source constrains it"
+        );
+        // THE COVERING SET IS [6, 27], WHICH IS REAL DISAGREEMENT, NOT SCATTER TO AVERAGE AWAY. Karato et al. 1993
+        // (V* = 6, fit over a range reaching 10 GPa) and Borch and Green 1989 (V* = 27, over <= 2 GPa) both cover
+        // 1.94 GPa and disagree by design: V* decreases with pressure, so the wider-range fit reads lower. The
+        // primary itself predicts this non-overlap.
+        assert_eq!(covered.at(VolumeEnd::Low), Fixed::from_int(6));
+        assert_eq!(covered.at(VolumeEnd::High), Fixed::from_int(27));
+        assert!(
+            !covered.is_degenerate(),
+            "the covering set is a band, not a point: the primary declined to choose"
+        );
+        // AND THE CONDITIONING BIT: the determinations whose chords do NOT reach 1.94 GPa are excluded. Kohlstedt
+        // and Wang (0.2-0.4), Ross (0.5-1.5), and Kohlstedt et al. recovery (1e-4-0.5) all stop short of it, so a
+        // band that ignored the carried interval would wrongly include their 23, 13.4, and 19. It does not.
+        for (i, why) in [(0usize, "0.2-0.4"), (1, "0.5-1.5"), (5, "1e-4-0.5")] {
+            assert!(
+                !eight[i].covers(p_lid),
+                "determination {i} ({why} GPa) does not reach 1.94 GPa and is conditioned out"
+            );
+        }
+        // A determination whose chord DOES reach it is kept: Borch and Green's 27 over 0.6-2.0 covers 1.94.
+        assert!(
+            eight[4].covers(p_lid),
+            "Borch and Green's chord reaches the lid pressure"
         );
     }
 }

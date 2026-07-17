@@ -842,6 +842,20 @@ pub enum MomentEquivalenceRefusal {
     CircularLoadNotConstructed,
     /// The envelope refused, or the profile could not be sampled.
     EnvelopeRefused,
+    /// A BANDED SOLVE'S TWO EDGES DISAGREED ABOUT WHETHER THE PLATE HOLDS: one edge of the `V*` band converged to
+    /// a rigidity and the other hit [`Self::LoadExceedsElasticSupport`]. That is a FINDING, not an average: the
+    /// source's own scatter in `V*` straddles the boundary between an elastically supported load and one that
+    /// exceeds it, so the load's support is UNDECIDED across the band and the honest report is that it is, never a
+    /// rigidity that silently picked the surviving edge. The field names which edge converged.
+    BandEdgeSupportDisagrees { low_edge_converged: bool },
+    /// A BANDED SOLVE'S RIGIDITY BAND CAME OUT UNORDERED: the low `V*` edge returned a rigidity ABOVE the high
+    /// edge, contradicting the monotonicity the interval-arithmetic license rests on. Never observed in the banked
+    /// data or the adversarial sweep, and if it ever fires it is the license itself failing, which the ruling says
+    /// is a stop rather than a swap. Carries both rigidities so the violation is inspectable.
+    BandRigidityUnordered {
+        low_gpa_km3: Fixed,
+        high_gpa_km3: Fixed,
+    },
     /// The fixed-point arithmetic left the representable window.
     NotRepresentable,
 }
@@ -1182,6 +1196,281 @@ pub fn solve_circular_load() -> Result<MomentEquivalentPlate, MomentEquivalenceR
     Err(MomentEquivalenceRefusal::CircularLoadNotConstructed)
 }
 
+/// A RIGIDITY BAND: an ordered interval of moment-equivalent flexural rigidity (`GPa km^3`), `low <= high`.
+///
+/// # THE HONEST CARRIER OF A PRIMARY THAT DECLINED TO CHOOSE
+///
+/// The dry-dislocation `V*` is not one number; H&K's Table 2 gives NINE determinations that disagree by a factor
+/// of several precisely where the ductile branch binds, and the primary declines to collapse them. A refusal
+/// there would claim the engine knows nothing; the determinations say the strength lies within a MEASURED spread.
+/// So the moment equivalence over a deep-binding column is an interval, and this is its rigidity. A DEGENERATE
+/// band (`low == high`) is the shallow column, where the brittle branch floors the envelope identically across the
+/// span and the interval collapses to the point the settled view already reports.
+///
+/// # THE GAP LAW FINISHES THE COMPOSITION, AND IT IS NOT REBUILT HERE
+///
+/// A downstream verdict that FLIPS across `[low, high]` is NEAR-DEGENERATE (it carries and escalates); one
+/// insensitive to the band PROCEEDS on either edge. That is the project's Gap Law, and its machinery is the
+/// [`civsim_materials::verdict`] typestate (`dispose` reads a `delta` against a resolution and returns `Decided`
+/// or `Escalate`). This crate is BELOW `materials` in the layering (`core -> physics -> materials -> sim`) and
+/// cannot reach it, so this ships the band and the [`Self::overlaps`] and [`Self::is_degenerate`] queries a
+/// sim-layer consumer feeds to that machinery. Building a second Gap Law here would be the twin-provider defect
+/// the project keeps convicting; the band is the input, never a re-implementation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RigidityBand {
+    low_gpa_km3: Fixed,
+    high_gpa_km3: Fixed,
+}
+
+impl RigidityBand {
+    /// Build a band from two rigidities in either order; the smaller becomes `low`. `None` on a non-positive
+    /// rigidity, which is not a plate.
+    pub fn new(a_gpa_km3: Fixed, b_gpa_km3: Fixed) -> Option<Self> {
+        if a_gpa_km3 <= ZERO || b_gpa_km3 <= ZERO {
+            return None;
+        }
+        Some(RigidityBand {
+            low_gpa_km3: a_gpa_km3.min(b_gpa_km3),
+            high_gpa_km3: a_gpa_km3.max(b_gpa_km3),
+        })
+    }
+
+    /// A PUBLISHED HINDCAST ROW'S OWN RIGIDITY SCATTER, built from its published elastic-thickness interval through
+    /// the ROW'S OWN modulus pair.
+    ///
+    /// This is the like-against-like the module header demands: a published `T_e` is conditioned on an ASSUMED
+    /// `(E, nu)` the literature never states at the point of quotation, and `T_e ~ (1/E)^(1/3)`, so comparing a
+    /// derived `T_e` against a published `T_e` compares the world's plate against a fictitious 80 GPa one. The row
+    /// is converted BACK to a rigidity through its own pair here, so the engine's band (built at the world's own
+    /// pair) and the row's band are both rigidities and the comparison imports no one's modulus into the other.
+    ///
+    /// `te_low_km` and `te_high_km` are the row's published thickness interval (its central value plus or minus
+    /// its own scatter); `D = E H^3 / (12 (1 - nu^2))` is monotone in `H`, so the thickness interval maps to a
+    /// rigidity interval order-preserving. `None` where the flexural rigidity refuses at either endpoint.
+    pub fn from_hindcast_thickness_interval(
+        te_low_km: Fixed,
+        te_high_km: Fixed,
+        youngs_modulus_gpa: Fixed,
+        poisson_ratio: Fixed,
+    ) -> Option<Self> {
+        let d_lo = crate::flexure::flexural_rigidity(youngs_modulus_gpa, poisson_ratio, te_low_km)?;
+        let d_hi =
+            crate::flexure::flexural_rigidity(youngs_modulus_gpa, poisson_ratio, te_high_km)?;
+        RigidityBand::new(d_lo, d_hi)
+    }
+
+    /// The lower edge (`GPa km^3`): the weakest plate the source's `V*` span permits.
+    pub fn low(self) -> Fixed {
+        self.low_gpa_km3
+    }
+
+    /// The upper edge (`GPa km^3`): the strongest plate the source's `V*` span permits.
+    pub fn high(self) -> Fixed {
+        self.high_gpa_km3
+    }
+
+    /// Whether the band has zero width, which is the shallow column where the span could not move the answer and
+    /// the interval is really a point.
+    pub fn is_degenerate(self) -> bool {
+        self.low_gpa_km3 == self.high_gpa_km3
+    }
+
+    /// BAND-AWARE OVERLAP against another rigidity band: whether the two intervals intersect.
+    ///
+    /// This is the hindcast comparison the ruling calls for, and it is NEVER point equality. A derived rigidity
+    /// band and a published row's own scatter band AGREE when they overlap, because a point-equality test would
+    /// convict the source's own `V*` spread as a modelling error. The test is exact interval intersection, with no
+    /// authored tolerance: the width on each side is the source's own (the engine's from the `V*` determinations,
+    /// the row's from its published uncertainty), so the only thing chosen is the question, never a slack.
+    pub fn overlaps(self, other: RigidityBand) -> bool {
+        self.low_gpa_km3 <= other.high_gpa_km3 && other.low_gpa_km3 <= self.high_gpa_km3
+    }
+}
+
+/// A BANDED PER-LOAD MOMENT EQUIVALENCE: the fixed point run at BOTH edges of the creep rows' `V*` span, carrying
+/// the two converged plates and their shared chord.
+///
+/// # TWO CONVERGENT SOLVES, NEVER AN AVERAGE
+///
+/// `V*` is a span, so `D_eq` is a span, and the two edges are found by running the whole per-load fixed point
+/// twice: once on the [`EnvelopeEdge::low`] envelope and once on [`EnvelopeEdge::high`]. Each is a full convergent
+/// solve with its own curvature, neutral surface, and moment. If ONE edge converges and the other does not, that
+/// is a FINDING ([`MomentEquivalenceRefusal::BandEdgeSupportDisagrees`]): the source's scatter straddles the
+/// boundary between a load the plate holds and one it does not, and the honest report is that it straddles, never
+/// the surviving edge's number passed off as the answer.
+#[derive(Clone, Copy, Debug)]
+pub struct BandedMomentEquivalentPlate {
+    /// The plate at the `V*` LOW edge: the weakest ductile branch, hence the lower rigidity.
+    low: MomentEquivalentPlate,
+    /// The plate at the `V*` HIGH edge: the strongest ductile branch, hence the higher rigidity.
+    high: MomentEquivalentPlate,
+}
+
+impl BandedMomentEquivalentPlate {
+    /// THE CANONICAL BANDED OUTPUT: the rigidity band `[D(V*_low), D(V*_high)]` (`GPa km^3`).
+    pub fn rigidity_band(&self) -> RigidityBand {
+        RigidityBand {
+            low_gpa_km3: self.low.rigidity_gpa_km3,
+            high_gpa_km3: self.high.rigidity_gpa_km3,
+        }
+    }
+
+    /// The `V*` LOW-edge plate (weaker, lower rigidity).
+    pub fn low_edge(&self) -> &MomentEquivalentPlate {
+        &self.low
+    }
+
+    /// The `V*` HIGH-edge plate (stronger, higher rigidity).
+    pub fn high_edge(&self) -> &MomentEquivalentPlate {
+        &self.high
+    }
+
+    /// Whether the band collapsed to a point: the shallow column, where the two edges converged to the same
+    /// rigidity to the bit because the brittle branch floored the envelope identically across the span.
+    pub fn is_degenerate(&self) -> bool {
+        self.rigidity_band().is_degenerate()
+    }
+
+    /// The DISPLAY-THICKNESS band (km) at a DECLARED modulus pair, low edge below high. A statistic, carrying its
+    /// pair for the reason [`elastic_thickness_km`] takes them explicitly: a `T_e` without its pair is a chord
+    /// with its endpoints dropped. `None` where either edge's thickness refuses.
+    pub fn elastic_thickness_band_km(
+        &self,
+        youngs_modulus_gpa: Fixed,
+        poisson_ratio: Fixed,
+    ) -> Option<(Fixed, Fixed)> {
+        let lo = self
+            .low
+            .elastic_thickness_km(youngs_modulus_gpa, poisson_ratio)?;
+        let hi = self
+            .high
+            .elastic_thickness_km(youngs_modulus_gpa, poisson_ratio)?;
+        Some((lo, hi))
+    }
+}
+
+/// THE BANDED LINE-LOAD SOLVE: run the per-load fixed point at BOTH edges of the creep rows' `V*` span and carry
+/// the result as a rigidity band.
+///
+/// # WHERE THE SETTLED VIEW REFUSES, THIS BANDS
+///
+/// A DEEP-binding column cannot be sampled through [`LithosphereEnvelope`]'s own [`YieldEnvelope`] impl, because
+/// that refuses wherever the ductile ends disagree (the settled view declining to collapse the span). This samples
+/// the [`EnvelopeEdge::low`] and [`EnvelopeEdge::high`] profiles instead, each a well-defined surface, and solves
+/// each. Where the column is shallow the two edges coincide and the band is degenerate, which is the settled
+/// view's answer read as a zero-width interval.
+///
+/// # THE LICENSE, CHECKED RATHER THAN TRUSTED
+///
+/// The band is ordered because the moment is MONOTONE in the strength profile and the high `V*` edge is pointwise
+/// stronger, so `D(V*_high) >= D(V*_low)`. This is verified in the banked data and an adversarial family of
+/// envelopes (`the_edge_envelopes_are_pointwise_ordered_low_below_high`,
+/// `the_banded_solve_orders_its_two_edges`), and it is ALSO re-checked at runtime: a solve returning `D_low >
+/// D_high` is [`MomentEquivalenceRefusal::BandRigidityUnordered`], a stop rather than a silent swap, because the
+/// interval-arithmetic license failing is a finding.
+///
+/// `steps` is the caller's declared grid sampling, the same convention [`EnvelopeProfile`] carries. The moduli,
+/// restoring term, load, and chord are [`solve_line_load`]'s own.
+// This mirrors `solve_line_load`'s own seven-argument shape and adds only the sampling grid, so the argument
+// list is the single-edge solve's plus one rather than a bundle worth a parameter struct.
+#[allow(clippy::too_many_arguments)]
+pub fn solve_line_load_banded(
+    envelope: &LithosphereEnvelope<'_>,
+    steps: u32,
+    youngs_modulus_gpa: Fixed,
+    poisson_ratio: Fixed,
+    delta_rho: Fixed,
+    gravity: Fixed,
+    v0: Fixed,
+    chord: LoadChord,
+) -> Result<BandedMomentEquivalentPlate, MomentEquivalenceRefusal> {
+    // Sample each edge of the envelope band onto its own profile. A refusal here is the envelope declining to
+    // describe a column, which refuses the whole solve rather than one edge.
+    let profile_low = EnvelopeProfile::sample(&EnvelopeEdge::low(envelope), steps)
+        .ok_or(MomentEquivalenceRefusal::EnvelopeRefused)?;
+    let profile_high = EnvelopeProfile::sample(&EnvelopeEdge::high(envelope), steps)
+        .ok_or(MomentEquivalenceRefusal::EnvelopeRefused)?;
+
+    let solve = |profile: &EnvelopeProfile| {
+        solve_line_load(
+            profile,
+            youngs_modulus_gpa,
+            poisson_ratio,
+            delta_rho,
+            gravity,
+            v0,
+            chord,
+        )
+    };
+    let low = solve(&profile_low);
+    let high = solve(&profile_high);
+    combine_band_edges(low, high)
+}
+
+/// COMBINE THE TWO EDGE SOLVES into a rigidity band or a finding. Pure, so every arm is testable directly,
+/// including the ones an end-to-end load sweep cannot reach (see `the_band_edge_combinator_reports_each_finding`).
+///
+/// # THE FINDING ARMS, AND WHY THEY ARE HERE EVEN WHERE A LOAD SWEEP CANNOT REACH THEM
+///
+/// The ruling is explicit: two convergent solves, and if one edge converges and the other does not that is a
+/// FINDING, never an average. So the combinator reports:
+///
+/// - BOTH Ok and ordered: the band `[D_low, D_high]`.
+/// - BOTH Ok but `D_low > D_high`: [`MomentEquivalenceRefusal::BandRigidityUnordered`], the monotonicity license
+///   failing, which the ruling says is a stop rather than a silent swap.
+/// - EXACTLY ONE Ok, the other [`MomentEquivalenceRefusal::LoadExceedsElasticSupport`]: the source's `V*` scatter
+///   straddles the support boundary, reported as [`MomentEquivalenceRefusal::BandEdgeSupportDisagrees`] naming
+///   which edge held, never the surviving edge's number.
+/// - BOTH `LoadExceedsElasticSupport`: the whole span agrees the load is not held, which routes to the
+///   support-bound branch and is honest rather than a straddle.
+/// - Any other refusal on an edge: structural (a degenerate modulus, an unrepresentable intermediate), propagated.
+///
+/// ON THE BANKED EARTH-LIKE ENVELOPE the straddle arm is UNREACHED by a load sweep: the flexure arithmetic leaves
+/// the Q32.32 window (`NotRepresentable`) at both edges within one load step of each other, before either edge's
+/// physical support limit is crossed alone. That is a representability ceiling masking the physical boundary, a
+/// stated blindness of the end-to-end path, not of this combinator, whose arms are put on trial here with
+/// synthetic edge results.
+fn combine_band_edges(
+    low: Result<MomentEquivalentPlate, MomentEquivalenceRefusal>,
+    high: Result<MomentEquivalentPlate, MomentEquivalenceRefusal>,
+) -> Result<BandedMomentEquivalentPlate, MomentEquivalenceRefusal> {
+    match (low, high) {
+        (Ok(low), Ok(high)) => {
+            // THE ORDERING, CHECKED. A larger `V*` is a stronger ductile branch is a larger moment is a larger
+            // rigidity; if that fails here the interval-arithmetic license has failed and this stops.
+            if low.rigidity_gpa_km3 > high.rigidity_gpa_km3 {
+                return Err(MomentEquivalenceRefusal::BandRigidityUnordered {
+                    low_gpa_km3: low.rigidity_gpa_km3,
+                    high_gpa_km3: high.rigidity_gpa_km3,
+                });
+            }
+            Ok(BandedMomentEquivalentPlate { low, high })
+        }
+        // BOTH edges say the load is not elastically held: honest and not a band-straddle. The whole span agrees
+        // the load exceeds support, so the support-bound branch is where it routes, at both edges.
+        (
+            Err(MomentEquivalenceRefusal::LoadExceedsElasticSupport),
+            Err(MomentEquivalenceRefusal::LoadExceedsElasticSupport),
+        ) => Err(MomentEquivalenceRefusal::LoadExceedsElasticSupport),
+        // EXACTLY ONE edge holds the load: the source's `V*` scatter straddles the support boundary, which is a
+        // finding rather than an average.
+        (Ok(_), Err(MomentEquivalenceRefusal::LoadExceedsElasticSupport)) => {
+            Err(MomentEquivalenceRefusal::BandEdgeSupportDisagrees {
+                low_edge_converged: true,
+            })
+        }
+        (Err(MomentEquivalenceRefusal::LoadExceedsElasticSupport), Ok(_)) => {
+            Err(MomentEquivalenceRefusal::BandEdgeSupportDisagrees {
+                low_edge_converged: false,
+            })
+        }
+        // Any other refusal (a degenerate modulus, an unrepresentable intermediate, a zero curvature) is
+        // structural rather than a band finding, so it propagates. The low edge's is reported where both carry
+        // one, since it is sampled first.
+        (Err(e), _) | (_, Err(e)) => Err(e),
+    }
+}
+
 /// THE CONDUCTIVE-LID BASE `delta`, CARRYING ITS DERIVATION IN ITS TYPE: the depth below which the interior
 /// convects, which is the moment integral's own domain.
 ///
@@ -1412,6 +1701,14 @@ impl LithosphereEnvelope<'_> {
     /// end, and the brittle branch floors the envelope identically both ways. That is what lets a real envelope
     /// be sampled FROM THE SURFACE, which is the full-column solve this unblocks, and it is asserted rather than
     /// asserted-about (`the_shallow_envelope_is_invariant_across_the_v_star_bracket`).
+    ///
+    /// # WHERE THE ENDS DISAGREE THIS REFUSES, AND THE BANDED VIEW IS ITS SIBLING
+    ///
+    /// This is the SETTLED view: it reports a strength only where the span could not have moved it. The DEEP
+    /// column, where the ductile branch binds and the two ends part company, is served instead by [`edge_yield`]
+    /// through an [`EnvelopeEdge`], which reads ONE edge of the interval-of-mins rather than demanding the two
+    /// agree. Refusing here and banding there are the two halves of the same ruling: honesty changes what the
+    /// answer LOOKS LIKE (a point becomes an interval), never whether there is one.
     fn yield_in_sense(&self, depth_km: Fixed, sense: FaultingSense) -> Option<Fixed> {
         if depth_km < ZERO {
             return None;
@@ -1441,6 +1738,109 @@ impl LithosphereEnvelope<'_> {
             return None;
         }
         low.checked_div(Fixed::from_int(MPA_PER_GPA))
+    }
+
+    /// THE ENVELOPE IN ONE SENSE AT ONE EDGE of the `V*` bracket (GPa): `min(brittle, ductile)` with the ductile
+    /// limb read at the named end and NO comparison against the other.
+    ///
+    /// # THIS IS THE INTERVAL'S EDGE, AND IT IS THE SURFACE THE BANDED CONSTRUCTION INTEGRATES
+    ///
+    /// `V*` is a span the primary declines to collapse ([`crate::creep_rows::ActivationVolumeBracket`]), so the
+    /// envelope's `min(brittle, ductile)` is a span too: `[min(brittle, ductile_low), min(brittle, ductile_high)]`.
+    /// [`Self::yield_in_sense`] asks whether that interval is degenerate (the two ends agree) and reports the
+    /// number where it is; this asks what the answer IS at one named end of it, so a caller can integrate the LOW
+    /// edge and the HIGH edge and carry the moment as an interval.
+    ///
+    /// # WHY THE TWO ENDS ARE AN ORDERED INTERVAL RATHER THAN TWO UNRELATED NUMBERS
+    ///
+    /// At a non-negative pressure a larger `V*` raises `E* + P V*`, which lowers every creep row's rate at a given
+    /// stress and so RAISES the stress the target rate needs: the ductile strength is monotone increasing in `V*`.
+    /// So `min(brittle, ductile_high) >= min(brittle, ductile_low)` at every depth, which is the pointwise ordering
+    /// the moment integral's own monotonicity then propagates into an ordered rigidity band
+    /// (`the_edge_envelopes_are_pointwise_ordered_low_below_high`).
+    ///
+    /// # THE BRITTLE GAP IS NOT THE DUCTILE SPAN
+    ///
+    /// A [`DifferentialStrength::Bracket`] from the friction row is a DIFFERENT band: the friction law's own
+    /// missing domain (ice between its two fits), which a `V*` interval cannot carry and which no end of the
+    /// ductile span settles. So this refuses there exactly as [`Self::yield_in_sense`] does, rather than pretending
+    /// an edge of the creep span speaks for the friction gap.
+    pub fn edge_yield(
+        &self,
+        depth_km: Fixed,
+        sense: FaultingSense,
+        end: VolumeEnd,
+    ) -> Option<Fixed> {
+        if depth_km < ZERO {
+            return None;
+        }
+        let brittle_mpa = match self.brittle(depth_km, sense)? {
+            DifferentialStrength::Determined(d) => d,
+            DifferentialStrength::Bracket { .. } => return None,
+        };
+        let mpa = match self.ductile(depth_km, end) {
+            DuctileReading::Determined(d) => brittle_mpa.min(d),
+            // Creep is irrelevant here; the brittle branch floors the envelope.
+            DuctileReading::AboveRepresentable => brittle_mpa,
+            // The material sustains nothing representable.
+            DuctileReading::BelowRepresentable => ZERO,
+            DuctileReading::Refused(_) => return None,
+        };
+        mpa.checked_div(Fixed::from_int(MPA_PER_GPA))
+    }
+}
+
+/// ONE EDGE of a [`LithosphereEnvelope`]'s `V*` band, as a [`YieldEnvelope`] in its own right.
+///
+/// # WHY A WRAPPER RATHER THAN A FLAG ON THE ENVELOPE
+///
+/// The moment integral consumes a [`YieldEnvelope`] and samples it onto a profile. A DEEP column's envelope
+/// refuses through [`LithosphereEnvelope`]'s own trait impl wherever the ductile ends disagree, so it cannot be
+/// sampled at all: that is the settled view declining to collapse the band. This wrapper is the BANDED view. It
+/// reads one named end of the interval-of-mins through [`LithosphereEnvelope::edge_yield`], so the profile at the
+/// [`VolumeEnd::Low`] edge and the profile at the [`VolumeEnd::High`] edge are the two edges of the envelope band,
+/// each a well-defined surface with no disagreement to refuse over.
+///
+/// The construction then integrates each edge (interval arithmetic on a monotone integrand) and carries the
+/// result as a rigidity band. The wrapper owns no new physics; it selects which end of an already-banded quantity
+/// a given integration reads.
+pub struct EnvelopeEdge<'a> {
+    envelope: &'a LithosphereEnvelope<'a>,
+    end: VolumeEnd,
+}
+
+impl<'a> EnvelopeEdge<'a> {
+    /// View the LOW edge of the envelope's `V*` band: the smallest `V*`, hence the WEAKEST the ductile branch can
+    /// be at a positive pressure, hence the lower edge of the strength interval.
+    pub fn low(envelope: &'a LithosphereEnvelope<'a>) -> Self {
+        EnvelopeEdge {
+            envelope,
+            end: VolumeEnd::Low,
+        }
+    }
+
+    /// View the HIGH edge: the largest `V*`, the STRONGEST the ductile branch can be at a positive pressure.
+    pub fn high(envelope: &'a LithosphereEnvelope<'a>) -> Self {
+        EnvelopeEdge {
+            envelope,
+            end: VolumeEnd::High,
+        }
+    }
+}
+
+impl YieldEnvelope for EnvelopeEdge<'_> {
+    fn tensile_yield_gpa(&self, depth_km: Fixed) -> Option<Fixed> {
+        self.envelope
+            .edge_yield(depth_km, FaultingSense::Normal, self.end)
+    }
+
+    fn compressive_yield_gpa(&self, depth_km: Fixed) -> Option<Fixed> {
+        self.envelope
+            .edge_yield(depth_km, FaultingSense::Thrust, self.end)
+    }
+
+    fn domain_max_depth_km(&self) -> Fixed {
+        self.envelope.lid_base.depth_km()
     }
 }
 
@@ -1581,8 +1981,9 @@ pub fn referee_conductive_lid_base(
 mod tests {
     use super::*;
     use crate::creep_rows::{
-        hk_dry_dislocation, ln_scientific, select_activation_volume, ActivationVolume, Modality,
-        VolumeConstraint,
+        hk_dry_dislocation, hk_dry_dislocation_activation_volumes,
+        hk_table2_activation_volume_determinations, ln_scientific, select_activation_volume,
+        ActivationVolume, Modality, VolumeConstraint,
     };
     use crate::geotherm::steady_conductive_geotherm;
     use crate::yield_envelope::{ice_friction_law, rock_friction_law};
@@ -3338,6 +3739,521 @@ mod tests {
             neutral_surface_depth_km(&dead, k, lit_e(), lit_nu()),
             Ok(ZERO),
             "a strengthless column zeroes the axial force at its own surface, the degenerate root"
+        );
+    }
+
+    // ===================================================================================================
+    // THE DEEP V* BAND: where the ductile branch binds, several of H&K Table 2's determinations cover the
+    // lid pressure WHILE DISAGREEING, so the envelope is a visible interval rather than a refusal.
+    // ===================================================================================================
+
+    /// The Earth-like lid carrying the BANKED Table 2 dislocation set (eight determinations), the shared fixture
+    /// for the deep-band checks. Same body and geotherm as `earth_like_lid`, but the creep candidate reads the
+    /// real banked volumes rather than a single fixture, which is what makes the deep bracket a real band.
+    fn earth_like_banded_lid<'a>(
+        creep: &'a [CreepCandidate<'a>],
+        geotherm: &'a dyn Fn(Fixed) -> Option<Fixed>,
+    ) -> LithosphereEnvelope<'a> {
+        earth_like_lid(creep, geotherm, Fixed::from_int(100_000))
+    }
+
+    #[test]
+    fn the_edge_envelopes_are_pointwise_ordered_low_below_high() {
+        // THE INTERVAL-ARITHMETIC LICENSE, ITS FIRST HALF. A larger V* raises E* + P V*, which lowers the creep
+        // rate at a given stress and so raises the strength: the ductile branch is monotone increasing in V*, so
+        // the HIGH edge of the envelope band is pointwise at or above the LOW edge. The moment integral's own
+        // monotonicity then carries this into an ordered rigidity band; here the pointwise half is put on trial
+        // across the whole column, in both senses. A mutation swapping the two ends in `edge_yield` reverses this
+        // and fires.
+        let volumes = hk_dry_dislocation_activation_volumes();
+        let creep = [CreepCandidate {
+            row: hk_dry_dislocation(),
+            volumes: &volumes,
+        }];
+        let geotherm = ramp_geotherm;
+        let env = earth_like_banded_lid(&creep, &geotherm);
+        let delta = f64_of(env.lid_base.depth_km());
+
+        let mut deep_band_seen = false;
+        let mut z = 0.5;
+        while z < delta {
+            let zf = Fixed::from_ratio((z * 1e6) as i64, 1_000_000);
+            for sense in [FaultingSense::Thrust, FaultingSense::Normal] {
+                if let (Some(lo), Some(hi)) = (
+                    env.edge_yield(zf, sense, VolumeEnd::Low),
+                    env.edge_yield(zf, sense, VolumeEnd::High),
+                ) {
+                    assert!(
+                        lo <= hi,
+                        "the low V* edge must be at or below the high edge at {z} km, {sense:?}: {} against {}",
+                        f64_of(lo),
+                        f64_of(hi)
+                    );
+                    if hi > lo {
+                        deep_band_seen = true;
+                    }
+                }
+            }
+            z += 0.5;
+        }
+        // AND THE ORDERING IS NOT VACUOUS: somewhere in the column the two edges do part company, or this
+        // test would pass on a degenerate band that never exercised the inequality.
+        assert!(
+            deep_band_seen,
+            "the deep column must open a real band where the two edges differ, or the ordering is untested"
+        );
+    }
+
+    #[test]
+    fn the_deep_band_is_visible_where_the_settled_view_refuses() {
+        // THE ANOMALY THIS ARC ANSWERS, made concrete. At a deep lid depth the ductile branch binds and several
+        // banked determinations cover the pressure while disagreeing, so the SETTLED view refuses (the two ends
+        // are not equal) while the BANDED view reports the interval. Refusing there would claim the engine knows
+        // nothing; the determinations say the strength lies within a measured spread, and the band is that spread.
+        let volumes = hk_dry_dislocation_activation_volumes();
+        let creep = [CreepCandidate {
+            row: hk_dry_dislocation(),
+            volumes: &volumes,
+        }];
+        let geotherm = ramp_geotherm;
+        let env = earth_like_banded_lid(&creep, &geotherm);
+
+        let deep = Fixed::from_int(60);
+        // THE SETTLED VIEW REFUSES: the V* span has reached the answer, so there is no single strength.
+        assert!(
+            env.compressive_yield_gpa(deep).is_none() && env.tensile_yield_gpa(deep).is_none(),
+            "where the ductile ends disagree the settled view reports nothing"
+        );
+        // THE BANDED VIEW REPORTS BOTH EDGES, and they are a real interval, ordered, non-degenerate.
+        let lo = env
+            .edge_yield(deep, FaultingSense::Thrust, VolumeEnd::Low)
+            .expect("the low edge is a determinate surface");
+        let hi = env
+            .edge_yield(deep, FaultingSense::Thrust, VolumeEnd::High)
+            .expect("the high edge is a determinate surface");
+        assert!(
+            hi > lo,
+            "the deep band is visible: [{}, {}] GPa",
+            f64_of(lo),
+            f64_of(hi)
+        );
+        // THE WIDTH IS WORTH SEEING, not a rounding: the covering set [6, 27] cm^3/mol drives a strength ratio of
+        // several. Measured rather than intuited.
+        let ratio = f64_of(hi) / f64_of(lo);
+        assert!(
+            ratio > 2.0,
+            "the deep band spans a factor of several in strength: {ratio:.3}x"
+        );
+    }
+
+    #[test]
+    fn the_conditioning_narrows_the_band_and_the_residual_ships() {
+        // THE HEADLINE RESULT, measured on the banked table. The band BEFORE conditioning drops each chord's
+        // carried pressure endpoints and takes the table's bare V* extremes [-2, 27], which cover the lid only
+        // because their endpoints were thrown away. The band AFTER conditioning respects the interval each chord
+        // was drawn over, so at the lid pressure only the covering determinations [6, 27] contribute. The residual
+        // [6, 27] is REAL disagreement (V* decreases with pressure; the primary predicts the non-overlap) and
+        // ships as the band.
+        let geotherm = ramp_geotherm;
+        let deep = Fixed::from_int(60);
+        let strength = |vols: &[ActivationVolume], end: VolumeEnd| {
+            let creep = [CreepCandidate {
+                row: hk_dry_dislocation(),
+                volumes: vols,
+            }];
+            let env = earth_like_banded_lid(&creep, &geotherm);
+            match env.ductile(deep, end) {
+                DuctileReading::Determined(d) => f64_of(d),
+                other => panic!("a hot deep lid creeps at a determinate strength, got {other:?}"),
+            }
+        };
+
+        // BEFORE: the bare-endpoints-dropped span. The table's V* extremes (-2 and 27) pasted onto a covering
+        // interval, which is exactly the "chord with its endpoints dropped" defect the interval tagging exists to
+        // prevent: it drops each chord's real pressure range and treats both extremes as if they applied at the
+        // lid.
+        let bare = |v: i32| ActivationVolume {
+            cm3_per_mol: Fixed::from_int(v),
+            interval_min_gpa: Fixed::from_ratio(3, 10),
+            interval_max_gpa: Fixed::from_int(2),
+            modality: Modality::Fitted,
+        };
+        let before_lo = strength(&[bare(-2)], VolumeEnd::Low);
+        let before_hi = strength(&[bare(27)], VolumeEnd::High);
+        let before = before_hi / before_lo;
+
+        // AFTER: the faithful nine determinations, pressure-conditioned by the selection at the lid pressure. The
+        // -2 (Bejina, Si self-diffusion over 5 to 10 GPa) drops out because its chord does not reach 1.94 GPa, so
+        // respecting the carried interval raises the low edge from -2's strength to 6's. This is the chord
+        // discipline paying its dividend: the fields captured to prevent laundering are the legitimate
+        // band-narrower.
+        let nine = hk_table2_activation_volume_determinations();
+        let after_lo = strength(&nine, VolumeEnd::Low);
+        let after_hi = strength(&nine, VolumeEnd::High);
+        let after = after_hi / after_lo;
+
+        println!(
+            "BAND WIDTH at 60 km: before conditioning {before:.3}x ([{before_lo:.2}, {before_hi:.2}] MPa), \
+             after conditioning {after:.3}x ([{after_lo:.2}, {after_hi:.2}] MPa)"
+        );
+        // THE MEASURED NUMBERS, pinned to what the ruling reported (6.11x) and what conditioning leaves (3.71x).
+        assert!(
+            (before - 6.11).abs() < 0.05,
+            "the bare-span band reproduces the ruling's 6.11x, got {before:.3}x"
+        );
+        assert!(
+            (after - 3.71).abs() < 0.05,
+            "conditioning on the chords' own pressure narrows it to 3.71x, got {after:.3}x"
+        );
+        // CONDITIONING NARROWS, AND THE RESIDUAL IS REAL. The band shrinks but does not close: what remains is the
+        // primary's own scatter within matching pressures, which ships rather than being averaged away.
+        assert!(
+            after < before && after > 1.5,
+            "conditioning narrows the band to a real residual, not a point: {before:.3}x -> {after:.3}x"
+        );
+    }
+
+    #[test]
+    fn the_rigidity_band_orders_refuses_a_non_plate_and_overlaps_by_intersection() {
+        // THE BAND TYPE'S OWN ALGEBRA, and the hindcast comparison it exists for.
+        // Ordering: the two ends sort regardless of the order handed in.
+        let b =
+            RigidityBand::new(Fixed::from_int(300_000), Fixed::from_int(500_000)).expect("band");
+        assert_eq!(b.low(), Fixed::from_int(300_000));
+        assert_eq!(b.high(), Fixed::from_int(500_000));
+        let flipped =
+            RigidityBand::new(Fixed::from_int(500_000), Fixed::from_int(300_000)).expect("band");
+        assert_eq!(
+            b, flipped,
+            "the band sorts its ends, so input order cannot move it"
+        );
+        // A non-plate refuses rather than reporting a zero-rigidity band.
+        assert!(RigidityBand::new(ZERO, Fixed::from_int(1000)).is_none());
+        assert!(RigidityBand::new(Fixed::from_int(1000), ZERO - Fixed::ONE).is_none());
+        // Degeneracy is a zero-width band, which is the shallow column.
+        assert!(
+            RigidityBand::new(Fixed::from_int(1000), Fixed::from_int(1000))
+                .unwrap()
+                .is_degenerate()
+        );
+        assert!(!b.is_degenerate());
+
+        // THE HINDCAST COMPARISON IS OVERLAP, NEVER POINT EQUALITY. Two bands agree when their intervals
+        // intersect; a point-equality test would convict the source's own V* spread as a modelling error.
+        let engine = RigidityBand::new(Fixed::from_int(300_000), Fixed::from_int(500_000)).unwrap();
+        // A hindcast row whose scatter overlaps but whose CENTRE differs: overlap says agree, `==` would not.
+        let row_overlapping =
+            RigidityBand::new(Fixed::from_int(450_000), Fixed::from_int(700_000)).unwrap();
+        assert!(
+            engine.overlaps(row_overlapping) && row_overlapping.overlaps(engine),
+            "overlapping bands agree, and the relation is symmetric"
+        );
+        assert_ne!(
+            engine, row_overlapping,
+            "and they are NOT equal: overlap is not point equality, which is the whole ruling"
+        );
+        // A row whose scatter is disjoint: no overlap, a real disagreement.
+        let row_disjoint =
+            RigidityBand::new(Fixed::from_int(600_000), Fixed::from_int(800_000)).unwrap();
+        assert!(
+            !engine.overlaps(row_disjoint),
+            "disjoint bands do not overlap: a real disagreement, reported"
+        );
+        // Touching at an endpoint counts as overlap (the intervals are closed), which is the honest boundary.
+        let row_touch =
+            RigidityBand::new(Fixed::from_int(500_000), Fixed::from_int(900_000)).unwrap();
+        assert!(
+            engine.overlaps(row_touch),
+            "closed intervals touching at an edge overlap"
+        );
+
+        // THE ROW'S BAND IS BUILT THROUGH ITS OWN MODULUS PAIR, which is the like-against-like the header demands:
+        // a published T_e interval becomes a rigidity interval via D = E H^3 / (12 (1 - nu^2)), monotone in H.
+        let row_band = RigidityBand::from_hindcast_thickness_interval(
+            Fixed::from_int(30),
+            Fixed::from_int(40),
+            lit_e(),
+            lit_nu(),
+        )
+        .expect("the row converts to a rigidity band");
+        // TWIN: D(30) and D(40) at (80, 0.25) computed OUTSIDE this codebase, against the band's ends.
+        let d30 = 80.0 * 30.0_f64.powi(3) / (12.0 * (1.0 - 0.0625));
+        let d40 = 80.0 * 40.0_f64.powi(3) / (12.0 * (1.0 - 0.0625));
+        assert!(
+            (f64_of(row_band.low()) - d30).abs() < d30 * 1e-4
+                && (f64_of(row_band.high()) - d40).abs() < d40 * 1e-4,
+            "the row band is [D(30), D(40)] through its own pair: [{}, {}] against [{d30}, {d40}]",
+            f64_of(row_band.low()),
+            f64_of(row_band.high())
+        );
+    }
+
+    #[test]
+    fn the_banded_solve_runs_the_fixed_point_at_both_edges_and_carries_the_chord() {
+        // TWO CONVERGENT SOLVES, ORDERED. The deep-binding column is solved at both edges of the V* span, each a
+        // full fixed point with its own curvature and neutral surface, and the two rigidities are an ordered band
+        // because the high V* edge is the stronger plate. Nothing is averaged; the band is what the primary's own
+        // scatter licenses, carried.
+        let volumes = hk_dry_dislocation_activation_volumes();
+        let creep = [CreepCandidate {
+            row: hk_dry_dislocation(),
+            volumes: &volumes,
+        }];
+        let geotherm = ramp_geotherm;
+        let env = earth_like_banded_lid(&creep, &geotherm);
+        let dr = Fixed::from_ratio(33, 10);
+        let g = Fixed::from_ratio(98, 10000);
+        // A load that bends this 62 km lid into its own yielding and converges at both edges (measured: both
+        // converge well inside the iteration cap and below the elastic ceiling).
+        let load = Fixed::from_int(64);
+        let banded =
+            solve_line_load_banded(&env, 600, lit_e(), lit_nu(), dr, g, load, test_chord())
+                .expect("both edges of the V* band converge on this deep lid");
+
+        let band = banded.rigidity_band();
+        assert!(
+            band.low() < band.high(),
+            "the deep column's rigidity is a real band: [{}, {}] GPa km^3",
+            f64_of(band.low()),
+            f64_of(band.high())
+        );
+        assert!(
+            !banded.is_degenerate(),
+            "the deep column opens a band rather than collapsing to a point"
+        );
+        // BOTH EDGES ARE FIXED POINTS: re-entering each converged rigidity reproduces it, which is the property
+        // the solve claims rather than the number it stopped at.
+        for plate in [banded.low_edge(), banded.high_edge()] {
+            let alpha = crate::flexure::flexural_parameter(plate.rigidity_gpa_km3, dr, g).unwrap();
+            let k = line_load_curvature_at_first_zero_crossing(load, alpha, plate.rigidity_gpa_km3)
+                .unwrap();
+            // Each edge owns its OWN profile; re-derive it to re-enter the fixed point at that edge.
+            let end = if plate.rigidity_gpa_km3 == banded.low_edge().rigidity_gpa_km3 {
+                VolumeEnd::Low
+            } else {
+                VolumeEnd::High
+            };
+            let edge = if end == VolumeEnd::Low {
+                EnvelopeEdge::low(&env)
+            } else {
+                EnvelopeEdge::high(&env)
+            };
+            let profile = EnvelopeProfile::sample(&edge, 600).unwrap();
+            let z_n = neutral_surface_depth_km(&profile, k, lit_e(), lit_nu()).unwrap();
+            let m = bending_moment(&profile, k, z_n, lit_e(), lit_nu()).unwrap();
+            let d_again = equivalent_rigidity(m.moment, k).unwrap();
+            assert!(
+                (f64_of(d_again) - f64_of(plate.rigidity_gpa_km3)).abs()
+                    < f64_of(plate.rigidity_gpa_km3) * 1e-6,
+                "each edge is a fixed point: re-entering {} reproduces it, got {}",
+                f64_of(plate.rigidity_gpa_km3),
+                f64_of(d_again)
+            );
+        }
+
+        // THE CHORD RIDES WITH BOTH EDGES: a rigidity band without its load class and timescale is a band with a
+        // hidden conditioning variable.
+        for plate in [banded.low_edge(), banded.high_edge()] {
+            assert_eq!(plate.chord.class, LoadClassId(1));
+            assert_eq!(plate.chord.timescale_s, Fixed::from_int(31_557_600));
+            assert_eq!(plate.chord.ln_strain_rate_per_s, ln_scientific(1, 1, -15));
+        }
+
+        // THE DISPLAY-THICKNESS BAND is available at a declared pair and is ordered the same way.
+        let (te_lo, te_hi) = banded
+            .elastic_thickness_band_km(lit_e(), lit_nu())
+            .expect("the thickness band resolves");
+        assert!(
+            te_lo < te_hi && f64_of(te_hi) <= 62.3,
+            "the display-thickness band is ordered and inside the lid: [{}, {}] km",
+            f64_of(te_lo),
+            f64_of(te_hi)
+        );
+    }
+
+    #[test]
+    fn the_banded_solve_is_degenerate_on_an_all_brittle_shallow_column() {
+        // HONESTY CHANGES SHAPE, NOT WHETHER THE ENGINE SPEAKS. Where the column is shallow and cold the ductile
+        // branch never binds (the flow law says creep is irrelevant at a geological rate), so the envelope is the
+        // brittle branch at both V* edges and the band is a POINT. The banded solve returns it, and the two edges
+        // agree to the bit, which is the shallow bracket's invariance surviving into the solve.
+        let volumes = hk_dry_dislocation_activation_volumes();
+        let creep = [CreepCandidate {
+            row: hk_dry_dislocation(),
+            volumes: &volumes,
+        }];
+        let geotherm = ramp_geotherm;
+        // A vigorous mantle (Ra = 7e6) shears over a ~15 km lid; at 15 km on the ramp geotherm the rock is not
+        // creeping at 1e-15/s, so the whole column is brittle and V*-independent.
+        let env = earth_like_lid(&creep, &geotherm, Fixed::from_int(7_000_000));
+        assert!(
+            f64_of(env.lid_base.depth_km()) < 16.0,
+            "Ra = 7e6 gives a thin lid: {} km",
+            f64_of(env.lid_base.depth_km())
+        );
+        assert_eq!(
+            env.ductile(env.lid_base.depth_km(), VolumeEnd::Low),
+            DuctileReading::AboveRepresentable,
+            "the thin lid's base is not creeping at a geological rate, so the column is all brittle"
+        );
+        let dr = Fixed::from_ratio(33, 10);
+        let g = Fixed::from_ratio(98, 10000);
+        let banded = solve_line_load_banded(
+            &env,
+            400,
+            lit_e(),
+            lit_nu(),
+            dr,
+            g,
+            Fixed::from_int(4),
+            test_chord(),
+        )
+        .expect("the shallow column converges");
+        assert!(
+            banded.is_degenerate(),
+            "an all-brittle column is V*-independent, so its rigidity band is a point: [{}, {}]",
+            f64_of(banded.rigidity_band().low()),
+            f64_of(banded.rigidity_band().high())
+        );
+        assert_eq!(
+            banded.low_edge().rigidity_gpa_km3,
+            banded.high_edge().rigidity_gpa_km3,
+            "the two edges agree to the bit where the span cannot move the answer"
+        );
+    }
+
+    #[test]
+    fn the_band_edge_combinator_reports_each_finding() {
+        // THE FINDING ARMS, PUT ON TRIAL DIRECTLY, because a load sweep on the banked envelope cannot reach the
+        // straddle (the flexure arithmetic leaves the representable window at both edges within one load step of
+        // each other, before either edge's support limit is crossed alone). This is stated as a blindness of the
+        // end-to-end path in `solve_line_load_banded`'s own doc; here the pure combinator's arms are exercised
+        // with synthetic edge results, so no arm is dead-untested.
+        let plate = |d: i64| MomentEquivalentPlate {
+            rigidity_gpa_km3: Fixed::from_int(d as i32),
+            curvature: FibreCurvature::from_upward_deflection(Fixed::from_ratio(-1, 2000)),
+            neutral_depth_km: Fixed::from_int(20),
+            moment: MomentReading {
+                moment: Fixed::from_int(100),
+                neutral_depth_km: Fixed::from_int(20),
+                self_truncated: false,
+                truncation_depth_km: None,
+                final_interval_contribution: Fixed::ONE,
+            },
+            chord: test_chord(),
+            iterations: 5,
+        };
+        let sup = || Err(MomentEquivalenceRefusal::LoadExceedsElasticSupport);
+        let other = || Err(MomentEquivalenceRefusal::ZeroCurvature);
+
+        // BOTH Ok and ordered: a band, low below high.
+        let band = combine_band_edges(Ok(plate(300_000)), Ok(plate(500_000))).expect("band");
+        assert_eq!(band.rigidity_band().low(), Fixed::from_int(300_000));
+        assert_eq!(band.rigidity_band().high(), Fixed::from_int(500_000));
+
+        // BOTH Ok but UNORDERED: the monotonicity license failed, a stop rather than a swap.
+        assert_eq!(
+            combine_band_edges(Ok(plate(500_000)), Ok(plate(300_000))).unwrap_err(),
+            MomentEquivalenceRefusal::BandRigidityUnordered {
+                low_gpa_km3: Fixed::from_int(500_000),
+                high_gpa_km3: Fixed::from_int(300_000),
+            },
+            "an unordered band stops rather than silently swapping"
+        );
+
+        // EXACTLY ONE holds the load: the straddle finding, naming which edge held.
+        assert_eq!(
+            combine_band_edges(Ok(plate(300_000)), sup()).unwrap_err(),
+            MomentEquivalenceRefusal::BandEdgeSupportDisagrees {
+                low_edge_converged: true
+            },
+            "low held, high did not: a finding naming the low edge"
+        );
+        assert_eq!(
+            combine_band_edges(sup(), Ok(plate(300_000))).unwrap_err(),
+            MomentEquivalenceRefusal::BandEdgeSupportDisagrees {
+                low_edge_converged: false
+            },
+            "high held, low did not: a finding naming the high edge"
+        );
+
+        // BOTH fail support: honest, routes to the support-bound branch, NOT a straddle.
+        assert_eq!(
+            combine_band_edges(sup(), sup()).unwrap_err(),
+            MomentEquivalenceRefusal::LoadExceedsElasticSupport,
+            "the whole span agreeing the load is not held is not a straddle"
+        );
+
+        // ANY OTHER refusal is structural and propagates rather than becoming a band finding.
+        assert_eq!(
+            combine_band_edges(Ok(plate(300_000)), other()).unwrap_err(),
+            MomentEquivalenceRefusal::ZeroCurvature,
+            "a structural refusal on one edge propagates, never a straddle"
+        );
+        assert_eq!(
+            combine_band_edges(other(), Ok(plate(300_000))).unwrap_err(),
+            MomentEquivalenceRefusal::ZeroCurvature
+        );
+    }
+
+    #[test]
+    fn the_edge_yield_refuses_inside_the_friction_gap_at_both_ends() {
+        // THE BRITTLE GAP IS NOT THE DUCTILE SPAN, on trial. An ice shell has a depth band where NEITHER of its
+        // friction fits is licensed, so the brittle branch is itself a bracket the calibration declines to
+        // collapse. A V* edge cannot speak for that gap, so `edge_yield` refuses there at BOTH ends, exactly as
+        // the settled view does; reading an edge of the creep span as the friction gap's answer would be laundering
+        // one band into another. Without this the refusal arm is untested, which a mutation run showed.
+        let volumes = hk_dry_dislocation_activation_volumes();
+        let creep = [CreepCandidate {
+            row: hk_dry_dislocation(),
+            volumes: &volumes,
+        }];
+        // A cold conductive Europa-class shell, its own lid: the same fixture the friction-gap test uses.
+        let geotherm = |_z: Fixed| Some(Fixed::from_int(100));
+        let lid_base = ConductiveLidBase::from_rayleigh(Fixed::from_int(30), ZERO)
+            .expect("a non-convecting shell is its own lid");
+        let shell = LithosphereEnvelope {
+            friction: ice_friction_law(),
+            density_kg_m3: Fixed::from_int(920),
+            gravity_m_s2: Fixed::from_ratio(131, 100),
+            geotherm_k: &geotherm,
+            creep: &creep,
+            chord: test_chord(),
+            lid_base,
+        };
+        // 15 MPa of overburden sits near 12.4 km on this shell, inside its NORMAL-faulting friction gap (the
+        // sense the two Beeman fits straddle over 5 to 10 MPa). The brittle branch brackets there, so both V* ends
+        // of `edge_yield` refuse in that sense.
+        let in_gap = Fixed::from_int(12);
+        assert!(
+            matches!(
+                shell.brittle(in_gap, FaultingSense::Normal),
+                Some(DifferentialStrength::Bracket { .. })
+            ),
+            "the premise: the friction branch is a bracket at 12 km in the normal sense, or this proves nothing"
+        );
+        for end in [VolumeEnd::Low, VolumeEnd::High] {
+            assert!(
+                shell.edge_yield(in_gap, FaultingSense::Normal, end).is_none(),
+                "inside the friction gap the edge refuses rather than reading a creep edge, {end:?}"
+            );
+        }
+        // AND WHERE THE FRICTION BRANCH DETERMINES, the edge answers, so the refusal above is the gap and not the
+        // function simply never speaking. Deep in the shell (about 30 MPa overburden at 25 km, well past the
+        // 10 MPa gap top) the brittle branch determines and floors the cold, non-creeping column.
+        let determinate = Fixed::from_int(25); // ~30 MPa on a 920 kg/m^3, 1.31 m/s^2 shell, inside the 30 km lid
+        assert!(
+            matches!(
+                shell.brittle(determinate, FaultingSense::Thrust),
+                Some(DifferentialStrength::Determined(_))
+            ),
+            "the premise: the friction branch determines deep in the shell"
+        );
+        assert!(
+            shell
+                .edge_yield(determinate, FaultingSense::Thrust, VolumeEnd::Low)
+                .is_some(),
+            "where the friction branch determines the edge answers"
         );
     }
 }
