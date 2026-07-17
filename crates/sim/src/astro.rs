@@ -722,10 +722,12 @@ pub fn viscous_similarity_accretion_rate(
 }
 
 /// One (epoch, rate) LANDMARK the accretion clock is hindcast against, with the fractional band it must sit
-/// within. The 0.19 formation-epoch and 0.01 mature-epoch rates are the two the arc retires, each a CHORD point
-/// carrying its own epoch (the formation rate at the condensation-front epoch, the mature rate at the class-II
-/// epoch); `band_frac` is the observational band on the rate (a reserved-with-basis chord variable), not authored
-/// here.
+/// within. A landmark must be a GENUINE RATE MEASUREMENT: the mature endpoint is the observed class-II accretion
+/// rate at the age of the sample it came from (a fetchable rate-versus-age locus, Hartmann or Manara-class
+/// compilations, with sample conditioning, not one synthetic point). The formation RATE is NOT a landmark here:
+/// the 0.19 is a partition share excluded by owner directive (see [`accretion_clock_hindcasts`]); the formation
+/// constraint enters as a derived-root condition instead. `band_frac` is the observational band on the rate,
+/// carried with the fetched measurement, not authored here.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct AccretionLandmark {
     /// The epoch (Myr since `t = 0`) at which the landmark rate was measured.
@@ -751,12 +753,17 @@ pub struct AccretionLandmark {
 /// landmarks. Blind, second, to the family SHAPE: two landmarks cannot distinguish the decline family, since a
 /// different `gamma` with refit `(mdot_0, t_visc)` can pass the same two points, covered by `gamma`'s own
 /// provenance from gate-G (the exponent is derived, not free to refit) and by the model-structure band being
-/// DECLARED rather than inferred from these landmarks. Blind, third, to the PRODUCT DEGENERACY in the formation
-/// landmark: the ~1400 K condensation front that fixes the 0.19 formation rate fixes only the PRODUCT of
-/// accretion rate, dust column, and opacity (the formation-era condensation slice documents this at its
-/// `FORMATION_ACCRETION_RATE_MSUN_MYR`), so a hindcast on `Mdot(t_formation) = 0.19` can pass with a compensating
-/// dust-column error, covered only once the dust column and opacity are independently derived (the dust profile
-/// and the condensation opacity), which isolates the rate.
+/// DECLARED rather than inferred from these landmarks. There is no third blind spot for a formation-RATE
+/// landmark, because there is no such landmark: the 0.19 formation rate is EXCLUDED from the validation set by
+/// owner directive. It was never a measurement, only a PARTITION SHARE: the ~1400 K condensation front fixes only
+/// the PRODUCT of accretion rate, dust column, and opacity (the formation-era slice records this at its
+/// `FORMATION_ACCRETION_RATE_MSUN_MYR`), so a hindcast on `Mdot(t_formation) = 0.19` could pass on a compensating
+/// dust error and fail on a correct `Mdot_0`, which is a referee that convicts the right answer, not a referee.
+/// The formation constraint enters instead as the DERIVED-ROOT condition it always physically was: `t_formation`
+/// is the root of `T_mid(1 AU, t) = T_condensation`, solved on `Mdot(t)` through the disk's own thermal
+/// structure (the same condensation-temperature module that consumed the 0.19), which now convicts `Mdot` because
+/// two of the three product factors (the dust column and the opacity) have since been derived. That derived-root
+/// referee is a follow-on build; this gate takes only landmarks that are genuine rate measurements.
 pub fn accretion_clock_hindcasts(
     mdot_0_msun_myr: Fixed,
     t_visc_myr: Fixed,
