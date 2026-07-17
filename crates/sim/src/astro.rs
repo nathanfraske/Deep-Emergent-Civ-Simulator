@@ -964,6 +964,58 @@ pub fn convective_turnover_time_days(
     compute().ok_or(TurnoverRefusal::Unrepresentable)
 }
 
+/// The star's ENVELOPE STRUCTURAL STATE for the wind-branch dispatch: does a convection zone operate a
+/// rotation-coupled magnetic dynamo (the CONVECTIVE branch, the X-ray wind, where
+/// [`convective_turnover_time_days`] returns a value), or is the photosphere radiative and dynamo-dark (the
+/// RADIATIVE branch, the Herbig Ae/Be EUV-photoevaporation wind, where the turnover refuses)? This is the
+/// STRUCTURE-KEYED line the turnover's high-mass refusal ([`TurnoverRefusal::AboveFitDomain`]) is the
+/// main-sequence INSTANCE of: rather than a mass cut (the `mass_max_msun` fit edge, ~1.36 M_sun), the dispatch
+/// keys on the star's own effective temperature against the KRAFT BREAK, the `T_eff` at which the surface
+/// convection zone (driven by the hydrogen and helium ionization layers) vanishes. Below the break a star of any
+/// mass hosts a convective dynamo, whether fully convective (a low-mass M dwarf, a cool T Tauri star on the
+/// Hayashi track) or a radiative core under a convective envelope (the Sun); above it the photosphere is
+/// radiative and dynamo-dark (an A or B star, a Herbig Ae/Be pre-main-sequence star).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum EnvelopeStructure {
+    /// A convection zone operates a rotation-coupled dynamo: the X-ray wind branch, where the convective turnover
+    /// time is defined. Covers both the fully convective and convective-envelope cases (both host a dynamo, the
+    /// distinction between them being a phase question the dispatch does not need, flagged below).
+    Convective,
+    /// A radiative photosphere with no dynamo: the Herbig Ae/Be EUV-photoevaporation branch, where the turnover
+    /// refuses with [`TurnoverRefusal::AboveFitDomain`] and the ionizing luminosity is the spectrum's own tail.
+    Radiative,
+}
+
+/// Derive the [`EnvelopeStructure`] from the star's current effective temperature against the Kraft break. Keying
+/// on `T_eff`, the drawn physical variable, generalizes where a fixed mass cut fails: an intermediate-mass star
+/// early on the Hayashi track is cool and fully convective (Convective), and heats past the break onto the
+/// radiative Henyey track as it evolves (Radiative), a transition its own `T_eff` tracks and a 1.36 M_sun cut,
+/// which would call it Radiative at every age, cannot. The caller passes the star's CURRENT `T_eff` (the Hayashi
+/// wall temperature while it is on the track, the main-sequence [`stellar_effective_temperature`] once it has
+/// arrived), so the same function serves both tracks.
+///
+/// ADMITS THE ALIEN: the boundary is a temperature read against the star's own derived `T_eff`, so a star of any
+/// composition dispatches through its own photosphere rather than a Terran mass. The honest limit: the Kraft
+/// break is the hydrogen and helium ionization boundary, so a radically different photospheric composition would
+/// move it, a per-star datum override if a world's chemistry ever demands one. A non-positive input is not a
+/// star (`None`, an error, never a branch).
+///
+/// SCOPE (flagged, not conflated): this keys the dynamo/wind dispatch, one boundary (the break). The `L_bol`
+/// track selection (pre-main-sequence contraction luminosity versus the main-sequence law) is a PHASE question,
+/// orthogonal to envelope structure: a Herbig star is radiative AND pre-main-sequence at once. The fully
+/// convective versus convective-envelope sub-distinction that would key the phase is a sibling on a second
+/// boundary (the fully convective limit), left to the `L_bol` wire rather than overloaded onto this axis.
+pub fn stellar_envelope_structure(t_eff_k: Fixed, kraft_break_k: Fixed) -> Option<EnvelopeStructure> {
+    if t_eff_k <= Fixed::ZERO || kraft_break_k <= Fixed::ZERO {
+        return None;
+    }
+    Some(if t_eff_k > kraft_break_k {
+        EnvelopeStructure::Radiative
+    } else {
+        EnvelopeStructure::Convective
+    })
+}
+
 /// The PRE-MAIN-SEQUENCE LUMINOSITY `L_bol / L_sun` at a stellar age, the disk-era bolometric luminosity the L_X
 /// chain reads (and the race's wind rate runs through). A disk-hosting star is not a main-sequence object: it is
 /// a pre-main-sequence star still descending the Hayashi track, fully convective and BRIGHTER than its
@@ -3163,6 +3215,99 @@ mod tests {
         );
         // Inside the range still resolves.
         assert!(convective_turnover_time_days(Fixed::ONE, &fit).is_ok());
+    }
+
+    #[test]
+    fn the_envelope_structure_keys_on_the_kraft_break_not_a_mass() {
+        // The structure-keyed dispatch state: below the Kraft break a convective dynamo (the X-ray wind branch),
+        // above it a radiative dynamo-dark photosphere (the EUV branch). The boundary is a TEMPERATURE, read
+        // against the star's own T_eff, so no mass enters the dispatch.
+        let kraft = Fixed::from_int(6200); // reserved Kraft-break T_eff, the surface-convection cutoff
+        assert_eq!(
+            stellar_envelope_structure(Fixed::from_int(4200), kraft), // a cool T Tauri / Hayashi-wall star
+            Some(EnvelopeStructure::Convective),
+            "a cool star hosts a convective dynamo"
+        );
+        assert_eq!(
+            stellar_envelope_structure(Fixed::from_int(9000), kraft), // a hot Herbig / A star
+            Some(EnvelopeStructure::Radiative),
+            "a hot star is radiative, dynamo-dark"
+        );
+        // The break itself resolves to the convective side (the surface zone survives at the boundary).
+        assert_eq!(
+            stellar_envelope_structure(kraft, kraft),
+            Some(EnvelopeStructure::Convective)
+        );
+        // A non-positive T_eff is not a star, and a non-positive break is not a boundary: errors, never branches.
+        assert_eq!(stellar_envelope_structure(Fixed::from_int(-1), kraft), None);
+        assert_eq!(stellar_envelope_structure(Fixed::from_int(5000), Fixed::ZERO), None);
+    }
+
+    #[test]
+    fn the_mass_cut_is_the_main_sequence_instance_of_the_structural_line() {
+        // The demotion the refinement requires: the turnover's high-mass refusal at mass_max (1.36 M_sun) and the
+        // T_eff Kraft break are the SAME boundary seen two ways. A main-sequence star at the fit's high-mass edge
+        // has a T_eff above the break, so the mass-keyed refusal and the T_eff-keyed dispatch AGREE on the main
+        // sequence, while the Sun sits below it (convective, turnover defined). The mass cut is the structural
+        // line's main-sequence shadow, not an independent number.
+        let (alpha, beta) = (Fixed::from_ratio(35, 10), Fixed::from_ratio(8, 10));
+        let t_max = Fixed::from_int(100_000);
+        let kraft = Fixed::from_int(6200);
+        let fit = tau_poly();
+        // At the fit's high-mass edge the main-sequence T_eff is radiative: the mass cut agrees with the break.
+        let t_edge = stellar_effective_temperature(fit.mass_max_msun, alpha, beta, t_max).unwrap();
+        assert_eq!(
+            stellar_envelope_structure(t_edge, kraft),
+            Some(EnvelopeStructure::Radiative),
+            "a main-sequence star at mass_max is radiative, matching AboveFitDomain (T_eff {})",
+            t_edge.to_f64_lossy()
+        );
+        // The Sun is convective by both keys (below mass_max, below the break).
+        let t_sun = stellar_effective_temperature(Fixed::ONE, alpha, beta, t_max).unwrap();
+        assert_eq!(
+            stellar_envelope_structure(t_sun, kraft),
+            Some(EnvelopeStructure::Convective),
+            "the Sun hosts a convective dynamo (T_eff {})",
+            t_sun.to_f64_lossy()
+        );
+        assert!(convective_turnover_time_days(Fixed::ONE, &fit).is_ok());
+        assert_eq!(
+            convective_turnover_time_days(Fixed::from_ratio(14, 10), &fit),
+            Err(TurnoverRefusal::AboveFitDomain)
+        );
+    }
+
+    #[test]
+    fn the_structural_line_generalizes_where_a_mass_cut_fails() {
+        // The generalization the mass cut cannot reach: a 2 M_sun star is ABOVE the 1.36 mass cut, so a mass-keyed
+        // dispatch calls it radiative at every age. But early on the Hayashi track it is COOL (its T_eff is the
+        // Hayashi wall) and fully convective, X-ray active; it turns radiative only once it heats onto the Henyey
+        // track. The structural line, keyed on the star's CURRENT T_eff, gets both epochs right where the mass cut
+        // gets the young one wrong.
+        let kraft = Fixed::from_int(6200);
+        // Epoch one: young, on the Hayashi wall (~4300 K), fully convective, whatever its main-sequence mass.
+        let t_hayashi_wall = Fixed::from_int(4300);
+        assert_eq!(
+            stellar_envelope_structure(t_hayashi_wall, kraft),
+            Some(EnvelopeStructure::Convective),
+            "a young intermediate-mass star on the Hayashi wall is convective"
+        );
+        // Epoch two: arrived on the main sequence, hot, radiative. The same star at its 2 M_sun main-sequence T_eff.
+        let (alpha, beta) = (Fixed::from_ratio(35, 10), Fixed::from_ratio(8, 10));
+        let t_ms =
+            stellar_effective_temperature(Fixed::from_int(2), alpha, beta, Fixed::from_int(100_000)).unwrap();
+        assert_eq!(
+            stellar_envelope_structure(t_ms, kraft),
+            Some(EnvelopeStructure::Radiative),
+            "the same star on the main sequence is hot and radiative (T_eff {})",
+            t_ms.to_f64_lossy()
+        );
+        // The mass cut, by contrast, refuses the 2 M_sun star at every age, getting the young epoch wrong.
+        let fit = tau_poly();
+        assert_eq!(
+            convective_turnover_time_days(Fixed::from_int(2), &fit),
+            Err(TurnoverRefusal::AboveFitDomain)
+        );
     }
 
     #[test]
