@@ -197,6 +197,39 @@ fn flexural_length_axisymmetric_from_alpha(alpha: Fixed) -> Option<Fixed> {
     alpha.checked_div(Fixed::from_int(2).sqrt())
 }
 
+// ----- The spectral flexural filter (the transfer function on a periodic load) -----
+
+/// The FLEXURAL RESPONSE RATIO `Phi(k) = 1 / (1 + (l k)^4)`, the fraction of an isostatic (Airy) load a plate of
+/// axisymmetric flexural length `l` passes into supported relief at wavenumber `k`. It is the spectral form of the
+/// plate equation `D grad^4 w + delta_rho g w = load`: in the wavenumber domain `(D k^4 + delta_rho g) W = Load`,
+/// so the ratio of the plate deflection to the isostatic deflection `Load / (delta_rho g)` is `delta_rho g /
+/// (D k^4 + delta_rho g) = 1 / (1 + (l k)^4)`, since `l^4 = D / (delta_rho g)` ([`flexural_length_axisymmetric`];
+/// Turcotte & Schubert, the flexural filter / degree of compensation). A LONG-wavelength load (small `k`, `l k`
+/// much less than 1) is fully compensated and passes as full relief (`Phi -> 1`, isostasy); a SHORT-wavelength
+/// load (large `k`, `l k` much greater than 1) is held by plate strength and passes almost none (`Phi -> 0`, the
+/// lid does not bend at that scale). This is the transfer function that convolves a province thickness-contrast
+/// field into the relief the lid supports, evaluated at the linear-response rigidity by passing
+/// `l = flexural_length_axisymmetric(D_mech, delta_rho, g)`.
+///
+/// The characteristic corner is at `l k = 1` (the wavelength `2 pi l`), where `Phi = 1/2`: contrasts longer than
+/// this pass more than half their relief, shorter ones less. Dimensionless, in `(0, 1]`. The `k = 0` DC term (the
+/// infinite-wavelength mean) returns `Phi = 1` exactly (a uniform load is fully isostatic). Fails loud (`None`) on
+/// a non-positive `l`, a negative `k`, or an out-of-range fixed-point intermediate, never a fabricated ratio.
+/// Deterministic.
+pub fn flexural_response_ratio(flexural_length: Fixed, wavenumber: Fixed) -> Option<Fixed> {
+    if flexural_length <= Fixed::ZERO || wavenumber < Fixed::ZERO {
+        return None;
+    }
+    if wavenumber == Fixed::ZERO {
+        // The infinite-wavelength (DC) term is fully compensated: a uniform load floats isostatically.
+        return Some(Fixed::ONE);
+    }
+    let lk = flexural_length.checked_mul(wavenumber)?;
+    let lk2 = lk.checked_mul(lk)?;
+    let lk4 = lk2.checked_mul(lk2)?;
+    Fixed::ONE.checked_div(Fixed::ONE + lk4)
+}
+
 /// The LINE-LOAD deflection `w(x) = (V0 alpha^3 / (8 D)) e^(-|x|/alpha) (cos(|x|/alpha) + sin(|x|/alpha))`
 /// (Turcotte & Schubert eq. 3-130 / TAFI eq. 4, the continuous-plate solution; PIPELINE_FETCHES.md section 1),
 /// the flexure at perpendicular distance `perp_dist` from a line load of magnitude `v0`, given the flexural
@@ -1350,5 +1383,64 @@ mod tests {
             );
             x += 0.5;
         }
+    }
+
+    #[test]
+    fn the_flexural_filter_halves_at_the_characteristic_wavelength() {
+        // At l*k = 1 (the wavelength 2 pi l, the corner of the filter), Phi = 1 / (1 + 1) = 1/2. This is the
+        // hand-verifiable anchor: the filter's corner sits exactly at the flexural length. l = 2, k = 1/2 keep
+        // l*k = 1 EXACTLY on the Q32.32 grid (1/2 is representable), so the corner lands with no rounding.
+        let l = Fixed::from_int(2);
+        let k = Fixed::from_ratio(1, 2); // l*k = 1 exactly
+        let phi = flexural_response_ratio(l, k).expect("the filter evaluates");
+        assert!(
+            close(phi, 0.5, 1e-9),
+            "Phi at the corner is 1/2, got {}",
+            phi.to_f64_lossy()
+        );
+    }
+
+    #[test]
+    fn the_flexural_filter_passes_long_wavelengths_and_stops_short_ones() {
+        let l = Fixed::from_int(10);
+        // A long-wavelength load (l*k = 0.1) is nearly fully compensated: Phi = 1 / (1 + 1e-4) ~ 0.9999.
+        let phi_long = flexural_response_ratio(l, Fixed::from_ratio(1, 100)).expect("long");
+        assert!(
+            close(phi_long, 1.0, 1e-3),
+            "a long-wavelength load passes nearly full relief, got {}",
+            phi_long.to_f64_lossy()
+        );
+        // A short-wavelength load (l*k = 10) is held by the plate: Phi = 1 / (1 + 1e4) ~ 1e-4.
+        let phi_short = flexural_response_ratio(l, Fixed::from_int(1)).expect("short");
+        assert!(
+            phi_short < Fixed::from_ratio(1, 1000),
+            "a short-wavelength load passes almost no relief, got {}",
+            phi_short.to_f64_lossy()
+        );
+        // The filter is monotone in k: a longer wavelength always passes more than a shorter one.
+        assert!(
+            phi_long > phi_short,
+            "the flexural filter is monotone decreasing in wavenumber"
+        );
+    }
+
+    #[test]
+    fn the_flexural_filter_dc_term_is_isostatic_and_it_fails_loud() {
+        let l = Fixed::from_int(10);
+        // The k = 0 (infinite-wavelength) term is fully compensated.
+        assert_eq!(
+            flexural_response_ratio(l, Fixed::ZERO),
+            Some(Fixed::ONE),
+            "the DC term floats isostatically"
+        );
+        // Degenerate inputs fail loud, never a fabricated ratio.
+        assert!(
+            flexural_response_ratio(Fixed::ZERO, Fixed::from_int(1)).is_none(),
+            "a non-positive flexural length fails loud"
+        );
+        assert!(
+            flexural_response_ratio(l, Fixed::from_int(-1)).is_none(),
+            "a negative wavenumber fails loud"
+        );
     }
 }
