@@ -441,6 +441,46 @@ impl Homeostasis {
             .unwrap_or(Fixed::ZERO)
     }
 
+    /// DEBUG-ONLY energy-integrity diagnostic (Q1 Stone-3 Piece A): the being's clamp-drops summed
+    /// over all its reserves since the last reset, as `(satiation_waste, starvation_shortfall)`. The
+    /// first is food a reserve was too full to hold; the second is metabolic or draw demand a reserve
+    /// was too empty to pay. It is the second lens on the founder starvation, read HOW a being fails:
+    /// a starvation shortfall means the metabolic drain outran the reserve (the being could not gather
+    /// enough), while satiation waste means food arrived but the cap could not hold it (a capture or
+    /// foraging gap, not a food gap). Compiled out of release, so it moves no pin.
+    #[cfg(debug_assertions)]
+    pub fn clamp_drops(&self) -> (Fixed, Fixed) {
+        let mut satiation = Fixed::ZERO;
+        let mut starvation = Fixed::ZERO;
+        for stock in self.reserves.values() {
+            satiation += stock.drop_satiation();
+            starvation += stock.drop_starvation();
+        }
+        (satiation, starvation)
+    }
+
+    /// DEBUG-ONLY (Piece A): the energy-integrity flows broken out PER AXIS as `(axis, flows)`, the
+    /// clamp-drops plus the realized intake and metabolic drain. Keeping the axis identity and the
+    /// gather-versus-burn magnitudes is what makes the founder-starvation localiser honest: a metabolic
+    /// pool (`drain > 0`, energy or water) is read apart from a regulated band (condition, temperature)
+    /// whose clamp churn is not an energy signal, and the intake-versus-drain ratio names the lever.
+    #[cfg(debug_assertions)]
+    pub fn flows_by_axis(&self) -> Vec<(HomeostaticAxisId, crate::stocks::ReserveFlows)> {
+        self.reserves
+            .iter()
+            .map(|(id, s)| (*id, s.reserve_flows()))
+            .collect()
+    }
+
+    /// DEBUG-ONLY (Piece A): clear every reserve's clamp-drop diagnostic, called at a tick boundary so
+    /// the readout is per-tick rather than cumulative.
+    #[cfg(debug_assertions)]
+    pub fn reset_clamp_drops(&mut self) {
+        for stock in self.reserves.values_mut() {
+            stock.reset_clamp_drops();
+        }
+    }
+
     /// Set a derived axis's level to a fraction of its capacity, for an axis whose value is sourced
     /// from elsewhere each tick rather than drained by metabolism (integrity, refreshed from the
     /// per-part body; design Part 35's derived, never-stored condition). A no-op for an unregistered

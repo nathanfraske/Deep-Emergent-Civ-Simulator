@@ -1279,6 +1279,15 @@ pub struct CreatureSelectionParams {
 
 pub struct Embodiment {
     walkers: Vec<Walker>,
+    /// DEBUG-ONLY energy-integrity diagnostic (Q1 Stone-3 Piece A readout): the population's reserve
+    /// flows summed over the whole run PER AXIS, folded in each tick before the cull so a founder that
+    /// dies still counts its final tick. Each axis carries its clamp-drops plus the realized intake and
+    /// metabolic drain, so the food reserve (energy, `drain > 0`) is read apart from a regulated band
+    /// whose churn is not an energy signal, and the gather-versus-burn ratio names the founder-starvation
+    /// lever (metabolic draw too high, gathering too slow, or endowment too small). Compiled out of
+    /// release, so it moves no pin.
+    #[cfg(debug_assertions)]
+    flows_by_axis: BTreeMap<HomeostaticAxisId, crate::stocks::ReserveFlows>,
     thermal: BTreeMap<StableId, BeingThermal>,
     homeo: HomeostaticRegistry,
     afford: AffordanceRegistry,
@@ -1637,6 +1646,8 @@ impl Embodiment {
         let layout = ControllerLayout::new(&homeo, &afford, hidden);
         Embodiment {
             walkers: Vec::new(),
+            #[cfg(debug_assertions)]
+            flows_by_axis: BTreeMap::new(),
             thermal: BTreeMap::new(),
             homeo,
             afford,
@@ -3588,6 +3599,32 @@ impl Embodiment {
         &mut self.walkers
     }
 
+    /// DEBUG-ONLY (Piece A readout): fold this tick's per-being clamp-drops into the run totals and clear
+    /// each being's, called once per tick BEFORE the cull so a founder that dies this tick still counts its
+    /// final tick's losses. Summing then resetting per tick keeps the total a population sum over the run
+    /// rather than double-counting a survivor's cumulative field. Compiled out of release.
+    #[cfg(debug_assertions)]
+    fn accumulate_clamp_drops(&mut self) {
+        for w in self.walkers.iter_mut() {
+            for (axis, flows) in w.homeostasis.flows_by_axis() {
+                let e = self.flows_by_axis.entry(axis).or_default();
+                e.satiation_drop += flows.satiation_drop;
+                e.starvation_drop += flows.starvation_drop;
+                e.intake += flows.intake;
+                e.drain += flows.drain;
+            }
+            w.homeostasis.reset_clamp_drops();
+        }
+    }
+
+    /// DEBUG-ONLY (Piece A readout): the population's run-total reserve flows PER AXIS (clamp-drops plus
+    /// realized intake and metabolic drain), the founder-starvation localiser. Empty in a build without
+    /// debug assertions (the field does not exist there).
+    #[cfg(debug_assertions)]
+    pub fn flows_by_axis(&self) -> &BTreeMap<HomeostaticAxisId, crate::stocks::ReserveFlows> {
+        &self.flows_by_axis
+    }
+
     /// The standing resource field the grazers deplete and the environment regrows (a pure read, for the
     /// carrying-capacity reader; base-level liveliness step 3).
     pub fn resources(&self) -> &ResourceField {
@@ -4956,6 +4993,14 @@ impl Runner {
                 world.tick(&inputs);
             }
         }
+        // The clamp-drop diagnostic readout (Q1 Stone-3 Piece A): fold this tick's per-being clamp-drops
+        // into the run totals BEFORE the cull, so a founder that dies this tick still counts its final tick's
+        // losses. Debug-only (the totals are never folded into the hash), so release is byte-identical and
+        // the pins hold; both tick entry points fold identically so they stay in step.
+        #[cfg(debug_assertions)]
+        if let Some(emb) = self.embodiment.as_mut() {
+            emb.accumulate_clamp_drops();
+        }
         self.reconcile_lifecycle();
         // The in-run creature reproduction beat runs after the cull, among the survivors, on a life-cadence beat
         // (a no-op unless the creature-selection substrate is armed). Both tick entry points call it identically
@@ -5823,6 +5868,14 @@ impl Runner {
         // order in step_inner: it is a pure deterministic function of the post-tick world and embodiment
         // state (worker-count independent), so both tick entry points reconcile identically and stay
         // bit-identical (real-world unification, step 3c).
+        // The clamp-drop diagnostic readout (Q1 Stone-3 Piece A): fold this tick's per-being clamp-drops
+        // into the run totals BEFORE the cull, so a founder that dies this tick still counts its final tick's
+        // losses. Debug-only (the totals are never folded into the hash), so release is byte-identical and
+        // the pins hold; both tick entry points fold identically so they stay in step.
+        #[cfg(debug_assertions)]
+        if let Some(emb) = self.embodiment.as_mut() {
+            emb.accumulate_clamp_drops();
+        }
         self.reconcile_lifecycle();
         // The in-run creature reproduction beat runs after the cull, among the survivors, on a life-cadence beat
         // (a no-op unless the creature-selection substrate is armed). Both tick entry points call it identically
