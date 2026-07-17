@@ -102,6 +102,26 @@ fn nonneg_fixed_to_bigrat(value: Fixed) -> BigRat {
 /// enters through `Fixed::powf`. `None` on a non-positive distance or a flux past the representable range (it
 /// routes to the extreme rather than wrapping).
 pub fn stellar_flux(mass_ratio: Fixed, exponent: Fixed, distance_au: Fixed) -> Option<Fixed> {
+    // The mass-luminosity power law fixes the luminosity `L = L_sun * mass_ratio^exponent`, then the flux
+    // derivation is shared with the direct-luminosity door: this delegates so the two forms cannot drift apart,
+    // and is byte-identical to computing the luminosity inline (the same `Fixed` enters the same wide divide).
+    stellar_flux_from_luminosity_lsun(mass_ratio.powf(exponent), distance_au)
+}
+
+/// The stellar-source flux from a DIRECTLY SUPPLIED bolometric luminosity (in `L_sun`), the door for a luminosity
+/// the `mass^exponent` power law cannot express: `L_sun * luminosity_lsun / (4*pi*d^2)`, with `d = distance_au *
+/// AU`. The load-bearing case is a PRE-MAIN-SEQUENCE star, which at a solar mass is several times brighter than
+/// its main-sequence instance while `mass_ratio^exponent` at `mass_ratio = 1` is exactly one, so no exponent can
+/// carry the pre-main-sequence brightness at the Mirror mass. `luminosity_lsun` is a scenario-set argument (the
+/// star's own bolometric luminosity, however derived), so a star of any track or composition is a data row. This
+/// is byte-identical to [`stellar_flux`] when `luminosity_lsun` equals `mass_ratio^exponent` (the same `Fixed`
+/// bits enter the same wide-magnitude divide, which is why [`stellar_flux`] delegates here). The wide divide runs
+/// in exact rational arithmetic and rounds once. `None` on a non-positive distance or a flux past the
+/// representable range.
+pub fn stellar_flux_from_luminosity_lsun(
+    luminosity_lsun: Fixed,
+    distance_au: Fixed,
+) -> Option<Fixed> {
     if distance_au <= Fixed::ZERO {
         return None;
     }
@@ -111,7 +131,7 @@ pub fn stellar_flux(mass_ratio: Fixed, exponent: Fixed, distance_au: Fixed) -> O
     let four_pi = BigRat::from_i64(4).mul(&compute::pi(FLUX_PI_DIGITS));
     let denom = four_pi.mul(&d2);
     let l_sun = BigRat::from_decimal_str(SOLAR_LUMINOSITY_W).ok()?;
-    let luminosity = l_sun.mul(&nonneg_fixed_to_bigrat(mass_ratio.powf(exponent)));
+    let luminosity = l_sun.mul(&nonneg_fixed_to_bigrat(luminosity_lsun));
     let flux = luminosity.div(&denom);
     let bits = flux.round_to_scale(Fixed::FRAC_BITS)?;
     Fixed::from_bits_i128(bits)
@@ -2226,6 +2246,7 @@ pub fn formation_midplane_temperature(
     accretion_rate_msun_myr: Fixed,
     mass_ratio: Fixed,
     luminosity_exponent: Fixed,
+    bolometric_luminosity_lsun: Option<Fixed>,
     distance_au: Fixed,
     reprocessing_factor: Fixed,
     inner_boundary_factor: Fixed,
@@ -2242,11 +2263,16 @@ pub fn formation_midplane_temperature(
         distance_au,
         inner_boundary_factor,
     )?;
-    let absorbed_irradiation_flux = reprocessing_factor.checked_mul(stellar_flux(
-        mass_ratio,
-        luminosity_exponent,
-        distance_au,
-    )?)?;
+    // The irradiation term reads the star's bolometric luminosity. `bolometric_luminosity_lsun` is the door for a
+    // luminosity the mass-luminosity power law cannot express (the PRE-MAIN-SEQUENCE case, where a solar-mass star
+    // is several times brighter than `mass_ratio^exponent = 1`): when supplied it drives the irradiation directly
+    // ([`stellar_flux_from_luminosity_lsun`]), and when `None` the term falls back to the main-sequence power law
+    // ([`stellar_flux`]) byte-for-byte, so a caller that does not opt in is unchanged.
+    let stellar_flux_wm2 = match bolometric_luminosity_lsun {
+        Some(l_bol_lsun) => stellar_flux_from_luminosity_lsun(l_bol_lsun, distance_au)?,
+        None => stellar_flux(mass_ratio, luminosity_exponent, distance_au)?,
+    };
+    let absorbed_irradiation_flux = reprocessing_factor.checked_mul(stellar_flux_wm2)?;
     let dust_surface_density = disk_surface_density(
         distance_au,
         characteristic_radius_au,
@@ -2700,6 +2726,46 @@ mod tests {
     fn a_non_positive_distance_routes_to_none() {
         assert_eq!(
             stellar_flux(Fixed::ONE, Fixed::from_ratio(35, 10), Fixed::ZERO),
+            None
+        );
+    }
+
+    #[test]
+    fn the_direct_luminosity_flux_byte_equals_the_power_law_at_the_same_luminosity() {
+        // The delegation contract: `stellar_flux` IS `stellar_flux_from_luminosity_lsun` at the power-law
+        // luminosity `mass^exponent`, byte-for-byte, across mass and distance. This is what makes the pre-MS
+        // override a pure door (a caller passing `None` is unchanged) and pins that the refactor moved no bit.
+        for &(m, e, d) in &[
+            (Fixed::ONE, Fixed::from_ratio(35, 10), Fixed::ONE),
+            (Fixed::from_int(2), Fixed::from_ratio(35, 10), Fixed::ONE),
+            (Fixed::ONE, Fixed::from_ratio(35, 10), Fixed::from_int(2)),
+            (
+                Fixed::from_ratio(1, 2),
+                Fixed::from_ratio(4, 1),
+                Fixed::from_int(5),
+            ),
+        ] {
+            assert_eq!(
+                stellar_flux(m, e, d),
+                stellar_flux_from_luminosity_lsun(m.powf(e), d),
+                "the two flux forms agree bit-for-bit at L = M^e (M={}, e={}, d={})",
+                m.to_f64_lossy(),
+                e.to_f64_lossy(),
+                d.to_f64_lossy()
+            );
+        }
+        // The direct door carries a luminosity the power law cannot reach at unit mass: a 3x-brighter pre-MS solar
+        // analogue delivers 3x the flux, where `mass^exponent = 1` at M = 1 could only ever give the solar value.
+        let solar = stellar_flux_from_luminosity_lsun(Fixed::ONE, Fixed::ONE).unwrap();
+        let pre_ms = stellar_flux_from_luminosity_lsun(Fixed::from_int(3), Fixed::ONE).unwrap();
+        assert!(
+            (pre_ms.to_f64_lossy() / solar.to_f64_lossy() - 3.0).abs() < 0.01,
+            "a 3x-brighter luminosity is 3x the flux (got {})",
+            pre_ms.to_f64_lossy() / solar.to_f64_lossy()
+        );
+        // Fail-loud on a non-positive distance, matching the power-law form.
+        assert_eq!(
+            stellar_flux_from_luminosity_lsun(Fixed::ONE, Fixed::ZERO),
             None
         );
     }
@@ -3225,6 +3291,7 @@ mod tests {
                 Fixed::from_ratio(19, 100), // formation accretion rate (reserved, pinned to the 1 AU front)
                 Fixed::ONE,
                 Fixed::from_ratio(35, 10),
+                None, // main-sequence power-law luminosity (no pre-MS override), byte-identical to before
                 orbit,
                 Fixed::from_ratio(1, 4),
                 Fixed::ONE,
@@ -3265,6 +3332,7 @@ mod tests {
                 mdot,
                 Fixed::ONE,
                 Fixed::from_ratio(35, 10),
+                None, // main-sequence power-law luminosity (no pre-MS override)
                 Fixed::ONE,
                 Fixed::from_ratio(1, 4),
                 Fixed::ONE,
@@ -3281,6 +3349,48 @@ mod tests {
         assert!(
             at(Fixed::from_ratio(25, 100)) > at(Fixed::from_ratio(10, 100)),
             "a higher accretion rate warms the formation midplane"
+        );
+    }
+
+    #[test]
+    fn the_formation_midplane_pre_ms_override_warms_the_disk_and_none_is_byte_neutral() {
+        // The slice-3b mechanism: the bolometric-luminosity override is a pure door. `None` returns exactly the
+        // main-sequence power-law midplane (byte-for-byte), so a caller that does not opt in is unchanged; and a
+        // Some carrying a BRIGHTER pre-MS luminosity warms the formation midplane (more irradiation to trap),
+        // which is the whole point of the third-site fix (a pre-MS star is brighter, its disk warmer, condensation
+        // earlier). Same star, same orbit: only the luminosity truth moves.
+        let kappa = |_t: Fixed| Some(Fixed::from_int(600));
+        let mid = |l_bol: Option<Fixed>| {
+            formation_midplane_temperature(
+                Fixed::from_ratio(19, 100),
+                Fixed::ONE,
+                Fixed::from_ratio(35, 10),
+                l_bol,
+                Fixed::ONE,
+                Fixed::from_ratio(1, 4),
+                Fixed::ONE,
+                Fixed::from_int(30),
+                Fixed::ONE,
+                Fixed::from_ratio(586, 1000),
+                kappa,
+                Fixed::from_int(100),
+                Fixed::from_int(1950),
+            )
+            .unwrap()
+        };
+        // None equals Some(mass^exponent): at unit mass the power law is L_sun, so an explicit unit luminosity is
+        // the same disk bit-for-bit as the fallback, the byte-neutrality of the door at the Mirror mass.
+        assert_eq!(
+            mid(None),
+            mid(Some(Fixed::ONE)),
+            "the override at the power-law luminosity is byte-identical to the fallback"
+        );
+        // A pre-MS solar analogue is several times brighter (say 4x): the warmer irradiation lifts the midplane.
+        assert!(
+            mid(Some(Fixed::from_int(4))) > mid(None),
+            "a brighter pre-MS luminosity warms the formation midplane (pre-MS {}, MS {})",
+            mid(Some(Fixed::from_int(4))).to_f64_lossy(),
+            mid(None).to_f64_lossy()
         );
     }
 
