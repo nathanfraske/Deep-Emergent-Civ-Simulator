@@ -892,9 +892,10 @@ pub fn derive_viscous_time_myr(
 ///
 /// ZERO new per-system free values: the Roche fraction derives from the mass ratio, and the truncation fraction
 /// `f` enters as a fetched (q, e, viscosity)-conditioned banded class row, not an owner scalar. `c_num` (~0.49)
-/// and `c_log` (~0.6) are the fixed Roche-geometry fit (cited, universal, not an owner tunable, like `pi`),
-/// passed as parameters. ADMITS THE ALIEN: it keys on the mass ratio and separation, the binary's own data, no
-/// Terran assumption. `None` on a non-positive input.
+/// and `c_log` (~0.6) are Eggleton's cited fit to the Roche-potential volume radius: cited-universal and
+/// mass-ratio-only (material-free, not an owner tunable), but a FIT accurate to about one percent, so it carries
+/// its own accuracy band, unlike an exact constant such as `pi`. Passed as parameters. ADMITS THE ALIEN: it keys
+/// on the mass ratio and separation, the binary's own data, no Terran assumption. `None` on a non-positive input.
 pub fn roche_lobe_radius_au(
     separation_au: Fixed,
     mass_ratio_host_to_companion: Fixed,
