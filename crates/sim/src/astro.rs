@@ -1103,6 +1103,68 @@ pub fn gravitational_radius_au(
     Some(ln_rg.exp())
 }
 
+/// The DISK LIFETIME `tau_disk` (Myr): the DERIVED output the whole arc is named for, the age at which the
+/// wind-versus-accretion race tips. While the viscous accretion rate [`viscous_similarity_accretion_rate`]
+/// exceeds the integrated photoevaporative wind loss the disk drains through the star; when the declining rate
+/// falls TO the wind rate at the gap radius the wind opens a gap and clears the disk on the much shorter local
+/// viscous time (Clarke, Gendrin and Sotomayor 2001; Alexander, Clarke and Pringle 2006). So `tau_disk` is the
+/// crossing time, the root of `Mdot(t) = Mdot_wind`. Because the LBP decline is a monotone power law crossing a
+/// CONSTANT wind rate, the crossing INVERTS in closed form rather than needing a root-finder:
+/// `Mdot_0 / (1 + t/t_visc)^p = Mdot_wind` gives `t = t_visc * ((Mdot_0/Mdot_wind)^(1/p) - 1)`, with
+/// `p = (5/2 - gamma)/(2 - gamma)` the same decline exponent the clock uses (so `1/p = (2 - gamma)/(5/2 - gamma)`).
+///
+/// This is a DERIVED output of `Mdot_0`, `t_visc`, `gamma`, and the wind rate, never a consulted constant: it is
+/// what hands the #73 giant gate a real gas clock in place of the reserved `disk_gas_lifetime_myr` it retires, and
+/// it validates against the Haisch-Lada / Mamajek disk-fraction-versus-age band as an OUTPUT (the
+/// replacement-circularity rule: it never calibrates against the lifetime it replaces). Zero reserved values of
+/// its own: it composes the clock's parameters with the wind rate the caller supplies.
+///
+/// TERMS-DROPPED: the wind rate is held CONSTANT across the crossing, the caller's `wind_rate_msun_myr` evaluated
+/// at the era of dispersal. The age-evolution of the wind rate during the race (through the star's declining
+/// `L_X`) is omitted; the omission is valid because the disk clears within the few-Myr class-II window, well
+/// inside the saturated-activity regime where `L_X` varies slowly, so the wind rate is near-constant over the
+/// dispersal. EXTERNAL photoevaporation (birth-environment irradiation) is likewise omitted, its validity domain
+/// the isolated star-forming environment, the dense-cluster term named for the environment-hook follow-on.
+///
+/// Returns `Fixed::ZERO` (immediate dispersal, no viscous era) when the wind rate already meets or exceeds the
+/// peak accretion rate `Mdot_0`, since the crossing then sits at or before birth. `None` on a non-positive input,
+/// a `gamma` outside `[0, 2)`, or a lifetime past the representable range.
+pub fn derive_disk_lifetime_myr(
+    mdot_0_msun_myr: Fixed,
+    t_visc_myr: Fixed,
+    decline_gamma: Fixed,
+    wind_rate_msun_myr: Fixed,
+) -> Option<Fixed> {
+    if mdot_0_msun_myr <= Fixed::ZERO
+        || t_visc_myr <= Fixed::ZERO
+        || wind_rate_msun_myr <= Fixed::ZERO
+        || decline_gamma < Fixed::ZERO
+        || decline_gamma >= Fixed::from_int(2)
+    {
+        return None;
+    }
+    // The wind already meets or beats peak accretion: the gap opens at (or before) birth, so no viscous era.
+    if wind_rate_msun_myr >= mdot_0_msun_myr {
+        return Some(Fixed::ZERO);
+    }
+    // 1/p = (2 - gamma) / (5/2 - gamma); at gamma = 1 this is 2/3 (p = 3/2).
+    let two = Fixed::from_int(2);
+    let inv_p = two
+        .checked_sub(decline_gamma)?
+        .checked_div(Fixed::from_ratio(5, 2).checked_sub(decline_gamma)?)?;
+    // factor = (Mdot_0 / Mdot_wind)^(1/p), computed in the log domain (the ratio exceeds 1 here, so ln > 0).
+    let ln_ratio = mdot_0_msun_myr.ln().checked_sub(wind_rate_msun_myr.ln())?;
+    let ln_factor = inv_p.checked_mul(ln_ratio)?;
+    // A REPRESENTATION-FLOOR guard (the clock precedent): a lifetime past the exp ceiling exceeds what the format
+    // can hold, so surface it as unrepresentable rather than a saturated value. Unreachable for physical ratios.
+    let ln_ceiling = Fixed::from_int(31).checked_mul(two.ln())?;
+    if ln_factor >= ln_ceiling {
+        return None;
+    }
+    // tau_disk = t_visc * (factor - 1).
+    t_visc_myr.checked_mul(ln_factor.exp().checked_sub(Fixed::ONE)?)
+}
+
 /// The FEEDING-ZONE (annulus) DISK MASS a planet accretes from, in `normalization`-units times AU-squared: the
 /// integral `M = integral over [inner, outer] of 2*pi*r*Sigma(r) dr`, the disk mass in the orbital annulus
 /// `[inner_au, outer_au]`. This is the ACCRETION-mass scaffold: the mass follows from the geometry and the surface
@@ -2868,5 +2930,98 @@ mod tests {
             gravitational_radius_au(Fixed::from_int(-1), Fixed::from_int(10_000), Fixed::ONE)
                 .is_none()
         );
+    }
+
+    #[test]
+    fn the_disk_lifetime_inverts_the_race_to_a_clean_oracle() {
+        // Twin-independent oracle: at gamma = 1 (p = 3/2, so 1/p = 2/3), Mdot_0 = 8, Mdot_wind = 1, t_visc = 1,
+        // the closed form t_visc*((Mdot_0/Mdot_wind)^(1/p) - 1) is 1*(8^(2/3) - 1) = 1*(4 - 1) = 3. A second
+        // point (Mdot_0 = 27, t_visc = 2) gives 2*(27^(2/3) - 1) = 2*(9 - 1) = 16, both integers computed
+        // outside the code under test.
+        let tau = derive_disk_lifetime_myr(Fixed::from_int(8), Fixed::ONE, Fixed::ONE, Fixed::ONE)
+            .unwrap();
+        assert!(
+            (tau.to_f64_lossy() - 3.0).abs() < 0.01,
+            "the race tips at the analytic crossing (got {})",
+            tau.to_f64_lossy()
+        );
+        let tau2 = derive_disk_lifetime_myr(
+            Fixed::from_int(27),
+            Fixed::from_int(2),
+            Fixed::ONE,
+            Fixed::ONE,
+        )
+        .unwrap();
+        assert!(
+            (tau2.to_f64_lossy() - 16.0).abs() < 0.02,
+            "the second oracle point matches (got {})",
+            tau2.to_f64_lossy()
+        );
+    }
+
+    #[test]
+    fn the_disk_lifetime_is_the_rate_crossing() {
+        // The deeper invariant: tau_disk is the age at which the clock's own rate equals the wind rate. Feeding
+        // the derived lifetime back through the accretion clock (an INDEPENDENT function) must reproduce the wind
+        // rate, so the closed form and the clock agree on where the race tips.
+        let mdot_0 = Fixed::from_int(8);
+        let t_visc = Fixed::ONE;
+        let gamma = Fixed::ONE;
+        let wind = Fixed::ONE;
+        let tau = derive_disk_lifetime_myr(mdot_0, t_visc, gamma, wind).unwrap();
+        let rate_at_tau = viscous_similarity_accretion_rate(mdot_0, t_visc, gamma, tau).unwrap();
+        assert!(
+            (rate_at_tau.to_f64_lossy() - wind.to_f64_lossy()).abs() < 0.01,
+            "Mdot(tau_disk) reproduces the wind rate (got {}, wind {})",
+            rate_at_tau.to_f64_lossy(),
+            wind.to_f64_lossy()
+        );
+    }
+
+    #[test]
+    fn the_disk_lifetime_is_zero_when_the_wind_beats_peak_accretion() {
+        // A wind rate at or above the peak accretion rate opens the gap at (or before) birth: no viscous era, so
+        // the lifetime is zero rather than a negative or None. Both the equal and the exceeding case.
+        assert_eq!(
+            derive_disk_lifetime_myr(
+                Fixed::from_int(8),
+                Fixed::ONE,
+                Fixed::ONE,
+                Fixed::from_int(8)
+            ),
+            Some(Fixed::ZERO)
+        );
+        assert_eq!(
+            derive_disk_lifetime_myr(
+                Fixed::from_int(8),
+                Fixed::ONE,
+                Fixed::ONE,
+                Fixed::from_int(10)
+            ),
+            Some(Fixed::ZERO)
+        );
+    }
+
+    #[test]
+    fn the_disk_lifetime_refuses_nonphysical_inputs() {
+        // Fail-loud on each non-positive axis and on a gamma outside [0, 2): no race, no derived lifetime.
+        assert!(
+            derive_disk_lifetime_myr(Fixed::ZERO, Fixed::ONE, Fixed::ONE, Fixed::ONE).is_none()
+        );
+        assert!(
+            derive_disk_lifetime_myr(Fixed::from_int(8), Fixed::ZERO, Fixed::ONE, Fixed::ONE)
+                .is_none()
+        );
+        assert!(
+            derive_disk_lifetime_myr(Fixed::from_int(8), Fixed::ONE, Fixed::ONE, Fixed::ZERO)
+                .is_none()
+        );
+        assert!(derive_disk_lifetime_myr(
+            Fixed::from_int(8),
+            Fixed::ONE,
+            Fixed::from_int(2),
+            Fixed::ONE
+        )
+        .is_none());
     }
 }
