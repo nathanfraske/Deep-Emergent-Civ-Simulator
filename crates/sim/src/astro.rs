@@ -751,7 +751,12 @@ pub struct AccretionLandmark {
 /// landmarks. Blind, second, to the family SHAPE: two landmarks cannot distinguish the decline family, since a
 /// different `gamma` with refit `(mdot_0, t_visc)` can pass the same two points, covered by `gamma`'s own
 /// provenance from gate-G (the exponent is derived, not free to refit) and by the model-structure band being
-/// DECLARED rather than inferred from these landmarks.
+/// DECLARED rather than inferred from these landmarks. Blind, third, to the PRODUCT DEGENERACY in the formation
+/// landmark: the ~1400 K condensation front that fixes the 0.19 formation rate fixes only the PRODUCT of
+/// accretion rate, dust column, and opacity (the formation-era condensation slice documents this at its
+/// `FORMATION_ACCRETION_RATE_MSUN_MYR`), so a hindcast on `Mdot(t_formation) = 0.19` can pass with a compensating
+/// dust-column error, covered only once the dust column and opacity are independently derived (the dust profile
+/// and the condensation opacity), which isolates the rate.
 pub fn accretion_clock_hindcasts(
     mdot_0_msun_myr: Fixed,
     t_visc_myr: Fixed,
@@ -2154,48 +2159,41 @@ mod tests {
     }
 
     #[test]
-    fn the_hindcast_validates_on_curve_landmarks_and_convicts_off_curve() {
-        // The inverted gate: on-curve landmarks pass, an off-curve one (beyond its band) fails. This is the
-        // discriminating power, the property that makes the hindcast a gate rather than a tautology.
+    fn the_hindcast_passes_external_landmarks_and_convicts_a_mutated_clock() {
+        // Mutation testing (standing rule) with twin-independence. The landmarks are pinned from OUTSIDE the
+        // engine by the analytic form, NOT sampled from the clock under test, so the pass case is not a
+        // self-comparison: at gamma = 1 (p = 3/2), base = 4 gives rate 1/4^(3/2) = 1/8 and base = 9 gives
+        // 1/9^(3/2) = 1/27, both exact rationals computed by hand. Then the clock is MUTATED (a wrong gamma) and
+        // the gate must convict, which is what proves the gate tests the clock rather than agreeing with it. A
+        // test never shown to fail has not been shown to test anything.
         let mdot_0 = Fixed::ONE;
         let t_visc = Fixed::ONE;
-        let gamma = Fixed::ONE;
-        let band = Fixed::from_ratio(1, 10); // 10 percent
-        let epoch_a = Fixed::ONE;
-        let epoch_b = Fixed::from_int(3);
-        // Sample the curve itself, so these two landmarks sit exactly on it.
-        let rate_a = viscous_similarity_accretion_rate(mdot_0, t_visc, gamma, epoch_a).unwrap();
-        let rate_b = viscous_similarity_accretion_rate(mdot_0, t_visc, gamma, epoch_b).unwrap();
-        let on_curve = [
+        let gamma = Fixed::ONE; // p = 3/2
+        let band = Fixed::from_ratio(1, 100); // 1 percent: over the ln/exp round-trip, under any real mutation
+        let external = [
             AccretionLandmark {
-                epoch_myr: epoch_a,
-                rate_msun_myr: rate_a,
+                epoch_myr: Fixed::from_int(3), // base = 4, rate = 1/4^(3/2) = 1/8
+                rate_msun_myr: Fixed::from_ratio(1, 8),
                 band_frac: band,
             },
             AccretionLandmark {
-                epoch_myr: epoch_b,
-                rate_msun_myr: rate_b,
+                epoch_myr: Fixed::from_int(8), // base = 9, rate = 1/9^(3/2) = 1/27
+                rate_msun_myr: Fixed::from_ratio(1, 27),
                 band_frac: band,
             },
         ];
         assert_eq!(
-            accretion_clock_hindcasts(mdot_0, t_visc, gamma, &on_curve),
+            accretion_clock_hindcasts(mdot_0, t_visc, gamma, &external),
             Some(true),
-            "the curve hindcasts its own landmarks within band"
+            "the true clock passes the external analytic landmarks within band"
         );
-        // Move landmark A's rate to double its on-curve value, far outside the ten percent band.
-        let off_curve = [
-            AccretionLandmark {
-                epoch_myr: epoch_a,
-                rate_msun_myr: rate_a.checked_mul(Fixed::from_int(2)).unwrap(),
-                band_frac: band,
-            },
-            on_curve[1],
-        ];
+        // MUTATION: a wrong gamma of 3/2 gives p = 2, not 3/2, so at base = 4 the mutant produces 1/4^2 = 1/16,
+        // half the 1/8 landmark and far outside the 1 percent band. The gate must convict the mutant.
+        let mutant_gamma = Fixed::from_ratio(3, 2);
         assert_eq!(
-            accretion_clock_hindcasts(mdot_0, t_visc, gamma, &off_curve),
+            accretion_clock_hindcasts(mdot_0, t_visc, mutant_gamma, &external),
             Some(false),
-            "an off-curve landmark convicts the hindcast"
+            "a mutated clock (wrong gamma) is convicted against the external landmarks"
         );
     }
 
