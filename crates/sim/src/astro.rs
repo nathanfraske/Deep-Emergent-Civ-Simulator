@@ -1622,6 +1622,123 @@ pub struct XrayWindFit {
     pub mass_min_msun: Fixed,
     /// Fit validity upper bound (solar masses); Owen's sample is low-mass stars, so above it the fit is unproven.
     pub mass_max_msun: Fixed,
+    /// The metallicity `Z/Z_sun` the coefficients were fit at (solar = 1), the domain-of-validity marker in
+    /// COMPOSITION, the sibling of `mass_min_msun`/`mass_max_msun`. The wind rate carries a NEGATIVE metallicity
+    /// slope `Mdot ~ Z^s` (a distinct axis from which [`XrayWindFit`] row the caller picks), so a draw off this
+    /// composition applies the slope through [`XrayWindFit::metallicity_rate_factor`] rather than the solar fit as if
+    /// composition did not matter. This field records the SAMPLE the row was measured at;
+    /// [`XrayWindFit::metallicity_domain`] classifies a draw against it and [`XrayWindFit::metallicity_rate_factor`] moves the
+    /// rate.
+    pub sample_metallicity: Fixed,
+}
+
+/// Where a drawn composition sits relative to a fit's sampled metallicity: the domain-of-validity classification
+/// on the METALLICITY AXIS, the sibling of the mass-range guard. It reports POSITION only and moves no rate; the
+/// rate move is [`XrayWindFit::metallicity_rate_factor`]. TWO AXES, KEPT SEPARATE: the metallicity axis (one model evaluated
+/// across `Z`, the negative slope `Mdot ~ Z^s`) is ORTHOGONAL to the model-structure axis (which
+/// [`XrayWindFit`] row the caller picks, Owen versus the Sellek 2024 thermochemistry revision, both at solar
+/// `Z`). Sellek is a solar-metallicity model, not a low-`Z` instance, so a metal-rich draw does NOT mean "the
+/// Sellek row"; it means a LOWER rate along the metallicity axis, whichever row is the base. The sign is settled
+/// (a metal-poor draw runs a higher wind rate, a metal-rich draw a lower one), fetched slope `-0.4` to `-0.8` dex
+/// per dex.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum MetallicitySampleDomain {
+    /// On the fit's sampled composition: the base rate applies with no metallicity adjustment.
+    OnSample,
+    /// Metal-poor relative to the sample: a HIGHER wind rate (weaker molecular cooling), the negative slope on the
+    /// metallicity axis, applied by [`XrayWindFit::metallicity_rate_factor`].
+    MetalPoor,
+    /// Metal-rich relative to the sample: a LOWER wind rate (stronger molecular cooling), the negative slope on the
+    /// metallicity axis, applied by [`XrayWindFit::metallicity_rate_factor`].
+    MetalRich,
+}
+
+impl XrayWindFit {
+    /// Classify a drawn metallicity `z_ratio` (`Z/Z_sun`) against the fit's `sample_metallicity`. Reports the
+    /// DOMAIN position only (on-sample, or which way it extrapolates), so a consumer can see an off-solar draw is
+    /// out of the sampled composition; it moves no rate, the rate move being [`XrayWindFit::metallicity_rate_factor`]. `None`
+    /// on a non-positive draw or a non-positive sample.
+    pub fn metallicity_domain(&self, z_ratio: Fixed) -> Option<MetallicitySampleDomain> {
+        if z_ratio <= Fixed::ZERO || self.sample_metallicity <= Fixed::ZERO {
+            return None;
+        }
+        Some(if z_ratio == self.sample_metallicity {
+            MetallicitySampleDomain::OnSample
+        } else if z_ratio < self.sample_metallicity {
+            MetallicitySampleDomain::MetalPoor
+        } else {
+            MetallicitySampleDomain::MetalRich
+        })
+    }
+}
+
+/// A dimensionless RATE-FACTOR BRACKET `[lo, hi]`: the band form for a multiplicative rate adjustment whose slope
+/// is model-dependent, the same band-not-point discipline as the EUV luminosity bracket. `width_dex` states the
+/// band width before a consumer reads the bounds.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct RateFactorBracket {
+    lo: Fixed,
+    hi: Fixed,
+}
+
+impl RateFactorBracket {
+    /// The lower bound (dimensionless multiplier).
+    pub fn lo(self) -> Fixed {
+        self.lo
+    }
+    /// The upper bound (dimensionless multiplier).
+    pub fn hi(self) -> Fixed {
+        self.hi
+    }
+    /// The band width in dex (`log10(hi/lo)`). `None` on a degenerate bracket (a non-positive bound).
+    pub fn width_dex(self) -> Option<Fixed> {
+        if self.lo <= Fixed::ZERO || self.hi <= Fixed::ZERO {
+            return None;
+        }
+        let ln10 = Fixed::from_int(10).ln();
+        self.hi.checked_div(self.lo)?.ln().checked_div(ln10)
+    }
+}
+
+impl XrayWindFit {
+    /// The METALLICITY RATE FACTOR: the multiplicative adjustment `Mdot_w(Z)/Mdot_w(Z_sample) =
+    /// (Z/Z_sample)^s` the photoevaporative wind rate carries with composition, a BAND because the slope `s` is
+    /// model-dependent. This is the METALLICITY AXIS, ORTHOGONAL to the model-structure ([`XrayWindFit`] row)
+    /// axis: it multiplies whatever base rate the chosen row gives, so Owen-versus-Sellek and
+    /// metal-poor-versus-rich never weld. The slope is FIRMLY NEGATIVE (Ercolano and Clarke 2010 `Z^-0.77`,
+    /// Nakatani 2018 `Z^-0.6` with X-rays and `Z^-0.4` without), so a metal-poor draw runs a HIGHER rate (a factor
+    /// above one) and a metal-rich draw a LOWER one, matching the observed disc-lifetime-versus-metallicity trend
+    /// (`t ~ Z^0.52`, tied to the rate by `t ~ Mdot^(-2/3)`, and `-0.77 * -2/3 ~ 0.51`).
+    ///
+    /// DOMAIN: the negative slope holds for `Z` above the floor (~0.03 solar); below it the FUV-driven rate turns
+    /// over, a SEPARATE regime, so a draw below `z_floor_ratio` REFUSES (`None`, the domain door) rather than
+    /// extrapolating the slope into a regime it does not describe. `None` also on a non-positive draw, sample, or
+    /// floor. The slope band edges and the floor are the caller's reserved-with-basis values; a
+    /// Sellek-generation slope across `Z` does not exist in the literature (Sellek ran only solar), so it is not
+    /// authored here.
+    pub fn metallicity_rate_factor(
+        &self,
+        z_ratio: Fixed,
+        slope_steep: Fixed,
+        slope_shallow: Fixed,
+        z_floor_ratio: Fixed,
+    ) -> Option<RateFactorBracket> {
+        if z_ratio <= Fixed::ZERO
+            || self.sample_metallicity <= Fixed::ZERO
+            || z_floor_ratio <= Fixed::ZERO
+        {
+            return None;
+        }
+        if z_ratio < z_floor_ratio {
+            return None; // below the slope's domain: the FUV-turnover regime, a separate door
+        }
+        let z = z_ratio.checked_div(self.sample_metallicity)?;
+        // (Z/Z_sample)^s at each slope edge; min/max orders the band whichever way the edges are passed.
+        let f_a = z.powf(slope_steep);
+        let f_b = z.powf(slope_shallow);
+        let (lo, hi) = if f_a <= f_b { (f_a, f_b) } else { (f_b, f_a) };
+        Some(RateFactorBracket { lo, hi })
+    }
 }
 
 /// The PHOTOEVAPORATIVE WIND MASS-LOSS RATE (solar masses per Myr), the input the dispersal race
@@ -3814,7 +3931,117 @@ mod tests {
             mass_exponent: Fixed::from_ratio(-68, 1000),                    // -0.068
             mass_min_msun: Fixed::from_ratio(1, 10), // 0.1 M_sun (sample low-mass edge)
             mass_max_msun: Fixed::from_ratio(15, 10), // 1.5 M_sun (low-mass sample edge)
+            sample_metallicity: Fixed::ONE, // solar: the composition Owen's coefficients were fit at
         }
+    }
+
+    #[test]
+    fn the_metallicity_domain_flags_off_solar_draws_without_moving_a_rate() {
+        // The domain-of-validity marker on the metallicity axis: a solar draw is on-sample, a metal-poor draw
+        // classifies MetalPoor (a higher wind rate through weaker cooling), a metal-rich draw MetalRich (a lower
+        // rate). Position only, no rate moved (that is `metallicity_rate_factor`). The axis is orthogonal to the
+        // Owen-versus-Sellek row choice; this classifies position, not a row.
+        let fit = owen_appendix_b_fit();
+        assert_eq!(
+            fit.sample_metallicity,
+            Fixed::ONE,
+            "the coefficients are solar-sampled"
+        );
+        assert_eq!(
+            fit.metallicity_domain(Fixed::ONE),
+            Some(MetallicitySampleDomain::OnSample),
+            "a solar draw is on-sample"
+        );
+        assert_eq!(
+            fit.metallicity_domain(Fixed::from_ratio(3, 10)), // 0.3 Z_sun
+            Some(MetallicitySampleDomain::MetalPoor),
+            "a metal-poor draw runs a higher rate"
+        );
+        assert_eq!(
+            fit.metallicity_domain(Fixed::from_int(2)), // 2 Z_sun
+            Some(MetallicitySampleDomain::MetalRich),
+            "a metal-rich draw runs a lower rate"
+        );
+        // A non-positive composition is not a draw: an error, never a classification.
+        assert_eq!(fit.metallicity_domain(Fixed::ZERO), None);
+        assert_eq!(fit.metallicity_domain(Fixed::from_int(-1)), None);
+    }
+
+    #[test]
+    fn the_metallicity_widening_applies_the_fetched_slope_band_with_the_correct_sign() {
+        // The widening, to the fetched slope band [-0.8, -0.4] dex/dex (Ercolano-Clarke -0.77, Nakatani
+        // -0.6/-0.4). External oracle: (Z/Z_sample)^s. At Z = 0.3 solar the band is [0.3^-0.4, 0.3^-0.8] =
+        // [1.62, 2.62] (metal-poor runs FASTER, factor > 1); at Z = 2 it is [2^-0.8, 2^-0.4] = [0.574, 0.758]
+        // (metal-rich runs SLOWER, factor < 1). Solar is exactly [1, 1]. The band width is the slope band times
+        // |log10 Z|, the model-dependent ignorance stated, not a point.
+        let fit = owen_appendix_b_fit();
+        let (steep, shallow, floor) = (
+            Fixed::from_ratio(-8, 10), // -0.8
+            Fixed::from_ratio(-4, 10), // -0.4
+            Fixed::from_ratio(3, 100), // 0.03 solar floor
+        );
+        // Metal-poor: factor above one, both bounds.
+        let poor = fit
+            .metallicity_rate_factor(Fixed::from_ratio(3, 10), steep, shallow, floor)
+            .unwrap();
+        assert!(
+            (poor.lo().to_f64_lossy() - 1.62).abs() < 0.02
+                && (poor.hi().to_f64_lossy() - 2.62).abs() < 0.02,
+            "0.3 solar widens to [1.62, 2.62], got [{}, {}]",
+            poor.lo().to_f64_lossy(),
+            poor.hi().to_f64_lossy()
+        );
+        assert!(poor.lo() > Fixed::ONE, "a metal-poor draw runs faster");
+        // Metal-rich: factor below one.
+        let rich = fit
+            .metallicity_rate_factor(Fixed::from_int(2), steep, shallow, floor)
+            .unwrap();
+        assert!(rich.hi() < Fixed::ONE, "a metal-rich draw runs slower");
+        assert!(
+            (rich.lo().to_f64_lossy() - 0.574).abs() < 0.01,
+            "2 solar low bound ~0.574, got {}",
+            rich.lo().to_f64_lossy()
+        );
+        // Solar is the identity: no adjustment on-sample.
+        let solar = fit
+            .metallicity_rate_factor(Fixed::ONE, steep, shallow, floor)
+            .unwrap();
+        assert_eq!(solar.lo(), Fixed::ONE);
+        assert_eq!(solar.hi(), Fixed::ONE);
+        assert_eq!(solar.width_dex(), Some(Fixed::ZERO), "solar has zero width");
+        // The stated width is the slope band times |log10 Z|: 0.4 dex-of-slope * |log10 0.3| ~ 0.209 dex.
+        let width = poor.width_dex().unwrap().to_f64_lossy();
+        assert!(
+            (width - 0.209).abs() < 0.005,
+            "the band width is the model-dependent slope band, got {width}"
+        );
+    }
+
+    #[test]
+    fn the_metallicity_widening_refuses_below_the_slope_domain() {
+        // DOMAIN: the negative slope holds only above ~0.03 solar; below it the FUV rate turns over, a separate
+        // regime, so the widening REFUSES rather than extrapolating the slope into physics it does not describe.
+        let fit = owen_appendix_b_fit();
+        let (steep, shallow, floor) = (
+            Fixed::from_ratio(-8, 10),
+            Fixed::from_ratio(-4, 10),
+            Fixed::from_ratio(3, 100),
+        );
+        assert!(
+            fit.metallicity_rate_factor(Fixed::from_ratio(2, 100), steep, shallow, floor)
+                .is_none(),
+            "0.02 solar is below the slope domain: the FUV-turnover door, not an extrapolated factor"
+        );
+        // Just above the floor still resolves.
+        assert!(
+            fit.metallicity_rate_factor(Fixed::from_ratio(5, 100), steep, shallow, floor)
+                .is_some(),
+            "0.05 solar is within the slope domain"
+        );
+        // A non-positive draw is an error, never a factor.
+        assert!(fit
+            .metallicity_rate_factor(Fixed::ZERO, steep, shallow, floor)
+            .is_none());
     }
 
     #[test]
