@@ -1572,6 +1572,13 @@ pub struct BandedMomentEquivalentPlate {
     low: MomentEquivalentPlate,
     /// The plate at the `V*` HIGH edge: the strongest ductile branch, hence the higher rigidity.
     high: MomentEquivalentPlate,
+    /// THE LID REFEREE'S VERDICT, RIDING THE PLATE rather than computed and discarded. The pure solve leaves this
+    /// `None`; [`BandedMomentEquivalentPlate::with_lid_referee`] attaches it from the envelope and a declared
+    /// convective stress. `None` means the plate was not refereed, or the referee refused at the lid base. When a
+    /// verdict is present, [`BandedMomentEquivalentPlate::te_biased_low`] reads whether it is the one the referee
+    /// convicts a too-shallow lid with, so a `T_e` that a truncated moment integral biased low travels with the
+    /// flag that says so.
+    lid_referee: Option<LidReferee>,
 }
 
 impl BandedMomentEquivalentPlate {
@@ -1614,6 +1621,45 @@ impl BandedMomentEquivalentPlate {
             .high
             .elastic_thickness_km(youngs_modulus_gpa, poisson_ratio)?;
         Some((lo, hi))
+    }
+
+    /// ATTACH THE LID REFEREE'S VERDICT to this plate, so a verdict that was being computed and discarded now
+    /// rides the output. Runs [`referee_conductive_lid_base`] against the same `envelope` this band was solved on
+    /// and the caller's declared `convective_stress_mpa` (in the ductile branch's own megapascals, explicit for
+    /// the reason the referee itself takes it explicitly: the stress crosses a crate boundary that cannot infer
+    /// its unit). Where the referee refuses at the lid base the field stays `None`, honest that no verdict was
+    /// reached rather than inventing one. A builder that consumes and returns `self`, so the plate stays immutable
+    /// once refereed.
+    pub fn with_lid_referee(
+        mut self,
+        envelope: &LithosphereEnvelope<'_>,
+        convective_stress_mpa: Fixed,
+    ) -> Self {
+        self.lid_referee = referee_conductive_lid_base(envelope, convective_stress_mpa);
+        self
+    }
+
+    /// THE LID REFEREE'S VERDICT if one was attached, else `None`. `None` distinguishes a plate that was never
+    /// refereed, or whose referee refused at the lid base, from any verdict reached.
+    pub fn lid_referee(&self) -> Option<&LidReferee> {
+        self.lid_referee.as_ref()
+    }
+
+    /// WHETHER THE ATTACHED VERDICT CONVICTS A TOO-SHALLOW LID, hence a `T_e` biased low. The referee fires
+    /// [`LidVerdict::StrengthExceedsConvectiveStress`] where the ductile strength at the derived lid base still
+    /// exceeds the convective driving stress, which its own doc reads as a lid base derived TOO SHALLOW: the
+    /// moment integral, bounded at that lid base, was cut short of the deeper column it should have summed, so the
+    /// equivalent rigidity and its `T_e` read LOW. This is the flag the review asked ride the output. `false` when
+    /// no verdict is attached, when the lid is confirmed, or when the bracket straddles: only the convicting
+    /// verdict raises it, and its one-sidedness (blind to a too-DEEP lid) is the referee's own stated limit.
+    pub fn te_biased_low(&self) -> bool {
+        matches!(
+            self.lid_referee,
+            Some(LidReferee {
+                verdict: LidVerdict::StrengthExceedsConvectiveStress,
+                ..
+            })
+        )
     }
 }
 
@@ -1712,7 +1758,11 @@ fn combine_band_edges(
                     high_gpa_km3: high.rigidity_gpa_km3,
                 });
             }
-            Ok(BandedMomentEquivalentPlate { low, high })
+            Ok(BandedMomentEquivalentPlate {
+                low,
+                high,
+                lid_referee: None,
+            })
         }
         // BOTH edges say the load is not elastically held: honest and not a band-straddle. The whole span agrees
         // the load exceeds support, so the support-bound branch is where it routes, at both edges.
@@ -4729,6 +4779,91 @@ mod tests {
             "the display-thickness band is ordered and inside the lid: [{}, {}] km",
             f64_of(te_lo),
             f64_of(te_hi)
+        );
+    }
+
+    #[test]
+    fn the_lid_referee_verdict_rides_the_banded_plate_when_attached() {
+        // THE VERDICT RIDES THE OUTPUT rather than being computed and discarded. `referee_conductive_lid_base` was
+        // reachable only from tests: it produced a verdict nothing carried. A plate solved against a lid base the
+        // referee convicts as too shallow has a moment integral cut short at that base, so its `T_e` reads low, and
+        // a consumer needs to see that riding the plate. `with_lid_referee` attaches the verdict; the pure solve
+        // leaves it absent. A mutation nulling the attach, or flipping which verdict raises the flag, dies here.
+        let volumes = hk_dry_dislocation_activation_volumes();
+        let creep = [CreepCandidate {
+            row: hk_dry_dislocation(),
+            volumes: &volumes,
+        }];
+        let geotherm = ramp_geotherm;
+        let env = earth_like_banded_lid(&creep, &geotherm);
+        let dr = Fixed::from_ratio(33, 10);
+        let g = Fixed::from_ratio(98, 10000);
+        let load = Fixed::from_int(64);
+        let solve = || {
+            solve_line_load_banded(&env, 600, lit_e(), lit_nu(), dr, g, load, test_chord())
+                .expect("both edges of the V* band converge on this deep lid")
+        };
+
+        // THE PURE SOLVE CARRIES NO VERDICT: the field is absent and the flag is down, so the attach below is what
+        // raises it and not the solve always speaking.
+        let bare = solve();
+        assert!(
+            bare.lid_referee().is_none(),
+            "the pure banded solve attaches no referee"
+        );
+        assert!(
+            !bare.te_biased_low(),
+            "with no verdict attached the bias flag is down"
+        );
+
+        // The measured strength at the derived lid base, both V* ends determinate and ordered, is the pivot the two
+        // convective stresses below straddle. This is the same probe the standalone referee test pivots on.
+        let probe =
+            referee_conductive_lid_base(&env, Fixed::ONE).expect("the ductile branch answers");
+        let (lo, hi) = match (probe.strength_low, probe.strength_high) {
+            (DuctileReading::Determined(l), DuctileReading::Determined(h)) => {
+                (f64_of(l), f64_of(h))
+            }
+            other => panic!(
+                "the premise: both V* ends creep at a determinate strength at the base, got {other:?}"
+            ),
+        };
+        assert!(
+            0.0 < lo && lo <= hi,
+            "the base strengths are positive and ordered: {lo}, {hi} MPa"
+        );
+
+        // A CONVECTIVE STRESS THE LID'S STRENGTH EXCEEDS AT BOTH ENDS convicts the base as too shallow: the verdict
+        // rides the plate and the bias flag is up. Half the weaker end is below both.
+        let below_both = Fixed::from_ratio((lo * 0.5 * 1e6) as i64, 1_000_000);
+        let biased = solve().with_lid_referee(&env, below_both);
+        assert_eq!(
+            biased.lid_referee(),
+            referee_conductive_lid_base(&env, below_both).as_ref(),
+            "the attached verdict is exactly the referee's own, unaltered by riding the plate"
+        );
+        assert_eq!(
+            biased.lid_referee().expect("attached").verdict,
+            LidVerdict::StrengthExceedsConvectiveStress,
+            "a stress the lid's strength exceeds at both ends convicts the base"
+        );
+        assert!(
+            biased.te_biased_low(),
+            "the convicting verdict raises the T_e-biased-low flag on the plate"
+        );
+
+        // A CONVECTIVE STRESS ABOVE BOTH ENDS confirms the base: the verdict still rides, but the bias flag is
+        // down, so the flag tracks the convicting verdict alone and not merely the presence of a verdict.
+        let above_both = Fixed::from_ratio((hi * 2.0 * 1e6) as i64, 1_000_000);
+        let confirmed = solve().with_lid_referee(&env, above_both);
+        assert_eq!(
+            confirmed.lid_referee().expect("attached").verdict,
+            LidVerdict::Confirmed,
+            "a stress above the lid's strength at both ends confirms the base"
+        );
+        assert!(
+            !confirmed.te_biased_low(),
+            "a confirmed base does not bias T_e low, though a verdict is attached"
         );
     }
 
