@@ -1078,6 +1078,12 @@ pub enum EnvelopeStructure {
 /// orthogonal to envelope structure: a Herbig star is radiative AND pre-main-sequence at once. The fully
 /// convective versus convective-envelope sub-distinction that would key the phase is a sibling on a second
 /// boundary (the fully convective limit), left to the `L_bol` wire rather than overloaded onto this axis.
+///
+/// SUPERSEDED for the live dispatch by the BAND-AWARE [`kraft_band_dispatch`]: the Kraft break is not one
+/// temperature but a band (the classic and modern determinations disagree by a few hundred K), so a point cut
+/// asserts a certainty the measurement does not have. This point form is kept as the CERTAIN-cut classifier (a
+/// star far from the band resolves the same either way) and as the main-sequence instance the structural
+/// criterion demotes to once the track exposes envelope structure directly.
 pub fn stellar_envelope_structure(
     t_eff_k: Fixed,
     kraft_break_k: Fixed,
@@ -1089,6 +1095,102 @@ pub fn stellar_envelope_structure(
         EnvelopeStructure::Radiative
     } else {
         EnvelopeStructure::Convective
+    })
+}
+
+/// THE KRAFT-BREAK BAND: the envelope-structure boundary as a BAND rather than a point, per the ratified ruling.
+/// The classic primary-read Kraft break (`classic_edge_k`, the LOWER edge) and the modern determination
+/// (`modern_center_k` plus or minus `modern_halfwidth_k`, whose upper reach is the band's UPPER edge) disagree by
+/// a few hundred K, and that disagreement is a real dispatch ambiguity, not a value to average away: below the
+/// lower edge a surface convection zone certainly operates (the dynamo branch), above the upper edge the
+/// photosphere is certainly radiative (the EUV branch), and between them lies the NEAR-DEGENERATE zone the Gap
+/// Law carries rather than asserts. `metallicity_shift_k_per_dex` moves the whole band with composition (the
+/// hydrogen and helium ionization boundary depends on the metal-line opacity), a FLAGGED conditioning field
+/// defaulting to zero shift until a metallicity-dependent Kraft determination is fetched.
+///
+/// The edges are RESERVED-with-basis data (Principle 11): the mechanism (a three-zone dispatch on `T_eff`) is
+/// fixed Rust; the edge temperatures and the Z-shift are data the caller supplies. ADMITS THE ALIEN: the band is
+/// read against the star's own derived `T_eff` and its own metallicity offset, so a star of any composition
+/// dispatches through its own photosphere.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct KraftBreakBand {
+    /// The classic Kraft-break `T_eff` (K), the band's LOWER edge: below it the convective dynamo branch is
+    /// certain. RESERVED-with-basis (the primary-read classic determination, ~6200 K).
+    pub classic_edge_k: Fixed,
+    /// The modern determination's CENTER `T_eff` (K). RESERVED-with-basis (the search-grade modern edge, ~6550 K).
+    pub modern_center_k: Fixed,
+    /// The modern determination's half-width (K): `modern_center_k + modern_halfwidth_k` is the band's UPPER edge,
+    /// above which the radiative EUV branch is certain. RESERVED-with-basis (~200 K).
+    pub modern_halfwidth_k: Fixed,
+    /// The band's shift in K per dex of metallicity relative to the sampled composition. A FLAGGED conditioning
+    /// field, reserved-with-basis, DEFAULTING TO ZERO (no shift, the band at its solar-composition placement)
+    /// until a metallicity-dependent Kraft determination is fetched; its sign and size are unauthored here.
+    pub metallicity_shift_k_per_dex: Fixed,
+}
+
+impl KraftBreakBand {
+    /// The band's effective LOWER edge (K) at a metallicity `metallicity_log10_offset` dex from the sampled
+    /// composition: `classic_edge_k + metallicity_shift_k_per_dex * offset`. `None` if the shift or an overflow
+    /// drives the edge non-positive (a non-physical band).
+    pub fn lower_edge_k(self, metallicity_log10_offset: Fixed) -> Option<Fixed> {
+        let shifted = self.classic_edge_k.checked_add(
+            self.metallicity_shift_k_per_dex
+                .checked_mul(metallicity_log10_offset)?,
+        )?;
+        (shifted > Fixed::ZERO).then_some(shifted)
+    }
+    /// The band's effective UPPER edge (K): `modern_center_k + modern_halfwidth_k`, shifted the same way. `None`
+    /// on overflow or a non-positive result.
+    pub fn upper_edge_k(self, metallicity_log10_offset: Fixed) -> Option<Fixed> {
+        let base = self.modern_center_k.checked_add(self.modern_halfwidth_k)?;
+        let shifted = base.checked_add(
+            self.metallicity_shift_k_per_dex
+                .checked_mul(metallicity_log10_offset)?,
+        )?;
+        (shifted > Fixed::ZERO).then_some(shifted)
+    }
+}
+
+/// The KRAFT-BAND VERDICT: which wind branch a star's photosphere takes, with the near-degenerate band CARRIED
+/// rather than asserted (the Gap Law). A consumer that needs a single clock and reads [`Self::NearDegenerate`]
+/// must evaluate BOTH branches and carry the pair as a bracket (the way the EUV branch ships a bracket), never
+/// silently pick a side, so a few hundred K of dispatch ambiguity cannot masquerade as a definite branch.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum KraftVerdict {
+    /// Below the band's lower edge: the X-ray dynamo branch, certain.
+    Convective,
+    /// Above the band's upper edge: the EUV branch, certain.
+    Radiative,
+    /// Inside the Kraft band: near-degenerate, both branches plausible (the Gap Law). The consumer carries both.
+    NearDegenerate,
+}
+
+/// Dispatch a star's envelope structure against the KRAFT-BREAK BAND, the band-aware successor to the point
+/// [`stellar_envelope_structure`]. The star's current `T_eff` against the band's effective edges (each shifted
+/// for the star's metallicity offset): [`KraftVerdict::Convective`] below the lower edge,
+/// [`KraftVerdict::Radiative`] above the upper edge, [`KraftVerdict::NearDegenerate`] inside (the boundaries
+/// themselves belong to the ambiguous band, so the certain branches are the strict outside). Per the ratified
+/// ruling the in-band case is a distinct verdict the consumer carries, never asserted to one side. `None` on a
+/// non-star (non-positive `T_eff`) or an invalid band (an edge non-positive, or the lower edge above the upper).
+pub fn kraft_band_dispatch(
+    t_eff_k: Fixed,
+    band: KraftBreakBand,
+    metallicity_log10_offset: Fixed,
+) -> Option<KraftVerdict> {
+    if t_eff_k <= Fixed::ZERO {
+        return None;
+    }
+    let lower = band.lower_edge_k(metallicity_log10_offset)?;
+    let upper = band.upper_edge_k(metallicity_log10_offset)?;
+    if lower > upper {
+        return None;
+    }
+    Some(if t_eff_k < lower {
+        KraftVerdict::Convective
+    } else if t_eff_k > upper {
+        KraftVerdict::Radiative
+    } else {
+        KraftVerdict::NearDegenerate
     })
 }
 
@@ -3704,6 +3806,114 @@ mod tests {
         assert_eq!(
             stellar_envelope_structure(Fixed::from_int(5000), Fixed::ZERO),
             None
+        );
+    }
+
+    fn kraft_band() -> KraftBreakBand {
+        // The ratified Kraft band as reserved-with-basis fixtures: the classic 6200 K lower edge, the modern
+        // 6550 +/- 200 K determination (a 6750 K upper edge), no metallicity shift (the flagged field, default 0).
+        KraftBreakBand {
+            classic_edge_k: Fixed::from_int(6200),
+            modern_center_k: Fixed::from_int(6550),
+            modern_halfwidth_k: Fixed::from_int(200),
+            metallicity_shift_k_per_dex: Fixed::ZERO,
+        }
+    }
+
+    #[test]
+    fn the_kraft_band_carries_the_near_degenerate_zone_rather_than_asserting_a_side() {
+        // The Gap-Law dispatch: three zones, not two. A cool star is certainly convective, a hot star certainly
+        // radiative, and a star inside the classic-to-modern band is NEAR-DEGENERATE, a verdict the consumer
+        // carries (evaluating both branches) rather than a side the dispatch picks. This is the whole point of the
+        // band over the point cut: the few-hundred-K disagreement between the classic and modern breaks is a real
+        // dispatch ambiguity, surfaced, not averaged away.
+        let band = kraft_band();
+        assert_eq!(
+            kraft_band_dispatch(Fixed::from_int(4200), band, Fixed::ZERO), // a cool T Tauri star
+            Some(KraftVerdict::Convective),
+            "well below the band the dynamo branch is certain"
+        );
+        assert_eq!(
+            kraft_band_dispatch(Fixed::from_int(9000), band, Fixed::ZERO), // a hot A star
+            Some(KraftVerdict::Radiative),
+            "well above the band the EUV branch is certain"
+        );
+        assert_eq!(
+            kraft_band_dispatch(Fixed::from_int(6400), band, Fixed::ZERO), // between 6200 and 6750
+            Some(KraftVerdict::NearDegenerate),
+            "inside the band the verdict is carried, not asserted"
+        );
+        // The boundaries themselves belong to the ambiguous band (the certain branches are the strict outside), so
+        // both edges resolve NearDegenerate: a star exactly at a measured break is precisely where certainty fails.
+        assert_eq!(
+            kraft_band_dispatch(Fixed::from_int(6200), band, Fixed::ZERO),
+            Some(KraftVerdict::NearDegenerate),
+            "the lower edge is in-band"
+        );
+        assert_eq!(
+            kraft_band_dispatch(Fixed::from_int(6750), band, Fixed::ZERO),
+            Some(KraftVerdict::NearDegenerate),
+            "the upper edge is in-band"
+        );
+    }
+
+    #[test]
+    fn the_kraft_band_shifts_with_metallicity() {
+        // The Z-shift conditioning field moves the WHOLE band with composition (the ionization boundary depends on
+        // the metal-line opacity). With a nonzero shift, a star that was in-band at solar composition falls to a
+        // certain branch at a metallicity offset, so the field is load-bearing and wired, not decorative. The SIGN
+        // is unauthored (the field defaults to zero); this asserts only that a nonzero coefficient moves the edges.
+        let mut band = kraft_band();
+        // A probe coefficient, not a fetched value: at +1 dex the edges shift up by 300 K to [6500, 7050], so a
+        // 6400 K star that read NearDegenerate at solar now sits BELOW the shifted lower edge and reads Convective.
+        band.metallicity_shift_k_per_dex = Fixed::from_int(300);
+        assert_eq!(
+            kraft_band_dispatch(Fixed::from_int(6400), band, Fixed::ONE),
+            Some(KraftVerdict::Convective),
+            "a +1 dex shift lifts the band above a 6400 K star"
+        );
+        // The unshifted band still calls the same star NearDegenerate: the shift, not the star, moved the verdict.
+        assert_eq!(
+            kraft_band_dispatch(Fixed::from_int(6400), band, Fixed::ZERO),
+            Some(KraftVerdict::NearDegenerate),
+            "with no offset the band is unmoved"
+        );
+        // The effective edges track the shift exactly.
+        assert_eq!(band.lower_edge_k(Fixed::ONE), Some(Fixed::from_int(6500)));
+        assert_eq!(band.upper_edge_k(Fixed::ONE), Some(Fixed::from_int(7050)));
+    }
+
+    #[test]
+    fn the_kraft_band_refuses_a_non_star_and_an_invalid_band() {
+        // Fail-loud: a non-positive T_eff is not a star, and a band whose lower edge is driven above its upper edge
+        // (here by a metallicity shift that inverts them) is not a boundary. Errors, never a silent branch.
+        let band = kraft_band();
+        assert_eq!(
+            kraft_band_dispatch(Fixed::from_int(-1), band, Fixed::ZERO),
+            None
+        );
+        assert_eq!(kraft_band_dispatch(Fixed::ZERO, band, Fixed::ZERO), None);
+        // A shift large enough to drive an edge non-positive refuses (the band ceases to be physical).
+        let mut sunk = kraft_band();
+        sunk.metallicity_shift_k_per_dex = Fixed::from_int(10_000);
+        assert_eq!(sunk.lower_edge_k(Fixed::from_int(-1)), None); // 6200 - 10000 < 0
+        assert_eq!(
+            kraft_band_dispatch(Fixed::from_int(5000), sunk, Fixed::from_int(-1)),
+            None,
+            "a shift that sinks an edge below zero is not a band"
+        );
+        // A CROSSED band (the classic lower edge above the modern upper reach) is malformed base data, not a shift
+        // artifact (the shift moves both edges equally and cannot invert them): the lower-above-upper guard refuses.
+        let crossed = KraftBreakBand {
+            classic_edge_k: Fixed::from_int(9000),
+            modern_center_k: Fixed::from_int(6550),
+            modern_halfwidth_k: Fixed::from_int(200),
+            metallicity_shift_k_per_dex: Fixed::ZERO,
+        };
+        assert_eq!(
+            kraft_band_dispatch(Fixed::from_int(7000), crossed, Fixed::ZERO),
+            None,
+            "a lower edge above the upper edge is not a band"
         );
     }
 
