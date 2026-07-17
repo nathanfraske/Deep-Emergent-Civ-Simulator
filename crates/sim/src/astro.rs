@@ -933,6 +933,55 @@ pub fn convective_turnover_time_days(
     Some(ln_tau.exp())
 }
 
+/// The ROTATION PERIOD `P_rot` (days) at a stellar age, the SPIN-DOWN that closes the last interim in the L_X
+/// chain: it supplies the numerator of the Rossby number ([`stellar_rossby_number`]) the whole activity-and-wind
+/// chain reads. Magnetized stars shed angular momentum in their winds and spin down, and the empirical law is
+/// Skumanich's `P_rot ~ t^n` with `n` near one half (Skumanich 1972; refined by Barnes 2007 and Mamajek and
+/// Hillenbrand 2008 to the ~0.5 to 0.57 range). So `P_rot(t) = P_ref * (t / t_ref)^n`, a power law in age, the
+/// same shape the accretion clock uses in time. Computed in the log domain (the ratio may be below one for a star
+/// younger than the reference, so the log is signed).
+///
+/// THE CARRIER IS MASS-AGNOSTIC BY CONSTRUCTION, and that is the design: the age evolution `(t/t_ref)^n` carries
+/// no colour or mass, so the star does not synthesize a colour to look one up (the keying resolution the
+/// convective-turnover fit already took, keying on the drawn physical variable). The MASS DEPENDENCE lives
+/// entirely in the reference rotation `P_ref`, which a gyrochrone supplies as a function of the star (the classic
+/// Barnes / Mamajek-Hillenbrand gyrochrones key that normalization on `B-V` colour, and a mass-keyed calibration
+/// is the follow-on that resolves the colour-versus-mass seam there, not here). `P_ref` is DRAW-PENDING, the
+/// interim-plus-destination pattern `Mdot_0` takes: the destination is the mass gyrochrone (converged old stars)
+/// over the layer-4 `Omega_star_0` birth rotation (young stars, before the gyrochrone erases the initial
+/// condition), and until that draw lands the caller passes a solar-interim reference (the Sun near `25.4` days at
+/// `4570` Myr). So this builds the spin-down SHAPE, the last mechanism the L_X chain needed, and leaves only that
+/// one normalization draw.
+///
+/// The `skumanich_exponent` is reserved-with-basis (the Skumanich-to-gyrochrone band, its basis the chosen
+/// gyrochrone's age index), not authored inline. `None` on a non-positive age, reference period, reference age, or
+/// exponent, or an intermediate past the representable range.
+pub fn stellar_rotation_period_days(
+    age_myr: Fixed,
+    reference_period_days: Fixed,
+    reference_age_myr: Fixed,
+    skumanich_exponent: Fixed,
+) -> Option<Fixed> {
+    if age_myr <= Fixed::ZERO
+        || reference_period_days <= Fixed::ZERO
+        || reference_age_myr <= Fixed::ZERO
+        || skumanich_exponent <= Fixed::ZERO
+    {
+        return None;
+    }
+    // ln P_rot = ln P_ref + n * (ln age - ln age_ref); the age ratio may be below one, so the log is signed.
+    let ln_ratio = age_myr.ln().checked_sub(reference_age_myr.ln())?;
+    let ln_p = reference_period_days
+        .ln()
+        .checked_add(skumanich_exponent.checked_mul(ln_ratio)?)?;
+    // Fail loud past the representable exp ceiling rather than saturate (the surface-density precedent).
+    let ln_ceiling = Fixed::from_int(31).checked_mul(Fixed::from_int(2).ln())?;
+    if ln_p >= ln_ceiling {
+        return None;
+    }
+    Some(ln_p.exp())
+}
+
 /// The stellar ROSSBY NUMBER `Ro = P_rot / tau_conv`, the SHARED ROTATION STATE both high-energy bands read (the
 /// L_X slice, ruled). Rotation is the causal upstream (the dynamo is driven by rotation against convection), the
 /// activity bands are windows on the dynamo's output, so the Rossby number is the state variable and each band
@@ -3356,5 +3405,93 @@ mod tests {
             Fixed::from_ratio(1, 1000)
         )
         .is_none());
+    }
+
+    #[test]
+    fn the_rotation_period_follows_skumanich_spindown() {
+        // Twin-independent oracle: P_rot = P_ref * (age/age_ref)^n. With n = 1/2, P_ref = 10 days, age_ref = 100
+        // Myr, a four-times-older star (age 400) has P = 10 * sqrt(4) = 20 days, and a four-times-younger star
+        // (age 25) has P = 10 * sqrt(0.25) = 5 days, both computed outside the code. At the reference age the
+        // period is the reference itself.
+        let half = Fixed::from_ratio(1, 2);
+        let p_ref = Fixed::from_int(10);
+        let age_ref = Fixed::from_int(100);
+        let older =
+            stellar_rotation_period_days(Fixed::from_int(400), p_ref, age_ref, half).unwrap();
+        let younger =
+            stellar_rotation_period_days(Fixed::from_int(25), p_ref, age_ref, half).unwrap();
+        let at_ref = stellar_rotation_period_days(age_ref, p_ref, age_ref, half).unwrap();
+        assert!(
+            (older.to_f64_lossy() - 20.0).abs() < 0.05,
+            "a four-times-older star spins to ~20 days (got {})",
+            older.to_f64_lossy()
+        );
+        assert!(
+            (younger.to_f64_lossy() - 5.0).abs() < 0.02,
+            "a four-times-younger star spins at ~5 days (got {})",
+            younger.to_f64_lossy()
+        );
+        assert!(
+            (at_ref.to_f64_lossy() - 10.0).abs() < 0.02,
+            "at the reference age the period is the reference (got {})",
+            at_ref.to_f64_lossy()
+        );
+    }
+
+    #[test]
+    fn the_rotation_period_refuses_nonphysical_inputs() {
+        // Fail-loud on a non-positive age, reference period, reference age, or spin-down exponent.
+        let half = Fixed::from_ratio(1, 2);
+        assert!(stellar_rotation_period_days(
+            Fixed::ZERO,
+            Fixed::from_int(10),
+            Fixed::from_int(100),
+            half
+        )
+        .is_none());
+        assert!(stellar_rotation_period_days(
+            Fixed::from_int(100),
+            Fixed::ZERO,
+            Fixed::from_int(100),
+            half
+        )
+        .is_none());
+        assert!(stellar_rotation_period_days(
+            Fixed::from_int(100),
+            Fixed::from_int(10),
+            Fixed::ZERO,
+            half
+        )
+        .is_none());
+        assert!(stellar_rotation_period_days(
+            Fixed::from_int(100),
+            Fixed::from_int(10),
+            Fixed::from_int(100),
+            Fixed::ZERO
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn the_spindown_gives_a_younger_star_a_lower_rossby() {
+        // The end-to-end chain property the spin-down exists to produce: a younger star spins faster (shorter
+        // P_rot), so at a fixed convective turnover it sits at a LOWER Rossby number, deeper in the saturated
+        // regime. Composing the spin-down with the Rossby number (an independent function) must show it.
+        let half = Fixed::from_ratio(1, 2);
+        let p_ref = Fixed::from_int(25); // ~solar rotation days
+        let age_ref = Fixed::from_int(4570); // ~solar age Myr
+        let tau_conv = Fixed::from_int(14); // ~solar convective turnover days (a fixed denominator here)
+        let young =
+            stellar_rotation_period_days(Fixed::from_int(100), p_ref, age_ref, half).unwrap();
+        let old =
+            stellar_rotation_period_days(Fixed::from_int(4570), p_ref, age_ref, half).unwrap();
+        let ro_young = stellar_rossby_number(young, tau_conv).unwrap();
+        let ro_old = stellar_rossby_number(old, tau_conv).unwrap();
+        assert!(
+            ro_young < ro_old,
+            "the younger star sits at a lower Rossby number (young {}, old {})",
+            ro_young.to_f64_lossy(),
+            ro_old.to_f64_lossy()
+        );
     }
 }
