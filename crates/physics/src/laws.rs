@@ -3641,6 +3641,15 @@ pub fn convective_strain_rate(velocity: Fixed, length_scale: Fixed) -> Option<Fi
     if length_scale <= ZERO {
         return None;
     }
+    // THE ONE INPUT WHERE THE CLAIM AND THE CODE DISAGREED. `sat_abs` is SATURATING by construction
+    // (`Fixed::MIN` has no representable positive twin, so it returns `Fixed::MAX`), which is right for the
+    // clamping sibling and WRONG HERE: this function's whole promise is that it refuses rather than fabricates,
+    // because its consumer logs the result and sets it beside an Arrhenius exponential. A saturated rate at
+    // `MIN` would have been the exact confident-wrong-strength this signature exists to prevent, arriving
+    // through the one input nobody tests. Refuse it: the absurd input gets the same honesty as the ordinary one.
+    if velocity == Fixed::MIN {
+        return None;
+    }
     sat_abs(velocity).checked_div(length_scale)
 }
 
@@ -3991,6 +4000,16 @@ mod tests {
             convective_strain_rate(Fixed::from_int(6), Fixed::from_int(-2)),
             None,
             "a negative shear length is not a length"
+        );
+        // THE ABSURD INPUT GETS THE SAME HONESTY AS THE ORDINARY ONE. `sat_abs(Fixed::MIN)` returns
+        // `Fixed::MAX`, because the representation's minimum has no positive twin. That saturation is correct
+        // for the clamping sibling and would be a FABRICATED RATE here, delivered through the one input nobody
+        // thinks to test, into a consumer that logs it and hands it to an exponential. A fail-loud function
+        // that silently clamps at one input is a claim its code does not keep.
+        assert_eq!(
+            convective_strain_rate(Fixed::MIN, Fixed::from_int(2)),
+            None,
+            "the representation's minimum has no magnitude to take, so the rate refuses rather than saturating"
         );
     }
 

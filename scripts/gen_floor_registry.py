@@ -91,7 +91,20 @@ def parse_floor(path):
 
 def parse_laws_rs(path):
     """Return [(name, line, summary)] for every `pub fn` in laws.rs, in file order (deterministic).
-    summary is the first line of the doc comment immediately above the fn, if any."""
+    summary is the first DESCRIPTIVE line of the doc comment immediately above the fn, if any.
+
+    DESCRIPTIVE, not merely FIRST, and the difference is a defect this file already suffered. Two consumers
+    independently claimed the position "first doc line": this reader took it as the excerpt, and the diamond
+    gate's `@provides` annotation was written there. The collision made the enforced derive-vs-author reference
+    stop describing two kernels and recite their annotations back ("@provides thermal_boundary_layer" as the
+    summary of `thermal_boundary_layer`). That is the POSITIONAL-CONVENTION COLLISION class: two conventions
+    agreeing on a slot and disagreeing about its meaning, which the stop gate caught and no other check could.
+
+    The repair is SEMANTIC rather than positional (owner ruling): annotation lines are SKIPPED rather than
+    reserved a position, so "the excerpt is the first descriptive line" holds no matter where an annotation is
+    placed, and the NEXT annotation convention cannot re-break it. Placing `@provides` last is the current
+    convention and is now a convenience rather than a load-bearing requirement.
+    """
     with open(path, encoding="utf-8") as fh:
         lines = fh.readlines()
     kernels = []
@@ -100,8 +113,11 @@ def parse_laws_rs(path):
         s = ln.strip()
         mdoc = re.match(r"^///\s?(.*)", s)
         if mdoc:
-            if summary is None:
-                summary = mdoc.group(1).strip()
+            text = mdoc.group(1).strip()
+            # An annotation is machinery for another reader, never a description of the kernel. Skipping it
+            # keeps this excerpt semantic; reserving it a position would only move the collision.
+            if summary is None and text and not text.startswith("@"):
+                summary = text
             continue
         mfn = re.match(r"^pub fn ([a-z0-9_]+)", ln)
         if mfn:
