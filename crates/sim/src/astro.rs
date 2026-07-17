@@ -875,6 +875,69 @@ pub fn derive_viscous_time_myr(
     Some(ln_t_myr.exp())
 }
 
+/// The ROCHE-LOBE RADIUS (AU) of the disk-hosting star in a binary, the Eggleton 1983 fit to the Roche-potential
+/// volume radius: `R_L/a = c_num * q^(2/3) / (c_log * q^(2/3) + ln(1 + q^(1/3)))`, `q = M_host/M_companion`,
+/// accurate to about one percent over all `q`.
+///
+/// MODALITY: this is the HARD UPPER EDGE on the disk's outer radius, NOT the expected truncation radius (an
+/// intrinsic bound, not a trusted central value: the bound-as-estimate defect class). A circumstellar disk
+/// tidally truncates INSIDE its Roche lobe, at the outermost non-overlapping Lindblad resonance (Paczynski 1977,
+/// Papaloizou and Pringle 1977, Artymowicz and Lubow 1994), at `R_t = f * R_L` with the resonance-truncation
+/// FRACTION `f` (~0.3 to 0.9, conditioned on mass ratio, eccentricity, and viscosity) a FETCH TARGET, not
+/// authored here. So this ships as the DECLARED UPPER EDGE of a one-sided bracket: [`tidally_capped_scale_radius_au`]
+/// caps `R_1` at it, the CONSERVATIVE (least-truncating, disk-too-large, `tau_disk`-biased-long) bound, until the
+/// fraction lands and tightens the cap to `f * R_L`, at which point `t_visc` and `tau_disk` inherit the roughly
+/// `sqrt(f)` band (a ten-to-twenty percent class effect) through [`derive_viscous_time_myr`] (`t_visc ~
+/// sqrt(R_1)`), the machinery already built rather than a new path.
+///
+/// ZERO new per-system free values: the Roche fraction derives from the mass ratio, and the truncation fraction
+/// `f` enters as a fetched (q, e, viscosity)-conditioned banded class row, not an owner scalar. `c_num` (~0.49)
+/// and `c_log` (~0.6) are the fixed Roche-geometry fit (cited, universal, not an owner tunable, like `pi`),
+/// passed as parameters. ADMITS THE ALIEN: it keys on the mass ratio and separation, the binary's own data, no
+/// Terran assumption. `None` on a non-positive input.
+pub fn roche_lobe_radius_au(
+    separation_au: Fixed,
+    mass_ratio_host_to_companion: Fixed,
+    eggleton_numerator_coeff: Fixed,
+    eggleton_log_coeff: Fixed,
+) -> Option<Fixed> {
+    if separation_au <= Fixed::ZERO || mass_ratio_host_to_companion <= Fixed::ZERO {
+        return None;
+    }
+    let q = mass_ratio_host_to_companion;
+    let q_third = q.powf(Fixed::from_ratio(1, 3)); // q^(1/3)
+    let q_two_thirds = q.powf(Fixed::from_ratio(2, 3)); // q^(2/3)
+                                                        // R_L/a = c_num * q^(2/3) / (c_log * q^(2/3) + ln(1 + q^(1/3))).
+    let denom = eggleton_log_coeff
+        .checked_mul(q_two_thirds)?
+        .checked_add(Fixed::ONE.checked_add(q_third)?.ln())?;
+    let fraction = eggleton_numerator_coeff
+        .checked_mul(q_two_thirds)?
+        .checked_div(denom)?;
+    separation_au.checked_mul(fraction)
+}
+
+/// Cap a disk's birth scale radius `R_1` at the companion's [`roche_lobe_radius_au`]: the effective `R_1`,
+/// `min(birth, roche_lobe)`. A disk inside its Roche lobe is untouched (a wide or absent companion leaves the
+/// birth radius); a disk that would spill past it is truncated to the lobe. The result feeds
+/// [`derive_viscous_time_myr`] as `scale_radius_au` unchanged, so binarity shortens `tau_disk` with no new path.
+///
+/// MODALITY: the Roche lobe is the HARD UPPER EDGE, not the expected truncation radius (the disk truncates inside
+/// it at `f * R_L`, the fraction fetch-pending, see [`roche_lobe_radius_au`]), so this returns the UPPER BOUND on
+/// the capped `R_1`, hence the upper bound on `t_visc` and the longest `tau_disk`. When the resonance-truncation
+/// fraction lands the cap tightens to `f * R_L` and the bound becomes a band; today it is the conservative edge.
+/// `None` on a non-positive input.
+pub fn tidally_capped_scale_radius_au(birth_r1_au: Fixed, roche_lobe_au: Fixed) -> Option<Fixed> {
+    if birth_r1_au <= Fixed::ZERO || roche_lobe_au <= Fixed::ZERO {
+        return None;
+    }
+    Some(if birth_r1_au < roche_lobe_au {
+        birth_r1_au
+    } else {
+        roche_lobe_au
+    })
+}
+
 /// Wright et al. 2011's empirical convective-turnover fit: the polynomial coefficients AND the stellar-mass range
 /// over which it was measured. The range travels with the coefficients because outside it the fit is not merely
 /// less accurate, the underlying PHYSICS changes: above the high-mass edge the star has a radiative envelope and
@@ -1062,19 +1125,33 @@ impl EuvLuminosityBracket {
 /// steeply with `T_eff` (roughly eight dex from a solar photosphere to a 30000 K one), which is why a hotter
 /// radiative star photoevaporates harder.
 ///
-/// VALIDITY: the Wien tail (dropping the `-1` in the Planck denominator) is exact to a fraction of a percent for
-/// `x >~ 3`, which holds at the hydrogen edge for every star cooler than ~50000 K; a hotter photosphere would
-/// need the full Planck denominator, a refinement to flag rather than extrapolate silently. A non-positive input
-/// returns `None`.
-pub fn blackbody_ionizing_fraction(t_eff_k: Fixed, t_ion_k: Fixed) -> Option<Fixed> {
-    if t_eff_k <= Fixed::ZERO || t_ion_k <= Fixed::ZERO {
+/// VALIDITY (GUARDED, not just documented): the Wien tail (dropping the `-1` in the Planck denominator) is exact
+/// to a fraction of a percent for `x >~ 3`, which holds at the hydrogen edge for every star cooler than ~50000 K.
+/// A hotter photosphere (`x < wien_x_min`) needs the full Planck denominator, so this REFUSES (`None`, the
+/// domain door) rather than extrapolating the approximation into a regime it does not describe: the code now
+/// enforces the flag its own doc claims, the second edge of a domain that was one-ended. `wien_x_min` (~3) is the
+/// caller's reserved-with-basis value (the Wien-tail validity edge). A non-positive input also returns `None`.
+pub fn blackbody_ionizing_fraction(
+    t_eff_k: Fixed,
+    t_ion_k: Fixed,
+    wien_x_min: Fixed,
+) -> Option<Fixed> {
+    if t_eff_k <= Fixed::ZERO || t_ion_k <= Fixed::ZERO || wien_x_min <= Fixed::ZERO {
         return None;
     }
     let x = t_ion_k.checked_div(t_eff_k)?;
+    if x < wien_x_min {
+        return None; // above the Wien-tail validity T_eff: the full-Planck-denominator regime, a separate door
+    }
     let c = Fixed::from_int(15).checked_div(Fixed::PI.powi(4))?; // 15/pi^4, the Planck-integral normalization
-    let poly = x
-        .powi(3)
-        .checked_add(Fixed::from_int(3).checked_mul(x.powi(2))?)?
+                                                                 // CHECKED powers (not `powi`, which multiplies through the unchecked `Fixed::mul` and wraps silently): a
+                                                                 // large `x` (a photosphere below ~122 K, non-stellar) must REFUSE with `None`, the total-kernel contract, not
+                                                                 // wrap `x^3` to garbage. This is the one unchecked-arithmetic hole the audit caught in an otherwise checked
+                                                                 // function.
+    let x2 = x.checked_mul(x)?;
+    let x3 = x2.checked_mul(x)?;
+    let poly = x3
+        .checked_add(Fixed::from_int(3).checked_mul(x2)?)?
         .checked_add(Fixed::from_int(6).checked_mul(x)?)?
         .checked_add(Fixed::from_int(6))?;
     // f_BB = C * poly * exp(-x), formed as C * exp(ln(poly) - x) so the tiny tail never underflows.
@@ -1096,13 +1173,14 @@ pub fn radiative_euv_luminosity_bracket(
     t_eff_k: Fixed,
     l_bol_lsun: Fixed,
     t_ion_k: Fixed,
+    wien_x_min: Fixed,
     departure_lo: Fixed,
     departure_hi: Fixed,
 ) -> Option<EuvLuminosityBracket> {
     if l_bol_lsun <= Fixed::ZERO || departure_lo <= Fixed::ZERO || departure_hi < departure_lo {
         return None;
     }
-    let f_bb = blackbody_ionizing_fraction(t_eff_k, t_ion_k)?;
+    let f_bb = blackbody_ionizing_fraction(t_eff_k, t_ion_k, wien_x_min)?;
     let base = l_bol_lsun.checked_mul(f_bb)?;
     Some(EuvLuminosityBracket {
         lo_lsun: base.checked_mul(departure_lo)?,
@@ -1638,33 +1716,40 @@ pub struct XrayWindFit {
 /// across `Z`, the negative slope `Mdot ~ Z^s`) is ORTHOGONAL to the model-structure axis (which
 /// [`XrayWindFit`] row the caller picks, Owen versus the Sellek 2024 thermochemistry revision, both at solar
 /// `Z`). Sellek is a solar-metallicity model, not a low-`Z` instance, so a metal-rich draw does NOT mean "the
-/// Sellek row"; it means a LOWER rate along the metallicity axis, whichever row is the base. The sign is settled
-/// (a metal-poor draw runs a higher wind rate, a metal-rich draw a lower one), fetched slope `-0.4` to `-0.8` dex
-/// per dex.
+/// Sellek row"; it means a LOWER rate along the metallicity axis, whichever row is the base.
+///
+/// SIGN AND ITS DOMAIN (the audit's alien and Terran-shape notes, surfaced not hidden): the measured slope is
+/// negative (a metal-poor draw runs a higher wind rate, a metal-rich draw a lower one, fetched `-0.4` to `-0.8`
+/// dex per dex) because heavy-element line, molecular, and dust cooling scale with metallicity. That sign is the
+/// PROTOPLANETARY-DISK regime's, NOT a universal, and the arithmetic is SIGN-GENERAL: an alien disk whose
+/// composition-wind coupling differs passes its own slope (even a positive one) and is a data row, not a rewrite,
+/// so `MetalPoor`/`MetalRich` name a SIDE of the sampled composition and the rate consequence follows from the
+/// passed slope. HONEST LIMIT (Principle 7): the single scalar `Z/Z_sample` axis itself assumes an H-dominated,
+/// metal-line-cooled disk with the FUV floor at H2 photodissociation; a disk not governed by that cooling has no
+/// meaningful single metallicity axis, a residual Terran-shaped modelling choice this arc names rather than
+/// buries.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum MetallicitySampleDomain {
-    /// On the fit's sampled composition: the base rate applies with no metallicity adjustment.
-    OnSample,
-    /// Metal-poor relative to the sample: a HIGHER wind rate (weaker molecular cooling), the negative slope on the
-    /// metallicity axis, applied by [`XrayWindFit::metallicity_rate_factor`].
+    /// Metal-poor relative to the sample (`Z < sample`): a HIGHER wind rate (weaker molecular cooling), the
+    /// negative slope on the metallicity axis, applied by [`XrayWindFit::metallicity_rate_factor`].
     MetalPoor,
-    /// Metal-rich relative to the sample: a LOWER wind rate (stronger molecular cooling), the negative slope on the
-    /// metallicity axis, applied by [`XrayWindFit::metallicity_rate_factor`].
+    /// Metal-rich, or exactly on-sample (`Z >= sample`): a LOWER-or-equal wind rate (stronger cooling), the same
+    /// slope, applied by [`XrayWindFit::metallicity_rate_factor`] (exactly on-sample gives a unit factor). There is
+    /// no exact-equality arm: an exact-`Z == sample` case is unreachable by measure on a continuous draw, so it
+    /// folds here rather than as a dead branch.
     MetalRich,
 }
 
 impl XrayWindFit {
-    /// Classify a drawn metallicity `z_ratio` (`Z/Z_sun`) against the fit's `sample_metallicity`. Reports the
-    /// DOMAIN position only (on-sample, or which way it extrapolates), so a consumer can see an off-solar draw is
-    /// out of the sampled composition; it moves no rate, the rate move being [`XrayWindFit::metallicity_rate_factor`]. `None`
-    /// on a non-positive draw or a non-positive sample.
+    /// Classify a drawn metallicity `z_ratio` (`Z/Z_sun`) against the fit's `sample_metallicity`: which SIDE of
+    /// the sampled composition it sits on, metal-poor (higher rate) or metal-rich (lower rate). Position only; it
+    /// moves no rate, the rate move being [`XrayWindFit::metallicity_rate_factor`], and the fit-range guard lives
+    /// there too. `None` on a non-positive draw or a non-positive sample.
     pub fn metallicity_domain(&self, z_ratio: Fixed) -> Option<MetallicitySampleDomain> {
         if z_ratio <= Fixed::ZERO || self.sample_metallicity <= Fixed::ZERO {
             return None;
         }
-        Some(if z_ratio == self.sample_metallicity {
-            MetallicitySampleDomain::OnSample
-        } else if z_ratio < self.sample_metallicity {
+        Some(if z_ratio < self.sample_metallicity {
             MetallicitySampleDomain::MetalPoor
         } else {
             MetallicitySampleDomain::MetalRich
@@ -1710,27 +1795,31 @@ impl XrayWindFit {
     /// above one) and a metal-rich draw a LOWER one, matching the observed disc-lifetime-versus-metallicity trend
     /// (`t ~ Z^0.52`, tied to the rate by `t ~ Mdot^(-2/3)`, and `-0.77 * -2/3 ~ 0.51`).
     ///
-    /// DOMAIN: the negative slope holds for `Z` above the floor (~0.03 solar); below it the FUV-driven rate turns
-    /// over, a SEPARATE regime, so a draw below `z_floor_ratio` REFUSES (`None`, the domain door) rather than
-    /// extrapolating the slope into a regime it does not describe. `None` also on a non-positive draw, sample, or
-    /// floor. The slope band edges and the floor are the caller's reserved-with-basis values; a
-    /// Sellek-generation slope across `Z` does not exist in the literature (Sellek ran only solar), so it is not
-    /// authored here.
+    /// DOMAIN (TWO-ENDED, both edges from the source's own fit range, because a one-ended guard is a half-guard):
+    /// the negative slope holds for `Z` between `z_floor_ratio` (~0.03 solar) and `z_ceiling_ratio` (~2 solar,
+    /// the Ercolano-Clarke fit's upper edge). Below the floor the FUV-driven rate turns over, a SEPARATE regime;
+    /// above the ceiling the draw is past the fitted range. A draw outside `[floor, ceiling]` REFUSES (`None`, the
+    /// domain door) rather than extrapolating the slope into a regime it does not describe. `None` also on a
+    /// non-positive draw, sample, floor, or ceiling, or an inverted `[floor, ceiling]`. The slope band edges and
+    /// the two domain edges are the caller's reserved-with-basis-and-cited values; a Sellek-generation slope
+    /// across `Z` does not exist in the literature (Sellek ran only solar), so it is not authored here.
     pub fn metallicity_rate_factor(
         &self,
         z_ratio: Fixed,
         slope_steep: Fixed,
         slope_shallow: Fixed,
         z_floor_ratio: Fixed,
+        z_ceiling_ratio: Fixed,
     ) -> Option<RateFactorBracket> {
         if z_ratio <= Fixed::ZERO
             || self.sample_metallicity <= Fixed::ZERO
             || z_floor_ratio <= Fixed::ZERO
+            || z_ceiling_ratio < z_floor_ratio
         {
             return None;
         }
-        if z_ratio < z_floor_ratio {
-            return None; // below the slope's domain: the FUV-turnover regime, a separate door
+        if z_ratio < z_floor_ratio || z_ratio > z_ceiling_ratio {
+            return None; // outside the fitted slope domain: the FUV-turnover floor or the fit's upper edge
         }
         let z = z_ratio.checked_div(self.sample_metallicity)?;
         // (Z/Z_sample)^s at each slope edge; min/max orders the band whichever way the edges are passed.
@@ -3287,6 +3376,110 @@ mod tests {
         assert!(derive_viscous_time_myr(r, m, t, a, Fixed::ZERO).is_none());
     }
 
+    // Eggleton 1983 Roche-lobe coefficients as a test fixture (cited at the function docs), the ~0.49/~0.6 fit.
+    fn eggleton() -> (Fixed, Fixed) {
+        (Fixed::from_ratio(49, 100), Fixed::from_ratio(6, 10))
+    }
+
+    #[test]
+    fn the_roche_lobe_matches_the_eggleton_oracle() {
+        // External f64 oracle (twin-independence): R_L/a = 0.49 q^(2/3) / (0.6 q^(2/3) + ln(1 + q^(1/3))), the
+        // Eggleton Roche lobe, computed outside the engine. At separation 20 AU: q = 1 -> 7.579, q = 2 -> 8.800,
+        // q = 0.5 -> 6.415 AU. A more massive host keeps a larger disk.
+        let (c_num, c_log) = eggleton();
+        let a = Fixed::from_int(20);
+        let cases = [
+            (Fixed::ONE, 7.5788f64),
+            (Fixed::from_int(2), 8.8003),
+            (Fixed::from_ratio(1, 2), 6.4153),
+        ];
+        for (q, oracle) in cases {
+            let r = roche_lobe_radius_au(a, q, c_num, c_log).unwrap();
+            assert!(
+                (r.to_f64_lossy() - oracle).abs() / oracle < 0.01,
+                "Eggleton R_L ~ {oracle}, got {}",
+                r.to_f64_lossy()
+            );
+        }
+    }
+
+    #[test]
+    fn the_roche_lobe_grows_with_separation_and_host_mass() {
+        let (c_num, c_log) = eggleton();
+        // Linear in separation.
+        let near = roche_lobe_radius_au(Fixed::from_int(10), Fixed::ONE, c_num, c_log).unwrap();
+        let far = roche_lobe_radius_au(Fixed::from_int(20), Fixed::ONE, c_num, c_log).unwrap();
+        assert!(
+            (far.to_f64_lossy() / near.to_f64_lossy() - 2.0).abs() < 0.001,
+            "the cap scales linearly with separation"
+        );
+        // Monotone in host mass ratio: a heavier host is less truncated.
+        let light =
+            roche_lobe_radius_au(Fixed::from_int(20), Fixed::from_ratio(1, 2), c_num, c_log)
+                .unwrap();
+        let heavy =
+            roche_lobe_radius_au(Fixed::from_int(20), Fixed::from_int(2), c_num, c_log).unwrap();
+        assert!(heavy > light, "a more massive host keeps a larger disk");
+    }
+
+    #[test]
+    fn the_cap_bounds_a_large_disk_at_the_roche_lobe() {
+        // min(birth, roche_lobe): a disk larger than its Roche lobe is bounded to the lobe (the upper edge, the
+        // actual truncation being inside), a smaller one untouched.
+        let lobe = Fixed::from_ratio(76, 10); // 7.6 AU Roche-lobe upper bound
+        assert_eq!(
+            tidally_capped_scale_radius_au(Fixed::from_int(30), lobe),
+            Some(lobe),
+            "a 30 AU disk in a tight binary is bounded at the Roche-lobe upper edge"
+        );
+        assert_eq!(
+            tidally_capped_scale_radius_au(Fixed::from_int(3), lobe),
+            Some(Fixed::from_int(3)),
+            "a 3 AU disk inside its lobe is untouched"
+        );
+        assert!(tidally_capped_scale_radius_au(Fixed::ZERO, lobe).is_none());
+        let (c_num, c_log) = eggleton();
+        assert!(roche_lobe_radius_au(Fixed::ZERO, Fixed::ONE, c_num, c_log).is_none());
+        assert!(roche_lobe_radius_au(Fixed::from_int(20), Fixed::ZERO, c_num, c_log).is_none());
+    }
+
+    #[test]
+    fn the_roche_lobe_cap_shortens_the_viscous_time_through_the_existing_machinery() {
+        // The payoff: binarity shortens tau_disk with NO new path. Cap a 30 AU birth disk at a q = 1, 20 AU
+        // binary's Roche lobe (~7.58 AU), feed the capped R_1 to derive_viscous_time_myr (all else equal), and
+        // t_visc falls, because t_visc ~ sqrt(R_1). Holding T fixed isolates the radius effect; the real cooler
+        // T(R_1) at the smaller radius shortens it further.
+        let (c_num, c_log) = eggleton();
+        let (m, t, alpha, mu) = (
+            Fixed::ONE,
+            Fixed::from_int(50),
+            Fixed::from_ratio(1, 100),
+            Fixed::from_ratio(234, 100),
+        );
+        let birth = Fixed::from_int(30);
+        let lobe = roche_lobe_radius_au(Fixed::from_int(20), Fixed::ONE, c_num, c_log).unwrap();
+        let capped = tidally_capped_scale_radius_au(birth, lobe).unwrap();
+        assert_eq!(
+            capped, lobe,
+            "the 30 AU disk is bounded at the Roche-lobe upper edge"
+        );
+        let t_birth = derive_viscous_time_myr(birth, m, t, alpha, mu).unwrap();
+        let t_capped = derive_viscous_time_myr(capped, m, t, alpha, mu).unwrap();
+        assert!(
+            t_capped < t_birth,
+            "the disk bounded at the Roche lobe runs a shorter (upper-bound) viscous time ({} < {})",
+            t_capped.to_f64_lossy(),
+            t_birth.to_f64_lossy()
+        );
+        // t_visc ~ sqrt(R_1), so the ratio tracks sqrt(lobe/birth).
+        let ratio = t_capped.to_f64_lossy() / t_birth.to_f64_lossy();
+        let expected = (lobe.to_f64_lossy() / birth.to_f64_lossy()).sqrt();
+        assert!(
+            (ratio - expected).abs() < 0.02,
+            "the viscous-time ratio tracks sqrt(R_trunc/R_1), got {ratio} vs {expected}"
+        );
+    }
+
     // Wright et al. 2011 convective-turnover fit as a test fixture (cited at the function docs), coefficients and
     // the 0.09 to 1.36 M_sun validity range.
     fn tau_poly() -> ConvectiveTurnoverFit {
@@ -3535,6 +3728,10 @@ mod tests {
         Fixed::from_int(157821)
     }
 
+    fn wien_x_min() -> Fixed {
+        Fixed::from_int(3) // the Wien-tail validity edge (x >~ 3)
+    }
+
     #[test]
     fn the_blackbody_ionizing_fraction_matches_the_wien_tail_oracle() {
         // External f64 oracle (twin-independence): f_BB = (15/pi^4) exp(-x)(x^3+3x^2+6x+6), x = T_ion/T_eff,
@@ -3546,7 +3743,8 @@ mod tests {
             (30000, 2.127986e-1),
         ];
         for (t_eff, oracle) in cases {
-            let f = blackbody_ionizing_fraction(Fixed::from_int(t_eff), t_ion()).unwrap();
+            let f =
+                blackbody_ionizing_fraction(Fixed::from_int(t_eff), t_ion(), wien_x_min()).unwrap();
             let got = f.to_f64_lossy();
             assert!(
                 (got - oracle).abs() / oracle < 0.02,
@@ -3560,9 +3758,12 @@ mod tests {
         // The convicting behaviour: the EUV tail climbs orders of magnitude with T_eff, so a hot Herbig B star
         // photoevaporates far harder than an A star. Monotone, and the 10000 -> 20000 K step alone spans more
         // than two dex.
-        let cool = blackbody_ionizing_fraction(Fixed::from_int(10000), t_ion()).unwrap();
-        let warm = blackbody_ionizing_fraction(Fixed::from_int(20000), t_ion()).unwrap();
-        let hot = blackbody_ionizing_fraction(Fixed::from_int(30000), t_ion()).unwrap();
+        let cool =
+            blackbody_ionizing_fraction(Fixed::from_int(10000), t_ion(), wien_x_min()).unwrap();
+        let warm =
+            blackbody_ionizing_fraction(Fixed::from_int(20000), t_ion(), wien_x_min()).unwrap();
+        let hot =
+            blackbody_ionizing_fraction(Fixed::from_int(30000), t_ion(), wien_x_min()).unwrap();
         assert!(warm > cool && hot > warm, "f_BB rises with T_eff");
         assert!(
             warm.to_f64_lossy() / cool.to_f64_lossy() > 100.0,
@@ -3580,6 +3781,7 @@ mod tests {
             Fixed::from_int(15000),
             Fixed::from_int(100), // L_bol ~ 100 L_sun, a Herbig
             t_ion(),
+            wien_x_min(),
             Fixed::ONE,           // departure_lo
             Fixed::from_int(100), // departure_hi (two dex)
         )
@@ -3600,6 +3802,7 @@ mod tests {
             Fixed::from_int(20000),
             Fixed::from_int(50),
             t_ion(),
+            wien_x_min(),
             Fixed::ONE,
             Fixed::from_int(30),
         )
@@ -3608,6 +3811,7 @@ mod tests {
             Fixed::from_int(20000),
             Fixed::from_int(100),
             t_ion(),
+            wien_x_min(),
             Fixed::ONE,
             Fixed::from_int(30),
         )
@@ -3628,6 +3832,7 @@ mod tests {
             Fixed::from_int(15000),
             Fixed::ZERO,
             t_ion(),
+            wien_x_min(),
             Fixed::ONE,
             Fixed::from_int(100)
         )
@@ -3636,16 +3841,40 @@ mod tests {
             Fixed::from_int(15000),
             Fixed::from_int(100),
             t_ion(),
+            wien_x_min(),
             Fixed::from_int(100),
             Fixed::ONE // hi < lo, inverted
         )
         .is_none());
-        assert!(blackbody_ionizing_fraction(Fixed::from_int(-1), t_ion()).is_none());
+        assert!(blackbody_ionizing_fraction(Fixed::from_int(-1), t_ion(), wien_x_min()).is_none());
+        // Above the Wien-tail validity T_eff (x < wien_x_min ~ 3, i.e. T_eff > ~52600 K): the full-Planck-
+        // denominator regime, a refusal not a silent extrapolation (the second edge of a once-one-ended domain).
+        assert!(
+            blackbody_ionizing_fraction(Fixed::from_int(60000), t_ion(), wien_x_min()).is_none(),
+            "a 60000 K photosphere is past the Wien-tail validity edge: refuse, do not extrapolate"
+        );
+        // The audit's checked-arithmetic fix: a sub-122 K photosphere (x > ~1290) would overflow the polynomial
+        // `x^3`; the checked multiply REFUSES with None (the total-kernel contract) rather than wrapping to
+        // garbage. Non-stellar, but the guard now enforces it instead of trusting the caller.
+        assert!(
+            blackbody_ionizing_fraction(Fixed::from_int(100), t_ion(), wien_x_min()).is_none(),
+            "a 100 K photosphere overflows x^3: refuse (checked), never a wrapped value"
+        );
+        assert!(radiative_euv_luminosity_bracket(
+            Fixed::from_int(60000),
+            Fixed::from_int(100),
+            t_ion(),
+            wien_x_min(),
+            Fixed::ONE,
+            Fixed::from_int(100)
+        )
+        .is_none());
         // A degenerate band [d, d] is a valid point bracket of zero width.
         let point = radiative_euv_luminosity_bracket(
             Fixed::from_int(15000),
             Fixed::from_int(100),
             t_ion(),
+            wien_x_min(),
             Fixed::from_int(5),
             Fixed::from_int(5),
         )
@@ -3937,20 +4166,15 @@ mod tests {
 
     #[test]
     fn the_metallicity_domain_flags_off_solar_draws_without_moving_a_rate() {
-        // The domain-of-validity marker on the metallicity axis: a solar draw is on-sample, a metal-poor draw
-        // classifies MetalPoor (a higher wind rate through weaker cooling), a metal-rich draw MetalRich (a lower
-        // rate). Position only, no rate moved (that is `metallicity_rate_factor`). The axis is orthogonal to the
-        // Owen-versus-Sellek row choice; this classifies position, not a row.
+        // The position classifier on the metallicity axis: a metal-poor draw classifies MetalPoor (a higher wind
+        // rate through weaker cooling), a metal-rich draw MetalRich (a lower rate). Position only, no rate moved
+        // (that is `metallicity_rate_factor`). No exact-equality arm: exactly-solar folds into MetalRich with a
+        // unit factor, since exact `Z == sample` is unreachable by measure on a continuous draw.
         let fit = owen_appendix_b_fit();
         assert_eq!(
             fit.sample_metallicity,
             Fixed::ONE,
             "the coefficients are solar-sampled"
-        );
-        assert_eq!(
-            fit.metallicity_domain(Fixed::ONE),
-            Some(MetallicitySampleDomain::OnSample),
-            "a solar draw is on-sample"
         );
         assert_eq!(
             fit.metallicity_domain(Fixed::from_ratio(3, 10)), // 0.3 Z_sun
@@ -3961,6 +4185,11 @@ mod tests {
             fit.metallicity_domain(Fixed::from_int(2)), // 2 Z_sun
             Some(MetallicitySampleDomain::MetalRich),
             "a metal-rich draw runs a lower rate"
+        );
+        // Exactly on-sample folds into MetalRich (the unit-factor side), no dead exact-equality branch.
+        assert_eq!(
+            fit.metallicity_domain(Fixed::ONE),
+            Some(MetallicitySampleDomain::MetalRich)
         );
         // A non-positive composition is not a draw: an error, never a classification.
         assert_eq!(fit.metallicity_domain(Fixed::ZERO), None);
@@ -3975,14 +4204,15 @@ mod tests {
         // (metal-rich runs SLOWER, factor < 1). Solar is exactly [1, 1]. The band width is the slope band times
         // |log10 Z|, the model-dependent ignorance stated, not a point.
         let fit = owen_appendix_b_fit();
-        let (steep, shallow, floor) = (
+        let (steep, shallow, floor, ceiling) = (
             Fixed::from_ratio(-8, 10), // -0.8
             Fixed::from_ratio(-4, 10), // -0.4
             Fixed::from_ratio(3, 100), // 0.03 solar floor
+            Fixed::from_int(2),        // 2 solar ceiling (Ercolano-Clarke fit top)
         );
         // Metal-poor: factor above one, both bounds.
         let poor = fit
-            .metallicity_rate_factor(Fixed::from_ratio(3, 10), steep, shallow, floor)
+            .metallicity_rate_factor(Fixed::from_ratio(3, 10), steep, shallow, floor, ceiling)
             .unwrap();
         assert!(
             (poor.lo().to_f64_lossy() - 1.62).abs() < 0.02
@@ -3994,7 +4224,7 @@ mod tests {
         assert!(poor.lo() > Fixed::ONE, "a metal-poor draw runs faster");
         // Metal-rich: factor below one.
         let rich = fit
-            .metallicity_rate_factor(Fixed::from_int(2), steep, shallow, floor)
+            .metallicity_rate_factor(Fixed::from_int(2), steep, shallow, floor, ceiling)
             .unwrap();
         assert!(rich.hi() < Fixed::ONE, "a metal-rich draw runs slower");
         assert!(
@@ -4004,7 +4234,7 @@ mod tests {
         );
         // Solar is the identity: no adjustment on-sample.
         let solar = fit
-            .metallicity_rate_factor(Fixed::ONE, steep, shallow, floor)
+            .metallicity_rate_factor(Fixed::ONE, steep, shallow, floor, ceiling)
             .unwrap();
         assert_eq!(solar.lo(), Fixed::ONE);
         assert_eq!(solar.hi(), Fixed::ONE);
@@ -4018,29 +4248,42 @@ mod tests {
     }
 
     #[test]
-    fn the_metallicity_widening_refuses_below_the_slope_domain() {
-        // DOMAIN: the negative slope holds only above ~0.03 solar; below it the FUV rate turns over, a separate
-        // regime, so the widening REFUSES rather than extrapolating the slope into physics it does not describe.
+    fn the_metallicity_widening_refuses_outside_the_two_ended_domain() {
+        // DOMAIN (two-ended): the slope holds between the ~0.03-solar FUV floor and the 2-solar fit ceiling; outside
+        // either edge the widening REFUSES rather than extrapolating the slope into physics it does not describe.
         let fit = owen_appendix_b_fit();
-        let (steep, shallow, floor) = (
+        let (steep, shallow, floor, ceiling) = (
             Fixed::from_ratio(-8, 10),
             Fixed::from_ratio(-4, 10),
             Fixed::from_ratio(3, 100),
+            Fixed::from_int(2), // 2 solar ceiling
         );
+        // Below the floor: the FUV-turnover regime, a separate door.
         assert!(
-            fit.metallicity_rate_factor(Fixed::from_ratio(2, 100), steep, shallow, floor)
+            fit.metallicity_rate_factor(Fixed::from_ratio(2, 100), steep, shallow, floor, ceiling)
                 .is_none(),
             "0.02 solar is below the slope domain: the FUV-turnover door, not an extrapolated factor"
         );
-        // Just above the floor still resolves.
+        // Above the ceiling: past the fitted range, the second door (the two-ended guard).
         assert!(
-            fit.metallicity_rate_factor(Fixed::from_ratio(5, 100), steep, shallow, floor)
+            fit.metallicity_rate_factor(Fixed::from_int(5), steep, shallow, floor, ceiling)
+                .is_none(),
+            "5 solar is above the Ercolano-Clarke fit's 2-solar edge: refuse, not a silent extrapolation"
+        );
+        // Inside the domain (both ends) resolves.
+        assert!(
+            fit.metallicity_rate_factor(Fixed::from_ratio(5, 100), steep, shallow, floor, ceiling)
                 .is_some(),
             "0.05 solar is within the slope domain"
         );
+        assert!(
+            fit.metallicity_rate_factor(Fixed::from_int(2), steep, shallow, floor, ceiling)
+                .is_some(),
+            "2 solar sits exactly on the ceiling, inclusive"
+        );
         // A non-positive draw is an error, never a factor.
         assert!(fit
-            .metallicity_rate_factor(Fixed::ZERO, steep, shallow, floor)
+            .metallicity_rate_factor(Fixed::ZERO, steep, shallow, floor, ceiling)
             .is_none());
     }
 
