@@ -789,6 +789,71 @@ pub fn accretion_clock_hindcasts(
     Some(true)
 }
 
+/// The DERIVED VISCOUS TIME `t_visc` (megayears), the characteristic time of the accretion clock's decline (the
+/// `t_visc` argument of [`viscous_similarity_accretion_rate`]), DERIVED from the disk's own structure rather than
+/// reserved. The arc ruling: this is not a free scalar; the Lynden-Bell-Pringle family defines it as the viscous
+/// time at the scale radius, `t_visc = R_1^2 / (3 * nu(R_1))`, with the Shakura-Sunyaev viscosity
+/// `nu = alpha * c_s * H`. Reducing the disk's own relations (`H = c_s / Omega`, `c_s^2 = k_B * T / (mu * m_H)`,
+/// `Omega = sqrt(G * M_star / R_1^3)`) collapses it to
+/// `t_visc = sqrt(R_1) * sqrt(G * M_star) * mu * m_H / (3 * alpha * k_B * T(R_1))`, so it reads the already-banked
+/// `alpha`, the disk temperature at the scale radius, and the mean molecular weight, and derives from them. The
+/// scale radius `R_1` is the disk's characteristic radius `r_c`. Computed in the log domain (the
+/// `viscous_similarity_surface_density` precedent), converting seconds to megayears at the end. `None` on a
+/// non-positive input or an intermediate past the representable range.
+pub fn derive_viscous_time_myr(
+    scale_radius_au: Fixed,
+    star_mass_ratio: Fixed,
+    disk_temperature_k: Fixed,
+    alpha_viscosity: Fixed,
+    mean_molecular_weight: Fixed,
+) -> Option<Fixed> {
+    if scale_radius_au <= Fixed::ZERO
+        || star_mass_ratio <= Fixed::ZERO
+        || disk_temperature_k <= Fixed::ZERO
+        || alpha_viscosity <= Fixed::ZERO
+        || mean_molecular_weight <= Fixed::ZERO
+    {
+        return None;
+    }
+    // ln R_1 [m] = ln(scale_radius_au) + ln(AU).
+    let ln_r1 = scale_radius_au
+        .ln()
+        .checked_add(civsim_physics::saha::ln_of_decimal(ASTRONOMICAL_UNIT_M)?)?;
+    // ln(G * M_star) = ln G + ln(star_mass_ratio) + ln(M_sun).
+    let ln_g = civsim_physics::saha::ln_of_decimal(
+        civsim_units::fundamentals::GRAVITATIONAL_CONSTANT.value,
+    )?;
+    let ln_g_m_star = ln_g
+        .checked_add(star_mass_ratio.ln())?
+        .checked_add(civsim_physics::saha::ln_of_decimal(SOLAR_MASS_KG)?)?;
+    // ln m_H = ln(1e-3) - ln(N_A): one atomic mass unit in kg (one gram per mole per amu).
+    let ln_m_h = civsim_physics::saha::ln_of_decimal("1e-3")?.checked_sub(
+        civsim_physics::saha::ln_of_decimal(civsim_units::fundamentals::AVOGADRO.value)?,
+    )?;
+    let ln_k_b = civsim_physics::saha::ln_of_decimal(civsim_units::fundamentals::BOLTZMANN.value)?;
+    let half = Fixed::from_ratio(1, 2);
+    // ln t_visc [s] = 0.5 ln R_1 + 0.5 ln(G M_star) + ln mu + ln m_H - ln 3 - ln alpha - ln k_B - ln T.
+    let ln_t_s = half
+        .checked_mul(ln_r1)?
+        .checked_add(half.checked_mul(ln_g_m_star)?)?
+        .checked_add(mean_molecular_weight.ln())?
+        .checked_add(ln_m_h)?
+        .checked_sub(Fixed::from_int(3).ln())?
+        .checked_sub(alpha_viscosity.ln())?
+        .checked_sub(ln_k_b)?
+        .checked_sub(disk_temperature_k.ln())?;
+    // Convert seconds to megayears: subtract ln(1e6 * Julian year) in the log domain.
+    let ln_megayear_s = civsim_physics::saha::ln_of_decimal(JULIAN_YEAR_S)?
+        .checked_add(civsim_physics::saha::ln_of_decimal("1e6")?)?;
+    let ln_t_myr = ln_t_s.checked_sub(ln_megayear_s)?;
+    // Fail loud past the representable exp ceiling rather than saturate (the surface-density precedent).
+    let ln_ceiling = Fixed::from_int(31).checked_mul(Fixed::from_int(2).ln())?;
+    if ln_t_myr >= ln_ceiling {
+        return None;
+    }
+    Some(ln_t_myr.exp())
+}
+
 /// The FEEDING-ZONE (annulus) DISK MASS a planet accretes from, in `normalization`-units times AU-squared: the
 /// integral `M = integral over [inner, outer] of 2*pi*r*Sigma(r) dr`, the disk mass in the orbital annulus
 /// `[inner_au, outer_au]`. This is the ACCRETION-mass scaffold: the mass follows from the geometry and the surface
@@ -2204,5 +2269,81 @@ mod tests {
         assert!(viscous_similarity_accretion_rate(m, Fixed::ZERO, g, a).is_none());
         assert!(viscous_similarity_accretion_rate(m, t, Fixed::from_int(2), a).is_none());
         assert!(viscous_similarity_accretion_rate(m, t, g, Fixed::from_int(-1)).is_none());
+    }
+
+    #[test]
+    fn the_viscous_time_matches_the_analytic_scale_time() {
+        // External f64 oracle (twin-independence): t_visc = sqrt(R_1)*sqrt(G*M)*mu*m_H/(3*alpha*k_B*T), computed
+        // OUTSIDE the fixed-point engine with the same constants the function reads. A solar disk (R_1 = 30 AU,
+        // M = 1 M_sun) at 50 K with alpha = 0.01, mu = 2.34 gives ~0.145 Myr, a sub-Myr scale time consistent
+        // with the observed class-II band.
+        let au = 149597870700.0_f64;
+        let m_sun = 1.989e30_f64;
+        let g = 6.67430e-11_f64;
+        let k_b = 1.380649e-23_f64;
+        let m_h = 1e-3_f64 / 6.02214076e23_f64;
+        let year = 31557600.0_f64;
+        let r1 = 30.0 * au;
+        let t_s = r1.sqrt() * (g * m_sun).sqrt() * 2.34 * m_h / (3.0 * 0.01 * k_b * 50.0);
+        let expected_myr = t_s / (1e6 * year);
+        let derived = derive_viscous_time_myr(
+            Fixed::from_int(30),
+            Fixed::ONE,
+            Fixed::from_int(50),
+            Fixed::from_ratio(1, 100),
+            Fixed::from_ratio(234, 100),
+        )
+        .unwrap();
+        // DEFAULTS-TAKEN, the 2 percent tolerance: a numerical-accuracy bound on the eight-term fixed-point log
+        // chain against the f64 oracle, not a residue budget. Basis: roughly a thousandth per ln/exp times the
+        // chain length, loose headroom.
+        assert!(
+            (derived.to_f64_lossy() - expected_myr).abs() / expected_myr < 0.02,
+            "t_visc matches the analytic scale time (expected {expected_myr}, got {})",
+            derived.to_f64_lossy()
+        );
+    }
+
+    #[test]
+    fn the_viscous_time_scales_inversely_with_alpha() {
+        // t_visc is proportional to 1/alpha by the analytic form, an independent check on the alpha dependence
+        // (a wrong power on alpha would break the ratio). Doubling alpha halves t_visc.
+        let base = derive_viscous_time_myr(
+            Fixed::from_int(30),
+            Fixed::ONE,
+            Fixed::from_int(50),
+            Fixed::from_ratio(1, 100),
+            Fixed::from_ratio(234, 100),
+        )
+        .unwrap();
+        let double_alpha = derive_viscous_time_myr(
+            Fixed::from_int(30),
+            Fixed::ONE,
+            Fixed::from_int(50),
+            Fixed::from_ratio(2, 100),
+            Fixed::from_ratio(234, 100),
+        )
+        .unwrap();
+        let ratio = base.checked_div(double_alpha).unwrap().to_f64_lossy();
+        assert!(
+            (ratio - 2.0).abs() < 0.01,
+            "doubling alpha halves t_visc (ratio {ratio}, expected 2.0)"
+        );
+    }
+
+    #[test]
+    fn the_viscous_time_fails_loud_on_bad_inputs() {
+        let (r, m, t, a, mu) = (
+            Fixed::from_int(30),
+            Fixed::ONE,
+            Fixed::from_int(50),
+            Fixed::from_ratio(1, 100),
+            Fixed::from_ratio(234, 100),
+        );
+        assert!(derive_viscous_time_myr(Fixed::ZERO, m, t, a, mu).is_none());
+        assert!(derive_viscous_time_myr(r, Fixed::ZERO, t, a, mu).is_none());
+        assert!(derive_viscous_time_myr(r, m, Fixed::ZERO, a, mu).is_none());
+        assert!(derive_viscous_time_myr(r, m, t, Fixed::ZERO, mu).is_none());
+        assert!(derive_viscous_time_myr(r, m, t, a, Fixed::ZERO).is_none());
     }
 }
