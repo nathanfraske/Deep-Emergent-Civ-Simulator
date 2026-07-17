@@ -110,10 +110,17 @@ jobs:
       #   - Items that EXIST but whose body is a stub: the link resolves and the claim is still false.
       #   - `#[cfg(test)]` items, which are unlinkable, so "the falsifier proves it" claims cannot be
       #     link-checked at exactly the sites that cite proofs.
-      #   - Cross-crate claims where the crate is not a dependency, which must be backticked and are hence
-      #     invisible. The live case: `crates/compose` names a `civsim_sim` item, and compose does not depend on
-      #     sim BY DESIGN (the authored-physics side must not learn of the emergent side), so rustdoc can never
-      #     check that cite and only a reader can.
+      #   - CROSS-FIREWALL REFERENCES: UNREACHABLE BY CONSTRUCTION, PANEL TERRITORY. The live case is
+      #     `crates/compose` naming a `civsim_sim` item. Compose does not depend on sim BY DESIGN: the
+      #     authored-physics side must not learn of the emergent side, which is this project's single strongest
+      #     ANTI-STEERING structure, authored physics constitutionally unable to condition on emergent outcomes.
+      #     THE FIREWALL OUTRANKS THIS GATE, PERMANENTLY AND ON PURPOSE (owner ruling 2026-07-16). A rustdoc
+      #     link IS A DEPENDENCY IN MINIATURE, so NO RESOLUTION PATH IS EVER GRANTED, and "make the gate green"
+      #     is never a reason to open one. Cross-firewall references are BY-NAME PROSE WITH THE BOUNDARY STATED
+      #     IN THE SENTENCE. The rot risk closes without touching the architecture, through a TOOLING-LEVEL NAME
+      #     CHECK (a script matching mentioned item names against the other crate's actual items), which is
+      #     legal precisely because TOOLING MAY READ BOTH SIDES OF A FIREWALL THAT CODE MAY NOT CROSS. The
+      #     reference stays checkable; the crates stay strangers.
       # CLOSED by this gate, and formerly the sharp one: "private items are not scanned at all".
       #
       # `rustdoc::private_intra_doc_links` is a DIFFERENT lint (a public doc linking a private item, ~91
