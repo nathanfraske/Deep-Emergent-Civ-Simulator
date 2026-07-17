@@ -949,35 +949,39 @@ pub fn stellar_rossby_number(rotation_period_days: Fixed, tau_conv_days: Fixed) 
     rotation_period_days.checked_div(tau_conv_days)
 }
 
-/// The X-RAY BAND MAPPING: the X-ray-to-bolometric ratio `L_X / L_bol` from the Rossby number, the X-ray window on
-/// the shared rotation state (Wright et al. 2011). Two regimes: SATURATED below the critical Rossby `ro_sat`, at a
-/// constant `10^saturated_log10_fraction`; and UNSATURATED above it, declining as `(Ro / ro_sat)^beta`. The band
-/// carries its OWN saturated level and slope, distinct from the EUV band's, which is what lets `L_X / L_EUV`
-/// evolve rather than be welded to a constant (see the welded-bands defect: one state with two measured mappings
-/// DERIVES the ratio; one shape for two bands would AUTHOR it). To get `L_X`, multiply by the bolometric
-/// luminosity ([`crate::stellar::luminosity_ratio`] times `L_sun`); this returns the dimensionless ratio.
+/// The ACTIVITY BAND MAPPING: a high-energy band's luminosity-to-bolometric ratio `L_band / L_bol` from the
+/// Rossby number, one window on the shared rotation state. Two regimes: SATURATED below the critical Rossby
+/// `ro_sat`, at a constant `10^saturated_log10_fraction`; and UNSATURATED above it, declining as
+/// `(Ro / ro_sat)^beta`. It is BAND-AGNOSTIC by construction: the FORM (a saturated power law) is the shared
+/// dynamo physics, and the BAND is entirely in the coefficient set the caller passes. That is the literal shape
+/// of the welded-bands cure, one state with two MEASURED mappings DERIVES the `L_X / L_EUV` ratio (it evolves
+/// because the coefficients differ), where one shared exponent would have AUTHORED it. To get an absolute
+/// luminosity, multiply by the bolometric luminosity ([`crate::stellar::luminosity_ratio`] times `L_sun`); this
+/// returns the dimensionless ratio.
 ///
-/// PARAMETRIC over the reserved-with-basis coefficients, each Wright et al. 2011 (arXiv:1109.4634, ar5iv HTML,
-/// native text so no OCR risk on the exponent), cited with its conditioning (824 solar and late-type stars,
-/// F-M dwarfs): `ro_sat = 0.13 +/- 0.02`; `saturated_log10_fraction = -3.13 +/- 0.22` (almost spectral-type
-/// independent). The slope `beta` carries a SOURCE-INTERNAL SELECTION DICHOTOMY, declared as a band per the
-/// V-star precedent: Wright et al. 2011 fits `beta = -2.55 +/- 0.15` on the full 824-star sample and
-/// `beta = -2.70 +/- 0.13` on the selection-corrected unbiased sub-sample (36 Mt. Wilson stars); the unbiased fit
-/// SERVES, with the full-sample value the other end of the declared band `[-2.70, -2.55]`. Both are inconsistent
-/// with the canonical -2 at ~5 sigma. The age decay is DERIVED not authored: with `P_rot ~ t^(1/2)` (Skumanich),
-/// `L_X / L_bol ~ Ro^beta ~ t^(beta/2)`, so the X-ray age index is `beta/2 ~ -1.35`, which matches the independent
-/// direct measurement `-1.37 +/- 0.47` (Aldarondo Quinones et al. 2025), a cross-check, not a second input.
+/// TWO COEFFICIENT SETS, each reserved-with-basis and cited, are the two measured mappings on this one form:
 ///
-/// TERMS DROPPED on that cross-check: the derivation assumes UNSATURATED Skumanich throughout, but a young star
-/// sits SATURATED with the fraction pinned at the plateau (the `Ro <= ro_sat` branch here), so the single
-/// `beta/2` index describes the POST-SATURATION era only. This is a domain statement, not an error: the eventual
-/// `Omega(t)` rotation structure renders it moot by producing plateau-then-decline naturally from the Rossby
-/// number crossing `ro_sat`, which this function already encodes across its two branches.
+/// X-RAY (the disk-wind consumer, Owen X-ray photoevaporation): Wright et al. 2011 (arXiv:1109.4634, ar5iv HTML,
+/// native text so no OCR risk), 824 solar and late-type F-M stars: `ro_sat = 0.13 +/- 0.02`;
+/// `saturated_log10_fraction = -3.13 +/- 0.22`; `beta` a SOURCE-INTERNAL SELECTION DICHOTOMY declared as a band
+/// per the V-star precedent, `-2.70 +/- 0.13` (unbiased sub-sample, SERVES) to `-2.55 +/- 0.15` (full sample), the
+/// band `[-2.70, -2.55]`, both rejecting the canonical -2 at ~5 sigma. The X-ray age decay is DERIVED: with
+/// `P_rot ~ t^(1/2)` (Skumanich), `L_X / L_bol ~ Ro^beta ~ t^(beta/2)`, so the index is `beta/2 ~ -1.35`, matching
+/// the independent `-1.37 +/- 0.47` (Aldarondo Quinones et al. 2025), a cross-check. TERMS DROPPED on that
+/// cross-check: it assumes unsaturated Skumanich throughout, so `beta/2` describes the POST-SATURATION era only;
+/// the `Omega(t)` structure renders that moot by producing plateau-then-decline from `Ro` crossing `ro_sat`.
 ///
-/// The EUV band is the NAMED SIBLING on the same Rossby state with its OWN coefficients, and its rows carry a
-/// reconstruction-modality flag (EUV is largely unobservable through the interstellar medium, its indices
-/// proxy-reconstructed); this slice does not build it. `None` on a non-positive Rossby or `ro_sat`.
-pub fn xray_luminosity_fraction(
+/// EUV (the atmospheric-escape consumer, a NAMED SIBLING this slice does not wire): France et al. 2024, saturated
+/// `L_EUV / L_bol = 9.7e-5 +/- 1.6e-5` (`saturated_log10_fraction ~ -4.01`). TWO EUV ANOMALIES surfaced, not
+/// silently resolved: (1) France measures EUV against AGE, not the Rossby number, so its Rossby slope is INFERRED
+/// through Skumanich, `beta_EUV = 2 * age_index = 2 * (-1.12 +/- 0.06) ~ -2.24`, a modeling assumption the X-ray
+/// band did not need; (2) the EUV values are PROXY-RECONSTRUCTED (N V line and DEM, EUV being ISM-absorbed), the
+/// reconstruction-modality flag on every EUV row. Open design call for the gate: whether the EUV shares the X-ray
+/// dynamo `ro_sat = 0.13` or carries a band-specific threshold (its age breakpoint is 73 +/- 16 Myr against the
+/// X-ray's ~100 Myr). Until ruled, the EUV coefficients are surfaced, not settled.
+///
+/// `None` on a non-positive Rossby or `ro_sat`.
+pub fn activity_luminosity_fraction(
     rossby: Fixed,
     ro_sat: Fixed,
     saturated_log10_fraction: Fixed,
@@ -2539,8 +2543,8 @@ mod tests {
         // Choose rotation periods so both give the same Rossby number Ro = 1.0 (P_rot = tau).
         let ro_g = stellar_rossby_number(tau_g, tau_g).unwrap();
         let ro_m = stellar_rossby_number(tau_m, tau_m).unwrap();
-        let frac_g = xray_luminosity_fraction(ro_g, ro_sat, sat, beta).unwrap();
-        let frac_m = xray_luminosity_fraction(ro_m, ro_sat, sat, beta).unwrap();
+        let frac_g = activity_luminosity_fraction(ro_g, ro_sat, sat, beta).unwrap();
+        let frac_m = activity_luminosity_fraction(ro_m, ro_sat, sat, beta).unwrap();
         assert_eq!(
             frac_g, frac_m,
             "same Rossby gives the same fractional activity regardless of mass"
@@ -2558,7 +2562,7 @@ mod tests {
         let beta = Fixed::from_ratio(-27, 10); // the unbiased sub-sample fit, which serves
                                                // Saturated regime: Ro below ro_sat returns the plateau exactly.
         let saturated =
-            xray_luminosity_fraction(Fixed::from_ratio(5, 100), ro_sat, sat, beta).unwrap();
+            activity_luminosity_fraction(Fixed::from_ratio(5, 100), ro_sat, sat, beta).unwrap();
         let expected_plateau = 10f64.powf(-3.13);
         assert!(
             (saturated.to_f64_lossy() - expected_plateau).abs() / expected_plateau < 0.02,
@@ -2569,7 +2573,7 @@ mod tests {
         let ro = Fixed::from_ratio(1757, 1000);
         let ro_f = 1.757_f64;
         let expected = 10f64.powf(-3.13) * (ro_f / 0.13).powf(-2.70);
-        let derived = xray_luminosity_fraction(ro, ro_sat, sat, beta).unwrap();
+        let derived = activity_luminosity_fraction(ro, ro_sat, sat, beta).unwrap();
         assert!(
             (derived.to_f64_lossy() - expected).abs() / expected < 0.02,
             "unsaturated fraction matches the oracle (expected {expected:e}, got {:e})",
@@ -2580,7 +2584,7 @@ mod tests {
             "the unsaturated fraction is below the plateau"
         );
         // MUTATION: the canonical -2 slope, which Wright rejects. It lands far outside the 2 percent band.
-        let mutant = xray_luminosity_fraction(ro, ro_sat, sat, Fixed::from_int(-2)).unwrap();
+        let mutant = activity_luminosity_fraction(ro, ro_sat, sat, Fixed::from_int(-2)).unwrap();
         assert!(
             (mutant.to_f64_lossy() - expected).abs() / expected > 0.5,
             "a mutated slope is convicted, off by more than half (mutant {:e}, true {expected:e})",
@@ -2599,8 +2603,8 @@ mod tests {
             Fixed::from_ratio(-313, 100),
             Fixed::from_ratio(-27, 10),
         );
-        assert!(xray_luminosity_fraction(Fixed::ZERO, ro_sat, sat, beta).is_none());
-        assert!(xray_luminosity_fraction(Fixed::ONE, Fixed::ZERO, sat, beta).is_none());
+        assert!(activity_luminosity_fraction(Fixed::ZERO, ro_sat, sat, beta).is_none());
+        assert!(activity_luminosity_fraction(Fixed::ONE, Fixed::ZERO, sat, beta).is_none());
     }
 
     #[test]
@@ -2620,5 +2624,30 @@ mod tests {
         );
         // Inside the range still resolves.
         assert!(convective_turnover_time_days(Fixed::ONE, &fit).is_some());
+    }
+
+    #[test]
+    fn the_band_ratio_evolves_with_rossby_the_welded_bands_cure() {
+        // The payoff test: the SAME band mapping on the X-ray and EUV coefficient sets gives a ratio L_X/L_EUV
+        // that EVOLVES with the Rossby number, because the slopes differ (X-ray -2.70 steeper than EUV -2.24). A
+        // welded single-exponent design would have pinned this ratio constant forever; one state with two
+        // measured mappings derives it. (The EUV coefficients are surfaced-pending-gate, so this proves the
+        // MECHANISM, not the exact crossover.)
+        let ro_sat = Fixed::from_ratio(13, 100);
+        let xray_sat = Fixed::from_ratio(-313, 100);
+        let xray_beta = Fixed::from_ratio(-27, 10);
+        let euv_sat = Fixed::from_ratio(-401, 100); // log10(9.7e-5) ~ -4.01, France 2024
+        let euv_beta = Fixed::from_ratio(-224, 100); // 2 * -1.12, inferred via Skumanich
+        let ratio_at = |ro: Fixed| {
+            let lx = activity_luminosity_fraction(ro, ro_sat, xray_sat, xray_beta).unwrap();
+            let le = activity_luminosity_fraction(ro, ro_sat, euv_sat, euv_beta).unwrap();
+            lx.checked_div(le).unwrap().to_f64_lossy()
+        };
+        let ratio_young = ratio_at(Fixed::from_ratio(3, 10)); // Ro = 0.3
+        let ratio_old = ratio_at(Fixed::from_int(3)); // Ro = 3.0
+        assert!(
+            ratio_old < ratio_young * 0.9,
+            "L_X/L_EUV evolves with Rossby (X-ray fades faster), not welded (young {ratio_young:e}, old {ratio_old:e})"
+        );
     }
 }
