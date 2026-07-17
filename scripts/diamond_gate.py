@@ -186,23 +186,54 @@ def law_providers():
     `@provides` and defends it); the checking stays mechanical.
     """
     out = {}
+    _scan_providers(LAWS, "crates/physics/src/laws.rs", out, name_is_quantity=True)
+
+    # THE CROSS-CRATE SWEEP. `laws.rs` is not where the collisions live, and this gate's own scorecard says so:
+    # Slack and Hofmeister sit in `crates/materials`, and the two logsumexp implementations sit in
+    # `physics/saha.rs` and `materials/creep.rs`. A gate that reads one file audits one file. So EVERY `.rs`
+    # under `crates/` is swept for `@provides`, and a file outside laws.rs contributes ONLY where a human wrote
+    # the annotation: no bare `pub fn` out there is guessed to provide the quantity its name states, because
+    # outside the law kernels that guess would be noise rather than signal. Declared providers only, which keeps
+    # authorship human and the counting mechanical.
+    for path in sorted((ROOT / "crates").rglob("*.rs")):
+        if path == LAWS:
+            continue
+        try:
+            if "@provides" not in path.read_text():
+                continue
+        except Exception:
+            continue
+        rel = path.relative_to(ROOT).as_posix()
+        _scan_providers(path, rel, out, name_is_quantity=False)
+    return out
+
+
+def _scan_providers(path, rel, out, name_is_quantity):
+    """Bind each `@provides` annotation to the next `pub fn`, appending to the quantity's provider list.
+
+    `name_is_quantity` is the laws.rs convention: an UNANNOTATED kernel there provides the quantity its name
+    states, which is the gate's original (and only) inference. Everywhere else, silence means silence.
+    """
     pending = None
-    for i, line in enumerate(LAWS.read_text().splitlines(), 1):
+    for i, line in enumerate(path.read_text().splitlines(), 1):
         ann = re.search(r"@provides\s+(\w+)", line)
         if ann:
             pending = ann.group(1)
             continue
-        m = re.match(r"pub fn (\w+)\s*\(", line)
+        m = (
+            re.match(r"pub fn (\w+)\s*[(<]", line)
+            if name_is_quantity
+            else re.match(r"\s*(?:pub(?:\([^)]*\))?\s+)?fn (\w+)\s*[(<]", line)
+        )
         if m:
-            out.setdefault(pending or m.group(1), []).append(
-                (m.group(1), f"crates/physics/src/laws.rs:{i}")
-            )
+            quantity = pending or (m.group(1) if name_is_quantity else None)
+            if quantity:
+                out.setdefault(quantity, []).append((m.group(1), f"{rel}:{i}"))
             pending = None
         elif line.strip() and not line.strip().startswith("///"):
-            # The annotation binds to the NEXT `pub fn`, so any non-doc line between them breaks the binding.
+            # The annotation binds to the NEXT fn, so any non-doc line between them breaks the binding.
             # An annotation that could drift onto a function it does not describe would be worse than none.
             pending = None
-    return out
 
 
 def stored_providers():
@@ -365,7 +396,13 @@ def main():
 
     print("THE DIAMOND GATE: quantities with a DERIVING law and a STORING field, unarbitrated.")
     print(f"canary fixture: {len(CANARIES)} known cases, all behaved (the gate can still see)")
-    print(f"scanned {len(laws)} laws.rs kernels against every pub struct field under crates/")
+    # COUNT WHAT THE SENTENCE CLAIMS. `len(laws)` is the QUANTITY count across every crate now that the sweep
+    # is cross-crate, so printing it as "laws.rs kernels" would state a number the label does not describe: the
+    # render told the same lie one line down until it was fixed. Count the laws.rs providers themselves.
+    kernel_sites = sum(
+        1 for ps in laws.values() for _, site in ps if site.startswith("crates/physics/src/laws.rs:")
+    )
+    print(f"scanned {kernel_sites} laws.rs kernels against every pub struct field under crates/")
     aliased = sum(1 for q, ps in laws.items() for fn, _ in ps if fn != q)
     print(
         f"quantity-to-provider mapping: {sum(len(p) for p in laws.values())} providers over {len(laws)} "
@@ -410,7 +447,7 @@ def report_twins(twins):
         print(f"    ({quantity})")
         print("     |")
         for fn, site in providers:
-            print(f"     +-- [DERIVED]  laws::{fn}()            {site}")
+            print(f"     +-- [DERIVED]  {fn}()  {site}")
         print("     |")
         print("     +-- ARBITRATION: none registered  <-- the defect")
         print()

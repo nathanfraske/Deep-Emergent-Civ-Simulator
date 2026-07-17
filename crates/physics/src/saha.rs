@@ -113,6 +113,7 @@ pub fn ln_fundamental(symbol: &str) -> Option<Fixed> {
 /// larger operand, so `lo - hi <= 0` and the inner `exp` is in `(0, 1]` (never overflows, underflows harmlessly to
 /// zero when one term dominates, giving `hi`). The fixed hi-then-lo ordering makes it associative-stable and
 /// order-independent (the canonical-logsumexp determinism rule).
+/// @provides log_sum_exp
 pub fn log_sum_exp(a: Fixed, b: Fixed) -> Fixed {
     let (hi, lo) = if a >= b { (a, b) } else { (b, a) };
     // lo - hi <= 0; a saturating subtract only matters at the representable rails, which the log domain avoids.

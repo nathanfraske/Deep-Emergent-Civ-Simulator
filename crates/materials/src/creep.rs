@@ -208,6 +208,7 @@ pub enum CreepComposition {
 /// `(0, 1]` (in-window, no overflow). The shifted terms are summed in CANONICAL (sorted-ascending) order so the
 /// reduction is permutation-independent (rider 1c), the fixed-topology-reduction discipline in log-space. The
 /// slice must be non-empty (callers guard).
+/// @provides log_sum_exp
 fn logsumexp_canonical(values: &[Fixed]) -> Fixed {
     let mut max = values[0];
     for &v in &values[1..] {
