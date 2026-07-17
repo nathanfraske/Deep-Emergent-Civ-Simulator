@@ -483,31 +483,44 @@ pub fn brittle_differential_mpa(
     )?;
     let low_licensed = low_n < law.low_domain_max;
     let high_licensed = high_n >= law.high_domain_min;
-    // THE LOW BRANCH'S ROUGHNESS BAND, if the owner has set it. Byerlee's low fit is a central line through
-    // roughness scatter, so where that fit is operative the honest strength is the INTERVAL the scatter spans,
-    // resolved through the SAME Mohr-Coulomb construction at the band's coefficient and cohesion edges. `None` is
-    // the reserved-unset state: the central fit alone, never a fabricated width. Strength rises with both
-    // coefficient and cohesion, so the lo-lo edge is the weak end and the hi-hi edge the strong one; ordered here
-    // so a consumer reads low before high without re-sorting.
+    // THE LOW BRANCH'S ROUGHNESS BAND, where the material has a measured one AND the fault-normal stress sits in its
+    // scatter domain. Byerlee's low fit is a central line through roughness scatter below his 50-bar boundary; above
+    // it the intermediate fit is tight, so the band is REGIME-SCOPED, never smeared across the whole low branch (that
+    // would overstate the scatter forty times in depth). In the roughness regime the honest strength is the INTERVAL
+    // the scatter spans, resolved through the SAME Mohr-Coulomb construction at the band's edges. At or above the
+    // boundary the intermediate residual band applies once a source pins it; until then it is `None`, the central fit
+    // alone (band-pending, absence as datum, never a fabricated zero width). Strength rises with both coefficient and
+    // cohesion, so the lo-lo edge is the weak end and hi-hi the strong one; ordered here so a consumer reads low first.
     let low_band = match law.low_stress_band {
         Some(b) => {
-            let (weak, _) = mohr_coulomb_differential_mpa(
-                b.coefficient_lo,
-                b.cohesion_lo,
-                vertical_stress_mpa,
-                sense,
-            )?;
-            let (strong, _) = mohr_coulomb_differential_mpa(
-                b.coefficient_hi,
-                b.cohesion_hi,
-                vertical_stress_mpa,
-                sense,
-            )?;
-            Some(if weak <= strong {
-                (weak, strong)
+            // The regime is keyed on the CENTRAL fit's fault-normal stress: below the scatter boundary, the roughness
+            // cloud's coefficient-and-cohesion edges; at or above, the intermediate residual around the central fit
+            // (its cohesion is the central low cohesion), or `None` while that residual read is pending.
+            let edges = if low_n < b.scatter_domain_max {
+                Some((
+                    b.coefficient_lo,
+                    b.cohesion_lo,
+                    b.coefficient_hi,
+                    b.cohesion_hi,
+                ))
             } else {
-                (strong, weak)
-            })
+                b.intermediate_band
+                    .map(|(clo, chi)| (clo, law.low_cohesion, chi, law.low_cohesion))
+            };
+            match edges {
+                Some((clo, coh_lo, chi, coh_hi)) => {
+                    let (weak, _) =
+                        mohr_coulomb_differential_mpa(clo, coh_lo, vertical_stress_mpa, sense)?;
+                    let (strong, _) =
+                        mohr_coulomb_differential_mpa(chi, coh_hi, vertical_stress_mpa, sense)?;
+                    Some(if weak <= strong {
+                        (weak, strong)
+                    } else {
+                        (strong, weak)
+                    })
+                }
+                None => None,
+            }
         }
         None => None,
     };
@@ -3360,7 +3373,14 @@ mod tests {
         rayleigh: Fixed,
     ) -> LithosphereEnvelope<'a> {
         LithosphereEnvelope {
-            friction: rock_friction_law(),
+            // Un-banded rock: this helper isolates the lid, geotherm, and solve machinery, so it carries the
+            // central low fit alone. The low-stress roughness band's shallow bracket is a SEPARATE feature, proven
+            // by `the_low_stress_roughness_band_widens_the_silicate_te` and exercised through the canonical
+            // `rock_friction_law` in the assembler test, not smuggled into every machinery test through the helper.
+            friction: FrictionLaw {
+                low_stress_band: None,
+                ..rock_friction_law()
+            },
             density_kg_m3: Fixed::from_int(3300),
             gravity_m_s2: Fixed::from_ratio(981, 100),
             geotherm_k: geotherm,
@@ -5167,31 +5187,34 @@ mod tests {
 
     #[test]
     fn the_low_stress_roughness_band_widens_the_silicate_te() {
-        // STEER ONE, EXECUTABLE. Byerlee's low branch is a central line through roughness scatter, and the shallow
-        // fibres it governs (above the ~6 km crossover for an Earth-gravity silicate lid) carry real moment share
-        // through their long lever arm about the neutral surface. So a low-stress band widens the silicate T_e band
-        // on the EARTH-LIKE default, where the Mars-class lid is only the sharpest case. This proves the MECHANISM.
-        // The band values here are an ILLUSTRATIVE FIXTURE, not the canonical reserved scatter (which stays `None`
-        // on the shipped law until the owner sets it); the test asserts the band WIDENS the T_e, never a number.
+        // CALL ONE, EXECUTABLE: the roughness band widens the T_e where it applies, and its SCOPE confines how far.
+        // Byerlee's low fit is a central line through roughness scatter, so a band over its domain softens the
+        // shallow brittle limb at the weak edge and stiffens it at the strong one, and the interval-of-mins in
+        // `edge_yield` carries that to the T_e band, low with low and high with high. But the scatter is a REGIME,
+        // below Byerlee's own 5 MPa boundary, so a band scoped to 5 MPa touches only the shallowest sliver and moves
+        // the T_e far less than one smeared across the whole low branch: the 40x-in-depth correction, executable.
+        // The fixture values are a round illustrative band, NOT the canonical Byerlee cloud; the test asserts the
+        // widening and its scoping, never a number.
         let volumes = hk_dry_dislocation_activation_volumes();
         let creep = [CreepCandidate {
             row: hk_dry_dislocation(),
             volumes: &volumes,
         }];
-        let silicate = LidColumn {
-            friction: rock_friction_law(),
-            creep: &creep,
-            surface_temperature_k: Fixed::from_int(273),
-            interior_temperature_k: Fixed::from_int(1600),
-            density_kg_m3: Fixed::from_int(3300),
-            heat_production: ZERO,
-            thermal_conductivity: Fixed::from_int(3),
-            gravity_m_s2: Fixed::from_ratio(981, 100),
-            convecting_depth_km: Fixed::from_int(2890),
-            rayleigh: Fixed::from_int(100_000),
-            chord: test_chord(),
-        };
-        let (lo0, hi0) = silicate
+        // Derive the silicate T_e low edge for a given friction law, all else the Earth-like column held fixed.
+        let te_lo = |friction: FrictionLaw| {
+            LidColumn {
+                friction,
+                creep: &creep,
+                surface_temperature_k: Fixed::from_int(273),
+                interior_temperature_k: Fixed::from_int(1600),
+                density_kg_m3: Fixed::from_int(3300),
+                heat_production: ZERO,
+                thermal_conductivity: Fixed::from_int(3),
+                gravity_m_s2: Fixed::from_ratio(981, 100),
+                convecting_depth_km: Fixed::from_int(2890),
+                rayleigh: Fixed::from_int(100_000),
+                chord: test_chord(),
+            }
             .elastic_thickness_band_km(
                 lit_e(),
                 lit_nu(),
@@ -5199,49 +5222,49 @@ mod tests {
                 Fixed::from_int(64),
                 600,
             )
-            .expect("the un-banded silicate lid derives a T_e band");
-
-        // The same column with an illustrative roughness band on the low branch: friction scattered from 0.6 to 1.0
-        // (a round fixture spanning the observed low-stress spread), no cohesion offset. The weak edge softens the
-        // shallow brittle limb and the strong edge stiffens it, so first yielding brackets there and the interval-
-        // of-mins in `edge_yield` carries it, low with low and high with high, to the T_e band.
-        let banded_law = FrictionLaw {
-            low_stress_band: Some(LowStressBand {
-                coefficient_lo: Fixed::from_ratio(6, 10),
-                coefficient_hi: Fixed::ONE,
-                cohesion_lo: Fixed::ZERO,
-                cohesion_hi: Fixed::ZERO,
-            }),
+            .expect("the silicate lid derives a T_e band")
+            .0
+        };
+        // A fixture roughness band (coefficient 0.6 to 1.0, no cohesion), scoped either across the whole low branch
+        // or to Byerlee's own 5 MPa boundary. This is a round fixture, not the canonical 0.3-to-10 cloud; its only
+        // job is to move the T_e measurably so the mechanism and its scoping are visible.
+        let fixture_band = |scatter_domain_max: Fixed| LowStressBand {
+            coefficient_lo: Fixed::from_ratio(6, 10),
+            coefficient_hi: Fixed::ONE,
+            cohesion_lo: Fixed::ZERO,
+            cohesion_hi: Fixed::ZERO,
+            scatter_domain_max,
+            intermediate_band: None,
+        };
+        let unbanded = te_lo(FrictionLaw {
+            low_stress_band: None,
             ..rock_friction_law()
-        };
-        let banded = LidColumn {
-            friction: banded_law,
-            ..silicate
-        };
-        let (lo1, hi1) = banded
-            .elastic_thickness_band_km(
-                lit_e(),
-                lit_nu(),
-                Fixed::from_ratio(33, 10),
-                Fixed::from_int(64),
-                600,
-            )
-            .expect("the banded silicate lid still derives");
+        });
+        let broad = te_lo(FrictionLaw {
+            low_stress_band: Some(fixture_band(Fixed::from_int(200))),
+            ..rock_friction_law()
+        });
+        let scoped = te_lo(FrictionLaw {
+            low_stress_band: Some(fixture_band(Fixed::from_int(5))),
+            ..rock_friction_law()
+        });
 
-        // The banded T_e band is a STRICT SUPERSET: its low edge drops below the un-banded low edge (the honest
-        // widening the arithmetic predicts, from the softened shallow limb), and its high edge does not fall below
-        // the un-banded one. This is the too-narrow band the wire must not render before the reserved scatter is set.
+        // The mechanism: a band spanning the low branch drops the T_e low edge below the un-banded one (the softened
+        // shallow limb). The scope: the 5 MPa-scoped band widens STRICTLY LESS, since it touches only the shallowest
+        // sliver, so its low edge sits above the broad band's and at or below the un-banded one. The same scatter,
+        // confined to its own regime, barely moves the number, which is the whole scope correction made executable.
         assert!(
-            lo1 < lo0,
-            "the roughness band drops the low edge of the silicate T_e: {} < {}",
-            f64_of(lo1),
-            f64_of(lo0)
+            broad < unbanded,
+            "a low-branch-spanning band widens the T_e: {} < {}",
+            f64_of(broad),
+            f64_of(unbanded)
         );
         assert!(
-            hi1 >= hi0,
-            "the roughness band does not lower the high edge: {} >= {}",
-            f64_of(hi1),
-            f64_of(hi0)
+            broad < scoped && scoped <= unbanded,
+            "the 5 MPa scope confines the widening: broad {} < scoped {} <= unbanded {}",
+            f64_of(broad),
+            f64_of(scoped),
+            f64_of(unbanded)
         );
     }
 

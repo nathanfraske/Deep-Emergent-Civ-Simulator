@@ -57,38 +57,54 @@ pub struct FrictionLaw {
     pub high_domain_min: Fixed,
     /// The low-stress regime's ROUGHNESS AND COHESION BAND, the scatter the central low fit is a line through.
     ///
-    /// RESERVED, SURFACED NOT BAKED, and this field is what gives the reserve a home. Byerlee's own abstract says
-    /// the low branch scatters WIDELY between experiments because friction there is dominated by surface roughness,
-    /// so a single `low_coefficient` reports a fit as a measurement (the sin
-    /// [`byerlee_low_stress_coefficient`] names). `None` is the honest unset state: the low branch emits its central
-    /// fit alone, never a fabricated zero band. `Some` is the owner's set scatter, at which point
+    /// MEASURED FROM THE PRIMARY where a material's scatter is sourced, `None` where no source has pinned it yet.
+    /// Byerlee's own abstract says the low branch scatters WIDELY between experiments because friction there is
+    /// dominated by surface roughness, so a single `low_coefficient` reports a fit as a measurement (the sin
+    /// [`byerlee_low_stress_coefficient`] names). `Some` carries the source's own envelope, at which point
     /// [`crate::moment_equivalence::brittle_differential_mpa`] emits a BRACKET wherever the low branch is operative
-    /// and the interval-of-mins
-    /// carries it to the `T_e` band with no new composition. Its basis is Byerlee 1978's low-stress data envelope
-    /// (the coefficient range the experiments span) and the reserved roughness-cohesion floor; the owner sets it
-    /// and validates the widened `T_e` band against measured elastic thicknesses on small, low-gravity bodies,
-    /// where the band is the whole answer.
+    /// AND the fault-normal stress sits inside the band's scatter domain, and the interval-of-mins carries it to
+    /// the `T_e` band with no new composition. `None` is the honest unset state for a material whose scatter no
+    /// source has pinned: the low branch emits its central fit alone, never a fabricated zero band. Rock carries
+    /// Byerlee 1978's measured low-pressure cloud; ice carries `None`, since Beeman's scatter is its own read
+    /// against Beeman's own domain boundaries rather than Byerlee's inherited.
     pub low_stress_band: Option<LowStressBand>,
 }
 
-/// The LOW-STRESS ROUGHNESS AND COHESION BAND: the scatter the central low fit is a line through, as the interval
-/// its two edges span. RESERVED (surfaced not baked); the owner sets the edges from the source's low-stress data
-/// envelope, and until then a law carries `None` rather than a fabricated width.
+/// The LOW-STRESS ROUGHNESS BAND, and where it ends: the scatter the central low fit is a line through, carried
+/// as the interval its edges span and SCOPED to the regime it belongs to. MEASURED from the primary rather than
+/// reserved, because the source states the envelope in its own ink.
 ///
-/// The coefficient edges are the roughness-scattered friction (near material-INDEPENDENCE is a high-stress
-/// property, so the low regime scatters); the cohesion edges are the roughness-induced apparent cohesion from
-/// asperity interlock (megapascals). Both edges ride so an asymmetric envelope is representable, since a central
-/// fit need not sit at the midpoint of its own scatter.
+/// THE SCOPE IS PART OF THE VALUE, and this is the seam that a fixed band hides. Byerlee 1978 separates three
+/// pressure regimes, and the wide scatter is the LOW-pressure one: normal stress up to 50 bars (5 MPa, his Fig. 3),
+/// where "the coefficient of friction can be as low as 0.3 and as high as 10" (p. 618), the cloud his abstract
+/// calls friction "varying widely with surface roughness". Above that his intermediate maximum-friction data
+/// (Fig. 5) have "much less scatter and can be approximated by tau = 0.85 sigma_n". So a band laid across the
+/// whole sub-200-MPa low branch would overstate the scatter forty times in depth (5 MPa sits near 150 m on Earth,
+/// the 200 MPa universality floor near 6 km). `scatter_domain_max` is that boundary, a measured regime line with
+/// the same citizenship as the 200 MPa floor already encoded.
+///
+/// The coefficient edges are the roughness-scattered friction; the cohesion edges are the roughness-induced
+/// apparent cohesion from asperity interlock (megapascals). Both edges ride so an asymmetric envelope is
+/// representable, since a central fit need not sit at the midpoint of its own scatter.
 #[derive(Clone, Copy, Debug)]
 pub struct LowStressBand {
-    /// The low edge of the roughness-scattered friction coefficient.
+    /// The low edge of the roughness-scattered friction coefficient, BELOW `scatter_domain_max`.
     pub coefficient_lo: Fixed,
-    /// The high edge of the roughness-scattered friction coefficient.
+    /// The high edge of the roughness-scattered friction coefficient, below `scatter_domain_max`.
     pub coefficient_hi: Fixed,
     /// The low edge of the roughness-induced cohesion (megapascals).
     pub cohesion_lo: Fixed,
     /// The high edge of the roughness-induced cohesion (megapascals).
     pub cohesion_hi: Fixed,
+    /// The normal-stress boundary (megapascals) between the roughness-scattered regime (below, where the
+    /// coefficient band applies) and the intermediate regime (at or above, where the central low fit governs).
+    /// Byerlee's own 50 bars = 5 MPa, the low-pressure limit of Fig. 3 and the onset of the tight Fig. 5 fit.
+    pub scatter_domain_max: Fixed,
+    /// The intermediate regime's residual coefficient band `(lo, hi)`, at or above `scatter_domain_max`. `None` is
+    /// the EXPLICIT band-pending state, absence carried as a datum rather than an implicit zero-width band: the
+    /// central fit governs there until a Figure-5 read lands. Byerlee calls that cloud "much less scatter" without
+    /// a number, so it is drawn in ink but unquantified in text and awaits a figure digitization.
+    pub intermediate_band: Option<(Fixed, Fixed)>,
 }
 
 /// The shear strength a friction law reports at a normal stress.
@@ -127,10 +143,19 @@ pub fn rock_friction_law() -> FrictionLaw {
         high_coefficient: Fixed::from_ratio(6, 10),
         high_cohesion: Fixed::from_int(50),
         high_domain_min: Fixed::from_int(200),
-        // RESERVED, surfaced not baked: the low branch's roughness-and-cohesion scatter (basis in the field doc).
-        // `None` is the honest unset state, the central low fit alone, never a fabricated zero band. The wire that
-        // renders a `T_e` waits on the owner setting this, so a rendered number is never the un-banded low edge.
-        low_stress_band: None,
+        // MEASURED from Byerlee 1978 (vendored, sha256 995adf14a816e517bd037936d45fa4237e312c0aa1f278781525bd6b202d2306):
+        // the low-pressure roughness cloud, coefficient 0.3 to 10 (p. 618 text and Fig. 3), no cohesion
+        // (through-origin, Barton's JRC form), scoped to his own 50-bar = 5 MPa low-pressure boundary. Above it the
+        // intermediate maximum-friction fit is tight; that residual band is `None`, the explicit Figure-5-read-pending
+        // state, so the central 0.85 governs there until the figure digitization lands.
+        low_stress_band: Some(LowStressBand {
+            coefficient_lo: Fixed::from_ratio(3, 10),
+            coefficient_hi: Fixed::from_int(10),
+            cohesion_lo: ZERO,
+            cohesion_hi: ZERO,
+            scatter_domain_max: Fixed::from_int(5),
+            intermediate_band: None,
+        }),
     }
 }
 
@@ -155,8 +180,8 @@ pub fn ice_friction_law() -> FrictionLaw {
         high_coefficient: Fixed::from_ratio(20, 100),
         high_cohesion: Fixed::from_ratio(83, 10),
         high_domain_min: Fixed::from_int(10),
-        // RESERVED like rock's: Beeman's low-fit scatter is its own reserve, unset here rather than assumed equal
-        // to rock's. `None` keeps ice's low branch its central fit until a source pins the ice-specific band.
+        // `None` by ratified design: ice keeps Beeman's OWN domain boundaries rather than inheriting Byerlee's, so
+        // its low-fit scatter is its own read against Beeman's own regimes, unbuilt until that source is read.
         low_stress_band: None,
     }
 }

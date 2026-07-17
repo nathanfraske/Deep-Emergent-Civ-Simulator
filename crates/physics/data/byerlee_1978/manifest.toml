@@ -1,0 +1,60 @@
+# Byerlee 1978 "Friction of Rocks" source manifest (the vendored-primary idiom: file / receipt / anchors).
+#
+# This is a PAPER whose values enter as in-code cited constants (crates/physics/src/yield_envelope.rs,
+# rock_friction_law), NOT a bulk data column, so the manifest holds the source's bytes with its receipt and records
+# the page or figure anchor for every value read from it. SHA256 is the primary receipt (VENDORING_CHECKLIST.md,
+# primary from 2026-07-17); md5 rides as a legacy secondary. This is the open USGS copy, vendored into the public
+# tree. No provenance dry-run battery yet: the held bytes ARE the reconstruction, and the checksum below is the
+# integrity check, pending the custody-runbook vault mechanism (AGENTIC_ADDENDUM.md section 12).
+
+[[source]]
+file = "Friction_of_rocks.pdf"
+sha256 = "995adf14a816e517bd037936d45fa4237e312c0aa1f278781525bd6b202d2306"
+md5 = "cced4f8db5ee5a9e78c0459f0b5f0b3e"
+citation = "Byerlee, J., 1978, Friction of rocks, Pure and Applied Geophysics 116, 615-626, DOI 10.1007/BF00876528"
+recipe = "GET https://earthquake.usgs.gov/static/lfs/research/rockphysics/Friction_of_rocks.pdf (open USGS copy)"
+pages = 10
+
+# Every value read from this source into rock_friction_law, each with its anchor. Channel: T = text, F = figure,
+# TF = both (dual-channel agreement).
+[[value]]
+name = "high_stress_coefficient"
+value = "0.6"
+anchor = "p.621 sec.5, tau = 50 + 0.6 sigma_n above 200 MPa"
+channel = "T"
+
+[[value]]
+name = "high_stress_cohesion_mpa"
+value = "50"
+anchor = "p.621 sec.5, the 0.5 kbar half-kilobar intercept; the module's continuity self-test at the 200 MPa branch point confirms it"
+channel = "T"
+
+[[value]]
+name = "low_stress_coefficient_central"
+value = "0.85"
+anchor = "p.618 sec.4 and Fig.3 (the reference line the author captions 'simply for reference and by no means a best fit')"
+channel = "TF"
+
+[[value]]
+name = "universality_floor_mpa"
+value = "200"
+anchor = "p.618 sec.3-4 and Fig.5, the low-to-high branch boundary near 2000 bars"
+channel = "T"
+
+[[value]]
+name = "low_stress_roughness_band_coefficient"
+value = "0.3 to 10"
+anchor = "p.618 sec.4 ('the coefficient of friction can be as low as 0.3 and as high as 10') and Fig.3 scatter cloud"
+channel = "TF"
+
+[[value]]
+name = "scatter_domain_max_mpa"
+value = "5"
+anchor = "p.618 sec.4, the low-pressure regime (normal stress up to 50 bars), the Fig.3-to-Fig.5 boundary"
+channel = "T"
+
+[[value]]
+name = "intermediate_residual_band"
+value = "pending (Figure-5 digitization)"
+anchor = "p.621 sec.5 and Fig.5 ('much less scatter'; upper bound quartzite and limestone, lower bound quartz-monzonite joints and plaster joints), unquantified in the text"
+channel = "F-pending"
