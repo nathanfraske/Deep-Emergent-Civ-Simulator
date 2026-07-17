@@ -1005,7 +1005,10 @@ pub enum EnvelopeStructure {
 /// orthogonal to envelope structure: a Herbig star is radiative AND pre-main-sequence at once. The fully
 /// convective versus convective-envelope sub-distinction that would key the phase is a sibling on a second
 /// boundary (the fully convective limit), left to the `L_bol` wire rather than overloaded onto this axis.
-pub fn stellar_envelope_structure(t_eff_k: Fixed, kraft_break_k: Fixed) -> Option<EnvelopeStructure> {
+pub fn stellar_envelope_structure(
+    t_eff_k: Fixed,
+    kraft_break_k: Fixed,
+) -> Option<EnvelopeStructure> {
     if t_eff_k <= Fixed::ZERO || kraft_break_k <= Fixed::ZERO {
         return None;
     }
@@ -3240,7 +3243,10 @@ mod tests {
         );
         // A non-positive T_eff is not a star, and a non-positive break is not a boundary: errors, never branches.
         assert_eq!(stellar_envelope_structure(Fixed::from_int(-1), kraft), None);
-        assert_eq!(stellar_envelope_structure(Fixed::from_int(5000), Fixed::ZERO), None);
+        assert_eq!(
+            stellar_envelope_structure(Fixed::from_int(5000), Fixed::ZERO),
+            None
+        );
     }
 
     #[test]
@@ -3294,8 +3300,13 @@ mod tests {
         );
         // Epoch two: arrived on the main sequence, hot, radiative. The same star at its 2 M_sun main-sequence T_eff.
         let (alpha, beta) = (Fixed::from_ratio(35, 10), Fixed::from_ratio(8, 10));
-        let t_ms =
-            stellar_effective_temperature(Fixed::from_int(2), alpha, beta, Fixed::from_int(100_000)).unwrap();
+        let t_ms = stellar_effective_temperature(
+            Fixed::from_int(2),
+            alpha,
+            beta,
+            Fixed::from_int(100_000),
+        )
+        .unwrap();
         assert_eq!(
             stellar_envelope_structure(t_ms, kraft),
             Some(EnvelopeStructure::Radiative),
