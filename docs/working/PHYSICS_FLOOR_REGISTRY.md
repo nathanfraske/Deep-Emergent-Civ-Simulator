@@ -438,6 +438,6 @@ Two kinds, kept distinct: a DECLARED law is a `[[law]]` block in the floor data 
 - `thermal_density_anomaly` (crates/physics/src/laws.rs:3446): Thermal density anomaly, the buoyancy SOURCE: `delta_rho = -rho * alpha * dT`, the density excess a
 - `rayleigh_number` (crates/physics/src/laws.rs:3484): Rayleigh number, the convection ONSET control parameter: `Ra = |delta_rho| * g * d^3 / (eta * kappa)`,
 - `heat_advection` (crates/physics/src/laws.rs:3529): Convective heat advection as specific power: `F = c * |v| * |dT| / d`, the heat a buoyant flow carries out
-- `thermal_boundary_layer` [direct] (crates/physics/src/laws.rs:3567): The THERMAL BOUNDARY LAYER thickness, the conductive lid riding on a convecting interior:
-- `convective_stress` (crates/physics/src/laws.rs:3588): The convective driving stress the interior flow exerts on the base of the lithosphere:
-- `convective_strain_rate` [direct] (crates/physics/src/laws.rs:3638): The CONVECTIVE STRAIN RATE `eps_dot = |v| / L` (per time): the shear rate the buoyant convective flow
+- `thermal_boundary_layer` [direct] (crates/physics/src/laws.rs:3568): The THERMAL BOUNDARY LAYER thickness, the conductive lid riding on a convecting interior:
+- `convective_stress` (crates/physics/src/laws.rs:3589): The convective driving stress the interior flow exerts on the base of the lithosphere:
+- `convective_strain_rate` [direct] (crates/physics/src/laws.rs:3640): The CONVECTIVE STRAIN RATE `eps_dot = |v| / L` (per time): the shear rate the buoyant convective flow

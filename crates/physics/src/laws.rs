@@ -3546,7 +3546,6 @@ pub fn heat_advection(
     }
 }
 
-/// @provides thermal_boundary_layer
 /// The THERMAL BOUNDARY LAYER thickness, the conductive lid riding on a convecting interior:
 /// `L = d * Ra^(-1/3)`, written as `d / Ra^(1/3)`.
 ///
@@ -3565,6 +3564,7 @@ pub fn heat_advection(
 /// Clamped to at most the layer depth (a boundary layer cannot exceed the layer it forms in, a geometric
 /// bound), and falling back to the full depth when `Ra` is non-positive (no convection, so no boundary layer
 /// forms and the whole layer is the conductive one). Deterministic fixed-point.
+/// @provides thermal_boundary_layer
 pub fn thermal_boundary_layer(depth: Fixed, rayleigh: Fixed) -> Fixed {
     let ra_cube_root = rayleigh.powf(Fixed::from_ratio(1, 3));
     if ra_cube_root > ZERO {
@@ -3608,7 +3608,6 @@ pub fn convective_stress(
     }
 }
 
-/// @provides convective_strain_rate
 /// The CONVECTIVE STRAIN RATE `eps_dot = |v| / L` (per time): the shear rate the buoyant convective flow
 /// ([`stokes_velocity`]) imposes across the length `L` it shears over (the boundary-layer or layer depth). For a
 /// Newtonian fluid `tau = eta * eps_dot`, so this is the rate [`convective_stress`] has ALWAYS FORMED AND
@@ -3637,6 +3636,7 @@ pub fn convective_stress(
 /// sits inside an ARRHENIUS EXPONENTIAL, so a saturated stand-in does not read as "very fast", it multiplies
 /// through an exp and returns a confident wrong strength. `None` on a non-positive length (the absence
 /// convention) or an unrepresentable quotient, never a fabricated rate. Deterministic fixed-point.
+/// @provides convective_strain_rate
 pub fn convective_strain_rate(velocity: Fixed, length_scale: Fixed) -> Option<Fixed> {
     if length_scale <= ZERO {
         return None;
