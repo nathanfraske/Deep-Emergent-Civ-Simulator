@@ -271,3 +271,43 @@ AN UNEXPLAINED RESIDUAL SHIPS AS EXACTLY THAT. Their `C_1` carries an unexplaine
 WHY THIS IS NOT LICENCE TO EDIT SOURCES. The standard reads the source's OWN definitions against the source's OWN printed results, and the arbiter is always the source's internal consistency, never our preference, never a modern value, never a memory. Condition 2 is what keeps it honest: if the controls do not reproduce, the reader is wrong. This is the same instrument as the citation-coverage discipline pointed the other way: there, a value wearing a citation it could not cash was retired (the Fe row, cited to a CODATA table containing no iron); here, a value contradicting its own paper's mathematics is corrected. BOTH ASK ONE QUESTION: does the number keep the promise its source made about it?
 
 AND THE COROLLARY THE Fe ROW PAID FOR: RE-VALUING IS INCOMPLETE UNTIL ITS PINS MOVE WITH IT, IN THE SAME COMMIT, FOR THE SAME CITED REASON. That commit named its live consumer in its own message and did not check it, so the suite asserted the retired value until a stranger's failing test surfaced it. NAMING A CONSUMER IS NOT CHECKING IT. And watch the quiet half: a sibling assertion pinned the Rose ratio at 2.895 with a tolerance of 0.01 while the correction moved it 0.0058, so THE TOLERANCE ABSORBED THE REPAIR and that test sat green throughout while its comment kept teaching the retired number. A tolerance wide enough to absorb a change is blind to it, which is legitimate for a physical band, and is exactly why THE COMMENT rather than the assertion is what the next reader inherits.
+
+---
+
+## 12. T_e is a verdict: the output is never fit, the input rarely, through one licensed channel (owner-ruled, 2026-07-17)
+
+This is a constitutional section and the distinction it draws carries the whole constitution. It generalizes past `T_e` to EVERY DERIVED VERDICT the engine emits.
+
+### The output is fit to observation NEVER
+
+Constraining a verdict to match observation is AUTHORING THE OUTCOME, and it destroys the two things the engine exists to produce:
+
+- INFORMATION. A derived `T_e` that misses the rows is the RESIDUAL LAW FIRING: a residual points at a defect, a dropped term, or a band that needs honest widening. Absorbing the miss by nudging until it lands DELETES THE SIGNAL that something upstream is wrong.
+- THE ALIENS. The moment `T_e` is fit to Earth, every other world's elastic thickness becomes an extrapolation of an Earth fit WEARING A DERIVATION'S CLOTHES: Terran bias injected at the deepest structural level, invisible in every render forever after.
+
+So the Mirror rule applies at full strength: THE COMPARISON IS RUN, THE MISS IS REPORTED, AND THE DERIVATION STAYS UNTOUCHED, exactly as the 41-planet assembly count was reported and never gated.
+
+### The input is inverted from observation RARELY, and only third in line
+
+There is a legitimate inversion channel, because it is WHAT THE FIELD ITSELF DOES: flexure observations are how humanity constrains lithospheric rheology at all, McNutt's program WAS an inversion, and the lab-to-field strength dispute exists precisely because field data measures something the lab bands only bracket. When a derivation INPUT carries a DECLARED IGNORANCE BAND from independent sources (the `V*` spread, the 418-to-530 effective-Q gap), the hindcast can act as a MEASUREMENT of that input. INFERENCE WITHIN DECLARED IGNORANCE IS NOT TUNING.
+
+But the channel is THIRD IN LINE, and the order is load-bearing:
+
+1. FIRST, TREAT THE MISS AS A DEFECT HUNT, because this project's entire history says the miss usually IS one: a dropped term, a units frame, a chord variable.
+2. SECOND, NARROW THE BAND BY MORE INDEPENDENT MEASUREMENT. The conditioning-fields filter (the deep `V*` band's covering-set selection over matching-condition determinations) is exactly this: honest narrowing with NO observation spent.
+3. ONLY WHEN THE BAND IS IRREDUCIBLY WIDE AND THE MISS SURVIVES THE HUNT does inversion earn its turn.
+
+### The six conditions on the licensed inversion, all load-bearing
+
+1. PRIOR BAND, FIT STRICTLY WITHIN. The parameter must have a prior band from lab or theory, and the fit selects strictly inside it. A FIT DEMANDING A VALUE OUTSIDE THE BAND IS NOT A CALIBRATION, IT IS THE CHAIN SURFACING A DEFECT (the in-population rule from the MMSN pin, generalized).
+2. SEPARATE TAGGED ENTRY, LAB ROWS NEVER EDITED. The inferred value is a separate, tagged, field-calibrated entry; the lab rows stand untouched (modality discipline), so the two knowledge sources stay distinguishable forever.
+3. THE CONSTRAINT FLOWS TO THE INPUT AND ONLY THE INPUT. The engine may store "effective `V*` is Y with band, inferred from row Z" and MAY NEVER STORE "`T_e` should be X". Every world's `T_e` is re-derived through unchanged machinery.
+4. THE PROVENANCE DAG MARKS THE INFERENCE. Any consumer of any world's `T_e` can see the Earth-inferred parameter in its ancestry, and THE PURE-LAB-BAND DERIVATION REMAINS COMPUTABLE IN PARALLEL for anyone who wants the uninfected answer. (Verified as built: `sim/calibration.rs` carries a provenance tag per value and its derives-from ids.)
+5. MIRROR-CLASS INSTANCE ONLY. The inversion is licensed only on Earth, because Earth is the one world whose OTHER inputs are independently pinned, making the inversion well-posed with ONE unknown. On an alien row it would be a degenerate fit of everything at once.
+6. A ROW SPENT ON CALIBRATION IS SPENT. It can NEVER again be claimed as validation, so the partition is declared BEFORE the fit, preregistered-holdout style: Earth's seamounts calibrate if anything does, Mars and Venus stay OUT-OF-SAMPLE, and the engine's predictive claims rest only on rows it never touched.
+
+### The institution: the calibration ledger
+
+Against creeping calibration (one licensed inference per year until the engine is secretly a fit of Earth with derivation theater), every field-inferred parameter is registered in `docs/working/CALIBRATION_LEDGER.md` with its spent row, its band, and the owner's signature, the same ceremony as a re-pin window, published in the audit and eventually the paper. TWO INVARIANTS RIDE IT: the validation set STRICTLY EXCEEDS the calibration set at all times, and the ledger's LENGTH is a reported honesty metric. IF THAT LIST EVER NEEDS A SECOND PAGE, THE ANSWER HAS QUIETLY BECOME NO, and the ledger is what makes the quiet loud.
+
+The ledger is empty today, which is the state to preserve.
