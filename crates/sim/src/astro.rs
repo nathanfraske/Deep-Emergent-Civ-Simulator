@@ -1672,6 +1672,101 @@ pub fn derive_formation_epoch_myr(
     lo.checked_add(hi)?.checked_div(two)
 }
 
+/// THE BASIS GRADE of a draw-pending interim: whether it is independently motivated enough that a validation
+/// reading it is meaningful rather than circular. A consistency check compares a DERIVED quantity against a
+/// landmark; if the interims feeding the derivation were CHOSEN to reproduce that landmark, the agreement is true
+/// by construction and the check is worthless (the replacement-circularity trap). This grade lets a check refuse
+/// exactly that case. The two qualifying grades are a real layer-4 draw ([`InterimBasis::DrawGrade`]) and a value
+/// cited to a documented population ([`InterimBasis::CitedToPopulation`], for instance a birth-accretion band or a
+/// disk-size demographic); a value picked without a documented basis
+/// ([`InterimBasis::ChosenWithoutBasis`]) never qualifies, because nothing stops it from being fit to the answer.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum InterimBasis {
+    /// A layer-4 draw, the real population sample: qualifies.
+    DrawGrade,
+    /// Cited to a documented population (a birth-accretion band, a disk-size demographic): qualifies, so a
+    /// consistency check can run meaningfully BEFORE the draw lands, since the value did not come from the answer.
+    CitedToPopulation,
+    /// Picked without a documented basis: NEVER qualifies, because it could be fit to whatever the check compares
+    /// against, which is the circularity the gate exists to refuse.
+    ChosenWithoutBasis,
+}
+
+impl InterimBasis {
+    /// True if the interim is independently motivated (a draw or cited to a population), so a validation reading
+    /// it is meaningful rather than circular. A [`InterimBasis::ChosenWithoutBasis`] interim is never independent.
+    pub fn is_independent(self) -> bool {
+        matches!(
+            self,
+            InterimBasis::DrawGrade | InterimBasis::CitedToPopulation
+        )
+    }
+}
+
+/// A draw-pending interim VALUE paired with its [`InterimBasis`], so a consumer can refuse to run a validation
+/// that its inputs would make meaningless. The mechanism is fixed Rust; the value and its basis are data the
+/// caller supplies (Principle 11), the basis field carrying the provenance the gate reads.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct ProvenancedInterim {
+    /// The interim value.
+    pub value: Fixed,
+    /// The basis grade of the value, the provenance a validation gates on.
+    pub basis: InterimBasis,
+}
+
+/// The verdict of the formation-rate consistency check: whether the derived epoch's accretion rate agrees with
+/// the retired formation-rate landmark. A verdict is returned ONLY when the check was meaningful (its interims
+/// were independent); a circular configuration returns `None` from [`formation_rate_consistency`] instead.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum FormationRateConsistency {
+    /// `Mdot(t_formation)` sits within tolerance of the landmark: the derived clock and the retired landmark agree.
+    Consistent,
+    /// `Mdot(t_formation)` is outside tolerance: a Residual to surface, not a failure to tune away.
+    Inconsistent,
+}
+
+/// PROVENANCE-GATED consistency check for the retired 0.19 formation-rate landmark. Once the formation epoch is a
+/// DERIVED root ([`derive_formation_epoch_myr`]), the old landmark demotes to a check: does the derived epoch's
+/// accretion rate `Mdot(t_formation)` land near the landmark the epoch used to be pinned to? That agreement is
+/// only MEANINGFUL if the clock's interims (`Mdot_0`, `t_visc`) are independently motivated; fitting them to
+/// reproduce the landmark (for instance `Mdot_0 = 1`, `t_visc = 0.5`, which lands `Mdot(1 Myr) = 0.192` exactly)
+/// makes the agreement true by construction, the circularity this arc convicts. So this REFUSES (`None`) unless
+/// EVERY interim [`InterimBasis::is_independent`], a check that reads its own inputs' provenance and knows when it
+/// would be worthless. On independent interims it returns [`FormationRateConsistency`], a verdict rather than a
+/// silent pass, so an inconsistency surfaces as a Residual instead of pressure to tune. `None` on a
+/// chosen-without-basis interim, a non-positive landmark or tolerance, or a clock that refuses the rate.
+pub fn formation_rate_consistency(
+    mdot_0: ProvenancedInterim,
+    t_visc: ProvenancedInterim,
+    gamma: Fixed,
+    t_formation_myr: Fixed,
+    landmark_rate_msun_myr: Fixed,
+    tolerance_frac: Fixed,
+) -> Option<FormationRateConsistency> {
+    // THE PROVENANCE GATE: a chosen-without-basis interim makes the whole check circular, so refuse rather than
+    // report a meaningless verdict. This is what makes interim-fitting unconstructible: the fitted exploit cannot
+    // even run the check, because its basis is not independent.
+    if !mdot_0.basis.is_independent() || !t_visc.basis.is_independent() {
+        return None;
+    }
+    if landmark_rate_msun_myr <= Fixed::ZERO || tolerance_frac < Fixed::ZERO {
+        return None;
+    }
+    let rate =
+        viscous_similarity_accretion_rate(mdot_0.value, t_visc.value, gamma, t_formation_myr)?;
+    let diff = if rate >= landmark_rate_msun_myr {
+        rate.checked_sub(landmark_rate_msun_myr)?
+    } else {
+        landmark_rate_msun_myr.checked_sub(rate)?
+    };
+    let frac = diff.checked_div(landmark_rate_msun_myr)?;
+    Some(if frac <= tolerance_frac {
+        FormationRateConsistency::Consistent
+    } else {
+        FormationRateConsistency::Inconsistent
+    })
+}
+
 /// The GRAVITATIONAL RADIUS `r_g` (AU): the disk radius beyond which the photoevaporative wind's thermal energy
 /// exceeds the star's gravitational binding, so the heated gas escapes (the slice-2 dispersal race). It DERIVES
 /// from the stellar mass and the wind's sound speed, `r_g = G * M_star / c_s^2` with `c_s^2 = k_B * T / (mu * m_H)`,
@@ -4343,6 +4438,126 @@ mod tests {
             .is_none(),
             "a bracket that never crosses the front returns None"
         );
+    }
+
+    #[test]
+    fn the_consistency_check_refuses_a_fitted_interim_so_the_trap_is_unconstructible() {
+        // THE ANTI-CIRCULARITY GATE (assert the defect cannot be constructed). The exploit: pick Mdot_0 = 1 and
+        // t_visc = 0.5 so Mdot(1 Myr) = 1 / (1 + 1/0.5)^(3/2) = 3^(-3/2) = 0.192, landing the 0.19 landmark
+        // EXACTLY by construction. If the check ran on these it would report a meaningless "Consistent". Tagged
+        // ChosenWithoutBasis, the provenance gate REFUSES (None): the fitted agreement cannot even be evaluated,
+        // which is what makes interim-fitting unconstructible rather than merely discouraged.
+        let fitted_mdot_0 = ProvenancedInterim {
+            value: Fixed::ONE,
+            basis: InterimBasis::ChosenWithoutBasis,
+        };
+        let fitted_t_visc = ProvenancedInterim {
+            value: Fixed::from_ratio(1, 2),
+            basis: InterimBasis::ChosenWithoutBasis,
+        };
+        let landmark = Fixed::from_ratio(19, 100); // 0.19
+        assert!(
+            formation_rate_consistency(
+                fitted_mdot_0,
+                fitted_t_visc,
+                Fixed::ONE,
+                Fixed::ONE, // t_formation = 1 Myr
+                landmark,
+                Fixed::from_ratio(5, 100), // 5 percent tolerance, which the fitted value would pass
+            )
+            .is_none(),
+            "a chosen-without-basis interim refuses the check even when its value fits the landmark exactly"
+        );
+        // One independent, one fitted: still refuses, since the gate needs EVERY interim independent.
+        let independent_mdot_0 = ProvenancedInterim {
+            value: Fixed::ONE,
+            basis: InterimBasis::CitedToPopulation,
+        };
+        assert!(
+            formation_rate_consistency(
+                independent_mdot_0,
+                fitted_t_visc,
+                Fixed::ONE,
+                Fixed::ONE,
+                landmark,
+                Fixed::from_ratio(5, 100),
+            )
+            .is_none(),
+            "one chosen-without-basis interim is enough to refuse"
+        );
+    }
+
+    #[test]
+    fn the_consistency_check_reports_a_verdict_on_independent_interims() {
+        // With independent interims (draw-grade or cited-to-population), the check RUNS and reports a verdict. The
+        // same values that were refused above (Mdot(1 Myr) = 0.192) now, cited to a population, land Consistent
+        // against the 0.19 landmark within 5 percent; the point is that the VERDICT is earned by provenance, not
+        // that these particular numbers pass. A far-off epoch reports Inconsistent, a Residual to surface.
+        let mdot_0 = ProvenancedInterim {
+            value: Fixed::ONE,
+            basis: InterimBasis::CitedToPopulation, // e.g. the class-0/I birth-accretion band
+        };
+        let t_visc = ProvenancedInterim {
+            value: Fixed::from_ratio(1, 2),
+            basis: InterimBasis::DrawGrade, // e.g. derived from an R_1 disk-size demographic
+        };
+        let landmark = Fixed::from_ratio(19, 100);
+        assert_eq!(
+            formation_rate_consistency(
+                mdot_0,
+                t_visc,
+                Fixed::ONE,
+                Fixed::ONE, // Mdot(1 Myr) = 0.192, within 5 percent of 0.19
+                landmark,
+                Fixed::from_ratio(5, 100),
+            ),
+            Some(FormationRateConsistency::Consistent),
+            "independent interims landing near the landmark report Consistent"
+        );
+        // A much later epoch has Mdot far below 0.19: Inconsistent, surfaced not tuned.
+        assert_eq!(
+            formation_rate_consistency(
+                mdot_0,
+                t_visc,
+                Fixed::ONE,
+                Fixed::from_int(50), // Mdot(50 Myr) is orders below 0.19
+                landmark,
+                Fixed::from_ratio(5, 100),
+            ),
+            Some(FormationRateConsistency::Inconsistent),
+            "an epoch far from the landmark reports Inconsistent, a Residual"
+        );
+    }
+
+    #[test]
+    fn the_consistency_check_and_basis_grade_fail_loud() {
+        // is_independent: only a draw or a cited population qualifies.
+        assert!(InterimBasis::DrawGrade.is_independent());
+        assert!(InterimBasis::CitedToPopulation.is_independent());
+        assert!(!InterimBasis::ChosenWithoutBasis.is_independent());
+        // Fail-loud on a non-positive landmark and a negative tolerance, even with independent interims.
+        let ind = ProvenancedInterim {
+            value: Fixed::ONE,
+            basis: InterimBasis::DrawGrade,
+        };
+        assert!(formation_rate_consistency(
+            ind,
+            ind,
+            Fixed::ONE,
+            Fixed::ONE,
+            Fixed::ZERO, // non-positive landmark
+            Fixed::from_ratio(5, 100),
+        )
+        .is_none());
+        assert!(formation_rate_consistency(
+            ind,
+            ind,
+            Fixed::ONE,
+            Fixed::ONE,
+            Fixed::from_ratio(19, 100),
+            Fixed::from_int(-1), // negative tolerance
+        )
+        .is_none());
     }
 
     #[test]
