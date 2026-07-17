@@ -1215,7 +1215,18 @@ pub fn derive_disk_lifetime_myr(
 /// (`l_x_exponent = 1`, `mass_exponent = 0`), the paper's own order-of-magnitude form; (3) the Sellek et al. 2024
 /// PLUTO+PRIZMO radiation-hydro revision, which finds integrated rates roughly an order of magnitude LOWER from
 /// enhanced molecular cooling (a live rival, a lower coefficient on the same shape). The mechanism below applies
-/// whichever row is passed; the arc ships the band DECLARED rather than silently picking one.
+/// whichever row is passed.
+///
+/// RULED (owner, the batch audit): all three rows ship as the DECLARED ENSEMBLE, not a single picked row, because
+/// they are distinct physics claims (a population-synthesis fit, an analytic estimate, a radiation-hydro rival),
+/// the radiative-conductivity dispute pattern. Their roles: the appendix-B fit is the CENTRAL instance (pending
+/// verbatim confirmation at the primary), equation 9 the same paper's order-of-magnitude cross-check, and Sellek
+/// 2024 the LOW EDGE. THE COST, stated so no consumer is surprised: an order-of-magnitude wind band propagates
+/// through the `(Mdot_0/Mdot_w)^(1/p)` inversion in [`derive_disk_lifetime_myr`] to roughly a factor `10^(1/p)`
+/// band on `tau_disk`, about 4.64 at `gamma = 1` (`1/p = 2/3`), wide and honest. The Haisch-Lada and Mamajek
+/// disk-fraction-versus-age data is the independent ensemble referee that discriminates WITHIN this band (legal
+/// because it is independent data, never the retired `disk_gas_lifetime_myr` the replacement-circularity rule
+/// forbids calibrating against).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct XrayWindFit {
     /// `log10` of the wind-rate coefficient (solar masses per YEAR) at the reference `L_X` and one solar mass.
@@ -3143,6 +3154,35 @@ mod tests {
             Fixed::ONE
         )
         .is_none());
+    }
+
+    #[test]
+    fn the_disk_lifetime_band_propagates_the_wind_uncertainty() {
+        // The owner's cost ruling made executable: the declared wind-rate ENSEMBLE spans about an order of
+        // magnitude (Owen appendix-B central, Owen eq. 9, Sellek 2024 the low edge), and that band propagates
+        // through the (Mdot_0/Mdot_w)^(1/p) inversion. At gamma = 1 the exponent is 1/p = 2/3, so a factor-ten
+        // band on the wind rate becomes a factor 10^(2/3) ~ 4.64 band on tau_disk, checked here so the cost is
+        // proven rather than asserted. Two wind rates a decade apart at a large accretion-to-wind ratio (where
+        // the -1 term is negligible) must give tau_disk values a factor ~4.64 apart. The Haisch-Lada / Mamajek
+        // disk-fraction-versus-age data is the independent ensemble referee that discriminates within this band.
+        let mdot_0 = Fixed::ONE;
+        let t_visc = Fixed::ONE;
+        let gamma = Fixed::ONE;
+        let tau_strong_wind =
+            derive_disk_lifetime_myr(mdot_0, t_visc, gamma, Fixed::from_ratio(1, 10_000))
+                .unwrap()
+                .to_f64_lossy();
+        let tau_weak_wind =
+            derive_disk_lifetime_myr(mdot_0, t_visc, gamma, Fixed::from_ratio(1, 100_000))
+                .unwrap()
+                .to_f64_lossy();
+        let band = tau_weak_wind / tau_strong_wind;
+        // Oracle 10^(2/3) = 4.6416 computed outside the code; the large ratio keeps the -1 shift under a percent.
+        assert!(
+            (band - 4.641_589).abs() < 0.05,
+            "a decade wind band propagates to a ~4.64 tau_disk band at gamma=1 (got {})",
+            band
+        );
     }
 
     fn owen_appendix_b_fit() -> XrayWindFit {
