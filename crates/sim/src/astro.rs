@@ -875,26 +875,51 @@ pub fn derive_viscous_time_myr(
     Some(ln_t_myr.exp())
 }
 
+/// Wright et al. 2011's empirical convective-turnover fit: the polynomial coefficients AND the stellar-mass range
+/// over which it was measured. The range travels with the coefficients because outside it the fit is not merely
+/// less accurate, the underlying PHYSICS changes: above the high-mass edge the star has a radiative envelope and
+/// no rotation-activity dynamo at all (A stars are X-ray dark), so an extrapolation returns a confident and wrong
+/// answer with no symptom. Reserved-with-basis measured data (Wright et al. 2011: `0.09 < M/M_sun < 1.36`), not
+/// authored.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct ConvectiveTurnoverFit {
+    /// `log10(tau)` polynomial constant term.
+    pub log_tau_c0: Fixed,
+    /// `log10(tau)` polynomial linear coefficient (on `log10 M`).
+    pub log_tau_c1: Fixed,
+    /// `log10(tau)` polynomial quadratic coefficient (on `log10^2 M`).
+    pub log_tau_c2: Fixed,
+    /// Fit validity lower bound (solar masses).
+    pub mass_min_msun: Fixed,
+    /// Fit validity upper bound (solar masses); above it the radiative-envelope regime, no dynamo.
+    pub mass_max_msun: Fixed,
+}
+
 /// The CONVECTIVE TURNOVER TIME (days) as a function of stellar mass, the denominator of the Rossby number and
 /// half of the shared rotation state (the L_X slice). An empirical polynomial in `log10(M/M_sun)`:
-/// `log10(tau) = c0 + c1*log10(M) + c2*log10(M)^2`. PARAMETRIC over the three fit coefficients, which are
-/// reserved-with-basis measured data (the third floor pillar), not authored. ANOMALY, surfaced not silently
-/// resolved: the mass-based polynomial `(1.16, -1.49, -0.54)` traces to Wright et al. 2018 (the fully-convective
-/// M-dwarf extension), while Wright et al. 2011 parameterizes `tau` by `V-Ks` COLOUR, so the exact coefficient
-/// source needs confirmation before the values are trusted; the FUNCTION (a quadratic in `log10 M`) is correct
-/// either way, the VALUES are the reserved data pending that confirmation. Longer for lower masses, so an M dwarf
-/// sits at a longer turnover and a lower Rossby number at fixed rotation, which is why M dwarfs stay saturated for
-/// gigayears (the convicting population for a mass-universal formulation). `None` on a non-positive mass or an
-/// intermediate past the representable range.
+/// `log10(tau) = c0 + c1*log10(M) + c2*log10(M)^2`, from Wright et al. 2011 (the mass fit, `0.09 < M/M_sun < 1.36`,
+/// RMS 0.028 dex, alongside their V-Ks colour fit; the engine keys on mass, the drawn physical variable, rather
+/// than derive a colour to look one up). The coefficients are reserved-with-basis measured data (the third floor
+/// pillar), not authored. Longer for lower masses, so an M dwarf sits at a longer turnover and a lower Rossby
+/// number at fixed rotation, which is why M dwarfs stay saturated for gigayears (the convicting population for a
+/// mass-universal formulation).
+///
+/// DOMAIN GUARD (both ends): the convective-dynamo paradigm ends at the fit's high-mass edge. A star above it has
+/// a radiative envelope and no rotation-activity dynamo (A STARS ARE X-RAY DARK, the convicting population that
+/// this function would otherwise light up like young suns), so this returns `None` outside `[mass_min, mass_max]`
+/// rather than extrapolate a confident wrong turnover, and the radiative-envelope regime is a named future branch,
+/// not a silent extension. `None` also on a non-positive mass or an intermediate past the representable range.
 pub fn convective_turnover_time_days(
     mass_ratio: Fixed,
-    log_tau_c0: Fixed,
-    log_tau_c1: Fixed,
-    log_tau_c2: Fixed,
+    fit: &ConvectiveTurnoverFit,
 ) -> Option<Fixed> {
-    if mass_ratio <= Fixed::ZERO {
+    if mass_ratio <= Fixed::ZERO || mass_ratio < fit.mass_min_msun || mass_ratio > fit.mass_max_msun
+    {
         return None;
     }
+    let log_tau_c0 = fit.log_tau_c0;
+    let log_tau_c1 = fit.log_tau_c1;
+    let log_tau_c2 = fit.log_tau_c2;
     let ln10 = Fixed::from_int(10).ln();
     let log10_m = mass_ratio.ln().checked_div(ln10)?;
     let log10_tau = log_tau_c0
@@ -935,13 +960,23 @@ pub fn stellar_rossby_number(rotation_period_days: Fixed, tau_conv_days: Fixed) 
 /// PARAMETRIC over the reserved-with-basis coefficients, each Wright et al. 2011 (arXiv:1109.4634, ar5iv HTML,
 /// native text so no OCR risk on the exponent), cited with its conditioning (824 solar and late-type stars,
 /// F-M dwarfs): `ro_sat = 0.13 +/- 0.02`; `saturated_log10_fraction = -3.13 +/- 0.22` (almost spectral-type
-/// independent); `beta = -2.70 +/- 0.13` (inconsistent with the canonical -2 at 5 sigma). The age decay is
-/// DERIVED not authored: with `P_rot ~ t^(1/2)` (Skumanich), `L_X / L_bol ~ Ro^beta ~ t^(beta/2)`, so the X-ray
-/// age index is `beta/2 ~ -1.35`, which matches the independent direct measurement `-1.37 +/- 0.47` (Aldarondo
-/// Quinones et al. 2025), a cross-check, not a second input. The EUV band is the NAMED SIBLING on the same Rossby
-/// state with its OWN coefficients, and its rows carry a reconstruction-modality flag (EUV is largely
-/// unobservable through the interstellar medium, its indices proxy-reconstructed); this slice does not build it.
-/// `None` on a non-positive Rossby or `ro_sat`.
+/// independent). The slope `beta` carries a SOURCE-INTERNAL SELECTION DICHOTOMY, declared as a band per the
+/// V-star precedent: Wright et al. 2011 fits `beta = -2.55 +/- 0.15` on the full 824-star sample and
+/// `beta = -2.70 +/- 0.13` on the selection-corrected unbiased sub-sample (36 Mt. Wilson stars); the unbiased fit
+/// SERVES, with the full-sample value the other end of the declared band `[-2.70, -2.55]`. Both are inconsistent
+/// with the canonical -2 at ~5 sigma. The age decay is DERIVED not authored: with `P_rot ~ t^(1/2)` (Skumanich),
+/// `L_X / L_bol ~ Ro^beta ~ t^(beta/2)`, so the X-ray age index is `beta/2 ~ -1.35`, which matches the independent
+/// direct measurement `-1.37 +/- 0.47` (Aldarondo Quinones et al. 2025), a cross-check, not a second input.
+///
+/// TERMS DROPPED on that cross-check: the derivation assumes UNSATURATED Skumanich throughout, but a young star
+/// sits SATURATED with the fraction pinned at the plateau (the `Ro <= ro_sat` branch here), so the single
+/// `beta/2` index describes the POST-SATURATION era only. This is a domain statement, not an error: the eventual
+/// `Omega(t)` rotation structure renders it moot by producing plateau-then-decline naturally from the Rossby
+/// number crossing `ro_sat`, which this function already encodes across its two branches.
+///
+/// The EUV band is the NAMED SIBLING on the same Rossby state with its OWN coefficients, and its rows carry a
+/// reconstruction-modality flag (EUV is largely unobservable through the interstellar medium, its indices
+/// proxy-reconstructed); this slice does not build it. `None` on a non-positive Rossby or `ro_sat`.
 pub fn xray_luminosity_fraction(
     rossby: Fixed,
     ro_sat: Fixed,
@@ -2456,21 +2491,24 @@ mod tests {
         assert!(derive_viscous_time_myr(r, m, t, a, Fixed::ZERO).is_none());
     }
 
-    // Wright et al. 2011 coefficients as test fixtures (cited at the function docs).
-    fn tau_poly() -> (Fixed, Fixed, Fixed) {
-        (
-            Fixed::from_ratio(116, 100),  // c0 = 1.16
-            Fixed::from_ratio(-149, 100), // c1 = -1.49
-            Fixed::from_ratio(-54, 100),  // c2 = -0.54
-        )
+    // Wright et al. 2011 convective-turnover fit as a test fixture (cited at the function docs), coefficients and
+    // the 0.09 to 1.36 M_sun validity range.
+    fn tau_poly() -> ConvectiveTurnoverFit {
+        ConvectiveTurnoverFit {
+            log_tau_c0: Fixed::from_ratio(116, 100),    // c0 = 1.16
+            log_tau_c1: Fixed::from_ratio(-149, 100),   // c1 = -1.49
+            log_tau_c2: Fixed::from_ratio(-54, 100),    // c2 = -0.54
+            mass_min_msun: Fixed::from_ratio(9, 100),   // 0.09 M_sun
+            mass_max_msun: Fixed::from_ratio(136, 100), // 1.36 M_sun
+        }
     }
 
     #[test]
     fn the_convective_turnover_matches_the_polynomial_and_lengthens_for_lower_mass() {
         // External f64 oracle (twin-independence): 10^(1.16 + c1 log M + c2 log^2 M), computed outside the engine.
         // At the solar mass log M = 0 so tau = 10^1.16 ~ 14.45 days.
-        let (c0, c1, c2) = tau_poly();
-        let solar = convective_turnover_time_days(Fixed::ONE, c0, c1, c2).unwrap();
+        let fit = tau_poly();
+        let solar = convective_turnover_time_days(Fixed::ONE, &fit).unwrap();
         let expected_solar = 10f64.powf(1.16);
         // DEFAULTS-TAKEN, 2 percent: numerical-accuracy on the ln/exp round-trip, not a residue budget.
         assert!(
@@ -2479,7 +2517,7 @@ mod tests {
             solar.to_f64_lossy()
         );
         // An M dwarf sits at a LONGER turnover, so it stays saturated longer (the convicting population).
-        let m_dwarf = convective_turnover_time_days(Fixed::from_ratio(3, 10), c0, c1, c2).unwrap();
+        let m_dwarf = convective_turnover_time_days(Fixed::from_ratio(3, 10), &fit).unwrap();
         assert!(
             m_dwarf > solar,
             "the M dwarf turnover exceeds the solar one (M dwarf {}, solar {})",
@@ -2492,12 +2530,12 @@ mod tests {
     fn the_xray_fraction_is_mass_universal_at_fixed_rossby() {
         // Admit-the-alien: the X-ray fraction depends ONLY on the Rossby number, so two stars of different mass
         // that reach the same Rossby show the same fractional activity. Build the same Ro two ways and compare.
-        let (c0, c1, c2) = tau_poly();
+        let fit = tau_poly();
         let ro_sat = Fixed::from_ratio(13, 100);
         let sat = Fixed::from_ratio(-313, 100);
         let beta = Fixed::from_ratio(-27, 10);
-        let tau_g = convective_turnover_time_days(Fixed::ONE, c0, c1, c2).unwrap();
-        let tau_m = convective_turnover_time_days(Fixed::from_ratio(3, 10), c0, c1, c2).unwrap();
+        let tau_g = convective_turnover_time_days(Fixed::ONE, &fit).unwrap();
+        let tau_m = convective_turnover_time_days(Fixed::from_ratio(3, 10), &fit).unwrap();
         // Choose rotation periods so both give the same Rossby number Ro = 1.0 (P_rot = tau).
         let ro_g = stellar_rossby_number(tau_g, tau_g).unwrap();
         let ro_m = stellar_rossby_number(tau_m, tau_m).unwrap();
@@ -2512,12 +2550,13 @@ mod tests {
     #[test]
     fn the_xray_fraction_saturates_declines_and_convicts_a_mutated_slope() {
         // The band mapping, mutation-tested. External f64 oracle: saturated 10^-3.13 below ro_sat; unsaturated
-        // 10^-3.13 * (Ro/ro_sat)^beta above. Then MUTATE the slope (the canonical -2 Wright rejects at 5 sigma)
-        // and the value must move outside the band, so the mapping is shown to depend on the slope it claims.
+        // 10^-3.13 * (Ro/ro_sat)^beta above. Then MUTATE the slope to the canonical -2, which sits OUTSIDE the
+        // declared source-internal dichotomy band [-2.70, -2.55] (Wright rejects it at 5 sigma), so the mutation
+        // proves the mapping depends on the slope it claims rather than merely tracking a value inside the band.
         let ro_sat = Fixed::from_ratio(13, 100);
         let sat = Fixed::from_ratio(-313, 100);
-        let beta = Fixed::from_ratio(-27, 10);
-        // Saturated regime: Ro below ro_sat returns the plateau exactly.
+        let beta = Fixed::from_ratio(-27, 10); // the unbiased sub-sample fit, which serves
+                                               // Saturated regime: Ro below ro_sat returns the plateau exactly.
         let saturated =
             xray_luminosity_fraction(Fixed::from_ratio(5, 100), ro_sat, sat, beta).unwrap();
         let expected_plateau = 10f64.powf(-3.13);
@@ -2551,8 +2590,8 @@ mod tests {
 
     #[test]
     fn the_xray_functions_fail_loud_on_bad_inputs() {
-        let (c0, c1, c2) = tau_poly();
-        assert!(convective_turnover_time_days(Fixed::ZERO, c0, c1, c2).is_none());
+        let fit = tau_poly();
+        assert!(convective_turnover_time_days(Fixed::ZERO, &fit).is_none());
         assert!(stellar_rossby_number(Fixed::ZERO, Fixed::ONE).is_none());
         assert!(stellar_rossby_number(Fixed::ONE, Fixed::ZERO).is_none());
         let (ro_sat, sat, beta) = (
@@ -2562,5 +2601,24 @@ mod tests {
         );
         assert!(xray_luminosity_fraction(Fixed::ZERO, ro_sat, sat, beta).is_none());
         assert!(xray_luminosity_fraction(Fixed::ONE, Fixed::ZERO, sat, beta).is_none());
+    }
+
+    #[test]
+    fn the_turnover_refuses_the_radiative_envelope_domain() {
+        // Domain guard (catch 1): the convective-dynamo fit ends at its mass range, and beyond the high-mass edge
+        // the star is radiative-enveloped with no rotation-activity dynamo. An A star (2 M_sun) must return None,
+        // not a confident extrapolated turnover that would light it up like a young Sun.
+        let fit = tau_poly();
+        assert!(
+            convective_turnover_time_days(Fixed::from_int(2), &fit).is_none(),
+            "a 2 M_sun A star is outside the fit range, no convective dynamo"
+        );
+        // The low-mass edge is guarded too (below the fit's brown-dwarf boundary).
+        assert!(
+            convective_turnover_time_days(Fixed::from_ratio(5, 100), &fit).is_none(),
+            "0.05 M_sun is below the fit's 0.09 lower bound"
+        );
+        // Inside the range still resolves.
+        assert!(convective_turnover_time_days(Fixed::ONE, &fit).is_some());
     }
 }
