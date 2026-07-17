@@ -3818,7 +3818,6 @@ mod tests {
         // uncertainty, across the disk-era mass range. This is what makes the blindness true on the right
         // substrate; with the MAIN-SEQUENCE turnover it FAILS for the solar-and-above masses (the finding).
         let ro_sat = Fixed::from_ratio(13, 100);
-        let p_rot = Fixed::from_int(8); // disk-locked rotation, days
         let c = Fixed::from_ratio(3, 2);
         for mass in [
             Fixed::from_ratio(3, 10),
@@ -3828,13 +3827,23 @@ mod tests {
         ] {
             let tau =
                 pre_main_sequence_convective_turnover_days(mass, Fixed::from_int(4000), c).unwrap();
-            let ro = stellar_rossby_number(p_rot, tau).unwrap();
-            // Margin: Ro must sit at least a factor of two below the knee, exceeding the coefficient uncertainty.
+            // Cover the disk-era ROTATION range, not one value: the representative disk-locked ~8 days sits below
+            // the knee with a factor-two margin (exceeding the coefficient uncertainty), and even the SLOW-rotation
+            // end (~15 days, the worst case for saturation) stays below the knee, so ANY disk-era rotation saturates.
+            let ro_locked = stellar_rossby_number(Fixed::from_int(8), tau).unwrap();
             assert!(
-                ro.checked_mul(Fixed::from_int(2)).unwrap() < ro_sat,
-                "the disk-era star is saturated with margin at M = {} (Ro {}, knee {})",
+                ro_locked.checked_mul(Fixed::from_int(2)).unwrap() < ro_sat,
+                "disk-locked (8 d) is saturated with margin at M = {} (Ro {}, knee {})",
                 mass.to_f64_lossy(),
-                ro.to_f64_lossy(),
+                ro_locked.to_f64_lossy(),
+                ro_sat.to_f64_lossy()
+            );
+            let ro_slow = stellar_rossby_number(Fixed::from_int(15), tau).unwrap();
+            assert!(
+                ro_slow < ro_sat,
+                "even a slow (15 d) disk-era rotator stays saturated at M = {} (Ro {}, knee {})",
+                mass.to_f64_lossy(),
+                ro_slow.to_f64_lossy(),
                 ro_sat.to_f64_lossy()
             );
         }
