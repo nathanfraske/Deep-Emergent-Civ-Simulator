@@ -1019,6 +1019,97 @@ pub fn stellar_envelope_structure(
     })
 }
 
+/// A LUMINOSITY BRACKET (`L_sun`), the RIDER 2 output form for a quantity whose model uncertainty spans orders of
+/// magnitude: the branch ships the RANGE, not a point, so a consumer cannot read a decade-wide ignorance as a
+/// value. `[lo, hi]` in `L_sun`, unconstrained-by-source by construction (a bracket is not a scalar), with
+/// [`EuvLuminosityBracket::width_dex`] making the width machine-readable before any consumer reads the bounds.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct EuvLuminosityBracket {
+    lo_lsun: Fixed,
+    hi_lsun: Fixed,
+}
+
+impl EuvLuminosityBracket {
+    /// The lower bound (`L_sun`).
+    pub fn lo_lsun(self) -> Fixed {
+        self.lo_lsun
+    }
+    /// The upper bound (`L_sun`).
+    pub fn hi_lsun(self) -> Fixed {
+        self.hi_lsun
+    }
+    /// The bracket WIDTH in dex (`log10(hi/lo)`), the stated width RIDER 2 requires be readable before a consumer
+    /// reads the bounds. `None` on a degenerate bracket (a non-positive bound).
+    pub fn width_dex(self) -> Option<Fixed> {
+        if self.lo_lsun <= Fixed::ZERO || self.hi_lsun <= Fixed::ZERO {
+            return None;
+        }
+        let ln10 = Fixed::from_int(10).ln();
+        self.hi_lsun
+            .checked_div(self.lo_lsun)?
+            .ln()
+            .checked_div(ln10)
+    }
+}
+
+/// The BLACKBODY IONIZING FRACTION `f_BB(T_eff)`: the fraction of a blackbody's radiant exitance emitted above the
+/// hydrogen ionization edge (13.6 eV), the Wien-tail upper-incomplete integral `(15/pi^4) exp(-x)(x^3 + 3x^2 +
+/// 6x + 6)` with `x = T_ion/T_eff` and `T_ion = E_edge/k_B`. Computed in LOG space (`C * exp(ln(poly) - x)`, one
+/// exp at the end) so the tiny tail stays representable where a bare `exp(-x)` would underflow fixed point. This
+/// is the LTE-blackbody BASELINE that the real hot-photosphere EUV departs from by orders of magnitude; the
+/// departure is the atmosphere-model band the caller brackets, not this baseline. DERIVED from `T_eff`, no
+/// authored value; `T_ion` is a derived physical constant (the hydrogen edge over Boltzmann, ~157821 K). It rises
+/// steeply with `T_eff` (roughly eight dex from a solar photosphere to a 30000 K one), which is why a hotter
+/// radiative star photoevaporates harder.
+///
+/// VALIDITY: the Wien tail (dropping the `-1` in the Planck denominator) is exact to a fraction of a percent for
+/// `x >~ 3`, which holds at the hydrogen edge for every star cooler than ~50000 K; a hotter photosphere would
+/// need the full Planck denominator, a refinement to flag rather than extrapolate silently. A non-positive input
+/// returns `None`.
+pub fn blackbody_ionizing_fraction(t_eff_k: Fixed, t_ion_k: Fixed) -> Option<Fixed> {
+    if t_eff_k <= Fixed::ZERO || t_ion_k <= Fixed::ZERO {
+        return None;
+    }
+    let x = t_ion_k.checked_div(t_eff_k)?;
+    let c = Fixed::from_int(15).checked_div(Fixed::PI.powi(4))?; // 15/pi^4, the Planck-integral normalization
+    let poly = x
+        .powi(3)
+        .checked_add(Fixed::from_int(3).checked_mul(x.powi(2))?)?
+        .checked_add(Fixed::from_int(6).checked_mul(x)?)?
+        .checked_add(Fixed::from_int(6))?;
+    // f_BB = C * poly * exp(-x), formed as C * exp(ln(poly) - x) so the tiny tail never underflows.
+    let tail = poly.ln().checked_sub(x)?.exp();
+    c.checked_mul(tail)
+}
+
+/// The RADIATIVE-ENVELOPE EUV luminosity BRACKET (`L_sun`): the ionizing luminosity that drives photoevaporation
+/// for a dynamo-dark [`EnvelopeStructure::Radiative`] star, DERIVED from `T_eff` and `L_bol` as `L_bol *
+/// f_BB(T_eff)` (the blackbody ionizing baseline, [`blackbody_ionizing_fraction`]) times an ATMOSPHERE-MODEL
+/// DEPARTURE BAND `[departure_lo, departure_hi]` that spans orders of magnitude: line blanketing, NLTE, and wind
+/// blanketing lift the real EUV off the LTE baseline by decades, and the departure IS the quantity, not a
+/// correction. Per RIDER 2 the branch ships the BRACKET and its width is readable through
+/// [`EuvLuminosityBracket::width_dex`] before a consumer reads the bounds: a decade-wide ignorance that reaches
+/// the dispersal race as a single value is the exact defect the bracket prevents. The departure band is
+/// reserved-with-basis and unconstrained-by-source until a hot-star atmosphere-model grid is fetched. `None` on a
+/// non-positive input or an inverted band.
+pub fn radiative_euv_luminosity_bracket(
+    t_eff_k: Fixed,
+    l_bol_lsun: Fixed,
+    t_ion_k: Fixed,
+    departure_lo: Fixed,
+    departure_hi: Fixed,
+) -> Option<EuvLuminosityBracket> {
+    if l_bol_lsun <= Fixed::ZERO || departure_lo <= Fixed::ZERO || departure_hi < departure_lo {
+        return None;
+    }
+    let f_bb = blackbody_ionizing_fraction(t_eff_k, t_ion_k)?;
+    let base = l_bol_lsun.checked_mul(f_bb)?;
+    Some(EuvLuminosityBracket {
+        lo_lsun: base.checked_mul(departure_lo)?,
+        hi_lsun: base.checked_mul(departure_hi)?,
+    })
+}
+
 /// The PRE-MAIN-SEQUENCE LUMINOSITY `L_bol / L_sun` at a stellar age, the disk-era bolometric luminosity the L_X
 /// chain reads (and the race's wind rate runs through). A disk-hosting star is not a main-sequence object: it is
 /// a pre-main-sequence star still descending the Hayashi track, fully convective and BRIGHTER than its
@@ -3318,6 +3409,134 @@ mod tests {
         assert_eq!(
             convective_turnover_time_days(Fixed::from_int(2), &fit),
             Err(TurnoverRefusal::AboveFitDomain)
+        );
+    }
+
+    // T_ion = E_edge/k_B for the 13.6 eV hydrogen Lyman edge, a DERIVED physical constant (~157821 K), the
+    // test's stand-in for the value a live caller derives from the floor.
+    fn t_ion() -> Fixed {
+        Fixed::from_int(157821)
+    }
+
+    #[test]
+    fn the_blackbody_ionizing_fraction_matches_the_wien_tail_oracle() {
+        // External f64 oracle (twin-independence): f_BB = (15/pi^4) exp(-x)(x^3+3x^2+6x+6), x = T_ion/T_eff,
+        // computed OUTSIDE the engine in python. The fixed-point log-space form must reproduce it. Values:
+        // T_eff=10000 -> 1.0297e-4, 20000 -> 4.214e-2, 30000 -> 2.128e-1.
+        let cases = [
+            (10000i32, 1.029720e-4f64),
+            (20000, 4.213767e-2),
+            (30000, 2.127986e-1),
+        ];
+        for (t_eff, oracle) in cases {
+            let f = blackbody_ionizing_fraction(Fixed::from_int(t_eff), t_ion()).unwrap();
+            let got = f.to_f64_lossy();
+            assert!(
+                (got - oracle).abs() / oracle < 0.02,
+                "f_BB(T_eff={t_eff}) ~ {oracle:e}, got {got:e}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_ionizing_fraction_rises_steeply_with_temperature() {
+        // The convicting behaviour: the EUV tail climbs orders of magnitude with T_eff, so a hot Herbig B star
+        // photoevaporates far harder than an A star. Monotone, and the 10000 -> 20000 K step alone spans more
+        // than two dex.
+        let cool = blackbody_ionizing_fraction(Fixed::from_int(10000), t_ion()).unwrap();
+        let warm = blackbody_ionizing_fraction(Fixed::from_int(20000), t_ion()).unwrap();
+        let hot = blackbody_ionizing_fraction(Fixed::from_int(30000), t_ion()).unwrap();
+        assert!(warm > cool && hot > warm, "f_BB rises with T_eff");
+        assert!(
+            warm.to_f64_lossy() / cool.to_f64_lossy() > 100.0,
+            "the 10000 -> 20000 K step spans more than two dex"
+        );
+    }
+
+    #[test]
+    fn the_euv_branch_ships_a_bracket_with_its_width_stated() {
+        // RIDER 2: the branch's output is a BRACKET whose width is readable before a consumer reads the bounds.
+        // A departure band of [1, 100] (two dex, the atmosphere-model ensemble spread) makes the bracket two dex
+        // wide, and width_dex reports exactly that. The width is the departure band's, independent of the
+        // blackbody baseline.
+        let b = radiative_euv_luminosity_bracket(
+            Fixed::from_int(15000),
+            Fixed::from_int(100), // L_bol ~ 100 L_sun, a Herbig
+            t_ion(),
+            Fixed::ONE,           // departure_lo
+            Fixed::from_int(100), // departure_hi (two dex)
+        )
+        .unwrap();
+        assert!(b.hi_lsun() > b.lo_lsun(), "the bracket brackets");
+        let width = b.width_dex().unwrap().to_f64_lossy();
+        assert!(
+            (width - 2.0).abs() < 0.01,
+            "the stated width is the departure band's two dex, got {width}"
+        );
+    }
+
+    #[test]
+    fn the_bracket_scales_with_luminosity_and_holds_its_width() {
+        // Doubling L_bol doubles both bounds (the ionizing luminosity is linear in L_bol) and leaves the width
+        // unchanged (the width is the model band, not the star's brightness).
+        let one = radiative_euv_luminosity_bracket(
+            Fixed::from_int(20000),
+            Fixed::from_int(50),
+            t_ion(),
+            Fixed::ONE,
+            Fixed::from_int(30),
+        )
+        .unwrap();
+        let two = radiative_euv_luminosity_bracket(
+            Fixed::from_int(20000),
+            Fixed::from_int(100),
+            t_ion(),
+            Fixed::ONE,
+            Fixed::from_int(30),
+        )
+        .unwrap();
+        let ratio = two.hi_lsun().to_f64_lossy() / one.hi_lsun().to_f64_lossy();
+        assert!(
+            (ratio - 2.0).abs() < 0.001,
+            "twice the L_bol, twice the bound"
+        );
+        let (w1, w2) = (one.width_dex().unwrap(), two.width_dex().unwrap());
+        assert_eq!(w1, w2, "the width is the model band, invariant under L_bol");
+    }
+
+    #[test]
+    fn the_euv_bracket_refuses_bad_inputs() {
+        // A non-positive luminosity, an inverted band, and a non-positive temperature are errors, never brackets.
+        assert!(radiative_euv_luminosity_bracket(
+            Fixed::from_int(15000),
+            Fixed::ZERO,
+            t_ion(),
+            Fixed::ONE,
+            Fixed::from_int(100)
+        )
+        .is_none());
+        assert!(radiative_euv_luminosity_bracket(
+            Fixed::from_int(15000),
+            Fixed::from_int(100),
+            t_ion(),
+            Fixed::from_int(100),
+            Fixed::ONE // hi < lo, inverted
+        )
+        .is_none());
+        assert!(blackbody_ionizing_fraction(Fixed::from_int(-1), t_ion()).is_none());
+        // A degenerate band [d, d] is a valid point bracket of zero width.
+        let point = radiative_euv_luminosity_bracket(
+            Fixed::from_int(15000),
+            Fixed::from_int(100),
+            t_ion(),
+            Fixed::from_int(5),
+            Fixed::from_int(5),
+        )
+        .unwrap();
+        assert_eq!(
+            point.width_dex(),
+            Some(Fixed::ZERO),
+            "a point band has zero width"
         );
     }
 
