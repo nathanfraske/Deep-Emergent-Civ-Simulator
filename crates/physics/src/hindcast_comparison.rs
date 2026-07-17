@@ -115,6 +115,11 @@ pub enum HindcastComparison {
 /// modulus pair, or the comparison refuses. A two-sided interval uses exact band overlap; a one-sided bound compares
 /// against the bound directly and never invents the open side; an age-rate relation refuses for a loading age; an
 /// absent pair refuses. A disjoint pair is a miss at the residual law's first rung, carrying the partition.
+///
+/// EDGE INCLUSIVITY: the intervals are CLOSED, so TOUCHING bands overlap (the operators are `<=` and `>=`
+/// throughout: [`RigidityBand::overlaps`] and the bound arms below). This is the honest reading because a rigidity
+/// band is an inclusive interval, and a ulp-marginal miss costs only an investigation by design (the residual
+/// law's first rung), never a fit, so erring toward overlap at the boundary spends nothing.
 pub fn compare_to_row(derived: RigidityBand, row: &ElasticThicknessRow) -> HindcastComparison {
     // The row's own moduli, or refuse. An absent pair cannot be brought into rigidity space (Mars, Venus), and
     // borrowing one would manufacture agreement, so the blockage is reported rather than crossed.
