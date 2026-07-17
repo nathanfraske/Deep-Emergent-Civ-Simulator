@@ -1040,6 +1040,65 @@ pub fn pre_main_sequence_luminosity_lsun(
     Some(ln_l_over_lsun.exp())
 }
 
+/// The PRE-MAIN-SEQUENCE CONVECTIVE TURNOVER TIME (days), the Rossby denominator a DISK-ERA star truly needs,
+/// which the main-sequence Wright polynomial ([`convective_turnover_time_days`]) gets wrong. This is the RIDER-1
+/// finding's fix and the second founding case of the MAIN-SEQUENCE-INSTANCE SWEEP: the arc's stars are
+/// pre-main-sequence, but the chain was built on main-sequence instances, and here the main-sequence polynomial
+/// (calibrated on shallow outer convection zones) UNDERESTIMATES the turnover of a FULLY convective
+/// pre-main-sequence star by roughly a decade, which flips the computed Rossby number from saturated (true) to
+/// unsaturated (wrong) for `M >~ 0.5 M_sun` at disk-locked rotation. Left unfixed it makes `L_X` read on the decay
+/// branch instead of the plateau, so the wind rate and `tau_disk` are wrong, so the #73 giant verdict races a
+/// wrong clock.
+///
+/// DERIVED on the SAME Hayashi substrate the contraction luminosity stands on. Global mixing-length theory gives a
+/// fully-convective turnover `tau ~ C (R^2 M / L)^(1/3)` (the convective velocity `v ~ (L/(4 pi R^2 rho))^(1/3)`
+/// carrying the luminosity, over a mixing length `~ R`). On the Hayashi track `L = 4 pi sigma T_H^4 R^2`, so the
+/// radius CANCELS and `tau ~ C (M / (4 pi sigma T_H^4))^(1/3)`, a function of stellar mass and the H-minus wall
+/// temperature alone. The cancellation is what makes this SPECIFIC to Hayashi-track stars: it does not misfire on a
+/// main-sequence star (whose `L` is not set by `T_H`), so the two turnovers stay distinct. The mass dependence is
+/// now correct (INCREASING weakly with mass, since a pre-main-sequence star is fully convective at every mass),
+/// the opposite of the main-sequence polynomial's decrease as the envelope thins, which is exactly why the
+/// polynomial failed at the high-mass end.
+///
+/// `mlt_coefficient` (`C`) is reserved-with-basis: the mixing-length `alpha` (solar-calibrated `~1.5 to 2.0`) times
+/// the order-unity global-mixing-length numerical factors, anchorable to a pre-main-sequence model turnover (a
+/// solar-mass pre-main-sequence `tau_conv ~ 250 to 400` days, Landin et al. 2010 / Gregory et al. 2016 class). Its
+/// precision does not decide the arc's answer: at disk-locked rotation the derived turnover clears the saturation
+/// knee by a factor of several (the saturation assertion test), so the conclusion survives the coefficient's
+/// uncertainty, which is the blindness restored on the CORRECT substrate. `None` on a non-positive input or an
+/// intermediate past the representable range.
+pub fn pre_main_sequence_convective_turnover_days(
+    mass_ratio: Fixed,
+    hayashi_temp_k: Fixed,
+    mlt_coefficient: Fixed,
+) -> Option<Fixed> {
+    if mass_ratio <= Fixed::ZERO || hayashi_temp_k <= Fixed::ZERO || mlt_coefficient <= Fixed::ZERO
+    {
+        return None;
+    }
+    let ln_pi = Fixed::PI.ln();
+    let ln_sigma = crate::physiology::derived_stefan_boltzmann().ln();
+    let ln_m = mass_ratio
+        .ln()
+        .checked_add(civsim_physics::saha::ln_of_decimal(SOLAR_MASS_KG)?)?;
+    // ln(tau in s) = ln C + (1/3)(ln M - ln 4 - ln pi - ln sigma - 4 ln T_H).
+    let inner = ln_m
+        .checked_sub(Fixed::from_int(4).ln())?
+        .checked_sub(ln_pi)?
+        .checked_sub(ln_sigma)?
+        .checked_sub(Fixed::from_int(4).checked_mul(hayashi_temp_k.ln())?)?;
+    let ln_tau_s = mlt_coefficient
+        .ln()
+        .checked_add(inner.checked_div(Fixed::from_int(3))?)?;
+    // Seconds to days: subtract ln(86400).
+    let ln_tau_days = ln_tau_s.checked_sub(Fixed::from_int(86_400).ln())?;
+    let ln_ceiling = Fixed::from_int(31).checked_mul(Fixed::from_int(2).ln())?;
+    if ln_tau_days >= ln_ceiling {
+        return None;
+    }
+    Some(ln_tau_days.exp())
+}
+
 /// The ROTATION PERIOD `P_rot` (days) at a stellar age, the SPIN-DOWN that closes the last interim in the L_X
 /// chain: it supplies the numerator of the Rossby number ([`stellar_rossby_number`]) the whole activity-and-wind
 /// chain reads. Magnetized stars shed angular momentum in their winds and spin down, and the empirical law is
@@ -3710,5 +3769,91 @@ mod tests {
             pre_main_sequence_luminosity_lsun(Fixed::ONE, Fixed::from_int(4000), Fixed::ZERO)
                 .is_none()
         );
+    }
+
+    #[test]
+    fn the_pre_ms_turnover_matches_the_hayashi_mlt_oracle() {
+        // Twin-independent oracle from tau = C (M/(4 pi sigma T_H^4))^(1/3): a solar-mass star at the Hayashi wall
+        // (T_H = 4000 K) with C = 1.5 gives ~385 days, roughly a decade longer than the main-sequence ~14.5 days,
+        // the fully-convective turnover a disk-era star has. Computed outside the code.
+        let c = Fixed::from_ratio(3, 2); // C = 1.5
+        let tau = pre_main_sequence_convective_turnover_days(Fixed::ONE, Fixed::from_int(4000), c)
+            .unwrap();
+        assert!(
+            (tau.to_f64_lossy() - 385.0).abs() / 385.0 < 0.02,
+            "the solar pre-MS turnover is ~385 days (got {})",
+            tau.to_f64_lossy()
+        );
+    }
+
+    #[test]
+    fn the_pre_ms_turnover_exceeds_the_main_sequence_polynomial() {
+        // The systematic the finding named: the pre-MS (fully convective) turnover is ~an order of magnitude
+        // longer than the main-sequence polynomial's value at the same mass. That gap, not the fitting error, is
+        // what decides saturation.
+        let fit = tau_poly();
+        let ms = convective_turnover_time_days(Fixed::ONE, &fit)
+            .unwrap()
+            .to_f64_lossy();
+        let pre = pre_main_sequence_convective_turnover_days(
+            Fixed::ONE,
+            Fixed::from_int(4000),
+            Fixed::from_ratio(3, 2),
+        )
+        .unwrap()
+        .to_f64_lossy();
+        assert!(
+            pre > ms * 10.0,
+            "the pre-MS turnover exceeds the MS value by more than a decade (MS {}, pre-MS {})",
+            ms,
+            pre
+        );
+    }
+
+    #[test]
+    fn the_pre_ms_turnover_saturates_the_disk_era_rossby() {
+        // THE SATURATION ASSERTION (RIDER 1), the claim the gate required proven rather than assumed and wants
+        // mutation-tested. With the CORRECT pre-MS turnover and a disk-locked rotation (P_rot ~ 8 days), the Rossby
+        // number sits BELOW the saturation knee (ro_sat = 0.13) by a margin exceeding the coefficient's own
+        // uncertainty, across the disk-era mass range. This is what makes the blindness true on the right
+        // substrate; with the MAIN-SEQUENCE turnover it FAILS for the solar-and-above masses (the finding).
+        let ro_sat = Fixed::from_ratio(13, 100);
+        let p_rot = Fixed::from_int(8); // disk-locked rotation, days
+        let c = Fixed::from_ratio(3, 2);
+        for mass in [
+            Fixed::from_ratio(3, 10),
+            Fixed::from_ratio(1, 2),
+            Fixed::ONE,
+            Fixed::from_ratio(136, 100),
+        ] {
+            let tau =
+                pre_main_sequence_convective_turnover_days(mass, Fixed::from_int(4000), c).unwrap();
+            let ro = stellar_rossby_number(p_rot, tau).unwrap();
+            // Margin: Ro must sit at least a factor of two below the knee, exceeding the coefficient uncertainty.
+            assert!(
+                ro.checked_mul(Fixed::from_int(2)).unwrap() < ro_sat,
+                "the disk-era star is saturated with margin at M = {} (Ro {}, knee {})",
+                mass.to_f64_lossy(),
+                ro.to_f64_lossy(),
+                ro_sat.to_f64_lossy()
+            );
+        }
+    }
+
+    #[test]
+    fn the_pre_ms_turnover_refuses_nonphysical_inputs() {
+        // Fail-loud on each non-positive axis: no mass, no wall temperature, no mixing-length coefficient.
+        let c = Fixed::from_ratio(3, 2);
+        assert!(
+            pre_main_sequence_convective_turnover_days(Fixed::ZERO, Fixed::from_int(4000), c)
+                .is_none()
+        );
+        assert!(pre_main_sequence_convective_turnover_days(Fixed::ONE, Fixed::ZERO, c).is_none());
+        assert!(pre_main_sequence_convective_turnover_days(
+            Fixed::ONE,
+            Fixed::from_int(4000),
+            Fixed::ZERO
+        )
+        .is_none());
     }
 }
