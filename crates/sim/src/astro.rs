@@ -895,6 +895,25 @@ pub struct ConvectiveTurnoverFit {
     pub mass_max_msun: Fixed,
 }
 
+/// Why [`convective_turnover_time_days`] declined to return a turnover: ONE TYPED DOOR PER REASON, so a consumer
+/// can never read three distinct refusals through one channel. A bare `None` welded three cases together (an
+/// invalid input, a fit-domain refusal, and an engine representation limit), and the expansion's radiative-envelope
+/// wind dispatch is precisely the consumer that would read them as one, sending a negative mass or an overflow to
+/// the EUV branch. This is the value-reads-two-ways defect class (the `friction` rename, the `Delta` unit error) in
+/// a return channel, so the channel is typed. Only [`TurnoverRefusal::AboveFitDomain`] is a dispatch seam.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum TurnoverRefusal {
+    /// The input is not a star (a non-positive mass): an error, never a branch.
+    InvalidInput,
+    /// The mass is BELOW the fit's low-mass edge (a sub-fit regime, its own future door, NOT the radiative branch).
+    BelowFitDomain,
+    /// The mass is ABOVE the fit's high-mass edge: the DISPATCH SEAM, where the convective dynamo ends and the
+    /// radiative-envelope (Herbig Ae/Be) wind branch takes over (A stars are X-ray dark). The only door here.
+    AboveFitDomain,
+    /// An intermediate exceeded the representable range: an engine limit, never a branch.
+    Unrepresentable,
+}
+
 /// The CONVECTIVE TURNOVER TIME (days) as a function of stellar mass, the denominator of the Rossby number and
 /// half of the shared rotation state (the L_X slice). An empirical polynomial in `log10(M/M_sun)`:
 /// `log10(tau) = c0 + c1*log10(M) + c2*log10(M)^2`, from Wright et al. 2011 (the mass fit, `0.09 < M/M_sun < 1.36`,
@@ -904,33 +923,45 @@ pub struct ConvectiveTurnoverFit {
 /// number at fixed rotation, which is why M dwarfs stay saturated for gigayears (the convicting population for a
 /// mass-universal formulation).
 ///
-/// DOMAIN GUARD (both ends): the convective-dynamo paradigm ends at the fit's high-mass edge. A star above it has
-/// a radiative envelope and no rotation-activity dynamo (A STARS ARE X-RAY DARK, the convicting population that
-/// this function would otherwise light up like young suns), so this returns `None` outside `[mass_min, mass_max]`
-/// rather than extrapolate a confident wrong turnover, and the radiative-envelope regime is a named future branch,
-/// not a silent extension. `None` also on a non-positive mass or an intermediate past the representable range.
+/// DOMAIN GUARD (both ends), returned as a TYPED REFUSAL so "every `None` is a door" holds BY CONSTRUCTION rather
+/// than by the caller's good behaviour (the gate ruling before the dispatch is built). The convective-dynamo
+/// paradigm ends at the fit's high-mass edge: a star above it has a radiative envelope and no rotation-activity
+/// dynamo (A STARS ARE X-RAY DARK, the convicting population this function would otherwise light up like young
+/// suns), so a mass above `mass_max` returns [`TurnoverRefusal::AboveFitDomain`], the one door, where the
+/// radiative-envelope wind branch takes over. A mass below `mass_min` is a separate door
+/// ([`TurnoverRefusal::BelowFitDomain`], a sub-fit regime, not the radiative branch); a non-positive mass is
+/// [`TurnoverRefusal::InvalidInput`] (an error, never a branch); an intermediate past the representable range is
+/// [`TurnoverRefusal::Unrepresentable`] (an engine limit, never a branch). The dispatch keys on `AboveFitDomain`
+/// ALONE, so an invalid mass or an overflow can never be misread as a physical seam.
 pub fn convective_turnover_time_days(
     mass_ratio: Fixed,
     fit: &ConvectiveTurnoverFit,
-) -> Option<Fixed> {
-    if mass_ratio <= Fixed::ZERO || mass_ratio < fit.mass_min_msun || mass_ratio > fit.mass_max_msun
-    {
-        return None;
+) -> Result<Fixed, TurnoverRefusal> {
+    if mass_ratio <= Fixed::ZERO {
+        return Err(TurnoverRefusal::InvalidInput);
     }
-    let log_tau_c0 = fit.log_tau_c0;
-    let log_tau_c1 = fit.log_tau_c1;
-    let log_tau_c2 = fit.log_tau_c2;
+    if mass_ratio < fit.mass_min_msun {
+        return Err(TurnoverRefusal::BelowFitDomain);
+    }
+    if mass_ratio > fit.mass_max_msun {
+        return Err(TurnoverRefusal::AboveFitDomain);
+    }
     let ln10 = Fixed::from_int(10).ln();
-    let log10_m = mass_ratio.ln().checked_div(ln10)?;
-    let log10_tau = log_tau_c0
-        .checked_add(log_tau_c1.checked_mul(log10_m)?)?
-        .checked_add(log_tau_c2.checked_mul(log10_m.checked_mul(log10_m)?)?)?;
-    let ln_tau = log10_tau.checked_mul(ln10)?;
-    let ln_ceiling = Fixed::from_int(31).checked_mul(Fixed::from_int(2).ln())?;
-    if ln_tau >= ln_ceiling {
-        return None;
-    }
-    Some(ln_tau.exp())
+    let compute = || -> Option<Fixed> {
+        let log10_m = mass_ratio.ln().checked_div(ln10)?;
+        let log10_tau = fit
+            .log_tau_c0
+            .checked_add(fit.log_tau_c1.checked_mul(log10_m)?)?
+            .checked_add(fit.log_tau_c2.checked_mul(log10_m.checked_mul(log10_m)?)?)?;
+        let ln_tau = log10_tau.checked_mul(ln10)?;
+        let ln_ceiling = Fixed::from_int(31).checked_mul(Fixed::from_int(2).ln())?;
+        if ln_tau >= ln_ceiling {
+            return None;
+        }
+        Some(ln_tau.exp())
+    };
+    // A `None` here is arithmetic overflow past the format, the representation limit, never a physical door.
+    compute().ok_or(TurnoverRefusal::Unrepresentable)
 }
 
 /// The PRE-MAIN-SEQUENCE LUMINOSITY `L_bol / L_sun` at a stellar age, the disk-era bolometric luminosity the L_X
@@ -3034,7 +3065,10 @@ mod tests {
     #[test]
     fn the_xray_functions_fail_loud_on_bad_inputs() {
         let fit = tau_poly();
-        assert!(convective_turnover_time_days(Fixed::ZERO, &fit).is_none());
+        assert_eq!(
+            convective_turnover_time_days(Fixed::ZERO, &fit),
+            Err(TurnoverRefusal::InvalidInput)
+        );
         assert!(stellar_rossby_number(Fixed::ZERO, Fixed::ONE).is_none());
         assert!(stellar_rossby_number(Fixed::ONE, Fixed::ZERO).is_none());
         let (ro_sat, sat, beta) = (
@@ -3048,21 +3082,28 @@ mod tests {
 
     #[test]
     fn the_turnover_refuses_the_radiative_envelope_domain() {
-        // Domain guard (catch 1): the convective-dynamo fit ends at its mass range, and beyond the high-mass edge
-        // the star is radiative-enveloped with no rotation-activity dynamo. An A star (2 M_sun) must return None,
-        // not a confident extrapolated turnover that would light it up like a young Sun.
+        // Domain guard (catch 1), now a TYPED refusal per door (the gate seam). Beyond the high-mass edge the star
+        // is radiative-enveloped with no rotation-activity dynamo: an A star (2 M_sun) returns the AboveFitDomain
+        // door, the ONE dispatch seam, not a bare refusal a consumer could confuse with an invalid input.
         let fit = tau_poly();
-        assert!(
-            convective_turnover_time_days(Fixed::from_int(2), &fit).is_none(),
-            "a 2 M_sun A star is outside the fit range, no convective dynamo"
+        assert_eq!(
+            convective_turnover_time_days(Fixed::from_int(2), &fit),
+            Err(TurnoverRefusal::AboveFitDomain),
+            "a 2 M_sun A star is the radiative-envelope dispatch seam"
         );
-        // The low-mass edge is guarded too (below the fit's brown-dwarf boundary).
-        assert!(
-            convective_turnover_time_days(Fixed::from_ratio(5, 100), &fit).is_none(),
-            "0.05 M_sun is below the fit's 0.09 lower bound"
+        // The low-mass edge is a DIFFERENT door (a sub-fit regime), never the radiative branch.
+        assert_eq!(
+            convective_turnover_time_days(Fixed::from_ratio(5, 100), &fit),
+            Err(TurnoverRefusal::BelowFitDomain),
+            "0.05 M_sun is below the fit, its own door"
+        );
+        // A non-positive mass is an invalid input, never a door.
+        assert_eq!(
+            convective_turnover_time_days(Fixed::from_int(-1), &fit),
+            Err(TurnoverRefusal::InvalidInput)
         );
         // Inside the range still resolves.
-        assert!(convective_turnover_time_days(Fixed::ONE, &fit).is_some());
+        assert!(convective_turnover_time_days(Fixed::ONE, &fit).is_ok());
     }
 
     #[test]
