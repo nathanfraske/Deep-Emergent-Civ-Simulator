@@ -1002,6 +1002,50 @@ const CONDENSATION_OPACITY_REFERENCE_K: Fixed = Fixed::from_int(1400);
 const MIDPLANE_BRACKET_LO_K: Fixed = Fixed::from_int(100);
 const MIDPLANE_BRACKET_HI_K: Fixed = Fixed::from_int(1950);
 
+// ----- Slice 3b-ii: the Lynden-Bell-Pringle disk-clock interims (the formation epoch derives, the pre-MS
+// luminosity flip feeds the displayed midplane). Each is reserved-with-basis per DISK_EVOLUTION_SLICE3B_WIRE_SCOPE.md
+// section 3, tagged for its layer-4 draw; the wire ships with the interim, never a fabricated value.
+
+/// RESERVED, DRAW-PENDING: the BIRTH accretion rate `Mdot_0` (solar masses per megayear), the hot class-0/I rate
+/// the declining disk starts from. Basis: the observed class-0/I protostellar peak-accretion band, of order
+/// `1e-6` M_sun/yr (~1 M_sun/Myr), well above the 0.19 class-II formation rate it declines to. Tagged
+/// `CitedToPopulation` at its use site so the consistency check runs NON-circularly (the basis, not the value,
+/// licenses the check): its independence, not a fit to 0.19, is what makes the agreement meaningful.
+const BIRTH_ACCRETION_RATE_MSUN_MYR: Fixed = Fixed::ONE; // ~1 M_sun/Myr, class-0/I band
+
+/// RESERVED, the Shakura-Sunyaev viscosity parameter `alpha` (dimensionless). Basis: the fiducial ~0.01 for a
+/// magnetorotational-turbulence disk (Hartmann et al. 1998), the value the disk-lifetime demographics imply. Sets
+/// the viscous time through [`civsim_sim::astro::derive_viscous_time_myr`].
+const DISK_ALPHA_VISCOSITY: Fixed = Fixed::from_int(1).div(Fixed::from_int(100)); // 0.01
+
+/// RESERVED, the disk gas MEAN MOLECULAR WEIGHT `mu` (atomic mass units). Basis: a solar hydrogen-plus-helium mix,
+/// 2.34, the standard protoplanetary-disk value. (The `mu` = 2.34 solar instance is the disk chain's fossil; the
+/// derived-over-drawn-abundances version is a disk-chain follow-on, this viewer interim reading the solar mix
+/// until it lands.)
+const DISK_MEAN_MOLECULAR_WEIGHT: Fixed = Fixed::from_int(234).div(Fixed::from_int(100)); // 2.34
+
+/// RESERVED, the Lynden-Bell-Pringle self-similar DECLINE index `gamma`. Basis: bare algebra of the self-similar
+/// family with viscosity `nu ~ r` (`gamma` = 1), giving the accretion decline exponent `p = 3/2`.
+const LBP_DECLINE_GAMMA: Fixed = Fixed::ONE;
+
+/// RESERVED, FETCH-PENDING: the pre-main-sequence HAYASHI WALL effective temperature (K) the contracting star
+/// sits at while the disk hosts. Basis: the ~4000 K solar-composition pre-main-sequence Hayashi-track wall
+/// (Baraffe et al. 2015 / Siess et al. 2000 grids); the digit is a fetch target (source-verbatim from a pre-MS
+/// grid, carrying its composition-conditioning), carried here as the interim, with its #77 demotion destiny.
+const HAYASHI_WALL_T_EFF_K: Fixed = Fixed::from_int(4000);
+
+/// RESERVED, the fractional tolerance the formation-rate consistency check compares within. Basis: the
+/// observational scatter on the class-II accretion rate the 0.19 landmark came from (~0.5 dex, a factor of a few),
+/// carried with that rate rather than authored; a Residual outside it is surfaced, never tuned away.
+const FORMATION_RATE_CONSISTENCY_TOLERANCE: Fixed = Fixed::from_int(1).div(Fixed::from_int(2)); // 0.5
+
+/// RESERVED, the formation-epoch bisection bracket (Myr) and iteration count. Basis: engine bounds, the bracket
+/// spanning the disk era (0.01 to 10 Myr straddles the condensation crossing, which lands near 0.3 Myr for the
+/// solar interim) and a fixed iteration count for a deterministic root; not physical knobs.
+const FORMATION_EPOCH_BRACKET_LO_MYR: Fixed = Fixed::from_int(1).div(Fixed::from_int(100)); // 0.01
+const FORMATION_EPOCH_BRACKET_HI_MYR: Fixed = Fixed::from_int(10);
+const FORMATION_EPOCH_ITERATIONS: u32 = 48;
+
 /// RESERVED, the SOLID surface-density normalization `Sigma_c` (kg/m^2) for the accretion feeding-zone integral. Basis:
 /// the Hayashi 1981 MMSN ROCK column ~7.1 g/cm^2 (= 71 kg/m^2) at 1 AU INSIDE the ice line (NOT the gas 1700, which
 /// would overmass the planet ~30x, and NOT the 30 g/cm^2 beyond-ice-line rock+ice figure), giving Sigma_solid(1 AU)
@@ -1488,6 +1532,103 @@ fn abundance_amount(abundances: &SolarAbundances, element: &str) -> Option<Fixed
     Some(exponent.exp())
 }
 
+/// The DERIVED pre-main-sequence bolometric luminosity (`L / L_sun`) the crust condensed under, with the
+/// consistency verdict on the retired 0.19 formation-rate landmark (slice 3b-ii, the render-visible wire scoped in
+/// `docs/working/DISK_EVOLUTION_SLICE3B_WIRE_SCOPE.md`). It runs the Lynden-Bell-Pringle disk clock: `disk_T(R_1)`
+/// from the disk thermal function at the scale radius, the viscous time `t_visc` from the birth size and
+/// temperature, the formation epoch `t_formation` as the ROOT where the declining-accretion 1-AU midplane crosses
+/// the condensation front, and the pre-MS luminosity at that epoch on the Hayashi track. The epoch root uses the
+/// CLOSED-FORM constant-opacity midplane ([`civsim_sim::astro::formation_midplane_temperature_constant_opacity`]),
+/// so each bisection step is O(1) rather than a nested 60-step solve, the perf completion the wire's design of
+/// record points to.
+///
+/// The epoch's midplane map passes `None` for the bolometric override, so the epoch does not depend on the very
+/// luminosity it is about to set (no self-reference). The consistency check runs NON-circularly because both
+/// interims (`Mdot_0`, `t_visc`) are `CitedToPopulation` (independent bases), so it returns a meaningful verdict
+/// rather than refusing. Returns `None` if a link does not resolve or an interim is not independent. `kappa_ref` is
+/// the caller's already-derived grain Rosseland opacity, threaded so the dust mixture is built once per star.
+fn derive_pre_ms_bolometric_luminosity(
+    star_mass: Fixed,
+    kappa_ref: Fixed,
+) -> Option<(Fixed, civsim_sim::astro::FormationRateConsistency)> {
+    use civsim_sim::astro::{
+        derive_formation_epoch_myr, derive_viscous_time_myr,
+        formation_midplane_temperature_constant_opacity, formation_rate_consistency,
+        pre_main_sequence_luminosity_lsun, InterimBasis, ProvenancedInterim,
+    };
+    // The mass-luminosity exponent the displayed midplane uses for the (weak) stellar-flux baseline, reused here.
+    let luminosity_exponent = Fixed::from_ratio(35, 10);
+    let reprocessing = Fixed::from_ratio(1, 4);
+    let inner_boundary = Fixed::ONE;
+    // disk_T(R_1): the disk thermal function (closed-form midplane) at the scale radius R_1 (~50 K at 30 AU).
+    let disk_t_r1 = formation_midplane_temperature_constant_opacity(
+        FORMATION_ACCRETION_RATE_MSUN_MYR,
+        star_mass,
+        luminosity_exponent,
+        None,
+        DISK_CHARACTERISTIC_RADIUS_AU,
+        reprocessing,
+        inner_boundary,
+        DISK_CHARACTERISTIC_RADIUS_AU,
+        DUST_SURFACE_DENSITY_GAMMA,
+        DUST_SURFACE_DENSITY_NORM_G_CM2,
+        kappa_ref,
+        MIDPLANE_BRACKET_HI_K,
+    )?;
+    let t_visc = derive_viscous_time_myr(
+        DISK_CHARACTERISTIC_RADIUS_AU,
+        star_mass,
+        disk_t_r1,
+        DISK_ALPHA_VISCOSITY,
+        DISK_MEAN_MOLECULAR_WEIGHT,
+    )?;
+    // The epoch's midplane map at 1 AU: closed-form, None irradiation (no self-reference on the luminosity).
+    let midplane_at_rate = |rate: Fixed| -> Option<Fixed> {
+        formation_midplane_temperature_constant_opacity(
+            rate,
+            star_mass,
+            luminosity_exponent,
+            None,
+            Fixed::ONE,
+            reprocessing,
+            inner_boundary,
+            DISK_CHARACTERISTIC_RADIUS_AU,
+            DUST_SURFACE_DENSITY_GAMMA,
+            DUST_SURFACE_DENSITY_NORM_G_CM2,
+            kappa_ref,
+            MIDPLANE_BRACKET_HI_K,
+        )
+    };
+    let t_formation = derive_formation_epoch_myr(
+        BIRTH_ACCRETION_RATE_MSUN_MYR,
+        t_visc,
+        LBP_DECLINE_GAMMA,
+        CONDENSATION_OPACITY_REFERENCE_K,
+        midplane_at_rate,
+        FORMATION_EPOCH_BRACKET_LO_MYR,
+        FORMATION_EPOCH_BRACKET_HI_MYR,
+        FORMATION_EPOCH_ITERATIONS,
+    )?;
+    let l_bol = pre_main_sequence_luminosity_lsun(star_mass, HAYASHI_WALL_T_EFF_K, t_formation)?;
+    // The provenance-gated consistency check: both interims independent-basis (CitedToPopulation), so it runs and
+    // reports Consistent/Inconsistent rather than refusing. t_visc inherits R_1's CitedToPopulation grade.
+    let verdict = formation_rate_consistency(
+        ProvenancedInterim {
+            value: BIRTH_ACCRETION_RATE_MSUN_MYR,
+            basis: InterimBasis::CitedToPopulation,
+        },
+        ProvenancedInterim {
+            value: t_visc,
+            basis: InterimBasis::CitedToPopulation,
+        },
+        LBP_DECLINE_GAMMA,
+        t_formation,
+        FORMATION_ACCRETION_RATE_MSUN_MYR,
+        FORMATION_RATE_CONSISTENCY_TOLERANCE,
+    )?;
+    Some((l_bol, verdict))
+}
+
 /// The DERIVED FORMATION-era condensation temperature at the orbit (K), snapped to the condensation grid, or `None` if a
 /// link does not resolve. It derives the disk opacity `kappa_ref` from the #54 grain wire (the astronomical-silicate
 /// dust's Rosseland mean, evaluated ONCE at the reference because it is nearly flat in T; calling it inside the
@@ -1515,11 +1656,17 @@ fn derive_formation_condensation_temperature(
         &estimator,
     )?;
     let kappa_ref = dust.rosseland_opacity(CONDENSATION_OPACITY_REFERENCE_K)?;
+    // Slice 3b-ii: the pre-MS bolometric luminosity the crust condensed under, DERIVED from the disk clock (the
+    // formation epoch is a root, not a reserved scalar), replacing the None that kept the main-sequence power law.
+    // The consistency verdict is computed and enforced (a circular configuration returns None here, failing loud);
+    // surfacing the verdict text in the provenance readout is the design's section-5 follow-on.
+    let (pre_ms_l_bol, _formation_verdict) =
+        derive_pre_ms_bolometric_luminosity(star_mass, kappa_ref)?;
     let raw = civsim_sim::astro::formation_midplane_temperature(
         FORMATION_ACCRETION_RATE_MSUN_MYR,
         star_mass,
         Fixed::from_ratio(35, 10), // alpha (mass-luminosity), the grid-extracted stellar slope
-        None, // pre-MS bolometric override (slice 3b-ii wires the pre-MS L_bol here); None keeps the MS power law
+        Some(pre_ms_l_bol), // slice 3b-ii: the derived pre-MS Hayashi-track luminosity at the formation epoch
         orbit_au,
         Fixed::from_ratio(1, 4), // reprocessing factor (spherical-grain equilibrium)
         Fixed::ONE,              // inner-boundary factor (~1 in the bulk disk)
@@ -4700,6 +4847,75 @@ fn main() {
 #[cfg(test)]
 mod composition_draw_tests {
     use super::*;
+
+    #[test]
+    fn the_pre_ms_flip_reproduces_the_probe_and_is_byte_neutral_at_one_au() {
+        // Slice 3b-ii: the derived pre-MS bolometric luminosity feeds the displayed midplane, replacing the
+        // reserved None. This proves two things at once. (1) FIDELITY: the disk clock reproduces the design-of-record
+        // probe on the solar Mirror (L_bol ~ 3.8 L_sun, the consistency check Consistent and running non-circularly),
+        // so the reconstruction matches the proven-then-backed-out wire. (2) BYTE-NEUTRALITY: the displayed 1-AU
+        // midplane snaps to the SAME condensation-grid cell with the derived L_bol as with None, so the rendered
+        // crust is bit-identical (the pre-MS warming is sub-grid, snapping out through the 100 K condensation grid).
+        let optical = OpticalConstants::standard().expect("the optical library loads");
+        let estimator = LoudMissEstimator;
+        let dust = GrainMixture::new(
+            vec![GrainConstituent {
+                species: DUST_SPECIES.to_string(),
+                amount: Fixed::ONE,
+                bulk_density_g_cm3: DUST_BULK_DENSITY_G_CM3,
+                condensation_rank: 0,
+            }],
+            DUST_SIZE_SLOPE,
+            DUST_A_MIN_UM,
+            DUST_A_MAX_UM,
+            &optical,
+            &estimator,
+        )
+        .expect("the dust mixture builds");
+        let kappa_ref = dust
+            .rosseland_opacity(CONDENSATION_OPACITY_REFERENCE_K)
+            .expect("kappa_ref derives");
+
+        // (1) The clock reproduces the probe.
+        let (l_bol, verdict) = derive_pre_ms_bolometric_luminosity(Fixed::ONE, kappa_ref)
+            .expect("the pre-MS luminosity derives for the solar Mirror");
+        let l = l_bol.to_f64_lossy();
+        assert!(
+            (3.0..=5.0).contains(&l),
+            "the derived pre-MS L_bol reproduces the ~3.8 L_sun probe, got {l}"
+        );
+        assert_eq!(
+            verdict,
+            civsim_sim::astro::FormationRateConsistency::Consistent,
+            "the non-circular consistency check agrees with the retired 0.19 landmark"
+        );
+
+        // (2) Byte-neutral at the condensation grid: the displayed 1-AU midplane snaps the same both ways.
+        let midplane = |l_bol_opt: Option<Fixed>| -> Fixed {
+            let raw = civsim_sim::astro::formation_midplane_temperature(
+                FORMATION_ACCRETION_RATE_MSUN_MYR,
+                Fixed::ONE,
+                Fixed::from_ratio(35, 10),
+                l_bol_opt,
+                Fixed::ONE,
+                Fixed::from_ratio(1, 4),
+                Fixed::ONE,
+                DISK_CHARACTERISTIC_RADIUS_AU,
+                DUST_SURFACE_DENSITY_GAMMA,
+                DUST_SURFACE_DENSITY_NORM_G_CM2,
+                |_t| Some(kappa_ref),
+                MIDPLANE_BRACKET_LO_K,
+                MIDPLANE_BRACKET_HI_K,
+            )
+            .expect("the displayed midplane derives");
+            snap_to_condensation_grid(raw)
+        };
+        assert_eq!(
+            midplane(Some(l_bol)),
+            midplane(None),
+            "the pre-MS flip snaps to the same condensation cell as None (byte-neutral render)"
+        );
+    }
 
     #[test]
     fn two_unpinned_seeds_derive_different_worlds() {
