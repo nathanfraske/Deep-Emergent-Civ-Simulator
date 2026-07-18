@@ -40,15 +40,16 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Instant;
 
+use civsim_bio::anatomy::{
+    BodyPlan, BodyPlanRegistry, OrganKindDef, Part, Temperament, TissueComposition,
+};
+use civsim_bio::calibration::{CalibrationManifest, Profile};
+use civsim_bio::tom::AccessChannelRegistry;
 use civsim_core::{Fixed, GaussApprox, StableId};
 use civsim_physics::PhysicsRegistry;
 use civsim_sim::affordance_percept::{
     AffordancePerceptKind, AffordancePerceptRefs, AffordancePerceptRegistry,
 };
-use civsim_sim::anatomy::{
-    BodyPlan, BodyPlanRegistry, OrganKindDef, Part, Temperament, TissueComposition,
-};
-use civsim_sim::calibration::{CalibrationManifest, Profile};
 use civsim_sim::contact_transfer::ContactTransferRegistry;
 use civsim_sim::conviction_experience::FeltConvictionCalib;
 use civsim_sim::decompose::DecomposerDriverRegistry;
@@ -71,7 +72,6 @@ use civsim_sim::planning::plan_toward;
 use civsim_sim::runner::{CreatureSelectionParams, ReproductiveVigorCalib, Runner};
 use civsim_sim::scenario::{Scenario, ScenarioResolution};
 use civsim_sim::sensorium::SenseChannelId;
-use civsim_sim::tom::AccessChannelRegistry;
 use civsim_sim::{
     append_controller_block, append_scalar_channel, build_dawn_runner, controller_gene_set,
     forage_taxis_weights, nsm_gloss, Articulation, Axiom, AxiomAxisId, BandSpec, BreedingSystem,
@@ -1220,7 +1220,7 @@ fn mirror_manifest() -> CalibrationManifest {
 /// glycogen, lean), read fail-loud (Principle 11, never fabricated inline). The registry mechanism and the
 /// organ KINDS are unchanged (dev_default); only the per-tissue energy-density VALUE moves to the real kJ/g
 /// scale. Body-plan sampling and biosphere survival scoring key on organ KIND ids, never on
-/// `bio.energy_density` (verified: [`civsim_sim::anatomy::sample_body_plan`] picks organ kinds, the
+/// `bio.energy_density` (verified: [`civsim_bio::anatomy::sample_body_plan`] picks organ kinds, the
 /// biome-fit closure reads niches), so swapping this registry onto the generated living world changes ONLY
 /// the food-content and reserve-energy read-out, never which species survive. Water-store (energy density
 /// zero) and muscle (no energy tissue) are unchanged; the fantasy mana-sac is absent from grounded Mirror.

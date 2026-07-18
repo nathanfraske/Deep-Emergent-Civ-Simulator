@@ -5,12 +5,12 @@
 
 use std::collections::BTreeMap;
 
+use civsim_bio::anatomy::{temperament_word, BodyPlanRegistry, WorldProfile};
+use civsim_bio::lineage::SpeciesId;
 use civsim_core::Fixed;
-use civsim_sim::anatomy::{temperament_word, BodyPlanRegistry, WorldProfile};
 use civsim_sim::biosphere::{trophic_label, SourceRef, Species};
 use civsim_sim::epoch::EpochParams;
 use civsim_sim::genesis::{genesis, GenesisParams};
-use civsim_sim::lineage::SpeciesId;
 
 fn main() {
     let argv: Vec<String> = std::env::args().collect();

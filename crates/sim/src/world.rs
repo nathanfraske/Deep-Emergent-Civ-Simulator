@@ -44,27 +44,19 @@ use std::collections::{BTreeMap, BTreeSet};
 use civsim_world::OrbitalElements;
 
 use crate::affect::{AffectAxisId, AffectState, AppraisalBinding};
-use crate::agent::{AccessObs, Mind, RetentionLaw, SharedBelief};
 use crate::axiom::{self, Axiom, AxiomAxisId, EvidenceRing, IntrinsicBeliefs, RingCapacityLaw};
-use crate::belief::{BeliefKey, BeliefPool};
 use crate::breeding::{BreedingSystemRegistry, SexClass};
-use crate::calibration::{CalibrationError, CalibrationManifest, Profile};
 use crate::census::{ReproductiveCensus, ReproductiveMoments};
 use crate::clock::LIFE_CADENCE_TICKS;
-use crate::decision::{ActionId, Behaviour, Curve, DriveId, InputId};
 use crate::dialogue::{
     ContentRef, EffectSign, ForceFloor, ForceKind, Move, MoveKindId, MoveRegistry, ResolvedBand,
 };
-use crate::evidence::{AttrKindId, InferenceParams, ValueId};
-use crate::genome::{Channel, GenePool, Genome, ReproductionMode};
 use crate::language::{
     ConceptId, DriftParams, FormSystem, LangId, Language, LanguageParams, Lexicon, Word,
 };
-use crate::mate_choice::{choose, MatePreference};
 use crate::personality::{age_personality, PersonalityRegistry, TraitAxisId, TraitInstance};
 use crate::race::{BandSpec, Race};
 use crate::sensorium::{SenseChannelId, Sensorium};
-use crate::tom::{self, AccessChannelRegistry, AccessWeights};
 use crate::transmission::{
     copy_drift, copy_fidelity, erode_and_cull, stability_span, transmit, transmit_draw, DesignId,
     Knowledge, TransmissionParams,
@@ -72,6 +64,14 @@ use crate::transmission::{
 use crate::value::{
     EmicProjection, EticAxisId, EticSubstrate, RaceId, RaceProjection, ValueAxisId, ValueProfile,
 };
+use civsim_bio::agent::{AccessObs, Mind, RetentionLaw, SharedBelief};
+use civsim_bio::belief::{BeliefKey, BeliefPool};
+use civsim_bio::calibration::{CalibrationError, CalibrationManifest, Profile};
+use civsim_bio::decision::{ActionId, Behaviour, Curve, DriveId, InputId};
+use civsim_bio::evidence::{AttrKindId, InferenceParams, ValueId};
+use civsim_bio::genome::{Channel, GenePool, Genome, ReproductionMode};
+use civsim_bio::mate_choice::{choose, MatePreference};
+use civsim_bio::tom::{self, AccessChannelRegistry, AccessWeights};
 use civsim_core::{
     gaussian_unit, CommandBuffer, CommandKey, DrawKey, EventId, EventLog, Fixed, GaussApprox,
     Phase, Registry, StableId, StateHasher,
@@ -128,7 +128,7 @@ fn assertion_move(
     speaker: StableId,
     listener: StableId,
     shared: &SharedBelief,
-    channel: crate::tom::AccessChannelId,
+    channel: civsim_bio::tom::AccessChannelId,
     tick: u64,
 ) -> Move {
     Move {
@@ -149,7 +149,7 @@ fn assertion_move(
 /// The per-being developmental-environment offset (design Part 25.6): a mean-zero symmetric
 /// deviation in `[-spread, +spread)` drawn once per being under [`Phase::DEVELOPMENT`], keyed on
 /// the being's `id` and the `tick` (the dawn passes tick 0, a birth passes the generation). This
-/// is the environmental-variance (V_E) source that makes [`crate::genome::GeneSet::express`] vary
+/// is the environmental-variance (V_E) source that makes [`civsim_bio::genome::GeneSet::express`] vary
 /// between members of one cohort: today every member rides one shared `race.environment`, so V_E
 /// is identically zero; adding this per-being offset to that baseline authors variance without a
 /// direction, because the map `(2 * unit - 1)` is symmetric about zero. Its expectation over a
@@ -452,7 +452,7 @@ pub struct World {
     /// no direction is authored) and inherited at birth by midparent plus bounded mutation, so
     /// which way a being assorts is shaped by differential reproduction rather than a per-race
     /// lever. Used by [`World::choose_mate`]; the selection that shapes it is proven in
-    /// [`crate::mate_choice`].
+    /// [`civsim_bio::mate_choice`].
     mate_prefs: BTreeMap<StableId, MatePreference>,
     /// Per-being transient affect, the event-driven emotional state (the R-EMOTION gap).
     affect: BTreeMap<StableId, AffectState>,
@@ -503,7 +503,7 @@ pub struct World {
     /// trait input, so a drive-only behaviour is unchanged. The world author picks input ids that do
     /// not collide with the drive ids (a drive reads at the input of its own id).
     ///
-    /// [`Consideration`]: crate::decision::Consideration
+    /// [`Consideration`]: civsim_bio::decision::Consideration
     trait_inputs: BTreeMap<InputId, TraitAxisId>,
     /// Per-mind drive levels, in the unit interval.
     drive_levels: BTreeMap<StableId, BTreeMap<DriveId, Fixed>>,
@@ -1221,7 +1221,7 @@ impl World {
     }
 
     /// Install the aggregate belief-diffusion rate (`evidence.aggregate_diffusion_rate`, derived from
-    /// the gossip parameters through [`crate::belief::BeliefParams`]). Until set, the belief-diffusion
+    /// the gossip parameters through [`civsim_bio::belief::BeliefParams`]). Until set, the belief-diffusion
     /// beat is a no-op, so a world that installs no rate runs exactly as before.
     pub fn set_belief_diffusion_rate(&mut self, rate: Fixed) {
         self.belief_diffusion_rate = Some(rate);
@@ -1463,7 +1463,7 @@ impl World {
     /// pre-chosen, and this lets the chooser pick under its inherited preference. The mechanism
     /// authors no direction: it reads the chooser's own preference weight, whose sign is the
     /// heritable, dawn-seeded, birth-inherited trait selection shapes. The incompatibility axis
-    /// (the viability cue a distance preference cannot carry) is proven in [`crate::mate_choice`]
+    /// (the viability cue a distance preference cannot carry) is proven in [`civsim_bio::mate_choice`]
     /// and rides a further change that gives the choose site a Dobzhansky-Muller table.
     pub fn choose_mate(&self, chooser: StableId, candidates: &[StableId]) -> Option<StableId> {
         let pref = self.mate_prefs.get(&chooser)?;
@@ -2646,7 +2646,7 @@ impl World {
 
     /// Bind a decision input to a personality trait axis (design Part 20, world-wiring increment 9):
     /// the decide phase then projects each being's value on `axis` into its readings map under
-    /// `input`, so a [`crate::decision::Consideration`] reading `input` scores on the being's trait.
+    /// `input`, so a [`civsim_bio::decision::Consideration`] reading `input` scores on the being's trait.
     /// A being carrying no personality instance contributes no reading for the bound input (it reads
     /// as zero in the scorer), never a fabricated value. Pick an `input` id distinct from the drive
     /// ids, since a drive reads at the input of its own id.
@@ -3630,7 +3630,7 @@ impl World {
     #[allow(clippy::too_many_arguments)]
     fn apply_assertion(
         &mut self,
-        channel: crate::tom::AccessChannelId,
+        channel: civsim_bio::tom::AccessChannelId,
         listener: StableId,
         speaker: StableId,
         shared: SharedBelief,
@@ -3803,7 +3803,7 @@ impl World {
     /// behaviour is moved out for the pass so the per-mind drive maps can be borrowed mutably without
     /// conflict, then restored.
     ///
-    /// The readings a [`crate::decision::Consideration`] scores over are keyed by
+    /// The readings a [`civsim_bio::decision::Consideration`] scores over are keyed by
     /// [`InputId`] (world-wiring increment 9): each drive contributes its level at the input of its
     /// own id, and each trait bound through [`World::bind_trait_input`] contributes the being's own
     /// value on that axis. So two beings under identical drive pressure but differing personality
@@ -4793,8 +4793,8 @@ margin_steps = -1
         assert_eq!(build(), build());
     }
 
-    fn behaviour() -> crate::decision::Behaviour {
-        use crate::decision::{ActionDef, Behaviour, Consideration, Curve, DriveDef};
+    fn behaviour() -> civsim_bio::decision::Behaviour {
+        use civsim_bio::decision::{ActionDef, Behaviour, Consideration, Curve, DriveDef};
         let hunger = DriveId(0);
         let fatigue = DriveId(1);
         // A drive reads at the input of its own id.
@@ -4871,8 +4871,8 @@ margin_steps = -1
         // InputId readings map, so two beings under identical drive pressure but differing trait values
         // diverge in the action they choose. The decide path carries no age or race branch; the
         // divergence is the per-being trait value read through one curve (Principle 9).
-        use crate::decision::{ActionDef, Behaviour, Consideration, DriveDef};
         use crate::personality::{TraitAxisId, TraitInstance};
+        use civsim_bio::decision::{ActionDef, Behaviour, Consideration, DriveDef};
 
         const BOLDNESS: TraitAxisId = TraitAxisId(0);
         // A drive both beings share (identical drive pressure), and a trait input bound to boldness.
@@ -4979,8 +4979,8 @@ margin_steps = -1
         );
     }
 
-    const WITNESSED: crate::tom::AccessChannelId = crate::tom::AccessChannelId(1);
-    const SAID: crate::tom::AccessChannelId = crate::tom::AccessChannelId(3);
+    const WITNESSED: civsim_bio::tom::AccessChannelId = civsim_bio::tom::AccessChannelId(1);
+    const SAID: civsim_bio::tom::AccessChannelId = civsim_bio::tom::AccessChannelId(3);
 
     fn gossip_world() -> World {
         let mut w = World::new(

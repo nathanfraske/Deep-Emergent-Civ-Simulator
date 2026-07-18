@@ -21,10 +21,10 @@
 //! lives in a rich medium and suffocates in a poor one, from the medium's content, not a label) and that
 //! the coupled runner is bit-identical across the scheduler variant and reproduces across runs.
 
-use civsim_core::{Fixed, StableId};
-use civsim_sim::anatomy::{
+use civsim_bio::anatomy::{
     BodyPlan, BodyPlanRegistry, OrganKindDef, Part, Temperament, TissueComposition,
 };
+use civsim_core::{Fixed, StableId};
 use civsim_sim::controller::Controller;
 use civsim_sim::edibility::Physiology;
 use civsim_sim::homeostasis::{
@@ -5038,7 +5038,7 @@ fn embodied_physiology_reads_a_set_manifest_and_fails_loud_when_reserved() {
     // medium field (the submersion elevation and the submerged and emergent medium profiles), the reserved
     // transfer coefficient, and the base tick from a set manifest, and a reserved input refuses to
     // fabricate a number (Principle 11).
-    use civsim_sim::calibration::{CalibrationError, CalibrationManifest};
+    use civsim_bio::calibration::{CalibrationError, CalibrationManifest};
     use civsim_world::{BiomeSet, FlatBounded, TileMap, WorldgenParams};
     let map = TileMap::generate(
         7,

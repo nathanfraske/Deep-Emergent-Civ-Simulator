@@ -16,7 +16,7 @@
 //! Part 25; R-BEHAVIOR-EVOLVE; Principles 8, 9, 10).
 //!
 //! What is authored here is physics, and only physics. A body's capacity to move is its morphology
-//! ([`crate::anatomy::BodyPlan`]): a body with no locomotion organ is rooted and never moves,
+//! ([`civsim_bio::anatomy::BodyPlan`]): a body with no locomotion organ is rooted and never moves,
 //! whatever its kingdom, so a rooted tree stays put while a body that bears the organ moves, even an
 //! autotroph, so a walking tree walks. Whether a body has that organ is itself an emergent
 //! morphological outcome, not a rule keyed on being a plant. Its ground speed comes from its size,
@@ -32,7 +32,7 @@
 //! reads its own reserves, and its controller decides. A being that has evolved the adaptive coupling
 //! walks up the gradient to a known source and ingests it; one that has not starves. This is the
 //! retirement of the authored decision menu that the prior slice flagged: the drives-and-actions
-//! policy is gone from this path, replaced by the expressed controller (the [`crate::decision`]
+//! policy is gone from this path, replaced by the expressed controller (the [`civsim_bio::decision`]
 //! utility layer remains the shape of the sentient, deliberative tier above, which the controller
 //! underlies rather than replaces).
 //!
@@ -67,7 +67,6 @@ use civsim_world::Coord3;
 
 use civsim_compose::{derive_capabilities, CapabilityCaps, CapabilityRefs, FunctionLawRegistry};
 
-use crate::anatomy::{BodyPlan, BodyPlanRegistry};
 use crate::controller::{Controller, ControllerLayout};
 use crate::conviction_experience::ConvictionExperience;
 use crate::edibility::{Composition, FloorCaps, Physiology};
@@ -81,6 +80,7 @@ use crate::material::{MaterialField, SubstanceMix, WieldedTool};
 use crate::material_percept::MaterialPerceptRegistry;
 use crate::morphogen::Structure;
 use crate::percept::PerceptRegistry;
+use civsim_bio::anatomy::{BodyPlan, BodyPlanRegistry};
 
 /// The reserved parameters of the movement physics. The mechanism that reads them is fixed; these
 /// numbers are the owner's to set, surfaced with a basis, never fabricated (Principle 11). The
@@ -705,7 +705,7 @@ pub struct Walker {
     /// rate in `[0, 1]` at which its discovery proposal is BIASED toward an action it perceived a co-located
     /// being enact (carried in `observed_actions`). FOUNDER-ZERO: a founder reads zero and ignores what it
     /// sees, so imitation EMERGES by selection rather than being switched on (Principle 9). Expressed from
-    /// [`crate::genome::Channel::SocialLearning`] at the birth path exactly as `exploration` is; tests prime
+    /// [`civsim_bio::genome::Channel::SocialLearning`] at the birth path exactly as `exploration` is; tests prime
     /// it directly. Folds into `state_hash` when positive.
     pub social_learning: Fixed,
     /// The being's TRANSIENT observed-action prior (social-learning arc, piece 2): the set of primitive ids
@@ -1990,11 +1990,11 @@ fn walk_dir<T: Terrain>(w: &mut Walker, hx: Fixed, hy: Fixed, speed: Fixed, terr
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::anatomy::{BodyPlan, Part, Temperament};
     use crate::controller::ControllerLayout;
     use crate::homeostasis::{
         AffordanceRegistry, HomeostaticAxisDef, HomeostaticRegistry, UnitBridge, ENERGY, WATER,
     };
+    use civsim_bio::anatomy::{BodyPlan, Part, Temperament};
 
     const SEED: u64 = 0x10C0;
 
@@ -2435,13 +2435,13 @@ mod tests {
         section: Fixed,
         arm: Fixed,
         yield_strength: Fixed,
-    ) -> crate::anatomy::KindDef {
+    ) -> civsim_bio::anatomy::KindDef {
         let mut geometry = BTreeMap::new();
         geometry.insert("mech.section_modulus".to_string(), section);
         geometry.insert("mech.arm_length".to_string(), arm);
         let mut material = BTreeMap::new();
         material.insert("mat.yield_strength".to_string(), yield_strength);
-        crate::anatomy::KindDef {
+        civsim_bio::anatomy::KindDef {
             id,
             name: format!("limb{id}"),
             fantasy: false,
@@ -2456,7 +2456,7 @@ mod tests {
         let mut reg = BodyPlanRegistry::dev_default();
         reg.locomotion = vec![
             // The rooted mark (kind id 0): no limb geometry, reads no LOCOMOTE capability.
-            crate::anatomy::KindDef {
+            civsim_bio::anatomy::KindDef {
                 id: 0,
                 name: "rooted".to_string(),
                 fantasy: false,

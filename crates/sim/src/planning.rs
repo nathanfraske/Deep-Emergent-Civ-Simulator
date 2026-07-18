@@ -23,14 +23,14 @@
 //! `attr` and the `value` the being wants to hold about it) and returns the committed beliefs that match,
 //! ranked by the frame's own confidence (the commit margin, how decisively the being holds the belief) and
 //! its support (how much evidence backs it), bounded by a reserved planning depth cap. It reads only
-//! [`crate::agent::Mind::frames`] and each frame's [`crate::evidence::InferenceFrame::clamped_total`], `commit`, and
+//! [`civsim_bio::agent::Mind::frames`] and each frame's [`civsim_bio::evidence::InferenceFrame::clamped_total`], `commit`, and
 //! `support`, never an affordance's authored valence, a race id, or a goal-to-action table.
 //!
 //! MULTI-HOP through the RELATIONAL substrate (relational-belief substrate, arc 2). The one-hop primitive,
 //! [`plan_toward`], ranks the being's direct goal-matching PROPERTY beliefs (a value on a `(subject, attr)`:
 //! "action A pays off"). On its own that is a one-hop plan, because a property belief's value is a `ValueId`
 //! category that can never BE another belief's subject, so there is no subject-to-subject edge in the property
-//! store. The RELATIONAL store ([`crate::agent::Mind::relations_into`]) supplies that edge: a belief `(head,
+//! store. The RELATIONAL store ([`civsim_bio::agent::Mind::relations_into`]) supplies that edge: a belief `(head,
 //! relation, tail)` the being holds RELATES ("A yields X", "A causes B"). [`plan_chain`] walks it: it seeds
 //! from the one-hop frontier, then traverses relation edges BACKWARD from each goal subject, prepending the
 //! antecedent action that brings the goal about, up to a reserved hop cap. So a being that believes "cutting
@@ -50,9 +50,9 @@ use civsim_core::{Fixed, StableId};
 
 use std::collections::BTreeSet;
 
-use crate::agent::Mind;
-use crate::evidence::{AttrKindId, InferenceParams, ValueId};
 use crate::learn::RELATES;
+use civsim_bio::agent::Mind;
+use civsim_bio::evidence::{AttrKindId, InferenceParams, ValueId};
 
 /// One belief on a plan path: a committed belief `(subject, attr) -> value` the being holds, with the
 /// confidence and support that ranked it. A GOAL step is a property belief matching the goal predicate
@@ -110,7 +110,7 @@ impl Plan {
 /// (or the total itself for a single-hypothesis frame). The same decisiveness `InferenceFrame::commit`
 /// gates on, exposed as a graded confidence for ranking. Pure and RNG-free.
 fn commit_margin(
-    frame: &crate::evidence::InferenceFrame,
+    frame: &civsim_bio::evidence::InferenceFrame,
     committed: ValueId,
     params: &InferenceParams,
 ) -> Fixed {

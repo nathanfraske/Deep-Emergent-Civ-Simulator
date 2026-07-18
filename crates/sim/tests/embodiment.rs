@@ -19,8 +19,8 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use civsim_bio::anatomy::{BodyPlan, BodyPlanRegistry, Part, Temperament};
 use civsim_core::Fixed;
-use civsim_sim::anatomy::{BodyPlan, BodyPlanRegistry, Part, Temperament};
 use civsim_sim::body::{
     apply_insult, Body, BodyParams, DamageModeRegistry, FluidRegistry, Insult, TissueRegistry,
     BLOOD, CUT,

@@ -43,8 +43,8 @@
 use civsim_core::Fixed;
 use civsim_world::Coord3;
 
-use crate::calibration::CalibrationError;
 use crate::material::{EarthworkField, GeodynamicField};
+use civsim_bio::calibration::CalibrationError;
 
 /// One relaxation pass over the armed geodynamic columns: for each column carrying geodynamic state, read its
 /// producer-derived `isostatic_elevation` target, measure the residual against the current effective elevation

@@ -55,13 +55,10 @@ use std::collections::BTreeMap;
 use civsim_core::{Fixed, StableId};
 use civsim_world::{Coord3, TileMap};
 
-use crate::anatomy::BodyPlanRegistry;
 use crate::axiom::RingCapacityLaw;
 use crate::breeding::BreedingSystemRegistry;
-use crate::calibration::{CalibrationError, CalibrationManifest, Profile};
 use crate::controller::Controller;
 use crate::conviction_experience::FeltConvictionCalib;
-use crate::decision::Curve;
 use crate::discovery::DiscoveryCalib;
 use crate::edibility::{Physiology, ToleranceRegistry};
 use crate::environ::{EnvironCalib, EnvironFields};
@@ -87,9 +84,12 @@ use crate::runner::{
 };
 use crate::scenario::ScenarioResolution;
 use crate::sensorium::SenseChannelId;
-use crate::tom::AccessChannelRegistry;
 use crate::value::RaceId;
 use crate::world::{PlaceId, ReproductionParams, World};
+use civsim_bio::anatomy::BodyPlanRegistry;
+use civsim_bio::calibration::{CalibrationError, CalibrationManifest, Profile};
+use civsim_bio::decision::Curve;
+use civsim_bio::tom::AccessChannelRegistry;
 
 /// The declared peoples of a world at the dawn of sentience (design Part 28): the race records, the
 /// founding band placements, and the two registries the dawn seeding reads (the breeding systems a
@@ -712,13 +712,13 @@ fn assemble_dawn_embodiment(
             if let Some(genome) = world.genome_of(id) {
                 walker.exploration = race
                     .genes
-                    .express_unit(genome, crate::genome::Channel::Exploration);
+                    .express_unit(genome, civsim_bio::genome::Channel::Exploration);
                 walker.deliberation = race
                     .genes
-                    .express_unit(genome, crate::genome::Channel::Deliberation);
+                    .express_unit(genome, civsim_bio::genome::Channel::Deliberation);
                 walker.social_learning = race
                     .genes
-                    .express_unit(genome, crate::genome::Channel::SocialLearning);
+                    .express_unit(genome, civsim_bio::genome::Channel::SocialLearning);
             }
             if let Some(s) = structure {
                 walker = walker.with_structure(s);

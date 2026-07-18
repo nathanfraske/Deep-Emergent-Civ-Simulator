@@ -43,25 +43,25 @@
 //! forms no belief, emits no move, and would let the barrier prove an empty set identical:
 //! a vacuous pass the guard now refuses.
 
-use civsim_core::{Fixed, StableId};
-use civsim_sim::anatomy::{
+use civsim_bio::anatomy::{
     BodyPlan, BodyPlanRegistry, OrganKindDef, Part, Temperament, TissueComposition,
 };
+use civsim_bio::decision::Behaviour;
+use civsim_bio::evidence::{AttrKindId, InferenceParams, ValueId};
+use civsim_bio::tom::{AccessChannelDef, AccessChannelId, AccessChannelRegistry, AccessWeights};
+use civsim_core::{Fixed, StableId};
 use civsim_sim::controller::Controller;
-use civsim_sim::decision::Behaviour;
 use civsim_sim::dialogue::{
     EffectSign, ForceEffectDef, ForceEffectId, ForceFloor, ForceKind, MoveKindDef, MoveKindId,
     MoveRegistry,
 };
 use civsim_sim::edibility::Physiology;
-use civsim_sim::evidence::{AttrKindId, InferenceParams, ValueId};
 use civsim_sim::homeostasis::{AffordanceRegistry, Homeostasis, HomeostaticRegistry};
 use civsim_sim::language::{ArticulationSubstrate, LanguageParams};
 use civsim_sim::locomotion::{LocomotionParams, Walker};
 use civsim_sim::lod::TwoTierWorld;
 use civsim_sim::primes::nsm_concept_ids;
 use civsim_sim::runner::{BeingThermal, Embodiment, Field, FieldCalib, Runner};
-use civsim_sim::tom::{AccessChannelDef, AccessChannelId, AccessChannelRegistry, AccessWeights};
 use civsim_sim::world::{GossipParams, Stimulus, TickInput, World};
 use civsim_world::Coord3;
 

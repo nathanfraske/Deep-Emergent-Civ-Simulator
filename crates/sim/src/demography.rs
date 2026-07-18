@@ -39,7 +39,7 @@
 //! agreement, never identical member-by-member outcomes, which is mathematically
 //! unattainable for a statistical and a per-agent model. So mortality here is the exact
 //! per-member Bernoulli sum the aggregate genome tier already uses
-//! ([`crate::genome::GenePool::drift`]): each of a bucket's members is rolled against the
+//! ([`civsim_bio::genome::GenePool::drift`]): each of a bucket's members is rolled against the
 //! bucket's age hazard, keyed by counter-RNG, so the count is conserved exactly and the
 //! pool death fraction agrees in expectation with the individual tier's. The exact sum is
 //! O(count) per bucket, the same cost the drift sampler carries; the O(1) binomial (tau-
@@ -50,7 +50,7 @@
 
 use crate::breeding::SexClass;
 use crate::census::ReproductiveMoments;
-use crate::decision::Curve;
+use civsim_bio::decision::Curve;
 use civsim_core::{DrawKey, Fixed, Phase, StateHasher};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;

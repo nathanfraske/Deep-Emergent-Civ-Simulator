@@ -995,8 +995,8 @@ mod tests {
 #[cfg(test)]
 mod capability_gate_tests {
     use super::*;
-    use crate::anatomy::{BodyPlan, BodyPlanRegistry, Part, Temperament};
     use crate::body::{BodyParams, BLOOD, F_VITAL_CORE};
+    use civsim_bio::anatomy::{BodyPlan, BodyPlanRegistry, Part, Temperament};
 
     // FIXTURE values, never read from the manifest.
     const VOICE: SenseChannelId = SenseChannelId(1); // the reception channel a voice fills (hearing)

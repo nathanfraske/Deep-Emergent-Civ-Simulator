@@ -38,14 +38,14 @@
 
 use std::collections::BTreeMap;
 
+use civsim_bio::anatomy::{BodyPlan, BodyPlanRegistry, Part, Temperament};
+use civsim_bio::calibration::{CalibrationError, CalibrationManifest, Category, Profile};
+use civsim_bio::tom::AccessChannelRegistry;
 use civsim_core::{Fixed, GaussApprox};
-use civsim_sim::anatomy::{BodyPlan, BodyPlanRegistry, Part, Temperament};
-use civsim_sim::calibration::{CalibrationError, CalibrationManifest, Category, Profile};
 use civsim_sim::homeostasis::{AffordanceRegistry, HomeostaticRegistry};
 use civsim_sim::locomotion::LocomotionParams;
 use civsim_sim::runner::Runner;
 use civsim_sim::scenario::{Scenario, ScenarioResolution};
-use civsim_sim::tom::AccessChannelRegistry;
 use civsim_sim::{
     build_dawn_runner, Axiom, AxiomAxisId, BandSpec, BreedingSystem, BreedingSystemId,
     BreedingSystemRegistry, Channel, CognitionChannel, Curve, DawnPeoples, DominanceMode,

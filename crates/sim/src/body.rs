@@ -17,7 +17,7 @@
 //! 11).
 //!
 //! A body is an assembly of typed parts made of layered tissue materials, promoted from the aggregate
-//! anatomy vector (Part 25.14, [`crate::anatomy::BodyPlan`]) on demand (Principle 1, the aggregate
+//! anatomy vector (Part 25.14, [`civsim_bio::anatomy::BodyPlan`]) on demand (Principle 1, the aggregate
 //! stays statistics until an individual warrants a full body). A wound is not a stored kind: it is the
 //! measured consequence of a physical insult meeting a part's tissue, computed by the resolved floor
 //! laws ([`civsim_physics::laws`]) and recorded as the part's condition change plus a measured outcome,
@@ -43,11 +43,11 @@ use civsim_compose::{
 use civsim_core::Fixed;
 use std::collections::BTreeMap;
 
-use crate::anatomy::BodyPlanRegistry;
+use civsim_bio::anatomy::BodyPlanRegistry;
 use civsim_physics::laws;
 
-use crate::anatomy::BodyPlan;
 use crate::stocks::Stock;
+use civsim_bio::anatomy::BodyPlan;
 
 // ============================================================================================
 // Tissue materials: data over the resolved material floor axes (mat.*/therm.*).
@@ -1144,7 +1144,7 @@ fn loss_knee(x: Fixed, threshold: Fixed) -> Fixed {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::anatomy::{Part, Temperament};
+    use civsim_bio::anatomy::{Part, Temperament};
 
     fn plan(mass: (i64, i64), legs: usize, weapons: usize) -> BodyPlan {
         BodyPlan {

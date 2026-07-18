@@ -38,9 +38,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use civsim_core::{DrawKey, Fixed, Phase};
 use civsim_physics::laws::{self, Edibility};
 
-use crate::genome::{Channel, GeneSet, Genome, ToleranceAxisId};
 use crate::homeostasis::HomeostaticRegistry;
 use crate::physiology::SALINITY;
+use civsim_bio::genome::{Channel, GeneSet, Genome, ToleranceAxisId};
 
 /// The caps the floor laws need, reserved with their basis in the floor (the per-class and
 /// aggregate harm ceilings and the margin cap). Passed in rather than baked so the mechanism
@@ -66,7 +66,7 @@ impl FloorCaps {
 /// An organism tissue's composition: the supply of each nutrient class (a mass-fraction simplex
 /// summing to one) and the dose of each toxin class present, each keyed by its biology-floor axis
 /// id. This is the same string-keyed, sorted-walk composition-over-the-floor shape
-/// [`crate::anatomy::TissueComposition`] and `civsim_physics::Substance::vector` use, so the class
+/// [`civsim_bio::anatomy::TissueComposition`] and `civsim_physics::Substance::vector` use, so the class
 /// vocabulary is the floor's DATA and grows with it at zero code cost (Principle 11): a nutrient or
 /// toxin class is a data edit, never an enum change. A class the tissue bears none of is simply
 /// absent (reads as zero, the substrate absence convention).
@@ -80,7 +80,7 @@ pub struct Composition {
 
 impl Composition {
     /// The supply on one nutrient class, named by its biology-floor axis id. An absent class reads
-    /// as zero (mirrors [`crate::anatomy::TissueComposition::component`]).
+    /// as zero (mirrors [`civsim_bio::anatomy::TissueComposition::component`]).
     pub fn nutrient(&self, axis: &str) -> Fixed {
         self.nutrients.get(axis).copied().unwrap_or(Fixed::ZERO)
     }

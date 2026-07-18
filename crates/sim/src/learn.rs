@@ -25,10 +25,10 @@
 //! piece of evidence per present feature toward "this feature harms me" (a harm tick) or "this feature
 //! is benign" (a harm-free tick), keyed on a per-feature belief subject.
 //!
-//! The associative learner IS the existing evidence engine ([`crate::evidence::InferenceFrame`] through
-//! [`crate::agent::Mind::consider`]), keyed differently: the one global hazard subject becomes a
+//! The associative learner IS the existing evidence engine ([`civsim_bio::evidence::InferenceFrame`] through
+//! [`civsim_bio::agent::Mind::consider`]), keyed differently: the one global hazard subject becomes a
 //! per-feature subject minted from the quantized feature the being senses, and the evidence weight is
-//! the general [`crate::evidence::good_weight`] of two reserved likelihoods. Because the belief is then
+//! the general [`civsim_bio::evidence::good_weight`] of two reserved likelihoods. Because the belief is then
 //! an ordinary `(subject, attr)` frame, the shipped overhearing transmission carries it for free, and
 //! the identical loop learns any ground-kind, any good place, any food that sickens, with zero
 //! per-hazard code. Nothing reads a dose threshold, a hazard label, or a race id: the sign comes from
@@ -45,9 +45,6 @@ use crate::perception_reach::{
     ChannelReach, ChannelReachRegistry, Reach, ReachBounds, DEV_OPTICAL,
 };
 
-use crate::agent::Mind;
-use crate::calibration::{CalibrationError, CalibrationManifest};
-use crate::evidence::{good_weight, AttrKindId, InferenceParams, ValueId};
 use crate::homeostasis::AffordanceId;
 use crate::locomotion::ResourceField;
 use crate::material::MaterialField;
@@ -55,6 +52,9 @@ use crate::material_percept::MaterialPerceptRegistry;
 use crate::perceivable_feature::PerceivableFeatureRegistry;
 use crate::percept::{feature_bucket, PerceptRegistry};
 use crate::sensorium::SenseChannelId;
+use civsim_bio::agent::Mind;
+use civsim_bio::calibration::{CalibrationError, CalibrationManifest};
+use civsim_bio::evidence::{good_weight, AttrKindId, InferenceParams, ValueId};
 
 /// The generic attribute every experientially-learned feature belief is ABOUT: "does standing on this
 /// feature harm me". One attribute for all features (the feature identity lives in the subject), a
@@ -568,7 +568,7 @@ impl EligibilityTrace {
 
 /// One piece of evidence a being contributes this tick: the per-feature subject to key it on, the value
 /// it points toward (`HARMS` on a harm tick, `BENIGN` otherwise), and the signed weight. Fed straight
-/// into [`crate::agent::Mind::consider`] (which scales it by the mind's acuity and accumulates it into
+/// into [`civsim_bio::agent::Mind::consider`] (which scales it by the mind's acuity and accumulates it into
 /// the `(subject, HARM_ATTR)` frame), so the belief commits at read past the engine's threshold and
 /// margin with no learner-specific commit logic.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

@@ -24,7 +24,7 @@
 //! for. This module replaces the authored tables with a data substrate plus fixed derivations:
 //! a trace kind carries its reliability and its decay law as data, and the weight and the salience
 //! are COMPUTED from that data through cited primitives (Good's weight of evidence over the race's
-//! own base rates, [`crate::evidence::good_weight`]; the physics reaction and corrosion kernels,
+//! own base rates, [`civsim_bio::evidence::good_weight`]; the physics reaction and corrosion kernels,
 //! [`civsim_physics::laws`]).
 //!
 //! Principle 9 holds throughout: the derivation functions read per-trace-kind and per-race DATA
@@ -44,7 +44,7 @@ use civsim_core::Fixed;
 use civsim_physics::laws;
 
 use crate::base_rates::RaceBaseRates;
-use crate::evidence::{good_weight, AttrKindId, ValueId};
+use civsim_bio::evidence::{good_weight, AttrKindId, ValueId};
 
 /// A data-defined trace-kind identifier (a newtype like [`AttrKindId`]), not a closed enum, so a
 /// world can carry trace kinds the engine's authors never enumerated (Principle 11). File order in
@@ -171,7 +171,7 @@ pub struct TraceKindDef {
     /// this trace appears when the implied cause did not occur (a corpse from a decoy, a bloodstain
     /// from a non-fatal injury). RESERVED. Basis: the base incidence of the trace absent its cause,
     /// the DENOMINATOR of Good's weight of evidence. Distinct from the race's background mortality,
-    /// which is the belief's PRIOR (applied via [`crate::evidence::InferenceFrame::seed_prior`]),
+    /// which is the belief's PRIOR (applied via [`civsim_bio::evidence::InferenceFrame::seed_prior`]),
     /// never part of the weight. A near-zero value makes the trace strongly diagnostic; a value near
     /// the reliability makes it nearly useless as evidence.
     pub false_attribution: Fixed,
@@ -254,13 +254,13 @@ pub const DEV_CORRODED_BLADE: TraceKindId = TraceKindId(2);
 
 /// The weight of evidence a mortality-implying trace of `kind` carries: Good's log-likelihood ratio
 /// of two LIKELIHOODS, `ln[P(trace | cause true) / P(trace | cause false)]`
-/// ([`crate::evidence::good_weight`]), with the trace kind's `reliability` as `P(trace | dead)` and
+/// ([`civsim_bio::evidence::good_weight`]), with the trace kind's `reliability` as `P(trace | dead)` and
 /// its `false_attribution` as `P(trace | alive)`. Both are per-trace-kind data (Principle 11), so a
 /// strongly diagnostic trace (low false attribution) carries a large weight and a weak one a small
 /// weight, and swapping two kinds' likelihoods swaps their weights.
 ///
 /// The base rate (a race's background mortality, `P(dead)`) is the belief's PRIOR, not the weight:
-/// it enters through [`crate::evidence::InferenceFrame::seed_prior`] at wire-up, never here. Feeding
+/// it enters through [`civsim_bio::evidence::InferenceFrame::seed_prior`] at wire-up, never here. Feeding
 /// the prior into the likelihood-ratio slot (the earlier form) double-counted it as evidence and
 /// conflated a prior with a likelihood. The `clamp` is the evidence engine's certainty clamp, reused
 /// rather than re-invented.
@@ -379,8 +379,8 @@ pub fn corroding_salience(elapsed: Fixed, kind: &TraceKindDef) -> Fixed {
 mod tests {
     use super::*;
     use crate::base_rates::RaceBaseRateRegistry;
-    use crate::decision::Curve;
     use crate::value::RaceId;
+    use civsim_bio::decision::Curve;
 
     const CLAMP: Fixed = Fixed::from_int(20);
 

@@ -20,9 +20,10 @@
 
 use std::collections::BTreeMap;
 
+use civsim_bio::anatomy::{BodyPlan, BodyPlanRegistry, Part, Temperament};
+use civsim_bio::calibration::{CalibrationManifest, Profile};
+use civsim_bio::tom::AccessChannelRegistry;
 use civsim_core::{Fixed, GaussApprox, StableId};
-use civsim_sim::anatomy::{BodyPlan, BodyPlanRegistry, Part, Temperament};
-use civsim_sim::calibration::{CalibrationManifest, Profile};
 use civsim_sim::homeostasis::{
     AffordanceRegistry, HomeostaticAxisDef, HomeostaticRegistry, INTEGRITY,
 };
@@ -31,7 +32,6 @@ use civsim_sim::language::{ConceptId, FeatureDimId, ProductionModalityId};
 use civsim_sim::locomotion::LocomotionParams;
 use civsim_sim::scenario::{Scenario, ScenarioResolution};
 use civsim_sim::sensorium::SenseChannelId;
-use civsim_sim::tom::AccessChannelRegistry;
 use civsim_sim::{
     append_controller_block, append_morphogen_block, append_scalar_channel, build_dawn_runner,
     express_program, grow, taxis_move_weights, Articulation, Axiom, AxiomAxisId, AxisSpec,

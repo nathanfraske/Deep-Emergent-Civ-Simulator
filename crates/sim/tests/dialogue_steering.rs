@@ -28,13 +28,13 @@
 //!   unchanged, and a genuine change of capacity must change it (so the test is not
 //!   vacuous).
 
+use civsim_bio::evidence::InferenceParams;
+use civsim_bio::tom::{AccessChannelDef, AccessChannelId, AccessChannelRegistry, AccessWeights};
 use civsim_core::{Fixed, StableId};
 use civsim_sim::dialogue::{
     EffectSign, ForceEffectDef, ForceEffectId, ForceFloor, ForceKind, MoveKindDef, MoveKindId,
     MoveRegistry,
 };
-use civsim_sim::evidence::InferenceParams;
-use civsim_sim::tom::{AccessChannelDef, AccessChannelId, AccessChannelRegistry, AccessWeights};
 use civsim_sim::world::{GossipParams, Stimulus, TickInput, World};
 use civsim_sim::AttrKindId;
 

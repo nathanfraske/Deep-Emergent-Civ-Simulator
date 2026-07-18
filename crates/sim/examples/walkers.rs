@@ -35,8 +35,8 @@
 
 use std::collections::BTreeMap;
 
+use civsim_bio::anatomy::{BodyPlan, Part, Temperament};
 use civsim_core::{Fixed, StableId};
-use civsim_sim::anatomy::{BodyPlan, Part, Temperament};
 use civsim_sim::controller::{Controller, ControllerLayout};
 use civsim_sim::edibility::{Composition, Physiology};
 use civsim_sim::homeostasis::{

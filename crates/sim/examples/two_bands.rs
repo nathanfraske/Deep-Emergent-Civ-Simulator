@@ -28,12 +28,12 @@
 //! because they never share a place, so two distinct tongues emerge for the one shared world
 //! of meanings. The run is keyed on a seed and replays identically.
 
+use civsim_bio::evidence::InferenceParams;
+use civsim_bio::tom::AccessWeights;
 use civsim_core::{Fixed, StableId};
-use civsim_sim::evidence::InferenceParams;
 use civsim_sim::language::{ArticulationSubstrate, ConceptId, LangId, Language, LanguageParams};
 use civsim_sim::located::{LocationIndex, OccupantId};
 use civsim_sim::primes::{nsm_concept_ids, nsm_gloss};
-use civsim_sim::tom::AccessWeights;
 use civsim_sim::value::RaceId;
 use civsim_sim::world::World;
 use civsim_world::{BiomeSet, Coord3, FlatBounded, TileMap, TopologySpace, WorldgenParams};

@@ -31,13 +31,13 @@
 
 use civsim_core::Fixed;
 
-use crate::anatomy::BodyPlan;
 use crate::axiom::IntrinsicBeliefs;
 use crate::breeding::BreedingSystemId;
-use crate::genome::{GenePool, GeneSet, GeneticScheme, ReproductionMode};
 use crate::morphogen::MorphogenProgram;
 use crate::value::RaceId;
 use crate::world::PlaceId;
+use civsim_bio::anatomy::BodyPlan;
+use civsim_bio::genome::{GenePool, GeneSet, GeneticScheme, ReproductionMode};
 
 /// A sentient race as it stands at the dawn: its genetic substrate and its innate belief
 /// disposition, all per-race data (Principle 11). The mechanism that seeds and expresses a

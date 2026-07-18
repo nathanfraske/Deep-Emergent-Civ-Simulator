@@ -37,7 +37,6 @@ use civsim_world::{
 };
 use rayon::prelude::*;
 
-use crate::anatomy::{temperament_word, BodyPlanRegistry, WorldProfile};
 use crate::biosphere::{
     generate, representative_structure, Biosphere, EnvProfile, GeneratorParams, Region, SourceRef,
     Species,
@@ -45,11 +44,12 @@ use crate::biosphere::{
 use crate::clock::Steppable;
 use crate::environ::AbioticSourceRegistry;
 use crate::epoch::{run, EpochParams, EpochReport, Radiation};
-use crate::genome::IncompatibilityTable;
-use crate::lineage::SpeciesId;
 use crate::located::{LocationIndex, OccupantId};
 use crate::morphogen::MorphogenProgram;
 use crate::physiology::whole_body_composition_vector;
+use civsim_bio::anatomy::{temperament_word, BodyPlanRegistry, WorldProfile};
+use civsim_bio::genome::IncompatibilityTable;
+use civsim_bio::lineage::SpeciesId;
 
 /// The parameters of the whole sequence: the world size, the region block side, and the
 /// generator and epoch parameters. DEVELOPMENT FIXTURE via [`GenesisParams::dev_default`].
@@ -149,7 +149,7 @@ pub struct GrownBodies {
 
 impl LivingWorld {
     /// A species' whole-body composition VECTOR (Arc 6), forking on the body tier: a catalog species reads
-    /// its sampled [`crate::anatomy::BodyPlan`] against the registry (byte-identical to pre-Arc-6); a grown species regrows
+    /// its sampled [`civsim_bio::anatomy::BodyPlan`] against the registry (byte-identical to pre-Arc-6); a grown species regrows
     /// its representative [`crate::morphogen::Structure`] from its pool against the world's shared program and
     /// reads its composition directly off the grown tissue. Fail-loud if a grown species is present without
     /// the world's grown-body context (an invariant violation, never a silent Terran default).

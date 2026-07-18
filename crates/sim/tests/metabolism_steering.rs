@@ -19,10 +19,10 @@
 //! functions of a body's COMPOSITION, MASS, MEDIUM, and TEMPERATURE, and read no identity. Two bodies
 //! diverge because their physics differ, and a body cannot get a different drain by relabelling itself.
 
-use civsim_core::Fixed;
-use civsim_sim::anatomy::{
+use civsim_bio::anatomy::{
     BodyPlan, BodyPlanRegistry, OrganKindDef, Part, Temperament, TissueComposition,
 };
+use civsim_core::Fixed;
 use civsim_sim::homeostasis::{Homeostasis, HomeostaticRegistry, ENERGY};
 use civsim_sim::physiology::{
     derive_base_drain, derive_body_exchange_rate, whole_body_energy_density, MetabolicAnchors,

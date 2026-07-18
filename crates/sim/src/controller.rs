@@ -19,8 +19,8 @@
 //! homeostatic state and percept (layers 1 and 3, `crate::homeostasis` and the locomotion percept)
 //! to which morphological affordance it issues (layer 2, `crate::homeostasis::AffordanceRegistry`).
 //! The mechanism is fixed Rust; the mapping's parameters are the heritable data, one weight per
-//! [`crate::genome::ControllerParamId`], expressed per individual from its genome by
-//! [`crate::genome::GeneSet::express`] exactly as the cognition, build, and composition channels are
+//! [`civsim_bio::genome::ControllerParamId`], expressed per individual from its genome by
+//! [`civsim_bio::genome::GeneSet::express`] exactly as the cognition, build, and composition channels are
 //! (Principle 11). So a being's behaviour is its inheritance the way its size and acuity are, and it
 //! evolves under the pre-dawn epoch's selection rather than being authored (Principle 9). Nobody
 //! writes "seek water when dry": a lineage comes to have that behaviour because the controllers that
@@ -61,7 +61,6 @@ use civsim_core::Fixed;
 use std::collections::BTreeSet;
 
 use crate::conviction_percept::ConvictionPerceptRegistry;
-use crate::genome::{Channel, ControllerParamId, GeneSet, Genome};
 use crate::homeostasis::{
     AffordanceId, AffordanceParam, AffordanceRegistry, Homeostasis, HomeostaticAxisId,
     HomeostaticRegistry,
@@ -69,6 +68,7 @@ use crate::homeostasis::{
 use crate::material_percept::MaterialPerceptRegistry;
 use crate::perceivable_feature::PerceivableFeatureRegistry;
 use crate::percept::PerceptRegistry;
+use civsim_bio::genome::{Channel, ControllerParamId, GeneSet, Genome};
 
 /// Minus one, the low clamp of the activation.
 const NEG_ONE: Fixed = Fixed::from_int(-1);
@@ -1355,7 +1355,7 @@ impl Controller {
     /// The full heritable weight vector, in [`ControllerParamId`] order (weight `k` feeds
     /// `Channel::Controller(ControllerParamId(k))`). A caller that has evolved a controller (the dawn
     /// forage bootstrap) reads this to seed a founder pool with each weight as its target, so a founder
-    /// expresses the pre-adapted controller (`crate::genome::append_controller_block`).
+    /// expresses the pre-adapted controller (`civsim_bio::genome::append_controller_block`).
     pub fn weights(&self) -> &[Fixed] {
         &self.weights
     }
@@ -1472,11 +1472,11 @@ fn input_at(v: &[Fixed], i: usize) -> Fixed {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::genome::{
-        Allele, AlleleState, DominanceMode, GeneDef, GeneEffect, GeneId, Haplotype, SchemeId,
-    };
     use crate::homeostasis::{
         AffordanceRegistry, HomeostaticRegistry, ENERGY, INGEST, MOVE, WATER,
+    };
+    use civsim_bio::genome::{
+        Allele, AlleleState, DominanceMode, GeneDef, GeneEffect, GeneId, Haplotype, SchemeId,
     };
 
     fn layout(hidden: usize) -> ControllerLayout {

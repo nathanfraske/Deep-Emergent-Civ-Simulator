@@ -73,9 +73,9 @@ use std::collections::{BTreeMap, VecDeque};
 
 use civsim_core::{EventId, Fixed};
 
-use crate::calibration::{CalibrationError, CalibrationManifest};
-use crate::decision::Curve;
 use crate::value::ValueProfile;
+use civsim_bio::calibration::{CalibrationError, CalibrationManifest};
+use civsim_bio::decision::Curve;
 
 /// A data-defined axiom-axis identifier (a bipolar worldview axis a race carries, Part 40).
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
@@ -942,7 +942,7 @@ mod tests {
 
     #[test]
     fn ring_capacity_law_from_manifest_fails_loud_while_reserved_and_reads_a_set_pair() {
-        use crate::calibration::CalibrationManifest;
+        use civsim_bio::calibration::CalibrationManifest;
         // Both entries reserved: fail loud, never a fabricated law (Principle 11).
         let reserved = "[[reserved]]\nid = \"axiom.evidence_ring_curve\"\nbasis = \"b\"\nstatus = \"reserved\"\nvalue = \"\"\nunit = \"curve\"\nsource = \"s\"\n[[reserved]]\nid = \"axiom.evidence_ring_hard_cap\"\nbasis = \"b\"\nstatus = \"reserved\"\nvalue = \"\"\nunit = \"count\"\nsource = \"s\"\n";
         let m = CalibrationManifest::from_toml_str(reserved).unwrap();

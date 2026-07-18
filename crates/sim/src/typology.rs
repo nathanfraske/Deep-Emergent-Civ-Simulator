@@ -67,9 +67,9 @@
 //! static generator on the owner's sequencing call, alongside the deeper 33.4 generation
 //! machinery it would move; the substrate it will act over is this registry.
 
-use crate::calibration::{CalibrationError, CalibrationManifest};
 use crate::language::Linearization;
 use crate::value::GroundMetric;
+use civsim_bio::calibration::{CalibrationError, CalibrationManifest};
 use civsim_core::{DrawKey, Fixed, Phase};
 use civsim_physics::laws;
 use std::collections::BTreeMap;

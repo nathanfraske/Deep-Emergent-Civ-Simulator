@@ -58,8 +58,8 @@
 use civsim_core::Fixed;
 use civsim_physics::laws::DiscriminationLaw;
 
-use crate::anatomy::{BodyPlan, BodyPlanRegistry};
 use crate::physiology::surface_optical_axis;
+use civsim_bio::anatomy::{BodyPlan, BodyPlanRegistry};
 
 /// A perceivable-feature id, minted through the registry (extensible, never a closed enum). The numeric value
 /// is the channel's slot in the perceivable-feature order.
@@ -201,7 +201,7 @@ impl PerceivableFeatureRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::anatomy::{BodyPlanRegistry, KindDef, Part, Temperament};
+    use civsim_bio::anatomy::{BodyPlanRegistry, KindDef, Part, Temperament};
 
     /// A body-plan registry with one covering carrying two distinct optical axes, and a body plan wearing it.
     fn emitter_with_optics() -> (BodyPlanRegistry, BodyPlan) {

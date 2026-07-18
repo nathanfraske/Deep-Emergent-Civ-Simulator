@@ -34,6 +34,7 @@ mod render;
 
 use minifb::{Key, KeyRepeat, MouseButton, MouseMode, Scale, ScaleMode, Window, WindowOptions};
 
+use civsim_bio::anatomy::WorldProfile;
 use civsim_core::Fixed;
 use civsim_materials::grain_opacity::{GrainConstituent, GrainMixture, GrainOpticalEstimator};
 use civsim_physics::band_gap::BandGapColumn;
@@ -44,7 +45,6 @@ use civsim_physics::optical_constants::OpticalConstants;
 use civsim_physics::periodic::PeriodicTable;
 use civsim_physics::petrology_data::PhaseRegistry;
 use civsim_physics::solar_abundances::SolarAbundances;
-use civsim_sim::anatomy::WorldProfile;
 use civsim_sim::clock::PlaybackDriver;
 use civsim_sim::deeptime::{
     bombard_tick, province_column_params, provinces_across, step_deep_time, DeepTimeState,

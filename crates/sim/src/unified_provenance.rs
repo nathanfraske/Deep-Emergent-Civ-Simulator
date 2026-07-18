@@ -36,7 +36,7 @@
 //! `CalibrationManifest::authoring_surface` and `FloorProvenance::authoring_surface`), so it cannot move a
 //! fixed-point pin.
 
-use crate::calibration::{CalibrationError, CalibrationManifest, Provenance};
+use civsim_bio::calibration::{CalibrationError, CalibrationManifest, Provenance};
 use civsim_physics::floor_provenance::FloorProvenance;
 use std::collections::{BTreeMap, BTreeSet};
 

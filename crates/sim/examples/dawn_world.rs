@@ -30,11 +30,11 @@
 //! still a place token, with the deep being model (genome, axioms, race parameters) and a
 //! place-as-map-coordinate still ahead (roadmap M2).
 
+use civsim_bio::evidence::InferenceParams;
+use civsim_bio::tom::AccessWeights;
 use civsim_core::{Fixed, StableId};
-use civsim_sim::evidence::InferenceParams;
 use civsim_sim::language::{ArticulationSubstrate, LanguageParams};
 use civsim_sim::primes::{nsm_concept_ids, nsm_gloss};
-use civsim_sim::tom::AccessWeights;
 use civsim_sim::world::World;
 use civsim_world::{BiomeSet, Coord3, FlatBounded, TileMap, TopologySpace, WorldgenParams};
 

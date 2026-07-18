@@ -51,9 +51,9 @@ use civsim_compose::{
     derive_capabilities, CapabilityCaps, CapabilityRefs, FunctionLawId, FunctionLawRegistry,
 };
 
-use crate::anatomy::{BodyPlan, BodyPlanRegistry, KindDef};
 use crate::morphogen::Structure;
 use crate::stocks::Stock;
+use civsim_bio::anatomy::{BodyPlan, BodyPlanRegistry, KindDef};
 
 /// A homeostatic axis id, minted through the registry (extensible, never a closed enum). The
 /// numeric values are stable ids folded into no canonical stream on their own; they key the
@@ -1209,7 +1209,7 @@ pub fn is_reward_tick(delta: Fixed, reward_noise_floor: Fixed) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::anatomy::{Part, Temperament};
+    use civsim_bio::anatomy::{Part, Temperament};
 
     #[test]
     fn a_wielded_tool_grants_a_capability_gated_affordance_and_never_an_unconditional_one() {
@@ -1735,7 +1735,7 @@ mod tests {
         // arm, no struct field is touched: the composition and the backing are keyed off floor axis
         // ids, the `Substance::vector` convention, so the reserve vocabulary grows with the floor's
         // data, never a code change. A future respiratory-surface axis (R-MEDIUM) enters the same way.
-        use crate::anatomy::{OrganKindDef, TissueComposition};
+        use civsim_bio::anatomy::{OrganKindDef, TissueComposition};
         let mut organs = BodyPlanRegistry::dev_default();
         organs.organs = vec![OrganKindDef {
             id: 0,

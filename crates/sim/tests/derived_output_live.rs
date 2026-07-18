@@ -26,7 +26,7 @@
 //! The site-local liveness probe (perturb the input, assert the derived value responds) is the next
 //! slice; this slice locks the membership.
 
-use civsim_sim::calibration::CalibrationManifest;
+use civsim_bio::calibration::CalibrationManifest;
 use civsim_sim::derive_gate::{coverage_report, Coverage, DerivationRegistry};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};

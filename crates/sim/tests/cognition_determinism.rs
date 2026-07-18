@@ -21,9 +21,9 @@
 //! and across thread counts, and the theory-of-mind anti-projection guarantee holds as
 //! a harness assertion (no world evidence ever moves a nested belief).
 
+use civsim_bio::evidence::{AttrKindId, InferenceFrame, InferenceParams};
+use civsim_bio::tom::{AccessChannelId, AccessWeights, EvidenceOrder, NestedFrame};
 use civsim_core::{Fixed, Rng, StableId, StateHasher};
-use civsim_sim::evidence::{AttrKindId, InferenceFrame, InferenceParams};
-use civsim_sim::tom::{AccessChannelId, AccessWeights, EvidenceOrder, NestedFrame};
 
 const ONE: Fixed = Fixed::ONE;
 const HYPS: [u32; 3] = [10, 20, 30];

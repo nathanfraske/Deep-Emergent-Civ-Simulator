@@ -15,7 +15,7 @@
 //! The reproductive-success census and the effective-population-size derivation (design Part 25,
 //! R-REPRO; the census tier of the deep-time genome model, Part 25.7).
 //!
-//! The aggregate genome tier ([`crate::genome::GenePool`]) carries an effective population size Ne
+//! The aggregate genome tier ([`civsim_bio::genome::GenePool`]) carries an effective population size Ne
 //! that sets the strength of drift. Ne was formerly a single reserved number dialed per world. It
 //! now DERIVES from a census of who bred and how well: the breeding sex ratio and the variance in
 //! reproductive success are the two demographic facts that pull Ne below the head count, and both
@@ -398,7 +398,7 @@ impl ReproductiveCensus {
 
     /// The effective population size the census implies, through the one race-blind kernel: it
     /// reduces to [`ReproductiveMoments`] and calls [`ReproductiveMoments::effective_size`]. Feeds
-    /// [`crate::genome::GenePool::effective_size`] for the census-tier pool.
+    /// [`civsim_bio::genome::GenePool::effective_size`] for the census-tier pool.
     pub fn effective_size(&self) -> u32 {
         self.moments().effective_size()
     }

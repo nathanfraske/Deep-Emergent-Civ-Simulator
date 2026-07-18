@@ -59,7 +59,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::calibration::{CalibrationError, CalibrationManifest};
+use civsim_bio::calibration::{CalibrationError, CalibrationManifest};
 use civsim_core::{DrawKey, Fixed, Phase, Rng, StableId};
 
 /// An opaque content-addressed design identity: the address of a piece of transmissible

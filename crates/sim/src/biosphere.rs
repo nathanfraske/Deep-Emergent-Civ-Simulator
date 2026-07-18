@@ -38,12 +38,12 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use civsim_core::{DrawKey, Fixed, Phase, StableId};
 
-use crate::anatomy::{sample_body_plan, BodyPlan, BodyPlanRegistry, WorldProfile};
-use crate::genome::{append_morphogen_block, GeneDef, GenePool, MorphogenParamId, SchemeId};
-use crate::lineage::{Lineage, SpeciesId};
 use crate::morphogen::{
     express_program, grow, morphogen_gene_set_with_prefix, MorphogenProgram, Structure,
 };
+use civsim_bio::anatomy::{sample_body_plan, BodyPlan, BodyPlanRegistry, WorldProfile};
+use civsim_bio::genome::{append_morphogen_block, GeneDef, GenePool, MorphogenParamId, SchemeId};
+use civsim_bio::lineage::{Lineage, SpeciesId};
 
 /// The RNG counter base for a grown species' per-parameter morphogen target seeds (Arc 6), placed clear of
 /// the niche (0..2*env_axes), draws_on (100), and body-plan (200) counter blocks in [`sample_candidate`].

@@ -44,7 +44,7 @@ use civsim_core::Fixed;
 use civsim_world::flood::priority_flood;
 use civsim_world::solve::{fixed_cap_solve, SolveOutcome};
 
-use crate::calibration::CalibrationError;
+use civsim_bio::calibration::CalibrationError;
 
 /// The largest stable per-step diffusion number for the four-connected explicit scheme. The explicit update
 /// keeps a cell's self-coefficient `1 - factor * n` non-negative only for `factor <= 1 / n`; the four-connected

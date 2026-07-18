@@ -18,7 +18,7 @@
 //! and determinism level, with tuned behaviour held until the owner sets the
 //! reserved numbers:
 //!
-//! - [`calibration`]: the calibration manifest loader. Every reserved value loads
+//! - [`civsim_bio::calibration`]: the calibration manifest loader. Every reserved value loads
 //!   as a fail-loud sentinel, so a system that reads an unset required value errors
 //!   rather than running on a fabricated default. This is the operational form of
 //!   the prime directive that the project never fabricates a value (runbook
@@ -33,12 +33,12 @@
 //! - [`substrate`]: data-driven substrate definitions with round-trip loading, the
 //!   schema-and-loader plumbing the runbook says is buildable now while the content
 //!   stays data.
-//! - [`tom`]: recursive theory of mind (design Part 37, the resolved R-TOM-UPDATE
+//! - [`civsim_bio::tom`]: recursive theory of mind (design Part 37, the resolved R-TOM-UPDATE
 //!   work). The evidence engine run recursively on whether a target believes a thing,
 //!   with a typed anti-projection guarantee (a nested frame admits only access evidence
 //!   about its target) and a data-driven access-channel registry, so a false belief
 //!   and a seen-through lie come from one mechanism without a closed enum of evidence.
-//! - [`agent`]: a minimal [`agent::Mind`] composing belief and theory of mind into the
+//! - [`civsim_bio::agent`]: a minimal [`civsim_bio::agent::Mind`] composing belief and theory of mind into the
 //!   epistemic core of an agent: it perceives, forms and revises beliefs, models other
 //!   minds, is deceived, and sees lies through, all deterministically. It does not yet
 //!   decide or act (design Part 8); that half is gated on the systems and reserved
@@ -58,16 +58,12 @@
 pub mod absence;
 pub mod affect;
 pub mod affordance_percept;
-pub mod agent;
-pub mod anatomy;
 pub mod astro;
 pub mod axiom;
 pub mod base_rates;
-pub mod belief;
 pub mod biosphere;
 pub mod body;
 pub mod breeding;
-pub mod calibration;
 pub mod census;
 pub mod clock;
 pub mod conservation;
@@ -77,7 +73,6 @@ pub mod controller;
 pub mod conviction_experience;
 pub mod conviction_percept;
 pub mod dawn_harness;
-pub mod decision;
 pub mod decompose;
 pub mod deeptime;
 pub mod demography;
@@ -87,11 +82,9 @@ pub mod discovery;
 pub mod edibility;
 pub mod environ;
 pub mod epoch;
-pub mod evidence;
 pub mod evolve;
 pub mod forward_model;
 pub mod genesis;
-pub mod genome;
 pub mod geodynamics;
 pub mod geodynamics_surface;
 pub mod giants;
@@ -102,11 +95,9 @@ pub mod langdist;
 pub mod langmod;
 pub mod language;
 pub mod learn;
-pub mod lineage;
 pub mod located;
 pub mod locomotion;
 pub mod lod;
-pub mod mate_choice;
 pub mod material;
 pub mod material_percept;
 pub mod medium;
@@ -140,7 +131,6 @@ pub mod substrate;
 pub mod surface_drivers;
 pub mod surface_transport;
 pub mod tectonic_regime;
-pub mod tom;
 pub mod trace;
 pub mod transmission;
 pub mod typology;
@@ -153,7 +143,6 @@ pub use absence::{
     LIFESPAN_HAZARD_THRESHOLD,
 };
 pub use affect::{AffectAxisId, AffectState, AppraisalBinding, DriveAppraisal};
-pub use agent::{AccessObs, Mind, RetentionLaw, SharedBelief};
 pub use axiom::{
     bounded_confidence_mean, confidence_weighted_mean, confidence_weighted_variance, enculturate,
     enculturation_pull_rate, entrenchment_threshold, inherit_seed, Appraisal, Axiom, AxiomAxisDef,
@@ -161,9 +150,6 @@ pub use axiom::{
     EvidenceRing, EvidenceTag, IntrinsicBeliefs, RingCapacityLaw, SourceModeDef, SourceModeId,
 };
 pub use base_rates::{RaceBaseRateRegistry, RaceBaseRates};
-pub use belief::{
-    instantiate_strength, BeliefKey, BeliefParams, BeliefPool, FacetStrength, PrevailingBelief,
-};
 pub use body::{
     apply_insult, strike, Body, BodyParams, BodyPart, DamageModeDef, DamageModeId,
     DamageModeRegistry, FluidDef, FluidKindId, FluidPool, FluidRegistry, FunctionId, Insult,
@@ -174,19 +160,35 @@ pub use breeding::{
     fisher_select_step, sex_ratio_selection_coeff, AssignmentRule, BreedingSystem,
     BreedingSystemId, BreedingSystemRegistry, CompatibilityRule, SexClass,
 };
-pub use calibration::{CalibrationError, CalibrationManifest, Profile, ReservedValue};
 pub use census::{
     effective_size_classes, effective_size_sex, effective_size_var, ReproductiveCensus,
     ReproductiveMoments,
+};
+pub use civsim_bio::agent::{AccessObs, Mind, RetentionLaw, SharedBelief};
+pub use civsim_bio::belief::{
+    instantiate_strength, BeliefKey, BeliefParams, BeliefPool, FacetStrength, PrevailingBelief,
+};
+pub use civsim_bio::calibration::{CalibrationError, CalibrationManifest, Profile, ReservedValue};
+pub use civsim_bio::decision::{
+    ActionDef, ActionId, Behaviour, Consideration, Curve, DriveDef, DriveId, InputId,
+};
+pub use civsim_bio::evidence::{
+    aggregate_diffusion_rate, derive_aggregate_diffusion_rate, good_weight, AttrKindId,
+    EvidenceRef, InferenceFrame, InferenceParams,
+};
+pub use civsim_bio::genome::{
+    append_controller_block, append_morphogen_block, append_scalar_channel, Allele, AlleleState,
+    BuildChannel, Channel, CognitionChannel, CompositionAxisId, ControllerParamId, DominanceKind,
+    DominanceMode, GeneDef, GeneEffect, GeneId, GenePool, GeneSet, GeneticScheme, Genome,
+    Haplotype, HybridOutcome, ImbuedChannel, Incompatibility, IncompatibilityKind,
+    IncompatibilityTable, LifeHistoryChannel, LinkageGroup, MorphogenParamId, ReproductionMode,
+    SchemeId, ToleranceAxisId, TraitId,
 };
 pub use clock::{PlaybackDriver, SimClock, Steppable, LIFE_CADENCE_TICKS, YEARS_PER_GENERATION};
 pub use conservation::{ConservationError, ConservationRegistry};
 pub use controller::{
     forage_taxis_weights, taxis_move_weights, weight_count, Controller, ControllerDecision,
     ControllerLayout, ForageGains,
-};
-pub use decision::{
-    ActionDef, ActionId, Behaviour, Consideration, Curve, DriveDef, DriveId, InputId,
 };
 pub use decompose::{
     CombineMode, DecomposerDriver, DecomposerDriverRegistry, DecomposerKernelId,
@@ -198,22 +200,10 @@ pub use dialogue::{
     ForceEffectDef, ForceEffectId, ForceFloor, ForceKind, Move, MoveKindDef, MoveKindId,
     MoveRegistry, ResolvedBand, MOVE_EVENT_KIND,
 };
-pub use evidence::{
-    aggregate_diffusion_rate, derive_aggregate_diffusion_rate, good_weight, AttrKindId,
-    EvidenceRef, InferenceFrame, InferenceParams,
-};
 pub use evolve::{
     controller_gene_set, episode_survival, evolve, evolve_forage_controller, full_episode_survival,
     homeostatic_coefficient, reserve_conflict_survival, selection_gradient, EvolveParams,
     EvolveReport,
-};
-pub use genome::{
-    append_controller_block, append_morphogen_block, append_scalar_channel, Allele, AlleleState,
-    BuildChannel, Channel, CognitionChannel, CompositionAxisId, ControllerParamId, DominanceKind,
-    DominanceMode, GeneDef, GeneEffect, GeneId, GenePool, GeneSet, GeneticScheme, Genome,
-    Haplotype, HybridOutcome, ImbuedChannel, Incompatibility, IncompatibilityKind,
-    IncompatibilityTable, LifeHistoryChannel, LinkageGroup, MorphogenParamId, ReproductionMode,
-    SchemeId, ToleranceAxisId, TraitId,
 };
 pub use homeostasis::{
     AffordanceDef, AffordanceId, AffordanceParam, AffordanceRegistry, Homeostasis,
@@ -225,6 +215,11 @@ pub use morphogen::{
 // The function-law dispatch types the affordance and body APIs read, re-exported so an external caller
 // can name the capability context an [`AffordanceRegistry::afforded`] or a [`body::BodyParams`] needs
 // (emergent-anatomy step one; the mechanism lives in `civsim_compose`).
+pub use civsim_bio::mate_choice::{choose, genetic_distance, realised_fitness, MatePreference};
+pub use civsim_bio::tom::{
+    detects_deception, AccessChannelDef, AccessChannelId, AccessChannelRegistry, AccessWeights,
+    EvidenceOrder, NestedFrame, ProjectionRejected,
+};
 pub use civsim_compose::{
     derive_capabilities, CapabilityCaps, CapabilityKernel, CapabilityRefs, CapabilityVector,
     FunctionLawDef, FunctionLawId, FunctionLawRegistry,
@@ -255,7 +250,6 @@ pub use language::{
 };
 pub use locomotion::{LocomotionParams, ResourceField, Terrain, Walker};
 pub use lod::{Individual, Pool, TwoTierWorld};
-pub use mate_choice::{choose, genetic_distance, realised_fitness, MatePreference};
 pub use personality::{
     age_personality, plasticity_at, PersonalityProfile, PersonalityRegistry, TraitAxisId, TraitDef,
     TraitInstance,
@@ -269,10 +263,6 @@ pub use semantics::{
 };
 pub use sensorium::{SenseChannelId, Sensorium};
 pub use substrate::Substrate;
-pub use tom::{
-    detects_deception, AccessChannelDef, AccessChannelId, AccessChannelRegistry, AccessWeights,
-    EvidenceOrder, NestedFrame, ProjectionRejected,
-};
 pub use trace::{
     corroding_salience, mortality_implication_weight, organic_salience, TraceImplicationSpec,
     TraceKindDef, TraceKindId, TraceKindRegistry, TransformKernelId, TransformKind,

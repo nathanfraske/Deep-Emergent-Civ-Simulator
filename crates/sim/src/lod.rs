@@ -24,12 +24,12 @@
 //! The behaviour here (who promotes when, how wealth is apportioned) is not the
 //! point and is not calibrated; the point is that the structural invariants hold.
 
-use crate::belief::{BeliefKey, BeliefParams, BeliefPool, FacetStrength};
 use crate::breeding::SexClass;
 use crate::census::ReproductiveMoments;
-use crate::decision::Curve;
 use crate::demography::AgeHistogram;
 use crate::institution::{AggregateInstitution, Institution};
+use civsim_bio::belief::{BeliefKey, BeliefParams, BeliefPool, FacetStrength};
+use civsim_bio::decision::Curve;
 use civsim_core::{
     EntityHandle, EntityLocation, EventId, Fixed, InstId, PoolId, Registry, StableId, StateHasher,
 };

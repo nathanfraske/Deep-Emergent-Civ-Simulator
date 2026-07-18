@@ -47,13 +47,13 @@ use civsim_physics::PhysicsRegistry;
 use civsim_world::{Coord3, TileMap};
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::calibration::{CalibrationError, CalibrationManifest};
 use crate::edibility::Composition;
 use crate::locomotion::ResourceField;
 use crate::material::{EarthworkField, SoilNutrientField};
 use crate::physiology::{ENERGY_DENSITY, SALINITY, WATER_FRACTION};
 use crate::runner::Field;
 use crate::stocks::Stock;
+use civsim_bio::calibration::{CalibrationError, CalibrationManifest};
 
 /// A scalar field on the flat bounded map, Q32.32, row-major (`idx = y * width + x`), the shape the
 /// temperature [`Field`] and the GPU field kernel use. The membership of the environmental stack is
