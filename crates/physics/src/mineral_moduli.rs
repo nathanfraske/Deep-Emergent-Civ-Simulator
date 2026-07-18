@@ -55,6 +55,24 @@ impl fmt::Display for ModuliError {
 
 impl std::error::Error for ModuliError {}
 
+/// The canonical mineral key for a phase name, bridging the two phase-naming conventions the engine uses: the
+/// petrology kernel's plain registry names (`forsterite`, `enstatite`) and the JANAF condensation solver's
+/// decorated names (`Mg2SiO4(cr,forsterite)`, `MgSiO3(cr,enstatite)`, `MgAl2O4(cr,spinel)`). A decorated name
+/// carries its mineral inside a `(cr,NAME)` tag; this extracts NAME so a crust derived by the condensation solver
+/// and a mantle derived by the petrology kernel both resolve to the one measured moduli row for that mineral. A
+/// plain name (no `(cr,` tag), or a bare `(cr)` metal phase like `Fe(cr)`, passes through unchanged. This is a
+/// pure string normalization, not a rename of either convention: each keeps its own names, and the moduli floor
+/// is keyed once by the mineral identity they share.
+pub fn canonical_phase_key(name: &str) -> &str {
+    if let Some(start) = name.find("(cr,") {
+        let rest = &name[start + 4..];
+        if let Some(end) = rest.find(')') {
+            return rest[..end].trim();
+        }
+    }
+    name
+}
+
 /// One phase's measured elastic moduli in the intact single-crystal frame. The bulk and shear moduli are the
 /// isotropic aggregate (Voigt-Reuss-Hill of the single-crystal elastic tensor) in GPa; each band is the
 /// symmetric half-width of the measurement uncertainty. The pressure and temperature are the CHORD conditions
@@ -216,9 +234,12 @@ impl MineralModuli {
     }
 
     /// The measured moduli for a phase, or `None` if the phase has no measured row (an unmeasured member the
-    /// aggregator routes to a banded refusal, never a silent drop).
+    /// aggregator routes to a banded refusal, never a silent drop). The lookup is by CANONICAL KEY
+    /// ([`canonical_phase_key`]), so both phase-naming conventions the engine uses resolve to the same row: the
+    /// petrology kernel's plain name (`forsterite`) and the JANAF condensation solver's decorated name
+    /// (`Mg2SiO4(cr,forsterite)`, `MgSiO3(cr,enstatite)`).
     pub fn row(&self, name: &str) -> Option<&MineralModulusRow> {
-        self.rows.get(name)
+        self.rows.get(canonical_phase_key(name))
     }
 
     /// The number of rows loaded.
@@ -318,6 +339,34 @@ source = "test fixture"
             (fo.bulk_gpa - Fixed::from_ratio(1288, 10)).abs() < Fixed::from_ratio(1, 100),
             "forsterite K_S is the cited 128.8 GPa, got {}",
             fo.bulk_gpa.to_f64_lossy()
+        );
+    }
+
+    #[test]
+    fn the_canonical_key_bridges_the_janaf_and_registry_names() {
+        // The JANAF condensation solver decorates its phase names; the petrology kernel uses plain ones. Both
+        // resolve to the same measured row through the canonical key.
+        assert_eq!(canonical_phase_key("MgSiO3(cr,enstatite)"), "enstatite");
+        assert_eq!(canonical_phase_key("Mg2SiO4(cr,forsterite)"), "forsterite");
+        assert_eq!(canonical_phase_key("MgAl2O4(cr,spinel)"), "spinel");
+        assert_eq!(canonical_phase_key("forsterite"), "forsterite"); // a plain name passes through
+        assert_eq!(canonical_phase_key("Fe(cr)"), "Fe(cr)"); // a bare metal phase passes through
+                                                             // A lookup by the decorated crust name lands on the registry-keyed row.
+        let toml = r#"
+[[mineral]]
+name = "spinel"
+bulk_modulus_gpa = "197.9"
+shear_modulus_gpa = "108.5"
+source = "test fixture, not a citation load"
+"#;
+        let table = MineralModuli::from_toml_str(toml).expect("the fixture loads");
+        assert!(
+            table.row("MgAl2O4(cr,spinel)").is_some(),
+            "the JANAF crust name resolves to the spinel row"
+        );
+        assert!(
+            table.row("spinel").is_some(),
+            "and the plain name resolves too"
         );
     }
 }

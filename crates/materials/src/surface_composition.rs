@@ -572,6 +572,37 @@ mod tests {
     }
 
     #[test]
+    fn the_mirror_primary_crust_is_hematite_free_the_terran_bias_lens_holding() {
+        // THE TERRAN-BIAS CATCHER as a standing test (owner ruling). Fe3+ oxide in a crust is a REDOX OUTCOME, not
+        // a given: a freshly differentiated crust from a reduced solar feedstock carries its iron as Fe2+ (the
+        // metal sinks to the core, the rest as FeS troilite and Fe2+ in silicates), NOT as Fe3+ oxide. Earth's
+        // abundant surface hematite is substantially an oxygenation-era biography item, so a newborn crust that
+        // came back with hematite would be surface-Terran bias wearing mineralogical clothes, not physics. The
+        // census decides per draw from the disposer's own oxygen fugacity; for the reduced solar Mirror it
+        // precipitates a single reduced Mg-silicate crust former (enstatite) and no ferric oxide.
+        let janaf = JanafTables::standard().unwrap();
+        let abundances = SolarAbundances::standard().unwrap();
+        let sc = derive_surface_composition(
+            &janaf,
+            &abundances,
+            Fixed::from_int(1000),
+            &normal_reserved(),
+        )
+        .unwrap();
+        for (phase, _) in &sc.crust {
+            assert!(
+                !phase.to_lowercase().contains("hematite") && !phase.contains("Fe2O3"),
+                "the Mirror primary crust must be hematite-free (the Terran-bias lens); got crust phase {phase}"
+            );
+        }
+        assert!(
+            sc.crust.iter().any(|(p, _)| p.contains("enstatite")),
+            "the Mirror crust former is the reduced Mg-silicate enstatite (MgSiO3), got {:?}",
+            sc.crust
+        );
+    }
+
+    #[test]
     fn the_inner_disk_derives_a_silicate_crust_over_an_iron_core() {
         // At a hot inner-disk temperature the solar gas condenses the Mg-silicates and iron metal; differentiation
         // floats the oxygen-bearing silicates as the crust and sinks the iron. The derived surface carries Mg, Si,
