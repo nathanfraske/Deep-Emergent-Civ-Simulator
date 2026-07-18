@@ -238,6 +238,25 @@ impl ConvectionScaling {
 mod tests {
     use super::*;
 
+    #[test]
+    fn the_fixture_eigenvalue_literal_is_pinned_to_the_cited_row() {
+        // ONE UNCOMPARED INSTANCE (owner ruling 2026-07-18): the geodynamics test fixtures spell the rigid-rigid
+        // critical Rayleigh as Fixed::from_ratio(1_707_762, 1000). It is pinned here to the cited convection_scaling
+        // row so the fixture literal is a COMPARED copy, never a second uncompared instance of the eigenvalue; the
+        // sibling sentinel in deeptime pins the RIGID_RIGID_RA_CRIT const the same way, leaving the cited row alone.
+        let cited = ConvectionScaling::standard()
+            .expect("convection_scaling.toml is vendored")
+            .critical_rayleigh(BoundaryCondition::RigidRigid)
+            .expect("the rigid-rigid row is present");
+        let fixture = Fixed::from_ratio(1_707_762, 1000);
+        assert!(
+            (fixture - cited).abs() < Fixed::from_ratio(1, 100),
+            "the fixture eigenvalue {} must equal the cited rigid-rigid row {}",
+            fixture.to_f64_lossy(),
+            cited.to_f64_lossy()
+        );
+    }
+
     fn scaling() -> ConvectionScaling {
         ConvectionScaling::standard().expect("the vendored column loads")
     }

@@ -900,7 +900,13 @@ pub fn provinces_across(span_m: Fixed, mantle_depth_m: Fixed, cell_aspect: Fixed
 /// II). A future marginal-stability solver would derive {Ra_crit, a_c, regime} jointly from the mantle's actual
 /// mechanical boundaries; here the two are the cited rigid-rigid pair, kept together so the onset and the cell
 /// scale can never drift into different regimes.
-pub const RIGID_RIGID_RA_CRIT: Fixed = Fixed::from_int(1708);
+///
+/// PINNED, exactly one uncompared instance (owner ruling 2026-07-18). The cited value lives once, in the
+/// `convection_scaling.toml` rigid-rigid row; this const carries the exact 1707.762 and the sentinel test
+/// `the_rigid_rigid_eigenvalue_is_the_one_cited_row` asserts it equals that row. Corrected from a rounded
+/// `from_int(1708)`, a fourth-digit diamond that sat in the path of every convection-onset verdict and agreed
+/// with no test because each compared against itself; it moves the deep-time onset by 0.014 percent.
+pub const RIGID_RIGID_RA_CRIT: Fixed = Fixed::from_int(1_707_762).div(Fixed::from_int(1000));
 
 /// The rigid-rigid Rayleigh-Benard marginal-stability CRITICAL WAVENUMBER a_c (inverse layer depths), the pair
 /// mate of [`RIGID_RIGID_RA_CRIT`]. The horizontal mode that goes unstable first has a_c ~ 3.117 for rigid
@@ -968,6 +974,24 @@ pub fn province_column_params(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_rigid_rigid_eigenvalue_is_the_one_cited_row() {
+        // ONE UNCOMPARED INSTANCE (owner ruling 2026-07-18): the rigid-rigid critical Rayleigh lives once, in the
+        // cited convection_scaling.toml row that convection onset and the boundary layer both read through
+        // ColumnParams::ra_crit. This const carries the same value and is pinned to that row here, so a rounding
+        // diamond like the retired from_int(1708) cannot slip back in agreeing only with itself.
+        let cited = civsim_physics::convection_scaling::ConvectionScaling::standard()
+            .expect("convection_scaling.toml is vendored")
+            .critical_rayleigh(civsim_physics::convection_scaling::BoundaryCondition::RigidRigid)
+            .expect("the rigid-rigid row is present");
+        assert!(
+            (RIGID_RIGID_RA_CRIT - cited).abs() < Fixed::from_ratio(1, 100),
+            "RIGID_RIGID_RA_CRIT {} must equal the cited convection_scaling rigid-rigid row {}",
+            RIGID_RIGID_RA_CRIT.to_f64_lossy(),
+            cited.to_f64_lossy()
+        );
+    }
 
     // A representable-scaled mantle column parameter set, mirroring the convection tests: the values are the
     // engine-scaled illustrative mantle (depth and viscosity are the representable-scaled forms the convection
