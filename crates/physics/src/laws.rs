@@ -3649,10 +3649,26 @@ pub fn heat_advection(
 /// bound), and falling back to the full depth when `Ra` is non-positive (no convection, so no boundary layer
 /// forms and the whole layer is the conductive one). Deterministic fixed-point.
 /// @provides thermal_boundary_layer
-pub fn thermal_boundary_layer(depth: Fixed, rayleigh: Fixed) -> Fixed {
-    let ra_cube_root = rayleigh.powf(Fixed::from_ratio(1, 3));
-    if ra_cube_root > ZERO {
-        depth.checked_div(ra_cube_root).unwrap_or(depth).min(depth)
+pub fn thermal_boundary_layer(depth: Fixed, rayleigh: Fixed, rayleigh_critical: Fixed) -> Fixed {
+    // delta = d * (Ra_crit / Ra)^(1/3): the boundary layer recovers the FULL layer depth at the ONSET of
+    // convection (Ra = Ra_crit, so the whole layer is the conductive one) and thins as Ra^(-1/3) above onset.
+    // Ra_crit is the BC-conditioned critical Rayleigh (the world's, read from ConvectionScaling), so the ONE
+    // shared lid the convective heat loss and the mechanical lid both read starts at the full layer at onset,
+    // rather than the unnormalized d*Ra^(-1/3) that put the lid a factor of Ra_crit^(1/3) (about ten) too thin.
+    // Clamped at the layer depth (a boundary layer cannot exceed the layer it forms in); the full depth when Ra
+    // or Ra_crit is non-positive (no convection, so the whole layer conducts), and when Ra falls so far below
+    // Ra_crit that the ratio overflows (the same sub-onset case: the whole layer is the conductive one).
+    if rayleigh > ZERO && rayleigh_critical > ZERO {
+        match rayleigh_critical.checked_div(rayleigh) {
+            Some(ratio) => {
+                let ratio_cube_root = ratio.powf(Fixed::from_ratio(1, 3));
+                depth
+                    .checked_mul(ratio_cube_root)
+                    .unwrap_or(depth)
+                    .min(depth)
+            }
+            None => depth,
+        }
     } else {
         depth
     }

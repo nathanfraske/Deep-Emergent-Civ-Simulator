@@ -231,7 +231,7 @@ pub fn column_readout(state: &ColumnState, p: &ColumnParams) -> ColumnReadout {
     // `laws::thermal_boundary_layer` when the LID GEOTHERM became its second consumer: the driving stress and
     // the geotherm must agree about how thick the lid is, so they read ONE law rather than two copies of the
     // same expression. Byte-identical across the move (the same operations in the same order).
-    let length_scale = laws::thermal_boundary_layer(p.depth, rayleigh);
+    let length_scale = laws::thermal_boundary_layer(p.depth, rayleigh, p.ra_crit);
     let convective_stress =
         laws::convective_stress(p.viscosity, velocity, length_scale, p.stress_max);
     let next = convection_step(state, p);
