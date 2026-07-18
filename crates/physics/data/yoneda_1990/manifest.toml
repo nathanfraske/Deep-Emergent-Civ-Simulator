@@ -1,0 +1,39 @@
+# Yoneda 1990 "Pressure derivatives of elastic constants of single crystal MgO and MgAl2O4"
+# source manifest (the vendored-primary idiom: file / receipt / anchors). Single-crystal
+# elasticity primary for SPINEL (MgAl2O4) in crates/physics/data/mineral_moduli.toml (and an
+# independent second channel for periclase/MgO). Open PDF from J-STAGE (Journal of Physics of
+# the Earth), vendored into the public tree. SHA256 is the primary receipt. Ambient room
+# temperature, atmospheric pressure (zero-pressure fit of ultrasonic velocities).
+
+[[source]]
+file = "yoneda_1990_jpe_MgO_MgAl2O4.pdf"
+sha256 = "5917f2fd5d545c4385083c8efb3c6ef47492d9020760b0264b9d630e8a6cc54f"
+citation = "Yoneda, A., 1990, Pressure derivatives of elastic constants of single crystal MgO and MgAl2O4, J. Phys. Earth 38(1), 19-55, DOI 10.4294/jpe1952.38.19"
+recipe = "GET https://www.jstage.jst.go.jp/article/jpe1952/38/1/38_1_19/_pdf (J-STAGE, open)"
+pages = 37
+
+# Values read into mineral_moduli.toml. Aggregate via Voigt-Reuss-Hill (Hill 1952); Table 12
+# states 'the lower bound and the upper one correspond to the Reuss and the Voigt averages'.
+[[value]]
+name = "spinel_bulk_modulus_KS_gpa"
+value = "197.9"
+anchor = "Table 10 'Results for MgAl2O4', Present work C_0: K_S = 197.9(2) GPa (for cubic this is the exact aggregate bulk (C11+2C12)/3); C11=282.9 C12=155.4 C44=154.8 C_S=63.8"
+channel = "T"
+
+[[value]]
+name = "spinel_shear_modulus_G_gpa"
+value = "108.5"
+anchor = "Table 12 'Elastic constants ... of MgAl2O4', isotropic-aggregate shear mu: Reuss 98.5 / Voigt 118.4 GPa -> Hill 108.5; band = V-R half-gap 9.9 (spinel shear anisotropy)"
+channel = "T"
+
+[[value]]
+name = "spinel_dual_channel_KS_gpa"
+value = "Chang & Barsch 1973: K_S=197.4, C_S=63.8, C44=154.7, C11=282.5, C12=154.9 GPa"
+anchor = "Table 10, Chang and Barsch row (independent-study agreement)"
+channel = "T"
+
+[[value]]
+name = "periclase_second_channel_context"
+value = "MgO present work dK_S/dP=4.13, dC_S/dP=3.48, dC44/dP=1.31 (Table 6); MgO ambient K_S0 in Fan 2019 Table 2 cites Yoneda 1990 as 164(1)/129.86(6)"
+anchor = "Table 6 'Summary of the elasticity ... in alkali earth oxides' (MgO column) plus Fan 2019 cross-listing"
+channel = "T"

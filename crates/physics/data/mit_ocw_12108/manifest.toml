@@ -1,0 +1,37 @@
+# MIT OpenCourseWare 12.108 (Structure of Earth Materials, Fall 2004), single-crystal elasticity
+# lecture, source manifest (the vendored-secondary idiom: file / receipt / anchors). This is a
+# SECONDARY teaching compilation, held as the ONLY available witness for the single-crystal
+# tensor of HEMATITE (Fe2O3) in crates/physics/data/mineral_moduli.toml, and as a cross-check for
+# the corundum and quartz tensors. It is NOT a primary measurement: its mineral table reproduces
+# Simmons & Wang (1971) "Single crystal elastic constants and calculated aggregate properties"
+# and Bass (1995), cited on the table's own "Sources:" line. It reports Cij only, not the VRH
+# aggregate K_S,G, so hematite's aggregate is left UNSOURCED in mineral_moduli.toml (no primary
+# reporting hematite's aggregate could be held; see that file's HEMATITE CAVEAT). Open, vendored
+# into the public tree. SHA256 is the receipt.
+
+[[source]]
+file = "lec20_single_crystal_elasticity.pdf"
+sha256 = "09d0e62410c9042747e7f6c3fa4eed573e162b4d0bc579286cbbf8d301671cd1"
+citation = "MIT OpenCourseWare, 12.108 Structure of Earth Materials, Fall 2004, Lecture 'Single-crystal elasticity'; mineral table sources cited therein: Simmons, G. and Wang, H. (1971) Single Crystal Elastic Constants and Calculated Aggregate Properties, MIT Press; Bass, J.D. (1995) Elasticity of Minerals, Glasses, and Melts, AGU RS2 pp.45-63"
+recipe = "GET https://ocw.mit.edu/courses/12-108-structure-of-earth-materials-fall-2004/1f8c6f71911526f241cfc9485376d011_lec20.pdf (open)"
+pages = 14
+
+# Values read as CONTEXT (secondary). Channel: T=text/table. These are single-crystal Cij, NOT
+# the VRH aggregate the mineral_moduli.toml target requires.
+[[value]]
+name = "hematite_single_crystal_Cij_gpa"
+value = "C11=242 C33=227 C44=85.7 C12=54.6 C13=15.4 C14=-12.5 (rho ~5.27 g/cm3)"
+anchor = "mineral elastic-constants table, Hematite (Fe2O3) row; sources Simmons & Wang 1971 / Bass 1995 (SECONDARY; no aggregate K_S,G given)"
+channel = "T"
+
+[[value]]
+name = "hematite_accepted_aggregate_UNHELD_gpa"
+value = "K_S~=206.6, G~=91.0 (Liebermann & Schreiber 1968, JGR 73:6585) - NOT held, paywalled; recorded here only to document the target the owner must vendor into the restricted store"
+anchor = "NOT in this document; external reference recorded for provenance completeness"
+channel = "none"
+
+[[value]]
+name = "corundum_quartz_Cij_crosscheck_gpa"
+value = "Corundum C11=497 C33=501 C44=147 C12=162 C13=116 C14=-22 (cross-checks Wachtman 1960); alpha-quartz C11=86.5 C33=107 C44=58 C12=7 C13=12 C14=-18 (cross-checks Heyliger 2003)"
+anchor = "mineral elastic-constants table, Corundum and alpha-quartz rows (independent cross-check only)"
+channel = "T"

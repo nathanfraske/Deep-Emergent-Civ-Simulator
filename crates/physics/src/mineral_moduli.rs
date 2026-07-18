@@ -126,6 +126,21 @@ impl MineralModuli {
             if def.source.trim().is_empty() {
                 return Err(ModuliError::MissingSource(format!("mineral {}", def.name)));
             }
+            // An explicitly UNSOURCED row is a DECLARED-but-unmeasured phase: a fetch could not hold a primary for
+            // its aggregate moduli (its `source` field carries the reason and the owner action). Skip it, so it has
+            // no table row, and the aggregator refuses any assemblage containing it (the banded-refusal path)
+            // rather than erroring the whole load or fabricating a number. The row stays in the data file, visible.
+            if def
+                .bulk_modulus_gpa
+                .trim()
+                .eq_ignore_ascii_case("UNSOURCED")
+                || def
+                    .shear_modulus_gpa
+                    .trim()
+                    .eq_ignore_ascii_case("UNSOURCED")
+            {
+                continue;
+            }
             let parse = |field: &str, raw: &str| -> Result<Fixed, ModuliError> {
                 Fixed::from_decimal_str(raw.trim())
                     .map_err(|d| ModuliError::BadValue(format!("{field} of {}: {d}", def.name)))
@@ -190,6 +205,14 @@ impl MineralModuli {
             }
         }
         Ok(MineralModuli { rows })
+    }
+
+    /// The embedded standard mineral-moduli table (`data/mineral_moduli.toml`), the cited single-crystal `K`, `G`
+    /// of the seed rock-forming phases (quartz, corundum, periclase, forsterite, fayalite, spinel; hematite is an
+    /// UNSOURCED row, absent from the table, so the aggregator refuses a hematite-bearing assemblage until it is
+    /// measured). Each row is real-with-source, its primary vendored under `data/` with a SHA256 receipt.
+    pub fn standard() -> Result<Self, ModuliError> {
+        Self::from_toml_str(include_str!("../data/mineral_moduli.toml"))
     }
 
     /// The measured moduli for a phase, or `None` if the phase has no measured row (an unmeasured member the
@@ -262,5 +285,39 @@ source = "test fixture"
             MineralModuli::from_toml_str(bad),
             Err(ModuliError::NonPhysical(_))
         ));
+    }
+
+    #[test]
+    fn the_standard_table_loads_the_sourced_phases_and_skips_unsourced_hematite() {
+        let table = MineralModuli::standard().expect("the embedded mineral-moduli table loads");
+        // The six sourced seed phases are present, each with cited positive moduli.
+        for name in [
+            "quartz",
+            "corundum",
+            "periclase",
+            "forsterite",
+            "fayalite",
+            "spinel",
+        ] {
+            let row = table
+                .row(name)
+                .unwrap_or_else(|| panic!("{name} is present in the standard table"));
+            assert!(row.bulk_gpa > Fixed::ZERO && row.shear_gpa > Fixed::ZERO);
+            assert!(!row.source.is_empty(), "{name} carries a citation");
+        }
+        // Hematite is an UNSOURCED row (a fetch could not hold a primary for its aggregate), so it is skipped, not
+        // loaded: the aggregator then refuses any assemblage containing it, the banded-refusal path.
+        assert!(
+            table.row("hematite").is_none(),
+            "the UNSOURCED hematite row is skipped, not loaded"
+        );
+        assert_eq!(table.len(), 6, "six sourced phases, hematite absent");
+        // Spot-check a cited value: forsterite K_S = 128.8 GPa (Zha et al. 1996).
+        let fo = table.row("forsterite").expect("forsterite present");
+        assert!(
+            (fo.bulk_gpa - Fixed::from_ratio(1288, 10)).abs() < Fixed::from_ratio(1, 100),
+            "forsterite K_S is the cited 128.8 GPa, got {}",
+            fo.bulk_gpa.to_f64_lossy()
+        );
     }
 }

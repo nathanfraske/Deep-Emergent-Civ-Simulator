@@ -1,0 +1,124 @@
+# Single-crystal isotropic-aggregate elastic moduli for the rock-forming mineral phases
+# (crate::petrology_data), the elastic sibling of phase_registry.toml. One entry per phase,
+# carrying the ambient adiabatic (isentropic) bulk modulus K_S and shear modulus G of the
+# INTACT single-crystal aggregate: the Voigt-Reuss-Hill average of the measured single-crystal
+# elastic tensor, crack-free and pore-free. A rock-moduli kernel aggregates these per-phase
+# moduli (by volume fraction, via VRH or Hashin-Shtrikman bounds) into the modulus of a
+# polycrystalline rock; the crack/porosity reduction is applied downstream, not here.
+#
+# FRAME: every value is the ambient reference state, ~298 K (room temperature) and 1 bar
+# (1 atmosphere), reported as the Voigt-Reuss-Hill isotropic aggregate of the single-crystal
+# tensor. Values are QUOTED strings; the engine parses fixed-point from strings, never floats.
+#
+# ONE-DATASET NOTE (why this file, unlike phase_registry.toml, does NOT pin a single source):
+# a free-energy minimization compares the RELATIVE energies of competing phases, so its phases
+# must share one internally consistent thermodynamic dataset. Elastic-moduli aggregation is
+# different: it reads each phase's ABSOLUTE K_S and G independently and never compares two
+# phases' energies, so there is no cross-phase consistency requirement. Each phase therefore
+# carries the best available single-crystal elasticity study on its own merits. Consistency is
+# instead enforced by the shared FRAME above (same reference state, same VRH-of-tensor
+# definition, same crack-free aggregate) applied to every row.
+#
+# SOURCES (each vendored: PDF held in the repo behind a per-source manifest.toml with its
+# SHA256 receipt, the anchor for every value read, and the P,T scope). Bass 1995 (AGU RS2),
+# the canonical VRH compilation, is paywalled and was NOT held, so per phase the best openly
+# holdable primary is cited instead, following the fetch fallback rule (cite what you hold):
+#   quartz      Heyliger, Ledbetter & Kim 1997? -> 2003, J. Acoust. Soc. Am. 114(2):644 (NIST-hosted)
+#   corundum    Wachtman, Tefft, Lam & Stinchfield 1960, J. Res. NBS 64A(3):213 (US public domain)
+#   periclase   Fan, Mao, Yang, Shi & Chen 2019, Am. Mineral. 104:262 (open)
+#   forsterite  Zha, Duffy, Downs, Mao & Hemley 1996, J. Geophys. Res. 101:17535 (open)
+#   fayalite    Speziale, Duffy & Angel 2004, J. Geophys. Res. 109:B12202 (open)
+#   spinel      Yoneda 1990, J. Phys. Earth 38:19 (J-STAGE open)
+#   hematite    UNSOURCED aggregate (see note below)
+#
+# HEMATITE CAVEAT: the single-crystal tensor of hematite is held only through a secondary
+# teaching compilation (crates/physics/data/mit_ocw_12108, which reproduces Simmons & Wang
+# 1971 and Bass 1995: C11=242, C33=227, C44=85.7, C12=54.6, C13=15.4, C14=-12.5 GPa). No
+# holdable PRIMARY reporting the VRH aggregate K_S,G was obtainable: the standard aggregate
+# (K_S~=206.6 GPa, G~=91.0 GPa, Liebermann & Schreiber 1968, J. Geophys. Res. 73:6585) is
+# behind the AGU paywall and Cloudflare and was not vendored. Per the no-fabrication rule, the
+# aggregate fields are left "UNSOURCED" rather than transcribing an unheld number or computing
+# a VRH from the secondary tensor. Owner action: either fetch Liebermann & Schreiber 1968 into
+# the restricted store, or approve deriving VRH from the held (secondary) tensor.
+#
+# BANDS: bulk_band_gpa / shear_band_gpa are the symmetric half-width uncertainty. Where the
+# source reports a 1-sigma, that sigma is used; where the source reports Voigt and Reuss bounds,
+# the band is the half-gap between them (this is why spinel's shear band is wide: its shear
+# anisotropy makes the Voigt-Reuss gap large even though the Hill value is well-constrained).
+
+[[mineral]]
+name = "quartz"
+bulk_modulus_gpa = "37.7"
+bulk_band_gpa = "0.2"
+shear_modulus_gpa = "44.6"
+shear_band_gpa = "2.7"
+temperature_k = "298"
+pressure_bar = "1"
+frame = "intact single-crystal VRH, crack-free"
+source = "Heyliger, Ledbetter & Kim 2003, J. Acoust. Soc. Am. 114(2):644, Table II (natural alpha-quartz, VRH row): B=37.67 GPa, G=46.91 GPa. K_S is tight across the three specimens (37.67/37.74/37.69). G is method-sensitive: the three VRH determinations span 44.55 (cultured-ordinary, matching the classic McSkimin/Bass aggregate ~44.3) to 47.23 (cultured-premium); the reported 44.6 is the consensus-matching end and the +2.7 band covers the natural/premium high end."
+
+[[mineral]]
+name = "corundum"
+bulk_modulus_gpa = "250.8"
+bulk_band_gpa = "3.0"
+shear_modulus_gpa = "163.3"
+shear_band_gpa = "2.7"
+temperature_k = "298"
+pressure_bar = "1"
+frame = "intact single-crystal VRH, crack-free"
+source = "Wachtman, Tefft, Lam & Stinchfield 1960, J. Res. NBS 64A(3):213. G: Table 9 (present-data polycrystalline alumina from the single-crystal tensor), Reuss 1606 / Voigt 1660 kbar -> Hill 163.3 GPa, band = V-R half-gap 2.7. K_S: Table 10 adiabatic volume compressibility (present data, 25 C) 3.988e-13 cm2/dyne, K=1/beta=250.8 GPa; band 3.0 covers the modern accepted ~252.6. Cross-checked against the Simmons&Wang/Bass Cij (497/501/147/162/116/-22) in mit_ocw_12108."
+
+[[mineral]]
+name = "periclase"
+bulk_modulus_gpa = "162.8"
+bulk_band_gpa = "0.2"
+shear_modulus_gpa = "130.3"
+shear_band_gpa = "0.2"
+temperature_k = "298"
+pressure_bar = "1"
+frame = "intact single-crystal VRH, crack-free"
+source = "Fan et al. 2019, Am. Mineral. 104:262, Table 2 (This study, Brillouin, VRH): K_S0=162.8(2), G0=130.3(2). Dual-channel (same Table 2): Sinogeikin & Bass 2000 163(1)/130(1); Jackson & Niesler 1982 162.5/130.9; Zha et al. 2000 162.5(7)/130(2)."
+
+[[mineral]]
+name = "hematite"
+bulk_modulus_gpa = "UNSOURCED"
+bulk_band_gpa = "UNSOURCED"
+shear_modulus_gpa = "UNSOURCED"
+shear_band_gpa = "UNSOURCED"
+temperature_k = "298"
+pressure_bar = "1"
+frame = "intact single-crystal VRH, crack-free"
+source = "UNSOURCED aggregate. Held single-crystal tensor via mit_ocw_12108 (secondary compilation of Simmons & Wang 1971 / Bass 1995): C11=242, C33=227, C44=85.7, C12=54.6, C13=15.4, C14=-12.5 GPa. Accepted aggregate K_S~=206.6, G~=91.0 GPa (Liebermann & Schreiber 1968, JGR 73:6585) is paywalled and was NOT held. See header HEMATITE CAVEAT for owner action."
+
+[[mineral]]
+name = "forsterite"
+bulk_modulus_gpa = "128.8"
+bulk_band_gpa = "0.5"
+shear_modulus_gpa = "81.6"
+shear_band_gpa = "0.2"
+temperature_k = "298"
+pressure_bar = "1"
+frame = "intact single-crystal VRH, crack-free"
+source = "Zha, Duffy, Downs, Mao & Hemley 1996, J. Geophys. Res. 101:17535, abstract + Fig.7 zero-pressure fit + Table 3 (VRH aggregate, Watt & Peselnick 1980 procedure): K_S0=128.8(5), G0=81.6(2). Dual-channel (Fig.7 prior studies): Isaak et al. 1989, Kumazawa & Anderson 1969, Graham & Barsch 1969, Yoneda & Morioka 1992, all clustering K_S~128-129 / G~81-82."
+
+[[mineral]]
+name = "fayalite"
+bulk_modulus_gpa = "136.3"
+bulk_band_gpa = "0.2"
+shear_modulus_gpa = "51.2"
+shear_band_gpa = "0.2"
+temperature_k = "298"
+pressure_bar = "1"
+frame = "intact single-crystal VRH, crack-free"
+source = "Speziale, Duffy & Angel 2004, J. Geophys. Res. 109:B12202, abstract + Table 2 (Hill average of Voigt-Reuss bounds): K_S0=136.3(2), G0=51.2(2). Sample is (Fe0.94Mn0.06)2SiO4 (6% Mn, near-end-member, not pure Fe2SiO4). Dual-channel (Table 2 Cij): Sumino 1979 and Graham et al. 1988 agree within a few percent."
+
+[[mineral]]
+name = "spinel"
+bulk_modulus_gpa = "197.9"
+bulk_band_gpa = "0.2"
+shear_modulus_gpa = "108.5"
+shear_band_gpa = "9.9"
+temperature_k = "298"
+pressure_bar = "1"
+frame = "intact single-crystal VRH, crack-free"
+source = "Yoneda 1990, J. Phys. Earth 38:19. K_S: Table 10 present work 197.9(2) GPa (for cubic this is the exact aggregate bulk (C11+2C12)/3); dual-channel Chang & Barsch 1973 197.4. G: Table 12 isotropic-aggregate shear mu, Reuss 98.5 / Voigt 118.4 GPa -> Hill 108.5, band = V-R half-gap 9.9 (wide because spinel shear is anisotropic, A_Z~2.4; the Hill value itself matches the ~108-109 consensus)."

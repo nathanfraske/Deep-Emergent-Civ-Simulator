@@ -1,0 +1,34 @@
+# Wachtman, Tefft, Lam & Stinchfield 1960 "Elastic Constants of Synthetic Single Crystal
+# Corundum at Room Temperature" source manifest (the vendored-primary idiom: file / receipt /
+# anchors). Single-crystal elasticity primary for CORUNDUM (Al2O3) in
+# crates/physics/data/mineral_moduli.toml. Journal of Research of the NBS is a US Government
+# publication in the PUBLIC DOMAIN; vendored into the public tree from NIST nvlpubs (this is the
+# full scanned J. Res. NBS 64A No.3 issue; the corundum paper is pp.213-228, PDF pages 9-24).
+# SHA256 is the primary receipt. Room temperature, 1 atmosphere; resonance method (kilocycle).
+
+[[source]]
+file = "jresv64An3p213_corundum.pdf"
+sha256 = "5b13e6113abca4931547bbba6d9f629c4dc21e51c68ddda3e5a2116b687f61d2"
+citation = "Wachtman, J.B. Jr., Tefft, W.E., Lam, D.G. Jr., and Stinchfield, R.P., 1960, Elastic constants of synthetic single crystal corundum at room temperature, J. Res. Natl. Bur. Stand. 64A(3), 213-228"
+recipe = "GET https://nvlpubs.nist.gov/nistpubs/jres/64A/jresv64An3p213_A1b.pdf (NIST nvlpubs, public domain)"
+pages = 16
+
+# Values read into mineral_moduli.toml, each with its anchor. Channel: T=text, F=figure.
+# The aggregate moduli are the source's own single-crystal-to-polycrystal averages (crack-free).
+[[value]]
+name = "corundum_shear_modulus_G_gpa"
+value = "163.3"
+anchor = "Table 9 'Comparison of calculated and measured elastic moduli for polycrystalline alumina' (kilobars), Present-data row: Reuss theory 1606, Voigt theory 1660 -> Hill (VRH) 163.3 GPa; band = V-R half-gap 2.7 GPa"
+channel = "T"
+
+[[value]]
+name = "corundum_bulk_modulus_KS_gpa"
+value = "250.8"
+anchor = "Table 10 'compressibilities calculated from elastic compliances', Present-data 25 C, adiabatic volume compressibility 3.988e-13 cm2/dyne; K_S = 1/beta = 250.8 GPa (definitional reciprocal); band 3.0 covers modern accepted ~252.6"
+channel = "T"
+
+[[value]]
+name = "corundum_aggregate_youngs_modulus_context_gpa"
+value = "E: Reuss 397.3 / Voigt 408.4 GPa (Table 9, present data); measured Lang 401.2"
+anchor = "Table 9, Young's-modulus columns (context / internal cross-check for K_S and G above)"
+channel = "T"

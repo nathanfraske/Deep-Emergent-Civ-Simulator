@@ -727,4 +727,77 @@ source = "SYNTHETIC test fixture, round numbers, not a citation"
             "an unmeasured census phase is a banded refusal, never a silent drop"
         );
     }
+
+    // ----- The two gate sentinels (condition 6): the machinery on a cited modal composition, and the whole
+    // pipeline hindcast against handbook rock, both refereed OUTPUT-side (a handbook rock never an input). -----
+
+    #[test]
+    fn machinery_sentinel_a_cited_fo90_olivine_aggregates_to_the_handbook_value() {
+        // MACHINERY SENTINEL: a CITED STANDARD MODAL composition through the aggregator. A mantle Fo90 olivine is
+        // 90% forsterite + 10% fayalite by mole (San Carlos olivine, the mantle standard). Its aggregate K, G,
+        // derived from the cited single-crystal moduli (`data/mineral_moduli.toml`), must land at the handbook
+        // olivine value (K ~ 129, G ~ 78 GPa; e.g. Christensen 1996), the OUTPUT-side referee, and the isotropic
+        // closure must give the physical olivine Poisson ratio (~0.25). The handbook rock appears only as the
+        // assertion target, never as an input (the doctrine: a rock name on the input side is the defect).
+        let reg = registry();
+        let moduli = MineralModuli::standard().expect("the cited mineral moduli load");
+        let fo90 = Assemblage {
+            phases: vec![
+                ("forsterite".to_string(), Fixed::from_ratio(9, 10)),
+                ("fayalite".to_string(), Fixed::from_ratio(1, 10)),
+            ],
+            total_gibbs: Fixed::ZERO,
+            truncated: false,
+        };
+        let agg = assemblage_bulk_shear_moduli(&fo90, &moduli, &reg).expect("Fo90 aggregates");
+        let k = agg.bulk.value.to_f64_lossy();
+        let g = agg.shear.value.to_f64_lossy();
+        assert!(
+            (125.0..=133.0).contains(&k),
+            "Fo90 aggregate bulk hindcasts handbook olivine ~129 GPa, got {k}"
+        );
+        assert!(
+            (74.0..=82.0).contains(&g),
+            "Fo90 aggregate shear hindcasts handbook olivine ~78 GPa, got {g}"
+        );
+        let closure = assemblage_isotropic_closure(agg.bulk.value, agg.shear.value)
+            .expect("the derived olivine moduli close to E and nu");
+        let nu = closure.poisson.to_f64_lossy();
+        assert!(
+            (0.20..=0.30).contains(&nu),
+            "the derived olivine Poisson ratio is ~0.25, got {nu}"
+        );
+    }
+
+    #[test]
+    fn integration_sentinel_a_derived_fo90_crust_hindcasts_handbook_olivine() {
+        // INTEGRATION SENTINEL: the WHOLE pipeline. A Fo90 bulk composition (Mg1.8 Fe0.2 Si O4) is DERIVED to its
+        // stable assemblage by the petrology kernel (the modal proportions are found, not supplied), then
+        // aggregated through the cited mineral moduli. The derived rock modulus must hindcast the handbook olivine
+        // (K ~ 129, G ~ 78 GPa), OUTPUT-side. This exercises the composition -> assemblage -> moduli chain end to
+        // end, the derive-first path a Mirror province takes, and closes the doctrine loop: nothing cited entered
+        // on the input side except the mineral rows, and the handbook rock is only the referee.
+        let reg = registry();
+        let moduli = MineralModuli::standard().expect("the cited mineral moduli load");
+        let composition = [
+            ("Mg".to_string(), Fixed::from_ratio(18, 10)),
+            ("Fe".to_string(), Fixed::from_ratio(2, 10)),
+            ("Si".to_string(), Fixed::ONE),
+            ("O".to_string(), Fixed::from_int(4)),
+        ];
+        let asm = stable_assemblage(&composition, Fixed::from_int(300), Fixed::from_int(1), &reg)
+            .expect("the Fo90 composition reaches an assemblage");
+        let agg = assemblage_bulk_shear_moduli(&asm, &moduli, &reg)
+            .expect("the derived assemblage aggregates (its phases are all measured olivines)");
+        let k = agg.bulk.value.to_f64_lossy();
+        let g = agg.shear.value.to_f64_lossy();
+        assert!(
+            (120.0..=140.0).contains(&k),
+            "the DERIVED Fo90 crust bulk hindcasts handbook olivine ~129 GPa, got {k}"
+        );
+        assert!(
+            (70.0..=85.0).contains(&g),
+            "the DERIVED Fo90 crust shear hindcasts handbook olivine ~78 GPa, got {g}"
+        );
+    }
 }

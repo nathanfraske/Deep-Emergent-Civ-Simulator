@@ -1,0 +1,32 @@
+# Zha, Duffy, Downs, Mao & Hemley 1996 "Sound velocity and elasticity of single-crystal
+# forsterite to 16 GPa" source manifest (the vendored-primary idiom: file / receipt / anchors).
+# Single-crystal elasticity primary for FORSTERITE (Mg2SiO4, Mg-olivine end-member) in
+# crates/physics/data/mineral_moduli.toml. Open PDF (Duffy group, Princeton), vendored into the
+# public tree. SHA256 is the primary receipt. Ambient 298 K, 1 bar (zero-pressure fit of
+# Brillouin scattering to 16 GPa).
+
+[[source]]
+file = "zha_etal_jgr_1996.pdf"
+sha256 = "3f2a66fb1dca0204b41faf792ddd31d2e1e38e5e2e640e646d2bf757678043f4"
+citation = "Zha, C.-S., Duffy, T.S., Downs, R.T., Mao, H.-K., and Hemley, R.J., 1996, Sound velocity and elasticity of single-crystal forsterite to 16 GPa, J. Geophys. Res. 101(B8), 17535-17545, DOI 10.1029/96JB01266"
+recipe = "GET https://duffy.princeton.edu/sites/g/files/toruqf616/files/zha_etal_jgr_1996.pdf (open)"
+pages = 11
+
+# Values read into mineral_moduli.toml. Aggregate is VRH (Watt & Peselnick 1980 procedure).
+[[value]]
+name = "forsterite_bulk_modulus_KS_gpa"
+value = "128.8"
+anchor = "abstract 'Ks(GPa) = 128.8(5) + 4.2(2)P' and Fig.7 zero-pressure intercept K_S0 = 128.8(5), K_S'=4.2(2); Table 3 gives the aggregate at each pressure (3.1 GPa: 140.75(203))"
+channel = "TF"
+
+[[value]]
+name = "forsterite_shear_modulus_G_gpa"
+value = "81.6"
+anchor = "abstract 'G(GPa) = 81.6(2) + 1.42(3)P' and Fig.7 zero-pressure intercept G0 = 81.6(2), G'=1.42(3); text: aggregate shear within +/-2% of expected in Monte Carlo test"
+channel = "TF"
+
+[[value]]
+name = "forsterite_dual_channel_prior_studies"
+value = "Isaak et al. 1989 (ambient), Kumazawa & Anderson 1969, Graham & Barsch 1969, Yoneda & Morioka 1992: all cluster K_S~128-129 / G~81-82; text 'good agreement with Yoneda and Morioka [1992]'"
+anchor = "Fig.6 and Fig.7 (prior-study symbols) and Results text (independent-study agreement for the mantle anchor)"
+channel = "F"

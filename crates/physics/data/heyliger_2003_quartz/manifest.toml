@@ -1,0 +1,34 @@
+# Heyliger, Ledbetter & Kim 2003 "Elastic constants of natural quartz" source manifest
+# (the vendored-primary idiom: file / receipt / anchors). Single-crystal elasticity primary for
+# QUARTZ (alpha-SiO2) in crates/physics/data/mineral_moduli.toml. NIST-hosted (Ledbetter was
+# NIST), open, vendored into the public tree. SHA256 is the primary receipt
+# (VENDORING_CHECKLIST.md). The held bytes ARE the reconstruction; the checksum is the integrity
+# check. Room temperature, 1 atmosphere; resonant-ultrasound spectroscopy (RUS) on a quartz sphere.
+
+[[source]]
+file = "heyliger_quartz_jasa2003.pdf"
+sha256 = "eca2dffeb19ab4deb90be9e8f3056081bea6ed41914b15a06829dd5d597cdfcd"
+citation = "Heyliger, P., Ledbetter, H., and Kim, S., 2003, Elastic constants of natural quartz, J. Acoust. Soc. Am. 114(2), 644-650, DOI 10.1121/1.1593063"
+recipe = "GET https://tsapps.nist.gov/publication/get_pdf.cfm?pub_id=851249 (NIST tsapps, open)"
+pages = 7
+
+# Values read into mineral_moduli.toml, each with its anchor. Channel: T=text, F=figure, TF=both.
+# The aggregate is stated by the source as "Quasi-isotropic polycrystalline elastic constants
+# obtained by Voigt-Reuss-Hill averaging" (Table II sub-header).
+[[value]]
+name = "quartz_bulk_modulus_KS_gpa"
+value = "37.7"
+anchor = "Table II, 'B (GPa)' VRH row: Natural 37.67, Cultured-ordinary 37.74, Cultured-premium 37.69 (tight, ~37.7)"
+channel = "T"
+
+[[value]]
+name = "quartz_shear_modulus_G_gpa"
+value = "44.6"
+anchor = "Table II, 'G (GPa)' VRH row: Cultured-ordinary 44.55 (matches classic McSkimin/Bass ~44.3), Natural 46.91, Cultured-premium 47.23. Reported value is the consensus end; band 2.7 covers the high specimens"
+channel = "T"
+
+[[value]]
+name = "quartz_single_crystal_Cij_context_gpa"
+value = "C11=87.26 C33=105.8 C44=57.15 C66=40.35 C12=6.57 C13=11.95 C14=-17.18; rho=2.6466 g/cm3 (natural)"
+anchor = "Table II, Natural column (context for the VRH aggregate above)"
+channel = "T"

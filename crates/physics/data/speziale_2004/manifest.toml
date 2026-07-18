@@ -1,0 +1,32 @@
+# Speziale, Duffy & Angel 2004 "Single-crystal elasticity of fayalite to 12 GPa" source manifest
+# (the vendored-primary idiom: file / receipt / anchors). Single-crystal elasticity primary for
+# FAYALITE (Fe2SiO4, Fe-olivine end-member) in crates/physics/data/mineral_moduli.toml. Open PDF
+# (Duffy group, Princeton), vendored into the public tree. SHA256 is the primary receipt.
+# Ambient 298 K, 1 bar (zero-pressure fit of Brillouin scattering to 12.1 GPa).
+# SAMPLE CAVEAT: the crystal is (Fe0.94Mn0.06)2SiO4, a near-end-member with 6% Mn, not pure Fe2SiO4.
+
+[[source]]
+file = "speziale_jgr_04.pdf"
+sha256 = "729d9ecac7fa4563634ca3dc9e5b4ab7a494e2af79fdd3a4266ac0093e602b0c"
+citation = "Speziale, S., Duffy, T.S., and Angel, R.J., 2004, Single-crystal elasticity of fayalite to 12 GPa, J. Geophys. Res. 109, B12202, DOI 10.1029/2004JB003162"
+recipe = "GET https://duffy.princeton.edu/sites/g/files/toruqf616/files/speziale_jgr_04.pdf (open)"
+pages = 15
+
+# Values read into mineral_moduli.toml. Aggregate is the Hill average of Voigt-Reuss bounds.
+[[value]]
+name = "fayalite_bulk_modulus_KS_gpa"
+value = "136.3"
+anchor = "abstract 'KS0 = 136.3 (2) GPa'; text (sec.3): 'The Hill average [Hill, 1963] of the Voigt and Reuss bounds of the aggregate bulk and shear moduli were calculated'"
+channel = "T"
+
+[[value]]
+name = "fayalite_shear_modulus_G_gpa"
+value = "51.2"
+anchor = "abstract 'G0 = 51.2 (2) GPa' (Hill/VRH)"
+channel = "T"
+
+[[value]]
+name = "fayalite_single_crystal_Cij_and_dual_channel_gpa"
+value = "This study (Fe0.94Mn0.06)2SiO4: C11=270(2) C12=103(2) C13=97.2(8) C22=171.1(9) C23=93.5(7) C33=234.1(5) C44=33.4(2) C55=48.7(7) C66=59.6(10). Dual-channel: Graham et al. 1988 (ultrasonic) C11=265.85(38); Sumino 1979 (RPR) C11=267.0(19)"
+anchor = "Table 2 'Isentropic Elastic Constants of Fayalite at Ambient Conditions' (independent-study agreement for the olivine anchor)"
+channel = "T"

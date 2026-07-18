@@ -1,0 +1,37 @@
+# Fan et al. 2019 "Elasticity of single-crystal periclase at high pressure and temperature"
+# source manifest (the vendored-primary idiom: file / receipt / anchors). Single-crystal
+# elasticity primary for PERICLASE (MgO) in crates/physics/data/mineral_moduli.toml. Open PDF
+# (Lin group, UT Austin), vendored into the public tree. SHA256 is the primary receipt.
+# Ambient conditions 298 K, 1 bar (zero-pressure fit of Brillouin + XRD to ~30 GPa, 900 K).
+
+[[source]]
+file = "FanPericlaseHighPTElasticityAM2019.pdf"
+sha256 = "560b5f8c9f94e6275c19f8038859c84ddff672c64da11874c7b180ea13de6ee3"
+citation = "Fan, D., Fu, S., Yang, J., Tkachev, S.N., Prakapenka, V.B., and Lin, J.-F., 2019, Elasticity of single-crystal periclase at high pressure and temperature: The effect of iron on the elasticity and seismic parameters of ferropericlase in the lower mantle, American Mineralogist 104, 262-275, DOI 10.2138/am-2019-6656"
+recipe = "GET https://www.jsg.utexas.edu/lin/files/FanPericlaseHighPTElasticityAM2019.pdf (open)"
+pages = 14
+
+# Values read into mineral_moduli.toml. Channel: T=text/table. Aggregate is VRH (Hill 1952).
+[[value]]
+name = "periclase_bulk_modulus_KS_gpa"
+value = "162.8"
+anchor = "abstract and Table 2 'Bulk and shear moduli ... of MgO at ambient conditions', This study (BLS): K_S0 = 162.8(2) GPa"
+channel = "T"
+
+[[value]]
+name = "periclase_shear_modulus_G_gpa"
+value = "130.3"
+anchor = "abstract and Table 2, This study (BLS): G0 = 130.3(2) GPa (VRH)"
+channel = "T"
+
+[[value]]
+name = "periclase_dual_channel_KS_G_gpa"
+value = "Sinogeikin & Bass 2000: 163(1)/130(1); Jackson & Niesler 1982: 162.5/130.9; Zha et al. 2000: 162.5(7)/130(2)"
+anchor = "Table 2, prior-study rows (independent-study agreement for the mantle anchor)"
+channel = "T"
+
+[[value]]
+name = "periclase_single_crystal_Cij_context_gpa"
+value = "This study C11=297.9(6) C12=95.1(5) C44=152.8(4); Sinogeikin & Bass 2000 C11=298(2) C12=96(1) C44=154(2)"
+anchor = "Table 1 'Single-crystal elastic moduli ... of MgO at ambient conditions'"
+channel = "T"
