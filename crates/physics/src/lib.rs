@@ -39,6 +39,7 @@
 
 pub mod band_gap;
 pub mod condensation;
+pub mod convection_scaling;
 pub mod convective_viscosity;
 pub mod covalent_radii;
 pub mod creep_rows;
