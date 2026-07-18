@@ -3902,10 +3902,13 @@ mod tests {
         let kappa = Fixed::ONE;
         let ln_eta = Fixed::from_int(4).ln();
         let ln_ra = ln_rayleigh_number(Fixed::from_int(-2), g, d, ln_eta, kappa).expect("ln Ra");
-        let ratio = ln_ra.exp().to_f64_lossy() / 12.0;
+        // exp(ln Ra) reproduces the linear Ra = 12, within the log/exp round-trip. Fixed only: this file is the
+        // canonical kernel path and carries no float (the steering audit scans it).
+        let recovered = ln_ra.exp();
+        let drift = (recovered - Fixed::from_int(12)).abs();
         assert!(
-            (0.999..=1.001).contains(&ratio),
-            "exp(ln Ra) reproduces the linear Ra = 12, ratio {ratio}"
+            drift <= Fixed::from_ratio(1, 100),
+            "exp(ln Ra) reproduces the linear Ra = 12, got {recovered:?}"
         );
 
         // SI OVERFLOW: the linear form overflows on a real mantle DEPTH (d^3 ~ 5.8e18 exceeds Q32.32's ~2.1e9), so
@@ -3936,10 +3939,13 @@ mod tests {
             kappa_si,
         )
         .expect("ln Ra SI");
-        let ra_si = ln_ra_si.exp().to_f64_lossy();
+        // Bracket ln Ra by ln(1e5) and ln(1e9) in log space (Fixed only, no float on this path): a real mantle
+        // Rayleigh number sits between, so the log form computes what the linear form could not.
+        let ln10 = Fixed::from_int(10).ln();
         assert!(
-            (1e5..=1e9).contains(&ra_si),
-            "a real mantle Rayleigh number is representable via logs, got {ra_si}"
+            ln_ra_si >= ln10.checked_mul(Fixed::from_int(5)).unwrap()
+                && ln_ra_si <= ln10.checked_mul(Fixed::from_int(9)).unwrap(),
+            "a real mantle Rayleigh number (ln Ra ~ 17.8) sits between ln(1e5) and ln(1e9), got {ln_ra_si:?}"
         );
 
         // Absence convention: a non-positive drho, g, d, or kappa has no real log.
