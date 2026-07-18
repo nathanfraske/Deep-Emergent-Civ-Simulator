@@ -12,6 +12,7 @@ Editing rule (the stop-gate enforces it): edit IN PLACE, keep every line a few w
 
 ## Recent landings (tombstoned; prune when old)
 
+- 2026-07-18  DONE  Physics realization digest (first determinism instrumentation on the physics path) -> `deeptime.rs::realization_digest`.
 - 2026-07-18  DONE  Dawn harness parked, quarantine build-enforced (`worldbuild.rs` -> `dawn_harness.rs`) -> `crates/sim/tests/dawn_harness_quarantine.rs`.
 - 2026-07-18  DONE  Lean board landed on main (archive byte-identical, 16KB cap) -> PR #202, `9ae14a4b`.
 - 2026-07-18  DONE  GPU globe shading on the 5090 (CubeCL f32 kernel, non-canon, feature `gpu`) -> `crates/gpu/src/globe.rs`.
