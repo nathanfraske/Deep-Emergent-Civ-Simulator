@@ -71,8 +71,9 @@
 use civsim_core::Fixed;
 
 use crate::astro::{
-    disk_effective_temperature, hill_radius_au, kepler_orbital_period_years, planet_radius_m,
-    viscous_similarity_surface_density, ASTRONOMICAL_UNIT_M, EARTH_MASS_KG,
+    disk_effective_temperature, disk_era_xray_disk_lifetime_myr, hill_radius_au,
+    kepler_orbital_period_years, planet_radius_m, viscous_similarity_surface_density, XrayWindFit,
+    ASTRONOMICAL_UNIT_M, EARTH_MASS_KG,
 };
 use crate::planetary_system::{Embryo, SolidDisk};
 
@@ -588,6 +589,92 @@ pub fn giant_formation_banded(
     })
 }
 
+/// The disk-era star-and-disk state the DERIVED disk clock reads, bundled so the composed giant gate takes one
+/// parameter rather than the clock's full argument list. Every field is the star's or the disk's own datum, or a
+/// TAGGED SOLAR INTERIM the caller supplies (`mdot_0_msun_myr` the class-0/I birth accretion, `t_visc_myr` from the
+/// disk birth size `R_1`, `rotation_period_days` the disk-locked rotation), never a value authored here: the
+/// composition is pure, so the wire stays fabrication-free until the layer-4 draws land to supply the interims.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DiskClockState {
+    /// The drawn star mass `M / Msun`.
+    pub mass_ratio: Fixed,
+    /// The pre-main-sequence Hayashi-wall `T_eff` (K), read per-star from the BHAC15 grid on the live path.
+    pub hayashi_temp_k: Fixed,
+    /// The disk-era evaluation age (Myr), the disk-hosting epoch.
+    pub age_myr: Fixed,
+    /// The disk-locked rotation period (days), a tagged interim until the gyrochronology draw.
+    pub rotation_period_days: Fixed,
+    /// The mixing-length turnover coefficient (reserved-with-basis, banked).
+    pub mlt_coefficient: Fixed,
+    /// The saturation Rossby number of the activity fit (reserved-with-basis).
+    pub ro_sat: Fixed,
+    /// The saturated `log10(L_X/L_bol)` fraction (reserved-with-basis).
+    pub saturated_log10_fraction: Fixed,
+    /// The activity-decline power-law index `beta` (reserved-with-basis).
+    pub beta: Fixed,
+    /// The birth accretion rate `Mdot_0` (Msun/Myr), a TAGGED SOLAR INTERIM (its retirement is the layer-4 draw).
+    pub mdot_0_msun_myr: Fixed,
+    /// The viscous time `t_visc` (Myr) from `R_1`, a TAGGED SOLAR INTERIM (its retirement is the layer-4 draw).
+    pub t_visc_myr: Fixed,
+    /// The LBP surface-density decline index `gamma` (bare algebra, `gamma = 1`).
+    pub decline_gamma: Fixed,
+}
+
+/// STAGE 4 of the slice-2 wire (DORMANT): the #73 giant gate DRIVEN BY THE DERIVED DISK CLOCK. It replaces the
+/// reserved `disk_gas_lifetime_myr` with the `tau_disk` band the composed clock derives from the star's own
+/// X-ray-driven photoevaporation history. The wind ensemble ([`XrayWindFit`], the declared model-structure band)
+/// is passed as its two edge rows; the clock is evaluated at each, and the two `tau_disk` values are ordered into a
+/// lifetime band fed to [`giant_formation_banded`]. So the giant-versus-terrestrial verdict reads a DERIVED gas
+/// clock, not an authored 3 Myr placeholder, and carries the wind-model band through to a near-degenerate outcome
+/// where the runaway threshold falls inside it. The strongest-wind row gives the shortest disk life and the
+/// weakest the longest, but the ordering here is done on the computed `tau_disk` values, so which row is which
+/// never needs asserting.
+///
+/// `gas.disk_gas_lifetime_myr` is IGNORED (the derived band supersedes it); the field is carried on
+/// [`GiantGasParams`] only for the OTHER gas residues (the collision coefficient, the core bulk density, the
+/// feeding-zone width, the integration steps), and its full retirement from the struct is a census item for the
+/// flip, not this dormant composition.
+///
+/// DORMANT and BYTE-NEUTRAL: no run-path caller (both the disk clock and the giant gate are dormant), so the pins
+/// hold bit-exact. The FLIP that feeds this into `run_world` and moves the pins is the capstone event under the
+/// owner's signature, not this composition, and it waits on the `Mdot_0` fetch and the layer-4 draws that retire
+/// the tagged interims. `None` if either clock evaluation refuses (a link's domain door) or the giant gate refuses
+/// (an unordered band or a monotonicity violation), the refusal propagated rather than swallowed.
+pub fn giant_formation_on_derived_clock(
+    embryo: &Embryo,
+    disk: &SolidDisk,
+    star: &DiskClockState,
+    wind_fit_a: &XrayWindFit,
+    wind_fit_b: &XrayWindFit,
+    gas: &GiantGasParams,
+    kh: &GiantKhParams,
+) -> Option<BandedGiantVerdict> {
+    let tau_disk = |fit: &XrayWindFit| {
+        disk_era_xray_disk_lifetime_myr(
+            star.mass_ratio,
+            star.hayashi_temp_k,
+            star.age_myr,
+            star.rotation_period_days,
+            star.mlt_coefficient,
+            star.ro_sat,
+            star.saturated_log10_fraction,
+            star.beta,
+            fit,
+            star.mdot_0_msun_myr,
+            star.t_visc_myr,
+            star.decline_gamma,
+        )
+    };
+    let tau_a = tau_disk(wind_fit_a)?;
+    let tau_b = tau_disk(wind_fit_b)?;
+    let (tau_low, tau_high) = if tau_a <= tau_b {
+        (tau_a, tau_b)
+    } else {
+        (tau_b, tau_a)
+    };
+    giant_formation_banded(embryo, disk, star.mass_ratio, gas, kh, tau_low, tau_high)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -982,6 +1069,114 @@ mod tests {
             )
             .is_none(),
             "an unordered band fails soft"
+        );
+    }
+
+    #[test]
+    fn the_derived_clock_drives_the_giant_gate_through_the_wind_band() {
+        // STAGE 4 (dormant): the composed wire, disk clock -> tau_disk band -> banded giant verdict, proved by
+        // twin-independence (the composition byte-equals the hand-chained clock-then-gate) and by the wind band
+        // being carried (the two rows produce an ordered, non-degenerate tau_disk interval, never collapsed).
+        let disk = mirror_disk(Fixed::from_int(30));
+        let field = oligarchic_embryo_field(
+            &disk,
+            Fixed::ONE,
+            Fixed::from_int(10),
+            Fixed::from_int(5),
+            Fixed::ONE,
+            Fixed::from_int(30),
+            256,
+        );
+        let embryo = *field.last().expect("the dense disk seeds embryos");
+        // The tagged solar interims (the same the disk clock's unit tests run): a fixture wall, disk-locked
+        // rotation, the class-0/I birth accretion band Mdot_0 ~ 1 Msun/Myr, unit t_visc, gamma = 1. The interims
+        // are TEST inputs, not authored by the wire, so the composition stays fabrication-free.
+        let star = DiskClockState {
+            mass_ratio: Fixed::ONE,
+            hayashi_temp_k: Fixed::from_int(4200),
+            age_myr: Fixed::ONE,
+            rotation_period_days: Fixed::from_int(8),
+            mlt_coefficient: Fixed::from_ratio(3, 2),
+            ro_sat: Fixed::from_ratio(13, 100),
+            saturated_log10_fraction: Fixed::from_ratio(-313, 100),
+            beta: Fixed::from_ratio(-27, 10),
+            mdot_0_msun_myr: Fixed::ONE, // class-0/I birth accretion band, tagged interim
+            t_visc_myr: Fixed::ONE,
+            decline_gamma: Fixed::ONE,
+        };
+        // The wind ensemble's two lifetime edges: the strongest-wind row (Owen eq. 9, 8e-9) is the shortest disk
+        // life, the weakest (Sellek, 4.32e-9) the longest.
+        let strong = XrayWindFit::owen_equation_9();
+        let weak = XrayWindFit::sellek_2024();
+
+        // Hand-chain the two tau_disk values and confirm the wind band is carried (a stronger wind, a shorter life).
+        let clock = |fit: &XrayWindFit| {
+            disk_era_xray_disk_lifetime_myr(
+                star.mass_ratio,
+                star.hayashi_temp_k,
+                star.age_myr,
+                star.rotation_period_days,
+                star.mlt_coefficient,
+                star.ro_sat,
+                star.saturated_log10_fraction,
+                star.beta,
+                fit,
+                star.mdot_0_msun_myr,
+                star.t_visc_myr,
+                star.decline_gamma,
+            )
+        };
+        let tau_strong = clock(&strong).expect("the strong-wind clock resolves");
+        let tau_weak = clock(&weak).expect("the weak-wind clock resolves");
+        assert!(
+            tau_weak > tau_strong,
+            "the weaker wind (Sellek) gives the longer disk life, the wind band carried (weak {} Myr, strong {} Myr)",
+            tau_weak.to_f64_lossy(),
+            tau_strong.to_f64_lossy()
+        );
+
+        // TWIN-INDEPENDENCE: the composition equals the hand-chain (order the tau band, call the banded gate direct).
+        let expected = giant_formation_banded(
+            &embryo,
+            &disk,
+            Fixed::ONE,
+            &gas_params(),
+            &kh_params(),
+            tau_strong,
+            tau_weak,
+        );
+        let composed = giant_formation_on_derived_clock(
+            &embryo,
+            &disk,
+            &star,
+            &strong,
+            &weak,
+            &gas_params(),
+            &kh_params(),
+        );
+        assert_eq!(
+            composed, expected,
+            "the composed wire byte-equals the hand-chained clock-then-gate"
+        );
+        assert!(
+            composed.is_some(),
+            "the composed wire resolves to a banded verdict"
+        );
+
+        // The wind-row argument ORDER is irrelevant: the wire orders on the computed tau, not on which argument is
+        // which, so passing the rows swapped yields the same verdict.
+        let swapped = giant_formation_on_derived_clock(
+            &embryo,
+            &disk,
+            &star,
+            &weak,
+            &strong,
+            &gas_params(),
+            &kh_params(),
+        );
+        assert_eq!(
+            swapped, composed,
+            "the wire orders on tau, so the wind-row argument order does not change the verdict"
         );
     }
 }

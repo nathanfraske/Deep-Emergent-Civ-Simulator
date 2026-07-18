@@ -5902,4 +5902,92 @@ mod tests {
         assert!(call(Fixed::ZERO, DISK_ERA_XRAY_TEST_WALL_K).is_none());
         assert!(call(Fixed::ONE, Fixed::ZERO).is_none());
     }
+
+    #[test]
+    fn the_live_disk_clock_composes_on_the_real_hayashi_wall_grid() {
+        // STAGE 3, the rider-2 upgrade from #200 landing: the disk clock's LIVE path reads its wall from the BHAC15
+        // grid (`civsim_physics::hayashi_wall::HayashiWallGrid`), not a fixture, so this integration test consumes
+        // the real grid read where the unit-math tests above use the de-camouflaged arithmetic fixture (fixtures for
+        // arithmetic, grid for integration, the split the fixture comment names). It proves the composed clock runs
+        // end to end on the per-star wall the wire will feed it, and that the grid's OWN drift band (its wall chord)
+        // propagates through the clock to a lifetime band, the chord carried, never collapsed.
+        use civsim_physics::hayashi_wall::HayashiWallGrid;
+        let grid = HayashiWallGrid::standard().expect("the standard BHAC15 wall grid loads");
+        let reading = grid
+            .wall_teff(Fixed::ONE)
+            .expect("a solar-mass star is inside the grid's convective-track domain");
+
+        // The tagged solar interims, the same the unit-math tests run (disk-locked rotation, unit t_visc, the
+        // hundredfold-over-wind peak accretion), so this isolates the ONE change: the wall now comes from the grid.
+        let mlt_c = Fixed::from_ratio(3, 2);
+        let age = Fixed::ONE;
+        let p_rot = Fixed::from_int(8);
+        let ro_sat = Fixed::from_ratio(13, 100);
+        let sat = Fixed::from_ratio(-313, 100);
+        let beta = Fixed::from_ratio(-27, 10);
+        let gamma = Fixed::ONE;
+        let t_visc = Fixed::ONE;
+        let fit = XrayWindFit::owen_appendix_b();
+        // The peak accretion is sized a hundredfold over the CENTRAL wall's wind and then HELD FIXED across the
+        // drift band, so the wall moves the wind (through luminosity and turnover) against a fixed birth accretion,
+        // the isolation the mechanistic test uses for the age sweep. Sizing mdot_0 per-wall instead would pin the
+        // race ratio and cancel the wall, which is the wrong probe.
+        let central_wind = {
+            let tau_conv =
+                pre_main_sequence_convective_turnover_days(Fixed::ONE, reading.wall_teff_k, mlt_c)
+                    .unwrap();
+            let rossby = stellar_rossby_number(p_rot, tau_conv).unwrap();
+            let activity = activity_luminosity_fraction(rossby, ro_sat, sat, beta).unwrap();
+            let l_bol =
+                pre_main_sequence_luminosity_lsun(Fixed::ONE, reading.wall_teff_k, age).unwrap();
+            let log10_l_x = stellar_xray_luminosity_log10_erg_s(l_bol, activity).unwrap();
+            photoevaporative_wind_rate_msun_myr(log10_l_x, Fixed::ONE, &fit).unwrap()
+        };
+        let mdot_0 = central_wind.checked_mul(Fixed::from_int(100)).unwrap();
+        let clock = |wall: Fixed| {
+            disk_era_xray_disk_lifetime_myr(
+                Fixed::ONE,
+                wall,
+                age,
+                p_rot,
+                mlt_c,
+                ro_sat,
+                sat,
+                beta,
+                &fit,
+                mdot_0,
+                t_visc,
+                gamma,
+            )
+        };
+
+        // The clock composes on the real grid wall and the race crosses to a finite, units-sane lifetime. The value
+        // is the tagged-interim solar analogue, NOT the real Sun's disk life (the same Residual-not-miss framing as
+        // the fixture tests), so the assert is a units bracket, not a physical-band claim.
+        let on_wall = clock(reading.wall_teff_k).expect("the clock composes on the grid wall");
+        assert!(
+            on_wall > Fixed::from_ratio(1, 1_000_000) && on_wall < Fixed::from_int(1_000_000),
+            "the grid-wall lifetime is finite and units-sane (got {} Myr)",
+            on_wall.to_f64_lossy()
+        );
+
+        // THE GRID CHORD PROPAGATES: the wall's own drift band (drift_lo_k, drift_hi_k) maps through the clock to a
+        // lifetime band. The clock is monotone in the wall (a hotter wall is brighter, a stronger wind, a shorter
+        // life), so the low-edge wall gives the longer life and the high-edge wall the shorter, and the band has
+        // non-zero width whenever the grid's drift band does. The chord is carried end to end, not averaged away.
+        assert!(
+            reading.drift_lo_k < reading.drift_hi_k,
+            "the grid row carries a drift band"
+        );
+        let life_at_lo =
+            clock(reading.drift_lo_k).expect("the clock composes on the drift low edge");
+        let life_at_hi =
+            clock(reading.drift_hi_k).expect("the clock composes on the drift high edge");
+        assert!(
+            life_at_lo > life_at_hi,
+            "a cooler wall (drift low) drives a longer disk life than a hotter one (lo {} Myr, hi {} Myr)",
+            life_at_lo.to_f64_lossy(),
+            life_at_hi.to_f64_lossy()
+        );
+    }
 }
