@@ -742,12 +742,24 @@ pub fn giant_formation_on_derived_clock(
 /// evaluated at every (collapse, wind) corner, and the `tau_disk` band is the interval over the four corners. The
 /// gate consumes that interval, interval in and interval out, never collapsing the declared band onto one member.
 ///
-/// The verdict is monotone in `tau_disk` (a longer disk life is more favorable to giant), so only the MIN and MAX
-/// tau across the four corners set the band edges; the interior corners cannot widen it. A faster collapse (a larger
-/// `Mdot_0`) gives a longer disk life, and a weaker wind likewise, so the corners span the honest compound
-/// uncertainty the two model-structure bands together imply. This is where the central-member ruling's warning bites
-/// or does not: if the factor-48 collapse band makes every embryo near-degenerate, the band is the priority signal
-/// for the retirement ladder (surfaced by the reported hindcast, never selected here).
+/// THE LICENSE for corner evaluation: min/max over the four corners is EXACT interval propagation ONLY when
+/// `tau_disk` is monotone in each argument over the box (a non-monotone dependence would hide an interior extremum
+/// and silently narrow the band, range-collapse wearing rigor's clothes). Here it is, with the SIGN of each
+/// dependence stated: `tau_disk` RISES with the birth accretion rate `Mdot_0` (a higher birth rate is a longer disk
+/// life), and `Mdot_0` rises linearly with the collapse coefficient `m0`, so `tau_disk` rises with the collapse
+/// member; and `tau_disk` FALLS with the wind rate (a stronger wind is a shorter life). Both dependences are
+/// componentwise monotone over the box, so the extrema sit at the corners. THE CORNERS ARE THE ENSEMBLE EXTREMES:
+/// the wind ensemble is three rows (Owen appendix-B central, Owen equation-9, Sellek), and `wind_fit_a`/`wind_fit_b`
+/// must be its RATE EXTREMES (Owen equation-9 the strongest wind and shortest life, Sellek the weakest and longest),
+/// with the Owen appendix-B central row riding as the interior CROSS-CHECK the box-midpoint sentinel evaluates, not a
+/// corner. This is where the central-member ruling's warning bites or does not: if the factor-48 collapse band makes
+/// every embryo near-degenerate, the band is the priority signal for the retirement ladder (surfaced by the reported
+/// hindcast, never selected here).
+///
+/// THE MEMBER-SELECTION GUARD IS STRUCTURAL, not a comment: this returns a [`BandedGiantVerdict`], which carries the
+/// two edge verdicts and the band classification and has NO "chosen member" field. There is no code path that reads
+/// one collapse endpoint and discards the other; a consumer that wanted to select a member would have to reach past
+/// the interval this returns, which the type does not offer. Selection is impossible here by construction.
 ///
 /// DORMANT and BYTE-NEUTRAL, the successor to the point wire: when the band ships (the central-member ruling's end
 /// state, no default), this is the wire the giant verdict reads; until then the point version rides with its
@@ -1398,6 +1410,28 @@ mod tests {
             .copied()
             .fold(corners[0], |a, b| if b > a { b } else { a });
 
+        // BOX-MIDPOINT SENTINEL (necessary, not sufficient): the compound evaluated at the box interior (the
+        // mid-collapse m0 and the central Owen appendix-B wind row) must lie INSIDE the corner-derived band. This
+        // costs one evaluation and falsifies the corner-evaluation license the day some future consumer bends the
+        // map non-monotone, the range-collapse-wearing-rigor case.
+        let mid_collapse = CollapseModel {
+            collapse_coefficient_m0: shu
+                .collapse_coefficient_m0
+                .checked_add(lp.collapse_coefficient_m0)
+                .unwrap()
+                .checked_div(Fixed::from_int(2))
+                .unwrap(),
+            instability_parameter_a: shu.instability_parameter_a,
+        };
+        let tau_mid = tau(&mid_collapse, &XrayWindFit::owen_appendix_b());
+        assert!(
+            tau_mid >= hand_lo && tau_mid <= hand_hi,
+            "the box-midpoint tau ({} Myr) lies inside the corner band [{}, {}], the monotonicity witness",
+            tau_mid.to_f64_lossy(),
+            hand_lo.to_f64_lossy(),
+            hand_hi.to_f64_lossy()
+        );
+
         // TWIN-INDEPENDENCE: the banded gate equals the hand-computed four-corner min/max fed to the banded verdict.
         let expected = giant_formation_banded(
             &embryo,
@@ -1472,13 +1506,48 @@ mod tests {
             &kh_params(),
         )
         .expect("the compound-band verdict resolves");
-        // A super-critical outer embryo has a short KH time, so it is giant-capable across at least the favorable
-        // edge of the band: it is NOT robustly terrestrial. Whether it is RobustGiant (the band is decisive) or
-        // NearDegenerate (the factor-48 band straddles the runaway threshold, the priority signal for the retirement
-        // ladder) is the REPORTED measurement, not a gate, and no collapse member is selected to produce it.
+        // THE MEASUREMENT, BAKED AS A FINDING (the ruling's spread report): the giant verdict over the wind band at
+        // EACH collapse corner (Shu and LP), to learn whether the factor-48 collapse band is verdict-stable on this
+        // row or splits it. The point wire evaluates each collapse member's own wind-banded verdict.
+        let shu_star = DiskClockState {
+            collapse: CollapseModel::shu_1977(),
+            ..star
+        };
+        let lp_star = DiskClockState {
+            collapse: CollapseModel::larson_penston(),
+            ..star
+        };
+        let corner = |s: &DiskClockState| {
+            giant_formation_on_derived_clock(
+                &embryo,
+                &disk,
+                s,
+                &XrayWindFit::owen_equation_9(),
+                &XrayWindFit::sellek_2024(),
+                &gas_params(),
+                &kh_params(),
+            )
+            .expect("the corner verdict resolves")
+        };
+        let shu_corner = corner(&shu_star);
+        let lp_corner = corner(&lp_star);
+        // REPORTED FINDING: on this super-critical row the factor-48 collapse band is VERDICT-STABLE, RobustGiant at
+        // both corners with the same giant mass (the mass is set by the feeding-zone gas reservoir, not the collapse
+        // rate, so it is invariant across the band). So the wide collapse band does NOT render this verdict vacuous:
+        // the priority signal says the collapse-model retirement ladder is not urgent for a clearly super-critical
+        // embryo (a near-threshold embryo could still be sensitive, untested here). No collapse member is selected.
+        assert_eq!(
+            shu_corner.band, lp_corner.band,
+            "the collapse band is verdict-stable on this row (Shu corner {:?}, LP corner {:?})",
+            shu_corner.band, lp_corner.band
+        );
         assert!(
-            !matches!(banded.band, BandedGiantOutcome::RobustTerrestrial),
-            "the super-critical embryo is giant-capable somewhere in the compound band, not robustly terrestrial"
+            matches!(shu_corner.band, BandedGiantOutcome::RobustGiant { .. }),
+            "the super-critical embryo is a robust giant at the Shu corner"
+        );
+        assert_eq!(
+            banded.band, shu_corner.band,
+            "the compound band agrees with the stable corners"
         );
     }
 }

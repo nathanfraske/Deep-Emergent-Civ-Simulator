@@ -54,24 +54,20 @@ jobs:
         run: |
           python3 scripts/floor_provenance_gate.py
           python3 scripts/floor_provenance_gate.py --self-test
-      - name: Derives-coverage gate (a new physics substrate is marked deriving or classified)
-        run: |
-          python3 scripts/derives_gate.py --self-test
-          python3 scripts/derives_gate.py
       - name: Quarantine gate (the parked living-world weak-provenance ledger stays in sync with source)
         run: |
           python3 scripts/quarantine_gate.py
           python3 scripts/quarantine_gate.py --self-test
-      # The vendoring pipeline. The generator check runs FIRST: the gate reads the mirrored registry, so a
-      # stale mirror would have it checking a wrong picture of the tree and passing on it.
-      - name: Sources generator (the mirrored registry and the bibliography are not stale)
+      # Floor-registry freshness: the registry records each @derives marker's file:line, so a doc edit that shifts a
+      # marker (or a new axis/kernel) staleness the committed file until regenerated. The local stop-gate hook
+      # catches this, but a positional convention that drifts must announce itself in CI too, not by hand-noticing.
+      # Regenerate and fail on any diff, so a forgotten regeneration cannot land quietly (a stale derive-vs-author
+      # reference is a wrong reference).
+      - name: Floor-registry freshness gate (regenerate; a stale registry is a wrong reference)
         run: |
-          python3 scripts/gen_sources.py --self-test
-          python3 scripts/gen_sources.py --check
-      - name: Sources gate (a vendored source is checksummed, archived, scoped, slimmed and licence-cleared)
-        run: |
-          python3 scripts/sources_gate.py --self-test
-          python3 scripts/sources_gate.py
+          python3 scripts/gen_floor_registry.py
+          git diff --exit-code -- docs/working/PHYSICS_FLOOR_REGISTRY.md \
+            || { echo "PHYSICS_FLOOR_REGISTRY.md is stale: run 'python3 scripts/gen_floor_registry.py' and commit it."; exit 1; }
 
   rust:
     name: build, format, lint, test

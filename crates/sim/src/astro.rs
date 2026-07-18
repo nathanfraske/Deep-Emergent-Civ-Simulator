@@ -603,10 +603,16 @@ pub fn disk_surface_density(
 /// star mass ([`SOLAR_MASS_KG`] times `star_mass_ratio`) and `r = orbit_au * AU`, `k_B`
 /// (`fundamentals::BOLTZMANN`), and `m_H` as one atomic mass unit (`1e-3 / N_A` kg, one gram-per-mole per amu, from
 /// `fundamentals::AVOGADRO`); `disk_temperature_k` is the caller's derived disk temperature `T(r)`.
-/// RESERVED-with-basis, surfaced rather than fabricated: `alpha_viscosity`, the Shakura-Sunyaev turbulent-viscosity
-/// parameter (basis ~0.001 to 0.01, Shakura & Sunyaev 1973; a per-disk datum, so a quiescent dead-zone disk and an
-/// MRI-active disk are data rows), and `mean_molecular_weight` `mu`, the disk-gas mean molecular weight (basis
-/// ~2.34 for a solar H2+He mix; a per-composition datum, so a carbon-rich or a metal-poor disk is a data row).
+/// RESERVED-with-basis, surfaced rather than fabricated: `alpha_viscosity`, the Shakura-Sunyaev viscosity parameter,
+/// and `mean_molecular_weight` `mu` (basis ~2.34 for a solar H2+He mix; a per-composition datum, so a carbon-rich or
+/// a metal-poor disk is a data row). ALPHA IS A CHORD THAT MUST DECLARE ITS METHOD (research-agent re-scope): the
+/// letter covers TWO quantities that diverge in practice, the EFFECTIVE TRANSPORT coefficient the accretion clock
+/// consumes (calibrated by accretion-rate and disk-lifetime demographics) and the LOCALLY-MEASURED turbulence
+/// coefficient (ALMA linewidths, MRI simulations), which part company in dead zones and non-ideal-MHD or weakly
+/// hydrodynamic regimes. This clock consumes the TRANSPORT-side quantity, so the basis is the transport-side
+/// observable (accretion-inferred `alpha ~ 1e-3 to 1e-2`), NOT the turbulence measurement; a per-disk datum, so a
+/// quiescent dead-zone disk and an MRI-active disk are data rows. The full census (method, region and regime,
+/// mechanism class, with regime-conditioned banded rows) is the alpha arc's first deliverable, not this interim.
 ///
 /// The product spans many decades (`Mdot ~ 1e15 kg/s`, `Omega ~ 1e-7 rad/s`, `m_H ~ 1e-27 kg`, `k_B ~ 1e-23 J/K`),
 /// so the whole assembly runs in LOG-SPACE (the [`isolation_mass_earth`] precedent): `ln Sigma = ln Mdot + ln mu +
@@ -747,10 +753,14 @@ impl CollapseModel {
     /// p.837 (`"values of P(0) ... being 8.854, ..."`) for the abscissa, which is Hunter's central-density
     /// coefficient `P(0)` (so `A = 2` for Shu and `A = 8.854` for LP both land on it). Hunter's convention (eqs. 1
     /// and 14, `M = a^3 t m(zeta)/G` with `m -> m0`) gives `Mdot = m0 c_s^3/G`, matching ours. Vendored primary
-    /// sha256 `9e187e6d69cccf733734b75c7b974f287532163692514084eb511828d6a70e0f`. DUAL-CHANNEL corroboration:
-    /// Whitworth and Summers 1985 (MNRAS 214, 1, receipt `ba57e11c...`) print the same member as `w0 = 46.84` under
-    /// their `(z0, w0)` parametrization, a 0.16% spread from independent eigenvalue integrations, far below the
-    /// factor-48 band; the carried value tracks Hunter's printed `46.915`.
+    /// sha256 `9e187e6d69cccf733734b75c7b974f287532163692514084eb511828d6a70e0f`. DUAL-CHANNEL, and the cross-source
+    /// spread is a CLASSIFIED ROW, not absorbed by the word corroboration: Whitworth and Summers 1985 (MNRAS 214, 1,
+    /// receipt `ba57e11c...`) print the same member as `w0 = 46.84` under their `(z0, w0)` parametrization
+    /// (`z0 = 1.672`, no `P(0)` given, so our `A = 8.854` rests on Hunter alone). The two carry BOTH facts: they
+    /// corroborate the PHYSICS (the Larson-Penston member exists at ~47x the Shu rate) and DISAGREE on the NUMBER at
+    /// the third digit (46.915 versus 46.84, a 0.16% spread). CLASSIFICATION: presumed numerical-integration
+    /// precision (two independent integrations of the same similarity ODE), unexplained beyond that, far below the
+    /// factor-48 band so decision-irrelevant; the carried value tracks Hunter's printed `46.915`.
     pub fn larson_penston() -> Self {
         CollapseModel {
             collapse_coefficient_m0: Fixed::from_ratio(46915, 1000), // 46.915 (Hunter 1977 p.838; W&S give 46.84)
