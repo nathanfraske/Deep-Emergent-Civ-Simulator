@@ -874,6 +874,71 @@ pub fn shu_inside_out_collapse_accretion_rate_msun_myr(
     Some(ln_mdot_msun_myr.exp())
 }
 
+/// The CENTRIFUGAL RADIUS `R_c` (AU): the disk BIRTH radius `R_1`, DERIVED from the collapsing core's specific
+/// angular momentum rather than drawn on its own axis. A fluid element falling in from the core conserves its
+/// specific angular momentum `j` and settles onto the forming disk where rotation supports it against gravity,
+/// which is where `j` equals the Keplerian circular value `sqrt(G M_star r)`. Equating them gives
+/// `R_c = j^2 / (G M_star)`, the classical rotating-collapse landing radius (Ulrich 1976; Cassen and Moosman
+/// 1981; Terebey, Shu and Cassen 1984). This is why `R_1` is DERIVABLE and not a root (LAYER4_ROOT_CENSUS): the
+/// disk's birth size follows from the core-angular-momentum root, and the resolved-disk-size demographics
+/// (Tazzari 2017 gas `R_c`, the Tripathi 2017 / Andrews 2020 dust size relations) demote to VALIDATION of the
+/// derived distribution. Drawing `R_1` independently while the engine owns core rotation would be two doors to one
+/// fact and would author away the correlation between disk size and everything else the core's `j` sets.
+///
+/// The value line: ZERO reserved numbers of its own. It reads the specific angular momentum (the census's ROOT,
+/// whose measured velocity-gradient distribution is the pending core-angular-momentum draw, not this kernel's to
+/// set) and the stellar mass, and composes them with the fundamental `G`, solar mass, and astronomical unit. Every
+/// input is a per-core ARGUMENT (the admit-the-alien test): a slower or faster core, a heavier or lighter star, is
+/// a data row, never a rewrite.
+///
+/// The specific angular momentum enters as its NATURAL LOG in SI (`m^2 s^-1`), not as a bare `Fixed`: a
+/// star-forming core carries `j ~ 1e16` to `1e18 m^2 s^-1` (Goodman et al. 1993 velocity gradients), which
+/// overflows the Q32.32 range the way the wide astronomical constants do, so the caller forms `ln j` (the
+/// log-valued-parameter idiom the wind coefficients already use) and the whole derivation stays in the log domain.
+/// `ln R_c[AU] = 2 ln j - ln G - ln M_sun - ln(star_mass_ratio) - ln AU`, then a single `exp`.
+///
+/// TERMS DROPPED, named rather than hidden. First and load-bearing: MAGNETIC BRAKING is omitted, so this is the
+/// pure HYDRODYNAMIC centrifugal radius and therefore an UPPER BOUND. A collapsing core threaded by field loses
+/// angular momentum to the envelope during infall (the classical magnetic-braking problem), which lands the
+/// material at a smaller radius than `j^2/(G M_star)` alone, so a braking-efficiency term is the named debt that a
+/// magnetized-collapse follow-on multiplies in; until then the derived `R_c` is the no-braking ceiling and the
+/// demographics validate whatever braking the drawn `j` distribution already folds in. Second: it is a SINGLE-SHELL
+/// instantaneous radius, the landing radius of material carrying THIS `j`. In a real collapse successively outer
+/// shells carry higher `j` and land farther out, so the disk outer edge grows over the accretion phase (the
+/// Terebey-Shu-Cassen time dependence); the caller selects which shell's `j` defines `R_1` (the outer,
+/// disk-defining shell), and the growth history is the named follow-on. Third: `M_star` is the enclosed central
+/// mass, disk self-gravity dropped, valid for `M_disk << M_star`. `None` on a non-positive stellar mass or a
+/// result past the representable `exp` range (it fails loud rather than saturating).
+///
+// @derives: the protostellar disk birth radius R_1 <- the centrifugal radius j^2/(G M_star) of the collapsing core's specific angular momentum over the enclosed stellar mass
+pub fn centrifugal_radius_au(
+    ln_specific_angular_momentum_si: Fixed,
+    star_mass_ratio: Fixed,
+) -> Option<Fixed> {
+    if star_mass_ratio <= Fixed::ZERO {
+        return None;
+    }
+    let ln_g = civsim_physics::saha::ln_of_decimal(
+        civsim_units::fundamentals::GRAVITATIONAL_CONSTANT.value,
+    )?;
+    let ln_m_sun = civsim_physics::saha::ln_of_decimal(SOLAR_MASS_KG)?;
+    let ln_au = civsim_physics::saha::ln_of_decimal(ASTRONOMICAL_UNIT_M)?;
+    // ln R_c[AU] = 2 ln j - ln G - ln M_sun - ln(star_mass_ratio) - ln AU (the m -> AU conversion in the log domain).
+    let ln_rc = Fixed::from_int(2)
+        .checked_mul(ln_specific_angular_momentum_si)?
+        .checked_sub(ln_g)?
+        .checked_sub(ln_m_sun)?
+        .checked_sub(star_mass_ratio.ln())?
+        .checked_sub(ln_au)?;
+    // Fail loud past the representable exp ceiling rather than saturate (the Shu-rate precedent): `ln(2^31)` is the
+    // log of the representation's own maximum, an engine bound, not an owner value.
+    let ln_ceiling = Fixed::from_int(31).checked_mul(Fixed::from_int(2).ln())?;
+    if ln_rc >= ln_ceiling {
+        return None;
+    }
+    Some(ln_rc.exp())
+}
+
 /// The DISK ACCRETION-RATE CLOCK (the disk-evolution arc, slice 1): the Lynden-Bell-Pringle self-similar decline
 /// (Hartmann et al. 1998), `Mdot(t) = Mdot_0 * (1 + t / t_visc) ^ (-p)` with the decline exponent
 /// `p = (5/2 - gamma) / (2 - gamma)` set by the viscous-spreading exponent `gamma` (the same `gamma ~ 1` gate-G
@@ -5399,6 +5464,54 @@ mod tests {
             &zero_m0
         )
         .is_none());
+    }
+
+    #[test]
+    fn the_centrifugal_radius_derives_the_disk_birth_size_from_the_core_angular_momentum() {
+        // The DERIVE-FIRST retirement of R_1 as an independent draw: the centrifugal radius R_c = j^2/(G M_star)
+        // derives the disk's birth size from the collapsing core's specific angular momentum, so R_1 is DERIVED off
+        // the core-angular-momentum root, not an independent axis (LAYER4_ROOT_CENSUS). Oracle: a core with
+        // j ~ 3e16 m^2/s around a 1 M_sun star lands its material at ~45 AU, inside the Tazzari 2017 observed bulk
+        // (25 to 100 AU, gas self-similar R_c), which is VALIDATION of the derived value, never the mechanism
+        // authored to it.
+        let ln_j = civsim_physics::saha::ln_of_decimal("3e16").unwrap(); // disk-scale core specific angular momentum
+        let r_c = centrifugal_radius_au(ln_j, Fixed::ONE)
+            .expect("the centrifugal radius resolves for a solar-mass star");
+        assert!(
+            r_c.to_f64_lossy() > 44.0 && r_c.to_f64_lossy() < 47.0,
+            "the j ~ 3e16 birth radius is ~45 AU, inside the observed 25-100 AU bulk (got {})",
+            r_c.to_f64_lossy()
+        );
+        // MECHANISM, R_c ~ j^2: doubling the specific angular momentum quadruples the landing radius. Formed by
+        // adding ln 2 to ln j so the log-parameter idiom is exercised, not re-derived from a second string.
+        let ln_j_double = ln_j.checked_add(Fixed::from_int(2).ln()).unwrap();
+        let r_c_double = centrifugal_radius_au(ln_j_double, Fixed::ONE).unwrap();
+        let j_ratio = r_c_double.checked_div(r_c).unwrap().to_f64_lossy();
+        assert!(
+            (j_ratio - 4.0).abs() < 0.02,
+            "R_c scales as j^2: 2x angular momentum lifts the radius by 4x (got {})",
+            j_ratio
+        );
+        // MECHANISM, R_c ~ 1/M_star: a heavier star holds the material closer, so doubling M_star halves the radius.
+        let r_c_heavy = centrifugal_radius_au(ln_j, Fixed::from_int(2)).unwrap();
+        let m_ratio = r_c_heavy.checked_div(r_c).unwrap().to_f64_lossy();
+        assert!(
+            (m_ratio - 0.5).abs() < 0.005,
+            "R_c scales as 1/M_star: 2x stellar mass halves the radius (got {})",
+            m_ratio
+        );
+        // A lower-j core (a slower rotator) births a smaller disk: the monotone direction the census relies on.
+        let ln_j_slow = civsim_physics::saha::ln_of_decimal("1e16").unwrap();
+        let r_c_slow = centrifugal_radius_au(ln_j_slow, Fixed::ONE).unwrap();
+        assert!(
+            r_c_slow < r_c,
+            "a slower core (lower j) births a smaller disk (slow {}, base {})",
+            r_c_slow.to_f64_lossy(),
+            r_c.to_f64_lossy()
+        );
+        // A non-physical stellar mass fails soft, never a fabricated radius.
+        assert!(centrifugal_radius_au(ln_j, Fixed::ZERO).is_none());
+        assert!(centrifugal_radius_au(ln_j, Fixed::from_int(-1)).is_none());
     }
 
     #[test]
