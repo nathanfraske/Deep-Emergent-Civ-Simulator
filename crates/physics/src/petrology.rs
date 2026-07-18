@@ -623,18 +623,21 @@ mod tests {
     }
 
     #[test]
-    fn a_silica_excess_composition_minimizes_to_forsterite_plus_quartz() {
-        // Mg2Si2O6 is forsterite plus quartz in the seed registry (which carries no enstatite MgSiO3, so the
-        // assemblage is only as complete as the data): the minimization lands fo + qz over the higher-Gibbs
-        // 2 quartz + 2 periclase alternative.
+    fn a_pyroxene_stoichiometry_minimizes_to_enstatite() {
+        // Mg2Si2O6 is 2 MgSiO3, the pyroxene stoichiometry. With enstatite now in the seed registry (added 2026-07-18
+        // with its cited R&H molar volume for the flexural render's crust aggregation), the minimization lands the
+        // REAL phase, enstatite, over the higher-Gibbs forsterite + quartz alternative it fell back to when
+        // enstatite was absent from the data. Enstatite is the stable pyroxene, which is why it forms in real rocks;
+        // its arrival in the census is the assemblage getting MORE correct, the data completing rather than a
+        // mechanism changing.
         let r = PhaseRegistry::standard().expect("registry loads");
         let comp = vec![el("Mg", 2), el("Si", 2), el("O", 6)];
         let a = stable_assemblage(&comp, Fixed::from_int(300), Fixed::from_int(1), &r)
             .expect("the budget forms an assemblage");
         assert_eq!(
             phase_names(&a),
-            vec!["forsterite".to_string(), "quartz".to_string()],
-            "silica-saturated bulk-silicate lands forsterite + quartz"
+            vec!["enstatite".to_string()],
+            "the pyroxene stoichiometry lands enstatite, the real MgSiO3 phase, now that the census carries it"
         );
     }
 
