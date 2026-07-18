@@ -1,0 +1,21 @@
+# BHAC15 pre-main-sequence evolutionary tracks: the vendored source for the Hayashi-wall T_eff grid.
+#
+# BLOCK KIND: [[source]], a HELD-BYTES vendored artifact (the JANAF / AESOPUS held-source idiom), NOT a reserved
+# floor kind ([[element]] / [[axis]] / [[substance]]): this is an immutable transcription of Baraffe et al. 2015
+# and does not participate in the floor real/fantasy authorship axis. PROVENANCE: header citation, out of
+# floor-Element policing. GRADE: single-grade, THEORY (stellar-evolution model tracks, solar composition
+# [M/H] = 0), like the Landin pre-MS turnover anchor, not a measurement. SHA256 is the receipt of the fetched
+# source bytes (primary since 2026-07-17); the dry-run battery scripts/bhac15_provenance_test.py re-checks it
+# offline, and also re-derives the extracted wall grid from these held bytes so a drifted transcription fails.
+#
+# The extracted Hayashi-wall grid (wall T_eff plus the age-drift band per stellar mass) is the cited data COLUMN
+# in ../hayashi_wall.toml; this held source is its witness.
+
+[[source]]
+name = "BHAC15_tracks"
+file = "BHAC15_tracks+structure"
+url = "http://perso.ens-lyon.fr/isabelle.baraffe/BHAC15dir/BHAC15_tracks+structure"
+citation = "Baraffe, I., Homeier, D., Allard, F., Chabrier, G. (2015), New evolutionary models for pre-main sequence and main sequence low-mass stars down to the hydrogen-burning limit, A&A 577, A42. DOI 10.1051/0004-6361/201425481. Tracks+structure table (M/Ms, log t, Teff, L/Ls, ...), masses 0.010 to 1.400 Msun, solar composition [M/H]=0."
+sha256 = "b95474c5d4284373a2fed3f06d969a44bcd925ac0e5b226cc0235acb7e068d2a"
+bytes = 1418659
+grade = "theory"
