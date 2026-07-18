@@ -676,6 +676,14 @@ impl DiskClockState {
 /// LBP primary's `Mdot_0` is its initial-condition normalization, which this closure supplies from the collapse
 /// rather than reserving; the correspondence is named here so the weld is auditable, not silent.
 ///
+/// RANGE-COLLAPSE, DECLARED. The wind ensemble now flows as an INTERVAL (the two `XrayWindFit` edges), but the
+/// COLLAPSE model is consumed as a POINT: `star.collapse` is one member (`CollapseModel::shu_1977` in the tests),
+/// DEFAULTS-TAKEN, so the derived `Mdot_0` is conditioned on the Shu member and a provenance readout must carry
+/// "conditioned on the Shu member" verbatim until the collapse-band interval propagation lands. That propagation
+/// (evaluate the collapse at both endpoints, feed the `Mdot_0` interval through the race, interval in and interval
+/// out) is its own slice; a weld that silently collapses the declared factor-48 band onto its Shu edge would be the
+/// range-collapse defect standing one step downstream of the wind band this wire already carries.
+///
 /// DORMANT and BYTE-NEUTRAL: no run-path caller (both the disk clock and the giant gate are dormant), so the pins
 /// hold bit-exact. The FLIP that feeds this into `run_world` and moves the pins is the capstone event under the
 /// owner's signature, not this composition, and it waits on the layer-4 draws that retire the remaining interims

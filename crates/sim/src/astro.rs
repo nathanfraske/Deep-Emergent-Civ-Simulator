@@ -691,21 +691,30 @@ pub fn viscous_similarity_surface_density(
 /// hydrostatic singular isothermal sphere), with `m0` conditioning on `A` within Shu 1977's own Table 1 (Hunter
 /// 1977; Whitworth and Summers 1985). The two shipped rows are the DECLARED ENDPOINTS of that measured continuum, a
 /// factor ~48 apart, the Owen-versus-Sellek band exactly: (1) [`CollapseModel::shu_1977`], the hydrostatic edge
-/// `A = 2`, `m0 = 0.975`, the slowest, quasi-static expansion-wave collapse; (2) [`CollapseModel::larson_penston`],
-/// the dynamical edge `A = 8.85`, `m0 = 46.9`, the fastest, most violent collapse. A caller needing one number gets
-/// the BAND, not a default.
+/// `A = 2`, `m0 = 0.975`, the slowest, quasi-static expansion-wave collapse, VENDORED (Shu 1977 primary, receipt on
+/// file); (2) [`CollapseModel::larson_penston`], the dynamical edge `A = 8.85`, `m0 = 46.9`, the fastest collapse,
+/// CHANNEL-RELAYED PROVISIONAL (the value was relayed from a secondary restatement, no bytes vendored, so it is a
+/// fetch-flagged endpoint, live for the band but not a citation until its primary is read source-verbatim). A caller
+/// needing one number gets the BAND, not a default.
 ///
-/// THE CENTRAL-MEMBER CHOICE IS A CONVENTION with a recorded stability note: Ori and Piran 1988 gave numerical
-/// evidence that Larson-Penston is the only STABLE self-similar solution in the family, so it is arguably the most
-/// physically relevant, while Shu-as-shipped is the widely-used quasi-static convention; the debate continues on the
-/// failure of either endpoint to describe post-core-formation accretion in numerical simulations. So neither
-/// endpoint is a neutral default; the band is the honest object.
+/// THE CENTRAL-MEMBER CHOICE IS A CONVENTION with a recorded stability note (Ori and Piran 1988, that Larson-Penston
+/// is the only STABLE self-similar solution, so arguably the most physically relevant, against Shu as the widely-used
+/// quasi-static convention; the debate continues on the failure of either endpoint post-core-formation). RULED
+/// (research agent, owner-signed): the end state is PURE BAND, NO DEFAULT, since a default here sits in the giant
+/// verdict's path with a factor-48 alternative and an open selection debate. STAGED: today the Shu member rides as a
+/// DEFAULTS-TAKEN interim (the convention line in the provenance readout, the stability note an annotation never a
+/// selector); the collapse-band interval propagation through the race is its own slice; then the default dies and
+/// the band ships. Choosing a member because a solar hindcast prefers it would be a licensed-calibration event
+/// (ledger, spent row, owner signature), which nothing here licenses. The stability note, the factor-48 framing, and
+/// the citations below are CHANNEL-RELAYED pending the measure fetch.
 ///
 /// NAMED DEBT (flagged, not built): the REALISTIC time-dependent infall history is not constant. Foster and
 /// Chevalier 1993 (and Larson 2003) find a PEAKED history, a high early rate dropping later, with a maximum near
-/// `13 c_s^3/G` once opacity is included. This [`CollapseModel`] carries a single eigenvalue (a constant-rate
-/// member), so the contract is kept wide enough to admit a rate-LAW member later (a `Mdot(t)` row), a fetch-flagged
-/// debt. Table 1 (the general `m0(A)` row) joins the fetch list.
+/// `13 c_s^3/G` once opacity is included (channel-relayed). This [`CollapseModel`] carries a single eigenvalue (a
+/// constant-rate member), so the contract is kept wide enough to admit a rate-LAW member later (a `Mdot(t)` row), a
+/// fetch-flagged debt. NAMED OPPORTUNITY (not a debt): the eigenvalue family's own floor is the similarity ODE, so
+/// `m0(A)` is derivable in-engine, at which rung Table 1 demotes to a concordance check. The fetch specs live in
+/// `docs/working/DISK_ARC_FETCH_VALUES.md`.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct CollapseModel {
     /// The dimensionless collapse mass-accretion eigenvalue `m0` (`Mdot = m0 * c_s^3 / G`).
@@ -730,13 +739,19 @@ impl CollapseModel {
     }
 
     /// The Larson-Penston (Hunter 1977) DYNAMICAL collapse, the FAST endpoint: `m0 = 46.9` at the instability
-    /// parameter `A = 8.85` (Hunter 1977; Whitworth and Summers 1985, the similarity-solution continuum), ~48 times
-    /// the Shu rate, the faster edge of the collapse-model band and the Ori-Piran 1988 stable member. The value is
-    /// cited from the continuum family; it graduates like the Shu row when its primary is vendored with a receipt.
+    /// parameter `A = 8.85`, ~48 times the Shu rate, the faster edge of the collapse-model band.
+    ///
+    /// CHANNEL-RELAYED, PROVISIONAL, FETCH-FLAGGED. These values were RELAYED (a secondary review's restatement of
+    /// the similarity-solution family), not vendored: no primary bytes were downloaded, no receipt computed, no
+    /// source-verbatim table read. The channel is not a citation (the Ra_crit-arc lesson), so the value stays LIVE
+    /// for the band under the modality `channel-relayed-provisional`, and the fetch-flag is RESTORED: the retirement
+    /// spec (locate the printed primary table for `A = 8.85`, `m0 = 46.9`, candidates Hunter 1977 and
+    /// Whitworth-Summers 1985 verified by content, vendor the bytes, compute the receipt, read source-verbatim) lives
+    /// in `docs/working/DISK_ARC_FETCH_VALUES.md`. Only vendored bytes retire this flag.
     pub fn larson_penston() -> Self {
         CollapseModel {
-            collapse_coefficient_m0: Fixed::from_ratio(469, 10), // 46.9 (Whitworth-Summers 1985)
-            instability_parameter_a: Fixed::from_ratio(885, 100), // A = 8.85
+            collapse_coefficient_m0: Fixed::from_ratio(469, 10), // 46.9, channel-relayed-provisional (fetch-flagged)
+            instability_parameter_a: Fixed::from_ratio(885, 100), // A = 8.85, channel-relayed-provisional
         }
     }
 }
@@ -763,7 +778,11 @@ impl CollapseModel {
 /// FREE PARTICLE (against pure-`H2` counting, a 1.26x lever), which is what [`derive_disk_gas_mean_molecular_weight`]
 /// returns when passed `hydrogen_atoms_per_molecule = 2` (`mu ~ 2.34` at solar). SAME-FACT-TWO-DOORS: the core `mu`
 /// and the disk `mu` are ONE ROW, the same molecular per-free-particle derivation, not two routes to arbitrate; the
-/// caller passes the world's single derived `mu` here and to the disk clock alike, so no second door opens.
+/// caller passes the world's single derived `mu` here and to the disk clock alike, so no second door opens. (That
+/// function's `disk_gas` NAME serves a cloud-core consumer here by SHARED SCOPE, both being cold molecular
+/// `H2`-dominated gas, not a proximity grab.) TERMS DROPPED: this is valid where hydrogen is MOLECULAR; a hot-inner-
+/// disk consumer, where `H2` dissociates, needs a phase dispatch before it may read this row, a named debt, flag
+/// only.
 ///
 /// THE COLLAPSE COEFFICIENT is the model-structure choice, carried on [`CollapseModel`] (Shu `A = 2` versus the
 /// faster Larson-Penston `A = 8.85` endpoint, a factor ~48 band), never authored inline. The cloud-core TEMPERATURE
@@ -5287,7 +5306,10 @@ mod tests {
                 .expect("the collapse rate resolves for a solar-composition 10 K core");
         // ISOTHERMAL ASSERTION: the vendored band is ~1.5 (mu=2.33) to ~1.9 (mu=2.0) M_sun/Myr at 10 K. An adiabatic
         // sound speed (gamma=5/3) would inflate the rate by gamma^(3/2) ~ 2.15 to ~3.3, OUTSIDE this band, so the
-        // absolute magnitude asserts the isothermal c_s that a silent-gamma bug would break.
+        // absolute magnitude asserts the isothermal c_s that a silent-gamma bug would break. MUTATION RECEIPT TAKEN
+        // once (audit of f369bdf): injecting the adiabatic gamma gave 3.36 M_sun/Myr and this assert went RED, so it
+        // tests the form, not just the magnitude. The band is a residue window with an analytic twin (the isothermal
+        // 1.55 against the adiabatic 3.3), not an authored epsilon: it discriminates the two forms by construction.
         assert!(
             solar.to_f64_lossy() > 1.4 && solar.to_f64_lossy() < 1.7,
             "the 10 K solar-core birth rate is ~1.5 M_sun/Myr, isothermal not adiabatic (got {})",
