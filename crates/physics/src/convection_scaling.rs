@@ -27,13 +27,17 @@
 //! 1916, analytic), rigid-rigid `1707.762` (Pellew and Southwell 1940), and RIGID-FREE `1100.65` (a free surface
 //! over a near-rigid base), which is the planetary-mantle case and the one the single-lid prefactor keys off.
 //!
-//! `a` IS CONVENTION-DEPENDENT, an O(1) number, not universal, and the column states the seam plainly: `a = 1.0`
-//! is the single-boundary-layer (peel-away) form the planetary parameterized-convection literature uses (Stevenson
-//! et al. 1983, Komacek and Abbot 2016, Vazan et al. 2018); `a = 2^(-4/3) ~ 0.397` is the symmetric
-//! two-boundary-layer form. The band spans them, and which point applies is a HEATING-MODE modeling choice
-//! (basal / single-lid toward 1.0, internal / symmetric toward 0.40) surfaced for the owner, not fabricated here.
-//! The bare coefficient `C = 0.294` of the un-normalized `Nu = C Ra^(1/3)` is a DIFFERENT normalization and is
-//! carried as its own row so it can never be read into the `a` slot.
+//! `a` IS CONVENTION-DEPENDENT, an O(1) number, not universal: `a = 1.0` is the single-boundary-layer (peel-away)
+//! BASAL-heated form (Stevenson et al. 1983, Komacek and Abbot 2016, Vazan et al. 2018), `a = 2^(-4/3) ~ 0.397` the
+//! symmetric two-boundary-layer INTERNAL-heated form. Which applies is NOT a taste but the WORLD'S OWN HEATING
+//! CONFIGURATION (owner ruling 2026-07-18, the residue rule: a convention selects on somebody's state, so make it
+//! the world's state, never the literature's default): [`ConvectionScaling::nusselt_prefactor_at_internal_fraction`]
+//! DERIVES `a` from the internal-heating fraction (the Urey-class ratio of radiogenic production to surface loss),
+//! the two cited endpoints as the band. The deep-time model is `heat_production`-only with NO basal core-flux term,
+//! so its fraction is 1 and its prefactor is the internal `0.397` (picking `1.0` would import the literature's
+//! basal-heated favourite and run every interior 2.5x too cold); the day a core-flux term lands, the dispatch is
+//! already shaped. The bare coefficient `C = 0.294` of the un-normalized `Nu = C Ra^(1/3)` is a DIFFERENT
+//! normalization and is carried as its own row so it can never be read into the `a` slot.
 
 use std::path::Path;
 
@@ -197,10 +201,31 @@ impl ConvectionScaling {
             .map(|(_, c)| *c)
     }
 
-    /// The Nusselt PREFACTOR `a` for `Nu = a (Ra/Ra_crit)^(1/3)`: the single-boundary-layer planetary value with
-    /// its two-convention band. Multiplies the heat-loss flux, never the lid boundary layer.
+    /// The Nusselt PREFACTOR `a` band for `Nu = a (Ra/Ra_crit)^(1/3)`, its value the single-boundary-layer basal
+    /// endpoint and its band spanning the two conventions. Prefer [`Self::nusselt_prefactor_at_internal_fraction`],
+    /// which selects within the band from the world's own heating configuration.
     pub fn nusselt_prefactor(&self) -> Option<ScalingConstant> {
         self.constant("nu_ra_prefactor_a")
+    }
+
+    /// The heating-conditioned Nusselt prefactor `a`, DERIVED from the world's own internal-heating fraction rather
+    /// than an authored convention (owner ruling 2026-07-18, the residue rule: a convention selects on somebody's
+    /// state, so it is made the WORLD's state). `internal_fraction` is the fraction of the interior's heat budget
+    /// that is INTERNAL (radiogenic), the Urey-class ratio: `1` for a purely internally-heated mantle (the
+    /// deep-time model today, `heat_production` with no basal core-flux term) and `0` for a purely basal-heated
+    /// one. The prefactor runs continuously between the two cited endpoints, `a = 1.0` (single-boundary-layer,
+    /// basal) at `f = 0` down to `a = 2^(-4/3) ~ 0.397` (symmetric two-boundary-layer, internal) at `f = 1`:
+    /// `a = a_basal - f (a_basal - a_internal)`. `None` if the prefactor band is absent.
+    pub fn nusselt_prefactor_at_internal_fraction(
+        &self,
+        internal_fraction: Fixed,
+    ) -> Option<Fixed> {
+        let c = self.nusselt_prefactor()?;
+        let a_basal = c.band_hi?;
+        let a_internal = c.band_lo?;
+        let f = internal_fraction.clamp(Fixed::ZERO, Fixed::ONE);
+        let span = a_basal.checked_sub(a_internal)?;
+        a_basal.checked_sub(f.checked_mul(span)?)
     }
 
     /// The critical Rayleigh number (marginal-stability eigenvalue) for a mechanical boundary condition.
@@ -232,6 +257,34 @@ mod tests {
         // The band spans the symmetric two-boundary-layer 2^(-4/3) ~ 0.397 up to 1.0.
         assert!(close(a.band_lo.expect("band_lo"), 0.397, 0.002));
         assert!(close(a.band_hi.expect("band_hi"), 1.0, 1e-9));
+    }
+
+    #[test]
+    fn the_prefactor_derives_from_the_internal_heating_fraction() {
+        let s = scaling();
+        // The deep-time model is heat_production-only (internal fraction 1) -> the internal endpoint 2^(-4/3),
+        // NOT the literature's basal default of 1.0 (the residue rule: condition on the world's own state).
+        let a_internal = s
+            .nusselt_prefactor_at_internal_fraction(Fixed::ONE)
+            .unwrap();
+        assert!(
+            close(a_internal, 0.397, 0.002),
+            "fully internal heating derives a = 2^(-4/3)"
+        );
+        // Purely basal heating (fraction 0) recovers the single-boundary-layer endpoint 1.0.
+        assert_eq!(
+            s.nusselt_prefactor_at_internal_fraction(Fixed::ZERO)
+                .unwrap(),
+            Fixed::ONE
+        );
+        // A mixed budget interpolates strictly between the endpoints.
+        let a_mid = s
+            .nusselt_prefactor_at_internal_fraction(Fixed::from_ratio(1, 2))
+            .unwrap();
+        assert!(
+            a_mid > a_internal && a_mid < Fixed::ONE,
+            "mixed heating interpolates the band"
+        );
     }
 
     #[test]
