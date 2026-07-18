@@ -23,3 +23,27 @@ rust-version = "1.94"
 # Determinism does not depend on optimization level, but reproducible release
 # builds are wanted; keep codegen settings explicit rather than implicit.
 overflow-checks = true
+
+# Build scripts and proc macros compile UNOPTIMIZED by default, and civsim-sim's build script runs the
+# Stone 0 provenance gate (crates/stone0), which scans every tracked file in the tree. Unoptimized, that
+# scan costs about 4.6 seconds; optimized it costs about 1.3 seconds, measured. The gate re-runs on every
+# edit under any of its nine watched paths and it blocks the crate compile, so those seconds sit on the
+# serial critical path of essentially every rebuild. Raising the build-time optimization level changes
+# nothing the gate CHECKS and nothing that reaches a compiled crate (the build script emits only
+# rerun-if-changed and rerun-if-env-changed directives, no cfg, no generated code, no compile-affecting
+# env), so both canonical byte pins are untouched.
+[profile.dev.build-override]
+opt-level = 3
+
+[profile.dev]
+# Full DWARF is the cargo default and it is the largest silent cost of the dev and test path: the debug
+# artifacts for a `cargo test --no-run` of the default members weigh 9.9 GB, and writing and linking them
+# costs real time. Line tables keep what this project reads (a panic backtrace with file and line, and
+# symbolised profiles), and drop what it does not (variable inspection under a debugger). Measured on the
+# warm rebuild after a one-line edit in civsim-sim: 6.5 seconds to 5.3 seconds, with the target directory
+# falling from 9.9 GB to 4.5 GB. This is the dev profile ONLY, so the release path both byte pins are
+# built on is untouched.
+debug = "line-tables-only"
+
+[profile.release.build-override]
+opt-level = 3

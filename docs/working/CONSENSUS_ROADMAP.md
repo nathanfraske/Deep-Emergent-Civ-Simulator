@@ -12,6 +12,7 @@ Editing rule (the stop-gate enforces it): edit IN PLACE, keep every line a few w
 
 ## Recent landings (tombstoned; prune when old)
 
+- 2026-07-18  DONE  Build speedups: build-script opt-level 3 (Stone 0 gate 4.4s -> 1.4s) + dev line-tables-only (9.9G -> 4.5G); pins held -> `Cargo.toml`.
 - 2026-07-18  DONE  CI doc gate unbroken: two links cited a nonexistent `derive_deep_time_cap` -> `crates/viewer/src/main.rs`.
 - 2026-07-18  DONE  Biology parked out of `civsim-sim` (10 modules, 9,388 lines, both pins bit-exact) -> `crates/bio`.
 - 2026-07-18  FLAG  `calibration` sits in `civsim-bio` but 23 sim modules read it; wants its own shared crate -> `crates/bio/src/lib.rs`.
