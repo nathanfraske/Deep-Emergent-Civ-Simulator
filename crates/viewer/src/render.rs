@@ -1197,6 +1197,126 @@ pub fn crater_relief_km(stamps: &[CraterStamp], p: [Fixed; 3]) -> Fixed {
     z
 }
 
+/// NON-CANON DISPLAY (Principle 10): one fresh crater's transient IMPACT-EVENT flash, the watchable incandescent
+/// bloom a strike paints over its settled static relief and that RELAXES back into that relief as the deep-time
+/// clock advances past its formation. Where [`CraterStamp`] is the crater's permanent shape, this is the brief
+/// event at its birth: a viewer watching deep time SEES the impact land, then sees the flash fade to the quiet
+/// crater. Every physical property is DERIVED from the crater's own row: WHEN it flashes is the crater's own
+/// formation tick ([`CraterRow::age_myr`], the clock reading at the strike), WHERE it sits and how WIDE the bloom
+/// spreads is the crater's own ejecta footprint (the same `center`, `angular_radius`, and reach cone the relief
+/// stamp derives), and how it FADES is the crater's own time-decay from that formation tick. Only the emission HUE
+/// and the brightness GAIN are display constants (siblings of the lava glow's), because the state carries no derived
+/// shock temperature: the sim never forms the impact's kinetic energy (it overflows the fixed-point range, see
+/// [`civsim_sim::deeptime::bombard_tick`]). Carried in the display f32 tier the globe pixel loop emits in
+/// ([`draw_globe`], the tier the lava glow and hillshade already run in), with the load-bearing timing derived in
+/// fixed-point so the same clock step yields the same flash to the bit (Principle 3).
+#[derive(Clone, Copy, Debug)]
+pub struct ImpactFlash {
+    /// The crater centre as a BODY-frame unit vector (the globe pixel loop's f32 tier).
+    center: [f32; 3],
+    /// The crater's rim radius as an angle on the sphere (radians), its own `(D/2)/R` footprint.
+    angular_radius: f32,
+    /// cos(reach cone): a pixel whose centre-dot is below this lies outside the bloom and is skipped cheaply.
+    cos_reach: f32,
+    /// The flash brightness in `[0, 1]` at the render's current epoch: the crater's own time-decay, peak `1` at its
+    /// formation tick and `0` once a full relaxation window has passed (after which the crater carries no flash).
+    intensity: f32,
+}
+
+impl ImpactFlash {
+    /// Prepare a crater row as a transient impact flash at the render's current deep-time `epoch_myr`, over a
+    /// `window_myr` relaxation window. `None` when the crater is degenerate (the same guard [`CraterStamp::from_row`]
+    /// applies) OR when the epoch lies outside the crater's flash window: before it formed (`epoch < formation`) or
+    /// after it has settled (`epoch >= formation + window`). So a caller mapping this over every crater keeps only
+    /// the few currently flashing, and the emission is a transient the viewer catches at each impact's own birth.
+    /// The brightness is the DECLARED decay shape below; the geometry is the relief stamp's, carried to f32.
+    pub fn from_row(
+        row: &CraterRow,
+        radius_m: Fixed,
+        epoch_myr: Fixed,
+        window_myr: Fixed,
+    ) -> Option<ImpactFlash> {
+        if window_myr <= Fixed::ZERO {
+            return None;
+        }
+        // The crater's age since formation: [`CraterRow::age_myr`] is the elapsed clock reading AT the strike (the
+        // formation tick), so the age is the current epoch minus it. Outside `[0, window)` the crater is not flashing
+        // (not yet formed, or already relaxed to its static relief), so it contributes no emission.
+        let since = epoch_myr.checked_sub(row.age_myr)?;
+        if since < Fixed::ZERO || since >= window_myr {
+            return None;
+        }
+        // `phase` in [0, 1): 0 at formation, -> 1 as it settles.
+        let phase = since.checked_div(window_myr)?;
+        // THE DECLARED DECAY SHAPE (the one display curve this effect is allowed): a quadratic ease-out
+        // `(1 - phase)^2`, brightest (1) at the formation tick and easing smoothly to 0 a full window later. It is a
+        // monotone fade (the flash peaks at the strike and only relaxes, never re-brightens), documented rather than
+        // derived because no physical shock-cooling timescale is in the state; the relaxation WINDOW it runs over is
+        // the caller's reserved-with-basis display duration.
+        let one_minus = Fixed::ONE.checked_sub(phase)?;
+        let intensity = one_minus.mul(one_minus);
+        // Reuse the relief stamp's geometry AND its degenerate-row guard (a non-positive radius or diameter yields
+        // `None`), then carry the few numbers the pixel loop needs into its f32 display tier.
+        let stamp = CraterStamp::from_row(row, radius_m)?;
+        Some(ImpactFlash {
+            center: [
+                stamp.center[0].to_f64_lossy() as f32,
+                stamp.center[1].to_f64_lossy() as f32,
+                stamp.center[2].to_f64_lossy() as f32,
+            ],
+            angular_radius: stamp.angular_radius.to_f64_lossy() as f32,
+            cos_reach: stamp.cos_reach.to_f64_lossy() as f32,
+            intensity: intensity.to_f64_lossy() as f32,
+        })
+    }
+}
+
+/// Prepare the fresh-impact FLASHES of a crater set at the render's current deep-time `epoch_myr`: map every crater
+/// through [`ImpactFlash::from_row`] and keep only those currently flashing (formed within the last `window_myr`),
+/// so the returned list is small (the quiescent majority of a heavily-cratered world drops out). The globe pixel
+/// loop emits these over the shaded crust ([`crater_flash_emission`]), so as the clock steps past each crater's
+/// formation the viewer SEES it land and fade. Empty when no crater is fresh, so the render adds nothing there
+/// (byte-identical). Display-only (Principle 10); deterministic in the crater rows and the clock (Principle 3).
+pub fn active_flash_stamps(
+    craters: &[CraterRow],
+    radius_m: Fixed,
+    epoch_myr: Fixed,
+    window_myr: Fixed,
+) -> Vec<ImpactFlash> {
+    craters
+        .iter()
+        .filter_map(|row| ImpactFlash::from_row(row, radius_m, epoch_myr, window_myr))
+        .collect()
+}
+
+/// THE ANALYTIC IMPACT-FLASH EMISSION at a globe sample direction `b` (a display f32 unit vector): the summed
+/// brightness in `[0, ~]` every fresh crater covering `b` contributes, its time-decayed intensity shaped by the
+/// crater's OWN footprint, the SAME shape the static relief stamps: full over the excavation bowl (`x <= 1`, the
+/// incandescent crater interior) and the `x^-3` ejecta falloff beyond the rim (`x > 1`, the glowing blanket),
+/// continuous at the rim. Beyond a crater's reach cone it contributes nothing (the cheap far-majority reject, the
+/// same bound the relief stamp uses). Zero for an empty list or a sample no fresh crater covers. Display-only f32
+/// (Principle 10), the tier the lava glow and hillshade run in; [`draw_globe`] scales this by the flash hue and gain
+/// and ADDS it, so a fresh impact glows on the night side too (it emits, it does not reflect).
+fn crater_flash_emission(flashes: &[ImpactFlash], b: [f32; 3]) -> f32 {
+    let mut e = 0.0f32;
+    for f in flashes {
+        let dot = b[0] * f.center[0] + b[1] * f.center[1] + b[2] * f.center[2];
+        if dot < f.cos_reach || f.angular_radius <= 0.0 {
+            continue;
+        }
+        // The great-circle angle from the cross-product magnitude (|b x c| = sin angle), precise for these small
+        // crater angles (dot >= cos_reach >= 0, so the angle is at most the reach, within a hemisphere).
+        let cx = b[1] * f.center[2] - b[2] * f.center[1];
+        let cy = b[2] * f.center[0] - b[0] * f.center[2];
+        let cz = b[0] * f.center[1] - b[1] * f.center[0];
+        let angle = (cx * cx + cy * cy + cz * cz).sqrt().clamp(0.0, 1.0).asin();
+        let x = angle / f.angular_radius;
+        let profile = if x <= 1.0 { 1.0 } else { 1.0 / (x * x * x) };
+        e += f.intensity * profile;
+    }
+    e
+}
+
 /// The lat-lon surface fraction `(fu, fv)` of a BODY-frame direction: `fu` the longitude fraction in `[0, 1)`
 /// (wrapping the meridian) and `fv` the latitude fraction in `[0, 1]`, the same `lon = u*2pi - pi`,
 /// `lat = (0.5 - v)*pi` sphere map [`crater_uv_unit`] inverts. This is the coordinate the COARSE province field is
@@ -1982,6 +2102,7 @@ pub fn draw_globe(
     orient: GlobeOrientation,
     lava: Option<&[LavaGlow]>,
     field: Option<&SurfaceField>,
+    flash: Option<&[ImpactFlash]>,
 ) {
     if radius_px == 0 || w == 0 || h == 0 {
         return;
@@ -2010,6 +2131,22 @@ pub fn draw_globe(
     // scales BRIGHTNESS only; it never moves the threshold (the derived solidus) or the hue (the derived temperature),
     // and it has zero effect on canon (byte-neutral). Kept modest.
     const LAVA_EMISSION_GAIN: f32 = 2.5;
+    // NON-CANON DISPLAY: the IMPACT-FLASH emission brightness gain, a sibling of `LAVA_EMISSION_GAIN` and `AMBIENT`
+    // (the observability layer's allowance, Principle 10). The flash add per channel is `FLASH_COLOR_channel *
+    // emission * GAIN`, where `emission` is the fresh crater's DERIVED time-decay times its DERIVED footprint profile
+    // (both physics, in `[0, 1]`); this scale only maps that onto the display's incandescent range so a strike reads
+    // as a bright bloom that fades. At the flash's peak (a just-formed crater's bowl) this saturates to a white-hot
+    // core, a fresh impact blindingly bright, and dims as the crater's own decay relaxes it to the settled relief. It
+    // scales BRIGHTNESS only, never the timing (the derived formation tick) or the extent (the derived footprint),
+    // and it has zero effect on canon (viewer-only, byte-neutral). Kept the same modest scale as the lava glow.
+    const FLASH_EMISSION_GAIN: f32 = 2.5;
+    // NON-CANON DISPLAY: the impact-flash HUE, the incandescent white-hot of a fresh strike's shock-melt fireball.
+    // Unlike the lava glow, whose hue is the blackbody of the DERIVED interior temperature, an impact carries no
+    // derived shock temperature in the state (the sim never forms the impact's kinetic energy, which overflows the
+    // fixed-point range: see `civsim_sim::deeptime::bombard_tick`), so the flash hue is a display choice on the same
+    // incandescence family (a hot white, warm at the fading edge), stated plainly. A derived shock temperature would
+    // let this derive like the lava hue; that is the honest limit and the future refinement.
+    const FLASH_COLOR: Rgb = Rgb::new(255, 246, 224);
     // SUN-DIRECTION HILLSHADE (the seeable-relief payoff): when relief shading is on and the physical body radius is
     // supplied, the shading normal at each pixel is the sphere normal TILTED by the DERIVED terrain slope, so slopes
     // facing the star are bright and slopes facing away are dark. The relief is lit at its real (unexaggerated)
@@ -2132,6 +2269,26 @@ pub fn draw_globe(
                             add(color.b, g.emission.b),
                         );
                     }
+                }
+            }
+            // SELF-EMITTED IMPACT FLASH (the watchable-impacts payoff): a crater whose formation the deep-time clock
+            // has just passed RADIATES a brief incandescent bloom over its settled relief, peaking at its formation
+            // tick and relaxing to the static crater as the clock advances (the flash/ejecta of a fresh strike). Like
+            // the lava glow it EMITS (survives on the night side) and adds over the shaded crust; unlike it, it is a
+            // TRANSIENT keyed on each crater's own formation time, so a viewer watching deep time SEES impacts land.
+            // Empty (no fresh impact this epoch) leaves the render byte-identical; the few active flashes are already
+            // filtered by the caller ([`active_flash_stamps`]), so this per-pixel sum is cheap.
+            if let Some(flashes) = flash {
+                let e = crater_flash_emission(flashes, b);
+                if e > 0.0 {
+                    let add = |c: u8, ch: u8| -> u8 {
+                        (c as f32 + ch as f32 * e * FLASH_EMISSION_GAIN).clamp(0.0, 255.0) as u8
+                    };
+                    color = Rgb::new(
+                        add(color.r, FLASH_COLOR.r),
+                        add(color.g, FLASH_COLOR.g),
+                        add(color.b, FLASH_COLOR.b),
+                    );
                 }
             }
             buf[py as usize * w + px as usize] = color.pack();
@@ -2281,6 +2438,7 @@ pub fn render_solar_system_view(
     derived_star_dir: Option<[f32; 3]>,
     lava: Option<&[LavaGlow]>,
     field: Option<&SurfaceField>,
+    flash: Option<&[ImpactFlash]>,
 ) -> Vec<u32> {
     let mut buf = vec![bg.pack(); w.max(1) * h.max(1)];
     if w == 0 || h == 0 {
@@ -2331,6 +2489,7 @@ pub fn render_solar_system_view(
         orient,
         lava,
         field,
+        flash,
     );
     // The atmosphere haze around the limb, tinted by the caller's `sky` colour: the DERIVED Rayleigh sky from the
     // gas mix ([`rayleigh_sky_rgb`]) when it resolves, or [`PLACEHOLDER_SKY`] as the fail-soft fallback. The limb wants
@@ -2380,6 +2539,7 @@ pub fn draw_globe_scene(
     orient: GlobeOrientation,
     lava: Option<&[LavaGlow]>,
     field: Option<&SurfaceField>,
+    flash: Option<&[ImpactFlash]>,
 ) {
     if w == 0 || h == 0 {
         return;
@@ -2403,6 +2563,7 @@ pub fn draw_globe_scene(
         orient,
         lava,
         field,
+        flash,
     );
     // The limb wants the VIEW-space sun direction (screen x, y), the projection of the derived body-frame vector.
     let limb_dir = normalize3(body_to_view(star_dir_body, orient));
@@ -2699,6 +2860,210 @@ mod tests {
             depth_m: Fixed::from_int(depth_m),
             age_myr: Fixed::ZERO,
         }
+    }
+
+    // A crater row at (u, v) = (0.5, 0.5) formed at a given clock reading `age_myr` (megayears), for the
+    // impact-FLASH timing tests: the flash keys this formation reading against the render's current epoch.
+    fn crater_row_formed_at(diameter_m: i32, depth_m: i32, age_myr: i32) -> CraterRow {
+        CraterRow {
+            u: Fixed::from_ratio(1, 2),
+            v: Fixed::from_ratio(1, 2),
+            diameter_m: Fixed::from_int(diameter_m),
+            depth_m: Fixed::from_int(depth_m),
+            age_myr: Fixed::from_int(age_myr),
+        }
+    }
+
+    // The crater-centre direction (u, v) = (0.5, 0.5) as the display f32 unit vector the flash emission samples.
+    fn flash_center_dir() -> [f32; 3] {
+        let c = crater_uv_unit(Fixed::from_ratio(1, 2), Fixed::from_ratio(1, 2));
+        [
+            c[0].to_f64_lossy() as f32,
+            c[1].to_f64_lossy() as f32,
+            c[2].to_f64_lossy() as f32,
+        ]
+    }
+
+    #[test]
+    fn an_impact_flashes_at_its_formation_and_settles_after_the_window() {
+        // A crater formed at 1000 Myr on a 3000 km body, a 60-Myr (3-tick x 20-Myr) relaxation window. The flash is
+        // present and PEAK at the formation epoch, dimmer halfway through the window, and GONE (no flash object) once
+        // a full window has passed, so a viewer watching deep time sees it land and relax to the static crater.
+        let radius_m = Fixed::from_int(3_000_000);
+        let window = Fixed::from_int(60);
+        let formed = 1000;
+        let rows = vec![crater_row_formed_at(60_000, 6_000, formed)];
+
+        // Before it forms: no flash (the crater does not exist yet on the clock).
+        let before = active_flash_stamps(&rows, radius_m, Fixed::from_int(formed - 20), window);
+        assert!(
+            before.is_empty(),
+            "a crater flashes only from its formation onward"
+        );
+
+        // At formation: exactly one flash, at peak intensity (1.0).
+        let at = active_flash_stamps(&rows, radius_m, Fixed::from_int(formed), window);
+        assert_eq!(
+            at.len(),
+            1,
+            "the fresh crater flashes at its formation epoch"
+        );
+        let peak = at[0].intensity;
+        assert!(
+            (peak - 1.0).abs() < 1e-3,
+            "peak flash at formation, got {peak}"
+        );
+
+        // Halfway through the window (phase 0.5): the declared (1-phase)^2 decay = 0.25 of peak.
+        let mid = active_flash_stamps(&rows, radius_m, Fixed::from_int(formed + 30), window);
+        assert_eq!(mid.len(), 1);
+        let midi = mid[0].intensity;
+        assert!(
+            (midi - 0.25).abs() < 1e-2,
+            "quadratic ease-out at half window ~0.25, got {midi}"
+        );
+        assert!(midi < peak, "the flash decays from its formation peak");
+
+        // A full window later: the crater has settled, no flash object at all (it is now just static relief).
+        let after = active_flash_stamps(&rows, radius_m, Fixed::from_int(formed + 60), window);
+        assert!(
+            after.is_empty(),
+            "the flash is gone once the window passes (settled to static relief)"
+        );
+    }
+
+    #[test]
+    fn the_flash_emission_is_bright_at_the_crater_and_fades_to_nothing() {
+        // The emission the pixel loop adds: bright over the crater at formation, gone once it settles, and zero for a
+        // sample far from the crater. Sampled at the crater-centre direction (u, v) = (0.5, 0.5).
+        let radius_m = Fixed::from_int(3_000_000);
+        let window = Fixed::from_int(60);
+        let rows = vec![crater_row_formed_at(60_000, 6_000, 1000)];
+        let c = flash_center_dir();
+
+        let at = active_flash_stamps(&rows, radius_m, Fixed::from_int(1000), window);
+        let e_at = crater_flash_emission(&at, c);
+        assert!(
+            e_at > 0.9,
+            "the crater centre is bright at formation, got {e_at}"
+        );
+
+        // The far side of the globe is outside the reach cone: no emission.
+        let far = crater_flash_emission(&at, [-c[0], -c[1], -c[2]]);
+        assert_eq!(far, 0.0, "a sample far from the crater gets no flash");
+
+        // After the window: no flash object, so no emission (the crater is now only static relief).
+        let after = active_flash_stamps(&rows, radius_m, Fixed::from_int(1060), window);
+        assert_eq!(
+            crater_flash_emission(&after, c),
+            0.0,
+            "no emission once the flash has settled"
+        );
+    }
+
+    #[test]
+    fn the_flash_is_deterministic_in_the_rows_and_the_clock() {
+        // Same rows + same epoch + same window => the same flashes and the same emission, to the bit (Principle 3).
+        let radius_m = Fixed::from_int(3_000_000);
+        let window = Fixed::from_int(60);
+        let rows = vec![
+            crater_row_formed_at(60_000, 6_000, 1000),
+            crater_row_formed_at(30_000, 3_000, 1010),
+        ];
+        let a = active_flash_stamps(&rows, radius_m, Fixed::from_int(1015), window);
+        let b = active_flash_stamps(&rows, radius_m, Fixed::from_int(1015), window);
+        assert_eq!(
+            a.len(),
+            b.len(),
+            "the same clock step draws the same flashes"
+        );
+        assert_eq!(
+            a.len(),
+            2,
+            "both craters are within the window at epoch 1015"
+        );
+        for (fa, fb) in a.iter().zip(b.iter()) {
+            assert_eq!(fa.intensity.to_bits(), fb.intensity.to_bits());
+        }
+        let c = flash_center_dir();
+        assert_eq!(
+            crater_flash_emission(&a, c).to_bits(),
+            crater_flash_emission(&b, c).to_bits(),
+            "same seed + same clock step => same rendered flash, to the bit"
+        );
+    }
+
+    #[test]
+    fn draw_globe_paints_a_fresh_impact_flash_over_the_dark_crust() {
+        // The pixel-level wiring: a fresh impact centred on the SUB-OBSERVER point radiates over the crust the globe
+        // draws, so the pixel there is brighter WITH the flash than without. The star lights the +x limb, so the
+        // sub-observer point [0, 0, 1] sits in shadow (Lambert 0, ambient only): a brighter pixel there proves the
+        // flash EMITS (like the lava glow, it survives on the dark side) rather than merely reflecting sunlight. A
+        // pixel out at the lit limb, far from the crater, is unchanged, so the flash is a local bloom, not a tint.
+        let (w, h) = (160usize, 120usize);
+        let bg = Rgb::new(8, 9, 14);
+        let cols = 8usize;
+        let uniform: Vec<DerivedTile> = (0..cols * 8)
+            .map(|_| DerivedTile {
+                elevation: Fixed::from_int(1),
+                relief: TerrainRelief::Lowland,
+            })
+            .collect();
+        let (cx, cy, radius) = (80i32, 60i32, 48usize);
+        let star = [1.0f32, 0.0, 0.0]; // lights the +x limb; the sub-observer point [0,0,1] is dark
+        let white = Rgb::new(255, 255, 255);
+
+        // One fresh impact at the sub-observer point (u, v) = (0.5, 0.5) -> body [0, 0, 1], at peak intensity
+        // (epoch == formation), 200 km across on a 3000 km body so its bloom covers several pixels around centre.
+        let radius_m = Fixed::from_int(3_000_000);
+        let window = Fixed::from_int(60);
+        let rows = vec![crater_row_formed_at(200_000, 20_000, 0)];
+        let flashes = active_flash_stamps(&rows, radius_m, Fixed::ZERO, window);
+        assert_eq!(
+            flashes.len(),
+            1,
+            "the fresh impact is flashing at its formation"
+        );
+
+        let render = |flash: Option<&[ImpactFlash]>| -> Vec<u32> {
+            let mut buf = vec![bg.pack(); w * h];
+            draw_globe(
+                &mut buf,
+                w,
+                h,
+                cx,
+                cy,
+                radius,
+                &uniform,
+                latlon(&uniform, cols),
+                star,
+                white,
+                SurfaceStyle::default(),
+                GlobeOrientation::IDENTITY,
+                None,
+                None,
+                flash,
+            );
+            buf
+        };
+        let lum = |px: u32| -> u32 { ((px >> 16) & 0xff) + ((px >> 8) & 0xff) + (px & 0xff) };
+
+        let without = render(None);
+        let with = render(Some(&flashes));
+        let center = cy as usize * w + cx as usize;
+        assert!(
+            lum(with[center]) > lum(without[center]) + 100,
+            "the fresh impact flashes bright over the dark sub-observer crust: without {} vs with {}",
+            lum(without[center]),
+            lum(with[center])
+        );
+
+        // A pixel out toward the lit +x limb (far from the crater's reach cone) is unchanged: the flash is local.
+        let limb = cy as usize * w + (cx + 40) as usize;
+        assert_eq!(
+            with[limb], without[limb],
+            "a sample far from the impact is untouched (the flash is a local bloom, not a global tint)"
+        );
     }
 
     #[test]
@@ -3115,6 +3480,7 @@ mod tests {
             GlobeOrientation::IDENTITY,
             None,
             None,
+            None,
         );
         assert!(buf.iter().any(|&p| p != bg.pack()), "the globe is drawn");
         let right = half_luminance(&buf, w, cx, cy, radius as i32, true);
@@ -3137,6 +3503,7 @@ mod tests {
             Rgb::new(255, 255, 255),
             SurfaceStyle::default(),
             GlobeOrientation::IDENTITY,
+            None,
             None,
             None,
         );
@@ -3202,6 +3569,7 @@ mod tests {
             Rgb::new(255, 255, 255),
             SurfaceStyle::default(),
             GlobeOrientation::IDENTITY,
+            None,
             None,
             None,
         );
@@ -3328,6 +3696,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         );
         assert_eq!(frame.len(), w * h, "one word per pixel");
         // The star disk carries the derived blackbody colour at its core.
@@ -3361,6 +3730,7 @@ mod tests {
             PLACEHOLDER_SKY,
             SurfaceStyle::default(),
             GlobeOrientation::IDENTITY,
+            None,
             None,
             None,
             None,
@@ -3398,6 +3768,7 @@ mod tests {
                 PLACEHOLDER_SKY,
                 SurfaceStyle::default(),
                 GlobeOrientation::IDENTITY,
+                None,
                 None,
                 None,
                 None,
@@ -4000,6 +4371,7 @@ mod tests {
             GlobeOrientation::IDENTITY,
             None,
             None,
+            None,
         );
         // A tiny rotation moves at least one pixel: the texture responds to the orientation.
         let mut b = vec![bg.pack(); w * h];
@@ -4019,6 +4391,7 @@ mod tests {
                 rot_lon: 0.0,
                 rot_lat: 0.8,
             },
+            None,
             None,
             None,
         );
@@ -4059,6 +4432,7 @@ mod tests {
             GlobeOrientation::IDENTITY,
             None,
             None,
+            None,
         );
         let mut panned = vec![bg.pack(); w * h];
         draw_globe(
@@ -4077,6 +4451,7 @@ mod tests {
                 rot_lon: 1.2,
                 rot_lat: 0.0,
             },
+            None,
             None,
             None,
         );
@@ -4105,6 +4480,7 @@ mod tests {
                     ..Default::default()
                 },
                 GlobeOrientation::IDENTITY,
+                None,
                 None,
                 None,
             );
@@ -4157,6 +4533,7 @@ mod tests {
                     ..Default::default()
                 },
                 GlobeOrientation::IDENTITY,
+                None,
                 None,
                 None,
             );
@@ -4222,6 +4599,7 @@ mod tests {
                     surface_radius_m: radius_m,
                 },
                 GlobeOrientation::IDENTITY,
+                None,
                 None,
                 None,
             );

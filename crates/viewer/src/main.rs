@@ -437,6 +437,8 @@ fn globe_cmd(argv: &[String]) {
         // The demo fixture carries no province field, so no analytic Sample: the hillshade falls back to the
         // cache's finite difference, byte-identical to before the analytic normals.
         None,
+        // The demo fixture drew no deep-time craters, so no impact flashes (byte-identical).
+        None,
     );
     write_ppm(&path, w, h, &buf);
     eprintln!(
@@ -574,6 +576,18 @@ fn derived_globe_cmd(argv: &[String]) {
         .provinces
         .as_ref()
         .map(|p| province_surface_field(p, &stamps));
+    // THE WATCHABLE IMPACT FLASHES at this epoch: the fresh craters whose formation the deep-time clock has just
+    // passed, each a transient incandescent bloom the render emits over the settled relief so an impact is SEEN
+    // landing. Empty (byte-identical) once the world quiets. The count is printed so the timing is checkable
+    // headlessly: render two step counts and a crater flashing at the first has relaxed to its static bowl by the
+    // later one.
+    let flash = scene.active_flash_stamps();
+    eprintln!(
+        "  impact flashes: {} fresh this epoch (craters formed within the last {} ticks, {:.0} Myr)",
+        flash.len(),
+        IMPACT_FLASH_RELAX_TICKS,
+        DEEP_TIME_MYR_PER_TICK.to_f64_lossy() * IMPACT_FLASH_RELAX_TICKS as f64,
+    );
     let buf = render::render_solar_system_view(
         fx.radius_m,
         fx.t_eff,
@@ -593,6 +607,8 @@ fn derived_globe_cmd(argv: &[String]) {
         // too). Empty on the uniform-crust fallback, so the render adds nothing there.
         (!scene.lava.is_empty()).then_some(scene.lava.as_slice()),
         field.as_ref(),
+        // The DERIVED impact flashes: fresh craters glow over the settled relief and relax as the clock advances.
+        (!flash.is_empty()).then_some(flash.as_slice()),
     );
     write_ppm(&path, w, h, &buf);
     eprintln!("wrote {path} ({w}x{h})");
@@ -951,6 +967,28 @@ impl DerivedScene {
         self.provinces
             .as_ref()
             .map(|p| render::crater_stamps(&p.state.craters, p.radius_m))
+            .unwrap_or_default()
+    }
+
+    /// This scene's fresh-impact FLASHES at the province field's current deep-time epoch
+    /// ([`render::active_flash_stamps`]): the few craters whose formation the clock has passed within the last
+    /// [`IMPACT_FLASH_RELAX_TICKS`] ticks, each a transient incandescent bloom the globe pixel loop emits over the
+    /// settled crust, so the owner SEES impacts land as deep time runs and sees each fade to its static crater. The
+    /// epoch is the province field's own `elapsed_myr` and each crater's formation is its own `age_myr`, so the
+    /// timing is derived and deterministic (Principle 3). Empty on the uniform-crust fallback (no province field) or
+    /// when no crater is currently fresh, in which case the render adds nothing (byte-identical). Display-only.
+    fn active_flash_stamps(&self) -> Vec<render::ImpactFlash> {
+        let window = DEEP_TIME_MYR_PER_TICK.mul(Fixed::from_int(IMPACT_FLASH_RELAX_TICKS));
+        self.provinces
+            .as_ref()
+            .map(|p| {
+                render::active_flash_stamps(
+                    &p.state.craters,
+                    p.radius_m,
+                    p.state.elapsed_myr,
+                    window,
+                )
+            })
             .unwrap_or_default()
     }
 }
@@ -1420,6 +1458,21 @@ fn heterogeneity_amplitude(f: Fixed, d: Fixed, efficiency: Fixed) -> Option<Fixe
 /// physics step ([`step_deep_time`]), only the CADENCE is the observer's. Scaled so the surface visibly
 /// evolves over a few real seconds when the clock is sped up.
 const DEEP_TIME_MYR_PER_TICK: Fixed = Fixed::from_int(20);
+
+/// NON-CANON DISPLAY, reserved-with-basis (Principle 10). The impact-flash relaxation window in deep-time TICKS:
+/// how many playback ticks after a crater's formation its watchable impact flash (the incandescent bloom
+/// [`render::active_flash_stamps`] paints, which peaks at the formation tick and relaxes to the crater's static
+/// relief) stays lit. The window in geological time is this many ticks of [`DEEP_TIME_MYR_PER_TICK`], so what this
+/// sets is the DISPLAY duration (how many rendered frames a viewer catches the flash across), which is why it is
+/// counted in TICKS rather than Myr: a faster or slower `MYR_PER_TICK` cadence keeps the same number of watchable
+/// frames. Its BASIS is a display-legibility bound, not a physical relaxation time (the state carries no derived
+/// shock-cooling timescale: the sim never forms the impact energy): it must be at least one tick so a fresh crater
+/// flashes on the very frame it appears at the coarsest single-step cadence, and only a few ticks so the flash
+/// reads as a BRIEF event and is gone well within the crater's long quiescent lifetime (short vs the run). Reserved
+/// for the owner to calibrate against how brief-yet-catchable he wants impacts to read at his playback speed; the
+/// default here is the minimal "a few ticks" that keeps a flash visible across more than the single formation
+/// frame. Viewer-only, byte-neutral to the run (the crater rows and the clock it reads are off the run path).
+const IMPACT_FLASH_RELAX_TICKS: i32 = 3;
 
 /// NON-CANON display: the number of deep-time steps the initial scene is aged to, so the globe opens on a
 /// planet that already carries relief (an evolved present-day surface) rather than a fresh molten sphere. A
@@ -3738,6 +3791,8 @@ fn draw_woosh_frame(
         .provinces
         .as_ref()
         .map(|p| province_surface_field(p, &stamps));
+    // The fresh-impact FLASHES ride the woosh in too, so a just-struck world already flickers as it grows in.
+    let flash = scene.active_flash_stamps();
     render::draw_globe_scene(
         &mut buf,
         w,
@@ -3756,6 +3811,7 @@ fn draw_woosh_frame(
         // The DERIVED lava glow rides the woosh in, so a molten world already glows as it grows from the map dot.
         (!scene.lava.is_empty()).then_some(scene.lava.as_slice()),
         field.as_ref(),
+        (!flash.is_empty()).then_some(flash.as_slice()),
     );
     buf
 }
@@ -4173,6 +4229,10 @@ fn run_derived(argv: &[String]) {
                     .provinces
                     .as_ref()
                     .map(|p| province_surface_field(p, &stamps));
+                // THE WATCHABLE IMPACT FLASHES: as the deep-time clock steps, a crater whose formation it has just
+                // passed flashes over its settled relief and relaxes as the clock advances, so the owner SEES
+                // impacts land while watching deep time. Empty (byte-identical) once the bombardment quiets.
+                let flash = scene.active_flash_stamps();
                 render::draw_globe_scene(
                     &mut buf,
                     w,
@@ -4192,6 +4252,7 @@ fn run_derived(argv: &[String]) {
                     // too, and it fades as the deep-time clock cools the world. Empty (no glow) on the uniform crust.
                     (!scene.lava.is_empty()).then_some(scene.lava.as_slice()),
                     field.as_ref(),
+                    (!flash.is_empty()).then_some(flash.as_slice()),
                 );
                 // Cursor -> surface pick and highlight (fail-soft off the sphere).
                 let picked = mouse_pos.and_then(|(mx, my)| {
@@ -4676,6 +4737,8 @@ fn main() {
                     None,
                     // The living-world globe carries no province field, so no analytic Sample: the hillshade keeps
                     // the cache's finite difference, byte-identical to before the analytic normals.
+                    None,
+                    // The living-world globe drew no deep-time craters, so no impact flashes (byte-identical).
                     None,
                 ),
                 CELL as i32,
