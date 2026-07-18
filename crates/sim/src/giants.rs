@@ -632,15 +632,22 @@ pub struct DiskClockState {
 }
 
 impl DiskClockState {
-    /// The birth accretion rate `Mdot_0` (Msun/Myr), DERIVED from this state's cloud-core temperature, gas mean
-    /// molecular weight, and declared collapse model through the Shu inside-out collapse, never a stored interim.
-    /// `None` if the collapse rate refuses (a non-physical temperature, molecular weight, or coefficient).
-    pub fn derived_birth_accretion_msun_myr(&self) -> Option<Fixed> {
+    /// The birth accretion rate `Mdot_0` (Msun/Myr) DERIVED for a GIVEN collapse model, over this state's cloud-core
+    /// temperature and gas mean molecular weight through the Shu inside-out collapse. Taking the collapse as an
+    /// argument (rather than reading `self.collapse`) is what lets the interval propagation evaluate both endpoints
+    /// of the collapse-model band from one state. `None` if the collapse rate refuses.
+    pub fn derived_birth_accretion_for(&self, collapse: &CollapseModel) -> Option<Fixed> {
         shu_inside_out_collapse_accretion_rate_msun_myr(
             self.cloud_core_temp_k,
             self.mean_molecular_weight,
-            &self.collapse,
+            collapse,
         )
+    }
+
+    /// The birth accretion rate `Mdot_0` (Msun/Myr) for this state's DEFAULTS-TAKEN collapse member (`self.collapse`,
+    /// the Shu interim until the band ships), never a stored interim. `None` if the collapse rate refuses.
+    pub fn derived_birth_accretion_msun_myr(&self) -> Option<Fixed> {
+        self.derived_birth_accretion_for(&self.collapse)
     }
 }
 
@@ -725,6 +732,67 @@ pub fn giant_formation_on_derived_clock(
         (tau_b, tau_a)
     };
     giant_formation_banded(embryo, disk, star.mass_ratio, gas, kh, tau_low, tau_high)
+}
+
+/// THE COLLAPSE-BAND INTERVAL PROPAGATION (the small slice the range-collapse ruling sequenced): the #73 giant gate
+/// over the COMPOUND band, the collapse-model band crossed with the wind-model band. It retires the range-collapse
+/// of [`giant_formation_on_derived_clock`], which consumed the collapse as a POINT (the Shu DEFAULTS-TAKEN member)
+/// while flowing only the wind band. Here BOTH bands flow: the birth accretion rate is derived at each collapse
+/// endpoint (`collapse_a`, `collapse_b`, the Shu and Larson-Penston edges, a factor ~48 apart), the disk clock is
+/// evaluated at every (collapse, wind) corner, and the `tau_disk` band is the interval over the four corners. The
+/// gate consumes that interval, interval in and interval out, never collapsing the declared band onto one member.
+///
+/// The verdict is monotone in `tau_disk` (a longer disk life is more favorable to giant), so only the MIN and MAX
+/// tau across the four corners set the band edges; the interior corners cannot widen it. A faster collapse (a larger
+/// `Mdot_0`) gives a longer disk life, and a weaker wind likewise, so the corners span the honest compound
+/// uncertainty the two model-structure bands together imply. This is where the central-member ruling's warning bites
+/// or does not: if the factor-48 collapse band makes every embryo near-degenerate, the band is the priority signal
+/// for the retirement ladder (surfaced by the reported hindcast, never selected here).
+///
+/// DORMANT and BYTE-NEUTRAL, the successor to the point wire: when the band ships (the central-member ruling's end
+/// state, no default), this is the wire the giant verdict reads; until then the point version rides with its
+/// DEFAULTS-TAKEN Shu member. `None` if any collapse or clock evaluation refuses, or the gate refuses.
+#[allow(clippy::too_many_arguments)]
+pub fn giant_formation_on_derived_clock_banded(
+    embryo: &Embryo,
+    disk: &SolidDisk,
+    star: &DiskClockState,
+    collapse_a: &CollapseModel,
+    collapse_b: &CollapseModel,
+    wind_fit_a: &XrayWindFit,
+    wind_fit_b: &XrayWindFit,
+    gas: &GiantGasParams,
+    kh: &GiantKhParams,
+) -> Option<BandedGiantVerdict> {
+    let tau_for = |mdot_0: Fixed, fit: &XrayWindFit| {
+        disk_era_xray_disk_lifetime_myr(
+            star.mass_ratio,
+            star.hayashi_temp_k,
+            star.age_myr,
+            star.rotation_period_days,
+            star.mlt_coefficient,
+            star.ro_sat,
+            star.saturated_log10_fraction,
+            star.beta,
+            fit,
+            mdot_0,
+            star.t_visc_myr,
+            star.decline_gamma,
+        )
+    };
+    // Each collapse endpoint derives its own Mdot_0; each (collapse, wind) corner gives a tau_disk. The band is the
+    // min and max over the four corners (the verdict is monotone in tau, so the interior corners cannot widen it).
+    let mut tau_lo: Option<Fixed> = None;
+    let mut tau_hi: Option<Fixed> = None;
+    for collapse in [collapse_a, collapse_b] {
+        let mdot_0 = star.derived_birth_accretion_for(collapse)?;
+        for fit in [wind_fit_a, wind_fit_b] {
+            let tau = tau_for(mdot_0, fit)?;
+            tau_lo = Some(tau_lo.map_or(tau, |lo| if tau < lo { tau } else { lo }));
+            tau_hi = Some(tau_hi.map_or(tau, |hi| if tau > hi { tau } else { hi }));
+        }
+    }
+    giant_formation_banded(embryo, disk, star.mass_ratio, gas, kh, tau_lo?, tau_hi?)
 }
 
 #[cfg(test)]
@@ -1241,6 +1309,176 @@ mod tests {
         assert_eq!(
             swapped, composed,
             "the wire orders on tau, so the wind-row argument order does not change the verdict"
+        );
+    }
+
+    /// A representative super-critical star-and-disk state for the compound-band tests: the same tagged interims
+    /// the stage-4 test uses, with the Shu member as the DEFAULTS-TAKEN point collapse on the state.
+    fn banded_clock_state() -> DiskClockState {
+        DiskClockState {
+            mass_ratio: Fixed::ONE,
+            hayashi_temp_k: Fixed::from_int(4200),
+            age_myr: Fixed::ONE,
+            rotation_period_days: Fixed::from_int(8),
+            mlt_coefficient: Fixed::from_ratio(3, 2),
+            ro_sat: Fixed::from_ratio(13, 100),
+            saturated_log10_fraction: Fixed::from_ratio(-313, 100),
+            beta: Fixed::from_ratio(-27, 10),
+            cloud_core_temp_k: Fixed::from_int(10),
+            mean_molecular_weight: Fixed::from_ratio(233, 100),
+            collapse: CollapseModel::shu_1977(),
+            t_visc_myr: Fixed::ONE,
+            decline_gamma: Fixed::ONE,
+        }
+    }
+
+    #[test]
+    fn the_collapse_band_propagates_as_an_interval_through_the_gate() {
+        // The interval-propagation slice: the collapse-model band crossed with the wind band. Proved by
+        // twin-independence (the banded gate byte-equals the hand-computed four-corner min/max) and by the collapse
+        // band CARRYING (the LP endpoint widens the tau_disk band beyond the Shu-point wind band).
+        let disk = mirror_disk(Fixed::from_int(30));
+        let field = oligarchic_embryo_field(
+            &disk,
+            Fixed::ONE,
+            Fixed::from_int(10),
+            Fixed::from_int(5),
+            Fixed::ONE,
+            Fixed::from_int(30),
+            256,
+        );
+        let embryo = *field.last().expect("the dense disk seeds embryos");
+        let star = banded_clock_state();
+        let shu = CollapseModel::shu_1977();
+        let lp = CollapseModel::larson_penston();
+        let strong = XrayWindFit::owen_equation_9(); // strongest wind, shortest disk life
+        let weak = XrayWindFit::sellek_2024(); // weakest wind, longest disk life
+
+        // Hand-compute the four corner tau_disk values (collapse x wind).
+        let tau = |collapse: &CollapseModel, fit: &XrayWindFit| {
+            let mdot_0 = star
+                .derived_birth_accretion_for(collapse)
+                .expect("the collapse rate resolves");
+            disk_era_xray_disk_lifetime_myr(
+                star.mass_ratio,
+                star.hayashi_temp_k,
+                star.age_myr,
+                star.rotation_period_days,
+                star.mlt_coefficient,
+                star.ro_sat,
+                star.saturated_log10_fraction,
+                star.beta,
+                fit,
+                mdot_0,
+                star.t_visc_myr,
+                star.decline_gamma,
+            )
+            .expect("the clock resolves")
+        };
+        // The collapse band WIDENS the band upward: the faster LP collapse gives a higher Mdot_0, so a longer disk
+        // life, so the compound high edge (LP + weak wind) exceeds the Shu-point high edge (Shu + weak wind).
+        assert!(
+            tau(&lp, &weak) > tau(&shu, &weak),
+            "the LP collapse endpoint lengthens the disk life beyond the Shu member (lp {} Myr, shu {} Myr)",
+            tau(&lp, &weak).to_f64_lossy(),
+            tau(&shu, &weak).to_f64_lossy()
+        );
+        let corners = [
+            tau(&shu, &strong),
+            tau(&shu, &weak),
+            tau(&lp, &strong),
+            tau(&lp, &weak),
+        ];
+        let hand_lo = corners
+            .iter()
+            .copied()
+            .fold(corners[0], |a, b| if b < a { b } else { a });
+        let hand_hi = corners
+            .iter()
+            .copied()
+            .fold(corners[0], |a, b| if b > a { b } else { a });
+
+        // TWIN-INDEPENDENCE: the banded gate equals the hand-computed four-corner min/max fed to the banded verdict.
+        let expected = giant_formation_banded(
+            &embryo,
+            &disk,
+            Fixed::ONE,
+            &gas_params(),
+            &kh_params(),
+            hand_lo,
+            hand_hi,
+        );
+        let banded = giant_formation_on_derived_clock_banded(
+            &embryo,
+            &disk,
+            &star,
+            &shu,
+            &lp,
+            &strong,
+            &weak,
+            &gas_params(),
+            &kh_params(),
+        );
+        assert_eq!(
+            banded, expected,
+            "the interval propagation byte-equals the hand-computed four-corner min/max band"
+        );
+        assert!(banded.is_some(), "the compound-band verdict resolves");
+        // The endpoint argument order is irrelevant: the function min/maxes over all corners.
+        let swapped = giant_formation_on_derived_clock_banded(
+            &embryo,
+            &disk,
+            &star,
+            &lp,
+            &shu,
+            &weak,
+            &strong,
+            &gas_params(),
+            &kh_params(),
+        );
+        assert_eq!(
+            swapped, banded,
+            "the collapse and wind endpoint argument order does not change the verdict"
+        );
+    }
+
+    #[test]
+    fn the_both_endpoints_hindcast_reports_the_band_verdict_without_selecting_a_member() {
+        // REPORTED, NEVER GATED (the central-member ruling's measurement): evaluate the giant verdict for a
+        // super-critical embryo across the full compound (collapse x wind) band, to learn whether the factor-48
+        // collapse band renders the verdict vacuous. This asserts the mechanism resolves and NEVER selects a
+        // collapse member (the fitting-trap guard); which banded outcome it lands on is the reported datum.
+        let disk = mirror_disk(Fixed::from_int(30));
+        let field = oligarchic_embryo_field(
+            &disk,
+            Fixed::ONE,
+            Fixed::from_int(10),
+            Fixed::from_int(5),
+            Fixed::ONE,
+            Fixed::from_int(30),
+            256,
+        );
+        let embryo = *field.last().expect("the dense disk seeds embryos");
+        let star = banded_clock_state();
+        let banded = giant_formation_on_derived_clock_banded(
+            &embryo,
+            &disk,
+            &star,
+            &CollapseModel::shu_1977(),
+            &CollapseModel::larson_penston(),
+            &XrayWindFit::owen_equation_9(),
+            &XrayWindFit::sellek_2024(),
+            &gas_params(),
+            &kh_params(),
+        )
+        .expect("the compound-band verdict resolves");
+        // A super-critical outer embryo has a short KH time, so it is giant-capable across at least the favorable
+        // edge of the band: it is NOT robustly terrestrial. Whether it is RobustGiant (the band is decisive) or
+        // NearDegenerate (the factor-48 band straddles the runaway threshold, the priority signal for the retirement
+        // ladder) is the REPORTED measurement, not a gate, and no collapse member is selected to produce it.
+        assert!(
+            !matches!(banded.band, BandedGiantOutcome::RobustTerrestrial),
+            "the super-critical embryo is giant-capable somewhere in the compound band, not robustly terrestrial"
         );
     }
 }
