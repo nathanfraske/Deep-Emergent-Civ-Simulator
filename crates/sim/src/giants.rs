@@ -664,6 +664,18 @@ impl DiskClockState {
 /// whole giant verdict runs from birth CONDITIONS end to end (temperature, composition, rotation, disk size), the
 /// derive-first thesis cashed. A refusal from the collapse (a non-physical birth condition) propagates as `None`.
 ///
+/// THE COLLAPSE-TO-CLOCK WELD IS A DECLARED CLOSURE, NOT AN IDENTITY. The Shu rate is the ENVELOPE INFALL onto the
+/// star-plus-disk; the Lynden-Bell-Pringle clock's `Mdot_0` is the DISK's own initial accretion rate (the viscous
+/// similarity solution's `Mdot(t=0)`). These are different physical quantities, and equating them is a QUASI-STEADY
+/// TRANSMISSION closure: in the embedded class-0/I phase, matter that falls onto the disk is processed through it
+/// onto the star at nearly the infall rate, so `Mdot_disk(0) ~ Mdot_infall`. VALIDITY: the closure holds while
+/// infall dominates (the embedded phase) and degrades once infall ends and the disk drains on its own viscous time,
+/// which is precisely the regime the LBP decline then governs, so the two meet at the handover. EPOCH CONVENTION:
+/// the clock's `t = 0` is the DISK-ASSEMBLY epoch (the end of the main infall), one abscissa among the family (core
+/// formation and end of infall are earlier), stated so a later per-world epoch draw keys to the right zero. The
+/// LBP primary's `Mdot_0` is its initial-condition normalization, which this closure supplies from the collapse
+/// rather than reserving; the correspondence is named here so the weld is auditable, not silent.
+///
 /// DORMANT and BYTE-NEUTRAL: no run-path caller (both the disk clock and the giant gate are dormant), so the pins
 /// hold bit-exact. The FLIP that feeds this into `run_world` and moves the pins is the capstone event under the
 /// owner's signature, not this composition, and it waits on the layer-4 draws that retire the remaining interims

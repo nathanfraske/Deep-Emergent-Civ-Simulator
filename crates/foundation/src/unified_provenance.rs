@@ -260,17 +260,17 @@ mod tests {
         let floor = real_floor();
         let joined =
             JoinedRegister::build(&cal, &floor).expect("the fold succeeds, no id collision");
-        // 228 calibration entries + 243 floor grades, no calibration/floor id collision.
+        // 229 calibration entries + 243 floor grades, no calibration/floor id collision.
         assert_eq!(
             cal.iter().count(),
-            228,
-            "the calibration manifest has 228 entries"
+            229,
+            "the calibration manifest has 229 entries"
         );
         assert_eq!(floor.grades.len(), 243, "the floor register has 243 grades");
         assert_eq!(
             joined.len(),
-            471,
-            "the joined register is the two node sets with no id collision (228 + 243)"
+            472,
+            "the joined register is the two node sets with no id collision (229 + 243)"
         );
     }
 

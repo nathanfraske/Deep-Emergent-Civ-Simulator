@@ -686,25 +686,57 @@ pub fn viscous_similarity_surface_density(
 /// mechanism applies whichever model is passed; an alien collapse physics is a new constructor, a data row, not a
 /// rewrite (admit-the-alien).
 ///
-/// TWO ROWS ARE ON THE TABLE (the model-structure band, like Owen versus Sellek): (1) the Shu 1977 EXPANSION-WAVE
-/// solution ([`CollapseModel::shu_1977`]), `m0 = 0.975`, the widely-used quasi-static inside-out collapse, the
-/// vendored central row; (2) the Larson-Penston-Hunter DYNAMICAL solutions, which give a much larger `m0` (of order
-/// tens), a faster runaway collapse, the FASTER EDGE. The Larson-Penston row is NAMED but not shipped: its `m0` is
-/// fetch-flagged (no vendored primary value yet), so it is surfaced rather than authored, the same posture the disk
-/// arc takes for an unvendored rival.
+/// `m0` IS A CHORD THAT DECLARES ITS ABSCISSA. The classic isothermal-sphere collapse solutions are a CONTINUUM
+/// FAMILY parameterized by the instability parameter `A` (the initial central over-density relative to the
+/// hydrostatic singular isothermal sphere), with `m0` conditioning on `A` within Shu 1977's own Table 1 (Hunter
+/// 1977; Whitworth and Summers 1985). The two shipped rows are the DECLARED ENDPOINTS of that measured continuum, a
+/// factor ~48 apart, the Owen-versus-Sellek band exactly: (1) [`CollapseModel::shu_1977`], the hydrostatic edge
+/// `A = 2`, `m0 = 0.975`, the slowest, quasi-static expansion-wave collapse; (2) [`CollapseModel::larson_penston`],
+/// the dynamical edge `A = 8.85`, `m0 = 46.9`, the fastest, most violent collapse. A caller needing one number gets
+/// the BAND, not a default.
+///
+/// THE CENTRAL-MEMBER CHOICE IS A CONVENTION with a recorded stability note: Ori and Piran 1988 gave numerical
+/// evidence that Larson-Penston is the only STABLE self-similar solution in the family, so it is arguably the most
+/// physically relevant, while Shu-as-shipped is the widely-used quasi-static convention; the debate continues on the
+/// failure of either endpoint to describe post-core-formation accretion in numerical simulations. So neither
+/// endpoint is a neutral default; the band is the honest object.
+///
+/// NAMED DEBT (flagged, not built): the REALISTIC time-dependent infall history is not constant. Foster and
+/// Chevalier 1993 (and Larson 2003) find a PEAKED history, a high early rate dropping later, with a maximum near
+/// `13 c_s^3/G` once opacity is included. This [`CollapseModel`] carries a single eigenvalue (a constant-rate
+/// member), so the contract is kept wide enough to admit a rate-LAW member later (a `Mdot(t)` row), a fetch-flagged
+/// debt. Table 1 (the general `m0(A)` row) joins the fetch list.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct CollapseModel {
     /// The dimensionless collapse mass-accretion eigenvalue `m0` (`Mdot = m0 * c_s^3 / G`).
     pub collapse_coefficient_m0: Fixed,
+    /// The instability parameter `A` the eigenvalue conditions on (Shu 1977 Table 1), the ABSCISSA of the `m0`
+    /// chord: `A = 2` is the hydrostatic singular isothermal sphere, larger `A` a more over-dense, faster collapse.
+    /// Carried so the coefficient never travels without the condition it was read at.
+    pub instability_parameter_a: Fixed,
 }
 
 impl CollapseModel {
-    /// The Shu (1977) EXPANSION-WAVE inside-out collapse: `m0 = 0.975` (Shu 1977, ApJ 214, 488, Table 2, the
-    /// `x -> 0` core-mass eigenvalue, vendored primary `af390700`), the widely-used quasi-static value, the central
-    /// row of the collapse-model band.
+    /// The Shu (1977) EXPANSION-WAVE inside-out collapse, the SLOW (hydrostatic) endpoint: `m0 = 0.975` at the
+    /// instability parameter `A = 2` (Shu 1977, ApJ 214, 488, Table 1 and Table 2, the `x -> 0` core-mass
+    /// eigenvalue; vendored primary sha256 `af390700604cd491d36b9dfbf9a5e767611b4f7880ae360a6d2258c224fd29d2`). A
+    /// CONVENTION, not a neutral default: the widely-used quasi-static value carrying the Ori-Piran 1988 stability
+    /// caveat that the Larson-Penston endpoint is the stable one. A consumer needing one number reads the band.
     pub fn shu_1977() -> Self {
         CollapseModel {
-            collapse_coefficient_m0: Fixed::from_ratio(975, 1000), // Shu 1977 Table 2 (x -> 0)
+            collapse_coefficient_m0: Fixed::from_ratio(975, 1000), // Shu 1977 Table 1/2 (x -> 0, A = 2)
+            instability_parameter_a: Fixed::from_int(2),           // the hydrostatic SIS
+        }
+    }
+
+    /// The Larson-Penston (Hunter 1977) DYNAMICAL collapse, the FAST endpoint: `m0 = 46.9` at the instability
+    /// parameter `A = 8.85` (Hunter 1977; Whitworth and Summers 1985, the similarity-solution continuum), ~48 times
+    /// the Shu rate, the faster edge of the collapse-model band and the Ori-Piran 1988 stable member. The value is
+    /// cited from the continuum family; it graduates like the Shu row when its primary is vendored with a receipt.
+    pub fn larson_penston() -> Self {
+        CollapseModel {
+            collapse_coefficient_m0: Fixed::from_ratio(469, 10), // 46.9 (Whitworth-Summers 1985)
+            instability_parameter_a: Fixed::from_ratio(885, 100), // A = 8.85
         }
     }
 }
@@ -715,16 +747,33 @@ impl CollapseModel {
 /// `Mdot = m0 * c_s^3 / G`, where `c_s = (k_B*T / (mu*m_H))^(1/2)` is the ISOTHERMAL sound speed of the molecular
 /// cloud core (the same `c_s` [`viscous_similarity_surface_density`] uses) and `m0` is the [`CollapseModel`] the
 /// caller declares. So the birth rate falls out of the core TEMPERATURE and the gas mean molecular weight, both more
-/// fundamental than an authored accretion rate: `Mdot ~ c_s^3 ~ T^(3/2)`, a warmer core collapsing faster. The mean
-/// molecular weight is the world's own drawn value ([`derive_disk_gas_mean_molecular_weight`], the built substrate),
-/// so this reads no composition constant.
+/// fundamental than an authored accretion rate: `Mdot ~ c_s^3 ~ T^(3/2)`, a warmer core collapsing faster.
 ///
-/// THE COLLAPSE COEFFICIENT is the model-structure choice, carried on [`CollapseModel`] (Shu 0.975 versus the faster
-/// Larson-Penston rival), never authored inline. The cloud-core TEMPERATURE is the remaining input: a per-system
-/// birth condition (a molecular cloud core sits near `~10 K`, Fiorellino et al. 2023 and the Shu illustrative
-/// `a = 0.2 km/s`), reserved-with-basis until the layer-4 birth draw supplies it per-star. It bottoms out at a
-/// population draw, not a further derivation: a core cannot be colder than the CMB floor, and above it the
-/// equilibrium is set by the birth environment (the Layer-4 terminus, admit-the-alien a data row per system).
+/// THE SOUND SPEED IS ISOTHERMAL, DECLARED AND ASSERTED. `c_s = (k_B*T / (mu*m_H))^(1/2)` carries NO adiabatic
+/// index: an `a = (gamma*k_B*T/(mu*m_H))^(1/2)` would inflate the rate by `gamma^(3/2)` (a factor 2.15 at
+/// `gamma = 5/3`), invisible to any T-scaling test, so the isothermal form is asserted by the absolute-magnitude
+/// oracle (the 10 K solar value lands near `1.5`, not the `~3.3` an adiabatic `c_s` would give). TERMS DROPPED, each
+/// where it lives: isothermality is physically justified at the prestellar stage (efficient line-and-dust cooling
+/// holds the core near constant `T`); spherical symmetry neglects rotation, magnetic fields, and dynamical
+/// turbulence, and ROTATION re-enters downstream through the disk-size derivation (`R_1`, `t_visc`), so the dropped
+/// angular momentum is relocated rather than lost, named here rather than buried.
+///
+/// THE MEAN MOLECULAR WEIGHT IS A CHORD OVER PHASE AND COUNTING, both fixed to core conditions. It MUST be the
+/// MOLECULAR value (hydrogen as `H2` at cold core conditions, a 2.5x rate lever against atomic hydrogen) and PER
+/// FREE PARTICLE (against pure-`H2` counting, a 1.26x lever), which is what [`derive_disk_gas_mean_molecular_weight`]
+/// returns when passed `hydrogen_atoms_per_molecule = 2` (`mu ~ 2.34` at solar). SAME-FACT-TWO-DOORS: the core `mu`
+/// and the disk `mu` are ONE ROW, the same molecular per-free-particle derivation, not two routes to arbitrate; the
+/// caller passes the world's single derived `mu` here and to the disk clock alike, so no second door opens.
+///
+/// THE COLLAPSE COEFFICIENT is the model-structure choice, carried on [`CollapseModel`] (Shu `A = 2` versus the
+/// faster Larson-Penston `A = 8.85` endpoint, a factor ~48 band), never authored inline. The cloud-core TEMPERATURE
+/// is the remaining input: a per-system birth condition (`disk_clock.cloud_core_temperature_k` in the calibration
+/// manifest, interim `10 K` with a DEFAULTS-TAKEN basis naming it the COLD EDGE of the Milky-Way present-epoch
+/// measured medians, owner-signature-pending), reserved until the layer-4 birth draw supplies it per-star. It bottoms
+/// out at a population draw, not a further derivation: a core cannot be colder than the CMB floor, and above it the
+/// equilibrium is set by the birth environment (the Layer-4 terminus). The draw conditions on environment class
+/// (cluster versus field, ~2.2x in rate), cosmic epoch (the CMB floor scaling `(1+z)`, a named debt: no epoch draw
+/// exists yet), and metallicity (present today as the drawn abundances), admit-the-alien a data row per system.
 ///
 /// DORMANT: the derived replacement the slice-2 wire's `Mdot_0` interim graduates to; the giant gate reads it
 /// through [`crate::giants::giant_formation_on_derived_clock`]. The wide-magnitude product (`Mdot ~ 1e17 kg/s`,
@@ -5225,16 +5274,23 @@ mod tests {
         // core (mu ~ 2.33) at Shu's m0 = 0.975 gives ~1.5e-6 M_sun/yr = ~1.5 M_sun/Myr (vendored Shu 1977 Table 2,
         // cross-checked against Fiorellino et al. 2023's class-I band), matching the tagged ~1 M_sun/Myr interim in
         // order of magnitude.
-        let shu = CollapseModel::shu_1977(); // m0 = 0.975, the vendored expansion-wave eigenvalue (Table 2, x -> 0)
+        let shu = CollapseModel::shu_1977(); // m0 = 0.975 at A = 2, the vendored expansion-wave eigenvalue
         assert_eq!(shu.collapse_coefficient_m0, Fixed::from_ratio(975, 1000));
+        assert_eq!(
+            shu.instability_parameter_a,
+            Fixed::from_int(2),
+            "the coefficient declares its abscissa A (Shu 1977 Table 1)"
+        );
         let mu_solar = Fixed::from_ratio(233, 100);
         let solar =
             shu_inside_out_collapse_accretion_rate_msun_myr(Fixed::from_int(10), mu_solar, &shu)
                 .expect("the collapse rate resolves for a solar-composition 10 K core");
-        // The vendored band: ~1.5 (mu=2.33) to ~1.9 (mu=2.0) M_sun/Myr at 10 K; assert the solar value sits in it.
+        // ISOTHERMAL ASSERTION: the vendored band is ~1.5 (mu=2.33) to ~1.9 (mu=2.0) M_sun/Myr at 10 K. An adiabatic
+        // sound speed (gamma=5/3) would inflate the rate by gamma^(3/2) ~ 2.15 to ~3.3, OUTSIDE this band, so the
+        // absolute magnitude asserts the isothermal c_s that a silent-gamma bug would break.
         assert!(
             solar.to_f64_lossy() > 1.4 && solar.to_f64_lossy() < 1.7,
-            "the 10 K solar-core birth rate is ~1.5 M_sun/Myr (got {})",
+            "the 10 K solar-core birth rate is ~1.5 M_sun/Myr, isothermal not adiabatic (got {})",
             solar.to_f64_lossy()
         );
         // MECHANISM, Mdot ~ T^(3/2): a warmer core collapses faster. Doubling T lifts the rate by 2^1.5 ~ 2.83.
@@ -5261,22 +5317,21 @@ mod tests {
             light.to_f64_lossy(),
             solar.to_f64_lossy()
         );
-        // A FASTER collapse model (a larger m0) drives a proportionally higher rate: Mdot is linear in m0, so
-        // doubling the eigenvalue doubles the birth rate, the model-structure band the generalization carries.
-        let faster = CollapseModel {
-            collapse_coefficient_m0: shu
-                .collapse_coefficient_m0
-                .checked_mul(Fixed::from_int(2))
-                .unwrap(),
-        };
+        // THE MODEL-STRUCTURE BAND (the declared endpoints): the Larson-Penston endpoint (m0 = 46.9 at A = 8.85) is
+        // ~48x the Shu rate, the faster edge. Mdot is linear in m0, so the rate ratio is exactly the eigenvalue
+        // ratio, and the two constructors are the measured continuum's endpoints (Whitworth-Summers 1985).
+        let lp = CollapseModel::larson_penston();
+        assert_eq!(lp.instability_parameter_a, Fixed::from_ratio(885, 100));
         let rapid =
-            shu_inside_out_collapse_accretion_rate_msun_myr(Fixed::from_int(10), mu_solar, &faster)
+            shu_inside_out_collapse_accretion_rate_msun_myr(Fixed::from_int(10), mu_solar, &lp)
                 .unwrap();
         let m0_ratio = rapid.checked_div(solar).unwrap().to_f64_lossy();
+        let expected_ratio = 46.9 / 0.975; // ~48.1, the vendored endpoint separation
         assert!(
-            (m0_ratio - 2.0).abs() < 0.01,
-            "Mdot is linear in m0: 2x the collapse eigenvalue doubles the rate (got {})",
-            m0_ratio
+            (m0_ratio - expected_ratio).abs() < 0.1,
+            "Mdot is linear in m0: the LP endpoint is ~48x the Shu rate (got {}, expected {})",
+            m0_ratio,
+            expected_ratio
         );
         // A non-physical temperature, molecular weight, or collapse coefficient fails soft, never a fabricated rate.
         assert!(
@@ -5290,6 +5345,7 @@ mod tests {
         .is_none());
         let zero_m0 = CollapseModel {
             collapse_coefficient_m0: Fixed::ZERO,
+            instability_parameter_a: Fixed::from_int(2),
         };
         assert!(shu_inside_out_collapse_accretion_rate_msun_myr(
             Fixed::from_int(10),
