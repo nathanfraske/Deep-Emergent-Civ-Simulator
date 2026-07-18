@@ -18,182 +18,187 @@
 # the planned radiative-branch dispatch. The grid is monotonic in mass, so a read interpolates in the table's own
 # spacing (never snaps to the nearest mass row).
 
-[[wall]]
-mass_msun = 0.010
-wall_teff_k = 2388.0
-drift_lo_k = 2240.0
-drift_hi_k = 2388.0
+source = "Baraffe, Homeier, Allard, Chabrier 2015 (BHAC15), A&A 577 A42, DOI 10.1051/0004-6361/201425481"
+grade = "theory"
+composition = "solar [M/H]=0"
+epoch = "top of the Hayashi track, earliest tabulated age ~0.49 Myr; drift band over the first 2 Myr"
 
 [[wall]]
-mass_msun = 0.015
-wall_teff_k = 2514.0
-drift_lo_k = 2454.0
-drift_hi_k = 2516.0
+mass_msun = "0.010"
+wall_teff_k = "2388"
+drift_lo_k = "2240"
+drift_hi_k = "2388"
 
 [[wall]]
-mass_msun = 0.020
-wall_teff_k = 2594.0
-drift_lo_k = 2571.0
-drift_hi_k = 2604.0
+mass_msun = "0.015"
+wall_teff_k = "2514"
+drift_lo_k = "2454"
+drift_hi_k = "2516"
 
 [[wall]]
-mass_msun = 0.030
-wall_teff_k = 2666.0
-drift_lo_k = 2666.0
-drift_hi_k = 2710.0
+mass_msun = "0.020"
+wall_teff_k = "2594"
+drift_lo_k = "2571"
+drift_hi_k = "2604"
 
 [[wall]]
-mass_msun = 0.040
-wall_teff_k = 2731.0
-drift_lo_k = 2731.0
-drift_hi_k = 2784.0
+mass_msun = "0.030"
+wall_teff_k = "2666"
+drift_lo_k = "2666"
+drift_hi_k = "2710"
 
 [[wall]]
-mass_msun = 0.050
-wall_teff_k = 2761.0
-drift_lo_k = 2761.0
-drift_hi_k = 2829.0
+mass_msun = "0.040"
+wall_teff_k = "2731"
+drift_lo_k = "2731"
+drift_hi_k = "2784"
 
 [[wall]]
-mass_msun = 0.060
-wall_teff_k = 2807.0
-drift_lo_k = 2807.0
-drift_hi_k = 2867.0
+mass_msun = "0.050"
+wall_teff_k = "2761"
+drift_lo_k = "2761"
+drift_hi_k = "2829"
 
 [[wall]]
-mass_msun = 0.070
-wall_teff_k = 2834.0
-drift_lo_k = 2834.0
-drift_hi_k = 2902.0
+mass_msun = "0.060"
+wall_teff_k = "2807"
+drift_lo_k = "2807"
+drift_hi_k = "2867"
 
 [[wall]]
-mass_msun = 0.072
-wall_teff_k = 2831.0
-drift_lo_k = 2831.0
-drift_hi_k = 2907.0
+mass_msun = "0.070"
+wall_teff_k = "2834"
+drift_lo_k = "2834"
+drift_hi_k = "2902"
 
 [[wall]]
-mass_msun = 0.075
-wall_teff_k = 2835.0
-drift_lo_k = 2835.0
-drift_hi_k = 2913.0
+mass_msun = "0.072"
+wall_teff_k = "2831"
+drift_lo_k = "2831"
+drift_hi_k = "2907"
 
 [[wall]]
-mass_msun = 0.080
-wall_teff_k = 2836.0
-drift_lo_k = 2836.0
-drift_hi_k = 2924.0
+mass_msun = "0.075"
+wall_teff_k = "2835"
+drift_lo_k = "2835"
+drift_hi_k = "2913"
 
 [[wall]]
-mass_msun = 0.090
-wall_teff_k = 2861.0
-drift_lo_k = 2861.0
-drift_hi_k = 2933.0
+mass_msun = "0.080"
+wall_teff_k = "2836"
+drift_lo_k = "2836"
+drift_hi_k = "2924"
 
 [[wall]]
-mass_msun = 0.100
-wall_teff_k = 2925.0
-drift_lo_k = 2925.0
-drift_hi_k = 2971.0
+mass_msun = "0.090"
+wall_teff_k = "2861"
+drift_lo_k = "2861"
+drift_hi_k = "2933"
 
 [[wall]]
-mass_msun = 0.110
-wall_teff_k = 2945.0
-drift_lo_k = 2945.0
-drift_hi_k = 2995.0
+mass_msun = "0.100"
+wall_teff_k = "2925"
+drift_lo_k = "2925"
+drift_hi_k = "2971"
 
 [[wall]]
-mass_msun = 0.130
-wall_teff_k = 3006.0
-drift_lo_k = 3006.0
-drift_hi_k = 3034.0
+mass_msun = "0.110"
+wall_teff_k = "2945"
+drift_lo_k = "2945"
+drift_hi_k = "2995"
 
 [[wall]]
-mass_msun = 0.150
-wall_teff_k = 3076.0
-drift_lo_k = 3076.0
-drift_hi_k = 3082.0
+mass_msun = "0.130"
+wall_teff_k = "3006"
+drift_lo_k = "3006"
+drift_hi_k = "3034"
 
 [[wall]]
-mass_msun = 0.170
-wall_teff_k = 3139.0
-drift_lo_k = 3126.0
-drift_hi_k = 3143.0
+mass_msun = "0.150"
+wall_teff_k = "3076"
+drift_lo_k = "3076"
+drift_hi_k = "3082"
 
 [[wall]]
-mass_msun = 0.200
-wall_teff_k = 3220.0
-drift_lo_k = 3203.0
-drift_hi_k = 3226.0
+mass_msun = "0.170"
+wall_teff_k = "3139"
+drift_lo_k = "3126"
+drift_hi_k = "3143"
 
 [[wall]]
-mass_msun = 0.300
-wall_teff_k = 3460.0
-drift_lo_k = 3426.0
-drift_hi_k = 3460.0
+mass_msun = "0.200"
+wall_teff_k = "3220"
+drift_lo_k = "3203"
+drift_hi_k = "3226"
 
 [[wall]]
-mass_msun = 0.400
-wall_teff_k = 3672.0
-drift_lo_k = 3608.0
-drift_hi_k = 3672.0
+mass_msun = "0.300"
+wall_teff_k = "3460"
+drift_lo_k = "3426"
+drift_hi_k = "3460"
 
 [[wall]]
-mass_msun = 0.500
-wall_teff_k = 3849.0
-drift_lo_k = 3764.0
-drift_hi_k = 3849.0
+mass_msun = "0.400"
+wall_teff_k = "3672"
+drift_lo_k = "3608"
+drift_hi_k = "3672"
 
 [[wall]]
-mass_msun = 0.600
-wall_teff_k = 3988.0
-drift_lo_k = 3907.0
-drift_hi_k = 3988.0
+mass_msun = "0.500"
+wall_teff_k = "3849"
+drift_lo_k = "3764"
+drift_hi_k = "3849"
 
 [[wall]]
-mass_msun = 0.700
-wall_teff_k = 4111.0
-drift_lo_k = 4035.0
-drift_hi_k = 4111.0
+mass_msun = "0.600"
+wall_teff_k = "3988"
+drift_lo_k = "3907"
+drift_hi_k = "3988"
 
 [[wall]]
-mass_msun = 0.800
-wall_teff_k = 4221.0
-drift_lo_k = 4156.0
-drift_hi_k = 4221.0
+mass_msun = "0.700"
+wall_teff_k = "4111"
+drift_lo_k = "4035"
+drift_hi_k = "4111"
 
 [[wall]]
-mass_msun = 0.900
-wall_teff_k = 4315.0
-drift_lo_k = 4260.0
-drift_hi_k = 4315.0
+mass_msun = "0.800"
+wall_teff_k = "4221"
+drift_lo_k = "4156"
+drift_hi_k = "4221"
 
 [[wall]]
-mass_msun = 1.000
-wall_teff_k = 4397.0
-drift_lo_k = 4350.0
-drift_hi_k = 4397.0
+mass_msun = "0.900"
+wall_teff_k = "4315"
+drift_lo_k = "4260"
+drift_hi_k = "4315"
 
 [[wall]]
-mass_msun = 1.100
-wall_teff_k = 4471.0
-drift_lo_k = 4432.0
-drift_hi_k = 4471.0
+mass_msun = "1.000"
+wall_teff_k = "4397"
+drift_lo_k = "4350"
+drift_hi_k = "4397"
 
 [[wall]]
-mass_msun = 1.200
-wall_teff_k = 4537.0
-drift_lo_k = 4508.0
-drift_hi_k = 4538.0
+mass_msun = "1.100"
+wall_teff_k = "4471"
+drift_lo_k = "4432"
+drift_hi_k = "4471"
 
 [[wall]]
-mass_msun = 1.300
-wall_teff_k = 4596.0
-drift_lo_k = 4581.0
-drift_hi_k = 4601.0
+mass_msun = "1.200"
+wall_teff_k = "4537"
+drift_lo_k = "4508"
+drift_hi_k = "4538"
 
 [[wall]]
-mass_msun = 1.400
-wall_teff_k = 4647.0
-drift_lo_k = 4647.0
-drift_hi_k = 4659.0
+mass_msun = "1.300"
+wall_teff_k = "4596"
+drift_lo_k = "4581"
+drift_hi_k = "4601"
+
+[[wall]]
+mass_msun = "1.400"
+wall_teff_k = "4647"
+drift_lo_k = "4647"
+drift_hi_k = "4659"

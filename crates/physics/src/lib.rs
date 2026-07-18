@@ -53,6 +53,7 @@ pub mod gas_thermochemistry;
 pub mod geodynamics;
 pub mod geotherm;
 pub mod graph;
+pub mod hayashi_wall;
 pub mod hindcast_comparison;
 pub mod ice_sublimation;
 pub mod ionic_radii;
