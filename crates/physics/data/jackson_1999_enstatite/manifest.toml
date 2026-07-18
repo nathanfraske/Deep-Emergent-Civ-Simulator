@@ -1,0 +1,54 @@
+# Jackson, Sinogeikin & Bass 1999 "Elasticity of MgSiO3 orthoenstatite" source manifest (the
+# vendored-primary idiom: file / receipt / anchors). Single-crystal elasticity primary for
+# ENSTATITE (orthoenstatite, MgSiO3, the orthorhombic Mg end-member pyroxene, Pbca; the crust
+# former of a reduced silicate world, distinct from forsterite Mg2SiO4) in
+# crates/physics/data/mineral_moduli.toml. Brillouin spectroscopy on synthetic single crystals
+# of nearly pure MgSiO3 (trace Li and V < 0.25 wt%; sample GRR 259, flux-grown by Ito 1975),
+# ambient conditions: 1 atm, room temperature ~298 K. Open PDF (Jackson group, Caltech mirror),
+# vendored into the public tree. SHA256 is the primary receipt.
+#
+# GRADE: PRIMARY. The authors measured the single-crystal elastic tensor Cij themselves and
+# report the isotropic aggregate KS, mu computed by the Hill averaging scheme (VRH). This is not
+# a computed-from-secondary-tensor entry: the VRH aggregate is the paper's own reported result,
+# and the tensor-to-aggregate VRH was independently reproduced from the published Cij as a
+# cross-check (see the recompute value block). No primary-read debt.
+
+[[source]]
+file = "jackson_sinogeikin_bass_ammin_1999.pdf"
+sha256 = "c6d79b4308d5a60907abea677787faa262c17a7279a15438a4eb9c0f0d816925"
+citation = "Jackson, J.M., Sinogeikin, S.V., and Bass, J.D., 1999, Elasticity of MgSiO3 orthoenstatite, American Mineralogist 84(4), 677-680"
+recipe = "GET https://web.gps.caltech.edu/users/jackson/pdf/Jackson_AmMin99_84_677.pdf (open). The Caltech host ships an incomplete TLS chain (missing intermediate); completed at fetch with the InCommon RSA Server CA 2 intermediate from http://crt.sectigo.com/InCommonRSAServerCA2.crt (which chains to a system root), so the download verified against a full chain rather than -k insecure. legacy md5 = 805436556322ce0004f1dd6b8ae93141"
+pages = 4
+
+# Values read into mineral_moduli.toml. Aggregate is VRH (the paper's Hill averaging scheme,
+# stated in RESULTS: "Isotropic aggregate properties [KS, mu, VP, VS] were calculated using the
+# Hill averaging scheme"). Channel: T = text/table, C = computed cross-check.
+[[value]]
+name = "enstatite_bulk_modulus_KS_gpa"
+value = "107.6"
+anchor = "Table 1 (This Study column), row 'KS,VRH, GPa' = 107.6(15). Table 2 gives the bracketing bounds for this study: KS,V (Voigt) = 108.6(10), KS,R (Reuss) = 106.6(10), so the Voigt-Reuss half-gap is 1.0 GPa; the reported VRH 1-sigma is 1.5 GPa (band, per the mineral_moduli.toml convention of using the reported sigma when the source gives one)"
+channel = "T"
+
+[[value]]
+name = "enstatite_shear_modulus_G_gpa"
+value = "76.8"
+anchor = "Table 1 (This Study column), row 'muVRH, GPa' = 76.8(7); band 0.7 is the reported 1-sigma. Note (Table 1): uncertainties are 1 standard deviation based on an RMS velocity deviation of 0.056 km/s"
+channel = "T"
+
+[[value]]
+name = "enstatite_single_crystal_Cij_gpa"
+value = "C11=233(1) C22=171(1) C33=216(1) C44=83(1) C55=79(1) C66=77(1) C12=73(2) C13=56(2) C23=50(3); rho=3.194(6) g/cm3"
+anchor = "Table 1 (This Study column), single-crystal orthorhombic (Pbca) elastic tensor from Brillouin, best-fit by linear inversion of 113 mode velocities in 53 directions; this is the lattice fact the VRH aggregate is the Hill average of"
+channel = "T"
+
+[[value]]
+name = "enstatite_VRH_recompute_crosscheck_gpa"
+value = "recomputing VRH from the Table 1 (This Study) Cij: K_Voigt=108.67 K_Reuss=106.68 K_Hill=107.67 (paper KS,VRH=107.6); G_Voigt=77.20 G_Reuss=75.89 G_Hill=76.55 (paper muVRH=76.8). K half-gap 1.00 matches Table 2; the ~0.25 GPa shear offset is integer rounding of the tabulated Cij, the paper used un-rounded moduli"
+anchor = "independent Voigt-Reuss-Hill recomputation from the held Table 1 tensor (compliance inversion), a derive-first cross-check that the reported aggregate and the reported tensor hang together"
+channel = "C"
+
+[[value]]
+name = "enstatite_dual_channel_prior_studies_gpa"
+value = "Weidner, Wang & Ito 1978 (nominally identical Ito-synthesized sample, Brillouin): KS,VRH=107.8, muVRH=75.7; text states KS, mu, VP, VS all agree with This Study within 1-sigma. Flesch et al. 1998 (hot-pressed polycrystalline MgSiO3 orthoenstatite): KS,VRH=104(2), muVRH=74.9(15), agrees with This Study"
+anchor = "Table 1, columns 'Weidner et al. (1978)' and 'Flesch et al. (1998)', both reproduced in the held document; RESULTS text confirms the 1-sigma agreement with Weidner et al."
+channel = "T"

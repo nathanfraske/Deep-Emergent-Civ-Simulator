@@ -311,7 +311,8 @@ source = "test fixture"
     #[test]
     fn the_standard_table_loads_the_sourced_phases_and_skips_unsourced_hematite() {
         let table = MineralModuli::standard().expect("the embedded mineral-moduli table loads");
-        // The six sourced seed phases are present, each with cited positive moduli.
+        // The seven sourced seed phases are present, each with cited positive moduli (the six original phases plus
+        // enstatite, the reduced-crust former).
         for name in [
             "quartz",
             "corundum",
@@ -319,6 +320,7 @@ source = "test fixture"
             "forsterite",
             "fayalite",
             "spinel",
+            "enstatite",
         ] {
             let row = table
                 .row(name)
@@ -332,7 +334,16 @@ source = "test fixture"
             table.row("hematite").is_none(),
             "the UNSOURCED hematite row is skipped, not loaded"
         );
-        assert_eq!(table.len(), 6, "six sourced phases, hematite absent");
+        assert_eq!(table.len(), 7, "seven sourced phases, hematite absent");
+        // The JANAF-decorated crust name resolves through the bridge to the enstatite row (K_S ~ 107.6 GPa).
+        let en = table
+            .row("MgSiO3(cr,enstatite)")
+            .expect("the decorated crust name resolves to enstatite");
+        assert!(
+            (en.bulk_gpa - Fixed::from_ratio(1076, 10)).abs() < Fixed::from_ratio(1, 100),
+            "enstatite K_S is the cited 107.6 GPa, got {}",
+            en.bulk_gpa.to_f64_lossy()
+        );
         // Spot-check a cited value: forsterite K_S = 128.8 GPa (Zha et al. 1996).
         let fo = table.row("forsterite").expect("forsterite present");
         assert!(
