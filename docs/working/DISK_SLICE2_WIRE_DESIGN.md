@@ -59,8 +59,8 @@ The measured delta is attributed in full: which draws' giant verdicts flipped (G
 
 The order, each step gated, the flag off until the last:
 
-1. The three wind rows as cited run-path data (`XrayWindFit` constructors: `owen_appendix_b`, `owen_equation_9`, `sellek_2024`), each reserved-with-basis, verbatim-cited, with a fetch follow-on where a coefficient needs primary confirmation.
-2. The band-carrying giant gate: `giant_formation` (or a wrapper) consumes the tau_disk interval and carries the near-degenerate verdict, with tests that a mid-band draw is flagged near-degenerate and an out-of-band draw is decided.
+1. The three wind rows as cited run-path data (`XrayWindFit` constructors: `owen_appendix_b`, `owen_equation_9`, `sellek_2024`). FETCH DONE (both primaries vendored with sha256 receipts): Owen 2012 Eq. B1 `6.25e-9 (M/Msun)^-0.068 (L_X/1e30)^1.14` and Eq. 9 `8e-9 (L_X/1e30)` confirmed verbatim against `arXiv:1112.1087` (matching astro.rs digit for digit); Sellek et al. 2024 (`arXiv:2408.00848`, A&A 690 A296) the low edge, `~1.06e-9` within 80 AU / `4.32e-9` total, an order of magnitude below the Owen lineage by the paper's own framing. TWO CATCHES to fold at build: the author list is Sellek, Grassi, Picogna, Rab, Clarke, Ercolano (correct the astro.rs comment), and the Sellek row is a rate PAIR (the 80-AU controlled `1.06e-9` versus the wider-radius total `4.32e-9`), a design call to surface to the owner for which the low-edge row supplies.
+2. The band-carrying giant gate. DONE (this PR): `giant_formation_banded` + `BandedGiantVerdict`/`BandedGiantOutcome` in `giants.rs` consume the tau_disk interval by evaluating `giant_formation` at both band edges (the verdict is monotone in the lifetime) and classify robust-giant / robust-terrestrial / near-degenerate, the near-degeneracy a carried datum per the Gap Law; a monotonicity violation fails loud. Test `the_banded_giant_verdict_carries_the_wind_band` calibrates the band off the embryo's own KH time. Dormant, byte-neutral: both pins bit-exact, all 9 giants tests green.
 3. The wall-grid-read for the live disk_era_xray path, and its integration test consuming the grid (the rider-2 upgrade landing).
 4. The wire itself behind the flag: the derived tau_disk band replacing the reserved `disk_gas_lifetime_myr`, dormant while the flag is off.
 5. The census executed and recorded (section 3).
@@ -68,3 +68,21 @@ The order, each step gated, the flag off until the last:
 7. Present the wiring for audit. On sign-off, flip the flag, measure and attribute the delta (section 7), re-pin both pins under Nathan's signature, record the ledger entry.
 
 Then the full gate: fmt, clippy `-D warnings`, doc-link delta 0, the mirror by real exit code, the saturation assert green, and the two pins re-pinned (not held) with the diff attributed.
+
+## 9. The arc from here to the capstone
+
+Sliced out so the whole path is visible, not just the next step. The disk-evolution arc's capstone is a disk clock that is FULLY DERIVED and PER-WORLD, feeding the entire planetary-assembly chain (the giant-versus-terrestrial verdicts, the DiskGas openings, and thus each world's planet population), with the observed disk-fraction data refereeing from the output side and every derive-first-debt interim graduated. The slices between here and there, in dependency order:
+
+- **Slice 2, this wire (in progress).** Stages 1 and 2 done (the cited wind rows, the band-carrying verdict); stages 3 to 7 remain (the live disk_era_xray wall-grid read plus its integration test; the wire behind the flag; the disk_gas_lifetime_myr census; the population-hindcast harness; then present, flip, and the FIRST re-pin under Nathan's signature). This is the topology change: the clock goes live.
+
+- **The tolerance vendoring (parallel, ready now).** The cited 0.72 dex class-II dispersion into the physics lane, retiring the viewer's reserved 0.5, as the input-side referee (tolerance three-lives spec, life one). It gates nothing here and rides beside slice 2.
+
+- **The remaining derive-first-debt interims.** `Mdot_0` (the class-0/I birth accretion band): fetchable for its solar value, but its real retirement is the layer-4 draw, correctly blocked. `alpha` (Shakura-Sunyaev viscosity): a genuine MRI-turbulence derivation arc, reserved-with-basis until someone opens it deliberately. Neither competes with the wire.
+
+- **The layer-4 draws (`Mdot_0`, `R_1`, `Omega_star_0`): the per-world contingency, the SECOND attributed re-pin.** This is where condition 6's "first of two" resolves: the clock stops running on tagged solar interims and reads each world's own drawn birth conditions, so a world's disk lifetime, its giant verdicts, and its planet population all become contingent on its own draw. The pins move again, under signature, as a recorded second event.
+
+- **The population hindcast graduates (life two).** With the draws landed and the ensemble running, the derived `tau_disk` distribution is measured at fixed mass and compared against the disk-fraction-versus-age data: the cited dispersion moves from an input-side tolerance to an output-side hindcast row (the tolerance three-lives spec's life two), observed diversity refereeing derived diversity. External, reported, never a gate.
+
+- **The moon lane (branch B), when unblocked.** The giant-impact debris moons wait on a debris-disk-mass-to-moon-mass fetch not yet in the record; a reserved-with-basis approach or a pointed fetch reopens it.
+
+- **The capstone.** The disk clock, fully derived and per-world, feeds the whole planetary-assembly chain, the population hindcast referees from the output side, and the five interims are all graduated: the arc is truly derive-first by the owner's standard. It meets the coordinator's topology capstone at the shared planetary-assembly and world-content boundary, where a world's derived disk history and its derived surface both write the same planet.

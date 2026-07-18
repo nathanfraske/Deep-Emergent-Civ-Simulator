@@ -503,6 +503,91 @@ pub fn giant_formation_field(
         .collect()
 }
 
+/// The band-membership of a giant verdict when the disk gas lifetime is a DERIVED INTERVAL (the three-row wind
+/// ensemble's `tau_disk` band) rather than a single value. Condition 3 of the slice-2 run-path wire: the #73 gate
+/// consumes the interval, never a silently chosen central row, so an embryo whose Kelvin-Helmholtz time falls
+/// inside the band is carried as NEAR-DEGENERATE (giant under the long-lifetime edge, terrestrial under the short)
+/// per the Gap Law, never resolved to one row. A point-valued wire would collapse a declared model band at the
+/// exact moment it first touches world content, the one failure mode that would make the slice dishonest.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BandedGiantOutcome {
+    /// Giant under EVERY wind row: the KH time beats even the shortest derived disk lifetime, so the verdict does
+    /// not depend on which wind row the ensemble picks. `final_mass_earth` is the mass at the short (least
+    /// favorable) edge, the conservative giant mass.
+    RobustGiant { final_mass_earth: Fixed },
+    /// Terrestrial under EVERY wind row: the KH time exceeds even the longest derived disk lifetime.
+    RobustTerrestrial,
+    /// NEAR-DEGENERATE: giant under the long-lifetime edge, terrestrial under the short. The KH time falls INSIDE
+    /// the declared wind band, so the verdict is a carried band-membership datum, never silently resolved.
+    /// `giant_mass_earth` is the mass under the giant (long) edge.
+    NearDegenerate { giant_mass_earth: Fixed },
+}
+
+/// The giant verdict across the derived disk-gas-lifetime BAND: the verdict at each band edge plus the
+/// band-membership classification the caller reports. The two edge verdicts carry every diagnostic (why each edge
+/// went the way it did).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BandedGiantVerdict {
+    /// The verdict at the SHORT (least favorable to giant) disk-lifetime edge, the low end of the `tau_disk` band.
+    pub short_lifetime: GiantVerdict,
+    /// The verdict at the LONG (most favorable) edge, the high end of the band.
+    pub long_lifetime: GiantVerdict,
+    /// The band-membership classification.
+    pub band: BandedGiantOutcome,
+}
+
+/// The #73 giant gate evaluated ACROSS the derived disk-gas-lifetime band (condition 3 of the slice-2 wire). The
+/// three-row wind ensemble yields a `tau_disk` interval, and the gate must consume the interval rather than a
+/// silently chosen central row. `gas` carries every giant-gas parameter except the lifetime; `lifetime_low_myr` and
+/// `lifetime_high_myr` are the shortest and longest `tau_disk` the ensemble produces. The verdict is monotone in the
+/// lifetime (giant-hood needs `ln_tau_kh < ln(lifetime)`, and the critical mass does not depend on the lifetime), so
+/// the short edge is the least favorable to giant and the long edge the most: the classification is robust when the
+/// two edges agree and near-degenerate when they differ. `None` on an unordered band (`low > high`) or if either
+/// edge verdict fails soft. A shorter lifetime cannot make giant MORE likely, so a giant-at-short with
+/// terrestrial-at-long is a monotonicity violation and fails loud (`None`) rather than fabricating a band.
+pub fn giant_formation_banded(
+    embryo: &Embryo,
+    disk: &SolidDisk,
+    star_mass_ratio: Fixed,
+    gas: &GiantGasParams,
+    kh: &GiantKhParams,
+    lifetime_low_myr: Fixed,
+    lifetime_high_myr: Fixed,
+) -> Option<BandedGiantVerdict> {
+    if lifetime_low_myr > lifetime_high_myr {
+        return None;
+    }
+    let gas_short = GiantGasParams {
+        disk_gas_lifetime_myr: lifetime_low_myr,
+        ..*gas
+    };
+    let gas_long = GiantGasParams {
+        disk_gas_lifetime_myr: lifetime_high_myr,
+        ..*gas
+    };
+    let short_lifetime = giant_formation(embryo, disk, star_mass_ratio, &gas_short, kh)?;
+    let long_lifetime = giant_formation(embryo, disk, star_mass_ratio, &gas_long, kh)?;
+    let band = match (short_lifetime.outcome, long_lifetime.outcome) {
+        (GiantOutcome::Giant { final_mass_earth }, GiantOutcome::Giant { .. }) => {
+            BandedGiantOutcome::RobustGiant { final_mass_earth }
+        }
+        (GiantOutcome::Terrestrial, GiantOutcome::Terrestrial) => {
+            BandedGiantOutcome::RobustTerrestrial
+        }
+        (GiantOutcome::Terrestrial, GiantOutcome::Giant { final_mass_earth }) => {
+            BandedGiantOutcome::NearDegenerate {
+                giant_mass_earth: final_mass_earth,
+            }
+        }
+        (GiantOutcome::Giant { .. }, GiantOutcome::Terrestrial) => return None,
+    };
+    Some(BandedGiantVerdict {
+        short_lifetime,
+        long_lifetime,
+        band,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -797,6 +882,106 @@ mod tests {
             terrestrials >= 1,
             "the inner disk stays terrestrial, got {}",
             terrestrials
+        );
+    }
+
+    /// Condition 3 of the slice-2 wire: the #73 gate consumes the derived `tau_disk` INTERVAL, not a picked central
+    /// row. A super-critical embryo whose Kelvin-Helmholtz time falls INSIDE the derived disk-lifetime band is
+    /// carried as near-degenerate (giant under the long edge, terrestrial under the short); one whose KH time beats
+    /// even the short edge is a robust giant; one whose KH time exceeds even the long edge is a robust terrestrial.
+    /// The band is calibrated off the embryo's OWN KH time, so the test rests on the mechanism, not a magic number.
+    #[test]
+    fn the_banded_giant_verdict_carries_the_wind_band() {
+        let disk = mirror_disk(Fixed::from_int(30));
+        // The outer embryo of the dense-disk field is super-critical (the giant end of the field-splits test).
+        let field = oligarchic_embryo_field(
+            &disk,
+            Fixed::ONE,
+            Fixed::from_int(10),
+            Fixed::from_int(5),
+            Fixed::ONE,
+            Fixed::from_int(30),
+            256,
+        );
+        let embryo = *field.last().expect("the dense disk seeds embryos");
+        // Probe at a generous lifetime to read the KH time and confirm the embryo is super-critical (a giant when
+        // the disk lives long enough); a sub-critical embryo would be terrestrial at every lifetime and the band
+        // test would be vacuous.
+        let probe = giant_formation(
+            &embryo,
+            &disk,
+            Fixed::ONE,
+            &GiantGasParams {
+                disk_gas_lifetime_myr: Fixed::from_int(1000),
+                ..gas_params()
+            },
+            &kh_params(),
+        )
+        .expect("the probe verdict resolves");
+        assert!(
+            matches!(probe.outcome, GiantOutcome::Giant { .. }),
+            "the probe embryo is super-critical at a long lifetime (core {})",
+            probe.core_mass_earth.to_f64_lossy()
+        );
+        // The KH time in Myr: giant-hood needs the disk lifetime to exceed it (ln_tau_kh < ln(lifetime * 1e6)).
+        let kh_myr = probe
+            .kh_time_yr
+            .checked_div(Fixed::from_int(1_000_000))
+            .expect("the KH time in Myr");
+        let two = Fixed::from_int(2);
+        let four = Fixed::from_int(4);
+        let half = Fixed::from_ratio(1, 2);
+        let quarter = Fixed::from_ratio(1, 4);
+        let band = |lo: Fixed, hi: Fixed| {
+            giant_formation_banded(
+                &embryo,
+                &disk,
+                Fixed::ONE,
+                &gas_params(),
+                &kh_params(),
+                lo,
+                hi,
+            )
+        };
+        // Both edges longer than the KH time: giant under every row.
+        let rg = band(
+            kh_myr.checked_mul(two).unwrap(),
+            kh_myr.checked_mul(four).unwrap(),
+        )
+        .expect("the robust-giant band resolves");
+        assert!(
+            matches!(rg.band, BandedGiantOutcome::RobustGiant { .. }),
+            "the KH time beats even the short edge, so giant is robust across the wind band"
+        );
+        // Both edges shorter than the KH time: terrestrial under every row (the envelope never contracts in time).
+        let rt = band(
+            kh_myr.checked_mul(quarter).unwrap(),
+            kh_myr.checked_mul(half).unwrap(),
+        )
+        .expect("the robust-terrestrial band resolves");
+        assert_eq!(
+            rt.band,
+            BandedGiantOutcome::RobustTerrestrial,
+            "the KH time exceeds even the long edge, so terrestrial is robust across the wind band"
+        );
+        // The band STRADDLES the KH time: near-degenerate, the Gap Law's carried datum.
+        let nd = band(
+            kh_myr.checked_mul(half).unwrap(),
+            kh_myr.checked_mul(two).unwrap(),
+        )
+        .expect("the near-degenerate band resolves");
+        assert!(
+            matches!(nd.band, BandedGiantOutcome::NearDegenerate { .. }),
+            "the KH time inside the band gives a near-degenerate verdict, carried not collapsed"
+        );
+        // An unordered band (low > high) fails soft rather than fabricating a verdict.
+        assert!(
+            band(
+                kh_myr.checked_mul(four).unwrap(),
+                kh_myr.checked_mul(two).unwrap()
+            )
+            .is_none(),
+            "an unordered band fails soft"
         );
     }
 }
