@@ -74,7 +74,7 @@ use crate::astro::{
     disk_effective_temperature, disk_era_xray_disk_lifetime_myr, hill_radius_au,
     kepler_orbital_period_years, planet_radius_m, shu_inside_out_collapse_accretion_rate_msun_myr,
     viscous_similarity_surface_density, CollapseModel, XrayWindFit, ASTRONOMICAL_UNIT_M,
-    EARTH_MASS_KG,
+    EARTH_MASS_KG, SOLAR_MASS_KG,
 };
 use crate::planetary_system::{Embryo, SolidDisk};
 
@@ -151,14 +151,15 @@ pub enum GiantOutcome {
     /// disk gas swept from the feeding annulus (capped by that local reservoir; the gap-opening and global caps
     /// are a documented follow-on).
     ///
-    /// TERMS-DROPPED, and it is load-bearing on the MASS (audit finding): there is NO accretion-termination
-    /// mechanism here. The closure is RESERVOIR EXHAUSTION (the giant grows until the feeding annulus empties), but
-    /// real runaway is ended earlier by gap-opening and throttled supply, so `final_mass_earth` is an UPPER BOUND,
-    /// not a predicted mass. It over-estimates: a dense-disk super-critical embryo returns tens of Jupiter masses
-    /// (brown-dwarf-class), a mass no termination physics has yet trimmed. Retirement points at an
-    /// ACCRETION-TERMINATION slice (the gap-opening / throttled-supply regime), a named debt; until it lands, read
-    /// this mass as a ceiling, and a value crossing the ~13 M_Jup deuterium boundary should eventually dispatch a
-    /// typed giant-planet-versus-brown-dwarf outcome (a second named debt), not be reported as a planet mass.
+    /// TERMS-DROPPED, and it is load-bearing on the MASS (audit finding): THIS field still carries the RESERVOIR
+    /// EXHAUSTION closure (the giant grows until the feeding annulus empties), an UPPER BOUND, not a predicted mass.
+    /// It over-estimates: a dense-disk super-critical embryo returns tens of Jupiter masses (brown-dwarf-class). The
+    /// accretion-termination MECHANISM now exists as a dormant kernel: [`gap_opening_mass_earth`] (the Crida 2006
+    /// gap-opening scale) caps the runaway, and [`runaway_terminated_giant_mass_earth`] applies `M_final =
+    /// min(reservoir, M_gap)`, which trims the solar-row giant from ~24 to ~2 Jupiter masses. Wiring that cap into
+    /// THIS field, and dispatching the ~13 M_Jup deuterium boundary into a typed giant-planet-versus-brown-dwarf
+    /// outcome, is the FOLLOW-ON slice; until that wiring lands, read `final_mass_earth` as the un-terminated
+    /// ceiling, and terminate it through the kernel above at the call site.
     Giant { final_mass_earth: Fixed },
 }
 
@@ -416,6 +417,159 @@ pub fn disk_gas_content(
         proxy_l = proxy_l.checked_add(ring_mass.checked_mul(r.sqrt())?)?;
     }
     Some((mass, proxy_l))
+}
+
+/// The GAP-OPENING MODEL: the cited coefficients of the Crida, Morbidelli and Masset (2006) combined
+/// thermal-viscous gap-opening criterion, the fixed physics [`gap_opening_mass_earth`] solves. The FORM is fixed
+/// Rust; these are the paper's own numbers (Eq. 15), a declared model the way [`crate::astro::CollapseModel`]
+/// carries its members, so a recalibration is a data row.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct GapOpeningModel {
+    /// The gravity (thermal) term coefficient, `3/4` (Crida 2006 Eq. 15, the `(3/4)(H/R_H)` term).
+    pub gravity_term_coeff: Fixed,
+    /// The viscous term coefficient, `50` (Crida 2006 Eq. 15, the `50/(q R)` term).
+    pub viscous_term_coeff: Fixed,
+    /// The Hill-radius denominator `3` in `R_H = r (q/3)^(1/3)` (Crida 2006 Sec. 2.2, Goldreich and Tremaine 1980).
+    pub hill_factor_denominator: Fixed,
+}
+
+impl GapOpeningModel {
+    /// Crida, Morbidelli and Masset 2006, the vendored coefficients (Icarus 181, 587; arXiv astro-ph/0511082;
+    /// receipt in the disk_arc_literature manifest): the gap opens when `P = (3/4)(H/R_H) + 50/(q R) <= 1` (Eq. 15),
+    /// with the Hill radius `R_H = r (q/3)^(1/3)`.
+    pub fn crida_2006() -> Self {
+        Self {
+            gravity_term_coeff: Fixed::from_ratio(3, 4),
+            viscous_term_coeff: Fixed::from_int(50),
+            hill_factor_denominator: Fixed::from_int(3),
+        }
+    }
+}
+
+/// The DISK REYNOLDS NUMBER `R = r^2 Omega / nu` at the planet's orbit, formed from the Shakura-Sunyaev alpha and
+/// the disk aspect ratio by the standard alpha-disk substitution `nu = alpha c_s H` (Shakura and Sunyaev 1973),
+/// which gives `R = 1 / (alpha (H/r)^2)`. This is the bridge the [`gap_opening_mass_earth`] criterion needs, kept
+/// SEPARATE and sourced to its true origin: Crida 2006 works in a constant kinematic viscosity and never names alpha, so the
+/// alpha-to-Reynolds conversion is the standard alpha-disk relation (a derivation, coefficient one), NOT a Crida
+/// claim. The caller composes this with the gap criterion. `None` on a non-positive input or an overflow (an
+/// inviscid disk, `alpha -> 0`, sends `R` past the representable range and fails loud rather than saturating).
+pub fn alpha_disk_reynolds_number(
+    alpha_viscosity: Fixed,
+    disk_aspect_ratio_h_over_r: Fixed,
+) -> Option<Fixed> {
+    if alpha_viscosity <= Fixed::ZERO || disk_aspect_ratio_h_over_r <= Fixed::ZERO {
+        return None;
+    }
+    let denom = alpha_viscosity
+        .checked_mul(disk_aspect_ratio_h_over_r)?
+        .checked_mul(disk_aspect_ratio_h_over_r)?;
+    Fixed::ONE.checked_div(denom)
+}
+
+/// The GAP-OPENING MASS `M_gap` (Earth masses): the planet mass at which a giant opens a gap in the disk, DERIVED
+/// by solving the Crida, Morbidelli and Masset (2006) criterion `P(q) = (3/4)(H/R_H) + 50/(q R) = 1` for the
+/// mass ratio `q = M_p/M_star`, with `R_H = r (q/3)^(1/3)` so `H/R_H = (H/r)/(q/3)^(1/3)`. Runaway gas accretion
+/// halts near this mass: once the gap opens, the disk can no longer feed the planet at the runaway rate, so
+/// `M_gap` is the accretion-TERMINATION scale that caps the reservoir-exhaustion upper bound the giant gate
+/// otherwise reports (the audit finding that a super-critical embryo returns tens of Jupiter masses). The
+/// terminated final mass is `min(reservoir-exhaustion mass, M_gap)`, [`runaway_terminated_giant_mass_earth`].
+///
+/// The value line: every physical input is an EXPLICIT named argument (the [`crate::astro::centrifugal_radius_au`]
+/// precedent), so the kernel owns the criterion and nothing else. The disk aspect ratio `H/r` and the Reynolds
+/// number `R` (from [`alpha_disk_reynolds_number`], the standard alpha-disk bridge) are the disk state; the
+/// coefficients are the cited [`GapOpeningModel`]. Zero fabricated values. `P(q)` decreases monotonically in `q`
+/// (both terms fall as the planet grows), so the gap-opening mass is the single crossing `P = 1`, found by
+/// bounded bisection over `q in [1e-6, 0.1]`. `None` if the bracket does not straddle the crossing (no gap-opening
+/// mass exists in range for these disk conditions), a fail-loud rather than a fabricated root.
+///
+/// DECLARED CLOSURE, not a Crida claim: identifying gap-opening (`P <= 1`, a SURFACE-DENSITY criterion) with the
+/// HALT of runaway gas accretion is the standard modeling assumption the caller applies, stated here rather than
+/// implied. Crida 2006 also works in a constant kinematic viscosity (the alpha bridge is [`alpha_disk_reynolds_number`]'s,
+/// not Crida's), for a 2D non-migrating giant with `q << 1`, the regime the caller stays inside. The two asymptotes
+/// cross-check the solve: the thermal (inviscid) limit `q = 3(H/r)^3` (Hill radius equal to the scale height) and
+/// the viscous limit (Crida Eq. 3), both self-anchored in the vendored bytes.
+///
+// @derives: the giant-planet gap-opening mass M_gap <- the Crida 2006 thermal-viscous gap criterion P(q)=(3/4)(H/R_H)+50/(qR)=1 solved for the mass ratio, over the disk aspect ratio and Reynolds number, the accretion-termination scale
+pub fn gap_opening_mass_earth(
+    disk_aspect_ratio_h_over_r: Fixed,
+    reynolds_number: Fixed,
+    star_mass_ratio: Fixed,
+    model: &GapOpeningModel,
+) -> Option<Fixed> {
+    if disk_aspect_ratio_h_over_r <= Fixed::ZERO
+        || reynolds_number <= Fixed::ZERO
+        || star_mass_ratio <= Fixed::ZERO
+        || model.hill_factor_denominator <= Fixed::ZERO
+    {
+        return None;
+    }
+    let third = Fixed::from_ratio(1, 3);
+    // P(q) = gravity*(H/r)/(q/hill_denom)^(1/3) + viscous/(q*R). Monotone decreasing in q.
+    let p_of_q = |q: Fixed| -> Option<Fixed> {
+        if q <= Fixed::ZERO {
+            return None;
+        }
+        let hill = q.checked_div(model.hill_factor_denominator)?.powf(third); // (q/3)^(1/3)
+        if hill <= Fixed::ZERO {
+            return None;
+        }
+        let h_over_rh = disk_aspect_ratio_h_over_r.checked_div(hill)?;
+        let gravity_term = model.gravity_term_coeff.checked_mul(h_over_rh)?;
+        let viscous_term = model
+            .viscous_term_coeff
+            .checked_div(q.checked_mul(reynolds_number)?)?;
+        gravity_term.checked_add(viscous_term)
+    };
+    let q_lo = Fixed::from_ratio(1, 1_000_000); // 1e-6, sub-gap (P > 1)
+    let q_hi = Fixed::from_ratio(1, 10); // 0.1, super-gap (P < 1)
+                                         // The bracket must straddle the crossing: no gap at the low end, a gap at the high end. Fail loud otherwise.
+    if !(p_of_q(q_lo)? > Fixed::ONE && p_of_q(q_hi)? < Fixed::ONE) {
+        return None;
+    }
+    let mut lo = q_lo;
+    let mut hi = q_hi;
+    for _ in 0..60 {
+        let mid = lo.checked_add(hi)?.checked_div(Fixed::from_int(2))?;
+        if p_of_q(mid)? > Fixed::ONE {
+            lo = mid; // still sub-gap, the opening mass is larger
+        } else {
+            hi = mid;
+        }
+    }
+    let q_gap = lo.checked_add(hi)?.checked_div(Fixed::from_int(2))?;
+    // M_gap[earth] = q_gap * M_star * (M_sun / M_earth), the ratio formed in the log domain (both masses overflow).
+    let ln_sun_over_earth = civsim_physics::saha::ln_of_decimal(SOLAR_MASS_KG)?
+        .checked_sub(civsim_physics::saha::ln_of_decimal(EARTH_MASS_KG)?)?;
+    let sun_to_earth = ln_sun_over_earth.exp();
+    q_gap
+        .checked_mul(star_mass_ratio)?
+        .checked_mul(sun_to_earth)
+}
+
+/// The RUNAWAY-TERMINATED giant mass (Earth masses): the accretion-termination rule applied, `M_final =
+/// min(reservoir-exhaustion mass, gap-opening mass)`. The giant grows by runaway gas accretion until either the
+/// feeding-zone reservoir empties or it opens a gap ([`gap_opening_mass_earth`]) and chokes its own supply,
+/// whichever comes first. This RETIRES the reservoir-exhaustion upper bound the giant gate reports (the audit
+/// finding): a super-critical embryo whose reservoir would carry it to tens of Jupiter masses is instead capped at
+/// the gap-opening mass, a Jupiter-class value below the deuterium boundary, so the deuterium-versus-brown-dwarf
+/// typed outcome becomes sound on a real mass. TERMS DROPPED: the slow gap-limited accretion that continues after
+/// the gap opens (a modest growth past `M_gap` over the remaining disk lifetime `tau_disk`) is omitted, so this is
+/// a lower-leaning bound in the gap-limited regime; naming it is the throttled-supply follow-on. `None` on a
+/// non-positive input.
+pub fn runaway_terminated_giant_mass_earth(
+    reservoir_exhaustion_mass_earth: Fixed,
+    gap_opening_mass_earth: Fixed,
+) -> Option<Fixed> {
+    if reservoir_exhaustion_mass_earth <= Fixed::ZERO || gap_opening_mass_earth <= Fixed::ZERO {
+        return None;
+    }
+    Some(
+        if reservoir_exhaustion_mass_earth < gap_opening_mass_earth {
+            reservoir_exhaustion_mass_earth
+        } else {
+            gap_opening_mass_earth
+        },
+    )
 }
 
 /// The GIANT-FORMATION VERDICT for one embryo (task #73, slice 1). It derives the core accretion rate, the
@@ -1579,5 +1733,84 @@ mod tests {
         // terminationless closure; once termination lands, mass may couple to the supply rate and this spread must be
         // RE-MEASURED, so the termination slice re-runs this fixture. A near-threshold-embryo row (where the factor-48
         // bites the verdict hardest) is a named debt, the sensitivity the population hindcast would otherwise owe.
+    }
+
+    #[test]
+    fn the_gap_opening_mass_terminates_the_runaway_at_a_jupiter_class_cap() {
+        // The ACCRETION-TERMINATION mechanism (the audit debt): runaway gas accretion halts when the giant opens a
+        // gap, so the Crida 2006 gap-opening mass caps the reservoir-exhaustion upper bound. Coefficients are the
+        // vendored Crida numbers (disk_arc_literature manifest).
+        let crida = GapOpeningModel::crida_2006();
+        assert_eq!(crida.gravity_term_coeff, Fixed::from_ratio(3, 4)); // Eq. 15
+        assert_eq!(crida.viscous_term_coeff, Fixed::from_int(50)); // Eq. 15
+        assert_eq!(crida.hill_factor_denominator, Fixed::from_int(3)); // Hill radius (q/3)^(1/3)
+                                                                       // The alpha-disk Reynolds bridge (the standard Shakura-Sunyaev substitution, not Crida's): alpha=1e-2,
+                                                                       // H/r=0.05 gives R = 1/(alpha (H/r)^2) = 40000.
+        let h_over_r = Fixed::from_ratio(5, 100);
+        let alpha = Fixed::from_ratio(1, 100);
+        let re = alpha_disk_reynolds_number(alpha, h_over_r).unwrap();
+        assert!(
+            (re.to_f64_lossy() - 40000.0).abs() < 1.0,
+            "R = 1/(alpha (H/r)^2) = 40000 (got {})",
+            re.to_f64_lossy()
+        );
+        // VALIDATION: for solar-ish disk conditions (H/r=0.05, alpha=1e-2) around a 1 M_sun star the gap-opening
+        // mass is a Jupiter-class ~2 M_Jup (~710 Earth masses), the physical cap that retires the reservoir-
+        // exhaustion tens-of-Jupiter upper bound. Reported inside a band, the mechanism not a fit.
+        let m_gap = gap_opening_mass_earth(h_over_r, re, Fixed::ONE, &crida).unwrap();
+        assert!(
+            m_gap.to_f64_lossy() > 600.0 && m_gap.to_f64_lossy() < 850.0,
+            "the gap-opening mass is Jupiter-class ~710 M_earth (~2 M_Jup) (got {})",
+            m_gap.to_f64_lossy()
+        );
+        // THE TERMINATION RULE: M_final = min(reservoir, M_gap). A super-critical embryo whose reservoir would carry
+        // it to the audited 7678 M_earth (24 M_Jup, brown-dwarf-class) is instead capped at the gap-opening mass.
+        let terminated = runaway_terminated_giant_mass_earth(Fixed::from_int(7678), m_gap).unwrap();
+        assert_eq!(
+            terminated, m_gap,
+            "the runaway is capped at the gap-opening mass"
+        );
+        // and when the reservoir is the smaller bound it wins (a gas-poor annulus never reaches the gap).
+        let gas_poor = runaway_terminated_giant_mass_earth(Fixed::from_int(100), m_gap).unwrap();
+        assert_eq!(gas_poor, Fixed::from_int(100));
+        // THERMAL (inviscid) ASYMPTOTE: as R grows the viscous term vanishes and the criterion reduces to
+        // P = (3/4)(H/R_H) = 1, giving q = 3*((3/4)(H/r))^3, its own fitted thermal limit (distinct from the
+        // R_H>=H physical criterion's 3(H/r)^3, the 3/4 fit coefficient the difference). For H/r=0.05 that is
+        // ~53 M_earth.
+        let m_thermal =
+            gap_opening_mass_earth(h_over_r, Fixed::from_int(1_000_000_000), Fixed::ONE, &crida)
+                .unwrap();
+        assert!(
+            m_thermal.to_f64_lossy() > 45.0 && m_thermal.to_f64_lossy() < 62.0,
+            "the near-inviscid gap mass approaches the Crida thermal limit ~53 M_earth (got {})",
+            m_thermal.to_f64_lossy()
+        );
+        // MECHANISM, a more viscous disk holds a wider gap open, so it takes a HEAVIER planet: M_gap rises with alpha.
+        let re_visc = alpha_disk_reynolds_number(Fixed::from_ratio(3, 100), h_over_r).unwrap();
+        let m_gap_visc = gap_opening_mass_earth(h_over_r, re_visc, Fixed::ONE, &crida).unwrap();
+        assert!(
+            m_gap_visc > m_gap,
+            "a more viscous disk needs a heavier planet to open a gap (alpha=3e-2 {} > alpha=1e-2 {})",
+            m_gap_visc.to_f64_lossy(),
+            m_gap.to_f64_lossy()
+        );
+        // MECHANISM, a THINNER disk opens a gap at a LIGHTER planet: M_gap falls with H/r.
+        let thin = Fixed::from_ratio(3, 100);
+        let re_thin = alpha_disk_reynolds_number(alpha, thin).unwrap();
+        let m_gap_thin = gap_opening_mass_earth(thin, re_thin, Fixed::ONE, &crida).unwrap();
+        assert!(
+            m_gap_thin < m_gap,
+            "a thinner disk opens a gap at a lighter planet (H/r=0.03 {} < H/r=0.05 {})",
+            m_gap_thin.to_f64_lossy(),
+            m_gap.to_f64_lossy()
+        );
+        // An extreme viscosity whose gap-opening mass would exceed the q=0.1 (~100 M_Jup, stellar) bracket ceiling
+        // fails loud, never a fabricated cap. Only an unphysical alpha (~0.9) pushes the gap mass past that ceiling.
+        let re_thick = alpha_disk_reynolds_number(Fixed::from_ratio(9, 10), h_over_r).unwrap();
+        assert!(gap_opening_mass_earth(h_over_r, re_thick, Fixed::ONE, &crida).is_none());
+        // Non-physical inputs fail soft.
+        assert!(alpha_disk_reynolds_number(Fixed::ZERO, h_over_r).is_none());
+        assert!(gap_opening_mass_earth(Fixed::ZERO, re, Fixed::ONE, &crida).is_none());
+        assert!(runaway_terminated_giant_mass_earth(Fixed::ZERO, m_gap).is_none());
     }
 }

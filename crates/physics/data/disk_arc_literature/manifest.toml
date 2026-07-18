@@ -27,6 +27,11 @@
 # captures. scripts/disk_arc_literature_provenance_test.py validates the archive_url format where present and
 # requires each entry to carry either archive_url or archive_pending.
 #
+# ERRATA BACKING (the errata pipeline is itself held): when a fetch catches a WRONG id, the wrong-id target is
+# vendored as its own [[source]] (see the errata-backing section at the tail), so 'the relayed id is misattributed'
+# is a held fact rather than a claim. A source-internal typo needs no separate entry: it is anchored to the
+# equation or table in the same held source whose own arithmetic contradicts the printed value.
+#
 # The reasoning consolidated here also lives in prose at docs/working/DISK_ARC_FETCH_VALUES.md,
 # docs/working/LAYER4_ROOT_CENSUS.md, and the calibration/reserved.toml disk_clock.cloud_core_temperature_k
 # basis; this file is the structured, machine-checkable receipt ledger for the same reads.
@@ -168,7 +173,7 @@ citation = "Burke, J. R. and Hollenbach, D. J. 1983, The gas-grain interaction i
 sha256 = "8478ebcd4742a99792b30e714f9459657809debc6ca83fb85a8de4dbc494f767"
 bytes = 1146599
 grade = "theory"
-extract = "The INDEPENDENT CROSS-REFERENCE for the Goldsmith gas-dust coupling (the primary Goldsmith eq. 14 cites). Eq. 9 p.230: Lambda_g-gr = n_gr * n_H * sigma_gr * (8 k T_g / (pi m_H))^0.5 * alpha_T * (2 k T_g - 2 k T_gr). Confirms the Goldsmith form term by term: the (8 k T_g / pi m_H)^0.5 mean thermal speed IS the sqrt(T_gas) factor of Goldsmith eq. 15; the (2 k T_g - 2 k T_gr) IS the linear (T_gas - T_dust); the bilinear n_gr*n_H becomes n(H2)^2 under a fixed dust-to-gas ratio and grain size (Goldsmith's imposed assumption, not read from this paper). Accommodation coefficient alpha_T from Fig. 4b (molecular H2 on silicate grains), at T_g = 10 K: 0.30 to 0.35 across T_s = 10 to 100 K, so Goldsmith's adopted alpha = 0.3 is SUPPORTED. PROVENANCE CAVEAT: Goldsmith's numeric coefficient 2e-33 and the n^2 collapse come from grain assumptions (radius, cross-section, dust-to-gas) Goldsmith supplies; Burke and Hollenbach leave n_gr and sigma_gr as free inputs. SCOPE: 10 K < T_g < 1e4 K, 5 K < T_s < 1e3 K, 0.1 < n < 1e6 cm^-3; silicate, ice, graphite grains. LICENSE: OPEN (NASA ADS scanned full text), public-tree. DUAL-CHANNEL: OCR text and a visual read of eq. 9 and Fig. 4b agree; the Fig. 4b alpha readings are graph-crop estimates good to ~0.03, the alpha ~ 0.3 conclusion robust to that read error."
+extract = "The INDEPENDENT CROSS-REFERENCE for the Goldsmith gas-dust coupling (the primary Goldsmith eq. 14 cites). Eq. 9 p.230: Lambda_g-gr = n_gr * n_H * sigma_gr * (8 k T_g / (pi m_H))^0.5 * alpha_T * (2 k T_g - 2 k T_gr). Confirms the Goldsmith form term by term: the (8 k T_g / pi m_H)^0.5 mean thermal speed IS the sqrt(T_gas) factor of Goldsmith eq. 15; the (2 k T_g - 2 k T_gr) IS the linear (T_gas - T_dust); the bilinear n_gr*n_H becomes n(H2)^2 under a fixed dust-to-gas ratio and grain size (Goldsmith's imposed assumption, not read from this paper). Accommodation coefficient alpha_T from Fig. 4b (molecular H2 on silicate grains), at T_g = 10 K: 0.30 to 0.35 across T_s = 10 to 100 K, so Goldsmith's adopted alpha = 0.3 is SUPPORTED. PROVENANCE CAVEAT: Goldsmith's numeric coefficient 2e-33 and the n^2 collapse come from grain assumptions (radius, cross-section, dust-to-gas) Goldsmith supplies; Burke and Hollenbach leave n_gr and sigma_gr as free inputs. SCOPE: 10 K < T_g < 1e4 K, 5 K < T_s < 1e3 K, 0.1 < n < 1e6 cm^-3; silicate, ice, graphite grains. LICENSE: OPEN (NASA ADS scanned full text), public-tree. The archive_url snapshot was re-downloaded and re-hashed byte-identical to the fetched bytes, a real held witness not a bot-wall page. DUAL-CHANNEL: OCR text and a visual read of eq. 9 and Fig. 4b agree; the Fig. 4b alpha readings are graph-crop estimates good to ~0.03, the alpha ~ 0.3 conclusion robust to that read error."
 used_by = "astro::GoldsmithThermalModel (independent cross-reference: the gas-dust coupling form and alpha = 0.3)"
 
 # ============================ Disk size (R_1) ============================
@@ -341,3 +346,33 @@ bytes = 18793019
 grade = "review"
 extract = "The load-bearing method distinction verbatim: transport requires 'alpha_S ~ 10^-2 ... to match the observed accretion rates', while ALMA gives 'alpha_S < 10^-4-10^-3 for four out of five sources' (DM Tau ~0.01-0.5). Non-ideal MRI reduced to ~several e-4; VSI alpha ~1e-4 (radial), COS ~1e-3, ZVI ~1e-5-1e-4. Framework flag: magnetized winds may dominate outer-disk transport, so a Shakura-Sunyaev alpha is a fitted stand-in."
 used_by = "LAYER4_ROOT_CENSUS alpha (census review; the transport-vs-turbulence two-quantities finding)"
+
+# ==================== Giant-planet accretion termination: gap opening ====================
+
+[[source]]
+name = "crida_2006"
+url = "https://arxiv.org/pdf/astro-ph/0511082"
+archive_url = "https://web.archive.org/web/20260718231028/https://arxiv.org/pdf/astro-ph/0511082"
+citation = "Crida, A., Morbidelli, A. and Masset, F. 2006, On the width and shape of gaps in protoplanetary disks, Icarus 181, 587. arXiv:astro-ph/0511082."
+sha256 = "d3eb42e01a27db10945d97aef30efd6e9e5bbc76edcde42eadffacd819582f3b"
+bytes = 492399
+grade = "theory"
+extract = "The gap-opening criterion for giant-planet accretion termination. Eq. 15 (p.17, Sec. 6): a gap is open when P = (3/4)(H/R_H) + 50/(q R) <= 1, with q = M_p/M_star the planet-to-star mass ratio, R = r_p^2 Omega_p / nu the Reynolds number, R_H = r_p (q/3)^(1/3) the Hill radius (so H/R_H = (H/r_p)/(q/3)^(1/3)). Coefficients 3/4 and 50 and the threshold P=1 confirmed dual-channel (OCR plus visual; the Fig. 12 caption restates P=1 as a second in-source channel for the threshold). THERMAL asymptote, self-anchored in the held bytes: R_H >= H (Sec. 2.3, Lin and Papaloizou 1993) which with the Hill definition gives q = 3(H/r)^3. VISCOUS asymptote: Eq. 3, nu < 0.0887 q^2 ... (equivalent to Bryden 1999). SCOPE: fit to Fig. 12 gap-depth-threshold curves (a gap is central surface density <= 10 percent of unperturbed) over q = 1e-4 to 3e-3, H/r up to ~0.12, constant kinematic nu; 2D vertically-isothermal non-migrating giant planet, q << 1. CHANNEL-RELAYED CAVEAT, NOT from Crida: the paper uses a CONSTANT kinematic viscosity nu and never mentions the Shakura-Sunyaev alpha; the link R = 1/(alpha (H/r)^2) via nu = alpha c_s H is the standard alpha-disk substitution (Shakura and Sunyaev 1973), a derivation the caller applies, not a Crida claim. MODELING-ASSUMPTION CAVEAT, NOT from Crida: identifying gap-opening (P<=1) with the HALT of runaway gas accretion is the caller's standard modeling assumption, not a claim Crida makes. LICENSE: OPEN (arXiv accepted preprint, public-tree); the ScienceDirect journal version is paywalled but carries the same equations. The archive_url snapshot re-hashes byte-identical to the fetched bytes, a real witness. CROSS-REFERENCE not-yet-vendored: the thermal R_H >= H traces to Lin and Papaloizou 1993 (a book chapter, no free PDF) and the Hill radius to Ward 1997 (the ADS scan timed out); the thermal asymptote is self-anchored in Crida's own bytes, so neither blocks the primary."
+used_by = "giants::gap_opening_mass_earth; giants::GapOpeningModel::crida_2006"
+
+# ==================== Errata backing (held witnesses for caught misattributions) ====================
+# When a fetch catches a WRONG id, the wrong-id target is vendored here so the correction is a held fact, not a
+# claim: 'the relayed id resolves to paper Z, not the intended source'. A source-internal typo needs no entry (it
+# is anchored to the equation in the same held source that contradicts it). The channel corollary in force: a
+# relayed id is a fetch-spec seed, only held bytes settle what it is.
+
+[[source]]
+name = "malzac_2001_errata_backing"
+url = "https://arxiv.org/pdf/astro-ph/0104273"
+archive_url = "https://web.archive.org/web/20260718221826/https://arxiv.org/pdf/astro-ph/0104273"
+citation = "Malzac, J. 2001, A quasi-spherical inner accretion flow in Seyfert galaxies?, MNRAS 325, 1625. DOI 10.1046/j.1365-8711.2001.04564.x."
+sha256 = "f3725387aa74184543d6953f53b62ba50ab0c2713ccb524b3a84ac65d2bbcc46"
+bytes = 353189
+grade = "theory"
+extract = "ERRATA BACKING, not a physics source: the held witness for the Goldsmith 2001 wrong-arXiv-id catch. The arXiv id astro-ph/0104273, first relayed as Goldsmith 2001's preprint, in fact resolves to THIS paper (Malzac 2001, an AGN / Seyfert X-ray accretion-flow paper), verified from its PDF page-1 title and the arXiv journal-ref. HELD FACT: astro-ph/0104273 = Malzac 2001, MNRAS 325, 1625, NOT Goldsmith 2001, ApJ 557, 736. Goldsmith 2001 has no arXiv preprint and was vendored from the IOP publisher PDF (sha256 d0598ff5). The archive_url snapshot re-hashes byte-identical to the fetched bytes, a real witness. This entry makes the id-misattribution provenance-complete."
+used_by = "errata backing for goldsmith_2001 (the wrong-arXiv-id catch, held witness)"
