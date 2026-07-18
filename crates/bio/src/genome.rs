@@ -25,7 +25,7 @@
 //!
 //! The phenotype channels a gene may feed ([`Channel`]) are a fixed mechanism enum, the
 //! interface the genotype expresses into, on the same footing as [`crate::tom::EvidenceOrder`]
-//! and [`crate::dialogue::ForceKind`]: each is a phenotype the engine knows how to read
+//! and `civsim_sim::dialogue::ForceKind`: each is a phenotype the engine knows how to read
 //! (a Part 20 trait setpoint keyed by a data trait id, a cognition channel, a build
 //! channel, an imbued trait, a life-history channel). What is data is which genes exist,
 //! which channels they feed and with what weight, and their dominance, all carried in the
@@ -162,12 +162,12 @@ pub enum Channel {
     /// one weight per controller-parameter id, so behaviour is a lineage's inheritance the way
     /// its size and acuity are, evolving under the pre-dawn epoch's selection rather than being
     /// authored (Principle 9). The variant is the fixed engine interface; the controller's
-    /// topology and how many parameters it has are data ([`crate::controller`]).
+    /// topology and how many parameters it has are data (`civsim_sim::controller`).
     Controller(ControllerParamId),
     /// A sex (mating-type) determination coordinate: the value read off a race's designated
     /// sex-determination locus (R-REPRO, design Part 25). A data-driven
-    /// [`crate::breeding::BreedingSystem`] maps this expressed value to a
-    /// [`crate::breeding::SexClass`], so the number of sex classes a race carries and how a
+    /// `civsim_sim::breeding::BreedingSystem` maps this expressed value to a
+    /// `civsim_sim::breeding::SexClass`, so the number of sex classes a race carries and how a
     /// genotype assigns to one are data, and the population sex ratio emerges from Fisherian
     /// selection on the locus rather than a drawn ratio (Principle 8). This variant is the fixed
     /// engine interface; which gene feeds it, and with what weight, is data, exactly like every
@@ -180,7 +180,7 @@ pub enum Channel {
     /// dose), so a lineage adapts to an environmental gradient (a salt flat, a dust haze) by selection
     /// on this channel rather than being excluded at a fixed dose (Principle 8: a graded dose, never a
     /// gate). The variant is the fixed engine interface; which toxin classes exist and which genes reach
-    /// them is data (a [`ToleranceRegistry`](crate::edibility::ToleranceRegistry) sibling to the
+    /// them is data (a `ToleranceRegistry` (`civsim_sim::edibility::ToleranceRegistry`) sibling to the
     /// controller and composition registries, keyed off the floor toxin-class id, never a `RaceId`).
     Tolerance(ToleranceAxisId),
     /// A heritable developmental-growth parameter, by morphogen-parameter id (emergent-anatomy Step 2).
@@ -191,11 +191,11 @@ pub enum Channel {
     /// heritable data expressed here, one value per morphogen-parameter id, so a body's SHAPE is a
     /// lineage's inheritance the way its controller and composition are, evolving under selection rather
     /// than being drawn from a catalog (Principle 8). The variant is the fixed engine interface; the
-    /// growth program's parameter count and what each parameter means are data ([`crate::morphogen`]).
+    /// growth program's parameter count and what each parameter means are data (`civsim_sim::morphogen`).
     Morphogen(MorphogenParamId),
     /// A heritable EXPLORATION propensity (ideation / experiential-discovery arc, the activation follow-on):
     /// the rate at which a being ENACTS a novel action it proposed rather than only acting on what its
-    /// controller decides, the value `crate::locomotion::Walker::exploration` is expressed from. A UNIT
+    /// controller decides, the value `civsim_sim::locomotion::Walker::exploration` is expressed from. A UNIT
     /// channel (one scalar, no parameter id, like [`Channel::SexDetermination`]). FOUNDER-ZERO: a founder
     /// carries an unseeded locus for it (frequency one half, effect zero), so it expresses to zero until
     /// mutation drifts it off, and exploration EMERGES by selection rather than being switched on (Principle
@@ -204,14 +204,14 @@ pub enum Channel {
     Exploration,
     /// A heritable DELIBERATION propensity (ideation / experiential-discovery arc, the activation follow-on):
     /// the rate at which a being ACTS on the believed-best action its planner recalled toward a goal, the
-    /// value `crate::locomotion::Walker::deliberation` is expressed from. A UNIT channel, the deliberation
+    /// value `civsim_sim::locomotion::Walker::deliberation` is expressed from. A UNIT channel, the deliberation
     /// twin of [`Channel::Exploration`]: where exploration tries the untried, deliberation exploits the
     /// best-believed, two independent heritable drives. FOUNDER-ZERO by the same unseeded-locus mechanism,
     /// so goal-directed pursuit emerges by selection, never a coded default (Principle 9).
     Deliberation,
     /// A heritable SOCIAL-LEARNING propensity (social-learning arc, piece 2, observe-and-imitate): the rate
     /// at which a being's proposal is BIASED toward an action it perceived a co-located being enact (a
-    /// valence-free observed ActionTrace), the value `crate::locomotion::Walker::social_learning` is
+    /// valence-free observed ActionTrace), the value `civsim_sim::locomotion::Walker::social_learning` is
     /// expressed from. A UNIT channel, the observational sibling of [`Channel::Exploration`]: where
     /// exploration tries the untried at a flat floor rate, social learning tries what it SAW others do,
     /// tipping the discovery draw toward a demonstrated technique. FOUNDER-ZERO by the same unseeded-locus
@@ -223,13 +223,13 @@ pub enum Channel {
 
 /// A tolerance-axis id, an index into a world's toxin-tolerance registry (the floor toxin classes a
 /// being's physiology carries a heritable tolerance for). A numeric id keeps [`Channel`] `Copy` and
-/// `Ord`; the class-name-to-id mapping is data in the [`ToleranceRegistry`](crate::edibility::ToleranceRegistry),
+/// `Ord`; the class-name-to-id mapping is data in the `ToleranceRegistry` (`civsim_sim::edibility::ToleranceRegistry`),
 /// sibling to the composition-axis and controller-parameter registries (base-level liveliness step 4).
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct ToleranceAxisId(pub u16);
 
 /// A controller-parameter id, an index into a being's behaviour controller's flat weight vector
-/// ([`crate::controller`]). A numeric id keeps [`Channel`] `Copy` and `Ord`; the parameter count
+/// (`civsim_sim::controller`). A numeric id keeps [`Channel`] `Copy` and `Ord`; the parameter count
 /// and the topology it indexes are data, sibling to the composition-axis registry. It is a `u32`
 /// (not a `u16`), so a large controller (a wide recurrent network over a rich registry) cannot
 /// silently collide two weights on one channel by truncation; `Channel` is already `u32`-sized
@@ -238,7 +238,7 @@ pub struct ToleranceAxisId(pub u16);
 pub struct ControllerParamId(pub u32);
 
 /// A morphogen-parameter id, an index into a being's developmental-growth program's flat parameter
-/// vector ([`crate::morphogen`]). A numeric id keeps [`Channel`] `Copy` and `Ord`; the parameter count
+/// vector (`civsim_sim::morphogen`). A numeric id keeps [`Channel`] `Copy` and `Ord`; the parameter count
 /// and the growth rules it indexes are data, sibling to the controller-parameter registry. It is a
 /// `u32` (not a `u16`), so a rich growth program (many axes over many generations) cannot silently
 /// collide two parameters on one channel by truncation; `Channel` is already `u32`-sized.
@@ -441,9 +441,9 @@ impl GeneSet {
 /// Append a full founding controller gene block to a gene set and its parallel pool spine (base-level
 /// liveliness, step 1). This adds one unit-effect additive gene for EVERY one of the controller's
 /// `weight_count` heritable weights (so a founder carries the whole controller substrate and mutation
-/// can later turn any weight on, matching `crate::evolve::controller_gene_set`), each feeding its
+/// can later turn any weight on, matching `civsim_sim::evolve::controller_gene_set`), each feeding its
 /// `Channel::Controller(ControllerParamId(k))` at a fresh locus. The pool spine is seeded from the
-/// `seeds` the caller derived from a taxis pattern (`crate::controller::taxis_move_weights`): a seeded
+/// `seeds` the caller derived from a taxis pattern (`civsim_sim::controller::taxis_move_weights`): a seeded
 /// weight's locus gets frequency `ONE` (the founder is homozygous, so the locus carries no additive
 /// variance and the dawn expression is deterministic) and additive effect `target / ploidy` (a
 /// `ploidy`-fold founder expresses `ploidy * (target / ploidy) = target`); an unseeded weight gets a
@@ -829,8 +829,8 @@ pub struct GenePool {
 const SLOT_ADDITIVE: u32 = 1;
 
 /// The environmental variance V_E of the uniform developmental-environment offset (design 25.6): the
-/// offset is drawn on `[-a, +a]` (`crate::world` `env_offset`), where `a` is the race's reserved
-/// half-width `crate::race::Race::environment_variance`. A uniform deviate on `[-a, a]` has variance
+/// offset is drawn on `[-a, +a]` (`civsim_sim::world` `env_offset`), where `a` is the race's reserved
+/// half-width `civsim_sim::race::Race::environment_variance`. A uniform deviate on `[-a, a]` has variance
 /// `a^2 / 3`, so a caller holding the HALF-WIDTH converts through this before feeding V_E to
 /// [`GenePool::narrow_sense_heritability`] (the half-width and the variance are NOT interchangeable;
 /// passing the raw half-width overstates V_E). Pure fixed-point.
@@ -929,7 +929,7 @@ impl GenePool {
     /// fraction of phenotypic variance that is additive-genetic and so transmitted to offspring
     /// (Falconer's offspring-on-midparent regression). `env_var` is the environmental variance V_E
     /// (a VARIANCE, not a half-width). The developmental-environment offset is a uniform deviate on
-    /// `[-a, +a]` whose half-width `a` is `crate::race::Race::environment_variance`; its variance is
+    /// `[-a, +a]` whose half-width `a` is `civsim_sim::race::Race::environment_variance`; its variance is
     /// `a^2 / 3`, NOT `a`, so a caller holding the half-width must convert through
     /// [`uniform_offset_variance`] before passing it here (the two are not interchangeable). This
     /// graduates the former authored `genome.narrow_sense_heritability` constant into a population

@@ -78,7 +78,7 @@
 //! prospective-viability feature, so the feature set the resolved mechanism needs is a selected
 //! consequence rather than an authored one.
 //!
-//! Sixth, the `World::birth` choosing call site is now built ([`crate::world::World::choose_mate`]):
+//! Sixth, the `World::birth` choosing call site is now built (`civsim_sim::world::World::choose_mate`):
 //! a per-being heritable [`MatePreference`] over the distance axis, seeded at the dawn with
 //! unbiased variation (symmetric about indifference, so no direction is authored) and inherited
 //! at birth by the midparent rule plus a bounded mutation, so which way a being assorts is a
@@ -98,7 +98,7 @@
 //! folding onto the shared `evolve_with` plus `Controller` substrate rides that substrate's input
 //! registry carrying a candidate-percept family; the value and axiom distances are added as further
 //! features; and the `World::birth` call site now does the choosing under a per-being heritable
-//! preference ([`crate::world::World::choose_mate`]), with the incompatibility axis at that site
+//! preference (`civsim_sim::world::World::choose_mate`), with the incompatibility axis at that site
 //! awaiting a Dobzhansky-Muller table on the choose path. The reserved values the resolved
 //! mechanism surfaces (none fabricated) are the
 //! cost of choosiness, the preference mutation variance, and, for the deep-time pure-frequency

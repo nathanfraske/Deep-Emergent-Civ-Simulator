@@ -162,9 +162,11 @@ impl Provenance {
     /// state, a CONTINGENCY leaf, and a MEASURED leaf as the most pinned. The join of a set is the member of
     /// minimum rank, so any authored or closure ancestor surfaces to the top of the derived chain.
     ///
-    /// `pub(crate)` so the joined register ([`crate::unified_provenance`]) runs the identical worst-case join
-    /// over the calibration-plus-floor node set, one honesty query spanning both registers.
-    pub(crate) fn rank(self) -> u8 {
+    /// `pub` so the joined register (`civsim_sim::unified_provenance`) runs the identical worst-case join
+    /// over the calibration-plus-floor node set, one honesty query spanning both registers. It was
+    /// `pub(crate)` while the manifest and that register shared a crate; the biology extraction put a crate
+    /// boundary between them, so the visibility widened to keep the one join. The rank ladder is unchanged.
+    pub fn rank(self) -> u8 {
         match self {
             Provenance::Authored => 0,
             Provenance::Closure => 1,
@@ -179,7 +181,7 @@ impl Provenance {
 
     /// Parse a seven-tag provenance string to its variant: the single source of truth for the mapping, shared
     /// by the calibration entries ([`ReservedValue::provenance`]) and the physics-floor grades (the joined
-    /// register, [`crate::unified_provenance`]). An empty string is [`Provenance::Unclassified`] (the additive
+    /// register, `civsim_sim::unified_provenance`). An empty string is [`Provenance::Unclassified`] (the additive
     /// migration default and the fail-loud sentinel); an unrecognized tag is `None` (the caller fails loud with
     /// its own context). The tag spellings are the owner's canonical register keys.
     pub fn from_tag(tag: &str) -> Option<Provenance> {
@@ -335,7 +337,7 @@ impl CalibrationManifest {
         self.values.get(id)
     }
 
-    /// Every entry in file order (a deterministic walk). The joined register ([`crate::unified_provenance`])
+    /// Every entry in file order (a deterministic walk). The joined register (`civsim_sim::unified_provenance`)
     /// uses this to fold the calibration manifest into the calibration-plus-floor node set; it reads
     /// config by key on the run path and is never hashed into state (R-CANON-WALK), so this ordered
     /// iterator is an accounting-side view, not a simulation walk.

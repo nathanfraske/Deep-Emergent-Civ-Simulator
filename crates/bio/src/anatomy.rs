@@ -315,7 +315,7 @@ impl BodyPlanRegistry {
             ]),
             // Coverings carry the SURFACE emissivity (`opt.emissivity`, the chem/optics floor axis) their
             // outermost layer radiates at, so the metabolism's radiant thermoregulatory term reads the
-            // being's OWN covering datum ([`crate::physiology::covering_emissivity`]) rather than a
+            // being's OWN covering datum (`civsim_sim::physiology::covering_emissivity`) rather than a
             // duplicate global manifest scalar (the retired `metabolism.surface_emissivity`, which
             // duplicated this floor axis; derive-vs-author, Principle 6). A LABELLED development fixture:
             // uniform at 0.95 to match the retired scalar (so the radiant term is byte-identical), grounded
@@ -340,7 +340,7 @@ impl BodyPlanRegistry {
             // structured one. So two beings at the same temperature and the same BROADBAND emissivity (hence the
             // same total signal strength) still differ in spectral SHAPE when their surface materials differ, a
             // strength-independent optical feature a perceiver can key a heritable weight on (the sensing
-            // mechanism reads these off the emitter's own surface, `crate::perceivable_feature`). The values are
+            // mechanism reads these off the emitter's own surface, `civsim_sim::perceivable_feature`). The values are
             // LABELLED DEV FIXTURES, grounded in real spectral-emissivity data and averaging the broadband 0.95
             // (so `covering_emissivity` and the radiant term are byte-identical): the organic profile is
             // (0.95, 0.96, 0.94), nearly flat; the keratin/mineral profile is (0.99, 0.88, 0.98), a mid-band dip.

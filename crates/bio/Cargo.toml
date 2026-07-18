@@ -1,0 +1,31 @@
+[package]
+name = "civsim-bio"
+description = "The parked biology arc for the Emergent Civilization Simulator: the genetic substrate, anatomy, lineage, mate choice, and the epistemic stack (evidence, belief, theory of mind, the agent mind), together with the calibration manifest they read. Moved out of civsim-sim so a physics change no longer recompiles it."
+authors.workspace = true
+license.workspace = true
+edition.workspace = true
+version.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+civsim-core = { path = "../core" }
+# The genetic substrate reads the resolved biology-and-composition floor (R-PHYS-BIO) to express a
+# composition channel. physics depends only on core, so this adds no heavy or fast-moving dependency.
+civsim-physics = { path = "../physics" }
+# Anatomy reads the function-law dispatch of the emergent technology-composition evaluator (design
+# Part 41) to derive what a body plan affords. compose depends only on core and physics.
+civsim-compose = { path = "../compose" }
+# serde and toml parse the calibration manifest and the data-driven registries (the access-channel
+# registry, the tolerance registry, the anatomy tables). No floating point reaches canonical state
+# through them.
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+# Rayon for DETERMINISTIC data-parallelism of the per-genome and per-locus loops. Every parallelized
+# loop is order-free and draws RNG only through a DrawKey keyed by the item's own id, never the
+# thread, so the result is bit-identical to the serial version at any thread count.
+rayon = "1"
+
+[lints.clippy]
+# R-CANON-WALK: no unordered containers in canonical state (see clippy.toml).
+disallowed_types = "deny"

@@ -697,7 +697,7 @@ mod tests {
 
     // --- relational-belief substrate, arc 2 ---
 
-    // The relation vocabulary lives in crate::learn; use a local mirror so the agent tests stay self-contained.
+    // The relation vocabulary lives in civsim_sim::learn; use a local mirror so the agent tests stay self-contained.
     const YIELDS: AttrKindId = AttrKindId(u32::MAX - 4);
     const RELATES: ValueId = 1;
     const UNRELATED: ValueId = 0;
