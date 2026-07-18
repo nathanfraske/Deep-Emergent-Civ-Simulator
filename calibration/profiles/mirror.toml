@@ -323,7 +323,7 @@ category = "per_world"
 
 # RETIRED (Arc 2, derive-vs-author): `metabolism.surface_emissivity` is gone; the radiant term reads the
 # being's covering `opt.emissivity` (physiology::covering_emissivity). The dev coverings carry 0.95 (the
-# retired fixture value) in crates/sim/src/anatomy.rs, so the dev radiant term is byte-identical.
+# retired fixture value) in crates/bio/src/anatomy.rs, so the dev radiant term is byte-identical.
 
 
 [[reserved]]
@@ -803,7 +803,7 @@ basis = "MIRROR Earth calibration: the gross energy density of adipose (fat-body
 status = "set"
 value = "37"
 unit = "kilojoule_per_gram"
-source = "Atwater general factor system, fat 9 kcal/g (Merrill & Watt 1955/1973, USDA Agriculture Handbook No. 74, 'Energy Value of Foods'); crates/sim/src/anatomy.rs fat-body organ bio.energy_density"
+source = "Atwater general factor system, fat 9 kcal/g (Merrill & Watt 1955/1973, USDA Agriculture Handbook No. 74, 'Energy Value of Foods'); crates/bio/src/anatomy.rs fat-body organ bio.energy_density"
 category = "per_world"
 
 [[reserved]]
@@ -812,7 +812,7 @@ basis = "MIRROR Earth calibration: the gross energy density of glycogen/carbohyd
 status = "set"
 value = "17"
 unit = "kilojoule_per_gram"
-source = "Atwater general factor system, carbohydrate 4 kcal/g (Merrill & Watt 1955/1973, USDA Agriculture Handbook No. 74); crates/sim/src/anatomy.rs glycogen-store organ bio.energy_density"
+source = "Atwater general factor system, carbohydrate 4 kcal/g (Merrill & Watt 1955/1973, USDA Agriculture Handbook No. 74); crates/bio/src/anatomy.rs glycogen-store organ bio.energy_density"
 category = "per_world"
 
 [[reserved]]
@@ -821,5 +821,5 @@ basis = "MIRROR Earth calibration: the gross energy density of lean (generalist-
 status = "set"
 value = "4"
 unit = "kilojoule_per_gram"
-source = "Atwater protein 4 kcal/g (Merrill & Watt 1955/1973, USDA Agriculture Handbook No. 74) diluted by USDA lean-tissue composition water fraction; crates/sim/src/anatomy.rs generalist-viscera organ bio.energy_density"
+source = "Atwater protein 4 kcal/g (Merrill & Watt 1955/1973, USDA Agriculture Handbook No. 74) diluted by USDA lean-tissue composition water fraction; crates/bio/src/anatomy.rs generalist-viscera organ bio.energy_density"
 category = "per_world"

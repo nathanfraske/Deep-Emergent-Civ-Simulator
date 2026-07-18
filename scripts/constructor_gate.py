@@ -51,7 +51,7 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 # The crates whose source is on the path of world content. Out of scope: `core` (the `Fixed` type's
 # own home, where its raw-bit transcendental table legitimately lives) and `units` (the constants
 # quarantine, the one authored place, where the fundamentals and measured floor constants live).
-CRATES = ["crates/physics/src", "crates/sim/src", "crates/world/src"]
+CRATES = ["crates/bio/src", "crates/physics/src", "crates/sim/src", "crates/world/src"]
 HARD = ["::from_bits(", "::from_decimal_str("]
 ADVISORY = ["::from_int(", "::from_ratio("]
 BASELINE = ROOT / "scripts" / "constructor_baseline.tsv"
@@ -76,7 +76,7 @@ EXEMPT_MODULES = {
     "crates/physics/src/crystal_field.rs", # the crystal-field loader (parses cited Jorgensen f/g, Racah B, oxide Delta_o)
     "crates/physics/src/stoner.rs",     # the Stoner loader (parses cited Janak 1977 I and nonmagnetic-band N)
     "crates/physics/src/quantities.rs", # quantity definitions and the wide-decimal doc reference
-    "crates/sim/src/calibration.rs",    # the calibration-manifest loader (parses the owner's reserved values)
+    "crates/bio/src/calibration.rs",    # the calibration-manifest loader (parses the owner's reserved values)
     "crates/sim/src/astro.rs",          # the stellar-flux derivation (parses cited astronomical anchors L_sun/AU)
     "crates/physics/src/opacity.rs",    # the disk-opacity generator (parses cited fundamentals e/eps_0/m_e/c for the Thomson-scattering derivation)
     "crates/physics/src/optical_constants.rs", # the optical-constants loader (parses cited per-species n,k tables)

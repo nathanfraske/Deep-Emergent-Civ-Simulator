@@ -43,6 +43,7 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 CRATES = [
     "crates/core/src",
     "crates/physics/src",
+    "crates/bio/src",
     "crates/sim/src",
     "crates/world/src",
 ]

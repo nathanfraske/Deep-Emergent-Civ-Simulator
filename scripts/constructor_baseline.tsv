@@ -20,12 +20,12 @@
 ::from_bits(	crates/physics/src/scaled.rs	2	test-fixture	scaled-representation unit tests constructing a specific Q-format value from bits
 ::from_bits(	crates/sim/src/absence.rs	1	engine-constant	LIFESPAN_HAZARD_THRESHOLD = 0.5 (1 << FRAC_BITS-1), a hazard midpoint
 ::from_bits(	crates/sim/src/axiom.rs	3	bit-arithmetic	group-belief mean and variance accumulated in bit-space, plus a test tolerance
-::from_bits(	crates/sim/src/belief.rs	2	bit-arithmetic	belief-mass mean computed in bit-space (sum over count)
+::from_bits(	crates/bio/src/belief.rs	2	bit-arithmetic	belief-mass mean computed in bit-space (sum over count)
 ::from_bits(	crates/sim/src/controller.rs	2	bit-arithmetic	controller-weight mutation applied in bit-space (weight bits plus deviation bits)
 ::from_bits(	crates/sim/src/decompose.rs	1	bit-arithmetic	decomposition drive computed in bit-space (temperature minus barrier), clamped
 ::from_bits(	crates/sim/src/deeptime.rs	3	bit-arithmetic	the conservative deep-time bit-space redistributions in raw field bits, each a world-crate delta that sums to exactly zero (mass moved, never created or lost): the impact delta (excavated bowl balancing ejecta blanket) applied to the bombardment relief and the running surface, and the support-bound collapse delta (the redistribute chain) applied to the crust thickness as it flows to the mechanical support bound
 ::from_bits(	crates/sim/src/environ.rs	1	bit-arithmetic	the derived molar gas constant R = N_A*k_B reconstructed from its rescaled Q32.32 bits (the same CODATA composite-compute projection as the derived Stefan-Boltzmann sigma)
-::from_bits(	crates/sim/src/evidence.rs	1	bit-arithmetic	evidence weight reconstructed from a value computed in bit-space
+::from_bits(	crates/bio/src/evidence.rs	1	bit-arithmetic	evidence weight reconstructed from a value computed in bit-space
 ::from_bits(	crates/sim/src/homeostasis.rs	1	engine-constant	MIN_CAP ~1e-6, the smallest representable reserve capacity floor
 ::from_bits(	crates/sim/src/institution.rs	5	bit-arithmetic	apportionment residue split into exact bit-halves (the indivisible-residue handler)
 ::from_bits(	crates/sim/src/insult.rs	6	bit-arithmetic	damage and repair arithmetic in bit-space (complement, difference, abs), plus tiny test inputs
@@ -35,7 +35,7 @@
 ::from_bits(	crates/sim/src/morphogen.rs	6	engine-constant	damage bit-accumulation and the JITTER/GROWTH_LO/GROWTH_HI/HALF growth-band constants
 ::from_bits(	crates/sim/src/physiology.rs	2	bit-arithmetic	a derived value reconstructed from bits, and a derived-Stefan-Boltzmann test assertion
 ::from_bits(	crates/sim/src/runner.rs	7	engine-constant	promotion and stencil-stability constants, temperature-field deserialization, strike-damage bit-accumulation, and labelled AIR_K/WATER_K test fixtures
-::from_bits(	crates/sim/src/tom.rs	1	engine-constant	LADDER_WEIGHT_FLOOR = 1 bit, the smallest representable ladder weight
+::from_bits(	crates/bio/src/tom.rs	1	engine-constant	LADDER_WEIGHT_FLOOR = 1 bit, the smallest representable ladder weight
 ::from_bits(	crates/sim/src/trace.rs	2	bit-arithmetic	a decay complement computed in bit-space
 ::from_bits(	crates/sim/src/transmission.rs	1	test-fixture	a bit-scale tolerance in a transmission test
 ::from_bits(	crates/sim/src/typology.rs	1	test-fixture	a bit-exact assertion in a typology test
@@ -45,7 +45,7 @@
 ::from_bits(	crates/world/src/ballistic.rs	2	bit-arithmetic	saturating fixed-point add/subtract helpers rebuilding a Fixed from raw-bit saturating arithmetic (the ballistic integrator's determinism-safe ops), no authored value
 ::from_bits(	crates/world/src/drag_flight.rs	2	bit-arithmetic	saturating fixed-point add/subtract helpers rebuilding a Fixed from raw-bit saturating arithmetic (the atmosphere-coupled flight integrator's determinism-safe ops), no authored value
 ::from_bits(	crates/world/src/momentum.rs	2	bit-arithmetic	saturating fixed-point add/subtract helpers rebuilding a Fixed from raw-bit saturating arithmetic (the unified momentum integrator's determinism-safe ops), no authored value
-::from_decimal_str(	crates/sim/src/anatomy.rs	1	dev-fixture	a decimal-parser helper for a labelled kind-fixture string argument
+::from_decimal_str(	crates/bio/src/anatomy.rs	1	dev-fixture	a decimal-parser helper for a labelled kind-fixture string argument
 ::from_decimal_str(	crates/sim/src/morphogen.rs	1	dev-fixture	a decimal-parser helper for a labelled morphogen dev-fixture string argument
 ::from_decimal_str(	crates/sim/src/runner.rs	17	dev-fixture	labelled non-canonical scenario values (the spawn_predator demo geometry and the test-scenario CreatureSelectionParams mutation spreads); production wiring should read these from the manifest
 ::from_decimal_str(	crates/physics/src/lattice_modulus.rs	3	deserialization	the Born-exponent, structure-prototype, and ionic-lattice-energy-validation loaders round-trip cited decimal strings (Born exponents, Madelung constants, Born-Haber reference energies) from their TOML data files to fixed-point, the same discipline as the periodic-table and phase-registry loaders

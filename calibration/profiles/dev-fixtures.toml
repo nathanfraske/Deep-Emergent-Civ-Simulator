@@ -301,7 +301,7 @@ source = "dev fixture for the dawn embodiment; crates/sim/src/physiology.rs Meta
 
 # RETIRED (Arc 2, derive-vs-author): `metabolism.surface_emissivity` is gone; the radiant term reads the
 # being's covering `opt.emissivity` (physiology::covering_emissivity). The dev coverings carry 0.95 (the
-# retired fixture value) in crates/sim/src/anatomy.rs, so the dev radiant term is byte-identical.
+# retired fixture value) in crates/bio/src/anatomy.rs, so the dev radiant term is byte-identical.
 
 
 [[reserved]]

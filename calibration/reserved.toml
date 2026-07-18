@@ -4,7 +4,7 @@
 # from the design document rather than invented. A mechanism is fixed Rust; these
 # numbers are the owner's to set. While status = "reserved" the loader treats the
 # entry as a fail-loud sentinel: any system that reads it unset errors rather than
-# running on a fabricated default (crates/sim/src/calibration.rs).
+# running on a fabricated default (crates/bio/src/calibration.rs).
 #
 # Each `basis` is copied from the matching "Decided and reserved" blockquote in
 # docs/design.md, condensed, so the manifest and the document say the same thing.
@@ -14,7 +14,7 @@
 # "fundamental" (a universal constant on the closed fundamentals list), "per_world" (a per-world /
 # per-substance / per-race datum), "derivable" (computable from the fundamentals and the situation,
 # never stored once its substrate lands), or "defect" (a value fitting none of the three, a bug flagged
-# not laundered). The field is machine-checked (crates/sim/src/calibration.rs): a non-empty value that is
+# not laundered). The field is machine-checked (crates/bio/src/calibration.rs): a non-empty value that is
 # not one of the four fails the build, so every entry is born categorized. An absent field reads as
 # UNCLASSIFIED, the additive-migration default for an in-flight entry not yet categorized. The categories
 # below were set by the gate-confirmed census (docs/working/CALIBRATION_CENSUS.md).
@@ -174,11 +174,11 @@ provenance = "closure"
 
 [[reserved]]
 id = "evidence.aggregate_diffusion_rate"
-basis = "DERIVES (2026-07-03, units corrected 2026-07-04) through evidence::aggregate_diffusion_rate over derive_aggregate_diffusion_rate (crates/sim/src/evidence.rs): the aggregate belief-diffusion rate is the mean field of the individual-tier gossip loop, sigmoid(told_weight * trust_baseline) * contact_density. The individual gossip loop adds told_weight * trust in LOG-ODDS (nats) per contact (world.rs apply_assertion), so that quantity is not a probability and cannot be a [0,1] hazard directly (the earlier told_weight*trust_baseline*contact_density form used the raw log-odds as a rate, and at the set gossip values 2 * 0.5 * 1 = 1 pinned the clamp and saturated every belief in one step). It is first mapped through the logistic, the log-odds-to-probability transform this manifest's unit convention already names (p = 1 / (1 + e^-L); Elfes 1989; Thrun, Burgard, Fox 2005), giving the per-contact transmission probability, then scaled by contact_density. The content-blind base rate reads gossip.told_weight and gossip.trust_baseline (already set) at unit contact density; the per-belief spatial coupling enters downstream as the distance factor PrevailingBelief::advance_diffusion applies under the SI logistic level*(1-level) term. A non-circular tier-consistency test (crates/sim/src/evidence.rs) validates the aggregate logistic against the REAL log-odds threshold-gated gossip loop (Mind::consider/Mind::belief, the mechanism world.rs runs), not a reimplementation of the aggregate step. No independent Earth-village diffusion rate is authored and no reserved input remains: the rate keys off the gossip parameters (Principle 11), and two worlds diverge only through those, never a race id (Principle 9). This entry stays as the surfaced pointer to the derivation."
+basis = "DERIVES (2026-07-03, units corrected 2026-07-04) through evidence::aggregate_diffusion_rate over derive_aggregate_diffusion_rate (crates/bio/src/evidence.rs): the aggregate belief-diffusion rate is the mean field of the individual-tier gossip loop, sigmoid(told_weight * trust_baseline) * contact_density. The individual gossip loop adds told_weight * trust in LOG-ODDS (nats) per contact (world.rs apply_assertion), so that quantity is not a probability and cannot be a [0,1] hazard directly (the earlier told_weight*trust_baseline*contact_density form used the raw log-odds as a rate, and at the set gossip values 2 * 0.5 * 1 = 1 pinned the clamp and saturated every belief in one step). It is first mapped through the logistic, the log-odds-to-probability transform this manifest's unit convention already names (p = 1 / (1 + e^-L); Elfes 1989; Thrun, Burgard, Fox 2005), giving the per-contact transmission probability, then scaled by contact_density. The content-blind base rate reads gossip.told_weight and gossip.trust_baseline (already set) at unit contact density; the per-belief spatial coupling enters downstream as the distance factor PrevailingBelief::advance_diffusion applies under the SI logistic level*(1-level) term. A non-circular tier-consistency test (crates/bio/src/evidence.rs) validates the aggregate logistic against the REAL log-odds threshold-gated gossip loop (Mind::consider/Mind::belief, the mechanism world.rs runs), not a reimplementation of the aggregate step. No independent Earth-village diffusion rate is authored and no reserved input remains: the rate keys off the gossip parameters (Principle 11), and two worlds diverge only through those, never a race id (Principle 9). This entry stays as the surfaced pointer to the derivation."
 status = "reserved"
 value = ""
 unit = "per_tick"
-source = "Part 9 evidence engine; record 62.6; audit section 1f; crates/sim/src/evidence.rs"
+source = "Part 9 evidence engine; record 62.6; audit section 1f; crates/bio/src/evidence.rs"
 category = "derivable"
 provenance = "derived"
 inputs = ["gossip.told_weight", "gossip.trust_baseline"]
@@ -187,7 +187,7 @@ derived_from = ["gossip.told_weight", "gossip.trust_baseline"]
 # evidence.knowledge_to_strength RETIRED (belief facet-strength substrate built, 2026-07-03):
 # the mapping from a pool knowledge level to a promoted mind belief strength was a second,
 # independent curve doing the same job as tier.belief_level_to_strength. It now DERIVES through
-# belief::instantiate_strength (crates/sim/src/belief.rs), the single monotone level-to-strength
+# belief::instantiate_strength (crates/bio/src/belief.rs), the single monotone level-to-strength
 # curve plus per-mind dispersion the two-tier lift operator reads. The single source of truth is
 # tier.belief_level_to_strength (the curve) and tier.belief_dispersion (the dispersion half-width)
 # below; this duplicate is removed rather than left a fail-loud sentinel for a value the engine no
@@ -197,7 +197,7 @@ derived_from = ["gossip.told_weight", "gossip.trust_baseline"]
 
 # being.heritable_fraction RETIRED (breeding-value tier built, 2026-07-03): narrow-sense
 # heritability is no longer an authored constant. It DERIVES through
-# GenePool::narrow_sense_heritability (crates/sim/src/genome.rs) as V_A/(V_A+V_E), where V_A =
+# GenePool::narrow_sense_heritability (crates/bio/src/genome.rs) as V_A/(V_A+V_E), where V_A =
 # additive_variance() = sum 2*p*(1-p)*alpha^2 over the pool's per-locus effects alpha_i (per-race
 # genome data, dev fixtures, NOT a manifest scalar) and V_E = genome.environment_variance (the
 # per-being developmental offset of Part 25.6). Removed rather than left as a fail-loud sentinel for
@@ -306,7 +306,7 @@ provenance = "closure"
 
 # genome.narrow_sense_heritability RETIRED (breeding-value tier built, 2026-07-03): the same
 # quantity as being.heritable_fraction, now a derived read rather than an authored constant. It
-# DERIVES through GenePool::narrow_sense_heritability (crates/sim/src/genome.rs) as V_A/(V_A+V_E),
+# DERIVES through GenePool::narrow_sense_heritability (crates/bio/src/genome.rs) as V_A/(V_A+V_E),
 # with V_A = additive_variance() = sum 2*p*(1-p)*alpha^2 over the pool's per-locus effects alpha_i
 # (per-race genome data, dev fixtures) and V_E = genome.environment_variance. The V_A==V_E case
 # gives exactly one half, the human twin-study midpoint, as an emergent consequence of the effect
@@ -336,7 +336,7 @@ basis = "the per-gene standard deviation of the mean-zero Gaussian additive step
 status = "reserved"
 value = ""
 unit = "trait_units"
-source = "Part 25.5, 25.10; crates/sim/src/genome.rs GeneticScheme::gamete"
+source = "Part 25.5, 25.10; crates/bio/src/genome.rs GeneticScheme::gamete"
 category = "defect"
 provenance = "closure"
 
@@ -719,7 +719,7 @@ provenance = "closure"
 
 [[reserved]]
 id = "langdet.usage_recency_window"
-basis = "the BASE recency window in ticks over which concept usage is taken as a normalised rate in [0,1]. It is no longer one fixed length: agent::RetentionLaw::window_ticks_for (crates/sim/src/agent.rs) scales this base by the memory-scaling curve langdet.retention_memory_scale below, read at the representative memory (the band's mean memory, world::band_mean_memory), so a sharper-memoried culture holds a longer usage-recency window from the same base and a forgetful one a shorter, keying on the memory scalar rather than a race id (Principle 9). Basis: the recency window a mind of neutral memory (curve multiplier one) uses; the retention record's recency window, set in ticks against the drift/usage cadence."
+basis = "the BASE recency window in ticks over which concept usage is taken as a normalised rate in [0,1]. It is no longer one fixed length: agent::RetentionLaw::window_ticks_for (crates/bio/src/agent.rs) scales this base by the memory-scaling curve langdet.retention_memory_scale below, read at the representative memory (the band's mean memory, world::band_mean_memory), so a sharper-memoried culture holds a longer usage-recency window from the same base and a forgetful one a shorter, keying on the memory scalar rather than a race id (Principle 9). Basis: the recency window a mind of neutral memory (curve multiplier one) uses; the retention record's recency window, set in ticks against the drift/usage cadence."
 status = "reserved"
 value = ""
 unit = "ticks"
@@ -729,7 +729,7 @@ provenance = "closure"
 
 [[reserved]]
 id = "langdet.retention_memory_scale"
-basis = "the INCREASING data curve mapping a mind's memory capacity (Mind.memory) to the multiplier on the base retention window langdet.usage_recency_window, read by agent::RetentionLaw::window_ticks_for (crates/sim/src/agent.rs). Basis: how much a sharper memory lengthens the window a belief or a usage-recency span persists over, a multiplier above one for high memory and below for low, so the same base window becomes a longer effective window in a high-memory mind. Parsed by require_curve as memory=multiplier points; a flat curve is the memory-independent single-window special case, reproducing the base window for every memory. The mechanism is fixed Rust, the curve is data (Principle 11), the law keys on the memory scalar, never a race id (Principle 9). Derive-vs-author: a per-race memory-scaling curve (Principle 11 data); for the Mirror single-human-phenotype control it is the memory-independent FLAT identity, not a floor axis and not a simplification of a modeled substrate"
+basis = "the INCREASING data curve mapping a mind's memory capacity (Mind.memory) to the multiplier on the base retention window langdet.usage_recency_window, read by agent::RetentionLaw::window_ticks_for (crates/bio/src/agent.rs). Basis: how much a sharper memory lengthens the window a belief or a usage-recency span persists over, a multiplier above one for high memory and below for low, so the same base window becomes a longer effective window in a high-memory mind. Parsed by require_curve as memory=multiplier points; a flat curve is the memory-independent single-window special case, reproducing the base window for every memory. The mechanism is fixed Rust, the curve is data (Principle 11), the law keys on the memory scalar, never a race id (Principle 9). Derive-vs-author: a per-race memory-scaling curve (Principle 11 data); for the Mirror single-human-phenotype control it is the memory-independent FLAT identity, not a floor axis and not a simplification of a modeled substrate"
 status = "set"
 value = "0.0=1.0,1.0=1.0"
 set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
@@ -1073,7 +1073,7 @@ provenance = "closure"
 
 [[reserved]]
 id = "tier.belief_level_to_strength"
-basis = "the monotone level-to-strength curve read by belief::instantiate_strength (crates/sim/src/belief.rs): a pool knowledge level maps through it to a promoted mind's base facet strength, before the per-mind dispersion. Split out of the former curve-plus-dispersion bundle (the dispersion is now tier.belief_dispersion); the retired evidence.knowledge_to_strength derives through this same curve. Set the (level, strength) points so the population mean strength reconstructs the pool knowledge level within fixed-point tolerance (the calibration target the substrate documents as a target, not a mechanism-enforced identity; a nonlinear curve drifts the intensive level while the extensive belief mass stays exact). Parsed by require_curve as x1=y1,x2=y2; a two-point curve is the linear special case. Monotone non-decreasing so a higher pool conviction never lowers the promoted strength. Derive-vs-author: a units-anchor identity curve between two representations of the SAME internal [0,1] belief quantity (pool knowledge level to promoted facet strength, belief.rs instantiate_strength); the linear identity reconstructs the pool level exactly (the documented calibration target), not a floor axis and not derivable from a deeper substrate"
+basis = "the monotone level-to-strength curve read by belief::instantiate_strength (crates/bio/src/belief.rs): a pool knowledge level maps through it to a promoted mind's base facet strength, before the per-mind dispersion. Split out of the former curve-plus-dispersion bundle (the dispersion is now tier.belief_dispersion); the retired evidence.knowledge_to_strength derives through this same curve. Set the (level, strength) points so the population mean strength reconstructs the pool knowledge level within fixed-point tolerance (the calibration target the substrate documents as a target, not a mechanism-enforced identity; a nonlinear curve drifts the intensive level while the extensive belief mass stays exact). Parsed by require_curve as x1=y1,x2=y2; a two-point curve is the linear special case. Monotone non-decreasing so a higher pool conviction never lowers the promoted strength. Derive-vs-author: a units-anchor identity curve between two representations of the SAME internal [0,1] belief quantity (pool knowledge level to promoted facet strength, belief.rs instantiate_strength); the linear identity reconstructs the pool level exactly (the documented calibration target), not a floor axis and not derivable from a deeper substrate"
 status = "set"
 value = "0=0,1=1"
 set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
@@ -1085,7 +1085,7 @@ provenance = "closure"
 
 [[reserved]]
 id = "tier.belief_dispersion"
-basis = "the per-mind belief dispersion half-width read by belief::instantiate_strength (crates/sim/src/belief.rs): the promoted facet strength is clamp01(level_to_strength(level) + (unit_draw*2-1)*dispersion), a symmetric mean-zero deviation keyed on the being, the belief, and the tick (Phase::BELIEF_LIFT), so promoted minds vary around the pool level. Split out of the former tier.belief_level_to_strength curve-plus-dispersion bundle. Set the half-width against the same target as the curve: small enough that the population mean strength still reconstructs the pool knowledge level within fixed-point tolerance, large enough that individual variation reads as plausible. A zero half-width promotes every mind to exactly the curve output."
+basis = "the per-mind belief dispersion half-width read by belief::instantiate_strength (crates/bio/src/belief.rs): the promoted facet strength is clamp01(level_to_strength(level) + (unit_draw*2-1)*dispersion), a symmetric mean-zero deviation keyed on the being, the belief, and the tick (Phase::BELIEF_LIFT), so promoted minds vary around the pool level. Split out of the former tier.belief_level_to_strength curve-plus-dispersion bundle. Set the half-width against the same target as the curve: small enough that the population mean strength still reconstructs the pool knowledge level within fixed-point tolerance, large enough that individual variation reads as plausible. A zero half-width promotes every mind to exactly the curve output."
 status = "reserved"
 value = ""
 unit = "ratio"
@@ -1106,14 +1106,14 @@ category = "defect"
 provenance = "closure"
 
 # --- R-TOM-UPDATE: recursive theory of mind (Part 37, record 62.11) ---
-# The access-channel set is data (the registry in crates/sim/src/tom.rs); these are the
+# The access-channel set is data (the registry in crates/bio/src/tom.rs); these are the
 # weights and meta thresholds the nested update reads. The hard constraint from the
 # blockquote: the witnessed weight must be set strictly above the told and said weights,
 # and no meta-observation weight above the same observation taken first-hand.
 #
 # tom.access_weight.witnessed/told/said and tom.meta_commit_threshold/meta_runner_up_margin/
 # meta_log_odds_clamp RETIRED (2026-07-03, derive audit): the six values are no longer authored.
-# The meta-frame params DERIVE through tom::meta_params_from_evidence (crates/sim/src/tom.rs) as
+# The meta-frame params DERIVE through tom::meta_params_from_evidence (crates/bio/src/tom.rs) as
 # the first-order evidence.* params themselves (the same log-odds accumulator, keyed off them, no
 # free second-order magnitude); the witnessed/told/said assertion ladder DERIVES through
 # AccessWeights::from_evidence_and_manifest by the fixed offsets the bases name (witnessed =
@@ -1390,31 +1390,31 @@ provenance = "closure"
 
 [[reserved]]
 id = "genome.allele_presence_threshold"
-basis = "RE-BASED (2026-07-03, HW product): the minimum JOINT cross probability at which a Dobzhansky-Muller pair counts as active, gating the Hardy-Weinberg product of the two pools' allele frequencies (p_a times p_b, the linkage-equilibrium chance a hybrid inherits both deleterious alleles) rather than a marginal presence cutoff on each pool (IncompatibilityTable::active_between, crates/sim/src/genome.rs). The marginal-AND cutoff is retired: two pools that each merely carry the allele are isolated only to the extent a hybrid is likely to inherit both. Basis: the hybrid cross-probability at which the incompatibility reliably expresses, so a near-fixed partition (product near one) always fires while an intermediate-frequency pair fires only when the joint chance is high; a lower value lets a polymorphic pair trip the firewall. Re-set for the joint-probability meaning: the former 0.9 was a marginal cutoff, a different scale."
+basis = "RE-BASED (2026-07-03, HW product): the minimum JOINT cross probability at which a Dobzhansky-Muller pair counts as active, gating the Hardy-Weinberg product of the two pools' allele frequencies (p_a times p_b, the linkage-equilibrium chance a hybrid inherits both deleterious alleles) rather than a marginal presence cutoff on each pool (IncompatibilityTable::active_between, crates/bio/src/genome.rs). The marginal-AND cutoff is retired: two pools that each merely carry the allele are isolated only to the extent a hybrid is likely to inherit both. Basis: the hybrid cross-probability at which the incompatibility reliably expresses, so a near-fixed partition (product near one) always fires while an intermediate-frequency pair fires only when the joint chance is high; a lower value lets a polymorphic pair trip the firewall. Re-set for the joint-probability meaning: the former 0.9 was a marginal cutoff, a different scale."
 status = "reserved"
 value = ""
 unit = "joint_probability"
-source = "Part 25.7; crates/sim/src/genome.rs"
+source = "Part 25.7; crates/bio/src/genome.rs"
 category = "defect"
 provenance = "closure"
 
 [[reserved]]
 id = "speciation.distance_threshold"
-basis = "the allele-frequency distance past which a pre-dawn founder-fork counts as reproductively isolated from its parent and is recorded as a daughter species (design 25.7, the declared speciation rule; the frequency half of GenePool::reproductively_isolated, crates/sim/src/genome.rs, read by epoch::step_generation, crates/sim/src/epoch.rs). It gates the pre-dawn radiation: a higher threshold makes speciation rarer, requiring a stronger founder bottleneck or more drift before a fork is a species, a lower one lets a modest bottleneck radiate. Set from the frequency divergence at which two populations no longer freely interbreed; distinct from the discrete incompatibility firewall (speciation.incompatibility_threshold), which isolates even close pools when a complementary allele pair is fixed"
+basis = "the allele-frequency distance past which a pre-dawn founder-fork counts as reproductively isolated from its parent and is recorded as a daughter species (design 25.7, the declared speciation rule; the frequency half of GenePool::reproductively_isolated, crates/bio/src/genome.rs, read by epoch::step_generation, crates/sim/src/epoch.rs). It gates the pre-dawn radiation: a higher threshold makes speciation rarer, requiring a stronger founder bottleneck or more drift before a fork is a species, a lower one lets a modest bottleneck radiate. Set from the frequency divergence at which two populations no longer freely interbreed; distinct from the discrete incompatibility firewall (speciation.incompatibility_threshold), which isolates even close pools when a complementary allele pair is fixed"
 status = "reserved"
 value = ""
 unit = "frequency_distance"
-source = "Part 25.7; crates/sim/src/epoch.rs step_generation; crates/sim/src/genome.rs reproductively_isolated"
+source = "Part 25.7; crates/sim/src/epoch.rs step_generation; crates/bio/src/genome.rs reproductively_isolated"
 category = "defect"
 provenance = "closure"
 
 [[reserved]]
 id = "speciation.incompatibility_threshold"
-basis = "the count of active Dobzhansky-Muller incompatibilities at which two pools are reproductively isolated regardless of frequency distance (the discrete genetic firewall, design 25.7; the count half of GenePool::reproductively_isolated, crates/sim/src/genome.rs, read by epoch::step_generation). A single complementary allele pair fixed across two lineages can raise the firewall between otherwise close pools, so this is a small integer (one for the strict rule that any active incompatibility isolates). Set from how many independent incompatibilities the world treats as a hard breeding barrier"
+basis = "the count of active Dobzhansky-Muller incompatibilities at which two pools are reproductively isolated regardless of frequency distance (the discrete genetic firewall, design 25.7; the count half of GenePool::reproductively_isolated, crates/bio/src/genome.rs, read by epoch::step_generation). A single complementary allele pair fixed across two lineages can raise the firewall between otherwise close pools, so this is a small integer (one for the strict rule that any active incompatibility isolates). Set from how many independent incompatibilities the world treats as a hard breeding barrier"
 status = "reserved"
 value = ""
 unit = "count"
-source = "Part 25.7; crates/sim/src/epoch.rs step_generation; crates/sim/src/genome.rs reproductively_isolated"
+source = "Part 25.7; crates/sim/src/epoch.rs step_generation; crates/bio/src/genome.rs reproductively_isolated"
 category = "defect"
 provenance = "closure"
 
@@ -1566,7 +1566,7 @@ category = "defect"
 provenance = "closure"
 
 # --- base-level liveliness step 1: the founding thermotaxis reaction norm the dawn controller gene block
-# seeds (crates/sim/src/controller.rs taxis_move_weights, crates/sim/src/genome.rs
+# seeds (crates/sim/src/controller.rs taxis_move_weights, crates/bio/src/genome.rs
 # append_controller_block). These are the taxis weight MAGNITUDES a canonical race genesis reads to seed a
 # founder that moves along the temperature gradient; the dev-fixture run harness stands them up inline
 # (Fixed::ONE). The mechanism (which controller weight each is) is fixed Rust; only the magnitudes are
@@ -1703,7 +1703,7 @@ basis = "the outermost-covering Griffith fracture energy per covering kind (J/m^
 status = "reserved"
 value = ""
 unit = "fracture_energy_j_per_m2"
-source = "predation-integration #120; crates/sim/src/anatomy.rs BodyPlanRegistry coverings; crates/sim/src/runner.rs strike_occupant coarse branch; Part 35, Part 41"
+source = "predation-integration #120; crates/bio/src/anatomy.rs BodyPlanRegistry coverings; crates/sim/src/runner.rs strike_occupant coarse branch; Part 35, Part 41"
 category = "per_world"
 provenance = "measured"
 
@@ -1713,7 +1713,7 @@ basis = "the per-band spectral emissivity per covering kind (dimensionless ratio
 status = "reserved"
 value = ""
 unit = "emissivity_ratio_per_band"
-source = "creature-selection step 2b #126; crates/sim/src/anatomy.rs BodyPlanRegistry coverings; crates/physics/data/chem_optics_floor.toml opt.emissivity.band_*; crates/sim/src/perceivable_feature.rs; Part 41"
+source = "creature-selection step 2b #126; crates/bio/src/anatomy.rs BodyPlanRegistry coverings; crates/physics/data/chem_optics_floor.toml opt.emissivity.band_*; crates/sim/src/perceivable_feature.rs; Part 41"
 category = "per_world"
 provenance = "measured"
 
@@ -2743,7 +2743,7 @@ set_by = "Owner Mirror sign-off 2026-07-09 (remainder delegated under the derive
 set_date = "2026-07-09"
 value = "0.9"
 unit = "probability"
-source = "harm-learning slice b; crates/sim/src/learn.rs; crates/sim/src/evidence.rs; crates/sim/src/trace.rs"
+source = "harm-learning slice b; crates/sim/src/learn.rs; crates/bio/src/evidence.rs; crates/sim/src/trace.rs"
 category = "defect"
 provenance = "closure"
 
@@ -2755,7 +2755,7 @@ set_by = "Owner Mirror sign-off 2026-07-09 (remainder delegated under the derive
 set_date = "2026-07-09"
 value = "0.1"
 unit = "probability"
-source = "harm-learning slice b; crates/sim/src/learn.rs; crates/sim/src/evidence.rs; crates/sim/src/trace.rs"
+source = "harm-learning slice b; crates/sim/src/learn.rs; crates/bio/src/evidence.rs; crates/sim/src/trace.rs"
 category = "defect"
 provenance = "closure"
 
@@ -2802,7 +2802,7 @@ basis = "P(the interoceptive reward signal fires | this action truly pays off), 
 status = "reserved"
 value = ""
 unit = "probability"
-source = "ideation arc piece 1 slice 1a; crates/sim/src/learn.rs; crates/sim/src/evidence.rs"
+source = "ideation arc piece 1 slice 1a; crates/sim/src/learn.rs; crates/bio/src/evidence.rs"
 category = "defect"
 provenance = "closure"
 
@@ -2812,7 +2812,7 @@ basis = "P(the interoceptive reward signal fires | this action is neutral), the 
 status = "reserved"
 value = ""
 unit = "probability"
-source = "ideation arc piece 1 slice 1a; crates/sim/src/learn.rs; crates/sim/src/evidence.rs"
+source = "ideation arc piece 1 slice 1a; crates/sim/src/learn.rs; crates/bio/src/evidence.rs"
 category = "defect"
 provenance = "closure"
 
