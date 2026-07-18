@@ -1492,7 +1492,7 @@ const DEEP_TIME_INITIAL_STEPS: usize = 0;
 /// NON-CANON display, reserved-with-basis (Principle 10): the fewest RENDERED frames the young->saturation deep-time
 /// transition should span at the observer's FASTEST playback speed. The interactive globe's per-frame deep-tick cap
 /// is DERIVED from this and the world's own visible saturation tick as `cap = max(1, saturation_tick /
-/// MIN_SHOW_FRAMES)` ([`derive_deep_time_cap`]), so the transition cannot be jumped in a single frame (the driver
+/// MIN_SHOW_FRAMES)` ([`derive_deep_time_cadence`]), so the transition cannot be jumped in a single frame (the driver
 /// banks the faster surplus as lod_debt, [`civsim_sim::clock::PlaybackDriver`]). Its BASIS is a display-legibility
 /// bound at the viewer's fixed 30 fps: the transition must last long enough to read as an EVOLVING world rather than
 /// a snap, and one second (30 frames) is the floor at which motion reads as motion.
@@ -2244,7 +2244,7 @@ fn step_provinces(prov: &mut DeepTimeProvinces, steps: usize) {
 /// each province's 8-bit incandescent colour ([`render::blackbody_rgb`], the lava glow's own quantization), each
 /// province's relief CLASS ([`civsim_world::terrain::classify_relief`], the tile field's own), and the crater count
 /// (a new crater is a visible event). Bounded so a never-settling field terminates at the bound. Off the canon path;
-/// sizes the interactive per-frame deep-tick cap ([`derive_deep_time_cap`]).
+/// sizes the interactive per-frame deep-tick cap ([`derive_deep_time_cadence`]).
 fn deep_time_saturation_tick(prov: &DeepTimeProvinces) -> usize {
     // Far past the tens of ticks a terrestrial surface takes to settle on screen, so the search always ends.
     const SATURATION_SEARCH_BOUND: usize = 512;
