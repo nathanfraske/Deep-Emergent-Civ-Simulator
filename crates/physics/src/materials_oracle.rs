@@ -253,31 +253,89 @@ fn vrh_banded(
 ///     softer (temperature). That `(P, T)` correction rides the moduli's own derivatives (a future column on the
 ///     mineral floor), dropped here and named.
 ///
-/// Returns `None` (a banded REFUSAL, never a silent phase drop) if any census phase has no cited measured row,
-/// is missing from the registry, or the assemblage has no volume. An unmeasured phase is refused rather than
-/// dropped because dropping it would bias the aggregate toward the measured remainder; the honest output is a
-/// refusal that says the census is not yet fully grounded. (The future tightening: an unmeasured but clean ionic
-/// phase could contribute a bulk modulus through the lattice-curvature carve rung, `crate::lattice_modulus`,
-/// rather than refusing the whole aggregate; the shear modulus has no floor route yet, so it would still refuse.)
+/// Refuses (an [`Err`], a banded REFUSAL that NAMES the phase, never a silent drop) if any census phase has no
+/// registry molar volume or no cited measured moduli, or a fixed-point intermediate leaves the window. Naming the
+/// phase is the alien door (RUNBOOK section 14 policy): the registry is the single property home for every phase
+/// any petrology path deposits into a crust, reached through the name bridge ([`crate::mineral_moduli::canonical_phase_key`],
+/// so a JANAF condensation name and a petrology-kernel name resolve to the same row), and when an exotic
+/// condensate with no row arrives, this REFUSES with its name, so the error message is the fetch list rather than
+/// a silent zero. An unmeasured phase is refused rather than dropped because dropping it would bias the aggregate
+/// toward the measured remainder.
 ///
 /// Byte-neutral: no consumer reads this yet, so the pins hold.
 pub fn assemblage_bulk_shear_moduli(
     assemblage: &Assemblage,
     moduli: &MineralModuli,
     registry: &PhaseRegistry,
+) -> Result<AggregateModuli, ModuliRefusal> {
+    // Resolve every census phase to its registry molar volume and its cited moduli FIRST, so a phase missing from
+    // either floor refuses HERE with its own name (the fetch list), not as a silent None deeper in the arithmetic.
+    let mut resolved: Vec<(Fixed, &Phase, &crate::mineral_moduli::MineralModulusRow)> =
+        Vec::with_capacity(assemblage.phases.len());
+    for (name, amt) in &assemblage.phases {
+        let phase = registry
+            .phase(crate::mineral_moduli::canonical_phase_key(name))
+            .ok_or_else(|| ModuliRefusal::NoRegistryRow(name.clone()))?;
+        let row = moduli
+            .row(name)
+            .ok_or_else(|| ModuliRefusal::NoMeasuredModuli(name.clone()))?;
+        resolved.push((*amt, phase, row));
+    }
+    aggregate_resolved(&resolved).ok_or(ModuliRefusal::NonRepresentable)
+}
+
+/// Why an aggregation refused, NAMING the phase so the error is the fetch list. This is the alien door: an exotic
+/// condensate's arrival in a world's crust is announced by the phase it names here, and the fix is to add that
+/// phase's cited row rather than to rewrite the aggregator.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ModuliRefusal {
+    /// A census phase has no registry row, so no molar volume for the volume weighting: add its cited row to
+    /// `phase_registry.toml`. Carries the phase name.
+    NoRegistryRow(String),
+    /// A census phase has no cited measured moduli: add its cited row to `data/mineral_moduli.toml`. Carries the
+    /// phase name.
+    NoMeasuredModuli(String),
+    /// A fixed-point intermediate left the representable window, a soft measurement edge was non-positive, or the
+    /// assemblage has no volume.
+    NonRepresentable,
+}
+
+impl std::fmt::Display for ModuliRefusal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ModuliRefusal::NoRegistryRow(name) => write!(
+                f,
+                "crust phase {name} has no registry row (add its cited molar volume to phase_registry.toml)"
+            ),
+            ModuliRefusal::NoMeasuredModuli(name) => write!(
+                f,
+                "crust phase {name} has no cited moduli (add its cited K, G to data/mineral_moduli.toml)"
+            ),
+            ModuliRefusal::NonRepresentable => {
+                write!(f, "the aggregation left the representable window or had no volume")
+            }
+        }
+    }
+}
+
+/// The Voigt-Reuss-Hill arithmetic over the already-resolved `(amount, phase, moduli-row)` triples, returning
+/// `None` on a fixed-point intermediate leaving the window, a non-positive soft edge, or a non-positive volume
+/// (the caller maps that to [`ModuliRefusal::NonRepresentable`]). Separated so the caller's refusals can name the
+/// missing phase before the arithmetic runs.
+fn aggregate_resolved(
+    resolved: &[(Fixed, &Phase, &crate::mineral_moduli::MineralModulusRow)],
 ) -> Option<AggregateModuli> {
     // First pass: the total volume, so the per-phase volume fractions are exact.
     let mut total_volume = Fixed::ZERO;
-    for (name, amt) in &assemblage.phases {
-        let phase = registry.phase(name)?;
+    for (amt, phase, _) in resolved {
         total_volume += amt.checked_mul(phase.molar_volume)?;
     }
     if total_volume <= Fixed::ZERO {
         return None;
     }
     // Second pass: the Voigt and Reuss accumulators for K and G, at the central moduli and at the outer
-    // measurement edges. The loader guarantees each soft edge (modulus minus band) is strictly positive, so the
-    // harmonic Reuss reciprocals never divide through zero.
+    // measurement edges. Each soft edge (modulus minus band) must be strictly positive, so the harmonic Reuss
+    // reciprocals never divide through zero.
     let mut k_voigt_c = Fixed::ZERO;
     let mut k_reuss_recip_c = Fixed::ZERO;
     let mut k_voigt_hi = Fixed::ZERO;
@@ -286,9 +344,7 @@ pub fn assemblage_bulk_shear_moduli(
     let mut g_reuss_recip_c = Fixed::ZERO;
     let mut g_voigt_hi = Fixed::ZERO;
     let mut g_reuss_recip_lo = Fixed::ZERO;
-    for (name, amt) in &assemblage.phases {
-        let phase = registry.phase(name)?;
-        let row = moduli.row(name)?; // banded refusal: an unmeasured census phase refuses the whole aggregate.
+    for (amt, phase, row) in resolved {
         let phase_volume = amt.checked_mul(phase.molar_volume)?;
         let fraction = phase_volume.checked_div(total_volume)?;
         let k_soft = row.bulk_gpa - row.bulk_band_gpa;
@@ -708,10 +764,10 @@ source = "SYNTHETIC test fixture, round numbers, not a citation"
     }
 
     #[test]
-    fn an_unmeasured_census_phase_refuses_the_aggregate() {
+    fn an_unmeasured_census_phase_refuses_the_aggregate_by_name() {
         // Forsterite is in the registry but NOT in the synthetic moduli table, an unmeasured census member. The
-        // aggregator refuses (None) rather than silently dropping it and biasing the result toward the measured
-        // remainder.
+        // aggregator refuses rather than silently dropping it, and the refusal NAMES the phase (the alien door:
+        // the error is the fetch list), so a caller knows exactly which cited row to add.
         let reg = registry();
         let moduli = synthetic_moduli();
         let asm = Assemblage {
@@ -722,9 +778,51 @@ source = "SYNTHETIC test fixture, round numbers, not a citation"
             total_gibbs: Fixed::ZERO,
             truncated: false,
         };
+        let refusal = assemblage_bulk_shear_moduli(&asm, &moduli, &reg)
+            .expect_err("an unmeasured census phase is a refusal, never a silent drop");
+        assert_eq!(
+            refusal,
+            ModuliRefusal::NoMeasuredModuli("forsterite".to_string()),
+            "the refusal names the unmeasured phase"
+        );
+    }
+
+    #[test]
+    fn a_janaf_named_enstatite_crust_aggregates_through_the_bridge() {
+        // SEAM A end to end: Mirror's derived crust is a single JANAF-named enstatite phase. Through the name
+        // bridge it resolves to enstatite's registry molar volume AND its cited moduli, so the crust aggregates
+        // to enstatite's own K_S ~ 107.6 / G ~ 76.8 GPa and closes to the physical enstatite Poisson ratio
+        // (~0.21) and Young's modulus (~186 GPa), the E and nu the flexural rigidity reads.
+        let reg = registry();
+        let moduli = MineralModuli::standard().expect("the cited mineral moduli load");
+        let crust = Assemblage {
+            phases: vec![("MgSiO3(cr,enstatite)".to_string(), Fixed::from_int(1))],
+            total_gibbs: Fixed::ZERO,
+            truncated: false,
+        };
+        let agg = assemblage_bulk_shear_moduli(&crust, &moduli, &reg)
+            .expect("the JANAF enstatite crust aggregates through the bridge");
         assert!(
-            assemblage_bulk_shear_moduli(&asm, &moduli, &reg).is_none(),
-            "an unmeasured census phase is a banded refusal, never a silent drop"
+            (agg.bulk.value.to_f64_lossy() - 107.6).abs() < 0.5,
+            "the crust bulk is enstatite's cited 107.6 GPa, got {}",
+            agg.bulk.value.to_f64_lossy()
+        );
+        assert!(
+            (agg.shear.value.to_f64_lossy() - 76.8).abs() < 0.5,
+            "the crust shear is enstatite's cited 76.8 GPa, got {}",
+            agg.shear.value.to_f64_lossy()
+        );
+        let closure = assemblage_isotropic_closure(agg.bulk.value, agg.shear.value)
+            .expect("the crust moduli close to E and nu");
+        assert!(
+            (closure.poisson.to_f64_lossy() - 0.21).abs() < 0.02,
+            "enstatite Poisson ratio ~0.21, got {}",
+            closure.poisson.to_f64_lossy()
+        );
+        assert!(
+            (closure.young.to_f64_lossy() - 186.0).abs() < 2.0,
+            "enstatite Young's ~186 GPa, got {}",
+            closure.young.to_f64_lossy()
         );
     }
 

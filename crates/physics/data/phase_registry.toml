@@ -75,3 +75,11 @@ enthalpy_formation = "-2299.1"
 standard_entropy = "88.70"
 molar_volume = "39.71"
 source = "Robie & Hemingway 1995, USGS Bulletin 2131 (298.15 K, 1 bar), MgAl2O4 spinel"
+
+[[phase]]
+name = "enstatite"
+formula = "MgSiO3"
+enthalpy_formation = "-1545.6"
+standard_entropy = "66.27"
+molar_volume = "31.31"
+source = "Robie & Hemingway 1995, USGS Bulletin 2131 (298.15 K, 1 bar), orthoenstatite (orthorhombic MgSiO3 pyroxene end-member); 298.15 K summary table p.34 and individual high-T phase table p.352 ('MgSiO3: Orthorhombic crystals'), agreeing; molar volume 31.31 cm3/mol, band +/-0.02 (V = 3.131 J/bar). Source PDF vendored at robie_hemingway_1995/ (SHA256 receipt in its manifest.toml)."

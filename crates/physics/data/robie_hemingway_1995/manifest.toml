@@ -1,0 +1,71 @@
+# Robie, R.A. & Hemingway, B.S. 1995, "Thermodynamic Properties of Minerals and Related
+# Substances at 298.15 K and 1 Bar (10^5 Pascals) Pressure and at Higher Temperatures", U.S.
+# Geological Survey Bulletin 2131, source manifest (the vendored-primary idiom: file / receipt /
+# anchors). This is the ONE internally consistent standard-state dataset the candidate-phase
+# thermodynamic registry (crates/physics/data/phase_registry.toml) cites throughout. A
+# free-energy minimization compares the RELATIVE energies of competing phases, so every phase row
+# must come from this single compilation or the comparison is corrupted; enstatite is added on
+# that dataset, not a foreign one (Holland-Powell, JANAF, and the like are excluded here).
+#
+# PUBLIC DOMAIN (U.S. Geological Survey, a US government publication), vendored into the public
+# tree. SHA256 is the primary receipt (VENDORING_CHECKLIST.md, primary from 2026-07-17). The
+# legacy md5 below is byte-identical to the receipt already pinned by md5 in
+# perovskite_robie1995.toml and oxide_thermochemistry/manifest.toml, so this vendoring holds the
+# actual bytes those two files referenced by hash but never carried: the number's witness is now
+# in hand rather than a hyperlink, closing the Byerlee failure class for this dataset.
+#
+# BLOCK KIND [[value]], the cited-data-column idiom (matching zha_1996/ and byerlee_1978/), NOT a
+# reserved floor kind: an immutable transcription of the Robie-Hemingway tables, out of the floor
+# real/fantasy authorship axis. An authored or fantasy phase draws its standard state from the
+# estimator tier at runtime, never written here. GRADE: single, one compilation (Robie 1995).
+# Channel legend: T = one table read; TT = two independent tables in the source agree
+# (dual-channel); C = computed cross-check.
+
+[[source]]
+file = "report.pdf"
+sha256 = "ca89fc07fd110a0441f3bc01d5fe67d749a944da2e7f2537520dbaf367f49dd8"
+md5 = "08c3cc7c2d823667c8efadfebcef02de"
+citation = "Robie, R.A., and Hemingway, B.S., 1995, Thermodynamic Properties of Minerals and Related Substances at 298.15 K and 1 Bar (10^5 Pascals) Pressure and at Higher Temperatures, U.S. Geological Survey Bulletin 2131, 461 p."
+recipe = "GET https://pubs.usgs.gov/bul/2131/report.pdf (open, U.S. Geological Survey, public domain)"
+pages = 470
+
+# ENSTATITE (orthoenstatite), MgSiO3, orthorhombic Mg end-member pyroxene (Pbca), the crust
+# former of a reduced silicate world. R&H tabulate this as "ENSTATITE"; the individual
+# high-temperature phase table on printed p.352 states "MgSiO3: Orthorhombic crystals", which
+# fixes the polymorph. It is distinct from R&H's separate "CLINOENSTATITE" (monoclinic, p.353,
+# V = 31.28) and from the high-pressure "MgSiO3-PEROVSKITE" (p.35, V = 24.50) and
+# "MgSiO3-ILMENITE" (p.35, V = 26.36) polymorphs. Formula weight 100.389 g/mol (matches MgSiO3 =
+# 100.39). Two independent tables carry the 298.15 K standard state and they agree: the 298.15 K
+# SUMMARY table for chain and band structure silicates (printed p.34; columns NAME AND FORMULA /
+# WEIGHT / ENTROPY S / VOLUME V / ENTHALPY dHf / FREE ENERGY dGf / LOG(K)) and the INDIVIDUAL
+# high-temperature phase table (printed p.352, its 298.15 K row).
+
+[[value]]
+name = "enstatite_enthalpy_formation_kJ_mol"
+value = "-1545.6"
+anchor = "298.15 K summary table p.34, ENTHALPY column: delta_f H = -1545.6 +/- 1.5 kJ/mol (uncertainty row beneath the entry). Individual high-T phase table p.352, 298.15 K row, delta_f H column: -1545.6 kJ/mol. Formation from the elements. The two independent tables agree."
+channel = "TT"
+
+[[value]]
+name = "enstatite_standard_entropy_J_mol_K"
+value = "66.27"
+anchor = "Individual high-T phase table p.352, 298.15 K row, S column: 66.27 J/mol/K. Summary table p.34, ENTROPY column: 66.3 +/- 0.1 J/mol/K (the summary rounds the table's 66.27). The registry uses the 2-decimal table value, matching the existing quartz row's use of 41.46 over the summary 41.5."
+channel = "TT"
+
+[[value]]
+name = "enstatite_molar_volume_cm3_mol"
+value = "31.31"
+anchor = "Individual high-T phase table p.352: 'Molar Vol. 3.131 J/bar = 31.31 cm3'. Summary table p.34, VOLUME column: 31.31 +/- 0.02 cm3/mol (uncertainty row beneath the entry). LOAD-BEARING (weights crust aggregation): band +/- 0.02 cm3/mol from the summary uncertainty row. Cross-check Vm = M/rho: 100.389 g/mol / 31.31 cm3/mol = 3.207 g/cm3, matching the independent Jackson, Sinogeikin & Bass 1999 single-crystal density 3.194(6) g/cm3 (held in jackson_1999_enstatite/) to within 0.4 percent, and the ~3.20 g/cm3 nominal to within 0.2 percent."
+channel = "TT"
+
+[[value]]
+name = "enstatite_gibbs_formation_kJ_mol"
+value = "-1458.3"
+anchor = "Summary table p.34, FREE ENERGY column: delta_f G = -1458.3 +/- 1.6 kJ/mol. Individual table p.352, 298.15 K row: -1458.3 kJ/mol, with LOG(K) = 255.48 (summary 255.5), which confirms the LOG(K) column identity. Not read by the registry (which carries dHf, S, Vm); held as an extra same-page witness."
+channel = "TT"
+
+[[value]]
+name = "enstatite_heat_capacity_Cp_J_mol_K"
+value = "83.09"
+anchor = "Individual high-T phase table p.352, 298.15 K row, Cp column: 83.09 J/mol/K. Held for the pressure-temperature dependence a Stage-3 petrology kernel grows onto the row later; not currently in the registry."
+channel = "T"
