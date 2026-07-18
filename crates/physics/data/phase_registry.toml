@@ -12,7 +12,10 @@
 #
 # CALIBRATION NOTE (thermodynamic consistency): a free-energy minimization compares the RELATIVE energies of
 # competing phases, so all phases must come from ONE internally consistent dataset or the comparison is
-# corrupted. This seed cites Robie & Hemingway 1995 (USGS Bulletin 2131) throughout. The owner pins the
+# corrupted. This seed cites Robie & Hemingway 1995 (USGS Bulletin 2131) throughout, and that invariant is now
+# AUDITED, not merely asserted: a 2026-07-18 provenance trace found forsterite carrying a Helgeson-1978 (SUPCRT92)
+# volume 43.790 under an R&H citation (the lone intruder, convicted because the sibling fayalite 46.31 is R&H and
+# not Helgeson's 46.39), and corrected it to R&H's 43.65, so the volumes are uniform R&H across every row. The owner pins the
 # production dataset (Holland & Powell 2011 is the petrology standard for phase-equilibrium work) and verifies
 # each value against the source before the Stage-3 kernel runs; the seed values are cited reference data
 # surfaced for that verification, never invented.
@@ -57,8 +60,8 @@ name = "forsterite"
 formula = "Mg2SiO4"
 enthalpy_formation = "-2173.00"
 standard_entropy = "94.11"
-molar_volume = "43.790"
-source = "Robie & Hemingway 1995, USGS Bulletin 2131 (298.15 K, 1 bar), Mg-olivine end-member"
+molar_volume = "43.65"
+source = "Robie & Hemingway 1995, USGS Bulletin 2131 (298.15 K, 1 bar), Mg-olivine end-member (V0 = 43.65 cm3/mol, 4.365 J/bar). CORRECTED 2026-07-18 from a mis-carried 43.790, which a provenance trace identified as Helgeson et al. 1978 (SUPCRT92 lineage) forsterite carried under this R&H citation (the sibling fayalite 46.31 matches R&H not Helgeson's 46.39, convicting forsterite as the lone intruder); the correction restores the registry's one-internally-consistent-dataset invariant, uniform R&H."
 
 [[phase]]
 name = "fayalite"

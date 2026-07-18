@@ -675,10 +675,11 @@ mod tests {
     fn the_assemblage_density_computes_mass_over_volume_and_discriminates_phases() {
         // assemblage_density is the total mass over the total volume of the phases, from the periodic table
         // (atomic weights) and the registry (molar volumes), and it is scale-invariant so the normalization
-        // does not touch it. For pure forsterite it is the hand computation 140.69 g/mol over 43.79 cm^3/mol.
-        // This checks the COMPUTATION, not the physics: 3.213 is the registry's own mass over volume, so
-        // validating it against a measured density would be circular. As a physical aside (not what the test
-        // asserts): 3.21 g/cm^3 is the correct room-condition density of PURE forsterite (measured near 3.22);
+        // does not touch it. For pure forsterite it is the hand computation 140.69 g/mol over 43.65 cm^3/mol
+        // (the R&H volume, corrected 2026-07-18 from a mis-carried Helgeson 43.790). This checks the COMPUTATION,
+        // not the physics: 3.223 is the registry's own mass over volume, so validating it against a measured
+        // density would be circular. As a physical aside (not what the test asserts): 3.22 g/cm^3 is the correct
+        // room-condition density of PURE forsterite (measured near 3.22, which the R&H volume now matches);
         // real mantle olivine near 3.27 is denser because it is Fe-bearing, a COMPOSITION difference (add the
         // fayalite end-member), not a pressure correction (which is zero at the 1 bar tested). Density
         // discriminates the assemblage, the property the isostasy read leans on: a pure-quartz assemblage reads
@@ -694,7 +695,7 @@ mod tests {
         .unwrap();
         let d_fo = assemblage_density(&fo, &r, &t).expect("forsterite has a density");
         assert!(
-            close(d_fo, 140.6915 / 43.790, 0.02),
+            close(d_fo, 140.6915 / 43.65, 0.02),
             "the density is the registry mass over volume, got {}",
             d_fo.to_f64_lossy()
         );
