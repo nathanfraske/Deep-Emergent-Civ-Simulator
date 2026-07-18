@@ -823,6 +823,59 @@ pub fn accretion_clock_hindcasts(
     Some(true)
 }
 
+/// The DERIVED DISK-GAS MEAN MOLECULAR WEIGHT `mu` (dimensionless), mass-weighted over the world's OWN elemental
+/// abundances rather than the authored solar `2.34`. It reads the drawn abundance pattern and derives
+/// `mu = (total mass) / (total particles)` per hydrogen nucleus: each element contributes its number relative to
+/// hydrogen `n_X/n_H = 10^(log_eps(X) - 12)` times its standard atomic weight to the mass, and its particle count
+/// to the denominator, with HYDROGEN counted as a molecule of `hydrogen_atoms_per_molecule` atoms (2 for the cold
+/// molecular disk, so `n_H/2` particles) and every other element counted atomically. So a metal-rich world carries
+/// a heavier gas and a slightly larger `mu`, and the solar pattern reproduces the `2.34` the fixture carried, now
+/// as the solar INSTANCE of a per-world derivation. `hydrogen_atoms_per_molecule` is the disk-gas regime input
+/// (2 for `H2`, 1 for an atomic-hydrogen disk), keyed so an alien gas is a data row (Principle 7).
+///
+/// DERIVE-FIRST, and a TRAP AVOIDED: it walks the abundance ROWS (`elements` plus `preferred`), which the `[Fe/H]`
+/// draw (`SolarAbundances::scaled_metals_by_dex`) correctly scales, NOT the `x_mass_fraction`/`y_mass_fraction`/
+/// `z_mass_fraction` getters, which that draw leaves at the SOLAR strings (a stale fixture, surfaced separately),
+/// so reading them would fix `mu` at solar for every world. The atomic weights are the periodic table's cited
+/// standard values (a physics floor read, never authored here). `None` on a non-positive
+/// `hydrogen_atoms_per_molecule`, an element in the pattern absent from the periodic table (a data
+/// inconsistency, surfaced rather than silently dropped), or no particles.
+pub fn derive_disk_gas_mean_molecular_weight(
+    abundances: &civsim_physics::solar_abundances::SolarAbundances,
+    periodic: &civsim_physics::periodic::PeriodicTable,
+    hydrogen_atoms_per_molecule: Fixed,
+) -> Option<Fixed> {
+    if hydrogen_atoms_per_molecule <= Fixed::ZERO {
+        return None;
+    }
+    let ln10 = Fixed::from_int(10).ln();
+    let twelve = Fixed::from_int(12);
+    let mut total_mass = Fixed::ZERO;
+    let mut total_particles = Fixed::ZERO;
+    for symbol in abundances.elements() {
+        let log_eps = match abundances.preferred(symbol) {
+            Some(v) => v,
+            None => continue, // a row with no cited abundance carries no gas
+        };
+        let element = periodic.element(symbol)?;
+        // The number relative to hydrogen, n_X/n_H = 10^(log_eps - 12), in the log-epsilon convention.
+        let n_rel = log_eps.checked_sub(twelve)?.checked_mul(ln10)?.exp();
+        total_mass = total_mass.checked_add(n_rel.checked_mul(element.standard_atomic_weight)?)?;
+        // Hydrogen (Z = 1) forms molecules of `hydrogen_atoms_per_molecule` atoms, so it is that many fewer
+        // particles; every other element is atomic in the gas.
+        let particles = if element.z == 1 {
+            n_rel.checked_div(hydrogen_atoms_per_molecule)?
+        } else {
+            n_rel
+        };
+        total_particles = total_particles.checked_add(particles)?;
+    }
+    if total_particles <= Fixed::ZERO {
+        return None;
+    }
+    total_mass.checked_div(total_particles)
+}
+
 /// The DERIVED VISCOUS TIME `t_visc` (megayears), the characteristic time of the accretion clock's decline (the
 /// `t_visc` argument of [`viscous_similarity_accretion_rate`]), DERIVED from the disk's own structure rather than
 /// reserved. The arc ruling: this is not a free scalar; the Lynden-Bell-Pringle family defines it as the viscous
@@ -3880,6 +3933,45 @@ mod tests {
         assert!(derive_viscous_time_myr(r, m, Fixed::ZERO, a, mu).is_none());
         assert!(derive_viscous_time_myr(r, m, t, Fixed::ZERO, mu).is_none());
         assert!(derive_viscous_time_myr(r, m, t, a, Fixed::ZERO).is_none());
+    }
+
+    #[test]
+    fn the_disk_gas_mu_derives_the_solar_value_and_shifts_with_metallicity() {
+        // TWIN-INDEPENDENCE: the disk-gas mean molecular weight mass-weighted over the SOLAR abundance pattern (H
+        // as H2) reproduces the ~2.34 the authored fixture carried, computed from the abundance rows and the
+        // periodic atomic weights, not read off any stored 2.34. It is the solar INSTANCE of a per-world
+        // derivation, so 2.34 demotes rather than vanishing.
+        let solar = civsim_physics::solar_abundances::SolarAbundances::standard()
+            .expect("solar abundances");
+        let periodic = civsim_physics::periodic::PeriodicTable::standard().expect("periodic table");
+        let h2 = Fixed::from_int(2);
+        let mu_solar = derive_disk_gas_mean_molecular_weight(&solar, &periodic, h2).unwrap();
+        assert!(
+            (mu_solar.to_f64_lossy() - 2.34).abs() < 0.1,
+            "the solar disk-gas mu reproduces ~2.34 (got {})",
+            mu_solar.to_f64_lossy()
+        );
+        // A metal-rich draw (+0.3 dex) carries a heavier gas, so a LARGER mu, the per-world variation the
+        // graduation gives. The drawn ROWS shift (which is what this reads), even though the x/y/z getters do not.
+        let metal_rich = solar.scaled_metals_by_dex(Fixed::from_ratio(3, 10));
+        let mu_rich = derive_disk_gas_mean_molecular_weight(&metal_rich, &periodic, h2).unwrap();
+        assert!(
+            mu_rich > mu_solar,
+            "a metal-rich world carries a heavier disk gas (rich {}, solar {})",
+            mu_rich.to_f64_lossy(),
+            mu_solar.to_f64_lossy()
+        );
+        // ADMIT THE ALIEN: an atomic-hydrogen disk (1 atom per molecule) has more particles per unit mass, so a
+        // LOWER mu than the molecular value; and a non-positive molecule size is not a gas.
+        let mu_atomic =
+            derive_disk_gas_mean_molecular_weight(&solar, &periodic, Fixed::ONE).unwrap();
+        assert!(
+            mu_atomic < mu_solar,
+            "atomic hydrogen lowers mu below the molecular value (atomic {}, H2 {})",
+            mu_atomic.to_f64_lossy(),
+            mu_solar.to_f64_lossy()
+        );
+        assert!(derive_disk_gas_mean_molecular_weight(&solar, &periodic, Fixed::ZERO).is_none());
     }
 
     // Eggleton 1983 Roche-lobe coefficients as a test fixture (cited at the function docs), the ~0.49/~0.6 fit.
