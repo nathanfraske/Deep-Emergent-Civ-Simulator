@@ -105,7 +105,7 @@ The dividing line is reserved values and design status. Anything that is pure me
 | Data schemas and loaders for resolved substrates (value substrate, semantic substrate, institution-function substrate, composition node with its interface-axis substrate, combinator registry, and emergent-proxy set, genome loci, language tables, trace and evidence and absence registries) | Settled schema, reserved content and numbers | Yes, the schema and loader and manifest plumbing | Round-trip and load tests yes; behaviour no |
 | Resolved system mechanisms (belief and evidence, theory-of-mind structure, institutions, value-distance metric, genome and inheritance, language and meaning, tier consistency, recursive composition) | Settled mechanism, reserved calibrations | Yes, the mechanism, in staged dependency order | Structural and determinism tests yes; tuned behaviour waits on the numbers |
 | The reserved calibration values themselves | Held for owner | No | No |
-| Open research items (the eighteen in the backlog) | Not yet designed | No | No |
+| Open research items (the backlog in `docs/audit.md`; read the count there rather than restating it) | Not yet designed | No | No |
 
 ### 2a. Build and test today (the bedrock)
 
@@ -117,7 +117,7 @@ The resolved system mechanisms are implementable now in the staged order the des
 
 ### 2b. Held for the owner's calls
 
-Held are: every reserved calibration value, which is surfaced with its basis and decided by the owner (Section 4); the eighteen open research items, which are not yet designed and are taken in the order the audit queue sets, several deliberately far-horizon (the four remaining deep-technology questions wait on the technology layer being built and proven at small scale; the most-wired items are taken last; the non-authoritative view elaboration waits on the level-of-detail model being built); and Inconsistency 5, the technique-origination disagreement, which is an owner decision the composition layer's promotion gate now leans on.
+Held are: every reserved calibration value, which is surfaced with its basis and decided by the owner (Section 4); the open research items in the backlog (`docs/audit.md` carries the running count; read it there rather than restating it), which are not yet designed and are taken in the order the audit queue sets, several deliberately far-horizon (the four remaining deep-technology questions wait on the technology layer being built and proven at small scale; the most-wired items are taken last; the non-authoritative view elaboration waits on the level-of-detail model being built); and Inconsistency 5, the technique-origination disagreement, which is an owner decision the composition layer's promotion gate now leans on.
 
 ---
 
@@ -150,7 +150,12 @@ unit    = "levels"
 set_by  = ""                   # who set it, once set
 set_date = ""                  # when, once set
 source  = "Part 41 composition mechanism; record 62.10; audit section 1l"
+category = "defect"            # MANDATORY
+provenance = "closure"         # MANDATORY: one of derived | measured | estimator |
+                               # closure | authored | written_state | contingency
 ```
+
+`category` and `provenance` are not optional. All 228 entries carry both, and `scripts/provenance_gate.py` runs in CI and fails on an untagged entry, so an entry written without them lands a red build. The seven provenance tags and the refutability test that assigns them are in `docs/PROVENANCE_LEDGER.md`.
 
 One entry per value, the id namespaced by system (`compose.*`, `evidence.*`, `tier.*`, `value_metric.*`, and so on). The `basis` is copied from the design document's reserved list so the manifest and the document say the same thing. The `source` points back to the mechanism, so a reviewer can read the full context before deciding.
 

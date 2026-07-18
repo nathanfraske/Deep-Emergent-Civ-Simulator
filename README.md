@@ -21,7 +21,7 @@ The standup follows the runbook: the determinism core is the foundation and carr
 - `crates/core`: the determinism bedrock. The `Fixed` (Q32.32) newtype with its arithmetic, the SplitMix64 counter-based RNG keyed on `(seed, entity, phase, counter)`, `StableId` and the registry, arena and slab allocators, the cache-line wrapper, the append-only event log with never-reused identifiers, the typed canonical-state boundary, and the deterministic state hash. No external dependencies, so the bedrock is maximally reproducible.
 - `crates/sim`: the calibration manifest loader (every reserved value loads as a fail-loud sentinel), the development and calibrated build profiles, the conserved-projection registry, the minimal two-tier LOD model, the data-driven substrate loader, and the conservation-with-referential-integrity harness. The determinism reproducibility harness lives with the core it exercises (`crates/core/tests`).
 
-What is held for the owner's calls: every reserved calibration value (surfaced with its basis in `calibration/reserved.toml`, never invented), and the eighteen open research items in the backlog.
+What is held for the owner's calls: every reserved calibration value (surfaced with its basis in `calibration/reserved.toml`, never invented), and the open research items in the backlog (`docs/audit.md` carries the running count).
 
 ## Building and testing
 
