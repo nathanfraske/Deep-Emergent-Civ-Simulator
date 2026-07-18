@@ -111,6 +111,26 @@ Reverse-chronological. Each session appends one entry at the top: what was done,
 
 ---
 
+## 2026-07-18 (manager session, cont. II): THE BYTE PINS ARE RETIRED, the ordering to honest mountains ruled
+
+OWNER RULINGS THIS SEGMENT, both explicit. (1) The two byte pins (default 40fe8a7269ee4da8974eb1787338c3a0, living be94e3100b9db82f7c1aea1d8091956d) are RETIRED and replaced by a physics baseline that does not run through the biology arc. (2) The biology modules are PARKED into a sibling crate, out of civsim-sim's build path, never deleted: they carry the R-BEHAVIOR-EVOLVE implementation (Part 8.4, record 62.19), so deleting them would falsify a signed-off record.
+
+WHY THE PINS HAD TO GO, three findings, each verified. The pins are measured through run_world, which its own module header labels a QUARANTINED DEV-FIXTURE RUN HARNESS built on the biology arc, so the determinism gate has been anchored to scaffolding and every physics change has had to hold a hash running through biology. The physics path carried NO determinism instrumentation at all (zero hash_into across deeptime.rs, planet.rs, planetary_assembly.rs, geodynamics.rs), which is why the pins lived there: it was the only hashable thing in the tree. And province_column_params is a DECLARED FIXTURE CLUSTER (density, viscosity, radius all ONE; authored conductivity 2, expansion 30 ppm, diffusivity 0.01, specific heat 10), tagged by the owner's 2026-07-16 ruling as a declared conflict whose stored diffusivity disagrees 20x with k/(rho c_p) and which nothing compares.
+
+THE CONSEQUENCE THAT SET THE ORDER: the chain to relief is fixture thermal properties -> Rayleigh -> lid base -> T_e -> flexural rigidity -> mountain height. So a mountain drawn today is FIXTURE-SCALED, resting on an authored 30 ppm and an authored k=2, which fails the capstone's own derived-topology premise and would look convincing while being wrong. Sub-step D before the seams is therefore not a preference: without it the relief scale is authored.
+
+THE ORDERING, owner-approved: land the biology extraction (in flight) -> replace the fixture cluster via the geotherm arc (rho derived, c_p Dulong-Petit, k the Hofmeister form, kappa computed-never-stored) -> measure the new physics baseline on that derived state through DeepTimeState::realization_digest -> RETIRE the old pins with a ledger entry -> then sub-step D's remainder and Seams C/D, where the mountains that draw carry a derived scale. The two arcs converge deliberately: the cluster replacement moves the pins and the pins are being replaced, so sequencing them together moves the pins ONCE rather than twice.
+
+THE CHAOS PROTOCOL BOUNDS WHAT A PIN MAY CLAIM (owner-corrected mid-build). Under gate 5 a content hash is CONSTITUTIVE, seeding which world is drawn, so the new receipt is named realization_digest rather than a state hash and folds nothing back into the world. A pin on it pins the REALIZATION (one seed through one measure), never a physical trajectory: the protocol forbids integrating the Lyapunov-sensitive stages as fixed point. Per-column deep-time thermal evolution is the dissipative regime instead (it converges, byte-identical from tick 11, drifting only sub-quantum after), so it is legitimately integrated and legitimately pinned. Owner: "that is the direction the Chaos Protocol was going anyway", and the protocol is the standin for life not being backwards computable.
+
+LANDED THIS SEGMENT: the dawn harness parked with a build-enforced, live-fired quarantine gate (7b7ac7d); the physics realization digest with a field-coverage test (0b5f598); the flexure point-load doc corrected to its cited axisymmetric form (fdddd1a); the entry point's dead document paths, the stale open-research count, and the RUNBOOK manifest schema (8daed0f); the retired boundary-layer formula purged from nine restatement sites (1a771b3); the TAFI question settled against the vendored primary, the defect OURS and no erratum owed (e2bca89).
+
+THE CLOUD AGENT IS BRIEFED on the pin retirement in advance (#201), told to keep holding the current two until replacements are posted, and told explicitly NOT to re-baseline if a pin moves that it did not cause.
+
+PROCESS NOTE, my error: I spawned a file-writing agent WITHOUT worktree isolation into a checkout I was editing and committing in, and committed its files under it. No damage (disjoint files, and it reported the collision rather than assuming its state was authoritative), but the rule stands: any local agent that WRITES gets a worktree; read-only sweeps may share.
+
+---
+
 ## 2026-07-18 (manager session, cont.): WSL copyback recovery, viewer cadence integrated, cargo artifact ring buffer
 
 The WSL volume was compressed, became unmountable, and was copied back, which rebooted the box at 16:15 and truncated everything mid-write. Recovery was complete: every finished commit survived intact, and the damage was confined to one commit object (55f1342, zero bytes) that the branch ref pointed at, six further empty objects, and the index. Repaired by resetting refs/heads/claude/topology-increment3 to the last good commit b2ebbb4 (identified from the reflog, not guessed), purging the empty objects, and rebuilding the index from HEAD; git fsck is clean and the working tree lost nothing.
