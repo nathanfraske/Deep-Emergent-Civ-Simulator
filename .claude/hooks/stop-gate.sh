@@ -53,7 +53,14 @@ if [ -f "$roadmap_file" ]; then
   roadmap_changed="$(git -C "$ROOT" status --porcelain -- "$roadmap_file" 2>/dev/null)"
   if [ -n "$work_changed" ] && [ -z "$roadmap_changed" ]; then
     echo "stop-gate: source or design files changed but the CONSENSUS_ROADMAP was not updated." >&2
-    echo "Edit ONLY the 'Feature status board' item(s) this segment moved, IN PLACE, and nothing else: sign off a done feature (tombstone it where it stands, flip its status to DONE, and point to where the work landed by a file or test), or deprecate/re-classify a section, or add a newly-flagged item citing its gate (an R-item, a Part number, or a file). Do NOT append a new dated section, do NOT rewrite the whole board, and do NOT touch unrelated segments. The board is a living in-place tracker, not an append log; that is the point." >&2
+    echo "It is a LEAN task board: edit IN PLACE, one short line per item (a date, a few words, and a POINTER to the commit/file/doc/worktree). Tombstone a landed item (mark it DONE with its pointer), or add a newly-flagged one citing its gate (an R-item, a Part number, a file). Do NOT inline the work's detail (point to it instead), do NOT append a dated narrative section (that is HANDOFFS), do NOT touch unrelated lines. The board answers where-are-we and where-did-it-go at a glance, nothing more." >&2
+    exit 2
+  fi
+  # Size guard: the board must stay lean. If a line wants to grow, that detail belongs behind its pointer.
+  roadmap_bytes="$(wc -c < "$roadmap_file" 2>/dev/null | tr -d ' ')"
+  if [ -n "$roadmap_bytes" ] && [ "$roadmap_bytes" -gt 16384 ]; then
+    echo "stop-gate: the CONSENSUS_ROADMAP ballooned to ${roadmap_bytes} bytes (lean cap 16384)." >&2
+    echo "Trim it: each item a few words plus a pointer, the detail moved behind the pointer (HANDOFFS, a commit, a doc). The retired long-form archive is CONSENSUS_ROADMAP_HISTORY.md; do not grow the board into that again." >&2
     exit 2
   fi
 fi
