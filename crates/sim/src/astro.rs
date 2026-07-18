@@ -1951,16 +1951,26 @@ pub fn derive_disk_lifetime_myr(
 /// Owen, Clarke and Ercolano 2012 APPENDIX-B population-synthesis fit, the near-linear
 /// `Mdot_w = 6.25e-9 (M_star/M_sun)^-0.068 (L_X/1e30)^1.14 M_sun/yr` (the widely-used primordial-disc row); (2) the
 /// same paper's EQUATION-9 analytic estimate, the strictly linear mass-independent `Mdot_w = 8e-9 (L_X/1e30)`
-/// (`l_x_exponent = 1`, `mass_exponent = 0`), the paper's own order-of-magnitude form; (3) the Sellek et al. 2024
-/// PLUTO+PRIZMO radiation-hydro revision, which finds integrated rates roughly an order of magnitude LOWER from
-/// enhanced molecular cooling (a live rival, a lower coefficient on the same shape). The mechanism below applies
-/// whichever row is passed.
+/// (`l_x_exponent = 1`, `mass_exponent = 0`), the paper's own order-of-magnitude form; (3) the Sellek, Grassi,
+/// Picogna, Rab, Clarke and Ercolano 2024 PLUTO+PRIZMO radiation-hydro revision, which finds integrated rates
+/// roughly an order of magnitude LOWER from enhanced molecular cooling (a live rival, a lower coefficient on the
+/// same shape). The mechanism below applies whichever row is passed.
+///
+/// INTEGRATED RATES ARE CHORDS OVER THEIR INTEGRATION DOMAIN (the generalization the owner minted ruling the
+/// Sellek rate pair): a photoevaporation rate is the wind integrated out to some outer radius, so a whole-disk
+/// total and a rate truncated to a shorter radius are different quantities, and BAND MEMBERSHIP REQUIRES
+/// DOMAIN-MATCHED ROWS. Sellek reports a PAIR: `4.32e-9 M_sun/yr` integrated to the model's 160 AU outer edge (the
+/// whole-disk total, DOMAIN-MATCHED to Owen's total, so the band-serving low edge the owner ruled) and
+/// `1.06e-9 M_sun/yr` truncated to 80 AU (the paper's own controlled-comparison statistic, a shorter chord, NOT
+/// domain-matched to Owen's total and so NOT a band edge). Both are carried ([`XrayWindFit::sellek_2024`] and
+/// [`XrayWindFit::sellek_2024_controlled_80au`]), each tagged with its [`WindIntegrationDomain`], so a consumer that
+/// bands rows can refuse a domain mismatch rather than compare a total against a chord.
 ///
 /// RULED (owner, the batch audit): all three rows ship as the DECLARED ENSEMBLE, not a single picked row, because
 /// they are distinct physics claims (a population-synthesis fit, an analytic estimate, a radiation-hydro rival),
-/// the radiative-conductivity dispute pattern. Their roles: the appendix-B fit is the CENTRAL instance (pending
-/// verbatim confirmation at the primary), equation 9 the same paper's order-of-magnitude cross-check, and Sellek
-/// 2024 the LOW EDGE. THE COST, stated so no consumer is surprised: an order-of-magnitude wind band propagates
+/// the radiative-conductivity dispute pattern. Their roles: the appendix-B fit is the CENTRAL instance (confirmed
+/// verbatim at the primary, `arXiv:1112.1087`), equation 9 the same paper's order-of-magnitude cross-check, and
+/// Sellek 2024 the LOW EDGE. THE COST, stated so no consumer is surprised: an order-of-magnitude wind band propagates
 /// through the `(Mdot_0/Mdot_w)^(1/p)` inversion in [`derive_disk_lifetime_myr`] to roughly a factor `10^(1/p)`
 /// band on `tau_disk`, about 4.64 at `gamma = 1` (`1/p = 2/3`), wide and honest. The Haisch-Lada and Mamajek
 /// disk-fraction-versus-age data is the independent ensemble referee that discriminates WITHIN this band (legal
@@ -1988,6 +1998,127 @@ pub struct XrayWindFit {
     /// [`XrayWindFit::metallicity_domain`] classifies a draw against it and [`XrayWindFit::metallicity_rate_factor`] moves the
     /// rate.
     pub sample_metallicity: Fixed,
+    /// The RADIAL INTEGRATION DOMAIN the coefficient's integrated rate was measured over: the scope marker on the
+    /// integrated-rate axis, the sibling of the mass range and the sampled metallicity. An X-ray photoevaporation
+    /// rate is a CHORD over the radius it is integrated to, so two rows are a legal band only when their domains
+    /// match ([`WindIntegrationDomain::matches`], the domain-matched-rows rule). A whole-disk total against a
+    /// rate truncated to a shorter radius would misstate the band width, which is why the Sellek 160 AU total
+    /// (domain-matched to Owen's total) serves the band and the 80 AU controlled statistic does not.
+    pub integration_domain: WindIntegrationDomain,
+}
+
+/// The RADIAL INTEGRATION DOMAIN a wind-rate coefficient was integrated over, the SCOPE of an integrated rate.
+/// A photoevaporation rate is the wind integrated out to some radius, so it is a CHORD, and two integrated rates
+/// are comparable (bandable) only when their chords span the same domain (the owner's domain-matched-rows rule).
+/// The variant carries the radius where a source states one, so the axis is open rather than a fixed set of named
+/// radii: a future row integrated to any radius is a data value, not a new arm.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum WindIntegrationDomain {
+    /// The total integrated wind rate over the whole disk, with no radial truncation stated by the source (Owen's
+    /// population-synthesis and analytic rows, and the Sellek total integrated to the model's own outer edge).
+    TotalDisk,
+    /// The rate integrated to a stated outer radius (AU): a truncated chord, NOT the whole-disk total. The Sellek
+    /// 80 AU controlled-comparison statistic is this; it does not band against a [`WindIntegrationDomain::TotalDisk`]
+    /// row.
+    WithinRadiusAu(Fixed),
+}
+
+impl WindIntegrationDomain {
+    /// Whether two integration domains are the SAME chord, so the rates they scope may form a band (the
+    /// domain-matched-rows rule). Two totals match; two truncated rates match iff they share the outer radius; a
+    /// total never matches a truncated chord. This is the guard a band-forming consumer runs before it treats two
+    /// [`XrayWindFit`] rows as edges of one wind band.
+    pub fn matches(self, other: Self) -> bool {
+        match (self, other) {
+            (WindIntegrationDomain::TotalDisk, WindIntegrationDomain::TotalDisk) => true,
+            (
+                WindIntegrationDomain::WithinRadiusAu(a),
+                WindIntegrationDomain::WithinRadiusAu(b),
+            ) => a == b,
+            _ => false,
+        }
+    }
+}
+
+impl XrayWindFit {
+    /// The Owen, Clarke and Ercolano 2012 APPENDIX-B population-synthesis fit, the CENTRAL row of the declared
+    /// wind ensemble, as cited data: `Mdot_w = 6.25e-9 (M_star/M_sun)^-0.068 (L_X/1e30)^1.14 M_sun/yr`, a total
+    /// disk rate over solar-metallicity low-mass (`0.1` to `1.5 M_sun`) stars. Confirmed verbatim against the
+    /// primary (`arXiv:1112.1087`, equation B1). The coefficient is stored as `log10(6.25e-9) = -8.20412`.
+    pub fn owen_appendix_b() -> Self {
+        XrayWindFit {
+            log10_coefficient_msun_yr: Fixed::from_ratio(-820412, 100_000), // log10(6.25e-9)
+            log10_l_x_reference_erg_s: Fixed::from_int(30),                 // L_X_ref = 1e30 erg/s
+            l_x_exponent: Fixed::from_ratio(114, 100),                      // 1.14
+            mass_exponent: Fixed::from_ratio(-68, 1000),                    // -0.068
+            mass_min_msun: Fixed::from_ratio(1, 10), // 0.1 M_sun (sample low-mass edge)
+            mass_max_msun: Fixed::from_ratio(15, 10), // 1.5 M_sun (sample high edge)
+            sample_metallicity: Fixed::ONE, // solar: the composition the coefficients were fit at
+            integration_domain: WindIntegrationDomain::TotalDisk, // whole-disk total, no radial truncation stated
+        }
+    }
+
+    /// The Owen, Clarke and Ercolano 2012 EQUATION-9 analytic estimate, the same paper's ORDER-OF-MAGNITUDE
+    /// cross-check of appendix B, as cited data: `Mdot_w = 8e-9 (L_X/1e30) M_sun/yr`, strictly linear in `L_X`
+    /// (`l_x_exponent = 1`) and mass-independent (`mass_exponent = 0`). Confirmed verbatim against the primary
+    /// (`arXiv:1112.1087`, equation 9). The coefficient is stored as `log10(8e-9) = -8.09691`. The mass range is
+    /// carried as the low-mass regime the X-ray-driven family is scoped to, even though the rate itself does not
+    /// read mass, so the domain guard in [`photoevaporative_wind_rate_msun_myr`] holds the same stellar window as
+    /// its sibling rows.
+    pub fn owen_equation_9() -> Self {
+        XrayWindFit {
+            log10_coefficient_msun_yr: Fixed::from_ratio(-809691, 100_000), // log10(8e-9)
+            log10_l_x_reference_erg_s: Fixed::from_int(30),                 // L_X_ref = 1e30 erg/s
+            l_x_exponent: Fixed::ONE,   // strictly linear in L_X
+            mass_exponent: Fixed::ZERO, // mass-independent
+            mass_min_msun: Fixed::from_ratio(1, 10), // 0.1 M_sun (family scope, low-mass)
+            mass_max_msun: Fixed::from_ratio(15, 10), // 1.5 M_sun (family scope, high edge)
+            sample_metallicity: Fixed::ONE, // solar
+            integration_domain: WindIntegrationDomain::TotalDisk, // whole-disk total
+        }
+    }
+
+    /// The Sellek, Grassi, Picogna, Rab, Clarke and Ercolano 2024 PLUTO+PRIZMO radiation-hydro revision, the LOW
+    /// EDGE of the declared wind band, as cited data: the WHOLE-DISK TOTAL `4.32e-9 M_sun/yr` integrated to the
+    /// model's 160 AU outer edge, the value DOMAIN-MATCHED to Owen's total and so the band-serving edge the owner
+    /// ruled (the domain-matched-rows rule). Sellek reports a total rate, not a re-fit of the mass and `L_X`
+    /// exponents, so this row INHERITS the Owen appendix-B shape (`l_x_exponent = 1.14`, `mass_exponent = -0.068`)
+    /// and supplies only the lower normalization, the honest interim stated so no consumer reads a Sellek-measured
+    /// mass slope that does not exist. The coefficient is stored as `log10(4.32e-9) = -8.36452`. Its sibling
+    /// [`XrayWindFit::sellek_2024_controlled_80au`] carries the paper's 80 AU controlled statistic, which is NOT a
+    /// band edge because its chord does not match Owen's total.
+    pub fn sellek_2024() -> Self {
+        XrayWindFit {
+            log10_coefficient_msun_yr: Fixed::from_ratio(-836452, 100_000), // log10(4.32e-9), total to 160 AU
+            log10_l_x_reference_erg_s: Fixed::from_int(30),                 // L_X_ref = 1e30 erg/s
+            l_x_exponent: Fixed::from_ratio(114, 100), // 1.14, inherited Owen appendix-B shape
+            mass_exponent: Fixed::from_ratio(-68, 1000), // -0.068, inherited Owen appendix-B shape
+            mass_min_msun: Fixed::from_ratio(1, 10),   // 0.1 M_sun (family scope, low-mass)
+            mass_max_msun: Fixed::from_ratio(15, 10),  // 1.5 M_sun (family scope, high edge)
+            sample_metallicity: Fixed::ONE, // solar: Sellek ran a solar-metallicity model
+            integration_domain: WindIntegrationDomain::TotalDisk, // total over the model's 160 AU outer edge
+        }
+    }
+
+    /// The Sellek et al. 2024 CONTROLLED-COMPARISON statistic: the rate the paper integrates only to 80 AU,
+    /// `1.06e-9 M_sun/yr`, PRESERVED as cited data but explicitly NOT a band edge. Its integration domain is
+    /// [`WindIntegrationDomain::WithinRadiusAu`] at 80 AU, a shorter chord than Owen's total, so
+    /// [`WindIntegrationDomain::matches`] refuses to band it against the Owen rows; the band-serving Sellek edge is
+    /// [`XrayWindFit::sellek_2024`] (the 160 AU total). This row exists so the paper's own controlled statistic is
+    /// carried with its domain marked, for a future consumer that runs Sellek's like-for-like 80 AU comparison
+    /// rather than the whole-disk band. The coefficient is stored as `log10(1.06e-9) = -8.97469`.
+    pub fn sellek_2024_controlled_80au() -> Self {
+        XrayWindFit {
+            log10_coefficient_msun_yr: Fixed::from_ratio(-897469, 100_000), // log10(1.06e-9), truncated to 80 AU
+            log10_l_x_reference_erg_s: Fixed::from_int(30),                 // L_X_ref = 1e30 erg/s
+            l_x_exponent: Fixed::from_ratio(114, 100), // 1.14, inherited Owen appendix-B shape
+            mass_exponent: Fixed::from_ratio(-68, 1000), // -0.068, inherited Owen appendix-B shape
+            mass_min_msun: Fixed::from_ratio(1, 10),   // 0.1 M_sun (family scope, low-mass)
+            mass_max_msun: Fixed::from_ratio(15, 10),  // 1.5 M_sun (family scope, high edge)
+            sample_metallicity: Fixed::ONE,            // solar
+            integration_domain: WindIntegrationDomain::WithinRadiusAu(Fixed::from_int(80)), // truncated chord
+        }
+    }
 }
 
 /// Where a drawn composition sits relative to a fit's sampled metallicity: the domain-of-validity classification
@@ -4978,16 +5109,60 @@ mod tests {
     }
 
     fn owen_appendix_b_fit() -> XrayWindFit {
-        // The Owen, Clarke and Ercolano 2012 appendix-B population-synthesis fit, as reserved-with-basis data.
-        XrayWindFit {
-            log10_coefficient_msun_yr: Fixed::from_ratio(-820412, 100_000), // log10(6.25e-9)
-            log10_l_x_reference_erg_s: Fixed::from_int(30),                 // L_X_ref = 1e30 erg/s
-            l_x_exponent: Fixed::from_ratio(114, 100),                      // 1.14
-            mass_exponent: Fixed::from_ratio(-68, 1000),                    // -0.068
-            mass_min_msun: Fixed::from_ratio(1, 10), // 0.1 M_sun (sample low-mass edge)
-            mass_max_msun: Fixed::from_ratio(15, 10), // 1.5 M_sun (low-mass sample edge)
-            sample_metallicity: Fixed::ONE, // solar: the composition Owen's coefficients were fit at
-        }
+        // The Owen, Clarke and Ercolano 2012 appendix-B population-synthesis fit, the cited central row: the test
+        // helper delegates to the run-path constructor so there is one source of truth for the coefficients.
+        XrayWindFit::owen_appendix_b()
+    }
+
+    #[test]
+    fn the_declared_wind_rows_carry_their_cited_coefficients_and_integration_domains() {
+        // The three-row wind ensemble as cited run-path data (stage 1 of the slice-2 wire), plus the Sellek
+        // controlled statistic. Two facts are asserted: the coefficients match the primaries digit for digit, and
+        // the integration domains encode the owner's domain-matched-rows ruling (the 160 AU total serves the band;
+        // the 80 AU chord does not).
+        let owen_b = XrayWindFit::owen_appendix_b();
+        let owen_9 = XrayWindFit::owen_equation_9();
+        let sellek = XrayWindFit::sellek_2024();
+        let sellek_80 = XrayWindFit::sellek_2024_controlled_80au();
+
+        // Coefficients, stored as log10 of M_sun/yr, against the cited values.
+        assert!((owen_b.log10_coefficient_msun_yr.to_f64_lossy() - (-8.204_12)).abs() < 1e-4); // 6.25e-9
+        assert!((owen_9.log10_coefficient_msun_yr.to_f64_lossy() - (-8.096_91)).abs() < 1e-4); // 8e-9
+        assert!((sellek.log10_coefficient_msun_yr.to_f64_lossy() - (-8.364_52)).abs() < 1e-4); // 4.32e-9, 160 AU
+        assert!((sellek_80.log10_coefficient_msun_yr.to_f64_lossy() - (-8.974_69)).abs() < 1e-4); // 1.06e-9, 80 AU
+
+        // Equation 9 is strictly linear in L_X and mass-independent, the shape that distinguishes it.
+        assert_eq!(owen_9.l_x_exponent, Fixed::ONE);
+        assert_eq!(owen_9.mass_exponent, Fixed::ZERO);
+        // Sellek inherits the Owen appendix-B shape (it re-normalizes, it does not re-fit the exponents).
+        assert_eq!(sellek.l_x_exponent, owen_b.l_x_exponent);
+        assert_eq!(sellek.mass_exponent, owen_b.mass_exponent);
+
+        // Band ordering: Sellek's whole-disk total is the LOW edge (below Owen's central and its eq-9 cross-check).
+        assert!(sellek.log10_coefficient_msun_yr < owen_b.log10_coefficient_msun_yr);
+        assert!(owen_b.log10_coefficient_msun_yr < owen_9.log10_coefficient_msun_yr);
+        // A shorter chord is a lower integrated rate: the 80 AU statistic sits below the 160 AU total, the physical
+        // reason the two are distinct quantities, not interchangeable.
+        assert!(sellek_80.log10_coefficient_msun_yr < sellek.log10_coefficient_msun_yr);
+
+        // The domain-matched-rows rule: the three whole-disk totals band together; the 80 AU chord does not band
+        // against a total, so it cannot be swapped in as the low edge.
+        assert!(owen_b.integration_domain.matches(owen_9.integration_domain));
+        assert!(owen_b.integration_domain.matches(sellek.integration_domain));
+        assert!(!sellek
+            .integration_domain
+            .matches(sellek_80.integration_domain));
+        assert_eq!(
+            sellek_80.integration_domain,
+            WindIntegrationDomain::WithinRadiusAu(Fixed::from_int(80)),
+        );
+        // Two truncated chords match iff they share the radius; a total never matches a chord.
+        assert!(WindIntegrationDomain::WithinRadiusAu(Fixed::from_int(80))
+            .matches(WindIntegrationDomain::WithinRadiusAu(Fixed::from_int(80))));
+        assert!(!WindIntegrationDomain::WithinRadiusAu(Fixed::from_int(80))
+            .matches(WindIntegrationDomain::WithinRadiusAu(Fixed::from_int(160))));
+        assert!(!WindIntegrationDomain::TotalDisk
+            .matches(WindIntegrationDomain::WithinRadiusAu(Fixed::from_int(160))));
     }
 
     #[test]
