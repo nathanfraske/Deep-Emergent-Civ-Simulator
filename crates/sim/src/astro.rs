@@ -5547,12 +5547,22 @@ mod tests {
         .is_none());
     }
 
+    // De-camouflaged fixture wall (post-#198 retirement of the viewer's HAYASHI_WALL_T_EFF_K): an ARBITRARY
+    // in-range pre-main-sequence wall T_eff for the disk_era_xray unit-math tests, deliberately NOT the retired
+    // 4000 K digits, so a future grep (human or agent) cannot read it as a surviving constant or restore it. A math
+    // fixture, not a physical claim: these tests exercise the composed clock's ARITHMETIC, and any in-range wall
+    // serves the byte-equality, monotonicity, and determinism they check. The LIVE path reads the per-star wall
+    // from the BHAC15 grid (`civsim_physics::hayashi_wall::HayashiWallGrid`). UPGRADE TRIGGER: when the slice-2
+    // run-path wire makes disk_era_xray live, that path's integration test consumes the real grid read (fixtures
+    // for arithmetic, grid for integration).
+    const DISK_ERA_XRAY_TEST_WALL_K: Fixed = Fixed::from_int(4200);
+
     #[test]
     fn the_composed_disk_clock_byte_equals_the_hand_chained_pieces() {
         // TWIN-INDEPENDENCE for the composed clock: the end-to-end `disk_era_xray_disk_lifetime_myr` must return
         // exactly what a hand-chain of the seven links returns, byte for byte, with no hidden transform between the
         // links. A solar-analogue disk-hosting star at 1 Myr: convective (T Tauri) branch, disk-locked rotation.
-        let hayashi = Fixed::from_int(4000);
+        let hayashi = DISK_ERA_XRAY_TEST_WALL_K;
         let mlt_c = Fixed::from_ratio(3, 2);
         let age = Fixed::ONE;
         let p_rot = Fixed::from_int(8);
@@ -5613,7 +5623,7 @@ mod tests {
         // band-aware and out of CI's reach, where the ruling homed it: it validates the ENSEMBLE output, never an
         // input, never a median. If the derived solar value comes out at half a Myr or thirty, that is a Residual
         // finding to surface, not a red X to make green.
-        let hayashi = Fixed::from_int(4000);
+        let hayashi = DISK_ERA_XRAY_TEST_WALL_K;
         let mlt_c = Fixed::from_ratio(3, 2);
         let p_rot = Fixed::from_int(8);
         let ro_sat = Fixed::from_ratio(13, 100);
@@ -5706,7 +5716,7 @@ mod tests {
         };
         // A zero mass refuses at the turnover (the first link); a zero wall temperature refuses at the turnover and
         // the luminosity both. Each must propagate to a whole-chain None.
-        assert!(call(Fixed::ZERO, Fixed::from_int(4000)).is_none());
+        assert!(call(Fixed::ZERO, DISK_ERA_XRAY_TEST_WALL_K).is_none());
         assert!(call(Fixed::ONE, Fixed::ZERO).is_none());
     }
 }
