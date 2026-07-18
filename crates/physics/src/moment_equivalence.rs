@@ -1939,6 +1939,37 @@ impl ConductiveLidBase {
         Some(ConductiveLidBase { depth_km })
     }
 
+    /// DERIVE the lid base from the world's own convecting layer in the LOG-DOMAIN Rayleigh number:
+    /// `delta = d * exp(-ln Ra / 3)`, the same `delta = d Ra^(-1/3)` as [`Self::from_rayleigh`] but computed from
+    /// `ln Ra` so the SI-magnitude `Ra` (whose linear intermediates overflow Q32.32) never materializes. This is
+    /// the constructor the anchored mid-band path uses: the convective viscosity is `~1e21 Pa*s`, so its Rayleigh
+    /// number is carried as `ln Ra` ([`crate::laws::ln_rayleigh_number`]) and the lid base falls out of it
+    /// directly, with no representable-overflow clamp anywhere in the chain.
+    ///
+    /// A NON-CONVECTING layer (`ln Ra <= 0`, so `Ra <= 1`) reads back the whole layer, the same convention as the
+    /// sibling: with no convection there is no conductive-convective boundary and the whole layer conducts. `None`
+    /// on a non-positive layer depth, or where the derived lid rounds away to nothing (a lid with no thickness has
+    /// no column to integrate).
+    pub fn from_ln_rayleigh(convecting_depth_km: Fixed, ln_rayleigh: Fixed) -> Option<Self> {
+        if convecting_depth_km <= ZERO {
+            return None;
+        }
+        if ln_rayleigh <= ZERO {
+            return Some(ConductiveLidBase {
+                depth_km: convecting_depth_km,
+            });
+        }
+        // delta = d * exp(-ln Ra / 3), capped at the layer depth.
+        let arg = (ZERO - ln_rayleigh).checked_div(Fixed::from_int(3))?;
+        let depth_km = convecting_depth_km
+            .checked_mul(arg.exp())?
+            .min(convecting_depth_km);
+        if depth_km <= ZERO {
+            return None;
+        }
+        Some(ConductiveLidBase { depth_km })
+    }
+
     /// The lid base `delta` (km).
     pub fn depth_km(self) -> Fixed {
         self.depth_km
@@ -3268,6 +3299,40 @@ mod tests {
             timescale_s: Fixed::from_int(31_557_600),
             ln_strain_rate_per_s: ln_scientific(1, 1, -15),
         }
+    }
+
+    #[test]
+    fn the_log_lid_base_twins_the_linear_from_rayleigh() {
+        // TWIN: for a representable Ra both constructors exist; from_ln_rayleigh(depth, ln Ra) must reproduce
+        // from_rayleigh(depth, Ra) to the log/exp round-trip. The sibling below uses (2890 km, Ra 1e5) -> 62.3 km.
+        let depth = Fixed::from_int(2890);
+        let ra = Fixed::from_int(100_000);
+        let linear = ConductiveLidBase::from_rayleigh(depth, ra).expect("linear lid");
+        let logform = ConductiveLidBase::from_ln_rayleigh(depth, ra.ln()).expect("log lid");
+        let ratio = f64_of(logform.depth_km()) / f64_of(linear.depth_km());
+        assert!(
+            (0.999..=1.001).contains(&ratio),
+            "the log lid base twins the linear from_rayleigh, ratio {ratio}"
+        );
+
+        // A non-convecting layer (ln Ra <= 0, Ra <= 1) reads back the whole layer, the sibling's convention.
+        let stagnant =
+            ConductiveLidBase::from_ln_rayleigh(depth, Fixed::from_int(-1)).expect("stagnant");
+        assert_eq!(
+            stagnant.depth_km(),
+            depth,
+            "with Ra <= 1 the whole layer conducts"
+        );
+
+        // A real mantle Ra, carried as ln Ra ~ 17.8 (Ra ~ 5e7), the value the linear form cannot reach: the lid
+        // base is a thin representable few kilometres, never a clamp artefact.
+        let ln_ra_si = Fixed::from_ratio(178, 10);
+        let lid = ConductiveLidBase::from_ln_rayleigh(depth, ln_ra_si).expect("si lid");
+        let km = f64_of(lid.depth_km());
+        assert!(
+            (1.0..=30.0).contains(&km),
+            "a vigorously convecting mantle has a thin conductive lid base, got {km} km"
+        );
     }
 
     #[test]

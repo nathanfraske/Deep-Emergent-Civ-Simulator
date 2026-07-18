@@ -3517,6 +3517,42 @@ pub fn rayleigh_number(
     }
 }
 
+/// The LOG-DOMAIN Rayleigh number `ln Ra = ln|drho| + ln g + 3 ln d - ln_eta - ln kappa`, computed as a SUM OF
+/// LOGS so the SI-magnitude numerator (`|drho| g d^3 ~ 1e21`) and denominator (`eta kappa ~ 1e15`), which both
+/// overflow Q32.32, never have to form. This is the sibling [`rayleigh_number`] cannot be for a real mantle: an
+/// interior viscosity is `~1e21 Pa*s` and never materializes as a linear `Fixed`, so its consumer carries
+/// `ln_eta` (from [`crate::convective_viscosity`]) and this returns `ln Ra` (a representable `~14` for a mantle
+/// `Ra ~ 1e6`). Its lid-base consumer is [`crate::moment_equivalence::ConductiveLidBase::from_ln_rayleigh`].
+///
+/// THE `ra_max` AUDIT, resolved here (owner ruling 2026-07-17). The `ra_max` argument to [`rayleigh_number`] is a
+/// REPRESENTABLE-OVERFLOW GUARD for the linear Q32.32 path (it is returned when `d^3` overflows and caps the
+/// quotient), NOT a physical Rayleigh ceiling: mantles convect at `Ra ~ 1e6` and up, with no upper bound in the
+/// physics, so a `ra_max` binding at that range would bias every derived lid thick by a cube-root factor nobody
+/// chose. The log-domain form has no overflow to guard (`ln Ra` is a small representable sum, and its lid base
+/// `delta = d exp(-ln Ra / 3)` is representable for any `ln Ra`), so it carries NO clamp. No physical Ra ceiling
+/// is authored on either path; the linear `ra_max` retires with the scaled operating point it guards, when the
+/// convection step lifts to this log-domain form. `ln_viscosity` is `ln(eta)` [ln Pa*s]; the other three are
+/// linear SI. Returns `None` on a non-positive `drho`, `g`, `d`, or `kappa` (no real log), the log-space twin of
+/// the linear form's zero-on-no-dissipation.
+pub fn ln_rayleigh_number(
+    density_anomaly: Fixed,
+    gravity: Fixed,
+    depth: Fixed,
+    ln_viscosity: Fixed,
+    thermal_diffusivity: Fixed,
+) -> Option<Fixed> {
+    let mag = sat_abs(density_anomaly);
+    if mag <= ZERO || gravity <= ZERO || depth <= ZERO || thermal_diffusivity <= ZERO {
+        return None;
+    }
+    let three_ln_depth = depth.ln().checked_mul(Fixed::from_int(3))?;
+    mag.ln()
+        .checked_add(gravity.ln())
+        .and_then(|x| x.checked_add(three_ln_depth))
+        .and_then(|x| x.checked_sub(ln_viscosity))
+        .and_then(|x| x.checked_sub(thermal_diffusivity.ln()))
+}
+
 /// Convective heat advection as specific power: `F = c * |v| * |dT| / d`, the heat a buoyant flow carries out
 /// of a column per unit mass. When convection is active (the Rayleigh onset has fired), the buoyant flow
 /// [`stokes_velocity`] transports heat from the hot interior toward the surface, a LOSS that augments the
@@ -3854,6 +3890,63 @@ mod tests {
         assert_eq!(
             thermal_density_anomaly(rho, ZERO, Fixed::from_int(100)),
             ZERO
+        );
+    }
+
+    #[test]
+    fn ln_rayleigh_number_twins_the_linear_form_and_survives_si_overflow() {
+        // TWIN: where the linear rayleigh_number is representable, ln_rayleigh_number returns its log. The same
+        // exactly-representable set gives Ra = 12; eta = 4 enters as ln_eta = ln 4.
+        let g = Fixed::from_int(3);
+        let d = Fixed::from_int(2);
+        let kappa = Fixed::ONE;
+        let ln_eta = Fixed::from_int(4).ln();
+        let ln_ra = ln_rayleigh_number(Fixed::from_int(-2), g, d, ln_eta, kappa).expect("ln Ra");
+        let ratio = ln_ra.exp().to_f64_lossy() / 12.0;
+        assert!(
+            (0.999..=1.001).contains(&ratio),
+            "exp(ln Ra) reproduces the linear Ra = 12, ratio {ratio}"
+        );
+
+        // SI OVERFLOW: the linear form overflows on a real mantle DEPTH (d^3 ~ 5.8e18 exceeds Q32.32's ~2.1e9), so
+        // it returns the cap regardless of the true Ra; the log form computes it as a sum of logs.
+        let d_si = Fixed::from_int(1_800_000);
+        let kappa_si = Fixed::from_ratio(1, 1_000_000);
+        let ra_max = Fixed::from_int(1_000_000);
+        assert_eq!(
+            rayleigh_number(
+                Fixed::from_int(50),
+                g,
+                d_si,
+                Fixed::from_int(4),
+                kappa_si,
+                ra_max
+            ),
+            ra_max,
+            "the linear form overflows on a real mantle depth and returns the cap"
+        );
+        // The real interior viscosity (~2e19 Pa*s) is carried as ln_eta ~ 44.4; the log Rayleigh number is a
+        // representable ~17.8, a physical Ra ~ 5e7 for a vigorously convecting mantle.
+        let ln_eta_si = Fixed::from_int(10).ln() * Fixed::from_ratio(193, 10);
+        let ln_ra_si = ln_rayleigh_number(
+            Fixed::from_int(50),
+            Fixed::from_ratio(37, 10),
+            d_si,
+            ln_eta_si,
+            kappa_si,
+        )
+        .expect("ln Ra SI");
+        let ra_si = ln_ra_si.exp().to_f64_lossy();
+        assert!(
+            (1e5..=1e9).contains(&ra_si),
+            "a real mantle Rayleigh number is representable via logs, got {ra_si}"
+        );
+
+        // Absence convention: a non-positive drho, g, d, or kappa has no real log.
+        assert_eq!(ln_rayleigh_number(ZERO, g, d, ln_eta, kappa), None);
+        assert_eq!(
+            ln_rayleigh_number(Fixed::from_int(-2), g, d, ln_eta, ZERO),
+            None
         );
     }
 
