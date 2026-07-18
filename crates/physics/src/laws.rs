@@ -853,6 +853,54 @@ pub fn conduction(
     }
 }
 
+/// THE MANTLE CONVECTIVE HEAT FLUX: the surface heat loss a convecting interior sustains, the conductive Fourier
+/// flux enhanced by the Nusselt number `Nu = a * (d / delta) = a * (Ra / Ra_crit)^(1/3)`. Heat leaves not across
+/// the whole layer depth but across the thin thermal BOUNDARY LAYER `delta` the vigorous flow maintains, so a
+/// mantle at `Ra ~ 1e6` loses about ten times the conductive flux. `a` is the parameterized-convection prefactor
+/// ([`crate::convection_scaling`], `1.0` single-lid planetary), `conductive_flux` the Fourier flux over the full
+/// layer ([`conduction`]), `layer_depth` the layer `d`, and `boundary_layer` the ONE shared `delta`
+/// ([`thermal_boundary_layer`]) the lid base and the driving stress also read (the mid-band lift, owner ruling
+/// 2026-07-18: the heat loss reads the shared boundary layer, never a parallel scaling of its own).
+///
+/// THE NAME IS DELIBERATE: this is NOT [`convective_flux`], which is Newton's-law-of-cooling thermoregulation over
+/// a heat-transfer coefficient (a different mechanism wearing the same adjective). This is the parameterized
+/// mantle-convection heat transport.
+///
+/// `Nu >= 1` IS THE DEFINITION, not an authored floor: convection never transports less than conduction, so the
+/// enhancement is clamped at unity. The parameterized `a (Ra/Ra_crit)^(1/3)` form is a high-`Ra` asymptotic; near
+/// onset (`Ra ~ Ra_crit`, `delta ~ d`) it would fall below one, which the clamp corrects to the conductive limit.
+///
+/// TERMS-DROPPED (owner ruling 2026-07-18, the Terran audit): this is the MOBILE-LID / single-lid isoviscous
+/// instance, valid where the surface participates in the overturn. A stagnant-lid body (the catalog MAJORITY:
+/// Mars-class, Venus-class, most one-plate worlds) has a temperature-dependent viscosity that locks the cold lid,
+/// and its heat loss is SUPPRESSED through the rheological temperature scale `RT^2 / E*` (`E*` the banked creep
+/// activation energy). That branch is DERIVABLE from rows already in the tree, keyed to the `tectonic_regime`
+/// dispatch, and is a FLAGGED follow-on (the debts ledger), not built here. Clamped to `flux_max`; a non-positive
+/// boundary layer reads back the conductive flux. Deterministic fixed-point.
+pub fn mantle_convective_heat_flux(
+    conductive_flux: Fixed,
+    layer_depth: Fixed,
+    boundary_layer: Fixed,
+    prefactor_a: Fixed,
+    flux_max: Fixed,
+) -> Fixed {
+    if boundary_layer <= ZERO || layer_depth <= ZERO {
+        return conductive_flux.min(flux_max);
+    }
+    // Nu = max(1, a * d / delta), the physical enhancement; q = Nu * q_conductive.
+    let nusselt = match layer_depth
+        .checked_div(boundary_layer)
+        .and_then(|ratio| ratio.checked_mul(prefactor_a))
+    {
+        Some(nu) => nu.max(Fixed::ONE),
+        None => return flux_max,
+    };
+    match nusselt.checked_mul(conductive_flux) {
+        Some(q) => q.min(flux_max),
+        None => flux_max,
+    }
+}
+
 /// The sensible-heat energy to effect a temperature change: `m c dT`.
 pub fn sensible_energy(
     mass: Fixed,
@@ -4693,6 +4741,36 @@ mod tests {
         assert_eq!(
             thermal_diffusivity(Fixed::from_int(1), ZERO, Fixed::from_int(1), alpha_max),
             alpha_max
+        );
+    }
+
+    #[test]
+    fn the_mantle_nusselt_flux_enhances_conduction_and_floors_at_unity() {
+        // MAGNITUDE REFEREE. A Mars-class mantle at Ra ~ 1e6 with the planetary Ra_crit ~ 1100 has
+        // delta = d (Ra_crit/Ra)^(1/3) ~ d / 9.7, so Nu = a (d/delta) ~ 9.7 (a = 1): the convecting interior loses
+        // about ten times the conductive flux. All Fixed, no float (this file is the integer-only canonical path).
+        let q_cond = Fixed::from_int(100);
+        let depth = Fixed::from_int(1_800_000);
+        let delta = Fixed::from_int(185_760); // 1.8e6 * (1100.65/1e6)^(1/3)
+        let a = Fixed::ONE;
+        let big = Fixed::from_int(1_000_000);
+        let q = mantle_convective_heat_flux(q_cond, depth, delta, a, big);
+        // Nu ~ 9.7, so q ~ 970: between 9x and 11x the conductive flux (a mechanism-class bracket, not a fit).
+        assert!(
+            q > q_cond.mul(Fixed::from_int(9)) && q < q_cond.mul(Fixed::from_int(11)),
+            "the convecting flux is about ten times conduction"
+        );
+        // Nu >= 1 is the definition: at onset (delta = depth) the enhancement floors at unity (conduction).
+        assert_eq!(
+            mantle_convective_heat_flux(q_cond, depth, depth, a, big),
+            q_cond,
+            "at onset the heat loss is exactly conduction"
+        );
+        // A small prefactor at onset still floors at conduction: convection never transports less than conduction.
+        assert_eq!(
+            mantle_convective_heat_flux(q_cond, depth, depth, Fixed::from_ratio(397, 1000), big),
+            q_cond,
+            "Nu is clamped to 1"
         );
     }
 
