@@ -6,13 +6,16 @@ Editing rule (the stop-gate enforces it): edit IN PLACE, keep every line a few w
 
 ## Active arcs
 
-- 2026-07-18  Mountains / mid-band (increment 3) -> branch `claude/topology-increment3`. Next: conditioned Ra_crit row, block-3 re-derivations, sub-step D, Seams C/D. Detail in HANDOFFS.
-- 2026-07-18  Viewer cadence, deep-time watchable (open-young, pace advance, decouple flash) -> viewer agent, non-canon, viewer-side.
+- 2026-07-18  Mountains / mid-band (increment 3) -> branch `claude/topology-increment3`. Next: block-3 re-derivations, sub-step D, Seams C/D. Detail in HANDOFFS.
 - 2026-07-18  GPU viewer render (112x surface-zoom, byte-neutral, feature `gpu`) -> `crates/gpu/src/globe.rs`, worktree `agent-afd7905b...`; integrate at the render layer.
 - 2026-07-18  Arc AFTER the crust (perpetual dynamics, atmosphere keystone, hydrosphere) -> plan in `PHYSICS_SUBSTRATE_ROADMAP.md`.
 
 ## Recent landings (tombstoned; prune when old)
 
+- 2026-07-18  DONE  Viewer cadence watchable (opens young, derived 1 tick/frame, held impact bloom, pole-smooth glow) -> `d8add16`.
+- 2026-07-18  DONE  Cargo artifact ring buffer (LRU under size+count caps, auto at SessionStart) -> `scripts/target_gc.sh`.
+- 2026-07-18  DONE  WSL copyback recovery (branch ref repaired to `b2ebbb4`, cargo PATH restored to `.bashrc`, 180G reclaimed).
+- 2026-07-18  DONE  Conditioned Ra_crit row (reads the registry, rigid-rigid DEFAULTS-TAKEN, dispatch stubbed) -> `crates/physics/src/rayleigh_critical.rs`.
 - 2026-07-18  DONE  Critical-Rayleigh eigenvalue registry (boundary_class x heating_mode) -> `30fdd86`.
 - 2026-07-18  DONE  Rigid-rigid eigenvalue diamond fixed (1708 -> 1707.762, one cited row + two sentinels) -> `9036c5e`.
 - 2026-07-18  DONE  Block-2 receipt: all-brittle-thin-lid unreachable, measured -> `e0941f9`.
