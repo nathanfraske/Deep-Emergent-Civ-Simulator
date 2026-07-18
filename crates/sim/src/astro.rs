@@ -691,11 +691,11 @@ pub fn viscous_similarity_surface_density(
 /// hydrostatic singular isothermal sphere), with `m0` conditioning on `A` within Shu 1977's own Table 1 (Hunter
 /// 1977; Whitworth and Summers 1985). The two shipped rows are the DECLARED ENDPOINTS of that measured continuum, a
 /// factor ~48 apart, the Owen-versus-Sellek band exactly: (1) [`CollapseModel::shu_1977`], the hydrostatic edge
-/// `A = 2`, `m0 = 0.975`, the slowest, quasi-static expansion-wave collapse, VENDORED (Shu 1977 primary, receipt on
-/// file); (2) [`CollapseModel::larson_penston`], the dynamical edge `A = 8.85`, `m0 = 46.9`, the fastest collapse,
-/// CHANNEL-RELAYED PROVISIONAL (the value was relayed from a secondary restatement, no bytes vendored, so it is a
-/// fetch-flagged endpoint, live for the band but not a citation until its primary is read source-verbatim). A caller
-/// needing one number gets the BAND, not a default.
+/// `A = 2`, `m0 = 0.975`, the slowest, quasi-static expansion-wave collapse, VENDORED (Shu 1977, and independently
+/// corroborated by Hunter 1977 p.838 which prints the same `0.975`); (2) [`CollapseModel::larson_penston`], the
+/// dynamical edge `A = 8.854`, `m0 = 46.915`, the fastest collapse, VENDORED (Hunter 1977, ApJ 218, 834, read
+/// source-verbatim, with Whitworth-Summers 1985 as a dual-channel corroboration at `w0 = 46.84`). A caller needing
+/// one number gets the BAND, not a default.
 ///
 /// THE CENTRAL-MEMBER CHOICE IS A CONVENTION with a recorded stability note (Ori and Piran 1988, that Larson-Penston
 /// is the only STABLE self-similar solution, so arguably the most physically relevant, against Shu as the widely-used
@@ -705,8 +705,9 @@ pub fn viscous_similarity_surface_density(
 /// DEFAULTS-TAKEN interim (the convention line in the provenance readout, the stability note an annotation never a
 /// selector); the collapse-band interval propagation through the race is its own slice; then the default dies and
 /// the band ships. Choosing a member because a solar hindcast prefers it would be a licensed-calibration event
-/// (ledger, spent row, owner signature), which nothing here licenses. The stability note, the factor-48 framing, and
-/// the citations below are CHANNEL-RELAYED pending the measure fetch.
+/// (ledger, spent row, owner signature), which nothing here licenses. The factor-48 framing now follows from two
+/// VENDORED endpoints (46.915 / 0.975), but the Ori-Piran 1988 stability note and the Foster-Chevalier peak below
+/// remain CHANNEL-RELAYED pending their own fetches.
 ///
 /// NAMED DEBT (flagged, not built): the REALISTIC time-dependent infall history is not constant. Foster and
 /// Chevalier 1993 (and Larson 2003) find a PEAKED history, a high early rate dropping later, with a maximum near
@@ -738,20 +739,22 @@ impl CollapseModel {
         }
     }
 
-    /// The Larson-Penston (Hunter 1977) DYNAMICAL collapse, the FAST endpoint: `m0 = 46.9` at the instability
-    /// parameter `A = 8.85`, ~48 times the Shu rate, the faster edge of the collapse-model band.
+    /// The Larson-Penston DYNAMICAL collapse, the FAST endpoint: `m0 = 46.915` at the instability parameter
+    /// `A = 8.854`, ~48 times the Shu rate, the faster edge of the collapse-model band.
     ///
-    /// CHANNEL-RELAYED, PROVISIONAL, FETCH-FLAGGED. These values were RELAYED (a secondary review's restatement of
-    /// the similarity-solution family), not vendored: no primary bytes were downloaded, no receipt computed, no
-    /// source-verbatim table read. The channel is not a citation (the Ra_crit-arc lesson), so the value stays LIVE
-    /// for the band under the modality `channel-relayed-provisional`, and the fetch-flag is RESTORED: the retirement
-    /// spec (locate the printed primary table for `A = 8.85`, `m0 = 46.9`, candidates Hunter 1977 and
-    /// Whitworth-Summers 1985 verified by content, vendor the bytes, compute the receipt, read source-verbatim) lives
-    /// in `docs/working/DISK_ARC_FETCH_VALUES.md`. Only vendored bytes retire this flag.
+    /// VENDORED (the channel-relayed flag retired). Read source-verbatim from the primary: Hunter 1977, ApJ 218,
+    /// 834, p.838 (`"Values of m0 are 46.915, ... for the Larson-Penston ... solutions"`) for the eigenvalue, and
+    /// p.837 (`"values of P(0) ... being 8.854, ..."`) for the abscissa, which is Hunter's central-density
+    /// coefficient `P(0)` (so `A = 2` for Shu and `A = 8.854` for LP both land on it). Hunter's convention (eqs. 1
+    /// and 14, `M = a^3 t m(zeta)/G` with `m -> m0`) gives `Mdot = m0 c_s^3/G`, matching ours. Vendored primary
+    /// sha256 `9e187e6d69cccf733734b75c7b974f287532163692514084eb511828d6a70e0f`. DUAL-CHANNEL corroboration:
+    /// Whitworth and Summers 1985 (MNRAS 214, 1, receipt `ba57e11c...`) print the same member as `w0 = 46.84` under
+    /// their `(z0, w0)` parametrization, a 0.16% spread from independent eigenvalue integrations, far below the
+    /// factor-48 band; the carried value tracks Hunter's printed `46.915`.
     pub fn larson_penston() -> Self {
         CollapseModel {
-            collapse_coefficient_m0: Fixed::from_ratio(469, 10), // 46.9, channel-relayed-provisional (fetch-flagged)
-            instability_parameter_a: Fixed::from_ratio(885, 100), // A = 8.85, channel-relayed-provisional
+            collapse_coefficient_m0: Fixed::from_ratio(46915, 1000), // 46.915 (Hunter 1977 p.838; W&S give 46.84)
+            instability_parameter_a: Fixed::from_ratio(8854, 1000), // A = P(0) = 8.854 (Hunter 1977 p.837)
         }
     }
 }
@@ -5343,12 +5346,12 @@ mod tests {
         // ~48x the Shu rate, the faster edge. Mdot is linear in m0, so the rate ratio is exactly the eigenvalue
         // ratio, and the two constructors are the measured continuum's endpoints (Whitworth-Summers 1985).
         let lp = CollapseModel::larson_penston();
-        assert_eq!(lp.instability_parameter_a, Fixed::from_ratio(885, 100));
+        assert_eq!(lp.instability_parameter_a, Fixed::from_ratio(8854, 1000)); // A = P(0) = 8.854 (Hunter 1977)
         let rapid =
             shu_inside_out_collapse_accretion_rate_msun_myr(Fixed::from_int(10), mu_solar, &lp)
                 .unwrap();
         let m0_ratio = rapid.checked_div(solar).unwrap().to_f64_lossy();
-        let expected_ratio = 46.9 / 0.975; // ~48.1, the vendored endpoint separation
+        let expected_ratio = 46.915 / 0.975; // ~48.1, the vendored endpoint separation (Hunter 1977)
         assert!(
             (m0_ratio - expected_ratio).abs() < 0.1,
             "Mdot is linear in m0: the LP endpoint is ~48x the Shu rate (got {}, expected {})",
