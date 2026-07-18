@@ -72,8 +72,9 @@ use civsim_core::Fixed;
 
 use crate::astro::{
     disk_effective_temperature, disk_era_xray_disk_lifetime_myr, hill_radius_au,
-    kepler_orbital_period_years, planet_radius_m, viscous_similarity_surface_density, XrayWindFit,
-    ASTRONOMICAL_UNIT_M, EARTH_MASS_KG,
+    kepler_orbital_period_years, planet_radius_m, shu_inside_out_collapse_accretion_rate_msun_myr,
+    viscous_similarity_surface_density, CollapseModel, XrayWindFit, ASTRONOMICAL_UNIT_M,
+    EARTH_MASS_KG,
 };
 use crate::planetary_system::{Embryo, SolidDisk};
 
@@ -590,10 +591,14 @@ pub fn giant_formation_banded(
 }
 
 /// The disk-era star-and-disk state the DERIVED disk clock reads, bundled so the composed giant gate takes one
-/// parameter rather than the clock's full argument list. Every field is the star's or the disk's own datum, or a
-/// TAGGED SOLAR INTERIM the caller supplies (`mdot_0_msun_myr` the class-0/I birth accretion, `t_visc_myr` from the
-/// disk birth size `R_1`, `rotation_period_days` the disk-locked rotation), never a value authored here: the
-/// composition is pure, so the wire stays fabrication-free until the layer-4 draws land to supply the interims.
+/// parameter rather than the clock's full argument list. The birth accretion rate is NOT a field: it DERIVES from
+/// the birth conditions carried here (`cloud_core_temp_k`, `mean_molecular_weight`, `collapse`) through the Shu
+/// inside-out collapse ([`shu_inside_out_collapse_accretion_rate_msun_myr`]), the derive-first retirement of the
+/// old `Mdot_0` interim: the clock now runs from a cloud-core TEMPERATURE and the world's own composition rather
+/// than a handed-in accretion rate. What remains interim is `cloud_core_temp_k` (a birth condition bottoming out at
+/// the layer-4 draw, admit-the-alien a data row), `t_visc_myr` (from the disk birth size `R_1`), and
+/// `rotation_period_days` (the disk-locked rotation), each a per-system datum the caller supplies, never authored
+/// here.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DiskClockState {
     /// The drawn star mass `M / Msun`.
@@ -612,12 +617,31 @@ pub struct DiskClockState {
     pub saturated_log10_fraction: Fixed,
     /// The activity-decline power-law index `beta` (reserved-with-basis).
     pub beta: Fixed,
-    /// The birth accretion rate `Mdot_0` (Msun/Myr), a TAGGED SOLAR INTERIM (its retirement is the layer-4 draw).
-    pub mdot_0_msun_myr: Fixed,
+    /// The molecular cloud-core TEMPERATURE (K) the birth accretion rate derives from (`Mdot_0 ~ T^(3/2)`): a
+    /// per-system birth condition bottoming out at the layer-4 draw, reserved-with-basis `~10 K` until it lands.
+    pub cloud_core_temp_k: Fixed,
+    /// The disk-gas MEAN MOLECULAR WEIGHT the Shu sound speed reads (the world's own derived value,
+    /// [`crate::astro::derive_disk_gas_mean_molecular_weight`]).
+    pub mean_molecular_weight: Fixed,
+    /// The declared [`CollapseModel`] (Shu 0.975 versus the faster Larson-Penston rival), the model-structure band.
+    pub collapse: CollapseModel,
     /// The viscous time `t_visc` (Myr) from `R_1`, a TAGGED SOLAR INTERIM (its retirement is the layer-4 draw).
     pub t_visc_myr: Fixed,
     /// The LBP surface-density decline index `gamma` (bare algebra, `gamma = 1`).
     pub decline_gamma: Fixed,
+}
+
+impl DiskClockState {
+    /// The birth accretion rate `Mdot_0` (Msun/Myr), DERIVED from this state's cloud-core temperature, gas mean
+    /// molecular weight, and declared collapse model through the Shu inside-out collapse, never a stored interim.
+    /// `None` if the collapse rate refuses (a non-physical temperature, molecular weight, or coefficient).
+    pub fn derived_birth_accretion_msun_myr(&self) -> Option<Fixed> {
+        shu_inside_out_collapse_accretion_rate_msun_myr(
+            self.cloud_core_temp_k,
+            self.mean_molecular_weight,
+            &self.collapse,
+        )
+    }
 }
 
 /// STAGE 4 of the slice-2 wire (DORMANT): the #73 giant gate DRIVEN BY THE DERIVED DISK CLOCK. It replaces the
@@ -635,11 +659,17 @@ pub struct DiskClockState {
 /// feeding-zone width, the integration steps), and its full retirement from the struct is a census item for the
 /// flip, not this dormant composition.
 ///
+/// The birth accretion rate the clock needs is DERIVED, not handed in: `star.derived_birth_accretion_msun_myr()`
+/// runs the Shu inside-out collapse over the state's cloud-core temperature, composition, and collapse model, so the
+/// whole giant verdict runs from birth CONDITIONS end to end (temperature, composition, rotation, disk size), the
+/// derive-first thesis cashed. A refusal from the collapse (a non-physical birth condition) propagates as `None`.
+///
 /// DORMANT and BYTE-NEUTRAL: no run-path caller (both the disk clock and the giant gate are dormant), so the pins
 /// hold bit-exact. The FLIP that feeds this into `run_world` and moves the pins is the capstone event under the
-/// owner's signature, not this composition, and it waits on the `Mdot_0` fetch and the layer-4 draws that retire
-/// the tagged interims. `None` if either clock evaluation refuses (a link's domain door) or the giant gate refuses
-/// (an unordered band or a monotonicity violation), the refusal propagated rather than swallowed.
+/// owner's signature, not this composition, and it waits on the layer-4 draws that retire the remaining interims
+/// (the cloud-core temperature, `t_visc`, the rotation). `None` if the collapse or either clock evaluation refuses
+/// (a link's domain door) or the giant gate refuses (an unordered band or a monotonicity violation), the refusal
+/// propagated rather than swallowed.
 pub fn giant_formation_on_derived_clock(
     embryo: &Embryo,
     disk: &SolidDisk,
@@ -649,6 +679,8 @@ pub fn giant_formation_on_derived_clock(
     gas: &GiantGasParams,
     kh: &GiantKhParams,
 ) -> Option<BandedGiantVerdict> {
+    // Mdot_0 DERIVES from the birth conditions (Shu collapse), never a stored interim.
+    let mdot_0_msun_myr = star.derived_birth_accretion_msun_myr()?;
     let tau_disk = |fit: &XrayWindFit| {
         disk_era_xray_disk_lifetime_myr(
             star.mass_ratio,
@@ -660,7 +692,7 @@ pub fn giant_formation_on_derived_clock(
             star.saturated_log10_fraction,
             star.beta,
             fit,
-            star.mdot_0_msun_myr,
+            mdot_0_msun_myr,
             star.t_visc_myr,
             star.decline_gamma,
         )
@@ -1088,9 +1120,9 @@ mod tests {
             256,
         );
         let embryo = *field.last().expect("the dense disk seeds embryos");
-        // The tagged solar interims (the same the disk clock's unit tests run): a fixture wall, disk-locked
-        // rotation, the class-0/I birth accretion band Mdot_0 ~ 1 Msun/Myr, unit t_visc, gamma = 1. The interims
-        // are TEST inputs, not authored by the wire, so the composition stays fabrication-free.
+        // The birth conditions the clock derives from (the derive-first form): a fixture wall, disk-locked rotation,
+        // a ~10 K solar-composition cloud core and the Shu collapse model (from which Mdot_0 DERIVES, no interim
+        // accretion rate), unit t_visc, gamma = 1. The conditions are TEST inputs, not authored by the wire.
         let star = DiskClockState {
             mass_ratio: Fixed::ONE,
             hayashi_temp_k: Fixed::from_int(4200),
@@ -1100,10 +1132,22 @@ mod tests {
             ro_sat: Fixed::from_ratio(13, 100),
             saturated_log10_fraction: Fixed::from_ratio(-313, 100),
             beta: Fixed::from_ratio(-27, 10),
-            mdot_0_msun_myr: Fixed::ONE, // class-0/I birth accretion band, tagged interim
+            cloud_core_temp_k: Fixed::from_int(10), // ~10 K molecular cloud core, reserved-with-basis birth draw
+            mean_molecular_weight: Fixed::from_ratio(233, 100), // solar disk gas, the world's derived value
+            collapse: CollapseModel::shu_1977(), // m0 = 0.975, the vendored central collapse row
             t_visc_myr: Fixed::ONE,
             decline_gamma: Fixed::ONE,
         };
+        // Mdot_0 is DERIVED from the birth conditions, not a stored field: the Shu collapse gives ~1.5 Msun/Myr at
+        // 10 K solar composition (the vendored oracle), so the hand-chain reads the SAME derived rate the wire does.
+        let mdot_0 = star
+            .derived_birth_accretion_msun_myr()
+            .expect("the birth accretion rate derives from the 10 K core");
+        assert!(
+            mdot_0.to_f64_lossy() > 1.4 && mdot_0.to_f64_lossy() < 1.7,
+            "the derived Mdot_0 is the ~1.5 Msun/Myr Shu rate (got {})",
+            mdot_0.to_f64_lossy()
+        );
         // The wind ensemble's two lifetime edges: the strongest-wind row (Owen eq. 9, 8e-9) is the shortest disk
         // life, the weakest (Sellek, 4.32e-9) the longest.
         let strong = XrayWindFit::owen_equation_9();
@@ -1121,7 +1165,7 @@ mod tests {
                 star.saturated_log10_fraction,
                 star.beta,
                 fit,
-                star.mdot_0_msun_myr,
+                mdot_0,
                 star.t_visc_myr,
                 star.decline_gamma,
             )

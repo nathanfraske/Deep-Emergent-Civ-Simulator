@@ -679,39 +679,69 @@ pub fn viscous_similarity_surface_density(
     Some(ln_sigma.exp())
 }
 
+/// A protostellar CORE-COLLAPSE MODEL: the dimensionless mass-accretion eigenvalue `m0` of an inside-out collapse,
+/// carried as data so which collapse solution the birth rate uses is a DECLARED CHOICE, the sibling of the
+/// [`XrayWindFit`] wind ensemble (distinct physics claims banded, not a settled law). The rate is `Mdot = m0*c_s^3/G`
+/// ([`shu_inside_out_collapse_accretion_rate_msun_myr`]), so a larger `m0` is a faster, more violent collapse. The
+/// mechanism applies whichever model is passed; an alien collapse physics is a new constructor, a data row, not a
+/// rewrite (admit-the-alien).
+///
+/// TWO ROWS ARE ON THE TABLE (the model-structure band, like Owen versus Sellek): (1) the Shu 1977 EXPANSION-WAVE
+/// solution ([`CollapseModel::shu_1977`]), `m0 = 0.975`, the widely-used quasi-static inside-out collapse, the
+/// vendored central row; (2) the Larson-Penston-Hunter DYNAMICAL solutions, which give a much larger `m0` (of order
+/// tens), a faster runaway collapse, the FASTER EDGE. The Larson-Penston row is NAMED but not shipped: its `m0` is
+/// fetch-flagged (no vendored primary value yet), so it is surfaced rather than authored, the same posture the disk
+/// arc takes for an unvendored rival.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct CollapseModel {
+    /// The dimensionless collapse mass-accretion eigenvalue `m0` (`Mdot = m0 * c_s^3 / G`).
+    pub collapse_coefficient_m0: Fixed,
+}
+
+impl CollapseModel {
+    /// The Shu (1977) EXPANSION-WAVE inside-out collapse: `m0 = 0.975` (Shu 1977, ApJ 214, 488, Table 2, the
+    /// `x -> 0` core-mass eigenvalue, vendored primary `af390700`), the widely-used quasi-static value, the central
+    /// row of the collapse-model band.
+    pub fn shu_1977() -> Self {
+        CollapseModel {
+            collapse_coefficient_m0: Fixed::from_ratio(975, 1000), // Shu 1977 Table 2 (x -> 0)
+        }
+    }
+}
+
 /// THE BIRTH ACCRETION RATE `Mdot_0` (solar masses per Myr), DERIVED from the cloud core's own collapse rather than
 /// reserved as a number. This retires the disk clock's `Mdot_0` from a tagged solar interim to a derived quantity:
-/// the Shu (1977) inside-out collapse of a singular isothermal sphere delivers mass onto the forming star-plus-disk
-/// at `Mdot = m0 * c_s^3 / G`, where `c_s = (k_B*T / (mu*m_H))^(1/2)` is the ISOTHERMAL sound speed of the
-/// molecular cloud core (the same `c_s` [`viscous_similarity_surface_density`] uses). So the birth rate falls out of
-/// the core TEMPERATURE and the gas mean molecular weight, both more fundamental than an authored accretion rate:
-/// `Mdot ~ c_s^3 ~ T^(3/2)`, a warmer core collapsing faster. The mean molecular weight is the world's own drawn
-/// value ([`derive_disk_gas_mean_molecular_weight`], the built substrate), so this reads no composition constant.
+/// the inside-out collapse of a singular isothermal sphere delivers mass onto the forming star-plus-disk at
+/// `Mdot = m0 * c_s^3 / G`, where `c_s = (k_B*T / (mu*m_H))^(1/2)` is the ISOTHERMAL sound speed of the molecular
+/// cloud core (the same `c_s` [`viscous_similarity_surface_density`] uses) and `m0` is the [`CollapseModel`] the
+/// caller declares. So the birth rate falls out of the core TEMPERATURE and the gas mean molecular weight, both more
+/// fundamental than an authored accretion rate: `Mdot ~ c_s^3 ~ T^(3/2)`, a warmer core collapsing faster. The mean
+/// molecular weight is the world's own drawn value ([`derive_disk_gas_mean_molecular_weight`], the built substrate),
+/// so this reads no composition constant.
 ///
-/// THE COLLAPSE COEFFICIENT `m0` IS THE MODEL-STRUCTURE CHOICE (the same declared-band discipline as the wind-row
-/// ensemble): Shu's expansion-wave solution gives `m0 = 0.975` (Shu 1977, Table 2, the `x -> 0` core-mass eigenvalue,
-/// vendored primary), the widely-used quasi-static value; the Larson-Penston-Hunter dynamical solutions give a much
-/// larger `m0` (of order tens), a faster, more violent collapse. Which the caller supplies is a declared choice, not
-/// a settled law, so `m0` is a parameter, cited-with-basis, never authored inline. The cloud-core TEMPERATURE is the
-/// remaining input: a per-system birth condition (a molecular cloud core sits near `~10 K`, Fiorellino et al. 2023
-/// and the Shu illustrative `a = 0.2 km/s`), reserved-with-basis until the layer-4 birth draw supplies it per-star.
+/// THE COLLAPSE COEFFICIENT is the model-structure choice, carried on [`CollapseModel`] (Shu 0.975 versus the faster
+/// Larson-Penston rival), never authored inline. The cloud-core TEMPERATURE is the remaining input: a per-system
+/// birth condition (a molecular cloud core sits near `~10 K`, Fiorellino et al. 2023 and the Shu illustrative
+/// `a = 0.2 km/s`), reserved-with-basis until the layer-4 birth draw supplies it per-star. It bottoms out at a
+/// population draw, not a further derivation: a core cannot be colder than the CMB floor, and above it the
+/// equilibrium is set by the birth environment (the Layer-4 terminus, admit-the-alien a data row per system).
 ///
-/// DORMANT: no run-path caller yet; it is the derived replacement the slice-2 wire's `Mdot_0` interim graduates to
-/// when the birth-temperature draw lands (surfaced to the owner as the derive-first retirement of `Mdot_0`). The
-/// wide-magnitude product (`Mdot ~ 1e17 kg/s`, `m_H ~ 1e-27 kg`, `k_B ~ 1e-23 J/K`) is computed entirely in the log
-/// domain, the [`viscous_similarity_surface_density`] precedent, so no unrepresentable intermediate forms and a
-/// fail-loud past the `exp` ceiling. `None` on a non-physical temperature, molecular weight, or coefficient, or an
+/// DORMANT: the derived replacement the slice-2 wire's `Mdot_0` interim graduates to; the giant gate reads it
+/// through [`crate::giants::giant_formation_on_derived_clock`]. The wide-magnitude product (`Mdot ~ 1e17 kg/s`,
+/// `m_H ~ 1e-27 kg`, `k_B ~ 1e-23 J/K`) is computed entirely in the log domain, the
+/// [`viscous_similarity_surface_density`] precedent, so no unrepresentable intermediate forms and a fail-loud past
+/// the `exp` ceiling. `None` on a non-physical temperature, molecular weight, or collapse coefficient, or an
 /// overflow.
 ///
-// @derives: the protostellar disk birth accretion rate Mdot_0 <- the Shu inside-out collapse rate m0*c_s^3/G over the cloud-core temperature and the disk-gas mean molecular weight
+// @derives: the protostellar disk birth accretion rate Mdot_0 <- the inside-out collapse rate m0*c_s^3/G over the cloud-core temperature, the disk-gas mean molecular weight, and the declared collapse model
 pub fn shu_inside_out_collapse_accretion_rate_msun_myr(
     cloud_core_temp_k: Fixed,
     mean_molecular_weight: Fixed,
-    collapse_coefficient_m0: Fixed,
+    collapse: &CollapseModel,
 ) -> Option<Fixed> {
     if cloud_core_temp_k <= Fixed::ZERO
         || mean_molecular_weight <= Fixed::ZERO
-        || collapse_coefficient_m0 <= Fixed::ZERO
+        || collapse.collapse_coefficient_m0 <= Fixed::ZERO
     {
         return None;
     }
@@ -731,7 +761,8 @@ pub fn shu_inside_out_collapse_accretion_rate_msun_myr(
     let ln_g = civsim_physics::saha::ln_of_decimal(
         civsim_units::fundamentals::GRAVITATIONAL_CONSTANT.value,
     )?;
-    let ln_mdot_kg_s = collapse_coefficient_m0
+    let ln_mdot_kg_s = collapse
+        .collapse_coefficient_m0
         .ln()
         .checked_add(Fixed::from_int(3).checked_mul(ln_c_s)?)?
         .checked_sub(ln_g)?;
@@ -5194,10 +5225,11 @@ mod tests {
         // core (mu ~ 2.33) at Shu's m0 = 0.975 gives ~1.5e-6 M_sun/yr = ~1.5 M_sun/Myr (vendored Shu 1977 Table 2,
         // cross-checked against Fiorellino et al. 2023's class-I band), matching the tagged ~1 M_sun/Myr interim in
         // order of magnitude.
-        let m0 = Fixed::from_ratio(975, 1000); // Shu 1977 expansion-wave eigenvalue (Table 2, x -> 0)
+        let shu = CollapseModel::shu_1977(); // m0 = 0.975, the vendored expansion-wave eigenvalue (Table 2, x -> 0)
+        assert_eq!(shu.collapse_coefficient_m0, Fixed::from_ratio(975, 1000));
         let mu_solar = Fixed::from_ratio(233, 100);
         let solar =
-            shu_inside_out_collapse_accretion_rate_msun_myr(Fixed::from_int(10), mu_solar, m0)
+            shu_inside_out_collapse_accretion_rate_msun_myr(Fixed::from_int(10), mu_solar, &shu)
                 .expect("the collapse rate resolves for a solar-composition 10 K core");
         // The vendored band: ~1.5 (mu=2.33) to ~1.9 (mu=2.0) M_sun/Myr at 10 K; assert the solar value sits in it.
         assert!(
@@ -5207,7 +5239,7 @@ mod tests {
         );
         // MECHANISM, Mdot ~ T^(3/2): a warmer core collapses faster. Doubling T lifts the rate by 2^1.5 ~ 2.83.
         let warm =
-            shu_inside_out_collapse_accretion_rate_msun_myr(Fixed::from_int(20), mu_solar, m0)
+            shu_inside_out_collapse_accretion_rate_msun_myr(Fixed::from_int(20), mu_solar, &shu)
                 .unwrap();
         let t_ratio = warm.checked_div(solar).unwrap().to_f64_lossy();
         assert!(
@@ -5220,7 +5252,7 @@ mod tests {
         let light = shu_inside_out_collapse_accretion_rate_msun_myr(
             Fixed::from_int(10),
             Fixed::from_int(2),
-            m0,
+            &shu,
         )
         .unwrap();
         assert!(
@@ -5229,20 +5261,40 @@ mod tests {
             light.to_f64_lossy(),
             solar.to_f64_lossy()
         );
-        // A non-physical temperature, molecular weight, or coefficient fails soft rather than fabricating a rate.
+        // A FASTER collapse model (a larger m0) drives a proportionally higher rate: Mdot is linear in m0, so
+        // doubling the eigenvalue doubles the birth rate, the model-structure band the generalization carries.
+        let faster = CollapseModel {
+            collapse_coefficient_m0: shu
+                .collapse_coefficient_m0
+                .checked_mul(Fixed::from_int(2))
+                .unwrap(),
+        };
+        let rapid =
+            shu_inside_out_collapse_accretion_rate_msun_myr(Fixed::from_int(10), mu_solar, &faster)
+                .unwrap();
+        let m0_ratio = rapid.checked_div(solar).unwrap().to_f64_lossy();
         assert!(
-            shu_inside_out_collapse_accretion_rate_msun_myr(Fixed::ZERO, mu_solar, m0).is_none()
+            (m0_ratio - 2.0).abs() < 0.01,
+            "Mdot is linear in m0: 2x the collapse eigenvalue doubles the rate (got {})",
+            m0_ratio
+        );
+        // A non-physical temperature, molecular weight, or collapse coefficient fails soft, never a fabricated rate.
+        assert!(
+            shu_inside_out_collapse_accretion_rate_msun_myr(Fixed::ZERO, mu_solar, &shu).is_none()
         );
         assert!(shu_inside_out_collapse_accretion_rate_msun_myr(
             Fixed::from_int(10),
             Fixed::ZERO,
-            m0
+            &shu
         )
         .is_none());
+        let zero_m0 = CollapseModel {
+            collapse_coefficient_m0: Fixed::ZERO,
+        };
         assert!(shu_inside_out_collapse_accretion_rate_msun_myr(
             Fixed::from_int(10),
             mu_solar,
-            Fixed::ZERO
+            &zero_m0
         )
         .is_none());
     }
