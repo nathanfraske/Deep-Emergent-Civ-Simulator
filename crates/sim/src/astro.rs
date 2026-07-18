@@ -1844,6 +1844,114 @@ pub fn stellar_rossby_number(rotation_period_days: Fixed, tau_conv_days: Fixed) 
     rotation_period_days.checked_div(tau_conv_days)
 }
 
+/// The GYROCHRONOLOGICAL SPIN-DOWN MODEL: the age-scaling exponent `n` of the magnetic-braking law that ages a
+/// star's rotation forward, `P(t) ~ t^n` (equivalently Skumanich's `v ~ t^(-n)` with `n = 1/2`, since a longer
+/// period is a slower rotation). The FORM is fixed dynamo physics, a wind-braked star spins down as a power law of
+/// age; the MEMBER is the cited exponent, a declared ensemble the way [`CollapseModel`] and [`XrayWindFit`] carry
+/// their measured members, so a different calibration is a data row, never a rewrite. The band runs from
+/// Skumanich's canonical `1/2` through the modern gyrochronology recalibrations (`0.5189`, `0.566`), a real
+/// measured spread rather than one authored point, which the caller propagates as an interval the way the collapse
+/// and wind bands already flow.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct SpinDownModel {
+    /// The braking-law age exponent `n` in `P(t) ~ t^n`. Skumanich `0.5`; Barnes `0.5189`; Mamajek-Hillenbrand
+    /// `0.566`. Carried as the ensemble member so the exponent never travels without the calibration it was read
+    /// from.
+    pub braking_exponent: Fixed,
+}
+
+impl SpinDownModel {
+    /// Skumanich (1972): the canonical `v ~ t^(-1/2)` braking law, age exponent `n = 1/2` EXACTLY (the value is the
+    /// power law's own, not a fit coefficient). Skumanich 1972, ApJ 171, 565 (SHA256 `9c4f2d4a...`); the exponent
+    /// is conditioned on the adopted 0.4 Gyr Hyades age, and the normalization is set by the Sun plus the
+    /// Pleiades/UMa/Hyades sequence, no printed coefficient.
+    pub fn skumanich_1972() -> Self {
+        Self {
+            braking_exponent: Fixed::from_ratio(1, 2),
+        }
+    }
+
+    /// Barnes (2007) separable gyrochronology, the age term `g(t) = t^0.5189`, exponent fixed by the solar anchor
+    /// (`P = 26.09` d at `B-V = 0.642`, 4.566 Gyr). Barnes 2007, ApJ 669, 1167 (SHA256 `1b6e3a14...`). Valid for
+    /// I-sequence rotators only, NOT the disk-locked birth population (segregated at the ~100 Myr gyrochrone), the
+    /// validity window the kernel guards.
+    pub fn barnes_2007() -> Self {
+        Self {
+            braking_exponent: Fixed::from_ratio(5189, 10_000),
+        }
+    }
+
+    /// Mamajek and Hillenbrand (2008) revised gyrochronology, age exponent `n = 0.566`. Mamajek and Hillenbrand
+    /// 2008, ApJ 687, 1264 (SHA256 `9e407163...`). Motivated by Barnes over-predicting Hyades periods by up to 50
+    /// percent, so the recalibrated exponent is the model-choice high edge of the band against Skumanich's `0.5`;
+    /// same I-sequence validity limits, anchored 130 Myr to 4.566 Gyr.
+    pub fn mamajek_hillenbrand_2008() -> Self {
+        Self {
+            braking_exponent: Fixed::from_ratio(566, 1000),
+        }
+    }
+}
+
+/// The STELLAR ROTATION at a target age (days), DERIVED by aging a reference rotation forward along the
+/// gyrochronological spin-down `P(t) = P_ref * (t / t_ref)^n` rather than drawn on its own axis. A wind-braked star
+/// loses angular momentum as a power law of age, so once its birth rotation and one reference epoch are fixed, the
+/// rotation at any later age is the braking law evaluated between them. This is why `Omega_star` at disk dispersal
+/// is DERIVABLE and not an independent root (LAYER4_ROOT_CENSUS): birth rotation is regulated by disk locking
+/// (correlated with the engine's own `tau_disk`), and after release the spin-down law ages it forward, so a marginal
+/// `Omega` draw would author away both correlations. The young-cluster rotation distributions (Herbst 2001, Rebull
+/// 2018) then validate the JOINT statistics rather than seeding an independent marginal.
+///
+/// The value line: ZERO reserved numbers of its own. The exponent `n` is a cited member of [`SpinDownModel`]
+/// (Skumanich `1/2`, Barnes `0.5189`, Mamajek-Hillenbrand `0.566`), the reference rotation and both epochs are
+/// per-star ARGUMENTS, and the spin-down onset is the caller's validity boundary. Every input is a data row (the
+/// admit-the-alien test): a faster or slower birth rotator, a different braking calibration, is a data row, never a
+/// rewrite. Computed in the log domain (`ln P = ln P_ref + n (ln t - ln t_ref)`) with a fail-loud ceiling, the
+/// sibling discipline of [`centrifugal_radius_au`] and the Shu rate.
+///
+/// TERMS DROPPED, named rather than hidden. First, the VALIDITY WINDOW is enforced, not assumed: the power-law
+/// calibration holds only AFTER the star leaves the disk-locked / C-sequence regime (the ~100 Myr gyrochrone), so
+/// both the reference and the target epoch must sit at or past `spin_down_onset_myr`, or the kernel REFUSES
+/// (`None`) rather than extrapolating the law into the birth window where it is invalid. Second, the COLOR (mass)
+/// dependence is dropped: the full gyrochronology forms carry a `f(B-V)` prefactor (a redder, lower-mass star
+/// brakes on a different track), and this kernel ages a GIVEN period forward color-free, so the mass dependence of
+/// the braking is the named debt that a color-axis follow-on multiplies in. Third, the STALLED-BRAKING and
+/// weak-braking regimes at old age and at the fast/slow extremes (the van Saders class) are omitted, valid across
+/// the main-sequence I-sequence and named at the far-age edge. `None` on a non-positive input, an epoch inside the
+/// birth window, or a result past the representable range.
+///
+// @derives: the stellar rotation period at a target age Omega_star(t) <- the gyrochronological spin-down P_ref*(t/t_ref)^n aged forward from a reference epoch, over the cited braking exponent, valid only after the disk-release onset
+pub fn spin_down_rotation_period_days(
+    reference_period_days: Fixed,
+    reference_age_myr: Fixed,
+    target_age_myr: Fixed,
+    spin_down_onset_myr: Fixed,
+    model: &SpinDownModel,
+) -> Option<Fixed> {
+    if reference_period_days <= Fixed::ZERO
+        || reference_age_myr <= Fixed::ZERO
+        || target_age_myr <= Fixed::ZERO
+        || spin_down_onset_myr <= Fixed::ZERO
+        || model.braking_exponent <= Fixed::ZERO
+    {
+        return None;
+    }
+    // The validity window: the braking law is invalid inside the disk-locked / C-sequence birth window, so both
+    // epochs must sit at or past the onset. Refuse rather than extrapolate the law outside its domain.
+    if reference_age_myr < spin_down_onset_myr || target_age_myr < spin_down_onset_myr {
+        return None;
+    }
+    // ln P(t) = ln P_ref + n * (ln t - ln t_ref), the period lengthening as the star brakes.
+    let ln_ratio = target_age_myr.ln().checked_sub(reference_age_myr.ln())?;
+    let ln_period = reference_period_days
+        .ln()
+        .checked_add(model.braking_exponent.checked_mul(ln_ratio)?)?;
+    let ln_ceiling = Fixed::from_int(31).checked_mul(Fixed::from_int(2).ln())?;
+    if ln_period >= ln_ceiling {
+        return None;
+    }
+    Some(ln_period.exp())
+}
+
 /// The ACTIVITY BAND MAPPING: a high-energy band's luminosity-to-bolometric ratio `L_band / L_bol` from the
 /// Rossby number, one window on the shared rotation state. Two regimes: SATURATED below the critical Rossby
 /// `ro_sat`, at a constant `10^saturated_log10_fraction`; and UNSATURATED above it, declining as
@@ -5512,6 +5620,130 @@ mod tests {
         // A non-physical stellar mass fails soft, never a fabricated radius.
         assert!(centrifugal_radius_au(ln_j, Fixed::ZERO).is_none());
         assert!(centrifugal_radius_au(ln_j, Fixed::from_int(-1)).is_none());
+    }
+
+    #[test]
+    fn the_spin_down_ages_stellar_rotation_along_the_gyrochronology_band() {
+        // The DERIVE-FIRST retirement of Omega_star as an independent draw: the gyrochronological spin-down
+        // P(t) = P_ref*(t/t_ref)^n ages a reference rotation forward, so the rotation at disk dispersal (and at any
+        // later age) is DERIVED off the birth rotation and the braking law, not an independent axis
+        // (LAYER4_ROOT_CENSUS). The exponent is a cited ensemble member, not one authored point.
+        let sku = SpinDownModel::skumanich_1972();
+        assert_eq!(
+            sku.braking_exponent,
+            Fixed::from_ratio(1, 2),
+            "Skumanich n = 1/2 exactly"
+        );
+        assert_eq!(
+            SpinDownModel::barnes_2007().braking_exponent,
+            Fixed::from_ratio(5189, 10_000),
+            "Barnes 2007 age exponent 0.5189"
+        );
+        let mh = SpinDownModel::mamajek_hillenbrand_2008();
+        assert_eq!(
+            mh.braking_exponent,
+            Fixed::from_ratio(566, 1000),
+            "Mamajek-Hillenbrand 0.566"
+        );
+        // MECHANISM, P ~ t^n: from a 5-day rotator at 100 Myr to 400 Myr (a 4x age ratio), Skumanich's n = 1/2
+        // gives a factor (4)^(1/2) = 2, so the period doubles to 10 days.
+        let onset = Fixed::from_int(100); // the ~100 Myr gyrochrone, the disk-locked / C-sequence exit
+        let aged = spin_down_rotation_period_days(
+            Fixed::from_int(5),
+            onset,
+            Fixed::from_int(400),
+            onset,
+            &sku,
+        )
+        .expect("the spin-down resolves at and past the onset");
+        assert!(
+            (aged.to_f64_lossy() - 10.0).abs() < 0.03,
+            "P ~ t^(1/2): a 4x age ratio doubles the 5-day period to ~10 (got {})",
+            aged.to_f64_lossy()
+        );
+        // THE MODEL BAND: a steeper exponent brakes the star more, so at the same age ratio Mamajek-Hillenbrand
+        // (0.566) lengthens the period past Skumanich (0.5). The band is the measured recalibration spread.
+        let aged_mh = spin_down_rotation_period_days(
+            Fixed::from_int(5),
+            onset,
+            Fixed::from_int(400),
+            onset,
+            &mh,
+        )
+        .unwrap();
+        assert!(
+            aged_mh > aged,
+            "a steeper braking exponent spins down more (MH {}, Skumanich {})",
+            aged_mh.to_f64_lossy(),
+            aged.to_f64_lossy()
+        );
+        // THE VALIDITY WINDOW: the braking law is invalid inside the disk-locked birth window, so an epoch below
+        // the onset REFUSES rather than extrapolating. Both the reference and the target are guarded.
+        assert!(
+            spin_down_rotation_period_days(
+                Fixed::from_int(5),
+                Fixed::from_int(50),
+                Fixed::from_int(400),
+                onset,
+                &sku
+            )
+            .is_none(),
+            "a reference epoch inside the birth window is refused, not extrapolated"
+        );
+        assert!(
+            spin_down_rotation_period_days(
+                Fixed::from_int(5),
+                onset,
+                Fixed::from_int(50),
+                onset,
+                &sku
+            )
+            .is_none(),
+            "a target epoch inside the birth window is refused"
+        );
+        // SOLAR HINDCAST, reported never gated (the replacement-circularity discipline): a ~5-day solar-mass
+        // Pleiades rotator (~125 Myr) aged to the solar age (4566 Myr) lands in the tens-of-days slow-rotator range,
+        // the order of the observed solar ~26 days, across the three-model band. REPORTED as a mechanism sanity,
+        // never asserted to the observed value it would otherwise calibrate against.
+        let solar_sku = spin_down_rotation_period_days(
+            Fixed::from_int(5),
+            Fixed::from_int(125),
+            Fixed::from_int(4566),
+            onset,
+            &sku,
+        )
+        .unwrap();
+        let solar_mh = spin_down_rotation_period_days(
+            Fixed::from_int(5),
+            Fixed::from_int(125),
+            Fixed::from_int(4566),
+            onset,
+            &mh,
+        )
+        .unwrap();
+        assert!(
+            solar_sku.to_f64_lossy() > 20.0 && solar_mh.to_f64_lossy() < 45.0,
+            "the solar-age hindcast lands in the slow-rotator tens-of-days band (Skumanich {}, MH {}, observed ~26)",
+            solar_sku.to_f64_lossy(),
+            solar_mh.to_f64_lossy()
+        );
+        // Non-physical inputs fail soft, never a fabricated period.
+        assert!(spin_down_rotation_period_days(
+            Fixed::ZERO,
+            onset,
+            Fixed::from_int(400),
+            onset,
+            &sku
+        )
+        .is_none());
+        assert!(spin_down_rotation_period_days(
+            Fixed::from_int(5),
+            Fixed::ZERO,
+            Fixed::from_int(400),
+            onset,
+            &sku
+        )
+        .is_none());
     }
 
     #[test]
