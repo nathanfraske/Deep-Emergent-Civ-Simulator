@@ -150,6 +150,15 @@ pub enum GiantOutcome {
     /// The embryo ran away into a gas giant. `final_mass_earth` is the FIRST-CUT total mass: the core plus the
     /// disk gas swept from the feeding annulus (capped by that local reservoir; the gap-opening and global caps
     /// are a documented follow-on).
+    ///
+    /// TERMS-DROPPED, and it is load-bearing on the MASS (audit finding): there is NO accretion-termination
+    /// mechanism here. The closure is RESERVOIR EXHAUSTION (the giant grows until the feeding annulus empties), but
+    /// real runaway is ended earlier by gap-opening and throttled supply, so `final_mass_earth` is an UPPER BOUND,
+    /// not a predicted mass. It over-estimates: a dense-disk super-critical embryo returns tens of Jupiter masses
+    /// (brown-dwarf-class), a mass no termination physics has yet trimmed. Retirement points at an
+    /// ACCRETION-TERMINATION slice (the gap-opening / throttled-supply regime), a named debt; until it lands, read
+    /// this mass as a ceiling, and a value crossing the ~13 M_Jup deuterium boundary should eventually dispatch a
+    /// typed giant-planet-versus-brown-dwarf outcome (a second named debt), not be reported as a planet mass.
     Giant { final_mass_earth: Fixed },
 }
 
@@ -748,11 +757,16 @@ pub fn giant_formation_on_derived_clock(
 /// dependence stated: `tau_disk` RISES with the birth accretion rate `Mdot_0` (a higher birth rate is a longer disk
 /// life), and `Mdot_0` rises linearly with the collapse coefficient `m0`, so `tau_disk` rises with the collapse
 /// member; and `tau_disk` FALLS with the wind rate (a stronger wind is a shorter life). Both dependences are
-/// componentwise monotone over the box, so the extrema sit at the corners. THE CORNERS ARE THE ENSEMBLE EXTREMES:
-/// the wind ensemble is three rows (Owen appendix-B central, Owen equation-9, Sellek), and `wind_fit_a`/`wind_fit_b`
-/// must be its RATE EXTREMES (Owen equation-9 the strongest wind and shortest life, Sellek the weakest and longest),
-/// with the Owen appendix-B central row riding as the interior CROSS-CHECK the box-midpoint sentinel evaluates, not a
-/// corner. This is where the central-member ruling's warning bites or does not: if the factor-48 collapse band makes
+/// componentwise monotone over the box, so the extrema sit at the corners. THE CORNERS ARE THE ENSEMBLE EXTREMES,
+/// with their LINEAGE recorded (a role swap is a ruling-visible event, not a refactor): the three wind rates in
+/// order are Owen equation-9 `8e-9`, Owen appendix-B `6.25e-9`, and Sellek `4.32e-9`, so the RATE EXTREMES are Owen
+/// equation-9 (strongest wind, shortest life) and Sellek (weakest, longest), and `wind_fit_a`/`wind_fit_b` must be
+/// those two, with Owen appendix-B (the ruled central instance) riding as the interior CROSS-CHECK the box-midpoint
+/// sentinel evaluates, not a corner. PROVENANCE OF THE HIGH EDGE: equation-9 and appendix-B are two readings of the
+/// same Owen 2012 primary, so the band's high-wind (short-life) edge is an INTRA-SOURCE variant, and its width there
+/// measures Owen's own internal spread (equation-9 versus appendix-B), while the low-wind edge (Sellek) is
+/// CROSS-SOURCE disagreement; legitimate to band over, but a different provenance than the ensemble as ruled, noted
+/// so the ledger reads true. This is where the central-member ruling's warning bites or does not: if the collapse band makes
 /// every embryo near-degenerate, the band is the priority signal for the retirement ladder (surfaced by the reported
 /// hindcast, never selected here).
 ///
@@ -1506,9 +1520,10 @@ mod tests {
             &kh_params(),
         )
         .expect("the compound-band verdict resolves");
-        // THE MEASUREMENT, BAKED AS A FINDING (the ruling's spread report): the giant verdict over the wind band at
-        // EACH collapse corner (Shu and LP), to learn whether the factor-48 collapse band is verdict-stable on this
-        // row or splits it. The point wire evaluates each collapse member's own wind-banded verdict.
+        // THE MEASUREMENT (the ruling's spread report), split into three licenses below: the giant verdict over the
+        // wind band at EACH collapse corner (Shu and LP), to learn whether the factor-48 collapse band is
+        // verdict-stable on this row or splits it. The point wire evaluates each collapse member's own wind-banded
+        // verdict.
         let shu_star = DiskClockState {
             collapse: CollapseModel::shu_1977(),
             ..star
@@ -1531,23 +1546,38 @@ mod tests {
         };
         let shu_corner = corner(&shu_star);
         let lp_corner = corner(&lp_star);
-        // REPORTED FINDING: on this super-critical row the factor-48 collapse band is VERDICT-STABLE, RobustGiant at
-        // both corners with the same giant mass (the mass is set by the feeding-zone gas reservoir, not the collapse
-        // rate, so it is invariant across the band). So the wide collapse band does NOT render this verdict vacuous:
-        // the priority signal says the collapse-model retirement ladder is not urgent for a clearly super-critical
-        // embryo (a near-threshold embryo could still be sensitive, untested here). No collapse member is selected.
+        // THE SPREAD, SPLIT INTO ITS THREE LICENSES (audit ruling). (1) BAND-AGREEMENT, a machinery property with a
+        // tight license, kept BAKED: both collapse corners produce the same verdict CLASS at this fixture. Compared
+        // by discriminant, NOT by the full band, so the giant MASS is deliberately NOT asserted here (baking the mass
+        // would enshrine the missing termination term as a regression target, the worst thing a test can do).
         assert_eq!(
-            shu_corner.band, lp_corner.band,
-            "the collapse band is verdict-stable on this row (Shu corner {:?}, LP corner {:?})",
-            shu_corner.band, lp_corner.band
+            std::mem::discriminant(&shu_corner.band),
+            std::mem::discriminant(&lp_corner.band),
+            "the collapse band is verdict-CLASS-stable on this row (Shu {:?}, LP {:?})",
+            shu_corner.band,
+            lp_corner.band
         );
+        assert_eq!(
+            std::mem::discriminant(&banded.band),
+            std::mem::discriminant(&shu_corner.band),
+            "the compound band agrees in class with the stable corners"
+        );
+        // (2) THE SOLAR-CLASS VERDICT, gated with its CATASTROPHE-WIDTH justification on the page (the oracle-redesign
+        // rule, so this is not a tuned oracle): a clearly super-critical embryo forming NO giant would be a
+        // mechanism-class failure decades wide in the underlying quantities (the KH time would have to exceed the
+        // derived disk life by orders of magnitude), so RobustGiant here is catastrophe-width, not a calibration.
         assert!(
             matches!(shu_corner.band, BandedGiantOutcome::RobustGiant { .. }),
-            "the super-critical embryo is a robust giant at the Shu corner"
+            "a clearly super-critical embryo forms a giant across the whole band (catastrophe-width)"
         );
-        assert_eq!(
-            banded.band, shu_corner.band,
-            "the compound band agrees with the stable corners"
-        );
+        // (3) THE MASS IS REPORTED, NEVER BAKED. The measured giant mass is ~7678 M_earth = ~24.2 M_Jupiter, which is
+        // 1.86x above the ~13 M_Jup deuterium-burning boundary: by mass a BROWN DWARF, not a planet. It is a REPORTED
+        // hindcast miss (7678 against Jupiter's ~318 M_earth), NOT asserted, because the closure is RESERVOIR
+        // EXHAUSTION with NO accretion termination (gap-opening, throttled supply end runaway well before the zone
+        // empties), so the mass is an UPPER BOUND only (the TERMS-DROPPED at the giant-mass site, routed to the
+        // termination slice). CONDITIONING: the mass invariance across the collapse band is a CONSEQUENCE of the
+        // terminationless closure; once termination lands, mass may couple to the supply rate and this spread must be
+        // RE-MEASURED, so the termination slice re-runs this fixture. A near-threshold-embryo row (where the factor-48
+        // bites the verdict hardest) is a named debt, the sensitivity the population hindcast would otherwise owe.
     }
 }

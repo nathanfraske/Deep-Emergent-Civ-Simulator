@@ -703,24 +703,32 @@ pub fn viscous_similarity_surface_density(
 /// source-verbatim, with Whitworth-Summers 1985 as a dual-channel corroboration at `w0 = 46.84`). A caller needing
 /// one number gets the BAND, not a default.
 ///
-/// THE CENTRAL-MEMBER CHOICE IS A CONVENTION with a recorded stability note (Ori and Piran 1988, that Larson-Penston
-/// is the only STABLE self-similar solution, so arguably the most physically relevant, against Shu as the widely-used
-/// quasi-static convention; the debate continues on the failure of either endpoint post-core-formation). RULED
+/// THE CENTRAL-MEMBER CHOICE IS A CONVENTION with a recorded stability note (VENDORED and CORRECTED at the primary,
+/// Ori and Piran 1988, MNRAS 234, 821, receipt `968e318b...`): the paper proves only a NECESSARY condition, so the
+/// carried claim is NOT "Larson-Penston is the only stable solution". Read verbatim: the primary-direction family
+/// (including homogeneous collapse) is UNSTABLE and ruled out, and the secondary-direction family (whose best-known
+/// member is Larson-Penston) SATISFIES the necessary criterion, but the paper states outright it "does not show that
+/// the secondary-direction ... solution is stable". So LP is the surviving candidate, not a proven-unique stable
+/// solution; Shu is the widely-used quasi-static convention; the debate continues on the failure of either endpoint
+/// post-core-formation. RULED
 /// (research agent, owner-signed): the end state is PURE BAND, NO DEFAULT, since a default here sits in the giant
 /// verdict's path with a factor-48 alternative and an open selection debate. STAGED: today the Shu member rides as a
 /// DEFAULTS-TAKEN interim (the convention line in the provenance readout, the stability note an annotation never a
 /// selector); the collapse-band interval propagation through the race is its own slice; then the default dies and
 /// the band ships. Choosing a member because a solar hindcast prefers it would be a licensed-calibration event
-/// (ledger, spent row, owner signature), which nothing here licenses. The factor-48 framing now follows from two
-/// VENDORED endpoints (46.915 / 0.975), but the Ori-Piran 1988 stability note and the Foster-Chevalier peak below
-/// remain CHANNEL-RELAYED pending their own fetches.
+/// (ledger, spent row, owner signature), which nothing here licenses. The factor-48 framing follows from two
+/// VENDORED endpoints (46.915 / 0.975), and the Ori-Piran stability note is now vendored-and-corrected above.
 ///
-/// NAMED DEBT (flagged, not built): the REALISTIC time-dependent infall history is not constant. Foster and
-/// Chevalier 1993 (and Larson 2003) find a PEAKED history, a high early rate dropping later, with a maximum near
-/// `13 c_s^3/G` once opacity is included (channel-relayed). This [`CollapseModel`] carries a single eigenvalue (a
-/// constant-rate member), so the contract is kept wide enough to admit a rate-LAW member later (a `Mdot(t)` row), a
-/// fetch-flagged debt. NAMED OPPORTUNITY (not a debt): the eigenvalue family's own floor is the similarity ODE, so
-/// `m0(A)` is derivable in-engine, at which rung Table 1 demotes to a concordance check. The fetch specs live in
+/// NAMED DEBT (flagged, not built): the REALISTIC time-dependent infall history is not constant, VENDORED and
+/// CORRECTED at the primary (Foster and Chevalier 1993, ApJ 416, 303, receipt `dfd6f006...`): the central mass
+/// accretion rate PEAKS at `~47 c_s^3/G` at `r = 0` immediately after core formation and declines sharply
+/// thereafter (NOT the `~13` the channel relayed, which is nowhere in the paper), and opacity is NOT in the collapse
+/// dynamics (the hydro is isothermal; opacity enters only the line-profile diagnostics). This [`CollapseModel`]
+/// carries a single constant-rate eigenvalue, so the contract is kept wide enough to admit a rate-LAW `Mdot(t)`
+/// member later, a fetch-flagged debt. NAMED OPPORTUNITY (not a debt): the eigenvalue family's own floor is the
+/// similarity ODE, so `m0(A)` is derivable in-engine, at which rung Shu Table 1 (the vendored `m0(A)` row,
+/// `A = 2.00 -> 4.00` giving `m0 = 0.975 -> 5.58`, with LP on Hunter's separate secondary branch far outside that
+/// range) demotes to a concordance check. The fetch specs live in
 /// `docs/working/DISK_ARC_FETCH_VALUES.md`.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct CollapseModel {
@@ -736,8 +744,9 @@ impl CollapseModel {
     /// The Shu (1977) EXPANSION-WAVE inside-out collapse, the SLOW (hydrostatic) endpoint: `m0 = 0.975` at the
     /// instability parameter `A = 2` (Shu 1977, ApJ 214, 488, Table 1 and Table 2, the `x -> 0` core-mass
     /// eigenvalue; vendored primary sha256 `af390700604cd491d36b9dfbf9a5e767611b4f7880ae360a6d2258c224fd29d2`). A
-    /// CONVENTION, not a neutral default: the widely-used quasi-static value carrying the Ori-Piran 1988 stability
-    /// caveat that the Larson-Penston endpoint is the stable one. A consumer needing one number reads the band.
+    /// CONVENTION, not a neutral default: the widely-used quasi-static value carrying the Ori-Piran 1988 caveat that
+    /// the Larson-Penston branch is the stability-SURVIVING candidate, not a proven-unique stable solution (the
+    /// corrected reading on [`CollapseModel`]). A consumer needing one number reads the band.
     pub fn shu_1977() -> Self {
         CollapseModel {
             collapse_coefficient_m0: Fixed::from_ratio(975, 1000), // Shu 1977 Table 1/2 (x -> 0, A = 2)
@@ -753,7 +762,9 @@ impl CollapseModel {
     /// p.837 (`"values of P(0) ... being 8.854, ..."`) for the abscissa, which is Hunter's central-density
     /// coefficient `P(0)` (so `A = 2` for Shu and `A = 8.854` for LP both land on it). Hunter's convention (eqs. 1
     /// and 14, `M = a^3 t m(zeta)/G` with `m -> m0`) gives `Mdot = m0 c_s^3/G`, matching ours. Vendored primary
-    /// sha256 `9e187e6d69cccf733734b75c7b974f287532163692514084eb511828d6a70e0f`. DUAL-CHANNEL, and the cross-source
+    /// sha256 `9e187e6d69cccf733734b75c7b974f287532163692514084eb511828d6a70e0f`. DUAL-CHANNEL CONFIRMED on Hunter's
+    /// own pages (the scanned-typography OCR-flip guard): an independent re-read of the rendered page crops agrees
+    /// with the OCR text layer exactly, `46.915` and `8.854`, no digit flip, same hash. Separately, the cross-source
     /// spread is a CLASSIFIED ROW, not absorbed by the word corroboration: Whitworth and Summers 1985 (MNRAS 214, 1,
     /// receipt `ba57e11c...`) print the same member as `w0 = 46.84` under their `(z0, w0)` parametrization
     /// (`z0 = 1.672`, no `P(0)` given, so our `A = 8.854` rests on Hunter alone). The two carry BOTH facts: they
