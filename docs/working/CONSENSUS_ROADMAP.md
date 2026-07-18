@@ -8,10 +8,7 @@ The retired long-form board is `docs/working/CONSENSUS_ROADMAP_HISTORY.md`, pres
 
 ## Active arcs
 
-- 2026-07-18  Mountains / mid-band (increment 3) -> branch `claude/topology-increment3`. Next: block-3 re-derivations, sub-step D, Seams C/D. Detail in HANDOFFS.
-- 2026-07-18  Remote agent #201 (disk-evolution wire) lands large and often -> rebase-onto-main integration, keep viewer/physics lanes disjoint.
-- 2026-07-18  Arc AFTER the crust (perpetual dynamics, atmosphere keystone, hydrosphere) -> plan in `PHYSICS_SUBSTRATE_ROADMAP.md`.
-
+- 2026-07-18 disk slice 2 wire + layer-4 kernels R_1/Omega_star_0, dormant -> claude/disk-slice2-wire, PR #201
 - 2026-07-18 mantle effective-convective-viscosity slice -> claude/seam4-deeptime, crates/physics/src/convective_viscosity.rs
 - 2026-07-18 Hayashi-wall grid, the split with Agent C (#198) -> claude/seam4-deeptime, crates/physics/data/hayashi_wall.toml
 - 2026-07-17 consolidated surface pipeline, stages 0-5 -> claude/seam4-deeptime, docs/working/CONSOLIDATED_SURFACE_PIPELINE.md
@@ -64,53 +61,6 @@ The retired long-form board is `docs/working/CONSENSUS_ROADMAP_HISTORY.md`, pres
 - 2026-07-08 Crucible RUNS as substrate, its design needs patchy-basin terrain and the war mechanism
 
 ## Recent landings (tombstoned; prune when old)
-
-- 2026-07-19  DONE  Phase-conductivity column fetched (8 phases, cell counts as reconstructions + kappa_298 x5) -> `crates/physics/data/phase_conductivity.toml`.
-- 2026-07-19  DONE  Crate layering un-inverted: `calibration`+`decision` bio -> foundation; foundation drops its bio lib dep -> `crates/foundation`.
-- 2026-07-19  DONE  Language cycle cut: `PlaceId` lifted to a leaf, 7-module cluster -> 3 -> `crates/foundation/src/located.rs`.
-- 2026-07-19  DONE  World ejecta docs: 7 stale claims, one pointing at a route ruled out in PR #177 -> `crates/world`.
-- 2026-07-19  FLAG  Last cycle (`environ`/`genesis`/`runner`) is NOT a small lift: `Field::step` calls `derive_field_diffusion` inside `runner.rs`.
-- 2026-07-18  HELD  Fixture-cluster re-pin BLOCKED on one absent cited column (`atoms_per_primitive_cell`, no data file carries it); rho/c_p/alpha measured and deriving, k/kappa/eta gated; thermostat diamond collapsed byte-neutral, both pins unmoved -> `GEOTHERM_ARC_SCOPE.md`.
-- 2026-07-18  DONE  Rock conductivity aggregate: Bruggeman EMT (fetched numerical benchmark rejects the geometric mean), pins held -> `crates/materials/src/conductivity.rs`.
-- 2026-07-18  DONE  Build speedups: build-script opt-level 3 (Stone 0 gate 4.4s -> 1.4s) + dev line-tables-only (9.9G -> 4.5G); pins held -> `Cargo.toml`.
-- 2026-07-18  DONE  Pipeline-status guard hardcoded (a habit is not a defense) -> `.claude/hooks/pipeline-status-guard.sh`.
-- 2026-07-18  DONE  Stone 0 pre-push hook INSTALLED; derives gate widened past `pub` (818 -> 1099 fns).
-- 2026-07-18  DONE  Provenance ratchet now fires at TURN scope (package-scoped cargo skipped it) -> `.claude/hooks/stop-gate.sh`.
-- 2026-07-18  DONE  Two load-bearing stale claims retired (render.rs T_e, stone0 wiring) -> `render.rs`, `crates/stone0/src/lib.rs`.
-- 2026-07-18  DONE  Derives-coverage gate + 8 physics/materials markers (map 11 -> 19 substrates; CI + stop-gate wired) -> `scripts/derives_gate.py`.
-- 2026-07-18  DONE  Gruneisen loader + census aggregator (rock gamma DERIVED, uncited phase refused) -> `crates/physics/src/gruneisen.rs`.
-- 2026-07-18  DONE  CI doc gate unbroken: two links cited a nonexistent `derive_deep_time_cap` -> `crates/viewer/src/main.rs`.
-- 2026-07-18  DONE  Biology parked out of `civsim-sim` (10 modules, 9,388 lines, both pins bit-exact) -> `crates/bio`.
-- 2026-07-18  DONE  Leaf substrates split out of `civsim-sim` (20 out-degree-zero modules, 12,677 lines, both pins bit-exact) -> `crates/foundation`.
-- 2026-07-18  DONE  `learn`/`locomotion` cycle broken by lifting 2 shared types; 3 SCCs -> 2 -> `crates/foundation/src/sequence.rs`.
-- 2026-07-18  FLAG  `calibration` sits in `civsim-bio` but 23 sim modules read it; wants its own shared crate -> `crates/bio/src/lib.rs`.
-- 2026-07-18  DONE  TAFI verdict: source correct, our transcription wrong; primary vendored + archived -> `VENDORING_CHECKLIST.md` (`flexure_tafi`).
-- 2026-07-18  DONE  Retired boundary-layer formula purged from 9 restatement sites (the diamond) -> `laws.rs`, `moment_equivalence.rs`, `geodynamics.rs`.
-- 2026-07-18  DONE  Stale-claim sweep, 32 verified findings (flexure Green's-function doc corrected to the cited form) -> `flexure.rs`.
-- 2026-07-18  DONE  Physics realization digest (first determinism instrumentation on the physics path) -> `deeptime.rs::realization_digest`.
-- 2026-07-18  DONE  Dawn harness parked, quarantine build-enforced (`worldbuild.rs` -> `dawn_harness.rs`) -> `crates/sim/tests/dawn_harness_quarantine.rs`.
-- 2026-07-18  DONE  Lean board landed on main (archive byte-identical, 16KB cap) -> PR #202, `9ae14a4b`.
-- 2026-07-18  DONE  GPU globe shading on the 5090 (CubeCL f32 kernel, non-canon, feature `gpu`) -> `crates/gpu/src/globe.rs`.
-- 2026-07-18  DONE  Viewer cadence watchable (opens young, derived 1 tick/frame, held impact bloom, pole-smooth glow) -> `d8add16`.
-- 2026-07-18  DONE  Cargo artifact ring buffer (LRU under size+count caps, auto at SessionStart) -> `scripts/target_gc.sh`.
-- 2026-07-18  DONE  WSL copyback recovery (branch ref repaired to `b2ebbb4`, cargo PATH restored to `.bashrc`, 180G reclaimed).
-- 2026-07-18  DONE  Conditioned Ra_crit row (reads the registry, rigid-rigid DEFAULTS-TAKEN, dispatch stubbed) -> `crates/physics/src/rayleigh_critical.rs`.
-- 2026-07-18  DONE  Critical-Rayleigh eigenvalue registry (boundary_class x heating_mode) -> `30fdd86`.
-- 2026-07-18  DONE  Rigid-rigid eigenvalue diamond fixed (1708 -> 1707.762, one cited row + two sentinels) -> `9036c5e`.
-- 2026-07-18  DONE  Block-2 receipt: all-brittle-thin-lid unreachable, measured -> `e0941f9`.
-- 2026-07-18  DONE  T_e hindcast retired from the floor (duplicated the wired referee) -> `9bab42a`.
-- 2026-07-18  DONE  Sub-step B: physical boundary layer `d(Ra_crit/Ra)^(1/3)` -> `0e8e4f6`.
-- 2026-07-18  DONE  Grueneisen ladder -> `ee89ce1`; Earth/Mars/Venus T_e referee -> `1ea64e5`; watchable-impacts flash -> `5f93509`.
-- 2026-07-18  DONE  Physics-substrate audit (3-lane map, dormant inventory) -> `PHYSICS_SUBSTRATE_ROADMAP.md`.
-- 2026-07-18  DONE  Vendoring pipeline consolidated + gated (29-source registry, licence overlay, `@sources` hop) -> `FETCH_PIPELINE_PLAN.md`, `scripts/sources_gate.py`.
-- 2026-07-18  DONE  Owner licence ruling applied: 6 restricted PDFs -> citation-plus-witness (witnesses byte-identical); JANAF blocked by `include_str!` -> plan D6.
-- Secular cooling: `geodynamics::secular_step` built; `step_deep_time` calls the static `convection_step` instead, so the interior freezes and volcanism dies.
-- Star brightening: `deeptime::stellar_luminosity_ratio` built; the viewer ages the clock but never reads it.
-- Relief collapse: `relax_to_support_bound` built; the viewer uses a hardcoded yield-strength flag.
-- Multi-body system generator: `assemble_system_with_giants` fully dark; the viewer samples independent single worlds.
-- Atmosphere radiative-balance / greenhouse closure (`wien_peak`, `interface_split` have no consumer; nothing derives surface temperature from the air). Highest leverage; gates Venus, climate, hydrology.
-- Hydrosphere + weather + erosion (R-HYDROSPHERE-WEATHER; needs a Chaos-Protocol climate ruling).
-- Interior recycling (crust is monotonic; no subduction, no overturn).
 
 - 2026-07-18 LANDED disk-gas mean molecular weight derives per world -> crates/sim/src/astro.rs
 - 2026-07-16 DONE pipeline literature-fetch values gathered -> docs/working/PIPELINE_FETCHES.md
