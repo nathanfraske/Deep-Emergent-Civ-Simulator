@@ -30,7 +30,7 @@
 //! # THE STRAIN RATE IS THE BOUNDARY-LAYER DIFFUSIVE RATE
 //!
 //! Convective turnover is DIFFUSION-LIMITED: the cold boundary layer must thicken by conduction until it founders,
-//! so the interior deforms at `eps_dot = kappa / delta^2`, where `delta = d * Ra^(-1/3)` is the marginally-critical
+//! so the interior deforms at `eps_dot = kappa / delta^2`, where `delta = d * (Ra_crit / Ra)^(1/3)` is the marginally-critical
 //! thermal boundary layer the engine already derives ([`crate::laws::thermal_boundary_layer`], the SAME `delta`
 //! the lid geotherm and the driving stress span). This is the infinite-Prandtl boundary-layer scaling, and its
 //! `Ra` exponent falls out of SQUARING a landed law, so it authors no new reservation.

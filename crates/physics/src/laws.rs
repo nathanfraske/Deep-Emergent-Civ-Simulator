@@ -3631,13 +3631,20 @@ pub fn heat_advection(
 }
 
 /// The THERMAL BOUNDARY LAYER thickness, the conductive lid riding on a convecting interior:
-/// `L = d * Ra^(-1/3)`, written as `d / Ra^(1/3)`.
+/// `delta = d * (Ra_crit / Ra)^(1/3)`, the boundary-layer scaling NORMALIZED AT THE ONSET of convection.
 ///
 /// This is the classical boundary-layer scaling: convection carries heat through the interior efficiently, so
 /// the temperature drop concentrates into a thin conductive skin at the top, and the skin THINS as the flow
-/// grows more vigorous. A mantle at `Ra ~ 1e6` shears over a layer about a hundredth of its depth. The `-1/3`
-/// is the scaling's own exponent (it falls out of the boundary layer sitting at its own marginal stability),
-/// never an authored knob, and the cube root is the deterministic fixed-point [`Fixed::powf`].
+/// grows more vigorous. The `-1/3` is the scaling's own exponent (it falls out of the boundary layer sitting at
+/// its own marginal stability), never an authored knob, and the cube root is the deterministic fixed-point
+/// [`Fixed::powf`].
+///
+/// THE NORMALIZATION IS THE POINT, and it is why this takes `rayleigh_critical` as its third argument. At the
+/// onset (`Ra = Ra_crit`) the layer recovers its FULL depth, which is the physics: with convection just barely
+/// beginning there is no conductive-convective boundary and the whole layer conducts. The unnormalized
+/// `d * Ra^(-1/3)` has no such anchor and puts the lid a factor of `Ra_crit^(1/3)`, roughly ten, too thin. So a
+/// mantle at `Ra ~ 1e6` against a planetary `Ra_crit` of 1707.762 shears over about a TENTH of its depth
+/// (`(1707.762 / 1e6)^(1/3) = 0.1195`), never the hundredth the unnormalized form gives.
 ///
 /// TWO CONSUMERS SHARE THIS, which is why it is a named law rather than an inline expression: the convective
 /// driving stress reads it as the length over which the interior flow shears against the lid

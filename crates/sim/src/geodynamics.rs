@@ -226,8 +226,9 @@ pub fn column_readout(state: &ColumnState, p: &ColumnParams) -> ColumnReadout {
     );
     let velocity = laws::stokes_velocity(delta_rho, p.gravity, p.radius, p.viscosity, p.v_max);
     // The shear length is the thermal BOUNDARY LAYER thickness, DERIVED (gate ruling, #176): the boundary layer
-    // thins with convective vigor as `depth * Ra^(-1/3)`, so a vigorous mantle (Ra of order 1e6) shears over a
-    // layer about a hundredth of its depth, concentrating the driving stress. The derivation MOVED to
+    // thins with convective vigor as `depth * (Ra_crit / Ra)^(1/3)`, so a vigorous mantle (Ra of order 1e6,
+    // against a planetary Ra_crit of 1707.762) shears over a layer about a TENTH of its depth, concentrating
+    // the driving stress. The derivation MOVED to
     // `laws::thermal_boundary_layer` when the LID GEOTHERM became its second consumer: the driving stress and
     // the geotherm must agree about how thick the lid is, so they read ONE law rather than two copies of the
     // same expression. Byte-identical across the move (the same operations in the same order).
@@ -912,7 +913,7 @@ mod tests {
 
     #[test]
     fn the_boundary_layer_thins_with_vigor_so_a_hotter_column_drives_more_stress() {
-        // The derived boundary layer L = depth * Ra^(-1/3): a more vigorous column has a thinner boundary layer
+        // The derived boundary layer L = depth * (Ra_crit / Ra)^(1/3): a more vigorous column has a thinner layer
         // and a higher driving stress, the derive-clean thinning (not the depth reference-pass).
         let (_, params) = column(Fixed::from_int(1));
         let warm = column_readout(

@@ -12,6 +12,8 @@ Editing rule (the stop-gate enforces it): edit IN PLACE, keep every line a few w
 
 ## Recent landings (tombstoned; prune when old)
 
+- 2026-07-18  DONE  TAFI verdict: source correct, our transcription wrong; primary vendored + archived -> `VENDORING_CHECKLIST.md` (`flexure_tafi`).
+- 2026-07-18  DONE  Retired boundary-layer formula purged from 9 restatement sites (the diamond) -> `laws.rs`, `moment_equivalence.rs`, `geodynamics.rs`.
 - 2026-07-18  DONE  Stale-claim sweep, 32 verified findings (flexure Green's-function doc corrected to the cited form) -> `flexure.rs`.
 - 2026-07-18  DONE  Physics realization digest (first determinism instrumentation on the physics path) -> `deeptime.rs::realization_digest`.
 - 2026-07-18  DONE  Dawn harness parked, quarantine build-enforced (`worldbuild.rs` -> `dawn_harness.rs`) -> `crates/sim/tests/dawn_harness_quarantine.rs`.

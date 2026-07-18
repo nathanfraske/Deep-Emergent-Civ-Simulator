@@ -1900,7 +1900,7 @@ fn combine_band_edges(
 ///
 /// # AND IT IS NOT ASSERTED, IT IS REFEREED
 ///
-/// `delta` here is derived from the THERMAL structure alone (`d / Ra^(1/3)`: buoyancy, viscosity, diffusivity,
+/// `delta` here is derived from the THERMAL structure alone (`d * (Ra_crit / Ra)^(1/3)`: buoyancy, viscosity, diffusivity,
 /// depth). Nothing in that derivation knows what creep is. So the choice is CHECKED against the stress scale
 /// that defines the same boundary mechanically, by [`referee_conductive_lid_base`]: at `delta` the ductile
 /// strength AT THE LOAD'S OWN RATE must have fallen to the convective driving stress
@@ -1916,7 +1916,7 @@ pub struct ConductiveLidBase {
 }
 
 impl ConductiveLidBase {
-    /// DERIVE the lid base from the world's own convecting layer: `delta = d / Ra^(1/3)`, through
+    /// DERIVE the lid base from the world's own convecting layer: `delta = d * (Ra_crit / Ra)^(1/3)`, through
     /// [`crate::laws::thermal_boundary_layer`], which is the SAME derivation the convective driving stress
     /// shears over and the lid geotherm spans, so the three cannot disagree about how thick the lid is.
     ///
@@ -1945,7 +1945,7 @@ impl ConductiveLidBase {
     }
 
     /// DERIVE the lid base from the world's own convecting layer in the LOG-DOMAIN Rayleigh number:
-    /// `delta = d * exp(-ln Ra / 3)`, the same `delta = d Ra^(-1/3)` as [`Self::from_rayleigh`] but computed from
+    /// `delta = d * exp((ln Ra_crit - ln Ra) / 3)`, the same `delta = d (Ra_crit / Ra)^(1/3)` as [`Self::from_rayleigh`] but computed from
     /// `ln Ra` so the SI-magnitude `Ra` (whose linear intermediates overflow Q32.32) never materializes. This is
     /// the constructor the anchored mid-band path uses: the convective viscosity is `~1e21 Pa*s`, so its Rayleigh
     /// number is carried as `ln Ra` ([`crate::laws::ln_rayleigh_number`]) and the lid base falls out of it
@@ -2358,7 +2358,7 @@ pub enum LidVerdict {
 ///
 /// # WHY THIS IS EVIDENCE AND NOT A RESTATEMENT
 ///
-/// [`ConductiveLidBase`] derives `delta` from the THERMAL structure alone (`d / Ra^(1/3)`: buoyancy, viscosity,
+/// [`ConductiveLidBase`] derives `delta` from the THERMAL structure alone (`d * (Ra_crit / Ra)^(1/3)`: buoyancy, viscosity,
 /// diffusivity, layer depth). Nothing in that expression knows what creep is, what `E*` is, or what rate the
 /// load imposes. This check asks the MECHANICAL question at that depth, through the creep rows, and it is the
 /// same competition that lid mobilization already emerges from: [`crate::laws::convective_stress`]'s own doc
@@ -3750,7 +3750,7 @@ mod tests {
     #[ignore = "sub-step B rebaseline: an all-brittle THIN lid is a pre-Ra_crit artifact. With delta = d(Ra_crit/Ra)^(1/3) a thin lid means a high Ra (a hot, vigorous mantle) whose lid base creeps, so thin-and-brittle is no longer physical via the linear form. Rework to a cold shallow all-brittle scenario (small cold body / thick cold lid). See HANDOFFS."]
     fn the_lid_referee_checks_the_derived_base_against_the_convective_stress_scale() {
         // THE CROSS-CHECK, and why it is evidence rather than a restatement. `ConductiveLidBase` derives delta
-        // from the THERMAL structure alone (`d / Ra^(1/3)`: buoyancy, viscosity, diffusivity, depth) and nothing
+        // from the THERMAL structure alone (`d * (Ra_crit / Ra)^(1/3)`: buoyancy, viscosity, diffusivity, depth) and nothing
         // in that expression knows what creep is. This asks the MECHANICAL question at that depth, through the
         // creep rows at the LOAD's own rate, against the stress scale lid mobilization already emerges from.
         //
