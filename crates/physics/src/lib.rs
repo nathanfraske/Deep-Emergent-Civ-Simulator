@@ -80,6 +80,7 @@ pub mod phonon;
 pub mod polarizability;
 pub mod qeq;
 pub mod quantities;
+pub mod rayleigh_critical;
 pub mod rose_eos;
 pub mod saha;
 pub mod scaled;
