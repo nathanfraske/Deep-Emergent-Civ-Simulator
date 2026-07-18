@@ -1984,7 +1984,7 @@ provenance = "closure"
 
 [[reserved]]
 id = "physiology.thermal_setpoint"
-basis = "the race's homeostatic core-temperature set point (Part 20 physiology), per race; recommended about 310 K (mammalian) for a temperate race; reserved. PER-RACE RELOCATION OWED (Arc-4): it doubles as a per-world dial (category per_world), but is read as a GLOBAL scalar applied to every race with no RaceId branch (worldbuild.rs:553), structurally like the relocated gossip.trust_baseline; the per-race thermal relocation is deferred to Arc-4"
+basis = "the race's homeostatic core-temperature set point (Part 20 physiology), per race; recommended about 310 K (mammalian) for a temperate race; reserved. PER-RACE RELOCATION OWED (Arc-4): it doubles as a per-world dial (category per_world), but is read as a GLOBAL scalar applied to every race with no RaceId branch (crates/sim/src/dawn_harness.rs assemble_dawn_embodiment), structurally like the relocated gossip.trust_baseline; the per-race thermal relocation is deferred to Arc-4"
 status = "set"
 value = "310"
 set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
@@ -2016,7 +2016,7 @@ provenance = "closure"
 
 [[reserved]]
 id = "physiology.thermal_half_band"
-basis = "the survivable half-range around the set point (Part 20 death conditions), per race; a body outside setpoint plus or minus half_band dies; a temperate-mammal thermoneutral half-width. OWNER RESOLUTION (Mirror sign-off): the fixed 8 K band does NOT prevent heat/cold attunement over generations, because attunement emerges through EVOLVABLE BODY MORPHOLOGY (covering, mass, surface area, genome-derived, driving the thermal coupling per the physics floor: Bergmann and Allen), not by changing the band; a drift-able genome SETPOINT (for ectothermy/torpor) is flagged as a later substrate option. So 8 K is authored as a per-race disposition, with attunement derived from the already-modelled morphology. PER-RACE RELOCATION OWED (Arc-4): it doubles as a per-world dial (category per_world), but is read as a GLOBAL scalar with no RaceId branch (worldbuild.rs:554), structurally like the relocated gossip.trust_baseline; the per-race thermal relocation is deferred to Arc-4"
+basis = "the survivable half-range around the set point (Part 20 death conditions), per race; a body outside setpoint plus or minus half_band dies; a temperate-mammal thermoneutral half-width. OWNER RESOLUTION (Mirror sign-off): the fixed 8 K band does NOT prevent heat/cold attunement over generations, because attunement emerges through EVOLVABLE BODY MORPHOLOGY (covering, mass, surface area, genome-derived, driving the thermal coupling per the physics floor: Bergmann and Allen), not by changing the band; a drift-able genome SETPOINT (for ectothermy/torpor) is flagged as a later substrate option. So 8 K is authored as a per-race disposition, with attunement derived from the already-modelled morphology. PER-RACE RELOCATION OWED (Arc-4): it doubles as a per-world dial (category per_world), but is read as a GLOBAL scalar with no RaceId branch (crates/sim/src/dawn_harness.rs assemble_dawn_embodiment), structurally like the relocated gossip.trust_baseline; the per-race thermal relocation is deferred to Arc-4"
 status = "set"
 value = "8"
 set_by = "Owner Mirror sign-off 2026-07-09 (docs/working/MIRROR_SIGNOFF_DECISIONS.md)"
