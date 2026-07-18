@@ -2184,7 +2184,7 @@ fn main() {
                 ..GenesisParams::dev_default()
             },
             // The world's abiotic sources: the Earth-triad dev fixture (Arc 5 T1). An alien world declares
-            // its own; the run arms this same registry via worldbuild, so generation and run agree by data.
+            // its own; the run arms this same registry via the dawn harness, so generation and run agree by data.
             &civsim_sim::environ::AbioticSourceRegistry::earth_dev(),
             None,
         );
@@ -2235,7 +2235,7 @@ fn main() {
     );
 
     // Build the unified runner. build_dawn_runner already arms reproduction and post-dawn generational
-    // drift (worldbuild.rs: set_reproduction + arm_generational_drift), and the life cadence resets the
+    // drift (dawn_harness.rs: set_reproduction + arm_generational_drift), and the life cadence resets the
     // census window each generation, so nothing further is armed here.
     let mut runner = build_dawn_runner(
         &manifest,
@@ -2381,7 +2381,7 @@ fn main() {
             runner.set_matter_cycle(MatterCycleCalib::dev_fixture());
             runner.set_decomposer(DecomposerDriverRegistry::dev_fixture());
             runner.set_corpse_matter(true);
-            // The abiotic-source binding registry (the extract-deplete cycle) is now armed by worldbuild from
+            // The abiotic-source binding registry (the extract-deplete cycle) is now armed by dawn_harness from
             // the SAME registry the biosphere was generated against (Arc 5 T1, `LivingWorld::abiotic`), so the
             // ids the producers evolved to draw on and the run's bindings agree by data, not by a hand-written
             // literal kept in sync by comment. Nothing to arm here.

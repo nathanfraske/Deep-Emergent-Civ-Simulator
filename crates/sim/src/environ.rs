@@ -1737,7 +1737,7 @@ impl EnvironFields {
     /// SAME `bio.energy_density` reserve bridge (keyed on no axis identity, so a mana-fed or silicon being is a
     /// data row). No fresh UNITS anchor is minted: the existing reserve bridge converts the magnitude, so energy is
     /// conserved across the eat step. This is the food-value MECHANISM (the units question), distinct from the
-    /// biosphere-BALANCE calibration the `worldbuild.rs` T3 owner-gate still holds (whether the grazers THRIVE on
+    /// biosphere-BALANCE calibration the `dawn_harness.rs` T3 owner-gate still holds (whether the grazers THRIVE on
     /// these real food values, which the balance work tunes; this foundation makes the value real, it does not
     /// claim the world thrives). The environmental axes regrow writes itself (water, salinity) are EXCLUDED,
     /// so the food never fights the hydrology write. A composition with no positive food axis seeds nothing (the

@@ -76,6 +76,7 @@ pub mod contact_wound;
 pub mod controller;
 pub mod conviction_experience;
 pub mod conviction_percept;
+pub mod dawn_harness;
 pub mod decision;
 pub mod decompose;
 pub mod deeptime;
@@ -146,7 +147,6 @@ pub mod typology;
 pub mod unified_provenance;
 pub mod value;
 pub mod world;
-pub mod worldbuild;
 
 pub use absence::{
     absence_window, characteristic_lifespan, AbsenceScheduleDef, AbsenceScheduleId, AbsenceStage,
@@ -229,6 +229,9 @@ pub use civsim_compose::{
     derive_capabilities, CapabilityCaps, CapabilityKernel, CapabilityRefs, CapabilityVector,
     FunctionLawDef, FunctionLawId, FunctionLawRegistry,
 };
+pub use dawn_harness::{
+    arm_dawn_languages, build_dawn_runner, DawnPeoples, EmbodimentGenesis, LanguageGenesis,
+};
 pub use institution::{
     crystallization_order, crystallize, emit_undertaking, institution_distance, norm_fires,
     recognize, signature_distance, weighted_tanimoto, AggregateInstitution, Atom, AttributeSel,
@@ -294,7 +297,4 @@ pub use value::{
 pub use world::{
     build_etic_substrate, GossipParams, PlaceId, ReproductionParams, Stimulus, TickInput, Trace,
     World,
-};
-pub use worldbuild::{
-    arm_dawn_languages, build_dawn_runner, DawnPeoples, EmbodimentGenesis, LanguageGenesis,
 };

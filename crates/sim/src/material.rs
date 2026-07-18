@@ -513,7 +513,7 @@ pub struct MatterCycleCalib {
     /// soil requirement (`productivity.soil_requirement`), so a carcass fully fertilises the ground it fell
     /// on; a soil-ecology coupling relating deposited nutrient mass to plant-available supply. Larger makes
     /// a given carcass fertilise more strongly. Only read where the matter cycle is armed, so it stays off
-    /// the calibrated worldbuild path until a later slice wires the matter cycle onto it.
+    /// the calibrated dawn-harness path until a later slice wires the matter cycle onto it.
     pub fertility_scale: Fixed,
 }
 

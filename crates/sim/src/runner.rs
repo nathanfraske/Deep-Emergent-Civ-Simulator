@@ -3705,20 +3705,20 @@ pub struct Runner {
     /// The reserved calibrations of the combustion beat (material-substrate arc, cascade item 6, live fire),
     /// armed opt-in. `None` on a runner without it, so no combustion runs and every existing scenario is
     /// byte-identical; armed via [`Runner::set_combustion`], the beat then sources the embodiment's fire
-    /// field from the combustible matter hot enough to burn. Off the calibrated worldbuild path until a later
+    /// field from the combustible matter hot enough to burn. Off the calibrated dawn-harness path until a later
     /// slice wires it, exactly like the extraction and craft params.
     combustion: Option<CombustionCalib>,
     /// The reserved calibration of shelter (material-substrate arc, cascade item 7), armed opt-in. `None` on
     /// a runner without it, so no thermal-exchange attenuation runs and every existing scenario is
     /// byte-identical; armed via [`Runner::set_shelter`], the body-exchange phase then attenuates each
     /// being's coupling to the field by the insulating matter enclosing its cell. Off the calibrated
-    /// worldbuild path until a later slice wires it, exactly like the combustion calib.
+    /// dawn-harness path until a later slice wires it, exactly like the combustion calib.
     shelter: Option<ShelterCalib>,
     /// The reserved calibration of the matter cycle (material-substrate arc, cascade item 8), armed opt-in.
     /// `None` on a runner without it, so no decomposition runs and every existing scenario is byte-identical;
     /// armed via [`Runner::set_matter_cycle`], the field step then decomposes a cell's organic matter over
     /// time and conserves the lost mass in the embodiment's decomposed-mass sink. Off the calibrated
-    /// worldbuild path until a later slice wires it, exactly like the combustion and shelter calibs.
+    /// dawn-harness path until a later slice wires it, exactly like the combustion and shelter calibs.
     matter_cycle: Option<MatterCycleCalib>,
     /// The ABIOTIC mineral-weathering base rate (the matter-cycle completion, #156): when armed, rock weathers
     /// map-wide into soil nutrient at this reserved base rate scaled by each cell's own wetness
@@ -3733,7 +3733,7 @@ pub struct Runner {
     /// Armed via [`Runner::set_decomposer`], the matter cycle and the organic-trace salience then multiply
     /// their rate by the per-cell decomposition ACTIVITY this registry derives from the cell's decomposer
     /// life and conditions, so a sterile, dry, or airless cell preserves its matter. Off the calibrated
-    /// worldbuild path until the biosphere slice fills the stock field, exactly like the matter-cycle calib.
+    /// dawn-harness path until the biosphere slice fills the stock field, exactly like the matter-cycle calib.
     decomposer: Option<DecomposerDriverRegistry>,
     /// The per-cell standing decomposer-biomass field the Life kernel reads, armed opt-in beside the
     /// decomposer registry. `None` (or empty) on a runner without it, so the Life kernel reads zero biomass
@@ -3750,7 +3750,7 @@ pub struct Runner {
     /// every existing scenario is byte-identical; armed via [`Runner::set_constituents`], a world declares its
     /// own constituents and the split re-materialises matter by its own chemistry. A param, not state: folds
     /// nothing into `state_hash` (its effect enters through the soil classes it deposits, which the soil field
-    /// folds). Off the calibrated worldbuild path until the biosphere slice wires it, like the matter-cycle calib.
+    /// folds). Off the calibrated dawn-harness path until the biosphere slice wires it, like the matter-cycle calib.
     constituents: Option<ConstituentRegistry>,
     /// Whether a death leaves the being's body as located matter (biosphere directive 2, organisms as usable
     /// material stuff). `false` by default, so a death retires the body and nothing is deposited and every
@@ -3774,7 +3774,7 @@ pub struct Runner {
     obs_deaths: Vec<HomeostaticAxisId>,
     /// The reserved calibrations of the base-level liveliness surfacing policy (the hazard-belief and
     /// arc-promotion magnitudes). Initialized to the labelled dev fixture in every constructor so the
-    /// test and harness paths are unchanged; [`build_dawn_runner`](crate::worldbuild::build_dawn_runner)
+    /// test and harness paths are unchanged; [`build_dawn_runner`](crate::dawn_harness::build_dawn_runner)
     /// overrides it fail-loud from the manifest through [`Runner::set_liveliness`].
     liveliness: LivelinessCalib,
     /// The reserved calibrations of the experiential associative learner (harm-learning arc slice b):
@@ -4095,7 +4095,7 @@ impl Runner {
     /// combustible matter a cell holds that stands at or above its ignition temperature burns, consuming a
     /// bounded fraction of its fuel and lighting the embodiment's fire field. Opt-in: a runner left unarmed
     /// runs no combustion, so every existing scenario is byte-identical. Reserved calibrations
-    /// ([`CombustionCalib`]); off the calibrated worldbuild path until a later slice wires it.
+    /// ([`CombustionCalib`]); off the calibrated dawn-harness path until a later slice wires it.
     pub fn set_combustion(&mut self, calib: CombustionCalib) {
         self.combustion = Some(calib);
     }
@@ -4124,7 +4124,7 @@ impl Runner {
     /// being's thermal coupling to the ambient field by the insulating matter enclosing its cell (the matter
     /// in the air cells above it), so a being under a roof of insulating matter is buffered from a harsh
     /// field. Opt-in: a runner left unarmed attenuates nothing, so every existing scenario is byte-identical.
-    /// Reserved calibration ([`ShelterCalib`]); off the calibrated worldbuild path until a later slice wires it.
+    /// Reserved calibration ([`ShelterCalib`]); off the calibrated dawn-harness path until a later slice wires it.
     pub fn set_shelter(&mut self, calib: ShelterCalib) {
         self.shelter = Some(calib);
     }
@@ -4133,7 +4133,7 @@ impl Runner {
     /// (a substance carrying a biological composition) at or above the decomposition barrier breaks down at
     /// the reserved rate, its lost mass exactly conserved in the embodiment's decomposed-mass sink (matter
     /// dispersed to the environment). Opt-in: a runner left unarmed decomposes nothing, so every existing
-    /// scenario is byte-identical. Reserved calibration ([`MatterCycleCalib`]); off the calibrated worldbuild
+    /// scenario is byte-identical. Reserved calibration ([`MatterCycleCalib`]); off the calibrated dawn_harness
     /// path until a later slice wires it.
     pub fn set_matter_cycle(&mut self, calib: MatterCycleCalib) {
         self.matter_cycle = Some(calib);
@@ -4158,7 +4158,7 @@ impl Runner {
     /// conditions afford. Opt-in and orthogonal to [`Runner::set_matter_cycle`]: arming this alone changes
     /// nothing (the matter cycle must be armed to decay at all), and arming the matter cycle without this
     /// keeps its unconditional rate, so every existing scenario is byte-identical. The reserved parameters
-    /// are the owner's ([`crate::decompose::DecomposerDriver`]); off the calibrated worldbuild path until the
+    /// are the owner's ([`crate::decompose::DecomposerDriver`]); off the calibrated dawn-harness path until the
     /// biosphere slice wires the stock field.
     pub fn set_decomposer(&mut self, registry: DecomposerDriverRegistry) {
         self.decomposer = Some(registry);
@@ -4186,7 +4186,7 @@ impl Runner {
     /// its composition vector derived from its own body plan and deposited into the embodiment's tissue field
     /// where it fell. Opt-in and default off, so an unarmed runner retires a body and deposits nothing, and
     /// every existing scenario is byte-identical. Whether a death leaves a corpse is the owner's world-design
-    /// choice; off the calibrated worldbuild path until worldgen wires the biosphere.
+    /// choice; off the calibrated dawn-harness path until worldgen wires the biosphere.
     pub fn set_corpse_matter(&mut self, on: bool) {
         self.corpse_matter = on;
     }
@@ -7684,7 +7684,7 @@ impl Runner {
                         }
                         _ => None,
                     };
-                    // The metabolic body and reserves, exactly as the worldbuild founder step: a race with a
+                    // The metabolic body and reserves, exactly as the dawn-harness founder step: a race with a
                     // catalog body keeps it as the metabolic aggregate (its catalog organs source the
                     // reserves, unchanged); a FULLY GROWN race (no catalog body) sources both from its grown
                     // structure (the digest and the grown tissue), so it needs no catalog body (Step 3, the

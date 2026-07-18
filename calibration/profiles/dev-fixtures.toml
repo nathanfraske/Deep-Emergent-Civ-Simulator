@@ -194,7 +194,7 @@ value = "86400"
 unit = "seconds_per_rotation"
 source = "dev fixture for Parts 14.6, 32; crates/sim/src/clock.rs"
 
-# --- the world-build path (the production dawn->Runner assembly, worldbuild::build_dawn_runner) ---
+# --- the world-build path (the production dawn->Runner assembly, dawn_harness::build_dawn_runner) ---
 # These let a development world assemble a whole Runner from a resolved scenario: the field
 # calibration derives from the selected medium's k/(rho*c) (FieldCalib::from_resolution), and the
 # dawn evidence rings size from expressed memory (RingCapacityLaw::from_manifest). FIXTURE
@@ -564,7 +564,7 @@ basis = "FIXTURE placeholder; the conserved split between a being's own convicti
 status = "set"
 value = "0.5"
 unit = "ratio"
-source = "dev fixture for base-level liveliness step 5; crates/sim/src/worldbuild.rs"
+source = "dev fixture for base-level liveliness step 5; crates/sim/src/dawn_harness.rs"
 
 [[reserved]]
 id = "belief.diffusion_rate"
@@ -572,7 +572,7 @@ basis = "FIXTURE placeholder; the per-tick rate a seeded aggregate belief pool a
 status = "set"
 value = "0.4"
 unit = "ratio_per_tick"
-source = "dev fixture for base-level liveliness step 5; crates/sim/src/worldbuild.rs"
+source = "dev fixture for base-level liveliness step 5; crates/sim/src/dawn_harness.rs"
 
 [[reserved]]
 id = "harm.noise_floor"

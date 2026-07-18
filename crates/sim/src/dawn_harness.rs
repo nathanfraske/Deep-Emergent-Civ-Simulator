@@ -12,7 +12,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The production world-build path: assembling a whole [`Runner`] from a resolved scenario and a
+//! QUARANTINED DAWN HARNESS (not canonical). This module assembles the dawn band, and it is the
+//! scaffolding the quarantined example harnesses run on (`docs/QUARANTINE.md`), never the canonical
+//! simulation. It was previously named `worldbuild` and described itself as "the production
+//! world-build path", which is why it kept being found and adopted as canon; it is neither
+//! production nor canonical, and the name and this banner now say so.
+//!
+//! Why it must not be reused as canon, beyond the label: the assembly reads through six modules that
+//! carry entries in the quarantine ledger (`anatomy`, `conviction_experience`, `discovery`,
+//! `edibility`, `homeostasis`, `morphogen`; see `docs/working/quarantine_ledger.toml`), whose values
+//! have absent or dead provenance and are frozen pending their derive-or-cite. Anything built on this
+//! path therefore inherits frozen-provenance values, which is a defect under the value-authoring line
+//! (Principle 11) rather than a matter of tidiness.
+//!
+//! The quarantine is BUILD-ENFORCED: `crates/sim/tests/dawn_harness_quarantine.rs` fails the build if
+//! any canonical `src/` module references this one in code. Tests, examples, and benches may use it
+//! freely; that is what it is for. To carry a concept onto the canonical path, reimplement it there
+//! reading manifest values fail-loud, exactly as `docs/QUARANTINE.md` requires (its code path may be
+//! reused, its numbers may not).
+//!
+//! What it does: assembling a whole [`Runner`] from a resolved scenario and a
 //! declared dawn population (design Part 28; the world-wiring handoff, section 4). Increment 1
 //! ([`FieldCalib::from_resolution`]) gave the field its medium-derived calibration but had no
 //! top-level caller; [`World::seed_dawn_populations`] founds a genome-real population but ran only in

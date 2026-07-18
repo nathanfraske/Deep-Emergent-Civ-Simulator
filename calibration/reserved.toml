@@ -1853,7 +1853,7 @@ value = "287"
 set_by = "Owner Mirror sign-off 2026-07-09 (docs/working/MIRROR_SIGNOFF_DECISIONS.md)"
 set_date = "2026-07-09"
 unit = "kelvin"
-source = "Mirror climate calibration (temperature-units reconciliation); crates/sim/src/runner.rs Field::from_map_absolute; crates/sim/src/worldbuild.rs"
+source = "Mirror climate calibration (temperature-units reconciliation); crates/sim/src/runner.rs Field::from_map_absolute; crates/sim/src/dawn_harness.rs"
 category = "per_world"
 provenance = "measured"
 
@@ -1865,7 +1865,7 @@ value = "60"
 set_by = "Owner Mirror sign-off 2026-07-09 (docs/working/MIRROR_SIGNOFF_DECISIONS.md)"
 set_date = "2026-07-09"
 unit = "kelvin"
-source = "Mirror climate calibration (temperature-units reconciliation); crates/sim/src/runner.rs Field::from_map_absolute; crates/sim/src/worldbuild.rs"
+source = "Mirror climate calibration (temperature-units reconciliation); crates/sim/src/runner.rs Field::from_map_absolute; crates/sim/src/dawn_harness.rs"
 category = "per_world"
 provenance = "measured"
 
@@ -2674,7 +2674,7 @@ category = "defect"
 provenance = "closure"
 
 # --- base-level liveliness step 5: the belief-diffusion movers armed in build_dawn_runner
-# (crates/sim/src/worldbuild.rs), fail-loud from the manifest. Enculturation drifts each band's intrinsic
+# (crates/sim/src/dawn_harness.rs), fail-loud from the manifest. Enculturation drifts each band's intrinsic
 # axiom stances toward the band mean on the life cadence; the pool diffusion advances a seeded aggregate
 # belief pool. The gossip spread the movement coupling drives reads Mind.beliefs directly and needs
 # neither of these. ---
@@ -2687,7 +2687,7 @@ value = "0.5"
 set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
 set_date = "2026-07-09"
 unit = "ratio"
-source = "base-level liveliness step 5; crates/sim/src/worldbuild.rs; crates/sim/src/world.rs enculturate"
+source = "base-level liveliness step 5; crates/sim/src/dawn_harness.rs; crates/sim/src/world.rs enculturate"
 category = "defect"
 provenance = "closure"
 
@@ -2699,7 +2699,7 @@ set_by = "Owner Mirror sign-off 2026-07-09 (remainder delegated under the derive
 set_date = "2026-07-09"
 value = "0.4"
 unit = "ratio_per_tick"
-source = "base-level liveliness step 5; crates/sim/src/worldbuild.rs; crates/sim/src/world.rs diffuse_beliefs"
+source = "base-level liveliness step 5; crates/sim/src/dawn_harness.rs; crates/sim/src/world.rs diffuse_beliefs"
 category = "defect"
 provenance = "closure"
 
