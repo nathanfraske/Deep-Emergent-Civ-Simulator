@@ -1018,12 +1018,6 @@ const BIRTH_ACCRETION_RATE_MSUN_MYR: Fixed = Fixed::ONE; // ~1 M_sun/Myr, class-
 /// the viscous time through [`civsim_sim::astro::derive_viscous_time_myr`].
 const DISK_ALPHA_VISCOSITY: Fixed = Fixed::from_int(1).div(Fixed::from_int(100)); // 0.01
 
-/// RESERVED, the disk gas MEAN MOLECULAR WEIGHT `mu` (atomic mass units). Basis: a solar hydrogen-plus-helium mix,
-/// 2.34, the standard protoplanetary-disk value. (The `mu` = 2.34 solar instance is the disk chain's fossil; the
-/// derived-over-drawn-abundances version is a disk-chain follow-on, this viewer interim reading the solar mix
-/// until it lands.)
-const DISK_MEAN_MOLECULAR_WEIGHT: Fixed = Fixed::from_int(234).div(Fixed::from_int(100)); // 2.34
-
 /// RESERVED, the Lynden-Bell-Pringle self-similar DECLINE index `gamma`. Basis: bare algebra of the self-similar
 /// family with viscosity `nu ~ r` (`gamma` = 1), giving the accretion decline exponent `p = 3/2`.
 const LBP_DECLINE_GAMMA: Fixed = Fixed::ONE;
@@ -1550,6 +1544,7 @@ fn abundance_amount(abundances: &SolarAbundances, element: &str) -> Option<Fixed
 fn derive_pre_ms_bolometric_luminosity(
     star_mass: Fixed,
     kappa_ref: Fixed,
+    abundances: &SolarAbundances,
 ) -> Option<(Fixed, civsim_sim::astro::FormationRateConsistency)> {
     use civsim_sim::astro::{
         derive_formation_epoch_myr, derive_viscous_time_myr,
@@ -1575,12 +1570,22 @@ fn derive_pre_ms_bolometric_luminosity(
         kappa_ref,
         MIDPLANE_BRACKET_HI_K,
     )?;
+    // The disk-gas mean molecular weight, DERIVED per-world from the world's own drawn abundance rows (hydrogen as
+    // H2), retiring the authored 2.34 interim: the solar pattern reproduces ~2.34 as its instance, a metal-rich draw
+    // carries a heavier gas. Read from the rows (not the mass-fraction getters), so it tracks the drawn metallicity.
+    // Built once per star (this path is star-only, not per-orbit).
+    let periodic = PeriodicTable::standard().ok()?;
+    let mean_molecular_weight = civsim_sim::astro::derive_disk_gas_mean_molecular_weight(
+        abundances,
+        &periodic,
+        Fixed::from_int(2),
+    )?;
     let t_visc = derive_viscous_time_myr(
         DISK_CHARACTERISTIC_RADIUS_AU,
         star_mass,
         disk_t_r1,
         DISK_ALPHA_VISCOSITY,
-        DISK_MEAN_MOLECULAR_WEIGHT,
+        mean_molecular_weight,
     )?;
     // The epoch's midplane map at 1 AU: closed-form, None irradiation (no self-reference on the luminosity).
     let midplane_at_rate = |rate: Fixed| -> Option<Fixed> {
@@ -1640,6 +1645,7 @@ fn derive_formation_condensation_temperature(
     star_mass: Fixed,
     orbit_au: Fixed,
     optical: &OpticalConstants,
+    abundances: &SolarAbundances,
 ) -> Option<Fixed> {
     let estimator = LoudMissEstimator;
     let dust = GrainMixture::new(
@@ -1661,7 +1667,7 @@ fn derive_formation_condensation_temperature(
     // The consistency verdict is computed and enforced (a circular configuration returns None here, failing loud);
     // surfacing the verdict text in the provenance readout is the design's section-5 follow-on.
     let (pre_ms_l_bol, _formation_verdict) =
-        derive_pre_ms_bolometric_luminosity(star_mass, kappa_ref)?;
+        derive_pre_ms_bolometric_luminosity(star_mass, kappa_ref, abundances)?;
     let raw = civsim_sim::astro::formation_midplane_temperature(
         FORMATION_ACCRETION_RATE_MSUN_MYR,
         star_mass,
@@ -2656,10 +2662,11 @@ fn build_derived_scene_with_composition(
     // (`planet.disk_temperature_k`, ~279 K at 1 AU below) is the MATURE irradiation equilibrium, a distinct epoch; the
     // two are never conflated. `derive_formation_condensation_temperature` and the reserved disk residues carry the
     // basis.
-    let condensation_temperature_k = derive_formation_condensation_temperature(
-        star_mass, orbit_au, &optical,
-    )
-    .ok_or("the formation-era midplane condensation temperature did not derive at this orbit")?;
+    let condensation_temperature_k =
+        derive_formation_condensation_temperature(star_mass, orbit_au, &optical, &abundances)
+            .ok_or(
+                "the formation-era midplane condensation temperature did not derive at this orbit",
+            )?;
     // The seam-6 partial-melt interior inputs (reserved-with-basis McKenzie-Bickle values; the solidus and source
     // density derive inside the chain). For the refractory solar set these are dormant (sub-solidus, buoyancy
     // fallback); they engage the moment a fertile or hotter mantle crosses the derived solidus.
@@ -4877,7 +4884,8 @@ mod composition_draw_tests {
             .expect("kappa_ref derives");
 
         // (1) The clock reproduces the probe.
-        let (l_bol, verdict) = derive_pre_ms_bolometric_luminosity(Fixed::ONE, kappa_ref)
+        let solar = SolarAbundances::standard().expect("the solar abundance pattern");
+        let (l_bol, verdict) = derive_pre_ms_bolometric_luminosity(Fixed::ONE, kappa_ref, &solar)
             .expect("the pre-MS luminosity derives for the solar Mirror");
         let l = l_bol.to_f64_lossy();
         assert!(
@@ -4970,8 +4978,10 @@ mod composition_draw_tests {
         let registry = PhaseRegistry::standard().expect("registry");
         let table = PeriodicTable::standard().expect("table");
         let eos = MetalEosAnchors::standard().expect("eos");
-        let cond_t = derive_formation_condensation_temperature(Fixed::ONE, Fixed::ONE, &optical)
-            .expect("the formation condensation temperature derives");
+        let solar = SolarAbundances::standard().expect("the solar abundance pattern");
+        let cond_t =
+            derive_formation_condensation_temperature(Fixed::ONE, Fixed::ONE, &optical, &solar)
+                .expect("the formation condensation temperature derives");
         let reserved_melt = civsim_materials::surface_composition::ReservedMeltParams {
             potential_temperature_k: MANTLE_POTENTIAL_TEMPERATURE_K,
             adiabat_slope_k_per_gpa: MANTLE_ADIABAT_SLOPE_K_PER_GPA,
