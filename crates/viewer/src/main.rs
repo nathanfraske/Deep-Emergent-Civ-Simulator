@@ -1474,10 +1474,46 @@ const DEEP_TIME_MYR_PER_TICK: Fixed = Fixed::from_int(20);
 /// frame. Viewer-only, byte-neutral to the run (the crater rows and the clock it reads are off the run path).
 const IMPACT_FLASH_RELAX_TICKS: i32 = 3;
 
-/// NON-CANON display: the number of deep-time steps the initial scene is aged to, so the globe opens on a
-/// planet that already carries relief (an evolved present-day surface) rather than a fresh molten sphere. A
-/// display framing of where the deep-time clock starts; the observer's time control runs it on from here.
-const DEEP_TIME_INITIAL_STEPS: usize = 80;
+/// NON-CANON display, reserved-with-basis (Principle 10): the deep-time step the interactive globe OPENS on, the
+/// start of the WATCHABLE transition. It is set to the YOUNG state (step 0) so the whole derived evolution is ahead
+/// of the observer: the provinces differentiate, the crust grows, and above all the ACCRETION-TAIL BOMBARDMENT
+/// (heaviest in the first ticks and spent within the first ~tick 15) lands where it can be SEEN. The previous value
+/// (80, ~1600 Myr) opened PAST saturation: the derived surface stops changing by its VISIBLE saturation tick (the
+/// interior relaxes to steady state, the crust reaches its melt-column equilibrium, the bombardment tail is spent),
+/// so every later tick re-derived an identical picture and nothing moved (measured headlessly on the derived
+/// Sun/1 AU world: the render is byte-identical from tick 11 on, and 40 == 80 == 400 == 4096). The BASIS is that the
+/// opening epoch must lie BEFORE that DERIVED saturation tick ([`deep_time_saturation_tick`]),
+/// and 0 is the only epoch from which the early bombardment is visible at all. Reserved for the owner to open later
+/// if he prefers to trade the earliest evolution for opening with relief already present: a later epoch would be a
+/// fraction of the DERIVED saturation tick ([`deep_time_saturation_tick`]) rather than a fabricated step count, and
+/// the rewind key ('R') replays from here regardless. Viewer-only, byte-neutral to the run.
+const DEEP_TIME_INITIAL_STEPS: usize = 0;
+
+/// NON-CANON display, reserved-with-basis (Principle 10): the fewest RENDERED frames the young->saturation deep-time
+/// transition should span at the observer's FASTEST playback speed. The interactive globe's per-frame deep-tick cap
+/// is DERIVED from this and the world's own visible saturation tick as `cap = max(1, saturation_tick /
+/// MIN_SHOW_FRAMES)` ([`derive_deep_time_cap`]), so the transition cannot be jumped in a single frame (the driver
+/// banks the faster surplus as lod_debt, [`civsim_sim::clock::PlaybackDriver`]). Its BASIS is a display-legibility
+/// bound at the viewer's fixed 30 fps: the transition must last long enough to read as an EVOLVING world rather than
+/// a snap, and one second (30 frames) is the floor at which motion reads as motion.
+///
+/// The HONEST LIMIT, since it is a ceiling on the cap and not a stretcher: when a world's DERIVED visible span is
+/// already SHORTER than this (the derived Sun/1 AU world settles on screen by tick 11), the cap floors at ONE tick
+/// per frame, the finest the deep-time clock steps, and the show is that span in frames, not this many. It binds only
+/// on a world whose visible transition runs longer than this many ticks. An observer wanting a longer show slows the
+/// playback rate, which the cap never limits. Reserved for the owner to lengthen if he wants a slower, more
+/// deliberate ceiling on the fastest speed; the default is that minimal one-second floor. Viewer-only, byte-neutral.
+const DEEP_TIME_MIN_SHOW_FRAMES: u32 = 30;
+
+/// NON-CANON display, reserved-with-basis (Principle 10): the floor number of RENDERED frames each fresh impact
+/// bloom is held in the interactive globe's frame-hold flash path ([`DerivedScene`] holds; the render side is
+/// [`render::ImpactFlash::held`]). The deep-time clock can advance many ticks in one rendered frame at high speed,
+/// so a flash keyed only to the clock epoch is skipped between frames; holding each fresh crater's bloom for at
+/// least this many rendered frames (and fading it over them) keeps an impact catchable at any cadence. Its BASIS is
+/// the perceptual floor for catching a transient at 30 fps: a single frame is 33 ms, below the ~100 ms a viewer
+/// needs to reliably notice a flash, so the floor is the few frames that clear it. Reserved for the owner to raise
+/// if he wants longer-lingering blooms; the default is that minimal ~100 ms (3 frames). Viewer-only, byte-neutral.
+const DEEP_TIME_FLASH_RENDER_FRAMES: u32 = 3;
 
 /// NON-CANON display: the per-face resolution of the derived globe's CUBE-SPHERE surface sample cache. The cache is
 /// six cube faces, each `FACE_RES` by `FACE_RES` cells projected onto the sphere by the equi-angular cube map
@@ -1855,6 +1891,10 @@ fn derive_core_fraction_and_metal_density(
 /// Stepping it ([`step_deep_time`]) evolves the interior and grows the crust, so the surface relief EMERGES
 /// and CHANGES over deep time (the provinces form, thicken, and diverge), never a painted map. Display-side
 /// state driven by the non-canon playback clock (Principle 10); nothing here touches canon.
+///
+/// `Clone` is derived for the DISPLAY saturation probe ([`deep_time_saturation_tick`]), which ages a copy from young
+/// to find where the surface stops changing; the live field is never cloned on the canon path.
+#[derive(Clone)]
 struct DeepTimeProvinces {
     /// The evolving interior state (stepped each playback tick).
     state: DeepTimeState,
@@ -2191,9 +2231,119 @@ fn step_provinces(prov: &mut DeepTimeProvinces, steps: usize) {
     }
 }
 
+/// NON-CANON display (Principle 10): the DERIVED saturation tick of a province field, the deep-time tick by which the
+/// surface stops changing WHERE THE OBSERVER CAN SEE IT, so it is the length of the WATCHABLE transition from the
+/// young state, read off the field rather than hardcoded.
+///
+/// The measure is deliberately the DISPLAY-QUANTIZED surface rather than the raw fixed-point state, and that
+/// distinction is the whole point: the state keeps drifting by sub-quantum amounts for hundreds of ticks after the
+/// picture has stopped moving (measured on the derived Sun/1 AU world: the render is byte-identical from tick 11 on,
+/// while the exact state does not reach its fixed point until past tick 150). Sizing the display cadence off the
+/// exact fixed point would set a cap that lets a single frame jump the entire visible show. So what is compared per
+/// tick is only what the render can RESOLVE, at the render's OWN existing quantizations, authoring no new threshold:
+/// each province's 8-bit incandescent colour ([`render::blackbody_rgb`], the lava glow's own quantization), each
+/// province's relief CLASS ([`civsim_world::terrain::classify_relief`], the tile field's own), and the crater count
+/// (a new crater is a visible event). Bounded so a never-settling field terminates at the bound. Off the canon path;
+/// sizes the interactive per-frame deep-tick cap ([`derive_deep_time_cap`]).
+fn deep_time_saturation_tick(prov: &DeepTimeProvinces) -> usize {
+    // Far past the tens of ticks a terrestrial surface takes to settle on screen, so the search always ends.
+    const SATURATION_SEARCH_BOUND: usize = 512;
+    let mut probe = prov.clone();
+    probe.state = DeepTimeState::young(
+        probe.column_params.len(),
+        probe.young_potential_temperature_k,
+    );
+    let mut prev = display_quantized_surface(&probe);
+    for tick in 1..=SATURATION_SEARCH_BOUND {
+        step_provinces(&mut probe, 1);
+        let now = display_quantized_surface(&probe);
+        if now == prev {
+            return tick - 1;
+        }
+        prev = now;
+    }
+    SATURATION_SEARCH_BOUND
+}
+
+/// What the OBSERVER can SEE of a province field, at the render's OWN quantization: per province the 8-bit
+/// incandescent colour of its interior temperature (what the lava glow paints) and the relief CLASS its Airy
+/// elevation falls in (what the tile field classifies), plus the crater count (a new crater is a visible event).
+/// Drift finer than these is invisible on screen, which is exactly what [`deep_time_saturation_tick`] must ignore.
+/// Read at the PROVINCE resolution (the physical grid), so the probe costs one pass per province per tick rather
+/// than a full display-cache build. Display-only (Principle 10).
+fn display_quantized_surface(
+    prov: &DeepTimeProvinces,
+) -> (Vec<(u8, u8, u8)>, Vec<TerrainRelief>, usize) {
+    let emission: Vec<(u8, u8, u8)> = prov
+        .state
+        .columns
+        .iter()
+        .map(|c| {
+            let e = render::blackbody_rgb(c.temperature);
+            (e.r, e.g, e.b)
+        })
+        .collect();
+    let elevations: Vec<Fixed> = prov
+        .state
+        .crust_thickness_km
+        .iter()
+        .map(|&t| {
+            civsim_physics::geodynamics::airy_isostatic_elevation(
+                prov.crust_density,
+                prov.mantle_density,
+                t,
+            )
+            .unwrap_or(Fixed::ZERO)
+        })
+        .collect();
+    let datum = civsim_world::terrain::relief_datum(&elevations).unwrap_or(Fixed::ZERO);
+    let relief: Vec<TerrainRelief> = elevations
+        .iter()
+        .map(|&e| civsim_world::terrain::classify_relief(e, prov.sea_level, datum))
+        .collect();
+    (emission, relief, prov.state.craters.len())
+}
+
+/// NON-CANON display (Principle 10): the interactive globe's deep-time display CADENCE, both numbers DERIVED from
+/// the sampled worlds themselves: the WATCHABLE SPAN (in ticks) and the per-frame deep-tick CAP that keeps a single
+/// fast frame from jumping it (the saturated, motionless surface the diagnosis found).
+///
+/// The span is the SMALLEST visible saturation tick over the province-bearing planets
+/// ([`deep_time_saturation_tick`]), the most conservative choice: sizing the cap off the shortest-lived transition
+/// keeps every sampled world's show at least that slow. The cap is `max(1, span / MIN_SHOW_FRAMES)` (integer floor),
+/// floored at one tick per frame, the finest the deep-time clock steps; the driver banks any faster surplus as
+/// lod_debt. A world with no province field never steps deep time, so it does not constrain the cadence; with none
+/// the span is 0 and the cap 1 (harmless, since nothing steps).
+fn derive_deep_time_cadence(planets: &[SampledPlanet]) -> (usize, u32) {
+    let span = planets
+        .iter()
+        .filter_map(|p| p.scene.provinces.as_ref())
+        .map(deep_time_saturation_tick)
+        .min()
+        .unwrap_or(0);
+    let cap = (span as u32 / DEEP_TIME_MIN_SHOW_FRAMES).max(1);
+    (span, cap)
+}
+
+/// NON-CANON display bookkeeping (Principle 10): one fresh impact flash HELD for a floor number of RENDERED frames,
+/// so a strike the deep-time clock passes in a single fast frame is still caught by the observer. The deep-time
+/// clock can jump many ticks per rendered frame at high playback speed, so a flash keyed only to the clock epoch
+/// (the headless single-epoch [`render::active_flash_stamps`]) can be skipped between frames; the interactive globe
+/// holds each fresh crater's bloom across a minimum of [`DEEP_TIME_FLASH_RENDER_FRAMES`] rendered frames and fades it
+/// over them. Keyed on the crater's INDEX in the province crater list (stable within a run: the list only grows,
+/// [`civsim_sim::deeptime::bombard_tick`] appends), cleared on a rewind. Display-only.
+struct FlashHold {
+    /// The crater's index in `prov.state.craters`, for rebuilding the flash geometry from its row each frame.
+    crater_index: usize,
+    /// Rendered frames remaining in the hold (counts down to zero, then the hold is dropped).
+    frames_remaining: u32,
+}
+
 /// Re-derive the per-display-tile LAVA GLOW field from the current province state, the visible-volcanism read: for
-/// each display tile, bilinearly sample the province's DERIVED interior temperature (the mantle potential temperature
-/// each column carries, the SAME field the crust and craters are sampled off), run the world's OWN derived-solidus
+/// each display tile, resample the province's DERIVED interior temperature (the mantle potential temperature each
+/// column carries) through the POLE-AWARE SMOOTH resampler ([`render::sample_province_field_smooth`], which collapses
+/// the coarse lat-lon field's pole spokes and softens its cell mesh, since the glow carries no surface normal off the
+/// same field), run the world's OWN derived-solidus
 /// melt column against it ([`civsim_physics::melting::adiabatic_melt_column`], the `crust_growth` closure's kernel),
 /// and pair the DERIVED melt fraction (the glow intensity, zero for a sub-solidus tile) with the blackbody colour of
 /// that temperature (the incandescence hue). A tile below the world's solidus makes no melt and does not glow (solid
@@ -2237,10 +2387,14 @@ fn derive_province_lava(
         .collect();
     // The self-emitted glow at a normalized surface coordinate: the incandescent colour of the resampled interior
     // temperature, and the resampled melt fraction as the intensity. A pure function of the immutable province fields.
+    // It reads the POLE-AWARE SMOOTH resampler ([`render::sample_province_field_smooth`]), not the plain bilinear one:
+    // the glow is a self-emitted field with no surface normal read off it, so it takes the smootherstep-plus-pole-cap
+    // treatment that collapses the coarse lat-lon field's pole spokes and softens its cell mesh, while the height
+    // cache keeps the plain sampler so its analytic gradient (the pixel-shader normal) stays its exact derivative.
     let glow_at = |fu: f32, fv: f32| -> render::LavaGlow {
-        let temp_k = render::sample_province_field(&temps, prov.pcols, prov.prows, fu, fv);
+        let temp_k = render::sample_province_field_smooth(&temps, prov.pcols, prov.prows, fu, fv);
         let intensity =
-            (render::sample_province_field(&melt_fraction, prov.pcols, prov.prows, fu, fv)
+            (render::sample_province_field_smooth(&melt_fraction, prov.pcols, prov.prows, fu, fv)
                 .to_f64_lossy() as f32)
                 .clamp(0.0, 1.0);
         render::LavaGlow {
@@ -3856,6 +4010,23 @@ fn run_derived(argv: &[String]) {
         );
     }
     eprintln!("  controls: click a planet to fly to it, esc/backspace to fly back, esc on the map to quit");
+    eprintln!("  on a globe: space pauses deep time, [ / ] (or , / .) slow / speed it, 0 resets, R rewinds to the young world");
+    // THE DERIVED DEEP-TIME DISPLAY CADENCE, read off the worlds themselves rather than hardcoded: each
+    // province-bearing planet's saturation tick (where its surface stops changing) sets the per-frame tick cap so the
+    // young->saturation transition cannot be jumped in one frame at the fastest speed. Printed so the cadence is
+    // checkable without a display, the sibling of the derived readouts above.
+    let (deep_span, deep_cap) = derive_deep_time_cadence(&planets);
+    eprintln!(
+        "  deep time: opens at the young world (step {}); the DERIVED watchable span is {} ticks ({:.0} Myr, where the \
+         surface stops changing on screen), so it advances at most {} tick(s) per frame at full speed ({} frames of \
+         show), each fresh impact blooming for {} rendered frames",
+        DEEP_TIME_INITIAL_STEPS,
+        deep_span,
+        deep_span as f64 * DEEP_TIME_MYR_PER_TICK.to_f64_lossy(),
+        deep_cap,
+        deep_span as u32 / deep_cap.max(1),
+        DEEP_TIME_FLASH_RENDER_FRAMES,
+    );
     let star_t_eff = planets[0].scene.t_eff;
 
     // One continuous zoom, all of it the sphere, once you are on a planet globe: from the distant globe down onto a
@@ -3910,7 +4081,13 @@ fn run_derived(argv: &[String]) {
     // evolution on the globe. Space pauses (freezing both so the owner can inspect), and the speed keys slow it
     // down or crank it up. `orbit_phase` is the continuous orbital sweep (radians at 1 AU); the per-planet rate is
     // the Kepler rate (inner planets sweep faster), and the deep-time field steps by the same clock's whole ticks.
-    let mut playback = PlaybackDriver::new(1.0);
+    // The per-frame deep-tick cap (DERIVED above from the sampled worlds' saturation ticks) so the fastest speed
+    // cannot jump the whole transition in one frame (the driver banks the surplus as lod_debt); it caps only the
+    // deep-time advance, not the orbital sweep (which reads the rate directly). Display-only (Principle 10).
+    let mut playback = PlaybackDriver::new(1.0).with_max_ticks_per_advance(deep_cap);
+    // The interactive impact-flash holds, one list per sampled planet: each fresh crater's bloom is held for a floor
+    // of rendered frames so it is caught even when the deep-time clock jumps many ticks in one frame (Principle 10).
+    let mut flash_holds: Vec<Vec<FlashHold>> = planets.iter().map(|_| Vec::new()).collect();
     let mut orbit_phase = 0.0f64;
     let mut last_instant = std::time::Instant::now();
 
@@ -4148,21 +4325,57 @@ fn run_derived(argv: &[String]) {
                     let param = planets[planet].scene.param;
                     let stepped = match planets[planet].scene.provinces.as_mut() {
                         Some(prov) => {
+                            // The crater count BEFORE the step, so the craters formed WITHIN this frame's advanced
+                            // tick span are exactly the new tail [before, after) (bombard_tick only appends).
+                            let craters_before = prov.state.craters.len();
                             step_provinces(prov, deep_ticks);
+                            let craters_after = prov.state.craters.len();
                             // Re-derive the surface AND the lava glow off the stepped provinces, so the owner watches
                             // the volcanism fade as the world cools (the glow follows the interior temperature down).
+                            let tiles = derive_province_tiles(prov, param);
+                            let lava = derive_province_lava(prov, param);
+                            Some((tiles, lava, craters_before, craters_after))
+                        }
+                        None => None,
+                    };
+                    if let Some((tiles, lava, craters_before, craters_after)) = stepped {
+                        if let Some(t) = tiles {
+                            planets[planet].scene.tiles = t;
+                        }
+                        planets[planet].scene.lava = lava;
+                        // EVERY crater formed within this frame's advanced tick span gets a fresh flash held for the
+                        // display floor, so an impact is caught even when the clock jumps many ticks this frame at
+                        // high speed (symptom 3c: decouple the bloom lifetime from the deep-time clock).
+                        for idx in craters_before..craters_after {
+                            flash_holds[planet].push(FlashHold {
+                                crater_index: idx,
+                                frames_remaining: DEEP_TIME_FLASH_RENDER_FRAMES,
+                            });
+                        }
+                    }
+                }
+                // THE REWIND (the durable form of opening before saturation): 'R' rewinds this planet's deep-time
+                // clock to the opening epoch (the young world), re-derives the surface, and clears the held flashes,
+                // so the observer can replay the whole deep-time evolution from the start. Uses the rewind primitive
+                // [`age_provinces_from_young`]. Handled before the immutable scene borrow below since it mutates.
+                if keys.contains(&Key::R) {
+                    let param = planets[planet].scene.param;
+                    let rederived = match planets[planet].scene.provinces.as_mut() {
+                        Some(prov) => {
+                            age_provinces_from_young(prov, DEEP_TIME_INITIAL_STEPS);
                             let tiles = derive_province_tiles(prov, param);
                             let lava = derive_province_lava(prov, param);
                             Some((tiles, lava))
                         }
                         None => None,
                     };
-                    if let Some((tiles, lava)) = stepped {
+                    if let Some((tiles, lava)) = rederived {
                         if let Some(t) = tiles {
                             planets[planet].scene.tiles = t;
                         }
                         planets[planet].scene.lava = lava;
                     }
+                    flash_holds[planet].clear();
                 }
                 let scene = &planets[planet].scene;
                 // Discrete keys: zoom, provenance, recentre.
@@ -4229,10 +4442,33 @@ fn run_derived(argv: &[String]) {
                     .provinces
                     .as_ref()
                     .map(|p| province_surface_field(p, &stamps));
-                // THE WATCHABLE IMPACT FLASHES: as the deep-time clock steps, a crater whose formation it has just
-                // passed flashes over its settled relief and relaxes as the clock advances, so the owner SEES
-                // impacts land while watching deep time. Empty (byte-identical) once the bombardment quiets.
-                let flash = scene.active_flash_stamps();
+                // THE WATCHABLE IMPACT FLASHES, held per RENDERED frame (symptom 3c, Principle 10): each fresh crater
+                // blooms for a floor of DEEP_TIME_FLASH_RENDER_FRAMES rendered frames and fades over them (peak at
+                // formation, quadratic ease-out, mirroring the epoch-window flash's shape but measured in rendered
+                // frames rather than clock ticks), so a strike is SEEN landing at any playback speed even when the
+                // deep-time clock jumps many ticks in one frame. Built from the current holds, then aged one rendered
+                // frame unless paused (pause freezes the bloom with the world). Empty once the holds drain.
+                let flash: Vec<render::ImpactFlash> = match scene.provinces.as_ref() {
+                    Some(prov) => flash_holds[planet]
+                        .iter()
+                        .filter_map(|hold| {
+                            let frac =
+                                hold.frames_remaining as f32 / DEEP_TIME_FLASH_RENDER_FRAMES as f32;
+                            let intensity = frac * frac;
+                            prov.state.craters.get(hold.crater_index).and_then(|row| {
+                                render::ImpactFlash::held(row, prov.radius_m, intensity)
+                            })
+                        })
+                        .collect(),
+                    None => Vec::new(),
+                };
+                if !playback.is_paused() {
+                    let holds = &mut flash_holds[planet];
+                    for hold in holds.iter_mut() {
+                        hold.frames_remaining = hold.frames_remaining.saturating_sub(1);
+                    }
+                    holds.retain(|h| h.frames_remaining > 0);
+                }
                 render::draw_globe_scene(
                     &mut buf,
                     w,
@@ -5817,7 +6053,7 @@ mod province_tests {
         // second `derive_surface_composition` call (F = phi_c by construction, proven in the physics test
         // `the_handoff_pins_the_lock_up_melt_fraction`), and textures the deep-time relief off the resulting
         // formation melt fraction. No hand-fed F: the verdict and the re-derivation are in the loop.
-        let scene =
+        let mut scene =
             build_derived_scene(Fixed::ONE, Fixed::ONE).expect("the derived scene resolves");
         let v = scene.young.expect("the young-thermal verdict resolves");
         // The Sun/1AU world melts at its best estimate, so it is carried at the super-solidus handoff (its grade is
@@ -5831,6 +6067,29 @@ mod province_tests {
             v.handoff_potential_temperature_k.unwrap(),
             "the carried young temperature IS the lock-up handoff (the re-derivation ran at it)"
         );
+        // The scene now OPENS on the YOUNG world (DEEP_TIME_INITIAL_STEPS = 0, so the whole evolution is watchable),
+        // so the isostatic relief and the bombardment record are the deep-time PAYOFF, not a property of the opening
+        // frame: age the province field to its DERIVED present day (the saturation tick, where the surface stops
+        // changing) and re-derive the composed surface off it before measuring the evolved relief. This also proves
+        // the saturation tick is derived (found well before the search bound), the datum the per-frame cap reads.
+        let param = scene.param;
+        let present_day = scene
+            .provinces
+            .as_ref()
+            .map(deep_time_saturation_tick)
+            .expect("a province field to age");
+        assert!(
+            present_day > 0 && present_day < 200,
+            "the present-day epoch is the DERIVED saturation tick, not the search bound, got {present_day}"
+        );
+        if let Some(prov) = scene.provinces.as_mut() {
+            age_provinces_from_young(prov, present_day);
+        }
+        if let Some(prov) = scene.provinces.as_ref() {
+            if let Some(t) = derive_province_tiles(prov, param) {
+                scene.tiles = t;
+            }
+        }
         // The ISOSTATIC diagnostics (the melt-driven relief) read the CRUST-ONLY tile field, not the composed
         // surface: the bombardment is a SEPARATE surface-topography record, so it must not dilute the melt-texture
         // indicator's normalization or masquerade as isostatic relief ([`derive_province_crust_tiles`]). They read

@@ -1269,6 +1269,29 @@ impl ImpactFlash {
             intensity: intensity.to_f64_lossy() as f32,
         })
     }
+
+    /// Prepare a crater row as a HELD impact flash at a caller-supplied display `intensity` in `[0, 1]`, for the
+    /// interactive FRAME-HOLD path. The observer's deep-time clock can jump many ticks per rendered frame at high
+    /// playback speed, so a flash keyed only to the clock epoch (the headless single-epoch [`active_flash_stamps`])
+    /// can be skipped between frames; the interactive viewer instead holds each fresh crater's bloom for a floor
+    /// number of RENDERED frames and supplies the fade intensity from that frame count. The GEOMETRY is the SAME
+    /// derived crater footprint the epoch-window flash uses ([`CraterStamp::from_row`], so an alien or low-gravity
+    /// world's larger crater blooms wider by its own scaling); only the intensity comes from the frame-hold, not
+    /// from a clock epoch. `None` on a degenerate row (the same guard [`CraterStamp::from_row`] applies).
+    /// Display-only (Principle 10); the geometry is fixed-point, the intensity the display f32 tier.
+    pub fn held(row: &CraterRow, radius_m: Fixed, intensity: f32) -> Option<ImpactFlash> {
+        let stamp = CraterStamp::from_row(row, radius_m)?;
+        Some(ImpactFlash {
+            center: [
+                stamp.center[0].to_f64_lossy() as f32,
+                stamp.center[1].to_f64_lossy() as f32,
+                stamp.center[2].to_f64_lossy() as f32,
+            ],
+            angular_radius: stamp.angular_radius.to_f64_lossy() as f32,
+            cos_reach: stamp.cos_reach.to_f64_lossy() as f32,
+            intensity: intensity.clamp(0.0, 1.0),
+        })
+    }
 }
 
 /// Prepare the fresh-impact FLASHES of a crater set at the render's current deep-time `epoch_myr`: map every crater
@@ -1378,6 +1401,95 @@ pub fn sample_province_field(
     let top = lerp_fx(at(x0i, y0i), at(x0i + 1, y0i), tx);
     let bot = lerp_fx(at(x0i, y0i + 1), at(x0i + 1, y0i + 1), tx);
     lerp_fx(top, bot, ty)
+}
+
+/// A POLE-AWARE, SMOOTHER display resample of a coarse per-province `field` (one value per province, row-major
+/// `pcols` by `prows`), the sibling of [`sample_province_field`] for the CACHE-BUILD / derivation callers that want
+/// a smooth field rather than the analytic-gradient-matched bilinear one. It differs from the plain sampler in two
+/// display-only ways, each aimed at one of the coarse lat-lon field's two visible artifacts:
+///
+/// - SMOOTHER MESH. The interpolation weights pass through a quintic smootherstep (Hermite, zero-sloped at the cell
+///   edges, so the interpolant is C1 there) rather than staying linear (C0), so the boxy province-cell mesh softens
+///   instead of showing its facets.
+/// - NO POLE SPOKES. Near a pole the lat-lon columns converge to a point, so the plain bilinear reads radial spokes
+///   there; this blends the sample toward the poleward-most province row's LONGITUDE MEAN as the pole is approached
+///   (over the width of that one row), collapsing the converging columns into a smooth cap.
+///
+/// It is NOT the analytic partner of [`SurfaceField::gradient`] (the smootherstep is not the derivative the gradient
+/// takes), so it is used ONLY where no surface NORMAL is read off the same field: the lava glow
+/// ([`super::derive_province_lava`]), a self-emitted colour field with no gradient. The height cache keeps the plain
+/// [`sample_province_field`] so its analytic gradient (the pixel-shader normal) stays that field's exact derivative,
+/// the standing numerical twin. Deterministic fixed-point with an f32 weight (the same 1/[`PROVINCE_LERP_STEPS`]
+/// quantization the plain sampler carries), so a parallel cache build is thread-count-independent. Display-only
+/// (Principle 10), a resampling of the DERIVED field, never fabricated content.
+pub fn sample_province_field_smooth(
+    field: &[Fixed],
+    pcols: usize,
+    prows: usize,
+    fu: f32,
+    fv: f32,
+) -> Fixed {
+    if pcols == 0 || prows == 0 || field.len() < pcols * prows {
+        return Fixed::ZERO;
+    }
+    let pc = pcols as i64;
+    let pr = prows as i64;
+    let gx = fu * pc as f32 - 0.5;
+    let gy = fv * pr as f32 - 0.5;
+    let x0 = gx.floor();
+    let y0 = gy.floor();
+    // The quintic smootherstep 6t^5 - 15t^4 + 10t^3 of the cell-local fraction: zero-sloped at both cell edges, so
+    // the interpolant meets its neighbours smoothly (the mesh softens). A display weight, quantized by the lerp below.
+    let smootherstep = |t: f32| -> f32 {
+        let t = t.clamp(0.0, 1.0);
+        t * t * t * (t * (t * 6.0 - 15.0) + 10.0)
+    };
+    let tx = smootherstep(gx - x0);
+    let ty = smootherstep(gy - y0);
+    let x0i = x0 as i64;
+    let y0i = y0 as i64;
+    let at = |xi: i64, yi: i64| -> Fixed {
+        let x = xi.rem_euclid(pc) as usize; // wrap longitude
+        let y = yi.clamp(0, pr - 1) as usize; // clamp latitude
+        field.get(y * pcols + x).copied().unwrap_or(Fixed::ZERO)
+    };
+    let lerp_fx = |a: Fixed, b: Fixed, t: f32| -> Fixed {
+        let tf = Fixed::from_ratio(
+            (t.clamp(0.0, 1.0) * PROVINCE_LERP_STEPS as f32) as i64,
+            PROVINCE_LERP_STEPS,
+        );
+        b.checked_sub(a)
+            .and_then(|d| d.checked_mul(tf))
+            .and_then(|d| a.checked_add(d))
+            .unwrap_or(a)
+    };
+    let top = lerp_fx(at(x0i, y0i), at(x0i + 1, y0i), tx);
+    let bot = lerp_fx(at(x0i, y0i + 1), at(x0i + 1, y0i + 1), tx);
+    let value = lerp_fx(top, bot, ty);
+    // THE POLE CAP: within the poleward-most province row, blend toward that row's longitude MEAN so the converging
+    // lat-lon columns read as a smooth cap rather than radial spokes. The blend ramps (smootherstep) from the full
+    // mean AT the pole to none one province row in. `row_mean` averages a pole row across its longitudes.
+    let row_mean = |row: i64| -> Fixed {
+        let base = (row.clamp(0, pr - 1) as usize) * pcols;
+        let mut sum = Fixed::ZERO;
+        for c in 0..pcols {
+            sum = sum
+                .checked_add(field.get(base + c).copied().unwrap_or(Fixed::ZERO))
+                .unwrap_or(sum);
+        }
+        sum.checked_div(Fixed::from_int(pcols as i32))
+            .unwrap_or(sum)
+    };
+    let pole_band = 1.0 / prows as f32; // one province row, in fv units
+    if fv < pole_band {
+        let w = smootherstep(1.0 - fv / pole_band); // 1 at the north pole, 0 one row in
+        lerp_fx(value, row_mean(0), w)
+    } else if fv > 1.0 - pole_band {
+        let w = smootherstep((fv - (1.0 - pole_band)) / pole_band); // 0 one row in, 1 at the south pole
+        lerp_fx(value, row_mean(pr - 1), w)
+    } else {
+        value
+    }
 }
 
 /// The quantization of the province-field interpolation weight (1/4096 of a cell): a display REPRESENTATION step
