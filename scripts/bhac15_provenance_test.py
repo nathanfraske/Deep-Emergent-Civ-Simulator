@@ -68,14 +68,15 @@ def read_column():
     text = open(COLUMN, encoding="utf-8").read()
     rows = {}
     for block in re.split(r"\[\[wall\]\]", text)[1:]:
-        # The header comment names the literal "[[wall]]"; only a real block carries a mass field.
-        mass_match = re.search(r"mass_msun\s*=\s*([\d.]+)", block)
+        # The header comment names the literal "[[wall]]"; only a real block carries a mass field. Values are
+        # quoted decimal strings (the from_decimal_str determinism idiom), so tolerate the optional quotes.
+        mass_match = re.search(r'mass_msun\s*=\s*"?([\d.]+)"?', block)
         if mass_match is None:
             continue
         m = float(mass_match.group(1))
-        w = float(re.search(r"wall_teff_k\s*=\s*([\d.]+)", block).group(1))
-        lo = float(re.search(r"drift_lo_k\s*=\s*([\d.]+)", block).group(1))
-        hi = float(re.search(r"drift_hi_k\s*=\s*([\d.]+)", block).group(1))
+        w = float(re.search(r'wall_teff_k\s*=\s*"?([\d.]+)"?', block).group(1))
+        lo = float(re.search(r'drift_lo_k\s*=\s*"?([\d.]+)"?', block).group(1))
+        hi = float(re.search(r'drift_hi_k\s*=\s*"?([\d.]+)"?', block).group(1))
         rows[round(m, 3)] = (w, lo, hi)
     return rows
 
