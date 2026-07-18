@@ -137,6 +137,23 @@ pub struct SolarAbundances {
     z_over_x: String,
 }
 
+/// The DERIVED per-instance mass fractions of a pattern, computed from its abundance rows and the periodic atomic
+/// weights ([`SolarAbundances::mass_fractions`]): `x` hydrogen, `y` helium, `z` the heavier-than-helium metals,
+/// and `z_over_x` the metals-to-hydrogen mass ratio. Unlike the cited `x_mass_fraction`-family getters (the fixed
+/// AGSS09 SOLAR reference), these are computed from the rows, so they TRACK a scaling: a metal-enriched pattern
+/// has a larger `z`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DerivedMassFractions {
+    /// The hydrogen mass fraction `X`.
+    pub x: Fixed,
+    /// The helium mass fraction `Y`.
+    pub y: Fixed,
+    /// The metal (atomic number `Z >= 3`) mass fraction `Z`.
+    pub z: Fixed,
+    /// The metals-to-hydrogen mass ratio `Z/X`.
+    pub z_over_x: Fixed,
+}
+
 #[derive(Debug, Default, Deserialize)]
 struct RawFile {
     #[serde(default)]
@@ -273,24 +290,78 @@ impl SolarAbundances {
         &self.scale
     }
 
-    /// The recommended present-day photospheric hydrogen mass fraction `X` (AGSS09 Table 4), a string.
+    /// The CITED SOLAR REFERENCE hydrogen mass fraction `X` (the recommended present-day photospheric value, AGSS09
+    /// Table 4), a string. This is the SOLAR TABLE's own recommendation, NOT a live per-instance mass fraction: it
+    /// is EMPTY on a scaled pattern ([`scaled_metals_by_dex`], [`scaled_alpha_by_dex`]), which has no cited
+    /// recommendation of its own. For the live per-instance mass fraction that tracks any scaling, use
+    /// [`mass_fractions`](Self::mass_fractions), which computes from the rows rather than caching a copy that
+    /// drifts.
     pub fn x_mass_fraction(&self) -> &str {
         &self.x_mass_fraction
     }
 
-    /// The recommended present-day photospheric helium mass fraction `Y`, a string.
+    /// The CITED SOLAR REFERENCE helium mass fraction `Y` (AGSS09 Table 4), a string; empty on a scaled pattern
+    /// (see [`x_mass_fraction`](Self::x_mass_fraction)). Live value: [`mass_fractions`](Self::mass_fractions).
     pub fn y_mass_fraction(&self) -> &str {
         &self.y_mass_fraction
     }
 
-    /// The recommended present-day photospheric metal mass fraction `Z` (the pinned solar anchor), a string.
+    /// The CITED SOLAR REFERENCE metal mass fraction `Z` (the recommended solar anchor, AGSS09 Table 4), a string;
+    /// empty on a scaled pattern (see [`x_mass_fraction`](Self::x_mass_fraction)). Live value:
+    /// [`mass_fractions`](Self::mass_fractions).
     pub fn z_mass_fraction(&self) -> &str {
         &self.z_mass_fraction
     }
 
-    /// The recommended present-day photospheric metals-to-hydrogen ratio `Z/X`, a string.
+    /// The CITED SOLAR REFERENCE metals-to-hydrogen ratio `Z/X` (AGSS09 Table 4), a string; empty on a scaled
+    /// pattern (see [`x_mass_fraction`](Self::x_mass_fraction)). Live value:
+    /// [`mass_fractions`](Self::mass_fractions).
     pub fn z_over_x(&self) -> &str {
         &self.z_over_x
+    }
+
+    /// The LIVE per-instance mass fractions `X` (hydrogen), `Y` (helium), `Z` (metals, atomic number `Z >= 3`),
+    /// and `Z/X`, DERIVED from the abundance rows and the periodic standard atomic weights: each element
+    /// contributes `n_X/n_H = 10^(log_eps - 12)` times its atomic weight to the mass, and the three fractions are
+    /// the hydrogen, helium, and heavier-than-helium shares of that total mass. This is the same-fact-ONE-door
+    /// form of the cited `x_mass_fraction`-family getters: it COMPUTES from the rows rather than caching a copy,
+    /// so it TRACKS a scaling (a [`scaled_metals_by_dex`] pattern's `z` rises, its `x` falls) where the cached
+    /// getters would go stale. The solar pattern's derived value reproduces the AGSS09 recommendation (asserted in
+    /// the tests), so the cited getters are the reference and this is the live instance. `None` if an element
+    /// carries no periodic atomic weight (a data gap) or the total mass is non-positive.
+    pub fn mass_fractions(
+        &self,
+        periodic: &crate::periodic::PeriodicTable,
+    ) -> Option<DerivedMassFractions> {
+        let ln10 = Fixed::from_int(10).ln();
+        let twelve = Fixed::from_int(12);
+        let mut mass_h = Fixed::ZERO;
+        let mut mass_he = Fixed::ZERO;
+        let mut mass_metals = Fixed::ZERO;
+        for symbol in self.elements() {
+            let log_eps = match self.preferred(symbol) {
+                Some(v) => v,
+                None => continue, // a row with no cited abundance carries no mass
+            };
+            let element = periodic.element(symbol)?;
+            let n_rel = log_eps.checked_sub(twelve)?.checked_mul(ln10)?.exp();
+            let mass = n_rel.checked_mul(element.standard_atomic_weight)?;
+            match element.z {
+                1 => mass_h = mass_h.checked_add(mass)?,
+                2 => mass_he = mass_he.checked_add(mass)?,
+                _ => mass_metals = mass_metals.checked_add(mass)?,
+            }
+        }
+        let total = mass_h.checked_add(mass_he)?.checked_add(mass_metals)?;
+        if total <= Fixed::ZERO || mass_h <= Fixed::ZERO {
+            return None;
+        }
+        Some(DerivedMassFractions {
+            x: mass_h.checked_div(total)?,
+            y: mass_he.checked_div(total)?,
+            z: mass_metals.checked_div(total)?,
+            z_over_x: mass_metals.checked_div(mass_h)?,
+        })
     }
 
     /// The element symbols in the table, sorted.
@@ -328,10 +399,13 @@ impl SolarAbundances {
         SolarAbundances {
             rows,
             scale: self.scale.clone(),
-            x_mass_fraction: self.x_mass_fraction.clone(),
-            y_mass_fraction: self.y_mass_fraction.clone(),
-            z_mass_fraction: self.z_mass_fraction.clone(),
-            z_over_x: self.z_over_x.clone(),
+            // A scaled pattern has no cited solar recommendation of its own: leave the reference fields empty, so
+            // the cited getters cannot return the stale SOLAR value on a non-solar instance (the drift Agent C's
+            // census caught). The live per-instance mass fractions are `mass_fractions`, computed from the rows.
+            x_mass_fraction: String::new(),
+            y_mass_fraction: String::new(),
+            z_mass_fraction: String::new(),
+            z_over_x: String::new(),
         }
     }
 
@@ -370,10 +444,13 @@ impl SolarAbundances {
         SolarAbundances {
             rows,
             scale: self.scale.clone(),
-            x_mass_fraction: self.x_mass_fraction.clone(),
-            y_mass_fraction: self.y_mass_fraction.clone(),
-            z_mass_fraction: self.z_mass_fraction.clone(),
-            z_over_x: self.z_over_x.clone(),
+            // A scaled pattern has no cited solar recommendation of its own: leave the reference fields empty, so
+            // the cited getters cannot return the stale SOLAR value on a non-solar instance (the drift Agent C's
+            // census caught). The live per-instance mass fractions are `mass_fractions`, computed from the rows.
+            x_mass_fraction: String::new(),
+            y_mass_fraction: String::new(),
+            z_mass_fraction: String::new(),
+            z_over_x: String::new(),
         }
     }
 }
@@ -397,6 +474,48 @@ mod tests {
         assert_eq!(t.scale(), "log_eps_H12", "the log-epsilon(H)=12 scale");
         assert_eq!(t.z_mass_fraction(), "0.0134", "the pinned solar anchor Z");
         assert_eq!(t.z_over_x(), "0.0181", "the recommended Z/X");
+    }
+
+    #[test]
+    fn the_derived_mass_fractions_track_scaling_where_the_cited_reference_goes_stale() {
+        // THE SAME-FACT-ONE-DOOR GUARD (the getter-staleness finding). The cited getters are the SOLAR reference;
+        // the LIVE mass fractions derive from the rows. (1) On the solar table the derived value reproduces the
+        // cited AGSS09 recommendation, so reference and derivation agree at the solar instance. (2) A metal-rich
+        // scaled pattern's derived Z RISES (the derivation tracks the scaling) while its cited getters are EMPTY,
+        // so the stale solar value can never be read off a non-solar instance.
+        let periodic =
+            crate::periodic::PeriodicTable::standard().expect("the periodic table loads");
+        let solar = table();
+        let mf = solar
+            .mass_fractions(&periodic)
+            .expect("the solar mass fractions derive");
+        // (1) The derived solar mass fractions land at the cited AGSS09 composition (the rows and the recommended
+        // values are the same composition read two ways): Z near 0.0134, X near 0.74.
+        assert!(
+            (0.010..=0.018).contains(&mf.z.to_f64_lossy()),
+            "the derived solar metal fraction reproduces the cited ~0.0134, got {}",
+            mf.z.to_f64_lossy()
+        );
+        assert!(
+            (0.70..=0.76).contains(&mf.x.to_f64_lossy()),
+            "the derived solar hydrogen fraction is near the cited AGSS09 X, got {}",
+            mf.x.to_f64_lossy()
+        );
+        // (2) A metal-rich (+0.5 dex) pattern's derived Z rises; its cited reference getters are emptied.
+        let rich = solar.scaled_metals_by_dex(Fixed::from_ratio(5, 10));
+        let mf_rich = rich
+            .mass_fractions(&periodic)
+            .expect("the scaled mass fractions derive");
+        assert!(
+            mf_rich.z > mf.z,
+            "a metal-rich pattern has a larger derived Z ({} vs solar {})",
+            mf_rich.z.to_f64_lossy(),
+            mf.z.to_f64_lossy()
+        );
+        assert!(
+            rich.z_mass_fraction().is_empty() && rich.x_mass_fraction().is_empty(),
+            "a scaled pattern carries no cited solar reference, so the stale value cannot be read"
+        );
     }
 
     #[test]
