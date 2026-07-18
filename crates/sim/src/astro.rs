@@ -5368,6 +5368,10 @@ mod tests {
         // and L = 4 pi sigma T_H^4 R^2: a solar-mass star at the Hayashi wall (T_H = 4000 K) at age 1 Myr sits at
         // R ~ 2.69 R_sun and L ~ 1.669 L_sun, brighter than the main-sequence Sun, exactly as a pre-main-sequence
         // contracting star should be.
+        // The T_H = 4000 K here is an ORACLE EVALUATION POINT, arbitrary and FROZEN with its hand-computed pair (the
+        // 1.6686 exists FOR it); NOT the retired production constant, which reads the per-star BHAC15 grid
+        // (civsim_physics::hayashi_wall) as of the retirement commit. Moved only if the mapping itself changes, at
+        // which point the whole pair recomputes by the independent closed-form route stated above.
         let l = pre_main_sequence_luminosity_lsun(
             Fixed::ONE,
             Fixed::from_int(4000),
@@ -5447,6 +5451,10 @@ mod tests {
         // Twin-independent oracle from tau = C (M/(4 pi sigma T_H^4))^(1/3): a solar-mass star at the Hayashi wall
         // (T_H = 4000 K) with C = 1.5 gives ~385 days, roughly a decade longer than the main-sequence ~14.5 days,
         // the fully-convective turnover a disk-era star has. Computed outside the code.
+        // The T_H = 4000 K here is an ORACLE EVALUATION POINT, arbitrary and FROZEN with its hand-computed pair (the
+        // ~385 days exists FOR it); NOT the retired production constant, which reads the per-star BHAC15 grid
+        // (civsim_physics::hayashi_wall) as of the retirement commit. Moved only if the mapping itself changes, at
+        // which point the whole pair recomputes by the independent closed-form route stated above.
         let c = Fixed::from_ratio(3, 2); // C = 1.5
         let tau = pre_main_sequence_convective_turnover_days(Fixed::ONE, Fixed::from_int(4000), c)
             .unwrap();
