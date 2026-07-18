@@ -3532,6 +3532,51 @@ mod tests {
     }
 
     #[test]
+    fn the_all_brittle_thin_lid_is_unreachable_the_founding_case() {
+        // BLOCK-2 RECEIPT (owner ruling 2026-07-18): the finding graduated from narrative to a measured number.
+        // THE MECHANISM, stated so the instance generalizes: a lid is all-brittle iff its base sits ABOVE the
+        // brittle-ductile crossover; the base rides the INTERIOR temperature (the geotherm's deep end); and a THIN
+        // lid means a high Rayleigh number, which through the Arrhenius viscosity means a vigorous, HOT interior. So
+        // thin couples to hot couples to a creeping base: an all-brittle THIN lid is unreachable via the linear form.
+        // CONDITIONING (declared): the ramp-fixture geotherm (273 K to 1600 K over 100 km) at the load's convective
+        // strain rate, through the landed ductile branch; the referee that reads ductile-vs-convective-stress is
+        // `referee_conductive_lid_base`, witnessed by `the_lid_referee_verdict_rides_the_banded_plate`.
+        let volumes = [table2_volume_fixture()];
+        let creep = [CreepCandidate {
+            row: hk_dry_dislocation(),
+            volumes: &volumes,
+        }];
+        let geotherm = ramp_geotherm;
+        let env = earth_like_lid(&creep, &geotherm, Fixed::from_int(1_000_000_000));
+        // The crossover: the shallowest kilometre where the ductile branch DETERMINES (the rock creeps) rather than
+        // running past what the type can hold. It is a property of the geotherm, not of any lid depth.
+        let crossover_km = (5..=80)
+            .find(|&z| {
+                matches!(
+                    env.ductile(Fixed::from_int(z), VolumeEnd::Low),
+                    DuctileReading::Determined(_)
+                )
+            })
+            .expect("the ramp geotherm crosses into creep within the lid");
+        // The thinnest lid the LINEAR form can reach: Ra = 1e9 gives about 34.5 km at d = 2890 (a higher Ra, which a
+        // thinner cold lid would need, overflows Q32.32 before it forms).
+        let thinnest = ConductiveLidBase::from_rayleigh(
+            Fixed::from_int(2890),
+            Fixed::from_int(1_000_000_000),
+            Fixed::from_ratio(1_707_762, 1000),
+        )
+        .expect("thinnest reachable lid")
+        .depth_km();
+        assert!(
+            (crossover_km as f64) < f64_of(thinnest),
+            "the brittle-ductile crossover is at {crossover_km} km, shallower than the thinnest reachable lid base \
+             {} km, so even the thinnest lid has its base past the crossover and creeping: all-brittle needs a lid \
+             shallower than the crossover, which needs a Rayleigh number the linear form cannot represent",
+            f64_of(thinnest)
+        );
+    }
+
+    #[test]
     fn the_conductive_lid_base_is_derived_and_carries_that_derivation_in_its_type() {
         // THE DOMAIN THE MOMENT INTEGRAL NEEDS, and the reason it needs one: the integrand does NOT die (see
         // `bending_moment`), so the integral is bounded at the conductive-lid base, below which the mantle
