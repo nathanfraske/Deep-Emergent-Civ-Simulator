@@ -292,7 +292,7 @@ impl SolarAbundances {
 
     /// The CITED SOLAR REFERENCE hydrogen mass fraction `X` (the recommended present-day photospheric value, AGSS09
     /// Table 4), a string. This is the SOLAR TABLE's own recommendation, NOT a live per-instance mass fraction: it
-    /// is EMPTY on a scaled pattern ([`scaled_metals_by_dex`], [`scaled_alpha_by_dex`]), which has no cited
+    /// is EMPTY on a scaled pattern ([`Self::scaled_metals_by_dex`], [`Self::scaled_alpha_by_dex`]), which has no cited
     /// recommendation of its own. For the live per-instance mass fraction that tracks any scaling, use
     /// [`mass_fractions`](Self::mass_fractions), which computes from the rows rather than caching a copy that
     /// drifts.
@@ -325,7 +325,7 @@ impl SolarAbundances {
     /// contributes `n_X/n_H = 10^(log_eps - 12)` times its atomic weight to the mass, and the three fractions are
     /// the hydrogen, helium, and heavier-than-helium shares of that total mass. This is the same-fact-ONE-door
     /// form of the cited `x_mass_fraction`-family getters: it COMPUTES from the rows rather than caching a copy,
-    /// so it TRACKS a scaling (a [`scaled_metals_by_dex`] pattern's `z` rises, its `x` falls) where the cached
+    /// so it TRACKS a scaling (a [`Self::scaled_metals_by_dex`] pattern's `z` rises, its `x` falls) where the cached
     /// getters would go stale. The solar pattern's derived value reproduces the AGSS09 recommendation (asserted in
     /// the tests), so the cited getters are the reference and this is the live instance. `None` if an element
     /// carries no periodic atomic weight (a data gap) or the total mass is non-positive.
