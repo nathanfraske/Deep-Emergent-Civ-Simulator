@@ -42,18 +42,30 @@ if [ -n "$docs_changed" ] && [ -z "$mem_changed" ]; then
   exit 2
 fi
 
-# Roadmap living-document gate, with the FEATURE STATUS BOARD as its point. If source
+# Roadmap living-document gate, with the LEAN POINTER BOARD as its point. If source
 # (crates/**) or the design/roadmap documents changed this session but the consensus
 # roadmap was not touched, block: a segment that changed source almost always moved an
-# item on the status board (a NOT DONE to DONE, a GATE cleared, a new arc flagged), and the
-# board must never go stale. Only fires when the roadmap exists, so it is inert until then.
+# item on the board (an arc advanced, a gate cleared, a landing tombstoned, a new arc
+# flagged), and the board must never go stale. Only fires when the roadmap exists.
 roadmap_file="docs/working/CONSENSUS_ROADMAP.md"
 if [ -f "$roadmap_file" ]; then
   work_changed="$(git -C "$ROOT" status --porcelain -- crates docs/design.md docs/audit.md ROADMAP.md 2>/dev/null)"
   roadmap_changed="$(git -C "$ROOT" status --porcelain -- "$roadmap_file" 2>/dev/null)"
   if [ -n "$work_changed" ] && [ -z "$roadmap_changed" ]; then
     echo "stop-gate: source or design files changed but the CONSENSUS_ROADMAP was not updated." >&2
-    echo "Edit ONLY the 'Feature status board' item(s) this segment moved, IN PLACE, and nothing else: sign off a done feature (tombstone it where it stands, flip its status to DONE, and point to where the work landed by a file or test), or deprecate/re-classify a section, or add a newly-flagged item citing its gate (an R-item, a Part number, or a file). Do NOT append a new dated section, do NOT rewrite the whole board, and do NOT touch unrelated segments. The board is a living in-place tracker, not an append log; that is the point." >&2
+    echo "Edit ONLY the line(s) this segment moved, IN PLACE, and nothing else. Every entry is ONE short line: a date, a few words, and a pointer (a branch, a PR, a file, or a doc). Move a line when its item moves, tombstone a landed item under 'Recent landings' with its pointer, prune stale landings, or add a newly-flagged item citing its gate. The detail lives BEHIND the pointer: do NOT inline it, do NOT append a dated narrative (that is HANDOFFS.md), do NOT rewrite the whole board, and do NOT touch unrelated lines. The board is a lean in-place pointer board, not an append log; that is the point." >&2
+    exit 2
+  fi
+fi
+
+# Roadmap size guard, the other half of the lean form. The board balloons whenever a segment
+# pastes its detail inline instead of pointing at it, which is how the old board reached half a
+# megabyte and made every parallel agent collide on it. A hard byte cap keeps the board a board.
+if [ -f "$roadmap_file" ]; then
+  roadmap_bytes="$(wc -c < "$ROOT/$roadmap_file" 2>/dev/null || echo 0)"
+  if [ "$roadmap_bytes" -gt 16384 ]; then
+    echo "stop-gate: the CONSENSUS_ROADMAP is $roadmap_bytes bytes, over the 16384-byte cap." >&2
+    echo "Trim it back to one short line per item (a date, a few words, a pointer). Move any inlined detail behind its pointer, and prune tombstoned landings that have gone stale. The retired long-form board is docs/working/CONSENSUS_ROADMAP_HISTORY.md; do not grow the live board back into it." >&2
     exit 2
   fi
 fi
