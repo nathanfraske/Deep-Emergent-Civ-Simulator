@@ -939,6 +939,179 @@ pub fn centrifugal_radius_au(
     Some(ln_rc.exp())
 }
 
+/// The GOLDSMITH THERMAL-BALANCE MODEL: the cited scalar coefficients of the dark-cloud-core gas-temperature
+/// balance (Goldsmith 2001, ApJ 557, 736), the fixed physics [`cloud_core_thermal_balance_temperature_k`] solves.
+/// The FORM is fixed Rust; these coefficients are the paper's own numbers, a declared model the way
+/// [`CollapseModel`] and [`SpinDownModel`] carry theirs, so a recalibration is a data row. The wide coefficients
+/// are stored as their base-ten log (the [`XrayWindFit`] idiom) because the raw rates underflow the Q32.32 range.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct GoldsmithThermalModel {
+    /// `log10` of the cosmic-ray heating energy deposited per ionization `dQ` (erg). Goldsmith adopts `dQ ~ 20 eV`
+    /// (`= 3.204e-11 erg`), so the heating rate is `Gamma = zeta * dQ * n(H2)` (eq. 3, linear in density, no
+    /// temperature dependence). The ionization rate `zeta` is the caller's explicit argument, not baked here.
+    pub cr_energy_log10_erg: Fixed,
+    /// `log10` of the gas-dust collisional-coupling coefficient (eq. 15): `Lambda_gd = 2e-33 * n(H2)^2 * (T_gas -
+    /// T_dust) * (T_gas/10)^0.5` erg cm^-3 s^-1, the `n^2` term that pins the gas to the dust above `n ~ 1e4`.
+    pub gas_dust_coeff_log10: Fixed,
+    /// The gas-dust cooling's temperature power, `0.5` (eq. 15's `(T_gas/10)^0.5`).
+    pub gas_dust_temp_power: Fixed,
+    /// The `10 K` reference temperature both the line-cooling `(T/10)^b` (eq. 1) and the gas-dust `(T/10)^0.5`
+    /// (eq. 15) are normalized to.
+    pub reference_temp_k: Fixed,
+}
+
+impl GoldsmithThermalModel {
+    /// Goldsmith 2001, the vendored coefficients (ApJ 557, 736; DOI 10.1086/322255; receipt in the
+    /// disk_arc_literature manifest, bytes in the restricted store per the paywalled-source carve-out): the
+    /// cosmic-ray heating `dQ ~ 20 eV` (eq. 3), the gas-dust coupling `2e-33` (eq. 15), the `10 K` reference.
+    pub fn goldsmith_2001() -> Self {
+        Self {
+            cr_energy_log10_erg: Fixed::from_ratio(-104942, 10_000), // log10(3.204e-11), dQ = 20 eV
+            gas_dust_coeff_log10: Fixed::from_ratio(-326990, 10_000), // log10(2e-33), eq. 15
+            gas_dust_temp_power: Fixed::from_ratio(1, 2),            // (T/10)^0.5, eq. 15
+            reference_temp_k: Fixed::from_int(10),
+        }
+    }
+}
+
+/// The LINE-COOLING FIT `Lambda_line = a (T/10)^b` (Goldsmith 2001 eq. 1): the abundance-and-depletion-conditioned
+/// power-law fit the caller reads from the vendored Table 2 (undepleted) or Table 4 (depleted) for its density and
+/// depletion regime. `log10_a` is `log10` of the coefficient `a` (erg cm^-3 s^-1, which underflows Q32.32 raw), `b`
+/// the temperature index. This is the abundance-set input to the balance, carried as a fit rather than a raw
+/// abundance because the cooling is the tabulated CO-network result, not a closed form.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct LineCoolingFit {
+    /// `log10` of the line-cooling coefficient `a` in `Lambda_line = a (T/10)^b`.
+    pub log10_a: Fixed,
+    /// The temperature index `b`.
+    pub b: Fixed,
+}
+
+/// The MOLECULAR CLOUD-CORE gas temperature `T_core` (K), DERIVED by SOLVING the Goldsmith (2001) thermal balance
+/// rather than drawn from a distribution. In a well-shielded dark core the gas temperature settles where the
+/// volumetric cosmic-ray heating equals the volumetric cooling: `Gamma_CR(zeta, n) = Lambda_line(n, T) +
+/// Lambda_gd(n, T, T_dust)`. This is the DERIVE-FIRST terminus (route two) of the reserved
+/// `disk_clock.cloud_core_temperature_k`: at this rung the birth temperature the Shu collapse reads stops being a
+/// drawn interim and becomes SOLVED from the core's own conditions, and the measured Jijina distribution demotes to
+/// a validation hindcast (the derived `T` at dark-core inputs must land inside the surveyed ~12 to 20 K spread).
+///
+/// The value line, and why it needs no schema: every physical input is an EXPLICIT named argument, the
+/// [`centrifugal_radius_au`] precedent, so the kernel owns the balance and nothing else and depends on no data
+/// layout. The cosmic-ray ionization rate enters in units of `1e-17 s^-1` (its dark-core scale, so the order-one
+/// argument stays representable), the H2 number density in `cm^-3`, the dust temperature in K (the radiation-field
+/// coupled sink the gas-dust term pulls toward), the line-cooling fit `(log10 a, b)` of `Lambda_line = a
+/// (T/10)^b` (eq. 1, the abundance-and-depletion-conditioned Table 2 / Table 4 fit the caller supplies for its
+/// regime), and the CMB floor. The cited scalar coefficients live in [`GoldsmithThermalModel`]. Zero fabricated
+/// values: the model numbers are Goldsmith's own (vendored), the state is per-core data (admit the alien).
+///
+/// Solved by bounded bisection over `[cmb_floor, t_hi]` (the [`disk_midplane_temperature`] pattern): at a trial
+/// `T` the net `Gamma - Lambda_line - Lambda_gd` is positive when heating wins (the gas wants to be hotter, raise
+/// the floor) and negative when cooling wins. Each rate is formed in the log domain and exponentiated into a
+/// common scaled linear domain (units of `1e-24 erg cm^-3 s^-1`) so the tiny CGS rates neither underflow nor lose
+/// their SIGN: the gas-dust term is signed by `T - T_dust`, so below the dust temperature it HEATS the gas rather
+/// than cooling it, which a pure-log sum could not represent. The result is clamped at the CMB floor (a core
+/// cannot be colder than the microwave background; the epoch `(1+z)` scaling of that floor is the named debt).
+///
+/// TERMS DROPPED, named at the site. Photoelectric and UV heating are omitted, valid for a well-shielded core and
+/// the named debt at the irradiated edge or PDR. Turbulent and compressional (adiabatic) heating are omitted,
+/// valid for a quiescent core and named at the collapsing or shocked edge. The line cooling is the dominant CO
+/// network folded into the caller's `(a, b)` fit; the fuller coolant set and the optical-depth moderation of
+/// depletion (Goldsmith's finding that a hundredfold abundance drop cuts the cooling only a few fold) live in that
+/// fit, which the caller reads from the vendored table. The dust temperature is taken as an explicit input rather
+/// than co-solved from the attenuated interstellar field through the dust balance (eqs. 13, 18), which is the named
+/// follow-on that would make the radiation-field scaling `chi` the argument and derive `T_dust` too. `None` on a
+/// non-physical input, a bracket that does not straddle the floor, or a rate past the representable range.
+///
+// @derives: the molecular cloud-core gas temperature T_core <- the Goldsmith thermal balance of cosmic-ray heating against gas-dust coupling and molecular line cooling, over the ionization rate, density, dust temperature, line-cooling fit, and the CMB floor
+pub fn cloud_core_thermal_balance_temperature_k(
+    cosmic_ray_ionization_rate_per_1e17_s: Fixed,
+    h2_number_density_cm3: Fixed,
+    dust_temperature_k: Fixed,
+    line_cooling: LineCoolingFit,
+    cmb_floor_k: Fixed,
+    model: &GoldsmithThermalModel,
+    t_hi: Fixed,
+) -> Option<Fixed> {
+    if cosmic_ray_ionization_rate_per_1e17_s <= Fixed::ZERO
+        || h2_number_density_cm3 <= Fixed::ZERO
+        || dust_temperature_k <= Fixed::ZERO
+        || cmb_floor_k <= Fixed::ZERO
+        || line_cooling.b <= Fixed::ZERO
+        || t_hi <= cmb_floor_k
+    {
+        return None;
+    }
+    fn exp_guarded(x: Fixed, ln_ceiling: Fixed) -> Option<Fixed> {
+        if x >= ln_ceiling {
+            None
+        } else {
+            Some(x.exp())
+        }
+    }
+    let ln_ceiling = Fixed::from_int(31).checked_mul(Fixed::from_int(2).ln())?;
+    let ln10 = Fixed::from_int(10).ln();
+    let ln_n = h2_number_density_cm3.ln();
+    let two_ln_n = Fixed::from_int(2).checked_mul(ln_n)?;
+    // The common scale R = 1e-24 erg cm^-3 s^-1: the dark-core cooling magnitude, so every rate divided by it is
+    // order one to order a few thousand across n = 1e3 to 1e6, representable in Q32.32.
+    let ln_scale = civsim_physics::saha::ln_of_decimal("1e-24")?;
+    let ln_ref_t = model.reference_temp_k.ln();
+    // ln Gamma_CR = ln(zeta) + ln(dQ) + ln(n), with zeta = argument * 1e-17 s^-1 and ln(dQ) = log10(dQ) * ln(10).
+    let ln_zeta = cosmic_ray_ionization_rate_per_1e17_s
+        .ln()
+        .checked_add(civsim_physics::saha::ln_of_decimal("1e-17")?)?;
+    let ln_gamma = ln_zeta
+        .checked_add(model.cr_energy_log10_erg.checked_mul(ln10)?)?
+        .checked_add(ln_n)?;
+    let gamma_scaled = exp_guarded(ln_gamma.checked_sub(ln_scale)?, ln_ceiling)?;
+    let ln_a = line_cooling.log10_a.checked_mul(ln10)?;
+    let ln_gd_coeff = model.gas_dust_coeff_log10.checked_mul(ln10)?;
+    // net(T) = (Gamma - Lambda_line - Lambda_gd) / R, the sign the bisection reads.
+    let net = |t: Fixed| -> Option<Fixed> {
+        if t <= Fixed::ZERO {
+            return None;
+        }
+        let ln_t_over_ref = t.ln().checked_sub(ln_ref_t)?;
+        let ln_line = ln_a.checked_add(line_cooling.b.checked_mul(ln_t_over_ref)?)?;
+        let line_scaled = exp_guarded(ln_line.checked_sub(ln_scale)?, ln_ceiling)?;
+        let dt = t.checked_sub(dust_temperature_k)?;
+        let gd_scaled = if dt == Fixed::ZERO {
+            Fixed::ZERO
+        } else {
+            let abs_dt = if dt < Fixed::ZERO {
+                Fixed::ZERO.checked_sub(dt)?
+            } else {
+                dt
+            };
+            let ln_gd = ln_gd_coeff
+                .checked_add(two_ln_n)?
+                .checked_add(abs_dt.ln())?
+                .checked_add(model.gas_dust_temp_power.checked_mul(ln_t_over_ref)?)?;
+            let mag = exp_guarded(ln_gd.checked_sub(ln_scale)?, ln_ceiling)?;
+            if dt < Fixed::ZERO {
+                Fixed::ZERO.checked_sub(mag)? // below the dust temperature the coupling HEATS the gas
+            } else {
+                mag
+            }
+        };
+        gamma_scaled
+            .checked_sub(line_scaled)?
+            .checked_sub(gd_scaled)
+    };
+    let mut lo = cmb_floor_k;
+    let mut hi = t_hi;
+    for _ in 0..60 {
+        let mid = lo.checked_add(hi)?.checked_div(Fixed::from_int(2))?;
+        if net(mid)? > Fixed::ZERO {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    let t = lo.checked_add(hi)?.checked_div(Fixed::from_int(2))?;
+    Some(if t < cmb_floor_k { cmb_floor_k } else { t })
+}
+
 /// The DISK ACCRETION-RATE CLOCK (the disk-evolution arc, slice 1): the Lynden-Bell-Pringle self-similar decline
 /// (Hartmann et al. 1998), `Mdot(t) = Mdot_0 * (1 + t / t_visc) ^ (-p)` with the decline exponent
 /// `p = (5/2 - gamma) / (2 - gamma)` set by the viscous-spreading exponent `gamma` (the same `gamma ~ 1` gate-G
@@ -5742,6 +5915,146 @@ mod tests {
             Fixed::from_int(400),
             onset,
             &sku
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn the_thermal_balance_derives_the_cloud_core_temperature_against_goldsmith_table_five() {
+        // The DERIVE-FIRST retirement (route two) of the reserved cloud-core temperature: the Goldsmith 2001
+        // thermal balance (cosmic-ray heating = molecular line cooling + gas-dust coupling) SOLVES T_core from the
+        // core's own conditions, so the birth temperature the Shu collapse reads becomes derived, not drawn, and the
+        // measured Jijina distribution demotes to a validation hindcast. Coefficients are the vendored Goldsmith
+        // numbers (disk_arc_literature manifest).
+        let m = GoldsmithThermalModel::goldsmith_2001();
+        assert_eq!(m.cr_energy_log10_erg, Fixed::from_ratio(-104942, 10_000)); // log10(20 eV in erg)
+        assert_eq!(m.gas_dust_coeff_log10, Fixed::from_ratio(-326990, 10_000)); // log10(2e-33), eq. 15
+                                                                                // The heating input: zeta ~ 3.12e-17 s^-1 reproduces the paper's intermediate 1e-27*n heating coefficient
+                                                                                // (zeta * dQ, dQ = 20 eV), so the solve is comparable to Table 5 (which uses that heating).
+        let zeta = Fixed::from_ratio(3121, 1000); // in units of 1e-17 s^-1
+        let cmb = Fixed::from_ratio(273, 100); // present-epoch CMB floor 2.73 K
+        let t_hi = Fixed::from_int(50);
+        // The line-cooling fits are the Goldsmith Table 2 (undepleted) power-law members for each density.
+        let fit_1e3 = LineCoolingFit {
+            log10_a: Fixed::from_ratio(-239586, 10_000), // log10(1.1e-24)
+            b: Fixed::from_ratio(24, 10),                // 2.4
+        };
+        let fit_1e4 = LineCoolingFit {
+            log10_a: Fixed::from_ratio(-232518, 10_000), // log10(5.6e-24)
+            b: Fixed::from_ratio(27, 10),                // 2.7
+        };
+        let fit_1e6 = LineCoolingFit {
+            log10_a: Fixed::from_ratio(-223098, 10_000), // log10(4.9e-23)
+            b: Fixed::from_ratio(34, 10),                // 3.4
+        };
+        // VALIDATION (reported, never gated, the replacement-circularity discipline): a dark core at n=1e4 cm^-3,
+        // undepleted, T_dust=6.53 K settles near Table 5's 11.4 K. Reported inside a band that brackets the paper,
+        // never asserted to the measured value it would otherwise calibrate against.
+        let t_1e4 = cloud_core_thermal_balance_temperature_k(
+            zeta,
+            Fixed::from_int(10_000),
+            Fixed::from_ratio(653, 100),
+            fit_1e4,
+            cmb,
+            &m,
+            t_hi,
+        )
+        .expect("the thermal balance resolves for a dark core");
+        assert!(
+            t_1e4.to_f64_lossy() > 10.0 && t_1e4.to_f64_lossy() < 13.0,
+            "the n=1e4 dark core settles ~11 K, the order of Goldsmith Table 5's 11.4 K (got {})",
+            t_1e4.to_f64_lossy()
+        );
+        // MECHANISM, more cosmic-ray heating raises T_gas: doubling zeta lifts the equilibrium.
+        let t_hot = cloud_core_thermal_balance_temperature_k(
+            Fixed::from_int(6),
+            Fixed::from_int(10_000),
+            Fixed::from_ratio(653, 100),
+            fit_1e4,
+            cmb,
+            &m,
+            t_hi,
+        )
+        .unwrap();
+        assert!(
+            t_hot > t_1e4,
+            "more cosmic-ray heating raises the gas temperature ({} vs {})",
+            t_hot.to_f64_lossy(),
+            t_1e4.to_f64_lossy()
+        );
+        // MECHANISM, the n^2 gas-dust coupling pins the gas to the dust at high density: at n=1e6 the gas-dust term
+        // dominates so |T_gas - T_dust| is small, where at n=1e3 the line cooling sets T_gas well above T_dust.
+        let td_hi_n = Fixed::from_ratio(763, 100); // T_dust = 7.63 K (Table 5, n=1e6)
+        let t_1e6 = cloud_core_thermal_balance_temperature_k(
+            zeta,
+            Fixed::from_int(1_000_000),
+            td_hi_n,
+            fit_1e6,
+            cmb,
+            &m,
+            t_hi,
+        )
+        .unwrap();
+        let gap_1e6 = t_1e6.checked_sub(td_hi_n).unwrap().to_f64_lossy();
+        assert!(
+            gap_1e6 < 1.5,
+            "at n=1e6 the gas-dust coupling pins T_gas near T_dust (gap {} K)",
+            gap_1e6
+        );
+        let td_lo_n = Fixed::from_ratio(618, 100); // T_dust = 6.18 K (Table 5, n=1e3)
+        let t_1e3 = cloud_core_thermal_balance_temperature_k(
+            zeta,
+            Fixed::from_int(1_000),
+            td_lo_n,
+            fit_1e3,
+            cmb,
+            &m,
+            t_hi,
+        )
+        .unwrap();
+        let gap_1e3 = t_1e3.checked_sub(td_lo_n).unwrap().to_f64_lossy();
+        assert!(
+            gap_1e3 > gap_1e6,
+            "a low-density core's gas sits farther above its dust (gap n=1e3 {} > n=1e6 {})",
+            gap_1e3,
+            gap_1e6
+        );
+        // THE CMB FLOOR: a core cannot be colder than the microwave background. A high-z floor (15 K = 2.73*(1+z),
+        // z~4.5) that exceeds the equilibrium clamps the result at the floor rather than returning below it.
+        let t_floored = cloud_core_thermal_balance_temperature_k(
+            zeta,
+            Fixed::from_int(10_000),
+            Fixed::from_ratio(653, 100),
+            fit_1e4,
+            Fixed::from_int(15),
+            &m,
+            t_hi,
+        )
+        .unwrap();
+        assert!(
+            (t_floored.to_f64_lossy() - 15.0).abs() < 0.5,
+            "the derived temperature clamps at the CMB floor when the floor exceeds the equilibrium (got {})",
+            t_floored.to_f64_lossy()
+        );
+        // Non-physical inputs fail soft, never a fabricated temperature.
+        assert!(cloud_core_thermal_balance_temperature_k(
+            Fixed::ZERO,
+            Fixed::from_int(10_000),
+            Fixed::from_ratio(653, 100),
+            fit_1e4,
+            cmb,
+            &m,
+            t_hi,
+        )
+        .is_none());
+        assert!(cloud_core_thermal_balance_temperature_k(
+            zeta,
+            Fixed::from_int(10_000),
+            Fixed::from_ratio(653, 100),
+            fit_1e4,
+            cmb,
+            &m,
+            cmb, // t_hi = floor, no bracket
         )
         .is_none());
     }
