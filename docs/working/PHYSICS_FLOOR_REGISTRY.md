@@ -21,7 +21,7 @@ The 12 deriving subsystems below live OUTSIDE the authored floor. Each produces 
 
 ### `crates/sim/src/astro.rs`
 
-- the protostellar disk birth accretion rate Mdot_0 <- the inside-out collapse rate m0*c_s^3/G over the cloud-core temperature, the disk-gas mean molecular weight, and the declared collapse model (`crates/sim/src/astro.rs:817`)
+- the protostellar disk birth accretion rate Mdot_0 <- the inside-out collapse rate m0*c_s^3/G over the cloud-core temperature, the disk-gas mean molecular weight, and the declared collapse model (`crates/sim/src/astro.rs:828`)
 ### `crates/sim/src/clock.rs`
 
 - a world's year/day/season in TICKS, and the cell area in metres <- the world's orbit (world-seconds) divided by the base tick (1 tick = 1 world-second, reserved). The calendar is NOT a hardcoded 365 days; it falls out of the orbit and the tick. The cell edge derives as a reference creature's real ground speed (m/s) x 1 s/tick (see locomotion base_speed), cross-checked by NPP density x cell area = standing crop. (`crates/sim/src/clock.rs:81`)
