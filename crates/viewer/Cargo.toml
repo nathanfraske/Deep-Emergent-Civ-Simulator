@@ -40,6 +40,16 @@ minifb = "0.27"
 # count). Display-only work off the canon run path (Principle 10); no determinism-critical crate depends on the
 # viewer, and the fixed-point per-cell math is thread-count-independent.
 rayon = "1"
+# NON-CANON GPU globe render (design Part 14, Principle 10), OFF by default so a plain `cargo build`/`cargo test`
+# stays lean and CUDA-free (civsim-gpu carries the heavy CubeCL dependency): the viewer shades the ~1M-pixel globe
+# disk on the GPU when built `--features gpu` and a CUDA device is present, else it falls back to the CPU
+# `render::draw_globe`. A one-way display consumer; no determinism-critical crate depends on the viewer.
+civsim-gpu = { path = "../gpu", optional = true }
+
+[features]
+# Enable the GPU globe render path (the CubeCL/CUDA kernel in civsim-gpu::globe). Auto-detected at run time: with
+# the feature AND a device it renders on the GPU, otherwise it uses the CPU renderer.
+gpu = ["dep:civsim-gpu"]
 
 [lints.clippy]
 # R-CANON-WALK is scoped to the canonical tick-state crates (core, sim, world);

@@ -4090,6 +4090,29 @@ fn run_derived(argv: &[String]) {
     let mut flash_holds: Vec<Vec<FlashHold>> = planets.iter().map(|_| Vec::new()).collect();
     let mut orbit_phase = 0.0f64;
     let mut last_instant = std::time::Instant::now();
+    // NON-CANON GPU globe render (design Part 14, Principle 10): auto-detect a CUDA device once at startup and
+    // shade the ~1M-pixel globe disk on it; `None` falls back to the CPU `render::draw_globe`. `CIVSIM_VIEWER_CPU`
+    // forces the CPU path (for an A/B comparison). Behind the `gpu` feature; a GPU-less build is unchanged.
+    #[cfg(feature = "gpu")]
+    let mut gpu_globe: Option<civsim_gpu::globe::CudaGlobeRenderer> = if std::env::var(
+        "CIVSIM_VIEWER_CPU",
+    )
+    .is_ok()
+    {
+        eprintln!("  globe render: CPU (CIVSIM_VIEWER_CPU set)");
+        None
+    } else {
+        match civsim_gpu::globe::try_cuda_renderer() {
+            Some(r) => {
+                eprintln!("  globe render: GPU (CUDA device detected, the 5090 path)");
+                Some(r)
+            }
+            None => {
+                eprintln!("  globe render: CPU (no CUDA device; build --features gpu with a device for the GPU path)");
+                None
+            }
+        }
+    };
 
     while window.is_open() {
         let (w, h) = window.get_size();
@@ -4447,7 +4470,9 @@ fn run_derived(argv: &[String]) {
                 // formation, quadratic ease-out, mirroring the epoch-window flash's shape but measured in rendered
                 // frames rather than clock ticks), so a strike is SEEN landing at any playback speed even when the
                 // deep-time clock jumps many ticks in one frame. Built from the current holds, then aged one rendered
-                // frame unless paused (pause freezes the bloom with the world). Empty once the holds drain.
+                // frame unless paused (pause freezes the bloom with the world). Empty once the holds drain. The GPU
+                // path carries these unchanged: the flash is not part of the resident per-cell cache, it is a small
+                // per-frame array summed per pixel in the kernel, so the bloom fades per FRAME on both paths.
                 let flash: Vec<render::ImpactFlash> = match scene.provinces.as_ref() {
                     Some(prov) => flash_holds[planet]
                         .iter()
@@ -4469,27 +4494,71 @@ fn run_derived(argv: &[String]) {
                     }
                     holds.retain(|h| h.frames_remaining > 0);
                 }
-                render::draw_globe_scene(
-                    &mut buf,
-                    w,
-                    h,
-                    gcx,
-                    gcy,
-                    radius_px,
-                    &scene.tiles,
-                    scene.param,
-                    scene.t_eff,
-                    star_dir,
-                    None,
-                    scene.sky,
-                    style,
-                    orient,
-                    // The DERIVED lava glow: molten provinces emit their incandescent colour, bright on the night side
-                    // too, and it fades as the deep-time clock cools the world. Empty (no glow) on the uniform crust.
-                    (!scene.lava.is_empty()).then_some(scene.lava.as_slice()),
-                    field.as_ref(),
-                    (!flash.is_empty()).then_some(flash.as_slice()),
-                );
+                let t_render = std::time::Instant::now();
+                // The GPU path shades the globe disk on the 5090 (design Part 14, Principle 10); the per-cell
+                // shading cache re-uploads only on an epoch change (a deep-time step or a scene switch), keyed by the
+                // planet index and the deep-time clock, so a rotate / zoom reuses it. The CPU path is the fallback.
+                #[cfg(feature = "gpu")]
+                let rendered_gpu = if let Some(gpu) = gpu_globe.as_mut() {
+                    let elapsed_bits = scene
+                        .provinces
+                        .as_ref()
+                        .map(|p| p.state.elapsed_myr.to_bits())
+                        .unwrap_or(0) as u64;
+                    let scene_epoch = (planet as u64)
+                        .wrapping_mul(0x9E37_79B9_7F4A_7C15)
+                        .wrapping_add(elapsed_bits);
+                    render::draw_globe_scene_gpu(
+                        gpu,
+                        scene_epoch,
+                        &mut buf,
+                        w,
+                        h,
+                        gcx,
+                        gcy,
+                        radius_px,
+                        &scene.tiles,
+                        scene.param,
+                        scene.t_eff,
+                        star_dir,
+                        None,
+                        scene.sky,
+                        style,
+                        orient,
+                        (!scene.lava.is_empty()).then_some(scene.lava.as_slice()),
+                        field.as_ref(),
+                        (!flash.is_empty()).then_some(flash.as_slice()),
+                    );
+                    true
+                } else {
+                    false
+                };
+                #[cfg(not(feature = "gpu"))]
+                let rendered_gpu = false;
+                if !rendered_gpu {
+                    render::draw_globe_scene(
+                        &mut buf,
+                        w,
+                        h,
+                        gcx,
+                        gcy,
+                        radius_px,
+                        &scene.tiles,
+                        scene.param,
+                        scene.t_eff,
+                        star_dir,
+                        None,
+                        scene.sky,
+                        style,
+                        orient,
+                        // The DERIVED lava glow: molten provinces emit their incandescent colour, bright on the night
+                        // side too, and it fades as the deep-time clock cools the world. Empty on the uniform crust.
+                        (!scene.lava.is_empty()).then_some(scene.lava.as_slice()),
+                        field.as_ref(),
+                        (!flash.is_empty()).then_some(flash.as_slice()),
+                    );
+                }
+                let render_ms = t_render.elapsed().as_secs_f64() * 1000.0;
                 // Cursor -> surface pick and highlight (fail-soft off the sphere).
                 let picked = mouse_pos.and_then(|(mx, my)| {
                     render::pick_surface_tile(
@@ -4572,6 +4641,19 @@ fn run_derived(argv: &[String]) {
                 // (the drill-down onto the elevation field), else GLOBE (the whole planet still fits).
                 let tier = if show_grid { "SURFACE" } else { "GLOBE" };
                 draw_zoom_readout(&mut buf, w, h, m_per_px.to_f64_lossy(), tier);
+                // The render cost + path (GPU on the 5090, or CPU), so the owner sees the per-frame shading time.
+                let render_path = if rendered_gpu { "GPU" } else { "CPU" };
+                render::draw_label(
+                    &mut buf,
+                    w,
+                    h,
+                    4,
+                    48,
+                    &format!("render {render_ms:.1} ms  {render_path}"),
+                    1,
+                    Rgb::new(150, 210, 170),
+                    Rgb::new(10, 12, 20),
+                );
                 if show_provenance {
                     let lines = provenance_lines(scene, floor_prov.as_ref(), picked);
                     let panel_w = 372usize;

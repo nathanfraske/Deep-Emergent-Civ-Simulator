@@ -37,6 +37,8 @@ use civsim_sim::genesis::LivingWorld;
 use civsim_sim::geodynamics::DerivedTile;
 use civsim_world::terrain::TerrainRelief;
 use civsim_world::{BiomeSet, Coord3, Rgb, TopologySpace};
+#[cfg(feature = "gpu")]
+use rayon::prelude::*;
 
 /// The colour of an organism mark: a base hue by trophic layer, jittered per species so each
 /// kind is a distinct individual form. Presentation only, never canonical state.
@@ -2179,6 +2181,37 @@ pub fn sub_solar_body_dir(declination: f32, subsolar_longitude: f32) -> [f32; 3]
     [cos_decl * sin_sslon, sin_decl, cos_decl * cos_sslon]
 }
 
+/// A faint neutral ambient so the night hemisphere reads dark but not pure black (skyglow and starlight). NON-CANON
+/// display (Principle 10); hoisted to module scope so [`draw_globe`] and the GPU per-cell cache builders share it.
+pub const AMBIENT: f32 = 0.10;
+/// NON-CANON DISPLAY: the lava-glow emission brightness gain, the one display scale the self-emitted incandescence
+/// is allowed (a sibling of `AMBIENT`, the relief palette, and the sky's `DISPLAY_OPACITY_UNIT`: the observability
+/// layer's allowance, Principle 10). The glow add per channel is `emission_channel * intensity * GAIN`, where the
+/// emission colour is the blackbody of the tile's DERIVED interior temperature (physics, the hue) and the intensity
+/// is its DERIVED melt fraction (physics, zero below the world's own solidus). This scale maps that physical
+/// partial-melt fraction, which for a silicate mantle saturates near the rheological lock-up (~0.4, the melt
+/// fraction above which the surface behaves as a mobile magma ocean), onto the display's incandescent range: at
+/// ~0.4 melt the tile emits at roughly full brightness (a mobile magma ocean glows fully), so `GAIN ~ 1 / 0.4`. It
+/// scales BRIGHTNESS only; it never moves the threshold (the derived solidus) or the hue (the derived temperature),
+/// and it has zero effect on canon (byte-neutral). Kept modest.
+pub const LAVA_EMISSION_GAIN: f32 = 2.5;
+/// NON-CANON DISPLAY: the IMPACT-FLASH emission brightness gain, a sibling of `LAVA_EMISSION_GAIN` and `AMBIENT`
+/// (the observability layer's allowance, Principle 10). The flash add per channel is `FLASH_COLOR_channel *
+/// emission * GAIN`, where `emission` is the fresh crater's DERIVED time-decay times its DERIVED footprint profile
+/// (both physics, in `[0, 1]`); this scale only maps that onto the display's incandescent range so a strike reads
+/// as a bright bloom that fades. At the flash's peak (a just-formed crater's bowl) this saturates to a white-hot
+/// core, a fresh impact blindingly bright, and dims as the crater's own decay relaxes it to the settled relief. It
+/// scales BRIGHTNESS only, never the timing (the derived formation tick) or the extent (the derived footprint),
+/// and it has zero effect on canon (viewer-only, byte-neutral). Kept the same modest scale as the lava glow.
+pub const FLASH_EMISSION_GAIN: f32 = 2.5;
+/// NON-CANON DISPLAY: the impact-flash HUE, the incandescent white-hot of a fresh strike's shock-melt fireball.
+/// Unlike the lava glow, whose hue is the blackbody of the DERIVED interior temperature, an impact carries no
+/// derived shock temperature in the state (the sim never forms the impact's kinetic energy, which overflows the
+/// fixed-point range: see `civsim_sim::deeptime::bombard_tick`), so the flash hue is a display choice on the same
+/// incandescence family (a hot white, warm at the fading edge), stated plainly. A derived shock temperature would
+/// let this derive like the lava hue; that is the honest limit and the future refinement.
+pub const FLASH_COLOR: Rgb = Rgb::new(255, 246, 224);
+
 /// Draw the planet as a lit sphere: a filled disk of on-screen radius `radius_px` centred at `(cx, cy)`, its
 /// surface textured from the DERIVED tiles (an orthographic sphere map of the relief field, sampled at the surface
 /// direction the globe `orient`ation has rotated under each pixel) and shaded by a Lambert diffuse term against the
@@ -2230,35 +2263,9 @@ pub fn draw_globe(
         light_tint.g as f32 / 255.0,
         light_tint.b as f32 / 255.0,
     ];
-    // A faint neutral ambient so the night hemisphere reads dark but not pure black (skyglow and starlight).
-    const AMBIENT: f32 = 0.10;
-    // NON-CANON DISPLAY: the lava-glow emission brightness gain, the one display scale the self-emitted incandescence
-    // is allowed (a sibling of `AMBIENT`, the relief palette, and the sky's `DISPLAY_OPACITY_UNIT`: the observability
-    // layer's allowance, Principle 10). The glow add per channel is `emission_channel * intensity * GAIN`, where the
-    // emission colour is the blackbody of the tile's DERIVED interior temperature (physics, the hue) and the intensity
-    // is its DERIVED melt fraction (physics, zero below the world's own solidus). This scale maps that physical
-    // partial-melt fraction, which for a silicate mantle saturates near the rheological lock-up (~0.4, the melt
-    // fraction above which the surface behaves as a mobile magma ocean), onto the display's incandescent range: at
-    // ~0.4 melt the tile emits at roughly full brightness (a mobile magma ocean glows fully), so `GAIN ~ 1 / 0.4`. It
-    // scales BRIGHTNESS only; it never moves the threshold (the derived solidus) or the hue (the derived temperature),
-    // and it has zero effect on canon (byte-neutral). Kept modest.
-    const LAVA_EMISSION_GAIN: f32 = 2.5;
-    // NON-CANON DISPLAY: the IMPACT-FLASH emission brightness gain, a sibling of `LAVA_EMISSION_GAIN` and `AMBIENT`
-    // (the observability layer's allowance, Principle 10). The flash add per channel is `FLASH_COLOR_channel *
-    // emission * GAIN`, where `emission` is the fresh crater's DERIVED time-decay times its DERIVED footprint profile
-    // (both physics, in `[0, 1]`); this scale only maps that onto the display's incandescent range so a strike reads
-    // as a bright bloom that fades. At the flash's peak (a just-formed crater's bowl) this saturates to a white-hot
-    // core, a fresh impact blindingly bright, and dims as the crater's own decay relaxes it to the settled relief. It
-    // scales BRIGHTNESS only, never the timing (the derived formation tick) or the extent (the derived footprint),
-    // and it has zero effect on canon (viewer-only, byte-neutral). Kept the same modest scale as the lava glow.
-    const FLASH_EMISSION_GAIN: f32 = 2.5;
-    // NON-CANON DISPLAY: the impact-flash HUE, the incandescent white-hot of a fresh strike's shock-melt fireball.
-    // Unlike the lava glow, whose hue is the blackbody of the DERIVED interior temperature, an impact carries no
-    // derived shock temperature in the state (the sim never forms the impact's kinetic energy, which overflows the
-    // fixed-point range: see `civsim_sim::deeptime::bombard_tick`), so the flash hue is a display choice on the same
-    // incandescence family (a hot white, warm at the fading edge), stated plainly. A derived shock temperature would
-    // let this derive like the lava hue; that is the honest limit and the future refinement.
-    const FLASH_COLOR: Rgb = Rgb::new(255, 246, 224);
+    // AMBIENT, LAVA_EMISSION_GAIN, FLASH_EMISSION_GAIN, and FLASH_COLOR are hoisted to module scope (above), so the
+    // NON-CANON GPU per-cell cache builders ([`globe_cell_base_rgb`] and siblings) share this one source of truth
+    // with the CPU render; their reserved-with-basis rationale is documented at the definitions.
     // SUN-DIRECTION HILLSHADE (the seeable-relief payoff): when relief shading is on and the physical body radius is
     // supplied, the shading normal at each pixel is the sphere normal TILTED by the DERIVED terrain slope, so slopes
     // facing the star are bright and slopes facing away are dark. The relief is lit at its real (unexaggerated)
@@ -2679,6 +2686,318 @@ pub fn draw_globe_scene(
     );
     // The limb wants the VIEW-space sun direction (screen x, y), the projection of the derived body-frame vector.
     let limb_dir = normalize3(body_to_view(star_dir_body, orient));
+    draw_atmosphere_limb(buf, w, h, cx, cy, radius_px, limb_dir, sky);
+}
+
+// ============================================================================================================
+// NON-CANON GPU shading cache builders (Principle 10). These pre-reduce, ONCE per epoch, exactly the DERIVED
+// per-cell shading inputs the GPU globe kernel (`civsim_gpu::globe`) samples: the base albedo, the terrain hillshade
+// normal, and the self-emitted lava and impact-flash adds, each evaluated at the cell CENTRE with the SAME verified
+// helpers `draw_globe` uses per pixel. Moving these off the per-pixel path is what lets the GPU shade run without the
+// O(pixels x craters) analytic gradient the CPU renderer pays; the kernel then samples the cell a pixel lands in.
+// The per-cell (rather than per-pixel) evaluation is the one approximation of the GPU path: within a cell the normal
+// and flash are held at the centre value, so the GPU frame is VISUALLY equal to `draw_globe`, not byte-equal (a
+// non-canon display allowance, Principle 10). All display f32 / packed RGB; they write no canonical state.
+// ============================================================================================================
+
+/// The BODY-frame direction at the CENTRE of surface cell `i` under the cache parameterization `param`, the
+/// representative direction the per-cell shading cache is evaluated at. A pixel that samples cell `i` (via
+/// [`surface_cell_index`]) reads the value built here; the centre round-trips back to `i` through that index by
+/// construction. Display-only f32 (Principle 10).
+#[cfg(feature = "gpu")]
+pub fn surface_cell_center_dir(param: SurfaceParam, i: usize) -> [f32; 3] {
+    use std::f32::consts::FRAC_PI_2;
+    match param {
+        SurfaceParam::LatLon { cols, rows } => {
+            if cols == 0 || rows == 0 {
+                return [0.0, 0.0, 1.0];
+            }
+            let cu = i % cols;
+            let cv = (i / cols).min(rows - 1);
+            let u = (cu as f32 + 0.5) / cols as f32;
+            let v = (cv as f32 + 0.5) / rows as f32;
+            uv_to_body(u, v)
+        }
+        SurfaceParam::CubeSphere { face_res } => {
+            if face_res == 0 {
+                return [0.0, 0.0, 1.0];
+            }
+            let fc = face_res * face_res;
+            let face = (i / fc).min(5);
+            let rem = i % fc;
+            let cj = rem / face_res; // t row
+            let ci = rem % face_res; // s col
+            let s = (ci as f32 + 0.5) / face_res as f32;
+            let t = (cj as f32 + 0.5) / face_res as f32;
+            // The equi-angular face-local direction (the same warp `cube_dir_to_face_st` inverts), then the face
+            // basis into the body frame (the exact inverse of the cube cell index the kernel computes).
+            let (sa, ca) = ((s - 0.5) * FRAC_PI_2).sin_cos();
+            let (sb, cb) = ((t - 0.5) * FRAC_PI_2).sin_cos();
+            let lx = sa * cb;
+            let ly = ca * sb;
+            let lz = ca * cb;
+            let n = (lx * lx + ly * ly + lz * lz).sqrt();
+            let d = if n > 0.0 {
+                [lx / n, ly / n, lz / n]
+            } else {
+                [0.0, 0.0, 1.0]
+            };
+            let (dx, dy, dz) = (d[0], d[1], d[2]);
+            match face {
+                0 => [dz, dy, -dx],  // +x dominant
+                1 => [-dz, dy, dx],  // -x
+                2 => [dx, dz, -dy],  // +y
+                3 => [dx, -dz, dy],  // -y
+                4 => [dx, dy, dz],   // +z
+                _ => [-dx, dy, -dz], // -z
+            }
+        }
+    }
+}
+
+/// The per-cell BASE ALBEDO (packed `0x00RRGGBB`), the colour `draw_globe` paints a cell before lighting: the
+/// DERIVED material tint (`style.tint`) when relief shading is on, that tint scaled by the discrete relief shade
+/// when it is off, or the relief swatch when there is no tint. One entry per tile, in cache order. Display-only.
+#[cfg(feature = "gpu")]
+pub fn globe_cell_base_rgb(tiles: &[DerivedTile], style: SurfaceStyle) -> Vec<u32> {
+    tiles
+        .iter()
+        .map(|tile| {
+            let rgb = match style.tint {
+                Some(m) => {
+                    if style.relief_shading {
+                        m
+                    } else {
+                        let s = relief_shade(tile.relief);
+                        let sc = |c: u8| (c as f32 * s).clamp(0.0, 255.0) as u8;
+                        Rgb::new(sc(m.r), sc(m.g), sc(m.b))
+                    }
+                }
+                None => derived_tile_color(tile.relief),
+            };
+            rgb.pack()
+        })
+        .collect()
+}
+
+/// The per-cell TERRAIN NORMAL (interleaved `nx, ny, nz` per cell, `3 * tiles.len()` long), the sphere normal
+/// tilted by the DERIVED slope, evaluated at each cell centre with the SAME [`hillshade_normal`] `draw_globe` uses
+/// per pixel (the analytic Sample gradient when `field` is supplied, the cache finite difference otherwise). Built
+/// in PARALLEL (each cell independent), the once-per-epoch reduction that moves the analytic gradient off the
+/// per-frame per-pixel path. Display-only f32 (Principle 10).
+#[cfg(feature = "gpu")]
+pub fn globe_cell_normals(
+    tiles: &[DerivedTile],
+    param: SurfaceParam,
+    surface_radius_m: Fixed,
+    field: Option<&SurfaceField>,
+) -> Vec<f32> {
+    let radius_m = surface_radius_m.to_f64_lossy() as f32;
+    let per_cell: Vec<[f32; 3]> = (0..tiles.len())
+        .into_par_iter()
+        .map(|i| {
+            let b = surface_cell_center_dir(param, i);
+            let (u, v) = body_to_uv(b);
+            hillshade_normal(b, tiles, param, u, v, radius_m, field)
+        })
+        .collect();
+    per_cell.into_iter().flatten().collect()
+}
+
+/// The per-cell SELF-EMITTED LAVA add (interleaved `r, g, b` per cell, `3 * ncells` long), already
+/// `emission * intensity * LAVA_EMISSION_GAIN`, the incandescent glow `draw_globe` adds over the shaded crust. Zero
+/// where a cell is below the world's solidus. Sampled at each cell centre through the same [`sample_glow`]
+/// `draw_globe` uses, so it registers with the crust cell it rides on. Display-only.
+#[cfg(feature = "gpu")]
+pub fn globe_cell_lava_add(lava: &[LavaGlow], param: SurfaceParam, ncells: usize) -> Vec<f32> {
+    (0..ncells)
+        .flat_map(|i| {
+            let b = surface_cell_center_dir(param, i);
+            let (u, v) = body_to_uv(b);
+            match sample_glow(lava, param, b, u, v) {
+                Some(g) if g.intensity > 0.0 => {
+                    let add = |e: u8| e as f32 * g.intensity * LAVA_EMISSION_GAIN;
+                    [add(g.emission.r), add(g.emission.g), add(g.emission.b)]
+                }
+                _ => [0.0, 0.0, 0.0],
+            }
+        })
+        .collect()
+}
+
+/// The active IMPACT FLASHES as the plain [`civsim_gpu::globe::GlobeFlash`] the kernel sums PER PIXEL (unlike the
+/// per-cell base / normal / lava, the flash has a steep `1/x^3` falloff and is the effect the owner watches land,
+/// so it is kept pixel-accurate). A direct carry of each [`ImpactFlash`]'s already-f32 geometry and decayed
+/// intensity; the kernel reproduces [`crater_flash_emission`] over them. Display-only (Principle 10).
+#[cfg(feature = "gpu")]
+pub fn globe_gpu_flashes(flash: &[ImpactFlash]) -> Vec<civsim_gpu::globe::GlobeFlash> {
+    flash
+        .iter()
+        .map(|f| civsim_gpu::globe::GlobeFlash {
+            center: f.center,
+            angular_radius: f.angular_radius,
+            cos_reach: f.cos_reach,
+            intensity: f.intensity,
+        })
+        .collect()
+}
+
+/// The per-frame [`civsim_gpu::globe::GlobeFrame`] scalars for the GPU globe shade: the camera, the body-frame and
+/// view-frame sun directions, the sunlight tint, the ambient floor, the tile-grid seam, and the hillshade-on
+/// decision, all derived exactly as [`draw_globe`] derives them per pixel. Shared by [`draw_globe_scene_gpu`] and
+/// the parity test so the two cannot drift. Cheap (a handful of scalars), rebuilt every frame. Display-only.
+#[cfg(feature = "gpu")]
+#[allow(clippy::too_many_arguments)]
+fn globe_gpu_frame(
+    w: usize,
+    h: usize,
+    cx: i32,
+    cy: i32,
+    radius_px: usize,
+    param: SurfaceParam,
+    star_dir_body: [f32; 3],
+    light_tint: Rgb,
+    style: SurfaceStyle,
+    orient: GlobeOrientation,
+) -> civsim_gpu::globe::GlobeFrame {
+    let surface_radius_m = style.surface_radius_m.to_f64_lossy() as f32;
+    let param_has_cells = match param {
+        SurfaceParam::LatLon { cols, rows } => cols > 0 && rows > 0,
+        SurfaceParam::CubeSphere { face_res } => face_res > 0,
+    };
+    let hillshade_on = style.relief_shading && surface_radius_m > 0.0 && param_has_cells;
+    civsim_gpu::globe::GlobeFrame {
+        w,
+        h,
+        cx,
+        cy,
+        radius_px,
+        rot_lon: orient.rot_lon,
+        rot_lat: orient.rot_lat,
+        star_dir_body,
+        light_view: normalize3(body_to_view(star_dir_body, orient)),
+        tint: [
+            light_tint.r as f32 / 255.0,
+            light_tint.g as f32 / 255.0,
+            light_tint.b as f32 / 255.0,
+        ],
+        ambient: AMBIENT,
+        flash_color: [
+            FLASH_COLOR.r as f32,
+            FLASH_COLOR.g as f32,
+            FLASH_COLOR.b as f32,
+        ],
+        flash_gain: FLASH_EMISSION_GAIN,
+        grid: style
+            .grid
+            .filter(|&(c, r)| c > 0 && r > 0)
+            .unwrap_or((0, 0)),
+        hillshade_on,
+    }
+}
+
+/// The GPU counterpart of [`draw_globe_scene`]: it composites the star (CPU), the globe DISK (the GPU shade in
+/// `civsim_gpu::globe`, the per-pixel port of [`draw_globe`]), and the atmosphere limb (CPU) into `buf`, in the same
+/// order and from the same inputs as [`draw_globe_scene`]. The heavy DERIVED per-cell shading cache (base albedo,
+/// hillshade normal, lava and flash adds) is (re)built and uploaded only when `scene_epoch` differs from the
+/// renderer's resident tag: a deep-time step or a scene switch rebuilds it, a rotate / zoom / sweep reuses the
+/// resident cache and pays only the small per-frame scalar upload plus the GPU shade. Fails soft to the CPU
+/// [`draw_globe`] for a degenerate cache. NON-CANON (Principle 10): writes pixels only, adds nothing to canon.
+#[cfg(feature = "gpu")]
+#[allow(clippy::too_many_arguments)]
+pub fn draw_globe_scene_gpu(
+    gpu: &mut civsim_gpu::globe::CudaGlobeRenderer,
+    scene_epoch: u64,
+    buf: &mut [u32],
+    w: usize,
+    h: usize,
+    cx: i32,
+    cy: i32,
+    radius_px: usize,
+    tiles: &[DerivedTile],
+    param: SurfaceParam,
+    t_eff_k: Fixed,
+    star_dir_body: [f32; 3],
+    star: Option<(i32, i32, usize)>,
+    sky: Rgb,
+    style: SurfaceStyle,
+    orient: GlobeOrientation,
+    lava: Option<&[LavaGlow]>,
+    field: Option<&SurfaceField>,
+    flash: Option<&[ImpactFlash]>,
+) {
+    use civsim_gpu::globe::{GlobeCells, GlobeParam};
+    if w == 0 || h == 0 {
+        return;
+    }
+    let light_tint = blackbody_rgb(t_eff_k);
+    if let Some((sx, sy, sr)) = star {
+        draw_star(buf, w, h, sx, sy, sr, light_tint);
+    }
+
+    let gparam = match param {
+        SurfaceParam::LatLon { cols, rows } => GlobeParam::LatLon { cols, rows },
+        SurfaceParam::CubeSphere { face_res } => GlobeParam::CubeSphere { face_res },
+    };
+    let cells_ok = gparam.cells() == tiles.len() && !tiles.is_empty() && radius_px > 0;
+
+    // (Re)build the per-cell cache on an epoch change; a matching tag reuses the resident device cache. The flash
+    // is NOT part of the resident cache: it is a small per-frame array summed per pixel in the kernel.
+    if cells_ok && (gpu.tag() != Some(scene_epoch) || !gpu.has_cells()) {
+        let base_rgb = globe_cell_base_rgb(tiles, style);
+        let normals = globe_cell_normals(tiles, param, style.surface_radius_m, field);
+        let lava_add = match lava {
+            Some(l) => globe_cell_lava_add(l, param, tiles.len()),
+            None => Vec::new(),
+        };
+        gpu.upload_cells(
+            gparam,
+            GlobeCells {
+                base_rgb: &base_rgb,
+                normal: &normals,
+                lava_add: &lava_add,
+            },
+            scene_epoch,
+        );
+    }
+
+    let limb_dir = normalize3(body_to_view(star_dir_body, orient));
+    if cells_ok && gpu.has_cells() {
+        let frame = globe_gpu_frame(
+            w,
+            h,
+            cx,
+            cy,
+            radius_px,
+            param,
+            star_dir_body,
+            light_tint,
+            style,
+            orient,
+        );
+        let flashes = flash.map(globe_gpu_flashes).unwrap_or_default();
+        gpu.render(buf, &frame, &flashes);
+    } else {
+        // Degenerate cache: keep drawing rather than blanking, via the CPU renderer.
+        draw_globe(
+            buf,
+            w,
+            h,
+            cx,
+            cy,
+            radius_px,
+            tiles,
+            param,
+            star_dir_body,
+            light_tint,
+            style,
+            orient,
+            lava,
+            field,
+            flash,
+        );
+    }
+
     draw_atmosphere_limb(buf, w, h, cx, cy, radius_px, limb_dir, sky);
 }
 
@@ -5019,5 +5338,675 @@ mod tests {
             along_toward < 0.0,
             "inside the bowl the surface rises away from the centre, so the gradient points away: got {along_toward}"
         );
+    }
+}
+
+// ============================================================================================================
+// NON-CANON GPU globe PARITY tests (Principle 10). They render the same scene with the CPU `draw_globe` reference
+// and with the GPU kernel (`civsim_gpu::globe`, run on the CubeCL CPU backend so no device is needed) and assert
+// the frames are VISUALLY equal: the max per-channel difference stays within a small display tolerance. Non-canon
+// means visual-equal, not byte-equal (two observers' framebuffers need not agree to the bit), so the tolerance
+// covers f32 order-of-operation drift and the ONE approximation of the GPU path (per-cell rather than per-pixel
+// evaluation of the hillshade normal and the flash bloom). Gated on the `gpu` feature.
+// ============================================================================================================
+#[cfg(all(test, feature = "gpu"))]
+mod gpu_parity_tests {
+    use super::*;
+
+    /// Render the globe disk with the GPU kernel on the CubeCL CPU backend, into a `bg`-filled buffer, using the
+    /// same per-cell cache builders and per-frame scalars `draw_globe_scene_gpu` uses.
+    #[allow(clippy::too_many_arguments)]
+    fn gpu_disk(
+        w: usize,
+        h: usize,
+        cx: i32,
+        cy: i32,
+        radius_px: usize,
+        tiles: &[DerivedTile],
+        param: SurfaceParam,
+        t_eff_k: Fixed,
+        star_dir_body: [f32; 3],
+        style: SurfaceStyle,
+        orient: GlobeOrientation,
+        lava: Option<&[LavaGlow]>,
+        field: Option<&SurfaceField>,
+        flash: Option<&[ImpactFlash]>,
+        bg: u32,
+    ) -> Vec<u32> {
+        use civsim_gpu::globe::{GlobeCells, GlobeParam};
+        let gparam = match param {
+            SurfaceParam::LatLon { cols, rows } => GlobeParam::LatLon { cols, rows },
+            SurfaceParam::CubeSphere { face_res } => GlobeParam::CubeSphere { face_res },
+        };
+        let base_rgb = globe_cell_base_rgb(tiles, style);
+        let normals = globe_cell_normals(tiles, param, style.surface_radius_m, field);
+        let lava_add = lava
+            .map(|l| globe_cell_lava_add(l, param, tiles.len()))
+            .unwrap_or_default();
+        let flashes = flash.map(globe_gpu_flashes).unwrap_or_default();
+        let light_tint = blackbody_rgb(t_eff_k);
+        let frame = globe_gpu_frame(
+            w,
+            h,
+            cx,
+            cy,
+            radius_px,
+            param,
+            star_dir_body,
+            light_tint,
+            style,
+            orient,
+        );
+        let mut r = civsim_gpu::globe::cpu_renderer();
+        r.upload_cells(
+            gparam,
+            GlobeCells {
+                base_rgb: &base_rgb,
+                normal: &normals,
+                lava_add: &lava_add,
+            },
+            0,
+        );
+        let mut buf = vec![bg; w * h];
+        r.render(&mut buf, &frame, &flashes);
+        buf
+    }
+
+    /// The max per-channel absolute difference between two framebuffers, and the fraction of pixels that differ by
+    /// more than one level (a picture of how localized the difference is).
+    fn frame_diff(a: &[u32], b: &[u32]) -> (u8, f64) {
+        let mut maxd = 0u8;
+        let mut over = 0usize;
+        for (&x, &y) in a.iter().zip(b.iter()) {
+            let mut worst = 0u8;
+            for sh in [16u32, 8, 0] {
+                let cx = ((x >> sh) & 255) as i32;
+                let cy = ((y >> sh) & 255) as i32;
+                worst = worst.max((cx - cy).unsigned_abs() as u8);
+            }
+            maxd = maxd.max(worst);
+            if worst > 1 {
+                over += 1;
+            }
+        }
+        (maxd, over as f64 / a.len() as f64)
+    }
+
+    fn tile(elev_km: f32, relief: TerrainRelief) -> DerivedTile {
+        DerivedTile {
+            elevation: Fixed::from_ratio((elev_km * 1000.0) as i64, 1000),
+            relief,
+        }
+    }
+
+    /// SCENE A, the CORE PIPELINE with no hillshade: rotate + cell-index + per-cell base albedo + bare-sphere
+    /// Lambert + tile-grid seam. Every term is the SAME per-pixel math on both paths (no per-cell approximation),
+    /// so the GPU frame must equal `draw_globe` to within f32 rounding.
+    #[test]
+    fn gpu_matches_draw_globe_core_pipeline() {
+        let face_res = 64usize;
+        let param = SurfaceParam::CubeSphere { face_res };
+        let n = 6 * face_res * face_res;
+        // A varied relief field (drives the per-cell base colour under relief-off shading and the swatch).
+        let tiles: Vec<DerivedTile> = (0..n)
+            .map(|i| {
+                let d = surface_cell_center_dir(param, i);
+                let e = 3.0 * (d[0] * 4.0).sin() + 2.0 * (d[1] * 3.0).cos();
+                let relief = if e < -1.0 {
+                    TerrainRelief::Submarine
+                } else if e < 1.5 {
+                    TerrainRelief::Lowland
+                } else {
+                    TerrainRelief::Upland
+                };
+                tile(e, relief)
+            })
+            .collect();
+        let style = SurfaceStyle {
+            tint: Some(Rgb::new(128, 116, 104)),
+            grid: Some((16, 8)),
+            relief_shading: false,
+            surface_radius_m: Fixed::from_int(3_390_000),
+        };
+        let orient = GlobeOrientation {
+            rot_lon: 0.7,
+            rot_lat: 0.3,
+        };
+        let star = normalize3([0.5, 0.25, 0.8]);
+        let t_eff = Fixed::from_int(5772);
+        let (w, h) = (420usize, 340usize);
+        let (cx, cy, rp) = (210i32, 170i32, 150usize);
+        const BG: u32 = 0x00101018;
+
+        let mut cpu = vec![BG; w * h];
+        draw_globe(
+            &mut cpu,
+            w,
+            h,
+            cx,
+            cy,
+            rp,
+            &tiles,
+            param,
+            star,
+            blackbody_rgb(t_eff),
+            style,
+            orient,
+            None,
+            None,
+            None,
+        );
+        let gpu = gpu_disk(
+            w, h, cx, cy, rp, &tiles, param, t_eff, star, style, orient, None, None, None, BG,
+        );
+        let (maxd, frac) = frame_diff(&cpu, &gpu);
+        eprintln!("scene A (core pipeline, CPU backend): max per-channel diff = {maxd}, frac>1 = {frac:.5}");
+        assert!(
+            maxd <= 2,
+            "core pipeline must match draw_globe to f32 rounding: max diff {maxd}"
+        );
+
+        // The SHIPPING path: the SAME kernel on the actual CUDA device (when one is present, i.e. CIVSIM_GPU +
+        // the CUDA env are set) must also match draw_globe. This proves the 5090 render, not only the portable
+        // CPU-backend codegen. Skipped (a pass) when no device is present, so the default gate stays device-free.
+        if let Some(mut r) = civsim_gpu::globe::try_cuda_renderer() {
+            use civsim_gpu::globe::{GlobeCells, GlobeParam};
+            let gparam = match param {
+                SurfaceParam::LatLon { cols, rows } => GlobeParam::LatLon { cols, rows },
+                SurfaceParam::CubeSphere { face_res } => GlobeParam::CubeSphere { face_res },
+            };
+            let base_rgb = globe_cell_base_rgb(&tiles, style);
+            let normals = globe_cell_normals(&tiles, param, style.surface_radius_m, None);
+            let frame = globe_gpu_frame(
+                w,
+                h,
+                cx,
+                cy,
+                rp,
+                param,
+                star,
+                blackbody_rgb(t_eff),
+                style,
+                orient,
+            );
+            r.upload_cells(
+                gparam,
+                GlobeCells {
+                    base_rgb: &base_rgb,
+                    normal: &normals,
+                    lava_add: &[],
+                },
+                0,
+            );
+            let mut cbuf = vec![BG; w * h];
+            r.render(&mut cbuf, &frame, &[]);
+            let (cd, cf) = frame_diff(&cpu, &cbuf);
+            eprintln!(
+                "scene A (core pipeline, CUDA 5090): max per-channel diff = {cd}, frac>1 = {cf:.6}"
+            );
+            // Visual-equality is the claim (not byte-equality): essentially every pixel is within one level of
+            // draw_globe. The isolated larger differences are TILE-BOUNDARY pixels where the 5090's hardware
+            // atan/asin round differently from libm and flip the discrete cell lookup, so a boundary pixel takes
+            // the neighbouring cell's colour (here up to the adjacent-relief contrast). It is a handful of pixels
+            // (frac below), invisible in the picture, and in the interactive path (a uniform material tint) a
+            // boundary flip changes no colour at all. A broken kernel would blow this fraction up.
+            assert!(
+                cf < 0.001,
+                "the CUDA render must be visually equal to draw_globe (a tiny boundary sliver): frac>1 = {cf}, max = {cd}"
+            );
+        }
+    }
+
+    /// SCENE B, the FULL EFFECT STACK: the analytic hillshade normal, the self-emitted lava glow, and the fresh
+    /// impact flash, plus the material tint. Here the GPU evaluates the hillshade normal and the flash bloom PER
+    /// CELL (the once-per-epoch reduction) where `draw_globe` evaluates them per pixel, so the frames are visually
+    /// equal within a small tolerance rather than exact. This asserts that tolerance and prints the measured value.
+    #[test]
+    fn gpu_matches_draw_globe_full_effects_within_tolerance() {
+        let face_res = 96usize;
+        let param = SurfaceParam::CubeSphere { face_res };
+        let n = 6 * face_res * face_res;
+        // Tiles are trivial here: with tint + relief shading the base is the material colour, so relief is unused.
+        let tiles: Vec<DerivedTile> = vec![tile(0.0, TerrainRelief::Lowland); n];
+
+        // A province crust field with lateral variation, so the analytic hillshade has real slope structure.
+        let (pcols, prows) = (12usize, 6usize);
+        let thickness: Vec<Fixed> = (0..pcols * prows)
+            .map(|k| {
+                let c = (k % pcols) as f32;
+                let r = (k / pcols) as f32;
+                let t = 30.0 + 8.0 * (c * 0.9).sin() + 6.0 * (r * 1.3).cos();
+                Fixed::from_ratio((t * 1000.0) as i64, 1000)
+            })
+            .collect();
+        let radius_m = Fixed::from_int(3_390_000);
+        // A few craters for the analytic crater layer of the gradient.
+        let craters = vec![
+            CraterRow {
+                u: Fixed::from_ratio(1, 4),
+                v: Fixed::from_ratio(2, 5),
+                diameter_m: Fixed::from_int(300_000),
+                depth_m: Fixed::from_int(20_000),
+                age_myr: Fixed::from_int(100),
+            },
+            CraterRow {
+                u: Fixed::from_ratio(3, 5),
+                v: Fixed::from_ratio(1, 2),
+                diameter_m: Fixed::from_int(500_000),
+                depth_m: Fixed::from_int(30_000),
+                age_myr: Fixed::from_int(100),
+            },
+        ];
+        let stamps = crater_stamps(&craters, radius_m);
+        let field = SurfaceField {
+            thickness_km: &thickness,
+            pcols,
+            prows,
+            crust_density: Fixed::from_int(2800),
+            mantle_density: Fixed::from_int(3300),
+            stamps: &stamps,
+            radius_km: radius_m.to_f64_lossy() as f32 / 1000.0,
+        };
+
+        // A lava patch on the front hemisphere (the same cell layout the tiles use).
+        let lava: Vec<LavaGlow> = (0..n)
+            .map(|i| {
+                let d = surface_cell_center_dir(param, i);
+                if d[2] > 0.3 {
+                    LavaGlow {
+                        emission: Rgb::new(255, 90, 20),
+                        intensity: 0.5,
+                    }
+                } else {
+                    LavaGlow::default()
+                }
+            })
+            .collect();
+
+        // Fresh impact flashes at their formation tick (peak intensity), from the crater rows.
+        let flash = active_flash_stamps(
+            &craters,
+            radius_m,
+            Fixed::from_int(100),
+            Fixed::from_int(50),
+        );
+        assert!(!flash.is_empty(), "test setup: flashes should be active");
+
+        let style = SurfaceStyle {
+            tint: Some(Rgb::new(120, 110, 100)),
+            grid: None,
+            relief_shading: true,
+            surface_radius_m: radius_m,
+        };
+        let orient = GlobeOrientation {
+            rot_lon: 0.4,
+            rot_lat: -0.2,
+        };
+        let star = normalize3([0.3, 0.4, 0.85]);
+        let t_eff = Fixed::from_int(5772);
+        let (w, h) = (420usize, 340usize);
+        let (cx, cy, rp) = (210i32, 170i32, 150usize);
+        const BG: u32 = 0x00101018;
+
+        let mut cpu = vec![BG; w * h];
+        draw_globe(
+            &mut cpu,
+            w,
+            h,
+            cx,
+            cy,
+            rp,
+            &tiles,
+            param,
+            star,
+            blackbody_rgb(t_eff),
+            style,
+            orient,
+            Some(&lava),
+            Some(&field),
+            Some(&flash),
+        );
+        let gpu = gpu_disk(
+            w,
+            h,
+            cx,
+            cy,
+            rp,
+            &tiles,
+            param,
+            t_eff,
+            star,
+            style,
+            orient,
+            Some(&lava),
+            Some(&field),
+            Some(&flash),
+            BG,
+        );
+        let (maxd, frac) = frame_diff(&cpu, &gpu);
+        eprintln!("scene B (full stack): max per-channel diff = {maxd}, frac>1 = {frac:.5}");
+
+        // Isolate the two effects that are NOT bit-shared per pixel, so the honest bound is asserted directly rather
+        // than left to whether one effect happens to saturate over another (as the lava does over the crater rims in
+        // the full stack above, which is why its max reads lower than the hillshade residual alone).
+        //
+        // FLASH is summed PER PIXEL in the kernel: it must reproduce crater_flash_emission to f32 rounding.
+        let flat = SurfaceStyle {
+            relief_shading: false,
+            ..style
+        };
+        let mut flash_cpu = vec![BG; w * h];
+        draw_globe(
+            &mut flash_cpu,
+            w,
+            h,
+            cx,
+            cy,
+            rp,
+            &tiles,
+            param,
+            star,
+            blackbody_rgb(t_eff),
+            flat,
+            orient,
+            None,
+            None,
+            Some(&flash),
+        );
+        let flash_gpu = gpu_disk(
+            w,
+            h,
+            cx,
+            cy,
+            rp,
+            &tiles,
+            param,
+            t_eff,
+            star,
+            flat,
+            orient,
+            None,
+            None,
+            Some(&flash),
+            BG,
+        );
+        let (fd, ff) = frame_diff(&flash_cpu, &flash_gpu);
+        eprintln!("  flash-only (per-pixel): max = {fd}, frac>1 = {ff:.5}");
+        assert!(
+            fd <= 2,
+            "the per-pixel flash must reproduce crater_flash_emission to f32 rounding: max diff {fd}"
+        );
+
+        // HILLSHADE is the one per-CELL approximation: the analytic normal is held at the cell centre, so the frame
+        // differs from the per-pixel draw_globe only in a small sliver of crater-rim cells (where the analytic
+        // gradient is discontinuous). This is the honest tolerance of the GPU path, measured here.
+        let mut hs_cpu = vec![BG; w * h];
+        draw_globe(
+            &mut hs_cpu,
+            w,
+            h,
+            cx,
+            cy,
+            rp,
+            &tiles,
+            param,
+            star,
+            blackbody_rgb(t_eff),
+            style,
+            orient,
+            None,
+            Some(&field),
+            None,
+        );
+        let hs_gpu = gpu_disk(
+            w,
+            h,
+            cx,
+            cy,
+            rp,
+            &tiles,
+            param,
+            t_eff,
+            star,
+            style,
+            orient,
+            None,
+            Some(&field),
+            None,
+            BG,
+        );
+        let (hd, hf) = frame_diff(&hs_cpu, &hs_gpu);
+        eprintln!("  hillshade-only (per-cell normal): max = {hd}, frac>1 = {hf:.5}");
+        assert!(
+            hd <= 24,
+            "the per-cell hillshade normal must stay a small display tolerance from draw_globe: max diff {hd}"
+        );
+        assert!(
+            hf < 0.01,
+            "the hillshade difference must be a small sliver (crater rims): frac>1 = {hf}"
+        );
+        // The full stack is bounded by the hillshade residual (the flash is pixel-accurate, the lava exact).
+        assert!(maxd <= 24, "full-stack frame max diff {maxd}");
+    }
+}
+
+// ============================================================================================================
+// NON-CANON GPU globe BENCHMARK (opt-in, `--ignored`). It times the heavy interactive path (a ~1M-cell derived
+// globe with an analytic hillshade over many craters, at surface-zoom radius) rendered by the serial CPU
+// `draw_globe` versus the GPU kernel on the resident per-cell cache, so the win is quantified. Run with:
+//   CIVSIM_GPU=1 CUDA_PATH=$HOME/.local/cuda LD_LIBRARY_PATH=$HOME/.local/cuda/lib:/usr/lib/wsl/lib \
+//     cargo test -p civsim-viewer --features gpu --release gpu_globe_benchmark -- --ignored --nocapture
+// Gated on the `gpu` feature; prints a note and skips the GPU timing when no CUDA device is present.
+// ============================================================================================================
+#[cfg(all(test, feature = "gpu"))]
+mod gpu_bench {
+    use super::*;
+    use std::time::Instant;
+
+    #[test]
+    #[ignore = "opt-in performance benchmark; run with --ignored --release"]
+    fn gpu_globe_benchmark() {
+        // A ~1M-cell derived globe (the cube-sphere render cache resolution) with an analytic Sample field over a
+        // heavily-cratered surface (the analytic hillshade the interactive derived globe uses), at surface-zoom
+        // framing (the globe fills the frame). This is the heavy path the goal targets.
+        let face_res = 400usize;
+        let param = SurfaceParam::CubeSphere { face_res };
+        let n = 6 * face_res * face_res;
+        let tiles: Vec<DerivedTile> = vec![
+            DerivedTile {
+                elevation: Fixed::ZERO,
+                relief: TerrainRelief::Lowland,
+            };
+            n
+        ];
+        let (pcols, prows) = (24usize, 12usize);
+        let thickness: Vec<Fixed> = (0..pcols * prows)
+            .map(|k| {
+                let c = (k % pcols) as f32;
+                let r = (k / pcols) as f32;
+                let t = 30.0 + 10.0 * (c * 0.7).sin() + 7.0 * (r * 1.1).cos();
+                Fixed::from_ratio((t * 1000.0) as i64, 1000)
+            })
+            .collect();
+        let radius_m = Fixed::from_int(3_390_000);
+        // A bombarded surface: 200 craters, so the per-pixel analytic gradient loops over a real crater list.
+        let ncr = 200usize;
+        let craters: Vec<CraterRow> = (0..ncr)
+            .map(|i| {
+                let f = i as f32;
+                CraterRow {
+                    u: Fixed::from_ratio(((f * 0.6180339).fract() * 1000.0) as i64, 1000),
+                    v: Fixed::from_ratio(((f * 0.7548776).fract() * 1000.0) as i64, 1000),
+                    diameter_m: Fixed::from_int(80_000 + (i % 40) as i32 * 8_000),
+                    depth_m: Fixed::from_int(6_000 + (i % 20) as i32 * 700),
+                    age_myr: Fixed::from_int(100),
+                }
+            })
+            .collect();
+        let stamps = crater_stamps(&craters, radius_m);
+        let field = SurfaceField {
+            thickness_km: &thickness,
+            pcols,
+            prows,
+            crust_density: Fixed::from_int(2800),
+            mantle_density: Fixed::from_int(3300),
+            stamps: &stamps,
+            radius_km: radius_m.to_f64_lossy() as f32 / 1000.0,
+        };
+        let lava: Vec<LavaGlow> = (0..n)
+            .map(|i| {
+                let d = surface_cell_center_dir(param, i);
+                if d[2] > 0.4 {
+                    LavaGlow {
+                        emission: Rgb::new(255, 90, 20),
+                        intensity: 0.4,
+                    }
+                } else {
+                    LavaGlow::default()
+                }
+            })
+            .collect();
+        let flash = active_flash_stamps(
+            &craters,
+            radius_m,
+            Fixed::from_int(100),
+            Fixed::from_int(50),
+        );
+        let style = SurfaceStyle {
+            tint: Some(Rgb::new(120, 110, 100)),
+            grid: Some((64, 32)),
+            relief_shading: true,
+            surface_radius_m: radius_m,
+        };
+        let t_eff = Fixed::from_int(5772);
+        let star = normalize3([0.3, 0.4, 0.85]);
+        // Surface-zoom framing: the globe fills the frame (radius ~ half the min dimension).
+        let (w, h) = (1100usize, 850usize);
+        let (cx, cy, rp) = (550i32, 425i32, 430usize);
+        const BG: u32 = 0x00101018;
+        let k = 4usize;
+
+        eprintln!(
+            "\n=== GPU globe benchmark: {n} cells, {ncr} craters, {w}x{h} frame, radius {rp}px ===",
+        );
+
+        // CPU: the serial per-pixel draw_globe (the current interactive render), K frames.
+        let mut sink = 0u64;
+        let t = Instant::now();
+        for i in 0..k {
+            let mut buf = vec![BG; w * h];
+            let orient = GlobeOrientation {
+                rot_lon: 0.4 + i as f32 * 0.05,
+                rot_lat: -0.2,
+            };
+            draw_globe(
+                &mut buf,
+                w,
+                h,
+                cx,
+                cy,
+                rp,
+                &tiles,
+                param,
+                star,
+                blackbody_rgb(t_eff),
+                style,
+                orient,
+                Some(&lava),
+                Some(&field),
+                Some(&flash),
+            );
+            sink ^= buf[buf.len() / 2] as u64;
+        }
+        let cpu_ms = t.elapsed().as_secs_f64() * 1000.0 / k as f64;
+        eprintln!("CPU  draw_globe (serial per-pixel):   {cpu_ms:8.2} ms/frame");
+
+        // GPU: the per-cell cache build (rayon, once per epoch) and the resident-cache render (per frame).
+        match civsim_gpu::globe::try_cuda_renderer() {
+            None => {
+                eprintln!(
+                    "GPU: no CUDA device (set CIVSIM_GPU + CUDA_PATH/LD_LIBRARY_PATH); skipping GPU timing"
+                );
+            }
+            Some(mut gpu) => {
+                use civsim_gpu::globe::{GlobeCells, GlobeParam};
+                let gparam = match param {
+                    SurfaceParam::LatLon { cols, rows } => GlobeParam::LatLon { cols, rows },
+                    SurfaceParam::CubeSphere { face_res } => GlobeParam::CubeSphere { face_res },
+                };
+                // The once-per-epoch per-cell cache build (the analytic normals dominate; rayon-parallel).
+                let tb = Instant::now();
+                let base_rgb = globe_cell_base_rgb(&tiles, style);
+                let normals =
+                    globe_cell_normals(&tiles, param, style.surface_radius_m, Some(&field));
+                let lava_add = globe_cell_lava_add(&lava, param, tiles.len());
+                let build_ms = tb.elapsed().as_secs_f64() * 1000.0;
+                gpu.upload_cells(
+                    gparam,
+                    GlobeCells {
+                        base_rgb: &base_rgb,
+                        normal: &normals,
+                        lava_add: &lava_add,
+                    },
+                    0,
+                );
+                let flashes = globe_gpu_flashes(&flash);
+                // Warm up (first launch JIT-compiles the kernel).
+                {
+                    let mut buf = vec![BG; w * h];
+                    let frame = globe_gpu_frame(
+                        w,
+                        h,
+                        cx,
+                        cy,
+                        rp,
+                        param,
+                        star,
+                        blackbody_rgb(t_eff),
+                        style,
+                        GlobeOrientation {
+                            rot_lon: 0.4,
+                            rot_lat: -0.2,
+                        },
+                    );
+                    gpu.render(&mut buf, &frame, &flashes);
+                    sink ^= buf[buf.len() / 2] as u64;
+                }
+                let t = Instant::now();
+                for i in 0..k {
+                    let mut buf = vec![BG; w * h];
+                    let frame = globe_gpu_frame(
+                        w,
+                        h,
+                        cx,
+                        cy,
+                        rp,
+                        param,
+                        star,
+                        blackbody_rgb(t_eff),
+                        style,
+                        GlobeOrientation {
+                            rot_lon: 0.4 + i as f32 * 0.05,
+                            rot_lat: -0.2,
+                        },
+                    );
+                    gpu.render(&mut buf, &frame, &flashes);
+                    sink ^= buf[buf.len() / 2] as u64;
+                }
+                let gpu_ms = t.elapsed().as_secs_f64() * 1000.0 / k as f64;
+                eprintln!("GPU  render (resident cache):         {gpu_ms:8.2} ms/frame");
+                eprintln!("GPU  per-cell cache build (once):     {build_ms:8.2} ms  (rayon; only on an epoch change)");
+                eprintln!(
+                    "\nSURFACE-ZOOM (epoch fixed, cache amortized): CPU {cpu_ms:.1} ms  ->  GPU {gpu_ms:.1} ms  = {:.1}x",
+                    cpu_ms / gpu_ms.max(1e-6)
+                );
+                eprintln!(
+                    "DEEP-TIME (epoch changes each frame): CPU {cpu_ms:.1} ms  ->  GPU {:.1} ms (build+render) = {:.1}x",
+                    build_ms + gpu_ms,
+                    cpu_ms / (build_ms + gpu_ms).max(1e-6)
+                );
+            }
+        }
+        eprintln!("(sink {sink})");
     }
 }
