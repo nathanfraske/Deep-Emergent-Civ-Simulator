@@ -68,6 +68,10 @@ jobs:
           python3 scripts/gen_floor_registry.py
           git diff --exit-code -- docs/working/PHYSICS_FLOOR_REGISTRY.md \
             || { echo "PHYSICS_FLOOR_REGISTRY.md is stale: run 'python3 scripts/gen_floor_registry.py' and commit it."; exit 1; }
+      - name: Disk-arc literature receipt ledger (every vendored source carries a complete receipt)
+        run: |
+          python3 scripts/disk_arc_literature_provenance_test.py
+          python3 scripts/disk_arc_literature_provenance_test.py --self-test
 
   rust:
     name: build, format, lint, test

@@ -1,0 +1,285 @@
+# Disk-evolution and layer-4 literature: the vendored-source manifest (the receipt ledger).
+#
+# LANDED IN THIS LANE by the disk arc (2026-07-18) because the physics lane was down (ephemeral WSL
+# issue); this is the physics-lane vendoring landing done here, disk-arc-scoped so it does not collide with
+# the coordinator's existing crates/physics/data files when that lane recovers.
+#
+# BLOCK KIND: [[source]], the HELD-RECEIPT vendored idiom (the JANAF / AESOPUS / BHAC15 held-source family),
+# NOT a reserved floor kind. Each entry is an immutable transcription-receipt of a primary paper: citation,
+# recipe (url), sha256 of the fetched bytes, byte count, grade, and the SLIMMED verbatim EXTRACT (the exact
+# value or passage the code and docs consume). PROVENANCE: header citation, out of floor-Element policing.
+#
+# SLIMMED, and honest about it: the full source PDFs (about 82 MB across these entries) are NOT committed, the
+# repo's standing practice for paper sources (only extractable DATA files are byte-held, as BHAC15 does). The
+# sha256 here is the RE-FETCH RECEIPT: the recipe url plus the sha256 reproduce and verify the bytes offline of
+# this repo. The verbatim extract is the slimmed held data; scripts/disk_arc_literature_provenance_test.py
+# re-checks the manifest's completeness and receipt format so a receipt cannot go missing or malform quietly.
+# When the physics lane recovers, this manifest is ready to graduate into the coordinator's held-bytes idiom
+# (a data-column extraction plus an offline byte re-checksum) for any entry whose values become a run-path
+# data column; the layer-4 demographics are the first candidates.
+#
+# The reasoning consolidated here also lives in prose at docs/working/DISK_ARC_FETCH_VALUES.md,
+# docs/working/LAYER4_ROOT_CENSUS.md, and the calibration/reserved.toml disk_clock.cloud_core_temperature_k
+# basis; this file is the structured, machine-checkable receipt ledger for the same reads.
+
+# ============================ Collapse family (theory) ============================
+
+[[source]]
+name = "shu_1977"
+url = "https://articles.adsabs.harvard.edu/pdf/1977ApJ...214..488S"
+citation = "Shu, F. H. 1977, Self-similar collapse of isothermal spheres and star formation, ApJ 214, 488. DOI 10.1086/155274."
+sha256 = "af390700604cd491d36b9dfbf9a5e767611b4f7880ae360a6d2258c224fd29d2"
+bytes = 1128907
+grade = "theory"
+extract = "Expansion-wave (hydrostatic SIS, A=2) mass-accretion eigenvalue m0 = 0.975 (Mdot = m0 c_s^3/G). Table 1 RELATION BETWEEN A AND m0: A = 2.00,2.20,...,4.00 gives m0 = 0.975,1.45,1.88,2.31,2.74,3.18,3.63,4.10,4.58,5.08,5.58. Also the theory anchor for the birth accretion rate Mdot = m0 a^3/G with a the isothermal sound speed."
+used_by = "astro::CollapseModel::shu_1977; astro::shu_inside_out_collapse_accretion_rate_msun_myr"
+
+[[source]]
+name = "hunter_1977"
+url = "https://articles.adsabs.harvard.edu/pdf/1977ApJ...218..834H"
+citation = "Hunter, C. 1977, The collapse of unstable isothermal spheres, ApJ 218, 834. DOI 10.1086/155739."
+sha256 = "9e187e6d69cccf733734b75c7b974f287532163692514084eb511828d6a70e0f"
+bytes = 1327844
+grade = "theory"
+extract = "p.838 verbatim: 'Values of m0 are 46.915, 2.577, 1.138, and 0.975 for the Larson-Penston, (11b), (11d), and expansion wave solutions, respectively.' p.837 verbatim: 'values of P(0) ... being 8.854, 2.378, and 2.032'. So Larson-Penston m0 = 46.915 at abscissa P(0) = 8.854; expansion-wave m0 = 0.975 (corroborates Shu). DUAL-CHANNEL CONFIRMED: OCR text layer and independent visual re-read of the page crops agree, no digit flip. LP (m0=46.915, P(0)=8.854) is Hunter's secondary-direction branch, far outside Shu's tabulated A in [2,4]."
+used_by = "astro::CollapseModel::larson_penston; astro::CollapseModel::shu_1977"
+
+[[source]]
+name = "whitworth_summers_1985"
+url = "https://articles.adsabs.harvard.edu/pdf/1985MNRAS.214....1W"
+citation = "Whitworth, A. & Summers, D. 1985, Self-similar condensation of spherically symmetric self-gravitating isothermal gas clouds, MNRAS 214, 1. DOI 10.1093/mnras/214.1.1."
+sha256 = "ba57e11cdc7b1699c5af8e22b6be8282787a428bb28c17cac6a6f7dc01be9457"
+bytes = 1574440
+grade = "theory"
+extract = "The Larson-Penston member printed as w0 = 46.84 at z0 = 1.672 under the (z0, w0) parametrization; no P(0). Cross-source spread vs Hunter's 46.915 is 0.16 percent, classified presumed numerical-integration precision, decision-irrelevant below the factor-48 band. The carried value tracks Hunter."
+used_by = "astro::CollapseModel::larson_penston (dual-channel corroboration + classified concordance)"
+
+[[source]]
+name = "ori_piran_1988"
+url = "https://articles.adsabs.harvard.edu/pdf/1988MNRAS.234..821O"
+citation = "Ori, A. & Piran, T. 1988, A simple stability criterion for isothermal spherical self-similar flow, MNRAS 234, 821."
+sha256 = "968e318bf63b0350072f2fb4704e914990f2ec739c961d1c5a76be9dfec898c1"
+bytes = 607958
+grade = "theory"
+extract = "Proves a NECESSARY stability condition only (p.827 verbatim: 'does not show that the secondary-direction ... solution is stable'). Primary-direction family (incl. homogeneous collapse) is UNSTABLE and ruled out; secondary-direction family (best-known member Larson-Penston) satisfies the necessary criterion. CORRECTION of the channel-relayed 'LP is the only stable solution': LP is the surviving candidate, not proven-unique-stable. Literal inequality direction carries a sign-convention ambiguity; rely on the thrice-stated verbal conclusion."
+used_by = "astro::CollapseModel stability note (corrected)"
+
+[[source]]
+name = "foster_chevalier_1993"
+url = "https://articles.adsabs.harvard.edu/pdf/1993ApJ...416..303F"
+citation = "Foster, P. N. & Chevalier, R. A. 1993, Gravitational collapse of an isothermal sphere, ApJ 416, 303. DOI 10.1086/173236."
+sha256 = "dfd6f006eff9a11d9d0ab79f56c5702b298d435c8356593d5a93418c30a780eb"
+bytes = 185803
+grade = "theory"
+extract = "p.308 verbatim: the central mass accretion rate 'peaks at 47 a^3/G immediately after core formation and sharply decreases thereafter' (LP reference 29, Hunter initial 36, Shu A=2.2 gives 1.45). CORRECTION of the channel-relayed '~13 c_s^3/G': there is NO ~13 in the paper. Opacity is NOT in the collapse dynamics (isothermal hydro; opacity enters only the transparent line-profile diagnostics). The peaked-then-declining Mdot(t) is the named rate-law-member debt."
+used_by = "astro::CollapseModel named-debt (rate-law member, corrected)"
+
+# ============================ Birth accretion rate (Mdot_0) ============================
+
+[[source]]
+name = "fiorellino_2023"
+url = "https://arxiv.org/pdf/2211.07653"
+citation = "Fiorellino, E., Manara, C. F., Nisini, B., et al. 2023, The Mass Accretion Rate and Stellar Properties in Class I Protostars, ApJ 944, 135. DOI 10.3847/1538-4357/aca320."
+sha256 = "73f00c21288de51929131bf4046dc4a94593609a73f3745563a2da8c07e5acab"
+bytes = 1745705
+grade = "observation"
+extract = "Class I (embedded protostellar) accretion-rate compilation, 39 confirmed protostars: Mdot_acc ~ 1e-8 to 1e-4 M_sun/yr, central log(Mdot/M_star) ~ -6.5 (so ~3e-7 M_sun/yr for ~1 M_sun), systematically ABOVE class II (~-9.0). The observational channel bracketing the Shu-collapse theory birth rate (~1.5e-6 at 10 K)."
+used_by = "astro::shu_inside_out_collapse_accretion_rate_msun_myr (observational cross-check); Mdot_0 interim"
+
+# ============================ Cloud-core temperature (birth) ============================
+
+[[source]]
+name = "jijina_1999"
+url = "https://ui.adsabs.harvard.edu/link_gateway/1999ApJS..125..161J/PUB_PDF"
+citation = "Jijina, J., Myers, P. C., Adams, F. C. 1999, Dense Cores Mapped in Ammonia: A Database, ApJS 125, 161. DOI 10.1086/313268."
+sha256 = "0bdb3db65bf8b98a70ee4978fd5b9c0e0a7bbd54309f2a5dc37f73bb3368df0c"
+bytes = 2260128
+grade = "observation"
+extract = "264-core NH3 database; gas kinetic-temperature distribution (Table B1): overall N=215 median 14.7 K (IQR 11.0-20.5), floor 7.5 K, tail to 100 K. Environment split verbatim: cluster N=84 median 20.5 K (IQR 16.8-27.9) vs no-cluster N=131 median 12.0 K (IQR 10.4-15.5). The primary conditioned distribution for the layer-4 cloud-core-temperature draw (gas kinetic axis)."
+used_by = "calibration reserved disk_clock.cloud_core_temperature_k; LAYER4_ROOT_CENSUS"
+
+[[source]]
+name = "benson_myers_1989"
+url = "https://articles.adsabs.harvard.edu/pdf/1989ApJS...71...89B"
+citation = "Benson, P. J. & Myers, P. C. 1989, A Survey for Dense Cores in Dark Clouds, ApJS 71, 89. DOI 10.1086/191365."
+sha256 = "76d2e6c0adcb6cd10b9600dbbdff349da98923fc60496552fec9706547357b6c"
+bytes = 4699310
+grade = "observation"
+extract = "Abstract verbatim: 'Most of the dense cores have temperatures 10-15 K'. NH3 (1,1)/(2,2) kinetic temperatures. The 10-15 K bulk range corroborating Jijina."
+used_by = "calibration reserved disk_clock.cloud_core_temperature_k (corroboration)"
+
+[[source]]
+name = "planck_ecc_2011"
+url = "https://arxiv.org/pdf/1101.2035"
+citation = "Planck Collaboration 2011, Planck early results XXIII: The Planck catalogue of Cold Cores, A&A 536, A23."
+sha256 = "16df559136ffb05300a232cfecf1aee3a5835815e26cea3cdf2637d3cba6732d"
+bytes = 3254999
+grade = "observation"
+extract = "Abstract verbatim: dust color-temperature 'spans from 7 K to 17 K, and peaks around 13 K'. DUST temperature, a separate axis from the gas kinetic temperature."
+used_by = "calibration reserved disk_clock.cloud_core_temperature_k (dust axis corroboration)"
+
+[[source]]
+name = "planck_pgcc_2016"
+url = "https://arxiv.org/pdf/1502.01599"
+citation = "Planck Collaboration 2016, Planck 2015 results XXVIII: The Planck Catalogue of Galactic Cold Clumps, A&A 594, A28."
+sha256 = "ab66c479d029eb39057fa7afa0c827debb6e336009910cef9fd4e3a18cd992e2"
+bytes = 1882083
+grade = "observation"
+extract = "Median dust color-temperature 13-14.5 K; Table 6 (FQ=1) percentiles min 8.6, median 14.5, max 30.0 K. INPUT-AUDIT: the prior '8.9-20.7 K, mean 12.3 K' is NOT in this paper and is retired as a misattribution."
+used_by = "calibration reserved disk_clock.cloud_core_temperature_k (dust axis; misattribution correction)"
+
+# ============================ Disk size (R_1) ============================
+
+[[source]]
+name = "tazzari_2017"
+url = "https://arxiv.org/pdf/1707.01499"
+citation = "Tazzari, M., Testi, L., Natta, A., et al. 2017, Physical properties of dusty protoplanetary disks in Lupus, A&A 606, A88."
+sha256 = "e13e1e156e35d95c6b763b57107137c43a5d57c0aeb9a19cb2d48c547cde53f0"
+bytes = 7494070
+grade = "observation"
+extract = "Self-similar (LBP tapered) characteristic radius R_c distribution, 22 Lupus disks: bulk 25-100 AU, 18/22 below 75 AU, floor ~14 AU, tail to ~200-430 AU, correlated with disk mass. The gas/self-similar R_c is the closer analogue to the LBP scale radius t_visc reads (distinct from dust R_eff)."
+used_by = "LAYER4_ROOT_CENSUS R_1 (scale-radius axis); t_visc"
+
+[[source]]
+name = "tripathi_2017"
+url = "https://arxiv.org/pdf/1706.08977"
+citation = "Tripathi, A., Andrews, S. M., Birnstiel, T., Wilner, D. J. 2017, A millimeter Continuum Size-Luminosity Relationship for Protoplanetary Disks, ApJ 845, 44."
+sha256 = "bf760ade35404821d75db5bb5d19cb6f00644af820aed1b96b2a15b333d43a97"
+bytes = 7310899
+grade = "observation"
+extract = "Dust size-luminosity relation (Eq. 6): log R_eff = 2.12 + 0.50 log L_mm, scatter 0.19 dex (R_eff in AU at x=0.68, L_mm in Jy at 140 pc). R_eff is a dust-continuum size, distinct from the gas R_c."
+used_by = "LAYER4_ROOT_CENSUS R_1 (dust R_eff axis)"
+
+[[source]]
+name = "andrews_2020_araa"
+url = "https://arxiv.org/pdf/2001.05007"
+citation = "Andrews, S. M. 2020, Observations of Protoplanetary Disk Structures, ARA&A 58, 483."
+sha256 = "ee01f3555ff67ff10e56451792dac7c80774d2912ce3a992c2aa517528da4f83"
+bytes = 4201022
+grade = "review"
+extract = "Stellar-mass conditioning: R_mm ~ M_star^0.9, L_mm ~ M_star^1.7 (0.5 dex scatter); gas R_CO ~ 2-2.5 R_mm. A review compiling the size demographics."
+used_by = "LAYER4_ROOT_CENSUS R_1 (stellar-mass conditioning)"
+
+[[source]]
+name = "andrews_2018_dsharp"
+url = "https://arxiv.org/pdf/1812.04040"
+citation = "Andrews, S. M., Huang, J., Perez, L. M., et al. 2018, The Disk Substructures at High Angular Resolution Project (DSHARP) I, ApJ 869, L41."
+sha256 = "61296dad692cb6c988650d5fe81a50db877744cd7d2f2e6b25d7cbf43806f925"
+bytes = 2857878
+grade = "observation"
+extract = "DSHARP averages M_star ~ 0.8, R_eff ~ 50 AU. CAVEAT: a bright/large-selected sample, NOT a demographic median (the paper says so); use only as the large-disk-tail anchor."
+used_by = "LAYER4_ROOT_CENSUS R_1 (large-tail anchor, biased)"
+
+# ============================ Birth rotation + spin-down ============================
+
+[[source]]
+name = "herbst_2001"
+url = "https://arxiv.org/pdf/astro-ph/0104438"
+citation = "Herbst, W., Bailer-Jones, C. A. L., Mundt, R. 2001, The Mass Dependence of Stellar Rotation in the Orion Nebula Cluster, ApJ 554, L197."
+sha256 = "0d24c268409c1b0335402190bc685d6364fa2a9405ab9c8b9502062c774e12e3"
+bytes = 120306
+grade = "observation"
+extract = "ONC (~1 Myr) rotation periods 0.8-12 days, bimodal for M >= 0.25 M_sun (modes ~2 and ~8 d, ~2/3 in the slow peak), median rate decreases with increasing mass. Disk-locking invoked for the slow peak. Substitute for the unreachable A&A 396,513 Herbst 2002 (same campaign)."
+used_by = "LAYER4_ROOT_CENSUS Omega_star_0 (birth-rotation distribution)"
+
+[[source]]
+name = "rebull_2018"
+url = "https://arxiv.org/pdf/1803.04440"
+citation = "Rebull, L. M., Stauffer, J. R., Cody, A. M., et al. 2018, Rotation of Low-mass Stars in Upper Scorpius and rho Ophiuchus with K2, AJ 155, 196."
+sha256 = "d5d190c546da8cb8da6db7bbb4969c17b32bce8fe423aab2e9fed89ea88df909"
+bytes = 11908082
+grade = "observation"
+extract = "USco (~8 Myr) + rho Oph (~1 Myr) K2 periods ~0.2-30 d, peak ~2 d. DISK-LOCKING confirmed verbatim: disks 'present predominantly among the more slowly rotating Ms', 'direct evidence for disk-locking' for 4 stars. TERMS-DROPPED: P_rot and disk presence are NOT independent; the layer-4 joint draw must condition rotation on disk state."
+used_by = "LAYER4_ROOT_CENSUS Omega_star_0 (disk-locking correlation edge)"
+
+[[source]]
+name = "skumanich_1972"
+url = "https://articles.adsabs.harvard.edu/pdf/1972ApJ...171..565S"
+citation = "Skumanich, A. 1972, Time Scales for Ca II Emission Decay, Rotational Braking, and Lithium Depletion, ApJ 171, 565."
+sha256 = "9c4f2d4a90ef9812e9785f54162ac4efdff5fc068d56cb632ace21d44dbd44d4"
+bytes = 194374
+grade = "observation"
+extract = "The braking law v ~ t^(-1/2) (equatorial velocity falls as the inverse square root of age). No printed coefficient; normalization set by the Sun + Pleiades/UMa/Hyades data. The -1/2 exponent is conditioned on the adopted 0.4 Gyr Hyades age."
+used_by = "LAYER4_ROOT_CENSUS spin-down substrate"
+
+[[source]]
+name = "barnes_2007"
+url = "https://arxiv.org/pdf/0704.3068"
+citation = "Barnes, S. A. 2007, Ages for Illustrative Field Stars Using Gyrochronology, ApJ 669, 1167."
+sha256 = "1b6e3a14bc9a31c1d332e429b4205ae75417a7094f2f8ff9baf38125a2daf980"
+bytes = 831214
+grade = "observation"
+extract = "Separable gyrochronology P(B-V,t) = f(B-V) g(t): f = 0.7725 (B-V-0.4)^0.601, g = t^0.5189; n=0.5189 fixed by the solar anchor (P=26.09 d, B-V=0.642, 4.566 Gyr). Valid for I-sequence rotators only, NOT the disk-locked birth population (segregated at the ~100 Myr gyrochrone)."
+used_by = "LAYER4_ROOT_CENSUS spin-down (gyro calibration)"
+
+[[source]]
+name = "mamajek_hillenbrand_2008"
+url = "https://arxiv.org/pdf/0807.1686"
+citation = "Mamajek, E. E. & Hillenbrand, L. A. 2008, Improved Age Estimation for Solar-Type Dwarfs Using Activity-Rotation Diagnostics, ApJ 687, 1264."
+sha256 = "9e407163f8e72bd9bfb7013376f0bb6ef6370d249834a6bce578b413642af881"
+bytes = 924884
+grade = "observation"
+extract = "Revised gyrochronology (Table 10): P = a((B-V)-c)^b t^n, a=0.407, b=0.325, c=0.495, n=0.566. Motivated by Barnes over-predicting Hyades periods by up to 50 percent, so the coefficient set is a modeling choice. Same I-sequence validity limits; anchors 130 Myr to 4.566 Gyr."
+used_by = "LAYER4_ROOT_CENSUS spin-down (modern recalibration; model-choice band vs Barnes)"
+
+# ============================ Alpha viscosity census ============================
+
+[[source]]
+name = "hartmann_1998"
+url = "https://iopscience.iop.org/article/10.1086/305277/pdf"
+citation = "Hartmann, L., Calvet, N., Gullbring, E., D'Alessio, P. 1998, Accretion and the Evolution of T Tauri Disks, ApJ 495, 385."
+sha256 = "89eb92d71a84a1abba7973c1a1ad01e9645c4979d7d1e9cabb0caa10f325f16d"
+bytes = 624291
+grade = "observation"
+extract = "Abstract verbatim: 'we estimate alpha ~ 10^-2 (on scales ~10-100 AU)' from similarity solutions and observed disk sizes. Median Mdot ~ 1e-8 M_sun/yr at ~1 Myr, Mdot ~ t^-gamma with 1.5 < gamma < 2.8. THE TRANSPORT-INFERRED alpha the LBP clock consumes (Cell A/B)."
+used_by = "LAYER4_ROOT_CENSUS alpha (transport-side, for t_visc)"
+
+[[source]]
+name = "flaherty_2015"
+url = "https://arxiv.org/pdf/1510.01375"
+citation = "Flaherty, K. M., Hughes, A. M., Rose, S. C., et al. 2015, Weak Turbulence in the HD 163296 Protoplanetary Disk Revealed by ALMA CO Observations, ApJ 813, 99."
+sha256 = "c32730b42831d7ffddd37c99bf17829aac0f7f63462750366ea17c9b70f92928"
+bytes = 5758752
+grade = "observation"
+extract = "Turbulence upper limit alpha < 9.6e-4 (CO 3-2) / < 0.03 (multiline); turbulent velocity < 3 percent of the sound speed. THE MEASURED-TURBULENCE alpha, an order of magnitude below the transport value (Cell C)."
+used_by = "LAYER4_ROOT_CENSUS alpha (turbulence-measured, the non-consumed axis)"
+
+[[source]]
+name = "flaherty_2018"
+url = "https://arxiv.org/pdf/1803.03842"
+citation = "Flaherty, K. M., Hughes, A. M., Teague, R., et al. 2018, Turbulence in the TW Hya Disk, ApJ 856, 117."
+sha256 = "bb03a5b8cca93815b301fa21aeb2d2a840e558e316a88abe439d20dca693a4a9"
+bytes = 1875285
+grade = "observation"
+extract = "Abstract verbatim: turbulent broadening < 0.08 c_s (alpha < 0.007 within 2-3 scale heights above midplane). TW Hya turbulence upper limit (Cell D)."
+used_by = "LAYER4_ROOT_CENSUS alpha (turbulence-measured)"
+
+[[source]]
+name = "gammie_1996"
+url = "https://articles.adsabs.harvard.edu/pdf/1996ApJ...457..355G"
+citation = "Gammie, C. F. 1996, Layered Accretion in T Tauri Disks, ApJ 457, 355."
+sha256 = "2867178ff23e66e61f53d6f4e66621e6104045fd25b13da508cd754f1960843b"
+bytes = 151113
+grade = "theory"
+extract = "Dead zone: MRI active only where ionized; at R >~ 0.1 AU accretion in a ~100 g/cm^2 cosmic-ray-ionized surface layer over a DEAD midplane (alpha ~ 0 at midplane, active-layer alpha ~ 10^-2). The disk-integrated alpha is then a thin-active-layer construct, framework-contested for the LBP clock."
+used_by = "LAYER4_ROOT_CENSUS alpha (dead-zone regime; framework flag)"
+
+[[source]]
+name = "bai_stone_2013"
+url = "https://arxiv.org/pdf/1210.6661"
+citation = "Bai, X.-N. & Stone, J. M. 2013, Local Study of Accretion Disks with a Strong Vertical Magnetic Field, ApJ 767, 30."
+sha256 = "b883d57e488b3f9ae9c991e5b3af16e40eb1cdf2452810503a2a91dcb890a52e"
+bytes = 1058018
+grade = "theory"
+extract = "MRI net-flux simulation: alpha ~ 0.08 at beta0=1e4 rising to alpha >~ 1.0 at beta0=100, critical beta0 ~ 1e3 (height-integrated mass-weighted Shakura-Sunyaev alpha, ideal MHD). The strong-flux upper end of the simulation-predictor band."
+used_by = "LAYER4_ROOT_CENSUS alpha (MRI net-flux simulation predictor)"
+
+[[source]]
+name = "lesur_2023_ppvii"
+url = "https://arxiv.org/pdf/2203.09821"
+citation = "Lesur, G., Ercolano, B., Flock, M., et al. 2023, Hydro-, Magnetohydro-, and Dust-Gas Dynamics of Protoplanetary Disks, Protostars and Planets VII."
+sha256 = "43a47fd643a6a75429282f65c1e1c01ccbeb95689028674d071dc56e79e55a8a"
+bytes = 18793019
+grade = "review"
+extract = "The load-bearing method distinction verbatim: transport requires 'alpha_S ~ 10^-2 ... to match the observed accretion rates', while ALMA gives 'alpha_S < 10^-4-10^-3 for four out of five sources' (DM Tau ~0.01-0.5). Non-ideal MRI reduced to ~several e-4; VSI alpha ~1e-4 (radial), COS ~1e-3, ZVI ~1e-5-1e-4. Framework flag: magnetized winds may dominate outer-disk transport, so a Shakura-Sunyaev alpha is a fitted stand-in."
+used_by = "LAYER4_ROOT_CENSUS alpha (census review; the transport-vs-turbulence two-quantities finding)"
