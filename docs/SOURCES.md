@@ -28,16 +28,6 @@ Lanz, T. and Hubeny, I., 2007, A Grid of NLTE Line-Blanketed Model Atmospheres o
 - licence evidence: arXiv default non-exclusive distribution licence (grants arXiv, not third parties); AAS copyright on the ApJS version of record; no CC statement found on the arXiv record
 - free route (preprint): https://arxiv.org/pdf/astro-ph/0611891
 
-### `bstar2006_sed_grid_svo`
-
-Lanz, T. and Hubeny, I., 2007, BSTAR2006 emergent model SEDs (model.flux), ApJS 169, 83, served by the SVO Theoretical Spectra service (Rodrigo, Solano et al.), collection tlusty_bstarbin. Underlying atmospheres: Hubeny & Lanz 1995, ApJ 439, 875.
-
-- sha256: `e8d2b13abefd0b233104650f9fd3c66c00338b10ffcae542fdd4356176004078`
-- archived: https://web.archive.org/web/20260719195502/http://svo2.cab.inta-csic.es/theory/newov2/ssap.php?model=tlusty_bstarbin
-- scope: The BSTAR2006 emergent model.flux SEDs (F_lambda vs lambda) over Teff 15000 to 30000 K, the Herbig / cool-B regime that reaches BELOW the Sternberg 25 kK anchor. The 16 files USED are solar Z (z=1.0) and log g 4.0, held FIXED (the joint-fit-parameters-belong-together rule); the full grid also spans log g 1.75 to 4.75 and six compositions. These SEDs supply the model-over-blackbody EUV (Lyman continuum, >13.6 eV) photon-rate DEPARTURE the P0-A Herbig branch (astro::nlte_departed_ionizing_spectrum) needs: derived here as log10 departure in [-2.69, -0.65] over 15 to 30 kK, nearly linear at +0.14 dex per 1000 K (full 16-point table, method, and cross-checks in docs/working/BSTAR2006_HERBIG_EUV_DEPARTURE.md). SCOPE LIMIT that governs use: these are WINDLESS, so above 25 kK they will NOT match the Sternberg windy WM-Basic anchor; the two are SIBLING grounded intervals for different regimes and must NEVER be merged into one continuous interval (the disjoint-evidence discipline P0-B enforces). The value of this grid is the 15 to 25 kK region where no windy grid reaches and Herbig Be winds are weak.
-- custody: witness
-- licence (redistribution unconfirmed): No explicit redistribution licence is posted on the SVO Theoretical Spectra service; its stated expectation is to acknowledge the SVO Theoretical Spectra service and cite the original paper (Lanz & Hubeny 2007, ApJS 169, 83; Hubeny & Lanz 1995). So the bytes are NOT held in-repo (also 1.19 MB each); this is a citation-plus-witness holding whose receipt is the sha256 set below plus the public Wayback captures. The values read (a per-model SED integrated against a blackbody, giving a dimensionless departure ratio) are facts and are citable under that acknowledgement.
-
 ### `cod_phase_crystallography`
 
 Crystallography Open Database (COD), https://www.crystallography.net/cod/, eleven CIF records for the eight registry phases: 1011097 and 1011172 (quartz, Wei 1935 and Brill, Hermann & Peters 1939), 1000032 (corundum, Lutterotti & Scardi 1990, J. Appl. Cryst. 23, 246), 1010914 (corundum rhombohedral setting, Pauling & Hendricks 1925, J. Am. Chem. Soc. 47, 781), 1000053 (periclase, Sasaki, Fujino & Takeuchi 1979, Proc. Japan Acad. 55, 43), 1011267 (hematite rhombohedral setting, Zachariasen 1928), 1544615 (forsterite, J. Mineral. Petrol. Sci. 2006), 1000064 (fayalite, Fujino, Sasaki, Takeuchi & Sadanaga 1981, Acta Cryst. B37, 513), 1010129 (spinel, Passerini 1930, Gazz. Chim. Ital. 60, 389), 1000047 (enstatite, Yang & Ghose 1995, Phys. Chem. Minerals 22, 300) and 1011018 (enstatite ferroan, Takane 1932, Proc. Imperial Acad. Tokyo 8, 308).
@@ -111,6 +101,16 @@ Powell, R.W., Ho, C.Y. & Liley, P.E., 1966, Thermal Conductivity of Selected Mat
 - licence evidence: the document's own front matter (issue date, GPO imprint, no copyright notice); Public Law 90-396, 11 July 1968, for the date comparison
 - free route (gov-work): https://nvlpubs.nist.gov/nistpubs/Legacy/NSRDS/nbsnsrds8.pdf
 - holding: `crates/physics/data/phase_conductivity/nsrds_nbs8_SLIM.pdf`
+
+### `svo_tlusty_bstar2006`
+
+Lanz, T. and Hubeny, I., 2007, A Grid of NLTE Line-blanketed Model Atmospheres of Early B-type Stars, ApJS 169, 83 (2007ApJS..169...83L), served as the BSTAR2006 grid through the Spanish Virtual Observatory Theoretical Spectra service (Data Archive Unit, Center of Astrobiology). Underlying code: TLUSTY, Hubeny, I. and Lanz, T., 1995, ApJ 439, 875 (1995ApJ...439..875H).
+
+- sha256: `e8d2b13abefd0b233104650f9fd3c66c00338b10ffcae542fdd4356176004078`
+- archived: https://web.archive.org/web/20260719195502/http://svo2.cab.inta-csic.es/theory/newov2/ssap.php?model=tlusty_bstarbin
+- scope: The 16 models at solar Z (z=1.0) and log g 4.0, Teff 15000 to 30000 K in 1000 K steps, held FIXED across the run. Used ONLY for the model-over-blackbody EUV departure below the 911.28 A Lyman edge: derived as log10 departure in [-2.69, -0.65] over 15 to 30 kK, nearly linear at +0.14 dex per 1000 K (full 16-point table, method, and cross-checks in docs/working/BSTAR2006_HERBIG_EUV_DEPARTURE.md). WINDLESS by construction: the grid carries no wind, so above 25 kK it does NOT match the wind-affected Sternberg WM-Basic anchor and must stay a SIBLING grounded interval, never merged with it (the disjoint-evidence discipline P0-B enforces); its value is the 15 to 25 kK region where no windy grid reaches. INTERPOLATION PROHIBITION: two of the sixteen (Teff 23000 and 24000, mid-range) are archive_pending, so a wired departure table must not silently interpolate across the 23 to 24 kK segment as though vendored; those two carry the reduced grade until the SAVE-retry lands.
+- custody: witness
+- licence (**NOT redistributable**): No rights, licence, or copyright field is present on the SVO service pages checked or anywhere in the VOTable Curation metadata (the only Curation fields are Publisher, PublisherDID, PublisherID, Reference, and Contact; verified in-session against a held VOTable and independently by the coordinator). An earlier draft of this entry asserted an acknowledgement-and-cite expectation that was NOT read from any page (it was inherited from a fetch summary), and it has been removed rather than kept as an unconfirmed receipt. redistributable is set false as the conservative reading. Held as citation-plus-witness: the SED values are uncopyrightable facts computed from a published model grid, so reading and citing them is safe independently of the redistribution question, and no bytes are held.
 
 ### `touloukian_1966_oxides`
 

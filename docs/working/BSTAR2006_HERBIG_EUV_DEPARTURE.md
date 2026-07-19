@@ -167,11 +167,15 @@ of its neighbours.
 
 ## Vendoring status
 
-The `sources/registry.toml` witness entry `bstar2006_sed_grid_svo` is authored (this branch):
+The `sources/registry.toml` witness entry `svo_tlusty_bstar2006` is authored (this branch):
 custody witness, the 16 per-file sha256 receipts and the 14 archived timestamps and the two
-`archive_pending` gaps recorded, the SSAP index as the primary witness, the SVO acknowledgement
-plus Lanz and Hubeny 2007 as the licence reason. The bytes are not held in-repo (1.19 MB each, no
-explicit redistribution licence). Remaining: the coordinator SAVE-retry for the two gap points,
+`archive_pending` gaps recorded, the SSAP index as the primary witness. LICENCE, corrected: an
+earlier draft asserted an SVO acknowledgement-and-cite expectation that was NOT read from any page
+(inherited from the fetch summary); the coordinator could not find it, and a check of the held
+VOTable confirms the Curation metadata carries no rights or licence field. So the entry now records
+the verified absence, sets `redistributable = false` conservatively, and holds it as
+citation-plus-witness because the SED values are uncopyrightable facts. The bytes are not held
+in-repo (1.19 MB each). Remaining: the coordinator SAVE-retry for the two gap points,
 and the wiring into the P0-A Herbig branch as a windless grounded interval (log-space
 interpolation over the table), sibling to the Sternberg windy anchor and never merged with it,
 honouring the interpolation prohibition above.
