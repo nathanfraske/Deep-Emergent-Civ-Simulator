@@ -72,6 +72,13 @@ jobs:
         run: |
           python3 scripts/sources_gate.py --self-test
           python3 scripts/sources_gate.py
+      # The disk-arc literature ledger is a sibling receipt store to the sources pipeline above: every vendored
+      # primary carries a complete receipt (SHA256, Wayback witness, grade, verbatim extract, used_by), and a
+      # citation-plus-witness entry holds no bytes while still pinning the IA snapshot it was read against.
+      - name: Disk-arc literature receipt ledger (every vendored source carries a complete receipt)
+        run: |
+          python3 scripts/disk_arc_literature_provenance_test.py
+          python3 scripts/disk_arc_literature_provenance_test.py --self-test
 
   rust:
     name: build, format, lint, test

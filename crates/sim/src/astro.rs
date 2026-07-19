@@ -603,10 +603,16 @@ pub fn disk_surface_density(
 /// star mass ([`SOLAR_MASS_KG`] times `star_mass_ratio`) and `r = orbit_au * AU`, `k_B`
 /// (`fundamentals::BOLTZMANN`), and `m_H` as one atomic mass unit (`1e-3 / N_A` kg, one gram-per-mole per amu, from
 /// `fundamentals::AVOGADRO`); `disk_temperature_k` is the caller's derived disk temperature `T(r)`.
-/// RESERVED-with-basis, surfaced rather than fabricated: `alpha_viscosity`, the Shakura-Sunyaev turbulent-viscosity
-/// parameter (basis ~0.001 to 0.01, Shakura & Sunyaev 1973; a per-disk datum, so a quiescent dead-zone disk and an
-/// MRI-active disk are data rows), and `mean_molecular_weight` `mu`, the disk-gas mean molecular weight (basis
-/// ~2.34 for a solar H2+He mix; a per-composition datum, so a carbon-rich or a metal-poor disk is a data row).
+/// RESERVED-with-basis, surfaced rather than fabricated: `alpha_viscosity`, the Shakura-Sunyaev viscosity parameter,
+/// and `mean_molecular_weight` `mu` (basis ~2.34 for a solar H2+He mix; a per-composition datum, so a carbon-rich or
+/// a metal-poor disk is a data row). ALPHA IS A CHORD THAT MUST DECLARE ITS METHOD (research-agent re-scope): the
+/// letter covers TWO quantities that diverge in practice, the EFFECTIVE TRANSPORT coefficient the accretion clock
+/// consumes (calibrated by accretion-rate and disk-lifetime demographics) and the LOCALLY-MEASURED turbulence
+/// coefficient (ALMA linewidths, MRI simulations), which part company in dead zones and non-ideal-MHD or weakly
+/// hydrodynamic regimes. This clock consumes the TRANSPORT-side quantity, so the basis is the transport-side
+/// observable (accretion-inferred `alpha ~ 1e-3 to 1e-2`), NOT the turbulence measurement; a per-disk datum, so a
+/// quiescent dead-zone disk and an MRI-active disk are data rows. The full census (method, region and regime,
+/// mechanism class, with regime-conditioned banded rows) is the alpha arc's first deliverable, not this interim.
 ///
 /// The product spans many decades (`Mdot ~ 1e15 kg/s`, `Omega ~ 1e-7 rad/s`, `m_H ~ 1e-27 kg`, `k_B ~ 1e-23 J/K`),
 /// so the whole assembly runs in LOG-SPACE (the [`isolation_mass_earth`] precedent): `ln Sigma = ln Mdot + ln mu +
@@ -677,6 +683,594 @@ pub fn viscous_similarity_surface_density(
         return None;
     }
     Some(ln_sigma.exp())
+}
+
+/// A protostellar CORE-COLLAPSE MODEL: the dimensionless mass-accretion eigenvalue `m0` of an inside-out collapse,
+/// carried as data so which collapse solution the birth rate uses is a DECLARED CHOICE, the sibling of the
+/// [`XrayWindFit`] wind ensemble (distinct physics claims banded, not a settled law). The rate is `Mdot = m0*c_s^3/G`
+/// ([`shu_inside_out_collapse_accretion_rate_msun_myr`]), so a larger `m0` is a faster, more violent collapse. The
+/// mechanism applies whichever model is passed; an alien collapse physics is a new constructor, a data row, not a
+/// rewrite (admit-the-alien).
+///
+/// `m0` IS A CHORD THAT DECLARES ITS ABSCISSA. The classic isothermal-sphere collapse solutions are a CONTINUUM
+/// FAMILY parameterized by the instability parameter `A` (the initial central over-density relative to the
+/// hydrostatic singular isothermal sphere), with `m0` conditioning on `A` within Shu 1977's own Table 1 (Hunter
+/// 1977; Whitworth and Summers 1985). The two shipped rows are the DECLARED ENDPOINTS of that measured continuum, a
+/// factor ~48 apart, the Owen-versus-Sellek band exactly: (1) [`CollapseModel::shu_1977`], the hydrostatic edge
+/// `A = 2`, `m0 = 0.975`, the slowest, quasi-static expansion-wave collapse, VENDORED (Shu 1977, and independently
+/// corroborated by Hunter 1977 p.838 which prints the same `0.975`); (2) [`CollapseModel::larson_penston`], the
+/// dynamical edge `A = 8.854`, `m0 = 46.915`, the fastest collapse, VENDORED (Hunter 1977, ApJ 218, 834, read
+/// source-verbatim, with Whitworth-Summers 1985 as a dual-channel corroboration at `w0 = 46.84`). A caller needing
+/// one number gets the BAND, not a default.
+///
+/// THE CENTRAL-MEMBER CHOICE IS A CONVENTION with a recorded stability note (VENDORED and CORRECTED at the primary,
+/// Ori and Piran 1988, MNRAS 234, 821, receipt `968e318b...`): the paper proves only a NECESSARY condition, so the
+/// carried claim is NOT "Larson-Penston is the only stable solution". Read verbatim: the primary-direction family
+/// (including homogeneous collapse) is UNSTABLE and ruled out, and the secondary-direction family (whose best-known
+/// member is Larson-Penston) SATISFIES the necessary criterion, but the paper states outright it "does not show that
+/// the secondary-direction ... solution is stable". So LP is the surviving candidate, not a proven-unique stable
+/// solution; Shu is the widely-used quasi-static convention; the debate continues on the failure of either endpoint
+/// post-core-formation. RULED
+/// (research agent, owner-signed): the end state is PURE BAND, NO DEFAULT, since a default here sits in the giant
+/// verdict's path with a factor-48 alternative and an open selection debate. STAGED: today the Shu member rides as a
+/// DEFAULTS-TAKEN interim (the convention line in the provenance readout, the stability note an annotation never a
+/// selector); the collapse-band interval propagation through the race is its own slice; then the default dies and
+/// the band ships. Choosing a member because a solar hindcast prefers it would be a licensed-calibration event
+/// (ledger, spent row, owner signature), which nothing here licenses. The factor-48 framing follows from two
+/// VENDORED endpoints (46.915 / 0.975), and the Ori-Piran stability note is now vendored-and-corrected above.
+///
+/// NAMED DEBT (flagged, not built): the REALISTIC time-dependent infall history is not constant, VENDORED and
+/// CORRECTED at the primary (Foster and Chevalier 1993, ApJ 416, 303, receipt `dfd6f006...`): the central mass
+/// accretion rate PEAKS at `~47 c_s^3/G` at `r = 0` immediately after core formation and declines sharply
+/// thereafter (NOT the `~13` the channel relayed, which is nowhere in the paper), and opacity is NOT in the collapse
+/// dynamics (the hydro is isothermal; opacity enters only the line-profile diagnostics). This [`CollapseModel`]
+/// carries a single constant-rate eigenvalue, so the contract is kept wide enough to admit a rate-LAW `Mdot(t)`
+/// member later, a fetch-flagged debt. NAMED OPPORTUNITY (not a debt): the eigenvalue family's own floor is the
+/// similarity ODE, so `m0(A)` is derivable in-engine, at which rung Shu Table 1 (the vendored `m0(A)` row,
+/// `A = 2.00 -> 4.00` giving `m0 = 0.975 -> 5.58`, with LP on Hunter's separate secondary branch far outside that
+/// range) demotes to a concordance check. The fetch specs live in
+/// `docs/working/DISK_ARC_FETCH_VALUES.md`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct CollapseModel {
+    /// The dimensionless collapse mass-accretion eigenvalue `m0` (`Mdot = m0 * c_s^3 / G`).
+    pub collapse_coefficient_m0: Fixed,
+    /// The instability parameter `A` the eigenvalue conditions on (Shu 1977 Table 1), the ABSCISSA of the `m0`
+    /// chord: `A = 2` is the hydrostatic singular isothermal sphere, larger `A` a more over-dense, faster collapse.
+    /// Carried so the coefficient never travels without the condition it was read at.
+    pub instability_parameter_a: Fixed,
+}
+
+impl CollapseModel {
+    /// The Shu (1977) EXPANSION-WAVE inside-out collapse, the SLOW (hydrostatic) endpoint: `m0 = 0.975` at the
+    /// instability parameter `A = 2` (Shu 1977, ApJ 214, 488, Table 1 and Table 2, the `x -> 0` core-mass
+    /// eigenvalue; vendored primary sha256 `af390700604cd491d36b9dfbf9a5e767611b4f7880ae360a6d2258c224fd29d2`). A
+    /// CONVENTION, not a neutral default: the widely-used quasi-static value carrying the Ori-Piran 1988 caveat that
+    /// the Larson-Penston branch is the stability-SURVIVING candidate, not a proven-unique stable solution (the
+    /// corrected reading on [`CollapseModel`]). A consumer needing one number reads the band.
+    pub fn shu_1977() -> Self {
+        CollapseModel {
+            collapse_coefficient_m0: Fixed::from_ratio(975, 1000), // Shu 1977 Table 1/2 (x -> 0, A = 2)
+            instability_parameter_a: Fixed::from_int(2),           // the hydrostatic SIS
+        }
+    }
+
+    /// The Larson-Penston DYNAMICAL collapse, the FAST endpoint: `m0 = 46.915` at the instability parameter
+    /// `A = 8.854`, ~48 times the Shu rate, the faster edge of the collapse-model band.
+    ///
+    /// VENDORED (the channel-relayed flag retired). Read source-verbatim from the primary: Hunter 1977, ApJ 218,
+    /// 834, p.838 (`"Values of m0 are 46.915, ... for the Larson-Penston ... solutions"`) for the eigenvalue, and
+    /// p.837 (`"values of P(0) ... being 8.854, ..."`) for the abscissa, which is Hunter's central-density
+    /// coefficient `P(0)` (so `A = 2` for Shu and `A = 8.854` for LP both land on it). Hunter's convention (eqs. 1
+    /// and 14, `M = a^3 t m(zeta)/G` with `m -> m0`) gives `Mdot = m0 c_s^3/G`, matching ours. Vendored primary
+    /// sha256 `9e187e6d69cccf733734b75c7b974f287532163692514084eb511828d6a70e0f`. DUAL-CHANNEL CONFIRMED on Hunter's
+    /// own pages (the scanned-typography OCR-flip guard): an independent re-read of the rendered page crops agrees
+    /// with the OCR text layer exactly, `46.915` and `8.854`, no digit flip, same hash. Separately, the cross-source
+    /// spread is a CLASSIFIED ROW, not absorbed by the word corroboration: Whitworth and Summers 1985 (MNRAS 214, 1,
+    /// receipt `ba57e11c...`) print the same member as `w0 = 46.84` under their `(z0, w0)` parametrization
+    /// (`z0 = 1.672`, no `P(0)` given, so our `A = 8.854` rests on Hunter alone). The two carry BOTH facts: they
+    /// corroborate the PHYSICS (the Larson-Penston member exists at ~47x the Shu rate) and DISAGREE on the NUMBER at
+    /// the third digit (46.915 versus 46.84, a 0.16% spread). CLASSIFICATION: presumed numerical-integration
+    /// precision (two independent integrations of the same similarity ODE), unexplained beyond that, far below the
+    /// factor-48 band so decision-irrelevant; the carried value tracks Hunter's printed `46.915`.
+    pub fn larson_penston() -> Self {
+        CollapseModel {
+            collapse_coefficient_m0: Fixed::from_ratio(46915, 1000), // 46.915 (Hunter 1977 p.838; W&S give 46.84)
+            instability_parameter_a: Fixed::from_ratio(8854, 1000), // A = P(0) = 8.854 (Hunter 1977 p.837)
+        }
+    }
+}
+
+/// THE BIRTH ACCRETION RATE `Mdot_0` (solar masses per Myr), DERIVED from the cloud core's own collapse rather than
+/// reserved as a number. This retires the disk clock's `Mdot_0` from a tagged solar interim to a derived quantity:
+/// the inside-out collapse of a singular isothermal sphere delivers mass onto the forming star-plus-disk at
+/// `Mdot = m0 * c_s^3 / G`, where `c_s = (k_B*T / (mu*m_H))^(1/2)` is the ISOTHERMAL sound speed of the molecular
+/// cloud core (the same `c_s` [`viscous_similarity_surface_density`] uses) and `m0` is the [`CollapseModel`] the
+/// caller declares. So the birth rate falls out of the core TEMPERATURE and the gas mean molecular weight, both more
+/// fundamental than an authored accretion rate: `Mdot ~ c_s^3 ~ T^(3/2)`, a warmer core collapsing faster.
+///
+/// THE SOUND SPEED IS ISOTHERMAL, DECLARED AND ASSERTED. `c_s = (k_B*T / (mu*m_H))^(1/2)` carries NO adiabatic
+/// index: an `a = (gamma*k_B*T/(mu*m_H))^(1/2)` would inflate the rate by `gamma^(3/2)` (a factor 2.15 at
+/// `gamma = 5/3`), invisible to any T-scaling test, so the isothermal form is asserted by the absolute-magnitude
+/// oracle (the 10 K solar value lands near `1.5`, not the `~3.3` an adiabatic `c_s` would give). TERMS DROPPED, each
+/// where it lives: isothermality is physically justified at the prestellar stage (efficient line-and-dust cooling
+/// holds the core near constant `T`); spherical symmetry neglects rotation, magnetic fields, and dynamical
+/// turbulence, and ROTATION re-enters downstream through the disk-size derivation (`R_1`, `t_visc`), so the dropped
+/// angular momentum is relocated rather than lost, named here rather than buried.
+///
+/// THE MEAN MOLECULAR WEIGHT IS A CHORD OVER PHASE AND COUNTING, both fixed to core conditions. It MUST be the
+/// MOLECULAR value (hydrogen as `H2` at cold core conditions, a 2.5x rate lever against atomic hydrogen) and PER
+/// FREE PARTICLE (against pure-`H2` counting, a 1.26x lever), which is what [`derive_disk_gas_mean_molecular_weight`]
+/// returns when passed `hydrogen_atoms_per_molecule = 2` (`mu ~ 2.34` at solar). SAME-FACT-TWO-DOORS: the core `mu`
+/// and the disk `mu` are ONE ROW, the same molecular per-free-particle derivation, not two routes to arbitrate; the
+/// caller passes the world's single derived `mu` here and to the disk clock alike, so no second door opens. (That
+/// function's `disk_gas` NAME serves a cloud-core consumer here by SHARED SCOPE, both being cold molecular
+/// `H2`-dominated gas, not a proximity grab.) TERMS DROPPED: this is valid where hydrogen is MOLECULAR; a hot-inner-
+/// disk consumer, where `H2` dissociates, needs a phase dispatch before it may read this row, a named debt, flag
+/// only.
+///
+/// THE COLLAPSE COEFFICIENT is the model-structure choice, carried on [`CollapseModel`] (Shu `A = 2` versus the
+/// faster Larson-Penston `A = 8.85` endpoint, a factor ~48 band), never authored inline. The cloud-core TEMPERATURE
+/// is the remaining input: a per-system birth condition (`disk_clock.cloud_core_temperature_k` in the calibration
+/// manifest, interim `10 K` with a DEFAULTS-TAKEN basis naming it the COLD EDGE of the Milky-Way present-epoch
+/// measured medians, owner-signature-pending), reserved until the layer-4 birth draw supplies it per-star. It bottoms
+/// out at a population draw, not a further derivation: a core cannot be colder than the CMB floor, and above it the
+/// equilibrium is set by the birth environment (the Layer-4 terminus). The draw conditions on environment class
+/// (cluster versus field, ~2.2x in rate), cosmic epoch (the CMB floor scaling `(1+z)`, a named debt: no epoch draw
+/// exists yet), and metallicity (present today as the drawn abundances), admit-the-alien a data row per system.
+///
+/// DORMANT: the derived replacement the slice-2 wire's `Mdot_0` interim graduates to; the giant gate reads it
+/// through [`crate::giants::giant_formation_on_derived_clock`]. The wide-magnitude product (`Mdot ~ 1e17 kg/s`,
+/// `m_H ~ 1e-27 kg`, `k_B ~ 1e-23 J/K`) is computed entirely in the log domain, the
+/// [`viscous_similarity_surface_density`] precedent, so no unrepresentable intermediate forms and a fail-loud past
+/// the `exp` ceiling. `None` on a non-physical temperature, molecular weight, or collapse coefficient, or an
+/// overflow.
+///
+// @derives: the protostellar disk birth accretion rate Mdot_0 <- the inside-out collapse rate m0*c_s^3/G over the cloud-core temperature, the disk-gas mean molecular weight, and the declared collapse model
+pub fn shu_inside_out_collapse_accretion_rate_msun_myr(
+    cloud_core_temp_k: Fixed,
+    mean_molecular_weight: Fixed,
+    collapse: &CollapseModel,
+) -> Option<Fixed> {
+    if cloud_core_temp_k <= Fixed::ZERO
+        || mean_molecular_weight <= Fixed::ZERO
+        || collapse.collapse_coefficient_m0 <= Fixed::ZERO
+    {
+        return None;
+    }
+    // ln c_s = 0.5*(ln k_B + ln T - ln mu - ln m_H), the isothermal sound speed (SI: m/s).
+    let ln_k_b = civsim_physics::saha::ln_of_decimal(civsim_units::fundamentals::BOLTZMANN.value)?;
+    // ln m_H = ln(1e-3) - ln(N_A): one atomic mass unit, one gram-per-mole per amu (`fundamentals::AVOGADRO`).
+    let ln_m_h = civsim_physics::saha::ln_of_decimal("1e-3")?.checked_sub(
+        civsim_physics::saha::ln_of_decimal(civsim_units::fundamentals::AVOGADRO.value)?,
+    )?;
+    let ln_c_s = Fixed::from_ratio(1, 2).checked_mul(
+        ln_k_b
+            .checked_add(cloud_core_temp_k.ln())?
+            .checked_sub(mean_molecular_weight.ln())?
+            .checked_sub(ln_m_h)?,
+    )?;
+    // ln Mdot [kg/s] = ln m0 + 3*ln c_s - ln G.
+    let ln_g = civsim_physics::saha::ln_of_decimal(
+        civsim_units::fundamentals::GRAVITATIONAL_CONSTANT.value,
+    )?;
+    let ln_mdot_kg_s = collapse
+        .collapse_coefficient_m0
+        .ln()
+        .checked_add(Fixed::from_int(3).checked_mul(ln_c_s)?)?
+        .checked_sub(ln_g)?;
+    // ln Mdot [M_sun/Myr] = ln Mdot [kg/s] + ln(1e6 * Julian year) - ln(M_sun), the kg/s -> M_sun/Myr conversion in
+    // the log domain (the `derive_disk_gas_surface_density` conversion run the other way).
+    let ln_megayear_s = civsim_physics::saha::ln_of_decimal(JULIAN_YEAR_S)?
+        .checked_add(civsim_physics::saha::ln_of_decimal("1e6")?)?;
+    let ln_mdot_msun_myr = ln_mdot_kg_s
+        .checked_add(ln_megayear_s)?
+        .checked_sub(civsim_physics::saha::ln_of_decimal(SOLAR_MASS_KG)?)?;
+    // Fail loud past the representable exp ceiling rather than saturate (the surface-density precedent):
+    // `ln(2^31) = 31*ln2` is the log of the representation's own maximum, an engine bound, not an owner value.
+    let ln_ceiling = Fixed::from_int(31).checked_mul(Fixed::from_int(2).ln())?;
+    if ln_mdot_msun_myr >= ln_ceiling {
+        return None;
+    }
+    Some(ln_mdot_msun_myr.exp())
+}
+
+/// The CENTRIFUGAL RADIUS `R_c` (AU): the disk BIRTH radius `R_1`, DERIVED from the collapsing core's specific
+/// angular momentum rather than drawn on its own axis. A fluid element falling in from the core conserves its
+/// specific angular momentum `j` and settles onto the forming disk where rotation supports it against gravity,
+/// which is where `j` equals the Keplerian circular value `sqrt(G M_star r)`. Equating them gives
+/// `R_c = j^2 / (G M_star)`, the classical rotating-collapse landing radius (Ulrich 1976; Cassen and Moosman
+/// 1981; Terebey, Shu and Cassen 1984). This is why `R_1` is DERIVABLE and not a root (LAYER4_ROOT_CENSUS): the
+/// disk's birth size follows from the core-angular-momentum root, and the resolved-disk-size demographics
+/// (Tazzari 2017 gas `R_c`, the Tripathi 2017 / Andrews 2020 dust size relations) demote to VALIDATION of the
+/// derived distribution. Drawing `R_1` independently while the engine owns core rotation would be two doors to one
+/// fact and would author away the correlation between disk size and everything else the core's `j` sets.
+///
+/// The value line: ZERO reserved numbers of its own. It reads the specific angular momentum (the census's ROOT,
+/// whose measured velocity-gradient distribution is the pending core-angular-momentum draw, not this kernel's to
+/// set) and the stellar mass, and composes them with the fundamental `G`, solar mass, and astronomical unit. Every
+/// input is a per-core ARGUMENT (the admit-the-alien test): a slower or faster core, a heavier or lighter star, is
+/// a data row, never a rewrite.
+///
+/// The specific angular momentum enters as its NATURAL LOG in SI (`m^2 s^-1`), not as a bare `Fixed`: a
+/// star-forming core carries `j ~ 1e16` to `1e18 m^2 s^-1` (Goodman et al. 1993 velocity gradients), which
+/// overflows the Q32.32 range the way the wide astronomical constants do, so the caller forms `ln j` (the
+/// log-valued-parameter idiom the wind coefficients already use) and the whole derivation stays in the log domain.
+/// `ln R_c[AU] = 2 ln j - ln G - ln M_sun - ln(star_mass_ratio) - ln AU`, then a single `exp`.
+///
+/// TERMS DROPPED, named rather than hidden. First and load-bearing: MAGNETIC BRAKING is omitted, so this is the
+/// pure HYDRODYNAMIC centrifugal radius and therefore an UPPER BOUND. A collapsing core threaded by field loses
+/// angular momentum to the envelope during infall (the classical magnetic-braking problem), which lands the
+/// material at a smaller radius than `j^2/(G M_star)` alone, so a braking-efficiency term is the named debt that a
+/// magnetized-collapse follow-on multiplies in; until then the derived `R_c` is the no-braking ceiling and the
+/// demographics validate whatever braking the drawn `j` distribution already folds in. Second: it is a SINGLE-SHELL
+/// instantaneous radius, the landing radius of material carrying THIS `j`. In a real collapse successively outer
+/// shells carry higher `j` and land farther out, so the disk outer edge grows over the accretion phase (the
+/// Terebey-Shu-Cassen time dependence); the caller selects which shell's `j` defines `R_1` (the outer,
+/// disk-defining shell), and the growth history is the named follow-on. Third: `M_star` is the enclosed central
+/// mass, disk self-gravity dropped, valid for `M_disk << M_star`. `None` on a non-positive stellar mass or a
+/// result past the representable `exp` range (it fails loud rather than saturating).
+///
+// @derives: the protostellar disk birth radius R_1 <- the centrifugal radius j^2/(G M_star) of the collapsing core's specific angular momentum over the enclosed stellar mass
+pub fn centrifugal_radius_au(
+    ln_specific_angular_momentum_si: Fixed,
+    star_mass_ratio: Fixed,
+) -> Option<Fixed> {
+    if star_mass_ratio <= Fixed::ZERO {
+        return None;
+    }
+    let ln_g = civsim_physics::saha::ln_of_decimal(
+        civsim_units::fundamentals::GRAVITATIONAL_CONSTANT.value,
+    )?;
+    let ln_m_sun = civsim_physics::saha::ln_of_decimal(SOLAR_MASS_KG)?;
+    let ln_au = civsim_physics::saha::ln_of_decimal(ASTRONOMICAL_UNIT_M)?;
+    // ln R_c[AU] = 2 ln j - ln G - ln M_sun - ln(star_mass_ratio) - ln AU (the m -> AU conversion in the log domain).
+    let ln_rc = Fixed::from_int(2)
+        .checked_mul(ln_specific_angular_momentum_si)?
+        .checked_sub(ln_g)?
+        .checked_sub(ln_m_sun)?
+        .checked_sub(star_mass_ratio.ln())?
+        .checked_sub(ln_au)?;
+    // Fail loud past the representable exp ceiling rather than saturate (the Shu-rate precedent): `ln(2^31)` is the
+    // log of the representation's own maximum, an engine bound, not an owner value.
+    let ln_ceiling = Fixed::from_int(31).checked_mul(Fixed::from_int(2).ln())?;
+    if ln_rc >= ln_ceiling {
+        return None;
+    }
+    Some(ln_rc.exp())
+}
+
+/// The GOLDSMITH THERMAL-BALANCE MODEL: the cited scalar coefficients of the dark-cloud-core gas-temperature
+/// balance (Goldsmith 2001, ApJ 557, 736), the fixed physics [`cloud_core_thermal_balance_temperature_k`] solves.
+/// The FORM is fixed Rust; these coefficients are the paper's own numbers, a declared model the way
+/// [`CollapseModel`] and [`SpinDownModel`] carry theirs, so a recalibration is a data row. The wide coefficients
+/// are stored as their base-ten log (the [`XrayWindFit`] idiom) because the raw rates underflow the Q32.32 range.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct GoldsmithThermalModel {
+    /// `log10` of the cosmic-ray heating energy deposited per ionization `dQ` (erg). Goldsmith adopts `dQ ~ 20 eV`
+    /// (`= 3.204e-11 erg`), so the heating rate is `Gamma = zeta * dQ * n(H2)` (eq. 3, linear in density, no
+    /// temperature dependence). The ionization rate `zeta` is the caller's explicit argument, not baked here.
+    pub cr_energy_log10_erg: Fixed,
+    /// `log10` of the gas-dust collisional-coupling coefficient (eq. 15): `Lambda_gd = 2e-33 * n(H2)^2 * (T_gas -
+    /// T_dust) * (T_gas/10)^0.5` erg cm^-3 s^-1, the `n^2` term that pins the gas to the dust above `n ~ 1e4`.
+    pub gas_dust_coeff_log10: Fixed,
+    /// The gas-dust cooling's temperature power, `0.5` (eq. 15's `(T_gas/10)^0.5`).
+    pub gas_dust_temp_power: Fixed,
+    /// The `10 K` reference temperature both the line-cooling `(T/10)^b` (eq. 1) and the gas-dust `(T/10)^0.5`
+    /// (eq. 15) are normalized to.
+    pub reference_temp_k: Fixed,
+    /// `log10` of the dust radiative-cooling coefficient (eq. 13): `Lambda_dust = 6.8e-33 * (T_d/K)^6 * n(H2)`
+    /// erg cm^-3 s^-1, the steep `T_d^6` thermal emission the dust balance ([`cloud_core_coupled_temperatures`])
+    /// balances against the external heating.
+    pub dust_cooling_coeff_log10: Fixed,
+    /// `log10` of the external dust-heating coefficient (eq. 7): `Gamma_dust,ext = 3.9e-24 * n(H2) * chi`
+    /// erg cm^-3 s^-1, the attenuated interstellar radiation field scaled by the caller's flux factor `chi`.
+    pub dust_heating_coeff_log10: Fixed,
+    /// The dust-cooling temperature power, `6` (eq. 13's `(T_d/10)`... `T_d^6`, the Planck-integrated emission).
+    pub dust_cooling_temp_power: Fixed,
+}
+
+impl GoldsmithThermalModel {
+    /// Goldsmith 2001, the vendored coefficients (ApJ 557, 736; DOI 10.1086/322255; citation-plus-witness in the
+    /// disk_arc_literature manifest, no bytes held per the AAS licence ruling, the equations read against the
+    /// Internet Archive witness): the cosmic-ray heating `dQ ~ 20 eV` (eq. 3), the gas-dust coupling `2e-33`
+    /// (eq. 15), the dust cooling `6.8e-33 T_d^6 n` (eq. 13), the external dust heating `3.9e-24 n chi` (eq. 7),
+    /// the `10 K` reference.
+    pub fn goldsmith_2001() -> Self {
+        Self {
+            cr_energy_log10_erg: Fixed::from_ratio(-104942, 10_000), // log10(3.204e-11), dQ = 20 eV
+            gas_dust_coeff_log10: Fixed::from_ratio(-326990, 10_000), // log10(2e-33), eq. 15
+            gas_dust_temp_power: Fixed::from_ratio(1, 2),            // (T/10)^0.5, eq. 15
+            reference_temp_k: Fixed::from_int(10),
+            dust_cooling_coeff_log10: Fixed::from_ratio(-321675, 10_000), // log10(6.8e-33), eq. 13
+            dust_heating_coeff_log10: Fixed::from_ratio(-234089, 10_000), // log10(3.9e-24), eq. 7
+            dust_cooling_temp_power: Fixed::from_int(6),                  // T_d^6, eq. 13
+        }
+    }
+}
+
+/// The LINE-COOLING FIT `Lambda_line = a (T/10)^b` (Goldsmith 2001 eq. 1): the abundance-and-depletion-conditioned
+/// power-law fit the caller reads from the vendored Table 2 (undepleted) or Table 4 (depleted) for its density and
+/// depletion regime. `log10_a` is `log10` of the coefficient `a` (erg cm^-3 s^-1, which underflows Q32.32 raw), `b`
+/// the temperature index. This is the abundance-set input to the balance, carried as a fit rather than a raw
+/// abundance because the cooling is the tabulated CO-network result, not a closed form.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct LineCoolingFit {
+    /// `log10` of the line-cooling coefficient `a` in `Lambda_line = a (T/10)^b`.
+    pub log10_a: Fixed,
+    /// The temperature index `b`.
+    pub b: Fixed,
+}
+
+/// The MOLECULAR CLOUD-CORE gas temperature `T_core` (K), DERIVED by SOLVING the Goldsmith (2001) thermal balance
+/// rather than drawn from a distribution. In a well-shielded dark core the gas temperature settles where the
+/// volumetric cosmic-ray heating equals the volumetric cooling: `Gamma_CR(zeta, n) = Lambda_line(n, T) +
+/// Lambda_gd(n, T, T_dust)`. This is the DERIVE-FIRST terminus (route two) of the reserved
+/// `disk_clock.cloud_core_temperature_k`: at this rung the birth temperature the Shu collapse reads stops being a
+/// drawn interim and becomes SOLVED from the core's own conditions, and the measured Jijina distribution demotes to
+/// a validation hindcast (the derived `T` at dark-core inputs must land inside the surveyed ~12 to 20 K spread).
+///
+/// The value line, and why it needs no schema: every physical input is an EXPLICIT named argument, the
+/// [`centrifugal_radius_au`] precedent, so the kernel owns the balance and nothing else and depends on no data
+/// layout. The cosmic-ray ionization rate enters in units of `1e-17 s^-1` (its dark-core scale, so the order-one
+/// argument stays representable), the H2 number density in `cm^-3`, the dust temperature in K (the radiation-field
+/// coupled sink the gas-dust term pulls toward), the line-cooling fit `(log10 a, b)` of `Lambda_line = a
+/// (T/10)^b` (eq. 1, the abundance-and-depletion-conditioned Table 2 / Table 4 fit the caller supplies for its
+/// regime), and the CMB floor. The cited scalar coefficients live in [`GoldsmithThermalModel`]. Zero fabricated
+/// values: the model numbers are Goldsmith's own (vendored), the state is per-core data (admit the alien).
+///
+/// Solved by bounded bisection over `[cmb_floor, t_hi]` (the [`disk_midplane_temperature`] pattern): at a trial
+/// `T` the net `Gamma - Lambda_line - Lambda_gd` is positive when heating wins (the gas wants to be hotter, raise
+/// the floor) and negative when cooling wins. Each rate is formed in the log domain and exponentiated into a
+/// common scaled linear domain (units of `1e-24 erg cm^-3 s^-1`) so the tiny CGS rates neither underflow nor lose
+/// their SIGN: the gas-dust term is signed by `T - T_dust`, so below the dust temperature it HEATS the gas rather
+/// than cooling it, which a pure-log sum could not represent. The result is clamped at the CMB floor (a core
+/// cannot be colder than the microwave background; the epoch `(1+z)` scaling of that floor is the named debt).
+///
+/// TERMS DROPPED, named at the site. Photoelectric and UV heating are omitted, valid for a well-shielded core and
+/// the named debt at the irradiated edge or PDR. Turbulent and compressional (adiabatic) heating are omitted,
+/// valid for a quiescent core and named at the collapsing or shocked edge. The line cooling is the dominant CO
+/// network folded into the caller's `(a, b)` fit; the fuller coolant set and the optical-depth moderation of
+/// depletion (Goldsmith's finding that a hundredfold abundance drop cuts the cooling only a few fold) live in that
+/// fit, which the caller reads from the vendored table. The dust temperature is taken as an explicit input rather
+/// than co-solved from the attenuated interstellar field through the dust balance (eqs. 13, 18). That co-solve now
+/// exists as [`cloud_core_coupled_temperatures`], which makes the radiation-field scaling `chi` the argument and
+/// derives `T_dust` too; this gas-only entry stays for the caller that already knows its dust temperature. `None`
+/// on a non-physical input, a bracket that does not straddle the floor, or a rate past the representable range.
+///
+// @derives: the molecular cloud-core gas temperature T_core <- the Goldsmith thermal balance of cosmic-ray heating against gas-dust coupling and molecular line cooling, over the ionization rate, density, dust temperature, line-cooling fit, and the CMB floor
+pub fn cloud_core_thermal_balance_temperature_k(
+    cosmic_ray_ionization_rate_per_1e17_s: Fixed,
+    h2_number_density_cm3: Fixed,
+    dust_temperature_k: Fixed,
+    line_cooling: LineCoolingFit,
+    cmb_floor_k: Fixed,
+    model: &GoldsmithThermalModel,
+    t_hi: Fixed,
+) -> Option<Fixed> {
+    if cosmic_ray_ionization_rate_per_1e17_s <= Fixed::ZERO
+        || h2_number_density_cm3 <= Fixed::ZERO
+        || dust_temperature_k <= Fixed::ZERO
+        || cmb_floor_k <= Fixed::ZERO
+        || line_cooling.b <= Fixed::ZERO
+        || t_hi <= cmb_floor_k
+    {
+        return None;
+    }
+    fn exp_guarded(x: Fixed, ln_ceiling: Fixed) -> Option<Fixed> {
+        if x >= ln_ceiling {
+            None
+        } else {
+            Some(x.exp())
+        }
+    }
+    let ln_ceiling = Fixed::from_int(31).checked_mul(Fixed::from_int(2).ln())?;
+    let ln10 = Fixed::from_int(10).ln();
+    let ln_n = h2_number_density_cm3.ln();
+    let two_ln_n = Fixed::from_int(2).checked_mul(ln_n)?;
+    // The common scale R = 1e-24 erg cm^-3 s^-1: the dark-core cooling magnitude, so every rate divided by it is
+    // order one to order a few thousand across n = 1e3 to 1e6, representable in Q32.32.
+    let ln_scale = civsim_physics::saha::ln_of_decimal("1e-24")?;
+    let ln_ref_t = model.reference_temp_k.ln();
+    // ln Gamma_CR = ln(zeta) + ln(dQ) + ln(n), with zeta = argument * 1e-17 s^-1 and ln(dQ) = log10(dQ) * ln(10).
+    let ln_zeta = cosmic_ray_ionization_rate_per_1e17_s
+        .ln()
+        .checked_add(civsim_physics::saha::ln_of_decimal("1e-17")?)?;
+    let ln_gamma = ln_zeta
+        .checked_add(model.cr_energy_log10_erg.checked_mul(ln10)?)?
+        .checked_add(ln_n)?;
+    let gamma_scaled = exp_guarded(ln_gamma.checked_sub(ln_scale)?, ln_ceiling)?;
+    let ln_a = line_cooling.log10_a.checked_mul(ln10)?;
+    let ln_gd_coeff = model.gas_dust_coeff_log10.checked_mul(ln10)?;
+    // net(T) = (Gamma - Lambda_line - Lambda_gd) / R, the sign the bisection reads.
+    let net = |t: Fixed| -> Option<Fixed> {
+        if t <= Fixed::ZERO {
+            return None;
+        }
+        let ln_t_over_ref = t.ln().checked_sub(ln_ref_t)?;
+        let ln_line = ln_a.checked_add(line_cooling.b.checked_mul(ln_t_over_ref)?)?;
+        let line_scaled = exp_guarded(ln_line.checked_sub(ln_scale)?, ln_ceiling)?;
+        let dt = t.checked_sub(dust_temperature_k)?;
+        let gd_scaled = if dt == Fixed::ZERO {
+            Fixed::ZERO
+        } else {
+            let abs_dt = if dt < Fixed::ZERO {
+                Fixed::ZERO.checked_sub(dt)?
+            } else {
+                dt
+            };
+            let ln_gd = ln_gd_coeff
+                .checked_add(two_ln_n)?
+                .checked_add(abs_dt.ln())?
+                .checked_add(model.gas_dust_temp_power.checked_mul(ln_t_over_ref)?)?;
+            let mag = exp_guarded(ln_gd.checked_sub(ln_scale)?, ln_ceiling)?;
+            if dt < Fixed::ZERO {
+                Fixed::ZERO.checked_sub(mag)? // below the dust temperature the coupling HEATS the gas
+            } else {
+                mag
+            }
+        };
+        gamma_scaled
+            .checked_sub(line_scaled)?
+            .checked_sub(gd_scaled)
+    };
+    let mut lo = cmb_floor_k;
+    let mut hi = t_hi;
+    for _ in 0..60 {
+        let mid = lo.checked_add(hi)?.checked_div(Fixed::from_int(2))?;
+        if net(mid)? > Fixed::ZERO {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    let t = lo.checked_add(hi)?.checked_div(Fixed::from_int(2))?;
+    Some(if t < cmb_floor_k { cmb_floor_k } else { t })
+}
+
+/// The coupled gas AND dust temperatures of a dark cloud core, both DERIVED.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct CoupledCoreTemperatures {
+    /// The derived gas temperature `T_gas` (K), the birth temperature the Shu collapse reads.
+    pub gas_temperature_k: Fixed,
+    /// The derived dust temperature `T_dust` (K), no longer a supplied input.
+    pub dust_temperature_k: Fixed,
+}
+
+/// The COUPLED gas-and-dust thermal balance: `T_gas` AND `T_dust` both DERIVED from the radiation field, closing
+/// the seam the gas-only [`cloud_core_thermal_balance_temperature_k`] left open (its `T_dust` was an explicit
+/// input). It solves the two Goldsmith (2001) balances together: the gas balance (eq. 17)
+/// `Gamma_CR = Lambda_line + Lambda_gd`, and the dust balance (eq. 18)
+/// `Gamma_dust,ext - Lambda_dust + Lambda_gd = 0`, so the radiation-field scaling `chi` (the attenuated
+/// interstellar field, `~1e-4` to `1e-5` for a well-shielded dark core) becomes the argument and `T_dust` is
+/// derived rather than supplied, converting a handed-in quantity into a solved one.
+///
+/// The dust heating is the attenuated ISRF (eq. 7) `Gamma_dust,ext = 3.9e-24 * n * chi`; the dust cooling is the
+/// steep thermal re-emission (eq. 13) `Lambda_dust = 6.8e-33 * T_d^6 * n`; the gas-dust coupling (eq. 15) carries
+/// energy from gas to dust when `T_gas > T_dust`. NESTED solve: bisect on `T_dust`, and at each trial solve the gas
+/// balance for `T_gas` on that dust temperature, then read the dust residual. The steep `T_d^6` cooling makes the
+/// residual monotone in `T_dust`, so the bracket converges cleanly. Every rate is formed in the log domain and
+/// combined in the scaled linear domain (the gas-solver discipline). Zero fabricated values: the coefficients are
+/// Goldsmith's own, read against the licenced Internet Archive witness (no bytes shipped).
+///
+/// TERMS DROPPED: the reradiation of far-infrared photons between grains is omitted (valid for a dark core where
+/// reradiation is at long wavelengths, Goldsmith's stated approximation), and `chi` is the caller's per-environment
+/// argument (its derivation from the visual extinction and column density is the named debt). `None` on a
+/// non-physical input or a solve that does not bracket.
+///
+// @derives: the coupled cloud-core gas and dust temperatures <- the Goldsmith gas-plus-dust thermal balance over the ionization rate, density, radiation-field chi, line-cooling fit, and CMB floor
+pub fn cloud_core_coupled_temperatures(
+    cosmic_ray_ionization_rate_per_1e17_s: Fixed,
+    h2_number_density_cm3: Fixed,
+    radiation_field_chi: Fixed,
+    line_cooling: LineCoolingFit,
+    cmb_floor_k: Fixed,
+    model: &GoldsmithThermalModel,
+    t_hi: Fixed,
+) -> Option<CoupledCoreTemperatures> {
+    if cosmic_ray_ionization_rate_per_1e17_s <= Fixed::ZERO
+        || h2_number_density_cm3 <= Fixed::ZERO
+        || radiation_field_chi <= Fixed::ZERO
+        || cmb_floor_k <= Fixed::ZERO
+        || line_cooling.b <= Fixed::ZERO
+        || t_hi <= cmb_floor_k
+    {
+        return None;
+    }
+    fn exp_guarded(x: Fixed, ln_ceiling: Fixed) -> Option<Fixed> {
+        if x >= ln_ceiling {
+            None
+        } else {
+            Some(x.exp())
+        }
+    }
+    let solve_gas = |t_dust: Fixed| -> Option<Fixed> {
+        cloud_core_thermal_balance_temperature_k(
+            cosmic_ray_ionization_rate_per_1e17_s,
+            h2_number_density_cm3,
+            t_dust,
+            line_cooling,
+            cmb_floor_k,
+            model,
+            t_hi,
+        )
+    };
+    let ln_ceiling = Fixed::from_int(31).checked_mul(Fixed::from_int(2).ln())?;
+    let ln10 = Fixed::from_int(10).ln();
+    let ln_n = h2_number_density_cm3.ln();
+    let two_ln_n = Fixed::from_int(2).checked_mul(ln_n)?;
+    let ln_scale = civsim_physics::saha::ln_of_decimal("1e-24")?;
+    let ln_ref_t = model.reference_temp_k.ln();
+    // Gamma_dust,ext = 3.9e-24 * n * chi (eq. 7), constant in T_dust.
+    let ln_gamma_dust = model
+        .dust_heating_coeff_log10
+        .checked_mul(ln10)?
+        .checked_add(ln_n)?
+        .checked_add(radiation_field_chi.ln())?;
+    let gamma_dust_scaled = exp_guarded(ln_gamma_dust.checked_sub(ln_scale)?, ln_ceiling)?;
+    let ln_dust_cool_coeff = model.dust_cooling_coeff_log10.checked_mul(ln10)?;
+    let ln_gd_coeff = model.gas_dust_coeff_log10.checked_mul(ln10)?;
+    // The dust-balance residual at a trial T_dust: positive means net dust heating (T_dust wants higher). The steep
+    // T_d^6 cooling makes it monotone decreasing in T_dust, so the bracket converges.
+    let dust_residual = |t_dust: Fixed| -> Option<Fixed> {
+        if t_dust <= Fixed::ZERO {
+            return None;
+        }
+        let t_gas = solve_gas(t_dust)?;
+        // Lambda_dust = 6.8e-33 * T_d^6 * n (eq. 13).
+        let ln_dust_cool = ln_dust_cool_coeff
+            .checked_add(model.dust_cooling_temp_power.checked_mul(t_dust.ln())?)?
+            .checked_add(ln_n)?;
+        let lambda_dust_scaled = exp_guarded(ln_dust_cool.checked_sub(ln_scale)?, ln_ceiling)?;
+        // Lambda_gd, signed by T_gas - T_dust: it HEATS the dust (positive) when the gas is hotter.
+        let dt = t_gas.checked_sub(t_dust)?;
+        let gd_scaled = if dt == Fixed::ZERO {
+            Fixed::ZERO
+        } else {
+            let abs_dt = if dt < Fixed::ZERO {
+                Fixed::ZERO.checked_sub(dt)?
+            } else {
+                dt
+            };
+            let ln_gd = ln_gd_coeff
+                .checked_add(two_ln_n)?
+                .checked_add(abs_dt.ln())?
+                .checked_add(
+                    model
+                        .gas_dust_temp_power
+                        .checked_mul(t_gas.ln().checked_sub(ln_ref_t)?)?,
+                )?;
+            let mag = exp_guarded(ln_gd.checked_sub(ln_scale)?, ln_ceiling)?;
+            if dt < Fixed::ZERO {
+                Fixed::ZERO.checked_sub(mag)?
+            } else {
+                mag
+            }
+        };
+        gamma_dust_scaled
+            .checked_sub(lambda_dust_scaled)?
+            .checked_add(gd_scaled)
+    };
+    let mut lo = cmb_floor_k;
+    let mut hi = t_hi;
+    for _ in 0..60 {
+        let mid = lo.checked_add(hi)?.checked_div(Fixed::from_int(2))?;
+        if dust_residual(mid)? > Fixed::ZERO {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    let t_dust_raw = lo.checked_add(hi)?.checked_div(Fixed::from_int(2))?;
+    let dust_temperature_k = if t_dust_raw < cmb_floor_k {
+        cmb_floor_k
+    } else {
+        t_dust_raw
+    };
+    let gas_temperature_k = solve_gas(dust_temperature_k)?;
+    Some(CoupledCoreTemperatures {
+        gas_temperature_k,
+        dust_temperature_k,
+    })
 }
 
 /// The DISK ACCRETION-RATE CLOCK (the disk-evolution arc, slice 1): the Lynden-Bell-Pringle self-similar decline
@@ -1267,6 +1861,110 @@ pub fn kraft_band_dispatch(
     })
 }
 
+/// The STAR'S EVOLUTIONARY PHASE, the axis ORTHOGONAL to envelope structure that decides which luminosity law a
+/// star obeys. A star is on the PRE-MAIN-SEQUENCE while it is still contracting and shining on the released
+/// gravitational energy (the Hayashi-Henyey contraction, brighter than its zero-age main-sequence instance), and
+/// on the MAIN SEQUENCE once hydrogen ignition has halted the contraction. The distinction is a PHASE question, not
+/// a structural one: a Herbig Ae/Be star is radiative-envelope AND pre-main-sequence at once, and a solar analogue
+/// is convective-envelope on BOTH sides of its arrival, so this never substitutes for [`KraftVerdict`].
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum EvolutionaryPhase {
+    /// Still contracting: the star shines above its main-sequence luminosity on gravitational energy, so the
+    /// `L_bol` track is the pre-main-sequence contraction law ([`pre_main_sequence_luminosity_lsun`]) and the
+    /// convective turnover is the fully-convective pre-main-sequence value
+    /// ([`pre_main_sequence_convective_turnover_days`]).
+    PreMainSequence,
+    /// Arrived: contraction has fallen to the zero-age main-sequence luminosity, so the `L_bol` track is the
+    /// main-sequence mass-luminosity law and the turnover is the main-sequence polynomial
+    /// ([`convective_turnover_time_days`]).
+    MainSequence,
+}
+
+/// Derive the [`EvolutionaryPhase`] from the CROSSING of the two luminosity laws the star obeys in turn: the falling
+/// pre-main-sequence contraction luminosity (`L ~ t^(-2/3)` on the Hayashi track) and the zero-age main-sequence
+/// luminosity (the mass-luminosity law, `L_sun * mass_ratio^exponent`). A pre-main-sequence star begins
+/// super-luminous and dims as it contracts, crossing the main-sequence value FROM ABOVE, and the crossing IS the
+/// arrival: while `L_pms > L_MS` the star is still contracting (PreMainSequence), and once the contraction
+/// luminosity has fallen to or below the main-sequence value it has reached the zero-age main sequence
+/// (MainSequence). Defining the boundary as the crossing makes `L_bol` CONTINUOUS across the phase switch (the two
+/// laws are equal there by construction), so a consumer selecting the phase-appropriate luminosity never sees a
+/// discontinuity at arrival, the same-fact-two-doors hazard defused at its root.
+///
+/// DERIVED, no authored value: both luminosities are the star's own derived quantities (each carries the star's
+/// mass, its Hayashi wall temperature, and, through the mass-luminosity exponent, its opacity), so the phase is a
+/// comparison of two derived numbers, not a threshold on age. ADMITS THE ALIEN: a star of any composition or energy
+/// route dispatches on ITS OWN two luminosities, never a Terran arrival age. The HONEST LIMIT: the Hayashi
+/// `t^(-2/3)` law overstates the late-contraction brightness (a real track flattens before the crossing) and a
+/// massive star's late pre-main-sequence is the Henyey track rather than the Hayashi wall, so the crossing slightly
+/// OVERESTIMATES the arrival age for those stars, a bias to correct when a per-track pre-main-sequence luminosity
+/// lands. `None` if either luminosity is non-positive (not a star).
+pub fn evolutionary_phase(
+    pre_main_sequence_luminosity_lsun: Fixed,
+    main_sequence_luminosity_lsun: Fixed,
+) -> Option<EvolutionaryPhase> {
+    if pre_main_sequence_luminosity_lsun <= Fixed::ZERO
+        || main_sequence_luminosity_lsun <= Fixed::ZERO
+    {
+        return None;
+    }
+    Some(
+        if pre_main_sequence_luminosity_lsun > main_sequence_luminosity_lsun {
+            EvolutionaryPhase::PreMainSequence
+        } else {
+            EvolutionaryPhase::MainSequence
+        },
+    )
+}
+
+/// THE STRUCTURE-KEYED DISPATCH STATE: the star's envelope structure and evolutionary phase as ONE derived state,
+/// the single node every branch downstream keys on. The two axes are orthogonal and both load-bearing: the
+/// [`KraftVerdict`] envelope (from [`kraft_band_dispatch`] on the star's current `T_eff`) selects the WIND branch (a
+/// convective envelope runs the X-ray dynamo clock, a radiative one the EUV-photoevaporation branch, a
+/// near-degenerate one carries both per the Gap Law), and the [`EvolutionaryPhase`] (from [`evolutionary_phase`] on
+/// the luminosity crossing) selects the `L_bol` TRACK (pre-main-sequence contraction versus the main-sequence law)
+/// and, with it, which convective turnover the Rossby number reads. Holding both in one state is what lets a
+/// consumer route a star correctly without re-deriving either: a Herbig star reads Radiative and PreMainSequence, a
+/// young solar analogue Convective and PreMainSequence, an arrived Sun Convective and MainSequence.
+///
+/// This supersedes a mass cut (the demoted `1.4 M_sun` figure was the main-sequence instance of a structure-keyed
+/// line): the dispatch keys on the star's own derived `T_eff` and its own two luminosities, so it is fully
+/// convective on the pre-main-sequence and mass-dependent on the main sequence WITHOUT reading a mass threshold.
+/// DERIVED throughout, no authored value; the mechanism is fixed Rust and the Kraft band edges are the only data,
+/// carried by [`KraftBreakBand`]. ADMITS THE ALIEN: every input is the star's own derived quantity.
+///
+/// HONEST LIMIT (a flagged sibling, not built here): the Kraft band is a MAIN-SEQUENCE-instance calibration, and a
+/// pre-main-sequence star keeps a convective envelope to a higher `T_eff` than its arrived instance, so the true
+/// envelope boundary shifts with phase. That shift is a future conditioning field on [`KraftBreakBand`] (the
+/// sibling of its metallicity shift), reserved until a pre-main-sequence Kraft determination is fetched; until then
+/// the envelope dispatches on the phase-correct `T_eff` against the main-sequence band, the conservative reading.
+/// `None` if either sub-dispatch refuses (a non-star `T_eff`, an invalid band, or a non-positive luminosity).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct StellarStructuralState {
+    /// The envelope-structure verdict against the Kraft band: which wind branch the star's photosphere takes.
+    pub envelope: KraftVerdict,
+    /// The evolutionary phase: which luminosity track and convective turnover the star obeys.
+    pub phase: EvolutionaryPhase,
+}
+
+/// Derive the [`StellarStructuralState`] by composing the two sub-dispatches: the envelope from
+/// [`kraft_band_dispatch`] (the star's current `T_eff` against the metallicity-shifted Kraft band) and the phase
+/// from [`evolutionary_phase`] (the pre-main-sequence contraction luminosity against the main-sequence luminosity,
+/// both in `L_sun`). Returns `None` if either refuses, so an ill-posed star never yields a half-formed state.
+pub fn stellar_structural_state(
+    t_eff_k: Fixed,
+    band: KraftBreakBand,
+    metallicity_log10_offset: Fixed,
+    pre_main_sequence_luminosity_lsun: Fixed,
+    main_sequence_luminosity_lsun: Fixed,
+) -> Option<StellarStructuralState> {
+    let envelope = kraft_band_dispatch(t_eff_k, band, metallicity_log10_offset)?;
+    let phase = evolutionary_phase(
+        pre_main_sequence_luminosity_lsun,
+        main_sequence_luminosity_lsun,
+    )?;
+    Some(StellarStructuralState { envelope, phase })
+}
+
 /// A LUMINOSITY BRACKET (`L_sun`), the RIDER 2 output form for a quantity whose model uncertainty spans orders of
 /// magnitude: the branch ships the RANGE, not a point, so a consumer cannot read a decade-wide ignorance as a
 /// value. `[lo, hi]` in `L_sun`, unconstrained-by-source by construction (a bracket is not a scalar), with
@@ -1582,6 +2280,114 @@ pub fn stellar_rossby_number(rotation_period_days: Fixed, tau_conv_days: Fixed) 
         return None;
     }
     rotation_period_days.checked_div(tau_conv_days)
+}
+
+/// The GYROCHRONOLOGICAL SPIN-DOWN MODEL: the age-scaling exponent `n` of the magnetic-braking law that ages a
+/// star's rotation forward, `P(t) ~ t^n` (equivalently Skumanich's `v ~ t^(-n)` with `n = 1/2`, since a longer
+/// period is a slower rotation). The FORM is fixed dynamo physics, a wind-braked star spins down as a power law of
+/// age; the MEMBER is the cited exponent, a declared ensemble the way [`CollapseModel`] and [`XrayWindFit`] carry
+/// their measured members, so a different calibration is a data row, never a rewrite. The band runs from
+/// Skumanich's canonical `1/2` through the modern gyrochronology recalibrations (`0.5189`, `0.566`), a real
+/// measured spread rather than one authored point, which the caller propagates as an interval the way the collapse
+/// and wind bands already flow.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct SpinDownModel {
+    /// The braking-law age exponent `n` in `P(t) ~ t^n`. Skumanich `0.5`; Barnes `0.5189`; Mamajek-Hillenbrand
+    /// `0.566`. Carried as the ensemble member so the exponent never travels without the calibration it was read
+    /// from.
+    pub braking_exponent: Fixed,
+}
+
+impl SpinDownModel {
+    /// Skumanich (1972): the canonical `v ~ t^(-1/2)` braking law, age exponent `n = 1/2` EXACTLY (the value is the
+    /// power law's own, not a fit coefficient). Skumanich 1972, ApJ 171, 565 (SHA256 `9c4f2d4a...`); the exponent
+    /// is conditioned on the adopted 0.4 Gyr Hyades age, and the normalization is set by the Sun plus the
+    /// Pleiades/UMa/Hyades sequence, no printed coefficient.
+    pub fn skumanich_1972() -> Self {
+        Self {
+            braking_exponent: Fixed::from_ratio(1, 2),
+        }
+    }
+
+    /// Barnes (2007) separable gyrochronology, the age term `g(t) = t^0.5189`, exponent fixed by the solar anchor
+    /// (`P = 26.09` d at `B-V = 0.642`, 4.566 Gyr). Barnes 2007, ApJ 669, 1167 (SHA256 `1b6e3a14...`). Valid for
+    /// I-sequence rotators only, NOT the disk-locked birth population (segregated at the ~100 Myr gyrochrone), the
+    /// validity window the kernel guards.
+    pub fn barnes_2007() -> Self {
+        Self {
+            braking_exponent: Fixed::from_ratio(5189, 10_000),
+        }
+    }
+
+    /// Mamajek and Hillenbrand (2008) revised gyrochronology, age exponent `n = 0.566`. Mamajek and Hillenbrand
+    /// 2008, ApJ 687, 1264 (SHA256 `9e407163...`). Motivated by Barnes over-predicting Hyades periods by up to 50
+    /// percent, so the recalibrated exponent is the model-choice high edge of the band against Skumanich's `0.5`;
+    /// same I-sequence validity limits, anchored 130 Myr to 4.566 Gyr.
+    pub fn mamajek_hillenbrand_2008() -> Self {
+        Self {
+            braking_exponent: Fixed::from_ratio(566, 1000),
+        }
+    }
+}
+
+/// The STELLAR ROTATION at a target age (days), DERIVED by aging a reference rotation forward along the
+/// gyrochronological spin-down `P(t) = P_ref * (t / t_ref)^n` rather than drawn on its own axis. A wind-braked star
+/// loses angular momentum as a power law of age, so once its birth rotation and one reference epoch are fixed, the
+/// rotation at any later age is the braking law evaluated between them. This is why `Omega_star` at disk dispersal
+/// is DERIVABLE and not an independent root (LAYER4_ROOT_CENSUS): birth rotation is regulated by disk locking
+/// (correlated with the engine's own `tau_disk`), and after release the spin-down law ages it forward, so a marginal
+/// `Omega` draw would author away both correlations. The young-cluster rotation distributions (Herbst 2001, Rebull
+/// 2018) then validate the JOINT statistics rather than seeding an independent marginal.
+///
+/// The value line: ZERO reserved numbers of its own. The exponent `n` is a cited member of [`SpinDownModel`]
+/// (Skumanich `1/2`, Barnes `0.5189`, Mamajek-Hillenbrand `0.566`), the reference rotation and both epochs are
+/// per-star ARGUMENTS, and the spin-down onset is the caller's validity boundary. Every input is a data row (the
+/// admit-the-alien test): a faster or slower birth rotator, a different braking calibration, is a data row, never a
+/// rewrite. Computed in the log domain (`ln P = ln P_ref + n (ln t - ln t_ref)`) with a fail-loud ceiling, the
+/// sibling discipline of [`centrifugal_radius_au`] and the Shu rate.
+///
+/// TERMS DROPPED, named rather than hidden. First, the VALIDITY WINDOW is enforced, not assumed: the power-law
+/// calibration holds only AFTER the star leaves the disk-locked / C-sequence regime (the ~100 Myr gyrochrone), so
+/// both the reference and the target epoch must sit at or past `spin_down_onset_myr`, or the kernel REFUSES
+/// (`None`) rather than extrapolating the law into the birth window where it is invalid. Second, the COLOR (mass)
+/// dependence is dropped: the full gyrochronology forms carry a `f(B-V)` prefactor (a redder, lower-mass star
+/// brakes on a different track), and this kernel ages a GIVEN period forward color-free, so the mass dependence of
+/// the braking is the named debt that a color-axis follow-on multiplies in. Third, the STALLED-BRAKING and
+/// weak-braking regimes at old age and at the fast/slow extremes (the van Saders class) are omitted, valid across
+/// the main-sequence I-sequence and named at the far-age edge. `None` on a non-positive input, an epoch inside the
+/// birth window, or a result past the representable range.
+///
+// @derives: the stellar rotation period at a target age Omega_star(t) <- the gyrochronological spin-down P_ref*(t/t_ref)^n aged forward from a reference epoch, over the cited braking exponent, valid only after the disk-release onset
+pub fn spin_down_rotation_period_days(
+    reference_period_days: Fixed,
+    reference_age_myr: Fixed,
+    target_age_myr: Fixed,
+    spin_down_onset_myr: Fixed,
+    model: &SpinDownModel,
+) -> Option<Fixed> {
+    if reference_period_days <= Fixed::ZERO
+        || reference_age_myr <= Fixed::ZERO
+        || target_age_myr <= Fixed::ZERO
+        || spin_down_onset_myr <= Fixed::ZERO
+        || model.braking_exponent <= Fixed::ZERO
+    {
+        return None;
+    }
+    // The validity window: the braking law is invalid inside the disk-locked / C-sequence birth window, so both
+    // epochs must sit at or past the onset. Refuse rather than extrapolate the law outside its domain.
+    if reference_age_myr < spin_down_onset_myr || target_age_myr < spin_down_onset_myr {
+        return None;
+    }
+    // ln P(t) = ln P_ref + n * (ln t - ln t_ref), the period lengthening as the star brakes.
+    let ln_ratio = target_age_myr.ln().checked_sub(reference_age_myr.ln())?;
+    let ln_period = reference_period_days
+        .ln()
+        .checked_add(model.braking_exponent.checked_mul(ln_ratio)?)?;
+    let ln_ceiling = Fixed::from_int(31).checked_mul(Fixed::from_int(2).ln())?;
+    if ln_period >= ln_ceiling {
+        return None;
+    }
+    Some(ln_period.exp())
 }
 
 /// The ACTIVITY BAND MAPPING: a high-energy band's luminosity-to-bolometric ratio `L_band / L_bol` from the
@@ -1951,16 +2757,26 @@ pub fn derive_disk_lifetime_myr(
 /// Owen, Clarke and Ercolano 2012 APPENDIX-B population-synthesis fit, the near-linear
 /// `Mdot_w = 6.25e-9 (M_star/M_sun)^-0.068 (L_X/1e30)^1.14 M_sun/yr` (the widely-used primordial-disc row); (2) the
 /// same paper's EQUATION-9 analytic estimate, the strictly linear mass-independent `Mdot_w = 8e-9 (L_X/1e30)`
-/// (`l_x_exponent = 1`, `mass_exponent = 0`), the paper's own order-of-magnitude form; (3) the Sellek et al. 2024
-/// PLUTO+PRIZMO radiation-hydro revision, which finds integrated rates roughly an order of magnitude LOWER from
-/// enhanced molecular cooling (a live rival, a lower coefficient on the same shape). The mechanism below applies
-/// whichever row is passed.
+/// (`l_x_exponent = 1`, `mass_exponent = 0`), the paper's own order-of-magnitude form; (3) the Sellek, Grassi,
+/// Picogna, Rab, Clarke and Ercolano 2024 PLUTO+PRIZMO radiation-hydro revision, which finds integrated rates
+/// roughly an order of magnitude LOWER from enhanced molecular cooling (a live rival, a lower coefficient on the
+/// same shape). The mechanism below applies whichever row is passed.
+///
+/// INTEGRATED RATES ARE CHORDS OVER THEIR INTEGRATION DOMAIN (the generalization the owner minted ruling the
+/// Sellek rate pair): a photoevaporation rate is the wind integrated out to some outer radius, so a whole-disk
+/// total and a rate truncated to a shorter radius are different quantities, and BAND MEMBERSHIP REQUIRES
+/// DOMAIN-MATCHED ROWS. Sellek reports a PAIR: `4.32e-9 M_sun/yr` integrated to the model's 160 AU outer edge (the
+/// whole-disk total, DOMAIN-MATCHED to Owen's total, so the band-serving low edge the owner ruled) and
+/// `1.06e-9 M_sun/yr` truncated to 80 AU (the paper's own controlled-comparison statistic, a shorter chord, NOT
+/// domain-matched to Owen's total and so NOT a band edge). Both are carried ([`XrayWindFit::sellek_2024`] and
+/// [`XrayWindFit::sellek_2024_controlled_80au`]), each tagged with its [`WindIntegrationDomain`], so a consumer that
+/// bands rows can refuse a domain mismatch rather than compare a total against a chord.
 ///
 /// RULED (owner, the batch audit): all three rows ship as the DECLARED ENSEMBLE, not a single picked row, because
 /// they are distinct physics claims (a population-synthesis fit, an analytic estimate, a radiation-hydro rival),
-/// the radiative-conductivity dispute pattern. Their roles: the appendix-B fit is the CENTRAL instance (pending
-/// verbatim confirmation at the primary), equation 9 the same paper's order-of-magnitude cross-check, and Sellek
-/// 2024 the LOW EDGE. THE COST, stated so no consumer is surprised: an order-of-magnitude wind band propagates
+/// the radiative-conductivity dispute pattern. Their roles: the appendix-B fit is the CENTRAL instance (confirmed
+/// verbatim at the primary, `arXiv:1112.1087`), equation 9 the same paper's order-of-magnitude cross-check, and
+/// Sellek 2024 the LOW EDGE. THE COST, stated so no consumer is surprised: an order-of-magnitude wind band propagates
 /// through the `(Mdot_0/Mdot_w)^(1/p)` inversion in [`derive_disk_lifetime_myr`] to roughly a factor `10^(1/p)`
 /// band on `tau_disk`, about 4.64 at `gamma = 1` (`1/p = 2/3`), wide and honest. The Haisch-Lada and Mamajek
 /// disk-fraction-versus-age data is the independent ensemble referee that discriminates WITHIN this band (legal
@@ -1988,6 +2804,127 @@ pub struct XrayWindFit {
     /// [`XrayWindFit::metallicity_domain`] classifies a draw against it and [`XrayWindFit::metallicity_rate_factor`] moves the
     /// rate.
     pub sample_metallicity: Fixed,
+    /// The RADIAL INTEGRATION DOMAIN the coefficient's integrated rate was measured over: the scope marker on the
+    /// integrated-rate axis, the sibling of the mass range and the sampled metallicity. An X-ray photoevaporation
+    /// rate is a CHORD over the radius it is integrated to, so two rows are a legal band only when their domains
+    /// match ([`WindIntegrationDomain::matches`], the domain-matched-rows rule). A whole-disk total against a
+    /// rate truncated to a shorter radius would misstate the band width, which is why the Sellek 160 AU total
+    /// (domain-matched to Owen's total) serves the band and the 80 AU controlled statistic does not.
+    pub integration_domain: WindIntegrationDomain,
+}
+
+/// The RADIAL INTEGRATION DOMAIN a wind-rate coefficient was integrated over, the SCOPE of an integrated rate.
+/// A photoevaporation rate is the wind integrated out to some radius, so it is a CHORD, and two integrated rates
+/// are comparable (bandable) only when their chords span the same domain (the owner's domain-matched-rows rule).
+/// The variant carries the radius where a source states one, so the axis is open rather than a fixed set of named
+/// radii: a future row integrated to any radius is a data value, not a new arm.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum WindIntegrationDomain {
+    /// The total integrated wind rate over the whole disk, with no radial truncation stated by the source (Owen's
+    /// population-synthesis and analytic rows, and the Sellek total integrated to the model's own outer edge).
+    TotalDisk,
+    /// The rate integrated to a stated outer radius (AU): a truncated chord, NOT the whole-disk total. The Sellek
+    /// 80 AU controlled-comparison statistic is this; it does not band against a [`WindIntegrationDomain::TotalDisk`]
+    /// row.
+    WithinRadiusAu(Fixed),
+}
+
+impl WindIntegrationDomain {
+    /// Whether two integration domains are the SAME chord, so the rates they scope may form a band (the
+    /// domain-matched-rows rule). Two totals match; two truncated rates match iff they share the outer radius; a
+    /// total never matches a truncated chord. This is the guard a band-forming consumer runs before it treats two
+    /// [`XrayWindFit`] rows as edges of one wind band.
+    pub fn matches(self, other: Self) -> bool {
+        match (self, other) {
+            (WindIntegrationDomain::TotalDisk, WindIntegrationDomain::TotalDisk) => true,
+            (
+                WindIntegrationDomain::WithinRadiusAu(a),
+                WindIntegrationDomain::WithinRadiusAu(b),
+            ) => a == b,
+            _ => false,
+        }
+    }
+}
+
+impl XrayWindFit {
+    /// The Owen, Clarke and Ercolano 2012 APPENDIX-B population-synthesis fit, the CENTRAL row of the declared
+    /// wind ensemble, as cited data: `Mdot_w = 6.25e-9 (M_star/M_sun)^-0.068 (L_X/1e30)^1.14 M_sun/yr`, a total
+    /// disk rate over solar-metallicity low-mass (`0.1` to `1.5 M_sun`) stars. Confirmed verbatim against the
+    /// primary (`arXiv:1112.1087`, equation B1). The coefficient is stored as `log10(6.25e-9) = -8.20412`.
+    pub fn owen_appendix_b() -> Self {
+        XrayWindFit {
+            log10_coefficient_msun_yr: Fixed::from_ratio(-820412, 100_000), // log10(6.25e-9)
+            log10_l_x_reference_erg_s: Fixed::from_int(30),                 // L_X_ref = 1e30 erg/s
+            l_x_exponent: Fixed::from_ratio(114, 100),                      // 1.14
+            mass_exponent: Fixed::from_ratio(-68, 1000),                    // -0.068
+            mass_min_msun: Fixed::from_ratio(1, 10), // 0.1 M_sun (sample low-mass edge)
+            mass_max_msun: Fixed::from_ratio(15, 10), // 1.5 M_sun (sample high edge)
+            sample_metallicity: Fixed::ONE, // solar: the composition the coefficients were fit at
+            integration_domain: WindIntegrationDomain::TotalDisk, // whole-disk total, no radial truncation stated
+        }
+    }
+
+    /// The Owen, Clarke and Ercolano 2012 EQUATION-9 analytic estimate, the same paper's ORDER-OF-MAGNITUDE
+    /// cross-check of appendix B, as cited data: `Mdot_w = 8e-9 (L_X/1e30) M_sun/yr`, strictly linear in `L_X`
+    /// (`l_x_exponent = 1`) and mass-independent (`mass_exponent = 0`). Confirmed verbatim against the primary
+    /// (`arXiv:1112.1087`, equation 9). The coefficient is stored as `log10(8e-9) = -8.09691`. The mass range is
+    /// carried as the low-mass regime the X-ray-driven family is scoped to, even though the rate itself does not
+    /// read mass, so the domain guard in [`photoevaporative_wind_rate_msun_myr`] holds the same stellar window as
+    /// its sibling rows.
+    pub fn owen_equation_9() -> Self {
+        XrayWindFit {
+            log10_coefficient_msun_yr: Fixed::from_ratio(-809691, 100_000), // log10(8e-9)
+            log10_l_x_reference_erg_s: Fixed::from_int(30),                 // L_X_ref = 1e30 erg/s
+            l_x_exponent: Fixed::ONE,   // strictly linear in L_X
+            mass_exponent: Fixed::ZERO, // mass-independent
+            mass_min_msun: Fixed::from_ratio(1, 10), // 0.1 M_sun (family scope, low-mass)
+            mass_max_msun: Fixed::from_ratio(15, 10), // 1.5 M_sun (family scope, high edge)
+            sample_metallicity: Fixed::ONE, // solar
+            integration_domain: WindIntegrationDomain::TotalDisk, // whole-disk total
+        }
+    }
+
+    /// The Sellek, Grassi, Picogna, Rab, Clarke and Ercolano 2024 PLUTO+PRIZMO radiation-hydro revision, the LOW
+    /// EDGE of the declared wind band, as cited data: the WHOLE-DISK TOTAL `4.32e-9 M_sun/yr` integrated to the
+    /// model's 160 AU outer edge, the value DOMAIN-MATCHED to Owen's total and so the band-serving edge the owner
+    /// ruled (the domain-matched-rows rule). Sellek reports a total rate, not a re-fit of the mass and `L_X`
+    /// exponents, so this row INHERITS the Owen appendix-B shape (`l_x_exponent = 1.14`, `mass_exponent = -0.068`)
+    /// and supplies only the lower normalization, the honest interim stated so no consumer reads a Sellek-measured
+    /// mass slope that does not exist. The coefficient is stored as `log10(4.32e-9) = -8.36452`. Its sibling
+    /// [`XrayWindFit::sellek_2024_controlled_80au`] carries the paper's 80 AU controlled statistic, which is NOT a
+    /// band edge because its chord does not match Owen's total.
+    pub fn sellek_2024() -> Self {
+        XrayWindFit {
+            log10_coefficient_msun_yr: Fixed::from_ratio(-836452, 100_000), // log10(4.32e-9), total to 160 AU
+            log10_l_x_reference_erg_s: Fixed::from_int(30),                 // L_X_ref = 1e30 erg/s
+            l_x_exponent: Fixed::from_ratio(114, 100), // 1.14, inherited Owen appendix-B shape
+            mass_exponent: Fixed::from_ratio(-68, 1000), // -0.068, inherited Owen appendix-B shape
+            mass_min_msun: Fixed::from_ratio(1, 10),   // 0.1 M_sun (family scope, low-mass)
+            mass_max_msun: Fixed::from_ratio(15, 10),  // 1.5 M_sun (family scope, high edge)
+            sample_metallicity: Fixed::ONE, // solar: Sellek ran a solar-metallicity model
+            integration_domain: WindIntegrationDomain::TotalDisk, // total over the model's 160 AU outer edge
+        }
+    }
+
+    /// The Sellek et al. 2024 CONTROLLED-COMPARISON statistic: the rate the paper integrates only to 80 AU,
+    /// `1.06e-9 M_sun/yr`, PRESERVED as cited data but explicitly NOT a band edge. Its integration domain is
+    /// [`WindIntegrationDomain::WithinRadiusAu`] at 80 AU, a shorter chord than Owen's total, so
+    /// [`WindIntegrationDomain::matches`] refuses to band it against the Owen rows; the band-serving Sellek edge is
+    /// [`XrayWindFit::sellek_2024`] (the 160 AU total). This row exists so the paper's own controlled statistic is
+    /// carried with its domain marked, for a future consumer that runs Sellek's like-for-like 80 AU comparison
+    /// rather than the whole-disk band. The coefficient is stored as `log10(1.06e-9) = -8.97469`.
+    pub fn sellek_2024_controlled_80au() -> Self {
+        XrayWindFit {
+            log10_coefficient_msun_yr: Fixed::from_ratio(-897469, 100_000), // log10(1.06e-9), truncated to 80 AU
+            log10_l_x_reference_erg_s: Fixed::from_int(30),                 // L_X_ref = 1e30 erg/s
+            l_x_exponent: Fixed::from_ratio(114, 100), // 1.14, inherited Owen appendix-B shape
+            mass_exponent: Fixed::from_ratio(-68, 1000), // -0.068, inherited Owen appendix-B shape
+            mass_min_msun: Fixed::from_ratio(1, 10),   // 0.1 M_sun (family scope, low-mass)
+            mass_max_msun: Fixed::from_ratio(15, 10),  // 1.5 M_sun (family scope, high edge)
+            sample_metallicity: Fixed::ONE,            // solar
+            integration_domain: WindIntegrationDomain::WithinRadiusAu(Fixed::from_int(80)), // truncated chord
+        }
+    }
 }
 
 /// Where a drawn composition sits relative to a fit's sampled metallicity: the domain-of-validity classification
@@ -4428,6 +5365,109 @@ mod tests {
         );
     }
 
+    #[test]
+    fn the_phase_is_the_crossing_of_the_two_luminosity_laws() {
+        // The evolutionary phase falls out of the luminosity crossing, from the star's OWN derived luminosities. A
+        // solar analogue: its zero-age main-sequence luminosity is 1 L_sun (1^exponent), and its pre-main-sequence
+        // contraction luminosity falls as t^(-2/3) from a super-solar value. Young, it outshines the main sequence
+        // (PreMainSequence); old, the contraction has fallen well below it (MainSequence). The same T_H is used for
+        // both so the t^(-2/3) decline is the only difference.
+        let l_ms = Fixed::ONE.powf(Fixed::from_ratio(35, 10)); // 1^exponent = 1 L_sun, the ZAMS Sun.
+        let t_h = Fixed::from_int(4300); // the Hayashi wall.
+        let l_pms_young = pre_main_sequence_luminosity_lsun(Fixed::ONE, t_h, Fixed::ONE).unwrap();
+        let l_pms_old =
+            pre_main_sequence_luminosity_lsun(Fixed::ONE, t_h, Fixed::from_int(200)).unwrap();
+        assert!(
+            l_pms_young > l_ms,
+            "a 1 Myr pre-main-sequence Sun outshines the ZAMS ({} > {})",
+            l_pms_young.to_f64_lossy(),
+            l_ms.to_f64_lossy()
+        );
+        assert!(
+            l_pms_old < l_ms,
+            "a 200 Myr contraction has fallen below the ZAMS ({} < {})",
+            l_pms_old.to_f64_lossy(),
+            l_ms.to_f64_lossy()
+        );
+        assert_eq!(
+            evolutionary_phase(l_pms_young, l_ms),
+            Some(EvolutionaryPhase::PreMainSequence),
+            "still contracting above the main sequence"
+        );
+        assert_eq!(
+            evolutionary_phase(l_pms_old, l_ms),
+            Some(EvolutionaryPhase::MainSequence),
+            "contraction fallen below the main sequence: arrived"
+        );
+        // The boundary is inclusive of arrival, so L_bol is CONTINUOUS across the switch: exactly at the crossing
+        // (the two laws equal) the phase reads MainSequence, and a max-of-the-two selection meets without a jump.
+        assert_eq!(
+            evolutionary_phase(l_ms, l_ms),
+            Some(EvolutionaryPhase::MainSequence),
+            "at the crossing the star has arrived, and the two laws agree there"
+        );
+        // Fail-loud on a non-star luminosity.
+        assert_eq!(evolutionary_phase(Fixed::ZERO, l_ms), None);
+        assert_eq!(evolutionary_phase(l_ms, Fixed::from_int(-1)), None);
+    }
+
+    #[test]
+    fn the_structural_state_keys_both_the_wind_branch_and_the_lbol_track() {
+        // The one state carries the two orthogonal axes, and the three canonical stars separate cleanly. The
+        // envelope is the wind branch (Kraft on T_eff), the phase the L_bol track (the luminosity crossing).
+        let band = kraft_band();
+        // A Herbig Ae/Be star: hot photosphere (radiative envelope, the EUV branch) AND still contracting above its
+        // luminous main sequence. Radiative and PreMainSequence at once, the case the two axes must keep distinct.
+        let herbig = stellar_structural_state(
+            Fixed::from_int(10_000),
+            band,
+            Fixed::ZERO,
+            Fixed::from_int(50), // still contracting above ...
+            Fixed::from_int(47), // ... its ZAMS luminosity.
+        )
+        .unwrap();
+        assert_eq!(herbig.envelope, KraftVerdict::Radiative);
+        assert_eq!(herbig.phase, EvolutionaryPhase::PreMainSequence);
+        // A young solar analogue: cool (convective dynamo, the X-ray branch) and still contracting. Convective and
+        // PreMainSequence, the same envelope as its arrived self but the other phase.
+        let young_sun = stellar_structural_state(
+            Fixed::from_int(5772),
+            band,
+            Fixed::ZERO,
+            Fixed::from_ratio(167, 100), // 1.67 L_sun contraction ...
+            Fixed::ONE,                  // ... above the 1 L_sun ZAMS.
+        )
+        .unwrap();
+        assert_eq!(young_sun.envelope, KraftVerdict::Convective);
+        assert_eq!(young_sun.phase, EvolutionaryPhase::PreMainSequence);
+        // The arrived Sun: same convective envelope, contraction now below the ZAMS. Convective and MainSequence.
+        let arrived_sun = stellar_structural_state(
+            Fixed::from_int(5772),
+            band,
+            Fixed::ZERO,
+            Fixed::from_ratio(5, 10), // contraction fallen to 0.5 L_sun ...
+            Fixed::ONE,               // ... below the 1 L_sun ZAMS.
+        )
+        .unwrap();
+        assert_eq!(arrived_sun.envelope, KraftVerdict::Convective);
+        assert_eq!(arrived_sun.phase, EvolutionaryPhase::MainSequence);
+        // Fail-loud: a non-star T_eff or a non-positive luminosity refuses the whole state, never a half-formed one.
+        assert_eq!(
+            stellar_structural_state(Fixed::ZERO, band, Fixed::ZERO, Fixed::ONE, Fixed::ONE),
+            None
+        );
+        assert_eq!(
+            stellar_structural_state(
+                Fixed::from_int(5772),
+                band,
+                Fixed::ZERO,
+                Fixed::ZERO,
+                Fixed::ONE
+            ),
+            None
+        );
+    }
+
     // T_ion = E_edge/k_B for the 13.6 eV hydrogen Lyman edge, a DERIVED physical constant (~157821 K), the
     // test's stand-in for the value a live caller derives from the floor.
     fn t_ion() -> Fixed {
@@ -4978,16 +6018,580 @@ mod tests {
     }
 
     fn owen_appendix_b_fit() -> XrayWindFit {
-        // The Owen, Clarke and Ercolano 2012 appendix-B population-synthesis fit, as reserved-with-basis data.
-        XrayWindFit {
-            log10_coefficient_msun_yr: Fixed::from_ratio(-820412, 100_000), // log10(6.25e-9)
-            log10_l_x_reference_erg_s: Fixed::from_int(30),                 // L_X_ref = 1e30 erg/s
-            l_x_exponent: Fixed::from_ratio(114, 100),                      // 1.14
-            mass_exponent: Fixed::from_ratio(-68, 1000),                    // -0.068
-            mass_min_msun: Fixed::from_ratio(1, 10), // 0.1 M_sun (sample low-mass edge)
-            mass_max_msun: Fixed::from_ratio(15, 10), // 1.5 M_sun (low-mass sample edge)
-            sample_metallicity: Fixed::ONE, // solar: the composition Owen's coefficients were fit at
-        }
+        // The Owen, Clarke and Ercolano 2012 appendix-B population-synthesis fit, the cited central row: the test
+        // helper delegates to the run-path constructor so there is one source of truth for the coefficients.
+        XrayWindFit::owen_appendix_b()
+    }
+
+    #[test]
+    fn the_shu_collapse_derives_the_birth_accretion_rate_from_the_core_temperature() {
+        // The DERIVE-FIRST retirement of the disk clock's Mdot_0 interim: the Shu (1977) inside-out collapse rate
+        // Mdot = m0*c_s^3/G derives the birth accretion rate from the cloud-core temperature and the gas mean
+        // molecular weight, so Mdot_0 is a DERIVED quantity, not a reserved number. Oracle: a ~10 K solar-composition
+        // core (mu ~ 2.33) at Shu's m0 = 0.975 gives ~1.5e-6 M_sun/yr = ~1.5 M_sun/Myr (vendored Shu 1977 Table 2,
+        // cross-checked against Fiorellino et al. 2023's class-I band), matching the tagged ~1 M_sun/Myr interim in
+        // order of magnitude.
+        let shu = CollapseModel::shu_1977(); // m0 = 0.975 at A = 2, the vendored expansion-wave eigenvalue
+        assert_eq!(shu.collapse_coefficient_m0, Fixed::from_ratio(975, 1000));
+        assert_eq!(
+            shu.instability_parameter_a,
+            Fixed::from_int(2),
+            "the coefficient declares its abscissa A (Shu 1977 Table 1)"
+        );
+        let mu_solar = Fixed::from_ratio(233, 100);
+        let solar =
+            shu_inside_out_collapse_accretion_rate_msun_myr(Fixed::from_int(10), mu_solar, &shu)
+                .expect("the collapse rate resolves for a solar-composition 10 K core");
+        // ISOTHERMAL ASSERTION: the vendored band is ~1.5 (mu=2.33) to ~1.9 (mu=2.0) M_sun/Myr at 10 K. An adiabatic
+        // sound speed (gamma=5/3) would inflate the rate by gamma^(3/2) ~ 2.15 to ~3.3, OUTSIDE this band, so the
+        // absolute magnitude asserts the isothermal c_s that a silent-gamma bug would break. MUTATION RECEIPT TAKEN
+        // once (audit of f369bdf): injecting the adiabatic gamma gave 3.36 M_sun/Myr and this assert went RED, so it
+        // tests the form, not just the magnitude. The band is a residue window with an analytic twin (the isothermal
+        // 1.55 against the adiabatic 3.3), not an authored epsilon: it discriminates the two forms by construction.
+        assert!(
+            solar.to_f64_lossy() > 1.4 && solar.to_f64_lossy() < 1.7,
+            "the 10 K solar-core birth rate is ~1.5 M_sun/Myr, isothermal not adiabatic (got {})",
+            solar.to_f64_lossy()
+        );
+        // MECHANISM, Mdot ~ T^(3/2): a warmer core collapses faster. Doubling T lifts the rate by 2^1.5 ~ 2.83.
+        let warm =
+            shu_inside_out_collapse_accretion_rate_msun_myr(Fixed::from_int(20), mu_solar, &shu)
+                .unwrap();
+        let t_ratio = warm.checked_div(solar).unwrap().to_f64_lossy();
+        assert!(
+            (t_ratio - 2.828_427).abs() < 0.02,
+            "Mdot scales as T^(3/2): 2x temperature lifts the rate by 2^1.5 (got {})",
+            t_ratio
+        );
+        // MECHANISM, Mdot ~ mu^(-3/2): a lighter gas has a higher sound speed, a faster collapse, so mu 2.0 < 2.33
+        // gives a higher rate.
+        let light = shu_inside_out_collapse_accretion_rate_msun_myr(
+            Fixed::from_int(10),
+            Fixed::from_int(2),
+            &shu,
+        )
+        .unwrap();
+        assert!(
+            light > solar,
+            "a lighter gas (lower mu) collapses faster (light {}, solar {})",
+            light.to_f64_lossy(),
+            solar.to_f64_lossy()
+        );
+        // THE MODEL-STRUCTURE BAND (the declared endpoints): the Larson-Penston endpoint (m0 = 46.9 at A = 8.85) is
+        // ~48x the Shu rate, the faster edge. Mdot is linear in m0, so the rate ratio is exactly the eigenvalue
+        // ratio, and the two constructors are the measured continuum's endpoints (Whitworth-Summers 1985).
+        let lp = CollapseModel::larson_penston();
+        assert_eq!(lp.instability_parameter_a, Fixed::from_ratio(8854, 1000)); // A = P(0) = 8.854 (Hunter 1977)
+        let rapid =
+            shu_inside_out_collapse_accretion_rate_msun_myr(Fixed::from_int(10), mu_solar, &lp)
+                .unwrap();
+        let m0_ratio = rapid.checked_div(solar).unwrap().to_f64_lossy();
+        let expected_ratio = 46.915 / 0.975; // ~48.1, the vendored endpoint separation (Hunter 1977)
+        assert!(
+            (m0_ratio - expected_ratio).abs() < 0.1,
+            "Mdot is linear in m0: the LP endpoint is ~48x the Shu rate (got {}, expected {})",
+            m0_ratio,
+            expected_ratio
+        );
+        // A non-physical temperature, molecular weight, or collapse coefficient fails soft, never a fabricated rate.
+        assert!(
+            shu_inside_out_collapse_accretion_rate_msun_myr(Fixed::ZERO, mu_solar, &shu).is_none()
+        );
+        assert!(shu_inside_out_collapse_accretion_rate_msun_myr(
+            Fixed::from_int(10),
+            Fixed::ZERO,
+            &shu
+        )
+        .is_none());
+        let zero_m0 = CollapseModel {
+            collapse_coefficient_m0: Fixed::ZERO,
+            instability_parameter_a: Fixed::from_int(2),
+        };
+        assert!(shu_inside_out_collapse_accretion_rate_msun_myr(
+            Fixed::from_int(10),
+            mu_solar,
+            &zero_m0
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn the_centrifugal_radius_derives_the_disk_birth_size_from_the_core_angular_momentum() {
+        // The DERIVE-FIRST retirement of R_1 as an independent draw: the centrifugal radius R_c = j^2/(G M_star)
+        // derives the disk's birth size from the collapsing core's specific angular momentum, so R_1 is DERIVED off
+        // the core-angular-momentum root, not an independent axis (LAYER4_ROOT_CENSUS). Oracle: a core with
+        // j ~ 3e16 m^2/s around a 1 M_sun star lands its material at ~45 AU, inside the Tazzari 2017 observed bulk
+        // (25 to 100 AU, gas self-similar R_c), which is VALIDATION of the derived value, never the mechanism
+        // authored to it.
+        let ln_j = civsim_physics::saha::ln_of_decimal("3e16").unwrap(); // disk-scale core specific angular momentum
+        let r_c = centrifugal_radius_au(ln_j, Fixed::ONE)
+            .expect("the centrifugal radius resolves for a solar-mass star");
+        assert!(
+            r_c.to_f64_lossy() > 44.0 && r_c.to_f64_lossy() < 47.0,
+            "the j ~ 3e16 birth radius is ~45 AU, inside the observed 25-100 AU bulk (got {})",
+            r_c.to_f64_lossy()
+        );
+        // MECHANISM, R_c ~ j^2: doubling the specific angular momentum quadruples the landing radius. Formed by
+        // adding ln 2 to ln j so the log-parameter idiom is exercised, not re-derived from a second string.
+        let ln_j_double = ln_j.checked_add(Fixed::from_int(2).ln()).unwrap();
+        let r_c_double = centrifugal_radius_au(ln_j_double, Fixed::ONE).unwrap();
+        let j_ratio = r_c_double.checked_div(r_c).unwrap().to_f64_lossy();
+        assert!(
+            (j_ratio - 4.0).abs() < 0.02,
+            "R_c scales as j^2: 2x angular momentum lifts the radius by 4x (got {})",
+            j_ratio
+        );
+        // MECHANISM, R_c ~ 1/M_star: a heavier star holds the material closer, so doubling M_star halves the radius.
+        let r_c_heavy = centrifugal_radius_au(ln_j, Fixed::from_int(2)).unwrap();
+        let m_ratio = r_c_heavy.checked_div(r_c).unwrap().to_f64_lossy();
+        assert!(
+            (m_ratio - 0.5).abs() < 0.005,
+            "R_c scales as 1/M_star: 2x stellar mass halves the radius (got {})",
+            m_ratio
+        );
+        // A lower-j core (a slower rotator) births a smaller disk: the monotone direction the census relies on.
+        let ln_j_slow = civsim_physics::saha::ln_of_decimal("1e16").unwrap();
+        let r_c_slow = centrifugal_radius_au(ln_j_slow, Fixed::ONE).unwrap();
+        assert!(
+            r_c_slow < r_c,
+            "a slower core (lower j) births a smaller disk (slow {}, base {})",
+            r_c_slow.to_f64_lossy(),
+            r_c.to_f64_lossy()
+        );
+        // A non-physical stellar mass fails soft, never a fabricated radius.
+        assert!(centrifugal_radius_au(ln_j, Fixed::ZERO).is_none());
+        assert!(centrifugal_radius_au(ln_j, Fixed::from_int(-1)).is_none());
+    }
+
+    #[test]
+    fn the_spin_down_ages_stellar_rotation_along_the_gyrochronology_band() {
+        // The DERIVE-FIRST retirement of Omega_star as an independent draw: the gyrochronological spin-down
+        // P(t) = P_ref*(t/t_ref)^n ages a reference rotation forward, so the rotation at disk dispersal (and at any
+        // later age) is DERIVED off the birth rotation and the braking law, not an independent axis
+        // (LAYER4_ROOT_CENSUS). The exponent is a cited ensemble member, not one authored point.
+        let sku = SpinDownModel::skumanich_1972();
+        assert_eq!(
+            sku.braking_exponent,
+            Fixed::from_ratio(1, 2),
+            "Skumanich n = 1/2 exactly"
+        );
+        assert_eq!(
+            SpinDownModel::barnes_2007().braking_exponent,
+            Fixed::from_ratio(5189, 10_000),
+            "Barnes 2007 age exponent 0.5189"
+        );
+        let mh = SpinDownModel::mamajek_hillenbrand_2008();
+        assert_eq!(
+            mh.braking_exponent,
+            Fixed::from_ratio(566, 1000),
+            "Mamajek-Hillenbrand 0.566"
+        );
+        // MECHANISM, P ~ t^n: from a 5-day rotator at 100 Myr to 400 Myr (a 4x age ratio), Skumanich's n = 1/2
+        // gives a factor (4)^(1/2) = 2, so the period doubles to 10 days.
+        let onset = Fixed::from_int(100); // the ~100 Myr gyrochrone, the disk-locked / C-sequence exit
+        let aged = spin_down_rotation_period_days(
+            Fixed::from_int(5),
+            onset,
+            Fixed::from_int(400),
+            onset,
+            &sku,
+        )
+        .expect("the spin-down resolves at and past the onset");
+        assert!(
+            (aged.to_f64_lossy() - 10.0).abs() < 0.03,
+            "P ~ t^(1/2): a 4x age ratio doubles the 5-day period to ~10 (got {})",
+            aged.to_f64_lossy()
+        );
+        // THE MODEL BAND: a steeper exponent brakes the star more, so at the same age ratio Mamajek-Hillenbrand
+        // (0.566) lengthens the period past Skumanich (0.5). The band is the measured recalibration spread.
+        let aged_mh = spin_down_rotation_period_days(
+            Fixed::from_int(5),
+            onset,
+            Fixed::from_int(400),
+            onset,
+            &mh,
+        )
+        .unwrap();
+        assert!(
+            aged_mh > aged,
+            "a steeper braking exponent spins down more (MH {}, Skumanich {})",
+            aged_mh.to_f64_lossy(),
+            aged.to_f64_lossy()
+        );
+        // THE VALIDITY WINDOW: the braking law is invalid inside the disk-locked birth window, so an epoch below
+        // the onset REFUSES rather than extrapolating. Both the reference and the target are guarded.
+        assert!(
+            spin_down_rotation_period_days(
+                Fixed::from_int(5),
+                Fixed::from_int(50),
+                Fixed::from_int(400),
+                onset,
+                &sku
+            )
+            .is_none(),
+            "a reference epoch inside the birth window is refused, not extrapolated"
+        );
+        assert!(
+            spin_down_rotation_period_days(
+                Fixed::from_int(5),
+                onset,
+                Fixed::from_int(50),
+                onset,
+                &sku
+            )
+            .is_none(),
+            "a target epoch inside the birth window is refused"
+        );
+        // SOLAR HINDCAST, reported never gated (the replacement-circularity discipline): a ~5-day solar-mass
+        // Pleiades rotator (~125 Myr) aged to the solar age (4566 Myr) lands in the tens-of-days slow-rotator range,
+        // the order of the observed solar ~26 days, across the three-model band. REPORTED as a mechanism sanity,
+        // never asserted to the observed value it would otherwise calibrate against.
+        let solar_sku = spin_down_rotation_period_days(
+            Fixed::from_int(5),
+            Fixed::from_int(125),
+            Fixed::from_int(4566),
+            onset,
+            &sku,
+        )
+        .unwrap();
+        let solar_mh = spin_down_rotation_period_days(
+            Fixed::from_int(5),
+            Fixed::from_int(125),
+            Fixed::from_int(4566),
+            onset,
+            &mh,
+        )
+        .unwrap();
+        assert!(
+            solar_sku.to_f64_lossy() > 20.0 && solar_mh.to_f64_lossy() < 45.0,
+            "the solar-age hindcast lands in the slow-rotator tens-of-days band (Skumanich {}, MH {}, observed ~26)",
+            solar_sku.to_f64_lossy(),
+            solar_mh.to_f64_lossy()
+        );
+        // Non-physical inputs fail soft, never a fabricated period.
+        assert!(spin_down_rotation_period_days(
+            Fixed::ZERO,
+            onset,
+            Fixed::from_int(400),
+            onset,
+            &sku
+        )
+        .is_none());
+        assert!(spin_down_rotation_period_days(
+            Fixed::from_int(5),
+            Fixed::ZERO,
+            Fixed::from_int(400),
+            onset,
+            &sku
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn the_thermal_balance_derives_the_cloud_core_temperature_against_goldsmith_table_five() {
+        // The DERIVE-FIRST retirement (route two) of the reserved cloud-core temperature: the Goldsmith 2001
+        // thermal balance (cosmic-ray heating = molecular line cooling + gas-dust coupling) SOLVES T_core from the
+        // core's own conditions, so the birth temperature the Shu collapse reads becomes derived, not drawn, and the
+        // measured Jijina distribution demotes to a validation hindcast. Coefficients are the vendored Goldsmith
+        // numbers (disk_arc_literature manifest).
+        let m = GoldsmithThermalModel::goldsmith_2001();
+        assert_eq!(m.cr_energy_log10_erg, Fixed::from_ratio(-104942, 10_000)); // log10(20 eV in erg)
+        assert_eq!(m.gas_dust_coeff_log10, Fixed::from_ratio(-326990, 10_000)); // log10(2e-33), eq. 15
+                                                                                // The heating input: zeta ~ 3.12e-17 s^-1 reproduces the paper's intermediate 1e-27*n heating coefficient
+                                                                                // (zeta * dQ, dQ = 20 eV), so the solve is comparable to Table 5 (which uses that heating).
+        let zeta = Fixed::from_ratio(3121, 1000); // in units of 1e-17 s^-1
+        let cmb = Fixed::from_ratio(273, 100); // present-epoch CMB floor 2.73 K
+        let t_hi = Fixed::from_int(50);
+        // The line-cooling fits are the Goldsmith Table 2 (undepleted) power-law members for each density.
+        let fit_1e3 = LineCoolingFit {
+            log10_a: Fixed::from_ratio(-239586, 10_000), // log10(1.1e-24)
+            b: Fixed::from_ratio(24, 10),                // 2.4
+        };
+        let fit_1e4 = LineCoolingFit {
+            log10_a: Fixed::from_ratio(-232518, 10_000), // log10(5.6e-24)
+            b: Fixed::from_ratio(27, 10),                // 2.7
+        };
+        let fit_1e6 = LineCoolingFit {
+            log10_a: Fixed::from_ratio(-223098, 10_000), // log10(4.9e-23)
+            b: Fixed::from_ratio(34, 10),                // 3.4
+        };
+        // VALIDATION (reported, never gated, the replacement-circularity discipline): a dark core at n=1e4 cm^-3,
+        // undepleted, T_dust=6.53 K settles near Table 5's 11.4 K. Reported inside a band that brackets the paper,
+        // never asserted to the measured value it would otherwise calibrate against.
+        let t_1e4 = cloud_core_thermal_balance_temperature_k(
+            zeta,
+            Fixed::from_int(10_000),
+            Fixed::from_ratio(653, 100),
+            fit_1e4,
+            cmb,
+            &m,
+            t_hi,
+        )
+        .expect("the thermal balance resolves for a dark core");
+        assert!(
+            t_1e4.to_f64_lossy() > 10.0 && t_1e4.to_f64_lossy() < 13.0,
+            "the n=1e4 dark core settles ~11 K, the order of Goldsmith Table 5's 11.4 K (got {})",
+            t_1e4.to_f64_lossy()
+        );
+        // MECHANISM, more cosmic-ray heating raises T_gas: doubling zeta lifts the equilibrium.
+        let t_hot = cloud_core_thermal_balance_temperature_k(
+            Fixed::from_int(6),
+            Fixed::from_int(10_000),
+            Fixed::from_ratio(653, 100),
+            fit_1e4,
+            cmb,
+            &m,
+            t_hi,
+        )
+        .unwrap();
+        assert!(
+            t_hot > t_1e4,
+            "more cosmic-ray heating raises the gas temperature ({} vs {})",
+            t_hot.to_f64_lossy(),
+            t_1e4.to_f64_lossy()
+        );
+        // MECHANISM, the n^2 gas-dust coupling pins the gas to the dust at high density: at n=1e6 the gas-dust term
+        // dominates so |T_gas - T_dust| is small, where at n=1e3 the line cooling sets T_gas well above T_dust.
+        let td_hi_n = Fixed::from_ratio(763, 100); // T_dust = 7.63 K (Table 5, n=1e6)
+        let t_1e6 = cloud_core_thermal_balance_temperature_k(
+            zeta,
+            Fixed::from_int(1_000_000),
+            td_hi_n,
+            fit_1e6,
+            cmb,
+            &m,
+            t_hi,
+        )
+        .unwrap();
+        let gap_1e6 = t_1e6.checked_sub(td_hi_n).unwrap().to_f64_lossy();
+        assert!(
+            gap_1e6 < 1.5,
+            "at n=1e6 the gas-dust coupling pins T_gas near T_dust (gap {} K)",
+            gap_1e6
+        );
+        let td_lo_n = Fixed::from_ratio(618, 100); // T_dust = 6.18 K (Table 5, n=1e3)
+        let t_1e3 = cloud_core_thermal_balance_temperature_k(
+            zeta,
+            Fixed::from_int(1_000),
+            td_lo_n,
+            fit_1e3,
+            cmb,
+            &m,
+            t_hi,
+        )
+        .unwrap();
+        let gap_1e3 = t_1e3.checked_sub(td_lo_n).unwrap().to_f64_lossy();
+        assert!(
+            gap_1e3 > gap_1e6,
+            "a low-density core's gas sits farther above its dust (gap n=1e3 {} > n=1e6 {})",
+            gap_1e3,
+            gap_1e6
+        );
+        // THE CMB FLOOR: a core cannot be colder than the microwave background. A high-z floor (15 K = 2.73*(1+z),
+        // z~4.5) that exceeds the equilibrium clamps the result at the floor rather than returning below it.
+        let t_floored = cloud_core_thermal_balance_temperature_k(
+            zeta,
+            Fixed::from_int(10_000),
+            Fixed::from_ratio(653, 100),
+            fit_1e4,
+            Fixed::from_int(15),
+            &m,
+            t_hi,
+        )
+        .unwrap();
+        assert!(
+            (t_floored.to_f64_lossy() - 15.0).abs() < 0.5,
+            "the derived temperature clamps at the CMB floor when the floor exceeds the equilibrium (got {})",
+            t_floored.to_f64_lossy()
+        );
+        // Non-physical inputs fail soft, never a fabricated temperature.
+        assert!(cloud_core_thermal_balance_temperature_k(
+            Fixed::ZERO,
+            Fixed::from_int(10_000),
+            Fixed::from_ratio(653, 100),
+            fit_1e4,
+            cmb,
+            &m,
+            t_hi,
+        )
+        .is_none());
+        assert!(cloud_core_thermal_balance_temperature_k(
+            zeta,
+            Fixed::from_int(10_000),
+            Fixed::from_ratio(653, 100),
+            fit_1e4,
+            cmb,
+            &m,
+            cmb, // t_hi = floor, no bracket
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn the_coupled_solve_derives_the_dust_temperature_from_the_radiation_field() {
+        // The seam closed: the dust temperature is no longer a supplied input but DERIVED with the gas temperature
+        // from the radiation-field scaling chi, solving Goldsmith's gas and dust balances together. Validation
+        // against Table 5 (chi = 1e-4): a n=1e4 dark core settles near T_gas = 11.4 K, T_dust = 6.53 K.
+        let m = GoldsmithThermalModel::goldsmith_2001();
+        assert_eq!(
+            m.dust_cooling_coeff_log10,
+            Fixed::from_ratio(-321675, 10_000)
+        ); // log10(6.8e-33), eq. 13
+        assert_eq!(
+            m.dust_heating_coeff_log10,
+            Fixed::from_ratio(-234089, 10_000)
+        ); // log10(3.9e-24), eq. 7
+        let zeta = Fixed::from_ratio(3121, 1000);
+        let cmb = Fixed::from_ratio(273, 100);
+        let t_hi = Fixed::from_int(50);
+        let chi = Fixed::from_ratio(1, 10_000); // 1e-4, the dark-cloud flux-scaling of Table 5
+        let fit_1e4 = LineCoolingFit {
+            log10_a: Fixed::from_ratio(-232518, 10_000),
+            b: Fixed::from_ratio(27, 10),
+        };
+        let t = cloud_core_coupled_temperatures(
+            zeta,
+            Fixed::from_int(10_000),
+            chi,
+            fit_1e4,
+            cmb,
+            &m,
+            t_hi,
+        )
+        .expect("the coupled balance resolves for a dark core");
+        // VALIDATION (reported, never gated): both temperatures land near Goldsmith Table 5 (11.4 K / 6.53 K).
+        assert!(
+            t.gas_temperature_k.to_f64_lossy() > 10.0 && t.gas_temperature_k.to_f64_lossy() < 13.0,
+            "the derived gas temperature is ~11 K (got {})",
+            t.gas_temperature_k.to_f64_lossy()
+        );
+        assert!(
+            t.dust_temperature_k.to_f64_lossy() > 5.5 && t.dust_temperature_k.to_f64_lossy() < 7.5,
+            "the derived dust temperature is ~6.5 K (got {})",
+            t.dust_temperature_k.to_f64_lossy()
+        );
+        // The dust is cooler than the gas (the cosmic rays heat the gas, the gas-dust coupling warms the dust).
+        assert!(
+            t.dust_temperature_k < t.gas_temperature_k,
+            "the dust settles cooler than the gas ({} vs {})",
+            t.dust_temperature_k.to_f64_lossy(),
+            t.gas_temperature_k.to_f64_lossy()
+        );
+        // MECHANISM, more radiation raises the dust: a tenfold chi lifts T_dust (Table 5's chi=1e-3 gives ~9 K).
+        let t_bright = cloud_core_coupled_temperatures(
+            zeta,
+            Fixed::from_int(10_000),
+            Fixed::from_ratio(1, 1_000), // chi = 1e-3
+            fit_1e4,
+            cmb,
+            &m,
+            t_hi,
+        )
+        .unwrap();
+        assert!(
+            t_bright.dust_temperature_k > t.dust_temperature_k,
+            "a stronger radiation field raises the dust temperature ({} vs {})",
+            t_bright.dust_temperature_k.to_f64_lossy(),
+            t.dust_temperature_k.to_f64_lossy()
+        );
+        // MECHANISM, the gas-dust coupling warms the dust at high density: T_dust rises with n (Table 5 6.18 K at
+        // n=1e3 to 7.63 K at n=1e6), where the uncoupled dust temperature would be density-independent.
+        let fit_1e3 = LineCoolingFit {
+            log10_a: Fixed::from_ratio(-239586, 10_000),
+            b: Fixed::from_ratio(24, 10),
+        };
+        let fit_1e6 = LineCoolingFit {
+            log10_a: Fixed::from_ratio(-223098, 10_000),
+            b: Fixed::from_ratio(34, 10),
+        };
+        let t_lo_n = cloud_core_coupled_temperatures(
+            zeta,
+            Fixed::from_int(1_000),
+            chi,
+            fit_1e3,
+            cmb,
+            &m,
+            t_hi,
+        )
+        .unwrap();
+        let t_hi_n = cloud_core_coupled_temperatures(
+            zeta,
+            Fixed::from_int(1_000_000),
+            chi,
+            fit_1e6,
+            cmb,
+            &m,
+            t_hi,
+        )
+        .unwrap();
+        assert!(
+            t_hi_n.dust_temperature_k > t_lo_n.dust_temperature_k,
+            "the gas-dust coupling warms the dust at high density ({} at n=1e6 vs {} at n=1e3)",
+            t_hi_n.dust_temperature_k.to_f64_lossy(),
+            t_lo_n.dust_temperature_k.to_f64_lossy()
+        );
+        // Non-physical inputs fail soft.
+        assert!(cloud_core_coupled_temperatures(
+            zeta,
+            Fixed::from_int(10_000),
+            Fixed::ZERO,
+            fit_1e4,
+            cmb,
+            &m,
+            t_hi
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn the_declared_wind_rows_carry_their_cited_coefficients_and_integration_domains() {
+        // The three-row wind ensemble as cited run-path data (stage 1 of the slice-2 wire), plus the Sellek
+        // controlled statistic. Two facts are asserted: the coefficients match the primaries digit for digit, and
+        // the integration domains encode the owner's domain-matched-rows ruling (the 160 AU total serves the band;
+        // the 80 AU chord does not).
+        let owen_b = XrayWindFit::owen_appendix_b();
+        let owen_9 = XrayWindFit::owen_equation_9();
+        let sellek = XrayWindFit::sellek_2024();
+        let sellek_80 = XrayWindFit::sellek_2024_controlled_80au();
+
+        // Coefficients, stored as log10 of M_sun/yr, against the cited values.
+        assert!((owen_b.log10_coefficient_msun_yr.to_f64_lossy() - (-8.204_12)).abs() < 1e-4); // 6.25e-9
+        assert!((owen_9.log10_coefficient_msun_yr.to_f64_lossy() - (-8.096_91)).abs() < 1e-4); // 8e-9
+        assert!((sellek.log10_coefficient_msun_yr.to_f64_lossy() - (-8.364_52)).abs() < 1e-4); // 4.32e-9, 160 AU
+        assert!((sellek_80.log10_coefficient_msun_yr.to_f64_lossy() - (-8.974_69)).abs() < 1e-4); // 1.06e-9, 80 AU
+
+        // Equation 9 is strictly linear in L_X and mass-independent, the shape that distinguishes it.
+        assert_eq!(owen_9.l_x_exponent, Fixed::ONE);
+        assert_eq!(owen_9.mass_exponent, Fixed::ZERO);
+        // Sellek inherits the Owen appendix-B shape (it re-normalizes, it does not re-fit the exponents).
+        assert_eq!(sellek.l_x_exponent, owen_b.l_x_exponent);
+        assert_eq!(sellek.mass_exponent, owen_b.mass_exponent);
+
+        // Band ordering: Sellek's whole-disk total is the LOW edge (below Owen's central and its eq-9 cross-check).
+        assert!(sellek.log10_coefficient_msun_yr < owen_b.log10_coefficient_msun_yr);
+        assert!(owen_b.log10_coefficient_msun_yr < owen_9.log10_coefficient_msun_yr);
+        // A shorter chord is a lower integrated rate: the 80 AU statistic sits below the 160 AU total, the physical
+        // reason the two are distinct quantities, not interchangeable.
+        assert!(sellek_80.log10_coefficient_msun_yr < sellek.log10_coefficient_msun_yr);
+
+        // The domain-matched-rows rule: the three whole-disk totals band together; the 80 AU chord does not band
+        // against a total, so it cannot be swapped in as the low edge.
+        assert!(owen_b.integration_domain.matches(owen_9.integration_domain));
+        assert!(owen_b.integration_domain.matches(sellek.integration_domain));
+        assert!(!sellek
+            .integration_domain
+            .matches(sellek_80.integration_domain));
+        assert_eq!(
+            sellek_80.integration_domain,
+            WindIntegrationDomain::WithinRadiusAu(Fixed::from_int(80)),
+        );
+        // Two truncated chords match iff they share the radius; a total never matches a chord.
+        assert!(WindIntegrationDomain::WithinRadiusAu(Fixed::from_int(80))
+            .matches(WindIntegrationDomain::WithinRadiusAu(Fixed::from_int(80))));
+        assert!(!WindIntegrationDomain::WithinRadiusAu(Fixed::from_int(80))
+            .matches(WindIntegrationDomain::WithinRadiusAu(Fixed::from_int(160))));
+        assert!(!WindIntegrationDomain::TotalDisk
+            .matches(WindIntegrationDomain::WithinRadiusAu(Fixed::from_int(160))));
     }
 
     #[test]
@@ -5726,5 +7330,93 @@ mod tests {
         // the luminosity both. Each must propagate to a whole-chain None.
         assert!(call(Fixed::ZERO, DISK_ERA_XRAY_TEST_WALL_K).is_none());
         assert!(call(Fixed::ONE, Fixed::ZERO).is_none());
+    }
+
+    #[test]
+    fn the_live_disk_clock_composes_on_the_real_hayashi_wall_grid() {
+        // STAGE 3, the rider-2 upgrade from #200 landing: the disk clock's LIVE path reads its wall from the BHAC15
+        // grid (`civsim_physics::hayashi_wall::HayashiWallGrid`), not a fixture, so this integration test consumes
+        // the real grid read where the unit-math tests above use the de-camouflaged arithmetic fixture (fixtures for
+        // arithmetic, grid for integration, the split the fixture comment names). It proves the composed clock runs
+        // end to end on the per-star wall the wire will feed it, and that the grid's OWN drift band (its wall chord)
+        // propagates through the clock to a lifetime band, the chord carried, never collapsed.
+        use civsim_physics::hayashi_wall::HayashiWallGrid;
+        let grid = HayashiWallGrid::standard().expect("the standard BHAC15 wall grid loads");
+        let reading = grid
+            .wall_teff(Fixed::ONE)
+            .expect("a solar-mass star is inside the grid's convective-track domain");
+
+        // The tagged solar interims, the same the unit-math tests run (disk-locked rotation, unit t_visc, the
+        // hundredfold-over-wind peak accretion), so this isolates the ONE change: the wall now comes from the grid.
+        let mlt_c = Fixed::from_ratio(3, 2);
+        let age = Fixed::ONE;
+        let p_rot = Fixed::from_int(8);
+        let ro_sat = Fixed::from_ratio(13, 100);
+        let sat = Fixed::from_ratio(-313, 100);
+        let beta = Fixed::from_ratio(-27, 10);
+        let gamma = Fixed::ONE;
+        let t_visc = Fixed::ONE;
+        let fit = XrayWindFit::owen_appendix_b();
+        // The peak accretion is sized a hundredfold over the CENTRAL wall's wind and then HELD FIXED across the
+        // drift band, so the wall moves the wind (through luminosity and turnover) against a fixed birth accretion,
+        // the isolation the mechanistic test uses for the age sweep. Sizing mdot_0 per-wall instead would pin the
+        // race ratio and cancel the wall, which is the wrong probe.
+        let central_wind = {
+            let tau_conv =
+                pre_main_sequence_convective_turnover_days(Fixed::ONE, reading.wall_teff_k, mlt_c)
+                    .unwrap();
+            let rossby = stellar_rossby_number(p_rot, tau_conv).unwrap();
+            let activity = activity_luminosity_fraction(rossby, ro_sat, sat, beta).unwrap();
+            let l_bol =
+                pre_main_sequence_luminosity_lsun(Fixed::ONE, reading.wall_teff_k, age).unwrap();
+            let log10_l_x = stellar_xray_luminosity_log10_erg_s(l_bol, activity).unwrap();
+            photoevaporative_wind_rate_msun_myr(log10_l_x, Fixed::ONE, &fit).unwrap()
+        };
+        let mdot_0 = central_wind.checked_mul(Fixed::from_int(100)).unwrap();
+        let clock = |wall: Fixed| {
+            disk_era_xray_disk_lifetime_myr(
+                Fixed::ONE,
+                wall,
+                age,
+                p_rot,
+                mlt_c,
+                ro_sat,
+                sat,
+                beta,
+                &fit,
+                mdot_0,
+                t_visc,
+                gamma,
+            )
+        };
+
+        // The clock composes on the real grid wall and the race crosses to a finite, units-sane lifetime. The value
+        // is the tagged-interim solar analogue, NOT the real Sun's disk life (the same Residual-not-miss framing as
+        // the fixture tests), so the assert is a units bracket, not a physical-band claim.
+        let on_wall = clock(reading.wall_teff_k).expect("the clock composes on the grid wall");
+        assert!(
+            on_wall > Fixed::from_ratio(1, 1_000_000) && on_wall < Fixed::from_int(1_000_000),
+            "the grid-wall lifetime is finite and units-sane (got {} Myr)",
+            on_wall.to_f64_lossy()
+        );
+
+        // THE GRID CHORD PROPAGATES: the wall's own drift band (drift_lo_k, drift_hi_k) maps through the clock to a
+        // lifetime band. The clock is monotone in the wall (a hotter wall is brighter, a stronger wind, a shorter
+        // life), so the low-edge wall gives the longer life and the high-edge wall the shorter, and the band has
+        // non-zero width whenever the grid's drift band does. The chord is carried end to end, not averaged away.
+        assert!(
+            reading.drift_lo_k < reading.drift_hi_k,
+            "the grid row carries a drift band"
+        );
+        let life_at_lo =
+            clock(reading.drift_lo_k).expect("the clock composes on the drift low edge");
+        let life_at_hi =
+            clock(reading.drift_hi_k).expect("the clock composes on the drift high edge");
+        assert!(
+            life_at_lo > life_at_hi,
+            "a cooler wall (drift low) drives a longer disk life than a hotter one (lo {} Myr, hi {} Myr)",
+            life_at_lo.to_f64_lossy(),
+            life_at_hi.to_f64_lossy()
+        );
     }
 }
