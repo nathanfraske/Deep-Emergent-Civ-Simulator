@@ -36,13 +36,13 @@
 //! a clearly marked non-canon flavor line, the optional interpretation layer dressing real
 //! moves in a voice. The flavor invents no move and changes nothing.
 
+use civsim_bio::evidence::InferenceParams;
+use civsim_bio::tom::{AccessChannelDef, AccessChannelId, AccessChannelRegistry, AccessWeights};
 use civsim_core::{Fixed, StableId};
 use civsim_sim::dialogue::{
     conversation_of, ContentRef, EffectSign, FelicityCond, ForceEffectDef, ForceEffectId,
     ForceFloor, ForceKind, Move, MoveKindDef, MoveKindId, MoveRegistry, ResolvedBand,
 };
-use civsim_sim::evidence::InferenceParams;
-use civsim_sim::tom::{AccessChannelDef, AccessChannelId, AccessChannelRegistry, AccessWeights};
 use civsim_sim::world::{GossipParams, Stimulus, TickInput, World};
 use civsim_sim::AttrKindId;
 

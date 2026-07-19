@@ -22,7 +22,7 @@
 //! to a characteristic-frequency (formant) vector; the frequency-squared absorption law
 //! ([`civsim_physics::laws::acoustic_absorption`]) over a typical path (through the existing
 //! [`civsim_physics::laws::optical_depth`]) says how much the medium blurs a contrast; and the
-//! being's own per-channel resolution (its [`crate::sensorium::Sensorium`] resolution, the
+//! being's own per-channel resolution (its [`civsim_foundation::sensorium::Sensorium`] resolution, the
 //! just-noticeable frequency difference, distinct from the `[0, ONE]` acuity gate after the
 //! R-SENSORIUM split) says how fine a contrast it can hold. Two media, or two vocal geometries,
 //! diverge in their confusability geometry from the physics alone, with no `RaceId` and no authored
@@ -54,7 +54,7 @@ use crate::language::{
     FeatureDimId, FeatureValueId, FormSegment, FormSystem, ProductionModalityId,
 };
 use crate::race::Articulation;
-use crate::sensorium::{SenseChannelId, Sensorium};
+use civsim_foundation::sensorium::{SenseChannelId, Sensorium};
 
 /// Caller-supplied caps and the structural mode count for a perceptual-geometry read-out. These are
 /// engine mechanics (the fixed-point saturation caps every physics kernel takes, and how many
@@ -995,8 +995,8 @@ mod tests {
 #[cfg(test)]
 mod capability_gate_tests {
     use super::*;
-    use crate::anatomy::{BodyPlan, BodyPlanRegistry, Part, Temperament};
     use crate::body::{BodyParams, BLOOD, F_VITAL_CORE};
+    use civsim_bio::anatomy::{BodyPlan, BodyPlanRegistry, Part, Temperament};
 
     // FIXTURE values, never read from the manifest.
     const VOICE: SenseChannelId = SenseChannelId(1); // the reception channel a voice fills (hearing)

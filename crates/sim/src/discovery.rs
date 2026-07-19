@@ -44,11 +44,12 @@
 
 use civsim_core::{DrawKey, Fixed, Phase, StableId};
 
-use crate::agent::Mind;
-use crate::calibration::{CalibrationError, CalibrationManifest};
-use crate::evidence::InferenceParams;
 use crate::homeostasis::AffordanceId;
-use crate::learn::{step_belief_subject, SequenceStep, REWARDS, REWARD_ATTR};
+use crate::learn::{step_belief_subject, REWARDS, REWARD_ATTR};
+use civsim_bio::agent::Mind;
+use civsim_bio::evidence::InferenceParams;
+use civsim_foundation::calibration::{CalibrationError, CalibrationManifest};
+use civsim_foundation::sequence::SequenceStep;
 
 /// The candidate single-step action bindings a being can propose this tick: the GENERIC cartesian of its
 /// afforded primitives and the affordance-typed targets it currently perceives, in a canonical order
@@ -143,7 +144,7 @@ pub struct DiscoveryCalib {
     /// plan is a direct reward belief; a multi-hop plan chains "A yields X" backward from a goal the being
     /// cannot act on directly. This bounds the chain LENGTH (distinct from `plan_depth_cap`, which bounds how
     /// many alternative plans are returned), so a being does not chase an ever-deeper chain of ever-weaker
-    /// inference. Read only where a being holds a relational belief ([`crate::agent::Mind::has_relations`]);
+    /// inference. Read only where a being holds a relational belief ([`civsim_bio::agent::Mind::has_relations`]);
     /// a mind with no relation never reads it and plans one-hop byte-identically. Basis: the per-tick cognition
     /// budget and the chain depth beyond which the weakest-link confidence has decayed below the belief
     /// commit margin (a plan no surer than a guess), a performance-and-resolution bound. Surfaced with its
@@ -308,9 +309,9 @@ pub fn sample_candidate(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::calibration::CalibrationManifest;
     use crate::homeostasis::{EXTRACT, GRASP, STRIKE};
     use crate::learn::{sequence_subject, RewardLearningCalib, NEUTRAL};
+    use civsim_foundation::calibration::CalibrationManifest;
 
     #[test]
     fn discovery_calib_reads_the_manifest_and_derives_surprise_from_reward_noise() {

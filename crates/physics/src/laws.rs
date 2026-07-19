@@ -853,6 +853,54 @@ pub fn conduction(
     }
 }
 
+/// THE MANTLE CONVECTIVE HEAT FLUX: the surface heat loss a convecting interior sustains, the conductive Fourier
+/// flux enhanced by the Nusselt number `Nu = a * (d / delta) = a * (Ra / Ra_crit)^(1/3)`. Heat leaves not across
+/// the whole layer depth but across the thin thermal BOUNDARY LAYER `delta` the vigorous flow maintains, so a
+/// mantle at `Ra ~ 1e6` loses about ten times the conductive flux. `a` is the parameterized-convection prefactor
+/// ([`crate::convection_scaling`], `1.0` single-lid planetary), `conductive_flux` the Fourier flux over the full
+/// layer ([`conduction`]), `layer_depth` the layer `d`, and `boundary_layer` the ONE shared `delta`
+/// ([`thermal_boundary_layer`]) the lid base and the driving stress also read (the mid-band lift, owner ruling
+/// 2026-07-18: the heat loss reads the shared boundary layer, never a parallel scaling of its own).
+///
+/// THE NAME IS DELIBERATE: this is NOT [`convective_flux`], which is Newton's-law-of-cooling thermoregulation over
+/// a heat-transfer coefficient (a different mechanism wearing the same adjective). This is the parameterized
+/// mantle-convection heat transport.
+///
+/// `Nu >= 1` IS THE DEFINITION, not an authored floor: convection never transports less than conduction, so the
+/// enhancement is clamped at unity. The parameterized `a (Ra/Ra_crit)^(1/3)` form is a high-`Ra` asymptotic; near
+/// onset (`Ra ~ Ra_crit`, `delta ~ d`) it would fall below one, which the clamp corrects to the conductive limit.
+///
+/// TERMS-DROPPED (owner ruling 2026-07-18, the Terran audit): this is the MOBILE-LID / single-lid isoviscous
+/// instance, valid where the surface participates in the overturn. A stagnant-lid body (the catalog MAJORITY:
+/// Mars-class, Venus-class, most one-plate worlds) has a temperature-dependent viscosity that locks the cold lid,
+/// and its heat loss is SUPPRESSED through the rheological temperature scale `RT^2 / E*` (`E*` the banked creep
+/// activation energy). That branch is DERIVABLE from rows already in the tree, keyed to the `tectonic_regime`
+/// dispatch, and is a FLAGGED follow-on (the debts ledger), not built here. Clamped to `flux_max`; a non-positive
+/// boundary layer reads back the conductive flux. Deterministic fixed-point.
+pub fn mantle_convective_heat_flux(
+    conductive_flux: Fixed,
+    layer_depth: Fixed,
+    boundary_layer: Fixed,
+    prefactor_a: Fixed,
+    flux_max: Fixed,
+) -> Fixed {
+    if boundary_layer <= ZERO || layer_depth <= ZERO {
+        return conductive_flux.min(flux_max);
+    }
+    // Nu = max(1, a * d / delta), the physical enhancement; q = Nu * q_conductive.
+    let nusselt = match layer_depth
+        .checked_div(boundary_layer)
+        .and_then(|ratio| ratio.checked_mul(prefactor_a))
+    {
+        Some(nu) => nu.max(Fixed::ONE),
+        None => return flux_max,
+    };
+    match nusselt.checked_mul(conductive_flux) {
+        Some(q) => q.min(flux_max),
+        None => flux_max,
+    }
+}
+
 /// The sensible-heat energy to effect a temperature change: `m c dT`.
 pub fn sensible_energy(
     mass: Fixed,
@@ -3583,13 +3631,20 @@ pub fn heat_advection(
 }
 
 /// The THERMAL BOUNDARY LAYER thickness, the conductive lid riding on a convecting interior:
-/// `L = d * Ra^(-1/3)`, written as `d / Ra^(1/3)`.
+/// `delta = d * (Ra_crit / Ra)^(1/3)`, the boundary-layer scaling NORMALIZED AT THE ONSET of convection.
 ///
 /// This is the classical boundary-layer scaling: convection carries heat through the interior efficiently, so
 /// the temperature drop concentrates into a thin conductive skin at the top, and the skin THINS as the flow
-/// grows more vigorous. A mantle at `Ra ~ 1e6` shears over a layer about a hundredth of its depth. The `-1/3`
-/// is the scaling's own exponent (it falls out of the boundary layer sitting at its own marginal stability),
-/// never an authored knob, and the cube root is the deterministic fixed-point [`Fixed::powf`].
+/// grows more vigorous. The `-1/3` is the scaling's own exponent (it falls out of the boundary layer sitting at
+/// its own marginal stability), never an authored knob, and the cube root is the deterministic fixed-point
+/// [`Fixed::powf`].
+///
+/// THE NORMALIZATION IS THE POINT, and it is why this takes `rayleigh_critical` as its third argument. At the
+/// onset (`Ra = Ra_crit`) the layer recovers its FULL depth, which is the physics: with convection just barely
+/// beginning there is no conductive-convective boundary and the whole layer conducts. The unnormalized
+/// `d * Ra^(-1/3)` has no such anchor and puts the lid a factor of `Ra_crit^(1/3)`, roughly ten, too thin. So a
+/// mantle at `Ra ~ 1e6` against a planetary `Ra_crit` of 1707.762 shears over about a TENTH of its depth
+/// (`(1707.762 / 1e6)^(1/3) = 0.1195`), never the hundredth the unnormalized form gives.
 ///
 /// TWO CONSUMERS SHARE THIS, which is why it is a named law rather than an inline expression: the convective
 /// driving stress reads it as the length over which the interior flow shears against the lid
@@ -3601,10 +3656,26 @@ pub fn heat_advection(
 /// bound), and falling back to the full depth when `Ra` is non-positive (no convection, so no boundary layer
 /// forms and the whole layer is the conductive one). Deterministic fixed-point.
 /// @provides thermal_boundary_layer
-pub fn thermal_boundary_layer(depth: Fixed, rayleigh: Fixed) -> Fixed {
-    let ra_cube_root = rayleigh.powf(Fixed::from_ratio(1, 3));
-    if ra_cube_root > ZERO {
-        depth.checked_div(ra_cube_root).unwrap_or(depth).min(depth)
+pub fn thermal_boundary_layer(depth: Fixed, rayleigh: Fixed, rayleigh_critical: Fixed) -> Fixed {
+    // delta = d * (Ra_crit / Ra)^(1/3): the boundary layer recovers the FULL layer depth at the ONSET of
+    // convection (Ra = Ra_crit, so the whole layer is the conductive one) and thins as Ra^(-1/3) above onset.
+    // Ra_crit is the BC-conditioned critical Rayleigh (the world's, read from ConvectionScaling), so the ONE
+    // shared lid the convective heat loss and the mechanical lid both read starts at the full layer at onset,
+    // rather than the unnormalized d*Ra^(-1/3) that put the lid a factor of Ra_crit^(1/3) (about ten) too thin.
+    // Clamped at the layer depth (a boundary layer cannot exceed the layer it forms in); the full depth when Ra
+    // or Ra_crit is non-positive (no convection, so the whole layer conducts), and when Ra falls so far below
+    // Ra_crit that the ratio overflows (the same sub-onset case: the whole layer is the conductive one).
+    if rayleigh > ZERO && rayleigh_critical > ZERO {
+        match rayleigh_critical.checked_div(rayleigh) {
+            Some(ratio) => {
+                let ratio_cube_root = ratio.powf(Fixed::from_ratio(1, 3));
+                depth
+                    .checked_mul(ratio_cube_root)
+                    .unwrap_or(depth)
+                    .min(depth)
+            }
+            None => depth,
+        }
     } else {
         depth
     }
@@ -4693,6 +4764,36 @@ mod tests {
         assert_eq!(
             thermal_diffusivity(Fixed::from_int(1), ZERO, Fixed::from_int(1), alpha_max),
             alpha_max
+        );
+    }
+
+    #[test]
+    fn the_mantle_nusselt_flux_enhances_conduction_and_floors_at_unity() {
+        // MAGNITUDE REFEREE. A Mars-class mantle at Ra ~ 1e6 with the planetary Ra_crit ~ 1100 has
+        // delta = d (Ra_crit/Ra)^(1/3) ~ d / 9.7, so Nu = a (d/delta) ~ 9.7 (a = 1): the convecting interior loses
+        // about ten times the conductive flux. All Fixed, no float (this file is the integer-only canonical path).
+        let q_cond = Fixed::from_int(100);
+        let depth = Fixed::from_int(1_800_000);
+        let delta = Fixed::from_int(185_760); // 1.8e6 * (1100.65/1e6)^(1/3)
+        let a = Fixed::ONE;
+        let big = Fixed::from_int(1_000_000);
+        let q = mantle_convective_heat_flux(q_cond, depth, delta, a, big);
+        // Nu ~ 9.7, so q ~ 970: between 9x and 11x the conductive flux (a mechanism-class bracket, not a fit).
+        assert!(
+            q > q_cond.mul(Fixed::from_int(9)) && q < q_cond.mul(Fixed::from_int(11)),
+            "the convecting flux is about ten times conduction"
+        );
+        // Nu >= 1 is the definition: at onset (delta = depth) the enhancement floors at unity (conduction).
+        assert_eq!(
+            mantle_convective_heat_flux(q_cond, depth, depth, a, big),
+            q_cond,
+            "at onset the heat loss is exactly conduction"
+        );
+        // A small prefactor at onset still floors at conduction: convection never transports less than conduction.
+        assert_eq!(
+            mantle_convective_heat_flux(q_cond, depth, depth, Fixed::from_ratio(397, 1000), big),
+            q_cond,
+            "Nu is clamped to 1"
         );
     }
 

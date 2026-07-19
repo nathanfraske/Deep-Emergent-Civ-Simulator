@@ -34,7 +34,7 @@
 //! `{temperature, convecting}`. The three quantities that pin the profile already exist: the surface
 //! temperature (the cold reference the column loses heat toward), the column's lumped scalar (which IS the
 //! convecting interior's potential temperature), and the lid thickness between them
-//! ([`crate::laws::thermal_boundary_layer`], `L = d * Ra^(-1/3)`, the SAME derivation the convective driving
+//! ([`crate::laws::thermal_boundary_layer`], which owns the form and its onset normalization, the SAME derivation the convective driving
 //! stress shears over, so the stress and the geotherm cannot disagree about how thick the lid is).
 //!
 //! TWO FORMS, dispatched on what the world's lid is rather than on a named regime:

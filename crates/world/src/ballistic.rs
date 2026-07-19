@@ -25,7 +25,7 @@
 //! `R = v^2*sin(2*alpha)/g`. It lands where the arc's absolute height (the launch elevation plus `z`) first
 //! meets the terrain along the azimuth: a downhill slope holds the arc above the falling ground longer and
 //! EXTENDS the range, an uphill rim meets it sooner and SHORTENS it. That terrain intersection is where the
-//! blanket's shape emerges (the ejecta fan, the next slice), no authored spread.
+//! blanket's shape emerges (the ejecta fan, [`ejecta_fan`] below), no authored spread.
 //!
 //! Gravity `g` is a PARAMETER (the floor `mech.gravitational_acceleration`), never hardcoded, so the range
 //! reads the world's own gravity, including a derived `g = G*M/R^2` when a world supplies it (gate note, PR
@@ -91,7 +91,8 @@ pub struct BallisticForces {
 
 /// Where a ballistic arc lands: the cells the arc passed over along the azimuth (its ground track, the source
 /// first, consecutive duplicates dropped) and the cell it deposits in. The landing is the single-parcel
-/// deposit site the redistribution operator credits; the isotropic ejecta fan is the next slice.
+/// deposit site the redistribution operator credits; [`ejecta_fan`] fires many of these over evenly spaced
+/// azimuths and aggregates them into the blanket.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BallisticLanding {
     /// The cells the arc's ground track crossed, in travel order, starting with the source.

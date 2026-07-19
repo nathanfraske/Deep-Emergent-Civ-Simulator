@@ -30,7 +30,7 @@
 //! # THE STRAIN RATE IS THE BOUNDARY-LAYER DIFFUSIVE RATE
 //!
 //! Convective turnover is DIFFUSION-LIMITED: the cold boundary layer must thicken by conduction until it founders,
-//! so the interior deforms at `eps_dot = kappa / delta^2`, where `delta = d * Ra^(-1/3)` is the marginally-critical
+//! so the interior deforms at `eps_dot = kappa / delta^2`, where `delta = d * (Ra_crit / Ra)^(1/3)` is the marginally-critical
 //! thermal boundary layer the engine already derives ([`crate::laws::thermal_boundary_layer`], the SAME `delta`
 //! the lid geotherm and the driving stress span). This is the infinite-Prandtl boundary-layer scaling, and its
 //! `Ra` exponent falls out of SQUARING a landed law, so it authors no new reservation.
@@ -119,6 +119,10 @@ pub struct ViscosityInputs {
     pub eval_temperature_k: Fixed,
     /// The pressure the creep ladder is evaluated at (GPa): the MID-LAYER pressure, the chord field.
     pub eval_pressure_gpa: Fixed,
+    /// The log of the critical Rayleigh number `ln Ra_crit` (the onset regime's), normalizing the boundary
+    /// layer: `ln delta = ln d - (1/3) max(0, ln Ra - ln Ra_crit)`, so the layer recovers the full depth at
+    /// onset. The SAME critical Rayleigh the linear boundary layer and the convection onset read.
+    pub ln_rayleigh_critical: Fixed,
 }
 
 /// Why the effective-viscosity solve refused. Every variant is a refusal to answer, never a degraded number.
@@ -175,16 +179,24 @@ fn ln_rayleigh(inputs: &ViscosityInputs, ln_eta: Fixed) -> Result<Fixed, Viscosi
     .ok_or(ViscosityRefusal::NotRepresentable)
 }
 
-/// `ln(delta) = ln(d) - (1/3) max(0, ln Ra)`, the log of the landed thermal boundary layer `delta = d Ra^(-1/3)`
-/// capped at the layer depth (below onset, `Ra <= 1`, the whole layer is the length). The log form of
-/// [`crate::laws::thermal_boundary_layer`], twinned against it in the tests.
-fn ln_boundary_layer(ln_depth: Fixed, ln_rayleigh: Fixed) -> Result<Fixed, ViscosityRefusal> {
-    let positive_ln_ra = if ln_rayleigh > Fixed::ZERO {
-        ln_rayleigh
+/// `ln(delta) = ln(d) - (1/3) max(0, ln Ra - ln Ra_crit)`, the log of the landed thermal boundary layer
+/// `delta = d (Ra_crit/Ra)^(1/3)` capped at the layer depth (below onset, `Ra <= Ra_crit`, the whole layer is
+/// the length). The log form of [`crate::laws::thermal_boundary_layer`], twinned against it in the tests, now
+/// normalized by the BC-conditioned critical Rayleigh rather than by `Ra = 1`.
+fn ln_boundary_layer(
+    ln_depth: Fixed,
+    ln_rayleigh: Fixed,
+    ln_rayleigh_critical: Fixed,
+) -> Result<Fixed, ViscosityRefusal> {
+    let excess = ln_rayleigh
+        .checked_sub(ln_rayleigh_critical)
+        .ok_or(ViscosityRefusal::NotRepresentable)?;
+    let positive_excess = if excess > Fixed::ZERO {
+        excess
     } else {
         Fixed::ZERO
     };
-    let drop = positive_ln_ra
+    let drop = positive_excess
         .checked_mul(Fixed::from_ratio(1, 3))
         .ok_or(ViscosityRefusal::NotRepresentable)?;
     ln_depth
@@ -278,7 +290,7 @@ pub fn solve_ln_effective_viscosity(
     let mut final_delta = Fixed::MAX;
     for _ in 0..MAX_FIXED_POINT_ITERATIONS {
         let ln_ra = ln_rayleigh(inputs, ln_eta)?;
-        let ln_bl = ln_boundary_layer(ln_depth, ln_ra)?;
+        let ln_bl = ln_boundary_layer(ln_depth, ln_ra, inputs.ln_rayleigh_critical)?;
         // ln(eps_dot) = ln(kappa) - 2 ln(delta).
         let ln_eps = ln_kappa
             .checked_sub(ln_bl)
@@ -354,6 +366,9 @@ mod tests {
             thermal_diffusivity_m2_s: Fixed::from_ratio(1, 1_000_000),
             eval_temperature_k: Fixed::from_int(1600),
             eval_pressure_gpa: Fixed::from_int(10),
+            // The onset (rigid-rigid) critical Rayleigh the boundary layer normalizes by, matching the mantle
+            // column's `ra_crit` (1707.762): the lid recovers the full depth at onset, thins as (Ra_crit/Ra)^(1/3).
+            ln_rayleigh_critical: Fixed::from_ratio(1_707_762, 1000).ln(),
         }
     }
 
@@ -386,8 +401,9 @@ mod tests {
         let inputs = mars_inputs();
         let ln_depth = inputs.layer_depth_m.ln();
         let ra = Fixed::from_int(1_000_000);
-        let ln_delta = ln_boundary_layer(ln_depth, ra.ln()).expect("delta");
-        let delta_landed = thermal_boundary_layer(inputs.layer_depth_m, ra);
+        let ra_crit = Fixed::from_ratio(1_707_762, 1000);
+        let ln_delta = ln_boundary_layer(ln_depth, ra.ln(), ra_crit.ln()).expect("delta");
+        let delta_landed = thermal_boundary_layer(inputs.layer_depth_m, ra, ra_crit);
         let ratio = ln_delta.exp().to_f64_lossy() / delta_landed.to_f64_lossy();
         assert!(
             (0.999..=1.001).contains(&ratio),
@@ -408,7 +424,7 @@ mod tests {
         let ln_depth = inputs.layer_depth_m.ln();
         let ln_kappa = inputs.thermal_diffusivity_m2_s.ln();
         let ln_ra = ln_rayleigh(&inputs, ln_eta).expect("ra");
-        let ln_bl = ln_boundary_layer(ln_depth, ln_ra).expect("bl");
+        let ln_bl = ln_boundary_layer(ln_depth, ln_ra, inputs.ln_rayleigh_critical).expect("bl");
         let ln_eps = ln_kappa - ln_bl - ln_bl;
         let ln_mpa_to_pa = Fixed::from_int(10).ln() * Fixed::from_int(6);
         let conditions = CreepConditions {

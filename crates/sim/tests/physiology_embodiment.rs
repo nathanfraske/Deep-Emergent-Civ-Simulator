@@ -21,10 +21,10 @@
 //! lives in a rich medium and suffocates in a poor one, from the medium's content, not a label) and that
 //! the coupled runner is bit-identical across the scheduler variant and reproduces across runs.
 
-use civsim_core::{Fixed, StableId};
-use civsim_sim::anatomy::{
+use civsim_bio::anatomy::{
     BodyPlan, BodyPlanRegistry, OrganKindDef, Part, Temperament, TissueComposition,
 };
+use civsim_core::{Fixed, StableId};
 use civsim_sim::controller::Controller;
 use civsim_sim::edibility::Physiology;
 use civsim_sim::homeostasis::{
@@ -458,7 +458,7 @@ fn the_material_substrate_folds_into_state_hash_and_stays_deterministic() {
     // for bit and folds identically between the pinned order and the scheduler variant. An empty
     // material layer (every existing scenario) folds no bytes, so the fold is byte-identical there
     // (carried by every existing suite); this test proves the fold is live and order-invariant.
-    use civsim_sim::material::{MaterialField, SubstanceMix};
+    use civsim_foundation::material::{MaterialField, SubstanceMix};
 
     let setpoint = 305;
     let material = || -> MaterialField {
@@ -554,7 +554,7 @@ fn a_carried_load_folds_into_state_hash_and_stays_deterministic() {
     // between the pinned order and the scheduler variant. A being carrying nothing (every existing
     // scenario) folds no bytes, so the fold is byte-identical there; this proves it is live and
     // order-invariant.
-    use civsim_sim::material::SubstanceMix;
+    use civsim_foundation::material::SubstanceMix;
 
     let setpoint = 305;
     let build = |carrying: bool| -> Runner {
@@ -633,7 +633,7 @@ fn a_being_picks_up_and_puts_down_matter_bounded_by_its_grown_strength() {
     // and no more, and puts it back conserved. The limit is grown strength versus physics-derived weight,
     // never a per-race carry table, so a being with no muscle carries nothing and a strong being is
     // bounded by its strength rather than by the size of the heap.
-    use civsim_sim::material::MaterialField;
+    use civsim_foundation::material::MaterialField;
     use civsim_sim::physiology::MUSCLE_STRENGTH;
 
     let cell = Coord3::ground(1, 1);
@@ -737,7 +737,7 @@ fn a_being_grasps_matter_only_through_an_evolved_controller_weight() {
     // and the physics are fixed, the DECISION is an evolved phenotype, and a founder does nothing until
     // selection gives it a reason to. The selection pressure that lifts the grasp weight (a need the carried
     // matter serves) arrives with item 4's extraction contest; here the mechanism is proven at the decision.
-    use civsim_sim::material::MaterialField;
+    use civsim_foundation::material::MaterialField;
     use civsim_sim::physiology::MUSCLE_STRENGTH;
 
     let grasper_cell = Coord3::ground(2, 2);
@@ -870,7 +870,7 @@ fn a_being_mines_bonded_rock_only_when_it_decides_to_and_can_fracture_it() {
     // deciding being mines when its force is concentrated over a small working area and fails when the same
     // force is spread over a large one, because the fracture gate is pressure, not raw force). All against
     // granite's cited fracture strength, no "miner" branch, no per-race yield table (Principles 8, 9).
-    use civsim_sim::material::{ExtractionParams, MaterialField};
+    use civsim_foundation::material::{ExtractionParams, MaterialField};
     use civsim_sim::physiology::MUSCLE_STRENGTH;
 
     let cell = Coord3::ground(2, 2);
@@ -1003,7 +1003,7 @@ fn a_wielded_tool_multiplies_the_extraction_affordance_by_its_geometry_and_mater
     // concentrates its force over a small contact area into a pressure that clears the rock, AND the tool
     // must itself be hard enough (a sharp soft tool blunts and does nothing). This is the payoff loop's
     // hinge, mining harder matter with a made tool, all geometry and material against substance data.
-    use civsim_sim::material::{ExtractionParams, MaterialField, WieldedTool};
+    use civsim_foundation::material::{ExtractionParams, MaterialField, WieldedTool};
     use civsim_sim::physiology::MUSCLE_STRENGTH;
 
     // A controlled floor: a granite target (a fracture strength to clear, a density to weigh the load), a
@@ -1176,7 +1176,7 @@ fn a_cut_frees_the_soft_constituent_of_a_composite_a_bare_extract_cannot_and_aut
     // substance whose OWN fracture strength the edge beats, where EXTRACT gates on the AGGREGATE (the hardest
     // constituent binds the whole cell). So a keen edge frees the soft flesh from a tough rind a bare press
     // cannot break, and WHICH substances are freed is derived from the cell's own composition, never a table.
-    use civsim_sim::material::{ExtractionParams, MaterialField, WieldedTool};
+    use civsim_foundation::material::{ExtractionParams, MaterialField, WieldedTool};
     use civsim_sim::physiology::MUSCLE_STRENGTH;
 
     // A composite target: a rind tough in shear (shear strength 5000) binding a soft flesh (shear strength 1),
@@ -1389,7 +1389,7 @@ fn a_crush_fails_compression_where_a_cut_parts_shear_the_same_tool_diverging_by_
     // target is weak in. A chalk (weak in compression, tough in shear) is crushed but not cut; a fibre (tough
     // in compression, weak in shear) is cut but not crushed. The divergence is the target's own material axes,
     // by physics, never a per-action table or an `IsChalk`/`IsFibre` tag.
-    use civsim_sim::material::{MaterialField, WieldedTool};
+    use civsim_foundation::material::{MaterialField, WieldedTool};
     use civsim_sim::physiology::MUSCLE_STRENGTH;
 
     const FLOOR: &str = r#"
@@ -1570,8 +1570,8 @@ fn a_miners_actuator_work_fractures_rock_and_a_stronger_actuator_shatters_where_
     // cannot, the payoff derived from the miner's own body, and two tools of DIFFERENT mass but the same shape
     // shatter identically, the free tool-mass term dropped (the gate-ruled feel-change-for-correctness; the
     // founded tool-geometry coupling is the arc's flagged follow-on (b)).
-    use civsim_sim::contact_transfer::ContactTransferRegistry;
-    use civsim_sim::material::{MaterialField, StrikeParams, WieldedTool};
+    use civsim_foundation::contact_transfer::ContactTransferRegistry;
+    use civsim_foundation::material::{MaterialField, StrikeParams, WieldedTool};
     use civsim_sim::morphogen::{Segment, Structure};
     use civsim_sim::physiology::MUSCLE_STRENGTH;
     use std::collections::BTreeMap;
@@ -1792,7 +1792,7 @@ fn a_worked_tool_wears_down_and_spends_out_over_repeated_use_and_an_unarmed_tool
     // hardness, no authored durability count) and OPT-IN (a world that never arms the wear params keeps every
     // tool immortal, byte-identical to before). This proves both: an armed tool wears down over several uses
     // and spends out, and the same tool on an unarmed world never wears.
-    use civsim_sim::material::{CraftParams, MaterialField, WearParams, WieldedTool};
+    use civsim_foundation::material::{CraftParams, MaterialField, WearParams, WieldedTool};
     use civsim_sim::physiology::MUSCLE_STRENGTH;
 
     // A flesh cell (fracture 1, so a keen edge frees it) and a flint edge that carries a wear coefficient. The
@@ -2018,7 +2018,7 @@ fn a_brittle_tool_snaps_under_its_own_working_stress_where_a_tough_one_survives_
     // tradeoff bites: two tools of IDENTICAL geometry, differing ONLY in fracture strength, meet the same
     // working stress, and the brittle one snaps where the tough one bears it, by physics not a durability tag.
     // Opt-in: an unarmed world never breaks a tool, byte-identical to before.
-    use civsim_sim::material::{MaterialField, WieldedTool};
+    use civsim_foundation::material::{MaterialField, WieldedTool};
     use civsim_sim::physiology::MUSCLE_STRENGTH;
 
     // A cuttable flesh (so the tool does real work) and two edges of equal geometry: a brittle one (fracture
@@ -2233,7 +2233,7 @@ fn a_slender_tool_buckles_under_its_working_load_where_a_stout_one_of_the_same_s
     // material) bears the load. The two differ ONLY in length, so the failure is the geometry tradeoff a
     // tool's material choice trades against, derived from `laws::euler_buckle` over the tool's own geometry
     // and elastic modulus, no per-shape table. Opt-in: an unarmed world never buckles a tool.
-    use civsim_sim::material::{MaterialField, WieldedTool};
+    use civsim_foundation::material::{MaterialField, WieldedTool};
     use civsim_sim::physiology::MUSCLE_STRENGTH;
 
     // One wood: a modest elastic modulus and a high fracture strength (so the edge STRESS never breaks either
@@ -2385,8 +2385,8 @@ fn a_being_geophages_a_needed_mineral_and_outlives_one_that_does_not() {
     // though it stands on the same salt, drains its reserve, and dies. So a mineral's fitness value, the
     // reason to seek it and (later) mine it, is an evolved phenotype resolved by physiology against
     // substance data, no per-race diet table (Principles 8, 9).
+    use civsim_foundation::material::MaterialField;
     use civsim_sim::homeostasis::HomeostaticAxisDef;
-    use civsim_sim::material::MaterialField;
 
     // A registry whose one draining reserve is backed by the halite substance (rock salt): a mineral need.
     // The required temperature axis does not drain. The reserve drains each tick and, refilled or not,
@@ -2511,8 +2511,8 @@ fn a_whole_body_bite_does_not_double_credit_two_reserves_backed_by_the_same_subs
     // each reserve the full amount (which would create biomass in the eater). Proof: a body carrying one
     // substance, an eater whose two drained reserves both draw on it; after one bite the eater's TOTAL gain
     // does not exceed the assimilable value of the mass the body actually lost.
+    use civsim_foundation::material::TissueField;
     use civsim_sim::homeostasis::HomeostaticAxisDef;
-    use civsim_sim::material::TissueField;
 
     // Two DRAINING reserves (energy and water), BOTH backed by the same substance "flesh", plus the required
     // non-draining TEMPERATURE axis (set each tick from the body core, never self-drains).
@@ -2642,8 +2642,8 @@ fn eating_a_food_that_sickens_harms_the_sensitive_eater_and_spares_the_tolerant_
     // eater and spares a salt-tolerant one, per consumer, no per-substance poison label (Principle 9). The
     // felt harm lands on CONDITION, the same reserve the harm-learning loop reads, so a being can learn "this
     // food sickens me", the symmetric completion of the composition read harm-learning opened.
+    use civsim_foundation::material::MaterialField;
     use civsim_sim::homeostasis::{HomeostaticAxisDef, CONDITION};
-    use civsim_sim::material::MaterialField;
     use civsim_sim::physiology::SALINITY;
 
     // A registry whose brackish substance both FEEDS a mineral reserve and carries a salinity toxin.
@@ -2809,7 +2809,7 @@ fn geophage_eats_the_carried_oilseed_and_feeds_the_reserve() {
     // learner credits). Here the cell holds NO oilseed; the being carries it, and eating the carried oilseed
     // lifts its energy reserve. Nothing authors the payoff: the energy is the seed's own physics, read
     // through the same runtime edibility laws the cell path uses.
-    use civsim_sim::material::{MaterialField, SubstanceMix};
+    use civsim_foundation::material::{MaterialField, SubstanceMix};
 
     let cell = Coord3::ground(1, 1);
     // A seed-storing tissue backs the reserve so the being has room to eat into (the same shape the mineral
@@ -2914,7 +2914,7 @@ fn the_geophage_enact_deposits_a_spent_hull_trace_and_is_inert_unarmed() {
     // It is opt-in: with NO byproduct map the identical bite deposits nothing, so the material field stays empty
     // and the run is byte-identical. The deposit reads only the eaten substance id and the data map, never a
     // belief, race, or kind (Principle 9): the mark is a physical fact whether or not the eater understands it.
-    use civsim_sim::material::{MaterialField, SubstanceMix};
+    use civsim_foundation::material::{MaterialField, SubstanceMix};
 
     // The same extract-then-eat fixture the reserve-feeding test uses: an ENERGY reserve backed by oilseed, the
     // being carrying the extracted oilseed, the cell holding none.
@@ -3042,7 +3042,7 @@ fn a_being_crafts_a_tool_from_its_carried_stone_only_through_an_evolved_weight()
     // being carrying stone with a lifted craft weight wields a tool of that stone (its carried stock spent
     // by the tool volume); a blank founder carrying the same stone never crafts. Founder-zero, evolved
     // decision, the tool made of the stone worked (Principles 8, 9).
-    use civsim_sim::material::{CraftParams, MaterialField, SubstanceMix};
+    use civsim_foundation::material::{CraftParams, MaterialField, SubstanceMix};
     use civsim_sim::physiology::MUSCLE_STRENGTH;
 
     // A floor so the crafted edge derives from the worked granite's own fracture strength under the being's
@@ -3206,7 +3206,7 @@ fn a_crafted_edge_is_derived_from_the_worked_stone_so_a_hard_stone_makes_a_sharp
     // the crafter's force (so cutting stays a real function of the wielder's force, R-EDGE-INTRINSIC). A
     // fine-grained hard obsidian holds a finer edge (a smaller contact area) than a coarse soft sandstone, and
     // a being carrying both shapes the fitter stone into its tool, the material chosen by physics not by id.
-    use civsim_sim::material::{CraftParams, MaterialField, SubstanceMix, WieldedTool};
+    use civsim_foundation::material::{CraftParams, MaterialField, SubstanceMix, WieldedTool};
     use civsim_sim::physiology::MUSCLE_STRENGTH;
 
     // Two workable stones: a fine hard obsidian (edge 1e-4 m, hardness 6000) and a coarse soft sandstone (edge
@@ -3376,7 +3376,7 @@ fn a_crafted_tool_closes_the_loop_and_mines_rock_the_bare_body_cannot() {
     // method level (craft then extract) so the two-step chain is proven directly: knapping makes the tool,
     // the tool multiplies the extraction. This is the payoff that gives mining and carrying a reason: a made
     // point breaks matter a body cannot.
-    use civsim_sim::material::{CraftParams, ExtractionParams, MaterialField, SubstanceMix};
+    use civsim_foundation::material::{CraftParams, ExtractionParams, MaterialField, SubstanceMix};
     use civsim_sim::physiology::MUSCLE_STRENGTH;
 
     // A floor: a granite target (fracture strength to clear), and a hard flint the being carries and shapes.
@@ -3541,7 +3541,7 @@ fn a_being_digs_a_pit_lowering_the_terrain_only_through_an_evolved_weight() {
     // terrain, not only mines it. It happens only through an evolved dig decision and the fracture contest:
     // a deciding being that can fracture the ground digs a pit and carries the spoil; a blank founder on the
     // same ground never digs and the terrain is untouched. Founder-zero, physics-gated (Principles 8, 9).
-    use civsim_sim::material::{ExtractionParams, MaterialField};
+    use civsim_foundation::material::{ExtractionParams, MaterialField};
     use civsim_sim::physiology::MUSCLE_STRENGTH;
 
     let cell = Coord3::ground(2, 2);
@@ -3655,7 +3655,7 @@ fn releasing_a_carried_load_raises_the_column_the_mound_half_of_terraforming() {
     // the consequence of the release primitive, not a coded verb: what a being digs from a pit and carries
     // elsewhere raises a mound there, and terracing emerges from the dig and release primitives. It happens
     // only through the evolved release decision; a blank founder holding the same load never sets it down.
-    use civsim_sim::material::SubstanceMix;
+    use civsim_foundation::material::SubstanceMix;
 
     let cell = Coord3::ground(3, 3);
     let load = Fixed::from_int(5);
@@ -3738,8 +3738,8 @@ fn a_dug_pit_recouples_the_hydrology_so_the_cell_becomes_a_basin_through_the_run
     // dig decision and only where the ground is reshaped: a deciding being turns its cell into a basin; a
     // blank being that digs nothing leaves the worldgen routing untouched. Proven identically in the pinned
     // and scheduled tick orders. Physics-gated, no race or label (Principles 3, 9).
+    use civsim_foundation::material::{ExtractionParams, MaterialField};
     use civsim_sim::environ::{EnvironCalib, EnvironFields};
-    use civsim_sim::material::{ExtractionParams, MaterialField};
     use civsim_sim::physiology::MUSCLE_STRENGTH;
     use civsim_world::{BiomeSet, FlatBounded, TileMap, WorldgenParams};
 
@@ -3883,7 +3883,7 @@ fn combustible_matter_burns_when_it_is_hot_enough_and_a_cold_cell_and_rock_do_no
     // fire field; the identical cell in a cold field does not, and a non-combustible substance in the same
     // hot cell is untouched. The outcome is the substance's own combustion data against the cell temperature,
     // no race, kind, or role (Principle 9), and it is opt-in: with no combustion armed nothing burns.
-    use civsim_sim::material::{CombustionCalib, MaterialField};
+    use civsim_foundation::material::{CombustionCalib, MaterialField};
 
     let cell = Coord3::ground(2, 2);
     let fuel0 = Fixed::from_int(4);
@@ -3973,7 +3973,7 @@ fn an_oxygen_demanding_fire_burns_in_air_and_starves_in_an_anoxic_medium() {
     // medium the same hot oak burns as it does in open air; in a near-anoxic medium the combustion goes
     // oxidiser-limited to nothing and the fuel is spared, so fire needs air, from the medium's respirable
     // content against the fuel's own stoichiometry, no coded rule (Principles 8, 9).
-    use civsim_sim::material::{CombustionCalib, MaterialField};
+    use civsim_foundation::material::{CombustionCalib, MaterialField};
 
     let (w, h) = (8, 8);
     let cell = Coord3::ground(2, 2);
@@ -4043,7 +4043,7 @@ fn fire_spreads_along_a_fuel_row_and_burns_out_behind_it() {
     // a neighbouring fuel cell whose temperature crosses its ignition gate catches. So fire SPREADS from cell
     // to cell and EXTINGUISHES when a cell's fuel runs out, both emergent from the physics with no coded
     // spread rule: it is the combustion gate over the diffused temperature, tick after tick.
-    use civsim_sim::material::{CombustionCalib, MaterialField};
+    use civsim_foundation::material::{CombustionCalib, MaterialField};
 
     let (w, h) = (8, 8);
     let src = Coord3::ground(2, 2);
@@ -4140,8 +4140,8 @@ fn organic_matter_decomposes_when_warm_and_the_matter_cycle_conserves_mass() {
     // what a cell loses enters the decomposed-mass sink bit for bit, so the total is invariant, the hard
     // conservation the ConservationRegistry guards. Keyed off the substance's own composition physics and
     // the cell temperature, no race, kind, or role (Principles 8, 9).
-    use civsim_sim::conservation::ConservationRegistry;
-    use civsim_sim::material::{MaterialField, MatterCycleCalib};
+    use civsim_foundation::conservation::ConservationRegistry;
+    use civsim_foundation::material::{MaterialField, MatterCycleCalib};
 
     let (w, h) = (8, 8);
     let cell = Coord3::ground(2, 2);
@@ -4270,7 +4270,7 @@ fn the_decomposition_split_is_data_defined_and_gated_on_the_barrier_not_the_ash_
     // decomposes (the barrier gate, not the ash gate), and its whole lost mass lands in the world's own
     // residual class, none in the Earth `bio.*` classes, so the split follows the armed data, never a bucket
     // baked into the engine.
-    use civsim_sim::material::{ConstituentRegistry, MaterialField, MatterCycleCalib};
+    use civsim_foundation::material::{ConstituentRegistry, MaterialField, MatterCycleCalib};
 
     let (w, h) = (8, 8);
     let cell = Coord3::ground(2, 2);
@@ -4330,8 +4330,8 @@ fn the_matter_cycle_conserves_material_plus_soil_plus_tissue_across_both_legs() 
     // AND a rotting body parcel present, and the producer biomass layer OPEN (no extract beat armed), the
     // registered ledger is conserved across the tick and both legs are active (material and tissue both fall,
     // the soil store rises). This closes the loop the earlier material-only conservation half-covered.
-    use civsim_sim::conservation::ConservationRegistry;
-    use civsim_sim::material::{MaterialField, MatterCycleCalib, TissueField};
+    use civsim_foundation::conservation::ConservationRegistry;
+    use civsim_foundation::material::{MaterialField, MatterCycleCalib, TissueField};
 
     let (w, h) = (8, 8);
     let mcell = Coord3::ground(2, 2);
@@ -4403,8 +4403,10 @@ fn decomposition_is_driven_by_life_and_conditions_not_by_an_engine_law() {
     // CONDITIONS. The decisive case (the one an abiotic proxy cannot express) is the sterile-but-favorable
     // cell: warm, but with no decomposer life present, it does not rot. The physics barrier gate is untouched,
     // so a frozen remains is still preserved, and an unarmed runner decays exactly as before (the opt-in flip).
-    use civsim_sim::decompose::{DecomposerDriver, DecomposerDriverRegistry, DecomposerStockField};
-    use civsim_sim::material::{MaterialField, MatterCycleCalib};
+    use civsim_foundation::decompose::{
+        DecomposerDriver, DecomposerDriverRegistry, DecomposerStockField,
+    };
+    use civsim_foundation::material::{MaterialField, MatterCycleCalib};
 
     let (w, h) = (8, 8);
     let cell = Coord3::ground(2, 2);
@@ -4546,7 +4548,7 @@ fn decomposition_is_driven_by_life_and_conditions_not_by_an_engine_law() {
     // Life row's zero wins the minimum); the opt-in Any combine makes the Conditions row an independent
     // driver, so the same sterile cell decays. The world chooses which regime through data, so the abiotic
     // Conditions proxy cannot silently swallow the emergent Life signal.
-    use civsim_sim::decompose::CombineMode;
+    use civsim_foundation::decompose::CombineMode;
     let both_all = || {
         let mut d = DecomposerDriverRegistry::new();
         d.push(DecomposerDriver::conditions(
@@ -4583,7 +4585,7 @@ fn a_spent_hull_trace_weathers_slowly_when_warm_and_is_preserved_when_frozen() {
     // being's lifespan, which is what lets a technique's mark persist past its maker, then fades if unvisited.
     // The weathering rate is RESERVED, surfaced with its basis (the recalcitrant-lignin decomposition timescale
     // of a nut shell, far slower than soft tissue), never fabricated; a dev value proves the mechanism here.
-    use civsim_sim::material::{MaterialField, MatterCycleCalib};
+    use civsim_foundation::material::{MaterialField, MatterCycleCalib};
 
     let (w, h) = (8, 8);
     let cell = Coord3::ground(2, 2);
@@ -4675,7 +4677,7 @@ fn a_roof_of_insulating_matter_shelters_a_being_from_a_harsh_field() {
     // matter's own thermal resistance (its volume over its conductivity) attenuating the body-to-field
     // coupling, no shelter tag: it keys off the substance's conductivity (Principles 8, 9, 11). Building the
     // roof is the deferred emergent technique; this proves the primitive that makes a built roof matter.
-    use civsim_sim::material::{MaterialField, ShelterCalib};
+    use civsim_foundation::material::{MaterialField, ShelterCalib};
 
     let (w, h) = (8, 8);
     let sheltered = Coord3::ground(2, 2);
@@ -4748,7 +4750,7 @@ fn a_being_builds_its_own_roof_overhead_and_that_self_built_roof_shelters_it() {
     // overhead matter). So shelter EMERGES from need plus the deposit affordance plus carried matter, no
     // shelter verb: the being that builds holds its warmth, the identical being carrying the same oak but not
     // building stays exposed and cools. A blank founder holding the same load never builds.
-    use civsim_sim::material::{ShelterCalib, SubstanceMix};
+    use civsim_foundation::material::{ShelterCalib, SubstanceMix};
 
     let (w, h) = (8, 8);
     let cell = Coord3::ground(2, 2);
@@ -4792,7 +4794,7 @@ fn a_being_builds_its_own_roof_overhead_and_that_self_built_roof_shelters_it() {
         carried.add("oak", load);
         walker.carried = carried;
         emb.add(walker, band(310));
-        emb.set_material(civsim_sim::material::MaterialField::new());
+        emb.set_material(civsim_foundation::material::MaterialField::new());
         emb.set_material_registry(civsim_physics::PhysicsRegistry::ground().unwrap());
         // A harsh cold field (280 K, below the being's 310 K start), so an exposed body loses heat to it.
         let mut r =
@@ -5038,7 +5040,7 @@ fn embodied_physiology_reads_a_set_manifest_and_fails_loud_when_reserved() {
     // medium field (the submersion elevation and the submerged and emergent medium profiles), the reserved
     // transfer coefficient, and the base tick from a set manifest, and a reserved input refuses to
     // fabricate a number (Principle 11).
-    use civsim_sim::calibration::{CalibrationError, CalibrationManifest};
+    use civsim_foundation::calibration::{CalibrationError, CalibrationManifest};
     use civsim_world::{BiomeSet, FlatBounded, TileMap, WorldgenParams};
     let map = TileMap::generate(
         7,

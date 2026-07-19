@@ -28,15 +28,15 @@
 
 use std::time::Instant;
 
+use civsim_bio::evidence::InferenceParams;
+use civsim_bio::tom::{AccessChannelDef, AccessChannelId, AccessChannelRegistry, AccessWeights};
 use civsim_core::{Fixed, StableId};
 use civsim_sim::dialogue::{
     EffectSign, ForceEffectDef, ForceEffectId, ForceFloor, ForceKind, MoveKindDef, MoveKindId,
     MoveRegistry,
 };
-use civsim_sim::evidence::InferenceParams;
 use civsim_sim::language::{ArticulationSubstrate, LanguageParams};
 use civsim_sim::primes::nsm_concept_ids;
-use civsim_sim::tom::{AccessChannelDef, AccessChannelId, AccessChannelRegistry, AccessWeights};
 use civsim_sim::world::{GossipParams, World};
 
 const WITNESSED: AccessChannelId = AccessChannelId(1);

@@ -26,13 +26,13 @@
 //! loop build on it.
 //!
 //! Three substrate siblings make this data-driven (Principle 11), the same hardening
-//! applied to the access-channel registry ([`crate::tom`]), the trace-kind registry, the
+//! applied to the access-channel registry ([`civsim_bio::tom`]), the trace-kind registry, the
 //! institution-function substrate, the value substrate, and the semantic substrate:
 //!
 //! - The etic force floor ([`ForceFloor`]) is the small menu of primitive effects a move
 //!   can fire. Its *entries* are data (which primitives a world includes, and in what
 //!   order), but each entry names a [`ForceKind`], and the *kinds* are a fixed mechanism
-//!   enum, exactly the two-layer shape [`crate::tom`] uses (the [`crate::tom::EvidenceOrder`]
+//!   enum, exactly the two-layer shape [`civsim_bio::tom`] uses (the [`civsim_bio::tom::EvidenceOrder`]
 //!   discriminator beside the data `AccessChannelRegistry`). [`ForceKind`] is the affordance
 //!   discriminator, not a catalogue of world content, because each variant is a call into a
 //!   mechanism the engine already has (a told-evidence facet 9.5, an inquiry goal 9.13, a
@@ -64,16 +64,16 @@
 //! ([`MoveRegistry::content_gate`]) enforces that structural guarantee together with
 //! referential integrity and well-formed data at load.
 
-use crate::calibration::{CalibrationError, CalibrationManifest};
-use crate::evidence::AttrKindId;
 use crate::language::ConceptId;
-use crate::tom::AccessChannelId;
+use civsim_bio::evidence::AttrKindId;
+use civsim_bio::tom::AccessChannelId;
 use civsim_core::{Event, EventId, EventKindId, EventLog, Fixed, StableId};
+use civsim_foundation::calibration::{CalibrationError, CalibrationManifest};
 use serde::{Deserialize, Serialize};
 
 /// The etic floor of primitive effects: the engine affordances a dialogue move's force
 /// can fire. A fixed mechanism enum, not a catalogue of world content, on the same
-/// footing as [`crate::tom::EvidenceOrder`]: every variant is a call into a mechanism the
+/// footing as [`civsim_bio::tom::EvidenceOrder`]: every variant is a call into a mechanism the
 /// engine already has, so a move composes affordances rather than authoring behaviour.
 /// The floor grows when the engine resolves a new mechanism, never from world data; what
 /// world data composes from this floor (the move kinds) is the emergent part.

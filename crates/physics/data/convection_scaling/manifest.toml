@@ -1,0 +1,84 @@
+# Held-source manifest for the convection-scaling cited column (../convection_scaling.toml). The vendored-primary
+# idiom: file / receipt / anchors. The load-bearing constants (the boundary-layer prefactor and the critical
+# Rayleigh numbers) are theory values whose true primaries are books and journal papers with no byte-identical
+# data table (Chandrasekhar 1961; Rayleigh 1916; Turcotte & Oxburgh 1967), so this follows the Lodders
+# TRANSCRIPTION idiom: cite the primary, hold downloadable WITNESS bytes that reproduce each value, record the
+# sha256 receipt of those bytes. ARCHIVE-THEN-SLIM (owner ruling 2026-07-18): the witness bytes are NOT held in
+# the repo (9.7 MB does not belong here); each carries a live Internet Archive snapshot (archived_url) and a
+# receipt, with the bytes in the local store. scripts/convection_scaling_provenance_test.py re-checks the receipts,
+# the archive coverage, and the pre-registered fingerprints offline. SHA256 is the receipt (VENDORING_CHECKLIST.md, primary since
+# 2026-07-17). Each source below carries the anchor (page / section / equation) for every value read from it.
+#
+# BLOCK KIND [[source]], a receipt-and-archive vendored artifact (the Lodders transcription idiom), NOT a reserved
+# floor kind: these witnesses do not participate in the floor real/fantasy authorship axis.
+
+# Rigid-rigid critical Rayleigh number witness: an authoritative review that states Rc=1708 and ac=3.117 and
+# attributes them to Chandrasekhar 1961.
+[[source]]
+name = "bodenschatz_pesch_ahlers_2000"
+file = "bodenschatz_pesch_ahlers_2000_arfm.pdf"
+url = "https://courses.physics.ucsd.edu/2018/Winter/physics116_216/Convection-Recent%20Results-Bodenschatz_W17.pdf"
+sha256 = "0f26fb4b8392e44d40dfc78d29fdf4cc057507f720dfa6c734bdfe0ce67e883d"
+archived_url = "http://web.archive.org/web/20260718143440/https://courses.physics.ucsd.edu/2018/Winter/physics116_216/Convection-Recent%20Results-Bodenschatz_W17.pdf"
+bytes = 2096785
+citation = "Bodenschatz, E., Pesch, W., Ahlers, G. (2000), Recent developments in Rayleigh-Benard convection, Annu. Rev. Fluid Mech. 32, 709-778."
+recipe = "GET the open UCSD course copy of the Annu. Rev. Fluid Mech. 2000 review"
+grade = "theory"
+anchor = "Rc = 1708 and ac = 3.117 stated as the critical Rayleigh and wavenumbers of horizontal RBC, citing Chandrasekhar 1961; supports ra_crit_rigid_rigid."
+
+# Free-free critical Rayleigh number witness: an ENS-Lyon geodynamics course note stating Rac = (27/4) pi^4 ~ 657
+# with critical wavenumber k = pi/sqrt(2) for free-slip boundaries, and citing Schubert et al. (2001) for the
+# other boundary conditions.
+[[source]]
+name = "ricard_geodynamics_notes"
+file = "ricard_geodynamics_convection_notes.pdf"
+url = "https://perso.ens-lyon.fr/yanick.ricard/note-convection"
+sha256 = "3a732fb76a67a21877c7a7538d258fe3d0c91c18fe89c70cb9bdb061560fdda6"
+archived_url = "http://web.archive.org/web/20260718143529/https://perso.ens-lyon.fr/yanick.ricard/note-convection"
+bytes = 205464
+citation = "Ricard, Y., Physics of mantle convection, course notes, ENS de Lyon (section 4.5, linear stability for basally heated convection)."
+recipe = "GET the open ENS-Lyon course note PDF"
+grade = "theory"
+anchor = "k = pi/sqrt(2), Rac = (27/4) pi^4 ~ 657 for free-slip boundaries; convection cell of aspect ratio sqrt(2); supports ra_crit_free_free."
+
+# Normalized single-boundary-layer prefactor witness (a = 1): derives delta = h (Racrit/Ra)^(1/3) and the
+# conducted flux, giving Nu = (Ra/Racrit)^(1/3), with Racrit ~ 1100, citing Turcotte & Schubert 2002.
+[[source]]
+name = "komacek_abbot_2016"
+file = "komacek_abbot_2016_arxiv_1609.04786.pdf"
+url = "https://arxiv.org/pdf/1609.04786"
+sha256 = "656f5afac5b78e21556a741327f936524788895ec99b0d29345ff270a362cec4"
+archived_url = "http://web.archive.org/web/20260718143618/https://arxiv.org/pdf/1609.04786"
+bytes = 903600
+citation = "Komacek, T.D., Abbot, D.S. (2016), Effect of surface-mantle water exchange parameterizations on exoplanet ocean depths, ApJ 832, 54. arXiv:1609.04786."
+recipe = "GET https://arxiv.org/pdf/1609.04786"
+grade = "theory"
+anchor = "eqs. 3-7: local boundary-layer Rayleigh number set to Racrit (~1100) at peel-away gives delta ~ h (Racrit/Ra)^(1/3) and Nu = (Ra/Racrit)^(1/3); supports nu_ra_prefactor_a value 1.0 (single-boundary-layer)."
+
+# Bare-form coefficient / band witness: states the Nusselt prefactor C1 of order 0.1 and the boundary-layer
+# thickness prefactor C2 ~ 2-3, citing Turcotte & Schubert 2002 and Solomatov 1995.
+[[source]]
+name = "foley_bercovici_2014"
+file = "foley_bercovici_2014_arxiv_1410.7652.pdf"
+url = "https://arxiv.org/pdf/1410.7652"
+sha256 = "f1fb792cd79357d0fb7ada8c1891ebbebd0ea6d4fcc8617c0ea1dad7862e0861"
+archived_url = "http://web.archive.org/web/20260718143703/https://arxiv.org/pdf/1410.7652"
+bytes = 6685571
+citation = "Foley, B.J., Bercovici, D. (2014), Scaling laws for convection with temperature-dependent viscosity and grain-damage, Geophys. J. Int. 199, 580-603. arXiv:1410.7652."
+recipe = "GET https://arxiv.org/pdf/1410.7652"
+grade = "theory"
+anchor = "Nusselt prefactor C1 of order 0.1 and boundary-layer thickness prefactor C2 ~ 2-3 (delta_l = d C2 Ra_eff^(-1/3)), citing Turcotte & Schubert 2002 and Solomatov 1995; supports nu_ra_bare_coefficient_C band."
+
+# Rigid-free high-precision witness: an interval-analysis recomputation to fifty digits, tabulating the
+# historical Chandrasekhar 1100.65 value it reproduces.
+[[source]]
+name = "glomski_johnson_2012"
+file = "glomski_johnson_2012_ams.pdf"
+url = "https://www.m-hikari.com/ams/ams-2012/ams-101-104-2012/glomskiAMS101-104-2012.pdf"
+sha256 = "01221b0edd012b11c005fabaeb41fdad0336e28120dc3f61fead43011532003c"
+archived_url = "http://web.archive.org/web/20260718143711/https://www.m-hikari.com/ams/ams-2012/ams-101-104-2012/glomskiAMS101-104-2012.pdf"
+bytes = 208553
+citation = "Glomski, M., Johnson, M.A. (2012), A precise calculation of the critical Rayleigh number and wave number for the rigid-free Rayleigh-Benard problem, Appl. Math. Sci. 6(101-104), 5097-5108."
+recipe = "GET the open m-hikari Applied Mathematical Sciences PDF"
+grade = "theory"
+anchor = "Theorem 4.1: Rc = 1100.6496068877..., kc = 2.6823217577...; Table 1 lists Chandrasekhar's 1100.65/1100.657; supports ra_crit_rigid_free."

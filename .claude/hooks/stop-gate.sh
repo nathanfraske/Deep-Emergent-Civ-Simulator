@@ -78,6 +78,58 @@ fi
 # is wrong and an audit against it is unsound. The
 # gate regenerates to a temp and compares, never touching the working tree. Inert until both the
 # generator and the registry exist.
+# Provenance ratchet, at TURN scope rather than build scope. The Stone 0 gate runs from
+# crates/sim/build.rs, so it only fires when a build touches civsim-sim. A package-scoped command such as
+# `cargo test -p civsim-physics` never fires it, which means a physics-only change can be written,
+# verified, and committed without the provenance ratchet ever running. That happened: an unclassified
+# from_decimal_str site rode in on a physics-only commit and surfaced later, on an unrelated build.
+#
+# This closes it without touching the build graph, so no build gets slower and no gate is duplicated. The
+# script list is READ FROM the Rust source rather than copied here, so there is ONE list: a gate added to
+# PROVENANCE_SCRIPTS is picked up here automatically and the two cannot drift apart.
+if [ -n "$(git -C "$ROOT" status --porcelain -- crates 2>/dev/null)" ]; then
+  scripts_list="$(sed -n '/const PROVENANCE_SCRIPTS/,/];/p' "$ROOT/crates/stone0/src/lib.rs" 2>/dev/null \
+    | grep -oE '"scripts/[a-z0-9_]+\.py"' | tr -d '"')"
+  for s in $scripts_list; do
+    [ -f "$ROOT/$s" ] || continue
+    if ! out="$(cd "$ROOT" && python3 "$s" 2>&1)"; then
+      echo "stop-gate: the provenance ratchet failed in $s." >&2
+      echo "This runs at turn scope because a package-scoped cargo command does not fire crates/sim/build.rs," >&2
+      echo "so a physics-only change would otherwise skip the Stone 0 gate entirely." >&2
+      printf '%s\n' "$out" | tail -20 >&2
+      exit 2
+    fi
+  done
+fi
+
+# Derives-coverage gate. The registry's staleness check cannot see an UNMARKED deriving function: the
+# generator regenerates identically and the check passes while the map is wrong, which is how the physics
+# substrate ended up with 818 public functions and no markers at all. This ratchets that shut.
+if [ -f "$ROOT/scripts/derives_gate.py" ] && [ -f "$ROOT/scripts/derives_baseline.tsv" ]; then
+  if ! python3 "$ROOT/scripts/derives_gate.py" >/tmp/civsim_derives.out 2>&1; then
+    echo "stop-gate: the derives-coverage gate failed." >&2
+    tail -20 /tmp/civsim_derives.out >&2
+    exit 2
+  fi
+fi
+
+# Sources gate. A vendored source is checksummed, archived, scoped, slimmed and licence-cleared, or it does
+# not land. The generator check runs first: the gate reads the mirrored registry, so a stale mirror would
+# have it checking a wrong picture of the tree and passing on it. Inert until both scripts and the baseline
+# exist, so it does not fire on a branch that predates them.
+if [ -f "$ROOT/scripts/sources_gate.py" ] && [ -f "$ROOT/scripts/sources_baseline.tsv" ]; then
+  if ! python3 "$ROOT/scripts/gen_sources.py" --check >/tmp/civsim_gensources.out 2>&1; then
+    echo "stop-gate: the source registry or the bibliography is stale." >&2
+    tail -10 /tmp/civsim_gensources.out >&2
+    exit 2
+  fi
+  if ! python3 "$ROOT/scripts/sources_gate.py" >/tmp/civsim_sources.out 2>&1; then
+    echo "stop-gate: the sources gate failed." >&2
+    tail -20 /tmp/civsim_sources.out >&2
+    exit 2
+  fi
+fi
+
 reg="docs/working/PHYSICS_FLOOR_REGISTRY.md"
 gen="scripts/gen_floor_registry.py"
 if [ -f "$ROOT/$gen" ] && [ -f "$ROOT/$reg" ]; then

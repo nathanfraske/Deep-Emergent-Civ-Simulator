@@ -1,0 +1,97 @@
+# Held-source manifest for the Gruneisen cited column (../gruneisen.toml). The vendored-primary idiom:
+# file / receipt / anchors. Three witnesses (ahrens, stixrude, angel) were ARCHIVE-THEN-SLIMMED (owner ruling
+# 2026-07-18): their bytes are not kept in the repo but in local custody (~/.claude/vendored-sources/gruneisen/,
+# sha256-verifiable) with a retrievable Internet Archive snapshot recorded as archived_url, so the receipt
+# still points at retrievable bytes without bloating git history. Three more (the forsterite, fayalite and
+# periclase K' primaries) are already vendored under sibling directories for the moduli fetch and are
+# cross-referenced by receipt so the provenance test rechecks them in place without a duplicate copy.
+# SHA256 is the primary receipt (VENDORING_CHECKLIST.md, primary since 2026-07-17). Each source carries the
+# anchor (table / page / equation) for every value read from it and the P,T scope.
+#
+# BLOCK KIND [[source]], a held-bytes vendored artifact (the JANAF / convection-scaling held-source idiom),
+# NOT a reserved floor kind: these witnesses do not participate in the floor real/fantasy authorship axis.
+# A source is verified by repo bytes whose sha256 matches OR by a retrievable archived_url (the slimmed three).
+# The `dir` field, when present, points at the sibling directory that already holds the bytes (the moduli
+# fetch vendored them); the receipt is rechecked there. When `dir` is absent the bytes were held in THIS
+# directory (gruneisen/) and are now archived-and-slimmed to local custody plus the archived_url snapshot.
+
+# gamma_thermodynamic anchor (RUNG 1) for periclase, corundum, spinel, forsterite, fayalite: the AGU
+# Mineral Physics Handbook, holding the Anderson & Isaak 1995 chapter with the per-mineral thermoelastic
+# tables (Tables 15 to 20) whose gamma column is the direct thermodynamic gamma_th = alpha*K_S*V/C_P at
+# 300 K. DjVu (5.6 MB) with an OCR text layer; the text-witness check uses djvutxt when present and is
+# skipped otherwise (the sha256 receipt still pins the exact bytes).
+[[source]]
+name = "ahrens_1995_handbook"
+file = "ahrens_1995_mineral_physics_handbook.djvu"
+url = "https://www.geokniga.org/bookfiles/geokniga-mineral-physics-and-crystallography-1995.djvu"
+archived_url = "https://web.archive.org/web/20251113015459/https://www.geokniga.org/bookfiles/geokniga-mineral-physics-and-crystallography-1995.djvu"
+sha256 = "8058e6bbcc2e083fe42ea6f1fc7aec7b3b27b3b3910500d1f8daa2a0504e9bb3"
+bytes = 5856046
+citation = "Anderson, O.L. & Isaak, D.G., 1995, Elastic Constants of Mantle Minerals at High Temperature, pp. 64-97 in Ahrens, T.J. (ed.), Mineral Physics and Crystallography: A Handbook of Physical Constants, AGU Reference Shelf 2, American Geophysical Union, ISBN 0-87590-852-7."
+recipe = "GET the open GeoKniga DjVu of the whole handbook; read Anderson & Isaak Tables 15-20 via the DjVu OCR text layer (djvutxt)."
+grade = "measured-thermodynamic"
+anchor = "Tables 15-20 (thermal expansivity, specific heat, isotropic moduli), 300 K gamma column: MgO (Table 15) 1.54, Al2O3 (Table 16) 1.32, MgAl2O4 (Table 17) 1.51, Mg2SiO4 (Table 18) 1.29, Fe2SiO4 (Table 20) 1.21. The gamma column sits between C_P and C_V and equals alpha*K_S*V/C_P (verified for MgO: 3.12e-5 * 163.9 GPa * 11.25 cm3/mol / (0.928 J/gK * 40.30 g/mol) = 1.54)."
+
+# gamma_eos_debye cross-channel (all six mantle phases) and K' (RUNG 2 input) for corundum, spinel,
+# enstatite: the self-consistent Stixrude & Lithgow-Bertelloni 2005 mantle-thermodynamics compilation.
+[[source]]
+name = "stixrude_lithgow_bertelloni_2005"
+file = "stixrude_lithgow-bertelloni_gji_2005.pdf"
+url = "https://www.perplex.ethz.ch/thermo_course/chapter_5/stixrude_GJI_05.pdf"
+archived_url = "https://web.archive.org/web/20260718151531/https://www.perplex.ethz.ch/thermo_course/chapter_5/stixrude_GJI_05.pdf"
+sha256 = "95e1cd9b58c28874b2617e68937a61c22ad78032ba4bc2b5a2305a104dc54604"
+bytes = 538634
+citation = "Stixrude, L. & Lithgow-Bertelloni, C., 2005, Thermodynamics of mantle minerals - I. Physical properties, Geophysical Journal International 162(2), 610-632, DOI 10.1111/j.1365-246X.2005.02642.x."
+recipe = "GET the open perplex.ethz.ch course copy of the GJI 2005 paper."
+grade = "compilation (EoS-fit)"
+anchor = "Table 1 'Properties of mantle species', columns gamma_0 (= -dln theta/dln V) and K0' (dK/dP): forsterite gamma_0=0.99(3) K0'=4.2(2); fayalite 1.06(7) / 4.2(10); enstatite (Mg4Si4O12) 0.67(4) / 7.1(4); corundum (AlAlO3) 1.32(4) / 4.3(2); periclase (MgO) 1.50(2) / 3.9(2); spinel (disordered (Mg3Al)(Al7Mg)O16 = 4x MgAl2O4) 1.02(4) / 5.7(2). gamma_0 is fit self-consistently to measured alpha, K, C_P (refs 1,4,5,8 = Robie & Hemingway 1995, Fei 1995, Anderson & Isaak 1995)."
+
+# K' (RUNG 2 input) for quartz: the alpha-quartz internal-pressure-standard EoS.
+[[source]]
+name = "angel_etal_1997_quartz"
+file = "angel_etal_1997_quartz_jac.pdf"
+url = "https://www.rossangel.com/Download/1997_Angel_etal_quartz.pdf"
+archived_url = "https://web.archive.org/web/20240221175127/http://www.rossangel.com/Download/1997_Angel_etal_quartz.pdf"
+sha256 = "2a62603af4382263049ba00468d281ef56d08a16a6ab246cbd59649a9d40f96a"
+bytes = 628028
+citation = "Angel, R.J., Allan, D.R., Miletich, R. & Finger, L.W., 1997, The Use of Quartz as an Internal Pressure Standard in High-Pressure Crystallography, J. Appl. Cryst. 30, 461-466, DOI 10.1107/S0021889897000861."
+recipe = "GET the open author copy from rossangel.com."
+grade = "measured"
+anchor = "Abstract and text: 'KT0 = 37.12(9) GPa and K' = 5.99(4)' for alpha-quartz, third-order Birch-Murnaghan EoS from single-crystal X-ray compression to 8.9 GPa (isothermal K_T')."
+
+# K' (RUNG 2 input) for forsterite: already held by the moduli fetch under ../zha_1996/. Cross-referenced,
+# not re-copied; the provenance test rechecks the receipt at the sibling path.
+[[source]]
+name = "zha_1996_forsterite"
+dir = "zha_1996"
+file = "zha_etal_jgr_1996.pdf"
+sha256 = "3f2a66fb1dca0204b41faf792ddd31d2e1e38e5e2e640e646d2bf757678043f4"
+bytes = 326494
+citation = "Zha, C.-S., Duffy, T.S., Downs, R.T., Mao, H.-K. & Hemley, R.J., 1996, Sound velocity and elasticity of single-crystal forsterite to 16 GPa, JGR 101(B8), 17535-17545, DOI 10.1029/96JB01266."
+recipe = "Held under ../zha_1996/ by the moduli fetch."
+grade = "measured"
+anchor = "Abstract 'Ks(GPa) = 128.8(5) + 4.2(2)P': K_S' = 4.2(2) (adiabatic, from the Brillouin aggregate to 16 GPa)."
+
+# K' (RUNG 2 input) for fayalite: already held under ../speziale_2004/.
+[[source]]
+name = "speziale_2004_fayalite"
+dir = "speziale_2004"
+file = "speziale_jgr_04.pdf"
+sha256 = "729d9ecac7fa4563634ca3dc9e5b4ab7a494e2af79fdd3a4266ac0093e602b0c"
+bytes = 756757
+citation = "Speziale, S., Duffy, T.S. & Angel, R.J., 2004, Single-crystal elasticity of fayalite to 12 GPa, JGR 109, B12202, DOI 10.1029/2004JB003162."
+recipe = "Held under ../speziale_2004/ by the moduli fetch."
+grade = "measured"
+anchor = "Table 5 (This study Hill aggregate): (dK_S/dP)_T0 = 4.85(5), (dK_T/dP)_T0 = 4.88(5); abstract rounds to 4.9(1). Sample (Fe0.94Mn0.06)2SiO4."
+
+# K' (RUNG 2 input) for periclase: already held under ../fan_2019/.
+[[source]]
+name = "fan_2019_periclase"
+dir = "fan_2019"
+file = "FanPericlaseHighPTElasticityAM2019.pdf"
+sha256 = "560b5f8c9f94e6275c19f8038859c84ddff672c64da11874c7b180ea13de6ee3"
+bytes = 3348584
+citation = "Fan, D., Fu, S., Yang, J., Tkachev, S.N., Prakapenka, V.B. & Lin, J.-F., 2019, Elasticity of single-crystal periclase at high pressure and temperature, American Mineralogist 104, 262-275, DOI 10.2138/am-2019-6656."
+recipe = "Held under ../fan_2019/ by the moduli fetch."
+grade = "measured"
+anchor = "Table 2 (This study, BLS): (dK_S/dP)_300K = 3.94(5); dual-channel Yoneda 1990 4.13(9), Zha et al. 2000 3.99(3)."

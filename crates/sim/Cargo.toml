@@ -10,6 +10,18 @@ rust-version.workspace = true
 
 [dependencies]
 civsim-core = { path = "../core" }
+# The parked biology arc: the genetic substrate, anatomy, lineage, mate choice, the epistemic stack
+# (evidence, belief, theory of mind, the agent mind), and the calibration manifest they read. Moved
+# out of this crate so a physics edit no longer recompiles biology. The dependency runs one way,
+# civsim-sim on civsim-bio and never the reverse, which is what keeps the split standing.
+civsim-bio = { path = "../bio" }
+# The leaf substrates of this layer: the material and matter-cycle substrate, value, sensorium, affect,
+# the clock, the conserved-projection registry, transmission, breeding, stocks, contact transfer, the
+# surface-transport lane, the tectonic-regime readout, orbit, the located join, and the scenario and
+# substrate loaders. They moved out because they reach NO other module of this crate (out-degree zero
+# over production code), so a change to the runner or the world spine no longer recompiles them. The
+# dependency runs one way, civsim-sim on civsim-foundation and never the reverse.
+civsim-foundation = { path = "../foundation" }
 # The biosphere reads the resolved biology-and-composition floor (R-PHYS-BIO) to measure
 # edibility as a relation between an organism's composition and a consumer's physiology.
 # physics depends only on core, so this adds no heavy or fast-moving dependency.

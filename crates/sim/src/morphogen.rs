@@ -51,11 +51,11 @@ use civsim_compose::{
 };
 use civsim_core::{DrawKey, Fixed, Phase, StableId, StateHasher};
 
-use crate::anatomy::{BodyPlan, Part, Temperament};
-use crate::genome::{
+use crate::insult;
+use civsim_bio::anatomy::{BodyPlan, Part, Temperament};
+use civsim_bio::genome::{
     Channel, DominanceMode, GeneDef, GeneEffect, GeneId, GeneSet, Genome, MorphogenParamId,
 };
-use crate::insult;
 use civsim_physics::laws;
 
 /// One geometry or material axis a grown segment carries, with the floor range the expressed fraction
@@ -238,7 +238,7 @@ impl MorphogenProgram {
 /// One grown segment: its place in the developmental tree (parent and depth) and its physics, the
 /// geometry and material a body part's function is read from ([`civsim_compose::derive_capabilities`]).
 /// The `geo`/`mat` accessors return zero for an absent axis, the same substrate-absence convention the
-/// per-kind [`crate::anatomy::KindDef`] uses, so the function-law dispatch reads a grown segment exactly
+/// per-kind [`civsim_bio::anatomy::KindDef`] uses, so the function-law dispatch reads a grown segment exactly
 /// as it reads a catalog part.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Segment {
@@ -949,9 +949,9 @@ fn dec(s: &str) -> Fixed {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::genome::{Allele, Haplotype, SchemeId};
     use crate::homeostasis::{AffordanceRegistry, Homeostasis, HomeostaticRegistry, MOVE, STRIKE};
     use crate::locomotion::{locomotion_speed_structure, LocomotionParams};
+    use civsim_bio::genome::{Allele, Haplotype, SchemeId};
 
     fn caps() -> CapabilityCaps {
         CapabilityCaps {

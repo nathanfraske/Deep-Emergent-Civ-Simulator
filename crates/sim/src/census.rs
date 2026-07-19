@@ -15,12 +15,12 @@
 //! The reproductive-success census and the effective-population-size derivation (design Part 25,
 //! R-REPRO; the census tier of the deep-time genome model, Part 25.7).
 //!
-//! The aggregate genome tier ([`crate::genome::GenePool`]) carries an effective population size Ne
+//! The aggregate genome tier ([`civsim_bio::genome::GenePool`]) carries an effective population size Ne
 //! that sets the strength of drift. Ne was formerly a single reserved number dialed per world. It
 //! now DERIVES from a census of who bred and how well: the breeding sex ratio and the variance in
 //! reproductive success are the two demographic facts that pull Ne below the head count, and both
 //! are measured, not authored. A [`ReproductiveCensus`] tallies, per contributing parent per
-//! window, the sex class ([`crate::breeding::SexClass`], a gene-fed phenotype) and the offspring
+//! window, the sex class ([`civsim_foundation::breeding::SexClass`], a gene-fed phenotype) and the offspring
 //! count; the tally reduces to [`ReproductiveMoments`] (the sex split and the reproductive moments
 //! sum k, sum k squared), and one race-blind kernel ([`ReproductiveMoments::effective_size`]) reads
 //! the moments and returns Ne.
@@ -29,7 +29,7 @@
 //! Ne only through their census data, through the one kernel; swapping their census inputs swaps
 //! their Ne; a sex-symmetric, Poisson-ideal census returns N with no downward bias; and the 1:1 sex
 //! ratio a stable Ne rests on emerges from Fisherian selection on the sex-determination locus
-//! ([`crate::breeding`]), never from a hardcoded number.
+//! ([`civsim_foundation::breeding`]), never from a hardcoded number.
 //!
 //! The two textbook results the kernel composes:
 //!
@@ -56,7 +56,7 @@ use std::collections::BTreeMap;
 
 use civsim_core::{Fixed, StableId, StateHasher};
 
-use crate::breeding::SexClass;
+use civsim_foundation::breeding::SexClass;
 
 /// Wright's separate-sexes effective population size, `Ne = 4 Nm Nf / (Nm + Nf)` (Wright 1931):
 /// with `Nm` breeding members of one class and `Nf` of the other, a skewed sex ratio drives Ne well
@@ -398,7 +398,7 @@ impl ReproductiveCensus {
 
     /// The effective population size the census implies, through the one race-blind kernel: it
     /// reduces to [`ReproductiveMoments`] and calls [`ReproductiveMoments::effective_size`]. Feeds
-    /// [`crate::genome::GenePool::effective_size`] for the census-tier pool.
+    /// [`civsim_bio::genome::GenePool::effective_size`] for the census-tier pool.
     pub fn effective_size(&self) -> u32 {
         self.moments().effective_size()
     }
@@ -432,8 +432,8 @@ impl ReproductiveCensus {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::conservation::ConservationRegistry;
     use civsim_core::{DrawKey, Phase};
+    use civsim_foundation::conservation::ConservationRegistry;
 
     fn sc(i: u16) -> SexClass {
         SexClass(i)

@@ -19,11 +19,11 @@
 //! race label, Principle 9), the additive mutation step as the sole lever that grows the spine, and
 //! the locked-representation change (effects and the stamped approximation) folded into identity.
 
-use civsim_core::{Fixed, GaussApprox, StateHasher};
-use civsim_sim::genome::{
+use civsim_bio::genome::{
     Allele, AlleleState, GenePool, GeneticScheme, Genome, Haplotype, LinkageGroup,
     ReproductionMode, SchemeId,
 };
+use civsim_core::{Fixed, GaussApprox, StateHasher};
 
 const SCHEME: SchemeId = SchemeId(0);
 const K12: GaussApprox = GaussApprox::SumOfUniforms { k: 12 };

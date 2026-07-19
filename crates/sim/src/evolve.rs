@@ -34,7 +34,7 @@
 //! on the camera, so which behaviours a world evolves is a function of the seed and the world alone
 //! (Principles 3, 10).
 //!
-//! The selection itself is the aggregate-tier recurrence [`crate::genome::GenePool::select`] already
+//! The selection itself is the aggregate-tier recurrence [`civsim_bio::genome::GenePool::select`] already
 //! carries: it takes a per-locus selection coefficient and moves the frequencies, channel-blind, so
 //! a controller locus is selected by the same mechanism as any other once its coefficient is a
 //! consequence of homeostatic survival ([`homeostatic_coefficient`]). The individual-based loop
@@ -55,19 +55,19 @@ use civsim_core::{gaussian_unit, DrawKey, Fixed, GaussApprox, Phase, StableId};
 use civsim_world::Coord3;
 use rayon::prelude::*;
 
-use crate::anatomy::{BodyPlan, Part, Temperament};
-use crate::calibration::{CalibrationError, CalibrationManifest};
 use crate::controller::{Controller, ControllerLayout};
 use crate::edibility::{Composition, Physiology};
-use crate::genome::{
-    Allele, AlleleState, Channel, ControllerParamId, DominanceMode, GeneDef, GeneEffect, GeneId,
-    GenePool, GeneSet, Genome, Haplotype, SchemeId,
-};
 use crate::homeostasis::{
     AffordanceRegistry, Homeostasis, HomeostaticAxisDef, HomeostaticRegistry, ENERGY, WATER,
 };
 use crate::locomotion::{self, LocomotionParams, ResourceField, Terrain, Walker};
 use crate::runner::{BeingThermal, Embodiment, Field, FieldCalib, Runner};
+use civsim_bio::anatomy::{BodyPlan, Part, Temperament};
+use civsim_bio::genome::{
+    Allele, AlleleState, Channel, ControllerParamId, DominanceMode, GeneDef, GeneEffect, GeneId,
+    GenePool, GeneSet, Genome, Haplotype, SchemeId,
+};
+use civsim_foundation::calibration::{CalibrationError, CalibrationManifest};
 
 // Draw-site slots within the CONTROLLER phase, so the init and the two mutation rolls of one lineage
 // do not collide on counter zero (the R-RNG-COORD slot rule).

@@ -24,12 +24,12 @@
 //! owner's reserved manifest values; this gate proves the mechanism, while the tuned
 //! numbers stay reserved and fail loud in production.
 
-use civsim_core::{Fixed, StableId};
-use civsim_sim::evidence::{AttrKindId, InferenceFrame, InferenceParams};
-use civsim_sim::tom::{
+use civsim_bio::evidence::{AttrKindId, InferenceFrame, InferenceParams};
+use civsim_bio::tom::{
     detects_deception, AccessChannelId, AccessChannelRegistry, AccessWeights, EvidenceOrder,
     NestedFrame, ProjectionRejected,
 };
+use civsim_core::{Fixed, StableId};
 
 const WITNESSED: AccessChannelId = AccessChannelId(1);
 const TOLD: AccessChannelId = AccessChannelId(2);

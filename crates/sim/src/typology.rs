@@ -52,7 +52,7 @@
 //!   [`crate::language::Language`] and inherited through `fork`.
 //! - [`typology_distance`]: the 33.5 grammatical component as a distance over the generic
 //!   profile vector under reserved per-parameter weights, with a per-parameter
-//!   [`crate::value::GroundMetric`] hook where a parameter's values have their own
+//!   [`civsim_foundation::value::GroundMetric`] hook where a parameter's values have their own
 //!   similarity structure, exactly as value axes are compiled.
 //!
 //! Steering holds (Principle 9, structural): no parameter and no value carries a
@@ -67,10 +67,10 @@
 //! static generator on the owner's sequencing call, alongside the deeper 33.4 generation
 //! machinery it would move; the substrate it will act over is this registry.
 
-use crate::calibration::{CalibrationError, CalibrationManifest};
 use crate::language::Linearization;
-use crate::value::GroundMetric;
 use civsim_core::{DrawKey, Fixed, Phase};
+use civsim_foundation::calibration::{CalibrationError, CalibrationManifest};
+use civsim_foundation::value::GroundMetric;
 use civsim_physics::laws;
 use std::collections::BTreeMap;
 use std::fmt;

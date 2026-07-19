@@ -20,9 +20,9 @@
 //! arrived. The weights and thresholds are clearly-labelled fixtures, not the owner's
 //! reserved numbers.
 
+use civsim_bio::evidence::{AttrKindId, InferenceParams};
+use civsim_bio::tom::{AccessChannelId, AccessWeights};
 use civsim_core::{Fixed, StableId};
-use civsim_sim::evidence::{AttrKindId, InferenceParams};
-use civsim_sim::tom::{AccessChannelId, AccessWeights};
 use civsim_sim::{AccessObs, Mind};
 
 const LOCATION: AttrKindId = AttrKindId(0);

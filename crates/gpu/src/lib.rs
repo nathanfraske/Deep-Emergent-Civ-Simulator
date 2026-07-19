@@ -53,11 +53,19 @@
 //!   the transcendental physics laws the waves deferred (Arrhenius, Clausius-Clapeyron, Beer-Lambert,
 //!   Nernst, Snell, Rayleigh, and general scaling).
 //!
+//! One module breaks the integer-only law ON PURPOSE, and is fenced off from the rest:
+//! - [`globe`]: the NON-CANON viewer globe shade, a plain `f32` kernel (design Part 14, Principle 10). It
+//!   produces an observer's FRAMEBUFFER, never canonical simulation state, so it carries no bit-identity
+//!   contract (two observers' framebuffers need not agree to the bit): the one place a float is allowed
+//!   here. It is the GPU port of `civsim_viewer`'s `render::draw_globe` per-pixel shade, kept apart from
+//!   the canonical kernels above so nothing confuses it with one.
+//!
 //! Device access is optional: the crate builds with no CUDA present, and the launchers assume a
 //! working device only when called. The gate tests self-skip unless `CIVSIM_GPU` is set.
 
 pub mod being;
 pub mod field;
+pub mod globe;
 pub mod perceive;
 mod prim;
 pub mod stage0;

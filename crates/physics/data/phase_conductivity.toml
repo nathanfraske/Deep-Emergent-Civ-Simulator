@@ -1,0 +1,252 @@
+# The two per-phase columns the THERMAL-CONDUCTIVITY LADDER (crate::civsim_materials::conductivity)
+# needs and that no data file in this repo carried, for the eight phases of phase_registry.toml.
+# Sibling of mineral_moduli.toml (elastic) and gruneisen.toml (thermal-EoS): same eight phase keys,
+# same cited-data-column idiom, same refusal rather than a default.
+#
+# WHY THIS FILE EXISTS. Both rungs of the ladder key on ATOMS PER PRIMITIVE CELL, which Slack's own
+# docstring marks (DATA). It was a function parameter and a struct field and nothing else, so
+# assemblage_conductivity had no production caller and a mantle column's conductivity could not be
+# derived. This file supplies that column, and supplies the measured kappa_298 anchor for the phases
+# where a citable primary reports one.
+#
+# BLOCK KIND [[conductivity]], the cited-data-COLUMN idiom (mirroring mineral_moduli.toml's [[mineral]],
+# the gruneisen [[mineral]], the ionic radii [[radius]], the condensation [[condensation]]), NOT a
+# reserved floor kind ([[element]] / [[axis]] / [[substance]]): an immutable transcription of cited
+# values, out of the floor real/fantasy authorship axis and out of floor-Element policing. Values are
+# QUOTED strings. Keyed by the phase name, matching the registry / moduli / gruneisen spelling exactly
+# (the JANAF-decorated crust names such as MgSiO3(cr,enstatite) resolve through the same canonical
+# bridge, mineral_moduli::canonical_phase_key).
+#
+# ===== COLUMN 1: atoms_per_primitive_cell (all eight phases) =====
+#
+# THIS IS A CRYSTALLOGRAPHIC COUNT, NOT A MEASUREMENT, and it is RECONSTRUCTIBLE rather than asserted.
+# Each row carries the space group, the formula units per conventional cell Z, the atoms per formula
+# unit, and the lattice points per conventional cell, and the loader RECOMPUTES
+#
+#     atoms_per_primitive_cell = Z * atoms_per_formula_unit / lattice_points_per_conventional_cell
+#
+# refusing the row when the stated count disagrees or the division is not exact. So a transcription
+# slip in any one of the four fields fails the build rather than shipping a wrong cell count.
+#
+# THE CONVENTIONAL-VERSUS-PRIMITIVE TRAP, which is the whole reason the count is not simply Z times
+# atoms per formula unit. A CENTRED lattice's conventional cell holds several primitive cells: an
+# F-centred cell holds four, an I-centred two, and an R-centred cell in the hexagonal setting three.
+# Three of these eight phases are centred (periclase and spinel are F, corundum and hematite are R),
+# so for them the conventional content OVERSTATES the primitive content by that factor. The count
+# enters Slack's magnitude as n^(-2/3), so the error would be silent and load-bearing.
+#
+# A SECOND TRAP, and the eight phases exhibit it: Z IS MEANINGLESS WITHOUT THE FORMULA UNIT IT COUNTS.
+# The two independent enstatite records read here state Z = 8 for a formula unit written Mg2Si2O6 and
+# Z = 16 for one written MgSiO3. Both give 80 atoms per conventional cell, which is the invariant, and
+# that is why this file carries atoms_per_formula_unit beside Z rather than Z alone.
+#
+# THE COUNTS, and their check. Independent of every cited record, Z was recomputed for each phase from
+# the published cell parameters, the molar mass and the measured density (Z = rho * N_A * V / M): all
+# eight returned an integer within 0.3 percent, and every conventional content divided exactly by its
+# centring multiplicity. The five counts the geodynamics blocker note already named (quartz 9,
+# corundum 10, hematite 10, forsterite 28, enstatite 80) are reproduced; periclase 2, spinel 14 and
+# fayalite 28 are the three it did not name. Periclase at n = 2 is the ladder's simple class and its
+# permanent OVERLAP SENTINEL, which is the row that makes the two-rung comparison run at all.
+#
+# ===== COLUMN 2: kappa_298 (six of eight phases, and the two absences are deliberate) =====
+#
+# The measured thermal conductivity at 300 K of the pure phase, W/(m*K). Present only where a citable
+# primary reports a pure-phase value in the ambient frame. A phase with no value here is NOT defaulted:
+# PhaseConductivity::kappa_298 is an Option, so the phase falls to Slack's estimator rung and
+# AssemblageConductivity::measured_weight_fraction reports how much of a census resolved through a
+# measured anchor. That is the ladder working as designed rather than a hole in it.
+#
+# AT 300 K A MEASURED TOTAL IS A LATTICE ANCHOR: the ladder's own radiative polynomial returns about
+# 0.006 W/(m*K) at this temperature, so the radiative channel is below the reported precision of every
+# value here and no lattice/radiative separation is needed at the anchor point.
+#
+# TWO VALUE SHAPES, and the loader derives the isotropic scalar rather than the data file asserting it.
+# An ISOTROPIC row states kappa_298_w_per_m_k directly. An ANISOTROPIC row states the measured principal
+# conductivities instead (quartz is the case: the source recommends per-axis values for a uniaxial
+# crystal), and the loader forms the orientational average of a randomly oriented aggregate the same way
+# mineral_moduli.toml forms its elastic values, by the VOIGT-REUSS-HILL convention:
+#
+#     voigt = (k_par + 2 k_perp) / 3        (parallel bound, the trace/3 of the conductivity tensor)
+#     reuss = 3 / (1/k_par + 2/k_perp)      (series bound)
+#     kappa_298 = (voigt + reuss) / 2       (Hill)
+#
+# so the stored facts stay the source's own numbers and the aggregation is code that can be tested.
+#
+# THE BAND IS DERIVED, NEVER INVENTED, and each row says which of the two bases produced it:
+#   - kappa_298_relative_uncertainty, the SOURCE'S OWN stated accuracy at 300 K, times the value; or
+#   - kappa_298_band, the absolute gap to an INDEPENDENT second determination of the same quantity, so
+#     the interval covers both determinations rather than one.
+# Where a row is anisotropic the band is widened to the orientational Voigt-Reuss bracket if that is the
+# larger of the two, so an aggregate never reads a narrower width than the anisotropy it averaged away.
+#
+# WHY HEMATITE AND SPINEL CARRY NO ANCHOR, recorded rather than left to inference. HEMATITE is a real
+# and unresolved dispute rather than a missing fetch: the values retrieved for it span 10.5 to 24.4
+# W/(m*K), a factor of 2.3, across a porous natural aggregate (Diment and Pratt 1988, whose sample's
+# measured density is 22 percent below theoretical), a 1911 determination, a laser-flash fit on a 99.9
+# percent specimen, and an EXTRAPOLATED single-crystal pair. Choosing a centre inside a 2.3x spread is
+# authoring, so no anchor is written and the manifest records every retrieved value for the next fetch.
+# SPINEL has no pure-phase determination in any source retrieved openly; the one value found is on an
+# artificial specimen at 35 C reported at third hand (Clark 1966 after McCarthy and Ballard 1951).
+# Slack (1962), Physical Review 126, 427, measures MgO, Al2O3 and MgAl2O4 to 300 K and is the named
+# follow-up for spinel; it is behind the APS paywall and was not retrieved.
+#
+# THE TWO CANONICAL COMPILATIONS REMAIN UNRETRIEVED, stated plainly rather than paraphrased from memory.
+# Horai 1971 (JGR 76, 1278-1308) returns HTTP 403 at the DOI and at the ADS scan, carries no Wayback
+# capture, and reports as closed access with zero open locations. Clauser and Huenges 1995 (AGU
+# Reference Shelf 3, 105-126) returns HTTP 403 at the DOI, has no repository copy, and the one
+# retrievable copy is an unauthorized mirror printing "Copyright 1995 by the American Geophysical
+# Union", so it is not vendorable. Neither was used. What replaced them is better for this purpose:
+# two US Government publications whose recommended values are per-phase and carry stated accuracies.
+#
+# FRAME: 300 K, 1 bar, pure end-member composition. The ladder carries no pressure dependence, so an
+# aggregate built from these anchors is an ambient-pressure quantity and a caller at depth is reading
+# outside the frame. Each row states the SPECIMEN FORM it was measured on (single crystal, dense
+# polycrystalline, or needle-probe aggregate), because that is the difference between a phase property
+# and a sample property.
+#
+# WITNESSES: crates/physics/data/phase_conductivity/manifest.toml carries the receipt, the licence
+# finding and the anchor for every source read. The crystallographic records and the NBS recommended
+# values are held in-repo as bytes; the published structure determinations behind Column 1 and the
+# chondrite paper behind three Column 2 rows are held as citation-plus-witness under the owner's
+# ruling, because their licences do not permit redistribution.
+#
+# THE COD LICENCE IS NOT UNIFORM, AND THE SPLIT IS PER ENTRY RATHER THAN PER ID RANGE. A COD record
+# whose data the contributors placed in the public domain carries the header 'All data on this site have
+# been placed in the public domain by the contributors'. A record whose data came from a third party
+# (the American Mineralogist Crystal Structure Database, or IUCr Journals) instead carries 'The file may
+# be used within the scientific community so long as proper attribution is given to the journal article
+# from which the data were obtained', which is an attribution-conditioned grant scoped to a community
+# rather than a public-domain dedication. Every CIF HELD under cod/ was checked against its own header
+# and every held one is public domain; the attribution-conditioned records are cited and not held.
+
+frame = "300 K, 1 bar, pure end-member composition; atoms_per_primitive_cell is a crystallographic count and is frame-free"
+grade = "atoms_per_primitive_cell: crystallographic (derived from space group, Z, formula content and lattice centring); kappa_298: measured (NBS recommended values for quartz, corundum and periclase; Horai and Simmons 1969 needle-probe via Henke et al. 2016 for forsterite, fayalite and enstatite)"
+primitive_cell_relation = "atoms_per_primitive_cell = Z * atoms_per_formula_unit / lattice_points_per_conventional_cell"
+
+[[conductivity]]
+name = "quartz"
+formula = "SiO2"
+atoms_per_primitive_cell = "9"
+space_group = "P3(1)21"
+space_group_number = "152"
+lattice_centring = "P"
+lattice_points_per_conventional_cell = "1"
+formula_units_per_conventional_cell = "3"
+atoms_per_formula_unit = "3"
+kappa_298_parallel_c = "10.4"
+kappa_298_perpendicular_c = "6.21"
+kappa_298_relative_uncertainty = "0.05"
+kappa_298_temperature_k = "300"
+kappa_specimen_form = "high-purity (over 99 percent) single crystal, per-axis recommended values"
+kappa_citation = "kappa_298 principal values at 300 K: Powell, R.W., Ho, C.Y. & Liley, P.E., 1966, Thermal Conductivity of Selected Materials, NSRDS-NBS 8, National Standard Reference Data Series, National Bureau of Standards, issued November 25, 1966, Table 14 'Recommended Thermal Conductivity of Nonmetallic Solids', units Watt cm^-1 K^-1, 300 K row (read from a 300 dpi render of the rotated printed page 72, because the scan's text layer is unreliable): Quartz (Single Crystal) column, 10.4 W/(m*K) parallel to the c-axis and 6.21 W/(m*K) perpendicular, neither in parentheses so neither is extrapolated (the table's footnote reserves parentheses for extrapolated values). Stated accuracy, quoted: the uncertainty for quartz single crystal 'is thought to be within +/-5% at temperatures from 300 to 500 K', which is exactly the anchor point. The single scalar the ladder consumes is the Voigt-Reuss-Hill orientational average the loader derives from this pair, 7.390 W/(m*K), which lands on the accepted polycrystalline quartz conductivity near 7.7 and is an independent magnitude check on the pair. CROSS-CHECKED against a second public-domain source: Diment, W.H. & Pratt, H.R., 1988, Thermal conductivity of some rock-forming minerals: a tabulation, USGS Open-File Report 88-690, Table 1 printed page 4, alpha-quartz 24.3 mcal/(cm*s*C) parallel and 14.7 perpendicular at 30 C, which convert at the 0.4184 factor to 10.17 and 6.15 W/(m*K), agreeing with the NBS recommendation to within 2 and 1 percent. THAT CROSS-CHECK REQUIRED A VISUAL READ: the USGS scan's text layer renders those two cells as 21.3 and 11.7, and the wrong digits would have moved the pair by 13 percent."
+crystallography_citation = "alpha-quartz (low quartz), trigonal, space group P3(1)21 (No. 152) with Z = 3; the enantiomorph P3(2)21 (No. 154) is the same primitive trigonal lattice with the same Z, so the cell content is identical either way. Database record: Crystallography Open Database entry 1011172 (Brill, R., Hermann, C. & Peters, C., 1939, Naturwissenschaften 27, 676), _space_group_name_H-M_alt 'P 31 2 1', _cell_formula_units_Z 3, a = 4.913, c = 5.405 A; cross-checked against COD 1011097 (Wei, P.H., 1935, Z. Kristallogr. 92, 355), same space group and Z. Cell parameters confirmed at a modern primary: Levien, L., Prewitt, C.T. & Weidner, D.J., 1980, Structure and elastic properties of quartz at pressure, American Mineralogist 65, 920-930, abstract: 'Unit-cell parameters are a = 4.916(1) and c = 5.4054(4) A at 1 atm'. Trigonal P is uncentred, so the conventional cell IS the primitive cell: 3 x 3 = 9 atoms. Density check: V = 113.01 A^3, M = 60.084, rho = 2.648 gives Z = 3.00."
+
+[[conductivity]]
+name = "corundum"
+formula = "Al2O3"
+atoms_per_primitive_cell = "10"
+space_group = "R-3c"
+space_group_number = "167"
+lattice_centring = "R (hexagonal setting)"
+lattice_points_per_conventional_cell = "3"
+formula_units_per_conventional_cell = "6"
+atoms_per_formula_unit = "5"
+kappa_298_w_per_m_k = "36.0"
+kappa_298_relative_uncertainty = "0.15"
+kappa_298_temperature_k = "300"
+kappa_specimen_form = "99.5 percent pure, 98 percent dense polycrystalline"
+kappa_citation = "kappa_298 = 36.0 W/(m*K) at 300 K: Powell, R.W., Ho, C.Y. & Liley, P.E., 1966, Thermal Conductivity of Selected Materials, NSRDS-NBS 8, National Standard Reference Data Series, National Bureau of Standards, issued November 25, 1966, Table 14 'Recommended Thermal Conductivity of Nonmetallic Solids', units Watt cm^-1 K^-1, 300 K row (read from a 300 dpi render of the rotated printed page 72; the scan's text layer is unreliable): Al2O3 column reads 0.360 Watt cm^-1 K^-1 at 300 K, not parenthesized so not extrapolated. SPECIMEN FORM matters and is carried: the Al2O3 column wears the table's footnote '99.5% pure, 98% dense, polycrystalline', so this is a dense polycrystal rather than a single crystal, and the 2 percent porosity depresses it slightly relative to the pure phase. BAND BASIS: the source's own statement for aluminum oxide, that the uncertainty 'should be within +/-8% at temperatures from 500 to 1000 K and increases to about +/-15% below 250 K'. 300 K sits in the transition the source does not resolve, so the WIDER bracketing bound is taken, which never understates the error. CONTEXT, not used as the anchor: Diment and Pratt 1988 Table 1 printed page 9 reports an impurity-bearing natural Transvaal crystal at 40.8, 41.2 and 36.4 mcal parallel and 36.8, 37.3 perpendicular, converting to 15.2 to 17.2 W/(m*K), roughly half the value here, which is what impurity phonon scattering does to a natural sample and is why a natural-crystal reading is not the phase's kappa_298."
+crystallography_citation = "alpha-Al2O3, space group R-3c (No. 167), Z = 6 in the HEXAGONAL setting. Database record: COD 1000032 (Lutterotti, L. & Scardi, P., 1990, Journal of Applied Crystallography 23, 246), _space_group_name_H-M_alt 'R -3 c :H', _cell_formula_units_Z 6, a = 4.76050, c = 12.9956 A. THE PRIMITIVE CONTENT IS CONFIRMED DIRECTLY rather than only by dividing: COD 1010914 (Pauling, L. & Hendricks, S.B., 1925, Crystal Structures of Hematite and Corundum, J. Am. Chem. Soc. 47, 781) states the same structure in the RHOMBOHEDRAL setting, 'R -3 c :R' with Z = 2, and the rhombohedral cell IS the primitive cell, so 2 x 5 = 10 atoms, matching 6 x 5 / 3 = 10. Density check: V = 254.79 A^3 (hex), M = 101.961, rho = 3.988 gives Z = 6.00."
+
+[[conductivity]]
+name = "periclase"
+formula = "MgO"
+atoms_per_primitive_cell = "2"
+space_group = "Fm-3m"
+space_group_number = "225"
+lattice_centring = "F"
+lattice_points_per_conventional_cell = "4"
+formula_units_per_conventional_cell = "4"
+atoms_per_formula_unit = "2"
+kappa_298_w_per_m_k = "48.4"
+kappa_298_band = "11.6"
+kappa_298_relative_uncertainty = "0.15"
+kappa_298_temperature_k = "300"
+kappa_specimen_form = "99.5 percent pure, 98 percent dense polycrystalline"
+kappa_citation = "kappa_298 = 48.4 W/(m*K) at 300 K: Powell, R.W., Ho, C.Y. & Liley, P.E., 1966, Thermal Conductivity of Selected Materials, NSRDS-NBS 8, National Standard Reference Data Series, National Bureau of Standards, issued November 25, 1966, Table 14 'Recommended Thermal Conductivity of Nonmetallic Solids', units Watt cm^-1 K^-1, 300 K row (read from a 300 dpi render of the rotated printed page 72; the scan's text layer is unreliable): MgO column reads 0.484 Watt cm^-1 K^-1 at 300 K, not parenthesized so not extrapolated (the 250 K and 273 K entries above it ARE parenthesized, so 300 K is the lowest recommended value the source stands behind for MgO). SPECIMEN FORM: the MgO column wears the same '99.5% pure, 98% dense, polycrystalline' footnote. BAND BASIS: the source's own statement for magnesium oxide, that the uncertainty 'is thought to be within +/-8% at temperatures from 500 to 1000 K and increases to +/-15% below 300 K'; 300 K is the stated boundary, so the wider bound is taken. THIS ROW IS THE LADDER'S OVERLAP SENTINEL and is the reason it was worth chasing: periclase is the only one of the eight phases in the simple class (n = 2), so it is the phase where BOTH rungs evaluate and rung_disagreement_ratio has something to report. Slack's own docstring records its MgO estimate at about 110 W/(m*K); against this anchor the ratio is near 2.3, inside the roughly 3x band Slack declares for simple cells, so the sentinel now runs and reports agreement rather than sitting dormant. INDEPENDENT SECOND DETERMINATION, and it is what widens the band past the source's own stated accuracy: Touloukian, Y.S. (ed.), 1966, Recommended Values of the Thermophysical Properties of Eight Alloys, Major Constituents and Their Oxides, NBS Sub-Contract CST-7590 / NASA Order R-45, TEPIAC Purdue, Table I-27 printed page 66, 'Thermal Conductivity of Magnesium Oxide (single crystal) MgO, Selected Values for MgO Single Crystal with Impurity Concentration 2 x 10^19 atoms cm^-3', 300 K row = 0.60 Watt cm^-1 K^-1 = 60.0 W/(m*K), unasterisked so not extrapolated, whose remark records that values from 2 to 320 K are taken from Slack (1962). THE GAP IS A FRAME DIFFERENCE, NOT ONLY SCATTER: 60.0 is a single crystal and 48.4 is a 98 percent dense polycrystal, and porosity plus grain-boundary resistance is the expected direction and rough size of the 24 percent difference. The band is set to that gap, 11.6, rather than to the source's stated +/-15 percent (7.26), because a width that excluded a second measured determination of the same phase would be a narrower claim than the evidence supports."
+crystallography_citation = "MgO, the rock-salt (NaCl) structure type, space group Fm-3m (No. 225), Z = 4 in the conventional cubic cell. Database record: COD 1000053 (Sasaki, S., Fujino, K. & Takeuchi, Y., 1979, Proc. Japan Acad. 55, 43), _space_group_name_H-M_alt 'F m -3 m', _cell_formula_units_Z 4, a = 4.217 A. Structure type and cell confirmed at a primary: Hazen, R.M., 1976, Effects of temperature and pressure on the cell dimension and X-ray temperature factors of periclase, American Mineralogist 61, 266-271, 'The cubic NaCl-type structure of periclase was first suggested by Hull (1919)', refined cell constant a = 4.2121(1) A. THE F-CENTRING IS THE WHOLE POINT HERE: the conventional cell holds 8 atoms but FOUR primitive cells, so the primitive content is 8 / 4 = 2. This is the ladder's simple class (n <= 2) and its permanent overlap sentinel. Density check: V = 74.73 A^3, M = 40.304, rho = 3.584 gives Z = 4.00."
+
+[[conductivity]]
+name = "hematite"
+formula = "Fe2O3"
+atoms_per_primitive_cell = "10"
+space_group = "R-3c"
+space_group_number = "167"
+lattice_centring = "R (hexagonal setting)"
+lattice_points_per_conventional_cell = "3"
+formula_units_per_conventional_cell = "6"
+atoms_per_formula_unit = "5"
+crystallography_citation = "alpha-Fe2O3, isostructural with corundum, space group R-3c (No. 167), Z = 6 in the HEXAGONAL setting. Primary: Blake, R.L., Hessevick, R.E., Zoltai, T. & Finger, L.W., 1966, Refinement of the hematite structure, American Mineralogist 51, 123-129; the text records that 'the space group R3c of Pauling and Hendricks was confirmed', and Table I states for the hexagonal unit cell 'Space Group: R3c' with 'Z = 6'. Database record HELD in cod/: COD 1011267 (Zachariasen, W.H., 1928), which states the same structure in the RHOMBOHEDRAL setting, 'R -3 c :R' with Z = 2, and the rhombohedral cell IS the primitive cell, so 2 x 5 = 10 atoms directly, matching 6 x 5 / 3 = 10 from the hexagonal setting. Corroborating record, CITED AND NOT HELD because its COD entry carries an IUCr attribution condition rather than the public-domain dedication: COD 2101167 (Maslen, E.N., Streltsov, V.A., Streltsova, N.R. & Ishizawa, N., 1994, Acta Crystallographica B 50, 435), 'R -3 c :H', Z = 6, a = 5.0355(5), c = 13.7471(7) A. Density check: V = 301.80 A^3 (hex), M = 159.688, rho = 5.271 gives Z = 6.00."
+
+[[conductivity]]
+name = "forsterite"
+formula = "Mg2SiO4"
+atoms_per_primitive_cell = "28"
+space_group = "Pbnm"
+space_group_number = "62"
+lattice_centring = "P"
+lattice_points_per_conventional_cell = "1"
+formula_units_per_conventional_cell = "4"
+atoms_per_formula_unit = "7"
+kappa_298_w_per_m_k = "5.158"
+kappa_298_band = "0.197"
+kappa_298_temperature_k = "300"
+kappa_specimen_form = "needle-probe measurement on a finely ground pure-species sample"
+crystallography_citation = "Mg2SiO4, the olivine structure, space group Pbnm (a non-standard setting of Pnma, No. 62), Z = 4. Primary: Birle, J.D., Gibbs, G.V., Moore, P.B. & Smith, J.V., 1968, Crystal structures of natural olivines, American Mineralogist 53, 807-824, which records that 'it seems safe to assume that all olivine crystals obey the symmetry of Pbnm'. Database record HELD in cod/: COD 1544615 (Journal of Mineralogical and Petrological Sciences, 2006), 'P b n m' with Z = 4, a = 4.756(1), b = 10.208(3), c = 5.988(2) A, composition Mg1.985Si0.993O4 with 0.06 H, a near-end-member synthetic forsterite. Corroborating records, CITED AND NOT HELD because their COD entries carry an AMCSD or IUCr attribution condition rather than the public-domain dedication: COD 9000319 (Smyth, J.R. & Hazen, R.M., 1973, American Mineralogist 58, 588), Pbnm, Z = 4, a = 4.756, b = 10.207, c = 5.980 A; and COD 1572966 (IUCrJ 11, 2024), Pbnm, Z = 4. The HELD fayalite record COD 1000064 is the same olivine structure type and carries the same Pbnm and Z = 4 independently. Orthorhombic P is uncentred, so the conventional cell IS primitive: 4 x 7 = 28 atoms. Density check: V = 290.30 A^3, M = 140.694, rho = 3.211 gives Z = 3.99."
+kappa_citation = "kappa_298 = 5.158 W/(m*K) at 300 K: Henke, S., Gail, H.-P. & Trieloff, M., 2016, Thermal evolution and sintering of chondritic planetesimals. III, Astronomy and Astrophysics 589, A41, Table 2 'The pure mineral species considered for calculating the properties of chondrite material, their chemical composition, atomic weight A, mass-density rho and thermal conductivity at 300 K', row 'forsterite Mg2SiO4, A = 140.69, rho = 3.22, K = 5.158', carrying note (a) = Horai, K. & Simmons, G., 1969, Thermal conductivity of rock-forming minerals, Earth and Planetary Science Letters 6, 359-368, which is the measurement primary. This is the PURE end-member, not the Fo80 solid solution of the same paper's Table 3 (4.349). No uncertainty is stated at the source, so no band is carried (reserved, basis in the header)."
+
+[[conductivity]]
+name = "fayalite"
+formula = "Fe2SiO4"
+atoms_per_primitive_cell = "28"
+space_group = "Pbnm"
+space_group_number = "62"
+lattice_centring = "P"
+lattice_points_per_conventional_cell = "1"
+formula_units_per_conventional_cell = "4"
+atoms_per_formula_unit = "7"
+kappa_298_w_per_m_k = "3.161"
+kappa_298_band = "0.045"
+kappa_298_temperature_k = "300"
+kappa_specimen_form = "needle-probe measurement on a finely ground pure-species sample"
+crystallography_citation = "Fe2SiO4, isostructural with forsterite, space group Pbnm (setting of Pnma, No. 62), Z = 4. Primary: Birle, Gibbs, Moore & Smith 1968, American Mineralogist 53, 807-824, whose refined structures include fayalite (Fe0.92, Mg0.01, Mn0.07) and which concludes the Pbnm symmetry for all four olivines studied. Database record: COD 1000064 (Fujino, K., Sasaki, S., Takeuchi, Y. & Sadanaga, R., 1981, Acta Crystallographica B 37, 513), _space_group_name Pbnm, Z = 4, formula Fe2O4Si, a = 4.8195(6), b = 10.4788, c = 6.0873(8) A. Orthorhombic P is uncentred: 4 x 7 = 28 atoms. Density check: V = 308.11 A^3, M = 203.774, rho = 4.393 gives Z = 4.00."
+kappa_citation = "kappa_298 = 3.161 W/(m*K) at 300 K: Henke, Gail & Trieloff 2016, A&A 589, A41, Table 2, row 'fayalite Fe2SiO4, A = 203.78, rho = 4.66, K = 3.161', note (a) = Horai & Simmons 1969, EPSL 6, 359-368 (the measurement primary). PURE end-member. RECORDED DISCREPANCY, not smoothed over: the same table's density 4.66 g/cm3 sits well above the accepted fayalite density near 4.39, which is a defect in that column of the source and is noted here because it is the row's own neighbour; the conductivity is the quantity read and the density is not used from this source. No uncertainty stated, so no band (reserved, basis in the header)."
+
+[[conductivity]]
+name = "spinel"
+formula = "MgAl2O4"
+atoms_per_primitive_cell = "14"
+space_group = "Fd-3m"
+space_group_number = "227"
+lattice_centring = "F"
+lattice_points_per_conventional_cell = "4"
+formula_units_per_conventional_cell = "8"
+atoms_per_formula_unit = "7"
+crystallography_citation = "MgAl2O4, the spinel structure, space group Fd-3m (No. 227), Z = 8 in the conventional cubic cell (8 Mg + 16 Al + 32 O = 56 atoms). Database record HELD in cod/: COD 1010129 (Passerini, L., 1930, Gazzetta Chimica Italiana 60, 389), formula 'Al2 Mg O4', 'F d -3 m :1', _cell_formula_units_Z 8, a = 8.050 A. Corroborating record, CITED AND NOT HELD (AMCSD attribution condition): COD 9001364 (Peterson, R.C., Lager, G.A. & Hitterman, R.L., 1991, American Mineralogist 76, 1455), 'F d -3 m :2', Z = 8, a = 8.08435 A, the modern refinement whose cell parameter the density check below uses. The two differ only in the origin-choice convention (:1 against :2), which is a setting of the same group and does not move the cell content. F-CENTRING: the conventional cell holds 56 atoms but FOUR primitive cells, so the primitive rhombohedral cell holds 56 / 4 = 14 atoms (2 Mg + 4 Al + 8 O). That is the count the lattice-dynamics literature states independently as 3 x 14 = 42 phonon branches for a cubic AB2O4 spinel. Density check: V = 527.63 A^3, M = 142.266, rho = 3.582 gives Z = 8.00."
+
+[[conductivity]]
+name = "enstatite"
+formula = "MgSiO3"
+atoms_per_primitive_cell = "80"
+space_group = "Pbca"
+space_group_number = "61"
+lattice_centring = "P"
+lattice_points_per_conventional_cell = "1"
+formula_units_per_conventional_cell = "16"
+atoms_per_formula_unit = "5"
+kappa_298_w_per_m_k = "4.961"
+kappa_298_band = "0.052"
+kappa_298_temperature_k = "300"
+kappa_specimen_form = "needle-probe measurement on a finely ground pure-species sample"
+crystallography_citation = "Orthoenstatite MgSiO3, space group Pbca (No. 61), Z = 16 counting the formula unit as MgSiO3. Primary: Hugh-Jones, D.A. & Angel, R.J., 1994, A compressional study of MgSiO3 orthoenstatite up to 8.5 GPa, American Mineralogist 79, 405-410, which records that the crystal used 'has Pbca' symmetry with no observed violations. Database records, AND THEY DISAGREE ON Z WHILE AGREEING ON THE CELL, which is why atoms_per_formula_unit is carried beside Z: COD 1000047 (Yang, H.X. & Ghose, S., 1995, Physics and Chemistry of Minerals 22, 300) states 'P b c a' with Z = 8 for a formula unit written Mg2O6Si2 (10 atoms), giving 80; COD 1011018 (Takane, 1932, Proc. Imperial Academy Tokyo 8, 308) states 'P b c a' with Z = 16 for a formula unit written MgO3Si (5 atoms), also giving 80. Orthorhombic P is uncentred, so 80 atoms is both the conventional and the primitive content. Density check: V = 832.18 A^3, M = 100.389, rho = 3.204 gives Z = 16.00."
+kappa_citation = "kappa_298 = 4.961 W/(m*K) at 300 K: Henke, Gail & Trieloff 2016, A&A 589, A41, Table 2, row 'enstatite MgSiO3, A = 100.39, rho = 3.20, K = 4.961', note (a) = Horai & Simmons 1969, EPSL 6, 359-368 (the measurement primary). PURE end-member En100, corroborated inside the same paper: its Table 3 EH-chondrite column carries an orthopyroxene of composition En100 with K = 4.961 and rho = 3.20, the same pair, so the end-member value and the census value agree by construction. No uncertainty stated, so no band (reserved, basis in the header)."

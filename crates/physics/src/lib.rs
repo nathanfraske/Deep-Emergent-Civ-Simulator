@@ -39,6 +39,7 @@
 
 pub mod band_gap;
 pub mod condensation;
+pub mod convection_scaling;
 pub mod convective_viscosity;
 pub mod covalent_radii;
 pub mod creep_rows;
@@ -53,6 +54,7 @@ pub mod gas_thermochemistry;
 pub mod geodynamics;
 pub mod geotherm;
 pub mod graph;
+pub mod gruneisen;
 pub mod hayashi_wall;
 pub mod hindcast_comparison;
 pub mod ice_sublimation;
@@ -75,10 +77,12 @@ pub mod periodic;
 pub mod perovskite_gibbs;
 pub mod petrology;
 pub mod petrology_data;
+pub mod phase_conductivity;
 pub mod phonon;
 pub mod polarizability;
 pub mod qeq;
 pub mod quantities;
+pub mod rayleigh_critical;
 pub mod rose_eos;
 pub mod saha;
 pub mod scaled;

@@ -13,7 +13,7 @@
 // limitations under the License.
 
 //! The surface isostatic-relaxation consumer (genesis-forward Stage 3, the surface lane). This reads the
-//! per-column [`crate::material::GeodynamicColumn::isostatic_elevation`] the producer derives (the interior convection lane, or
+//! per-column [`civsim_foundation::material::GeodynamicColumn::isostatic_elevation`] the producer derives (the interior convection lane, or
 //! the surface seed-crust pass, both through the Airy flotation law in
 //! [`civsim_physics::geodynamics::airy_isostatic_elevation`]) and relaxes the EFFECTIVE elevation toward it by
 //! writing the geological delta into the [`EarthworkField`]. It is the consumer end of the producer-consumer
@@ -43,8 +43,8 @@
 use civsim_core::Fixed;
 use civsim_world::Coord3;
 
-use crate::calibration::CalibrationError;
-use crate::material::{EarthworkField, GeodynamicField};
+use civsim_foundation::calibration::CalibrationError;
+use civsim_foundation::material::{EarthworkField, GeodynamicField};
 
 /// One relaxation pass over the armed geodynamic columns: for each column carrying geodynamic state, read its
 /// producer-derived `isostatic_elevation` target, measure the residual against the current effective elevation
@@ -113,7 +113,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::material::GeodynamicColumn;
+    use civsim_foundation::material::GeodynamicColumn;
     use civsim_physics::geodynamics::airy_isostatic_elevation;
 
     fn flat_base(_: Coord3) -> Fixed {

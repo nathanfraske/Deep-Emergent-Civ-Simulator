@@ -1,0 +1,89 @@
+# The sources-gate baseline (scripts/sources_gate.py).
+#
+# One row per (source, check) that the pre-existing vendored population does not yet satisfy, so
+# the gate RATCHETS FORWARD instead of blocking every commit until someone audits all 27 sources
+# at once. Exactly the shape scripts/derives_baseline.tsv and scripts/constructor_baseline.tsv use.
+#
+# A ROW IS AN ADMISSION THAT NOBODY HAS LOOKED. It is not a claim that the entry is fine, and it is
+# not permission to add another. A NEW source gets no rows and must satisfy every check: sha256, an
+# archive record, a scope, a slim record, a licence answer if it holds bytes, and for a claim a
+# secondary witness beside the primary.
+#
+# Resolve a row by fixing the entry, then deleting the row. The gate reports a row whose source is
+# gone, so the baseline cannot rot.
+#
+# source_id	check	classification	reason
+bhac15	archive	archive-unreviewed	predates the sources gate; in_repo custody; classify when next touched
+bhac15	scope	scope-unreviewed	predates the sources gate; in_repo custody; classify when next touched
+bhac15	slim	slim-unreviewed	predates the sources gate; in_repo custody; classify when next touched
+bhac15	licence	licence-unreviewed	predates the sources gate; in_repo custody; classify when next touched
+byerlee_1978	archive	archive-unreviewed	predates the sources gate; in_repo custody; classify when next touched
+byerlee_1978	scope	scope-unreviewed	predates the sources gate; in_repo custody; classify when next touched
+byerlee_1978	slim	slim-unreviewed	predates the sources gate; in_repo custody; classify when next touched
+convection_scaling.bodenschatz_pesch_ahlers_2000	licence-reason	licence-reason-unreviewed	predates the sources gate; witness custody; classify when next touched
+convection_scaling.bodenschatz_pesch_ahlers_2000	scope	scope-unreviewed	predates the sources gate; witness custody; classify when next touched
+convection_scaling.bodenschatz_pesch_ahlers_2000	slim	slim-unreviewed	predates the sources gate; witness custody; classify when next touched
+convection_scaling.foley_bercovici_2014	licence-reason	licence-reason-unreviewed	predates the sources gate; witness custody; classify when next touched
+convection_scaling.foley_bercovici_2014	scope	scope-unreviewed	predates the sources gate; witness custody; classify when next touched
+convection_scaling.foley_bercovici_2014	slim	slim-unreviewed	predates the sources gate; witness custody; classify when next touched
+convection_scaling.glomski_johnson_2012	licence-reason	licence-reason-unreviewed	predates the sources gate; witness custody; classify when next touched
+convection_scaling.glomski_johnson_2012	scope	scope-unreviewed	predates the sources gate; witness custody; classify when next touched
+convection_scaling.glomski_johnson_2012	slim	slim-unreviewed	predates the sources gate; witness custody; classify when next touched
+convection_scaling.komacek_abbot_2016	licence-reason	licence-reason-unreviewed	predates the sources gate; witness custody; classify when next touched
+convection_scaling.komacek_abbot_2016	scope	scope-unreviewed	predates the sources gate; witness custody; classify when next touched
+convection_scaling.komacek_abbot_2016	slim	slim-unreviewed	predates the sources gate; witness custody; classify when next touched
+convection_scaling.ricard_geodynamics_notes	licence-reason	licence-reason-unreviewed	predates the sources gate; witness custody; classify when next touched
+convection_scaling.ricard_geodynamics_notes	scope	scope-unreviewed	predates the sources gate; witness custody; classify when next touched
+convection_scaling.ricard_geodynamics_notes	slim	slim-unreviewed	predates the sources gate; witness custody; classify when next touched
+fan_2019	scope	scope-unreviewed	predates the sources gate; witness custody; classify when next touched
+fan_2019	slim	slim-unreviewed	predates the sources gate; witness custody; classify when next touched
+gruneisen.ahrens_1995_handbook	scope	scope-unreviewed	predates the sources gate; witness custody; classify when next touched
+gruneisen.ahrens_1995_handbook	slim	slim-unreviewed	predates the sources gate; witness custody; classify when next touched
+gruneisen.angel_etal_1997_quartz	licence-reason	licence-reason-unreviewed	predates the sources gate; witness custody; classify when next touched
+gruneisen.angel_etal_1997_quartz	scope	scope-unreviewed	predates the sources gate; witness custody; classify when next touched
+gruneisen.angel_etal_1997_quartz	slim	slim-unreviewed	predates the sources gate; witness custody; classify when next touched
+gruneisen.fan_2019_periclase	archive	archive-unreviewed	predates the sources gate; witness custody; classify when next touched
+gruneisen.fan_2019_periclase	scope	scope-unreviewed	predates the sources gate; witness custody; classify when next touched
+gruneisen.fan_2019_periclase	slim	slim-unreviewed	predates the sources gate; witness custody; classify when next touched
+gruneisen.speziale_2004_fayalite	archive	archive-unreviewed	predates the sources gate; witness custody; classify when next touched
+gruneisen.speziale_2004_fayalite	scope	scope-unreviewed	predates the sources gate; witness custody; classify when next touched
+gruneisen.speziale_2004_fayalite	slim	slim-unreviewed	predates the sources gate; witness custody; classify when next touched
+gruneisen.stixrude_lithgow_bertelloni_2005	licence-reason	licence-reason-unreviewed	predates the sources gate; witness custody; classify when next touched
+gruneisen.stixrude_lithgow_bertelloni_2005	scope	scope-unreviewed	predates the sources gate; witness custody; classify when next touched
+gruneisen.stixrude_lithgow_bertelloni_2005	slim	slim-unreviewed	predates the sources gate; witness custody; classify when next touched
+gruneisen.zha_1996_forsterite	archive	archive-unreviewed	predates the sources gate; witness custody; classify when next touched
+gruneisen.zha_1996_forsterite	scope	scope-unreviewed	predates the sources gate; witness custody; classify when next touched
+gruneisen.zha_1996_forsterite	slim	slim-unreviewed	predates the sources gate; witness custody; classify when next touched
+heyliger_2003_quartz	scope	scope-unreviewed	predates the sources gate; witness custody; classify when next touched
+heyliger_2003_quartz	slim	slim-unreviewed	predates the sources gate; witness custody; classify when next touched
+jackson_1999_enstatite	scope	scope-unreviewed	predates the sources gate; witness custody; classify when next touched
+jackson_1999_enstatite	slim	slim-unreviewed	predates the sources gate; witness custody; classify when next touched
+mit_ocw_12108	archive	archive-unreviewed	predates the sources gate; in_repo custody; classify when next touched
+mit_ocw_12108	scope	scope-unreviewed	predates the sources gate; in_repo custody; classify when next touched
+mit_ocw_12108	slim	slim-unreviewed	predates the sources gate; in_repo custody; classify when next touched
+rayleigh_critical_eigenvalues.bodenschatz_pesch_ahlers_2000	licence-reason	licence-reason-unreviewed	predates the sources gate; witness custody; classify when next touched
+rayleigh_critical_eigenvalues.bodenschatz_pesch_ahlers_2000	slim	slim-unreviewed	predates the sources gate; witness custody; classify when next touched
+rayleigh_critical_eigenvalues.glomski_johnson_2012	licence-reason	licence-reason-unreviewed	predates the sources gate; witness custody; classify when next touched
+rayleigh_critical_eigenvalues.glomski_johnson_2012	slim	slim-unreviewed	predates the sources gate; witness custody; classify when next touched
+rayleigh_critical_eigenvalues.goluskin_2016_internally_heated	licence-reason	licence-reason-unreviewed	predates the sources gate; witness custody; classify when next touched
+rayleigh_critical_eigenvalues.goluskin_2016_internally_heated	slim	slim-unreviewed	predates the sources gate; witness custody; classify when next touched
+rayleigh_critical_eigenvalues.ricard_geodynamics_notes	licence-reason	licence-reason-unreviewed	predates the sources gate; witness custody; classify when next touched
+rayleigh_critical_eigenvalues.ricard_geodynamics_notes	slim	slim-unreviewed	predates the sources gate; witness custody; classify when next touched
+rayleigh_critical_eigenvalues.sturtz_etal_2021_magma_ocean	licence-reason	licence-reason-unreviewed	predates the sources gate; witness custody; classify when next touched
+rayleigh_critical_eigenvalues.sturtz_etal_2021_magma_ocean	slim	slim-unreviewed	predates the sources gate; witness custody; classify when next touched
+robie_hemingway_1995	archive	archive-unreviewed	predates the sources gate; in_repo custody; classify when next touched
+robie_hemingway_1995	scope	scope-unreviewed	predates the sources gate; in_repo custody; classify when next touched
+robie_hemingway_1995	slim	slim-unreviewed	predates the sources gate; in_repo custody; classify when next touched
+speziale_2004	scope	scope-unreviewed	predates the sources gate; witness custody; classify when next touched
+speziale_2004	slim	slim-unreviewed	predates the sources gate; witness custody; classify when next touched
+wachtman_1960_corundum	archive	archive-unreviewed	predates the sources gate; in_repo custody; classify when next touched
+wachtman_1960_corundum	scope	scope-unreviewed	predates the sources gate; in_repo custody; classify when next touched
+wachtman_1960_corundum	slim	slim-unreviewed	predates the sources gate; in_repo custody; classify when next touched
+yoneda_1990	scope	scope-unreviewed	predates the sources gate; witness custody; classify when next touched
+yoneda_1990	slim	slim-unreviewed	predates the sources gate; witness custody; classify when next touched
+zha_1996	scope	scope-unreviewed	predates the sources gate; witness custody; classify when next touched
+zha_1996	slim	slim-unreviewed	predates the sources gate; witness custody; classify when next touched
+collection:aesopus_lowt	coverage	coverage-unreviewed	vendored data files with no [[source]] record; needs a collection-level source entry
+collection:janaf	coverage	coverage-unreviewed	vendored data files with no [[source]] record; needs a collection-level source entry
+collection:optical_constants_aesopus	coverage	coverage-unreviewed	vendored data files with no [[source]] record; needs a collection-level source entry
+collection:oxide_thermochemistry	coverage	coverage-unreviewed	vendored data files with no [[source]] record; needs a collection-level source entry

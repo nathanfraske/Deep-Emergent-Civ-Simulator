@@ -1,0 +1,211 @@
+# Critical-Rayleigh eigenvalue registry: the marginal-stability eigenvalues (critical Rayleigh number Ra_c and
+# critical wavenumber k_c) of a plane Boussinesq fluid layer, conditioned on the mechanical boundary class and on
+# the heating mode. These are the onset thresholds a geodynamics Ra_crit consumer reads: below Ra_c a layer
+# conducts, above it convects, and k_c sets the horizontal scale (cell aspect ratio / planform) of the first
+# unstable mode. A stability eigenvalue of the nondimensional Boussinesq equations is the same number on any
+# world (it depends only on the boundary conditions and the heating geometry, not on the fluid or the planet), so
+# it is a legitimate universal PHYSICS floor datum, unlike a planetary outcome. This registry deepens the three
+# eigenvalue rows already carried inside convection_scaling.toml (the Nu-Ra scaling column): it adds the printed
+# decompositions source-verbatim, the rigid-free provenance tangle, the modern error-bounded verified
+# computation, and the internally-heated (Rayleigh-Roberts) heating mode with its subcritical-onset bracket.
+#
+# BLOCK KIND [[eigenvalue]], the cited-data-COLUMN idiom (matching the optical-constants [[species]], the ionic
+# radii [[radius]], the convection [[constant]], and the gruneisen [[mineral]] columns), NOT a reserved floor
+# kind ([[element]] / [[axis]] / [[substance]]): an immutable transcription of cited stability-theory results,
+# out of the floor real/fantasy authorship axis and out of floor-Element policing. PROVENANCE: per-row citation
+# plus a header-cited held-source manifest (rayleigh_critical_eigenvalues/manifest.toml). CONDITIONING FIELDS
+# (the axes a consumer keys on): heating_mode (bottom_heated = classical Rayleigh-Benard, or internal =
+# Rayleigh-Roberts) and boundary_class (the mechanical velocity condition at each horizontal boundary).
+#
+# GRADE IS MIXED, declared per row (VENDORING_CHECKLIST.md mixed-grade rule): "analytic" for a closed-form
+# eigenvalue (free-free), "verified-numerical" for an interval-analysis result with a proven error bound
+# (Glomski & Johnson 2012), "numerical" for a spectral-collocation or transcendental-root solution
+# (Goluskin 2016; the classic rigid-rigid and rigid-free roots), and "measured" for a laboratory concordance.
+# The measured/analytic split the task named lives in this grade field; no row is a reserved floor value.
+#
+# WITNESSES (held bytes + sha256 receipts + Internet Archive snapshots in rayleigh_critical_eigenvalues/
+# manifest.toml; three cross-referenced in the sibling convection_scaling/ directory). The offline battery
+# scripts/rayleigh_eigenvalue_provenance_test.py rechecks every receipt, recomputes the two closed forms
+# (27*pi^4/4 and pi/sqrt(2)), reconstructs the rigid-free decomposition arithmetic, and asserts the owner's
+# pre-registered fingerprints, so a drifted source or a drifted transcription fails the build with no network.
+#
+# HONEST LIMITS. (1) These are Cartesian plane-layer eigenvalues; spherical-shell geometry shifts Ra_crit and is
+# a separate datum (Chandrasekhar 1961 ch. VI; not carried here). (2) The infinite-Prandtl / Boussinesq
+# idealization is assumed; the eigenvalues are Prandtl-number-independent but the Boussinesq approximation is
+# not exact for a deep compressible mantle. (3) Under internal heating the up-down symmetry is broken, so the
+# rigid-free class splits into two order-distinct cases (free surface on top vs on bottom), both carried.
+
+registry = "critical-Rayleigh marginal-stability eigenvalues (Ra_c, k_c) conditioned on boundary_class and heating_mode"
+regime = "plane horizontal Boussinesq layer, marginal (linear) stability, Prandtl-number-independent"
+
+
+# ============================================================================================================
+# PART 1: BOTTOM-HEATED (classical Rayleigh-Benard, RB1: both boundaries isothermal). Ra_c = g*alpha*dT*d^3 /
+# (kappa*nu), the standard Rayleigh number on the imposed top-to-bottom temperature difference dT. One row per
+# mechanical boundary class, each with its cross-source concordance (PART 3 discipline).
+# ============================================================================================================
+
+# Free-free (both boundaries stress-free / free-slip). The one class with a closed-form eigenvalue: Rayleigh's
+# 1916 analytic result. ANALYTIC grade, exact.
+[[eigenvalue]]
+name = "bottom_heated_free_free"
+heating_mode = "bottom_heated"
+boundary_class = "free-free"
+threshold_type = "marginal_stability"
+grade = "analytic"
+rayleigh_number = "657.511"
+closed_form = "27*pi^4/4"
+critical_wavenumber = "2.2214"
+wavenumber_closed_form = "pi/sqrt(2)"
+concordance = "Goluskin 2016 table 2.2 lists 657.511 and k=2.2214 (numerical, RB1 free-slip); Ricard ENS-Lyon notes state Rac=(27/4)pi^4~657 with k=pi/sqrt(2) (aspect ratio sqrt(2)). All agree with the closed form."
+citation = "Rayleigh, Lord (1916), On convection currents in a horizontal layer of fluid, Phil. Mag. 32(192), 529-546 (analytic 27*pi^4/4, k=pi/sqrt(2)); tabulated Chandrasekhar 1961 ch. II. Cross-source held witnesses: Goluskin 2016 (arXiv:1506.01656) table 2.2; Ricard geodynamics notes (convection_scaling/)."
+anchor = "27*pi^4/4 = 657.5113645; pi/sqrt(2) = 2.2214415. Goluskin table 2.2 RB1 free-slip row: 657.511, 2.2214."
+scope = "plane layer, both boundaries stress-free, bottom-heated Boussinesq onset; exact."
+
+# Rigid-rigid (both boundaries no-slip). Transcendental eigenvalue; the physically standard laboratory case
+# (fluid between two solid plates). NUMERICAL grade.
+[[eigenvalue]]
+name = "bottom_heated_rigid_rigid"
+heating_mode = "bottom_heated"
+boundary_class = "rigid-rigid"
+threshold_type = "marginal_stability"
+grade = "numerical"
+rayleigh_number = "1707.762"
+critical_wavenumber = "3.117"
+concordance = "Pellew & Southwell 1940 (rigorous) and Reid & Harris 1958 give 1707.762; Chandrasekhar 1961 ch. II tabulates 1707.762, a=3.117; Goluskin 2016 table 2.2 (RB1 no-slip) 1707.76, k=3.1163; Bodenschatz, Pesch & Ahlers 2000 review Rc=1708, ac=3.117. Four-source agreement to the rounding."
+citation = "Pellew, A. & Southwell, R.V. (1940), On maintained convective motion in a fluid heated from below, Proc. R. Soc. A 176, 312-343 (rigorous solution); Reid, W.H. & Harris, D.L. (1958), Some further results on the Benard problem, Phys. Fluids 1(2), 102-110; tabulated Chandrasekhar 1961 ch. II. Cross-source held witnesses: Goluskin 2016 table 2.2; Bodenschatz et al. 2000 (convection_scaling/)."
+anchor = "Chandrasekhar 1961 ch. II: Rc=1707.762, ac=3.117. Goluskin table 2.2 RB1 no-slip: 1707.76, 3.1163. Bodenschatz et al. 2000: Rc=1708, ac=3.117."
+scope = "plane layer, both boundaries no-slip, bottom-heated Boussinesq onset."
+
+# Rigid-free (one boundary no-slip, one stress-free). The physically relevant planetary-mantle case: a free
+# upper surface over a ~rigid base (order-symmetric under bottom heating: free-on-top equals free-on-bottom).
+# This row carries the PROVENANCE TANGLE source-verbatim and the MODERN VERIFIED value as its high-precision
+# concordance. NUMERICAL grade for the canonical value; the verified_* fields are VERIFIED-NUMERICAL.
+[[eigenvalue]]
+name = "bottom_heated_rigid_free"
+heating_mode = "bottom_heated"
+boundary_class = "rigid-free"
+threshold_type = "marginal_stability"
+grade = "numerical"
+rayleigh_number = "1100.65"
+critical_wavenumber = "2.682"
+order_symmetric = "true"
+order_symmetry_note = "Under bottom heating the free surface may be on either boundary with the same eigenvalue: Goluskin 2016 table 2.2 gives RB1 free-slip-top = free-slip-bottom = 1100.65, k=2.6823. Internal heating breaks this (see PART 2)."
+# The historical decompositions, transcribed exactly as Glomski & Johnson 2012 table 1 records each source's
+# 'original notation'. They all target the same eigenvalue but differ in trailing digits and denominators, and
+# two later works each attribute a different value to Reid & Harris 1958, who printed no explicit decimal. This
+# tangle is recorded faithfully (audit-the-input), not silently reconciled.
+decomposition_pellew_southwell_1940 = "17,610.5/16 = 1100.65  (= 1100.65625; numerator .5)"
+decomposition_reid_harris_1958 = "no explicit decimal printed; estimate for 16*Rc given as 17,610.39 (=> Rc = 1100.649; numerator .39)"
+decomposition_chandrasekhar_1961 = "17,610.39/16 = 1100.65  (= 1100.649375; cites Reid & Harris)"
+decomposition_drazin_reid_2004 = "17,610.39/24 = 1101  (printed as such, cites Reid & Harris; note 17,610.39/24 = 733.77 arithmetically, while 1101 is the integer rounding of 17,610.39/16 = 1100.649: the printed expression is internally inconsistent, a further strand of the tangle)"
+decomposition_others = "Low 1929: 1108 ('nearly 1108'); Koschmieder 1993: 1100.7; Getling 1998: 1100.657"
+tangle_note = "Reid & Harris 1958 gave no explicit decimal for Rc (only 16*Rc = 17,610.39). This is why two different values are each attributed to them: Chandrasekhar 1961 reports 1100.65 (/16) and Drazin & Reid 2004 report 1101, both citing Reid & Harris. Recorded per Glomski & Johnson 2012 table 1 and its footnote."
+# The modern error-bounded, verified computation (interval analysis, proven error bound), the concordance of
+# record and the value a consumer wanting many-digit precision reads.
+verified_value = "1100.6496068876767846274918888472711957506710554524140"
+verified_wavenumber = "2.6823217576934142448438929301107059823340014414401993"
+verified_grade = "verified-numerical"
+verified_citation = "Glomski, M. & Johnson, M.A. (2012), A precise calculation of the critical Rayleigh number and wave number for the rigid-free Rayleigh-Benard problem, Appl. Math. Sci. 6(101-104), 5097-5108, Theorem 4.1 (interval analysis, fifty-digit precision, error at most one digit in the last decimal place)."
+citation = "Canonical 1100.65: Pellew & Southwell 1940 (Proc. R. Soc. A 176, 312-343); Chandrasekhar 1961 ch. II. Historical tangle and modern verified value: Glomski & Johnson 2012 (held witness, convection_scaling/), Theorem 4.1 and table 1."
+anchor = "Glomski & Johnson 2012 Theorem 4.1: Rc = 1100.64960688...41401, kc = 2.68232175769...401993. Table 1: the source-verbatim decompositions above. Goluskin 2016 table 2.2 RB1 free-slip-top/bottom: 1100.65, 2.6823."
+scope = "plane layer, one no-slip and one stress-free boundary, bottom-heated Boussinesq onset; order-symmetric."
+
+
+# ============================================================================================================
+# PART 2: INTERNALLY HEATED (Rayleigh-Roberts, Roberts 1967). A layer heated volumetrically carries its OWN
+# nondimensionalization, so its onset numbers are NOT comparable to the bottom-heated Ra_c above without the
+# definition and a declared conversion (importing across nondimensionalizations without the definition is a
+# units defect). This section carries (a) the DEFINITION, (b) the subcritical-onset BRACKET, and (c) the
+# boundary-condition dependence, all verified at source in Goluskin 2016 and the geodynamics-convention
+# Sturtz et al. 2021 (which cites Roberts 1967).
+# ============================================================================================================
+
+# (a) THE DEFINITION ROW. The Rayleigh-Roberts number and its temperature scale, in two equivalent conventions,
+# with the reconciliation so a value may be imported across them safely. This is metadata, not an onset value:
+# rayleigh_number is left as the symbolic form.
+[[eigenvalue]]
+name = "rayleigh_roberts_definition"
+heating_mode = "internal"
+boundary_class = "definition (any)"
+threshold_type = "nondimensionalization"
+grade = "analytic"
+rayleigh_number = "R = g*alpha*H_T*d^5 / (kappa^2*nu)   [temperature-source convention]"
+alt_form = "Ra_H = alpha*rho0*g*H*h^5 / (eta*kappa*lambda)   [volumetric-heat convention]"
+temperature_scale = "Delta = H_T*d^2/kappa = H*h^2/lambda   (the layer depth enters Ra_H at the FIFTH power; the temperature scale scales as H*h^2/conductivity)"
+reconciliation = "The two forms are identical. Goluskin's H_T is a temperature-source rate (units K/s), the geodynamics H is a volumetric heat rate (units W/m^3); with H_T = H/(rho*cp), thermal conductivity lambda = rho*cp*kappa, and eta = rho*nu, both give Ra_H = alpha*g*H_T*d^5/(kappa^2*nu). Delta = H_T*d^2/kappa = H*h^2/lambda likewise coincide."
+conversion_to_bottom_heated_Ra = "Goluskin's diagnostic Rayleigh number Ra := R/N (eq. 1.35), where N is the Nusselt number: it replaces the a-priori static temperature scale Delta with the flowing-fluid temperature scale (for IH1, the maximum horizontally-averaged temperature, ~8*Tmax*Delta), bringing the internally-heated heat-transport bounds into the bottom-heated form Nu <= c*Ra^(1/2). A raw Ra_H is thus NOT a bottom-heated Ra_c; the conversion is dynamic (flow-dependent), not a constant factor."
+grade_note = "analytic (a definitional identity, not a measured or computed onset value)"
+citation = "Roberts, P.H. (1967), Convection in horizontal layers with internal heat generation. Theory, J. Fluid Mech. 30(1), 33-49 (origin of the Rayleigh-Roberts number). Held witnesses: Goluskin 2016 (arXiv:1506.01656) eqs. 1.5, 1.10, 1.35-1.38; Sturtz, Limare, Tait & Kaminski 2021 (arXiv:2108.00910) eqs. 1-3 (geodynamics convention, citing Roberts 1967)."
+anchor = "Goluskin eq. 1.5 Delta:=d^2*H/kappa (IH), eq. 1.10 R:=g*alpha*d^3*Delta/(kappa*nu), eq. 1.35 Ra:=R/N. Sturtz et al. eq. 1 DeltaT_H=H*h^2/lambda_f, eq. 2 Ra_H=alpha_f*rho0_f*g*H*h^5/(eta_f*kappa_f*lambda_f), eq. 3 Pr=eta_f/(rho0_f*kappa_f)."
+scope = "uniform volumetric internal heating, plane Boussinesq layer; the number itself, no boundary condition assumed."
+
+# (b) THE SUBCRITICAL-ONSET BRACKET, IH1 (both boundaries isothermal), NO-SLIP. Internally-heated convection
+# supports SUBCRITICAL onset: an energy-stability threshold RE below which the conducting state is globally
+# stable, well under the linear-instability threshold RL above which it is linearly unstable. Between them is
+# an amplitude-conditional band where finite-amplitude convection can persist but infinitesimal perturbations
+# decay. Two rows, the two edges, each with its critical wavenumber.
+[[eigenvalue]]
+name = "internal_ih1_noslip_energy_stability"
+heating_mode = "internal"
+boundary_class = "rigid-rigid"
+threshold_type = "energy_stability"
+edge_meaning = "lower edge: below RE the conducting (static) state is the unique globally stable state (any perturbation decays). Conducting."
+grade = "numerical"
+rayleigh_number = "26926.6"
+critical_wavenumber = "3.6174"
+bracket_partner = "internal_ih1_noslip_linear_instability"
+percent_below_linear = "27.9"
+concordance = "Goluskin 2016 energy-stability table (spectral collocation, optimal coupling gamma*=8.8831). An earlier energy-stability analysis by Kulacki & Goldstein 1972 reported smaller RE (non-optimal coupling parameters). Experimental class: Kulacki & Goldstein 1972 measured onset and heat transport in a uniformly heated water layer."
+citation = "Goluskin, D. (2016), Internally Heated Convection and Rayleigh-Benard Convection, SpringerBriefs in Applied Sciences and Technology (arXiv:1506.01656), energy-stability table for IH1. Experimental concordance: Kulacki, F.A. & Goldstein, R.J. (1972), Thermal convection in a horizontal fluid layer with uniform volumetric energy sources, J. Fluid Mech. 55(2), 271-287."
+anchor = "Goluskin IH1 no-slip energy row: RE=26 926.6, 27.9% below RL, gamma*=8.8831, kE=3.6174."
+scope = "IH1 (both boundaries isothermal), both no-slip; energy-stability (global) threshold."
+
+[[eigenvalue]]
+name = "internal_ih1_noslip_linear_instability"
+heating_mode = "internal"
+boundary_class = "rigid-rigid"
+threshold_type = "linear_instability"
+edge_meaning = "upper edge: above RL the conducting (static) state is linearly unstable, so any realizable state has sustained convection. Convecting."
+grade = "numerical"
+rayleigh_number = "37325.2"
+critical_wavenumber = "3.9989"
+bracket_partner = "internal_ih1_noslip_energy_stability"
+subcritical_band = "26926.6 <= R <= 37325.2 (RE to RL): the amplitude-conditional band, static state linearly stable but finite-amplitude convection possible; subcritical convection is confirmed for IH1."
+concordance = "Goluskin 2016 table 2.2 (spectral collocation). The Rayleigh-Roberts number convention is Roberts 1967's; the specific value depends on the boundary conditions (see the audit note below and PART 2c)."
+citation = "Goluskin, D. (2016), Internally Heated Convection and Rayleigh-Benard Convection (arXiv:1506.01656), table 2.2 (RL) and the subcritical-regime discussion. Origin of the number: Roberts, P.H. (1967), J. Fluid Mech. 30(1), 33-49."
+anchor = "Goluskin table 2.2 IH1 no-slip: RL=37 325.2, kL=3.9989. Subcritical-regime statement: RE<R<RL static state linearly stable but sustained flow possible."
+audit_note = "Roberts' OWN 1967 paper solved a different boundary configuration (uniform heating, cooled from above = Goluskin's IH3: fixed-flux bottom, fixed-temperature top), obtaining Rc=2772 at k=2.63 (Goluskin IH3 no-slip: RL=2772.27, kL=2.6293). So 2772 (Roberts' config) and 37325.2 (IH1) are the SAME nondimensional Rayleigh-Roberts number applied to DIFFERENT boundary conditions, not a discrepancy. Keying a value without its configuration is the units defect this registry guards against."
+scope = "IH1 (both boundaries isothermal), both no-slip; linear-instability threshold."
+
+# (c) THE BOUNDARY-CONDITION DEPENDENCE PERSISTS under internal heating, and internal heating BREAKS the
+# up-down symmetry, so the rigid-free class splits into two order-distinct cases. These rows record the linear
+# (RL) and energy (RE) thresholds for the free-slip variants of IH1, so a consumer keying on boundary_class
+# under internal heating reads the right pair. Goluskin 2016 table 2.2 (linear) and energy-stability table.
+[[eigenvalue]]
+name = "internal_ih1_freefree_linear_instability"
+heating_mode = "internal"
+boundary_class = "free-free"
+threshold_type = "linear_instability"
+grade = "numerical"
+rayleigh_number = "16992.2"
+critical_wavenumber = "3.0277"
+concordance = "Goluskin 2016 table 2.2, IH1 free-slip (both stress-free). Energy-stability partner RE=10618.1 (kE=2.5498), 37.5% below RL."
+citation = "Goluskin, D. (2016) (arXiv:1506.01656), table 2.2 (RL) and energy-stability table (RE), IH1 free-slip rows."
+anchor = "Goluskin table 2.2 IH1 free-slip: RL=16 992.2, kL=3.0277. Energy row: RE=10 618.1, kE=2.5498, 37.5% below."
+scope = "IH1, both boundaries stress-free; linear threshold (energy partner in concordance)."
+
+[[eigenvalue]]
+name = "internal_ih1_rigidfree_freetop_linear_instability"
+heating_mode = "internal"
+boundary_class = "rigid-free (free surface on top)"
+threshold_type = "linear_instability"
+grade = "numerical"
+rayleigh_number = "16669.8"
+critical_wavenumber = "3.0131"
+order_symmetric = "false"
+order_note = "Under internal heating the free-on-top and free-on-bottom cases DIFFER (up-down symmetry broken): free-top RL=16669.8 but free-bottom RL=37949.4. Contrast the bottom-heated rigid-free row, where the two orders coincide at 1100.65."
+concordance = "Goluskin 2016 table 2.2, IH1 free-slip-top. Energy partner RE=12620.2 (kE=2.9014), 24.3% below RL. The free-slip-bottom order: RL=37949.4 (kL=4.0867), RE=24722.8 (kE=3.3664)."
+citation = "Goluskin, D. (2016) (arXiv:1506.01656), table 2.2 and energy-stability table, IH1 free-slip-top and free-slip-bottom rows."
+anchor = "Goluskin table 2.2 IH1 free-slip-top RL=16 669.8 kL=3.0131; free-slip-bottom RL=37 949.4 kL=4.0867. Energy: free-slip-top RE=12 620.2 kE=2.9014; free-slip-bottom RE=24 722.8 kE=3.3664."
+scope = "IH1, one no-slip one stress-free; order matters under internal heating, both orders recorded."

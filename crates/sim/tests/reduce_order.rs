@@ -36,9 +36,9 @@
 //! The shuffles here are deterministic: a fixed reversal and a hand-written permutation, never
 //! `rand`, so the harness itself replays bit for bit.
 
+use civsim_bio::evidence::{AttrKindId, InferenceParams, ValueId};
+use civsim_bio::tom::{AccessChannelId, AccessWeights};
 use civsim_core::{canonical_sorted, Fixed, StableId};
-use civsim_sim::evidence::{AttrKindId, InferenceParams, ValueId};
-use civsim_sim::tom::{AccessChannelId, AccessWeights};
 use civsim_sim::typology::{
     sample_profile, tilted_weights, wals_seed, HarmonyModel, TiltParams, TypologyParamId,
     TypologyPrior, TypologyRegistry, TypologyValueId,

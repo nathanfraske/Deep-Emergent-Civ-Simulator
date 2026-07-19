@@ -74,8 +74,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use civsim_core::Fixed;
 use civsim_physics::laws;
 
-use crate::anatomy::{BodyPlan, BodyPlanRegistry};
-use crate::calibration::{CalibrationError, CalibrationManifest};
+use civsim_bio::anatomy::{BodyPlan, BodyPlanRegistry};
+use civsim_foundation::calibration::{CalibrationError, CalibrationManifest};
 
 /// The biology-floor axis a tissue carries its body-to-medium exchange surface on
 /// (`crates/physics/data/biology_floor.toml`), the area the heat-loss and coupling laws integrate over.
@@ -385,9 +385,9 @@ pub fn whole_body_water_density(plan: &BodyPlan, organs: &BodyPlanRegistry) -> F
 /// declares, each a development-weighted mean over the parts that carry it, generalizing
 /// [`whole_body_energy_density`] and [`crate::medium::body_density`] from one named axis to all of them. This
 /// is the physics of the matter a body is made of: the vector a corpse deposits into the tissue field
-/// ([`crate::material::TissueField`]) so the world can forage, work, and decompose an organism's remains by
+/// ([`civsim_foundation::material::TissueField`]) so the world can forage, work, and decompose an organism's remains by
 /// the SAME axes and mechanisms as any other matter, with no minted per-species substance and no authored
-/// species-to-substance map (Principle 8). The organs read their [`crate::anatomy::TissueComposition`] via
+/// species-to-substance map (Principle 8). The organs read their [`civsim_bio::anatomy::TissueComposition`] via
 /// `organ_composition`; the covering and each weapon read their `KindDef::material` DIRECTLY, because
 /// `organ_composition` searches only the organ list and a covering or weapon kind id would otherwise alias
 /// onto an unrelated organ sharing that numeric id. Locomotion (a bare kind-id vector with no development
@@ -405,7 +405,7 @@ pub fn whole_body_composition_vector(
     // read their material map directly (organ_composition would alias their kind id onto an organ). The
     // CONTRIBUTOR SET is deliberately organs, covering, and weapons only: senses and locomotion are NOT
     // contributors. This is load-bearing for what the corpse deposits: the senses carry optical axes
-    // (`opt.refractive_index`, `crate::anatomy` sense kinds), and were they added as contributors those
+    // (`opt.refractive_index`, `civsim_bio::anatomy` sense kinds), and were they added as contributors those
     // axes would enter this vector. The `opt.*` axis-union skip below already keeps optical axes out of the
     // deposited matter, so senses contribute nothing even if added, but a future change to the contributor
     // set (or a new non-optical axis on a sense) must be conscious of this coupling rather than break the
@@ -908,8 +908,8 @@ pub fn body_exchange_rate_from(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::anatomy::{OrganKindDef, Part, Temperament, TissueComposition};
     use crate::homeostasis::{Homeostasis, HomeostaticRegistry, ENERGY};
+    use civsim_bio::anatomy::{OrganKindDef, Part, Temperament, TissueComposition};
 
     #[test]
     fn being_signal_emission_derives_from_body_temperature_not_a_species_label() {
@@ -1168,7 +1168,7 @@ mod tests {
 
     #[test]
     fn surface_optical_axis_reads_one_axis_and_is_zero_for_absent() {
-        use crate::anatomy::KindDef;
+        use civsim_bio::anatomy::KindDef;
         let (mut reg, _skin, _flesh, _fat) = registry();
         // A covering carrying two optical axes with distinct values (a labelled fixture, not owner canon).
         let cov = reg.coverings.len() as u16;

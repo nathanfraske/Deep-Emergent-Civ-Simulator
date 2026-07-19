@@ -39,7 +39,7 @@ use std::collections::BTreeMap;
 use civsim_core::Fixed;
 use civsim_physics::laws::{self, DiscriminationLaw, ResponseLaw};
 
-use crate::sensorium::SenseChannelId;
+use civsim_foundation::sensorium::SenseChannelId;
 
 /// One channel's transduction as the being's OWN data: the response law and its parameters, the
 /// discrimination law and its step, and the detection threshold below which the being forms no percept.

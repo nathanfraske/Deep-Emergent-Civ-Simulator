@@ -38,8 +38,8 @@ use civsim_core::Fixed;
 use civsim_physics::laws;
 use civsim_world::{Coord3, TileMap};
 
-use crate::anatomy::{BodyPlan, BodyPlanRegistry};
 use crate::homeostasis::{Homeostasis, HomeostaticAxisDef, HomeostaticRegistry, RESPIRATION};
+use civsim_bio::anatomy::{BodyPlan, BodyPlanRegistry};
 
 /// The biology-floor axis id a respiratory organ carries its gas-exchange surface on (the physics
 /// biology floor, `crates/physics/data/biology_floor.toml`). A tissue with none of it is not a
@@ -429,7 +429,7 @@ pub fn in_medium_temperature_at(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::anatomy::{BodyPlan, OrganKindDef, Part, Temperament, TissueComposition};
+    use civsim_bio::anatomy::{BodyPlan, OrganKindDef, Part, Temperament, TissueComposition};
 
     fn temperament() -> Temperament {
         Temperament {

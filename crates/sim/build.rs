@@ -34,6 +34,8 @@ fn main() {
         "../units/src",
         "../materials/src",
         "../compose/src",
+        "../bio/src",
+        "../foundation/src",
         "../sim/src",
         "../world/src",
         "../../calibration",

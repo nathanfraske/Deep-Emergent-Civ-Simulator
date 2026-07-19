@@ -21,12 +21,12 @@
 
 use std::collections::BTreeMap;
 
+use civsim_bio::evidence::InferenceParams;
+use civsim_bio::tom::AccessWeights;
 use civsim_core::{Fixed, GaussApprox, StableId};
-use civsim_sim::evidence::InferenceParams;
 use civsim_sim::language::{
     ArticulationSubstrate, ConceptId, DriftParams, LangId, Language, LanguageParams,
 };
-use civsim_sim::tom::AccessWeights;
 use civsim_sim::world::World;
 use civsim_sim::{
     EpistemicStance, GenePool, GeneSet, GeneticScheme, IntrinsicBeliefs, Race, RaceId,

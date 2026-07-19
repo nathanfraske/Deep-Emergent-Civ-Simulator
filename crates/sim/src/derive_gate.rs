@@ -39,8 +39,8 @@
 //! live-but-byte-neutral derivation whose effect lands in a downstream deadband is a coverage gap the
 //! separate coverage signal reports, never a liveness failure (the gate's ruling).
 
-use crate::calibration::CalibrationManifest;
 use civsim_core::Fixed;
+use civsim_foundation::calibration::CalibrationManifest;
 
 /// Whether a derivation replaced an authored floor or is a new derived output. The liveness principle
 /// (perturb the input, assert the output responds) applies to both; the category only records which
@@ -245,7 +245,7 @@ const CANONICAL: &[CanonicalRow] = &[
         // derivations sharing the ticks_from_seconds kernel (gate ruling, #168).
         &["manifest:world.rotation_period_seconds"],
         "default",
-        "crates/sim/src/clock.rs",
+        "crates/foundation/src/clock.rs",
         "retired-floor",
     ),
     (
@@ -261,7 +261,7 @@ const CANONICAL: &[CanonicalRow] = &[
         "a world's year, day, and season in ticks, and the cell area",
         &["manifest:world.orbital_period_seconds"],
         "default",
-        "crates/sim/src/clock.rs",
+        "crates/foundation/src/clock.rs",
         "retired-floor",
     ),
     (
@@ -303,7 +303,7 @@ const CANONICAL: &[CanonicalRow] = &[
         // driver-param case the broadening turns from Unwired into a real probe).
         &["driver:life/biomass_reference"],
         "full",
-        "crates/sim/src/decompose.rs",
+        "crates/foundation/src/decompose.rs",
         "retired-floor",
     ),
     (
@@ -499,7 +499,7 @@ fn probe_tick_cadence(
     label: &str,
     period: Fixed,
 ) -> Result<ProbeReading, String> {
-    use crate::clock::{base_tick_seconds_fixed, ticks_from_seconds};
+    use civsim_foundation::clock::{base_tick_seconds_fixed, ticks_from_seconds};
     let base_tick =
         base_tick_seconds_fixed(m).map_err(|e| format!("{label} cadence probe: {e}"))?;
     let cadence_ticks = |seconds: Fixed| -> Result<Fixed, String> {
@@ -523,7 +523,7 @@ fn probe_tick_cadence(
 /// The year-cadence probe (`clock_calendar_cell`): the year in ticks must respond to
 /// `world.orbital_period_seconds`, the orbital period floored over the base tick.
 fn probe_year_cadence(m: &CalibrationManifest) -> Result<ProbeReading, String> {
-    use crate::clock::orbital_from_manifest;
+    use civsim_foundation::clock::orbital_from_manifest;
     let orbit = orbital_from_manifest(m).map_err(|e| format!("year cadence probe: {e}"))?;
     probe_tick_cadence(m, "year", orbit.orbital_period_seconds)
 }
@@ -534,7 +534,7 @@ fn probe_year_cadence(m: &CalibrationManifest) -> Result<ProbeReading, String> {
 /// rather than one probe under two ids (gate ruling, #168). The rotation cadence is a real run-path
 /// derivation: `DiurnalSky::rotation_period_ticks` drives the diurnal cycle.
 fn probe_day_cadence(m: &CalibrationManifest) -> Result<ProbeReading, String> {
-    use crate::clock::orbital_from_manifest;
+    use civsim_foundation::clock::orbital_from_manifest;
     let orbit = orbital_from_manifest(m).map_err(|e| format!("day cadence probe: {e}"))?;
     probe_tick_cadence(m, "day", orbit.rotation_period_seconds)
 }
@@ -607,7 +607,7 @@ fn probe_productivity_capacity(m: &CalibrationManifest) -> Result<ProbeReading, 
 /// the activity. This turns the phantom-input row into a real probe. The manifest is unused: the input
 /// lives on the driver, not the manifest.
 fn probe_decomposition_recovery(_m: &CalibrationManifest) -> Result<ProbeReading, String> {
-    use crate::decompose::{DecomposerDriver, DecomposerDriverRegistry};
+    use civsim_foundation::decompose::{DecomposerDriver, DecomposerDriverRegistry};
     // A registry of one Life row, so `activity_at` returns that row's contribution:
     // saturating_response(life_stock, biomass_reference). A stock below the reference keeps the read in
     // the rising region (not saturated at either end). Situation scaffolding; it never enters the sim.

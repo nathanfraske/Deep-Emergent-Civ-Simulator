@@ -80,6 +80,15 @@ print(json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart", "addit
 PY
 )"
 
+# Cargo build-artifact ring buffer (scripts/target_gc.sh). Cargo never garbage-collects a target
+# directory, and one target per agent worktree grew to 244 GB here, which is what pushed the volume into
+# the compression attempt that corrupted the install. This bounds it once per session. It is detached and
+# wholly silent because this hook's stdout must remain a single valid JSON object; the report goes to the
+# log. The script stands down by itself when a build is in flight and never touches a locked worktree.
+if [ -x "$ROOT/scripts/target_gc.sh" ]; then
+  ( setsid "$ROOT/scripts/target_gc.sh" >> "$ROOT/.claude/target_gc.log" 2>&1 & ) >/dev/null 2>&1 </dev/null
+fi
+
 # Guard the Python step: on any failure (including a crash on unusual content) emit a
 # minimal valid object, never nothing and never malformed JSON.
 if [ $? -ne 0 ] || [ -z "$out" ]; then

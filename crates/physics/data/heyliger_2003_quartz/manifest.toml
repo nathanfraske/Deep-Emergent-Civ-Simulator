@@ -8,6 +8,10 @@
 [[source]]
 file = "heyliger_quartz_jasa2003.pdf"
 sha256 = "eca2dffeb19ab4deb90be9e8f3056081bea6ed41914b15a06829dd5d597cdfcd"
+custody = "witness"
+archived_url = "https://web.archive.org/web/20250325200634/https://tsapps.nist.gov/publication/get_pdf.cfm?pub_id=851249"
+witness_verified = "Wayback capture re-fetched 2026-07-18 and hashed: 164700 bytes, sha256 BYTE-IDENTICAL to the receipt below."
+witness_note = "CONVERTED TO CITATION-PLUS-WITNESS on 2026-07-18 under the owner's ruling: a source with a public link and no redistribution licence is held as citation plus Wayback witness plus the full provenance record, and its bytes are NOT vendored into the repo. The sha256 below is retained as the RE-FETCH RECEIPT: it still verifies against the archived copy, so the provenance is unbroken. See sources/licences.toml for the licence finding and docs/working/FETCH_PIPELINE_PLAN.md section 3."
 citation = "Heyliger, P., Ledbetter, H., and Kim, S., 2003, Elastic constants of natural quartz, J. Acoust. Soc. Am. 114(2), 644-650, DOI 10.1121/1.1593063"
 recipe = "GET https://tsapps.nist.gov/publication/get_pdf.cfm?pub_id=851249 (NIST tsapps, open)"
 pages = 7

@@ -320,6 +320,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "civsim-bio"
+version = "0.1.0"
+dependencies = [
+ "civsim-compose",
+ "civsim-core",
+ "civsim-foundation",
+ "civsim-physics",
+ "rayon",
+ "serde",
+ "toml 0.8.23",
+]
+
+[[package]]
 name = "civsim-compose"
 version = "0.1.0"
 dependencies = [
@@ -330,6 +343,19 @@ dependencies = [
 [[package]]
 name = "civsim-core"
 version = "0.1.0"
+
+[[package]]
+name = "civsim-foundation"
+version = "0.1.0"
+dependencies = [
+ "civsim-bio",
+ "civsim-compose",
+ "civsim-core",
+ "civsim-physics",
+ "civsim-world",
+ "serde",
+ "toml 0.8.23",
+]
 
 [[package]]
 name = "civsim-gpu"
@@ -363,8 +389,10 @@ dependencies = [
 name = "civsim-sim"
 version = "0.1.0"
 dependencies = [
+ "civsim-bio",
  "civsim-compose",
  "civsim-core",
+ "civsim-foundation",
  "civsim-gpu",
  "civsim-materials",
  "civsim-physics",
@@ -392,7 +420,10 @@ dependencies = [
 name = "civsim-viewer"
 version = "0.1.0"
 dependencies = [
+ "civsim-bio",
  "civsim-core",
+ "civsim-foundation",
+ "civsim-gpu",
  "civsim-materials",
  "civsim-physics",
  "civsim-sim",

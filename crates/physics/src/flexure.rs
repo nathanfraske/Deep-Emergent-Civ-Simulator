@@ -74,10 +74,15 @@
 //!   4.3 percent of the central depression). This uses only exp/cos/sin, which the fixed-point library carries
 //!   exactly, so it is the PROVEN core.
 //! - POINT LOAD (axisymmetric, infinite plate), Brotchie & Silvester 1969 / TAFI eq. 6: for a point load `Q0`
-//!   at the origin, `w(r) = Q0 (alpha^2 / (2 pi D)) kei(r/alpha)`, where `kei` is the zeroth-order Kelvin
-//!   function and `r` the radial distance. `kei(0) = -pi/4`, so the central deflection magnitude is
-//!   `Q0 alpha^2 / (8 D)`, structurally parallel to the line-load `w0`. [`kelvin_kei`] evaluates `kei` from its
-//!   Abramowitz-Stegun 9.9 ascending series in fixed point; see its accuracy band below.
+//!   at the origin, `w(r) = Q0 (l^2 / (2 pi D)) kei(r/l)`, where `kei` is the zeroth-order Kelvin function, `r`
+//!   the radial distance, and `l = (D / (delta_rho g))^(1/4) = alpha / sqrt(2)` the AXISYMMETRIC flexural
+//!   length, which is NOT the line-load `alpha` above. `kei(0) = -pi/4`, so the central deflection magnitude is
+//!   `Q0 l^2 / (8 D)`, which in the line-load parameter is `Q0 alpha^2 / (16 D)`. It is deliberately NOT
+//!   structurally parallel to the line-load `w0`: assuming that parallelism is what welded the two lengths and
+//!   made the moat sqrt(2) too wide and 2x too deep here until 2026-07-17. The factor of 4 in `alpha` belongs to
+//!   the one-dimensional line-load ODE alone (McNutt and Menard 1982 eq. A8; the TAFI Table 1 point-load row
+//!   carries no factor of 4). [`kelvin_kei`] evaluates `kei` from its Abramowitz-Stegun 9.9 ascending series in
+//!   fixed point; see its accuracy band below.
 //!
 //! # No free constants
 //!
@@ -256,13 +261,28 @@ pub fn line_load_deflection(v0: Fixed, alpha: Fixed, d: Fixed, perp_dist: Fixed)
     w0.checked_mul(shape)
 }
 
-/// The POINT-LOAD (axisymmetric) deflection `w(r) = Q0 (alpha^2 / (2 pi D)) kei(r/alpha)` (Brotchie & Silvester
-/// 1969 / TAFI eq. 6, the impulse-response Green's function; PIPELINE_FETCHES.md section 1), the flexure at radial
-/// distance `r` from a point load of magnitude `q0`, given the flexural parameter `alpha` and rigidity `d`. As
-/// with the line load the value is signed: `kei(0) = -pi/4` gives the central depression of magnitude
-/// `Q0 alpha^2 / (8 D)`, and `kei` crosses zero and rises into the axisymmetric forebulge farther out. The
-/// `2 pi` is the formula's own. Fails loud (`None`) on a non-positive `alpha` or `d`, a negative `r`, or an
-/// out-of-range intermediate. Deterministic.
+/// The POINT-LOAD (axisymmetric) deflection `w(r) = Q0 (l^2 / (2 pi D)) kei(r/l)` (Brotchie & Silvester 1969 /
+/// TAFI eq. 6, the impulse-response Green's function), the flexure at radial distance `r` from a point load of
+/// magnitude `q0`, given rigidity `d`.
+///
+/// THE LENGTH IN THE FORMULA IS NOT THE ARGUMENT. The caller passes `alpha`, the LINE-LOAD flexural parameter
+/// `(4 D / (delta_rho g))^(1/4)`, because that is what every caller already holds; this function converts once
+/// to the AXISYMMETRIC length `l = (D / (delta_rho g))^(1/4) = alpha / sqrt(2)`
+/// ([`flexural_length_axisymmetric`]) and runs the Green's function on `l`. The factor of 4 belongs to the
+/// one-dimensional line-load ODE, never to the axisymmetric plate equation, whose `grad^4 kei(r/l) =
+/// -(1/l^4) kei(r/l)` cancels the restoring term only at `l^4 = D / (delta_rho g)` (McNutt and Menard 1982
+/// eq. A8; the TAFI Table 1 point-load row, which carries no factor of 4).
+///
+/// So the value is signed and `kei(0) = -pi/4` gives a central depression of magnitude `Q0 l^2 / (8 D)`, which
+/// in the caller's own `alpha` is `Q0 alpha^2 / (16 D)`, HALF what the line-load parameter alone would suggest.
+/// `kei` crosses zero and rises into the axisymmetric forebulge farther out. The `2 pi` is the formula's own.
+///
+/// Stated at this length because the welded form was a real defect here, not a hypothetical one: this function
+/// read `kei(r/alpha)` and scaled by `alpha^2` until 2026-07-17, which made the moat sqrt(2) too wide and 2x too
+/// deep, from a misread of TAFI Table 1 in PIPELINE_FETCHES.md that welded one `alpha` to both load types.
+///
+/// Fails loud (`None`) on a non-positive `alpha` or `d`, a negative `r`, or an out-of-range intermediate.
+/// Deterministic.
 pub fn point_load_deflection(q0: Fixed, alpha: Fixed, d: Fixed, r: Fixed) -> Option<Fixed> {
     if alpha <= Fixed::ZERO || d <= Fixed::ZERO || r < Fixed::ZERO {
         return None;

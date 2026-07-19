@@ -29,7 +29,7 @@
 //! side-effecting observation would shift). A render-equivalent read of the `LivingWorld` is folded
 //! into the observation so the guard covers the render path with no `viewer` dependency.
 
-use civsim_sim::conservation::ConservationRegistry;
+use civsim_foundation::conservation::ConservationRegistry;
 use civsim_sim::environ::AbioticSourceRegistry;
 use civsim_sim::genesis::{GenesisParams, WorldGenesis};
 use civsim_sim::lod::TwoTierWorld;

@@ -8,6 +8,10 @@
 [[source]]
 file = "speziale_jgr_04.pdf"
 sha256 = "729d9ecac7fa4563634ca3dc9e5b4ab7a494e2af79fdd3a4266ac0093e602b0c"
+custody = "witness"
+archived_url = "https://web.archive.org/web/20240722035045/https://duffy.princeton.edu/sites/g/files/toruqf616/files/speziale_jgr_04.pdf"
+witness_verified = "Wayback capture re-fetched 2026-07-18 and hashed: 756757 bytes, sha256 BYTE-IDENTICAL to the receipt below."
+witness_note = "CONVERTED TO CITATION-PLUS-WITNESS on 2026-07-18 under the owner's ruling: a source with a public link and no redistribution licence is held as citation plus Wayback witness plus the full provenance record, and its bytes are NOT vendored into the repo. The sha256 below is retained as the RE-FETCH RECEIPT: it still verifies against the archived copy, so the provenance is unbroken. See sources/licences.toml for the licence finding and docs/working/FETCH_PIPELINE_PLAN.md section 3."
 citation = "Speziale, S., Duffy, T.S., and Angel, R.J., 2004, Single-crystal elasticity of fayalite to 12 GPa, J. Geophys. Res. 109, B12202, DOI 10.1029/2004JB003162"
 recipe = "GET https://duffy.princeton.edu/sites/g/files/toruqf616/files/speziale_jgr_04.pdf (open)"
 pages = 15

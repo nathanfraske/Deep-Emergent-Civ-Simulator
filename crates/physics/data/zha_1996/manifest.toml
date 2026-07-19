@@ -8,6 +8,10 @@
 [[source]]
 file = "zha_etal_jgr_1996.pdf"
 sha256 = "3f2a66fb1dca0204b41faf792ddd31d2e1e38e5e2e640e646d2bf757678043f4"
+custody = "witness"
+archived_url = "https://web.archive.org/web/20240804095129/https://duffy.princeton.edu/sites/g/files/toruqf616/files/zha_etal_jgr_1996.pdf"
+witness_verified = "Wayback capture re-fetched 2026-07-18 and hashed: 326494 bytes, sha256 BYTE-IDENTICAL to the receipt below."
+witness_note = "CONVERTED TO CITATION-PLUS-WITNESS on 2026-07-18 under the owner's ruling: a source with a public link and no redistribution licence is held as citation plus Wayback witness plus the full provenance record, and its bytes are NOT vendored into the repo. The sha256 below is retained as the RE-FETCH RECEIPT: it still verifies against the archived copy, so the provenance is unbroken. See sources/licences.toml for the licence finding and docs/working/FETCH_PIPELINE_PLAN.md section 3."
 citation = "Zha, C.-S., Duffy, T.S., Downs, R.T., Mao, H.-K., and Hemley, R.J., 1996, Sound velocity and elasticity of single-crystal forsterite to 16 GPa, J. Geophys. Res. 101(B8), 17535-17545, DOI 10.1029/96JB01266"
 recipe = "GET https://duffy.princeton.edu/sites/g/files/toruqf616/files/zha_etal_jgr_1996.pdf (open)"
 pages = 11

@@ -37,6 +37,8 @@ use civsim_sim::genesis::LivingWorld;
 use civsim_sim::geodynamics::DerivedTile;
 use civsim_world::terrain::TerrainRelief;
 use civsim_world::{BiomeSet, Coord3, Rgb, TopologySpace};
+#[cfg(feature = "gpu")]
+use rayon::prelude::*;
 
 /// The colour of an organism mark: a base hue by trophic layer, jittered per species so each
 /// kind is a distinct individual form. Presentation only, never canonical state.
@@ -1197,6 +1199,149 @@ pub fn crater_relief_km(stamps: &[CraterStamp], p: [Fixed; 3]) -> Fixed {
     z
 }
 
+/// NON-CANON DISPLAY (Principle 10): one fresh crater's transient IMPACT-EVENT flash, the watchable incandescent
+/// bloom a strike paints over its settled static relief and that RELAXES back into that relief as the deep-time
+/// clock advances past its formation. Where [`CraterStamp`] is the crater's permanent shape, this is the brief
+/// event at its birth: a viewer watching deep time SEES the impact land, then sees the flash fade to the quiet
+/// crater. Every physical property is DERIVED from the crater's own row: WHEN it flashes is the crater's own
+/// formation tick ([`CraterRow::age_myr`], the clock reading at the strike), WHERE it sits and how WIDE the bloom
+/// spreads is the crater's own ejecta footprint (the same `center`, `angular_radius`, and reach cone the relief
+/// stamp derives), and how it FADES is the crater's own time-decay from that formation tick. Only the emission HUE
+/// and the brightness GAIN are display constants (siblings of the lava glow's), because the state carries no derived
+/// shock temperature: the sim never forms the impact's kinetic energy (it overflows the fixed-point range, see
+/// [`civsim_sim::deeptime::bombard_tick`]). Carried in the display f32 tier the globe pixel loop emits in
+/// ([`draw_globe`], the tier the lava glow and hillshade already run in), with the load-bearing timing derived in
+/// fixed-point so the same clock step yields the same flash to the bit (Principle 3).
+#[derive(Clone, Copy, Debug)]
+pub struct ImpactFlash {
+    /// The crater centre as a BODY-frame unit vector (the globe pixel loop's f32 tier).
+    center: [f32; 3],
+    /// The crater's rim radius as an angle on the sphere (radians), its own `(D/2)/R` footprint.
+    angular_radius: f32,
+    /// cos(reach cone): a pixel whose centre-dot is below this lies outside the bloom and is skipped cheaply.
+    cos_reach: f32,
+    /// The flash brightness in `[0, 1]` at the render's current epoch: the crater's own time-decay, peak `1` at its
+    /// formation tick and `0` once a full relaxation window has passed (after which the crater carries no flash).
+    intensity: f32,
+}
+
+impl ImpactFlash {
+    /// Prepare a crater row as a transient impact flash at the render's current deep-time `epoch_myr`, over a
+    /// `window_myr` relaxation window. `None` when the crater is degenerate (the same guard [`CraterStamp::from_row`]
+    /// applies) OR when the epoch lies outside the crater's flash window: before it formed (`epoch < formation`) or
+    /// after it has settled (`epoch >= formation + window`). So a caller mapping this over every crater keeps only
+    /// the few currently flashing, and the emission is a transient the viewer catches at each impact's own birth.
+    /// The brightness is the DECLARED decay shape below; the geometry is the relief stamp's, carried to f32.
+    pub fn from_row(
+        row: &CraterRow,
+        radius_m: Fixed,
+        epoch_myr: Fixed,
+        window_myr: Fixed,
+    ) -> Option<ImpactFlash> {
+        if window_myr <= Fixed::ZERO {
+            return None;
+        }
+        // The crater's age since formation: [`CraterRow::age_myr`] is the elapsed clock reading AT the strike (the
+        // formation tick), so the age is the current epoch minus it. Outside `[0, window)` the crater is not flashing
+        // (not yet formed, or already relaxed to its static relief), so it contributes no emission.
+        let since = epoch_myr.checked_sub(row.age_myr)?;
+        if since < Fixed::ZERO || since >= window_myr {
+            return None;
+        }
+        // `phase` in [0, 1): 0 at formation, -> 1 as it settles.
+        let phase = since.checked_div(window_myr)?;
+        // THE DECLARED DECAY SHAPE (the one display curve this effect is allowed): a quadratic ease-out
+        // `(1 - phase)^2`, brightest (1) at the formation tick and easing smoothly to 0 a full window later. It is a
+        // monotone fade (the flash peaks at the strike and only relaxes, never re-brightens), documented rather than
+        // derived because no physical shock-cooling timescale is in the state; the relaxation WINDOW it runs over is
+        // the caller's reserved-with-basis display duration.
+        let one_minus = Fixed::ONE.checked_sub(phase)?;
+        let intensity = one_minus.mul(one_minus);
+        // Reuse the relief stamp's geometry AND its degenerate-row guard (a non-positive radius or diameter yields
+        // `None`), then carry the few numbers the pixel loop needs into its f32 display tier.
+        let stamp = CraterStamp::from_row(row, radius_m)?;
+        Some(ImpactFlash {
+            center: [
+                stamp.center[0].to_f64_lossy() as f32,
+                stamp.center[1].to_f64_lossy() as f32,
+                stamp.center[2].to_f64_lossy() as f32,
+            ],
+            angular_radius: stamp.angular_radius.to_f64_lossy() as f32,
+            cos_reach: stamp.cos_reach.to_f64_lossy() as f32,
+            intensity: intensity.to_f64_lossy() as f32,
+        })
+    }
+
+    /// Prepare a crater row as a HELD impact flash at a caller-supplied display `intensity` in `[0, 1]`, for the
+    /// interactive FRAME-HOLD path. The observer's deep-time clock can jump many ticks per rendered frame at high
+    /// playback speed, so a flash keyed only to the clock epoch (the headless single-epoch [`active_flash_stamps`])
+    /// can be skipped between frames; the interactive viewer instead holds each fresh crater's bloom for a floor
+    /// number of RENDERED frames and supplies the fade intensity from that frame count. The GEOMETRY is the SAME
+    /// derived crater footprint the epoch-window flash uses ([`CraterStamp::from_row`], so an alien or low-gravity
+    /// world's larger crater blooms wider by its own scaling); only the intensity comes from the frame-hold, not
+    /// from a clock epoch. `None` on a degenerate row (the same guard [`CraterStamp::from_row`] applies).
+    /// Display-only (Principle 10); the geometry is fixed-point, the intensity the display f32 tier.
+    pub fn held(row: &CraterRow, radius_m: Fixed, intensity: f32) -> Option<ImpactFlash> {
+        let stamp = CraterStamp::from_row(row, radius_m)?;
+        Some(ImpactFlash {
+            center: [
+                stamp.center[0].to_f64_lossy() as f32,
+                stamp.center[1].to_f64_lossy() as f32,
+                stamp.center[2].to_f64_lossy() as f32,
+            ],
+            angular_radius: stamp.angular_radius.to_f64_lossy() as f32,
+            cos_reach: stamp.cos_reach.to_f64_lossy() as f32,
+            intensity: intensity.clamp(0.0, 1.0),
+        })
+    }
+}
+
+/// Prepare the fresh-impact FLASHES of a crater set at the render's current deep-time `epoch_myr`: map every crater
+/// through [`ImpactFlash::from_row`] and keep only those currently flashing (formed within the last `window_myr`),
+/// so the returned list is small (the quiescent majority of a heavily-cratered world drops out). The globe pixel
+/// loop emits these over the shaded crust ([`crater_flash_emission`]), so as the clock steps past each crater's
+/// formation the viewer SEES it land and fade. Empty when no crater is fresh, so the render adds nothing there
+/// (byte-identical). Display-only (Principle 10); deterministic in the crater rows and the clock (Principle 3).
+pub fn active_flash_stamps(
+    craters: &[CraterRow],
+    radius_m: Fixed,
+    epoch_myr: Fixed,
+    window_myr: Fixed,
+) -> Vec<ImpactFlash> {
+    craters
+        .iter()
+        .filter_map(|row| ImpactFlash::from_row(row, radius_m, epoch_myr, window_myr))
+        .collect()
+}
+
+/// THE ANALYTIC IMPACT-FLASH EMISSION at a globe sample direction `b` (a display f32 unit vector): the summed
+/// brightness in `[0, ~]` every fresh crater covering `b` contributes, its time-decayed intensity shaped by the
+/// crater's OWN footprint, the SAME shape the static relief stamps: full over the excavation bowl (`x <= 1`, the
+/// incandescent crater interior) and the `x^-3` ejecta falloff beyond the rim (`x > 1`, the glowing blanket),
+/// continuous at the rim. Beyond a crater's reach cone it contributes nothing (the cheap far-majority reject, the
+/// same bound the relief stamp uses). Zero for an empty list or a sample no fresh crater covers. Display-only f32
+/// (Principle 10), the tier the lava glow and hillshade run in; [`draw_globe`] scales this by the flash hue and gain
+/// and ADDS it, so a fresh impact glows on the night side too (it emits, it does not reflect).
+fn crater_flash_emission(flashes: &[ImpactFlash], b: [f32; 3]) -> f32 {
+    let mut e = 0.0f32;
+    for f in flashes {
+        let dot = b[0] * f.center[0] + b[1] * f.center[1] + b[2] * f.center[2];
+        if dot < f.cos_reach || f.angular_radius <= 0.0 {
+            continue;
+        }
+        // The great-circle angle from the cross-product magnitude (|b x c| = sin angle), precise for these small
+        // crater angles (dot >= cos_reach >= 0, so the angle is at most the reach, within a hemisphere).
+        let cx = b[1] * f.center[2] - b[2] * f.center[1];
+        let cy = b[2] * f.center[0] - b[0] * f.center[2];
+        let cz = b[0] * f.center[1] - b[1] * f.center[0];
+        let angle = (cx * cx + cy * cy + cz * cz).sqrt().clamp(0.0, 1.0).asin();
+        let x = angle / f.angular_radius;
+        let profile = if x <= 1.0 { 1.0 } else { 1.0 / (x * x * x) };
+        e += f.intensity * profile;
+    }
+    e
+}
+
 /// The lat-lon surface fraction `(fu, fv)` of a BODY-frame direction: `fu` the longitude fraction in `[0, 1)`
 /// (wrapping the meridian) and `fv` the latitude fraction in `[0, 1]`, the same `lon = u*2pi - pi`,
 /// `lat = (0.5 - v)*pi` sphere map [`crater_uv_unit`] inverts. This is the coordinate the COARSE province field is
@@ -1260,6 +1405,95 @@ pub fn sample_province_field(
     lerp_fx(top, bot, ty)
 }
 
+/// A POLE-AWARE, SMOOTHER display resample of a coarse per-province `field` (one value per province, row-major
+/// `pcols` by `prows`), the sibling of [`sample_province_field`] for the CACHE-BUILD / derivation callers that want
+/// a smooth field rather than the analytic-gradient-matched bilinear one. It differs from the plain sampler in two
+/// display-only ways, each aimed at one of the coarse lat-lon field's two visible artifacts:
+///
+/// - SMOOTHER MESH. The interpolation weights pass through a quintic smootherstep (Hermite, zero-sloped at the cell
+///   edges, so the interpolant is C1 there) rather than staying linear (C0), so the boxy province-cell mesh softens
+///   instead of showing its facets.
+/// - NO POLE SPOKES. Near a pole the lat-lon columns converge to a point, so the plain bilinear reads radial spokes
+///   there; this blends the sample toward the poleward-most province row's LONGITUDE MEAN as the pole is approached
+///   (over the width of that one row), collapsing the converging columns into a smooth cap.
+///
+/// It is NOT the analytic partner of [`SurfaceField::gradient`] (the smootherstep is not the derivative the gradient
+/// takes), so it is used ONLY where no surface NORMAL is read off the same field: the lava glow
+/// ([`super::derive_province_lava`]), a self-emitted colour field with no gradient. The height cache keeps the plain
+/// [`sample_province_field`] so its analytic gradient (the pixel-shader normal) stays that field's exact derivative,
+/// the standing numerical twin. Deterministic fixed-point with an f32 weight (the same 1/[`PROVINCE_LERP_STEPS`]
+/// quantization the plain sampler carries), so a parallel cache build is thread-count-independent. Display-only
+/// (Principle 10), a resampling of the DERIVED field, never fabricated content.
+pub fn sample_province_field_smooth(
+    field: &[Fixed],
+    pcols: usize,
+    prows: usize,
+    fu: f32,
+    fv: f32,
+) -> Fixed {
+    if pcols == 0 || prows == 0 || field.len() < pcols * prows {
+        return Fixed::ZERO;
+    }
+    let pc = pcols as i64;
+    let pr = prows as i64;
+    let gx = fu * pc as f32 - 0.5;
+    let gy = fv * pr as f32 - 0.5;
+    let x0 = gx.floor();
+    let y0 = gy.floor();
+    // The quintic smootherstep 6t^5 - 15t^4 + 10t^3 of the cell-local fraction: zero-sloped at both cell edges, so
+    // the interpolant meets its neighbours smoothly (the mesh softens). A display weight, quantized by the lerp below.
+    let smootherstep = |t: f32| -> f32 {
+        let t = t.clamp(0.0, 1.0);
+        t * t * t * (t * (t * 6.0 - 15.0) + 10.0)
+    };
+    let tx = smootherstep(gx - x0);
+    let ty = smootherstep(gy - y0);
+    let x0i = x0 as i64;
+    let y0i = y0 as i64;
+    let at = |xi: i64, yi: i64| -> Fixed {
+        let x = xi.rem_euclid(pc) as usize; // wrap longitude
+        let y = yi.clamp(0, pr - 1) as usize; // clamp latitude
+        field.get(y * pcols + x).copied().unwrap_or(Fixed::ZERO)
+    };
+    let lerp_fx = |a: Fixed, b: Fixed, t: f32| -> Fixed {
+        let tf = Fixed::from_ratio(
+            (t.clamp(0.0, 1.0) * PROVINCE_LERP_STEPS as f32) as i64,
+            PROVINCE_LERP_STEPS,
+        );
+        b.checked_sub(a)
+            .and_then(|d| d.checked_mul(tf))
+            .and_then(|d| a.checked_add(d))
+            .unwrap_or(a)
+    };
+    let top = lerp_fx(at(x0i, y0i), at(x0i + 1, y0i), tx);
+    let bot = lerp_fx(at(x0i, y0i + 1), at(x0i + 1, y0i + 1), tx);
+    let value = lerp_fx(top, bot, ty);
+    // THE POLE CAP: within the poleward-most province row, blend toward that row's longitude MEAN so the converging
+    // lat-lon columns read as a smooth cap rather than radial spokes. The blend ramps (smootherstep) from the full
+    // mean AT the pole to none one province row in. `row_mean` averages a pole row across its longitudes.
+    let row_mean = |row: i64| -> Fixed {
+        let base = (row.clamp(0, pr - 1) as usize) * pcols;
+        let mut sum = Fixed::ZERO;
+        for c in 0..pcols {
+            sum = sum
+                .checked_add(field.get(base + c).copied().unwrap_or(Fixed::ZERO))
+                .unwrap_or(sum);
+        }
+        sum.checked_div(Fixed::from_int(pcols as i32))
+            .unwrap_or(sum)
+    };
+    let pole_band = 1.0 / prows as f32; // one province row, in fv units
+    if fv < pole_band {
+        let w = smootherstep(1.0 - fv / pole_band); // 1 at the north pole, 0 one row in
+        lerp_fx(value, row_mean(0), w)
+    } else if fv > 1.0 - pole_band {
+        let w = smootherstep((fv - (1.0 - pole_band)) / pole_band); // 0 one row in, 1 at the south pole
+        lerp_fx(value, row_mean(pr - 1), w)
+    } else {
+        value
+    }
+}
+
 /// The quantization of the province-field interpolation weight (1/4096 of a cell): a display REPRESENTATION step
 /// carried over from the pre-existing sample path, not a physical value. It sets the floor below which the
 /// implemented height stops varying smoothly, and hence the smallest finite-difference step the analytic
@@ -1280,12 +1514,28 @@ const PROVINCE_LERP_STEPS: i64 = 4096;
 /// THE FLEXURAL MIDDLE IS ABSENT, and its absence is loud rather than papered over. The band between the coarse
 /// provinces and the fine crater rows (the moats, peripheral bulges, and terrain-scale swells a human reads as
 /// terrain) is the elastic plate's flexure under its load list, and the kernel for it is BUILT and dormant
-/// ([`civsim_physics::flexure`]). It is not wired here because its rigidity `D = E T_e^3 / (12 (1 - nu^2))` needs
-/// the elastic lid thickness `T_e`, and NOTHING BUILT DERIVES `T_e` today: the deep-time thermal state carries one
-/// lumped temperature per column ([`civsim_sim::geodynamics::ColumnState`]) and no depth-resolved geotherm, so
-/// there is no profile against which a mechanical lid base can be located. Authoring a lid thickness, or pinning
-/// it to the thermal boundary layer through an invented ratio, would cross the value-authoring line, so the layer
-/// is left out and the gap is surfaced. When `T_e` derives, the flexure enters here as one more analytic layer:
+/// ([`civsim_physics::flexure`]). Its rigidity `D = E T_e^3 / (12 (1 - nu^2))` needs the elastic lid thickness
+/// `T_e`, and THAT NOW DERIVES: the owner ruled the mechanical lid reads the RAYLEIGH-derived lid base
+/// ([`civsim_physics::moment_equivalence::ConductiveLidBase::from_rayleigh`]) rather than a depth-resolved
+/// geotherm, so the missing-profile objection this block used to raise is retired.
+///
+/// WHAT STILL HOLDS IT BACK is one level further down, and it is a value-authoring problem rather than a missing
+/// mechanism. The lid base is derived from the column's Rayleigh number, which is computed from the thermal
+/// properties in [`civsim_sim::deeptime::province_column_params`], and those are a DECLARED FIXTURE CLUSTER
+/// (density, viscosity and radius all set to ONE, with an authored conductivity, expansivity, diffusivity and
+/// specific heat, tagged as a declared conflict by the owner's 2026-07-16 ruling). So the chain from thermal
+/// properties through Rayleigh to the lid base to `D` to relief HEIGHT would carry an authored scale: the
+/// mountains would look convincing and rest on an authored 30 ppm expansivity and an authored conductivity of 2.
+/// Drawing them on that basis is worse than leaving them out, because a plausible mountain range invites no
+/// scrutiny. The geotherm arc replaces that cluster with derived properties (density derived, specific heat
+/// Dulong-Petit, conductivity the two-rung Hofmeister and Slack ladder, diffusivity computed and never stored),
+/// and the pins move once when it does. THE REPLACEMENT IS BLOCKED, measured 2026-07-18, on one absent cited
+/// column: both rungs of the conductivity ladder key on a per-phase `atoms_per_primitive_cell` that no data
+/// file carries, and conductivity gates diffusivity which gates the viscosity solve. Density, specific heat
+/// and expansivity DO derive today. The finding and the unblocking fetch are recorded on
+/// [`civsim_sim::geodynamics::ColumnParams::thermal_diffusivity`] and in `docs/working/GEOTHERM_ARC_SCOPE.md`.
+///
+/// When the cluster is derived, the flexure enters here as one more analytic layer:
 /// its deflection adds to [`SurfaceField::height_km`] and its Green's function's analytic derivative adds to
 /// [`SurfaceField::gradient`], with no change to either function's shape.
 ///
@@ -1927,11 +2177,11 @@ pub struct SurfaceStyle {
 }
 
 /// The DERIVED body-frame sun direction for [`draw_globe`], the unit vector pointing from the body's centre toward the
-/// SUB-SOLAR POINT, given the sub-solar latitude (`declination`, the seasons, from [`civsim_sim::orbit::solar_declination`])
-/// and the sub-solar longitude (`subsolar_longitude`, the time of day, from [`civsim_sim::orbit::subsolar_longitude`]),
+/// SUB-SOLAR POINT, given the sub-solar latitude (`declination`, the seasons, from [`civsim_foundation::orbit::solar_declination`])
+/// and the sub-solar longitude (`subsolar_longitude`, the time of day, from [`civsim_foundation::orbit::subsolar_longitude`]),
 /// both in radians. Because [`draw_globe`]'s Lambert term is the dot of the surface normal with this vector, feeding it
 /// the sub-solar direction makes the shading read out the physical solar elevation cosine
-/// (`sin(lat)sin(decl) + cos(lat)cos(decl)cos(lon - subsolar_lon)`, [`civsim_sim::orbit::solar_elevation_cosine`])
+/// (`sin(lat)sin(decl) + cos(lat)cos(decl)cos(lon - subsolar_lon)`, [`civsim_foundation::orbit::solar_elevation_cosine`])
 /// automatically, so the lit hemisphere and the day/night terminator are DERIVED, never an authored light direction.
 ///
 /// The vector is expressed in [`draw_globe`]'s BODY frame, whose axes come from [`body_to_uv`]: `y` is the north pole
@@ -1946,6 +2196,37 @@ pub fn sub_solar_body_dir(declination: f32, subsolar_longitude: f32) -> [f32; 3]
     let (sin_sslon, cos_sslon) = subsolar_longitude.sin_cos();
     [cos_decl * sin_sslon, sin_decl, cos_decl * cos_sslon]
 }
+
+/// A faint neutral ambient so the night hemisphere reads dark but not pure black (skyglow and starlight). NON-CANON
+/// display (Principle 10); hoisted to module scope so [`draw_globe`] and the GPU per-cell cache builders share it.
+pub const AMBIENT: f32 = 0.10;
+/// NON-CANON DISPLAY: the lava-glow emission brightness gain, the one display scale the self-emitted incandescence
+/// is allowed (a sibling of `AMBIENT`, the relief palette, and the sky's `DISPLAY_OPACITY_UNIT`: the observability
+/// layer's allowance, Principle 10). The glow add per channel is `emission_channel * intensity * GAIN`, where the
+/// emission colour is the blackbody of the tile's DERIVED interior temperature (physics, the hue) and the intensity
+/// is its DERIVED melt fraction (physics, zero below the world's own solidus). This scale maps that physical
+/// partial-melt fraction, which for a silicate mantle saturates near the rheological lock-up (~0.4, the melt
+/// fraction above which the surface behaves as a mobile magma ocean), onto the display's incandescent range: at
+/// ~0.4 melt the tile emits at roughly full brightness (a mobile magma ocean glows fully), so `GAIN ~ 1 / 0.4`. It
+/// scales BRIGHTNESS only; it never moves the threshold (the derived solidus) or the hue (the derived temperature),
+/// and it has zero effect on canon (byte-neutral). Kept modest.
+pub const LAVA_EMISSION_GAIN: f32 = 2.5;
+/// NON-CANON DISPLAY: the IMPACT-FLASH emission brightness gain, a sibling of `LAVA_EMISSION_GAIN` and `AMBIENT`
+/// (the observability layer's allowance, Principle 10). The flash add per channel is `FLASH_COLOR_channel *
+/// emission * GAIN`, where `emission` is the fresh crater's DERIVED time-decay times its DERIVED footprint profile
+/// (both physics, in `[0, 1]`); this scale only maps that onto the display's incandescent range so a strike reads
+/// as a bright bloom that fades. At the flash's peak (a just-formed crater's bowl) this saturates to a white-hot
+/// core, a fresh impact blindingly bright, and dims as the crater's own decay relaxes it to the settled relief. It
+/// scales BRIGHTNESS only, never the timing (the derived formation tick) or the extent (the derived footprint),
+/// and it has zero effect on canon (viewer-only, byte-neutral). Kept the same modest scale as the lava glow.
+pub const FLASH_EMISSION_GAIN: f32 = 2.5;
+/// NON-CANON DISPLAY: the impact-flash HUE, the incandescent white-hot of a fresh strike's shock-melt fireball.
+/// Unlike the lava glow, whose hue is the blackbody of the DERIVED interior temperature, an impact carries no
+/// derived shock temperature in the state (the sim never forms the impact's kinetic energy, which overflows the
+/// fixed-point range: see `civsim_sim::deeptime::bombard_tick`), so the flash hue is a display choice on the same
+/// incandescence family (a hot white, warm at the fading edge), stated plainly. A derived shock temperature would
+/// let this derive like the lava hue; that is the honest limit and the future refinement.
+pub const FLASH_COLOR: Rgb = Rgb::new(255, 246, 224);
 
 /// Draw the planet as a lit sphere: a filled disk of on-screen radius `radius_px` centred at `(cx, cy)`, its
 /// surface textured from the DERIVED tiles (an orthographic sphere map of the relief field, sampled at the surface
@@ -1982,6 +2263,7 @@ pub fn draw_globe(
     orient: GlobeOrientation,
     lava: Option<&[LavaGlow]>,
     field: Option<&SurfaceField>,
+    flash: Option<&[ImpactFlash]>,
 ) {
     if radius_px == 0 || w == 0 || h == 0 {
         return;
@@ -1997,19 +2279,9 @@ pub fn draw_globe(
         light_tint.g as f32 / 255.0,
         light_tint.b as f32 / 255.0,
     ];
-    // A faint neutral ambient so the night hemisphere reads dark but not pure black (skyglow and starlight).
-    const AMBIENT: f32 = 0.10;
-    // NON-CANON DISPLAY: the lava-glow emission brightness gain, the one display scale the self-emitted incandescence
-    // is allowed (a sibling of `AMBIENT`, the relief palette, and the sky's `DISPLAY_OPACITY_UNIT`: the observability
-    // layer's allowance, Principle 10). The glow add per channel is `emission_channel * intensity * GAIN`, where the
-    // emission colour is the blackbody of the tile's DERIVED interior temperature (physics, the hue) and the intensity
-    // is its DERIVED melt fraction (physics, zero below the world's own solidus). This scale maps that physical
-    // partial-melt fraction, which for a silicate mantle saturates near the rheological lock-up (~0.4, the melt
-    // fraction above which the surface behaves as a mobile magma ocean), onto the display's incandescent range: at
-    // ~0.4 melt the tile emits at roughly full brightness (a mobile magma ocean glows fully), so `GAIN ~ 1 / 0.4`. It
-    // scales BRIGHTNESS only; it never moves the threshold (the derived solidus) or the hue (the derived temperature),
-    // and it has zero effect on canon (byte-neutral). Kept modest.
-    const LAVA_EMISSION_GAIN: f32 = 2.5;
+    // AMBIENT, LAVA_EMISSION_GAIN, FLASH_EMISSION_GAIN, and FLASH_COLOR are hoisted to module scope (above), so the
+    // NON-CANON GPU per-cell cache builders ([`globe_cell_base_rgb`] and siblings) share this one source of truth
+    // with the CPU render; their reserved-with-basis rationale is documented at the definitions.
     // SUN-DIRECTION HILLSHADE (the seeable-relief payoff): when relief shading is on and the physical body radius is
     // supplied, the shading normal at each pixel is the sphere normal TILTED by the DERIVED terrain slope, so slopes
     // facing the star are bright and slopes facing away are dark. The relief is lit at its real (unexaggerated)
@@ -2132,6 +2404,26 @@ pub fn draw_globe(
                             add(color.b, g.emission.b),
                         );
                     }
+                }
+            }
+            // SELF-EMITTED IMPACT FLASH (the watchable-impacts payoff): a crater whose formation the deep-time clock
+            // has just passed RADIATES a brief incandescent bloom over its settled relief, peaking at its formation
+            // tick and relaxing to the static crater as the clock advances (the flash/ejecta of a fresh strike). Like
+            // the lava glow it EMITS (survives on the night side) and adds over the shaded crust; unlike it, it is a
+            // TRANSIENT keyed on each crater's own formation time, so a viewer watching deep time SEES impacts land.
+            // Empty (no fresh impact this epoch) leaves the render byte-identical; the few active flashes are already
+            // filtered by the caller ([`active_flash_stamps`]), so this per-pixel sum is cheap.
+            if let Some(flashes) = flash {
+                let e = crater_flash_emission(flashes, b);
+                if e > 0.0 {
+                    let add = |c: u8, ch: u8| -> u8 {
+                        (c as f32 + ch as f32 * e * FLASH_EMISSION_GAIN).clamp(0.0, 255.0) as u8
+                    };
+                    color = Rgb::new(
+                        add(color.r, FLASH_COLOR.r),
+                        add(color.g, FLASH_COLOR.g),
+                        add(color.b, FLASH_COLOR.b),
+                    );
                 }
             }
             buf[py as usize * w + px as usize] = color.pack();
@@ -2281,6 +2573,7 @@ pub fn render_solar_system_view(
     derived_star_dir: Option<[f32; 3]>,
     lava: Option<&[LavaGlow]>,
     field: Option<&SurfaceField>,
+    flash: Option<&[ImpactFlash]>,
 ) -> Vec<u32> {
     let mut buf = vec![bg.pack(); w.max(1) * h.max(1)];
     if w == 0 || h == 0 {
@@ -2331,6 +2624,7 @@ pub fn render_solar_system_view(
         orient,
         lava,
         field,
+        flash,
     );
     // The atmosphere haze around the limb, tinted by the caller's `sky` colour: the DERIVED Rayleigh sky from the
     // gas mix ([`rayleigh_sky_rgb`]) when it resolves, or [`PLACEHOLDER_SKY`] as the fail-soft fallback. The limb wants
@@ -2380,6 +2674,7 @@ pub fn draw_globe_scene(
     orient: GlobeOrientation,
     lava: Option<&[LavaGlow]>,
     field: Option<&SurfaceField>,
+    flash: Option<&[ImpactFlash]>,
 ) {
     if w == 0 || h == 0 {
         return;
@@ -2403,14 +2698,327 @@ pub fn draw_globe_scene(
         orient,
         lava,
         field,
+        flash,
     );
     // The limb wants the VIEW-space sun direction (screen x, y), the projection of the derived body-frame vector.
     let limb_dir = normalize3(body_to_view(star_dir_body, orient));
     draw_atmosphere_limb(buf, w, h, cx, cy, radius_px, limb_dir, sky);
 }
 
+// ============================================================================================================
+// NON-CANON GPU shading cache builders (Principle 10). These pre-reduce, ONCE per epoch, exactly the DERIVED
+// per-cell shading inputs the GPU globe kernel (`civsim_gpu::globe`) samples: the base albedo, the terrain hillshade
+// normal, and the self-emitted lava and impact-flash adds, each evaluated at the cell CENTRE with the SAME verified
+// helpers `draw_globe` uses per pixel. Moving these off the per-pixel path is what lets the GPU shade run without the
+// O(pixels x craters) analytic gradient the CPU renderer pays; the kernel then samples the cell a pixel lands in.
+// The per-cell (rather than per-pixel) evaluation is the one approximation of the GPU path: within a cell the normal
+// and flash are held at the centre value, so the GPU frame is VISUALLY equal to `draw_globe`, not byte-equal (a
+// non-canon display allowance, Principle 10). All display f32 / packed RGB; they write no canonical state.
+// ============================================================================================================
+
+/// The BODY-frame direction at the CENTRE of surface cell `i` under the cache parameterization `param`, the
+/// representative direction the per-cell shading cache is evaluated at. A pixel that samples cell `i` (via
+/// [`surface_cell_index`]) reads the value built here; the centre round-trips back to `i` through that index by
+/// construction. Display-only f32 (Principle 10).
+#[cfg(feature = "gpu")]
+pub fn surface_cell_center_dir(param: SurfaceParam, i: usize) -> [f32; 3] {
+    use std::f32::consts::FRAC_PI_2;
+    match param {
+        SurfaceParam::LatLon { cols, rows } => {
+            if cols == 0 || rows == 0 {
+                return [0.0, 0.0, 1.0];
+            }
+            let cu = i % cols;
+            let cv = (i / cols).min(rows - 1);
+            let u = (cu as f32 + 0.5) / cols as f32;
+            let v = (cv as f32 + 0.5) / rows as f32;
+            uv_to_body(u, v)
+        }
+        SurfaceParam::CubeSphere { face_res } => {
+            if face_res == 0 {
+                return [0.0, 0.0, 1.0];
+            }
+            let fc = face_res * face_res;
+            let face = (i / fc).min(5);
+            let rem = i % fc;
+            let cj = rem / face_res; // t row
+            let ci = rem % face_res; // s col
+            let s = (ci as f32 + 0.5) / face_res as f32;
+            let t = (cj as f32 + 0.5) / face_res as f32;
+            // The equi-angular face-local direction (the same warp `cube_dir_to_face_st` inverts), then the face
+            // basis into the body frame (the exact inverse of the cube cell index the kernel computes).
+            let (sa, ca) = ((s - 0.5) * FRAC_PI_2).sin_cos();
+            let (sb, cb) = ((t - 0.5) * FRAC_PI_2).sin_cos();
+            let lx = sa * cb;
+            let ly = ca * sb;
+            let lz = ca * cb;
+            let n = (lx * lx + ly * ly + lz * lz).sqrt();
+            let d = if n > 0.0 {
+                [lx / n, ly / n, lz / n]
+            } else {
+                [0.0, 0.0, 1.0]
+            };
+            let (dx, dy, dz) = (d[0], d[1], d[2]);
+            match face {
+                0 => [dz, dy, -dx],  // +x dominant
+                1 => [-dz, dy, dx],  // -x
+                2 => [dx, dz, -dy],  // +y
+                3 => [dx, -dz, dy],  // -y
+                4 => [dx, dy, dz],   // +z
+                _ => [-dx, dy, -dz], // -z
+            }
+        }
+    }
+}
+
+/// The per-cell BASE ALBEDO (packed `0x00RRGGBB`), the colour `draw_globe` paints a cell before lighting: the
+/// DERIVED material tint (`style.tint`) when relief shading is on, that tint scaled by the discrete relief shade
+/// when it is off, or the relief swatch when there is no tint. One entry per tile, in cache order. Display-only.
+#[cfg(feature = "gpu")]
+pub fn globe_cell_base_rgb(tiles: &[DerivedTile], style: SurfaceStyle) -> Vec<u32> {
+    tiles
+        .iter()
+        .map(|tile| {
+            let rgb = match style.tint {
+                Some(m) => {
+                    if style.relief_shading {
+                        m
+                    } else {
+                        let s = relief_shade(tile.relief);
+                        let sc = |c: u8| (c as f32 * s).clamp(0.0, 255.0) as u8;
+                        Rgb::new(sc(m.r), sc(m.g), sc(m.b))
+                    }
+                }
+                None => derived_tile_color(tile.relief),
+            };
+            rgb.pack()
+        })
+        .collect()
+}
+
+/// The per-cell TERRAIN NORMAL (interleaved `nx, ny, nz` per cell, `3 * tiles.len()` long), the sphere normal
+/// tilted by the DERIVED slope, evaluated at each cell centre with the SAME [`hillshade_normal`] `draw_globe` uses
+/// per pixel (the analytic Sample gradient when `field` is supplied, the cache finite difference otherwise). Built
+/// in PARALLEL (each cell independent), the once-per-epoch reduction that moves the analytic gradient off the
+/// per-frame per-pixel path. Display-only f32 (Principle 10).
+#[cfg(feature = "gpu")]
+pub fn globe_cell_normals(
+    tiles: &[DerivedTile],
+    param: SurfaceParam,
+    surface_radius_m: Fixed,
+    field: Option<&SurfaceField>,
+) -> Vec<f32> {
+    let radius_m = surface_radius_m.to_f64_lossy() as f32;
+    let per_cell: Vec<[f32; 3]> = (0..tiles.len())
+        .into_par_iter()
+        .map(|i| {
+            let b = surface_cell_center_dir(param, i);
+            let (u, v) = body_to_uv(b);
+            hillshade_normal(b, tiles, param, u, v, radius_m, field)
+        })
+        .collect();
+    per_cell.into_iter().flatten().collect()
+}
+
+/// The per-cell SELF-EMITTED LAVA add (interleaved `r, g, b` per cell, `3 * ncells` long), already
+/// `emission * intensity * LAVA_EMISSION_GAIN`, the incandescent glow `draw_globe` adds over the shaded crust. Zero
+/// where a cell is below the world's solidus. Sampled at each cell centre through the same [`sample_glow`]
+/// `draw_globe` uses, so it registers with the crust cell it rides on. Display-only.
+#[cfg(feature = "gpu")]
+pub fn globe_cell_lava_add(lava: &[LavaGlow], param: SurfaceParam, ncells: usize) -> Vec<f32> {
+    (0..ncells)
+        .flat_map(|i| {
+            let b = surface_cell_center_dir(param, i);
+            let (u, v) = body_to_uv(b);
+            match sample_glow(lava, param, b, u, v) {
+                Some(g) if g.intensity > 0.0 => {
+                    let add = |e: u8| e as f32 * g.intensity * LAVA_EMISSION_GAIN;
+                    [add(g.emission.r), add(g.emission.g), add(g.emission.b)]
+                }
+                _ => [0.0, 0.0, 0.0],
+            }
+        })
+        .collect()
+}
+
+/// The active IMPACT FLASHES as the plain [`civsim_gpu::globe::GlobeFlash`] the kernel sums PER PIXEL (unlike the
+/// per-cell base / normal / lava, the flash has a steep `1/x^3` falloff and is the effect the owner watches land,
+/// so it is kept pixel-accurate). A direct carry of each [`ImpactFlash`]'s already-f32 geometry and decayed
+/// intensity; the kernel reproduces [`crater_flash_emission`] over them. Display-only (Principle 10).
+#[cfg(feature = "gpu")]
+pub fn globe_gpu_flashes(flash: &[ImpactFlash]) -> Vec<civsim_gpu::globe::GlobeFlash> {
+    flash
+        .iter()
+        .map(|f| civsim_gpu::globe::GlobeFlash {
+            center: f.center,
+            angular_radius: f.angular_radius,
+            cos_reach: f.cos_reach,
+            intensity: f.intensity,
+        })
+        .collect()
+}
+
+/// The per-frame [`civsim_gpu::globe::GlobeFrame`] scalars for the GPU globe shade: the camera, the body-frame and
+/// view-frame sun directions, the sunlight tint, the ambient floor, the tile-grid seam, and the hillshade-on
+/// decision, all derived exactly as [`draw_globe`] derives them per pixel. Shared by [`draw_globe_scene_gpu`] and
+/// the parity test so the two cannot drift. Cheap (a handful of scalars), rebuilt every frame. Display-only.
+#[cfg(feature = "gpu")]
+#[allow(clippy::too_many_arguments)]
+fn globe_gpu_frame(
+    w: usize,
+    h: usize,
+    cx: i32,
+    cy: i32,
+    radius_px: usize,
+    param: SurfaceParam,
+    star_dir_body: [f32; 3],
+    light_tint: Rgb,
+    style: SurfaceStyle,
+    orient: GlobeOrientation,
+) -> civsim_gpu::globe::GlobeFrame {
+    let surface_radius_m = style.surface_radius_m.to_f64_lossy() as f32;
+    let param_has_cells = match param {
+        SurfaceParam::LatLon { cols, rows } => cols > 0 && rows > 0,
+        SurfaceParam::CubeSphere { face_res } => face_res > 0,
+    };
+    let hillshade_on = style.relief_shading && surface_radius_m > 0.0 && param_has_cells;
+    civsim_gpu::globe::GlobeFrame {
+        w,
+        h,
+        cx,
+        cy,
+        radius_px,
+        rot_lon: orient.rot_lon,
+        rot_lat: orient.rot_lat,
+        star_dir_body,
+        light_view: normalize3(body_to_view(star_dir_body, orient)),
+        tint: [
+            light_tint.r as f32 / 255.0,
+            light_tint.g as f32 / 255.0,
+            light_tint.b as f32 / 255.0,
+        ],
+        ambient: AMBIENT,
+        flash_color: [
+            FLASH_COLOR.r as f32,
+            FLASH_COLOR.g as f32,
+            FLASH_COLOR.b as f32,
+        ],
+        flash_gain: FLASH_EMISSION_GAIN,
+        grid: style
+            .grid
+            .filter(|&(c, r)| c > 0 && r > 0)
+            .unwrap_or((0, 0)),
+        hillshade_on,
+    }
+}
+
+/// The GPU counterpart of [`draw_globe_scene`]: it composites the star (CPU), the globe DISK (the GPU shade in
+/// `civsim_gpu::globe`, the per-pixel port of [`draw_globe`]), and the atmosphere limb (CPU) into `buf`, in the same
+/// order and from the same inputs as [`draw_globe_scene`]. The heavy DERIVED per-cell shading cache (base albedo,
+/// hillshade normal, lava and flash adds) is (re)built and uploaded only when `scene_epoch` differs from the
+/// renderer's resident tag: a deep-time step or a scene switch rebuilds it, a rotate / zoom / sweep reuses the
+/// resident cache and pays only the small per-frame scalar upload plus the GPU shade. Fails soft to the CPU
+/// [`draw_globe`] for a degenerate cache. NON-CANON (Principle 10): writes pixels only, adds nothing to canon.
+#[cfg(feature = "gpu")]
+#[allow(clippy::too_many_arguments)]
+pub fn draw_globe_scene_gpu(
+    gpu: &mut civsim_gpu::globe::CudaGlobeRenderer,
+    scene_epoch: u64,
+    buf: &mut [u32],
+    w: usize,
+    h: usize,
+    cx: i32,
+    cy: i32,
+    radius_px: usize,
+    tiles: &[DerivedTile],
+    param: SurfaceParam,
+    t_eff_k: Fixed,
+    star_dir_body: [f32; 3],
+    star: Option<(i32, i32, usize)>,
+    sky: Rgb,
+    style: SurfaceStyle,
+    orient: GlobeOrientation,
+    lava: Option<&[LavaGlow]>,
+    field: Option<&SurfaceField>,
+    flash: Option<&[ImpactFlash]>,
+) {
+    use civsim_gpu::globe::{GlobeCells, GlobeParam};
+    if w == 0 || h == 0 {
+        return;
+    }
+    let light_tint = blackbody_rgb(t_eff_k);
+    if let Some((sx, sy, sr)) = star {
+        draw_star(buf, w, h, sx, sy, sr, light_tint);
+    }
+
+    let gparam = match param {
+        SurfaceParam::LatLon { cols, rows } => GlobeParam::LatLon { cols, rows },
+        SurfaceParam::CubeSphere { face_res } => GlobeParam::CubeSphere { face_res },
+    };
+    let cells_ok = gparam.cells() == tiles.len() && !tiles.is_empty() && radius_px > 0;
+
+    // (Re)build the per-cell cache on an epoch change; a matching tag reuses the resident device cache. The flash
+    // is NOT part of the resident cache: it is a small per-frame array summed per pixel in the kernel.
+    if cells_ok && (gpu.tag() != Some(scene_epoch) || !gpu.has_cells()) {
+        let base_rgb = globe_cell_base_rgb(tiles, style);
+        let normals = globe_cell_normals(tiles, param, style.surface_radius_m, field);
+        let lava_add = match lava {
+            Some(l) => globe_cell_lava_add(l, param, tiles.len()),
+            None => Vec::new(),
+        };
+        gpu.upload_cells(
+            gparam,
+            GlobeCells {
+                base_rgb: &base_rgb,
+                normal: &normals,
+                lava_add: &lava_add,
+            },
+            scene_epoch,
+        );
+    }
+
+    let limb_dir = normalize3(body_to_view(star_dir_body, orient));
+    if cells_ok && gpu.has_cells() {
+        let frame = globe_gpu_frame(
+            w,
+            h,
+            cx,
+            cy,
+            radius_px,
+            param,
+            star_dir_body,
+            light_tint,
+            style,
+            orient,
+        );
+        let flashes = flash.map(globe_gpu_flashes).unwrap_or_default();
+        gpu.render(buf, &frame, &flashes);
+    } else {
+        // Degenerate cache: keep drawing rather than blanking, via the CPU renderer.
+        draw_globe(
+            buf,
+            w,
+            h,
+            cx,
+            cy,
+            radius_px,
+            tiles,
+            param,
+            star_dir_body,
+            light_tint,
+            style,
+            orient,
+            lava,
+            field,
+            flash,
+        );
+    }
+
+    draw_atmosphere_limb(buf, w, h, cx, cy, radius_px, limb_dir, sky);
+}
+
 /// One body on the zoomed-out SYSTEM MAP: its orbit's semi-major axis (AU) and eccentricity (which trace the ellipse
-/// through [`civsim_sim::orbit::orbital_state`]), its current mean anomaly (the phase that places the dot on the ellipse),
+/// through [`civsim_foundation::orbit::orbital_state`]), its current mean anomaly (the phase that places the dot on the ellipse),
 /// and the display colour and pixel size of its dot. The orbit geometry is DERIVED from `orbit.rs`; the dot colour is the
 /// planet's derived material colour and the size is a non-canon display choice the caller sets.
 #[derive(Clone, Copy)]
@@ -2517,7 +3125,7 @@ pub fn render_system_map(
             let m = Fixed::from_ratio((frac * 1_000_000.0) as i64, 1_000_000)
                 .checked_mul(Fixed::PI.checked_add(Fixed::PI).unwrap_or(Fixed::PI));
             let point = m.and_then(|m| {
-                civsim_sim::orbit::orbital_state(m, b.eccentricity).map(|s| {
+                civsim_foundation::orbit::orbital_state(m, b.eccentricity).map(|s| {
                     system_map_project(
                         s.position_x_over_a.to_f64_lossy(),
                         s.position_y_over_a.to_f64_lossy(),
@@ -2537,7 +3145,7 @@ pub fn render_system_map(
             }
         }
         // The planet dot at its current phase; fail-soft to the frame centre if the state does not resolve.
-        let dot = civsim_sim::orbit::orbital_state(b.mean_anomaly, b.eccentricity)
+        let dot = civsim_foundation::orbit::orbital_state(b.mean_anomaly, b.eccentricity)
             .map(|s| {
                 system_map_project(
                     s.position_x_over_a.to_f64_lossy(),
@@ -2699,6 +3307,210 @@ mod tests {
             depth_m: Fixed::from_int(depth_m),
             age_myr: Fixed::ZERO,
         }
+    }
+
+    // A crater row at (u, v) = (0.5, 0.5) formed at a given clock reading `age_myr` (megayears), for the
+    // impact-FLASH timing tests: the flash keys this formation reading against the render's current epoch.
+    fn crater_row_formed_at(diameter_m: i32, depth_m: i32, age_myr: i32) -> CraterRow {
+        CraterRow {
+            u: Fixed::from_ratio(1, 2),
+            v: Fixed::from_ratio(1, 2),
+            diameter_m: Fixed::from_int(diameter_m),
+            depth_m: Fixed::from_int(depth_m),
+            age_myr: Fixed::from_int(age_myr),
+        }
+    }
+
+    // The crater-centre direction (u, v) = (0.5, 0.5) as the display f32 unit vector the flash emission samples.
+    fn flash_center_dir() -> [f32; 3] {
+        let c = crater_uv_unit(Fixed::from_ratio(1, 2), Fixed::from_ratio(1, 2));
+        [
+            c[0].to_f64_lossy() as f32,
+            c[1].to_f64_lossy() as f32,
+            c[2].to_f64_lossy() as f32,
+        ]
+    }
+
+    #[test]
+    fn an_impact_flashes_at_its_formation_and_settles_after_the_window() {
+        // A crater formed at 1000 Myr on a 3000 km body, a 60-Myr (3-tick x 20-Myr) relaxation window. The flash is
+        // present and PEAK at the formation epoch, dimmer halfway through the window, and GONE (no flash object) once
+        // a full window has passed, so a viewer watching deep time sees it land and relax to the static crater.
+        let radius_m = Fixed::from_int(3_000_000);
+        let window = Fixed::from_int(60);
+        let formed = 1000;
+        let rows = vec![crater_row_formed_at(60_000, 6_000, formed)];
+
+        // Before it forms: no flash (the crater does not exist yet on the clock).
+        let before = active_flash_stamps(&rows, radius_m, Fixed::from_int(formed - 20), window);
+        assert!(
+            before.is_empty(),
+            "a crater flashes only from its formation onward"
+        );
+
+        // At formation: exactly one flash, at peak intensity (1.0).
+        let at = active_flash_stamps(&rows, radius_m, Fixed::from_int(formed), window);
+        assert_eq!(
+            at.len(),
+            1,
+            "the fresh crater flashes at its formation epoch"
+        );
+        let peak = at[0].intensity;
+        assert!(
+            (peak - 1.0).abs() < 1e-3,
+            "peak flash at formation, got {peak}"
+        );
+
+        // Halfway through the window (phase 0.5): the declared (1-phase)^2 decay = 0.25 of peak.
+        let mid = active_flash_stamps(&rows, radius_m, Fixed::from_int(formed + 30), window);
+        assert_eq!(mid.len(), 1);
+        let midi = mid[0].intensity;
+        assert!(
+            (midi - 0.25).abs() < 1e-2,
+            "quadratic ease-out at half window ~0.25, got {midi}"
+        );
+        assert!(midi < peak, "the flash decays from its formation peak");
+
+        // A full window later: the crater has settled, no flash object at all (it is now just static relief).
+        let after = active_flash_stamps(&rows, radius_m, Fixed::from_int(formed + 60), window);
+        assert!(
+            after.is_empty(),
+            "the flash is gone once the window passes (settled to static relief)"
+        );
+    }
+
+    #[test]
+    fn the_flash_emission_is_bright_at_the_crater_and_fades_to_nothing() {
+        // The emission the pixel loop adds: bright over the crater at formation, gone once it settles, and zero for a
+        // sample far from the crater. Sampled at the crater-centre direction (u, v) = (0.5, 0.5).
+        let radius_m = Fixed::from_int(3_000_000);
+        let window = Fixed::from_int(60);
+        let rows = vec![crater_row_formed_at(60_000, 6_000, 1000)];
+        let c = flash_center_dir();
+
+        let at = active_flash_stamps(&rows, radius_m, Fixed::from_int(1000), window);
+        let e_at = crater_flash_emission(&at, c);
+        assert!(
+            e_at > 0.9,
+            "the crater centre is bright at formation, got {e_at}"
+        );
+
+        // The far side of the globe is outside the reach cone: no emission.
+        let far = crater_flash_emission(&at, [-c[0], -c[1], -c[2]]);
+        assert_eq!(far, 0.0, "a sample far from the crater gets no flash");
+
+        // After the window: no flash object, so no emission (the crater is now only static relief).
+        let after = active_flash_stamps(&rows, radius_m, Fixed::from_int(1060), window);
+        assert_eq!(
+            crater_flash_emission(&after, c),
+            0.0,
+            "no emission once the flash has settled"
+        );
+    }
+
+    #[test]
+    fn the_flash_is_deterministic_in_the_rows_and_the_clock() {
+        // Same rows + same epoch + same window => the same flashes and the same emission, to the bit (Principle 3).
+        let radius_m = Fixed::from_int(3_000_000);
+        let window = Fixed::from_int(60);
+        let rows = vec![
+            crater_row_formed_at(60_000, 6_000, 1000),
+            crater_row_formed_at(30_000, 3_000, 1010),
+        ];
+        let a = active_flash_stamps(&rows, radius_m, Fixed::from_int(1015), window);
+        let b = active_flash_stamps(&rows, radius_m, Fixed::from_int(1015), window);
+        assert_eq!(
+            a.len(),
+            b.len(),
+            "the same clock step draws the same flashes"
+        );
+        assert_eq!(
+            a.len(),
+            2,
+            "both craters are within the window at epoch 1015"
+        );
+        for (fa, fb) in a.iter().zip(b.iter()) {
+            assert_eq!(fa.intensity.to_bits(), fb.intensity.to_bits());
+        }
+        let c = flash_center_dir();
+        assert_eq!(
+            crater_flash_emission(&a, c).to_bits(),
+            crater_flash_emission(&b, c).to_bits(),
+            "same seed + same clock step => same rendered flash, to the bit"
+        );
+    }
+
+    #[test]
+    fn draw_globe_paints_a_fresh_impact_flash_over_the_dark_crust() {
+        // The pixel-level wiring: a fresh impact centred on the SUB-OBSERVER point radiates over the crust the globe
+        // draws, so the pixel there is brighter WITH the flash than without. The star lights the +x limb, so the
+        // sub-observer point [0, 0, 1] sits in shadow (Lambert 0, ambient only): a brighter pixel there proves the
+        // flash EMITS (like the lava glow, it survives on the dark side) rather than merely reflecting sunlight. A
+        // pixel out at the lit limb, far from the crater, is unchanged, so the flash is a local bloom, not a tint.
+        let (w, h) = (160usize, 120usize);
+        let bg = Rgb::new(8, 9, 14);
+        let cols = 8usize;
+        let uniform: Vec<DerivedTile> = (0..cols * 8)
+            .map(|_| DerivedTile {
+                elevation: Fixed::from_int(1),
+                relief: TerrainRelief::Lowland,
+            })
+            .collect();
+        let (cx, cy, radius) = (80i32, 60i32, 48usize);
+        let star = [1.0f32, 0.0, 0.0]; // lights the +x limb; the sub-observer point [0,0,1] is dark
+        let white = Rgb::new(255, 255, 255);
+
+        // One fresh impact at the sub-observer point (u, v) = (0.5, 0.5) -> body [0, 0, 1], at peak intensity
+        // (epoch == formation), 200 km across on a 3000 km body so its bloom covers several pixels around centre.
+        let radius_m = Fixed::from_int(3_000_000);
+        let window = Fixed::from_int(60);
+        let rows = vec![crater_row_formed_at(200_000, 20_000, 0)];
+        let flashes = active_flash_stamps(&rows, radius_m, Fixed::ZERO, window);
+        assert_eq!(
+            flashes.len(),
+            1,
+            "the fresh impact is flashing at its formation"
+        );
+
+        let render = |flash: Option<&[ImpactFlash]>| -> Vec<u32> {
+            let mut buf = vec![bg.pack(); w * h];
+            draw_globe(
+                &mut buf,
+                w,
+                h,
+                cx,
+                cy,
+                radius,
+                &uniform,
+                latlon(&uniform, cols),
+                star,
+                white,
+                SurfaceStyle::default(),
+                GlobeOrientation::IDENTITY,
+                None,
+                None,
+                flash,
+            );
+            buf
+        };
+        let lum = |px: u32| -> u32 { ((px >> 16) & 0xff) + ((px >> 8) & 0xff) + (px & 0xff) };
+
+        let without = render(None);
+        let with = render(Some(&flashes));
+        let center = cy as usize * w + cx as usize;
+        assert!(
+            lum(with[center]) > lum(without[center]) + 100,
+            "the fresh impact flashes bright over the dark sub-observer crust: without {} vs with {}",
+            lum(without[center]),
+            lum(with[center])
+        );
+
+        // A pixel out toward the lit +x limb (far from the crater's reach cone) is unchanged: the flash is local.
+        let limb = cy as usize * w + (cx + 40) as usize;
+        assert_eq!(
+            with[limb], without[limb],
+            "a sample far from the impact is untouched (the flash is a local bloom, not a global tint)"
+        );
     }
 
     #[test]
@@ -3115,6 +3927,7 @@ mod tests {
             GlobeOrientation::IDENTITY,
             None,
             None,
+            None,
         );
         assert!(buf.iter().any(|&p| p != bg.pack()), "the globe is drawn");
         let right = half_luminance(&buf, w, cx, cy, radius as i32, true);
@@ -3139,13 +3952,14 @@ mod tests {
             GlobeOrientation::IDENTITY,
             None,
             None,
+            None,
         );
         assert_eq!(buf, replay, "a pure read replays byte for byte");
     }
 
     #[test]
     fn the_derived_sun_direction_lights_the_sub_solar_face_and_reads_the_solar_elevation() {
-        use civsim_sim::orbit;
+        use civsim_foundation::orbit;
         // The load-bearing identity: the body-frame sun vector dotted with a surface point's body-frame normal is the
         // physical solar-elevation cosine, so draw_globe's Lambert term yields the derived illumination for free. Check
         // it against orbit::solar_elevation_cosine at several surface points, for a tilted, off-meridian sub-solar point.
@@ -3202,6 +4016,7 @@ mod tests {
             Rgb::new(255, 255, 255),
             SurfaceStyle::default(),
             GlobeOrientation::IDENTITY,
+            None,
             None,
             None,
         );
@@ -3328,6 +4143,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         );
         assert_eq!(frame.len(), w * h, "one word per pixel");
         // The star disk carries the derived blackbody colour at its core.
@@ -3361,6 +4177,7 @@ mod tests {
             PLACEHOLDER_SKY,
             SurfaceStyle::default(),
             GlobeOrientation::IDENTITY,
+            None,
             None,
             None,
             None,
@@ -3398,6 +4215,7 @@ mod tests {
                 PLACEHOLDER_SKY,
                 SurfaceStyle::default(),
                 GlobeOrientation::IDENTITY,
+                None,
                 None,
                 None,
                 None,
@@ -4000,6 +4818,7 @@ mod tests {
             GlobeOrientation::IDENTITY,
             None,
             None,
+            None,
         );
         // A tiny rotation moves at least one pixel: the texture responds to the orientation.
         let mut b = vec![bg.pack(); w * h];
@@ -4019,6 +4838,7 @@ mod tests {
                 rot_lon: 0.0,
                 rot_lat: 0.8,
             },
+            None,
             None,
             None,
         );
@@ -4059,6 +4879,7 @@ mod tests {
             GlobeOrientation::IDENTITY,
             None,
             None,
+            None,
         );
         let mut panned = vec![bg.pack(); w * h];
         draw_globe(
@@ -4077,6 +4898,7 @@ mod tests {
                 rot_lon: 1.2,
                 rot_lat: 0.0,
             },
+            None,
             None,
             None,
         );
@@ -4105,6 +4927,7 @@ mod tests {
                     ..Default::default()
                 },
                 GlobeOrientation::IDENTITY,
+                None,
                 None,
                 None,
             );
@@ -4157,6 +4980,7 @@ mod tests {
                     ..Default::default()
                 },
                 GlobeOrientation::IDENTITY,
+                None,
                 None,
                 None,
             );
@@ -4222,6 +5046,7 @@ mod tests {
                     surface_radius_m: radius_m,
                 },
                 GlobeOrientation::IDENTITY,
+                None,
                 None,
                 None,
             );
@@ -4529,5 +5354,675 @@ mod tests {
             along_toward < 0.0,
             "inside the bowl the surface rises away from the centre, so the gradient points away: got {along_toward}"
         );
+    }
+}
+
+// ============================================================================================================
+// NON-CANON GPU globe PARITY tests (Principle 10). They render the same scene with the CPU `draw_globe` reference
+// and with the GPU kernel (`civsim_gpu::globe`, run on the CubeCL CPU backend so no device is needed) and assert
+// the frames are VISUALLY equal: the max per-channel difference stays within a small display tolerance. Non-canon
+// means visual-equal, not byte-equal (two observers' framebuffers need not agree to the bit), so the tolerance
+// covers f32 order-of-operation drift and the ONE approximation of the GPU path (per-cell rather than per-pixel
+// evaluation of the hillshade normal and the flash bloom). Gated on the `gpu` feature.
+// ============================================================================================================
+#[cfg(all(test, feature = "gpu"))]
+mod gpu_parity_tests {
+    use super::*;
+
+    /// Render the globe disk with the GPU kernel on the CubeCL CPU backend, into a `bg`-filled buffer, using the
+    /// same per-cell cache builders and per-frame scalars `draw_globe_scene_gpu` uses.
+    #[allow(clippy::too_many_arguments)]
+    fn gpu_disk(
+        w: usize,
+        h: usize,
+        cx: i32,
+        cy: i32,
+        radius_px: usize,
+        tiles: &[DerivedTile],
+        param: SurfaceParam,
+        t_eff_k: Fixed,
+        star_dir_body: [f32; 3],
+        style: SurfaceStyle,
+        orient: GlobeOrientation,
+        lava: Option<&[LavaGlow]>,
+        field: Option<&SurfaceField>,
+        flash: Option<&[ImpactFlash]>,
+        bg: u32,
+    ) -> Vec<u32> {
+        use civsim_gpu::globe::{GlobeCells, GlobeParam};
+        let gparam = match param {
+            SurfaceParam::LatLon { cols, rows } => GlobeParam::LatLon { cols, rows },
+            SurfaceParam::CubeSphere { face_res } => GlobeParam::CubeSphere { face_res },
+        };
+        let base_rgb = globe_cell_base_rgb(tiles, style);
+        let normals = globe_cell_normals(tiles, param, style.surface_radius_m, field);
+        let lava_add = lava
+            .map(|l| globe_cell_lava_add(l, param, tiles.len()))
+            .unwrap_or_default();
+        let flashes = flash.map(globe_gpu_flashes).unwrap_or_default();
+        let light_tint = blackbody_rgb(t_eff_k);
+        let frame = globe_gpu_frame(
+            w,
+            h,
+            cx,
+            cy,
+            radius_px,
+            param,
+            star_dir_body,
+            light_tint,
+            style,
+            orient,
+        );
+        let mut r = civsim_gpu::globe::cpu_renderer();
+        r.upload_cells(
+            gparam,
+            GlobeCells {
+                base_rgb: &base_rgb,
+                normal: &normals,
+                lava_add: &lava_add,
+            },
+            0,
+        );
+        let mut buf = vec![bg; w * h];
+        r.render(&mut buf, &frame, &flashes);
+        buf
+    }
+
+    /// The max per-channel absolute difference between two framebuffers, and the fraction of pixels that differ by
+    /// more than one level (a picture of how localized the difference is).
+    fn frame_diff(a: &[u32], b: &[u32]) -> (u8, f64) {
+        let mut maxd = 0u8;
+        let mut over = 0usize;
+        for (&x, &y) in a.iter().zip(b.iter()) {
+            let mut worst = 0u8;
+            for sh in [16u32, 8, 0] {
+                let cx = ((x >> sh) & 255) as i32;
+                let cy = ((y >> sh) & 255) as i32;
+                worst = worst.max((cx - cy).unsigned_abs() as u8);
+            }
+            maxd = maxd.max(worst);
+            if worst > 1 {
+                over += 1;
+            }
+        }
+        (maxd, over as f64 / a.len() as f64)
+    }
+
+    fn tile(elev_km: f32, relief: TerrainRelief) -> DerivedTile {
+        DerivedTile {
+            elevation: Fixed::from_ratio((elev_km * 1000.0) as i64, 1000),
+            relief,
+        }
+    }
+
+    /// SCENE A, the CORE PIPELINE with no hillshade: rotate + cell-index + per-cell base albedo + bare-sphere
+    /// Lambert + tile-grid seam. Every term is the SAME per-pixel math on both paths (no per-cell approximation),
+    /// so the GPU frame must equal `draw_globe` to within f32 rounding.
+    #[test]
+    fn gpu_matches_draw_globe_core_pipeline() {
+        let face_res = 64usize;
+        let param = SurfaceParam::CubeSphere { face_res };
+        let n = 6 * face_res * face_res;
+        // A varied relief field (drives the per-cell base colour under relief-off shading and the swatch).
+        let tiles: Vec<DerivedTile> = (0..n)
+            .map(|i| {
+                let d = surface_cell_center_dir(param, i);
+                let e = 3.0 * (d[0] * 4.0).sin() + 2.0 * (d[1] * 3.0).cos();
+                let relief = if e < -1.0 {
+                    TerrainRelief::Submarine
+                } else if e < 1.5 {
+                    TerrainRelief::Lowland
+                } else {
+                    TerrainRelief::Upland
+                };
+                tile(e, relief)
+            })
+            .collect();
+        let style = SurfaceStyle {
+            tint: Some(Rgb::new(128, 116, 104)),
+            grid: Some((16, 8)),
+            relief_shading: false,
+            surface_radius_m: Fixed::from_int(3_390_000),
+        };
+        let orient = GlobeOrientation {
+            rot_lon: 0.7,
+            rot_lat: 0.3,
+        };
+        let star = normalize3([0.5, 0.25, 0.8]);
+        let t_eff = Fixed::from_int(5772);
+        let (w, h) = (420usize, 340usize);
+        let (cx, cy, rp) = (210i32, 170i32, 150usize);
+        const BG: u32 = 0x00101018;
+
+        let mut cpu = vec![BG; w * h];
+        draw_globe(
+            &mut cpu,
+            w,
+            h,
+            cx,
+            cy,
+            rp,
+            &tiles,
+            param,
+            star,
+            blackbody_rgb(t_eff),
+            style,
+            orient,
+            None,
+            None,
+            None,
+        );
+        let gpu = gpu_disk(
+            w, h, cx, cy, rp, &tiles, param, t_eff, star, style, orient, None, None, None, BG,
+        );
+        let (maxd, frac) = frame_diff(&cpu, &gpu);
+        eprintln!("scene A (core pipeline, CPU backend): max per-channel diff = {maxd}, frac>1 = {frac:.5}");
+        assert!(
+            maxd <= 2,
+            "core pipeline must match draw_globe to f32 rounding: max diff {maxd}"
+        );
+
+        // The SHIPPING path: the SAME kernel on the actual CUDA device (when one is present, i.e. CIVSIM_GPU +
+        // the CUDA env are set) must also match draw_globe. This proves the 5090 render, not only the portable
+        // CPU-backend codegen. Skipped (a pass) when no device is present, so the default gate stays device-free.
+        if let Some(mut r) = civsim_gpu::globe::try_cuda_renderer() {
+            use civsim_gpu::globe::{GlobeCells, GlobeParam};
+            let gparam = match param {
+                SurfaceParam::LatLon { cols, rows } => GlobeParam::LatLon { cols, rows },
+                SurfaceParam::CubeSphere { face_res } => GlobeParam::CubeSphere { face_res },
+            };
+            let base_rgb = globe_cell_base_rgb(&tiles, style);
+            let normals = globe_cell_normals(&tiles, param, style.surface_radius_m, None);
+            let frame = globe_gpu_frame(
+                w,
+                h,
+                cx,
+                cy,
+                rp,
+                param,
+                star,
+                blackbody_rgb(t_eff),
+                style,
+                orient,
+            );
+            r.upload_cells(
+                gparam,
+                GlobeCells {
+                    base_rgb: &base_rgb,
+                    normal: &normals,
+                    lava_add: &[],
+                },
+                0,
+            );
+            let mut cbuf = vec![BG; w * h];
+            r.render(&mut cbuf, &frame, &[]);
+            let (cd, cf) = frame_diff(&cpu, &cbuf);
+            eprintln!(
+                "scene A (core pipeline, CUDA 5090): max per-channel diff = {cd}, frac>1 = {cf:.6}"
+            );
+            // Visual-equality is the claim (not byte-equality): essentially every pixel is within one level of
+            // draw_globe. The isolated larger differences are TILE-BOUNDARY pixels where the 5090's hardware
+            // atan/asin round differently from libm and flip the discrete cell lookup, so a boundary pixel takes
+            // the neighbouring cell's colour (here up to the adjacent-relief contrast). It is a handful of pixels
+            // (frac below), invisible in the picture, and in the interactive path (a uniform material tint) a
+            // boundary flip changes no colour at all. A broken kernel would blow this fraction up.
+            assert!(
+                cf < 0.001,
+                "the CUDA render must be visually equal to draw_globe (a tiny boundary sliver): frac>1 = {cf}, max = {cd}"
+            );
+        }
+    }
+
+    /// SCENE B, the FULL EFFECT STACK: the analytic hillshade normal, the self-emitted lava glow, and the fresh
+    /// impact flash, plus the material tint. Here the GPU evaluates the hillshade normal and the flash bloom PER
+    /// CELL (the once-per-epoch reduction) where `draw_globe` evaluates them per pixel, so the frames are visually
+    /// equal within a small tolerance rather than exact. This asserts that tolerance and prints the measured value.
+    #[test]
+    fn gpu_matches_draw_globe_full_effects_within_tolerance() {
+        let face_res = 96usize;
+        let param = SurfaceParam::CubeSphere { face_res };
+        let n = 6 * face_res * face_res;
+        // Tiles are trivial here: with tint + relief shading the base is the material colour, so relief is unused.
+        let tiles: Vec<DerivedTile> = vec![tile(0.0, TerrainRelief::Lowland); n];
+
+        // A province crust field with lateral variation, so the analytic hillshade has real slope structure.
+        let (pcols, prows) = (12usize, 6usize);
+        let thickness: Vec<Fixed> = (0..pcols * prows)
+            .map(|k| {
+                let c = (k % pcols) as f32;
+                let r = (k / pcols) as f32;
+                let t = 30.0 + 8.0 * (c * 0.9).sin() + 6.0 * (r * 1.3).cos();
+                Fixed::from_ratio((t * 1000.0) as i64, 1000)
+            })
+            .collect();
+        let radius_m = Fixed::from_int(3_390_000);
+        // A few craters for the analytic crater layer of the gradient.
+        let craters = vec![
+            CraterRow {
+                u: Fixed::from_ratio(1, 4),
+                v: Fixed::from_ratio(2, 5),
+                diameter_m: Fixed::from_int(300_000),
+                depth_m: Fixed::from_int(20_000),
+                age_myr: Fixed::from_int(100),
+            },
+            CraterRow {
+                u: Fixed::from_ratio(3, 5),
+                v: Fixed::from_ratio(1, 2),
+                diameter_m: Fixed::from_int(500_000),
+                depth_m: Fixed::from_int(30_000),
+                age_myr: Fixed::from_int(100),
+            },
+        ];
+        let stamps = crater_stamps(&craters, radius_m);
+        let field = SurfaceField {
+            thickness_km: &thickness,
+            pcols,
+            prows,
+            crust_density: Fixed::from_int(2800),
+            mantle_density: Fixed::from_int(3300),
+            stamps: &stamps,
+            radius_km: radius_m.to_f64_lossy() as f32 / 1000.0,
+        };
+
+        // A lava patch on the front hemisphere (the same cell layout the tiles use).
+        let lava: Vec<LavaGlow> = (0..n)
+            .map(|i| {
+                let d = surface_cell_center_dir(param, i);
+                if d[2] > 0.3 {
+                    LavaGlow {
+                        emission: Rgb::new(255, 90, 20),
+                        intensity: 0.5,
+                    }
+                } else {
+                    LavaGlow::default()
+                }
+            })
+            .collect();
+
+        // Fresh impact flashes at their formation tick (peak intensity), from the crater rows.
+        let flash = active_flash_stamps(
+            &craters,
+            radius_m,
+            Fixed::from_int(100),
+            Fixed::from_int(50),
+        );
+        assert!(!flash.is_empty(), "test setup: flashes should be active");
+
+        let style = SurfaceStyle {
+            tint: Some(Rgb::new(120, 110, 100)),
+            grid: None,
+            relief_shading: true,
+            surface_radius_m: radius_m,
+        };
+        let orient = GlobeOrientation {
+            rot_lon: 0.4,
+            rot_lat: -0.2,
+        };
+        let star = normalize3([0.3, 0.4, 0.85]);
+        let t_eff = Fixed::from_int(5772);
+        let (w, h) = (420usize, 340usize);
+        let (cx, cy, rp) = (210i32, 170i32, 150usize);
+        const BG: u32 = 0x00101018;
+
+        let mut cpu = vec![BG; w * h];
+        draw_globe(
+            &mut cpu,
+            w,
+            h,
+            cx,
+            cy,
+            rp,
+            &tiles,
+            param,
+            star,
+            blackbody_rgb(t_eff),
+            style,
+            orient,
+            Some(&lava),
+            Some(&field),
+            Some(&flash),
+        );
+        let gpu = gpu_disk(
+            w,
+            h,
+            cx,
+            cy,
+            rp,
+            &tiles,
+            param,
+            t_eff,
+            star,
+            style,
+            orient,
+            Some(&lava),
+            Some(&field),
+            Some(&flash),
+            BG,
+        );
+        let (maxd, frac) = frame_diff(&cpu, &gpu);
+        eprintln!("scene B (full stack): max per-channel diff = {maxd}, frac>1 = {frac:.5}");
+
+        // Isolate the two effects that are NOT bit-shared per pixel, so the honest bound is asserted directly rather
+        // than left to whether one effect happens to saturate over another (as the lava does over the crater rims in
+        // the full stack above, which is why its max reads lower than the hillshade residual alone).
+        //
+        // FLASH is summed PER PIXEL in the kernel: it must reproduce crater_flash_emission to f32 rounding.
+        let flat = SurfaceStyle {
+            relief_shading: false,
+            ..style
+        };
+        let mut flash_cpu = vec![BG; w * h];
+        draw_globe(
+            &mut flash_cpu,
+            w,
+            h,
+            cx,
+            cy,
+            rp,
+            &tiles,
+            param,
+            star,
+            blackbody_rgb(t_eff),
+            flat,
+            orient,
+            None,
+            None,
+            Some(&flash),
+        );
+        let flash_gpu = gpu_disk(
+            w,
+            h,
+            cx,
+            cy,
+            rp,
+            &tiles,
+            param,
+            t_eff,
+            star,
+            flat,
+            orient,
+            None,
+            None,
+            Some(&flash),
+            BG,
+        );
+        let (fd, ff) = frame_diff(&flash_cpu, &flash_gpu);
+        eprintln!("  flash-only (per-pixel): max = {fd}, frac>1 = {ff:.5}");
+        assert!(
+            fd <= 2,
+            "the per-pixel flash must reproduce crater_flash_emission to f32 rounding: max diff {fd}"
+        );
+
+        // HILLSHADE is the one per-CELL approximation: the analytic normal is held at the cell centre, so the frame
+        // differs from the per-pixel draw_globe only in a small sliver of crater-rim cells (where the analytic
+        // gradient is discontinuous). This is the honest tolerance of the GPU path, measured here.
+        let mut hs_cpu = vec![BG; w * h];
+        draw_globe(
+            &mut hs_cpu,
+            w,
+            h,
+            cx,
+            cy,
+            rp,
+            &tiles,
+            param,
+            star,
+            blackbody_rgb(t_eff),
+            style,
+            orient,
+            None,
+            Some(&field),
+            None,
+        );
+        let hs_gpu = gpu_disk(
+            w,
+            h,
+            cx,
+            cy,
+            rp,
+            &tiles,
+            param,
+            t_eff,
+            star,
+            style,
+            orient,
+            None,
+            Some(&field),
+            None,
+            BG,
+        );
+        let (hd, hf) = frame_diff(&hs_cpu, &hs_gpu);
+        eprintln!("  hillshade-only (per-cell normal): max = {hd}, frac>1 = {hf:.5}");
+        assert!(
+            hd <= 24,
+            "the per-cell hillshade normal must stay a small display tolerance from draw_globe: max diff {hd}"
+        );
+        assert!(
+            hf < 0.01,
+            "the hillshade difference must be a small sliver (crater rims): frac>1 = {hf}"
+        );
+        // The full stack is bounded by the hillshade residual (the flash is pixel-accurate, the lava exact).
+        assert!(maxd <= 24, "full-stack frame max diff {maxd}");
+    }
+}
+
+// ============================================================================================================
+// NON-CANON GPU globe BENCHMARK (opt-in, `--ignored`). It times the heavy interactive path (a ~1M-cell derived
+// globe with an analytic hillshade over many craters, at surface-zoom radius) rendered by the serial CPU
+// `draw_globe` versus the GPU kernel on the resident per-cell cache, so the win is quantified. Run with:
+//   CIVSIM_GPU=1 CUDA_PATH=$HOME/.local/cuda LD_LIBRARY_PATH=$HOME/.local/cuda/lib:/usr/lib/wsl/lib \
+//     cargo test -p civsim-viewer --features gpu --release gpu_globe_benchmark -- --ignored --nocapture
+// Gated on the `gpu` feature; prints a note and skips the GPU timing when no CUDA device is present.
+// ============================================================================================================
+#[cfg(all(test, feature = "gpu"))]
+mod gpu_bench {
+    use super::*;
+    use std::time::Instant;
+
+    #[test]
+    #[ignore = "opt-in performance benchmark; run with --ignored --release"]
+    fn gpu_globe_benchmark() {
+        // A ~1M-cell derived globe (the cube-sphere render cache resolution) with an analytic Sample field over a
+        // heavily-cratered surface (the analytic hillshade the interactive derived globe uses), at surface-zoom
+        // framing (the globe fills the frame). This is the heavy path the goal targets.
+        let face_res = 400usize;
+        let param = SurfaceParam::CubeSphere { face_res };
+        let n = 6 * face_res * face_res;
+        let tiles: Vec<DerivedTile> = vec![
+            DerivedTile {
+                elevation: Fixed::ZERO,
+                relief: TerrainRelief::Lowland,
+            };
+            n
+        ];
+        let (pcols, prows) = (24usize, 12usize);
+        let thickness: Vec<Fixed> = (0..pcols * prows)
+            .map(|k| {
+                let c = (k % pcols) as f32;
+                let r = (k / pcols) as f32;
+                let t = 30.0 + 10.0 * (c * 0.7).sin() + 7.0 * (r * 1.1).cos();
+                Fixed::from_ratio((t * 1000.0) as i64, 1000)
+            })
+            .collect();
+        let radius_m = Fixed::from_int(3_390_000);
+        // A bombarded surface: 200 craters, so the per-pixel analytic gradient loops over a real crater list.
+        let ncr = 200usize;
+        let craters: Vec<CraterRow> = (0..ncr)
+            .map(|i| {
+                let f = i as f32;
+                CraterRow {
+                    u: Fixed::from_ratio(((f * 0.6180339).fract() * 1000.0) as i64, 1000),
+                    v: Fixed::from_ratio(((f * 0.7548776).fract() * 1000.0) as i64, 1000),
+                    diameter_m: Fixed::from_int(80_000 + (i % 40) as i32 * 8_000),
+                    depth_m: Fixed::from_int(6_000 + (i % 20) as i32 * 700),
+                    age_myr: Fixed::from_int(100),
+                }
+            })
+            .collect();
+        let stamps = crater_stamps(&craters, radius_m);
+        let field = SurfaceField {
+            thickness_km: &thickness,
+            pcols,
+            prows,
+            crust_density: Fixed::from_int(2800),
+            mantle_density: Fixed::from_int(3300),
+            stamps: &stamps,
+            radius_km: radius_m.to_f64_lossy() as f32 / 1000.0,
+        };
+        let lava: Vec<LavaGlow> = (0..n)
+            .map(|i| {
+                let d = surface_cell_center_dir(param, i);
+                if d[2] > 0.4 {
+                    LavaGlow {
+                        emission: Rgb::new(255, 90, 20),
+                        intensity: 0.4,
+                    }
+                } else {
+                    LavaGlow::default()
+                }
+            })
+            .collect();
+        let flash = active_flash_stamps(
+            &craters,
+            radius_m,
+            Fixed::from_int(100),
+            Fixed::from_int(50),
+        );
+        let style = SurfaceStyle {
+            tint: Some(Rgb::new(120, 110, 100)),
+            grid: Some((64, 32)),
+            relief_shading: true,
+            surface_radius_m: radius_m,
+        };
+        let t_eff = Fixed::from_int(5772);
+        let star = normalize3([0.3, 0.4, 0.85]);
+        // Surface-zoom framing: the globe fills the frame (radius ~ half the min dimension).
+        let (w, h) = (1100usize, 850usize);
+        let (cx, cy, rp) = (550i32, 425i32, 430usize);
+        const BG: u32 = 0x00101018;
+        let k = 4usize;
+
+        eprintln!(
+            "\n=== GPU globe benchmark: {n} cells, {ncr} craters, {w}x{h} frame, radius {rp}px ===",
+        );
+
+        // CPU: the serial per-pixel draw_globe (the current interactive render), K frames.
+        let mut sink = 0u64;
+        let t = Instant::now();
+        for i in 0..k {
+            let mut buf = vec![BG; w * h];
+            let orient = GlobeOrientation {
+                rot_lon: 0.4 + i as f32 * 0.05,
+                rot_lat: -0.2,
+            };
+            draw_globe(
+                &mut buf,
+                w,
+                h,
+                cx,
+                cy,
+                rp,
+                &tiles,
+                param,
+                star,
+                blackbody_rgb(t_eff),
+                style,
+                orient,
+                Some(&lava),
+                Some(&field),
+                Some(&flash),
+            );
+            sink ^= buf[buf.len() / 2] as u64;
+        }
+        let cpu_ms = t.elapsed().as_secs_f64() * 1000.0 / k as f64;
+        eprintln!("CPU  draw_globe (serial per-pixel):   {cpu_ms:8.2} ms/frame");
+
+        // GPU: the per-cell cache build (rayon, once per epoch) and the resident-cache render (per frame).
+        match civsim_gpu::globe::try_cuda_renderer() {
+            None => {
+                eprintln!(
+                    "GPU: no CUDA device (set CIVSIM_GPU + CUDA_PATH/LD_LIBRARY_PATH); skipping GPU timing"
+                );
+            }
+            Some(mut gpu) => {
+                use civsim_gpu::globe::{GlobeCells, GlobeParam};
+                let gparam = match param {
+                    SurfaceParam::LatLon { cols, rows } => GlobeParam::LatLon { cols, rows },
+                    SurfaceParam::CubeSphere { face_res } => GlobeParam::CubeSphere { face_res },
+                };
+                // The once-per-epoch per-cell cache build (the analytic normals dominate; rayon-parallel).
+                let tb = Instant::now();
+                let base_rgb = globe_cell_base_rgb(&tiles, style);
+                let normals =
+                    globe_cell_normals(&tiles, param, style.surface_radius_m, Some(&field));
+                let lava_add = globe_cell_lava_add(&lava, param, tiles.len());
+                let build_ms = tb.elapsed().as_secs_f64() * 1000.0;
+                gpu.upload_cells(
+                    gparam,
+                    GlobeCells {
+                        base_rgb: &base_rgb,
+                        normal: &normals,
+                        lava_add: &lava_add,
+                    },
+                    0,
+                );
+                let flashes = globe_gpu_flashes(&flash);
+                // Warm up (first launch JIT-compiles the kernel).
+                {
+                    let mut buf = vec![BG; w * h];
+                    let frame = globe_gpu_frame(
+                        w,
+                        h,
+                        cx,
+                        cy,
+                        rp,
+                        param,
+                        star,
+                        blackbody_rgb(t_eff),
+                        style,
+                        GlobeOrientation {
+                            rot_lon: 0.4,
+                            rot_lat: -0.2,
+                        },
+                    );
+                    gpu.render(&mut buf, &frame, &flashes);
+                    sink ^= buf[buf.len() / 2] as u64;
+                }
+                let t = Instant::now();
+                for i in 0..k {
+                    let mut buf = vec![BG; w * h];
+                    let frame = globe_gpu_frame(
+                        w,
+                        h,
+                        cx,
+                        cy,
+                        rp,
+                        param,
+                        star,
+                        blackbody_rgb(t_eff),
+                        style,
+                        GlobeOrientation {
+                            rot_lon: 0.4 + i as f32 * 0.05,
+                            rot_lat: -0.2,
+                        },
+                    );
+                    gpu.render(&mut buf, &frame, &flashes);
+                    sink ^= buf[buf.len() / 2] as u64;
+                }
+                let gpu_ms = t.elapsed().as_secs_f64() * 1000.0 / k as f64;
+                eprintln!("GPU  render (resident cache):         {gpu_ms:8.2} ms/frame");
+                eprintln!("GPU  per-cell cache build (once):     {build_ms:8.2} ms  (rayon; only on an epoch change)");
+                eprintln!(
+                    "\nSURFACE-ZOOM (epoch fixed, cache amortized): CPU {cpu_ms:.1} ms  ->  GPU {gpu_ms:.1} ms  = {:.1}x",
+                    cpu_ms / gpu_ms.max(1e-6)
+                );
+                eprintln!(
+                    "DEEP-TIME (epoch changes each frame): CPU {cpu_ms:.1} ms  ->  GPU {:.1} ms (build+render) = {:.1}x",
+                    build_ms + gpu_ms,
+                    cpu_ms / (build_ms + gpu_ms).max(1e-6)
+                );
+            }
+        }
+        eprintln!("(sink {sink})");
     }
 }

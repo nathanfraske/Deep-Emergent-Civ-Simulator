@@ -15,7 +15,7 @@
 //! Wiring the non-local redistribution primitive to the surface-mass ledger's snapshot-apply reconciliation
 //! (the coupling slice 2, PR #174). The primitive and its honored-removal closure live in the world crate
 //! ([`civsim_world::surface_coupling::NonLocalMove`]); the four-reservoir ledger and its per-column
-//! reconciliation live in this crate ([`crate::surface_transport`]). The world crate is upstream of this one,
+//! reconciliation live in this crate ([`civsim_foundation::surface_transport`]). The world crate is upstream of this one,
 //! so the join lives HERE, and it is a thin binding: the closure was proven in isolation, this makes it live
 //! against the real ledger.
 //!
@@ -31,8 +31,8 @@
 //! The single clamp is correct against the merged contract (confirmed at source, PR #174): `reconcile_column`
 //! applies ADDITIONS in full and apportions only REMOVALS, so the destination side needs no clamp and the
 //! second seam (a destination rejecting arriving mass under an addition cap) does not exist here. A non-local
-//! move relocates mass WITHIN the [`crate::surface_transport::MassReservoir::ColumnSolid`] fate (a spatial move, not a change of fate),
-//! so it needs no [`crate::surface_transport::SurfaceMassBudget`] transfer: the per-cell delta sums to zero and the fate's global total
+//! move relocates mass WITHIN the [`civsim_foundation::surface_transport::MassReservoir::ColumnSolid`] fate (a spatial move, not a change of fate),
+//! so it needs no [`civsim_foundation::surface_transport::SurfaceMassBudget`] transfer: the per-cell delta sums to zero and the fate's global total
 //! is preserved, which is what keeps the budget conserved across the move.
 //!
 //! Byte-neutral: this binding is built and tested but armed by no scenario (no run-path caller), so the
@@ -43,7 +43,7 @@
 use civsim_world::redistribute::RedistributeError;
 use civsim_world::surface_coupling::NonLocalMove;
 
-use crate::surface_transport::reconcile_column;
+use civsim_foundation::surface_transport::reconcile_column;
 
 /// Reconcile a non-local move's SOURCE removal through the ledger's snapshot-apply, then split the HONORED
 /// removal across the move's fixed destination weights, returning the signed per-cell delta field that closes
@@ -72,8 +72,8 @@ pub fn reconcile_and_apply(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::surface_transport::{MassReservoir, SurfaceMassBudget};
     use civsim_core::Fixed;
+    use civsim_foundation::surface_transport::{MassReservoir, SurfaceMassBudget};
     use civsim_world::redistribute::Weighted;
 
     fn w(dest: usize, weight: u64) -> Weighted {

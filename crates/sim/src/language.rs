@@ -38,12 +38,12 @@
 
 use std::collections::BTreeMap;
 
-use crate::calibration::{CalibrationError, CalibrationManifest};
-use crate::decision::Curve;
 use crate::race::Race;
 use crate::typology::TypologyProfile;
-use crate::value::RaceId;
 use civsim_core::{Fixed, Rng};
+use civsim_foundation::calibration::{CalibrationError, CalibrationManifest};
+use civsim_foundation::decision::Curve;
+use civsim_foundation::value::RaceId;
 
 /// The reserved calibration the naming game needs: how often a speaker coins a fresh
 /// variant instead of reusing its word, the seed of drift. Read from the manifest,
@@ -542,7 +542,7 @@ impl FormChangeRule {
 /// scalar. It DERIVES per lineage from the speaking race's own maturity: a generation is that race's
 /// maturity in world-time, `race.maturity_years` (in orbits) times the orbital year in ticks
 /// ([`crate::world::World::life_cadence_ticks`], itself derived from the world's orbit through
-/// [`crate::clock::ticks_from_seconds`]). Two lineages of races with different `maturity_years`
+/// [`civsim_foundation::clock::ticks_from_seconds`]). Two lineages of races with different `maturity_years`
 /// therefore drift on different cadences from the one mechanism, never a single Earth-year interim
 /// (the retired `language.generation_ticks`). The derivation lives in
 /// [`crate::world::World::drift_languages`], which reads each lineage's [`Language::race`] against a

@@ -15,7 +15,7 @@
 
 """The provenance-register gate (docs/PROVENANCE_LEDGER.md, the owner's mandated-constant register).
 
-The fast structural sibling of the born-provenance `#[test]` in crates/sim/src/calibration.rs, in the
+The fast structural sibling of the born-provenance `#[test]` in crates/bio/src/calibration.rs, in the
 family of constructor_gate / determinism_gate. It fails CI the moment a reserved value ships without one
 of the seven provenance tags, so the register can never silently drift back to empty (the failure that
 made it mandatory: a designed-but-optional ledger stayed 0-of-228 tagged).

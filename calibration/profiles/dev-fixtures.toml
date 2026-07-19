@@ -176,7 +176,7 @@ basis = "FIXTURE placeholder, not the owner's value; one world-second per tick s
 status = "set"
 value = "1"
 unit = "seconds_per_tick"
-source = "dev fixture for Part 14.6; crates/sim/src/clock.rs"
+source = "dev fixture for Part 14.6; crates/foundation/src/clock.rs"
 
 [[reserved]]
 id = "world.orbital_period_seconds"
@@ -184,7 +184,7 @@ basis = "FIXTURE placeholder, not the owner's per-world value; an Earth year in 
 status = "set"
 value = "31536000"
 unit = "seconds_per_orbit"
-source = "dev fixture for Parts 14.6, 20; crates/sim/src/clock.rs"
+source = "dev fixture for Parts 14.6, 20; crates/foundation/src/clock.rs"
 
 [[reserved]]
 id = "world.rotation_period_seconds"
@@ -192,9 +192,9 @@ basis = "FIXTURE placeholder, not the owner's per-world value; an Earth day in w
 status = "set"
 value = "86400"
 unit = "seconds_per_rotation"
-source = "dev fixture for Parts 14.6, 32; crates/sim/src/clock.rs"
+source = "dev fixture for Parts 14.6, 32; crates/foundation/src/clock.rs"
 
-# --- the world-build path (the production dawn->Runner assembly, worldbuild::build_dawn_runner) ---
+# --- the world-build path (the production dawn->Runner assembly, dawn_harness::build_dawn_runner) ---
 # These let a development world assemble a whole Runner from a resolved scenario: the field
 # calibration derives from the selected medium's k/(rho*c) (FieldCalib::from_resolution), and the
 # dawn evidence rings size from expressed memory (RingCapacityLaw::from_manifest). FIXTURE
@@ -301,7 +301,7 @@ source = "dev fixture for the dawn embodiment; crates/sim/src/physiology.rs Meta
 
 # RETIRED (Arc 2, derive-vs-author): `metabolism.surface_emissivity` is gone; the radiant term reads the
 # being's covering `opt.emissivity` (physiology::covering_emissivity). The dev coverings carry 0.95 (the
-# retired fixture value) in crates/sim/src/anatomy.rs, so the dev radiant term is byte-identical.
+# retired fixture value) in crates/bio/src/anatomy.rs, so the dev radiant term is byte-identical.
 
 
 [[reserved]]
@@ -464,7 +464,7 @@ basis = "FIXTURE placeholder; the logistic regrowth rate the standing food stock
 status = "set"
 value = "0.25"
 unit = "ratio_per_tick"
-source = "dev fixture for base-level liveliness step 3; crates/sim/src/environ.rs; crates/sim/src/stocks.rs"
+source = "dev fixture for base-level liveliness step 3; crates/sim/src/environ.rs; crates/foundation/src/stocks.rs"
 
 [[reserved]]
 id = "productivity.colonization"
@@ -564,7 +564,7 @@ basis = "FIXTURE placeholder; the conserved split between a being's own convicti
 status = "set"
 value = "0.5"
 unit = "ratio"
-source = "dev fixture for base-level liveliness step 5; crates/sim/src/worldbuild.rs"
+source = "dev fixture for base-level liveliness step 5; crates/sim/src/dawn_harness.rs"
 
 [[reserved]]
 id = "belief.diffusion_rate"
@@ -572,7 +572,7 @@ basis = "FIXTURE placeholder; the per-tick rate a seeded aggregate belief pool a
 status = "set"
 value = "0.4"
 unit = "ratio_per_tick"
-source = "dev fixture for base-level liveliness step 5; crates/sim/src/worldbuild.rs"
+source = "dev fixture for base-level liveliness step 5; crates/sim/src/dawn_harness.rs"
 
 [[reserved]]
 id = "harm.noise_floor"

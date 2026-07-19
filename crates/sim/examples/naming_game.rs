@@ -26,11 +26,11 @@
 //! printed as gloss and coined word. Every number here is a labelled fixture, never an
 //! owner value, and the run is keyed on a seed so it replays identically.
 
+use civsim_bio::evidence::InferenceParams;
+use civsim_bio::tom::AccessWeights;
 use civsim_core::{Fixed, StableId};
-use civsim_sim::evidence::InferenceParams;
 use civsim_sim::language::{ArticulationSubstrate, LanguageParams};
 use civsim_sim::primes::{nsm_concept_ids, nsm_gloss};
-use civsim_sim::tom::AccessWeights;
 use civsim_sim::world::World;
 
 fn params() -> InferenceParams {

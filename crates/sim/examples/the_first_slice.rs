@@ -38,15 +38,15 @@
 //! rendering layer here consumes the naming game's output but does not yet make the content
 //! itself an emergent concept.
 
+use civsim_bio::evidence::InferenceParams;
+use civsim_bio::tom::{AccessChannelDef, AccessChannelId, AccessChannelRegistry, AccessWeights};
 use civsim_core::{Fixed, StableId};
 use civsim_sim::dialogue::{
     conversation_of, ContentRef, EffectSign, ForceEffectDef, ForceEffectId, ForceFloor, ForceKind,
     Move, MoveKindDef, MoveKindId, MoveRegistry,
 };
-use civsim_sim::evidence::InferenceParams;
 use civsim_sim::language::{ArticulationSubstrate, ConceptId, LanguageParams};
 use civsim_sim::primes::{nsm_concept_ids, nsm_gloss};
-use civsim_sim::tom::{AccessChannelDef, AccessChannelId, AccessChannelRegistry, AccessWeights};
 use civsim_sim::world::{GossipParams, Stimulus, TickInput, World};
 use civsim_sim::AttrKindId;
 use civsim_world::{BiomeSet, Coord3, FlatBounded, TileMap, TopologySpace, WorldgenParams};

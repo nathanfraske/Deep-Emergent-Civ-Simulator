@@ -12,8 +12,8 @@ A single large Markdown design document for a custom Rust engine: a deterministi
 
 The canonical knowledge lives in two maintained documents, plus a research record:
 
-- **The design document** (`emergent_civ_simulator_design.md`): the specification, 64 gapless parts (Part 0 through Part 63). Part 62 holds the research records (62.1 onward), Part 63 holds the bibliography. This is the source of truth.
-- **The audit and remediation log** (`AUDIT_AND_REMEDIATION.md`): the companion ledger. Section 1 is the consolidation history (1a onward), Section 2 lists every part that carries an open research flag, Section 3 is the research backlog grouped thematically, Section 4 is the inconsistency list, and the tail holds the queue and the limitation note with the running resolved/open counts.
+- **The design document** (`docs/design.md`): the specification, 64 gapless parts (Part 0 through Part 63). Part 62 holds the research records (62.1 onward), Part 63 holds the bibliography. This is the source of truth.
+- **The audit and remediation log** (`docs/audit.md`): the companion ledger. Section 1 is the consolidation history (1a onward), Section 2 lists every part that carries an open research flag, Section 3 is the research backlog grouped thematically, Section 4 is the inconsistency list, and the tail holds the queue and the limitation note with the running resolved/open counts.
 - **The research papers**: standalone research reports behind the resolved items, archived for reference. Their reasoning is consolidated into the design document; the papers are the long-form source.
 
 The eleven design principles govern everything. The three that come up most: Principle 3 (determinism), Principle 8 (order emerges, never templated), Principle 9 (physics may be an authored cultural input, cultural outcomes may not, enforced by the Steering Audit), Principle 10 (observer independence), and Principle 11 (data-driven by default; a hardcoded constant in the path of world content is a defect until it earns its place). When in doubt, read the actual part before relying on memory of it.
@@ -60,7 +60,7 @@ These govern the design document, the audit log, every research record, and the 
 **The audit log.**
 - Section 1 consolidation blocks are `### 1a`, `### 1b`, and so on, each a single dense paragraph ending with a pointer to where the mechanism, record, and sources live, and the note "Calibrations are reserved, not invented (below)." Subsections are separated by `---`.
 - Section 3 backlog entries are bullets. An **open** item's bullet starts `- **R-XXX.` so it is counted. A **resolved** item's bullet is rewritten to start with a plain word, for example `- **Composition (R-DEEPTECH-COMPOSE): resolved.**`, so it drops out of the open count while staying findable.
-- The limitation note at the end carries the running counts ("Fourteen research questions are resolved ... and eighteen remain open ...") and must be updated on every resolve or flag.
+- The limitation note at the end carries the running counts (of the form "N research questions are resolved ... and M remain open ...") and must be updated on every resolve or flag. Read the current numbers from `docs/audit.md` itself rather than from any count quoted elsewhere: a restated count goes stale silently, and three documents in this repo have carried a stale one.
 
 **Research item identifiers.** `R-` plus a domain tag, sometimes two parts: `R-EVIDENCE`, `R-VALUE-METRIC`, `R-DEEPTECH-COMPOSE`. New items follow the same shape.
 

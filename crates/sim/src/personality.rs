@@ -44,9 +44,9 @@ use std::collections::BTreeMap;
 
 use civsim_core::Fixed;
 
-use crate::decision::Curve;
 use crate::race::Race;
-use crate::value::RaceId;
+use civsim_foundation::decision::Curve;
+use civsim_foundation::value::RaceId;
 
 /// A data-defined personality trait axis identifier (an open registry, Principle 11): which trait a
 /// race's personality moves along, for example a conscientiousness-like axis, a novelty-seeking one,
@@ -235,12 +235,12 @@ pub fn age_personality(
 mod tests {
     use super::*;
     use crate::axiom::{Axiom, AxiomAxisId, EpistemicStance, EvidenceRing, IntrinsicBeliefs};
-    use crate::genome::{
+    use crate::SourceModeId;
+    use civsim_bio::genome::{
         Channel, CognitionChannel, DominanceMode, GeneDef, GeneEffect, GeneId, GenePool, GeneSet,
         GeneticScheme, ReproductionMode, SchemeId,
     };
-    use crate::value::{ValueAxisId, ValueProfile};
-    use crate::SourceModeId;
+    use civsim_foundation::value::{ValueAxisId, ValueProfile};
 
     /// A minimal intrinsic-belief seed (the personality kernel reads none of it; the Race just
     /// needs one). A labelled fixture, not owner data.

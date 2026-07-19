@@ -51,9 +51,9 @@ use civsim_compose::{
     derive_capabilities, CapabilityCaps, CapabilityRefs, FunctionLawId, FunctionLawRegistry,
 };
 
-use crate::anatomy::{BodyPlan, BodyPlanRegistry, KindDef};
 use crate::morphogen::Structure;
-use crate::stocks::Stock;
+use civsim_bio::anatomy::{BodyPlan, BodyPlanRegistry, KindDef};
+use civsim_foundation::stocks::Stock;
 
 /// A homeostatic axis id, minted through the registry (extensible, never a closed enum). The
 /// numeric values are stable ids folded into no canonical stream on their own; they key the
@@ -575,7 +575,7 @@ impl Homeostasis {
 /// case is to LEAN ON THE EXISTING CLOSURE CULL rather than add a seed-time reject: in the running
 /// sim a birth-nonviable organism dies at once (its reserve is already through the floor), so its
 /// aggregate pool draws no sustaining return and collapses under the Part 15 stock dynamics
-/// ([`crate::stocks::Stock`]), the same over-harvest cull that removes an under-supplied pool. Nothing
+/// ([`civsim_foundation::stocks::Stock`]), the same over-harvest cull that removes an under-supplied pool. Nothing
 /// here rejects a species at seed time. The cull it leans on reads only the food web and supply, never
 /// morphology, and birth-viability is a pure function of the organ set, independent of body mass,
 /// covering, or weaponry, so leaning on the cull removes only the physically-impossible and steers no
@@ -1209,7 +1209,7 @@ pub fn is_reward_tick(delta: Fixed, reward_noise_floor: Fixed) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::anatomy::{Part, Temperament};
+    use civsim_bio::anatomy::{Part, Temperament};
 
     #[test]
     fn a_wielded_tool_grants_a_capability_gated_affordance_and_never_an_unconditional_one() {
@@ -1735,7 +1735,7 @@ mod tests {
         // arm, no struct field is touched: the composition and the backing are keyed off floor axis
         // ids, the `Substance::vector` convention, so the reserve vocabulary grows with the floor's
         // data, never a code change. A future respiratory-surface axis (R-MEDIUM) enters the same way.
-        use crate::anatomy::{OrganKindDef, TissueComposition};
+        use civsim_bio::anatomy::{OrganKindDef, TissueComposition};
         let mut organs = BodyPlanRegistry::dev_default();
         organs.organs = vec![OrganKindDef {
             id: 0,

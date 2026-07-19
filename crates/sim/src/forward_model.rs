@@ -23,7 +23,7 @@
 //! and the discovery sampler (piece 2) reads: a template's committed reward IS its prediction. A being that
 //! holds a committed REWARDS belief about a sequence PREDICTS that enacting it pays off (a supra-recovery
 //! reserve rise); one with no such belief predicts nothing beyond recovery. There is no new learned
-//! magnitude and no new engine: the prediction reads [`crate::agent::Mind::belief`] on the exact
+//! magnitude and no new engine: the prediction reads [`civsim_bio::agent::Mind::belief`] on the exact
 //! [`crate::learn::sequence_subject`] the piece-1 credit pass commits and the piece-2 sampler weights, and the felt side
 //! reduces the being's own reserve delta through the shipped [`is_reward_tick`] predicate, so the two sit on
 //! one normalised reward scale and their difference is the signed surprise.
@@ -44,10 +44,11 @@
 
 use civsim_core::Fixed;
 
-use crate::agent::Mind;
-use crate::evidence::InferenceParams;
 use crate::homeostasis::is_reward_tick;
-use crate::learn::{step_belief_subject, SequenceStep, REWARDS, REWARD_ATTR};
+use crate::learn::{step_belief_subject, REWARDS, REWARD_ATTR};
+use civsim_bio::agent::Mind;
+use civsim_bio::evidence::InferenceParams;
+use civsim_foundation::sequence::SequenceStep;
 
 /// The forward model's predicted interoceptive outcome for a candidate action step, in `[0, 1]`: `Fixed::ONE`
 /// when the being holds a committed REWARDS belief about the step's [`crate::learn::sequence_subject`] (it PREDICTS the
@@ -109,8 +110,8 @@ pub fn prediction_error(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::evidence::{AttrKindId, ValueId};
     use crate::learn::{sequence_subject, NEUTRAL};
+    use civsim_bio::evidence::{AttrKindId, ValueId};
     use civsim_core::StableId;
 
     fn params() -> InferenceParams {

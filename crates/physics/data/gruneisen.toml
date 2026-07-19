@@ -1,0 +1,176 @@
+# Thermodynamic Gruneisen parameter of the rock-forming silicate and oxide mineral phases, the
+# thermal-EoS sibling of mineral_moduli.toml (crate::petrology_data). One entry per phase, carrying a
+# TWO-RUNG LADDER for the phase's ambient Gruneisen parameter gamma, exactly as the moduli file carries
+# the ladder for K and G: a measured anchor above a derived estimator, per quantity. A rock-Gruneisen
+# kernel aggregates these per-phase gammas over a world's OWN mineral census (by volume or mass fraction),
+# so a mantle gamma is DERIVED from the assemblage and is never a floor datum: there is no reserved
+# "mantle gamma", because a mantle is an aggregate, not a phase.
+#
+# WHY GAMMA IS NEEDED PER PHASE. The Gruneisen parameter sets the thermal pressure (P_thermal =
+# gamma * E_thermal / V), the adiabatic gradient, and the coupling of a mineral's stiffness to its heat
+# content. Like a modulus, a mineral's gamma is a FLOOR datum: it was measured in ignorance of any rock
+# the mineral will sit in, so it cannot fit an outcome; the rock's gamma is the aggregate. An alien phase
+# is a new row (Principle 11), and a phase with no gamma row is refused by the aggregator, never defaulted.
+#
+# BLOCK KIND [[mineral]], the cited-data-COLUMN idiom (mirroring mineral_moduli.toml's [[mineral]], the
+# ionic radii [[radius]], the condensation [[condensation]], the convection-scaling [[constant]]), NOT a
+# reserved floor kind ([[element]] / [[axis]] / [[substance]]): an immutable transcription of cited
+# measured and compilation values, out of the floor real/fantasy authorship axis and out of floor-Element
+# policing. Values are QUOTED strings; the engine parses fixed-point from strings, never floats. Keyed by
+# the phase name, matching the phase-registry / moduli spelling exactly (the JANAF-decorated crust names
+# such as MgSiO3(cr,enstatite) resolve to the plain key by the same canonical bridge the moduli file uses).
+#
+# THE TWO RUNGS (the ladder, measured anchor above estimator, per phase):
+#   RUNG 1, ANCHOR (measured): gamma_thermodynamic, the direct thermodynamic Gruneisen parameter
+#     gamma_th = alpha * K_S * V / C_P (equivalently alpha * K_T * V / C_V), a combination of separately
+#     measured quantities. Sourced from Anderson & Isaak 1995 (the AGU Mineral Physics Handbook chapter,
+#     held), Tables 15 to 20, at 300 K. This is the quantity the task names (forsterite ~1.2-1.3, MgO ~1.5).
+#   RUNG 2, ESTIMATOR (Slater-class): where no measured gamma exists, the engine derives one from the
+#     measured pressure derivative of the bulk modulus by the Slater (1939) relation
+#     gamma_Slater = K' / 2 - 1/6, K' = (dK/dP). K' is itself a measured floor quantity (~4 to 6 for
+#     silicates), carried here as bulk_modulus_pressure_derivative_kprime so the estimate is DERIVED, not
+#     stored (the Slater value is recomputed by the consumer and by the provenance test, never written in).
+#
+# A THIRD, CROSS-CHANNEL COLUMN, gamma_eos_debye, carries the Mie-Gruneisen-Debye EoS parameter
+# gamma_0 = -dln(theta_D)/dln(V) from the self-consistent Stixrude & Lithgow-Bertelloni 2005 compilation
+# (held). It is a DIFFERENT average from the direct gamma_th: the two coincide for the dense cubic oxides
+# (periclase, corundum) and run ~15 to 30 percent lower for the silicates, because a real mineral is not a
+# Debye solid. It is carried so the definitional spread is visible rather than laundered, and it is the
+# measured anchor for enstatite (where no direct gamma_th table exists). Do NOT read gamma_eos_debye into
+# the gamma_thermodynamic slot: they are the same physics under two different weightings of the vibrational
+# spectrum, and the row states which is which.
+#
+# THE SLATER ESTIMATOR IS BIASED HIGH, AND FAILS FOR CHAIN AND FRAMEWORK SILICATES (the honest limit).
+# Slater assumes a volume-independent Poisson ratio and estimates the acoustic gamma; against the measured
+# gamma_thermodynamic it over-estimates by ~1.2x (periclase) to ~1.9x (fayalite, spinel) for the dense
+# oxides and orthosilicates, so it is a same-order estimate, not a precise one, and the measured anchor is
+# preferred whenever present. For the chain silicate enstatite (K' ~ 7 to 10) and the framework silicate
+# quartz (K' ~ 6) the soft polyhedral-tilt (rigid-unit) modes make K' anomalously large while the thermal
+# gamma stays low (~1.0 and ~0.7), so Slater over-estimates by ~4 to 5x and is INVALID. Each row declares
+# slater_gamma_applicable; the aggregator applies the Slater rung only where it is true, and refuses a
+# phase that is Slater-inapplicable and has no measured gamma (the banded-refusal path), rather than
+# writing in a value the physics does not support.
+#
+# S-VERSUS-T PRESSURE DERIVATIVE. The Slater relation formally uses the isothermal K_T'; the held single-
+# crystal elasticity primaries report the adiabatic K_S' (forsterite, fayalite, periclase) and the held
+# compression / EoS primaries report K_T' (quartz, and the Stixrude compilation K0'). At ambient the two
+# differ by ~1 percent (fayalite: K_S' = 4.85, K_T' = 4.88), well inside the K' band, so each row carries
+# the value its source reports and names which it is (kprime_type); the ~1 percent S/T offset is a dropped
+# term the band already spans.
+#
+# WITNESSES (held bytes, sha256 in gruneisen/manifest.toml): scripts/gruneisen_provenance_test.py rechecks
+# every receipt offline, asserts the pre-registered fingerprints against this column, and recomputes the
+# Slater relation gamma = K'/2 - 1/6 for every row that carries both a measured gamma and a K' (the overlap
+# sentinel: where both speak, a Slater-applicable phase agrees to same order and a Slater-inapplicable phase
+# diverges, both asserted, so the documented failure is encoded and a drifted transcription fails the build).
+#
+# FINGERPRINTS (owner spot-check, re-asserted in the test): gamma_thermodynamic at 300 K (Anderson & Isaak
+# 1995): periclase 1.54, corundum 1.32, spinel 1.51, forsterite 1.29, fayalite 1.21. gamma_eos_debye
+# (Stixrude & Lithgow-Bertelloni 2005 Table 1): forsterite 0.99, fayalite 1.06, enstatite 0.67, corundum
+# 1.32, periclase 1.50, spinel 1.02. K': forsterite 4.2 (Zha 1996), fayalite 4.85 (Speziale 2004), periclase
+# 3.94 (Fan 2019), corundum 4.3 (Stixrude 2005), spinel 5.7 (Stixrude 2005), enstatite 7.1 (Stixrude 2005),
+# quartz 5.99 (Angel 1997). Slater = K'/2 - 1/6: applicable phases in [1.1, 2.2]x the measured gamma;
+# enstatite ~5.0x (inapplicable); quartz K'-only, Slater inapplicable.
+
+frame = "ambient reference state ~298 to 300 K, 1 bar; gamma_thermodynamic = alpha*K_S*V/C_P at 300 K"
+grade = "gamma_thermodynamic: measured-thermodynamic (Anderson & Isaak 1995); gamma_eos_debye: compilation, EoS-fit (Stixrude & Lithgow-Bertelloni 2005); kprime: measured; Slater gamma: derived (K'/2 - 1/6)"
+slater_relation = "gamma_Slater = K'/2 - 1/6"
+
+[[mineral]]
+name = "periclase"
+gamma_thermodynamic = "1.54"
+gamma_thermodynamic_band = "0.05"
+gamma_eos_debye = "1.50"
+gamma_eos_debye_band = "0.02"
+bulk_modulus_pressure_derivative_kprime = "3.94"
+kprime_band = "0.05"
+kprime_type = "K_S (adiabatic, single-crystal Brillouin)"
+slater_gamma_applicable = "true"
+temperature_k = "300"
+pressure_bar = "1"
+gamma_definition = "thermodynamic gamma_th = alpha*K_S*V/C_P (Anderson & Isaak 1995 Table 15)"
+citation = "gamma_thermodynamic 1.54 (300 K): Anderson, O.L. & Isaak, D.G. 1995, Elastic Constants of Mantle Minerals at High Temperature, in Mineral Physics and Crystallography: A Handbook of Physical Constants (AGU Reference Shelf 2), ed. Ahrens, Table 15 'MgO: Thermal expansivity, specific heat, isotropic elastic constants and velocities', 300 K row (alpha=3.12e-5/K, K_S=163.9 GPa, C_P=0.928 J/gK; gamma column = 1.54, verified alpha*K_S*V/C_P). gamma_eos_debye 1.50(2): Stixrude & Lithgow-Bertelloni 2005, GJI 162, Table 1 (gamma_0 = -dln theta/dln V). K' = 3.94(5): Fan et al. 2019, Am. Mineral. 104:262, Table 2 (This study, BLS, (dK_S/dP)_300K); dual-channel Stixrude 2005 3.9(2), Yoneda 1990 4.13(9), Zha et al. 2000 3.99(3). Slater(3.94)=1.80 vs measured 1.54, ratio 1.17 (biased high, same order)."
+
+[[mineral]]
+name = "corundum"
+gamma_thermodynamic = "1.32"
+gamma_thermodynamic_band = "0.05"
+gamma_eos_debye = "1.32"
+gamma_eos_debye_band = "0.04"
+bulk_modulus_pressure_derivative_kprime = "4.3"
+kprime_band = "0.2"
+kprime_type = "K_S0' (compilation, single-crystal elasticity)"
+slater_gamma_applicable = "true"
+temperature_k = "300"
+pressure_bar = "1"
+gamma_definition = "thermodynamic gamma_th = alpha*K_S*V/C_P (Anderson & Isaak 1995 Table 16)"
+citation = "gamma_thermodynamic 1.32 (300 K): Anderson & Isaak 1995 (AGU Handbook), Table 16 'Al2O3: Thermal expansivity, specific heat, isotropic moduli and velocities', 300 K row (alpha=1.62e-5/K, K_S=253.6 GPa, C_P=0.779 J/gK; gamma column = 1.32). gamma_eos_debye 1.32(4) and K' 4.3(2): Stixrude & Lithgow-Bertelloni 2005, GJI 162, Table 1 (corundum AlAlO3; K0'=4.3, gamma_0=1.32), citing Gieske & Barsch 1968 for the single-crystal derivatives. Direct and EoS-Debye gamma coincide for corundum (dense cubic-like oxide). Slater(4.3)=1.98 vs measured 1.32, ratio 1.50 (biased high, same order)."
+
+[[mineral]]
+name = "spinel"
+gamma_thermodynamic = "1.51"
+gamma_thermodynamic_band = "0.10"
+gamma_eos_debye = "1.02"
+gamma_eos_debye_band = "0.04"
+bulk_modulus_pressure_derivative_kprime = "5.7"
+kprime_band = "0.6"
+kprime_type = "K0' (compilation, disordered-spinel EoS model)"
+slater_gamma_applicable = "true"
+temperature_k = "300"
+pressure_bar = "1"
+gamma_definition = "thermodynamic gamma_th = alpha*K_S*V/C_P (Anderson & Isaak 1995 Table 17)"
+citation = "gamma_thermodynamic 1.51 (300 K): Anderson & Isaak 1995 (AGU Handbook), Table 17 'MgAl2O4: Thermal expansivity, specific heat, isotropic moduli and velocities', 300 K row (alpha=2.11e-5/K, K_S=209.9 GPa, C_P=0.819 J/gK; gamma column = 1.51). CAVEAT: the tabulated gamma_th falls steeply with T (1.41 at 350 K, 1.36 at 400 K), so the 300 K value is the least robust of the five, hence the wider band; the EoS-Debye channel gives 1.02. gamma_eos_debye 1.02(4) and K' 5.7(2): Stixrude & Lithgow-Bertelloni 2005, GJI 162, Table 1 for DISORDERED spinel (Mg3Al)(Al7Mg)O16 = 4x MgAl2O4; the ordered single-crystal K' is lower (~4.3 to 5.0, Yoneda 1990 / Askarpour et al. 1993), hence the wide K' band. Slater(5.7)=2.68 vs measured 1.51, ratio 1.78 (biased high, same order)."
+
+[[mineral]]
+name = "forsterite"
+gamma_thermodynamic = "1.29"
+gamma_thermodynamic_band = "0.05"
+gamma_eos_debye = "0.99"
+gamma_eos_debye_band = "0.03"
+bulk_modulus_pressure_derivative_kprime = "4.2"
+kprime_band = "0.2"
+kprime_type = "K_S' (adiabatic, single-crystal Brillouin to 16 GPa)"
+slater_gamma_applicable = "true"
+temperature_k = "300"
+pressure_bar = "1"
+gamma_definition = "thermodynamic gamma_th = alpha*K_S*V/C_P (Anderson & Isaak 1995 Table 18)"
+citation = "gamma_thermodynamic 1.29 (300 K): Anderson & Isaak 1995 (AGU Handbook), Table 18 'Mg2SiO4: Thermal expansivity, specific heat, isotropic moduli and velocities', 300 K row (alpha=2.72e-5/K, K_S=128.6 GPa, C_P=0.840 J/gK; gamma column = 1.29), matching the task's forsterite ~1.2-1.3. gamma_eos_debye 0.99(3): Stixrude & Lithgow-Bertelloni 2005, GJI 162, Table 1 (the ~23 percent silicate gap between the direct and EoS-Debye gamma). K' = 4.2(2): Zha, Duffy, Downs, Mao & Hemley 1996, JGR 101:17535, abstract 'Ks(GPa) = 128.8(5) + 4.2(2)P' (K_S', adiabatic); Stixrude 2005 Table 1 K0'=4.2(2) agrees. Slater(4.2)=1.93 vs measured 1.29, ratio 1.50 (biased high, same order)."
+
+[[mineral]]
+name = "fayalite"
+gamma_thermodynamic = "1.21"
+gamma_thermodynamic_band = "0.05"
+gamma_eos_debye = "1.06"
+gamma_eos_debye_band = "0.07"
+bulk_modulus_pressure_derivative_kprime = "4.85"
+kprime_band = "0.1"
+kprime_type = "K_S' (adiabatic, Brillouin to 12 GPa; K_T'=4.88)"
+slater_gamma_applicable = "true"
+temperature_k = "300"
+pressure_bar = "1"
+gamma_definition = "thermodynamic gamma_th = alpha*K_S*V/C_P (Anderson & Isaak 1995 Table 20)"
+citation = "gamma_thermodynamic 1.21 (300 K): Anderson & Isaak 1995 (AGU Handbook), Table 20 'Fe2SiO4: Thermal expansivity, specific heat, isotropic moduli and velocities', 300 K row (alpha=2.61e-5/K, K_S=138.0 GPa, C_P=0.673 J/gK; gamma column = 1.21). gamma_eos_debye 1.06(7): Stixrude & Lithgow-Bertelloni 2005, GJI 162, Table 1. K' = 4.85(5): Speziale, Duffy & Angel 2004, JGR 109:B12202, Table 5 (This study Hill aggregate, (dK_S/dP)_T0 = 4.85(5); the isothermal (dK_T/dP)_T0 = 4.88(5); abstract rounds to 4.9(1)). Sample (Fe0.94Mn0.06)2SiO4. Slater(4.85)=2.26 vs measured 1.21, ratio 1.87 (biased high, same order, the widest of the applicable phases)."
+
+[[mineral]]
+name = "enstatite"
+gamma_eos_debye = "0.67"
+gamma_eos_debye_band = "0.04"
+bulk_modulus_pressure_derivative_kprime = "7.1"
+kprime_band = "0.4"
+kprime_type = "K0' (compilation; orthoenstatite, anomalously large)"
+slater_gamma_applicable = "false"
+temperature_k = "300"
+pressure_bar = "1"
+gamma_definition = "eos_debye gamma_0 = -dln theta/dln V (Stixrude & Lithgow-Bertelloni 2005 Table 1); no direct gamma_th table in Anderson & Isaak 1995"
+citation = "SLATER-INAPPLICABLE anomaly phase (chain silicate, orthoenstatite MgSiO3, Pbca). gamma_eos_debye 0.67(4) and K' 7.1(4): Stixrude & Lithgow-Bertelloni 2005, GJI 162, Table 1 (enstatite Mg4Si4O12 = 4x MgSiO3; K0'=7.1(4), gamma_0=0.67(4)), citing Jackson et al. 1999/2003, HughJones & Angel 1997, Frisillo & Barsch 1972. Orthoenstatite has the largest K' of the upper-mantle minerals (high-P XRD gives K_T0' ~ 8.5 to 10.2, HughJones & Angel 1997; Zhao et al. 1995), from soft chain-tilt modes that raise K' without raising the thermal gamma (direct gamma_th ~ 1.0 to 1.05 in the orthopyroxene thermoelastic literature). Slater(7.1)=3.38 vs measured gamma_0 0.67, ratio ~5.0: Slater INVALID here, so this row is the documented failure that keeps the measured anchor above the estimator. No gamma_thermodynamic carried: Anderson & Isaak 1995 has no orthopyroxene table, and no direct gamma_th was held at a primary."
+
+[[mineral]]
+name = "quartz"
+bulk_modulus_pressure_derivative_kprime = "5.99"
+kprime_band = "0.04"
+kprime_type = "K_T' (isothermal, 3rd-order Birch-Murnaghan, X-ray compression)"
+slater_gamma_applicable = "false"
+temperature_k = "298"
+pressure_bar = "1"
+gamma_definition = "none held; direct gamma_th ~ 0.66 to 0.72 (framework silicate) is strongly T-dependent and not held at a primary"
+citation = "SLATER-INAPPLICABLE, K'-ONLY anomaly phase (framework silicate, alpha-quartz SiO2). K' = 5.99(4): Angel, Allan, Miletich & Finger 1997, J. Appl. Cryst. 30:461-466, 'K_T0 = 37.12(9) GPa and K' = 5.99(4)' (third-order Birch-Murnaghan EoS, isothermal, X-ray compression to 8.9 GPa). No measured gamma carried: quartz is absent from the Anderson & Isaak 1995 mantle tables and from the Stixrude 2005 mantle compilation, and its thermal gamma is strongly T-dependent near the alpha-beta inversion. The well-known direct gamma_th at room T is ~0.66 to 0.72 (Boehler 1979 measured gamma = (K_S/T)(dT/dP)_S directly), so Slater(5.99)=2.83 over-estimates by ~4x: soft rigid-unit tilt modes raise K' while the thermal gamma stays low. Slater INVALID; the aggregator refuses quartz rather than applying it. This is the honest absent-gamma row (per the no-fabrication rule)."

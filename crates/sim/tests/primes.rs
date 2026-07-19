@@ -17,11 +17,11 @@
 //! replays bit for bit. Innovation is off so coordination converges cleanly; every number
 //! here is a labelled fixture, never an owner value.
 
+use civsim_bio::evidence::InferenceParams;
+use civsim_bio::tom::AccessWeights;
 use civsim_core::{Fixed, StableId};
-use civsim_sim::evidence::InferenceParams;
 use civsim_sim::language::{ArticulationSubstrate, ConceptId, LanguageParams};
 use civsim_sim::primes::{nsm_concept_ids, nsm_gloss};
-use civsim_sim::tom::AccessWeights;
 use civsim_sim::world::World;
 
 fn params() -> InferenceParams {

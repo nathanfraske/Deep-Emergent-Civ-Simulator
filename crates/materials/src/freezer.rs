@@ -173,6 +173,7 @@ fn kb_fold_gpa_angstrom3_to_kelvin() -> Fixed {
 /// sqrt(10^6 m^2/s^2) = 10^3 m/s = 1 km/s`, so the square root of `B_0[GPa]/rho[g/cm^3]` is already in km/s
 /// (the atomic-scale working unit, representable where the SI `~5000 m/s` also fits but the elastic modulus in
 /// pascals would not). Non-positive inputs (no elastic scale or no mass) yield zero.
+// @derives: the bulk sound speed <- bulk modulus + density
 pub fn sound_speed_km_per_s(bulk_modulus_gpa: Fixed, density_g_per_cm3: Fixed) -> Fixed {
     if bulk_modulus_gpa <= ZERO || density_g_per_cm3 <= ZERO {
         return ZERO;

@@ -14,7 +14,7 @@
 
 //! The channel reach registry (perception-substrate arc, slice 1, segment 2): the data-defined binding
 //! from a sense channel to the physics-floor law and axes its signal reaches by. It is the
-//! harden-to-registry sibling of the value substrate ([`crate::value`]), the semantic substrate, and
+//! harden-to-registry sibling of the value substrate ([`civsim_foundation::value`]), the semantic substrate, and
 //! the percept substrate ([`crate::percept`]): the kernel SET is fixed Rust (the mechanism), the
 //! membership (which channels exist and which law and axes each reaches by) is data and grows with the
 //! world (Principle 11).
@@ -38,8 +38,8 @@ use civsim_core::Fixed;
 use civsim_physics::{laws, PhysicsRegistry};
 use civsim_world::Coord3;
 
-use crate::material::MaterialField;
-use crate::sensorium::SenseChannelId;
+use civsim_foundation::material::MaterialField;
+use civsim_foundation::sensorium::SenseChannelId;
 
 /// The spreading law a channel's signal propagates by. The kernel SET is fixed Rust code (the
 /// mechanism); which law a channel uses is data (the registry row). Today only [`SpreadKernel::Geometric`]
@@ -352,7 +352,7 @@ pub fn resolve_reach(
 ///   [`crate::medium::MediumField`]) is not sampled here. So a being whose dominant occluder IS its fluid
 ///   (a water-dweller, an atmosphere-swimmer) has that fluid treated as transparent, which understates its
 ///   occlusion. The full volumetric medium is the flagged z-stacked-medium follow-on.
-/// - AGGREGATION: the per-cell coupling is the volume-weighted bulk mean ([`crate::material::SubstanceMix::bulk_axis`]), the
+/// - AGGREGATION: the per-cell coupling is the volume-weighted bulk mean ([`civsim_foundation::material::SubstanceMix::bulk_axis`]), the
 ///   linear mixing the material substrate uses everywhere. A channel whose occlusion is NOT a linear
 ///   volume-mean of the cell (a threshold occluder, a saturating or max-dominated medium) cannot be
 ///   expressed by the row today, which carries no aggregation selector. The data-expressible
@@ -399,7 +399,7 @@ fn absorption_along(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::material::SubstanceMix;
+    use civsim_foundation::material::SubstanceMix;
 
     #[test]
     fn empty_registry_is_the_opt_out() {

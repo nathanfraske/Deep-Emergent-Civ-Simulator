@@ -33,9 +33,9 @@
 //! Per-axis divergence still emerges from WHEN each conviction is held relative to the being's lived valence.
 
 use crate::axiom::AxiomAxisId;
-use crate::calibration::{CalibrationError, CalibrationManifest};
 use crate::physiology::FeltExperience;
 use civsim_core::{Fixed, StateHasher};
+use civsim_foundation::calibration::{CalibrationError, CalibrationManifest};
 use std::collections::BTreeMap;
 
 /// A per-being learned association between felt experience and each conviction the being holds (Branch 1). A
@@ -227,7 +227,7 @@ impl FeltConvictionCalib {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::calibration::CalibrationManifest;
+    use civsim_foundation::calibration::CalibrationManifest;
 
     fn felt(valence: i32, intensity: Fixed) -> FeltExperience {
         FeltExperience {

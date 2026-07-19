@@ -45,10 +45,10 @@ use civsim_compose::{
 use civsim_core::Fixed;
 use civsim_physics::PhysicsRegistry;
 
-use crate::material::{SubstanceMix, WieldedTool};
+use civsim_foundation::material::{SubstanceMix, WieldedTool};
 
 /// The fracture-strength material axis the fracture-potential kernel reads: the stress a substance
-/// fractures at, the same axis the extraction contest gates on ([`crate::material`]).
+/// fractures at, the same axis the extraction contest gates on ([`civsim_foundation::material`]).
 const AXIS_FRACTURE: &str = "mat.fracture_strength";
 
 /// The contact-area geometry axis the sharpness kernel reads: the working area a tool's edge presses
@@ -71,7 +71,7 @@ pub struct AffordancePerceptId(pub u16);
 pub struct AffordancePerceptRefs {
     /// RESERVED. The reference actionable contact stress the fracture-potential is measured against: the
     /// contact stress an ORDINARY being delivers to matter it works (the extraction contest's reference
-    /// force over a reference contact area, [`crate::material`]'s `ExtractionParams`), so the percept
+    /// force over a reference contact area, [`civsim_foundation::material`]'s `ExtractionParams`), so the percept
     /// reads "how breakable is this to an ordinary actor" rather than against the theoretical strongest
     /// material the axis admits (which would read every ordinary rock and soil as equally, trivially
     /// breakable and discriminate nothing). Surfaced with its basis, never fabricated: the value graduates

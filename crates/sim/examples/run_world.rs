@@ -40,18 +40,22 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Instant;
 
+use civsim_bio::anatomy::{
+    BodyPlan, BodyPlanRegistry, OrganKindDef, Part, Temperament, TissueComposition,
+};
+use civsim_bio::tom::AccessChannelRegistry;
 use civsim_core::{Fixed, GaussApprox, StableId};
+use civsim_foundation::calibration::{CalibrationManifest, Profile};
+use civsim_foundation::contact_transfer::ContactTransferRegistry;
+use civsim_foundation::decompose::DecomposerDriverRegistry;
+use civsim_foundation::material::{MaterialField, MatterCycleCalib, StrikeParams};
+use civsim_foundation::scenario::{Scenario, ScenarioResolution};
+use civsim_foundation::sensorium::SenseChannelId;
 use civsim_physics::PhysicsRegistry;
 use civsim_sim::affordance_percept::{
     AffordancePerceptKind, AffordancePerceptRefs, AffordancePerceptRegistry,
 };
-use civsim_sim::anatomy::{
-    BodyPlan, BodyPlanRegistry, OrganKindDef, Part, Temperament, TissueComposition,
-};
-use civsim_sim::calibration::{CalibrationManifest, Profile};
-use civsim_sim::contact_transfer::ContactTransferRegistry;
 use civsim_sim::conviction_experience::FeltConvictionCalib;
-use civsim_sim::decompose::DecomposerDriverRegistry;
 use civsim_sim::discovery::DiscoveryCalib;
 use civsim_sim::edibility::ToleranceRegistry;
 use civsim_sim::genesis::{genesis, GenesisParams};
@@ -63,15 +67,11 @@ use civsim_sim::langmod::PerceptualParams;
 use civsim_sim::language::{ConceptId, FeatureDimId, ProductionModalityId, Word};
 use civsim_sim::learn::{RewardLearningCalib, HARMS, HARM_ATTR, REWARDS, REWARD_ATTR};
 use civsim_sim::locomotion::LocomotionParams;
-use civsim_sim::material::{MaterialField, MatterCycleCalib, StrikeParams};
 use civsim_sim::perceivable_feature::PerceivableFeatureRegistry;
 use civsim_sim::percept::PerceptRegistry;
 use civsim_sim::physiology::{ENERGY_DENSITY, SALINITY};
 use civsim_sim::planning::plan_toward;
 use civsim_sim::runner::{CreatureSelectionParams, ReproductiveVigorCalib, Runner};
-use civsim_sim::scenario::{Scenario, ScenarioResolution};
-use civsim_sim::sensorium::SenseChannelId;
-use civsim_sim::tom::AccessChannelRegistry;
 use civsim_sim::{
     append_controller_block, append_scalar_channel, build_dawn_runner, controller_gene_set,
     forage_taxis_weights, nsm_gloss, Articulation, Axiom, AxiomAxisId, BandSpec, BreedingSystem,
@@ -1220,7 +1220,7 @@ fn mirror_manifest() -> CalibrationManifest {
 /// glycogen, lean), read fail-loud (Principle 11, never fabricated inline). The registry mechanism and the
 /// organ KINDS are unchanged (dev_default); only the per-tissue energy-density VALUE moves to the real kJ/g
 /// scale. Body-plan sampling and biosphere survival scoring key on organ KIND ids, never on
-/// `bio.energy_density` (verified: [`civsim_sim::anatomy::sample_body_plan`] picks organ kinds, the
+/// `bio.energy_density` (verified: [`civsim_bio::anatomy::sample_body_plan`] picks organ kinds, the
 /// biome-fit closure reads niches), so swapping this registry onto the generated living world changes ONLY
 /// the food-content and reserve-energy read-out, never which species survive. Water-store (energy density
 /// zero) and muscle (no energy tissue) are unchanged; the fantasy mana-sac is absent from grounded Mirror.
@@ -2184,7 +2184,7 @@ fn main() {
                 ..GenesisParams::dev_default()
             },
             // The world's abiotic sources: the Earth-triad dev fixture (Arc 5 T1). An alien world declares
-            // its own; the run arms this same registry via worldbuild, so generation and run agree by data.
+            // its own; the run arms this same registry via the dawn harness, so generation and run agree by data.
             &civsim_sim::environ::AbioticSourceRegistry::earth_dev(),
             None,
         );
@@ -2235,7 +2235,7 @@ fn main() {
     );
 
     // Build the unified runner. build_dawn_runner already arms reproduction and post-dawn generational
-    // drift (worldbuild.rs: set_reproduction + arm_generational_drift), and the life cadence resets the
+    // drift (dawn_harness.rs: set_reproduction + arm_generational_drift), and the life cadence resets the
     // census window each generation, so nothing further is armed here.
     let mut runner = build_dawn_runner(
         &manifest,
@@ -2381,7 +2381,7 @@ fn main() {
             runner.set_matter_cycle(MatterCycleCalib::dev_fixture());
             runner.set_decomposer(DecomposerDriverRegistry::dev_fixture());
             runner.set_corpse_matter(true);
-            // The abiotic-source binding registry (the extract-deplete cycle) is now armed by worldbuild from
+            // The abiotic-source binding registry (the extract-deplete cycle) is now armed by dawn_harness from
             // the SAME registry the biosphere was generated against (Arc 5 T1, `LivingWorld::abiotic`), so the
             // ids the producers evolved to draw on and the run's bindings agree by data, not by a hand-written
             // literal kept in sync by comment. Nothing to arm here.
@@ -2582,11 +2582,14 @@ fn main() {
                 // before (its year is 365 of its own days), so this is byte-neutral; an alien orbit would land
                 // its own calendar automatically.
                 const DEMO_TICKS_PER_DAY: u64 = 128;
-                let orbital = civsim_sim::clock::orbital_from_manifest(&manifest)
+                let orbital = civsim_foundation::clock::orbital_from_manifest(&manifest)
                     .expect("the Mirror manifest carries the world's orbital scalars");
                 let (rotation_period_ticks, orbital_period_ticks) =
-                    civsim_sim::clock::diurnal_periods_at_sampling(&orbital, DEMO_TICKS_PER_DAY)
-                        .expect("the Mirror orbit yields a valid diurnal sampling");
+                    civsim_foundation::clock::diurnal_periods_at_sampling(
+                        &orbital,
+                        DEMO_TICKS_PER_DAY,
+                    )
+                    .expect("the Mirror orbit yields a valid diurnal sampling");
                 env.arm_diurnal(civsim_sim::environ::DiurnalSky::mirror(
                     rotation_period_ticks,
                     orbital_period_ticks,
@@ -2723,5 +2726,5 @@ fn main() {
     );
     println!("  final state_hash: {:032x}", runner.state_hash());
     println!("  (same arguments reproduce this hash: Principle 3 determinism)");
-    civsim_sim::profile::report();
+    civsim_foundation::profile::report();
 }

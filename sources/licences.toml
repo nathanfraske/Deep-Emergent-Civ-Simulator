@@ -1,0 +1,170 @@
+# THE LICENCE OVERLAY: the redistribution finding for each vendored source.
+#
+# An OVERLAY rather than an edit to the per-directory manifests, for two reasons. The manifests are the
+# fetch record and are owned by whichever lane made the fetch, so writing licence findings into eighteen of
+# them would collide with concurrent work for no gain. And the licence finding has a different lifetime
+# from the fetch: bytes and checksums are immutable forever, while a licence finding is dated, revisable,
+# and may be superseded by a permission grant. Keeping them apart lets each be corrected without touching
+# the other. The gate merges this file onto the matching registry id at load time, so a finding here is as
+# enforceable as a field written inline.
+#
+# This is NOT a diamond: the manifests record no licence, so nothing here can disagree with anything there.
+#
+# THE TEST, in the owner's terms. Not "is it paywalled" but "does the licence permit THIS use": an
+# open-source, educational, non-profit project redistributing the bytes. Free to READ and free to
+# REDISTRIBUTE are different questions, and IOP Publishing states the distinction in its own words:
+# "Free to view is not the same as free to reuse."
+#
+# PROVENANCE OF THESE FINDINGS. Researched 2026-07-18 against the publishers' own licence pages, each with
+# a quoted term and an evidence URL. Every locally-checkable claim was re-verified against this tree before
+# being recorded here (the tracked-PDF list, the absence of tracked .djvu bytes, the JANAF table count, and
+# the repo's Apache-2.0 licence all confirmed). The LEGAL READING IS NOT VERIFIED BY THIS AGENT and is not
+# a lawyer's opinion. Where a finding says bytes should not be held, the remediation is an OWNER RULING
+# (docs/working/FETCH_PIPELINE_PLAN.md, decision D6), and nothing has been deleted on the strength of it.
+
+# =====================================================================================================
+# REDISTRIBUTABLE: US government works and the public domain.
+# =====================================================================================================
+
+[[licence]]
+id = "byerlee_1978"
+licence = "US Government work, 17 USC 105 (USGS-authored). Byerlee is affiliated on the article as U.S. Geological Survey, Menlo Park. USGS SM 1100.4: work submitted to outside publication is in the public domain and may not be copyrighted. CENDI interagency FAQ 3.2.1: a republisher cannot assert copyright unless it added original protected material."
+redistributable = true
+licence_evidence = "https://www.usgs.gov/information-policies-and-instructions/copyrights-and-credits"
+free_route = "https://earthquake.usgs.gov/static/lfs/research/rockphysics/Friction_of_rocks.pdf"
+free_route_kind = "gov-work"
+reviewed = "2026-07-18"
+caveat = "Two residual limits, recorded rather than resolved. Nothing documents that this specific manuscript was official duty rather than personal volition. And 17 USC 105 disclaims US copyright only, leaving Swiss and EU rights untested for a globally distributed repo. The held bytes are a USGS re-keying (pdfinfo Creator 'Microsoft Word: AdobePS 8.7.3', CreationDate 2002-10-11) rather than Birkhauser's typesetting, and carry no copyright notice, which supports the reading."
+
+[[licence]]
+id = "robie_hemingway_1995"
+licence = "US Government work. USGS Bulletin 2131, DOI 10.3133/b2131, USGS's own numbered series with no third-party copyright marking. USGS: USGS-authored or produced data and information are considered to be in the U.S. Public Domain."
+redistributable = true
+licence_evidence = "https://www.usgs.gov/information-policies-and-instructions/copyrights-and-credits"
+free_route = "https://pubs.usgs.gov/bul/2131/report.pdf"
+free_route_kind = "gov-work"
+reviewed = "2026-07-18"
+
+[[licence]]
+id = "wachtman_1960_corundum"
+licence = "US Government work. NIST states it for this journal specifically: Papers published in the Journal of Research of NIST are not subject to copyright in the U.S. All four authors were NBS staff."
+redistributable = true
+licence_evidence = "https://www.nist.gov/nist-research-library/journal-research-nist/about-journal"
+free_route = "https://nvlpubs.nist.gov/nistpubs/jres/64A/jresv64An3p213_A1b.pdf"
+free_route_kind = "gov-work"
+reviewed = "2026-07-18"
+
+# =====================================================================================================
+# REDISTRIBUTABLE, WITH A LICENCE-COMPATIBILITY CONFLICT to resolve (owner ruling D6).
+# =====================================================================================================
+
+[[licence]]
+id = "mit_ocw_12108"
+licence = "CC BY-NC-SA 4.0 (MIT OpenCourseWare). Redistribution is permitted, and the NC clause forbids commercial use."
+redistributable = true
+licence_evidence = "https://ocw.mit.edu/pages/privacy-and-terms-of-use/"
+free_route = "https://ocw.mit.edu/courses/12-108-structure-of-earth-materials-fall-2004/"
+free_route_kind = "publisher-open"
+reviewed = "2026-07-18"
+conflict = "THE REPO IS Apache-2.0 (verified: LICENSE and Cargo.toml), which grants commercial use, while CC BY-NC-SA forbids it. Shipping this file under a blanket Apache-2.0 statement overclaims for this file. Remediation is an isolated vendor directory carrying its own licence note plus MIT's attribution format, and a NOTICE entry. Unresolved detail: CC coverage was confirmed at COURSE level, not per file, and OCW marks some third-party items 'All rights reserved' outside the CC grant; loading the lec20 resource page and checking for that badge would settle it."
+
+# =====================================================================================================
+# NOT REDISTRIBUTABLE: bytes are held in-tree against terms that reserve the right. Each is a recorded
+# DEFECT awaiting the owner's ruling (D6). Nothing has been removed by this agent.
+# =====================================================================================================
+
+[[licence]]
+id = "fan_2019"
+licence = "American Mineralogist / Mineralogical Society of America, all rights reserved. MSA: Open or public access does not mean the material is un-copyrighted."
+redistributable = false
+licence_evidence = "http://www.minsocam.org/"
+reviewed = "2026-07-18"
+remediation = "CONVERTED 2026-07-18 under the owner ruling: bytes removed from the repo, entry now citation-plus-witness. The Wayback witness was re-fetched and hashed and is BYTE-IDENTICAL to the retained sha256 receipt, so the provenance is unbroken and nothing was lost with the bytes."
+
+[[licence]]
+id = "jackson_1999_enstatite"
+licence = "American Mineralogist / Mineralogical Society of America, all rights reserved."
+redistributable = false
+licence_evidence = "http://www.minsocam.org/"
+free_route = "http://www.minsocam.org/msa/ammin/toc/Articles_Free/1999/Jackson_p677-680_99.pdf"
+free_route_kind = "publisher-open"
+reviewed = "2026-07-18"
+remediation = "CONVERTED 2026-07-18 under the owner ruling: bytes removed from the repo, entry now citation-plus-witness. The Wayback witness was re-fetched and hashed and is BYTE-IDENTICAL to the retained sha256 receipt, so the provenance is unbroken and nothing was lost with the bytes. A capture had to be REQUESTED (none existed) and now resolves. MSA's own sanctioned archive is carried as a second witness."
+
+[[licence]]
+id = "speziale_2004"
+licence = "AGU / Wiley, Version of Record. AGU: This permission does not extend to public posting of the PDF or HTML created by AGU for publication."
+redistributable = false
+licence_evidence = "https://www.agu.org/publications/authors/policies"
+reviewed = "2026-07-18"
+remediation = "CONVERTED 2026-07-18 under the owner ruling: bytes removed from the repo, entry now citation-plus-witness. The Wayback witness was re-fetched and hashed and is BYTE-IDENTICAL to the retained sha256 receipt, so the provenance is unbroken and nothing was lost with the bytes."
+
+[[licence]]
+id = "zha_1996"
+licence = "AGU / Wiley, Version of Record. Same AGU term as speziale_2004."
+redistributable = false
+licence_evidence = "https://www.agu.org/publications/authors/policies"
+reviewed = "2026-07-18"
+remediation = "CONVERTED 2026-07-18 under the owner ruling: bytes removed from the repo, entry now citation-plus-witness. The Wayback witness was re-fetched and hashed and is BYTE-IDENTICAL to the retained sha256 receipt, so the provenance is unbroken and nothing was lost with the bytes. NOTE: also cross-referenced by the gruneisen manifest, whose twin entry carries the same finding."
+
+[[licence]]
+id = "yoneda_1990"
+licence = "J-STAGE, approval required for reprinting, duplication and public transmission."
+redistributable = false
+licence_evidence = "https://www.jstage.jst.go.jp/"
+reviewed = "2026-07-18"
+remediation = "CONVERTED 2026-07-18 under the owner ruling: bytes removed from the repo, entry now citation-plus-witness. The Wayback witness was re-fetched and hashed and is BYTE-IDENTICAL to the retained sha256 receipt, so the provenance is unbroken and nothing was lost with the bytes."
+
+[[licence]]
+id = "heyliger_2003_quartz"
+licence = "Copyright 2003 Acoustical Society of America (the notice appears twice in the held PDF). One of three authors was federal (Kim, NIST); Ledbetter was at Los Alamos in 2003, so the 17 USC 105 argument fails on the facts, and the work falls inside NIST's own carve-out for material marked as copyrighted."
+redistributable = false
+licence_evidence = "https://pubs.aip.org/asa/jasa"
+reviewed = "2026-07-18"
+remediation = "CONVERTED 2026-07-18 under the owner ruling: bytes removed from the repo, entry now citation-plus-witness. The Wayback witness was re-fetched and hashed and is BYTE-IDENTICAL to the retained sha256 receipt, so the provenance is unbroken and nothing was lost with the bytes. This entry also corrects an earlier assumption that both authors were NIST staff."
+
+# =====================================================================================================
+# A SHADOW-LIBRARY SOURCE. No bytes were ever committed (verified: zero .djvu tracked), so there is
+# nothing to take down. What needs correcting is the WORDING: the manifest recipe calls this "the open
+# GeoKniga DjVu", and geokniga is not open.
+# =====================================================================================================
+
+[[licence]]
+id = "gruneisen.ahrens_1995_handbook"
+licence = "The chapter is in copyright (AGU/Wiley, book DOI 10.1029/RF002). The bytes were fetched from geokniga.org, which is a SHADOW LIBRARY: it disclaims all rights in its own words ('All rights to these materials belong to their legal rights holders'), materials are posted by users without moderation, available 'exclusively for familiarization', with a takedown address in place of any licence."
+redistributable = false
+licence_evidence = "https://www.geokniga.org/geowiki/geokniga"
+reviewed = "2026-07-18"
+remediation = "No bytes are tracked in the repo (verified), so no removal is required. The defect is a PROVENANCE WORDING error: the gruneisen manifest describes the fetch as 'the open GeoKniga DjVu', and labelling a shadow library open is a false provenance claim that a future reader would rely on. Correcting that sentence is a one-line fix in a file this lane does not own. No free legitimate route to this chapter was found."
+
+# =====================================================================================================
+# THE CROSS-REFERENCE TWINS. The gruneisen manifest reaches three sibling directories' bytes by COPYING
+# the record (its `dir` idiom), so the same document appears under two ids. The gate's duplicate-document
+# check caught that the AGU and MSA findings had landed on one id of each pair and not the other, which
+# would have let an identical copy read as un-reviewed. Same document, same finding, recorded on both.
+# The underlying duplication is a consolidation follow-on (plan D8): one document should carry one id.
+# =====================================================================================================
+
+[[licence]]
+id = "gruneisen.zha_1996_forsterite"
+licence = "AGU / Wiley, Version of Record. Identical bytes to `zha_1996` (same sha256); see that entry."
+redistributable = false
+licence_evidence = "https://www.agu.org/publications/authors/policies"
+reviewed = "2026-07-18"
+remediation = "Bytes removed with the zha_1996 conversion; this cross-reference now resolves to the same citation-plus-witness record. Deduplicate the two ids when the cross-reference idiom is reworked."
+
+[[licence]]
+id = "gruneisen.fan_2019_periclase"
+licence = "American Mineralogist / Mineralogical Society of America, all rights reserved. Identical bytes to `fan_2019` (same sha256); see that entry."
+redistributable = false
+licence_evidence = "http://www.minsocam.org/"
+reviewed = "2026-07-18"
+remediation = "Bytes removed with the fan_2019 conversion; this cross-reference now resolves to the same citation-plus-witness record. Deduplicate the two ids when the cross-reference idiom is reworked."
+
+[[licence]]
+id = "gruneisen.speziale_2004_fayalite"
+licence = "AGU / Wiley, Version of Record. Identical bytes to `speziale_2004` (same sha256); see that entry."
+redistributable = false
+licence_evidence = "https://www.agu.org/publications/authors/policies"
+reviewed = "2026-07-18"
+remediation = "Bytes removed with the speziale_2004 conversion; this cross-reference now resolves to the same citation-plus-witness record. Deduplicate the two ids when the cross-reference idiom is reworked."

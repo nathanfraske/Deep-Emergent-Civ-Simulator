@@ -20,7 +20,7 @@
 //! step of Part 25), applies selection through a piecewise-linear environment-to-coefficient
 //! kernel (a species that fits its region better is pushed toward fixing its adaptive
 //! alleles, the coefficient clamped to a divide-safe interval), forks founders on a cadence
-//! (the founder effect, [`crate::genome::GenePool::found`]), records a fork as a daughter species
+//! (the founder effect, [`civsim_bio::genome::GenePool::found`]), records a fork as a daughter species
 //! only where it is reproductively isolated from its parent (by frequency distance or the count of
 //! active Dobzhansky-Muller incompatibilities), accumulates the Orr snowball as the real joint
 //! Hardy-Weinberg cross count between the pools (no RNG, the former fair coin retired), and drives to
@@ -38,9 +38,9 @@
 use civsim_core::Fixed;
 
 use crate::biosphere::{Biosphere, Region};
-use crate::genome::IncompatibilityTable;
-use crate::lineage::SpeciesId;
-use crate::stocks::Stock;
+use civsim_bio::genome::IncompatibilityTable;
+use civsim_bio::lineage::SpeciesId;
+use civsim_foundation::stocks::Stock;
 
 /// The epoch's reserved parameters (the selection, speciation, founder-fork, and extinction
 /// scales). DEVELOPMENT FIXTURE values come from [`EpochParams::dev_default`]; the
@@ -76,7 +76,7 @@ pub struct EpochParams {
     /// from its parent (design 25.7, the declared speciation rule): a daughter species is recorded
     /// only where the fork's allele frequencies have diverged by at least this, so speciation tracks
     /// real genetic divergence rather than firing on every cadence. RESERVED
-    /// (`speciation.distance_threshold`), fed to [`crate::genome::GenePool::reproductively_isolated`].
+    /// (`speciation.distance_threshold`), fed to [`civsim_bio::genome::GenePool::reproductively_isolated`].
     pub speciation_dist_threshold: Fixed,
     /// The count of active Dobzhansky-Muller incompatibilities at which two pools are reproductively
     /// isolated regardless of distance (the discrete genetic firewall a complementary allele pair
@@ -310,7 +310,7 @@ pub fn run(
 /// A one-generation stepper over the pre-dawn radiation, so the deep-time evolution can be watched
 /// unfolding rather than only seen as a finished summary. It owns the region's biosphere and the
 /// running epoch state (the population stocks, the generation counter, the accumulating report),
-/// advances exactly one generation per [`crate::clock::Steppable::step`], and stepped to completion reproduces
+/// advances exactly one generation per [`civsim_foundation::clock::Steppable::step`], and stepped to completion reproduces
 /// the batch [`run`] bit for bit, since both call the same [`step_generation`] over the same
 /// generation coordinates. Deterministic and self-contained: a step reads no wall-clock, so the
 /// radiation replays identically however an observer paced it (Principle 3, Principle 10).
@@ -415,7 +415,7 @@ impl Radiation {
     }
 }
 
-impl crate::clock::Steppable for Radiation {
+impl civsim_foundation::clock::Steppable for Radiation {
     fn step(&mut self) {
         self.step_once();
     }
@@ -477,8 +477,8 @@ mod tests {
                 &region(4),
                 7,
                 &gp,
-                &crate::anatomy::BodyPlanRegistry::dev_default(),
-                crate::anatomy::WorldProfile::grounded(),
+                &civsim_bio::anatomy::BodyPlanRegistry::dev_default(),
+                civsim_bio::anatomy::WorldProfile::grounded(),
                 None,
             );
             let founders = bio.len();
@@ -516,8 +516,8 @@ mod tests {
                 &region(4),
                 7,
                 &gp,
-                &crate::anatomy::BodyPlanRegistry::dev_default(),
-                crate::anatomy::WorldProfile::grounded(),
+                &civsim_bio::anatomy::BodyPlanRegistry::dev_default(),
+                civsim_bio::anatomy::WorldProfile::grounded(),
                 None,
             )
         };
@@ -571,8 +571,8 @@ mod tests {
             &region(4),
             7,
             &gp,
-            &crate::anatomy::BodyPlanRegistry::dev_default(),
-            crate::anatomy::WorldProfile::grounded(),
+            &civsim_bio::anatomy::BodyPlanRegistry::dev_default(),
+            civsim_bio::anatomy::WorldProfile::grounded(),
             None,
         );
         let report = run(
@@ -596,8 +596,8 @@ mod tests {
             &region(4),
             7,
             &gp,
-            &crate::anatomy::BodyPlanRegistry::dev_default(),
-            crate::anatomy::WorldProfile::grounded(),
+            &civsim_bio::anatomy::BodyPlanRegistry::dev_default(),
+            civsim_bio::anatomy::WorldProfile::grounded(),
             None,
         );
         let founders = bio.len();
@@ -651,7 +651,7 @@ mod tests {
         let gp = GeneratorParams::dev_default();
         let ep = EpochParams::dev_default();
         let reg = region(4);
-        let bpr = crate::anatomy::BodyPlanRegistry::dev_default();
+        let bpr = civsim_bio::anatomy::BodyPlanRegistry::dev_default();
         // Two identical fresh biospheres (generate is deterministic from its seed and inputs).
         let mut bio_batch = generate(
             0xB105,
@@ -659,7 +659,7 @@ mod tests {
             7,
             &gp,
             &bpr,
-            crate::anatomy::WorldProfile::grounded(),
+            civsim_bio::anatomy::WorldProfile::grounded(),
             None,
         );
         let bio_step = generate(
@@ -668,7 +668,7 @@ mod tests {
             7,
             &gp,
             &bpr,
-            crate::anatomy::WorldProfile::grounded(),
+            civsim_bio::anatomy::WorldProfile::grounded(),
             None,
         );
 
@@ -713,14 +713,14 @@ mod tests {
         let gp = GeneratorParams::dev_default();
         let ep = EpochParams::dev_default();
         let reg = region(4);
-        let bpr = crate::anatomy::BodyPlanRegistry::dev_default();
+        let bpr = civsim_bio::anatomy::BodyPlanRegistry::dev_default();
         let bio = generate(
             0xB105,
             &reg,
             7,
             &gp,
             &bpr,
-            crate::anatomy::WorldProfile::grounded(),
+            civsim_bio::anatomy::WorldProfile::grounded(),
             None,
         );
         let mut rad = Radiation::new(0xB105, bio, reg, ep, IncompatibilityTable::new());

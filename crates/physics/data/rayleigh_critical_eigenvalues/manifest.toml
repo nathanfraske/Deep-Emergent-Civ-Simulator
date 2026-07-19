@@ -1,0 +1,112 @@
+# Held-source manifest for the critical-Rayleigh eigenvalue registry (../rayleigh_critical_eigenvalues.toml).
+# The vendored-primary idiom: file / receipt / anchors. The load-bearing values are hydrodynamic-stability
+# eigenvalues whose true primaries are books and journal papers with no byte-identical data table (Rayleigh
+# 1916; Pellew & Southwell 1940; Reid & Harris 1958; Chandrasekhar 1961; Roberts 1967), so this follows the
+# TRANSCRIPTION idiom (as convection_scaling and gruneisen do): cite the primary, hold downloadable WITNESS
+# bytes that reproduce or transcribe each value, record the sha256 receipt of those bytes. Two of the classic
+# primaries are paywalled (Roberts 1967 at Cambridge; Pellew & Southwell 1940 behind a Cloudflare challenge at
+# the Royal Society), so the held witnesses are the modern open works that transcribe them at source: Glomski &
+# Johnson 2012 (whose table 1 records each historical decomposition's 'original notation' verbatim, the
+# provenance tangle) and Goluskin 2016 (whose tables 2.1-2.3 recompute the boundary-conditioned eigenvalues and
+# whose eqs. 1.5-1.38 give the Rayleigh-Roberts nondimensionalization and the conversion to the bottom-heated
+# Ra). Sturtz et al. 2021 is a geodynamics-convention dual-channel for the Rayleigh-Roberts definition, citing
+# Roberts 1967 directly.
+#
+# ARCHIVE-THEN-SLIM (owner ruling 2026-07-18): the witness bytes are NOT held in the repo; each carries an
+# Internet Archive snapshot (archived_url) proven to return bytes whose sha256 matches the receipt, with the
+# bytes in local custody (~/.claude/vendored-sources/rayleigh_eigenvalues/ for the two new witnesses; the three
+# cross-referenced witnesses live in ~/.claude/vendored-sources/convection_scaling/ and are rechecked in place
+# via the `dir` field, no duplicate copy). scripts/rayleigh_eigenvalue_provenance_test.py rechecks the receipts,
+# the archive coverage, the closed forms, and the pre-registered fingerprints offline. SHA256 is the receipt
+# (VENDORING_CHECKLIST.md, primary since 2026-07-17). Each source carries the anchor (table / equation / page)
+# for every value read from it and its scope.
+#
+# BLOCK KIND [[source]], a receipt-and-archive vendored artifact (the transcription idiom), NOT a reserved floor
+# kind: these witnesses do not participate in the floor real/fantasy authorship axis. A source is verified by
+# repo bytes whose sha256 matches, by a local-custody copy whose sha256 matches, or by a retrievable
+# archived_url; a receipt with none is the rot the custody work exists to prevent.
+
+# PART 2 primary witness: Goluskin's monograph. The authoritative modern treatment of the six canonical
+# convective configurations (three Rayleigh-Benard, three internally-heated). Gives the Rayleigh-Roberts
+# nondimensionalization, the linear (RL) and energy-stability (RE) thresholds for every boundary class, the
+# subcritical bracket, and the conversion to the bottom-heated Ra. Also an independent numerical cross-source
+# for the three bottom-heated eigenvalues (PART 1 concordance).
+[[source]]
+name = "goluskin_2016_internally_heated"
+file = "goluskin_2016_internally_heated_arxiv_1506.01656.pdf"
+url = "https://arxiv.org/pdf/1506.01656"
+archived_url = "https://web.archive.org/web/20240604023559/https://arxiv.org/pdf/1506.01656"
+sha256 = "7a0bec608d9fc4b8cacaafa03022ffa087a9ef88035bbd16348c5f8deef02b70"
+bytes = 2371774
+citation = "Goluskin, D. (2016), Internally Heated Convection and Rayleigh-Benard Convection, SpringerBriefs in Applied Sciences and Technology, Springer (arXiv:1506.01656v2)."
+recipe = "GET https://arxiv.org/pdf/1506.01656 ; archived copy sha256-identical to the fetched bytes."
+grade = "theory (analytic + numerical)"
+anchor = "Eq. 1.5 Delta:=d^2*H/kappa (IH temperature scale), eq. 1.10 R:=g*alpha*d^3*Delta/(kappa*nu) (=> R=g*alpha*H*d^5/(kappa^2*nu)), eqs. 1.35-1.38 diagnostic Ra:=R/N (conversion to bottom-heated Ra). Table 2.1 (no-slip RE/RL): RB1 1707.76, IH1 RE=26 926.6 / RL=37 325.2. Table 2.2 (RL, kL by boundary class): RB1 no-slip 1707.76/3.1163, free-slip-top=free-slip-bottom 1100.65/2.6823, free-slip 657.511/2.2214; IH1 no-slip 37 325.2/3.9989, free-slip-top 16 669.8/3.0131, free-slip-bottom 37 949.4/4.0867, free-slip 16 992.2/3.0277; IH3 no-slip 2772.27/2.6293 (Roberts' 1967 configuration). Energy-stability table (RE, kE, % below RL): IH1 no-slip 26 926.6/3.6174/27.9%, free-slip-top 12 620.2/2.9014/24.3%, free-slip-bottom 24 722.8/3.3664/34.9%, free-slip 10 618.1/2.5498/37.5%. Subcritical-regime statement: RE<R<RL static state linearly stable but sustained convection possible."
+scope = "plane Boussinesq layer, marginal stability, Prandtl-number-independent; RB (bottom-heated) and IH (Rayleigh-Roberts) configurations."
+
+# PART 2 dual-channel witness (geodynamics convention): the Rayleigh-Roberts number as written in the magma-
+# reservoir / mantle literature, citing Roberts 1967. Confirms the fifth-power depth dependence and the
+# H*h^2/lambda temperature scale in the volumetric-heat convention, reconciling with Goluskin's temperature-
+# source convention.
+[[source]]
+name = "sturtz_etal_2021_magma_ocean"
+file = "sturtz_etal_2021_magma_ocean_arxiv_2108.00910.pdf"
+url = "https://arxiv.org/pdf/2108.00910"
+archived_url = "https://web.archive.org/web/20260718181250/https://arxiv.org/pdf/2108.00910"
+sha256 = "8cc6af6de400e694d262a089b3b72de44ea03351606a233583397e4beded48e5"
+bytes = 1853119
+citation = "Sturtz, C., Limare, A., Tait, S. & Kaminski, E. (2021), Birth and decline of magma oceans. Part 1, submitted to J. Geophys. Res. Planets (arXiv:2108.00910v1)."
+recipe = "GET https://arxiv.org/pdf/2108.00910 ; archived via Save Page Now, snapshot sha256-identical to the fetched bytes."
+grade = "theory (definition)"
+anchor = "Eq. 1: DeltaT_H = H*h^2/lambda_f (internal-heating temperature scale, cited to Roberts 1967). Eq. 2: Ra_H = alpha_f*rho0_f*g*H*h^5/(eta_f*kappa_f*lambda_f) (Rayleigh-Roberts number, depth to the fifth power). Eq. 3: Pr = eta_f/(rho0_f*kappa_f). H = volumetric internal-heating rate, lambda_f = fluid thermal conductivity."
+scope = "internally-heated convection in a magma reservoir; the Rayleigh-Roberts nondimensionalization in the geophysical (volumetric-heat) convention."
+
+# PART 1 rigid-free witness (CROSS-REFERENCED in convection_scaling/): the modern error-bounded verified
+# computation (interval analysis, fifty digits) AND the historical provenance tangle. Table 1 records each
+# source's 'original notation' verbatim; Theorem 4.1 gives the verified value. Bytes held under the sibling
+# convection_scaling directory (rechecked in place via `dir`).
+[[source]]
+name = "glomski_johnson_2012"
+dir = "convection_scaling"
+file = "glomski_johnson_2012_ams.pdf"
+url = "https://www.m-hikari.com/ams/ams-2012/ams-101-104-2012/glomskiAMS101-104-2012.pdf"
+archived_url = "http://web.archive.org/web/20260718143711/https://www.m-hikari.com/ams/ams-2012/ams-101-104-2012/glomskiAMS101-104-2012.pdf"
+sha256 = "01221b0edd012b11c005fabaeb41fdad0336e28120dc3f61fead43011532003c"
+bytes = 208553
+citation = "Glomski, M. & Johnson, M.A. (2012), A precise calculation of the critical Rayleigh number and wave number for the rigid-free Rayleigh-Benard problem, Appl. Math. Sci. 6(101-104), 5097-5108."
+recipe = "GET the open m-hikari Applied Mathematical Sciences PDF (vendored for convection_scaling; cross-referenced here)."
+grade = "theory (verified-numerical)"
+anchor = "Theorem 4.1: Rc = 1100.6496068876767846274918888472711957506710554524140, kc = 2.6823217576934142448438929301107059823340014414401993 (error at most one digit in the last decimal place, by interval analysis). Table 1 (historical rigid-free approximations, original notation verbatim): Low 1929 'nearly 1108'; Pellew & Southwell 1940 '17,610.5/16 = 1100.65'; Reid & Harris 1958 'no decimal given, 16*Rc = 17,610.39'; Chandrasekhar 1961 '17,610.39/16 = 1100.65' (cites Reid & Harris); Koschmieder 1993 1100.7; Getling 1998 1100.657; Drazin & Reid 2004 '17,610.39/24 = 1101' (cites Reid & Harris). Footnote: Reid & Harris print no explicit decimal, which is why two different values are each attributed to them."
+scope = "rigid-free (one no-slip, one stress-free) bottom-heated Rayleigh-Benard critical eigenvalue; the verified value and the historical decomposition tangle."
+
+# PART 1 rigid-rigid concordance witness (CROSS-REFERENCED in convection_scaling/): an authoritative review
+# stating Rc=1708, ac=3.117, attributing them to Chandrasekhar 1961. Bytes held under convection_scaling.
+[[source]]
+name = "bodenschatz_pesch_ahlers_2000"
+dir = "convection_scaling"
+file = "bodenschatz_pesch_ahlers_2000_arfm.pdf"
+url = "https://courses.physics.ucsd.edu/2018/Winter/physics116_216/Convection-Recent%20Results-Bodenschatz_W17.pdf"
+archived_url = "http://web.archive.org/web/20260718143440/https://courses.physics.ucsd.edu/2018/Winter/physics116_216/Convection-Recent%20Results-Bodenschatz_W17.pdf"
+sha256 = "0f26fb4b8392e44d40dfc78d29fdf4cc057507f720dfa6c734bdfe0ce67e883d"
+bytes = 2096785
+citation = "Bodenschatz, E., Pesch, W. & Ahlers, G. (2000), Recent developments in Rayleigh-Benard convection, Annu. Rev. Fluid Mech. 32, 709-778."
+recipe = "GET the open UCSD course copy (vendored for convection_scaling; cross-referenced here)."
+grade = "theory (numerical)"
+anchor = "Rc = 1708 and ac = 3.117 for the rigid-rigid critical Rayleigh and wavenumber, citing Chandrasekhar 1961; concordance for bottom_heated_rigid_rigid."
+scope = "rigid-rigid bottom-heated critical eigenvalue, review cross-source."
+
+# PART 1 free-free concordance witness (CROSS-REFERENCED in convection_scaling/): an ENS-Lyon geodynamics course
+# note stating Rac=(27/4)pi^4~657, k=pi/sqrt(2). Bytes held under convection_scaling.
+[[source]]
+name = "ricard_geodynamics_notes"
+dir = "convection_scaling"
+file = "ricard_geodynamics_convection_notes.pdf"
+url = "https://perso.ens-lyon.fr/yanick.ricard/note-convection"
+archived_url = "http://web.archive.org/web/20260718143529/https://perso.ens-lyon.fr/yanick.ricard/note-convection"
+sha256 = "3a732fb76a67a21877c7a7538d258fe3d0c91c18fe89c70cb9bdb061560fdda6"
+bytes = 205464
+citation = "Ricard, Y., Physics of mantle convection, course notes, ENS de Lyon (linear stability for basally heated convection)."
+recipe = "GET the open ENS-Lyon course note PDF (vendored for convection_scaling; cross-referenced here)."
+grade = "theory (analytic)"
+anchor = "Rac = (27/4)*pi^4 ~ 657 with k = pi/sqrt(2) for free-slip boundaries (aspect ratio sqrt(2)); concordance for bottom_heated_free_free."
+scope = "free-free bottom-heated critical eigenvalue, course-note cross-source."

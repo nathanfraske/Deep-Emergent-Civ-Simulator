@@ -47,13 +47,13 @@ use civsim_physics::PhysicsRegistry;
 use civsim_world::{Coord3, TileMap};
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::calibration::{CalibrationError, CalibrationManifest};
 use crate::edibility::Composition;
 use crate::locomotion::ResourceField;
-use crate::material::{EarthworkField, SoilNutrientField};
 use crate::physiology::{ENERGY_DENSITY, SALINITY, WATER_FRACTION};
 use crate::runner::Field;
-use crate::stocks::Stock;
+use civsim_foundation::calibration::{CalibrationError, CalibrationManifest};
+use civsim_foundation::material::{EarthworkField, SoilNutrientField};
+use civsim_foundation::stocks::Stock;
 
 /// A scalar field on the flat bounded map, Q32.32, row-major (`idx = y * width + x`), the shape the
 /// temperature [`Field`] and the GPU field kernel use. The membership of the environmental stack is
@@ -155,7 +155,7 @@ pub struct EnvironCalib {
     pub soil_baseline: Fixed,
     /// The producer-biomass regrowth rate (base-level liveliness step 3): the logistic regeneration
     /// coefficient the standing food stock regrows toward the productivity capacity at each tick
-    /// ([`crate::stocks::Stock`]). Larger regrows a grazed patch faster and raises the carrying
+    /// ([`civsim_foundation::stocks::Stock`]). Larger regrows a grazed patch faster and raises the carrying
     /// capacity; smaller makes food scarcer.
     pub regen_rate: Fixed,
     /// The colonization propagule floor (base-level liveliness step 3): the small standing biomass a
@@ -1404,7 +1404,7 @@ impl EnvironFields {
 
     /// The static worldgen MOISTURE at a cell (the precipitation and soil-moisture proxy, not standing
     /// water depth), a pure read over the frozen moisture input for the decomposition-activity kernel
-    /// ([`crate::decompose`]). Reads nothing dynamic and mutates nothing, so exposing it changes no state
+    /// ([`civsim_foundation::decompose`]). Reads nothing dynamic and mutates nothing, so exposing it changes no state
     /// and no hash. Bounds are the caller's responsibility, exactly as the reader's [`Self::water_at`].
     pub fn moisture_at(&self, x: i32, y: i32) -> Fixed {
         self.moisture[self.idx(x, y)]
@@ -1737,7 +1737,7 @@ impl EnvironFields {
     /// SAME `bio.energy_density` reserve bridge (keyed on no axis identity, so a mana-fed or silicon being is a
     /// data row). No fresh UNITS anchor is minted: the existing reserve bridge converts the magnitude, so energy is
     /// conserved across the eat step. This is the food-value MECHANISM (the units question), distinct from the
-    /// biosphere-BALANCE calibration the `worldbuild.rs` T3 owner-gate still holds (whether the grazers THRIVE on
+    /// biosphere-BALANCE calibration the `dawn_harness.rs` T3 owner-gate still holds (whether the grazers THRIVE on
     /// these real food values, which the balance work tunes; this foundation makes the value real, it does not
     /// claim the world thrives). The environmental axes regrow writes itself (water, salinity) are EXCLUDED,
     /// so the food never fights the hydrology write. A composition with no positive food axis seeds nothing (the

@@ -22,7 +22,7 @@
 //! authored number.
 //!
 //! What it does: it holds a canonical fixed-point temperature [`Field`] over the flat bounded map and
-//! the [`crate::located::LocationIndex`] of who stands where, and each tick it steps the field (a
+//! the [`civsim_foundation::located::LocationIndex`] of who stands where, and each tick it steps the field (a
 //! pinned integer diffusion-and-relaxation stencil, the Part 5.5 GPU workload, bit-identical on the
 //! CPU and, once authored as a CubeCL `#[cube]` kernel, on the GPU) and lets each located being
 //! exchange heat with its cell (the discrete Newton-cooling form of `law.convective_flux`, the body
@@ -85,15 +85,11 @@
 use crate::affordance_percept::{
     tool_capability, AffordancePerceptRefs, AffordancePerceptRegistry,
 };
-use crate::anatomy::{BodyPlan, BodyPlanRegistry};
 use crate::axiom::AxiomAxisId;
-use crate::calibration::{CalibrationError, CalibrationManifest};
-use crate::contact_transfer::{resolve_delivered_energy, ContactTransferRegistry};
 use crate::contact_wound::{presented_contact_area, wound_fraction, FRACTURE_ENERGY_AXIS};
 use crate::controller::{Controller, ControllerLayout};
 use crate::conviction_experience::FeltConvictionCalib;
 use crate::conviction_percept::ConvictionPerceptRegistry;
-use crate::decompose::{DecomposerDriverRegistry, DecomposerStockField};
 use crate::discovery::{candidate_bindings, sample_candidate, DiscoveryCalib};
 use crate::edibility::{Physiology, ToleranceRegistry};
 use crate::environ::AbioticSourceRegistry;
@@ -109,16 +105,10 @@ use crate::learn::{
     builtin_reachable_relations, creature_being_direction, creature_being_feature_directions,
     feature_observations, perceive_being_magnitude, perceive_being_signal, reward_observations,
     sequence_subject, step_belief_subject, BeingPerceptField, HarmLearningCalib,
-    RewardLearningCalib, SequenceStep, BENIGN, HARMS, HARM_ATTR, MATERIAL_FEATURE_CHANNEL_BASE,
-    NEUTRAL, REWARDS, REWARD_ATTR,
+    RewardLearningCalib, BENIGN, HARMS, HARM_ATTR, MATERIAL_FEATURE_CHANNEL_BASE, NEUTRAL, REWARDS,
+    REWARD_ATTR,
 };
-use crate::located::{LocationIndex, OccupantId};
 use crate::locomotion::{self, LocomotionParams, ResourceField, Terrain, Walker};
-use crate::material::{
-    CombustionCalib, ConstituentRegistry, CraftParams, EarthworkField, ExtractionParams, FireField,
-    MaterialField, MatterCycleCalib, ShelterCalib, SoilNutrientField, StrikeParams, SubstanceMix,
-    TissueField, WearParams, WieldedTool,
-};
 use crate::material_percept::MaterialPerceptRegistry;
 use crate::medium;
 use crate::morphogen::{express_program, grow, Structure};
@@ -130,11 +120,22 @@ use crate::physiology::{
     derive_exertion_coupling, felt_salience, whole_body_composition_vector, MetabolicAnchors,
 };
 use crate::planning::plan_chain;
-use crate::scenario::ScenarioResolution;
 use crate::world::{PlaceId, Stimulus, TickInput, World};
+use civsim_bio::anatomy::{BodyPlan, BodyPlanRegistry};
 use civsim_compose::FunctionLawRegistry;
 use civsim_core::schedule::{run_serial, schedule, Access, ResourceId, SystemId};
 use civsim_core::{DrawKey, Fixed, Phase, StableId, StateHasher};
+use civsim_foundation::calibration::{CalibrationError, CalibrationManifest};
+use civsim_foundation::contact_transfer::{resolve_delivered_energy, ContactTransferRegistry};
+use civsim_foundation::decompose::{DecomposerDriverRegistry, DecomposerStockField};
+use civsim_foundation::located::{LocationIndex, OccupantId};
+use civsim_foundation::material::{
+    CombustionCalib, ConstituentRegistry, CraftParams, EarthworkField, ExtractionParams, FireField,
+    MaterialField, MatterCycleCalib, ShelterCalib, SoilNutrientField, StrikeParams, SubstanceMix,
+    TissueField, WearParams, WieldedTool,
+};
+use civsim_foundation::scenario::ScenarioResolution;
+use civsim_foundation::sequence::SequenceStep;
 use civsim_physics::laws;
 use civsim_physics::PhysicsRegistry;
 use civsim_world::{Coord3, TileMap};
@@ -1546,7 +1547,7 @@ pub struct Embodiment {
     strike: Option<StrikeParams>,
     /// The contact-transfer registry the being-vs-being STRIKE delivers its energy through (hunt-kill strike
     /// arc): which contact channels exist and which physics-floor transfer kernel each delivers by
-    /// ([`crate::contact_transfer`]). EMPTY by default, so a world that declares no channel delivers no strike
+    /// ([`civsim_foundation::contact_transfer`]). EMPTY by default, so a world that declares no channel delivers no strike
     /// energy and every existing scenario is byte-identical (the opt-in empty-default); the STRIKE affordance is
     /// itself afforded only by a PIERCE-bearing body, so no run_world scenario reaches the strike at all.
     /// Populated by the world-build ([`Embodiment::set_contact_transfer`]).
@@ -2067,7 +2068,7 @@ impl Embodiment {
     /// The producer BIOMASS layer is OPEN and deliberately NOT in this ledger: the extract-deplete beat's
     /// weathering deposit is a source and the producer draw a sink, so a run with the producer cycle armed is
     /// not expected to hold this invariant across a whole tick, only the decomposition legs in isolation. Zero
-    /// material term if no material registry is installed. For the [`crate::conservation::ConservationRegistry`].
+    /// material term if no material registry is installed. For the [`civsim_foundation::conservation::ConservationRegistry`].
     pub fn decay_ledger_mass(&self) -> Fixed {
         let material = self
             .material_registry
@@ -2492,7 +2493,7 @@ impl Embodiment {
     ///
     /// The yield AMOUNT is the strength-bounded carry here (the fracture STRENGTH gates whether the rock
     /// breaks); a later slice sizes the per-stroke yield by the delivered work over the substance's cutting
-    /// energy ([`crate::material::extraction_yield`], built and proven), once the mineable substances carry
+    /// energy ([`civsim_foundation::material::extraction_yield`], built and proven), once the mineable substances carry
     /// a cited `mat.specific_cut_energy`.
     pub fn extract_underfoot(&mut self, walker_id: StableId) -> Fixed {
         let (Some(params), Some(reg), Some(phys)) = (
@@ -2846,7 +2847,7 @@ impl Embodiment {
     /// so nothing reads a species, role, or relatedness (Principle 8), and the primitive reads whatever Segments
     /// occupy the cell, the occupant-agnostic form.
     ///
-    /// The delivered energy is [`crate::contact_transfer::resolve_delivered_energy`] (piece 1, the stroke-rate
+    /// The delivered energy is [`civsim_foundation::contact_transfer::resolve_delivered_energy`] (piece 1, the stroke-rate
     /// step-2 run-all-gate-to-zero resolve) over the acting part's own
     /// ACTUATOR WORK: the greatest, among the being's grown Segments, of its strength-over-cross-section force
     /// (promoted to newtons by [`laws::stress_force`], read off the axes the channel's row DECLARES) times its
@@ -2880,7 +2881,7 @@ impl Embodiment {
     /// Step 1b (growing `mech.cross_section_area` and `mech.stroke_length` so grown bodies deliver a non-zero blow)
     /// is MERGED. Step 2 (in progress, gate-signed-off, owner-decisions R15) generalizes a NON-RIGID striker (an
     /// elastic recoil, a hydraulic jet) through the run-all-gate-to-zero delivered-energy kernel set
-    /// ([`crate::contact_transfer::resolve_delivered_energy`]), each kernel gated on the part's own continuous grown
+    /// ([`civsim_foundation::contact_transfer::resolve_delivered_energy`]), each kernel gated on the part's own continuous grown
     /// axes, so a non-rigid striker is an emergent DESCRIPTION of which axes are nonzero, NOT a grown categorical
     /// actuation-kind selector (that shape was rejected by the frame-blind as the template case);
     /// (2) the tool-geometry mass-payoff (a heavier or longer wielded tool affording a longer stroke or higher
@@ -3705,20 +3706,20 @@ pub struct Runner {
     /// The reserved calibrations of the combustion beat (material-substrate arc, cascade item 6, live fire),
     /// armed opt-in. `None` on a runner without it, so no combustion runs and every existing scenario is
     /// byte-identical; armed via [`Runner::set_combustion`], the beat then sources the embodiment's fire
-    /// field from the combustible matter hot enough to burn. Off the calibrated worldbuild path until a later
+    /// field from the combustible matter hot enough to burn. Off the calibrated dawn-harness path until a later
     /// slice wires it, exactly like the extraction and craft params.
     combustion: Option<CombustionCalib>,
     /// The reserved calibration of shelter (material-substrate arc, cascade item 7), armed opt-in. `None` on
     /// a runner without it, so no thermal-exchange attenuation runs and every existing scenario is
     /// byte-identical; armed via [`Runner::set_shelter`], the body-exchange phase then attenuates each
     /// being's coupling to the field by the insulating matter enclosing its cell. Off the calibrated
-    /// worldbuild path until a later slice wires it, exactly like the combustion calib.
+    /// dawn-harness path until a later slice wires it, exactly like the combustion calib.
     shelter: Option<ShelterCalib>,
     /// The reserved calibration of the matter cycle (material-substrate arc, cascade item 8), armed opt-in.
     /// `None` on a runner without it, so no decomposition runs and every existing scenario is byte-identical;
     /// armed via [`Runner::set_matter_cycle`], the field step then decomposes a cell's organic matter over
     /// time and conserves the lost mass in the embodiment's decomposed-mass sink. Off the calibrated
-    /// worldbuild path until a later slice wires it, exactly like the combustion and shelter calibs.
+    /// dawn-harness path until a later slice wires it, exactly like the combustion and shelter calibs.
     matter_cycle: Option<MatterCycleCalib>,
     /// The ABIOTIC mineral-weathering base rate (the matter-cycle completion, #156): when armed, rock weathers
     /// map-wide into soil nutrient at this reserved base rate scaled by each cell's own wetness
@@ -3733,7 +3734,7 @@ pub struct Runner {
     /// Armed via [`Runner::set_decomposer`], the matter cycle and the organic-trace salience then multiply
     /// their rate by the per-cell decomposition ACTIVITY this registry derives from the cell's decomposer
     /// life and conditions, so a sterile, dry, or airless cell preserves its matter. Off the calibrated
-    /// worldbuild path until the biosphere slice fills the stock field, exactly like the matter-cycle calib.
+    /// dawn-harness path until the biosphere slice fills the stock field, exactly like the matter-cycle calib.
     decomposer: Option<DecomposerDriverRegistry>,
     /// The per-cell standing decomposer-biomass field the Life kernel reads, armed opt-in beside the
     /// decomposer registry. `None` (or empty) on a runner without it, so the Life kernel reads zero biomass
@@ -3744,13 +3745,13 @@ pub struct Runner {
     decomposer_stock: Option<DecomposerStockField>,
     /// The data-defined MASS-CONSTITUENT registry (chemistry arc, T5): how a decomposing substance's or body's
     /// lost mass is apportioned into located soil-nutrient CLASSES by its OWN composition axes, generalizing
-    /// the fixed ash-plus-organic pair to k=N (`crate::material::ConstituentRegistry`). `None` on a runner
+    /// the fixed ash-plus-organic pair to k=N (`civsim_foundation::material::ConstituentRegistry`). `None` on a runner
     /// without it, so the matter cycle (if armed) uses the unconfigured Terran default split (the substance's
     /// own mineral-ash fraction to a mineral class, the remainder to an organic class) exactly as before and
     /// every existing scenario is byte-identical; armed via [`Runner::set_constituents`], a world declares its
     /// own constituents and the split re-materialises matter by its own chemistry. A param, not state: folds
     /// nothing into `state_hash` (its effect enters through the soil classes it deposits, which the soil field
-    /// folds). Off the calibrated worldbuild path until the biosphere slice wires it, like the matter-cycle calib.
+    /// folds). Off the calibrated dawn-harness path until the biosphere slice wires it, like the matter-cycle calib.
     constituents: Option<ConstituentRegistry>,
     /// Whether a death leaves the being's body as located matter (biosphere directive 2, organisms as usable
     /// material stuff). `false` by default, so a death retires the body and nothing is deposited and every
@@ -3774,7 +3775,7 @@ pub struct Runner {
     obs_deaths: Vec<HomeostaticAxisId>,
     /// The reserved calibrations of the base-level liveliness surfacing policy (the hazard-belief and
     /// arc-promotion magnitudes). Initialized to the labelled dev fixture in every constructor so the
-    /// test and harness paths are unchanged; [`build_dawn_runner`](crate::worldbuild::build_dawn_runner)
+    /// test and harness paths are unchanged; [`build_dawn_runner`](crate::dawn_harness::build_dawn_runner)
     /// overrides it fail-loud from the manifest through [`Runner::set_liveliness`].
     liveliness: LivelinessCalib,
     /// The reserved calibrations of the experiential associative learner (harm-learning arc slice b):
@@ -4095,7 +4096,7 @@ impl Runner {
     /// combustible matter a cell holds that stands at or above its ignition temperature burns, consuming a
     /// bounded fraction of its fuel and lighting the embodiment's fire field. Opt-in: a runner left unarmed
     /// runs no combustion, so every existing scenario is byte-identical. Reserved calibrations
-    /// ([`CombustionCalib`]); off the calibrated worldbuild path until a later slice wires it.
+    /// ([`CombustionCalib`]); off the calibrated dawn-harness path until a later slice wires it.
     pub fn set_combustion(&mut self, calib: CombustionCalib) {
         self.combustion = Some(calib);
     }
@@ -4124,7 +4125,7 @@ impl Runner {
     /// being's thermal coupling to the ambient field by the insulating matter enclosing its cell (the matter
     /// in the air cells above it), so a being under a roof of insulating matter is buffered from a harsh
     /// field. Opt-in: a runner left unarmed attenuates nothing, so every existing scenario is byte-identical.
-    /// Reserved calibration ([`ShelterCalib`]); off the calibrated worldbuild path until a later slice wires it.
+    /// Reserved calibration ([`ShelterCalib`]); off the calibrated dawn-harness path until a later slice wires it.
     pub fn set_shelter(&mut self, calib: ShelterCalib) {
         self.shelter = Some(calib);
     }
@@ -4133,7 +4134,7 @@ impl Runner {
     /// (a substance carrying a biological composition) at or above the decomposition barrier breaks down at
     /// the reserved rate, its lost mass exactly conserved in the embodiment's decomposed-mass sink (matter
     /// dispersed to the environment). Opt-in: a runner left unarmed decomposes nothing, so every existing
-    /// scenario is byte-identical. Reserved calibration ([`MatterCycleCalib`]); off the calibrated worldbuild
+    /// scenario is byte-identical. Reserved calibration ([`MatterCycleCalib`]); off the calibrated dawn_harness
     /// path until a later slice wires it.
     pub fn set_matter_cycle(&mut self, calib: MatterCycleCalib) {
         self.matter_cycle = Some(calib);
@@ -4158,7 +4159,7 @@ impl Runner {
     /// conditions afford. Opt-in and orthogonal to [`Runner::set_matter_cycle`]: arming this alone changes
     /// nothing (the matter cycle must be armed to decay at all), and arming the matter cycle without this
     /// keeps its unconditional rate, so every existing scenario is byte-identical. The reserved parameters
-    /// are the owner's ([`crate::decompose::DecomposerDriver`]); off the calibrated worldbuild path until the
+    /// are the owner's ([`civsim_foundation::decompose::DecomposerDriver`]); off the calibrated dawn-harness path until the
     /// biosphere slice wires the stock field.
     pub fn set_decomposer(&mut self, registry: DecomposerDriverRegistry) {
         self.decomposer = Some(registry);
@@ -4177,7 +4178,7 @@ impl Runner {
     /// generalizing the fixed ash-plus-organic pair to k=N. Opt-in and orthogonal to [`Runner::set_matter_cycle`]:
     /// arming this alone changes nothing (the matter cycle must be armed to decay), and arming the matter cycle
     /// without this keeps the unconfigured Terran default split, so every existing scenario is byte-identical.
-    /// The constituents are the world's own chemistry ([`crate::material::ConstituentRegistry`]).
+    /// The constituents are the world's own chemistry ([`civsim_foundation::material::ConstituentRegistry`]).
     pub fn set_constituents(&mut self, registry: ConstituentRegistry) {
         self.constituents = Some(registry);
     }
@@ -4186,7 +4187,7 @@ impl Runner {
     /// its composition vector derived from its own body plan and deposited into the embodiment's tissue field
     /// where it fell. Opt-in and default off, so an unarmed runner retires a body and deposits nothing, and
     /// every existing scenario is byte-identical. Whether a death leaves a corpse is the owner's world-design
-    /// choice; off the calibrated worldbuild path until worldgen wires the biosphere.
+    /// choice; off the calibrated dawn-harness path until worldgen wires the biosphere.
     pub fn set_corpse_matter(&mut self, on: bool) {
         self.corpse_matter = on;
     }
@@ -4376,7 +4377,7 @@ impl Runner {
     /// (Principle 3); the supply write keys off the physical productivity, no label (Principles 8, 9).
     fn step_field(&mut self) {
         {
-            let _g = crate::profile::scope(crate::profile::P_FIELD);
+            let _g = civsim_foundation::profile::scope(civsim_foundation::profile::P_FIELD);
             #[cfg(feature = "gpu")]
             {
                 // If last tick dispatched the stencil to the GPU, consume the finished result here (the
@@ -4391,7 +4392,7 @@ impl Runner {
             self.field.step(&self.calib);
         }
         {
-            let _g = crate::profile::scope(crate::profile::P_ENV);
+            let _g = civsim_foundation::profile::scope(civsim_foundation::profile::P_ENV);
             if let Some((env, calib)) = self.environ.as_mut() {
                 let calib = *calib;
                 // Slice C2 (the matter cycle closes into the food web): fill the per-cell soil fertility from
@@ -4445,7 +4446,7 @@ impl Runner {
             }
         }
         {
-            let _g = crate::profile::scope(crate::profile::P_REGROW);
+            let _g = civsim_foundation::profile::scope(civsim_foundation::profile::P_REGROW);
             // Regrow the standing food stock toward the freshly-derived productivity capacity and refresh the
             // drinkable water supply in the embodiment's resource field (base-level liveliness step 3), before
             // the embodiment step grazes it. The stock persists in the resource field, so this reads back last
@@ -4458,7 +4459,7 @@ impl Runner {
             }
         }
         {
-            let _g = crate::profile::scope(crate::profile::P_COMBUST);
+            let _g = civsim_foundation::profile::scope(civsim_foundation::profile::P_COMBUST);
             self.step_combustion();
         }
         // The field is now frozen for the rest of the tick: its only writers are `Field::step` (done, at the
@@ -4476,7 +4477,7 @@ impl Runner {
             self.gpu_field.as_mut().unwrap().dispatch(&temp, d, r);
         }
         {
-            let _g = crate::profile::scope(crate::profile::P_MATTER);
+            let _g = civsim_foundation::profile::scope(civsim_foundation::profile::P_MATTER);
             self.step_matter_cycle();
         }
     }
@@ -4486,7 +4487,7 @@ impl Runner {
     /// BARRIER (its own thermal gate, the mark of decomposable organic matter, whatever its chemistry) whose
     /// cell temperature is at or above that barrier, a per-substance fraction of its volume breaks down this
     /// tick and its EXACT mass re-materialises into the cell's SOIL NUTRIENT store, split into located soil
-    /// classes by the substance's OWN composition through the data-defined [`crate::material::ConstituentRegistry`]
+    /// classes by the substance's OWN composition through the data-defined [`civsim_foundation::material::ConstituentRegistry`]
     /// (chemistry arc, T5: the constituent fraction axes plus a residual, not a fixed ash-and-organic pair).
     /// Run inside [`Runner::step_field`] after the temperature advances, so both tick orders decompose
     /// against the settled temperature identically. A pure deterministic fold in canonical cell-and-substance
@@ -4499,7 +4500,7 @@ impl Runner {
     /// mass decrease for the taken volume) enters the soil store bit for bit (the mineral share plus the
     /// organic remainder equals the loss exactly, mass-valued so no volume-quantisation rounding), so
     /// `sum(cell masses) + soil store total` is invariant, the hard conservation the
-    /// [`crate::conservation::ConservationRegistry`] guards. Slice C2 lets the deposited nutrient fertilise
+    /// [`civsim_foundation::conservation::ConservationRegistry`] guards. Slice C2 lets the deposited nutrient fertilise
     /// the cell's productivity; volatilising the organic share to the air (a gas the decomposition vents) is
     /// a follow-on refinement of the split.
     /// The matter-cycle step, wrapped by the Q1 Stone-3 per-step conservation gate.
@@ -4628,11 +4629,11 @@ impl Runner {
                             // reads byte-identical to the pre-T6 kernel; a world declaring fewer or other axes
                             // reads only what it declares.
                             let profile = [
-                                (crate::decompose::ConditionSource::Moisture, moisture),
-                                (crate::decompose::ConditionSource::Respirable, oxygen),
+                                (civsim_foundation::decompose::ConditionSource::Moisture, moisture),
+                                (civsim_foundation::decompose::ConditionSource::Respirable, oxygen),
                                 (
-                                    crate::decompose::ConditionSource::WarmthAboveBarrier,
-                                    crate::decompose::warmth_above_barrier(temperature, barrier),
+                                    civsim_foundation::decompose::ConditionSource::WarmthAboveBarrier,
+                                    civsim_foundation::decompose::warmth_above_barrier(temperature, barrier),
                                 ),
                             ];
                             driver.activity_at(&profile, life_stock)
@@ -4916,10 +4917,10 @@ impl Runner {
 
     fn step_inner(&mut self, world_inputs: &[TickInput]) {
         // The whole-tick timer; its remainder over the wrapped phases is the honest "unwrapped" cost.
-        let _tick = crate::profile::scope(crate::profile::P_TICK);
+        let _tick = civsim_foundation::profile::scope(civsim_foundation::profile::P_TICK);
         self.step_field();
         {
-            let _g = crate::profile::scope(crate::profile::P_BODY);
+            let _g = civsim_foundation::profile::scope(civsim_foundation::profile::P_BODY);
             self.phase_body_exchange();
         }
         // Snapshot reserves for the felt-conviction learner BEFORE the embodiment step, so this tick's
@@ -4927,7 +4928,7 @@ impl Runner {
         // embodiment-step snapshot (Branch 1; a no-op unless the learner is armed, matching the scheduled path).
         self.snapshot_reserves_for_conviction();
         if self.embodiment.is_some() {
-            let _g = crate::profile::scope(crate::profile::P_EMB);
+            let _g = civsim_foundation::profile::scope(civsim_foundation::profile::P_EMB);
             self.step_embodiment();
         }
         self.recouple_hydrology();
@@ -4943,7 +4944,7 @@ impl Runner {
         // folded; a no-op unless the learner is armed WITH move parameters, so it is byte-identical otherwise.
         self.apply_conviction_moves();
         {
-            let _g = crate::profile::scope(crate::profile::P_WORLD);
+            let _g = civsim_foundation::profile::scope(civsim_foundation::profile::P_WORLD);
             // Base-level liveliness step 5: publish each moved being's live cell into the world (so gossip
             // clusters by where it stands) and inject the environment-sourced hazard belief, then tick the
             // world with the merged batch. Runs after the embodiment moved the beings, matching the scheduled
@@ -7136,8 +7137,8 @@ impl Runner {
     pub fn spawn_creatures(
         &mut self,
         living: &crate::genesis::LivingWorld,
-        ctrl_genes: &crate::genome::GeneSet,
-        ctrl_pool: &crate::genome::GenePool,
+        ctrl_genes: &civsim_bio::genome::GeneSet,
+        ctrl_pool: &civsim_bio::genome::GenePool,
         ploidy: usize,
     ) -> usize {
         use crate::biosphere::SourceRef;
@@ -7684,7 +7685,7 @@ impl Runner {
                         }
                         _ => None,
                     };
-                    // The metabolic body and reserves, exactly as the worldbuild founder step: a race with a
+                    // The metabolic body and reserves, exactly as the dawn-harness founder step: a race with a
                     // catalog body keeps it as the metabolic aggregate (its catalog organs source the
                     // reserves, unchanged); a FULLY GROWN race (no catalog body) sources both from its grown
                     // structure (the digest and the grown tissue), so it needs no catalog body (Step 3, the
@@ -7731,13 +7732,13 @@ impl Runner {
                     if let Some(genome) = world.genome_of(id) {
                         walker.exploration = race
                             .genes
-                            .express_unit(genome, crate::genome::Channel::Exploration);
+                            .express_unit(genome, civsim_bio::genome::Channel::Exploration);
                         walker.deliberation = race
                             .genes
-                            .express_unit(genome, crate::genome::Channel::Deliberation);
+                            .express_unit(genome, civsim_bio::genome::Channel::Deliberation);
                         walker.social_learning = race
                             .genes
-                            .express_unit(genome, crate::genome::Channel::SocialLearning);
+                            .express_unit(genome, civsim_bio::genome::Channel::SocialLearning);
                     }
                     if let Some(s) = structure {
                         walker = walker.with_structure(s);
@@ -7942,8 +7943,8 @@ impl Runner {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::calibration::CalibrationManifest;
-    use crate::scenario::Scenario;
+    use civsim_foundation::calibration::CalibrationManifest;
+    use civsim_foundation::scenario::Scenario;
 
     /// A manifest with the three field calibrations set to labelled fixture values.
     const SET: &str = r#"
@@ -8301,13 +8302,13 @@ source = "test"
 
     #[test]
     fn per_being_exchange_cools_a_high_surface_body_faster_and_replays_bit_for_bit() {
-        use crate::anatomy::{BodyPlan, OrganKindDef, Part, Temperament, TissueComposition};
         use crate::physiology::{
             derive_body_exchange_rate, MetabolicAnchors, CONVECTIVE_SURFACE, TISSUE_SPECIFIC_HEAT,
         };
+        use civsim_bio::anatomy::{BodyPlan, OrganKindDef, Part, Temperament, TissueComposition};
 
         // A registry with a skin tissue (convective surface) and a flesh tissue (specific heat).
-        let mut organs = crate::anatomy::BodyPlanRegistry::dev_default();
+        let mut organs = civsim_bio::anatomy::BodyPlanRegistry::dev_default();
         let skin = organs.organs.len() as u16;
         organs.organs.push(OrganKindDef {
             id: skin,
@@ -8670,14 +8671,14 @@ source = "test"
 
     #[test]
     fn a_strike_wounds_the_targets_largest_presented_segment_by_geometry_not_weak_point() {
-        use crate::anatomy::{Part, Temperament};
-        use crate::contact_transfer::{
-            resolve_delivered_energy, ContactTransferRegistry, DEV_KINETIC,
-        };
         use crate::contact_wound::wound_fraction;
         use crate::homeostasis::HomeostaticAxisDef;
-        use crate::material::StrikeParams;
         use crate::morphogen::{Segment, Structure};
+        use civsim_bio::anatomy::{Part, Temperament};
+        use civsim_foundation::contact_transfer::{
+            resolve_delivered_energy, ContactTransferRegistry, DEV_KINETIC,
+        };
+        use civsim_foundation::material::StrikeParams;
 
         let reg = HomeostaticRegistry {
             axes: vec![HomeostaticAxisDef {
@@ -8948,11 +8949,11 @@ source = "test"
         // a CATALOG prey (no Structure). The wound reads the STRIKER's own delivery-part contact area and the
         // prey's OUTERMOST covering fracture-energy, accruing to the prey's `whole_body_damage`. A covering with
         // NO fracture-energy is not woundable (admit-the-alien: data-absent, no forced fracture death).
-        use crate::anatomy::{BodyPlan, Part, Temperament};
-        use crate::contact_transfer::ContactTransferRegistry;
         use crate::homeostasis::{HomeostaticAxisDef, HomeostaticRegistry};
-        use crate::material::StrikeParams;
         use crate::morphogen::{Segment, Structure};
+        use civsim_bio::anatomy::{BodyPlan, Part, Temperament};
+        use civsim_foundation::contact_transfer::ContactTransferRegistry;
+        use civsim_foundation::material::StrikeParams;
 
         let reg = HomeostaticRegistry {
             axes: vec![HomeostaticAxisDef {
@@ -9194,13 +9195,13 @@ source = "test"
         // tolerant being on the identical salt) forms no such belief, so the belief tracks the felt harm,
         // not the mere presence of the substance. This ties the whole learner path end to end through
         // couple_conversation, which the unit tests exercise piecewise.
-        use crate::anatomy::{BodyPlan, Part, Temperament};
         use crate::edibility::{Composition, Physiology};
-        use crate::evidence::InferenceParams;
         use crate::homeostasis::{HomeostaticAxisDef, HomeostaticRegistry, CONDITION, TEMPERATURE};
         use crate::learn::{feature_subject, HARMS, HARM_ATTR};
         use crate::percept::{feature_bucket, PerceptId, PerceptRegistry};
-        use crate::tom::{AccessChannelId, AccessWeights};
+        use civsim_bio::anatomy::{BodyPlan, Part, Temperament};
+        use civsim_bio::evidence::InferenceParams;
+        use civsim_bio::tom::{AccessChannelId, AccessWeights};
 
         let bp = InferenceParams {
             clamp: Fixed::from_int(50),
@@ -9278,7 +9279,7 @@ source = "test"
 
         // Run the being on the salt for a few ticks (an idle, blank controller, so it stays on the salt),
         // capturing the first HARMS commit before the salt eventually wears it through.
-        let run = |tolerance: Fixed| -> Option<crate::evidence::ValueId> {
+        let run = |tolerance: Fixed| -> Option<civsim_bio::evidence::ValueId> {
             let mut world = World::new(
                 bp,
                 bp,
@@ -9364,18 +9365,17 @@ source = "test"
         // same being with the reward learner UNARMED never populates a trace and forms no such belief, so the
         // belief tracks the felt reward routed through the eligibility trace, not the mere taking of an
         // action. This ties the reward-credit path end to end through couple_conversation.
-        use crate::anatomy::{BodyPlan, Part, Temperament};
         use crate::controller::Controller;
         use crate::edibility::{Composition, Physiology};
-        use crate::evidence::InferenceParams;
         use crate::homeostasis::{
             HomeostaticAxisDef, HomeostaticRegistry, ENERGY, INGEST, TEMPERATURE,
         };
-        use crate::learn::{
-            sequence_subject, RewardLearningCalib, SequenceStep, REWARDS, REWARD_ATTR,
-        };
+        use crate::learn::{sequence_subject, RewardLearningCalib, REWARDS, REWARD_ATTR};
         use crate::physiology::ENERGY_DENSITY;
-        use crate::tom::{AccessChannelId, AccessWeights};
+        use civsim_bio::anatomy::{BodyPlan, Part, Temperament};
+        use civsim_bio::evidence::InferenceParams;
+        use civsim_bio::tom::{AccessChannelId, AccessWeights};
+        use civsim_foundation::sequence::SequenceStep;
 
         let bp = InferenceParams {
             clamp: Fixed::from_int(50),
@@ -9449,7 +9449,7 @@ source = "test"
 
         // Run a being that ingests the food each tick (an INGEST-biased controller), with the reward learner
         // armed or not, and report whether it committed the REWARDS belief about its ingest.
-        let run = |reward_armed: bool| -> Option<crate::evidence::ValueId> {
+        let run = |reward_armed: bool| -> Option<civsim_bio::evidence::ValueId> {
             let mut world = World::new(
                 bp,
                 bp,
@@ -9556,16 +9556,17 @@ source = "test"
         // appetitive percept and an evolved weight, changes the behaviour, and removing the reward signal
         // removes the repetition, the appetitive twin of the harm falsifier. No authored preference: the two
         // beings are identical but for the felt reward.
-        use crate::anatomy::{BodyPlan, Part, Temperament};
         use crate::controller::Controller;
         use crate::edibility::{Composition, Physiology};
-        use crate::evidence::InferenceParams;
         use crate::homeostasis::{
             HomeostaticAxisDef, HomeostaticRegistry, ENERGY, INGEST, TEMPERATURE,
         };
-        use crate::learn::{sequence_subject, RewardLearningCalib, SequenceStep};
+        use crate::learn::{sequence_subject, RewardLearningCalib};
         use crate::physiology::ENERGY_DENSITY;
-        use crate::tom::{AccessChannelId, AccessWeights};
+        use civsim_bio::anatomy::{BodyPlan, Part, Temperament};
+        use civsim_bio::evidence::InferenceParams;
+        use civsim_bio::tom::{AccessChannelId, AccessWeights};
+        use civsim_foundation::sequence::SequenceStep;
 
         let bp = InferenceParams {
             clamp: Fixed::from_int(50),
@@ -9782,12 +9783,12 @@ source = "test"
         use crate::affordance_percept::{
             AffordancePerceptKind, AffordancePerceptRefs, AffordancePerceptRegistry,
         };
-        use crate::anatomy::{BodyPlan, Part, Temperament};
         use crate::edibility::Physiology;
-        use crate::evidence::InferenceParams;
         use crate::homeostasis::{HomeostaticAxisDef, HomeostaticRegistry, TEMPERATURE};
-        use crate::material::MaterialField;
-        use crate::tom::{AccessChannelId, AccessWeights};
+        use civsim_bio::anatomy::{BodyPlan, Part, Temperament};
+        use civsim_bio::evidence::InferenceParams;
+        use civsim_bio::tom::{AccessChannelId, AccessWeights};
+        use civsim_foundation::material::MaterialField;
         use civsim_physics::PhysicsRegistry;
 
         // A minimal material floor: a fracture axis and a granite substance the being can sense as
@@ -9967,15 +9968,15 @@ values = [
         use crate::affordance_percept::{
             AffordancePerceptKind, AffordancePerceptRefs, AffordancePerceptRegistry,
         };
-        use crate::anatomy::{BodyPlan, Part, Temperament};
         use crate::edibility::Physiology;
-        use crate::evidence::InferenceParams;
         use crate::homeostasis::{
             AffordanceDef, AffordanceId, AffordanceParam, HomeostaticAxisDef, HomeostaticRegistry,
             GRASP, TEMPERATURE,
         };
-        use crate::material::MaterialField;
-        use crate::tom::{AccessChannelId, AccessWeights};
+        use civsim_bio::anatomy::{BodyPlan, Part, Temperament};
+        use civsim_bio::evidence::InferenceParams;
+        use civsim_bio::tom::{AccessChannelId, AccessWeights};
+        use civsim_foundation::material::MaterialField;
         use civsim_physics::PhysicsRegistry;
 
         // The same minimal material floor as the 2c-1 proposal test: a fracture axis and a granite substance
@@ -10184,18 +10185,17 @@ values = [
         use crate::affordance_percept::{
             AffordancePerceptKind, AffordancePerceptRefs, AffordancePerceptRegistry,
         };
-        use crate::anatomy::{BodyPlan, Part, Temperament};
         use crate::edibility::Physiology;
-        use crate::evidence::InferenceParams;
         use crate::homeostasis::{
             AffordanceDef, AffordanceParam, HomeostaticAxisDef, HomeostaticRegistry, ENERGY,
             GEOPHAGE, TEMPERATURE,
         };
-        use crate::learn::{
-            sequence_subject, RewardLearningCalib, SequenceStep, REWARDS, REWARD_ATTR,
-        };
-        use crate::material::MaterialField;
-        use crate::tom::{AccessChannelId, AccessWeights};
+        use crate::learn::{sequence_subject, RewardLearningCalib, REWARDS, REWARD_ATTR};
+        use civsim_bio::anatomy::{BodyPlan, Part, Temperament};
+        use civsim_bio::evidence::InferenceParams;
+        use civsim_bio::tom::{AccessChannelId, AccessWeights};
+        use civsim_foundation::material::MaterialField;
+        use civsim_foundation::sequence::SequenceStep;
         use civsim_physics::PhysicsRegistry;
 
         let bp = InferenceParams {
@@ -10286,7 +10286,7 @@ values = [
         // that its geophage pays off. Zero is a founder (never enacts); one is a being whose propensity is
         // fully lifted (enacts its proposal every tick), standing in for the follow-on's Channel::Exploration
         // expression exactly as the 2c-2 gate is proved primed.
-        let run = |exploration: Fixed| -> Option<crate::evidence::ValueId> {
+        let run = |exploration: Fixed| -> Option<civsim_bio::evidence::ValueId> {
             let mut world = World::new(
                 bp,
                 bp,
@@ -10392,19 +10392,19 @@ values = [
         use crate::affordance_percept::{
             AffordancePerceptKind, AffordancePerceptRefs, AffordancePerceptRegistry,
         };
-        use crate::anatomy::{BodyPlan, Part, Temperament};
         use crate::edibility::Physiology;
-        use crate::evidence::{InferenceParams, ValueId};
         use crate::homeostasis::{
             AffordanceDef, AffordanceParam, HomeostaticAxisDef, HomeostaticRegistry, ENERGY,
             GEOPHAGE, TEMPERATURE,
         };
         use crate::learn::{
-            sequence_subject, step_belief_subject, RewardLearningCalib, SequenceStep, REWARDS,
-            REWARD_ATTR,
+            sequence_subject, step_belief_subject, RewardLearningCalib, REWARDS, REWARD_ATTR,
         };
-        use crate::material::MaterialField;
-        use crate::tom::{AccessChannelId, AccessWeights};
+        use civsim_bio::anatomy::{BodyPlan, Part, Temperament};
+        use civsim_bio::evidence::{InferenceParams, ValueId};
+        use civsim_bio::tom::{AccessChannelId, AccessWeights};
+        use civsim_foundation::material::MaterialField;
+        use civsim_foundation::sequence::SequenceStep;
         use civsim_physics::PhysicsRegistry;
 
         let bp = InferenceParams {
@@ -10604,9 +10604,7 @@ values = [
         use crate::affordance_percept::{
             AffordancePerceptKind, AffordancePerceptRefs, AffordancePerceptRegistry,
         };
-        use crate::anatomy::{BodyPlan, Part, Temperament};
         use crate::edibility::Physiology;
-        use crate::evidence::InferenceParams;
         use crate::homeostasis::{
             AffordanceDef, AffordanceParam, HomeostaticAxisDef, HomeostaticRegistry, ENERGY,
             GEOPHAGE, TEMPERATURE,
@@ -10614,10 +10612,12 @@ values = [
         use crate::learn::{
             feature_subject, RewardLearningCalib, MATERIAL_FEATURE_CHANNEL_BASE, REWARDS,
         };
-        use crate::material::MaterialField;
         use crate::material_percept::MaterialPerceptRegistry;
         use crate::percept::feature_bucket;
-        use crate::tom::{AccessChannelId, AccessWeights};
+        use civsim_bio::anatomy::{BodyPlan, Part, Temperament};
+        use civsim_bio::evidence::InferenceParams;
+        use civsim_bio::tom::{AccessChannelId, AccessWeights};
+        use civsim_foundation::material::MaterialField;
         use civsim_physics::PhysicsRegistry;
 
         let bp = InferenceParams {
@@ -10695,7 +10695,7 @@ values = [
             ),
         );
 
-        let run = |exploration: Fixed| -> Option<crate::evidence::ValueId> {
+        let run = |exploration: Fixed| -> Option<civsim_bio::evidence::ValueId> {
             let mut world = World::new(
                 bp,
                 bp,
@@ -10802,9 +10802,7 @@ values = [
         use crate::affordance_percept::{
             AffordancePerceptKind, AffordancePerceptRefs, AffordancePerceptRegistry,
         };
-        use crate::anatomy::{BodyPlan, Part, Temperament};
         use crate::edibility::Physiology;
-        use crate::evidence::InferenceParams;
         use crate::homeostasis::{
             AffordanceDef, AffordanceParam, HomeostaticAxisDef, HomeostaticRegistry, ENERGY,
             GEOPHAGE, TEMPERATURE,
@@ -10812,9 +10810,11 @@ values = [
         use crate::learn::{
             feature_subject, RewardLearningCalib, MATERIAL_FEATURE_CHANNEL_BASE, REWARDS,
         };
-        use crate::material::MaterialField;
         use crate::material_percept::MaterialPerceptRegistry;
-        use crate::tom::{AccessChannelId, AccessWeights};
+        use civsim_bio::anatomy::{BodyPlan, Part, Temperament};
+        use civsim_bio::evidence::InferenceParams;
+        use civsim_bio::tom::{AccessChannelId, AccessWeights};
+        use civsim_foundation::material::MaterialField;
         use civsim_physics::PhysicsRegistry;
 
         let bp = InferenceParams {
@@ -11007,9 +11007,7 @@ values = [
         use crate::affordance_percept::{
             AffordancePerceptKind, AffordancePerceptRefs, AffordancePerceptRegistry,
         };
-        use crate::anatomy::{BodyPlan, Part, Temperament};
         use crate::edibility::Physiology;
-        use crate::evidence::InferenceParams;
         use crate::homeostasis::{
             AffordanceDef, AffordanceParam, HomeostaticAxisDef, HomeostaticAxisId,
             HomeostaticRegistry, ENERGY, GEOPHAGE, TEMPERATURE,
@@ -11017,9 +11015,11 @@ values = [
         use crate::learn::{
             feature_subject, RewardLearningCalib, MATERIAL_FEATURE_CHANNEL_BASE, REWARDS,
         };
-        use crate::material::MaterialField;
         use crate::material_percept::MaterialPerceptRegistry;
-        use crate::tom::{AccessChannelId, AccessWeights};
+        use civsim_bio::anatomy::{BodyPlan, Part, Temperament};
+        use civsim_bio::evidence::InferenceParams;
+        use civsim_bio::tom::{AccessChannelId, AccessWeights};
+        use civsim_foundation::material::MaterialField;
         use civsim_physics::PhysicsRegistry;
 
         // A second food reserve beside ENERGY: STARCH, backed by the soft tuber, so a being that eats EITHER
@@ -11231,19 +11231,18 @@ values = [
         use crate::affordance_percept::{
             AffordancePerceptKind, AffordancePerceptRefs, AffordancePerceptRegistry,
         };
-        use crate::anatomy::{BodyPlan, Part, Temperament};
         use crate::edibility::Physiology;
-        use crate::evidence::InferenceParams;
         use crate::homeostasis::{
             AffordanceDef, AffordanceParam, HomeostaticAxisDef, HomeostaticRegistry, ENERGY,
             GEOPHAGE, TEMPERATURE,
         };
-        use crate::learn::{
-            sequence_subject, RewardLearningCalib, SequenceStep, REWARDS, REWARD_ATTR,
-        };
-        use crate::material::MaterialField;
+        use crate::learn::{sequence_subject, RewardLearningCalib, REWARDS, REWARD_ATTR};
         use crate::material_percept::MaterialPerceptRegistry;
-        use crate::tom::{AccessChannelId, AccessWeights};
+        use civsim_bio::anatomy::{BodyPlan, Part, Temperament};
+        use civsim_bio::evidence::InferenceParams;
+        use civsim_bio::tom::{AccessChannelId, AccessWeights};
+        use civsim_foundation::material::MaterialField;
+        use civsim_foundation::sequence::SequenceStep;
         use civsim_physics::PhysicsRegistry;
 
         let bp = InferenceParams {
@@ -11456,15 +11455,15 @@ values = [
         use crate::affordance_percept::{
             AffordancePerceptKind, AffordancePerceptRefs, AffordancePerceptRegistry,
         };
-        use crate::anatomy::{BodyPlan, Part, Temperament};
         use crate::edibility::Physiology;
-        use crate::evidence::InferenceParams;
         use crate::homeostasis::{
             AffordanceDef, AffordanceParam, HomeostaticAxisDef, HomeostaticRegistry, GRASP,
             TEMPERATURE,
         };
-        use crate::material::MaterialField;
-        use crate::tom::{AccessChannelId, AccessWeights};
+        use civsim_bio::anatomy::{BodyPlan, Part, Temperament};
+        use civsim_bio::evidence::InferenceParams;
+        use civsim_bio::tom::{AccessChannelId, AccessWeights};
+        use civsim_foundation::material::MaterialField;
         use civsim_physics::PhysicsRegistry;
 
         const FLOOR: &str = r#"
@@ -11666,16 +11665,17 @@ values = [
         use crate::affordance_percept::{
             AffordancePerceptKind, AffordancePerceptRefs, AffordancePerceptRegistry,
         };
-        use crate::anatomy::{BodyPlan, Part, Temperament};
         use crate::edibility::Physiology;
-        use crate::evidence::InferenceParams;
         use crate::homeostasis::{
             AffordanceDef, AffordanceId, AffordanceParam, HomeostaticAxisDef, HomeostaticRegistry,
             GRASP, TEMPERATURE,
         };
-        use crate::learn::{sequence_subject, SequenceStep, NEUTRAL, REWARDS, REWARD_ATTR};
-        use crate::material::MaterialField;
-        use crate::tom::{AccessChannelId, AccessWeights};
+        use crate::learn::{sequence_subject, NEUTRAL, REWARDS, REWARD_ATTR};
+        use civsim_bio::anatomy::{BodyPlan, Part, Temperament};
+        use civsim_bio::evidence::InferenceParams;
+        use civsim_bio::tom::{AccessChannelId, AccessWeights};
+        use civsim_foundation::material::MaterialField;
+        use civsim_foundation::sequence::SequenceStep;
         use civsim_physics::PhysicsRegistry;
 
         const FLOOR: &str = r#"
@@ -11887,14 +11887,14 @@ values = [
         // on the salt, and is worn. So the belief is adaptive only through the evolved weight, and
         // avoidance is what makes it worth carrying (Principle 9). No authored flight: both hold the same
         // belief; only the evolved weight differs.
-        use crate::anatomy::{BodyPlan, Part, Temperament};
         use crate::controller::{forage_taxis_weights, ForageGains};
         use crate::edibility::{Composition, Physiology};
-        use crate::evidence::InferenceParams;
         use crate::homeostasis::{HomeostaticAxisDef, HomeostaticRegistry, CONDITION, TEMPERATURE};
         use crate::learn::{feature_subject, HARMS, HARM_ATTR};
         use crate::percept::{feature_bucket, PerceptRegistry};
-        use crate::tom::{AccessChannelId, AccessWeights};
+        use civsim_bio::anatomy::{BodyPlan, Part, Temperament};
+        use civsim_bio::evidence::InferenceParams;
+        use civsim_bio::tom::{AccessChannelId, AccessWeights};
 
         let bp = InferenceParams {
             clamp: Fixed::from_int(50),
@@ -12114,18 +12114,18 @@ values = [
         // cannot act on the belief and stays put. So the trace biases approach only through the evolved weight,
         // and seeking the trace-marked place emerges (Principle 9): no authored approach, both hold the same
         // belief, only the evolved weight differs. The exact sign-flipped mirror of the avoidance test.
-        use crate::anatomy::{BodyPlan, Part, Temperament};
         use crate::edibility::Physiology;
-        use crate::evidence::InferenceParams;
         use crate::homeostasis::{HomeostaticAxisDef, HomeostaticRegistry, CONDITION, TEMPERATURE};
         use crate::learn::{
             feature_subject, RewardLearningCalib, MATERIAL_FEATURE_CHANNEL_BASE, REWARDS,
             REWARD_ATTR,
         };
-        use crate::material::MaterialField;
         use crate::material_percept::MaterialPerceptRegistry;
         use crate::percept::feature_bucket;
-        use crate::tom::{AccessChannelId, AccessWeights};
+        use civsim_bio::anatomy::{BodyPlan, Part, Temperament};
+        use civsim_bio::evidence::InferenceParams;
+        use civsim_bio::tom::{AccessChannelId, AccessWeights};
+        use civsim_foundation::material::MaterialField;
 
         let bp = InferenceParams {
             clamp: Fixed::from_int(50),
@@ -12324,16 +12324,16 @@ values = [
         // third (a founder with a blank controller) does not move on its conviction at all. So whether and which
         // way a conviction sways action rides on the stance times an EVOLVED weight, and a conviction-biased
         // behaviour EMERGES (Principle 8): no authored conviction-to-action rule, only the stance and the weight.
-        use crate::anatomy::{BodyPlan, Part, Temperament};
         use crate::axiom::{
             Axiom, AxiomAxisId, EpistemicStance, EvidenceRing, IntrinsicBeliefs, SourceModeId,
         };
         use crate::conviction_percept::ConvictionPerceptRegistry;
         use crate::edibility::Physiology;
-        use crate::evidence::InferenceParams;
         use crate::homeostasis::{HomeostaticAxisDef, HomeostaticRegistry, CONDITION, TEMPERATURE};
-        use crate::tom::{AccessChannelId, AccessWeights};
-        use crate::value::{ValueAxisId, ValueProfile};
+        use civsim_bio::anatomy::{BodyPlan, Part, Temperament};
+        use civsim_bio::evidence::InferenceParams;
+        use civsim_bio::tom::{AccessChannelId, AccessWeights};
+        use civsim_foundation::value::{ValueAxisId, ValueProfile};
 
         // The exposed conviction axis: a bare id, its meaning the world's data (the Steering Audit bites here).
         const AXIS: AxiomAxisId = AxiomAxisId(0);
@@ -12547,16 +12547,16 @@ values = [
         // the first-cut behaviour-weight-gated framing); (b) INERT, the conviction's own stance is UNCHANGED,
         // Branch 1 only records (Branch 2 consumes the record to move a conviction). The felt signal is the
         // being's own interoceptive delta (its draining energy), keyed on no axis identity.
-        use crate::anatomy::{BodyPlan, Part, Temperament};
         use crate::axiom::{
             Axiom, AxiomAxisId, EpistemicStance, EvidenceRing, IntrinsicBeliefs, SourceModeId,
         };
         use crate::conviction_experience::FeltConvictionCalib;
         use crate::edibility::Physiology;
-        use crate::evidence::InferenceParams;
         use crate::homeostasis::{HomeostaticAxisDef, HomeostaticRegistry, ENERGY, TEMPERATURE};
-        use crate::tom::{AccessChannelId, AccessWeights};
-        use crate::value::{ValueAxisId, ValueProfile};
+        use civsim_bio::anatomy::{BodyPlan, Part, Temperament};
+        use civsim_bio::evidence::InferenceParams;
+        use civsim_bio::tom::{AccessChannelId, AccessWeights};
+        use civsim_foundation::value::{ValueAxisId, ValueProfile};
 
         const AXIS: AxiomAxisId = AxiomAxisId(0);
 
@@ -12722,16 +12722,16 @@ values = [
         // conviction (the martyr / costly-signal mode). Neither direction is coded: the engine never reads which
         // pole "means" what (the move is relabel-invariant), and which epistemology a being has is its race's
         // own innate disposition. Same experience, opposite belief change, emergent from disposition.
-        use crate::anatomy::{BodyPlan, Part, Temperament};
         use crate::axiom::{
             Axiom, AxiomAxisId, EpistemicStance, EvidenceRing, IntrinsicBeliefs, SourceModeId,
         };
         use crate::conviction_experience::FeltConvictionCalib;
         use crate::edibility::Physiology;
-        use crate::evidence::InferenceParams;
         use crate::homeostasis::{HomeostaticAxisDef, HomeostaticRegistry, ENERGY, TEMPERATURE};
-        use crate::tom::{AccessChannelId, AccessWeights};
-        use crate::value::{ValueAxisId, ValueProfile};
+        use civsim_bio::anatomy::{BodyPlan, Part, Temperament};
+        use civsim_bio::evidence::InferenceParams;
+        use civsim_bio::tom::{AccessChannelId, AccessWeights};
+        use civsim_foundation::value::{ValueAxisId, ValueProfile};
 
         const AXIS: AxiomAxisId = AxiomAxisId(0);
         let held_stance = Fixed::from_ratio(8, 10);
@@ -12906,10 +12906,7 @@ values = [
         use crate::affordance_percept::{
             AffordancePerceptKind, AffordancePerceptRefs, AffordancePerceptRegistry,
         };
-        use crate::anatomy::{BodyPlan, Part, Temperament};
-        use crate::decision::Curve;
         use crate::edibility::Physiology;
-        use crate::evidence::InferenceParams;
         use crate::homeostasis::{
             AffordanceDef, AffordanceParam, HomeostaticAxisDef, HomeostaticRegistry, ENERGY,
             GEOPHAGE, TEMPERATURE,
@@ -12917,9 +12914,12 @@ values = [
         use crate::learn::{
             feature_subject, RewardLearningCalib, MATERIAL_FEATURE_CHANNEL_BASE, REWARDS,
         };
-        use crate::material::{MaterialField, MatterCycleCalib};
         use crate::material_percept::MaterialPerceptRegistry;
-        use crate::tom::{AccessChannelId, AccessWeights};
+        use civsim_bio::anatomy::{BodyPlan, Part, Temperament};
+        use civsim_bio::evidence::InferenceParams;
+        use civsim_bio::tom::{AccessChannelId, AccessWeights};
+        use civsim_foundation::decision::Curve;
+        use civsim_foundation::material::{MaterialField, MatterCycleCalib};
         use civsim_physics::PhysicsRegistry;
 
         let bp = InferenceParams {
@@ -13305,11 +13305,11 @@ values = [
         // free. A holder co-located with a naive being conveys the belief through gossip, so the idea
         // spreads by presence (not by an authored teaching path, not by reading kinship), and it persists
         // only while a holder is present, which is what makes the loop's persistence possible.
-        use crate::evidence::InferenceParams;
         use crate::learn::{feature_subject, HARMS, HARM_ATTR};
         use crate::percept::feature_bucket;
-        use crate::tom::{AccessChannelId, AccessWeights};
         use crate::world::GossipParams;
+        use civsim_bio::evidence::InferenceParams;
+        use civsim_bio::tom::{AccessChannelId, AccessWeights};
 
         let bp = InferenceParams {
             clamp: Fixed::from_int(50),
@@ -13474,14 +13474,14 @@ values = [
             encephalization: Fixed::from_ratio(1, 2),
             diet_breadth: Fixed::from_ratio(1, 2),
             weapons: vec![],
-            covering: crate::anatomy::Part {
+            covering: civsim_bio::anatomy::Part {
                 kind: 0,
                 development: Fixed::from_ratio(1, 2),
             },
             senses: vec![],
             locomotion: vec![1],
             organs: vec![],
-            temperament: crate::anatomy::Temperament {
+            temperament: civsim_bio::anatomy::Temperament {
                 boldness: Fixed::from_ratio(1, 2),
                 exploration: Fixed::from_ratio(1, 2),
                 activity: Fixed::from_ratio(1, 2),
@@ -13837,7 +13837,7 @@ values = [
         };
         let body_with_covering = |kind: u16| {
             let mut b = repro_body();
-            b.covering = crate::anatomy::Part {
+            b.covering = civsim_bio::anatomy::Part {
                 kind,
                 development: Fixed::from_ratio(1, 2),
             };
@@ -14020,7 +14020,7 @@ values = [
                 [("bio.energy_density".to_string(), cell_content)]
                     .into_iter()
                     .collect();
-            let mut tissue = crate::material::TissueField::new();
+            let mut tissue = civsim_foundation::material::TissueField::new();
             tissue.deposit(Coord3::ground(5, 8), comp, Fixed::ONE);
             emb.set_tissue(tissue);
         } else {
@@ -14354,11 +14354,11 @@ values = [
     /// and the living count. Scoped to the MAGNITUDE proxy: a being sorts emitters by signal strength, so
     /// avoiding the strong-emitting predator (which wounds) is favoured, never a "predator" identity read.
     fn flee_arena(predator_present: bool, generations: u64, verbose: bool) -> (Fixed, usize) {
-        use crate::contact_transfer::ContactTransferRegistry;
         use crate::homeostasis::{HomeostaticAxisDef, HomeostaticRegistry, INTEGRITY};
         use crate::learn::BeingPerceptField;
-        use crate::material::StrikeParams;
         use crate::medium::MediumField;
+        use civsim_foundation::contact_transfer::ContactTransferRegistry;
+        use civsim_foundation::material::StrikeParams;
         let ax = |id, name: &str, backing: Option<&str>, floor: i32| HomeostaticAxisDef {
             id,
             name: name.to_string(),
@@ -14640,7 +14640,7 @@ values = [
         // founder and its descendant hold the same reserve.
         let corpse_body = || {
             let mut b = repro_body();
-            b.organs = vec![crate::anatomy::Part {
+            b.organs = vec![civsim_bio::anatomy::Part {
                 kind: 0,
                 development: Fixed::ONE,
             }];
@@ -14694,7 +14694,7 @@ values = [
         // tick so the bite that depletes it is replenished (a standing carcass held fixed while the population
         // evolves, the tissue-field analogue of the matter arena's re-applied food). It is the EXISTING matter
         // deposit eaten by the EXISTING trophic-agnostic whole-body bite; nothing about it is a "corpse" tag.
-        let deposit_corpse = |t: &mut crate::material::TissueField| {
+        let deposit_corpse = |t: &mut civsim_foundation::material::TissueField| {
             let mut comp: BTreeMap<String, Fixed> = BTreeMap::new();
             comp.insert(crate::physiology::ENERGY_DENSITY.to_string(), Fixed::ONE);
             t.deposit(start, comp, Fixed::from_int(8));
@@ -14829,12 +14829,12 @@ values = [
         generations: u64,
         verbose: bool,
     ) -> (Fixed, Fixed, usize) {
-        use crate::contact_transfer::ContactTransferRegistry;
         use crate::homeostasis::{HomeostaticAxisDef, HomeostaticRegistry, INTEGRITY};
         use crate::learn::BeingPerceptField;
-        use crate::material::StrikeParams;
         use crate::medium::MediumField;
         use crate::perceivable_feature::PerceivableFeatureRegistry;
+        use civsim_foundation::contact_transfer::ContactTransferRegistry;
+        use civsim_foundation::material::StrikeParams;
         let ax =
             |id, name: &str, backing: Option<&str>, drain: Fixed, floor: i32| HomeostaticAxisDef {
                 id,
@@ -14946,11 +14946,11 @@ values = [
         // from the organs) and the adaptive lineage can compound, the #148 lesson.
         let perceiver_body = || {
             let mut b = repro_body();
-            b.covering = crate::anatomy::Part {
+            b.covering = civsim_bio::anatomy::Part {
                 kind: 0,
                 development: Fixed::from_ratio(1, 2),
             };
-            b.organs = vec![crate::anatomy::Part {
+            b.organs = vec![civsim_bio::anatomy::Part {
                 kind: 0,
                 development: Fixed::ONE,
             }];
@@ -14960,7 +14960,7 @@ values = [
         // breed; they carry no heritable lineage, so `carries_lineage` excludes them from the beat).
         let emitter_body = |covering: u16| {
             let mut b = repro_body();
-            b.covering = crate::anatomy::Part {
+            b.covering = civsim_bio::anatomy::Part {
                 kind: covering,
                 development: Fixed::from_ratio(1, 2),
             };

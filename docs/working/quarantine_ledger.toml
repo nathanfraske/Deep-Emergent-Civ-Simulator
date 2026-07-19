@@ -38,7 +38,7 @@ owed = "derive-from-perceiver-body-axis: the perceiver-keyed replacement substra
 
 [[entry]]
 id = "q-anatomy-01"
-file = "crates/sim/src/anatomy.rs"
+file = "crates/bio/src/anatomy.rs"
 anchor = "sample_body_plan"
 value = "1 + range(4) (one to four organs; siblings: want_senses = 1 + range(3), want_weapons = (layer).min(3))"
 shapes = "how many organs a creature draws, i.e. the richness of its reserve/metabolic endowment (and, for the siblings, sensory and weapon endowment)"
@@ -48,7 +48,7 @@ owed = "derive-from a heritable per-species organ-count trait or reserve-with-ba
 
 [[entry]]
 id = "q-anatomy-02"
-file = "crates/sim/src/anatomy.rs"
+file = "crates/bio/src/anatomy.rs"
 anchor = "BodyPlanRegistry"
 value = "fat-body energy_density ONE / water_fraction Fixed::from_ratio(1,10); glycogen-store 3/4 & 1/4; generalist-viscera 1/2 & 1/2"
 shapes = "organ tissue compositions from which reserve capacities (energy/water endurance) are derived"
@@ -58,7 +58,7 @@ owed = "cite-biology-source for each composition magnitude (the data-defined reg
 
 [[entry]]
 id = "q-anatomy-03"
-file = "crates/sim/src/anatomy.rs"
+file = "crates/bio/src/anatomy.rs"
 anchor = "BodyPlanRegistry"
 value = "mat.fracture_strength Fixed::from_int(3)"
 shapes = "the muscle tissue strength the whole-body work force integrates over (a body's exertion force / effective strength)"
@@ -68,7 +68,7 @@ owed = "cite-materials-datasheet for muscle strength or derive from the material
 
 [[entry]]
 id = "q-anatomy-04"
-file = "crates/sim/src/anatomy.rs"
+file = "crates/bio/src/anatomy.rs"
 anchor = "BodyPlanRegistry"
 value = "opt.emissivity '0.95'"
 shapes = "the covering surface emissivity the radiant thermoregulation term and the thermal-signal (perceivable-feature) read (a creature's heat loss and how perceptible its thermal signature is)"
@@ -78,7 +78,7 @@ owed = "cite-spectral-emissivity source per covering material (the covering_emis
 
 [[entry]]
 id = "q-anatomy-05"
-file = "crates/sim/src/anatomy.rs"
+file = "crates/bio/src/anatomy.rs"
 anchor = "BodyPlanRegistry"
 value = "organic profile ('0.95','0.96','0.94'); keratin/mineral profile ('0.99','0.88','0.98')"
 shapes = "the per-band spectral emissivity shape a perceiver keys a heritable weight on (a creature's spectral thermal signature, feeding predation/fleeing perception)"
@@ -88,7 +88,7 @@ owed = "cite-spectral-emissivity source for each material profile; per-world res
 
 [[entry]]
 id = "q-anatomy-06"
-file = "crates/sim/src/anatomy.rs"
+file = "crates/bio/src/anatomy.rs"
 anchor = "BodyPlanRegistry"
 value = "mat.fracture_energy '3' (soft/keratin coverings) / '8' (rigid/mineral coverings)"
 shapes = "the covering's Griffith fracture tolerance the coarse whole-body wound branch reads (how hard a creature's outer layer is to breach)"
@@ -318,7 +318,7 @@ owed = "cite-source for the lived-experience integration window, or key-on-being
 
 [[entry]]
 id = "q-decompose-01"
-file = "crates/sim/src/decompose.rs"
+file = "crates/foundation/src/decompose.rs"
 anchor = "dev_fixture"
 value = "DecomposerDriver::conditions(Fixed::from_ratio(1,4), Fixed::ONE, Fixed::from_int(10)); DecomposerDriver::life(Fixed::ONE)"
 shapes = "The moisture saturation, oxygen (respirable) reference, warmth span, and decomposer-biomass reference that set a cell's decomposition activity in [0,1] (rot rate -> matter cycle -> soil-nutrient recovery -> productivity)."
@@ -508,7 +508,7 @@ owed = "derive-from-body: the canonical Homeostasis::new already derives reserve
 
 [[entry]]
 id = "q-mate_choice-01"
-file = "crates/sim/src/mate_choice.rs"
+file = "crates/bio/src/mate_choice.rs"
 anchor = "hybrid_viability"
 value = "Fixed::from_ratio(1, 2)"
 shapes = "The fitness scalar assigned to a sterile Dobzhansky-Muller hybrid offspring. It feeds the genome-derived offspring fitness (multiplied into heterozygosity in evolve_featured_preference / read in choose_by_viability and pairing_viability) that drives mate-choice and assortative-mating selection, so it is a coefficient changing which mate preferences and crosses survive."

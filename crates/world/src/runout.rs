@@ -134,7 +134,7 @@ pub fn regime_ratio(energy: Fixed, forces: RunoutForces) -> Fixed {
 /// The path a parcel takes and where it deposits: the cells it passed through in order (the source first),
 /// the cell it came to rest in, and the specific energy left when it stopped. The rest cell is the
 /// single-parcel deposit site the redistribution operator credits; the multi-parcel fan that spreads a
-/// source's mass into a blanket is the next slice.
+/// source's mass into a blanket is [`launch_fan`] below.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RunoutPath {
     /// The cells the parcel occupied, in travel order, starting with the source.
@@ -327,15 +327,21 @@ pub struct LaunchFan {
 /// The honest boundary (the integrator is SURFACE-CONTACT, friction-dissipated along the ground): this fan
 /// is correct for the surface-flowing mass movements (debris flows, lahars, pyroclastic and turbidity
 /// currents, lava runout) and APPROXIMATE for a true impact ejecta blanket, whose parcels launch on a
-/// VERTICAL ballistic arc. The vertical-arc regime (airborne drag in flight versus contact friction on the
-/// ground) is a deeper force-term extension through the same open [`BodyForce`] slot, deferred behind this
-/// boundary, not built here.
+/// VERTICAL ballistic arc. That regime IS built, as a SEPARATE integrator rather than a force term:
+/// [`crate::ballistic`] flies a parcel over the ground on a projectile arc, so an impact's ejecta clears
+/// intervening terrain. Reaching it through this module's [`BodyForce`] slot was considered and RULED OUT
+/// (gate-ruled, PR #177): a `BodyForce` here is a horizontal surface-potential gradient, so it could only
+/// walk a parcel into a valley, never over a ridge. [`crate::momentum`] carries both regimes under one
+/// velocity-vector law, and for a true impact ejecta blanket the entry point is
+/// [`crate::momentum::momentum_fan`].
 ///
 /// A second honest limit, the ANGULAR resolution: the integrator takes greedy single-cell 4-connected
 /// steps, so on flat ground a diagonal launch snaps to its nearest axis (the deposit is SYMMETRIC but
 /// effectively four-axis, and directions beyond the four re-weight the same axis endpoints rather than
-/// filling in angles); the terrain breaks this on real relief, and true angular resolution is the deferred
-/// momentum-vector (sub-cell velocity) integrator, a follow-on refinement of the same law.
+/// filling in angles); the terrain breaks this on real relief. True angular resolution is the
+/// momentum-vector (sub-cell velocity) integrator, and it is BUILT: see
+/// [`crate::momentum::momentum_integrate`], whose fan already cites this function's four-axis limit as the
+/// thing it fixes.
 pub fn launch_fan(
     width: usize,
     height: usize,

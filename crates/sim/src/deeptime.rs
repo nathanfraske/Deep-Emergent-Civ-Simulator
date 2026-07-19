@@ -83,7 +83,7 @@
 //! path.
 
 use crate::geodynamics::{convection_step, ColumnParams, ColumnState};
-use civsim_core::{Fixed, Rng};
+use civsim_core::{Fixed, Rng, StateHasher};
 use civsim_materials::properties::operative_shear_strength_gpa;
 use civsim_physics::geodynamics::airy_isostatic_elevation;
 use civsim_physics::melting::adiabatic_melt_column;
@@ -165,6 +165,67 @@ pub struct DeepTimeState {
 }
 
 impl DeepTimeState {
+    /// A RECEIPT over the realized physics state, for the physics determinism baseline. Deliberately NOT
+    /// called a state hash, and deliberately not reusable as one: under the Chaos Protocol (the R-ASSEMBLY
+    /// ruling, `docs/working/R_ASSEMBLY_RESEARCH_QUESTION.md`) a content hash is a CONSTITUTIVE input, gate
+    /// 5's seed discipline content-hashing world identity plus the embryo field to decide WHICH world is
+    /// drawn. This digest is the opposite direction of causation: it reads a state that has already been
+    /// realized and folds nothing back into the world. Keeping the two named apart keeps a reader from
+    /// feeding a receipt into a seed slot, which would make the drawn world depend on its own outcome.
+    ///
+    /// What a pin on this digest MEANS, stated so it is not over-read: it pins the REALIZATION, a given seed
+    /// through a given measure, never a physical trajectory. The Chaos Protocol forbids integrating the
+    /// Lyapunov-sensitive stages as fixed point (a byte-neutrality landmine, and no derivation anyway, since
+    /// below the Lyapunov horizon a trajectory is a hash of sub-band digits the seed stream already carries).
+    /// The per-column deep-time thermal evolution folded here is the dissipative regime rather than that one:
+    /// it CONVERGES, the measured state going byte-identical from tick 11 and drifting only sub-quantum
+    /// after, which is the signature of relaxation toward equilibrium rather than of divergence. So it is
+    /// legitimately integrated and legitimately pinned. The assembly stage is the chaotic one, and its
+    /// determinism lives in the seeded draw, never here.
+    ///
+    /// So a moved digest carries a readable meaning, which the biology-harness pins it replaces could not
+    /// give: either a derivation changed (review it), or the seed derivation changed, so a different world
+    /// was drawn (a different question entirely).
+    ///
+    /// Every field is folded, each collection length-prefixed. The vectors are POSITIONAL, one entry per
+    /// lateral cell, so they fold in index order and are never sorted: their order is the geometry, and
+    /// sorting would hash a different world that happens to hold the same values.
+    pub fn realization_digest(&self) -> u128 {
+        let mut h = StateHasher::new();
+        // The clocks the provinces are written against.
+        h.write_fixed(self.elapsed_myr);
+        h.write_fixed(self.star_age_start_myr);
+        h.write_u64(self.impact_count);
+        // The interior, one column per lateral cell, in cell order.
+        h.write_u64(self.columns.len() as u64);
+        for c in &self.columns {
+            h.write_fixed(c.temperature);
+            // The onset latch is state: a column that has begun convecting is a different world from one
+            // sitting at the same temperature that has not.
+            h.write_u32(u32::from(c.convecting));
+        }
+        // The derived crust, the field that retires the authored thickness fixture.
+        h.write_u64(self.crust_thickness_km.len() as u64);
+        for t in &self.crust_thickness_km {
+            h.write_fixed(*t);
+        }
+        // The province-scale bombardment relief.
+        h.write_u64(self.impact_relief_m.len() as u64);
+        for r in &self.impact_relief_m {
+            h.write_fixed(*r);
+        }
+        // The crater rows, in formation order, which is append-only and so already deterministic.
+        h.write_u64(self.craters.len() as u64);
+        for c in &self.craters {
+            h.write_fixed(c.u);
+            h.write_fixed(c.v);
+            h.write_fixed(c.diameter_m);
+            h.write_fixed(c.depth_m);
+            h.write_fixed(c.age_myr);
+        }
+        h.finish()
+    }
+
     /// The initial state of a fresh planet: `n_cells` mantle columns all at the same starting temperature, none
     /// convecting yet (the Rayleigh-onset latch fires per column as each steepens), and no crust built yet (a
     /// fresh planet has no accumulated crust, it is what the melt history produces). A young planet has NO lateral
@@ -900,7 +961,13 @@ pub fn provinces_across(span_m: Fixed, mantle_depth_m: Fixed, cell_aspect: Fixed
 /// II). A future marginal-stability solver would derive {Ra_crit, a_c, regime} jointly from the mantle's actual
 /// mechanical boundaries; here the two are the cited rigid-rigid pair, kept together so the onset and the cell
 /// scale can never drift into different regimes.
-pub const RIGID_RIGID_RA_CRIT: Fixed = Fixed::from_int(1708);
+///
+/// PINNED, exactly one uncompared instance (owner ruling 2026-07-18). The cited value lives once, in the
+/// `convection_scaling.toml` rigid-rigid row; this const carries the exact 1707.762 and the sentinel test
+/// `the_rigid_rigid_eigenvalue_is_the_one_cited_row` asserts it equals that row. Corrected from a rounded
+/// `from_int(1708)`, a fourth-digit diamond that sat in the path of every convection-onset verdict and agreed
+/// with no test because each compared against itself; it moves the deep-time onset by 0.014 percent.
+pub const RIGID_RIGID_RA_CRIT: Fixed = Fixed::from_int(1_707_762).div(Fixed::from_int(1000));
 
 /// The rigid-rigid Rayleigh-Benard marginal-stability CRITICAL WAVENUMBER a_c (inverse layer depths), the pair
 /// mate of [`RIGID_RIGID_RA_CRIT`]. The horizontal mode that goes unstable first has a_c ~ 3.117 for rigid
@@ -968,6 +1035,132 @@ pub fn province_column_params(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The realization digest must be REPRODUCIBLE: the same realized state folds to the same receipt. This is
+    /// the property a physics baseline pin rests on, and it is the one the Chaos Protocol makes available for a
+    /// seeded draw (the same seed through the same measure realizes the same world).
+    #[test]
+    fn the_realization_digest_reproduces_on_an_identical_state() {
+        let a = DeepTimeState::young(6, Fixed::from_int(1600));
+        let b = DeepTimeState::young(6, Fixed::from_int(1600));
+        assert_eq!(
+            a.realization_digest(),
+            b.realization_digest(),
+            "an identical realized state must fold to an identical receipt"
+        );
+        let other = DeepTimeState::young(6, Fixed::from_int(1601));
+        assert_ne!(
+            a.realization_digest(),
+            other.realization_digest(),
+            "a different initial temperature is a different world"
+        );
+    }
+
+    /// A receipt that silently omits a field cannot catch a regression in that field, and its passing would be
+    /// worse than no receipt at all: it would read as coverage while proving nothing. So every field the state
+    /// carries is perturbed in turn and the digest must move for each. A field added to DeepTimeState without
+    /// being folded into the digest fails here, which is the point.
+    #[test]
+    fn the_realization_digest_covers_every_field_it_claims_to() {
+        let base = DeepTimeState::young(4, Fixed::from_int(1600));
+        let d0 = base.realization_digest();
+
+        let mut s = base.clone();
+        s.elapsed_myr = Fixed::from_int(7);
+        assert_ne!(d0, s.realization_digest(), "elapsed_myr is not covered");
+
+        let mut s = base.clone();
+        s.star_age_start_myr = Fixed::from_int(9);
+        assert_ne!(
+            d0,
+            s.realization_digest(),
+            "star_age_start_myr is not covered"
+        );
+
+        let mut s = base.clone();
+        s.impact_count += 1;
+        assert_ne!(d0, s.realization_digest(), "impact_count is not covered");
+
+        let mut s = base.clone();
+        s.columns[1].temperature = Fixed::from_int(1700);
+        assert_ne!(
+            d0,
+            s.realization_digest(),
+            "a column temperature is not covered"
+        );
+
+        let mut s = base.clone();
+        s.columns[1].convecting = !s.columns[1].convecting;
+        assert_ne!(
+            d0,
+            s.realization_digest(),
+            "the convection onset latch is not covered"
+        );
+
+        let mut s = base.clone();
+        s.crust_thickness_km[2] = Fixed::from_int(30);
+        assert_ne!(
+            d0,
+            s.realization_digest(),
+            "the derived crust thickness is not covered"
+        );
+
+        let mut s = base.clone();
+        s.impact_relief_m[3] = Fixed::from_int(500);
+        assert_ne!(
+            d0,
+            s.realization_digest(),
+            "the basin impact relief is not covered"
+        );
+
+        let mut s = base.clone();
+        s.craters.push(CraterRow {
+            u: Fixed::from_ratio(1, 4),
+            v: Fixed::from_ratio(1, 3),
+            diameter_m: Fixed::from_int(1200),
+            depth_m: Fixed::from_int(200),
+            age_myr: Fixed::from_int(11),
+        });
+        assert_ne!(
+            d0,
+            s.realization_digest(),
+            "the crater rows are not covered"
+        );
+    }
+
+    /// The vectors are POSITIONAL, one entry per lateral cell, so the receipt must distinguish two worlds that
+    /// hold the same values in different cells. A digest that sorted or otherwise discarded index order would
+    /// call a hot pole and a hot equator the same planet.
+    #[test]
+    fn the_realization_digest_is_positional_not_a_multiset() {
+        let mut a = DeepTimeState::young(4, Fixed::from_int(1600));
+        let mut b = DeepTimeState::young(4, Fixed::from_int(1600));
+        a.crust_thickness_km[0] = Fixed::from_int(40);
+        b.crust_thickness_km[3] = Fixed::from_int(40);
+        assert_ne!(
+            a.realization_digest(),
+            b.realization_digest(),
+            "the same values in different cells are different worlds"
+        );
+    }
+
+    #[test]
+    fn the_rigid_rigid_eigenvalue_is_the_one_cited_row() {
+        // ONE UNCOMPARED INSTANCE (owner ruling 2026-07-18): the rigid-rigid critical Rayleigh lives once, in the
+        // cited convection_scaling.toml row that convection onset and the boundary layer both read through
+        // ColumnParams::ra_crit. This const carries the same value and is pinned to that row here, so a rounding
+        // diamond like the retired from_int(1708) cannot slip back in agreeing only with itself.
+        let cited = civsim_physics::convection_scaling::ConvectionScaling::standard()
+            .expect("convection_scaling.toml is vendored")
+            .critical_rayleigh(civsim_physics::convection_scaling::BoundaryCondition::RigidRigid)
+            .expect("the rigid-rigid row is present");
+        assert!(
+            (RIGID_RIGID_RA_CRIT - cited).abs() < Fixed::from_ratio(1, 100),
+            "RIGID_RIGID_RA_CRIT {} must equal the cited convection_scaling rigid-rigid row {}",
+            RIGID_RIGID_RA_CRIT.to_f64_lossy(),
+            cited.to_f64_lossy()
+        );
+    }
 
     // A representable-scaled mantle column parameter set, mirroring the convection tests: the values are the
     // engine-scaled illustrative mantle (depth and viscosity are the representable-scaled forms the convection

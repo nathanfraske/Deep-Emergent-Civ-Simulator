@@ -83,8 +83,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use civsim_core::{DrawKey, EventId, Fixed, InstId, Phase, StableId, StateHasher};
 
-use crate::decision::{ActionId, InputId};
-use crate::stocks::Stock;
+use civsim_foundation::decision::{ActionId, InputId};
+use civsim_foundation::stocks::Stock;
 
 // === (A) The institution-function substrate and the institution representation ===
 
