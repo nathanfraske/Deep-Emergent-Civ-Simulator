@@ -36,7 +36,19 @@
 >
 > **WHAT RIDES ON THE THRESHOLD, since it was asked: nothing in canon and nothing in the render.** `tile_relief_heterogeneity_indicator` is called in exactly two places, an `eprintln!` diagnostic that branches on nothing, and this test assertion. Both byte pins are untouched by the whole deep-time path. What rides on it is the REGRESSION GUARD: it is what would catch the deep-time texture silently collapsing to a smooth ball. A bare lowered constant would still have caught total collapse and would NOT have caught a tenfold weakening; the self-calibrating form catches collapse and keeps its meaning under a physics change.
 >
-> NEXT: Seams C and D (fold the flexure kernel over the province load list, then into `height_km`/`gradient` and the mountains draw). The honest open limit to carry into them: the mobile-lid Nusselt law is being applied to stagnant-lid bodies, whose suppression through the rheological temperature scale `RT^2/E*` is derivable from creep rows already banked and is the flagged follow-on recorded on that law.
+> # SEAM C IS MAPPED AND ITS BLOCKER IS MEASURED (2026-07-19). The whole chain EXISTS and is unwired; it connects end to end and refuses at ONE identified arithmetic point.
+>
+> **THE CHAIN, all of it already built and with no production consumer in `sim/` or `viewer/`:** `ConductiveLidBase::from_ln_rayleigh(depth, ln Ra, ln Ra_crit)` -> `LithosphereEnvelope { rock_friction_law(), geotherm, creep rows, chord, lid }` -> `solve_line_load_banded` (the self-consistent McNutt moment-equivalent fixed point) -> `T_e` -> `flexure::PlateInputs` -> `flexure::deflection_at(inputs, loads, qx, qy)` superposing over the load list. Nothing in the tree referenced `flexure::` or `moment_equivalence::` from a production path, which is the FIFTH banked-but-unread of this arc.
+>
+> **IT RUNS.** On the derived Mars-class column the lid base comes out at 739.4 km (checked by hand: `1212.2 * exp(-(8.926 - 7.443)/3)`) and the geotherm answers 220 K at the surface, 328.9 K at 50 km, 437.9 K at 100 km.
+>
+> **IT REFUSES AT `solve_line_load_banded` WITH `NotRepresentable`, and the cause is arithmetic rather than physical.** The solver's DERIVED INITIAL TRIAL is the fully-elastic rigidity over the envelope's whole domain, and `D = E T_e^3 / (12(1 - nu^2))` with `E = 120 GPa` and `T_e = 739.4 km` is `4.31e9` against a `Fixed::MAX` of `2.147e9`: over by exactly 2.0x. Every PHYSICAL elastic thickness is comfortably representable (`T_e = 10 km` gives `1.07e4`, `100 km` gives `1.07e7`, `300 km` gives `2.88e8`); the largest representable `T_e` is 586 km. So only the starting guess overflows, and only because this world's thermal lid is unusually thick.
+>
+> **WHY THE LID IS 739 km, which is the part worth understanding before fixing anything:** it follows correctly from `ln Ra = 8.926`, and that Ra is low because the DERIVED viscosity is high (`ln eta = 54.3`, about `4e23 Pa*s`). The chain is self-consistent; this world is simply very sluggish. A likelier physical reading is that the moment integral's domain should stop at the DUCTILE transition rather than at the thermal lid base, since the envelope stops describing rock long before 739 km, but that is a design question for the fix and not something to decide by picking whichever bound avoids an overflow.
+>
+> THE FIX IS BOUNDED AND IS THE NEXT UNIT OF WORK: make the initial trial representable (clamp it to the representable-thickness bound, or carry `D` in logs the way the Rayleigh and Stokes paths already do). It touches `moment_equivalence.rs`, which has a large existing test suite, so it wants its own pass rather than a hurried one at the end of this session.
+>
+> NEXT: that fix, then fold `deflection_at` over the province load list (Seam C proper), then Seam D (`height_km`/`gradient` and the mountains draw). The honest open limit to carry into them: the mobile-lid Nusselt law is being applied to stagnant-lid bodies, whose suppression through the rheological temperature scale `RT^2/E*` is derivable from creep rows already banked and is the flagged follow-on recorded on that law.
 >
 > ---
 >
