@@ -95,20 +95,34 @@ pub struct ColumnParams {
     /// times the rigid-rigid critical value, so the province convects without touching the `ra_max` guard. The
     /// blocker on this field is therefore the DIFFUSIVITY it needs as a solve input, never the representation.
     ///
-    /// AND THE MEASUREMENT THAT SETTLES THE UNIT QUESTION FOR THE WHOLE KERNEL, taken 2026-07-19, because the
-    /// ruled plan for the fixture-cluster replacement was "a FULL SI/log-space lift" and that plan cannot
-    /// work. In SI-SECONDS the kernel's SOURCE TERM vanishes: a mantle's radiogenic heating is `~5e-12 W/kg`
-    /// against a Q32.32 resolution of `2.33e-10`, which is `0.02 ulp`, so `H` and the conductive loss `L`
-    /// both quantize to ZERO and `T + ((H - L)/c) dt` never moves the temperature. The failure is not a loss
-    /// of precision at the margin, it is the physics disappearing at the source. At the other end of the same
-    /// kernel `eta`, `d^3` and `rho * d` all overflow. SI-seconds has no window that holds this problem.
+    /// AND THE UNIT QUESTION, MEASURED AND THEN CORRECTED. Read the correction before the measurement,
+    /// because the first version of this note overturned an approved plan on a mistake.
     ///
-    /// The same four quantities in MEGAMETRES and MEGAYEARS land mid-window: `H` reads `158 J/(kg Myr)`, the
-    /// convective velocity `9.5e-2 Mm/Myr`, `d^3` about `24 Mm^3`, and `kappa` about `3.2e-5 Mm^2/Myr`. So
-    /// the correct target is a DECLARED unit system rather than SI, which is what this kernel already runs in
-    /// informally. The original complaint was never that these units are wrong, it was that a bare value with
-    /// no declared scale carries no correctness; declaring the scale answers it, and SI-ifying the kernel
-    /// would break the physics to satisfy a preference for familiar units.
+    /// THE MEASUREMENT, which stands. A mantle's radiogenic heating is `~5e-12 W/kg` against a Q32.32
+    /// resolution of `2.33e-10`, so as a PER-SECOND RATE it is `0.02 ulp` and quantizes to ZERO. Carried that
+    /// way, `H` and the conductive loss both vanish and `T + ((H - L)/c) dt` never moves the temperature. At
+    /// the other end of the same kernel `eta`, `d^3`, `r^2`, `9 eta`, `eta kappa`, `eta v` and `rho d` all
+    /// overflow. A RAW-LINEAR SI kernel therefore cannot work.
+    ///
+    /// THE CORRECTION, from an independent audit of this very note. That does NOT make the ruled plan
+    /// infeasible, and the first version of this comment said it did. The plan of record was "a FULL SI/
+    /// LOG-SPACE lift", and the log-space half is exactly what rescues it: carried as per-tick ENERGY
+    /// (`H dt = 157.8 J/kg`, about `6.8e11` ulp) or as a signed logarithm, the same physics is comfortably
+    /// representable and yields `dT ~ 0.127 K` per megayear at about `5.5e8` ulp. What was refuted was
+    /// SI-seconds LINEAR, which the plan never proposed. Refuting a weaker form of a plan and reporting the
+    /// plan dead is the error recorded here so it is not repeated.
+    ///
+    /// THE LOWER-RISK ROUTE, therefore, keeps SI semantics: hold viscosity, Rayleigh, Stokes and stress in
+    /// logs (the machinery already exists in [`civsim_physics::laws::ln_rayleigh_number`] and
+    /// [`civsim_physics::laws::ln_stokes_velocity`]), and carry heat as signed per-tick energy or a signed
+    /// log until the final temperature increment. `Fixed::exp` bottoms out near `-22`, so `H` at `ln -26` is
+    /// never exponentiated; only the integrated increment is. A declared Mm/Myr kernel also works but is a
+    /// larger migration: every affected field and cap must convert consistently, and the `dt` wiring does not
+    /// do that today. Full nondimensionalization is numerically the strongest option and the biggest rewrite.
+    ///
+    /// TWO FURTHER CORRECTIONS from the same audit. The conductive loss is NOT the same magnitude as `H`: the
+    /// full-depth term is about `1.9e-13`, roughly 27 times smaller, though it still quantizes to zero. And
+    /// the velocity band `1e-9` to `3e-9 m/s` is `3.2` to `9.5 cm/yr`, not `1` to `10`.
     pub viscosity: Fixed,
     /// Thermal diffusivity (m^2/s), k/(rho*c).
     ///
