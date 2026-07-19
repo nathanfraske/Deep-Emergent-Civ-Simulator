@@ -1290,6 +1290,62 @@ pub fn cloud_core_coupled_temperatures(
     })
 }
 
+/// The VISUAL EXTINCTION `A_V` (magnitudes) to a cloud-core center, DERIVED from the core's own hydrogen column
+/// density and the cited gas-to-extinction ratio: `A_V = N_H / (N_H/A_V)`. The column (order `1e22` per cm^2) and
+/// the ratio (order `1e21` per cm^2 per mag) both overflow fixed point, so the caller passes their base-10
+/// LOGARITHMS and the division is a subtraction in the log domain, `log10(A_V) = log10(N_H) - log10(N_H/A_V)`, then
+/// exponentiated to the representable `A_V` (order 1 to 100 for a core). DERIVED, no authored value: `log10_column`
+/// is the core's own column (a drawn or derived environment quantity) and `log10_gas_to_extinction_ratio` is the
+/// cited Bohlin, Savage and Drake 1978 / Guver and Ozel 2009 constant (`N_H/A_V ~ 1.87e21` to `2.21e21`, vendored in
+/// `disk_arc_literature`). ADMITS THE ALIEN: keyed on the core's own column against a cited dust law, so a
+/// different dust-to-gas world is a data row. `None` if the log-domain result overflows the representable range.
+// @derives: the visual extinction A_V to a cloud-core center <- the core's hydrogen column density over the cited gas-to-extinction ratio (Bohlin 1978 / Guver-Ozel 2009)
+pub fn visual_extinction_magnitudes(
+    log10_column_h_cm2: Fixed,
+    log10_gas_to_extinction_ratio_cm2_per_mag: Fixed,
+) -> Option<Fixed> {
+    let ln10 = Fixed::from_int(10).ln();
+    let log10_a_v = log10_column_h_cm2.checked_sub(log10_gas_to_extinction_ratio_cm2_per_mag)?;
+    let ln_ceiling = Fixed::from_int(31).checked_mul(Fixed::from_int(2).ln())?;
+    let ln_a_v = log10_a_v.checked_mul(ln10)?;
+    if ln_a_v >= ln_ceiling {
+        return None;
+    }
+    Some(ln_a_v.exp())
+}
+
+/// The RADIATION-FIELD SCALING `chi`, DERIVED from the visual extinction, retiring the reserved `chi` the coupled
+/// cloud-core temperature solve ([`cloud_core_coupled_temperatures`]) reads. The interstellar radiation field that
+/// heats core dust is attenuated by `A_V` magnitudes of extinction to `chi = 10^(-A_V * k)`, where `k` is the
+/// extinction efficiency of the dust-heating band per magnitude of visual extinction. For a pure V-band optical
+/// attenuation `k = 1/2.5 = 0.4` EXACTLY by the definition of the magnitude scale, which reproduces the Goldsmith
+/// 2001 dark-core range: `A_V ~ 10` gives `chi ~ 1e-4`, `A_V ~ 12.5` gives `chi ~ 1e-5`. So `chi` is no longer a
+/// supplied number but a derivation off the core's own extinction.
+///
+/// `k` is DERIVED for the V-band (the `0.4` is the exact magnitude-scale slope, not a reserved value); the true
+/// BROADBAND dust-heating attenuation is band-averaged and somewhat shallower (redder photons penetrate deeper), a
+/// refinement the vendored dust-attenuation source sets, so `k` is passed as a parameter with the exact V-band `0.4`
+/// as its anchor. DERIVED throughout, ADMITS THE ALIEN (keyed on the core's own extinction). Computed in the log
+/// domain since `chi` reaches `1e-4` and below. HONEST LIMIT: a very deep core (`A_V` beyond about 20 to 25 mag)
+/// drives `chi` below the fixed-point floor, where this refuses (`None`) and the deeper field needs a log-domain
+/// `chi` interface, a flagged refinement; the Goldsmith dark-core regime sits well inside the representable range.
+/// `None` on a negative extinction, a non-positive efficiency, or a `chi` that underflows the representable floor.
+// @derives: the cloud-core radiation-field scaling chi <- the extinction attenuation 10^(-A_V*k) of the interstellar field into the core, retiring the reserved chi the coupled T_core solve read
+pub fn radiation_field_chi_from_extinction(
+    a_v_magnitudes: Fixed,
+    attenuation_efficiency_per_mag: Fixed,
+) -> Option<Fixed> {
+    if a_v_magnitudes < Fixed::ZERO || attenuation_efficiency_per_mag <= Fixed::ZERO {
+        return None;
+    }
+    let ln10 = Fixed::from_int(10).ln();
+    // log10(chi) = -A_V * k, then chi = exp(log10(chi) * ln10). A deep core underflows chi to zero (refused below).
+    let log10_chi = Fixed::ZERO
+        .checked_sub(a_v_magnitudes.checked_mul(attenuation_efficiency_per_mag)?)?;
+    let chi = log10_chi.checked_mul(ln10)?.exp();
+    (chi > Fixed::ZERO).then_some(chi)
+}
+
 /// The DISK ACCRETION-RATE CLOCK (the disk-evolution arc, slice 1): the Lynden-Bell-Pringle self-similar decline
 /// (Hartmann et al. 1998), `Mdot(t) = Mdot_0 * (1 + t / t_visc) ^ (-p)` with the decline exponent
 /// `p = (5/2 - gamma) / (2 - gamma)` set by the viscous-spreading exponent `gamma` (the same `gamma ~ 1` gate-G
@@ -7005,6 +7061,63 @@ mod tests {
             t_hi
         )
         .is_none());
+    }
+
+    #[test]
+    fn the_radiation_field_chi_derives_from_the_core_extinction() {
+        // chi is no longer supplied: it derives from the core's own column through the extinction. A core with
+        // N_H = 1.87e22 per cm^2 against the Bohlin N_H/A_V = 1.87e21 per cm^2 per mag has A_V = 10 mag, and the
+        // V-band attenuation k = 0.4 gives chi = 10^(-10*0.4) = 1e-4, the Goldsmith Table-5 dark-core value.
+        let log10_ratio = Fixed::from_ratio(2127, 100); // log10(1.87e21) ~ 21.27, the cited Bohlin ratio
+        let log10_column = Fixed::from_ratio(2227, 100); // log10(1.87e22) ~ 22.27, a factor 10 over the ratio
+        let k = Fixed::from_ratio(2, 5); // 0.4 = 1/2.5, the exact V-band magnitude slope
+        let a_v = visual_extinction_magnitudes(log10_column, log10_ratio).unwrap();
+        assert!(
+            (a_v.to_f64_lossy() - 10.0).abs() < 0.3,
+            "a tenfold column over the ratio is 10 mag of extinction (got {})",
+            a_v.to_f64_lossy()
+        );
+        let chi = radiation_field_chi_from_extinction(a_v, k).unwrap();
+        assert!(
+            (chi.to_f64_lossy() / 1e-4 - 1.0).abs() < 0.05,
+            "10 mag at k=0.4 gives chi ~ 1e-4 (got {})",
+            chi.to_f64_lossy()
+        );
+        // The DERIVED chi drives the coupled T_core solve to the same dark-core regime the supplied 1e-4 did.
+        let m = GoldsmithThermalModel::goldsmith_2001();
+        let fit_1e4 = LineCoolingFit {
+            log10_a: Fixed::from_ratio(-232518, 10_000),
+            b: Fixed::from_ratio(27, 10),
+        };
+        let t = cloud_core_coupled_temperatures(
+            Fixed::from_ratio(3121, 1000),
+            Fixed::from_int(10_000),
+            chi,
+            fit_1e4,
+            Fixed::from_ratio(273, 100),
+            &m,
+            Fixed::from_int(50),
+        )
+        .expect("the derived chi is a valid input to the coupled solve");
+        assert!(
+            t.gas_temperature_k.to_f64_lossy() > 10.0 && t.gas_temperature_k.to_f64_lossy() < 13.0,
+            "the derived chi reproduces the ~11 K dark-core gas temperature (got {})",
+            t.gas_temperature_k.to_f64_lossy()
+        );
+        // No extinction is the unattenuated field (chi = 1); more extinction dims it monotonically.
+        let chi_bare = radiation_field_chi_from_extinction(Fixed::ZERO, k).unwrap();
+        assert!(
+            (chi_bare.to_f64_lossy() - 1.0).abs() < 1e-6,
+            "no extinction leaves the field unattenuated (got {})",
+            chi_bare.to_f64_lossy()
+        );
+        let chi_thin = radiation_field_chi_from_extinction(Fixed::from_int(5), k).unwrap();
+        assert!(chi_thin > chi, "less extinction is a brighter field");
+        // A very deep core drives chi below the fixed-point floor: refuse rather than round to a false zero.
+        assert!(radiation_field_chi_from_extinction(Fixed::from_int(80), k).is_none());
+        // Fail-loud on a negative extinction or a non-positive efficiency.
+        assert!(radiation_field_chi_from_extinction(Fixed::from_int(-1), k).is_none());
+        assert!(radiation_field_chi_from_extinction(Fixed::from_int(10), Fixed::ZERO).is_none());
     }
 
     #[test]
