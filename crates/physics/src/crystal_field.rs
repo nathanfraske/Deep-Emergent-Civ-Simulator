@@ -462,50 +462,132 @@ pub enum IronValence {
 /// (a scoped follow-on). Reserves no value; keyed entirely on the composition and the banked periodic valence, so a
 /// novel iron-bearing phase (an alien anion, an unusual stoichiometry) is a data row.
 pub fn iron_valence_state(composition: &[(String, u32)], table: &PeriodicTable) -> IronValence {
+    // THE CONSTRAINT SOLVE, replacing a first-listed-valence read that was not general charge balance.
+    //
+    // The old rule took each element's FIRST banked valence as its role. Sulfur's row begins `-2`, so
+    // `FeSO4` was read as one S(2-) plus four O(2-), demanding Fe(10+), and came out FERRIC. Sulfate is
+    // S(6+) and FeSO4 is ferrous. Every polyatomic anion failed the same way.
+    //
+    // The fix enumerates, rather than assumes: one oxidation state per non-iron element drawn from its
+    // COMPLETE banked set, with iron permitted to split across its own states (magnetite needs that), and
+    // keeps only charge-neutral assignments. FeSO4 then has exactly one neutral vector, Fe(2+) with S(6+)
+    // and four O(2-), so it derives as ferrous WITHOUT anyone teaching the engine what a sulfate is. That
+    // is the difference between deriving a fact and tabulating it.
+    //
+    // AMBIGUITY REFUSES. Two or more neutral vectors means the formula alone does not determine the state,
+    // and this returns `Unresolved` even when every vector lands in the same coarse class, because
+    // agreeing by luck is not the same as being determined. Electronegativity is deliberately NOT used as
+    // a tiebreak: atomic electronegativity carries no group connectivity, so it would convert a likelihood
+    // into an authored certainty.
+    //
+    // THE MODEL'S LIMIT, stated: one state per non-iron element. Permitting arbitrary O(2-)/O(1-) mixtures
+    // within a flat formula would make even hematite and magnetite ambiguous peroxide readings and refuse
+    // both. Formula-level oxidation state is what this API's inputs can support.
     let mut n_fe: i64 = 0;
-    let mut anion_charge_total: i64 = 0; // negative: the total anion charge iron must balance
-    let mut has_other_cation = false;
-    let mut saw_iron = false;
+    let mut others: Vec<(String, i64, Vec<i64>)> = Vec::new();
     for (symbol, count) in composition {
         if *count == 0 {
             continue;
         }
-        let primary = table
-            .element(symbol)
-            .and_then(|e| e.valence.first().copied());
-        let primary = match primary {
-            Some(v) => v,
-            None => continue, // an element with no tabulated valence contributes no charge (out of scope)
-        };
         if symbol == "Fe" {
-            saw_iron = true;
             n_fe += *count as i64;
-        } else if primary < 0 {
-            anion_charge_total += primary as i64 * *count as i64;
-        } else if primary > 0 {
-            has_other_cation = true;
+            continue;
         }
+        let states: Vec<i64> = match table.element(symbol) {
+            Some(e) if !e.valence.is_empty() => e.valence.iter().map(|v| i64::from(*v)).collect(),
+            // An element with no banked valence cannot be placed, and skipping it as neutral (the old
+            // behaviour) silently invents a charge balance. It refuses.
+            _ => return IronValence::Unresolved,
+        };
+        others.push((symbol.clone(), *count as i64, states));
     }
-    if !saw_iron || n_fe == 0 {
+    if n_fe == 0 {
         return IronValence::NoIron;
     }
-    // No oxidizing anion (a metal or an alloy): iron carries no oxide chromophore.
-    if anion_charge_total == 0 {
-        return IronValence::Metallic;
+    let fe_states: Vec<i64> = match table.element("Fe") {
+        Some(e) if !e.valence.is_empty() => e.valence.iter().map(|v| i64::from(*v)).collect(),
+        _ => return IronValence::Unresolved,
+    };
+    // Every total the iron atoms can reach by distributing over their own banked states.
+    let mut fe_totals: Vec<i64> = Vec::new();
+    let lo = fe_states.iter().copied().min().unwrap_or(0);
+    let hi = fe_states.iter().copied().max().unwrap_or(0);
+    for total in (lo * n_fe)..=(hi * n_fe) {
+        // reachable when total = sum of n_fe values each drawn from fe_states
+        let reachable = fe_states.iter().any(|_| {
+            // with two states a and b, total is reachable iff total = a*k + b*(n-k) for some 0<=k<=n
+            fe_states.iter().any(|a| {
+                fe_states
+                    .iter()
+                    .any(|b| (0..=n_fe).any(|k| a * k + b * (n_fe - k) == total))
+            })
+        });
+        if reachable {
+            fe_totals.push(total);
+        }
     }
-    // Another cation shares the anion budget, so charge balance cannot isolate iron's charge alone.
-    if has_other_cation {
-        return IronValence::Unresolved;
+    // Enumerate one state per non-iron element and keep the neutral assignments.
+    let mut neutral_fe_totals: Vec<i64> = Vec::new();
+    let mut index = vec![0usize; others.len()];
+    loop {
+        let rest: i64 = others
+            .iter()
+            .zip(index.iter())
+            .map(|((_, count, states), i)| count * states[*i])
+            .sum();
+        for fe_total in &fe_totals {
+            if fe_total + rest == 0 && !neutral_fe_totals.contains(fe_total) {
+                neutral_fe_totals.push(*fe_total);
+            }
+        }
+        // odometer over the per-element state choices
+        let mut pos = others.len();
+        loop {
+            if pos == 0 {
+                break;
+            }
+            pos -= 1;
+            index[pos] += 1;
+            if index[pos] < others[pos].2.len() {
+                break;
+            }
+            index[pos] = 0;
+            if pos == 0 {
+                pos = usize::MAX;
+                break;
+            }
+        }
+        if pos == usize::MAX || others.is_empty() {
+            break;
+        }
     }
-    // The positive charge iron must supply, and the class boundaries at the integer valences q = 2 and q = 3
-    // (comparisons kept in integers: q = supply / n_fe, so `supply <= 2 n_fe` is `q <= 2`, and so on).
-    let supply = -anion_charge_total; // > 0
-    if supply <= 2 * n_fe {
-        IronValence::Ferrous
-    } else if supply < 3 * n_fe {
-        IronValence::Mixed
-    } else {
-        IronValence::Ferric
+    // The solved per-element assignment is also what the anion helper needs, so it is returned through
+    // `solved_assignment` below rather than re-derived there from first-listed valences. Two functions
+    // answering one question independently is the diamond this file already paid for once.
+    match neutral_fe_totals.len() {
+        // No neutral assignment: an alloy or metal with no oxidizing partner is metallic; otherwise the
+        // formula does not balance at all and refuses.
+        0 => {
+            if others.is_empty() {
+                IronValence::Metallic
+            } else {
+                IronValence::Unresolved
+            }
+        }
+        1 => {
+            let supply = neutral_fe_totals[0];
+            if supply <= 0 {
+                IronValence::Metallic
+            } else if supply <= 2 * n_fe {
+                IronValence::Ferrous
+            } else if supply < 3 * n_fe {
+                IronValence::Mixed
+            } else {
+                IronValence::Ferric
+            }
+        }
+        // Determined by luck is not determined. Refuse.
+        _ => IronValence::Unresolved,
     }
 }
 
@@ -513,24 +595,107 @@ pub fn iron_valence_state(composition: &[(String, u32)], table: &PeriodicTable) 
 /// symbol + magnitude + sign (`O` at `-2` -> `"O2-"`), the key the charge-transfer ligand column uses. `None` when
 /// the phase has no anion. Keyed off the composition, so an alien anion is a data row.
 fn dominant_anion_species(composition: &[(String, u32)], table: &PeriodicTable) -> Option<String> {
-    let mut best: Option<(String, i8, i64)> = None; // (symbol, charge, total_magnitude)
+    // THE SAME DETERMINACY RULE the iron classifier uses, rather than a second first-listed-valence read.
+    //
+    // This helper previously took each element's FIRST banked valence to decide which species is the anion,
+    // which is the identical defect that made `FeSO4` read as S(2-) and demand Fe(10+). Fixing one and
+    // leaving the other would have left the wrong answer reachable through a different door: the classifier
+    // would call sulfate ferrous while this named `S2-` as its ligand.
+    //
+    // So the anion is taken from the UNIQUE charge-neutral assignment when one exists, and this refuses
+    // when none does. A composition whose formula does not determine its oxidation states does not have a
+    // determinate dominant anion either.
+    let mut others: Vec<(String, i64, Vec<i64>)> = Vec::new();
     for (symbol, count) in composition {
         if *count == 0 || symbol == "Fe" {
             continue;
         }
-        let primary = table
-            .element(symbol)
-            .and_then(|e| e.valence.first().copied());
-        if let Some(v) = primary {
-            if v < 0 {
-                let magnitude = (-(v as i64)) * *count as i64;
-                if best.as_ref().map(|b| magnitude > b.2).unwrap_or(true) {
-                    best = Some((symbol.clone(), v, magnitude));
-                }
+        let states: Vec<i64> = match table.element(symbol) {
+            Some(e) if !e.valence.is_empty() => e.valence.iter().map(|v| i64::from(*v)).collect(),
+            _ => return None,
+        };
+        others.push((symbol.clone(), *count as i64, states));
+    }
+    if others.is_empty() {
+        return None;
+    }
+    let n_fe: i64 = composition
+        .iter()
+        .filter(|(s, _)| s == "Fe")
+        .map(|(_, c)| *c as i64)
+        .sum();
+    let fe_states: Vec<i64> = table
+        .element("Fe")
+        .map(|e| e.valence.iter().map(|v| i64::from(*v)).collect())
+        .unwrap_or_default();
+
+    // Enumerate one state per non-iron element; keep assignments the irons can neutralize.
+    let mut solutions: Vec<Vec<i64>> = Vec::new();
+    let mut index = vec![0usize; others.len()];
+    loop {
+        let rest: i64 = others
+            .iter()
+            .zip(index.iter())
+            .map(|((_, count, states), i)| count * states[*i])
+            .sum();
+        let neutralizable = if n_fe == 0 {
+            rest == 0
+        } else {
+            fe_states.iter().any(|a| {
+                fe_states
+                    .iter()
+                    .any(|b| (0..=n_fe).any(|k| a * k + b * (n_fe - k) + rest == 0))
+            })
+        };
+        if neutralizable {
+            let assignment: Vec<i64> = others
+                .iter()
+                .zip(index.iter())
+                .map(|((_, _, states), i)| states[*i])
+                .collect();
+            if !solutions.contains(&assignment) {
+                solutions.push(assignment);
             }
         }
+        let mut pos = others.len();
+        loop {
+            if pos == 0 {
+                pos = usize::MAX;
+                break;
+            }
+            pos -= 1;
+            index[pos] += 1;
+            if index[pos] < others[pos].2.len() {
+                break;
+            }
+            index[pos] = 0;
+            if pos == 0 {
+                pos = usize::MAX;
+                break;
+            }
+        }
+        if pos == usize::MAX {
+            break;
+        }
     }
-    best.map(|(symbol, charge, _)| species_key(&symbol, charge))
+    // Determinate or nothing: an ambiguous formula has no determinate dominant anion.
+    if solutions.len() != 1 {
+        return None;
+    }
+    let assignment = &solutions[0];
+    let mut best: Option<(String, i64, i64)> = None; // (symbol, charge, total magnitude)
+    for ((symbol, count, _), charge) in others.iter().zip(assignment.iter()) {
+        if *charge >= 0 {
+            continue;
+        }
+        let magnitude = (-charge) * count;
+        if best.as_ref().map(|b| magnitude > b.2).unwrap_or(true) {
+            best = Some((symbol.clone(), *charge, magnitude));
+        }
+    }
+    // Formatted through the SAME `species_key` the charge-transfer column keys on, rather than by an
+    // inline format string, so the anion name this produces cannot drift from the name that column expects.
+    best.map(|(symbol, charge, _)| species_key(&symbol, charge as i8))
 }
 
 /// A species key: the element symbol, the charge magnitude, and the sign (`("O", -2) -> "O2-"`,
@@ -673,8 +838,17 @@ source = ""
     fn the_iron_oxidation_state_derives_from_charge_balance() {
         // THE PHASE IS THE STATE: the average iron charge is derived by charge balance against the phase's anions
         // (O at -2), and the class boundaries are the integer valences 2 and 3. FeO -> Fe2+ (ferrous), Fe2O3 -> Fe3+
-        // (ferric), Fe3O4 -> 8/3 (mixed valence), pure iron -> metallic, an iron-free oxide -> no iron. A multi-cation
-        // phase (fayalite, with the Si4+ cation) cannot isolate iron's charge here and is Unresolved (a scoped limit).
+        // (ferric), Fe3O4 -> 8/3 (mixed valence), pure iron -> metallic, an iron-free oxide -> no iron.
+        //
+        // FAYALITE MOVED, 2026-07-19, and the move is the point rather than a fixture adjustment. This case read
+        // `Unresolved` while the balance refused any phase carrying a second cation, which this function's own
+        // doc called a scoped follow-on. Silicon lists exactly ONE positive valence, so it takes +4 with no
+        // choice left open and can be subtracted from the budget: Fe2SiO4's oxygens demand 8, silicon supplies
+        // 4, and the two irons split the remaining 4 into the FERROUS state. The five assertions above are
+        // untouched, which is the evidence the extension closed a limit rather than moved a result.
+        //
+        // `Unresolved` stays live-fired below on PYRITE, whose persulfide sulfur no one-state-per-element
+        // assignment can balance. Siderite, which this comment once named as the refusal case, resolves.
         let t = periodic();
         assert_eq!(
             iron_valence_state(&comp(&[("Fe", 1), ("O", 1)]), &t),
@@ -698,7 +872,33 @@ source = ""
         );
         assert_eq!(
             iron_valence_state(&comp(&[("Fe", 2), ("Si", 1), ("O", 4)]), &t),
-            IronValence::Unresolved
+            IronValence::Ferrous,
+            "fayalite: the oxygens demand 8, silicon's single positive state supplies 4, two irons split 4"
+        );
+        // SIDERITE MOVED, 2026-07-19, and the move is the fix. Under the old first-valence rule this read
+        // as unresolvable; the constraint solve finds exactly ONE neutral assignment, Fe(2+) with C(4+) and
+        // three O(2-), because C(2+) would demand Fe(4+) and O(1-) would demand a negative iron, neither of
+        // which iron's own banked set admits. FeCO3 is ferrous carbonate, so the derived answer is right.
+        assert_eq!(
+            iron_valence_state(&comp(&[("Fe", 1), ("C", 1), ("O", 3)]), &t),
+            IronValence::Ferrous,
+            "siderite: exactly one neutral vector exists, Fe(2+) C(4+) 3 O(2-)"
+        );
+        // THE MOTIVATING CASE. Sulfate defeated the old rule completely: sulfur's row begins -2, so FeSO4
+        // read as S(2-) plus four O(2-), demanded Fe(10+), and came out FERRIC. The solve finds the single
+        // neutral vector Fe(2+) S(6+) 4 O(2-) without anyone teaching it what a sulfate is.
+        assert_eq!(
+            iron_valence_state(&comp(&[("Fe", 1), ("S", 1), ("O", 4)]), &t),
+            IronValence::Ferrous,
+            "FeSO4 is ferrous sulfate, derived rather than tabulated"
+        );
+        // AND THE REFUSAL STAYS LIVE-FIRED on a formula the model genuinely cannot place. Pyrite's sulfur is
+        // a persulfide pair S2(2-), which one-state-per-element cannot express: no assignment over the
+        // banked sets is charge neutral, so it refuses instead of inventing a state.
+        assert_eq!(
+            iron_valence_state(&comp(&[("Fe", 1), ("S", 2)]), &t),
+            IronValence::Unresolved,
+            "pyrite FeS2 has no neutral assignment under one state per element"
         );
     }
 

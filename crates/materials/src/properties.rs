@@ -456,6 +456,206 @@ pub fn operative_shear_strength_gpa(shear_modulus_gpa: Fixed, knockdown: Fixed) 
 /// must share a basis (both per mole of atoms, or both per mole of formula units); for an element metal (one atom
 /// per formula) they coincide, and a compound caller passes both per-atom (`C_v` per atom, `V_m / n`). Non-positive
 /// inputs yield zero.
+/// Why an assemblage expansivity refused, NAMING the phase and the column, so the error is a fetch list.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ExpansivityRefusal {
+    /// A banked column carries no row for this phase.
+    NoBankedColumn {
+        /// The phase the census named.
+        phase: String,
+        /// The column with no row for it, for example `gruneisen` or `bulk_modulus`.
+        column: String,
+    },
+    /// A phase's expansivity could not be formed from otherwise-present inputs (a non-positive or
+    /// unrepresentable intermediate).
+    NotRepresentable {
+        /// The phase the census named.
+        phase: String,
+    },
+    /// The census carried no positive volume weight.
+    NoWeight,
+    /// The requested state lies OUTSIDE the frame the input rows were measured in. The rows are ambient
+    /// values and this function does not carry them to another state, so it refuses rather than returning
+    /// an ambient number wearing an interior label.
+    OutsideFrame {
+        /// The phase whose row frame was violated.
+        phase: String,
+        /// The requested temperature (K).
+        requested_temperature_k: Fixed,
+        /// The requested pressure (bar).
+        requested_pressure_bar: Fixed,
+        /// The row's own frame temperature (K).
+        frame_temperature_k: Fixed,
+        /// The row's own frame pressure (bar).
+        frame_pressure_bar: Fixed,
+    },
+}
+
+impl core::fmt::Display for ExpansivityRefusal {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            ExpansivityRefusal::NoBankedColumn { phase, column } => write!(
+                f,
+                "census phase {phase} has no row in the banked {column} column, so its expansivity cannot \
+                 be formed; refused rather than defaulted, because a fabricated expansivity sets how much a \
+                 world's interior swells when heated and so how hard it convects"
+            ),
+            ExpansivityRefusal::NotRepresentable { phase } => {
+                write!(f, "phase {phase} could not form a representable expansivity")
+            }
+            ExpansivityRefusal::NoWeight => {
+                write!(f, "the census carried no positive volume weight")
+            }
+            ExpansivityRefusal::OutsideFrame {
+                phase,
+                requested_temperature_k,
+                requested_pressure_bar,
+                frame_temperature_k,
+                frame_pressure_bar,
+            } => write!(
+                f,
+                "phase {phase} was asked for an expansivity at {} K and {} bar, outside the {} K and {} bar \
+                 frame its Grueneisen, modulus and molar-volume rows were measured in; refused rather than \
+                 returning an ambient value wearing an interior label",
+                requested_temperature_k.to_f64_lossy(),
+                requested_pressure_bar.to_f64_lossy(),
+                frame_temperature_k.to_f64_lossy(),
+                frame_pressure_bar.to_f64_lossy()
+            ),
+        }
+    }
+}
+
+impl std::error::Error for ExpansivityRefusal {}
+
+/// The VOLUMETRIC THERMAL EXPANSIVITY of a mineral assemblage (per kelvin), DERIVED per phase from the banked
+/// columns and mixed by volume.
+///
+/// THIS IS THE JOIN, and the join is the whole difficulty. Each phase's expansivity is the Grueneisen
+/// identity `alpha = gamma C_v / (K V_m)`, whose four inputs sit in four different places: the gamma in the
+/// Grueneisen table, the bulk modulus in the mineral-moduli table, the molar volume on the phase registry,
+/// and the molar heat capacity nowhere at all, because it is DERIVED here as Dulong-Petit `C_v = 3 n R` from
+/// the atom count the registry's own parsed composition carries. Nothing joined those before this function.
+///
+/// THE BASIS RIDER, honoured rather than assumed. `volumetric_thermal_expansion_per_k` requires that `C_v`
+/// and `V_m` share a basis. The registry's molar volume is per mole of FORMULA UNITS, so `n` is taken as
+/// atoms per FORMULA UNIT and the Dulong-Petit capacity comes out per mole of formula units to match. Taking
+/// `n` as atoms per primitive CELL, the count the conductivity ladder keys on, would be a basis mismatch
+/// wearing a derivation's clothes, and it is a live hazard because that column exists and sits nearby.
+///
+/// MIXED BY VOLUME, to leading order: a composite's volumetric response is the volume-weighted mean of its
+/// phases' responses. The honest limit is that this ignores the internal stresses a real aggregate develops
+/// when phases of differing stiffness expand against each other, which is a second-order correction requiring
+/// each phase's shear modulus and a chosen bounding scheme. It is stated rather than silently taken.
+///
+/// `census` is `(phase name, volume fraction)`; the fractions are normalized by their own total, so a partial
+/// census aggregates what it names. REFUSES rather than defaulting for any phase that cannot resolve.
+// @derives: an assemblage's volumetric expansivity <- the banked Grueneisen, moduli and molar-volume columns + Dulong-Petit over the registry's atom counts
+pub fn ambient_assemblage_volumetric_expansivity_per_k(
+    census: &[(String, Fixed)],
+    requested_temperature_k: Fixed,
+    requested_pressure_bar: Fixed,
+    registry: &civsim_physics::petrology_data::PhaseRegistry,
+    moduli: &civsim_physics::mineral_moduli::MineralModuli,
+    gruneisen: &civsim_physics::gruneisen::GruneisenTable,
+) -> Result<Fixed, ExpansivityRefusal> {
+    let gas_constant = civsim_physics::gas_thermochemistry::molar_gas_constant().ok_or(
+        ExpansivityRefusal::NotRepresentable {
+            phase: "molar_gas_constant".to_string(),
+        },
+    )?;
+    let missing = |phase: &str, column: &str| ExpansivityRefusal::NoBankedColumn {
+        phase: phase.to_string(),
+        column: column.to_string(),
+    };
+    let mut weighted = ZERO;
+    let mut total = ZERO;
+    for (name, fraction) in census {
+        if *fraction <= ZERO {
+            continue;
+        }
+        let phase = registry
+            .phase(name)
+            .ok_or_else(|| missing(name, "phase_registry"))?;
+        let (gamma, _rung) = gruneisen
+            .gamma(name)
+            .ok_or_else(|| missing(name, "gruneisen"))?;
+        // THE FRAME GATE. The Grueneisen row, the bulk modulus and the molar volume are all AMBIENT values
+        // near 300 K and 1 bar, and `gruneisen.rs` says so explicitly: it stores each row's own temperature
+        // and pressure "so a caller cannot silently treat an ambient aggregate as a deep-interior value".
+        // The first version of this function was that caller. Evaluating these rows at interior conditions
+        // mixes a high-temperature Dulong-Petit capacity with 300 K gamma, modulus and volume, and returns a
+        // number that agrees with measurement at one temperature by cancellation rather than by physics.
+        // Carrying them to another state is a real derivation (a state-resolved thermoelastic provider) and
+        // not something this function does, so outside its frame it refuses.
+        let row = gruneisen
+            .row(name)
+            .ok_or_else(|| missing(name, "gruneisen"))?;
+        let t_slack = Fixed::from_int(25);
+        let p_slack = Fixed::from_int(1000);
+        let t_off = if requested_temperature_k > row.temperature_k {
+            requested_temperature_k - row.temperature_k
+        } else {
+            row.temperature_k - requested_temperature_k
+        };
+        let p_off = if requested_pressure_bar > row.pressure_bar {
+            requested_pressure_bar - row.pressure_bar
+        } else {
+            row.pressure_bar - requested_pressure_bar
+        };
+        if t_off > t_slack || p_off > p_slack {
+            return Err(ExpansivityRefusal::OutsideFrame {
+                phase: name.clone(),
+                requested_temperature_k,
+                requested_pressure_bar,
+                frame_temperature_k: row.temperature_k,
+                frame_pressure_bar: row.pressure_bar,
+            });
+        }
+        let key = civsim_physics::mineral_moduli::canonical_phase_key(name);
+        let bulk_gpa = moduli
+            .row(key)
+            .ok_or_else(|| missing(name, "bulk_modulus"))?
+            .bulk_gpa;
+        // Dulong-Petit per mole of FORMULA UNITS, to share the registry molar volume's basis.
+        let atoms_per_formula_unit: u32 = phase.composition.iter().map(|(_, c)| *c).sum();
+        let heat_capacity = Fixed::from_int(3)
+            .checked_mul(Fixed::from_int(atoms_per_formula_unit as i32))
+            .and_then(|x| x.checked_mul(gas_constant))
+            .ok_or_else(|| ExpansivityRefusal::NotRepresentable {
+                phase: name.clone(),
+            })?;
+        let alpha =
+            volumetric_thermal_expansion_per_k(gamma, heat_capacity, bulk_gpa, phase.molar_volume);
+        if alpha <= ZERO {
+            return Err(ExpansivityRefusal::NotRepresentable {
+                phase: name.clone(),
+            });
+        }
+        weighted = weighted
+            .checked_add(alpha.checked_mul(*fraction).ok_or_else(|| {
+                ExpansivityRefusal::NotRepresentable {
+                    phase: name.clone(),
+                }
+            })?)
+            .ok_or_else(|| ExpansivityRefusal::NotRepresentable {
+                phase: name.clone(),
+            })?;
+        total =
+            total
+                .checked_add(*fraction)
+                .ok_or_else(|| ExpansivityRefusal::NotRepresentable {
+                    phase: name.clone(),
+                })?;
+    }
+    if total <= ZERO {
+        return Err(ExpansivityRefusal::NoWeight);
+    }
+    weighted
+        .checked_div(total)
+        .ok_or(ExpansivityRefusal::NoWeight)
+}
+
 pub fn volumetric_thermal_expansion_per_k(
     gruneisen: Fixed,
     heat_capacity_j_per_mol_k: Fixed,
@@ -1673,6 +1873,117 @@ mod tests {
                 )
                 .is_none(),
             "an unanchored metal escalates in the conductivity route"
+        );
+    }
+
+    /// THE MAGNITUDE CHECK, which is the only thing that proves this join rather than merely exercising it.
+    /// Algebra shows a formula is self-consistent; it says nothing about whether the world agrees. So the
+    /// assertion is against the MEASURED forsterite expansivity at mantle temperature, roughly `4e-5` per
+    /// kelvin, reproduced here from four banked columns that were never fitted to it: the Grueneisen gamma,
+    /// the bulk modulus, the registry molar volume, and a Dulong-Petit heat capacity derived from the atom
+    /// count. Nothing in that chain was back-solved from the answer, which is what makes it a check and not a
+    /// circular one.
+    ///
+    /// Worth recording alongside: the fixture this replaces was 30 ppm/K, and forsterite derives near 40.
+    /// The derived value DIFFERS from the fixture, which is the point of deriving it.
+    #[test]
+    fn the_assemblage_expansivity_reproduces_the_measured_forsterite_magnitude() {
+        use civsim_physics::gruneisen::GruneisenTable;
+        use civsim_physics::mineral_moduli::MineralModuli;
+        use civsim_physics::petrology_data::PhaseRegistry;
+
+        let registry = PhaseRegistry::standard().expect("the phase registry loads");
+        let moduli = MineralModuli::standard().expect("the moduli table loads");
+        let gruneisen = GruneisenTable::standard().expect("the Grueneisen table loads");
+
+        let census = vec![("forsterite".to_string(), Fixed::ONE)];
+        let alpha = ambient_assemblage_volumetric_expansivity_per_k(
+            &census,
+            Fixed::from_int(300),
+            Fixed::ONE,
+            &registry,
+            &moduli,
+            &gruneisen,
+        )
+        .expect("forsterite carries every banked column this join reads");
+        let ppm = alpha.to_f64_lossy() * 1e6;
+        // Checked at the rows' OWN 300 K frame now, against an INDEPENDENT anchor rather than by
+        // inverting the gamma this derivation reads: Ye, Schwering and Smyth (2009) single-crystal XRD
+        // give forsterite `alpha(300 K) ~ 29.1 +/- 2.6 ppm/K`. The band is widened to admit the residual
+        // conjugate mismatch (Dulong-Petit `C_V` against an adiabatic `K_S`), which the state-resolved
+        // thermoelastic arc closes and this function does not.
+        assert!(
+            (20.0..=45.0).contains(&ppm),
+            "the ambient expansivity should be within reach of the independent 29.1 ppm/K anchor, read {:.1}",
+            ppm
+        );
+
+        // A two-phase census mixes by volume, so it must land BETWEEN the two single-phase values rather
+        // than outside them. That is the assertion that would catch a weighting error.
+        let fayalite_only = vec![("fayalite".to_string(), Fixed::ONE)];
+        if let Ok(fa) = ambient_assemblage_volumetric_expansivity_per_k(
+            &fayalite_only,
+            Fixed::from_int(300),
+            Fixed::ONE,
+            &registry,
+            &moduli,
+            &gruneisen,
+        ) {
+            let mixed = vec![
+                ("forsterite".to_string(), Fixed::from_ratio(1, 2)),
+                ("fayalite".to_string(), Fixed::from_ratio(1, 2)),
+            ];
+            let mix = ambient_assemblage_volumetric_expansivity_per_k(
+                &mixed,
+                Fixed::from_int(300),
+                Fixed::ONE,
+                &registry,
+                &moduli,
+                &gruneisen,
+            )
+            .expect("both phases resolve, so the mixture does")
+            .to_f64_lossy();
+            let (lo, hi) = if alpha.to_f64_lossy() < fa.to_f64_lossy() {
+                (alpha.to_f64_lossy(), fa.to_f64_lossy())
+            } else {
+                (fa.to_f64_lossy(), alpha.to_f64_lossy())
+            };
+            assert!(
+                mix >= lo - 1e-9 && mix <= hi + 1e-9,
+                "a volume mixture lies between its endmembers: {lo:.3e} <= {mix:.3e} <= {hi:.3e}"
+            );
+        }
+    }
+
+    /// Quartz holds a K'-only anomaly row with no Grueneisen gamma, so a census naming it must refuse by
+    /// name rather than proceed on a substituted one. The refusal names the COLUMN, because "no gamma" and
+    /// "no bulk modulus" are two different fetches.
+    #[test]
+    fn a_phase_missing_a_banked_column_refuses_and_names_which() {
+        use civsim_physics::gruneisen::GruneisenTable;
+        use civsim_physics::mineral_moduli::MineralModuli;
+        use civsim_physics::petrology_data::PhaseRegistry;
+
+        let registry = PhaseRegistry::standard().expect("the phase registry loads");
+        let moduli = MineralModuli::standard().expect("the moduli table loads");
+        let gruneisen = GruneisenTable::standard().expect("the Grueneisen table loads");
+
+        let census = vec![("quartz".to_string(), Fixed::ONE)];
+        let refusal = ambient_assemblage_volumetric_expansivity_per_k(
+            &census,
+            Fixed::from_int(300),
+            Fixed::ONE,
+            &registry,
+            &moduli,
+            &gruneisen,
+        )
+        .expect_err("quartz holds no gamma, so the expansivity must refuse");
+        assert_eq!(
+            refusal,
+            ExpansivityRefusal::NoBankedColumn {
+                phase: "quartz".to_string(),
+                column: "gruneisen".to_string(),
+            }
         );
     }
 

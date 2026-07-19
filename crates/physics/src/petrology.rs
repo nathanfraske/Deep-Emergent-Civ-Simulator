@@ -471,6 +471,84 @@ pub fn assemblage_density(
     total_mass.checked_div(total_volume)
 }
 
+/// The assemblage's MEAN ATOMIC MASS in kg/mol: its total mass over its total atom count, the one input the
+/// Dulong-Petit specific heat takes (`c_p = 3R / M`).
+///
+/// An iron-rich assemblage reads a heavier mean atomic mass and so a lower specific heat, a silicate one a
+/// lighter mass and a higher heat, each keyed on its own composition rather than on a per-rock-type table.
+/// The registry's parsed `composition` supplies both the element counts and the atom count, so no formula
+/// string is re-parsed here.
+///
+/// The table's molar masses are relative atomic weights in g/mol, so the result divides by 1000 to reach the
+/// kg/mol the Dulong-Petit form expects. `None` when a phase or element is missing, when an arithmetic step
+/// leaves the window, or when the assemblage carries no atoms.
+///
+/// A SIBLING EXISTS on the viewer's VCS-condensed path, keyed by formula string rather than by registry
+/// phase, computing the same quantity for the bulk condensed assemblage. The two are kept apart only because
+/// their inputs are keyed differently; when the VCS keys align with registry names they should collapse into
+/// this one, and that is the intended direction rather than a standing duplication.
+// @derives: an assemblage's mean atomic mass <- its own molar amounts + the registry compositions + the periodic masses
+pub fn assemblage_mean_atomic_mass_kg_per_mol(
+    assemblage: &Assemblage,
+    registry: &PhaseRegistry,
+    table: &PeriodicTable,
+) -> Option<Fixed> {
+    let mut total_mass_g = Fixed::ZERO;
+    let mut total_atoms = Fixed::ZERO;
+    for (name, amount) in &assemblage.phases {
+        let phase = registry.phase(name)?;
+        let molar_mass = phase_molar_mass(phase, table)?;
+        total_mass_g = total_mass_g.checked_add(amount.checked_mul(molar_mass)?)?;
+        let atoms: u32 = phase.composition.iter().map(|(_, count)| *count).sum();
+        total_atoms =
+            total_atoms.checked_add(amount.checked_mul(Fixed::from_int(atoms as i32))?)?;
+    }
+    if total_atoms <= Fixed::ZERO {
+        return None;
+    }
+    total_mass_g
+        .checked_div(total_atoms)?
+        .checked_div(Fixed::from_int(1000))
+}
+
+/// The assemblage's phases re-expressed as VOLUME fractions summing to one, from the molar amounts
+/// [`stable_assemblage`] produces.
+///
+/// WHY THIS IS A FUNCTION RATHER THAN A LINE AT EACH CALL SITE. An assemblage is minimized in MOLAR amounts,
+/// and the transport aggregates that consume it want VOLUME fractions: a Bruggeman conductivity mixes by the
+/// volume each phase occupies, not by how many moles of it there are. The product `amount * molar_volume`
+/// already forms inside [`assemblage_density`], so a second consumer writing it again would leave two
+/// weightings of ONE census in the tree with nothing comparing them. That is the shape this repository keeps
+/// paying for, so the conversion is named once and read by both.
+///
+/// The fractions are normalized, so a caller can hand the result straight to an aggregate without repeating
+/// the division. Returns `None` when a phase is missing from the registry, when an amount is unrepresentable,
+/// or when the assemblage occupies no volume at all, each of which is a refusal rather than an empty census.
+// @derives: an assemblage's volume fractions <- its minimized molar amounts + the registry's own molar volumes
+pub fn assemblage_volume_fractions(
+    assemblage: &Assemblage,
+    registry: &PhaseRegistry,
+) -> Option<Vec<(String, Fixed)>> {
+    let mut volumes: Vec<(String, Fixed)> = Vec::with_capacity(assemblage.phases.len());
+    let mut total_volume = Fixed::ZERO;
+    for (name, amount) in &assemblage.phases {
+        let phase = registry.phase(name)?;
+        let volume = amount.checked_mul(phase.molar_volume)?;
+        if volume <= Fixed::ZERO {
+            continue;
+        }
+        total_volume = total_volume.checked_add(volume)?;
+        volumes.push((name.clone(), volume));
+    }
+    if total_volume <= Fixed::ZERO {
+        return None;
+    }
+    for (_, volume) in volumes.iter_mut() {
+        *volume = volume.checked_div(total_volume)?;
+    }
+    Some(volumes)
+}
+
 /// The CRUSTAL DENSITY a bulk composition reaches at a temperature and pressure, in grams per cubic centimetre:
 /// the density of the stable mineral assemblage the composition minimizes to ([`stable_assemblage`] then
 /// [`assemblage_density`]). This is the composition-to-density bridge the isostasy read consumes: the elevation
@@ -648,6 +726,47 @@ mod tests {
         let a = stable_assemblage(&comp, Fixed::from_int(300), Fixed::from_int(1), &r)
             .expect("silica forms an assemblage");
         assert_eq!(phase_names(&a), vec!["quartz".to_string()]);
+    }
+
+    /// THE ANTI-DIAMOND CHECK, and it is the reason this conversion is a named function rather than a line at
+    /// each call site. The volume fractions and [`assemblage_density`] both rest on the same `amount *
+    /// molar_volume` product, so they must agree by construction: a mixture's density is the volume-weighted
+    /// mean of its phase densities, `rho_mix = sum(f_i rho_i)`, exactly when the `f_i` are the volume
+    /// fractions this returns. If the two ever weighted the census differently, that identity is where it
+    /// would show, which is what makes this a cross-check rather than a restatement of the code.
+    #[test]
+    fn the_volume_fractions_reproduce_the_assemblage_density_they_share_a_product_with() {
+        let r = PhaseRegistry::standard().expect("registry loads");
+        let t = PeriodicTable::standard().expect("periodic table loads");
+        // A two-phase olivine composition, so the weighting has something to get wrong.
+        let comp = vec![el("Mg", 2), el("Fe", 1), el("Si", 2), el("O", 7)];
+        let a = stable_assemblage(&comp, Fixed::from_int(1200), Fixed::from_int(10_000), &r)
+            .expect("the composition reaches an assemblage");
+
+        let fractions =
+            assemblage_volume_fractions(&a, &r).expect("the assemblage occupies a volume");
+        let sum: f64 = fractions.iter().map(|(_, f)| f.to_f64_lossy()).sum();
+        assert!(
+            (sum - 1.0).abs() < 1e-6,
+            "the fractions must be normalized, summed to {sum}"
+        );
+
+        // Rebuild the density from the fractions alone and compare with the density function.
+        let mut from_fractions = 0.0;
+        for (name, fraction) in &fractions {
+            let phase = r.phase(name).expect("a fraction names a registry phase");
+            let molar_mass = phase_molar_mass(phase, &t).expect("the phase has a molar mass");
+            let rho = molar_mass.to_f64_lossy() / phase.molar_volume.to_f64_lossy();
+            from_fractions += fraction.to_f64_lossy() * rho;
+        }
+        let direct = assemblage_density(&a, &r, &t)
+            .expect("the assemblage has a density")
+            .to_f64_lossy();
+        assert!(
+            (from_fractions - direct).abs() < 1e-3,
+            "the volume-weighted mean of the phase densities must reproduce the assemblage density: \
+             {from_fractions} against {direct}"
+        );
     }
 
     #[test]

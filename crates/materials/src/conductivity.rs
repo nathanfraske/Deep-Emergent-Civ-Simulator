@@ -58,6 +58,11 @@ use std::fmt;
 
 use crate::properties::lattice_thermal_conductivity_w_per_m_k;
 use civsim_core::Fixed;
+use civsim_physics::crystal_field::{iron_valence_state, IronValence};
+use civsim_physics::gruneisen::GruneisenTable;
+use civsim_physics::periodic::PeriodicTable;
+use civsim_physics::petrology_data::PhaseRegistry;
+use civsim_physics::phase_conductivity::PhaseConductivityTable;
 
 const ZERO: Fixed = Fixed::ZERO;
 
@@ -358,12 +363,12 @@ pub struct PhaseConductivity {
     pub estimator_band: Option<Fixed>,
     /// The banked Gruneisen parameter, feeding both Slack's magnitude and Hofmeister's expansion correction.
     pub gruneisen: Fixed,
-    /// Slack's mean atomic mass (amu).
-    pub mean_atomic_mass_amu: Fixed,
-    /// Slack's Debye temperature (K).
-    pub debye_temperature_k: Fixed,
-    /// Slack's atomic volume (cubic angstrom).
-    pub atomic_volume_angstrom3: Fixed,
+    /// Slack's mean atomic mass (amu). `None` when no cited column supplies it for this phase.
+    pub mean_atomic_mass_amu: Option<Fixed>,
+    /// Slack's Debye temperature (K). `None` when no cited column supplies it for this phase.
+    pub debye_temperature_k: Option<Fixed>,
+    /// Slack's atomic volume (cubic angstrom). `None` when no cited column supplies it for this phase.
+    pub atomic_volume_angstrom3: Option<Fixed>,
     /// Atoms per primitive cell: the class variable that keys BOTH Slack's magnitude and Hofmeister's temperature
     /// exponent. A count the cited calibration cannot place (`2 < n < 6`) refuses the phase.
     pub atoms_per_primitive_cell: i32,
@@ -397,11 +402,28 @@ impl PhaseConductivity {
         let (base, band, rung) = match self.kappa_298 {
             Some(k) if k > ZERO => (k, self.kappa_298_band, ConductivityRung::MeasuredAnchor),
             _ => {
-                let k = estimator_anchor_298(
-                    self.gruneisen,
+                // Slack's three inputs are absent for every phase no cited column supplies, so their absence
+                // routes to the SAME refusal an unevaluable estimator already raises. Holding them as `Option`
+                // is what keeps a bridge from inventing a Debye temperature to satisfy the type: a fabricated
+                // one would sit dormant behind a measured anchor and go live the first time a census named an
+                // unmeasured phase, which is the failure this ladder exists to make impossible.
+                let (mean_atomic_mass, debye_temperature, atomic_volume) = match (
                     self.mean_atomic_mass_amu,
                     self.debye_temperature_k,
                     self.atomic_volume_angstrom3,
+                ) {
+                    (Some(m), Some(t), Some(v)) => (m, t, v),
+                    _ => {
+                        return Err(ConductivityRefusal::NoRung {
+                            phase: self.name.clone(),
+                        })
+                    }
+                };
+                let k = estimator_anchor_298(
+                    self.gruneisen,
+                    mean_atomic_mass,
+                    debye_temperature,
+                    atomic_volume,
                     self.atoms_per_primitive_cell,
                 )
                 .ok_or_else(|| ConductivityRefusal::NoRung {
@@ -493,6 +515,15 @@ pub enum ConductivityRefusal {
     /// The self-consistent equation did not bracket a root, which cannot happen for positive per-phase
     /// conductivities and is therefore an arithmetic defect rather than a data gap.
     NoSelfConsistentRoot,
+    /// A banked column the ladder reads carries no row for this phase, so its inputs cannot be assembled at
+    /// all. Names WHICH column, because the difference between "this phase has no measured conductivity" and
+    /// "this phase has no Grueneisen row" is the difference between two different fetches.
+    NoBankedColumn {
+        /// The phase the census named.
+        phase: String,
+        /// The column with no row for it, for example `atoms_per_primitive_cell` or `gruneisen`.
+        column: String,
+    },
 }
 
 impl fmt::Display for ConductivityRefusal {
@@ -522,6 +553,12 @@ impl fmt::Display for ConductivityRefusal {
                 f,
                 "the Bruggeman self-consistent equation did not bracket a root over the census conductivities, \
                  which is an arithmetic defect rather than a data gap"
+            ),
+            ConductivityRefusal::NoBankedColumn { phase, column } => write!(
+                f,
+                "census phase {phase} has no row in the banked {column} column, so its ladder inputs cannot be \
+                 assembled; refused rather than defaulted, because a fabricated row here would author the \
+                 rock's heat transport"
             ),
         }
     }
@@ -612,6 +649,73 @@ fn solve_bruggeman(components: &[(Fixed, Fixed)]) -> Option<Fixed> {
 ///
 /// Deterministic fixed-point throughout: the solve is a fixed bisection with an exact convergence exit, and no
 /// float and no logarithm enters (Bruggeman needs only the four arithmetic operations, unlike a geometric mean).
+/// Assemble one phase's ladder inputs from the BANKED columns, so a caller names a phase and gets the row the
+/// ladder reads rather than hand-building one.
+///
+/// This is the bridge the fixture-cluster replacement needs. The cited crystallographic column supplies the
+/// cell count and, where the phase has one, the measured `kappa_298` anchor and its band; the Grueneisen table
+/// supplies the gamma BOTH rungs need for Hofmeister's expansion correction; and the phase registry plus the
+/// periodic table supply the ferrous-iron question by charge balance over the phase's own composition
+/// ([`civsim_physics::crystal_field::iron_valence_state`]), so the radiative term is keyed on a DERIVED
+/// oxidation state rather than a per-mineral tag. Mixed-valence phases count as ferrous-bearing, because
+/// magnetite's `Fe2+` is present and radiating whatever its average charge reads.
+///
+/// SLACK'S THREE INPUTS ARE LEFT ABSENT, deliberately and not as an oversight: no data file in this repo
+/// carries a per-phase Debye temperature or atomic volume, so there is nothing to read. Passing `None` is what
+/// makes the estimator rung REFUSE by name for a phase with no measured anchor, instead of evaluating on
+/// invented columns. For the mantle census that matters (forsterite, fayalite, enstatite) every phase carries
+/// a measured anchor, so the estimator rung never fires and the absence costs nothing; a census naming
+/// hematite or spinel will refuse, which is the correct outcome until those columns are fetched.
+///
+/// `expansivity_integral` stays the caller's own, for the reason the field's own docstring gives: only the
+/// caller knows whether its expansivity is constant over the range it is integrating.
+// @derives: a phase's ladder inputs <- the banked crystallographic, Grueneisen and phase-registry columns + charge balance
+pub fn phase_conductivity_from_banked(
+    phase_name: &str,
+    conductivity: &PhaseConductivityTable,
+    gruneisen: &GruneisenTable,
+    registry: &PhaseRegistry,
+    periodic: &PeriodicTable,
+    expansivity_integral: Fixed,
+) -> Result<PhaseConductivity, ConductivityRefusal> {
+    let missing = |column: &str| ConductivityRefusal::NoBankedColumn {
+        phase: phase_name.to_string(),
+        column: column.to_string(),
+    };
+    let atoms_per_primitive_cell = conductivity
+        .atoms_per_primitive_cell(phase_name)
+        .ok_or_else(|| missing("atoms_per_primitive_cell"))?;
+    // Gamma is read by BOTH rungs, so its absence is a hard stop rather than an estimator-only gap. Quartz is
+    // the live case: it holds a K'-only anomaly row with no gamma, so a census naming it refuses here.
+    let (gamma, _rung) = gruneisen
+        .gamma(phase_name)
+        .ok_or_else(|| missing("gruneisen"))?;
+    let (kappa_298, kappa_298_band) = match conductivity.kappa_298(phase_name) {
+        Some((k, band)) => (Some(k), band),
+        None => (None, None),
+    };
+    let phase = registry
+        .phase(phase_name)
+        .ok_or_else(|| missing("phase_registry"))?;
+    let bears_ferrous_iron = matches!(
+        iron_valence_state(&phase.composition, periodic),
+        IronValence::Ferrous | IronValence::Mixed
+    );
+    Ok(PhaseConductivity {
+        name: phase_name.to_string(),
+        kappa_298,
+        kappa_298_band,
+        estimator_band: None,
+        gruneisen: gamma,
+        mean_atomic_mass_amu: None,
+        debye_temperature_k: None,
+        atomic_volume_angstrom3: None,
+        atoms_per_primitive_cell,
+        expansivity_integral,
+        bears_ferrous_iron,
+    })
+}
+
 // @derives: a rock's effective thermal conductivity <- the per-phase conductivity ladder + the world's own mineral census (Bruggeman self-consistent EMT)
 pub fn assemblage_conductivity(
     census: &[(&PhaseConductivity, Fixed)],
@@ -831,9 +935,9 @@ mod tests {
             kappa_298_band: band,
             estimator_band: None,
             gruneisen: Fixed::from_ratio(15, 10),
-            mean_atomic_mass_amu: Fixed::from_int(20),
-            debye_temperature_k: Fixed::from_int(700),
-            atomic_volume_angstrom3: Fixed::from_int(20),
+            mean_atomic_mass_amu: Some(Fixed::from_int(20)),
+            debye_temperature_k: Some(Fixed::from_int(700)),
+            atomic_volume_angstrom3: Some(Fixed::from_int(20)),
             atoms_per_primitive_cell: 6,
             expansivity_integral: ZERO,
             bears_ferrous_iron: false,
@@ -1003,11 +1107,123 @@ mod tests {
     /// THE REFUSAL IS THE LOAD-BEARING BEHAVIOUR. A phase that resolves to no rung must stop the aggregate and
     /// name itself, never fall back to a default, because a rock's conductivity sets its heat transport and a
     /// silent default would author a world's interior.
+    /// THE END-TO-END PROOF the fixture-cluster replacement rests on: the real mantle census, assembled from
+    /// the BANKED columns rather than from hand-built rows, produces a rock conductivity in the physical band.
+    ///
+    /// This is the test that would catch the chain being broken anywhere along it, because every link is a
+    /// banked read: the cited cell counts and measured anchors, the Grueneisen gammas, the phase registry's
+    /// compositions, and the periodic table's valences. It asserts a BAND rather than a value, because the
+    /// point is the magnitude being physical, and an exact assertion here would be a fixture pretending to be
+    /// a measurement.
+    #[test]
+    fn the_real_mantle_census_assembles_from_banked_columns_into_a_physical_conductivity() {
+        let conductivity =
+            PhaseConductivityTable::standard().expect("the cited conductivity column loads");
+        let gruneisen = GruneisenTable::standard().expect("the Grueneisen table loads");
+        let registry = PhaseRegistry::standard().expect("the phase registry loads");
+        let periodic = PeriodicTable::standard().expect("the periodic table loads");
+
+        // An olivine-plus-pyroxene mantle, the assemblage the deep-time columns actually carry.
+        let rows: Vec<(PhaseConductivity, Fixed)> = [
+            ("forsterite", dec("0.55")),
+            ("enstatite", dec("0.35")),
+            ("fayalite", dec("0.10")),
+        ]
+        .into_iter()
+        .map(|(name, fraction)| {
+            let row = phase_conductivity_from_banked(
+                name,
+                &conductivity,
+                &gruneisen,
+                &registry,
+                &periodic,
+                ZERO,
+            )
+            .unwrap_or_else(|e| panic!("{name} must assemble from the banked columns: {e}"));
+            (row, fraction)
+        })
+        .collect();
+
+        // Fayalite is the ferrous phase, and the flag is DERIVED by charge balance rather than tagged.
+        let fayalite = &rows
+            .iter()
+            .find(|(r, _)| r.name == "fayalite")
+            .expect("fayalite is in the census")
+            .0;
+        assert!(
+            fayalite.bears_ferrous_iron,
+            "Fe2SiO4 balances to Fe2+, so the radiative term applies"
+        );
+        assert!(
+            !rows
+                .iter()
+                .find(|(r, _)| r.name == "forsterite")
+                .expect("forsterite is in the census")
+                .0
+                .bears_ferrous_iron,
+            "Mg2SiO4 carries no iron at all"
+        );
+
+        // Every mantle phase carries a MEASURED anchor, so the estimator rung never fires and Slack's absent
+        // columns cost nothing. That is the claim the whole replacement leans on, so it is asserted here.
+        for (row, _) in &rows {
+            assert!(
+                row.kappa_298.is_some(),
+                "{} must resolve on the measured rung",
+                row.name
+            );
+        }
+
+        let aggregate = assemblage_conductivity(&borrow(&rows), dec("1600"))
+            .expect("the banked mantle census must not refuse")
+            .expect("a census with positive weight returns a value");
+        let k = aggregate.conductivity.to_f64_lossy();
+        assert!(
+            (1.0..=8.0).contains(&k),
+            "a silicate mantle at 1600 K should land in roughly 1 to 8 W/(m*K), read {k}"
+        );
+        assert_eq!(
+            aggregate.measured_weight_fraction,
+            Fixed::ONE,
+            "the whole census is measured-rung, so the reported mix must say so"
+        );
+    }
+
+    /// Quartz holds a K'-only anomaly row with NO Grueneisen gamma, and gamma is read by both rungs, so a
+    /// census naming it must refuse by name rather than proceed on a substituted value. The bridge is where
+    /// that refusal has to happen, because past it the ladder has no way to tell an absent gamma from a real
+    /// one.
+    #[test]
+    fn a_phase_with_no_banked_gamma_refuses_at_the_bridge_and_names_the_column() {
+        let conductivity =
+            PhaseConductivityTable::standard().expect("the cited conductivity column loads");
+        let gruneisen = GruneisenTable::standard().expect("the Grueneisen table loads");
+        let registry = PhaseRegistry::standard().expect("the phase registry loads");
+        let periodic = PeriodicTable::standard().expect("the periodic table loads");
+
+        let refusal = phase_conductivity_from_banked(
+            "quartz",
+            &conductivity,
+            &gruneisen,
+            &registry,
+            &periodic,
+            ZERO,
+        )
+        .expect_err("quartz holds no gamma, so the bridge must refuse");
+        assert_eq!(
+            refusal,
+            ConductivityRefusal::NoBankedColumn {
+                phase: "quartz".to_string(),
+                column: "gruneisen".to_string(),
+            }
+        );
+    }
+
     #[test]
     fn a_phase_with_no_resolvable_rung_is_refused_and_never_defaulted() {
         let mut ghost = measured_phase("unobtainium", dec("4.0"), None);
         ghost.kappa_298 = None; // no measured anchor
-        ghost.debye_temperature_k = ZERO; // and Slack cannot evaluate either
+        ghost.debye_temperature_k = None; // and no cited column supplies Slack's input either
         let census = vec![
             (measured_phase("olivine", dec("4.349"), None), dec("0.5")),
             (ghost, dec("0.5")),
@@ -1026,6 +1242,32 @@ mod tests {
                 .to_string()
                 .contains("refused rather than defaulted"),
             "the refusal explains why it is not a default: {refusal}"
+        );
+    }
+
+    /// The sibling of the test above, and the reason both are kept: a phase can fail Slack's rung in two
+    /// different ways, and only one of them is an ABSENT column. Here the column is PRESENT and unevaluable
+    /// (a zero Debye temperature), which is the path through `estimator_anchor_298` rather than the earlier
+    /// `Option` check. Both must land on the same named refusal, because a caller distinguishing "we never
+    /// fetched this" from "the fetched value cannot evaluate" would be reading a provenance question off a
+    /// physics failure.
+    #[test]
+    fn a_present_but_unevaluable_slack_input_refuses_by_the_same_name() {
+        let mut ghost = measured_phase("unobtainium", dec("4.0"), None);
+        ghost.kappa_298 = None; // no measured anchor, so the estimator rung is the only route
+        ghost.debye_temperature_k = Some(ZERO); // the column exists and cannot evaluate
+        let census = vec![
+            (measured_phase("olivine", dec("4.349"), None), dec("0.5")),
+            (ghost, dec("0.5")),
+        ];
+        let refusal =
+            assemblage_conductivity(&borrow(&census), hofmeister_reference_temperature_k())
+                .expect_err("an unevaluable estimator input must be refused");
+        assert_eq!(
+            refusal,
+            ConductivityRefusal::NoRung {
+                phase: "unobtainium".to_string()
+            }
         );
     }
 

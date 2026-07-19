@@ -8,8 +8,7 @@ The retired long-form board is `docs/working/CONSENSUS_ROADMAP_HISTORY.md`, pres
 
 ## Active arcs
 
-- 2026-07-19 disk slice 2: layer-4 kernels R_1/Omega_star_0/T_core(+dust co-solve) + accretion-termination + typed outcome + gate integration + Z-derived deuterium line, dormant -> claude/disk-slice2-wire, PR #201
-- 2026-07-18  Mountains / mid-band (increment 3) -> branch `claude/topology-increment3`. Next: block-3 re-derivations, sub-step D, Seams C/D. Detail in HANDOFFS.
+- 2026-07-19  Mountains / mid-band (increment 3) -> #205 HELD, the seven-field frontier is NOT closed: the ambient-frame rows were read at interior state, so the cluster now REFUSES a mixed-frame request (#208 steering). ALL 9 audit findings fixed, each as a refusal or an unconstructible pairing rather than a comment. BLOCKED: the wire cannot activate because the bundle correctly refuses at interior state; unblocking needs the state-resolved thermoelastic provider -> `docs/working/THERMOELASTIC_STATE_FRAME_DERIVE_FIRST_STEERING.md`. Next: thread the census through `build_deep_time_provinces`, move the 7 fields + their 3 uncompared copies, re-baseline via `realization_digest`, then Seams C/D. RETRACTED in HANDOFFS: my "the full SI lift is infeasible" claim was WRONG (audit-caught, I tested SI-LINEAR not the ruled SI/LOG-SPACE); the ruled plan stands, heat carries as per-tick energy or a signed log.
 - 2026-07-18  Remote agent #201 (disk-evolution wire) lands large and often -> rebase-onto-main integration, keep viewer/physics lanes disjoint.
 - 2026-07-18  Arc AFTER the crust (perpetual dynamics, atmosphere keystone, hydrosphere) -> plan in `PHYSICS_SUBSTRATE_ROADMAP.md`.
 
@@ -37,6 +36,7 @@ The retired long-form board is `docs/working/CONSENSUS_ROADMAP_HISTORY.md`, pres
 
 ## Not done / gated
 
+- 2026-07-19 FLAGGED provenance system: 6 CRITICAL + 8 HIGH from an adversarial audit; a ghost source passes `sources_gate.py` (live-fired), 4 claims have primary == secondary, 0 `@sources` markers -> `$CLAUDE_JOB_DIR/tmp/codex_provenance_audit.txt`, blocks R-ABIOGENESIS-2.
 - 2026-07-15 QUARANTINED 56 reserved values with dead provenance, frozen by the CI gate -> docs/working/quarantine_ledger.toml
 - 2026-07-12 PARTIAL the four universal constants to CODATA, G now in the floor -> crates/units/src/fundamentals.rs
 - 2026-07-11 GATED real biosphere thriving, gated on the biosphere-balance calibration -> worldbuild.rs T3 owner-gate
@@ -66,6 +66,10 @@ The retired long-form board is `docs/working/CONSENSUS_ROADMAP_HISTORY.md`, pres
 
 ## Recent landings (tombstoned; prune when old)
 
+- 2026-07-19  DONE  #207 merged to main (`0de27ab`): derive-first abiogenesis research spec + closure-formalism addendum -> `docs/working/ABIOGENESIS_*.md`.
+- 2026-07-19  DONE  #201 merged to main (`402e00d`): disk slice 2 run-path wire, Mdot_0 derived, the L_bol hold dissolved -> `git log 402e00d`.
+- 2026-07-19  DONE  #203 merged to main (`b1b9ed0`): two crates, five live-fired gates, 225 files, pins held -> `git log b1b9ed0`.
+- 2026-07-19  DONE  Local/CI command parity: the check list is PARSED from the workflow, not copied (six classes had never run locally) -> `scripts/ci_local.sh`.
 - 2026-07-19  DONE  Phase-conductivity column fetched (8 phases, cell counts as reconstructions + kappa_298 x5) -> `crates/physics/data/phase_conductivity.toml`.
 - 2026-07-19  DONE  Crate layering un-inverted: `calibration`+`decision` bio -> foundation; foundation drops its bio lib dep -> `crates/foundation`.
 - 2026-07-19  DONE  Language cycle cut: `PlaceId` lifted to a leaf, 7-module cluster -> 3 -> `crates/foundation/src/located.rs`.
