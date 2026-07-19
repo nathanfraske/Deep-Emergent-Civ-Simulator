@@ -299,6 +299,9 @@ pub enum ColumnDerivationRefusal {
     /// The conductivity ladder refused, carrying its own reason (a phase with no banked column, no rung, or
     /// an unplaceable cell count).
     Conductivity(String),
+    /// The expansivity join refused, carrying its own reason (a phase with no banked gamma, bulk modulus or
+    /// registry row).
+    Expansivity(String),
     /// A JOIN this derivation needs has no implementation yet. This is the honest frontier rather than a
     /// data gap: the pieces exist and nothing composes them. Names the join and what it would take.
     NoJoinYet {
@@ -323,6 +326,9 @@ impl std::fmt::Display for ColumnDerivationRefusal {
             ColumnDerivationRefusal::Conductivity(reason) => {
                 write!(f, "the conductivity ladder refused: {reason}")
             }
+            ColumnDerivationRefusal::Expansivity(reason) => {
+                write!(f, "the expansivity join refused: {reason}")
+            }
             ColumnDerivationRefusal::NoJoinYet { quantity, needs } => write!(
                 f,
                 "{quantity} has no assembled derivation yet; it needs {needs}. Refused rather than \
@@ -334,6 +340,26 @@ impl std::fmt::Display for ColumnDerivationRefusal {
 }
 
 impl std::error::Error for ColumnDerivationRefusal {}
+
+/// The banked reference tables a column derivation reads, grouped so the derivation takes ONE borrow rather
+/// than four positional ones.
+///
+/// They travel together because every one of them is consulted for every phase in a census, and a caller
+/// holding three of the four has nothing useful. Grouping them also removes the positional hazard: four
+/// same-shaped `&Table` parameters in a row are four chances to transpose two of them, and the compiler
+/// catches none of it.
+pub struct BankedTables<'a> {
+    /// The candidate-phase thermodynamic registry (compositions, molar volumes).
+    pub registry: &'a civsim_physics::petrology_data::PhaseRegistry,
+    /// The periodic table (atomic masses, valences).
+    pub periodic: &'a civsim_physics::periodic::PeriodicTable,
+    /// The cited crystallographic and `kappa_298` column.
+    pub conductivity: &'a civsim_physics::phase_conductivity::PhaseConductivityTable,
+    /// The two-rung Grueneisen table.
+    pub gruneisen: &'a civsim_physics::gruneisen::GruneisenTable,
+    /// The mineral elastic-moduli table.
+    pub moduli: &'a civsim_physics::mineral_moduli::MineralModuli,
+}
 
 /// Derive every thermal property of an interior column from the world's OWN composition, ATOMICALLY.
 ///
@@ -354,10 +380,7 @@ pub fn derive_column_thermal_properties(
     composition: &[(String, Fixed)],
     temperature_k: Fixed,
     pressure_bar: Fixed,
-    registry: &civsim_physics::petrology_data::PhaseRegistry,
-    periodic: &civsim_physics::periodic::PeriodicTable,
-    conductivity_table: &civsim_physics::phase_conductivity::PhaseConductivityTable,
-    gruneisen_table: &civsim_physics::gruneisen::GruneisenTable,
+    tables: &BankedTables<'_>,
 ) -> Result<ColumnThermalProperties, ColumnDerivationRefusal> {
     let missing = |q: &str| ColumnDerivationRefusal::NoQuantity {
         quantity: q.to_string(),
@@ -366,14 +389,17 @@ pub fn derive_column_thermal_properties(
         composition,
         temperature_k,
         pressure_bar,
-        registry,
+        tables.registry,
     )
     .ok_or(ColumnDerivationRefusal::NoAssemblage)?;
 
     // Density: the registry's own molar volumes and masses, in g/cm^3, lifted to kg/m^3.
-    let density_g_cm3 =
-        civsim_physics::petrology::assemblage_density(&assemblage, registry, periodic)
-            .ok_or_else(|| missing("density"))?;
+    let density_g_cm3 = civsim_physics::petrology::assemblage_density(
+        &assemblage,
+        tables.registry,
+        tables.periodic,
+    )
+    .ok_or_else(|| missing("density"))?;
     let density_kg_m3 = density_g_cm3
         .checked_mul(Fixed::from_int(1000))
         .ok_or_else(|| missing("density"))?;
@@ -381,8 +407,8 @@ pub fn derive_column_thermal_properties(
     // Specific heat: Dulong-Petit over the assemblage's own mean atomic mass.
     let mean_atomic_mass = civsim_physics::petrology::assemblage_mean_atomic_mass_kg_per_mol(
         &assemblage,
-        registry,
-        periodic,
+        tables.registry,
+        tables.periodic,
     )
     .ok_or_else(|| missing("mean_atomic_mass"))?;
     let specific_heat_j_kg_k =
@@ -392,16 +418,16 @@ pub fn derive_column_thermal_properties(
     // Conductivity: the volume census through the two-rung ladder. Volume fractions rather than molar
     // amounts, because a Bruggeman mixture weights by the volume each phase occupies.
     let volume_census =
-        civsim_physics::petrology::assemblage_volume_fractions(&assemblage, registry)
+        civsim_physics::petrology::assemblage_volume_fractions(&assemblage, tables.registry)
             .ok_or_else(|| missing("volume_fractions"))?;
     let mut rows = Vec::with_capacity(volume_census.len());
     for (name, fraction) in &volume_census {
         let row = civsim_materials::conductivity::phase_conductivity_from_banked(
             name,
-            conductivity_table,
-            gruneisen_table,
-            registry,
-            periodic,
+            tables.conductivity,
+            tables.gruneisen,
+            tables.registry,
+            tables.periodic,
             Fixed::ZERO,
         )
         .map_err(|e| ColumnDerivationRefusal::Conductivity(e.to_string()))?;
@@ -419,7 +445,8 @@ pub fn derive_column_thermal_properties(
     // an early return so the three derivations above are EXERCISED on every attempt: a chain that is never
     // run is a chain that rots, and this way a break in the assemblage, ladder or Dulong-Petit path surfaces
     // here rather than waiting for the frontier to close.
-    let thermal_expansion_ppm_per_k = derive_assemblage_expansivity_ppm_per_k()?;
+    let thermal_expansion_ppm_per_k =
+        derive_assemblage_expansivity_ppm_per_k(&volume_census, tables)?;
     let ln_viscosity_pa_s = derive_column_ln_viscosity()?;
 
     Ok(ColumnThermalProperties {
@@ -431,24 +458,35 @@ pub fn derive_column_thermal_properties(
     })
 }
 
-/// The assemblage's volumetric expansivity in ppm per kelvin. THE FRONTIER, refusing by name.
+/// The assemblage's volumetric expansivity in PPM per kelvin, the unit the kernel's
+/// [`civsim_physics::laws::thermal_density_anomaly`] reads.
 ///
-/// Every piece exists and nothing composes them, which is why this is a join rather than a data gap.
-/// [`civsim_physics::gruneisen::GruneisenTable::assemblage_gamma`] gives the census gamma, and
-/// [`civsim_materials::properties::volumetric_thermal_expansion_per_k`] turns a gamma into an expansivity
-/// given the molar heat capacity, the bulk modulus and the molar volume. The obstacle is that the bulk
-/// modulus lives in `mineral_moduli` and the molar volume on the phase registry, with no function joining
-/// them by phase key, and the two must share a basis (both per mole of atoms or both per formula unit) or the
-/// result is a unit error wearing a derivation's clothes.
-fn derive_assemblage_expansivity_ppm_per_k() -> Result<Fixed, ColumnDerivationRefusal> {
-    Err(ColumnDerivationRefusal::NoJoinYet {
-        quantity: "thermal_expansion_ppm_per_k".to_string(),
-        needs: "an assemblage-level expansivity join: `assemblage_gamma` for the census gamma, then \
-                `volumetric_thermal_expansion_per_k` with the molar heat capacity, the bulk modulus and the \
-                molar volume, which requires joining `mineral_moduli` to the phase registry by phase key on \
-                a shared per-atom or per-formula-unit basis"
-            .to_string(),
-    })
+/// FRONTIER CLOSED 2026-07-19. The join now exists as
+/// [`civsim_materials::properties::assemblage_volumetric_expansivity_per_k`], which derives each phase's
+/// `alpha = gamma C_v / (K V_m)` from four banked columns and mixes them by volume. Its magnitude is checked
+/// against the MEASURED forsterite expansivity (roughly 40 ppm/K at mantle temperature) reproduced from
+/// columns never fitted to it, which is what makes that a check rather than a circular one. Worth recording
+/// as the reason to derive it: the fixture being replaced reads 30 ppm/K, and forsterite derives near 40.
+///
+/// The per-kelvin result is scaled to ppm here, at the boundary where the kernel's unit is declared, rather
+/// than inside the derivation, so the physics function returns the physical quantity and this conversion is
+/// visible at the site that needs it.
+fn derive_assemblage_expansivity_ppm_per_k(
+    volume_census: &[(String, Fixed)],
+    tables: &BankedTables<'_>,
+) -> Result<Fixed, ColumnDerivationRefusal> {
+    let per_k = civsim_materials::properties::assemblage_volumetric_expansivity_per_k(
+        volume_census,
+        tables.registry,
+        tables.moduli,
+        tables.gruneisen,
+    )
+    .map_err(|e| ColumnDerivationRefusal::Expansivity(e.to_string()))?;
+    per_k
+        .checked_mul(Fixed::from_int(1_000_000))
+        .ok_or_else(|| ColumnDerivationRefusal::NoQuantity {
+            quantity: "thermal_expansion_ppm_per_k".to_string(),
+        })
 }
 
 /// The column's log viscosity (ln Pa*s). THE SECOND FRONTIER, refusing by name.
@@ -989,6 +1027,7 @@ mod tests {
     #[test]
     fn the_column_derivation_refuses_a_partial_cluster_and_names_the_remaining_joins() {
         use civsim_physics::gruneisen::GruneisenTable;
+        use civsim_physics::mineral_moduli::MineralModuli;
         use civsim_physics::periodic::PeriodicTable;
         use civsim_physics::petrology_data::PhaseRegistry;
         use civsim_physics::phase_conductivity::PhaseConductivityTable;
@@ -997,6 +1036,7 @@ mod tests {
         let periodic = PeriodicTable::standard().expect("the periodic table loads");
         let conductivity = PhaseConductivityTable::standard().expect("the cited column loads");
         let gruneisen = GruneisenTable::standard().expect("the Grueneisen table loads");
+        let moduli = MineralModuli::standard().expect("the moduli table loads");
         // A magnesian olivine mantle, the composition the deep-time columns carry.
         let composition = vec![
             ("Mg".to_string(), Fixed::from_int(2)),
@@ -1008,22 +1048,30 @@ mod tests {
             &composition,
             Fixed::from_int(1600),
             Fixed::from_int(100_000),
-            &registry,
-            &periodic,
-            &conductivity,
-            &gruneisen,
+            &BankedTables {
+                registry: &registry,
+                periodic: &periodic,
+                conductivity: &conductivity,
+                gruneisen: &gruneisen,
+                moduli: &moduli,
+            },
         )
-        .expect_err("two of the seven properties have no join yet, so the cluster must not move");
+        .expect_err("the viscosity join is still open, so the cluster must not move");
 
         match &refusal {
             ColumnDerivationRefusal::NoJoinYet { quantity, needs } => {
+                // THE FRONTIER MOVED, 2026-07-19, and that is what this assertion records. The
+                // expansivity join landed, so the derivation now gets PAST it and refuses one step
+                // later, at the viscosity. Reaching this arm is the proof that the expansivity
+                // derives: a census that could not form an expansivity would have refused earlier.
                 assert_eq!(
-                    quantity, "thermal_expansion_ppm_per_k",
-                    "the frontier reached is named exactly rather than lumped"
+                    quantity, "ln_viscosity_pa_s",
+                    "the expansivity join closed, so the frontier is now the viscosity"
                 );
                 assert!(
-                    needs.contains("mineral_moduli") && needs.contains("assemblage_gamma"),
-                    "the refusal is a work list, naming both tables the join must bridge: {needs}"
+                    needs.contains("solve_ln_effective_viscosity")
+                        && needs.contains("eval_pressure_gpa"),
+                    "the refusal is a work list, naming the solve and the input the call site lacks: {needs}"
                 );
             }
             other => panic!("expected the join frontier, got {other}"),

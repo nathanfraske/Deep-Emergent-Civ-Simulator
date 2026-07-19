@@ -1,17 +1,17 @@
-# The derives-coverage baseline (scripts/derives_gate.py).
 #
-# One row per public function in the physics and materials substrate that does NOT carry a
-# `// @derives:` marker, with what it is instead. A function that DOES carry a marker needs no row:
-# the gate reads the marker directly, so the registry and this baseline cannot disagree.
+#
+#
 #
 # Classifications: accessor | constructor | derives | grandfathered | helper | loader | predicate
-#
+# One row per public function in the physics and materials substrate that does NOT carry a
+# The derives-coverage baseline (scripts/derives_gate.py).
+# `// @derives:` marker, with what it is instead. A function that DOES carry a marker needs no row:
 # `grandfathered` means the function predates the gate and nobody has classified it yet. It is not a
-# claim that the function does not derive; it is an admission that no one has looked. Classify it
-# properly when the function is next touched, and if it turns out to derive a world quantity, give it
 # a marker instead of a row.
-#
+# claim that the function does not derive; it is an admission that no one has looked. Classify it
 # file	function	classification	reason
+# properly when the function is next touched, and if it turns out to derive a world quantity, give it
+# the gate reads the marker directly, so the registry and this baseline cannot disagree.
 crates/materials/src/assemblage.rs	at_equilibrium	grandfathered	predates the derives-coverage gate; unclassified
 crates/materials/src/assemblage.rs	competing_phases	grandfathered	predates the derives-coverage gate; unclassified
 crates/materials/src/assemblage.rs	departures	grandfathered	predates the derives-coverage gate; unclassified
@@ -31,10 +31,13 @@ crates/materials/src/band_gap.rs	eigenvalue_provenance	grandfathered	predates th
 crates/materials/src/band_gap.rs	gap_eigenvalue_provenance	grandfathered	predates the derives-coverage gate; unclassified
 crates/materials/src/band_gap.rs	ln_thermal_carrier_activation	grandfathered	predates the derives-coverage gate; unclassified
 crates/materials/src/band_gap.rs	two_kb_ev_per_k	grandfathered	predates the derives-coverage gate; unclassified
+crates/materials/src/conductivity.rs	bruggeman_residual	helper	the Bruggeman residual function the bisection solves; pure arithmetic with no world quantity of its own
 crates/materials/src/conductivity.rs	estimator_anchor_298	grandfathered	predates the derives-coverage gate; unclassified
+crates/materials/src/conductivity.rs	fmt	helper	a Display impl
 crates/materials/src/conductivity.rs	hofmeister_reference_temperature_k	grandfathered	predates the derives-coverage gate; unclassified
 crates/materials/src/conductivity.rs	lattice_exponent_for_cell	grandfathered	predates the derives-coverage gate; unclassified
 crates/materials/src/conductivity.rs	rung_disagreement_ratio	grandfathered	predates the derives-coverage gate; unclassified
+crates/materials/src/conductivity.rs	solve_bruggeman	helper	the fixed-point bisection that finds the residual's root; the numerical method, not the quantity
 crates/materials/src/contract.rs	dispose	grandfathered	predates the derives-coverage gate; unclassified
 crates/materials/src/contract.rs	is_valid	grandfathered	predates the derives-coverage gate; unclassified
 crates/materials/src/contract.rs	preflight	grandfathered	predates the derives-coverage gate; unclassified
@@ -227,6 +230,7 @@ crates/materials/src/properties.rs	debye_temperature	grandfathered	predates the 
 crates/materials/src/properties.rs	debye_temperature_shear_aware	grandfathered	predates the derives-coverage gate; unclassified
 crates/materials/src/properties.rs	debye_velocity_km_per_s	grandfathered	predates the derives-coverage gate; unclassified
 crates/materials/src/properties.rs	density	grandfathered	predates the derives-coverage gate; unclassified
+crates/materials/src/properties.rs	fmt	helper	Display formatter for ExpansivityRefusal; renders a refusal, derives nothing
 crates/materials/src/properties.rs	gas_constant_j_per_mol_k	grandfathered	predates the derives-coverage gate; unclassified
 crates/materials/src/properties.rs	grain_boundary_energy	grandfathered	predates the derives-coverage gate; unclassified
 crates/materials/src/properties.rs	grain_boundary_energy_j_per_m2	grandfathered	predates the derives-coverage gate; unclassified
@@ -977,6 +981,14 @@ crates/physics/src/petrology_data.rs	phase	grandfathered	predates the derives-co
 crates/physics/src/petrology_data.rs	phases	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/petrology_data.rs	standard	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/petrology_data.rs	validate_against	grandfathered	predates the derives-coverage gate; unclassified
+crates/physics/src/phase_conductivity.rs	atoms_per_primitive_cell	accessor	returns the cited crystallographic count for a phase
+crates/physics/src/phase_conductivity.rs	fmt	helper	Display for the refusal enum
+crates/physics/src/phase_conductivity.rs	from_toml_str	loader	parses the cited [[conductivity]] blocks and RECONSTRUCTS atoms_per_primitive_cell from the row's own space group, Z, formula content and lattice centring, refusing on disagreement; a transcription check on cited data rather than a derivation of a world quantity
+crates/physics/src/phase_conductivity.rs	is_empty	predicate	whether the table holds no rows
+crates/physics/src/phase_conductivity.rs	kappa_298	accessor	returns the cited measured anchor and its band for a phase, or None where no primary reports one
+crates/physics/src/phase_conductivity.rs	len	accessor	row count
+crates/physics/src/phase_conductivity.rs	row	accessor	returns a cited row by canonical phase key
+crates/physics/src/phase_conductivity.rs	standard	loader	loads the vendored cited phase_conductivity.toml column; no derivation, the reconstruction check lives in from_toml_str
 crates/physics/src/phonon.rs	anharmonic_fundamental_cm_inverse	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/phonon.rs	bend_to_stretch_ratio	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/phonon.rs	clausius_mossotti_floor	grandfathered	predates the derives-coverage gate; unclassified
@@ -1103,14 +1115,3 @@ crates/physics/src/young_thermal.rs	peak_temperature_at	grandfathered	predates t
 crates/physics/src/young_thermal.rs	slr_family_temperature_rise	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/young_thermal.rs	solar_system_slr_family	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/young_thermal.rs	young_thermal_verdict	grandfathered	predates the derives-coverage gate; unclassified
-crates/materials/src/conductivity.rs	bruggeman_residual	helper	the Bruggeman residual function the bisection solves; pure arithmetic with no world quantity of its own
-crates/materials/src/conductivity.rs	solve_bruggeman	helper	the fixed-point bisection that finds the residual's root; the numerical method, not the quantity
-crates/materials/src/conductivity.rs	fmt	helper	a Display impl
-crates/physics/src/phase_conductivity.rs	standard	loader	loads the vendored cited phase_conductivity.toml column; no derivation, the reconstruction check lives in from_toml_str
-crates/physics/src/phase_conductivity.rs	from_toml_str	loader	parses the cited [[conductivity]] blocks and RECONSTRUCTS atoms_per_primitive_cell from the row's own space group, Z, formula content and lattice centring, refusing on disagreement; a transcription check on cited data rather than a derivation of a world quantity
-crates/physics/src/phase_conductivity.rs	row	accessor	returns a cited row by canonical phase key
-crates/physics/src/phase_conductivity.rs	atoms_per_primitive_cell	accessor	returns the cited crystallographic count for a phase
-crates/physics/src/phase_conductivity.rs	kappa_298	accessor	returns the cited measured anchor and its band for a phase, or None where no primary reports one
-crates/physics/src/phase_conductivity.rs	len	accessor	row count
-crates/physics/src/phase_conductivity.rs	is_empty	predicate	whether the table holds no rows
-crates/physics/src/phase_conductivity.rs	fmt	helper	Display for the refusal enum
