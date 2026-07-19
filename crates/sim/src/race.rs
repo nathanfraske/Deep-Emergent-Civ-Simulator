@@ -33,10 +33,10 @@ use civsim_core::Fixed;
 
 use crate::axiom::IntrinsicBeliefs;
 use crate::morphogen::MorphogenProgram;
-use crate::world::PlaceId;
 use civsim_bio::anatomy::BodyPlan;
 use civsim_bio::genome::{GenePool, GeneSet, GeneticScheme, ReproductionMode};
 use civsim_foundation::breeding::BreedingSystemId;
+use civsim_foundation::located::PlaceId;
 use civsim_foundation::value::RaceId;
 
 /// A sentient race as it stands at the dawn: its genetic substrate and its innate belief

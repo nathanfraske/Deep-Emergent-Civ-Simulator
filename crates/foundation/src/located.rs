@@ -34,6 +34,17 @@ use std::collections::{BTreeMap, BTreeSet};
 use civsim_core::StableId;
 use civsim_world::{ChunkCoord, Coord3, CHUNK};
 
+/// A place in the world. Minimal for now: two minds are co-located when they share a
+/// place id, which is what lets one perceive a trace or talk to another. The full
+/// spatial hierarchy (design Part 6) refines this later.
+///
+/// It lives HERE rather than in the simulation's world module because it is a bare spatial identity
+/// that both the world and the race registry need. Held on the world side it formed the only edge
+/// keeping `race` in a seven-module dependency cycle: `race` imported this one alias, `world` imported
+/// `race`, and the loop closed on a type that is `u32`. A leaf is where an identity shared by two
+/// modules belongs.
+pub type PlaceId = u32;
+
 /// A located occupant: a being or a promoted biosphere organism, keyed by a stable id and
 /// tagged by kind so beings and organisms share one index without colliding. The kind is a
 /// small fixed tag (an identity discriminator), not world content, so it is an enum.

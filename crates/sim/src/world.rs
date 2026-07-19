@@ -77,10 +77,9 @@ use civsim_foundation::value::{
     EmicProjection, EticAxisId, EticSubstrate, RaceId, RaceProjection, ValueAxisId, ValueProfile,
 };
 
-/// A place in the world. Minimal for now: two minds are co-located when they share a
-/// place id, which is what lets one perceive a trace or talk to another. The full
-/// spatial hierarchy (design Part 6) refines this later.
-pub type PlaceId = u32;
+/// A place in the world, re-exported from [`civsim_foundation::located`] where it now lives so the
+/// race registry can read it without closing a dependency cycle through this module.
+pub use civsim_foundation::located::PlaceId;
 
 /// The conventional access channel name a spoken belief travels through, used by the
 /// gossip step to update the hearer's model of the speaker. If the data registry defines
