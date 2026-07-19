@@ -175,7 +175,19 @@ earlier draft asserted an SVO acknowledgement-and-cite expectation that was NOT 
 VOTable confirms the Curation metadata carries no rights or licence field. So the entry now records
 the verified absence, sets `redistributable = false` conservatively, and holds it as
 citation-plus-witness because the SED values are uncopyrightable facts. The bytes are not held
-in-repo (1.19 MB each). Remaining: the coordinator SAVE-retry for the two gap points,
-and the wiring into the P0-A Herbig branch as a windless grounded interval (log-space
-interpolation over the table), sibling to the Sternberg windy anchor and never merged with it,
-honouring the interpolation prohibition above.
+in-repo (1.19 MB each).
+
+WIRED (dormant, byte-neutral): the table is now `astro::HerbigEuvDepartureGrid::bstar2006_svo()`
+(16 points as derived data), read by `astro::HerbigEuvDepartureGrid::departure_log10_at` (log-space
+interpolation in Teff, refusing below 15000 K and above 30000 K) and applied to a blackbody
+spectrum by `astro::windless_herbig_departed_spectrum` through the reused
+`nlte_departed_ionizing_spectrum` (photon-space). The interpolation prohibition is a CARRIED FACT,
+not a comment: `DepartureArchiveGrade::ArchivePending` travels with any evaluation whose bracketing
+points include 23000 or 24000 K (and only when that pending point carries weight, so an exact
+witnessed point adjacent to the hole stays witnessed). Both pins bit-exact, diamond `--strict`
+clean, floor registry regenerated (45 substrates), 5 new tests. The windless-versus-windy crossover
+in the 25000 to 30000 K overlap is a NAMED derivation gap (keys on the star's wind strength, a
+stellar-physics property to be derived, not authored); this grid supplies only the windless branch.
+
+Remaining: the coordinator SAVE-retry for the two gap points, and, when a wind-regime selector
+exists, the dispatch that chooses the windless sibling versus the Sternberg windy anchor.
