@@ -2042,6 +2042,50 @@ pub fn blackbody_ionizing_fraction(
     c.checked_mul(tail)
 }
 
+/// The MEAN IONIZING PHOTON ENERGY as a multiple of the hydrogen edge energy, DERIVED from the star's `T_eff`: the
+/// energy-weighted mean energy of a photon above the 13.6 eV ionization edge, `<E> / E_edge`. This is what converts
+/// the ionizing LUMINOSITY (energy per second, the [`EuvLuminosityBracket`]) into the ionizing photon RATE `Phi`
+/// (photons per second) the photoevaporation wind law reads, and it is DERIVED rather than reserved: it falls out of
+/// the same Wien-tail integral as [`blackbody_ionizing_fraction`]. The mean energy above the edge is the energy flux
+/// over the photon-number flux, `<E> = kT * Gamma(4,x) / Gamma(3,x)` with `x = T_ion/T_eff`, which reduces (using
+/// `kT = E_edge/x`) to `<E>/E_edge = (x^3 + 3x^2 + 6x + 6) / (x (x^2 + 2x + 2))`. The numerator is the SAME
+/// `Gamma(4,x)` polynomial the ionizing fraction carries (the energy integral); the denominator adds the
+/// `Gamma(3,x) = x^2 + 2x + 2` number integral. The ratio is 1 at the cold limit (every ionizing photon sits just
+/// above the edge) and rises as the photosphere heats and the tail hardens (about 1.11 at `x = 10`, 1.28 at `x = 5`).
+///
+/// DERIVED, NO reserved value: it keys ONLY on the star's own `T_eff` against the derived edge, so a hot star of any
+/// composition converts its own luminosity to its own photon rate (ADMITS THE ALIEN). HONEST LIMIT: this is the LTE
+/// BLACKBODY mean, the same baseline the EUV luminosity bracket departs from; a real atmosphere-model spectrum
+/// hardens the tail further, and that departure is carried by the luminosity bracket's band rather than a second
+/// number here. `None` above the Wien-tail validity edge (`x < wien_x_min`, the full-Planck regime) or on a non-star
+/// input, the same domain door the ionizing fraction guards.
+pub fn mean_ionizing_photon_energy_over_edge(
+    t_eff_k: Fixed,
+    t_ion_k: Fixed,
+    wien_x_min: Fixed,
+) -> Option<Fixed> {
+    if t_eff_k <= Fixed::ZERO || t_ion_k <= Fixed::ZERO || wien_x_min <= Fixed::ZERO {
+        return None;
+    }
+    let x = t_ion_k.checked_div(t_eff_k)?;
+    if x < wien_x_min {
+        return None; // above the Wien-tail validity T_eff, the full-Planck regime, the shared domain door
+    }
+    let x2 = x.checked_mul(x)?;
+    let x3 = x2.checked_mul(x)?;
+    // Gamma(4,x) = x^3 + 3x^2 + 6x + 6, the energy integral (the ionizing-fraction numerator).
+    let gamma4 = x3
+        .checked_add(Fixed::from_int(3).checked_mul(x2)?)?
+        .checked_add(Fixed::from_int(6).checked_mul(x)?)?
+        .checked_add(Fixed::from_int(6))?;
+    // Gamma(3,x) = x^2 + 2x + 2, the photon-number integral.
+    let gamma3 = x2
+        .checked_add(Fixed::from_int(2).checked_mul(x)?)?
+        .checked_add(Fixed::from_int(2))?;
+    // <E>/E_edge = Gamma(4,x) / (x * Gamma(3,x)).
+    gamma4.checked_div(x.checked_mul(gamma3)?)
+}
+
 /// The RADIATIVE-ENVELOPE EUV luminosity BRACKET (`L_sun`): the ionizing luminosity that drives photoevaporation
 /// for a dynamo-dark [`EnvelopeStructure::Radiative`] star, DERIVED from `T_eff` and `L_bol` as `L_bol *
 /// f_BB(T_eff)` (the blackbody ionizing baseline, [`blackbody_ionizing_fraction`]) times an ATMOSPHERE-MODEL
@@ -3230,15 +3274,14 @@ impl EuvWindFit {
 /// analytic-versus-hydrodynamic MODEL band (which [`EuvWindFit`] the caller passes) is the orthogonal second axis, a
 /// band the consumer forms from two fits.
 ///
-/// THE LUMINOSITY-TO-PHOTON-RATE STEP IS THE CALLER'S, and it needs the `mean_ionizing_photon_energy_ev`, the
-/// spectrum-weighted mean energy of a hydrogen-ionizing photon in the star's EUV tail (of order 20 eV above the 13.6
-/// eV edge). This is RESERVED-with-basis, not authored here: its basis is the same hot-star EUV atmosphere-model
-/// grid that pins the luminosity bracket's departure band, so it graduates when that grid is fetched. It is taken in
-/// eV (an order-20 value, representable) and converted to erg IN THE LOG DOMAIN, because the photon energy in erg
-/// (about 3e-11) sits BELOW the fixed-point resolution and would underflow to zero if formed directly, the same
-/// SI-window discipline the whole rate obeys: the ionizing photon rate (order `1e45` per second) and the mass-loss
-/// rate (order `1e-10` solar masses per year) both sit outside the representable range, so everything is carried as
-/// `log10` and exponentiated once at the end.
+/// THE LUMINOSITY-TO-PHOTON-RATE STEP IS DERIVED, not reserved. Converting the ionizing LUMINOSITY into the photon
+/// RATE `Phi` needs the mean energy of an ionizing photon, and that is [`mean_ionizing_photon_energy_over_edge`] on
+/// the star's own `T_eff`, times the edge energy `E_edge = k_B T_ion` (both floor), so no owner number enters: a hot
+/// star converts its own luminosity to its own photon rate through its own spectrum. It is formed IN THE LOG DOMAIN,
+/// because the photon energy in erg (about 3e-11) sits BELOW the fixed-point resolution and would underflow to zero
+/// if built directly, the same SI-window discipline the whole rate obeys: the ionizing photon rate (order `1e45` per
+/// second) and the mass-loss rate (order `1e-10` solar masses per year) both sit outside the representable range, so
+/// everything is carried as `log10` and exponentiated once at the end.
 ///
 /// ADMITS THE ALIEN: the rate keys on the star's OWN ionizing luminosity and mass, so a hot star of any composition
 /// photoevaporates its disk through its own spectrum, never a Terran template. SCOPE: the EUV (hydrogen-ionizing)
@@ -3251,27 +3294,32 @@ impl EuvWindFit {
 pub fn radiative_euv_photoevaporation_wind_rate_msun_myr(
     euv_luminosity: EuvLuminosityBracket,
     star_mass_ratio: Fixed,
-    mean_ionizing_photon_energy_ev: Fixed,
+    t_eff_k: Fixed,
+    t_ion_k: Fixed,
+    wien_x_min: Fixed,
     fit: &EuvWindFit,
 ) -> Option<PhotoevaporationRateBracket> {
     if star_mass_ratio <= Fixed::ZERO
         || star_mass_ratio < fit.mass_min_msun
         || star_mass_ratio > fit.mass_max_msun
-        || mean_ionizing_photon_energy_ev <= Fixed::ZERO
     {
         return None;
     }
     let ln10 = Fixed::from_int(10).ln();
     let log10 = |x: Fixed| -> Option<Fixed> { x.ln().checked_div(ln10) };
     let log10_m = log10(star_mass_ratio)?;
-    // The eV-to-erg factor and the solar luminosity in erg/s, formed in the log domain so the tiny photon energy
-    // (about 3e-11 erg for 20 eV) never underflows fixed point (the SI-window discipline).
-    let log10_ev_in_erg =
-        civsim_physics::saha::ln_of_decimal("1.602176634e-12")?.checked_div(ln10)?;
+    // The mean ionizing photon energy, DERIVED from T_eff as a multiple of the edge, then the edge energy itself
+    // E_edge = k_B * T_ion (both floor): E_photon(erg) = (<E>/E_edge) * k_B(erg/K) * T_ion. Formed in the log
+    // domain so the tiny photon energy (about 3e-11 erg) never underflows fixed point (the SI-window discipline).
+    let photon_over_edge = mean_ionizing_photon_energy_over_edge(t_eff_k, t_ion_k, wien_x_min)?;
+    let log10_kb_erg_per_k =
+        civsim_physics::saha::ln_of_decimal("1.380649e-16")?.checked_div(ln10)?;
+    let log10_e_photon_erg = log10(photon_over_edge)?
+        .checked_add(log10_kb_erg_per_k)?
+        .checked_add(log10(t_ion_k)?)?;
     let log10_lsun_erg_s = civsim_physics::saha::ln_of_decimal(SOLAR_LUMINOSITY_W)?
         .checked_div(ln10)?
         .checked_add(Fixed::from_int(7))?; // Watts to erg/s
-    let log10_e_photon_erg = log10(mean_ionizing_photon_energy_ev)?.checked_add(log10_ev_in_erg)?;
     let ln_ceiling = Fixed::from_int(31).checked_mul(Fixed::from_int(2).ln())?;
     let rate_for = |l_euv_lsun: Fixed| -> Option<Fixed> {
         if l_euv_lsun <= Fixed::ZERO {
@@ -5841,9 +5889,40 @@ mod tests {
     }
 
     #[test]
+    fn the_mean_ionizing_photon_energy_derives_from_the_wien_tail() {
+        // <E>/E_edge = Gamma(4,x)/(x Gamma(3,x)), x = T_ion/T_eff. At a 15000 K photosphere (x ~ 10.5) the ratio is
+        // about 1.11 (the mean ionizing photon carries about 15 eV), DERIVED from T_eff with no reserved value.
+        let ratio =
+            mean_ionizing_photon_energy_over_edge(Fixed::from_int(15000), t_ion(), wien_x_min())
+                .unwrap()
+                .to_f64_lossy();
+        let x = 157821.0_f64 / 15000.0;
+        let oracle =
+            (x * x * x + 3.0 * x * x + 6.0 * x + 6.0) / (x * (x * x + 2.0 * x + 2.0));
+        assert!(
+            (ratio / oracle - 1.0).abs() < 0.001,
+            "the derived ratio matches the Wien-tail oracle: got {ratio}, oracle {oracle}"
+        );
+        // A hotter photosphere hardens the tail: the mean energy rises above the cold-limit edge value, and the
+        // mean is always above the edge itself (the ratio exceeds 1).
+        let hot = mean_ionizing_photon_energy_over_edge(Fixed::from_int(30000), t_ion(), wien_x_min())
+            .unwrap();
+        let cool = mean_ionizing_photon_energy_over_edge(Fixed::from_int(10000), t_ion(), wien_x_min())
+            .unwrap();
+        assert!(hot > cool, "a hotter photosphere has a harder mean ionizing photon");
+        assert!(cool > Fixed::ONE, "the mean is always above the edge energy");
+        // Past the Wien-tail validity edge (T_eff > T_ion/wien_x_min ~ 52600 K) it refuses, not extrapolates.
+        assert!(
+            mean_ionizing_photon_energy_over_edge(Fixed::from_int(60000), t_ion(), wien_x_min())
+                .is_none()
+        );
+    }
+
+    #[test]
     fn the_euv_wind_rate_matches_the_hollenbach_normalization_oracle() {
         // Oracle against an independent f64 computation of the HJLS94 rate through the whole chain
-        // (L_EUV -> Phi -> Mdot). A 1e-2 L_sun ionizing luminosity, one solar mass, a 20 eV mean ionizing photon.
+        // (T_eff -> <E> -> Phi -> Mdot). A 1e-2 L_sun ionizing luminosity, one solar mass, a 15000 K photosphere
+        // (the mean ionizing photon energy DERIVED from it, no reserved value).
         let l_euv = Fixed::from_ratio(1, 100); // 1e-2 L_sun, a point bracket
         let euv = EuvLuminosityBracket {
             lo_lsun: l_euv,
@@ -5852,13 +5931,19 @@ mod tests {
         let out = radiative_euv_photoevaporation_wind_rate_msun_myr(
             euv,
             Fixed::ONE,
-            Fixed::from_int(20),
+            Fixed::from_int(15000),
+            t_ion(),
+            wien_x_min(),
             &EuvWindFit::hollenbach_1994(),
         )
         .unwrap();
-        // The f64 oracle, computed OUTSIDE the code: Phi = L_EUV(erg/s)/E_photon(erg), Mdot = 4.1e-10 (Phi/1e41)^0.5.
+        // The f64 oracle, computed OUTSIDE the code. The mean ionizing photon energy is DERIVED:
+        // <E> = k_B T_ion * Gamma(4,x)/(x Gamma(3,x)) with x = T_ion/T_eff, then Phi = L_EUV(erg/s)/<E>(erg).
         let l_sun_erg_s = 3.828e26_f64 * 1e7; // solar luminosity in erg/s
-        let e_photon_erg = 20.0 * 1.602176634e-12;
+        let (t_ion_f, k_b_erg) = (157821.0_f64, 1.380649e-16_f64);
+        let x = t_ion_f / 15000.0;
+        let e_photon_erg = k_b_erg * t_ion_f * (x * x * x + 3.0 * x * x + 6.0 * x + 6.0)
+            / (x * (x * x + 2.0 * x + 2.0));
         let phi = (1e-2 * l_sun_erg_s) / e_photon_erg;
         let mdot_myr = 4.1e-10 * (phi / 1e41).powf(0.5) * 1.0_f64.powf(0.5) * 1e6;
         let got = out.lo_msun_myr().to_f64_lossy();
@@ -5881,7 +5966,9 @@ mod tests {
         let out = radiative_euv_photoevaporation_wind_rate_msun_myr(
             euv,
             Fixed::ONE,
-            Fixed::from_int(20),
+            Fixed::from_int(15000),
+            t_ion(),
+            wien_x_min(),
             &EuvWindFit::hollenbach_1994(),
         )
         .unwrap();
@@ -5908,9 +5995,16 @@ mod tests {
             hi_lsun: l_euv,
         };
         let rate = |fit: &EuvWindFit| {
-            radiative_euv_photoevaporation_wind_rate_msun_myr(euv, Fixed::ONE, Fixed::from_int(20), fit)
-                .unwrap()
-                .lo_msun_myr()
+            radiative_euv_photoevaporation_wind_rate_msun_myr(
+                euv,
+                Fixed::ONE,
+                Fixed::from_int(15000),
+                t_ion(),
+                wien_x_min(),
+                fit,
+            )
+            .unwrap()
+            .lo_msun_myr()
         };
         let font = rate(&EuvWindFit::font_2004_hydrodynamic());
         let hollenbach = rate(&EuvWindFit::hollenbach_1994());
@@ -5926,8 +6020,8 @@ mod tests {
 
     #[test]
     fn the_euv_wind_rate_guards_its_domain() {
-        // Fail-loud: a mass outside the fit's grounded span, a non-positive photon energy, and a non-positive
-        // luminosity bound each refuse, never a silent rate.
+        // Fail-loud: a mass outside the fit's grounded span, a photosphere past the Wien-tail validity edge, and a
+        // non-positive luminosity bound each refuse, never a silent rate.
         let euv = EuvLuminosityBracket {
             lo_lsun: Fixed::from_ratio(1, 100),
             hi_lsun: Fixed::from_ratio(1, 100),
@@ -5937,22 +6031,29 @@ mod tests {
         assert!(radiative_euv_photoevaporation_wind_rate_msun_myr(
             euv,
             Fixed::from_ratio(5, 100),
-            Fixed::from_int(20),
+            Fixed::from_int(15000),
+            t_ion(),
+            wien_x_min(),
             &fit
         )
         .is_none());
         assert!(radiative_euv_photoevaporation_wind_rate_msun_myr(
             euv,
             Fixed::from_int(100),
-            Fixed::from_int(20),
+            Fixed::from_int(15000),
+            t_ion(),
+            wien_x_min(),
             &fit
         )
         .is_none());
-        // A non-positive mean photon energy.
+        // A 60000 K photosphere is past the Wien-tail validity edge (x = T_ion/T_eff < wien_x_min ~ 3), so the
+        // derived mean photon energy refuses and the rate with it: the shared domain door, not an extrapolation.
         assert!(radiative_euv_photoevaporation_wind_rate_msun_myr(
             euv,
             Fixed::ONE,
-            Fixed::ZERO,
+            Fixed::from_int(60000),
+            t_ion(),
+            wien_x_min(),
             &fit
         )
         .is_none());
@@ -5964,7 +6065,9 @@ mod tests {
         assert!(radiative_euv_photoevaporation_wind_rate_msun_myr(
             bad,
             Fixed::ONE,
-            Fixed::from_int(20),
+            Fixed::from_int(15000),
+            t_ion(),
+            wien_x_min(),
             &fit
         )
         .is_none());
