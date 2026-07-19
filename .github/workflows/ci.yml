@@ -84,6 +84,13 @@ jobs:
       # regenerates it and blocks stale output; no CI job and no Stone 0 path ran the generator, so the
       # only enforcement was a local editor hook, invisible to CI and to main. The registry is the
       # enforced derive-versus-author reference, and a stale one is a WRONG reference.
+      # A profile may override a reserved value and must SAY SO. 71 ids collide between reserved.toml and
+      # mirror.toml with 40 different values and nothing comparing them, and six pairs disagree on UNIT,
+      # which is two quantities sharing a name rather than one quantity at two values.
+      - name: Profile overrides are declared (a calibration divergence is stated, not discovered)
+        run: |
+          python3 scripts/profile_override_gate.py --self-test
+          python3 scripts/profile_override_gate.py
       - name: Floor registry is current (the derive-vs-author reference is not stale)
         run: python3 scripts/gen_floor_registry.py --check
       - name: Per-source provenance tests (every receipt, every source, discovered not listed)
