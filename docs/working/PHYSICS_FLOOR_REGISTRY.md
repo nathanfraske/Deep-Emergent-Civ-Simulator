@@ -17,7 +17,7 @@ The lists below are GENERATED from `crates/physics/data/*.toml`, `crates/physics
 
 ## Deriving substrates (check here BEFORE authoring: what the world derives, and where)
 
-The 42 deriving subsystems below live OUTSIDE the authored floor. Each produces a world quantity from the floor and the situation, so its output must never be authored: if the value you need appears here, read or extend the subsystem, do not set a number. This is the list that stops `1 year = 365 days` from being authored when orbital mechanics already derives it. Generated from the `// @derives:` markers in the code; a subsystem missing its marker is a gap in this map, so mark every derivation entry point.
+The 43 deriving subsystems below live OUTSIDE the authored floor. Each produces a world quantity from the floor and the situation, so its output must never be authored: if the value you need appears here, read or extend the subsystem, do not set a number. This is the list that stops `1 year = 365 days` from being authored when orbital mechanics already derives it. Generated from the `// @derives:` markers in the code; a subsystem missing its marker is a gap in this map, so mark every derivation entry point.
 
 ### `crates/foundation/src/clock.rs`
 
@@ -70,6 +70,7 @@ The 42 deriving subsystems below live OUTSIDE the authored floor. Each produces 
 - the coupled cloud-core gas and dust temperatures <- the Goldsmith gas-plus-dust thermal balance over the ionization rate, density, radiation-field chi, line-cooling fit, and CMB floor (`crates/sim/src/astro.rs:1186`)
 - the visual extinction A_V to a cloud-core center <- the core's hydrogen column density over the cited gas-to-extinction ratio (Bohlin 1978 / Guver-Ozel 2009) (`crates/sim/src/astro.rs:1311`)
 - the stellar rotation period at a target age Omega_star(t) <- the gyrochronological spin-down P_ref*(t/t_ref)^n aged forward from a reference epoch, over the cited braking exponent, valid only after the disk-release onset (`crates/sim/src/astro.rs:2925`)
+- the EUV dispersal phase (diffuse versus direct field) <- the disc's inner optical depth against the cited Alexander 2006 breakthrough transition tau=4.61, the topology state that decides which field drives the wind (`crates/sim/src/astro.rs:4028`)
 ### `crates/sim/src/environ.rs`
 
 - local water presence, rainfall, evaporation, runoff <- Clausius-Clapeyron saturation(local temperature) + Dalton evaporation + condensation where moisture exceeds saturation + downhill routing to the lowest neighbour. Water is NOT authored per cell; it falls out of temperature and terrain. (`crates/sim/src/environ.rs:1552`)
