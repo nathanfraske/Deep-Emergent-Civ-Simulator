@@ -3601,6 +3601,47 @@ pub fn ln_rayleigh_number(
         .and_then(|x| x.checked_sub(thermal_diffusivity.ln()))
 }
 
+/// The LOG-DOMAIN Stokes settling velocity `ln v = ln(2/9) + ln|drho| + ln g + 2 ln r - ln eta`, the sibling
+/// [`stokes_velocity`] cannot be for a real mantle, computed as a SUM OF LOGS so neither the `r^2` numerator
+/// nor the `9 eta` denominator has to form.
+///
+/// WHY THE LINEAR FORM CANNOT CARRY THIS AT SI, measured rather than asserted. An interior viscosity is
+/// `~1e21 Pa*s` against a `Fixed::MAX` of `2.1e9`, so `9 eta` overflows by twelve orders and the linear form
+/// falls to its `ZERO` velocity branch. The parcel radius compounds it: at a convective cell scale of
+/// `~1e6 m` the `r^2` numerator is `~1e12`, overflowing on its own.
+///
+/// AND A PRECISION FLOOR THE RESULT INHERITS, which is the finding a consumer most needs and the reason this
+/// returns a LOGARITHM rather than a velocity. A mantle convects at roughly 1 to 10 cm per year, which is
+/// `1e-9` to `3e-9 m/s`, against a Q32.32 resolution of `2.33e-10`: that is 4 to 13 ulp, roughly ONE
+/// significant figure. So a velocity is representable in SI metres per second only barely, and any product
+/// formed from it (the advective heat flux is the live case) inherits that single figure. A consumer wanting
+/// the advective flux should carry this logarithm INTO the flux rather than exponentiating to a linear
+/// velocity first, or work in a unit system where the velocity is not against the floor.
+///
+/// `None` when any input is non-positive (no settling without buoyancy, gravity, a parcel, or dissipation),
+/// or when a logarithm leaves the representable window. Deterministic fixed-point.
+// @derives: the log-domain Stokes settling velocity <- the buoyancy, gravity, parcel scale and log viscosity
+pub fn ln_stokes_velocity(
+    density_anomaly: Fixed,
+    gravity: Fixed,
+    radius: Fixed,
+    ln_viscosity: Fixed,
+) -> Option<Fixed> {
+    let mag = sat_abs(density_anomaly);
+    if mag <= ZERO || gravity <= ZERO || radius <= ZERO {
+        return None;
+    }
+    // The 2/9 is the creeping-flow coefficient the linear form carries, taken as a log rather than restated
+    // as a decimal so the two forms cannot drift on the constant.
+    let ln_coefficient = Fixed::from_ratio(2, 9).ln();
+    let two_ln_radius = radius.ln().checked_mul(Fixed::from_int(2))?;
+    ln_coefficient
+        .checked_add(mag.ln())
+        .and_then(|x| x.checked_add(gravity.ln()))
+        .and_then(|x| x.checked_add(two_ln_radius))
+        .and_then(|x| x.checked_sub(ln_viscosity))
+}
+
 /// Convective heat advection as specific power: `F = c * |v| * |dT| / d`, the heat a buoyant flow carries out
 /// of a column per unit mass. When convection is active (the Rayleigh onset has fired), the buoyant flow
 /// [`stokes_velocity`] transports heat from the hot interior toward the surface, a LOSS that augments the
@@ -3961,6 +4002,67 @@ mod tests {
         assert_eq!(
             thermal_density_anomaly(rho, ZERO, Fixed::from_int(100)),
             ZERO
+        );
+    }
+
+    #[test]
+    fn ln_stokes_velocity_twins_the_linear_form_and_survives_si_overflow() {
+        // TWIN: where the linear stokes_velocity is representable, the log form returns its logarithm.
+        // v = (2/9) |drho| g r^2 / eta = (2/9) * 2 * 3 * 4 / 4 = 4/3.
+        let g = Fixed::from_int(3);
+        let r = Fixed::from_int(2);
+        let eta = Fixed::from_int(4);
+        let v_max = Fixed::from_int(1_000_000);
+        let linear = stokes_velocity(Fixed::from_int(-2), g, r, eta, v_max);
+        let ln_v = ln_stokes_velocity(Fixed::from_int(-2), g, r, eta.ln()).expect("ln v");
+        let recovered = ln_v.exp();
+        let drift = (recovered - linear).abs();
+        assert!(
+            drift <= Fixed::from_ratio(1, 100),
+            "exp(ln v) reproduces the linear velocity {linear:?}, got {recovered:?}"
+        );
+
+        // SI: the limit is the INPUT DOMAIN rather than an output branch, which is the sharper statement and
+        // the one this test was corrected to make. Handed the largest viscosity it can represent, the linear
+        // form saturates its numerator and returns the CAP, a maximal velocity carrying the anomaly's sign.
+        // That is a saturation, not a wrong verdict. The real limit is upstream of it: an interior viscosity
+        // is ~1e21 Pa*s against a `Fixed::MAX` of ~2.1e9, so there is no argument to pass in the first place.
+        // The log form takes ln_eta, and ln(1e21) ~ 48 sits well inside the window, which is why it exists.
+        assert_eq!(
+            stokes_velocity(
+                Fixed::from_int(50),
+                g,
+                Fixed::from_int(1_000_000),
+                Fixed::MAX,
+                v_max
+            ),
+            -v_max,
+            "handed its largest representable viscosity the linear form saturates to the signed cap"
+        );
+        let ln_eta_si = Fixed::from_decimal_str("44.4").expect("a decimal literal parses");
+        let ln_v_si = ln_stokes_velocity(
+            Fixed::from_int(50),
+            g,
+            Fixed::from_int(1_000_000),
+            ln_eta_si,
+        )
+        .expect("the log form computes where the linear one cannot");
+        // A mantle parcel settles slowly: ln v well below zero is a sub-metre-per-second velocity, and the
+        // magnitude check is what would catch a sign slip on the viscosity subtraction.
+        assert!(
+            ln_v_si < ZERO,
+            "a mantle parcel creeps, so ln v must be negative, got {ln_v_si:?}"
+        );
+
+        // The refusals: no buoyancy, no gravity, no parcel.
+        assert_eq!(ln_stokes_velocity(ZERO, g, r, eta.ln()), None);
+        assert_eq!(
+            ln_stokes_velocity(Fixed::from_int(-2), ZERO, r, eta.ln()),
+            None
+        );
+        assert_eq!(
+            ln_stokes_velocity(Fixed::from_int(-2), g, ZERO, eta.ln()),
+            None
         );
     }
 

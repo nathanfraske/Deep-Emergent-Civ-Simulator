@@ -8,7 +8,7 @@ The retired long-form board is `docs/working/CONSENSUS_ROADMAP_HISTORY.md`, pres
 
 ## Active arcs
 
-- 2026-07-19  Mountains / mid-band (increment 3) -> UNBLOCKED, both cited columns landed. Next in the owner-approved order: replace the fixture cluster (atomic, all seven fields), re-baseline via `realization_digest`, retire the pins with a ledger entry, then sub-step D + Seams C/D draw the mountains. Detail in HANDOFFS.
+- 2026-07-19  Mountains / mid-band (increment 3) -> prerequisites built and PR'd (#205: banked-column bridge, volume fractions, parcel radius, `ln_stokes_velocity`). Next: the atomic seven-field replacement + the log-space lift of `convection_step`, re-baseline via `realization_digest`, retire the pins with a ledger entry, then Seams C/D draw the mountains. Two measured constraints on the lift in HANDOFFS (SI Rayleigh has no discriminating power; SI velocity is 4-13 ulp).
 - 2026-07-18  Remote agent #201 (disk-evolution wire) lands large and often -> rebase-onto-main integration, keep viewer/physics lanes disjoint.
 - 2026-07-18  Arc AFTER the crust (perpetual dynamics, atmosphere keystone, hydrosphere) -> plan in `PHYSICS_SUBSTRATE_ROADMAP.md`.
 
