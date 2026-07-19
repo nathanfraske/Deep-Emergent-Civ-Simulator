@@ -1,4 +1,16 @@
 #!/usr/bin/env python3
+# ANALYTIC VERIFICATION + TRANSCRIPTION, NOT VALIDATION.
+#
+# The 27 pi^4 / 4, pi / sqrt(2) and 2^(-4/3) computations are genuine analytic verification. The fingerprint d
+# ictionary is transcription. Neither proves empirical Nusselt-Rayleigh accuracy.
+#
+# WHY THE LABEL IS HERE. An audit found this battery described uniformly as one that reconstructs each
+# fetch from its recipe and asserts byte-equality, for all eight tests. That was true of some and false
+# of others, and the difference matters: custody proves the bytes we hold are the bytes we fetched,
+# transcription proves our column matches the held source, and neither proves the source is RIGHT. A
+# test that reads its expectation from the file under test does not even prove independence. Saying so
+# where the test is, is harder to drift than saying it in a document.
+#
 # Dry-run provenance battery for the convection-scaling cited [M] column. No network. It (1) re-checks the sha256
 # receipt and byte count of every held witness PDF against convection_scaling/manifest.toml, (2) recomputes the two
 # closed-form stability eigenvalues (free-free 27*pi^4/4 and its wavenumber pi/sqrt(2), plus the symmetric-layer

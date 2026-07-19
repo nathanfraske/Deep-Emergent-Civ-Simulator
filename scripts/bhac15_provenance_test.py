@@ -1,4 +1,16 @@
 #!/usr/bin/env python3
+# EXTRACTION + TRANSCRIPTION, NOT VALIDATION.
+#
+# Proves the committed wall grid was extracted from the held BHAC15 bytes. It does NOT validate BHAC15 stellar
+#  evolution.
+#
+# WHY THE LABEL IS HERE. An audit found this battery described uniformly as one that reconstructs each
+# fetch from its recipe and asserts byte-equality, for all eight tests. That was true of some and false
+# of others, and the difference matters: custody proves the bytes we hold are the bytes we fetched,
+# transcription proves our column matches the held source, and neither proves the source is RIGHT. A
+# test that reads its expectation from the file under test does not even prove independence. Saying so
+# where the test is, is harder to drift than saying it in a document.
+#
 # Dry-run provenance battery for the BHAC15 Hayashi-wall vendored [M] column. No network: it re-checks the recorded
 # sha256 receipt against the vendored source bytes, and re-derives the extracted wall grid from those same bytes and
 # asserts it equals the committed cited-data column, so a drifted source OR a drifted transcription fails the build.

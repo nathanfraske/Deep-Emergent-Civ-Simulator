@@ -1,4 +1,18 @@
 #!/usr/bin/env python3
+# TRANSCRIPTION + GENERATED-COLUMN CONSISTENCY, NOT VALIDATION.
+#
+# Proves the AGSS09 and Robie-Hemingway rows transcribe their sources, and that the ice sample points were gen
+# erated from the committed coefficients. That last one is CIRCULAR as validation: altering the coefficients a
+# nd regenerating the points passes without ever consulting Murphy-Koop. Rebuilding against IAPWS R14-08(2011)
+#  over 130 to 220 K is the recorded fix.
+#
+# WHY THE LABEL IS HERE. An audit found this battery described uniformly as one that reconstructs each
+# fetch from its recipe and asserts byte-equality, for all eight tests. That was true of some and false
+# of others, and the difference matters: custody proves the bytes we hold are the bytes we fetched,
+# transcription proves our column matches the held source, and neither proves the source is RIGHT. A
+# test that reads its expectation from the file under test does not even prove independence. Saying so
+# where the test is, is harder to drift than saying it in a document.
+#
 # Dry-run provenance battery for the disk-condensation mu-fetch vendored [M] columns (the AGSS09 solar abundance
 # pattern, the Murphy-Koop ice sublimation pressure, and the Robie-Hemingway CaTiO3 perovskite Gibbs energy). No
 # network: each source is a transcription of a primary PDF (or an equation from one), so there is no byte-identical

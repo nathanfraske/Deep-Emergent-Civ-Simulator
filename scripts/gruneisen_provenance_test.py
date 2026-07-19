@@ -1,4 +1,18 @@
 #!/usr/bin/env python3
+# CUSTODY + TRANSCRIPTION (two checks are CIRCULAR), NOT VALIDATION.
+#
+# Proves custody of three citation-plus-witness sources and transcription of seven rows. TWO of its checks are
+#  circular and are labelled so rather than removed: the 1.803 Slater expectation is BACK-SOLVED from the same
+#  K-prime = 3.94 it checks, and the applicability sentinel reads the slater_gamma_applicable flag on the very
+#  rows under test.
+#
+# WHY THE LABEL IS HERE. An audit found this battery described uniformly as one that reconstructs each
+# fetch from its recipe and asserts byte-equality, for all eight tests. That was true of some and false
+# of others, and the difference matters: custody proves the bytes we hold are the bytes we fetched,
+# transcription proves our column matches the held source, and neither proves the source is RIGHT. A
+# test that reads its expectation from the file under test does not even prove independence. Saying so
+# where the test is, is harder to drift than saying it in a document.
+#
 # Dry-run provenance battery for the Gruneisen cited [M] column. No network. It (1) rechecks the sha256
 # receipt of every witness (three archive-then-slimmed to local custody + a retrievable archived_url, three
 # cross-referenced in-repo in the sibling moduli directories) against gruneisen/manifest.toml, (2) asserts the owner's pre-registered fingerprints

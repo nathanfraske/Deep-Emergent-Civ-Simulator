@@ -1,4 +1,16 @@
 #!/usr/bin/env python3
+# ANALYTIC VERIFICATION + TRANSCRIPTION, NOT VALIDATION.
+#
+# The free-free closed forms are genuine analytic verification. The non-analytic eigenvalues are TRANSCRIBED r
+# ather than recomputed, so for those this is a transcription check.
+#
+# WHY THE LABEL IS HERE. An audit found this battery described uniformly as one that reconstructs each
+# fetch from its recipe and asserts byte-equality, for all eight tests. That was true of some and false
+# of others, and the difference matters: custody proves the bytes we hold are the bytes we fetched,
+# transcription proves our column matches the held source, and neither proves the source is RIGHT. A
+# test that reads its expectation from the file under test does not even prove independence. Saying so
+# where the test is, is harder to drift than saying it in a document.
+#
 # Dry-run provenance battery for the critical-Rayleigh eigenvalue registry cited [M] column. No network. It
 # (1) rechecks the sha256 receipt and byte count of every witness against rayleigh_critical_eigenvalues/
 # manifest.toml (two archive-then-slimmed to this registry's local custody + a retrievable archived_url, three

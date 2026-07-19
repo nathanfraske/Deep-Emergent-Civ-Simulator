@@ -1,4 +1,17 @@
 #!/usr/bin/env python3
+# CUSTODY + TRANSCRIPTION, NOT VALIDATION.
+#
+# Proves the 34 held JANAF tables hash against their receipts (custody) and that the Lodders fingerprints matc
+# h the committed column (transcription). It does NOT prove the condensation solver agrees with Lodders; that 
+# needs a separate system test with Lodders held out.
+#
+# WHY THE LABEL IS HERE. An audit found this battery described uniformly as one that reconstructs each
+# fetch from its recipe and asserts byte-equality, for all eight tests. That was true of some and false
+# of others, and the difference matters: custody proves the bytes we hold are the bytes we fetched,
+# transcription proves our column matches the held source, and neither proves the source is RIGHT. A
+# test that reads its expectation from the file under test does not even prove independence. Saying so
+# where the test is, is harder to drift than saying it in a document.
+#
 # Dry-run provenance battery for the thermo-fetch vendored [M] columns (JANAF standard potentials + the Lodders 2003
 # condensation battery). No network: it re-checks the recorded receipts against the vendored bytes, so a drifted or
 # swapped table fails the build. Mirrors scripts/aesopus_provenance_test.py's check_optical_manifest idiom.
