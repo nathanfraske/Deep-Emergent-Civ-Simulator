@@ -1314,39 +1314,95 @@ pub fn visual_extinction_magnitudes(
     Some(ln_a_v.exp())
 }
 
-/// The RADIATION-FIELD SCALING `chi`, DERIVED from the visual extinction, retiring the reserved `chi` the coupled
-/// cloud-core temperature solve ([`cloud_core_coupled_temperatures`]) reads. The interstellar field that heats core
-/// dust is attenuated by the core's extinction to `chi = 10^(-A_V * k)`, where `k` is the effective attenuation
-/// efficiency of the DUST-HEATING field per magnitude of visual extinction.
-///
-/// `k` IS NOT THE V-BAND `0.4`, and that correction is the whole point (Zucconi, Walmsley and Galli 2001, vendored).
-/// The V-band flux attenuation `10^(-A_V/2.5)` grossly OVER-attenuates the dust-heating field: the interstellar
-/// radiation that heats core dust is BROADBAND (optical-NIR, far-IR, mid-IR, the cosmic background), and a dark core
-/// is optically thin to its own far-IR (`A_V << 700`), so the FIR and MIR photons penetrate deeply and carry the
-/// heating from frequencies where the optical depth is of order one, far shallower than the V band. The effective
-/// `k` is CITED-with-basis (Zucconi's broadband result), about `0.05` to `0.13` per magnitude, reproducing the
-/// Goldsmith 2001 dark-core `chi ~ 1e-4` to `1e-5` at the REAL core extinctions `A_V ~ 30` to `100` (where the
-/// wrong V-band form would force `chi ~ 1e-20`). DERIVED off the core's own extinction, ADMITS THE ALIEN, computed
-/// in the log domain (`chi` reaches `1e-4` and below). HONEST LIMIT: the true attenuation is `A_V`-dependent (it
-/// FLATTENS as the far-IR takes over, so `k` falls from about `0.13` at `A_V = 30` to about `0.05` at `A_V = 100`,
-/// a factor of a few over the dark-core range); the exact `chi(A_V)` is Zucconi's per-frequency `exp(-tau_nu)`
-/// radiative transfer, a broadband-spectral substrate to build, for which a single `k` is the first-order stand-in.
-/// `None` on a negative extinction, a non-positive efficiency, or a `chi` that underflows the representable floor
-/// (a core past about `A_V = 130` at the shallow broadband `k`, deeper than any real dark core).
-// @derives: the cloud-core radiation-field scaling chi <- the extinction attenuation 10^(-A_V*k) of the interstellar field into the core, retiring the reserved chi the coupled T_core solve read
-pub fn radiation_field_chi_from_extinction(
+/// The BROADBAND DUST-HEATING ATTENUATION ESTIMATOR: the effective attenuation efficiency `k` per magnitude of
+/// visual extinction, held as a BAND `[k_lo, k_hi]` rather than a single value because it is `A_V`-dependent and no
+/// single constant is the physical model. Zucconi, Walmsley and Galli 2001 (vendored) give a per-frequency
+/// radiative-transfer solution whose EFFECTIVE broadband `k` runs about `0.05` (deep cores, where the penetrating
+/// far-IR takes over) to about `0.13` (shallow cores). This model carries that range so the estimator it feeds
+/// returns a band, never a laundered point.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct ExtinctionChiEstimator {
+    /// The shallow-attenuation edge (per magnitude), the smaller `k` toward which deep cores flatten.
+    pub k_lo: Fixed,
+    /// The steep-attenuation edge (per magnitude), the larger `k` of shallow cores.
+    pub k_hi: Fixed,
+}
+
+impl ExtinctionChiEstimator {
+    /// Zucconi, Walmsley and Galli 2001's broadband dust-heating range, `k` about `0.05` to `0.13` per magnitude
+    /// (vendored receipt in `disk_arc_literature`). NOT the V-band `0.4`: the V-band flux attenuation
+    /// `10^(-A_V/2.5)` grossly over-attenuates the DUST-HEATING field, which is broadband (optical-NIR, far-IR,
+    /// mid-IR, the cosmic background) and penetrates a dark core from frequencies where the optical depth is of
+    /// order one, far shallower than the V band.
+    pub fn zucconi_2001() -> Self {
+        Self {
+            k_lo: Fixed::from_ratio(5, 100),
+            k_hi: Fixed::from_ratio(13, 100),
+        }
+    }
+}
+
+/// A banded log-domain radiation-field scaling `chi`, the [`ExtinctionChiEstimator`] output. Held as `log10(chi)`
+/// so a deep core (a `chi` far below the fixed-point floor) stays REPRESENTABLE rather than underflowing to a
+/// false zero or a refusal: the linear value is recovered only on demand, and only that recovery can fail.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct ChiEstimateBand {
+    /// `log10(chi)` at the deepest attenuation (the larger `k`), the band's lower `chi` edge.
+    pub log10_chi_lo: Fixed,
+    /// `log10(chi)` at the shallowest attenuation (the smaller `k`), the band's upper `chi` edge.
+    pub log10_chi_hi: Fixed,
+}
+
+impl ChiEstimateBand {
+    /// The linear `chi` upper edge, `10^(log10_chi_hi)`. `None` if it overflows the representable range.
+    pub fn linear_hi(&self) -> Option<Fixed> {
+        let ln10 = Fixed::from_int(10).ln();
+        let ln_val = self.log10_chi_hi.checked_mul(ln10)?;
+        let ln_ceiling = Fixed::from_int(31).checked_mul(Fixed::from_int(2).ln())?;
+        if ln_val >= ln_ceiling {
+            return None;
+        }
+        Some(ln_val.exp())
+    }
+
+    /// The linear `chi` lower edge, `10^(log10_chi_lo)`. `None` if a deep core drives it below the fixed-point
+    /// floor: the honest limit of a LINEAR carrier, surfaced here rather than swallowed, since the log edges above
+    /// stay live for a consumer that carries `log10(chi)` through the thermal balance.
+    pub fn linear_lo(&self) -> Option<Fixed> {
+        let ln10 = Fixed::from_int(10).ln();
+        let chi = self.log10_chi_lo.checked_mul(ln10)?.exp();
+        (chi > Fixed::ZERO).then_some(chi)
+    }
+}
+
+/// A LAYER-3 ESTIMATE of the radiation-field scaling `chi` from the visual extinction, NOT a derivation and NOT a
+/// retirement of the reserved `chi` the coupled cloud-core temperature solve ([`cloud_core_coupled_temperatures`])
+/// reads. The interstellar field that heats core dust is attenuated by the core's extinction, modelled here to
+/// FIRST ORDER as `chi = 10^(-A_V * k)` over the [`ExtinctionChiEstimator`] band. This is a coordinate change on a
+/// single effective `k`, a stand-in for Zucconi's per-frequency `exp(-tau_nu)` radiative transfer, so it is graded
+/// an estimator: the true `chi(A_V)` is spectral (the far-IR takes over as the core deepens, flattening `k`), and
+/// deriving it needs the broadband dust-heating integral over the external SED, the dust opacity, the column, and
+/// the geometry, a substrate this does not build. The band `[k_lo, k_hi]` is carried through so the output is an
+/// interval, and it is returned in the LOG domain ([`ChiEstimateBand`]) so a deep core does not vanish into a false
+/// zero: the representation-liveness rule says a large extinction convicts a linear carrier, not the core's
+/// existence. `None` only on a negative extinction or an inverted `k` band.
+pub fn radiation_field_chi_estimate_from_extinction(
     a_v_magnitudes: Fixed,
-    attenuation_efficiency_per_mag: Fixed,
-) -> Option<Fixed> {
-    if a_v_magnitudes < Fixed::ZERO || attenuation_efficiency_per_mag <= Fixed::ZERO {
+    estimator: &ExtinctionChiEstimator,
+) -> Option<ChiEstimateBand> {
+    if a_v_magnitudes < Fixed::ZERO
+        || estimator.k_lo <= Fixed::ZERO
+        || estimator.k_hi < estimator.k_lo
+    {
         return None;
     }
-    let ln10 = Fixed::from_int(10).ln();
-    // log10(chi) = -A_V * k, then chi = exp(log10(chi) * ln10). A deep core underflows chi to zero (refused below).
-    let log10_chi =
-        Fixed::ZERO.checked_sub(a_v_magnitudes.checked_mul(attenuation_efficiency_per_mag)?)?;
-    let chi = log10_chi.checked_mul(ln10)?.exp();
-    (chi > Fixed::ZERO).then_some(chi)
+    // log10(chi) = -A_V * k. The steeper k (k_hi) gives the deeper attenuation, so it forms the lower chi edge.
+    let log10_chi_lo = Fixed::ZERO.checked_sub(a_v_magnitudes.checked_mul(estimator.k_hi)?)?;
+    let log10_chi_hi = Fixed::ZERO.checked_sub(a_v_magnitudes.checked_mul(estimator.k_lo)?)?;
+    Some(ChiEstimateBand {
+        log10_chi_lo,
+        log10_chi_hi,
+    })
 }
 
 /// The DISK ACCRETION-RATE CLOCK (the disk-evolution arc, slice 1): the Lynden-Bell-Pringle self-similar decline
@@ -7251,62 +7307,75 @@ mod tests {
     }
 
     #[test]
-    fn the_radiation_field_chi_derives_from_the_core_extinction() {
-        // chi is no longer supplied: it derives from the core's own column through the extinction. A real dark core
-        // reaches A_V ~ 50 mag (N_H ~ 5.9e22 against the Bohlin N_H/A_V = 1.87e21 per mag), and the BROADBAND
-        // dust-heating attenuation k ~ 0.08 per mag (Zucconi 2001, NOT the V-band 0.4 that would over-attenuate to
-        // 1e-20) gives chi = 10^(-50*0.08) = 1e-4, the Goldsmith Table-5 dark-core value.
+    fn the_radiation_field_chi_estimator_is_a_banded_log_domain_stand_in() {
+        // The extinction-to-chi map is graded an ESTIMATOR, not a derivation, so this test exercises its own
+        // contract (a band, monotone in A_V, live in the log domain at deep extinction) and does NOT validate a
+        // single chi against the Goldsmith dark-core value: selecting k to reproduce that value and then checking
+        // against it would be the circular target reuse the audit flagged.
+        let est = ExtinctionChiEstimator::zucconi_2001();
+        // The A_V axis derives from the core column exactly as before (that step IS a derivation, the Bohlin ratio).
         let log10_ratio = Fixed::from_ratio(2127, 100); // log10(1.87e21) ~ 21.27, the cited Bohlin ratio
         let log10_column = Fixed::from_ratio(2297, 100); // log10(9.4e22) ~ 22.97, a factor ~50 over the ratio
-        let k = Fixed::from_ratio(8, 100); // 0.08 per mag, the broadband dust-heating attenuation (Zucconi)
         let a_v = visual_extinction_magnitudes(log10_column, log10_ratio).unwrap();
         assert!(
             (a_v.to_f64_lossy() - 50.0).abs() < 1.5,
             "the column over the ratio is ~50 mag of extinction (got {})",
             a_v.to_f64_lossy()
         );
-        let chi = radiation_field_chi_from_extinction(a_v, k).unwrap();
+        // The estimate is a BAND: the steep-k edge attenuates deeper (lower chi) than the shallow-k edge.
+        let band = radiation_field_chi_estimate_from_extinction(a_v, &est).unwrap();
         assert!(
-            (chi.to_f64_lossy() / 1e-4 - 1.0).abs() < 0.1,
-            "50 mag at the broadband k=0.08 gives chi ~ 1e-4 (got {})",
-            chi.to_f64_lossy()
+            band.log10_chi_lo < band.log10_chi_hi,
+            "the steep-k edge is the lower chi ({} < {})",
+            band.log10_chi_lo.to_f64_lossy(),
+            band.log10_chi_hi.to_f64_lossy()
         );
-        // The DERIVED chi drives the coupled T_core solve to the same dark-core regime the supplied 1e-4 did.
-        let m = GoldsmithThermalModel::goldsmith_2001();
-        let fit_1e4 = LineCoolingFit {
-            log10_a: Fixed::from_ratio(-232518, 10_000),
-            b: Fixed::from_ratio(27, 10),
+        // At A_V ~ 50 the band spans about 10^(-50*0.13) to 10^(-50*0.05), i.e. log10(chi) in about -6.5 to -2.5,
+        // straddling the observed dark-core regime WITHOUT being pinned to any one target inside it.
+        assert!(
+            band.log10_chi_hi.to_f64_lossy() > -3.0 && band.log10_chi_hi.to_f64_lossy() < -2.0,
+            "the shallow-k edge log10(chi) ~ -2.5 (got {})",
+            band.log10_chi_hi.to_f64_lossy()
+        );
+        assert!(
+            band.log10_chi_lo.to_f64_lossy() > -7.0 && band.log10_chi_lo.to_f64_lossy() < -6.0,
+            "the steep-k edge log10(chi) ~ -6.5 (got {})",
+            band.log10_chi_lo.to_f64_lossy()
+        );
+        // No extinction leaves the field unattenuated: log10(chi) = 0 on both edges, chi = 1.
+        let bare = radiation_field_chi_estimate_from_extinction(Fixed::ZERO, &est).unwrap();
+        assert_eq!(bare.log10_chi_lo, Fixed::ZERO);
+        assert_eq!(bare.log10_chi_hi, Fixed::ZERO);
+        assert!((bare.linear_hi().unwrap().to_f64_lossy() - 1.0).abs() < 1e-6);
+        // Monotone: less extinction is a brighter field on the matched edge.
+        let thin = radiation_field_chi_estimate_from_extinction(Fixed::from_int(5), &est).unwrap();
+        assert!(
+            thin.log10_chi_hi > band.log10_chi_hi,
+            "less extinction is brighter"
+        );
+        // REPRESENTATION LIVENESS: a deep core past the linear fixed-point floor stays live in the LOG domain (the
+        // band is a valid, very negative log10(chi)); only the LINEAR recovery refuses, which convicts the carrier
+        // and not the core's existence. This is the alien-general behaviour the A_V=200 refusal test lacked.
+        let deep =
+            radiation_field_chi_estimate_from_extinction(Fixed::from_int(200), &est).unwrap();
+        assert!(
+            deep.log10_chi_lo.to_f64_lossy() < -20.0,
+            "a deep core has a live, very negative log10(chi) (got {})",
+            deep.log10_chi_lo.to_f64_lossy()
+        );
+        assert!(
+            deep.linear_lo().is_none(),
+            "the linear recovery is the carrier that refuses, not the estimator"
+        );
+        // Fail-loud on a negative extinction or an inverted k band.
+        assert!(radiation_field_chi_estimate_from_extinction(Fixed::from_int(-1), &est).is_none());
+        let inverted = ExtinctionChiEstimator {
+            k_lo: Fixed::from_ratio(13, 100),
+            k_hi: Fixed::from_ratio(5, 100),
         };
-        let t = cloud_core_coupled_temperatures(
-            Fixed::from_ratio(3121, 1000),
-            Fixed::from_int(10_000),
-            chi,
-            fit_1e4,
-            Fixed::from_ratio(273, 100),
-            &m,
-            Fixed::from_int(50),
-        )
-        .expect("the derived chi is a valid input to the coupled solve");
         assert!(
-            t.gas_temperature_k.to_f64_lossy() > 10.0 && t.gas_temperature_k.to_f64_lossy() < 13.0,
-            "the derived chi reproduces the ~11 K dark-core gas temperature (got {})",
-            t.gas_temperature_k.to_f64_lossy()
+            radiation_field_chi_estimate_from_extinction(Fixed::from_int(10), &inverted).is_none()
         );
-        // No extinction is the unattenuated field (chi = 1); more extinction dims it monotonically.
-        let chi_bare = radiation_field_chi_from_extinction(Fixed::ZERO, k).unwrap();
-        assert!(
-            (chi_bare.to_f64_lossy() - 1.0).abs() < 1e-6,
-            "no extinction leaves the field unattenuated (got {})",
-            chi_bare.to_f64_lossy()
-        );
-        let chi_thin = radiation_field_chi_from_extinction(Fixed::from_int(5), k).unwrap();
-        assert!(chi_thin > chi, "less extinction is a brighter field");
-        // A core past the representable floor (about A_V = 130 at the broadband k, deeper than any real dark core)
-        // drives chi below the fixed-point floor: refuse rather than round to a false zero.
-        assert!(radiation_field_chi_from_extinction(Fixed::from_int(200), k).is_none());
-        // Fail-loud on a negative extinction or a non-positive efficiency.
-        assert!(radiation_field_chi_from_extinction(Fixed::from_int(-1), k).is_none());
-        assert!(radiation_field_chi_from_extinction(Fixed::from_int(10), Fixed::ZERO).is_none());
     }
 
     #[test]
