@@ -194,6 +194,23 @@ pub fn stellar_effective_temperature(
     Some(if t_eff > t_max { t_max } else { t_eff })
 }
 
+/// The SPHERICAL-GRAIN (fast-rotator) IRRADIATION REPROCESSING FACTOR, DERIVED from geometry rather than reserved: a
+/// body that absorbs starlight on its circular cross-section `pi r^2` and re-emits isotropically over its full
+/// sphere `4 pi r^2` reprocesses `pi r^2 / (4 pi r^2)` of the incident flux per unit emitting area. The `pi` and
+/// `r^2` cancel analytically, so the factor is the EXACT rational `1/4`, the cross-section-to-sphere ratio that
+/// reproduces a planet's blackbody equilibrium temperature (the ~278 K at 1 AU anchor). ADMITS THE ALIEN: it is
+/// pure geometry, independent of the body's composition or the star's spectrum. This is what [`irradiated_disk_temperature`]
+/// and [`disk_effective_temperature`] read for a spherical-grain or fast-rotator regime, in place of an authored `1/4`.
+///
+/// HONEST LIMIT: this is the SPHERICAL case. A passive FLARED DISK intercepts starlight at a shallow grazing angle
+/// and radiates from two faces, so its reprocessing factor is the grazing-and-flaring geometry, which needs a disk
+/// vertical-structure (scale-height flaring) substrate the engine does not yet carry; that variant is a
+/// derive-later data row keyed on the disk's own flaring, not this constant.
+pub fn spherical_reprocessing_factor() -> Fixed {
+    // pi r^2 (absorbing cross-section) over 4 pi r^2 (isotropic emitting sphere): pi and r^2 cancel to the exact 1/4.
+    Fixed::from_ratio(1, 4)
+}
+
 /// The IRRADIATED-DISK (surface-equilibrium) TEMPERATURE `T_irr(r)` (K) at an orbital distance, DERIVED from
 /// irradiation balance: the disk annulus at distance `r` intercepts the stellar flux `F(r) = L/(4*pi*r^2)`
 /// ([`stellar_flux`], the same flux a world at that orbit receives), absorbs a geometry-set fraction of it, and
@@ -208,12 +225,12 @@ pub fn stellar_effective_temperature(
 ///
 /// Every per-world input is a scenario-set ARGUMENT (the admit-the-alien test): `mass_ratio`, `luminosity_exponent`
 /// (the star's mass and its mass-luminosity residue, together fixing `L`), `distance_au` (the orbit), and
-/// `reprocessing_factor`. The reprocessing factor is the reserved closure-residue of the disk's absorb-to-reradiate
-/// GEOMETRY: `1/4` for a body that absorbs on its cross-section and re-emits isotropically (the fast-rotator /
-/// spherical-grain equilibrium, the value that reproduces a planet's blackbody equilibrium temperature), a
-/// grazing-and-flaring factor for a passive flared disk that intercepts starlight at a shallow angle and radiates
-/// from two faces. Its basis is the disk (or grain) geometry of the world's regime, so a different disk structure
-/// is a data row, never a rewrite. `t_max` is the representable ceiling the fourth-root read caps at (an engine
+/// `reprocessing_factor`. The reprocessing factor is the disk's absorb-to-reradiate GEOMETRY, DERIVED not reserved:
+/// the spherical-grain / fast-rotator case is [`spherical_reprocessing_factor`], the exact cross-section-to-sphere
+/// `1/4` that reproduces a planet's blackbody equilibrium temperature; a passive flared disk that intercepts
+/// starlight at a shallow angle and radiates from two faces takes the grazing-and-flaring factor instead, keyed on
+/// the disk's own flaring (a derive-later data row when the vertical-structure substrate lands). Its basis is the
+/// disk (or grain) geometry of the world's regime, so a different disk structure is a data row, never a rewrite. `t_max` is the representable ceiling the fourth-root read caps at (an engine
 /// bound). At Earth's orbit (`mass_ratio = 1`, `distance_au = 1`, `reprocessing_factor = 1/4`) this derives the
 /// ~278 K blackbody equilibrium temperature from `L_sun`, the AU, and the derived `sigma` alone, the derive-not-fit
 /// anchor. `None` on a non-positive distance or a flux past the representable range.
@@ -4259,13 +4276,19 @@ mod tests {
         // reaches sigma*T^4 = F/4 with F ~1361 W/m^2, so T = (1361/(4 sigma))^(1/4) ~278 K, Earth's textbook
         // blackbody equilibrium temperature (the ~255 K real value is 278 K reduced by the ~0.3 albedo, which the
         // atmosphere arc supplies later; here the airless blackbody value is the DERIVED anchor). Nothing tuned:
-        // it falls out of L_sun, the AU, and the CODATA-derived sigma.
+        // it falls out of L_sun, the AU, and the CODATA-derived sigma. The reprocessing factor is DERIVED geometry
+        // (cross-section over sphere), the exact 1/4, not an authored constant.
+        assert_eq!(
+            spherical_reprocessing_factor(),
+            Fixed::from_ratio(1, 4),
+            "the cross-section-to-sphere geometry is the exact 1/4"
+        );
         let t_max = Fixed::from_int(100_000);
         let t = irradiated_disk_temperature(
             Fixed::ONE,
             Fixed::from_ratio(35, 10),
             Fixed::ONE,
-            Fixed::from_ratio(1, 4),
+            spherical_reprocessing_factor(),
             t_max,
         )
         .expect("the disk temperature derives");
