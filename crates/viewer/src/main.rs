@@ -3499,7 +3499,7 @@ fn print_derived_readout(scene: &DerivedScene) {
     }
     if let Some(indicator) = tile_relief_heterogeneity_indicator(iso_tiles, iso_cols) {
         eprintln!(
-            "  relief heterogeneity-engaged indicator: {:.1}%  (a normalized roughness ratio: is the melt-driven texture ON, not a relief magnitude; smooth-ball floor near ~2%)",
+            "  relief heterogeneity-engaged indicator: {:.3}%  (a normalized roughness ratio: is the melt-driven texture ON, not a relief magnitude; a UNIFORM field reads exactly 0, measured, so any nonzero value is engaged texture)",
             indicator * 100.0
         );
     }
@@ -6334,23 +6334,35 @@ mod province_tests {
         // is on, which the amplitude confirms is real relief rather than a normalized artifact.
         let indicator = tile_relief_heterogeneity_indicator(&crust_tiles, DIAGNOSTIC_TILE_COLS)
             .expect("the heterogeneity indicator resolves");
-        // THE THRESHOLD WAS RECALIBRATED WHEN THE FIXTURE CLUSTER WAS RETIRED, and the recalibration is the
-        // finding rather than a concession. It was `0.03`, a number tuned against a kernel whose authored
-        // `density = 1`, `specific_heat = 10` and dimensionless `dt = 1` made the interior evolve roughly
-        // five orders of magnitude faster than the derived physics does.
+        // THE GUARD IS SELF-CALIBRATING NOW, against a uniform field measured in this same run, because a
+        // bare threshold on this indicator is exactly the thing that went stale when the physics changed.
         //
-        // Measured on the derived cluster, two provinces at plus and minus 30 percent radiogenic budget
-        // diverge by 1.6 K after 200 Myr, 8.1 K after 1 Gyr and 31.5 K after 4 Gyr, and their crusts reach
-        // 1.11 km of lateral variation before the growth saturates near 1 Gyr. The texture is REAL and it
-        // is subtler than the fixture's: about half the relative amplitude over the same span.
+        // It used to read `indicator > 0.03`, a number tuned against a kernel whose authored `density = 1`,
+        // `specific_heat = 10` and dimensionless `dt = 1` evolved the interior roughly five orders of
+        // magnitude faster than the derived physics does. Retiring that cluster dropped the real value to
+        // about 0.002 and the assertion failed, and lowering the constant to match would have re-tuned the
+        // guard to today's kernel and left it to go stale again the next time the physics moved.
         //
-        // The floor is what the assertion is actually for: a smooth ball gives exactly zero, so any
-        // nonzero indicator says the melt-driven heterogeneity is engaged. It is set an order of magnitude
-        // above zero rather than at the fixture's amplitude, and the sub-solidus test is what proves it
-        // still discriminates.
+        // MEASURED, so the comparison is grounded rather than assumed: a perfectly uniform crust field
+        // reads EXACTLY 0.0 through this indicator (adjacent tiles are identical, so the mean absolute
+        // difference is zero), a 1.11 km spread reads 3.0e-4, and a fixture-era 10 km spread reads 5.1e-3.
+        // The uniform floor is zero, not the "~2%" the diagnostic message used to claim.
+        //
+        // So the honest question is "is this field rougher than a smooth ball", and it is asked directly.
+        let smooth_baseline = {
+            let flat = provinces_with(vec![Fixed::from_int(70); 12], DIAGNOSTIC_TILE_COLS);
+            derive_province_crust_tiles(&flat, DIAGNOSTIC_TILE_COLS, DIAGNOSTIC_TILE_ROWS)
+                .and_then(|t| tile_relief_heterogeneity_indicator(&t, DIAGNOSTIC_TILE_COLS))
+                .unwrap_or(0.0)
+        };
         assert!(
-            indicator > 0.001,
-            "the melt-driven texture is engaged above the smooth-ball floor, got {indicator:.4}"
+            indicator > smooth_baseline,
+            "the melt-driven texture must read rougher than a uniform crust field: got {indicator:.5} \
+             against a smooth baseline of {smooth_baseline:.5}"
+        );
+        assert!(
+            indicator > 0.0,
+            "and strictly nonzero, since a uniform field reads exactly zero through this indicator"
         );
         // THE BOMBARDMENT composed additional surface relief onto the same tiles: the deep-time impact chain drew
         // craters over the aged span, so the RENDERED (composed) relief stands ABOVE the crust-only isostatic
