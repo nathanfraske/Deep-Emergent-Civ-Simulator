@@ -1315,21 +1315,24 @@ pub fn visual_extinction_magnitudes(
 }
 
 /// The RADIATION-FIELD SCALING `chi`, DERIVED from the visual extinction, retiring the reserved `chi` the coupled
-/// cloud-core temperature solve ([`cloud_core_coupled_temperatures`]) reads. The interstellar radiation field that
-/// heats core dust is attenuated by `A_V` magnitudes of extinction to `chi = 10^(-A_V * k)`, where `k` is the
-/// extinction efficiency of the dust-heating band per magnitude of visual extinction. For a pure V-band optical
-/// attenuation `k = 1/2.5 = 0.4` EXACTLY by the definition of the magnitude scale, which reproduces the Goldsmith
-/// 2001 dark-core range: `A_V ~ 10` gives `chi ~ 1e-4`, `A_V ~ 12.5` gives `chi ~ 1e-5`. So `chi` is no longer a
-/// supplied number but a derivation off the core's own extinction.
+/// cloud-core temperature solve ([`cloud_core_coupled_temperatures`]) reads. The interstellar field that heats core
+/// dust is attenuated by the core's extinction to `chi = 10^(-A_V * k)`, where `k` is the effective attenuation
+/// efficiency of the DUST-HEATING field per magnitude of visual extinction.
 ///
-/// `k` is DERIVED for the V-band (the `0.4` is the exact magnitude-scale slope, not a reserved value); the true
-/// BROADBAND dust-heating attenuation is band-averaged and somewhat shallower (redder photons penetrate deeper), a
-/// refinement the vendored dust-attenuation source sets, so `k` is passed as a parameter with the exact V-band `0.4`
-/// as its anchor. DERIVED throughout, ADMITS THE ALIEN (keyed on the core's own extinction). Computed in the log
-/// domain since `chi` reaches `1e-4` and below. HONEST LIMIT: a very deep core (`A_V` beyond about 20 to 25 mag)
-/// drives `chi` below the fixed-point floor, where this refuses (`None`) and the deeper field needs a log-domain
-/// `chi` interface, a flagged refinement; the Goldsmith dark-core regime sits well inside the representable range.
-/// `None` on a negative extinction, a non-positive efficiency, or a `chi` that underflows the representable floor.
+/// `k` IS NOT THE V-BAND `0.4`, and that correction is the whole point (Zucconi, Walmsley and Galli 2001, vendored).
+/// The V-band flux attenuation `10^(-A_V/2.5)` grossly OVER-attenuates the dust-heating field: the interstellar
+/// radiation that heats core dust is BROADBAND (optical-NIR, far-IR, mid-IR, the cosmic background), and a dark core
+/// is optically thin to its own far-IR (`A_V << 700`), so the FIR and MIR photons penetrate deeply and carry the
+/// heating from frequencies where the optical depth is of order one, far shallower than the V band. The effective
+/// `k` is CITED-with-basis (Zucconi's broadband result), about `0.05` to `0.13` per magnitude, reproducing the
+/// Goldsmith 2001 dark-core `chi ~ 1e-4` to `1e-5` at the REAL core extinctions `A_V ~ 30` to `100` (where the
+/// wrong V-band form would force `chi ~ 1e-20`). DERIVED off the core's own extinction, ADMITS THE ALIEN, computed
+/// in the log domain (`chi` reaches `1e-4` and below). HONEST LIMIT: the true attenuation is `A_V`-dependent (it
+/// FLATTENS as the far-IR takes over, so `k` falls from about `0.13` at `A_V = 30` to about `0.05` at `A_V = 100`,
+/// a factor of a few over the dark-core range); the exact `chi(A_V)` is Zucconi's per-frequency `exp(-tau_nu)`
+/// radiative transfer, a broadband-spectral substrate to build, for which a single `k` is the first-order stand-in.
+/// `None` on a negative extinction, a non-positive efficiency, or a `chi` that underflows the representable floor
+/// (a core past about `A_V = 130` at the shallow broadband `k`, deeper than any real dark core).
 // @derives: the cloud-core radiation-field scaling chi <- the extinction attenuation 10^(-A_V*k) of the interstellar field into the core, retiring the reserved chi the coupled T_core solve read
 pub fn radiation_field_chi_from_extinction(
     a_v_magnitudes: Fixed,
@@ -1863,8 +1866,15 @@ pub struct KraftBreakBand {
     /// above which the radiative EUV branch is certain. RESERVED-with-basis (~200 K).
     pub modern_halfwidth_k: Fixed,
     /// The band's shift in K per dex of metallicity relative to the sampled composition. A FLAGGED conditioning
-    /// field, reserved-with-basis, DEFAULTING TO ZERO (no shift, the band at its solar-composition placement)
-    /// until a metallicity-dependent Kraft determination is fetched; its sign and size are unauthored here.
+    /// field, DEFAULTING TO ZERO (no shift, the band at its solar-composition placement). The literature fixes the
+    /// SIGN but not the magnitude: the break shifts UP in `T_eff` with rising [Fe/H], since a metal-rich star bears a
+    /// deeper surface convection zone and sustains it to higher mass (Amard and Matt 2020, the break mass falling
+    /// from ~1.3 to ~1.0 M_sun from [Fe/H] 0.0 to -1.0, ~+0.3 M_sun per dex; vendored). No source gives a `T_eff`
+    /// break versus [Fe/H] slope in K per dex, and Avallone et al. 2022 find the near-break rotation-metallicity
+    /// correlation is below detection in a hot main-sequence sample (an empirical upper bound; vendored). So this
+    /// stays a flagged POSITIVE-signed field with its basis recorded rather than a fabricated K-per-dex number: the
+    /// sign is known, the magnitude is under-constrained by the data, and the honest state is the documented bound, not
+    /// a set value.
     pub metallicity_shift_k_per_dex: Fixed,
 }
 
@@ -2162,13 +2172,16 @@ pub fn mean_ionizing_photon_energy_over_edge(
 /// The RADIATIVE-ENVELOPE EUV luminosity BRACKET (`L_sun`): the ionizing luminosity that drives photoevaporation
 /// for a dynamo-dark [`EnvelopeStructure::Radiative`] star, DERIVED from `T_eff` and `L_bol` as `L_bol *
 /// f_BB(T_eff)` (the blackbody ionizing baseline, [`blackbody_ionizing_fraction`]) times an ATMOSPHERE-MODEL
-/// DEPARTURE BAND `[departure_lo, departure_hi]` that spans orders of magnitude: line blanketing, NLTE, and wind
-/// blanketing lift the real EUV off the LTE baseline by decades, and the departure IS the quantity, not a
-/// correction. Per RIDER 2 the branch ships the BRACKET and its width is readable through
-/// [`EuvLuminosityBracket::width_dex`] before a consumer reads the bounds: a decade-wide ignorance that reaches
-/// the dispersal race as a single value is the exact defect the bracket prevents. The departure band is
-/// reserved-with-basis and unconstrained-by-source until a hot-star atmosphere-model grid is fetched. `None` on a
-/// non-positive input or an inverted band.
+/// DEPARTURE BAND `[departure_lo, departure_hi]`: line blanketing, NLTE, and the metal and helium ionization edges
+/// SUPPRESS the real ionizing flux BELOW the LTE blackbody baseline, deepening toward cooler `T_eff`, and the
+/// departure IS the quantity, not a correction. Per RIDER 2 the branch ships the BRACKET and its width is readable
+/// through [`EuvLuminosityBracket::width_dex`] before a consumer reads the bounds: a decade-wide ignorance that
+/// reaches the dispersal race as a single value is the exact defect the bracket prevents. The band is now
+/// PART-CONSTRAINED by a vendored grid (Sternberg, Hoffmann and Pauldrach 2003, WM-basic NLTE): for `T_eff` 25000
+/// to 55000 K (O and early-B) the suppression is within about 0.1 to 0.2 dex above 45000 K, widening to of order 1
+/// dex at the 26000 to 30000 K edge, so `departure ~ 0.1` to `1`. BELOW 25000 K (the Herbig Ae/Be regime where the
+/// radiative dispatch mostly lives) it stays UNCONSTRAINED and deeper, pending a cooler grid (BSTAR2006, Lanz and
+/// Hubeny 2007), the flagged honest limit. `None` on a non-positive input or an inverted band.
 pub fn radiative_euv_luminosity_bracket(
     t_eff_k: Fixed,
     l_bol_lsun: Fixed,
@@ -7065,22 +7078,23 @@ mod tests {
 
     #[test]
     fn the_radiation_field_chi_derives_from_the_core_extinction() {
-        // chi is no longer supplied: it derives from the core's own column through the extinction. A core with
-        // N_H = 1.87e22 per cm^2 against the Bohlin N_H/A_V = 1.87e21 per cm^2 per mag has A_V = 10 mag, and the
-        // V-band attenuation k = 0.4 gives chi = 10^(-10*0.4) = 1e-4, the Goldsmith Table-5 dark-core value.
+        // chi is no longer supplied: it derives from the core's own column through the extinction. A real dark core
+        // reaches A_V ~ 50 mag (N_H ~ 5.9e22 against the Bohlin N_H/A_V = 1.87e21 per mag), and the BROADBAND
+        // dust-heating attenuation k ~ 0.08 per mag (Zucconi 2001, NOT the V-band 0.4 that would over-attenuate to
+        // 1e-20) gives chi = 10^(-50*0.08) = 1e-4, the Goldsmith Table-5 dark-core value.
         let log10_ratio = Fixed::from_ratio(2127, 100); // log10(1.87e21) ~ 21.27, the cited Bohlin ratio
-        let log10_column = Fixed::from_ratio(2227, 100); // log10(1.87e22) ~ 22.27, a factor 10 over the ratio
-        let k = Fixed::from_ratio(2, 5); // 0.4 = 1/2.5, the exact V-band magnitude slope
+        let log10_column = Fixed::from_ratio(2297, 100); // log10(9.4e22) ~ 22.97, a factor ~50 over the ratio
+        let k = Fixed::from_ratio(8, 100); // 0.08 per mag, the broadband dust-heating attenuation (Zucconi)
         let a_v = visual_extinction_magnitudes(log10_column, log10_ratio).unwrap();
         assert!(
-            (a_v.to_f64_lossy() - 10.0).abs() < 0.3,
-            "a tenfold column over the ratio is 10 mag of extinction (got {})",
+            (a_v.to_f64_lossy() - 50.0).abs() < 1.5,
+            "the column over the ratio is ~50 mag of extinction (got {})",
             a_v.to_f64_lossy()
         );
         let chi = radiation_field_chi_from_extinction(a_v, k).unwrap();
         assert!(
-            (chi.to_f64_lossy() / 1e-4 - 1.0).abs() < 0.05,
-            "10 mag at k=0.4 gives chi ~ 1e-4 (got {})",
+            (chi.to_f64_lossy() / 1e-4 - 1.0).abs() < 0.1,
+            "50 mag at the broadband k=0.08 gives chi ~ 1e-4 (got {})",
             chi.to_f64_lossy()
         );
         // The DERIVED chi drives the coupled T_core solve to the same dark-core regime the supplied 1e-4 did.
@@ -7113,8 +7127,9 @@ mod tests {
         );
         let chi_thin = radiation_field_chi_from_extinction(Fixed::from_int(5), k).unwrap();
         assert!(chi_thin > chi, "less extinction is a brighter field");
-        // A very deep core drives chi below the fixed-point floor: refuse rather than round to a false zero.
-        assert!(radiation_field_chi_from_extinction(Fixed::from_int(80), k).is_none());
+        // A core past the representable floor (about A_V = 130 at the broadband k, deeper than any real dark core)
+        // drives chi below the fixed-point floor: refuse rather than round to a false zero.
+        assert!(radiation_field_chi_from_extinction(Fixed::from_int(200), k).is_none());
         // Fail-loud on a negative extinction or a non-positive efficiency.
         assert!(radiation_field_chi_from_extinction(Fixed::from_int(-1), k).is_none());
         assert!(radiation_field_chi_from_extinction(Fixed::from_int(10), Fixed::ZERO).is_none());
