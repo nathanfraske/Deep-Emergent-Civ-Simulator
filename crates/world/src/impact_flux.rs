@@ -34,15 +34,22 @@
 //! the number of bodies is dominated by the small end (`p > 1`) and the mass by the large end (`p < 4`): the
 //! reservoir is a swarm of small bodies carrying its mass in a few large ones. The cumulative fractions above a
 //! size are formed in size RATIOS to the largest body, so the absolute sizes (metres to thousands of
-//! kilometres) never enter fixed point; a size range too wide for the fixed-point range fails soft (the named
-//! log-space refinement) rather than overflowing.
+//! kilometres) never enter fixed point.
+//!
+//! That ratio staging has a WIDTH LIMIT, and it is tighter than it looks. A fraction needs `u^(1-p)` inside the
+//! fixed-point range, so it holds only while `(p - 1) * ln(max/min)` stays under the `exp` window of about 22:
+//! roughly 3.8 decades of size at the Dohnanyi slope, less at a steeper one. Past that the power SATURATES, and
+//! saturation is silent, so the fractions now refuse instead (see `unsaturated_powf`); before that guard they
+//! returned a confidently wrong number. The LOG-SPACE form is the answer for the quantity that most needs the
+//! range, the number-weighted mean body mass ([`ln_mean_cube_size_ratio`]), which carries any width the size
+//! bounds can express and is what a reservoir's physical body count is derived from.
 //!
 //! Admit-the-alien (a prime directive): every input is the reservoir's or the world's own datum (the sweep-up
 //! timescale, the cascade slope, the size bounds). A different disk, a captured swarm, or a late instability
 //! delivering a distinct population are each a different set of numbers through the same law, not a new code
 //! path. Determinism (Principle 3, Principle 10): fixed-point throughout, the pinned [`Fixed::exp`] and
-//! [`Fixed::powf`], staged in ratios so no physical intermediate rails; a non-physical input fails soft to
-//! `None`, never a fabricated flux.
+//! [`Fixed::powf`], staged in ratios or in logs so a physical intermediate that would rail is caught rather than
+//! saturated; a non-physical or unstageable input fails soft to `None`, never a fabricated flux.
 
 use civsim_core::Fixed;
 
@@ -140,7 +147,7 @@ pub fn size_at_number_fraction(
     // (since `umin < 1` and `e < 0`), so the span `umin^e - 1` is positive and `u^e = 1 + f (umin^e - 1)` runs
     // from 1 (at `f = 0`, size `= max_size`) up to `umin^e` (at `f = 1`, size `= min_size`).
     let umin = min_size.checked_div(max_size)?;
-    let umin_e = umin.powf(exponent);
+    let umin_e = unsaturated_powf(umin, exponent)?;
     let span = umin_e.checked_sub(Fixed::ONE)?;
     if span <= Fixed::ZERO {
         // A degenerate single-size reservoir (`min_size == max_size`): no distribution to draw from.
@@ -149,8 +156,131 @@ pub fn size_at_number_fraction(
     let u_e = Fixed::ONE.checked_add(fraction.checked_mul(span)?)?;
     // Invert the power: `u = (u^e)^(1/e)`. The base `u_e >= 1 > 0`, so `powf` is well-defined; `1/e < 0`.
     let inv_exponent = Fixed::ONE.checked_div(exponent)?;
-    let u = u_e.powf(inv_exponent);
+    let u = unsaturated_powf(u_e, inv_exponent)?;
     u.checked_mul(max_size)
+}
+
+/// `x^e`, refusing where the pinned [`Fixed::powf`] would SATURATE rather than answer. `powf` composes
+/// `exp(e * ln x)` and [`Fixed::exp`] rails to [`Fixed::MAX`] above an argument near 22, so a size ratio raised to
+/// a steep negative exponent returns the fixed-point ceiling in place of a number decades larger: over six decades
+/// of size at the Dohnanyi slope the true `u^(1-p)` is ~1e15 against a ceiling of ~2.1e9, and the cumulative
+/// fraction built from it came back 4.7e5 times too large (5.7 orders of magnitude) with no signal. Reading the
+/// saturation sentinel back (rather than restating `exp`'s window here, which would be a second copy of a constant
+/// that lives in the numeric type) makes the ratio staging's documented fail-soft real: a size range too wide to
+/// stage returns `None`, and [`ln_mean_cube_size_ratio`] is the log-space form that carries the same range.
+fn unsaturated_powf(x: Fixed, exponent: Fixed) -> Option<Fixed> {
+    if x <= Fixed::ZERO {
+        return None;
+    }
+    let power = x.powf(exponent);
+    if power >= Fixed::MAX {
+        return None;
+    }
+    Some(power)
+}
+
+/// The natural log of the NUMBER-WEIGHTED MEAN CUBE of body size, as a ratio to the largest body's cube:
+/// `ln(<D^3> / max_size^3)` for the differential power law `dN/dD = D^(-p)` over `[min_size, max_size]`. Derived
+/// ANALYTICALLY from the power law (a ratio of two closed-form integrals) rather than sampled, so it carries no
+/// draw noise and no iteration count. Where a reservoir's bodies share a bulk density and shape, the density and
+/// the shape factor CANCEL out of this ratio, so it is equally the mean body MASS as a fraction of the largest
+/// body's mass: that is how a reservoir's physical body COUNT reads it, as reservoir mass over largest-body mass
+/// over this ratio.
+///
+/// Returned in LOG space because the linear ratio sinks through the fixed-point floor: a 100 m to 100 km reservoir
+/// at the Dohnanyi slope puts it at `1.5e-7`, about 658 units of the `~2.3e-10` grid; one more decade of range
+/// leaves 2 units, and two more decades put it under the grid entirely. The log stays comfortable at every width
+/// the size bounds can express, so this helper is the log-space refinement the ratio-staged siblings above name.
+///
+/// THE ALGEBRA. With `u = min_size/max_size` and `T(e) = (1 - u^e) / e` (the integral `int D^(e-1) dD` over the
+/// range, divided by `max_size^e`), the number-weighted mean cube is `T(4 - p) / T(1 - p)`; the `max_size^e`
+/// factors cancel to exactly `max_size^3`, so only `u` and the slope enter and the absolute sizes never reach
+/// fixed point. `T` takes three explicit branches, one per SIGN of its exponent, because the sign is which end of
+/// the size range carries the integral and the two ends need different staging:
+///
+/// - `e > 0`, the LARGE end carries it: `u^e` lies in `(0, 1)`, so `ln T = ln(1 - u^e) - ln(e)` stages directly.
+/// - `e < 0`, the SMALL end carries it: `u^e` is large and rails the fixed-point range, so the dominant end is
+///   factored out first, `T(e) = u^e * (1 - u^(-e)) / (-e)`, giving `ln T = e*ln(u) + ln(1 - u^(-e)) - ln(-e)`
+///   with every term representable however small `u` is.
+/// - `e = 0`, the DEGENERATE exponent (`p = 4` in the numerator, `p = 1` in the denominator): the power rule has
+///   no antiderivative there and the integral is a logarithm instead, `int D^(-1) dD = ln(max_size/min_size)`, so
+///   `ln T = ln(-ln u)`. It is also the continuous limit of both branches above, so the three agree where they
+///   meet and a slope approaching 1 or 4 does not jump.
+///
+/// CONVERGENCE, stated precisely because it is NOT the condition the two fraction helpers above guard: over a
+/// BOUNDED range with `min_size > 0` both integrals are finite for EVERY slope, so this helper does not refuse on
+/// the slope, and a cascade steeper than 4 (the mean cube then sitting just above `min_size`) is a valid data row.
+/// The divergences that gate [`number_fraction_above_size`] at `p <= 1` and [`mass_fraction_above_size`] at
+/// `p >= 4` belong to the UNBOUNDED idealizations, `min_size -> 0` and `max_size -> infinity`; the first is
+/// reached here as `min_size <= 0`, which refuses.
+///
+/// `None` on non-physical or disordered sizes (a non-positive bound, or `min_size` above `max_size`), on a size
+/// ratio the fixed-point grid cannot resolve (`u` underflowing to zero past about nine decades of range, or `u`
+/// so near one that `1 - u^e` collapses to nothing), or on a product past the representable range. An EXACTLY
+/// degenerate reservoir (`min_size == max_size`, a swarm of identical bodies) is not a refusal: every body is
+/// `max_size`, so the mean cube ratio is exactly one and its log exactly zero.
+pub fn ln_mean_cube_size_ratio(
+    min_size: Fixed,
+    max_size: Fixed,
+    differential_slope: Fixed,
+) -> Option<Fixed> {
+    if min_size <= Fixed::ZERO || max_size <= Fixed::ZERO || min_size > max_size {
+        return None;
+    }
+    if min_size == max_size {
+        // A single-size reservoir: every body is `max_size`, so the mean cube ratio is exactly one.
+        return Some(Fixed::ZERO);
+    }
+    let u = min_size.checked_div(max_size)?;
+    if u <= Fixed::ZERO {
+        return None; // the ratio underflowed the fixed-point grid: the size range is too wide to stage
+    }
+    let ln_u = u.ln();
+    if ln_u >= Fixed::ZERO {
+        return None; // `u` rounded to one: the two bounds are within a fixed-point step of each other
+    }
+    // The number-weighted mean of `D^3` is `int D^(3-p) dD / int D^(-p) dD`, so the two exponents are `4 - p`
+    // (the numerator's `D^(e-1)` form) and `1 - p`.
+    let numerator =
+        ln_power_law_integral(ln_u, Fixed::from_int(4).checked_sub(differential_slope)?)?;
+    let denominator = ln_power_law_integral(ln_u, Fixed::ONE.checked_sub(differential_slope)?)?;
+    numerator.checked_sub(denominator)
+}
+
+/// `ln T(e)` for `T(e) = (1 - u^e)/e` (and `T(0) = -ln u`), the log of the power-law integral
+/// `int_{min_size}^{max_size} D^(e-1) dD` divided by `max_size^e`, taken from `ln u` alone so the absolute sizes
+/// never enter. The three branches and their staging are documented on [`ln_mean_cube_size_ratio`]. Requires
+/// `ln_u < 0` (a strictly ordered range), which the caller guarantees. `None` if a product leaves the
+/// representable range or if a `1 - u^e` term collapses to nothing on the fixed-point grid.
+fn ln_power_law_integral(ln_u: Fixed, exponent: Fixed) -> Option<Fixed> {
+    // `u^e` as `exp(e * ln u)` from the log already taken. The product is CHECKED because `Fixed::powf` forms the
+    // same product with the wrapping `mul`, which would turn an extreme exponent into a plausible wrong answer
+    // rather than a refusal. Both call sites below pass a POSITIVE exponent against a negative `ln u`, so the
+    // argument is always negative and `exp` can only underflow toward zero, never saturate at the maximum; an
+    // underflow to zero is the correct limit (`u^e` vanishing leaves `1 - u^e = 1`).
+    let power = |e: Fixed| -> Option<Fixed> { Some(e.checked_mul(ln_u)?.exp()) };
+    if exponent == Fixed::ZERO {
+        // The degenerate exponent: the integral is `ln(max_size/min_size) = -ln u`, positive for an ordered range.
+        return Some(Fixed::ZERO.checked_sub(ln_u)?.ln());
+    }
+    if exponent > Fixed::ZERO {
+        // The large end carries the integral; `u^e` is in `(0, 1)` and needs no factoring.
+        let head = Fixed::ONE.checked_sub(power(exponent)?)?;
+        if head <= Fixed::ZERO {
+            return None;
+        }
+        return head.ln().checked_sub(exponent.ln());
+    }
+    // The small end carries the integral: factor the dominant `u^e` out so nothing large is ever formed.
+    let flipped = Fixed::ZERO.checked_sub(exponent)?;
+    let head = Fixed::ONE.checked_sub(power(flipped)?)?;
+    if head <= Fixed::ZERO {
+        return None;
+    }
+    exponent
+        .checked_mul(ln_u)?
+        .checked_add(head.ln())?
+        .checked_sub(flipped.ln())
 }
 
 /// The shared cumulative-fraction-above-size kernel for the power-law distribution, in ratios to `max_size`.
@@ -173,8 +303,8 @@ fn fraction_above(
     }
     let u = size.checked_div(max_size)?;
     let umin = min_size.checked_div(max_size)?;
-    let u_e = u.powf(exponent);
-    let umin_e = umin.powf(exponent);
+    let u_e = unsaturated_powf(u, exponent)?;
+    let umin_e = unsaturated_powf(umin, exponent)?;
     let (numer, denom) = if negative_exponent {
         // u^e >= 1 for u <= 1 and e < 0; the fraction is (u^e - 1)/(umin^e - 1).
         (
@@ -321,14 +451,35 @@ mod tests {
     fn the_alien_reservoir_is_a_data_row() {
         // A steeper cascade (p = 3.8) and a different size range: the same law, a finite split. No Terran
         // assumption blocks it.
+        let slope = Fixed::from_ratio(38, 10);
         let n = number_fraction_above_size(
             Fixed::from_int(5000),
             Fixed::from_int(50),
-            Fixed::from_int(500_000),
-            Fixed::from_ratio(38, 10),
+            Fixed::from_int(50_000),
+            slope,
         )
         .expect("an alien reservoir resolves");
         assert!(n > Fixed::ZERO && n < Fixed::ONE, "a finite size fraction");
+        // The ratio staging has a WIDTH limit, and it is tighter than it looks: the fraction needs `u^(1-p)`
+        // inside the fixed-point range, which holds while `(p - 1) * ln(max/min)` stays under `exp`'s window of
+        // about 22, so a p = 3.8 cascade can span about 3.4 decades of size and no more. This alien reservoir at
+        // four decades is past it, and it REFUSES rather than answering from a railed power (it previously
+        // answered, wrongly). The reservoir is still a data row: the quantity a body count needs, the
+        // number-weighted mean cube, has a log-space form that carries this range and every wider one.
+        assert!(
+            number_fraction_above_size(
+                Fixed::from_int(5000),
+                Fixed::from_int(50),
+                Fixed::from_int(500_000),
+                slope
+            )
+            .is_none(),
+            "four decades of size is past the linear ratio staging, so it refuses"
+        );
+        assert!(
+            ln_mean_cube_size_ratio(Fixed::from_int(50), Fixed::from_int(500_000), slope).is_some(),
+            "the log-space mean carries the same four-decade alien reservoir"
+        );
     }
 
     #[test]
@@ -399,6 +550,184 @@ mod tests {
         assert!(size_at_number_fraction(Fixed::from_int(-1), dmin(), dmax(), slope()).is_none());
         assert!(
             size_at_number_fraction(Fixed::from_ratio(1, 2), dmin(), dmin(), slope()).is_none()
+        );
+    }
+
+    /// The number-weighted mean cube by direct QUADRATURE over the power law, an independent arithmetic path
+    /// that never touches the closed form under test: a Riemann sum in log-size (so a nine-decade range costs no
+    /// more than a one-decade one), with `dD = D dx` under the substitution `D = exp(x)`. Returns the mean cube
+    /// as a ratio to `max_size^3`, taking `u = min_size/max_size` and the slope, the same two numbers the
+    /// analytic form reads.
+    fn mean_cube_by_quadrature(u: f64, p: f64) -> f64 {
+        let (lo, hi, n) = (u.ln(), 0.0_f64, 200_000);
+        let h = (hi - lo) / n as f64;
+        let (mut num, mut den) = (0.0_f64, 0.0_f64);
+        for i in 0..n {
+            let d = (lo + h * (i as f64 + 0.5)).exp();
+            let weight = d.powf(-p) * d * h;
+            den += weight;
+            num += weight * d * d * d;
+        }
+        num / den
+    }
+
+    #[test]
+    fn the_mean_cube_matches_an_independent_quadrature() {
+        // The numerical twin for the analytic mean: four size ranges and slopes spanning both signs of both
+        // exponents, each against the quadrature above. This validates the closed form and its branch staging;
+        // the Dohnanyi citation and the end-dominance test below carry the physics.
+        for &(num, den, slope_num, slope_den) in &[
+            (1i64, 1000i64, 35i64, 10i64), // the Dohnanyi cascade over three decades
+            (1, 100, 20, 10), // a shallow slope: both exponents change sign against the case above
+            (1, 1000, 50, 10), // steeper than four: the mean cube collapses onto the small end
+            (1, 4, 35, 10),   // a narrow range: the whole reservoir within a factor of four
+        ] {
+            let (u, p) = (num as f64 / den as f64, slope_num as f64 / slope_den as f64);
+            let reference = mean_cube_by_quadrature(u, p).ln();
+            let got = ln_mean_cube_size_ratio(
+                Fixed::from_ratio(num, den),
+                Fixed::ONE,
+                Fixed::from_ratio(slope_num, slope_den),
+            )
+            .expect("the mean cube resolves")
+            .to_f64_lossy();
+            assert!(
+                (got - reference).abs() < 1e-3,
+                "ln mean cube for u={u} p={p}: got {got}, quadrature twin {reference}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_degenerate_exponents_take_the_logarithmic_closed_form() {
+        // The two slopes where the power rule has no antiderivative and the integral becomes a logarithm:
+        // p = 4 zeroes the numerator's exponent and p = 1 zeroes the denominator's. Both are evaluated against
+        // the same independent quadrature, so the degenerate branch is proven rather than asserted.
+        for &(slope, u) in &[(4i64, 1e-3_f64), (1, 1e-3)] {
+            let reference = mean_cube_by_quadrature(u, slope as f64).ln();
+            let got = ln_mean_cube_size_ratio(
+                Fixed::from_ratio(1, 1000),
+                Fixed::ONE,
+                Fixed::from_int(slope as i32),
+            )
+            .expect("the degenerate exponent resolves")
+            .to_f64_lossy();
+            assert!(
+                (got - reference).abs() < 1e-3,
+                "the p={slope} logarithmic form: got {got}, quadrature twin {reference}"
+            );
+        }
+        // The branches JOIN: a slope a thousandth away from each degenerate value lands within a thousandth of
+        // it, so a cascade near 1 or 4 does not jump between the logarithmic and the power branch.
+        for &(exact, near) in &[(4000i64, 3999i64), (1000, 1001)] {
+            let a = ln_mean_cube_size_ratio(
+                Fixed::from_ratio(1, 1000),
+                Fixed::ONE,
+                Fixed::from_ratio(exact, 1000),
+            )
+            .expect("resolves")
+            .to_f64_lossy();
+            let b = ln_mean_cube_size_ratio(
+                Fixed::from_ratio(1, 1000),
+                Fixed::ONE,
+                Fixed::from_ratio(near, 1000),
+            )
+            .expect("resolves")
+            .to_f64_lossy();
+            assert!(
+                (a - b).abs() < 1e-2,
+                "the degenerate branch joins its neighbour: p={} gives {a}, p={} gives {b}",
+                exact as f64 / 1000.0,
+                near as f64 / 1000.0
+            );
+        }
+    }
+
+    #[test]
+    fn the_slope_decides_which_end_of_the_range_carries_the_mass() {
+        // The physical content of the exponent's sign. Read as a diameter, the mean cube is
+        // `Dbar = max_size * exp(ln_mean_cube / 3)`. A cascade steeper than four puts the mass at the SMALL end,
+        // so `Dbar` sits just above `min_size`; a shallow cascade puts it at the LARGE end, so `Dbar` climbs far
+        // above `min_size`. Over a three-decade range (`min_size` a thousandth of `max_size`) the computed
+        // multiples of `min_size` are ~1.6 at p=5, ~5.4 at p=3.5, and ~79 at p=2, monotone in the slope.
+        let mut previous = 0.0_f64;
+        for (slope, expected_multiple) in [(50i64, 1.585_f64), (35, 5.353), (20, 79.43)] {
+            let ln_mean = ln_mean_cube_size_ratio(
+                Fixed::from_ratio(1, 1000),
+                Fixed::ONE,
+                Fixed::from_ratio(slope, 10),
+            )
+            .expect("resolves")
+            .to_f64_lossy();
+            // `Dbar` in units of `min_size`, which is a thousandth of `max_size`.
+            let multiple = (ln_mean / 3.0).exp() * 1000.0;
+            assert!(
+                (multiple - expected_multiple).abs() / expected_multiple < 0.01,
+                "at p={} the mean-cube diameter is {expected_multiple} times the smallest body, got {multiple}",
+                slope as f64 / 10.0
+            );
+            assert!(
+                multiple > previous,
+                "walking the slope down from 5 to 2 moves the mean cube off the small end toward the large"
+            );
+            previous = multiple;
+        }
+    }
+
+    #[test]
+    fn the_log_form_resolves_a_range_that_rails_the_linear_fractions() {
+        // The reason the mean is exported in LOG space, and the reason the ratio powers are now guarded. Over six
+        // decades of size at the Dohnanyi slope the ratio power `u^(1-p)` is ~1e15 against a fixed-point ceiling
+        // of ~2.1e9, so the linear cumulative fraction cannot hold the range: before the saturation guard it
+        // answered 1.5e-2 at a probe size where the true fraction is 3.2e-8, five orders of magnitude high and
+        // with no signal that anything had failed. It now refuses. The log form carries the same reservoir and
+        // still matches the independent quadrature.
+        let (umin, slope) = (Fixed::from_ratio(1, 1_000_000), Fixed::from_ratio(35, 10));
+        assert!(
+            number_fraction_above_size(Fixed::from_ratio(1, 1000), umin, Fixed::ONE, slope)
+                .is_none(),
+            "a six-decade size range refuses rather than returning a railed fraction"
+        );
+        let ln_mean = ln_mean_cube_size_ratio(umin, Fixed::ONE, slope)
+            .expect("the log form resolves the same range")
+            .to_f64_lossy();
+        let reference = mean_cube_by_quadrature(1e-6, 3.5).ln();
+        assert!(
+            (ln_mean - reference).abs() < 1e-3,
+            "the log form over six decades: got {ln_mean}, quadrature twin {reference}"
+        );
+    }
+
+    #[test]
+    fn the_mean_cube_refuses_the_non_physical_and_answers_the_degenerate() {
+        let slope = slope();
+        // Non-physical or disordered bounds have no distribution to average over.
+        assert!(ln_mean_cube_size_ratio(Fixed::ZERO, Fixed::ONE, slope).is_none());
+        assert!(ln_mean_cube_size_ratio(Fixed::from_int(-1), Fixed::ONE, slope).is_none());
+        assert!(ln_mean_cube_size_ratio(Fixed::ONE, Fixed::ZERO, slope).is_none());
+        assert!(ln_mean_cube_size_ratio(Fixed::from_int(2), Fixed::ONE, slope).is_none());
+        // A size ratio under the fixed-point grid (twelve decades of range) cannot be staged.
+        assert!(
+            ln_mean_cube_size_ratio(Fixed::EPSILON, Fixed::from_int(1000), slope).is_none(),
+            "a size ratio that underflows the grid refuses rather than returning a number"
+        );
+        // A single-size reservoir is NOT a refusal: every body is the largest, so the mean cube ratio is one.
+        assert_eq!(
+            ln_mean_cube_size_ratio(dmax(), dmax(), slope),
+            Some(Fixed::ZERO),
+            "a swarm of identical bodies has a mean cube ratio of exactly one"
+        );
+        // Over a bounded range the integrals converge at EVERY slope, so a slope the cumulative fractions refuse
+        // still yields a mean: this helper does not inherit their unbounded-idealization guards.
+        assert!(
+            number_fraction_above_size(dmin(), dmin(), dmax(), Fixed::from_ratio(5, 10)).is_none()
+                && ln_mean_cube_size_ratio(dmin(), dmax(), Fixed::from_ratio(5, 10)).is_some(),
+            "a slope below one has no cumulative fraction but does have a bounded-range mean"
+        );
+        assert!(
+            mass_fraction_above_size(dmin(), dmin(), dmax(), Fixed::from_int(4)).is_none()
+                && ln_mean_cube_size_ratio(dmin(), dmax(), Fixed::from_int(4)).is_some(),
+            "a slope at four has no cumulative mass fraction but does have a bounded-range mean"
         );
     }
 
