@@ -105,6 +105,14 @@ def archive_of(block):
     return block.get("archived_url") or block.get("archive_url")
 
 
+# The custody vocabulary, closed on purpose. A value outside it is a DEFECT rather than a new category:
+# every branch below dispatches on custody, so an unrecognised one silently skips the witness receipt
+# check AND the licence rule at once. That is not hypothetical. A source declaring `custody = "in_reop"`
+# with `sha256 = "anything"` and `archived_url = "not a URL"` passed this gate clean, because the typo
+# matched no branch and so answered to none of them.
+VALID_CUSTODY = ("in_repo", "external", "witness")
+
+
 def infer_custody(block):
     """Where the bytes are. An explicit `custody` wins; otherwise infer from the holding path, because the
     27 migrated entries predate the field.
@@ -115,6 +123,8 @@ def infer_custody(block):
     """
     explicit = block.get("custody")
     if explicit:
+        # Returned as-is; `check_source` convicts an unrecognised value rather than this function
+        # guessing, so the failure names the field the author actually wrote.
         return explicit
     holding = block.get("holding")
     if not holding:
@@ -142,14 +152,51 @@ def check_source(block, custody):
     """
     failures = []
 
+    # THE CUSTODY VOCABULARY FIRST, because every check after this dispatches on it. An unrecognised
+    # custody is not a stricter or looser entry, it is an entry that answers to NO rule.
+    if custody not in VALID_CUSTODY:
+        failures.append("custody-vocabulary")
+
+    # A MULTI-FILE SOURCE points at a manifest carrying one receipt per held file, instead of one digest
+    # for a thing that is not one file. The pointer is VALIDATED rather than trusted: the manifest must
+    # exist and must actually contain well-formed digests. Before this rule the two multi-file entries
+    # carried a SENTENCE in the `sha256` field claiming receipts were "recorded row by row", and for one of
+    # them no row carried one. A pointer nobody follows is the same as no receipt.
+    manifest_rel = str(block.get("sha256_manifest", "")).strip()
+    if manifest_rel:
+        manifest = ROOT / manifest_rel
+        if not manifest.is_file():
+            failures.append("sha256-manifest-missing")
+        else:
+            text = manifest.read_text(errors="replace")
+            digests = re.findall(r'sha256\s*=\s*"([0-9a-fA-F]{64})"', text)
+            if not digests:
+                failures.append("sha256-manifest-empty")
+
+    # A CHECKSUM MUST LOOK LIKE ONE. The gate cannot verify a hash whose bytes it does not hold, but it can
+    # refuse a string that is not a SHA-256 at all: the literal "anything" passed as a receipt before this.
+    sha = str(block.get("sha256", "")).strip()
+    if sha and (len(sha) != 64 or any(c not in "0123456789abcdefABCDEF" for c in sha)):
+        failures.append("sha256-format")
+
+    # AN ARCHIVE URL MUST BE A URL. The witness is the whole receipt for a citation-plus-witness holding,
+    # so "not a URL" recorded there is a receipt for nothing.
+    archive = str(archive_of(block) or "").strip()
+    if archive and not (archive.startswith("http://") or archive.startswith("https://")):
+        failures.append("archive-url-syntax")
+
     if custody == "witness":
         # The witness IS the receipt here. A witness with no retrievable archive and no checksum is the
         # "entry with neither" case the ruling names as the failure.
-        if not archive_of(block) and not block.get("sha256"):
+        if (
+            not archive_of(block)
+            and not block.get("sha256")
+            and not block.get("sha256_manifest")
+        ):
             failures.append("witness-receipt")
         if not str(block.get("licence", "")).strip():
             failures.append("licence-reason")
-    elif not block.get("sha256"):
+    elif not block.get("sha256") and not block.get("sha256_manifest"):
         failures.append("sha256")
 
     if not archive_of(block) and not str(block.get("archive_pending", "")).strip():
@@ -184,9 +231,30 @@ def check_source(block, custody):
     return failures
 
 
-def check_claim(claim):
-    """A claim needs a primary AND at least one secondary: two independent witnesses for one number."""
+def check_claim(claim, known_ids=None):
+    """A claim needs a primary AND at least one secondary: two independent witnesses for one number.
+
+    INDEPENDENT is the operative word, and it was not being checked. Naming the SAME source in both lists
+    satisfies "nonempty and nonempty" while providing one witness twice, which is the source checking
+    itself. Four claims in this repository did exactly that. Both lists must also RESOLVE: a claim citing
+    an id no source block defines is a citation of nothing, and `["ghost"]` passed before this.
+    """
     failures = []
+    primary = [str(x) for x in (claim.get("primary") or [])]
+    secondary = [str(x) for x in (claim.get("secondary") or [])]
+    if known_ids is not None:
+        for cited in primary + secondary:
+            if cited not in known_ids:
+                failures.append(f"unresolved-source:{cited}")
+    if primary and secondary and set(primary) == set(secondary):
+        failures.append("witnesses-not-independent")
+    # A SINGLE-WITNESS CLAIM IS ALLOWED TO SAY SO. Requiring a secondary unconditionally is what produced
+    # four claims naming the primary twice: the schema had no way to state "one witness exists", so the
+    # slot was filled with a copy and the cross-check became the source checking itself. A declared reason
+    # is a weaker claim than two witnesses and a far stronger one than a fake second, because it is TRUE
+    # and it is visible to anyone reading the manifest.
+    if primary and not secondary and str(claim.get("single_witness_reason", "")).strip():
+        return failures
     if not claim.get("primary"):
         failures.append("primary")
     if not claim.get("secondary"):
@@ -414,6 +482,8 @@ def run_checks(entries, baseline, claims, markers, row_refs):
     """(unwaived_failures, waived_count, unresolved_ids). Pure over its inputs."""
     unwaived = []
     waived = 0
+    # Hoisted above the claim loop so a claim can be checked for RESOLUTION, not merely nonemptiness.
+    known = {sid for sid, _ in entries}
     for sid, block in entries:
         custody = infer_custody(block)
         for check in check_source(block, custody):
@@ -423,7 +493,7 @@ def run_checks(entries, baseline, claims, markers, row_refs):
                 unwaived.append((sid, check))
 
     for label, claim in claims:
-        for failure in check_claim(claim):
+        for failure in check_claim(claim, known):
             cid = claim.get("id", "(unnamed claim)")
             key = (f"{label}:{cid}", "secondary")
             if key in baseline:
@@ -431,7 +501,6 @@ def run_checks(entries, baseline, claims, markers, row_refs):
             else:
                 unwaived.append((f"{label}:{cid}", f"claim-{failure}"))
 
-    known = {sid for sid, _ in entries}
     unresolved = []
     for rel, lineno, ids in markers:
         for i in ids:
