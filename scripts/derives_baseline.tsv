@@ -1119,3 +1119,18 @@ crates/physics/src/young_thermal.rs	peak_temperature_at	grandfathered	predates t
 crates/physics/src/young_thermal.rs	slr_family_temperature_rise	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/young_thermal.rs	solar_system_slr_family	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/young_thermal.rs	young_thermal_verdict	grandfathered	predates the derives-coverage gate; unclassified
+crates/physics/src/thermoelastic_anchors.rs	parse	helper	vocabulary parse for the cell-grade / channel-agreement / gamma-pairing enums; fatal on an unrecognised member rather than defaulting
+crates/physics/src/thermoelastic_anchors.rs	phases	accessor	iterates the loaded phase keys in deterministic order
+crates/physics/src/thermoelastic_anchors.rs	row	accessor	one phase's loaded anchor row, or None; no default is ever supplied
+crates/physics/src/thermoelastic_anchors.rs	standard	loader	loads the vendored thermoelastic_anchors.toml column
+crates/physics/src/thermoelastic_anchors.rs	usable_as_anchor	predicate	whether a cell's grade permits reading it as an anchor (fit yes, systematics no)
+crates/materials/src/thermoelastic.rs	kelvin	accessor	the elastic Debye temperature's kelvin value; one-way by design, no Fixed goes back in
+crates/physics/src/thermoelastic_anchors.rs	kelvin	accessor	the effective Debye temperature's kelvin value; one-way by design, no Fixed goes back in
+crates/physics/src/thermoelastic_anchors.rs	agrees	predicate	whether two source inversions agree; single-channel is NOT agreement, it is unchecked
+crates/physics/src/thermoelastic_anchors.rs	all_cells_fit	predicate	whether every cell a row needs was fit rather than estimated from systematics
+crates/physics/src/thermoelastic_anchors.rs	fmt	accessor	Display for the effective Debye temperature, naming which average it is
+crates/physics/src/thermoelastic_anchors.rs	fmt	accessor	Display for the parse-failure enum
+crates/physics/src/thermoelastic_anchors.rs	from_toml_str	loader	parses the [[anchor]] blocks; line-anchored split so header prose naming the marker cannot manufacture a row
+crates/physics/src/thermoelastic_anchors.rs	pairs_with_banked_gamma	predicate	whether the row's own fit reproduces the banked gamma_0, so the MGD set comes from one inversion
+crates/materials/src/mie_gruneisen_debye.rs	debye_integral	helper	Simpson quadrature of the dimensionless Debye integral; interval count bounds the step, not the count
+crates/materials/src/mie_gruneisen_debye.rs	debye_integrand	helper	the dimensionless integrand x^3/(e^x-1), series-continued through its removable singularity at the origin

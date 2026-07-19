@@ -168,3 +168,39 @@ redistributable = false
 licence_evidence = "https://www.agu.org/publications/authors/policies"
 reviewed = "2026-07-18"
 remediation = "Bytes removed with the speziale_2004 conversion; this cross-reference now resolves to the same citation-plus-witness record. Deduplicate the two ids when the cross-reference idiom is reworked."
+
+# =====================================================================================================
+# BRONZE OPEN ACCESS: free to READ at the publisher, with NO open licence attached. The distinction this
+# file exists to police, in IOP's own words, is that "Free to view is not the same as free to reuse", and
+# bronze is exactly that case: the publisher has lifted the paywall without granting reuse rights, and it
+# may re-impose it at any time. These are therefore held as CITATION PLUS WITNESS, with no bytes in the
+# tree, and each archived snapshot re-fetched and hashed byte-identical to its receipt.
+# =====================================================================================================
+
+[[licence]]
+id = "thermoelastic_anchors.slb_2005_mantle_minerals_i"
+licence = "Geophysical Journal International (Royal Astronomical Society; Blackwell in 2005, now Oxford University Press), all rights reserved. The article is BRONZE open access: readable without payment at the publisher, carrying no Creative Commons or other reuse grant, so redistribution of the bytes is not permitted. The held copy is in addition an ACCEPTED-MANUSCRIPT PREPRINT hosted on a university course page (perplex.ethz.ch), which is an author/institutional posting rather than a licensed redistribution."
+redistributable = false
+licence_evidence = "https://academic.oup.com/journals/pages/access_purchase/rights_and_permissions"
+free_route = "https://web.archive.org/web/20260718151531/https://www.perplex.ethz.ch/thermo_course/chapter_5/stixrude_GJI_05.pdf"
+free_route_kind = "author-manuscript-plus-archive"
+reviewed = "2026-07-19"
+caveat = "The bytes are the same document already witnessed under `gruneisen.stixrude_lithgow_bertelloni_2005` (identical sha256), so the sources gate reports the pair as one document under two ids. The finding is recorded on BOTH ids so neither reads as un-reviewed, per the CROSS-REFERENCE TWINS precedent above. No bytes are tracked in the repo for either id, so no removal is required."
+
+[[licence]]
+id = "gruneisen.stixrude_lithgow_bertelloni_2005"
+licence = "Geophysical Journal International (Royal Astronomical Society; Blackwell in 2005, now Oxford University Press), all rights reserved. BRONZE open access: free to read, no reuse grant. Identical bytes to `thermoelastic_anchors.slb_2005_mantle_minerals_i` (same sha256); see that entry."
+redistributable = false
+licence_evidence = "https://academic.oup.com/journals/pages/access_purchase/rights_and_permissions"
+reviewed = "2026-07-19"
+remediation = "No bytes are tracked in the repo (citation-plus-witness, bytes in local custody), so no removal is required. Recorded here because the gate's duplicate-document check would otherwise report this twin as carrying no finding while its identical copy carries one. A second, smaller wording defect is noted rather than fixed in this lane: the gruneisen manifest's recipe calls the held file 'the open perplex.ethz.ch course copy' without recording that it is an accepted-manuscript preprint rather than the version of record, and its table anchors are therefore in the preprint's own pagination."
+
+[[licence]]
+id = "thermoelastic_anchors.slb_2011_mantle_minerals_ii"
+licence = "Geophysical Journal International (Royal Astronomical Society; Wiley-Blackwell in 2011, now Oxford University Press), all rights reserved. BRONZE open access: OpenAlex reports oa_status 'bronze' with the publisher's own PDF free to read at academic.oup.com, and no Creative Commons or other reuse grant is attached, so redistribution of the bytes is not permitted. The held copy is the publisher's VERSION OF RECORD as posted on the first author's UCL homepage, an author posting rather than a licensed redistribution, and that URL now 404s."
+redistributable = false
+licence_evidence = "https://academic.oup.com/journals/pages/access_purchase/rights_and_permissions"
+free_route = "https://web.archive.org/web/20221029182918/https://www.homepages.ucl.ac.uk/~ucfbls0/stixrudelithgowbertelloni_11.pdf"
+free_route_kind = "author-posting-plus-archive"
+reviewed = "2026-07-19"
+caveat = "The publisher's own free-to-read PDF at academic.oup.com/gji/article-pdf/184/3/1180/27638878/184-3-1180.pdf returns HTTP 403 to a crawler, and the Wayback captures of that publisher URL are all 302 redirects rather than bytes, so the archived author copy is the only retrievable route. It was re-fetched and hashed byte-identical to the receipt rather than assumed to be the same document."

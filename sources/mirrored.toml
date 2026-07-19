@@ -8,7 +8,7 @@
 # A NEW fetch does not land here. It lands in sources/registry.toml, which is hand-maintained.
 # The gate and the bibliography read both files as one namespace.
 #
-# Entries: 27
+# Entries: 29
 
 [[source]]
 id = "bhac15"
@@ -283,6 +283,42 @@ archived_url = "https://web.archive.org/web/20240722035045/https://duffy.princet
 sha256 = "729d9ecac7fa4563634ca3dc9e5b4ab7a494e2af79fdd3a4266ac0093e602b0c"
 pages = 15
 recipe = "GET https://duffy.princeton.edu/sites/g/files/toruqf616/files/speziale_jgr_04.pdf (open)"
+
+[[source]]
+id = "thermoelastic_anchors.slb_2005_mantle_minerals_i"
+mirrors = "crates/physics/data/thermoelastic_anchors/manifest.toml"
+custody = "witness"
+witness_verified = "Wayback capture re-fetched 2026-07-19 and hashed: 538634 bytes, sha256 BYTE-IDENTICAL to the receipt below. The public witness holds exactly the bytes these q values were read from."
+citation = "Stixrude, L. & Lithgow-Bertelloni, C., 2005, Thermodynamics of mantle minerals - I. Physical properties, Geophysical Journal International 162(2), 610-632, DOI 10.1111/j.1365-246X.2005.02642.x."
+url = "https://www.perplex.ethz.ch/thermo_course/chapter_5/stixrude_GJI_05.pdf"
+archived_url = "https://web.archive.org/web/20260718151531/https://www.perplex.ethz.ch/thermo_course/chapter_5/stixrude_GJI_05.pdf"
+sha256 = "95e1cd9b58c28874b2617e68937a61c22ad78032ba4bc2b5a2305a104dc54604"
+bytes = 538634
+pages = 43
+recipe = "GET the open perplex.ethz.ch course copy of the GJI 2005 paper (accepted-manuscript preprint, 43 pp). Read the q column of the parameter table on PDF page 30 via `pdftotext -layout`, then re-read the same cells via `pdftohtml -xml -f 30 -l 30` and map each span's font subset (CHDPDM+Times-Italic = systematics, CHDPEO+Times-Roman = fit)."
+grade = "compilation (self-consistent global inversion); per-cell fit-versus-systematics grade read from the source typography"
+scope = "Ambient reference state V_0 at 300 K, 1 bar, for 31 MANTLE species in the MgO-FeO-CaO-Al2O3-SiO2-Na2O system. q is the constant exponent of gamma = gamma_0 (V/V_0)^q, valid over the upper-mantle to lower-mantle P,T range the inversion was fit across. NOT applicable to ferric phases (no Fe2O3), and the only SiO2 polymorph present is stishovite, which must never be read for quartz."
+anchor = "PDF page 30, 'Table 1. Properties of mantle species' (the paper's own text calls it Table A1), q column: periclase (MgO) 1.5 (2); corundum (AlAlO3) 1.3 (2); spinel ((Mg3Al)(Al7Mg)O16) 2.8 (6); forsterite (Mg2SiO4) 2.1 (2); fayalite (Fe2SiO4) 3.6 (10); enstatite (Mg4Si4O12) 7.8 (11). All six cells Times-Roman, that is fit rather than systematics. The companion gamma_0 column on the same rows is the source of gruneisen.toml's gamma_eos_debye: 1.50(2), 1.32(4), 1.02(4), 0.99(3), 1.06(7), 0.67(4)."
+extract = "Table 1 footnote: 'Italicized entries are from systematics.' Table 1 rows, columns V0 / K0 / K0' / theta0 / gamma0 / q: 'magnesiowustite (mw)  periclase  MgO  11.24  161 (3)  3.9 (2)  773 (9)  1.50 (2)  1.5 (2)'; 'akimotoite  corundum  AlAlO3  25.58  253 (5)  4.3 (2)  933 (3)  1.32 (4)  1.3 (2)'; 'spinel (sp)  spinel  (Mg3Al)(Al7Mg)O16  159.05  197 (1)  5.7 (2)  900 (3)  1.02 (4)  2.8 (6)'; 'olivine (ol)  forsterite  Mg2SiO4  43.60  128 (2)  4.2 (2)  809 (1)  0.99 (3)  2.1 (2)'; 'olivine  fayalite  Fe2SiO4  46.29  135 (2)  4.2 (10)  619 (2)  1.06 (7)  3.6 (10)'; 'orhopyroxene (opx)  enstatite  Mg4Si4O12  125.35  107 (2)  7.1 (4)  810 (8)  0.67 (4)  7.8 (11)'. Section A: 'We have estimated unknown parameters on the basis of systematics. We assume that K0', gamma0, q0, K0, and G0' are approximately constant across isostructural series so that if constraints exist for one end-member of a phase, but not the others, we assume that the same values apply to all end-members of that phase.' Section A on how q is determined: 'q0 is determined by a least squares fit to measurements of the bulk modulus at high temperature, via eq. (32), or if these are not available to measurements of the pressure-volume-temperature equation of state, via eq. (21).'"
+note = "Accepted-manuscript preprint, not the version of record. Bytes are the same document the gruneisen manifest witnesses under the id gruneisen.stixrude_lithgow_bertelloni_2005, so the sources gate reports the two ids as one document carried twice; that notice is correct and the receipts are identical."
+
+[[source]]
+id = "thermoelastic_anchors.slb_2011_mantle_minerals_ii"
+mirrors = "crates/physics/data/thermoelastic_anchors/manifest.toml"
+custody = "witness"
+witness_verified = "Wayback capture re-fetched 2026-07-19 and hashed: 1378171 bytes, sha256 BYTE-IDENTICAL to the receipt below. The live author URL now 404s and the publisher's own OA PDF at academic.oup.com returns HTTP 403 to a crawler, so the Wayback capture is the only retrievable route and it was verified rather than assumed."
+citation = "Stixrude, L. & Lithgow-Bertelloni, C., 2011, Thermodynamics of mantle minerals - II. Phase equilibria, Geophysical Journal International 184(3), 1180-1213, DOI 10.1111/j.1365-246X.2010.04890.x."
+url = "https://www.homepages.ucl.ac.uk/~ucfbls0/stixrudelithgowbertelloni_11.pdf"
+archived_url = "https://web.archive.org/web/20221029182918/https://www.homepages.ucl.ac.uk/~ucfbls0/stixrudelithgowbertelloni_11.pdf"
+sha256 = "9266dc9405085d7f89dc68c84e7b2cf69dc0a5b09b576f5935dd703aa5647797"
+bytes = 1378171
+pages = 34
+recipe = "The DOI resolves to Wiley and the OpenAlex-reported OA PDF at academic.oup.com/gji/article-pdf/184/3/1180/27638878/184-3-1180.pdf returns HTTP 403 to a crawler; the author copy at homepages.ucl.ac.uk 404s live. Located via the Wayback CDX index for www.homepages.ucl.ac.uk/~ucfbls0/* and fetched with `curl -L 'https://web.archive.org/web/20221029182918id_/https://www.homepages.ucl.ac.uk/~ucfbls0/stixrudelithgowbertelloni_11.pdf'` (HTTP 200, application/pdf, 1378171 bytes). Read the q_0 column of Table A1 on printed pages 1207-1208 via `pdftotext -layout`, then re-read the same cells via `pdftohtml -xml`; the table is ROTATED 90 degrees, so rows group by the `left` coordinate and cells run along `top`. Font subsets: OPEGNK+TimesNewRomanPS-Italic = systematics, OPEGOM+TimesNewRomanPS = fit."
+grade = "compilation (self-consistent global inversion); MIXED per-cell grade, fit and systematics, boundary read from the source typography"
+scope = "Ambient reference state V_0 at 300 K, 1 bar, for the mantle phase-equilibrium species set. q_0 is the constant exponent of gamma = gamma_0 (V/V_0)^q over the P,T range of the phase-equilibrium inversion. The quartz entry covers ALPHA-quartz with the alpha-beta displacive transition carried by a SEPARATE Landau term, so the quartz row does not describe the phase across that transition. No ferric phases: Fe2O3 is absent."
+anchor = "Printed pages 1207-1208, 'Table A1' and 'Table A1. (Continued.)', q_0 column: spinel 2.7 (6); forsterite 2.1 (2); fayalite 3.6 (10); enstatite (MgMgSi2O6) 3.4 (4); corundum 1.3 (2); quartz 1.0 (10) in ITALIC; periclase 1.7 (2). All Roman (fit) except quartz, which is italic (systematics). Companion gamma_0 on the same rows: 1.02(4), 0.99(3), 1.06(7), 0.78(4), 1.32(4), 0.00(5) italic, 1.36(5)."
+extract = "Table A1 footnote: 'Italicized entries are from systematics.' Table A1 rows, columns F0 / V0 / KT0 / KT0' / theta0 / gamma0 / q0: 'quartz (qtz)  Quartz (qtz)  SiO2  -859 (1)  23.67  50 (1)  4.3 (1)  816 (31)  0.00 (5)  1.0 (10)' with the gamma0 and q0 cells set in italic; 'orthopyroxene  Enstatite (en)  MgMgSi2O6  -2913 (2)  62.68  107 (2)  7.0 (4)  812 (4)  0.78 (4)  3.4 (4)'; 'magnesiowustite  Periclase (pe)  MgO  -569  11.24  161 (3)  3.8 (2)  767 (9)  1.36 (5)  1.7 (2)'; 'spinel (sp)  Spinel (sp)  (Mg3Al)(Al7Mg)O16  -8668 (32)  159.05  197 (1)  5.7 (2)  843 (33)  1.02 (4)  2.7 (6)'; 'olivine (ol)  Forsterite (fo)  Mg2SiO4  -2055 (2)  43.60  128 (2)  4.2 (2)  809 (1)  0.99 (3)  2.1 (2)'; 'olivine  Fayalite (fa)  Fe2SiO4  -1371 (1)  46.29  135 (2)  4.2 (10)  619 (2)  1.06 (7)  3.6 (10)'; 'akimotoite  Corundum (co)  AlAlO3  -1582 (1)  25.58  253 (5)  4.3 (2)  933 (3)  1.32 (4)  1.3 (2)'."
+note = "Publisher's version of record. Sole source for quartz, whose q_0 is italic (from systematics) and whose companion gamma_0 of 0.00 (5) is also italic; gamma_0 = 0 makes the MGD thermal pressure identically zero whatever q is, so the quartz q is inoperative as well as assumed."
 
 [[source]]
 id = "wachtman_1960_corundum"

@@ -34,16 +34,40 @@
 //!
 //! # What is built today, stated plainly
 //!
-//! ONLY RUNG 4 CAN ANSWER, and the ladder says so rather than implying it by absence. Rung 3 needs six
-//! per-phase anchors and the repository banks four: molar volume (phase registry), bulk modulus (mineral
-//! moduli), `K'` with its adiabatic-versus-isothermal type recorded (Grueneisen table), and `gamma_0`
-//! (Grueneisen table). It is missing the DEBYE TEMPERATURE and the VOLUME EXPONENT `q`, neither of which
-//! appears in any data file. Both are fetches, and naming them here is what turns "the cluster refuses at
-//! interior conditions" into "the cluster refuses, and rung 3 would answer if these two columns existed".
+//! ALL SIX RUNG-3 ANCHORS ARE NOW BANKED: molar volume (phase registry), bulk modulus (mineral moduli),
+//! `K'` and `gamma_0` (Grueneisen table), and the effective Debye temperature `theta_0` and volume
+//! exponent `q` (`thermoelastic_anchors.toml`), and RUNG 3 ITSELF IS BUILT in
+//! [`crate::mie_gruneisen_debye`]. What remains is wiring it into this ladder's dispatch, so a query
+//! above the ambient frame reaches the solver instead of the refusal it still returns today.
 //!
-//! `K'` was a THIRD missing anchor until 2026-07-19 and was never a fetch: it had been banked in
-//! `gruneisen.toml` from the start and the loader did not read it. Worth recording because the two kinds
-//! of gap cost very different amounts, and counting a loader gap as a fetch overprices the work.
+//! Two of those anchors arrived by routes worth distinguishing, because counting them all as fetches
+//! overprices the work by a large factor:
+//!
+//! - `K'` was never a fetch. It had been banked in `gruneisen.toml` from the start, with its band and its
+//!   adiabatic-versus-isothermal type, and the loader did not read it. A loader change.
+//! - `theta_0` was never a fetch either, though for a different reason: its values were already inside the
+//!   held extracts in `thermoelastic_anchors/manifest.toml`, which quote the full source table rows
+//!   including the `theta0` column. A transcription from a witness already in the repository.
+//!
+//! # The correction this module carries, recorded because it was mine
+//!
+//! An earlier pass concluded that `theta_0` needed no column at all, because the Debye temperature
+//! DERIVES from the banked moduli. That derivation is real and it is still here. The conclusion drawn from
+//! it was wrong, and wrong in an instructive way: the derived quantity is the ELASTIC Debye temperature,
+//! set by the three acoustic branches near `k = 0`, and the MGD equation of state consumes the EFFECTIVE
+//! one, fit by its source to the vibrational entropy near 1000 K over the whole density of states. For a
+//! 7-atom orthosilicate that is 3 modes against 21.
+//!
+//! The check that licensed the error was a single forsterite spot-check, and forsterite sits almost
+//! exactly on the crossover where the two definitions coincide (762 K elastic against 809 K effective).
+//! Across the seven phases the ratio runs 0.83 to 1.22 and does not cancel. Periclase alone would have
+//! been 167 K out.
+//!
+//! The two are now separated BY TYPE, [`ElasticDebyeTemperature`] here against
+//! `civsim_physics::thermoelastic_anchors::EffectiveDebyeTemperature` there, with no conversion in either
+//! direction and no public constructor from a bare `Fixed` on either side. The mispairing is
+//! unconstructible rather than warned against, because a defence carried in a comment is one that gets
+//! dropped.
 //!
 //! Rungs 1 and 2 are further out: rung 1 wants a cited P-V-T surface per phase (forsterite has a lead to
 //! about 14 GPa and 1900 K, which is one phase rather than a mechanism), and rung 2 wants a quasi-harmonic
@@ -53,6 +77,7 @@ use civsim_core::Fixed;
 use civsim_physics::gruneisen::GruneisenTable;
 use civsim_physics::mineral_moduli::MineralModuli;
 use civsim_physics::petrology_data::PhaseRegistry;
+use civsim_physics::thermoelastic_anchors::ThermoelasticAnchors;
 
 /// The zero this module compares against, matching the sibling modules' idiom.
 const ZERO: Fixed = Fixed::ZERO;
@@ -162,34 +187,65 @@ impl core::fmt::Display for ThermoRefusal {
 
 impl std::error::Error for ThermoRefusal {}
 
-/// A phase's DEBYE TEMPERATURE (K), DERIVED from banked elasticity rather than read from a column.
+/// A phase's ELASTIC Debye temperature (K), DERIVED from banked elasticity rather than read from a column.
 ///
-/// THIS WAS NEARLY A FETCH, and recording why matters more than the function. The Mie-Grueneisen-Debye
-/// rung needs `theta_0`, no data file carries one, and the obvious next move was to send an agent after
-/// the literature. It is not needed: the Debye temperature follows from the mean sound velocity and the
-/// atomic volume, the sound velocity follows from the bulk and shear moduli and the density, and every
-/// one of those is already banked. `mineral_moduli.toml` carries K AND G for all eight phases, the phase
-/// registry carries the molar volume and the formula-unit atom count, and density follows from those.
+/// Private field and no public constructor from a bare `Fixed`, so this cannot be built anywhere except
+/// the derivation below, and no route exists between it and
+/// `civsim_physics::thermoelastic_anchors::EffectiveDebyeTemperature`. See the module documentation for
+/// why the two must not meet.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct ElasticDebyeTemperature(Fixed);
+
+impl ElasticDebyeTemperature {
+    /// The value in kelvin. One-way, like its counterpart: a `Fixed` comes out for arithmetic and none
+    /// goes back in.
+    pub fn kelvin(self) -> Fixed {
+        self.0
+    }
+}
+
+impl core::fmt::Display for ElasticDebyeTemperature {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "{} K (elastic, acoustic-branch)", self.0.to_f64_lossy())
+    }
+}
+
+/// A phase's ELASTIC Debye temperature, from the mean sound velocity and the atomic volume.
 ///
-/// CHECKED BEFORE BEING BELIEVED, because a derivation that merely looks plausible is the thing this
-/// repository keeps paying for. Forsterite: `K = 128 GPa`, `G = 81 GPa`, `rho = 3.22 g/cm^3`,
-/// `V_m = 43.65 cm^3/mol` over 7 atoms per formula unit gives `v_D` about `5.56 km/s` and
-/// `theta_D` about `760 K`, against a measured forsterite Debye temperature of about 760 K. None of those
-/// inputs was fitted to that answer, which is what makes the agreement a check rather than a restatement.
+/// The sound velocity follows from the banked bulk and shear moduli and the density, the density is the
+/// registry's own molar mass over its own molar volume (so this uses the SAME density the rest of the
+/// cluster derives rather than a second opinion about it), and the atomic volume is the molar volume
+/// shared over the formula unit's atoms.
 ///
-/// Fetching a `theta_0` column to sit beside this would have created a second copy of one fact with
-/// nothing comparing them, which is the diamond pattern, and it would have cost a fetch to acquire a
-/// number the floor already implies.
+/// # What this is, and the one thing it is not
+///
+/// It is the acoustic average: set by the three branches near `k = 0`, asymptotically correct as
+/// `T -> 0`, and the right quantity for a low-temperature `C_V = beta T^3` coefficient or an acoustic
+/// density of states, PROVIDED it is paired with its own acoustic `gamma_el = 1/3 - dln(v_m)/dln(V)`.
+///
+/// It is NOT the effective Debye temperature an MGD equation of state consumes, and the return type says
+/// so. That distinction cost a wrong conclusion in this repository on 2026-07-19: this derivation was
+/// checked against forsterite's measured 760 K, agreed, and was taken as evidence that no `theta_0`
+/// column was needed. Forsterite is within a few percent of the crossover between the two definitions.
+/// Periclase, the phase whose simplicity made it look like the safer check, is 167 K apart (940 elastic
+/// against 773 effective).
+///
+/// # Coverage
+///
+/// Seven of the eight registry phases. Hematite is not one of them: its bulk and shear moduli are
+/// recorded `UNSOURCED` in `mineral_moduli.toml`, so there is nothing to derive from. An earlier version
+/// of this comment claimed the moduli file "carries K AND G for all eight phases"; it does not, and the
+/// claim was never checked before it was written.
 ///
 /// `None` when the phase lacks a moduli row or a registry row, or when an intermediate leaves the
 /// representable window. No phase receives a default.
-// @derives: a phase's Debye temperature <- its banked bulk and shear moduli, density and atomic volume
-pub fn derived_debye_temperature_k(
+// @derives: a phase's elastic Debye temperature <- its banked bulk and shear moduli, density and atomic volume
+pub fn derived_elastic_debye_temperature(
     phase: &str,
     registry: &PhaseRegistry,
     moduli: &MineralModuli,
     periodic: &civsim_physics::periodic::PeriodicTable,
-) -> Option<Fixed> {
+) -> Option<ElasticDebyeTemperature> {
     let row = registry.phase(phase)?;
     let m = moduli.row(civsim_physics::mineral_moduli::canonical_phase_key(phase))?;
     // Density in g/cm^3: the registry's own molar mass over its own molar volume, so the density this
@@ -219,7 +275,7 @@ pub fn derived_debye_temperature_k(
     if theta <= ZERO {
         None
     } else {
-        Some(theta)
+        Some(ElasticDebyeTemperature(theta))
     }
 }
 
@@ -232,14 +288,13 @@ pub fn mie_gruneisen_debye_readiness(
     registry: &PhaseRegistry,
     moduli: &MineralModuli,
     gruneisen: &GruneisenTable,
+    anchors: &ThermoelasticAnchors,
 ) -> Vec<(&'static str, bool)> {
     let has_volume = registry.phase(phase).is_some();
     let key = civsim_physics::mineral_moduli::canonical_phase_key(phase);
     let has_k0 = moduli.row(key).is_some();
     let row = gruneisen.row(phase);
     let has_gamma = row.and_then(|r| r.gamma()).is_some();
-    let has_theta =
-        has_volume && has_k0 && moduli.row(key).map(|m| m.shear_gpa > ZERO).unwrap_or(false);
     // K' WAS BANKED AND UNREAD, and that gap is now closed. The data file carried
     // `bulk_modulus_pressure_derivative_kprime` for every row along with its band and its `kprime_type`
     // (adiabatic `K_S'` versus isothermal `K_T'`), and the loader simply did not read it. Distinguishing
@@ -248,20 +303,42 @@ pub fn mie_gruneisen_debye_readiness(
     let has_kprime = row
         .and_then(|r| r.bulk_modulus_pressure_derivative_kprime)
         .is_some();
+
+    // THETA_0 AND q COME FROM THE COLUMN, and each must be FIT rather than estimated from systematics.
+    //
+    // This slot previously reported true whenever the phase had the elasticity to DERIVE a Debye
+    // temperature from, which was the wrong quantity: the derivation yields the elastic average and the
+    // MGD form consumes the entropy-fit effective one. A readiness report that answers with the wrong
+    // quantity is worse than one that answers "missing", because it licenses the solver to run.
+    //
+    // `usable_as_anchor` is what makes quartz report NOT ready on `q`: its cell is italic in the source
+    // table, meaning the authors estimated it rather than fitting it, and an assumed exponent entering
+    // under a measured grade is exactly what the font-metadata read exists to stop.
+    let arow = anchors.row(phase);
+    let has_theta = arow
+        .map(|r| {
+            r.theta_0.is_some()
+                && r.theta_0_grade
+                    .map(|g| g.usable_as_anchor())
+                    .unwrap_or(false)
+        })
+        .unwrap_or(false);
+    let has_q = arow
+        .map(|r| r.q.is_some() && r.q_grade.map(|g| g.usable_as_anchor()).unwrap_or(false))
+        .unwrap_or(false);
+    // The whole set must come from ONE inversion. A row whose own fit does not reproduce the banked
+    // gamma_0 was never jointly constrained with it, so the parameters are not a set even when every
+    // individual cell is present and fit.
+    let one_fit = arow.map(|r| r.pairs_with_banked_gamma()).unwrap_or(false);
+
     vec![
         ("molar_volume_V0", has_volume),
         ("bulk_modulus_K0", has_k0),
         ("kprime_K0_prime", has_kprime),
         ("gruneisen_gamma_0", has_gamma),
-        // theta_0 DERIVES rather than being fetched: see `derived_debye_temperature_k`. It reports true
-        // when the phase has the elasticity to derive it from, which is a stronger statement than a
-        // column existing, because a derived value cannot drift from the moduli it came from.
         ("debye_temperature_theta_0", has_theta),
-        // The one genuine fetch left. `q` is the volume exponent in gamma = gamma_0 (V/V_0)^q, and no
-        // data file carries it. It is also frequently ASSUMED rather than measured (many equation-of-
-        // state fits set q = 1 because their data cannot constrain it), so whatever lands here must
-        // record which it is.
-        ("volume_exponent_q", false),
+        ("volume_exponent_q", has_q),
+        ("anchors_from_one_joint_fit", one_fit),
     ]
 }
 
@@ -277,6 +354,7 @@ pub fn response_at(
     registry: &PhaseRegistry,
     moduli: &MineralModuli,
     gruneisen: &GruneisenTable,
+    anchors: &ThermoelasticAnchors,
 ) -> Result<ThermoResponse, ThermoRefusal> {
     let row = registry
         .phase(phase)
@@ -288,7 +366,7 @@ pub fn response_at(
     // plausible value is the defect, and a stub that returns an error is what the fall-through already is.
 
     // RUNG 3: Mie-Grueneisen-Debye. Reports its own readiness rather than being described as blocked.
-    let readiness = mie_gruneisen_debye_readiness(phase, registry, moduli, gruneisen);
+    let readiness = mie_gruneisen_debye_readiness(phase, registry, moduli, gruneisen, anchors);
     let missing: Vec<String> = readiness
         .iter()
         .filter(|(_, have)| !have)
@@ -398,23 +476,29 @@ fn ambient_alpha(
 mod tests {
     use super::*;
 
-    fn tables() -> (PhaseRegistry, MineralModuli, GruneisenTable) {
+    fn tables() -> (
+        PhaseRegistry,
+        MineralModuli,
+        GruneisenTable,
+        ThermoelasticAnchors,
+    ) {
         (
             PhaseRegistry::standard().expect("registry"),
             MineralModuli::standard().expect("moduli"),
             GruneisenTable::standard().expect("gruneisen"),
+            ThermoelasticAnchors::standard().expect("anchors"),
         )
     }
 
     /// THE LADDER ANSWERS INSIDE ITS FRAME and refuses outside it, which is the whole contract.
     #[test]
     fn the_ambient_rung_answers_at_its_own_frame_and_refuses_at_interior_conditions() {
-        let (reg, mod_, gr) = tables();
+        let (reg, mod_, gr, anc) = tables();
         let ambient = ThermoState {
             temperature_k: Fixed::from_int(300),
             pressure_bar: Fixed::ONE,
         };
-        let r = response_at("forsterite", ambient, &reg, &mod_, &gr)
+        let r = response_at("forsterite", ambient, &reg, &mod_, &gr, &anc)
             .expect("forsterite has an ambient row and answers at its own frame");
         assert_eq!(
             r.rung,
@@ -432,100 +516,223 @@ mod tests {
             temperature_k: Fixed::from_int(1600),
             pressure_bar: Fixed::from_int(100_000),
         };
-        let err = response_at("forsterite", interior, &reg, &mod_, &gr)
+        let err = response_at("forsterite", interior, &reg, &mod_, &gr, &anc)
             .expect_err("no built rung answers at interior conditions");
         let text = format!("{err}");
+        // THE REFUSAL MOVED, and the move is the progress report. It used to name the missing anchor
+        // COLUMNS; every one of those is now banked, so it names the missing SOLVER instead. The branch
+        // that produces this message was written as a deliberate tripwire while it was unreachable, so
+        // that landing the columns would fail a test rather than silently succeed. It fired.
         assert!(
-            text.contains("debye_temperature_theta_0") || text.contains("volume_exponent_q"),
-            "the refusal NAMES the missing rung-3 anchors rather than saying no: {text}"
+            text.contains("the rung 3 solver itself"),
+            "with every anchor banked the refusal must name what is actually missing, the solver: {text}"
+        );
+        assert!(
+            !text.contains("debye_temperature_theta_0") && !text.contains("volume_exponent_q"),
+            "and it must no longer claim the columns are missing, because they are not: {text}"
         );
     }
 
-    /// THE DEBYE TEMPERATURE DERIVES, and this is the check that says so against the world rather than
-    /// against its own inputs.
+    /// THE ELASTIC DEBYE TEMPERATURE DERIVES, checked at TWO magnitudes rather than one.
     ///
-    /// Forsterite's measured Debye temperature is about 760 K. This derives it from the bulk and shear
-    /// moduli, the density implied by the registry's molar mass and molar volume, and the formula-unit
-    /// atom count, none of which was fitted to that answer. That independence is what makes the agreement
-    /// a check: recovering a number from inputs back-solved out of it proves nothing, and this repository
-    /// shipped exactly that mistake in the expansivity join earlier today.
+    /// The single-point version of this test is what licensed a wrong conclusion on 2026-07-19. It
+    /// checked forsterite, got 762 K against a measured 760 K, and was read as proof that the derivation
+    /// could stand in for the MGD `theta_0`. Forsterite is within a few percent of the crossover between
+    /// the two definitions, so that agreement was the least informative point in the set.
     ///
-    /// A band rather than a point, because the moduli carry bands of their own and a Debye temperature
-    /// good to a few percent is what the elasticity supports.
+    /// Periclase is the second magnitude, and it is the one that separates the definitions: a simpler,
+    /// stiffer, lighter-per-atom structure whose measured ELASTIC Debye temperature is about 940 K while
+    /// its entropy-fit EFFECTIVE one is 773 K. A derivation returning either a structure-independent
+    /// value or the effective average would fail here while passing forsterite.
+    ///
+    /// The earlier version of this test asserted only that periclase came out HIGHER than forsterite, an
+    /// ordering rather than a magnitude, and it did so inside an `if let Some(..)` so it also passed
+    /// silently when the derivation returned nothing. Both are fixed: the value is bounded, and its
+    /// absence is a failure.
     #[test]
-    fn the_debye_temperature_derives_from_banked_elasticity_and_matches_measurement() {
+    fn the_elastic_debye_temperature_derives_and_matches_measurement_at_two_magnitudes() {
         use civsim_physics::periodic::PeriodicTable;
-        let (reg, mod_, _gr) = tables();
+        let (reg, mod_, _gr, _anc) = tables();
         let periodic = PeriodicTable::standard().expect("periodic table");
 
-        let theta = derived_debye_temperature_k("forsterite", &reg, &mod_, &periodic)
+        let theta = derived_elastic_debye_temperature("forsterite", &reg, &mod_, &periodic)
             .expect("forsterite has the elasticity to derive a Debye temperature from")
+            .kelvin()
             .to_f64_lossy();
         assert!(
             (680.0..=840.0).contains(&theta),
-            "forsterite's measured Debye temperature is about 760 K; derived {theta:.0} K"
+            "forsterite's measured ELASTIC Debye temperature is about 760 K; derived {theta:.0} K"
         );
 
-        // Periclase is the second check, and a useful one because it is a far simpler structure: its
-        // measured Debye temperature is about 940 K, well separated from forsterite's, so a derivation
-        // that returned something structure-independent would fail here even while passing above.
-        if let Some(p) = derived_debye_temperature_k("periclase", &reg, &mod_, &periodic) {
-            let pv = p.to_f64_lossy();
-            assert!(
-                pv > theta,
-                "periclase is stiffer and lighter per atom than forsterite, so its Debye temperature is \
-                 HIGHER: forsterite {theta:.0} K against periclase {pv:.0} K"
-            );
-        }
+        let peri = derived_elastic_debye_temperature("periclase", &reg, &mod_, &periodic)
+            .expect("periclase has moduli, so its absence would itself be the finding")
+            .kelvin()
+            .to_f64_lossy();
+        assert!(
+            (860.0..=1020.0).contains(&peri),
+            "periclase's measured ELASTIC Debye temperature is about 940 K; derived {peri:.0} K. Note \
+             this is well clear of its EFFECTIVE 773 K, which is the whole reason the two are separate \
+             types"
+        );
 
         // A phase with no moduli row cannot derive one, and says so rather than defaulting.
         assert!(
-            derived_debye_temperature_k("unobtainium", &reg, &mod_, &periodic).is_none(),
+            derived_elastic_debye_temperature("unobtainium", &reg, &mod_, &periodic).is_none(),
             "an unknown phase refuses rather than inheriting an Earth mineral's Debye temperature"
+        );
+        // HEMATITE is the coverage limit, and it is a real absence rather than a hypothetical: its bulk
+        // and shear moduli are UNSOURCED, so seven of eight phases derive, not eight.
+        assert!(
+            derived_elastic_debye_temperature("hematite", &reg, &mod_, &periodic).is_none(),
+            "hematite's moduli are UNSOURCED in mineral_moduli.toml, so nothing can be derived for it. \
+             An earlier comment claimed the moduli file covers all eight phases; it does not."
         );
     }
 
-    /// The readiness report is DATA, so "rung 3 is blocked on two columns" is checkable rather than
-    /// asserted in prose. When either column lands, this test changes, which is the intended signal.
+    /// THE TWO DEBYE TEMPERATURES ARE DIFFERENT QUANTITIES, and this is the measurement that says so.
+    ///
+    /// This test exists because the claim "they are the same fact in two places" was made in this
+    /// repository and acted on. The ratio is reported per phase so the spread is visible: if these were
+    /// two copies of one fact the column would be flat at 1.0, and it is not.
     #[test]
-    fn rung_three_is_blocked_on_exactly_one_unbanked_anchor() {
-        let (reg, mod_, gr) = tables();
-        let readiness = mie_gruneisen_debye_readiness("forsterite", &reg, &mod_, &gr);
+    fn the_elastic_and_effective_debye_temperatures_are_not_two_copies_of_one_fact() {
+        use civsim_physics::periodic::PeriodicTable;
+        let (reg, mod_, _gr, anc) = tables();
+        let periodic = PeriodicTable::standard().expect("periodic table");
+
+        let mut ratios: Vec<(String, f64)> = Vec::new();
+        for phase in [
+            "periclase",
+            "corundum",
+            "spinel",
+            "forsterite",
+            "fayalite",
+            "enstatite",
+        ] {
+            let el = derived_elastic_debye_temperature(phase, &reg, &mod_, &periodic)
+                .expect("phase derives an elastic theta")
+                .kelvin()
+                .to_f64_lossy();
+            let eff = anc
+                .row(phase)
+                .and_then(|r| r.theta_0)
+                .expect("phase has a transcribed effective theta")
+                .kelvin()
+                .to_f64_lossy();
+            ratios.push((phase.to_string(), el / eff));
+        }
+
+        let worst = ratios
+            .iter()
+            .map(|(_, r)| (r - 1.0).abs())
+            .fold(0.0_f64, f64::max);
+        assert!(
+            worst > 0.15,
+            "the two averages must be measurably different somewhere, or the type split would be \
+             ceremony. Ratios: {ratios:?}"
+        );
+
+        // Periclase is the sharpest separation and the one a forsterite-only check misses entirely.
+        let (_, peri) = ratios
+            .iter()
+            .find(|(p, _)| p == "periclase")
+            .expect("periclase");
+        assert!(
+            *peri > 1.15,
+            "periclase's elastic average runs well ABOVE its effective one (940 K against 773 K), \
+             read {peri:.3}"
+        );
+        // Forsterite is the crossover, which is exactly why a single forsterite spot-check proved nothing.
+        let (_, fo) = ratios
+            .iter()
+            .find(|(p, _)| p == "forsterite")
+            .expect("forsterite");
+        assert!(
+            (fo - 1.0).abs() < 0.10,
+            "forsterite sits near the crossover, read {fo:.3}: this is the agreement that misled, and it \
+             is asserted so the reason the earlier check passed stays on the record"
+        );
+    }
+
+    /// The readiness report is DATA, so "rung 3 is blocked" is checkable rather than asserted in prose.
+    ///
+    /// It now reports READY for forsterite: all six anchors banked and all from one joint fit. What
+    /// remains is the solver. That is a real state change and this test is where it shows.
+    #[test]
+    fn rung_three_has_every_anchor_and_wants_only_its_solver() {
+        let (reg, mod_, gr, anc) = tables();
+        let readiness = mie_gruneisen_debye_readiness("forsterite", &reg, &mod_, &gr, &anc);
         let missing: Vec<&str> = readiness
             .iter()
             .filter(|(_, have)| !have)
             .map(|(n, _)| *n)
             .collect();
-        assert_eq!(
-            missing,
-            vec!["volume_exponent_q"],
-            "ONE anchor remains, and it is the only genuine fetch of the three this started with. K-prime \
-             was banked in gruneisen.toml the whole time and merely unread (a loader change). The Debye \
-             temperature DERIVES from the banked moduli, density and atomic volume, verified against \
-             forsterite's measured value. Only the volume exponent q is absent from every data file, and \
-             it is also frequently ASSUMED rather than measured, so whatever lands must say which."
+        assert!(
+            missing.is_empty(),
+            "every rung-3 anchor is banked for forsterite; still missing {missing:?}. K-prime was banked \
+             all along and merely unread (a loader change), and theta_0 was inside the held manifest \
+             extracts (a transcription). Neither was the fetch it was counted as."
         );
-        let have: Vec<&str> = readiness
+        assert_eq!(
+            readiness.len(),
+            7,
+            "six anchors plus the one-joint-fit condition"
+        );
+    }
+
+    /// QUARTZ IS NOT READY, and the reason is one italic cell in a source table.
+    ///
+    /// Its Debye temperature was fit and its volume exponent was assumed, so a row-level grade would have
+    /// called the whole row usable. The per-cell grade refuses it on `q` alone. This is the live firing of
+    /// the font-metadata read: without it the assumed `q = 1` would have entered wearing a measured grade
+    /// and nothing downstream would ever have known.
+    #[test]
+    fn a_row_whose_exponent_was_assumed_rather_than_fit_is_not_ready() {
+        let (reg, mod_, gr, anc) = tables();
+        let readiness = mie_gruneisen_debye_readiness("quartz", &reg, &mod_, &gr, &anc);
+        let missing: Vec<&str> = readiness
             .iter()
-            .filter(|(_, h)| *h)
+            .filter(|(_, have)| !have)
             .map(|(n, _)| *n)
             .collect();
-        assert_eq!(
-            have.len(),
-            5,
-            "molar volume, K0, K-prime, gamma_0 and the derived Debye temperature are all available"
+        assert!(
+            missing.contains(&"volume_exponent_q"),
+            "quartz's q is italic in Table A1, that is estimated from systematics, so it is refused as an \
+             anchor: {missing:?}"
+        );
+        assert!(
+            !missing.contains(&"debye_temperature_theta_0"),
+            "and its theta_0 is Roman, so the SAME ROW carries one usable cell and one that is not. A \
+             row-level grade would have lost that in whichever direction it rounded."
+        );
+    }
+
+    /// HEMATITE IS REFUSED WHOLE, which is the correct outcome for a phase outside the sources' system.
+    #[test]
+    fn a_phase_absent_from_the_compilations_is_refused_rather_than_estimated() {
+        let (reg, mod_, gr, anc) = tables();
+        let readiness = mie_gruneisen_debye_readiness("hematite", &reg, &mod_, &gr, &anc);
+        let missing: Vec<&str> = readiness
+            .iter()
+            .filter(|(_, have)| !have)
+            .map(|(n, _)| *n)
+            .collect();
+        assert!(
+            missing.contains(&"debye_temperature_theta_0") && missing.contains(&"volume_exponent_q"),
+            "hematite is a ferric phase outside both mantle-species compilations, so it has neither \
+             anchor and gets no neighbour's: {missing:?}"
         );
     }
 
     /// A phase with no Grueneisen row refuses by name rather than borrowing another phase's numbers.
     #[test]
     fn a_phase_with_no_row_refuses_rather_than_inheriting_an_earth_mineral_default() {
-        let (reg, mod_, gr) = tables();
+        let (reg, mod_, gr, anc) = tables();
         let state = ThermoState {
             temperature_k: Fixed::from_int(300),
             pressure_bar: Fixed::ONE,
         };
-        let err = response_at("unobtainium", state, &reg, &mod_, &gr)
+        let err = response_at("unobtainium", state, &reg, &mod_, &gr, &anc)
             .expect_err("an unknown phase must refuse");
         assert!(
             matches!(err, ThermoRefusal::UnknownPhase { .. }),

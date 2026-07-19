@@ -12,7 +12,7 @@ Custody is one of three. `in_repo`: bytes held in-tree, checksum verifiable with
 witness. `external`: bytes in local custody outside the repo, checksum plus archive snapshot.
 The licence decides which is permitted; see `docs/working/FETCH_PIPELINE_PLAN.md` section 3.
 
-**35 sources** (8 registry, 27 mirrored).
+**37 sources** (8 registry, 29 mirrored).
 
 ## Registry (hand-maintained)
 
@@ -235,6 +235,9 @@ Stixrude, L. & Lithgow-Bertelloni, C., 2005, Thermodynamics of mantle minerals -
 
 - sha256: `95e1cd9b58c28874b2617e68937a61c22ad78032ba4bc2b5a2305a104dc54604`
 - archived: https://web.archive.org/web/20260718151531/https://www.perplex.ethz.ch/thermo_course/chapter_5/stixrude_GJI_05.pdf
+- licence (**NOT redistributable**): Geophysical Journal International (Royal Astronomical Society; Blackwell in 2005, now Oxford University Press), all rights reserved. BRONZE open access: free to read, no reuse grant. Identical bytes to `thermoelastic_anchors.slb_2005_mantle_minerals_i` (same sha256); see that entry.
+- licence evidence: https://academic.oup.com/journals/pages/access_purchase/rights_and_permissions
+- remediation: No bytes are tracked in the repo (citation-plus-witness, bytes in local custody), so no removal is required. Recorded here because the gate's duplicate-document check would otherwise report this twin as carrying no finding while its identical copy carries one. A second, smaller wording defect is noted rather than fixed in this lane: the gruneisen manifest's recipe calls the held file 'the open perplex.ethz.ch course copy' without recording that it is an accepted-manuscript preprint rather than the version of record, and its table anchors are therefore in the preprint's own pagination.
 - authority: `crates/physics/data/gruneisen/manifest.toml`
 
 ### `gruneisen.zha_1996_forsterite`
@@ -351,6 +354,32 @@ Speziale, S., Duffy, T.S., and Angel, R.J., 2004, Single-crystal elasticity of f
 - licence evidence: https://www.agu.org/publications/authors/policies
 - remediation: CONVERTED 2026-07-18 under the owner ruling: bytes removed from the repo, entry now citation-plus-witness. The Wayback witness was re-fetched and hashed and is BYTE-IDENTICAL to the retained sha256 receipt, so the provenance is unbroken and nothing was lost with the bytes.
 - authority: `crates/physics/data/speziale_2004/manifest.toml`
+
+### `thermoelastic_anchors.slb_2005_mantle_minerals_i`
+
+Stixrude, L. & Lithgow-Bertelloni, C., 2005, Thermodynamics of mantle minerals - I. Physical properties, Geophysical Journal International 162(2), 610-632, DOI 10.1111/j.1365-246X.2005.02642.x.
+
+- sha256: `95e1cd9b58c28874b2617e68937a61c22ad78032ba4bc2b5a2305a104dc54604`
+- archived: https://web.archive.org/web/20260718151531/https://www.perplex.ethz.ch/thermo_course/chapter_5/stixrude_GJI_05.pdf
+- scope: Ambient reference state V_0 at 300 K, 1 bar, for 31 MANTLE species in the MgO-FeO-CaO-Al2O3-SiO2-Na2O system. q is the constant exponent of gamma = gamma_0 (V/V_0)^q, valid over the upper-mantle to lower-mantle P,T range the inversion was fit across. NOT applicable to ferric phases (no Fe2O3), and the only SiO2 polymorph present is stishovite, which must never be read for quartz.
+- custody: witness
+- licence (**NOT redistributable**): Geophysical Journal International (Royal Astronomical Society; Blackwell in 2005, now Oxford University Press), all rights reserved. The article is BRONZE open access: readable without payment at the publisher, carrying no Creative Commons or other reuse grant, so redistribution of the bytes is not permitted. The held copy is in addition an ACCEPTED-MANUSCRIPT PREPRINT hosted on a university course page (perplex.ethz.ch), which is an author/institutional posting rather than a licensed redistribution.
+- licence evidence: https://academic.oup.com/journals/pages/access_purchase/rights_and_permissions
+- free route (author-manuscript-plus-archive): https://web.archive.org/web/20260718151531/https://www.perplex.ethz.ch/thermo_course/chapter_5/stixrude_GJI_05.pdf
+- authority: `crates/physics/data/thermoelastic_anchors/manifest.toml`
+
+### `thermoelastic_anchors.slb_2011_mantle_minerals_ii`
+
+Stixrude, L. & Lithgow-Bertelloni, C., 2011, Thermodynamics of mantle minerals - II. Phase equilibria, Geophysical Journal International 184(3), 1180-1213, DOI 10.1111/j.1365-246X.2010.04890.x.
+
+- sha256: `9266dc9405085d7f89dc68c84e7b2cf69dc0a5b09b576f5935dd703aa5647797`
+- archived: https://web.archive.org/web/20221029182918/https://www.homepages.ucl.ac.uk/~ucfbls0/stixrudelithgowbertelloni_11.pdf
+- scope: Ambient reference state V_0 at 300 K, 1 bar, for the mantle phase-equilibrium species set. q_0 is the constant exponent of gamma = gamma_0 (V/V_0)^q over the P,T range of the phase-equilibrium inversion. The quartz entry covers ALPHA-quartz with the alpha-beta displacive transition carried by a SEPARATE Landau term, so the quartz row does not describe the phase across that transition. No ferric phases: Fe2O3 is absent.
+- custody: witness
+- licence (**NOT redistributable**): Geophysical Journal International (Royal Astronomical Society; Wiley-Blackwell in 2011, now Oxford University Press), all rights reserved. BRONZE open access: OpenAlex reports oa_status 'bronze' with the publisher's own PDF free to read at academic.oup.com, and no Creative Commons or other reuse grant is attached, so redistribution of the bytes is not permitted. The held copy is the publisher's VERSION OF RECORD as posted on the first author's UCL homepage, an author posting rather than a licensed redistribution, and that URL now 404s.
+- licence evidence: https://academic.oup.com/journals/pages/access_purchase/rights_and_permissions
+- free route (author-posting-plus-archive): https://web.archive.org/web/20221029182918/https://www.homepages.ucl.ac.uk/~ucfbls0/stixrudelithgowbertelloni_11.pdf
+- authority: `crates/physics/data/thermoelastic_anchors/manifest.toml`
 
 ### `wachtman_1960_corundum`
 

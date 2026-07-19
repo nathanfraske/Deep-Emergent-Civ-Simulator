@@ -71,6 +71,7 @@ EXEMPT_MODULES = {
     "crates/physics/src/lib.rs",        # the physics registry loader (parses cited axis/substance data)
     "crates/physics/src/periodic.rs",   # the periodic-table loader (parses cited atomic weights)
     "crates/physics/src/petrology_data.rs", # the phase-registry loader (parses cited phase thermodynamics)
+    "crates/physics/src/thermoelastic_anchors.rs", # the MGD-anchor loader (parses the cited theta_0/q column)
     "crates/physics/src/melting_data.rs", # the melting-endmember loader (parses cited [M] T_m/dH_fus/dV_fus signatures)
     "crates/physics/src/ionic_radii.rs", # the ionic-radii loader (parses cited Shannon 1976 crystal radii)
     "crates/physics/src/ionization_ladder.rs", # the ionization-ladder loader (parses cited NIST successive IEs)

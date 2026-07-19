@@ -64,6 +64,7 @@ pub mod log;
 pub mod magnetism;
 pub mod memo;
 pub mod metallic;
+pub mod mie_gruneisen_debye;
 pub mod nucleation;
 pub mod opacity_registry;
 pub mod optics;
