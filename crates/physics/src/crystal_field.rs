@@ -462,71 +462,129 @@ pub enum IronValence {
 /// (a scoped follow-on). Reserves no value; keyed entirely on the composition and the banked periodic valence, so a
 /// novel iron-bearing phase (an alien anion, an unusual stoichiometry) is a data row.
 pub fn iron_valence_state(composition: &[(String, u32)], table: &PeriodicTable) -> IronValence {
+    // THE CONSTRAINT SOLVE, replacing a first-listed-valence read that was not general charge balance.
+    //
+    // The old rule took each element's FIRST banked valence as its role. Sulfur's row begins `-2`, so
+    // `FeSO4` was read as one S(2-) plus four O(2-), demanding Fe(10+), and came out FERRIC. Sulfate is
+    // S(6+) and FeSO4 is ferrous. Every polyatomic anion failed the same way.
+    //
+    // The fix enumerates, rather than assumes: one oxidation state per non-iron element drawn from its
+    // COMPLETE banked set, with iron permitted to split across its own states (magnetite needs that), and
+    // keeps only charge-neutral assignments. FeSO4 then has exactly one neutral vector, Fe(2+) with S(6+)
+    // and four O(2-), so it derives as ferrous WITHOUT anyone teaching the engine what a sulfate is. That
+    // is the difference between deriving a fact and tabulating it.
+    //
+    // AMBIGUITY REFUSES. Two or more neutral vectors means the formula alone does not determine the state,
+    // and this returns `Unresolved` even when every vector lands in the same coarse class, because
+    // agreeing by luck is not the same as being determined. Electronegativity is deliberately NOT used as
+    // a tiebreak: atomic electronegativity carries no group connectivity, so it would convert a likelihood
+    // into an authored certainty.
+    //
+    // THE MODEL'S LIMIT, stated: one state per non-iron element. Permitting arbitrary O(2-)/O(1-) mixtures
+    // within a flat formula would make even hematite and magnetite ambiguous peroxide readings and refuse
+    // both. Formula-level oxidation state is what this API's inputs can support.
     let mut n_fe: i64 = 0;
-    let mut anion_charge_total: i64 = 0; // negative: the total anion charge iron must balance
-    let mut other_cation_charge: i64 = 0; // positive: what the non-iron cations already supply
-    let mut ambiguous_cation = false;
-    let mut saw_iron = false;
+    let mut others: Vec<(String, i64, Vec<i64>)> = Vec::new();
     for (symbol, count) in composition {
         if *count == 0 {
             continue;
         }
-        let primary = table
-            .element(symbol)
-            .and_then(|e| e.valence.first().copied());
-        let primary = match primary {
-            Some(v) => v,
-            None => continue, // an element with no tabulated valence contributes no charge (out of scope)
-        };
         if symbol == "Fe" {
-            saw_iron = true;
             n_fe += *count as i64;
-        } else if primary < 0 {
-            anion_charge_total += primary as i64 * *count as i64;
-        } else if primary > 0 {
-            // A cation whose row lists exactly ONE positive valence takes that charge with no choice left
-            // open, so it can be subtracted from the budget and iron's charge still isolates. Silicon in a
-            // silicate is this case, which is what lets fayalite resolve. A cation listing SEVERAL positive
-            // states is a second unknown in one equation, and that is the case this still refuses.
-            let positive_states = table
-                .element(symbol)
-                .map(|e| e.valence.iter().filter(|v| **v > 0).count())
-                .unwrap_or(0);
-            if positive_states > 1 {
-                ambiguous_cation = true;
-            } else {
-                other_cation_charge += primary as i64 * *count as i64;
-            }
+            continue;
         }
+        let states: Vec<i64> = match table.element(symbol) {
+            Some(e) if !e.valence.is_empty() => e.valence.iter().map(|v| i64::from(*v)).collect(),
+            // An element with no banked valence cannot be placed, and skipping it as neutral (the old
+            // behaviour) silently invents a charge balance. It refuses.
+            _ => return IronValence::Unresolved,
+        };
+        others.push((symbol.clone(), *count as i64, states));
     }
-    if !saw_iron || n_fe == 0 {
+    if n_fe == 0 {
         return IronValence::NoIron;
     }
-    // No oxidizing anion (a metal or an alloy): iron carries no oxide chromophore.
-    if anion_charge_total == 0 {
-        return IronValence::Metallic;
+    let fe_states: Vec<i64> = match table.element("Fe") {
+        Some(e) if !e.valence.is_empty() => e.valence.iter().map(|v| i64::from(*v)).collect(),
+        _ => return IronValence::Unresolved,
+    };
+    // Every total the iron atoms can reach by distributing over their own banked states.
+    let mut fe_totals: Vec<i64> = Vec::new();
+    let lo = fe_states.iter().copied().min().unwrap_or(0);
+    let hi = fe_states.iter().copied().max().unwrap_or(0);
+    for total in (lo * n_fe)..=(hi * n_fe) {
+        // reachable when total = sum of n_fe values each drawn from fe_states
+        let reachable = fe_states.iter().any(|_| {
+            // with two states a and b, total is reachable iff total = a*k + b*(n-k) for some 0<=k<=n
+            fe_states.iter().any(|a| {
+                fe_states
+                    .iter()
+                    .any(|b| (0..=n_fe).any(|k| a * k + b * (n_fe - k) == total))
+            })
+        });
+        if reachable {
+            fe_totals.push(total);
+        }
     }
-    // A second MULTIVALENT cation is a second unknown, so charge balance cannot isolate iron's charge.
-    if ambiguous_cation {
-        return IronValence::Unresolved;
+    // Enumerate one state per non-iron element and keep the neutral assignments.
+    let mut neutral_fe_totals: Vec<i64> = Vec::new();
+    let mut index = vec![0usize; others.len()];
+    loop {
+        let rest: i64 = others
+            .iter()
+            .zip(index.iter())
+            .map(|((_, count, states), i)| count * states[*i])
+            .sum();
+        for fe_total in &fe_totals {
+            if fe_total + rest == 0 && !neutral_fe_totals.contains(fe_total) {
+                neutral_fe_totals.push(*fe_total);
+            }
+        }
+        // odometer over the per-element state choices
+        let mut pos = others.len();
+        loop {
+            if pos == 0 {
+                break;
+            }
+            pos -= 1;
+            index[pos] += 1;
+            if index[pos] < others[pos].2.len() {
+                break;
+            }
+            index[pos] = 0;
+            if pos == 0 {
+                pos = usize::MAX;
+                break;
+            }
+        }
+        if pos == usize::MAX || others.is_empty() {
+            break;
+        }
     }
-    // The positive charge iron must supply is what the anions demand LESS what the other cations already
-    // supply. Subtracting them is what closes the multi-cation case this function's `Unresolved` arm used to
-    // name as a scoped follow-on: fayalite `Fe2SiO4` demands 8 from its oxygens, silicon supplies 4 of it,
-    // and the two irons split the remaining 4 into the ferrous state the radiative term keys on.
-    // Class boundaries stay at the integer valences q = 2 and q = 3, compared in integers (q = supply / n_fe,
-    // so `supply <= 2 n_fe` is `q <= 2`, and so on).
-    let supply = -anion_charge_total - other_cation_charge;
-    // The other cations already balance the anions, so iron is left reduced rather than oxidized.
-    if supply <= 0 {
-        return IronValence::Metallic;
-    }
-    if supply <= 2 * n_fe {
-        IronValence::Ferrous
-    } else if supply < 3 * n_fe {
-        IronValence::Mixed
-    } else {
-        IronValence::Ferric
+    match neutral_fe_totals.len() {
+        // No neutral assignment: an alloy or metal with no oxidizing partner is metallic; otherwise the
+        // formula does not balance at all and refuses.
+        0 => {
+            if others.is_empty() {
+                IronValence::Metallic
+            } else {
+                IronValence::Unresolved
+            }
+        }
+        1 => {
+            let supply = neutral_fe_totals[0];
+            if supply <= 0 {
+                IronValence::Metallic
+            } else if supply <= 2 * n_fe {
+                IronValence::Ferrous
+            } else if supply < 3 * n_fe {
+                IronValence::Mixed
+            } else {
+                IronValence::Ferric
+            }
+        }
+        // Determined by luck is not determined. Refuse.
+        _ => IronValence::Unresolved,
     }
 }
 
@@ -703,8 +761,8 @@ source = ""
         // 4, and the two irons split the remaining 4 into the FERROUS state. The five assertions above are
         // untouched, which is the evidence the extension closed a limit rather than moved a result.
         //
-        // `Unresolved` stays live-fired below on siderite, where carbon lists TWO positive states (+4 and +2),
-        // so the balance carries two unknowns in one equation and refuses instead of picking one.
+        // `Unresolved` stays live-fired below on PYRITE, whose persulfide sulfur no one-state-per-element
+        // assignment can balance. Siderite, which this comment once named as the refusal case, resolves.
         let t = periodic();
         assert_eq!(
             iron_valence_state(&comp(&[("Fe", 1), ("O", 1)]), &t),
@@ -731,10 +789,30 @@ source = ""
             IronValence::Ferrous,
             "fayalite: the oxygens demand 8, silicon's single positive state supplies 4, two irons split 4"
         );
+        // SIDERITE MOVED, 2026-07-19, and the move is the fix. Under the old first-valence rule this read
+        // as unresolvable; the constraint solve finds exactly ONE neutral assignment, Fe(2+) with C(4+) and
+        // three O(2-), because C(2+) would demand Fe(4+) and O(1-) would demand a negative iron, neither of
+        // which iron's own banked set admits. FeCO3 is ferrous carbonate, so the derived answer is right.
         assert_eq!(
             iron_valence_state(&comp(&[("Fe", 1), ("C", 1), ("O", 3)]), &t),
+            IronValence::Ferrous,
+            "siderite: exactly one neutral vector exists, Fe(2+) C(4+) 3 O(2-)"
+        );
+        // THE MOTIVATING CASE. Sulfate defeated the old rule completely: sulfur's row begins -2, so FeSO4
+        // read as S(2-) plus four O(2-), demanded Fe(10+), and came out FERRIC. The solve finds the single
+        // neutral vector Fe(2+) S(6+) 4 O(2-) without anyone teaching it what a sulfate is.
+        assert_eq!(
+            iron_valence_state(&comp(&[("Fe", 1), ("S", 1), ("O", 4)]), &t),
+            IronValence::Ferrous,
+            "FeSO4 is ferrous sulfate, derived rather than tabulated"
+        );
+        // AND THE REFUSAL STAYS LIVE-FIRED on a formula the model genuinely cannot place. Pyrite's sulfur is
+        // a persulfide pair S2(2-), which one-state-per-element cannot express: no assignment over the
+        // banked sets is charge neutral, so it refuses instead of inventing a state.
+        assert_eq!(
+            iron_valence_state(&comp(&[("Fe", 1), ("S", 2)]), &t),
             IronValence::Unresolved,
-            "siderite: carbon lists +4 and +2, so iron's charge is not isolable by balance alone"
+            "pyrite FeS2 has no neutral assignment under one state per element"
         );
     }
 
