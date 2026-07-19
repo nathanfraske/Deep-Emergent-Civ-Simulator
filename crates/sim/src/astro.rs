@@ -2600,7 +2600,13 @@ pub fn blackbody_ionizing_spectrum(
 /// log10(Q_H,BB) + log10(departure)`. This is the same-spectrum-correct placement of the atmosphere-model band: the
 /// Sternberg, Hoffmann and Pauldrach 2003 grid tabulates `q_H` as a photon flux, so its departure below the
 /// same-`T_eff` blackbody is a photon-number suppression (within about 0.1 to 0.2 dex above 45000 K, of order 1 dex
-/// at the 26000 to 30000 K edge; deeper and UNCONSTRAINED below 25000 K, the Herbig regime, pending a cooler grid).
+/// at the 26000 to 30000 K edge; deeper and UNCONSTRAINED below 25000 K, the Herbig regime). The cooler grid is now
+/// HELD as a witness (the BSTAR2006 NLTE B-star atmospheres, Lanz and Hubeny 2007, `bstar2006_lanz_hubeny` in
+/// `sources/registry.toml`, Teff 15000 to 30000 K, `model.flux` from soft X-ray to far-IR so the Lyman continuum is
+/// computed), but reading its paper found that its Fig. 6 EUV statement is NLTE-versus-LTE(Kurucz), NOT the
+/// model-versus-blackbody departure this branch consumes, so it does not yet supply the Herbig number: that requires
+/// integrating the grid's `model.flux` SEDs against the blackbody Wien tail, a data fetch named as the deeper rung
+/// (the paper's factor is a different comparison and must not be conflated with the departure).
 /// The departure is NOT applied to an energy and then divided by a mean energy: that would cross an NLTE energy with
 /// an LTE mean. `L_ion` and `<E>` are left absent because this branch does not reconstruct the NLTE energy integral,
 /// so no self-consistent energy pair is claimed. `None` if the input is not a blackbody evaluation, on a

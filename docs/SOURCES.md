@@ -12,9 +12,21 @@ Custody is one of three. `in_repo`: bytes held in-tree, checksum verifiable with
 witness. `external`: bytes in local custody outside the repo, checksum plus archive snapshot.
 The licence decides which is permitted; see `docs/working/FETCH_PIPELINE_PLAN.md` section 3.
 
-**35 sources** (8 registry, 27 mirrored).
+**36 sources** (9 registry, 27 mirrored).
 
 ## Registry (hand-maintained)
+
+### `bstar2006_lanz_hubeny`
+
+Lanz, T. and Hubeny, I., 2007, A Grid of NLTE Line-Blanketed Model Atmospheres of Early B-Type Stars (BSTAR2006), ApJS 169, 83-104, DOI 10.1086/511268. arXiv astro-ph/0611891.
+
+- sha256: `e5435bab670315a6611c2e7b252de9b8c6f88f12ce8a26d1c1c28906c0e24e10`
+- archived: https://web.archive.org/web/20260719182515/https://arxiv.org/pdf/astro-ph/0611891
+- scope: NLTE, plane-parallel, hydrostatic B-star model atmospheres over Teff 15,000 to 30,000 K (1000 K steps, 16 values), log g 1.75 to 4.75, six compositions from twice to one-tenth solar plus metal-free; the emergent model.flux spans the soft X-ray to the far-infrared, so the Lyman continuum (>13.6 eV) IS computed. This grid extends the Sternberg/OSTAR2002 O and early-B coverage DOWN into the Herbig regime (below the Sternberg 25 kK floor), the regime the radiative-envelope EUV wind (astro::nlte_departed_ionizing_spectrum) currently leaves unconstrained. SCOPE LIMIT that governs use: the paper's Fig. 6 EUV statement is an NLTE-versus-LTE(Kurucz) comparison, NOT the model-versus-blackbody departure the EUV code consumes, so it does NOT supply that departure; the model-versus-blackbody Herbig departure is DERIVABLE from the grid's model.flux SEDs (a data fetch), a named deeper rung, and must not be conflated with the Fig. 6 factor.
+- custody: witness
+- licence (**NOT redistributable**): NOT ESTABLISHED AS REDISTRIBUTABLE, so no bytes are held. This is the author's arXiv preprint of an AAS-copyright ApJS paper; the arXiv non-exclusive distribution licence grants arXiv the right to distribute but does not by itself grant third-party redistribution, and no CC licence is stated on the record, so redistribution is unconfirmed. The byte-identical Wayback snapshot stands as the held witness behind the receipt. The values read (a grid's parameter ranges and a figure's qualitative direction) are facts and are citable either way, which is what is done here.
+- licence evidence: arXiv default non-exclusive distribution licence (grants arXiv, not third parties); AAS copyright on the ApJS version of record; no CC statement found on the arXiv record
+- free route (preprint): https://arxiv.org/pdf/astro-ph/0611891
 
 ### `cod_phase_crystallography`
 
