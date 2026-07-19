@@ -1135,3 +1135,5 @@ crates/physics/src/thermoelastic_anchors.rs	pairs_with_banked_gamma	predicate	wh
 crates/materials/src/mie_gruneisen_debye.rs	debye_integral	helper	Simpson quadrature of the dimensionless Debye integral; interval count bounds the step, not the count
 crates/materials/src/mie_gruneisen_debye.rs	debye_integrand	helper	the dimensionless integrand x^3/(e^x-1), series-continued through its removable singularity at the origin
 crates/materials/src/mie_gruneisen_debye.rs	from_banked	constructor	assembles the six MGD anchors from one source fit, refusing a mixed-provenance or systematics-graded set
+crates/physics/src/moment_equivalence.rs	initial_trial_rigidity	helper	the fixed point's starting trial, clamped to the rigidity kernel's own computable ceiling; reports whether the clamp bound
+crates/physics/src/moment_equivalence.rs	solve_line_load_from_trial	helper	the line-load fixed point from an explicit start, so its start-dependence is testable rather than assumed

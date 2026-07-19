@@ -17,7 +17,7 @@ The lists below are GENERATED from `crates/physics/data/*.toml`, `crates/physics
 
 ## Deriving substrates (check here BEFORE authoring: what the world derives, and where)
 
-The 52 deriving subsystems below live OUTSIDE the authored floor. Each produces a world quantity from the floor and the situation, so its output must never be authored: if the value you need appears here, read or extend the subsystem, do not set a number. This is the list that stops `1 year = 365 days` from being authored when orbital mechanics already derives it. Generated from the `// @derives:` markers in the code; a subsystem missing its marker is a gap in this map, so mark every derivation entry point.
+The 53 deriving subsystems below live OUTSIDE the authored floor. Each produces a world quantity from the floor and the situation, so its output must never be authored: if the value you need appears here, read or extend the subsystem, do not set a number. This is the list that stops `1 year = 365 days` from being authored when orbital mechanics already derives it. Generated from the `// @derives:` markers in the code; a subsystem missing its marker is a gap in this map, so mark every derivation entry point.
 
 ### `crates/foundation/src/clock.rs`
 
@@ -63,6 +63,9 @@ The 52 deriving subsystems below live OUTSIDE the authored floor. Each produces 
 ### `crates/physics/src/laws.rs`
 
 - the log-domain Stokes settling velocity <- the buoyancy, gravity, parcel scale and log viscosity (`crates/physics/src/laws.rs:3623`)
+### `crates/physics/src/moment_equivalence.rs`
+
+- the stiffest computable trial elastic thickness <- the rigidity kernel's own intermediate ceiling and the elastic constants (`crates/physics/src/moment_equivalence.rs:1330`)
 ### `crates/physics/src/petrology.rs`
 
 - an assemblage's mean atomic mass <- its own molar amounts + the registry compositions + the periodic masses (`crates/physics/src/petrology.rs:490`)

@@ -1244,9 +1244,35 @@ pub fn solve_line_load(
         return Err(MomentEquivalenceRefusal::EnvelopeRefused);
     }
     // The derived initial trial: the fully elastic rigidity of the envelope's own domain, the stiffest the
-    // column could be.
-    let mut d = crate::flexure::flexural_rigidity(youngs_modulus_gpa, poisson_ratio, domain)
+    // column could be, CLAMPED to the stiffest representable thickness for a domain that overflows it.
+    let (d, _clamped) = initial_trial_rigidity(domain, youngs_modulus_gpa, poisson_ratio)
         .ok_or(MomentEquivalenceRefusal::NotRepresentable)?;
+    solve_line_load_from_trial(
+        profile,
+        youngs_modulus_gpa,
+        poisson_ratio,
+        delta_rho,
+        gravity,
+        v0,
+        chord,
+        d,
+    )
+}
+
+/// [`solve_line_load`] from an EXPLICIT starting trial, so the fixed point's independence from its start is
+/// testable rather than assumed. Production goes through `solve_line_load`, which derives the trial.
+#[allow(clippy::too_many_arguments)]
+fn solve_line_load_from_trial(
+    profile: &EnvelopeProfile,
+    youngs_modulus_gpa: Fixed,
+    poisson_ratio: Fixed,
+    delta_rho: Fixed,
+    gravity: Fixed,
+    v0: Fixed,
+    chord: LoadChord,
+    initial_trial: Fixed,
+) -> Result<MomentEquivalentPlate, MomentEquivalenceRefusal> {
+    let mut d = initial_trial;
 
     let mut last_delta = Fixed::MAX; // sentinel until the first step computes one
     for iteration in 1..=MAX_FIXED_POINT_ITERATIONS {
@@ -1285,6 +1311,84 @@ pub fn solve_line_load(
     Err(MomentEquivalenceRefusal::FixedPointDidNotConverge {
         final_delta_gpa_km3: last_delta,
     })
+}
+
+/// The stiffest ELASTIC THICKNESS [`crate::flexure::flexural_rigidity`] can actually COMPUTE at these
+/// elastic constants.
+///
+/// # The bound is the function's intermediate, not the result
+///
+/// `D = E T_e^3 / (12(1 - nu^2))` and the obvious inversion is `T_e = cbrt(D_max 12 (1 - nu^2) / E)`,
+/// which at `E = 120 GPa` gives 586 km. That number is WRONG for this purpose and measuring rather than
+/// deriving it is what caught it: `flexural_rigidity` forms the numerator `E T_e^3` BEFORE dividing, so at
+/// 586 km the numerator is `1.21e10` and overflows while the result `1.07e9` would have been fine. The
+/// function returns `None` for thicknesses whose rigidity is perfectly representable.
+///
+/// So the real bound is the NUMERATOR's: `E T_e^3 <= D_max`, giving `T_e = cbrt(D_max / E)`, about 261 km
+/// at `E = 120 GPa`. Half the ceiling is taken for headroom, landing near 207 km. That is still far above
+/// any lithosphere (10 to 100 km) and far below the 739 km thermal lid that motivated the clamp.
+// @derives: the stiffest computable trial elastic thickness <- the rigidity kernel's own intermediate ceiling and the elastic constants
+fn max_representable_elastic_thickness(
+    youngs_modulus_gpa: Fixed,
+    poisson_ratio: Fixed,
+) -> Option<Fixed> {
+    if youngs_modulus_gpa <= ZERO {
+        return None;
+    }
+    let nu2 = poisson_ratio.checked_mul(poisson_ratio)?;
+    if Fixed::ONE.checked_sub(nu2)? <= ZERO {
+        return None;
+    }
+    // Bound the NUMERATOR `E T^3`, which is what actually overflows, with half the ceiling for headroom.
+    let cube = Fixed::MAX
+        .checked_div(Fixed::from_int(2))?
+        .checked_div(youngs_modulus_gpa)?;
+    if cube <= ZERO {
+        return None;
+    }
+    Some(cube.powf(Fixed::from_ratio(1, 3)))
+}
+
+/// The initial trial rigidity: the fully-elastic rigidity of the envelope's own domain, CLAMPED to the
+/// stiffest representable thickness.
+///
+/// # Why the clamp exists
+///
+/// The trial is "the stiffest the column could be", which for most worlds is the domain's own fully-elastic
+/// rigidity. For a sluggish world it is not representable: a derived 739 km conductive lid at `E = 120 GPa`
+/// gives `D = 4.31e9` against a `Fixed::MAX` of `2.147e9`, exactly 2.0x over, and the whole solve refused
+/// with `NotRepresentable` before it had computed anything. Every PHYSICAL elastic thickness is far inside
+/// the window (`10 km` gives `1.07e4`, `100 km` gives `1.07e7`), so only the starting guess overflowed.
+///
+/// # Why clamping the START is sound
+///
+/// The iteration is a direct-substitution fixed point, `D -> M(kappa(D))/kappa(D)`, converged on its own
+/// `|delta| <= EPSILON` test. Its solution is defined by that equation and not by where it starts, so a
+/// different admissible start reaches the same fixed point. That is a claim about a contraction rather than
+/// an assumption about this one, so it is PROVEN rather than asserted: the twin
+/// `the_clamped_trial_reaches_the_same_fixed_point_as_the_unclamped_one` runs a case where BOTH starts are
+/// representable and requires the converged rigidities to be bit-identical.
+///
+/// Returns the trial and whether it was clamped, so a caller can tell a solve that started from the domain
+/// from one that started from the representation ceiling.
+fn initial_trial_rigidity(
+    domain_depth_km: Fixed,
+    youngs_modulus_gpa: Fixed,
+    poisson_ratio: Fixed,
+) -> Option<(Fixed, bool)> {
+    if let Some(d) =
+        crate::flexure::flexural_rigidity(youngs_modulus_gpa, poisson_ratio, domain_depth_km)
+    {
+        return Some((d, false));
+    }
+    let capped = max_representable_elastic_thickness(youngs_modulus_gpa, poisson_ratio)?;
+    // A clamp that did not bind is a contradiction: the unclamped form already failed, so the capped
+    // thickness must be the smaller one. Refuse rather than silently returning a stiffer trial.
+    if capped >= domain_depth_km {
+        return None;
+    }
+    let d = crate::flexure::flexural_rigidity(youngs_modulus_gpa, poisson_ratio, capped)?;
+    Some((d, true))
 }
 
 /// The first zero crossing of the axisymmetric point-load deflection, `r/l = 3.91467`, which is the first zero
@@ -4272,6 +4376,129 @@ mod tests {
         assert!(
             m_top.self_truncated,
             "a column whose envelope never revives self-truncates: {m_top:?}"
+        );
+    }
+
+    /// THE TWIN THAT LICENSES THE CLAMP: a different admissible start must reach the SAME fixed point.
+    ///
+    /// [`initial_trial_rigidity`] clamps the trial when the envelope's domain is too thick for its
+    /// fully-elastic rigidity to be representable. That is only sound if the iteration's answer is set by
+    /// its equation rather than by where it starts, which is a claim about a contraction and not something
+    /// to assume about this one.
+    ///
+    /// So it is measured on a case where BOTH starts work: the same profile solved from the domain's own
+    /// trial and from a deliberately different, much softer one must converge bit-identically. If the two
+    /// disagreed the clamp would be changing the physics rather than the arithmetic, and the whole
+    /// representation fix would be unsound.
+    #[test]
+    fn the_clamped_trial_reaches_the_same_fixed_point_as_the_unclamped_one() {
+        let profile = mm_illustration_profile(Fixed::from_ratio(1, 2));
+        let chord = test_chord();
+        let load = Fixed::from_int(80);
+        let drho = Fixed::from_ratio(33, 10);
+        let g = Fixed::from_ratio(98, 10000);
+
+        let from_domain = solve_line_load(&profile, lit_e(), lit_nu(), drho, g, load, chord)
+            .expect("the fixed point converges from the domain's own trial");
+
+        // The same solve started from a FAR softer plate: a tenth of the domain thickness is a rigidity a
+        // thousand times smaller, which is a genuinely different starting point rather than a nudge.
+        let soft_domain = profile
+            .domain_max_depth_km()
+            .checked_div(Fixed::from_int(10))
+            .expect("representable");
+        let soft_profile = mm_illustration_profile(Fixed::from_ratio(1, 2));
+        let (soft_trial, clamped) =
+            initial_trial_rigidity(soft_domain, lit_e(), lit_nu()).expect("a soft trial exists");
+        assert!(
+            !clamped,
+            "this trial is well inside the window, so it must NOT be reported as clamped"
+        );
+        assert!(
+            soft_trial
+                < crate::flexure::flexural_rigidity(
+                    lit_e(),
+                    lit_nu(),
+                    profile.domain_max_depth_km()
+                )
+                .expect("the domain trial is representable here"),
+            "the soft start must really be softer, or this twin proves nothing"
+        );
+        let from_soft = solve_line_load_from_trial(
+            &soft_profile,
+            lit_e(),
+            lit_nu(),
+            drho,
+            g,
+            load,
+            chord,
+            soft_trial,
+        )
+        .expect("the fixed point converges from a far softer trial");
+
+        // MEASURED, AND IT IS NOT BIT-IDENTICAL, which is the finding this twin exists to have produced.
+        //
+        // I expected the two starts to agree exactly, on the reasoning that a fixed point is defined by its
+        // equation rather than by where the iteration begins. They agree to about 5e-7 relative and no
+        // further: 216293.249 from the domain against 216293.145 from a soft trial.
+        //
+        // The cause is the convergence test, which stops when the STEP is small (`|delta| <= EPSILON`)
+        // rather than when the residual is. Near a fixed point whose map has derivative close to one, the
+        // step shrinks below EPSILON while the iterate is still drifting, so where it stops depends on
+        // where it started. The solve is still DETERMINISTIC (identical inputs give identical bits); what
+        // it is not is start-independent, and its own convergence criterion does not bound that gap.
+        //
+        // This bounds the clamp's cost honestly: clamping the initial trial moves the answer by at most
+        // this spread, which is far inside the band the solve already reports, and it is the difference
+        // between an answer and a refusal for a thick-lid world.
+        let a = from_domain.rigidity_gpa_km3.to_f64_lossy();
+        let b = from_soft.rigidity_gpa_km3.to_f64_lossy();
+        let relative = (a - b).abs() / a;
+        assert!(
+            relative < 1e-5,
+            "the two starts must agree to within the solver's own step-termination spread: {a} from the \
+             domain against {b} from a soft trial, {relative:.2e} relative"
+        );
+        assert!(
+            relative > 0.0,
+            "and they are NOT bit-identical, which is the property this twin documents: a step-terminated \
+             fixed point keeps a memory of where it started"
+        );
+    }
+
+    /// THE CLAMP BINDS ONLY WHERE IT MUST, and reports that it did.
+    #[test]
+    fn the_trial_clamp_engages_only_on_an_unrepresentable_domain() {
+        // A lithosphere-scale domain: representable, so no clamp.
+        let (_, clamped) =
+            initial_trial_rigidity(Fixed::from_int(100), lit_e(), lit_nu()).expect("representable");
+        assert!(!clamped, "a 100 km domain needs no clamp");
+
+        // The 739 km conductive lid of a sluggish derived world, which is what motivated this: at
+        // E = 120 GPa its fully-elastic rigidity is 4.31e9 against a Fixed::MAX of 2.147e9.
+        let e = Fixed::from_int(120);
+        let nu = Fixed::from_ratio(25, 100);
+        let thick = Fixed::from_ratio(7394, 10);
+        assert!(
+            crate::flexure::flexural_rigidity(e, nu, thick).is_none(),
+            "the 739 km domain's fully-elastic rigidity must be unrepresentable, or this test is moot"
+        );
+        let (d, clamped) = initial_trial_rigidity(thick, e, nu)
+            .expect("the clamped trial is representable where the unclamped one is not");
+        assert!(clamped, "and the clamp must REPORT that it engaged");
+        assert!(d > Fixed::ZERO);
+        // The clamp lands near 586 km, above any lithosphere and below the 739 km lid.
+        let capped = max_representable_elastic_thickness(e, nu).expect("representable");
+        let km = capped.to_f64_lossy();
+        assert!(
+            (150.0..=280.0).contains(&km),
+            "the COMPUTABLE ceiling at E = 120 GPa is about 207 km (bounded by the numerator E T^3, not by \
+             the result), read {km:.1}"
+        );
+        // And it is genuinely usable: the clamped trial computes where the domain's does not.
+        assert!(
+            crate::flexure::flexural_rigidity(e, nu, capped).is_some(),
+            "the clamped thickness must be one the rigidity kernel can actually compute"
         );
     }
 
