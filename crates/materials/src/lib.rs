@@ -72,6 +72,7 @@ pub mod quench;
 pub mod stoner;
 pub mod surface_composition;
 pub mod thermochemical;
+pub mod thermoelastic;
 pub mod verdict;
 
 pub use assemblage::{

@@ -1,0 +1,245 @@
+# The Gruneisen VOLUME EXPONENT q per phase: the exponent in the Mie-Gruneisen-Debye closure
+# gamma(V) = gamma_0 (V/V_0)^q, equivalently q = (dln gamma / dln V)_T held constant. The thermal-EoS
+# sibling of gruneisen.toml and mineral_moduli.toml (crate::petrology_data), carrying the one MGD anchor
+# neither of them holds: V_0, K_0 and K_0' are banked in mineral_moduli.toml, gamma_0 is banked in
+# gruneisen.toml as gamma_eos_debye, the Debye temperature theta_D is DERIVED (see below), and q closes
+# the set.
+#
+# WHY THETA_D IS NOT IN THIS FILE. It is derived, not fetched: civsim_materials::properties::
+# debye_velocity_km_per_s(K, G, rho) with debye_temperature(v_D, V_atom) computes it from the banked
+# moduli, molar volume and formula-unit atom count. Fetching a theta column to sit beside a derivation of
+# the same fact would put one fact in two places with nothing comparing them. THE HONEST LIMIT OF THAT
+# DERIVATION, measured rather than assumed and recorded here because this file is where a reader of the MGD
+# parameter set will look: the built path computes the ELASTIC Debye temperature (the mean-sound-velocity
+# average of the phonon spectrum), which is a DIFFERENT average from the effective Debye temperature that
+# an MGD equation of state pairs with gamma_0 and q (the one-parameter Debye model fit to the measured
+# entropy at 1000 K). Evaluated on the banked inputs against the Stixrude & Lithgow-Bertelloni compilation
+# values, the ratio elastic-over-effective runs 0.70 (quartz, 573 K against 816 K), 0.83 (fayalite, 513
+# against 619), 0.91 (enstatite, 738 against 812), 0.94 (forsterite, 762 against 809), 1.02 (spinel, 863
+# against 843), 1.11 (corundum, 1035 against 933), 1.23 (periclase, 940 against 773). It is a spread of
+# minus 30 to plus 23 percent, it does not cancel, and forsterite sits near the crossover where the two
+# definitions happen to coincide, so a single forsterite spot-check does not certify the pairing. The
+# derivation is correct for the elastic Debye temperature; whether the MGD consumer may read it in place of
+# the effective one is an open question for the owner, and it is flagged rather than settled here.
+#
+# WHY q IS NEEDED PER PHASE. q sets how fast the Gruneisen parameter falls as the phase is compressed, and
+# so how the thermal pressure P_thermal = gamma(V) E_th / V decays with depth. It is a FLOOR datum: it was
+# fit in ignorance of any rock the mineral will sit in, so it cannot fit an outcome. An alien phase is a new
+# row (Principle 11), and a phase with no q row is refused by the consumer, never defaulted to 1.
+#
+# BLOCK KIND [[anchor]], the cited-data-COLUMN idiom (mirroring gruneisen.toml's [[mineral]], the ionic
+# radii [[radius]], the condensation [[condensation]], the convection-scaling [[constant]]), NOT a reserved
+# floor kind ([[element]] / [[axis]] / [[substance]]): an immutable transcription of cited compilation
+# values, out of the floor real/fantasy authorship axis and out of floor-Element policing. Values are
+# QUOTED strings; the engine parses fixed-point from strings, never floats. Keyed by the phase name,
+# matching the phase-registry / moduli / gruneisen spelling exactly.
+#
+# q AND gamma_0 ARE CORRELATED IN THE SAME FIT, WHICH DECIDES WHICH SOURCE EACH ROW TAKES. Neither is an
+# independent measurement: both come from one least-squares global inversion, iterated to self-consistency
+# against the same thermal-expansion, heat-capacity and high-temperature elasticity data, so a q from one
+# paper beside a gamma_0 from another is a pair that was never jointly constrained. The banked gamma_0
+# (gruneisen.toml gamma_eos_debye) is transcribed from Stixrude & Lithgow-Bertelloni 2005 Table 1, so the
+# PRIMARY q here is that same table's, and every row records whether its q's own fit reproduces the banked
+# gamma_0. Six of the seven rows match exactly; the mismatches are reported below rather than reconciled.
+#
+# THE SUCCESSOR COMPILATION DISAGREES ON TWO ROWS, AND THE DISAGREEMENT IS THE FINDING. Stixrude &
+# Lithgow-Bertelloni 2011 Table A1 is the same authors' later inversion. It leaves q unchanged for
+# forsterite (2.1), fayalite (3.6) and corundum (1.3), moves spinel 2.8 -> 2.7 inside the band, and breaks
+# in two places:
+#   PERICLASE: q 1.5 -> 1.7, and gamma_0 1.50 -> 1.36. The 2011 q therefore does NOT pair with the banked
+#     gamma_0, and taking it would silently mix two inversions.
+#   ENSTATITE: q 7.8 -> 3.4, a factor of 2.3, with gamma_0 0.67 -> 0.78 and K_0' held at 7.0(4) against
+#     7.1(4). q = 7.8 was by far the largest in the 2005 table and the later inversion did not sustain it.
+#     The 2005 pair (q 7.8, gamma_0 0.67) is the one consistent with the bank, and it is also the one the
+#     successor retracted, so enstatite's thermal pressure is the least settled quantity in this column.
+#     This is the same phase gruneisen.toml flags as the Slater-inapplicable chain-silicate anomaly, and an
+#     unstable q is a second symptom of the same soft chain-tilt physics.
+# Both channels are carried per row so the supersession is visible rather than laundered, exactly as
+# gruneisen.toml carries gamma_thermodynamic beside gamma_eos_debye.
+#
+# GRADE: ONE ROW IS ASSUMED RATHER THAN FIT, AND THE BOUNDARY IS READ FROM THE SOURCE'S OWN TYPOGRAPHY.
+# Both tables print "Italicized entries are from systematics", meaning the authors estimated the cell rather
+# than fitting it for that species. Text extraction discards italics, so every cell below was additionally
+# read through the PDF font metadata (Times-Italic against Times-Roman in 2005, TimesNewRomanPS-Italic
+# against TimesNewRomanPS in 2011), with a known-italic neighbour used as the control in each table. Result:
+# every q below is ROMAN, that is fit to data, EXCEPT quartz's, which is ITALIC. Quartz therefore carries
+# q_grade = "unverified_measurement_candidate" (the repository's honest tier for a value labelled measured
+# that carries no machine-checkable evidence; it renders [?M], never [M]), a band equal to the value itself,
+# and an explicit refusal flag. An assumed q = 1 must never enter wearing a measured grade, and this is the
+# row where that would have happened.
+#
+# HEMATITE HAS NO ROW, AND THE ABSENCE IS THE CORRECT RESULT. Fe2O3 is in the phase registry but appears in
+# neither compilation: both are mantle-species databases and hematite is a ferric phase outside their
+# systems. The literature was searched rather than guessed at, and the two candidates each fail for a stated
+# reason. Zerilli & Jones 1995, "High Pressure Equation of State for Fe2O3", MRS Proc. 418, 421, DOI
+# 10.1557/PROC-418-421, does report a Debye-Gruneisen EoS for hematite and is CLOSED ACCESS with no free
+# legitimate copy found, so no cell of it can be quoted and it cannot be used. Dorogokupets, Sokolova,
+# Dymshits & Litasov 2016, Geodynamics & Tectonophysics 7(3), 459-476, DOI 10.5800/GT-2016-7-3-0217, is open
+# access and gives a modern optimized thermal EoS for hematite, but in a formalism with NO CONSTANT q TO
+# TRANSCRIBE: its Gruneisen parameter follows the Al'tshuler form gamma = gamma_inf + (gamma_0 - gamma_inf)
+# x^beta, under which q is a VOLUME-DEPENDENT FUNCTION, its eq. (10.3), q = beta x^beta (gamma_0 -
+# gamma_inf)/gamma, and its vibrational term is two EINSTEIN oscillators rather than a Debye model.
+# Evaluating that function at ambient volume and calling the result the MGD q would launder one model's
+# parameter into another's slot and would carry no band the source states. Hematite is therefore OMITTED per
+# the no-fabrication rule, and the consumer must refuse a hematite-bearing assemblage rather than default
+# it. (Hematite is separately unserved by the derivation route as well: its bulk and shear moduli are
+# recorded UNSOURCED in mineral_moduli.toml, so no theta_D can be derived for it either.)
+#
+# FORMULA UNITS DIFFER BETWEEN THE CHANNELS AND DO NOT AFFECT q. The 2005 table lists spinel as
+# (Mg3Al)(Al7Mg)O16 (4x MgAl2O4) and enstatite as Mg4Si4O12 (4x MgSiO3); the 2011 table lists enstatite as
+# MgMgSi2O6 (2x MgSiO3). q is a logarithmic derivative and is intensive, so the choice of formula unit
+# rescales V_0 and F_0 and leaves q unchanged. Each row records the formula unit its channel used so the
+# V_0 pairing stays checkable.
+#
+# WITNESSES (both citation-plus-witness, receipts in thermoelastic_anchors/manifest.toml):
+# scripts/thermoelastic_anchors_provenance_test.py rechecks every receipt offline and asserts the
+# pre-registered fingerprints against this column.
+#
+# FINGERPRINTS (owner spot-check, re-asserted in the test). q primary (slb2005) / successor (slb2011):
+# periclase 1.5 / 1.7, corundum 1.3 / 1.3, spinel 2.8 / 2.7, forsterite 2.1 / 2.1, fayalite 3.6 / 3.6,
+# enstatite 7.8 / 3.4, quartz (absent) / 1.0 assumed. gamma_0 agreement with the banked gruneisen.toml
+# gamma_eos_debye: six rows true on the primary channel, quartz has no banked gamma_0 at all.
+
+frame = "reference state V_0 at 300 K, 1 bar; q = (dln gamma / dln V)_T, held CONSTANT in the MGD form gamma = gamma_0 (V/V_0)^q. A source whose gamma(V) is not this power law has no constant q to transcribe and is excluded rather than evaluated at ambient."
+grade = "compilation, self-consistent global inversion (least-squares, iterated) of thermal-expansion, heat-capacity and high-temperature elasticity data; per-cell fit-versus-assumed grade read from the source typography and recorded per row as q_grade"
+uncertainty_convention = "the source prints the uncertainty as a parenthetical on the last digit(s): 2.8 (6) is 2.8 +/- 0.6, 3.6 (10) is 3.6 +/- 1.0, 7.8 (11) is 7.8 +/- 1.1. The q_band fields carry that uncertainty expanded to the same units as the value."
+gamma_0_companion = "gruneisen.toml, field gamma_eos_debye, transcribed from the slb2005 channel of this same table. Carried by pointer rather than copied, so there is no second copy to drift. Each row records gamma_0_matches_banked for the channel it takes q from."
+pairing_rule = "q and gamma_0 are correlated in one fit and must be read from ONE source. The primary q here is slb2005 because the banked gamma_0 is slb2005. Reading the slb2011 q against the banked gamma_0 is a defect for periclase and enstatite, where the 2011 inversion moved gamma_0 as well."
+theta_d_note = "theta_D is NOT carried here: it derives from the banked moduli via civsim_materials::properties::debye_velocity_km_per_s + debye_temperature. That derivation yields the ELASTIC Debye temperature, which departs from the MGD effective Debye temperature by minus 30 to plus 23 percent across these phases (see the header). Whether the MGD consumer may substitute one for the other is open and is the owner's call."
+
+[[anchor]]
+name = "periclase"
+formula = "MgO"
+q = "1.5"
+q_band = "0.2"
+q_grade = "fit"
+q_source = "slb2005"
+q_slb2011 = "1.7"
+q_slb2011_band = "0.2"
+q_slb2011_grade = "fit"
+channels_agree = "false"
+gamma_0_matches_banked = "true"
+formula_unit = "MgO"
+temperature_k = "300"
+pressure_bar = "1"
+scope = "ambient reference state, upper-mantle to lower-mantle P,T as fit by the inversion; q constant in gamma = gamma_0 (V/V_0)^q"
+anchor = "Stixrude & Lithgow-Bertelloni 2005, held PDF page 30, 'Table 1. Properties of mantle species' (the text calls it Table A1), row 'magnesiowustite (mw) / periclase / MgO', q column: 1.5 (2). Times-Roman, so fit rather than systematics."
+anchor_slb2011 = "Stixrude & Lithgow-Bertelloni 2011, printed page 1208, 'Table A1. (Continued.)', row 'magnesiowustite / Periclase (pe) / MgO', q_0 column: 1.7 (2). Roman, so fit."
+citation = "q = 1.5(2): Stixrude, L. & Lithgow-Bertelloni, C., 2005, Thermodynamics of mantle minerals - I. Physical properties, Geophysical Journal International 162(2), 610-632, DOI 10.1111/j.1365-246X.2005.02642.x, Table 1, periclase row, citing refs 1,4,7,8,44 (Smyth & McCormick 1995, Robie & Hemingway 1995, Fiquet et al. 1999, Anderson & Isaak 1995, Sinogeikin & Bass 2000). GAMMA_0 PAIRING: this fit's gamma_0 is 1.50(2), which is exactly the banked gruneisen.toml gamma_eos_debye, so the pair is jointly constrained and consistent. SUCCESSOR DISAGREEMENT, reported rather than reconciled: Stixrude & Lithgow-Bertelloni 2011, GJI 184(3), 1180-1213, DOI 10.1111/j.1365-246X.2010.04890.x, Table A1 gives q_0 = 1.7(2) with gamma_0 = 1.36(5). Its q is outside the 2005 band and its gamma_0 does NOT match the bank, so the 2011 q may not be read against the banked gamma_0 without also re-sourcing gamma_0."
+
+[[anchor]]
+name = "corundum"
+formula = "Al2O3"
+q = "1.3"
+q_band = "0.2"
+q_grade = "fit"
+q_source = "slb2005"
+q_slb2011 = "1.3"
+q_slb2011_band = "0.2"
+q_slb2011_grade = "fit"
+channels_agree = "true"
+gamma_0_matches_banked = "true"
+formula_unit = "AlAlO3"
+temperature_k = "300"
+pressure_bar = "1"
+scope = "ambient reference state, upper-mantle to lower-mantle P,T as fit by the inversion; q constant in gamma = gamma_0 (V/V_0)^q"
+anchor = "Stixrude & Lithgow-Bertelloni 2005, held PDF page 30, 'Table 1. Properties of mantle species', row 'akimotoite / corundum / AlAlO3', q column: 1.3 (2). Times-Roman (fit). The akimotoite end-members in the same group carry q 1.3 (10) in ITALIC, copied from this row by the isostructural-series systematics rule, which confirms this row is the fitted one."
+anchor_slb2011 = "Stixrude & Lithgow-Bertelloni 2011, printed page 1207, 'Table A1', row 'akimotoite / Corundum (co) / AlAlO3', q_0 column: 1.3 (2). Roman (fit)."
+citation = "q = 1.3(2): Stixrude & Lithgow-Bertelloni 2005, GJI 162, 610-632, Table 1, corundum row, citing refs 1,4,5,8,43 including Gieske & Barsch 1968 for the single-crystal elasticity. GAMMA_0 PAIRING: this fit's gamma_0 is 1.32(4), exactly the banked gruneisen.toml gamma_eos_debye, so the pair is consistent. Reproduced UNCHANGED in Stixrude & Lithgow-Bertelloni 2011, GJI 184, Table A1 (q_0 1.3(2), gamma_0 1.32(4)), so both compilations agree on both members of the pair. Corundum is the cleanest row in this column."
+
+[[anchor]]
+name = "spinel"
+formula = "MgAl2O4"
+q = "2.8"
+q_band = "0.6"
+q_grade = "fit"
+q_source = "slb2005"
+q_slb2011 = "2.7"
+q_slb2011_band = "0.6"
+q_slb2011_grade = "fit"
+channels_agree = "within-band"
+gamma_0_matches_banked = "true"
+formula_unit = "(Mg3Al)(Al7Mg)O16, disordered spinel = 4x MgAl2O4"
+temperature_k = "300"
+pressure_bar = "1"
+scope = "ambient reference state, upper-mantle P,T as fit by the inversion; the DISORDERED spinel model, whose cation distribution differs from an ordered single-crystal sample; q constant in gamma = gamma_0 (V/V_0)^q"
+anchor = "Stixrude & Lithgow-Bertelloni 2005, held PDF page 30, 'Table 1. Properties of mantle species', row 'spinel (sp) / spinel / (Mg3Al)(Al7Mg)O16', q column: 2.8 (6). Times-Roman (fit). The sibling hercynite row carries 2.8 (10) in ITALIC, copied from this row, which confirms this row is the fitted one."
+anchor_slb2011 = "Stixrude & Lithgow-Bertelloni 2011, printed page 1207, 'Table A1', row 'spinel (sp) / Spinel (sp) / (Mg3Al)(Al7Mg)O16', q_0 column: 2.7 (6). Roman (fit)."
+citation = "q = 2.8(6): Stixrude & Lithgow-Bertelloni 2005, GJI 162, 610-632, Table 1, spinel row, citing refs 1,4,6-8 including Yoneda 1990. GAMMA_0 PAIRING: this fit's gamma_0 is 1.02(4), exactly the banked gruneisen.toml gamma_eos_debye, so the pair is consistent. SUCCESSOR: Stixrude & Lithgow-Bertelloni 2011, GJI 184, Table A1 gives q_0 = 2.7(6) with gamma_0 unchanged at 1.02(4). The q shift is 0.1 against a band of 0.6, so the two channels agree within uncertainty and either may be read against the bank. (The 2011 inversion did move this phase's Debye temperature substantially, 900 K to 843 K with the band widening from 3 K to 33 K, which is recorded because it bears on the same phase's thermal model even though theta is not carried in this file.)"
+
+[[anchor]]
+name = "forsterite"
+formula = "Mg2SiO4"
+q = "2.1"
+q_band = "0.2"
+q_grade = "fit"
+q_source = "slb2005"
+q_slb2011 = "2.1"
+q_slb2011_band = "0.2"
+q_slb2011_grade = "fit"
+channels_agree = "true"
+gamma_0_matches_banked = "true"
+formula_unit = "Mg2SiO4"
+temperature_k = "300"
+pressure_bar = "1"
+scope = "ambient reference state, upper-mantle P,T as fit by the inversion; q constant in gamma = gamma_0 (V/V_0)^q"
+anchor = "Stixrude & Lithgow-Bertelloni 2005, held PDF page 30, 'Table 1. Properties of mantle species', row 'olivine (ol) / forsterite / Mg2SiO4', q column: 2.1 (2). Times-Roman (fit)."
+anchor_slb2011 = "Stixrude & Lithgow-Bertelloni 2011, printed page 1207, 'Table A1', row 'olivine (ol) / Forsterite (fo) / Mg2SiO4', q_0 column: 2.1 (2). Roman (fit)."
+citation = "q = 2.1(2): Stixrude & Lithgow-Bertelloni 2005, GJI 162, 610-632, Table 1, forsterite row, citing refs 1,8,11-13 including Zha et al. 1996 (the same single-crystal Brillouin study that supplies K' = 4.2(2) to gruneisen.toml) and Anderson & Isaak 1995. GAMMA_0 PAIRING: this fit's gamma_0 is 0.99(3), exactly the banked gruneisen.toml gamma_eos_debye, so the pair is consistent. Reproduced UNCHANGED in Stixrude & Lithgow-Bertelloni 2011, GJI 184, Table A1 (q_0 2.1(2), gamma_0 0.99(3)), so both compilations agree on both members of the pair."
+
+[[anchor]]
+name = "fayalite"
+formula = "Fe2SiO4"
+q = "3.6"
+q_band = "1.0"
+q_grade = "fit"
+q_source = "slb2005"
+q_slb2011 = "3.6"
+q_slb2011_band = "1.0"
+q_slb2011_grade = "fit"
+channels_agree = "true"
+gamma_0_matches_banked = "true"
+formula_unit = "Fe2SiO4"
+temperature_k = "300"
+pressure_bar = "1"
+scope = "ambient reference state, upper-mantle P,T as fit by the inversion; q constant in gamma = gamma_0 (V/V_0)^q. The 2005 paper notes the fayalite entropy assumes R ln 5 magnetic entropy per Fe, so this fit inherits that magnetic-entropy assumption."
+anchor = "Stixrude & Lithgow-Bertelloni 2005, held PDF page 30, 'Table 1. Properties of mantle species', row 'olivine / fayalite / Fe2SiO4', q column: 3.6 (10). Times-Roman (fit); the neighbouring G_0' cell 1.4 (5) IS italic on the same row, which is the control proving the font read discriminates within a row."
+anchor_slb2011 = "Stixrude & Lithgow-Bertelloni 2011, printed page 1207, 'Table A1', row 'olivine / Fayalite (fa) / Fe2SiO4', q_0 column: 3.6 (10). Roman (fit)."
+citation = "q = 3.6(10): Stixrude & Lithgow-Bertelloni 2005, GJI 162, 610-632, Table 1, fayalite row, citing refs 1,2,4,5,8,14,15. GAMMA_0 PAIRING: this fit's gamma_0 is 1.06(7), exactly the banked gruneisen.toml gamma_eos_debye, so the pair is consistent. Reproduced UNCHANGED in Stixrude & Lithgow-Bertelloni 2011, GJI 184, Table A1. THE BAND IS 28 PERCENT OF THE VALUE, the loosest fitted q in this column, so fayalite's thermal-pressure decay with compression is the least constrained of the olivines even though the two compilations agree on the central value."
+
+[[anchor]]
+name = "enstatite"
+formula = "MgSiO3"
+q = "7.8"
+q_band = "1.1"
+q_grade = "fit"
+q_source = "slb2005"
+q_slb2011 = "3.4"
+q_slb2011_band = "0.4"
+q_slb2011_grade = "fit"
+channels_agree = "false"
+gamma_0_matches_banked = "true"
+formula_unit = "Mg4Si4O12, = 4x MgSiO3"
+temperature_k = "300"
+pressure_bar = "1"
+scope = "ambient reference state, upper-mantle P,T as fit by the inversion; orthoenstatite (orthorhombic MgSiO3 pyroxene, Pbca); q constant in gamma = gamma_0 (V/V_0)^q"
+anchor = "Stixrude & Lithgow-Bertelloni 2005, held PDF page 30, 'Table 1. Properties of mantle species', row 'orhopyroxene (opx) / enstatite / Mg4Si4O12' (the source's own typo for orthopyroxene), q column: 7.8 (11). Times-Roman (fit). The sibling ferrosilite and Mg-Tschermak's rows carry q 7.8 (10) in ITALIC, copied from this row, which confirms this row is the fitted one."
+anchor_slb2011 = "Stixrude & Lithgow-Bertelloni 2011, printed page 1207, 'Table A1', row 'orthopyroxene / Enstatite (en) / MgMgSi2O6', q_0 column: 3.4 (4). Roman (fit)."
+citation = "q = 7.8(11): Stixrude & Lithgow-Bertelloni 2005, GJI 162, 610-632, Table 1, enstatite row, citing refs 1,23-29 including Jackson et al. 1999/2003, Zhao et al. 1995 and Frisillo & Barsch 1972. GAMMA_0 PAIRING: this fit's gamma_0 is 0.67(4), exactly the banked gruneisen.toml gamma_eos_debye, so the pair is jointly constrained and consistent, which is why this channel is primary. THE LARGEST DISAGREEMENT IN THIS COLUMN, reported rather than reconciled: Stixrude & Lithgow-Bertelloni 2011, GJI 184, Table A1 gives q_0 = 3.4(4) with gamma_0 = 0.78(4) and K_0' 7.0(4) against 7.1(4). q falls by a factor of 2.3, far outside either band, and gamma_0 moves too, so the 2011 q may not be read against the banked gamma_0. q = 7.8 was by far the largest in the 2005 table and the successor inversion did not sustain it: the value banked here is the gamma_0-consistent one AND the one the later work retracted, so enstatite's thermal pressure is the least settled quantity in this column and is the row most in need of the owner's ruling. This is the same phase gruneisen.toml flags as the Slater-inapplicable chain-silicate anomaly whose K' is anomalously large; an unstable q is a second symptom of the same soft chain-tilt physics."
+
+[[anchor]]
+name = "quartz"
+formula = "SiO2"
+q_slb2011 = "1.0"
+q_slb2011_band = "1.0"
+q_slb2011_grade = "unverified_measurement_candidate"
+q_source = "slb2011"
+channels_agree = "single-channel"
+gamma_0_matches_banked = "no-banked-gamma_0"
+usable_as_anchor = "false"
+formula_unit = "SiO2"
+temperature_k = "300"
+pressure_bar = "1"
+scope = "ambient reference state, alpha-quartz. The 2011 model treats the alpha-beta displacive transition with a separate Landau term, so this row describes the non-Landau part only and does not by itself carry quartz across the transition."
+anchor_slb2011 = "Stixrude & Lithgow-Bertelloni 2011, printed page 1207, 'Table A1', row 'quartz (qtz) / Quartz (qtz) / SiO2', q_0 column: 1.0 (10) in ITALIC, and the gamma_0 column 0.00 (5) also in ITALIC. The font read is the whole reason this row is graded differently from its neighbours: the theta_0 cell on the same row is Roman."
+citation = "q_0 = 1.0(10): Stixrude & Lithgow-Bertelloni 2011, Thermodynamics of mantle minerals - II. Phase equilibria, GJI 184(3), 1180-1213, DOI 10.1111/j.1365-246X.2010.04890.x, Table A1, Quartz row, citing refs 1,6,62-64 (Smyth & McCormick 1995, Fei 1995, Ohno et al. 2006, Kimizuka et al. 2007, Richet et al. 1982). ONLY ONE SOURCE EXISTS: quartz is absent from the 2005 mantle table, which carries only stishovite among the SiO2 polymorphs, and stishovite is a different phase whose values must never be read for quartz. THIS q IS ASSUMED, NOT FIT: it is italic in the source, that is from systematics, with a band equal to the value, so it is the authors' default rather than a determination, and it is graded unverified_measurement_candidate for that reason. GAMMA_0 PAIRING FAILS TWICE OVER: the companion gamma_0 in the same fit is 0.00(5), itself also from systematics, and gruneisen.toml carries NO gamma for quartz at all (its honest absent-gamma row), so there is no banked gamma_0 to pair with. gamma_0 = 0 additionally makes the MGD thermal pressure identically zero whatever q is, so q is inoperative for quartz in this parameterization. usable_as_anchor is false: the consumer must refuse quartz for MGD thermal pressure rather than assemble a triple from these cells. The row is carried so the refusal is explicit and the next fetch does not repeat the search."
