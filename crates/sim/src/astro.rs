@@ -1747,8 +1747,9 @@ pub fn roche_lobe_radius_au(
 /// is the outermost resonance the viscous torque cannot overflow), and the Manara / Papaloizou-Pringle
 /// viscous-torque fit (a distinct `h mu^k` form that consumes `alpha_viscosity` and `H/r` through a Reynolds state)
 /// is its own type, built only when a consumer needs the viscosity-conditioned edge. A viscous disk's true
-/// truncation is a band between the SPH edge and this dissipationless bound. `None` on `e` outside `[0, 1)` or a
-/// mass fraction outside `(0, 1)`.
+/// truncation is a band between the SPH edge and this dissipationless bound. The fit's OWN validity travels with
+/// its coefficients (the [`ConvectiveTurnoverFit`] precedent): the source fitted `e in [0, 0.90]` and `q in
+/// [0.01, 0.99]` to about 6.5 percent, so an evaluation outside that box REFUSES rather than extrapolating the fit.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct DiskTruncationFit {
     /// The fit coefficient `c` (the `q -> 1` circular-orbit limit of `f`). Cited (Pichardo 2005 Eq. 6, 0.733).
@@ -1758,70 +1759,196 @@ pub struct DiskTruncationFit {
     /// The exponent on the companion mass fraction `q = M_2/(M_1+M_2)`, weakly positive. Cited (0.07, NOT the 0.01
     /// an OCR text layer misread; corrected against the held scan p.524).
     pub mass_fraction_exponent: Fixed,
+    /// The fractional fit accuracy, carried so the fraction ships as a BAND `f * (1 +/- this)` rather than a point.
+    /// Cited (Pichardo 2005 p.524, `+/- 6.5 percent`).
+    pub fit_error_fraction: Fixed,
+    /// The highest eccentricity the fit was measured over (Pichardo p.524, `0.90`); above it the evaluation refuses.
+    pub valid_ecc_max: Fixed,
+    /// The lowest companion mass fraction the fit was measured over (Pichardo p.524, `0.01`).
+    pub valid_mass_fraction_min: Fixed,
+    /// The highest companion mass fraction the fit was measured over (Pichardo p.524, `0.99`).
+    pub valid_mass_fraction_max: Fixed,
 }
 
 impl DiskTruncationFit {
     /// The Pichardo, Sparke and Aguilar 2005 invariant-loop fit (MNRAS 359, 521, Eq. 6, held-scan p.524), as cited
-    /// data: `f = 0.733 (1 - e)^1.20 q^0.07`, `q` the companion mass fraction. Vendored in `disk_arc_literature`
-    /// (`pichardo_2005`).
+    /// data: `f = 0.733 (1 - e)^1.20 q^0.07`, `q` the companion mass fraction, fitted over `e in [0, 0.90]` and
+    /// `q in [0.01, 0.99]` to `+/- 6.5 percent`. Vendored in `disk_arc_literature` (`pichardo_2005`).
     pub fn pichardo_2005() -> Self {
         DiskTruncationFit {
             circular_fraction: Fixed::from_ratio(733, 1000), // 0.733
             eccentricity_exponent: Fixed::from_ratio(120, 100), // 1.20
             mass_fraction_exponent: Fixed::from_ratio(7, 100), // 0.07 (verified p.524, not the OCR-misread 0.01)
+            fit_error_fraction: Fixed::from_ratio(65, 1000),   // +/- 6.5 percent (p.524)
+            valid_ecc_max: Fixed::from_ratio(90, 100),         // e in [0, 0.90]
+            valid_mass_fraction_min: Fixed::from_ratio(1, 100), // q in [0.01, ...]
+            valid_mass_fraction_max: Fixed::from_ratio(99, 100), // q in [..., 0.99]
         }
     }
 }
 
-/// Derive the [`DiskTruncationFit`] fraction `f = c (1 - e)^p_e q^p_f` at a binary's eccentricity and companion mass
-/// fraction `q = M_2/(M_1+M_2)`. `None` if `e` is outside `[0, 1)` (not a bound orbit) or the mass fraction is
-/// outside `(0, 1)` (not a real two-body split).
+/// Which circumstellar disc a truncation radius describes. Pichardo Eq. 6 (the invariant-loop fit) is the disc
+/// around the PRIMARY (the accretor hosting the modelled disc); the paper's separate secondary-disc rule
+/// (`0.4 +/- 0.03` of the Lagrange radius times `(1 - e)`, p.526) is a DIFFERENT relation. Keying the evaluation on
+/// the component stops the two from being silently swapped, the ambiguity equal-mass tests cannot expose.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum CircumstellarComponent {
+    /// The disc around the primary (host) star, the regime Pichardo Eq. 6 fits.
+    Primary,
+    /// The disc around the secondary (companion) star, governed by the distinct secondary-disc rule.
+    Secondary,
+}
+
+/// The physical MODALITY a truncation radius is drawn from: these are SEPARATE rungs, not one number. The
+/// dissipationless invariant-loop UPPER bound (Pichardo 2005) sits above the viscous SPH resonant edge
+/// (Artymowicz-Lubow 1994), which sits below the tidal-torque-balance radius (Papaloizou-Pringle 1977, the
+/// near-Roche-lobe high-viscosity limit). A consumer that needs the viscous edge reads a different rung, not this
+/// one relabelled.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum TruncationModality {
+    /// Pichardo 2005 coplanar dissipationless invariant-loop determination: an UPPER bound (no viscosity).
+    InvariantLoopUpperBound,
+    /// Artymowicz-Lubow 1994 viscous SPH resonant edge: LOWER, moves outward with disk viscosity.
+    ViscousSphResonant,
+    /// Papaloizou-Pringle 1977 tidal-torque-balance radius: the near-Roche-lobe high-viscosity limit.
+    TidalTorqueBalance,
+}
+
+/// A banded truncation FRACTION `f = R_t / R_L` (dimensionless), the Pichardo central value widened by its stated
+/// fit error. `lo <= hi`, both in `(0, 1]` for a physical truncation inside the Roche lobe.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct TruncationFractionBand {
+    /// The lower fraction edge, `f_central * (1 - fit_error_fraction)`.
+    pub lo: Fixed,
+    /// The upper fraction edge, `f_central * (1 + fit_error_fraction)`.
+    pub hi: Fixed,
+}
+
+impl TruncationFractionBand {
+    /// The central fraction, the midpoint of the symmetric band (a readout, not the consumed value).
+    pub fn central(&self) -> Option<Fixed> {
+        self.lo
+            .checked_add(self.hi)?
+            .checked_div(Fixed::from_int(2))
+    }
+}
+
+/// A banded truncation RADIUS (AU), the fraction band scaled by the Roche-lobe radius.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct TruncationRadiusBand {
+    /// The lower radius edge (AU).
+    pub lo_au: Fixed,
+    /// The upper radius edge (AU).
+    pub hi_au: Fixed,
+}
+
+impl TruncationRadiusBand {
+    /// The central radius (AU), the midpoint of the band (a readout for a consumer that wants a single value).
+    pub fn central(&self) -> Option<Fixed> {
+        self.lo_au
+            .checked_add(self.hi_au)?
+            .checked_div(Fixed::from_int(2))
+    }
+}
+
+/// The TYPED truncation evaluation: the banded fraction and radius, tagged with the modality it was drawn from and
+/// the circumstellar component it describes, so a scalar Pichardo output can never be mistaken for the canonical
+/// disk state. Built by [`pichardo_truncation_evaluation`]; consumed by [`tidally_capped_scale_radius_au`].
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct TruncationEvaluation {
+    /// The truncation fraction band `f = R_t / R_L`.
+    pub fraction: TruncationFractionBand,
+    /// The truncation radius band `R_t = f * R_L` (AU).
+    pub radius_au: TruncationRadiusBand,
+    /// Which model rung this radius is drawn from (Pichardo: the invariant-loop upper bound).
+    pub modality: TruncationModality,
+    /// Which disc this radius describes (Pichardo Eq. 6: the circumprimary disc).
+    pub component: CircumstellarComponent,
+}
+
+/// Derive the [`DiskTruncationFit`] fraction BAND `f = c (1 - e)^p_e q^p_f`, widened by the fit's stated accuracy,
+/// at a binary's eccentricity and companion mass fraction `q = M_2/(M_1+M_2)`. The band is the point fraction times
+/// `(1 -/+ fit_error_fraction)`, so no downstream consumer reads a laundered point. The fit's OWN measured domain is
+/// enforced (Pichardo `e in [0, 0.90]`, `q in [0.01, 0.99]`): outside it the function REFUSES rather than
+/// extrapolating an invariant-loop fit into a regime it never covered. `None` if `e` is negative or above the fit's
+/// `valid_ecc_max`, or the mass fraction is outside `[valid_mass_fraction_min, valid_mass_fraction_max]`.
 pub fn resonant_truncation_fraction(
     eccentricity: Fixed,
     companion_mass_fraction: Fixed,
     fit: &DiskTruncationFit,
-) -> Option<Fixed> {
+) -> Option<TruncationFractionBand> {
     if eccentricity < Fixed::ZERO
-        || eccentricity >= Fixed::ONE
-        || companion_mass_fraction <= Fixed::ZERO
-        || companion_mass_fraction >= Fixed::ONE
+        || eccentricity > fit.valid_ecc_max
+        || companion_mass_fraction < fit.valid_mass_fraction_min
+        || companion_mass_fraction > fit.valid_mass_fraction_max
     {
         return None;
     }
     let one_minus_e = Fixed::ONE.checked_sub(eccentricity)?;
     let ecc_term = one_minus_e.powf(fit.eccentricity_exponent);
     let q_term = companion_mass_fraction.powf(fit.mass_fraction_exponent);
-    fit.circular_fraction
+    let central = fit
+        .circular_fraction
         .checked_mul(ecc_term)?
-        .checked_mul(q_term)
+        .checked_mul(q_term)?;
+    let lo = central.checked_mul(Fixed::ONE.checked_sub(fit.fit_error_fraction)?)?;
+    let hi = central.checked_mul(Fixed::ONE.checked_add(fit.fit_error_fraction)?)?;
+    Some(TruncationFractionBand { lo, hi })
 }
 
-/// Cap a disk's birth scale radius `R_1` at the companion's resonant TRUNCATION radius `R_t = f * R_L`: the
-/// effective `R_1`, `min(birth, f * roche_lobe)`. A disk inside its truncation radius is untouched (a wide or absent
-/// companion leaves the birth radius); a disk that would spill past it is truncated. The result feeds
-/// [`derive_viscous_time_myr`] as `scale_radius_au` unchanged, so binarity shortens `tau_disk` with no new path.
-///
-/// The `truncation_fraction` is the resonant `f = R_t / R_L` from [`resonant_truncation_fraction`], so the cap is
-/// the EXPECTED truncation radius, no longer the conservative Roche-lobe upper edge the fraction fetch retired. The
-/// residual modality is the fit's own band (Pichardo to about 6.5 percent, dissipationless) widened by the
-/// viscosity dependence toward the lower Artymowicz-Lubow SPH edge, so `t_visc` and `tau_disk` inherit that band
-/// rather than a single conservative upper bound. `None` on a non-positive input.
+/// Compose the Pichardo [`TruncationEvaluation`]: the banded fraction from [`resonant_truncation_fraction`] scaled
+/// to a radius band by the Roche-lobe radius, tagged [`TruncationModality::InvariantLoopUpperBound`] and
+/// [`CircumstellarComponent::Primary`] (Pichardo Eq. 6 is the circumprimary dissipationless upper bound). This is
+/// the typed object the cap consumes, so the modality and component travel with the number rather than being
+/// implied. `None` on a non-positive Roche lobe or a domain refusal from the fraction.
+pub fn pichardo_truncation_evaluation(
+    eccentricity: Fixed,
+    companion_mass_fraction: Fixed,
+    roche_lobe_au: Fixed,
+    fit: &DiskTruncationFit,
+) -> Option<TruncationEvaluation> {
+    if roche_lobe_au <= Fixed::ZERO {
+        return None;
+    }
+    let fraction = resonant_truncation_fraction(eccentricity, companion_mass_fraction, fit)?;
+    Some(TruncationEvaluation {
+        radius_au: TruncationRadiusBand {
+            lo_au: roche_lobe_au.checked_mul(fraction.lo)?,
+            hi_au: roche_lobe_au.checked_mul(fraction.hi)?,
+        },
+        fraction,
+        modality: TruncationModality::InvariantLoopUpperBound,
+        component: CircumstellarComponent::Primary,
+    })
+}
+
+/// Cap a disk's birth scale radius `R_1` at the companion's resonant TRUNCATION radius band, returning the effective
+/// `R_1` as a BAND `[min(birth, R_t_lo), min(birth, R_t_hi)]`. A disk inside its truncation radius is untouched (a
+/// wide or absent companion leaves the birth radius on both edges); a disk that would spill past it is truncated,
+/// and the fit's 6.5 percent band propagates to `t_visc` and `tau_disk` rather than collapsing to one conservative
+/// point. The cap consumes the TYPED [`TruncationEvaluation`], not an arbitrary scalar fraction, and REFUSES a
+/// non-physical fraction (a truncation radius cannot exceed the Roche lobe, so `f > 1` is rejected). `None` on a
+/// non-positive birth radius or an unphysical fraction band.
 pub fn tidally_capped_scale_radius_au(
     birth_r1_au: Fixed,
-    roche_lobe_au: Fixed,
-    truncation_fraction: Fixed,
-) -> Option<Fixed> {
+    evaluation: &TruncationEvaluation,
+) -> Option<TruncationRadiusBand> {
     if birth_r1_au <= Fixed::ZERO
-        || roche_lobe_au <= Fixed::ZERO
-        || truncation_fraction <= Fixed::ZERO
+        || evaluation.fraction.lo <= Fixed::ZERO
+        || evaluation.fraction.hi > Fixed::ONE
     {
         return None;
     }
-    let truncation_radius_au = roche_lobe_au.checked_mul(truncation_fraction)?;
-    Some(if birth_r1_au < truncation_radius_au {
-        birth_r1_au
-    } else {
-        truncation_radius_au
+    let cap = |r_t: Fixed| -> Fixed {
+        if birth_r1_au < r_t {
+            birth_r1_au
+        } else {
+            r_t
+        }
+    };
+    Some(TruncationRadiusBand {
+        lo_au: cap(evaluation.radius_au.lo_au),
+        hi_au: cap(evaluation.radius_au.hi_au),
     })
 }
 
@@ -5564,8 +5691,10 @@ mod tests {
         // The Pichardo fit f = 0.733 (1-e)^1.20 q^0.07, q the companion mass fraction M_2/(M_1+M_2). At an equal-mass
         // circular binary (q=0.5) the disk truncates near 0.70 R_L; the 0.733 coefficient is the q->1 limit.
         let fit = DiskTruncationFit::pichardo_2005();
-        let f_eq =
-            resonant_truncation_fraction(Fixed::ZERO, Fixed::from_ratio(1, 2), &fit).unwrap();
+        let f_eq = resonant_truncation_fraction(Fixed::ZERO, Fixed::from_ratio(1, 2), &fit)
+            .unwrap()
+            .central()
+            .unwrap();
         assert!(
             (f_eq.to_f64_lossy() - 0.699).abs() < 0.01,
             "an equal-mass circular binary truncates the disk near 0.70 R_L (got {})",
@@ -5574,9 +5703,13 @@ mod tests {
         // Eccentricity tightens the disk sharply: at q=0.5, e=0.5 gives ~0.30, e=0.9 gives ~0.044.
         let f_half =
             resonant_truncation_fraction(Fixed::from_ratio(1, 2), Fixed::from_ratio(1, 2), &fit)
+                .unwrap()
+                .central()
                 .unwrap();
         let f_high =
             resonant_truncation_fraction(Fixed::from_ratio(9, 10), Fixed::from_ratio(1, 2), &fit)
+                .unwrap()
+                .central()
                 .unwrap();
         assert!(
             f_high < f_half && f_half < f_eq,
@@ -5587,20 +5720,40 @@ mod tests {
             "e=0.5 truncates near 0.30 R_L at equal mass (got {})",
             f_half.to_f64_lossy()
         );
+        // The fraction ships as a BAND at the fit's stated +/- 6.5 percent, not a point.
+        let band =
+            resonant_truncation_fraction(Fixed::ZERO, Fixed::from_ratio(1, 2), &fit).unwrap();
+        assert!(
+            (band.hi.to_f64_lossy() / band.lo.to_f64_lossy() - 1.065 / 0.935).abs() < 0.001,
+            "the fraction band spans the +/- 6.5 percent Pichardo fit accuracy"
+        );
         // The mass-fraction dependence is WEAK BUT REAL (q^0.07, ~17.5 percent per decade), not negligible: a tenfold
         // mass fraction (0.05 -> 0.5) raises f by ~17.5 percent, the exact 0.07-versus-0.01 exponent the audit fixed.
-        let f_low_q =
-            resonant_truncation_fraction(Fixed::ZERO, Fixed::from_ratio(5, 100), &fit).unwrap();
-        let f_hi_q =
-            resonant_truncation_fraction(Fixed::ZERO, Fixed::from_ratio(5, 10), &fit).unwrap();
+        let f_low_q = resonant_truncation_fraction(Fixed::ZERO, Fixed::from_ratio(5, 100), &fit)
+            .unwrap()
+            .central()
+            .unwrap();
+        let f_hi_q = resonant_truncation_fraction(Fixed::ZERO, Fixed::from_ratio(5, 10), &fit)
+            .unwrap()
+            .central()
+            .unwrap();
         let decade_ratio = f_hi_q.to_f64_lossy() / f_low_q.to_f64_lossy();
         assert!(
             (decade_ratio - 1.175).abs() < 0.01,
             "a tenfold mass fraction moves f by ~17.5 percent (10^0.07), got {decade_ratio}"
         );
-        // Fail-loud: an unbound orbit (e >= 1) or a mass fraction outside (0, 1).
+        // Fail-loud on the SOURCE domain (Pichardo e in [0, 0.90], q in [0.01, 0.99]), not an extrapolation: an
+        // eccentricity above 0.90 (even below the unbound-orbit 1.0) and a mass fraction outside [0.01, 0.99] refuse.
+        assert!(
+            resonant_truncation_fraction(Fixed::from_ratio(95, 100), Fixed::from_ratio(1, 2), &fit)
+                .is_none(),
+            "e = 0.95 is above the fit's measured e <= 0.90, so it refuses rather than extrapolating"
+        );
         assert!(resonant_truncation_fraction(Fixed::ONE, Fixed::from_ratio(1, 2), &fit).is_none());
-        assert!(resonant_truncation_fraction(Fixed::ZERO, Fixed::ZERO, &fit).is_none());
+        assert!(
+            resonant_truncation_fraction(Fixed::ZERO, Fixed::from_ratio(5, 1000), &fit).is_none(),
+            "q = 0.005 is below the fit's measured q >= 0.01"
+        );
         assert!(resonant_truncation_fraction(Fixed::ZERO, Fixed::ONE, &fit).is_none());
     }
 
@@ -5626,6 +5779,24 @@ mod tests {
             Fixed::from_ratio(7, 100),
             "mass-fraction exponent 0.07 (NOT the OCR-misread 0.01)"
         );
+        // The fit's own validity and accuracy travel with it (Pichardo p.524): the +/- 6.5 percent band and the
+        // measured e in [0, 0.90], q in [0.01, 0.99] box, so a consumer cannot extrapolate the fit silently.
+        assert_eq!(
+            fit.fit_error_fraction,
+            Fixed::from_ratio(65, 1000),
+            "+/- 6.5 percent"
+        );
+        assert_eq!(fit.valid_ecc_max, Fixed::from_ratio(90, 100), "e <= 0.90");
+        assert_eq!(
+            fit.valid_mass_fraction_min,
+            Fixed::from_ratio(1, 100),
+            "q >= 0.01"
+        );
+        assert_eq!(
+            fit.valid_mass_fraction_max,
+            Fixed::from_ratio(99, 100),
+            "q <= 0.99"
+        );
     }
 
     #[test]
@@ -5633,24 +5804,41 @@ mod tests {
         // min(birth, f * roche_lobe): a disk larger than its resonant truncation radius is bounded to it, a smaller
         // one untouched. At a circular orbit the Pichardo fraction is ~0.733, so the 7.6 AU lobe truncates at ~5.6 AU.
         let lobe = Fixed::from_ratio(76, 10); // 7.6 AU Roche-lobe radius
-        let f = resonant_truncation_fraction(
+        let eval = pichardo_truncation_evaluation(
             Fixed::ZERO,
             Fixed::from_ratio(1, 2),
+            lobe,
             &DiskTruncationFit::pichardo_2005(),
         )
         .unwrap();
-        let r_t = lobe.checked_mul(f).unwrap(); // ~5.6 AU, the resonant truncation radius
+        // The evaluation is typed: the circumprimary invariant-loop upper bound, a band, not a bare scalar.
+        assert_eq!(eval.component, CircumstellarComponent::Primary);
+        assert_eq!(eval.modality, TruncationModality::InvariantLoopUpperBound);
+        // A large disk is bounded to the truncation band (both edges are the truncation radius, birth is larger).
+        let capped_large = tidally_capped_scale_radius_au(Fixed::from_int(30), &eval).unwrap();
         assert_eq!(
-            tidally_capped_scale_radius_au(Fixed::from_int(30), lobe, f),
-            Some(r_t),
-            "a 30 AU disk in a tight binary is bounded at the resonant truncation radius f * R_L"
+            capped_large, eval.radius_au,
+            "a 30 AU disk in a tight binary is bounded at the resonant truncation band f * R_L"
         );
-        assert_eq!(
-            tidally_capped_scale_radius_au(Fixed::from_int(3), lobe, f),
-            Some(Fixed::from_int(3)),
-            "a 3 AU disk inside its truncation radius is untouched"
-        );
-        assert!(tidally_capped_scale_radius_au(Fixed::ZERO, lobe, f).is_none());
+        // A small disk inside its truncation radius is untouched on BOTH edges (birth is below either bound).
+        let capped_small = tidally_capped_scale_radius_au(Fixed::from_int(3), &eval).unwrap();
+        assert_eq!(capped_small.lo_au, Fixed::from_int(3));
+        assert_eq!(capped_small.hi_au, Fixed::from_int(3));
+        assert!(tidally_capped_scale_radius_au(Fixed::ZERO, &eval).is_none());
+        // A non-physical fraction (f > 1, a truncation radius beyond the Roche lobe) is refused.
+        let bad_eval = TruncationEvaluation {
+            fraction: TruncationFractionBand {
+                lo: Fixed::from_ratio(9, 10),
+                hi: Fixed::from_ratio(11, 10),
+            },
+            radius_au: TruncationRadiusBand {
+                lo_au: Fixed::from_int(7),
+                hi_au: Fixed::from_int(9),
+            },
+            modality: TruncationModality::InvariantLoopUpperBound,
+            component: CircumstellarComponent::Primary,
+        };
+        assert!(tidally_capped_scale_radius_au(Fixed::from_int(30), &bad_eval).is_none());
         let (c_num, c_log) = eggleton();
         assert!(roche_lobe_radius_au(Fixed::ZERO, Fixed::ONE, c_num, c_log).is_none());
         assert!(roche_lobe_radius_au(Fixed::from_int(20), Fixed::ZERO, c_num, c_log).is_none());
@@ -5671,14 +5859,17 @@ mod tests {
         );
         let birth = Fixed::from_int(30);
         let lobe = roche_lobe_radius_au(Fixed::from_int(20), Fixed::ONE, c_num, c_log).unwrap();
-        let f = resonant_truncation_fraction(
+        let eval = pichardo_truncation_evaluation(
             Fixed::ZERO,
             Fixed::from_ratio(1, 2),
+            lobe,
             &DiskTruncationFit::pichardo_2005(),
         )
         .unwrap();
-        let r_t = lobe.checked_mul(f).unwrap();
-        let capped = tidally_capped_scale_radius_au(birth, lobe, f).unwrap();
+        let capped_band = tidally_capped_scale_radius_au(birth, &eval).unwrap();
+        // Read the central of the capped band as the single radius the (still point-wise) viscous clock consumes.
+        let capped = capped_band.central().unwrap();
+        let r_t = eval.radius_au.central().unwrap();
         assert_eq!(
             capped, r_t,
             "the 30 AU disk is bounded at the resonant truncation radius f * R_L"
