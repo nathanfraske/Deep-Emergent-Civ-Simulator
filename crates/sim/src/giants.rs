@@ -436,9 +436,14 @@ pub fn disk_gas_content(
 /// bit for bit, so the conservation account carries no numerical leak: the only approximation is the shared
 /// midpoint quadrature of the profile, which both readings below inherit equally.
 ///
-/// The ledger is INTERPRETATION-NEUTRAL: it reports the partition and leaves the physical reading to the owner,
-/// because the two readings demand different bookkeeping and the choice is a design call, not a fact the profile
-/// settles. Under the INITIAL-CONDITION reading the disk is born already truncated, so `retained` IS its whole gas
+/// The ledger is INTERPRETATION-NEUTRAL: it reports the partition and leaves the physical reading un-selected,
+/// because the two readings demand different bookkeeping and which one holds is DERIVED from the binary's formation
+/// history, not a fact THIS profile settles and not an authored choice. The selector is physical: whether the
+/// companion was already present as the disk assembled (born truncated) or the disk formed at `R_1` first and the
+/// orbit hardened later (the outer gas formed, then was stripped). That history emerges from the star-formation
+/// model (Principle 8), which does not yet supply a companion-origin or companion-timing record, so the reading is
+/// a derivation GAP pending that substrate, named here rather than defaulted or deferred to a design call. Under the
+/// INITIAL-CONDITION reading the disk is born already truncated, so `retained` IS its whole gas
 /// budget and `removed` is gas that never formed (the birth profile is the normalization over `[inner, R_t]`); no
 /// sink is owed. Under the DYNAMIC reading the disk forms at `R_1` and the companion strips the outer gas over
 /// time, so `removed` mass and proxy angular momentum are a real outflow that owes a named sink (accreted onto the
@@ -550,11 +555,12 @@ impl TruncationSink {
     }
 }
 
-/// The physical READING the owner selects for a truncation residual, the design fork the interpretation-neutral
-/// [`TruncationGasLedger`] surfaces. The profile settles the PARTITION (retained versus removed); it does NOT
-/// settle whether the removed gas ever formed, and that is a design call, so it is a typed selection here rather
-/// than a fact any code may author. The idiom mirrors [`crate::astro::KraftMetallicityConditioning`]: the
-/// un-selected state is a named variant, not a fabricated default.
+/// The physical READING for a truncation residual, the fork the interpretation-neutral [`TruncationGasLedger`]
+/// surfaces. The profile settles the PARTITION (retained versus removed); it does NOT settle whether the removed
+/// gas ever formed. That is DERIVED from the binary's formation history (companion present as the disk assembled
+/// versus disk-first then orbit-hardened), which the star-formation model should supply and does not yet, so it is
+/// a typed selection here rather than a fact this code can author or a value to fabricate. The idiom mirrors
+/// [`crate::astro::KraftMetallicityConditioning`]: the un-selected state is a named variant, not a default.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum TruncationResidualReading {
     /// The disc was BORN already truncated: `retained` IS the whole system gas budget, and `removed` is gas that
@@ -567,8 +573,9 @@ pub enum TruncationResidualReading {
         /// Where the stripped residual goes.
         sink: TruncationSink,
     },
-    /// UN-SELECTED, the honest default: the reading is the owner's design call, not a fact the profile settles, so
-    /// the disposition REFUSES to collapse to a single system budget and carries both candidates instead.
+    /// UN-SELECTED, the honest default: the reading DERIVES from the binary formation history the star-formation
+    /// model does not yet supply, so the disposition REFUSES to collapse to a single system budget and carries both
+    /// candidates instead, naming the missing input rather than defaulting.
     Unresolved,
 }
 
@@ -600,7 +607,7 @@ pub struct TruncationResidualDisposition {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum TruncationResidualRefusal {
     /// The reading is [`TruncationResidualReading::Unresolved`]: the disposition cannot collapse to one system
-    /// budget until the owner rules the physical reading. Both candidate budgets are carried so the consumer sees
+    /// budget until the binary-formation-history substrate supplies the reading. Both candidate budgets are carried so the consumer sees
     /// the fork rather than a default: `initial_condition_budget_earth` (the retained-only budget) and
     /// `dynamic_budget_earth` (the full birth budget with the residual owed to a sink).
     ReadingUnselected {
@@ -612,7 +619,7 @@ pub enum TruncationResidualRefusal {
 }
 
 // @derives: the truncation-residual system gas budget and its named sink <- the interpretation-neutral truncation gas ledger under a selected physical reading, the removed residual discharged through the foundation conserved-ledger to a named sink under the dynamic reading
-/// Dispose the truncation residual under the owner-selected [`TruncationResidualReading`]. Under the initial-
+/// Dispose the truncation residual under the [`TruncationResidualReading`] the formation history selects. Under the initial-
 /// condition reading the system budget is the disc's `retained` gas and no sink is owed. Under the dynamic reading
 /// the `removed` mass and proxy angular momentum are each entered into a
 /// [`civsim_foundation::conservation::ConservedLedger`] from the disc's outer annulus and destroyed to the chosen
@@ -1550,7 +1557,7 @@ pub struct DiskEvolutionState {
 /// IGNORED and SUPERSEDED: `t_visc` is derived here from the capped `R_1` (the disc temperature at that radius, the
 /// alpha closure), so truncation reaches the clock. The gas account and the residual are read over the same capped
 /// disc. `reading` must be resolved (a [`TruncationResidualReading::Unresolved`] refuses, because the state cannot
-/// pin one gas budget until the owner rules the reading). `None` if any composed derivation refuses (a domain door),
+/// pin one gas budget until the formation history supplies the reading). `None` if any composed derivation refuses (a domain door),
 /// the residual reading is unresolved, or the giant band is unordered; the refusal propagates rather than being
 /// swallowed.
 #[allow(clippy::too_many_arguments)]
@@ -2281,7 +2288,7 @@ mod tests {
         assert!(state.interims.rotation_period_solar_pinned);
         assert!(state.interims.cloud_core_temperature_solar_pinned);
 
-        // An UNRESOLVED residual reading refuses: the state cannot pin one gas budget until the owner rules it.
+        // An UNRESOLVED residual reading refuses: the state cannot pin one gas budget until the formation history supplies it.
         assert!(
             derive_disk_evolution_state(
                 &embryo,
@@ -2967,7 +2974,7 @@ mod tests {
     }
 
     /// The UN-SELECTED reading REFUSES to collapse to a single budget and carries both candidates, the "name the
-    /// gap" pattern: the owner rules the physical reading, no code defaults it.
+    /// gap" pattern: the formation history selects the physical reading once modelled, no code defaults it.
     #[test]
     fn the_disposition_refuses_an_unresolved_reading() {
         let ledger = truncated_ledger();
