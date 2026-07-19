@@ -1529,7 +1529,11 @@ const PROVINCE_LERP_STEPS: i64 = 4096;
 /// Drawing them on that basis is worse than leaving them out, because a plausible mountain range invites no
 /// scrutiny. The geotherm arc replaces that cluster with derived properties (density derived, specific heat
 /// Dulong-Petit, conductivity the two-rung Hofmeister and Slack ladder, diffusivity computed and never stored),
-/// and the pins move once when it does.
+/// and the pins move once when it does. THE REPLACEMENT IS BLOCKED, measured 2026-07-18, on one absent cited
+/// column: both rungs of the conductivity ladder key on a per-phase `atoms_per_primitive_cell` that no data
+/// file carries, and conductivity gates diffusivity which gates the viscosity solve. Density, specific heat
+/// and expansivity DO derive today. The finding and the unblocking fetch are recorded on
+/// [`civsim_sim::geodynamics::ColumnParams::thermal_diffusivity`] and in `docs/working/GEOTHERM_ARC_SCOPE.md`.
 ///
 /// When the cluster is derived, the flexure enters here as one more analytic layer:
 /// its deflection adds to [`SurfaceField::height_km`] and its Green's function's analytic derivative adds to

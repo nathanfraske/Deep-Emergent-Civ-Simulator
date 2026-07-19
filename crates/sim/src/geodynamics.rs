@@ -74,9 +74,26 @@ pub struct ColumnParams {
     pub gravity: Fixed,
     /// The convecting-layer depth (representable-scaled length; raw SI mantle depth overflows Q32.32).
     pub depth: Fixed,
-    /// The buoyant parcel radius.
+    /// The buoyant PARCEL radius, the Stokes sphere radius [`civsim_physics::laws::stokes_velocity`] takes,
+    /// NOT the planet's radius. Flagged 2026-07-18 because the fixture-cluster replacement was scoped to
+    /// derive this field from "the planet's own radius", which is a category error: `v ~ drho g r^2 / eta` is
+    /// the terminal velocity of a sphere of radius `r` settling through the fluid, so the planet's radius here
+    /// would inflate `r^2` by roughly `(R/d)^2` and overflow the linear kernel besides. The derived source
+    /// this struct already carries is the CONVECTIVE CELL scale: [`Self::ra_crit_wavenumber`] gives the
+    /// cell half-wavelength as `pi / a_c` layer depths, so the parcel radius derives from `depth` and `a_c`
+    /// and stays in the same regime as the onset threshold by construction.
     pub radius: Fixed,
     /// Dynamic viscosity (representable-scaled Pa*s).
+    ///
+    /// THE REPRESENTATION NOTE, measured 2026-07-18 so the next attempt does not rediscover it. A real mantle
+    /// viscosity does not fit Q32.32: the built [`civsim_physics::convective_viscosity`] solve returns
+    /// `ln(eta) ~ 53.9` for a Mars-class interior at 1600 K and 10.7 GPa, which is `eta ~ 2.5e23 Pa*s` against
+    /// a `Fixed::MAX` of `2.1e9`. That is NOT fatal to this field, because `depth` is already declared in
+    /// MEGAMETRES: the Rayleigh number is dimensionless, so a viscosity expressed in the matching `1e18 Pa*s`
+    /// unit makes the linear kernel compute the TRUE dimensionless `Ra`. Checked numerically: the scaled pair
+    /// reproduces the log-domain [`civsim_physics::laws::ln_rayleigh_number`] at `Ra ~ 1.66e4`, about ten
+    /// times the rigid-rigid critical value, so the province convects without touching the `ra_max` guard. The
+    /// blocker on this field is therefore the DIFFUSIVITY it needs as a solve input, never the representation.
     pub viscosity: Fixed,
     /// Thermal diffusivity (m^2/s), k/(rho*c).
     ///
@@ -104,6 +121,52 @@ pub struct ColumnParams {
     /// cluster it replaced. The resulting shift (roughly 2.7x on the derived lid thickness, since `Ra` goes as
     /// `1/kappa` and the boundary layer as `Ra^(-1/3)`) is EXPECTED, and it is refereed by the relief and lid
     /// hindcast rows, never by either fixture value.
+    ///
+    /// THE REPLACEMENT WAS ATTEMPTED (2026-07-18) AND IS BLOCKED ON ONE ABSENT CITED COLUMN, measured rather
+    /// than assumed, so the next attempt starts from the finding instead of repeating the survey. Three of the
+    /// four thermal quantities DO derive today, on a forsterite mantle at the 300 K / 1 bar reference frame:
+    /// `rho = 3223.2 kg/m^3` (the assemblage density over the derived mantle composition), `c_p = 1241.1
+    /// J/(kg*K)` (Dulong-Petit on the assemblage mean atomic mass 0.020099 kg/mol), and `alpha_V = 40.1 ppm/K`
+    /// (the Grueneisen relation at the cited measured `gamma = 1.29 +/- 0.05`). The fourth, `k`, does NOT.
+    ///
+    /// WHY `k` IS BLOCKED, and it is a DATA gap rather than a machinery gap. Both rungs of
+    /// [`civsim_materials::conductivity`] key on ATOMS PER PRIMITIVE CELL, which the ladder's own docstring
+    /// marks `(DATA)`. No data file in this repo carries that column, for any phase: it is a function
+    /// parameter and a struct field and nothing else, and the only construction of a `PhaseConductivity` in
+    /// the tree is a test fixture that writes the count as a literal. The top rung is blocked twice over,
+    /// because no per-phase `kappa_298` column exists either. So the geotherm arc's scoping claim that the
+    /// class variable "was already banked and already in Slack's own signature" holds for the SIGNATURE and
+    /// fails for the BANK, and the sibling claim that "the geotherm's minerals have measured anchors" is
+    /// false as of this writing. Both are corrected in `docs/working/GEOTHERM_ARC_SCOPE.md`.
+    ///
+    /// WHY IT IS LOAD-BEARING RATHER THAN A ROUNDING DETAIL. The count enters Slack's magnitude as
+    /// `n^(-2/3)`. For forsterite, atoms per FORMULA UNIT is 7 and the true primitive cell (Pbnm, `Z = 4`) is
+    /// 28, and the estimator at 1600 K reads 15.15 against 6.01 W/(m*K) across that range: a 2.5x spread set
+    /// by a column nobody has. Substituting the formula-unit count for the cell count would be a quantity
+    /// substitution wearing a derivation's clothes, so it is refused here. `k` then gates `kappa`, and `kappa`
+    /// gates the [`civsim_physics::convective_viscosity`] solve (which takes it as an input), so ONE missing
+    /// column holds three of the seven cluster fields. The cluster moves as a whole or not at all, per the
+    /// ruling above: a partial replacement would widen this field's declared conflict from 20x to roughly
+    /// 20000x (`0.01` stored against `k / (3223.2 * 1241.1)`) and would move the pins twice for one truth.
+    ///
+    /// A SECOND HOLE IN THE ESTIMATOR RUNG, found the same way. `PhaseConductivity::estimator_band` is
+    /// caller-supplied and never defaulted, by deliberate design, but Slack's band is DECLARED numerically
+    /// only for the simple class (roughly 3x symmetric); for a complex cell it is one-sided with no stated
+    /// magnitude beyond "several-fold" and the one exhibit (rutile, ~43 against a measured ~9). A silicate
+    /// mantle is the complex class, so the caller has no cited width to pass. Measured consequence: the
+    /// aggregate returns `band = 0` on a value uncertain by several-fold, a silent zero-width claim the
+    /// struct's own docstring warns about.
+    ///
+    /// WHAT UNBLOCKS IT: a cited per-phase `atoms_per_primitive_cell` column (a crystallographic count, from
+    /// the space group and `Z`) for the registry's phases, and, for the measured rung the front lane wants, a
+    /// cited per-phase `kappa_298` column. The estimator rung alone would ship a 2x-to-5x-high `k` into the
+    /// run path with nothing comparing it, which is the overlap-sentinel case the ladder was built to make
+    /// impossible. A cheaper-looking substitution is refused for a further reason worth recording: keying the
+    /// count off atoms per FORMULA UNIT does not merely mis-value the magnitude, it makes four of the
+    /// registry's eight phases (quartz 3, corundum 5, hematite 5, enstatite 5) land inside the `2 < n < 6`
+    /// band the cited calibration does not place, so they REFUSE outright while their true cell counts (9,
+    /// 10, 10, 80) are all comfortably in the complex class. The substitution breaks the mechanism for half
+    /// the registry rather than degrading it.
     pub thermal_diffusivity: Fixed,
     /// Specific heat capacity (J/(kg*K)).
     pub specific_heat: Fixed,
@@ -190,6 +253,35 @@ pub fn convection_step(state: &ColumnState, p: &ColumnParams) -> ColumnState {
         temperature,
         convecting,
     }
+}
+
+/// The column's CONDUCTIVE LOSS COEFFICIENT `k / (rho * d^2)` (per second, per kelvin of contrast): the
+/// specific power a column sheds per kelvin it sits above its cold reference, read OFF THE COLUMN the kernel
+/// will itself run rather than restated at a caller. It is exactly the coefficient [`convection_step`]
+/// composes when it divides the Fourier flux by the column's mass per area, so a consumer that needs the
+/// conductive balance (the interior-thermostat closure, which sets the radiogenic base so a column's
+/// steady state lands on the world's own solidus) reads one home instead of carrying a second copy of the
+/// column's conductivity and density.
+///
+/// WHY IT EXISTS AS A FUNCTION. The thermostat previously restated `conductivity` and `density` at its own
+/// call site, so the SAME two facts lived in two places with nothing comparing them: the redundant-parameter
+/// diamond this repo keeps paying for, one level up from the `kappa` versus `k / (rho * c_p)` conflict tagged
+/// on [`ColumnParams::thermal_diffusivity`]. Collapsing the copies makes divergence structurally impossible
+/// rather than test-detectable, and it means the geotherm arc's replacement of the fixture cluster moves the
+/// thermostat with the kernel by construction. `the_loss_coefficient_twins_the_kernels_own_conductive_loss`
+/// is the twin that proves the composition matches the kernel's.
+///
+/// `None` when the depth or the volumetric mass is non-positive (no conductive path), or on an arithmetic
+/// overflow. Deterministic fixed-point.
+pub fn conductive_loss_coefficient(p: &ColumnParams) -> Option<Fixed> {
+    let mass_per_area = p.density.checked_mul(p.depth)?;
+    if mass_per_area <= Fixed::ZERO || p.depth <= Fixed::ZERO {
+        return None;
+    }
+    // k / (rho * d^2), composed in the kernel's own association: the Fourier flux `k * dT / d` over the mass
+    // per area `rho * d`.
+    p.thermal_conductivity
+        .checked_div(p.density.checked_mul(p.depth.checked_mul(p.depth)?)?)
 }
 
 /// The continuous interior read-outs of one column, the CONTINUOUS state the resident contract stores (gate
@@ -642,6 +734,49 @@ mod tests {
             dt: Fixed::ONE,
         };
         (state, params)
+    }
+
+    #[test]
+    fn the_loss_coefficient_twins_the_kernels_own_conductive_loss() {
+        // THE TWIN that licenses the thermostat to read one home. `conductive_loss_coefficient` claims to be
+        // the coefficient `convection_step` composes internally, so it is checked against that composition
+        // rather than against a restatement of its own formula (which would be circular). The depth is set
+        // AWAY from one, because at `d = 1` the linear and the squared depth coincide and a dropped depth
+        // factor would pass unnoticed: the test would prove nothing about the term it exists to pin.
+        let (state, mut params) = column(Fixed::from_int(1_000_000_000));
+        params.depth = Fixed::from_ratio(18, 10);
+        let delta_t = state.temperature - params.reference_temperature;
+
+        // The kernel's own composition, transcribed from `convection_step`: the Fourier flux over the
+        // column's mass per area.
+        let flux = laws::conduction(
+            params.thermal_conductivity,
+            Fixed::ONE,
+            state.temperature,
+            params.reference_temperature,
+            params.depth,
+            params.flux_max,
+        );
+        let mass_per_area = params.density.checked_mul(params.depth).unwrap();
+        let kernel_loss = flux.checked_div(mass_per_area).unwrap();
+
+        let coefficient = conductive_loss_coefficient(&params).expect("a positive column has one");
+        let from_coefficient = coefficient.checked_mul(delta_t).unwrap();
+        let gap = (kernel_loss - from_coefficient).abs();
+        assert!(
+            gap < Fixed::from_ratio(1, 1_000_000),
+            "the coefficient must reproduce the kernel's conductive loss: kernel {kernel_loss:?} against \
+             coefficient-composed {from_coefficient:?}"
+        );
+
+        // A column with no conductive path has no coefficient, refused rather than returned as zero (which a
+        // consumer would divide by).
+        let mut open = params;
+        open.depth = Fixed::ZERO;
+        assert!(
+            conductive_loss_coefficient(&open).is_none(),
+            "a zero-depth column has no conductive loss coefficient"
+        );
     }
 
     #[test]

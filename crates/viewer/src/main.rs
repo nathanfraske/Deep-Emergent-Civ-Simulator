@@ -53,8 +53,8 @@ use civsim_sim::deeptime::{
 };
 use civsim_sim::genesis::{genesis, GenesisParams, LivingWorld, WorldGenesis};
 use civsim_sim::geodynamics::{
-    convecting_mantle_depth_m, derive_mantle_density, generate_derived_tiles, slice0_demo_field,
-    ColumnParams, DerivedTile,
+    conductive_loss_coefficient, convecting_mantle_depth_m, derive_mantle_density,
+    generate_derived_tiles, slice0_demo_field, ColumnParams, DerivedTile,
 };
 use civsim_world::ballistic::{BallisticForces, EjectaFan};
 use civsim_world::crater::{CraterCoupling, Target};
@@ -2036,11 +2036,24 @@ fn build_deep_time_provinces(
     // Z=42, so U and Th are absent, and no per-isotope specific-heat-production column is vendored); both are
     // flagged as cited [M] columns to source, and until they land the self-regulation closure is the per-system
     // mean.
+    //
+    // THE SECOND COPY IS RETIRED HERE. This site used to restate the kernel's `conductivity` and `density` as
+    // its own `kernel_conductivity = 2` and `kernel_density = 1`, independent of the pair inside
+    // `province_column_params`, with nothing comparing them: two uncompared copies of one fact, the diamond
+    // pattern. The coefficient is now READ OFF a column the kernel would itself run
+    // (`conductive_loss_coefficient`, twinned there against `convection_step`'s own conductive composition),
+    // so the thermostat cannot drift from the kernel and the geotherm arc's replacement of the fixture
+    // cluster moves both by construction. Byte-neutral at the current values: the same operations in the same
+    // order over the same numbers.
     let reference_temperature = Fixed::from_int(300);
-    let kernel_conductivity = Fixed::from_int(2);
-    let kernel_density = Fixed::ONE;
-    let loss_coeff = kernel_conductivity
-        .checked_div(kernel_density.checked_mul(depth_mm.checked_mul(depth_mm)?)?)?;
+    let thermostat_column = province_column_params(
+        depth_mm,
+        surface_gravity_m_s2,
+        Fixed::ZERO,
+        reference_temperature,
+        Fixed::ONE,
+    );
+    let loss_coeff = conductive_loss_coefficient(&thermostat_column)?;
     let base_heat =
         loss_coeff.checked_mul(solidus_surface_k.checked_sub(reference_temperature)?)?;
 

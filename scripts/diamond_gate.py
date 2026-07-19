@@ -8,8 +8,9 @@ person happened to run one grep before building on it:
      the same quantity from three fields the same struct carries. They disagree by 20x. Nothing compared them.
   2. Slack/Hofmeister: two physical models of thermal conductivity, which would have disagreed ~5x on the
      target class had a census not run first.
-  3. The A-source: the viewer re-declares `kernel_conductivity = 2` and `kernel_density = 1` locally, the SAME
-     fixture cluster `ColumnParams` carries, at a site that can drift from it independently.
+  3. The A-source: the viewer re-declared `kernel_conductivity = 2` and `kernel_density = 1` locally, the SAME
+     fixture cluster `ColumnParams` carries, at a site that could drift from it independently. RETIRED AT
+     SOURCE 2026-07-18 (see BLIND 2): the duplicate is gone, the gate's sight of that shape is unchanged.
 
 A person running one line is not a control. This is the script.
 
@@ -39,10 +40,17 @@ it, THIS GATE CATCHES ONE:
     kernel. This gate cannot see that collision at all. COVERED BY: the census-before-build habit, which is what
     caught it in the event, and by the ladder registry below once a quantity is registered. NOT covered mechanically.
 
-  BLIND 2, LOCAL-VARIABLE DUPLICATES: the viewer re-declares `kernel_conductivity = 2` and `kernel_density = 1`
+  BLIND 2, LOCAL-VARIABLE DUPLICATES: the viewer re-declared `kernel_conductivity = 2` and `kernel_density = 1`
     as LOCALS, the same fixture cluster ColumnParams carries. Not a pub field, so this gate cannot see it.
     COVERED BY: nothing mechanical today. It was found by a one-line check a human ran, which is precisely the
     control this gate exists to replace and does not yet replace here.
+    THE INSTANCE IS RETIRED AT SOURCE (2026-07-18), which is a DIFFERENT thing from the gate gaining sight of
+    it. The viewer no longer re-declares either local: it reads `geodynamics::conductive_loss_coefficient` off
+    a column `province_column_params` built, so the second copy does not exist to be missed, and the reading is
+    twinned against `convection_step`'s own conductive composition. This is the defence migrating LEFTWARD past
+    the gate entirely, from "detect the duplicate" to "there is no duplicate". The BLINDNESS ITSELF STANDS
+    UNCHANGED: a future local-variable duplicate anywhere else is still invisible here, so the entry stays in
+    this set rather than moving to the caught list. One motivating instance fewer, no new discriminating power.
 
   BLIND 3, SHARED-SOURCE ERRORS: this gate certifies that two providers are ARBITRATED. It says NOTHING about
     whether either provider is RIGHT. Two rungs that agree because they share a wrong input pass silently, the

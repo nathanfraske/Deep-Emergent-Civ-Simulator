@@ -12,6 +12,7 @@ Editing rule (the stop-gate enforces it): edit IN PLACE, keep every line a few w
 
 ## Recent landings (tombstoned; prune when old)
 
+- 2026-07-18  HELD  Fixture-cluster re-pin BLOCKED on one absent cited column (`atoms_per_primitive_cell`, no data file carries it); rho/c_p/alpha measured and deriving, k/kappa/eta gated; thermostat diamond collapsed byte-neutral, both pins unmoved -> `GEOTHERM_ARC_SCOPE.md`.
 - 2026-07-18  DONE  Rock conductivity aggregate: Bruggeman EMT (fetched numerical benchmark rejects the geometric mean), pins held -> `crates/materials/src/conductivity.rs`.
 - 2026-07-18  DONE  Build speedups: build-script opt-level 3 (Stone 0 gate 4.4s -> 1.4s) + dev line-tables-only (9.9G -> 4.5G); pins held -> `Cargo.toml`.
 - 2026-07-18  DONE  Pipeline-status guard hardcoded (a habit is not a defense) -> `.claude/hooks/pipeline-status-guard.sh`.
