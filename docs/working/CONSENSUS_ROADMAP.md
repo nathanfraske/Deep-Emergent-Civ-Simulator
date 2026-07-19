@@ -12,6 +12,8 @@ Editing rule (the stop-gate enforces it): edit IN PLACE, keep every line a few w
 
 ## Recent landings (tombstoned; prune when old)
 
+- 2026-07-19  DONE  Phase-conductivity column fetched (8 phases, cell counts as reconstructions + kappa_298 x5) -> `crates/physics/data/phase_conductivity.toml`.
+
 - 2026-07-19  DONE  Crate layering un-inverted: `calibration`+`decision` bio -> foundation; foundation drops its bio lib dep -> `crates/foundation`.
 - 2026-07-19  DONE  Language cycle cut: `PlaceId` lifted to a leaf, 7-module cluster -> 3 -> `crates/foundation/src/located.rs`.
 - 2026-07-19  DONE  World ejecta docs: 7 stale claims, one pointing at a route ruled out in PR #177 -> `crates/world`.
