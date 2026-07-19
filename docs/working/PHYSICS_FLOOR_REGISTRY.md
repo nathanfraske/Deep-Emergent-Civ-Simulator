@@ -17,7 +17,7 @@ The lists below are GENERATED from `crates/physics/data/*.toml`, `crates/physics
 
 ## Deriving substrates (check here BEFORE authoring: what the world derives, and where)
 
-The 37 deriving subsystems below live OUTSIDE the authored floor. Each produces a world quantity from the floor and the situation, so its output must never be authored: if the value you need appears here, read or extend the subsystem, do not set a number. This is the list that stops `1 year = 365 days` from being authored when orbital mechanics already derives it. Generated from the `// @derives:` markers in the code; a subsystem missing its marker is a gap in this map, so mark every derivation entry point.
+The 39 deriving subsystems below live OUTSIDE the authored floor. Each produces a world quantity from the floor and the situation, so its output must never be authored: if the value you need appears here, read or extend the subsystem, do not set a number. This is the list that stops `1 year = 365 days` from being authored when orbital mechanics already derives it. Generated from the `// @derives:` markers in the code; a subsystem missing its marker is a gap in this map, so mark every derivation entry point.
 
 ### `crates/foundation/src/clock.rs`
 
@@ -44,7 +44,7 @@ The 37 deriving subsystems below live OUTSIDE the authored floor. Each produces 
 - lattice thermal conductivity k(T) <- Grueneisen, mean atomic mass, Debye temperature, atomic volume, cell count (Slack estimator rung) (`crates/materials/src/properties.rs:894`)
 ### `crates/physics/src/gruneisen.rs`
 
-- a rock's Gruneisen parameter <- the cited per-phase gamma table + the world's own mineral census (`crates/physics/src/gruneisen.rs:328`)
+- a rock's Gruneisen parameter <- the cited per-phase gamma table + the world's own mineral census (`crates/physics/src/gruneisen.rs:358`)
 ### `crates/physics/src/laws.rs`
 
 - the log-domain Stokes settling velocity <- the buoyancy, gravity, parcel scale and log viscosity (`crates/physics/src/laws.rs:3623`)
@@ -55,6 +55,10 @@ The 37 deriving subsystems below live OUTSIDE the authored floor. Each produces 
 ### `crates/physics/src/phase_conductivity.rs`
 
 - a uniaxial phase's isotropic-aggregate conductivity and its orientational band <- the measured principal conductivities (Voigt-Reuss-Hill) (`crates/physics/src/phase_conductivity.rs:179`)
+### `crates/physics/src/thermoelastic.rs`
+
+- a phase's thermoelastic response at a state <- the strongest available rung over the banked per-phase anchors (`crates/physics/src/thermoelastic.rs:203`)
+- a phase's ambient volumetric expansivity <- its banked gamma, bulk modulus, molar volume and Dulong-Petit capacity (`crates/physics/src/thermoelastic.rs:295`)
 ### `crates/physics/src/young_thermal.rs`
 
 - the high-temperature specific heat <- mean atomic mass (Dulong-Petit) (`crates/physics/src/young_thermal.rs:301`)

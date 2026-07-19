@@ -35,12 +35,15 @@
 //! # What is built today, stated plainly
 //!
 //! ONLY RUNG 4 CAN ANSWER, and the ladder says so rather than implying it by absence. Rung 3 needs six
-//! per-phase anchors and the repository banks four of them: molar volume (phase registry), bulk modulus
-//! (mineral moduli), `K'` with its adiabatic-versus-isothermal type recorded (Grueneisen table), and
-//! `gamma_0` (Grueneisen table). It is missing the DEBYE TEMPERATURE, which appears in no data file at
-//! all, and the VOLUME EXPONENT `q`. Both are fetches, and naming them here is what turns "the cluster
-//! refuses at interior conditions" into "the cluster refuses, and rung 3 would answer if these two columns
-//! existed".
+//! per-phase anchors and the repository banks four: molar volume (phase registry), bulk modulus (mineral
+//! moduli), `K'` with its adiabatic-versus-isothermal type recorded (Grueneisen table), and `gamma_0`
+//! (Grueneisen table). It is missing the DEBYE TEMPERATURE and the VOLUME EXPONENT `q`, neither of which
+//! appears in any data file. Both are fetches, and naming them here is what turns "the cluster refuses at
+//! interior conditions" into "the cluster refuses, and rung 3 would answer if these two columns existed".
+//!
+//! `K'` was a THIRD missing anchor until 2026-07-19 and was never a fetch: it had been banked in
+//! `gruneisen.toml` from the start and the loader did not read it. Worth recording because the two kinds
+//! of gap cost very different amounts, and counting a loader gap as a fetch overprices the work.
 //!
 //! Rungs 1 and 2 are further out: rung 1 wants a cited P-V-T surface per phase (forsterite has a lead to
 //! about 14 GPa and 1900 K, which is one phase rather than a mechanism), and rung 2 wants a quasi-harmonic
@@ -171,16 +174,18 @@ pub fn mie_gruneisen_debye_readiness(
     let has_k0 = moduli.row(key).is_some();
     let row = gruneisen.row(phase);
     let has_gamma = row.and_then(|r| r.gamma()).is_some();
-    // K' IS BANKED BUT NOT LOADED, which is a different and much cheaper gap than a fetch.
-    // `crates/physics/data/gruneisen.toml` carries a `kprime` for fourteen rows AND a `kprime_type`
-    // recording whether each is adiabatic or isothermal, which is exactly the discipline rung 3 needs.
-    // `GruneisenRow` does not expose either. So this reports FALSE while being honest about why: the
-    // number exists, the loader does not read it, and closing that is an afternoon rather than a fetch.
-    let has_kprime = false;
+    // K' WAS BANKED AND UNREAD, and that gap is now closed. The data file carried
+    // `bulk_modulus_pressure_derivative_kprime` for every row along with its band and its `kprime_type`
+    // (adiabatic `K_S'` versus isothermal `K_T'`), and the loader simply did not read it. Distinguishing
+    // that from a genuine fetch mattered: it was being counted as one of rung 3's missing anchors when it
+    // was a loader change, and conflating the two would have mispriced the work by a fetch.
+    let has_kprime = row
+        .and_then(|r| r.bulk_modulus_pressure_derivative_kprime)
+        .is_some();
     vec![
         ("molar_volume_V0", has_volume),
         ("bulk_modulus_K0", has_k0),
-        ("kprime_K0_prime_LOADER_GAP", has_kprime),
+        ("kprime_K0_prime", has_kprime),
         ("gruneisen_gamma_0", has_gamma),
         // Neither of these appears in ANY data file. They are the two fetches between this ladder and a
         // state-resolved interior, and they are listed here so that claim is checkable rather than
@@ -287,6 +292,7 @@ fn abs_diff(a: Fixed, b: Fixed) -> Fixed {
 }
 
 /// The ambient expansivity from the Grueneisen identity, at the rows' own frame and nowhere else.
+// @derives: a phase's ambient volumetric expansivity <- its banked gamma, bulk modulus, molar volume and Dulong-Petit capacity
 fn ambient_alpha(
     gamma: Fixed,
     phase: &crate::petrology_data::Phase,
@@ -377,15 +383,12 @@ mod tests {
             .collect();
         assert_eq!(
             missing,
-            vec![
-                "kprime_K0_prime_LOADER_GAP",
-                "debye_temperature_theta_0",
-                "volume_exponent_q"
-            ],
-            "three anchors are unavailable, and they are NOT the same kind of unavailable: K-prime is \
-             banked in gruneisen.toml with its adiabatic-versus-isothermal type recorded and merely not \
-             loaded, while the Debye temperature and q appear in no data file at all. One is a loader \
-             change, two are fetches, and conflating them would misprice the work."
+            vec!["debye_temperature_theta_0", "volume_exponent_q"],
+            "TWO anchors remain, and both are genuine fetches: neither the Debye temperature nor the \
+             volume exponent q appears in any data file. K-prime was a THIRD entry here until its loader \
+             gap closed on 2026-07-19; it had been banked in gruneisen.toml the whole time, with its band \
+             and its adiabatic-versus-isothermal type, and merely unread. Distinguishing a loader gap \
+             from a fetch is what kept this from being priced as three fetches."
         );
         let have: Vec<&str> = readiness
             .iter()
@@ -394,8 +397,8 @@ mod tests {
             .collect();
         assert_eq!(
             have.len(),
-            3,
-            "molar volume, K0 and gamma_0 are banked and loaded"
+            4,
+            "molar volume, K0, K-prime and gamma_0 are banked and loaded"
         );
     }
 

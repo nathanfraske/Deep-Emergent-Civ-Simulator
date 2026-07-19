@@ -108,6 +108,22 @@ pub struct GruneisenRow {
     /// Its symmetric half-width band.
     pub gamma_eos_debye_band: Option<Fixed>,
     /// The temperature the row's values were measured at (kelvin).
+    /// The pressure derivative of the bulk modulus, `K'`, when the row carries one.
+    ///
+    /// BANKED SINCE THE COLUMN LANDED AND UNREAD UNTIL 2026-07-19. The data file has carried this for
+    /// fourteen rows, with its band and its `kprime_type`, and the loader simply did not read it. That is
+    /// a cheaper class of gap than a fetch and worth distinguishing: the Mie-Grueneisen-Debye rung needs
+    /// six anchors and this was miscounted as one of its missing ones until someone looked at the file.
+    pub bulk_modulus_pressure_derivative_kprime: Option<Fixed>,
+    /// `K'`'s uncertainty as the source states it.
+    pub kprime_band: Option<Fixed>,
+    /// WHICH `K'` this is, verbatim from the source: adiabatic (`K_S'`) or isothermal (`K_T'`).
+    ///
+    /// Carried as text rather than parsed into a flag because the rows say different things in different
+    /// ways ("K_S (adiabatic, single-crystal Brillouin)", "K_T' (isothermal, 3rd-order Birch-Murnaghan)"),
+    /// and a consumer mixing an adiabatic `K'` into an isothermal relation is exactly the conjugate error
+    /// the expansivity join already made once. The distinction is preserved so a reader cannot lose it.
+    pub kprime_type: Option<String>,
     pub temperature_k: Fixed,
     /// The pressure the row's values were measured at (bar).
     pub pressure_bar: Fixed,
@@ -258,6 +274,17 @@ impl GruneisenTable {
                     }
                 }
             }
+            let bulk_modulus_pressure_derivative_kprime =
+                num("bulk_modulus_pressure_derivative_kprime")?;
+            if let Some(v) = bulk_modulus_pressure_derivative_kprime {
+                if v <= ZERO {
+                    return Err(GruneisenError::NonPhysical(format!(
+                        "{name}.kprime = {v:?}"
+                    )));
+                }
+            }
+            let kprime_band = num("kprime_band")?;
+            let kprime_type = field("kprime_type");
             let gamma_thermodynamic_band = num("gamma_thermodynamic_band")?;
             let gamma_eos_debye_band = num("gamma_eos_debye_band")?;
             for (label, b) in [
@@ -273,6 +300,9 @@ impl GruneisenTable {
                 }
             }
             let row = GruneisenRow {
+                bulk_modulus_pressure_derivative_kprime,
+                kprime_band,
+                kprime_type,
                 name: name.clone(),
                 gamma_thermodynamic,
                 gamma_thermodynamic_band,
@@ -415,6 +445,11 @@ mod tests {
     fn the_ladder_prefers_the_measured_anchor_over_the_estimator() {
         let row = GruneisenRow {
             name: "test".into(),
+            // Absent on purpose: this fixture exercises the GAMMA ladder, and a K' it does not use would
+            // be a value the test implies matters and does not check.
+            bulk_modulus_pressure_derivative_kprime: None,
+            kprime_band: None,
+            kprime_type: None,
             gamma_thermodynamic: Some(Fixed::from_ratio(150, 100)),
             gamma_thermodynamic_band: Some(Fixed::from_ratio(5, 100)),
             gamma_eos_debye: Some(Fixed::from_ratio(120, 100)),
