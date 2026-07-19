@@ -3783,8 +3783,10 @@ impl EuvFitDomain {
 pub struct PhotoevaporationRateEvaluation {
     /// The mass-loss rate bracket (solar masses per Myr), the atmosphere-model band propagated through the wind law.
     pub rate: PhotoevaporationRateBracket,
-    /// The grounded-or-extrapolated grade of this evaluation, from the fit's typed domain.
-    pub reach: FitReach,
+    /// The grounded-or-extrapolated grade of this evaluation, from the fit's typed domain. Named `fit_reach`, not
+    /// `reach`, so it does not read as the physics `laws::reach()` distance (a homonym: this is a fit-domain grade,
+    /// not a runout reach), per the diamond gate's rename-when-not-one discharge.
+    pub fit_reach: FitReach,
 }
 
 /// The EUV PHOTOEVAPORATION WIND-RATE FIT: the reserved-with-basis coefficients of the radiative-envelope branch's
@@ -3971,7 +3973,7 @@ pub fn radiative_euv_photoevaporation_wind_rate_msun_myr(
             lo_msun_myr: lo,
             hi_msun_myr: hi,
         },
-        reach,
+        fit_reach: reach,
     })
 }
 
@@ -6807,7 +6809,7 @@ mod tests {
         // One solar mass sits BELOW Hollenbach's grounded 15-to-65 massive-star grid, so the rate is graded an
         // analytic extrapolation (estimator), not a grounded point: the disjoint-evidence fix in action.
         assert!(
-            matches!(out.reach, FitReach::AnalyticExtrapolation { .. }),
+            matches!(out.fit_reach, FitReach::AnalyticExtrapolation { .. }),
             "a solar mass is an extrapolation for the Hollenbach massive-star grid"
         );
     }
