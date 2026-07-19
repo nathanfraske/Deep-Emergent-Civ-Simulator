@@ -8,6 +8,7 @@ The retired long-form board is `docs/working/CONSENSUS_ROADMAP_HISTORY.md`, pres
 
 ## Active arcs
 
+- 2026-07-19 disk slice 2: layer-4 kernels R_1/Omega_star_0/T_core(+dust co-solve) + accretion-termination + typed outcome + gate integration + Z-derived deuterium line, dormant -> claude/disk-slice2-wire, PR #201
 - 2026-07-18  Mountains / mid-band (increment 3) -> branch `claude/topology-increment3`. Next: block-3 re-derivations, sub-step D, Seams C/D. Detail in HANDOFFS.
 - 2026-07-18  Remote agent #201 (disk-evolution wire) lands large and often -> rebase-onto-main integration, keep viewer/physics lanes disjoint.
 - 2026-07-18  Arc AFTER the crust (perpetual dynamics, atmosphere keystone, hydrosphere) -> plan in `PHYSICS_SUBSTRATE_ROADMAP.md`.
