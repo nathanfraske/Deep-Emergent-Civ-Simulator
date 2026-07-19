@@ -67,12 +67,29 @@ pub const OVERRIDE_INSTRUCTIONS: &str = "This value has no provenance. To overri
 
 /// The five existing python gates the provenance scan consolidates. A script that is absent is skipped
 /// silently (fail-open), so a not-yet-created gate never bricks a build.
-const PROVENANCE_SCRIPTS: &[&str] = &[
-    "scripts/constructor_gate.py",
-    "scripts/provenance_gate.py",
-    "scripts/floor_provenance_gate.py",
-    "scripts/determinism_gate.py",
-    "scripts/quarantine_gate.py",
+/// Every gate Stone 0 runs, with its arguments. An entry is `(script, args)`.
+///
+/// THE LIST WAS HALF THE GATES. It named five and omitted sources, source generation, derives, the
+/// diamond scan, the profile-override check, the floor-registry staleness check and all eight
+/// per-source provenance tests. The omission was invisible from Stone 0's own output, because a gate
+/// that is not in this list reports nothing at all: the failing Grueneisen witnesses were unseen here
+/// for exactly that reason.
+///
+/// A gate that takes an argument is listed WITH it, because `--strict` and `--check` are where several
+/// of these actually convict; running them bare is how the diamond scan passed for months without ever
+/// looking at the repository.
+const PROVENANCE_SCRIPTS: &[(&str, &[&str])] = &[
+    ("scripts/constructor_gate.py", &[]),
+    ("scripts/provenance_gate.py", &[]),
+    ("scripts/floor_provenance_gate.py", &[]),
+    ("scripts/determinism_gate.py", &[]),
+    ("scripts/quarantine_gate.py", &[]),
+    ("scripts/sources_gate.py", &[]),
+    ("scripts/gen_sources.py", &["--check"]),
+    ("scripts/derives_gate.py", &[]),
+    ("scripts/diamond_gate.py", &["--strict"]),
+    ("scripts/profile_override_gate.py", &[]),
+    ("scripts/gen_floor_registry.py", &["--check"]),
 ];
 
 /// Which run this is. `Local` runs every check including the live-password and canary scans against the
@@ -322,9 +339,14 @@ pub fn override_is_valid(override_value: Option<&str>, password: &str) -> bool {
 // The provenance scan: shell out to the python gates, with a content-hash verdict cache.
 // ----------------------------------------------------------------------------------------------------
 
+/// What one gate run produced.
+///
+/// `Skipped` USED TO EXIST and is deliberately gone. It absorbed three different situations that are
+/// not the same: a script missing from disk, a script that crashed, and an interpreter that could not
+/// be spawned. Only the last is operational. Folding the other two into a skip made deleting or
+/// breaking a gate the two cheapest ways to stop it convicting, and Stone 0 reported neither.
 enum ScriptResult {
     Clean,
-    Skipped,
     Detected(String),
     Operational(String),
 }
@@ -334,13 +356,20 @@ struct ProvenanceOutcome {
     operational: Vec<String>,
 }
 
-fn run_python_gate(root: &Path, script_rel: &str) -> ScriptResult {
+fn run_python_gate(root: &Path, script_rel: &str, args: &[&str]) -> ScriptResult {
     let path = root.join(script_rel);
     if !path.exists() {
-        return ScriptResult::Skipped;
+        // A LISTED SCRIPT THAT IS ABSENT IS A FAILURE, not a skip. This list names what MUST run, so a
+        // missing entry means either the gate was deleted or the path drifted, and both should be loud.
+        // Skipping made deleting a gate the quietest way to stop it convicting.
+        return ScriptResult::Detected(format!(
+            "{script_rel} is listed in PROVENANCE_SCRIPTS but does not exist. A gate that is not there \
+             has not passed; restore it or remove its entry deliberately."
+        ));
     }
     let out = match Command::new("python3")
         .arg(&path)
+        .args(args)
         .current_dir(root)
         .output()
     {
@@ -355,13 +384,19 @@ fn run_python_gate(root: &Path, script_rel: &str) -> ScriptResult {
         return ScriptResult::Clean;
     }
     let stderr = String::from_utf8_lossy(&out.stderr);
+    // A CRASHING GATE HAS NOT PASSED. These three were treated as "operational" and skipped, which made
+    // BREAKING a gate the cheapest way to silence it: introduce a syntax error, or an import of
+    // something absent, and Stone 0 reported an operational skip and moved on. The one genuinely
+    // operational case is python3 itself being unavailable, and that is handled above where the spawn
+    // fails; everything reaching here ran the interpreter and the SCRIPT failed.
     if stderr.contains("Traceback (most recent call last)")
         || stderr.contains("ModuleNotFoundError")
         || stderr.contains("SyntaxError")
     {
         let last = stderr.lines().last().unwrap_or("");
-        return ScriptResult::Operational(format!(
-            "{script_rel} errored operationally ({last}); skipped"
+        return ScriptResult::Detected(format!(
+            "{script_rel} CRASHED ({last}). A gate that cannot run has not passed, and treating this as \
+             an operational skip made breaking a gate the cheapest way to silence it."
         ));
     }
     let stdout = String::from_utf8_lossy(&out.stdout);
@@ -371,9 +406,9 @@ fn run_python_gate(root: &Path, script_rel: &str) -> ScriptResult {
 fn provenance_scan(root: &Path) -> ProvenanceOutcome {
     let mut detections = Vec::new();
     let mut operational = Vec::new();
-    for s in PROVENANCE_SCRIPTS {
-        match run_python_gate(root, s) {
-            ScriptResult::Clean | ScriptResult::Skipped => {}
+    for (s, args) in PROVENANCE_SCRIPTS {
+        match run_python_gate(root, s, args) {
+            ScriptResult::Clean => {}
             ScriptResult::Detected(r) => detections.push(r),
             ScriptResult::Operational(w) => operational.push(w),
         }
@@ -410,13 +445,25 @@ fn collect_files_with_ext(dir: &Path, ext: &str, out: &mut Vec<PathBuf>) {
 /// runs on a fresh checkout with no cache, so a cache miss is the backstop.
 fn provenance_input_hash(root: &Path) -> u64 {
     let mut files: Vec<PathBuf> = Vec::new();
-    for s in PROVENANCE_SCRIPTS {
+    for (s, _args) in PROVENANCE_SCRIPTS {
         files.push(root.join(s));
     }
+    // EVERY INPUT A GATE READS, or a cached clean verdict outlives an edit that would have convicted.
+    // The ledger and the profiles were the live gap: editing `quarantine_ledger.toml` locally could reuse
+    // a cached pass because the ledger was not hashed and the build script did not declare it as a rerun
+    // input, and the calibration profiles are what the simulation actually loads.
     for extra in [
         "scripts/constructor_baseline.tsv",
         "scripts/determinism_baseline.tsv",
+        "scripts/derives_baseline.tsv",
+        "scripts/profile_override_baseline.tsv",
         "calibration/reserved.toml",
+        "calibration/profiles/dev-fixtures.toml",
+        "calibration/profiles/mirror.toml",
+        "docs/working/quarantine_ledger.toml",
+        "docs/working/PHYSICS_FLOOR_REGISTRY.md",
+        "sources/registry.toml",
+        "sources/mirrored.toml",
     ] {
         files.push(root.join(extra));
     }
