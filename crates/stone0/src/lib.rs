@@ -16,9 +16,14 @@
 //!
 //! Stone 0 is the meta-gate that makes the no-fabricated-values discipline un-bypassable at the local
 //! inner loop (design `docs/working/Q1_STONE0_PROVENANCE_GATE_DESIGN.md`). This crate is the gate's
-//! library and its `stone0-gate` binary. It is NOT yet wired into any build script: increment 4 (the
-//! `build.rs` firing in the gated crates) is invasive and reserved for the owner to gate, so `gate()`
-//! is fully written and tested here but invoked only through the binary for now.
+//! library and its `stone0-gate` binary. INCREMENT 4 IS DONE and the gate fires at BUILD time:
+//! `crates/sim/build.rs` calls `run(Mode::Local)` and panics on a positive detection, so the scan runs on
+//! every `cargo build`, `check`, `test`, and `clippy` of `civsim-sim`, and a blocked build stops there
+//! with the gate's report. The binary remains the direct entry point for `--ci` and `--self-test`.
+//!
+//! Said plainly because the previous wording claimed the opposite ("NOT yet wired into any build script"),
+//! which would send a developer whose build is blocked here to rule this gate out as the cause when it is
+//! the most likely one.
 //!
 //! ## The checks
 //!

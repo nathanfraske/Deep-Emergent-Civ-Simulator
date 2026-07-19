@@ -1514,12 +1514,24 @@ const PROVINCE_LERP_STEPS: i64 = 4096;
 /// THE FLEXURAL MIDDLE IS ABSENT, and its absence is loud rather than papered over. The band between the coarse
 /// provinces and the fine crater rows (the moats, peripheral bulges, and terrain-scale swells a human reads as
 /// terrain) is the elastic plate's flexure under its load list, and the kernel for it is BUILT and dormant
-/// ([`civsim_physics::flexure`]). It is not wired here because its rigidity `D = E T_e^3 / (12 (1 - nu^2))` needs
-/// the elastic lid thickness `T_e`, and NOTHING BUILT DERIVES `T_e` today: the deep-time thermal state carries one
-/// lumped temperature per column ([`civsim_sim::geodynamics::ColumnState`]) and no depth-resolved geotherm, so
-/// there is no profile against which a mechanical lid base can be located. Authoring a lid thickness, or pinning
-/// it to the thermal boundary layer through an invented ratio, would cross the value-authoring line, so the layer
-/// is left out and the gap is surfaced. When `T_e` derives, the flexure enters here as one more analytic layer:
+/// ([`civsim_physics::flexure`]). Its rigidity `D = E T_e^3 / (12 (1 - nu^2))` needs the elastic lid thickness
+/// `T_e`, and THAT NOW DERIVES: the owner ruled the mechanical lid reads the RAYLEIGH-derived lid base
+/// ([`civsim_physics::moment_equivalence::ConductiveLidBase::from_rayleigh`]) rather than a depth-resolved
+/// geotherm, so the missing-profile objection this block used to raise is retired.
+///
+/// WHAT STILL HOLDS IT BACK is one level further down, and it is a value-authoring problem rather than a missing
+/// mechanism. The lid base is derived from the column's Rayleigh number, which is computed from the thermal
+/// properties in [`civsim_sim::deeptime::province_column_params`], and those are a DECLARED FIXTURE CLUSTER
+/// (density, viscosity and radius all set to ONE, with an authored conductivity, expansivity, diffusivity and
+/// specific heat, tagged as a declared conflict by the owner's 2026-07-16 ruling). So the chain from thermal
+/// properties through Rayleigh to the lid base to `D` to relief HEIGHT would carry an authored scale: the
+/// mountains would look convincing and rest on an authored 30 ppm expansivity and an authored conductivity of 2.
+/// Drawing them on that basis is worse than leaving them out, because a plausible mountain range invites no
+/// scrutiny. The geotherm arc replaces that cluster with derived properties (density derived, specific heat
+/// Dulong-Petit, conductivity the two-rung Hofmeister and Slack ladder, diffusivity computed and never stored),
+/// and the pins move once when it does.
+///
+/// When the cluster is derived, the flexure enters here as one more analytic layer:
 /// its deflection adds to [`SurfaceField::height_km`] and its Green's function's analytic derivative adds to
 /// [`SurfaceField::gradient`], with no change to either function's shape.
 ///
