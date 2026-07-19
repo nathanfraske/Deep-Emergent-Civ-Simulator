@@ -8,7 +8,7 @@ The retired long-form board is `docs/working/CONSENSUS_ROADMAP_HISTORY.md`, pres
 
 ## Active arcs
 
-- 2026-07-18  Mountains / mid-band (increment 3) -> branch `claude/topology-increment3`. Next: block-3 re-derivations, sub-step D, Seams C/D. Detail in HANDOFFS.
+- 2026-07-19  Mountains / mid-band (increment 3) -> UNBLOCKED, both cited columns landed. Next in the owner-approved order: replace the fixture cluster (atomic, all seven fields), re-baseline via `realization_digest`, retire the pins with a ledger entry, then sub-step D + Seams C/D draw the mountains. Detail in HANDOFFS.
 - 2026-07-18  Remote agent #201 (disk-evolution wire) lands large and often -> rebase-onto-main integration, keep viewer/physics lanes disjoint.
 - 2026-07-18  Arc AFTER the crust (perpetual dynamics, atmosphere keystone, hydrosphere) -> plan in `PHYSICS_SUBSTRATE_ROADMAP.md`.
 
@@ -65,6 +65,8 @@ The retired long-form board is `docs/working/CONSENSUS_ROADMAP_HISTORY.md`, pres
 
 ## Recent landings (tombstoned; prune when old)
 
+- 2026-07-19  DONE  #203 merged to main (`b1b9ed0`): two crates, five live-fired gates, 225 files, pins held -> `git log b1b9ed0`.
+- 2026-07-19  DONE  Local/CI command parity: the check list is PARSED from the workflow, not copied (six classes had never run locally) -> `scripts/ci_local.sh`.
 - 2026-07-19  DONE  Phase-conductivity column fetched (8 phases, cell counts as reconstructions + kappa_298 x5) -> `crates/physics/data/phase_conductivity.toml`.
 - 2026-07-19  DONE  Crate layering un-inverted: `calibration`+`decision` bio -> foundation; foundation drops its bio lib dep -> `crates/foundation`.
 - 2026-07-19  DONE  Language cycle cut: `PlaceId` lifted to a leaf, 7-module cluster -> 3 -> `crates/foundation/src/located.rs`.
