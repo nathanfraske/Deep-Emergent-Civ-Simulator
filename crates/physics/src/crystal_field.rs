@@ -561,6 +561,9 @@ pub fn iron_valence_state(composition: &[(String, u32)], table: &PeriodicTable) 
             break;
         }
     }
+    // The solved per-element assignment is also what the anion helper needs, so it is returned through
+    // `solved_assignment` below rather than re-derived there from first-listed valences. Two functions
+    // answering one question independently is the diamond this file already paid for once.
     match neutral_fe_totals.len() {
         // No neutral assignment: an alloy or metal with no oxidizing partner is metallic; otherwise the
         // formula does not balance at all and refuses.
@@ -592,24 +595,107 @@ pub fn iron_valence_state(composition: &[(String, u32)], table: &PeriodicTable) 
 /// symbol + magnitude + sign (`O` at `-2` -> `"O2-"`), the key the charge-transfer ligand column uses. `None` when
 /// the phase has no anion. Keyed off the composition, so an alien anion is a data row.
 fn dominant_anion_species(composition: &[(String, u32)], table: &PeriodicTable) -> Option<String> {
-    let mut best: Option<(String, i8, i64)> = None; // (symbol, charge, total_magnitude)
+    // THE SAME DETERMINACY RULE the iron classifier uses, rather than a second first-listed-valence read.
+    //
+    // This helper previously took each element's FIRST banked valence to decide which species is the anion,
+    // which is the identical defect that made `FeSO4` read as S(2-) and demand Fe(10+). Fixing one and
+    // leaving the other would have left the wrong answer reachable through a different door: the classifier
+    // would call sulfate ferrous while this named `S2-` as its ligand.
+    //
+    // So the anion is taken from the UNIQUE charge-neutral assignment when one exists, and this refuses
+    // when none does. A composition whose formula does not determine its oxidation states does not have a
+    // determinate dominant anion either.
+    let mut others: Vec<(String, i64, Vec<i64>)> = Vec::new();
     for (symbol, count) in composition {
         if *count == 0 || symbol == "Fe" {
             continue;
         }
-        let primary = table
-            .element(symbol)
-            .and_then(|e| e.valence.first().copied());
-        if let Some(v) = primary {
-            if v < 0 {
-                let magnitude = (-(v as i64)) * *count as i64;
-                if best.as_ref().map(|b| magnitude > b.2).unwrap_or(true) {
-                    best = Some((symbol.clone(), v, magnitude));
-                }
+        let states: Vec<i64> = match table.element(symbol) {
+            Some(e) if !e.valence.is_empty() => e.valence.iter().map(|v| i64::from(*v)).collect(),
+            _ => return None,
+        };
+        others.push((symbol.clone(), *count as i64, states));
+    }
+    if others.is_empty() {
+        return None;
+    }
+    let n_fe: i64 = composition
+        .iter()
+        .filter(|(s, _)| s == "Fe")
+        .map(|(_, c)| *c as i64)
+        .sum();
+    let fe_states: Vec<i64> = table
+        .element("Fe")
+        .map(|e| e.valence.iter().map(|v| i64::from(*v)).collect())
+        .unwrap_or_default();
+
+    // Enumerate one state per non-iron element; keep assignments the irons can neutralize.
+    let mut solutions: Vec<Vec<i64>> = Vec::new();
+    let mut index = vec![0usize; others.len()];
+    loop {
+        let rest: i64 = others
+            .iter()
+            .zip(index.iter())
+            .map(|((_, count, states), i)| count * states[*i])
+            .sum();
+        let neutralizable = if n_fe == 0 {
+            rest == 0
+        } else {
+            fe_states.iter().any(|a| {
+                fe_states
+                    .iter()
+                    .any(|b| (0..=n_fe).any(|k| a * k + b * (n_fe - k) + rest == 0))
+            })
+        };
+        if neutralizable {
+            let assignment: Vec<i64> = others
+                .iter()
+                .zip(index.iter())
+                .map(|((_, _, states), i)| states[*i])
+                .collect();
+            if !solutions.contains(&assignment) {
+                solutions.push(assignment);
             }
         }
+        let mut pos = others.len();
+        loop {
+            if pos == 0 {
+                pos = usize::MAX;
+                break;
+            }
+            pos -= 1;
+            index[pos] += 1;
+            if index[pos] < others[pos].2.len() {
+                break;
+            }
+            index[pos] = 0;
+            if pos == 0 {
+                pos = usize::MAX;
+                break;
+            }
+        }
+        if pos == usize::MAX {
+            break;
+        }
     }
-    best.map(|(symbol, charge, _)| species_key(&symbol, charge))
+    // Determinate or nothing: an ambiguous formula has no determinate dominant anion.
+    if solutions.len() != 1 {
+        return None;
+    }
+    let assignment = &solutions[0];
+    let mut best: Option<(String, i64, i64)> = None; // (symbol, charge, total magnitude)
+    for ((symbol, count, _), charge) in others.iter().zip(assignment.iter()) {
+        if *charge >= 0 {
+            continue;
+        }
+        let magnitude = (-charge) * count;
+        if best.as_ref().map(|b| magnitude > b.2).unwrap_or(true) {
+            best = Some((symbol.clone(), *charge, magnitude));
+        }
+    }
+    // Formatted through the SAME `species_key` the charge-transfer column keys on, rather than by an
+    // inline format string, so the anion name this produces cannot drift from the name that column expects.
+    best.map(|(symbol, charge, _)| species_key(&symbol, charge as i8))
 }
 
 /// A species key: the element symbol, the charge magnitude, and the sign (`("O", -2) -> "O2-"`,

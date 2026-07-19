@@ -658,7 +658,7 @@ pub fn derive_column_thermal_properties(
 /// [`civsim_physics::laws::thermal_density_anomaly`] reads.
 ///
 /// NOT CLOSED, and the earlier "FRONTIER CLOSED" note here was wrong. The join exists as
-/// [`civsim_materials::properties::assemblage_volumetric_expansivity_per_k`], which derives each phase's
+/// [`civsim_materials::properties::ambient_assemblage_volumetric_expansivity_per_k`], which derives each phase's
 /// `alpha = gamma C_v / (K V_m)` from four banked columns and mixes them by volume. Its magnitude is checked
 /// against the MEASURED forsterite expansivity (roughly 40 ppm/K at mantle temperature) reproduced from
 /// columns never fitted to it, which is what makes that a check rather than a circular one. Worth recording
