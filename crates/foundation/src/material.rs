@@ -1216,7 +1216,7 @@ impl ConstituentRegistry {
 /// parcel's physics IS its own body's composition, derived by a development-weighted fold over its body plan
 /// (`civsim_sim::physiology::whole_body_composition_vector`), and every consumer reads a named axis off the
 /// vector exactly as it reads one off a substance, with the same absence-is-zero convention. The composition
-/// shares the string-keyed sorted-walk shape of [`civsim_bio::anatomy::TissueComposition`] and
+/// shares the string-keyed sorted-walk shape of `civsim_bio::anatomy::TissueComposition` and
 /// [`civsim_physics::Substance`]'s `vector`, so a consumer that reads `mat.fracture_strength` or
 /// `bio.decomposition_barrier` off a substance reads it off a parcel unchanged.
 #[derive(Clone, Debug, PartialEq, Eq)]

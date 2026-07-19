@@ -48,10 +48,10 @@
 //!   access-channel registry.
 //! - [`agent`]: the [`agent::Mind`] composing belief and theory of mind into the
 //!   epistemic core of an agent.
-//! - [`calibration`]: the calibration manifest loader. Every reserved value loads
+//! - [`civsim_foundation::calibration`]: the calibration manifest loader. Every reserved value loads
 //!   as a fail-loud sentinel, so a system that reads an unset required value
 //!   errors rather than running on a fabricated default (design Principle 11).
-//! - [`decision`]: the action, drive, and consideration definitions the belief
+//! - [`civsim_foundation::decision`]: the action, drive, and consideration definitions the belief
 //!   and agent paths read.
 //!
 //! ## What this crate does NOT carry, and why
@@ -76,7 +76,7 @@
 //! the biology arc is overhauled, so the placement question is answered by that
 //! work rather than by the import graph.
 //!
-//! ## A note on [`calibration`]
+//! ## A note on [`civsim_foundation::calibration`]
 //!
 //! The calibration manifest is not biology. It is here because the epistemic
 //! modules read it and it is a leaf, so the closure demanded it. It belongs in a

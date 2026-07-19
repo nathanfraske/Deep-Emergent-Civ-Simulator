@@ -15,8 +15,8 @@
 //! The sex / breeding-system substrate (design Part 25, R-REPRO).
 //!
 //! A being's sex is a gene-fed phenotype, not a drawn attribute. It is read off a designated
-//! sex-determination locus through the ordinary expression map ([`civsim_bio::genome::GeneSet::express`]
-//! on [`civsim_bio::genome::Channel::SexDetermination`]), and a data-driven [`BreedingSystem`] maps the
+//! sex-determination locus through the ordinary expression map (`civsim_bio::genome::GeneSet::express`
+//! on `civsim_bio::genome::Channel::SexDetermination`), and a data-driven [`BreedingSystem`] maps the
 //! expressed value to a [`SexClass`]. Because the sex ratio is a genotype-to-phenotype reading and
 //! not an authored number, a 1:1 ratio emerges from Fisherian equal-investment selection on the
 //! locus rather than being drawn or reserved (Principle 8, Principle 9). There is deliberately no
@@ -107,7 +107,7 @@ impl BreedingSystem {
     }
 
     /// Assign a [`SexClass`] to an expressed sex-determination value (the value read off the locus
-    /// through [`civsim_bio::genome::GeneSet::express`]). A pure function, so sex is deterministic from
+    /// through `civsim_bio::genome::GeneSet::express`). A pure function, so sex is deterministic from
     /// the genome with no RNG. A degenerate system with no classes returns [`SexClass::default`]
     /// rather than panicking, so a misconfigured registry fails soft into a single class.
     pub fn assign(&self, expressed: Fixed) -> SexClass {
