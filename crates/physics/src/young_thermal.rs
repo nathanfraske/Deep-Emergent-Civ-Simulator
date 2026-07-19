@@ -298,6 +298,7 @@ pub fn slr_family_temperature_rise(
 /// plateau, which the magma-ocean operating point sits on for silicates and iron. Below the Debye temperature the
 /// specific heat falls off as the Debye integral, a banded correction keyed on the assemblage's own Debye
 /// temperature; that correction is the flagged follow-on, not needed at the melt-decision temperature.
+// @derives: the high-temperature specific heat <- mean atomic mass (Dulong-Petit)
 pub fn dulong_petit_specific_heat(mean_atomic_mass_kg_per_mol: Fixed) -> Option<Fixed> {
     if mean_atomic_mass_kg_per_mol <= Fixed::ZERO {
         return None;

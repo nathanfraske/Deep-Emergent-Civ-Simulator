@@ -54,6 +54,10 @@ jobs:
         run: |
           python3 scripts/floor_provenance_gate.py
           python3 scripts/floor_provenance_gate.py --self-test
+      - name: Derives-coverage gate (a new physics substrate is marked deriving or classified)
+        run: |
+          python3 scripts/derives_gate.py --self-test
+          python3 scripts/derives_gate.py
       - name: Quarantine gate (the parked living-world weak-provenance ledger stays in sync with source)
         run: |
           python3 scripts/quarantine_gate.py

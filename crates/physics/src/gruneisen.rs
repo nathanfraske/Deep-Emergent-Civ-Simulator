@@ -325,6 +325,7 @@ impl GruneisenTable {
     /// REFUSES rather than defaults. A census phase with no cited row returns [`GammaRefusal`] naming
     /// that phase. A mantle's gamma sets its thermal pressure, so inventing one for a missing phase
     /// would author a world's interior.
+    // @derives: a rock's Gruneisen parameter <- the cited per-phase gamma table + the world's own mineral census
     pub fn assemblage_gamma(
         &self,
         census: &[(&str, Fixed)],

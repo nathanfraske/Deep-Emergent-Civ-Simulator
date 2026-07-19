@@ -116,6 +116,7 @@ pub fn lattice_exponent_for_cell(atoms_per_primitive_cell: i32) -> Option<Fixed>
 /// its own and passes the result. Passing a bare `alpha` here would author the constancy assumption invisibly.
 ///
 /// `None` on a non-positive temperature or anchor, or a fixed-point overflow. Deterministic fixed-point.
+// @derives: lattice thermal conductivity k(T,P) <- a measured kappa_298 anchor + banked Grueneisen, bulk modulus and expansivity (measured rung)
 pub fn hofmeister_lattice_conductivity(
     kappa_298: Fixed,
     exponent_a: Fixed,
@@ -159,6 +160,7 @@ pub fn hofmeister_lattice_conductivity(
 /// Returns zero below the temperature where the polynomial goes non-positive (its fit does not extend to the
 /// cold end, where the physical answer is that radiative transport is negligible anyway), so a cold caller reads
 /// the honest zero rather than a negative conductivity.
+// @derives: the radiative conductivity silicates gain at high T <- temperature
 pub fn radiative_conductivity_w_per_m_k(temperature: Fixed) -> Fixed {
     if temperature <= ZERO {
         return ZERO;

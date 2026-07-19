@@ -17,8 +17,26 @@ The lists below are GENERATED from `crates/physics/data/*.toml`, `crates/physics
 
 ## Deriving substrates (check here BEFORE authoring: what the world derives, and where)
 
-The 11 deriving subsystems below live OUTSIDE the authored floor. Each produces a world quantity from the floor and the situation, so its output must never be authored: if the value you need appears here, read or extend the subsystem, do not set a number. This is the list that stops `1 year = 365 days` from being authored when orbital mechanics already derives it. Generated from the `// @derives:` markers in the code; a subsystem missing its marker is a gap in this map, so mark every derivation entry point.
+The 19 deriving subsystems below live OUTSIDE the authored floor. Each produces a world quantity from the floor and the situation, so its output must never be authored: if the value you need appears here, read or extend the subsystem, do not set a number. This is the list that stops `1 year = 365 days` from being authored when orbital mechanics already derives it. Generated from the `// @derives:` markers in the code; a subsystem missing its marker is a gap in this map, so mark every derivation entry point.
 
+### `crates/materials/src/conductivity.rs`
+
+- lattice thermal conductivity k(T,P) <- a measured kappa_298 anchor + banked Grueneisen, bulk modulus and expansivity (measured rung) (`crates/materials/src/conductivity.rs:119`)
+- the radiative conductivity silicates gain at high T <- temperature (`crates/materials/src/conductivity.rs:163`)
+### `crates/materials/src/freezer.rs`
+
+- the bulk sound speed <- bulk modulus + density (`crates/materials/src/freezer.rs:176`)
+### `crates/materials/src/properties.rs`
+
+- a phase's density <- molar mass + molar volume (`crates/materials/src/properties.rs:87`)
+- the Debye temperature <- sound speed + atomic volume (`crates/materials/src/properties.rs:124`)
+- lattice thermal conductivity k(T) <- Grueneisen, mean atomic mass, Debye temperature, atomic volume, cell count (Slack estimator rung) (`crates/materials/src/properties.rs:694`)
+### `crates/physics/src/gruneisen.rs`
+
+- a rock's Gruneisen parameter <- the cited per-phase gamma table + the world's own mineral census (`crates/physics/src/gruneisen.rs:328`)
+### `crates/physics/src/young_thermal.rs`
+
+- the high-temperature specific heat <- mean atomic mass (Dulong-Petit) (`crates/physics/src/young_thermal.rs:301`)
 ### `crates/sim/src/clock.rs`
 
 - a world's year/day/season in TICKS, and the cell area in metres <- the world's orbit (world-seconds) divided by the base tick (1 tick = 1 world-second, reserved). The calendar is NOT a hardcoded 365 days; it falls out of the orbit and the tick. The cell edge derives as a reference creature's real ground speed (m/s) x 1 s/tick (see locomotion base_speed), cross-checked by NPP density x cell area = standing crop. (`crates/sim/src/clock.rs:81`)

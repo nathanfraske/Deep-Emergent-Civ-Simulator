@@ -73,6 +73,17 @@ fi
 # is wrong and an audit against it is unsound. The
 # gate regenerates to a temp and compares, never touching the working tree. Inert until both the
 # generator and the registry exist.
+# Derives-coverage gate. The registry's staleness check cannot see an UNMARKED deriving function: the
+# generator regenerates identically and the check passes while the map is wrong, which is how the physics
+# substrate ended up with 818 public functions and no markers at all. This ratchets that shut.
+if [ -f "$ROOT/scripts/derives_gate.py" ] && [ -f "$ROOT/scripts/derives_baseline.tsv" ]; then
+  if ! python3 "$ROOT/scripts/derives_gate.py" >/tmp/civsim_derives.out 2>&1; then
+    echo "stop-gate: the derives-coverage gate failed." >&2
+    tail -20 /tmp/civsim_derives.out >&2
+    exit 2
+  fi
+fi
+
 reg="docs/working/PHYSICS_FLOOR_REGISTRY.md"
 gen="scripts/gen_floor_registry.py"
 if [ -f "$ROOT/$gen" ] && [ -f "$ROOT/$reg" ]; then

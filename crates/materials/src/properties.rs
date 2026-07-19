@@ -84,6 +84,7 @@ const ZERO: Fixed = Fixed::ZERO;
 /// The mass density `rho = M / V_m` (g/cm^3), the molar mass (g/mol) over the molar volume (cm^3/mol): a pure
 /// ratio of floor data, no reserved value. This is the density the freezer's sound speed reads. Non-positive
 /// inputs yield zero (no density without a mass and a volume).
+// @derives: a phase's density <- molar mass + molar volume
 pub fn density_g_per_cm3(molar_mass_g_per_mol: Fixed, molar_volume_cm3_per_mol: Fixed) -> Fixed {
     if molar_mass_g_per_mol <= ZERO || molar_volume_cm3_per_mol <= ZERO {
         return ZERO;
@@ -120,6 +121,7 @@ fn debye_fold() -> Fixed {
 /// beyond the exact fold. See the module HONEST LIMIT: with the bulk sound speed (no shear modulus) this
 /// OVERESTIMATES the shear-aware Debye temperature by roughly 30 percent, the bulk-elastic approximation the
 /// Lindemann `T_m` also carries, refined when a shear modulus is anchored. Non-positive inputs yield zero.
+// @derives: the Debye temperature <- sound speed + atomic volume
 pub fn debye_temperature(sound_speed_km_per_s: Fixed, atomic_volume_angstrom3: Fixed) -> Fixed {
     if sound_speed_km_per_s <= ZERO || atomic_volume_angstrom3 <= ZERO {
         return ZERO;
@@ -689,6 +691,7 @@ fn slack_dimensional_fold_rescaled() -> Fixed {
 /// dominated by the ELECTRONIC conductivity (Wiedemann-Franz), which needs the electronic-structure substrate (the
 /// deferred Stage-6 sub-arc), and the Slack phonon form additionally over-predicts even the metal's lattice part.
 /// So for a metal this is a lattice COMPONENT, not the total. Non-positive inputs yield zero.
+// @derives: lattice thermal conductivity k(T) <- Grueneisen, mean atomic mass, Debye temperature, atomic volume, cell count (Slack estimator rung)
 pub fn lattice_thermal_conductivity_w_per_m_k(
     gruneisen: Fixed,
     mean_atomic_mass_amu: Fixed,
