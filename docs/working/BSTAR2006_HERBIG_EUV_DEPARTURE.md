@@ -59,7 +59,7 @@ nu_L = 3.2898e15 Hz (lambda_L = 911.28 A), the same threshold the P0-A code uses
 - Model ionizing photon rate: `N_model = integral over lambda < lambda_L of F_lambda * lambda / (h c) d_lambda`, with lambda in cm (lambda_A times 1e-8). Units: photons cm^-2 s^-1, surface.
 - Blackbody reference: `N_bb = pi * integral over nu > nu_L of B_nu(Teff) / (h nu) d_nu`, the physical surface flux (F_nu = pi B_nu).
 - departure(Teff) = N_model / N_bb.
-- Flux-convention check, done from the data itself (not assumed): `integral F_lambda d_lambda / (sigma Teff^4)` came out 0.9994 to 1.0002 for all 16 models, so SVO serves the physical surface flux and the matching reference is pi B_nu. This is convention-consistent with the code's (pi/4) B_nu Eddington form: model-Eddington over (pi/4) B_nu equals model-physical over pi B_nu, the identical dimensionless ratio.
+- Flux-convention check, done from the data itself (not assumed): `integral F_lambda d_lambda / (sigma Teff^4)` came out 0.9994 to 1.0002 for all 16 models, so SVO serves the PHYSICAL surface flux (F_nu = pi B_nu for a blackbody), and the reference is the same physical blackbody flux pi B_nu. The departure is model-physical over blackbody-physical, both surface fluxes, computed directly. CORRECTION: an earlier draft called the reference "(pi/4) B_nu Eddington flux", which is WRONG. The Eddington flux is H_nu = B_nu/4 and the physical surface flux is pi B_nu; (pi/4) B_nu is neither. The departure NUMBERS are unaffected (they are the ratio of two physical surface fluxes), but the convention label was wrong and is corrected here.
 
 ## The verified departure table (solar Z, log g = 4.0)
 
@@ -85,7 +85,7 @@ Teff    log10(departure)
 
 - Full 15 to 30 kK: log10 departure in [-2.689, -0.654] (departure in [2.05e-3, 0.222]).
 - Cool 15 to 25 kK (the region below the Sternberg anchor): log10 departure in [-2.689, -1.549] (departure in [2.05e-3, 2.83e-2]).
-- Monotonic and nearly linear in Teff: slope about +0.140 dex per 1000 K. The mapping spans two decades, so `[departure_lo, departure_hi]` is NOT a flat clamp: departure(Teff) should be interpolated in log space across this table, not pinned to a single endpoint.
+- Monotonic in Teff, but NOT a single linear slope. The local slope runs from about 0.054 dex per 1000 K (15 to 16 kK) to about 0.19 dex per 1000 K (29 to 30 kK); the average of about 0.14 is NOT the local rate and must not be read as one. The mapping spans two decades, so `[departure_lo, departure_hi]` is NOT a flat clamp: departure(Teff) is interpolated LINEARLY in log10 space between grid points, an authored piecewise-linear model whose error is the deviation of the true curve from each chord (a stated error band on that interpolation is a later rung).
 
 ## Independent verification and the caught error
 
@@ -108,7 +108,7 @@ in, the Herbig EUV photoevaporation would have been suppressed by 10^8, a qualit
 
 - WINDLESS. These are plane-parallel hydrostatic NLTE atmospheres with no wind. The far-Wien Lyman continuum is exactly where winds matter, which is why Sternberg (WM-Basic, windy) is the >25 kK anchor. So BSTAR2006 above 25 kK will NOT match the Sternberg value, and the two must NOT be stitched into one continuous interval: they are sibling grounded intervals for different regimes (windless cool-B versus windy hot-B), the same disjoint-evidence discipline P0-B enforces on the EUV fit domain. The value of this grid is the 15 to 25 kK region, where no windy grid reaches and where Herbig Be winds are weak, so the windless model is the appropriate one.
 - Fixed (log g = 4.0, solar Z). The band is specific to these. Herbig Be stars sit near log g 3.5 to 4.5; a log g or sub-solar Z sensitivity run is a separate fixed-other-params run, and every FID is in the SVO SSAP index above.
-- Threshold: lambda_L = 911.28 A was used (nu_L = 3.2898e15 Hz, the code's value). The textbook 13.6057 eV limit is 911.75 A, a 0.05 percent difference in the threshold, negligible against the two-decade span.
+- Threshold: lambda_L = 911.28 A (nu_L = 3.2898e15 Hz), i.e. 13.606 eV, was used, matching the code's value. NIST hydrogen ionization is 13.5984 eV = 911.75 A; the 911.28 versus 911.75 A choice is about 0.05 percent in the threshold. CORRECTION: an earlier draft claimed 13.6057 eV corresponds to 911.75 A, which is false (13.6057 eV = 911.27 A; 911.75 A is 13.598 eV). Two more small systematics, named plainly: the departure's blackbody reference here uses the FULL Planck denominator, while the P0-A `blackbody_ionizing_fraction` uses the one-term WIEN tail, differing about 0.216 percent at 30 kK; and `IonizingSpectrumEvaluation` does not carry its own threshold, so the fixed table must only be applied to a blackbody built with the matching T_ion. Together these are of order 0.25 to 0.29 percent, small against the two-decade departure but real, so the wired result is not exact to better than a fraction of a percent.
 
 ## Archive witnesses (coordinator, 2026-07-19)
 
@@ -124,10 +124,13 @@ is coordinator-attested, the data layer is self-verified.
 
 SSAP index witness: `https://web.archive.org/web/20260719195502/http://svo2.cab.inta-csic.es/theory/newov2/ssap.php?model=tlusty_bstarbin` (index sha256 `e8d2b13abefd0b233104650f9fd3c66c00338b10ffcae542fdd4356176004078`).
 
-Fourteen witnessed points (byte-identical to the receipts after decompression):
+Sixteen witnessed points (byte-identical to the receipts after decompression). The two that first
+came back as empty captures (fid 590 and 650) were re-captured on the coordinator's SAVE-retry
+after Wayback's dedup window cleared, both byte-identical to their receipts, so the whole 15 to 30
+kK grid is now durably archived at 1000 K spacing:
 
 ```
-Teff   FID  archived_url (web.archive.org/web/<ts>id_/ ... ssap.php?model=tlusty_bstarbin&fid=<FID>)
+Teff   FID  archived timestamp (web.archive.org/web/<ts>/ ... ssap.php?model=tlusty_bstarbin&fid=<FID>)
 15000  59   20260719195513
 16000  131  20260719195527
 17000  203  20260719195542
@@ -136,6 +139,8 @@ Teff   FID  archived_url (web.archive.org/web/<ts>id_/ ... ssap.php?model=tlusty
 20000  407  20260719195627
 21000  470  20260719195722
 22000  530  20260719195739
+23000  590  20260719223601
+24000  650  20260719223641
 25000  704  20260719195823
 26000  758  20260719195853
 27000  812  20260719195911
@@ -144,50 +149,38 @@ Teff   FID  archived_url (web.archive.org/web/<ts>id_/ ... ssap.php?model=tlusty
 30000  962  20260719200001
 ```
 
-## The two-point archive gap: Teff 23000 (fid 590) and 24000 (fid 650)
-
-Wayback accepted the SAVE for these two and returned a location, but the stored capture is EMPTY
-(the raw fetch hashes to `e3b0c442...`, the sha256 of zero bytes). The coordinator retried and
-re-issued SAVE; Wayback deduplicated to the same timestamps rather than re-capturing. So these two
-have a sound DATA layer (their SVO bytes are sha256-verified, receipts `9294d5c4...` and
-`c5b24e66...` above, re-confirmed 16/16 by the coordinator) but NO durable archive witness yet.
-
-Disposition: recorded as `archive_pending`, NOT as witnessed. A witness row pointing at an empty
-capture is exactly the defect the custody rule prevents, and it would be worse than an absent row
-because it reads as vendored. The durable fix (a coordinator SAVE-retry after Wayback's dedup
-window) is not doable from this egress-blocked session and is requested from the coordinator.
-
-INTERPOLATION PROHIBITION. When the table is wired, the departure function must NOT silently
-interpolate across the 23 to 24 kK segment as though those two points were fully vendored. Two
-adjacent points at the middle of the 15 to 30 kK grid are a real hole in the durable evidence, and
-the +0.14 dex per 1000 K near-linearity is exactly what makes silent interpolation LOOK safe, so
-it must be DECLARED rather than assumed: the windless grounded interval carries 23 to 24 kK at the
-reduced `archive_pending` provenance grade until the SAVE-retry lands, not at the witnessed grade
-of its neighbours.
+The earlier 23 to 24 kK archive gap (empty captures that deduplicated on retry) is CLOSED. It was
+carried as an interim for a time as `archive_pending`, not witnessed, and an interpolation prohibition
+across that segment travelled with the value so the near-piecewise-linear curve could not launder
+the hole; with the SAVE-retry landed, both are retired.
 
 ## Vendoring status
 
-The `sources/registry.toml` witness entry `svo_tlusty_bstar2006` is authored (this branch):
-custody witness, the 16 per-file sha256 receipts and the 14 archived timestamps and the two
-`archive_pending` gaps recorded, the SSAP index as the primary witness. LICENCE, corrected: an
-earlier draft asserted an SVO acknowledgement-and-cite expectation that was NOT read from any page
-(inherited from the fetch summary); the coordinator could not find it, and a check of the held
-VOTable confirms the Curation metadata carries no rights or licence field. So the entry now records
-the verified absence, sets `redistributable = false` conservatively, and holds it as
-citation-plus-witness because the SED values are uncopyrightable facts. The bytes are not held
-in-repo (1.19 MB each).
+The `sources/registry.toml` witness entry `svo_tlusty_bstar2006` is authored (this branch): custody
+witness, the 16 per-file sha256 receipts, all 16 archived timestamps, the SSAP index as the primary
+witness. LICENCE, corrected: an earlier draft asserted an SVO acknowledgement-and-cite expectation
+that was NOT read from any page (inherited from the fetch summary); the coordinator could not find
+it, and a check of the held VOTable confirms the Curation metadata carries no rights or licence
+field. So the entry records the verified absence, sets `redistributable = false` conservatively (the
+operative decision), and holds it as citation-plus-witness because the SED values are treated as
+citable facts (computed model data, not authored expression), the handling this registry applies to
+its other data entries. The bytes are not held in-repo (1.19 MB each). The sibling paper entry's DOI
+was corrected: `10.1086/511270` is Lanz and Hubeny 2007 (verified at IOP), not the earlier
+`10.1086/511268`, which resolves to an unrelated paper.
 
-WIRED (dormant, byte-neutral): the table is now `astro::HerbigEuvDepartureGrid::bstar2006_svo()`
-(16 points as derived data), read by `astro::HerbigEuvDepartureGrid::departure_log10_at` (log-space
-interpolation in Teff, refusing below 15000 K and above 30000 K) and applied to a blackbody
-spectrum by `astro::windless_herbig_departed_spectrum` through the reused
-`nlte_departed_ionizing_spectrum` (photon-space). The interpolation prohibition is a CARRIED FACT,
-not a comment: `DepartureArchiveGrade::ArchivePending` travels with any evaluation whose bracketing
-points include 23000 or 24000 K (and only when that pending point carries weight, so an exact
-witnessed point adjacent to the hole stays witnessed). Both pins bit-exact, diamond `--strict`
-clean, floor registry regenerated (45 substrates), 5 new tests. The windless-versus-windy crossover
-in the 25000 to 30000 K overlap is a NAMED derivation gap (keys on the star's wind strength, a
-stellar-physics property to be derived, not authored); this grid supplies only the windless branch.
+WIRED (dormant, byte-neutral): the table is `astro::HerbigEuvDepartureGrid::bstar2006_svo()` (16
+points as derived data, carrying its `(Z, log g)` coordinates), read by `departure_log10_at`
+(log-space interpolation in Teff, refusing below 15000 K and above 30000 K) and applied to a
+blackbody spectrum by `astro::windless_herbig_departed_spectrum` through the reused
+`nlte_departed_ionizing_spectrum` (photon-space). COORDINATE GATE: the wiring takes the star's own
+`(Z, log g)` and REFUSES a star off the grid's single (solar Z, log g 4.0) slice, so the
+solar-log-g-4 departure is never applied to a metal-free or low-gravity star. The now-obsolete
+`archive_pending` grade machinery was retired once all 16 points became witnessed. Both pins
+bit-exact, diamond `--strict` clean, sources gate clean, five windless tests including a
+coordinate-refusal test.
 
-Remaining: the coordinator SAVE-retry for the two gap points, and, when a wind-regime selector
-exists, the dispatch that chooses the windless sibling versus the Sternberg windy anchor.
+Remaining, both named: the full `(Z, log g)`-interpolated lookup over BSTAR2006's six compositions
+and thirteen gravities (a data-and-interpolation rung), and, when a wind-regime selector exists (it
+keys on the star's wind strength, to be derived), the dispatch that chooses the windless sibling
+versus the Sternberg windy anchor in the 25 to 30 kK overlap. A stated error band on the log-linear
+interpolation between grid points is a further rung.
