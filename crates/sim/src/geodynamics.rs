@@ -241,6 +241,14 @@ impl ColumnParams {
     ///
     /// Returns `None` when the wavenumber is non-positive or the product leaves the representable window,
     /// which is a refusal rather than a fallback radius.
+    /// THE UNIT HAZARD, named because the two depths in this file are NOT the same number. This reads
+    /// [`Self::depth`], which is the representable-SCALED depth the linear kernel runs on (megametres for a
+    /// mantle), while [`ColumnGeometry::layer_depth_m`] is SI metres. A caller that pairs
+    /// `ColumnParams.depth = 1` with `ColumnGeometry.layer_depth_m = 1_800_000` gets no complaint from
+    /// either type, and feeding THIS radius to the SI [`civsim_physics::laws::ln_stokes_velocity`] would
+    /// introduce a `1e6` radius error and a `1e12` velocity error, because the Stokes form is quadratic in
+    /// the radius. The returned value therefore carries the SAME scale as `depth` and must be consumed by
+    /// the linear kernel only. An SI consumer needs the SI depth, not this.
     // @derives: the buoyant parcel radius <- the column's own layer depth + its critical wavenumber (cell half-wavelength)
     pub fn parcel_radius(&self) -> Option<Fixed> {
         if self.ra_crit_wavenumber <= Fixed::ZERO {
@@ -326,6 +334,14 @@ pub enum ColumnDerivationRefusal {
     /// The creep ladder refused, carrying its own reason (an unfeedable row, a domain violation, or a solve
     /// that did not converge).
     Viscosity(String),
+    /// The caller's selection pressure and the pressure the geometry implies disagree, so the bundle would
+    /// describe two thermodynamic states at once.
+    IncoherentState {
+        /// The pressure the caller selected the assemblage at (GPa).
+        requested_gpa: Fixed,
+        /// The mid-layer lithostatic pressure the geometry implies (GPa).
+        implied_gpa: Fixed,
+    },
     /// The assemblage came back TRUNCATED: the subset enumeration hit its candidate cap, so the phases are
     /// the best of a searched set rather than of the full one, and any property read off them is provisional.
     TruncatedAssemblage,
@@ -359,6 +375,16 @@ impl std::fmt::Display for ColumnDerivationRefusal {
             ColumnDerivationRefusal::Viscosity(reason) => {
                 write!(f, "the creep ladder refused: {reason}")
             }
+            ColumnDerivationRefusal::IncoherentState {
+                requested_gpa,
+                implied_gpa,
+            } => write!(
+                f,
+                "the assemblage was selected at {} GPa while the geometry implies a mid-layer {} GPa, so \
+                 the bundle would describe two thermodynamic states at once; refused",
+                requested_gpa.to_f64_lossy(),
+                implied_gpa.to_f64_lossy()
+            ),
             ColumnDerivationRefusal::TruncatedAssemblage => write!(
                 f,
                 "the stable assemblage hit its candidate cap and is provisional rather than minimized, so \
@@ -394,6 +420,42 @@ pub struct ColumnGeometry {
     /// `ln Ra_crit`, the onset regime's critical Rayleigh number in logs, the SAME one the boundary layer and
     /// the convection onset read.
     pub ln_rayleigh_critical: Fixed,
+}
+
+impl ColumnGeometry {
+    /// Build a geometry whose SI depth is DERIVED from a column's own scaled depth, so the two cannot
+    /// disagree.
+    ///
+    /// WHY THIS EXISTS RATHER THAN A WARNING. There are two depths in this file and they are not the same
+    /// number: [`ColumnParams::depth`] is the representable-SCALED depth the linear kernel runs on
+    /// (megametres for a mantle) and [`Self::layer_depth_m`] is SI metres. Supplied independently, a caller
+    /// can pair `depth = 1` with `layer_depth_m = 1_800_000` and neither type complains, while the parcel
+    /// radius comes out in the former unit and the Stokes velocity consumes the latter. Because Stokes is
+    /// QUADRATIC in the radius, that mispairing is a `1e6` radius error and a `1e12` velocity error, and it
+    /// would look like physics rather than like a bug.
+    ///
+    /// Prose could say all that, and today has been a lesson in prose warnings being dropped by exactly the
+    /// consumer they were written for. So the SI depth is derived here instead of accepted, and the wire is
+    /// expected to build its geometry this way rather than by filling the fields.
+    ///
+    /// `None` if the scaled depth is non-positive or the conversion leaves the representable window.
+    // @derives: a column's SI layer depth <- its own representable-scaled depth (megametres to metres)
+    pub fn from_scaled_column(
+        params: &ColumnParams,
+        temperature_contrast_k: Fixed,
+        ln_rayleigh_critical: Fixed,
+    ) -> Option<Self> {
+        if params.depth <= Fixed::ZERO {
+            return None;
+        }
+        let layer_depth_m = params.depth.checked_mul(Fixed::from_int(1_000_000))?;
+        Some(Self {
+            layer_depth_m,
+            gravity_m_s2: params.gravity,
+            temperature_contrast_k,
+            ln_rayleigh_critical,
+        })
+    }
 }
 
 /// The banked reference tables a column derivation reads, grouped so the derivation takes ONE borrow rather
@@ -541,6 +603,39 @@ pub fn derive_column_thermal_properties(
     // The viscosity closes LAST because it consumes the other four: the diffusivity it needs is
     // `k / (rho c_p)` and the buoyancy contrast it needs is `rho alpha dT`. That ordering is the reason the
     // ruling called this cluster atomic rather than seven independent values.
+    // THE PRESSURE COHERENCE GATE. Two pressures enter this derivation and nothing compared them: the
+    // caller's `pressure_bar`, which selects the stable assemblage, and the mid-layer lithostatic pressure
+    // the geometry implies, which the creep ladder is evaluated at. A caller could select phases at 1 bar
+    // and evaluate viscosity near 46 GPa and get a bundle. That is the same defect the frame gate closes
+    // one level up, in its within-bundle form: the seven fields must describe ONE thermodynamic state, and
+    // atomicity does not license moving them together when they do not.
+    let implied_gpa = density_kg_m3
+        .checked_mul(geometry.gravity_m_s2)
+        .and_then(|x| x.checked_mul(geometry.layer_depth_m))
+        .and_then(|x| x.checked_div(Fixed::from_int(2)))
+        .and_then(|x| x.checked_div(Fixed::from_int(1_000_000_000)));
+    if let Some(implied_gpa) = implied_gpa {
+        let requested_gpa = pressure_bar.checked_div(Fixed::from_int(10_000));
+        if let Some(requested_gpa) = requested_gpa {
+            let off = if implied_gpa > requested_gpa {
+                implied_gpa - requested_gpa
+            } else {
+                requested_gpa - implied_gpa
+            };
+            // A tenth of the implied pressure, so a rounding-scale difference passes and a
+            // wrong-state pairing does not.
+            let slack = implied_gpa
+                .checked_div(Fixed::from_int(10))
+                .unwrap_or(Fixed::ZERO);
+            if off > slack {
+                return Err(ColumnDerivationRefusal::IncoherentState {
+                    requested_gpa,
+                    implied_gpa,
+                });
+            }
+        }
+    }
+
     let viscosity = derive_column_viscosity(
         density_kg_m3,
         thermal_conductivity_w_m_k,
@@ -621,7 +716,8 @@ fn derive_column_viscosity(
 ) -> Result<civsim_physics::convective_viscosity::ViscosityBand, ColumnDerivationRefusal> {
     use civsim_physics::convective_viscosity::{effective_viscosity_band, ViscosityInputs};
     use civsim_physics::creep_rows::{
-        hk_dry_dislocation, hk_dry_dislocation_activation_volumes, CreepCandidate,
+        hk_dry_dislocation, hk_dry_dislocation_activation_volumes, select_activation_volume,
+        CreepCandidate, VolumeConstraint,
     };
 
     let unrepresentable = |what: &str| ColumnDerivationRefusal::NoQuantity {
@@ -670,6 +766,29 @@ fn derive_column_viscosity(
     // too low, and further down it is worse. `hk_dry_dislocation_activation_volumes` exists for this and its
     // docstring says so; this consumer failed to inherit the exclusion until an audit caught it.
     let volumes = hk_dry_dislocation_activation_volumes();
+    // THE COVERAGE GATE. `select_activation_volume` reports whether any determination's pressure chord
+    // actually COVERS the requested pressure, and when none does it falls back to the table's own extremes
+    // and labels the result `UnconstrainedBySource`. That label is produced and then dropped: the solve
+    // returns a `ViscosityBand` carrying only numbers, so a caller receives a viscosity with no signal that
+    // the source constrains nothing there. Every dry-dislocation chord ends by 15 GPa, and an Earth-like
+    // column derives about 47 GPa, so this is not a hypothetical: the previous version returned a confident
+    // deep-mantle viscosity extrapolated past every measurement behind it. It refuses instead, which is the
+    // same discipline the frame gate applies to the ambient thermoelastic rows.
+    match select_activation_volume(&volumes, eval_pressure_gpa) {
+        Some(bracket) if bracket.constraint() == VolumeConstraint::CoveredBySource => {}
+        Some(_) => {
+            return Err(ColumnDerivationRefusal::Viscosity(format!(
+                "no activation-volume determination covers {:.1} GPa; the dry-dislocation chords end by \
+                 15 GPa, so a viscosity here would be extrapolated past every measurement behind it",
+                eval_pressure_gpa.to_f64_lossy()
+            )))
+        }
+        None => {
+            return Err(ColumnDerivationRefusal::Viscosity(
+                "the activation-volume bracket did not resolve".to_string(),
+            ))
+        }
+    }
     let candidates = [CreepCandidate {
         row: hk_dry_dislocation(),
         volumes: &volumes,
@@ -1321,6 +1440,45 @@ mod tests {
             (1e-7..=1e-5).contains(&kappa.to_f64_lossy()),
             "a silicate diffusivity should land near 1e-6 m^2/s"
         );
+    }
+
+    /// THE TWO DEPTHS AGREE WHEN THE GEOMETRY IS DERIVED FROM THE COLUMN, and that is the whole point of
+    /// the checked constructor. Built by hand the pair can disagree by `1e6` with no complaint from either
+    /// type; built from the column it cannot, because the SI depth is computed rather than accepted.
+    #[test]
+    fn the_derived_geometry_cannot_disagree_with_the_column_it_came_from() {
+        let (_, mut p) = column(Fixed::from_int(1000));
+        p.depth = Fixed::from_ratio(18, 10); // 1.8 Mm, the scaled kernel's unit
+        p.gravity = Fixed::from_ratio(37, 10);
+        let g = ColumnGeometry::from_scaled_column(
+            &p,
+            Fixed::from_int(1300),
+            crate::deeptime::RIGID_RIGID_RA_CRIT.ln(),
+        )
+        .expect("a positive scaled depth converts");
+        // Compared with a tolerance rather than exactly: `1.8` has no exact binary fixed-point
+        // representation, so the scaled-to-SI product lands a fraction of a metre under 1,800,000. That is
+        // a representation artifact of the conversion, not a disagreement between the two depths, and
+        // asserting exact equality here would be asserting something about binary fractions rather than
+        // about the unit coherence this test exists for.
+        let drift = (g.layer_depth_m - Fixed::from_int(1_800_000)).abs();
+        assert!(
+            drift < Fixed::ONE,
+            "the SI depth is DERIVED from the scaled one, within representation: read {}",
+            g.layer_depth_m.to_f64_lossy()
+        );
+        assert_eq!(
+            g.gravity_m_s2, p.gravity,
+            "gravity comes from the column too"
+        );
+        // A degenerate scaled depth has no SI counterpart and refuses rather than yielding zero metres.
+        p.depth = Fixed::ZERO;
+        assert!(ColumnGeometry::from_scaled_column(
+            &p,
+            Fixed::from_int(1300),
+            crate::deeptime::RIGID_RIGID_RA_CRIT.ln()
+        )
+        .is_none());
     }
 
     /// The parcel radius derives from the cell geometry the column already carries, so it tracks the
