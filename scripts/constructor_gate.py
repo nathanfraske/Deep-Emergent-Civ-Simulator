@@ -43,6 +43,7 @@ Two enforcement strengths, one mechanism:
 (fill the reason column from the audit). `--self-test` proves a synthetic new `from_bits` is caught.
 """
 
+import hashlib
 import pathlib
 import re
 import sys
@@ -89,6 +90,42 @@ EXEMPT_MODULES = {
 }
 
 
+def site_digest(text: str, pat: str) -> str:
+    """A stable digest of the ARGUMENTS at every occurrence of `pat` in one file.
+
+    WHY A COUNT IS NOT ENOUGH, live-fired. The ratchet compared occurrence COUNTS per file, so replacing
+    an existing `Fixed::from_bits(12345)` with `Fixed::from_bits(436587)` left the count identical and the
+    gate returned 0. A hard ratchet that cannot see a changed value is a ratchet over the number of
+    authored constants rather than over the constants themselves, and the second is what matters: an
+    audited site's CLASSIFICATION was granted to the value that was there when it was audited.
+
+    Sorted, so a reordering that changes nothing does not convict, and whitespace-normalised inside the
+    parentheses for the same reason. What convicts is a value that was not audited.
+    """
+    # BALANCED extraction, not `[^)]*`. The first version stopped at the first close-paren, so
+    # `Fixed::from_bits((1i64 << 32) + 12345)` digested only `(1i64 << 32` and a swap of the 12345 went
+    # unnoticed. The live-fire caught that: the same edit that passed before the digest existed passed
+    # after it too, which is why a fix is not finished until it has been fired at.
+    args = []
+    start = 0
+    while True:
+        i = text.find(pat, start)
+        if i < 0:
+            break
+        j = i + len(pat)
+        depth = 1
+        while j < len(text) and depth:
+            if text[j] == "(":
+                depth += 1
+            elif text[j] == ")":
+                depth -= 1
+            j += 1
+        args.append(text[i + len(pat) : j - 1])
+        start = j
+    normalised = sorted("".join(a.split()) for a in args)
+    return hashlib.sha256("|".join(normalised).encode()).hexdigest()[:16]
+
+
 def _count(text: str, pat: str) -> int:
     # Exact-constructor match: `::from_bits(` matches `Fixed::from_bits(` / `Self::from_bits(` but not
     # `from_bits_i128(` (the `_i128` breaks the trailing paren) and not a method name like
@@ -97,6 +134,7 @@ def _count(text: str, pat: str) -> int:
 
 
 def scan(root: pathlib.Path, patterns) -> dict:
+    """(pattern, path) -> count. `scan_digests` is its content-aware sibling."""
     counts = {}
     for crate in CRATES:
         for path in sorted((root / crate).rglob("*.rs")):
@@ -111,6 +149,21 @@ def scan(root: pathlib.Path, patterns) -> dict:
     return counts
 
 
+def scan_digests(root: pathlib.Path, patterns) -> dict:
+    """(pattern, path) -> digest of the constructor ARGUMENTS, the content the count cannot see."""
+    digests = {}
+    for crate in CRATES:
+        for path in sorted((root / crate).rglob("*.rs")):
+            rel = path.relative_to(root).as_posix()
+            if rel in EXEMPT_MODULES:
+                continue
+            text = path.read_text(encoding="utf-8")
+            for pat in patterns:
+                if _count(text, pat):
+                    digests[(pat, rel)] = site_digest(text, pat)
+    return digests
+
+
 def load_baseline(path: pathlib.Path) -> dict:
     base = {}
     for line in path.read_text(encoding="utf-8").splitlines():
@@ -119,7 +172,11 @@ def load_baseline(path: pathlib.Path) -> dict:
         fields = line.split("\t")
         if len(fields) < 4:
             raise SystemExit(f"malformed baseline row (need pattern<TAB>path<TAB>count<TAB>class<TAB>reason): {line!r}")
-        base[(fields[0], fields[1])] = (int(fields[2]), fields[3])
+        # Field 5, when present, is the SITE DIGEST: a hash of the constructor arguments as audited.
+        # Optional so a row written before digests existed still loads, but the gate reports any row
+        # missing one, because an undigested row is a row whose value can still be swapped silently.
+        digest = fields[5].strip() if len(fields) > 5 else ""
+        base[(fields[0], fields[1])] = (int(fields[2]), fields[3], digest)
     return base
 
 
@@ -131,7 +188,7 @@ def hard_check(root: pathlib.Path) -> tuple:
     for key in sorted(observed.keys() | baseline.keys()):
         pat, rel = key
         got = observed.get(key, 0)
-        want = baseline.get(key, (0, ""))[0]
+        want = baseline.get(key, (0, "", ""))[0]
         if got > want:
             violations.append(
                 f"NEW inline `{pat}` in {rel} ({got}, baseline {want}). Classify it in "
@@ -142,7 +199,32 @@ def hard_check(root: pathlib.Path) -> tuple:
             )
         elif got < want:
             violations.append(f"stale baseline: `{pat}` in {rel} ({got}, baseline {want}). Lower or delete its row.")
-    defect_rows = [f"{p} {r}" for (p, r), (_, cls) in sorted(baseline.items()) if cls == "authored-should-derive"]
+    # THE CONTENT CHECK, which the count alone cannot make. A site's audit CLASSIFICATION was granted to
+    # the value that was there when it was audited, so changing that value without re-auditing spends a
+    # judgement made about a different number. Live-fired before this existed: replacing
+    # `Fixed::from_bits(12345)` with `Fixed::from_bits(436587)` left the count identical and passed clean.
+    observed_digests = scan_digests(root, HARD)
+    undigested = []
+    for key in sorted(observed_digests.keys() & baseline.keys()):
+        pat, rel = key
+        want_digest = baseline[key][2]
+        if not want_digest:
+            undigested.append(f"`{pat}` in {rel}")
+            continue
+        got_digest = observed_digests[key]
+        if got_digest != want_digest:
+            violations.append(
+                f"CHANGED inline `{pat}` value(s) in {rel} (digest {got_digest}, baseline {want_digest}). "
+                f"The count is unchanged, so a literal was edited in place. Re-audit the site and update "
+                f"its digest column, or restore the audited value."
+            )
+    if undigested:
+        violations.append(
+            f"{len(undigested)} baselined site(s) carry no digest, so their values can be changed "
+            f"silently: {', '.join(undigested[:4])}{' ...' if len(undigested) > 4 else ''}. "
+            f"Run --generate to emit digests and paste them into the baseline's sixth column."
+        )
+    defect_rows = [f"{p} {r}" for (p, r), (_, cls, _d) in sorted(baseline.items()) if cls == "authored-should-derive"]
     return violations, defect_rows
 
 
@@ -161,8 +243,9 @@ def advisory(root: pathlib.Path) -> None:
 
 
 def generate(root: pathlib.Path) -> int:
+    digests = scan_digests(root, HARD)
     for (pat, rel), n in sorted(scan(root, HARD).items()):
-        print(f"{pat}\t{rel}\t{n}\tCLASSIFY\treason")
+        print(f"{pat}\t{rel}\t{n}\tCLASSIFY\treason\t{digests.get((pat, rel), '')}")
     return 0
 
 

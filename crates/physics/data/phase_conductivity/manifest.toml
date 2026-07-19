@@ -51,7 +51,7 @@ scope = "ambient alpha-quartz"
 id = "cell.atoms_per_primitive_cell.corundum"
 quantity = "10"
 primary = ["cod_phase_crystallography"]
-secondary = ["cod_phase_crystallography"]
+single_witness_reason = "ONE WITNESS, and the second check is structural rather than bibliographic. The cell count is not a measured quantity but a RECONSTRUCTION from the space group, Z, formula content and lattice centring, and the loader recomputes it and REFUSES the row on mismatch (CellCountMismatch). That internal recomputation is the cross-check; a second crystallographic database would restate the same structural determination rather than test it. A genuinely independent witness would be a different structure solution of the same phase, which is not vendored."
 anchor = "COD 1000032 (Lutterotti and Scardi 1990), 'R -3 c :H' with Z = 6 in the hexagonal setting: 6 x 5 / 3 = 10. THE SECONDARY IS A DIFFERENT SETTING OF THE SAME STRUCTURE AND IT STATES THE PRIMITIVE CONTENT DIRECTLY, which is stronger than a second hexagonal record: COD 1010914 (Pauling and Hendricks 1925, 'Crystal Structures of Hematite and Corundum') gives 'R -3 c :R' with Z = 2 and a rhombohedral cell volume of 84.5 against the hexagonal 254.8, a ratio of 3.01 that IS the R-centring factor. 2 x 5 = 10 with no division needed."
 channel = "TF"
 scope = "ambient alpha-Al2O3"
@@ -96,7 +96,7 @@ scope = "ambient Fe2SiO4 olivine"
 id = "cell.atoms_per_primitive_cell.spinel"
 quantity = "14"
 primary = ["cod_phase_crystallography"]
-secondary = ["cod_phase_crystallography"]
+single_witness_reason = "ONE WITNESS, same structural argument as corundum: the count is reconstructed from space group, Z and centring and rechecked at load, so the cross-check is the recomputation rather than a second bibliography entry."
 anchor = "COD 1010129 (Passerini 1930), formula Al2MgO4, 'F d -3 m :1' with Z = 8, a = 8.050. The conventional cubic cell holds 8 x 7 = 56 atoms (8 Mg, 16 Al, 32 O) and F-centring puts four primitive cells in it, so 56 / 4 = 14 (2 Mg, 4 Al, 8 O). SECONDARY, cited and not held because its COD record carries an AMCSD attribution condition rather than the public-domain dedication: COD 9001364 (Peterson, Lager and Hitterman 1991, Am. Min. 76, 1455), 'F d -3 m :2' with Z = 8 and a = 8.08435. The two differ only in origin convention. THE WEAKEST CLAIM IN COLUMN 1 AND IT IS FLAGGED AS SUCH: no source read here states spinel's PRIMITIVE content directly, unlike corundum and hematite, so the 14 rests on the F-centring division plus the density check. The lattice-dynamics literature's independent statement that a cubic AB2O4 spinel has 42 phonon branches (3 x 14) is consistent with it but was not read at a primary."
 channel = "TF"
 scope = "ambient MgAl2O4"
@@ -145,7 +145,7 @@ scope = "ambient MgO; the anchor is a dense polycrystal and the band reaches the
 id = "conductivity.kappa_298.forsterite"
 quantity = "5.158 W/(m*K) at 300 K, band 0.197"
 primary = ["mixing_henke2016"]
-secondary = ["mixing_henke2016"]
+single_witness_reason = "ONE WITNESS. The Horai and Simmons 1969 needle-probe determination reaches this manifest through Henke et al. 2016; no second independent determination of forsterite kappa_298 is vendored. Recorded as single-witness rather than by naming Henke twice, which would have claimed an independence that does not exist."
 anchor = "Henke, Gail and Trieloff 2016 Table 2 ('The pure mineral species ... and thermal conductivity at 300 K'), row 'forsterite Mg2SiO4, A 140.69, rho 3.22, K 5.158', note (a) = Horai and Simmons 1969, EPSL 6, 359-368, the measurement primary. THE SECONDARY IS AN INDEPENDENT DETERMINATION INSIDE THE SAME PAPER, from a different measurement source: equation (8), 'K(x) = 5.3548 - 5.7704 x + 3.6216 x^2' with x the mole fraction of fayalite, fitted to Horai and Baldridge (1972) at room temperature, which at x = 0 gives K(Fo100) = 5.3548. The band 0.197 is the gap between the two, so the interval covers both determinations. Both sit apart from Table 3's 4.349, which is the Fo80 SOLID SOLUTION and is deliberately not used."
 channel = "T"
 scope = "ambient pure end-member Mg2SiO4, needle-probe measurement on a finely ground sample"
@@ -154,7 +154,7 @@ scope = "ambient pure end-member Mg2SiO4, needle-probe measurement on a finely g
 id = "conductivity.kappa_298.fayalite"
 quantity = "3.161 W/(m*K) at 300 K, band 0.045"
 primary = ["mixing_henke2016"]
-secondary = ["mixing_henke2016"]
+single_witness_reason = "ONE WITNESS, same provenance and same limit as forsterite: one needle-probe determination via Henke et al. 2016, with no second independent determination vendored."
 anchor = "Henke et al. 2016 Table 2, row 'fayalite Fe2SiO4, A 203.78, rho 4.66, K 3.161', note (a) = Horai and Simmons 1969. SECONDARY: the same paper's equation (8) at x = 1 gives K(Fa100) = 5.3548 - 5.7704 + 3.6216 = 3.2060, from the independent Horai and Baldridge (1972) data. Band 0.045 is the gap. A DEFECT IN THE SOURCE ROW, recorded rather than smoothed: the density 4.66 g/cm3 in that same table sits well above the accepted fayalite density near 4.39, so that column is wrong there; only the conductivity is read from this row."
 channel = "T"
 scope = "ambient pure end-member Fe2SiO4"

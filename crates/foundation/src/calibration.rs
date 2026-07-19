@@ -138,6 +138,24 @@ pub enum Provenance {
     Derived,
     /// `[M]` A pinned floor value, refutable by observation without the sim (carries error bars, not free).
     Measured,
+    /// A value LABELLED as a measurement that carries no machine-checkable evidence for the claim.
+    ///
+    /// Renders `[?M]`, never `[M]`, and that distinction is the whole reason it exists. An audit found
+    /// 244 values (230 floor grades, 14 calibration entries) declared `measured` with ZERO machine-linked
+    /// evidence between them: no resolvable source id, no held or archived witness, no claim locator, no
+    /// measurement regime, no uncertainty. Many of those plainly DO have literature behind them. The
+    /// defect is that the repository could not tell those apart from a conventional label without a human
+    /// reading prose, which is exactly the distinction a provenance grade exists to make.
+    ///
+    /// Baselining them and letting them keep saying `measured` was the tempting move and is the wrong one.
+    /// The difference from every other ratchet here is worth stating: a baseline is right for a BYPASS,
+    /// where the claim is sound and the check is weak. This is a false CLAIM, and grandfathering it
+    /// preserves the very thing being eliminated.
+    ///
+    /// It ranks BELOW `Estimator`, because an estimator declares itself an estimate while this is a
+    /// measurement claim with nothing behind it. Every entry resolves one of two equally good ways,
+    /// promotion with evidence or truthful downgrade. Nothing should stay here permanently.
+    UnverifiedMeasurementCandidate,
     /// `[E]` A banded approximation on measured columns (factor to tens of percent), refutable but not exact.
     Estimator,
     /// `[C]` A real free knob: turning it changes outcomes without contradicting a measurement. Part of the
@@ -171,11 +189,14 @@ impl Provenance {
             Provenance::Authored => 0,
             Provenance::Closure => 1,
             Provenance::Unclassified => 2,
-            Provenance::Estimator => 3,
-            Provenance::Derived => 4,
-            Provenance::WrittenState => 5,
-            Provenance::Contingency => 6,
-            Provenance::Measured => 7,
+            // Below Estimator on purpose: an estimator declares itself an estimate, while this is a
+            // measurement claim with nothing behind it, which is a weaker position than an honest guess.
+            Provenance::UnverifiedMeasurementCandidate => 3,
+            Provenance::Estimator => 4,
+            Provenance::Derived => 5,
+            Provenance::WrittenState => 6,
+            Provenance::Contingency => 7,
+            Provenance::Measured => 8,
         }
     }
 
@@ -189,6 +210,7 @@ impl Provenance {
             "" => Provenance::Unclassified,
             "derived" => Provenance::Derived,
             "measured" => Provenance::Measured,
+            "unverified_measurement_candidate" => Provenance::UnverifiedMeasurementCandidate,
             "estimator" => Provenance::Estimator,
             "closure" => Provenance::Closure,
             "authored" => Provenance::Authored,
@@ -511,7 +533,16 @@ impl CalibrationManifest {
     }
 
     /// The category-provenance CONSISTENCY gate: the two orthogonal axes must not contradict. The four
-    /// category buckets partition the seven provenance tags cleanly: a `fundamental` is measured (one of the
+    /// THE PARTITION IS A CONTRADICTION CHECK, NOT A CLASSIFIER, and the distinction was being lost. An
+    /// audit found this rule "structurally forces every per_world datum into measured or contingency,
+    /// encouraging grade assignment by CATEGORY rather than by evidence": if the only tags a per-world
+    /// value may wear are `measured` and `contingency`, then labelling one `measured` is what the schema
+    /// tells you to do, whether or not anyone has evidence. That is a mechanism for manufacturing exactly
+    /// the false `[M]` labels the unverified tier now absorbs. Category and evidence are independent axes
+    /// and are validated as such; what remains here is the genuine contradiction (a `defect` claiming to
+    /// be a refutable datum, a `derivable` claiming to be a free knob).
+    ///
+    /// category buckets partition the provenance tags: a `fundamental` is measured (one of the
     /// closed constant list); a `per_world` datum is measured or a sampled contingency; a `derivable` value
     /// is one of the computed tags (derived, estimator, or written state); a `defect` is on the authoring
     /// surface (closure or authored). An entry that has declared BOTH axes but pairs them across buckets fails
@@ -528,10 +559,19 @@ impl CalibrationManifest {
                 (cat, prov),
                 (Category::Unclassified, _)
                     | (_, Provenance::Unclassified)
-                    | (Category::Fundamental, Provenance::Measured)
+                    // A CANDIDATE IS ADMISSIBLE WHEREVER ITS MEASURED CLAIM WOULD BE, because it is the
+                    // same claim awaiting evidence rather than a different kind of value. Rejecting it
+                    // here would have made the honest downgrade impossible and pushed every unverified
+                    // label back to `measured`, which is precisely the outcome the tier exists to end.
+                    | (
+                        Category::Fundamental,
+                        Provenance::Measured | Provenance::UnverifiedMeasurementCandidate
+                    )
                     | (
                         Category::PerWorld,
-                        Provenance::Measured | Provenance::Contingency
+                        Provenance::Measured
+                            | Provenance::UnverifiedMeasurementCandidate
+                            | Provenance::Contingency
                     )
                     | (
                         Category::Derivable,

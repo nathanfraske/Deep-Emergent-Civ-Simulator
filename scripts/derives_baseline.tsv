@@ -1089,6 +1089,10 @@ crates/physics/src/term_values.rs	len	grandfathered	predates the derives-coverag
 crates/physics/src/term_values.rs	sp3_hybrid_energy	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/term_values.rs	standard	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/term_values.rs	term_value	grandfathered	predates the derives-coverage gate; unclassified
+crates/physics/src/thermoelastic.rs	abs_diff	helper	absolute difference of two Fixed values; arithmetic, derives nothing
+crates/physics/src/thermoelastic.rs	fmt	helper	Display formatter for ThermoRefusal; renders a refusal
+crates/physics/src/thermoelastic.rs	key_of	helper	delegates to mineral_moduli::canonical_phase_key; a name lookup, not a derivation
+crates/physics/src/thermoelastic.rs	mie_gruneisen_debye_readiness	predicate	reports which rung-3 anchors are banked; answers a question about the DATA, derives no world quantity
 crates/physics/src/tm_oxide_lattice_energy.rs	composition_key	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/tm_oxide_lattice_energy.rs	fmt	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/tm_oxide_lattice_energy.rs	from_toml_str	grandfathered	predates the derives-coverage gate; unclassified

@@ -152,7 +152,78 @@ impl JoinedRegister {
             );
         }
 
-        Ok(JoinedRegister { order, nodes })
+        // CYCLES FAIL CONSTRUCTION. A cycle is a malformed graph, not a provenance grade. Resolved
+        // lazily it became `Unclassified`, and the authoring-surface query selects only `Closure` and
+        // `Authored`, so a cyclic derivation was OMITTED from the honesty surface rather than surfaced as
+        // suspect: two floor rows naming each other in `derived_from` passed every structural check and
+        // then vanished from the count that is supposed to make authoring visible.
+        //
+        // Three-colour depth-first search over the resolved value-to-value edges. It convicts nothing in
+        // the current tree, which is the point: it is a trap set before the thing it catches exists,
+        // rather than a fix applied after one shipped.
+        let register = JoinedRegister { order, nodes };
+        register.assert_acyclic()?;
+        Ok(register)
+    }
+
+    /// Refuse a cyclic derivation graph, naming the exact cycle path.
+    ///
+    /// `A -> B -> A` is not a value with unknown provenance; it is two values each claiming the other as
+    /// its ground, which grounds neither. Reported as the full path rather than as a boolean, because
+    /// "there is a cycle somewhere" is not actionable and the path is.
+    fn assert_acyclic(&self) -> Result<(), CalibrationError> {
+        // 0 unvisited, 1 on the current stack (grey), 2 finished (black).
+        let mut colour: BTreeMap<&str, u8> = BTreeMap::new();
+        for key in &self.order {
+            if colour.get(key.as_str()).copied().unwrap_or(0) != 0 {
+                continue;
+            }
+            let mut stack: Vec<(&str, usize)> = vec![(key.as_str(), 0)];
+            let mut path: Vec<&str> = vec![key.as_str()];
+            colour.insert(key.as_str(), 1);
+            while let Some((node, idx)) = stack.pop() {
+                let inputs = self.nodes.get(node).map(|n| &n.inputs);
+                let next = inputs.and_then(|v| v.get(idx));
+                match next {
+                    Some(child) => {
+                        stack.push((node, idx + 1));
+                        let c = colour.get(child.as_str()).copied().unwrap_or(0);
+                        if c == 1 {
+                            // Grey means it is on the current path: splice the cycle out of it.
+                            let start = path.iter().position(|p| *p == child.as_str()).unwrap_or(0);
+                            let mut cycle: Vec<&str> = path[start..].to_vec();
+                            cycle.push(child.as_str());
+                            return Err(CalibrationError::BadValue {
+                                id: child.clone(),
+                                detail: format!(
+                                    "provenance cycle: {}. Each of these names the next as its ground, so \
+                                     none of them is grounded. A cycle is a malformed graph rather than a \
+                                     grade, and it is not baseline-waivable.",
+                                    cycle.join(" -> ")
+                                ),
+                            });
+                        }
+                        if c == 0 {
+                            let child_key = self
+                                .nodes
+                                .get_key_value(child.as_str())
+                                .map(|(k, _)| k.as_str())
+                                .unwrap_or(child.as_str());
+                            colour.insert(child_key, 1);
+                            path.push(child_key);
+                            stack.push((child_key, 0));
+                        }
+                    }
+                    None => {
+                        colour.insert(node, 2);
+                        if path.last() == Some(&node) {
+                            path.pop();
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 
     /// The number of nodes in the joined register (calibration entries plus floor grades).
@@ -254,6 +325,52 @@ mod tests {
         FloorProvenance::embedded().expect("the embedded floor grade register parses")
     }
 
+    /// THE CYCLE TRAP, set before the thing it catches exists.
+    ///
+    /// A cycle used to resolve lazily to `Unclassified`, and the authoring-surface query selects only
+    /// `Closure` and `Authored`, so a cyclic derivation was OMITTED from the honesty surface rather than
+    /// surfaced as suspect. Two rows naming each other passed every structural check and then vanished
+    /// from the count that exists to make authoring visible. The current tree has no such cycle, so this
+    /// builds one directly against the detector: a detector with nothing to catch is one nobody has
+    /// proven, and this repository has already shipped two gates whose failure path had never run.
+    #[test]
+    fn a_provenance_cycle_fails_construction_and_names_its_path() {
+        let mut nodes: BTreeMap<String, JoinedNode> = BTreeMap::new();
+        let mk = |inputs: Vec<&str>| JoinedNode {
+            register: Register::Floor,
+            provenance: Provenance::Derived,
+            inputs: inputs.into_iter().map(String::from).collect(),
+        };
+        nodes.insert("floor.a".into(), mk(vec!["floor.b"]));
+        nodes.insert("floor.b".into(), mk(vec!["floor.a"]));
+        let register = JoinedRegister {
+            order: vec!["floor.a".into(), "floor.b".into()],
+            nodes,
+        };
+        let err = register
+            .assert_acyclic()
+            .expect_err("a cycle must refuse rather than resolve to Unclassified");
+        let text = format!("{err:?}");
+        assert!(
+            text.contains("provenance cycle"),
+            "names the defect: {text}"
+        );
+        assert!(
+            text.contains("floor.a") && text.contains("floor.b"),
+            "names the PATH, because 'there is a cycle somewhere' is not actionable: {text}"
+        );
+
+        // And an acyclic graph passes, so the detector is not simply always-on.
+        let mut ok: BTreeMap<String, JoinedNode> = BTreeMap::new();
+        ok.insert("floor.a".into(), mk(vec!["floor.b"]));
+        ok.insert("floor.b".into(), mk(vec![]));
+        let good = JoinedRegister {
+            order: vec!["floor.a".into(), "floor.b".into()],
+            nodes: ok,
+        };
+        assert!(good.assert_acyclic().is_ok(), "an acyclic graph must pass");
+    }
+
     #[test]
     fn the_joined_register_is_the_two_registers_as_one_node_set() {
         let cal = real_calibration();
@@ -350,15 +467,32 @@ mod tests {
             node.inputs.iter().any(|s| s == "acoustic.resonator_length"),
             "the second cross-register acoustic edge joins too"
         );
-        // Both acoustic axes are measured, so the join is benign: the derived value stays derived, off surface.
+        // THE ASSERTION MOVED WITH THE TRUTH, 2026-07-19, and the test's INTENT is unchanged. Both
+        // acoustic axes used to be labelled `measured`; an audit found neither carried machine-checkable
+        // evidence, and all 244 such labels were downgraded to `unverified_measurement_candidate`. The
+        // derived value therefore now INHERITS that weakness, which is the join working correctly: a
+        // value derived from an unverified measurement is not better evidenced than its input.
+        //
+        // What this test exists to prove is untouched: the join does not taint toward the AUTHORING
+        // surface. `Closure` and `Authored` are what that surface means, and an unverified measurement is
+        // a weaker evidence claim rather than a free knob, so the property still holds and is asserted
+        // directly rather than implied by an equality that only happened to hold under the old ranking.
+        let joined_prov = joined.effective_provenance("langmod.perceptual_geometry");
         assert_eq!(
-            joined.effective_provenance("langmod.perceptual_geometry"),
-            Provenance::Derived,
-            "a measured floor input never taints toward the authoring surface"
+            joined_prov,
+            Provenance::UnverifiedMeasurementCandidate,
+            "a derived value inherits the weakest evidence among its inputs"
         );
+        assert!(
+            !matches!(joined_prov, Provenance::Closure | Provenance::Authored),
+            "and it still never taints onto the AUTHORING surface, which is what this test is for"
+        );
+        // The floor leaf itself: labelled measured before the 2026-07-19 evidence audit, now honestly an
+        // unverified candidate, because no machine-checkable source backs it. This is the value the
+        // derived node above inherits from, so the two assertions move together or one of them is lying.
         assert_eq!(
             joined.effective_provenance("acoustic.absorption_reference"),
-            Provenance::Measured
+            Provenance::UnverifiedMeasurementCandidate
         );
 
         // The cross-register edge list surfaces exactly these acoustic edges (the audit surface for a future

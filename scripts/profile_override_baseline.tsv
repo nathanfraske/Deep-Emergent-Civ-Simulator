@@ -1,0 +1,79 @@
+# Profile override baseline v1. SHRINK-ONLY: rows may be deleted, never added.
+# id	profile	kind	reserved_value	profile_value
+being_percept.emission_coefficient	dev-fixtures.toml	undeclared-override		0.5
+being_percept.emission_coefficient	mirror.toml	undeclared-override		0.5
+climate.latitude_temperature_range	dev-fixtures.toml	undeclared-override	60	1
+climate.latitude_temperature_range	mirror.toml	undeclared-override	60	46
+discovery.exploration_floor	dev-fixtures.toml	undeclared-override		0.25
+discovery.exploration_floor	mirror.toml	undeclared-override		0.25
+discovery.surprise_gain	dev-fixtures.toml	undeclared-override		1
+discovery.surprise_gain	mirror.toml	undeclared-override		1
+discovery.target_value_granularity	dev-fixtures.toml	undeclared-override		1
+discovery.target_value_granularity	mirror.toml	undeclared-override		1
+evidence.log_odds_clamp	dev-fixtures.toml	undeclared-override	7	50
+evidence.log_odds_clamp	mirror.toml	undeclared-override	7	50
+evidence.runner_up_margin	dev-fixtures.toml	undeclared-override	2	1
+evidence.runner_up_margin	mirror.toml	undeclared-override	2	1
+felt_conviction.move_plasticity	dev-fixtures.toml	undeclared-override		0.25
+felt_conviction.move_plasticity	mirror.toml	undeclared-override		0.25
+felt_conviction.move_threshold	dev-fixtures.toml	undeclared-override		0.01
+felt_conviction.move_threshold	mirror.toml	undeclared-override		0.01
+felt_conviction.retention	dev-fixtures.toml	undeclared-override		0.9375
+felt_conviction.retention	mirror.toml	undeclared-override		0.9375
+field.relaxation	dev-fixtures.toml	undeclared-override	0.0000694	0.01
+field.relaxation	mirror.toml	undeclared-override	0.0000694	0.01
+gossip.told_weight	dev-fixtures.toml	undeclared-override	2	3
+gossip.told_weight	mirror.toml	undeclared-override	2	3
+gossip.trust_baseline	dev-fixtures.toml	undeclared-override	0.5	1
+gossip.trust_baseline	mirror.toml	undeclared-override	0.5	1
+harm.eligibility_decay	dev-fixtures.toml	undeclared-override		0.5
+harm.eligibility_decay	mirror.toml	undeclared-override		0.5
+hydrology.evaporation_cap	dev-fixtures.toml	undeclared-override	0.0005	1
+hydrology.evaporation_cap	mirror.toml	undeclared-override	0.0005	1
+hydrology.max_water_depth	dev-fixtures.toml	undeclared-override	10	4
+hydrology.max_water_depth	mirror.toml	undeclared-override	10	4
+hydrology.precipitation_rate	dev-fixtures.toml	undeclared-override	0.00000129	0.2
+hydrology.precipitation_rate	mirror.toml	undeclared-override	0.00000129	0.2
+hydrology.saturation_cap	dev-fixtures.toml	undeclared-override	0.05	2
+hydrology.saturation_e_ref	dev-fixtures.toml	undeclared-override	0.001596	0.5
+hydrology.saturation_slope	dev-fixtures.toml	undeclared-override	0.0001048	0.5
+hydrology.vapor_source_temperature	mirror.toml	undeclared-override		311
+language.innovation_rate	dev-fixtures.toml	undeclared-override	0.02	0.05
+language.innovation_rate	mirror.toml	undeclared-override	0.02	0.05
+language.sound_change_rate	dev-fixtures.toml	undeclared-override	0.02	1.0
+language.sound_change_rate	mirror.toml	undeclared-override	0.02	1.0
+metabolism.body_mass_kg_scale	dev-fixtures.toml	undeclared-override	70	100
+planning.depth_cap	dev-fixtures.toml	undeclared-override		8
+planning.depth_cap	mirror.toml	undeclared-override		8
+planning.hop_cap	dev-fixtures.toml	undeclared-override		4
+planning.hop_cap	mirror.toml	undeclared-override		4
+productivity.colonization	dev-fixtures.toml	undeclared-override	0.01	0.05
+productivity.colonization	mirror.toml	undeclared-override	0.01	0.05
+productivity.light_requirement	dev-fixtures.toml	undeclared-override	0.3	0.5
+productivity.light_requirement	mirror.toml	undeclared-override	0.3	0.5
+productivity.regen_rate	dev-fixtures.toml	undeclared-override	0.00000035	0.25
+productivity.regen_rate	mirror.toml	undeclared-override	0.00000035	0.25
+productivity.soil_requirement	dev-fixtures.toml	undeclared-override	1	0.5
+productivity.soil_requirement	mirror.toml	undeclared-override	1	0.5
+productivity.temperature_requirement	dev-fixtures.toml	undeclared-override	298	0.5
+productivity.temperature_requirement	mirror.toml	undeclared-override	298	0.5
+productivity.water_requirement	dev-fixtures.toml	undeclared-override	0.15	0.5
+productivity.water_requirement	mirror.toml	undeclared-override	0.15	0.5
+reward.eligibility_decay	dev-fixtures.toml	undeclared-override		0.5
+reward.eligibility_decay	mirror.toml	undeclared-override		0.5
+reward.feature_granularity	dev-fixtures.toml	undeclared-override		1
+reward.feature_granularity	mirror.toml	undeclared-override		1
+reward.noise_floor	dev-fixtures.toml	undeclared-override		0.01
+reward.noise_floor	mirror.toml	undeclared-override		0.01
+reward.p_reward_given_neutral	dev-fixtures.toml	undeclared-override		0.1
+reward.p_reward_given_neutral	mirror.toml	undeclared-override		0.1
+reward.p_reward_given_rewards	dev-fixtures.toml	undeclared-override		0.9
+reward.p_reward_given_rewards	mirror.toml	undeclared-override		0.9
+tom.access_weight.absence	dev-fixtures.toml	undeclared-override	4	2
+tom.access_weight.absence	mirror.toml	undeclared-override	4	2
+tom.access_weight.denied	dev-fixtures.toml	undeclared-override	4	2
+tom.access_weight.denied	mirror.toml	undeclared-override	4	2
+tom.access_weight.reachable	dev-fixtures.toml	undeclared-override	2	1
+tom.access_weight.reachable	mirror.toml	undeclared-override	2	1
+world.orbital_period_seconds	dev-fixtures.toml	undeclared-override	31556952	31536000
+world.orbital_period_seconds	mirror.toml	undeclared-override	31556952	31536000

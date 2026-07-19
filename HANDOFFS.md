@@ -115,6 +115,75 @@ Reverse-chronological. Each session appends one entry at the top: what was done,
 
 ---
 
+## 2026-07-19 (manager session, cont. V): the provenance floor, fifteen findings, each live-fired
+
+WHERE THE NEXT SESSION PICKS UP. The provenance system is hardened and merged (PR #211,
+`claude/provenance-hardening`). The next BUILD is the state-resolved thermoelastic provider, which is what
+unblocks the fixture-cluster wire and therefore the mountains: the cluster derives within its ambient frame
+and correctly REFUSES outside it, so the provider is what lets it derive AT interior conditions. Four rungs
+are scoped in `docs/working/THERMOELASTIC_STATE_FRAME_DERIVE_FIRST_STEERING.md`: measured PVT surface,
+compute-once free-energy surface, Mie-Grueneisen-Debye estimator, ambient measured, refusal.
+
+WHY THE ARC HAPPENED. An adversarial audit of the provenance system returned 6 CRITICAL and 8 HIGH findings
+with the verdict that the system "does not make an untraceable number structurally impossible; it makes an
+untraceable number easy to label, baseline, quarantine, or route around". Since every derive-first claim in
+this repository rests on that machinery, it outranked the capstone.
+
+THE FINDINGS SPLIT THREE WAYS, AND THE SPLIT DECIDED THE TREATMENT. That distinction is the most reusable
+thing here. BYPASSES are gates that can be walked past: a source declaring `custody = "in_reop"` with
+`sha256 = "anything"` passed `sources_gate.py` reporting clean, because the misspelling matched no branch
+and so answered to none of them; a malformed manifest was skipped, and since a skipped manifest changes no
+generated output, `--check` returned 0, making an INVALID manifest the way to add an unvetted source column;
+deleting every quarantine entry read as "clean (0)"; an empty `@derives:` marker was a pass token; the
+constructor ratchet compared counts, so swapping an audited constant passed. A ratchet is right for these.
+BLIND SPOTS are checks that existed and never ran: CI invoked 1 of 8 per-source tests and the omitted
+Grueneisen test was FAILING the whole time it sat unrun; the diamond gate's `--self-test` returns before
+scanning, so five diamonds and a twin provider were live and invisible; Stone 0 ran 5 of 11 gates and
+treated a CRASHED gate as an operational skip; the floor registry's advertised stop gate existed only as a
+local editor hook. FALSE CLAIMS are where a ratchet is exactly wrong: 244 values labelled `measured` with
+zero machine-linked evidence, and baselining them preserves the claim being eliminated.
+
+THE 244 ARE DOWNGRADED, NOT BASELINED, to `unverified_measurement_candidate` (`[?M]`, never `[M]`), ranked
+BELOW `Estimator` because an estimator declares itself an estimate. More important than the relabel: the
+MECHANISM that manufactured the labels is gone. `validate_consistency` forced every `per_world` datum into
+`measured` or `contingency`, so labelling one `measured` was what the schema TOLD you to do, evidence or
+not. Category and evidence now validate independently. Nothing stays in the tier permanently: each row
+resolves by promotion with a claim record or by truthful downgrade, and the queue is visible.
+
+WHAT THE GATES CONVICTED ONCE THEY COULD. The JANAF entry claimed per-table checksums "recorded row by row"
+and 34 held tables carried none; they exist now, with their scope stated (they detect future drift, they do
+not retroactively prove fetch fidelity). Four claims named one source as both primary and secondary. Seventy
+nine undeclared calibration divergences and SIX unit clashes, of which `hydrology.saturation_cap` as
+megapascals against a dimensionless saturation index is two quantities sharing a name rather than one
+quantity at two values.
+
+THE 287/288 SPLIT WAS NOT A JUDGEMENT CALL, and I wrongly framed it as one for the owner. 287 was marked
+`measured` while citing our own reconciliation; 288 cited NASA GISS/NOAA. Corrected the unsourced one.
+Correcting it exposed worse underneath: `dev-fixtures.toml` carries the same id at 0.5 with `unit = "kelvin"`,
+a dimensionless mapping offset wearing a temperature unit, and the override gate could not see it because
+BOTH sides declared the same wrong unit. Relabelling it honestly made the gate convict it immediately.
+
+THE THROUGH-LINE, and it is the same lesson as the fixture-cluster arc one level up. Four times the substrate
+had ALREADY written the warning ("so a deep-interior consumer inherits it rather than rediscovering it";
+"the caller's own"; "so a caller cannot silently treat an ambient aggregate as a deep-interior value"; a
+`VolumeConstraint` distinguishing covered from unconstrained) and four times the consumer dropped it. So
+every fix in this arc is a REFUSAL, an unconstructible pairing, or a label at the site. A defence carried
+only in prose is one that gets dropped.
+
+TWO OF MY OWN FIXES FAILED THEIR FIRST LIVE-FIRE and only firing at them showed it: a digest using `[^)]*`
+stopped at the first close-paren so `from_bits((1i64 << 32) + 12345)` digested only the prefix, and a
+`--check` flag was read as an output path so the checker reported the registry missing "at --check" while
+the real one sat untouched. Three probes were also NO-OPS that looked like passes. Assert the edit landed
+before believing the result.
+
+STILL OPEN, recorded rather than forgotten: six known-open diamonds carried in a ledger (one of them mine,
+the stored `thermal_diffusivity` that #205 gave a computed sibling without retiring); seven carried unit
+defects; the 244-row promotion queue; and three circular tests worth rebuilding against independent anchors
+(ice against IAPWS R14-08(2011), Slater applicability against held-out thermodynamic gammas, non-analytic
+Rayleigh eigenvalues against an independent neutral-stability solver).
+
+---
+
 ## 2026-07-19 (manager session, cont. IV): #203 merged, the local/CI drift closed at its root, the cluster prerequisites built
 
 WHERE THE NEXT SESSION PICKS UP. The fixture-cluster replacement (sub-step D) is UNBLOCKED, unclaimed, and its prerequisites are built and PR'd (#205). Every gate the ruled spec named is cleared, each verified against source rather than assumed: both cited columns landed (`atoms_per_primitive_cell` AND `kappa_298`, the ruling on `ColumnParams::thermal_diffusivity` names both); the two-rung ladder is built and keys on the fetched column (`materials/src/conductivity.rs`, `lattice_exponent_for_cell`, `assemblage_conductivity` at line 616); `sim` already depends on `materials`; the spec's named "gamma HARD-GATE RISK" is retired because the Grueneisen ladder dissolved the alpha reservation; and the estimator-band hole the ruling flagged does not bite, because the mantle phases (forsterite, fayalite, enstatite) all carry MEASURED anchors rather than falling to Slack's estimator. The prior session's in-flight agent HELD rather than stalling, and its finding landed on main as `8206387`, so its worktree branch is spent and the slice is free.

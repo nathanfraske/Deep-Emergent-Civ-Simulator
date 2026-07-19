@@ -20,7 +20,7 @@ The licence decides which is permitted; see `docs/working/FETCH_PIPELINE_PLAN.md
 
 Crystallography Open Database (COD), https://www.crystallography.net/cod/, eleven CIF records for the eight registry phases: 1011097 and 1011172 (quartz, Wei 1935 and Brill, Hermann & Peters 1939), 1000032 (corundum, Lutterotti & Scardi 1990, J. Appl. Cryst. 23, 246), 1010914 (corundum rhombohedral setting, Pauling & Hendricks 1925, J. Am. Chem. Soc. 47, 781), 1000053 (periclase, Sasaki, Fujino & Takeuchi 1979, Proc. Japan Acad. 55, 43), 1011267 (hematite rhombohedral setting, Zachariasen 1928), 1544615 (forsterite, J. Mineral. Petrol. Sci. 2006), 1000064 (fayalite, Fujino, Sasaki, Takeuchi & Sadanaga 1981, Acta Cryst. B37, 513), 1010129 (spinel, Passerini 1930, Gazz. Chim. Ital. 60, 389), 1000047 (enstatite, Yang & Ghose 1995, Phys. Chem. Minerals 22, 300) and 1011018 (enstatite ferroan, Takane 1932, Proc. Imperial Acad. Tokyo 8, 308).
 
-- sha256: `per-file, recorded row by row in crates/physics/data/phase_conductivity/manifest.toml (11 CIFs)`
+- checksum: NONE RECORDED
 - archived: https://web.archive.org/web/20171010005130/http://www.crystallography.net/cod/1000053.cif
 - scope: Ambient-condition crystal structures of the eight registry phases: space group, lattice centring, cell parameters and formula units per cell. Structural facts, frame-free for this column's purpose, and independent of any conductivity measurement. A polymorph caveat that matters and is handled by carrying the space group explicitly in every row: formula alone does NOT determine the structure here, since MgSiO3 also occurs as clinoenstatite (P2(1)/c), protoenstatite (Pbcn) and bridgmanite (Pbnm), and Mg2SiO4 also occurs as ringwoodite (Fd-3m). A lookup keyed on formula would silently return the wrong phase.
 - custody: in_repo
@@ -44,7 +44,7 @@ Jha, S., Harry, D. L. and Schutt, D. L., 2017, Toolbox for Analysis of Flexural 
 
 Chase, M.W. Jr., 1998, NIST-JANAF Thermochemical Tables, 4th ed., Journal of Physical and Chemical Reference Data, Monograph 9, 1-1951. American Chemical Society and American Institute of Physics for the National Institute of Standards and Technology.
 
-- sha256: `per-table, recorded row by row in crates/physics/data/janaf/manifest.toml (34 tables, md5 receipts)`
+- checksum: NONE RECORDED
 - archived: https://web.archive.org/web/20260101000000*/janaf.nist.gov/tables/*
 - scope: Standard-state thermochemistry, 0 to 6000 K at 1 bar: the Gibbs energy function, standard entropy, enthalpy increment, and formation enthalpy and Gibbs energy, for the 34 gas and reference species the condensation and thermochemistry work consumes.
 - custody: in_repo

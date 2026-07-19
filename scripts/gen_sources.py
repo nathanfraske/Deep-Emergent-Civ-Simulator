@@ -372,6 +372,20 @@ def main():
         for p in problems:
             print(f"  {p}", file=sys.stderr)
 
+    # A MALFORMED MANIFEST IS A FAILURE, NOT A NOTE. Before this, an unparseable manifest was printed and
+    # SKIPPED, and because a skipped manifest contributes nothing to the generated mirror, the mirror stayed
+    # byte-identical and `--check` returned 0. So the way to add an unvetted source column was to make its
+    # manifest invalid: both this collector and `sources_gate.py` would step over it, and CI would pass. The
+    # skip is what made it invisible; the exit code is what made it safe.
+    if problems:
+        print(
+            f"gen_sources: FAILED. {len(problems)} manifest(s) could not be read, so their sources are "
+            "absent from the mirror and from every gate that reads it. A manifest that does not parse is "
+            "an unvetted source column, not a warning.",
+            file=sys.stderr,
+        )
+        return 1
+
     if "--check" in args:
         stale = []
         if not MIRRORED.exists() or _digest(MIRRORED.read_text(encoding="utf-8")) != _digest(

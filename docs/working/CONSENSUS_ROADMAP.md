@@ -8,7 +8,7 @@ The retired long-form board is `docs/working/CONSENSUS_ROADMAP_HISTORY.md`, pres
 
 ## Active arcs
 
-- 2026-07-19  Mountains / mid-band (increment 3) -> #205 HELD, the seven-field frontier is NOT closed: the ambient-frame rows were read at interior state, so the cluster now REFUSES a mixed-frame request (#208 steering). ALL 9 audit findings fixed, each as a refusal or an unconstructible pairing rather than a comment. BLOCKED: the wire cannot activate because the bundle correctly refuses at interior state; unblocking needs the state-resolved thermoelastic provider -> `docs/working/THERMOELASTIC_STATE_FRAME_DERIVE_FIRST_STEERING.md`. Next: thread the census through `build_deep_time_provinces`, move the 7 fields + their 3 uncompared copies, re-baseline via `realization_digest`, then Seams C/D. RETRACTED in HANDOFFS: my "the full SI lift is infeasible" claim was WRONG (audit-caught, I tested SI-LINEAR not the ruled SI/LOG-SPACE); the ruled plan stands, heat carries as per-tick energy or a signed log.
+- 2026-07-19  Mountains / mid-band (increment 3) -> #205 merged; the wire waits on the thermoelastic ladder, now BUILT as `crates/physics/src/thermoelastic.rs` (4 rungs, rung 4 answers in-frame, refusal names the gap). Rung 3 needs 3 anchors: K' is banked-not-loaded (loader change), theta_Debye and q are fetches (agent out). Then wire + Seams C/D. Next: thread the census through `build_deep_time_provinces`, move the 7 fields + their 3 uncompared copies, re-baseline via `realization_digest`, then Seams C/D. RETRACTED in HANDOFFS: my "the full SI lift is infeasible" claim was WRONG (audit-caught, I tested SI-LINEAR not the ruled SI/LOG-SPACE); the ruled plan stands, heat carries as per-tick energy or a signed log.
 - 2026-07-18  Remote agent #201 (disk-evolution wire) lands large and often -> rebase-onto-main integration, keep viewer/physics lanes disjoint.
 - 2026-07-18  Arc AFTER the crust (perpetual dynamics, atmosphere keystone, hydrosphere) -> plan in `PHYSICS_SUBSTRATE_ROADMAP.md`.
 
@@ -36,7 +36,7 @@ The retired long-form board is `docs/working/CONSENSUS_ROADMAP_HISTORY.md`, pres
 
 ## Not done / gated
 
-- 2026-07-19 FLAGGED provenance system: 6 CRITICAL + 8 HIGH from an adversarial audit; a ghost source passes `sources_gate.py` (live-fired), 4 claims have primary == secondary, 0 `@sources` markers -> `$CLAUDE_JOB_DIR/tmp/codex_provenance_audit.txt`, blocks R-ABIOGENESIS-2.
+- 2026-07-19 Provenance hardening -> branch `claude/provenance-hardening`, 15 of 15 audit findings closed, each live-fired: gate bypasses shut, CI runs the checks that convict, Stone 0 runs 11 gates not 5, 244 unevidenced `[M]` labels downgraded to `unverified_measurement_candidate`. Pins hold. Unblocks R-ABIOGENESIS-2.
 - 2026-07-15 QUARANTINED 56 reserved values with dead provenance, frozen by the CI gate -> docs/working/quarantine_ledger.toml
 - 2026-07-12 PARTIAL the four universal constants to CODATA, G now in the floor -> crates/units/src/fundamentals.rs
 - 2026-07-11 GATED real biosphere thriving, gated on the biosphere-balance calibration -> worldbuild.rs T3 owner-gate

@@ -32,9 +32,13 @@ import re
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# A positional output path, ignoring FLAGS. Taking `sys.argv[1]` unconditionally made `--check` read as
+# an output filename, so the check reported the registry "MISSING at --check" while the real one sat
+# untouched beside it. A flag that silently becomes a path is a check that silently tests nothing.
+_POSITIONAL = [a for a in sys.argv[1:] if not a.startswith("-")]
 OUT = (
-    os.path.abspath(sys.argv[1])
-    if len(sys.argv) > 1
+    os.path.abspath(_POSITIONAL[0])
+    if _POSITIONAL
     else os.path.join(ROOT, "docs/working/PHYSICS_FLOOR_REGISTRY.md")
 )
 LAWS_RS_REL = "crates/physics/src/laws.rs"
@@ -303,14 +307,39 @@ def main():
         tail = f": {s}" if s else ""
         body.append(f"- `{name}`{tag} ({LAWS_RS_REL}:{line}){tail}")
     body.append("")
-    with open(OUT, "w", encoding="utf-8") as fh:
-        fh.write("\n".join(body).rstrip() + "\n")
-    print(
-        f"wrote {os.path.relpath(OUT, ROOT)}: {n_axes} axes, {n_sub} substances, "
-        f"{n_law} declared laws, {n_kernels} laws.rs kernels ({n_direct} direct), "
-        f"{n_derives} deriving substrates"
+    rendered = "\n".join(body).rstrip() + "\n"
+    summary = (
+        f"{n_axes} axes, {n_sub} substances, {n_law} declared laws, "
+        f"{n_kernels} laws.rs kernels ({n_direct} direct), {n_derives} deriving substrates"
     )
+
+    # `--check` EXISTS BECAUSE THE ADVERTISED STOP GATE DID NOT. The registry's own header says a stop
+    # gate regenerates it and blocks stale output, and no CI job and no Stone 0 path ran this script: the
+    # only thing enforcing it was a LOCAL Claude Code hook, invisible to CI, to main, and to anyone else.
+    # A generator that always writes cannot convict staleness, so hand-editing the registry, adding a floor
+    # law, or changing a `@derives` marker went unnoticed anywhere but one machine.
+    if "--check" in sys.argv:
+        if not os.path.exists(OUT):
+            print(f"floor registry MISSING at {os.path.relpath(OUT, ROOT)}; run this script.")
+            return 1
+        with open(OUT, encoding="utf-8") as fh:
+            current = fh.read()
+        if current != rendered:
+            print(
+                f"floor registry STALE at {os.path.relpath(OUT, ROOT)}. The generated content no longer "
+                f"matches the tree ({summary}). Run `python3 scripts/gen_floor_registry.py` and commit "
+                f"the result. This is the enforced derive-versus-author reference: a stale one is a WRONG "
+                f"reference, so it fails rather than warns."
+            )
+            return 1
+        print(f"floor registry current: {summary}")
+        return 0
+
+    with open(OUT, "w", encoding="utf-8") as fh:
+        fh.write(rendered)
+    print(f"wrote {os.path.relpath(OUT, ROOT)}: {summary}")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

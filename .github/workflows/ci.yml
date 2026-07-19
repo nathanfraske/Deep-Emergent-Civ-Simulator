@@ -75,10 +75,41 @@ jobs:
       # The disk-arc literature ledger is a sibling receipt store to the sources pipeline above: every vendored
       # primary carries a complete receipt (SHA256, Wayback witness, grade, verbatim extract, used_by), and a
       # citation-plus-witness entry holds no bytes while still pinning the IA snapshot it was read against.
-      - name: Disk-arc literature receipt ledger (every vendored source carries a complete receipt)
+      # EVERY per-source provenance test, discovered rather than listed. Naming them one by one is how
+      # seven of the eight came to be omitted: the list was written when there was one test and never grew
+      # with the directory. The omission was not visible from CI either, because a test that is not
+      # invoked reports nothing, and the Grueneisen test was FAILING the whole time it sat unrun. A glob
+      # cannot fall behind the tests it runs.
+      # THE ADVERTISED STOP GATE, which did not exist. The registry's own header says a stop gate
+      # regenerates it and blocks stale output; no CI job and no Stone 0 path ran the generator, so the
+      # only enforcement was a local editor hook, invisible to CI and to main. The registry is the
+      # enforced derive-versus-author reference, and a stale one is a WRONG reference.
+      # A profile may override a reserved value and must SAY SO. 71 ids collide between reserved.toml and
+      # mirror.toml with 40 different values and nothing comparing them, and six pairs disagree on UNIT,
+      # which is two quantities sharing a name rather than one quantity at two values.
+      - name: Profile overrides are declared (a calibration divergence is stated, not discovered)
         run: |
-          python3 scripts/disk_arc_literature_provenance_test.py
-          python3 scripts/disk_arc_literature_provenance_test.py --self-test
+          python3 scripts/profile_override_gate.py --self-test
+          python3 scripts/profile_override_gate.py
+      - name: Floor registry is current (the derive-vs-author reference is not stale)
+        run: python3 scripts/gen_floor_registry.py --check
+      - name: Per-source provenance tests (every receipt, every source, discovered not listed)
+        run: |
+          set -e
+          shopt -s nullglob
+          found=0
+          for t in scripts/*_provenance_test.py; do
+            echo "--- $t"
+            python3 "$t"
+            found=$((found + 1))
+          done
+          if [ "$found" -lt 8 ]; then
+            echo "expected at least 8 per-source provenance tests, found $found" >&2
+            exit 1
+          fi
+          echo "ran $found per-source provenance test(s)"
+      - name: Disk-arc literature receipt ledger self-test
+        run: python3 scripts/disk_arc_literature_provenance_test.py --self-test
 
   rust:
     name: build, format, lint, test
@@ -168,7 +199,13 @@ jobs:
       # A refinement that quietly re-blinds the detector fails here instead of shipping, because a
       # gate's noise is visible and annoying while a gate's blindness is invisible and comfortable.
       - name: Diamond gate self-test (prove the detector still fires)
-        run: python3 scripts/diamond_gate.py --self-test
+        run: |
+          python3 scripts/diamond_gate.py --self-test
+          # THE REAL SCAN, which CI did not run. `--self-test` returns after checking two synthetic
+          # canaries and never touches the repository, so the gate has been passing without ever looking:
+          # five law-versus-field diamonds and one twin provider were live the whole time. `--strict`
+          # convicts anything NEW and carries the known-open ledger, so this can be on today.
+          python3 scripts/diamond_gate.py --strict
       - name: Doctests
         run: cargo test --workspace --doc
 

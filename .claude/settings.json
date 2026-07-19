@@ -50,6 +50,15 @@
             "command": "\"$CLAUDE_PROJECT_DIR/.claude/hooks/pipeline-status-guard.sh\""
           }
         ]
+      },
+      {
+        "matcher": "Agent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/fetch-brief-guard.sh"
+          }
+        ]
       }
     ],
     "PostToolUse": [

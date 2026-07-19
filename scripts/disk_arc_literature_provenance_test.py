@@ -1,5 +1,16 @@
 #!/usr/bin/env python3
-"""Provenance dry-run for the disk-arc literature vendoring manifest.
+"""SCHEMA + RECEIPT COMPLETENESS, NOT VALIDATION.
+
+Proves every one of 31 sources carries a complete, well-formed receipt. It does NOT prove any extract or grade is scientifically correct.
+
+WHY THE LABEL IS IN THE FILE. An audit found this battery described uniformly as one that "reconstructs
+each fetch from its recipe and asserts byte-equality", for all eight tests. That was true of some and
+false of others, and the difference matters: a custody check proves the bytes we hold are the bytes we
+fetched, a transcription check proves our column matches the held source, and neither proves the source
+is RIGHT. A test that reads its expectation from the file under test does not even prove independence.
+Saying so here, where the test is, is harder to drift than saying it in a document.
+
+Provenance dry-run for the disk-arc literature vendoring manifest.
 
 This is the SLIMMED-landing check (crates/physics/data/disk_arc_literature/manifest.toml). The full source
 PDFs are not byte-held in the repo (about 82 MB across the entries), the standing practice for paper sources,

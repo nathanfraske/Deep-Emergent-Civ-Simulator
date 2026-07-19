@@ -14,7 +14,22 @@ For each vendored artifact, the manifest (or the data file's header) declares:
 - **provenance idiom**: how the column carries provenance. A floor manifest declares per-entry `real = "..."` / `fantasy = "..."`. A cited data column carries a header citation and is out of floor-Element policing. State which, so the gate and the reader agree.
 - **grade uniformity**: whether the source is single-grade or MIXED-grade. If a source mixes grades (e.g. the Pyykkö column: light rows are fits to measured bond distances, heavy actinide-and-beyond rows are relativistic computed estimates), declare the measured-versus-computed boundary from the source's own data-source notes, and add a loader guard that flags reads above the boundary. Per-entry grade annotation is required only where a source mixes grades AND a consumer reads the mixed region; otherwise the header boundary plus the loader guard suffice. (Flagged-for-later: Draine's "astronomical silicate" is a constructed object rather than a lab measurement, so if the mixed-grade vocabulary ever wants a second customer, that optical file is it.)
 
-The dry-run byte-equality battery (the `*_provenance_test.py` pattern) then reconstructs each fetch from its recipe and asserts byte-equality against the receipt, with no network, so a drifted transcription fails the build.
+The `*_provenance_test.py` battery then checks each artifact offline, with no network. **What each test actually proves varies, and this document used to overstate it uniformly.** Audited 2026-07-19 against all eight:
+
+| Test | What it PROVES | What it does NOT prove |
+| --- | --- | --- |
+| `janaf` | Artifact integrity: 34 held tables hash against their receipts. Plus transcription of the Lodders fingerprints. | That the condensation solver agrees with Lodders. That belongs in a separate system test with Lodders held out. |
+| `bhac15` | That the committed wall grid was extracted from the held BHAC15 bytes. | That BHAC15 stellar evolution is correct. |
+| `aesopus` | POST-recipe reconstruction and manifest consistency. | Physical validation. The gas `.dat` files are not hashed against a receipt here. |
+| `condensation_mu` | Transcription of the AGSS09 and Robie-Hemingway rows; that the ice sample points were generated from the committed coefficients. | Agreement with Murphy-Koop. Altering the coefficients and regenerating the points passes: it is a generated-column consistency check, not a validation. |
+| `convection_scaling` | Analytic verification of `27 pi^4 / 4`, `pi / sqrt(2)` and `2^(-4/3)`, which is real. Plus transcription of the fingerprint dictionary. | Empirical Nusselt-Rayleigh accuracy. |
+| `gruneisen` | Custody of three citation-plus-witness sources; transcription of seven rows. | Independent agreement. Its `1.803` Slater expectation is BACK-SOLVED from the same `K' = 3.94` it checks, and its applicability sentinel reads the `slater_gamma_applicable` flag on the very rows under test. |
+| `rayleigh_eigenvalue` | Closed-form analytic verification of the free-free case. | The non-analytic eigenvalues, which are transcribed rather than recomputed. |
+| `disk_arc_literature` | Receipt completeness and schema shape across 31 sources. | That any extract or grade is scientifically correct. |
+
+**The honest summary: these are CUSTODY, TRANSCRIPTION and ANALYTIC-VERIFICATION checks.** Custody proves the bytes we hold are the bytes we fetched. Transcription proves the number in our column matches the number in the held source. Analytic verification proves a closed form is computed correctly. All three are worth having and all three catch real drift. None of them establishes that the source is RIGHT, and a transcription check that reads its expectation from the file under test does not even establish independence.
+
+Three are worth rebuilding as genuine validation, and are recorded rather than quietly left: the ice correlation against IAPWS R14-08(2011) over 130 to 220 K; the Slater applicability classification against held-out thermodynamic gamma measurements instead of the row's own flag; and the non-analytic Rayleigh eigenvalues against an independent neutral-stability solver.
 
 ---
 

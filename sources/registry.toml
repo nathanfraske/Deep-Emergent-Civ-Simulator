@@ -93,7 +93,9 @@ id = "janaf"
 citation = "Chase, M.W. Jr., 1998, NIST-JANAF Thermochemical Tables, 4th ed., Journal of Physical and Chemical Reference Data, Monograph 9, 1-1951. American Chemical Society and American Institute of Physics for the National Institute of Standards and Technology."
 url = "https://janaf.nist.gov/"
 archived_url = "https://web.archive.org/web/20260101000000*/janaf.nist.gov/tables/*"
-sha256 = "per-table, recorded row by row in crates/physics/data/janaf/manifest.toml (34 tables, md5 receipts)"
+sha256_manifest = "crates/physics/data/janaf/manifest.toml"
+# was: prose in the sha256 field, which is not a checksum. The per-table receipts now exist and live there.
+_sha256_note = "per-table, recorded row by row in crates/physics/data/janaf/manifest.toml (34 tables, md5 receipts)"
 scope = "Standard-state thermochemistry, 0 to 6000 K at 1 bar: the Gibbs energy function, standard entropy, enthalpy increment, and formation enthalpy and Gibbs energy, for the 34 gas and reference species the condensation and thermochemistry work consumes."
 grade = "measured (critically-evaluated compilation)"
 
@@ -181,7 +183,8 @@ citation = "Crystallography Open Database (COD), https://www.crystallography.net
 url = "https://www.crystallography.net/cod/"
 archived_url = "https://web.archive.org/web/20171010005130/http://www.crystallography.net/cod/1000053.cif"
 archive_pending = "Only one of the eleven CIF URLs carries a Wayback capture (1000053, checked 2026-07-18); the rest return an empty availability response. That is why the BYTES are held in-tree rather than left to the archive: a record with no capture and no local copy would be provenance by hyperlink, which is the failure the checklist exists to prevent."
-sha256 = "per-file, recorded row by row in crates/physics/data/phase_conductivity/manifest.toml (11 CIFs)"
+sha256_manifest = "crates/physics/data/phase_conductivity/manifest.toml"
+_sha256_note = "per-file, recorded row by row in crates/physics/data/phase_conductivity/manifest.toml (11 CIFs)"
 bytes = 34609
 recipe = "curl https://www.crystallography.net/cod/<id>.cif for each of the eleven ids, verbatim. Each file's own header records its provenance and its terms, which is what the licence finding below was read from."
 grade = "measured (published single-crystal and powder structure determinations, as deposited)"

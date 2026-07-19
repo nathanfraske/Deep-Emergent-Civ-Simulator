@@ -1,4 +1,18 @@
 #!/usr/bin/env python3
+# CUSTODY + TRANSCRIPTION (two checks are CIRCULAR), NOT VALIDATION.
+#
+# Proves custody of three citation-plus-witness sources and transcription of seven rows. TWO of its checks are
+#  circular and are labelled so rather than removed: the 1.803 Slater expectation is BACK-SOLVED from the same
+#  K-prime = 3.94 it checks, and the applicability sentinel reads the slater_gamma_applicable flag on the very
+#  rows under test.
+#
+# WHY THE LABEL IS HERE. An audit found this battery described uniformly as one that reconstructs each
+# fetch from its recipe and asserts byte-equality, for all eight tests. That was true of some and false
+# of others, and the difference matters: custody proves the bytes we hold are the bytes we fetched,
+# transcription proves our column matches the held source, and neither proves the source is RIGHT. A
+# test that reads its expectation from the file under test does not even prove independence. Saying so
+# where the test is, is harder to drift than saying it in a document.
+#
 # Dry-run provenance battery for the Gruneisen cited [M] column. No network. It (1) rechecks the sha256
 # receipt of every witness (three archive-then-slimmed to local custody + a retrievable archived_url, three
 # cross-referenced in-repo in the sibling moduli directories) against gruneisen/manifest.toml, (2) asserts the owner's pre-registered fingerprints
@@ -70,8 +84,26 @@ def check_receipts():
             else:
                 held += 1
             continue
+        # A CROSS-REFERENCED PRIMARY carries its witness in the SIBLING manifest, not here, and this test
+        # could not follow that. The chain broke silently: the moduli fetch once HELD these PDFs, this
+        # manifest cross-referenced them ("the provenance test rechecks the receipt at the sibling path"),
+        # and the sibling was later slimmed to citation-plus-witness under the owner's licence ruling. The
+        # bytes went away, the witness moved into the sibling manifest, and the cross-reference was left
+        # pointing at a path that no longer resolves. Following the reference is the anti-diamond fix:
+        # copying `archived_url` into both manifests would put one fact in two places with nothing
+        # comparing them, which is what this repository keeps paying for.
+        witness = s.get("archived_url", "").strip()
+        if not witness and s.get("dir"):
+            sibling = os.path.join(DATA, s["dir"], "manifest.toml")
+            if os.path.exists(sibling):
+                sib_text = open(sibling, encoding="utf-8").read()
+                for sib in parse_blocks(sib_text, "source"):
+                    if sib.get("sha256") == s.get("sha256"):
+                        witness = sib.get("archived_url", "").strip()
+                        if witness:
+                            break
         # Slimmed from the repo: the archived snapshot is the retrievable witness of record.
-        if not s.get("archived_url", "").strip():
+        if not witness:
             print(f"GRUNEISEN NO WITNESS {s['file']}: receipt {s['sha256']} points at nothing retrievable")
             failures += 1
             continue
