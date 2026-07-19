@@ -4143,78 +4143,6 @@ pub fn radiative_euv_photoevaporation_wind_rate_msun_myr(
     })
 }
 
-/// Which EUV field drives the photoevaporative wind, a function of the disc's INNER OPTICAL-DEPTH TOPOLOGY rather
-/// than a prose aside. While the inner disc is optically THICK the star's direct ionizing field cannot reach the
-/// disc surface past the inner rim, so a recombination (DIFFUSE) field drives the wind; once the inner disc drains
-/// and turns optically THIN the DIRECT field reaches the surface and drives a materially stronger wind (the
-/// [`radiative_euv_photoevaporation_wind_rate_msun_myr`] rate is the diffuse branch, so the direct branch is the
-/// load-bearing sibling this phase decides). The two branches also carry different radial scalings (the diffuse
-/// integrated rate falls as `R^(-1/2)`, the direct rises as `R^(1/2)`, Alexander, Clarke and Pringle 2006, Eq. 14).
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum EuvDispersalPhase {
-    /// The inner disc is optically thick: the recombination (diffuse) field drives the wind.
-    Diffuse,
-    /// The inner disc has drained optically thin: the direct field reaches the surface and drives the wind.
-    Direct,
-}
-
-/// The DIFFUSE-TO-DIRECT EUV PHASE TRANSITION, cited data (Alexander, Clarke and Pringle 2006, MNRAS 369, 229;
-/// vendored in `disk_arc_literature` as `alexander_2006_ii`): the inner-disc optical depth at which the direct
-/// field breaks through, and the direct-to-diffuse mass-loss ratio at the solar reference. The MECHANISM (the
-/// dispatch on optical depth) is fixed Rust (Principle 11); these are the paper's own numbers, a declared model the
-/// way [`EuvWindFit`] carries the wind-rate rows.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub struct EuvPhaseTransition {
-    /// The inner-disc optical depth at the diffuse-to-direct transition (Alexander 2006 Eq. 15: `tau = 4.61`, i.e.
-    /// `exp(-tau) = 0.01`, the surface where the direct ionizing field has attenuated to one percent).
-    pub transition_optical_depth: Fixed,
-    /// The direct-to-diffuse INTEGRATED mass-loss ratio AT the reference stellar mass (Alexander 2006: `8.8` at
-    /// `1 M_sun`). A SCOPED anchor for the "materially larger" direct branch, NOT a universal multiplier: away from
-    /// the reference mass the full radial direct-field form (Eq. 3, coefficient `1.73e-9`, `C_D = 0.235`, radial
-    /// exponent `a = 2.42`) sets the ratio through `Phi` and the gravitational radius, a deeper rung named here and
-    /// not fabricated as a constant factor.
-    pub reference_enhancement_ratio: Fixed,
-    /// The stellar mass (solar masses) at which the enhancement ratio was computed (Alexander 2006: `1.0`).
-    pub reference_mass_ratio: Fixed,
-}
-
-impl EuvPhaseTransition {
-    /// Alexander, Clarke and Pringle 2006's diffuse-to-direct transition, as cited data (Eq. 14, 15; vendored
-    /// receipt in `alexander_2006_ii`): the direct field breaks through at `tau = 4.61`, and the direct wind is
-    /// about `8.8` times the diffuse at `1 M_sun`.
-    pub fn alexander_2006() -> Self {
-        Self {
-            transition_optical_depth: Fixed::from_ratio(461, 100), // tau = 4.61 (Eq. 15)
-            reference_enhancement_ratio: Fixed::from_ratio(88, 10), // 8.8x at 1 M_sun
-            reference_mass_ratio: Fixed::ONE,
-        }
-    }
-}
-
-// @derives: the EUV dispersal phase (diffuse versus direct field) <- the disc's inner optical depth against the cited Alexander 2006 breakthrough transition tau=4.61, the topology state that decides which field drives the wind
-/// Dispatch the EUV dispersal phase on the disc's INNER OPTICAL DEPTH: [`EuvDispersalPhase::Direct`] once the inner
-/// disc has drained BELOW the transition optical depth (turned optically thin, so the direct field reaches the
-/// surface), [`EuvDispersalPhase::Diffuse`] while it is still optically thick. Keyed on the disc's OWN inner optical
-/// depth (admit-the-alien: any disc dispatches through its own topology, no Terran default), so the once-prose
-/// "flagged later-phase sibling" becomes a typed branch on written state, the audit's load-bearing requirement.
-/// `None` on a non-positive optical depth or transition.
-pub fn euv_dispersal_phase(
-    inner_disc_optical_depth: Fixed,
-    transition: &EuvPhaseTransition,
-) -> Option<EuvDispersalPhase> {
-    if inner_disc_optical_depth <= Fixed::ZERO || transition.transition_optical_depth <= Fixed::ZERO
-    {
-        return None;
-    }
-    Some(
-        if inner_disc_optical_depth < transition.transition_optical_depth {
-            EuvDispersalPhase::Direct
-        } else {
-            EuvDispersalPhase::Diffuse
-        },
-    )
-}
-
 /// THE COMPOSED DISK CLOCK (Myr), CONVECTIVE (X-ray-driven) BRANCH: the disk lifetime `tau_disk` DERIVED end to
 /// end from a disk-hosting star's own state, the payoff the whole arc built toward, turning `tau_disk` from a
 /// consulted constant into a derived output. It chains the built pieces:
@@ -7315,41 +7243,6 @@ mod tests {
         // Outside every interval is a refusal, not a silent extrapolation.
         assert_eq!(hollenbach.domain.reach_at(Fixed::from_int(80)), None);
         assert_eq!(font.domain.reach_at(Fixed::from_ratio(5, 100)), None);
-    }
-
-    #[test]
-    fn the_euv_dispersal_phase_branches_on_the_inner_optical_depth() {
-        // The load-bearing P1-3 fix: the diffuse/direct field is a typed branch on the disc's OWN inner optical
-        // depth against the cited Alexander transition (tau = 4.61), not a prose aside. An optically THICK inner
-        // disc (tau well above 4.61) is diffuse-driven; a DRAINED, optically thin inner disc (tau below 4.61) is
-        // direct-driven, the materially stronger wind.
-        let t = EuvPhaseTransition::alexander_2006();
-        assert_eq!(
-            t.transition_optical_depth,
-            Fixed::from_ratio(461, 100),
-            "tau = 4.61 (Eq. 15)"
-        );
-        assert_eq!(
-            euv_dispersal_phase(Fixed::from_int(20), &t),
-            Some(EuvDispersalPhase::Diffuse),
-            "an optically thick inner disc is diffuse-driven"
-        );
-        assert_eq!(
-            euv_dispersal_phase(Fixed::from_ratio(1, 100), &t),
-            Some(EuvDispersalPhase::Direct),
-            "a drained, optically thin inner disc is direct-driven"
-        );
-        // The transition itself sits in the thick (diffuse) side: exactly at tau it has not yet broken through.
-        assert_eq!(
-            euv_dispersal_phase(t.transition_optical_depth, &t),
-            Some(EuvDispersalPhase::Diffuse)
-        );
-        // The 8.8x enhancement is a SCOPED reference datum (at 1 M_sun), carried for the direct branch's magnitude.
-        assert_eq!(t.reference_enhancement_ratio, Fixed::from_ratio(88, 10));
-        assert_eq!(t.reference_mass_ratio, Fixed::ONE);
-        // Fail-loud on a non-positive optical depth.
-        assert_eq!(euv_dispersal_phase(Fixed::ZERO, &t), None);
-        assert_eq!(euv_dispersal_phase(Fixed::from_int(-1), &t), None);
     }
 
     #[test]
