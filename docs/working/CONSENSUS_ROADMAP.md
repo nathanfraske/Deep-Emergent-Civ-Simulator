@@ -8,7 +8,7 @@ The retired long-form board is `docs/working/CONSENSUS_ROADMAP_HISTORY.md`, pres
 
 ## Active arcs
 
-- 2026-07-19  Mountains / mid-band (increment 3) -> #205, ALL SEVEN cluster properties now derive from composition + geometry (`derive_column_thermal_properties`); the derived chain reproduces the independently recorded ln(eta) 53.9 at 10.7 GPa. Next: thread the census through `build_deep_time_provinces`, move the 7 fields + their 3 uncompared copies, re-baseline via `realization_digest`, then Seams C/D. RETRACTED in HANDOFFS: my "the full SI lift is infeasible" claim was WRONG (audit-caught, I tested SI-LINEAR not the ruled SI/LOG-SPACE); the ruled plan stands, heat carries as per-tick energy or a signed log.
+- 2026-07-19  Mountains / mid-band (increment 3) -> #205, all seven cluster properties derive; HELD on 9 audit findings (4 HIGH), 3 fixed (Si-diffusion V* contamination, authored zero expansion integral, truncated assemblage), 2 delegated. Next: thread the census through `build_deep_time_provinces`, move the 7 fields + their 3 uncompared copies, re-baseline via `realization_digest`, then Seams C/D. RETRACTED in HANDOFFS: my "the full SI lift is infeasible" claim was WRONG (audit-caught, I tested SI-LINEAR not the ruled SI/LOG-SPACE); the ruled plan stands, heat carries as per-tick energy or a signed log.
 - 2026-07-18  Remote agent #201 (disk-evolution wire) lands large and often -> rebase-onto-main integration, keep viewer/physics lanes disjoint.
 - 2026-07-18  Arc AFTER the crust (perpetual dynamics, atmosphere keystone, hydrosphere) -> plan in `PHYSICS_SUBSTRATE_ROADMAP.md`.
 
@@ -36,6 +36,7 @@ The retired long-form board is `docs/working/CONSENSUS_ROADMAP_HISTORY.md`, pres
 
 ## Not done / gated
 
+- 2026-07-19 FLAGGED provenance system: 6 CRITICAL + 8 HIGH from an adversarial audit; a ghost source passes `sources_gate.py` (live-fired), 4 claims have primary == secondary, 0 `@sources` markers -> `$CLAUDE_JOB_DIR/tmp/codex_provenance_audit.txt`, blocks R-ABIOGENESIS-2.
 - 2026-07-15 QUARANTINED 56 reserved values with dead provenance, frozen by the CI gate -> docs/working/quarantine_ledger.toml
 - 2026-07-12 PARTIAL the four universal constants to CODATA, G now in the floor -> crates/units/src/fundamentals.rs
 - 2026-07-11 GATED real biosphere thriving, gated on the biosphere-balance calibration -> worldbuild.rs T3 owner-gate
@@ -65,6 +66,7 @@ The retired long-form board is `docs/working/CONSENSUS_ROADMAP_HISTORY.md`, pres
 
 ## Recent landings (tombstoned; prune when old)
 
+- 2026-07-19  DONE  #207 merged to main (`0de27ab`): derive-first abiogenesis research spec + closure-formalism addendum -> `docs/working/ABIOGENESIS_*.md`.
 - 2026-07-19  DONE  #201 merged to main (`402e00d`): disk slice 2 run-path wire, Mdot_0 derived, the L_bol hold dissolved -> `git log 402e00d`.
 - 2026-07-19  DONE  #203 merged to main (`b1b9ed0`): two crates, five live-fired gates, 225 files, pins held -> `git log b1b9ed0`.
 - 2026-07-19  DONE  Local/CI command parity: the check list is PARSED from the workflow, not copied (six classes had never run locally) -> `scripts/ci_local.sh`.

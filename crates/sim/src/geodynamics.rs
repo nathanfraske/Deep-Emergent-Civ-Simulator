@@ -326,6 +326,9 @@ pub enum ColumnDerivationRefusal {
     /// The creep ladder refused, carrying its own reason (an unfeedable row, a domain violation, or a solve
     /// that did not converge).
     Viscosity(String),
+    /// The assemblage came back TRUNCATED: the subset enumeration hit its candidate cap, so the phases are
+    /// the best of a searched set rather than of the full one, and any property read off them is provisional.
+    TruncatedAssemblage,
     /// A JOIN this derivation needs has no implementation yet. This is the honest frontier rather than a
     /// data gap: the pieces exist and nothing composes them. Names the join and what it would take.
     NoJoinYet {
@@ -356,6 +359,11 @@ impl std::fmt::Display for ColumnDerivationRefusal {
             ColumnDerivationRefusal::Viscosity(reason) => {
                 write!(f, "the creep ladder refused: {reason}")
             }
+            ColumnDerivationRefusal::TruncatedAssemblage => write!(
+                f,
+                "the stable assemblage hit its candidate cap and is provisional rather than minimized, so \
+                 properties derived from it would be confident and possibly wrong; refused"
+            ),
             ColumnDerivationRefusal::NoJoinYet { quantity, needs } => write!(
                 f,
                 "{quantity} has no assembled derivation yet; it needs {needs}. Refused rather than \
@@ -440,6 +448,15 @@ pub fn derive_column_thermal_properties(
         tables.registry,
     )
     .ok_or(ColumnDerivationRefusal::NoAssemblage)?;
+    // A TRUNCATED assemblage is provisional, not minimized: `stable_assemblage` sets this flag when its
+    // subset enumeration hits the candidate cap, so the returned phases are the best of a SEARCHED set
+    // rather than of the full one. Properties derived from it would be confident and possibly wrong, which
+    // is the outcome this whole derivation exists to avoid. It refuses instead. The cap is reachable: with
+    // fifteen candidate phases over five present elements the subsets of size one through five number
+    // 4,943, past the 4,096 limit, so growing the registry alone can trigger it.
+    if assemblage.truncated {
+        return Err(ColumnDerivationRefusal::TruncatedAssemblage);
+    }
 
     // Density: the registry's own molar volumes and masses, in g/cm^3, lifted to kg/m^3.
     let density_g_cm3 = civsim_physics::petrology::assemblage_density(
@@ -468,6 +485,30 @@ pub fn derive_column_thermal_properties(
     let volume_census =
         civsim_physics::petrology::assemblage_volume_fractions(&assemblage, tables.registry)
             .ok_or_else(|| missing("volume_fractions"))?;
+    // THE EXPANSIVITY IS DERIVED BEFORE THE CONDUCTIVITY because the conductivity ladder CONSUMES it.
+    // Hofmeister's lattice form carries a factor `exp[-(4 gamma + 1/3) * integral(alpha dT)]` from the
+    // 298 K anchor to the evaluation temperature, and passing ZERO for that integral silently asserts a
+    // phase that does not expand between 298 K and 1600 K. It is not a harmless placeholder: for forsterite
+    // the omitted correction is about `exp(-0.287) = 0.751`, so the lattice conductivity came out roughly
+    // 33 percent HIGH, and the assemblage about 23 percent high. An audit caught it; the first version of
+    // this code passed `Fixed::ZERO` here and called the field "the caller's own", which was true and not
+    // an excuse for supplying a wrong value.
+    let thermal_expansion_ppm_per_k =
+        derive_assemblage_expansivity_ppm_per_k(&volume_census, tables)?;
+    // The integral of a CONSTANT expansivity over the anchor-to-evaluation range. Constant-alpha is the
+    // honest limit here and is stated rather than hidden: the banked gamma, bulk modulus and molar volume
+    // are ambient-frame values, so the expansivity they produce carries no temperature dependence of its
+    // own, and integrating it as a constant claims exactly that and no more.
+    let anchor_k = civsim_materials::conductivity::hofmeister_reference_temperature_k();
+    let expansivity_integral = if temperature_k > anchor_k {
+        thermal_expansion_ppm_per_k
+            .checked_div(Fixed::from_int(1_000_000))
+            .and_then(|per_k| per_k.checked_mul(temperature_k - anchor_k))
+            .ok_or_else(|| missing("expansivity_integral"))?
+    } else {
+        Fixed::ZERO
+    };
+
     let mut rows = Vec::with_capacity(volume_census.len());
     for (name, fraction) in &volume_census {
         let row = civsim_materials::conductivity::phase_conductivity_from_banked(
@@ -476,7 +517,7 @@ pub fn derive_column_thermal_properties(
             tables.gruneisen,
             tables.registry,
             tables.periodic,
-            Fixed::ZERO,
+            expansivity_integral,
         )
         .map_err(|e| ColumnDerivationRefusal::Conductivity(e.to_string()))?;
         rows.push((row, *fraction));
@@ -493,8 +534,6 @@ pub fn derive_column_thermal_properties(
     // an early return so the three derivations above are EXERCISED on every attempt: a chain that is never
     // run is a chain that rots, and this way a break in the assemblage, ladder or Dulong-Petit path surfaces
     // here rather than waiting for the frontier to close.
-    let thermal_expansion_ppm_per_k =
-        derive_assemblage_expansivity_ppm_per_k(&volume_census, tables)?;
     // The viscosity closes LAST because it consumes the other four: the diffusivity it needs is
     // `k / (rho c_p)` and the buoyancy contrast it needs is `rho alpha dT`. That ordering is the reason the
     // ruling called this cluster atomic rather than seven independent values.
@@ -574,7 +613,7 @@ fn derive_column_viscosity(
 ) -> Result<civsim_physics::convective_viscosity::ViscosityBand, ColumnDerivationRefusal> {
     use civsim_physics::convective_viscosity::{effective_viscosity_band, ViscosityInputs};
     use civsim_physics::creep_rows::{
-        hk_dry_dislocation, hk_table2_activation_volume_determinations, CreepCandidate,
+        hk_dry_dislocation, hk_dry_dislocation_activation_volumes, CreepCandidate,
     };
 
     let unrepresentable = |what: &str| ColumnDerivationRefusal::NoQuantity {
@@ -616,7 +655,13 @@ fn derive_column_viscosity(
         .and_then(|x| x.checked_mul(geometry.gravity_m_s2))
         .ok_or_else(|| unrepresentable("eval_pressure_gpa"))?;
 
-    let volumes = hk_table2_activation_volume_determinations();
+    // THE DISLOCATION-ONLY determinations, NOT the whole of Table 2. The ninth row of that table is a Si
+    // SELF-DIFFUSION measurement (`V* = -2 cm^3/mol`, Bejina et al. 1997), a different mechanism, and its
+    // chord covers 5 to 10 GPa. Feeding it to a dislocation column contaminates the bracket exactly where a
+    // deep interior sits: at 10 GPa it drags the primary from `ln(eta) 51.2` to `47.9`, a viscosity 27 times
+    // too low, and further down it is worse. `hk_dry_dislocation_activation_volumes` exists for this and its
+    // docstring says so; this consumer failed to inherit the exclusion until an audit caught it.
+    let volumes = hk_dry_dislocation_activation_volumes();
     let candidates = [CreepCandidate {
         row: hk_dry_dislocation(),
         volumes: &volumes,
