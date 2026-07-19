@@ -4,8 +4,6 @@ being_percept.emission_coefficient	dev-fixtures.toml	undeclared-override		0.5
 being_percept.emission_coefficient	mirror.toml	undeclared-override		0.5
 climate.latitude_temperature_range	dev-fixtures.toml	undeclared-override	60	1
 climate.latitude_temperature_range	mirror.toml	undeclared-override	60	46
-climate.mean_surface_temperature	dev-fixtures.toml	undeclared-override	287	0.5
-climate.mean_surface_temperature	mirror.toml	undeclared-override	287	288
 discovery.exploration_floor	dev-fixtures.toml	undeclared-override		0.25
 discovery.exploration_floor	mirror.toml	undeclared-override		0.25
 discovery.surprise_gain	dev-fixtures.toml	undeclared-override		1

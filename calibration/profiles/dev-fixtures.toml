@@ -242,10 +242,10 @@ source = "dev fixture for Part 5.4/5.5 field layer; crates/sim/src/runner.rs"
 
 [[reserved]]
 id = "climate.mean_surface_temperature"
-basis = "FIXTURE placeholder, not the owner's Kelvin value; the IDENTITY offset 1/2 for the temperature-to-absolute mapping T = mean + range*(normalised - 1/2), so a Development build keeps the raw normalised [0,1] worldgen temperature field byte-for-byte (crates/sim/src/runner.rs Field::from_map_absolute)"
+basis = "FIXTURE placeholder, not the owner's Kelvin value; the IDENTITY offset 1/2 for the temperature-to-absolute mapping T = mean + range*(normalised - 1/2), so a Development build keeps the raw normalised [0,1] worldgen temperature field byte-for-byte (crates/sim/src/runner.rs Field::from_map_absolute) UNIT CORRECTED 2026-07-19 from `kelvin` to `ratio`, metadata only and byte-neutral. The value is 0.5, a DIMENSIONLESS identity offset for the normalised-to-absolute mapping, and 0.5 kelvin is near absolute zero: the unit label was simply false. It mattered because the canonical register carries the same id in real Kelvin, so the pair read as one quantity at two values rather than as two different quantities, and the override gate could not see it because BOTH sides declared the same wrong unit. A gate comparing declared units cannot catch a unit that is declared falsely; only the basis prose contradicted it, and prose is what nobody reads."
 status = "set"
 value = "0.5"
-unit = "kelvin"
+unit = "ratio"
 source = "dev fixture for the temperature-units reconciliation; crates/sim/src/runner.rs Field::from_map_absolute"
 
 [[reserved]]

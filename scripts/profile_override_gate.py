@@ -161,6 +161,13 @@ def main():
     # profile reaches canonical state, so a careless fix moves a pin), which is why they are recorded here
     # rather than either fixed in a hurry or left invisible.
     KNOWN_UNIT_DEFECTS = {
+        # Found by CORRECTING a false unit label rather than by the unit comparison, which could not see
+        # it: the dev fixture carried a dimensionless 0.5 identity offset declared as `kelvin`, so both
+        # sides claimed the same unit and the mismatch was invisible. Relabelling it `ratio` made the gate
+        # convict it, which is the outcome an honest label is FOR. The real fix is a rename, since a
+        # normalised mapping offset is not a mean surface temperature; that touches the default run path
+        # and its consumers, so it is recorded here rather than done in a hurry.
+        ("climate.mean_surface_temperature", "dev-fixtures.toml"),
         ("metabolism.kleiber_coefficient", "dev-fixtures.toml"),
         ("physiology.thermal_half_band", "dev-fixtures.toml"),
         ("physiology.thermal_setpoint", "dev-fixtures.toml"),

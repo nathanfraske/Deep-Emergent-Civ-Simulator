@@ -1847,13 +1847,14 @@ provenance = "closure"
 
 [[reserved]]
 id = "climate.mean_surface_temperature"
-basis = "the world's mean surface temperature in Kelvin, the offset the NORMALISED worldgen temperature axis is mapped to ABSOLUTE temperature around: T = mean + range*(normalised - 1/2) (Field::from_map_absolute, crates/sim/src/runner.rs). The physics laws read absolute Kelvin (Stefan-Boltzmann T^4, the Clausius-Clapeyron saturation, the productivity temperature factor), so the worldgen's normalised [0,1] shape must be reconciled to Kelvin here rather than wearing a Kelvin label over [0,1] values. Set from the world's mean surface temperature (Earth ~288 K). Derive-vs-author: a per-world climate datum (category b, world data), not a floor axis and not derivable from a deeper substrate; the dev fixture is the identity placeholder 1/2 that keeps the field the raw normalised axis (byte-neutral)"
+basis = "the world's mean surface temperature in Kelvin, the offset the NORMALISED worldgen temperature axis is mapped to ABSOLUTE temperature around: T = mean + range*(normalised - 1/2) (Field::from_map_absolute, crates/sim/src/runner.rs). The physics laws read absolute Kelvin (Stefan-Boltzmann T^4, the Clausius-Clapeyron saturation, the productivity temperature factor), so the worldgen's normalised [0,1] shape must be reconciled to Kelvin here rather than wearing a Kelvin label over [0,1] values. Set from the world's mean surface temperature (Earth ~288 K). Derive-vs-author: a per-world climate datum (category b, world data), not a floor axis and not derivable from a deeper substrate; the dev fixture is the identity placeholder 1/2 that keeps the field the raw normalised axis (byte-neutral) DERIVE-FIRST PATH, so this does not sit here forever: a world mean surface temperature is an OUTCOME of the surface energy balance, and laws::surface_balance_temperature is built and live (crates/sim/src/environ.rs). It cannot supply this figure yet because bare radiative equilibrium for Earth is about 255 K and the 288 K mean is what the greenhouse contributes, which needs the atmosphere keystone arc. Until then this is a PER-WORLD calibrated datum with an external citation, which is the locked treatment for a tunable world outcome: Mirror defaults to Earth, and an alien world supplies its own by data rather than inheriting this one."
 status = "set"
-value = "287"
+value = "288"
 set_by = "Owner Mirror sign-off 2026-07-09 (docs/working/MIRROR_SIGNOFF_DECISIONS.md)"
 set_date = "2026-07-09"
 unit = "kelvin"
-source = "Mirror climate calibration (temperature-units reconciliation); crates/sim/src/runner.rs Field::from_map_absolute; crates/sim/src/dawn_harness.rs"
+
+source = "NASA GISS / NOAA global mean surface temperature ~288 K (15 C), the same external measurement calibration/profiles/mirror.toml cites. CORRECTED 2026-07-19: this entry previously read 287 and cited 'Mirror climate calibration (temperature-units reconciliation)' plus two of our own source files, which is an internal reconciliation rather than a measurement. A measured grade sourced to our own code is grade inflation, and the 287/288 split was that inflation showing: the canonical register disagreed with the file the simulation actually reads, and the one with an external witness was the profile. Resolved by CORRECTING the unsourced value, not by choosing between two authored numbers."
 category = "per_world"
 provenance = "measured"
 
