@@ -219,10 +219,25 @@ kind it is.
 | `yoneda_1990` | NOT redistributable | J-STAGE, approval required |
 | `heyliger_2003_quartz` | NOT redistributable | "© 2003 Acoustical Society of America" |
 
-Two more findings sit outside that table. **The JANAF tables are the surprise**: 34 tracked files whose
-licence is not the usual NIST public domain, because the Standard Reference Data Act (15 USC 290e) lets
-Commerce secure copyright in SRD compilations and JANAF is SRD 13. Individual numeric values are facts and
-uncopyrightable, so citing values is safe and shipping the compilation is what is restricted. And the
+Two more findings sit outside that table. **The JANAF entry is NOT ESTABLISHED and is corrected here
+(owner challenge, 2026-07-19).** The original wording called it a surprise: 34 tracked files whose licence
+is not the usual NIST public domain, on the ground that the Standard Reference Data Act (15 USC 290e)
+LETS Commerce secure copyright in Standard Reference Data compilations and JANAF is SRD 13.
+
+That inferred a restriction from the mere EXISTENCE OF THE AUTHORITY to restrict. It is not the same
+claim, and the difference is the whole finding. The statute permitting NIST to secure copyright is not
+evidence that NIST did so for these tables, and the owner reports finding nothing stating anything other
+than the NIST open licence. Our own manifest captured no terms at fetch time: it records 34
+`janaf.nist.gov` URLs and no licence statement, so there is no local evidence of a restriction either.
+
+The burden runs the other way. A restrictive finding needs an ASSERTION to point at, not an authority that
+was never shown to be exercised. So this entry stands as UNRESOLVED, not as not-redistributable, and it
+carries no remediation: nothing is converted, nothing is deleted, and the tables remain as they are.
+Closing it needs one checkable thing, the actual terms on the NIST distribution page captured and held the
+way any other licence finding is. Until then the honest record is "no terms captured, no assertion found".
+
+Kept because it remains true and useful: individual numeric values are facts and uncopyrightable, so
+citing values is safe regardless of how the compilation is licensed. And the
 **geokniga** source behind the Gruneisen handbook is a shadow library that disclaims all rights in its own
 words. No bytes were ever committed, verified, so there is nothing to take down; the defect is that the
 manifest calls it "the open GeoKniga DjVu", and labelling a shadow library open is a false provenance claim

@@ -348,8 +348,10 @@ def check_collection_coverage(tracked_data_files):
     optical_constants_aesopus 45, oxide_thermochemistry 10) are vendored bytes with per-row citations and
     NO `[[source]]` block at all, so the source registry does not cover them and no licence question was
     ever asked of them. That is exactly where the largest licence problem in the tree turned out to sit:
-    the JANAF tables are NIST Standard Reference Data, copyrighted by statute under 15 USC 290e rather
-    than public domain like most NIST output.
+    the JANAF tables, whose terms were never captured at fetch time at all. (An earlier draft of this
+    comment called them copyrighted by statute under 15 USC 290e. That was wrong: the Act AUTHORIZES the
+    Secretary to secure copyright in Standard Reference Data, which is not evidence any was secured over
+    these tables. The entry is UNRESOLVED, not restricted.)
 
     A per-row md5 proves a file was not corrupted. It does not say who may redistribute it, what regime it
     holds in, or what was dropped when it was slimmed. Those are source-level questions and they need a

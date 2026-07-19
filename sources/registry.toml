@@ -101,9 +101,9 @@ custody = "in_repo"
 holding_collection = "crates/physics/data/janaf/"
 collection_files = 34
 
-licence = "NIST Standard Reference Data, SRD 13. NOT the usual NIST public domain: the Standard Reference Data Act (15 USC 290e) expressly authorizes the Secretary of Commerce to secure copyright in standard reference data compilations, and NIST asserts it for SRD products. The Act also contemplates NIST 'authoriz[ing] the reproduction and publication thereof by others', which is the clean route to a permission grant. Individual numeric values are uncopyrightable facts (Feist Publications v. Rural Telephone Service), so READING values from these tables and citing them is safe; what is restricted is redistributing the COMPILATION."
-redistributable = false
-licence_evidence = "https://www.law.cornell.edu/uscode/text/15/290e"
+licence = "UNRESOLVED, not a restriction (owner challenge 2026-07-19). The earlier entry read this as NOT the usual NIST public domain because the Standard Reference Data Act (15 USC 290e) AUTHORIZES the Secretary to secure copyright in Standard Reference Data compilations and JANAF is SRD 13. That inferred a restriction from the existence of the authority to restrict, which is a different claim. No assertion by NIST over these tables was ever found, our own manifest captured no terms at fetch time (34 janaf.nist.gov URLs, no licence statement), and the owner reports finding nothing stating anything other than the NIST open licence. Closing this needs the actual terms on the distribution page captured and held like any other licence finding. Individual numeric values are facts and uncopyrightable regardless, so citing values is safe either way."
+redistributable = "unresolved"
+licence_evidence = "none captured; 15 USC 290e is the AUTHORITY, not an assertion over these tables"
 free_route = "https://janaf.nist.gov/tables/"
 free_route_kind = "publisher-open"
 reviewed = "2026-07-18"
