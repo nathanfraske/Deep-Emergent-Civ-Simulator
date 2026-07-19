@@ -464,7 +464,8 @@ pub enum IronValence {
 pub fn iron_valence_state(composition: &[(String, u32)], table: &PeriodicTable) -> IronValence {
     let mut n_fe: i64 = 0;
     let mut anion_charge_total: i64 = 0; // negative: the total anion charge iron must balance
-    let mut has_other_cation = false;
+    let mut other_cation_charge: i64 = 0; // positive: what the non-iron cations already supply
+    let mut ambiguous_cation = false;
     let mut saw_iron = false;
     for (symbol, count) in composition {
         if *count == 0 {
@@ -483,7 +484,19 @@ pub fn iron_valence_state(composition: &[(String, u32)], table: &PeriodicTable) 
         } else if primary < 0 {
             anion_charge_total += primary as i64 * *count as i64;
         } else if primary > 0 {
-            has_other_cation = true;
+            // A cation whose row lists exactly ONE positive valence takes that charge with no choice left
+            // open, so it can be subtracted from the budget and iron's charge still isolates. Silicon in a
+            // silicate is this case, which is what lets fayalite resolve. A cation listing SEVERAL positive
+            // states is a second unknown in one equation, and that is the case this still refuses.
+            let positive_states = table
+                .element(symbol)
+                .map(|e| e.valence.iter().filter(|v| **v > 0).count())
+                .unwrap_or(0);
+            if positive_states > 1 {
+                ambiguous_cation = true;
+            } else {
+                other_cation_charge += primary as i64 * *count as i64;
+            }
         }
     }
     if !saw_iron || n_fe == 0 {
@@ -493,13 +506,21 @@ pub fn iron_valence_state(composition: &[(String, u32)], table: &PeriodicTable) 
     if anion_charge_total == 0 {
         return IronValence::Metallic;
     }
-    // Another cation shares the anion budget, so charge balance cannot isolate iron's charge alone.
-    if has_other_cation {
+    // A second MULTIVALENT cation is a second unknown, so charge balance cannot isolate iron's charge.
+    if ambiguous_cation {
         return IronValence::Unresolved;
     }
-    // The positive charge iron must supply, and the class boundaries at the integer valences q = 2 and q = 3
-    // (comparisons kept in integers: q = supply / n_fe, so `supply <= 2 n_fe` is `q <= 2`, and so on).
-    let supply = -anion_charge_total; // > 0
+    // The positive charge iron must supply is what the anions demand LESS what the other cations already
+    // supply. Subtracting them is what closes the multi-cation case this function's `Unresolved` arm used to
+    // name as a scoped follow-on: fayalite `Fe2SiO4` demands 8 from its oxygens, silicon supplies 4 of it,
+    // and the two irons split the remaining 4 into the ferrous state the radiative term keys on.
+    // Class boundaries stay at the integer valences q = 2 and q = 3, compared in integers (q = supply / n_fe,
+    // so `supply <= 2 n_fe` is `q <= 2`, and so on).
+    let supply = -anion_charge_total - other_cation_charge;
+    // The other cations already balance the anions, so iron is left reduced rather than oxidized.
+    if supply <= 0 {
+        return IronValence::Metallic;
+    }
     if supply <= 2 * n_fe {
         IronValence::Ferrous
     } else if supply < 3 * n_fe {
@@ -673,8 +694,17 @@ source = ""
     fn the_iron_oxidation_state_derives_from_charge_balance() {
         // THE PHASE IS THE STATE: the average iron charge is derived by charge balance against the phase's anions
         // (O at -2), and the class boundaries are the integer valences 2 and 3. FeO -> Fe2+ (ferrous), Fe2O3 -> Fe3+
-        // (ferric), Fe3O4 -> 8/3 (mixed valence), pure iron -> metallic, an iron-free oxide -> no iron. A multi-cation
-        // phase (fayalite, with the Si4+ cation) cannot isolate iron's charge here and is Unresolved (a scoped limit).
+        // (ferric), Fe3O4 -> 8/3 (mixed valence), pure iron -> metallic, an iron-free oxide -> no iron.
+        //
+        // FAYALITE MOVED, 2026-07-19, and the move is the point rather than a fixture adjustment. This case read
+        // `Unresolved` while the balance refused any phase carrying a second cation, which this function's own
+        // doc called a scoped follow-on. Silicon lists exactly ONE positive valence, so it takes +4 with no
+        // choice left open and can be subtracted from the budget: Fe2SiO4's oxygens demand 8, silicon supplies
+        // 4, and the two irons split the remaining 4 into the FERROUS state. The five assertions above are
+        // untouched, which is the evidence the extension closed a limit rather than moved a result.
+        //
+        // `Unresolved` stays live-fired below on siderite, where carbon lists TWO positive states (+4 and +2),
+        // so the balance carries two unknowns in one equation and refuses instead of picking one.
         let t = periodic();
         assert_eq!(
             iron_valence_state(&comp(&[("Fe", 1), ("O", 1)]), &t),
@@ -698,7 +728,13 @@ source = ""
         );
         assert_eq!(
             iron_valence_state(&comp(&[("Fe", 2), ("Si", 1), ("O", 4)]), &t),
-            IronValence::Unresolved
+            IronValence::Ferrous,
+            "fayalite: the oxygens demand 8, silicon's single positive state supplies 4, two irons split 4"
+        );
+        assert_eq!(
+            iron_valence_state(&comp(&[("Fe", 1), ("C", 1), ("O", 3)]), &t),
+            IronValence::Unresolved,
+            "siderite: carbon lists +4 and +2, so iron's charge is not isolable by balance alone"
         );
     }
 

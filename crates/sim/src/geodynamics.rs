@@ -196,6 +196,33 @@ pub struct ColumnParams {
     pub dt: Fixed,
 }
 
+impl ColumnParams {
+    /// The buoyant PARCEL radius this column's convection carries, DERIVED from the column's own convective
+    /// cell scale rather than stored as a seventh fixture.
+    ///
+    /// The marginal-stability eigenvalue pair fixes both the onset threshold and the cell geometry: the
+    /// critical wavenumber `a_c` sets a cell half-wavelength of `pi / a_c` layer depths, so a parcel rising
+    /// through a layer of thickness `d` has the scale `r = d * pi / a_c`. Reading [`Self::ra_crit_wavenumber`]
+    /// rather than a module constant is what keeps the parcel in the SAME regime as the onset threshold by
+    /// construction: a column carrying a free-free eigenvalue pair gets the free-free cell scale, with no
+    /// second place for the two to drift apart.
+    ///
+    /// This is the same geometry the viewer's province lateral scale uses (`pi / a_c`, the rigid-rigid pair
+    /// giving roughly 1.008), stated here so the relationship is visible rather than rediscovered.
+    ///
+    /// Returns `None` when the wavenumber is non-positive or the product leaves the representable window,
+    /// which is a refusal rather than a fallback radius.
+    // @derives: the buoyant parcel radius <- the column's own layer depth + its critical wavenumber (cell half-wavelength)
+    pub fn parcel_radius(&self) -> Option<Fixed> {
+        if self.ra_crit_wavenumber <= Fixed::ZERO {
+            return None;
+        }
+        Fixed::PI
+            .checked_div(self.ra_crit_wavenumber)?
+            .checked_mul(self.depth)
+    }
+}
+
 /// One convection-evolution step: compose the merged floor law-forms into the next column state.
 // @derives[column_convection]: the interior column temperature and convection-onset state <- the merged floor law-forms (thermal_density_anomaly, rayleigh_number, threshold_latch, stokes_velocity, heat_advection, internal_heat_evolution, conduction) over the column's own physical parameters; no authored convection knob (Ra_crit is the derived marginal-stability eigenvalue, the Stokes coefficient the derived 2/9, the buoyancy the real material thermal expansion). A NEW derivation (not a retired-floor replacement), now covered by the liveness gate broadened to any derived output and any input source (task #46): the derive_gate registry carries a column_convection row (category new-derivation) whose probe perturbs the ColumnParams heat_production (a resident-field input) and asserts the stepped temperature responds.
 pub fn convection_step(state: &ColumnState, p: &ColumnParams) -> ColumnState {
@@ -706,6 +733,35 @@ mod tests {
 
     // A synthetic column: hot relative to a cold reference, with representable-scaled parameters (so the
     // Rayleigh intermediates fit Q32.32). The Rayleigh onset is switched by ra_crit in each test.
+    /// The parcel radius derives from the cell geometry the column already carries, so it tracks the
+    /// eigenvalue pair rather than sitting beside it. Asserted against the analytic `pi / a_c` rather than
+    /// against a recorded number, because a recorded number here would be the fixture this replaces.
+    #[test]
+    fn the_parcel_radius_derives_from_the_columns_own_cell_scale() {
+        let (_, mut p) = column(Fixed::from_int(1000));
+        p.depth = Fixed::from_int(3);
+        p.ra_crit_wavenumber = crate::deeptime::RIGID_RIGID_CRITICAL_WAVENUMBER;
+        let r = p
+            .parcel_radius()
+            .expect("a positive wavenumber yields a radius");
+        let expected = std::f64::consts::PI / p.ra_crit_wavenumber.to_f64_lossy() * 3.0;
+        assert!(
+            (r.to_f64_lossy() - expected).abs() < 1e-3,
+            "r = d * pi / a_c, expected {expected}, read {}",
+            r.to_f64_lossy()
+        );
+        // The rigid-rigid pair puts the half-wavelength near one layer depth, which is the regime check that
+        // would catch a wavenumber swapped for the free-free value (sqrt(2), giving ~1.41 depths).
+        assert!(
+            (0.9..=1.2).contains(&(r.to_f64_lossy() / 3.0)),
+            "the rigid-rigid cell is near one layer depth per parcel"
+        );
+
+        // A degenerate wavenumber has no cell scale, so it refuses rather than returning a radius.
+        p.ra_crit_wavenumber = Fixed::ZERO;
+        assert_eq!(p.parcel_radius(), None);
+    }
+
     fn column(ra_crit: Fixed) -> (ColumnState, ColumnParams) {
         let state = ColumnState {
             temperature: Fixed::from_int(400),
