@@ -73,6 +73,30 @@ fi
 # is wrong and an audit against it is unsound. The
 # gate regenerates to a temp and compares, never touching the working tree. Inert until both the
 # generator and the registry exist.
+# Provenance ratchet, at TURN scope rather than build scope. The Stone 0 gate runs from
+# crates/sim/build.rs, so it only fires when a build touches civsim-sim. A package-scoped command such as
+# `cargo test -p civsim-physics` never fires it, which means a physics-only change can be written,
+# verified, and committed without the provenance ratchet ever running. That happened: an unclassified
+# from_decimal_str site rode in on a physics-only commit and surfaced later, on an unrelated build.
+#
+# This closes it without touching the build graph, so no build gets slower and no gate is duplicated. The
+# script list is READ FROM the Rust source rather than copied here, so there is ONE list: a gate added to
+# PROVENANCE_SCRIPTS is picked up here automatically and the two cannot drift apart.
+if [ -n "$(git -C "$ROOT" status --porcelain -- crates 2>/dev/null)" ]; then
+  scripts_list="$(sed -n '/const PROVENANCE_SCRIPTS/,/];/p' "$ROOT/crates/stone0/src/lib.rs" 2>/dev/null \
+    | grep -oE '"scripts/[a-z0-9_]+\.py"' | tr -d '"')"
+  for s in $scripts_list; do
+    [ -f "$ROOT/$s" ] || continue
+    if ! out="$(cd "$ROOT" && python3 "$s" 2>&1)"; then
+      echo "stop-gate: the provenance ratchet failed in $s." >&2
+      echo "This runs at turn scope because a package-scoped cargo command does not fire crates/sim/build.rs," >&2
+      echo "so a physics-only change would otherwise skip the Stone 0 gate entirely." >&2
+      printf '%s\n' "$out" | tail -20 >&2
+      exit 2
+    fi
+  done
+fi
+
 # Derives-coverage gate. The registry's staleness check cannot see an UNMARKED deriving function: the
 # generator regenerates identically and the check passes while the map is wrong, which is how the physics
 # substrate ended up with 818 public functions and no markers at all. This ratchets that shut.
