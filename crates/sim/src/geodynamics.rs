@@ -267,9 +267,16 @@ pub struct ColumnThermalProperties {
     /// Volumetric thermal expansivity in parts per million per kelvin, the unit the kernel's
     /// [`civsim_physics::laws::thermal_density_anomaly`] reads.
     pub thermal_expansion_ppm_per_k: Fixed,
-    /// The NATURAL LOG of dynamic viscosity (ln Pa*s). Held as a logarithm because the value itself cannot be
-    /// represented: an interior viscosity is `~1e21 Pa*s` against a `Fixed::MAX` of `~2.1e9`.
-    pub ln_viscosity_pa_s: Fixed,
+    /// Dynamic viscosity as a BAND in log space (ln Pa*s), carrying its declared primary and the honest
+    /// interval around it.
+    ///
+    /// A LOGARITHM because the value cannot be represented: an interior viscosity is `~1e21 Pa*s` against a
+    /// `Fixed::MAX` of `~2.1e9`. A BAND rather than a scalar for a separate and stronger reason: the creep
+    /// row's activation volume `V*` is banked as nine determinations spanning a range the source declines to
+    /// collapse to a point, so reporting one number would author the very choice the primary refuses to make.
+    /// The band's `ln_viscosity_primary` is the declared single-figure read (the low `V*` end, the weakest the
+    /// row can be at positive pressure) and `min`/`max` are its uncertainty, never a discarded alternative.
+    pub viscosity: civsim_physics::convective_viscosity::ViscosityBand,
 }
 
 impl ColumnThermalProperties {
@@ -302,6 +309,9 @@ pub enum ColumnDerivationRefusal {
     /// The expansivity join refused, carrying its own reason (a phase with no banked gamma, bulk modulus or
     /// registry row).
     Expansivity(String),
+    /// The creep ladder refused, carrying its own reason (an unfeedable row, a domain violation, or a solve
+    /// that did not converge).
+    Viscosity(String),
     /// A JOIN this derivation needs has no implementation yet. This is the honest frontier rather than a
     /// data gap: the pieces exist and nothing composes them. Names the join and what it would take.
     NoJoinYet {
@@ -329,6 +339,9 @@ impl std::fmt::Display for ColumnDerivationRefusal {
             ColumnDerivationRefusal::Expansivity(reason) => {
                 write!(f, "the expansivity join refused: {reason}")
             }
+            ColumnDerivationRefusal::Viscosity(reason) => {
+                write!(f, "the creep ladder refused: {reason}")
+            }
             ColumnDerivationRefusal::NoJoinYet { quantity, needs } => write!(
                 f,
                 "{quantity} has no assembled derivation yet; it needs {needs}. Refused rather than \
@@ -340,6 +353,26 @@ impl std::fmt::Display for ColumnDerivationRefusal {
 }
 
 impl std::error::Error for ColumnDerivationRefusal {}
+
+/// The column's DYNAMICAL state, the inputs the viscosity needs and the material properties do not.
+///
+/// The split is real rather than cosmetic. Density, conductivity, specific heat and expansivity are MATERIAL
+/// properties: give a composition, a temperature and a pressure and they follow. Viscosity is a COLUMN
+/// property: the creep ladder's effective value depends on the strain rate the convection itself sets, so it
+/// reads the layer depth, the gravity and the buoyancy contrast driving the flow. Bundling them would have
+/// hidden that the seventh cluster field is a different KIND of quantity from the other six.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ColumnGeometry {
+    /// The convecting-layer depth (m).
+    pub layer_depth_m: Fixed,
+    /// Surface gravity (m/s^2).
+    pub gravity_m_s2: Fixed,
+    /// The temperature contrast driving buoyancy (K), interior against the cold reference.
+    pub temperature_contrast_k: Fixed,
+    /// `ln Ra_crit`, the onset regime's critical Rayleigh number in logs, the SAME one the boundary layer and
+    /// the convection onset read.
+    pub ln_rayleigh_critical: Fixed,
+}
 
 /// The banked reference tables a column derivation reads, grouped so the derivation takes ONE borrow rather
 /// than four positional ones.
@@ -380,6 +413,7 @@ pub fn derive_column_thermal_properties(
     composition: &[(String, Fixed)],
     temperature_k: Fixed,
     pressure_bar: Fixed,
+    geometry: &ColumnGeometry,
     tables: &BankedTables<'_>,
 ) -> Result<ColumnThermalProperties, ColumnDerivationRefusal> {
     let missing = |q: &str| ColumnDerivationRefusal::NoQuantity {
@@ -447,14 +481,24 @@ pub fn derive_column_thermal_properties(
     // here rather than waiting for the frontier to close.
     let thermal_expansion_ppm_per_k =
         derive_assemblage_expansivity_ppm_per_k(&volume_census, tables)?;
-    let ln_viscosity_pa_s = derive_column_ln_viscosity()?;
+    // The viscosity closes LAST because it consumes the other four: the diffusivity it needs is
+    // `k / (rho c_p)` and the buoyancy contrast it needs is `rho alpha dT`. That ordering is the reason the
+    // ruling called this cluster atomic rather than seven independent values.
+    let viscosity = derive_column_viscosity(
+        density_kg_m3,
+        thermal_conductivity_w_m_k,
+        specific_heat_j_kg_k,
+        thermal_expansion_ppm_per_k,
+        temperature_k,
+        geometry,
+    )?;
 
     Ok(ColumnThermalProperties {
         density_kg_m3,
         thermal_conductivity_w_m_k,
         specific_heat_j_kg_k,
         thermal_expansion_ppm_per_k,
-        ln_viscosity_pa_s,
+        viscosity,
     })
 }
 
@@ -489,20 +533,94 @@ fn derive_assemblage_expansivity_ppm_per_k(
         })
 }
 
-/// The column's log viscosity (ln Pa*s). THE SECOND FRONTIER, refusing by name.
+/// The column's effective viscosity as a log-space BAND. FRONTIER CLOSED 2026-07-19.
 ///
-/// [`civsim_physics::convective_viscosity::solve_ln_effective_viscosity`] is built and returns exactly this
-/// quantity, so the obstacle is its inputs rather than the solve. It takes creep candidates that nothing
-/// assembles for a province, a `thermal_diffusivity` that [`ColumnThermalProperties::thermal_diffusivity`]
-/// can now supply, and an `eval_pressure_gpa` the province call site does not form (composable there as
-/// `rho g d / 2`, since the depth, gravity and density are all in scope, but not composed today).
-fn derive_column_ln_viscosity() -> Result<Fixed, ColumnDerivationRefusal> {
-    Err(ColumnDerivationRefusal::NoJoinYet {
-        quantity: "ln_viscosity_pa_s".to_string(),
-        needs: "the creep-candidate wire into `convective_viscosity::solve_ln_effective_viscosity`, plus a \
-                mid-layer `eval_pressure_gpa` the province call site does not yet form"
-            .to_string(),
-    })
+/// THE ADMITTED CREEP SET IS ONE ROW, and that is a capability statement rather than a simplification.
+/// Hirth and Kohlstedt 2003 Table 1 banks five rows; three are WET and refuse because no water fugacity or
+/// content is derived anywhere in this engine, and the grain-boundary-sliding row refuses because no grain
+/// size is. Dry dislocation creep is what remains, and it is admitted because its grain-size exponent is zero
+/// and it needs no water. Those refusals are the rows' own, carried rather than worked around: the wet rows
+/// retire into the set the day a water substrate lands.
+///
+/// THE MID-LAYER PRESSURE is composed here as `rho g d / 2`, the lithostatic pressure at half the layer
+/// depth, which is the chord the creep ladder declares it wants. It is formed from the column's OWN derived
+/// density and its geometry rather than passed in, so it cannot disagree with the density the rest of the
+/// cluster uses.
+///
+/// THE BUOYANCY CONTRAST is `rho alpha dT` from the same derived pair, so the viscosity, the Rayleigh number
+/// and the density anomaly all read one density. Refuses rather than defaulting on any unrepresentable step.
+#[allow(clippy::too_many_arguments)]
+fn derive_column_viscosity(
+    density_kg_m3: Fixed,
+    thermal_conductivity_w_m_k: Fixed,
+    specific_heat_j_kg_k: Fixed,
+    thermal_expansion_ppm_per_k: Fixed,
+    temperature_k: Fixed,
+    geometry: &ColumnGeometry,
+) -> Result<civsim_physics::convective_viscosity::ViscosityBand, ColumnDerivationRefusal> {
+    use civsim_physics::convective_viscosity::{effective_viscosity_band, ViscosityInputs};
+    use civsim_physics::creep_rows::{
+        hk_dry_dislocation, hk_table2_activation_volume_determinations, CreepCandidate,
+    };
+
+    let unrepresentable = |what: &str| ColumnDerivationRefusal::NoQuantity {
+        quantity: what.to_string(),
+    };
+    // kappa = k / (rho c_p), computed here from the same three facts the struct exposes it from, so the
+    // viscosity cannot run on a different diffusivity than the one the kernel reads.
+    let thermal_diffusivity_m2_s = density_kg_m3
+        .checked_mul(specific_heat_j_kg_k)
+        .filter(|rho_cp| *rho_cp > Fixed::ZERO)
+        .and_then(|rho_cp| thermal_conductivity_w_m_k.checked_div(rho_cp))
+        .ok_or_else(|| unrepresentable("thermal_diffusivity"))?;
+
+    // The buoyancy contrast the flow runs on, from this column's own density and expansivity.
+    let density_anomaly_kg_m3 = civsim_physics::laws::thermal_density_anomaly(
+        density_kg_m3,
+        thermal_expansion_ppm_per_k,
+        geometry.temperature_contrast_k,
+    );
+    let density_anomaly_kg_m3 = if density_anomaly_kg_m3 < Fixed::ZERO {
+        Fixed::ZERO - density_anomaly_kg_m3
+    } else {
+        density_anomaly_kg_m3
+    };
+
+    // Mid-layer lithostatic pressure in GPa: rho g (d/2), then Pa to GPa.
+    // ORDER MATTERS HERE, and getting it wrong is not a style question. Formed left to right as
+    // `rho g d / 2e9`, the intermediate `rho g d` is about `2.2e10` for a Mars-class mantle and OVERFLOWS
+    // Q32.32's `2.1e9` ceiling, so the derivation refuses on a pressure it can perfectly well represent
+    // (about 11 GPa). Dividing FIRST keeps every intermediate inside the window: `d / 2e9` is `9e-4`, and
+    // the two multiplications climb back to order ten. This is the same representation discipline the
+    // Rayleigh number needs, met by reassociation rather than by a wider type.
+    let half_depth_scaled = geometry
+        .layer_depth_m
+        .checked_div(Fixed::from_int(2_000_000_000))
+        .ok_or_else(|| unrepresentable("eval_pressure_gpa"))?;
+    let eval_pressure_gpa = half_depth_scaled
+        .checked_mul(density_kg_m3)
+        .and_then(|x| x.checked_mul(geometry.gravity_m_s2))
+        .ok_or_else(|| unrepresentable("eval_pressure_gpa"))?;
+
+    let volumes = hk_table2_activation_volume_determinations();
+    let candidates = [CreepCandidate {
+        row: hk_dry_dislocation(),
+        volumes: &volumes,
+    }];
+    let inputs = ViscosityInputs {
+        density_anomaly_kg_m3,
+        gravity_m_s2: geometry.gravity_m_s2,
+        layer_depth_m: geometry.layer_depth_m,
+        thermal_diffusivity_m2_s,
+        // The ladder's chord is the interior POTENTIAL temperature, NOT the contrast that drives
+        // buoyancy. They are different quantities and passing the contrast here would evaluate the creep
+        // law at a few hundred kelvin instead of a few thousand.
+        eval_temperature_k: temperature_k,
+        eval_pressure_gpa,
+        ln_rayleigh_critical: geometry.ln_rayleigh_critical,
+    };
+    effective_viscosity_band(&inputs, &candidates)
+        .map_err(|e| ColumnDerivationRefusal::Viscosity(format!("{e:?}")))
 }
 
 /// One convection-evolution step: compose the merged floor law-forms into the next column state.
@@ -1015,17 +1133,18 @@ mod tests {
 
     // A synthetic column: hot relative to a cold reference, with representable-scaled parameters (so the
     // Rayleigh intermediates fit Q32.32). The Rayleigh onset is switched by ra_crit in each test.
-    /// THE ATOMICITY, ENFORCED. The ruling on `ColumnParams::thermal_diffusivity` says the cluster moves as
-    /// a whole or not at all, and this asserts that the code makes a partial move IMPOSSIBLE rather than
-    /// merely discouraged: with two of the seven properties still lacking a join, the derivation refuses,
-    /// and the refusal names both the quantity and what composing it requires, so it reads as a work list.
+    /// THE WHOLE CLUSTER, DERIVED. All seven properties now come from the world's own composition and the
+    /// column's own geometry, with no authored value anywhere in the chain.
     ///
-    /// This test is written to FAIL when the frontier closes, which is deliberate. When the expansivity and
-    /// viscosity joins land, this assertion breaks and whoever lands them replaces it with the assertion
-    /// that the seven properties derive, having been told exactly where to do it. A test that quietly kept
-    /// passing through that change would be a test that stopped meaning anything.
+    /// This test replaces the atomicity-refusal assertion that stood here while the joins were open. That
+    /// one was written to FAIL when the frontier closed, and it did, twice: once when the expansivity join
+    /// landed and once when the viscosity join did. Each failure was the signal to come here and widen what
+    /// is claimed, which is what a test earning its keep looks like.
+    ///
+    /// Every assertion is a MAGNITUDE against the world rather than against the algebra, because algebra
+    /// proves a formula self-consistent and says nothing about whether a mantle behaves that way.
     #[test]
-    fn the_column_derivation_refuses_a_partial_cluster_and_names_the_remaining_joins() {
+    fn the_whole_cluster_derives_from_composition_and_geometry() {
         use civsim_physics::gruneisen::GruneisenTable;
         use civsim_physics::mineral_moduli::MineralModuli;
         use civsim_physics::periodic::PeriodicTable;
@@ -1037,17 +1156,24 @@ mod tests {
         let conductivity = PhaseConductivityTable::standard().expect("the cited column loads");
         let gruneisen = GruneisenTable::standard().expect("the Grueneisen table loads");
         let moduli = MineralModuli::standard().expect("the moduli table loads");
-        // A magnesian olivine mantle, the composition the deep-time columns carry.
         let composition = vec![
             ("Mg".to_string(), Fixed::from_int(2)),
             ("Si".to_string(), Fixed::ONE),
             ("O".to_string(), Fixed::from_int(4)),
         ];
+        // A Mars-class convecting mantle: ~1800 km layer, 3.7 m/s^2, a 1300 K contrast.
+        let geometry = ColumnGeometry {
+            layer_depth_m: Fixed::from_int(1_800_000),
+            gravity_m_s2: Fixed::from_ratio(37, 10),
+            temperature_contrast_k: Fixed::from_int(1300),
+            ln_rayleigh_critical: crate::deeptime::RIGID_RIGID_RA_CRIT.ln(),
+        };
 
-        let refusal = derive_column_thermal_properties(
+        let p = derive_column_thermal_properties(
             &composition,
             Fixed::from_int(1600),
             Fixed::from_int(100_000),
+            &geometry,
             &BankedTables {
                 registry: &registry,
                 periodic: &periodic,
@@ -1056,45 +1182,64 @@ mod tests {
                 moduli: &moduli,
             },
         )
-        .expect_err("the viscosity join is still open, so the cluster must not move");
+        .expect("every join is closed, so the whole cluster derives");
 
-        match &refusal {
-            ColumnDerivationRefusal::NoJoinYet { quantity, needs } => {
-                // THE FRONTIER MOVED, 2026-07-19, and that is what this assertion records. The
-                // expansivity join landed, so the derivation now gets PAST it and refuses one step
-                // later, at the viscosity. Reaching this arm is the proof that the expansivity
-                // derives: a census that could not form an expansivity would have refused earlier.
-                assert_eq!(
-                    quantity, "ln_viscosity_pa_s",
-                    "the expansivity join closed, so the frontier is now the viscosity"
-                );
-                assert!(
-                    needs.contains("solve_ln_effective_viscosity")
-                        && needs.contains("eval_pressure_gpa"),
-                    "the refusal is a work list, naming the solve and the input the call site lacks: {needs}"
-                );
-            }
-            other => panic!("expected the join frontier, got {other}"),
-        }
-        // The SECOND frontier refuses on its own terms, so closing the first cannot silently open the
-        // cluster. Asserted separately because the derivation short-circuits at the first one it reaches.
-        let viscosity_refusal =
-            derive_column_ln_viscosity().expect_err("the viscosity join is not wired either");
-        match &viscosity_refusal {
-            ColumnDerivationRefusal::NoJoinYet { quantity, needs } => {
-                assert_eq!(quantity, "ln_viscosity_pa_s");
-                assert!(
-                    needs.contains("solve_ln_effective_viscosity")
-                        && needs.contains("eval_pressure_gpa"),
-                    "it names the solve AND the input the call site does not form: {needs}"
-                );
-            }
-            other => panic!("expected the viscosity frontier, got {other}"),
-        }
-        // And the message explains WHY it refused rather than substituted, since that is the ruling.
+        let rho = p.density_kg_m3.to_f64_lossy();
         assert!(
-            refusal.to_string().contains("atomicity"),
-            "the refusal cites the ruling it is enforcing: {refusal}"
+            (3000.0..=3800.0).contains(&rho),
+            "a silicate mantle sits near 3300 kg/m^3, read {rho:.0}"
+        );
+        let k = p.thermal_conductivity_w_m_k.to_f64_lossy();
+        assert!(
+            (1.0..=8.0).contains(&k),
+            "a silicate conductivity at 1600 K sits near a few W/(m K), read {k:.2}"
+        );
+        let cp = p.specific_heat_j_kg_k.to_f64_lossy();
+        assert!(
+            (900.0..=1500.0).contains(&cp),
+            "Dulong-Petit for a silicate lands near 1200 J/(kg K), read {cp:.0}"
+        );
+        let alpha_ppm = p.thermal_expansion_ppm_per_k.to_f64_lossy();
+        assert!(
+            (20.0..=60.0).contains(&alpha_ppm),
+            "a mantle expansivity sits near 30 to 40 ppm/K, read {alpha_ppm:.1}"
+        );
+        let kappa = p
+            .thermal_diffusivity()
+            .expect("computed from the three")
+            .to_f64_lossy();
+        assert!(
+            (1e-7..=1e-5).contains(&kappa),
+            "a silicate diffusivity sits near 1e-6 m^2/s, read {kappa:.2e}"
+        );
+
+        // THE VISCOSITY, AND THIS IS THE STRONGEST CHECK IN THE TEST. The representation note on
+        // `ColumnParams::viscosity` records, from an entirely separate measurement made before this
+        // derivation existed, that the built creep solve returns `ln(eta) ~ 53.9` for a Mars-class interior
+        // at 1600 K and 10.7 GPa. This chain reaches those conditions from a COMPOSITION: the assemblage
+        // gives the density, the density and conductivity and heat capacity give the diffusivity, the
+        // density and expansivity give the buoyancy contrast, and the density and geometry give the
+        // mid-layer pressure. Landing on the recorded value means the derived input chain puts the column
+        // where hand-set inputs had put it. The solve is shared, so this checks the INPUTS rather than the
+        // solve, which is exactly the part that is new.
+        let ln_eta = p.viscosity.ln_viscosity_primary.to_f64_lossy();
+        assert!(
+            (53.0..=55.0).contains(&ln_eta),
+            "the derived chain should reproduce the independently recorded ln(eta) ~ 53.9, read {ln_eta:.3}"
+        );
+        assert!(
+            (10.0..=12.0).contains(&p.viscosity.eval_pressure_gpa.to_f64_lossy()),
+            "the mid-layer pressure of an 1800 km Mars-class mantle is ~11 GPa"
+        );
+
+        // THE BAND IS ORDERED, and a COLLAPSED band is an honest report rather than a defect: the bracket
+        // takes min and max over the activation-volume determinations that COVER this pressure, so when the
+        // source's determinations agree at a pressure there is no spread to report. What would be a defect
+        // is a primary outside its own interval, which is what this asserts.
+        assert!(
+            p.viscosity.ln_viscosity_min <= p.viscosity.ln_viscosity_primary
+                && p.viscosity.ln_viscosity_primary <= p.viscosity.ln_viscosity_max,
+            "the declared primary lies inside its own band"
         );
     }
 
@@ -1108,7 +1253,14 @@ mod tests {
             thermal_conductivity_w_m_k: Fixed::from_int(4),
             specific_heat_j_kg_k: Fixed::from_int(1200),
             thermal_expansion_ppm_per_k: Fixed::from_int(30),
-            ln_viscosity_pa_s: Fixed::from_int(48),
+            // The band is irrelevant to this test, which is about the three facts kappa composes from.
+            viscosity: civsim_physics::convective_viscosity::ViscosityBand {
+                ln_viscosity_min: Fixed::from_int(46),
+                ln_viscosity_max: Fixed::from_int(50),
+                ln_viscosity_primary: Fixed::from_int(48),
+                eval_temperature_k: Fixed::from_int(1600),
+                eval_pressure_gpa: Fixed::from_int(10),
+            },
         };
         let kappa = p.thermal_diffusivity().expect("the three facts compose");
         let expected = 4.0 / (3300.0 * 1200.0);
