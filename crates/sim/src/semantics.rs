@@ -41,8 +41,8 @@
 //! distances, the two thresholds, and the quantization step are pure functions of the prototypes
 //! and the two perceptual inputs, walked in [`ConceptId`] order. The point-to-point distance is the
 //! pinned Euclidean form the metric reduces to for independent meaning axes (exactly as
-//! [`crate::value::euclidean_distance`] over value axes); a structured meaning metric weights it,
-//! the same flagged seam [`crate::value::value_distance`] leaves open, so the separation and span
+//! [`civsim_foundation::value::euclidean_distance`] over value axes); a structured meaning metric weights it,
+//! the same flagged seam [`civsim_foundation::value::value_distance`] leaves open, so the separation and span
 //! read `None` there rather than run on an invented weighted metric.
 
 use std::collections::BTreeMap;
@@ -50,7 +50,7 @@ use std::collections::BTreeMap;
 use civsim_core::Fixed;
 
 use crate::language::ConceptId;
-use crate::value::{GroundMetric, StructureKind};
+use civsim_foundation::value::{GroundMetric, StructureKind};
 
 /// A concept: a meaning region anchored by a prototype point over the meaning ground metric's axes
 /// (design Part 33.1). The prototype is the region's centre; the neighbourhood within the
@@ -134,7 +134,7 @@ impl SemanticSubstrate {
 
     /// The Euclidean inter-meaning distance between two prototypes over their shared components, the
     /// pinned form the metric reduces to for independent meaning axes (mirroring
-    /// [`crate::value::euclidean_distance`]). Computed with the deterministic [`Fixed::sqrt`].
+    /// [`civsim_foundation::value::euclidean_distance`]). Computed with the deterministic [`Fixed::sqrt`].
     fn prototype_distance(a: &[Fixed], b: &[Fixed]) -> Fixed {
         let n = a.len().min(b.len());
         let mut acc = Fixed::ZERO;
@@ -243,7 +243,7 @@ pub fn substrate_quantization(thresholds: &ConceptThresholds) -> Fixed {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::value::ValueStructure;
+    use civsim_foundation::value::ValueStructure;
 
     fn independent_substrate(concepts: &[(u32, &[i32])]) -> SemanticSubstrate {
         let k = concepts.iter().map(|(_, p)| p.len()).max().unwrap_or(0);

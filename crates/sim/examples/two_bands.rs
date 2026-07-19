@@ -31,10 +31,10 @@
 use civsim_bio::evidence::InferenceParams;
 use civsim_bio::tom::AccessWeights;
 use civsim_core::{Fixed, StableId};
+use civsim_foundation::located::{LocationIndex, OccupantId};
+use civsim_foundation::value::RaceId;
 use civsim_sim::language::{ArticulationSubstrate, ConceptId, LangId, Language, LanguageParams};
-use civsim_sim::located::{LocationIndex, OccupantId};
 use civsim_sim::primes::{nsm_concept_ids, nsm_gloss};
-use civsim_sim::value::RaceId;
 use civsim_sim::world::World;
 use civsim_world::{BiomeSet, Coord3, FlatBounded, TileMap, TopologySpace, WorldgenParams};
 

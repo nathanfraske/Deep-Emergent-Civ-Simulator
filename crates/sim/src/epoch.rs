@@ -38,9 +38,9 @@
 use civsim_core::Fixed;
 
 use crate::biosphere::{Biosphere, Region};
-use crate::stocks::Stock;
 use civsim_bio::genome::IncompatibilityTable;
 use civsim_bio::lineage::SpeciesId;
+use civsim_foundation::stocks::Stock;
 
 /// The epoch's reserved parameters (the selection, speciation, founder-fork, and extinction
 /// scales). DEVELOPMENT FIXTURE values come from [`EpochParams::dev_default`]; the
@@ -310,7 +310,7 @@ pub fn run(
 /// A one-generation stepper over the pre-dawn radiation, so the deep-time evolution can be watched
 /// unfolding rather than only seen as a finished summary. It owns the region's biosphere and the
 /// running epoch state (the population stocks, the generation counter, the accumulating report),
-/// advances exactly one generation per [`crate::clock::Steppable::step`], and stepped to completion reproduces
+/// advances exactly one generation per [`civsim_foundation::clock::Steppable::step`], and stepped to completion reproduces
 /// the batch [`run`] bit for bit, since both call the same [`step_generation`] over the same
 /// generation coordinates. Deterministic and self-contained: a step reads no wall-clock, so the
 /// radiation replays identically however an observer paced it (Principle 3, Principle 10).
@@ -415,7 +415,7 @@ impl Radiation {
     }
 }
 
-impl crate::clock::Steppable for Radiation {
+impl civsim_foundation::clock::Steppable for Radiation {
     fn step(&mut self) {
         self.step_once();
     }

@@ -36,6 +36,8 @@ use minifb::{Key, KeyRepeat, MouseButton, MouseMode, Scale, ScaleMode, Window, W
 
 use civsim_bio::anatomy::WorldProfile;
 use civsim_core::Fixed;
+use civsim_foundation::clock::PlaybackDriver;
+use civsim_foundation::located::OccupantId;
 use civsim_materials::grain_opacity::{GrainConstituent, GrainMixture, GrainOpticalEstimator};
 use civsim_physics::band_gap::BandGapColumn;
 use civsim_physics::crystal_field::CrystalFieldTables;
@@ -45,7 +47,6 @@ use civsim_physics::optical_constants::OpticalConstants;
 use civsim_physics::periodic::PeriodicTable;
 use civsim_physics::petrology_data::PhaseRegistry;
 use civsim_physics::solar_abundances::SolarAbundances;
-use civsim_sim::clock::PlaybackDriver;
 use civsim_sim::deeptime::{
     bombard_tick, province_column_params, provinces_across, step_deep_time, DeepTimeState,
     ImpactFluxParams, MeltParams,
@@ -55,7 +56,6 @@ use civsim_sim::geodynamics::{
     convecting_mantle_depth_m, derive_mantle_density, generate_derived_tiles, slice0_demo_field,
     ColumnParams, DerivedTile,
 };
-use civsim_sim::located::OccupantId;
 use civsim_world::ballistic::{BallisticForces, EjectaFan};
 use civsim_world::crater::{CraterCoupling, Target};
 use civsim_world::terrain::TerrainRelief;
@@ -82,7 +82,7 @@ const DEFAULT_GEN_RATE: f64 = 4.0;
 
 // The DERIVED-globe LIGHTING attitude is READ PER-WORLD from the scene, never authored inline. The observability layer
 // lights the sphere from the DERIVED sub-solar direction (the orbit's declination and the spin's sub-solar longitude,
-// read straight out of `civsim_sim::orbit`). The attitude and orbital elements it needs (axial tilt, axis orientation,
+// read straight out of `civsim_foundation::orbit`). The attitude and orbital elements it needs (axial tilt, axis orientation,
 // orbital phase, orbit eccentricity, rotation period, initial spin phase) are PER-WORLD inputs carried as fields on
 // [`DerivedScene`] (see [`SceneAttitude`]); the pipeline fills them, and when the spin/tilt derivation lands (task #44 /
 // Part 18.1) the values flow into the viewer with no viewer change. NO obliquity, spin, tilt, or phase value is a literal
@@ -182,12 +182,12 @@ fn attitude_eccentricity(attitude: &SceneAttitude) -> Fixed {
     attitude.orbit_eccentricity.unwrap_or(Fixed::ZERO)
 }
 
-/// The DERIVED body-frame sun direction for the globe lighting, consuming `civsim_sim::orbit` and the PER-WORLD attitude
+/// The DERIVED body-frame sun direction for the globe lighting, consuming `civsim_foundation::orbit` and the PER-WORLD attitude
 /// read from the scene. `day_sweep` is the observer's day clock (feeds the sub-solar longitude, the time of day);
 /// `year_sweep` is the observer's year clock (feeds the orbital phase for the declination when the per-world phase is not
 /// yet supplied, so the DERIVED tilt shows as the seasons pass). The sub-solar latitude comes from
-/// [`civsim_sim::orbit::solar_declination`] at the per-world obliquity (else declination zero when the tilt is not
-/// available), and the sub-solar longitude from [`civsim_sim::orbit::subsolar_longitude`]. Mapped into
+/// [`civsim_foundation::orbit::solar_declination`] at the per-world obliquity (else declination zero when the tilt is not
+/// available), and the sub-solar longitude from [`civsim_foundation::orbit::subsolar_longitude`]. Mapped into
 /// [`render::draw_globe`]'s body frame by [`render::sub_solar_body_dir`], it makes the lit hemisphere DERIVED, never an
 /// authored light direction. Every physical input is READ from `attitude`; the only inline value is the neutral zero used
 /// when a per-world field is not yet available. `None` on a link that does not resolve (fail-soft).
@@ -203,11 +203,11 @@ fn derived_sun_body_dir(
     let phase = attitude.orbital_phase.unwrap_or(year_sweep);
     let declination = match attitude.obliquity {
         Some(obliquity) => {
-            let state = civsim_sim::orbit::orbital_state(phase, eccentricity)?;
+            let state = civsim_foundation::orbit::orbital_state(phase, eccentricity)?;
             // The axis orientation: the per-world value when supplied, else the neutral (perihelion at the equinox), the
             // same reference choice the sky's reference world uses. Not an authored per-world value.
             let perihelion = attitude.perihelion_longitude.unwrap_or(Fixed::ZERO);
-            civsim_sim::orbit::solar_declination(&state, obliquity, perihelion)?
+            civsim_foundation::orbit::solar_declination(&state, obliquity, perihelion)?
         }
         None => Fixed::ZERO,
     };
@@ -220,7 +220,7 @@ fn derived_sun_body_dir(
     if spin >= tau {
         spin = spin.checked_sub(tau)?;
     }
-    let subsolar_longitude = civsim_sim::orbit::subsolar_longitude(spin)?;
+    let subsolar_longitude = civsim_foundation::orbit::subsolar_longitude(spin)?;
     Some(render::sub_solar_body_dir(
         declination.to_f64_lossy() as f32,
         subsolar_longitude.to_f64_lossy() as f32,
@@ -548,10 +548,10 @@ fn derived_globe_cmd(argv: &[String]) {
     let star_dir = derived_sun_body_dir(&scene.attitude, day_sweep, year_sweep);
     let phase = scene.attitude.orbital_phase.unwrap_or(year_sweep);
     if let Some(state) =
-        civsim_sim::orbit::orbital_state(phase, attitude_eccentricity(&scene.attitude))
+        civsim_foundation::orbit::orbital_state(phase, attitude_eccentricity(&scene.attitude))
     {
         let decl = match scene.attitude.obliquity {
-            Some(obliquity) => civsim_sim::orbit::solar_declination(
+            Some(obliquity) => civsim_foundation::orbit::solar_declination(
                 &state,
                 obliquity,
                 scene.attitude.perihelion_longitude.unwrap_or(Fixed::ZERO),
@@ -1493,7 +1493,7 @@ const DEEP_TIME_INITIAL_STEPS: usize = 0;
 /// transition should span at the observer's FASTEST playback speed. The interactive globe's per-frame deep-tick cap
 /// is DERIVED from this and the world's own visible saturation tick as `cap = max(1, saturation_tick /
 /// MIN_SHOW_FRAMES)` ([`derive_deep_time_cadence`]), so the transition cannot be jumped in a single frame (the driver
-/// banks the faster surplus as lod_debt, [`civsim_sim::clock::PlaybackDriver`]). Its BASIS is a display-legibility
+/// banks the faster surplus as lod_debt, [`civsim_foundation::clock::PlaybackDriver`]). Its BASIS is a display-legibility
 /// bound at the viewer's fixed 30 fps: the transition must last long enough to read as an EVOLVING world rather than
 /// a snap, and one second (30 frames) is the floor at which motion reads as motion.
 ///
@@ -3881,7 +3881,7 @@ fn map_body(p: &SampledPlanet, dot_px: usize, mean_anomaly: Fixed) -> render::Ma
 /// The CURRENT animated mean anomaly of a sampled planet: its static display-spread phase advanced by the observer's
 /// orbital sweep at the planet's DERIVED Kepler rate ([`kepler_sweep_factor`], inner planets faster), folded into one
 /// turn. The Keplerian speed-up at perihelion falls out for free downstream in the mean-to-true-anomaly solve
-/// ([`civsim_sim::orbit::orbital_state`]); this only sets the mean-anomaly phase. Display-only (Principle 10).
+/// ([`civsim_foundation::orbit::orbital_state`]); this only sets the mean-anomaly phase. Display-only (Principle 10).
 fn animated_mean_anomaly(p: &SampledPlanet, orbit_phase: f64) -> Fixed {
     let tau = std::f64::consts::TAU;
     let base = p.mean_anomaly.to_f64_lossy();
@@ -4076,7 +4076,7 @@ fn run_derived(argv: &[String]) {
     // A frame clock for the derived spin animation (the day/night terminator sweep) and a mouse-edge tracker for clicks.
     let mut spin_frame: u64 = 0;
     let mut was_mouse_down = false;
-    // THE OBSERVER'S TIME CONTROL: one non-canon playback clock ([`civsim_sim::clock::PlaybackDriver`], the banked
+    // THE OBSERVER'S TIME CONTROL: one non-canon playback clock ([`civsim_foundation::clock::PlaybackDriver`], the banked
     // pause/rate/scale holder) governs BOTH the planets' orbital motion on the map and the deep-time surface
     // evolution on the globe. Space pauses (freezing both so the owner can inspect), and the speed keys slow it
     // down or crank it up. `orbit_phase` is the continuous orbital sweep (radians at 1 AU); the per-planet rate is

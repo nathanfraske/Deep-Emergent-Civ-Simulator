@@ -23,7 +23,7 @@
 //! least-fixed-point food-web closure, and niche openness), resampled at the next ordinal up
 //! to a hard bound, then a closure-preserving fallback. Closure is the hybrid (fork F1):
 //! topological at seed time here, with quantitative feasibility left to the Part 15 stock
-//! dynamics ([`crate::stocks`]) which cull under-supplied pools over the early ticks.
+//! dynamics ([`civsim_foundation::stocks`]) which cull under-supplied pools over the early ticks.
 //!
 //! Every value the generator needs (the biome-fit cutoff, the resample bound, the niche
 //! breadth range, the limiting-similarity floor, the per-region founder counts) is reserved

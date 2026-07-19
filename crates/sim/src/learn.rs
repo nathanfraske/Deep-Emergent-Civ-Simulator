@@ -47,14 +47,14 @@ use crate::perception_reach::{
 
 use crate::homeostasis::AffordanceId;
 use crate::locomotion::ResourceField;
-use crate::material::MaterialField;
 use crate::material_percept::MaterialPerceptRegistry;
 use crate::perceivable_feature::PerceivableFeatureRegistry;
 use crate::percept::{feature_bucket, PerceptRegistry};
-use crate::sensorium::SenseChannelId;
 use civsim_bio::agent::Mind;
 use civsim_bio::calibration::{CalibrationError, CalibrationManifest};
 use civsim_bio::evidence::{good_weight, AttrKindId, InferenceParams, ValueId};
+use civsim_foundation::material::MaterialField;
+use civsim_foundation::sensorium::SenseChannelId;
 
 /// The generic attribute every experientially-learned feature belief is ABOUT: "does standing on this
 /// feature harm me". One attribute for all features (the feature identity lives in the subject), a
@@ -2722,8 +2722,8 @@ mod tests {
         // gradient is a percept the controller weights, so no approach is authored here (it emerges when
         // selection lifts the weight). The subject is reconstructed at the material channel base, the same
         // offset the trace reward learner committed it under.
-        use crate::material::MaterialField;
         use crate::material_percept::MaterialPerceptRegistry;
+        use civsim_foundation::material::MaterialField;
 
         let percepts = MaterialPerceptRegistry::from_substances(&["spent_hull"]);
         let here = Coord3::ground(5, 5);

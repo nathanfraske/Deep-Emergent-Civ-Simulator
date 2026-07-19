@@ -144,7 +144,7 @@ impl PerceptRegistry {
 ///
 /// RESERVED: the feature granularity (the quantization step). Basis: the just-noticeable difference in
 /// the sensed substance, the sensorium's per-class acuity/JND the perception subsystem already defines
-/// (`crate::sensorium`); coarse enough that ordinary spatial variation in a hazard reads as one kind,
+/// (`civsim_foundation::sensorium`); coarse enough that ordinary spatial variation in a hazard reads as one kind,
 /// fine enough to separate a harmful ground from a benign one. Surfaced for the owner, never
 /// fabricated.
 pub fn feature_bucket(raw: Fixed, granularity: Fixed) -> i64 {

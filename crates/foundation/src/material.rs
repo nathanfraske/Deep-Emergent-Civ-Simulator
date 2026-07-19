@@ -1,9 +1,9 @@
 //! The material substrate: the located, structured MATTER that sits in the ground, the third kind of
-//! world state beside the environmental FIELDS ([`crate::environ`], [`crate::runner`]'s temperature
-//! field) and the ORGANISMS ([`crate::locomotion::Walker`]). A cell carries a MIXTURE of physics
+//! world state beside the environmental FIELDS (`civsim_sim::environ`, `civsim_sim::runner`'s temperature
+//! field) and the ORGANISMS (`civsim_sim::locomotion::Walker`). A cell carries a MIXTURE of physics
 //! [`Substance`](civsim_physics::Substance)s by volume, and its bulk mechanical properties (density,
 //! indentation hardness) are DERIVED by reading the [`PhysicsRegistry`], never stored on the tile,
-//! mirroring how [`crate::locomotion::ResourceField`] derives axis-presence from a
+//! mirroring how `civsim_sim::locomotion::ResourceField` derives axis-presence from a
 //! `HomeostaticRegistry` rather than tagging a tile.
 //!
 //! This is the base of the material-substrate arc (cascade item 1). Everything downstream reads a
@@ -49,8 +49,8 @@ const AXIS_FRACTURE: &str = "mat.fracture_strength";
 /// The substance a single cell is made of: a mixture keyed by physics [`civsim_physics::Substance`] id, each carrying
 /// the VOLUME of that substance present in the cell (a fantasy or real substance alike, whatever the
 /// registry declares). A substance the cell bears none of is simply absent (reads as zero, the
-/// substrate absence convention shared with [`crate::edibility::Composition`] and
-/// [`crate::locomotion::ResourceField`]). The mechanical properties are never stored here; they are
+/// substrate absence convention shared with `civsim_sim::edibility::Composition` and
+/// `civsim_sim::locomotion::ResourceField`). The mechanical properties are never stored here; they are
 /// derived on demand by reading the [`PhysicsRegistry`] (see [`SubstanceMix::bulk_density`],
 /// [`SubstanceMix::bulk_hardness`], [`SubstanceMix::mass`]).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -111,7 +111,7 @@ impl SubstanceMix {
     }
 
     /// Remove up to `want` volume of one substance, returning what was removed (never more than is
-    /// present, never negative): the extraction draw, mirroring [`crate::locomotion::ResourceField::take`].
+    /// present, never negative): the extraction draw, mirroring `civsim_sim::locomotion::ResourceField::take`.
     /// A pruned-to-zero substance leaves the mixture so the canonical walk stays minimal. Reads and
     /// writes only the substance id's volume, no identity (Principle 9).
     pub fn take(&mut self, substance: &str, want: Fixed) -> Fixed {
@@ -161,7 +161,7 @@ impl SubstanceMix {
 
     /// The intensive volume-weighted mean of ANY named floor axis over the cell's mixture, for a reader
     /// outside this module. Modality-agnostic: it reads whatever axis the caller names, on any substance.
-    /// Its first caller is the reach substrate ([`crate::perception_reach`]), which samples a cell's bulk
+    /// Its first caller is the reach substrate (`civsim_sim::perception_reach`), which samples a cell's bulk
     /// absorption on a channel's own absorption axis along a signal's path (a strongly-absorbing cell
     /// occludes, an empty cell is transparent), but nothing here is specific to that axis or that use. An
     /// empty cell reads zero (the absence convention). Delegates to the internal bulk mean, so the
@@ -233,7 +233,7 @@ impl SubstanceMix {
     /// Fold the mixture into a hash in canonical (substance-id, volume) order. Defined for the wiring
     /// slice that folds the material layer into `state_hash`; nothing calls it on the run path yet, so
     /// declaring the substrate is hash-neutral. The `BTreeMap` walks in sorted id order, so the fold is
-    /// reproducible and thread-invariant (the [`crate::locomotion::ResourceField::hash_into`]
+    /// reproducible and thread-invariant (the `civsim_sim::locomotion::ResourceField::hash_into`
     /// discipline).
     pub fn hash_into(&self, h: &mut StateHasher) {
         for (substance, volume) in &self.volumes {
@@ -322,7 +322,7 @@ pub struct CraftParams {
     /// geometry-and-scale datum, surfaced for the owner. The working-edge AREA is not carried here and is not
     /// reserved: it is INTRINSIC to the worked stone, the finest working edge its microstructure holds
     /// (the `mat.edge_length_scale` floor axis), and the contact area is that edge length squared
-    /// ([`crate::runner::Embodiment::craft_from_carried`]). A fine-grained stone therefore holds a fine edge
+    /// (`civsim_sim::runner::Embodiment::craft_from_carried`). A fine-grained stone therefore holds a fine edge
     /// whoever knaps it, and the cut pressure at USE stays a real function of the WIELDER's current force.
     ///
     /// TOMBSTONE (`8f34b31`, which removed `civsim_physics::laws::edge_area_at`): the edge was once derived
@@ -609,7 +609,7 @@ impl WieldedTool {
 
 /// The matter that sits in each z-cell of the world, the ground truth of what the world is made of: a
 /// per-cell [`SubstanceMix`] keyed by [`Coord3`], a Coord3-keyed sibling of
-/// [`crate::locomotion::ResourceField`] of the same sparse shape. A cell with no entry is void (no
+/// `civsim_sim::locomotion::ResourceField` of the same sparse shape. A cell with no entry is void (no
 /// matter). The mechanical properties of a cell are DERIVED by reading a [`PhysicsRegistry`], never
 /// stored, so the mechanical floor's authored data is the single source of a substance's density and
 /// hardness (Principle 11), and the world never hardcodes what a tile is made of: worldgen fills the
@@ -731,7 +731,7 @@ impl MaterialField {
 
     /// Fold the material layer into a hash in canonical (Coord3, substance-id, volume) order. Defined
     /// for the wiring slice that folds it into the runner's `state_hash` beside
-    /// [`crate::locomotion::ResourceField::hash_into`]; nothing calls it on the run path yet, so the
+    /// `civsim_sim::locomotion::ResourceField::hash_into`; nothing calls it on the run path yet, so the
     /// substrate is hash-neutral until it is wired. The `BTreeMap`s walk in canonical key order, so the
     /// fold is reproducible and thread-invariant.
     pub fn hash_into(&self, h: &mut StateHasher) {
@@ -1214,7 +1214,7 @@ impl ConstituentRegistry {
 /// registered [`civsim_physics::Substance`] id. This is how a generated organism becomes located, usable
 /// matter without minting a per-species substance or authoring a species-to-substance map (Principle 8): the
 /// parcel's physics IS its own body's composition, derived by a development-weighted fold over its body plan
-/// ([`crate::physiology::whole_body_composition_vector`]), and every consumer reads a named axis off the
+/// (`civsim_sim::physiology::whole_body_composition_vector`), and every consumer reads a named axis off the
 /// vector exactly as it reads one off a substance, with the same absence-is-zero convention. The composition
 /// shares the string-keyed sorted-walk shape of [`civsim_bio::anatomy::TissueComposition`] and
 /// [`civsim_physics::Substance`]'s `vector`, so a consumer that reads `mat.fracture_strength` or
@@ -1406,12 +1406,12 @@ impl TissueField {
     }
 
     /// The IDENTITY-BLIND, valence-blind total matter mass located at a cell (the tissue analogue of
-    /// [`crate::locomotion::ResourceField::cell_content`], so the resource-density percept can union the two
+    /// `civsim_sim::locomotion::ResourceField::cell_content`, so the resource-density percept can union the two
     /// matter pools and a being is drawn to a corpse exactly as to a plant, per the creature-selection-loop
     /// slice-2 ruling). The sum over parcels of `volume * sum-of-composition-densities`, which equals
     /// [`Self::axis_supply`] summed over every axis: a body's total mass across all substances it carries, read
     /// without inspecting which substances they are. Zero where no body lies. A pure read: it moves no matter,
-    /// so the two intake paths (the forage INGEST over [`crate::locomotion::ResourceField`] and the whole-body
+    /// so the two intake paths (the forage INGEST over `civsim_sim::locomotion::ResourceField` and the whole-body
     /// bite over this field) each still eat their own pool once, with no double-count.
     pub fn cell_content(&self, cell: Coord3) -> Fixed {
         let Some(parcels) = self.cells.get(&cell) else {

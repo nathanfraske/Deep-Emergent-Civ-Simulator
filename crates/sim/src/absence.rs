@@ -23,7 +23,7 @@
 //! confirm, so the window is longer) and how long it characteristically lives (no one is presumed
 //! merely absent for longer than their own lifespan would allow). This module derives the window
 //! from those, through a fixed function reading per-race DATA and never a concrete
-//! [`crate::value::RaceId`] (Principle 9).
+//! [`civsim_foundation::value::RaceId`] (Principle 9).
 //!
 //! The absence STAGES are a race-independent universal set (a recent absence, a prolonged one, a
 //! long one), each a multiplier on the base window; a race enters the same stages, and only its
@@ -180,7 +180,7 @@ fn scale_u64_by_fixed(n: u64, f: Fixed) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::value::RaceId;
+    use civsim_foundation::value::RaceId;
 
     fn race(id: u32, mortality: Curve, visibility: Fixed) -> RaceBaseRates {
         RaceBaseRates {

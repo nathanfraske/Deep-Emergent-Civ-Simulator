@@ -49,7 +49,7 @@
 //! Follow-on (deferred, not a small addition): registering the holder count of a design as a
 //! conserved projection in the [`crate::conservation::ConservationRegistry`] (R-TIER-CONSIST).
 //! That registry conserves a quantity across the promote and demote of
-//! [`crate::lod::TwoTierWorld`], which today carries population and wealth across the tier
+//! `civsim_sim::lod::TwoTierWorld`, which today carries population and wealth across the tier
 //! boundary but not knowledge. Holder count is not conserved under transmission or loss (those
 //! laws are meant to add and remove holders: rediscovery and cull); it would be conserved only
 //! when an individual holding a design is promoted to or demoted from a pool, which first
@@ -119,7 +119,7 @@ impl Knowledge {
 
 /// The reserved calibrations the transmission substrate needs. Read from the manifest; until
 /// set, reading them fails loud rather than running on a fabricated default (mirrors
-/// [`crate::world::GossipParams::from_manifest`]).
+/// `civsim_sim::world::GossipParams::from_manifest`).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct TransmissionParams {
     /// The base copy-drift magnitude: the half-width of the mean-zero proficiency perturbation a

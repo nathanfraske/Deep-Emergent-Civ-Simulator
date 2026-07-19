@@ -64,8 +64,8 @@ pub trait Steppable {
 /// R-AGING). This is Earth's year at the one-second base tick (365 days of 86,400 seconds), one
 /// option among many, NOT the canonical per-world value: on the canonical path the life cadence
 /// derives from the world's own orbit, [`ticks_from_seconds`] over the orbital year and the base
-/// tick (see [`crate::world::World::from_manifest_with_orbital`]), so a fast world and a slow
-/// world beat aging on their own years. This constant is what [`crate::world::World::new`] falls
+/// tick (see `civsim_sim::world::World::from_manifest_with_orbital`), so a fast world and a slow
+/// world beat aging on their own years. This constant is what `civsim_sim::world::World::new` falls
 /// back to when no manifest and orbit are supplied, so tests and tools have a concrete cadence
 /// before the owner sets the two per-world orbital scalars.
 pub const LIFE_CADENCE_TICKS: u64 = 31_536_000;

@@ -166,8 +166,8 @@ pub enum Channel {
     Controller(ControllerParamId),
     /// A sex (mating-type) determination coordinate: the value read off a race's designated
     /// sex-determination locus (R-REPRO, design Part 25). A data-driven
-    /// `civsim_sim::breeding::BreedingSystem` maps this expressed value to a
-    /// `civsim_sim::breeding::SexClass`, so the number of sex classes a race carries and how a
+    /// `civsim_foundation::breeding::BreedingSystem` maps this expressed value to a
+    /// `civsim_foundation::breeding::SexClass`, so the number of sex classes a race carries and how a
     /// genotype assigns to one are data, and the population sex ratio emerges from Fisherian
     /// selection on the locus rather than a drawn ratio (Principle 8). This variant is the fixed
     /// engine interface; which gene feeds it, and with what weight, is data, exactly like every

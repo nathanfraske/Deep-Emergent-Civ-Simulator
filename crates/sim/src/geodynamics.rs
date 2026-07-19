@@ -41,7 +41,7 @@ use civsim_physics::laws;
 use civsim_world::solve::{fixed_cap_solve, SolveOutcome};
 use civsim_world::terrain::{classify_relief, relief_datum, TerrainRelief};
 
-use crate::material::{GeodynamicColumn, GeodynamicField};
+use civsim_foundation::material::{GeodynamicColumn, GeodynamicField};
 
 /// The resident state of one interior column the convection solve evolves: its temperature and whether
 /// convection has begun. The convection flag is the one-way Rayleigh-onset latch (once the Rayleigh number

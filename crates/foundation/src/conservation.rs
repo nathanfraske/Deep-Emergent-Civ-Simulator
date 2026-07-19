@@ -155,7 +155,7 @@ impl<W> Default for ConservationRegistry<W> {
 /// as a net imbalance.
 ///
 /// ```compile_fail
-/// use civsim_sim::conservation::ConservedLedger;
+/// use civsim_foundation::conservation::ConservedLedger;
 /// let mut ledger = ConservedLedger::new(0i128);
 /// let c = ledger.create(10, "source");
 /// let _dup = c.clone(); // a conserved quantity has no Clone: this must not compile

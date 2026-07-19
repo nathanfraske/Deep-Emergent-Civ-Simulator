@@ -39,8 +39,8 @@ use std::collections::BTreeMap;
 
 use civsim_core::Fixed;
 
-use crate::value::RaceId;
 use civsim_bio::decision::Curve;
+use civsim_foundation::value::RaceId;
 
 /// One race's base rates: the biology the evidence derivations read.
 ///

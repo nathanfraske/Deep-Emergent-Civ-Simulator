@@ -176,7 +176,7 @@ basis = "FIXTURE placeholder, not the owner's value; one world-second per tick s
 status = "set"
 value = "1"
 unit = "seconds_per_tick"
-source = "dev fixture for Part 14.6; crates/sim/src/clock.rs"
+source = "dev fixture for Part 14.6; crates/foundation/src/clock.rs"
 
 [[reserved]]
 id = "world.orbital_period_seconds"
@@ -184,7 +184,7 @@ basis = "FIXTURE placeholder, not the owner's per-world value; an Earth year in 
 status = "set"
 value = "31536000"
 unit = "seconds_per_orbit"
-source = "dev fixture for Parts 14.6, 20; crates/sim/src/clock.rs"
+source = "dev fixture for Parts 14.6, 20; crates/foundation/src/clock.rs"
 
 [[reserved]]
 id = "world.rotation_period_seconds"
@@ -192,7 +192,7 @@ basis = "FIXTURE placeholder, not the owner's per-world value; an Earth day in w
 status = "set"
 value = "86400"
 unit = "seconds_per_rotation"
-source = "dev fixture for Parts 14.6, 32; crates/sim/src/clock.rs"
+source = "dev fixture for Parts 14.6, 32; crates/foundation/src/clock.rs"
 
 # --- the world-build path (the production dawn->Runner assembly, dawn_harness::build_dawn_runner) ---
 # These let a development world assemble a whole Runner from a resolved scenario: the field
@@ -464,7 +464,7 @@ basis = "FIXTURE placeholder; the logistic regrowth rate the standing food stock
 status = "set"
 value = "0.25"
 unit = "ratio_per_tick"
-source = "dev fixture for base-level liveliness step 3; crates/sim/src/environ.rs; crates/sim/src/stocks.rs"
+source = "dev fixture for base-level liveliness step 3; crates/sim/src/environ.rs; crates/foundation/src/stocks.rs"
 
 [[reserved]]
 id = "productivity.colonization"

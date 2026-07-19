@@ -14,7 +14,7 @@
 
 //! The orbital-mechanics geometry: where a body actually sits on its orbit at a moment in time
 //! (design Parts 14.6, 32, the "orbits arc", task #78). The Kepler PERIOD is derived by
-//! [`crate::astro::kepler_orbital_period_seconds`]; this module is the PHASE, the analytic position
+//! `civsim_sim::astro::kepler_orbital_period_seconds`; this module is the PHASE, the analytic position
 //! along that orbit, which the sun-direction lighting and the projecting camera read.
 //!
 //! The position is ANALYTIC, not stepped: given the orbit's shape (eccentricity) and how far through

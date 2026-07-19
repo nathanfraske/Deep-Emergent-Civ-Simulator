@@ -385,7 +385,7 @@ pub fn whole_body_water_density(plan: &BodyPlan, organs: &BodyPlanRegistry) -> F
 /// declares, each a development-weighted mean over the parts that carry it, generalizing
 /// [`whole_body_energy_density`] and [`crate::medium::body_density`] from one named axis to all of them. This
 /// is the physics of the matter a body is made of: the vector a corpse deposits into the tissue field
-/// ([`crate::material::TissueField`]) so the world can forage, work, and decompose an organism's remains by
+/// ([`civsim_foundation::material::TissueField`]) so the world can forage, work, and decompose an organism's remains by
 /// the SAME axes and mechanisms as any other matter, with no minted per-species substance and no authored
 /// species-to-substance map (Principle 8). The organs read their [`civsim_bio::anatomy::TissueComposition`] via
 /// `organ_composition`; the covering and each weapon read their `KindDef::material` DIRECTLY, because

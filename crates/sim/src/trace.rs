@@ -28,7 +28,7 @@
 //! [`civsim_physics::laws`]).
 //!
 //! Principle 9 holds throughout: the derivation functions read per-trace-kind and per-race DATA
-//! and never branch on a concrete [`TraceKindId`] or [`crate::value::RaceId`]. Swap two races' base
+//! and never branch on a concrete [`TraceKindId`] or [`civsim_foundation::value::RaceId`]. Swap two races' base
 //! rates and the weights swap; swap two kinds' susceptibilities and the decay speeds swap; the
 //! mechanism authors none of it.
 //!
@@ -283,7 +283,7 @@ pub fn mortality_implication_weight(kind: &TraceKindDef, clamp: Fixed) -> Fixed 
 ///
 /// The `decomposer_activity` argument, in `[0, 1]`, scales the decay rate by what the world at the
 /// trace's cell affords decomposition
-/// ([`crate::decompose::DecomposerDriverRegistry::activity_at`]): a trace above the thermal barrier
+/// ([`civsim_foundation::decompose::DecomposerDriverRegistry::activity_at`]): a trace above the thermal barrier
 /// persists where no decomposer life or favorable conditions act on it (activity zero) and fades faster
 /// where they do (activity one is the unconditional rate). A caller with no decomposer substrate passes
 /// one, reproducing the barrier-gated exponential unchanged.
@@ -312,7 +312,7 @@ pub fn organic_salience(
         return Fixed::ONE;
     }
     // Effective decomposition rate: the kind's rate scaled by the race's own decay multiplier and by the
-    // per-cell DECOMPOSER ACTIVITY ([`crate::decompose::DecomposerDriverRegistry::activity_at`], in
+    // per-cell DECOMPOSER ACTIVITY ([`civsim_foundation::decompose::DecomposerDriverRegistry::activity_at`], in
     // `[0, 1]`), so a trace above the thermal barrier persists where no decomposer life or favorable
     // conditions act on it and fades faster where they do. The caller passes one for the unconditional
     // rate (the matter cycle's own default before a decomposer registry is armed), so this is byte-
@@ -379,8 +379,8 @@ pub fn corroding_salience(elapsed: Fixed, kind: &TraceKindDef) -> Fixed {
 mod tests {
     use super::*;
     use crate::base_rates::RaceBaseRateRegistry;
-    use crate::value::RaceId;
     use civsim_bio::decision::Curve;
+    use civsim_foundation::value::RaceId;
 
     const CLAMP: Fixed = Fixed::from_int(20);
 

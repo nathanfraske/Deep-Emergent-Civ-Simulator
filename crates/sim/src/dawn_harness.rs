@@ -56,7 +56,6 @@ use civsim_core::{Fixed, StableId};
 use civsim_world::{Coord3, TileMap};
 
 use crate::axiom::RingCapacityLaw;
-use crate::breeding::BreedingSystemRegistry;
 use crate::controller::Controller;
 use crate::conviction_experience::FeltConvictionCalib;
 use crate::discovery::DiscoveryCalib;
@@ -82,14 +81,15 @@ use crate::runner::{
     BeingThermal, EmbodiedPhysiology, Embodiment, Field, FieldCalib, LifecycleKit, LivelinessCalib,
     Runner,
 };
-use crate::scenario::ScenarioResolution;
-use crate::sensorium::SenseChannelId;
-use crate::value::RaceId;
 use crate::world::{PlaceId, ReproductionParams, World};
 use civsim_bio::anatomy::BodyPlanRegistry;
 use civsim_bio::calibration::{CalibrationError, CalibrationManifest, Profile};
 use civsim_bio::decision::Curve;
 use civsim_bio::tom::AccessChannelRegistry;
+use civsim_foundation::breeding::BreedingSystemRegistry;
+use civsim_foundation::scenario::ScenarioResolution;
+use civsim_foundation::sensorium::SenseChannelId;
+use civsim_foundation::value::RaceId;
 
 /// The declared peoples of a world at the dawn of sentience (design Part 28): the race records, the
 /// founding band placements, and the two registries the dawn seeding reads (the breeding systems a

@@ -73,9 +73,9 @@ use std::collections::{BTreeMap, VecDeque};
 
 use civsim_core::{EventId, Fixed};
 
-use crate::value::ValueProfile;
 use civsim_bio::calibration::{CalibrationError, CalibrationManifest};
 use civsim_bio::decision::Curve;
+use civsim_foundation::value::ValueProfile;
 
 /// A data-defined axiom-axis identifier (a bipolar worldview axis a race carries, Part 40).
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]

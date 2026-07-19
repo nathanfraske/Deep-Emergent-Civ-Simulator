@@ -120,7 +120,7 @@ provenance = "closure"
 # convention (a scale definition, not an authored biology value). Removed rather than left a
 # fail-loud sentinel for a value the engine no longer authors.
 
-# decompose.* (decomposition-as-emergence, Principle 8; crates/sim/src/decompose.rs, record deferred
+# decompose.* (decomposition-as-emergence, Principle 8; crates/foundation/src/decompose.rs, record deferred
 # to the design-doc consolidation): the authored "all warm matter rots" law is replaced by a per-cell
 # decomposition ACTIVITY (DecomposerDriverRegistry::activity_at) that a world derives from its own
 # decomposer LIFE and CONDITIONS, so the substance rate is now a maximum susceptibility and a sterile,
@@ -271,7 +271,7 @@ provenance = "closure"
 
 [[reserved]]
 id = "value_metric.incommensurability_floor"
-basis = "DERIVES (2026-07-03) through value::cross_race_distance via value::project_to_etic_with_loss (crates/sim/src/value.rs): the cross-race incommensurability is measured PER RACE-PAIR as the etic projection loss (the sum of squared stances of every untranslatable emic axis each side drops), folded into the sum-of-squares under one final sqrt, not a flat floor added to every pairing. A full projection adds nothing and one extra untranslatable axis of stance s raises the distance by exactly the magnitude of s. The flat-floor parameter is removed from cross_race_distance entirely (the owner's lean toward no fixed floor), so no constant is authored; no reserved input remains."
+basis = "DERIVES (2026-07-03) through value::cross_race_distance via value::project_to_etic_with_loss (crates/foundation/src/value.rs): the cross-race incommensurability is measured PER RACE-PAIR as the etic projection loss (the sum of squared stances of every untranslatable emic axis each side drops), folded into the sum-of-squares under one final sqrt, not a flat floor added to every pairing. A full projection adds nothing and one extra untranslatable axis of stance s raises the distance by exactly the magnitude of s. The flat-floor parameter is removed from cross_race_distance entirely (the owner's lean toward no fixed floor), so no constant is authored; no reserved input remains."
 status = "reserved"
 value = ""
 unit = "distance"
@@ -527,13 +527,13 @@ provenance = "closure"
 
 [[reserved]]
 id = "articulation.hearing_resolution"
-basis = "a per-race just-noticeable frequency difference (Race.articulation.hearing_resolution, crates/sim/src/race.rs), the sensorium resolution langmod::articulated_geometry reads to set the phonetic contrast budget and confusability, where a SMALLER value is a sharper ear that discriminates more sounds; the discrimination side of the R-SENSORIUM acuity/resolution split (crates/sim/src/sensorium.rs), distinct from the [0, ONE] perception acuity. Set from the race's auditory frequency-discrimination threshold in hertz; the human ear's roughly a-few-hertz JND is one race's row, not the global value Derive-vs-author: a per-race auditory just-noticeable frequency difference (a sensory discrimination datum, R-SENSORIUM); NOT the floor axis acoustic.frequency (the carrier Hz), a per-race sensory phenotype the engine models no deeper, not derivable today"
+basis = "a per-race just-noticeable frequency difference (Race.articulation.hearing_resolution, crates/sim/src/race.rs), the sensorium resolution langmod::articulated_geometry reads to set the phonetic contrast budget and confusability, where a SMALLER value is a sharper ear that discriminates more sounds; the discrimination side of the R-SENSORIUM acuity/resolution split (crates/foundation/src/sensorium.rs), distinct from the [0, ONE] perception acuity. Set from the race's auditory frequency-discrimination threshold in hertz; the human ear's roughly a-few-hertz JND is one race's row, not the global value Derive-vs-author: a per-race auditory just-noticeable frequency difference (a sensory discrimination datum, R-SENSORIUM); NOT the floor axis acoustic.frequency (the carrier Hz), a per-race sensory phenotype the engine models no deeper, not derivable today"
 status = "set"
 value = "3"
 set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
 set_date = "2026-07-09"
 unit = "hertz"
-source = "Part 33.3 language system; record 62.13; crates/sim/src/race.rs Articulation; crates/sim/src/sensorium.rs resolution; crates/sim/src/langmod.rs articulated_geometry"
+source = "Part 33.3 language system; record 62.13; crates/sim/src/race.rs Articulation; crates/foundation/src/sensorium.rs resolution; crates/sim/src/langmod.rs articulated_geometry"
 category = "per_world"
 provenance = "measured"
 
@@ -753,7 +753,7 @@ derived_from = ["lang.concept_thresholds"]
 
 [[reserved]]
 id = "langdet.incommensurability_ceiling"
-basis = "DERIVES (2026-07-03) through langdist::lexical_distance and langdist::phonological_distance (crates/sim/src/langdist.rs) as the normalised language image of value::incommensurability_ceiling (crates/sim/src/value.rs, a pure alias of the measured per-race-pair etic projection loss project_to_etic_with_loss, Wave 1): a concept one side lacks (one-sided coverage) counts as fully non-cognate and a form-disjoint or cross-modality pair reaches the ceiling of one, both emerging from the non-cognate share rather than a separately authored constant, exactly as a wholly untranslatable value pair is the projection-loss ceiling. The cross-modality case reuses the same no-shared-form ceiling (the optional distinct cross-modality ceiling was retired by R-LANG-MODALITY on a Steering Audit ground). No reserved input remains: the ceiling and the one-sided contribution are the top of the normalised [0,1] lexical and phonological share, never an owner number, keying off forms and modalities and never a race id (Principle 9)."
+basis = "DERIVES (2026-07-03) through langdist::lexical_distance and langdist::phonological_distance (crates/sim/src/langdist.rs) as the normalised language image of value::incommensurability_ceiling (crates/foundation/src/value.rs, a pure alias of the measured per-race-pair etic projection loss project_to_etic_with_loss, Wave 1): a concept one side lacks (one-sided coverage) counts as fully non-cognate and a form-disjoint or cross-modality pair reaches the ceiling of one, both emerging from the non-cognate share rather than a separately authored constant, exactly as a wholly untranslatable value pair is the projection-loss ceiling. The cross-modality case reuses the same no-shared-form ceiling (the optional distinct cross-modality ceiling was retired by R-LANG-MODALITY on a Steering Audit ground). No reserved input remains: the ceiling and the one-sided contribution are the top of the normalised [0,1] lexical and phonological share, never an owner number, keying off forms and modalities and never a race id (Principle 9)."
 status = "reserved"
 value = ""
 unit = "distance"
@@ -956,7 +956,7 @@ basis = "the stability span and drift-similarity radius; derives, set equal to t
 status = "reserved"
 value = ""
 unit = "ticks"
-source = "Part 41 composition mechanism; record 62.10; audit section 1l; transmission substrate (crates/sim/src/transmission.rs)"
+source = "Part 41 composition mechanism; record 62.10; audit section 1l; transmission substrate (crates/foundation/src/transmission.rs)"
 category = "derivable"
 provenance = "derived"
 inputs = ["transmission.loss_rate", "transmission.drift_rate"]
@@ -1013,7 +1013,7 @@ category = "defect"
 provenance = "closure"
 
 # --- Knowledge-transmission substrate: the drift and loss rates compose.transmission_stability
-# derives from (Parts 20, 23, 25, 41; crates/sim/src/transmission.rs). The transmit and loss
+# derives from (Parts 20, 23, 25, 41; crates/foundation/src/transmission.rs). The transmit and loss
 # kernels are race-blind and read per-race perception and memory (Principle 9); these are the base
 # scales, never a per-race fidelity table. ---
 
@@ -1025,7 +1025,7 @@ value = "0.03"
 set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
 set_date = "2026-07-09"
 unit = "proficiency_per_copy"
-source = "Parts 20, 23, 25 transmission; Part 41 compose.transmission_stability; crates/sim/src/transmission.rs"
+source = "Parts 20, 23, 25 transmission; Part 41 compose.transmission_stability; crates/foundation/src/transmission.rs"
 category = "defect"
 provenance = "closure"
 
@@ -1035,7 +1035,7 @@ basis = "the erosion timescale a below-floor design loses proficiency at per tic
 status = "reserved"
 value = ""
 unit = "proficiency_per_tick"
-source = "Parts 20, 23, 25 transmission; Part 41 compose.transmission_stability; crates/sim/src/transmission.rs"
+source = "Parts 20, 23, 25 transmission; Part 41 compose.transmission_stability; crates/foundation/src/transmission.rs"
 category = "defect"
 provenance = "closure"
 
@@ -1045,7 +1045,7 @@ basis = "the minimum-viable practitioner count below which a design erodes; the 
 status = "reserved"
 value = ""
 unit = "practitioners"
-source = "Parts 20, 23, 25 transmission; Part 41 compose.transmission_stability; crates/sim/src/transmission.rs"
+source = "Parts 20, 23, 25 transmission; Part 41 compose.transmission_stability; crates/foundation/src/transmission.rs"
 category = "defect"
 provenance = "closure"
 
@@ -1464,13 +1464,13 @@ provenance = "closure"
 
 [[reserved]]
 id = "world.orbital_period_seconds"
-basis = "the length of the world's year in world-seconds (one full orbit), the physical input the life-cadence beat derives from through ticks_from_seconds over time.base_tick_seconds (crates/sim/src/clock.rs); owner-set per world rather than an Earth default: Earth's 31536000 is one option among many, surfaced as the labelled dev fixture OrbitalElements::dev_earth, never a silent default. The Q32.32 range caps a representable year near 2.1e9 world-seconds."
+basis = "the length of the world's year in world-seconds (one full orbit), the physical input the life-cadence beat derives from through ticks_from_seconds over time.base_tick_seconds (crates/foundation/src/clock.rs); owner-set per world rather than an Earth default: Earth's 31536000 is one option among many, surfaced as the labelled dev fixture OrbitalElements::dev_earth, never a silent default. The Q32.32 range caps a representable year near 2.1e9 world-seconds."
 status = "set"
 value = "31556952"
 set_by = "Owner Mirror sign-off 2026-07-09 (docs/working/MIRROR_SIGNOFF_DECISIONS.md)"
 set_date = "2026-07-09"
 unit = "seconds_per_orbit"
-source = "Part 14.6, Part 32, Part 20; crates/world/src/celestial.rs; crates/sim/src/clock.rs ticks_from_seconds"
+source = "Part 14.6, Part 32, Part 20; crates/world/src/celestial.rs; crates/foundation/src/clock.rs ticks_from_seconds"
 category = "per_world"
 provenance = "measured"
 
@@ -1967,7 +1967,7 @@ provenance = "closure"
 # A test-world scenario pushes each change-and-extremes dial in a direction (real, high, low),
 # and the magnitude behind a pushed direction is a reserved end of its own, distinct from the
 # baseline. These are those ends: the `.high` and `.low` siblings the Tempest and Arcanum stress
-# worlds resolve to (scenarios/*.toml, crates/sim/src/scenario.rs). A `real` dial resolves to its
+# worlds resolve to (scenarios/*.toml, crates/foundation/src/scenario.rs). A `real` dial resolves to its
 # baseline entry above; only the pushed directions need a sibling. Every one stays reserved: the
 # stress-world extremes are the owner's to set, surfaced here rather than fabricated, each basis
 # naming the direction and the useful bound the scenario is meant to find.
@@ -2599,7 +2599,7 @@ value = "0.00000035"
 set_by = "Arc 2 Mirror calibration (cited, pending owner sign-off)"
 set_date = "2026-07-09"
 unit = "ratio_per_tick"
-source = "base-level liveliness step 3; crates/sim/src/environ.rs; crates/sim/src/stocks.rs"
+source = "base-level liveliness step 3; crates/sim/src/environ.rs; crates/foundation/src/stocks.rs"
 category = "defect"
 provenance = "closure"
 
@@ -2731,7 +2731,7 @@ set_by = "Owner Mirror sign-off 2026-07-09 (remainder delegated under the derive
 set_date = "2026-07-09"
 value = "1"
 unit = "dose"
-source = "harm-learning slice b; crates/sim/src/learn.rs; crates/sim/src/percept.rs; crates/sim/src/sensorium.rs"
+source = "harm-learning slice b; crates/sim/src/learn.rs; crates/sim/src/percept.rs; crates/foundation/src/sensorium.rs"
 category = "defect"
 provenance = "closure"
 
@@ -2856,11 +2856,11 @@ provenance = "closure"
 
 [[reserved]]
 id = "affordance_percept.reference_stress"
-basis = "the reference actionable contact stress the fracture-potential percept is measured against (AffordancePerceptKind::FracturePotential): the contact stress an ORDINARY being delivers to matter it works, the extraction contest's reference force over a reference contact area (crates/sim/src/material.rs ExtractionParams), so the percept reads 'how breakable is this to an ordinary actor' and discriminates soft matter from hard rock. Set at that typical delivered stress, NOT the fracture axis's theoretical maximum, which would read every ordinary material as equally, trivially breakable. Larger reads more matter as breakable, smaller reserves the percept for the softest"
+basis = "the reference actionable contact stress the fracture-potential percept is measured against (AffordancePerceptKind::FracturePotential): the contact stress an ORDINARY being delivers to matter it works, the extraction contest's reference force over a reference contact area (crates/foundation/src/material.rs ExtractionParams), so the percept reads 'how breakable is this to an ordinary actor' and discriminates soft matter from hard rock. Set at that typical delivered stress, NOT the fracture axis's theoretical maximum, which would read every ordinary material as equally, trivially breakable. Larger reads more matter as breakable, smaller reserves the percept for the softest"
 status = "reserved"
 value = ""
 unit = "MPa"
-source = "ideation arc piece 2 slice 2a; crates/sim/src/affordance_percept.rs; crates/sim/src/material.rs"
+source = "ideation arc piece 2 slice 2a; crates/sim/src/affordance_percept.rs; crates/foundation/src/material.rs"
 category = "defect"
 provenance = "closure"
 

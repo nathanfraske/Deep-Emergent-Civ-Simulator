@@ -51,7 +51,13 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 # The crates whose source is on the path of world content. Out of scope: `core` (the `Fixed` type's
 # own home, where its raw-bit transcendental table legitimately lives) and `units` (the constants
 # quarantine, the one authored place, where the fundamentals and measured floor constants live).
-CRATES = ["crates/bio/src", "crates/physics/src", "crates/sim/src", "crates/world/src"]
+CRATES = [
+    "crates/bio/src",
+    "crates/foundation/src",
+    "crates/physics/src",
+    "crates/sim/src",
+    "crates/world/src",
+]
 HARD = ["::from_bits(", "::from_decimal_str("]
 ADVISORY = ["::from_int(", "::from_ratio("]
 BASELINE = ROOT / "scripts" / "constructor_baseline.tsv"

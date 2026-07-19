@@ -132,11 +132,11 @@ pub struct MagicPosture {
 /// only selects which are armed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
 pub struct ScenarioFeatures {
-    /// Arm the appetitive REWARD learner ([`crate::learn::RewardLearningCalib`]): a being credits a felt
+    /// Arm the appetitive REWARD learner (`civsim_sim::learn::RewardLearningCalib`): a being credits a felt
     /// reserve rise to the action that produced it, forming a "this pays off" belief.
     #[serde(default)]
     pub reward: bool,
-    /// Arm the DISCOVERY / ideation sampler ([`crate::discovery::DiscoveryCalib`]): a being proposes a
+    /// Arm the DISCOVERY / ideation sampler (`civsim_sim::discovery::DiscoveryCalib`): a being proposes a
     /// candidate action each tick, biased by its own reward beliefs. The sampler reads reward beliefs, so a
     /// world arming discovery normally arms `reward` too (an unrewarded discovery world still runs, but has
     /// no rewarded habit to exploit). HONEST LIMIT (flagged, not hidden): arming discovery does NOT by itself
@@ -146,7 +146,7 @@ pub struct ScenarioFeatures {
     /// actions, not that it reasons through tool chains.
     #[serde(default)]
     pub discovery: bool,
-    /// Arm the experiential FELT-CONVICTION learner ([`crate::conviction_experience::FeltConvictionCalib`]),
+    /// Arm the experiential FELT-CONVICTION learner (`civsim_sim::conviction_experience::FeltConvictionCalib`),
     /// the RECORD-and-MOVE leg: a being's own felt experience records against the convictions it holds and
     /// moves them by its per-race epistemic polarity (OWNER_DECISIONS_LOG R2/R4/R5).
     #[serde(default)]

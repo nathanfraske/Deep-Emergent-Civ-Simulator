@@ -44,6 +44,7 @@ CRATES = [
     "crates/core/src",
     "crates/physics/src",
     "crates/bio/src",
+    "crates/foundation/src",
     "crates/sim/src",
     "crates/world/src",
 ]

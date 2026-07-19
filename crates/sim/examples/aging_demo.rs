@@ -16,12 +16,12 @@ use civsim_bio::anatomy::BodyPlanRegistry;
 use civsim_bio::calibration::{CalibrationManifest, Profile};
 use civsim_bio::tom::AccessChannelRegistry;
 use civsim_core::{Fixed, GaussApprox};
+use civsim_foundation::material::WearParams;
+use civsim_foundation::scenario::Scenario;
 use civsim_sim::homeostasis::{
     AffordanceRegistry, HomeostaticAxisDef, HomeostaticRegistry, INTEGRITY,
 };
 use civsim_sim::locomotion::LocomotionParams;
-use civsim_sim::material::WearParams;
-use civsim_sim::scenario::Scenario;
 use civsim_sim::{
     append_morphogen_block, build_dawn_runner, Axiom, AxiomAxisId, AxisSpec, BandSpec,
     BreedingSystem, BreedingSystemId, BreedingSystemRegistry, Channel, CognitionChannel,

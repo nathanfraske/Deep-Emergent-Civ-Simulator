@@ -76,11 +76,11 @@ use crate::homeostasis::{
     MOVE, RELEASE, SHELTER, STRIKE,
 };
 use crate::learn::{EligibilityTrace, SequenceStep};
-use crate::material::{MaterialField, SubstanceMix, WieldedTool};
 use crate::material_percept::MaterialPerceptRegistry;
 use crate::morphogen::Structure;
 use crate::percept::PerceptRegistry;
 use civsim_bio::anatomy::{BodyPlan, BodyPlanRegistry};
+use civsim_foundation::material::{MaterialField, SubstanceMix, WieldedTool};
 
 /// The reserved parameters of the movement physics. The mechanism that reads them is fixed; these
 /// numbers are the owner's to set, surfaced with a basis, never fabricated (Principle 11). The
@@ -119,7 +119,7 @@ pub struct LocomotionParams {
     pub explore_persistence: u64,
     /// The trophic ingest efficiency: the fraction of the biomass a bite removes from a tile's standing
     /// stock that becomes the being's reserve, the rest lost to handling and respiration (the
-    /// [`crate::stocks::flow`] transfer efficiency; base-level liveliness step 3). A being's reserve
+    /// [`civsim_foundation::stocks::flow`] transfer efficiency; base-level liveliness step 3). A being's reserve
     /// gain is conservation-honest against the tile's loss: the tile loses the gross bite, the being
     /// gains that times this efficiency. RESERVED. Basis: the ecological trophic transfer efficiency of
     /// a bite becoming consumer tissue (the Lindeman ~10 percent figure, or the fraction the owner sets
@@ -2558,7 +2558,7 @@ mod tests {
                     None,
                     &PerceptRegistry::empty(),
                     &crate::material_percept::MaterialPerceptRegistry::empty(),
-                    &crate::material::MaterialField::new(),
+                    &civsim_foundation::material::MaterialField::new(),
                     &load_factors,
                     &BTreeMap::new(), // no appetitive block on the fixture path
                     &BTreeMap::new(), // no attraction block on the fixture path
@@ -2644,7 +2644,7 @@ mod tests {
                     None,
                     &crate::percept::PerceptRegistry::empty(),
                     &crate::material_percept::MaterialPerceptRegistry::empty(),
-                    &crate::material::MaterialField::new(),
+                    &civsim_foundation::material::MaterialField::new(),
                     &std::collections::BTreeMap::new(),
                     &std::collections::BTreeMap::new(), // no appetitive block on the fixture path
                     &std::collections::BTreeMap::new(), // no attraction block on the fixture path
@@ -2740,7 +2740,7 @@ mod tests {
                     None,
                     &crate::percept::PerceptRegistry::empty(),
                     &crate::material_percept::MaterialPerceptRegistry::empty(),
-                    &crate::material::MaterialField::new(),
+                    &civsim_foundation::material::MaterialField::new(),
                     &std::collections::BTreeMap::new(),
                     &std::collections::BTreeMap::new(), // no appetitive block on the fixture path
                     &std::collections::BTreeMap::new(), // no attraction block on the fixture path
@@ -3251,7 +3251,7 @@ mod tests {
             None,
             &crate::percept::PerceptRegistry::empty(),
             &crate::material_percept::MaterialPerceptRegistry::empty(),
-            &crate::material::MaterialField::new(),
+            &civsim_foundation::material::MaterialField::new(),
             &std::collections::BTreeMap::new(),
             &std::collections::BTreeMap::new(), // no appetitive block on the fixture path
             &std::collections::BTreeMap::new(), // no attraction block on the fixture path
@@ -3381,7 +3381,7 @@ mod tests {
                     None,
                     &crate::percept::PerceptRegistry::empty(),
                     &crate::material_percept::MaterialPerceptRegistry::empty(),
-                    &crate::material::MaterialField::new(),
+                    &civsim_foundation::material::MaterialField::new(),
                     &std::collections::BTreeMap::new(),
                     &std::collections::BTreeMap::new(), // no appetitive block on the fixture path
                     &std::collections::BTreeMap::new(), // no attraction block on the fixture path
@@ -3506,7 +3506,7 @@ mod tests {
                     None,
                     &percepts,
                     &crate::material_percept::MaterialPerceptRegistry::empty(),
-                    &crate::material::MaterialField::new(),
+                    &civsim_foundation::material::MaterialField::new(),
                     &std::collections::BTreeMap::new(),
                     &std::collections::BTreeMap::new(), // no appetitive block on the fixture path
                     &std::collections::BTreeMap::new(), // no attraction block on the fixture path
@@ -3610,7 +3610,7 @@ mod tests {
                     None,
                     &crate::percept::PerceptRegistry::empty(),
                     &crate::material_percept::MaterialPerceptRegistry::empty(),
-                    &crate::material::MaterialField::new(),
+                    &civsim_foundation::material::MaterialField::new(),
                     &std::collections::BTreeMap::new(),
                     &std::collections::BTreeMap::new(), // no appetitive block on the fixture path
                     &std::collections::BTreeMap::new(), // no attraction block on the fixture path

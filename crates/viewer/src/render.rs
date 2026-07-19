@@ -2173,11 +2173,11 @@ pub struct SurfaceStyle {
 }
 
 /// The DERIVED body-frame sun direction for [`draw_globe`], the unit vector pointing from the body's centre toward the
-/// SUB-SOLAR POINT, given the sub-solar latitude (`declination`, the seasons, from [`civsim_sim::orbit::solar_declination`])
-/// and the sub-solar longitude (`subsolar_longitude`, the time of day, from [`civsim_sim::orbit::subsolar_longitude`]),
+/// SUB-SOLAR POINT, given the sub-solar latitude (`declination`, the seasons, from [`civsim_foundation::orbit::solar_declination`])
+/// and the sub-solar longitude (`subsolar_longitude`, the time of day, from [`civsim_foundation::orbit::subsolar_longitude`]),
 /// both in radians. Because [`draw_globe`]'s Lambert term is the dot of the surface normal with this vector, feeding it
 /// the sub-solar direction makes the shading read out the physical solar elevation cosine
-/// (`sin(lat)sin(decl) + cos(lat)cos(decl)cos(lon - subsolar_lon)`, [`civsim_sim::orbit::solar_elevation_cosine`])
+/// (`sin(lat)sin(decl) + cos(lat)cos(decl)cos(lon - subsolar_lon)`, [`civsim_foundation::orbit::solar_elevation_cosine`])
 /// automatically, so the lit hemisphere and the day/night terminator are DERIVED, never an authored light direction.
 ///
 /// The vector is expressed in [`draw_globe`]'s BODY frame, whose axes come from [`body_to_uv`]: `y` is the north pole
@@ -3014,7 +3014,7 @@ pub fn draw_globe_scene_gpu(
 }
 
 /// One body on the zoomed-out SYSTEM MAP: its orbit's semi-major axis (AU) and eccentricity (which trace the ellipse
-/// through [`civsim_sim::orbit::orbital_state`]), its current mean anomaly (the phase that places the dot on the ellipse),
+/// through [`civsim_foundation::orbit::orbital_state`]), its current mean anomaly (the phase that places the dot on the ellipse),
 /// and the display colour and pixel size of its dot. The orbit geometry is DERIVED from `orbit.rs`; the dot colour is the
 /// planet's derived material colour and the size is a non-canon display choice the caller sets.
 #[derive(Clone, Copy)]
@@ -3121,7 +3121,7 @@ pub fn render_system_map(
             let m = Fixed::from_ratio((frac * 1_000_000.0) as i64, 1_000_000)
                 .checked_mul(Fixed::PI.checked_add(Fixed::PI).unwrap_or(Fixed::PI));
             let point = m.and_then(|m| {
-                civsim_sim::orbit::orbital_state(m, b.eccentricity).map(|s| {
+                civsim_foundation::orbit::orbital_state(m, b.eccentricity).map(|s| {
                     system_map_project(
                         s.position_x_over_a.to_f64_lossy(),
                         s.position_y_over_a.to_f64_lossy(),
@@ -3141,7 +3141,7 @@ pub fn render_system_map(
             }
         }
         // The planet dot at its current phase; fail-soft to the frame centre if the state does not resolve.
-        let dot = civsim_sim::orbit::orbital_state(b.mean_anomaly, b.eccentricity)
+        let dot = civsim_foundation::orbit::orbital_state(b.mean_anomaly, b.eccentricity)
             .map(|s| {
                 system_map_project(
                     s.position_x_over_a.to_f64_lossy(),
@@ -3955,7 +3955,7 @@ mod tests {
 
     #[test]
     fn the_derived_sun_direction_lights_the_sub_solar_face_and_reads_the_solar_elevation() {
-        use civsim_sim::orbit;
+        use civsim_foundation::orbit;
         // The load-bearing identity: the body-frame sun vector dotted with a surface point's body-frame normal is the
         // physical solar-elevation cosine, so draw_globe's Lambert term yields the derived illumination for free. Check
         // it against orbit::solar_elevation_cosine at several surface points, for a tilted, off-meridian sub-solar point.

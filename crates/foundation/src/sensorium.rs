@@ -64,12 +64,12 @@ impl SenseChannelId {
 #[derive(Clone, PartialEq, Eq, Debug, Default)]
 pub struct Sensorium {
     /// Per-channel acuity in `[0, ONE]`: the sensitivity gate. Read by the perception gate (the
-    /// perceive beat of [`crate::world::World`]) and the production-perception Liebig half
-    /// ([`crate::langmod::capability_halves`]). A channel absent here is one the being does not
+    /// perceive beat of `civsim_sim::world::World`) and the production-perception Liebig half
+    /// (`civsim_sim::langmod::capability_halves`). A channel absent here is one the being does not
     /// perceive.
     channels: BTreeMap<SenseChannelId, Fixed>,
     /// Per-channel resolution: the just-noticeable difference on the channel's physical scale
-    /// (smaller is sharper). Read by [`crate::langmod::perceptual_geometry`] to set the phonetic
+    /// (smaller is sharper). Read by `civsim_sim::langmod::perceptual_geometry` to set the phonetic
     /// contrast budget and confusability. A distinct physical quantity from acuity, keyed by the same
     /// channel; absent for a channel whose discrimination is unspecified.
     resolutions: BTreeMap<SenseChannelId, Fixed>,
@@ -93,7 +93,7 @@ impl Sensorium {
     }
 
     /// A sensorium over channel-resolution (just-noticeable-difference) pairs, its acuity map empty:
-    /// the discrimination side alone, for a reader (like [`crate::langmod::perceptual_geometry`]) that
+    /// the discrimination side alone, for a reader (like `civsim_sim::langmod::perceptual_geometry`) that
     /// consumes only the resolution.
     pub fn with_resolution(pairs: impl IntoIterator<Item = (SenseChannelId, Fixed)>) -> Self {
         Sensorium {

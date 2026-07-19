@@ -35,11 +35,18 @@ use std::path::{Path, PathBuf};
 /// constants the wired probes perturb. The gate reads run state and asserts; it never enters the sim.
 const DEV_FIXTURES: &str = include_str!("../../../calibration/profiles/dev-fixtures.toml");
 
-/// The determinism-critical crate source roots the annotations live in, repo-relative.
+/// The determinism-critical crate source roots the annotations live in, repo-relative. A crate
+/// extracted out of `civsim-sim` must be added here in the same commit that moves it, or its
+/// annotations leave the scan silently and the registry rows pointing at them read as stale.
+/// `crates/foundation/src` carries three today (the clock's calendar cell and day cadence, the
+/// decomposer's soil-nutrient recovery); `crates/bio/src` carries none yet and is listed so that
+/// the first one written there is covered rather than dropped.
 const SCANNED_CRATES: &[&str] = &[
     "crates/core/src",
     "crates/physics/src",
     "crates/world/src",
+    "crates/bio/src",
+    "crates/foundation/src",
     "crates/sim/src",
 ];
 

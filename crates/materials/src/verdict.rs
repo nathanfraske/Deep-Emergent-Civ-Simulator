@@ -24,9 +24,9 @@
 use civsim_core::{canonical_sorted, content_id, Fixed, StateHasher};
 
 /// The opaque provenance key every verdict carries: an interned content id referencing the seven-tag joined
-/// register (`civsim_sim::unified_provenance`). The kernel treats it opaquely so it stays below `sim` in the
-/// layering (`core -> physics -> materials -> sim`); `sim` resolves it against the register, keeping the
-/// honesty query where the register lives. So a seeded authored draw becomes a counted entry on the authoring
+/// register (`civsim_foundation::unified_provenance`). The kernel treats it opaquely so it stays below `foundation`
+/// in the layering (`core -> physics -> materials -> foundation -> sim`); `foundation` resolves it against the
+/// register, keeping the honesty query where the register lives. So a seeded authored draw becomes a counted entry on the authoring
 /// surface, queryable rather than remembered.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ProvenanceKey(pub u64);

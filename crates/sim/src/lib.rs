@@ -23,14 +23,14 @@
 //!   rather than running on a fabricated default. This is the operational form of
 //!   the prime directive that the project never fabricates a value (runbook
 //!   section 4, design Principle 11).
-//! - [`conservation`]: the conserved-projection registry of design Part 58. What
+//! - [`civsim_foundation::conservation`]: the conserved-projection registry of design Part 58. What
 //!   must be conserved is not a fixed list but a registry each two-tier subsystem
 //!   declares for itself, so a future subsystem is covered the moment it registers
 //!   its own projection.
 //! - [`lod`]: a minimal two-tier world (individuals and aggregate pools) with
 //!   promotion, demotion, merge, and split, used to exercise conservation and
 //!   referential integrity (design Parts 11, 54, 58).
-//! - [`substrate`]: data-driven substrate definitions with round-trip loading, the
+//! - [`civsim_foundation::substrate`]: data-driven substrate definitions with round-trip loading, the
 //!   schema-and-loader plumbing the runbook says is buildable now while the content
 //!   stays data.
 //! - [`civsim_bio::tom`]: recursive theory of mind (design Part 37, the resolved R-TOM-UPDATE
@@ -43,7 +43,7 @@
 //!   minds, is deceived, and sees lies through, all deterministically. It does not yet
 //!   decide or act (design Part 8); that half is gated on the systems and reserved
 //!   numbers the gating notes name.
-//! - [`transmission`]: the knowledge-transmission substrate (design Parts 20, 23, 25, 41). A
+//! - [`civsim_foundation::transmission`]: the knowledge-transmission substrate (design Parts 20, 23, 25, 41). A
 //!   culture copies opaque content-addressed designs; the copy drifts a fidelity-scaled amount
 //!   and an under-practised design is lost, exposing the drift and loss rates
 //!   `compose.transmission_stability` derives from. The transmit and loss kernels are race-blind,
@@ -56,24 +56,18 @@
 //!   R-REDUCE-ORDER); this is the serial form everything else can run on now.
 
 pub mod absence;
-pub mod affect;
 pub mod affordance_percept;
 pub mod astro;
 pub mod axiom;
 pub mod base_rates;
 pub mod biosphere;
 pub mod body;
-pub mod breeding;
 pub mod census;
-pub mod clock;
-pub mod conservation;
-pub mod contact_transfer;
 pub mod contact_wound;
 pub mod controller;
 pub mod conviction_experience;
 pub mod conviction_percept;
 pub mod dawn_harness;
-pub mod decompose;
 pub mod deeptime;
 pub mod demography;
 pub mod derive_gate;
@@ -95,16 +89,13 @@ pub mod langdist;
 pub mod langmod;
 pub mod language;
 pub mod learn;
-pub mod located;
 pub mod locomotion;
 pub mod lod;
-pub mod material;
 pub mod material_percept;
 pub mod medium;
 pub mod moons;
 pub mod morphogen;
 pub mod nonlocal_coupling;
-pub mod orbit;
 pub mod perceivable_feature;
 pub mod percept;
 pub mod perception_percept;
@@ -116,33 +107,21 @@ pub mod planetary_assembly;
 pub mod planetary_system;
 pub mod planning;
 pub mod primes;
-pub mod profile;
 pub mod race;
 pub mod runner;
-pub mod scenario;
 pub mod secular;
 pub mod semantics;
-pub mod sensorium;
 pub mod smallbody;
 pub mod stellar;
 pub mod stellar_evolution;
-pub mod stocks;
-pub mod substrate;
-pub mod surface_drivers;
-pub mod surface_transport;
-pub mod tectonic_regime;
 pub mod trace;
-pub mod transmission;
 pub mod typology;
-pub mod unified_provenance;
-pub mod value;
 pub mod world;
 
 pub use absence::{
     absence_window, characteristic_lifespan, AbsenceScheduleDef, AbsenceScheduleId, AbsenceStage,
     LIFESPAN_HAZARD_THRESHOLD,
 };
-pub use affect::{AffectAxisId, AffectState, AppraisalBinding, DriveAppraisal};
 pub use axiom::{
     bounded_confidence_mean, confidence_weighted_mean, confidence_weighted_variance, enculturate,
     enculturation_pull_rate, entrenchment_threshold, inherit_seed, Appraisal, Axiom, AxiomAxisDef,
@@ -155,10 +134,6 @@ pub use body::{
     DamageModeRegistry, FluidDef, FluidKindId, FluidPool, FluidRegistry, FunctionId, Insult,
     MeasureKind, PartCondition, TissueLayer, TissueMaterial, TissueMaterialId, TissueRegistry,
     WoundRecord,
-};
-pub use breeding::{
-    fisher_select_step, sex_ratio_selection_coeff, AssignmentRule, BreedingSystem,
-    BreedingSystemId, BreedingSystemRegistry, CompatibilityRule, SexClass,
 };
 pub use census::{
     effective_size_classes, effective_size_sex, effective_size_var, ReproductiveCensus,
@@ -184,15 +159,22 @@ pub use civsim_bio::genome::{
     IncompatibilityTable, LifeHistoryChannel, LinkageGroup, MorphogenParamId, ReproductionMode,
     SchemeId, ToleranceAxisId, TraitId,
 };
-pub use clock::{PlaybackDriver, SimClock, Steppable, LIFE_CADENCE_TICKS, YEARS_PER_GENERATION};
-pub use conservation::{ConservationError, ConservationRegistry};
+pub use civsim_foundation::affect::{AffectAxisId, AffectState, AppraisalBinding, DriveAppraisal};
+pub use civsim_foundation::breeding::{
+    fisher_select_step, sex_ratio_selection_coeff, AssignmentRule, BreedingSystem,
+    BreedingSystemId, BreedingSystemRegistry, CompatibilityRule, SexClass,
+};
+pub use civsim_foundation::clock::{
+    PlaybackDriver, SimClock, Steppable, LIFE_CADENCE_TICKS, YEARS_PER_GENERATION,
+};
+pub use civsim_foundation::conservation::{ConservationError, ConservationRegistry};
+pub use civsim_foundation::decompose::{
+    CombineMode, DecomposerDriver, DecomposerDriverRegistry, DecomposerKernelId,
+    DecomposerStockField,
+};
 pub use controller::{
     forage_taxis_weights, taxis_move_weights, weight_count, Controller, ControllerDecision,
     ControllerLayout, ForageGains,
-};
-pub use decompose::{
-    CombineMode, DecomposerDriver, DecomposerDriverRegistry, DecomposerKernelId,
-    DecomposerStockField,
 };
 pub use demography::{hazard_age, AgeHistogram};
 pub use dialogue::{
@@ -223,6 +205,22 @@ pub use civsim_bio::tom::{
 pub use civsim_compose::{
     derive_capabilities, CapabilityCaps, CapabilityKernel, CapabilityRefs, CapabilityVector,
     FunctionLawDef, FunctionLawId, FunctionLawRegistry,
+};
+pub use civsim_foundation::scenario::{
+    Direction, MagicPosture, RacePosture, Scenario, ScenarioError, ScenarioMeta,
+};
+pub use civsim_foundation::sensorium::{SenseChannelId, Sensorium};
+pub use civsim_foundation::substrate::Substrate;
+pub use civsim_foundation::transmission::{
+    copy_drift, copy_fidelity, drift_similarity_radius, erode_and_cull, is_stabilised,
+    stability_span, transmit, transmit_draw, DesignHistory, DesignId, Knowledge,
+    TransmissionParams,
+};
+pub use civsim_foundation::value::{
+    conflict_pressure, cross_race_distance, euclidean_distance, incommensurability_ceiling,
+    project_to_etic, project_to_etic_with_loss, value_distance, EmicProjection, EticAxisId,
+    EticProfile, EticSubstrate, GraphEdge, GroundMetric, RaceId, RaceProjection, StructureKind,
+    ValueAxisId, ValueProfile, ValueStructure,
 };
 pub use dawn_harness::{
     arm_dawn_languages, build_dawn_runner, DawnPeoples, EmbodimentGenesis, LanguageGenesis,
@@ -256,33 +254,19 @@ pub use personality::{
 };
 pub use primes::{nsm_concept_ids, nsm_gloss, nsm_prime_count, nsm_primes, Prime};
 pub use race::{Articulation, BandSpec, Race};
-pub use scenario::{Direction, MagicPosture, RacePosture, Scenario, ScenarioError, ScenarioMeta};
 pub use semantics::{
     concept_thresholds, substrate_quantization, Concept, ConceptThresholds, SemanticSubstrate,
     QUANTIZATION_DIVISOR,
 };
-pub use sensorium::{SenseChannelId, Sensorium};
-pub use substrate::Substrate;
 pub use trace::{
     corroding_salience, mortality_implication_weight, organic_salience, TraceImplicationSpec,
     TraceKindDef, TraceKindId, TraceKindRegistry, TransformKernelId, TransformKind,
-};
-pub use transmission::{
-    copy_drift, copy_fidelity, drift_similarity_radius, erode_and_cull, is_stabilised,
-    stability_span, transmit, transmit_draw, DesignHistory, DesignId, Knowledge,
-    TransmissionParams,
 };
 pub use typology::{
     grammar_parse_cost, information_weights, sample_profile, tilted_weights, typology_distance,
     validate as validate_typology, wals_seed, HarmonyBias, HarmonyModel, TiltParams, TypologyError,
     TypologyParamDef, TypologyParamId, TypologyParams, TypologyPrior, TypologyProfile,
     TypologyRegistry, TypologyValueDef, TypologyValueId, ValueMetric,
-};
-pub use value::{
-    conflict_pressure, cross_race_distance, euclidean_distance, incommensurability_ceiling,
-    project_to_etic, project_to_etic_with_loss, value_distance, EmicProjection, EticAxisId,
-    EticProfile, EticSubstrate, GraphEdge, GroundMetric, RaceId, RaceProjection, StructureKind,
-    ValueAxisId, ValueProfile, ValueStructure,
 };
 pub use world::{
     build_etic_substrate, GossipParams, PlaceId, ReproductionParams, Stimulus, TickInput, Trace,

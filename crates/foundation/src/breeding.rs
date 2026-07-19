@@ -32,9 +32,9 @@
 //! classes pair"; a hermaphroditic entry allows self or any.
 //!
 //! What a [`SexClass`] feeds downstream: the reproductive-success census
-//! ([`crate::census::ReproductiveCensus`]) tallies each breeder's sex and offspring count so an
+//! (`civsim_sim::census::ReproductiveCensus`) tallies each breeder's sex and offspring count so an
 //! effective population size Ne can be derived through one race-blind kernel. This module carries
-//! only the phenotype and the mating-type registry; the Ne derivation lives in [`crate::census`].
+//! only the phenotype and the mating-type registry; the Ne derivation lives in `civsim_sim::census`.
 
 use std::collections::BTreeMap;
 
@@ -47,7 +47,7 @@ use civsim_core::Fixed;
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Default)]
 pub struct SexClass(pub u16);
 
-/// A data-defined breeding-system identifier (Part 40), carried on a [`crate::race::Race`] and
+/// A data-defined breeding-system identifier (Part 40), carried on a `civsim_sim::race::Race` and
 /// resolved through a [`BreedingSystemRegistry`].
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Default)]
 pub struct BreedingSystemId(pub u32);

@@ -19,7 +19,7 @@
 //! runbook requires in CI from the first tick, alongside the determinism harness.
 
 use civsim_core::{EventId, Fixed, StableId};
-use civsim_sim::conservation::ConservationRegistry;
+use civsim_foundation::conservation::ConservationRegistry;
 use civsim_sim::lod::TwoTierWorld;
 use civsim_sim::{
     crystallization_order, AgeHistogram, AggregateInstitution, AttrKindId, BeliefKey, BeliefParams,

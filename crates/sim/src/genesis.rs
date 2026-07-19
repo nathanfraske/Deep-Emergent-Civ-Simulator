@@ -18,7 +18,7 @@
 //! becomes region environmental profiles, each region generates a closed-food-web biosphere
 //! ([`crate::biosphere`]), the pre-dawn epoch ([`crate::epoch`]) radiates the founders over
 //! deep time, and a representative surviving organism of each species is promoted onto the map
-//! through the located-identity join ([`crate::located`]). The sequence is worldgen, then the
+//! through the located-identity join ([`civsim_foundation::located`]). The sequence is worldgen, then the
 //! pre-dawn biosphere epoch, then the dawn-ready living world, all before any people arrive,
 //! so a world's ecology is mature and self-made when play begins.
 //!
@@ -41,15 +41,15 @@ use crate::biosphere::{
     generate, representative_structure, Biosphere, EnvProfile, GeneratorParams, Region, SourceRef,
     Species,
 };
-use crate::clock::Steppable;
 use crate::environ::AbioticSourceRegistry;
 use crate::epoch::{run, EpochParams, EpochReport, Radiation};
-use crate::located::{LocationIndex, OccupantId};
 use crate::morphogen::MorphogenProgram;
 use crate::physiology::whole_body_composition_vector;
 use civsim_bio::anatomy::{temperament_word, BodyPlanRegistry, WorldProfile};
 use civsim_bio::genome::IncompatibilityTable;
 use civsim_bio::lineage::SpeciesId;
+use civsim_foundation::clock::Steppable;
+use civsim_foundation::located::{LocationIndex, OccupantId};
 
 /// The parameters of the whole sequence: the world size, the region block side, and the
 /// generator and epoch parameters. DEVELOPMENT FIXTURE via [`GenesisParams::dev_default`].
@@ -621,7 +621,7 @@ struct StagedRegion {
 /// than only seen as the finished [`LivingWorld`]. Where [`genesis`] runs worldgen, then every
 /// region's whole radiation, then the dawn placement in one call, this driver runs worldgen and
 /// the founder generation up front, then advances every region's radiation one generation per
-/// [`crate::clock::Steppable::step`], and can produce a [`LivingWorld`] snapshot of the current state at any
+/// [`civsim_foundation::clock::Steppable::step`], and can produce a [`LivingWorld`] snapshot of the current state at any
 /// point. Stepped to completion it yields a living world bit-identical to [`genesis`], since the
 /// radiation stepper reproduces the batch epoch exactly and the placement is a pure function of
 /// the matured biospheres. It is a driver over canonical state, not a view: it holds no camera and

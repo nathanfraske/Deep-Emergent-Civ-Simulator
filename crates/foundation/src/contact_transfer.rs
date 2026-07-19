@@ -14,7 +14,7 @@
 
 //! The contact-energy-transfer registry (hunt-kill strike arc, piece 1): the data-defined binding from a
 //! contact channel to the physics-floor law by which an acting part delivers energy into what it contacts.
-//! It is the harden-to-registry sibling of the channel reach registry ([`crate::perception_reach`]): the
+//! It is the harden-to-registry sibling of the channel reach registry (`civsim_sim::perception_reach`): the
 //! kernel SET is fixed Rust (the mechanism), and the membership (which contact channels exist and which
 //! transfer law each delivers by) is data that grows with the world (Principle 11).
 //!
@@ -210,7 +210,7 @@ impl ContactTransferRegistry {
     /// reference inherits a validated binding; a dangling reference is the fail-loud load error that makes a
     /// grade/delivery mapping desync impossible (there is no second binding to diverge, only a reference that must
     /// resolve). The walk is in canonical channel-id order, so the first-reported offender is deterministic. This
-    /// is the wire-boundary check [`crate::runner::Embodiment::set_contact_transfer`] runs against the Embodiment's
+    /// is the wire-boundary check `civsim_sim::runner::Embodiment::set_contact_transfer` runs against the Embodiment's
     /// grade registry.
     pub fn validate(&self, grade_laws: &FunctionLawRegistry) -> Result<(), String> {
         for (channel, row) in self.channels.iter() {

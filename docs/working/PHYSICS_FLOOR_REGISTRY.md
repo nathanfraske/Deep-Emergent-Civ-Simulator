@@ -17,35 +17,15 @@ The lists below are GENERATED from `crates/physics/data/*.toml`, `crates/physics
 
 ## Deriving substrates (check here BEFORE authoring: what the world derives, and where)
 
-The 21 deriving subsystems below live OUTSIDE the authored floor. Each produces a world quantity from the floor and the situation, so its output must never be authored: if the value you need appears here, read or extend the subsystem, do not set a number. This is the list that stops `1 year = 365 days` from being authored when orbital mechanics already derives it. Generated from the `// @derives:` markers in the code; a subsystem missing its marker is a gap in this map, so mark every derivation entry point.
+The 11 deriving subsystems below live OUTSIDE the authored floor. Each produces a world quantity from the floor and the situation, so its output must never be authored: if the value you need appears here, read or extend the subsystem, do not set a number. This is the list that stops `1 year = 365 days` from being authored when orbital mechanics already derives it. Generated from the `// @derives:` markers in the code; a subsystem missing its marker is a gap in this map, so mark every derivation entry point.
 
-### `crates/materials/src/conductivity.rs`
+### `crates/foundation/src/clock.rs`
 
-- lattice thermal conductivity k(T,P) <- a measured kappa_298 anchor + banked Grueneisen, bulk modulus and expansivity (measured rung) (`crates/materials/src/conductivity.rs:121`)
-- the radiative conductivity silicates gain at high T <- temperature (`crates/materials/src/conductivity.rs:165`)
-- a phase's conductivity at a temperature <- its ladder rung's anchor, band and exponent (`crates/materials/src/conductivity.rs:384`)
-- a rock's effective thermal conductivity <- the per-phase conductivity ladder + the world's own mineral census (Bruggeman self-consistent EMT) (`crates/materials/src/conductivity.rs:615`)
-### `crates/materials/src/freezer.rs`
+- a world's year/day/season in TICKS, and the cell area in metres <- the world's orbit (world-seconds) divided by the base tick (1 tick = 1 world-second, reserved). The calendar is NOT a hardcoded 365 days; it falls out of the orbit and the tick. The cell edge derives as a reference creature's real ground speed (m/s) x 1 s/tick (see locomotion base_speed), cross-checked by NPP density x cell area = standing crop. (`crates/foundation/src/clock.rs:81`)
+- the DAY cadence in TICKS (the rotation-derived beat: aging, drift, the diurnal calendar) <- the ROTATION period floored over the base tick, this same kernel; repointed here off the celestial.rs passthrough (OrbitalElements is a manifest read, not a derivation) and differentiated from clock_calendar_cell (which floors the ORBITAL period, the year), so the two temporal cadences are distinct derivations, day versus year (gate ruling, #168). The rotation cadence is real on the run path: DiurnalSky::rotation_period_ticks drives the diurnal cycle. (`crates/foundation/src/clock.rs:82`)
+### `crates/foundation/src/decompose.rs`
 
-- the bulk sound speed <- bulk modulus + density (`crates/materials/src/freezer.rs:176`)
-### `crates/materials/src/properties.rs`
-
-- a phase's density <- molar mass + molar volume (`crates/materials/src/properties.rs:87`)
-- the Debye temperature <- sound speed + atomic volume (`crates/materials/src/properties.rs:124`)
-- lattice thermal conductivity k(T) <- Grueneisen, mean atomic mass, Debye temperature, atomic volume, cell count (Slack estimator rung) (`crates/materials/src/properties.rs:694`)
-### `crates/physics/src/gruneisen.rs`
-
-- a rock's Gruneisen parameter <- the cited per-phase gamma table + the world's own mineral census (`crates/physics/src/gruneisen.rs:328`)
-### `crates/physics/src/young_thermal.rs`
-
-- the high-temperature specific heat <- mean atomic mass (Dulong-Petit) (`crates/physics/src/young_thermal.rs:301`)
-### `crates/sim/src/clock.rs`
-
-- a world's year/day/season in TICKS, and the cell area in metres <- the world's orbit (world-seconds) divided by the base tick (1 tick = 1 world-second, reserved). The calendar is NOT a hardcoded 365 days; it falls out of the orbit and the tick. The cell edge derives as a reference creature's real ground speed (m/s) x 1 s/tick (see locomotion base_speed), cross-checked by NPP density x cell area = standing crop. (`crates/sim/src/clock.rs:81`)
-- the DAY cadence in TICKS (the rotation-derived beat: aging, drift, the diurnal calendar) <- the ROTATION period floored over the base tick, this same kernel; repointed here off the celestial.rs passthrough (OrbitalElements is a manifest read, not a derivation) and differentiated from clock_calendar_cell (which floors the ORBITAL period, the year), so the two temporal cadences are distinct derivations, day versus year (gate ruling, #168). The rotation cadence is real on the run path: DiurnalSky::rotation_period_ticks drives the diurnal cycle. (`crates/sim/src/clock.rs:82`)
-### `crates/sim/src/decompose.rs`
-
-- soil-nutrient recovery (the matter cycle corpse -> decompose -> soil -> productivity) <- local conditions (moisture, oxygen, warmth via a Liebig minimum) x the standing decomposer biomass. Decomposition is NOT universally good and NOT an authored recovery time: it is condition-gated and life-gated, so an anaerobic or decomposer-poor world recovers differently (the axis set is data, not the hardcoded moisture-oxygen-warmth triad). (`crates/sim/src/decompose.rs:145`)
+- soil-nutrient recovery (the matter cycle corpse -> decompose -> soil -> productivity) <- local conditions (moisture, oxygen, warmth via a Liebig minimum) x the standing decomposer biomass. Decomposition is NOT universally good and NOT an authored recovery time: it is condition-gated and life-gated, so an anaerobic or decomposer-poor world recovers differently (the axis set is data, not the hardcoded moisture-oxygen-warmth triad). (`crates/foundation/src/decompose.rs:145`)
 ### `crates/sim/src/environ.rs`
 
 - local water presence, rainfall, evaporation, runoff <- Clausius-Clapeyron saturation(local temperature) + Dalton evaporation + condensation where moisture exceeds saturation + downhill routing to the lowest neighbour. Water is NOT authored per cell; it falls out of temperature and terrain. (`crates/sim/src/environ.rs:1552`)

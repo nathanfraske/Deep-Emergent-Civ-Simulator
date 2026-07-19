@@ -35,12 +35,12 @@ use civsim_bio::anatomy::{
 use civsim_bio::genome::{GenePool, SchemeId};
 use civsim_bio::lineage::SpeciesId;
 use civsim_core::{DrawKey, Fixed, Phase};
+use civsim_foundation::stocks::Stock;
 use civsim_sim::biosphere::{grounded, Niche, SourceRef, Species};
 use civsim_sim::body::{Body, BodyParams, BLOOD};
 use civsim_sim::homeostasis::{
     birth_viable, AffordanceRegistry, Homeostasis, HomeostaticRegistry, ENERGY, MOVE,
 };
-use civsim_sim::stocks::Stock;
 use civsim_sim::{CapabilityCaps, CapabilityRefs};
 
 // Dev-registry organ kind ids (crate::anatomy BodyPlanRegistry::dev_default): 0 fat-body (energy

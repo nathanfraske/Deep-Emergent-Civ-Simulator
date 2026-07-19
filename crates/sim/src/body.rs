@@ -46,8 +46,8 @@ use std::collections::BTreeMap;
 use civsim_bio::anatomy::BodyPlanRegistry;
 use civsim_physics::laws;
 
-use crate::stocks::Stock;
 use civsim_bio::anatomy::BodyPlan;
+use civsim_foundation::stocks::Stock;
 
 // ============================================================================================
 // Tissue materials: data over the resolved material floor axes (mat.*/therm.*).

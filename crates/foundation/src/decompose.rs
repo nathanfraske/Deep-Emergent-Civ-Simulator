@@ -16,7 +16,7 @@
 //! decomposition emerges from a world's life and conditions rather than from an engine law that all
 //! warm matter decays (Principle 8).
 //!
-//! The material substrate ([`crate::material`]) and its matter cycle ([`crate::runner::Runner`]'s
+//! The material substrate ([`crate::material`]) and its matter cycle (`civsim_sim::runner::Runner`'s
 //! `step_matter_cycle`) already break a cell's organic matter down over time, gated below the
 //! substance's own thermal barrier (a frozen remains is preserved), and conserve the lost mass into
 //! the ground. That beat as first written decayed EVERY warm cell of organic matter at the substance's
@@ -32,7 +32,7 @@
 //! combined by a data-defined [`CombineMode`] (the default gates the drivers against each other, so a
 //! sterile cell does not decay even under favorable conditions; the alternative makes them independent
 //! sufficient drivers). The mechanism is fixed Rust and the membership, parameters, and combine mode are
-//! data (Principle 11), sibling to the transform-kernel substrate ([`crate::trace::TransformKernelId`]), the
+//! data (Principle 11), sibling to the transform-kernel substrate (`civsim_sim::trace::TransformKernelId`), the
 //! value, semantic, and institution-function substrates. Two kernels are defined:
 //!
 //! - The CONDITIONS kernel is the abiotic microbial-activity PROXY: a Liebig minimum of saturating
@@ -111,7 +111,7 @@ pub enum DecomposerKernelId {
 }
 
 /// A CONDITION SOURCE (Arc 5 T6): the kind of environmental quantity a Conditions axis reads. This is the
-/// fixed-vocabulary-plus-data-binding boundary the abiotic [`crate::environ::AbioticField`] draws: the engine
+/// fixed-vocabulary-plus-data-binding boundary the abiotic `civsim_sim::environ::AbioticField` draws: the engine
 /// knows how to READ each source (the caller supplies its per-cell value), while WHICH sources gate a given
 /// substance's decomposition, and their reference scales, are the world's data. Extending the set is a Rust
 /// change (a new physical quantity needs a new reader), the same bounded cost `AbioticField` has; a world's
@@ -140,7 +140,7 @@ pub struct ConditionAxis {
 }
 
 /// A DECOMPOSER-DRIVER row: a data binding of one [`DecomposerKernelId`] to its reserved parameters,
-/// keyed by name (the accepted [`crate::trace::TransformKind`] shape). A registry is a sequence of these
+/// keyed by name (the accepted `civsim_sim::trace::TransformKind` shape). A registry is a sequence of these
 /// rows, and a cell's decomposition activity is the clamped saturating sum of their contributions.
 // @derives[decomposition_recovery]: soil-nutrient recovery (the matter cycle corpse -> decompose -> soil -> productivity) <- local conditions (moisture, oxygen, warmth via a Liebig minimum) x the standing decomposer biomass. Decomposition is NOT universally good and NOT an authored recovery time: it is condition-gated and life-gated, so an anaerobic or decomposer-poor world recovers differently (the axis set is data, not the hardcoded moisture-oxygen-warmth triad).
 #[derive(Clone, Debug)]

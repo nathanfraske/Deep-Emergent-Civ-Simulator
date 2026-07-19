@@ -20,7 +20,7 @@
 //! now DERIVES from a census of who bred and how well: the breeding sex ratio and the variance in
 //! reproductive success are the two demographic facts that pull Ne below the head count, and both
 //! are measured, not authored. A [`ReproductiveCensus`] tallies, per contributing parent per
-//! window, the sex class ([`crate::breeding::SexClass`], a gene-fed phenotype) and the offspring
+//! window, the sex class ([`civsim_foundation::breeding::SexClass`], a gene-fed phenotype) and the offspring
 //! count; the tally reduces to [`ReproductiveMoments`] (the sex split and the reproductive moments
 //! sum k, sum k squared), and one race-blind kernel ([`ReproductiveMoments::effective_size`]) reads
 //! the moments and returns Ne.
@@ -29,7 +29,7 @@
 //! Ne only through their census data, through the one kernel; swapping their census inputs swaps
 //! their Ne; a sex-symmetric, Poisson-ideal census returns N with no downward bias; and the 1:1 sex
 //! ratio a stable Ne rests on emerges from Fisherian selection on the sex-determination locus
-//! ([`crate::breeding`]), never from a hardcoded number.
+//! ([`civsim_foundation::breeding`]), never from a hardcoded number.
 //!
 //! The two textbook results the kernel composes:
 //!
@@ -56,7 +56,7 @@ use std::collections::BTreeMap;
 
 use civsim_core::{Fixed, StableId, StateHasher};
 
-use crate::breeding::SexClass;
+use civsim_foundation::breeding::SexClass;
 
 /// Wright's separate-sexes effective population size, `Ne = 4 Nm Nf / (Nm + Nf)` (Wright 1931):
 /// with `Nm` breeding members of one class and `Nf` of the other, a skewed sex ratio drives Ne well
@@ -432,8 +432,8 @@ impl ReproductiveCensus {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::conservation::ConservationRegistry;
     use civsim_core::{DrawKey, Phase};
+    use civsim_foundation::conservation::ConservationRegistry;
 
     fn sc(i: u16) -> SexClass {
         SexClass(i)

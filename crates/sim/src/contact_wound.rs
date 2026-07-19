@@ -15,7 +15,7 @@
 //! The contact wound resolve (hunt-kill strike arc, piece 2): the geometry-derived contact area and the wound
 //! a delivered energy inflicts on a struck [`crate::morphogen::Segment`] against that segment's OWN material,
 //! computed from the physics floor. It is the sibling of the contact-energy-transfer registry
-//! ([`crate::contact_transfer`]): piece 1 resolves HOW MUCH energy a contact delivers (by the acting part's own
+//! ([`civsim_foundation::contact_transfer`]): piece 1 resolves HOW MUCH energy a contact delivers (by the acting part's own
 //! channel and body), piece 2 resolves the WOUND that energy makes (against the struck part's own material and
 //! geometry). Both are pure and off the run path; the strike wire consumes them, so this is byte-neutral by
 //! construction.
@@ -47,7 +47,7 @@
 //!
 //! FLAGGED FOLLOW-ON (surfaced by the section-9 audit): the DEFENDER-resistance law is a single mechanical
 //! Griffith fracture (delivered energy against `mat.fracture_energy` times contact area), NOT yet kernel-
-//! dispatched the way piece 1's DELIVERY law is ([`crate::contact_transfer::TransferKernel`]). So a being whose
+//! dispatched the way piece 1's DELIVERY law is ([`civsim_foundation::contact_transfer::TransferKernel`]). So a being whose
 //! integrity resists by a non-Griffith law (a field, plasma, or mana body, the same alien piece 1's channel set
 //! anticipates on the attack side) would today need a code change rather than a data row, and the
 //! absence convention defaults a body carrying no `mat.fracture_energy` to maximally fragile. The symmetric fix

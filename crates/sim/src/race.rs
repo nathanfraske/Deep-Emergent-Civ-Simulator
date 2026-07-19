@@ -32,12 +32,12 @@
 use civsim_core::Fixed;
 
 use crate::axiom::IntrinsicBeliefs;
-use crate::breeding::BreedingSystemId;
 use crate::morphogen::MorphogenProgram;
-use crate::value::RaceId;
 use crate::world::PlaceId;
 use civsim_bio::anatomy::BodyPlan;
 use civsim_bio::genome::{GenePool, GeneSet, GeneticScheme, ReproductionMode};
+use civsim_foundation::breeding::BreedingSystemId;
+use civsim_foundation::value::RaceId;
 
 /// A sentient race as it stands at the dawn: its genetic substrate and its innate belief
 /// disposition, all per-race data (Principle 11). The mechanism that seeds and expresses a
@@ -98,7 +98,7 @@ pub struct Race {
     /// crosses into adulthood is per-race data, not a hardcoded threshold. A plain count, no
     /// formula: the owner sets it.
     pub maturity_years: u32,
-    /// The race's breeding system, by id into the world's [`crate::breeding::BreedingSystemRegistry`]
+    /// The race's breeding system, by id into the world's [`civsim_foundation::breeding::BreedingSystemRegistry`]
     /// (design Part 25, R-REPRO). It names how many sex classes the race carries and how a genotype
     /// assigns to one, so a race's sex is a gene-fed phenotype read off its sex-determination locus,
     /// and the number of mating types is per-race data rather than a closed binary enum (Principle

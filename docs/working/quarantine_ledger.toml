@@ -318,7 +318,7 @@ owed = "cite-source for the lived-experience integration window, or key-on-being
 
 [[entry]]
 id = "q-decompose-01"
-file = "crates/sim/src/decompose.rs"
+file = "crates/foundation/src/decompose.rs"
 anchor = "dev_fixture"
 value = "DecomposerDriver::conditions(Fixed::from_ratio(1,4), Fixed::ONE, Fixed::from_int(10)); DecomposerDriver::life(Fixed::ONE)"
 shapes = "The moisture saturation, oxygen (respirable) reference, warmth span, and decomposer-biomass reference that set a cell's decomposition activity in [0,1] (rot rate -> matter cycle -> soil-nutrient recovery -> productivity)."

@@ -48,10 +48,10 @@
 //! advance the temporal-LOD work reserves), surfaced rather than fabricated, so only the
 //! exact reference sampler is built here.
 
-use crate::breeding::SexClass;
 use crate::census::ReproductiveMoments;
 use civsim_bio::decision::Curve;
 use civsim_core::{DrawKey, Fixed, Phase, StateHasher};
+use civsim_foundation::breeding::SexClass;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -139,7 +139,7 @@ impl AgeHistogram {
 
     /// The total member count across all ages: the conserved population projection (design
     /// Part 58, R-PROJ-REGISTER). Returned as `i128` so it composes directly with the
-    /// [`crate::conservation::ConservationRegistry`], where addition is exact and
+    /// [`civsim_foundation::conservation::ConservationRegistry`], where addition is exact and
     /// associative, so an age distribution's total is conserved bit for bit across every
     /// structural change (aging, mortality, merge, promotion).
     pub fn total(&self) -> i128 {
@@ -272,7 +272,7 @@ impl AgeHistogram {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::conservation::ConservationRegistry;
+    use civsim_foundation::conservation::ConservationRegistry;
 
     /// A rising age-hazard curve as data: death probability climbs with age, the
     /// data-driven default the individual tier's tests also use. The shape is a fixture,
@@ -522,7 +522,7 @@ mod tests {
         // reproductive contribution feeds the moment accumulator, so a coarse pool derives Ne with
         // no individuals. Population is conserved as an inflow (age zero rises by the offspring
         // added), and the moments reduce to a positive effective size.
-        use crate::breeding::SexClass;
+        use civsim_foundation::breeding::SexClass;
         let mut ages = AgeHistogram::from_pairs([(20, 30), (40, 20)]);
         let mut moments = ReproductiveMoments::new();
         let before = ages.total();

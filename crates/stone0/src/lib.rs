@@ -420,9 +420,15 @@ fn provenance_input_hash(root: &Path) -> u64 {
     ] {
         files.push(root.join(extra));
     }
+    // Every directory the python gates scan must appear here, or an edit inside one of them would not
+    // invalidate the cached verdict and a stale verdict would be reused. `crates/bio/src` and
+    // `crates/foundation/src` are the scan roots the two crate extractions added (see the CRATES lists
+    // in constructor_gate.py and determinism_gate.py); they are covered here for that reason.
     for dir in [
         "crates/core/src",
         "crates/physics/src",
+        "crates/bio/src",
+        "crates/foundation/src",
         "crates/sim/src",
         "crates/world/src",
     ] {

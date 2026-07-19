@@ -16,10 +16,10 @@
 //! being senses in the cell it stands on (the lifetime/demography keystone, pillar 2, physical-trace
 //! persistence, trace slice C; Principles 8, 9, 10, 11).
 //!
-//! This is the [`crate::material::MaterialField`] sibling of the biology-class feature percept
+//! This is the [`civsim_foundation::material::MaterialField`] sibling of the biology-class feature percept
 //! ([`crate::percept::PerceptRegistry`]). The biology percept senses the raw amount of each declared
 //! [`crate::edibility::Composition`] class; this one senses the raw amount of each declared MATERIAL
-//! substance in the cell's [`crate::material::SubstanceMix`] (`spent_hull`, `granite`, `oilseed`, whatever
+//! substance in the cell's [`civsim_foundation::material::SubstanceMix`] (`spent_hull`, `granite`, `oilseed`, whatever
 //! a world declares). It exists because the two feature paths are disjoint: the biology percept never
 //! reads the material field, and the affordance percept ([`crate::affordance_percept`]) reads the material
 //! field but exposes only DERIVED kernels (a single aggregate `FracturePotential`), so a being cannot tell
@@ -41,7 +41,7 @@
 
 use civsim_core::Fixed;
 
-use crate::material::SubstanceMix;
+use civsim_foundation::material::SubstanceMix;
 
 /// A material-percept id, minted through the registry (extensible, never a closed enum). The numeric value
 /// is the percept's slot in the controller's material-feature input block, in registry order.

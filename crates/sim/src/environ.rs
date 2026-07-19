@@ -49,11 +49,11 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::edibility::Composition;
 use crate::locomotion::ResourceField;
-use crate::material::{EarthworkField, SoilNutrientField};
 use crate::physiology::{ENERGY_DENSITY, SALINITY, WATER_FRACTION};
 use crate::runner::Field;
-use crate::stocks::Stock;
 use civsim_bio::calibration::{CalibrationError, CalibrationManifest};
+use civsim_foundation::material::{EarthworkField, SoilNutrientField};
+use civsim_foundation::stocks::Stock;
 
 /// A scalar field on the flat bounded map, Q32.32, row-major (`idx = y * width + x`), the shape the
 /// temperature [`Field`] and the GPU field kernel use. The membership of the environmental stack is
@@ -155,7 +155,7 @@ pub struct EnvironCalib {
     pub soil_baseline: Fixed,
     /// The producer-biomass regrowth rate (base-level liveliness step 3): the logistic regeneration
     /// coefficient the standing food stock regrows toward the productivity capacity at each tick
-    /// ([`crate::stocks::Stock`]). Larger regrows a grazed patch faster and raises the carrying
+    /// ([`civsim_foundation::stocks::Stock`]). Larger regrows a grazed patch faster and raises the carrying
     /// capacity; smaller makes food scarcer.
     pub regen_rate: Fixed,
     /// The colonization propagule floor (base-level liveliness step 3): the small standing biomass a
@@ -1404,7 +1404,7 @@ impl EnvironFields {
 
     /// The static worldgen MOISTURE at a cell (the precipitation and soil-moisture proxy, not standing
     /// water depth), a pure read over the frozen moisture input for the decomposition-activity kernel
-    /// ([`crate::decompose`]). Reads nothing dynamic and mutates nothing, so exposing it changes no state
+    /// ([`civsim_foundation::decompose`]). Reads nothing dynamic and mutates nothing, so exposing it changes no state
     /// and no hash. Bounds are the caller's responsibility, exactly as the reader's [`Self::water_at`].
     pub fn moisture_at(&self, x: i32, y: i32) -> Fixed {
         self.moisture[self.idx(x, y)]

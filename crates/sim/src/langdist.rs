@@ -28,7 +28,7 @@
 //!   normalised tolerance directly). Two cases carry no separate authored constant: a concept one side
 //!   lacks (one-sided coverage) counts as fully non-cognate, and a form-disjoint or cross-modality
 //!   pair (whose forms can never correspond) reaches the ceiling of one, both the normalised language
-//!   image of [`crate::value::incommensurability_ceiling`] (the untranslatable magnitude) rather than
+//!   image of [`civsim_foundation::value::incommensurability_ceiling`] (the untranslatable magnitude) rather than
 //!   a distinct number.
 //! - [`phonological_distance`] over two form systems: the feature-based Jaccard distance between the
 //!   two producible inventories (a form-disjoint or cross-modality pair reaching one), so sounds one
@@ -90,7 +90,7 @@ fn form_distance(a: &Word, b: &Word) -> Fixed {
 /// is not yet rescaled into this normalised space, so the two are not yet wired: the caller supplies a
 /// normalised tolerance directly today. A replaced form beyond the window, and a concept one side
 /// lacks, count as non-cognate. The one-sided contribution and the all-non-cognate ceiling
-/// are the normalised language image of [`crate::value::incommensurability_ceiling`], not a separate
+/// are the normalised language image of [`civsim_foundation::value::incommensurability_ceiling`], not a separate
 /// authored constant: a form-disjoint pair reaches one because every cell is non-cognate. Symmetric
 /// under swapping the two lexicons; the walk is over concept ids in canonical order; no race
 /// identifier enters. Two empty lexicons read zero.

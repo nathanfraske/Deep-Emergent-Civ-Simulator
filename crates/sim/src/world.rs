@@ -28,7 +28,7 @@
 //! R-AGING): on a tick that lands on the life-cadence period every tracked being ages one
 //! step and, if an age-hazard curve is installed, faces the mortality roll, so a world left
 //! running turns its generations over on the clock rather than only when a caller reaches in.
-//! The period defaults to the owner-set [`crate::clock::LIFE_CADENCE_TICKS`] and the hazard is
+//! The period defaults to the owner-set [`civsim_foundation::clock::LIFE_CADENCE_TICKS`] and the hazard is
 //! owner-supplied, so nothing here fabricates when a being ages or how likely it is to die.
 //!
 //! This is deliberately the serial tick, not the parallel command scheduler: that
@@ -43,11 +43,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use civsim_world::OrbitalElements;
 
-use crate::affect::{AffectAxisId, AffectState, AppraisalBinding};
 use crate::axiom::{self, Axiom, AxiomAxisId, EvidenceRing, IntrinsicBeliefs, RingCapacityLaw};
-use crate::breeding::{BreedingSystemRegistry, SexClass};
 use crate::census::{ReproductiveCensus, ReproductiveMoments};
-use crate::clock::LIFE_CADENCE_TICKS;
 use crate::dialogue::{
     ContentRef, EffectSign, ForceFloor, ForceKind, Move, MoveKindId, MoveRegistry, ResolvedBand,
 };
@@ -56,14 +53,6 @@ use crate::language::{
 };
 use crate::personality::{age_personality, PersonalityRegistry, TraitAxisId, TraitInstance};
 use crate::race::{BandSpec, Race};
-use crate::sensorium::{SenseChannelId, Sensorium};
-use crate::transmission::{
-    copy_drift, copy_fidelity, erode_and_cull, stability_span, transmit, transmit_draw, DesignId,
-    Knowledge, TransmissionParams,
-};
-use crate::value::{
-    EmicProjection, EticAxisId, EticSubstrate, RaceId, RaceProjection, ValueAxisId, ValueProfile,
-};
 use civsim_bio::agent::{AccessObs, Mind, RetentionLaw, SharedBelief};
 use civsim_bio::belief::{BeliefKey, BeliefPool};
 use civsim_bio::calibration::{CalibrationError, CalibrationManifest, Profile};
@@ -75,6 +64,17 @@ use civsim_bio::tom::{self, AccessChannelRegistry, AccessWeights};
 use civsim_core::{
     gaussian_unit, CommandBuffer, CommandKey, DrawKey, EventId, EventLog, Fixed, GaussApprox,
     Phase, Registry, StableId, StateHasher,
+};
+use civsim_foundation::affect::{AffectAxisId, AffectState, AppraisalBinding};
+use civsim_foundation::breeding::{BreedingSystemRegistry, SexClass};
+use civsim_foundation::clock::LIFE_CADENCE_TICKS;
+use civsim_foundation::sensorium::{SenseChannelId, Sensorium};
+use civsim_foundation::transmission::{
+    copy_drift, copy_fidelity, erode_and_cull, stability_span, transmit, transmit_draw, DesignId,
+    Knowledge, TransmissionParams,
+};
+use civsim_foundation::value::{
+    EmicProjection, EticAxisId, EticSubstrate, RaceId, RaceProjection, ValueAxisId, ValueProfile,
 };
 
 /// A place in the world. Minimal for now: two minds are co-located when they share a
@@ -637,7 +637,7 @@ pub struct World {
     /// overlapping generations is the breeder-restricted moments (R-OVERLAP-NE).
     per_tick_birth: bool,
     /// The data-driven breeding-system registry (design Part 25, R-REPRO): resolves a race's
-    /// [`crate::breeding::BreedingSystemId`] to its sex classes and assignment rule, so a being's
+    /// [`civsim_foundation::breeding::BreedingSystemId`] to its sex classes and assignment rule, so a being's
     /// sex is read off its sex-determination locus. Empty by default; when a race's system is not
     /// registered, sex determination falls back to a single class, so the census authors no ratio.
     breeding_systems: BreedingSystemRegistry,
@@ -964,9 +964,12 @@ impl World {
                 "time.base_tick_seconds",
             ],
         )?;
-        let orbital = crate::clock::orbital_from_manifest(manifest)?;
-        let base_tick = crate::clock::base_tick_seconds_fixed(manifest)?;
-        let cadence = crate::clock::ticks_from_seconds(orbital.orbital_period_seconds, base_tick)?;
+        let orbital = civsim_foundation::clock::orbital_from_manifest(manifest)?;
+        let base_tick = civsim_foundation::clock::base_tick_seconds_fixed(manifest)?;
+        let cadence = civsim_foundation::clock::ticks_from_seconds(
+            orbital.orbital_period_seconds,
+            base_tick,
+        )?;
         world.set_life_cadence(cadence);
         Ok(world)
     }
@@ -1024,8 +1027,11 @@ impl World {
     ) -> Result<Self, CalibrationError> {
         let mut world =
             World::from_manifest_gated(manifest, channels, profile, &["time.base_tick_seconds"])?;
-        let base_tick = crate::clock::base_tick_seconds_fixed(manifest)?;
-        let cadence = crate::clock::ticks_from_seconds(orbital.orbital_period_seconds, base_tick)?;
+        let base_tick = civsim_foundation::clock::base_tick_seconds_fixed(manifest)?;
+        let cadence = civsim_foundation::clock::ticks_from_seconds(
+            orbital.orbital_period_seconds,
+            base_tick,
+        )?;
         world.set_life_cadence(cadence);
         Ok(world)
     }
@@ -2919,7 +2925,7 @@ impl World {
     }
 
     /// A being's copy cognition, the (memory, perception) pair the transmission fidelity and drift are
-    /// derived from (design Parts 20, 25, [`crate::transmission::copy_fidelity`]). Memory is the being's
+    /// derived from (design Parts 20, 25, [`civsim_foundation::transmission::copy_fidelity`]). Memory is the being's
     /// expressed memory capacity (retention: how well a copied technique is held) and perception is its
     /// expressed reasoning acuity (resolution: how sharply the demonstration is read), both read off the
     /// being's own [`Mind`], itself expressed from the genome. A being with no mind reads neutral (no
@@ -4222,7 +4228,7 @@ impl World {
 /// empty substrate and empty projections. Deterministic by construction: the counts and the
 /// mint walk sorted maps.
 ///
-/// [`project_to_etic`]: crate::value::project_to_etic
+/// [`project_to_etic`]: civsim_foundation::value::project_to_etic
 pub fn build_etic_substrate(
     races: &BTreeMap<RaceId, ValueProfile>,
     recurrence_min: usize,
@@ -4584,14 +4590,17 @@ margin_steps = -1
         );
         assert_ne!(
             wf.life_cadence_ticks(),
-            crate::clock::LIFE_CADENCE_TICKS,
+            civsim_foundation::clock::LIFE_CADENCE_TICKS,
             "the derived cadence is not the bare Earth constant unless the orbit says so"
         );
         // And an Earth orbit does reproduce the Earth constant (the orbit says so), so the constant
         // is not banished, only no longer the unconditional default.
         let earth = CalibrationManifest::from_toml_str(&manifest_with_orbit("31536000")).unwrap();
         let we = World::from_manifest(&earth, &chans, Profile::Calibrated).unwrap();
-        assert_eq!(we.life_cadence_ticks(), crate::clock::LIFE_CADENCE_TICKS);
+        assert_eq!(
+            we.life_cadence_ticks(),
+            civsim_foundation::clock::LIFE_CADENCE_TICKS
+        );
     }
 
     #[test]
@@ -5665,7 +5674,7 @@ name = "said"
 
     #[test]
     fn a_world_appraises_a_drive_change_into_a_beings_affect() {
-        use crate::affect::DriveAppraisal;
+        use civsim_foundation::affect::DriveAppraisal;
         const JOY: AffectAxisId = AffectAxisId(0);
         let hunger = DriveId(0);
         let mut w = world();
