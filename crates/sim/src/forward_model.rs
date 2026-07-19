@@ -45,9 +45,10 @@
 use civsim_core::Fixed;
 
 use crate::homeostasis::is_reward_tick;
-use crate::learn::{step_belief_subject, SequenceStep, REWARDS, REWARD_ATTR};
+use crate::learn::{step_belief_subject, REWARDS, REWARD_ATTR};
 use civsim_bio::agent::Mind;
 use civsim_bio::evidence::InferenceParams;
+use civsim_foundation::sequence::SequenceStep;
 
 /// The forward model's predicted interoceptive outcome for a candidate action step, in `[0, 1]`: `Fixed::ONE`
 /// when the being holds a committed REWARDS belief about the step's [`crate::learn::sequence_subject`] (it PREDICTS the

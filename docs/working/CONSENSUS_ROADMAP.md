@@ -23,6 +23,7 @@ Editing rule (the stop-gate enforces it): edit IN PLACE, keep every line a few w
 - 2026-07-18  DONE  CI doc gate unbroken: two links cited a nonexistent `derive_deep_time_cap` -> `crates/viewer/src/main.rs`.
 - 2026-07-18  DONE  Biology parked out of `civsim-sim` (10 modules, 9,388 lines, both pins bit-exact) -> `crates/bio`.
 - 2026-07-18  DONE  Leaf substrates split out of `civsim-sim` (20 out-degree-zero modules, 12,677 lines, both pins bit-exact) -> `crates/foundation`.
+- 2026-07-18  DONE  `learn`/`locomotion` cycle broken by lifting 2 shared types; 3 SCCs -> 2 -> `crates/foundation/src/sequence.rs`.
 - 2026-07-18  FLAG  `calibration` sits in `civsim-bio` but 23 sim modules read it; wants its own shared crate -> `crates/bio/src/lib.rs`.
 - 2026-07-18  DONE  TAFI verdict: source correct, our transcription wrong; primary vendored + archived -> `VENDORING_CHECKLIST.md` (`flexure_tafi`).
 - 2026-07-18  DONE  Retired boundary-layer formula purged from 9 restatement sites (the diamond) -> `laws.rs`, `moment_equivalence.rs`, `geodynamics.rs`.

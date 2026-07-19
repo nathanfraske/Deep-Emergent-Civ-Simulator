@@ -45,10 +45,11 @@
 use civsim_core::{DrawKey, Fixed, Phase, StableId};
 
 use crate::homeostasis::AffordanceId;
-use crate::learn::{step_belief_subject, SequenceStep, REWARDS, REWARD_ATTR};
+use crate::learn::{step_belief_subject, REWARDS, REWARD_ATTR};
 use civsim_bio::agent::Mind;
 use civsim_bio::calibration::{CalibrationError, CalibrationManifest};
 use civsim_bio::evidence::InferenceParams;
+use civsim_foundation::sequence::SequenceStep;
 
 /// The candidate single-step action bindings a being can propose this tick: the GENERIC cartesian of its
 /// afforded primitives and the affordance-typed targets it currently perceives, in a canonical order

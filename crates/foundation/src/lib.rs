@@ -74,6 +74,9 @@
 //!   a moment in time (design Parts 14.6, 32).
 //! - [`located`]: the located-identity join, a tile to its occupants (design Parts
 //!   6, 56).
+//! - [`sequence`]: the executed-primitive-sequence substrate, one step of a sequence
+//!   and the eligibility trace over recently executed sequences. It came here to cut
+//!   the `learn` and `locomotion` cycle at its narrowest point.
 //! - [`scenario`]: the scenario loader, reading a starting world from data.
 //! - [`substrate`]: data-driven substrate definitions and their loader.
 //! - [`unified_provenance`]: the joined provenance register.
@@ -110,6 +113,7 @@ pub mod orbit;
 pub mod profile;
 pub mod scenario;
 pub mod sensorium;
+pub mod sequence;
 pub mod stocks;
 pub mod substrate;
 pub mod surface_drivers;

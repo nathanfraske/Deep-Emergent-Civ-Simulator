@@ -325,9 +325,10 @@ fn chain_order(a: &[PlanStep], b: &[PlanStep]) -> std::cmp::Ordering {
 mod tests {
     use super::*;
     use crate::learn::{
-        builtin_reachable_relations, sequence_subject, SequenceStep, NEUTRAL, RELATES, REWARDS,
-        REWARD_ATTR, UNRELATED, YIELDS,
+        builtin_reachable_relations, sequence_subject, NEUTRAL, RELATES, REWARDS, REWARD_ATTR,
+        UNRELATED, YIELDS,
     };
+    use civsim_foundation::sequence::SequenceStep;
 
     // The data-defined causal relation set the run path uses (YIELDS is the one built-in causal kind).
     fn reachable() -> BTreeSet<AttrKindId> {

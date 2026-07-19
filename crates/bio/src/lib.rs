@@ -58,11 +58,23 @@
 //!
 //! The biology arc is wider than this set. `evolve` (the R-BEHAVIOR-EVOLVE
 //! implementation, design Part 8.4, record 62.19), `biosphere`, `discovery`,
-//! `edibility`, and `conviction_experience` are still in `civsim-sim`: each
-//! reaches a module that is itself inside a production dependency cycle there
-//! (`learn` and `locomotion` cycle with each other, and `runner` cycles with
-//! `environ` and `genesis`), so moving them would need a back-dependency on
-//! `civsim-sim`. They move when that cycle is broken, not before.
+//! `edibility`, and `conviction_experience` are still in `civsim-sim`.
+//!
+//! An earlier revision of this note said each was held by a production
+//! dependency cycle. Measured over the production import graph, that holds for
+//! `evolve` alone: it imports `crate::runner`, which cycles with `environ` and
+//! `genesis`, so its closure is 39 modules. The `learn` and `locomotion` cycle
+//! that the note also named is now broken (the shared types moved to
+//! `civsim_foundation::sequence`), and the other three were never inside a
+//! cycle at all: `conviction_experience` closes over 3 modules, `biosphere`
+//! over 4, `edibility` over 6, and `discovery` over 18, none of them cyclic.
+//!
+//! What holds them is closure cost rather than cyclicity: each drags modules
+//! that stay behind, so the move is a decision about where those modules
+//! belong and not a mechanical relocation. Being outside a cycle is not the
+//! same as being free to leave. They are parked here on the owner's call while
+//! the biology arc is overhauled, so the placement question is answered by that
+//! work rather than by the import graph.
 //!
 //! ## A note on [`calibration`]
 //!

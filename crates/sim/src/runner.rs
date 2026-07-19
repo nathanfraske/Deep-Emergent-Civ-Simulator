@@ -105,8 +105,8 @@ use crate::learn::{
     builtin_reachable_relations, creature_being_direction, creature_being_feature_directions,
     feature_observations, perceive_being_magnitude, perceive_being_signal, reward_observations,
     sequence_subject, step_belief_subject, BeingPerceptField, HarmLearningCalib,
-    RewardLearningCalib, SequenceStep, BENIGN, HARMS, HARM_ATTR, MATERIAL_FEATURE_CHANNEL_BASE,
-    NEUTRAL, REWARDS, REWARD_ATTR,
+    RewardLearningCalib, BENIGN, HARMS, HARM_ATTR, MATERIAL_FEATURE_CHANNEL_BASE, NEUTRAL, REWARDS,
+    REWARD_ATTR,
 };
 use crate::locomotion::{self, LocomotionParams, ResourceField, Terrain, Walker};
 use crate::material_percept::MaterialPerceptRegistry;
@@ -135,6 +135,7 @@ use civsim_foundation::material::{
     TissueField, WearParams, WieldedTool,
 };
 use civsim_foundation::scenario::ScenarioResolution;
+use civsim_foundation::sequence::SequenceStep;
 use civsim_physics::laws;
 use civsim_physics::PhysicsRegistry;
 use civsim_world::{Coord3, TileMap};
@@ -9369,13 +9370,12 @@ source = "test"
         use crate::homeostasis::{
             HomeostaticAxisDef, HomeostaticRegistry, ENERGY, INGEST, TEMPERATURE,
         };
-        use crate::learn::{
-            sequence_subject, RewardLearningCalib, SequenceStep, REWARDS, REWARD_ATTR,
-        };
+        use crate::learn::{sequence_subject, RewardLearningCalib, REWARDS, REWARD_ATTR};
         use crate::physiology::ENERGY_DENSITY;
         use civsim_bio::anatomy::{BodyPlan, Part, Temperament};
         use civsim_bio::evidence::InferenceParams;
         use civsim_bio::tom::{AccessChannelId, AccessWeights};
+        use civsim_foundation::sequence::SequenceStep;
 
         let bp = InferenceParams {
             clamp: Fixed::from_int(50),
@@ -9561,11 +9561,12 @@ source = "test"
         use crate::homeostasis::{
             HomeostaticAxisDef, HomeostaticRegistry, ENERGY, INGEST, TEMPERATURE,
         };
-        use crate::learn::{sequence_subject, RewardLearningCalib, SequenceStep};
+        use crate::learn::{sequence_subject, RewardLearningCalib};
         use crate::physiology::ENERGY_DENSITY;
         use civsim_bio::anatomy::{BodyPlan, Part, Temperament};
         use civsim_bio::evidence::InferenceParams;
         use civsim_bio::tom::{AccessChannelId, AccessWeights};
+        use civsim_foundation::sequence::SequenceStep;
 
         let bp = InferenceParams {
             clamp: Fixed::from_int(50),
@@ -10189,13 +10190,12 @@ values = [
             AffordanceDef, AffordanceParam, HomeostaticAxisDef, HomeostaticRegistry, ENERGY,
             GEOPHAGE, TEMPERATURE,
         };
-        use crate::learn::{
-            sequence_subject, RewardLearningCalib, SequenceStep, REWARDS, REWARD_ATTR,
-        };
+        use crate::learn::{sequence_subject, RewardLearningCalib, REWARDS, REWARD_ATTR};
         use civsim_bio::anatomy::{BodyPlan, Part, Temperament};
         use civsim_bio::evidence::InferenceParams;
         use civsim_bio::tom::{AccessChannelId, AccessWeights};
         use civsim_foundation::material::MaterialField;
+        use civsim_foundation::sequence::SequenceStep;
         use civsim_physics::PhysicsRegistry;
 
         let bp = InferenceParams {
@@ -10398,13 +10398,13 @@ values = [
             GEOPHAGE, TEMPERATURE,
         };
         use crate::learn::{
-            sequence_subject, step_belief_subject, RewardLearningCalib, SequenceStep, REWARDS,
-            REWARD_ATTR,
+            sequence_subject, step_belief_subject, RewardLearningCalib, REWARDS, REWARD_ATTR,
         };
         use civsim_bio::anatomy::{BodyPlan, Part, Temperament};
         use civsim_bio::evidence::{InferenceParams, ValueId};
         use civsim_bio::tom::{AccessChannelId, AccessWeights};
         use civsim_foundation::material::MaterialField;
+        use civsim_foundation::sequence::SequenceStep;
         use civsim_physics::PhysicsRegistry;
 
         let bp = InferenceParams {
@@ -11236,14 +11236,13 @@ values = [
             AffordanceDef, AffordanceParam, HomeostaticAxisDef, HomeostaticRegistry, ENERGY,
             GEOPHAGE, TEMPERATURE,
         };
-        use crate::learn::{
-            sequence_subject, RewardLearningCalib, SequenceStep, REWARDS, REWARD_ATTR,
-        };
+        use crate::learn::{sequence_subject, RewardLearningCalib, REWARDS, REWARD_ATTR};
         use crate::material_percept::MaterialPerceptRegistry;
         use civsim_bio::anatomy::{BodyPlan, Part, Temperament};
         use civsim_bio::evidence::InferenceParams;
         use civsim_bio::tom::{AccessChannelId, AccessWeights};
         use civsim_foundation::material::MaterialField;
+        use civsim_foundation::sequence::SequenceStep;
         use civsim_physics::PhysicsRegistry;
 
         let bp = InferenceParams {
@@ -11671,11 +11670,12 @@ values = [
             AffordanceDef, AffordanceId, AffordanceParam, HomeostaticAxisDef, HomeostaticRegistry,
             GRASP, TEMPERATURE,
         };
-        use crate::learn::{sequence_subject, SequenceStep, NEUTRAL, REWARDS, REWARD_ATTR};
+        use crate::learn::{sequence_subject, NEUTRAL, REWARDS, REWARD_ATTR};
         use civsim_bio::anatomy::{BodyPlan, Part, Temperament};
         use civsim_bio::evidence::InferenceParams;
         use civsim_bio::tom::{AccessChannelId, AccessWeights};
         use civsim_foundation::material::MaterialField;
+        use civsim_foundation::sequence::SequenceStep;
         use civsim_physics::PhysicsRegistry;
 
         const FLOOR: &str = r#"

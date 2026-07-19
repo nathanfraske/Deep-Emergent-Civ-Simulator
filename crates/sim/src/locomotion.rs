@@ -75,12 +75,13 @@ use crate::homeostasis::{
     HomeostaticRegistry, ReserveMemory, CONDITION, CRAFT, DIG, EXTRACT, GEOPHAGE, GRASP, INGEST,
     MOVE, RELEASE, SHELTER, STRIKE,
 };
-use crate::learn::{EligibilityTrace, SequenceStep};
+
 use crate::material_percept::MaterialPerceptRegistry;
 use crate::morphogen::Structure;
 use crate::percept::PerceptRegistry;
 use civsim_bio::anatomy::{BodyPlan, BodyPlanRegistry};
 use civsim_foundation::material::{MaterialField, SubstanceMix, WieldedTool};
+use civsim_foundation::sequence::{EligibilityTrace, SequenceStep};
 
 /// The reserved parameters of the movement physics. The mechanism that reads them is fixed; these
 /// numbers are the owner's to set, surfaced with a basis, never fabricated (Principle 11). The
@@ -622,7 +623,7 @@ pub struct Walker {
     pub wielded: Option<WieldedTool>,
     /// The being's ELIGIBILITY TRACE (ideation / experiential-discovery arc, piece 1, slice 1c): the short,
     /// recency-decayed memory of the primitive sequences it recently executed, so a reserve rise felt after
-    /// an action can credit the sequence that produced it ([`crate::learn::EligibilityTrace`]). EMPTY by
+    /// an action can credit the sequence that produced it ([`EligibilityTrace`]). EMPTY by
     /// default, so a being in a world with no reward learning armed folds nothing into `state_hash` (the
     /// reward trace is opt-in, hash-neutral by default). Populated, decayed, and credited only where the
     /// runner arms the reward learner.

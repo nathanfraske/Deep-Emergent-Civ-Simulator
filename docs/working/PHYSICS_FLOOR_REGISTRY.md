@@ -38,7 +38,7 @@ The 11 deriving subsystems below live OUTSIDE the authored floor. Each produces 
 - the interior column's secular thermal history <- radiogenic_decay (the isotope reservoir spending down over the world clock) feeding radiogenic_heat (the falling heat production) into the convection step, so the interior warms under radiogenic heating and cools as the sources decay; no authored cooling knob, the source history is the decaying reservoir (`crates/sim/src/geodynamics.rs:284`)
 ### `crates/sim/src/locomotion.rs`
 
-- movement speed in tiles/tick, and (inverted) the cell edge in metres <- a real ground speed (about 1.4 m/s) / the tile edge, at the 1 s/tick base. The cell size is NOT free: it is fixed by one real creature's speed x the tick. Body-side, a being's own speed derives from its size (morphology), not a plant/animal tag. (`crates/sim/src/locomotion.rs:88`)
+- movement speed in tiles/tick, and (inverted) the cell edge in metres <- a real ground speed (about 1.4 m/s) / the tile edge, at the 1 s/tick base. The cell size is NOT free: it is fixed by one real creature's speed x the tick. Body-side, a being's own speed derives from its size (morphology), not a plant/animal tag. (`crates/sim/src/locomotion.rs:89`)
 ### `crates/sim/src/physiology.rs`
 
 - a being's metabolic rate, energy drain, and heat loss <- Kleiber's law P = a * m^(3/4) over the body's own mass (kleiber_a and body_mass_kg_scale are per-race anchors, sigma is a universal constant); the rate is NOT authored, it derives from the being's body. Water loss derives from 1/L_vap (latent heat of vaporization) x metabolic power (physiology water-loss coupling, landed with the Mirror water arc). (`crates/sim/src/physiology.rs:130`)
