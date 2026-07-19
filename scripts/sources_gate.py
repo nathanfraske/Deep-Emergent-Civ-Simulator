@@ -341,7 +341,7 @@ def check_duplicate_documents(entries):
     return out
 
 
-def check_collection_coverage(tracked_data_files):
+def check_collection_coverage(tracked_data_files, entries=()):
     """A vendored data COLLECTION must have a source record.
 
     THE HOLE THIS CLOSES, found by counting rather than by reading: 89 tracked data files (janaf 34,
@@ -356,8 +356,36 @@ def check_collection_coverage(tracked_data_files):
     A per-row md5 proves a file was not corrupted. It does not say who may redistribute it, what regime it
     holds in, or what was dropped when it was slimmed. Those are source-level questions and they need a
     source-level record.
+
+    THE RECORD MAY LIVE IN EITHER HALF OF THE REGISTRY, and reading only the manifest was too narrow. A
+    directory's bytes are equally covered when a HAND-MAINTAINED `sources/registry.toml` entry claims them
+    through its `holding` or `holding_collection` path, which is where sources/registry.toml's own header
+    says a NEW fetch lands. A manifest that instead carries `[[claim]]` records and leaves the sources
+    registered centrally is following the design in docs/working/FETCH_PIPELINE_PLAN.md section 2 (sources
+    central, claims beside their values), and it avoids carrying one document under two ids, which is the
+    duplication the same gate reports as a notice further down. So coverage asks the question the
+    docstring above actually poses, "has a source-level licence question been asked of these bytes", and
+    accepts either place that answers it. What is still convicted is the case this exists to catch:
+    vendored bytes that NO source record anywhere claims.
     """
-    return [d for d, (n_files, n_sources) in sorted(tracked_data_files.items()) if n_files and not n_sources]
+    claimed_dirs = set()
+    for _sid, block in entries:
+        for key in ("holding", "holding_collection"):
+            path = block.get(key)
+            if not isinstance(path, str) or not path.strip():
+                continue
+            parts = [p for p in path.strip().strip("/").split("/") if p]
+            # `crates/<crate>/data/<dir>/...`: the directory that owns the bytes is the one a manifest
+            # would sit in, so take the segment after `data`.
+            if "data" in parts:
+                i = parts.index("data")
+                if i + 1 < len(parts):
+                    claimed_dirs.add(parts[i + 1])
+    return [
+        d
+        for d, (n_files, n_sources) in sorted(tracked_data_files.items())
+        if n_files and not n_sources and d not in claimed_dirs
+    ]
 
 
 def verify_holdings(entries):
@@ -658,7 +686,7 @@ def main():
         return 2
 
     entries, problems, claims, markers, row_refs, collections = gather()
-    uncovered = check_collection_coverage(collections)
+    uncovered = check_collection_coverage(collections, entries)
 
     if "--update" in args:
         BASELINE.write_text(render_baseline(entries, uncovered), encoding="utf-8")

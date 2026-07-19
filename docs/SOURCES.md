@@ -12,9 +12,22 @@ Custody is one of three. `in_repo`: bytes held in-tree, checksum verifiable with
 witness. `external`: bytes in local custody outside the repo, checksum plus archive snapshot.
 The licence decides which is permitted; see `docs/working/FETCH_PIPELINE_PLAN.md` section 3.
 
-**29 sources** (2 registry, 27 mirrored).
+**35 sources** (8 registry, 27 mirrored).
 
 ## Registry (hand-maintained)
+
+### `cod_phase_crystallography`
+
+Crystallography Open Database (COD), https://www.crystallography.net/cod/, eleven CIF records for the eight registry phases: 1011097 and 1011172 (quartz, Wei 1935 and Brill, Hermann & Peters 1939), 1000032 (corundum, Lutterotti & Scardi 1990, J. Appl. Cryst. 23, 246), 1010914 (corundum rhombohedral setting, Pauling & Hendricks 1925, J. Am. Chem. Soc. 47, 781), 1000053 (periclase, Sasaki, Fujino & Takeuchi 1979, Proc. Japan Acad. 55, 43), 1011267 (hematite rhombohedral setting, Zachariasen 1928), 1544615 (forsterite, J. Mineral. Petrol. Sci. 2006), 1000064 (fayalite, Fujino, Sasaki, Takeuchi & Sadanaga 1981, Acta Cryst. B37, 513), 1010129 (spinel, Passerini 1930, Gazz. Chim. Ital. 60, 389), 1000047 (enstatite, Yang & Ghose 1995, Phys. Chem. Minerals 22, 300) and 1011018 (enstatite ferroan, Takane 1932, Proc. Imperial Acad. Tokyo 8, 308).
+
+- sha256: `per-file, recorded row by row in crates/physics/data/phase_conductivity/manifest.toml (11 CIFs)`
+- archived: https://web.archive.org/web/20171010005130/http://www.crystallography.net/cod/1000053.cif
+- scope: Ambient-condition crystal structures of the eight registry phases: space group, lattice centring, cell parameters and formula units per cell. Structural facts, frame-free for this column's purpose, and independent of any conductivity measurement. A polymorph caveat that matters and is handled by carrying the space group explicitly in every row: formula alone does NOT determine the structure here, since MgSiO3 also occurs as clinoenstatite (P2(1)/c), protoenstatite (Pbcn) and bridgmanite (Pbnm), and Mg2SiO4 also occurs as ringwoodite (Fd-3m). A lookup keyed on formula would silently return the wrong phase.
+- custody: in_repo
+- licence (redistributable): PUBLIC DOMAIN, verified PER FILE rather than assumed for the database. COD's site states 'All data on this site have been placed in the public domain by the contributors', and each held CIF repeats that dedication in its own header. THE TERMS ARE NOT UNIFORM ACROSS COD AND THE SPLIT IS PER ENTRY, NOT PER ID RANGE, which is the catch worth carrying forward: a record whose data came from a third party (the American Mineralogist Crystal Structure Database, or IUCr Journals) carries instead 'The file may be used within the scientific community so long as proper attribution is given to the journal article from which the data were obtained', an attribution-conditioned grant scoped to a community rather than a public-domain dedication. Every one of the eleven held files was grepped against its own header and every one carries the public-domain dedication; three records that would otherwise have been held (COD 9000319 forsterite, 9001364 spinel, 2101167 and 1572966 via IUCr) were dropped to citation-only on exactly this ground.
+- licence evidence: https://www.crystallography.net/cod/ and the per-file header in each held CIF
+- free route (repository): https://www.crystallography.net/cod/
+- holding: `crates/physics/data/phase_conductivity/cod/`
 
 ### `flexure_tafi`
 
@@ -39,6 +52,68 @@ Chase, M.W. Jr., 1998, NIST-JANAF Thermochemical Tables, 4th ed., Journal of Phy
 - licence evidence: none captured; 15 USC 290e is the AUTHORITY, not an assertion over these tables
 - remediation: THE RULING CANNOT BE APPLIED AS A DATA CHANGE. The 34 tables are compile-time dependencies (35 `include_str!` sites in crates/physics/src/janaf.rs), so removing them is a compile error rather than a conversion, and it is load-bearing for the condensation and thermochemistry work. The legal nuance offers the path: values are facts and the compilation is what is restricted, so the principled fix is to replace the verbatim NIST table files with a DERIVED data file carrying only the numeric columns the loader consumes, cited to Chase 1998 with the statute noted. That is an engineering arc, not a deletion: it changes a compiled input, so it must be done against a buildable tree with the byte pins verified before and after, and any transcription difference would move them. Surfaced for the owner (plan D6) rather than attempted here. The cheaper alternative the statute itself names is a written permission request to NIST, which would settle it with no code change at all.
 - free route (publisher-open): https://janaf.nist.gov/tables/
+
+### `mixing_henke2016`
+
+Henke, S., Gail, H.-P. & Trieloff, M., 2016, Thermal evolution and sintering of chondritic planetesimals. III. Modelling the heat conductivity of porous chondrite material, Astronomy and Astrophysics 589, A41, DOI 10.1051/0004-6361/201527687.
+
+- sha256: `f9bcb3be8f7101955f1bcb61a206607ed29a45e6a1338e837f46fb9bb27d292e`
+- archived: https://web.archive.org/web/20260719002840/https://arxiv.org/pdf/1602.00292
+- scope: Heat conductivity of multi-mineral chondritic material at 300 K and zero to 0.30 porosity. The values read here are Table 2's PURE END-MEMBER species conductivities, which are the only pure-phase numbers in the paper; Table 3's are solid-solution compositions and are deliberately not used.
+- custody: external
+- licence (**NOT redistributable**): arXiv author preprint under arXiv's non-exclusive licence to distribute, which permits arXiv to distribute and does NOT grant this project redistribution rights, so the bytes stay in local custody outside the repo rather than in tree. The publisher's open-access copy at aanda.org returned HTTP 500 on 18 July 2026, so the version held is the preprint and a value read here is a preprint reading.
+- licence evidence: arXiv licence terms for the non-exclusive distribution option
+- free route (preprint): https://arxiv.org/pdf/1602.00292
+
+### `msa_structure_determinations`
+
+Five published structure determinations in American Mineralogist, read as the primary crystallographic witnesses for Column 1: Blake, R.L., Hessevick, R.E., Zoltai, T. & Finger, L.W., 1966, Refinement of the hematite structure, Am. Min. 51, 123-129; Birle, J.D., Gibbs, G.V., Moore, P.B. & Smith, J.V., 1968, Crystal structures of natural olivines, Am. Min. 53, 807-824; Hazen, R.M., 1976, Effects of temperature and pressure on the cell dimension and X-ray temperature factors of periclase, Am. Min. 61, 266-271; Levien, L., Prewitt, C.T. & Weidner, D.J., 1980, Structure and elastic properties of quartz at pressure, Am. Min. 65, 920-930; Hugh-Jones, D.A. & Angel, R.J., 1994, A compressional study of MgSiO3 orthoenstatite up to 8.5 GPa, Am. Min. 79, 405-410.
+
+- sha256: `b083336fbde0d3aef7daa0da926a1e8582961fcfd3030067d1b81214545e6ff5`
+- archived: https://web.archive.org/web/20260115015117/http://www.minsocam.org/ammin/AM51/AM51_123.pdf
+- scope: Ambient and high-pressure crystal structures of hematite, the natural olivines, periclase, quartz and orthoenstatite: space groups, cell parameters and refined atomic coordinates. Used here ONLY for the space-group and cell statements each paper actually prints.
+- custody: witness
+- licence (**NOT redistributable**): NOT REDISTRIBUTABLE, and the finding points at an explicit assertion rather than at an inference. The Mineralogical Society of America's copyright notice states: 'All rights are reserved by the Mineralogical Society of America (MSA) and content may not be reproduced, downloaded, disseminated, published, or transferred in any form or by any means, except with the prior written permission of MSA, or as indicated below. Members of MSA and nonmembers may download pages or other content for their own use ... on a single computer. However, no part of such content may be otherwise or subsequently reproduced, downloaded, disseminated, published, or transferred, in any form or by any means, except with the prior written permission of, and with the express attribution to MSA.' Reading is permitted and redistributing is not, so these are held as citation plus witness with no bytes, matching the existing MSA findings in this registry for fan_2019 and jackson_1999_enstatite.
+- licence evidence: http://www.minsocam.org/msa/Copyright.html
+- free route (publisher-open): http://www.minsocam.org/ammin/AM51/AM51_123.pdf
+
+### `nsrds_nbs8`
+
+Powell, R.W., Ho, C.Y. & Liley, P.E., 1966, Thermal Conductivity of Selected Materials, NSRDS-NBS 8, National Standard Reference Data System, National Bureau of Standards, U.S. Department of Commerce, issued November 25, 1966, 168 p.
+
+- sha256: `a24275c622a5808152d51774b4bacb9ddd7d9cb8e3fb71824878214270d58441`
+- archived: https://web.archive.org/web/20260707010354/https://nvlpubs.nist.gov/nistpubs/Legacy/NSRDS/nbsnsrds8.pdf
+- scope: Recommended thermal conductivity of nonmetallic solids over 0 to 2300 K at 1 atm. The values read here are the 300 K row: Al2O3 and MgO as 99.5 percent pure, 98 percent dense POLYCRYSTALLINE specimens, and quartz as a high-purity SINGLE CRYSTAL resolved per axis. The specimen form is part of the scope, not a footnote: a 98 percent dense polycrystal is not the pure phase, and the periclase row's band is set by that difference.
+- custody: in_repo
+- licence (redistributable): US Government publication with NO copyright assertion anywhere in the document (grepped across all 180 pages of the extracted text, zero hits for copyright or all rights reserved). Issued by the National Bureau of Standards and sold by the Superintendent of Documents, U.S. Government Printing Office, imprint 'GOVERNMENT PRINTING OFFICE: 1966-251-021/41'. The dated argument that closes it: the Standard Reference Data Act (Public Law 90-396) that lets Commerce secure copyright in Standard Reference Data compilations was enacted in July 1968, and this volume was ISSUED NOVEMBER 25, 1966, so the authority the JANAF question turns on did not exist when this was published. The finding therefore points at an absence of assertion PLUS a date, rather than at an authority never shown to be exercised. Residual seam, recorded rather than hidden: the authors were at Purdue's Thermophysical Properties Research Center under NBS contract, so 'US Government work by a federal employee' is not the cleanest possible ground; the absence of any notice and the pre-statute issue date are.
+- licence evidence: the document's own front matter (issue date, GPO imprint, no copyright notice); Public Law 90-396, 11 July 1968, for the date comparison
+- free route (gov-work): https://nvlpubs.nist.gov/nistpubs/Legacy/NSRDS/nbsnsrds8.pdf
+- holding: `crates/physics/data/phase_conductivity/nsrds_nbs8_SLIM.pdf`
+
+### `touloukian_1966_oxides`
+
+Touloukian, Y.S. (ed.), 1966, Recommended Values of the Thermophysical Properties of Eight Alloys, Major Constituents and Their Oxides, prepared by the Thermophysical Properties Research Center, Purdue University, under NBS Sub-Contract CST-7590, NASA Order R-45, 549 p. NASA Technical Reports Server document 19660014513.
+
+- sha256: `ceb8fb6ee31814819438b808f29fbd42ac034f03b7a1fa517ea429c981a750ee`
+- archived: https://web.archive.org/web/20250202023422/https://apps.dtic.mil/sti/tr/pdf/ADA951936.pdf
+- scope: Recommended thermophysical properties of eight alloys, their major constituents and the corresponding oxides. The value read here is the single-crystal MgO thermal conductivity at 300 K, on a specimen of stated impurity concentration 2e19 atoms per cubic centimetre.
+- custody: witness
+- licence (**NOT redistributable**): NOT ESTABLISHED AS REDISTRIBUTABLE, so no bytes are held. The document is openly served by NASA's Technical Reports Server and carries a DTIC Distribution Statement A on its sibling volume, but it was prepared by Purdue's Thermophysical Properties Research Center under contract, and the SIBLING TPRC volume prints an explicit 'Copyright 1970, Purdue Research Foundation'. A copyright asserted by the same preparing institution over the same data series is enough to withhold the bytes rather than assume the absence of a notice in this volume settles it. The values themselves are facts and are uncopyrightable, so reading and citing them is safe either way, which is what is done here.
+- licence evidence: the printed 'Copyright 1970, Purdue Research Foundation' notice in the sibling volume TPRC Data Series Volume 2 (DTIC ADA951936), read at line 395 of its extracted text
+- free route (gov-work): https://ntrs.nasa.gov/api/citations/19660014513/downloads/19660014513.pdf
+
+### `usgs_ofr88690`
+
+Diment, W.H. & Pratt, H.R., 1988, Thermal conductivity of some rock-forming minerals: a tabulation, U.S. Geological Survey Open-File Report 88-690, 15 p., DOI 10.3133/ofr88690.
+
+- sha256: `458f14028e438734b66d96a9c62f7ea0b954b9d8eb55b61c34f62401b7b3cc97`
+- archived: https://web.archive.org/web/20250619042834/https://pubs.usgs.gov/of/1988/0690/report.pdf
+- scope: Thermal conductivity of rock-forming minerals in mcal/(cm*s*C) at 21 to 100 C and 25 to 170 bars, on NATURAL mineral samples and monomineralic aggregates with stated porosity and measured-versus-theoretical density. The scope limit that governs how this source may be used: many rows are natural, impure or porous specimens, so a row is a SAMPLE property and becomes a PHASE property only where the specimen is pure and dense. That is why this source supplies a cross-check here and only one anchor.
+- custody: in_repo
+- licence (redistributable): US Geological Survey Open-File Report. USGS states 'USGS-authored or produced data and information are considered to be in the U.S. Public Domain', and the repo already holds byerlee_1978 on the same ground. Residual seam, recorded rather than smoothed: the second author is listed under SAIC, a contractor, so 'USGS-authored' does not cleanly cover every part of the work; the report is nevertheless a USGS-produced Open-File Report published by the Survey.
+- licence evidence: https://www.usgs.gov/information-policies-and-instructions/copyrights-and-credits
+- free route (gov-work): https://pubs.usgs.gov/of/1988/0690/report.pdf
+- holding: `crates/physics/data/phase_conductivity/diment_pratt_1988.pdf`
 
 ## Mirrored from the per-directory manifests
 

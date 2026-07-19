@@ -1,0 +1,88 @@
+#------------------------------------------------------------------------------
+#$Date: 2016-11-18 09:43:20 +0200 (Fri, 18 Nov 2016) $
+#$Revision: 188558 $
+#$URL: file:///home/coder/svn-repositories/_RELOADED_COD/cod-reloaded/cif/1/54/46/1544615.cif $
+#------------------------------------------------------------------------------
+#
+# This file is available in the Crystallography Open Database (COD),
+# http://www.crystallography.net/
+#
+# All data on this site have been placed in the public domain by the
+# contributors.
+#
+data_1544615
+loop_
+_publ_author_name
+'Kudoh, Y.'
+'Kuribayashi, T.'
+'Kagi, H.'
+'Inoue, T.'
+_publ_section_title
+;
+ Cation vacancy and possible hydrogen positions in hydrous forsterite,
+ Mg1.985Si0.993H0.06O4, synthesized at 13.5 GPa and 1300 ?C
+;
+_journal_name_full
+'Journal of Mineralogical and Petrological Sciences'
+_journal_page_first              265
+_journal_page_last               269
+_journal_volume                  101
+_journal_year                    2006
+_chemical_formula_sum            'H0.06 Mg1.985 O4 Si0.993'
+_chemical_name_common            'hydrous forsterite'
+_chemical_name_mineral           'Mg1.985Si0.993H0.06O4 hydrous forsterite'
+_space_group_IT_number           62
+_space_group_name_H-M_alt        'P b n m'
+_symmetry_space_group_name_Hall  '-P 2c 2ab'
+_symmetry_space_group_name_H-M   'P b n m'
+_cell_angle_alpha                90
+_cell_angle_beta                 90
+_cell_angle_gamma                90
+_cell_formula_units_Z            4
+_cell_length_a                   4.756(1)
+_cell_length_b                   10.208(3)
+_cell_length_c                   5.988(2)
+_cell_volume                     290.71(14)
+_cod_data_source_file            hydrous_forsterite.cif
+_cod_data_source_block           hydrous_forsterite
+_cod_original_formula_sum        'Mg1.985 Si0.993 H0.06 O4'
+_cod_database_code               1544615
+loop_
+_space_group_symop_operation_xyz
+'x, y, z'
+'-x, -y, -z'
+'x+1/2, -y+1/2, -z'
+'-x+1/2, y+1/2, z'
+'-x, -y, z+1/2'
+'x, y, -z+1/2'
+'-x+1/2, y+1/2, -z+1/2'
+'x+1/2, -y+1/2, z+1/2'
+loop_
+_atom_site_label
+_atom_site_occupancy
+_atom_site_fract_x
+_atom_site_fract_y
+_atom_site_fract_z
+_atom_site_adp_type
+_atom_site_B_iso_or_equiv
+_atom_site_type_symbol
+M1 0.9860 0.000000 0.000000 0.000000 Biso 0.481637 Mg
+M2 0.9990 0.9916(2) 0.27733(9) 0.250000 Biso 0.526379 Mg
+Si 0.9930 0.42620(10) 0.09402(7) 0.250000 Biso 0.368465 Si
+O1 1.0 0.7654(4) 0.0913(2) 0.250000 Biso 0.573753 O
+O2 1.0 0.2219(4) 0.4478(2) 0.250000 Biso 0.531643 O
+O3 1.0 0.2775(4) 0.16290(10) 0.0342(2) Biso 0.586913 O
+loop_
+_atom_site_aniso_label
+_atom_site_aniso_U_11
+_atom_site_aniso_U_22
+_atom_site_aniso_U_33
+_atom_site_aniso_U_12
+_atom_site_aniso_U_13
+_atom_site_aniso_U_23
+M1 0.00780 0.00520 0.00530 -0.00100 0.00000 -0.00070
+M2 0.00630 0.00640 0.00730 0.00000 0.00030 0.00000
+Si 0.00520 0.00450 0.00430 0.00000 0.00030 0.00000
+O1 0.00860 0.00640 0.00680 0.00000 0.00030 0.00000
+O2 0.00730 0.00710 0.00580 0.00000 -0.00050 0.00000
+O3 0.00850 0.00740 0.00640 0.00110 0.00010 0.00040

@@ -1,0 +1,306 @@
+# The READ RECORD for the phase-conductivity cited column (../phase_conductivity.toml): what was read,
+# out of which table, and which two independent sources back each claim.
+#
+# WHY THIS FILE CARRIES NO [[source]] BLOCKS, unlike the gruneisen manifest it otherwise mirrors. The
+# source registry has two halves and an id lives in exactly one of them: sources/mirrored.toml is
+# GENERATED from per-directory [[source]] blocks, and sources/registry.toml is hand-maintained and is
+# where a NEW fetch lands (its own header says so). Writing [[source]] blocks here as well would carry
+# every source under two ids, which is the duplication defect the pipeline plan records as D8 and which
+# already caused a licence finding to miss its twin. So the SOURCES for this fetch are registered once,
+# in sources/registry.toml (ids nsrds_nbs8, usgs_ofr88690, cod_phase_crystallography,
+# touloukian_1966_oxides, msa_structure_determinations, mixing_henke2016), and this file carries the
+# CLAIMS, which is the shape docs/working/FETCH_PIPELINE_PLAN.md section 2 designed for exactly this:
+# "Claims live beside their values in the per-directory manifests, not in the central registry, because
+# a claim is about a value and the value's file is where a reader looks."
+#
+# EVERY CLAIM CARRIES A PRIMARY AND A SECONDARY, per the owner's rule 5, so each value has two
+# independent witnesses and a transcription error in either is visible as a disagreement rather than
+# invisible as a lone number.
+#
+# HELD BYTES IN THIS DIRECTORY (receipts below in [[holding]] blocks):
+#   nsrds_nbs8_SLIM.pdf     9 pages cut from NSRDS-NBS 8, the recommended-value table and its accuracies
+#   diment_pratt_1988.pdf   USGS Open-File Report 88-690 whole, the cross-check and the context values
+#   cod/*.cif               11 Crystallography Open Database records, each public domain by its own header
+#
+# THE ONE METHOD FINDING WORTH CARRYING TO THE NEXT FETCH: on BOTH scanned compilations the text layer
+# corrupts digits, and on both the corruption is silent and plausible. The USGS scan renders quartz as
+# 21.3 and 11.7 where the page prints 24.3 and 14.7, and corundum as 10.8 and 11.2 where the page prints
+# 40.8 and 41.2. The NBS Table 14 is a rotated landscape scan whose extracted text is unusable. Every
+# value in this column was read from a page render, and the quartz pair then agreed with an independent
+# source to within 2 percent, which is what confirms the read rather than merely asserting it.
+
+# =====================================================================================================
+# CLAIMS: Column 1, atoms per primitive cell (all eight phases)
+# =====================================================================================================
+#
+# Each of these is a CRYSTALLOGRAPHIC count, reconstructed by the loader from the space group, Z, the
+# atoms per formula unit and the lattice centring, so the claim below is really a claim about those four
+# fields. The reconstruction is asserted in code
+# (crates/physics/src/phase_conductivity.rs, a_cell_count_that_contradicts_its_own_crystallography_is_refused).
+
+[[claim]]
+id = "cell.atoms_per_primitive_cell.quartz"
+quantity = "9"
+primary = ["cod_phase_crystallography"]
+secondary = ["msa_structure_determinations"]
+anchor = "COD 1011172 and 1011097, both 'P 31 2 1' with _cell_formula_units_Z 3, a = 4.913, c = 5.404. Trigonal P is uncentred, so 3 formula units x 3 atoms = 9. The enantiomorph P3(2)21 has the same lattice and the same Z. SECONDARY confirms the cell only: Levien, Prewitt and Weidner 1980 prints 'a = 4.916(1) and c = 5.4054(4) A at 1 atm' and NO space group and NO Z, which is recorded rather than glossed."
+channel = "TF"
+scope = "ambient alpha-quartz"
+
+[[claim]]
+id = "cell.atoms_per_primitive_cell.corundum"
+quantity = "10"
+primary = ["cod_phase_crystallography"]
+secondary = ["cod_phase_crystallography"]
+anchor = "COD 1000032 (Lutterotti and Scardi 1990), 'R -3 c :H' with Z = 6 in the hexagonal setting: 6 x 5 / 3 = 10. THE SECONDARY IS A DIFFERENT SETTING OF THE SAME STRUCTURE AND IT STATES THE PRIMITIVE CONTENT DIRECTLY, which is stronger than a second hexagonal record: COD 1010914 (Pauling and Hendricks 1925, 'Crystal Structures of Hematite and Corundum') gives 'R -3 c :R' with Z = 2 and a rhombohedral cell volume of 84.5 against the hexagonal 254.8, a ratio of 3.01 that IS the R-centring factor. 2 x 5 = 10 with no division needed."
+channel = "TF"
+scope = "ambient alpha-Al2O3"
+
+[[claim]]
+id = "cell.atoms_per_primitive_cell.periclase"
+quantity = "2"
+primary = ["cod_phase_crystallography"]
+secondary = ["msa_structure_determinations"]
+anchor = "COD 1000053 (Sasaki, Fujino and Takeuchi 1979), 'F m -3 m' with Z = 4 and a = 4.217. F-centring puts four primitive cells in the conventional cell, so 4 x 2 / 4 = 2. SECONDARY confirms the structure type and the cell only: Hazen 1976 prints 'The cubic NaCl-type structure of periclase was first suggested by Hull (1919)' with a = 4.2121(1) A, and prints NEITHER the space-group symbol NOR Z. This is the ladder's only simple-class phase and therefore its only overlap sentinel."
+channel = "TF"
+scope = "ambient MgO"
+
+[[claim]]
+id = "cell.atoms_per_primitive_cell.hematite"
+quantity = "10"
+primary = ["msa_structure_determinations"]
+secondary = ["cod_phase_crystallography"]
+anchor = "Blake, Hessevick, Zoltai and Finger 1966, Am. Min. 51, 123-129, Table I, read from a 400 dpi render: 'Hexagonal unit cell: a = 5.038 +/- 0.002 A, c = 13.772 +/- .012 A, c/a = 2.733 +/- 0.015, Z = 6' with 'Space Group = R3c' printed beneath. THIS IS THE ONE PHASE OF THE EIGHT WHOSE Z IS PRINTED IN A PUBLISHED PAPER THIS PROJECT HAS READ; for the other seven Z comes from the COD records. 6 x 5 / 3 = 10. SECONDARY states the primitive content directly: COD 1011267 (Zachariasen 1928), 'R -3 c :R' with Z = 2, so 2 x 5 = 10."
+channel = "TF"
+scope = "ambient alpha-Fe2O3"
+
+[[claim]]
+id = "cell.atoms_per_primitive_cell.forsterite"
+quantity = "28"
+primary = ["cod_phase_crystallography"]
+secondary = ["msa_structure_determinations"]
+anchor = "COD 1544615, 'P b n m' with Z = 4, a = 4.756(1), b = 10.208(3), c = 5.988(2), composition Mg1.985Si0.993O4 with 0.06 H. Orthorhombic P is uncentred, so 4 x 7 = 28 and the conventional cell IS the primitive cell. SECONDARY, the space group only: Birle, Gibbs, Moore and Smith 1968 prints 'it seems safe to assume that all olivine crystals obey the symmetry of Pbnm and have the normal cell size' and NO Z. Its samples are NATURAL olivines rather than the pure end-member, which is recorded because a reader would otherwise take it as a forsterite refinement."
+channel = "TF"
+scope = "ambient Mg2SiO4 olivine; NOT the Fd-3m ringwoodite polymorph of the same formula"
+
+[[claim]]
+id = "cell.atoms_per_primitive_cell.fayalite"
+quantity = "28"
+primary = ["cod_phase_crystallography"]
+secondary = ["msa_structure_determinations"]
+anchor = "COD 1000064 (Fujino, Sasaki, Takeuchi and Sadanaga 1981, Acta Cryst. B37, 513), formula Fe2O4Si, 'P b n m' with Z = 4, a = 4.8195(6), b = 10.4788, c = 6.0873(8). Uncentred, so 4 x 7 = 28. SECONDARY: Birle et al. 1968, whose refined set includes a fayalite and whose Pbnm conclusion covers all four olivines studied."
+channel = "TF"
+scope = "ambient Fe2SiO4 olivine"
+
+[[claim]]
+id = "cell.atoms_per_primitive_cell.spinel"
+quantity = "14"
+primary = ["cod_phase_crystallography"]
+secondary = ["cod_phase_crystallography"]
+anchor = "COD 1010129 (Passerini 1930), formula Al2MgO4, 'F d -3 m :1' with Z = 8, a = 8.050. The conventional cubic cell holds 8 x 7 = 56 atoms (8 Mg, 16 Al, 32 O) and F-centring puts four primitive cells in it, so 56 / 4 = 14 (2 Mg, 4 Al, 8 O). SECONDARY, cited and not held because its COD record carries an AMCSD attribution condition rather than the public-domain dedication: COD 9001364 (Peterson, Lager and Hitterman 1991, Am. Min. 76, 1455), 'F d -3 m :2' with Z = 8 and a = 8.08435. The two differ only in origin convention. THE WEAKEST CLAIM IN COLUMN 1 AND IT IS FLAGGED AS SUCH: no source read here states spinel's PRIMITIVE content directly, unlike corundum and hematite, so the 14 rests on the F-centring division plus the density check. The lattice-dynamics literature's independent statement that a cubic AB2O4 spinel has 42 phonon branches (3 x 14) is consistent with it but was not read at a primary."
+channel = "TF"
+scope = "ambient MgAl2O4"
+
+[[claim]]
+id = "cell.atoms_per_primitive_cell.enstatite"
+quantity = "80"
+primary = ["cod_phase_crystallography"]
+secondary = ["msa_structure_determinations"]
+anchor = "TWO COD RECORDS THAT DISAGREE ON Z AND AGREE ON THE CELL, which is the reason this column carries atoms_per_formula_unit beside Z rather than Z alone: COD 1000047 (Yang and Ghose 1995, Phys. Chem. Minerals 22, 300) states 'P b c a' with Z = 8 for a formula unit written Mg2O6Si2 (10 atoms), and COD 1011018 (Takane 1932) states 'P b c a' with Z = 16 for a formula unit written MgO3Si (5 atoms). Both give 80 atoms in the conventional cell, and Pbca is uncentred, so 80 is also the primitive content. SECONDARY: Hugh-Jones and Angel 1994 prints 'confirming that the crystal used in our experiments has Pbca symmetry' and NO Z."
+channel = "TF"
+scope = "ambient orthoenstatite MgSiO3; NOT the P2(1)/c clinoenstatite, Pbcn protoenstatite or Pbnm bridgmanite polymorphs of the same formula"
+
+# =====================================================================================================
+# CLAIMS: Column 2, kappa_298 (six of eight phases)
+# =====================================================================================================
+
+[[claim]]
+id = "conductivity.kappa_298.quartz"
+quantity = "10.4 parallel to c and 6.21 perpendicular, W/(m*K) at 300 K; the ladder reads the derived Voigt-Reuss-Hill aggregate 7.390"
+primary = ["nsrds_nbs8"]
+secondary = ["usgs_ofr88690"]
+anchor = "NSRDS-NBS 8 Table 14, printed page 72, 300 K row, Quartz (Single Crystal) columns: 0.104 and 0.0621 Watt cm^-1 K^-1, neither parenthesized so neither extrapolated. Stated accuracy 'within +/-5% at temperatures from 300 to 500 K'. SECONDARY, and it is a real independent check rather than a restatement: USGS OFR 88-690 Table 1, printed page 4, alpha-quartz 24.3 mcal/(cm*s*C) parallel and 14.7 perpendicular at 30 C, which at the 0.4184 conversion give 10.17 and 6.15 W/(m*K), agreeing to 2 and 1 percent. THE SECONDARY ONLY AGREES WHEN READ VISUALLY: the USGS text layer gives 21.3 and 11.7 for those two cells, which would have disagreed by 13 percent and looked like a real discrepancy."
+channel = "F"
+scope = "ambient single-crystal alpha-quartz"
+
+[[claim]]
+id = "conductivity.kappa_298.corundum"
+quantity = "36.0 W/(m*K) at 300 K"
+primary = ["nsrds_nbs8"]
+secondary = ["usgs_ofr88690"]
+anchor = "NSRDS-NBS 8 Table 14, 300 K row, Al2O3 column: 0.360 Watt cm^-1 K^-1, unparenthesized, on a specimen the table's footnote declares '99.5% pure, 98% dense, polycrystalline'. Band from the source's own statement for aluminum oxide, 'within +/-8% at temperatures from 500 to 1000 K and increases to about +/-15% below 250 K'; 300 K sits in the unresolved transition, so the wider bound is taken. SECONDARY IS A DISAGREEMENT AND IS RECORDED AS ONE: USGS OFR 88-690 printed page 9 gives an impurity-bearing natural Transvaal crystal at 40.8, 41.2, 36.4 mcal parallel and 36.8, 37.3 perpendicular, converting to 15.2 to 17.2 W/(m*K), roughly HALF the NBS value. The explanation is specimen purity rather than measurement error (a coloured natural corundum carries impurity phonon scattering), which is why the pure-phase recommendation is the anchor and the natural crystal is not."
+channel = "F"
+scope = "ambient dense polycrystalline Al2O3"
+
+[[claim]]
+id = "conductivity.kappa_298.periclase"
+quantity = "48.4 W/(m*K) at 300 K, band 11.6"
+primary = ["nsrds_nbs8"]
+secondary = ["touloukian_1966_oxides"]
+anchor = "NSRDS-NBS 8 Table 14, 300 K row, MgO column: 0.484 Watt cm^-1 K^-1, unparenthesized, and 300 K is the LOWEST unparenthesized entry in that column (250 K and 273 K are both parenthesized, so the source does not stand behind them). Specimen '99.5% pure, 98% dense, polycrystalline'. SECONDARY: Touloukian 1966 Table I-27, printed page 66, MgO SINGLE CRYSTAL with impurity concentration 2e19 atoms per cubic centimetre, 300 K = 0.60 Watt cm^-1 K^-1 = 60.0 W/(m*K), unasterisked, traced by its own remark to Slack (1962). THE 24 PERCENT GAP IS A SPECIMEN-FORM DIFFERENCE, NOT SCATTER, and the band is set to it rather than to the narrower stated accuracy of +/-15 percent, because a width that excluded a second measured determination would claim more than the evidence supports. This row is what makes the ladder's overlap sentinel live: periclase is the only simple-class phase, so it is the only row where both rungs evaluate and rung_disagreement_ratio has anything to report."
+channel = "F"
+scope = "ambient MgO; the anchor is a dense polycrystal and the band reaches the single-crystal value"
+
+[[claim]]
+id = "conductivity.kappa_298.forsterite"
+quantity = "5.158 W/(m*K) at 300 K, band 0.197"
+primary = ["mixing_henke2016"]
+secondary = ["mixing_henke2016"]
+anchor = "Henke, Gail and Trieloff 2016 Table 2 ('The pure mineral species ... and thermal conductivity at 300 K'), row 'forsterite Mg2SiO4, A 140.69, rho 3.22, K 5.158', note (a) = Horai and Simmons 1969, EPSL 6, 359-368, the measurement primary. THE SECONDARY IS AN INDEPENDENT DETERMINATION INSIDE THE SAME PAPER, from a different measurement source: equation (8), 'K(x) = 5.3548 - 5.7704 x + 3.6216 x^2' with x the mole fraction of fayalite, fitted to Horai and Baldridge (1972) at room temperature, which at x = 0 gives K(Fo100) = 5.3548. The band 0.197 is the gap between the two, so the interval covers both determinations. Both sit apart from Table 3's 4.349, which is the Fo80 SOLID SOLUTION and is deliberately not used."
+channel = "T"
+scope = "ambient pure end-member Mg2SiO4, needle-probe measurement on a finely ground sample"
+
+[[claim]]
+id = "conductivity.kappa_298.fayalite"
+quantity = "3.161 W/(m*K) at 300 K, band 0.045"
+primary = ["mixing_henke2016"]
+secondary = ["mixing_henke2016"]
+anchor = "Henke et al. 2016 Table 2, row 'fayalite Fe2SiO4, A 203.78, rho 4.66, K 3.161', note (a) = Horai and Simmons 1969. SECONDARY: the same paper's equation (8) at x = 1 gives K(Fa100) = 5.3548 - 5.7704 + 3.6216 = 3.2060, from the independent Horai and Baldridge (1972) data. Band 0.045 is the gap. A DEFECT IN THE SOURCE ROW, recorded rather than smoothed: the density 4.66 g/cm3 in that same table sits well above the accepted fayalite density near 4.39, so that column is wrong there; only the conductivity is read from this row."
+channel = "T"
+scope = "ambient pure end-member Fe2SiO4"
+
+[[claim]]
+id = "conductivity.kappa_298.enstatite"
+quantity = "4.961 W/(m*K) at 300 K, band 0.052"
+primary = ["mixing_henke2016"]
+secondary = ["usgs_ofr88690"]
+anchor = "Henke et al. 2016 Table 2, row 'enstatite MgSiO3, A 100.39, rho 3.20, K 4.961', note (a) = Horai and Simmons 1969. Corroborated INSIDE the same paper twice: equation (9), 'K(x) = 4.9094 - 5.0649 x + 3.5078 x^2' with x the mole fraction of ferrosilite, fitted to Horai and Baldridge (1972), gives K(En100) = 4.9094 at x = 0, and the Table 3 EH-chondrite column carries an orthopyroxene of composition En100 at K = 4.961 with rho = 3.20, the same pair. Band 0.052 is the gap to the equation (9) value. SECONDARY, from a different compilation: USGS OFR 88-690 printed page 5 gives 'Enstatite 11.8 MIX' after Horai and Simmons 1969, which at the 0.4184 conversion is 4.94 W/(m*K), within 0.5 percent, though it shares the Horai and Simmons measurement lineage rather than being fully independent, which is why it is recorded as a corroboration and not as a second measurement."
+channel = "TF"
+scope = "ambient pure end-member orthoenstatite MgSiO3"
+
+# =====================================================================================================
+# THE TWO PHASES WITH NO ANCHOR, and what was retrieved for them
+# =====================================================================================================
+#
+# HEMATITE is an unresolved dispute rather than a missing fetch. The values retrieved span a factor of
+# 2.3: 10.46, 12.09 and 14.69 W/(m*K) from USGS OFR 88-690 printed page 9 (the first of which is on a
+# sample whose measured density 4.1 is 22 percent below the theoretical 5.274, so it is a porous
+# aggregate), against roughly 19.9 and 24.4 W/(m*K) from Touloukian 1966 Table I-26 for a Brazil
+# single crystal at 300 K where BOTH entries are asterisked as EXTRAPOLATED, the nearest measured points
+# being 350 and 400 K. Choosing a centre inside a 2.3x spread would be authoring, so the row carries no
+# anchor and falls to Slack's rung. Closing it needs a modern single-crystal or dense-polycrystal
+# measurement at 300 K that is not an extrapolation.
+#
+# SPINEL has no pure-phase determination in anything retrieved openly. USGS OFR 88-690 gives 33, 26 and
+# 28 mcal on artificial specimens at 35, 68 and 70 C, cited at third hand (Clark 1966 after McCarthy and
+# Ballard 1951 and after Tuchschmidt 1883), which is a 1951 measurement reached through two
+# intermediaries at a temperature 37 K above the anchor point. The named follow-up is Slack, G.A., 1962,
+# Thermal Conductivity of MgO, Al2O3, MgAl2O4, and Fe3O4 Crystals from 3 to 300 K, Physical Review 126,
+# 427-441, which measures all three oxides this column wants to 300 K and is the same Slack whose
+# estimator is the ladder's second rung; it is behind the APS paywall and was not retrieved.
+#
+# NOT RETRIEVED, stated plainly rather than paraphrased from memory, so the next fetch does not repeat
+# the search:
+#   Horai, K., 1971, Thermal conductivity of rock-forming minerals, JGR 76, 1278-1308,
+#     DOI 10.1029/JB076i005p01278. HTTP 403 at the DOI and at the ADS scan, no Wayback capture, reported
+#     closed access with zero open locations. The citation itself IS corroborated: USGS OFR 88-690's own
+#     reference list prints it with the same volume and page range.
+#   Clauser, C. and Huenges, E., 1995, Thermal Conductivity of Rocks and Minerals, AGU Reference Shelf 3,
+#     105-126, DOI 10.1029/RF003p0105. HTTP 403 at the DOI, no repository copy. The Internet Archive scan
+#     of the volume is dark. The only retrievable copy found was an unauthorized mirror printing
+#     "Copyright 1995 by the American Geophysical Union", so it is not vendorable and was not used.
+#   Hofmeister's single-crystal diffusivity papers (Pertermann and Hofmeister 2006 Am. Min. 91, 1747;
+#     Branlund and Hofmeister 2007; Hofmeister 2014 Phys. Chem. Minerals 41, 361) are all closed access,
+#     and MSA's free American Mineralogist archive covers 1916 to 1999 only, so the 2006 paper falls
+#     outside it (confirmed: AM91_1703.pdf returns HTTP 200 and AM91_1747.pdf returns HTTP 404).
+#   TPRC Data Series Volume 2 (Touloukian, Powell, Ho and Klemens) WAS retrieved from DTIC ADA951936
+#     (HTTP 200, 89.5 MB, 1286 pages, Distribution Statement A) and was NOT used, for two reasons that
+#     are both recorded because either alone would be enough: it prints "Copyright 1970, Purdue Research
+#     Foundation", so its bytes are not redistributable; and its scanned text layer is so degraded that
+#     only 12 of its 1287 pages retain the word "RECOMMENDED", so reading a per-phase value out of it
+#     requires locating and rendering each table by hand. It remains a live route for a later fetch.
+
+# =====================================================================================================
+# HELD BYTES: receipts for everything in this directory
+# =====================================================================================================
+
+[[holding]]
+file = "nsrds_nbs8_SLIM.pdf"
+source_id = "nsrds_nbs8"
+sha256 = "a24275c622a5808152d51774b4bacb9ddd7d9cb8e3fb71824878214270d58441"
+bytes = 619849
+pages = 9
+
+[[holding]]
+file = "diment_pratt_1988.pdf"
+source_id = "usgs_ofr88690"
+sha256 = "458f14028e438734b66d96a9c62f7ea0b954b9d8eb55b61c34f62401b7b3cc97"
+bytes = 289429
+pages = 16
+
+[[holding]]
+file = "cod/cod_1000032.cif"
+source_id = "cod_phase_crystallography"
+sha256 = "8f539f0811f51cc1f4fe6e539c5cf0e5d9c4fe9bf4770372424be8ee499e1b2f"
+bytes = 3311
+anchor = "corundum, 'R -3 c :H', Z = 6, a = 4.76050, c = 12.9956"
+
+[[holding]]
+file = "cod/cod_1010914.cif"
+source_id = "cod_phase_crystallography"
+sha256 = "7af0671408329a1b4c3d8a1b5ffd99fd17e29ada95b16857499d53e175eeb310"
+bytes = 2596
+anchor = "corundum RHOMBOHEDRAL setting, 'R -3 c :R', Z = 2, the primitive content stated directly"
+
+[[holding]]
+file = "cod/cod_1000053.cif"
+source_id = "cod_phase_crystallography"
+sha256 = "d4ea4453e9712fc12dff925cb7812b8a5b68a19e9afa03449be062540b8ad9c7"
+bytes = 4997
+anchor = "periclase, 'F m -3 m', Z = 4, a = 4.217"
+
+[[holding]]
+file = "cod/cod_1011267.cif"
+source_id = "cod_phase_crystallography"
+sha256 = "bdb1776d6c49ed1a03ed1676b96b88e1aca1f1378eb117082fb17c50cf4f3074"
+bytes = 2467
+anchor = "hematite RHOMBOHEDRAL setting, 'R -3 c :R', Z = 2, the primitive content stated directly"
+
+[[holding]]
+file = "cod/cod_1544615.cif"
+source_id = "cod_phase_crystallography"
+sha256 = "57bffb0cbb69020d72cfec27893f1bb0f444c401f3e86fbad79fd7dc0a5fb2c0"
+bytes = 3020
+anchor = "forsterite, 'P b n m', Z = 4, a = 4.756(1), b = 10.208(3), c = 5.988(2)"
+
+[[holding]]
+file = "cod/cod_1000064.cif"
+source_id = "cod_phase_crystallography"
+sha256 = "3463f83dd3bef22058474df81f82007d7666d3d64d92224f89f0136753c3a05c"
+bytes = 2886
+anchor = "fayalite, 'P b n m', Z = 4, a = 4.8195(6), b = 10.4788, c = 6.0873(8)"
+
+[[holding]]
+file = "cod/cod_1010129.cif"
+source_id = "cod_phase_crystallography"
+sha256 = "a201a58f2fdd718ede045e860abb75f86e1fe0a8a52313f15a01070ad16aa365"
+bytes = 5125
+anchor = "spinel, 'F d -3 m :1', Z = 8, a = 8.050"
+
+[[holding]]
+file = "cod/cod_1000047.cif"
+source_id = "cod_phase_crystallography"
+sha256 = "a5c4f3c6056e7d31f7fe7d6f3d2944b6789940b53ceed6bb706e5a2e51d78c06"
+bytes = 2751
+anchor = "enstatite, 'P b c a', Z = 8 counting the formula unit as Mg2Si2O6, so 80 atoms"
+
+[[holding]]
+file = "cod/cod_1011018.cif"
+source_id = "cod_phase_crystallography"
+sha256 = "6fdd40f21d2bc6d7d91bcc7ace76bb512c62d91cbcd5e88ba209cacf08940015"
+bytes = 2894
+anchor = "enstatite ferroan, 'P b c a', Z = 16 counting the formula unit as MgSiO3, so 80 atoms; the Z that disagrees with cod_1000047 while agreeing on the cell"
+
+[[holding]]
+file = "cod/cod_1011097.cif"
+source_id = "cod_phase_crystallography"
+sha256 = "e7014ed2bf991b90c21c0013f261e7f4112b9b51487da043024a96e7cfe62c2a"
+bytes = 2308
+anchor = "quartz low, 'P 31 2 1', Z = 3, a = 4.913, c = 5.404"
+
+[[holding]]
+file = "cod/cod_1011172.cif"
+source_id = "cod_phase_crystallography"
+sha256 = "82e1df28b3a236dd455796a2a26dee2762a20a03c473e19533e6c82ee739ffe1"
+bytes = 2254
+anchor = "quartz low, 'P 31 2 1', Z = 3, a = 4.913, c = 5.405"

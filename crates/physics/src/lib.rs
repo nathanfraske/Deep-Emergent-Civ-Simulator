@@ -77,6 +77,7 @@ pub mod periodic;
 pub mod perovskite_gibbs;
 pub mod petrology;
 pub mod petrology_data;
+pub mod phase_conductivity;
 pub mod phonon;
 pub mod polarizability;
 pub mod qeq;

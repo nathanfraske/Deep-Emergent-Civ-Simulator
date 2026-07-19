@@ -111,3 +111,152 @@ reviewed = "2026-07-18"
 slim = "Not slimmed. Each table is the artifact-native machine-readable form fetched verbatim from janaf.nist.gov/tables/<code>.txt, because the loader parses the full temperature grid rather than a page range."
 
 remediation = "THE RULING CANNOT BE APPLIED AS A DATA CHANGE. The 34 tables are compile-time dependencies (35 `include_str!` sites in crates/physics/src/janaf.rs), so removing them is a compile error rather than a conversion, and it is load-bearing for the condensation and thermochemistry work. The legal nuance offers the path: values are facts and the compilation is what is restricted, so the principled fix is to replace the verbatim NIST table files with a DERIVED data file carrying only the numeric columns the loader consumes, cited to Chase 1998 with the statute noted. That is an engineering arc, not a deletion: it changes a compiled input, so it must be done against a buildable tree with the byte pins verified before and after, and any transcription difference would move them. Surfaced for the owner (plan D6) rather than attempted here. The cheaper alternative the statute itself names is a written permission request to NIST, which would settle it with no code change at all."
+
+# ---------------------------------------------------------------------------------------------------
+# THE PHASE-CONDUCTIVITY FETCH (crates/physics/data/phase_conductivity.toml, 2026-07-18).
+#
+# Two per-phase columns the thermal-conductivity ladder needed and no data file carried: the
+# crystallographic atoms-per-primitive-cell for all eight registry phases, and the measured kappa_298
+# anchor for six of them. The read record, with the anchor for every value and the claim-level
+# primary/secondary pairing, is in crates/physics/data/phase_conductivity/manifest.toml.
+#
+# THE TWO CANONICAL COMPILATIONS WERE SOUGHT AGAIN AND NOT RETRIEVED, recorded at the bottom of this
+# block rather than paraphrased from memory, because a later reader will otherwise re-run the same
+# search. What replaced them is better for this purpose: two US Government publications carrying
+# critically-evaluated per-phase recommended values with STATED accuracies.
+# ---------------------------------------------------------------------------------------------------
+
+[[source]]
+id = "nsrds_nbs8"
+citation = "Powell, R.W., Ho, C.Y. & Liley, P.E., 1966, Thermal Conductivity of Selected Materials, NSRDS-NBS 8, National Standard Reference Data System, National Bureau of Standards, U.S. Department of Commerce, issued November 25, 1966, 168 p."
+url = "https://nvlpubs.nist.gov/nistpubs/Legacy/NSRDS/nbsnsrds8.pdf"
+archived_url = "https://web.archive.org/web/20260707010354/https://nvlpubs.nist.gov/nistpubs/Legacy/NSRDS/nbsnsrds8.pdf"
+witness_verified = "The Wayback capture 20260707010354 was re-fetched and hashed on 2026-07-18 and is BYTE-IDENTICAL to the full document fetched here (sha256 06ea47b0..., 10,801,927 bytes), so the archive corroborates the receipt rather than merely standing beside it."
+sha256 = "a24275c622a5808152d51774b4bacb9ddd7d9cb8e3fb71824878214270d58441"
+bytes = 619849
+pages = 9
+sha256_fetched = "06ea47b01e910abe8e2b7e78a1d1b86946d3e41951ea943de0ac919564797440"
+bytes_fetched = 10801927
+pages_fetched = 180
+recipe = "curl -L https://nvlpubs.nist.gov/nistpubs/Legacy/NSRDS/nbsnsrds8.pdf (HTTP 200, application/pdf), then keep PDF pages 3, 4, 75, 76, 77, 78, 79, 80 and 82 with pypdf.PdfWriter. Both checksums are reproducible from that pair of steps."
+grade = "measured (critically-evaluated recommended values)"
+scope = "Recommended thermal conductivity of nonmetallic solids over 0 to 2300 K at 1 atm. The values read here are the 300 K row: Al2O3 and MgO as 99.5 percent pure, 98 percent dense POLYCRYSTALLINE specimens, and quartz as a high-purity SINGLE CRYSTAL resolved per axis. The specimen form is part of the scope, not a footnote: a 98 percent dense polycrystal is not the pure phase, and the periclase row's band is set by that difference."
+custody = "in_repo"
+holding = "crates/physics/data/phase_conductivity/nsrds_nbs8_SLIM.pdf"
+licence = "US Government publication with NO copyright assertion anywhere in the document (grepped across all 180 pages of the extracted text, zero hits for copyright or all rights reserved). Issued by the National Bureau of Standards and sold by the Superintendent of Documents, U.S. Government Printing Office, imprint 'GOVERNMENT PRINTING OFFICE: 1966-251-021/41'. The dated argument that closes it: the Standard Reference Data Act (Public Law 90-396) that lets Commerce secure copyright in Standard Reference Data compilations was enacted in July 1968, and this volume was ISSUED NOVEMBER 25, 1966, so the authority the JANAF question turns on did not exist when this was published. The finding therefore points at an absence of assertion PLUS a date, rather than at an authority never shown to be exercised. Residual seam, recorded rather than hidden: the authors were at Purdue's Thermophysical Properties Research Center under NBS contract, so 'US Government work by a federal employee' is not the cleanest possible ground; the absence of any notice and the pre-statute issue date are."
+redistributable = true
+licence_evidence = "the document's own front matter (issue date, GPO imprint, no copyright notice); Public Law 90-396, 11 July 1968, for the date comparison"
+free_route = "https://nvlpubs.nist.gov/nistpubs/Legacy/NSRDS/nbsnsrds8.pdf"
+free_route_kind = "gov-work"
+slim = "KEPT: PDF pages 3 and 4, the identification and the verso carrying the NBS and Department of Commerce imprint, the issue date and the GPO line, which is the evidence for the licence finding above. PDF pages 75 to 80, Part II 'Thermal Conductivity of Nonmetallic Solids', holding the per-material discussion and the STATED UNCERTAINTIES that set the bands: aluminum oxide 'within +/-8% at temperatures from 500 to 1000 K and increases to about +/-15% below 250 K' (p.77), magnesium oxide 'within +/-8% at temperatures from 500 to 1000 K and increases to +/-15% below 300 K' (p.78), and quartz single crystal 'within +/-5% at temperatures from 300 to 500 K' (p.79). PDF page 82, THE LOAD-BEARING PAGE, Table 14 with the 300 K row and the footnotes that decide how it is read. DROPPED: Part I on metals, the figure pages, the per-material reference lists for materials this column does not use, and the tables for BeO, diamond, Pyroceram, ThO2 and TiO2. The full document is recoverable from the archived URL and checkable against the full-fetch receipt above."
+read_channels = "A 300 dpi render of PDF page 82 (rotated 90 degrees to read the landscape table) plus text extraction for the prose uncertainties. THE VISUAL CHANNEL IS NOT OPTIONAL FOR THIS ARTIFACT: Table 14 is a rotated scan and the values are read off a grid whose column headers carry the footnote markers that decide whether an entry is extrapolated."
+note = "Table 14 footnotes, read verbatim from the render: '*In the table the third significant figure is given only for the purpose of comparison and for smoothness and is not indicative of the degree of accuracy.', '**99.5% pure, 98% dense, polycrystalline', '+High-purity.', '++Values in parentheses are extrapolated.' The 300 K entries used here are NONE of them parenthesized. For MgO the 250 K and 273 K entries above 300 K in the column ARE parenthesized, so 300 K is the lowest temperature the source stands behind for that material, which is exactly the anchor point."
+
+[[source]]
+id = "usgs_ofr88690"
+citation = "Diment, W.H. & Pratt, H.R., 1988, Thermal conductivity of some rock-forming minerals: a tabulation, U.S. Geological Survey Open-File Report 88-690, 15 p., DOI 10.3133/ofr88690."
+url = "https://pubs.usgs.gov/of/1988/0690/report.pdf"
+archived_url = "https://web.archive.org/web/20250619042834/https://pubs.usgs.gov/of/1988/0690/report.pdf"
+witness_verified = "The Wayback capture 20250619042834 was re-fetched and hashed on 2026-07-18 and is BYTE-IDENTICAL to the bytes held here (sha256 458f1402..., 289,429 bytes)."
+sha256 = "458f14028e438734b66d96a9c62f7ea0b954b9d8eb55b61c34f62401b7b3cc97"
+bytes = 289429
+pages = 16
+recipe = "curl -L https://pubs.usgs.gov/of/1988/0690/report.pdf (HTTP 200, application/pdf). Held whole: at 0.28 MB and 16 pages it is already under the per-file cap, so no slim was cut and no second receipt exists."
+grade = "measured (compilation of laboratory measurements to 1969, plus the authors' own)"
+scope = "Thermal conductivity of rock-forming minerals in mcal/(cm*s*C) at 21 to 100 C and 25 to 170 bars, on NATURAL mineral samples and monomineralic aggregates with stated porosity and measured-versus-theoretical density. The scope limit that governs how this source may be used: many rows are natural, impure or porous specimens, so a row is a SAMPLE property and becomes a PHASE property only where the specimen is pure and dense. That is why this source supplies a cross-check here and only one anchor."
+custody = "in_repo"
+holding = "crates/physics/data/phase_conductivity/diment_pratt_1988.pdf"
+licence = "US Geological Survey Open-File Report. USGS states 'USGS-authored or produced data and information are considered to be in the U.S. Public Domain', and the repo already holds byerlee_1978 on the same ground. Residual seam, recorded rather than smoothed: the second author is listed under SAIC, a contractor, so 'USGS-authored' does not cleanly cover every part of the work; the report is nevertheless a USGS-produced Open-File Report published by the Survey."
+redistributable = true
+licence_evidence = "https://www.usgs.gov/information-policies-and-instructions/copyrights-and-credits"
+free_route = "https://pubs.usgs.gov/of/1988/0690/report.pdf"
+free_route_kind = "gov-work"
+slim = "Not slimmed: the whole 16-page report is held, 0.28 MB, under the per-file cap and smaller than four of the ten documents already in tree. Nothing was dropped, so no kept-versus-dropped record is needed."
+read_channels = "TEXT EXTRACTION IS UNSAFE FOR THIS ARTIFACT AND THE RENDER IS MANDATORY, which is the most transferable thing this fetch learned. The scan's text layer silently corrupts leading digits in Table 1: it renders the alpha-quartz pair as 21.3 and 11.7 where the printed page reads 24.3 and 14.7, and the corundum rows as 10.8 and 11.2 where the page reads 40.8 and 41.2, a 4x error on the latter. It also mis-attributes rows, presenting novaculite, jasper and chert as though they were quartz aggregates. Every value quoted from this source was read from a 300 dpi pdftoppm render of the printed page, and the corrected quartz pair then agrees with the independent NSRDS-NBS 8 recommendation to within 2 percent, which is what confirms the visual read rather than merely asserting it."
+note = "The unit conversion is READ, not assumed: the companion USGS Open-File Report 88-441 (Robertson, E.G., 1988, Thermal properties of rocks) prints '1 CU = 10^-3 cal/cm sec C = 0.4184 W/m K'. Retrieved values not used as anchors, recorded so the next fetch does not repeat the work: hematite 25 (measured density 4.1 against theoretical 5.274, roughly 22 percent porosity), 28.9 and 35.1 mcal; spinel 33, 26 and 28 mcal on artificial specimens at 35, 68 and 70 C, cited at third hand through Clark 1966 after McCarthy and Ballard 1951; corundum 40.8, 41.2 and 36.4 parallel and 36.8 and 37.3 perpendicular on an impurity-bearing natural Transvaal crystal, converting to 15.2 to 17.2 W/(m*K), roughly half the NBS recommendation for the pure phase; enstatite 11.8 mcal MIX after Horai and Simmons 1969. PERICLASE IS ABSENT FROM THIS REPORT ENTIRELY."
+
+[[source]]
+id = "cod_phase_crystallography"
+citation = "Crystallography Open Database (COD), https://www.crystallography.net/cod/, eleven CIF records for the eight registry phases: 1011097 and 1011172 (quartz, Wei 1935 and Brill, Hermann & Peters 1939), 1000032 (corundum, Lutterotti & Scardi 1990, J. Appl. Cryst. 23, 246), 1010914 (corundum rhombohedral setting, Pauling & Hendricks 1925, J. Am. Chem. Soc. 47, 781), 1000053 (periclase, Sasaki, Fujino & Takeuchi 1979, Proc. Japan Acad. 55, 43), 1011267 (hematite rhombohedral setting, Zachariasen 1928), 1544615 (forsterite, J. Mineral. Petrol. Sci. 2006), 1000064 (fayalite, Fujino, Sasaki, Takeuchi & Sadanaga 1981, Acta Cryst. B37, 513), 1010129 (spinel, Passerini 1930, Gazz. Chim. Ital. 60, 389), 1000047 (enstatite, Yang & Ghose 1995, Phys. Chem. Minerals 22, 300) and 1011018 (enstatite ferroan, Takane 1932, Proc. Imperial Acad. Tokyo 8, 308)."
+url = "https://www.crystallography.net/cod/"
+archived_url = "https://web.archive.org/web/20171010005130/http://www.crystallography.net/cod/1000053.cif"
+archive_pending = "Only one of the eleven CIF URLs carries a Wayback capture (1000053, checked 2026-07-18); the rest return an empty availability response. That is why the BYTES are held in-tree rather than left to the archive: a record with no capture and no local copy would be provenance by hyperlink, which is the failure the checklist exists to prevent."
+sha256 = "per-file, recorded row by row in crates/physics/data/phase_conductivity/manifest.toml (11 CIFs)"
+bytes = 34609
+recipe = "curl https://www.crystallography.net/cod/<id>.cif for each of the eleven ids, verbatim. Each file's own header records its provenance and its terms, which is what the licence finding below was read from."
+grade = "measured (published single-crystal and powder structure determinations, as deposited)"
+scope = "Ambient-condition crystal structures of the eight registry phases: space group, lattice centring, cell parameters and formula units per cell. Structural facts, frame-free for this column's purpose, and independent of any conductivity measurement. A polymorph caveat that matters and is handled by carrying the space group explicitly in every row: formula alone does NOT determine the structure here, since MgSiO3 also occurs as clinoenstatite (P2(1)/c), protoenstatite (Pbcn) and bridgmanite (Pbnm), and Mg2SiO4 also occurs as ringwoodite (Fd-3m). A lookup keyed on formula would silently return the wrong phase."
+custody = "in_repo"
+holding = "crates/physics/data/phase_conductivity/cod/"
+licence = "PUBLIC DOMAIN, verified PER FILE rather than assumed for the database. COD's site states 'All data on this site have been placed in the public domain by the contributors', and each held CIF repeats that dedication in its own header. THE TERMS ARE NOT UNIFORM ACROSS COD AND THE SPLIT IS PER ENTRY, NOT PER ID RANGE, which is the catch worth carrying forward: a record whose data came from a third party (the American Mineralogist Crystal Structure Database, or IUCr Journals) carries instead 'The file may be used within the scientific community so long as proper attribution is given to the journal article from which the data were obtained', an attribution-conditioned grant scoped to a community rather than a public-domain dedication. Every one of the eleven held files was grepped against its own header and every one carries the public-domain dedication; three records that would otherwise have been held (COD 9000319 forsterite, 9001364 spinel, 2101167 and 1572966 via IUCr) were dropped to citation-only on exactly this ground."
+redistributable = true
+licence_evidence = "https://www.crystallography.net/cod/ and the per-file header in each held CIF"
+free_route = "https://www.crystallography.net/cod/"
+free_route_kind = "repository"
+slim = "Not slimmed: each CIF is the artifact-native machine-readable record, 2 to 6 KB, and the whole set is 34.6 KB. Nothing was dropped from any file."
+
+[[source]]
+id = "touloukian_1966_oxides"
+citation = "Touloukian, Y.S. (ed.), 1966, Recommended Values of the Thermophysical Properties of Eight Alloys, Major Constituents and Their Oxides, prepared by the Thermophysical Properties Research Center, Purdue University, under NBS Sub-Contract CST-7590, NASA Order R-45, 549 p. NASA Technical Reports Server document 19660014513."
+url = "https://ntrs.nasa.gov/api/citations/19660014513/downloads/19660014513.pdf"
+archived_url = "https://web.archive.org/web/20250202023422/https://apps.dtic.mil/sti/tr/pdf/ADA951936.pdf"
+archive_pending = "The archived_url above is the DTIC copy of the SIBLING TPRC volume and is NOT this document; no Wayback capture of the NTRS URL was found on 2026-07-18. Recorded as pending with the reason rather than left to imply a capture that does not exist."
+sha256 = "ceb8fb6ee31814819438b808f29fbd42ac034f03b7a1fa517ea429c981a750ee"
+bytes = 15023851
+pages = 552
+recipe = "curl -L https://ntrs.nasa.gov/api/citations/19660014513/downloads/19660014513.pdf (HTTP 200, application/pdf)."
+grade = "measured (selected values from experimental data)"
+scope = "Recommended thermophysical properties of eight alloys, their major constituents and the corresponding oxides. The value read here is the single-crystal MgO thermal conductivity at 300 K, on a specimen of stated impurity concentration 2e19 atoms per cubic centimetre."
+custody = "witness"
+licence = "NOT ESTABLISHED AS REDISTRIBUTABLE, so no bytes are held. The document is openly served by NASA's Technical Reports Server and carries a DTIC Distribution Statement A on its sibling volume, but it was prepared by Purdue's Thermophysical Properties Research Center under contract, and the SIBLING TPRC volume prints an explicit 'Copyright 1970, Purdue Research Foundation'. A copyright asserted by the same preparing institution over the same data series is enough to withhold the bytes rather than assume the absence of a notice in this volume settles it. The values themselves are facts and are uncopyrightable, so reading and citing them is safe either way, which is what is done here."
+redistributable = false
+licence_evidence = "the printed 'Copyright 1970, Purdue Research Foundation' notice in the sibling volume TPRC Data Series Volume 2 (DTIC ADA951936), read at line 395 of its extracted text"
+free_route = "https://ntrs.nasa.gov/api/citations/19660014513/downloads/19660014513.pdf"
+free_route_kind = "gov-work"
+extract = "Table I-27, printed page 66: 'THERMAL CONDUCTIVITY OF MAGNESIUM OXIDE (single crystal) MgO. Selected Values for MgO Single Crystal with Impurity Concentration 2 x 10^19 atoms cm^-3'. The 300 K row reads k = 0.60 Watt cm^-1 K^-1, which is 60.0 W/(m*K), and it carries NO asterisk (the table's footnote reserves the asterisk for extrapolated values, and only the 0.1, 0.5 and 1 K entries carry one). Neighbouring rows: 273 K 0.66, 350 K 0.50, 400 K 0.43. The section's own remark: 'Five sets of experimental data are available. Selected values from 2 to 320 K are taken from the data of Slack (1962), and values from 423 to 483 K from the data of Makarounis and Jenkins'. So this value traces to Slack (1962), Physical Review 126, 427, the single-crystal study that remains paywalled at the publisher."
+read_channels = "A 250 dpi pdftoppm render of PDF page 78 (printed page 66). The text layer of this scan is degraded and was not relied on for any value."
+note = "This is the INDEPENDENT SECOND DETERMINATION that sets the periclase band. Against the NSRDS-NBS 8 recommendation of 48.4 W/(m*K) for a 98 percent dense polycrystal, this single-crystal value of 60.0 is 24 percent higher, and the direction and rough size are what porosity plus grain-boundary resistance predict. The band on the periclase row is set to that gap rather than to the narrower stated accuracy, because a width that excluded a second measured determination would claim more than the evidence supports."
+
+[[source]]
+id = "msa_structure_determinations"
+citation = "Five published structure determinations in American Mineralogist, read as the primary crystallographic witnesses for Column 1: Blake, R.L., Hessevick, R.E., Zoltai, T. & Finger, L.W., 1966, Refinement of the hematite structure, Am. Min. 51, 123-129; Birle, J.D., Gibbs, G.V., Moore, P.B. & Smith, J.V., 1968, Crystal structures of natural olivines, Am. Min. 53, 807-824; Hazen, R.M., 1976, Effects of temperature and pressure on the cell dimension and X-ray temperature factors of periclase, Am. Min. 61, 266-271; Levien, L., Prewitt, C.T. & Weidner, D.J., 1980, Structure and elastic properties of quartz at pressure, Am. Min. 65, 920-930; Hugh-Jones, D.A. & Angel, R.J., 1994, A compressional study of MgSiO3 orthoenstatite up to 8.5 GPa, Am. Min. 79, 405-410."
+url = "http://www.minsocam.org/ammin/AM51/AM51_123.pdf"
+archived_url = "https://web.archive.org/web/20260115015117/http://www.minsocam.org/ammin/AM51/AM51_123.pdf"
+sha256 = "b083336fbde0d3aef7daa0da926a1e8582961fcfd3030067d1b81214545e6ff5"
+bytes = 459675
+sha256_set = "Re-fetch receipts for all five papers, none held: AM51_123.pdf (hematite, Blake 1966) b083336fbde0d3aef7daa0da926a1e8582961fcfd3030067d1b81214545e6ff5, 459675 bytes; AM53_807.pdf (olivines, Birle 1968) d6c87e56de69e14b9d2dd48105f7253651153550462562918f94a66cd7bebc2f, 1170263 bytes; AM61_266.pdf (periclase, Hazen 1976) 905a260202939b4e987fd7050e77fd58e815d5ff3553366146f3dfb5cfbf1220, 643306 bytes; AM65_920.pdf (quartz, Levien 1980) 9f496e89e95eed7498162662a40805a1f71ba5169c93dd047af7bcfba6bd3b85, 1177432 bytes; AM79_405.pdf (orthoenstatite, Hugh-Jones & Angel 1994) 09fb2e8c6e9ac64b4b7f4169fefc120c3968d7d637849b474e9a8c90f42a9a33, 776792 bytes. The `sha256` field above is the hematite paper, the one whose `url` this entry names; the rest are here because one entry covers five documents and a receipt per document is what makes each re-fetchable."
+recipe = "curl -L http://www.minsocam.org/ammin/AM<vol>/AM<vol>_<page>.pdf over PLAIN HTTP for each paper. minsocam.org refuses HTTPS, which matters for automation: a fetcher that force-upgrades to HTTPS will always fail on this host."
+grade = "measured (published single-crystal structure refinements)"
+scope = "Ambient and high-pressure crystal structures of hematite, the natural olivines, periclase, quartz and orthoenstatite: space groups, cell parameters and refined atomic coordinates. Used here ONLY for the space-group and cell statements each paper actually prints."
+custody = "witness"
+licence = "NOT REDISTRIBUTABLE, and the finding points at an explicit assertion rather than at an inference. The Mineralogical Society of America's copyright notice states: 'All rights are reserved by the Mineralogical Society of America (MSA) and content may not be reproduced, downloaded, disseminated, published, or transferred in any form or by any means, except with the prior written permission of MSA, or as indicated below. Members of MSA and nonmembers may download pages or other content for their own use ... on a single computer. However, no part of such content may be otherwise or subsequently reproduced, downloaded, disseminated, published, or transferred, in any form or by any means, except with the prior written permission of, and with the express attribution to MSA.' Reading is permitted and redistributing is not, so these are held as citation plus witness with no bytes, matching the existing MSA findings in this registry for fan_2019 and jackson_1999_enstatite."
+redistributable = false
+licence_evidence = "http://www.minsocam.org/msa/Copyright.html"
+free_route = "http://www.minsocam.org/ammin/AM51/AM51_123.pdf"
+free_route_kind = "publisher-open"
+extract = "WHAT EACH PAPER ACTUALLY PRINTS, quoted, because three of the five print LESS than a reader would assume and the difference decides what may be cited to them. Blake et al. 1966 prints BOTH: the text records that 'the space group R3c of Pauling and Hendricks was confirmed', and Table I heads 'Hexagonal unit cell: a = 5.038 +/- 0.002 A, c = 13.772 +/- .012 A, c/a = 2.733 +/- 0.015, Z = 6' with 'Space Group = R3c' beneath it (read from a 400 dpi render; the text layer drops the overbar and mangles the Z). Birle et al. 1968 prints the space group only, 'it seems safe to assume that all olivine crystals obey the symmetry of Pbnm and have the normal cell size', and NO Z. Hugh-Jones & Angel 1994 prints the space group only, 'confirming that the crystal used in our experiments has Pbca symmetry', and NO Z. Hazen 1976 prints NEITHER symbol NOR Z, only the structure type and the cell: 'The cubic NaCl-type structure of periclase was first suggested by Hull (1919)', with a refined a = 4.2121 +/- 0.0001 A. Levien et al. 1980 prints NEITHER: it gives the cell parameters 'a = 4.916(1) and c = 5.4054(4) A at 1 atm' and no space-group symbol anywhere. So for periclase and quartz the space group is cited to the COD records and the structure type to these papers, and Z is cited to COD throughout except for hematite."
+note = "This entry exists so that a reader can tell which crystallographic claim rests on which document. The Z values in Column 1 come from the COD records for seven of the eight phases; hematite is the one phase whose Z is printed in a published paper this project has read."
+
+[[source]]
+id = "mixing_henke2016"
+citation = "Henke, S., Gail, H.-P. & Trieloff, M., 2016, Thermal evolution and sintering of chondritic planetesimals. III. Modelling the heat conductivity of porous chondrite material, Astronomy and Astrophysics 589, A41, DOI 10.1051/0004-6361/201527687."
+url = "https://arxiv.org/pdf/1602.00292"
+archived_url = "https://web.archive.org/web/20260719002840/https://arxiv.org/pdf/1602.00292"
+sha256 = "f9bcb3be8f7101955f1bcb61a206607ed29a45e6a1338e837f46fb9bb27d292e"
+bytes = 119223
+pages = 6
+sha256_fetched = "f62bf64fbcd97dc0111c250c214343dbd77af3a2052f584dc69365e4a8870935"
+bytes_fetched = 1128030
+pages_fetched = 19
+recipe = "curl -L https://arxiv.org/pdf/1602.00292 (HTTP 200, application/pdf), then keep PDF pages 1, 5, 7, 8, 9 and 19 with pypdf.PdfWriter."
+grade = "MIXED, and the boundary is load-bearing. Table 2's per-species conductivities are MEASURED values compiled from Horai & Simmons (1969); Table 3's census conductivities are INTERPOLATED from composition fits; the Table 4 and 6 numerical columns are COMPUTED finite-difference solutions of the heat equation; the Bruggeman column is an ANALYTIC closure."
+scope = "Heat conductivity of multi-mineral chondritic material at 300 K and zero to 0.30 porosity. The values read here are Table 2's PURE END-MEMBER species conductivities, which are the only pure-phase numbers in the paper; Table 3's are solid-solution compositions and are deliberately not used."
+custody = "external"
+external_path = "~/.claude/vendored-sources/rock_conductivity_mixing/henke_gail_trieloff_2016_AA589_A41_SLIM_p1_p5_p7-9_p19.pdf"
+licence = "arXiv author preprint under arXiv's non-exclusive licence to distribute, which permits arXiv to distribute and does NOT grant this project redistribution rights, so the bytes stay in local custody outside the repo rather than in tree. The publisher's open-access copy at aanda.org returned HTTP 500 on 18 July 2026, so the version held is the preprint and a value read here is a preprint reading."
+redistributable = false
+licence_evidence = "arXiv licence terms for the non-exclusive distribution option"
+free_route = "https://arxiv.org/pdf/1602.00292"
+free_route_kind = "preprint"
+slim = "KEPT: PDF pages 1, 5, 7, 8, 9 and 19 (identification, Table 3, Tables 4 and 5, the mixing-rule derivation, equation 17 with Table 6, and the reference list). Table 2, the pure-species table this fetch reads, is on PDF page 3 and was NOT in the original slim, which was cut for the mixing-rule question; it was read from the full preprint text held beside the slim in the same directory."
+note = "PREVIOUSLY VENDORED for the multiphase mixing rule (docs/working/VENDORING_CHECKLIST.md) and REGISTERED HERE for the first time, because this fetch depends on it for three of the six kappa_298 anchors and an unregistered dependency is a dependency the gate cannot check. Table 2 read verbatim: 'forsterite Mg2SiO4, A 140.69, rho 3.22, K 5.158'; 'fayalite Fe2SiO4, A 203.78, rho 4.66, K 3.161'; 'enstatite MgSiO3, A 100.39, rho 3.20, K 4.961'; all three carrying note (a) = Horai & Simmons (1969), which is the measurement primary. A DEFECT IN THE SOURCE, recorded rather than smoothed: the fayalite density 4.66 g/cm3 in that table sits well above the accepted 4.39, so that column of that row is wrong; the conductivity is the quantity read and the density is not taken from here."
