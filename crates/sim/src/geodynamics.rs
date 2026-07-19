@@ -493,8 +493,12 @@ pub fn derive_column_thermal_properties(
     // 33 percent HIGH, and the assemblage about 23 percent high. An audit caught it; the first version of
     // this code passed `Fixed::ZERO` here and called the field "the caller's own", which was true and not
     // an excuse for supplying a wrong value.
-    let thermal_expansion_ppm_per_k =
-        derive_assemblage_expansivity_ppm_per_k(&volume_census, tables)?;
+    let thermal_expansion_ppm_per_k = derive_assemblage_expansivity_ppm_per_k(
+        &volume_census,
+        temperature_k,
+        pressure_bar,
+        tables,
+    )?;
     // The integral of a CONSTANT expansivity over the anchor-to-evaluation range. Constant-alpha is the
     // honest limit here and is stated rather than hidden: the banked gamma, bulk modulus and molar volume
     // are ambient-frame values, so the expansivity they produce carries no temperature dependence of its
@@ -558,7 +562,7 @@ pub fn derive_column_thermal_properties(
 /// The assemblage's volumetric expansivity in PPM per kelvin, the unit the kernel's
 /// [`civsim_physics::laws::thermal_density_anomaly`] reads.
 ///
-/// FRONTIER CLOSED 2026-07-19. The join now exists as
+/// NOT CLOSED, and the earlier "FRONTIER CLOSED" note here was wrong. The join exists as
 /// [`civsim_materials::properties::assemblage_volumetric_expansivity_per_k`], which derives each phase's
 /// `alpha = gamma C_v / (K V_m)` from four banked columns and mixes them by volume. Its magnitude is checked
 /// against the MEASURED forsterite expansivity (roughly 40 ppm/K at mantle temperature) reproduced from
@@ -570,10 +574,14 @@ pub fn derive_column_thermal_properties(
 /// visible at the site that needs it.
 fn derive_assemblage_expansivity_ppm_per_k(
     volume_census: &[(String, Fixed)],
+    requested_temperature_k: Fixed,
+    requested_pressure_bar: Fixed,
     tables: &BankedTables<'_>,
 ) -> Result<Fixed, ColumnDerivationRefusal> {
-    let per_k = civsim_materials::properties::assemblage_volumetric_expansivity_per_k(
+    let per_k = civsim_materials::properties::ambient_assemblage_volumetric_expansivity_per_k(
         volume_census,
+        requested_temperature_k,
+        requested_pressure_bar,
         tables.registry,
         tables.moduli,
         tables.gruneisen,
@@ -586,7 +594,7 @@ fn derive_assemblage_expansivity_ppm_per_k(
         })
 }
 
-/// The column's effective viscosity as a log-space BAND. FRONTIER CLOSED 2026-07-19.
+/// The column's effective viscosity as a log-space BAND.
 ///
 /// THE ADMITTED CREEP SET IS ONE ROW, and that is a capability statement rather than a simplification.
 /// Hirth and Kohlstedt 2003 Table 1 banks five rows; three are WET and refuse because no water fugacity or
@@ -1192,18 +1200,22 @@ mod tests {
 
     // A synthetic column: hot relative to a cold reference, with representable-scaled parameters (so the
     // Rayleigh intermediates fit Q32.32). The Rayleigh onset is switched by ra_crit in each test.
-    /// THE WHOLE CLUSTER, DERIVED. All seven properties now come from the world's own composition and the
-    /// column's own geometry, with no authored value anywhere in the chain.
+    /// THE CLUSTER REFUSES A MIXED-FRAME STATE, which is the honest behaviour and replaces an earlier test
+    /// asserting that all seven properties derive at mantle conditions.
     ///
-    /// This test replaces the atomicity-refusal assertion that stood here while the joins were open. That
-    /// one was written to FAIL when the frontier closed, and it did, twice: once when the expansivity join
-    /// landed and once when the viscosity join did. Each failure was the signal to come here and widen what
-    /// is claimed, which is what a test earning its keep looks like.
+    /// That earlier claim was wrong and an audit caught it. The Grueneisen rows, the bulk moduli and the
+    /// molar volumes are AMBIENT values near 300 K and 1 bar, and `gruneisen.rs` stores each row's frame
+    /// precisely "so a caller cannot silently treat an ambient aggregate as a deep-interior value". Reading
+    /// them at 1600 K and 100 kbar produced a number that agreed with measurement at one temperature by
+    /// cancellation (a high-temperature Dulong-Petit capacity against 300 K gamma, modulus and volume)
+    /// rather than by physics.
     ///
-    /// Every assertion is a MAGNITUDE against the world rather than against the algebra, because algebra
-    /// proves a formula self-consistent and says nothing about whether a mantle behaves that way.
+    /// The corrected ruling is sharper than "all seven or none": a column consumes one STATE-COHERENT
+    /// property bundle or it refuses. Atomicity does not license moving seven fields together when the
+    /// fields do not describe the same thermodynamic state. Carrying the rows to interior conditions is a
+    /// state-resolved thermoelastic provider and a real arc, not a patch.
     #[test]
-    fn the_whole_cluster_derives_from_composition_and_geometry() {
+    fn the_cluster_refuses_a_state_outside_its_input_frames() {
         use civsim_physics::gruneisen::GruneisenTable;
         use civsim_physics::mineral_moduli::MineralModuli;
         use civsim_physics::periodic::PeriodicTable;
@@ -1215,12 +1227,18 @@ mod tests {
         let conductivity = PhaseConductivityTable::standard().expect("the cited column loads");
         let gruneisen = GruneisenTable::standard().expect("the Grueneisen table loads");
         let moduli = MineralModuli::standard().expect("the moduli table loads");
+        let tables = BankedTables {
+            registry: &registry,
+            periodic: &periodic,
+            conductivity: &conductivity,
+            gruneisen: &gruneisen,
+            moduli: &moduli,
+        };
         let composition = vec![
             ("Mg".to_string(), Fixed::from_int(2)),
             ("Si".to_string(), Fixed::ONE),
             ("O".to_string(), Fixed::from_int(4)),
         ];
-        // A Mars-class convecting mantle: ~1800 km layer, 3.7 m/s^2, a 1300 K contrast.
         let geometry = ColumnGeometry {
             layer_depth_m: Fixed::from_int(1_800_000),
             gravity_m_s2: Fixed::from_ratio(37, 10),
@@ -1228,77 +1246,47 @@ mod tests {
             ln_rayleigh_critical: crate::deeptime::RIGID_RIGID_RA_CRIT.ln(),
         };
 
-        let p = derive_column_thermal_properties(
+        // A MANTLE state is outside every input row's frame, so the bundle refuses BY NAME rather than
+        // returning ambient values wearing an interior label.
+        let refusal = derive_column_thermal_properties(
             &composition,
             Fixed::from_int(1600),
             Fixed::from_int(100_000),
             &geometry,
-            &BankedTables {
-                registry: &registry,
-                periodic: &periodic,
-                conductivity: &conductivity,
-                gruneisen: &gruneisen,
-                moduli: &moduli,
-            },
+            &tables,
         )
-        .expect("every join is closed, so the whole cluster derives");
+        .expect_err("interior conditions lie outside the ambient input frames");
+        match &refusal {
+            ColumnDerivationRefusal::Expansivity(reason) => {
+                assert!(
+                    reason.contains("outside") && reason.contains("frame"),
+                    "the refusal names the frame violation: {reason}"
+                );
+            }
+            other => panic!("expected a frame refusal, got {other}"),
+        }
 
-        let rho = p.density_kg_m3.to_f64_lossy();
+        // AT ITS OWN FRAME the chain still runs end to end, which is what keeps this a scoping limit rather
+        // than a broken derivation. The expansivity is checked against an INDEPENDENT anchor: Ye, Schwering
+        // and Smyth (2009) single-crystal XRD give forsterite `alpha(300 K) ~ 29.1 +/- 2.6 ppm/K`, a
+        // different measurement from the Anderson and Isaak gamma row this derivation reads, so recovering
+        // it is a check rather than a back-solve of the source's own number.
+        let ambient =
+            civsim_materials::properties::ambient_assemblage_volumetric_expansivity_per_k(
+                &[("forsterite".to_string(), Fixed::ONE)],
+                Fixed::from_int(300),
+                Fixed::ONE,
+                &registry,
+                &moduli,
+                &gruneisen,
+            )
+            .expect("forsterite carries a complete ambient row");
+        let ppm = ambient.to_f64_lossy() * 1e6;
         assert!(
-            (3000.0..=3800.0).contains(&rho),
-            "a silicate mantle sits near 3300 kg/m^3, read {rho:.0}"
-        );
-        let k = p.thermal_conductivity_w_m_k.to_f64_lossy();
-        assert!(
-            (1.0..=8.0).contains(&k),
-            "a silicate conductivity at 1600 K sits near a few W/(m K), read {k:.2}"
-        );
-        let cp = p.specific_heat_j_kg_k.to_f64_lossy();
-        assert!(
-            (900.0..=1500.0).contains(&cp),
-            "Dulong-Petit for a silicate lands near 1200 J/(kg K), read {cp:.0}"
-        );
-        let alpha_ppm = p.thermal_expansion_ppm_per_k.to_f64_lossy();
-        assert!(
-            (20.0..=60.0).contains(&alpha_ppm),
-            "a mantle expansivity sits near 30 to 40 ppm/K, read {alpha_ppm:.1}"
-        );
-        let kappa = p
-            .thermal_diffusivity()
-            .expect("computed from the three")
-            .to_f64_lossy();
-        assert!(
-            (1e-7..=1e-5).contains(&kappa),
-            "a silicate diffusivity sits near 1e-6 m^2/s, read {kappa:.2e}"
-        );
-
-        // THE VISCOSITY, AND THIS IS THE STRONGEST CHECK IN THE TEST. The representation note on
-        // `ColumnParams::viscosity` records, from an entirely separate measurement made before this
-        // derivation existed, that the built creep solve returns `ln(eta) ~ 53.9` for a Mars-class interior
-        // at 1600 K and 10.7 GPa. This chain reaches those conditions from a COMPOSITION: the assemblage
-        // gives the density, the density and conductivity and heat capacity give the diffusivity, the
-        // density and expansivity give the buoyancy contrast, and the density and geometry give the
-        // mid-layer pressure. Landing on the recorded value means the derived input chain puts the column
-        // where hand-set inputs had put it. The solve is shared, so this checks the INPUTS rather than the
-        // solve, which is exactly the part that is new.
-        let ln_eta = p.viscosity.ln_viscosity_primary.to_f64_lossy();
-        assert!(
-            (53.0..=55.0).contains(&ln_eta),
-            "the derived chain should reproduce the independently recorded ln(eta) ~ 53.9, read {ln_eta:.3}"
-        );
-        assert!(
-            (10.0..=12.0).contains(&p.viscosity.eval_pressure_gpa.to_f64_lossy()),
-            "the mid-layer pressure of an 1800 km Mars-class mantle is ~11 GPa"
-        );
-
-        // THE BAND IS ORDERED, and a COLLAPSED band is an honest report rather than a defect: the bracket
-        // takes min and max over the activation-volume determinations that COVER this pressure, so when the
-        // source's determinations agree at a pressure there is no spread to report. What would be a defect
-        // is a primary outside its own interval, which is what this asserts.
-        assert!(
-            p.viscosity.ln_viscosity_min <= p.viscosity.ln_viscosity_primary
-                && p.viscosity.ln_viscosity_primary <= p.viscosity.ln_viscosity_max,
-            "the declared primary lies inside its own band"
+            (20.0..=45.0).contains(&ppm),
+            "the ambient-frame expansivity should be within reach of the independent 29.1 ppm/K anchor, \
+             read {ppm:.1}; the residual gap is the C_V-against-K_S conjugate mismatch, which the \
+             state-resolved arc closes"
         );
     }
 

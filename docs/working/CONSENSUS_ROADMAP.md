@@ -8,7 +8,7 @@ The retired long-form board is `docs/working/CONSENSUS_ROADMAP_HISTORY.md`, pres
 
 ## Active arcs
 
-- 2026-07-19  Mountains / mid-band (increment 3) -> #205, all seven cluster properties derive; HELD on 9 audit findings (4 HIGH), 3 fixed (Si-diffusion V* contamination, authored zero expansion integral, truncated assemblage), 2 delegated. Next: thread the census through `build_deep_time_provinces`, move the 7 fields + their 3 uncompared copies, re-baseline via `realization_digest`, then Seams C/D. RETRACTED in HANDOFFS: my "the full SI lift is infeasible" claim was WRONG (audit-caught, I tested SI-LINEAR not the ruled SI/LOG-SPACE); the ruled plan stands, heat carries as per-tick energy or a signed log.
+- 2026-07-19  Mountains / mid-band (increment 3) -> #205 HELD, the seven-field frontier is NOT closed: the ambient-frame rows were read at interior state, so the cluster now REFUSES a mixed-frame request (#208 steering). Fixed: Si-diffusion V* contamination, authored zero expansion integral, truncated assemblage, frame gate. Remaining: the state-resolved thermoelastic provider. Next: thread the census through `build_deep_time_provinces`, move the 7 fields + their 3 uncompared copies, re-baseline via `realization_digest`, then Seams C/D. RETRACTED in HANDOFFS: my "the full SI lift is infeasible" claim was WRONG (audit-caught, I tested SI-LINEAR not the ruled SI/LOG-SPACE); the ruled plan stands, heat carries as per-tick energy or a signed log.
 - 2026-07-18  Remote agent #201 (disk-evolution wire) lands large and often -> rebase-onto-main integration, keep viewer/physics lanes disjoint.
 - 2026-07-18  Arc AFTER the crust (perpetual dynamics, atmosphere keystone, hydrosphere) -> plan in `PHYSICS_SUBSTRATE_ROADMAP.md`.
 
