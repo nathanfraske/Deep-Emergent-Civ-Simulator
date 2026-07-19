@@ -50,7 +50,11 @@ case "$cmd" in
 esac
 
 # A verifier whose status is load-bearing.
-verifier_re='(^|[;&|(]|[[:space:]])(cargo|python3?[[:space:]]+scripts/[a-z0-9_]+\.py|bash[[:space:]]+scripts/verify\.sh|scripts/verify\.sh)([[:space:]]|$)'
+# The verifier must be in COMMAND POSITION: at the start of the statement, or straight after a pipe,
+# a separator, or an opening paren. Accepting it after any whitespace matched it as an ARGUMENT to
+# something else, so `pgrep -c cargo | sed` read as running cargo and was blocked. That is a false
+# positive, and a guard that blocks legitimate work teaches the reader to route around it.
+verifier_re='(^|[;&|(]|&&|\|\|)[[:space:]]*(cargo|python3?[[:space:]]+scripts/[a-z0-9_]+\.py|bash[[:space:]]+scripts/verify\.sh|scripts/verify\.sh)([[:space:]]|$)'
 # A filter that would mask it.
 filter_re='\|[[:space:]]*(head|tail|grep|wc|sed|awk|cut|sort|uniq|jq)([[:space:]]|$)'
 
