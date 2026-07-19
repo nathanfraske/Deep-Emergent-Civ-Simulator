@@ -476,22 +476,36 @@ pub struct BankedTables<'a> {
     pub gruneisen: &'a civsim_physics::gruneisen::GruneisenTable,
     /// The mineral elastic-moduli table.
     pub moduli: &'a civsim_physics::mineral_moduli::MineralModuli,
+    /// The Mie-Grueneisen-Debye anchor column (`theta_0`, `q`, and the `V_0`/`K_0`/`K_0'` from the same
+    /// fit). What lets the expansivity be asked for AT the column's own state rather than at 300 K.
+    pub anchors: &'a civsim_physics::thermoelastic_anchors::ThermoelasticAnchors,
 }
 
 /// Derive every thermal property of an interior column from the world's OWN composition, ATOMICALLY.
 ///
 /// The chain, each link a banked derivation rather than a value: the composition minimizes to a stable
-/// assemblage; the assemblage's phases and molar volumes give its density; its mean atomic mass gives the
-/// Dulong-Petit specific heat; its volume census runs the two-rung conductivity ladder; and the diffusivity
-/// falls out of those three rather than being stored beside them.
+/// assemblage; one pass of the thermoelastic ladder over its volume census gives the expansivity and the
+/// compression AT the requested state; that compression carries the registry's ambient molar volumes to the
+/// state, giving the density; the mean atomic mass gives the Dulong-Petit specific heat; the same census
+/// runs the two-rung conductivity ladder; and the diffusivity falls out of those three rather than being
+/// stored beside them.
 ///
-/// TWO OF THE SEVEN STILL REFUSE, and that is the point of returning a `Result` rather than a struct of
-/// options. The expansivity needs an assemblage-level join over the Grueneisen gamma, the molar heat
-/// capacity, the bulk modulus and the molar volume, and those live in two tables (`mineral_moduli` and the
-/// phase registry) with no function joining them by phase key. The viscosity needs the creep-candidate wire
-/// into `convective_viscosity::solve_ln_effective_viscosity`, which additionally wants the diffusivity this
-/// function computes and a mid-layer pressure the province call site does not yet form. Until both land, this
-/// refuses, the fixture cluster stays whole, and the pins do not move. That is the ruling enforced by a type.
+/// ALL SEVEN NOW DERIVE AT DEPTH, which is what the thermoelastic ladder was built for. They refused until
+/// 2026-07-19, and the refusal was correct rather than a placeholder: every input row was an ambient one,
+/// and reading those at 1600 K and 100 kbar had produced a number that matched measurement by CANCELLATION.
+/// Rung 3 of the ladder solves the equation of state at the requested state instead, so the bundle is
+/// computed there rather than borrowed from 300 K.
+///
+/// THE RESULT IS STILL A `Result`, because refusing remains the correct answer in three cases the wire does
+/// not remove: an assemblage that hit the subset-enumeration cap and is provisional rather than minimized; a
+/// census the ladder cannot solve whole, since renormalising over the covered phases would substitute their
+/// behaviour for the rock's; and a requested pressure that disagrees with the one the column's own density
+/// implies, which is the same state-coherence the seven fields promise, checked rather than assumed.
+///
+/// THE ONE-STATE PROMISE IS STRUCTURAL, not a comment. The expansivity and the density come from ONE ladder
+/// pass returning both, because the first version of this wire took the expansivity from the ladder and left
+/// the density on the registry's ambient volumes: two volumes for one rock, four percent apart, with nothing
+/// comparing them.
 // @derives: an interior column's thermal properties <- the world's own composition through the banked assemblage, ladder and Dulong-Petit derivations
 pub fn derive_column_thermal_properties(
     composition: &[(String, Fixed)],
@@ -520,13 +534,43 @@ pub fn derive_column_thermal_properties(
         return Err(ColumnDerivationRefusal::TruncatedAssemblage);
     }
 
-    // Density: the registry's own molar volumes and masses, in g/cm^3, lifted to kg/m^3.
-    let density_g_cm3 = civsim_physics::petrology::assemblage_density(
+    // The volume census, needed before the density now because the density is state-resolved through it.
+    // Volume fractions rather than molar amounts, because both the Bruggeman conductivity mixture and the
+    // compression average weight by the volume each phase occupies.
+    let volume_census =
+        civsim_physics::petrology::assemblage_volume_fractions(&assemblage, tables.registry)
+            .ok_or_else(|| missing("volume_fractions"))?;
+
+    // ONE LADDER PASS supplies BOTH the expansivity and the compression, so the two cannot describe
+    // different volumes for the same rock. `None` means the ladder could not solve the whole census here,
+    // and every consumer below falls back to its own ambient path, which refuses out of frame on its own
+    // terms rather than answering.
+    let state = civsim_materials::thermoelastic::ThermoState {
+        temperature_k,
+        pressure_bar,
+    };
+    let pass = ladder_pass_over_census(&volume_census, state, tables);
+
+    // Density: the registry's own molar volumes and masses, in g/cm^3, lifted to kg/m^3, and then CARRIED
+    // TO THE REQUESTED STATE by the same solve the expansivity came from.
+    //
+    // The ambient value alone is wrong at depth and wrong in a way that hides: at 1600 K and 10.7 GPa
+    // forsterite's molar volume is 41.94 cm^3/mol against its 43.60 reference, so an ambient density
+    // understates the column by about 4 percent and, worse, disagrees with the volume its own expansivity
+    // was solved at. `rho(P,T) = rho_0 / sum(phi_i f_i)` follows directly from `rho = M/V` with each phase
+    // compressed by `f_i`, using the same ambient volume fractions the census carries.
+    let density_g_cm3_ambient = civsim_physics::petrology::assemblage_density(
         &assemblage,
         tables.registry,
         tables.periodic,
     )
     .ok_or_else(|| missing("density"))?;
+    let density_g_cm3 = match &pass {
+        Some(p) if p.compression > Fixed::ZERO => density_g_cm3_ambient
+            .checked_div(p.compression)
+            .ok_or_else(|| missing("density_at_state"))?,
+        _ => density_g_cm3_ambient,
+    };
     let density_kg_m3 = density_g_cm3
         .checked_mul(Fixed::from_int(1000))
         .ok_or_else(|| missing("density"))?;
@@ -542,11 +586,7 @@ pub fn derive_column_thermal_properties(
         civsim_physics::young_thermal::dulong_petit_specific_heat(mean_atomic_mass)
             .ok_or_else(|| missing("specific_heat"))?;
 
-    // Conductivity: the volume census through the two-rung ladder. Volume fractions rather than molar
-    // amounts, because a Bruggeman mixture weights by the volume each phase occupies.
-    let volume_census =
-        civsim_physics::petrology::assemblage_volume_fractions(&assemblage, tables.registry)
-            .ok_or_else(|| missing("volume_fractions"))?;
+    // Conductivity: the volume census through the two-rung ladder.
     // THE EXPANSIVITY IS DERIVED BEFORE THE CONDUCTIVITY because the conductivity ladder CONSUMES it.
     // Hofmeister's lattice form carries a factor `exp[-(4 gamma + 1/3) * integral(alpha dT)]` from the
     // 298 K anchor to the evaluation temperature, and passing ZERO for that integral silently asserts a
@@ -560,6 +600,7 @@ pub fn derive_column_thermal_properties(
         temperature_k,
         pressure_bar,
         tables,
+        pass.as_ref(),
     )?;
     // The integral of a CONSTANT expansivity over the anchor-to-evaluation range. Constant-alpha is the
     // honest limit here and is stated rather than hidden: the banked gamma, bulk modulus and molar volume
@@ -667,21 +708,95 @@ pub fn derive_column_thermal_properties(
 /// The per-kelvin result is scaled to ppm here, at the boundary where the kernel's unit is declared, rather
 /// than inside the derivation, so the physics function returns the physical quantity and this conversion is
 /// visible at the site that needs it.
+/// What ONE pass of the thermoelastic ladder over the census yields: the state-resolved expansivity and
+/// the compression the same solve implies.
+///
+/// The two travel together BY CONSTRUCTION, and that is the point of the struct rather than two functions.
+/// A first version of this wire took the expansivity from the ladder at the column's own state and left the
+/// density reading the registry's ambient molar volumes, so a mantle column reported an expansivity solved
+/// at 41.94 cm^3/mol beside a density computed from 43.60. Two volumes for one rock, nothing comparing
+/// them, in a bundle whose entire ruling is that the seven fields describe ONE thermodynamic state. It is
+/// the diamond pattern in miniature, and returning both from one solve makes it unconstructible.
+struct LadderPass {
+    /// Volume-weighted volumetric expansivity at the requested state (per K).
+    alpha_per_k: Fixed,
+    /// `sum(phi_i * V_i(P,T) / V_0i)`, the census-weighted compression factor. Multiply an ambient molar
+    /// volume by this to get the state-resolved one; divide an ambient density by it for the same state.
+    compression: Fixed,
+}
+
+/// Run the ladder over the whole census at one state, or report that it could not.
+///
+/// PARTIAL COVERAGE IS NOT AN ANSWER. If any phase cannot be solved here, renormalising over the rest
+/// would silently substitute the covered phases' behaviour for the whole rock, which is an authored
+/// assemblage wearing a derivation's clothes. The whole census answers or none of it does.
+fn ladder_pass_over_census(
+    volume_census: &[(String, Fixed)],
+    state: civsim_materials::thermoelastic::ThermoState,
+    tables: &BankedTables<'_>,
+) -> Option<LadderPass> {
+    let mut alpha = Fixed::ZERO;
+    let mut compression = Fixed::ZERO;
+    let mut covered = Fixed::ZERO;
+    for (name, fraction) in volume_census {
+        let r = civsim_materials::thermoelastic::response_at(
+            name,
+            state,
+            tables.registry,
+            tables.moduli,
+            tables.gruneisen,
+            tables.anchors,
+        )
+        .ok()?;
+        // The ratio against the phase's OWN reference volume, taken from the registry the census was
+        // built from, so the compression is measured against the same basis the density uses.
+        let v0 = tables.registry.phase(name)?.molar_volume;
+        if v0 <= Fixed::ZERO {
+            return None;
+        }
+        let f = r.molar_volume_cm3.checked_div(v0)?;
+        alpha = alpha.checked_add(r.alpha_per_k.checked_mul(*fraction)?)?;
+        compression = compression.checked_add(f.checked_mul(*fraction)?)?;
+        covered = covered.checked_add(*fraction)?;
+    }
+    if covered <= Fixed::ZERO {
+        return None;
+    }
+    Some(LadderPass {
+        alpha_per_k: alpha.checked_div(covered)?,
+        compression: compression.checked_div(covered)?,
+    })
+}
+
+/// The assemblage's volumetric expansivity in ppm/K at the requested state.
+///
+/// THE LADDER IS ASKED FIRST, AT THE COLUMN'S OWN STATE. This is the seam the thermoelastic ladder was
+/// built to close. The ambient join below is correct only inside its rows' 300 K frame, and an interior
+/// column is nowhere near it: reading it at 1600 K and 100 kbar returned a number that matched measurement
+/// by CANCELLATION, which is the defect on record. It refuses outside its frame now, so before this wire
+/// an interior column got no expansivity at all.
 fn derive_assemblage_expansivity_ppm_per_k(
     volume_census: &[(String, Fixed)],
     requested_temperature_k: Fixed,
     requested_pressure_bar: Fixed,
     tables: &BankedTables<'_>,
+    pass: Option<&LadderPass>,
 ) -> Result<Fixed, ColumnDerivationRefusal> {
-    let per_k = civsim_materials::properties::ambient_assemblage_volumetric_expansivity_per_k(
-        volume_census,
-        requested_temperature_k,
-        requested_pressure_bar,
-        tables.registry,
-        tables.moduli,
-        tables.gruneisen,
-    )
-    .map_err(|e| ColumnDerivationRefusal::Expansivity(e.to_string()))?;
+    let per_k = match pass {
+        Some(p) => p.alpha_per_k,
+        // THE AMBIENT JOIN IS THE FALLBACK, and it refuses on its own terms when the state is outside its
+        // frame. Reaching it is therefore not a silent downgrade: either the query is genuinely ambient
+        // and this is the right rung, or it refuses and the column refuses with it.
+        None => civsim_materials::properties::ambient_assemblage_volumetric_expansivity_per_k(
+            volume_census,
+            requested_temperature_k,
+            requested_pressure_bar,
+            tables.registry,
+            tables.moduli,
+            tables.gruneisen,
+        )
+        .map_err(|e| ColumnDerivationRefusal::Expansivity(e.to_string()))?,
+    };
     per_k
         .checked_mul(Fixed::from_int(1_000_000))
         .ok_or_else(|| ColumnDerivationRefusal::NoQuantity {
@@ -1334,7 +1449,7 @@ mod tests {
     /// fields do not describe the same thermodynamic state. Carrying the rows to interior conditions is a
     /// state-resolved thermoelastic provider and a real arc, not a patch.
     #[test]
-    fn the_cluster_refuses_a_state_outside_its_input_frames() {
+    fn the_cluster_derives_one_coherent_state_at_depth() {
         use civsim_physics::gruneisen::GruneisenTable;
         use civsim_physics::mineral_moduli::MineralModuli;
         use civsim_physics::periodic::PeriodicTable;
@@ -1346,7 +1461,10 @@ mod tests {
         let conductivity = PhaseConductivityTable::standard().expect("the cited column loads");
         let gruneisen = GruneisenTable::standard().expect("the Grueneisen table loads");
         let moduli = MineralModuli::standard().expect("the moduli table loads");
+        let anchors_tbl = civsim_physics::thermoelastic_anchors::ThermoelasticAnchors::standard()
+            .expect("anchors");
         let tables = BankedTables {
+            anchors: &anchors_tbl,
             registry: &registry,
             periodic: &periodic,
             conductivity: &conductivity,
@@ -1365,31 +1483,53 @@ mod tests {
             ln_rayleigh_critical: crate::deeptime::RIGID_RIGID_RA_CRIT.ln(),
         };
 
-        // A MANTLE state is outside every input row's frame, so the bundle refuses BY NAME rather than
-        // returning ambient values wearing an interior label.
-        let refusal = derive_column_thermal_properties(
+        // A MANTLE STATE NOW DERIVES, and the whole cluster comes back state-resolved. Before the
+        // thermoelastic ladder was wired in this refused by name, which was correct and was a scoping
+        // limit rather than a destination. All seven fields now describe 1600 K and the pressure the
+        // column's own density implies at that depth.
+        let deep = derive_column_thermal_properties(
             &composition,
             Fixed::from_int(1600),
             Fixed::from_int(100_000),
             &geometry,
             &tables,
         )
-        .expect_err("interior conditions lie outside the ambient input frames");
-        match &refusal {
-            ColumnDerivationRefusal::Expansivity(reason) => {
-                assert!(
-                    reason.contains("outside") && reason.contains("frame"),
-                    "the refusal names the frame violation: {reason}"
-                );
-            }
-            other => panic!("expected a frame refusal, got {other}"),
-        }
+        .expect("the ladder answers at interior conditions");
 
-        // AT ITS OWN FRAME the chain still runs end to end, which is what keeps this a scoping limit rather
-        // than a broken derivation. The expansivity is checked against an INDEPENDENT anchor: Ye, Schwering
-        // and Smyth (2009) single-crystal XRD give forsterite `alpha(300 K) ~ 29.1 +/- 2.6 ppm/K`, a
-        // different measurement from the Anderson and Isaak gamma row this derivation reads, so recovering
-        // it is a check rather than a back-solve of the source's own number.
+        // THE DENSITY IS CARRIED TO THE STATE, and this assertion is the one that would have caught the
+        // defect the first version of this wire shipped. That version took the expansivity from the ladder
+        // at 41.94 cm^3/mol and left the density reading the registry's ambient 43.60, so the bundle
+        // reported 3223 kg/m^3: two volumes for one rock, in a cluster whose entire ruling is that the
+        // seven fields describe ONE thermodynamic state.
+        let rho = deep.density_kg_m3.to_f64_lossy();
+        assert!(
+            (3300.0..=3420.0).contains(&rho),
+            "forsterite at 1600 K and about 11 GPa compresses to roughly 3355 kg/m^3, well above its \
+             ambient 3223; read {rho:.1}. An ambient density here would be four percent light AND would \
+             disagree with the volume its own expansivity was solved at"
+        );
+
+        // The expansivity is the one solved AT that state, not the ambient row: compression suppresses it
+        // from the ~29 ppm/K forsterite shows at 300 K and 1 bar, and heating alone would raise it.
+        let ppm = deep.thermal_expansion_ppm_per_k.to_f64_lossy();
+        assert!((18.0..=34.0).contains(&ppm), "read {ppm:.1} ppm/K at depth");
+
+        // AND THE PRESSURE THE VISCOSITY WAS EVALUATED AT AGREES WITH THAT DENSITY, which is the
+        // coherence the bundle promises: a denser column implies a higher lithostatic pressure at the same
+        // depth, and the state-resolved density moved it from 10.73 to 11.17 GPa rather than leaving the
+        // creep ladder evaluated at a pressure the density no longer supports.
+        let p_gpa = deep.viscosity.eval_pressure_gpa.to_f64_lossy();
+        let implied = rho * 3.7 * 1_800_000.0 / 2.0 / 1e9;
+        assert!(
+            (p_gpa - implied).abs() < 0.05,
+            "the creep evaluation pressure {p_gpa:.3} GPa must be the mid-layer lithostatic pressure of \
+             THIS density, {implied:.3} GPa"
+        );
+
+        // AT ITS OWN FRAME the ambient join still runs, checked against an INDEPENDENT anchor: Ye,
+        // Schwering and Smyth (2009) single-crystal XRD give forsterite `alpha(300 K) ~ 29.1 +/- 2.6
+        // ppm/K`, a different measurement from the Anderson and Isaak gamma row this derivation reads, so
+        // recovering it is a check rather than a back-solve of the source's own number.
         let ambient =
             civsim_materials::properties::ambient_assemblage_volumetric_expansivity_per_k(
                 &[("forsterite".to_string(), Fixed::ONE)],
@@ -1404,8 +1544,7 @@ mod tests {
         assert!(
             (20.0..=45.0).contains(&ppm),
             "the ambient-frame expansivity should be within reach of the independent 29.1 ppm/K anchor, \
-             read {ppm:.1}; the residual gap is the C_V-against-K_S conjugate mismatch, which the \
-             state-resolved arc closes"
+             read {ppm:.1}"
         );
     }
 
