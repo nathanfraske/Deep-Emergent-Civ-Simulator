@@ -360,6 +360,30 @@ grade = "theory"
 extract = "The gap-opening criterion for giant-planet accretion termination. Eq. 15 (p.17, Sec. 6): a gap is open when P = (3/4)(H/R_H) + 50/(q R) <= 1, with q = M_p/M_star the planet-to-star mass ratio, R = r_p^2 Omega_p / nu the Reynolds number, R_H = r_p (q/3)^(1/3) the Hill radius (so H/R_H = (H/r_p)/(q/3)^(1/3)). Coefficients 3/4 and 50 and the threshold P=1 confirmed dual-channel (OCR plus visual; the Fig. 12 caption restates P=1 as a second in-source channel for the threshold). THERMAL asymptote, self-anchored in the held bytes: R_H >= H (Sec. 2.3, Lin and Papaloizou 1993) which with the Hill definition gives q = 3(H/r)^3. VISCOUS asymptote: Eq. 3, nu < 0.0887 q^2 ... (equivalent to Bryden 1999). SCOPE: fit to Fig. 12 gap-depth-threshold curves (a gap is central surface density <= 10 percent of unperturbed) over q = 1e-4 to 3e-3, H/r up to ~0.12, constant kinematic nu; 2D vertically-isothermal non-migrating giant planet, q << 1. CHANNEL-RELAYED CAVEAT, NOT from Crida: the paper uses a CONSTANT kinematic viscosity nu and never mentions the Shakura-Sunyaev alpha; the link R = 1/(alpha (H/r)^2) via nu = alpha c_s H is the standard alpha-disk substitution (Shakura and Sunyaev 1973), a derivation the caller applies, not a Crida claim. MODELING-ASSUMPTION CAVEAT, NOT from Crida: identifying gap-opening (P<=1) with the HALT of runaway gas accretion is the caller's standard modeling assumption, not a claim Crida makes. LICENSE: OPEN (arXiv accepted preprint, public-tree); the ScienceDirect journal version is paywalled but carries the same equations. The archive_url snapshot re-hashes byte-identical to the fetched bytes, a real witness. CROSS-REFERENCE not-yet-vendored: the thermal R_H >= H traces to Lin and Papaloizou 1993 (a book chapter, no free PDF) and the Hill radius to Ward 1997 (the ADS scan timed out); the thermal asymptote is self-anchored in Crida's own bytes, so neither blocks the primary."
 used_by = "giants::gap_opening_mass_earth; giants::GapOpeningModel::crida_2006"
 
+# ==================== Substellar mass boundaries (the typed giant outcome) ====================
+
+[[source]]
+name = "spiegel_burrows_milsom_2011"
+url = "https://arxiv.org/pdf/1008.5150"
+archive_url = "https://web.archive.org/web/20260718234423/https://arxiv.org/pdf/1008.5150"
+citation = "Spiegel, D. S., Burrows, A. and Milsom, J. A. 2011, The Deuterium-Burning Mass Limit for Brown Dwarfs and Giant Planets, ApJ 727, 57. arXiv:1008.5150."
+sha256 = "3dfd0c6d9c007a4417cd95775e5b4920675bf3037fea78b3682dbf4b665a0c8a"
+bytes = 651766
+grade = "theory"
+extract = "The deuterium-burning minimum mass, the giant-planet / brown-dwarf line. FIDUCIAL (Abstract): 50 percent of initial deuterium burns at ~13.0 +/- 0.8 M_Jup (= 0.012 M_sun) for most proto-brown-dwarf conditions. FULL RANGE (Abstract; Table 1/3): 11.0 M_Jup (3x solar metallicity, 10 percent burn) to 16.3 M_Jup (zero metallicity, 90 percent burn). Definition: NO single criterion; the mass at which a chosen fraction (10/50/90 percent) of initial D combusts within 10 Gyr (each fraction a different edge; 10 to 50 to 90 percent each adds ~0.8-0.9 M_Jup). DEPENDENCE (Table 1, M(50%) in M_Jup): helium Y higher lowers it (Y=0.22 -> 14.08, 0.25 -> 13.55, 0.30 -> 12.42, 0.32 -> 12.05); initial deuterium higher lowers it; metallicity Z higher lowers it (Z0 -> 15.40, Z0.01 -> 14.56). NARROWED realistic band (Sec.4): 12.2 to 13.7 M_Jup for Y in 0.25-0.30, y_D,i in 1e-5 to 2e-5, Z in 0.5-2 solar, 50 percent burn. SCOPE: cloud-free high-initial-entropy (hot-start) models; metallicity enters via atmospheric opacity. LICENSE: OPEN (arXiv), public-tree; the archive_url snapshot re-hashes byte-identical. DUAL-CHANNEL: abstract prose and Table 1 grid agree on the endpoints. Id verified against held bytes (title, authors)."
+used_by = "giants::BurningLimits::spiegel_chabrier (deuterium line); giants::giant_mass_class"
+
+[[source]]
+name = "chabrier_2000"
+url = "https://arxiv.org/pdf/astro-ph/0005557"
+archive_url = "https://web.archive.org/web/20260718234436/https://arxiv.org/pdf/astro-ph/0005557"
+citation = "Chabrier, G., Baraffe, I., Allard, F. and Hauschildt, P. 2000, Evolutionary models for very-low-mass stars and brown dwarfs with dusty atmospheres, ApJ 542, 464. arXiv:astro-ph/0005557."
+sha256 = "72eabcc2d40f3e18dd132fa7c34fac2d1c5dee5556ebafe3cd1b3ad66b306d74"
+bytes = 327038
+grade = "theory"
+extract = "The hydrogen-burning minimum mass, the brown-dwarf / star line. VALUE (Sec.3, HBMM paragraph): grain-free (NextGen/COND) m_HBMM ~ 0.072 M_sun (T_eff 1700 K, log L/L_sun = 5e-5); DUSTY models ~0.070 M_sun (T_eff 1550 K), for solar composition. In Jupiter masses (derived, M_sun/M_Jup = 1047.57): ~75.4 / 73.3 M_Jup. Definition: the minimum mass at which sustained core hydrogen fusion balances the radiated luminosity in thermal equilibrium on the main sequence; below it the object cools as a brown dwarf. METALLICITY: this paper gives the solar-composition HBMM only; the well-established rise toward ~0.08-0.09 M_sun at low/zero metallicity is CHANNEL-RELAYED (not in these held bytes), the named debt. SCOPE: solar composition, dusty versus grain-free atmospheres, conductive-core physics active near the HBMM. LICENSE: OPEN (arXiv), public-tree; the archive_url snapshot re-hashes byte-identical. DUAL-CHANNEL: the 0.070/0.072 M_sun figures cross-confirmed by Sec.3 prose and the evolutionary tables; the M_Jup equivalents are a derived conversion, not a source read. Id verified against held bytes."
+used_by = "giants::BurningLimits::spiegel_chabrier (hydrogen line); giants::giant_mass_class"
+
 # ==================== Errata backing (held witnesses for caught misattributions) ====================
 # When a fetch catches a WRONG id, the wrong-id target is vendored here so the correction is a held fact, not a
 # claim: 'the relayed id resolves to paper Z, not the intended source'. A source-internal typo needs no entry (it

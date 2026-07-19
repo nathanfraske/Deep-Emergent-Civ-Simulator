@@ -44,7 +44,7 @@ The 16 deriving subsystems below live OUTSIDE the authored floor. Each produces 
 - the interior column's secular thermal history <- radiogenic_decay (the isotope reservoir spending down over the world clock) feeding radiogenic_heat (the falling heat production) into the convection step, so the interior warms under radiogenic heating and cools as the sources decay; no authored cooling knob, the source history is the decaying reservoir (`crates/sim/src/geodynamics.rs:283`)
 ### `crates/sim/src/giants.rs`
 
-- the giant-planet gap-opening mass M_gap <- the Crida 2006 thermal-viscous gap criterion P(q)=(3/4)(H/R_H)+50/(qR)=1 solved for the mass ratio, over the disk aspect ratio and Reynolds number, the accretion-termination scale (`crates/sim/src/giants.rs:492`)
+- the giant-planet gap-opening mass M_gap <- the Crida 2006 thermal-viscous gap criterion P(q)=(3/4)(H/R_H)+50/(qR)=1 solved for the mass ratio, over the disk aspect ratio and Reynolds number, the accretion-termination scale (`crates/sim/src/giants.rs:495`)
 ### `crates/sim/src/locomotion.rs`
 
 - movement speed in tiles/tick, and (inverted) the cell edge in metres <- a real ground speed (about 1.4 m/s) / the tile edge, at the 1 s/tick base. The cell size is NOT free: it is fixed by one real creature's speed x the tick. Body-side, a being's own speed derives from its size (morphology), not a plant/animal tag. (`crates/sim/src/locomotion.rs:88`)

@@ -154,12 +154,15 @@ pub enum GiantOutcome {
     /// TERMS-DROPPED, and it is load-bearing on the MASS (audit finding): THIS field still carries the RESERVOIR
     /// EXHAUSTION closure (the giant grows until the feeding annulus empties), an UPPER BOUND, not a predicted mass.
     /// It over-estimates: a dense-disk super-critical embryo returns tens of Jupiter masses (brown-dwarf-class). The
-    /// accretion-termination MECHANISM now exists as a dormant kernel: [`gap_opening_mass_earth`] (the Crida 2006
+    /// accretion-termination MECHANISM exists as a dormant kernel: [`gap_opening_mass_earth`] (the Crida 2006
     /// gap-opening scale) caps the runaway, and [`runaway_terminated_giant_mass_earth`] applies `M_final =
-    /// min(reservoir, M_gap)`, which trims the solar-row giant from ~24 to ~2 Jupiter masses. Wiring that cap into
-    /// THIS field, and dispatching the ~13 M_Jup deuterium boundary into a typed giant-planet-versus-brown-dwarf
-    /// outcome, is the FOLLOW-ON slice; until that wiring lands, read `final_mass_earth` as the un-terminated
-    /// ceiling, and terminate it through the kernel above at the call site.
+    /// min(reservoir, M_gap)`, which trims the solar-row giant from ~24 to ~2 Jupiter masses. The TYPED OUTCOME also
+    /// exists: [`giant_mass_class`] reads a mass against the vendored deuterium (~13 M_Jup) and hydrogen (~0.072
+    /// M_sun) fusion boundaries into Planet / BrownDwarf / Star, so the terminated mass types as a planet while the
+    /// un-terminated 24-M_Jup ceiling would type as a brown dwarf. What remains is the INTEGRATION: threading the
+    /// disk aspect ratio through THIS gate to apply the cap and emit the class on `final_mass_earth`; until that
+    /// lands, read `final_mass_earth` as the un-terminated ceiling and terminate-and-type it through the kernels
+    /// above at the call site.
     Giant { final_mass_earth: Fixed },
 }
 
@@ -570,6 +573,85 @@ pub fn runaway_terminated_giant_mass_earth(
             gap_opening_mass_earth
         },
     )
+}
+
+/// IAU nominal Jupiter mass (kg), the unit the deuterium-burning line is quoted in. Local to the giant mass
+/// classification; the sibling [`crate::astro::EARTH_MASS_KG`] and [`crate::astro::SOLAR_MASS_KG`] live in astro.
+const JUPITER_MASS_KG: &str = "1.89813e27";
+
+/// The FUSION MASS BOUNDARIES that type a substellar body, cited and vendored: the deuterium-burning minimum mass
+/// (the giant-planet / brown-dwarf line) and the hydrogen-burning minimum mass (the brown-dwarf / star line). The
+/// values are the paper fiducials; a declared model the way [`crate::astro::CollapseModel`] carries its members.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct BurningLimits {
+    /// The deuterium-burning minimum mass (Jupiter masses). Below it a body never fuses deuterium: a giant planet.
+    pub deuterium_limit_m_jup: Fixed,
+    /// The hydrogen-burning minimum mass (solar masses). At or above it a body sustains hydrogen fusion: a star.
+    pub hydrogen_limit_m_sun: Fixed,
+}
+
+impl BurningLimits {
+    /// The vendored fiducials (receipts in the disk_arc_literature manifest): the deuterium line ~13 M_Jup
+    /// (Spiegel, Burrows and Milsom 2011, the 50-percent-burn fiducial, `13.0 +/- 0.8 M_Jup`) and the
+    /// hydrogen line ~0.072 M_sun (Chabrier, Baraffe, Allard and Hauschildt 2000, the grain-free HBMM). The
+    /// COMPOSITION dependence is the named debt: the deuterium line runs 11.0 to 16.3 M_Jup across helium fraction,
+    /// deuterium abundance, metallicity, and burn fraction (Spiegel Table 1), and the hydrogen line rises toward
+    /// ~0.08 to 0.09 M_sun at low metallicity (channel-relayed, not in the vendored Chabrier bytes), so a per-world
+    /// derivation from the drawn composition is the follow-on. Solar composition here.
+    pub fn spiegel_chabrier() -> Self {
+        Self {
+            deuterium_limit_m_jup: Fixed::from_int(13),
+            hydrogen_limit_m_sun: Fixed::from_ratio(72, 1000),
+        }
+    }
+}
+
+/// The typed substellar OUTCOME: which side of the two fusion boundaries a mass falls on.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum GiantMassClass {
+    /// Below the deuterium-burning line: a giant planet.
+    Planet,
+    /// Between the deuterium and hydrogen lines: a brown dwarf (fuses deuterium, never hydrogen).
+    BrownDwarf,
+    /// At or above the hydrogen-burning line: a star.
+    Star,
+}
+
+/// The TYPED giant outcome (Planet / BrownDwarf / Star) for a body of a given mass, DERIVED by comparing the mass
+/// to the two vendored fusion boundaries ([`BurningLimits`]). This is what makes the deuterium bound SOUND on the
+/// terminated mass (the audit finding): a value crossing the ~13 M_Jup deuterium line is TYPED a brown dwarf, not
+/// reported as a giant planet, and the terminated ~2 M_Jup mass ([`runaway_terminated_giant_mass_earth`]) types as
+/// a planet. The mass enters in Earth masses (the giant gate's unit); the boundaries convert through the cited
+/// Jupiter and solar masses in the log domain (both overflow Q32.32 raw).
+///
+/// The value line: the boundaries are the caller's cited [`BurningLimits`], the mass is per-body data (admit the
+/// alien), and the classification is fixed Rust. Zero fabricated values. TERMS DROPPED: the composition dependence
+/// of both lines (the deuterium line's 11-to-16 M_Jup range, the hydrogen line's metallicity rise) is folded into
+/// the fiducial limits; a per-world derivation from the drawn composition is the named debt on [`BurningLimits`].
+/// `None` on a non-physical input.
+pub fn giant_mass_class(mass_earth: Fixed, limits: &BurningLimits) -> Option<GiantMassClass> {
+    if mass_earth <= Fixed::ZERO
+        || limits.deuterium_limit_m_jup <= Fixed::ZERO
+        || limits.hydrogen_limit_m_sun <= Fixed::ZERO
+    {
+        return None;
+    }
+    let ln_earth = civsim_physics::saha::ln_of_decimal(EARTH_MASS_KG)?;
+    let jup_to_earth = civsim_physics::saha::ln_of_decimal(JUPITER_MASS_KG)?
+        .checked_sub(ln_earth)?
+        .exp();
+    let sun_to_earth = civsim_physics::saha::ln_of_decimal(SOLAR_MASS_KG)?
+        .checked_sub(ln_earth)?
+        .exp();
+    let deuterium_line_earth = limits.deuterium_limit_m_jup.checked_mul(jup_to_earth)?;
+    let hydrogen_line_earth = limits.hydrogen_limit_m_sun.checked_mul(sun_to_earth)?;
+    Some(if mass_earth < deuterium_line_earth {
+        GiantMassClass::Planet
+    } else if mass_earth < hydrogen_line_earth {
+        GiantMassClass::BrownDwarf
+    } else {
+        GiantMassClass::Star
+    })
 }
 
 /// The GIANT-FORMATION VERDICT for one embryo (task #73, slice 1). It derives the core accretion rate, the
@@ -1812,5 +1894,56 @@ mod tests {
         assert!(alpha_disk_reynolds_number(Fixed::ZERO, h_over_r).is_none());
         assert!(gap_opening_mass_earth(Fixed::ZERO, re, Fixed::ONE, &crida).is_none());
         assert!(runaway_terminated_giant_mass_earth(Fixed::ZERO, m_gap).is_none());
+    }
+
+    #[test]
+    fn the_typed_outcome_makes_the_deuterium_bound_sound_on_the_terminated_mass() {
+        // The audit resolution, end to end: termination caps the runaway, and the typed outcome reads the capped
+        // mass against the vendored fusion boundaries, so a genuine planet is a planet and only a body past the
+        // deuterium line is a brown dwarf. Boundaries are the vendored Spiegel 2011 / Chabrier 2000 fiducials.
+        let limits = BurningLimits::spiegel_chabrier();
+        assert_eq!(limits.deuterium_limit_m_jup, Fixed::from_int(13)); // ~13 M_Jup (Spiegel 2011)
+        assert_eq!(limits.hydrogen_limit_m_sun, Fixed::from_ratio(72, 1000)); // ~0.072 M_sun (Chabrier 2000)
+                                                                              // THE FIX, end to end: the audited super-critical embryo's UN-terminated reservoir mass (7678 M_earth =
+                                                                              // 24.2 M_Jup) types as a BROWN DWARF (past the ~13 M_Jup deuterium line, the audit's mis-report), but the
+                                                                              // TERMINATED mass min(reservoir, M_gap) types as a PLANET, the sound outcome.
+        let crida = GapOpeningModel::crida_2006();
+        let re = alpha_disk_reynolds_number(Fixed::from_ratio(1, 100), Fixed::from_ratio(5, 100))
+            .unwrap();
+        let m_gap =
+            gap_opening_mass_earth(Fixed::from_ratio(5, 100), re, Fixed::ONE, &crida).unwrap();
+        let un_terminated = Fixed::from_int(7678);
+        let terminated = runaway_terminated_giant_mass_earth(un_terminated, m_gap).unwrap();
+        assert_eq!(
+            giant_mass_class(un_terminated, &limits).unwrap(),
+            GiantMassClass::BrownDwarf,
+            "the un-terminated 24 M_Jup ceiling is a brown dwarf by mass (the audit finding)"
+        );
+        assert_eq!(
+            giant_mass_class(terminated, &limits).unwrap(),
+            GiantMassClass::Planet,
+            "the terminated ~2 M_Jup giant is a genuine planet (the sound outcome)"
+        );
+        // THE BOUNDARIES: the deuterium line is ~4132 M_earth (13 M_Jup), the hydrogen line ~23980 M_earth
+        // (0.072 M_sun). Straddle each with a body just below and just above.
+        assert_eq!(
+            giant_mass_class(Fixed::from_int(4000), &limits).unwrap(),
+            GiantMassClass::Planet
+        );
+        assert_eq!(
+            giant_mass_class(Fixed::from_int(4300), &limits).unwrap(),
+            GiantMassClass::BrownDwarf
+        );
+        assert_eq!(
+            giant_mass_class(Fixed::from_int(23000), &limits).unwrap(),
+            GiantMassClass::BrownDwarf
+        );
+        assert_eq!(
+            giant_mass_class(Fixed::from_int(24500), &limits).unwrap(),
+            GiantMassClass::Star,
+            "past ~0.072 M_sun the body sustains hydrogen fusion, a star"
+        );
+        // Non-physical inputs fail soft.
+        assert!(giant_mass_class(Fixed::ZERO, &limits).is_none());
     }
 }
