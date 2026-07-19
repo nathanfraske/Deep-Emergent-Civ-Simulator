@@ -54,7 +54,27 @@ verifier_re='(^|[;&|(]|[[:space:]])(cargo|python3?[[:space:]]+scripts/[a-z0-9_]+
 # A filter that would mask it.
 filter_re='\|[[:space:]]*(head|tail|grep|wc|sed|awk|cut|sort|uniq|jq)([[:space:]]|$)'
 
-if printf '%s' "$cmd" | grep -qE "$verifier_re" && printf '%s' "$cmd" | grep -qE "$filter_re"; then
+# Judge PER STATEMENT, never across the whole command. A command often redirects a verifier safely and
+# then pipes something unrelated (`grep ... | cut`) in a later statement; matching the two patterns
+# anywhere in one string blocks that, which is a false positive. A false positive is not a harmless gate:
+# it teaches the reader to route around the guard, which is how a gate decays into a suggestion. So split
+# on statement separators and require the verifier and the masking filter to sit in the SAME statement.
+offending=0
+while IFS= read -r stmt; do
+  [ -z "$stmt" ] && continue
+  case "$stmt" in
+    *pipefail*|*PIPESTATUS*) continue ;;
+  esac
+  # A verifier whose output is REDIRECTED rather than piped keeps its status; that is the safe form.
+  if printf '%s' "$stmt" | grep -qE "$verifier_re" && printf '%s' "$stmt" | grep -qE "$filter_re"; then
+    offending=1
+    break
+  fi
+done <<EOF
+$(printf '%s' "$cmd" | sed -e 's/&&/\n/g' -e 's/||/\n/g' -e 's/;/\n/g')
+EOF
+
+if [ "$offending" = 1 ]; then
   cat >&2 <<'MSG'
 pipeline-status-guard: BLOCKED. This pipes a verifier into a filter, so the exit status you read back
 belongs to the FILTER, not to the verifier.
