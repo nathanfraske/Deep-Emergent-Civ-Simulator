@@ -41,7 +41,7 @@
 //!
 //! The honest boundaries, stated not hidden. The march is along a FIXED azimuth (the launch heading), so the
 //! contact regime follows the terrain along that line rather than navigating freely downhill across the grid
-//! (the surface integrator's 2-D steepest-descent turn); the isotropic fan over azimuths, the next slice,
+//! (the surface integrator's 2-D steepest-descent turn); the isotropic fan over azimuths ([`momentum_fan`]),
 //! recovers the blanket, and free 2-D contact navigation is a later refinement. The march step is one cell
 //! (`cell_size`), the resolution of the `z = 0` per-cell heightfield (A's substrate boundary): a sub-cell
 //! step buys nothing against a per-cell terrain until the heightfield is continuous, so it is reserved behind
@@ -121,7 +121,7 @@ pub struct MomentumForces {
 /// (the source first, consecutive duplicates dropped), the cell it came to rest in, and whether it rested by
 /// FLYING to a landing (an airborne touch-down) or by RUNNING OUT in contact (friction spent its budget). The
 /// rest cell is the single-parcel deposit site the redistribution operator ([`crate::redistribute`]) credits;
-/// the isotropic fan that spreads a source's mass into a blanket is the next slice.
+/// [`momentum_fan`] fires many of these over evenly spaced azimuths and aggregates them into the blanket.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MomentumPath {
     /// The cells the parcel occupied, in travel order, starting with the source.
