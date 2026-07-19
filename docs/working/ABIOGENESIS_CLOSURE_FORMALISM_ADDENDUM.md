@@ -1,8 +1,8 @@
 # Abiogenesis closure formalism: correction to the fixed-axis sketch
 
-Owner-directed follow-up, 2026-07-19, responding to the design review on PR #207. This document is a design-first correction to `ABIOGENESIS_DERIVE_FIRST_RESEARCH.md`. It changes no code, sets no value, and does not register a resolved research item. Until the parent document is consolidated, this addendum supersedes its fixed-field `ClosureReport` sketch and its placement of heredity inside organizational closure.
+Owner-directed follow-up, 2026-07-19, responding to design review on PR #207. This document is a design-first correction to `ABIOGENESIS_DERIVE_FIRST_RESEARCH.md`. It changes no code, sets no value, and does not register a resolved research item. Until the parent document is consolidated, this addendum supersedes its fixed-field `ClosureReport` sketch, its placement of heredity inside organizational closure, and the first wording of its numerical-liveness example.
 
-## The seam
+## The closure-axis seam
 
 The parent document represented closure through five named fields:
 
@@ -24,15 +24,15 @@ That representation freezes a taxonomy one level below the mechanism. It also mi
 2. `hereditary` is a property of reproduction and lineage continuity.
 3. `persistence_time` is a temporal result.
 
-The five fields are not an exhaustive formal basis. Leaving them as the universal report would create an alien-generality defect: a physically closed organization whose constitutive constraints do not map cleanly onto those names could be missed by the analyzer even though the causal graph is present.
+The five fields are not an exhaustive formal basis. Leaving them as the universal report would create an alien-generality defect: a physically closed organization whose constitutive constraints do not map cleanly onto those names could be missed even though the causal graph is present.
 
-## The decision
+## The closure decision
 
 The closed universal object is a typed process-constraint graph extracted from realized physics. Named closure kinds are optional diagnostic projections over that graph. Heritable lineage is evaluated separately.
 
 The world does not declare its own criterion for life. It supplies physical structures, processes, fluxes, production histories, and partition events. Fixed Rust constructs and evaluates the generic causal graph. A versioned, data-defined analysis registry supplies named projections for inspection and validation. A projection may be absent or unrecognized without preventing the graph-level closure test.
 
-This preserves observer independence. The analyzer reads organization already present in written state and does not grant any structure a causal power, persistence advantage, or reproductive capability.
+This preserves observer independence. The analyzer reads organization already present in written state and does not grant any structure causal power, persistence advantage, or reproductive capability.
 
 ## The formal substrate
 
@@ -50,11 +50,11 @@ pub struct ProcessNode {
 }
 ```
 
-Examples include a chemical reaction, diffusion through an interface, polymer extension, repair of a surface, fission of a compartment, or transport driven by a field. The type does not contain biological names.
+Examples include a chemical reaction, diffusion through an interface, polymer extension, repair of a surface, fission of a compartment, or transport driven by a field. The type contains no biological names.
 
 ### Constraints
 
-A structure is a constraint relative to a process and a time scale when two conditions hold:
+A structure is a constraint relative to a process and time scale when two conditions hold:
 
 1. Its presence changes the accessible dynamics or outcome distribution of the process.
 2. The aspects responsible for that causal difference remain sufficiently conserved over the process time scale.
@@ -98,14 +98,14 @@ Both edges require derivation receipts. A prose assertion that an enzyme catalyz
 
 ## Organizational closure
 
-Let `C` be a candidate set of constraint nodes and `P` the processes connected to them. The component realizes overall organizational closure when every constraint in `C` is both dependent and generative:
+Let `C` be a candidate set of constraint nodes and `P` the processes connected to them. The component realizes organizational closure when every constraint in `C` is both dependent and generative:
 
 1. Each constraint is produced or maintained by at least one process whose operation depends on one or more constraints in `C`.
 2. Each constraint contributes, directly or through constrained processes, to producing or maintaining at least one constraint in `C`.
-3. Every claimed maintenance path closes its material, energy, charge, and state residuals within its declared bands.
-4. The component is evaluated across the set of time scales required to include both constraint action and constraint renewal.
+3. Every claimed maintenance path closes its material, energy, charge, and state residuals within declared bands.
+4. The component is evaluated across the time scales needed to include both constraint action and constraint renewal.
 
-Strict closure additionally requires that the component cannot be decomposed into independent closed components under the same boundary conditions. The implementation may use a strongly connected component as a candidate generator, but a graph-theoretic cycle alone is insufficient. Every edge must carry a positive causal and maintenance residual rather than a bare topological relation.
+Strict closure additionally requires that the component cannot be decomposed into independent closed components under the same boundary conditions. A strongly connected component may generate candidates, but a graph cycle alone is insufficient. Every edge must carry a positive causal or maintenance residual rather than a bare topological relation.
 
 The system remains thermodynamically and usually materially open. External photons, reactants, heat gradients, electron donors, or fluid fluxes are legitimate inputs. They are recorded as open fluxes, not mistaken for failures of organizational closure.
 
@@ -120,9 +120,7 @@ pub struct OrganizationalClosureReport {
     pub projections: Vec<ClosureProjection>,
     pub provenance: ReceiptId,
 }
-```
 
-```rust
 pub struct ConstraintSupport {
     pub constrains: Vec<ProcessId>,
     pub produced_or_maintained_by: Vec<ProcessId>,
@@ -133,7 +131,7 @@ pub struct ConstraintSupport {
 }
 ```
 
-`persistence` remains in the report because a closed component can be transient, but it is orthogonal to the closure membership test. The report should expose transient closure, marginal closure, and robust closure without hiding them behind one label.
+`persistence` remains in the report because a closed component can be transient, but it is orthogonal to closure membership. The report exposes transient, marginal, and robust closure without hiding them behind one label.
 
 ## Diagnostic projections are data-defined
 
@@ -147,9 +145,7 @@ pub struct ClosureProjectionDef {
     pub required_relations: Vec<RelationPattern>,
     pub provenance: ProvenanceKey,
 }
-```
 
-```rust
 pub struct ClosureProjection {
     pub id: ClosureProjectionId,
     pub result: ResidualBand,
@@ -182,9 +178,7 @@ pub struct LifeReport {
     pub organization: OrganizationalClosureReport,
     pub lineage: LineageCapabilityReport,
 }
-```
 
-```rust
 pub struct LineageCapabilityReport {
     pub parent_events: Vec<LineageEventId>,
     pub inherited_constraints: BTreeMap<ConstraintId, InheritanceBand>,
@@ -202,42 +196,59 @@ The user-facing life label remains a derived summary. The organizational and lin
 
 ## Gap-Law handling
 
-Closure is not a Boolean threshold over one score. Each causal edge and maintenance residual carries a band. The analyzer must preserve branch uncertainty when any edge can change component topology within its band.
+Closure is not a Boolean threshold over one score. Each causal edge and maintenance residual carries a band. The analyzer preserves branch uncertainty when any edge can change component topology within its band.
 
 A well-gapped component may receive a stable organizational report. A near-degenerate component carries alternative graph realizations. A sub-resolution relation may consume a named seeded draw only after the provenance ladder is exhausted, and the draw remains visible as contingency. The analyzer cannot choose the graph that makes the system alive.
 
 ## Numerical representation liveness
 
-The convection work supplied a general numerical failure that applies directly to prebiotic chemistry: a load-bearing term can quantize to zero before any solver residual reports a problem. This is not gradual precision loss. It removes a physical edge from the graph.
+### Re-audit of the motivating premise
 
-Every numerical representation tier must therefore pass a liveness preflight over its declared validity domain:
+The motivating convection result required a correction. A mantle radiogenic-heating rate near `5e-12 W/kg` is below one Q32.32 quantum when materialized as a direct per-second linear value, so that carrier rounds to zero. This proves that the selected linear-rate representation fails. It does not prove that SI unit semantics, or a plan that includes logarithmic representation, is infeasible.
 
-1. Every load-bearing source, sink, and coupling term is representably nonzero where physics says it is nonzero.
-2. Every branch-discriminating residual retains enough range to separate its declared band.
-3. No required intermediate saturates to a common cap that erases candidate ordering.
-4. Conservation residuals remain representable below the accepted physical error band.
-5. Promotion and demotion between integer-count, direct fixed-point, logarithmic, or higher-precision forms preserve the same physical state within band.
+The same physical influence can remain comfortably representable as the accumulated specific energy over an already-valid integration step, such as `H * dt`, or as a signed logarithmic carrier. Those are promotions within the same physical semantics. The conductive-loss magnitude and the precise velocity band from the motivating convection calculation are irrelevant to the general rule and are not used here.
+
+The corrected lesson is:
+
+> A vanished term convicts the selected computational carrier and operation ordering, not the physical mechanism or its unit semantics.
+
+### The liveness contract
+
+The preflight audits the composed numerical path from a physical influence to its effect on the state. It does not demand that every physical rate be materialized as a direct linear scalar.
+
+The contract is:
+
+1. Every load-bearing physical influence above its accepted physical uncertainty has a declared computational carrier through the full update path.
+2. The composed update preserves a counterfactual difference when that influence is present versus absent, within the declared numerical and physical bands.
+3. An algebraic path must not materialize an underflowing intermediate before a later multiplication, integration, or cancellation-aware transform would make the final effect representable.
+4. Every branch-discriminating residual retains enough range to separate its declared band.
+5. No required intermediate saturates to a common cap that erases candidate ordering.
+6. Conservation residuals remain representable below the accepted physical error band.
+7. Promotion and demotion among integer counts, direct fixed point, accumulated increments, signed logarithms, or wider precision preserve the same physical state within band.
+8. A time step may not be enlarged merely to rescue representability. It must independently satisfy the solver's time-scale, stiffness, and truncation-error obligations.
 
 ```rust
 pub struct RepresentationLiveness {
-    pub live_terms: Vec<TermLiveness>,
-    pub vanished_terms: Vec<TermLiveness>,
-    pub saturated_discriminants: Vec<TermLiveness>,
-    pub promotion_required: bool,
+    pub carrier: NumericCarrierId,
+    pub live_influences: Vec<InfluenceLiveness>,
+    pub vanished_influences: Vec<InfluenceLiveness>,
+    pub saturated_discriminants: Vec<InfluenceLiveness>,
+    pub equivalent_alternatives: Vec<NumericCarrierId>,
+    pub refusal: Option<RepresentationRefusal>,
 }
 ```
 
-A vanished source term or saturated discriminator is a representation refusal. The caller must change the declared unit scale, remain in logarithmic form, use integer event counts, or promote precision before integration. The solver may not silently continue with a causal edge removed by arithmetic.
+A vanished influence or saturated discriminator is a refusal of the selected carrier. The caller may reorder the algebra, accumulate over the valid step, remain in signed-log form, use integer event counts, change the declared working scale, or promote precision. The mechanism or unit semantics are refused only if every licensed carrier fails within the validity domain.
+
+Each accepted carrier needs a numerical twin against a wider or exact reference over the whole declared domain. The twin must prove both value agreement and branch agreement. A carrier that recovers the magnitude but changes which channel, regime, or closure edge wins has failed.
 
 This preflight belongs in R-ABIOGENESIS-0 as part of the constitution and in every later numerical tier's validation battery.
 
 ## Staging delta
 
-The parent research packet's stages change as follows.
-
 ### R-ABIOGENESIS-0
 
-Add the process-constraint distinction, the graph-level closure definition, the projection-registry rule, the separate lineage gate, and the representation-liveness preflight to the boundary constitution.
+Add the process-constraint distinction, graph-level closure, projection-registry rule, separate lineage gate, and composed-path representation-liveness preflight to the boundary constitution.
 
 ### R-ABIOGENESIS-5 through R-ABIOGENESIS-7
 
@@ -256,18 +267,22 @@ Keep the runtime receipt schema open until the in-flight provenance audit lands.
 The validation battery gains the following cases:
 
 - a graph cycle with no positive counterfactual constraint effect must not count as closure;
-- a catalytic RAF without internally maintained constraints reports catalytic projection but no organizational closure;
+- a catalytic RAF without internally maintained constraints reports a catalytic projection but no organizational closure;
 - a closed organization without fission reports organization without lineage capability;
 - physical division without reconstructive inheritance reports reproduction-like partition without lineage capability;
 - a boundary-free organization can close if its physical constraints and fluxes support it, while the boundary projection remains absent;
 - a novel constraint role with no registered projection still participates in graph-level closure;
 - removing one maintenance edge breaks or branches the report according to its residual band;
-- a load-bearing term that rounds to zero triggers representation refusal before the first integration step;
+- a direct linear rate carrier that rounds a load-bearing influence to zero is refused;
+- an accumulated-increment or signed-log carrier for the same influence must agree with a wider reference and preserve the same branch;
+- a raw intermediate that vanishes before a later scale-restoring operation is caught before integration;
+- increasing the time step only to make a term representable is rejected when the time-scale or truncation-error checks fail;
+- changing only a numerical carrier within a proven equivalence band does not change canonical physical state;
 - changing only analysis projection membership does not alter canonical world state.
 
 ## Source basis and provenance status
 
-The formal direction is grounded by two primary source leads:
+The formal closure direction is grounded by two primary source leads:
 
 - Montévil, Maël, and Matteo Mossio. 2015. "Biological organisation as closure of constraints." *Journal of Theoretical Biology* 372: 179-191. DOI `10.1016/j.jtbi.2015.02.029`. It distinguishes processes from constraints at stated time scales and defines closure through mutual dependence among constraints.
 - Hordijk, Wim, and Mike Steel. 2015. "Autocatalytic sets and boundaries." *Journal of Systems Chemistry* 6: 1. DOI `10.1186/s13322-014-0006-2`. It shows that autocatalytic-set and boundary analysis can be composed without treating either as the exhaustive definition of living organization.
@@ -276,4 +291,6 @@ These are citation leads, not closed repository provenance. Before their equatio
 
 ## Result
 
-The review seam changes the architecture rather than adding one more closure kind. The universal substrate now has one formal causal object, the process-constraint graph. The named biological readings become extensible, non-causal projections. Heredity moves to the lineage report. Persistence stays orthogonal. Novel alien organization can therefore be detected from its causal structure even when no current projection gives it a familiar name.
+The closure review changes the architecture rather than adding one more closure kind. The universal substrate has one formal causal object, the process-constraint graph. Named biological readings are extensible, non-causal projections. Heredity belongs to the lineage report, and persistence remains orthogonal.
+
+The premise correction does not remove the representation-liveness rule. It narrows its target to the selected computational carrier and the composed update. Novel alien organization can be detected from causal structure, and numerically small physical influences remain admissible when a proven carrier preserves them.
