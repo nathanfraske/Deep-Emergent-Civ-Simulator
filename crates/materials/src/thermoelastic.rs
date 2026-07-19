@@ -187,6 +187,34 @@ impl core::fmt::Display for ThermoRefusal {
 
 impl std::error::Error for ThermoRefusal {}
 
+/// A phase's volume PER ATOM in cubic angstroms, from the registry's own molar volume and formula unit.
+///
+/// ONE home for this conversion, because two consumers need it and two copies of a unit bridge is how a
+/// factor of `1e24` quietly diverges. The elastic Debye temperature reads it for the `(3n/4 pi V)^(1/3)`
+/// wavevector, and the Slack lattice-conductivity estimator reads it for the interatomic spacing
+/// `delta = cbrt(V_atom)`. `1 cm^3/mol` over Avogadro is `1e24 / 6.02214076e23 = 1.66053906717` cubic
+/// angstroms per particle.
+///
+/// The atom count is the FORMULA UNIT's, matching the registry molar volume's own basis. Mixing it with an
+/// atoms-per-primitive-cell count would be a basis error wearing a derivation's clothes, and that column
+/// sits one table over.
+// @derives: a phase's volume per atom <- its registry molar volume and formula-unit atom count
+pub fn atomic_volume_angstrom3(phase: &str, registry: &PhaseRegistry) -> Option<Fixed> {
+    let row = registry.phase(phase)?;
+    if row.molar_volume <= ZERO {
+        return None;
+    }
+    let atoms: u32 = row.composition.iter().map(|(_, c)| *c).sum();
+    if atoms == 0 {
+        return None;
+    }
+    let per_atom_cm3_mol = row
+        .molar_volume
+        .checked_div(Fixed::from_int(atoms as i32))?;
+    let angstrom3_per_cm3_mol = Fixed::from_decimal_str("1.66053906717").ok()?;
+    per_atom_cm3_mol.checked_mul(angstrom3_per_cm3_mol)
+}
+
 /// A phase's ELASTIC Debye temperature (K), DERIVED from banked elasticity rather than read from a column.
 ///
 /// Private field and no public constructor from a bare `Fixed`, so this cannot be built anywhere except
@@ -261,16 +289,7 @@ pub fn derived_elastic_debye_temperature(
     }
     // Atomic volume in cubic angstroms: the molar volume shared over the formula unit's atoms, converted
     // from cm^3/mol. 1 cm^3/mol over Avogadro is 1e24/6.02214076e23 cubic angstroms per particle.
-    let atoms: u32 = row.composition.iter().map(|(_, c)| *c).sum();
-    if atoms == 0 {
-        return None;
-    }
-    let per_atom_cm3_mol = row
-        .molar_volume
-        .checked_div(Fixed::from_int(atoms as i32))?;
-    // 1e24 / 6.02214076e23 = 1.66053906717
-    let angstrom3_per_cm3_mol = Fixed::from_decimal_str("1.66053906717").ok()?;
-    let atomic_volume_a3 = per_atom_cm3_mol.checked_mul(angstrom3_per_cm3_mol)?;
+    let atomic_volume_a3 = atomic_volume_angstrom3(phase, registry)?;
     let theta = crate::properties::debye_temperature(v_d, atomic_volume_a3);
     if theta <= ZERO {
         None

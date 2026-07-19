@@ -19,7 +19,7 @@
 //! surface re-derives and redraws each step.
 //!
 //! Slice 1 (this): the INTERIOR THERMAL EVOLUTION. A lateral field of mantle columns steps its convection
-//! ([`convection_step`]) each tick, so the interior cools and convects over deep time. Lateral variation EMERGES
+//! ([`convection_step_si`]) each tick, so the interior cools and convects over deep time. Lateral variation EMERGES
 //! rather than being painted: a column with more radiogenic heat or a hotter start relaxes to a different thermal
 //! state than its neighbour, so the provinces are the written record of each column's own history. Nothing is
 //! authored: the columns start uniform (a fresh planet has no thermal history yet) and diverge only by their own
@@ -77,12 +77,12 @@
 //! derive-first floor and needs none. It is a term SEPARATE from [`step_deep_time`], applied by the caller after
 //! it, so a run that does not collapse replays bit-for-bit.
 //!
-//! Determinism (Principle 3, Principle 10): [`convection_step`] is a pure function and the columns are walked in
+//! Determinism (Principle 3, Principle 10): [`convection_step_si`] is a pure function and the columns are walked in
 //! index order, so the tick is a pure function of the state and the parameters, worker-invariant. Dormant: no
 //! scenario or viewer drives it yet (the time control is the next slice), so it is byte-neutral over the run
 //! path.
 
-use crate::geodynamics::{convection_step, ColumnParams, ColumnState};
+use crate::geodynamics::{convection_step_si, ColumnState, SiColumnParams};
 use civsim_core::{Fixed, Rng, StateHasher};
 use civsim_materials::properties::operative_shear_strength_gpa;
 use civsim_physics::geodynamics::airy_isostatic_elevation;
@@ -365,7 +365,7 @@ pub fn crust_growth(
     }
 }
 
-/// Advance the deep-time state by one tick: step every interior column's convection ([`convection_step`]), grow
+/// Advance the deep-time state by one tick: step every interior column's convection ([`convection_step_si`]), grow
 /// each column's crust from the melt its interior now delivers ([`crust_growth`]), and accumulate the elapsed
 /// geological time. `column_params` is either ONE entry broadcast to every column (a laterally uniform world) or
 /// one per column (each cell's own composition and radiogenic budget, the source of lateral variation); any other
@@ -379,7 +379,7 @@ pub fn crust_growth(
 /// against), fail-loud rather than a silent no-op.
 pub fn step_deep_time(
     state: &DeepTimeState,
-    column_params: &[ColumnParams],
+    column_params: &[SiColumnParams],
     melt: &MeltParams,
     dt_myr: Fixed,
 ) -> Option<DeepTimeState> {
@@ -397,7 +397,10 @@ pub fn step_deep_time(
             } else {
                 &column_params[0]
             };
-            convection_step(col, p)
+            // A refusal HOLDS the column rather than fabricating a step. The parameters were validated
+            // when the province field was built (an unresolvable assemblage refuses the whole field), so
+            // this is an arithmetic backstop and not a path the physics takes.
+            convection_step_si(col, p).unwrap_or(*col)
         })
         .collect();
     // The volcanism: each column's stepped interior temperature delivers crust over the tick, relaxing the crust
@@ -976,65 +979,115 @@ pub const RIGID_RIGID_RA_CRIT: Fixed = Fixed::from_int(1_707_762).div(Fixed::fro
 /// aspect, so the aspect and the onset threshold are the SAME regime by construction. Cited: Chandrasekhar (1961).
 pub const RIGID_RIGID_CRITICAL_WAVENUMBER: Fixed = Fixed::from_int(3117).div(Fixed::from_int(1000));
 
-/// One province's convection [`ColumnParams`], composed from the DERIVED per-planet inputs and the
-/// convection kernel's REPRESENTABLE-SCALED operating point. The DERIVED inputs are threaded in where they
-/// are physical and safe: the temperatures are real kelvin (so the solidus comparison the volcanism makes
-/// is physical), `surface_gravity_m_s2` is the planet's DERIVED surface gravity, `convecting_depth_mm` is
-/// the DERIVED convecting-mantle depth ([`crate::geodynamics::convecting_mantle_depth_m`]) expressed in
-/// megametres (an O(1) length the depth-cubed Rayleigh term does not overflow, RETIRING the depth = 1
-/// fixture), and `heat_production` is the per-province radiogenic budget (its lateral spread is what makes
-/// the provinces diverge). The kernel's remaining DYNAMICAL quantities (viscosity, diffusivity, the
-/// representable caps) are engine-scaled illustrative values, the documented interim the units plan retires
-/// with the SI / Tier-2 units wiring: the raw SI mantle viscosity and the depth-cubed Rayleigh term overflow
-/// Q32.32, so the kernel runs on a self-consistent scaled operating point rather than SI (a labelled fixture,
-/// not an authored world-content value). This scaled operating point retires TOGETHER with the same SI /
-/// Tier-2 arc that unblocks the mantle PROCESSING-TIME derive-down (`MeltParams::processing_time_myr`): both
-/// wait on the SI-valued Stokes velocity, so the two are one unit-wiring dependency, not two independent knobs.
-/// `ra_crit` and `ra_crit_wavenumber` are the classical Rayleigh-Benard critical PAIR (the marginal-stability
-/// eigenvalue for rigid boundaries, {~1708, a_c ~ 3.117}, from [`RIGID_RIGID_RA_CRIT`] and
-/// [`RIGID_RIGID_CRITICAL_WAVENUMBER`]), so the onset threshold and the lateral cell scale share one regime; as
-/// the units plan lifts the operating point to SI a hot radiogenic province crosses `ra_crit` and convects
-/// while a cold one conducts, the bifurcation that amplifies the seed. Deterministic (a pure function of its
-/// inputs).
+/// `ln(1e18)`, the bridge between an SI viscosity and the `1e18 Pa*s` unit the megametre-depth Rayleigh
+/// number is dimensionally consistent with. Carried as a logarithm because the SI value it converts from
+/// (`~5.5e23 Pa*s`) cannot be held at all.
+/// `ln(3.1557e13)`, the seconds in a megayear. A logarithm because the value itself is four orders past
+/// `Fixed::MAX`, so the tick length can never be held linearly in seconds.
+const LN_SECONDS_PER_MYR: Fixed = Fixed::from_int(31_083_129).div(Fixed::from_int(1_000_000));
+
+/// One province's [`SiColumnParams`], composed entirely from DERIVED inputs.
+///
+/// # What this used to be
+///
+/// It returned a scaled operating point carrying a tagged FIXTURE CLUSTER: `density = 1`,
+/// `thermal_conductivity = 2`, `thermal_expansion_ppm = 30`, `thermal_diffusivity = 0.01`,
+/// `specific_heat = 10`, `viscosity = 1`, `radius = 1`, stepped with a dimensionless `dt = 1`. Its own
+/// comment recorded that the stored diffusivity disagreed with `k / (rho c_p)` by twentyfold and that
+/// nothing compared them, and declared the conflict rather than resolving it: "the geotherm arc REPLACES
+/// the whole cluster, and the pins move ONCE then, with a ledger entry."
+///
+/// This is that replacement. Every field is now the column's own derived property, and the redundancy is
+/// gone by construction rather than by agreement: the diffusivity is computed from the three facts it is
+/// made of instead of stored beside them.
+///
+/// # Two clocks became one
+///
+/// The retired kernel advanced convection by a dimensionless tick while the crust grew by `dt_myr`, so a
+/// single stepper ran two unrelated clocks with nothing relating them. That was invisible while the
+/// thermal values were fixtures, because no rate in the system was in real units. `dt_myr` now sets both:
+/// the tick length enters as `ln_dt_s` and the heat terms are per-tick ENERGIES on that same clock.
+///
+/// # Why the tick is a logarithm
+///
+/// One megayear is `3.1557e13 s` against a `Fixed::MAX` of `2.1e9`, so the tick length cannot be held in
+/// seconds at all, and a 20 Myr tick is `6.3e14`. It is carried as `ln(dt)` and never exponentiated. The
+/// radiogenic budget has the mirror problem in the other direction: `~5e-12 W/kg` is `0.02` of one `Fixed`
+/// ulp and quantizes to exactly zero as a rate, so it is carried as the energy that rate delivers over one
+/// tick, where it is a comfortable `~340 J/kg`.
+///
+/// `heat_production_j_per_kg` is the per-province radiogenic ENERGY per tick, whose lateral spread is what
+/// makes the provinces diverge; `reference_temperature_k` is the cold reference the contrast is measured
+/// against. Returns `None` when an input is non-physical or a composition is unrepresentable, which
+/// refuses the whole province field rather than falling back to the retired cluster. Deterministic.
+// @derives: one province's SI convection column <- the derived thermal cluster, the planet's own depth and gravity, and the per-province radiogenic energy
 pub fn province_column_params(
     convecting_depth_mm: Fixed,
     surface_gravity_m_s2: Fixed,
-    heat_production: Fixed,
+    heat_production_j_per_kg: Fixed,
     reference_temperature_k: Fixed,
-    dt: Fixed,
-) -> ColumnParams {
-    ColumnParams {
-        reference_temperature: reference_temperature_k,
-        // THE FIXTURE CLUSTER, TAGGED (owner ruling 2026-07-16): these four are a DECLARED CONFLICT, not a
-        // settled parameterization. `thermal_diffusivity` is redundant against `k / (rho * c_p)`, and the two
-        // disagree by 20x here (stored 0.01, derived 0.2), which nothing compares. The question is undecidable
-        // at the site because no per-quantity scale is declared, and a bare value with no declared scale carries
-        // no correctness, only a value. NOT corrected by fiat: the geotherm arc REPLACES the whole cluster
-        // (rho derived, c_p Dulong-Petit, k the Hofmeister form, kappa computed-never-stored), and the pins move
-        // ONCE then, with a ledger entry. See `ColumnParams::thermal_diffusivity` for the full ruling.
-        density: Fixed::ONE,
-        thermal_conductivity: Fixed::from_int(2),
-        thermal_expansion_ppm: Fixed::from_int(30),
-        gravity: surface_gravity_m_s2,
-        depth: convecting_depth_mm,
-        radius: Fixed::ONE,
-        viscosity: Fixed::ONE,
-        thermal_diffusivity: Fixed::from_ratio(1, 100),
-        specific_heat: Fixed::from_int(10),
-        heat_production,
-        ra_crit: RIGID_RIGID_RA_CRIT,
-        ra_crit_wavenumber: RIGID_RIGID_CRITICAL_WAVENUMBER,
-        ra_max: Fixed::from_int(1_000_000),
-        v_max: Fixed::from_int(1_000_000),
-        flux_max: Fixed::from_int(1_000_000),
-        stress_max: Fixed::from_int(1_000_000),
-        dt,
-    }
+    dt_myr: Fixed,
+    derived: &crate::geodynamics::ColumnThermalProperties,
+) -> Option<SiColumnParams> {
+    let depth_m = convecting_depth_mm.checked_mul(Fixed::from_int(1_000_000))?;
+    // ln(dt in seconds) = ln(dt_myr) + ln(3.1557e13). Composed in logs because the product is `6.3e14`
+    // for a 20 Myr tick, five orders past `Fixed::MAX`, and the tick length is an INPUT so no reordering
+    // of a linear form would rescue it.
+    let ln_dt_s = dt_myr.ln().checked_add(LN_SECONDS_PER_MYR)?;
+    Some(SiColumnParams {
+        reference_temperature_k,
+        // THE FIXTURE CLUSTER IS RETIRED. These five were `density = 1`, `thermal_conductivity = 2`,
+        // `thermal_expansion_ppm = 30`, `thermal_diffusivity = 0.01` and `specific_heat = 10`: a DECLARED
+        // CONFLICT rather than a parameterization, whose own tag recorded that the stored diffusivity
+        // disagreed with `k / (rho c_p)` by twentyfold with nothing comparing them. They are the column's
+        // DERIVED properties now, minimized from the world's own composition at its own state, and the
+        // redundancy is gone by construction: the diffusivity is computed from the three facts it is made
+        // of rather than stored beside them.
+        density_kg_m3: derived.density_kg_m3,
+        thermal_conductivity_w_m_k: derived.thermal_conductivity_w_m_k,
+        thermal_expansion_ppm: derived.thermal_expansion_ppm_per_k,
+        specific_heat_j_kg_k: derived.specific_heat_j_kg_k,
+        thermal_diffusivity_m2_s: derived.thermal_diffusivity()?,
+        // Never exponentiated: the SI value is `~5e23 Pa*s`.
+        ln_viscosity: derived.viscosity.ln_viscosity_primary,
+        gravity_m_s2: surface_gravity_m_s2,
+        depth_m,
+        // The buoyant parcel scale, DERIVED from the column's own convective cell rather than the former
+        // `radius = 1` fixture: `pi / a_c` layer depths, the rigid-rigid critical mode's half-wavelength.
+        parcel_radius_m: Fixed::PI
+            .checked_div(RIGID_RIGID_CRITICAL_WAVENUMBER)
+            .and_then(|x| x.checked_mul(depth_m))?,
+        heat_production_j_per_kg,
+        ln_rayleigh_critical: RIGID_RIGID_RA_CRIT.ln(),
+        ln_dt_s,
+        // The single-lid planetary Nusselt prefactor. Not authored here: it is the value
+        // `civsim_physics::convection_scaling` carries for this regime.
+        nusselt_prefactor: Fixed::ONE,
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A representative DERIVED thermal cluster for the deep-time scaffolds, at the magnitudes a
+    /// Mars-class forsterite column actually derives. Constructed rather than derived because these tests
+    /// vary ONE input (the radiogenic budget) and should not carry a full assemblage minimization.
+    fn test_cluster() -> crate::geodynamics::ColumnThermalProperties {
+        crate::geodynamics::ColumnThermalProperties {
+            density_kg_m3: Fixed::from_ratio(33545, 10),
+            thermal_conductivity_w_m_k: Fixed::from_ratio(2461, 1000),
+            specific_heat_j_kg_k: Fixed::from_int(1241),
+            thermal_expansion_ppm_per_k: Fixed::from_ratio(259, 10),
+            viscosity: civsim_physics::convective_viscosity::ViscosityBand {
+                ln_viscosity_min: Fixed::from_ratio(5466, 100),
+                ln_viscosity_max: Fixed::from_ratio(5466, 100),
+                ln_viscosity_primary: Fixed::from_ratio(5466, 100),
+                eval_temperature_k: Fixed::from_int(1600),
+                eval_pressure_gpa: Fixed::from_ratio(1117, 100),
+            },
+        }
+    }
 
     /// The realization digest must be REPRODUCIBLE: the same realized state folds to the same receipt. This is
     /// the property a physics baseline pin rests on, and it is the one the Chaos Protocol makes available for a
@@ -1167,27 +1220,20 @@ mod tests {
     // kernel documents), enough to exercise the deep-time evolution deterministically. `ra_crit` high keeps a
     // column conductive so its relaxation is monotone and easy to assert; `heat_production` is the per-column
     // knob the lateral-variation test varies.
-    fn mantle_params(heat_production: i32) -> ColumnParams {
-        ColumnParams {
-            reference_temperature: Fixed::from_int(300),
-            density: Fixed::ONE,
-            thermal_conductivity: Fixed::from_int(2),
-            thermal_expansion_ppm: Fixed::from_int(30),
-            gravity: Fixed::from_int(10),
-            depth: Fixed::ONE,
-            radius: Fixed::ONE,
-            viscosity: Fixed::ONE,
-            thermal_diffusivity: Fixed::from_ratio(1, 100),
-            specific_heat: Fixed::from_int(10),
-            heat_production: Fixed::from_int(heat_production),
-            ra_crit: Fixed::from_int(1_000_000_000),
-            ra_crit_wavenumber: RIGID_RIGID_CRITICAL_WAVENUMBER,
-            ra_max: Fixed::from_int(1_000_000),
-            v_max: Fixed::from_int(1_000_000),
-            flux_max: Fixed::from_int(1_000_000),
-            stress_max: Fixed::from_int(1_000_000),
-            dt: Fixed::ONE,
-        }
+    fn mantle_params(heat_production_j_per_kg: i32) -> SiColumnParams {
+        // Built through the real constructor from the DERIVED cluster, so these lateral-variation tests run
+        // the same path production does. The old version hand-wrote the fixture cluster (`density = 1`,
+        // `specific_heat = 10`, a `thermal_diffusivity` twentyfold off `k/(rho c_p)`), which meant it could
+        // not have caught the fixture's own incoherence.
+        province_column_params(
+            Fixed::from_ratio(15, 10),
+            Fixed::from_ratio(37, 10),
+            Fixed::from_int(heat_production_j_per_kg),
+            Fixed::from_int(300),
+            Fixed::from_int(20),
+            &test_cluster(),
+        )
+        .expect("the scaffold column resolves")
     }
 
     // The melt-and-crust parameters, the McKenzie-Bickle peridotite values the seam-6 melt-column test uses
@@ -1611,39 +1657,71 @@ mod tests {
             g,
             Fixed::from_int(5),
             Fixed::from_int(300),
-            Fixed::ONE,
-        );
+            Fixed::from_int(20),
+            &test_cluster(),
+        )
+        .expect("the cool column resolves");
         let hot = province_column_params(
             depth_mm,
             g,
             Fixed::from_int(400),
             Fixed::from_int(300),
-            Fixed::ONE,
+            Fixed::from_int(20),
+            &test_cluster(),
+        )
+        .expect("the hot column resolves");
+        assert_eq!(
+            cool.depth_m,
+            depth_mm.checked_mul(Fixed::from_int(1_000_000)).unwrap(),
+            "the derived depth is wired in as SI metres, not a fixture"
         );
         assert_eq!(
-            cool.depth, depth_mm,
-            "the derived depth is wired in, not a fixture"
+            cool.gravity_m_s2, g,
+            "the derived surface gravity is wired in"
         );
-        assert_eq!(cool.gravity, g, "the derived surface gravity is wired in");
         assert!(
-            hot.heat_production > cool.heat_production,
+            hot.heat_production_j_per_kg > cool.heat_production_j_per_kg,
             "the per-province radiogenic budget varies"
         );
+        // THE FIXTURE CLUSTER IS GONE from these columns, and this asserts it rather than trusting the
+        // constructor: a density of 1 kg/m^3 and a specific heat of 10 J/kg/K were the tagged conflict.
+        assert!(
+            cool.density_kg_m3 > Fixed::from_int(1000),
+            "the density is the DERIVED one, not the fixture's 1"
+        );
+        assert!(
+            cool.specific_heat_j_kg_k > Fixed::from_int(100),
+            "the specific heat is the DERIVED one, not the fixture's 10"
+        );
+        // And the diffusivity is COMPUTED from the three facts rather than stored beside them, so the
+        // twentyfold disagreement the old cluster carried cannot exist.
+        let implied = cool
+            .thermal_conductivity_w_m_k
+            .checked_div(cool.density_kg_m3)
+            .and_then(|x| x.checked_div(cool.specific_heat_j_kg_k))
+            .expect("representable");
+        assert_eq!(
+            cool.thermal_diffusivity_m2_s, implied,
+            "kappa must BE k/(rho c_p), not a second independent answer to the same question"
+        );
+
         // The two share the same operating point apart from the varied heat, so a step diverges them.
-        let cool_state = convection_step(
+        let cool_state = convection_step_si(
             &ColumnState {
                 temperature: Fixed::from_int(1588),
                 convecting: false,
             },
             &cool,
-        );
-        let hot_state = convection_step(
+        )
+        .expect("the cool column steps");
+        let hot_state = convection_step_si(
             &ColumnState {
                 temperature: Fixed::from_int(1588),
                 convecting: false,
             },
             &hot,
-        );
+        )
+        .expect("the hot column steps");
         assert!(
             hot_state.temperature > cool_state.temperature,
             "the more-radiogenic province stays hotter after a step, got {} vs {}",

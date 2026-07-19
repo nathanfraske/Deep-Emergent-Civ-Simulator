@@ -17,7 +17,7 @@ The lists below are GENERATED from `crates/physics/data/*.toml`, `crates/physics
 
 ## Deriving substrates (check here BEFORE authoring: what the world derives, and where)
 
-The 48 deriving subsystems below live OUTSIDE the authored floor. Each produces a world quantity from the floor and the situation, so its output must never be authored: if the value you need appears here, read or extend the subsystem, do not set a number. This is the list that stops `1 year = 365 days` from being authored when orbital mechanics already derives it. Generated from the `// @derives:` markers in the code; a subsystem missing its marker is a gap in this map, so mark every derivation entry point.
+The 52 deriving subsystems below live OUTSIDE the authored floor. Each produces a world quantity from the floor and the situation, so its output must never be authored: if the value you need appears here, read or extend the subsystem, do not set a number. This is the list that stops `1 year = 365 days` from being authored when orbital mechanics already derives it. Generated from the `// @derives:` markers in the code; a subsystem missing its marker is a gap in this map, so mark every derivation entry point.
 
 ### `crates/foundation/src/clock.rs`
 
@@ -32,7 +32,7 @@ The 48 deriving subsystems below live OUTSIDE the authored floor. Each produces 
 - the radiative conductivity silicates gain at high T <- temperature (`crates/materials/src/conductivity.rs:170`)
 - a phase's conductivity at a temperature <- its ladder rung's anchor, band and exponent (`crates/materials/src/conductivity.rs:389`)
 - a phase's ladder inputs <- the banked crystallographic, Grueneisen and phase-registry columns + charge balance (`crates/materials/src/conductivity.rs:672`)
-- a rock's effective thermal conductivity <- the per-phase conductivity ladder + the world's own mineral census (Bruggeman self-consistent EMT) (`crates/materials/src/conductivity.rs:719`)
+- a rock's effective thermal conductivity <- the per-phase conductivity ladder + the world's own mineral census (Bruggeman self-consistent EMT) (`crates/materials/src/conductivity.rs:749`)
 ### `crates/materials/src/freezer.rs`
 
 - the bulk sound speed <- bulk modulus + density (`crates/materials/src/freezer.rs:176`)
@@ -53,9 +53,10 @@ The 48 deriving subsystems below live OUTSIDE the authored floor. Each produces 
 - lattice thermal conductivity k(T) <- Grueneisen, mean atomic mass, Debye temperature, atomic volume, cell count (Slack estimator rung) (`crates/materials/src/properties.rs:894`)
 ### `crates/materials/src/thermoelastic.rs`
 
-- a phase's elastic Debye temperature <- its banked bulk and shear moduli, density and atomic volume (`crates/materials/src/thermoelastic.rs:242`)
-- a phase's thermoelastic response at a state <- the strongest available rung over the banked per-phase anchors (`crates/materials/src/thermoelastic.rs:350`)
-- a phase's ambient volumetric expansivity <- its banked gamma, bulk modulus, molar volume and Dulong-Petit capacity (`crates/materials/src/thermoelastic.rs:483`)
+- a phase's volume per atom <- its registry molar volume and formula-unit atom count (`crates/materials/src/thermoelastic.rs:201`)
+- a phase's elastic Debye temperature <- its banked bulk and shear moduli, density and atomic volume (`crates/materials/src/thermoelastic.rs:270`)
+- a phase's thermoelastic response at a state <- the strongest available rung over the banked per-phase anchors (`crates/materials/src/thermoelastic.rs:369`)
+- a phase's ambient volumetric expansivity <- its banked gamma, bulk modulus, molar volume and Dulong-Petit capacity (`crates/materials/src/thermoelastic.rs:502`)
 ### `crates/physics/src/gruneisen.rs`
 
 - a rock's Gruneisen parameter <- the cited per-phase gamma table + the world's own mineral census (`crates/physics/src/gruneisen.rs:358`)
@@ -79,6 +80,9 @@ The 48 deriving subsystems below live OUTSIDE the authored floor. Each produces 
 - the molecular cloud-core gas temperature T_core <- the Goldsmith thermal balance of cosmic-ray heating against gas-dust coupling and molecular line cooling, over the ionization rate, density, dust temperature, line-cooling fit, and the CMB floor (`crates/sim/src/astro.rs:1040`)
 - the coupled cloud-core gas and dust temperatures <- the Goldsmith gas-plus-dust thermal balance over the ionization rate, density, radiation-field chi, line-cooling fit, and CMB floor (`crates/sim/src/astro.rs:1160`)
 - the stellar rotation period at a target age Omega_star(t) <- the gyrochronological spin-down P_ref*(t/t_ref)^n aged forward from a reference epoch, over the cited braking exponent, valid only after the disk-release onset (`crates/sim/src/astro.rs:2360`)
+### `crates/sim/src/deeptime.rs`
+
+- one province's SI convection column <- the derived thermal cluster, the planet's own depth and gravity, and the per-province radiogenic energy (`crates/sim/src/deeptime.rs:1023`)
 ### `crates/sim/src/environ.rs`
 
 - local water presence, rainfall, evaporation, runoff <- Clausius-Clapeyron saturation(local temperature) + Dalton evaporation + condensation where moisture exceeds saturation + downhill routing to the lowest neighbour. Water is NOT authored per cell; it falls out of temperature and terrain. (`crates/sim/src/environ.rs:1552`)
@@ -90,10 +94,12 @@ The 48 deriving subsystems below live OUTSIDE the authored floor. Each produces 
 - the buoyant parcel radius <- the column's own layer depth + its critical wavenumber (cell half-wavelength) (`crates/sim/src/geodynamics.rs:252`)
 - a column's thermal diffusivity <- its own conductivity, density and specific heat (`crates/sim/src/geodynamics.rs:307`)
 - a column's SI layer depth <- its own representable-scaled depth (megametres to metres) (`crates/sim/src/geodynamics.rs:442`)
-- an interior column's thermal properties <- the world's own composition through the banked assemblage, ladder and Dulong-Petit derivations (`crates/sim/src/geodynamics.rs:509`)
-- the interior column temperature and convection-onset state <- the merged floor law-forms (thermal_density_anomaly, rayleigh_number, threshold_latch, stokes_velocity, heat_advection, internal_heat_evolution, conduction) over the column's own physical parameters; no authored convection knob (Ra_crit is the derived marginal-stability eigenvalue, the Stokes coefficient the derived 2/9, the buoyancy the real material thermal expansion). A NEW derivation (not a retired-floor replacement), now covered by the liveness gate broadened to any derived output and any input source (task #46): the derive_gate registry carries a column_convection row (category new-derivation) whose probe perturbs the ColumnParams heat_production (a resident-field input) and asserts the stepped temperature responds. (`crates/sim/src/geodynamics.rs:928`)
-- a column's log-domain Rayleigh number and convection onset <- its SI buoyancy, gravity, depth, log viscosity and diffusivity (`crates/sim/src/geodynamics.rs:1020`)
-- the interior column's secular thermal history <- radiogenic_decay (the isotope reservoir spending down over the world clock) feeding radiogenic_heat (the falling heat production) into the convection step, so the interior warms under radiogenic heating and cools as the sources decay; no authored cooling knob, the source history is the decaying reservoir (`crates/sim/src/geodynamics.rs:1157`)
+- an interior column's thermal properties <- the world's own composition through the banked assemblage, ladder and Dulong-Petit derivations (`crates/sim/src/geodynamics.rs:536`)
+- the interior column temperature and convection-onset state <- the merged floor law-forms (thermal_density_anomaly, rayleigh_number, threshold_latch, stokes_velocity, heat_advection, internal_heat_evolution, conduction) over the column's own physical parameters; no authored convection knob (Ra_crit is the derived marginal-stability eigenvalue, the Stokes coefficient the derived 2/9, the buoyancy the real material thermal expansion). A NEW derivation (not a retired-floor replacement), now covered by the liveness gate broadened to any derived output and any input source (task #46): the derive_gate registry carries a column_convection row (category new-derivation) whose probe perturbs the ColumnParams heat_production (a resident-field input) and asserts the stepped temperature responds. (`crates/sim/src/geodynamics.rs:956`)
+- a column's log-domain Rayleigh number and convection onset <- its SI buoyancy, gravity, depth, log viscosity and diffusivity (`crates/sim/src/geodynamics.rs:1048`)
+- a column's per-tick conductive loss energy per kelvin <- its conductivity, density, depth and log tick length (`crates/sim/src/geodynamics.rs:1144`)
+- an SI interior column's next temperature and convection state <- its derived thermal properties, log viscosity, boundary-layer Nusselt enhancement and per-tick radiogenic energy (`crates/sim/src/geodynamics.rs:1200`)
+- the interior column's secular thermal history <- radiogenic_decay (the isotope reservoir spending down over the world clock) feeding radiogenic_heat (the falling heat production) into the convection step, so the interior warms under radiogenic heating and cools as the sources decay; no authored cooling knob, the source history is the decaying reservoir (`crates/sim/src/geodynamics.rs:1384`)
 ### `crates/sim/src/giants.rs`
 
 - the giant-planet gap-opening mass M_gap <- the Crida 2006 thermal-viscous gap criterion P(q)=(3/4)(H/R_H)+50/(qR)=1 solved for the mass ratio, over the disk aspect ratio and Reynolds number, the accretion-termination scale (`crates/sim/src/giants.rs:496`)

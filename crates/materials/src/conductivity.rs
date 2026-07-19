@@ -674,6 +674,7 @@ pub fn phase_conductivity_from_banked(
     phase_name: &str,
     conductivity: &PhaseConductivityTable,
     gruneisen: &GruneisenTable,
+    moduli: Option<&civsim_physics::mineral_moduli::MineralModuli>,
     registry: &PhaseRegistry,
     periodic: &PeriodicTable,
     expansivity_integral: Fixed,
@@ -697,6 +698,35 @@ pub fn phase_conductivity_from_banked(
     let phase = registry
         .phase(phase_name)
         .ok_or_else(|| missing("phase_registry"))?;
+
+    // THE ESTIMATOR RUNG'S INPUTS, DERIVED. These three were hardcoded `None`, which meant the Slack rung
+    // could never fire from this loader at all: a phase with no measured `kappa_298` resolved to NO rung and
+    // the whole assemblage refused. Every one of them derives from tables this function already holds.
+    //
+    // That gap was invisible until the fixture cluster was retired, because nothing before then ran a real
+    // derived mantle composition through here. The composition that exposed it minimizes to a SPINEL-bearing
+    // assemblage, and spinel has no measured `kappa_298`, so the province field refused outright.
+    //
+    // THE DEBYE TEMPERATURE HERE IS THE ELASTIC ONE, and this is the one place in the arc where that is the
+    // correct choice rather than the error. Slack's model reads `Theta_a`, the ACOUSTIC Debye temperature,
+    // and this module's own law documentation says so: "the built shear-aware `Theta_D`, which IS the
+    // acoustic average". The entropy-fit effective temperature in `thermoelastic_anchors` would be the wrong
+    // one, and the two are separate types precisely so that choice has to be made deliberately.
+    let mean_atomic_mass_amu = civsim_physics::petrology::phase_molar_mass(phase, periodic)
+        .and_then(|m| {
+            let atoms: u32 = phase.composition.iter().map(|(_, c)| *c).sum();
+            if atoms == 0 {
+                None
+            } else {
+                m.checked_div(Fixed::from_int(atoms as i32))
+            }
+        });
+    let atomic_volume_angstrom3 =
+        crate::thermoelastic::atomic_volume_angstrom3(phase_name, registry);
+    let debye_temperature_k = moduli.and_then(|m| {
+        crate::thermoelastic::derived_elastic_debye_temperature(phase_name, registry, m, periodic)
+            .map(|t| t.kelvin())
+    });
     let bears_ferrous_iron = matches!(
         iron_valence_state(&phase.composition, periodic),
         IronValence::Ferrous | IronValence::Mixed
@@ -707,9 +737,9 @@ pub fn phase_conductivity_from_banked(
         kappa_298_band,
         estimator_band: None,
         gruneisen: gamma,
-        mean_atomic_mass_amu: None,
-        debye_temperature_k: None,
-        atomic_volume_angstrom3: None,
+        mean_atomic_mass_amu,
+        debye_temperature_k,
+        atomic_volume_angstrom3,
         atoms_per_primitive_cell,
         expansivity_integral,
         bears_ferrous_iron,
@@ -1135,6 +1165,7 @@ mod tests {
                 name,
                 &conductivity,
                 &gruneisen,
+                None,
                 &registry,
                 &periodic,
                 ZERO,
@@ -1205,6 +1236,7 @@ mod tests {
             "quartz",
             &conductivity,
             &gruneisen,
+            None,
             &registry,
             &periodic,
             ZERO,

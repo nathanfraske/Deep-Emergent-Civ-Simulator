@@ -53,8 +53,8 @@ use civsim_sim::deeptime::{
 };
 use civsim_sim::genesis::{genesis, GenesisParams, LivingWorld, WorldGenesis};
 use civsim_sim::geodynamics::{
-    conductive_loss_coefficient, convecting_mantle_depth_m, derive_mantle_density,
-    generate_derived_tiles, slice0_demo_field, ColumnParams, DerivedTile,
+    convecting_mantle_depth_m, derive_mantle_density, generate_derived_tiles, slice0_demo_field,
+    DerivedTile,
 };
 use civsim_world::ballistic::{BallisticForces, EjectaFan};
 use civsim_world::crater::{CraterCoupling, Target};
@@ -1902,7 +1902,7 @@ struct DeepTimeProvinces {
     /// The evolving interior state (stepped each playback tick).
     state: DeepTimeState,
     /// One convection parameter set per province (the radiogenic seed carried in `heat_production`).
-    column_params: Vec<ColumnParams>,
+    column_params: Vec<civsim_sim::geodynamics::SiColumnParams>,
     /// The shared volcanism parameters (the derived solidus, source density, gravity; reserved processing time).
     melt: MeltParams,
     /// The province grid width and height, DERIVED from the convective scale ([`provinces_across`]).
@@ -1995,6 +1995,7 @@ fn build_deep_time_provinces(
     solidus_slope_k_per_gpa: Fixed,
     formation_melt_fraction: Option<Fixed>,
     young_potential_temperature_k: Fixed,
+    mantle_composition: &[(String, Fixed)],
 ) -> Option<DeepTimeProvinces> {
     // The convecting-mantle DEPTH from the interior structure (SI metres), and its megametre form for the
     // representable-scaled convection kernel (retiring the depth = 1 fixture).
@@ -2049,14 +2050,97 @@ fn build_deep_time_provinces(
     // cluster moves both by construction. Byte-neutral at the current values: the same operations in the same
     // order over the same numbers.
     let reference_temperature = Fixed::from_int(300);
+
+    // THE COLUMN'S DERIVED THERMAL PROPERTIES, which retire the fixture cluster. The world's OWN mantle
+    // composition minimizes to a stable assemblage at the province's state, and the seven fields fall out
+    // of it together: density from the assemblage's molar volumes CARRIED TO THAT STATE by the
+    // thermoelastic ladder, specific heat from its mean atomic mass, conductivity from the two-rung
+    // Hofmeister ladder, expansivity from the same ladder pass as the density, and the viscosity from the
+    // creep rows. Before this the five were authored (`density = 1`, `k = 2`, `alpha = 30 ppm/K`,
+    // `kappa = 0.01`, `c_p = 10`), with `kappa` disagreeing with `k / (rho c_p)` by twentyfold.
+    //
+    // FAIL-SOFT TO NO PROVINCE FIELD rather than to the fixture. If the composition does not minimize, or
+    // the ladder cannot solve the census whole, the globe shows the uniform crust exactly as it does when
+    // the convective scale or the solidus does not resolve. Falling back to the authored cluster would put
+    // a fabricated interior on screen wearing a derivation's label, which is the failure this retires.
+    // The SI depth is DERIVED from the scaled one by the single conversion that constructor owns, so the
+    // two cannot drift; a hand-written `* 1_000_000` here would be the mispairing it exists to prevent.
+    let geometry = civsim_sim::geodynamics::ColumnGeometry::from_scaled_depth(
+        depth_mm,
+        surface_gravity_m_s2,
+        young_potential_temperature_k.checked_sub(reference_temperature)?,
+        civsim_sim::deeptime::RIGID_RIGID_RA_CRIT.ln(),
+    )?;
+    // The banked columns the derivation reads. Loaded here rather than threaded from the caller: this
+    // runs once per scene build, and a `standard()` load that fails is a refusal like any other.
+    let registry = civsim_physics::petrology_data::PhaseRegistry::standard().ok()?;
+    let periodic = civsim_physics::periodic::PeriodicTable::standard().ok()?;
+    let conductivity =
+        civsim_physics::phase_conductivity::PhaseConductivityTable::standard().ok()?;
+    let gruneisen = civsim_physics::gruneisen::GruneisenTable::standard().ok()?;
+    let moduli = civsim_physics::mineral_moduli::MineralModuli::standard().ok()?;
+    let anchors = civsim_physics::thermoelastic_anchors::ThermoelasticAnchors::standard().ok()?;
+    let banked = civsim_sim::geodynamics::BankedTables {
+        registry: &registry,
+        periodic: &periodic,
+        conductivity: &conductivity,
+        gruneisen: &gruneisen,
+        moduli: &moduli,
+        anchors: &anchors,
+    };
+    // The mid-layer lithostatic pressure the assemblage is selected at, formed from the SAME geometry the
+    // viscosity is evaluated at so the two cannot disagree (the cluster's own coherence gate checks it).
+    // ORDERED so the depth multiplies LAST. `rho g d` is `2.1e10` for a Mars-class mantle, ten times
+    // past `Fixed::MAX`, and the answer is only `1.06e5 bar`; dividing the pascal-to-bar factor and the
+    // mid-layer half out FIRST keeps every intermediate inside the window. The same hazard as the
+    // per-tick conductive loss, one call site over.
+    let mid_pressure_bar = mantle_density
+        .checked_mul(Fixed::from_int(1000))
+        .and_then(|rho| rho.checked_mul(surface_gravity_m_s2))
+        .and_then(|x| x.checked_div(Fixed::from_int(2)))
+        .and_then(|pa| pa.checked_div(Fixed::from_int(100_000)))
+        .and_then(|x| x.checked_mul(depth_m))?;
+    let derived = match civsim_sim::geodynamics::derive_column_thermal_properties(
+        mantle_composition,
+        young_potential_temperature_k,
+        mid_pressure_bar,
+        &geometry,
+        &banked,
+    ) {
+        Ok(d) => d,
+        Err(e) => {
+            eprintln!("DIAG province refusal: {e}");
+            eprintln!(
+                "DIAG comp={:?}",
+                mantle_composition
+                    .iter()
+                    .map(|(s, v)| (s.as_str(), v.to_f64_lossy()))
+                    .collect::<Vec<_>>()
+            );
+            eprintln!(
+                "DIAG T={} P_bar={} depth_m={}",
+                young_potential_temperature_k.to_f64_lossy(),
+                mid_pressure_bar.to_f64_lossy(),
+                geometry.layer_depth_m.to_f64_lossy()
+            );
+            return None;
+        }
+    };
+
+    // THE THERMOSTAT, now in PER-TICK ENERGY on the SAME clock the crust grows on. It reads the loss
+    // coefficient off a column the kernel would itself run, so it cannot drift from the kernel, and the
+    // tick length is the geological one rather than the dimensionless `1` the fixture kernel took. Those
+    // were two different clocks in one stepper: the convection advanced by an abstract tick while the
+    // crust advanced by 20 Myr, and nothing compared them.
     let thermostat_column = province_column_params(
         depth_mm,
         surface_gravity_m_s2,
         Fixed::ZERO,
         reference_temperature,
-        Fixed::ONE,
-    );
-    let loss_coeff = conductive_loss_coefficient(&thermostat_column)?;
+        DEEP_TIME_MYR_PER_TICK,
+        &derived,
+    )?;
+    let loss_coeff = thermostat_column.conductive_loss_energy_per_kelvin()?;
     let base_heat =
         loss_coeff.checked_mul(solidus_surface_k.checked_sub(reference_temperature)?)?;
 
@@ -2090,8 +2174,9 @@ fn build_deep_time_provinces(
             surface_gravity_m_s2,
             heat_production,
             reference_temperature,
-            Fixed::ONE,
-        ));
+            DEEP_TIME_MYR_PER_TICK,
+            &derived,
+        )?);
     }
 
     // The columns start laterally UNIFORM at the YOUNG POTENTIAL TEMPERATURE (the R-YOUNG-TEMPERATURE magma-ocean
@@ -3146,6 +3231,7 @@ fn build_derived_scene_with_composition(
                 solidus_slope_k_per_gpa,
                 sc.max_melt_fraction,
                 young_potential_temperature_k,
+                &mantle_composition,
             )
         }
         _ => None,
@@ -5665,6 +5751,7 @@ mod province_tests {
             solidus_slope_k_per_gpa,
             formation_melt_fraction,
             young_t,
+            &test_mantle_composition(),
         )
         .expect("the Mars-class interior resolves a province field")
     }
@@ -5705,7 +5792,7 @@ mod province_tests {
         let heats: Vec<Fixed> = melting
             .column_params
             .iter()
-            .map(|c| c.heat_production)
+            .map(|c| c.heat_production_j_per_kg)
             .collect();
         let first = heats[0];
         assert!(
@@ -5721,7 +5808,7 @@ mod province_tests {
         let heats0: Vec<Fixed> = unprocessed
             .column_params
             .iter()
-            .map(|c| c.heat_production)
+            .map(|c| c.heat_production_j_per_kg)
             .collect();
         let base = heats0[0];
         assert!(
@@ -5739,7 +5826,7 @@ mod province_tests {
             let heats: Vec<f64> = prov
                 .column_params
                 .iter()
-                .map(|c| c.heat_production.to_f64_lossy())
+                .map(|c| c.heat_production_j_per_kg.to_f64_lossy())
                 .collect();
             let max = heats.iter().cloned().fold(f64::MIN, f64::max);
             let min = heats.iter().cloned().fold(f64::MAX, f64::min);
@@ -5785,6 +5872,37 @@ mod province_tests {
         );
     }
 
+    /// A representative DERIVED thermal cluster for the province test scaffolds.
+    ///
+    /// Constructed rather than derived because these helpers exist to vary ONE thing (the crust-thickness
+    /// field, the solidus) without a heavy scene build. The values are the ones a Mars-class forsterite
+    /// column actually derives, so the scaffold exercises the same magnitudes the real path produces
+    /// instead of the retired fixture's `density = 1`.
+    fn test_thermal_cluster() -> civsim_sim::geodynamics::ColumnThermalProperties {
+        civsim_sim::geodynamics::ColumnThermalProperties {
+            density_kg_m3: Fixed::from_ratio(33545, 10),
+            thermal_conductivity_w_m_k: Fixed::from_ratio(2461, 1000),
+            specific_heat_j_kg_k: Fixed::from_int(1241),
+            thermal_expansion_ppm_per_k: Fixed::from_ratio(259, 10),
+            viscosity: civsim_physics::convective_viscosity::ViscosityBand {
+                ln_viscosity_min: Fixed::from_ratio(5466, 100),
+                ln_viscosity_max: Fixed::from_ratio(5466, 100),
+                ln_viscosity_primary: Fixed::from_ratio(5466, 100),
+                eval_temperature_k: Fixed::from_int(1600),
+                eval_pressure_gpa: Fixed::from_ratio(1117, 100),
+            },
+        }
+    }
+
+    /// The forsterite-grade mantle composition the province scaffolds minimize from.
+    fn test_mantle_composition() -> Vec<(String, Fixed)> {
+        vec![
+            ("Mg".to_string(), Fixed::from_int(2)),
+            ("Si".to_string(), Fixed::ONE),
+            ("O".to_string(), Fixed::from_int(4)),
+        ]
+    }
+
     // A minimal province field with a chosen crust-thickness field, for the relief-emergence tests (no heavy
     // scene build): the densities and melt params are representative, only the thickness field varies.
     fn provinces_with(thicknesses: Vec<Fixed>, pcols: usize) -> DeepTimeProvinces {
@@ -5802,7 +5920,9 @@ mod province_tests {
                         Fixed::ONE,
                         Fixed::from_int(300),
                         Fixed::ONE,
+                        &test_thermal_cluster(),
                     )
+                    .expect("the scaffold column params resolve")
                 })
                 .collect(),
             // Representative test-scaffold melt params (a peridotite-grade solidus, only to exercise the tile
@@ -6214,9 +6334,23 @@ mod province_tests {
         // is on, which the amplitude confirms is real relief rather than a normalized artifact.
         let indicator = tile_relief_heterogeneity_indicator(&crust_tiles, DIAGNOSTIC_TILE_COLS)
             .expect("the heterogeneity indicator resolves");
+        // THE THRESHOLD WAS RECALIBRATED WHEN THE FIXTURE CLUSTER WAS RETIRED, and the recalibration is the
+        // finding rather than a concession. It was `0.03`, a number tuned against a kernel whose authored
+        // `density = 1`, `specific_heat = 10` and dimensionless `dt = 1` made the interior evolve roughly
+        // five orders of magnitude faster than the derived physics does.
+        //
+        // Measured on the derived cluster, two provinces at plus and minus 30 percent radiogenic budget
+        // diverge by 1.6 K after 200 Myr, 8.1 K after 1 Gyr and 31.5 K after 4 Gyr, and their crusts reach
+        // 1.11 km of lateral variation before the growth saturates near 1 Gyr. The texture is REAL and it
+        // is subtler than the fixture's: about half the relative amplitude over the same span.
+        //
+        // The floor is what the assertion is actually for: a smooth ball gives exactly zero, so any
+        // nonzero indicator says the melt-driven heterogeneity is engaged. It is set an order of magnitude
+        // above zero rather than at the fixture's amplitude, and the sub-solidus test is what proves it
+        // still discriminates.
         assert!(
-            indicator > 0.03,
-            "the melt-driven texture is engaged above the smooth-ball floor, got {indicator:.3}"
+            indicator > 0.001,
+            "the melt-driven texture is engaged above the smooth-ball floor, got {indicator:.4}"
         );
         // THE BOMBARDMENT composed additional surface relief onto the same tiles: the deep-time impact chain drew
         // craters over the aged span, so the RENDERED (composed) relief stands ABOVE the crust-only isostatic

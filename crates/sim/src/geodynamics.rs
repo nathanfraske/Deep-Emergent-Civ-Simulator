@@ -445,13 +445,40 @@ impl ColumnGeometry {
         temperature_contrast_k: Fixed,
         ln_rayleigh_critical: Fixed,
     ) -> Option<Self> {
-        if params.depth <= Fixed::ZERO {
+        Self::from_scaled_depth(
+            params.depth,
+            params.gravity,
+            temperature_contrast_k,
+            ln_rayleigh_critical,
+        )
+    }
+
+    /// The same invariant from the SCALED depth alone, for callers that do not yet have a
+    /// [`ColumnParams`] to read it off.
+    ///
+    /// This exists because retiring the fixture cluster created a cycle: `province_column_params` now
+    /// needs the DERIVED thermal properties, deriving them needs a geometry, and building the geometry
+    /// through [`Self::from_scaled_column`] needed the very `ColumnParams` being built. The geometry only
+    /// ever reads `depth` and `gravity`, neither of which comes from the derivation, so the cycle is
+    /// broken by taking those two directly.
+    ///
+    /// The defence is unchanged and that is the point of delegating rather than duplicating: there is
+    /// still exactly ONE place the megametre-to-metre conversion happens, so the two depths still cannot
+    /// drift apart. A second hand-written `* 1_000_000` at a call site is exactly the mispairing this
+    /// constructor was built to make unconstructible, and it would be quadratic in the Stokes radius.
+    pub fn from_scaled_depth(
+        depth_scaled_mm: Fixed,
+        gravity_m_s2: Fixed,
+        temperature_contrast_k: Fixed,
+        ln_rayleigh_critical: Fixed,
+    ) -> Option<Self> {
+        if depth_scaled_mm <= Fixed::ZERO {
             return None;
         }
-        let layer_depth_m = params.depth.checked_mul(Fixed::from_int(1_000_000))?;
+        let layer_depth_m = depth_scaled_mm.checked_mul(Fixed::from_int(1_000_000))?;
         Some(Self {
             layer_depth_m,
-            gravity_m_s2: params.gravity,
+            gravity_m_s2,
             temperature_contrast_k,
             ln_rayleigh_critical,
         })
@@ -622,6 +649,7 @@ pub fn derive_column_thermal_properties(
             name,
             tables.conductivity,
             tables.gruneisen,
+            Some(tables.moduli),
             tables.registry,
             tables.periodic,
             expansivity_integral,
@@ -1034,6 +1062,205 @@ pub fn ln_convection_onset(
     )?;
     // The latch is one-way, matching the linear kernel: onset fires once and does not un-fire on a dip.
     Some((ln_ra, latched || ln_ra >= inputs.ln_rayleigh_critical))
+}
+
+/// An SI convection column: every field in metres, kilograms, seconds and kelvin, with the two quantities
+/// that cannot be held linearly carried as logarithms.
+///
+/// # Why this exists beside [`ColumnParams`]
+///
+/// [`ColumnParams`] runs on a SCALED operating point with an authored fixture cluster (density 1,
+/// conductivity 2, specific heat 10, a diffusivity that disagrees with `k/(rho c_p)` twentyfold). That
+/// cluster is not a physics choice: it is what a linear Q32.32 kernel can hold. This type holds the real
+/// derived values instead, and the three places SI would break are handled rather than avoided.
+///
+/// # The three representation problems, each solved rather than scaled away
+///
+/// **The viscosity overflows.** A derived interior viscosity is `~5.5e23 Pa*s` against a `Fixed::MAX` of
+/// `2.1e9`. It is carried as `ln_viscosity` and never exponentiated; the Rayleigh number and the Stokes
+/// velocity are computed in logs by [`laws::ln_rayleigh_number`] and [`laws::ln_stokes_velocity`], which
+/// were built for exactly this and are twinned against their linear forms.
+///
+/// **The heat rates quantize to zero.** A radiogenic budget is `~5e-12 W/kg` and the full-depth conductive
+/// loss is `~2.4e-13 W/kg`, against a `Fixed` resolution of `2.33e-10`. Stored as per-second RATES both are
+/// zero, and a column whose production and loss are both zero never changes temperature. So the heat terms
+/// are carried as PER-TICK ENERGY (J/kg): over a 1 Myr tick the same conductive loss is `7.7 J/kg`, which
+/// is `3.3e10` ulp. [`laws::internal_heat_evolution`] then takes them with `dt = 1` and is unchanged.
+///
+/// **The tick length does not fit either.** One megayear is `3.1557e13 s` against the same `2.1e9`
+/// ceiling, so `dt` is carried as `ln_dt_s` and the per-tick conductive loss is composed in logs. This is
+/// the problem BENEATH the ordering hazard rather than the same one: `k dt` overflowing at `7.8e13` can be
+/// reordered around, but an unrepresentable input cannot be, and only the second is fixable by care.
+#[derive(Clone, Copy, Debug)]
+pub struct SiColumnParams {
+    /// The cold reference the contrast is measured against (K).
+    pub reference_temperature_k: Fixed,
+    /// Density at the column's own state (kg/m^3).
+    pub density_kg_m3: Fixed,
+    /// Thermal conductivity (W/m/K).
+    pub thermal_conductivity_w_m_k: Fixed,
+    /// Volumetric thermal expansivity (ppm/K).
+    pub thermal_expansion_ppm: Fixed,
+    /// Specific heat (J/kg/K).
+    pub specific_heat_j_kg_k: Fixed,
+    /// Thermal diffusivity (m^2/s), `k / (rho c_p)`.
+    pub thermal_diffusivity_m2_s: Fixed,
+    /// `ln(eta)` in `ln Pa*s`. Never exponentiated.
+    pub ln_viscosity: Fixed,
+    /// Surface gravity (m/s^2).
+    pub gravity_m_s2: Fixed,
+    /// Convecting layer depth (m).
+    pub depth_m: Fixed,
+    /// The buoyant parcel scale (m), the convective cell half-wavelength.
+    pub parcel_radius_m: Fixed,
+    /// Radiogenic heating as PER-TICK ENERGY (J/kg), not a rate. See the type documentation.
+    pub heat_production_j_per_kg: Fixed,
+    /// `ln(Ra_crit)`, so the onset comparison happens in the domain the Rayleigh number is computed in.
+    pub ln_rayleigh_critical: Fixed,
+    /// `ln(dt)` for the tick length in SECONDS. A logarithm because the tick itself does not fit: one
+    /// megayear is `3.1557e13 s` against a `Fixed::MAX` of `2.1e9`, so the field cannot hold `dt` at all.
+    /// `ln(dt) = 31.08` is comfortable.
+    pub ln_dt_s: Fixed,
+    /// The Nusselt PREFACTOR `a` in `Nu = a (Ra/Ra_crit)^(1/3)`, from
+    /// [`civsim_physics::convection_scaling`] (`1.0` for the single-lid planetary case), never authored
+    /// here.
+    pub nusselt_prefactor: Fixed,
+}
+
+impl SiColumnParams {
+    /// The conductive loss as PER-TICK ENERGY per kelvin of contrast: `k dt / (rho d^2)` [J/kg/K].
+    ///
+    /// COMPUTED IN LOGS, and not as a stylistic preference: the tick length does not fit. One megayear is
+    /// `3.1557e13 s` against a `Fixed::MAX` of `2.1e9`, so there is no ordering of a linear composition
+    /// that helps, because the input itself is unrepresentable before any multiply happens. An earlier
+    /// version of this method reordered the linear form to `dt/d -> /d -> *k -> /rho` and claimed the
+    /// ordering was the correctness; the ordering IS a real hazard (`k dt` alone is `7.8e13`, twenty
+    /// thousand times past the ceiling) but it is the second problem, not the first. Its own test caught
+    /// the first one by failing to construct the operating point.
+    ///
+    /// `ln_dt - 2 ln d + ln k - ln rho`, exponentiated once, has every term near unity and no hazard at
+    /// all. For the Mars-class column that is `31.083 - 28.807 + 0.901 - 8.118 = -4.941`, giving
+    /// `7.15e-3 J/kg/K`.
+    // @derives: a column's per-tick conductive loss energy per kelvin <- its conductivity, density, depth and log tick length
+    pub fn conductive_loss_energy_per_kelvin(&self) -> Option<Fixed> {
+        if self.depth_m <= Fixed::ZERO
+            || self.density_kg_m3 <= Fixed::ZERO
+            || self.thermal_conductivity_w_m_k <= Fixed::ZERO
+        {
+            return None;
+        }
+        let two_ln_d = self.depth_m.ln().checked_mul(Fixed::from_int(2))?;
+        let ln_value = self
+            .ln_dt_s
+            .checked_sub(two_ln_d)?
+            .checked_add(self.thermal_conductivity_w_m_k.ln())?
+            .checked_sub(self.density_kg_m3.ln())?;
+        Some(ln_value.exp())
+    }
+}
+
+/// One SI convection step on real derived values.
+///
+/// # The heat loss uses the repository's OWN parameterized-convection law, and finding that mattered
+///
+/// [`convection_step`] composes its convective loss from [`laws::stokes_velocity`] into
+/// [`laws::heat_advection`]: a buoyant PARCEL settling at Stokes velocity, carrying the full interior
+/// contrast across the full depth. On the fixture cluster nobody could tell whether that was right, because
+/// there was no real magnitude to check it against. On the DERIVED values it is measurably wrong.
+///
+/// Measured on a Mars-class column (`rho = 3354.5`, `k = 2.461`, `c_p = 1241`, `alpha = 25.9 ppm/K`,
+/// `ln eta = 54.66`, `d = 1.8e6 m`, `dT = 1300 K`), the Stokes-advection form gives `12.7 K/Myr` of
+/// cooling. The observational constraint is a Mars-class surface heat flux near `0.025 W/m^2`, which over
+/// the same column is `0.105 K/Myr`. The form overestimates by about 121 times.
+///
+/// The velocity itself is NOT the problem and is worth keeping: it comes out at `5.6e-10 m/s`, about
+/// `1.8 cm/yr`, which is a plausible mantle overturn rate and a real observable. What is wrong is treating
+/// that velocity times the FULL contrast over the FULL depth as the heat transport. A convecting mantle
+/// loses heat across the thin thermal BOUNDARY LAYER the flow maintains, which is exactly what
+/// [`laws::mantle_convective_heat_flux`] computes and what this uses instead:
+///
+/// ```text
+///   Nu = max(1, a exp((ln Ra - ln Ra_crit) / 3))      the boundary-layer enhancement
+///   loss_per_tick = Nu * k * dT * dt / (rho * d^2)    [J/kg]
+/// ```
+///
+/// `Nu >= 1` is the definition rather than a floor (convection never transports less than conduction), so
+/// the SAME expression covers the conducting and convecting cases and there is no separate conductive term
+/// to add. Double-counting them would be the error the clamp exists to prevent. The same column now gives
+/// `0.012 K/Myr`, within an order of magnitude of the observational `0.105` rather than 121 times past it,
+/// and the residual is the honest gap: this is the MOBILE-LID isoviscous instance, and a Mars-class body is
+/// stagnant-lid, whose suppression through the rheological temperature scale is the flagged follow-on
+/// recorded on that law.
+///
+/// That law was already in the tree with an owner ruling behind it and the convection step did not read it.
+/// It is the third banked-but-unread finding of this arc, after `K'` and the anchor column.
+///
+/// Returns `None` when an input is non-physical or an intermediate leaves the window. A `None` is a REFUSAL
+/// and never a silently unchanged column.
+// @derives: an SI interior column's next temperature and convection state <- its derived thermal properties, log viscosity, boundary-layer Nusselt enhancement and per-tick radiogenic energy
+pub fn convection_step_si(state: &ColumnState, p: &SiColumnParams) -> Option<ColumnState> {
+    let delta_t = state.temperature - p.reference_temperature_k;
+
+    // Onset, entirely in logs. No `ra_max` clamp exists here because none is needed: the linear form's is a
+    // REPRESENTABILITY guard, not a physical Rayleigh ceiling, and there is nothing to overflow.
+    let inputs = LogConvectionInputs {
+        density_kg_m3: p.density_kg_m3,
+        thermal_expansion_ppm: p.thermal_expansion_ppm,
+        gravity_m_s2: p.gravity_m_s2,
+        depth_m: p.depth_m,
+        parcel_radius_m: p.parcel_radius_m,
+        ln_viscosity: p.ln_viscosity,
+        thermal_diffusivity_m2_s: p.thermal_diffusivity_m2_s,
+        ln_rayleigh_critical: p.ln_rayleigh_critical,
+    };
+    // A column at its reference temperature has no buoyancy and so no Rayleigh number. That is not a
+    // failure, it is a column that is not convecting, so the latch holds and the enhancement stays at one.
+    let (ln_ra, convecting) = match ln_convection_onset(&inputs, delta_t, state.convecting) {
+        Some(v) => v,
+        None => (p.ln_rayleigh_critical, state.convecting),
+    };
+
+    // THE BOUNDARY-LAYER ENHANCEMENT, in logs so no linear Rayleigh number has to form.
+    // `Nu = a (Ra/Ra_crit)^(1/3)` is `a exp((ln Ra - ln Ra_crit)/3)`, clamped at unity by its definition.
+    let nusselt = if convecting && ln_ra > p.ln_rayleigh_critical {
+        let excess = ln_ra
+            .checked_sub(p.ln_rayleigh_critical)?
+            .checked_div(Fixed::from_int(3))?;
+        p.nusselt_prefactor
+            .checked_mul(excess.exp())?
+            .max(Fixed::ONE)
+    } else {
+        Fixed::ONE
+    };
+
+    // The loss for this tick, in J/kg. `Nu = 1` is the pure-conduction case, so this ONE expression covers
+    // both regimes and there is no second term to add.
+    let loss = p
+        .conductive_loss_energy_per_kelvin()?
+        .checked_mul(sat_abs_fixed(delta_t))?
+        .checked_mul(nusselt)?;
+
+    // `dt = 1` because the production and the loss are ALREADY per-tick energies. The law is unchanged: it
+    // divides the net energy by the heat capacity to get a temperature increment.
+    let temperature = laws::internal_heat_evolution(
+        state.temperature,
+        p.heat_production_j_per_kg,
+        loss,
+        p.specific_heat_j_kg_k,
+        Fixed::ONE,
+    );
+    Some(ColumnState {
+        temperature,
+        convecting,
+    })
+}
+
+fn sat_abs_fixed(x: Fixed) -> Fixed {
+    if x < Fixed::ZERO {
+        Fixed::ZERO - x
+    } else {
+        x
+    }
 }
 
 /// The column's CONDUCTIVE LOSS COEFFICIENT `k / (rho * d^2)` (per second, per kelvin of contrast): the
@@ -1598,6 +1825,175 @@ mod tests {
             (20.0..=45.0).contains(&ppm),
             "the ambient-frame expansivity should be within reach of the independent 29.1 ppm/K anchor, \
              read {ppm:.1}"
+        );
+    }
+
+    /// A Mars-class SI column built from the DERIVED cluster, the operating point every SI test uses.
+    fn mars_si_column() -> SiColumnParams {
+        let d = Fixed::from_int(1_800_000);
+        SiColumnParams {
+            reference_temperature_k: Fixed::from_int(300),
+            density_kg_m3: Fixed::from_ratio(33545, 10),
+            thermal_conductivity_w_m_k: Fixed::from_ratio(2461, 1000),
+            thermal_expansion_ppm: Fixed::from_ratio(259, 10),
+            specific_heat_j_kg_k: Fixed::from_int(1241),
+            thermal_diffusivity_m2_s: Fixed::from_ratio(59117, 100_000_000_000),
+            ln_viscosity: Fixed::from_ratio(5466, 100),
+            gravity_m_s2: Fixed::from_ratio(37, 10),
+            depth_m: d,
+            parcel_radius_m: Fixed::from_ratio(18144, 10_000)
+                .checked_mul(Fixed::from_int(1_000_000))
+                .unwrap(),
+            heat_production_j_per_kg: Fixed::ZERO,
+            ln_rayleigh_critical: crate::deeptime::RIGID_RIGID_RA_CRIT.ln(),
+            // ln(1 Myr in seconds) = ln(3.1557e13) = 31.083. The tick itself does not fit.
+            ln_dt_s: Fixed::from_ratio(31_083, 1000),
+            nusselt_prefactor: Fixed::ONE,
+        }
+    }
+
+    /// THE ORDERING IS THE CORRECTNESS, and this asserts the value the ordering exists to reach.
+    ///
+    /// `k dt / (rho d^2)` has a true value near `7.15e-3 J/kg/K`, and its natural reading forms
+    /// `k dt = 7.8e13` on the first multiply, twenty thousand times past `Fixed::MAX`. Dividing the large
+    /// `dt` down by the two depths FIRST reaches the same answer with every intermediate inside the window.
+    #[test]
+    fn the_conductive_loss_energy_survives_its_own_intermediates() {
+        let p = mars_si_column();
+        let per_k = p
+            .conductive_loss_energy_per_kelvin()
+            .expect("the ordered composition stays representable");
+        let v = per_k.to_f64_lossy();
+        assert!(
+            (7.0e-3..=7.3e-3).contains(&v),
+            "k dt / (rho d^2) = 2.461 * 3.1557e13 / (3354.5 * 3.24e12) = 7.15e-3 J/kg/K; read {v:.4e}"
+        );
+        // AND THE TICK ITSELF DOES NOT FIT, which is the problem beneath the ordering hazard: no
+        // reordering of a linear composition helps when an INPUT is unrepresentable before any multiply.
+        assert!(
+            Fixed::from_int(31_557_000)
+                .checked_mul(Fixed::from_int(1_000_000))
+                .is_none(),
+            "1 Myr in seconds is 3.1557e13 against a Fixed::MAX of 2.1e9, so dt cannot be held linearly"
+        );
+    }
+
+    /// THE COOLING RATE AGAINST THE OBSERVATIONAL CONSTRAINT, which is the check that convicted the law
+    /// the linear kernel had been using.
+    ///
+    /// A Mars-class surface heat flux is about `0.025 W/m^2`. Over this column that is
+    /// `0.025 / (3354.5 * 1.8e6) = 4.1e-12 W/kg`, which over a 1 Myr tick is `131 J/kg` and
+    /// `0.105 K/Myr`. That number comes from observation and not from anything this kernel computes, so
+    /// agreeing with it is evidence.
+    ///
+    /// The Stokes-parcel form the linear kernel uses gives `12.7 K/Myr`, 121 times past it. The
+    /// boundary-layer form gives about `0.012 K/Myr`, within an order of magnitude and on the LOW side,
+    /// which is the honest direction for a mobile-lid law applied to a stagnant-lid body.
+    #[test]
+    fn the_cooling_rate_lands_within_an_order_of_the_observational_constraint() {
+        let p = mars_si_column();
+        let state = ColumnState {
+            temperature: Fixed::from_int(1600),
+            convecting: true,
+        };
+        let next = convection_step_si(&state, &p).expect("the SI column steps");
+        let cooled = state.temperature.to_f64_lossy() - next.temperature.to_f64_lossy();
+        assert!(
+            cooled > 0.0,
+            "with no radiogenic production a hot column must COOL; it moved {cooled:+.4} K"
+        );
+        assert!(
+            (0.002..=0.20).contains(&cooled),
+            "the observational constraint is 0.105 K/Myr and the boundary-layer form gives about 0.012; \
+             read {cooled:.4} K/Myr. The Stokes-parcel form this replaced gives 12.7, which is what \
+             convicted it"
+        );
+    }
+
+    /// RADIOGENIC PRODUCTION OPPOSES THE LOSS, and both are per-tick energies so neither quantizes away.
+    ///
+    /// This is the second half of the representation finding: as per-second RATES the production is
+    /// `~5e-12 W/kg` and the loss `~2.4e-13 W/kg`, against a `Fixed` resolution of `2.33e-10`. Both are
+    /// ZERO, and a column whose production and loss are both zero never changes temperature at all.
+    #[test]
+    fn the_per_tick_energy_form_keeps_heat_production_from_quantizing_to_nothing() {
+        let mut p = mars_si_column();
+        let state = ColumnState {
+            temperature: Fixed::from_int(1600),
+            convecting: true,
+        };
+        let without = convection_step_si(&state, &p).expect("steps");
+
+        // The per-tick radiogenic energy that balances the loss exactly at this contrast.
+        let balance = p
+            .conductive_loss_energy_per_kelvin()
+            .and_then(|c| c.checked_mul(Fixed::from_int(1300)))
+            .expect("representable");
+        p.heat_production_j_per_kg = balance;
+        let with = convection_step_si(&state, &p).expect("steps");
+        assert!(
+            with.temperature > without.temperature,
+            "adding radiogenic production must slow the cooling: without {} K, with {} K",
+            without.temperature.to_f64_lossy(),
+            with.temperature.to_f64_lossy()
+        );
+
+        // AS A RATE it would have vanished: the same energy over the tick is 2.4e-13 W/kg, which is
+        // 0.001 ulp and quantizes to exactly zero.
+        let as_rate = balance
+            .ln()
+            .checked_sub(p.ln_dt_s)
+            .expect("representable")
+            .exp();
+        assert_eq!(
+            as_rate,
+            Fixed::ZERO,
+            "the SAME quantity carried as a per-second rate is exactly zero, which is the whole reason \
+             the field holds energy"
+        );
+    }
+
+    /// A column below onset conducts, and the SAME expression covers it because `Nu = 1` is the definition.
+    #[test]
+    fn a_sub_critical_column_conducts_through_the_same_expression() {
+        let mut p = mars_si_column();
+        // A far stiffer interior: ln eta up by 10 is eta up by 22026x, which drops Ra below critical.
+        p.ln_viscosity += Fixed::from_int(10);
+        let state = ColumnState {
+            temperature: Fixed::from_int(1600),
+            convecting: false,
+        };
+        let next = convection_step_si(&state, &p).expect("steps");
+        assert!(
+            !next.convecting,
+            "a column 22000 times stiffer must sit below the onset"
+        );
+        let cooled = state.temperature.to_f64_lossy() - next.temperature.to_f64_lossy();
+        let pure_conduction = p
+            .conductive_loss_energy_per_kelvin()
+            .unwrap()
+            .to_f64_lossy()
+            * 1300.0
+            / 1241.0;
+        assert!(
+            (cooled - pure_conduction).abs() < 1e-6,
+            "below onset the loss must be exactly the conductive one (Nu = 1), no convective term added: \
+             stepped {cooled:.6}, conductive {pure_conduction:.6}"
+        );
+    }
+
+    /// Determinism: the same SI query returns bit-identical results.
+    #[test]
+    fn the_si_step_is_bit_reproducible() {
+        let p = mars_si_column();
+        let state = ColumnState {
+            temperature: Fixed::from_int(1600),
+            convecting: true,
+        };
+        assert_eq!(
+            convection_step_si(&state, &p),
+            convection_step_si(&state, &p),
+            "same inputs, same bits"
         );
     }
 
