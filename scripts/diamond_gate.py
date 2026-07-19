@@ -404,6 +404,41 @@ def main():
         print(f"diamond gate self-test: {len(CANARIES)} known cases, every detector fires.")
         return 0
 
+    # THE KNOWN-OPEN LEDGER, and it is deliberately NOT the registry above. `REGISTERED_RELATIONSHIPS`
+    # says "this pair is legitimate and here is the arbitration". This says "this pair is a real defect,
+    # nobody has fixed it, and it is not allowed to be a surprise". Conflating the two would let an
+    # unresolved diamond be retired by calling it registered, which is the bypass the registry's own
+    # docstring warns about.
+    #
+    # WHY IT EXISTS AT ALL. CI ran only `--self-test`, which returns before scanning, so these six have
+    # been passing invisibly. Turning the real scan on without a ledger means either fixing six diamonds
+    # in one sitting or leaving the scan off again; the ledger is what lets the scan run TODAY and convict
+    # anything new while these stay counted and visible.
+    #
+    # It is a RATCHET, not an amnesty: the count is printed on every run, a new diamond is not in it and
+    # so fails, and an entry removed from the code must be removed from here (the gate says so below).
+    KNOWN_OPEN = {
+        "log_sum_exp": "two independent implementations of one numerical primitive "
+        "(materials::creep::logsumexp_canonical and physics::saha::log_sum_exp). A real duplicate: one "
+        "should consume the other. Not yet done.",
+        "friction": "laws::friction() derives a force while momentum.rs, runout.rs and "
+        "moment_equivalence.rs store coefficients or a FrictionLaw. Probably homonyms rather than one "
+        "quantity, but nobody has SHOWN that, and the gate's own guidance says an unshown homonym gets "
+        "renamed rather than assumed.",
+        "optical_depth": "laws::optical_depth() against a stored field in perception_reach.rs. "
+        "Unexamined: it may be a cached output of the law (which needs registering) or a different "
+        "quantity (which needs renaming).",
+        "shear": "laws::shear() against materials_oracle's PropertyEstimate and Fixed. Likely the "
+        "oracle's estimator ladder, which would be a REGISTERED relationship once someone states the "
+        "rung order and the overlap sentinel.",
+        "thermal_diffusivity": "laws::thermal_diffusivity() against the stored ColumnParams field. The "
+        "sharpest of the six and the one I made worse: #205 added a COMPUTED sibling "
+        "(ColumnThermalProperties::thermal_diffusivity) while leaving the stored field in place, so "
+        "there are now three ways to get this number. Retiring the stored field is the fix.",
+        "weight": "laws::weight() against a u64 in redistribute.rs and a Fixed in learn.rs. The learn.rs "
+        "one is a learning weight and almost certainly a homonym; the redistribute.rs one is unexamined.",
+    }
+
     laws = law_providers()
     fields = stored_providers()
     findings = detect(laws, fields, REGISTERED_RELATIONSHIPS)
@@ -434,12 +469,38 @@ def main():
         print("no unarbitrated diamonds found.")
         return 1 if (strict and twins) else 0
 
-    for quantity, law_site, sites in findings:
+
+    new_findings = [f for f in findings if f[0] not in KNOWN_OPEN]
+    carried = [f for f in findings if f[0] in KNOWN_OPEN]
+    # THE LEDGER COVERS BOTH FINDING SHAPES. `log_sum_exp` is a TWIN PROVIDER (two deriving kernels for
+    # one quantity), not a law-versus-field diamond, so checking staleness against `findings` alone
+    # reported it as stale while the gate was reporting it two paragraphs above. A ledger that contradicts
+    # the same run's output is worse than no ledger.
+    detected = {f[0] for f in findings} | {q for q, _ in twins}
+    stale_ledger = sorted(set(KNOWN_OPEN) - detected)
+
+    if carried:
+        print(f"CARRIED (known-open, {len(carried)} of {len(KNOWN_OPEN)} ledger entries still present):")
+        for quantity, _law_site, _sites in carried:
+            print(f"  - {quantity}: {KNOWN_OPEN[quantity]}")
+        print()
+    if stale_ledger:
+        print(
+            "STALE LEDGER: these are recorded as known-open but no longer detected. If they were fixed, "
+            "delete their rows so the ledger cannot quietly become an amnesty for things that came back:"
+        )
+        for q in stale_ledger:
+            print(f"  - {q}")
+        print()
+
+    for quantity, law_site, sites in new_findings:
         print(f"UNARBITRATED DIAMOND: `{quantity}`")
         print(render_subgraph(quantity, law_site, sites))
         print()
 
-    print(f"{len(findings)} unarbitrated diamond(s).")
+    print(
+        f"{len(findings)} unarbitrated diamond(s): {len(new_findings)} NEW, {len(carried)} known-open."
+    )
     print()
     print("Each is a CANDIDATE for a human to rule on, never a verdict: this gate falsifies, it does not")
     print("author. A finding is discharged by one of three moves, and by nothing else:")
@@ -449,7 +510,13 @@ def main():
     print("     that computes and reports the rungs' disagreement wherever both evaluate.")
     print("  3. SHOW IT IS NOT ONE: the name collides but the quantities differ. Then rename, because a name")
     print("     that reads as a diamond will be read as one by the next person too.")
-    return 1 if strict else 0
+    # THE RATCHET. A NEW diamond fails under --strict; a known-open one is carried, counted and printed.
+    # A stale ledger row also fails, because a ledger that keeps entries for things nobody detects any
+    # more is how an amnesty forms: the row stays, the defect comes back under it, and nothing notices.
+    if strict:
+        new_twins = [q for q, _ in twins if q not in KNOWN_OPEN]
+        return 1 if (new_findings or new_twins or stale_ledger) else 0
+    return 0
 
 
 def report_twins(twins):

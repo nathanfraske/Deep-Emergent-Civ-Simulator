@@ -70,8 +70,26 @@ def check_receipts():
             else:
                 held += 1
             continue
+        # A CROSS-REFERENCED PRIMARY carries its witness in the SIBLING manifest, not here, and this test
+        # could not follow that. The chain broke silently: the moduli fetch once HELD these PDFs, this
+        # manifest cross-referenced them ("the provenance test rechecks the receipt at the sibling path"),
+        # and the sibling was later slimmed to citation-plus-witness under the owner's licence ruling. The
+        # bytes went away, the witness moved into the sibling manifest, and the cross-reference was left
+        # pointing at a path that no longer resolves. Following the reference is the anti-diamond fix:
+        # copying `archived_url` into both manifests would put one fact in two places with nothing
+        # comparing them, which is what this repository keeps paying for.
+        witness = s.get("archived_url", "").strip()
+        if not witness and s.get("dir"):
+            sibling = os.path.join(DATA, s["dir"], "manifest.toml")
+            if os.path.exists(sibling):
+                sib_text = open(sibling, encoding="utf-8").read()
+                for sib in parse_blocks(sib_text, "source"):
+                    if sib.get("sha256") == s.get("sha256"):
+                        witness = sib.get("archived_url", "").strip()
+                        if witness:
+                            break
         # Slimmed from the repo: the archived snapshot is the retrievable witness of record.
-        if not s.get("archived_url", "").strip():
+        if not witness:
             print(f"GRUNEISEN NO WITNESS {s['file']}: receipt {s['sha256']} points at nothing retrievable")
             failures += 1
             continue
