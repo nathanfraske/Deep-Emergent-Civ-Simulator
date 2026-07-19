@@ -18,8 +18,18 @@ Copyright 2026 Nathan M. Fraske. Licensed under the Apache License, Version 2.0;
 
 The standup follows the runbook: the determinism core is the foundation and carries no reserved numbers, so it is built and tested in full. The simulation crate carries the calibration-manifest plumbing and the substrate-loader scaffold; behaviour that depends on a reserved value is gated until the owner sets the number.
 
-- `crates/core`: the determinism bedrock. The `Fixed` (Q32.32) newtype with its arithmetic, the SplitMix64 counter-based RNG keyed on `(seed, entity, phase, counter)`, `StableId` and the registry, arena and slab allocators, the cache-line wrapper, the append-only event log with never-reused identifiers, the typed canonical-state boundary, and the deterministic state hash. No external dependencies, so the bedrock is maximally reproducible.
-- `crates/sim`: the calibration manifest loader (every reserved value loads as a fail-loud sentinel), the development and calibrated build profiles, the conserved-projection registry, the minimal two-tier LOD model, the data-driven substrate loader, and the conservation-with-referential-integrity harness. The determinism reproducibility harness lives with the core it exercises (`crates/core/tests`).
+- `crates/core`: the determinism bedrock. The `Fixed` (Q32.32) newtype with its arithmetic, the SplitMix64 counter-based RNG keyed on `(seed, entity, phase, counter)`, the state hasher, and the append-only event log. It depends on nothing, deliberately.
+- `crates/units`: the dimensional and representation layer (the scale planner, the wide-intermediate tier, the range census).
+- `crates/physics`: the authored physics FLOOR (its axes, substances and law kernels) plus the substrates that derive from it: the Rayleigh and convection scalings, flexure, the geotherm, moment equivalence, the Gruneisen ladder, mineral moduli, and the floor provenance register.
+- `crates/materials`: composition to properties. Density, specific heat, the two-rung thermal-conductivity ladder, moduli estimators, phase and condensation machinery.
+- `crates/compose`: the composition and capability layer.
+- `crates/foundation`: the leaf modules shared across the simulation, extracted so an edit elsewhere does not rebuild them (material, value, scenario, clock, breeding, sensorium, unified provenance and the rest).
+- `crates/bio`: the biology arc, parked out of the simulation's build path (genome, anatomy, belief, evidence, agent, theory of mind, lineage, mate choice).
+- `crates/world`: worldgen and surface transport. Craters, ejecta and runout, the ballistic and momentum integrators, impact events, celestial geometry.
+- `crates/sim`: the simulation systems and the calibration manifest loader (every reserved value loads as a fail-loud sentinel), the deep-time geodynamics, the runner, and the development and calibrated build profiles.
+- `crates/viewer`: the observer. A windowed glyph and globe view that reads canon and never writes it (Principle 10).
+- `crates/gpu`: canonical GPU compute in CubeCL, integer-only and bit-identical to the CPU oracle.
+- `crates/stone0`: the local-firing provenance gate that makes the no-fabricated-values discipline un-bypassable.
 
 What is held for the owner's calls: every reserved calibration value (surfaced with its basis in `calibration/reserved.toml`, never invented), and the open research items in the backlog (`docs/audit.md` carries the running count).
 
