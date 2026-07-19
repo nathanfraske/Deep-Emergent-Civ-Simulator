@@ -46,6 +46,26 @@ pub struct FloorGrade {
     /// The ground was ambiguous between two tags or mis-bucketed; a disclosed limit, not a directional lean.
     #[serde(default)]
     pub unsettled: bool,
+    /// THE LAST HOP of the provenance DAG: the vendored source ids this entry's value traces to, resolving
+    /// into the consolidated source registry.
+    ///
+    /// Without it the DAG stops one step short of the evidence. [`Self::derived_from`] walks a derived
+    /// quantity back to the floor quantities it computes from, and `unified_provenance` joins those with
+    /// the calibration side, but a LEAF has nowhere left to point: nothing connects a measured floor value
+    /// to the paper, table, or dataset it was read out of, and no gate can ask whether it traces to a held
+    /// primary. This closes that hop, so a walk from a derived world quantity can reach a checksummed,
+    /// archived source rather than ending at a bare id.
+    ///
+    /// EMPTY IS THE HONEST DEFAULT, not a claim of no provenance. The existing register predates this
+    /// field and carries citations in prose elsewhere; an empty list here means "not yet linked", never
+    /// "unsourced". Enforcement ratchets separately once the source registry lands, the same shape the
+    /// constructor and derives baselines use: grandfather the population, require it of new entries.
+    ///
+    /// A source whose licence forbids redistribution is still nameable here. The registry entry it points
+    /// at holds a citation and a public archive witness rather than bytes (owner ruling), so this field
+    /// records the trace either way and the completeness question belongs to the registry, not here.
+    #[serde(default)]
+    pub sources: Vec<String>,
 }
 
 /// The floor grade register, loaded from `crates/physics/data/floor_provenance.toml`.
