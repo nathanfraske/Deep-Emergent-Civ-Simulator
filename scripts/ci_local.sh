@@ -70,6 +70,22 @@ print('\n'.join(uniq))
 PY
 )
 
+# Export the workflow's own job-level `env:` values before running anything. A command like
+# `cargo nextest run -E "not ($SLOW_TESTS)"` carries a variable the workflow defines and a local shell does
+# not, and under `set -u` that unbound expansion KILLS THIS SCRIPT MID-LOOP: the run stops after the last
+# command that happened to succeed, prints no failure, and exits non-zero with output that reads like a
+# clean partial pass. That is exactly the false-green this script exists to prevent, so the variables are
+# read from the same file the commands are, rather than restated here.
+while IFS= read -r line; do
+  key="${line%%=*}"; val="${line#*=}"
+  [ -n "$key" ] && export "$key=$val"
+done < <(python3 - "$WORKFLOW" <<'PY'
+import re, sys
+for m in re.finditer(r'^\s{4,}([A-Z][A-Z0-9_]*):\s*"(.*)"\s*$', open(sys.argv[1]).read(), re.M):
+    print(f"{m.group(1)}={m.group(2)}")
+PY
+)
+
 if [ "${1:-}" = "--list" ]; then
   printf 'ci_local: %d command(s) extracted from %s\n' "${#CMDS[@]}" "$WORKFLOW"
   for c in "${CMDS[@]}"; do echo "  $c"; done
@@ -79,6 +95,12 @@ fi
 # nextest is CI's runner; fall back if it is not installed, and SAY so rather than silently differing.
 HAVE_NEXTEST=1
 cargo nextest --version >/dev/null 2>&1 || HAVE_NEXTEST=0
+
+# A run that dies partway (an unbound variable, a killed shell) would otherwise leave output that reads like
+# a clean partial pass, which is worse than a loud failure because it is quotable. This makes the truncation
+# announce itself, so "it stopped early" can never be mistaken for "everything before this passed".
+COMPLETED=0
+trap '[ "$COMPLETED" = "1" ] || echo "  ci_local: RUN DID NOT COMPLETE. The checks above are a PREFIX, not a result." >&2' EXIT
 
 pass=0; fail=0; failed_cmds=()
 for c in "${CMDS[@]}"; do
@@ -99,6 +121,7 @@ for c in "${CMDS[@]}"; do
   rm -f "$out"
 done
 
+COMPLETED=1
 echo "  ---"
 echo "  ci_local: $pass passed, $fail failed (of ${#CMDS[@]} extracted)"
 if [ "$fail" -gt 0 ]; then
