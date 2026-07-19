@@ -234,6 +234,51 @@ somebody looked, found a defect, and it is waived pending a ruling. The gate add
 restricted-but-held set on every run whether or not it passes, so a waiver can never make a known defect
 invisible, which is the failure mode grandfathering invites.
 
+### The ruling, and what it changed (owner, 2026-07-18)
+
+**A source with a public link and no redistribution licence is held as citation plus witness**: the
+citation, the licence finding, the public URL, the Wayback witness, the scope, and a checksum where one
+can be computed without redistributing. It does not hold the bytes. This confirmed what was proposed for
+Goldsmith 2001 and extended it to the other five.
+
+**Six entries converted, and the conversion cost nothing.** Before removing any bytes, each source's
+Wayback capture was re-fetched and hashed against the receipt on record. **Five of six were byte-identical
+to the bytes we held.** The sixth, `jackson_1999_enstatite`, had no capture at all, so one was requested
+from the Wayback save endpoint, then re-fetched and hashed, and it too came back byte-identical. So every
+converted entry now points at a public artifact whose bytes match its retained sha256: the receipt still
+verifies, the provenance is unbroken, and what was lost by deleting the local copies is nothing beyond the
+copies themselves. That verification is recorded per entry in `witness_verified`.
+
+A caution on method, because it nearly produced a false finding. The first hash pass used Python's urllib
+and reported all six as DIFFERING. Those were 10 to 12 KB interstitial pages rather than the documents;
+`curl -L` with a browser user-agent returned the real PDFs at the correct sizes. The differing verdict was
+an artifact of the fetch, not a fact about the archive, and reporting it would have been wrong.
+
+**The gate's completeness predicate now branches on custody**, which the ruling requires: a witness must
+not be failed for lacking a checksum of bytes it is forbidden to keep. A bytes-held entry needs a
+held-bytes sha256; a witness needs a resolving archive URL and a recorded licence reason; an entry with
+neither is the failure case. Both directions are covered in the self-test.
+
+**JANAF cannot be converted as a data change, and that is the finding.** The 34 tables are not inert
+document witnesses like the six PDFs: they are `include_str!`d into the physics crate at 35 sites in
+`crates/physics/src/janaf.rs`. Deleting them is a compile error rather than a conversion, and they are
+load-bearing for the condensation and thermochemistry work. The legal nuance offers the path, since values
+are uncopyrightable facts and the compilation is what is restricted: replace the verbatim NIST files with a
+derived data file carrying only the numeric columns the loader consumes, cited to Chase 1998 with the
+statute noted. That is an engineering arc against a buildable tree with pins verified either side, because
+any transcription difference moves them. The cheaper route the statute itself names is a written permission
+request to NIST, which settles it with no code change. The entry is recorded in `sources/registry.toml`
+rather than in the JANAF manifest, precisely because that manifest is a compiled input and this branch
+cannot verify pins. It remains the one source the gate reports as restricted-but-held.
+
+**A hole the conversion exposed.** Removing the bytes broke three cross-references in the Gruneisen
+manifest, which reaches sibling directories' bytes by copying the record. The generator now emits a
+`holding` claim only when the bytes are present, so those corrected themselves and no entry claims
+a file that is gone. Underneath sat a real defect: **six documents are carried under two ids each**
+(identical sha256), and the AGU and MSA findings had landed on one id of each pair and not the other, so an
+identical copy read as un-reviewed. The gate now detects same-checksum-different-id and flags the pairs
+whose findings disagree; the three disagreeing pairs were closed, and the duplication itself is D8.
+
 ---
 
 ## 4. The repo-size policy (rule 4)
@@ -440,17 +485,14 @@ working tree is clean and the gate still fails, so the defect is entirely inheri
 textbook `deserialization` classification, but it is another agent's commit and classifying someone
 else's constructor is not this agent's call.
 
-**D6. What to do about the six restricted holdings, the JANAF tables, and the OCW licence conflict.** This
-is the ruling the licence review exists to inform, and it is legal rather than technical, so it is the
-owner's alone. The options per source are to hold as a `witness` (drop the bytes, keep the sha256 as a
-re-fetch receipt plus the archived URL and the extract, which loses nothing a reader needs), to seek
-permission (the JANAF statute expressly contemplates NIST "authoriz[ing] the reproduction and publication
-thereof by others", so a written request is a clean route for the 34 tables), or to accept the risk
-deliberately and record that as the decision. Two sub-questions ride along: `mit_ocw_12108` is CC BY-NC-SA
-inside an Apache-2.0 repo, which overclaims for that file and wants an isolated directory with its own
-licence note and a `NOTICE` entry; and `NOTICE` currently carries no third-party attributions at all
-despite ten vendored PDFs. Nothing has been removed by this agent, and the gate is already able to enforce
-whichever way the ruling goes.
+**D6. What remains after the ruling: JANAF and the OCW conflict.** The six restricted PDF holdings are
+DONE, converted to citation-plus-witness with byte-identical witnesses verified. Two items remain and both
+are yours. **JANAF**: the 34 tables cannot be converted as a data change (35 `include_str!` sites), so the
+options are a permission request to NIST under the route 15 USC 290e itself names, an engineering arc
+replacing the compilation with a derived numeric column cited to Chase 1998, or a deliberate accepted risk
+recorded as the decision. **`mit_ocw_12108`**: CC BY-NC-SA inside an Apache-2.0 repo overclaims for that
+file, and wants an isolated directory with its own licence note plus a `NOTICE` entry. `NOTICE` currently
+carries no third-party attributions at all, against four remaining vendored PDFs.
 
 **D7. The 89-file registry coverage hole.** Three directories vendor bulk data with per-row citations and
 no source-level record at all (`janaf` 34 files, `optical_constants_aesopus` 45, `oxide_thermochemistry`
@@ -460,3 +502,15 @@ collections and grandfathers them. The decision is whether each gets one collect
 entry (cheap, and it is where the JANAF licence problem would have surfaced years earlier) or stays
 row-cited by exception.
 
+**D8. Six documents are carried under two ids each.** Detected by identical sha256: three Gruneisen
+cross-references to sibling directories, and three shared between `convection_scaling` and
+`rayleigh_critical_eigenvalues`. The immediate consequence was real and is now closed (a licence finding on
+one id did not reach its twin, so an identical copy read as un-reviewed), and the gate flags any future
+recurrence. The remaining question is whether the cross-reference idiom should reference a single registry
+id rather than copy the record, which would make the duplication structurally impossible.
+
+**D9. Git history still contains the removed bytes.** The six PDFs are gone from HEAD, so a checkout no
+longer redistributes them, but they remain reachable in history. Removing them from history needs a rewrite
+(`git filter-repo`) that rewrites every commit hash and breaks every open branch and PR, including the
+concurrent lanes. That is destructive and coordination-heavy, so it is surfaced rather than attempted, with
+the honest note that "not in HEAD" is a weaker statement than "not in the repository".

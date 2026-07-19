@@ -79,7 +79,7 @@ licence = "American Mineralogist / Mineralogical Society of America, all rights 
 redistributable = false
 licence_evidence = "http://www.minsocam.org/"
 reviewed = "2026-07-18"
-remediation = "Hold as a witness: drop the bytes, keep the sha256 as a re-fetch receipt plus the archived URL and the extract."
+remediation = "CONVERTED 2026-07-18 under the owner ruling: bytes removed from the repo, entry now citation-plus-witness. The Wayback witness was re-fetched and hashed and is BYTE-IDENTICAL to the retained sha256 receipt, so the provenance is unbroken and nothing was lost with the bytes."
 
 [[licence]]
 id = "jackson_1999_enstatite"
@@ -89,7 +89,7 @@ licence_evidence = "http://www.minsocam.org/"
 free_route = "http://www.minsocam.org/msa/ammin/toc/Articles_Free/1999/Jackson_p677-680_99.pdf"
 free_route_kind = "publisher-open"
 reviewed = "2026-07-18"
-remediation = "A free route exists at MSA's own sanctioned archive, which is a better fetch target than the Caltech author copy currently recorded. Free to read does not grant redistribution, so this stays a witness rather than a holding."
+remediation = "CONVERTED 2026-07-18 under the owner ruling: bytes removed from the repo, entry now citation-plus-witness. The Wayback witness was re-fetched and hashed and is BYTE-IDENTICAL to the retained sha256 receipt, so the provenance is unbroken and nothing was lost with the bytes. A capture had to be REQUESTED (none existed) and now resolves. MSA's own sanctioned archive is carried as a second witness."
 
 [[licence]]
 id = "speziale_2004"
@@ -97,7 +97,7 @@ licence = "AGU / Wiley, Version of Record. AGU: This permission does not extend 
 redistributable = false
 licence_evidence = "https://www.agu.org/publications/authors/policies"
 reviewed = "2026-07-18"
-remediation = "Hold as a witness."
+remediation = "CONVERTED 2026-07-18 under the owner ruling: bytes removed from the repo, entry now citation-plus-witness. The Wayback witness was re-fetched and hashed and is BYTE-IDENTICAL to the retained sha256 receipt, so the provenance is unbroken and nothing was lost with the bytes."
 
 [[licence]]
 id = "zha_1996"
@@ -105,7 +105,7 @@ licence = "AGU / Wiley, Version of Record. Same AGU term as speziale_2004."
 redistributable = false
 licence_evidence = "https://www.agu.org/publications/authors/policies"
 reviewed = "2026-07-18"
-remediation = "Hold as a witness. Note this source is ALSO cross-referenced by the gruneisen manifest, so a remediation must update both records together."
+remediation = "CONVERTED 2026-07-18 under the owner ruling: bytes removed from the repo, entry now citation-plus-witness. The Wayback witness was re-fetched and hashed and is BYTE-IDENTICAL to the retained sha256 receipt, so the provenance is unbroken and nothing was lost with the bytes. NOTE: also cross-referenced by the gruneisen manifest, whose twin entry carries the same finding."
 
 [[licence]]
 id = "yoneda_1990"
@@ -113,7 +113,7 @@ licence = "J-STAGE, approval required for reprinting, duplication and public tra
 redistributable = false
 licence_evidence = "https://www.jstage.jst.go.jp/"
 reviewed = "2026-07-18"
-remediation = "Hold as a witness."
+remediation = "CONVERTED 2026-07-18 under the owner ruling: bytes removed from the repo, entry now citation-plus-witness. The Wayback witness was re-fetched and hashed and is BYTE-IDENTICAL to the retained sha256 receipt, so the provenance is unbroken and nothing was lost with the bytes."
 
 [[licence]]
 id = "heyliger_2003_quartz"
@@ -121,7 +121,7 @@ licence = "Copyright 2003 Acoustical Society of America (the notice appears twic
 redistributable = false
 licence_evidence = "https://pubs.aip.org/asa/jasa"
 reviewed = "2026-07-18"
-remediation = "Hold as a witness. This entry corrects an earlier assumption that both authors were NIST staff; the affiliation was checked in the held PDF."
+remediation = "CONVERTED 2026-07-18 under the owner ruling: bytes removed from the repo, entry now citation-plus-witness. The Wayback witness was re-fetched and hashed and is BYTE-IDENTICAL to the retained sha256 receipt, so the provenance is unbroken and nothing was lost with the bytes. This entry also corrects an earlier assumption that both authors were NIST staff."
 
 # =====================================================================================================
 # A SHADOW-LIBRARY SOURCE. No bytes were ever committed (verified: zero .djvu tracked), so there is
@@ -136,3 +136,35 @@ redistributable = false
 licence_evidence = "https://www.geokniga.org/geowiki/geokniga"
 reviewed = "2026-07-18"
 remediation = "No bytes are tracked in the repo (verified), so no removal is required. The defect is a PROVENANCE WORDING error: the gruneisen manifest describes the fetch as 'the open GeoKniga DjVu', and labelling a shadow library open is a false provenance claim that a future reader would rely on. Correcting that sentence is a one-line fix in a file this lane does not own. No free legitimate route to this chapter was found."
+
+# =====================================================================================================
+# THE CROSS-REFERENCE TWINS. The gruneisen manifest reaches three sibling directories' bytes by COPYING
+# the record (its `dir` idiom), so the same document appears under two ids. The gate's duplicate-document
+# check caught that the AGU and MSA findings had landed on one id of each pair and not the other, which
+# would have let an identical copy read as un-reviewed. Same document, same finding, recorded on both.
+# The underlying duplication is a consolidation follow-on (plan D8): one document should carry one id.
+# =====================================================================================================
+
+[[licence]]
+id = "gruneisen.zha_1996_forsterite"
+licence = "AGU / Wiley, Version of Record. Identical bytes to `zha_1996` (same sha256); see that entry."
+redistributable = false
+licence_evidence = "https://www.agu.org/publications/authors/policies"
+reviewed = "2026-07-18"
+remediation = "Bytes removed with the zha_1996 conversion; this cross-reference now resolves to the same citation-plus-witness record. Deduplicate the two ids when the cross-reference idiom is reworked."
+
+[[licence]]
+id = "gruneisen.fan_2019_periclase"
+licence = "American Mineralogist / Mineralogical Society of America, all rights reserved. Identical bytes to `fan_2019` (same sha256); see that entry."
+redistributable = false
+licence_evidence = "http://www.minsocam.org/"
+reviewed = "2026-07-18"
+remediation = "Bytes removed with the fan_2019 conversion; this cross-reference now resolves to the same citation-plus-witness record. Deduplicate the two ids when the cross-reference idiom is reworked."
+
+[[licence]]
+id = "gruneisen.speziale_2004_fayalite"
+licence = "AGU / Wiley, Version of Record. Identical bytes to `speziale_2004` (same sha256); see that entry."
+redistributable = false
+licence_evidence = "https://www.agu.org/publications/authors/policies"
+reviewed = "2026-07-18"
+remediation = "Bytes removed with the speziale_2004 conversion; this cross-reference now resolves to the same citation-plus-witness record. Deduplicate the two ids when the cross-reference idiom is reworked."

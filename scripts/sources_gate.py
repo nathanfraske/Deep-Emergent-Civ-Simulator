@@ -80,7 +80,7 @@ BASELINE = ROOT / "scripts" / "sources_baseline.tsv"
 MARKER_SCAN_ROOTS = ["crates"]
 MANIFEST_GLOB = "crates/*/data/*/manifest.toml"
 
-CHECKS = ["sha256", "archive", "scope", "slim", "licence", "secondary"]
+CHECKS = ["sha256", "witness-receipt", "licence-reason", "archive", "scope", "slim", "licence", "secondary"]
 
 CLASSIFICATIONS = {
     "sha256-unreviewed",
@@ -89,6 +89,8 @@ CLASSIFICATIONS = {
     "slim-unreviewed",
     "licence-unreviewed",
     "secondary-unreviewed",
+    "witness-receipt-unreviewed",
+    "licence-reason-unreviewed",
 }
 
 
@@ -121,10 +123,33 @@ def infer_custody(block):
 
 
 def check_source(block, custody):
-    """Every failing check name for one source entry. Pure, so the self-test can drive it directly."""
+    """Every failing check name for one source entry. Pure, so the self-test can drive it directly.
+
+    THE COMPLETENESS PREDICATE BRANCHES ON CUSTODY (owner ruling, 2026-07-18). A source with a public link
+    and no redistribution licence is held as CITATION PLUS WITNESS: the citation, the licence finding, the
+    public URL, the Wayback witness, the scope, and a checksum where one can be computed without
+    redistributing. It does not hold the bytes, and it must not be failed for lacking a checksum OF bytes
+    it is forbidden to keep. That would punish the entry for obeying the rule.
+
+    So the receipt requirement splits:
+      bytes-held (in_repo, external): a sha256 OF THE HELD BYTES, which is what makes the holding verifiable
+                                     offline with no network.
+      witness:                       a RESOLVING archive URL and a recorded licence reason. The sha256 is
+                                     kept when it can be computed (it stays a valid re-fetch receipt), but
+                                     its absence is not the failure.
+      neither:                       the failure case. An entry with no held checksum AND no archive
+                                     witness is a claim with nothing behind it.
+    """
     failures = []
 
-    if not block.get("sha256"):
+    if custody == "witness":
+        # The witness IS the receipt here. A witness with no retrievable archive and no checksum is the
+        # "entry with neither" case the ruling names as the failure.
+        if not archive_of(block) and not block.get("sha256"):
+            failures.append("witness-receipt")
+        if not str(block.get("licence", "")).strip():
+            failures.append("licence-reason")
+    elif not block.get("sha256"):
         failures.append("sha256")
 
     if not archive_of(block) and not str(block.get("archive_pending", "")).strip():
@@ -286,6 +311,34 @@ def load_entries(read_toml_fn):
                 if key != "id":
                     target[key] = value
     return entries, problems
+
+
+def check_duplicate_documents(entries):
+    """The SAME document carried under two ids, detected by identical sha256.
+
+    WHY THIS IS NOT COSMETIC. The per-directory manifests cross-reference a sibling's bytes by COPYING the
+    record (the gruneisen manifest's `dir` idiom), so one document can appear as `zha_1996` and again as
+    `gruneisen.zha_1996_forsterite`. A licence finding recorded against one id then does not reach the
+    other, and that is exactly what happened here: the AGU finding landed on `zha_1996` while its twin
+    carried nothing. A registry whose facts do not propagate to every copy of the same document will report
+    a source as cleared while an identical copy of it sits un-cleared.
+
+    Returns [(sha256, [ids], findings_disagree)] so the caller can report the disagreeing ones loudest.
+    """
+    by_sha = {}
+    for sid, block in entries:
+        sha = block.get("sha256")
+        if sha and len(str(sha)) == 64:
+            by_sha.setdefault(sha, []).append((sid, block))
+    out = []
+    for sha, group in sorted(by_sha.items()):
+        if len(group) < 2:
+            continue
+        findings = {b.get("redistributable") for _, b in group}
+        licences = {bool(str(b.get("licence", "")).strip()) for _, b in group}
+        disagree = len(findings) > 1 or len(licences) > 1
+        out.append((sha, [sid for sid, _ in group], disagree))
+    return out
 
 
 def check_collection_coverage(tracked_data_files):
@@ -506,6 +559,37 @@ def self_test():
         "an explicitly non-redistributable byte-holding must convict"
     )
 
+    # THE CUSTODY BRANCH (owner ruling). A witness must NOT be failed for lacking a held-bytes checksum,
+    # and must be failed when it has neither a checksum nor an archive.
+    wit_ok = {
+        "id": "w",
+        "archived_url": "https://web.archive.org/web/x",
+        "scope": "300 K",
+        "extract": "the passage",
+        "licence": "all rights reserved; free to read only",
+    }
+    assert check_source(wit_ok, "witness") == [], (
+        "a citation-plus-witness entry with an archive and a licence reason must PASS with no held sha256"
+    )
+    naked = {k: v for k, v in wit_ok.items() if k != "archived_url"}
+    got = check_source(naked, "witness")
+    assert "witness-receipt" in got and "archive" in got, (
+        f"a witness with neither checksum nor archive is the failure case, got {got}"
+    )
+    with_sha = dict(naked)
+    with_sha["sha256"] = "e" * 64
+    assert "witness-receipt" not in check_source(with_sha, "witness"), (
+        "a witness carrying a re-fetch receipt satisfies the receipt requirement"
+    )
+    no_reason = {k: v for k, v in wit_ok.items() if k != "licence"}
+    assert "licence-reason" in check_source(no_reason, "witness"), (
+        "a witness must record WHY it holds no bytes"
+    )
+    # A bytes-held entry still needs its held-bytes checksum: the branch must not weaken that side.
+    assert "sha256" in check_source(without("sha256"), "in_repo"), (
+        "the custody branch must not excuse a byte-holding from its own receipt"
+    )
+
     # A witness needs an extract as its slim record.
     witness = {k: v for k, v in ok_block.items() if k not in ("slim", "holding")}
     assert check_source(witness, "witness") == ["slim"], "a witness with no extract must convict"
@@ -657,6 +741,17 @@ def main():
         )
         for sid in stale[:25]:
             print(f"  {sid}", file=sys.stderr)
+
+    dupes = check_duplicate_documents(entries)
+    disagreeing = [(s, ids) for s, ids, dis in dupes if dis]
+    if dupes:
+        print(
+            f"sources gate: NOTICE. {len(dupes)} document(s) are carried under more than one id "
+            "(identical sha256), so a licence finding on one id does not reach its twin:"
+        )
+        for sha, ids, dis in dupes:
+            flag = "  <-- LICENCE FINDINGS DISAGREE" if dis else ""
+            print(f"  {' == '.join(ids)}{flag}")
 
     if held_but_restricted:
         print(

@@ -8,6 +8,10 @@
 [[source]]
 file = "yoneda_1990_jpe_MgO_MgAl2O4.pdf"
 sha256 = "5917f2fd5d545c4385083c8efb3c6ef47492d9020760b0264b9d630e8a6cc54f"
+custody = "witness"
+archived_url = "https://web.archive.org/web/20240414161313/https://www.jstage.jst.go.jp/article/jpe1952/38/1/38_1_19/_pdf"
+witness_verified = "Wayback capture re-fetched 2026-07-18 and hashed: 3388883 bytes, sha256 BYTE-IDENTICAL to the receipt below."
+witness_note = "CONVERTED TO CITATION-PLUS-WITNESS on 2026-07-18 under the owner's ruling: a source with a public link and no redistribution licence is held as citation plus Wayback witness plus the full provenance record, and its bytes are NOT vendored into the repo. The sha256 below is retained as the RE-FETCH RECEIPT: it still verifies against the archived copy, so the provenance is unbroken. See sources/licences.toml for the licence finding and docs/working/FETCH_PIPELINE_PLAN.md section 3."
 citation = "Yoneda, A., 1990, Pressure derivatives of elastic constants of single crystal MgO and MgAl2O4, J. Phys. Earth 38(1), 19-55, DOI 10.4294/jpe1952.38.19"
 recipe = "GET https://www.jstage.jst.go.jp/article/jpe1952/38/1/38_1_19/_pdf (J-STAGE, open)"
 pages = 37

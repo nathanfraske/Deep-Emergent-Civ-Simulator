@@ -16,6 +16,10 @@
 [[source]]
 file = "jackson_sinogeikin_bass_ammin_1999.pdf"
 sha256 = "c6d79b4308d5a60907abea677787faa262c17a7279a15438a4eb9c0f0d816925"
+custody = "witness"
+archived_url = "https://web.archive.org/web/20260719011603/https://web.gps.caltech.edu/users/jackson/pdf/Jackson_AmMin99_84_677.pdf"
+witness_verified = "No capture existed, so one was REQUESTED from the Wayback save endpoint on 2026-07-18, then re-fetched and hashed: sha256 BYTE-IDENTICAL to the receipt below. MSA's own sanctioned free archive is a second witness at https://web.archive.org/web/20240517171654/http://www.minsocam.org/msa/AmMin/toc/Articles_Free/1999/Jackson_p677-680_99.pdf (a different production of the same article, 31653 bytes, so a different hash by design)."
+witness_note = "CONVERTED TO CITATION-PLUS-WITNESS on 2026-07-18 under the owner's ruling: a source with a public link and no redistribution licence is held as citation plus Wayback witness plus the full provenance record, and its bytes are NOT vendored into the repo. The sha256 below is retained as the RE-FETCH RECEIPT: it still verifies against the archived copy, so the provenance is unbroken. See sources/licences.toml for the licence finding and docs/working/FETCH_PIPELINE_PLAN.md section 3."
 citation = "Jackson, J.M., Sinogeikin, S.V., and Bass, J.D., 1999, Elasticity of MgSiO3 orthoenstatite, American Mineralogist 84(4), 677-680"
 recipe = "GET https://web.gps.caltech.edu/users/jackson/pdf/Jackson_AmMin99_84_677.pdf (open). The Caltech host ships an incomplete TLS chain (missing intermediate); completed at fetch with the InCommon RSA Server CA 2 intermediate from http://crt.sectigo.com/InCommonRSAServerCA2.crt (which chains to a system root), so the download verified against a full chain rather than -k insecure. legacy md5 = 805436556322ce0004f1dd6b8ae93141"
 pages = 4

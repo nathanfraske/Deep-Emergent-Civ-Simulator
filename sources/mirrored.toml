@@ -33,7 +33,6 @@ recipe = "GET https://earthquake.usgs.gov/static/lfs/research/rockphysics/Fricti
 [[source]]
 id = "convection_scaling.bodenschatz_pesch_ahlers_2000"
 mirrors = "crates/physics/data/convection_scaling/manifest.toml"
-holding = "crates/physics/data/convection_scaling/bodenschatz_pesch_ahlers_2000_arfm.pdf"
 citation = "Bodenschatz, E., Pesch, W., Ahlers, G. (2000), Recent developments in Rayleigh-Benard convection, Annu. Rev. Fluid Mech. 32, 709-778."
 url = "https://courses.physics.ucsd.edu/2018/Winter/physics116_216/Convection-Recent%20Results-Bodenschatz_W17.pdf"
 archived_url = "http://web.archive.org/web/20260718143440/https://courses.physics.ucsd.edu/2018/Winter/physics116_216/Convection-Recent%20Results-Bodenschatz_W17.pdf"
@@ -46,7 +45,6 @@ anchor = "Rc = 1708 and ac = 3.117 stated as the critical Rayleigh and wavenumbe
 [[source]]
 id = "convection_scaling.foley_bercovici_2014"
 mirrors = "crates/physics/data/convection_scaling/manifest.toml"
-holding = "crates/physics/data/convection_scaling/foley_bercovici_2014_arxiv_1410.7652.pdf"
 citation = "Foley, B.J., Bercovici, D. (2014), Scaling laws for convection with temperature-dependent viscosity and grain-damage, Geophys. J. Int. 199, 580-603. arXiv:1410.7652."
 url = "https://arxiv.org/pdf/1410.7652"
 archived_url = "http://web.archive.org/web/20260718143703/https://arxiv.org/pdf/1410.7652"
@@ -59,7 +57,6 @@ anchor = "Nusselt prefactor C1 of order 0.1 and boundary-layer thickness prefact
 [[source]]
 id = "convection_scaling.glomski_johnson_2012"
 mirrors = "crates/physics/data/convection_scaling/manifest.toml"
-holding = "crates/physics/data/convection_scaling/glomski_johnson_2012_ams.pdf"
 citation = "Glomski, M., Johnson, M.A. (2012), A precise calculation of the critical Rayleigh number and wave number for the rigid-free Rayleigh-Benard problem, Appl. Math. Sci. 6(101-104), 5097-5108."
 url = "https://www.m-hikari.com/ams/ams-2012/ams-101-104-2012/glomskiAMS101-104-2012.pdf"
 archived_url = "http://web.archive.org/web/20260718143711/https://www.m-hikari.com/ams/ams-2012/ams-101-104-2012/glomskiAMS101-104-2012.pdf"
@@ -72,7 +69,6 @@ anchor = "Theorem 4.1: Rc = 1100.6496068877..., kc = 2.6823217577...; Table 1 li
 [[source]]
 id = "convection_scaling.komacek_abbot_2016"
 mirrors = "crates/physics/data/convection_scaling/manifest.toml"
-holding = "crates/physics/data/convection_scaling/komacek_abbot_2016_arxiv_1609.04786.pdf"
 citation = "Komacek, T.D., Abbot, D.S. (2016), Effect of surface-mantle water exchange parameterizations on exoplanet ocean depths, ApJ 832, 54. arXiv:1609.04786."
 url = "https://arxiv.org/pdf/1609.04786"
 archived_url = "http://web.archive.org/web/20260718143618/https://arxiv.org/pdf/1609.04786"
@@ -85,7 +81,6 @@ anchor = "eqs. 3-7: local boundary-layer Rayleigh number set to Racrit (~1100) a
 [[source]]
 id = "convection_scaling.ricard_geodynamics_notes"
 mirrors = "crates/physics/data/convection_scaling/manifest.toml"
-holding = "crates/physics/data/convection_scaling/ricard_geodynamics_convection_notes.pdf"
 citation = "Ricard, Y., Physics of mantle convection, course notes, ENS de Lyon (section 4.5, linear stability for basally heated convection)."
 url = "https://perso.ens-lyon.fr/yanick.ricard/note-convection"
 archived_url = "http://web.archive.org/web/20260718143529/https://perso.ens-lyon.fr/yanick.ricard/note-convection"
@@ -98,8 +93,10 @@ anchor = "k = pi/sqrt(2), Rac = (27/4) pi^4 ~ 657 for free-slip boundaries; conv
 [[source]]
 id = "fan_2019"
 mirrors = "crates/physics/data/fan_2019/manifest.toml"
-holding = "crates/physics/data/fan_2019/FanPericlaseHighPTElasticityAM2019.pdf"
+custody = "witness"
+witness_verified = "Wayback capture re-fetched 2026-07-18 and hashed: 3348584 bytes, sha256 BYTE-IDENTICAL to the receipt below. The public witness holds exactly the bytes this entry used to hold, so converting to witness form loses nothing."
 citation = "Fan, D., Fu, S., Yang, J., Tkachev, S.N., Prakapenka, V.B., and Lin, J.-F., 2019, Elasticity of single-crystal periclase at high pressure and temperature: The effect of iron on the elasticity and seismic parameters of ferropericlase in the lower mantle, American Mineralogist 104, 262-275, DOI 10.2138/am-2019-6656"
+archived_url = "https://web.archive.org/web/20260312222426/https://www.jsg.utexas.edu/lin/files/FanPericlaseHighPTElasticityAM2019.pdf"
 sha256 = "560b5f8c9f94e6275c19f8038859c84ddff672c64da11874c7b180ea13de6ee3"
 pages = 14
 recipe = "GET https://www.jsg.utexas.edu/lin/files/FanPericlaseHighPTElasticityAM2019.pdf (open)"
@@ -107,7 +104,6 @@ recipe = "GET https://www.jsg.utexas.edu/lin/files/FanPericlaseHighPTElasticityA
 [[source]]
 id = "gruneisen.ahrens_1995_handbook"
 mirrors = "crates/physics/data/gruneisen/manifest.toml"
-holding = "crates/physics/data/gruneisen/ahrens_1995_mineral_physics_handbook.djvu"
 citation = "Anderson, O.L. & Isaak, D.G., 1995, Elastic Constants of Mantle Minerals at High Temperature, pp. 64-97 in Ahrens, T.J. (ed.), Mineral Physics and Crystallography: A Handbook of Physical Constants, AGU Reference Shelf 2, American Geophysical Union, ISBN 0-87590-852-7."
 url = "https://www.geokniga.org/bookfiles/geokniga-mineral-physics-and-crystallography-1995.djvu"
 archived_url = "https://web.archive.org/web/20251113015459/https://www.geokniga.org/bookfiles/geokniga-mineral-physics-and-crystallography-1995.djvu"
@@ -120,7 +116,6 @@ anchor = "Tables 15-20 (thermal expansivity, specific heat, isotropic moduli), 3
 [[source]]
 id = "gruneisen.angel_etal_1997_quartz"
 mirrors = "crates/physics/data/gruneisen/manifest.toml"
-holding = "crates/physics/data/gruneisen/angel_etal_1997_quartz_jac.pdf"
 citation = "Angel, R.J., Allan, D.R., Miletich, R. & Finger, L.W., 1997, The Use of Quartz as an Internal Pressure Standard in High-Pressure Crystallography, J. Appl. Cryst. 30, 461-466, DOI 10.1107/S0021889897000861."
 url = "https://www.rossangel.com/Download/1997_Angel_etal_quartz.pdf"
 archived_url = "https://web.archive.org/web/20240221175127/http://www.rossangel.com/Download/1997_Angel_etal_quartz.pdf"
@@ -133,7 +128,6 @@ anchor = "Abstract and text: 'KT0 = 37.12(9) GPa and K' = 5.99(4)' for alpha-qua
 [[source]]
 id = "gruneisen.fan_2019_periclase"
 mirrors = "crates/physics/data/gruneisen/manifest.toml"
-holding = "crates/physics/data/fan_2019/FanPericlaseHighPTElasticityAM2019.pdf"
 citation = "Fan, D., Fu, S., Yang, J., Tkachev, S.N., Prakapenka, V.B. & Lin, J.-F., 2019, Elasticity of single-crystal periclase at high pressure and temperature, American Mineralogist 104, 262-275, DOI 10.2138/am-2019-6656."
 sha256 = "560b5f8c9f94e6275c19f8038859c84ddff672c64da11874c7b180ea13de6ee3"
 bytes = 3348584
@@ -144,7 +138,6 @@ anchor = "Table 2 (This study, BLS): (dK_S/dP)_300K = 3.94(5); dual-channel Yone
 [[source]]
 id = "gruneisen.speziale_2004_fayalite"
 mirrors = "crates/physics/data/gruneisen/manifest.toml"
-holding = "crates/physics/data/speziale_2004/speziale_jgr_04.pdf"
 citation = "Speziale, S., Duffy, T.S. & Angel, R.J., 2004, Single-crystal elasticity of fayalite to 12 GPa, JGR 109, B12202, DOI 10.1029/2004JB003162."
 sha256 = "729d9ecac7fa4563634ca3dc9e5b4ab7a494e2af79fdd3a4266ac0093e602b0c"
 bytes = 756757
@@ -155,7 +148,6 @@ anchor = "Table 5 (This study Hill aggregate): (dK_S/dP)_T0 = 4.85(5), (dK_T/dP)
 [[source]]
 id = "gruneisen.stixrude_lithgow_bertelloni_2005"
 mirrors = "crates/physics/data/gruneisen/manifest.toml"
-holding = "crates/physics/data/gruneisen/stixrude_lithgow-bertelloni_gji_2005.pdf"
 citation = "Stixrude, L. & Lithgow-Bertelloni, C., 2005, Thermodynamics of mantle minerals - I. Physical properties, Geophysical Journal International 162(2), 610-632, DOI 10.1111/j.1365-246X.2005.02642.x."
 url = "https://www.perplex.ethz.ch/thermo_course/chapter_5/stixrude_GJI_05.pdf"
 archived_url = "https://web.archive.org/web/20260718151531/https://www.perplex.ethz.ch/thermo_course/chapter_5/stixrude_GJI_05.pdf"
@@ -168,7 +160,6 @@ anchor = "Table 1 'Properties of mantle species', columns gamma_0 (= -dln theta/
 [[source]]
 id = "gruneisen.zha_1996_forsterite"
 mirrors = "crates/physics/data/gruneisen/manifest.toml"
-holding = "crates/physics/data/zha_1996/zha_etal_jgr_1996.pdf"
 citation = "Zha, C.-S., Duffy, T.S., Downs, R.T., Mao, H.-K. & Hemley, R.J., 1996, Sound velocity and elasticity of single-crystal forsterite to 16 GPa, JGR 101(B8), 17535-17545, DOI 10.1029/96JB01266."
 sha256 = "3f2a66fb1dca0204b41faf792ddd31d2e1e38e5e2e640e646d2bf757678043f4"
 bytes = 326494
@@ -179,8 +170,10 @@ anchor = "Abstract 'Ks(GPa) = 128.8(5) + 4.2(2)P': K_S' = 4.2(2) (adiabatic, fro
 [[source]]
 id = "heyliger_2003_quartz"
 mirrors = "crates/physics/data/heyliger_2003_quartz/manifest.toml"
-holding = "crates/physics/data/heyliger_2003_quartz/heyliger_quartz_jasa2003.pdf"
+custody = "witness"
+witness_verified = "Wayback capture re-fetched 2026-07-18 and hashed: 164700 bytes, sha256 BYTE-IDENTICAL to the receipt below."
 citation = "Heyliger, P., Ledbetter, H., and Kim, S., 2003, Elastic constants of natural quartz, J. Acoust. Soc. Am. 114(2), 644-650, DOI 10.1121/1.1593063"
+archived_url = "https://web.archive.org/web/20250325200634/https://tsapps.nist.gov/publication/get_pdf.cfm?pub_id=851249"
 sha256 = "eca2dffeb19ab4deb90be9e8f3056081bea6ed41914b15a06829dd5d597cdfcd"
 pages = 7
 recipe = "GET https://tsapps.nist.gov/publication/get_pdf.cfm?pub_id=851249 (NIST tsapps, open)"
@@ -188,8 +181,10 @@ recipe = "GET https://tsapps.nist.gov/publication/get_pdf.cfm?pub_id=851249 (NIS
 [[source]]
 id = "jackson_1999_enstatite"
 mirrors = "crates/physics/data/jackson_1999_enstatite/manifest.toml"
-holding = "crates/physics/data/jackson_1999_enstatite/jackson_sinogeikin_bass_ammin_1999.pdf"
+custody = "witness"
+witness_verified = "No capture existed, so one was REQUESTED from the Wayback save endpoint on 2026-07-18, then re-fetched and hashed: sha256 BYTE-IDENTICAL to the receipt below. MSA's own sanctioned free archive is a second witness at https://web.archive.org/web/20240517171654/http://www.minsocam.org/msa/AmMin/toc/Articles_Free/1999/Jackson_p677-680_99.pdf (a different production of the same article, 31653 bytes, so a different hash by design)."
 citation = "Jackson, J.M., Sinogeikin, S.V., and Bass, J.D., 1999, Elasticity of MgSiO3 orthoenstatite, American Mineralogist 84(4), 677-680"
+archived_url = "https://web.archive.org/web/20260719011603/https://web.gps.caltech.edu/users/jackson/pdf/Jackson_AmMin99_84_677.pdf"
 sha256 = "c6d79b4308d5a60907abea677787faa262c17a7279a15438a4eb9c0f0d816925"
 pages = 4
 recipe = "GET https://web.gps.caltech.edu/users/jackson/pdf/Jackson_AmMin99_84_677.pdf (open). The Caltech host ships an incomplete TLS chain (missing intermediate); completed at fetch with the InCommon RSA Server CA 2 intermediate from http://crt.sectigo.com/InCommonRSAServerCA2.crt (which chains to a system root), so the download verified against a full chain rather than -k insecure. legacy md5 = 805436556322ce0004f1dd6b8ae93141"
@@ -206,7 +201,6 @@ recipe = "GET https://ocw.mit.edu/courses/12-108-structure-of-earth-materials-fa
 [[source]]
 id = "rayleigh_critical_eigenvalues.bodenschatz_pesch_ahlers_2000"
 mirrors = "crates/physics/data/rayleigh_critical_eigenvalues/manifest.toml"
-holding = "crates/physics/data/convection_scaling/bodenschatz_pesch_ahlers_2000_arfm.pdf"
 citation = "Bodenschatz, E., Pesch, W. & Ahlers, G. (2000), Recent developments in Rayleigh-Benard convection, Annu. Rev. Fluid Mech. 32, 709-778."
 url = "https://courses.physics.ucsd.edu/2018/Winter/physics116_216/Convection-Recent%20Results-Bodenschatz_W17.pdf"
 archived_url = "http://web.archive.org/web/20260718143440/https://courses.physics.ucsd.edu/2018/Winter/physics116_216/Convection-Recent%20Results-Bodenschatz_W17.pdf"
@@ -220,7 +214,6 @@ anchor = "Rc = 1708 and ac = 3.117 for the rigid-rigid critical Rayleigh and wav
 [[source]]
 id = "rayleigh_critical_eigenvalues.glomski_johnson_2012"
 mirrors = "crates/physics/data/rayleigh_critical_eigenvalues/manifest.toml"
-holding = "crates/physics/data/convection_scaling/glomski_johnson_2012_ams.pdf"
 citation = "Glomski, M. & Johnson, M.A. (2012), A precise calculation of the critical Rayleigh number and wave number for the rigid-free Rayleigh-Benard problem, Appl. Math. Sci. 6(101-104), 5097-5108."
 url = "https://www.m-hikari.com/ams/ams-2012/ams-101-104-2012/glomskiAMS101-104-2012.pdf"
 archived_url = "http://web.archive.org/web/20260718143711/https://www.m-hikari.com/ams/ams-2012/ams-101-104-2012/glomskiAMS101-104-2012.pdf"
@@ -234,7 +227,6 @@ anchor = "Theorem 4.1: Rc = 1100.64960688767678462749188884727119575067105545241
 [[source]]
 id = "rayleigh_critical_eigenvalues.goluskin_2016_internally_heated"
 mirrors = "crates/physics/data/rayleigh_critical_eigenvalues/manifest.toml"
-holding = "crates/physics/data/rayleigh_critical_eigenvalues/goluskin_2016_internally_heated_arxiv_1506.01656.pdf"
 citation = "Goluskin, D. (2016), Internally Heated Convection and Rayleigh-Benard Convection, SpringerBriefs in Applied Sciences and Technology, Springer (arXiv:1506.01656v2)."
 url = "https://arxiv.org/pdf/1506.01656"
 archived_url = "https://web.archive.org/web/20240604023559/https://arxiv.org/pdf/1506.01656"
@@ -248,7 +240,6 @@ anchor = "Eq. 1.5 Delta:=d^2*H/kappa (IH temperature scale), eq. 1.10 R:=g*alpha
 [[source]]
 id = "rayleigh_critical_eigenvalues.ricard_geodynamics_notes"
 mirrors = "crates/physics/data/rayleigh_critical_eigenvalues/manifest.toml"
-holding = "crates/physics/data/convection_scaling/ricard_geodynamics_convection_notes.pdf"
 citation = "Ricard, Y., Physics of mantle convection, course notes, ENS de Lyon (linear stability for basally heated convection)."
 url = "https://perso.ens-lyon.fr/yanick.ricard/note-convection"
 archived_url = "http://web.archive.org/web/20260718143529/https://perso.ens-lyon.fr/yanick.ricard/note-convection"
@@ -262,7 +253,6 @@ anchor = "Rac = (27/4)*pi^4 ~ 657 with k = pi/sqrt(2) for free-slip boundaries (
 [[source]]
 id = "rayleigh_critical_eigenvalues.sturtz_etal_2021_magma_ocean"
 mirrors = "crates/physics/data/rayleigh_critical_eigenvalues/manifest.toml"
-holding = "crates/physics/data/rayleigh_critical_eigenvalues/sturtz_etal_2021_magma_ocean_arxiv_2108.00910.pdf"
 citation = "Sturtz, C., Limare, A., Tait, S. & Kaminski, E. (2021), Birth and decline of magma oceans. Part 1, submitted to J. Geophys. Res. Planets (arXiv:2108.00910v1)."
 url = "https://arxiv.org/pdf/2108.00910"
 archived_url = "https://web.archive.org/web/20260718181250/https://arxiv.org/pdf/2108.00910"
@@ -286,8 +276,10 @@ recipe = "GET https://pubs.usgs.gov/bul/2131/report.pdf (open, U.S. Geological S
 [[source]]
 id = "speziale_2004"
 mirrors = "crates/physics/data/speziale_2004/manifest.toml"
-holding = "crates/physics/data/speziale_2004/speziale_jgr_04.pdf"
+custody = "witness"
+witness_verified = "Wayback capture re-fetched 2026-07-18 and hashed: 756757 bytes, sha256 BYTE-IDENTICAL to the receipt below."
 citation = "Speziale, S., Duffy, T.S., and Angel, R.J., 2004, Single-crystal elasticity of fayalite to 12 GPa, J. Geophys. Res. 109, B12202, DOI 10.1029/2004JB003162"
+archived_url = "https://web.archive.org/web/20240722035045/https://duffy.princeton.edu/sites/g/files/toruqf616/files/speziale_jgr_04.pdf"
 sha256 = "729d9ecac7fa4563634ca3dc9e5b4ab7a494e2af79fdd3a4266ac0093e602b0c"
 pages = 15
 recipe = "GET https://duffy.princeton.edu/sites/g/files/toruqf616/files/speziale_jgr_04.pdf (open)"
@@ -304,8 +296,10 @@ recipe = "GET https://nvlpubs.nist.gov/nistpubs/jres/64A/jresv64An3p213_A1b.pdf 
 [[source]]
 id = "yoneda_1990"
 mirrors = "crates/physics/data/yoneda_1990/manifest.toml"
-holding = "crates/physics/data/yoneda_1990/yoneda_1990_jpe_MgO_MgAl2O4.pdf"
+custody = "witness"
+witness_verified = "Wayback capture re-fetched 2026-07-18 and hashed: 3388883 bytes, sha256 BYTE-IDENTICAL to the receipt below."
 citation = "Yoneda, A., 1990, Pressure derivatives of elastic constants of single crystal MgO and MgAl2O4, J. Phys. Earth 38(1), 19-55, DOI 10.4294/jpe1952.38.19"
+archived_url = "https://web.archive.org/web/20240414161313/https://www.jstage.jst.go.jp/article/jpe1952/38/1/38_1_19/_pdf"
 sha256 = "5917f2fd5d545c4385083c8efb3c6ef47492d9020760b0264b9d630e8a6cc54f"
 pages = 37
 recipe = "GET https://www.jstage.jst.go.jp/article/jpe1952/38/1/38_1_19/_pdf (J-STAGE, open)"
@@ -313,8 +307,10 @@ recipe = "GET https://www.jstage.jst.go.jp/article/jpe1952/38/1/38_1_19/_pdf (J-
 [[source]]
 id = "zha_1996"
 mirrors = "crates/physics/data/zha_1996/manifest.toml"
-holding = "crates/physics/data/zha_1996/zha_etal_jgr_1996.pdf"
+custody = "witness"
+witness_verified = "Wayback capture re-fetched 2026-07-18 and hashed: 326494 bytes, sha256 BYTE-IDENTICAL to the receipt below."
 citation = "Zha, C.-S., Duffy, T.S., Downs, R.T., Mao, H.-K., and Hemley, R.J., 1996, Sound velocity and elasticity of single-crystal forsterite to 16 GPa, J. Geophys. Res. 101(B8), 17535-17545, DOI 10.1029/96JB01266"
+archived_url = "https://web.archive.org/web/20240804095129/https://duffy.princeton.edu/sites/g/files/toruqf616/files/zha_etal_jgr_1996.pdf"
 sha256 = "3f2a66fb1dca0204b41faf792ddd31d2e1e38e5e2e640e646d2bf757678043f4"
 pages = 11
 recipe = "GET https://duffy.princeton.edu/sites/g/files/toruqf616/files/zha_etal_jgr_1996.pdf (open)"

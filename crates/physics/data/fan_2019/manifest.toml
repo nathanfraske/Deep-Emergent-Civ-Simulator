@@ -7,6 +7,10 @@
 [[source]]
 file = "FanPericlaseHighPTElasticityAM2019.pdf"
 sha256 = "560b5f8c9f94e6275c19f8038859c84ddff672c64da11874c7b180ea13de6ee3"
+custody = "witness"
+archived_url = "https://web.archive.org/web/20260312222426/https://www.jsg.utexas.edu/lin/files/FanPericlaseHighPTElasticityAM2019.pdf"
+witness_verified = "Wayback capture re-fetched 2026-07-18 and hashed: 3348584 bytes, sha256 BYTE-IDENTICAL to the receipt below. The public witness holds exactly the bytes this entry used to hold, so converting to witness form loses nothing."
+witness_note = "CONVERTED TO CITATION-PLUS-WITNESS on 2026-07-18 under the owner's ruling: a source with a public link and no redistribution licence is held as citation plus Wayback witness plus the full provenance record, and its bytes are NOT vendored into the repo. The sha256 below is retained as the RE-FETCH RECEIPT: it still verifies against the archived copy, so the provenance is unbroken. See sources/licences.toml for the licence finding and docs/working/FETCH_PIPELINE_PLAN.md section 3."
 citation = "Fan, D., Fu, S., Yang, J., Tkachev, S.N., Prakapenka, V.B., and Lin, J.-F., 2019, Elasticity of single-crystal periclase at high pressure and temperature: The effect of iron on the elasticity and seismic parameters of ferropericlase in the lower mantle, American Mineralogist 104, 262-275, DOI 10.2138/am-2019-6656"
 recipe = "GET https://www.jsg.utexas.edu/lin/files/FanPericlaseHighPTElasticityAM2019.pdf (open)"
 pages = 14

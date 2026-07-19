@@ -64,6 +64,8 @@ EXCLUDED_DIRS = {"disk_arc_literature"}
 # Fields copied down from a manifest `[[source]]` block, in emit order. `archive_url` is PR #201's spelling
 # of `archived_url`; both are accepted everywhere so neither lane has to rename on a live branch.
 MIRRORED_FIELDS = [
+    "custody",
+    "witness_verified",
     "citation",
     "url",
     "archived_url",
@@ -159,7 +161,12 @@ def render_mirrored(collected):
                 holding = str(
                     pathlib.Path(rel).parent.parent / block["dir"] / block["file"]
                 )
-            lines.append(f'holding = "{holding}"')
+            # `holding` asserts THE BYTES ARE HERE, and the gate checksums them on that assertion. Emit it
+            # only when they are, so converting an entry to citation-plus-witness form (deleting bytes the
+            # licence forbids holding) cannot leave a false holding claim pointing at a deleted file. The
+            # filename stays recorded in the manifest as what the receipt is a receipt FOR.
+            if (ROOT / holding).is_file():
+                lines.append(f'holding = "{holding}"')
         for field in MIRRORED_FIELDS:
             if field not in block:
                 continue
@@ -324,10 +331,21 @@ def self_test():
     assert ids == ["pair.one", "pair.two", "solo"], f"id derivation: {ids}"
     assert len(problems) == 2, f"two nameless multi-source blocks must be reported, got {problems}"
 
-    # The holding path is resolved beside the manifest.
+    # `holding` asserts the bytes are here, so it is emitted ONLY when they are. Both directions, using a
+    # file that really exists in this repo and one that does not, because this is the property that keeps a
+    # witness conversion from leaving a false holding claim pointing at a deleted file.
     text = render_mirrored(collected)
-    assert 'holding = "crates/x/data/solo/x.pdf"' in text, "holding path must resolve beside the manifest"
+    assert 'holding = ' not in text, "a holding path whose bytes are absent must NOT be claimed"
     assert 'mirrors = "crates/x/data/solo/manifest.toml"' in text, "the authority must be named"
+    real = ROOT / "scripts" / "gen_sources.py"
+    assert real.is_file(), "self-test needs a file that exists"
+    held, _ = collect(
+        lambda p: {"source": [{"citation": "C", "sha256": "a" * 64, "file": "gen_sources.py"}]},
+        [ROOT / "scripts" / "manifest.toml"],
+    )
+    assert 'holding = "scripts/gen_sources.py"' in render_mirrored(held), (
+        "a holding path whose bytes ARE present must be claimed"
+    )
     # Deterministic: the same input renders identically.
     assert text == render_mirrored(collected), "render must be deterministic"
     # A quote in a citation must not break the TOML it is emitted into.

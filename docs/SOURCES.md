@@ -12,7 +12,7 @@ Custody is one of three. `in_repo`: bytes held in-tree, checksum verifiable with
 witness. `external`: bytes in local custody outside the repo, checksum plus archive snapshot.
 The licence decides which is permitted; see `docs/working/FETCH_PIPELINE_PLAN.md` section 3.
 
-**28 sources** (1 registry, 27 mirrored).
+**29 sources** (2 registry, 27 mirrored).
 
 ## Registry (hand-maintained)
 
@@ -26,6 +26,19 @@ Jha, S., Harry, D. L. and Schutt, D. L., 2017, Toolbox for Analysis of Flexural 
 - custody: external
 - licence (redistribution unconfirmed): Gold open access (GSA Geosphere). The specific licence instrument is NOT stated in the source entry and has not been verified, so redistribution is unconfirmed and `redistributable` is deliberately absent rather than assumed from open-access status. Free-to-read is not free-to-redistribute.
 - free route (author-copy): https://derekschutt.wordpress.com/wp-content/uploads/2018/01/flexural_modeling_geosphere_2017.pdf
+
+### `janaf`
+
+Chase, M.W. Jr., 1998, NIST-JANAF Thermochemical Tables, 4th ed., Journal of Physical and Chemical Reference Data, Monograph 9, 1-1951. American Chemical Society and American Institute of Physics for the National Institute of Standards and Technology.
+
+- sha256: `per-table, recorded row by row in crates/physics/data/janaf/manifest.toml (34 tables, md5 receipts)`
+- archived: https://web.archive.org/web/20260101000000*/janaf.nist.gov/tables/*
+- scope: Standard-state thermochemistry, 0 to 6000 K at 1 bar: the Gibbs energy function, standard entropy, enthalpy increment, and formation enthalpy and Gibbs energy, for the 34 gas and reference species the condensation and thermochemistry work consumes.
+- custody: in_repo
+- licence (**NOT redistributable**): NIST Standard Reference Data, SRD 13. NOT the usual NIST public domain: the Standard Reference Data Act (15 USC 290e) expressly authorizes the Secretary of Commerce to secure copyright in standard reference data compilations, and NIST asserts it for SRD products. The Act also contemplates NIST 'authoriz[ing] the reproduction and publication thereof by others', which is the clean route to a permission grant. Individual numeric values are uncopyrightable facts (Feist Publications v. Rural Telephone Service), so READING values from these tables and citing them is safe; what is restricted is redistributing the COMPILATION.
+- licence evidence: https://www.law.cornell.edu/uscode/text/15/290e
+- remediation: THE RULING CANNOT BE APPLIED AS A DATA CHANGE. The 34 tables are compile-time dependencies (35 `include_str!` sites in crates/physics/src/janaf.rs), so removing them is a compile error rather than a conversion, and it is load-bearing for the condensation and thermochemistry work. The legal nuance offers the path: values are facts and the compilation is what is restricted, so the principled fix is to replace the verbatim NIST table files with a DERIVED data file carrying only the numeric columns the loader consumes, cited to Chase 1998 with the statute noted. That is an engineering arc, not a deletion: it changes a compiled input, so it must be done against a buildable tree with the byte pins verified before and after, and any transcription difference would move them. Surfaced for the owner (plan D6) rather than attempted here. The cheaper alternative the statute itself names is a written permission request to NIST, which would settle it with no code change at all.
+- free route (publisher-open): https://janaf.nist.gov/tables/
 
 ## Mirrored from the per-directory manifests
 
@@ -93,10 +106,11 @@ Ricard, Y., Physics of mantle convection, course notes, ENS de Lyon (section 4.5
 Fan, D., Fu, S., Yang, J., Tkachev, S.N., Prakapenka, V.B., and Lin, J.-F., 2019, Elasticity of single-crystal periclase at high pressure and temperature: The effect of iron on the elasticity and seismic parameters of ferropericlase in the lower mantle, American Mineralogist 104, 262-275, DOI 10.2138/am-2019-6656
 
 - sha256: `560b5f8c9f94e6275c19f8038859c84ddff672c64da11874c7b180ea13de6ee3`
-- archived: NONE RECORDED
+- archived: https://web.archive.org/web/20260312222426/https://www.jsg.utexas.edu/lin/files/FanPericlaseHighPTElasticityAM2019.pdf
+- custody: witness
 - licence (**NOT redistributable**): American Mineralogist / Mineralogical Society of America, all rights reserved. MSA: Open or public access does not mean the material is un-copyrighted.
 - licence evidence: http://www.minsocam.org/
-- remediation: Hold as a witness: drop the bytes, keep the sha256 as a re-fetch receipt plus the archived URL and the extract.
+- remediation: CONVERTED 2026-07-18 under the owner ruling: bytes removed from the repo, entry now citation-plus-witness. The Wayback witness was re-fetched and hashed and is BYTE-IDENTICAL to the retained sha256 receipt, so the provenance is unbroken and nothing was lost with the bytes.
 - authority: `crates/physics/data/fan_2019/manifest.toml`
 
 ### `gruneisen.ahrens_1995_handbook`
@@ -124,6 +138,9 @@ Fan, D., Fu, S., Yang, J., Tkachev, S.N., Prakapenka, V.B. & Lin, J.-F., 2019, E
 
 - sha256: `560b5f8c9f94e6275c19f8038859c84ddff672c64da11874c7b180ea13de6ee3`
 - archived: NONE RECORDED
+- licence (**NOT redistributable**): American Mineralogist / Mineralogical Society of America, all rights reserved. Identical bytes to `fan_2019` (same sha256); see that entry.
+- licence evidence: http://www.minsocam.org/
+- remediation: Bytes removed with the fan_2019 conversion; this cross-reference now resolves to the same citation-plus-witness record. Deduplicate the two ids when the cross-reference idiom is reworked.
 - authority: `crates/physics/data/gruneisen/manifest.toml`
 
 ### `gruneisen.speziale_2004_fayalite`
@@ -132,6 +149,9 @@ Speziale, S., Duffy, T.S. & Angel, R.J., 2004, Single-crystal elasticity of faya
 
 - sha256: `729d9ecac7fa4563634ca3dc9e5b4ab7a494e2af79fdd3a4266ac0093e602b0c`
 - archived: NONE RECORDED
+- licence (**NOT redistributable**): AGU / Wiley, Version of Record. Identical bytes to `speziale_2004` (same sha256); see that entry.
+- licence evidence: https://www.agu.org/publications/authors/policies
+- remediation: Bytes removed with the speziale_2004 conversion; this cross-reference now resolves to the same citation-plus-witness record. Deduplicate the two ids when the cross-reference idiom is reworked.
 - authority: `crates/physics/data/gruneisen/manifest.toml`
 
 ### `gruneisen.stixrude_lithgow_bertelloni_2005`
@@ -148,6 +168,9 @@ Zha, C.-S., Duffy, T.S., Downs, R.T., Mao, H.-K. & Hemley, R.J., 1996, Sound vel
 
 - sha256: `3f2a66fb1dca0204b41faf792ddd31d2e1e38e5e2e640e646d2bf757678043f4`
 - archived: NONE RECORDED
+- licence (**NOT redistributable**): AGU / Wiley, Version of Record. Identical bytes to `zha_1996` (same sha256); see that entry.
+- licence evidence: https://www.agu.org/publications/authors/policies
+- remediation: Bytes removed with the zha_1996 conversion; this cross-reference now resolves to the same citation-plus-witness record. Deduplicate the two ids when the cross-reference idiom is reworked.
 - authority: `crates/physics/data/gruneisen/manifest.toml`
 
 ### `heyliger_2003_quartz`
@@ -155,10 +178,11 @@ Zha, C.-S., Duffy, T.S., Downs, R.T., Mao, H.-K. & Hemley, R.J., 1996, Sound vel
 Heyliger, P., Ledbetter, H., and Kim, S., 2003, Elastic constants of natural quartz, J. Acoust. Soc. Am. 114(2), 644-650, DOI 10.1121/1.1593063
 
 - sha256: `eca2dffeb19ab4deb90be9e8f3056081bea6ed41914b15a06829dd5d597cdfcd`
-- archived: NONE RECORDED
+- archived: https://web.archive.org/web/20250325200634/https://tsapps.nist.gov/publication/get_pdf.cfm?pub_id=851249
+- custody: witness
 - licence (**NOT redistributable**): Copyright 2003 Acoustical Society of America (the notice appears twice in the held PDF). One of three authors was federal (Kim, NIST); Ledbetter was at Los Alamos in 2003, so the 17 USC 105 argument fails on the facts, and the work falls inside NIST's own carve-out for material marked as copyrighted.
 - licence evidence: https://pubs.aip.org/asa/jasa
-- remediation: Hold as a witness. This entry corrects an earlier assumption that both authors were NIST staff; the affiliation was checked in the held PDF.
+- remediation: CONVERTED 2026-07-18 under the owner ruling: bytes removed from the repo, entry now citation-plus-witness. The Wayback witness was re-fetched and hashed and is BYTE-IDENTICAL to the retained sha256 receipt, so the provenance is unbroken and nothing was lost with the bytes. This entry also corrects an earlier assumption that both authors were NIST staff.
 - authority: `crates/physics/data/heyliger_2003_quartz/manifest.toml`
 
 ### `jackson_1999_enstatite`
@@ -166,10 +190,11 @@ Heyliger, P., Ledbetter, H., and Kim, S., 2003, Elastic constants of natural qua
 Jackson, J.M., Sinogeikin, S.V., and Bass, J.D., 1999, Elasticity of MgSiO3 orthoenstatite, American Mineralogist 84(4), 677-680
 
 - sha256: `c6d79b4308d5a60907abea677787faa262c17a7279a15438a4eb9c0f0d816925`
-- archived: NONE RECORDED
+- archived: https://web.archive.org/web/20260719011603/https://web.gps.caltech.edu/users/jackson/pdf/Jackson_AmMin99_84_677.pdf
+- custody: witness
 - licence (**NOT redistributable**): American Mineralogist / Mineralogical Society of America, all rights reserved.
 - licence evidence: http://www.minsocam.org/
-- remediation: A free route exists at MSA's own sanctioned archive, which is a better fetch target than the Caltech author copy currently recorded. Free to read does not grant redistribution, so this stays a witness rather than a holding.
+- remediation: CONVERTED 2026-07-18 under the owner ruling: bytes removed from the repo, entry now citation-plus-witness. The Wayback witness was re-fetched and hashed and is BYTE-IDENTICAL to the retained sha256 receipt, so the provenance is unbroken and nothing was lost with the bytes. A capture had to be REQUESTED (none existed) and now resolves. MSA's own sanctioned archive is carried as a second witness.
 - free route (publisher-open): http://www.minsocam.org/msa/ammin/toc/Articles_Free/1999/Jackson_p677-680_99.pdf
 - authority: `crates/physics/data/jackson_1999_enstatite/manifest.toml`
 
@@ -245,10 +270,11 @@ Robie, R.A., and Hemingway, B.S., 1995, Thermodynamic Properties of Minerals and
 Speziale, S., Duffy, T.S., and Angel, R.J., 2004, Single-crystal elasticity of fayalite to 12 GPa, J. Geophys. Res. 109, B12202, DOI 10.1029/2004JB003162
 
 - sha256: `729d9ecac7fa4563634ca3dc9e5b4ab7a494e2af79fdd3a4266ac0093e602b0c`
-- archived: NONE RECORDED
+- archived: https://web.archive.org/web/20240722035045/https://duffy.princeton.edu/sites/g/files/toruqf616/files/speziale_jgr_04.pdf
+- custody: witness
 - licence (**NOT redistributable**): AGU / Wiley, Version of Record. AGU: This permission does not extend to public posting of the PDF or HTML created by AGU for publication.
 - licence evidence: https://www.agu.org/publications/authors/policies
-- remediation: Hold as a witness.
+- remediation: CONVERTED 2026-07-18 under the owner ruling: bytes removed from the repo, entry now citation-plus-witness. The Wayback witness was re-fetched and hashed and is BYTE-IDENTICAL to the retained sha256 receipt, so the provenance is unbroken and nothing was lost with the bytes.
 - authority: `crates/physics/data/speziale_2004/manifest.toml`
 
 ### `wachtman_1960_corundum`
@@ -267,10 +293,11 @@ Wachtman, J.B. Jr., Tefft, W.E., Lam, D.G. Jr., and Stinchfield, R.P., 1960, Ela
 Yoneda, A., 1990, Pressure derivatives of elastic constants of single crystal MgO and MgAl2O4, J. Phys. Earth 38(1), 19-55, DOI 10.4294/jpe1952.38.19
 
 - sha256: `5917f2fd5d545c4385083c8efb3c6ef47492d9020760b0264b9d630e8a6cc54f`
-- archived: NONE RECORDED
+- archived: https://web.archive.org/web/20240414161313/https://www.jstage.jst.go.jp/article/jpe1952/38/1/38_1_19/_pdf
+- custody: witness
 - licence (**NOT redistributable**): J-STAGE, approval required for reprinting, duplication and public transmission.
 - licence evidence: https://www.jstage.jst.go.jp/
-- remediation: Hold as a witness.
+- remediation: CONVERTED 2026-07-18 under the owner ruling: bytes removed from the repo, entry now citation-plus-witness. The Wayback witness was re-fetched and hashed and is BYTE-IDENTICAL to the retained sha256 receipt, so the provenance is unbroken and nothing was lost with the bytes.
 - authority: `crates/physics/data/yoneda_1990/manifest.toml`
 
 ### `zha_1996`
@@ -278,9 +305,10 @@ Yoneda, A., 1990, Pressure derivatives of elastic constants of single crystal Mg
 Zha, C.-S., Duffy, T.S., Downs, R.T., Mao, H.-K., and Hemley, R.J., 1996, Sound velocity and elasticity of single-crystal forsterite to 16 GPa, J. Geophys. Res. 101(B8), 17535-17545, DOI 10.1029/96JB01266
 
 - sha256: `3f2a66fb1dca0204b41faf792ddd31d2e1e38e5e2e640e646d2bf757678043f4`
-- archived: NONE RECORDED
+- archived: https://web.archive.org/web/20240804095129/https://duffy.princeton.edu/sites/g/files/toruqf616/files/zha_etal_jgr_1996.pdf
+- custody: witness
 - licence (**NOT redistributable**): AGU / Wiley, Version of Record. Same AGU term as speziale_2004.
 - licence evidence: https://www.agu.org/publications/authors/policies
-- remediation: Hold as a witness. Note this source is ALSO cross-referenced by the gruneisen manifest, so a remediation must update both records together.
+- remediation: CONVERTED 2026-07-18 under the owner ruling: bytes removed from the repo, entry now citation-plus-witness. The Wayback witness was re-fetched and hashed and is BYTE-IDENTICAL to the retained sha256 receipt, so the provenance is unbroken and nothing was lost with the bytes. NOTE: also cross-referenced by the gruneisen manifest, whose twin entry carries the same finding.
 - authority: `crates/physics/data/zha_1996/manifest.toml`
 

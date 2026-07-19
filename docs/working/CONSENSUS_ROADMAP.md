@@ -44,7 +44,8 @@ Editing rule (the stop-gate enforces it): edit IN PLACE, keep every line a few w
 - 2026-07-18  DONE  Grueneisen ladder -> `ee89ce1`; Earth/Mars/Venus T_e referee -> `1ea64e5`; watchable-impacts flash -> `5f93509`.
 - 2026-07-18  DONE  Physics-substrate audit (3-lane map, dormant inventory) -> `PHYSICS_SUBSTRATE_ROADMAP.md`.
 
-- 2026-07-18  DONE  Vendoring pipeline consolidated + gated (28-source registry, licence overlay, `@sources` hop) -> `FETCH_PIPELINE_PLAN.md`, `scripts/sources_gate.py`.
+- 2026-07-18  DONE  Vendoring pipeline consolidated + gated (29-source registry, licence overlay, `@sources` hop) -> `FETCH_PIPELINE_PLAN.md`, `scripts/sources_gate.py`.
+- 2026-07-18  DONE  Owner licence ruling applied: 6 restricted PDFs -> citation-plus-witness (witnesses byte-identical); JANAF blocked by `include_str!` -> plan D6.
 
 ## Top dormant-but-built (one wire from alive; detail in PHYSICS_SUBSTRATE_ROADMAP)
 

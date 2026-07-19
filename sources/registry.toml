@@ -73,3 +73,41 @@ slim = "KEPT: printed p.1555 (PDF 1), the identification (title, three authors, 
 read_channels = "Text extraction (pdftotext -layout) and a visual render (pdftoppm) of printed p.1557 at 450 dpi, with the Table 1 point-load flexural-parameter cell re-rendered at 900 dpi. Dual channel is the standard here because the load-bearing content is a table cell whose exponent and denominator decide a length scale."
 
 note = "Version of record: the PDF is the GSA typeset final (Adobe InDesign CC 2017, created 11 September 2017, matching the paper's printed 'Final version posted 11 September 2017'), rather than an accepted manuscript. The DOI itself resolves to a Cloudflare 403 at pubs.geoscienceworld.org, so the bytes came from the third author's site, which is the same typeset document. SECONDARY, cited rather than held: the toolbox source at github.com/sumantjha/TAFI_v1.0, whose TAFI_v1.0/Geodynamic_functions/Geodynamic_Utilities/flexparam.m is the authors' own machine-readable statement of the same quantity. It is a separate artifact under separate terms. Under the primary-plus-secondary rule this secondary should itself come through the pipeline; it predates the rule and is baselined."
+
+# ---------------------------------------------------------------------------------------------------
+# JANAF, the collection-level entry (owner ruling consequence 2, and the D7 coverage hole).
+#
+# Recorded HERE rather than in crates/physics/data/janaf/manifest.toml deliberately. That manifest is
+# `include_str!`d by crates/physics/src/janaf.rs, so editing it changes the compiled binary, and the byte
+# pins cannot be verified on this branch (the inherited constructor-gate block, plan D5). A registry entry
+# touches no compiled input and carries the same facts.
+#
+# THE CITATION-PLUS-WITNESS RULING CANNOT BE EXECUTED ON THESE BYTES AS A DATA CHANGE, and that is the
+# finding that matters. The 34 tables are not inert document witnesses like the six PDFs converted above:
+# they are `include_str!`d into the physics crate, 35 sites in janaf.rs. Deleting them does not convert an
+# entry, it fails the build. See `remediation` for the path and its cost.
+# ---------------------------------------------------------------------------------------------------
+
+[[source]]
+id = "janaf"
+citation = "Chase, M.W. Jr., 1998, NIST-JANAF Thermochemical Tables, 4th ed., Journal of Physical and Chemical Reference Data, Monograph 9, 1-1951. American Chemical Society and American Institute of Physics for the National Institute of Standards and Technology."
+url = "https://janaf.nist.gov/"
+archived_url = "https://web.archive.org/web/20260101000000*/janaf.nist.gov/tables/*"
+sha256 = "per-table, recorded row by row in crates/physics/data/janaf/manifest.toml (34 tables, md5 receipts)"
+scope = "Standard-state thermochemistry, 0 to 6000 K at 1 bar: the Gibbs energy function, standard entropy, enthalpy increment, and formation enthalpy and Gibbs energy, for the 34 gas and reference species the condensation and thermochemistry work consumes."
+grade = "measured (critically-evaluated compilation)"
+
+custody = "in_repo"
+holding_collection = "crates/physics/data/janaf/"
+collection_files = 34
+
+licence = "NIST Standard Reference Data, SRD 13. NOT the usual NIST public domain: the Standard Reference Data Act (15 USC 290e) expressly authorizes the Secretary of Commerce to secure copyright in standard reference data compilations, and NIST asserts it for SRD products. The Act also contemplates NIST 'authoriz[ing] the reproduction and publication thereof by others', which is the clean route to a permission grant. Individual numeric values are uncopyrightable facts (Feist Publications v. Rural Telephone Service), so READING values from these tables and citing them is safe; what is restricted is redistributing the COMPILATION."
+redistributable = false
+licence_evidence = "https://www.law.cornell.edu/uscode/text/15/290e"
+free_route = "https://janaf.nist.gov/tables/"
+free_route_kind = "publisher-open"
+reviewed = "2026-07-18"
+
+slim = "Not slimmed. Each table is the artifact-native machine-readable form fetched verbatim from janaf.nist.gov/tables/<code>.txt, because the loader parses the full temperature grid rather than a page range."
+
+remediation = "THE RULING CANNOT BE APPLIED AS A DATA CHANGE. The 34 tables are compile-time dependencies (35 `include_str!` sites in crates/physics/src/janaf.rs), so removing them is a compile error rather than a conversion, and it is load-bearing for the condensation and thermochemistry work. The legal nuance offers the path: values are facts and the compilation is what is restricted, so the principled fix is to replace the verbatim NIST table files with a DERIVED data file carrying only the numeric columns the loader consumes, cited to Chase 1998 with the statute noted. That is an engineering arc, not a deletion: it changes a compiled input, so it must be done against a buildable tree with the byte pins verified before and after, and any transcription difference would move them. Surfaced for the owner (plan D6) rather than attempted here. The cheaper alternative the statute itself names is a written permission request to NIST, which would settle it with no code change at all."
