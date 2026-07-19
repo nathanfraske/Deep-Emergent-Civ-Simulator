@@ -68,6 +68,29 @@ CLASSIFICATIONS = {
 }
 
 
+def _marker_is_substantive(text):
+    """Whether a line carries a @derives marker that actually SAYS something.
+
+    THE BYPASS THIS CLOSES. The gate used to accept any line matching `@derives:` regardless of what
+    followed, so a bare `// @derives:` above a function was a pass token: it satisfied coverage, counted
+    toward the marked total, and let an invented world value through while reading as documented. Worse,
+    `gen_floor_registry.py` requires nonempty marker text, so an empty marker did not even reach the
+    registry mirror the substrate map is read from. The value was covered, counted, and invisible at once.
+
+    The declared convention is `@derives: <the quantity> <- <the substrate inputs it reads>`, and both
+    halves carry meaning: the quantity says what is derived, the inputs say what it is derived FROM. A
+    marker missing either has not answered the question it exists to answer.
+    """
+    m = re.search(r"//\s*@derives(?:\[\w+\])?:(.*)$", text)
+    if not m:
+        return False
+    body = m.group(1).strip()
+    if "<-" not in body:
+        return False
+    quantity, _, inputs = body.partition("<-")
+    return bool(quantity.strip()) and bool(inputs.strip())
+
+
 def scan_public_functions(read_file):
     """Every `pub fn` in the scanned crates, with whether a @derives marker sits above it.
 
@@ -122,7 +145,7 @@ def scan_public_functions(read_file):
                 while j >= 0 and (i - j) <= MARKER_LOOKBACK:
                     t = lines[j].strip()
                     if t.startswith("//"):
-                        if re.search(r"//\s*@derives(?:\[\w+\])?:", t):
+                        if _marker_is_substantive(t):
                             has_marker = True
                             break
                         j -= 1
@@ -205,7 +228,7 @@ def self_test():
     try:
         # Exercise the marker window logic directly rather than the filesystem walk.
         lines = sample["a.rs"]
-        marked = re.search(r"//\s*@derives(?:\[\w+\])?:", "".join(lines[0:1])) is not None
+        marked = _marker_is_substantive("".join(lines[0:1]))
         unmarked = re.search(r"//\s*@derives(?:\[\w+\])?:", "".join(lines[2:3])) is not None
         assert marked, "a marker above the signature must be seen"
         assert not unmarked, "a signature with no marker above it must not read as marked"

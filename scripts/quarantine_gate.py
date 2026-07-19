@@ -155,7 +155,29 @@ def main():
     if not LEDGER.exists():
         print(f"quarantine gate: ledger not found at {LEDGER}")
         return 1
-    entries = parse_entries(LEDGER.read_text())
+    text = LEDGER.read_text()
+    entries = parse_entries(text)
+
+    # AN EMPTY LEDGER IS A DEFECT, NOT AN ACHIEVEMENT. Deleting every `[[entry]]` block used to pass this
+    # gate clean: the parser returned nothing, verification found no problems in nothing, and the summary
+    # read "clean (0 quarantined values)". That is indistinguishable from having resolved all 56, and the
+    # cheaper of the two paths. A quarantine that can be emptied by deletion quarantines nothing.
+    #
+    # Emptying it legitimately is still possible and is stated rather than inferred: declare
+    # `deliberately_empty = "<why>"` in the ledger header and the gate accepts it. That converts a silent
+    # deletion into a claim someone signed.
+    if not entries:
+        declared = re.search(r'^\s*deliberately_empty\s*=\s*"([^"]+)"', text, re.M)
+        if declared:
+            print(f"quarantine gate: ledger declared deliberately empty ({declared.group(1)})")
+            return 0
+        print(
+            "quarantine gate: FAILED. The ledger contains no entries. Every quarantined value was "
+            "either resolved (in which case say so with a `deliberately_empty = \"...\"` header) or the "
+            "ledger was emptied, which is the bypass this check exists for: deleting the entries used to "
+            "read as clean."
+        )
+        return 1
 
     def reader(path):
         p = ROOT / path
