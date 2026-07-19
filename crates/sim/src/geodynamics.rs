@@ -983,6 +983,59 @@ pub fn convection_step(state: &ColumnState, p: &ColumnParams) -> ColumnState {
     }
 }
 
+/// The SI operating point a log-domain convection step runs on: the linear fields the kernel can hold,
+/// plus the viscosity as a LOGARITHM because a real one cannot be held at all.
+///
+/// A Mars-class interior at 1600 K and 10.7 GPa solves to `ln(eta) ~ 54.7`, that is `eta ~ 5e23 Pa*s`
+/// against a `Fixed::MAX` of `2.1e9`. The linear [`convection_step`] therefore cannot run on SI values, and
+/// that is the whole reason its callers pass a scaled operating point with an authored fixture cluster.
+/// Nothing about the PHYSICS required that; it was a representation limit, and the log-domain law forms
+/// ([`laws::ln_rayleigh_number`], [`laws::ln_stokes_velocity`]) are the documented way out.
+#[derive(Clone, Copy, Debug)]
+pub struct LogConvectionInputs {
+    /// Density at the column's own state (kg/m^3).
+    pub density_kg_m3: Fixed,
+    /// Volumetric thermal expansivity (ppm/K).
+    pub thermal_expansion_ppm: Fixed,
+    /// Surface gravity (m/s^2).
+    pub gravity_m_s2: Fixed,
+    /// Convecting layer depth (m).
+    pub depth_m: Fixed,
+    /// The buoyant parcel scale (m), the convective cell half-wavelength.
+    pub parcel_radius_m: Fixed,
+    /// `ln(eta)` in `ln Pa*s`. Never exponentiated.
+    pub ln_viscosity: Fixed,
+    /// Thermal diffusivity (m^2/s).
+    pub thermal_diffusivity_m2_s: Fixed,
+    /// `ln(Ra_crit)`, the onset threshold in the same domain the Rayleigh number is computed in.
+    pub ln_rayleigh_critical: Fixed,
+}
+
+/// The Rayleigh number and convection-onset verdict for an SI operating point, IN LOGS.
+///
+/// Returns `(ln Ra, convecting)`. The comparison happens in the log domain on both sides, so neither `Ra`
+/// nor `Ra_crit` has to materialise, and there is no overflow guard to author: `ln Ra` for a real mantle is
+/// a small representable number near 14, and the linear form's `ra_max` clamp (a REPRESENTABILITY guard,
+/// never a physical ceiling) has nothing to guard here. `None` when an input is non-physical.
+// @derives: a column's log-domain Rayleigh number and convection onset <- its SI buoyancy, gravity, depth, log viscosity and diffusivity
+pub fn ln_convection_onset(
+    inputs: &LogConvectionInputs,
+    delta_t: Fixed,
+    latched: bool,
+) -> Option<(Fixed, bool)> {
+    let delta_rho =
+        laws::thermal_density_anomaly(inputs.density_kg_m3, inputs.thermal_expansion_ppm, delta_t);
+    let ln_ra = laws::ln_rayleigh_number(
+        delta_rho,
+        inputs.gravity_m_s2,
+        inputs.depth_m,
+        inputs.ln_viscosity,
+        inputs.thermal_diffusivity_m2_s,
+    )?;
+    // The latch is one-way, matching the linear kernel: onset fires once and does not un-fire on a dip.
+    Some((ln_ra, latched || ln_ra >= inputs.ln_rayleigh_critical))
+}
+
 /// The column's CONDUCTIVE LOSS COEFFICIENT `k / (rho * d^2)` (per second, per kelvin of contrast): the
 /// specific power a column sheds per kelvin it sits above its cold reference, read OFF THE COLUMN the kernel
 /// will itself run rather than restated at a caller. It is exactly the coefficient [`convection_step`]
@@ -1545,6 +1598,136 @@ mod tests {
             (20.0..=45.0).contains(&ppm),
             "the ambient-frame expansivity should be within reach of the independent 29.1 ppm/K anchor, \
              read {ppm:.1}"
+        );
+    }
+
+    /// THE LOG-DOMAIN TWIN: the two Rayleigh forms must agree where BOTH can run.
+    ///
+    /// This is the test that makes the lift a migration rather than a rewrite. The linear kernel cannot run
+    /// on SI values (a real viscosity is `~5e23 Pa*s` against a `Fixed::MAX` of `2.1e9`), which is the whole
+    /// reason its callers pass a scaled operating point with an authored fixture cluster. The log form can.
+    /// But "the log form can run" is not "the log form computes the same thing", and asserting the second
+    /// from the first is exactly the class of error this arc has already paid for twice today.
+    ///
+    /// So both are run on an operating point the LINEAR one can hold, fed identical inputs, and the linear
+    /// result is compared against `exp(ln Ra)`. Where they disagree the migration is wrong, whatever the
+    /// SI-only path reports, because there is nothing to check it against there.
+    #[test]
+    fn the_log_rayleigh_form_reproduces_the_linear_one_where_both_can_run() {
+        // A scaled operating point, chosen so the LINEAR form stays inside its window.
+        let density = Fixed::from_int(3);
+        let expansion_ppm = Fixed::from_int(30);
+        let delta_t = Fixed::from_int(400);
+        let gravity = Fixed::from_ratio(37, 10);
+        let depth = Fixed::from_int(2);
+        let viscosity = Fixed::from_int(5);
+        let kappa = Fixed::from_ratio(1, 100);
+
+        let delta_rho = laws::thermal_density_anomaly(density, expansion_ppm, delta_t);
+        let linear = laws::rayleigh_number(
+            delta_rho,
+            gravity,
+            depth,
+            viscosity,
+            kappa,
+            Fixed::from_int(1_000_000),
+        );
+        let ln_form = laws::ln_rayleigh_number(delta_rho, gravity, depth, viscosity.ln(), kappa)
+            .expect("the log form answers on a physical operating point");
+        let from_log = ln_form.exp().to_f64_lossy();
+        let direct = linear.to_f64_lossy();
+        assert!(
+            direct > 0.0 && (from_log - direct).abs() / direct < 0.01,
+            "the two Rayleigh forms must agree within a percent where both run: linear {direct:.4}, \
+             exp(log) {from_log:.4}. A disagreement here means the log-domain lift changes the physics \
+             rather than the representation"
+        );
+
+        // AND THE STOKES PAIR, same discipline: the advective loss reads this one, so a drift here moves a
+        // convecting column's cooling rate while the onset verdict stays right.
+        let radius = Fixed::from_int(1);
+        let v_linear = laws::stokes_velocity(
+            delta_rho,
+            gravity,
+            radius,
+            viscosity,
+            Fixed::from_int(1_000_000),
+        )
+        .to_f64_lossy();
+        let v_log = laws::ln_stokes_velocity(delta_rho, gravity, radius, viscosity.ln())
+            .expect("the log Stokes form answers")
+            .exp()
+            .to_f64_lossy();
+        assert!(
+            v_linear > 0.0 && (v_log - v_linear).abs() / v_linear < 0.01,
+            "the two Stokes forms must agree within a percent: linear {v_linear:.6}, exp(log) {v_log:.6}"
+        );
+    }
+
+    /// THE LOG FORM RUNS WHERE THE LINEAR ONE CANNOT, which is the reason to have it.
+    ///
+    /// At the real SI operating point the derived cluster now produces (a Mars-class mantle at 1600 K with
+    /// `ln eta ~ 54.7`), the linear form falls to its overflow branch and reports a Rayleigh number of zero,
+    /// so a column that plainly convects reads as conducting. The log form answers with a mantle-scale
+    /// `ln Ra` and the onset fires. This is the defect the fixture cluster was papering over.
+    #[test]
+    fn the_linear_form_fails_at_si_where_the_log_form_answers() {
+        let inputs = LogConvectionInputs {
+            density_kg_m3: Fixed::from_int(3354),
+            thermal_expansion_ppm: Fixed::from_int(26),
+            gravity_m_s2: Fixed::from_ratio(37, 10),
+            depth_m: Fixed::from_int(1_800_000),
+            parcel_radius_m: Fixed::from_int(1_800_000),
+            ln_viscosity: Fixed::from_ratio(547, 10),
+            thermal_diffusivity_m2_s: Fixed::from_ratio(6, 10_000_000),
+            ln_rayleigh_critical: crate::deeptime::RIGID_RIGID_RA_CRIT.ln(),
+        };
+        let delta_t = Fixed::from_int(1300);
+        let (ln_ra, convecting) =
+            ln_convection_onset(&inputs, delta_t, false).expect("the log form answers at SI");
+
+        // THE VALUE IS COMPUTED HERE RATHER THAN GUESSED, because guessing it is how this assertion was
+        // wrong the first time. `drho = rho alpha dT = 3354 * 26e-6 * 1300 = 113.4 kg/m^3`, `d^3 = 5.83e18`,
+        // `eta = e^54.7 = 5.7e23`, `kappa = 6e-7`, so `Ra = 113.4 * 3.7 * 5.83e18 / (5.7e23 * 6e-7) = 7155`
+        // and `ln Ra = 8.88`. The first version of this test asserted `> 10` from intuition about what a
+        // "mantle-scale" Rayleigh number looks like and convicted correct arithmetic.
+        //
+        // It is lower than a textbook mantle `Ra ~ 1e6` for a stated reason worth carrying: the viscosity
+        // is the DERIVED dry-dislocation value at 1600 K and 11 GPa, `~5.7e23 Pa*s`, a few hundred times the
+        // `~1e21` usually quoted, and the diffusivity is the derived `6e-7 m^2/s` rather than the customary
+        // `1e-6`. Both push `Ra` down. The column still convects, at about four times critical.
+        let v = ln_ra.to_f64_lossy();
+        assert!(
+            (8.5..=9.3).contains(&v),
+            "the computed ln Ra for this operating point is 8.88, read {v:.2}"
+        );
+        let critical = inputs.ln_rayleigh_critical.to_f64_lossy();
+        assert!(
+            v > critical,
+            "and it must exceed the rigid-rigid ln(1707.76) = {critical:.2} for the onset to fire"
+        );
+        assert!(convecting, "so the latch fires at ln Ra = {v:.2}");
+
+        // THE LINEAR FORM ON THE SAME INPUTS, which is the comparison that justifies the migration. Its
+        // depth-cubed term alone is 5.8e18 against a Fixed::MAX of 2.1e9, so it cannot even form the
+        // numerator and returns its overflow value.
+        let delta_rho = laws::thermal_density_anomaly(
+            inputs.density_kg_m3,
+            inputs.thermal_expansion_ppm,
+            delta_t,
+        );
+        let linear = laws::rayleigh_number(
+            delta_rho,
+            inputs.gravity_m_s2,
+            inputs.depth_m,
+            Fixed::from_int(1),
+            inputs.thermal_diffusivity_m2_s,
+            Fixed::from_int(1_000_000),
+        );
+        assert_ne!(
+            linear.to_f64_lossy(),
+            ln_ra.exp().to_f64_lossy(),
+            "the linear form cannot reproduce the SI answer, which is why the operating point was scaled"
         );
     }
 
