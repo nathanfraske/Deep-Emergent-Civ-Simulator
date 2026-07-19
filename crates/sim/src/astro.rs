@@ -2309,37 +2309,56 @@ pub fn stellar_structural_state(
     Some(StellarStructuralState { envelope, phase })
 }
 
-/// A LUMINOSITY BRACKET (`L_sun`), the RIDER 2 output form for a quantity whose model uncertainty spans orders of
-/// magnitude: the branch ships the RANGE, not a point, so a consumer cannot read a decade-wide ignorance as a
-/// value. `[lo, hi]` in `L_sun`, unconstrained-by-source by construction (a bracket is not a scalar), with
-/// [`EuvLuminosityBracket::width_dex`] making the width machine-readable before any consumer reads the bounds.
+/// A LOG10 BAND `[lo, hi]` (both already `log10` of the underlying quantity), the RIDER 2 output form for a value
+/// whose model uncertainty spans orders of magnitude: carrying the range in the log domain keeps a quantity that
+/// sits outside the fixed-point window (an ionizing photon rate of order `1e45` per second, an ionizing luminosity
+/// of order `1e33` erg/s) representable, and makes the width a subtraction. A point value is `lo == hi`.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub struct EuvLuminosityBracket {
-    lo_lsun: Fixed,
-    hi_lsun: Fixed,
+pub struct Log10Band {
+    /// The lower bound (`log10` of the quantity).
+    pub lo: Fixed,
+    /// The upper bound (`log10` of the quantity).
+    pub hi: Fixed,
 }
 
-impl EuvLuminosityBracket {
-    /// The lower bound (`L_sun`).
-    pub fn lo_lsun(self) -> Fixed {
-        self.lo_lsun
-    }
-    /// The upper bound (`L_sun`).
-    pub fn hi_lsun(self) -> Fixed {
-        self.hi_lsun
-    }
-    /// The bracket WIDTH in dex (`log10(hi/lo)`), the stated width RIDER 2 requires be readable before a consumer
-    /// reads the bounds. `None` on a degenerate bracket (a non-positive bound).
+impl Log10Band {
+    /// The band WIDTH in dex (`hi - lo`), readable before any consumer reads the bounds (RIDER 2). `None` only if
+    /// the subtraction leaves the representable range.
     pub fn width_dex(self) -> Option<Fixed> {
-        if self.lo_lsun <= Fixed::ZERO || self.hi_lsun <= Fixed::ZERO {
-            return None;
-        }
-        let ln10 = Fixed::from_int(10).ln();
-        self.hi_lsun
-            .checked_div(self.lo_lsun)?
-            .ln()
-            .checked_div(ln10)
+        self.hi.checked_sub(self.lo)
     }
+}
+
+/// Which spectral model an ionizing evaluation came from, carried so a consumer never mistakes the LTE estimator
+/// for a real atmosphere.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum AtmosphereBranch {
+    /// The LTE blackbody Wien-tail integral: a self-consistent ESTIMATOR and upper bound (a real hot atmosphere's
+    /// line blanketing and ionization edges suppress the ionizing flux below it).
+    Blackbody,
+    /// An NLTE line-blanketed atmosphere grid (Sternberg, Hoffmann and Pauldrach 2003): the photon-number departure
+    /// applied to the blackbody photon rate IN PHOTON SPACE, never an energy departure divided by a mean energy.
+    NlteLineBlanketed,
+}
+
+/// ONE IONIZING-SPECTRUM EVALUATION, the same-spectrum-correct object the EUV wind consumes: the hydrogen-ionizing
+/// photon rate `Q_H` (photons/s, `log10`) with the ionizing luminosity `L_ion` and the mean ionizing photon energy
+/// `<E>` from the SAME spectral branch when that branch supplies them, so `L_ion / Q_H = <E>` holds within one
+/// spectrum. This is the fix for the same-spectrum violation: the wind reads `Q_H` directly, never an NLTE-adjusted
+/// energy bracket divided by an LTE blackbody mean energy (three correlated errors, since line blanketing changes
+/// spectral shape so the departures in integrated energy, photon number, and mean energy are not the same number).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct IonizingSpectrumEvaluation {
+    /// `log10(Q_H)` in photons per second, the quantity the EUV wind law consumes.
+    pub photon_rate_log10_s: Log10Band,
+    /// `log10(L_ion)` in erg/s, present only when the branch supplies it self-consistently (the blackbody branch).
+    pub ionizing_luminosity_log10_erg_s: Option<Log10Band>,
+    /// `log10(<E>)` in erg, the mean ionizing photon energy, present only from the same branch as `L_ion`.
+    pub mean_photon_energy_log10_erg: Option<Log10Band>,
+    /// Which spectral model produced this evaluation.
+    pub branch: AtmosphereBranch,
+    /// The effective temperature the evaluation was formed at (the minimal atmosphere-state anchor).
+    pub t_eff_k: Fixed,
 }
 
 /// The BLACKBODY IONIZING FRACTION `f_BB(T_eff)`: the fraction of a blackbody's radiant exitance emitted above the
@@ -2388,8 +2407,8 @@ pub fn blackbody_ionizing_fraction(
 
 /// The MEAN IONIZING PHOTON ENERGY as a multiple of the hydrogen edge energy, DERIVED from the star's `T_eff`: the
 /// energy-weighted mean energy of a photon above the 13.6 eV ionization edge, `<E> / E_edge`. This is what converts
-/// the ionizing LUMINOSITY (energy per second, the [`EuvLuminosityBracket`]) into the ionizing photon RATE `Phi`
-/// (photons per second) the photoevaporation wind law reads, and it is DERIVED rather than reserved: it falls out of
+/// the ionizing LUMINOSITY (energy per second) into the ionizing photon RATE `Q_H` (photons per second) inside the
+/// same-branch [`blackbody_ionizing_spectrum`], and it is DERIVED rather than reserved: it falls out of
 /// the same Wien-tail integral as [`blackbody_ionizing_fraction`]. The mean energy above the edge is the energy flux
 /// over the photon-number flux, `<E> = kT * Gamma(4,x) / Gamma(3,x)` with `x = T_ion/T_eff`, which reduces (using
 /// `kT = E_edge/x`) to `<E>/E_edge = (x^3 + 3x^2 + 6x + 6) / (x (x^2 + 2x + 2))`. The numerator is the SAME
@@ -2430,35 +2449,99 @@ pub fn mean_ionizing_photon_energy_over_edge(
     gamma4.checked_div(x.checked_mul(gamma3)?)
 }
 
-/// The RADIATIVE-ENVELOPE EUV luminosity BRACKET (`L_sun`): the ionizing luminosity that drives photoevaporation
-/// for a dynamo-dark [`EnvelopeStructure::Radiative`] star, DERIVED from `T_eff` and `L_bol` as `L_bol *
-/// f_BB(T_eff)` (the blackbody ionizing baseline, [`blackbody_ionizing_fraction`]) times an ATMOSPHERE-MODEL
-/// DEPARTURE BAND `[departure_lo, departure_hi]`: line blanketing, NLTE, and the metal and helium ionization edges
-/// SUPPRESS the real ionizing flux BELOW the LTE blackbody baseline, deepening toward cooler `T_eff`, and the
-/// departure IS the quantity, not a correction. Per RIDER 2 the branch ships the BRACKET and its width is readable
-/// through [`EuvLuminosityBracket::width_dex`] before a consumer reads the bounds: a decade-wide ignorance that
-/// reaches the dispersal race as a single value is the exact defect the bracket prevents. The band is now
-/// PART-CONSTRAINED by a vendored grid (Sternberg, Hoffmann and Pauldrach 2003, WM-basic NLTE): for `T_eff` 25000
-/// to 55000 K (O and early-B) the suppression is within about 0.1 to 0.2 dex above 45000 K, widening to of order 1
-/// dex at the 26000 to 30000 K edge, so `departure ~ 0.1` to `1`. BELOW 25000 K (the Herbig Ae/Be regime where the
-/// radiative dispatch mostly lives) it stays UNCONSTRAINED and deeper, pending a cooler grid (BSTAR2006, Lanz and
-/// Hubeny 2007), the flagged honest limit. `None` on a non-positive input or an inverted band.
-pub fn radiative_euv_luminosity_bracket(
+/// The BLACKBODY IONIZING SPECTRUM: `L_ion`, `Q_H`, and `<E>` for a radiative-envelope star's photosphere, all
+/// three from the SAME LTE Wien-tail integral so they are self-consistent (`L_ion / Q_H = <E>` by construction).
+/// The ionizing luminosity is `L_ion = L_bol * f_BB(T_eff)` ([`blackbody_ionizing_fraction`]); the mean ionizing
+/// photon energy is `<E> = (<E>/E_edge) * k_B * T_ion` ([`mean_ionizing_photon_energy_over_edge`] times the edge
+/// energy, both floor); the photon rate is the ONE division `Q_H = L_ion / <E>`, done here in the log domain (the
+/// erg-scale photon energy of order `3e-11` sits below fixed-point resolution and `Q_H ~ 1e45` above its range, so
+/// everything is `log10`). This is the LTE ESTIMATOR and UPPER BOUND (branch [`AtmosphereBranch::Blackbody`]); a
+/// real atmosphere departs below it, and that departure is applied in PHOTON space by
+/// [`nlte_departed_ionizing_spectrum`], never as an energy multiplier divided by this mean energy. `None` on a
+/// non-positive `L_bol`, a `T_eff` past the Wien-tail edge (the shared domain door), or an intermediate overflow.
+pub fn blackbody_ionizing_spectrum(
     t_eff_k: Fixed,
     l_bol_lsun: Fixed,
     t_ion_k: Fixed,
     wien_x_min: Fixed,
-    departure_lo: Fixed,
-    departure_hi: Fixed,
-) -> Option<EuvLuminosityBracket> {
-    if l_bol_lsun <= Fixed::ZERO || departure_lo <= Fixed::ZERO || departure_hi < departure_lo {
+) -> Option<IonizingSpectrumEvaluation> {
+    if l_bol_lsun <= Fixed::ZERO {
         return None;
     }
+    let ln10 = Fixed::from_int(10).ln();
+    let log10 = |x: Fixed| -> Option<Fixed> { x.ln().checked_div(ln10) };
     let f_bb = blackbody_ionizing_fraction(t_eff_k, t_ion_k, wien_x_min)?;
-    let base = l_bol_lsun.checked_mul(f_bb)?;
-    Some(EuvLuminosityBracket {
-        lo_lsun: base.checked_mul(departure_lo)?,
-        hi_lsun: base.checked_mul(departure_hi)?,
+    // log10(L_ion in erg/s) = log10(L_bol/L_sun) + log10(f_BB) + log10(L_sun in erg/s).
+    let log10_lsun_erg_s = civsim_physics::saha::ln_of_decimal(SOLAR_LUMINOSITY_W)?
+        .checked_div(ln10)?
+        .checked_add(Fixed::from_int(7))?; // W to erg/s
+    let log10_l_ion = log10(l_bol_lsun)?
+        .checked_add(log10(f_bb)?)?
+        .checked_add(log10_lsun_erg_s)?;
+    // log10(<E> in erg) = log10(<E>/E_edge) + log10(k_B in erg/K) + log10(T_ion).
+    let photon_over_edge = mean_ionizing_photon_energy_over_edge(t_eff_k, t_ion_k, wien_x_min)?;
+    let log10_kb_erg = civsim_physics::saha::ln_of_decimal("1.380649e-16")?.checked_div(ln10)?;
+    let log10_mean_e = log10(photon_over_edge)?
+        .checked_add(log10_kb_erg)?
+        .checked_add(log10(t_ion_k)?)?;
+    // The ONE division, self-consistent: log10(Q_H) = log10(L_ion) - log10(<E>).
+    let log10_q_h = log10_l_ion.checked_sub(log10_mean_e)?;
+    Some(IonizingSpectrumEvaluation {
+        photon_rate_log10_s: Log10Band {
+            lo: log10_q_h,
+            hi: log10_q_h,
+        },
+        ionizing_luminosity_log10_erg_s: Some(Log10Band {
+            lo: log10_l_ion,
+            hi: log10_l_ion,
+        }),
+        mean_photon_energy_log10_erg: Some(Log10Band {
+            lo: log10_mean_e,
+            hi: log10_mean_e,
+        }),
+        branch: AtmosphereBranch::Blackbody,
+        t_eff_k,
+    })
+}
+
+/// The NLTE-DEPARTED IONIZING SPECTRUM: the real hot atmosphere's photon rate, formed by applying a PHOTON-NUMBER
+/// departure band `[departure_lo, departure_hi]` to the blackbody `Q_H` IN PHOTON SPACE, `log10(Q_H) =
+/// log10(Q_H,BB) + log10(departure)`. This is the same-spectrum-correct placement of the atmosphere-model band: the
+/// Sternberg, Hoffmann and Pauldrach 2003 grid tabulates `q_H` as a photon flux, so its departure below the
+/// same-`T_eff` blackbody is a photon-number suppression (within about 0.1 to 0.2 dex above 45000 K, of order 1 dex
+/// at the 26000 to 30000 K edge; deeper and UNCONSTRAINED below 25000 K, the Herbig regime, pending a cooler grid).
+/// The departure is NOT applied to an energy and then divided by a mean energy: that would cross an NLTE energy with
+/// an LTE mean. `L_ion` and `<E>` are left absent because this branch does not reconstruct the NLTE energy integral,
+/// so no self-consistent energy pair is claimed. `None` if the input is not a blackbody evaluation, on a
+/// non-positive or inverted departure, or an overflow.
+pub fn nlte_departed_ionizing_spectrum(
+    blackbody: &IonizingSpectrumEvaluation,
+    departure_lo: Fixed,
+    departure_hi: Fixed,
+) -> Option<IonizingSpectrumEvaluation> {
+    if blackbody.branch != AtmosphereBranch::Blackbody
+        || departure_lo <= Fixed::ZERO
+        || departure_hi < departure_lo
+    {
+        return None;
+    }
+    let ln10 = Fixed::from_int(10).ln();
+    let log10 = |x: Fixed| -> Option<Fixed> { x.ln().checked_div(ln10) };
+    // The departure suppresses in PHOTON space: the lower departure gives the lower photon rate.
+    let lo = blackbody
+        .photon_rate_log10_s
+        .lo
+        .checked_add(log10(departure_lo)?)?;
+    let hi = blackbody
+        .photon_rate_log10_s
+        .hi
+        .checked_add(log10(departure_hi)?)?;
+    Some(IonizingSpectrumEvaluation {
+        photon_rate_log10_s: Log10Band { lo, hi },
+        ionizing_luminosity_log10_erg_s: None,
+        mean_photon_energy_log10_erg: None,
+        branch: AtmosphereBranch::NlteLineBlanketed,
+        t_eff_k: blackbody.t_eff_k,
     })
 }
 
@@ -3492,9 +3575,10 @@ pub fn photoevaporative_wind_rate_msun_myr(
 }
 
 /// A PHOTOEVAPORATION RATE BRACKET (solar masses per Myr), the RIDER 2 output form for the radiative-envelope wind
-/// rate. The EUV luminosity that drives it is itself a bracket (the hot-photosphere atmosphere-model band spans
-/// decades, [`EuvLuminosityBracket`]), so the rate it produces is a bracket, never a point: a consumer cannot read
-/// a decade-wide ignorance as a definite mass-loss rate. `[lo, hi]` in solar masses per Myr, with
+/// rate. The ionizing photon rate that drives it is itself a band (the hot-photosphere atmosphere-model departure
+/// spans decades, the [`IonizingSpectrumEvaluation`] photon-rate band), so the rate it produces is a bracket, never
+/// a point: a consumer cannot read a decade-wide ignorance as a definite mass-loss rate. `[lo, hi]` in solar masses
+/// per Myr, with
 /// [`PhotoevaporationRateBracket::width_dex`] making the width machine-readable before any consumer reads the bounds.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct PhotoevaporationRateBracket {
@@ -3729,39 +3813,34 @@ impl EuvWindFit {
 /// ionizing photon rate `Phi` (Hollenbach et al. 1994 Eq. 3.14, cross-confirmed by Alexander et al. 2006 and Font
 /// et al. 2004, all vendored), read from the [`EuvWindFit`] the caller supplies.
 ///
-/// A BRACKET IN, A BRACKET OUT (RIDER 2). The ionizing luminosity is the [`EuvLuminosityBracket`] the
-/// radiative-envelope branch already derives, whose width is the hot-star atmosphere-model departure from the LTE
-/// baseline. That band propagates through the square root to the rate, so the output is a
-/// [`PhotoevaporationRateBracket`] whose width (halved in dex by the `1/2` exponent) is stated before any consumer
-/// reads it, never a point that would launder a decade of spectral ignorance into a definite rate. The
-/// analytic-versus-hydrodynamic MODEL band (which [`EuvWindFit`] the caller passes) is the orthogonal second axis, a
-/// band the consumer forms from two fits.
+/// A BRACKET IN, A BRACKET OUT (RIDER 2). The input is the [`IonizingSpectrumEvaluation`] the radiative-envelope
+/// branch derives, whose photon-rate band width is the hot-star atmosphere-model departure from the LTE baseline
+/// (an NLTE evaluation) or zero (a blackbody evaluation). That band propagates through the square root to the rate,
+/// so the output is a [`PhotoevaporationRateBracket`] whose width (halved in dex by the `1/2` exponent) is stated
+/// before any consumer reads it. The analytic-versus-hydrodynamic MODEL band (which [`EuvWindFit`] the caller
+/// passes) is the orthogonal second axis, a band the consumer forms from two fits.
 ///
-/// THE LUMINOSITY-TO-PHOTON-RATE STEP IS DERIVED, not reserved. Converting the ionizing LUMINOSITY into the photon
-/// RATE `Phi` needs the mean energy of an ionizing photon, and that is [`mean_ionizing_photon_energy_over_edge`] on
-/// the star's own `T_eff`, times the edge energy `E_edge = k_B T_ion` (both floor), so no owner number enters: a hot
-/// star converts its own luminosity to its own photon rate through its own spectrum. It is formed IN THE LOG DOMAIN,
-/// because the photon energy in erg (about 3e-11) sits BELOW the fixed-point resolution and would underflow to zero
-/// if built directly, the same SI-window discipline the whole rate obeys: the ionizing photon rate (order `1e45` per
-/// second) and the mass-loss rate (order `1e-10` solar masses per year) both sit outside the representable range, so
-/// everything is carried as `log10` and exponentiated once at the end.
+/// THE SAME-SPECTRUM RULE. The wind consumes the photon rate `Q_H` DIRECTLY from the spectrum
+/// (`photon_rate_log10_s`), never an ionizing luminosity divided here by a mean photon energy. The one
+/// luminosity-to-photon-rate division lives inside [`blackbody_ionizing_spectrum`], self-consistent within the LTE
+/// blackbody, and any NLTE departure is applied in PHOTON space by [`nlte_departed_ionizing_spectrum`]. So an
+/// NLTE-adjusted energy is never crossed with an LTE mean energy: the three correlated departures (integrated
+/// energy, photon number, mean energy) stay inside one branch. The photon rate (order `1e45` per second) and the
+/// mass-loss rate (order `1e-10` solar masses per year) both sit outside the fixed-point range, so the whole rate
+/// is carried as `log10` and exponentiated once at the end.
 ///
-/// ADMITS THE ALIEN: the rate keys on the star's OWN ionizing luminosity and mass, so a hot star of any composition
-/// photoevaporates its disk through its own spectrum, never a Terran template. SCOPE: the EUV (hydrogen-ionizing)
-/// diffuse-field weak wind at 1e4 K, not the X-ray or FUV wind; the direct-field rate (about 8.8 times higher, which
-/// dominates once the inner disk drains and turns optically thin) is a flagged later-phase sibling this rate does
-/// not carry. The Herbig regime (about 2 to 15 M_sun), where the radiative-envelope dispatch mostly lives, is a
-/// validation GAP bridged by the analytic scaling: the result is GRADED, so a mass in that gap returns a
-/// [`PhotoevaporationRateEvaluation`] tagged [`FitReach::AnalyticExtrapolation`] (estimator provenance) rather than
-/// the same rate a grounded mass would, and a mass outside the fit's whole reach REFUSES. `None` on a non-star
-/// mass, a mass outside the fit's typed domain (grounded or extrapolation), a non-positive photon energy, a
-/// non-positive luminosity bound, or an intermediate past the representable range.
+/// ADMITS THE ALIEN: the rate keys on the star's OWN ionizing photon rate and mass, so a hot star of any
+/// composition photoevaporates its disk through its own spectrum, never a Terran template. SCOPE: the EUV
+/// (hydrogen-ionizing) diffuse-field weak wind at 1e4 K, not the X-ray or FUV wind; the direct-field rate (about
+/// 8.8 times higher, which dominates once the inner disk drains and turns optically thin) is a flagged later-phase
+/// sibling this rate does not carry. The Herbig regime (about 2 to 15 M_sun), where the radiative-envelope dispatch
+/// mostly lives, is a validation GAP bridged by the analytic scaling: the result is GRADED, so a mass in that gap
+/// returns a [`PhotoevaporationRateEvaluation`] tagged [`FitReach::AnalyticExtrapolation`] (estimator provenance)
+/// rather than the same rate a grounded mass would, and a mass outside the fit's whole reach REFUSES. `None` on a
+/// non-star mass, a mass outside the fit's typed domain, or an intermediate past the representable range.
 pub fn radiative_euv_photoevaporation_wind_rate_msun_myr(
-    euv_luminosity: EuvLuminosityBracket,
+    spectrum: &IonizingSpectrumEvaluation,
     star_mass_ratio: Fixed,
-    t_eff_k: Fixed,
-    t_ion_k: Fixed,
-    wien_x_min: Fixed,
     fit: &EuvWindFit,
 ) -> Option<PhotoevaporationRateEvaluation> {
     if star_mass_ratio <= Fixed::ZERO {
@@ -3772,26 +3851,9 @@ pub fn radiative_euv_photoevaporation_wind_rate_msun_myr(
     let ln10 = Fixed::from_int(10).ln();
     let log10 = |x: Fixed| -> Option<Fixed> { x.ln().checked_div(ln10) };
     let log10_m = log10(star_mass_ratio)?;
-    // The mean ionizing photon energy, DERIVED from T_eff as a multiple of the edge, then the edge energy itself
-    // E_edge = k_B * T_ion (both floor): E_photon(erg) = (<E>/E_edge) * k_B(erg/K) * T_ion. Formed in the log
-    // domain so the tiny photon energy (about 3e-11 erg) never underflows fixed point (the SI-window discipline).
-    let photon_over_edge = mean_ionizing_photon_energy_over_edge(t_eff_k, t_ion_k, wien_x_min)?;
-    let log10_kb_erg_per_k =
-        civsim_physics::saha::ln_of_decimal("1.380649e-16")?.checked_div(ln10)?;
-    let log10_e_photon_erg = log10(photon_over_edge)?
-        .checked_add(log10_kb_erg_per_k)?
-        .checked_add(log10(t_ion_k)?)?;
-    let log10_lsun_erg_s = civsim_physics::saha::ln_of_decimal(SOLAR_LUMINOSITY_W)?
-        .checked_div(ln10)?
-        .checked_add(Fixed::from_int(7))?; // Watts to erg/s
     let ln_ceiling = Fixed::from_int(31).checked_mul(Fixed::from_int(2).ln())?;
-    let rate_for = |l_euv_lsun: Fixed| -> Option<Fixed> {
-        if l_euv_lsun <= Fixed::ZERO {
-            return None;
-        }
-        // log10(Phi in photons/s) = log10(L_EUV in erg/s) - log10(E_photon in erg).
-        let log10_l_erg_s = log10(l_euv_lsun)?.checked_add(log10_lsun_erg_s)?;
-        let log10_phi = log10_l_erg_s.checked_sub(log10_e_photon_erg)?;
+    // The wind law on the photon rate Q_H read straight from the spectrum: no luminosity-to-photon division here.
+    let rate_for = |log10_phi: Fixed| -> Option<Fixed> {
         // log10(Mdot in M_sun/yr) = log10(C) + p*(log10(Phi) - log10(Phi_ref)) + q*log10(M).
         let phi_term = fit
             .phi_exponent
@@ -3810,10 +3872,9 @@ pub fn radiative_euv_photoevaporation_wind_rate_msun_myr(
         }
         Some(ln_rate.exp())
     };
-    // The EUV luminosity bracket propagates monotonically: the lower luminosity gives the lower rate, the higher the
-    // higher, so the bounds pair without a reorder.
-    let lo = rate_for(euv_luminosity.lo_lsun())?;
-    let hi = rate_for(euv_luminosity.hi_lsun())?;
+    // The photon-rate band propagates monotonically: the lower Q_H gives the lower rate, the higher the higher.
+    let lo = rate_for(spectrum.photon_rate_log10_s.lo)?;
+    let hi = rate_for(spectrum.photon_rate_log10_s.hi)?;
     Some(PhotoevaporationRateEvaluation {
         rate: PhotoevaporationRateBracket {
             lo_msun_myr: lo,
@@ -3833,7 +3894,7 @@ pub fn radiative_euv_photoevaporation_wind_rate_msun_myr(
 /// ([`photoevaporative_wind_rate_msun_myr`]) -> the accretion-versus-wind dispersal race
 /// ([`derive_disk_lifetime_myr`]). This is the CONVECTIVE branch, a T Tauri star with a rotation-driven dynamo;
 /// a radiative-envelope (Herbig) star has no dynamo and takes the EUV branch instead
-/// ([`radiative_euv_luminosity_bracket`]), dispatched on the star's envelope structure at the Kraft break, its
+/// ([`blackbody_ionizing_spectrum`]), dispatched on the star's envelope structure at the Kraft break, its
 /// sibling.
 ///
 /// DORMANT: no run-path caller yet; the consumer wire that feeds this `tau_disk` into the #73 giant gate and the
@@ -6394,78 +6455,96 @@ mod tests {
     }
 
     #[test]
-    fn the_euv_branch_ships_a_bracket_with_its_width_stated() {
-        // RIDER 2: the branch's output is a BRACKET whose width is readable before a consumer reads the bounds.
-        // A departure band of [1, 100] (two dex, the atmosphere-model ensemble spread) makes the bracket two dex
-        // wide, and width_dex reports exactly that. The width is the departure band's, independent of the
-        // blackbody baseline.
-        let b = radiative_euv_luminosity_bracket(
+    fn the_blackbody_spectrum_is_same_spectrum_self_consistent() {
+        // THE SAME-SPECTRUM IDENTITY (the audit's required test): all three quantities come from ONE blackbody
+        // integral, so L_ion / Q_H = <E> exactly, i.e. log10(L_ion) - log10(Q_H) = log10(<E>). No NLTE energy is
+        // ever crossed with an LTE mean energy because there is one branch here.
+        let bb = blackbody_ionizing_spectrum(
             Fixed::from_int(15000),
             Fixed::from_int(100), // L_bol ~ 100 L_sun, a Herbig
             t_ion(),
             wien_x_min(),
-            Fixed::ONE,           // departure_lo
-            Fixed::from_int(100), // departure_hi (two dex)
         )
         .unwrap();
-        assert!(b.hi_lsun() > b.lo_lsun(), "the bracket brackets");
-        let width = b.width_dex().unwrap().to_f64_lossy();
+        assert_eq!(bb.branch, AtmosphereBranch::Blackbody);
+        let l_ion = bb.ionizing_luminosity_log10_erg_s.unwrap().lo;
+        let q_h = bb.photon_rate_log10_s.lo;
+        let mean_e = bb.mean_photon_energy_log10_erg.unwrap().lo;
         assert!(
-            (width - 2.0).abs() < 0.01,
-            "the stated width is the departure band's two dex, got {width}"
+            (l_ion.checked_sub(q_h).unwrap().to_f64_lossy() - mean_e.to_f64_lossy()).abs() < 1e-6,
+            "L_ion / Q_H = <E> holds within the one blackbody branch"
         );
+        // The blackbody is a POINT spectrum: zero-width photon-rate band.
+        assert_eq!(bb.photon_rate_log10_s.width_dex(), Some(Fixed::ZERO));
     }
 
     #[test]
-    fn the_bracket_scales_with_luminosity_and_holds_its_width() {
-        // Doubling L_bol doubles both bounds (the ionizing luminosity is linear in L_bol) and leaves the width
-        // unchanged (the width is the model band, not the star's brightness).
-        let one = radiative_euv_luminosity_bracket(
+    fn the_nlte_departure_applies_in_photon_space_with_its_width_stated() {
+        // RIDER 2: the NLTE branch's photon rate is a BAND whose width is readable before a consumer reads it. A
+        // photon-number departure of [0.01, 1] (two dex of suppression below the blackbody, the atmosphere-model
+        // ensemble spread) makes the Q_H band two dex wide, applied IN PHOTON SPACE, and width_dex reports it.
+        let bb = blackbody_ionizing_spectrum(
+            Fixed::from_int(15000),
+            Fixed::from_int(100),
+            t_ion(),
+            wien_x_min(),
+        )
+        .unwrap();
+        let nlte = nlte_departed_ionizing_spectrum(
+            &bb,
+            Fixed::from_ratio(1, 100), // 0.01, deep suppression edge
+            Fixed::ONE,                // 1.0, the blackbody edge
+        )
+        .unwrap();
+        assert_eq!(nlte.branch, AtmosphereBranch::NlteLineBlanketed);
+        // The suppressed edge is below the blackbody photon rate; the unsuppressed edge equals it.
+        assert!(nlte.photon_rate_log10_s.lo < bb.photon_rate_log10_s.lo);
+        assert_eq!(nlte.photon_rate_log10_s.hi, bb.photon_rate_log10_s.hi);
+        let width = nlte.photon_rate_log10_s.width_dex().unwrap().to_f64_lossy();
+        assert!(
+            (width - 2.0).abs() < 0.01,
+            "the photon-rate band is the departure's two dex, got {width}"
+        );
+        // The NLTE branch does not claim a self-consistent energy pair it did not reconstruct.
+        assert!(nlte.ionizing_luminosity_log10_erg_s.is_none());
+        assert!(nlte.mean_photon_energy_log10_erg.is_none());
+    }
+
+    #[test]
+    fn the_blackbody_photon_rate_scales_with_luminosity() {
+        // Doubling L_bol doubles Q_H (the ionizing luminosity is linear in L_bol, and the one division by the
+        // same-T_eff mean energy is unchanged), so log10(Q_H) rises by log10(2).
+        let one = blackbody_ionizing_spectrum(
             Fixed::from_int(20000),
             Fixed::from_int(50),
             t_ion(),
             wien_x_min(),
-            Fixed::ONE,
-            Fixed::from_int(30),
         )
         .unwrap();
-        let two = radiative_euv_luminosity_bracket(
+        let two = blackbody_ionizing_spectrum(
             Fixed::from_int(20000),
             Fixed::from_int(100),
             t_ion(),
             wien_x_min(),
-            Fixed::ONE,
-            Fixed::from_int(30),
         )
         .unwrap();
-        let ratio = two.hi_lsun().to_f64_lossy() / one.hi_lsun().to_f64_lossy();
+        let ratio = 10.0_f64.powf(
+            two.photon_rate_log10_s.lo.to_f64_lossy() - one.photon_rate_log10_s.lo.to_f64_lossy(),
+        );
         assert!(
             (ratio - 2.0).abs() < 0.001,
-            "twice the L_bol, twice the bound"
+            "twice the L_bol, twice the photon rate, got {ratio}"
         );
-        let (w1, w2) = (one.width_dex().unwrap(), two.width_dex().unwrap());
-        assert_eq!(w1, w2, "the width is the model band, invariant under L_bol");
     }
 
     #[test]
-    fn the_euv_bracket_refuses_bad_inputs() {
-        // A non-positive luminosity, an inverted band, and a non-positive temperature are errors, never brackets.
-        assert!(radiative_euv_luminosity_bracket(
+    fn the_ionizing_spectrum_refuses_bad_inputs() {
+        // A non-positive luminosity is an error, never a spectrum.
+        assert!(blackbody_ionizing_spectrum(
             Fixed::from_int(15000),
             Fixed::ZERO,
             t_ion(),
-            wien_x_min(),
-            Fixed::ONE,
-            Fixed::from_int(100)
-        )
-        .is_none());
-        assert!(radiative_euv_luminosity_bracket(
-            Fixed::from_int(15000),
-            Fixed::from_int(100),
-            t_ion(),
-            wien_x_min(),
-            Fixed::from_int(100),
-            Fixed::ONE // hi < lo, inverted
+            wien_x_min()
         )
         .is_none());
         assert!(blackbody_ionizing_fraction(Fixed::from_int(-1), t_ion(), wien_x_min()).is_none());
@@ -6475,36 +6554,46 @@ mod tests {
             blackbody_ionizing_fraction(Fixed::from_int(60000), t_ion(), wien_x_min()).is_none(),
             "a 60000 K photosphere is past the Wien-tail validity edge: refuse, do not extrapolate"
         );
+        assert!(blackbody_ionizing_spectrum(
+            Fixed::from_int(60000),
+            Fixed::from_int(100),
+            t_ion(),
+            wien_x_min()
+        )
+        .is_none());
         // The audit's checked-arithmetic fix: a sub-122 K photosphere (x > ~1290) would overflow the polynomial
-        // `x^3`; the checked multiply REFUSES with None (the total-kernel contract) rather than wrapping to
-        // garbage. Non-stellar, but the guard now enforces it instead of trusting the caller.
+        // `x^3`; the checked multiply REFUSES with None (the total-kernel contract) rather than wrapping to garbage.
         assert!(
             blackbody_ionizing_fraction(Fixed::from_int(100), t_ion(), wien_x_min()).is_none(),
             "a 100 K photosphere overflows x^3: refuse (checked), never a wrapped value"
         );
-        assert!(radiative_euv_luminosity_bracket(
-            Fixed::from_int(60000),
-            Fixed::from_int(100),
-            t_ion(),
-            wien_x_min(),
-            Fixed::ONE,
-            Fixed::from_int(100)
-        )
-        .is_none());
-        // A degenerate band [d, d] is a valid point bracket of zero width.
-        let point = radiative_euv_luminosity_bracket(
+        // The NLTE departure refuses an inverted band and a non-blackbody input.
+        let bb = blackbody_ionizing_spectrum(
             Fixed::from_int(15000),
             Fixed::from_int(100),
             t_ion(),
             wien_x_min(),
-            Fixed::from_int(5),
-            Fixed::from_int(5),
         )
         .unwrap();
+        assert!(
+            nlte_departed_ionizing_spectrum(&bb, Fixed::ONE, Fixed::from_ratio(1, 100)).is_none(),
+            "an inverted departure band (hi < lo) refuses"
+        );
+        let already_nlte =
+            nlte_departed_ionizing_spectrum(&bb, Fixed::from_ratio(1, 10), Fixed::ONE).unwrap();
+        assert!(
+            nlte_departed_ionizing_spectrum(&already_nlte, Fixed::from_ratio(1, 10), Fixed::ONE)
+                .is_none(),
+            "the departure only applies to a blackbody evaluation, never a re-departed one"
+        );
+        // A degenerate departure [d, d] is a valid point band of zero width.
+        let point =
+            nlte_departed_ionizing_spectrum(&bb, Fixed::from_ratio(1, 2), Fixed::from_ratio(1, 2))
+                .unwrap();
         assert_eq!(
-            point.width_dex(),
+            point.photon_rate_log10_s.width_dex(),
             Some(Fixed::ZERO),
-            "a point band has zero width"
+            "a point departure has zero width"
         );
     }
 
@@ -6549,42 +6638,42 @@ mod tests {
 
     #[test]
     fn the_euv_wind_rate_matches_the_hollenbach_normalization_oracle() {
-        // Oracle against an independent f64 computation of the HJLS94 rate through the whole chain
-        // (T_eff -> <E> -> Phi -> Mdot). A 1e-2 L_sun ionizing luminosity, one solar mass, a 15000 K photosphere
-        // (the mean ionizing photon energy DERIVED from it, no reserved value).
-        let l_euv = Fixed::from_ratio(1, 100); // 1e-2 L_sun, a point bracket
-        let euv = EuvLuminosityBracket {
-            lo_lsun: l_euv,
-            hi_lsun: l_euv,
-        };
-        let out = radiative_euv_photoevaporation_wind_rate_msun_myr(
-            euv,
-            Fixed::ONE,
+        // END-TO-END oracle (the audit's requirement: begin at a grid state, not an arbitrary ionizing luminosity):
+        // start from (T_eff, L_bol), build the blackbody spectrum (L_ion, Q_H, <E> from one integral), feed Q_H to
+        // the wind law, and match an independent f64 chain L_bol -> f_BB -> L_ion -> Q_H = L_ion/<E> -> Mdot.
+        let bb = blackbody_ionizing_spectrum(
             Fixed::from_int(15000),
+            Fixed::from_int(100), // L_bol ~ 100 L_sun, a Herbig
             t_ion(),
             wien_x_min(),
+        )
+        .unwrap();
+        let out = radiative_euv_photoevaporation_wind_rate_msun_myr(
+            &bb,
+            Fixed::ONE,
             &EuvWindFit::hollenbach_1994(),
         )
         .unwrap();
-        // The f64 oracle, computed OUTSIDE the code. The mean ionizing photon energy is DERIVED:
-        // <E> = k_B T_ion * Gamma(4,x)/(x Gamma(3,x)) with x = T_ion/T_eff, then Phi = L_EUV(erg/s)/<E>(erg).
+        // The f64 oracle, computed OUTSIDE the code, replicates the same one-branch chain.
         let l_sun_erg_s = 3.828e26_f64 * 1e7; // solar luminosity in erg/s
         let (t_ion_f, k_b_erg) = (157821.0_f64, 1.380649e-16_f64);
         let x = t_ion_f / 15000.0;
-        let e_photon_erg = k_b_erg * t_ion_f * (x * x * x + 3.0 * x * x + 6.0 * x + 6.0)
-            / (x * (x * x + 2.0 * x + 2.0));
-        let phi = (1e-2 * l_sun_erg_s) / e_photon_erg;
+        let poly = x * x * x + 3.0 * x * x + 6.0 * x + 6.0;
+        let f_bb = (15.0 / std::f64::consts::PI.powi(4)) * (-x).exp() * poly;
+        let l_ion_erg_s = 100.0 * f_bb * l_sun_erg_s;
+        let e_photon_erg = k_b_erg * t_ion_f * poly / (x * (x * x + 2.0 * x + 2.0));
+        let phi = l_ion_erg_s / e_photon_erg; // Q_H
         let mdot_myr = 4.1e-10 * (phi / 1e41).powf(0.5) * 1.0_f64.powf(0.5) * 1e6;
         let got = out.rate.lo_msun_myr().to_f64_lossy();
         assert!(
             (got / mdot_myr - 1.0).abs() < 0.03,
-            "the derived EUV wind rate matches the Hollenbach oracle: got {got}, oracle {mdot_myr}"
+            "the end-to-end EUV wind rate matches the Hollenbach oracle: got {got}, oracle {mdot_myr}"
         );
-        // A point luminosity gives a point rate: zero-width bracket.
+        // A blackbody (point) spectrum gives a point rate: zero-width bracket.
         assert_eq!(
             out.rate.width_dex(),
             Some(Fixed::ZERO),
-            "a point bracket has zero width"
+            "a point spectrum has zero rate width"
         );
         // One solar mass sits BELOW Hollenbach's grounded 15-to-65 massive-star grid, so the rate is graded an
         // analytic extrapolation (estimator), not a grounded point: the disjoint-evidence fix in action.
@@ -6595,31 +6684,34 @@ mod tests {
     }
 
     #[test]
-    fn the_euv_wind_rate_scales_as_the_square_root_of_the_luminosity() {
-        // Mdot ~ Phi^(1/2) ~ L_EUV^(1/2), so a hundredfold luminosity band gives a tenfold rate band, and the rate
-        // bracket's width is HALF the luminosity bracket's in dex (the RIDER 2 propagation stated on the output).
-        let euv = EuvLuminosityBracket {
-            lo_lsun: Fixed::from_ratio(1, 1000), // 1e-3 L_sun
-            hi_lsun: Fixed::from_ratio(1, 10),   // 1e-1 L_sun, a factor 100 band (2 dex)
-        };
-        let out = radiative_euv_photoevaporation_wind_rate_msun_myr(
-            euv,
-            Fixed::ONE,
+    fn the_euv_wind_rate_scales_as_the_square_root_of_the_photon_rate() {
+        // Mdot ~ Q_H^(1/2), so a hundredfold photon-rate band (two dex, an NLTE departure applied in photon space)
+        // gives a tenfold rate band, and the rate bracket's width is HALF the photon band's in dex (RIDER 2).
+        let bb = blackbody_ionizing_spectrum(
             Fixed::from_int(15000),
+            Fixed::from_int(100),
             t_ion(),
             wien_x_min(),
+        )
+        .unwrap();
+        // A [0.01, 1] photon-number departure is a two-dex Q_H band.
+        let nlte =
+            nlte_departed_ionizing_spectrum(&bb, Fixed::from_ratio(1, 100), Fixed::ONE).unwrap();
+        let out = radiative_euv_photoevaporation_wind_rate_msun_myr(
+            &nlte,
+            Fixed::ONE,
             &EuvWindFit::hollenbach_1994(),
         )
         .unwrap();
         let ratio = out.rate.hi_msun_myr().to_f64_lossy() / out.rate.lo_msun_myr().to_f64_lossy();
         assert!(
             (ratio - 10.0).abs() < 0.1,
-            "a 100x luminosity band gives a 10x (sqrt) rate band, got {ratio}"
+            "a 100x photon-rate band gives a 10x (sqrt) rate band, got {ratio}"
         );
         let width = out.rate.width_dex().unwrap().to_f64_lossy();
         assert!(
             (width - 1.0).abs() < 0.01,
-            "the rate bracket is 1 dex, half the luminosity's 2 dex, got {width}"
+            "the rate bracket is 1 dex, half the photon band's 2 dex, got {width}"
         );
     }
 
@@ -6628,23 +6720,18 @@ mod tests {
         // The three cited channels form the model band: the Font hydrodynamic floor (1.52e-10) below the Hollenbach
         // analytic (4.1e-10) below the Alexander analytic ceiling (4.4e-10), at identical inputs. This is the band a
         // consumer forms, the analytic-versus-hydrodynamic sibling of the X-ray Owen-versus-Sellek band.
-        let l_euv = Fixed::from_ratio(1, 100);
-        let euv = EuvLuminosityBracket {
-            lo_lsun: l_euv,
-            hi_lsun: l_euv,
-        };
+        let bb = blackbody_ionizing_spectrum(
+            Fixed::from_int(15000),
+            Fixed::from_int(100),
+            t_ion(),
+            wien_x_min(),
+        )
+        .unwrap();
         let rate = |fit: &EuvWindFit| {
-            radiative_euv_photoevaporation_wind_rate_msun_myr(
-                euv,
-                Fixed::ONE,
-                Fixed::from_int(15000),
-                t_ion(),
-                wien_x_min(),
-                fit,
-            )
-            .unwrap()
-            .rate
-            .lo_msun_myr()
+            radiative_euv_photoevaporation_wind_rate_msun_myr(&bb, Fixed::ONE, fit)
+                .unwrap()
+                .rate
+                .lo_msun_myr()
         };
         let font = rate(&EuvWindFit::font_2004_hydrodynamic());
         let hollenbach = rate(&EuvWindFit::hollenbach_1994());
@@ -6660,55 +6747,34 @@ mod tests {
 
     #[test]
     fn the_euv_wind_rate_guards_its_domain() {
-        // Fail-loud: a mass outside the fit's grounded span, a photosphere past the Wien-tail validity edge, and a
-        // non-positive luminosity bound each refuse, never a silent rate.
-        let euv = EuvLuminosityBracket {
-            lo_lsun: Fixed::from_ratio(1, 100),
-            hi_lsun: Fixed::from_ratio(1, 100),
-        };
+        // Fail-loud: a mass outside the fit's whole reach refuses, and a photosphere past the Wien-tail validity edge
+        // refuses at the spectrum, so no wind rate can be built from it.
+        let bb = blackbody_ionizing_spectrum(
+            Fixed::from_int(15000),
+            Fixed::from_int(100),
+            t_ion(),
+            wien_x_min(),
+        )
+        .unwrap();
         let fit = EuvWindFit::hollenbach_1994();
         // Below the 0.1 M_sun extrapolation floor and above the 65 M_sun grounded ceiling: outside the whole reach.
         assert!(radiative_euv_photoevaporation_wind_rate_msun_myr(
-            euv,
+            &bb,
             Fixed::from_ratio(5, 100),
-            Fixed::from_int(15000),
-            t_ion(),
-            wien_x_min(),
             &fit
         )
         .is_none());
-        assert!(radiative_euv_photoevaporation_wind_rate_msun_myr(
-            euv,
-            Fixed::from_int(100),
-            Fixed::from_int(15000),
-            t_ion(),
-            wien_x_min(),
-            &fit
-        )
-        .is_none());
+        assert!(
+            radiative_euv_photoevaporation_wind_rate_msun_myr(&bb, Fixed::from_int(100), &fit)
+                .is_none()
+        );
         // A 60000 K photosphere is past the Wien-tail validity edge (x = T_ion/T_eff < wien_x_min ~ 3), so the
-        // derived mean photon energy refuses and the rate with it: the shared domain door, not an extrapolation.
-        assert!(radiative_euv_photoevaporation_wind_rate_msun_myr(
-            euv,
-            Fixed::ONE,
+        // SPECTRUM refuses to form, and there is no laundered rate downstream: the shared domain door moved up front.
+        assert!(blackbody_ionizing_spectrum(
             Fixed::from_int(60000),
+            Fixed::from_int(100),
             t_ion(),
-            wien_x_min(),
-            &fit
-        )
-        .is_none());
-        // A non-positive luminosity bound.
-        let bad = EuvLuminosityBracket {
-            lo_lsun: Fixed::ZERO,
-            hi_lsun: Fixed::from_ratio(1, 100),
-        };
-        assert!(radiative_euv_photoevaporation_wind_rate_msun_myr(
-            bad,
-            Fixed::ONE,
-            Fixed::from_int(15000),
-            t_ion(),
-            wien_x_min(),
-            &fit
+            wien_x_min()
         )
         .is_none());
     }
