@@ -62,6 +62,16 @@ jobs:
         run: |
           python3 scripts/quarantine_gate.py
           python3 scripts/quarantine_gate.py --self-test
+      # The vendoring pipeline. The generator check runs FIRST: the gate reads the mirrored registry, so a
+      # stale mirror would have it checking a wrong picture of the tree and passing on it.
+      - name: Sources generator (the mirrored registry and the bibliography are not stale)
+        run: |
+          python3 scripts/gen_sources.py --self-test
+          python3 scripts/gen_sources.py --check
+      - name: Sources gate (a vendored source is checksummed, archived, scoped, slimmed and licence-cleared)
+        run: |
+          python3 scripts/sources_gate.py --self-test
+          python3 scripts/sources_gate.py
 
   rust:
     name: build, format, lint, test

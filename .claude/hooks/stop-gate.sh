@@ -108,6 +108,23 @@ if [ -f "$ROOT/scripts/derives_gate.py" ] && [ -f "$ROOT/scripts/derives_baselin
   fi
 fi
 
+# Sources gate. A vendored source is checksummed, archived, scoped, slimmed and licence-cleared, or it does
+# not land. The generator check runs first: the gate reads the mirrored registry, so a stale mirror would
+# have it checking a wrong picture of the tree and passing on it. Inert until both scripts and the baseline
+# exist, so it does not fire on a branch that predates them.
+if [ -f "$ROOT/scripts/sources_gate.py" ] && [ -f "$ROOT/scripts/sources_baseline.tsv" ]; then
+  if ! python3 "$ROOT/scripts/gen_sources.py" --check >/tmp/civsim_gensources.out 2>&1; then
+    echo "stop-gate: the source registry or the bibliography is stale." >&2
+    tail -10 /tmp/civsim_gensources.out >&2
+    exit 2
+  fi
+  if ! python3 "$ROOT/scripts/sources_gate.py" >/tmp/civsim_sources.out 2>&1; then
+    echo "stop-gate: the sources gate failed." >&2
+    tail -20 /tmp/civsim_sources.out >&2
+    exit 2
+  fi
+fi
+
 reg="docs/working/PHYSICS_FLOOR_REGISTRY.md"
 gen="scripts/gen_floor_registry.py"
 if [ -f "$ROOT/$gen" ] && [ -f "$ROOT/$reg" ]; then
