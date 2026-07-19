@@ -3100,6 +3100,214 @@ pub fn photoevaporative_wind_rate_msun_myr(
     Some(ln_rate.exp())
 }
 
+/// A PHOTOEVAPORATION RATE BRACKET (solar masses per Myr), the RIDER 2 output form for the radiative-envelope wind
+/// rate. The EUV luminosity that drives it is itself a bracket (the hot-photosphere atmosphere-model band spans
+/// decades, [`EuvLuminosityBracket`]), so the rate it produces is a bracket, never a point: a consumer cannot read
+/// a decade-wide ignorance as a definite mass-loss rate. `[lo, hi]` in solar masses per Myr, with
+/// [`PhotoevaporationRateBracket::width_dex`] making the width machine-readable before any consumer reads the bounds.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct PhotoevaporationRateBracket {
+    lo_msun_myr: Fixed,
+    hi_msun_myr: Fixed,
+}
+
+impl PhotoevaporationRateBracket {
+    /// The lower bound (solar masses per Myr).
+    pub fn lo_msun_myr(self) -> Fixed {
+        self.lo_msun_myr
+    }
+    /// The upper bound (solar masses per Myr).
+    pub fn hi_msun_myr(self) -> Fixed {
+        self.hi_msun_myr
+    }
+    /// The bracket WIDTH in dex (`log10(hi/lo)`), the stated width RIDER 2 requires be readable before a consumer
+    /// reads the bounds. `None` on a degenerate bracket (a non-positive bound).
+    pub fn width_dex(self) -> Option<Fixed> {
+        if self.lo_msun_myr <= Fixed::ZERO || self.hi_msun_myr <= Fixed::ZERO {
+            return None;
+        }
+        let ln10 = Fixed::from_int(10).ln();
+        self.hi_msun_myr
+            .checked_div(self.lo_msun_myr)?
+            .ln()
+            .checked_div(ln10)
+    }
+}
+
+/// The EUV PHOTOEVAPORATION WIND-RATE FIT: the reserved-with-basis coefficients of the radiative-envelope branch's
+/// mass-loss rate `Mdot = C (Phi/Phi_ref)^p (M_star/M_sun)^q` (solar masses per YEAR), where `Phi` is the star's own
+/// ionizing (Lyman-continuum) photon rate in photons per second. The mechanism (the power law) is fixed Rust
+/// (Principle 11); the coefficient, the reference photon rate, and the two exponents are cited data a constructor
+/// supplies, one per literature channel, the way [`XrayWindFit`] carries the X-ray branch's rows. A consumer forms
+/// the MODEL BAND by evaluating two channels, the analytic ceiling ([`EuvWindFit::hollenbach_1994`] or
+/// [`EuvWindFit::alexander_2006`]) and the hydrodynamic floor ([`EuvWindFit::font_2004_hydrodynamic`]), the
+/// analytic-versus-hydrodynamic sibling of the Owen-versus-Sellek band the X-ray branch forms. That model band is
+/// ORTHOGONAL to the atmosphere-model band the EUV luminosity itself carries; both ship as brackets.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct EuvWindFit {
+    /// `log10` of the wind-rate coefficient (solar masses per YEAR) at the reference photon rate and one solar mass.
+    pub log10_coefficient_msun_yr: Fixed,
+    /// `log10` of the reference ionizing photon rate (photons/s) the coefficient normalizes to (41 for the `1e41`
+    /// per second T Tauri normalization the low-mass channels use).
+    pub log10_phi_reference_per_s: Fixed,
+    /// The exponent on `(Phi/Phi_ref)` (`1/2`: the rate scales as the square root of the ionizing photon rate).
+    pub phi_exponent: Fixed,
+    /// The exponent on `(M_star/M_sun)` (`1/2`: the rate scales as the square root of stellar mass).
+    pub mass_exponent: Fixed,
+    /// Fit validity lower bound (solar masses), the low edge of the grounded span (the T Tauri analytic extension).
+    pub mass_min_msun: Fixed,
+    /// Fit validity upper bound (solar masses), the high edge (the massive-star numerical models). The Herbig regime
+    /// (about 2 to 15 M_sun) sits in a validation GAP between the two, bridged by the analytic scaling.
+    pub mass_max_msun: Fixed,
+}
+
+impl EuvWindFit {
+    /// The Hollenbach, Johnstone, Lizano and Shu 1994 analytic WEAK-WIND rate, the TRUE ORIGIN of the EUV
+    /// photoevaporation normalization, as cited data: Eq. 3.14 `Mdot = 1.3e-5 Phi_49^(1/2) M_1^(1/2)` M_sun/yr,
+    /// rescaled to the T Tauri normalization `4.1e-10 (Phi/1e41 s^-1)^(1/2) (M_star/M_sun)^(1/2)` M_sun/yr. This is
+    /// the ANALYTIC rate (launch velocity `v = c_s`), a UPPER edge of the model band. Validity per the primary: the
+    /// 1e4 K photoionized diffuse-field weak wind; the numerical models span 15 to 65 M_sun, the low-mass reach is
+    /// the analytic scaling extended by Font 2004 and Alexander 2006. The coefficient is stored as `log10(4.1e-10)`.
+    /// Vendored in `disk_arc_literature` (`hollenbach_1994`).
+    pub fn hollenbach_1994() -> Self {
+        EuvWindFit {
+            log10_coefficient_msun_yr: Fixed::from_ratio(-938722, 100_000), // log10(4.1e-10)
+            log10_phi_reference_per_s: Fixed::from_int(41),                 // Phi_ref = 1e41 s^-1
+            phi_exponent: Fixed::from_ratio(1, 2),                          // 1/2
+            mass_exponent: Fixed::from_ratio(1, 2),                         // 1/2
+            mass_min_msun: Fixed::from_ratio(1, 10),                        // 0.1 M_sun (analytic extension edge)
+            mass_max_msun: Fixed::from_int(65),                            // 65 M_sun (massive-star model edge)
+        }
+    }
+
+    /// The Alexander, Clarke and Pringle 2006 restatement of the HJLS94 rate, the CROSS-REFERENCE channel and the
+    /// analytic ceiling, as cited data: Eq. 2 `Mdot = 4.4e-10 (Phi/1e41 s^-1)^(1/2) (M_star/M_sun)^(1/2)` M_sun/yr,
+    /// attributed to Hollenbach et al. 1994. The 4.4e-10 sits about 7 percent above the HJLS94 rescaled 4.1e-10 (the
+    /// exact analytic prefactor versus the numerically-fitted Eq. 3.14); the exponents agree exactly across both
+    /// channels. The coefficient is stored as `log10(4.4e-10)`. Vendored in `disk_arc_literature` (`alexander_2006_ii`).
+    pub fn alexander_2006() -> Self {
+        EuvWindFit {
+            log10_coefficient_msun_yr: Fixed::from_ratio(-935655, 100_000), // log10(4.4e-10)
+            log10_phi_reference_per_s: Fixed::from_int(41),                 // Phi_ref = 1e41 s^-1
+            phi_exponent: Fixed::from_ratio(1, 2),                          // 1/2
+            mass_exponent: Fixed::from_ratio(1, 2),                         // 1/2
+            mass_min_msun: Fixed::from_ratio(1, 10),                        // 0.1 M_sun
+            mass_max_msun: Fixed::from_int(65),                            // 65 M_sun
+        }
+    }
+
+    /// The Font, McCarthy, Johnstone and Ballantyne 2004 HYDRODYNAMIC correction, the LOW edge of the model band, as
+    /// cited data: the 2D radiation-hydrodynamic simulations find the total mass-loss rate LOWER than the HJLS94
+    /// analytic value by a factor of about 2.7, because the wind launches off the disk at about 0.3 to 0.4 `c_s`
+    /// rather than the analytic `v = c_s` (a check at `v = c_s` recovers the analytic rate to within 10 percent).
+    /// The correction is to the launch velocity, not the density normalization or the scaling, so the exponents and
+    /// reference are unchanged and only the coefficient moves: the HJLS94 4.1e-10 reduced by 2.7, stored as
+    /// `log10(4.1e-10 / 2.7) = log10(1.52e-10)`. Vendored in `disk_arc_literature` (`font_2004`).
+    pub fn font_2004_hydrodynamic() -> Self {
+        EuvWindFit {
+            log10_coefficient_msun_yr: Fixed::from_ratio(-981860, 100_000), // log10(4.1e-10/2.7) = log10(1.52e-10)
+            log10_phi_reference_per_s: Fixed::from_int(41),                 // Phi_ref = 1e41 s^-1
+            phi_exponent: Fixed::from_ratio(1, 2),                          // 1/2
+            mass_exponent: Fixed::from_ratio(1, 2),                         // 1/2
+            mass_min_msun: Fixed::from_ratio(1, 10),                        // 0.1 M_sun
+            mass_max_msun: Fixed::from_int(65),                            // 65 M_sun
+        }
+    }
+}
+
+/// The RADIATIVE-ENVELOPE EUV PHOTOEVAPORATION WIND RATE (solar masses per Myr), the Herbig-branch sibling of the
+/// X-ray [`photoevaporative_wind_rate_msun_myr`]: the mass-loss rate a radiative-envelope star's ionizing luminosity
+/// drives off its disk. A hot photosphere has no corona but is intrinsically EUV-bright, so the wind is EUV-driven
+/// rather than X-ray-driven, and the rate is `Mdot = C (Phi/Phi_ref)^(1/2) (M_star/M_sun)^(1/2)` on the star's
+/// ionizing photon rate `Phi` (Hollenbach et al. 1994 Eq. 3.14, cross-confirmed by Alexander et al. 2006 and Font
+/// et al. 2004, all vendored), read from the [`EuvWindFit`] the caller supplies.
+///
+/// A BRACKET IN, A BRACKET OUT (RIDER 2). The ionizing luminosity is the [`EuvLuminosityBracket`] the
+/// radiative-envelope branch already derives, whose width is the hot-star atmosphere-model departure from the LTE
+/// baseline. That band propagates through the square root to the rate, so the output is a
+/// [`PhotoevaporationRateBracket`] whose width (halved in dex by the `1/2` exponent) is stated before any consumer
+/// reads it, never a point that would launder a decade of spectral ignorance into a definite rate. The
+/// analytic-versus-hydrodynamic MODEL band (which [`EuvWindFit`] the caller passes) is the orthogonal second axis, a
+/// band the consumer forms from two fits.
+///
+/// THE LUMINOSITY-TO-PHOTON-RATE STEP IS THE CALLER'S, and it needs the `mean_ionizing_photon_energy_ev`, the
+/// spectrum-weighted mean energy of a hydrogen-ionizing photon in the star's EUV tail (of order 20 eV above the 13.6
+/// eV edge). This is RESERVED-with-basis, not authored here: its basis is the same hot-star EUV atmosphere-model
+/// grid that pins the luminosity bracket's departure band, so it graduates when that grid is fetched. It is taken in
+/// eV (an order-20 value, representable) and converted to erg IN THE LOG DOMAIN, because the photon energy in erg
+/// (about 3e-11) sits BELOW the fixed-point resolution and would underflow to zero if formed directly, the same
+/// SI-window discipline the whole rate obeys: the ionizing photon rate (order `1e45` per second) and the mass-loss
+/// rate (order `1e-10` solar masses per year) both sit outside the representable range, so everything is carried as
+/// `log10` and exponentiated once at the end.
+///
+/// ADMITS THE ALIEN: the rate keys on the star's OWN ionizing luminosity and mass, so a hot star of any composition
+/// photoevaporates its disk through its own spectrum, never a Terran template. SCOPE: the EUV (hydrogen-ionizing)
+/// diffuse-field weak wind at 1e4 K, not the X-ray or FUV wind; the direct-field rate (about 8.8 times higher, which
+/// dominates once the inner disk drains and turns optically thin) is a flagged later-phase sibling this rate does
+/// not carry. The Herbig regime (about 2 to 15 M_sun), where the radiative-envelope dispatch mostly lives, is a
+/// validation GAP bridged by the analytic scaling, the honest limit stated on [`EuvWindFit::mass_max_msun`]. `None`
+/// on a non-star mass, a mass outside the fit's grounded span, a non-positive photon energy, a non-positive
+/// luminosity bound, or an intermediate past the representable range.
+pub fn radiative_euv_photoevaporation_wind_rate_msun_myr(
+    euv_luminosity: EuvLuminosityBracket,
+    star_mass_ratio: Fixed,
+    mean_ionizing_photon_energy_ev: Fixed,
+    fit: &EuvWindFit,
+) -> Option<PhotoevaporationRateBracket> {
+    if star_mass_ratio <= Fixed::ZERO
+        || star_mass_ratio < fit.mass_min_msun
+        || star_mass_ratio > fit.mass_max_msun
+        || mean_ionizing_photon_energy_ev <= Fixed::ZERO
+    {
+        return None;
+    }
+    let ln10 = Fixed::from_int(10).ln();
+    let log10 = |x: Fixed| -> Option<Fixed> { x.ln().checked_div(ln10) };
+    let log10_m = log10(star_mass_ratio)?;
+    // The eV-to-erg factor and the solar luminosity in erg/s, formed in the log domain so the tiny photon energy
+    // (about 3e-11 erg for 20 eV) never underflows fixed point (the SI-window discipline).
+    let log10_ev_in_erg =
+        civsim_physics::saha::ln_of_decimal("1.602176634e-12")?.checked_div(ln10)?;
+    let log10_lsun_erg_s = civsim_physics::saha::ln_of_decimal(SOLAR_LUMINOSITY_W)?
+        .checked_div(ln10)?
+        .checked_add(Fixed::from_int(7))?; // Watts to erg/s
+    let log10_e_photon_erg = log10(mean_ionizing_photon_energy_ev)?.checked_add(log10_ev_in_erg)?;
+    let ln_ceiling = Fixed::from_int(31).checked_mul(Fixed::from_int(2).ln())?;
+    let rate_for = |l_euv_lsun: Fixed| -> Option<Fixed> {
+        if l_euv_lsun <= Fixed::ZERO {
+            return None;
+        }
+        // log10(Phi in photons/s) = log10(L_EUV in erg/s) - log10(E_photon in erg).
+        let log10_l_erg_s = log10(l_euv_lsun)?.checked_add(log10_lsun_erg_s)?;
+        let log10_phi = log10_l_erg_s.checked_sub(log10_e_photon_erg)?;
+        // log10(Mdot in M_sun/yr) = log10(C) + p*(log10(Phi) - log10(Phi_ref)) + q*log10(M).
+        let phi_term = fit
+            .phi_exponent
+            .checked_mul(log10_phi.checked_sub(fit.log10_phi_reference_per_s)?)?;
+        let mass_term = fit.mass_exponent.checked_mul(log10_m)?;
+        let log10_rate_yr = fit
+            .log10_coefficient_msun_yr
+            .checked_add(phi_term)?
+            .checked_add(mass_term)?;
+        // Per-year to per-Myr: add log10(1e6) = 6.
+        let log10_rate_myr = log10_rate_yr.checked_add(Fixed::from_int(6))?;
+        let ln_rate = log10_rate_myr.checked_mul(ln10)?;
+        // Fail loud past the representable exp ceiling rather than saturate (the surface-density precedent).
+        if ln_rate >= ln_ceiling {
+            return None;
+        }
+        Some(ln_rate.exp())
+    };
+    // The EUV luminosity bracket propagates monotonically: the lower luminosity gives the lower rate, the higher the
+    // higher, so the bounds pair without a reorder.
+    let lo = rate_for(euv_luminosity.lo_lsun())?;
+    let hi = rate_for(euv_luminosity.hi_lsun())?;
+    Some(PhotoevaporationRateBracket {
+        lo_msun_myr: lo,
+        hi_msun_myr: hi,
+    })
+}
+
 /// THE COMPOSED DISK CLOCK (Myr), CONVECTIVE (X-ray-driven) BRANCH: the disk lifetime `tau_disk` DERIVED end to
 /// end from a disk-hosting star's own state, the payoff the whole arc built toward, turning `tau_disk` from a
 /// consulted constant into a derived output. It chains the built pieces:
@@ -5630,6 +5838,136 @@ mod tests {
             Some(Fixed::ZERO),
             "a point band has zero width"
         );
+    }
+
+    #[test]
+    fn the_euv_wind_rate_matches_the_hollenbach_normalization_oracle() {
+        // Oracle against an independent f64 computation of the HJLS94 rate through the whole chain
+        // (L_EUV -> Phi -> Mdot). A 1e-2 L_sun ionizing luminosity, one solar mass, a 20 eV mean ionizing photon.
+        let l_euv = Fixed::from_ratio(1, 100); // 1e-2 L_sun, a point bracket
+        let euv = EuvLuminosityBracket {
+            lo_lsun: l_euv,
+            hi_lsun: l_euv,
+        };
+        let out = radiative_euv_photoevaporation_wind_rate_msun_myr(
+            euv,
+            Fixed::ONE,
+            Fixed::from_int(20),
+            &EuvWindFit::hollenbach_1994(),
+        )
+        .unwrap();
+        // The f64 oracle, computed OUTSIDE the code: Phi = L_EUV(erg/s)/E_photon(erg), Mdot = 4.1e-10 (Phi/1e41)^0.5.
+        let l_sun_erg_s = 3.828e26_f64 * 1e7; // solar luminosity in erg/s
+        let e_photon_erg = 20.0 * 1.602176634e-12;
+        let phi = (1e-2 * l_sun_erg_s) / e_photon_erg;
+        let mdot_myr = 4.1e-10 * (phi / 1e41).powf(0.5) * 1.0_f64.powf(0.5) * 1e6;
+        let got = out.lo_msun_myr().to_f64_lossy();
+        assert!(
+            (got / mdot_myr - 1.0).abs() < 0.03,
+            "the derived EUV wind rate matches the Hollenbach oracle: got {got}, oracle {mdot_myr}"
+        );
+        // A point luminosity gives a point rate: zero-width bracket.
+        assert_eq!(out.width_dex(), Some(Fixed::ZERO), "a point bracket has zero width");
+    }
+
+    #[test]
+    fn the_euv_wind_rate_scales_as_the_square_root_of_the_luminosity() {
+        // Mdot ~ Phi^(1/2) ~ L_EUV^(1/2), so a hundredfold luminosity band gives a tenfold rate band, and the rate
+        // bracket's width is HALF the luminosity bracket's in dex (the RIDER 2 propagation stated on the output).
+        let euv = EuvLuminosityBracket {
+            lo_lsun: Fixed::from_ratio(1, 1000), // 1e-3 L_sun
+            hi_lsun: Fixed::from_ratio(1, 10),   // 1e-1 L_sun, a factor 100 band (2 dex)
+        };
+        let out = radiative_euv_photoevaporation_wind_rate_msun_myr(
+            euv,
+            Fixed::ONE,
+            Fixed::from_int(20),
+            &EuvWindFit::hollenbach_1994(),
+        )
+        .unwrap();
+        let ratio = out.hi_msun_myr().to_f64_lossy() / out.lo_msun_myr().to_f64_lossy();
+        assert!(
+            (ratio - 10.0).abs() < 0.1,
+            "a 100x luminosity band gives a 10x (sqrt) rate band, got {ratio}"
+        );
+        let width = out.width_dex().unwrap().to_f64_lossy();
+        assert!(
+            (width - 1.0).abs() < 0.01,
+            "the rate bracket is 1 dex, half the luminosity's 2 dex, got {width}"
+        );
+    }
+
+    #[test]
+    fn the_euv_wind_rate_orders_the_analytic_and_hydrodynamic_channels() {
+        // The three cited channels form the model band: the Font hydrodynamic floor (1.52e-10) below the Hollenbach
+        // analytic (4.1e-10) below the Alexander analytic ceiling (4.4e-10), at identical inputs. This is the band a
+        // consumer forms, the analytic-versus-hydrodynamic sibling of the X-ray Owen-versus-Sellek band.
+        let l_euv = Fixed::from_ratio(1, 100);
+        let euv = EuvLuminosityBracket {
+            lo_lsun: l_euv,
+            hi_lsun: l_euv,
+        };
+        let rate = |fit: &EuvWindFit| {
+            radiative_euv_photoevaporation_wind_rate_msun_myr(euv, Fixed::ONE, Fixed::from_int(20), fit)
+                .unwrap()
+                .lo_msun_myr()
+        };
+        let font = rate(&EuvWindFit::font_2004_hydrodynamic());
+        let hollenbach = rate(&EuvWindFit::hollenbach_1994());
+        let alexander = rate(&EuvWindFit::alexander_2006());
+        assert!(
+            font < hollenbach && hollenbach < alexander,
+            "the model band orders floor < analytic < ceiling: {} < {} < {}",
+            font.to_f64_lossy(),
+            hollenbach.to_f64_lossy(),
+            alexander.to_f64_lossy()
+        );
+    }
+
+    #[test]
+    fn the_euv_wind_rate_guards_its_domain() {
+        // Fail-loud: a mass outside the fit's grounded span, a non-positive photon energy, and a non-positive
+        // luminosity bound each refuse, never a silent rate.
+        let euv = EuvLuminosityBracket {
+            lo_lsun: Fixed::from_ratio(1, 100),
+            hi_lsun: Fixed::from_ratio(1, 100),
+        };
+        let fit = EuvWindFit::hollenbach_1994();
+        // Below the 0.1 M_sun floor and above the 65 M_sun ceiling.
+        assert!(radiative_euv_photoevaporation_wind_rate_msun_myr(
+            euv,
+            Fixed::from_ratio(5, 100),
+            Fixed::from_int(20),
+            &fit
+        )
+        .is_none());
+        assert!(radiative_euv_photoevaporation_wind_rate_msun_myr(
+            euv,
+            Fixed::from_int(100),
+            Fixed::from_int(20),
+            &fit
+        )
+        .is_none());
+        // A non-positive mean photon energy.
+        assert!(radiative_euv_photoevaporation_wind_rate_msun_myr(
+            euv,
+            Fixed::ONE,
+            Fixed::ZERO,
+            &fit
+        )
+        .is_none());
+        // A non-positive luminosity bound.
+        let bad = EuvLuminosityBracket {
+            lo_lsun: Fixed::ZERO,
+            hi_lsun: Fixed::from_ratio(1, 100),
+        };
+        assert!(radiative_euv_photoevaporation_wind_rate_msun_myr(
+            bad,
+            Fixed::ONE,
+            Fixed::from_int(20),
+            &fit
+        )
+        .is_none());
     }
 
     #[test]
