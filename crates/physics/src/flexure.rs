@@ -261,6 +261,76 @@ pub fn flexural_response_ratio(flexural_length: Fixed, wavenumber: Fixed) -> Opt
     Fixed::ONE.checked_div(Fixed::ONE + lk4)
 }
 
+/// A deflection AMPLITUDE composed in logs: `magnitude * length^power / (coefficient * D)`.
+///
+/// The deflection Green's functions all have this shape, and all of them overflow the same way at
+/// planetary scale: the numerator product runs past `Fixed::MAX` while the quotient it belongs to is
+/// small. `alpha^3` for a thick-lid plate is `7.3e7`, so any load magnitude above about 29 overflows, and
+/// the answer is a deflection of a few kilometres.
+///
+/// `ln|w| = ln|magnitude| + power * ln(length) - ln(coefficient) - ln(D)`, exponentiated once. The sign is
+/// carried around the logarithm rather than through it, since a logarithm has none.
+///
+/// `None` on a non-positive length or rigidity, or when a logarithm leaves the representable window.
+// @derives: a flexural deflection amplitude in log space <- its load magnitude, flexural length and rigidity
+fn log_amplitude(
+    magnitude: Fixed,
+    length: Fixed,
+    power: Fixed,
+    coefficient: Fixed,
+    d: Fixed,
+) -> Option<Fixed> {
+    if length <= Fixed::ZERO || d <= Fixed::ZERO || coefficient <= Fixed::ZERO {
+        return None;
+    }
+    if magnitude == Fixed::ZERO {
+        return Some(Fixed::ZERO);
+    }
+    let negative = magnitude < Fixed::ZERO;
+    let mag = if negative {
+        Fixed::ZERO.checked_sub(magnitude)?
+    } else {
+        magnitude
+    };
+    let ln_w = mag
+        .ln()
+        .checked_add(power.checked_mul(length.ln())?)?
+        .checked_sub(coefficient.ln())?
+        .checked_sub(d.ln())?;
+    let w = ln_w.exp();
+    if negative {
+        Fixed::ZERO.checked_sub(w)
+    } else {
+        Some(w)
+    }
+}
+
+/// THE LINE-LOAD AMPLITUDE `w0 = V0 alpha^3 / (8 D)`, the maximum deflection under the load.
+///
+/// ONE HOME, because it had two. This formula lived here inside [`line_load_deflection`] and again inside
+/// `moment_equivalence::line_load_curvature_at_first_zero_crossing`, which is the redundant-parameter
+/// diamond this repository keeps paying for: when the overflow fallback was added to the first copy the
+/// second still refused, and the solve failed on its SECOND iteration where `alpha` had grown to about
+/// 731 km and `V0 alpha^3` passed `Fixed::MAX` again. Collapsing the copies makes that divergence
+/// structurally impossible rather than something to remember.
+///
+/// Linear first so existing results are bit-preserved, with a log fallback for the planetary-scale plate
+/// whose product overflows while its quotient does not.
+// @derives: the line-load flexural amplitude <- the load intensity, flexural parameter and rigidity
+pub fn line_load_amplitude(v0: Fixed, alpha: Fixed, d: Fixed) -> Option<Fixed> {
+    if alpha <= Fixed::ZERO || d <= Fixed::ZERO {
+        return None;
+    }
+    let a3 = alpha
+        .checked_mul(alpha)
+        .and_then(|a2| a2.checked_mul(alpha))?;
+    let eight_d = Fixed::from_int(8).checked_mul(d)?;
+    match v0.checked_mul(a3).and_then(|x| x.checked_div(eight_d)) {
+        Some(w) => Some(w),
+        None => log_amplitude(v0, alpha, Fixed::from_int(3), Fixed::from_int(8), d),
+    }
+}
+
 /// The LINE-LOAD deflection `w(x) = (V0 alpha^3 / (8 D)) e^(-|x|/alpha) (cos(|x|/alpha) + sin(|x|/alpha))`
 /// (Turcotte & Schubert eq. 3-130 / TAFI eq. 4, the continuous-plate solution; PIPELINE_FETCHES.md section 1),
 /// the flexure at perpendicular distance `perp_dist` from a line load of magnitude `v0`, given the flexural
@@ -274,11 +344,15 @@ pub fn line_load_deflection(v0: Fixed, alpha: Fixed, d: Fixed, perp_dist: Fixed)
         return None;
     }
     // w0 = V0 alpha^3 / (8 D), the maximum deflection under the load.
-    let a3 = alpha
-        .checked_mul(alpha)
-        .and_then(|a2| a2.checked_mul(alpha))?;
-    let eight_d = Fixed::from_int(8).checked_mul(d)?;
-    let w0 = v0.checked_mul(a3).and_then(|x| x.checked_div(eight_d))?;
+    // THE AMPLITUDE, linear first so every existing result is bit-preserved, with a log fallback for the
+    // planetary-scale plate whose PRODUCT overflows while its quotient does not.
+    //
+    // At a Mars-class thick lid `alpha` is about 417 km, so `alpha^3` is `7.3e7` and a line load of 80
+    // (the magnitude this module's own Earth-like tests use) makes `V0 alpha^3 = 5.8e9`, past a
+    // `Fixed::MAX` of `2.147e9`, for a `w0` of 7.69 km that is entirely representable. The log form is
+    // `ln|w0| = ln|V0| + 3 ln alpha - ln 8 - ln D`, with the sign carried around it because a logarithm
+    // has no sign to carry. The SHAPE factor below stays linear: it is bounded near unity by construction.
+    let w0 = line_load_amplitude(v0, alpha, d)?;
     // The dimensionless argument X = |x| / alpha, and the decaying-oscillatory shape e^(-X)(cos X + sin X).
     let big_x = perp_dist.abs().checked_div(alpha)?;
     let decay = (Fixed::ZERO - big_x).exp(); // e^(-X); saturates to 0 far from the load (honest Q32.32 limit)
@@ -328,7 +402,15 @@ pub fn point_load_deflection(q0: Fixed, alpha: Fixed, d: Fixed, r: Fixed) -> Opt
     let two_pi_d = Fixed::from_int(2)
         .checked_mul(Fixed::PI)
         .and_then(|x| x.checked_mul(d))?;
-    let coef = q0.checked_mul(l2).and_then(|x| x.checked_div(two_pi_d))?;
+    // The same amplitude hazard as the line load, one power lower: `Q0 l^2` overflows at planetary scale
+    // while `Q0 l^2 / (2 pi D)` is a few kilometres. Linear first, log fallback, sign carried outside.
+    let coef = match q0.checked_mul(l2).and_then(|x| x.checked_div(two_pi_d)) {
+        Some(c) => c,
+        None => {
+            let two_pi = Fixed::from_int(2).checked_mul(Fixed::PI)?;
+            log_amplitude(q0, l, Fixed::from_int(2), two_pi, d)?
+        }
+    };
     let arg = r.checked_div(l)?; // r / l
     coef.checked_mul(kelvin_kei(arg))
 }
@@ -805,6 +887,69 @@ mod tests {
     /// overflows for a planetary-scale plate while `alpha` itself stays small. A fallback that answered
     /// DIFFERENTLY from the path it replaces would be changing the physics under the cover of a
     /// representation fix, so the two are held against each other across the range where both run.
+    /// THE AMPLITUDE FALLBACK MUST NOT CHANGE THE ANSWER where the linear product can form.
+    ///
+    /// `line_load_deflection` and `point_load_deflection` gained a log fallback for their amplitude
+    /// because `V0 alpha^3` and `Q0 l^2` overflow at planetary scale while the deflections they belong to
+    /// are a few kilometres. Held against the linear path across load magnitudes where both run.
+    #[test]
+    fn the_amplitude_fallback_reproduces_the_linear_deflection_where_both_run() {
+        let d = flexural_rigidity(earth_e(), earth_nu(), Fixed::from_int(30)).expect("rigidity");
+        let alpha = flexural_parameter(d, earth_drho(), earth_g()).expect("alpha");
+        for v0 in [1, 10, 50, 200] {
+            let v = Fixed::from_int(v0);
+            for x in [0, 25, 100] {
+                let linear =
+                    line_load_deflection(v, alpha, d, Fixed::from_int(x)).expect("linear answers");
+                // The log amplitude, composed as the fallback does, times the same shape factor.
+                let log_w0 = log_amplitude(v, alpha, Fixed::from_int(3), Fixed::from_int(8), d)
+                    .expect("log amplitude");
+                let big_x = Fixed::from_int(x).abs().checked_div(alpha).expect("X");
+                let (s, c) = big_x.sin_cos();
+                let shape = (Fixed::ZERO - big_x)
+                    .exp()
+                    .checked_mul(c.checked_add(s).expect("c+s"))
+                    .expect("shape");
+                let via_log = log_w0.checked_mul(shape).expect("via log");
+                let a = linear.to_f64_lossy();
+                let b = via_log.to_f64_lossy();
+                assert!(
+                    (a - b).abs() <= 1e-4 * a.abs().max(1e-6),
+                    "V0 = {v0}, x = {x} km: linear {a:.8} against log-amplitude {b:.8}"
+                );
+            }
+        }
+    }
+
+    /// AND IT EXTENDS THE DOMAIN: the thick-lid plate that overflowed the linear product now answers.
+    #[test]
+    fn the_amplitude_fallback_answers_where_the_linear_product_overflows() {
+        let e = Fixed::from_int(120);
+        let nu = Fixed::from_ratio(25, 100);
+        let d = flexural_rigidity(e, nu, Fixed::from_int(207)).expect("clamped rigidity");
+        let alpha =
+            flexural_parameter(d, Fixed::from_ratio(337, 100), Fixed::from_ratio(37, 10000))
+                .expect("alpha via the parameter fallback");
+        let v0 = Fixed::from_int(80); // the magnitude this module's own Earth-like tests use
+
+        // The linear product really does overflow, or this test is moot.
+        let a3 = alpha
+            .checked_mul(alpha)
+            .and_then(|a2| a2.checked_mul(alpha))
+            .expect("alpha^3 itself is representable");
+        assert!(
+            v0.checked_mul(a3).is_none(),
+            "V0 alpha^3 must overflow here: that is the reason for the fallback"
+        );
+
+        let w = line_load_deflection(v0, alpha, d, Fixed::ZERO).expect("the fallback answers");
+        let km = w.to_f64_lossy();
+        assert!(
+            (5.0..=12.0).contains(&km),
+            "w0 = V0 alpha^3 / (8 D) is about 7.7 km here, read {km:.3}"
+        );
+    }
+
     #[test]
     fn the_log_fallback_reproduces_the_linear_parameter_where_both_run() {
         for te in [5, 10, 25, 50, 100] {

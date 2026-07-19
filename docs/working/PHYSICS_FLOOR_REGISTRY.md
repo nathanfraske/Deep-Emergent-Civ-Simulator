@@ -17,7 +17,7 @@ The lists below are GENERATED from `crates/physics/data/*.toml`, `crates/physics
 
 ## Deriving substrates (check here BEFORE authoring: what the world derives, and where)
 
-The 54 deriving subsystems below live OUTSIDE the authored floor. Each produces a world quantity from the floor and the situation, so its output must never be authored: if the value you need appears here, read or extend the subsystem, do not set a number. This is the list that stops `1 year = 365 days` from being authored when orbital mechanics already derives it. Generated from the `// @derives:` markers in the code; a subsystem missing its marker is a gap in this map, so mark every derivation entry point.
+The 56 deriving subsystems below live OUTSIDE the authored floor. Each produces a world quantity from the floor and the situation, so its output must never be authored: if the value you need appears here, read or extend the subsystem, do not set a number. This is the list that stops `1 year = 365 days` from being authored when orbital mechanics already derives it. Generated from the `// @derives:` markers in the code; a subsystem missing its marker is a gap in this map, so mark every derivation entry point.
 
 ### `crates/foundation/src/clock.rs`
 
@@ -57,6 +57,10 @@ The 54 deriving subsystems below live OUTSIDE the authored floor. Each produces 
 - a phase's elastic Debye temperature <- its banked bulk and shear moduli, density and atomic volume (`crates/materials/src/thermoelastic.rs:270`)
 - a phase's thermoelastic response at a state <- the strongest available rung over the banked per-phase anchors (`crates/materials/src/thermoelastic.rs:369`)
 - a phase's ambient volumetric expansivity <- its banked gamma, bulk modulus, molar volume and Dulong-Petit capacity (`crates/materials/src/thermoelastic.rs:502`)
+### `crates/physics/src/flexure.rs`
+
+- a flexural deflection amplitude in log space <- its load magnitude, flexural length and rigidity (`crates/physics/src/flexure.rs:275`)
+- the line-load flexural amplitude <- the load intensity, flexural parameter and rigidity (`crates/physics/src/flexure.rs:319`)
 ### `crates/physics/src/gruneisen.rs`
 
 - a rock's Gruneisen parameter <- the cited per-phase gamma table + the world's own mineral census (`crates/physics/src/gruneisen.rs:358`)
@@ -65,7 +69,7 @@ The 54 deriving subsystems below live OUTSIDE the authored floor. Each produces 
 - the log-domain Stokes settling velocity <- the buoyancy, gravity, parcel scale and log viscosity (`crates/physics/src/laws.rs:3623`)
 ### `crates/physics/src/moment_equivalence.rs`
 
-- the stiffest computable trial elastic thickness <- the rigidity kernel's own intermediate ceiling and the elastic constants (`crates/physics/src/moment_equivalence.rs:1330`)
+- the stiffest computable trial elastic thickness <- the rigidity kernel's own intermediate ceiling and the elastic constants (`crates/physics/src/moment_equivalence.rs:1331`)
 ### `crates/physics/src/petrology.rs`
 
 - an assemblage's mean atomic mass <- its own molar amounts + the registry compositions + the periodic masses (`crates/physics/src/petrology.rs:490`)

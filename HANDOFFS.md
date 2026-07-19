@@ -65,7 +65,18 @@
 >
 > So the next unit of work is a DESIGNED pass over the flexure and moment-equivalence chain (log-space `D`, `alpha` and the deflection amplitudes, or a nondimensionalization), not another point fix. I stopped chasing after the third because each fix revealing the next IS the finding, and continuing to patch would have produced a chain that works for the cases I happened to test and fails on the next world.
 >
-> NEXT: that pass, then fold `deflection_at` over the province load list, then Seam D.
+> **FOUR FIXED, STILL REFUSING, AND THAT SETTLES THE STRATEGY.** I lifted four of them and the chain still returns `NotRepresentable`, which is the strongest possible evidence that incremental fallbacks are the wrong instrument here:
+>
+>   1. FIXED `flexural_rigidity` trial: clamped to the computable ceiling (207 km, bounded by the numerator `E T^3`, not the result).
+>   2. FIXED `flexural_parameter`: log fallback for `D / (delta_rho g)`, twinned against the linear path across `T_e` 5 to 100 km.
+>   3. FIXED both deflection amplitudes: `V0 alpha^3 / (8 D)` and `Q0 l^2 / (2 pi D)` via a shared `log_amplitude`, twinned.
+>   4. FIXED A DIAMOND, and this one is the instructive failure. The line-load amplitude existed in TWO places, `flexure::line_load_deflection` and `moment_equivalence::line_load_curvature_at_first_zero_crossing`, computing the identical formula independently. Fixing one left the other overflowing, so the solve completed its FIRST iteration cleanly (alpha 417 km, curvature -2.96e-6, neutral surface 222.5 km, moment -2628, `D_new` 8.89e8) and died on the SECOND, where alpha had grown to about 731 km. There is now one home, `flexure::line_load_amplitude`, and the curvature reads it.
+>
+> Each fix is independently correct and tested, and none of them is the cure. A fifth point remains unlocated somewhere past the second iteration.
+>
+> **THE CONCLUSION, evidenced rather than asserted:** this module's declared unit system (km, GPa, 1000 kg/m^3, km/s^2) is the defect, not any one expression in it. `g` in km/s^2 is `0.0037`, so the buoyancy modulus is a tiny divisor; lengths cubed and to the fourth run large; and the products and quotients pass `Fixed::MAX` in opposite directions all through a chain whose inputs and outputs are all comfortably representable. Its Earth-like tests pass because their `D` is two orders smaller, so the chain has only ever run in the corner where it happens to fit. The next unit of work is a DESIGNED nondimensionalization of the flexure and moment-equivalence chain, which is the option the module's own notes already call numerically strongest, not a fifth fallback.
+>
+> NEXT: that nondimensionalization, then fold `deflection_at` over the province load list, then Seam D.
 >
 > NEXT: that fix, then fold `deflection_at` over the province load list (Seam C proper), then Seam D (`height_km`/`gradient` and the mountains draw). The honest open limit to carry into them: the mobile-lid Nusselt law is being applied to stagnant-lid bodies, whose suppression through the rheological temperature scale `RT^2/E*` is derivable from creep rows already banked and is the flagged follow-on recorded on that law.
 >

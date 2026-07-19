@@ -1138,11 +1138,12 @@ pub fn line_load_curvature_at_first_zero_crossing(
         return None;
     }
     // w0 = V0 alpha^3 / (8 D)
-    let a3 = alpha_km
-        .checked_mul(alpha_km)
-        .and_then(|a2| a2.checked_mul(alpha_km))?;
-    let eight_d = Fixed::from_int(8).checked_mul(rigidity_gpa_km3)?;
-    let w0 = v0.checked_mul(a3).and_then(|x| x.checked_div(eight_d))?;
+    // THE AMPLITUDE IS READ, NOT RECOMPUTED. This recomputed `V0 alpha^3 / (8 D)` independently of the
+    // identical formula in `flexure::line_load_deflection`: two copies of one fact, and they diverged the
+    // moment the other gained an overflow fallback. The fixed point then failed on its SECOND iteration,
+    // where `alpha` had grown to about 731 km and the product passed `Fixed::MAX` again, while the first
+    // iteration had sailed through. Reading the one home makes that class of divergence unconstructible.
+    let w0 = crate::flexure::line_load_amplitude(v0, alpha_km, rigidity_gpa_km3)?;
     // 2 sqrt(2) e^(-3 pi / 4) w0 / alpha^2
     let three_pi_over_four = Fixed::PI
         .checked_mul(Fixed::from_int(3))?
