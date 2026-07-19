@@ -2642,60 +2642,45 @@ pub fn nlte_departed_ionizing_spectrum(
     })
 }
 
-/// The ARCHIVAL provenance grade of a windless departure evaluation, so a consumer never reads an interpolation
-/// across the unwitnessed segment as fully vendored. The two grid points at 23000 and 24000 K (SVO fid 590 and 650)
-/// are `archive_pending`: their SVO bytes are sha256-verified but their Wayback captures came back empty and
-/// deduplicated on retry, so a durable witness is owed (a coordinator SAVE-retry). Any evaluation whose bracketing
-/// points include one of those two carries the reduced grade rather than the witnessed one.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum DepartureArchiveGrade {
-    /// Both bracketing grid points carry a byte-verified Wayback witness.
-    Witnessed,
-    /// The interpolation touches the 23 to 24 kK segment, whose two grid points are `archive_pending`; the value is
-    /// carried at reduced grade until the durable witness lands. This is the interpolation prohibition made a carried
-    /// fact rather than a comment: the near-linear +0.14 dex per 1000 K makes silent interpolation LOOK safe, so the
-    /// hole travels with the value instead of being assumed away.
-    ArchivePending,
-}
-
-/// A WINDLESS Herbig-regime EUV departure evaluation: `log10` of the model-over-blackbody Lyman-continuum photon-rate
-/// departure at a `T_eff`, paired with its archival grade. The value is a POINT, not a band: the derived grid gives
-/// one departure per `T_eff` and no measured error width exists, so none is fabricated (the honest limits travel as
-/// the grade and the windless scope, the same choice [`FitReach`] makes for the wind fit).
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub struct WindlessDepartureEvaluation {
-    /// `log10` of the model-over-blackbody Lyman-continuum photon-rate departure (a suppression, so negative).
-    pub log10_departure: Fixed,
-    /// Whether the interpolation used only witnessed grid points.
-    pub archive_grade: DepartureArchiveGrade,
-}
-
-// @derives: the windless Herbig-regime EUV model-over-blackbody departure grid <- the BSTAR2006 emergent NLTE SEDs (svo_tlusty_bstar2006) integrated over the Lyman continuum against the same-Teff blackbody photon rate, 16 points at solar Z and log g 4.0 over Teff 15000 to 30000 K, log-space interpolated in Teff
+// @derives: the windless Herbig-regime EUV model-over-blackbody departure grid <- the BSTAR2006 emergent NLTE SEDs (svo_tlusty_bstar2006) integrated over the Lyman continuum against the same-Teff blackbody photon rate, 16 points at ONE coordinate slice (solar Z, log g 4.0) over Teff 15000 to 30000 K, log-space interpolated in Teff and applicable only at that slice
 /// The WINDLESS HERBIG-REGIME EUV DEPARTURE GRID: the model-over-blackbody Lyman-continuum photon-rate departure as a
-/// function of `T_eff`, DERIVED by integrating the BSTAR2006 emergent NLTE SEDs (Lanz and Hubeny 2007, served by the
-/// SVO Theoretical Spectra service; `svo_tlusty_bstar2006` and the paper `bstar2006_lanz_hubeny` in
-/// `sources/registry.toml`) over the Lyman continuum and dividing by the same-`T_eff` blackbody photon rate. The 16
-/// points (solar Z, log g 4.0, `T_eff` 15000 to 30000 K in 1000 K steps) and the full derivation live in
-/// `docs/working/BSTAR2006_HERBIG_EUV_DEPARTURE.md`; the mapping is monotonic and nearly linear at +0.14 dex per
-/// 1000 K, so the grid interpolates in `log10` space.
+/// function of `T_eff` AT ONE COORDINATE SLICE, DERIVED by integrating the BSTAR2006 emergent NLTE SEDs (Lanz and
+/// Hubeny 2007, served by the SVO Theoretical Spectra service; `svo_tlusty_bstar2006` and the paper
+/// `bstar2006_lanz_hubeny` in `sources/registry.toml`) over the Lyman continuum and dividing by the same-`T_eff`
+/// blackbody photon rate. The 16 points and the full derivation live in `docs/working/BSTAR2006_HERBIG_EUV_DEPARTURE.md`.
+///
+/// COORDINATES, load-bearing: the grid is computed at a SINGLE metallicity and gravity (`metallicity_z_solar` and
+/// `log_g_cgs`, here solar Z and log g 4.0), so the departure is a function of `T_eff` ONLY at that slice. A 20000 K
+/// star that is metal-free, twice-solar, or at log g 2 has a DIFFERENT ionizing departure; BSTAR2006 itself ships six
+/// compositions and thirteen gravities, which is what makes `(Z, log g)` model COORDINATES, not metadata. The lookup
+/// [`windless_herbig_departed_spectrum`] therefore REFUSES a star off this slice rather than silently applying the
+/// solar-log-g-4 value; the full `(Z, log g)`-interpolated lookup over the whole BSTAR2006 grid is a NAMED
+/// data-and-interpolation rung, not built here.
+///
+/// INTERPOLATION: monotonic and rising with `T_eff`, but NOT a single linear slope. The local slope runs from about
+/// 0.054 to 0.19 dex per 1000 K across the range (the average, about 0.14, must NOT be read as the local rate). The
+/// grid interpolates LINEARLY in `log10` departure between adjacent points, an authored piecewise-linear model whose
+/// error is the deviation of the true curve from each chord; a stated error band on that interpolation is a later rung.
 ///
 /// WINDLESS, and a SIBLING of the Sternberg windy anchor, NEVER merged with it. These are plane-parallel hydrostatic
 /// atmospheres with no wind, so above 25000 K they do not describe the wind-affected EUV of a luminous early B star,
 /// where the Sternberg, Hoffmann and Pauldrach 2003 grid (with winds) is the anchor. This grid's value is the 15000
-/// to 25000 K region, below the Sternberg floor, where no windy grid reaches and Herbig Be winds are weak. The choice
-/// of WHICH sibling applies in the 25000 to 30000 K overlap keys on whether the star has a significant wind, a
-/// stellar-physics property that should be DERIVED from the star's own data (luminosity, mass-loss) rather than
-/// authored; that wind-regime selector is not built here and is a NAMED derivation gap, not a design call. This grid
-/// supplies only the windless branch.
+/// to 25000 K region. The choice of WHICH sibling applies in the 25000 to 30000 K overlap keys on whether the star
+/// has a significant wind, a stellar-physics property that should be DERIVED (luminosity, mass-loss), not authored;
+/// that wind-regime selector is a NAMED derivation gap. This grid supplies only the windless branch.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct HerbigEuvDepartureGrid {
     /// The 16 `(T_eff in K, log10 departure)` points, ascending in `T_eff`.
     points: [(Fixed, Fixed); 16],
+    /// The metallicity (multiples of solar) the grid was computed at: the lookup refuses a star off this value.
+    metallicity_z_solar: Fixed,
+    /// The surface gravity `log g` (cgs) the grid was computed at: the lookup refuses a star off this value.
+    log_g_cgs: Fixed,
 }
 
 impl HerbigEuvDepartureGrid {
-    /// The BSTAR2006 grid served by SVO, the 16 verified points (solar Z, log g 4.0). The `log10` departures are the
-    /// derived data (`docs/working/BSTAR2006_HERBIG_EUV_DEPARTURE.md`), each a suppression below the blackbody.
+    /// The BSTAR2006 grid served by SVO, the 16 verified points at solar Z (z = 1.0) and log g 4.0. The `log10`
+    /// departures are the derived data (`docs/working/BSTAR2006_HERBIG_EUV_DEPARTURE.md`), each a suppression.
     pub fn bstar2006_svo() -> Self {
         HerbigEuvDepartureGrid {
             points: [
@@ -2716,19 +2701,16 @@ impl HerbigEuvDepartureGrid {
                 (Fixed::from_int(29000), Fixed::from_ratio(-8248, 10000)),
                 (Fixed::from_int(30000), Fixed::from_ratio(-6541, 10000)),
             ],
+            metallicity_z_solar: Fixed::ONE,
+            log_g_cgs: Fixed::from_int(4),
         }
     }
 
-    /// Whether a grid temperature is one of the two `archive_pending` points (23000 or 24000 K).
-    fn is_archive_pending(t_k: Fixed) -> bool {
-        t_k == Fixed::from_int(23000) || t_k == Fixed::from_int(24000)
-    }
-
-    /// The graded windless departure at a `T_eff`: `log10` departure by log-space interpolation between the two
-    /// bracketing grid points, with the [`DepartureArchiveGrade`] set to `ArchivePending` when either bracketing
-    /// point is one of the two unwitnessed ones. `None` below 15000 K (the EUV is negligible and off-grid) or above
-    /// 30000 K (the windy-Sternberg door, where the windless sibling does not apply), the domain the grid describes.
-    pub fn departure_log10_at(&self, t_eff_k: Fixed) -> Option<WindlessDepartureEvaluation> {
+    /// The windless departure `log10` at a `T_eff` by log-space interpolation between the two bracketing grid points.
+    /// `None` below 15000 K (the EUV is negligible and off-grid) or above 30000 K (the windy-Sternberg door). This
+    /// does NOT check `(Z, log g)`; that coordinate gate lives in [`windless_herbig_departed_spectrum`], the only
+    /// path that knows the star's coordinates.
+    pub fn departure_log10_at(&self, t_eff_k: Fixed) -> Option<Fixed> {
         let first = self.points[0].0;
         let last = self.points[self.points.len() - 1].0;
         if t_eff_k < first || t_eff_k > last {
@@ -2744,62 +2726,39 @@ impl HerbigEuvDepartureGrid {
                 } else {
                     t_eff_k.checked_sub(t0)?.checked_div(span)?
                 };
-                let log10_departure = d0.checked_add(frac.checked_mul(d1.checked_sub(d0)?)?)?;
-                // ArchivePending only when a pending point actually carries weight: at frac 0 only `t0` contributes,
-                // at frac 1 only `t1`, so an exact witnessed point adjacent to a pending one stays witnessed.
-                let uses_t0 = frac < Fixed::ONE;
-                let uses_t1 = frac > Fixed::ZERO;
-                let archive_grade = if (Self::is_archive_pending(t0) && uses_t0)
-                    || (Self::is_archive_pending(t1) && uses_t1)
-                {
-                    DepartureArchiveGrade::ArchivePending
-                } else {
-                    DepartureArchiveGrade::Witnessed
-                };
-                return Some(WindlessDepartureEvaluation {
-                    log10_departure,
-                    archive_grade,
-                });
+                return d0.checked_add(frac.checked_mul(d1.checked_sub(d0)?)?);
             }
         }
         None
     }
 }
 
-/// A WINDLESS-departed ionizing spectrum: the [`IonizingSpectrumEvaluation`] the EUV wind consumes for a Herbig
-/// (cool-B, weak-wind) star, paired with the archival grade of the departure that formed it.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub struct WindlessHerbigSpectrum {
-    /// The NLTE-departed spectrum, `Q_H` suppressed below the blackbody by the windless grid's departure.
-    pub spectrum: IonizingSpectrumEvaluation,
-    /// The archival grade of the departure at this `T_eff` (witnessed, or `archive_pending` across 23 to 24 kK).
-    pub archive_grade: DepartureArchiveGrade,
-}
-
 /// Apply the WINDLESS Herbig departure grid to a blackbody ionizing spectrum, the Herbig-branch supplier of the
-/// atmosphere-model band that [`nlte_departed_ionizing_spectrum`] left caller-provided. It reads the blackbody
-/// evaluation's own `T_eff`, looks up the graded windless departure ([`HerbigEuvDepartureGrid::departure_log10_at`]),
-/// and applies it in PHOTON space through [`nlte_departed_ionizing_spectrum`] (reused, not reinvented), carrying the
-/// [`DepartureArchiveGrade`] out so a consumer sees an interpolation across the unwitnessed 23 to 24 kK segment for
-/// what it is. The departure enters as a POINT (`departure_lo = departure_hi`): the grid gives one value per `T_eff`.
-/// `None` if the input is not a blackbody evaluation, if the `T_eff` is off the windless grid (below 15000 K or above
-/// 30000 K, the windy-Sternberg door), or on an overflow.
+/// atmosphere-model band [`nlte_departed_ionizing_spectrum`] left caller-provided. It reads the blackbody's own
+/// `T_eff`, REFUSES a star whose `(Z, log g)` are off the grid's single slice (so the solar-log-g-4 departure is
+/// never applied to a metal-free or low-gravity star), looks up the windless departure, and applies it in PHOTON
+/// space through [`nlte_departed_ionizing_spectrum`] (reused, not reinvented). The departure enters as a POINT
+/// (`departure_lo = departure_hi`): the grid gives one value per `T_eff`. `None` if the input is not a blackbody
+/// evaluation, if the star is off the grid's `(Z, log g)` slice, if the `T_eff` is off the grid (below 15000 K or
+/// above 30000 K, the windy-Sternberg door), or on an overflow.
 pub fn windless_herbig_departed_spectrum(
     blackbody: &IonizingSpectrumEvaluation,
     grid: &HerbigEuvDepartureGrid,
-) -> Option<WindlessHerbigSpectrum> {
+    star_metallicity_z_solar: Fixed,
+    star_log_g_cgs: Fixed,
+) -> Option<IonizingSpectrumEvaluation> {
     if blackbody.branch != AtmosphereBranch::Blackbody {
         return None;
     }
-    let eval = grid.departure_log10_at(blackbody.t_eff_k)?;
+    // The grid is a single-(Z, log g) slice; refuse a star off it rather than applying the wrong-coordinate value.
+    if star_metallicity_z_solar != grid.metallicity_z_solar || star_log_g_cgs != grid.log_g_cgs {
+        return None;
+    }
+    let log10_departure = grid.departure_log10_at(blackbody.t_eff_k)?;
     // The grid carries log10(departure); the departure application takes the linear departure, so 10^(log10 dep).
     let ln10 = Fixed::from_int(10).ln();
-    let departure = eval.log10_departure.checked_mul(ln10)?.exp();
-    let spectrum = nlte_departed_ionizing_spectrum(blackbody, departure, departure)?;
-    Some(WindlessHerbigSpectrum {
-        spectrum,
-        archive_grade: eval.archive_grade,
-    })
+    let departure = log10_departure.checked_mul(ln10)?.exp();
+    nlte_departed_ionizing_spectrum(blackbody, departure, departure)
 }
 
 /// The PRE-MAIN-SEQUENCE LUMINOSITY `L_bol / L_sun` at a stellar age, the disk-era bolometric luminosity the L_X
@@ -6813,8 +6772,8 @@ mod tests {
         // Exact grid points return their tabulated log10 departure (the derived data).
         let at15 = grid.departure_log10_at(Fixed::from_int(15000)).unwrap();
         let at30 = grid.departure_log10_at(Fixed::from_int(30000)).unwrap();
-        assert!((at15.log10_departure.to_f64_lossy() - (-2.6892)).abs() < 1e-4);
-        assert!((at30.log10_departure.to_f64_lossy() - (-0.6541)).abs() < 1e-4);
+        assert!((at15.to_f64_lossy() - (-2.6892)).abs() < 1e-4);
+        assert!((at30.to_f64_lossy() - (-0.6541)).abs() < 1e-4);
         // Monotone: the departure (a suppression, negative) RISES with T_eff, so a hotter Herbig B star is less
         // suppressed and photoevaporates harder, the physical direction.
         let mut prev = f64::NEG_INFINITY;
@@ -6822,14 +6781,10 @@ mod tests {
             let d = grid
                 .departure_log10_at(Fixed::from_int(t))
                 .unwrap()
-                .log10_departure
                 .to_f64_lossy();
             assert!(d > prev, "departure rises with T_eff at {t}");
             prev = d;
         }
-        // The endpoints are witnessed (only the 23-24 kK interior is pending).
-        assert_eq!(at15.archive_grade, DepartureArchiveGrade::Witnessed);
-        assert_eq!(at30.archive_grade, DepartureArchiveGrade::Witnessed);
     }
 
     #[test]
@@ -6838,55 +6793,56 @@ mod tests {
         let lo = grid
             .departure_log10_at(Fixed::from_int(20000))
             .unwrap()
-            .log10_departure
             .to_f64_lossy();
         let hi = grid
             .departure_log10_at(Fixed::from_int(21000))
             .unwrap()
-            .log10_departure
             .to_f64_lossy();
-        let mid = grid.departure_log10_at(Fixed::from_int(20500)).unwrap();
-        let m = mid.log10_departure.to_f64_lossy();
+        let m = grid
+            .departure_log10_at(Fixed::from_int(20500))
+            .unwrap()
+            .to_f64_lossy();
         assert!(
             lo < m && m < hi,
             "20500 K interpolates between the 20000 and 21000 K points"
         );
-        // Halfway in T_eff is halfway in log10 departure (the grid interpolates in log space).
+        // Halfway in T_eff is halfway in log10 departure (the grid interpolates linearly in log space).
         assert!(
             (m - 0.5 * (lo + hi)).abs() < 1e-3,
             "log-space linear interpolation at the segment midpoint"
         );
-        // An interior segment clear of the hole is witnessed.
-        assert_eq!(mid.archive_grade, DepartureArchiveGrade::Witnessed);
     }
 
     #[test]
-    fn the_windless_grid_flags_the_archive_pending_hole_only_where_it_bites() {
+    fn the_windless_spectrum_refuses_a_star_off_the_grid_coordinate_slice() {
+        // The grid is a single (solar Z, log g 4.0) slice; a star off that slice must REFUSE, not silently receive
+        // the solar-log-g-4 departure. This is the fix for applying the departure without its model coordinates.
         let grid = HerbigEuvDepartureGrid::bstar2006_svo();
-        // Any evaluation whose interpolation USES a 23 or 24 kK point (the two empty-capture points) is pending.
-        for t in [22500, 23000, 23500, 24000, 24500] {
-            assert_eq!(
-                grid.departure_log10_at(Fixed::from_int(t))
-                    .unwrap()
-                    .archive_grade,
-                DepartureArchiveGrade::ArchivePending,
-                "an evaluation depending on a 23-24 kK point is archive_pending at {t}"
-            );
-        }
-        // The witnessed points bracketing the hole stay witnessed at their exact value: at 22000 K the segment
-        // [22000, 23000] is read at frac 0, so the pending 23000 point carries no weight, and likewise 25000 K.
-        assert_eq!(
-            grid.departure_log10_at(Fixed::from_int(22000))
-                .unwrap()
-                .archive_grade,
-            DepartureArchiveGrade::Witnessed,
-            "an exact witnessed point adjacent to the hole is not laundered as pending, nor mislabelled"
+        let bb = blackbody_ionizing_spectrum(
+            Fixed::from_int(20000),
+            Fixed::from_int(100),
+            t_ion(),
+            wien_x_min(),
+        )
+        .unwrap();
+        // On the slice (solar Z, log g 4): resolves.
+        assert!(
+            windless_herbig_departed_spectrum(&bb, &grid, Fixed::ONE, Fixed::from_int(4)).is_some()
         );
-        assert_eq!(
-            grid.departure_log10_at(Fixed::from_int(25000))
-                .unwrap()
-                .archive_grade,
-            DepartureArchiveGrade::Witnessed
+        // Metal-free, twice-solar, and low-gravity stars all refuse: the departure is not theirs.
+        assert!(
+            windless_herbig_departed_spectrum(&bb, &grid, Fixed::ZERO, Fixed::from_int(4))
+                .is_none()
+        );
+        assert!(windless_herbig_departed_spectrum(
+            &bb,
+            &grid,
+            Fixed::from_int(2),
+            Fixed::from_int(4)
+        )
+        .is_none());
+        assert!(
+            windless_herbig_departed_spectrum(&bb, &grid, Fixed::ONE, Fixed::from_int(2)).is_none()
         );
     }
 
@@ -6913,19 +6869,18 @@ mod tests {
             wien_x_min(),
         )
         .unwrap();
-        let w = windless_herbig_departed_spectrum(&bb, &grid).unwrap();
-        assert_eq!(w.spectrum.branch, AtmosphereBranch::NlteLineBlanketed);
+        let w =
+            windless_herbig_departed_spectrum(&bb, &grid, Fixed::ONE, Fixed::from_int(4)).unwrap();
+        assert_eq!(w.branch, AtmosphereBranch::NlteLineBlanketed);
         // The windless model suppresses the ionizing photon rate below the blackbody by the grid's own departure
         // (about 2.28 dex at 20000 K), applied in photon space.
-        let applied = bb.photon_rate_log10_s.lo.to_f64_lossy()
-            - w.spectrum.photon_rate_log10_s.lo.to_f64_lossy();
+        let applied =
+            bb.photon_rate_log10_s.lo.to_f64_lossy() - w.photon_rate_log10_s.lo.to_f64_lossy();
         assert!(
             (applied - 2.2815).abs() < 0.01,
             "20000 K windless suppression ~ 2.28 dex, got {applied}"
         );
-        assert_eq!(w.archive_grade, DepartureArchiveGrade::Witnessed);
-        // A 40000 K star sits in the windy-Sternberg regime: the blackbody is fine but the windless sibling refuses
-        // rather than extrapolating its grid past 30000 K.
+        // A 40000 K star sits in the windy-Sternberg regime: the windless sibling refuses on T_eff, not extrapolating.
         if let Some(hot_bb) = blackbody_ionizing_spectrum(
             Fixed::from_int(40000),
             Fixed::from_int(100),
@@ -6933,7 +6888,8 @@ mod tests {
             wien_x_min(),
         ) {
             assert!(
-                windless_herbig_departed_spectrum(&hot_bb, &grid).is_none(),
+                windless_herbig_departed_spectrum(&hot_bb, &grid, Fixed::ONE, Fixed::from_int(4))
+                    .is_none(),
                 "40000 K is off the windless grid: refuse, do not extrapolate into the windy regime"
             );
         }
