@@ -597,13 +597,27 @@ impl BurningLimits {
     /// hydrogen line ~0.072 M_sun (Chabrier, Baraffe, Allard and Hauschildt 2000, the grain-free HBMM). The
     /// COMPOSITION dependence is the named debt: the deuterium line runs 11.0 to 16.3 M_Jup across helium fraction,
     /// deuterium abundance, metallicity, and burn fraction (Spiegel Table 1), and the hydrogen line rises toward
-    /// ~0.08 to 0.09 M_sun at low metallicity (channel-relayed, not in the vendored Chabrier bytes), so a per-world
-    /// derivation from the drawn composition is the follow-on. Solar composition here.
+    /// ~0.08 to 0.09 M_sun at low metallicity (channel-relayed, not in the vendored Chabrier bytes). The metallicity
+    /// axis of the deuterium line is now DERIVED per world ([`BurningLimits::from_metallicity`] via
+    /// [`deuterium_burning_limit_m_jup`]); the helium-fraction and burn-fraction axes and the hydrogen line's
+    /// metallicity rise remain the follow-on. This fiducial holds all at solar.
     pub fn spiegel_chabrier() -> Self {
         Self {
             deuterium_limit_m_jup: Fixed::from_int(13),
             hydrogen_limit_m_sun: Fixed::from_ratio(72, 1000),
         }
+    }
+
+    /// The per-world limits with the deuterium line DERIVED from the disk metallicity
+    /// ([`deuterium_burning_limit_m_jup`]) rather than held at the solar fiducial, so a metal-rich world (a lower
+    /// deuterium line) types a giant of a given mass differently from a metal-poor one (admit the alien). The
+    /// hydrogen line stays the Chabrier solar fiducial (its metallicity rise is the channel-relayed named debt).
+    /// `None` on a non-physical metallicity.
+    pub fn from_metallicity(metallicity_z_solar: Fixed, deuterium: &DeuteriumLine) -> Option<Self> {
+        Some(Self {
+            deuterium_limit_m_jup: deuterium_burning_limit_m_jup(metallicity_z_solar, deuterium)?,
+            hydrogen_limit_m_sun: Fixed::from_ratio(72, 1000),
+        })
     }
 }
 
@@ -653,6 +667,80 @@ pub fn giant_mass_class(mass_earth: Fixed, limits: &BurningLimits) -> Option<Gia
     } else {
         GiantMassClass::Star
     })
+}
+
+/// The METALLICITY track of the deuterium-burning limit, the Spiegel (2011) COOLTLUSTY sequence (Table 1, rows
+/// T0.3 / T1 / T3) at the fiducial helium fraction `Y = 0.25` and the 50-percent-burn criterion: three cited
+/// anchors of the limit mass `M_D` (Jupiter masses) at 0.316, 1, and 3.16 times solar metallicity. A declared
+/// model the way [`BurningLimits`] and [`GapOpeningModel`] carry theirs.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct DeuteriumLine {
+    /// `M_D` (Jupiter masses) at `0.316` solar metallicity (Spiegel 2011 Table 1, T0.3, 50-percent burn).
+    pub m_jup_at_third_solar: Fixed,
+    /// `M_D` at solar metallicity (T1).
+    pub m_jup_at_solar: Fixed,
+    /// `M_D` at `3.16` solar metallicity (T3).
+    pub m_jup_at_triple_solar: Fixed,
+}
+
+impl DeuteriumLine {
+    /// The vendored Spiegel 2011 COOLTLUSTY metallicity track (Table 1, receipt in the disk_arc_literature
+    /// manifest): `M_D(50%) = 13.77 / 13.48 / 13.13 M_Jup` at `0.316 / 1 / 3.16` solar metallicity, the sequence the
+    /// paper itself uses to build its metallicity-dependent limit (Table 3).
+    pub fn spiegel_cooltlusty() -> Self {
+        Self {
+            m_jup_at_third_solar: Fixed::from_ratio(1377, 100),
+            m_jup_at_solar: Fixed::from_ratio(1348, 100),
+            m_jup_at_triple_solar: Fixed::from_ratio(1313, 100),
+        }
+    }
+}
+
+/// The DEUTERIUM-BURNING LIMIT `M_D` (Jupiter masses) at a given metallicity, DERIVED by interpolating the cited
+/// Spiegel (2011) COOLTLUSTY track ([`DeuteriumLine`]) log-linearly in metallicity. Higher metallicity gives a
+/// LOWER limit (a metal-rich object's higher atmospheric opacity blankets the core, so it reaches deuterium fusion
+/// at a lower mass), so a metal-rich world's giant crosses into brown-dwarf territory at a lower mass than a
+/// metal-poor world's, the admit-the-alien behaviour the fiducial `~13 M_Jup` folds away.
+///
+/// The metallicity is the caller's per-world data (in solar units); the anchors are the cited track. Interpolation
+/// is piecewise-linear in `log10(Z)` between the three anchors (`0.316`, `1`, `3.16` solar) and CLAMPED at the
+/// endpoints. TERMS DROPPED: beyond the `0.316` to `3.16` solar span the clamp holds the endpoint value, so a very
+/// metal-poor object's higher limit (the pure-metallicity sequence reaches `~15.4 M_Jup` at zero metal) is the
+/// named debt; the helium-fraction and burn-fraction axes are held at the fiducial (the He- and D-sequences and the
+/// `~0.8-0.9 M_Jup`-per-cutoff shift are the further debts); and the track co-varies the deuterium abundance with
+/// metallicity along the paper's own realistic sequence. `None` on a non-physical metallicity.
+pub fn deuterium_burning_limit_m_jup(
+    metallicity_z_solar: Fixed,
+    line: &DeuteriumLine,
+) -> Option<Fixed> {
+    if metallicity_z_solar <= Fixed::ZERO {
+        return None;
+    }
+    let half = Fixed::from_ratio(1, 2);
+    let neg_half = Fixed::ZERO.checked_sub(half)?;
+    // log10(Z/Z_sun); the anchors sit at log10 = -0.5, 0, +0.5.
+    let log_z = metallicity_z_solar
+        .ln()
+        .checked_div(Fixed::from_int(10).ln())?;
+    let m = if log_z <= neg_half {
+        line.m_jup_at_third_solar
+    } else if log_z <= Fixed::ZERO {
+        let frac = log_z.checked_sub(neg_half)?.checked_div(half)?;
+        line.m_jup_at_third_solar.checked_add(
+            frac.checked_mul(line.m_jup_at_solar.checked_sub(line.m_jup_at_third_solar)?)?,
+        )?
+    } else if log_z <= half {
+        let frac = log_z.checked_div(half)?;
+        line.m_jup_at_solar.checked_add(
+            frac.checked_mul(
+                line.m_jup_at_triple_solar
+                    .checked_sub(line.m_jup_at_solar)?,
+            )?,
+        )?
+    } else {
+        line.m_jup_at_triple_solar
+    };
+    Some(m)
 }
 
 /// The disk GAS ASPECT RATIO `H/r` at an orbit, DERIVED from the disk temperature: the isothermal scale height
@@ -2114,5 +2202,61 @@ mod tests {
             terminate_and_type_giant(&terrestrial, &disk, Fixed::ONE, &gap_model, &limits)
                 .is_none()
         );
+    }
+
+    #[test]
+    fn the_deuterium_line_derives_from_metallicity_and_moves_the_class() {
+        // The composition follow-on: the deuterium line derives from the disk metallicity off the Spiegel
+        // COOLTLUSTY track, so a metal-rich world types a giant of a given mass differently from a metal-poor one.
+        let line = DeuteriumLine::spiegel_cooltlusty();
+        assert_eq!(line.m_jup_at_solar, Fixed::from_ratio(1348, 100)); // 13.48 M_Jup at solar (Spiegel T1)
+                                                                       // The cited anchors, at 0.316 / 1 / 3.16 solar metallicity.
+        let solar = deuterium_burning_limit_m_jup(Fixed::ONE, &line).unwrap();
+        assert!(
+            (solar.to_f64_lossy() - 13.48).abs() < 0.02,
+            "the solar-metallicity deuterium line is 13.48 M_Jup (got {})",
+            solar.to_f64_lossy()
+        );
+        let metal_rich = deuterium_burning_limit_m_jup(Fixed::from_ratio(316, 100), &line).unwrap();
+        let metal_poor =
+            deuterium_burning_limit_m_jup(Fixed::from_ratio(316, 1000), &line).unwrap();
+        assert!(
+            (metal_rich.to_f64_lossy() - 13.13).abs() < 0.03
+                && (metal_poor.to_f64_lossy() - 13.77).abs() < 0.03,
+            "the track endpoints are 13.13 (3.16 solar) and 13.77 (0.316 solar) (got {}, {})",
+            metal_rich.to_f64_lossy(),
+            metal_poor.to_f64_lossy()
+        );
+        // MECHANISM: higher metallicity lowers the line (opacity blankets the core to fusion at a lower mass).
+        assert!(
+            metal_rich < solar && solar < metal_poor,
+            "higher metallicity gives a lower deuterium line"
+        );
+        // The clamp holds the endpoints beyond the track span.
+        assert_eq!(
+            deuterium_burning_limit_m_jup(Fixed::from_int(10), &line).unwrap(),
+            line.m_jup_at_triple_solar
+        );
+        // ADMIT THE ALIEN, the point of the derivation: a body of 4300 M_earth (~13.5 M_Jup) sits BETWEEN the
+        // metal-rich line (13.13 M_Jup) and the metal-poor line (13.77 M_Jup), so it types as a brown dwarf in a
+        // metal-rich world and a genuine planet in a metal-poor one. The fiducial ~13 M_Jup folds this away.
+        let mass = Fixed::from_int(4300);
+        let rich_limits =
+            BurningLimits::from_metallicity(Fixed::from_ratio(316, 100), &line).unwrap();
+        let poor_limits =
+            BurningLimits::from_metallicity(Fixed::from_ratio(316, 1000), &line).unwrap();
+        assert_eq!(
+            giant_mass_class(mass, &rich_limits).unwrap(),
+            GiantMassClass::BrownDwarf,
+            "a metal-rich world's lower deuterium line makes the same mass a brown dwarf"
+        );
+        assert_eq!(
+            giant_mass_class(mass, &poor_limits).unwrap(),
+            GiantMassClass::Planet,
+            "a metal-poor world's higher deuterium line makes the same mass a planet"
+        );
+        // Non-physical metallicity fails soft.
+        assert!(deuterium_burning_limit_m_jup(Fixed::ZERO, &line).is_none());
+        assert!(BurningLimits::from_metallicity(Fixed::ZERO, &line).is_none());
     }
 }
