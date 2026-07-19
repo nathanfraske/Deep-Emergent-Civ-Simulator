@@ -1861,6 +1861,110 @@ pub fn kraft_band_dispatch(
     })
 }
 
+/// The STAR'S EVOLUTIONARY PHASE, the axis ORTHOGONAL to envelope structure that decides which luminosity law a
+/// star obeys. A star is on the PRE-MAIN-SEQUENCE while it is still contracting and shining on the released
+/// gravitational energy (the Hayashi-Henyey contraction, brighter than its zero-age main-sequence instance), and
+/// on the MAIN SEQUENCE once hydrogen ignition has halted the contraction. The distinction is a PHASE question, not
+/// a structural one: a Herbig Ae/Be star is radiative-envelope AND pre-main-sequence at once, and a solar analogue
+/// is convective-envelope on BOTH sides of its arrival, so this never substitutes for [`KraftVerdict`].
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum EvolutionaryPhase {
+    /// Still contracting: the star shines above its main-sequence luminosity on gravitational energy, so the
+    /// `L_bol` track is the pre-main-sequence contraction law ([`pre_main_sequence_luminosity_lsun`]) and the
+    /// convective turnover is the fully-convective pre-main-sequence value
+    /// ([`pre_main_sequence_convective_turnover_days`]).
+    PreMainSequence,
+    /// Arrived: contraction has fallen to the zero-age main-sequence luminosity, so the `L_bol` track is the
+    /// main-sequence mass-luminosity law and the turnover is the main-sequence polynomial
+    /// ([`convective_turnover_time_days`]).
+    MainSequence,
+}
+
+/// Derive the [`EvolutionaryPhase`] from the CROSSING of the two luminosity laws the star obeys in turn: the falling
+/// pre-main-sequence contraction luminosity (`L ~ t^(-2/3)` on the Hayashi track) and the zero-age main-sequence
+/// luminosity (the mass-luminosity law, `L_sun * mass_ratio^exponent`). A pre-main-sequence star begins
+/// super-luminous and dims as it contracts, crossing the main-sequence value FROM ABOVE, and the crossing IS the
+/// arrival: while `L_pms > L_MS` the star is still contracting (PreMainSequence), and once the contraction
+/// luminosity has fallen to or below the main-sequence value it has reached the zero-age main sequence
+/// (MainSequence). Defining the boundary as the crossing makes `L_bol` CONTINUOUS across the phase switch (the two
+/// laws are equal there by construction), so a consumer selecting the phase-appropriate luminosity never sees a
+/// discontinuity at arrival, the same-fact-two-doors hazard defused at its root.
+///
+/// DERIVED, no authored value: both luminosities are the star's own derived quantities (each carries the star's
+/// mass, its Hayashi wall temperature, and, through the mass-luminosity exponent, its opacity), so the phase is a
+/// comparison of two derived numbers, not a threshold on age. ADMITS THE ALIEN: a star of any composition or energy
+/// route dispatches on ITS OWN two luminosities, never a Terran arrival age. The HONEST LIMIT: the Hayashi
+/// `t^(-2/3)` law overstates the late-contraction brightness (a real track flattens before the crossing) and a
+/// massive star's late pre-main-sequence is the Henyey track rather than the Hayashi wall, so the crossing slightly
+/// OVERESTIMATES the arrival age for those stars, a bias to correct when a per-track pre-main-sequence luminosity
+/// lands. `None` if either luminosity is non-positive (not a star).
+pub fn evolutionary_phase(
+    pre_main_sequence_luminosity_lsun: Fixed,
+    main_sequence_luminosity_lsun: Fixed,
+) -> Option<EvolutionaryPhase> {
+    if pre_main_sequence_luminosity_lsun <= Fixed::ZERO
+        || main_sequence_luminosity_lsun <= Fixed::ZERO
+    {
+        return None;
+    }
+    Some(
+        if pre_main_sequence_luminosity_lsun > main_sequence_luminosity_lsun {
+            EvolutionaryPhase::PreMainSequence
+        } else {
+            EvolutionaryPhase::MainSequence
+        },
+    )
+}
+
+/// THE STRUCTURE-KEYED DISPATCH STATE: the star's envelope structure and evolutionary phase as ONE derived state,
+/// the single node every branch downstream keys on. The two axes are orthogonal and both load-bearing: the
+/// [`KraftVerdict`] envelope (from [`kraft_band_dispatch`] on the star's current `T_eff`) selects the WIND branch (a
+/// convective envelope runs the X-ray dynamo clock, a radiative one the EUV-photoevaporation branch, a
+/// near-degenerate one carries both per the Gap Law), and the [`EvolutionaryPhase`] (from [`evolutionary_phase`] on
+/// the luminosity crossing) selects the `L_bol` TRACK (pre-main-sequence contraction versus the main-sequence law)
+/// and, with it, which convective turnover the Rossby number reads. Holding both in one state is what lets a
+/// consumer route a star correctly without re-deriving either: a Herbig star reads Radiative and PreMainSequence, a
+/// young solar analogue Convective and PreMainSequence, an arrived Sun Convective and MainSequence.
+///
+/// This supersedes a mass cut (the demoted `1.4 M_sun` figure was the main-sequence instance of a structure-keyed
+/// line): the dispatch keys on the star's own derived `T_eff` and its own two luminosities, so it is fully
+/// convective on the pre-main-sequence and mass-dependent on the main sequence WITHOUT reading a mass threshold.
+/// DERIVED throughout, no authored value; the mechanism is fixed Rust and the Kraft band edges are the only data,
+/// carried by [`KraftBreakBand`]. ADMITS THE ALIEN: every input is the star's own derived quantity.
+///
+/// HONEST LIMIT (a flagged sibling, not built here): the Kraft band is a MAIN-SEQUENCE-instance calibration, and a
+/// pre-main-sequence star keeps a convective envelope to a higher `T_eff` than its arrived instance, so the true
+/// envelope boundary shifts with phase. That shift is a future conditioning field on [`KraftBreakBand`] (the
+/// sibling of its metallicity shift), reserved until a pre-main-sequence Kraft determination is fetched; until then
+/// the envelope dispatches on the phase-correct `T_eff` against the main-sequence band, the conservative reading.
+/// `None` if either sub-dispatch refuses (a non-star `T_eff`, an invalid band, or a non-positive luminosity).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct StellarStructuralState {
+    /// The envelope-structure verdict against the Kraft band: which wind branch the star's photosphere takes.
+    pub envelope: KraftVerdict,
+    /// The evolutionary phase: which luminosity track and convective turnover the star obeys.
+    pub phase: EvolutionaryPhase,
+}
+
+/// Derive the [`StellarStructuralState`] by composing the two sub-dispatches: the envelope from
+/// [`kraft_band_dispatch`] (the star's current `T_eff` against the metallicity-shifted Kraft band) and the phase
+/// from [`evolutionary_phase`] (the pre-main-sequence contraction luminosity against the main-sequence luminosity,
+/// both in `L_sun`). Returns `None` if either refuses, so an ill-posed star never yields a half-formed state.
+pub fn stellar_structural_state(
+    t_eff_k: Fixed,
+    band: KraftBreakBand,
+    metallicity_log10_offset: Fixed,
+    pre_main_sequence_luminosity_lsun: Fixed,
+    main_sequence_luminosity_lsun: Fixed,
+) -> Option<StellarStructuralState> {
+    let envelope = kraft_band_dispatch(t_eff_k, band, metallicity_log10_offset)?;
+    let phase = evolutionary_phase(
+        pre_main_sequence_luminosity_lsun,
+        main_sequence_luminosity_lsun,
+    )?;
+    Some(StellarStructuralState { envelope, phase })
+}
+
 /// A LUMINOSITY BRACKET (`L_sun`), the RIDER 2 output form for a quantity whose model uncertainty spans orders of
 /// magnitude: the branch ships the RANGE, not a point, so a consumer cannot read a decade-wide ignorance as a
 /// value. `[lo, hi]` in `L_sun`, unconstrained-by-source by construction (a bracket is not a scalar), with
@@ -5258,6 +5362,109 @@ mod tests {
         assert_eq!(
             convective_turnover_time_days(Fixed::from_int(2), &fit),
             Err(TurnoverRefusal::AboveFitDomain)
+        );
+    }
+
+    #[test]
+    fn the_phase_is_the_crossing_of_the_two_luminosity_laws() {
+        // The evolutionary phase falls out of the luminosity crossing, from the star's OWN derived luminosities. A
+        // solar analogue: its zero-age main-sequence luminosity is 1 L_sun (1^exponent), and its pre-main-sequence
+        // contraction luminosity falls as t^(-2/3) from a super-solar value. Young, it outshines the main sequence
+        // (PreMainSequence); old, the contraction has fallen well below it (MainSequence). The same T_H is used for
+        // both so the t^(-2/3) decline is the only difference.
+        let l_ms = Fixed::ONE.powf(Fixed::from_ratio(35, 10)); // 1^exponent = 1 L_sun, the ZAMS Sun.
+        let t_h = Fixed::from_int(4300); // the Hayashi wall.
+        let l_pms_young = pre_main_sequence_luminosity_lsun(Fixed::ONE, t_h, Fixed::ONE).unwrap();
+        let l_pms_old =
+            pre_main_sequence_luminosity_lsun(Fixed::ONE, t_h, Fixed::from_int(200)).unwrap();
+        assert!(
+            l_pms_young > l_ms,
+            "a 1 Myr pre-main-sequence Sun outshines the ZAMS ({} > {})",
+            l_pms_young.to_f64_lossy(),
+            l_ms.to_f64_lossy()
+        );
+        assert!(
+            l_pms_old < l_ms,
+            "a 200 Myr contraction has fallen below the ZAMS ({} < {})",
+            l_pms_old.to_f64_lossy(),
+            l_ms.to_f64_lossy()
+        );
+        assert_eq!(
+            evolutionary_phase(l_pms_young, l_ms),
+            Some(EvolutionaryPhase::PreMainSequence),
+            "still contracting above the main sequence"
+        );
+        assert_eq!(
+            evolutionary_phase(l_pms_old, l_ms),
+            Some(EvolutionaryPhase::MainSequence),
+            "contraction fallen below the main sequence: arrived"
+        );
+        // The boundary is inclusive of arrival, so L_bol is CONTINUOUS across the switch: exactly at the crossing
+        // (the two laws equal) the phase reads MainSequence, and a max-of-the-two selection meets without a jump.
+        assert_eq!(
+            evolutionary_phase(l_ms, l_ms),
+            Some(EvolutionaryPhase::MainSequence),
+            "at the crossing the star has arrived, and the two laws agree there"
+        );
+        // Fail-loud on a non-star luminosity.
+        assert_eq!(evolutionary_phase(Fixed::ZERO, l_ms), None);
+        assert_eq!(evolutionary_phase(l_ms, Fixed::from_int(-1)), None);
+    }
+
+    #[test]
+    fn the_structural_state_keys_both_the_wind_branch_and_the_lbol_track() {
+        // The one state carries the two orthogonal axes, and the three canonical stars separate cleanly. The
+        // envelope is the wind branch (Kraft on T_eff), the phase the L_bol track (the luminosity crossing).
+        let band = kraft_band();
+        // A Herbig Ae/Be star: hot photosphere (radiative envelope, the EUV branch) AND still contracting above its
+        // luminous main sequence. Radiative and PreMainSequence at once, the case the two axes must keep distinct.
+        let herbig = stellar_structural_state(
+            Fixed::from_int(10_000),
+            band,
+            Fixed::ZERO,
+            Fixed::from_int(50), // still contracting above ...
+            Fixed::from_int(47), // ... its ZAMS luminosity.
+        )
+        .unwrap();
+        assert_eq!(herbig.envelope, KraftVerdict::Radiative);
+        assert_eq!(herbig.phase, EvolutionaryPhase::PreMainSequence);
+        // A young solar analogue: cool (convective dynamo, the X-ray branch) and still contracting. Convective and
+        // PreMainSequence, the same envelope as its arrived self but the other phase.
+        let young_sun = stellar_structural_state(
+            Fixed::from_int(5772),
+            band,
+            Fixed::ZERO,
+            Fixed::from_ratio(167, 100), // 1.67 L_sun contraction ...
+            Fixed::ONE,                  // ... above the 1 L_sun ZAMS.
+        )
+        .unwrap();
+        assert_eq!(young_sun.envelope, KraftVerdict::Convective);
+        assert_eq!(young_sun.phase, EvolutionaryPhase::PreMainSequence);
+        // The arrived Sun: same convective envelope, contraction now below the ZAMS. Convective and MainSequence.
+        let arrived_sun = stellar_structural_state(
+            Fixed::from_int(5772),
+            band,
+            Fixed::ZERO,
+            Fixed::from_ratio(5, 10), // contraction fallen to 0.5 L_sun ...
+            Fixed::ONE,               // ... below the 1 L_sun ZAMS.
+        )
+        .unwrap();
+        assert_eq!(arrived_sun.envelope, KraftVerdict::Convective);
+        assert_eq!(arrived_sun.phase, EvolutionaryPhase::MainSequence);
+        // Fail-loud: a non-star T_eff or a non-positive luminosity refuses the whole state, never a half-formed one.
+        assert_eq!(
+            stellar_structural_state(Fixed::ZERO, band, Fixed::ZERO, Fixed::ONE, Fixed::ONE),
+            None
+        );
+        assert_eq!(
+            stellar_structural_state(
+                Fixed::from_int(5772),
+                band,
+                Fixed::ZERO,
+                Fixed::ZERO,
+                Fixed::ONE
+            ),
+            None
         );
     }
 
