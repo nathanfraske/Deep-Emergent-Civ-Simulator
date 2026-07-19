@@ -1103,3 +1103,6 @@ crates/physics/src/young_thermal.rs	peak_temperature_at	grandfathered	predates t
 crates/physics/src/young_thermal.rs	slr_family_temperature_rise	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/young_thermal.rs	solar_system_slr_family	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/young_thermal.rs	young_thermal_verdict	grandfathered	predates the derives-coverage gate; unclassified
+crates/materials/src/conductivity.rs	bruggeman_residual	helper	the Bruggeman residual function the bisection solves; pure arithmetic with no world quantity of its own
+crates/materials/src/conductivity.rs	solve_bruggeman	helper	the fixed-point bisection that finds the residual's root; the numerical method, not the quantity
+crates/materials/src/conductivity.rs	fmt	helper	a Display impl

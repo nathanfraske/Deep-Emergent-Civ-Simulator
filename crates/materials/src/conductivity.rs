@@ -381,6 +381,7 @@ impl PhaseConductivity {
     ///
     /// `anchor_shift` displaces the anchor by the rung's own band, so the caller can walk the outer edges of the
     /// uncertainty interval: zero for the central value, `+1` for the stiff edge, `-1` for the soft edge.
+    // @derives: a phase's conductivity at a temperature <- its ladder rung's anchor, band and exponent
     fn conductivity_at(
         &self,
         temperature: Fixed,
@@ -611,6 +612,7 @@ fn solve_bruggeman(components: &[(Fixed, Fixed)]) -> Option<Fixed> {
 ///
 /// Deterministic fixed-point throughout: the solve is a fixed bisection with an exact convergence exit, and no
 /// float and no logarithm enters (Bruggeman needs only the four arithmetic operations, unlike a geometric mean).
+// @derives: a rock's effective thermal conductivity <- the per-phase conductivity ladder + the world's own mineral census (Bruggeman self-consistent EMT)
 pub fn assemblage_conductivity(
     census: &[(&PhaseConductivity, Fixed)],
     temperature: Fixed,

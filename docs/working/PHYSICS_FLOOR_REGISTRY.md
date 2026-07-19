@@ -17,12 +17,14 @@ The lists below are GENERATED from `crates/physics/data/*.toml`, `crates/physics
 
 ## Deriving substrates (check here BEFORE authoring: what the world derives, and where)
 
-The 19 deriving subsystems below live OUTSIDE the authored floor. Each produces a world quantity from the floor and the situation, so its output must never be authored: if the value you need appears here, read or extend the subsystem, do not set a number. This is the list that stops `1 year = 365 days` from being authored when orbital mechanics already derives it. Generated from the `// @derives:` markers in the code; a subsystem missing its marker is a gap in this map, so mark every derivation entry point.
+The 21 deriving subsystems below live OUTSIDE the authored floor. Each produces a world quantity from the floor and the situation, so its output must never be authored: if the value you need appears here, read or extend the subsystem, do not set a number. This is the list that stops `1 year = 365 days` from being authored when orbital mechanics already derives it. Generated from the `// @derives:` markers in the code; a subsystem missing its marker is a gap in this map, so mark every derivation entry point.
 
 ### `crates/materials/src/conductivity.rs`
 
-- lattice thermal conductivity k(T,P) <- a measured kappa_298 anchor + banked Grueneisen, bulk modulus and expansivity (measured rung) (`crates/materials/src/conductivity.rs:119`)
-- the radiative conductivity silicates gain at high T <- temperature (`crates/materials/src/conductivity.rs:163`)
+- lattice thermal conductivity k(T,P) <- a measured kappa_298 anchor + banked Grueneisen, bulk modulus and expansivity (measured rung) (`crates/materials/src/conductivity.rs:121`)
+- the radiative conductivity silicates gain at high T <- temperature (`crates/materials/src/conductivity.rs:165`)
+- a phase's conductivity at a temperature <- its ladder rung's anchor, band and exponent (`crates/materials/src/conductivity.rs:384`)
+- a rock's effective thermal conductivity <- the per-phase conductivity ladder + the world's own mineral census (Bruggeman self-consistent EMT) (`crates/materials/src/conductivity.rs:615`)
 ### `crates/materials/src/freezer.rs`
 
 - the bulk sound speed <- bulk modulus + density (`crates/materials/src/freezer.rs:176`)
