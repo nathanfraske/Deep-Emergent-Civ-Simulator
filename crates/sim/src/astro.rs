@@ -1343,8 +1343,8 @@ pub fn radiation_field_chi_from_extinction(
     }
     let ln10 = Fixed::from_int(10).ln();
     // log10(chi) = -A_V * k, then chi = exp(log10(chi) * ln10). A deep core underflows chi to zero (refused below).
-    let log10_chi = Fixed::ZERO
-        .checked_sub(a_v_magnitudes.checked_mul(attenuation_efficiency_per_mag)?)?;
+    let log10_chi =
+        Fixed::ZERO.checked_sub(a_v_magnitudes.checked_mul(attenuation_efficiency_per_mag)?)?;
     let chi = log10_chi.checked_mul(ln10)?.exp();
     (chi > Fixed::ZERO).then_some(chi)
 }
@@ -1626,7 +1626,8 @@ pub fn derive_viscous_time_myr(
 /// circumstellar disk tidally truncates INSIDE its Roche lobe, at the outermost non-overlapping Lindblad resonance
 /// (Paczynski 1977, Papaloizou and Pringle 1977, Artymowicz and Lubow 1994), at `R_t = f * R_L` with the
 /// resonance-truncation FRACTION `f` now VENDORED ([`resonant_truncation_fraction`], the Pichardo 2005 fit
-/// `f = 0.733 (1 - e)^1.20 q^0.01`), so [`tidally_capped_scale_radius_au`] caps `R_1` at the expected `f * R_L`
+/// `f = 0.733 (1 - e)^1.20 q^0.07`, `q` the companion mass fraction), so [`tidally_capped_scale_radius_au`] caps
+/// `R_1` at the expected `f * R_L`
 /// rather than this conservative edge. `t_visc` and `tau_disk` inherit the resulting `sqrt(f)` band (a class effect,
 /// wider at high eccentricity) through [`derive_viscous_time_myr`] (`t_visc ~ sqrt(R_1)`), the machinery already
 /// built rather than a new path. This Roche-lobe radius stays the outer bound of that band.
@@ -1670,56 +1671,70 @@ pub fn roche_lobe_radius_au(
 
 /// The RESONANT DISK-TRUNCATION FRACTION `f = R_t / R_L`: the fraction of the host's Roche-lobe radius at which a
 /// circumstellar disk truncates under the companion's resonant torques, the cited closed fit
-/// `f = c (1 - e)^p_e q^p_q` (Pichardo, Sparke and Aguilar 2005, Eq. 6, the dissipationless invariant-loop
-/// determination, vendored). The disk edge sits INSIDE the Roche lobe: at a circular orbit `f ~ 0.733` and nearly
-/// mass-ratio independent (the `q` exponent is about 0.01), tightening with eccentricity (`f ~ 0.32` at `e = 0.5`,
-/// about `0.046` at `e = 0.9`) as the companion's closest approach carves the disk back. The fit holds over
-/// `e in [0, 0.9]`, `q in [0.01, 0.99]`, to about 6.5 percent.
+/// `f = c (1 - e)^p_e q^p_f` (Pichardo, Sparke and Aguilar 2005, Eq. 6, VERIFIED source-verbatim against the held
+/// scan p.524: `R_d ~ R_d,Egg * 0.733 (1 - e)^1.20 q^0.07`). The symbol `q` is the COMPANION MASS FRACTION
+/// `M_2 / (M_1 + M_2)` (Pichardo Eq. 5 and Figs 3 to 4), NOT a mass ratio, over `q in [0.01, 0.99]`, `e in [0, 0.9]`,
+/// to about 6.5 percent. The disk edge sits INSIDE the Roche lobe: `f` runs from about 0.53 (a low mass fraction) to
+/// 0.73 (a companion-dominated split), weakly increasing with the mass fraction (the exponent is 0.07, about 17
+/// percent per decade of `q`, weak but NOT negligible), and tightening sharply with eccentricity (`f ~ 0.32` at
+/// `e = 0.5`, about `0.046` at `e = 0.9`, at the high-mass-fraction end) as the companion's closest approach carves
+/// the disk back.
 ///
-/// The coefficients are CITED data (Principle 11), carried by [`DiskTruncationFit`]; the mechanism is fixed Rust.
-/// ADMITS THE ALIEN: keyed on the binary's own eccentricity and mass ratio. HONEST LIMIT: the fit is
-/// DISSIPATIONLESS (an upper bound, no viscosity), while the Artymowicz and Lubow 1994 SPH edge sits lower and moves
-/// OUTWARD with disk viscosity (the edge is the outermost resonance the viscous torque cannot overflow), so a
-/// viscous disk's true truncation is a band between the SPH edge and this bound, the viscosity dependence a flagged
-/// sibling. `None` on `e` outside `[0, 1)` or a non-positive mass ratio.
+/// CORRECTION OF RECORD: the `q` exponent is 0.07, not the 0.01 an earlier OCR text-layer read reported (a
+/// superscript misread, caught in the derive-first audit and corrected against the held page image). The coefficients
+/// are CITED data (Principle 11), carried by [`DiskTruncationFit`]; the mechanism is fixed Rust. ADMITS THE ALIEN:
+/// keyed on the binary's own eccentricity and mass fraction.
+///
+/// THIS IS ONE RUNG, NOT THE UNIVERSAL EDGE. Pichardo is the COPLANAR, DISSIPATIONLESS invariant-loop determination
+/// (an estimator ceiling, no viscosity). Two SEPARATE rungs stay distinct and are NOT folded into these
+/// coefficients: the Artymowicz and Lubow 1994 SPH edge sits LOWER and moves OUTWARD with disk viscosity (the edge
+/// is the outermost resonance the viscous torque cannot overflow), and the Manara / Papaloizou-Pringle
+/// viscous-torque fit (a distinct `h mu^k` form that consumes `alpha_viscosity` and `H/r` through a Reynolds state)
+/// is its own type, built only when a consumer needs the viscosity-conditioned edge. A viscous disk's true
+/// truncation is a band between the SPH edge and this dissipationless bound. `None` on `e` outside `[0, 1)` or a
+/// mass fraction outside `(0, 1)`.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct DiskTruncationFit {
-    /// The circular-orbit truncation fraction `f(e=0)`, the coefficient `c`. Cited (Pichardo 2005 Eq. 6, ~0.733).
+    /// The fit coefficient `c` (the `q -> 1` circular-orbit limit of `f`). Cited (Pichardo 2005 Eq. 6, 0.733).
     pub circular_fraction: Fixed,
-    /// The exponent on `(1 - e)`, the eccentricity tightening. Cited (~1.20).
+    /// The exponent on `(1 - e)`, the eccentricity tightening. Cited (1.20).
     pub eccentricity_exponent: Fixed,
-    /// The exponent on the mass ratio `q`, near zero (the fraction is nearly mass-ratio independent). Cited (~0.01).
-    pub mass_ratio_exponent: Fixed,
+    /// The exponent on the companion mass fraction `q = M_2/(M_1+M_2)`, weakly positive. Cited (0.07, NOT the 0.01
+    /// an OCR text layer misread; corrected against the held scan p.524).
+    pub mass_fraction_exponent: Fixed,
 }
 
 impl DiskTruncationFit {
-    /// The Pichardo, Sparke and Aguilar 2005 invariant-loop fit (MNRAS 359, 521, Eq. 6), as cited data:
-    /// `f = 0.733 (1 - e)^1.20 q^0.01`. Vendored in `disk_arc_literature` (`pichardo_2005`).
+    /// The Pichardo, Sparke and Aguilar 2005 invariant-loop fit (MNRAS 359, 521, Eq. 6, held-scan p.524), as cited
+    /// data: `f = 0.733 (1 - e)^1.20 q^0.07`, `q` the companion mass fraction. Vendored in `disk_arc_literature`
+    /// (`pichardo_2005`).
     pub fn pichardo_2005() -> Self {
         DiskTruncationFit {
-            circular_fraction: Fixed::from_ratio(733, 1000),    // 0.733
+            circular_fraction: Fixed::from_ratio(733, 1000), // 0.733
             eccentricity_exponent: Fixed::from_ratio(120, 100), // 1.20
-            mass_ratio_exponent: Fixed::from_ratio(1, 100),     // 0.01
+            mass_fraction_exponent: Fixed::from_ratio(7, 100), // 0.07 (verified p.524, not the OCR-misread 0.01)
         }
     }
 }
 
-/// Derive the [`DiskTruncationFit`] fraction `f = c (1 - e)^p_e q^p_q` at a binary's eccentricity and mass ratio.
-/// `None` if `e` is outside `[0, 1)` (not a bound orbit) or the mass ratio is non-positive.
+/// Derive the [`DiskTruncationFit`] fraction `f = c (1 - e)^p_e q^p_f` at a binary's eccentricity and companion mass
+/// fraction `q = M_2/(M_1+M_2)`. `None` if `e` is outside `[0, 1)` (not a bound orbit) or the mass fraction is
+/// outside `(0, 1)` (not a real two-body split).
 pub fn resonant_truncation_fraction(
     eccentricity: Fixed,
-    mass_ratio_host_to_companion: Fixed,
+    companion_mass_fraction: Fixed,
     fit: &DiskTruncationFit,
 ) -> Option<Fixed> {
     if eccentricity < Fixed::ZERO
         || eccentricity >= Fixed::ONE
-        || mass_ratio_host_to_companion <= Fixed::ZERO
+        || companion_mass_fraction <= Fixed::ZERO
+        || companion_mass_fraction >= Fixed::ONE
     {
         return None;
     }
     let one_minus_e = Fixed::ONE.checked_sub(eccentricity)?;
     let ecc_term = one_minus_e.powf(fit.eccentricity_exponent);
-    let q_term = mass_ratio_host_to_companion.powf(fit.mass_ratio_exponent);
+    let q_term = companion_mass_fraction.powf(fit.mass_fraction_exponent);
     fit.circular_fraction
         .checked_mul(ecc_term)?
         .checked_mul(q_term)
@@ -1740,7 +1755,10 @@ pub fn tidally_capped_scale_radius_au(
     roche_lobe_au: Fixed,
     truncation_fraction: Fixed,
 ) -> Option<Fixed> {
-    if birth_r1_au <= Fixed::ZERO || roche_lobe_au <= Fixed::ZERO || truncation_fraction <= Fixed::ZERO {
+    if birth_r1_au <= Fixed::ZERO
+        || roche_lobe_au <= Fixed::ZERO
+        || truncation_fraction <= Fixed::ZERO
+    {
         return None;
     }
     let truncation_radius_au = roche_lobe_au.checked_mul(truncation_fraction)?;
@@ -3365,8 +3383,8 @@ impl EuvWindFit {
             log10_phi_reference_per_s: Fixed::from_int(41),                 // Phi_ref = 1e41 s^-1
             phi_exponent: Fixed::from_ratio(1, 2),                          // 1/2
             mass_exponent: Fixed::from_ratio(1, 2),                         // 1/2
-            mass_min_msun: Fixed::from_ratio(1, 10),                        // 0.1 M_sun (analytic extension edge)
-            mass_max_msun: Fixed::from_int(65),                            // 65 M_sun (massive-star model edge)
+            mass_min_msun: Fixed::from_ratio(1, 10), // 0.1 M_sun (analytic extension edge)
+            mass_max_msun: Fixed::from_int(65),      // 65 M_sun (massive-star model edge)
         }
     }
 
@@ -3382,7 +3400,7 @@ impl EuvWindFit {
             phi_exponent: Fixed::from_ratio(1, 2),                          // 1/2
             mass_exponent: Fixed::from_ratio(1, 2),                         // 1/2
             mass_min_msun: Fixed::from_ratio(1, 10),                        // 0.1 M_sun
-            mass_max_msun: Fixed::from_int(65),                            // 65 M_sun
+            mass_max_msun: Fixed::from_int(65),                             // 65 M_sun
         }
     }
 
@@ -3400,7 +3418,7 @@ impl EuvWindFit {
             phi_exponent: Fixed::from_ratio(1, 2),                          // 1/2
             mass_exponent: Fixed::from_ratio(1, 2),                         // 1/2
             mass_min_msun: Fixed::from_ratio(1, 10),                        // 0.1 M_sun
-            mass_max_msun: Fixed::from_int(65),                            // 65 M_sun
+            mass_max_msun: Fixed::from_int(65),                             // 65 M_sun
         }
     }
 }
@@ -5367,37 +5385,71 @@ mod tests {
 
     #[test]
     fn the_truncation_fraction_tightens_the_disk_inside_the_roche_lobe() {
-        // The Pichardo fit f = 0.733 (1-e)^1.20 q^0.01. Circular: f ~ 0.733, nearly mass-ratio independent.
+        // The Pichardo fit f = 0.733 (1-e)^1.20 q^0.07, q the companion mass fraction M_2/(M_1+M_2). At an equal-mass
+        // circular binary (q=0.5) the disk truncates near 0.70 R_L; the 0.733 coefficient is the q->1 limit.
         let fit = DiskTruncationFit::pichardo_2005();
-        let f0 = resonant_truncation_fraction(Fixed::ZERO, Fixed::ONE, &fit).unwrap();
+        let f_eq =
+            resonant_truncation_fraction(Fixed::ZERO, Fixed::from_ratio(1, 2), &fit).unwrap();
         assert!(
-            (f0.to_f64_lossy() - 0.733).abs() < 0.01,
-            "a circular binary truncates the disk at ~0.733 R_L (got {})",
-            f0.to_f64_lossy()
+            (f_eq.to_f64_lossy() - 0.699).abs() < 0.01,
+            "an equal-mass circular binary truncates the disk near 0.70 R_L (got {})",
+            f_eq.to_f64_lossy()
         );
-        // Eccentricity tightens the disk: e=0.5 gives ~0.32, e=0.9 gives ~0.046 (the companion carves it back).
-        let f_half = resonant_truncation_fraction(Fixed::from_ratio(1, 2), Fixed::ONE, &fit).unwrap();
-        let f_high = resonant_truncation_fraction(Fixed::from_ratio(9, 10), Fixed::ONE, &fit).unwrap();
+        // Eccentricity tightens the disk sharply: at q=0.5, e=0.5 gives ~0.30, e=0.9 gives ~0.044.
+        let f_half =
+            resonant_truncation_fraction(Fixed::from_ratio(1, 2), Fixed::from_ratio(1, 2), &fit)
+                .unwrap();
+        let f_high =
+            resonant_truncation_fraction(Fixed::from_ratio(9, 10), Fixed::from_ratio(1, 2), &fit)
+                .unwrap();
         assert!(
-            (f_half.to_f64_lossy() - 0.32).abs() < 0.02,
-            "e=0.5 truncates at ~0.32 R_L (got {})",
+            f_high < f_half && f_half < f_eq,
+            "higher eccentricity tightens the disk"
+        );
+        assert!(
+            (f_half.to_f64_lossy() - 0.304).abs() < 0.02,
+            "e=0.5 truncates near 0.30 R_L at equal mass (got {})",
             f_half.to_f64_lossy()
         );
-        assert!(f_high < f_half && f_half < f0, "higher eccentricity tightens the disk");
+        // The mass-fraction dependence is WEAK BUT REAL (q^0.07, ~17.5 percent per decade), not negligible: a tenfold
+        // mass fraction (0.05 -> 0.5) raises f by ~17.5 percent, the exact 0.07-versus-0.01 exponent the audit fixed.
+        let f_low_q =
+            resonant_truncation_fraction(Fixed::ZERO, Fixed::from_ratio(5, 100), &fit).unwrap();
+        let f_hi_q =
+            resonant_truncation_fraction(Fixed::ZERO, Fixed::from_ratio(5, 10), &fit).unwrap();
+        let decade_ratio = f_hi_q.to_f64_lossy() / f_low_q.to_f64_lossy();
         assert!(
-            (f_high.to_f64_lossy() - 0.046).abs() < 0.01,
-            "e=0.9 truncates at ~0.046 R_L (got {})",
-            f_high.to_f64_lossy()
+            (decade_ratio - 1.175).abs() < 0.01,
+            "a tenfold mass fraction moves f by ~17.5 percent (10^0.07), got {decade_ratio}"
         );
-        // Nearly mass-ratio independent (the q exponent is ~0.01): a tenfold q barely moves f.
-        let f_q10 = resonant_truncation_fraction(Fixed::ZERO, Fixed::from_int(10), &fit).unwrap();
-        assert!(
-            (f_q10.to_f64_lossy() / f0.to_f64_lossy() - 1.0).abs() < 0.03,
-            "the truncation fraction is nearly mass-ratio independent"
-        );
-        // Fail-loud: an unbound orbit (e >= 1) or a non-positive mass ratio.
-        assert!(resonant_truncation_fraction(Fixed::ONE, Fixed::ONE, &fit).is_none());
+        // Fail-loud: an unbound orbit (e >= 1) or a mass fraction outside (0, 1).
+        assert!(resonant_truncation_fraction(Fixed::ONE, Fixed::from_ratio(1, 2), &fit).is_none());
         assert!(resonant_truncation_fraction(Fixed::ZERO, Fixed::ZERO, &fit).is_none());
+        assert!(resonant_truncation_fraction(Fixed::ZERO, Fixed::ONE, &fit).is_none());
+    }
+
+    #[test]
+    fn the_truncation_fit_fingerprints_the_pichardo_coefficients() {
+        // Source-fingerprint (the audit's requirement): the exact Pichardo 2005 Eq. 6 coefficients, verified against
+        // the held scan p.524 (f = 0.733 (1-e)^1.20 q^0.07). This pins them so no future edit can silently swap in a
+        // different model family's coefficient (the Manara / Papaloizou-Pringle viscous-torque fit's 0.01, say, a
+        // distinct type with its own validity frame). If this fails, the fit has crossed a model family.
+        let fit = DiskTruncationFit::pichardo_2005();
+        assert_eq!(
+            fit.circular_fraction,
+            Fixed::from_ratio(733, 1000),
+            "coefficient 0.733"
+        );
+        assert_eq!(
+            fit.eccentricity_exponent,
+            Fixed::from_ratio(120, 100),
+            "eccentricity exponent 1.20"
+        );
+        assert_eq!(
+            fit.mass_fraction_exponent,
+            Fixed::from_ratio(7, 100),
+            "mass-fraction exponent 0.07 (NOT the OCR-misread 0.01)"
+        );
     }
 
     #[test]
@@ -5405,8 +5457,12 @@ mod tests {
         // min(birth, f * roche_lobe): a disk larger than its resonant truncation radius is bounded to it, a smaller
         // one untouched. At a circular orbit the Pichardo fraction is ~0.733, so the 7.6 AU lobe truncates at ~5.6 AU.
         let lobe = Fixed::from_ratio(76, 10); // 7.6 AU Roche-lobe radius
-        let f = resonant_truncation_fraction(Fixed::ZERO, Fixed::ONE, &DiskTruncationFit::pichardo_2005())
-            .unwrap();
+        let f = resonant_truncation_fraction(
+            Fixed::ZERO,
+            Fixed::from_ratio(1, 2),
+            &DiskTruncationFit::pichardo_2005(),
+        )
+        .unwrap();
         let r_t = lobe.checked_mul(f).unwrap(); // ~5.6 AU, the resonant truncation radius
         assert_eq!(
             tidally_capped_scale_radius_au(Fixed::from_int(30), lobe, f),
@@ -5439,8 +5495,12 @@ mod tests {
         );
         let birth = Fixed::from_int(30);
         let lobe = roche_lobe_radius_au(Fixed::from_int(20), Fixed::ONE, c_num, c_log).unwrap();
-        let f = resonant_truncation_fraction(Fixed::ZERO, Fixed::ONE, &DiskTruncationFit::pichardo_2005())
-            .unwrap();
+        let f = resonant_truncation_fraction(
+            Fixed::ZERO,
+            Fixed::from_ratio(1, 2),
+            &DiskTruncationFit::pichardo_2005(),
+        )
+        .unwrap();
         let r_t = lobe.checked_mul(f).unwrap();
         let capped = tidally_capped_scale_radius_au(birth, lobe, f).unwrap();
         assert_eq!(
@@ -6090,25 +6150,34 @@ mod tests {
                 .unwrap()
                 .to_f64_lossy();
         let x = 157821.0_f64 / 15000.0;
-        let oracle =
-            (x * x * x + 3.0 * x * x + 6.0 * x + 6.0) / (x * (x * x + 2.0 * x + 2.0));
+        let oracle = (x * x * x + 3.0 * x * x + 6.0 * x + 6.0) / (x * (x * x + 2.0 * x + 2.0));
         assert!(
             (ratio / oracle - 1.0).abs() < 0.001,
             "the derived ratio matches the Wien-tail oracle: got {ratio}, oracle {oracle}"
         );
         // A hotter photosphere hardens the tail: the mean energy rises above the cold-limit edge value, and the
         // mean is always above the edge itself (the ratio exceeds 1).
-        let hot = mean_ionizing_photon_energy_over_edge(Fixed::from_int(30000), t_ion(), wien_x_min())
-            .unwrap();
-        let cool = mean_ionizing_photon_energy_over_edge(Fixed::from_int(10000), t_ion(), wien_x_min())
-            .unwrap();
-        assert!(hot > cool, "a hotter photosphere has a harder mean ionizing photon");
-        assert!(cool > Fixed::ONE, "the mean is always above the edge energy");
-        // Past the Wien-tail validity edge (T_eff > T_ion/wien_x_min ~ 52600 K) it refuses, not extrapolates.
+        let hot =
+            mean_ionizing_photon_energy_over_edge(Fixed::from_int(30000), t_ion(), wien_x_min())
+                .unwrap();
+        let cool =
+            mean_ionizing_photon_energy_over_edge(Fixed::from_int(10000), t_ion(), wien_x_min())
+                .unwrap();
         assert!(
-            mean_ionizing_photon_energy_over_edge(Fixed::from_int(60000), t_ion(), wien_x_min())
-                .is_none()
+            hot > cool,
+            "a hotter photosphere has a harder mean ionizing photon"
         );
+        assert!(
+            cool > Fixed::ONE,
+            "the mean is always above the edge energy"
+        );
+        // Past the Wien-tail validity edge (T_eff > T_ion/wien_x_min ~ 52600 K) it refuses, not extrapolates.
+        assert!(mean_ionizing_photon_energy_over_edge(
+            Fixed::from_int(60000),
+            t_ion(),
+            wien_x_min()
+        )
+        .is_none());
     }
 
     #[test]
@@ -6145,7 +6214,11 @@ mod tests {
             "the derived EUV wind rate matches the Hollenbach oracle: got {got}, oracle {mdot_myr}"
         );
         // A point luminosity gives a point rate: zero-width bracket.
-        assert_eq!(out.width_dex(), Some(Fixed::ZERO), "a point bracket has zero width");
+        assert_eq!(
+            out.width_dex(),
+            Some(Fixed::ZERO),
+            "a point bracket has zero width"
+        );
     }
 
     #[test]
