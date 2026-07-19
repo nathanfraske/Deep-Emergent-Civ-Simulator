@@ -1360,14 +1360,24 @@ fn max_representable_elastic_thickness(
 /// with `NotRepresentable` before it had computed anything. Every PHYSICAL elastic thickness is far inside
 /// the window (`10 km` gives `1.07e4`, `100 km` gives `1.07e7`), so only the starting guess overflowed.
 ///
-/// # Why clamping the START is sound
+/// # What clamping the START does and does not establish
 ///
-/// The iteration is a direct-substitution fixed point, `D -> M(kappa(D))/kappa(D)`, converged on its own
-/// `|delta| <= EPSILON` test. Its solution is defined by that equation and not by where it starts, so a
-/// different admissible start reaches the same fixed point. That is a claim about a contraction rather than
-/// an assumption about this one, so it is PROVEN rather than asserted: the twin
-/// `the_clamped_trial_reaches_the_same_fixed_point_as_the_unclamped_one` runs a case where BOTH starts are
-/// representable and requires the converged rigidities to be bit-identical.
+/// The iteration is a direct-substitution fixed point, `D -> M(kappa(D))/kappa(D)`, converged on
+/// `|delta| <= EPSILON`. I first argued the clamp was free because a fixed point is defined by its
+/// equation rather than by where it starts, and wrote a twin to prove it. The twin FAILED: two starts
+/// converge to `216293.249` and `216293.145`, agreeing to about `5e-7` relative and no further.
+///
+/// I then explained that gap by saying the loop terminates on a small STEP rather than a small residual.
+/// THAT EXPLANATION IS ALSO WRONG, and an audit caught it: for a direct substitution `D_new = F(D)`, the
+/// step `|D_new - D|` IS the residual `|F(D) - D|`, so there is no distinction to appeal to. What the two
+/// endpoints actually show is a near-identity map whose residual is small over a range of `D`, so
+/// EPSILON-level termination admits a spread of approximate fixed points; whether that is poor
+/// conditioning, quantization, or more than one basin is NOT established by two samples.
+///
+/// So this is a PRAGMATIC fallback, not a proven-equivalent one. It is the difference between an answer
+/// and a refusal for a thick-lid world, the measured spread on the one case where both starts run is
+/// `5e-7`, and that single case does NOT bound the error for the 739 km case whose unclamped start cannot
+/// be run at all. A consumer that needs the solve's start-independence guaranteed does not have it here.
 ///
 /// Returns the trial and whether it was clamped, so a caller can tell a solve that started from the domain
 /// from one that started from the representation ceiling.
@@ -4382,14 +4392,13 @@ mod tests {
     /// THE TWIN THAT LICENSES THE CLAMP: a different admissible start must reach the SAME fixed point.
     ///
     /// [`initial_trial_rigidity`] clamps the trial when the envelope's domain is too thick for its
-    /// fully-elastic rigidity to be representable. That is only sound if the iteration's answer is set by
-    /// its equation rather than by where it starts, which is a claim about a contraction and not something
-    /// to assume about this one.
+    /// fully-elastic rigidity to be representable. I expected that to be free, on the reasoning that a
+    /// fixed point is set by its equation rather than by where it starts.
     ///
-    /// So it is measured on a case where BOTH starts work: the same profile solved from the domain's own
-    /// trial and from a deliberately different, much softer one must converge bit-identically. If the two
-    /// disagreed the clamp would be changing the physics rather than the arithmetic, and the whole
-    /// representation fix would be unsound.
+    /// IT IS NOT FREE, and this measures the cost rather than asserting there is none. The same profile
+    /// from two admissible starts converges to values `5e-7` apart, not bit-identically. One sample does
+    /// not bound the spread for another profile, so this test documents a property of ONE case and the
+    /// clamp is a pragmatic fallback rather than a proven-equivalent substitution.
     #[test]
     fn the_clamped_trial_reaches_the_same_fixed_point_as_the_unclamped_one() {
         let profile = mm_illustration_profile(Fixed::from_ratio(1, 2));

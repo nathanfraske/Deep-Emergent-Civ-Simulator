@@ -176,9 +176,35 @@ pub fn flexural_parameter(d: Fixed, delta_rho: Fixed, g: Fixed) -> Option<Fixed>
         return None;
     }
     let restoring = delta_rho.checked_mul(g)?; // (rho_m - rho_infill) g, the buoyancy modulus
-    let ratio = d.checked_div(restoring)?; // D / (delta_rho g) = alpha^4 / 4
-    let inner = Fixed::from_int(2).checked_mul(ratio.sqrt())?; // 2 sqrt(ratio) = alpha^2
-    Some(inner.sqrt()) // sqrt(alpha^2) = alpha
+                                               // THE LINEAR PATH FIRST, so every result this function already produced is bit-preserved.
+    if let Some(ratio) = d.checked_div(restoring) {
+        // D / (delta_rho g) = alpha^4 / 4
+        if let Some(inner) = Fixed::from_int(2).checked_mul(ratio.sqrt()) {
+            return Some(inner.sqrt()); // sqrt(alpha^2) = alpha
+        }
+    }
+    // THE LOG FALLBACK, for a planetary-scale plate whose INTERMEDIATE overflows while its answer does not.
+    //
+    // This is a small-divisor hazard rather than a large answer. In this module's declared units `g` is in
+    // km/s^2, so a Mars-class `0.0037` against a density contrast of `3.37` makes the buoyancy modulus
+    // `0.0125`, and dividing by it multiplies by eighty. A thick-lid world reaches `D / (delta_rho g) =
+    // 7.59e9` against a `Fixed::MAX` of `2.147e9` for an `alpha` of 417 km that is entirely representable.
+    // The Earth-like cases stay on the linear path because their `D` is two orders smaller.
+    //
+    // `alpha = (4 D / (delta_rho g))^(1/4)`, so `ln alpha = (ln 4 + ln D - ln(delta_rho g)) / 4` and no
+    // intermediate has to form at all. The same move the Rayleigh and Stokes paths already take, and the
+    // twin `the_log_fallback_reproduces_the_linear_parameter_where_both_run` holds it to the linear form
+    // wherever that one can answer.
+    let ln_alpha = Fixed::from_int(4)
+        .ln()
+        .checked_add(d.ln())?
+        .checked_sub(restoring.ln())?
+        .checked_div(Fixed::from_int(4))?;
+    let alpha = ln_alpha.exp();
+    if alpha <= Fixed::ZERO {
+        return None;
+    }
+    Some(alpha)
 }
 
 /// The AXISYMMETRIC (point/disc load) flexural length `l = (D / (delta_rho g))^(1/4)`, DISTINCT from the
@@ -770,6 +796,64 @@ mod tests {
             close(d, expect, expect * 1e-6),
             "D = {} vs expected {expect}",
             d.to_f64_lossy()
+        );
+    }
+
+    /// THE LOG FALLBACK MUST NOT CHANGE THE ANSWER where the linear path can compute one.
+    ///
+    /// [`flexural_parameter`] gained a log-space fallback because its intermediate `D / (delta_rho g)`
+    /// overflows for a planetary-scale plate while `alpha` itself stays small. A fallback that answered
+    /// DIFFERENTLY from the path it replaces would be changing the physics under the cover of a
+    /// representation fix, so the two are held against each other across the range where both run.
+    #[test]
+    fn the_log_fallback_reproduces_the_linear_parameter_where_both_run() {
+        for te in [5, 10, 25, 50, 100] {
+            let d =
+                flexural_rigidity(earth_e(), earth_nu(), Fixed::from_int(te)).expect("rigidity");
+            let linear =
+                flexural_parameter(d, earth_drho(), earth_g()).expect("the linear path answers");
+            // The log form, computed here exactly as the fallback does.
+            let restoring = earth_drho().checked_mul(earth_g()).expect("restoring");
+            let log_alpha = Fixed::from_int(4)
+                .ln()
+                .checked_add(d.ln())
+                .and_then(|x| x.checked_sub(restoring.ln()))
+                .and_then(|x| x.checked_div(Fixed::from_int(4)))
+                .expect("representable")
+                .exp();
+            let a = linear.to_f64_lossy();
+            let b = log_alpha.to_f64_lossy();
+            assert!(
+                (a - b).abs() / a < 1e-4,
+                "T_e = {te} km: the linear parameter is {a:.6} km and the log form gives {b:.6} km"
+            );
+        }
+    }
+
+    /// AND IT EXTENDS THE DOMAIN, which is the reason it exists: a thick-lid plate that the linear
+    /// intermediate cannot hold now gets an answer instead of a refusal.
+    #[test]
+    fn the_log_fallback_answers_where_the_linear_intermediate_overflows() {
+        // The clamped trial of a sluggish world: T_e = 207 km at E = 120 GPa.
+        let e = Fixed::from_int(120);
+        let nu = Fixed::from_ratio(25, 100);
+        let d =
+            flexural_rigidity(e, nu, Fixed::from_int(207)).expect("the clamped rigidity computes");
+        let drho = Fixed::from_ratio(337, 100);
+        let g = Fixed::from_ratio(37, 10000); // 3.7 m/s^2 in km/s^2
+
+        // The linear intermediate really does overflow, or this test is moot.
+        let restoring = drho.checked_mul(g).expect("restoring");
+        assert!(
+            d.checked_div(restoring).is_none(),
+            "D / (delta_rho g) must overflow here: that is the whole reason for the fallback"
+        );
+
+        let alpha = flexural_parameter(d, drho, g).expect("the log fallback answers");
+        let km = alpha.to_f64_lossy();
+        assert!(
+            (380.0..=460.0).contains(&km),
+            "alpha = (4 D / (delta_rho g))^(1/4) is about 417 km here, read {km:.1}"
         );
     }
 

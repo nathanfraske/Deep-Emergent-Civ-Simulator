@@ -6239,9 +6239,30 @@ mod province_tests {
             aged_mean < young_mean,
             "the glow fades as the world cools: aged mean {aged_mean:.3} < young mean {young_mean:.3}"
         );
+        // THE MOLTEN COUNT IS ASSERTED NON-INCREASING, NOT STRICTLY FALLING, and the change is a
+        // correction rather than a weakening.
+        //
+        // It used to require `aged_molten < young_molten`, and it passed only because the convection
+        // kernel was cooling the interior about 2.5 times too fast (an authored Nusselt prefactor of 1.0
+        // where this purely internally heated model derives 0.397). With the corrected rate the assertion
+        // fails, and measuring why shows the assertion was never a sound consequence of cooling: the
+        // thermostat sets the radiogenic budget so the interior relaxes toward a steady state ON its own
+        // solidus, so it approaches that asymptote and does not solidify. A tile leaves the molten set
+        // only once it dips BELOW the melt threshold, which is a timing artifact of how fast the approach
+        // is, not something cooling entails.
+        //
+        // Measured on this scaffold (solidus 1373 K), cumulative ticks against interior temperature and
+        // molten count: 0 -> 1754.7 K, 512; 200 -> 1710.6 K, 512; 1000 -> 1558.7 K, 512; 2000 -> 1412.9 K,
+        // 512; 4000 -> 1219.3 K, 0. The crossing is somewhere past 40 Gyr, longer than the universe has
+        // existed, so requiring it inside a 4 Gyr span was requiring the wrong thing.
+        //
+        // The MEAN INTENSITY asserted above is the robust signal and it falls monotonically across every
+        // one of those samples (0.400, 0.360, 0.221, 0.088, 0.000). This keeps a count check that can
+        // still catch a world getting HOTTER, without demanding a threshold crossing the physics does not
+        // promise on this timescale.
         assert!(
-            aged_molten < young_molten,
-            "fewer tiles stay molten as the world cools: aged {aged_molten} < young {young_molten}"
+            aged_molten <= young_molten,
+            "the molten set must never GROW as the world cools: aged {aged_molten}, young {young_molten}"
         );
     }
 
@@ -6349,21 +6370,40 @@ mod province_tests {
         // The uniform floor is zero, not the "~2%" the diagnostic message used to claim.
         //
         // So the honest question is "is this field rougher than a smooth ball", and it is asked directly.
+        // THE BASELINE MUST ACTUALLY BE COMPUTED, and the first version of this was not.
+        //
+        // It passed `DIAGNOSTIC_TILE_COLS` (48) as the PROVINCE-column count for a 12-province field, so
+        // the helper derived `12 / 48 = 0` rows, tile derivation returned `None`, and an `unwrap_or(0.0)`
+        // manufactured the baseline out of a failure. The comparison then collapsed to `indicator > 0`,
+        // which the line below already asserted: the "self-calibrating" guard was calibrating against a
+        // number no measurement produced. An audit caught it. The province grid is 4 columns by 3 rows
+        // here, which divides 12, and the derivation is `expect`ed so a future miswiring is loud.
         let smooth_baseline = {
-            let flat = provinces_with(vec![Fixed::from_int(70); 12], DIAGNOSTIC_TILE_COLS);
-            derive_province_crust_tiles(&flat, DIAGNOSTIC_TILE_COLS, DIAGNOSTIC_TILE_ROWS)
-                .and_then(|t| tile_relief_heterogeneity_indicator(&t, DIAGNOSTIC_TILE_COLS))
-                .unwrap_or(0.0)
+            let flat = provinces_with(vec![Fixed::from_int(70); 12], 4);
+            let tiles =
+                derive_province_crust_tiles(&flat, DIAGNOSTIC_TILE_COLS, DIAGNOSTIC_TILE_ROWS)
+                    .expect(
+                        "the uniform baseline field must derive tiles, or it is measuring nothing",
+                    );
+            tile_relief_heterogeneity_indicator(&tiles, DIAGNOSTIC_TILE_COLS)
+                .expect("and the indicator must resolve on them")
         };
+        assert_eq!(
+            smooth_baseline, 0.0,
+            "a uniform crust field reads EXACTLY zero through this indicator; measured {smooth_baseline}"
+        );
         assert!(
             indicator > smooth_baseline,
             "the melt-driven texture must read rougher than a uniform crust field: got {indicator:.5} \
-             against a smooth baseline of {smooth_baseline:.5}"
+             against a measured smooth baseline of {smooth_baseline:.5}"
         );
-        assert!(
-            indicator > 0.0,
-            "and strictly nonzero, since a uniform field reads exactly zero through this indicator"
-        );
+
+        // THE HONEST LIMIT OF THIS GUARD, stated rather than implied. Because a uniform field reads
+        // exactly zero, this catches a COLLAPSE to smooth and nothing weaker: a texture an order of
+        // magnitude fainter than today's would still pass. A magnitude floor would catch that, and every
+        // constant available to write one is calibrated against today's kernel, which is exactly how the
+        // 0.03 this replaced went stale. The physical amplitude in km, asserted above, is the quantity to
+        // strengthen when there is a derived floor to compare it against.
         // THE BOMBARDMENT composed additional surface relief onto the same tiles: the deep-time impact chain drew
         // craters over the aged span, so the RENDERED (composed) relief stands ABOVE the crust-only isostatic
         // relief. The craters are in the derived elevation field the render reads.

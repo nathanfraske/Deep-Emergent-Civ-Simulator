@@ -54,7 +54,18 @@
 >
 > STILL BLOCKING (`flexural_parameter`): `ratio = D / (delta_rho g)` is `7.59e9` at the clamped trial, for an `alpha` of 417 km that is perfectly representable. The cause is the declared unit system: `g` in km/s^2 is `0.0037`, so `delta_rho g` is `0.0125` and dividing by it multiplies by 80. That is the small-divisor hazard the units work already names. So the flexure chain as built cannot run at planetary lid scale in its own units, and the fix is the one the Rayleigh and Stokes paths already took: carry `D` and `alpha` in logs, or choose a unit system whose buoyancy modulus is not a tiny divisor. Its Earth-like tests pass because their `D` is two orders smaller.
 >
-> NEXT: lift the flexure chain's intermediates (log-space `D` and `alpha`), then fold `deflection_at` over the province load list, then Seam D.
+> **SEAM C NEEDS A SYSTEMATIC PASS, NOT POINT FIXES, and that conclusion is now evidenced rather than guessed.** I fixed two overflow points and each one revealed the next:
+>
+>   1. FIXED `flexural_rigidity`: numerator `E T^3` = 1.21e10 for a result of 1.07e9. Clamped trial.
+>   2. FIXED `flexural_parameter`: `D / (delta_rho g)` = 7.59e9 for an `alpha` of 417 km. Log fallback, linear-first so existing results are bit-preserved, twinned against the linear path across `T_e` 5 to 100 km.
+>   3. CONFIRMED, unfixed: `V0 alpha^3` in the deflection form caps the line load at 29.5 GPa km. A load of 80 (the value the module's OWN Earth-like tests use) gives 5.82e9 for a `w0` of 7.69 km that is entirely representable.
+>   4. AT LEAST ONE MORE, unlocated: loads of 1, 5 and 20 all fit limit 3 and still refuse `NotRepresentable`, so something further down the moment or neutral-surface path overflows too.
+>
+> Every one is an INTERMEDIATE overflowing while its result is comfortably representable, and the root cause is shared: this module's declared unit system (km, GPa, 1000 kg/m^3, km/s^2) makes the buoyancy modulus a tiny divisor and lets the length-cubed terms run large. Its Earth-like tests pass because their `D` is two orders smaller than a thick-lid world's, so the whole chain has only ever been exercised in the corner where it happens to fit.
+>
+> So the next unit of work is a DESIGNED pass over the flexure and moment-equivalence chain (log-space `D`, `alpha` and the deflection amplitudes, or a nondimensionalization), not another point fix. I stopped chasing after the third because each fix revealing the next IS the finding, and continuing to patch would have produced a chain that works for the cases I happened to test and fails on the next world.
+>
+> NEXT: that pass, then fold `deflection_at` over the province load list, then Seam D.
 >
 > NEXT: that fix, then fold `deflection_at` over the province load list (Seam C proper), then Seam D (`height_km`/`gradient` and the mountains draw). The honest open limit to carry into them: the mobile-lid Nusselt law is being applied to stagnant-lid bodies, whose suppression through the rheological temperature scale `RT^2/E*` is derivable from creep rows already banked and is the flagged follow-on recorded on that law.
 >

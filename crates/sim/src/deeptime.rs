@@ -982,9 +982,27 @@ pub const RIGID_RIGID_CRITICAL_WAVENUMBER: Fixed = Fixed::from_int(3117).div(Fix
 /// `ln(1e18)`, the bridge between an SI viscosity and the `1e18 Pa*s` unit the megametre-depth Rayleigh
 /// number is dimensionally consistent with. Carried as a logarithm because the SI value it converts from
 /// (`~5.5e23 Pa*s`) cannot be held at all.
-/// `ln(3.1557e13)`, the seconds in a megayear. A logarithm because the value itself is four orders past
-/// `Fixed::MAX`, so the tick length can never be held linearly in seconds.
-const LN_SECONDS_PER_MYR: Fixed = Fixed::from_int(31_083_129).div(Fixed::from_int(1_000_000));
+/// `ln(3.15576e13)`, the seconds in a megayear (`31_557_600 s/yr` times `1e6`). A logarithm because the
+/// value itself is four orders past `Fixed::MAX`, so the tick length can never be held linearly in seconds.
+///
+/// CORRECTED 2026-07-19 from `31.083129`, an audit finding. The true value is `31.0828355634`, so every
+/// thermal tick was running `0.0293 percent` long. Small, and wrong in a quantity that multiplies every
+/// energy in the deep-time run, which is exactly the kind of error that never announces itself.
+const LN_SECONDS_PER_MYR: Fixed = Fixed::from_int(310_828_356).div(Fixed::from_int(10_000_000));
+
+/// The Nusselt prefactor `a` for a PURELY INTERNALLY HEATED interior, derived rather than chosen.
+///
+/// The deep-time column carries a radiogenic `heat_production` and no basal core-flux term, so its
+/// internal-heating fraction is 1 and `civsim_physics::convection_scaling` gives the symmetric
+/// two-boundary-layer endpoint `2^(-4/3)`, about 0.397. Reading it from the scaling table rather than
+/// writing 0.397 here keeps the one home the residue ruling established: the day this model gains a basal
+/// flux term, the fraction becomes a real derived quantity and this call site changes by passing it.
+// @derives: the deep-time Nusselt prefactor <- the convection-scaling band at the model's own internal-heating fraction
+fn nusselt_prefactor_internally_heated() -> Option<Fixed> {
+    civsim_physics::convection_scaling::ConvectionScaling::standard()
+        .ok()?
+        .nusselt_prefactor_at_internal_fraction(Fixed::ONE)
+}
 
 /// One province's [`SiColumnParams`], composed entirely from DERIVED inputs.
 ///
@@ -1060,9 +1078,21 @@ pub fn province_column_params(
         heat_production_j_per_kg,
         ln_rayleigh_critical: RIGID_RIGID_RA_CRIT.ln(),
         ln_dt_s,
-        // The single-lid planetary Nusselt prefactor. Not authored here: it is the value
-        // `civsim_physics::convection_scaling` carries for this regime.
-        nusselt_prefactor: Fixed::ONE,
+        // THE NUSSELT PREFACTOR, DERIVED from the world's own heating configuration rather than authored.
+        //
+        // This was `Fixed::ONE` with a comment claiming it was "the value convection_scaling carries for
+        // this regime". Both halves were wrong, and an audit caught it. `1.0` is the BASAL endpoint, the
+        // single-boundary-layer case at internal-heating fraction `f = 0`, which is the OPPOSITE of this
+        // model's regime; and the value is not carried as a constant at all, it is derived by
+        // `nusselt_prefactor_at_internal_fraction`, which the owner's residue ruling of 2026-07-18 added
+        // precisely so the convention selects on the world's state instead of being picked.
+        //
+        // The deep-time interior is PURELY INTERNALLY HEATED: it carries `heat_production` and no basal
+        // core-flux term, so `f = 1` and the prefactor is the symmetric two-boundary-layer endpoint
+        // `2^(-4/3)`, about `0.397`. The module's own documentation warns that using `1.0` here cools the
+        // interior about 2.5 times too fast, which is a factor sitting directly on the deep-time evolution
+        // the province texture emerges from.
+        nusselt_prefactor: nusselt_prefactor_internally_heated()?,
     })
 }
 
