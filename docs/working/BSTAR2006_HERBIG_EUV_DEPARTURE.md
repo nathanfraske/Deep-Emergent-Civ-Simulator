@@ -110,16 +110,68 @@ in, the Herbig EUV photoevaporation would have been suppressed by 10^8, a qualit
 - Fixed (log g = 4.0, solar Z). The band is specific to these. Herbig Be stars sit near log g 3.5 to 4.5; a log g or sub-solar Z sensitivity run is a separate fixed-other-params run, and every FID is in the SVO SSAP index above.
 - Threshold: lambda_L = 911.28 A was used (nu_L = 3.2898e15 Hz, the code's value). The textbook 13.6057 eV limit is 911.75 A, a 0.05 percent difference in the threshold, negligible against the two-decade span.
 
-## Vendoring status: PENDING the archived witness
+## Archive witnesses (coordinator, 2026-07-19)
 
-The bytes are sha256-pinned above and the source is live at SVO, but the vendoring is NOT
-finished and NO gate-passing source entry exists yet:
+The coordinator ran the archive step in a Wayback-reachable environment (this session cannot:
+`web.archive.org` SAVE and CONTENT are egress-blocked here, 403). They re-fetched all 16 SEDs
+from SVO independently and confirmed 16/16 byte-exact against the sha256 receipts above, then
+archived each and byte-verified the stored captures. The captures come back gzip-encoded, so a
+re-check needs `gunzip -c` in the path before hashing (a naive hash of the replay bytes disagrees
+with the receipt and looks like a mismatch when it is not). Attribution: the SVO source bytes are
+sha256-verified in this session at download; the Wayback captures were created and byte-verified
+by the coordinator, and this session did NOT resolve them (egress-blocked), so the archive layer
+is coordinator-attested, the data layer is self-verified.
 
-- The `witness` custody the sources_gate requires needs a RESOLVING archive URL. `web.archive.org` SAVE and CONTENT are egress-blocked in this environment (403 "Blocked by egress policy"), so a byte-identical Wayback witness cannot be created or verified here.
-- The SVO files are 1.19 MB each and carry no explicit redistribution licence (the service expects "acknowledge the SVO Theoretical Spectra service and cite the original paper"), so the bytes are not held in-repo either.
+SSAP index witness: `https://web.archive.org/web/20260719195502/http://svo2.cab.inta-csic.es/theory/newov2/ssap.php?model=tlusty_bstarbin` (index sha256 `e8d2b13abefd0b233104650f9fd3c66c00338b10ffcae542fdd4356176004078`).
 
-To finish, in an environment where `web.archive.org` is reachable: archive the SSAP index and the
-per-model URLs, record the archive URL and the licence reason, and add the `witness` entry to
-`sources/registry.toml` keyed to the sha256s above. Then the departure table can be wired into
-the P0-A Herbig branch as its own windless grounded interval (log-space interpolation over the
-table), sibling to the Sternberg windy anchor, never merged with it.
+Fourteen witnessed points (byte-identical to the receipts after decompression):
+
+```
+Teff   FID  archived_url (web.archive.org/web/<ts>id_/ ... ssap.php?model=tlusty_bstarbin&fid=<FID>)
+15000  59   20260719195513
+16000  131  20260719195527
+17000  203  20260719195542
+18000  275  20260719200029
+19000  341  20260719195606
+20000  407  20260719195627
+21000  470  20260719195722
+22000  530  20260719195739
+25000  704  20260719195823
+26000  758  20260719195853
+27000  812  20260719195911
+28000  866  20260719195931
+29000  914  20260719195946
+30000  962  20260719200001
+```
+
+## The two-point archive gap: Teff 23000 (fid 590) and 24000 (fid 650)
+
+Wayback accepted the SAVE for these two and returned a location, but the stored capture is EMPTY
+(the raw fetch hashes to `e3b0c442...`, the sha256 of zero bytes). The coordinator retried and
+re-issued SAVE; Wayback deduplicated to the same timestamps rather than re-capturing. So these two
+have a sound DATA layer (their SVO bytes are sha256-verified, receipts `9294d5c4...` and
+`c5b24e66...` above, re-confirmed 16/16 by the coordinator) but NO durable archive witness yet.
+
+Disposition: recorded as `archive_pending`, NOT as witnessed. A witness row pointing at an empty
+capture is exactly the defect the custody rule prevents, and it would be worse than an absent row
+because it reads as vendored. The durable fix (a coordinator SAVE-retry after Wayback's dedup
+window) is not doable from this egress-blocked session and is requested from the coordinator.
+
+INTERPOLATION PROHIBITION. When the table is wired, the departure function must NOT silently
+interpolate across the 23 to 24 kK segment as though those two points were fully vendored. Two
+adjacent points at the middle of the 15 to 30 kK grid are a real hole in the durable evidence, and
+the +0.14 dex per 1000 K near-linearity is exactly what makes silent interpolation LOOK safe, so
+it must be DECLARED rather than assumed: the windless grounded interval carries 23 to 24 kK at the
+reduced `archive_pending` provenance grade until the SAVE-retry lands, not at the witnessed grade
+of its neighbours.
+
+## Vendoring status
+
+The `sources/registry.toml` witness entry `bstar2006_sed_grid_svo` is authored (this branch):
+custody witness, the 16 per-file sha256 receipts and the 14 archived timestamps and the two
+`archive_pending` gaps recorded, the SSAP index as the primary witness, the SVO acknowledgement
+plus Lanz and Hubeny 2007 as the licence reason. The bytes are not held in-repo (1.19 MB each, no
+explicit redistribution licence). Remaining: the coordinator SAVE-retry for the two gap points,
+and the wiring into the P0-A Herbig branch as a windless grounded interval (log-space
+interpolation over the table), sibling to the Sternberg windy anchor and never merged with it,
+honouring the interpolation prohibition above.

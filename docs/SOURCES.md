@@ -12,7 +12,7 @@ Custody is one of three. `in_repo`: bytes held in-tree, checksum verifiable with
 witness. `external`: bytes in local custody outside the repo, checksum plus archive snapshot.
 The licence decides which is permitted; see `docs/working/FETCH_PIPELINE_PLAN.md` section 3.
 
-**36 sources** (9 registry, 27 mirrored).
+**37 sources** (10 registry, 27 mirrored).
 
 ## Registry (hand-maintained)
 
@@ -27,6 +27,16 @@ Lanz, T. and Hubeny, I., 2007, A Grid of NLTE Line-Blanketed Model Atmospheres o
 - licence (**NOT redistributable**): NOT ESTABLISHED AS REDISTRIBUTABLE, so no bytes are held. This is the author's arXiv preprint of an AAS-copyright ApJS paper; the arXiv non-exclusive distribution licence grants arXiv the right to distribute but does not by itself grant third-party redistribution, and no CC licence is stated on the record, so redistribution is unconfirmed. The byte-identical Wayback snapshot stands as the held witness behind the receipt. The values read (a grid's parameter ranges and a figure's qualitative direction) are facts and are citable either way, which is what is done here.
 - licence evidence: arXiv default non-exclusive distribution licence (grants arXiv, not third parties); AAS copyright on the ApJS version of record; no CC statement found on the arXiv record
 - free route (preprint): https://arxiv.org/pdf/astro-ph/0611891
+
+### `bstar2006_sed_grid_svo`
+
+Lanz, T. and Hubeny, I., 2007, BSTAR2006 emergent model SEDs (model.flux), ApJS 169, 83, served by the SVO Theoretical Spectra service (Rodrigo, Solano et al.), collection tlusty_bstarbin. Underlying atmospheres: Hubeny & Lanz 1995, ApJ 439, 875.
+
+- sha256: `e8d2b13abefd0b233104650f9fd3c66c00338b10ffcae542fdd4356176004078`
+- archived: https://web.archive.org/web/20260719195502/http://svo2.cab.inta-csic.es/theory/newov2/ssap.php?model=tlusty_bstarbin
+- scope: The BSTAR2006 emergent model.flux SEDs (F_lambda vs lambda) over Teff 15000 to 30000 K, the Herbig / cool-B regime that reaches BELOW the Sternberg 25 kK anchor. The 16 files USED are solar Z (z=1.0) and log g 4.0, held FIXED (the joint-fit-parameters-belong-together rule); the full grid also spans log g 1.75 to 4.75 and six compositions. These SEDs supply the model-over-blackbody EUV (Lyman continuum, >13.6 eV) photon-rate DEPARTURE the P0-A Herbig branch (astro::nlte_departed_ionizing_spectrum) needs: derived here as log10 departure in [-2.69, -0.65] over 15 to 30 kK, nearly linear at +0.14 dex per 1000 K (full 16-point table, method, and cross-checks in docs/working/BSTAR2006_HERBIG_EUV_DEPARTURE.md). SCOPE LIMIT that governs use: these are WINDLESS, so above 25 kK they will NOT match the Sternberg windy WM-Basic anchor; the two are SIBLING grounded intervals for different regimes and must NEVER be merged into one continuous interval (the disjoint-evidence discipline P0-B enforces). The value of this grid is the 15 to 25 kK region where no windy grid reaches and Herbig Be winds are weak.
+- custody: witness
+- licence (redistribution unconfirmed): No explicit redistribution licence is posted on the SVO Theoretical Spectra service; its stated expectation is to acknowledge the SVO Theoretical Spectra service and cite the original paper (Lanz & Hubeny 2007, ApJS 169, 83; Hubeny & Lanz 1995). So the bytes are NOT held in-repo (also 1.19 MB each); this is a citation-plus-witness holding whose receipt is the sha256 set below plus the public Wayback captures. The values read (a per-model SED integrated against a blackbody, giving a dimensionless departure ratio) are facts and are citable under that acknowledgement.
 
 ### `cod_phase_crystallography`
 
