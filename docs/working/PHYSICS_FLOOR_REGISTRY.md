@@ -38,13 +38,13 @@ The 47 deriving subsystems below live OUTSIDE the authored floor. Each produces 
 - the bulk sound speed <- bulk modulus + density (`crates/materials/src/freezer.rs:176`)
 ### `crates/materials/src/mie_gruneisen_debye.rs`
 
-- a phase's Debye thermal energy <- its atom count, the requested temperature and its characteristic Debye temperature (`crates/materials/src/mie_gruneisen_debye.rs:165`)
-- a phase's Grueneisen parameter at volume <- its reference gamma, volume ratio and volume exponent (`crates/materials/src/mie_gruneisen_debye.rs:193`)
-- a phase's Debye temperature at volume <- its reference Debye temperature, gamma and volume exponent (`crates/materials/src/mie_gruneisen_debye.rs:207`)
-- a phase's cold-isotherm pressure <- its reference volume, bulk modulus and pressure derivative (`crates/materials/src/mie_gruneisen_debye.rs:224`)
-- a phase's thermal pressure at a state <- its Grueneisen parameter, Debye thermal energy and molar volume (`crates/materials/src/mie_gruneisen_debye.rs:250`)
-- a phase's pressure at a state <- its cold isotherm and the Debye thermal pressure above the reference temperature (`crates/materials/src/mie_gruneisen_debye.rs:263`)
-- a phase's molar volume, bulk modulus and expansivity at a state <- its six Mie-Grueneisen-Debye anchors (`crates/materials/src/mie_gruneisen_debye.rs:318`)
+- a phase's Debye thermal energy <- its atom count, the requested temperature and its characteristic Debye temperature (`crates/materials/src/mie_gruneisen_debye.rs:209`)
+- a phase's Grueneisen parameter at volume <- its reference gamma, volume ratio and volume exponent (`crates/materials/src/mie_gruneisen_debye.rs:237`)
+- a phase's Debye temperature at volume <- its reference Debye temperature, gamma and volume exponent (`crates/materials/src/mie_gruneisen_debye.rs:251`)
+- a phase's cold-isotherm pressure <- its reference volume, bulk modulus and pressure derivative (`crates/materials/src/mie_gruneisen_debye.rs:268`)
+- a phase's thermal pressure at a state <- its Grueneisen parameter, Debye thermal energy and molar volume (`crates/materials/src/mie_gruneisen_debye.rs:294`)
+- a phase's pressure at a state <- its cold isotherm and the Debye thermal pressure above the reference temperature (`crates/materials/src/mie_gruneisen_debye.rs:307`)
+- a phase's molar volume, bulk modulus and expansivity at a state <- its six Mie-Grueneisen-Debye anchors (`crates/materials/src/mie_gruneisen_debye.rs:362`)
 ### `crates/materials/src/properties.rs`
 
 - a phase's density <- molar mass + molar volume (`crates/materials/src/properties.rs:87`)
@@ -55,7 +55,7 @@ The 47 deriving subsystems below live OUTSIDE the authored floor. Each produces 
 
 - a phase's elastic Debye temperature <- its banked bulk and shear moduli, density and atomic volume (`crates/materials/src/thermoelastic.rs:242`)
 - a phase's thermoelastic response at a state <- the strongest available rung over the banked per-phase anchors (`crates/materials/src/thermoelastic.rs:350`)
-- a phase's ambient volumetric expansivity <- its banked gamma, bulk modulus, molar volume and Dulong-Petit capacity (`crates/materials/src/thermoelastic.rs:443`)
+- a phase's ambient volumetric expansivity <- its banked gamma, bulk modulus, molar volume and Dulong-Petit capacity (`crates/materials/src/thermoelastic.rs:483`)
 ### `crates/physics/src/gruneisen.rs`
 
 - a rock's Gruneisen parameter <- the cited per-phase gamma table + the world's own mineral census (`crates/physics/src/gruneisen.rs:358`)

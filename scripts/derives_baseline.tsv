@@ -1134,3 +1134,4 @@ crates/physics/src/thermoelastic_anchors.rs	from_toml_str	loader	parses the [[an
 crates/physics/src/thermoelastic_anchors.rs	pairs_with_banked_gamma	predicate	whether the row's own fit reproduces the banked gamma_0, so the MGD set comes from one inversion
 crates/materials/src/mie_gruneisen_debye.rs	debye_integral	helper	Simpson quadrature of the dimensionless Debye integral; interval count bounds the step, not the count
 crates/materials/src/mie_gruneisen_debye.rs	debye_integrand	helper	the dimensionless integrand x^3/(e^x-1), series-continued through its removable singularity at the origin
+crates/materials/src/mie_gruneisen_debye.rs	from_banked	constructor	assembles the six MGD anchors from one source fit, refusing a mixed-provenance or systematics-graded set

@@ -86,6 +86,50 @@ pub struct MgdAnchors {
     pub atoms_per_formula_unit: u32,
 }
 
+impl MgdAnchors {
+    /// Assemble the six anchors for a phase from the banked columns, or refuse.
+    ///
+    /// # The gamma this reads, and the one it must not
+    ///
+    /// It reads `gamma_eos_debye` DIRECTLY and never `GruneisenRow::gamma()`. That accessor returns the
+    /// ladder's preferred value, the measured thermodynamic gamma where one exists, and the thermodynamic
+    /// and EoS-Debye gammas are two different weightings of the vibrational spectrum. `gruneisen.toml`'s
+    /// own header says so: "Do NOT read gamma_eos_debye into the gamma_thermodynamic slot", and the
+    /// converse binds here. The EoS gamma is the one jointly fit with this row's `theta_0` and `q`, so it
+    /// is the only one that belongs in this parameter set.
+    ///
+    /// This is the same error the module documentation records for the Debye temperature, one quantity
+    /// over. Both would have been a plausible-looking value from a nearby column.
+    ///
+    /// # One fit, or nothing
+    ///
+    /// `V_0`, `K_0`, `K_0'`, `theta_0` and `q` all come from THIS row, which transcribes one source table,
+    /// and `gamma_0` is checked against that same fit through `pairs_with_banked_gamma`. A row whose cells
+    /// were estimated from systematics, or whose fit does not reproduce the banked `gamma_0`, is refused
+    /// rather than assembled: the parameters of a joint inversion are meaningful together and not
+    /// individually.
+    pub fn from_banked(
+        phase: &str,
+        gruneisen: &civsim_physics::gruneisen::GruneisenTable,
+        anchors: &civsim_physics::thermoelastic_anchors::ThermoelasticAnchors,
+    ) -> Option<Self> {
+        let row = anchors.row(phase)?;
+        if !row.all_cells_fit() || !row.pairs_with_banked_gamma() {
+            return None;
+        }
+        let gamma_0 = gruneisen.row(phase)?.gamma_eos_debye?;
+        Some(MgdAnchors {
+            v0_cm3: row.v0_cm3?,
+            k0_gpa: row.k0_gpa?,
+            k0_prime: row.k0_prime?,
+            theta_0: row.theta_0?,
+            gamma_0,
+            q: row.q?,
+            atoms_per_formula_unit: row.atoms_per_formula_unit?,
+        })
+    }
+}
+
 /// The reference temperature the anchors are stated at (K). The cold isotherm is the 300 K one, so the
 /// thermal pressure is taken as a DIFFERENCE from this temperature rather than as an absolute.
 const REFERENCE_TEMPERATURE_K: i32 = 300;

@@ -203,6 +203,19 @@ pub struct ThermoelasticAnchorRow {
     pub gamma_pairing: GammaPairing,
     /// The column's own explicit refusal flag, honoured when present regardless of the cell grades.
     pub usable_as_anchor: Option<bool>,
+    /// Reference molar volume from the SAME fit (cm^3/mol).
+    pub v0_cm3: Option<Fixed>,
+    /// Reference isothermal bulk modulus from the SAME fit (GPa).
+    pub k0_gpa: Option<Fixed>,
+    /// Pressure derivative of the bulk modulus from the SAME fit.
+    pub k0_prime: Option<Fixed>,
+    /// Atoms per formula unit matching THIS ROW'S `v0_cm3` basis.
+    ///
+    /// Carried per row rather than derived from the phase registry because the two source channels use
+    /// DIFFERENT formula units for the same phase: enstatite is `Mg4Si4O12` in 2005 and `MgMgSi2O6` in
+    /// 2011, a factor of two in both `V_0` and the atom count. Taking `V_0` from here and the atom count
+    /// from elsewhere would halve the molar basis silently, and the thermal energy is per formula unit.
+    pub atoms_per_formula_unit: Option<u32>,
 }
 
 impl ThermoelasticAnchorRow {
@@ -391,6 +404,11 @@ impl ThermoelasticAnchors {
                 q_channels: vocab("channels_agree", ChannelAgreement::parse)?,
                 gamma_pairing: pairing,
                 usable_as_anchor: field("usable_as_anchor").map(|v| v == "true"),
+                v0_cm3: num("v0_cm3_per_mol")?,
+                k0_gpa: num("k0_gpa")?,
+                k0_prime: num("k0_prime")?,
+                atoms_per_formula_unit: field("atoms_per_formula_unit")
+                    .and_then(|v| v.parse::<u32>().ok()),
                 name: name.clone(),
             };
             rows.insert(name, row);

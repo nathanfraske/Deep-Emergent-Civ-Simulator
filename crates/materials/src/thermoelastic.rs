@@ -397,13 +397,53 @@ pub fn response_at(
                 });
             }
         } else if missing.is_empty() {
-            // Rung 3 could answer here once it is built; this branch is unreachable today and is written
-            // so that landing the two columns produces a compile-checked hole rather than silent success.
+            // RUNG 3 ANSWERS HERE. This branch was a deliberate tripwire while the solver did not exist:
+            // it refused by naming the solver, so landing the anchor columns failed a test rather than
+            // succeeding silently. It fired, and this is what replaced it.
+            //
+            // The pressure crosses from bar to GPa on the way in: the ladder's state is stated in bar
+            // because the registry and moduli rows are, and the equation of state works in GPa.
+            if let Some(a) =
+                crate::mie_gruneisen_debye::MgdAnchors::from_banked(phase, gruneisen, anchors)
+            {
+                let p_gpa = state
+                    .pressure_bar
+                    .checked_div(Fixed::from_int(10_000))
+                    .ok_or_else(|| ThermoRefusal::UnknownPhase {
+                        phase: phase.to_string(),
+                    })?;
+                match crate::mie_gruneisen_debye::response_at(&a, p_gpa, state.temperature_k) {
+                    Ok(r) => {
+                        return Ok(ThermoResponse {
+                            alpha_per_k: r.alpha_per_k,
+                            bulk_modulus_gpa: r.bulk_modulus_gpa,
+                            molar_volume_cm3: r.molar_volume_cm3,
+                            rung: ThermoRung::MieGruneisenDebye,
+                            // Valid AT THE REQUESTED STATE, which is the whole point of the rung: unlike
+                            // the ambient row below, it does not carry someone else's frame.
+                            valid_at: state,
+                        });
+                    }
+                    Err(why) => {
+                        // The solver refused for a stated physical reason (past the spinodal, or an
+                        // unrepresentable intermediate). It is carried through rather than flattened into
+                        // "no rung answered", so a caller can tell a phase with no stable state at these
+                        // conditions from one the repository cannot describe.
+                        return Err(ThermoRefusal::RungUnavailable {
+                            phase: phase.to_string(),
+                            rung: ThermoRung::MieGruneisenDebye,
+                            missing: vec![format!("{why:?}")],
+                        });
+                    }
+                }
+            }
             return Err(ThermoRefusal::RungUnavailable {
                 phase: phase.to_string(),
                 rung: ThermoRung::MieGruneisenDebye,
                 missing: vec![
-                    "the rung 3 solver itself, whose anchors are now all banked".to_string()
+                    "a coherent single-fit anchor set: every cell fit rather than \
+                     estimated, and the row's own gamma_0 reproducing the banked one"
+                        .to_string(),
                 ],
             });
         } else {
@@ -490,9 +530,11 @@ mod tests {
         )
     }
 
-    /// THE LADDER ANSWERS INSIDE ITS FRAME and refuses outside it, which is the whole contract.
+    /// THE LADDER ANSWERS ON THE RIGHT RUNG FOR THE STATE, which is the whole contract: the ambient row
+    /// inside its own measured frame, and the equation of state at depth. Neither is ever read as the
+    /// other, and every response carries the rung that produced it.
     #[test]
-    fn the_ambient_rung_answers_at_its_own_frame_and_refuses_at_interior_conditions() {
+    fn the_ladder_answers_in_frame_on_rung_four_and_at_depth_on_rung_three() {
         let (reg, mod_, gr, anc) = tables();
         let ambient = ThermoState {
             temperature_k: Fixed::from_int(300),
@@ -511,25 +553,48 @@ mod tests {
             "an ambient forsterite expansivity, read {ppm:.1} ppm/K"
         );
 
-        // The mantle query that started all of this.
+        // THE MANTLE QUERY THAT STARTED ALL OF THIS, and it now gets a real answer.
+        //
+        // This module exists because reading an ambient row at 1600 K and 100 kbar returned a number that
+        // matched measurement by CANCELLATION (a high-temperature Dulong-Petit capacity against a 300 K
+        // gamma, modulus and volume). The ladder's first version refused instead, which was correct and
+        // was not the destination. Rung 3 is the destination: it solves the equation of state AT the
+        // requested state, and the response says which rung produced it and that it is valid THERE.
         let interior = ThermoState {
             temperature_k: Fixed::from_int(1600),
             pressure_bar: Fixed::from_int(100_000),
         };
-        let err = response_at("forsterite", interior, &reg, &mod_, &gr, &anc)
-            .expect_err("no built rung answers at interior conditions");
-        let text = format!("{err}");
-        // THE REFUSAL MOVED, and the move is the progress report. It used to name the missing anchor
-        // COLUMNS; every one of those is now banked, so it names the missing SOLVER instead. The branch
-        // that produces this message was written as a deliberate tripwire while it was unreachable, so
-        // that landing the columns would fail a test rather than silently succeed. It fired.
-        assert!(
-            text.contains("the rung 3 solver itself"),
-            "with every anchor banked the refusal must name what is actually missing, the solver: {text}"
+        let deep = response_at("forsterite", interior, &reg, &mod_, &gr, &anc)
+            .expect("rung 3 answers at interior conditions");
+        assert_eq!(
+            deep.rung,
+            ThermoRung::MieGruneisenDebye,
+            "and it SAYS it was the equation of state, not an ambient row reused out of frame"
         );
+        assert_eq!(
+            deep.valid_at, interior,
+            "and the frame it reports is the REQUESTED one, unlike rung 4 which reports its row's frame"
+        );
+
+        // The three magnitudes, each checked for direction as well as value, because a sign error here
+        // would still land inside a loose band.
+        let v = deep.molar_volume_cm3.to_f64_lossy();
         assert!(
-            !text.contains("debye_temperature_theta_0") && !text.contains("volume_exponent_q"),
-            "and it must no longer claim the columns are missing, because they are not: {text}"
+            (40.0..=43.0).contains(&v),
+            "at 10 GPa compression beats 1300 K of heating, so V falls below the 43.60 reference; \
+             read {v:.2}"
+        );
+        let k = deep.bulk_modulus_gpa.to_f64_lossy();
+        assert!(
+            (130.0..=165.0).contains(&k),
+            "and K_T RISES above the 128 GPa reference: 10 GPa at K' ~ 4.2 adds far more than 1300 K \
+             removes; read {k:.1}"
+        );
+        let ppm = deep.alpha_per_k.to_f64_lossy() * 1e6;
+        assert!(
+            (18.0..=34.0).contains(&ppm),
+            "and expansivity FALLS under compression to roughly 26 ppm/K, well below the ~40 ppm/K it \
+             shows at 1000 K and ambient pressure; read {ppm:.1}"
         );
     }
 
@@ -656,10 +721,10 @@ mod tests {
 
     /// The readiness report is DATA, so "rung 3 is blocked" is checkable rather than asserted in prose.
     ///
-    /// It now reports READY for forsterite: all six anchors banked and all from one joint fit. What
-    /// remains is the solver. That is a real state change and this test is where it shows.
+    /// It reports READY for forsterite: all six anchors banked and all from one joint fit. The solver
+    /// that consumes them is built and wired, so this is now the report that licenses rung 3 to run.
     #[test]
-    fn rung_three_has_every_anchor_and_wants_only_its_solver() {
+    fn rung_three_reports_every_anchor_banked() {
         let (reg, mod_, gr, anc) = tables();
         let readiness = mie_gruneisen_debye_readiness("forsterite", &reg, &mod_, &gr, &anc);
         let missing: Vec<&str> = readiness
