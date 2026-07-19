@@ -8,7 +8,7 @@ The retired long-form board is `docs/working/CONSENSUS_ROADMAP_HISTORY.md`, pres
 
 ## Active arcs
 
-- 2026-07-18 disk slice 2 + layer-4 kernels R_1/Omega_star_0/T_core + accretion-termination + typed outcome, dormant -> claude/disk-slice2-wire, PR #201
+- 2026-07-19 disk slice 2 + layer-4 kernels R_1/Omega_star_0/T_core + accretion-termination + typed outcome + gate integration, dormant -> claude/disk-slice2-wire, PR #201
 - 2026-07-18 mantle effective-convective-viscosity slice -> claude/seam4-deeptime, crates/physics/src/convective_viscosity.rs
 - 2026-07-18 Hayashi-wall grid, the split with Agent C (#198) -> claude/seam4-deeptime, crates/physics/data/hayashi_wall.toml
 - 2026-07-17 consolidated surface pipeline, stages 0-5 -> claude/seam4-deeptime, docs/working/CONSOLIDATED_SURFACE_PIPELINE.md

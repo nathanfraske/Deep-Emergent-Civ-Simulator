@@ -159,10 +159,11 @@ pub enum GiantOutcome {
     /// min(reservoir, M_gap)`, which trims the solar-row giant from ~24 to ~2 Jupiter masses. The TYPED OUTCOME also
     /// exists: [`giant_mass_class`] reads a mass against the vendored deuterium (~13 M_Jup) and hydrogen (~0.072
     /// M_sun) fusion boundaries into Planet / BrownDwarf / Star, so the terminated mass types as a planet while the
-    /// un-terminated 24-M_Jup ceiling would type as a brown dwarf. What remains is the INTEGRATION: threading the
-    /// disk aspect ratio through THIS gate to apply the cap and emit the class on `final_mass_earth`; until that
-    /// lands, read `final_mass_earth` as the un-terminated ceiling and terminate-and-type it through the kernels
-    /// above at the call site.
+    /// un-terminated 24-M_Jup ceiling would type as a brown dwarf. The INTEGRATION is [`terminate_and_type_giant`]:
+    /// it threads the disk aspect ratio at the embryo's orbit through the gap cap and the fusion classes and returns
+    /// the sound [`TerminatedGiant`] (the ceiling, the cap, the terminated mass, and the class). THIS field stays
+    /// the un-terminated first cut BY DESIGN, so the composition is additive and byte-neutral (no existing verdict
+    /// changes); a caller wanting the sound mass reads `terminate_and_type_giant`, not `final_mass_earth`.
     Giant { final_mass_earth: Fixed },
 }
 
@@ -651,6 +652,104 @@ pub fn giant_mass_class(mass_earth: Fixed, limits: &BurningLimits) -> Option<Gia
         GiantMassClass::BrownDwarf
     } else {
         GiantMassClass::Star
+    })
+}
+
+/// The disk GAS ASPECT RATIO `H/r` at an orbit, DERIVED from the disk temperature: the isothermal scale height
+/// `H = c_s/Omega` over the orbital radius, so `H/r = c_s/v_kep` with the isothermal sound speed
+/// `c_s = (k_B T/(mu m_H))^(1/2)` and the Keplerian velocity `v_kep = (G M_star/r)^(1/2)`. The Crida gap-opening
+/// criterion reads it. Computed in the log domain (the disk-clock precedent), so no unrepresentable intermediate
+/// forms. `None` past the disk edge (the temperature solve fails) or on an overflow.
+fn disk_aspect_ratio_at_orbit(disk: &SolidDisk, orbit_au: Fixed) -> Option<Fixed> {
+    let temperature = disk_effective_temperature(
+        disk.thermal.accretion_rate_msun_myr,
+        disk.thermal.star_mass_ratio,
+        disk.thermal.mass_luminosity_exponent,
+        orbit_au,
+        disk.thermal.reprocessing_factor,
+        disk.thermal.inner_boundary_factor,
+        disk.thermal.t_max,
+    )?;
+    if temperature <= Fixed::ZERO
+        || disk.mean_molecular_weight <= Fixed::ZERO
+        || disk.thermal.star_mass_ratio <= Fixed::ZERO
+        || orbit_au <= Fixed::ZERO
+    {
+        return None;
+    }
+    let ln_k_b = civsim_physics::saha::ln_of_decimal(civsim_units::fundamentals::BOLTZMANN.value)?;
+    // ln m_H = ln(1e-3) - ln(N_A): one atomic mass unit (one gram per mole per amu).
+    let ln_m_h = civsim_physics::saha::ln_of_decimal("1e-3")?.checked_sub(
+        civsim_physics::saha::ln_of_decimal(civsim_units::fundamentals::AVOGADRO.value)?,
+    )?;
+    let ln_g = civsim_physics::saha::ln_of_decimal(
+        civsim_units::fundamentals::GRAVITATIONAL_CONSTANT.value,
+    )?;
+    // ln c_s = 0.5*(ln k_B + ln T - ln mu - ln m_H).
+    let ln_c_s = Fixed::from_ratio(1, 2).checked_mul(
+        ln_k_b
+            .checked_add(temperature.ln())?
+            .checked_sub(disk.mean_molecular_weight.ln())?
+            .checked_sub(ln_m_h)?,
+    )?;
+    // ln v_kep = 0.5*(ln G + ln M_star + ln M_sun - ln r), with r = orbit_au * AU in metres.
+    let ln_r = orbit_au
+        .ln()
+        .checked_add(civsim_physics::saha::ln_of_decimal(ASTRONOMICAL_UNIT_M)?)?;
+    let ln_v_kep = Fixed::from_ratio(1, 2).checked_mul(
+        ln_g.checked_add(disk.thermal.star_mass_ratio.ln())?
+            .checked_add(civsim_physics::saha::ln_of_decimal(SOLAR_MASS_KG)?)?
+            .checked_sub(ln_r)?,
+    )?;
+    Some(ln_c_s.checked_sub(ln_v_kep)?.exp())
+}
+
+/// The TERMINATED-AND-TYPED giant result: the un-terminated reservoir ceiling, the gap-opening cap, the terminated
+/// mass, and the fusion class. [`terminate_and_type_giant`] composes it.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct TerminatedGiant {
+    /// The reservoir-exhaustion first cut (Earth masses), the [`GiantOutcome::Giant`] `final_mass_earth` ceiling.
+    pub un_terminated_mass_earth: Fixed,
+    /// The Crida gap-opening cap (Earth masses), the runaway-termination scale.
+    pub gap_mass_earth: Fixed,
+    /// The terminated mass (Earth masses), `min(reservoir, M_gap)`.
+    pub terminated_mass_earth: Fixed,
+    /// The fusion class of the terminated mass.
+    pub mass_class: GiantMassClass,
+}
+
+/// TERMINATE AND TYPE a giant verdict: the integration that makes the giant gate's mass SOUND. It threads the disk
+/// aspect ratio at the embryo's orbit ([`disk_aspect_ratio_at_orbit`]) through the Crida gap-opening criterion to
+/// cap the runaway (`M_final = min(reservoir, M_gap)`), then types the capped mass against the fusion boundaries.
+/// This retires the reservoir-exhaustion upper bound the audit flagged: the un-terminated ~24-Jupiter-mass ceiling
+/// becomes a ~2-Jupiter-mass planet, and only a mass truly past the deuterium line types as a brown dwarf.
+///
+/// The wiring is ADDITIVE and byte-neutral: [`giant_formation`] stays the un-terminated first cut (its
+/// `final_mass_earth` is the honest ceiling), and this composes the sound result on top from the disk and the two
+/// cited models, so no existing caller or verdict changes. `None` when the verdict is TERRESTRIAL (no giant to
+/// terminate) or a derivation fails (a disk-edge orbit, an overflow), a fail-soft that never fabricates a mass.
+pub fn terminate_and_type_giant(
+    verdict: &GiantVerdict,
+    disk: &SolidDisk,
+    star_mass_ratio: Fixed,
+    gap_model: &GapOpeningModel,
+    burning_limits: &BurningLimits,
+) -> Option<TerminatedGiant> {
+    let un_terminated_mass_earth = match verdict.outcome {
+        GiantOutcome::Giant { final_mass_earth } => final_mass_earth,
+        GiantOutcome::Terrestrial => return None,
+    };
+    let h_over_r = disk_aspect_ratio_at_orbit(disk, verdict.orbit_au)?;
+    let reynolds = alpha_disk_reynolds_number(disk.alpha_viscosity, h_over_r)?;
+    let gap_mass_earth = gap_opening_mass_earth(h_over_r, reynolds, star_mass_ratio, gap_model)?;
+    let terminated_mass_earth =
+        runaway_terminated_giant_mass_earth(un_terminated_mass_earth, gap_mass_earth)?;
+    let mass_class = giant_mass_class(terminated_mass_earth, burning_limits)?;
+    Some(TerminatedGiant {
+        un_terminated_mass_earth,
+        gap_mass_earth,
+        terminated_mass_earth,
+        mass_class,
     })
 }
 
@@ -1945,5 +2044,75 @@ mod tests {
         );
         // Non-physical inputs fail soft.
         assert!(giant_mass_class(Fixed::ZERO, &limits).is_none());
+    }
+
+    #[test]
+    fn the_integration_terminates_and_types_the_giant_from_the_disk() {
+        // The INTEGRATION: threading the disk aspect ratio through a giant verdict caps the runaway and types the
+        // capped mass, so the giant gate reports a sound mass instead of the reservoir-exhaustion ceiling. Additive
+        // over the existing verdict, so giant_formation is unchanged.
+        let disk = mirror_disk(Fixed::from_int(30));
+        let field = oligarchic_embryo_field(
+            &disk,
+            Fixed::ONE,
+            Fixed::from_int(10),
+            Fixed::from_int(5),
+            Fixed::ONE,
+            Fixed::from_int(30),
+            256,
+        );
+        let embryo = *field
+            .last()
+            .expect("the dense disk seeds a super-critical embryo");
+        let verdict =
+            giant_formation(&embryo, &disk, Fixed::ONE, &gas_params(), &kh_params()).unwrap();
+        let un_terminated = match verdict.outcome {
+            GiantOutcome::Giant { final_mass_earth } => final_mass_earth,
+            GiantOutcome::Terrestrial => panic!("the super-critical embryo should run away"),
+        };
+        // The derived disk aspect ratio at the embryo's orbit is a plausible thin-disk value.
+        let h_over_r = disk_aspect_ratio_at_orbit(&disk, embryo.orbit_au).unwrap();
+        assert!(
+            h_over_r.to_f64_lossy() > 0.01 && h_over_r.to_f64_lossy() < 0.2,
+            "H/r is a plausible disk aspect ratio (got {})",
+            h_over_r.to_f64_lossy()
+        );
+        let gap_model = GapOpeningModel::crida_2006();
+        let limits = BurningLimits::spiegel_chabrier();
+        let t = terminate_and_type_giant(&verdict, &disk, Fixed::ONE, &gap_model, &limits).unwrap();
+        // Termination never raises the mass, and the terminated mass is min(reservoir, M_gap).
+        assert_eq!(t.un_terminated_mass_earth, un_terminated);
+        assert!(
+            t.terminated_mass_earth <= un_terminated,
+            "termination never raises the mass"
+        );
+        let expected =
+            runaway_terminated_giant_mass_earth(un_terminated, t.gap_mass_earth).unwrap();
+        assert_eq!(t.terminated_mass_earth, expected);
+        // The class is the class of the terminated (sound) mass, not the reservoir ceiling.
+        assert_eq!(
+            t.mass_class,
+            giant_mass_class(t.terminated_mass_earth, &limits).unwrap()
+        );
+        // THE AUDIT FIX, reported: if the un-terminated ceiling was a brown dwarf (or a star) by mass, the
+        // terminated mass is a strictly lower class, so termination rescued a genuine planet from a mis-report.
+        let ceiling_class = giant_mass_class(un_terminated, &limits).unwrap();
+        if ceiling_class != GiantMassClass::Planet {
+            assert!(
+                t.terminated_mass_earth < un_terminated,
+                "a super-Jupiter reservoir ceiling is trimmed by the gap cap (ceiling {:?}, terminated {})",
+                ceiling_class,
+                t.terminated_mass_earth.to_f64_lossy()
+            );
+        }
+        // A TERRESTRIAL verdict has no giant to terminate.
+        let terrestrial = GiantVerdict {
+            outcome: GiantOutcome::Terrestrial,
+            ..verdict
+        };
+        assert!(
+            terminate_and_type_giant(&terrestrial, &disk, Fixed::ONE, &gap_model, &limits)
+                .is_none()
+        );
     }
 }
