@@ -358,12 +358,12 @@ pub struct PhaseConductivity {
     pub estimator_band: Option<Fixed>,
     /// The banked Gruneisen parameter, feeding both Slack's magnitude and Hofmeister's expansion correction.
     pub gruneisen: Fixed,
-    /// Slack's mean atomic mass (amu).
-    pub mean_atomic_mass_amu: Fixed,
-    /// Slack's Debye temperature (K).
-    pub debye_temperature_k: Fixed,
-    /// Slack's atomic volume (cubic angstrom).
-    pub atomic_volume_angstrom3: Fixed,
+    /// Slack's mean atomic mass (amu). `None` when no cited column supplies it for this phase.
+    pub mean_atomic_mass_amu: Option<Fixed>,
+    /// Slack's Debye temperature (K). `None` when no cited column supplies it for this phase.
+    pub debye_temperature_k: Option<Fixed>,
+    /// Slack's atomic volume (cubic angstrom). `None` when no cited column supplies it for this phase.
+    pub atomic_volume_angstrom3: Option<Fixed>,
     /// Atoms per primitive cell: the class variable that keys BOTH Slack's magnitude and Hofmeister's temperature
     /// exponent. A count the cited calibration cannot place (`2 < n < 6`) refuses the phase.
     pub atoms_per_primitive_cell: i32,
@@ -397,11 +397,28 @@ impl PhaseConductivity {
         let (base, band, rung) = match self.kappa_298 {
             Some(k) if k > ZERO => (k, self.kappa_298_band, ConductivityRung::MeasuredAnchor),
             _ => {
-                let k = estimator_anchor_298(
-                    self.gruneisen,
+                // Slack's three inputs are absent for every phase no cited column supplies, so their absence
+                // routes to the SAME refusal an unevaluable estimator already raises. Holding them as `Option`
+                // is what keeps a bridge from inventing a Debye temperature to satisfy the type: a fabricated
+                // one would sit dormant behind a measured anchor and go live the first time a census named an
+                // unmeasured phase, which is the failure this ladder exists to make impossible.
+                let (mean_atomic_mass, debye_temperature, atomic_volume) = match (
                     self.mean_atomic_mass_amu,
                     self.debye_temperature_k,
                     self.atomic_volume_angstrom3,
+                ) {
+                    (Some(m), Some(t), Some(v)) => (m, t, v),
+                    _ => {
+                        return Err(ConductivityRefusal::NoRung {
+                            phase: self.name.clone(),
+                        })
+                    }
+                };
+                let k = estimator_anchor_298(
+                    self.gruneisen,
+                    mean_atomic_mass,
+                    debye_temperature,
+                    atomic_volume,
                     self.atoms_per_primitive_cell,
                 )
                 .ok_or_else(|| ConductivityRefusal::NoRung {
@@ -831,9 +848,9 @@ mod tests {
             kappa_298_band: band,
             estimator_band: None,
             gruneisen: Fixed::from_ratio(15, 10),
-            mean_atomic_mass_amu: Fixed::from_int(20),
-            debye_temperature_k: Fixed::from_int(700),
-            atomic_volume_angstrom3: Fixed::from_int(20),
+            mean_atomic_mass_amu: Some(Fixed::from_int(20)),
+            debye_temperature_k: Some(Fixed::from_int(700)),
+            atomic_volume_angstrom3: Some(Fixed::from_int(20)),
             atoms_per_primitive_cell: 6,
             expansivity_integral: ZERO,
             bears_ferrous_iron: false,
@@ -1007,7 +1024,7 @@ mod tests {
     fn a_phase_with_no_resolvable_rung_is_refused_and_never_defaulted() {
         let mut ghost = measured_phase("unobtainium", dec("4.0"), None);
         ghost.kappa_298 = None; // no measured anchor
-        ghost.debye_temperature_k = ZERO; // and Slack cannot evaluate either
+        ghost.debye_temperature_k = None; // and no cited column supplies Slack's input either
         let census = vec![
             (measured_phase("olivine", dec("4.349"), None), dec("0.5")),
             (ghost, dec("0.5")),
@@ -1026,6 +1043,32 @@ mod tests {
                 .to_string()
                 .contains("refused rather than defaulted"),
             "the refusal explains why it is not a default: {refusal}"
+        );
+    }
+
+    /// The sibling of the test above, and the reason both are kept: a phase can fail Slack's rung in two
+    /// different ways, and only one of them is an ABSENT column. Here the column is PRESENT and unevaluable
+    /// (a zero Debye temperature), which is the path through `estimator_anchor_298` rather than the earlier
+    /// `Option` check. Both must land on the same named refusal, because a caller distinguishing "we never
+    /// fetched this" from "the fetched value cannot evaluate" would be reading a provenance question off a
+    /// physics failure.
+    #[test]
+    fn a_present_but_unevaluable_slack_input_refuses_by_the_same_name() {
+        let mut ghost = measured_phase("unobtainium", dec("4.0"), None);
+        ghost.kappa_298 = None; // no measured anchor, so the estimator rung is the only route
+        ghost.debye_temperature_k = Some(ZERO); // the column exists and cannot evaluate
+        let census = vec![
+            (measured_phase("olivine", dec("4.349"), None), dec("0.5")),
+            (ghost, dec("0.5")),
+        ];
+        let refusal =
+            assemblage_conductivity(&borrow(&census), hofmeister_reference_temperature_k())
+                .expect_err("an unevaluable estimator input must be refused");
+        assert_eq!(
+            refusal,
+            ConductivityRefusal::NoRung {
+                phase: "unobtainium".to_string()
+            }
         );
     }
 
