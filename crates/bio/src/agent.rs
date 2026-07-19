@@ -39,13 +39,13 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::decision::Curve;
 use crate::evidence::{AttrKindId, InferenceFrame, InferenceParams, ValueId};
 use crate::genome::{Channel, CognitionChannel, GeneSet, Genome};
 use crate::tom::{
     detects_deception, AccessChannelId, AccessWeights, NestedFrame, ProjectionRejected,
 };
 use civsim_core::{Fixed, StableId, StateHasher};
+use civsim_foundation::decision::Curve;
 
 /// A question a mind holds a belief about: a subject and one of its attributes. Ordered
 /// so the mind's state walks in a canonical, deterministic order.

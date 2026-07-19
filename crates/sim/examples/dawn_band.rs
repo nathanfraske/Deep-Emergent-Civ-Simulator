@@ -26,13 +26,13 @@
 //! uses for the concept, and what each chose to do. Every number is a labelled fixture,
 //! never an owner value, and the run is keyed on a seed so it replays identically.
 
-use civsim_bio::calibration::{CalibrationManifest, Profile};
-use civsim_bio::decision::{
-    ActionDef, ActionId, Behaviour, Consideration, Curve, DriveDef, DriveId, InputId,
-};
 use civsim_bio::evidence::AttrKindId;
 use civsim_bio::tom::AccessChannelRegistry;
 use civsim_core::{Fixed, StableId};
+use civsim_foundation::calibration::{CalibrationManifest, Profile};
+use civsim_foundation::decision::{
+    ActionDef, ActionId, Behaviour, Consideration, Curve, DriveDef, DriveId, InputId,
+};
 use civsim_sim::language::{ArticulationSubstrate, ConceptId, DriftParams, LangId, LanguageParams};
 use civsim_sim::world::{Trace, World};
 

@@ -47,8 +47,8 @@ use civsim_core::{DrawKey, Fixed, Phase, StableId};
 use crate::homeostasis::AffordanceId;
 use crate::learn::{step_belief_subject, REWARDS, REWARD_ATTR};
 use civsim_bio::agent::Mind;
-use civsim_bio::calibration::{CalibrationError, CalibrationManifest};
 use civsim_bio::evidence::InferenceParams;
+use civsim_foundation::calibration::{CalibrationError, CalibrationManifest};
 use civsim_foundation::sequence::SequenceStep;
 
 /// The candidate single-step action bindings a being can propose this tick: the GENERIC cartesian of its
@@ -311,7 +311,7 @@ mod tests {
     use super::*;
     use crate::homeostasis::{EXTRACT, GRASP, STRIKE};
     use crate::learn::{sequence_subject, RewardLearningCalib, NEUTRAL};
-    use civsim_bio::calibration::CalibrationManifest;
+    use civsim_foundation::calibration::CalibrationManifest;
 
     #[test]
     fn discovery_calib_reads_the_manifest_and_derives_surprise_from_reward_noise() {

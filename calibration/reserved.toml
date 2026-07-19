@@ -4,7 +4,7 @@
 # from the design document rather than invented. A mechanism is fixed Rust; these
 # numbers are the owner's to set. While status = "reserved" the loader treats the
 # entry as a fail-loud sentinel: any system that reads it unset errors rather than
-# running on a fabricated default (crates/bio/src/calibration.rs).
+# running on a fabricated default (crates/foundation/src/calibration.rs).
 #
 # Each `basis` is copied from the matching "Decided and reserved" blockquote in
 # docs/design.md, condensed, so the manifest and the document say the same thing.
@@ -14,7 +14,7 @@
 # "fundamental" (a universal constant on the closed fundamentals list), "per_world" (a per-world /
 # per-substance / per-race datum), "derivable" (computable from the fundamentals and the situation,
 # never stored once its substrate lands), or "defect" (a value fitting none of the three, a bug flagged
-# not laundered). The field is machine-checked (crates/bio/src/calibration.rs): a non-empty value that is
+# not laundered). The field is machine-checked (crates/foundation/src/calibration.rs): a non-empty value that is
 # not one of the four fails the build, so every entry is born categorized. An absent field reads as
 # UNCLASSIFIED, the additive-migration default for an in-flight entry not yet categorized. The categories
 # below were set by the gate-confirmed census (docs/working/CALIBRATION_CENSUS.md).

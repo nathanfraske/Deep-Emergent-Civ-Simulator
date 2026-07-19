@@ -63,11 +63,11 @@ use crate::homeostasis::{
 use crate::locomotion::{self, LocomotionParams, ResourceField, Terrain, Walker};
 use crate::runner::{BeingThermal, Embodiment, Field, FieldCalib, Runner};
 use civsim_bio::anatomy::{BodyPlan, Part, Temperament};
-use civsim_bio::calibration::{CalibrationError, CalibrationManifest};
 use civsim_bio::genome::{
     Allele, AlleleState, Channel, ControllerParamId, DominanceMode, GeneDef, GeneEffect, GeneId,
     GenePool, GeneSet, Genome, Haplotype, SchemeId,
 };
+use civsim_foundation::calibration::{CalibrationError, CalibrationManifest};
 
 // Draw-site slots within the CONTROLLER phase, so the init and the two mutation rolls of one lineage
 // do not collide on counter zero (the R-RNG-COORD slot rule).

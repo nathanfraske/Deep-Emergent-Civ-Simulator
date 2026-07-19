@@ -83,10 +83,10 @@ use crate::runner::{
 };
 use crate::world::{PlaceId, ReproductionParams, World};
 use civsim_bio::anatomy::BodyPlanRegistry;
-use civsim_bio::calibration::{CalibrationError, CalibrationManifest, Profile};
-use civsim_bio::decision::Curve;
 use civsim_bio::tom::AccessChannelRegistry;
 use civsim_foundation::breeding::BreedingSystemRegistry;
+use civsim_foundation::calibration::{CalibrationError, CalibrationManifest, Profile};
+use civsim_foundation::decision::Curve;
 use civsim_foundation::scenario::ScenarioResolution;
 use civsim_foundation::sensorium::SenseChannelId;
 use civsim_foundation::value::RaceId;

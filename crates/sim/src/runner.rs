@@ -122,10 +122,10 @@ use crate::physiology::{
 use crate::planning::plan_chain;
 use crate::world::{PlaceId, Stimulus, TickInput, World};
 use civsim_bio::anatomy::{BodyPlan, BodyPlanRegistry};
-use civsim_bio::calibration::{CalibrationError, CalibrationManifest};
 use civsim_compose::FunctionLawRegistry;
 use civsim_core::schedule::{run_serial, schedule, Access, ResourceId, SystemId};
 use civsim_core::{DrawKey, Fixed, Phase, StableId, StateHasher};
+use civsim_foundation::calibration::{CalibrationError, CalibrationManifest};
 use civsim_foundation::contact_transfer::{resolve_delivered_energy, ContactTransferRegistry};
 use civsim_foundation::decompose::{DecomposerDriverRegistry, DecomposerStockField};
 use civsim_foundation::located::{LocationIndex, OccupantId};
@@ -7943,7 +7943,7 @@ impl Runner {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use civsim_bio::calibration::CalibrationManifest;
+    use civsim_foundation::calibration::CalibrationManifest;
     use civsim_foundation::scenario::Scenario;
 
     /// A manifest with the three field calibrations set to labelled fixture values.
@@ -12916,9 +12916,9 @@ values = [
         };
         use crate::material_percept::MaterialPerceptRegistry;
         use civsim_bio::anatomy::{BodyPlan, Part, Temperament};
-        use civsim_bio::decision::Curve;
         use civsim_bio::evidence::InferenceParams;
         use civsim_bio::tom::{AccessChannelId, AccessWeights};
+        use civsim_foundation::decision::Curve;
         use civsim_foundation::material::{MaterialField, MatterCycleCalib};
         use civsim_physics::PhysicsRegistry;
 

@@ -13,7 +13,6 @@ civsim-core = { path = "../core" }
 # The parked biology arc. The clock reads the calibration manifest, the material substrate reads the
 # genome's composition axes, and breeding reads the genetic scheme. bio depends only on core, physics,
 # and compose, so this adds no cycle and no heavy dependency.
-civsim-bio = { path = "../bio" }
 # The physics floor: the contact-transfer registry binds a contact channel to a floor law, the material
 # substrate reads the biology-and-composition floor, and the tectonic-regime readout reads the rheology
 # terms. physics depends only on core.
@@ -33,3 +32,6 @@ toml = "0.8"
 [lints.clippy]
 # R-CANON-WALK: no unordered containers in canonical state (see clippy.toml).
 disallowed_types = "deny"
+
+[dev-dependencies]
+civsim-bio = { path = "../bio" }

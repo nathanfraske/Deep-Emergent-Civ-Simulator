@@ -40,9 +40,9 @@ use std::collections::BTreeMap;
 
 use crate::race::Race;
 use crate::typology::TypologyProfile;
-use civsim_bio::calibration::{CalibrationError, CalibrationManifest};
-use civsim_bio::decision::Curve;
 use civsim_core::{Fixed, Rng};
+use civsim_foundation::calibration::{CalibrationError, CalibrationManifest};
+use civsim_foundation::decision::Curve;
 use civsim_foundation::value::RaceId;
 
 /// The reserved calibration the naming game needs: how often a speaker coins a fresh

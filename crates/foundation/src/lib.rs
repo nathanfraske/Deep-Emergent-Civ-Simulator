@@ -103,9 +103,11 @@
 
 pub mod affect;
 pub mod breeding;
+pub mod calibration;
 pub mod clock;
 pub mod conservation;
 pub mod contact_transfer;
+pub mod decision;
 pub mod decompose;
 pub mod located;
 pub mod material;

@@ -20,10 +20,10 @@
 //! never runs on an unset number.
 
 use civsim_bio::agent::AccessObs;
-use civsim_bio::calibration::{CalibrationManifest, Profile};
 use civsim_bio::evidence::AttrKindId;
 use civsim_bio::tom::{AccessChannelId, AccessChannelRegistry};
 use civsim_core::{Fixed, StableId};
+use civsim_foundation::calibration::{CalibrationManifest, Profile};
 use civsim_sim::world::{Stimulus, TickInput, World};
 use civsim_world::OrbitalElements;
 

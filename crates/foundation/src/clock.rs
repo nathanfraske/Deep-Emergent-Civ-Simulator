@@ -43,7 +43,7 @@
 use civsim_core::Fixed;
 use civsim_world::OrbitalElements;
 
-use civsim_bio::calibration::{CalibrationError, CalibrationManifest};
+use crate::calibration::{CalibrationError, CalibrationManifest};
 
 /// A steppable simulation: something the observer can advance one canonical tick at a time. A
 /// step is one base tick (for the dawn) or one generation (for the pre-dawn radiation); the

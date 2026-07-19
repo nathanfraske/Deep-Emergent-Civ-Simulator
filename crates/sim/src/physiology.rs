@@ -75,7 +75,7 @@ use civsim_core::Fixed;
 use civsim_physics::laws;
 
 use civsim_bio::anatomy::{BodyPlan, BodyPlanRegistry};
-use civsim_bio::calibration::{CalibrationError, CalibrationManifest};
+use civsim_foundation::calibration::{CalibrationError, CalibrationManifest};
 
 /// The biology-floor axis a tissue carries its body-to-medium exchange surface on
 /// (`crates/physics/data/biology_floor.toml`), the area the heat-loss and coupling laws integrate over.

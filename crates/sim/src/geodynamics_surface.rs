@@ -43,7 +43,7 @@
 use civsim_core::Fixed;
 use civsim_world::Coord3;
 
-use civsim_bio::calibration::CalibrationError;
+use civsim_foundation::calibration::CalibrationError;
 use civsim_foundation::material::{EarthworkField, GeodynamicField};
 
 /// One relaxation pass over the armed geodynamic columns: for each column carrying geodynamic state, read its

@@ -39,8 +39,8 @@
 //! live-but-byte-neutral derivation whose effect lands in a downstream deadband is a coverage gap the
 //! separate coverage signal reports, never a liveness failure (the gate's ruling).
 
-use civsim_bio::calibration::CalibrationManifest;
 use civsim_core::Fixed;
+use civsim_foundation::calibration::CalibrationManifest;
 
 /// Whether a derivation replaced an authored floor or is a new derived output. The liveness principle
 /// (perturb the input, assert the output responds) applies to both; the category only records which

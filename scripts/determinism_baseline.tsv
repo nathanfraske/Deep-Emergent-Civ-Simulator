@@ -14,4 +14,4 @@ Instant::now	crates/foundation/src/profile.rs	1	profiling timer scope; the elaps
 Instant::now	crates/sim/src/world.rs	7	tick_timed profiling variant; per-phase nanoseconds are returned for a report, never state (the canonical tick is untimed)
 HashMap	crates/core/src/id.rs	3	StableId to EntityLocation lookup index (import, field, constructor); point-lookups by id only, never iterated into canonical state
 HashMap	crates/core/src/event.rs	2	StableId to Vec<EventId> lookup index (import, field); point-lookups by id only, never iterated into canonical state
-HashMap	crates/bio/src/calibration.rs	3	calibration manifest String to ReservedValue lookups (import, field, constructor); require_* reads by key, never iterated into canonical state
+HashMap	crates/foundation/src/calibration.rs	3	calibration manifest String to ReservedValue lookups (import, field, constructor); require_* reads by key, never iterated into canonical state

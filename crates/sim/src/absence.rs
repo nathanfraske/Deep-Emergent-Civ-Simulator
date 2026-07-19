@@ -39,7 +39,7 @@ use civsim_core::Fixed;
 
 use crate::base_rates::RaceBaseRates;
 use crate::demography::hazard_age;
-use civsim_bio::decision::Curve;
+use civsim_foundation::decision::Curve;
 
 /// One absence stage: a label and a multiplier on the base window. Race-independent (a universal
 /// set every race passes through); how long the stage runs for a given race comes from that race's

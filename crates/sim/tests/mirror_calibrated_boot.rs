@@ -39,9 +39,9 @@
 use std::collections::BTreeMap;
 
 use civsim_bio::anatomy::{BodyPlan, BodyPlanRegistry, Part, Temperament};
-use civsim_bio::calibration::{CalibrationError, CalibrationManifest, Category, Profile};
 use civsim_bio::tom::AccessChannelRegistry;
 use civsim_core::{Fixed, GaussApprox};
+use civsim_foundation::calibration::{CalibrationError, CalibrationManifest, Category, Profile};
 use civsim_foundation::scenario::{Scenario, ScenarioResolution};
 use civsim_sim::homeostasis::{AffordanceRegistry, HomeostaticRegistry};
 use civsim_sim::locomotion::LocomotionParams;

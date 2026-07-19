@@ -32,7 +32,7 @@
 //! reads its own reserves, and its controller decides. A being that has evolved the adaptive coupling
 //! walks up the gradient to a known source and ingests it; one that has not starves. This is the
 //! retirement of the authored decision menu that the prior slice flagged: the drives-and-actions
-//! policy is gone from this path, replaced by the expressed controller (the [`civsim_bio::decision`]
+//! policy is gone from this path, replaced by the expressed controller (the [`civsim_foundation::decision`]
 //! utility layer remains the shape of the sentient, deliberative tier above, which the controller
 //! underlies rather than replaces).
 //!

@@ -55,8 +55,6 @@ use crate::personality::{age_personality, PersonalityRegistry, TraitAxisId, Trai
 use crate::race::{BandSpec, Race};
 use civsim_bio::agent::{AccessObs, Mind, RetentionLaw, SharedBelief};
 use civsim_bio::belief::{BeliefKey, BeliefPool};
-use civsim_bio::calibration::{CalibrationError, CalibrationManifest, Profile};
-use civsim_bio::decision::{ActionId, Behaviour, Curve, DriveId, InputId};
 use civsim_bio::evidence::{AttrKindId, InferenceParams, ValueId};
 use civsim_bio::genome::{Channel, GenePool, Genome, ReproductionMode};
 use civsim_bio::mate_choice::{choose, MatePreference};
@@ -67,7 +65,9 @@ use civsim_core::{
 };
 use civsim_foundation::affect::{AffectAxisId, AffectState, AppraisalBinding};
 use civsim_foundation::breeding::{BreedingSystemRegistry, SexClass};
+use civsim_foundation::calibration::{CalibrationError, CalibrationManifest, Profile};
 use civsim_foundation::clock::LIFE_CADENCE_TICKS;
+use civsim_foundation::decision::{ActionId, Behaviour, Curve, DriveId, InputId};
 use civsim_foundation::sensorium::{SenseChannelId, Sensorium};
 use civsim_foundation::transmission::{
     copy_drift, copy_fidelity, erode_and_cull, stability_span, transmit, transmit_draw, DesignId,
@@ -502,7 +502,7 @@ pub struct World {
     /// trait input, so a drive-only behaviour is unchanged. The world author picks input ids that do
     /// not collide with the drive ids (a drive reads at the input of its own id).
     ///
-    /// [`Consideration`]: civsim_bio::decision::Consideration
+    /// [`Consideration`]: civsim_foundation::decision::Consideration
     trait_inputs: BTreeMap<InputId, TraitAxisId>,
     /// Per-mind drive levels, in the unit interval.
     drive_levels: BTreeMap<StableId, BTreeMap<DriveId, Fixed>>,
@@ -2651,7 +2651,7 @@ impl World {
 
     /// Bind a decision input to a personality trait axis (design Part 20, world-wiring increment 9):
     /// the decide phase then projects each being's value on `axis` into its readings map under
-    /// `input`, so a [`civsim_bio::decision::Consideration`] reading `input` scores on the being's trait.
+    /// `input`, so a [`civsim_foundation::decision::Consideration`] reading `input` scores on the being's trait.
     /// A being carrying no personality instance contributes no reading for the bound input (it reads
     /// as zero in the scorer), never a fabricated value. Pick an `input` id distinct from the drive
     /// ids, since a drive reads at the input of its own id.
@@ -3808,7 +3808,7 @@ impl World {
     /// behaviour is moved out for the pass so the per-mind drive maps can be borrowed mutably without
     /// conflict, then restored.
     ///
-    /// The readings a [`civsim_bio::decision::Consideration`] scores over are keyed by
+    /// The readings a [`civsim_foundation::decision::Consideration`] scores over are keyed by
     /// [`InputId`] (world-wiring increment 9): each drive contributes its level at the input of its
     /// own id, and each trait bound through [`World::bind_trait_input`] contributes the being's own
     /// value on that axis. So two beings under identical drive pressure but differing personality
@@ -4801,8 +4801,8 @@ margin_steps = -1
         assert_eq!(build(), build());
     }
 
-    fn behaviour() -> civsim_bio::decision::Behaviour {
-        use civsim_bio::decision::{ActionDef, Behaviour, Consideration, Curve, DriveDef};
+    fn behaviour() -> civsim_foundation::decision::Behaviour {
+        use civsim_foundation::decision::{ActionDef, Behaviour, Consideration, Curve, DriveDef};
         let hunger = DriveId(0);
         let fatigue = DriveId(1);
         // A drive reads at the input of its own id.
@@ -4880,7 +4880,7 @@ margin_steps = -1
         // diverge in the action they choose. The decide path carries no age or race branch; the
         // divergence is the per-being trait value read through one curve (Principle 9).
         use crate::personality::{TraitAxisId, TraitInstance};
-        use civsim_bio::decision::{ActionDef, Behaviour, Consideration, DriveDef};
+        use civsim_foundation::decision::{ActionDef, Behaviour, Consideration, DriveDef};
 
         const BOLDNESS: TraitAxisId = TraitAxisId(0);
         // A drive both beings share (identical drive pressure), and a trait input bound to boldness.

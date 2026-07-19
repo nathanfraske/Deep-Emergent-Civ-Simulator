@@ -18,7 +18,7 @@
 //! and determinism level, with tuned behaviour held until the owner sets the
 //! reserved numbers:
 //!
-//! - [`civsim_bio::calibration`]: the calibration manifest loader. Every reserved value loads
+//! - [`civsim_foundation::calibration`]: the calibration manifest loader. Every reserved value loads
 //!   as a fail-loud sentinel, so a system that reads an unset required value errors
 //!   rather than running on a fabricated default. This is the operational form of
 //!   the prime directive that the project never fabricates a value (runbook
@@ -143,10 +143,6 @@ pub use civsim_bio::agent::{AccessObs, Mind, RetentionLaw, SharedBelief};
 pub use civsim_bio::belief::{
     instantiate_strength, BeliefKey, BeliefParams, BeliefPool, FacetStrength, PrevailingBelief,
 };
-pub use civsim_bio::calibration::{CalibrationError, CalibrationManifest, Profile, ReservedValue};
-pub use civsim_bio::decision::{
-    ActionDef, ActionId, Behaviour, Consideration, Curve, DriveDef, DriveId, InputId,
-};
 pub use civsim_bio::evidence::{
     aggregate_diffusion_rate, derive_aggregate_diffusion_rate, good_weight, AttrKindId,
     EvidenceRef, InferenceFrame, InferenceParams,
@@ -164,10 +160,16 @@ pub use civsim_foundation::breeding::{
     fisher_select_step, sex_ratio_selection_coeff, AssignmentRule, BreedingSystem,
     BreedingSystemId, BreedingSystemRegistry, CompatibilityRule, SexClass,
 };
+pub use civsim_foundation::calibration::{
+    CalibrationError, CalibrationManifest, Profile, ReservedValue,
+};
 pub use civsim_foundation::clock::{
     PlaybackDriver, SimClock, Steppable, LIFE_CADENCE_TICKS, YEARS_PER_GENERATION,
 };
 pub use civsim_foundation::conservation::{ConservationError, ConservationRegistry};
+pub use civsim_foundation::decision::{
+    ActionDef, ActionId, Behaviour, Consideration, Curve, DriveDef, DriveId, InputId,
+};
 pub use civsim_foundation::decompose::{
     CombineMode, DecomposerDriver, DecomposerDriverRegistry, DecomposerKernelId,
     DecomposerStockField,

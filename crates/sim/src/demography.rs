@@ -49,9 +49,9 @@
 //! exact reference sampler is built here.
 
 use crate::census::ReproductiveMoments;
-use civsim_bio::decision::Curve;
 use civsim_core::{DrawKey, Fixed, Phase, StateHasher};
 use civsim_foundation::breeding::SexClass;
+use civsim_foundation::decision::Curve;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 

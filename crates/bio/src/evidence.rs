@@ -37,8 +37,8 @@
 //! the thresholds are the owner's reserved calibrations, read from the manifest and
 //! failing loud until set. The engine is fixed Rust.
 
-use crate::calibration::{CalibrationError, CalibrationManifest};
 use civsim_core::{Fixed, StableId};
+use civsim_foundation::calibration::{CalibrationError, CalibrationManifest};
 
 /// A data-defined attribute kind (which question is being inferred). An identifier,
 /// not a closed enum, so a world can ask questions the engine's authors never

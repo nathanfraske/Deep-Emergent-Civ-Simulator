@@ -379,7 +379,7 @@ pub fn corroding_salience(elapsed: Fixed, kind: &TraceKindDef) -> Fixed {
 mod tests {
     use super::*;
     use crate::base_rates::RaceBaseRateRegistry;
-    use civsim_bio::decision::Curve;
+    use civsim_foundation::decision::Curve;
     use civsim_foundation::value::RaceId;
 
     const CLAMP: Fixed = Fixed::from_int(20);

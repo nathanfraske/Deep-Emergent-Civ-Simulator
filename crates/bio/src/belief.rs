@@ -46,10 +46,10 @@
 //! not an identity the mechanism enforces (the deliberately-lossy lift direction of Part 54,
 //! corrected on the next re-summarize).
 
-use crate::calibration::{CalibrationError, CalibrationManifest};
-use crate::decision::Curve;
 use crate::evidence::{self, AttrKindId, ValueId};
 use civsim_core::{DrawKey, Fixed, Phase, StableId, StateHasher};
+use civsim_foundation::calibration::{CalibrationError, CalibrationManifest};
+use civsim_foundation::decision::Curve;
 use std::collections::BTreeMap;
 
 /// A `[0, 1]`-clamped conviction: the Part 9.2 belief strength as a standalone scalar,

@@ -87,8 +87,6 @@
 pub mod agent;
 pub mod anatomy;
 pub mod belief;
-pub mod calibration;
-pub mod decision;
 pub mod evidence;
 pub mod genome;
 pub mod lineage;

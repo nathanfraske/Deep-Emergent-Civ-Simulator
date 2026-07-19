@@ -42,9 +42,9 @@
 //! [`EvidenceOrder`], the recursion-level discriminator, parameterised by the stable
 //! id of whose access is meant: it is mechanism, not a catalogue of world content.
 
-use crate::calibration::{CalibrationError, CalibrationManifest};
 use crate::evidence::{AttrKindId, InferenceFrame, InferenceParams, ValueId};
 use civsim_core::{Fixed, StableId};
+use civsim_foundation::calibration::{CalibrationError, CalibrationManifest};
 use serde::{Deserialize, Serialize};
 
 /// The strictly-positive floor on a derived assertion-ladder weight (the smallest positive Q32.32

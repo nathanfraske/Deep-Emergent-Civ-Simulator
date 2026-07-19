@@ -35,7 +35,7 @@ use std::collections::BTreeMap;
 
 use civsim_core::Fixed;
 
-use civsim_bio::decision::DriveId;
+use crate::decision::DriveId;
 
 /// A data-defined affect-axis identifier (a dimension of feeling a race carries, Part 40). The
 /// axis set is a registry, not a closed list of named emotions, so an alien affect space is a

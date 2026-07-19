@@ -39,7 +39,7 @@ use std::path::Path;
 use civsim_world::{WorldStructure, EARTH_STRUCTURE};
 use serde::{Deserialize, Serialize};
 
-use civsim_bio::calibration::{CalibrationError, CalibrationManifest, ReservedValue};
+use crate::calibration::{CalibrationError, CalibrationManifest, ReservedValue};
 
 /// The direction a scenario pushes a dial: a token, not a magnitude.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
@@ -375,7 +375,7 @@ impl ScenarioResolution {
     /// Whether every `[dials]` entry this scenario pushes has a set magnitude. This covers the
     /// change-and-extremes dials only, not the magic-intensity or race postures (not manifest-backed
     /// until Part 34), so it is necessary but not sufficient for a magical world to run under
-    /// [`Profile::Calibrated`](civsim_bio::calibration::Profile); a grounded world (Mirror) with no magic
+    /// [`Profile::Calibrated`](crate::calibration::Profile); a grounded world (Mirror) with no magic
     /// postures is fully calibrated when this holds.
     pub fn is_fully_set(&self) -> bool {
         self.dials.iter().all(|d| d.entry.is_set())

@@ -51,7 +51,7 @@ use crate::edibility::Composition;
 use crate::locomotion::ResourceField;
 use crate::physiology::{ENERGY_DENSITY, SALINITY, WATER_FRACTION};
 use crate::runner::Field;
-use civsim_bio::calibration::{CalibrationError, CalibrationManifest};
+use civsim_foundation::calibration::{CalibrationError, CalibrationManifest};
 use civsim_foundation::material::{EarthworkField, SoilNutrientField};
 use civsim_foundation::stocks::Stock;
 

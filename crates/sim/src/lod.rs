@@ -28,11 +28,11 @@ use crate::census::ReproductiveMoments;
 use crate::demography::AgeHistogram;
 use crate::institution::{AggregateInstitution, Institution};
 use civsim_bio::belief::{BeliefKey, BeliefParams, BeliefPool, FacetStrength};
-use civsim_bio::decision::Curve;
 use civsim_core::{
     EntityHandle, EntityLocation, EventId, Fixed, InstId, PoolId, Registry, StableId, StateHasher,
 };
 use civsim_foundation::breeding::SexClass;
+use civsim_foundation::decision::Curve;
 use serde::{Deserialize, Serialize};
 
 /// A promoted, fully represented entity holding some wealth.

@@ -65,10 +65,10 @@
 //! referential integrity and well-formed data at load.
 
 use crate::language::ConceptId;
-use civsim_bio::calibration::{CalibrationError, CalibrationManifest};
 use civsim_bio::evidence::AttrKindId;
 use civsim_bio::tom::AccessChannelId;
 use civsim_core::{Event, EventId, EventKindId, EventLog, Fixed, StableId};
+use civsim_foundation::calibration::{CalibrationError, CalibrationManifest};
 use serde::{Deserialize, Serialize};
 
 /// The etic floor of primitive effects: the engine affordances a dialogue move's force

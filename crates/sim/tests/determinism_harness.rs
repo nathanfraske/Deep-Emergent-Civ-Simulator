@@ -46,10 +46,10 @@
 use civsim_bio::anatomy::{
     BodyPlan, BodyPlanRegistry, OrganKindDef, Part, Temperament, TissueComposition,
 };
-use civsim_bio::decision::Behaviour;
 use civsim_bio::evidence::{AttrKindId, InferenceParams, ValueId};
 use civsim_bio::tom::{AccessChannelDef, AccessChannelId, AccessChannelRegistry, AccessWeights};
 use civsim_core::{Fixed, StableId};
+use civsim_foundation::decision::Behaviour;
 use civsim_sim::controller::Controller;
 use civsim_sim::dialogue::{
     EffectSign, ForceEffectDef, ForceEffectId, ForceFloor, ForceKind, MoveKindDef, MoveKindId,

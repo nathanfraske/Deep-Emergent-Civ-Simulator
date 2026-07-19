@@ -43,9 +43,9 @@ use std::time::Instant;
 use civsim_bio::anatomy::{
     BodyPlan, BodyPlanRegistry, OrganKindDef, Part, Temperament, TissueComposition,
 };
-use civsim_bio::calibration::{CalibrationManifest, Profile};
 use civsim_bio::tom::AccessChannelRegistry;
 use civsim_core::{Fixed, GaussApprox, StableId};
+use civsim_foundation::calibration::{CalibrationManifest, Profile};
 use civsim_foundation::contact_transfer::ContactTransferRegistry;
 use civsim_foundation::decompose::DecomposerDriverRegistry;
 use civsim_foundation::material::{MaterialField, MatterCycleCalib, StrikeParams};

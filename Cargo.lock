@@ -325,6 +325,7 @@ version = "0.1.0"
 dependencies = [
  "civsim-compose",
  "civsim-core",
+ "civsim-foundation",
  "civsim-physics",
  "rayon",
  "serde",

@@ -68,8 +68,8 @@
 //! machinery it would move; the substrate it will act over is this registry.
 
 use crate::language::Linearization;
-use civsim_bio::calibration::{CalibrationError, CalibrationManifest};
 use civsim_core::{DrawKey, Fixed, Phase};
+use civsim_foundation::calibration::{CalibrationError, CalibrationManifest};
 use civsim_foundation::value::GroundMetric;
 use civsim_physics::laws;
 use std::collections::BTreeMap;

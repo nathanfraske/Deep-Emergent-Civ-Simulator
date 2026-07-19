@@ -13,9 +13,9 @@
 use std::collections::BTreeMap;
 
 use civsim_bio::anatomy::BodyPlanRegistry;
-use civsim_bio::calibration::{CalibrationManifest, Profile};
 use civsim_bio::tom::AccessChannelRegistry;
 use civsim_core::{Fixed, GaussApprox};
+use civsim_foundation::calibration::{CalibrationManifest, Profile};
 use civsim_foundation::material::WearParams;
 use civsim_foundation::scenario::Scenario;
 use civsim_sim::homeostasis::{

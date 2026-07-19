@@ -10,6 +10,7 @@ rust-version.workspace = true
 
 [dependencies]
 civsim-core = { path = "../core" }
+civsim-foundation = { path = "../foundation" }
 # The genetic substrate reads the resolved biology-and-composition floor (R-PHYS-BIO) to express a
 # composition channel. physics depends only on core, so this adds no heavy or fast-moving dependency.
 civsim-physics = { path = "../physics" }

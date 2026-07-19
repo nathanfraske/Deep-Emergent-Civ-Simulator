@@ -45,7 +45,7 @@ use std::collections::BTreeMap;
 use civsim_core::Fixed;
 
 use crate::race::Race;
-use civsim_bio::decision::Curve;
+use civsim_foundation::decision::Curve;
 use civsim_foundation::value::RaceId;
 
 /// A data-defined personality trait axis identifier (an open registry, Principle 11): which trait a

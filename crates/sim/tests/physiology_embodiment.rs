@@ -5040,7 +5040,7 @@ fn embodied_physiology_reads_a_set_manifest_and_fails_loud_when_reserved() {
     // medium field (the submersion elevation and the submerged and emergent medium profiles), the reserved
     // transfer coefficient, and the base tick from a set manifest, and a reserved input refuses to
     // fabricate a number (Principle 11).
-    use civsim_bio::calibration::{CalibrationError, CalibrationManifest};
+    use civsim_foundation::calibration::{CalibrationError, CalibrationManifest};
     use civsim_world::{BiomeSet, FlatBounded, TileMap, WorldgenParams};
     let map = TileMap::generate(
         7,
