@@ -3398,6 +3398,93 @@ impl PhotoevaporationRateBracket {
     }
 }
 
+/// A CLOSED STELLAR-MASS INTERVAL `[lo, hi]` in solar masses, the unit a fit's typed domain is built from.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct MassInterval {
+    /// Lower edge (solar masses), inclusive.
+    pub lo_solar: Fixed,
+    /// Upper edge (solar masses), inclusive.
+    pub hi_solar: Fixed,
+}
+
+impl MassInterval {
+    /// Whether a stellar mass falls inside the closed interval.
+    pub fn contains(&self, mass_solar: Fixed) -> bool {
+        mass_solar >= self.lo_solar && mass_solar <= self.hi_solar
+    }
+}
+
+/// The GRADE of an [`EuvWindFit`] evaluation at a given stellar mass, so a consumer can never mistake an
+/// extrapolation into an unmeasured regime for an empirically grounded rate. This is the fix for the disjoint-
+/// evidence defect: a single `[mass_min, mass_max]` pair turned the Herbig validation gap (about 2 to 15 solar
+/// masses, between the low-mass T Tauri grounding and the massive-star numerical grounding) into ordinary in-domain
+/// success. The grade travels with the rate instead.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum FitReach {
+    /// The mass sits inside the fit's empirically grounded interval: the rate carries the fit's own grade.
+    Grounded,
+    /// The mass sits in the analytic-extrapolation interval (the fit's power law reaching beyond where it was
+    /// measured, principally the Herbig gap): ESTIMATOR grade. The carried value is the DERIVED extrapolation
+    /// distance, `decades_beyond_grounded`, the base-10 magnitude in stellar mass from the nearest grounded edge,
+    /// a monotone trust-decay proxy the consumer reads. It is NOT a rate-error band in dex: the rate uncertainty of
+    /// bridging the unmeasured Herbig regime is not itself measured (the honest gap, pending a Herbig-regime grid),
+    /// so no such width is fabricated here.
+    AnalyticExtrapolation { decades_beyond_grounded: Fixed },
+}
+
+/// The TYPED DOMAIN of an EUV wind fit: the interval where its coefficients were empirically grounded, and the
+/// adjacent interval its power law only reaches by analytic extrapolation, at estimator grade. Queried at a stellar
+/// mass, it returns the graded [`FitReach`] or `None` (outside both intervals, a refusal). This replaces the old
+/// `[mass_min, mass_max]` pair, which could not represent the disjoint support of the cited channels.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct EuvFitDomain {
+    /// The empirically grounded interval (the channel's own measured or modelled masses).
+    pub grounded: MassInterval,
+    /// The analytic-extrapolation interval, adjacent to the grounded one, where the same scaling is extended into an
+    /// unmeasured regime at estimator grade.
+    pub extrapolation: MassInterval,
+}
+
+impl EuvFitDomain {
+    /// The graded reach at a stellar mass: grounded wins where the intervals touch, then extrapolation, else `None`.
+    /// The extrapolation distance is DERIVED as `|log10(mass) - log10(nearest grounded edge)|`, the decades of
+    /// stellar mass past the grounded interval, so an ungrounded evaluation carries how far out on the limb it sits.
+    pub fn reach_at(&self, mass_solar: Fixed) -> Option<FitReach> {
+        if mass_solar <= Fixed::ZERO {
+            return None;
+        }
+        if self.grounded.contains(mass_solar) {
+            return Some(FitReach::Grounded);
+        }
+        if self.extrapolation.contains(mass_solar) {
+            let ln10 = Fixed::from_int(10).ln();
+            let log10_m = mass_solar.ln().checked_div(ln10)?;
+            // The nearest grounded edge: the low edge if the mass sits below the grounded interval, else the high.
+            let edge = if mass_solar < self.grounded.lo_solar {
+                self.grounded.lo_solar
+            } else {
+                self.grounded.hi_solar
+            };
+            let log10_edge = edge.ln().checked_div(ln10)?;
+            let decades = log10_m.checked_sub(log10_edge)?.abs();
+            return Some(FitReach::AnalyticExtrapolation {
+                decades_beyond_grounded: decades,
+            });
+        }
+        None
+    }
+}
+
+/// A GRADED EUV wind-rate evaluation: the rate bracket paired with the [`FitReach`] grade at the evaluated mass, so
+/// a Herbig-gap extrapolation reaches the consumer tagged as estimator provenance rather than as a grounded point.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct PhotoevaporationRateEvaluation {
+    /// The mass-loss rate bracket (solar masses per Myr), the atmosphere-model band propagated through the wind law.
+    pub rate: PhotoevaporationRateBracket,
+    /// The grounded-or-extrapolated grade of this evaluation, from the fit's typed domain.
+    pub reach: FitReach,
+}
+
 /// The EUV PHOTOEVAPORATION WIND-RATE FIT: the reserved-with-basis coefficients of the radiative-envelope branch's
 /// mass-loss rate `Mdot = C (Phi/Phi_ref)^p (M_star/M_sun)^q` (solar masses per YEAR), where `Phi` is the star's own
 /// ionizing (Lyman-continuum) photon rate in photons per second. The mechanism (the power law) is fixed Rust
@@ -3418,11 +3505,10 @@ pub struct EuvWindFit {
     pub phi_exponent: Fixed,
     /// The exponent on `(M_star/M_sun)` (`1/2`: the rate scales as the square root of stellar mass).
     pub mass_exponent: Fixed,
-    /// Fit validity lower bound (solar masses), the low edge of the grounded span (the T Tauri analytic extension).
-    pub mass_min_msun: Fixed,
-    /// Fit validity upper bound (solar masses), the high edge (the massive-star numerical models). The Herbig regime
-    /// (about 2 to 15 M_sun) sits in a validation GAP between the two, bridged by the analytic scaling.
-    pub mass_max_msun: Fixed,
+    /// The TYPED mass domain: the grounded interval where this channel was measured, and the adjacent analytic-
+    /// extrapolation interval it reaches at estimator grade. Replaces the old `[mass_min, mass_max]` pair, which
+    /// could not represent that the Herbig regime (about 2 to 15 solar masses) is a validation gap, not in-domain.
+    pub domain: EuvFitDomain,
 }
 
 impl EuvWindFit {
@@ -3439,8 +3525,18 @@ impl EuvWindFit {
             log10_phi_reference_per_s: Fixed::from_int(41),                 // Phi_ref = 1e41 s^-1
             phi_exponent: Fixed::from_ratio(1, 2),                          // 1/2
             mass_exponent: Fixed::from_ratio(1, 2),                         // 1/2
-            mass_min_msun: Fixed::from_ratio(1, 10), // 0.1 M_sun (analytic extension edge)
-            mass_max_msun: Fixed::from_int(65),      // 65 M_sun (massive-star model edge)
+            // GROUNDED on the massive-star numerical models (about 15 to 65 solar masses, the primary's own grid);
+            // the analytic scaling reaches DOWN to the T Tauri regime at estimator grade.
+            domain: EuvFitDomain {
+                grounded: MassInterval {
+                    lo_solar: Fixed::from_int(15),
+                    hi_solar: Fixed::from_int(65),
+                },
+                extrapolation: MassInterval {
+                    lo_solar: Fixed::from_ratio(1, 10),
+                    hi_solar: Fixed::from_int(15),
+                },
+            },
         }
     }
 
@@ -3455,8 +3551,18 @@ impl EuvWindFit {
             log10_phi_reference_per_s: Fixed::from_int(41),                 // Phi_ref = 1e41 s^-1
             phi_exponent: Fixed::from_ratio(1, 2),                          // 1/2
             mass_exponent: Fixed::from_ratio(1, 2),                         // 1/2
-            mass_min_msun: Fixed::from_ratio(1, 10),                        // 0.1 M_sun
-            mass_max_msun: Fixed::from_int(65),                             // 65 M_sun
+            // GROUNDED on the low-mass T Tauri regime (about 0.1 to 2 solar masses, where this restatement is
+            // applied); the same scaling reaches UP through the Herbig gap to the massive-star edge at estimator grade.
+            domain: EuvFitDomain {
+                grounded: MassInterval {
+                    lo_solar: Fixed::from_ratio(1, 10),
+                    hi_solar: Fixed::from_int(2),
+                },
+                extrapolation: MassInterval {
+                    lo_solar: Fixed::from_int(2),
+                    hi_solar: Fixed::from_int(65),
+                },
+            },
         }
     }
 
@@ -3473,8 +3579,18 @@ impl EuvWindFit {
             log10_phi_reference_per_s: Fixed::from_int(41),                 // Phi_ref = 1e41 s^-1
             phi_exponent: Fixed::from_ratio(1, 2),                          // 1/2
             mass_exponent: Fixed::from_ratio(1, 2),                         // 1/2
-            mass_min_msun: Fixed::from_ratio(1, 10),                        // 0.1 M_sun
-            mass_max_msun: Fixed::from_int(65),                             // 65 M_sun
+            // GROUNDED on the low-mass T Tauri regime (about 0.1 to 2 solar masses, the 2D radiation-hydrodynamic
+            // simulations); the same scaling reaches UP through the Herbig gap at estimator grade.
+            domain: EuvFitDomain {
+                grounded: MassInterval {
+                    lo_solar: Fixed::from_ratio(1, 10),
+                    hi_solar: Fixed::from_int(2),
+                },
+                extrapolation: MassInterval {
+                    lo_solar: Fixed::from_int(2),
+                    hi_solar: Fixed::from_int(65),
+                },
+            },
         }
     }
 }
@@ -3508,9 +3624,11 @@ impl EuvWindFit {
 /// diffuse-field weak wind at 1e4 K, not the X-ray or FUV wind; the direct-field rate (about 8.8 times higher, which
 /// dominates once the inner disk drains and turns optically thin) is a flagged later-phase sibling this rate does
 /// not carry. The Herbig regime (about 2 to 15 M_sun), where the radiative-envelope dispatch mostly lives, is a
-/// validation GAP bridged by the analytic scaling, the honest limit stated on [`EuvWindFit::mass_max_msun`]. `None`
-/// on a non-star mass, a mass outside the fit's grounded span, a non-positive photon energy, a non-positive
-/// luminosity bound, or an intermediate past the representable range.
+/// validation GAP bridged by the analytic scaling: the result is GRADED, so a mass in that gap returns a
+/// [`PhotoevaporationRateEvaluation`] tagged [`FitReach::AnalyticExtrapolation`] (estimator provenance) rather than
+/// the same rate a grounded mass would, and a mass outside the fit's whole reach REFUSES. `None` on a non-star
+/// mass, a mass outside the fit's typed domain (grounded or extrapolation), a non-positive photon energy, a
+/// non-positive luminosity bound, or an intermediate past the representable range.
 pub fn radiative_euv_photoevaporation_wind_rate_msun_myr(
     euv_luminosity: EuvLuminosityBracket,
     star_mass_ratio: Fixed,
@@ -3518,13 +3636,12 @@ pub fn radiative_euv_photoevaporation_wind_rate_msun_myr(
     t_ion_k: Fixed,
     wien_x_min: Fixed,
     fit: &EuvWindFit,
-) -> Option<PhotoevaporationRateBracket> {
-    if star_mass_ratio <= Fixed::ZERO
-        || star_mass_ratio < fit.mass_min_msun
-        || star_mass_ratio > fit.mass_max_msun
-    {
+) -> Option<PhotoevaporationRateEvaluation> {
+    if star_mass_ratio <= Fixed::ZERO {
         return None;
     }
+    // The typed domain grades the mass: grounded, analytic-extrapolation (estimator), or outside (refusal).
+    let reach = fit.domain.reach_at(star_mass_ratio)?;
     let ln10 = Fixed::from_int(10).ln();
     let log10 = |x: Fixed| -> Option<Fixed> { x.ln().checked_div(ln10) };
     let log10_m = log10(star_mass_ratio)?;
@@ -3570,9 +3687,12 @@ pub fn radiative_euv_photoevaporation_wind_rate_msun_myr(
     // higher, so the bounds pair without a reorder.
     let lo = rate_for(euv_luminosity.lo_lsun())?;
     let hi = rate_for(euv_luminosity.hi_lsun())?;
-    Some(PhotoevaporationRateBracket {
-        lo_msun_myr: lo,
-        hi_msun_myr: hi,
+    Some(PhotoevaporationRateEvaluation {
+        rate: PhotoevaporationRateBracket {
+            lo_msun_myr: lo,
+            hi_msun_myr: hi,
+        },
+        reach,
     })
 }
 
@@ -6264,16 +6384,22 @@ mod tests {
             / (x * (x * x + 2.0 * x + 2.0));
         let phi = (1e-2 * l_sun_erg_s) / e_photon_erg;
         let mdot_myr = 4.1e-10 * (phi / 1e41).powf(0.5) * 1.0_f64.powf(0.5) * 1e6;
-        let got = out.lo_msun_myr().to_f64_lossy();
+        let got = out.rate.lo_msun_myr().to_f64_lossy();
         assert!(
             (got / mdot_myr - 1.0).abs() < 0.03,
             "the derived EUV wind rate matches the Hollenbach oracle: got {got}, oracle {mdot_myr}"
         );
         // A point luminosity gives a point rate: zero-width bracket.
         assert_eq!(
-            out.width_dex(),
+            out.rate.width_dex(),
             Some(Fixed::ZERO),
             "a point bracket has zero width"
+        );
+        // One solar mass sits BELOW Hollenbach's grounded 15-to-65 massive-star grid, so the rate is graded an
+        // analytic extrapolation (estimator), not a grounded point: the disjoint-evidence fix in action.
+        assert!(
+            matches!(out.reach, FitReach::AnalyticExtrapolation { .. }),
+            "a solar mass is an extrapolation for the Hollenbach massive-star grid"
         );
     }
 
@@ -6294,12 +6420,12 @@ mod tests {
             &EuvWindFit::hollenbach_1994(),
         )
         .unwrap();
-        let ratio = out.hi_msun_myr().to_f64_lossy() / out.lo_msun_myr().to_f64_lossy();
+        let ratio = out.rate.hi_msun_myr().to_f64_lossy() / out.rate.lo_msun_myr().to_f64_lossy();
         assert!(
             (ratio - 10.0).abs() < 0.1,
             "a 100x luminosity band gives a 10x (sqrt) rate band, got {ratio}"
         );
-        let width = out.width_dex().unwrap().to_f64_lossy();
+        let width = out.rate.width_dex().unwrap().to_f64_lossy();
         assert!(
             (width - 1.0).abs() < 0.01,
             "the rate bracket is 1 dex, half the luminosity's 2 dex, got {width}"
@@ -6326,6 +6452,7 @@ mod tests {
                 fit,
             )
             .unwrap()
+            .rate
             .lo_msun_myr()
         };
         let font = rate(&EuvWindFit::font_2004_hydrodynamic());
@@ -6349,7 +6476,7 @@ mod tests {
             hi_lsun: Fixed::from_ratio(1, 100),
         };
         let fit = EuvWindFit::hollenbach_1994();
-        // Below the 0.1 M_sun floor and above the 65 M_sun ceiling.
+        // Below the 0.1 M_sun extrapolation floor and above the 65 M_sun grounded ceiling: outside the whole reach.
         assert!(radiative_euv_photoevaporation_wind_rate_msun_myr(
             euv,
             Fixed::from_ratio(5, 100),
@@ -6393,6 +6520,43 @@ mod tests {
             &fit
         )
         .is_none());
+    }
+
+    #[test]
+    fn the_euv_fit_domain_grades_each_channels_disjoint_support() {
+        // The disjoint-evidence fix: each channel grades a mass by ITS OWN grounded support, so the Herbig gap is
+        // never laundered into in-domain success. A single [mass_min, mass_max] pair could not tell these apart.
+        let hollenbach = EuvWindFit::hollenbach_1994();
+        let font = EuvWindFit::font_2004_hydrodynamic();
+        // Hollenbach is grounded on the 15-to-65 massive-star grid; a 30 M_sun star is in-domain.
+        assert_eq!(
+            hollenbach.domain.reach_at(Fixed::from_int(30)),
+            Some(FitReach::Grounded)
+        );
+        // The same fit at 1 M_sun is an analytic extrapolation (about 1.18 decades below the 15 M_sun edge).
+        match hollenbach.domain.reach_at(Fixed::ONE) {
+            Some(FitReach::AnalyticExtrapolation {
+                decades_beyond_grounded,
+            }) => assert!(
+                (decades_beyond_grounded.to_f64_lossy() - 15.0_f64.log10()).abs() < 0.02,
+                "the extrapolation distance is log10(15) decades below the grounded edge"
+            ),
+            other => panic!("a solar mass is a Hollenbach extrapolation, got {other:?}"),
+        }
+        // Font is grounded on the low-mass T Tauri regime; a solar-mass T Tauri star is in-domain for it, and the
+        // SAME 8 M_sun Herbig-gap star is an extrapolation for Font but never grounded by any channel.
+        assert_eq!(font.domain.reach_at(Fixed::ONE), Some(FitReach::Grounded));
+        assert!(matches!(
+            font.domain.reach_at(Fixed::from_int(8)),
+            Some(FitReach::AnalyticExtrapolation { .. })
+        ));
+        assert!(matches!(
+            hollenbach.domain.reach_at(Fixed::from_int(8)),
+            Some(FitReach::AnalyticExtrapolation { .. })
+        ));
+        // Outside every interval is a refusal, not a silent extrapolation.
+        assert_eq!(hollenbach.domain.reach_at(Fixed::from_int(80)), None);
+        assert_eq!(font.domain.reach_at(Fixed::from_ratio(5, 100)), None);
     }
 
     #[test]
