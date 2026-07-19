@@ -97,9 +97,29 @@ def parse_blocks(text):
 # any grade except a written-state (a floor value is never the sim's evolved history). A `fantasy` entry has
 # NO observation behind it, so it can never be measured or a banded estimator: fantasy -> authored, closure,
 # derived, or contingency. The load-bearing catch is therefore a fantasy value laundered as measured.
-SEVEN_GRADES = {"measured", "derived", "estimator", "closure", "authored", "contingency", "written_state"}
+# EIGHT now. `unverified_measurement_candidate` is the honest tier for a value LABELLED measured that
+# carries no machine-checkable evidence. It renders `[?M]`, never `[M]`. See the variant's own doc in
+# crates/foundation/src/calibration.rs for why these were downgraded rather than baselined.
+SEVEN_GRADES = {
+    "measured",
+    "unverified_measurement_candidate",
+    "derived",
+    "estimator",
+    "closure",
+    "authored",
+    "contingency",
+    "written_state",
+}
 CONSISTENT = {
-    "real": {"measured", "derived", "estimator", "closure", "authored", "contingency"},
+    "real": {
+        "measured",
+        "unverified_measurement_candidate",
+        "derived",
+        "estimator",
+        "closure",
+        "authored",
+        "contingency",
+    },
     "fantasy": {"authored", "closure", "derived", "contingency"},
 }
 GRADE_REGISTER = FLOOR_DIR / "floor_provenance.toml"

@@ -511,7 +511,7 @@ value = ""
 unit = "metres_per_sound"
 source = "Part 33.3 language system; record 62.13; crates/sim/src/language.rs phonetic; crates/sim/src/langmod.rs perceptual_geometry"
 category = "per_world"
-provenance = "measured"
+provenance = "unverified_measurement_candidate"
 
 [[reserved]]
 id = "articulation.vocal_tract_scale"
@@ -535,7 +535,7 @@ set_date = "2026-07-09"
 unit = "hertz"
 source = "Part 33.3 language system; record 62.13; crates/sim/src/race.rs Articulation; crates/foundation/src/sensorium.rs resolution; crates/sim/src/langmod.rs articulated_geometry"
 category = "per_world"
-provenance = "measured"
+provenance = "unverified_measurement_candidate"
 
 [[reserved]]
 id = "articulation.producibility_threshold"
@@ -682,7 +682,7 @@ set_date = "2026-07-09"
 unit = "probability"
 source = "Part 33.4 typological substrate; docs/working/LANG_TYPOLOGY_SCOPED_PROPOSAL.md; crates/sim/src/typology.rs"
 category = "per_world"
-provenance = "measured"
+provenance = "unverified_measurement_candidate"
 
 [[reserved]]
 id = "lang.typology_distance_weights"
@@ -1472,7 +1472,7 @@ set_date = "2026-07-09"
 unit = "seconds_per_orbit"
 source = "Part 14.6, Part 32, Part 20; crates/world/src/celestial.rs; crates/foundation/src/clock.rs ticks_from_seconds"
 category = "per_world"
-provenance = "measured"
+provenance = "unverified_measurement_candidate"
 
 [[reserved]]
 id = "world.rotation_period_seconds"
@@ -1484,7 +1484,7 @@ set_date = "2026-07-09"
 unit = "seconds_per_rotation"
 source = "Part 14.6, Part 32; crates/world/src/celestial.rs"
 category = "per_world"
-provenance = "measured"
+provenance = "unverified_measurement_candidate"
 
 [[reserved]]
 id = "world.surface_pressure"
@@ -1695,7 +1695,7 @@ value = ""
 unit = "material_axes"
 source = "Part 35, Part 41; crates/sim/src/body.rs"
 category = "per_world"
-provenance = "measured"
+provenance = "unverified_measurement_candidate"
 
 [[reserved]]
 id = "body.covering_fracture_energy"
@@ -1705,7 +1705,7 @@ value = ""
 unit = "fracture_energy_j_per_m2"
 source = "predation-integration #120; crates/bio/src/anatomy.rs BodyPlanRegistry coverings; crates/sim/src/runner.rs strike_occupant coarse branch; Part 35, Part 41"
 category = "per_world"
-provenance = "measured"
+provenance = "unverified_measurement_candidate"
 
 [[reserved]]
 id = "body.covering_spectral_emissivity"
@@ -1715,7 +1715,7 @@ value = ""
 unit = "emissivity_ratio_per_band"
 source = "creature-selection step 2b #126; crates/bio/src/anatomy.rs BodyPlanRegistry coverings; crates/physics/data/chem_optics_floor.toml opt.emissivity.band_*; crates/sim/src/perceivable_feature.rs; Part 41"
 category = "per_world"
-provenance = "measured"
+provenance = "unverified_measurement_candidate"
 
 [[reserved]]
 id = "body.damage_caps"
@@ -1767,7 +1767,7 @@ value = ""
 unit = "fraction_of_volume"
 source = "Part 35; crates/sim/src/body.rs"
 category = "per_world"
-provenance = "measured"
+provenance = "unverified_measurement_candidate"
 
 [[reserved]]
 id = "body.clot_and_breach_rates"
@@ -1787,7 +1787,7 @@ value = ""
 unit = "body_shape"
 source = "Part 35, Part 20; crates/sim/src/body.rs"
 category = "per_world"
-provenance = "measured"
+provenance = "unverified_measurement_candidate"
 
 [[reserved]]
 id = "body.strike_energetics"
@@ -1856,7 +1856,7 @@ unit = "kelvin"
 
 source = "NASA GISS / NOAA global mean surface temperature ~288 K (15 C), the same external measurement calibration/profiles/mirror.toml cites. CORRECTED 2026-07-19: this entry previously read 287 and cited 'Mirror climate calibration (temperature-units reconciliation)' plus two of our own source files, which is an internal reconciliation rather than a measurement. A measured grade sourced to our own code is grade inflation, and the 287/288 split was that inflation showing: the canonical register disagreed with the file the simulation actually reads, and the one with an external witness was the profile. Resolved by CORRECTING the unsourced value, not by choosing between two authored numbers."
 category = "per_world"
-provenance = "measured"
+provenance = "unverified_measurement_candidate"
 
 [[reserved]]
 id = "climate.latitude_temperature_range"
@@ -1868,7 +1868,7 @@ set_date = "2026-07-09"
 unit = "kelvin"
 source = "Mirror climate calibration (temperature-units reconciliation); crates/sim/src/runner.rs Field::from_map_absolute; crates/sim/src/dawn_harness.rs"
 category = "per_world"
-provenance = "measured"
+provenance = "unverified_measurement_candidate"
 
 [[reserved]]
 id = "field.relaxation.low"
@@ -1993,7 +1993,7 @@ set_date = "2026-07-09"
 unit = "kelvin"
 source = "worksheet §3b; Part 20 physiology"
 category = "per_world"
-provenance = "measured"
+provenance = "unverified_measurement_candidate"
 
 [[reserved]]
 id = "physiology.thermal_setpoint.high"
@@ -3021,7 +3021,7 @@ value = ""
 unit = "material_axes"
 source = "Part 35, Part 41; crates/sim/src/morphogen.rs accrue_aging; crates/sim/src/insult.rs repair_energy"
 category = "per_world"
-provenance = "measured"
+provenance = "unverified_measurement_candidate"
 
 [[reserved]]
 id = "aging.wear_energy_ceiling"

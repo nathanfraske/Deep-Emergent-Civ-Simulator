@@ -467,15 +467,32 @@ mod tests {
             node.inputs.iter().any(|s| s == "acoustic.resonator_length"),
             "the second cross-register acoustic edge joins too"
         );
-        // Both acoustic axes are measured, so the join is benign: the derived value stays derived, off surface.
+        // THE ASSERTION MOVED WITH THE TRUTH, 2026-07-19, and the test's INTENT is unchanged. Both
+        // acoustic axes used to be labelled `measured`; an audit found neither carried machine-checkable
+        // evidence, and all 244 such labels were downgraded to `unverified_measurement_candidate`. The
+        // derived value therefore now INHERITS that weakness, which is the join working correctly: a
+        // value derived from an unverified measurement is not better evidenced than its input.
+        //
+        // What this test exists to prove is untouched: the join does not taint toward the AUTHORING
+        // surface. `Closure` and `Authored` are what that surface means, and an unverified measurement is
+        // a weaker evidence claim rather than a free knob, so the property still holds and is asserted
+        // directly rather than implied by an equality that only happened to hold under the old ranking.
+        let joined_prov = joined.effective_provenance("langmod.perceptual_geometry");
         assert_eq!(
-            joined.effective_provenance("langmod.perceptual_geometry"),
-            Provenance::Derived,
-            "a measured floor input never taints toward the authoring surface"
+            joined_prov,
+            Provenance::UnverifiedMeasurementCandidate,
+            "a derived value inherits the weakest evidence among its inputs"
         );
+        assert!(
+            !matches!(joined_prov, Provenance::Closure | Provenance::Authored),
+            "and it still never taints onto the AUTHORING surface, which is what this test is for"
+        );
+        // The floor leaf itself: labelled measured before the 2026-07-19 evidence audit, now honestly an
+        // unverified candidate, because no machine-checkable source backs it. This is the value the
+        // derived node above inherits from, so the two assertions move together or one of them is lying.
         assert_eq!(
             joined.effective_provenance("acoustic.absorption_reference"),
-            Provenance::Measured
+            Provenance::UnverifiedMeasurementCandidate
         );
 
         // The cross-register edge list surfaces exactly these acoustic edges (the audit surface for a future

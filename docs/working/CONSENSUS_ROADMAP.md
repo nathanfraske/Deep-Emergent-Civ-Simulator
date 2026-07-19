@@ -36,7 +36,7 @@ The retired long-form board is `docs/working/CONSENSUS_ROADMAP_HISTORY.md`, pres
 
 ## Not done / gated
 
-- 2026-07-19 FLAGGED provenance system: 6 CRITICAL + 8 HIGH from an adversarial audit; a ghost source passes `sources_gate.py` (live-fired), 4 claims have primary == secondary, 0 `@sources` markers -> `$CLAUDE_JOB_DIR/tmp/codex_provenance_audit.txt`, blocks R-ABIOGENESIS-2.
+- 2026-07-19 Provenance hardening -> branch `claude/provenance-hardening`, 15 of 15 audit findings closed, each live-fired: gate bypasses shut, CI runs the checks that convict, Stone 0 runs 11 gates not 5, 244 unevidenced `[M]` labels downgraded to `unverified_measurement_candidate`. Pins hold. Unblocks R-ABIOGENESIS-2.
 - 2026-07-15 QUARANTINED 56 reserved values with dead provenance, frozen by the CI gate -> docs/working/quarantine_ledger.toml
 - 2026-07-12 PARTIAL the four universal constants to CODATA, G now in the floor -> crates/units/src/fundamentals.rs
 - 2026-07-11 GATED real biosphere thriving, gated on the biosphere-balance calibration -> worldbuild.rs T3 owner-gate

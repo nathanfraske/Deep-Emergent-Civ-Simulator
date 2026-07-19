@@ -16,11 +16,11 @@
 
 [[grade]]
 id = "bio.consumer.assimilation"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "bio.consumer.fermentation"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "bio.consumer.hill_exponent"
@@ -29,20 +29,20 @@ unsettled = true
 
 [[grade]]
 id = "bio.consumer.reference_tolerance"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "bio.consumer.requirement"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "bio.convective_surface"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 unsettled = true
 
 [[grade]]
 id = "bio.decomposition_barrier"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "bio.decomposition_rate"
@@ -50,15 +50,15 @@ grade = "closure"
 
 [[grade]]
 id = "bio.energy_density"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "bio.lipid_fraction"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "bio.mineral_ash_fraction"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "bio.net_harm"
@@ -73,32 +73,32 @@ unsettled = true
 
 [[grade]]
 id = "bio.nonstructural_carbohydrate_fraction"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "bio.protein_fraction"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "bio.respiratory_surface"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 unsettled = true
 
 [[grade]]
 id = "bio.structural_carbohydrate_fraction"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "bio.toxin.alkaloid"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "bio.toxin.cardiac_glycoside"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "bio.toxin.cyanogenic"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "bio.toxin_load_coarse"
@@ -107,15 +107,15 @@ derived_from = ["bio.toxin.alkaloid", "bio.toxin.cyanogenic", "bio.toxin.cardiac
 
 [[grade]]
 id = "bio.water_fraction"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "chem.acidity"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "chem.activation_energy"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "chem.corrosion_susceptibility"
@@ -124,7 +124,7 @@ unsettled = true
 
 [[grade]]
 id = "chem.formation_enthalpy"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "chem.solute_affinity"
@@ -133,44 +133,44 @@ unsettled = true
 
 [[grade]]
 id = "chem.standard_potential"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "opt.absorption_coefficient"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "opt.emissivity"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "opt.emissivity.band_0"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "opt.emissivity.band_1"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "opt.emissivity.band_2"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "opt.reflectance"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "opt.refractive_index"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "opt.scattering_coefficient"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 unsettled = true
 
 [[grade]]
 id = "opt.source_power"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "opt.spectral_band"
@@ -179,44 +179,44 @@ unsettled = true
 
 [[grade]]
 id = "opt.transmittance"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "copper"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 derive_first_defect = true
 
 [[grade]]
 id = "elec.capacitance"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "elec.charge"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "elec.current"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "elec.electric_field"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "elec.emf"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "elec.potential"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "elec.resistance"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "elec.resistivity"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "lodestone"
@@ -226,91 +226,91 @@ unsettled = true
 
 [[grade]]
 id = "mag.coupling_coefficient"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "mag.flux"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "mag.flux_density"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "mag.inductance"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "mag.magnetic_moment"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "mag.permeability"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "acoustic.absorption_coefficient"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "acoustic.absorption_reference"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "acoustic.formant_frequency"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "acoustic.frequency"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "acoustic.resonator_length"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "acoustic.source_power"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "air"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "chem.acentric_factor"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "chem.boiling_point"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "chem.critical_pressure"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "chem.critical_temperature"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "chem.fusion_enthalpy"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "chem.triple_point_temperature"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "chem.vaporization_enthalpy"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "fluid.bulk_modulus"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "fluid.channel_radius"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "fluid.column_height"
@@ -319,19 +319,19 @@ unsettled = true
 
 [[grade]]
 id = "fluid.convective_coefficient"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "fluid.drag_coefficient"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "fluid.driving_pressure"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "fluid.dynamic_viscosity"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "fluid.gas_transfer_coefficient"
@@ -345,31 +345,31 @@ unsettled = true
 
 [[grade]]
 id = "fluid.lift_coefficient"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "fluid.moisture_content"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "fluid.respirable_content"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "fluid.surface_tension"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "fluid.vapor_pressure"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "therm.temperature"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "water"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "geo.decay_constant"
@@ -379,663 +379,663 @@ unsettled = true
 
 [[grade]]
 id = "geo.internal_heat_production"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "geo.isotope_concentration"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 unsettled = true
 
 [[grade]]
 id = "geo.specific_heat_production"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "k40"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "th232"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "u235"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "u238"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "carrion"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 derive_first_defect = true
 
 [[grade]]
 id = "clay"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 derive_first_defect = true
 
 [[grade]]
 id = "granite"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 derive_first_defect = true
 
 [[grade]]
 id = "halite"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 derive_first_defect = true
 
 [[grade]]
 id = "hematite"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 derive_first_defect = true
 
 [[grade]]
 id = "loam"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 derive_first_defect = true
 
 [[grade]]
 id = "oilseed"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 derive_first_defect = true
 
 [[grade]]
 id = "spent_hull"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 derive_first_defect = true
 
 [[grade]]
 id = "tuber"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 derive_first_defect = true
 
 [[grade]]
 id = "iron"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 derive_first_defect = true
 
 [[grade]]
 id = "mat.compressive_strength"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "mat.density"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "mat.ductility"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "mat.elastic_modulus"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 derive_first_defect = true
 
 [[grade]]
 id = "mat.fracture_energy"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "mat.fracture_strength"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "mat.indentation_hardness"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "mat.poisson_ratio"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "mat.shear_strength"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "mat.specific_cut_energy"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "mat.ultimate_tensile_strength"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "mat.wear_coefficient"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 unsettled = true
 
 [[grade]]
 id = "mat.yield_strength"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "mech.arm_length"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "mech.constraint_factor"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "mech.contact_area"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "mech.cross_section_area"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "mech.edge_radius"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "mech.effective_length_factor"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "mech.force"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "mech.gravitational_acceleration"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "mech.kinetic_friction"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "mech.mass"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "mech.restitution"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "mech.second_moment_of_area"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "mech.section_modulus"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "mech.slide_distance"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "mech.static_friction"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "mech.stroke_length"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "mech.velocity"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "oak"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 derive_first_defect = true
 
 [[grade]]
 id = "therm.boiling_temperature"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "therm.conductivity"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "therm.expansion"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "therm.fuel_value"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "therm.ignition_temperature"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "therm.latent_heat"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "therm.melting_temperature"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "therm.oxidiser_demand"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 unsettled = true
 
 [[grade]]
 id = "therm.specific_heat"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "Ac"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 unsettled = true
 
 [[grade]]
 id = "Ag"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "Al"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "Ar"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "As"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "At"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 unsettled = true
 
 [[grade]]
 id = "Au"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "B"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "Ba"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "Be"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "Bi"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "Br"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "C"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "Ca"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "Cd"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "Ce"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "Cl"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "Co"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "Cr"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "Cs"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "Cu"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "Dy"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "Er"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "Eu"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "F"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "Fe"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "Fr"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 unsettled = true
 
 [[grade]]
 id = "Ga"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "Gd"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "Ge"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "H"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "He"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "Hf"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "Hg"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "Ho"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "I"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "In"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "Ir"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "K"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "Kr"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "La"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "Li"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "Lu"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "Mg"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "Mn"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "Mo"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "N"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "Na"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "Nb"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "Nd"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "Ne"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "Ni"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "O"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "Os"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "P"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "Pa"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "Pb"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 unsettled = true
 
 [[grade]]
 id = "Pd"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "Pm"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 unsettled = true
 
 [[grade]]
 id = "Po"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 unsettled = true
 
 [[grade]]
 id = "Pr"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "Pt"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "Ra"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 unsettled = true
 
 [[grade]]
 id = "Rb"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "Re"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "Rh"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "Rn"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 unsettled = true
 
 [[grade]]
 id = "Ru"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "S"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "Sb"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "Sc"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "Se"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "Si"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "Sm"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "Sn"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "Sr"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "Ta"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "Tb"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "Tc"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 unsettled = true
 
 [[grade]]
 id = "Te"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "Th"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "Ti"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "Tl"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 unsettled = true
 
 [[grade]]
 id = "Tm"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "U"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "V"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "W"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "Xe"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "Y"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "Yb"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "Zn"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 [[grade]]
 id = "Zr"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 
 # --- candidate phases (phase_registry.toml): cited thermodynamic data, measured plus a generality defect (seam-1 reconciled by the two-axis distinction) ---
 
 [[grade]]
 id = "phase.quartz"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 derive_first_defect = true
 
 [[grade]]
 id = "phase.corundum"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 derive_first_defect = true
 
 [[grade]]
 id = "phase.periclase"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 derive_first_defect = true
 
 [[grade]]
 id = "phase.hematite"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 derive_first_defect = true
 
 [[grade]]
 id = "phase.forsterite"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 derive_first_defect = true
 
 [[grade]]
 id = "phase.fayalite"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 derive_first_defect = true
 
 [[grade]]
 id = "phase.spinel"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 derive_first_defect = true
 
 [[grade]]
 id = "phase.enstatite"
-grade = "measured"
+grade = "unverified_measurement_candidate"
 derive_first_defect = true

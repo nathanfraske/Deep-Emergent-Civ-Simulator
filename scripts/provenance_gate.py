@@ -45,6 +45,7 @@ MANIFEST = ROOT / "calibration" / "reserved.toml"
 SEVEN_TAGS = {
     "derived",
     "measured",
+    "unverified_measurement_candidate",
     "estimator",
     "closure",
     "authored",

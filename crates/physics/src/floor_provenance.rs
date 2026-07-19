@@ -154,8 +154,12 @@ mod tests {
             "the composite-material bulk rows carry the derive-first defect marker"
         );
         // Every grade is one of the seven; a derived grade names its inputs.
-        const SEVEN: [&str; 7] = [
+        // EIGHT since 2026-07-19: `unverified_measurement_candidate` is the honest tier for a value LABELLED
+        // measured with no machine-checkable evidence behind it. See the variant's doc in
+        // crates/foundation/src/calibration.rs for why 244 such labels were downgraded rather than baselined.
+        const SEVEN: [&str; 8] = [
             "measured",
+            "unverified_measurement_candidate",
             "derived",
             "estimator",
             "closure",

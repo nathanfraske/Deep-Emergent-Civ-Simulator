@@ -402,9 +402,21 @@ fn every_loaded_floor_entry_has_a_seven_tag_grade_in_the_register() {
         let grade = reg
             .grade(&key)
             .unwrap_or_else(|| panic!("phase '{key}' has no grade in floor_provenance.toml"));
+        // MOVED WITH THE TRUTH, 2026-07-19, and this row is the clearest illustration of why. A
+        // candidate phase DOES carry cited thermodynamic data: every registry row has a real citation in
+        // its `source` field. What it does not carry is a MACHINE-RESOLVABLE source id, a claim locator,
+        // a measurement regime or an uncertainty, so nothing here can tell a genuinely evidenced value
+        // from a conventionally labelled one without a human reading prose. An audit found 244 such
+        // labels across both registers with zero machine-linked evidence between them.
+        //
+        // These are therefore `unverified_measurement_candidate`, not because the literature is absent
+        // but because the LINK is. Each resolves one of two equally good ways: promotion once its claim
+        // record exists, or truthful downgrade. The assertion still pins the grade, so a silent drift to
+        // some other tag still fails.
         assert_eq!(
-            grade.grade, "measured",
-            "a candidate phase carries cited thermodynamic data, so it is measured, not derived"
+            grade.grade, "unverified_measurement_candidate",
+            "a candidate phase cites its thermodynamics in prose but carries no machine-resolvable \
+             source id, so it is an unverified measurement candidate until that link exists"
         );
         assert!(
             grade.derive_first_defect,
