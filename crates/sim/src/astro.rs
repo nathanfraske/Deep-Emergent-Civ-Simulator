@@ -194,18 +194,27 @@ pub fn stellar_effective_temperature(
     Some(if t_eff > t_max { t_max } else { t_eff })
 }
 
-/// The SPHERICAL-GRAIN (fast-rotator) IRRADIATION REPROCESSING FACTOR, DERIVED from geometry rather than reserved: a
-/// body that absorbs starlight on its circular cross-section `pi r^2` and re-emits isotropically over its full
-/// sphere `4 pi r^2` reprocesses `pi r^2 / (4 pi r^2)` of the incident flux per unit emitting area. The `pi` and
-/// `r^2` cancel analytically, so the factor is the EXACT rational `1/4`, the cross-section-to-sphere ratio that
-/// reproduces a planet's blackbody equilibrium temperature (the ~278 K at 1 AU anchor). ADMITS THE ALIEN: it is
-/// pure geometry, independent of the body's composition or the star's spectrum. This is what [`irradiated_disk_temperature`]
-/// and [`disk_effective_temperature`] read for a spherical-grain or fast-rotator regime, in place of an authored `1/4`.
+/// The BLACK, ISOTHERMAL SPHERE REDISTRIBUTION FACTOR, DERIVED from geometry rather than reserved: a body that
+/// absorbs starlight on its circular cross-section `pi r^2` and re-emits isotropically over its full sphere
+/// `4 pi r^2` reprocesses `pi r^2 / (4 pi r^2)` of the incident flux per unit emitting area. The `pi` and `r^2`
+/// cancel analytically, so the factor is the EXACT rational `1/4`, the cross-section-to-sphere ratio that
+/// reproduces a body's blackbody equilibrium temperature (the ~278 K at 1 AU anchor). ADMITS THE ALIEN: it is pure
+/// geometry, independent of the body's composition or the star's spectrum.
 ///
-/// HONEST LIMIT: this is the SPHERICAL case. A passive FLARED DISK intercepts starlight at a shallow grazing angle
-/// and radiates from two faces, so its reprocessing factor is the grazing-and-flaring geometry, which needs a disk
-/// vertical-structure (scale-height flaring) substrate the engine does not yet carry; that variant is a
-/// derive-later data row keyed on the disk's own flaring, not this constant.
+/// SCOPE, stated so it is never over-read: this is the BLACK (zero-albedo) case, so the 278 K anchor is the airless
+/// blackbody value a real body's albedo reduces (Earth's ~255 K is 278 K times `(1-A)^(1/4)`); and it is the
+/// ISOTHERMAL / FULL-REDISTRIBUTION case, the `1/4` assuming the absorbed flux spreads uniformly over the whole
+/// sphere (a fast rotator or a high thermal-inertia body), where a slow rotator radiating mostly from its dayside
+/// carries a larger factor. A CALLER supplies its own albedo and redistribution when the body departs from black
+/// and isothermal.
+///
+/// NOT THE DISK DEFAULT. This is a SPHERICAL-BODY redistribution factor, NOT the passive-disk reprocessing
+/// solution. A passive FLARED DISK intercepts starlight at a shallow grazing angle and radiates from two faces, so
+/// its reprocessing factor is the grazing-and-flaring geometry (of order a few percent, a much SMALLER number),
+/// which needs a disk vertical-structure (scale-height flaring) substrate the engine does not yet carry. The
+/// canonical disk therefore passes its OWN flared factor to [`irradiated_disk_temperature`] and
+/// [`disk_effective_temperature`] (the derived-disk tests use about `0.05`); this `1/4` must never be wired in as
+/// the disk default, and is exercised only for a spherical grain or a fast-rotating body's equilibrium temperature.
 pub fn spherical_reprocessing_factor() -> Fixed {
     // pi r^2 (absorbing cross-section) over 4 pi r^2 (isotropic emitting sphere): pi and r^2 cancel to the exact 1/4.
     Fixed::from_ratio(1, 4)
@@ -2102,15 +2111,99 @@ pub fn stellar_envelope_structure(
     })
 }
 
+/// The Kraft band's METALLICITY CONDITIONING, a SUM TYPE so a consumer can never read one meaning for another. A
+/// plain zero shift conflates three distinct states (no slope claimed, a measured zero slope, a solar-reference
+/// offset of zero), and a bare signed scalar would admit a NEGATIVE slope the data forbid. The break shifts UP in
+/// `T_eff` with rising `[Fe/H]` (a metal-rich star sustains surface convection to higher mass, Amard and Matt
+/// 2020), so the sign is fixed POSITIVE; the magnitude is under-constrained by the present data.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum KraftMetallicityConditioning {
+    /// No conditioning: the band sits at its solar-reference placement. Distinct from a measured-zero slope, this is
+    /// the state before any metallicity-dependent determination is consulted at all.
+    SolarReference,
+    /// The SIGN is known (positive) but no magnitude is applied, because the data fix the direction (Amard and Matt
+    /// 2020's break-mass shift) without a `T_eff`-per-dex slope, and Avallone et al. 2022 find the near-break
+    /// rotation-metallicity correlation below detection. A consumer may dispatch on the known direction; the edges do
+    /// not move, and no value is fabricated. This is the current honest default of the ratified band.
+    SignOnly,
+    /// A BANDED `K`-per-dex slope, applied once a metallicity-dependent Kraft determination is fetched. Both bounds
+    /// are non-negative (the fixed positive sign), and an uncertain slope WIDENS the near-degenerate band rather than
+    /// asserting a point shift. Built through [`KraftMetallicityConditioning::banded_slope`].
+    BandedSlope {
+        /// The shallow slope edge (K per dex), non-negative.
+        lo_k_per_dex: Fixed,
+        /// The steep slope edge (K per dex), at least the shallow edge.
+        hi_k_per_dex: Fixed,
+    },
+    /// The shift DERIVED from the star's own convective-envelope structure (a future structure-first route) rather
+    /// than an empirical slope: a single non-negative `K`-per-dex. Built through
+    /// [`KraftMetallicityConditioning::structure_derived`].
+    StructureDerived {
+        /// The derived slope (K per dex), non-negative.
+        k_per_dex: Fixed,
+    },
+}
+
+impl KraftMetallicityConditioning {
+    /// A banded positive slope. `None` unless `0 <= lo <= hi` (the sign is fixed positive, and the band is ordered).
+    pub fn banded_slope(lo_k_per_dex: Fixed, hi_k_per_dex: Fixed) -> Option<Self> {
+        (lo_k_per_dex >= Fixed::ZERO && hi_k_per_dex >= lo_k_per_dex).then_some(Self::BandedSlope {
+            lo_k_per_dex,
+            hi_k_per_dex,
+        })
+    }
+
+    /// A structure-derived positive slope. `None` if the slope is negative (the sign is fixed positive).
+    pub fn structure_derived(k_per_dex: Fixed) -> Option<Self> {
+        (k_per_dex >= Fixed::ZERO).then_some(Self::StructureDerived { k_per_dex })
+    }
+
+    /// The shift (K) applied to the band's LOWER edge at a metallicity `offset`. The no-magnitude states apply zero;
+    /// a point slope shifts rigidly; a banded slope takes the shift that pushes the lower edge furthest DOWN, so an
+    /// uncertain slope WIDENS the near-degenerate zone rather than asserting it narrower.
+    fn lower_edge_shift(self, offset: Fixed) -> Option<Fixed> {
+        match self {
+            Self::SolarReference | Self::SignOnly => Some(Fixed::ZERO),
+            Self::StructureDerived { k_per_dex } => k_per_dex.checked_mul(offset),
+            Self::BandedSlope {
+                lo_k_per_dex,
+                hi_k_per_dex,
+            } => {
+                let a = lo_k_per_dex.checked_mul(offset)?;
+                let b = hi_k_per_dex.checked_mul(offset)?;
+                Some(if a < b { a } else { b })
+            }
+        }
+    }
+
+    /// The shift (K) applied to the band's UPPER edge at a metallicity `offset`; the banded slope takes the shift
+    /// that pushes the upper edge furthest UP (the mirror of [`Self::lower_edge_shift`]).
+    fn upper_edge_shift(self, offset: Fixed) -> Option<Fixed> {
+        match self {
+            Self::SolarReference | Self::SignOnly => Some(Fixed::ZERO),
+            Self::StructureDerived { k_per_dex } => k_per_dex.checked_mul(offset),
+            Self::BandedSlope {
+                lo_k_per_dex,
+                hi_k_per_dex,
+            } => {
+                let a = lo_k_per_dex.checked_mul(offset)?;
+                let b = hi_k_per_dex.checked_mul(offset)?;
+                Some(if a > b { a } else { b })
+            }
+        }
+    }
+}
+
 /// THE KRAFT-BREAK BAND: the envelope-structure boundary as a BAND rather than a point, per the ratified ruling.
 /// The classic primary-read Kraft break (`classic_edge_k`, the LOWER edge) and the modern determination
 /// (`modern_center_k` plus or minus `modern_halfwidth_k`, whose upper reach is the band's UPPER edge) disagree by
 /// a few hundred K, and that disagreement is a real dispatch ambiguity, not a value to average away: below the
 /// lower edge a surface convection zone certainly operates (the dynamo branch), above the upper edge the
 /// photosphere is certainly radiative (the EUV branch), and between them lies the NEAR-DEGENERATE zone the Gap
-/// Law carries rather than asserts. `metallicity_shift_k_per_dex` moves the whole band with composition (the
-/// hydrogen and helium ionization boundary depends on the metal-line opacity), a FLAGGED conditioning field
-/// defaulting to zero shift until a metallicity-dependent Kraft determination is fetched.
+/// Law carries rather than asserts. `conditioning` moves the whole band with composition (the hydrogen and helium
+/// ionization boundary depends on the metal-line opacity), a typed [`KraftMetallicityConditioning`] state rather
+/// than a bare scalar, so the pre-fetch honest state (sign known, magnitude under-constrained) is distinct from a
+/// measured zero and a negative slope is unrepresentable.
 ///
 /// The edges are RESERVED-with-basis data (Principle 11): the mechanism (a three-zone dispatch on `T_eff`) is
 /// fixed Rust; the edge temperatures and the Z-shift are data the caller supplies. ADMITS THE ALIEN: the band is
@@ -2126,37 +2219,35 @@ pub struct KraftBreakBand {
     /// The modern determination's half-width (K): `modern_center_k + modern_halfwidth_k` is the band's UPPER edge,
     /// above which the radiative EUV branch is certain. RESERVED-with-basis (~200 K).
     pub modern_halfwidth_k: Fixed,
-    /// The band's shift in K per dex of metallicity relative to the sampled composition. A FLAGGED conditioning
-    /// field, DEFAULTING TO ZERO (no shift, the band at its solar-composition placement). The literature fixes the
-    /// SIGN but not the magnitude: the break shifts UP in `T_eff` with rising [Fe/H], since a metal-rich star bears a
-    /// deeper surface convection zone and sustains it to higher mass (Amard and Matt 2020, the break mass falling
-    /// from ~1.3 to ~1.0 M_sun from [Fe/H] 0.0 to -1.0, ~+0.3 M_sun per dex; vendored). No source gives a `T_eff`
-    /// break versus [Fe/H] slope in K per dex, and Avallone et al. 2022 find the near-break rotation-metallicity
-    /// correlation is below detection in a hot main-sequence sample (an empirical upper bound; vendored). So this
-    /// stays a flagged POSITIVE-signed field with its basis recorded rather than a fabricated K-per-dex number: the
-    /// sign is known, the magnitude is under-constrained by the data, and the honest state is the documented bound, not
-    /// a set value.
-    pub metallicity_shift_k_per_dex: Fixed,
+    /// The band's METALLICITY CONDITIONING, a typed [`KraftMetallicityConditioning`] rather than a bare K-per-dex
+    /// scalar. The literature fixes the SIGN but not the magnitude: the break shifts UP in `T_eff` with rising
+    /// [Fe/H], since a metal-rich star bears a deeper surface convection zone and sustains it to higher mass (Amard
+    /// and Matt 2020, the break mass falling from ~1.3 to ~1.0 M_sun from [Fe/H] 0.0 to -1.0, ~+0.3 M_sun per dex;
+    /// vendored). No source gives a `T_eff` break versus [Fe/H] slope in K per dex, and Avallone et al. 2022 find
+    /// the near-break rotation-metallicity correlation below detection in a hot main-sequence sample (an empirical
+    /// upper bound; vendored). So the honest pre-fetch state is [`KraftMetallicityConditioning::SignOnly`] (the sign
+    /// carried, no magnitude applied), distinct from a measured zero and unable to hold a negative slope.
+    pub conditioning: KraftMetallicityConditioning,
 }
 
 impl KraftBreakBand {
     /// The band's effective LOWER edge (K) at a metallicity `metallicity_log10_offset` dex from the sampled
-    /// composition: `classic_edge_k + metallicity_shift_k_per_dex * offset`. `None` if the shift or an overflow
+    /// composition: `classic_edge_k` plus the conditioning's lower-edge shift. `None` if the shift or an overflow
     /// drives the edge non-positive (a non-physical band).
     pub fn lower_edge_k(self, metallicity_log10_offset: Fixed) -> Option<Fixed> {
         let shifted = self.classic_edge_k.checked_add(
-            self.metallicity_shift_k_per_dex
-                .checked_mul(metallicity_log10_offset)?,
+            self.conditioning
+                .lower_edge_shift(metallicity_log10_offset)?,
         )?;
         (shifted > Fixed::ZERO).then_some(shifted)
     }
-    /// The band's effective UPPER edge (K): `modern_center_k + modern_halfwidth_k`, shifted the same way. `None`
-    /// on overflow or a non-positive result.
+    /// The band's effective UPPER edge (K): `modern_center_k + modern_halfwidth_k` plus the conditioning's
+    /// upper-edge shift. `None` on overflow or a non-positive result.
     pub fn upper_edge_k(self, metallicity_log10_offset: Fixed) -> Option<Fixed> {
         let base = self.modern_center_k.checked_add(self.modern_halfwidth_k)?;
         let shifted = base.checked_add(
-            self.metallicity_shift_k_per_dex
-                .checked_mul(metallicity_log10_offset)?,
+            self.conditioning
+                .upper_edge_shift(metallicity_log10_offset)?,
         )?;
         (shifted > Fixed::ZERO).then_some(shifted)
     }
@@ -6124,12 +6215,13 @@ mod tests {
 
     fn kraft_band() -> KraftBreakBand {
         // The ratified Kraft band as reserved-with-basis fixtures: the classic 6200 K lower edge, the modern
-        // 6550 +/- 200 K determination (a 6750 K upper edge), no metallicity shift (the flagged field, default 0).
+        // 6550 +/- 200 K determination (a 6750 K upper edge), and the honest pre-fetch conditioning (sign known
+        // positive, no magnitude), distinct from a measured-zero slope.
         KraftBreakBand {
             classic_edge_k: Fixed::from_int(6200),
             modern_center_k: Fixed::from_int(6550),
             modern_halfwidth_k: Fixed::from_int(200),
-            metallicity_shift_k_per_dex: Fixed::ZERO,
+            conditioning: KraftMetallicityConditioning::SignOnly,
         }
     }
 
@@ -6172,28 +6264,64 @@ mod tests {
 
     #[test]
     fn the_kraft_band_shifts_with_metallicity() {
-        // The Z-shift conditioning field moves the WHOLE band with composition (the ionization boundary depends on
-        // the metal-line opacity). With a nonzero shift, a star that was in-band at solar composition falls to a
-        // certain branch at a metallicity offset, so the field is load-bearing and wired, not decorative. The SIGN
-        // is unauthored (the field defaults to zero); this asserts only that a nonzero coefficient moves the edges.
+        // A STRUCTURE-DERIVED point slope moves the WHOLE band with composition (the ionization boundary depends on
+        // the metal-line opacity). At +1 dex a 300 K/dex slope shifts the edges up to [6500, 7050], so a 6400 K star
+        // that read NearDegenerate at solar sits BELOW the shifted lower edge and reads Convective. The sign is
+        // fixed positive by the type; the magnitude here is a probe, not a fetched value.
         let mut band = kraft_band();
-        // A probe coefficient, not a fetched value: at +1 dex the edges shift up by 300 K to [6500, 7050], so a
-        // 6400 K star that read NearDegenerate at solar now sits BELOW the shifted lower edge and reads Convective.
-        band.metallicity_shift_k_per_dex = Fixed::from_int(300);
+        band.conditioning =
+            KraftMetallicityConditioning::structure_derived(Fixed::from_int(300)).unwrap();
         assert_eq!(
             kraft_band_dispatch(Fixed::from_int(6400), band, Fixed::ONE),
             Some(KraftVerdict::Convective),
             "a +1 dex shift lifts the band above a 6400 K star"
         );
-        // The unshifted band still calls the same star NearDegenerate: the shift, not the star, moved the verdict.
+        // At solar composition the same band leaves the star NearDegenerate: the shift, not the star, moved it.
         assert_eq!(
             kraft_band_dispatch(Fixed::from_int(6400), band, Fixed::ZERO),
             Some(KraftVerdict::NearDegenerate),
             "with no offset the band is unmoved"
         );
-        // The effective edges track the shift exactly.
+        // The effective edges track the point shift exactly.
         assert_eq!(band.lower_edge_k(Fixed::ONE), Some(Fixed::from_int(6500)));
         assert_eq!(band.upper_edge_k(Fixed::ONE), Some(Fixed::from_int(7050)));
+        // The SIGN is fixed positive by the type: a negative slope is unrepresentable, not a runtime check.
+        assert!(KraftMetallicityConditioning::structure_derived(Fixed::from_int(-1)).is_none());
+        // The default conditioning (SignOnly) applies no magnitude, so the band does not move with metallicity, and
+        // that is DISTINCT from a measured-zero slope: the sign is carried even though the edges stay put.
+        let default_band = kraft_band();
+        assert_eq!(
+            default_band.lower_edge_k(Fixed::ONE),
+            Some(Fixed::from_int(6200))
+        );
+        assert_eq!(
+            default_band.conditioning,
+            KraftMetallicityConditioning::SignOnly
+        );
+    }
+
+    #[test]
+    fn the_kraft_banded_slope_widens_the_near_degenerate_zone() {
+        // A BANDED slope (uncertain magnitude) widens the near-degenerate band rather than asserting a point shift:
+        // at +1 dex a [100, 300] K/dex slope pushes the lower edge up by the SHALLOW 100 (to 6300) and the upper by
+        // the STEEP 300 (to 7050), so the ambiguous zone grows with the slope uncertainty.
+        let mut band = kraft_band();
+        band.conditioning =
+            KraftMetallicityConditioning::banded_slope(Fixed::from_int(100), Fixed::from_int(300))
+                .unwrap();
+        assert_eq!(band.lower_edge_k(Fixed::ONE), Some(Fixed::from_int(6300)));
+        assert_eq!(band.upper_edge_k(Fixed::ONE), Some(Fixed::from_int(7050)));
+        // The banded constructor enforces the ordering and the fixed positive sign.
+        assert!(
+            KraftMetallicityConditioning::banded_slope(Fixed::from_int(300), Fixed::from_int(100))
+                .is_none(),
+            "an out-of-order band is rejected"
+        );
+        assert!(
+            KraftMetallicityConditioning::banded_slope(Fixed::from_int(-1), Fixed::from_int(100))
+                .is_none(),
+            "a negative slope edge is rejected"
+        );
     }
 
     #[test]
@@ -6208,7 +6336,8 @@ mod tests {
         assert_eq!(kraft_band_dispatch(Fixed::ZERO, band, Fixed::ZERO), None);
         // A shift large enough to drive an edge non-positive refuses (the band ceases to be physical).
         let mut sunk = kraft_band();
-        sunk.metallicity_shift_k_per_dex = Fixed::from_int(10_000);
+        sunk.conditioning =
+            KraftMetallicityConditioning::structure_derived(Fixed::from_int(10_000)).unwrap();
         assert_eq!(sunk.lower_edge_k(Fixed::from_int(-1)), None); // 6200 - 10000 < 0
         assert_eq!(
             kraft_band_dispatch(Fixed::from_int(5000), sunk, Fixed::from_int(-1)),
@@ -6216,12 +6345,12 @@ mod tests {
             "a shift that sinks an edge below zero is not a band"
         );
         // A CROSSED band (the classic lower edge above the modern upper reach) is malformed base data, not a shift
-        // artifact (the shift moves both edges equally and cannot invert them): the lower-above-upper guard refuses.
+        // artifact (the point shift moves both edges equally and cannot invert them): the lower-above-upper guard refuses.
         let crossed = KraftBreakBand {
             classic_edge_k: Fixed::from_int(9000),
             modern_center_k: Fixed::from_int(6550),
             modern_halfwidth_k: Fixed::from_int(200),
-            metallicity_shift_k_per_dex: Fixed::ZERO,
+            conditioning: KraftMetallicityConditioning::SignOnly,
         };
         assert_eq!(
             kraft_band_dispatch(Fixed::from_int(7000), crossed, Fixed::ZERO),
