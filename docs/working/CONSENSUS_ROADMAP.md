@@ -13,6 +13,8 @@ Editing rule (the stop-gate enforces it): edit IN PLACE, keep every line a few w
 ## Recent landings (tombstoned; prune when old)
 
 - 2026-07-18  DONE  Build speedups: build-script opt-level 3 (Stone 0 gate 4.4s -> 1.4s) + dev line-tables-only (9.9G -> 4.5G); pins held -> `Cargo.toml`.
+- 2026-07-18  DONE  Pipeline-status guard hardcoded (a habit is not a defense) -> `.claude/hooks/pipeline-status-guard.sh`.
+- 2026-07-18  DONE  Stone 0 pre-push hook INSTALLED; derives gate widened past `pub` (818 -> 1099 fns).
 - 2026-07-18  DONE  Provenance ratchet now fires at TURN scope (package-scoped cargo skipped it) -> `.claude/hooks/stop-gate.sh`.
 - 2026-07-18  DONE  Two load-bearing stale claims retired (render.rs T_e, stone0 wiring) -> `render.rs`, `crates/stone0/src/lib.rs`.
 - 2026-07-18  DONE  Derives-coverage gate + 8 physics/materials markers (map 11 -> 19 substrates; CI + stop-gate wired) -> `scripts/derives_gate.py`.

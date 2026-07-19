@@ -13,8 +13,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""The DERIVES-COVERAGE gate: a new public function in the physics or materials substrate must either
-carry a `// @derives:` marker or be classified as non-deriving in the baseline.
+"""The DERIVES-COVERAGE gate: a new function in the physics or materials substrate must either carry a
+`// @derives:` marker or be classified as non-deriving in the baseline. Visibility is not consulted: a
+private derivation is as rebuildable by the next reader as a public one.
 
 WHY THIS EXISTS. `docs/working/PHYSICS_FLOOR_REGISTRY.md` is the enforced derive-versus-author reference:
 an agent about to author a value is supposed to check it first, because a quantity found there is a
@@ -100,7 +101,16 @@ def scan_public_functions(read_file):
                     test_depth = None
                 if in_test:
                     continue
-                m = re.match(r"\s*pub(?:\([^)]*\))?\s+(?:const\s+|unsafe\s+|async\s+)*fn\s+(\w+)", ln)
+                # Match EVERY function, not only `pub fn`. Visibility is irrelevant to whether something
+                # derives a world quantity: a private derivation inside these crates is exactly as
+                # rebuildable by the next reader, and the failures this gate exists to stop happened INSIDE
+                # crates/physics and crates/materials, where private items are freely reachable. Scanning
+                # only the public surface left 1,348 functions invisible. The sibling stone0 gates are all
+                # visibility-blind for the same reason.
+                m = re.match(
+                    r"\s*(?:pub(?:\([^)]*\))?\s+)?(?:const\s+|unsafe\s+|async\s+|extern\s+\"[^\"]*\"\s+)*fn\s+(\w+)",
+                    ln,
+                )
                 if not m:
                     continue
                 # Attribute a marker ONLY from this function's own contiguous comment-and-attribute
