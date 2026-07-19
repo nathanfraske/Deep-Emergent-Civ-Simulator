@@ -1622,16 +1622,14 @@ pub fn derive_viscous_time_myr(
 /// volume radius: `R_L/a = c_num * q^(2/3) / (c_log * q^(2/3) + ln(1 + q^(1/3)))`, `q = M_host/M_companion`,
 /// accurate to about one percent over all `q`.
 ///
-/// MODALITY: this is the HARD UPPER EDGE on the disk's outer radius, NOT the expected truncation radius (an
-/// intrinsic bound, not a trusted central value: the bound-as-estimate defect class). A circumstellar disk
-/// tidally truncates INSIDE its Roche lobe, at the outermost non-overlapping Lindblad resonance (Paczynski 1977,
-/// Papaloizou and Pringle 1977, Artymowicz and Lubow 1994), at `R_t = f * R_L` with the resonance-truncation
-/// FRACTION `f` (~0.3 to 0.9, conditioned on mass ratio, eccentricity, and viscosity) a FETCH TARGET, not
-/// authored here. So this ships as the DECLARED UPPER EDGE of a one-sided bracket: [`tidally_capped_scale_radius_au`]
-/// caps `R_1` at it, the CONSERVATIVE (least-truncating, disk-too-large, `tau_disk`-biased-long) bound, until the
-/// fraction lands and tightens the cap to `f * R_L`, at which point `t_visc` and `tau_disk` inherit the roughly
-/// `sqrt(f)` band (a ten-to-twenty percent class effect) through [`derive_viscous_time_myr`] (`t_visc ~
-/// sqrt(R_1)`), the machinery already built rather than a new path.
+/// MODALITY: this is the HARD UPPER EDGE on the disk's outer radius, NOT the expected truncation radius. A
+/// circumstellar disk tidally truncates INSIDE its Roche lobe, at the outermost non-overlapping Lindblad resonance
+/// (Paczynski 1977, Papaloizou and Pringle 1977, Artymowicz and Lubow 1994), at `R_t = f * R_L` with the
+/// resonance-truncation FRACTION `f` now VENDORED ([`resonant_truncation_fraction`], the Pichardo 2005 fit
+/// `f = 0.733 (1 - e)^1.20 q^0.01`), so [`tidally_capped_scale_radius_au`] caps `R_1` at the expected `f * R_L`
+/// rather than this conservative edge. `t_visc` and `tau_disk` inherit the resulting `sqrt(f)` band (a class effect,
+/// wider at high eccentricity) through [`derive_viscous_time_myr`] (`t_visc ~ sqrt(R_1)`), the machinery already
+/// built rather than a new path. This Roche-lobe radius stays the outer bound of that band.
 ///
 /// SEPARATION CONVENTION: `separation_au` is the SEMI-MAJOR AXIS `a`, so this is the Roche lobe at the mean
 /// separation. In an eccentric binary the tide is strongest at periastron, where the instantaneous lobe is
@@ -1670,24 +1668,86 @@ pub fn roche_lobe_radius_au(
     separation_au.checked_mul(fraction)
 }
 
-/// Cap a disk's birth scale radius `R_1` at the companion's [`roche_lobe_radius_au`]: the effective `R_1`,
-/// `min(birth, roche_lobe)`. A disk inside its Roche lobe is untouched (a wide or absent companion leaves the
-/// birth radius); a disk that would spill past it is truncated to the lobe. The result feeds
-/// [`derive_viscous_time_myr`] as `scale_radius_au` unchanged, so binarity shortens `tau_disk` with no new path.
+/// The RESONANT DISK-TRUNCATION FRACTION `f = R_t / R_L`: the fraction of the host's Roche-lobe radius at which a
+/// circumstellar disk truncates under the companion's resonant torques, the cited closed fit
+/// `f = c (1 - e)^p_e q^p_q` (Pichardo, Sparke and Aguilar 2005, Eq. 6, the dissipationless invariant-loop
+/// determination, vendored). The disk edge sits INSIDE the Roche lobe: at a circular orbit `f ~ 0.733` and nearly
+/// mass-ratio independent (the `q` exponent is about 0.01), tightening with eccentricity (`f ~ 0.32` at `e = 0.5`,
+/// about `0.046` at `e = 0.9`) as the companion's closest approach carves the disk back. The fit holds over
+/// `e in [0, 0.9]`, `q in [0.01, 0.99]`, to about 6.5 percent.
 ///
-/// MODALITY: the Roche lobe is the HARD UPPER EDGE, not the expected truncation radius (the disk truncates inside
-/// it at `f * R_L`, the fraction fetch-pending, see [`roche_lobe_radius_au`]), so this returns the UPPER BOUND on
-/// the capped `R_1`, hence the upper bound on `t_visc` and the longest `tau_disk`. When the resonance-truncation
-/// fraction lands the cap tightens to `f * R_L` and the bound becomes a band; today it is the conservative edge.
-/// `None` on a non-positive input.
-pub fn tidally_capped_scale_radius_au(birth_r1_au: Fixed, roche_lobe_au: Fixed) -> Option<Fixed> {
-    if birth_r1_au <= Fixed::ZERO || roche_lobe_au <= Fixed::ZERO {
+/// The coefficients are CITED data (Principle 11), carried by [`DiskTruncationFit`]; the mechanism is fixed Rust.
+/// ADMITS THE ALIEN: keyed on the binary's own eccentricity and mass ratio. HONEST LIMIT: the fit is
+/// DISSIPATIONLESS (an upper bound, no viscosity), while the Artymowicz and Lubow 1994 SPH edge sits lower and moves
+/// OUTWARD with disk viscosity (the edge is the outermost resonance the viscous torque cannot overflow), so a
+/// viscous disk's true truncation is a band between the SPH edge and this bound, the viscosity dependence a flagged
+/// sibling. `None` on `e` outside `[0, 1)` or a non-positive mass ratio.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct DiskTruncationFit {
+    /// The circular-orbit truncation fraction `f(e=0)`, the coefficient `c`. Cited (Pichardo 2005 Eq. 6, ~0.733).
+    pub circular_fraction: Fixed,
+    /// The exponent on `(1 - e)`, the eccentricity tightening. Cited (~1.20).
+    pub eccentricity_exponent: Fixed,
+    /// The exponent on the mass ratio `q`, near zero (the fraction is nearly mass-ratio independent). Cited (~0.01).
+    pub mass_ratio_exponent: Fixed,
+}
+
+impl DiskTruncationFit {
+    /// The Pichardo, Sparke and Aguilar 2005 invariant-loop fit (MNRAS 359, 521, Eq. 6), as cited data:
+    /// `f = 0.733 (1 - e)^1.20 q^0.01`. Vendored in `disk_arc_literature` (`pichardo_2005`).
+    pub fn pichardo_2005() -> Self {
+        DiskTruncationFit {
+            circular_fraction: Fixed::from_ratio(733, 1000),    // 0.733
+            eccentricity_exponent: Fixed::from_ratio(120, 100), // 1.20
+            mass_ratio_exponent: Fixed::from_ratio(1, 100),     // 0.01
+        }
+    }
+}
+
+/// Derive the [`DiskTruncationFit`] fraction `f = c (1 - e)^p_e q^p_q` at a binary's eccentricity and mass ratio.
+/// `None` if `e` is outside `[0, 1)` (not a bound orbit) or the mass ratio is non-positive.
+pub fn resonant_truncation_fraction(
+    eccentricity: Fixed,
+    mass_ratio_host_to_companion: Fixed,
+    fit: &DiskTruncationFit,
+) -> Option<Fixed> {
+    if eccentricity < Fixed::ZERO
+        || eccentricity >= Fixed::ONE
+        || mass_ratio_host_to_companion <= Fixed::ZERO
+    {
         return None;
     }
-    Some(if birth_r1_au < roche_lobe_au {
+    let one_minus_e = Fixed::ONE.checked_sub(eccentricity)?;
+    let ecc_term = one_minus_e.powf(fit.eccentricity_exponent);
+    let q_term = mass_ratio_host_to_companion.powf(fit.mass_ratio_exponent);
+    fit.circular_fraction
+        .checked_mul(ecc_term)?
+        .checked_mul(q_term)
+}
+
+/// Cap a disk's birth scale radius `R_1` at the companion's resonant TRUNCATION radius `R_t = f * R_L`: the
+/// effective `R_1`, `min(birth, f * roche_lobe)`. A disk inside its truncation radius is untouched (a wide or absent
+/// companion leaves the birth radius); a disk that would spill past it is truncated. The result feeds
+/// [`derive_viscous_time_myr`] as `scale_radius_au` unchanged, so binarity shortens `tau_disk` with no new path.
+///
+/// The `truncation_fraction` is the resonant `f = R_t / R_L` from [`resonant_truncation_fraction`], so the cap is
+/// the EXPECTED truncation radius, no longer the conservative Roche-lobe upper edge the fraction fetch retired. The
+/// residual modality is the fit's own band (Pichardo to about 6.5 percent, dissipationless) widened by the
+/// viscosity dependence toward the lower Artymowicz-Lubow SPH edge, so `t_visc` and `tau_disk` inherit that band
+/// rather than a single conservative upper bound. `None` on a non-positive input.
+pub fn tidally_capped_scale_radius_au(
+    birth_r1_au: Fixed,
+    roche_lobe_au: Fixed,
+    truncation_fraction: Fixed,
+) -> Option<Fixed> {
+    if birth_r1_au <= Fixed::ZERO || roche_lobe_au <= Fixed::ZERO || truncation_fraction <= Fixed::ZERO {
+        return None;
+    }
+    let truncation_radius_au = roche_lobe_au.checked_mul(truncation_fraction)?;
+    Some(if birth_r1_au < truncation_radius_au {
         birth_r1_au
     } else {
-        roche_lobe_au
+        truncation_radius_au
     })
 }
 
@@ -5306,21 +5366,59 @@ mod tests {
     }
 
     #[test]
-    fn the_cap_bounds_a_large_disk_at_the_roche_lobe() {
-        // min(birth, roche_lobe): a disk larger than its Roche lobe is bounded to the lobe (the upper edge, the
-        // actual truncation being inside), a smaller one untouched.
-        let lobe = Fixed::from_ratio(76, 10); // 7.6 AU Roche-lobe upper bound
+    fn the_truncation_fraction_tightens_the_disk_inside_the_roche_lobe() {
+        // The Pichardo fit f = 0.733 (1-e)^1.20 q^0.01. Circular: f ~ 0.733, nearly mass-ratio independent.
+        let fit = DiskTruncationFit::pichardo_2005();
+        let f0 = resonant_truncation_fraction(Fixed::ZERO, Fixed::ONE, &fit).unwrap();
+        assert!(
+            (f0.to_f64_lossy() - 0.733).abs() < 0.01,
+            "a circular binary truncates the disk at ~0.733 R_L (got {})",
+            f0.to_f64_lossy()
+        );
+        // Eccentricity tightens the disk: e=0.5 gives ~0.32, e=0.9 gives ~0.046 (the companion carves it back).
+        let f_half = resonant_truncation_fraction(Fixed::from_ratio(1, 2), Fixed::ONE, &fit).unwrap();
+        let f_high = resonant_truncation_fraction(Fixed::from_ratio(9, 10), Fixed::ONE, &fit).unwrap();
+        assert!(
+            (f_half.to_f64_lossy() - 0.32).abs() < 0.02,
+            "e=0.5 truncates at ~0.32 R_L (got {})",
+            f_half.to_f64_lossy()
+        );
+        assert!(f_high < f_half && f_half < f0, "higher eccentricity tightens the disk");
+        assert!(
+            (f_high.to_f64_lossy() - 0.046).abs() < 0.01,
+            "e=0.9 truncates at ~0.046 R_L (got {})",
+            f_high.to_f64_lossy()
+        );
+        // Nearly mass-ratio independent (the q exponent is ~0.01): a tenfold q barely moves f.
+        let f_q10 = resonant_truncation_fraction(Fixed::ZERO, Fixed::from_int(10), &fit).unwrap();
+        assert!(
+            (f_q10.to_f64_lossy() / f0.to_f64_lossy() - 1.0).abs() < 0.03,
+            "the truncation fraction is nearly mass-ratio independent"
+        );
+        // Fail-loud: an unbound orbit (e >= 1) or a non-positive mass ratio.
+        assert!(resonant_truncation_fraction(Fixed::ONE, Fixed::ONE, &fit).is_none());
+        assert!(resonant_truncation_fraction(Fixed::ZERO, Fixed::ZERO, &fit).is_none());
+    }
+
+    #[test]
+    fn the_cap_bounds_a_large_disk_at_the_truncation_radius() {
+        // min(birth, f * roche_lobe): a disk larger than its resonant truncation radius is bounded to it, a smaller
+        // one untouched. At a circular orbit the Pichardo fraction is ~0.733, so the 7.6 AU lobe truncates at ~5.6 AU.
+        let lobe = Fixed::from_ratio(76, 10); // 7.6 AU Roche-lobe radius
+        let f = resonant_truncation_fraction(Fixed::ZERO, Fixed::ONE, &DiskTruncationFit::pichardo_2005())
+            .unwrap();
+        let r_t = lobe.checked_mul(f).unwrap(); // ~5.6 AU, the resonant truncation radius
         assert_eq!(
-            tidally_capped_scale_radius_au(Fixed::from_int(30), lobe),
-            Some(lobe),
-            "a 30 AU disk in a tight binary is bounded at the Roche-lobe upper edge"
+            tidally_capped_scale_radius_au(Fixed::from_int(30), lobe, f),
+            Some(r_t),
+            "a 30 AU disk in a tight binary is bounded at the resonant truncation radius f * R_L"
         );
         assert_eq!(
-            tidally_capped_scale_radius_au(Fixed::from_int(3), lobe),
+            tidally_capped_scale_radius_au(Fixed::from_int(3), lobe, f),
             Some(Fixed::from_int(3)),
-            "a 3 AU disk inside its lobe is untouched"
+            "a 3 AU disk inside its truncation radius is untouched"
         );
-        assert!(tidally_capped_scale_radius_au(Fixed::ZERO, lobe).is_none());
+        assert!(tidally_capped_scale_radius_au(Fixed::ZERO, lobe, f).is_none());
         let (c_num, c_log) = eggleton();
         assert!(roche_lobe_radius_au(Fixed::ZERO, Fixed::ONE, c_num, c_log).is_none());
         assert!(roche_lobe_radius_au(Fixed::from_int(20), Fixed::ZERO, c_num, c_log).is_none());
@@ -5341,10 +5439,13 @@ mod tests {
         );
         let birth = Fixed::from_int(30);
         let lobe = roche_lobe_radius_au(Fixed::from_int(20), Fixed::ONE, c_num, c_log).unwrap();
-        let capped = tidally_capped_scale_radius_au(birth, lobe).unwrap();
+        let f = resonant_truncation_fraction(Fixed::ZERO, Fixed::ONE, &DiskTruncationFit::pichardo_2005())
+            .unwrap();
+        let r_t = lobe.checked_mul(f).unwrap();
+        let capped = tidally_capped_scale_radius_au(birth, lobe, f).unwrap();
         assert_eq!(
-            capped, lobe,
-            "the 30 AU disk is bounded at the Roche-lobe upper edge"
+            capped, r_t,
+            "the 30 AU disk is bounded at the resonant truncation radius f * R_L"
         );
         let t_birth = derive_viscous_time_myr(birth, m, t, alpha, mu).unwrap();
         let t_capped = derive_viscous_time_myr(capped, m, t, alpha, mu).unwrap();
@@ -5354,12 +5455,12 @@ mod tests {
             t_capped.to_f64_lossy(),
             t_birth.to_f64_lossy()
         );
-        // t_visc ~ sqrt(R_1), so the ratio tracks sqrt(lobe/birth).
+        // t_visc ~ sqrt(R_1), so the ratio tracks sqrt(R_trunc/birth).
         let ratio = t_capped.to_f64_lossy() / t_birth.to_f64_lossy();
-        let expected = (lobe.to_f64_lossy() / birth.to_f64_lossy()).sqrt();
+        let expected = (r_t.to_f64_lossy() / birth.to_f64_lossy()).sqrt();
         assert!(
             (ratio - expected).abs() < 0.02,
-            "the viscous-time ratio tracks sqrt(R_trunc/R_1), got {ratio} vs {expected}"
+            "the viscous-time ratio tracks sqrt(R_trunc/birth), got {ratio} vs {expected}"
         );
     }
 
