@@ -38,7 +38,7 @@
 use civsim_core::{Fixed, StableId, StateHasher};
 use civsim_physics::laws::{DiscriminationLaw, ResponseLaw};
 use civsim_world::Coord3;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 use crate::perception_percept::{sense, ChannelTransduction};
 use crate::perception_reach::{
