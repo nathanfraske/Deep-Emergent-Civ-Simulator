@@ -1060,12 +1060,6 @@ const DISK_ALPHA_VISCOSITY: Fixed = Fixed::from_int(1).div(Fixed::from_int(100))
 /// family with viscosity `nu ~ r` (`gamma` = 1), giving the accretion decline exponent `p = 3/2`.
 const LBP_DECLINE_GAMMA: Fixed = Fixed::ONE;
 
-/// RESERVED, FETCH-PENDING: the pre-main-sequence HAYASHI WALL effective temperature (K) the contracting star
-/// sits at while the disk hosts. Basis: the ~4000 K solar-composition pre-main-sequence Hayashi-track wall
-/// (Baraffe et al. 2015 / Siess et al. 2000 grids); the digit is a fetch target (source-verbatim from a pre-MS
-/// grid, carrying its composition-conditioning), carried here as the interim, with its #77 demotion destiny.
-const HAYASHI_WALL_T_EFF_K: Fixed = Fixed::from_int(4000);
-
 /// RESERVED, the fractional tolerance the formation-rate consistency check compares within. Basis: the
 /// observational scatter on the class-II accretion rate the 0.19 landmark came from (~0.5 dex, a factor of a few),
 /// carried with that rate rather than authored; a Residual outside it is surfaced, never tuned away.
@@ -1703,7 +1697,16 @@ fn derive_pre_ms_bolometric_luminosity(
         FORMATION_EPOCH_BRACKET_HI_MYR,
         FORMATION_EPOCH_ITERATIONS,
     )?;
-    let l_bol = pre_main_sequence_luminosity_lsun(star_mass, HAYASHI_WALL_T_EFF_K, t_formation)?;
+    // The Hayashi-wall T_eff, DERIVED per-star from the star's own mass via the vendored BHAC15 grid (Baraffe et al.
+    // 2015), retiring the authored 4000 K interim: the grid interpolates the wall in its own mass spacing and REFUSES
+    // BY NAME outside 0.010 to 1.400 M_sun (the high side the planned radiative-branch dispatch). The solar wall is
+    // the corrected 4397 K, a ~46% pre-MS luminosity lift through the fourth power. Built once per star.
+    let wall_teff_k = civsim_physics::hayashi_wall::HayashiWallGrid::standard()
+        .ok()?
+        .wall_teff(star_mass)
+        .ok()?
+        .wall_teff_k;
+    let l_bol = pre_main_sequence_luminosity_lsun(star_mass, wall_teff_k, t_formation)?;
     // The provenance-gated consistency check: both interims independent-basis (CitedToPopulation), so it runs and
     // reports Consistent/Inconsistent rather than refusing. t_visc inherits R_1's CitedToPopulation grade.
     let verdict = formation_rate_consistency(
@@ -5253,8 +5256,10 @@ mod composition_draw_tests {
     fn the_pre_ms_flip_reproduces_the_probe_and_is_byte_neutral_at_one_au() {
         // Slice 3b-ii: the derived pre-MS bolometric luminosity feeds the displayed midplane, replacing the
         // reserved None. This proves two things at once. (1) FIDELITY: the disk clock reproduces the design-of-record
-        // probe on the solar Mirror (L_bol ~ 3.8 L_sun, the consistency check Consistent and running non-circularly),
-        // so the reconstruction matches the proven-then-backed-out wire. (2) BYTE-NEUTRALITY: the displayed 1-AU
+        // probe on the solar Mirror (L_bol ~ 4.3 L_sun on the BHAC15 grid wall 4397 K, the 4000 K interim's ~3.8
+        // lifted only ~13% because the Hayashi model contracts R as T_eff^(-4/3), so L scales as T_eff^(4/3) not
+        // T_eff^4; the consistency check Consistent and running non-circularly), so the reconstruction matches the
+        // proven-then-backed-out wire. (2) BYTE-NEUTRALITY: the displayed 1-AU
         // midplane snaps to the SAME condensation-grid cell with the derived L_bol as with None, so the rendered
         // crust is bit-identical (the pre-MS warming is sub-grid, snapping out through the 100 K condensation grid).
         let optical = OpticalConstants::standard().expect("the optical library loads");
@@ -5284,7 +5289,7 @@ mod composition_draw_tests {
         let l = l_bol.to_f64_lossy();
         assert!(
             (3.0..=5.0).contains(&l),
-            "the derived pre-MS L_bol reproduces the ~3.8 L_sun probe, got {l}"
+            "the derived pre-MS L_bol reproduces the pre-MS probe (~4.3 L_sun on the grid wall), got {l}"
         );
         assert_eq!(
             verdict,
