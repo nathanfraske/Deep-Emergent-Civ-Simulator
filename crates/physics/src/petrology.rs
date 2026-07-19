@@ -471,6 +471,46 @@ pub fn assemblage_density(
     total_mass.checked_div(total_volume)
 }
 
+/// The assemblage's MEAN ATOMIC MASS in kg/mol: its total mass over its total atom count, the one input the
+/// Dulong-Petit specific heat takes (`c_p = 3R / M`).
+///
+/// An iron-rich assemblage reads a heavier mean atomic mass and so a lower specific heat, a silicate one a
+/// lighter mass and a higher heat, each keyed on its own composition rather than on a per-rock-type table.
+/// The registry's parsed `composition` supplies both the element counts and the atom count, so no formula
+/// string is re-parsed here.
+///
+/// The table's molar masses are relative atomic weights in g/mol, so the result divides by 1000 to reach the
+/// kg/mol the Dulong-Petit form expects. `None` when a phase or element is missing, when an arithmetic step
+/// leaves the window, or when the assemblage carries no atoms.
+///
+/// A SIBLING EXISTS on the viewer's VCS-condensed path, keyed by formula string rather than by registry
+/// phase, computing the same quantity for the bulk condensed assemblage. The two are kept apart only because
+/// their inputs are keyed differently; when the VCS keys align with registry names they should collapse into
+/// this one, and that is the intended direction rather than a standing duplication.
+// @derives: an assemblage's mean atomic mass <- its own molar amounts + the registry compositions + the periodic masses
+pub fn assemblage_mean_atomic_mass_kg_per_mol(
+    assemblage: &Assemblage,
+    registry: &PhaseRegistry,
+    table: &PeriodicTable,
+) -> Option<Fixed> {
+    let mut total_mass_g = Fixed::ZERO;
+    let mut total_atoms = Fixed::ZERO;
+    for (name, amount) in &assemblage.phases {
+        let phase = registry.phase(name)?;
+        let molar_mass = phase_molar_mass(phase, table)?;
+        total_mass_g = total_mass_g.checked_add(amount.checked_mul(molar_mass)?)?;
+        let atoms: u32 = phase.composition.iter().map(|(_, count)| *count).sum();
+        total_atoms =
+            total_atoms.checked_add(amount.checked_mul(Fixed::from_int(atoms as i32))?)?;
+    }
+    if total_atoms <= Fixed::ZERO {
+        return None;
+    }
+    total_mass_g
+        .checked_div(total_atoms)?
+        .checked_div(Fixed::from_int(1000))
+}
+
 /// The assemblage's phases re-expressed as VOLUME fractions summing to one, from the molar amounts
 /// [`stable_assemblage`] produces.
 ///

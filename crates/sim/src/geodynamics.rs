@@ -94,6 +94,21 @@ pub struct ColumnParams {
     /// reproduces the log-domain [`civsim_physics::laws::ln_rayleigh_number`] at `Ra ~ 1.66e4`, about ten
     /// times the rigid-rigid critical value, so the province convects without touching the `ra_max` guard. The
     /// blocker on this field is therefore the DIFFUSIVITY it needs as a solve input, never the representation.
+    ///
+    /// AND THE MEASUREMENT THAT SETTLES THE UNIT QUESTION FOR THE WHOLE KERNEL, taken 2026-07-19, because the
+    /// ruled plan for the fixture-cluster replacement was "a FULL SI/log-space lift" and that plan cannot
+    /// work. In SI-SECONDS the kernel's SOURCE TERM vanishes: a mantle's radiogenic heating is `~5e-12 W/kg`
+    /// against a Q32.32 resolution of `2.33e-10`, which is `0.02 ulp`, so `H` and the conductive loss `L`
+    /// both quantize to ZERO and `T + ((H - L)/c) dt` never moves the temperature. The failure is not a loss
+    /// of precision at the margin, it is the physics disappearing at the source. At the other end of the same
+    /// kernel `eta`, `d^3` and `rho * d` all overflow. SI-seconds has no window that holds this problem.
+    ///
+    /// The same four quantities in MEGAMETRES and MEGAYEARS land mid-window: `H` reads `158 J/(kg Myr)`, the
+    /// convective velocity `9.5e-2 Mm/Myr`, `d^3` about `24 Mm^3`, and `kappa` about `3.2e-5 Mm^2/Myr`. So
+    /// the correct target is a DECLARED unit system rather than SI, which is what this kernel already runs in
+    /// informally. The original complaint was never that these units are wrong, it was that a bare value with
+    /// no declared scale carries no correctness; declaring the scale answers it, and SI-ifying the kernel
+    /// would break the physics to satisfy a preference for familiar units.
     pub viscosity: Fixed,
     /// Thermal diffusivity (m^2/s), k/(rho*c).
     ///
@@ -221,6 +236,235 @@ impl ColumnParams {
             .checked_div(self.ra_crit_wavenumber)?
             .checked_mul(self.depth)
     }
+}
+
+/// The DERIVED thermal properties of one interior column, in SI, all of them together or none of them.
+///
+/// This type is how the atomicity ruling on [`ColumnParams::thermal_diffusivity`] stops being a comment and
+/// starts being a constraint the compiler carries: the cluster "moves as a whole or not at all", so the
+/// derivation produces every field or it refuses naming what is missing. A caller cannot take the three that
+/// derive today and leave the rest as fixtures, which is the partial replacement the ruling forbids because
+/// it would widen the declared conflict from 20x to roughly 20000x.
+///
+/// The diffusivity is deliberately ABSENT rather than stored. It is `k / (rho * c_p)` exactly, so holding it
+/// would be a fourth copy of three facts already here, which is the redundant-parameter defect the ruling was
+/// written about. [`Self::thermal_diffusivity`] computes it.
+///
+/// SI throughout, because this states the PHYSICS. What representation the kernel runs in is a separate
+/// question with a separate answer, recorded on [`ColumnParams`]: an SI-second kernel cannot work, since a
+/// mantle's radiogenic heating is `~5e-12 W/kg` against a Q32.32 resolution of `2.33e-10`, which quantizes
+/// the source term of the heat balance to ZERO. The conversion to the kernel's declared scale belongs at that
+/// boundary, stated, rather than smuggled into these values.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ColumnThermalProperties {
+    /// Density (kg/m^3), from the stable assemblage's own phases and their molar volumes.
+    pub density_kg_m3: Fixed,
+    /// Lattice-plus-radiative thermal conductivity (W/(m*K)) at the column's temperature, by the two-rung
+    /// ladder over the assemblage's volume census.
+    pub thermal_conductivity_w_m_k: Fixed,
+    /// Specific heat (J/(kg*K)) by Dulong-Petit over the assemblage's own mean atomic mass.
+    pub specific_heat_j_kg_k: Fixed,
+    /// Volumetric thermal expansivity in parts per million per kelvin, the unit the kernel's
+    /// [`civsim_physics::laws::thermal_density_anomaly`] reads.
+    pub thermal_expansion_ppm_per_k: Fixed,
+    /// The NATURAL LOG of dynamic viscosity (ln Pa*s). Held as a logarithm because the value itself cannot be
+    /// represented: an interior viscosity is `~1e21 Pa*s` against a `Fixed::MAX` of `~2.1e9`.
+    pub ln_viscosity_pa_s: Fixed,
+}
+
+impl ColumnThermalProperties {
+    /// Thermal diffusivity `kappa = k / (rho * c_p)` (m^2/s), COMPUTED and never stored, so it cannot drift
+    /// from the three facts it is made of. `None` if the product leaves the representable window.
+    // @derives: a column's thermal diffusivity <- its own conductivity, density and specific heat
+    pub fn thermal_diffusivity(&self) -> Option<Fixed> {
+        let rho_cp = self.density_kg_m3.checked_mul(self.specific_heat_j_kg_k)?;
+        if rho_cp <= Fixed::ZERO {
+            return None;
+        }
+        self.thermal_conductivity_w_m_k.checked_div(rho_cp)
+    }
+}
+
+/// Why a column's thermal derivation refused, NAMING the join that is missing so the refusal is a work list
+/// rather than a dead end.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ColumnDerivationRefusal {
+    /// The composition reached no stable assemblage at this temperature and pressure.
+    NoAssemblage,
+    /// A quantity the assemblage should supply did not resolve; names which.
+    NoQuantity {
+        /// The quantity, for example `density` or `mean_atomic_mass`.
+        quantity: String,
+    },
+    /// The conductivity ladder refused, carrying its own reason (a phase with no banked column, no rung, or
+    /// an unplaceable cell count).
+    Conductivity(String),
+    /// A JOIN this derivation needs has no implementation yet. This is the honest frontier rather than a
+    /// data gap: the pieces exist and nothing composes them. Names the join and what it would take.
+    NoJoinYet {
+        /// The quantity that cannot be assembled.
+        quantity: String,
+        /// What composing it requires.
+        needs: String,
+    },
+}
+
+impl std::fmt::Display for ColumnDerivationRefusal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ColumnDerivationRefusal::NoAssemblage => write!(
+                f,
+                "the composition reaches no stable assemblage at these conditions, so no column property \
+                 can be derived from it"
+            ),
+            ColumnDerivationRefusal::NoQuantity { quantity } => {
+                write!(f, "the assemblage did not resolve its {quantity}")
+            }
+            ColumnDerivationRefusal::Conductivity(reason) => {
+                write!(f, "the conductivity ladder refused: {reason}")
+            }
+            ColumnDerivationRefusal::NoJoinYet { quantity, needs } => write!(
+                f,
+                "{quantity} has no assembled derivation yet; it needs {needs}. Refused rather than \
+                 defaulted: a fixture here would move the cluster PARTIALLY, which the atomicity ruling \
+                 forbids because the derived and fixture halves would then span two unit systems"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for ColumnDerivationRefusal {}
+
+/// Derive every thermal property of an interior column from the world's OWN composition, ATOMICALLY.
+///
+/// The chain, each link a banked derivation rather than a value: the composition minimizes to a stable
+/// assemblage; the assemblage's phases and molar volumes give its density; its mean atomic mass gives the
+/// Dulong-Petit specific heat; its volume census runs the two-rung conductivity ladder; and the diffusivity
+/// falls out of those three rather than being stored beside them.
+///
+/// TWO OF THE SEVEN STILL REFUSE, and that is the point of returning a `Result` rather than a struct of
+/// options. The expansivity needs an assemblage-level join over the Grueneisen gamma, the molar heat
+/// capacity, the bulk modulus and the molar volume, and those live in two tables (`mineral_moduli` and the
+/// phase registry) with no function joining them by phase key. The viscosity needs the creep-candidate wire
+/// into `convective_viscosity::solve_ln_effective_viscosity`, which additionally wants the diffusivity this
+/// function computes and a mid-layer pressure the province call site does not yet form. Until both land, this
+/// refuses, the fixture cluster stays whole, and the pins do not move. That is the ruling enforced by a type.
+// @derives: an interior column's thermal properties <- the world's own composition through the banked assemblage, ladder and Dulong-Petit derivations
+pub fn derive_column_thermal_properties(
+    composition: &[(String, Fixed)],
+    temperature_k: Fixed,
+    pressure_bar: Fixed,
+    registry: &civsim_physics::petrology_data::PhaseRegistry,
+    periodic: &civsim_physics::periodic::PeriodicTable,
+    conductivity_table: &civsim_physics::phase_conductivity::PhaseConductivityTable,
+    gruneisen_table: &civsim_physics::gruneisen::GruneisenTable,
+) -> Result<ColumnThermalProperties, ColumnDerivationRefusal> {
+    let missing = |q: &str| ColumnDerivationRefusal::NoQuantity {
+        quantity: q.to_string(),
+    };
+    let assemblage = civsim_physics::petrology::stable_assemblage(
+        composition,
+        temperature_k,
+        pressure_bar,
+        registry,
+    )
+    .ok_or(ColumnDerivationRefusal::NoAssemblage)?;
+
+    // Density: the registry's own molar volumes and masses, in g/cm^3, lifted to kg/m^3.
+    let density_g_cm3 =
+        civsim_physics::petrology::assemblage_density(&assemblage, registry, periodic)
+            .ok_or_else(|| missing("density"))?;
+    let density_kg_m3 = density_g_cm3
+        .checked_mul(Fixed::from_int(1000))
+        .ok_or_else(|| missing("density"))?;
+
+    // Specific heat: Dulong-Petit over the assemblage's own mean atomic mass.
+    let mean_atomic_mass = civsim_physics::petrology::assemblage_mean_atomic_mass_kg_per_mol(
+        &assemblage,
+        registry,
+        periodic,
+    )
+    .ok_or_else(|| missing("mean_atomic_mass"))?;
+    let specific_heat_j_kg_k =
+        civsim_physics::young_thermal::dulong_petit_specific_heat(mean_atomic_mass)
+            .ok_or_else(|| missing("specific_heat"))?;
+
+    // Conductivity: the volume census through the two-rung ladder. Volume fractions rather than molar
+    // amounts, because a Bruggeman mixture weights by the volume each phase occupies.
+    let volume_census =
+        civsim_physics::petrology::assemblage_volume_fractions(&assemblage, registry)
+            .ok_or_else(|| missing("volume_fractions"))?;
+    let mut rows = Vec::with_capacity(volume_census.len());
+    for (name, fraction) in &volume_census {
+        let row = civsim_materials::conductivity::phase_conductivity_from_banked(
+            name,
+            conductivity_table,
+            gruneisen_table,
+            registry,
+            periodic,
+            Fixed::ZERO,
+        )
+        .map_err(|e| ColumnDerivationRefusal::Conductivity(e.to_string()))?;
+        rows.push((row, *fraction));
+    }
+    let borrowed: Vec<(&civsim_materials::conductivity::PhaseConductivity, Fixed)> =
+        rows.iter().map(|(r, f)| (r, *f)).collect();
+    let thermal_conductivity_w_m_k =
+        civsim_materials::conductivity::assemblage_conductivity(&borrowed, temperature_k)
+            .map_err(|e| ColumnDerivationRefusal::Conductivity(e.to_string()))?
+            .ok_or_else(|| missing("conductivity"))?
+            .conductivity;
+
+    // THE TWO FRONTIERS, each asked for honestly and each refusing by name. Written as calls rather than as
+    // an early return so the three derivations above are EXERCISED on every attempt: a chain that is never
+    // run is a chain that rots, and this way a break in the assemblage, ladder or Dulong-Petit path surfaces
+    // here rather than waiting for the frontier to close.
+    let thermal_expansion_ppm_per_k = derive_assemblage_expansivity_ppm_per_k()?;
+    let ln_viscosity_pa_s = derive_column_ln_viscosity()?;
+
+    Ok(ColumnThermalProperties {
+        density_kg_m3,
+        thermal_conductivity_w_m_k,
+        specific_heat_j_kg_k,
+        thermal_expansion_ppm_per_k,
+        ln_viscosity_pa_s,
+    })
+}
+
+/// The assemblage's volumetric expansivity in ppm per kelvin. THE FRONTIER, refusing by name.
+///
+/// Every piece exists and nothing composes them, which is why this is a join rather than a data gap.
+/// [`civsim_physics::gruneisen::GruneisenTable::assemblage_gamma`] gives the census gamma, and
+/// [`civsim_materials::properties::volumetric_thermal_expansion_per_k`] turns a gamma into an expansivity
+/// given the molar heat capacity, the bulk modulus and the molar volume. The obstacle is that the bulk
+/// modulus lives in `mineral_moduli` and the molar volume on the phase registry, with no function joining
+/// them by phase key, and the two must share a basis (both per mole of atoms or both per formula unit) or the
+/// result is a unit error wearing a derivation's clothes.
+fn derive_assemblage_expansivity_ppm_per_k() -> Result<Fixed, ColumnDerivationRefusal> {
+    Err(ColumnDerivationRefusal::NoJoinYet {
+        quantity: "thermal_expansion_ppm_per_k".to_string(),
+        needs: "an assemblage-level expansivity join: `assemblage_gamma` for the census gamma, then \
+                `volumetric_thermal_expansion_per_k` with the molar heat capacity, the bulk modulus and the \
+                molar volume, which requires joining `mineral_moduli` to the phase registry by phase key on \
+                a shared per-atom or per-formula-unit basis"
+            .to_string(),
+    })
+}
+
+/// The column's log viscosity (ln Pa*s). THE SECOND FRONTIER, refusing by name.
+///
+/// [`civsim_physics::convective_viscosity::solve_ln_effective_viscosity`] is built and returns exactly this
+/// quantity, so the obstacle is its inputs rather than the solve. It takes creep candidates that nothing
+/// assembles for a province, a `thermal_diffusivity` that [`ColumnThermalProperties::thermal_diffusivity`]
+/// can now supply, and an `eval_pressure_gpa` the province call site does not form (composable there as
+/// `rho g d / 2`, since the depth, gravity and density are all in scope, but not composed today).
+fn derive_column_ln_viscosity() -> Result<Fixed, ColumnDerivationRefusal> {
+    Err(ColumnDerivationRefusal::NoJoinYet {
+        quantity: "ln_viscosity_pa_s".to_string(),
+        needs: "the creep-candidate wire into `convective_viscosity::solve_ln_effective_viscosity`, plus a \
+                mid-layer `eval_pressure_gpa` the province call site does not yet form"
+            .to_string(),
+    })
 }
 
 /// One convection-evolution step: compose the merged floor law-forms into the next column state.
@@ -733,6 +977,105 @@ mod tests {
 
     // A synthetic column: hot relative to a cold reference, with representable-scaled parameters (so the
     // Rayleigh intermediates fit Q32.32). The Rayleigh onset is switched by ra_crit in each test.
+    /// THE ATOMICITY, ENFORCED. The ruling on `ColumnParams::thermal_diffusivity` says the cluster moves as
+    /// a whole or not at all, and this asserts that the code makes a partial move IMPOSSIBLE rather than
+    /// merely discouraged: with two of the seven properties still lacking a join, the derivation refuses,
+    /// and the refusal names both the quantity and what composing it requires, so it reads as a work list.
+    ///
+    /// This test is written to FAIL when the frontier closes, which is deliberate. When the expansivity and
+    /// viscosity joins land, this assertion breaks and whoever lands them replaces it with the assertion
+    /// that the seven properties derive, having been told exactly where to do it. A test that quietly kept
+    /// passing through that change would be a test that stopped meaning anything.
+    #[test]
+    fn the_column_derivation_refuses_a_partial_cluster_and_names_the_remaining_joins() {
+        use civsim_physics::gruneisen::GruneisenTable;
+        use civsim_physics::periodic::PeriodicTable;
+        use civsim_physics::petrology_data::PhaseRegistry;
+        use civsim_physics::phase_conductivity::PhaseConductivityTable;
+
+        let registry = PhaseRegistry::standard().expect("the phase registry loads");
+        let periodic = PeriodicTable::standard().expect("the periodic table loads");
+        let conductivity = PhaseConductivityTable::standard().expect("the cited column loads");
+        let gruneisen = GruneisenTable::standard().expect("the Grueneisen table loads");
+        // A magnesian olivine mantle, the composition the deep-time columns carry.
+        let composition = vec![
+            ("Mg".to_string(), Fixed::from_int(2)),
+            ("Si".to_string(), Fixed::ONE),
+            ("O".to_string(), Fixed::from_int(4)),
+        ];
+
+        let refusal = derive_column_thermal_properties(
+            &composition,
+            Fixed::from_int(1600),
+            Fixed::from_int(100_000),
+            &registry,
+            &periodic,
+            &conductivity,
+            &gruneisen,
+        )
+        .expect_err("two of the seven properties have no join yet, so the cluster must not move");
+
+        match &refusal {
+            ColumnDerivationRefusal::NoJoinYet { quantity, needs } => {
+                assert_eq!(
+                    quantity, "thermal_expansion_ppm_per_k",
+                    "the frontier reached is named exactly rather than lumped"
+                );
+                assert!(
+                    needs.contains("mineral_moduli") && needs.contains("assemblage_gamma"),
+                    "the refusal is a work list, naming both tables the join must bridge: {needs}"
+                );
+            }
+            other => panic!("expected the join frontier, got {other}"),
+        }
+        // The SECOND frontier refuses on its own terms, so closing the first cannot silently open the
+        // cluster. Asserted separately because the derivation short-circuits at the first one it reaches.
+        let viscosity_refusal =
+            derive_column_ln_viscosity().expect_err("the viscosity join is not wired either");
+        match &viscosity_refusal {
+            ColumnDerivationRefusal::NoJoinYet { quantity, needs } => {
+                assert_eq!(quantity, "ln_viscosity_pa_s");
+                assert!(
+                    needs.contains("solve_ln_effective_viscosity")
+                        && needs.contains("eval_pressure_gpa"),
+                    "it names the solve AND the input the call site does not form: {needs}"
+                );
+            }
+            other => panic!("expected the viscosity frontier, got {other}"),
+        }
+        // And the message explains WHY it refused rather than substituted, since that is the ruling.
+        assert!(
+            refusal.to_string().contains("atomicity"),
+            "the refusal cites the ruling it is enforcing: {refusal}"
+        );
+    }
+
+    /// The diffusivity is COMPUTED from the three facts it is made of, never stored beside them, which is the
+    /// redundant-parameter defect the ruling was written about. Asserted against the algebra rather than a
+    /// recorded number: `kappa = k / (rho c_p)`.
+    #[test]
+    fn the_diffusivity_is_computed_from_its_three_facts_and_never_stored() {
+        let p = ColumnThermalProperties {
+            density_kg_m3: Fixed::from_int(3300),
+            thermal_conductivity_w_m_k: Fixed::from_int(4),
+            specific_heat_j_kg_k: Fixed::from_int(1200),
+            thermal_expansion_ppm_per_k: Fixed::from_int(30),
+            ln_viscosity_pa_s: Fixed::from_int(48),
+        };
+        let kappa = p.thermal_diffusivity().expect("the three facts compose");
+        let expected = 4.0 / (3300.0 * 1200.0);
+        assert!(
+            (kappa.to_f64_lossy() - expected).abs() < 1e-9,
+            "kappa = k/(rho c_p) = {expected:.3e}, read {:.3e}",
+            kappa.to_f64_lossy()
+        );
+        // A silicate mantle sits near 1e-6 m^2/s, which is the magnitude check that would catch a unit slip.
+        assert!(
+            (1e-7..=1e-5).contains(&kappa.to_f64_lossy()),
+            "a silicate diffusivity should land near 1e-6 m^2/s"
+        );
+    }
+
     /// The parcel radius derives from the cell geometry the column already carries, so it tracks the
     /// eigenvalue pair rather than sitting beside it. Asserted against the analytic `pi / a_c` rather than
     /// against a recorded number, because a recorded number here would be the fixture this replaces.

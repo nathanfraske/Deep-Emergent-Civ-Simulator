@@ -17,7 +17,7 @@ The lists below are GENERATED from `crates/physics/data/*.toml`, `crates/physics
 
 ## Deriving substrates (check here BEFORE authoring: what the world derives, and where)
 
-The 26 deriving subsystems below live OUTSIDE the authored floor. Each produces a world quantity from the floor and the situation, so its output must never be authored: if the value you need appears here, read or extend the subsystem, do not set a number. This is the list that stops `1 year = 365 days` from being authored when orbital mechanics already derives it. Generated from the `// @derives:` markers in the code; a subsystem missing its marker is a gap in this map, so mark every derivation entry point.
+The 29 deriving subsystems below live OUTSIDE the authored floor. Each produces a world quantity from the floor and the situation, so its output must never be authored: if the value you need appears here, read or extend the subsystem, do not set a number. This is the list that stops `1 year = 365 days` from being authored when orbital mechanics already derives it. Generated from the `// @derives:` markers in the code; a subsystem missing its marker is a gap in this map, so mark every derivation entry point.
 
 ### `crates/foundation/src/clock.rs`
 
@@ -49,7 +49,8 @@ The 26 deriving subsystems below live OUTSIDE the authored floor. Each produces 
 - the log-domain Stokes settling velocity <- the buoyancy, gravity, parcel scale and log viscosity (`crates/physics/src/laws.rs:3623`)
 ### `crates/physics/src/petrology.rs`
 
-- an assemblage's volume fractions <- its minimized molar amounts + the registry's own molar volumes (`crates/physics/src/petrology.rs:487`)
+- an assemblage's mean atomic mass <- its own molar amounts + the registry compositions + the periodic masses (`crates/physics/src/petrology.rs:490`)
+- an assemblage's volume fractions <- its minimized molar amounts + the registry's own molar volumes (`crates/physics/src/petrology.rs:527`)
 ### `crates/physics/src/phase_conductivity.rs`
 
 - a uniaxial phase's isotropic-aggregate conductivity and its orientational band <- the measured principal conductivities (Voigt-Reuss-Hill) (`crates/physics/src/phase_conductivity.rs:179`)
@@ -64,9 +65,11 @@ The 26 deriving subsystems below live OUTSIDE the authored floor. Each produces 
 - per-cell carbon-fixation rate / net primary productivity <- the photosynthesis light-response (`crates/sim/src/environ.rs:2334`)
 ### `crates/sim/src/geodynamics.rs`
 
-- the buoyant parcel radius <- the column's own layer depth + its critical wavenumber (cell half-wavelength) (`crates/sim/src/geodynamics.rs:215`)
-- the interior column temperature and convection-onset state <- the merged floor law-forms (thermal_density_anomaly, rayleigh_number, threshold_latch, stokes_velocity, heat_advection, internal_heat_evolution, conduction) over the column's own physical parameters; no authored convection knob (Ra_crit is the derived marginal-stability eigenvalue, the Stokes coefficient the derived 2/9, the buoyancy the real material thermal expansion). A NEW derivation (not a retired-floor replacement), now covered by the liveness gate broadened to any derived output and any input source (task #46): the derive_gate registry carries a column_convection row (category new-derivation) whose probe perturbs the ColumnParams heat_production (a resident-field input) and asserts the stepped temperature responds. (`crates/sim/src/geodynamics.rs:227`)
-- the interior column's secular thermal history <- radiogenic_decay (the isotope reservoir spending down over the world clock) feeding radiogenic_heat (the falling heat production) into the convection step, so the interior warms under radiogenic heating and cools as the sources decay; no authored cooling knob, the source history is the decaying reservoir (`crates/sim/src/geodynamics.rs:403`)
+- the buoyant parcel radius <- the column's own layer depth + its critical wavenumber (cell half-wavelength) (`crates/sim/src/geodynamics.rs:230`)
+- a column's thermal diffusivity <- its own conductivity, density and specific heat (`crates/sim/src/geodynamics.rs:278`)
+- an interior column's thermal properties <- the world's own composition through the banked assemblage, ladder and Dulong-Petit derivations (`crates/sim/src/geodynamics.rs:352`)
+- the interior column temperature and convection-onset state <- the merged floor law-forms (thermal_density_anomaly, rayleigh_number, threshold_latch, stokes_velocity, heat_advection, internal_heat_evolution, conduction) over the column's own physical parameters; no authored convection knob (Ra_crit is the derived marginal-stability eigenvalue, the Stokes coefficient the derived 2/9, the buoyancy the real material thermal expansion). A NEW derivation (not a retired-floor replacement), now covered by the liveness gate broadened to any derived output and any input source (task #46): the derive_gate registry carries a column_convection row (category new-derivation) whose probe perturbs the ColumnParams heat_production (a resident-field input) and asserts the stepped temperature responds. (`crates/sim/src/geodynamics.rs:471`)
+- the interior column's secular thermal history <- radiogenic_decay (the isotope reservoir spending down over the world clock) feeding radiogenic_heat (the falling heat production) into the convection step, so the interior warms under radiogenic heating and cools as the sources decay; no authored cooling knob, the source history is the decaying reservoir (`crates/sim/src/geodynamics.rs:647`)
 ### `crates/sim/src/locomotion.rs`
 
 - movement speed in tiles/tick, and (inverted) the cell edge in metres <- a real ground speed (about 1.4 m/s) / the tile edge, at the 1 s/tick base. The cell size is NOT free: it is fixed by one real creature's speed x the tick. Body-side, a being's own speed derives from its size (morphology), not a plant/animal tag. (`crates/sim/src/locomotion.rs:89`)

@@ -8,7 +8,7 @@ The retired long-form board is `docs/working/CONSENSUS_ROADMAP_HISTORY.md`, pres
 
 ## Active arcs
 
-- 2026-07-19  Mountains / mid-band (increment 3) -> prerequisites built and PR'd (#205: banked-column bridge, volume fractions, parcel radius, `ln_stokes_velocity`). Next: the atomic seven-field replacement + the log-space lift of `convection_step`, re-baseline via `realization_digest`, retire the pins with a ledger entry, then Seams C/D draw the mountains. Two measured constraints on the lift in HANDOFFS (SI Rayleigh has no discriminating power; SI velocity is 4-13 ulp).
+- 2026-07-19  Mountains / mid-band (increment 3) -> #205, `derive_column_thermal_properties` makes the atomicity a TYPE (3 of 7 derive, 2 refuse by name). Next: the expansivity join (`mineral_moduli` x registry by phase key) and the creep-candidate wire, then the wire + re-baseline + Seams C/D. RULED-SPEC CORRECTION in HANDOFFS: the "full SI lift" is infeasible (H = 5e-12 W/kg = 0.02 ulp, the source term quantizes to zero); the target is a DECLARED Mm/Myr scale.
 - 2026-07-18  Remote agent #201 (disk-evolution wire) lands large and often -> rebase-onto-main integration, keep viewer/physics lanes disjoint.
 - 2026-07-18  Arc AFTER the crust (perpetual dynamics, atmosphere keystone, hydrosphere) -> plan in `PHYSICS_SUBSTRATE_ROADMAP.md`.
 
