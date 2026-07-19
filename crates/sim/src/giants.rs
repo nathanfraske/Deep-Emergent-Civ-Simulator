@@ -69,6 +69,7 @@
 //! them is invented inline.
 
 use civsim_core::Fixed;
+use civsim_foundation::conservation::ConservedLedger;
 
 use crate::astro::{
     disk_effective_temperature, disk_era_xray_disk_lifetime_myr, hill_radius_au,
@@ -518,6 +519,151 @@ pub fn truncation_gas_ledger(
         total_mass_earth,
         total_proxy_l,
     })
+}
+
+/// The NAMED SINK a truncation residual flows to under the DYNAMIC reading: the destinations the audit named for
+/// the stripped outer gas. The MECHANISM is conservation (the removed budget enters the account from the disc and
+/// leaves to one of these tagged sinks, netting to zero); the CHANNEL is a tag, not a value. How the removed gas
+/// DIVIDES among these channels (if it divides) is a not-yet-derived physics question, named here rather than
+/// fabricated: a first disposition sends the whole residual to a single chosen channel, and a split model is a
+/// later rung.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum TruncationSink {
+    /// The stripped gas accreted onto the companion star.
+    CompanionAccretion,
+    /// The stripped gas fed to a circumbinary disc or reservoir.
+    CircumbinaryReservoir,
+    /// The stripped gas viscously spread back inward within the primary's disc.
+    ViscousSpreadInward,
+}
+
+impl TruncationSink {
+    /// The `&'static str` tag the [`civsim_foundation::conservation::ConservedLedger`] records the outflow under.
+    pub fn tag(self) -> &'static str {
+        match self {
+            TruncationSink::CompanionAccretion => "truncation_residual:companion_accretion",
+            TruncationSink::CircumbinaryReservoir => "truncation_residual:circumbinary_reservoir",
+            TruncationSink::ViscousSpreadInward => "truncation_residual:viscous_spread_inward",
+        }
+    }
+}
+
+/// The physical READING the owner selects for a truncation residual, the design fork the interpretation-neutral
+/// [`TruncationGasLedger`] surfaces. The profile settles the PARTITION (retained versus removed); it does NOT
+/// settle whether the removed gas ever formed, and that is a design call, so it is a typed selection here rather
+/// than a fact any code may author. The idiom mirrors [`crate::astro::KraftMetallicityConditioning`]: the
+/// un-selected state is a named variant, not a fabricated default.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum TruncationResidualReading {
+    /// The disc was BORN already truncated: `retained` IS the whole system gas budget, and `removed` is gas that
+    /// never formed (the birth profile is the normalization over the retained domain). No sink is owed.
+    InitialCondition,
+    /// The disc formed at the birth radius `R_1` and the companion STRIPPED the outer gas over time: `removed` is a
+    /// real outflow that owes a named [`TruncationSink`], so the system budget stays the full birth `total` with
+    /// `removed` relocated, conserved rather than vanished.
+    DynamicOutflow {
+        /// Where the stripped residual goes.
+        sink: TruncationSink,
+    },
+    /// UN-SELECTED, the honest default: the reading is the owner's design call, not a fact the profile settles, so
+    /// the disposition REFUSES to collapse to a single system budget and carries both candidates instead.
+    Unresolved,
+}
+
+/// The RESOLVED truncation-residual disposition: the disc's own retained gas (identical under either physical
+/// reading, because truncation removes the same outer rings), the SYSTEM gas budget (which the reading DOES
+/// change), and, under the dynamic reading, the named sink the residual was conserved to. Built by
+/// [`dispose_truncation_residual`], which discharges the residual through the foundation
+/// [`civsim_foundation::conservation::ConservedLedger`] so a dropped residual is a compile-flagged leak, not a
+/// silent loss.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct TruncationResidualDisposition {
+    /// Gas mass retained in the truncated disc (Earth masses), the same under both readings.
+    pub disk_gas_mass_earth: Fixed,
+    /// Proxy angular momentum retained in the truncated disc (Earth-mass times sqrt(AU)).
+    pub disk_gas_proxy_l: Fixed,
+    /// The SYSTEM gas budget (Earth masses): `retained` under the initial-condition reading (the removed gas never
+    /// existed), the full birth `total` under the dynamic reading (the removed gas relocated to the sink).
+    pub system_gas_budget_earth: Fixed,
+    /// The sink the residual was conserved to, `Some` only under the dynamic reading.
+    pub residual_sink: Option<TruncationSink>,
+    /// Whether the residual accounting closed (the conserved-ledger net returned to zero). True by construction for
+    /// a completed disposition; carried so a consumer reads the closure rather than assuming it.
+    pub residual_conserved: bool,
+}
+
+/// Why a truncation residual could not be disposed to a single budget: the "refusal names the gap" pattern
+/// (mirroring [`crate::astro`]'s domain refusals and the thermoelastic ladder), so an unresolved fork is a typed
+/// stop, never a silent default.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum TruncationResidualRefusal {
+    /// The reading is [`TruncationResidualReading::Unresolved`]: the disposition cannot collapse to one system
+    /// budget until the owner rules the physical reading. Both candidate budgets are carried so the consumer sees
+    /// the fork rather than a default: `initial_condition_budget_earth` (the retained-only budget) and
+    /// `dynamic_budget_earth` (the full birth budget with the residual owed to a sink).
+    ReadingUnselected {
+        /// The system budget under the initial-condition reading (Earth masses): the retained gas only.
+        initial_condition_budget_earth: Fixed,
+        /// The system budget under the dynamic reading (Earth masses): the full birth total.
+        dynamic_budget_earth: Fixed,
+    },
+}
+
+// @derives: the truncation-residual system gas budget and its named sink <- the interpretation-neutral truncation gas ledger under a selected physical reading, the removed residual discharged through the foundation conserved-ledger to a named sink under the dynamic reading
+/// Dispose the truncation residual under the owner-selected [`TruncationResidualReading`]. Under the initial-
+/// condition reading the system budget is the disc's `retained` gas and no sink is owed. Under the dynamic reading
+/// the `removed` mass and proxy angular momentum are each entered into a
+/// [`civsim_foundation::conservation::ConservedLedger`] from the disc's outer annulus and destroyed to the chosen
+/// [`TruncationSink`], so the residual is fully accounted (the ledger closes to a zero net) and the system budget
+/// stays the full birth `total`. Under the un-selected reading it REFUSES with
+/// [`TruncationResidualRefusal::ReadingUnselected`], carrying both candidate budgets rather than defaulting. The
+/// disposition authors no split fraction and no sink physics: it names the sink and conserves the total.
+pub fn dispose_truncation_residual(
+    ledger: &TruncationGasLedger,
+    reading: TruncationResidualReading,
+) -> Result<TruncationResidualDisposition, TruncationResidualRefusal> {
+    match reading {
+        TruncationResidualReading::InitialCondition => Ok(TruncationResidualDisposition {
+            disk_gas_mass_earth: ledger.retained_mass_earth,
+            disk_gas_proxy_l: ledger.retained_proxy_l,
+            system_gas_budget_earth: ledger.retained_mass_earth,
+            residual_sink: None,
+            residual_conserved: true,
+        }),
+        TruncationResidualReading::DynamicOutflow { sink } => {
+            // Discharge the residual through the foundation conserved-ledger: it enters from the disc's outer
+            // annulus and leaves to the named sink, so a dropped residual is a compile-flagged leak (the Conserved
+            // token is #[must_use]) and the accounting closes to a zero net. Mass and proxy angular momentum are
+            // each conserved on their own ledger.
+            let mut mass_ledger = ConservedLedger::new(Fixed::ZERO);
+            let removed_mass = mass_ledger.create(
+                ledger.removed_mass_earth,
+                "truncation_residual:birth_disk_outer_annulus",
+            );
+            mass_ledger.destroy(removed_mass, sink.tag());
+
+            let mut momentum_ledger = ConservedLedger::new(Fixed::ZERO);
+            let removed_l = momentum_ledger.create(
+                ledger.removed_proxy_l,
+                "truncation_residual:birth_disk_outer_annulus",
+            );
+            momentum_ledger.destroy(removed_l, sink.tag());
+
+            Ok(TruncationResidualDisposition {
+                disk_gas_mass_earth: ledger.retained_mass_earth,
+                disk_gas_proxy_l: ledger.retained_proxy_l,
+                system_gas_budget_earth: ledger.total_mass_earth,
+                residual_sink: Some(sink),
+                residual_conserved: mass_ledger.is_closed() && momentum_ledger.is_closed(),
+            })
+        }
+        TruncationResidualReading::Unresolved => {
+            Err(TruncationResidualRefusal::ReadingUnselected {
+                initial_condition_budget_earth: ledger.retained_mass_earth,
+                dynamic_budget_earth: ledger.total_mass_earth,
+            })
+        }
+    }
 }
 
 /// The GAP-OPENING MODEL: the cited coefficients of the Crida, Morbidelli and Masset (2006) combined
@@ -2457,5 +2603,89 @@ mod tests {
         assert!(truncation_gas_ledger(&disk, r(1, 10), birth_r1, Fixed::from_int(12), 0).is_none());
         // Non-positive truncation radius.
         assert!(truncation_gas_ledger(&disk, r(1, 10), birth_r1, Fixed::ZERO, 64).is_none());
+    }
+
+    /// A ledger fixture with a REAL cut (retained and removed both non-empty), the input the disposition reads.
+    fn truncated_ledger() -> TruncationGasLedger {
+        let disk = mirror_disk(Fixed::ONE);
+        truncation_gas_ledger(
+            &disk,
+            r(1, 10),
+            Fixed::from_int(30),
+            Fixed::from_int(12),
+            128,
+        )
+        .expect("the truncated ledger builds")
+    }
+
+    /// The INITIAL-CONDITION reading: the system budget is the retained gas only, and no sink is owed (the removed
+    /// gas never formed).
+    #[test]
+    fn the_disposition_initial_condition_reads_retained_only() {
+        let ledger = truncated_ledger();
+        let d = dispose_truncation_residual(&ledger, TruncationResidualReading::InitialCondition)
+            .expect("the initial-condition reading resolves");
+        assert_eq!(d.disk_gas_mass_earth, ledger.retained_mass_earth);
+        assert_eq!(d.system_gas_budget_earth, ledger.retained_mass_earth);
+        assert_eq!(d.residual_sink, None);
+        assert!(
+            d.residual_conserved,
+            "no residual is owed, so the account is closed"
+        );
+    }
+
+    /// The DYNAMIC reading: the residual is conserved to a NAMED sink through the foundation conserved-ledger, so
+    /// the system budget stays the full birth total, while the disc keeps only the retained gas.
+    #[test]
+    fn the_disposition_dynamic_conserves_the_residual_to_a_named_sink() {
+        let ledger = truncated_ledger();
+        let d = dispose_truncation_residual(
+            &ledger,
+            TruncationResidualReading::DynamicOutflow {
+                sink: TruncationSink::CompanionAccretion,
+            },
+        )
+        .expect("the dynamic reading resolves");
+        // The disc keeps the retained gas (same as the initial-condition reading)...
+        assert_eq!(d.disk_gas_mass_earth, ledger.retained_mass_earth);
+        // ...but the SYSTEM budget is the full birth total, with the residual relocated, not vanished.
+        assert_eq!(d.system_gas_budget_earth, ledger.total_mass_earth);
+        assert_eq!(d.residual_sink, Some(TruncationSink::CompanionAccretion));
+        assert!(
+            d.residual_conserved,
+            "the residual entered from the disc and left to the sink: the account closes to a zero net"
+        );
+        // A real cut means the two readings' system budgets differ (total > retained).
+        assert!(ledger.total_mass_earth > ledger.retained_mass_earth);
+        // The three named sinks carry distinct conservation tags.
+        assert_ne!(
+            TruncationSink::CompanionAccretion.tag(),
+            TruncationSink::CircumbinaryReservoir.tag()
+        );
+        assert_ne!(
+            TruncationSink::CircumbinaryReservoir.tag(),
+            TruncationSink::ViscousSpreadInward.tag()
+        );
+    }
+
+    /// The UN-SELECTED reading REFUSES to collapse to a single budget and carries both candidates, the "name the
+    /// gap" pattern: the owner rules the physical reading, no code defaults it.
+    #[test]
+    fn the_disposition_refuses_an_unresolved_reading() {
+        let ledger = truncated_ledger();
+        match dispose_truncation_residual(&ledger, TruncationResidualReading::Unresolved) {
+            Err(TruncationResidualRefusal::ReadingUnselected {
+                initial_condition_budget_earth,
+                dynamic_budget_earth,
+            }) => {
+                assert_eq!(initial_condition_budget_earth, ledger.retained_mass_earth);
+                assert_eq!(dynamic_budget_earth, ledger.total_mass_earth);
+                assert!(
+                    dynamic_budget_earth > initial_condition_budget_earth,
+                    "the two candidate budgets differ, so the fork is real"
+                );
+            }
+            other => panic!("an unresolved reading must refuse, got {other:?}"),
+        }
     }
 }
