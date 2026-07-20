@@ -571,6 +571,58 @@ impl Fixed {
 
     /// Real power `x^y = exp(y * ln x)` for `x > 0`, composed from the pinned `ln` and `exp`. A
     /// non-positive base returns zero (the domain guard).
+    ///
+    /// # IT SATURATES SILENTLY, and that is inherited rather than chosen
+    ///
+    /// [`Fixed::exp`] saturates to [`Fixed::MAX`] above an argument of about 21.5, which its own
+    /// documentation states as an honest Q32.32 limit. This function is `exp(y ln x)`, so it inherits
+    /// that rail whenever `y ln x` crosses it, and until 2026-07-19 it did not say so. A caller reading
+    /// only this comment had no way to learn it.
+    ///
+    /// MEASURED, because the threshold is what a caller needs: at the Dohnanyi slope `y = 2.5`, a base
+    /// spanning 3.8 decades already rails, and at 6 decades this returns `2.147e9` where the true value
+    /// is `1e15`. Six orders of magnitude, with no error and no signal.
+    ///
+    /// WHAT IS AND IS NOT WRONG HERE, stated precisely because the loose version overstates it. The rail
+    /// condition is `y ln x > 21.5`, which is `x^y > e^21.5`, which is about `Fixed::MAX`. So this
+    /// saturates EXACTLY when its result stops being representable: the arithmetic is not wrong, the
+    /// SIGNAL is missing. It cannot distinguish "your answer is 2.147e9" from "your answer does not fit",
+    /// and it reports the former in both cases.
+    ///
+    /// That is not hypothetical. Two functions in `world::impact_flux` documented a fail-soft on a
+    /// too-wide size range, did not have one because of this rail, and returned `1.5e-2` where the truth
+    /// was `3.2e-8`, five and a half orders high, in a value a caller would have believed.
+    ///
+    /// SURVEYED ACROSS THE TREE, so the exposure is a measurement rather than an alarm. Of the shapes
+    /// actually called: the Mie-Grueneisen volume ratio reaches `3.2` of the `21.5` budget, the
+    /// Birch-Murnaghan cube root `0.4`, the flexural parameter `5.2`, the elastic-thickness inversion
+    /// `6.9`, and a stellar mass-luminosity power at a hundred solar masses `16.1`. The one shape that
+    /// rails in practice is the impact size-frequency ratio, at `34.5` over six decades, and it is the
+    /// one that was found returning a wrong number.
+    ///
+    /// Use [`Fixed::checked_powf`] where the result feeds a decision. Reach for this one only where the
+    /// operands are bounded by something that keeps `y ln x` inside the window, and say what that is.
+    /// `x^y`, or `None` where the composition rails.
+    ///
+    /// Reads [`Fixed::exp`]'s saturation sentinel back rather than trusting the value: a result of
+    /// exactly [`Fixed::MAX`] from a finite argument means the exponential clamped, so the true power is
+    /// somewhere above the representable window and no number here is honest. A non-positive base still
+    /// returns `None` rather than the bare form's zero, because a domain violation is not a result.
+    ///
+    /// THE ONE FALSE POSITIVE, stated so it is not discovered later: a computation whose true value lands
+    /// exactly on `Fixed::MAX` is indistinguishable from a rail and is refused. That is the correct
+    /// trade. A wrong number that looks right costs more than a refusal on a boundary a caller can widen.
+    pub fn checked_powf(self, y: Fixed) -> Option<Fixed> {
+        if self <= Fixed::ZERO {
+            return None;
+        }
+        let r = y.mul(self.ln()).exp();
+        if r == Fixed::MAX || r == Fixed::ZERO {
+            return None;
+        }
+        Some(r)
+    }
+
     pub fn powf(self, y: Fixed) -> Fixed {
         if self <= Fixed::ZERO {
             return Fixed::ZERO;
@@ -691,6 +743,54 @@ impl fmt::Debug for Fixed {
 impl fmt::Display for Fixed {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.to_f64_lossy())
+    }
+}
+
+#[cfg(test)]
+mod powf_rail_tests {
+    use super::*;
+
+    /// THE RAIL IS REAL AND `checked_powf` CATCHES IT, measured at the threshold rather than asserted.
+    ///
+    /// `powf` is `exp(y ln x)` and `exp` saturates above about 21.5, so a wide enough base rails. This
+    /// pins the measured behaviour so a future change to `exp`'s window cannot move it silently.
+    #[test]
+    fn powf_rails_where_checked_powf_refuses() {
+        let exponent = Fixed::from_ratio(25, 10); // the Dohnanyi slope's p - 1
+                                                  // Inside the window: both agree.
+        for decades in [1i32, 2, 3] {
+            let base = Fixed::from_int(10i32.pow(decades as u32));
+            let bare = base.powf(exponent);
+            let checked = base
+                .checked_powf(exponent)
+                .expect("inside the window it answers");
+            assert_eq!(bare, checked, "{decades} decades must agree");
+            assert_ne!(bare, Fixed::MAX, "{decades} decades must not rail");
+        }
+        // Past it: the bare form returns MAX and lies; the checked form refuses.
+        for decades in [4i32, 5, 6] {
+            let base = Fixed::from_int(10i32.pow(decades as u32));
+            assert_eq!(
+                base.powf(exponent),
+                Fixed::MAX,
+                "{decades} decades rails the bare form, which is the defect being documented"
+            );
+            assert!(
+                base.checked_powf(exponent).is_none(),
+                "{decades} decades must REFUSE rather than return the rail"
+            );
+        }
+    }
+
+    /// A non-positive base is a domain violation, not a result. The bare form returns zero, which a
+    /// caller can mistake for a computed value; the checked form refuses.
+    #[test]
+    fn a_non_positive_base_refuses_rather_than_reading_zero() {
+        assert_eq!(Fixed::ZERO.powf(Fixed::ONE), Fixed::ZERO);
+        assert!(Fixed::ZERO.checked_powf(Fixed::ONE).is_none());
+        assert!((Fixed::ZERO - Fixed::ONE)
+            .checked_powf(Fixed::ONE)
+            .is_none());
     }
 }
 
