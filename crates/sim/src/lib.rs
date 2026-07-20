@@ -98,6 +98,7 @@ pub mod moons;
 pub mod moons_cpd;
 pub mod morphogen;
 pub mod nonlocal_coupling;
+pub mod orbital_state;
 pub mod perceivable_feature;
 pub mod percept;
 pub mod perception_percept;
