@@ -150,11 +150,26 @@ fn debye_integrand(x: Fixed) -> Option<Fixed> {
         let bracket = Fixed::ONE.checked_sub(half_x)?.checked_add(x2_over_12)?;
         return x2.checked_mul(bracket);
     }
-    let denom = x.exp().checked_sub(Fixed::ONE)?;
+    // THE DECAYING FORM, `x^3 e^-x / (1 - e^-x)`, which is algebraically the same as `x^3 / (e^x - 1)` and
+    // numerically not the same at all.
+    //
+    // The direct form was WRONG over this function's own integration range. `Fixed::exp` saturates to
+    // `Fixed::MAX` above an argument of about 22 while the Debye integral is evaluated to 30, so across that
+    // whole upper span the denominator was a constant `Fixed::MAX - 1` and the code integrated roughly
+    // `x^3 / Fixed::MAX` instead of an exponentially decaying tail. At `x = 25` that is `7.3e-6` against a
+    // true `2.2e-7`, a factor of 33; by `x = 30` it is `1.3e-5` against `2.5e-9`, a factor of 5000. The tail
+    // was not merely imprecise, it was rising where the physics falls. Found by review.
+    //
+    // `e^-x` FAILS IN THE SAFE DIRECTION: it underflows smoothly toward zero exactly where `e^x` saturates,
+    // so the integrand goes to zero as the physics does, and the residual error at the far end is bounded by
+    // an ulp rather than by the representation's ceiling.
+    let neg_exp = (Fixed::ZERO.checked_sub(x)?).exp();
+    let denom = Fixed::ONE.checked_sub(neg_exp)?;
     if denom <= Fixed::ZERO {
         return None;
     }
-    x.checked_mul(x)?.checked_mul(x)?.checked_div(denom)
+    let x3 = x.checked_mul(x)?.checked_mul(x)?;
+    x3.checked_mul(neg_exp)?.checked_div(denom)
 }
 
 /// `Integral_0^y x^3/(e^x - 1) dx` by Simpson's rule, over enough intervals to bound the step.
@@ -734,5 +749,57 @@ mod tests {
         let one = response_at(&a, Fixed::from_int(5), Fixed::from_int(1200)).expect("answers");
         let two = response_at(&a, Fixed::from_int(5), Fixed::from_int(1200)).expect("answers");
         assert_eq!(one, two, "same inputs, same bits");
+    }
+
+    #[test]
+    fn the_debye_integral_twins_a_high_precision_evaluation_across_the_whole_range() {
+        // THE NUMERICAL TWIN the review asked for, and the reason it is worth having: the integrand used the
+        // direct `x^3/(e^x - 1)` form, which was not merely imprecise past `Fixed::exp`'s rail near 22 but
+        // RISING where the physics falls, because the saturated denominator turned the tail into `x^3/MAX`.
+        // An algebraic check would not have caught that; only comparing against an independent evaluation
+        // does. The twin is an f64 Simpson integration at far finer resolution, which shares no code and no
+        // representation with the kernel under test.
+        fn twin(y: f64) -> f64 {
+            // x^3 e^-x / (1 - e^-x), the same identity, evaluated in f64 at 20000 intervals.
+            let n = 20_000;
+            let h = y / n as f64;
+            let f = |x: f64| {
+                if x <= 1e-12 {
+                    return x * x; // the removable singularity's leading term
+                }
+                let e = (-x).exp();
+                x * x * x * e / (1.0 - e)
+            };
+            let mut acc = f(0.0) + f(y);
+            for i in 1..n {
+                let x = h * i as f64;
+                acc += if i % 2 == 1 { 4.0 * f(x) } else { 2.0 * f(x) };
+            }
+            acc * h / 3.0
+        }
+
+        // Across the whole `theta/T` span the solver meets, INCLUDING the region past the old rail.
+        for y_int in [1i32, 2, 5, 8, 12, 16, 20, 22, 25, 28, 30] {
+            let got = debye_integral(Fixed::from_int(y_int))
+                .unwrap_or_else(|| panic!("the integral must evaluate at y = {y_int}"))
+                .to_f64_lossy();
+            let want = twin(f64::from(y_int));
+            let rel = (got - want).abs() / want;
+            assert!(
+                rel < 2e-3,
+                "y = {y_int}: fixed-point {got} against high-precision {want}, relative {rel:.3e}"
+            );
+        }
+
+        // AND IT CONVERGES ON THE ANALYTIC INFINITE LIMIT, `pi^4 / 15`, which is the one value that needs no
+        // twin at all because it is exact.
+        let infinite = debye_integral(Fixed::from_int(30))
+            .expect("y = 30 evaluates")
+            .to_f64_lossy();
+        let exact = std::f64::consts::PI.powi(4) / 15.0;
+        assert!(
+            (infinite - exact).abs() / exact < 2e-3,
+            "the clamped upper limit reproduces pi^4/15: {infinite} against {exact}"
+        );
     }
 }

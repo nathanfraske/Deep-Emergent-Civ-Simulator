@@ -44,6 +44,48 @@ pub const FRAC_BITS: u32 = 32;
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct Fixed(i64);
 
+/// THE OUTCOME OF AN EXPONENTIAL IN FIXED POINT, distinguishing the three ways it can fail to be a number.
+///
+/// # WHY A TYPE RATHER THAN A SENTINEL
+///
+/// [`Fixed::exp`] saturates to [`Fixed::MAX`] and flushes to [`Fixed::ZERO`] at its rails, and the first
+/// attempt at a checked exponential SNIFFED those values back afterwards. That cannot work through a
+/// wrapping operation: if the argument itself overflowed on the way in, `exp` receives a plausible WRAPPED
+/// number, returns a plausible finite result, and there is no sentinel left to read. The loss is already
+/// unrecoverable by the time anything looks.
+///
+/// So the classification happens on the ARGUMENT, before evaluation, and it is carried in the type.
+///
+/// # THE TWO FAILURES ARE NOT THE SAME AND CALLERS MUST NOT TREAT THEM ALIKE
+///
+/// [`Self::Overflow`] is unbounded error: the true value is past what the representation holds and nothing
+/// about the returned number relates to it. [`Self::Underflow`] is bounded by about one ulp: the true value
+/// was already below the grid, so ZERO is very nearly right and is often the answer a caller wants. Collapsing
+/// both into one refusal makes a conservative floor look like a caught defect and hides the real one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ExpOutcome {
+    /// The exponential is representable and this is its value.
+    Finite(Fixed),
+    /// The true value lies below one ulp. Zero is within an ulp of correct; a caller that wants the floor
+    /// may take it, and one that wants to know it happened now can.
+    Underflow,
+    /// The true value is past [`Fixed::MAX`]. Nothing representable relates to it.
+    Overflow,
+    /// The input is outside the function's domain (for a power, a non-positive base).
+    Domain,
+}
+
+impl ExpOutcome {
+    /// The value where the exponential is finite, and `None` at either rail or outside the domain. The
+    /// lossy view, for a caller with no distinct policy.
+    pub fn finite(self) -> Option<Fixed> {
+        match self {
+            ExpOutcome::Finite(v) => Some(v),
+            _ => None,
+        }
+    }
+}
+
 impl Fixed {
     /// Fractional bits, also exposed as the module constant [`FRAC_BITS`].
     pub const FRAC_BITS: u32 = FRAC_BITS;
@@ -644,14 +686,61 @@ impl Fixed {
     /// right trade: a wrong number that looks right costs more than a refusal on a boundary a caller can
     /// widen.
     pub fn checked_powf(self, y: Fixed) -> Option<Fixed> {
+        self.powf_outcome(y).finite()
+    }
+
+    /// `self^y` WITH ITS FAILURE CLASSIFIED, which is what [`Self::checked_powf`] discards.
+    ///
+    /// # THE PRODUCT IS CHECKED, AND THAT IS THE HALF THE FIRST VERSION MISSED
+    ///
+    /// `powf` is `exp(y ln x)`, and the first checked form read `y.mul(self.ln()).exp()` and then compared
+    /// the RESULT against the rails. `mul` is the WRAPPING multiply. When `y ln x` itself left the window it
+    /// wrapped to a plausible argument, `exp` returned a plausible finite number, and no sentinel survived
+    /// for the check to find: the answer was already wrong and no longer detectably so. The product is now
+    /// `checked_mul`, so an overflow there is caught where it happens instead of being laundered through an
+    /// exponential.
+    ///
+    /// # THE RAILS ARE READ ON THE ARGUMENT, NOT SNIFFED FROM THE VALUE
+    ///
+    /// [`Fixed::exp`] returns `Fixed::MAX` above 22 and `Fixed::ZERO` below -22 by its own construction, so
+    /// the classification is a comparison on `y ln x` before evaluating rather than an equality test on
+    /// something that may legitimately BE those values. A true result landing exactly on `Fixed::MAX` used to
+    /// be refused as a false positive; it is `Finite` now, because the argument test can tell them apart.
+    // @derives: a classified fixed-point power <- the base, the exponent and the representable window
+    pub fn powf_outcome(self, y: Fixed) -> ExpOutcome {
         if self <= Fixed::ZERO {
-            return None;
+            return ExpOutcome::Domain;
         }
-        let r = y.mul(self.ln()).exp();
-        if r == Fixed::MAX || r == Fixed::ZERO {
-            return None;
+        let Some(arg) = y.checked_mul(self.ln()) else {
+            // The exponent times the log left the window. Its SIGN tells which rail it was heading for, and
+            // the operands are what decide it: a positive product overflows, a negative one underflows.
+            let positive = (y > Fixed::ZERO) == (self > Fixed::ONE);
+            return if positive {
+                ExpOutcome::Overflow
+            } else {
+                ExpOutcome::Underflow
+            };
+        };
+        if arg > Fixed::from_int(22) {
+            return ExpOutcome::Overflow;
         }
-        Some(r)
+        if arg < Fixed::from_int(-22) {
+            return ExpOutcome::Underflow;
+        }
+        ExpOutcome::Finite(arg.exp())
+    }
+
+    /// [`Fixed::exp`] WITH ITS FAILURE CLASSIFIED, the sibling of [`Self::powf_outcome`] for a caller that
+    /// already holds the exponent.
+    // @derives: a classified fixed-point exponential <- the argument and the representable window
+    pub fn exp_outcome(self) -> ExpOutcome {
+        if self > Fixed::from_int(22) {
+            return ExpOutcome::Overflow;
+        }
+        if self < Fixed::from_int(-22) {
+            return ExpOutcome::Underflow;
+        }
+        ExpOutcome::Finite(self.exp())
     }
 
     /// The COMPLEMENTARY ERROR FUNCTION `erfc(x) = 1 - erf(x)`, by Abramowitz and Stegun 7.1.26 (a
@@ -1086,5 +1175,70 @@ mod tests {
         assert!(Fixed::from_int(-1) < Fixed::ZERO);
         assert!(Fixed::from_ratio(1, 2) < Fixed::ONE);
         assert!(Fixed::from_int(3) > Fixed::from_ratio(5, 2));
+    }
+
+    #[test]
+    fn the_checked_power_catches_a_wrapping_product_that_the_sentinel_could_not() {
+        // THE DEFECT THIS PINS. `powf` is `exp(y ln x)`, and the first checked form read
+        // `y.mul(self.ln()).exp()` and compared the RESULT against the rails. `mul` wraps. When `y ln x`
+        // itself left the window it wrapped to a plausible argument, `exp` returned a plausible finite
+        // number, and no sentinel survived for the check to find. Found by review.
+        //
+        // A large base with a large exponent is the shape that does it: `ln` is bounded by about 21.49, so a
+        // big enough `y` overflows the product long before `exp` is reached.
+        let big = Fixed::from_int(1_000_000);
+        let huge_y = Fixed::from_int(2_000_000_000);
+        assert_eq!(
+            big.powf_outcome(huge_y),
+            ExpOutcome::Overflow,
+            "an overflowing product is caught where it happens, not laundered through exp"
+        );
+        assert_eq!(big.checked_powf(huge_y), None);
+
+        // THE TWO RAILS ARE DISTINGUISHED, which a single `None` could not do.
+        let tiny = Fixed::from_ratio(1, 1000);
+        assert_eq!(
+            tiny.powf_outcome(Fixed::from_int(100)),
+            ExpOutcome::Underflow
+        );
+        assert_eq!(
+            Fixed::from_int(1000).powf_outcome(Fixed::from_int(100)),
+            ExpOutcome::Overflow
+        );
+        // A NON-POSITIVE BASE IS A DOMAIN ERROR, not a rail.
+        assert_eq!(Fixed::ZERO.powf_outcome(Fixed::ONE), ExpOutcome::Domain);
+        assert_eq!(
+            Fixed::from_int(-2).powf_outcome(Fixed::ONE),
+            ExpOutcome::Domain
+        );
+
+        // AND THE ORDINARY CASE IS UNCHANGED, to the bit, so this is a classification and not a rewrite.
+        for (b, e) in [(2i32, 3i32), (10, 2), (7, 1), (3, 4)] {
+            let base = Fixed::from_int(b);
+            let expo = Fixed::from_int(e);
+            assert_eq!(
+                base.powf_outcome(expo).finite().map(|v| v.to_bits()),
+                Some(base.powf(expo).to_bits()),
+                "{b}^{e} must be bit-identical to the bare form"
+            );
+        }
+    }
+
+    #[test]
+    fn the_exponential_outcome_names_which_rail_it_hit() {
+        assert_eq!(
+            Fixed::from_int(30).exp_outcome(),
+            ExpOutcome::Overflow,
+            "past the upper rail the error is unbounded"
+        );
+        assert_eq!(
+            Fixed::from_int(-30).exp_outcome(),
+            ExpOutcome::Underflow,
+            "past the lower rail the error is about one ulp"
+        );
+        assert_eq!(
+            Fixed::ONE.exp_outcome().finite().map(|v| v.to_bits()),
+            Some(Fixed::ONE.exp().to_bits())
+        );
     }
 }

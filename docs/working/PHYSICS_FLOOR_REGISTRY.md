@@ -17,8 +17,12 @@ The lists below are GENERATED from `crates/physics/data/*.toml`, `crates/physics
 
 ## Deriving substrates (check here BEFORE authoring: what the world derives, and where)
 
-The 83 deriving subsystems below live OUTSIDE the authored floor. Each produces a world quantity from the floor and the situation, so its output must never be authored: if the value you need appears here, read or extend the subsystem, do not set a number. This is the list that stops `1 year = 365 days` from being authored when orbital mechanics already derives it. Generated from the `// @derives:` markers in the code; a subsystem missing its marker is a gap in this map, so mark every derivation entry point.
+The 85 deriving subsystems below live OUTSIDE the authored floor. Each produces a world quantity from the floor and the situation, so its output must never be authored: if the value you need appears here, read or extend the subsystem, do not set a number. This is the list that stops `1 year = 365 days` from being authored when orbital mechanics already derives it. Generated from the `// @derives:` markers in the code; a subsystem missing its marker is a gap in this map, so mark every derivation entry point.
 
+### `crates/core/src/fixed.rs`
+
+- a classified fixed-point power <- the base, the exponent and the representable window (`crates/core/src/fixed.rs:709`)
+- a classified fixed-point exponential <- the argument and the representable window (`crates/core/src/fixed.rs:735`)
 ### `crates/foundation/src/clock.rs`
 
 - a world's year/day/season in TICKS, and the cell area in metres <- the world's orbit (world-seconds) divided by the base tick (1 tick = 1 world-second, reserved). The calendar is NOT a hardcoded 365 days; it falls out of the orbit and the tick. The cell edge derives as a reference creature's real ground speed (m/s) x 1 s/tick (see locomotion base_speed), cross-checked by NPP density x cell area = standing crop. (`crates/foundation/src/clock.rs:81`)
@@ -38,13 +42,13 @@ The 83 deriving subsystems below live OUTSIDE the authored floor. Each produces 
 - the bulk sound speed <- bulk modulus + density (`crates/materials/src/freezer.rs:176`)
 ### `crates/materials/src/mie_gruneisen_debye.rs`
 
-- a phase's Debye thermal energy <- its atom count, the requested temperature and its characteristic Debye temperature (`crates/materials/src/mie_gruneisen_debye.rs:209`)
-- a phase's Grueneisen parameter at volume <- its reference gamma, volume ratio and volume exponent (`crates/materials/src/mie_gruneisen_debye.rs:237`)
-- a phase's Debye temperature at volume <- its reference Debye temperature, gamma and volume exponent (`crates/materials/src/mie_gruneisen_debye.rs:251`)
-- a phase's cold-isotherm pressure <- its reference volume, bulk modulus and pressure derivative (`crates/materials/src/mie_gruneisen_debye.rs:268`)
-- a phase's thermal pressure at a state <- its Grueneisen parameter, Debye thermal energy and molar volume (`crates/materials/src/mie_gruneisen_debye.rs:294`)
-- a phase's pressure at a state <- its cold isotherm and the Debye thermal pressure above the reference temperature (`crates/materials/src/mie_gruneisen_debye.rs:307`)
-- a phase's molar volume, bulk modulus and expansivity at a state <- its six Mie-Grueneisen-Debye anchors (`crates/materials/src/mie_gruneisen_debye.rs:362`)
+- a phase's Debye thermal energy <- its atom count, the requested temperature and its characteristic Debye temperature (`crates/materials/src/mie_gruneisen_debye.rs:224`)
+- a phase's Grueneisen parameter at volume <- its reference gamma, volume ratio and volume exponent (`crates/materials/src/mie_gruneisen_debye.rs:252`)
+- a phase's Debye temperature at volume <- its reference Debye temperature, gamma and volume exponent (`crates/materials/src/mie_gruneisen_debye.rs:266`)
+- a phase's cold-isotherm pressure <- its reference volume, bulk modulus and pressure derivative (`crates/materials/src/mie_gruneisen_debye.rs:283`)
+- a phase's thermal pressure at a state <- its Grueneisen parameter, Debye thermal energy and molar volume (`crates/materials/src/mie_gruneisen_debye.rs:309`)
+- a phase's pressure at a state <- its cold isotherm and the Debye thermal pressure above the reference temperature (`crates/materials/src/mie_gruneisen_debye.rs:322`)
+- a phase's molar volume, bulk modulus and expansivity at a state <- its six Mie-Grueneisen-Debye anchors (`crates/materials/src/mie_gruneisen_debye.rs:377`)
 ### `crates/materials/src/properties.rs`
 
 - a phase's density <- molar mass + molar volume (`crates/materials/src/properties.rs:87`)
