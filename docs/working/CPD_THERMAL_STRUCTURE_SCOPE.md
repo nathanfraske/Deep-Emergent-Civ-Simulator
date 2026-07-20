@@ -1,0 +1,50 @@
+# CPD thermal-structure substrate: the layer below moon composition
+
+This scope doc records where the derive-first pipeline went when the moon Branch A COMPOSITION slice did not fit neatly in one kernel. A satellite's rock-versus-ice composition emerges from an equilibrium-condensation run in the circumplanetary disk (CPD), so it rests on the CPD's midplane TEMPERATURE at the satellite's orbit. That temperature is not a value the model can author or read off a simple profile: it is set by a coupled, implicit viscous-plus-irradiated disk model. So the pipeline goes down a layer, and this doc maps that layer, its grounding, and the further layers below it, so the substrate can be built slice by slice rather than fabricated.
+
+## Where this sits in the derivation pipeline
+
+The moon pipeline derives everything about a satellite from the physics floor and the world's natal data, with nothing authored:
+
+physics floor (G, sigma, k_B, the water-ice condensation onset, the opacity substrate) and the natal cloud (mass, angular momentum, metallicity, abundances) -> the star -> the protoplanetary disk -> the planets, including the giants (`crates/sim/src/giants.rs`) -> for each giant, its CIRCUMPLANETARY DISK -> **the CPD thermal structure (this doc)** -> the CPD midplane temperature T(r) -> condensation over T(r) -> the satellite composition; in parallel the satellite mass budget (Canup-Ward, `moons_cpd::regular_satellite_mass_budget_earth`) -> the satellites accrete -> the tidal-survival filter (`moons::tidal_survival`) and tidal heating (`moons::tidal_heating_power_log10`) -> the retained moon (mass, orbit, composition, interior heat) -> an observable body in the world.
+
+The CPD thermal structure is the missing rung between the derived giant and the satellite composition. It is the layer the composition slice surfaced.
+
+## The coupled model (the layer that must be built)
+
+Grounded in the gas-starved CPD model of Canup and Ward (2002, 2006) with the Makalkin and Dorofeeva (1995, 2014) semi-analytical thermal structure, as reproduced in full by Schneeberger and Mousis (2024, "Impact of Jupiter's heating and self-shadowing on the Jovian circumplanetary disk structure", A&A, arXiv:2411.13351). The equations below are that paper's, read from the held PDF; receipts are at the end.
+
+The CPD is fed a uniform gas flux inside the centrifugal radius R_c and is at hydrostatic equilibrium. The system is COUPLED and implicit, because the temperature sets the viscosity, the surface density, and the opacity, which in turn set the temperature:
+
+- Surface density: `Sigma_g = (Mdot / (3 pi nu)) (Lambda / l)` (their Eq. 1), with `nu = alpha c_s / Omega_K` (Eq. 2) the Shakura-Sunyaev viscosity and `c_s = sqrt(R T / mu_g)` (Eq. 3) the sound speed, so `nu` and `Sigma_g` both depend on `T`.
+- Optical depth: `tau = integral of rho kappa_R dz` (Eq. 12), with the Rosseland mean opacity `kappa_R` a function of `T`.
+- Surface temperature: `T_s^4 = [1 + (2 kappa_p Sigma_g)^-1] (F_vis + F_acc + F_p) / sigma_SB + T_neb^4` (Eq. 18), where the three heat fluxes are the CPD's own viscous dissipation `F_vis = (3/(8 pi)) (Lambda/l) Mdot Omega_K^2` (Eq. 19), the accretion heating `F_acc` (Eq. 20), and the planet's radiative heating `F_p = L_p sin(zeta+eta)/(8 pi (r^2 + z_s^2))` (Eq. 21), which carries the planet luminosity `L_p`.
+- Midplane temperature: obtained by integrating the radiative-transfer moment equation `dT^4/dq = -(27/(64 pi)) nu Sigma_g^2 Omega_K^2 kappa_R q` (Eq. 24) from the photosurface to the midplane, with `T(q'=1) = T_s` and `dT/dq' = 0` at the midplane. Because `nu`, `Sigma_g`, and `kappa_R` all depend on `T`, the paper solves this with a Jacobian-Free-Newton-Krylov iteration in the (r, q') parameter space.
+
+So the CPD midplane temperature is a coupled implicit solve, not a closed form. This is why the composition slice could not simply read it.
+
+## The opacity comes from the engine's own generator, not a fitted power law
+
+Schneeberger and Mousis use a Pollack-fit power-law opacity `kappa_R = chi kappa_0 T^beta` with regime constants (their Eq. 13, Table 1: water ice `T < 173 K`, `beta = 2.1`; water vapor, organics, refractories at higher `T`). The engine ALREADY derives the Rosseland mean opacity from first principles: `crates/physics/src/opacity.rs` generates `kappa_R` as Rosseland(Mie(optical constants x size distribution x mixing rule x condensate fractions)). Reusing that generator for the CPD opacity is MORE derive-first than the fitted power law and avoids a second provider of the same quantity (a diamond the repo's gate would flag). So the CPD thermal build consumes `opacity.rs`, and the Pollack fit is a cross-check, not a second source of truth. The water-ice regime boundary (`T < 173 K`) is the same physical transition the condensation substrate already carries as the water-ice onset (182 K, `crates/physics/src/condensation.rs`), and the two should be reconciled, not duplicated.
+
+## What is carried, what is reserved, what is further down
+
+- CARRIED by the derived giant (`GiantVerdict`, `giants.rs`): the planet mass `M_p` (sets `Omega_K = sqrt(G M_p / r^3)`), the orbit, the derived envelope opacity, the core-accretion rate.
+- RESERVED-with-basis (grounded caller inputs, surfaced not fabricated, exactly as `k2`/`Q` and the Canup-Ward mass ratio are): the CPD gas accretion rate `Mdot_CPD` (the gas-starved value, order `1e-7 M_J/yr`, its basis Canup and Ward 2002 and the low-accretion class-II gas supply), the alpha-viscosity (`1e-5` to `1e-2`, Shakura-Sunyaev), the dust enrichment factor `chi` relative to the protosolar nebula, and the absorbed-light fraction `k_s = 0.2` (Makalkin and Dorofeeva 1995).
+- FURTHER DOWN (their own rungs, each derivable, none authored): the planet luminosity `L_p` and radius `R_p` during satellite formation (from the giant's contraction and gas-accretion history, a giants.rs extension, since the giant does not yet carry a luminosity); the centrifugal radius `R_c = j^2 / (G M_p)` (Eq. 7) from the specific angular momentum `j` of the infalling gas, itself set by the giant's formation environment; the disk outer radius `r_d`. These bottom out at the physics floor and the natal data, so the descent terminates.
+
+## The build order (slices, each grounded and dormant)
+
+1. The KEPLERIAN and geometry primitives around the planet: `Omega_K(r)`, the scale height `h = c_s/Omega_K`, the centrifugal radius `R_c(j, M_p)`. Standalone, cheap.
+2. The three HEAT FLUXES (Eq. 19-21) as pure kernels given the disk parameters and `L_p`. Standalone once the geometry factors `Lambda/l` (Eq. 4-6) are in.
+3. The COUPLED SURFACE and midplane temperature solve (Eq. 18, 24) reusing `opacity.rs` for `kappa_R`, a deterministic fixed-point / Newton solve in fixed-point arithmetic (the hard slice, research-grade; the paper uses JFNK).
+4. WIRE the CPD midplane temperature into the composition kernel (condensation over `T(r)`), so the Galilean rock-to-ice gradient EMERGES: with Jupiter's mass and the gas-starved parameters, the ice line falls between Europa and Ganymede, and the observed satellite densities (Io 3.53, Europa 3.01, Ganymede 1.94, Callisto 1.83 g/cm^3) are the convicting anchor, not a fit.
+5. The `L_p` and `R_c` further-down rungs, extending `giants.rs` to carry a formation luminosity and the infalling-gas angular momentum.
+
+## Honest limits
+
+The CPD thermal structure is an active research area with strong model dependence: Schneeberger and Mousis report midplane temperatures from about 100 K in self-shadowed cold traps to about 4500 K in optically-thick inner regions, depending on the optical-depth regime, self-shadowing, and the planet's formation luminosity. The gas-starved model is the one the moon arc already builds on (the Canup-Ward mass ratio), so it is the consistent choice, but the temperature it yields is a model result carrying the model's uncertainty, and the reserved parameters (`Mdot_CPD`, alpha, chi) are the levers. The composition that emerges is therefore a banded, model-conditioned result, and the band should be carried, not collapsed to a point.
+
+## Source receipts
+
+Schneeberger, A. and Mousis, O., 2024, "Impact of Jupiter's heating and self-shadowing on the Jovian circumplanetary disk structure", Astronomy and Astrophysics, arXiv:2411.13351 (v2). The PDF was fetched from `https://arxiv.org/pdf/2411.13351` on 2026-07-20, sha256 `18c07e5f35efdf804a6ba15ccce8225958e07fa9c119994cb1bd093048b8fb0d`, 2846919 bytes, and the model equations (Eq. 1-30, Table 1) were read directly from it. A durable Internet Archive capture exists at `https://web.archive.org/web/20241121054247/http://arxiv.org/pdf/2411.13351` (sha256 `5f51d0396b96014e331e08178d87828e340f3b88c3233319f5a286911a969d02`, 2846916 bytes); it differs from the 2026 re-fetch by three bytes because arXiv regenerates the PDF encoding of the same v2 submission, and the equations read are identical. The full registry witness entry (`sources/registry.toml`) with the `@sources` hop lands when the CPD thermal kernel is built and first consumes a value, per the vendor-at-consumption discipline; this doc holds the receipts until then. Primaries: Canup, R. M. and Ward, W. R., 2002, AJ 124, 3404, and 2006, Nature 441, 834; Makalkin, A. B. and Dorofeeva, V. A., 1995 and 2014 (Solar System Research). Opacity regimes: Pollack et al. 1994; the engine's own generator is `crates/physics/src/opacity.rs`.
