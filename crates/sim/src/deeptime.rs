@@ -72,10 +72,15 @@
 //! bound. The yield strength is DERIVED, never the reserved 1e8 Pa literal: it reads the crust's OWN operative
 //! shear strength from the mechanical floor (the Frenkel ideal scaled by the per-class knockdown,
 //! [`civsim_materials::properties::operative_shear_strength_gpa`]), the derive-down that retires the authored
-//! bound on this path. The collapse is the INSTANTANEOUS-COLLAPSE idealization (within a tick the over-bound
-//! relief flows to the bound); a viscous flow RATE would be a reserved value, so the instantaneous limit is the
-//! derive-first floor and needs none. It is a term SEPARATE from [`step_deep_time`], applied by the caller after
-//! it, so a run that does not collapse replays bit-for-bit.
+//! bound on this path. WHAT IS DERIVED HERE AND WHAT IS NOT: the CAP is derived, and the COLLAPSE LAW is an
+//! authored limiting idealization standing in for transport physics this module does not carry. The whole
+//! over-bound excess moves within one tick, so there is no flow RATE; the excess reaches every under-cap column
+//! in the field whatever its distance, so there is no TRANSPORT PATH; and nothing is dissipated and no damage
+//! state accumulates, so a column that has collapsed is indistinguishable from one that never did. The absence
+//! of a rate is a GAP rather than a floor that needs none: under the Residual Law's fluctuation-dissipation
+//! clause, a relaxation that dissipates with no fluctuation partner is declared INCOMPLETE. It is a term
+//! SEPARATE from [`step_deep_time`], applied by the caller after it, so a run that does not collapse replays
+//! bit-for-bit.
 //!
 //! THE MASS LEDGER slice (this): the crust is a STOCK moved by a TRANSACTION, never a thickness that appears.
 //! Before this the crust only grew, toward the equilibrium its melt column supports, and that growth was an
@@ -192,6 +197,33 @@ pub struct DeepTimeState {
     /// intense) and quiescent late (the reservoir is swept up), the honest decline the flux model drives; the
     /// derived record, not an authored intensity.
     pub impact_count: u64,
+    /// THE DEFERRED-IMPACT QUEUE: whole impact events the accretion tail DELIVERED but the per-tick cap
+    /// ([`ImpactFluxParams::per_tick_impact_cap`]) could not apply, WITHHELD and re-offered on the next tick.
+    /// The cap is a compute-and-determinism bound rather than a physical one, so truncating the draw at it used
+    /// to delete real bodies from the reservoir's budget with no ledger: a tick offering a thousand strikes
+    /// against a cap of five discarded the other nine hundred and ninety-five, while the flux's analytic decline
+    /// ([`tail_rate_fraction`]) went on asserting all thousand had been swept. The queue is the WITHHOLDING
+    /// principle (an un-drawn event stays conserved and is offered again) rather than the largest-remainder
+    /// apportionment the redistribution uses: cap truncation is a carry with one queue and one next tick, never
+    /// `m` claimants contending over an indivisible quantum.
+    ///
+    /// The honest limit: withholding conserves the COUNT and does not preserve the arrival TIME. A body the cap
+    /// defers strikes later than the flux delivered it, so a heavily-capped early bombardment is smeared into the
+    /// epochs after it. The queue makes that visible and bounded where the truncation made it invisible; only a
+    /// cap high enough not to bind removes it.
+    pub deferred_impacts: u64,
+    /// The impact events this run drew and could NOT realize: a size the reservoir's size-frequency distribution
+    /// could not draw, a crater the scaling law could not solve, or a basin raster whose application would have
+    /// left the representable window or failed its own zero-sum check. Each of these used to `continue`
+    /// silently, so a deleted event left no trace at all and [`DeepTimeState::impact_count`] (which advances only
+    /// after a strike fully lands) could not tell a quiet epoch from a broken one.
+    ///
+    /// These are NOT deferred, and that is why they are counted apart: a deferred event failed for CAPACITY and
+    /// will succeed later, while these failed against the world's own parameters and would fail identically on
+    /// every retry, so re-offering them would spin forever. They are the honest LOSS from the reservoir's budget,
+    /// recorded rather than hidden, and a run that accumulates them is reporting that its impactor population and
+    /// its crater law do not meet.
+    pub unrealized_impacts: u64,
     /// The star's main-sequence AGE (megayears) when this run began: the star and the planet share one clock, so
     /// the star's current age is this start age plus `elapsed_myr` ([`DeepTimeState::star_age_myr`]). A fresh
     /// planet co-forming with a zero-age star begins at zero; a run beginning around an already-aged star carries
@@ -232,6 +264,11 @@ impl DeepTimeState {
         h.write_fixed(self.elapsed_myr);
         h.write_fixed(self.star_age_start_myr);
         h.write_u64(self.impact_count);
+        // The bombardment's two RESIDUAL counts. A world holding a deferred queue is mid-bombardment and owes
+        // strikes; a world carrying unrealized events has a reservoir and a crater law that do not meet. Neither
+        // is the same world as one whose bombardment closed cleanly at the same crater count.
+        h.write_u64(self.deferred_impacts);
+        h.write_u64(self.unrealized_impacts);
         // The interior, one column per lateral cell, in cell order.
         h.write_u64(self.columns.len() as u64);
         for c in &self.columns {
@@ -309,6 +346,9 @@ impl DeepTimeState {
             impact_relief_m: vec![Fixed::ZERO; n_cells],
             craters: Vec::new(),
             impact_count: 0,
+            // A fresh planet owes no withheld strikes and has failed to realize none.
+            deferred_impacts: 0,
+            unrealized_impacts: 0,
             star_age_start_myr: Fixed::ZERO,
         }
     }
@@ -347,8 +387,12 @@ impl DeepTimeState {
 /// Mars-class convecting mantle (about 1500 km at 3300 kg per cubic metre) is `5.0e9 kg/m^2` and an Earth-class
 /// one is past `1e10`, both above the `2.147e9` ceiling of Q32.32, so the SOURCE STOCK could not be held at all.
 /// The same column in megagrams per square metre is `5.0e6`, and a 30 km crust is `8.7e4`, both far inside the
-/// window with the fixed point's sub-nanogram resolution still under them. `None` on a non-positive input or an
-/// overflow, so a degenerate layer refuses rather than returning a fabricated mass.
+/// window with the fixed point's sub-nanogram resolution still under them. `None` on a NEGATIVE thickness, a
+/// non-positive density, or an overflow, so a degenerate layer refuses rather than returning a fabricated mass.
+/// A ZERO thickness is not degenerate and returns `Some(0)`: a layer of no thickness has no mass, which is the
+/// right answer rather than a refusal, and the melt transaction reads it as one of its two physical zeros
+/// ([`step_deep_time`]). The guard says "non-positive" for the density alone, because a material of no density
+/// is a material that does not exist.
 pub fn areal_mass_mg_per_m2(thickness_km: Fixed, density_kg_per_m3: Fixed) -> Option<Fixed> {
     if thickness_km < Fixed::ZERO || density_kg_per_m3 <= Fixed::ZERO {
         return None;
@@ -370,6 +414,11 @@ pub fn thickness_km_from_areal_mass(
     }
     areal_mass_mg_per_m2.checked_div(density_kg_per_m3)
 }
+
+/// The kilometre-to-metre unit bridge (`1 km = 1000 m`), the exact factor the crust thickness (kilometres)
+/// converts through to the metres the impact relief and the ballistic surface carry, and that the support bound
+/// converts back through. A fundamental unit conversion (Principle 11), never an authored world-content value.
+const M_PER_KM: Fixed = Fixed::from_int(1000);
 
 /// The per-world melt-and-crust parameters the deep-time volcanism reads: the seam-6 adiabatic-melt-column
 /// closure's inputs (the solidus surface value and slope, the adiabat slope, the melt productivity, the source
@@ -407,13 +456,33 @@ pub struct MeltParams {
     /// and the ballistic forces.
     ///
     /// A NAMED INCONSISTENCY it inherits rather than creates, recorded because the ledger is the first thing that
-    /// makes it visible: [`adiabatic_melt_column`] forms its crust thickness as a melt VOLUME per unit area
-    /// integrated at the SOURCE density (`dz = dP / (rho_source * g)`), and everything downstream then floats
-    /// that same thickness at the CRUST density. So the mass this ledger moves is the mass the crust has and the
-    /// mass the isostasy weighs, and it differs from the melt mass the melt column's own volume integral implies
-    /// by the density ratio (about 14 percent for a mafic crust off a peridotite source). Reconciling the two is
-    /// a change to the melt closure in `civsim_physics::melting`, not to the ledger, so it is flagged here rather
-    /// than settled by picking whichever density made the numbers agree.
+    /// makes it visible: [`adiabatic_melt_column`] forms its column thickness with the SOURCE density in the
+    /// denominator (`crust = (dF/dP) * P0^2 / (2 * rho_source * g)`, the pressure-to-depth conversion
+    /// `dz = dP / (rho_source * g)`), and everything downstream then floats that same thickness at the CRUST
+    /// density. So the mass this ledger moves is the mass the crust has and the mass the isostasy weighs, and it
+    /// does not equal the melt mass the column's own integral implies.
+    ///
+    /// THE SIZE OF THAT RESIDUAL IS NOT DETERMINED, which is the sharper finding and the reason nothing is
+    /// reconciled here. It depends on what basis the melt fraction `F` carries, and `civsim_physics::melting`
+    /// does not declare one. If `F` is a MASS fraction the extracted melt is `t * rho_source`, the residual is
+    /// `t * (rho_source - rho_crust)`, and the familiar density-ratio figure (about 14 percent of the crust mass
+    /// for a mafic crust off a peridotite source) is the right one. If `F` is a VOLUME fraction the extracted
+    /// melt is `t * rho_melt` at the LIQUID density, which is near the crust density rather than the source
+    /// density, so the residual is small and is a melt-to-solid densification instead. And the one supplier the
+    /// melt module itself names for the productivity term ([`civsim_physics::melting::batch_melt_fraction`], a
+    /// lever rule over MOLE fractions) yields neither without endmember molar masses, which nothing on that path
+    /// reads. Meanwhile the value callers feed is the McKenzie-Bickle literature productivity, a mass-basis
+    /// figure. Two suppliers of one term on two bases is the actual defect.
+    ///
+    /// So this is FLAGGED and not settled, rather than settled by picking whichever density made the numbers
+    /// agree. What the ledger needs from `civsim_physics::melting` before it can close the residual: the melt
+    /// fraction's BASIS declared, and, on a mass basis, the extracted melt MASS per unit area returned beside the
+    /// thickness (on a volume basis, a melt density taken as an input, since the liquid density is neither the
+    /// source's nor the crust's). Only then does the destination-explicit form
+    /// (`source debit = extracted melt = crust credit + retained melt + lost volatiles + returned residue`) have
+    /// a determined total to partition, and the three destination stocks it needs can be sized rather than
+    /// guessed. Adding those stocks now would encode an assumption about the basis, which is the fabrication the
+    /// flag exists to prevent.
     pub crust_density_kg_per_m3: Fixed,
     /// Gravity (m per second squared).
     pub gravity_m_per_s2: Fixed,
@@ -478,15 +547,18 @@ pub fn crust_growth(
 /// each column's crust from the melt its interior now delivers ([`crust_growth`]), and accumulate the elapsed
 /// geological time. `column_params` is either ONE entry broadcast to every column (a laterally uniform world) or
 /// one per column (each cell's own composition and radiogenic budget, the source of lateral variation); any other
-/// length is a caller mismatch and the column falls back to the first entry so the tick never panics. `melt` is
+/// length is a caller mismatch and REFUSES the tick, where it used to broadcast the first entry across columns
+/// the caller had asked to differ. `melt` is
 /// the shared per-world volcanism parameters. `dt_myr` is the tick's geological duration. The crust GROWS TOWARD
 /// EACH COLUMN'S EQUILIBRIUM and saturates there: a crust the interior once built stays, but the finite fusible
 /// source cannot push it past the equilibrium the column supports ([`crust_growth`]), so the surface thickness is
 /// the BOUNDED melt history, hot columns building thicker crust (the provinces, and the derived thickness that
 /// retires the 30 km fixture) without an unbounded runaway. Returns the next state. Deterministic and
-/// worker-invariant (a pure per-column map in index order). `None` if `column_params` is empty (nothing to step
-/// against), or if the ledger's stocks are not one entry per column (a caller mismatch the ledger cannot balance
-/// over), fail-loud rather than a silent no-op.
+/// worker-invariant (a pure per-column map in index order). Every failure is a TYPED REFUSAL
+/// ([`DeepTimeRefusal`]) rather than a silent no-op: no parameters at all, a parameter set matching neither one
+/// column nor every column, a ledger whose stocks do not cover every column, a column whose convection step or
+/// whose melt conversion or whose stock transfer left the representable window, a thickness readout the stock
+/// cannot back, and a clock that cannot advance.
 ///
 /// THE MELT TRANSACTION. The crust increment is no longer an addition to a thickness: it is a TRANSFER between
 /// the two stocks the state now carries. The tick converts the increment [`crust_growth`] asks for into an areal
@@ -495,8 +567,11 @@ pub fn crust_growth(
 /// the source and credits the crust by ONE AND THE SAME fixed-point value, so
 /// `crust_areal_mass[i] + source_areal_mass[i]` is invariant to the bit. The thickness is then re-read off the
 /// crust stock ([`thickness_km_from_areal_mass`]) rather than accumulated beside it, so the geometry the isostasy
-/// floats stays a function of the ledger and the two cannot drift apart. A conversion that overflows or a column
-/// with no source left HOLDS that column (no transfer, no crust), never a fabricated one.
+/// floats stays a function of the ledger and the two cannot drift apart. A column with no source left, and a
+/// sub-solidus column with no melt to move, transfer nothing and carry on: those are the finite source and the
+/// cold interior, and zero is the right answer for both. A conversion or a transfer that cannot be REPRESENTED
+/// refuses the tick instead, because moving zero mass on failed arithmetic is indistinguishable from those two
+/// physical zeros and would report a quiescent column where the ledger had broken.
 /// WHY A DEEP-TIME STEP REFUSED. Every arm is a stop, and none of them is a state a caller may confuse with
 /// a world that simply did not change.
 ///
@@ -527,6 +602,30 @@ pub enum DeepTimeRefusal {
     ColumnStepRefused { index: usize },
     /// A column's crust-thickness readout refused after the melt transaction moved its mass.
     ThicknessReadoutRefused { index: usize },
+    /// The parameter set covers neither ONE column (the laterally uniform broadcast) nor every column, so the
+    /// caller and the field disagree about how many distinct interiors this world has. It used to BROADCAST
+    /// entry zero over every column, so seven parameter rows against a hundred columns silently ran a hundred
+    /// copies of the first row: a laterally uniform world, delivered to a caller who had asked for a varied one
+    /// and had no way to tell. Carries both counts so the mismatch is locatable.
+    ColumnParamsLengthMismatch {
+        /// How many parameter rows the caller supplied.
+        supplied: usize,
+        /// How many columns the field holds.
+        columns: usize,
+    },
+    /// A column's melt increment could not be CONVERTED to an areal mass (the product left the representable
+    /// window, or the emplaced-crust density is non-positive). Distinct from the two physical zeros (a
+    /// sub-solidus column with no melt, and a source already spent), which are real zeros and continue.
+    MeltMassUnrepresentable { index: usize },
+    /// A column's melt TRANSFER could not be applied: the credit to the crust stock or the debit from the source
+    /// stock left the representable window. Holding both stocks would have preserved the PAIRING while asserting
+    /// "no melt moved this tick", a physical claim the failed arithmetic has no basis for.
+    TransferUnrepresentable { index: usize },
+    /// The geological clock could not advance: `elapsed + dt` left the representable window. Magnitude-unreachable
+    /// in any physical run (Q32.32 rails near `2.147e9` megayears, about 155,000 times the age of the universe),
+    /// and an arm regardless, because "unreachable" is a claim about magnitudes rather than about the arithmetic,
+    /// and a saturating clock reports a tick that advanced time when it did not.
+    ClockOverflow,
 }
 
 pub fn step_deep_time(
@@ -546,6 +645,15 @@ pub fn step_deep_time(
         || state.source_areal_mass.len() != n
     {
         return Err(DeepTimeRefusal::LedgerDoesNotCoverEveryColumn);
+    }
+    // The parameters must arrive in one of the two DOCUMENTED shapes: one entry broadcast to every column, or one
+    // entry per column. Any other length used to fall through to entry zero for every column, which is a silent
+    // BROADCAST of one interior over a field the caller had asked to vary; see `DeepTimeRefusal`.
+    if column_params.len() != 1 && column_params.len() != n {
+        return Err(DeepTimeRefusal::ColumnParamsLengthMismatch {
+            supplied: column_params.len(),
+            columns: n,
+        });
     }
     let per_column = column_params.len() == state.columns.len();
     let columns: Vec<ColumnState> = state
@@ -577,21 +685,28 @@ pub fn step_deep_time(
         // What the melt column asks for this tick, in thickness, then in the mass that thickness costs.
         let asked_km = crust_growth(col.temperature, prev_thickness, melt, dt_myr);
         let asked_mass = areal_mass_mg_per_m2(asked_km, melt.crust_density_kg_per_m3);
-        // What the source can pay. A source already spent pays nothing, which is the finite-source limit as a
-        // reservoir rather than as a clamp. An unrepresentable conversion HOLDS the column at no transfer.
+        // What the source can pay. Two PHYSICAL zeros continue here, and one FAILURE refuses, where a single
+        // catch-all arm used to swallow all three together. The physical zeros are a sub-solidus column that
+        // asked for no melt and a source already spent (the finite-source limit as a reservoir rather than as a
+        // clamp); both move zero mass because zero is the right answer. A conversion that could not be FORMED
+        // moves zero mass because the arithmetic failed, and pooling it with the other two made it unobservable
+        // by construction: the state it produced was identical to a quiescent column's.
         let moved = match asked_mass {
             Some(m) if m > Fixed::ZERO && prev_source > Fixed::ZERO => m.min(prev_source),
-            _ => Fixed::ZERO,
+            Some(_) => Fixed::ZERO,
+            None => return Err(DeepTimeRefusal::MeltMassUnrepresentable { index: i }),
         };
         // THE TRANSFER, the same value out of one stock and into the other, so the pair's sum is invariant to the
-        // bit. `checked_*` on both legs and a HOLD on either failing keeps the two sides from ever moving apart:
-        // a credit that overflowed while its debit landed would be mass created out of a rounding boundary.
+        // bit. `checked_*` on both legs keeps the two sides from ever moving apart: a credit that overflowed
+        // while its debit landed would be mass created out of a rounding boundary. Holding BOTH stocks preserved
+        // that pairing, which is why it was written, and it also asserted "no melt moved this tick", which the
+        // failed arithmetic gives no basis for. The pairing is preserved by refusing instead.
         let (next_crust, next_source) = match (
             prev_crust.checked_add(moved),
             prev_source.checked_sub(moved),
         ) {
             (Some(c), Some(s)) => (c, s),
-            _ => (prev_crust, prev_source),
+            _ => return Err(DeepTimeRefusal::TransferUnrepresentable { index: i }),
         };
         // The thickness is the crust stock's READOUT, re-read each tick rather than accumulated beside it. A
         // refusal holds the previous thickness rather than reporting a crust the stock does not back.
@@ -601,18 +716,28 @@ pub fn step_deep_time(
         crust_areal_mass.push(next_crust);
         source_areal_mass.push(next_source);
     }
+    // THE CLOCK. A saturating add would have railed the clock at the fixed-point ceiling and returned a state
+    // reporting that the tick advanced geological time when it did not, and every later tick would have railed
+    // silently at the same instant. It is the same failure-to-no-change conversion as the three above, at a
+    // magnitude no physical run reaches; see `DeepTimeRefusal::ClockOverflow`.
+    let elapsed_myr = state
+        .elapsed_myr
+        .checked_add(dt_myr)
+        .ok_or(DeepTimeRefusal::ClockOverflow)?;
     Ok(DeepTimeState {
         columns,
         crust_thickness_km,
         crust_areal_mass,
         source_areal_mass,
-        elapsed_myr: state.elapsed_myr.saturating_add(dt_myr),
+        elapsed_myr,
         // The bombardment is a SEPARATE step term ([`bombard_tick`]), applied by the caller after this one, so the
         // interior tick carries the impact record forward unchanged and stays byte-identical for a run that does
         // not bombard (the viewer's existing interior-and-volcanism step is untouched).
         impact_relief_m: state.impact_relief_m.clone(),
         craters: state.craters.clone(),
         impact_count: state.impact_count,
+        deferred_impacts: state.deferred_impacts,
+        unrealized_impacts: state.unrealized_impacts,
         // The star's start age is a per-run constant; its CURRENT age advances through `elapsed_myr` above, so the
         // star ages on the same clock as the interior without a separate step term.
         star_age_start_myr: state.star_age_start_myr,
@@ -697,9 +822,15 @@ pub struct ImpactFluxParams {
 /// coordinate path, the splitmix64 counter style), never floating randomness; the integer strike count is the
 /// expected value's floor plus a seeded Bernoulli on its fractional remainder (deterministic stochastic
 /// rounding, so the run delivers the expected total without authoring a per-tick count), capped at
-/// `per_tick_impact_cap` so the per-tick work is bounded. A degenerate call (a zero-area grid, a grid that does
-/// not match the province field, a non-positive tick duration) or a non-drawable reservoir falls SOFT to the
-/// unchanged state, never a panic and never a fabricated impact.
+/// `per_tick_impact_cap` so the per-tick work is bounded. THE CAP WITHHOLDS RATHER THAN TRUNCATES: what it
+/// cannot admit this tick is queued on [`DeepTimeState::deferred_impacts`] and re-offered on the next one, so a
+/// compute bound no longer deletes bodies from a reservoir whose analytic decline goes on counting them as
+/// swept. An event the world's own parameters cannot realize (a size the distribution will not draw, a crater
+/// the law will not solve, a raster failing its zero-sum or representability check) is counted on
+/// [`DeepTimeState::unrealized_impacts`] instead, the honest loss, because a retry would refuse it identically
+/// forever. A degenerate call (a zero-area grid, a grid that does not match the province field, a non-positive
+/// tick duration), a crust thickness whose metre conversion is unrepresentable, or a tail rate outside its own
+/// domain falls SOFT to the unchanged state, never a panic and never a fabricated impact.
 pub fn bombard_tick(
     state: &DeepTimeState,
     width: usize,
@@ -716,6 +847,9 @@ pub fn bombard_tick(
         || height == 0
         || n_cells != state.columns.len()
         || state.impact_relief_m.len() != n_cells
+        // The crust thickness is INDEXED over the same grid when the running surface is built, so a short one
+        // would have indexed out of bounds in a function documented never to panic.
+        || state.crust_thickness_km.len() != n_cells
         || dt_myr <= Fixed::ZERO
     {
         return next;
@@ -734,30 +868,58 @@ pub fn bombard_tick(
         Some(r) => r,
         None => return next, // a non-positive sweep timescale: no decay defined, no draw
     };
-    let rate1 = tail_rate_fraction(t1, flux.sweep_timescale_myr).unwrap_or(Fixed::ZERO);
-    let swept_fraction = match rate0.checked_sub(rate1) {
-        Some(f) if f > Fixed::ZERO => f,
-        _ => return next, // no reservoir swept this tick (a spent tail): nothing to draw
-    };
-    // The expected strike count = the reservoir's body count times the fraction swept across the interval.
-    let expected = match flux.reservoir_body_count.checked_mul(swept_fraction) {
-        Some(e) if e > Fixed::ZERO => e,
-        _ => return next,
+    // A REFUSAL AT THE INTERVAL'S END IS NOT A ZERO RATE. This read `unwrap_or(Fixed::ZERO)`, which reports a
+    // failed rate as a fully-swept tail and so makes `swept_fraction` MAXIMAL: alone among the fallbacks in this
+    // function, it turned a failure into the LARGEST possible draw rather than the smallest. The tail rate
+    // refuses only on a domain error (a negative clock) or an overflow, and neither is a statement about how
+    // much reservoir remains.
+    let rate1 = match tail_rate_fraction(t1, flux.sweep_timescale_myr) {
+        Some(r) => r,
+        None => return next,
     };
 
-    // The integer strike count for the tick: the floor plus a SEEDED Bernoulli on the fractional remainder
-    // (deterministic stochastic rounding, so the run delivers the expected total without authoring a per-tick
-    // count), capped at the determinism-and-cost bound. The stream is keyed on the world identity and the tick,
-    // the observer-safe coordinate path, never floating randomness.
+    // The stream is keyed on the world identity and the tick, the observer-safe coordinate path, never floating
+    // randomness. Counter 0 is the strike-count Bernoulli and the per-strike draws start at 1, so a tick that
+    // delivers no new bodies consumes no counter and the per-strike stream is unshifted.
     let rng = Rng::for_coords(world_seed, &[tick_index]);
-    let floor_count = expected.to_int().max(0) as u64;
-    let remainder = expected
-        .checked_sub(Fixed::from_int(expected.to_int()))
-        .unwrap_or(Fixed::ZERO);
-    let extra = u64::from(rng.unit_fixed(0) < remainder);
-    let count = floor_count
-        .saturating_add(extra)
-        .min(flux.per_tick_impact_cap as u64);
+    // THE NEW BODIES THIS TICK: the reservoir's body count times the fraction the tail swept across the interval,
+    // rounded to a whole number of events by a SEEDED Bernoulli on the fractional remainder (deterministic
+    // stochastic rounding, so the run delivers the expected total without authoring a per-tick count). A spent
+    // tail (nothing swept) or an exhausted reservoir delivers no new bodies, which is a physical statement rather
+    // than a failure, so the deferred queue below still drains against it.
+    //
+    // THE SHOT-NOISE GAP, measured rather than waved at. Floor-plus-Bernoulli has variance `r(1-r) <= 0.25` in
+    // the count, whatever the expectation, where a Poisson arrival process has variance equal to the expectation
+    // itself. At an expected 10.3 strikes that is 0.21 against 10.3, an under-dispersion of about fiftyfold, so
+    // this bombardment carries essentially NO shot noise: it delivers the right mean with almost none of the
+    // clustering a real accretion tail shows, and a run cannot produce an anomalously heavy or light epoch by
+    // chance. Closing it needs a seeded Poisson sampler, which the workspace does not have
+    // ([`civsim_core::Rng`] exposes `for_entity`, `for_coords`, `range_i32`, `range_u32` and `unit_fixed`, with
+    // no arrival-process draw), so it is a named follow-on rather than a defect fixed here.
+    let newly_offered = match rate0
+        .checked_sub(rate1)
+        .filter(|swept| *swept > Fixed::ZERO)
+        .and_then(|swept| flux.reservoir_body_count.checked_mul(swept))
+        .filter(|expected| *expected > Fixed::ZERO)
+    {
+        Some(expected) => {
+            let floor_count = expected.to_int().max(0) as u64;
+            let remainder = expected
+                .checked_sub(Fixed::from_int(expected.to_int()))
+                .unwrap_or(Fixed::ZERO);
+            floor_count.saturating_add(u64::from(rng.unit_fixed(0) < remainder))
+        }
+        None => 0,
+    };
+
+    // THE OFFER, and the WITHHOLDING that makes the cap conservative. This tick's new bodies plus the queue the
+    // cap withheld earlier are offered together; the cap admits what it can and the REST IS WITHHELD rather than
+    // discarded. The cap is a compute bound, so truncating at it used to delete real bodies from a reservoir
+    // whose analytic decline went on counting them as swept. Every body the tail delivers now either strikes, is
+    // still queued, or is counted unrealizable ([`DeepTimeState::unrealized_impacts`]), so the budget closes.
+    let offered = newly_offered.saturating_add(state.deferred_impacts);
+    let count = offered.min(flux.per_tick_impact_cap as u64);
+    next.deferred_impacts = offered - count;
     if count == 0 {
         return next;
     }
@@ -765,14 +927,23 @@ pub fn bombard_tick(
     // The running surface the ejecta arcs fly over: the volcanic crust (kilometres, converted to metres) plus
     // the bombardment relief built so far, so an impact clears the real relief (volcanic highlands AND earlier
     // craters), and a later strike this tick sees the craters the earlier ones dug.
-    let mut surface_m: Vec<Fixed> = (0..n_cells)
+    //
+    // BOTH LEGS ARE CHECKED and the whole surface is built or none of it is. The kilometre-to-metre conversion
+    // fell back to zero and the relief add saturated, so a column whose crust could not be expressed in metres
+    // reached the ballistic arc as a datum-level surface: the ejecta flew over sea level where the world holds a
+    // highland, and nothing recorded it. A surface this tick cannot form is a tick it cannot bombard, which is
+    // the soft-fail the degenerate-call guard above already takes.
+    let surface_built: Option<Vec<Fixed>> = (0..n_cells)
         .map(|i| {
-            let crust_m = next.crust_thickness_km[i]
-                .checked_mul(Fixed::from_int(1000))
-                .unwrap_or(Fixed::ZERO);
-            crust_m.saturating_add(next.impact_relief_m[i])
+            next.crust_thickness_km[i]
+                .checked_mul(M_PER_KM)
+                .and_then(|crust_m| crust_m.checked_add(next.impact_relief_m[i]))
         })
         .collect();
+    let mut surface_m = match surface_built {
+        Some(s) => s,
+        None => return next,
+    };
 
     for i in 0..count {
         // Distinct counters per strike keep the location and size draws independent within the tick stream.
@@ -785,7 +956,13 @@ pub fn bombard_tick(
             flux.differential_slope,
         ) {
             Some(r) => r,
-            None => continue, // a non-drawable reservoir (a degenerate range): skip, never fabricate a size
+            // A non-drawable reservoir (a degenerate size range): never fabricate a size. COUNTED rather than
+            // merely skipped, because the event came out of the reservoir's budget; and NOT deferred, because
+            // the same range would refuse it identically on every later tick, so re-offering it would spin.
+            None => {
+                next.unrealized_impacts = next.unrealized_impacts.saturating_add(1);
+                continue;
+            }
         };
         let impactor = Impactor {
             radius,
@@ -797,7 +974,36 @@ pub fn bombard_tick(
         // crater; skip it, never fabricate a size.
         let bowl = match crater(impactor, flux.target, flux.coupling) {
             Some(c) => c,
-            None => continue,
+            // Counted for the same reason as the size refusal above: a crater the law cannot solve for this
+            // world's target and coupling will not solve on a retry either.
+            None => {
+                next.unrealized_impacts = next.unrealized_impacts.saturating_add(1);
+                continue;
+            }
+        };
+
+        // THE BASIN RASTER IS PREPARED AND VALIDATED BEFORE ANYTHING IS COMMITTED, so a strike lands WHOLE or
+        // not at all (the same atomicity `DeepTimeRefusal` argues for the interior tick). The row used to be
+        // pushed and the count advanced before the raster was attempted, so a basin that could not be applied
+        // left a crater row and a count with no relief behind them.
+        let basin_raster = if bowl.diameter >= flux.forces.cell_size {
+            match prepared_basin_raster(
+                width,
+                height,
+                &surface_m,
+                source,
+                impactor,
+                flux,
+                &next.impact_relief_m,
+            ) {
+                Some(r) => Some(r),
+                None => {
+                    next.unrealized_impacts = next.unrealized_impacts.saturating_add(1);
+                    continue;
+                }
+            }
+        } else {
+            None
         };
 
         // EMIT THE ROW: the discrete crater individual, recorded at its true derived size (rows not rasters). The
@@ -821,30 +1027,14 @@ pub fn bombard_tick(
         // [`apply_impact`] (the basin that resurfaces a province, its thermal/province feedback). A sub-cell
         // crater has written its ROW above and touches this coarse field no further (rows not rasters), so the
         // province field is no longer smeared with sub-cell craters.
-        if bowl.diameter >= flux.forces.cell_size {
-            // Compose the basin onto the province surface through the already-built chain: the crater law's
-            // paraboloid bowl, the isotropic ballistic ejecta fan, the conservative redistribution. The returned
-            // delta (metres, in the field's raw bits) sums to exactly zero (excavated bowl equals deposited
-            // blanket). Land it in the relief field and keep the running surface in step so a later basin this
-            // tick flies over the updated terrain; adding the identical delta to both preserves the sum exactly.
-            let delta = apply_impact(
-                width,
-                height,
-                &surface_m,
-                source,
-                impactor,
-                flux.target,
-                flux.coupling,
-                flux.ejecta,
-                flux.forces,
-            );
-            for (cell, &d) in delta.iter().enumerate() {
-                if d != 0 {
-                    next.impact_relief_m[cell] =
-                        Fixed::from_bits(next.impact_relief_m[cell].to_bits().saturating_add(d));
-                    surface_m[cell] = Fixed::from_bits(surface_m[cell].to_bits().saturating_add(d));
-                }
-            }
+        //
+        // The raster was composed and CHECKED above, through the already-built chain (the crater law's
+        // paraboloid bowl, the isotropic ballistic ejecta fan, the conservative redistribution), so committing
+        // it here is an assignment that cannot fail. Both fields move by the identical delta, which preserves
+        // each sum exactly and keeps a later basin this tick flying over the terrain the earlier ones dug.
+        if let Some((relief, surface)) = basin_raster {
+            next.impact_relief_m = relief;
+            surface_m = surface;
         }
 
         // HEAT-LEDGER HOOK (a deep-time interior heat ledger does not exist yet, so this posts nowhere). The
@@ -856,9 +1046,121 @@ pub fn bombard_tick(
         // mass RATIO and never forms the impactor mass), so the posting awaits the wide-magnitude energy substrate
         // (the log-space / Tier-2 units wiring), a sibling to the assembly binding-energy posting gap already
         // flagged. The hook is this site; the impactor state the energy needs is in scope.
+        //
+        // The open edge is carried in the TYPE and no longer in this comment alone: `impact_kinetic_energy_j` is
+        // the call that ledger will make, and it REFUSES with `ImpactHeatRefusal::UnrepresentableInFixedPoint`,
+        // so a consumer meets a stop it must handle rather than an omission it may not notice.
     }
 
     next
+}
+
+/// Form the basin RASTER for one large impact and VALIDATE it before any of it is committed: the conservative
+/// [`apply_impact`] delta, checked for the zero sum it promises and for representability in both fields it lands
+/// in, returned as the two MOVED fields (the province impact relief and the running ballistic surface), or `None`
+/// if either check fails. Returning the moved fields rather than the delta is what makes the commit at the call
+/// site an assignment that cannot fail, so the strike is atomic without a second arithmetic argument.
+///
+/// WHY THE ZERO SUM IS CHECKED HERE rather than trusted: [`apply_impact`] documents that its delta sums to
+/// exactly zero (the excavated bowl equals the deposited blanket), and until now only a unit test asserted it, so
+/// a kernel that stopped being conservative would have written a mass-creating basin into every later run with
+/// nothing at the site to catch it. This is the Residual Law's conservation clause used as a DETECTOR where the
+/// quantity moves.
+///
+/// WHY THE ADDS ARE CHECKED: both fields used `saturating_add`. The support-bound collapse can argue its own
+/// saturating add cannot saturate, and the argument is the CAP rather than the magnitudes (every column there is
+/// bounded by a representable mass cap). The accumulated impact relief carries no such cap, so no equivalent
+/// argument was available here, and one saturated cell would have silently broken the zero sum that makes the
+/// bombardment conservative.
+fn prepared_basin_raster(
+    width: usize,
+    height: usize,
+    surface_m: &[Fixed],
+    source: usize,
+    impactor: Impactor,
+    flux: &ImpactFluxParams,
+    impact_relief_m: &[Fixed],
+) -> Option<(Vec<Fixed>, Vec<Fixed>)> {
+    let delta = apply_impact(
+        width,
+        height,
+        surface_m,
+        source,
+        impactor,
+        flux.target,
+        flux.coupling,
+        flux.ejecta,
+        flux.forces,
+    );
+    if delta.len() != impact_relief_m.len() || delta.len() != surface_m.len() {
+        return None;
+    }
+    if delta.iter().map(|&d| d as i128).sum::<i128>() != 0 {
+        return None;
+    }
+    let mut relief = Vec::with_capacity(delta.len());
+    let mut surface = Vec::with_capacity(delta.len());
+    for (cell, &d) in delta.iter().enumerate() {
+        relief.push(Fixed::from_bits(
+            impact_relief_m[cell].to_bits().checked_add(d)?,
+        ));
+        surface.push(Fixed::from_bits(surface_m[cell].to_bits().checked_add(d)?));
+    }
+    Some((relief, surface))
+}
+
+/// WHY AN IMPACT'S HEAT IS NOT POSTED, carried as a TYPE rather than as a comment alone. The bombardment
+/// delivers kinetic energy to a young surface and there is no deep-time interior heat ledger for it to post
+/// into, so the edge is open at both ends: no sink, and no representable quantity to send. Naming the second
+/// half as a refusal keeps a later consumer from assuming the energy was simply not wired up.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ImpactHeatRefusal {
+    /// The impactor's own data is degenerate (a non-positive radius, density, or closing speed), so no kinetic
+    /// energy is defined for it.
+    DegenerateImpactor,
+    /// The kinetic energy leaves the fixed-point window. This is the ordinary case for a planetary impactor
+    /// rather than an edge case, and it is the reason the posting waits: Q32.32 rails near `2.147e9`, while a
+    /// kilometre-scale body at a few kilometres per second carries joules past `1e19`. The same magnitude wall
+    /// is why the crater law returns its ejecta as a mass RATIO and never forms the impactor mass.
+    UnrepresentableInFixedPoint,
+}
+
+/// The kinetic energy `E = 1/2 * m * U^2` one impactor delivers (joules), with `m = (4/3) * pi * r^3 * rho` from
+/// THIS event's own data, so an alien impactor population is a data row rather than a code path. This is the
+/// call a deep-time interior heat ledger will make; it exists now so the open edge is a typed REFUSAL a consumer
+/// must handle rather than a comment a consumer may miss.
+///
+/// It is expected to refuse for any planetary impactor, and it EARNS that refusal from the arithmetic rather
+/// than asserting it: the products are formed smallest-first and checked at every stage, so the caller learns
+/// the energy is unrepresentable because the multiplication said so. It is not called from [`bombard_tick`],
+/// because a value that cannot be formed cannot be accumulated; the posting lands when the wide-magnitude energy
+/// substrate does (the log-space / Tier-2 units wiring), a sibling to the assembly binding-energy posting gap.
+pub fn impact_kinetic_energy_j(impactor: Impactor) -> Result<Fixed, ImpactHeatRefusal> {
+    if impactor.radius <= Fixed::ZERO
+        || impactor.density <= Fixed::ZERO
+        || impactor.velocity <= Fixed::ZERO
+    {
+        return Err(ImpactHeatRefusal::DegenerateImpactor);
+    }
+    let unrepresentable = || ImpactHeatRefusal::UnrepresentableInFixedPoint;
+    // E = (2/3) * pi * r^3 * rho * U^2, formed in stages so the first overflow is the one reported.
+    let r3 = impactor
+        .radius
+        .checked_mul(impactor.radius)
+        .and_then(|r2| r2.checked_mul(impactor.radius))
+        .ok_or_else(unrepresentable)?;
+    let mass = r3
+        .checked_mul(impactor.density)
+        .and_then(|m| m.checked_mul(Fixed::PI))
+        .and_then(|m| m.checked_mul(Fixed::from_ratio(4, 3)))
+        .ok_or_else(unrepresentable)?;
+    let u_squared = impactor
+        .velocity
+        .checked_mul(impactor.velocity)
+        .ok_or_else(unrepresentable)?;
+    mass.checked_mul(u_squared)
+        .and_then(|e| e.checked_div(Fixed::from_int(2)))
+        .ok_or_else(unrepresentable)
 }
 
 /// The GPa-to-Pa unit bridge (`1 GPa = 1e9 Pa`), the exact factor the derived operative shear strength (in GPa)
@@ -941,10 +1243,20 @@ fn derived_crust_yield_pa(shear_modulus_gpa: Fixed, knockdown: Fixed) -> Option<
 /// untouched: this is a LATERAL transfer of crust that already exists, never an extraction or a return, so the
 /// ledger's crust-plus-source total is invariant across it as well.
 ///
-/// This is the INSTANTANEOUS-COLLAPSE idealization: within the tick the whole over-bound excess flows to the
-/// bound. A viscous flow RATE (a partial collapse per tick) would be a reserved value, so the instantaneous limit
-/// is the derive-first floor and needs none; a rate, and a LOCAL grid-neighbour (downhill) flow in place of the
-/// accommodation-space fill, are the named reserved-with-basis refinements, flagged not authored. A crust denser
+/// THE CAP IS DERIVED; THE COLLAPSE LAW IS NOT. The ceiling `sigma_y / (rho * g)` reads the crust's own strength
+/// and its own gravitational load, so the bound this relaxes TO is derived. HOW it relaxes is an authored
+/// limiting idealization standing in for transport physics this module does not carry, and the three things it
+/// lacks are stated rather than implied: the whole over-bound excess moves within one tick, so there is no flow
+/// RATE; the excess is apportioned across every under-cap column in the field regardless of distance (the
+/// destination scan below walks all `n` columns, with no neighbour or distance restriction), so there is no
+/// TRANSPORT PATH; and no energy is dissipated and no damage state is accumulated, so a column that has
+/// collapsed once is indistinguishable afterwards from one that never did.
+///
+/// The absence of a rate is a GAP, never a virtue. Under the Residual Law's fluctuation-dissipation clause a
+/// relaxation that dissipates with no fluctuation partner is declared INCOMPLETE, and the instantaneous limit is
+/// what a reserved-with-basis viscous rate would replace rather than a floor that needs none. A rate (the
+/// crust's own effective viscosity against the driving stress), and a LOCAL grid-neighbour (downhill) flow in
+/// place of the accommodation-space fill, are the named refinements, flagged not authored. A crust denser
 /// than the mantle (`k <= 0`) FOUNDERS rather than standing as topography, a delamination regime this tall-relief
 /// collapse does not cover, so it is left unchanged. Call it AFTER [`step_deep_time`] (and after [`bombard_tick`])
 /// each tick, so the interior tick stays byte-identical and a run that never collapses replays bit-for-bit.
@@ -989,7 +1301,7 @@ pub fn relax_to_support_bound(state: &DeepTimeState, params: &SupportBoundParams
         .checked_mul(params.gravity_m_per_s2)
         .filter(|rho_g| *rho_g > Fixed::ZERO)
         .and_then(|rho_g| sigma_y_pa.checked_div(rho_g))
-        .and_then(|bound_m| bound_m.checked_div(Fixed::from_int(1000)))
+        .and_then(|bound_m| bound_m.checked_div(M_PER_KM))
     {
         Some(b) if b > Fixed::ZERO => b,
         _ => return state.clone(),
@@ -1356,7 +1668,7 @@ mod tests {
     }
 
     /// A representative DERIVED thermal cluster for the deep-time scaffolds, at the magnitudes a
-    /// Mars-class forsterite column actually derives. Constructed rather than derived because these tests
+    /// Mars-class forsterite column derives. Constructed rather than derived because these tests
     /// vary ONE input (the radiogenic budget) and should not carry a full assemblage minimization.
     fn test_cluster() -> crate::geodynamics::ColumnThermalProperties {
         crate::geodynamics::ColumnThermalProperties {
@@ -1418,6 +1730,25 @@ mod tests {
         let mut s = base.clone();
         s.impact_count += 1;
         assert_ne!(d0, s.realization_digest(), "impact_count is not covered");
+
+        // The bombardment's two RESIDUAL counts. A world owing withheld strikes is mid-bombardment, and a world
+        // carrying unrealized events has a reservoir and a crater law that do not meet; neither is the same
+        // world as one whose bombardment closed cleanly at the same crater count.
+        let mut s = base.clone();
+        s.deferred_impacts += 1;
+        assert_ne!(
+            d0,
+            s.realization_digest(),
+            "deferred_impacts is not covered"
+        );
+
+        let mut s = base.clone();
+        s.unrealized_impacts += 1;
+        assert_ne!(
+            d0,
+            s.realization_digest(),
+            "unrealized_impacts is not covered"
+        );
 
         let mut s = base.clone();
         s.columns[1].temperature = Fixed::from_int(1700);
@@ -2109,6 +2440,161 @@ mod tests {
         );
     }
 
+    /// The parameters must cover ONE column (the laterally uniform broadcast) or EVERY column. Three rows
+    /// against four columns used to fall through to row zero for all four, delivering a laterally uniform world
+    /// to a caller who had asked for a varied one, with nothing in the result to say so.
+    #[test]
+    fn a_parameter_set_matching_neither_one_column_nor_every_column_fails_loud() {
+        let state = young_state(4, 1800);
+        let melt = melt_params();
+        let dt = Fixed::from_int(50);
+        // Both LEGAL shapes still step, so the guard admits what the contract documents.
+        assert!(
+            step_deep_time(&state, &[mantle_params(50)], &melt, dt).is_ok(),
+            "one row broadcasts to every column"
+        );
+        let per_column: Vec<_> = (0..4).map(|i| mantle_params(50 + i)).collect();
+        assert!(
+            step_deep_time(&state, &per_column, &melt, dt).is_ok(),
+            "one row per column is the lateral-variation shape"
+        );
+        // Anything else is a mismatch, and it reports BOTH counts rather than broadcasting row zero.
+        let short: Vec<_> = (0..3).map(|i| mantle_params(50 + i)).collect();
+        assert_eq!(
+            step_deep_time(&state, &short, &melt, dt),
+            Err(DeepTimeRefusal::ColumnParamsLengthMismatch {
+                supplied: 3,
+                columns: 4
+            }),
+            "a parameter set covering neither one column nor every column fails loud"
+        );
+    }
+
+    /// The melt conversion has ONE failure and TWO physical zeros, and the single catch-all arm pooled them, so
+    /// an overflowing conversion moved zero mass and produced a state identical to a quiescent column's. The
+    /// failure now refuses; both physical zeros still step, which is the half that would break if the refusal
+    /// were over-eager.
+    #[test]
+    fn an_unrepresentable_melt_conversion_refuses_where_the_physical_zeros_step() {
+        let dt = Fixed::from_int(50);
+        // A crust density large enough that the asked thickness times it leaves the representable window. The
+        // asked thickness does not move with it, because `crust_growth` integrates the melt column at the
+        // SOURCE density, so this isolates the conversion.
+        let mut melt = melt_params();
+        melt.crust_density_kg_per_m3 = Fixed::from_int(2_000_000_000);
+        assert_eq!(
+            step_deep_time(&young_state(3, 1800), &[mantle_params(50)], &melt, dt),
+            Err(DeepTimeRefusal::MeltMassUnrepresentable { index: 0 }),
+            "a melt mass that cannot be FORMED refuses, where it used to move zero and read as quiescent"
+        );
+
+        // PHYSICAL ZERO ONE: a sub-solidus column asks for no melt. Zero is the right answer, not a failure.
+        let cold = step_deep_time(
+            &young_state(3, 1000),
+            &[mantle_params(50)],
+            &melt_params(),
+            dt,
+        )
+        .expect("a mantle below its own surface solidus makes no melt, which is not a refusal");
+        assert!(
+            cold.crust_areal_mass.iter().all(|&m| m == Fixed::ZERO),
+            "no melt, no crust, and no refusal"
+        );
+
+        // PHYSICAL ZERO TWO: a source already spent pays nothing, the finite-source limit as a reservoir.
+        let mut spent = young_state(3, 1800);
+        for s in spent.source_areal_mass.iter_mut() {
+            *s = Fixed::ZERO;
+        }
+        let spent = step_deep_time(&spent, &[mantle_params(50)], &melt_params(), dt)
+            .expect("a spent source pays nothing, which is the finite source, not a refusal");
+        assert!(
+            spent.crust_areal_mass.iter().all(|&m| m == Fixed::ZERO),
+            "a spent source builds no crust, and no refusal"
+        );
+    }
+
+    /// A credit or debit that cannot land refuses. Holding BOTH stocks preserved the pairing, which is why it
+    /// was written, and it also asserted "no melt moved this tick", which the failed arithmetic cannot support.
+    #[test]
+    fn a_transfer_that_cannot_be_represented_refuses_rather_than_holding_both_stocks() {
+        // A crust stock at the fixed-point ceiling under a zero thickness readout: an incoherent pair, and the
+        // caller mismatch the refusal exists for. The zero thickness makes the melt column ask for a full
+        // increment, and the credit onto a ceiling-valued stock cannot be represented.
+        let mut state = young_state(3, 1800);
+        state.crust_areal_mass[1] = Fixed::MAX;
+        assert_eq!(
+            step_deep_time(
+                &state,
+                &[mantle_params(50)],
+                &melt_params(),
+                Fixed::from_int(50)
+            ),
+            Err(DeepTimeRefusal::TransferUnrepresentable { index: 1 }),
+            "a credit that cannot land refuses, and names the column"
+        );
+    }
+
+    /// The clock refuses rather than railing. A saturating add returned a state reporting that the tick had
+    /// advanced geological time when it had not, and every later tick would have railed at the same instant.
+    #[test]
+    fn a_clock_that_cannot_advance_refuses_rather_than_railing() {
+        let mut state = young_state(3, 1800);
+        state.elapsed_myr = Fixed::MAX;
+        assert_eq!(
+            step_deep_time(
+                &state,
+                &[mantle_params(50)],
+                &melt_params(),
+                Fixed::from_int(50)
+            ),
+            Err(DeepTimeRefusal::ClockOverflow),
+            "a clock at the ceiling refuses, where saturating reported a tick that advanced no time"
+        );
+        // The magnitude, so the arm is not mistaken for a reachable one: a clock standing at the age of the
+        // universe is four orders below the rail and steps without complaint.
+        let mut aged = young_state(3, 1800);
+        aged.elapsed_myr = Fixed::from_int(13_800);
+        assert!(
+            step_deep_time(
+                &aged,
+                &[mantle_params(50)],
+                &melt_params(),
+                Fixed::from_int(50)
+            )
+            .is_ok(),
+            "13.8 Gyr is nowhere near the 2.147e9 Myr ceiling; the arm guards the arithmetic, not the physics"
+        );
+    }
+
+    /// The unit bridge's doc claimed `None` on a non-positive INPUT while the guard admitted a zero thickness,
+    /// and the CODE was right: a layer of no thickness has no mass. Refusing there would break the melt
+    /// transaction's own physical zero, because a sub-solidus column asks for zero kilometres every tick.
+    #[test]
+    fn a_zero_thickness_layer_has_no_mass_and_only_a_negative_one_refuses() {
+        let rho = Fixed::from_int(CRUST_DENSITY_KG_M3);
+        assert_eq!(
+            areal_mass_mg_per_m2(Fixed::ZERO, rho),
+            Some(Fixed::ZERO),
+            "no thickness, no mass: the right answer rather than a refusal"
+        );
+        assert_eq!(
+            areal_mass_mg_per_m2(Fixed::from_int(-1), rho),
+            None,
+            "a negative thickness is geometrically meaningless and refuses"
+        );
+        assert_eq!(
+            areal_mass_mg_per_m2(Fixed::from_int(10), Fixed::ZERO),
+            None,
+            "a material of no density does not exist and refuses"
+        );
+        assert_eq!(
+            areal_mass_mg_per_m2(Fixed::from_int(10), Fixed::from_int(-1)),
+            None,
+            "a negative density refuses"
+        );
+    }
+
     #[test]
     fn the_tick_is_deterministic() {
         let start = young_state(6, 1800);
@@ -2463,6 +2949,210 @@ mod tests {
         assert_eq!(
             zero.impact_count, state.impact_count,
             "a zero-duration tick draws nothing"
+        );
+    }
+
+    /// The cap is a COMPUTE bound, so what it cannot admit is WITHHELD and re-offered rather than deleted. The
+    /// truncation discarded the remainder while the flux's analytic decline went on counting those bodies as
+    /// swept, so the reservoir's budget leaked by exactly the amount the cap bit.
+    #[test]
+    fn the_cap_withholds_the_impacts_it_cannot_admit_and_re_offers_them() {
+        let (w, h) = (20usize, 20usize);
+        let n = w * h;
+        // A large reservoir against a tiny cap, so the cap binds hard on the first tick.
+        let flux = flux_params(1000, 100, 5);
+        let params = [mantle_params(50)];
+        let dt = Fixed::from_int(50);
+        let state =
+            step_deep_time(&young_state(n, 1800), &params, &melt_params(), dt).expect("steps");
+        let first = bombard_tick(&state, w, h, &flux, 0x1, 0, dt);
+        let struck = first.impact_count - state.impact_count;
+        assert!(struck <= 5, "the cap still bounds the per-tick work");
+        assert!(
+            first.deferred_impacts > 0,
+            "what the cap could not admit is queued, never discarded"
+        );
+
+        // THE BUDGET CLOSES over the tick, against the offer computed from the flux model itself rather than
+        // from a remembered number: everything the tail delivered either struck, is queued, or is counted
+        // unrealizable. The one-event slack is the seeded Bernoulli on the expectation's fractional remainder.
+        let swept = tail_rate_fraction(Fixed::ZERO, flux.sweep_timescale_myr)
+            .and_then(|r0| {
+                tail_rate_fraction(state.elapsed_myr, flux.sweep_timescale_myr)
+                    .and_then(|r1| r0.checked_sub(r1))
+            })
+            .expect("the tail sweeps a fraction over the first tick");
+        let expected = flux
+            .reservoir_body_count
+            .checked_mul(swept)
+            .expect("the expected strike count");
+        let floor_offer = expected.to_int().max(0) as u64;
+        let accounted =
+            struck + first.deferred_impacts + (first.unrealized_impacts - state.unrealized_impacts);
+        assert!(
+            accounted == floor_offer || accounted == floor_offer + 1,
+            "the reservoir's budget must close: {accounted} accounted against an offer of {floor_offer} \
+             (+1 for the Bernoulli)"
+        );
+
+        // THE QUEUE IS LIVE AFTER THE TAIL IS SPENT, which is the whole point of withholding: a body the cap
+        // held back is one the reservoir already delivered, so it must still strike once the tail supplies
+        // nothing. Note the queue GROWS while the tail out-delivers the cap (388 against a cap of 5 above); it
+        // drains only when new arrivals fall below the cap, and this is that regime.
+        let mut spent_tail =
+            step_deep_time(&young_state(n, 1800), &params, &melt_params(), dt).expect("steps");
+        spent_tail.elapsed_myr = Fixed::from_int(100_000); // far past the tail's decay
+        spent_tail.deferred_impacts = 7;
+        let drained = bombard_tick(&spent_tail, w, h, &flux, 0x1, 99, dt);
+        assert!(
+            drained.impact_count > spent_tail.impact_count,
+            "the queue keeps delivering after the tail itself is spent"
+        );
+        assert_eq!(
+            drained.deferred_impacts, 2,
+            "the queue draws down by exactly what the cap admits (7 held, 5 admitted, 2 left)"
+        );
+    }
+
+    /// An event the world's own parameters cannot realize used to `continue` with no trace, so a deleted impact
+    /// was invisible: `impact_count` advances only after a strike fully lands, so a broken reservoir and a quiet
+    /// epoch produced the same state.
+    #[test]
+    fn an_impact_the_world_cannot_realize_is_counted_rather_than_deleted() {
+        let (w, h) = (20usize, 20usize);
+        let n = w * h;
+        // A DISORDERED size range, so the size-frequency draw refuses every strike: every admitted event is
+        // unrealizable rather than merely unlucky.
+        let mut flux = flux_params(50, 100, 8);
+        flux.min_impactor_radius_m = Fixed::from_int(1500);
+        flux.max_impactor_radius_m = Fixed::from_int(300);
+        let dt = Fixed::from_int(50);
+        let state = step_deep_time(
+            &young_state(n, 1800),
+            &[mantle_params(50)],
+            &melt_params(),
+            dt,
+        )
+        .expect("steps");
+        let after = bombard_tick(&state, w, h, &flux, 0x1, 0, dt);
+        assert_eq!(
+            after.impact_count, state.impact_count,
+            "no crater is fabricated out of a refused size draw"
+        );
+        assert_eq!(
+            after.unrealized_impacts, 8,
+            "every event the cap admitted is COUNTED as unrealized, one per refused draw"
+        );
+        assert!(
+            after.deferred_impacts > 0,
+            "and the events the cap never admitted stay queued, not deleted"
+        );
+    }
+
+    /// A tail rate outside its own domain is not a swept reservoir. `unwrap_or(Fixed::ZERO)` on the interval's
+    /// END rate made the swept fraction MAXIMAL, so a refusal produced the LARGEST possible bombardment: alone
+    /// among the fallbacks here it failed upward.
+    #[test]
+    fn a_clock_outside_the_tail_rates_domain_draws_nothing_rather_than_everything() {
+        let (w, h) = (20usize, 20usize);
+        let n = w * h;
+        let flux = flux_params(1000, 100, 64);
+        let mut state = young_state(n, 1800);
+        state.elapsed_myr = Fixed::ZERO
+            .checked_sub(Fixed::from_int(10))
+            .expect("a negative clock is representable");
+        let after = bombard_tick(&state, w, h, &flux, 0x1, 0, Fixed::from_int(50));
+        assert_eq!(
+            after.impact_count, state.impact_count,
+            "a clock outside the tail rate's domain draws NOTHING, where it used to draw a full capped tick"
+        );
+        assert_eq!(
+            after.deferred_impacts, 0,
+            "and queues nothing, because nothing was delivered"
+        );
+    }
+
+    /// A surface that cannot be expressed in metres is a tick that cannot be bombarded. The kilometre-to-metre
+    /// conversion fell back to zero, so a column whose crust overflowed the conversion was handed to the
+    /// ballistic arc as a datum-level plain and the ejecta flew over sea level where the world holds a highland.
+    #[test]
+    fn a_surface_that_cannot_be_expressed_in_metres_does_not_bombard_a_datum_level_plain() {
+        let (w, h) = (20usize, 20usize);
+        let n = w * h;
+        let flux = flux_params(1000, 100, 8);
+        let dt = Fixed::from_int(50);
+        let state = step_deep_time(
+            &young_state(n, 1800),
+            &[mantle_params(50)],
+            &melt_params(),
+            dt,
+        )
+        .expect("steps");
+        // THE CONTROL: this state does draw, so the hold below is the conversion and not a quiet tick.
+        let drew = bombard_tick(&state, w, h, &flux, 0x5EED, 0, dt);
+        assert!(
+            drew.impact_count > state.impact_count,
+            "the control tick draws impacts"
+        );
+        // One column whose kilometres cannot be carried in metres (3e6 km at 1000 m/km leaves the window).
+        let mut tall = state.clone();
+        tall.crust_thickness_km[7] = Fixed::from_int(3_000_000);
+        assert!(
+            tall.crust_thickness_km[7].checked_mul(M_PER_KM).is_none(),
+            "the fixture must overflow the conversion, or the test proves nothing"
+        );
+        let held = bombard_tick(&tall, w, h, &flux, 0x5EED, 0, dt);
+        assert_eq!(
+            held.impact_count, tall.impact_count,
+            "a surface that cannot be formed is not bombarded over a substituted zero"
+        );
+        assert_eq!(
+            held.craters.len(),
+            tall.craters.len(),
+            "and no crater row is emitted against it either"
+        );
+    }
+
+    /// The impact heat posting is an OPEN EDGE carried in the TYPE rather than in a comment alone, and the
+    /// refusal is EARNED by the arithmetic: a representative impactor from this module's own flux scaffold
+    /// cannot have its kinetic energy formed in Q32.32. That is the disclosure's claim, checked rather than
+    /// restated.
+    #[test]
+    fn impact_kinetic_energy_refuses_at_planetary_magnitudes_and_says_why() {
+        let flux = flux_params(30, 100, 64);
+        let body = Impactor {
+            radius: flux.max_impactor_radius_m,
+            velocity: flux.impact_velocity_m_s,
+            density: flux.impactor_density,
+        };
+        assert_eq!(
+            impact_kinetic_energy_j(body),
+            Err(ImpactHeatRefusal::UnrepresentableInFixedPoint),
+            "a 1.5 km body at 17 km/s carries energy far past the fixed-point ceiling"
+        );
+        // A degenerate impactor is a DIFFERENT refusal, so a consumer can tell bad data from a magnitude wall.
+        assert_eq!(
+            impact_kinetic_energy_j(Impactor {
+                radius: Fixed::ZERO,
+                velocity: flux.impact_velocity_m_s,
+                density: flux.impactor_density,
+            }),
+            Err(ImpactHeatRefusal::DegenerateImpactor),
+            "a body of no radius has no defined energy, and says so differently"
+        );
+        // And where it CAN be formed the law is the kinetic energy and not merely an overflow generator:
+        // E = (2/3) * pi * r^3 * rho * U^2, which at unit radius, density and speed is 2.0944 J.
+        let unit = impact_kinetic_energy_j(Impactor {
+            radius: Fixed::ONE,
+            velocity: Fixed::ONE,
+            density: Fixed::ONE,
+        })
+        .expect("a unit body is representable");
+        let want = 2.0 / 3.0 * std::f64::consts::PI;
+        assert!(
+            (unit.to_f64_lossy() - want).abs() < 1e-6,
+            "E(r=1, rho=1, U=1) must be (2/3)pi = {want}, got {}",
+            unit.to_f64_lossy()
         );
     }
 
