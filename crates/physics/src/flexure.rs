@@ -398,7 +398,7 @@ pub(crate) mod scaled {
     /// world below it would refuse legitimate small bodies: a Europa-class ice shell floats on a contrast near
     /// `0.08` at `1.31 m/s^2`, an `R_hat` of `0.0034`, a third of the design's floor, and its `D_hat / R_hat` is
     /// about 1 because a small world also has a thin lid. So the quotient is guarded by checked arithmetic,
-    /// which fails loud on the pairing that actually overflows, rather than by an input floor that would encode
+    /// which fails loud on the pairing that overflows, rather than by an input floor that would encode
     /// a large-world assumption.
     // @derives: the line-load flexural length scale in internal units <- the rigidity and the restoring modulus
     pub(crate) fn scaled_flexural_parameter(

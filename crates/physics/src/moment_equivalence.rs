@@ -902,7 +902,7 @@ pub fn bending_moment(
 
     Some(MomentReading {
         // The total is the one quantity that can still leave the window, and it fails loud when it does. The
-        // moment a load actually imposes is small (`M = 2 sqrt(2) e^(-3 pi/4) V0 alpha / 8`, at most about
+        // moment a load imposes is small (`M = 2 sqrt(2) e^(-3 pi/4) V0 alpha / 8`, at most about
         // `3.2e4 GPa km^2` over the declared load and length ranges); it is only an INDEPENDENTLY chosen
         // curvature, read against an independently chosen plate thickness, that can drive it past what
         // `GPa km^2` holds.
@@ -1473,7 +1473,7 @@ fn solve_line_load_from_ceiling(
     // CEILING'S rounding into the demand curve, so two admissible ceilings shifted the crossing by `5.8e-6`
     // relative and the bracketing's whole claim to exact start-independence went with it. The identity between
     // the two routes is checked instead (`the_bracket_constant_reproduces_the_curvature_at_a_rigidity`), which
-    // is the honest treatment of two genuinely different quantities related by an equation.
+    // is the honest treatment of two distinct quantities related by an equation.
     let bracket_constant = line_load_bracket_constant(v0, delta_rho, gravity)
         .ok_or(MomentEquivalenceRefusal::NotRepresentable)?;
     if bracket_constant <= ZERO {
@@ -4921,7 +4921,7 @@ mod tests {
             );
             assert_eq!(
                 other.curvature, derived.curvature,
-                "and the same curvature, which is the quantity the bracket actually bisects"
+                "and the same curvature, which is the quantity the bracket bisects"
             );
         }
     }
@@ -5600,7 +5600,7 @@ mod tests {
         );
         assert_eq!(
             worst_sign_changes, 1,
-            "and it must actually find crossings, or it proved nothing"
+            "and it must find real crossings, or it proved nothing"
         );
         // THE STAIR TREADS, REPORTED. This is the design's predicted departure from exact monotonicity, and
         // it is bounded here so that a change which turned it into something coarser would be caught.
