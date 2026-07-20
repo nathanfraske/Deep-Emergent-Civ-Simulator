@@ -9,7 +9,7 @@ The retired long-form board is `docs/working/CONSENSUS_ROADMAP_HISTORY.md`, pres
 ## Active arcs
 
 - 2026-07-20  #215 review remediation: 18 pushed, pins bit-exact, CI green -> `HANDOFFS.md`
-- 2026-07-20  Slack band DERIVES from 5 banked rung-disagreement ratios; not reserved -> `crates/materials/src/conductivity.rs`
+- 2026-07-20  Slack band derived and reserved value retired; province now stops at the coherence gate -> `crates/materials/src/conductivity.rs`
 - 2026-07-20  FLAGGED: physics ungated both ways, pins reach zero of it and per-PR CI excludes the capstone tests -> `docs/working/UNTANGLE_PLAN.md`
 - 2026-07-20  Moon tidal-heating kernel -> `claude/moon-tidal-heating` (off main, carries #193's survival filter; doc-review round done). `moons::tidal_heating_power_log10`, dormant; witness `henning_2009_tidal_heating` in `sources/registry.toml`. Detail in `HANDOFFS.md`.
 - 2026-07-19  Mountains / mid-band (increment 3) -> #205 merged; wire waits on the thermoelastic ladder (`crates/physics/src/thermoelastic.rs`, rung 3 needs 3 anchors). Detail in `HANDOFFS.md`.
