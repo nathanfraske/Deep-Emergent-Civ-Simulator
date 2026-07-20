@@ -8,8 +8,9 @@ The retired long-form board is `docs/working/CONSENSUS_ROADMAP_HISTORY.md`, pres
 
 ## Active arcs
 
-- 2026-07-20  #215 review remediation: 6 slices landed, pins bit-exact; viewer, column heat capacity and creep gate in flight -> `HANDOFFS.md`
-- 2026-07-20  BLOCKED: province field refuses, spinel needs a stoichiometric MgAl2O4 kappa_298; Slack 1962 ruled OUT as closer (3 off-composition spinels); hematite banked -> `crates/physics/data/phase_conductivity/manifest.toml`
+- 2026-07-20  #215 review remediation: 15 slices landed, pins bit-exact -> `HANDOFFS.md`
+- 2026-07-20  Slack band DERIVES from 5 banked rung-disagreement ratios; not reserved -> `crates/materials/src/conductivity.rs`
+- 2026-07-20  FLAGGED: pins run a quarantined dev-fixture example on Profile::Development, reaching zero physics -> `docs/working/UNTANGLE_PLAN.md`
 - 2026-07-20  Moon tidal-heating kernel -> `claude/moon-tidal-heating` (off main, carries #193's survival filter; doc-review round done). `moons::tidal_heating_power_log10`, dormant; witness `henning_2009_tidal_heating` in `sources/registry.toml`. Detail in `HANDOFFS.md`.
 - 2026-07-19  Mountains / mid-band (increment 3) -> #205 merged; wire waits on the thermoelastic ladder (`crates/physics/src/thermoelastic.rs`, rung 3 needs 3 anchors). Detail in `HANDOFFS.md`.
 - 2026-07-19  Seam D kernel built, flexural relief has a forebulge; producer-side wiring next -> `crates/physics/src/flexural_relief.rs`, `HANDOFFS.md`
