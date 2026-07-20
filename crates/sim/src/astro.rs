@@ -105,7 +105,16 @@ pub fn stellar_flux(mass_ratio: Fixed, exponent: Fixed, distance_au: Fixed) -> O
     // The mass-luminosity power law fixes the luminosity `L = L_sun * mass_ratio^exponent`, then the flux
     // derivation is shared with the direct-luminosity door: this delegates so the two forms cannot drift apart,
     // and is byte-identical to computing the luminosity inline (the same `Fixed` enters the same wide divide).
-    stellar_flux_from_luminosity_lsun(mass_ratio.powf(exponent), distance_au)
+    //
+    // THE POWER READS THE SATURATION SENTINEL BACK. At the production `exponent = 3.5` the composition
+    // `exp(y ln x)` saturates above `464` solar masses, and the bare form returned `Fixed::MAX` there with no
+    // signal. At one astronomical unit the wide divide caught it downstream (the flux itself overflowed and
+    // this refused), but that cover fails with distance: at `2000` solar masses and `100 AU` the flux is
+    // representable again, so the railed luminosity ESCAPED as `2.923e8 W/m^2` against a truth of
+    // `4.869e10`, `166x` low and perfectly plausible. Refusing at the power is the fix; leaning on a
+    // downstream range check was the bug. Bit-identical below the rail (`checked_powf` differs from `powf`
+    // only on the sentinel), so every mass that resolved before resolves to the same bits.
+    stellar_flux_from_luminosity_lsun(mass_ratio.checked_powf(exponent)?, distance_au)
 }
 
 /// The stellar-source flux from a DIRECTLY SUPPLIED bolometric luminosity (in `L_sun`), the door for a luminosity
@@ -7418,5 +7427,57 @@ mod tests {
             life_at_lo.to_f64_lossy(),
             life_at_hi.to_f64_lossy()
         );
+    }
+
+    /// THE MASS-LUMINOSITY RAIL ESCAPED THROUGH DISTANCE, which is why the guard sits on the POWER rather
+    /// than on the flux. At one astronomical unit the wide divide refused a railed luminosity for the
+    /// wrong reason (the flux itself overflowed), so the defect looked covered. Move the planet out and
+    /// the flux is representable again, and before the guard the railed luminosity escaped as a plausible
+    /// number: `2000` solar masses at `100 AU` returned `2.923e8 W/m^2` against a truth of `4.869e10`.
+    #[test]
+    fn the_stellar_flux_power_refuses_rather_than_letting_a_railed_luminosity_escape() {
+        let alpha = Fixed::from_ratio(35, 10); // the PRODUCTION exponent, viewer/main.rs:3203
+
+        // Below the rail, at the Mirror anchor, unchanged: the solar constant.
+        let solar = stellar_flux(Fixed::ONE, alpha, Fixed::ONE).expect("the Sun at 1 AU resolves");
+        assert!(
+            (solar.to_f64_lossy() - 1361.0).abs() < 1.0,
+            "the solar constant must be unchanged, got {}",
+            solar.to_f64_lossy()
+        );
+
+        // Below the rail but far out, where the old cover (the flux overflow) does not apply: still right.
+        for (m, d, truth) in [(400i32, 100i32, 1.74208e8f64), (400, 1000, 1.74208e6)] {
+            let got = stellar_flux(Fixed::from_int(m), alpha, Fixed::from_int(d))
+                .unwrap_or_else(|| panic!("{m} solar masses at {d} AU is inside the window"))
+                .to_f64_lossy();
+            assert!(
+                (got - truth).abs() / truth < 1e-3,
+                "{m} solar masses at {d} AU derives {got}, expected about {truth}"
+            );
+        }
+
+        // Past the rail, at every distance: a refusal rather than a wrong number. These are exactly the
+        // cases that escaped, and the two far ones are the ones the flux range check never caught.
+        for m in [1000i32, 2000] {
+            for d in [1i32, 10, 100, 1000] {
+                assert!(
+                    stellar_flux(Fixed::from_int(m), alpha, Fixed::from_int(d)).is_none(),
+                    "{m} solar masses at {d} AU rails the power and must refuse"
+                );
+            }
+        }
+
+        // And the guard is bit-neutral below the rail: same computation, sentinel aside.
+        for m in 1..464i32 {
+            let mass = Fixed::from_int(m);
+            let guarded = stellar_flux(mass, alpha, Fixed::from_int(100));
+            let unguarded =
+                stellar_flux_from_luminosity_lsun(mass.powf(alpha), Fixed::from_int(100));
+            assert_eq!(
+                guarded, unguarded,
+                "{m} solar masses must be bit-identical to the pre-guard form"
+            );
+        }
     }
 }

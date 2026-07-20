@@ -134,7 +134,22 @@ pub fn luminosity_ratio(
     if mass_ratio <= Fixed::ZERO || metallicity_ratio <= Fixed::ZERO {
         return None;
     }
-    let mass_factor = mass_ratio.powf(mass_luminosity_exponent);
+    // THE MASS POWER READS THE SATURATION SENTINEL BACK, because at the production `alpha = 3.5` it rails.
+    // `Fixed::powf` is `exp(y ln x)` and the exponential saturates to `Fixed::MAX` above `21.4875626`, so
+    // `M^3.5` stops being representable at `M = exp(21.4875626/3.5) = 464` solar masses. The bare form
+    // returned `Some(Fixed::MAX)` there with no signal: at `2000` solar masses it reported `2.147e9` where
+    // the truth is `3.578e11`, and because the RADIUS power (`beta = 0.8`) keeps growing while the
+    // luminosity is pinned, the effective temperature came back UNDER its cap and looked plausible,
+    // `59387 K` against a true `213459 K`. A refusal is the honest answer for a star past the window.
+    //
+    // Bit-identical below the rail: `checked_powf` runs the same `exp(y ln x)` and differs only on the
+    // sentinel, so every mass the old form got right returns the same bits.
+    //
+    // The METALLICITY power needs no such guard at any representable base: `ln` of a positive `Fixed`
+    // lies in `[-22.18, 21.49]`, so an exponent inside `[-0.9687, +0.9919]` cannot reach either rail, and
+    // the production `lambda = -0.44` is well inside. A caller passing a steeper exponent would be
+    // outside that window, which is the bound this function states rather than enforces.
+    let mass_factor = mass_ratio.checked_powf(mass_luminosity_exponent)?;
     let metallicity_factor = metallicity_ratio.powf(metallicity_luminosity_exponent);
     mass_factor.checked_mul(metallicity_factor)
 }
@@ -214,7 +229,7 @@ pub fn effective_temperature(
 ///
 /// A Sun-grade surface flux (~6.3e7 W/m^2) fits Q32.32, so that path rounds the absolute flux and is taken
 /// unchanged. But a hot massive star's SURFACE flux itself crosses the ceiling (an 18 M_sun star radiates
-/// ~1.5e10 W/m^2, above the ~2.1e9 Q32.32 max, because a hotter photosphere is genuinely brighter per unit area),
+/// ~1.5e10 W/m^2, above the ~2.1e9 Q32.32 max, because a hotter photosphere is brighter per unit area),
 /// so the absolute-flux read returns `None`. When it does, the SUN-RELATIVE form takes over without ever forming
 /// the wide flux: `T_eff = T_sun*(F/F_sun)^(1/4)`, where the flux RATIO `F/F_sun = luminosity_ratio/radius_ratio^2`
 /// is representable (~240 for 18 M_sun) and `T_sun` derives from the Sun's OWN representable surface flux. This is
@@ -719,5 +734,90 @@ mod tests {
             t_max(),
         );
         assert_eq!(a, b, "the front-end derivation replays deterministically");
+    }
+
+    /// THE MASS-LUMINOSITY RAIL, the defect this guard was added for, pinned by measurement.
+    ///
+    /// At the production `alpha = 3.5` the composition `exp(y ln x)` saturates above
+    /// `exp(21.4875626/3.5) = 464` solar masses. Before the guard this returned `Some(Fixed::MAX)` with no
+    /// signal. The star mass is a raw command-line argument (`crates/viewer/src/main.rs:464`, parsed with
+    /// no clamp), so the input is one argument away from any run.
+    #[test]
+    fn the_mass_luminosity_power_refuses_past_the_representable_window() {
+        let alpha = Fixed::from_ratio(35, 10); // the PRODUCTION exponent, viewer/main.rs:3203
+        let z = Fixed::ONE;
+        let lam = Fixed::ZERO - Fixed::from_ratio(44, 100); // the PRODUCTION lambda, viewer/main.rs:3205
+
+        // Below the rail it answers, and the answer is right.
+        for (m, truth) in [(1i32, 1.0f64), (18, 24743.1), (100, 1.0e7), (300, 4.6765e8)] {
+            let got = luminosity_ratio(Fixed::from_int(m), z, alpha, lam)
+                .unwrap_or_else(|| panic!("{m} solar masses is inside the window and must resolve"))
+                .to_f64_lossy();
+            assert!(
+                (got - truth).abs() / truth < 1e-3,
+                "{m} solar masses derives {got}, expected about {truth}"
+            );
+        }
+
+        // The threshold itself, measured rather than assumed: 463 resolves, 464 refuses.
+        assert!(
+            luminosity_ratio(Fixed::from_int(463), z, alpha, lam).is_some(),
+            "463 solar masses is the last representable mass and must still resolve"
+        );
+        assert!(
+            luminosity_ratio(Fixed::from_int(464), z, alpha, lam).is_none(),
+            "464 solar masses is past the window and must REFUSE, not return the rail"
+        );
+
+        // Past it, a refusal rather than a wrong number. Without the guard these returned
+        // Some(Fixed::MAX) = 2.147e9 against truths of 4.26e9, 3.16e10 and 3.58e11.
+        for m in [564i32, 1000, 2000] {
+            assert!(
+                luminosity_ratio(Fixed::from_int(m), z, alpha, lam).is_none(),
+                "{m} solar masses rails the power and must refuse"
+            );
+            assert!(
+                main_sequence_star(
+                    Fixed::from_int(m),
+                    z,
+                    alpha,
+                    Fixed::from_ratio(8, 10),
+                    lam,
+                    Fixed::ZERO - Fixed::from_ratio(18, 1000),
+                    Fixed::from_int(100_000),
+                )
+                .is_none(),
+                "the whole star must refuse at {m} solar masses, since its luminosity does"
+            );
+        }
+    }
+
+    /// THE GUARD IS BIT-NEUTRAL BELOW THE RAIL. `checked_powf` runs the same `exp(y ln x)` as `powf` and
+    /// differs only on the sentinel, so every mass that resolved before resolves to the SAME BITS. This
+    /// sweeps the whole resolvable mass range rather than sampling it, so a silent shift cannot hide.
+    #[test]
+    fn the_guard_changes_no_bits_below_the_rail() {
+        let alpha = Fixed::from_ratio(35, 10);
+        let z = Fixed::ONE;
+        let lam = Fixed::ZERO - Fixed::from_ratio(44, 100);
+        for m in 1..464i32 {
+            let mass = Fixed::from_int(m);
+            let unguarded = mass.powf(alpha).checked_mul(z.powf(lam));
+            let guarded = luminosity_ratio(mass, z, alpha, lam);
+            assert_eq!(
+                guarded, unguarded,
+                "{m} solar masses must be bit-identical to the pre-guard form"
+            );
+        }
+        // And at fractional masses, where the sub-stellar end approaches the underflow rail.
+        for n in 1..200i64 {
+            let mass = Fixed::from_ratio(n, 100);
+            let unguarded = mass.powf(alpha).checked_mul(z.powf(lam));
+            let guarded = luminosity_ratio(mass, z, alpha, lam);
+            assert_eq!(
+                guarded, unguarded,
+                "{n}/100 solar masses must be bit-identical to the pre-guard form"
+            );
+        }
     }
 }

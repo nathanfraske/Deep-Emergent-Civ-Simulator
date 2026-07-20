@@ -593,25 +593,56 @@ impl Fixed {
     /// too-wide size range, did not have one because of this rail, and returned `1.5e-2` where the truth
     /// was `3.2e-8`, five and a half orders high, in a value a caller would have believed.
     ///
-    /// SURVEYED ACROSS THE TREE, so the exposure is a measurement rather than an alarm. Of the shapes
-    /// actually called: the Mie-Grueneisen volume ratio reaches `3.2` of the `21.5` budget, the
-    /// Birch-Murnaghan cube root `0.4`, the flexural parameter `5.2`, the elastic-thickness inversion
-    /// `6.9`, and a stellar mass-luminosity power at a hundred solar masses `16.1`. The one shape that
-    /// rails in practice is the impact size-frequency ratio, at `34.5` over six decades, and it is the
-    /// one that was found returning a wrong number.
+    /// SURVEYED ACROSS THE TREE, so the exposure is a measurement rather than an alarm. Budgets below are
+    /// MAGNITUDES of `y ln x`, against a window about 22 wide either way. Of the shapes the engine calls:
+    /// the crater strength group reaches `13.9` (toward the underflow side), the Mie-Grueneisen volume
+    /// ratio `8.6` at the steepest banked `q` (also underflow), the disk surface density `5.6`, the
+    /// metallicity dex power `2.8` (toward saturation), and the Birch-Murnaghan cube root `0.4`. The full
+    /// site-by-site measurement, with the input bound behind each number and which rail each approaches,
+    /// is `docs/working/POWF_CALL_SITE_AUDIT.md`.
+    ///
+    /// TWO SHAPES REACH A RAIL. The impact size-frequency ratio spends `34.5` over six decades of size,
+    /// and `world::impact_flux` now guards it (a too-wide reservoir refuses rather than answering). The
+    /// stellar mass-luminosity power `M^3.5` rails above `464` solar masses, and it was found ESCAPING:
+    /// the railed luminosity reaches a caller as a plausible flux at distance, `166x` low at `2000` solar
+    /// masses with no signal. Both call sites now read the sentinel back.
+    ///
+    /// THERE ARE TWO RAILS, and they are not the same kind of failure. The upper one saturates to
+    /// [`Fixed::MAX`] when `y ln x > 21.4875626` (measured, the point where `exp` exceeds `2^31`), and its
+    /// error is UNBOUNDED: at `(1e8)^2.5` this returns `2.147e9` against a truth of `1e20`. The lower one
+    /// underflows to [`Fixed::ZERO`] when `y ln x < -22`, and its error is bounded by roughly ONE ULP,
+    /// because `e^-22 = 2.79e-10` and one ulp is `2.33e-10`, so a zeroed result was never more than 1.2
+    /// grid steps from zero to begin with. Treat the upper rail as a defect to guard and the lower one as
+    /// the representable floor doing its job.
+    ///
+    /// THE EXPONENT WINDOW, the cheapest bound a caller can check. `ln` of a representable positive
+    /// `Fixed` lies in `[-22.1807098, 21.4875626]` (the ulp and [`Fixed::MAX`]), so an exponent inside
+    /// `[-0.9687499, +0.9918528]` CANNOT reach either rail for ANY representable base, no matter what the
+    /// base is. Every cube root, fourth root, and fractional exponent in the tree is covered by that one
+    /// fact and needs no further argument. Outside the window the caller owes a bound on the BASE.
     ///
     /// Use [`Fixed::checked_powf`] where the result feeds a decision. Reach for this one only where the
     /// operands are bounded by something that keeps `y ln x` inside the window, and say what that is.
+    pub fn powf(self, y: Fixed) -> Fixed {
+        if self <= Fixed::ZERO {
+            return Fixed::ZERO;
+        }
+        y.mul(self.ln()).exp()
+    }
+
     /// `x^y`, or `None` where the composition rails.
     ///
     /// Reads [`Fixed::exp`]'s saturation sentinel back rather than trusting the value: a result of
     /// exactly [`Fixed::MAX`] from a finite argument means the exponential clamped, so the true power is
-    /// somewhere above the representable window and no number here is honest. A non-positive base still
-    /// returns `None` rather than the bare form's zero, because a domain violation is not a result.
+    /// somewhere above the representable window and no number here is honest. A non-positive base
+    /// returns `None` rather than [`Fixed::powf`]'s zero, because a domain violation is not a result.
     ///
-    /// THE ONE FALSE POSITIVE, stated so it is not discovered later: a computation whose true value lands
-    /// exactly on `Fixed::MAX` is indistinguishable from a rail and is refused. That is the correct
-    /// trade. A wrong number that looks right costs more than a refusal on a boundary a caller can widen.
+    /// THE TWO FALSE POSITIVES, stated so they are not discovered later. A computation whose true value
+    /// lands exactly on `Fixed::MAX` is indistinguishable from a rail and is refused. A computation whose
+    /// true value falls below one ulp is indistinguishable from an underflow and is refused, where the
+    /// bare form would return the zero that is in fact the correct representable answer. Both are the
+    /// right trade: a wrong number that looks right costs more than a refusal on a boundary a caller can
+    /// widen.
     pub fn checked_powf(self, y: Fixed) -> Option<Fixed> {
         if self <= Fixed::ZERO {
             return None;
@@ -621,13 +652,6 @@ impl Fixed {
             return None;
         }
         Some(r)
-    }
-
-    pub fn powf(self, y: Fixed) -> Fixed {
-        if self <= Fixed::ZERO {
-            return Fixed::ZERO;
-        }
-        y.mul(self.ln()).exp()
     }
 
     /// The COMPLEMENTARY ERROR FUNCTION `erfc(x) = 1 - erf(x)`, by Abramowitz and Stegun 7.1.26 (a
@@ -780,6 +804,103 @@ mod powf_rail_tests {
                 "{decades} decades must REFUSE rather than return the rail"
             );
         }
+    }
+
+    /// THE EXPONENT WINDOW, the bound that classifies most call sites without any argument about the base.
+    ///
+    /// `ln` of a representable positive `Fixed` lies in `[ln(ulp), ln(MAX)] = [-22.1807098, 21.4875626]`,
+    /// so `y ln x` is bounded by the exponent alone. An exponent inside `[-0.9687499, +0.9918528]` cannot
+    /// reach either rail for ANY representable base. This SWEEPS the whole representable range (every
+    /// power-of-two magnitude, both extremes) at each edge and one step past it, so the window is measured
+    /// rather than derived, and a future change to `exp`'s or `ln`'s window moves this test.
+    ///
+    /// The two edges are different because the rails are not symmetric: the upper rail sits at
+    /// `+21.4875626` and the lower at `-22`, and a negative exponent maps the MOST negative log (the ulp,
+    /// `-22.1807098`) onto the UPPER rail, which is why the negative edge is the tighter of the two.
+    #[test]
+    fn the_exponent_window_cannot_rail_for_any_representable_base() {
+        // Spanning set: every power-of-two magnitude in the representable range, plus both extremes.
+        let mut bases: Vec<Fixed> = (0..63).map(|k| Fixed::from_bits(1i64 << k)).collect();
+        bases.push(Fixed::MAX);
+        bases.push(Fixed::from_bits(1));
+        bases.push(Fixed::ONE);
+        let rails = |y: Fixed| -> bool {
+            bases
+                .iter()
+                .filter(|b| **b > Fixed::ZERO)
+                .any(|b| b.powf(y) == Fixed::MAX || b.powf(y) == Fixed::ZERO)
+        };
+
+        // Inside the window, at both edges: nothing rails.
+        let positive_edge = Fixed::from_ratio(9_918_528, 10_000_000);
+        let negative_edge = Fixed::ZERO - Fixed::from_ratio(9_687_499, 10_000_000);
+        assert!(
+            !rails(positive_edge),
+            "the positive edge +0.9918528 must clear both rails for every representable base"
+        );
+        assert!(
+            !rails(negative_edge),
+            "the negative edge -0.9687499 must clear both rails for every representable base"
+        );
+
+        // One step past each edge: the window is tight, not merely sufficient.
+        assert!(
+            rails(Fixed::from_ratio(9_918_529, 10_000_000)),
+            "one step past the positive edge must rail, or the stated window is loose"
+        );
+        assert!(
+            rails(Fixed::ZERO - Fixed::from_ratio(9_687_500, 10_000_000)),
+            "one step past the negative edge must rail, or the stated window is loose"
+        );
+
+        // The exponents the engine calls inside the window, named so a change to one is caught here.
+        for (name, num, den) in [
+            ("cube root", 1i64, 3i64),
+            ("two thirds", 2, 3),
+            ("fourth root", 1, 4),
+            ("square root", 1, 2),
+            ("Chen-Tse hardness", 585, 1000),
+            ("Watson latent heat", 38, 100),
+            ("Neufeld collision", 1561, 10000),
+            ("Hofmeister simple lattice", 95, 100),
+            ("mass-radius beta", 8, 10),
+        ] {
+            let y = Fixed::from_ratio(num, den);
+            assert!(!rails(y), "{name} ({num}/{den}) must be inside the window");
+        }
+        for (name, num, den) in [
+            ("metallicity-luminosity lambda", 44i64, 100i64),
+            ("metallicity-radius mu", 18, 1000),
+            ("crater outer exponent", 64706, 100000),
+        ] {
+            let y = Fixed::ZERO - Fixed::from_ratio(num, den);
+            assert!(!rails(y), "{name} (-{num}/{den}) must be inside the window");
+        }
+    }
+
+    /// THE TWO RAILS ARE NOT THE SAME KIND OF FAILURE, measured so the audit's classification stands on a
+    /// number. The upper rail's error is unbounded; the lower rail's is about one ulp, because it fires
+    /// only where the true value was already at the bottom of the grid.
+    #[test]
+    fn the_lower_rail_costs_about_one_ulp_and_the_upper_one_is_unbounded() {
+        // The zero rail fires below `e^-22`; one ulp is `2^-32`. The gap is one grid step, so a zeroed
+        // result was never more than that far from zero.
+        let one_ulp = Fixed::from_bits(1).to_f64_lossy();
+        let zero_rail = (-22.0f64).exp();
+        assert!(
+            zero_rail / one_ulp < 1.25,
+            "the zero rail must sit within about one ulp of the grid floor, got {} ulp",
+            zero_rail / one_ulp
+        );
+        // The upper rail, by contrast, understates without bound.
+        let exponent = Fixed::from_ratio(25, 10);
+        let got = Fixed::from_int(10).powi(8).powf(exponent).to_f64_lossy();
+        assert_eq!(got, Fixed::MAX.to_f64_lossy(), "(1e8)^2.5 rails");
+        assert!(
+            1e20 / got > 1e10,
+            "the upper rail understates by more than ten orders here, got {}x",
+            1e20 / got
+        );
     }
 
     /// A non-positive base is a domain violation, not a result. The bare form returns zero, which a
