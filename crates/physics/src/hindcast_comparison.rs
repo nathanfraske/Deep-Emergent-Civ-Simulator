@@ -153,8 +153,8 @@ pub fn compare_to_row(derived: RigidityBand, row: &ElasticThicknessRow) -> Hindc
         // lies ENTIRELY above `D(max)` (its low edge exceeds the ceiling). The open lower side is never invented.
         ObservedElasticThickness::UpperBound { max_km } => {
             match crate::flexure::flexural_rigidity(e, nu, max_km) {
-                Some(d_max) => derived.low() <= d_max,
-                None => {
+                Ok(d_max) => derived.low() <= d_max,
+                Err(_) => {
                     return HindcastComparison::Refused {
                         reason: ComparisonRefusal::RigidityRefused,
                     }
@@ -165,8 +165,8 @@ pub fn compare_to_row(derived: RigidityBand, row: &ElasticThicknessRow) -> Hindc
         // unless the derived band lies ENTIRELY below `D(min)` (its high edge falls under the floor).
         ObservedElasticThickness::LowerBound { min_km } => {
             match crate::flexure::flexural_rigidity(e, nu, min_km) {
-                Some(d_min) => derived.high() >= d_min,
-                None => {
+                Ok(d_min) => derived.high() >= d_min,
+                Err(_) => {
                     return HindcastComparison::Refused {
                         reason: ComparisonRefusal::RigidityRefused,
                     }

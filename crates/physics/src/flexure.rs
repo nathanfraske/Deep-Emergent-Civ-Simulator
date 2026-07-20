@@ -151,7 +151,7 @@ pub fn euler_gamma() -> Fixed {
 /// ascending series grow like `e^(x/sqrt2)` toward the edge of the Q32.32 window, while `kei` itself has already
 /// decayed below `~1e-4` (it decays as `e^(-x/sqrt2)`), so the point-load deflection there is negligible and is
 /// taken as zero. Twelve `alpha` is far past the point-load forebulge (near `5.6 alpha`) and its decay.
-const KEI_SERIES_MAX: i32 = 12;
+pub(crate) const KEI_SERIES_MAX: i32 = 12;
 
 /// The maximum number of terms summed in the [`kelvin_kei`] ascending series before the loop gives up. A
 /// NUMERICAL resolution (the series converges well inside this within the `KEI_SERIES_MAX` domain, breaking early
@@ -176,6 +176,11 @@ const KEI_MAX_TERMS: i32 = 40;
 /// 1200 GPa is therefore REFUSED here, and the refusal is honest rather than a bug: the range proof does not
 /// reach it. What would be a defect is the two numbers sitting in one repository with nothing connecting
 /// them, which is how a caller meets an unexplained stop.
+///
+/// THAT STOP IS NO LONGER UNEXPLAINED. Such a material now refuses as
+/// [`FlexureRefusal::RepresentationPromotionRequired`] carrying this constant as its `proven_to`, which is a
+/// different answer from "not a material" and says what a promotion would have to cover. The gap was written
+/// down here in prose and had no channel in the return type until then.
 ///
 /// This doc claimed "diamond is about 1050 GPa" until an audit read it beside the floor. That figure was
 /// UNCITED and disagreed with the repository's own cited one; the floor's `~1200 GPa` is the number with a
@@ -205,6 +210,13 @@ pub const MAX_YOUNGS_MODULUS_GPA: i32 = 512;
 /// PROVENANCE under the seven-tag register: the upper limit is `[D]` derived (the incompressible bound),
 /// the lower is `[A]` authored (a proof envelope). One constant carrying two provenances is itself the
 /// argument for splitting it when a world needs the auxetic range.
+///
+/// THE TWO PROVENANCES NOW SPLIT IN THE REFUSAL, which is the smallest honest form of that argument. The
+/// derived upper bound and the physical `-1` of [`min_poisson_ratio_physical`] refuse as
+/// [`FlexureRefusal::NotAMaterial`]; the authored lower half refuses the auxetic band `-1 < nu < -1/2` as
+/// [`FlexureRefusal::RepresentationPromotionRequired`], carrying this constant's negation as its
+/// `proven_to`. The constant still holds one number and the two halves it stands for are no longer
+/// indistinguishable to a caller.
 pub fn max_poisson_ratio_magnitude() -> Fixed {
     Fixed::from_ratio(1, 2)
 }
@@ -251,11 +263,154 @@ pub const MAX_LINE_LOAD_GPA_KM: i32 = 500;
 /// that would have broken working physics.
 pub const MAX_POINT_LOAD_GPA_KM2: i32 = 67_108_864;
 
-/// Whether an elastic-constant pair sits inside the declared validation envelope, positive and bounded.
+// ----- THE REFUSAL, SPLIT: WHAT IS NOT A MATERIAL AGAINST WHAT THIS PROOF DOES NOT REACH -----
+
+/// The lower bound on Poisson's ratio for a STABLE isotropic elastic solid, `nu > -1`.
+///
+/// Positive-definite strain energy for an isotropic solid requires a positive bulk modulus and a positive
+/// shear modulus, which together bound `nu` to the open interval `(-1, 1/2)`. `-1` is therefore where the
+/// material stops existing, exactly as `1/2` is at the other end, and it is a DERIVED bound of the same
+/// standing rather than a proof envelope. It is a whole number in a dimensionless ratio, the same status as
+/// the `1/2`.
+pub fn min_poisson_ratio_physical() -> Fixed {
+    Fixed::from_int(-1)
+}
+
+/// Which declared input a refusal names.
+///
+/// A property of THIS KERNEL rather than of any world: the membership is the elastic inputs `D` is computed
+/// from, which is fixed by the formula `D = E T_e^3 / (12 (1 - nu^2))` and not by what a world contains. It
+/// is closed for the same reason the formula is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ElasticAxis {
+    /// Young's modulus `E`.
+    YoungsModulus,
+    /// Poisson's ratio `nu`.
+    PoissonRatio,
+    /// The moment-equivalent elastic thickness `T_e`.
+    ElasticThickness,
+}
+
+/// WHY THE FLEXURE KERNEL DECLINED TO RETURN A RIGIDITY, and the distinction the old `Option` could not make.
+///
+/// # A REPRESENTATION LIMIT IS NOT PHYSICAL INADMISSIBILITY
+///
+/// [`flexural_rigidity`] returned `None` for two unrelated things: a `nu` above `1/2`, where the material
+/// stops existing because its bulk modulus turns negative, and an `E` of `900 GPa`, where the material exists
+/// and this module's RANGE PROOF does not reach it. Both facts were already written down here in prose.
+/// [`MAX_YOUNGS_MODULUS_GPA`] records that the floor's own axis admits `1200 GPa` against this envelope's
+/// `512` and says outright that a material between them "is therefore REFUSED here";
+/// [`max_poisson_ratio_magnitude`] records that thermodynamic stability bounds `nu` at `-1` while this
+/// envelope bounds it at `-1/2`, and calls its own lower half `[A]` authored. Neither gap was expressible in
+/// the return type, so a caller met one unexplained stop and could not tell "these inputs are not a solid"
+/// from "widen the carrier and ask again".
+///
+/// That is a Principle 7 defect rather than a tidiness one. An auxetic lithosphere at `nu = -0.7` and a
+/// covalent one at `E = 900 GPa` are both stable solids, and a kernel that answers `None` for them has
+/// decided what a world may be made of. The alien must be a DATA ROW that asks for a wider carrier, never a
+/// material declared impossible, so the two refusals are two variants and the promotion arm carries what it
+/// would take to serve it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FlexureRefusal {
+    /// THE INPUTS DESCRIBE NO STABLE ISOTROPIC ELASTIC SOLID. This is physics: `E <= 0`, `nu > 1/2` (negative
+    /// bulk modulus), `nu <= -1` (indefinite strain energy), or a non-positive thickness, which is not a
+    /// plate. Widening any carrier changes nothing here, and no world data can make such a row admissible.
+    NotAMaterial {
+        /// Which input carries the inadmissible value.
+        axis: ElasticAxis,
+        /// The value as supplied.
+        value: Fixed,
+    },
+    /// THE INPUTS DESCRIBE A REAL MATERIAL THIS KERNEL'S RANGE PROOF DOES NOT REACH. The material exists; the
+    /// declared envelope the range table was proved over stops short of it. `proven_to` is how far this
+    /// kernel's proof extends on that axis, so the refusal states what a promotion would have to cover
+    /// rather than leaving the caller to guess.
+    ///
+    /// This is a statement about the ENGINE, and it is the honest form of the gap between an envelope
+    /// constant and the floor's own wider axis.
+    RepresentationPromotionRequired {
+        /// Which input the proof stops short on.
+        axis: ElasticAxis,
+        /// The value as supplied.
+        value: Fixed,
+        /// The furthest this kernel's range proof reaches on that axis.
+        proven_to: Fixed,
+    },
+    /// A fixed-point intermediate, or the answer itself, left the representable window. Distinct from a
+    /// promotion request because no wider ENVELOPE would help: the caller's own unit system cannot hold the
+    /// number. See [`InternalRigidity`], which is the carrier that exists for exactly this case.
+    NotRepresentable,
+}
+
+/// Classify an elastic-constant pair: physically inadmissible first, outside the proof second, admissible
+/// last (`None`).
+///
+/// `E` is read before `nu` within each class, so a pair that fails on both names one axis deterministically.
+fn classify_elastic_constants(e: Fixed, nu: Fixed) -> Option<FlexureRefusal> {
+    let proven_nu = max_poisson_ratio_magnitude();
+    // --- the physics: where the material stops existing ---
+    if e <= Fixed::ZERO {
+        return Some(FlexureRefusal::NotAMaterial {
+            axis: ElasticAxis::YoungsModulus,
+            value: e,
+        });
+    }
+    // `nu > 1/2` is a negative bulk modulus and `nu <= -1` is an indefinite strain energy. The upper bound is
+    // inclusive because `nu = 1/2` is the incompressible LIMIT, which is a real material and leaves
+    // `1 - nu^2 = 3/4`; the lower is exclusive because `-1` is the limit itself.
+    if nu > proven_nu || nu <= min_poisson_ratio_physical() {
+        return Some(FlexureRefusal::NotAMaterial {
+            axis: ElasticAxis::PoissonRatio,
+            value: nu,
+        });
+    }
+    // --- the proof: where this kernel stops proving, on a material that exists ---
+    let proven_e = Fixed::from_int(MAX_YOUNGS_MODULUS_GPA);
+    if e > proven_e {
+        return Some(FlexureRefusal::RepresentationPromotionRequired {
+            axis: ElasticAxis::YoungsModulus,
+            value: e,
+            proven_to: proven_e,
+        });
+    }
+    // The auxetic band `-1 < nu < -1/2`: stable solids the range table was never proved over. The `proven_to`
+    // is the NEGATIVE edge, since that is the side the request is on.
+    if let Some(proven_low) = Fixed::ZERO.checked_sub(proven_nu) {
+        if nu < proven_low {
+            return Some(FlexureRefusal::RepresentationPromotionRequired {
+                axis: ElasticAxis::PoissonRatio,
+                value: nu,
+                proven_to: proven_low,
+            });
+        }
+    }
+    None
+}
+
+/// Classify an elastic thickness, on the same two-class split as [`classify_elastic_constants`].
+fn classify_elastic_thickness(t_e: Fixed) -> Option<FlexureRefusal> {
+    if t_e <= Fixed::ZERO {
+        return Some(FlexureRefusal::NotAMaterial {
+            axis: ElasticAxis::ElasticThickness,
+            value: t_e,
+        });
+    }
+    let proven = Fixed::from_int(MAX_ELASTIC_THICKNESS_KM);
+    if t_e > proven {
+        return Some(FlexureRefusal::RepresentationPromotionRequired {
+            axis: ElasticAxis::ElasticThickness,
+            value: t_e,
+            proven_to: proven,
+        });
+    }
+    None
+}
+
+/// Whether an elastic-constant pair sits inside the declared validation envelope, positive and bounded. The
+/// boolean face of [`classify_elastic_constants`], for the scaled kernels, which report through `Option` and
+/// have no channel for a reason.
 fn elastic_constants_admissible(e: Fixed, nu: Fixed) -> bool {
-    e > Fixed::ZERO
-        && e <= Fixed::from_int(MAX_YOUNGS_MODULUS_GPA)
-        && nu.abs() <= max_poisson_ratio_magnitude()
+    classify_elastic_constants(e, nu).is_none()
 }
 
 /// Whether a LINE-load intensity sits inside the declared validation envelope ([`MAX_LINE_LOAD_GPA_KM`]).
@@ -314,13 +469,63 @@ pub(crate) fn uniform_strip_load_admissible(pressure: Fixed, half_width: Fixed) 
     integrated_bits.is_some_and(|load| load <= envelope_bits)
 }
 
+/// A FLEXURAL RIGIDITY IN THE KERNEL'S INTERNAL UNIT, `D_hat = D / (S0 L0^3)` with `S0 L0^3 = 32768 GPa km^3`
+/// ([`scaled::INTERNAL_RIGIDITY_GPA_KM3`]).
+///
+/// # WHY THIS IS A TYPE AND NOT A DOCUMENTED `Fixed`
+///
+/// [`scaled`] is crate-private on purpose, so the `32768` scale is not a number a downstream crate can read.
+/// Three public entry points nonetheless took or returned the internal rigidity as a bare `Fixed`:
+/// `FlexedPlate::from_internal_rigidity`, `FlexedPlate::rigidity_internal`, and
+/// `MomentEquivalentPlate::rigidity_internal` as a public FIELD. That combination is the worst of both: an
+/// external caller could not CONSTRUCT a correct value, because the factor it needs is private, but could
+/// pass any `Fixed` at all, and a plate silently 32768 times too stiff answers every query without
+/// complaining. This module's own test was reverse-engineering the factor by hand to read a rigidity back
+/// out, which is the same hole seen from the inside.
+///
+/// So the internal rigidity crosses a public boundary only inside this type. Construction from the raw
+/// internal number is crate-private; the two public ways in and out are DIMENSIONAL ([`Self::from_gpa_km3`],
+/// [`Self::to_gpa_km3`]), and both are fallible for the same honest reason the rest of the module is: some
+/// real plates are stiffer than `GPa km^3` can express, which is why the internal carrier exists at all.
+///
+/// The sibling of [`crate::flexural_relief::ElevationKm`], and for the same reason: a unit boundary that must
+/// be crossed on purpose rather than a comment saying which scale a `Fixed` is in.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct InternalRigidity(Fixed);
+
+impl InternalRigidity {
+    /// From a DIMENSIONAL rigidity in the caller's `GPa km^3`. `None` where the conversion leaves the
+    /// representable window.
+    pub fn from_gpa_km3(gpa_km3: Fixed) -> Option<Self> {
+        scaled::internal_rigidity(gpa_km3)
+    }
+
+    /// THE DIMENSIONAL READOUT in the caller's `GPa km^3`, or `None` where that unit cannot hold it. A `None`
+    /// here is a representation limit of the OUTPUT unit and never a statement about the plate: the engine's
+    /// own sluggish Mars-class column converges to `2.9e9 GPa km^3` and does not fit, while the plate is
+    /// perfectly real and every query against it answers.
+    pub fn to_gpa_km3(self) -> Option<Fixed> {
+        scaled::external_rigidity(self.0)
+    }
+
+    /// The raw internal number, for this crate's own arithmetic. Crate-private, which is the whole point.
+    pub(crate) fn internal(self) -> Fixed {
+        self.0
+    }
+
+    /// Wrap a raw internal number. Crate-private: only the conversions and the solve may mint one.
+    pub(crate) fn from_internal(hat: Fixed) -> Self {
+        InternalRigidity(hat)
+    }
+}
+
 /// THE INTERNAL UNIT SYSTEM AND THE SCALED KERNELS, private to the crate.
 ///
 /// The public functions of this module are thin boundaries over these: they convert in, call one kernel,
 /// and convert out. `moment_equivalence` reaches them directly where it needs a quantity the caller's own
 /// units cannot hold, which is how a fully elastic 800 km starting trial exists at all.
 pub(crate) mod scaled {
-    use super::{elastic_constants_admissible, Fixed};
+    use super::{elastic_constants_admissible, Fixed, InternalRigidity};
 
     // ----- THE INTERNAL UNIT SYSTEM (one coherent rescaling, not a family of local fallbacks) -----
 
@@ -377,8 +582,14 @@ pub(crate) mod scaled {
     }
 
     /// A rigidity (`GPa km^3`) in internal rigidities: `D_hat = D / 32768`.
-    pub(crate) fn internal_rigidity(gpa_km3: Fixed) -> Option<Fixed> {
-        gpa_km3.checked_div(Fixed::from_int(INTERNAL_RIGIDITY_GPA_KM3))
+    ///
+    /// Returns the TYPED [`InternalRigidity`] rather than a bare `Fixed`, because this is the one place the
+    /// internal rigidity is minted from a dimensional one and the type exists so nothing else can mint it.
+    /// The crate's own arithmetic reads through [`InternalRigidity::internal`].
+    pub(crate) fn internal_rigidity(gpa_km3: Fixed) -> Option<InternalRigidity> {
+        gpa_km3
+            .checked_div(Fixed::from_int(INTERNAL_RIGIDITY_GPA_KM3))
+            .map(InternalRigidity::from_internal)
     }
 
     /// An internal rigidity back to `GPa km^3`. Fails loud where the answer leaves the window, which is the
@@ -576,16 +787,34 @@ pub(crate) mod scaled {
 /// the internal arithmetic can make that fit an external `Fixed`, so this refuses there and the solver that
 /// needs such a plate as a private starting trial holds it in internal units instead.
 ///
-/// Fails loud (`None`) outside the declared operating envelope ([`MAX_YOUNGS_MODULUS_GPA`],
+/// Fails loud outside the declared operating envelope ([`MAX_YOUNGS_MODULUS_GPA`],
 /// [`max_poisson_ratio_magnitude`], [`MAX_ELASTIC_THICKNESS_KM`]), on a non-positive modulus or thickness, or
 /// where the rigidity leaves the caller's own window; never a fabricated rigidity. Deterministic (Principle 3).
-pub fn flexural_rigidity(e: Fixed, nu: Fixed, t_e: Fixed) -> Option<Fixed> {
-    if t_e > Fixed::from_int(MAX_ELASTIC_THICKNESS_KM) {
-        return None;
+///
+/// THE REFUSAL IS TYPED AND SPLIT ([`FlexureRefusal`]): a `nu` above `1/2` is not a material, an `E` of
+/// `900 GPa` is a material this kernel's range proof does not reach, and this function used to answer `None`
+/// for both. The precedence between them is DECLARED rather than emergent, because one call can fail both
+/// ways at once: something that is not a material cannot ask for a wider carrier, so every
+/// [`FlexureRefusal::NotAMaterial`] arm is tested across all inputs before any
+/// [`FlexureRefusal::RepresentationPromotionRequired`] arm is.
+// @derives: the flexural rigidity <- Youngs modulus, Poisson ratio and the elastic thickness
+pub fn flexural_rigidity(e: Fixed, nu: Fixed, t_e: Fixed) -> Result<Fixed, FlexureRefusal> {
+    let candidates = [
+        classify_elastic_constants(e, nu),
+        classify_elastic_thickness(t_e),
+    ];
+    // Every inadmissibility first, across all inputs, then any promotion request.
+    for refusal in candidates.into_iter().flatten() {
+        if matches!(refusal, FlexureRefusal::NotAMaterial { .. }) {
+            return Err(refusal);
+        }
     }
-    let t_hat = scaled::internal_length(t_e)?;
-    let d_hat = scaled::scaled_rigidity(e, nu, t_hat)?;
-    scaled::external_rigidity(d_hat)
+    if let Some(refusal) = candidates.into_iter().flatten().next() {
+        return Err(refusal);
+    }
+    let t_hat = scaled::internal_length(t_e).ok_or(FlexureRefusal::NotRepresentable)?;
+    let d_hat = scaled::scaled_rigidity(e, nu, t_hat).ok_or(FlexureRefusal::NotRepresentable)?;
+    scaled::external_rigidity(d_hat).ok_or(FlexureRefusal::NotRepresentable)
 }
 
 /// The FLEXURAL PARAMETER `alpha = (4 D / (delta_rho g))^(1/4)` (Turcotte & Schubert eq. 3-127; PIPELINE_FETCHES.md
@@ -605,7 +834,7 @@ pub fn flexural_rigidity(e: Fixed, nu: Fixed, t_e: Fixed) -> Option<Fixed> {
 /// `7.3e3`. Fails loud (`None`) on a non-positive `d`, `delta_rho`, or `g`, or on an out-of-range intermediate.
 /// Deterministic.
 pub fn flexural_parameter(d: Fixed, delta_rho: Fixed, g: Fixed) -> Option<Fixed> {
-    let d_hat = scaled::internal_rigidity(d)?;
+    let d_hat = scaled::internal_rigidity(d)?.internal();
     let g_hat = scaled::internal_gravity(g)?;
     let alpha_hat = scaled::scaled_flexural_parameter(d_hat, delta_rho, g_hat)?;
     scaled::external_length(alpha_hat)
@@ -621,7 +850,7 @@ pub fn flexural_parameter(d: Fixed, delta_rho: Fixed, g: Fixed) -> Option<Fixed>
 /// It shares [`flexural_parameter`]'s internal arithmetic and therefore its range: the `D / (delta_rho g)`
 /// division that used to overflow here unguarded is the same one, taken in internal units.
 pub fn flexural_length_axisymmetric(d: Fixed, delta_rho: Fixed, g: Fixed) -> Option<Fixed> {
-    let d_hat = scaled::internal_rigidity(d)?;
+    let d_hat = scaled::internal_rigidity(d)?.internal();
     let g_hat = scaled::internal_gravity(g)?;
     let l_hat = scaled::scaled_flexural_length_axisymmetric(d_hat, delta_rho, g_hat)?;
     scaled::external_length(l_hat)
@@ -711,7 +940,7 @@ pub fn line_load_amplitude(v0: Fixed, alpha: Fixed, d: Fixed) -> Option<Fixed> {
         return None;
     }
     let alpha_hat = scaled::internal_length(alpha)?;
-    let d_hat = scaled::internal_rigidity(d)?;
+    let d_hat = scaled::internal_rigidity(d)?.internal();
     let v_hat = scaled::internal_line_load(v0)?;
     let w0_hat = scaled::scaled_line_load_amplitude(v_hat, alpha_hat, d_hat)?;
     scaled::external_length(w0_hat)
@@ -752,7 +981,7 @@ pub fn line_load_deflection(v0: Fixed, alpha: Fixed, d: Fixed, perp_dist: Fixed)
         return None;
     }
     let alpha_hat = scaled::internal_length(alpha)?;
-    let d_hat = scaled::internal_rigidity(d)?;
+    let d_hat = scaled::internal_rigidity(d)?.internal();
     let v_hat = scaled::internal_line_load(v0)?;
     let w0_hat = scaled::scaled_line_load_amplitude(v_hat, alpha_hat, d_hat)?;
     if w0_hat == Fixed::ZERO {
@@ -872,7 +1101,7 @@ pub fn point_load_deflection(q0: Fixed, alpha: Fixed, d: Fixed, r: Fixed) -> Opt
     // `2 pi D_hat` at `1.9e5`. In the caller's units `2 pi D` alone overflowed for any `D` past `3.4e8`, which
     // is the third of the design's three `2 pi D` sites and the one that reaches a deflection.
     let l_hat = scaled::internal_length(l)?;
-    let d_hat = scaled::internal_rigidity(d)?;
+    let d_hat = scaled::internal_rigidity(d)?.internal();
     let q_hat = scaled::internal_force(q0)?;
     let l2_hat = l_hat.checked_mul(l_hat)?;
     let two_pi_d_hat = Fixed::from_int(2)
@@ -982,6 +1211,77 @@ pub fn kelvin_kei(x: Fixed) -> Fixed {
     let log_part = Fixed::ZERO - ln_term.mul(bei);
     let pi_part = Fixed::ZERO - pi_over_4.mul(ber);
     log_part.saturating_add(pi_part).saturating_add(bei_phi)
+}
+
+/// A CERTIFIED UPPER BOUND ON `|kei(x)|`, so the far field [`kelvin_kei`] truncates to zero can be REPORTED
+/// rather than silently dropped.
+///
+/// # WHY A BOUND EXISTS AT ALL, AND WHY IT IS NOT AN EXTRAPOLATION
+///
+/// [`kelvin_kei`] returns exactly zero past [`KEI_SERIES_MAX`], because the ascending series' `ber`/`bei`
+/// partial sums would leave the Q32.32 window there while `kei` itself has decayed to about `7.5e-5`. The
+/// consumer multiplies that suppressed value by a coefficient carrying the LOAD MAGNITUDE, so the absolute
+/// error scales with the load and accumulated unreported across a load list, and the cut leaves a step
+/// discontinuity at `r = KEI_SERIES_MAX l`. None of that was visible in any return type.
+///
+/// The bound follows from the function's own definition in four elementary steps, so it is an INEQUALITY and
+/// never a fit to the observed decay:
+///
+/// 1. `ker(x) + i kei(x) = K_0(x e^(i pi/4))` (Abramowitz & Stegun 9.9.2), so `|kei(x)| <= |K_0(x e^(i pi/4))|`
+///    because a modulus bounds an imaginary part.
+/// 2. `K_0(z) = integral_0^inf e^(-z cosh t) dt` holds for `|arg z| < pi/2` (A&S 9.6.24), and
+///    `|arg(x e^(i pi/4))| = pi/4`, so the representation applies.
+/// 3. `|e^(-z cosh t)| = e^(-Re(z) cosh t)` and `Re(x e^(i pi/4)) = x / sqrt(2)`, so moving the modulus
+///    inside the integral gives `|K_0(x e^(i pi/4))| <= K_0(x / sqrt(2))`.
+/// 4. `cosh t >= 1 + t^2/2`, every omitted Taylor term being positive, so
+///    `K_0(y) <= e^(-y) integral_0^inf e^(-y t^2/2) dt = sqrt(pi / (2 y)) e^(-y)`.
+///
+/// Together, `|kei(x)| <= sqrt(pi / (sqrt(2) x)) e^(-x / sqrt(2))`, which is what this returns. The only
+/// literals are `pi`, `2` and a square root, dimensionless mathematical constants of the same standing as the
+/// [`euler_gamma`] the series itself carries. No physical value is authored.
+///
+/// IT IS TIGHT, and the sharp way to say so is against the ENVELOPE rather than against a point value. `kei`
+/// oscillates under a decaying envelope whose leading asymptotic amplitude is `sqrt(pi / (2x)) e^(-x/sqrt(2))`,
+/// and this bound is that amplitude times `2^(1/4)`, exactly, at every radius: nineteen per cent above the
+/// sharpest asymptotic envelope. Comparing it against `|kei|` AT A CHOSEN RADIUS instead can mislead badly,
+/// because the zeros of `kei` sit near `sqrt(2) pi (n - 1/8)` and one of them falls at `12.773`, so the
+/// truncation radius catches the function on its way into a zero: the envelope there is `7.47e-5` while
+/// `|kei(12)|` is only about `3.88e-5`. A review brief reached this module quoting the former as the latter.
+///
+/// The bound is the model of the tail bound `crate::moment_equivalence` already carries for the yield-envelope
+/// moment integral: a quantity computed from what the caller supplied, compared against the representation's
+/// own resolution, never a decay ratio read off the integrand.
+///
+/// ONE REPRESENTABLE UNIT IS ADDED to the evaluated envelope, and it is not padding. The evaluation floors,
+/// so the computed value can sit up to a last bit UNDER the true envelope, and a bound that is under the
+/// quantity it bounds is not a bound. The same unit is what keeps the answer positive where `Fixed::exp`
+/// saturates to zero past `e^-22`: out there the true bound really is below the last bit Q32.32 holds, and
+/// "at most one representable unit" is the honest statement rather than "exactly none".
+///
+/// Valid for every `x > 0` and returned across the whole domain rather than past the cut alone; `Fixed::MIN` for a
+/// non-positive argument, where `kei` is at its finite `-pi/4` and no decaying envelope applies.
+/// Deterministic (Principle 3).
+// @derives: a certified upper bound on the Kelvin function kei <- the radius, through the K_0 integral representation
+pub fn kelvin_kei_far_field_bound(x: Fixed) -> Fixed {
+    if x <= Fixed::ZERO {
+        return Fixed::MIN;
+    }
+    let root_two = Fixed::from_int(2).sqrt();
+    let Some(scaled_radius) = x.checked_div(root_two) else {
+        return Fixed::EPSILON;
+    };
+    // `sqrt(pi / (sqrt(2) x))`, the algebraic square root of the algebraic prefactor.
+    let prefactor = root_two
+        .checked_mul(x)
+        .and_then(|denominator| Fixed::PI.checked_div(denominator))
+        .map(Fixed::sqrt);
+    // `e^(-x / sqrt(2))`; `Fixed::exp` saturates to zero past `e^-22`, which is handled by the added unit.
+    let decay = Fixed::ZERO.checked_sub(scaled_radius).map(Fixed::exp);
+    let envelope = match (prefactor, decay) {
+        (Some(p), Some(d)) => p.checked_mul(d).unwrap_or(Fixed::MAX),
+        _ => Fixed::MAX,
+    };
+    envelope.saturating_add(Fixed::EPSILON)
 }
 
 /// The zeroth-order Kelvin function `ker(x)`, the SECOND axisymmetric point-load Green's-function shape (the
@@ -1239,8 +1539,8 @@ pub struct PlateInputs {
 }
 
 impl PlateInputs {
-    /// The flexural rigidity `D` for these inputs ([`flexural_rigidity`]).
-    pub fn rigidity(&self) -> Option<Fixed> {
+    /// The flexural rigidity `D` for these inputs ([`flexural_rigidity`]), carrying its typed refusal.
+    pub fn rigidity(&self) -> Result<Fixed, FlexureRefusal> {
         flexural_rigidity(
             self.youngs_modulus,
             self.poisson_ratio,
@@ -1249,8 +1549,12 @@ impl PlateInputs {
     }
 
     /// The flexural parameter `alpha` for these inputs ([`flexural_parameter`]).
+    ///
+    /// `Option` rather than `Result`, because this composes the rigidity's refusal with
+    /// [`flexural_parameter`]'s own degenerate-restoring-term one and the two have no common type yet. A
+    /// caller that needs to know WHY reads [`Self::rigidity`] directly.
     pub fn parameter(&self) -> Option<Fixed> {
-        flexural_parameter(self.rigidity()?, self.density_contrast, self.gravity)
+        flexural_parameter(self.rigidity().ok()?, self.density_contrast, self.gravity)
     }
 }
 
@@ -1293,6 +1597,21 @@ pub struct Load {
 /// given the plate inputs. It computes `D` and `alpha` once, sums the per-load Green's-function contributions
 /// (each in its own distance to the query), and returns the signed deflection in the caller's length unit.
 ///
+/// # THE DECLARED SIGN CONVENTION IS THE LINE LOAD'S, AND THIS FUNCTION CONVERTS INTO IT
+///
+/// The two Green's functions agree that a positive magnitude is a downward load and DISAGREE on how to report
+/// the resulting deflection. [`line_load_deflection`] follows Turcotte and Schubert, where the depression under
+/// the load is POSITIVE; [`point_load_deflection`] follows Brotchie and Silvester, where `kei(0) = -pi/4` makes
+/// that same depression NEGATIVE. Each is faithful to its own primary and neither is edited. What is not
+/// faithful to anything is SUPERPOSING them raw, which had a ridge and a volcano of the same physical sense
+/// pulling the plate in opposite directions, so a load list's answer depended on which kinds were in it.
+///
+/// This evaluator therefore negates the point contribution, exactly as
+/// [`crate::flexural_relief::FlexedPlate::deflection_km`] does. The two public superposition paths had disagreed
+/// on the physics since the relief sibling was corrected and this one was not, which is the retired-here,
+/// alive-there pattern: a defect fixed in one copy and left standing in the other. Pinned by
+/// `every_load_kind_deflects_the_same_way_for_the_same_signed_magnitude_in_the_evaluator`.
+///
 /// The sum is over `Fixed` values, whose addition is exact and associative, so the result is INDEPENDENT of the
 /// order the loads are listed in (the determinism contract). Contribution bits accumulate exactly in `i128`
 /// before one final Q32.32 range check, so even large opposite-signed partial sums cannot make refusal depend on
@@ -1300,7 +1619,7 @@ pub struct Load {
 /// rigidity or parameter is degenerate, or if any contribution or the final sum leaves the representable
 /// window, never a fabricated deflection. Deterministic (Principle 3).
 pub fn deflection_at(inputs: &PlateInputs, loads: &[Load], qx: Fixed, qy: Fixed) -> Option<Fixed> {
-    let d = inputs.rigidity()?;
+    let d = inputs.rigidity().ok()?;
     let alpha = flexural_parameter(d, inputs.density_contrast, inputs.gravity)?;
     let mut total_bits = 0_i128;
     for load in loads {
@@ -1315,7 +1634,12 @@ pub fn deflection_at(inputs: &PlateInputs, loads: &[Load], qx: Fixed, qy: Fixed)
                 let dx2 = dx.checked_mul(dx)?;
                 let dy2 = dy.checked_mul(dy)?;
                 let r = dx2.checked_add(dy2)?.sqrt();
-                point_load_deflection(load.magnitude, alpha, d, r)?
+                let raw = point_load_deflection(load.magnitude, alpha, d, r)?;
+                // INTO THE DECLARED CONVENTION (see this function's doc): the axisymmetric kernel reports a
+                // downward load's depression as negative and the line kernel reports it as positive, so the
+                // sum is meaningless until one of them is converted. The line's is the declared one, because
+                // it is the one the strip inherits by integration.
+                Fixed::ZERO.checked_sub(raw)?
             }
             LoadKind::UniformStripY { half_width } => {
                 let perp = qx.checked_sub(load.x)?;
@@ -1368,6 +1692,18 @@ pub(crate) mod golden {
         /// says which kind of movement is being licensed, so a solver plateau cannot be waved through as a
         /// truncation site and a truncation site cannot be waved through as a solver plateau.
         pub solver_terminated: bool,
+        /// A NAMED, REVIEWED PHYSICS CORRECTION between `before` and `now`, or `None` for the ordinary row.
+        ///
+        /// The representation gate exists to stop a physics change being waved through as a rescaling. It
+        /// cannot also be the thing that stops a physics change from ever LANDING, so a row whose movement is
+        /// a deliberate correction says which defect it is correcting, in this field, at the row. The `now`
+        /// column stays a bit-exact pin either way; what the naming replaces is the movement arm alone.
+        ///
+        /// The gate is then INVERTED rather than dropped: a row claiming a correction must have moved PAST
+        /// both arms of the representation bound. A change that calls itself a correction and moves only as
+        /// far as a truncation site is a rescaling wearing a correction's clothes, which is the same
+        /// masquerade in the other direction.
+        pub physics_corrected: Option<&'static str>,
     }
 
     /// The relative movement a REPRESENTATION change is allowed to make, above which a moved golden row is
@@ -1433,13 +1769,23 @@ pub(crate) mod golden {
             } else {
                 MIGRATION_MOVE
             };
-            assert!(
-                moved <= bound || moved_bits <= MIGRATION_MOVE_BITS,
-                "{}: moved {moved:.3e} relative and {moved_bits} raw bits across the migration ({bf} to \
-                 {nf}), past both arms of the representation bound; that is a physical change wearing a \
-                 rescaling's clothes",
-                row.what
-            );
+            let within_representation = moved <= bound || moved_bits <= MIGRATION_MOVE_BITS;
+            match row.physics_corrected {
+                None => assert!(
+                    within_representation,
+                    "{}: moved {moved:.3e} relative and {moved_bits} raw bits across the migration ({bf} to \
+                     {nf}), past both arms of the representation bound; that is a physical change wearing a \
+                     rescaling's clothes",
+                    row.what
+                ),
+                Some(why) => assert!(
+                    !within_representation,
+                    "{}: claims the physics correction \"{why}\" but moved only {moved:.3e} relative and \
+                     {moved_bits} raw bits ({bf} to {nf}), inside the representation bound; a correction that \
+                     moves no further than a truncation site is a rescaling wearing a correction's clothes",
+                    row.what
+                ),
+            }
         }
     }
 
@@ -1449,6 +1795,7 @@ pub(crate) mod golden {
             before: Some(before),
             now: Some(now),
             solver_terminated: false,
+            physics_corrected: None,
         }
     }
 
@@ -1460,6 +1807,25 @@ pub(crate) mod golden {
             before: Some(before),
             now: Some(now),
             solver_terminated: true,
+            physics_corrected: None,
+        }
+    }
+
+    /// A row whose movement from `before` is a NAMED, REVIEWED PHYSICS CORRECTION rather than a rescaling
+    /// artifact; see [`Golden::physics_corrected`]. `why` names the defect being corrected and is printed
+    /// when the row's own inverted gate trips.
+    pub(crate) fn g_corrected(
+        what: &'static str,
+        before: i64,
+        now: i64,
+        why: &'static str,
+    ) -> Golden {
+        Golden {
+            what,
+            before: Some(before),
+            now: Some(now),
+            solver_terminated: false,
+            physics_corrected: Some(why),
         }
     }
 
@@ -1469,6 +1835,7 @@ pub(crate) mod golden {
             before: None,
             now,
             solver_terminated: false,
+            physics_corrected: None,
         }
     }
 }
@@ -1595,7 +1962,7 @@ mod tests {
             for t in thicknesses {
                 let t_km = Fixed::from_int(t);
                 let t_hat = scaled::internal_length(t_km).expect("a thickness converts");
-                let d_ext = flexural_rigidity(e, nu, t_km);
+                let d_ext = flexural_rigidity(e, nu, t_km).ok();
                 let d_hat = scaled::scaled_rigidity(e, nu, t_hat);
                 let (ef, nf, tf) = (e.to_f64_lossy(), nu.to_f64_lossy(), t_km.to_f64_lossy());
                 let plane = 12.0 * (1.0 - nf * nf);
@@ -1727,7 +2094,7 @@ mod tests {
     #[test]
     fn the_golden_vectors_hold_across_the_representation_migration() {
         let (e, nu, drho, g) = (earth_e(), earth_nu(), earth_drho(), earth_g());
-        let d = |t: i32| flexural_rigidity(e, nu, Fixed::from_int(t));
+        let d = |t: i32| flexural_rigidity(e, nu, Fixed::from_int(t)).ok();
         let (d10, d30, d40, d100) = (d(10), d(30), d(40), d(100));
         let a40 = flexural_parameter(d40.unwrap(), drho, g).unwrap();
         let d40v = d40.unwrap();
@@ -1932,13 +2299,31 @@ mod tests {
                 g_row("kei'(4.93181)", 97, 97),
                 Some(kelvin_kei_prime(kel(493181, 100000))),
             ),
-            // --- the superposing evaluator ---
+            // --- the superposing evaluator, whose point contribution now enters in the declared sign ---
+            //
+            // BOTH ROWS MOVE, and the movement is the correction rather than the representation. This load
+            // list holds two point loads beside one line load, and the evaluator summed the axisymmetric
+            // kernel's own `kei`-signed values straight into the line kernel's opposite convention, so the two
+            // kinds subtracted where they should have added. The relief sibling was corrected and this
+            // evaluator was not; the rows are the size of that disagreement.
             (
-                g_row("deflection_at(10,10)", 6439116477, 6439116384),
+                g_corrected(
+                    "deflection_at(10,10)",
+                    6439116477,
+                    12626949984,
+                    "the point contribution enters the sum in the line load's declared downward-positive \
+                     sense, the normalization `flexural_relief` already made",
+                ),
                 deflection_at(&inputs, &loads, Fixed::from_int(10), Fixed::from_int(10)),
             ),
             (
-                g_row("deflection_at(0,0)", 5154552311, 5154552224),
+                g_corrected(
+                    "deflection_at(0,0)",
+                    5154552311,
+                    11687324512,
+                    "the point contribution enters the sum in the line load's declared downward-positive \
+                     sense, the normalization `flexural_relief` already made",
+                ),
                 deflection_at(&inputs, &loads, Fixed::ZERO, Fixed::ZERO),
             ),
         ];
@@ -2209,6 +2594,128 @@ mod tests {
         );
     }
 
+    /// THE UNIFORM STRIP'S WHOLE-DOMAIN FORCE RESIDUAL, the direct twin of the line load's above.
+    ///
+    /// The strip was checked POINTWISE and nowhere else: `flexural_relief`'s Airy convergence sweep reads it at
+    /// the footprint centre alone, so a kernel with the right depth under the load and the wrong width would
+    /// have passed every test this substrate carried. This reads the whole domain instead.
+    ///
+    /// The identity is the plate equation integrated over the domain rather than a restatement of the closed
+    /// form: `integral(D w'''' dx)` vanishes on a field that decays at both ends, leaving
+    /// `delta_rho g integral(w dx)` equal to the total applied force. A strip of pressure `q` over `|x| <= a`
+    /// applies `q (2a)` per unit y-length, so `integral(w dx) = q (2a) / (delta_rho g)` WHATEVER the rigidity.
+    /// The deflection is only sampled here; no amplitude, coefficient or shape from the kernel is reused.
+    #[test]
+    fn the_uniform_strip_conserves_force_over_the_whole_domain() {
+        let t_e = Fixed::from_int(40);
+        let d = flexural_rigidity(earth_e(), earth_nu(), t_e).expect("D");
+        let alpha = flexural_parameter(d, earth_drho(), earth_g()).expect("alpha");
+        // A footprint comparable to the plate's own flexural parameter, so the strip is neither a line load in
+        // disguise (`a` far under `alpha`) nor a locally isostatic slab (`a` far over it).
+        let pressure = Fixed::from_ratio(1, 100); // 0.01 GPa
+        let half_width = Fixed::from_int(100); // a = 100 km against alpha ~ 91 km
+        let (q, a_km) = (0.01_f64, 100.0_f64);
+        let alpha_km = alpha.to_f64_lossy();
+
+        // Trapezoid over one side out to 40 alpha past the footprint edge, doubled: the deflection is even in
+        // `x` about the strip centre, which is the same shape the line-load integral above uses.
+        let step = alpha_km * 0.02;
+        let far = a_km + 40.0 * alpha_km;
+        let strip_at = |x: f64| -> f64 {
+            uniform_strip_load_deflection(
+                pressure,
+                half_width,
+                alpha,
+                earth_drho(),
+                earth_g(),
+                Fixed::from_ratio((x * 1000.0) as i64, 1000),
+            )
+            .expect("the strip evaluates")
+            .to_f64_lossy()
+        };
+        let mut integral = 0.0_f64;
+        let mut prev = strip_at(0.0);
+        let mut xg = step;
+        while xg < far {
+            let wv = strip_at(xg);
+            integral += 0.5 * (prev + wv) * step;
+            prev = wv;
+            xg += step;
+        }
+        let both_sides = 2.0 * integral;
+        let expect = q * (2.0 * a_km) / (3.3 * 0.0098); // q (2a) / (delta_rho g)
+        assert!(
+            (both_sides - expect).abs() < expect * 5e-3,
+            "integral(w dx) over the plate = {both_sides} vs q(2a)/(delta_rho g) = {expect}"
+        );
+    }
+
+    /// THE POINT LOAD'S WHOLE-DOMAIN FORCE RESIDUAL, the axisymmetric member of the same family, and the
+    /// strongest of the three because the point load had NO whole-domain check at all.
+    ///
+    /// `integral(w dA) = integral_0^inf w(r) 2 pi r dr = Q0 / (delta_rho g)`, the same plate-equation integral
+    /// as its two siblings: the biharmonic term vanishes on a decaying field and the restoring term carries the
+    /// whole applied force. The plate deflects by exactly the volume the load displaces, at any rigidity.
+    ///
+    /// # WHY THIS CATCHES WHAT THE CENTRAL-MAGNITUDE TEST CANNOT
+    ///
+    /// `the_point_load_central_deflection_is_the_analytic_magnitude` says so itself: it mirrors the code's own
+    /// amplitude and passes for either flexural length. This one does not. The coefficient carries `l^2` and the
+    /// area integral carries another `l^2`, so the total scales as `l^4`; running the Green's function on the
+    /// LINE-load `alpha = sqrt(2) l`, which is the defect this module shipped until 2026-07-17, moves the answer
+    /// by a factor of FOUR. The identity is also what ties the coefficient to the restoring modulus, which no
+    /// self-comparison inside the kernel can do.
+    ///
+    /// THE SIGN IS THE KERNEL'S OWN AND IS THE POINT OF A SEPARATE FINDING. `point_load_deflection` follows
+    /// Brotchie and Silvester, where `kei(0) = -pi/4` makes a DOWNWARD load's central deflection NEGATIVE, the
+    /// opposite of the line load's Turcotte and Schubert convention. So this integral comes out at
+    /// `-Q0 / (delta_rho g)` and is compared in magnitude. Superposing the two kernels raw is what
+    /// `flexural_relief` normalizes and what `deflection_at` now normalizes too.
+    #[test]
+    fn the_point_load_conserves_force_over_the_whole_plate() {
+        let t_e = Fixed::from_int(40);
+        let d = flexural_rigidity(earth_e(), earth_nu(), t_e).expect("D");
+        let alpha = flexural_parameter(d, earth_drho(), earth_g()).expect("alpha");
+        let l = flexural_length_axisymmetric(d, earth_drho(), earth_g()).expect("l");
+        let q0 = Fixed::from_int(500);
+        let l_km = l.to_f64_lossy();
+
+        // Out to the Kelvin series domain edge, `r = KEI_SERIES_MAX * l`, past which the kernel returns zero.
+        // That truncation is a real and SIGNED shortfall in this integral, not a rounding: `|kei|` out there is
+        // near `7.5e-5` while the area weight `2 pi r` is still growing, and the suppressed tail is a few
+        // thousandths of the total. It sits inside the same 5e-3 the line load's own residual is held to, and it
+        // is the reason that bound is not tighter here.
+        let step = l_km * 0.01;
+        let far = f64::from(KEI_SERIES_MAX) * l_km;
+        let point_at = |r: f64| -> f64 {
+            point_load_deflection(q0, alpha, d, Fixed::from_ratio((r * 1000.0) as i64, 1000))
+                .expect("the point load evaluates")
+                .to_f64_lossy()
+        };
+        // The integrand is `w(r) 2 pi r`, which vanishes at the origin because the area weight does, so the
+        // finite `kei(0) = -pi/4` needs no special handling.
+        let mut integral = 0.0_f64;
+        let mut prev = 0.0_f64;
+        let mut rg = step;
+        while rg <= far {
+            let wv = point_at(rg) * 2.0 * std::f64::consts::PI * rg;
+            integral += 0.5 * (prev + wv) * step;
+            prev = wv;
+            rg += step;
+        }
+        let expect = 500.0 / (3.3 * 0.0098); // Q0 / (delta_rho g), in the kernel's own negative sense
+        assert!(
+            (integral.abs() - expect).abs() < expect * 5e-3,
+            "integral(w 2 pi r dr) over the plate = {integral} vs -Q0/(delta_rho g) = {}",
+            -expect
+        );
+        assert!(
+            integral < 0.0,
+            "and it carries the axisymmetric kernel's own sign, which is why the superposition normalizes it: \
+             got {integral}"
+        );
+    }
+
     #[test]
     fn the_point_load_kei_matches_reference_values() {
         // The Kelvin function kei anchored at independent tabulated values (Abramowitz & Stegun): kei(0) = -pi/4,
@@ -2357,7 +2864,11 @@ mod tests {
             Fixed::from_ratio((r2 * 1000.0) as i64, 1000),
         )
         .unwrap();
-        let manual = p0.to_f64_lossy() + l1.to_f64_lossy() + p2.to_f64_lossy();
+        // THE POINT CONTRIBUTIONS ENTER NEGATED, which is the declared sign convention rather than a fudge:
+        // `point_load_deflection` reports a downward load's depression as negative (Brotchie and Silvester,
+        // `kei(0) = -pi/4`) and `line_load_deflection` reports it as positive (Turcotte and Schubert), so the
+        // hand-sum has to convert exactly as the evaluator does or the two disagree by twice the point terms.
+        let manual = -p0.to_f64_lossy() + l1.to_f64_lossy() - p2.to_f64_lossy();
         assert!(
             close(total, manual, 1e-3),
             "superposition {} vs hand-sum {manual}",
@@ -2370,21 +2881,94 @@ mod tests {
         assert_eq!(total, total_rev, "the deflection sum is order-independent");
     }
 
+    /// THE SUPERPOSITION INVARIANT FOR THIS EVALUATOR: a sum over load kinds is meaningful only if the kinds
+    /// agree on what a sign MEANS.
+    ///
+    /// The twin of `flexural_relief`'s `every_load_kind_deflects_the_same_way_for_the_same_signed_magnitude`,
+    /// and it is a twin because the defect was: the relief sibling normalized the axisymmetric kernel into the
+    /// line's convention and this evaluator did not, so the two public superposition paths disagreed about the
+    /// physics of the same load list. A ridge and a volcano of the same physical sense pulled the plate in
+    /// opposite directions here, and a list holding both read LOWER than the line alone.
+    #[test]
+    fn every_load_kind_deflects_the_same_way_for_the_same_signed_magnitude_in_the_evaluator() {
+        let inputs = PlateInputs {
+            youngs_modulus: earth_e(),
+            poisson_ratio: earth_nu(),
+            elastic_thickness: Fixed::from_int(35),
+            density_contrast: earth_drho(),
+            gravity: earth_g(),
+        };
+        let at = |kind: LoadKind, magnitude: Fixed| {
+            deflection_at(
+                &inputs,
+                &[Load {
+                    kind,
+                    magnitude,
+                    x: Fixed::ZERO,
+                    y: Fixed::ZERO,
+                }],
+                Fixed::ZERO,
+                Fixed::ZERO,
+            )
+            .expect("evaluates")
+            .to_f64_lossy()
+        };
+        let line = at(LoadKind::LineY, Fixed::from_int(20));
+        let strip = at(
+            LoadKind::UniformStripY {
+                half_width: Fixed::from_int(100),
+            },
+            Fixed::from_ratio(1, 100),
+        );
+        let point = at(LoadKind::Point, Fixed::from_int(500));
+        assert!(
+            line > 0.0 && strip > 0.0 && point > 0.0,
+            "every kind must deflect the same way under the same-signed magnitude: line {line}, strip \
+             {strip}, point {point}"
+        );
+        // AND THE SUM MUST NOT CANCEL, which is the defect in the form a consumer would have met it.
+        let both = deflection_at(
+            &inputs,
+            &[
+                Load {
+                    kind: LoadKind::LineY,
+                    magnitude: Fixed::from_int(20),
+                    x: Fixed::ZERO,
+                    y: Fixed::ZERO,
+                },
+                Load {
+                    kind: LoadKind::Point,
+                    magnitude: Fixed::from_int(500),
+                    x: Fixed::ZERO,
+                    y: Fixed::ZERO,
+                },
+            ],
+            Fixed::ZERO,
+            Fixed::ZERO,
+        )
+        .expect("evaluates")
+        .to_f64_lossy();
+        assert!(
+            both > line,
+            "two loads of the same sense must add rather than cancel: {both} against {line} for the line alone"
+        );
+    }
+
     #[test]
     fn the_kernel_fails_loud_on_degenerate_inputs() {
         // No fabricated value on a degenerate input: each guard returns None.
         assert!(
-            flexural_rigidity(Fixed::ZERO, earth_nu(), Fixed::from_int(30)).is_none(),
+            flexural_rigidity(Fixed::ZERO, earth_nu(), Fixed::from_int(30)).is_err(),
             "zero E"
         );
         assert!(
-            flexural_rigidity(earth_e(), earth_nu(), Fixed::ZERO).is_none(),
+            flexural_rigidity(earth_e(), earth_nu(), Fixed::ZERO).is_err(),
             "zero T_e"
         );
         // `nu = 1` is past the declared envelope's `|nu| <= 0.5`, which is also the physical
         // incompressible limit for an isotropic solid; it is refused one step before `1 - nu^2` reaches zero.
         assert!(
-            flexural_rigidity(earth_e(), Fixed::from_int(1), Fixed::from_int(30)).is_none(),
+            flexural_rigidity(earth_e(), Fixed::from_int(1), Fixed::from_int(30)).is_err(),
             "nu = 1"
         );
         let d = flexural_rigidity(earth_e(), earth_nu(), Fixed::from_int(30)).unwrap();
@@ -2414,6 +2998,109 @@ mod tests {
             .is_none(),
             "negative r"
         );
+    }
+
+    /// A REPRESENTATION LIMIT IS NOT PHYSICAL INADMISSIBILITY, asserted on the four rows that separate them.
+    ///
+    /// The kernel answered `None` for "this is not a solid" and for "this solid is outside my range proof"
+    /// alike, so a caller could not tell a rejected world from an engine that needs a wider carrier. Both
+    /// gaps were named in the constants' own prose and neither was in the return type.
+    ///
+    /// The two promotion rows are real materials rather than hypotheticals. An AUXETIC solid at `nu = -0.7`
+    /// sits inside the isotropic stability interval `(-1, 1/2)`; auxetic foams and several crystals reach
+    /// there, and this module's own [`max_poisson_ratio_magnitude`] doc says the `-1/2` refusing them is a
+    /// proof envelope wearing a physical justification. A COVALENT solid at `E = 900 GPa` sits inside the
+    /// floor's own `mat.elastic_modulus` axis, which admits `1200 GPa`, and
+    /// [`MAX_YOUNGS_MODULUS_GPA`] says outright that such a material "is therefore REFUSED here".
+    ///
+    /// The two inadmissible rows are physics: `nu = 0.6` gives a negative bulk modulus and `E = -1` is not a
+    /// solid at all. No wider carrier serves either, which is exactly why they must not share a channel with
+    /// the first two (Principle 7: the alien is a data row that asks for a wider carrier, never a material
+    /// declared impossible).
+    #[test]
+    fn a_material_outside_the_proof_asks_for_promotion_and_a_non_material_does_not() {
+        let t = Fixed::from_int(40);
+        let auxetic = flexural_rigidity(earth_e(), Fixed::from_ratio(-7, 10), t);
+        assert!(
+            matches!(
+                auxetic,
+                Err(FlexureRefusal::RepresentationPromotionRequired {
+                    axis: ElasticAxis::PoissonRatio,
+                    ..
+                })
+            ),
+            "a stable auxetic solid at nu = -0.7 asks for a wider carrier, got {auxetic:?}"
+        );
+        let covalent = flexural_rigidity(Fixed::from_int(900), earth_nu(), t);
+        assert!(
+            matches!(
+                covalent,
+                Err(FlexureRefusal::RepresentationPromotionRequired {
+                    axis: ElasticAxis::YoungsModulus,
+                    ..
+                })
+            ),
+            "a covalent solid at E = 900 GPa asks for a wider carrier, got {covalent:?}"
+        );
+        // AND THE PROMOTION REQUEST SAYS HOW FAR THE PROOF REACHES, so the caller is not left guessing what
+        // widening would take.
+        assert_eq!(
+            covalent,
+            Err(FlexureRefusal::RepresentationPromotionRequired {
+                axis: ElasticAxis::YoungsModulus,
+                value: Fixed::from_int(900),
+                proven_to: Fixed::from_int(MAX_YOUNGS_MODULUS_GPA),
+            })
+        );
+        assert_eq!(
+            auxetic,
+            Err(FlexureRefusal::RepresentationPromotionRequired {
+                axis: ElasticAxis::PoissonRatio,
+                value: Fixed::from_ratio(-7, 10),
+                proven_to: Fixed::ZERO - max_poisson_ratio_magnitude(),
+            })
+        );
+
+        // THE OTHER SIDE: these are not materials, and no carrier helps.
+        for (e, nu, axis, what) in [
+            (
+                earth_e(),
+                Fixed::from_ratio(6, 10),
+                ElasticAxis::PoissonRatio,
+                "nu = 0.6 has a negative bulk modulus",
+            ),
+            (
+                Fixed::from_int(-1),
+                earth_nu(),
+                ElasticAxis::YoungsModulus,
+                "E = -1 is not a solid",
+            ),
+            (
+                earth_e(),
+                Fixed::from_int(-1),
+                ElasticAxis::PoissonRatio,
+                "nu = -1 is the stability limit itself, where the strain energy stops being definite",
+            ),
+        ] {
+            let got = flexural_rigidity(e, nu, t);
+            assert!(
+                matches!(got, Err(FlexureRefusal::NotAMaterial { axis: a, .. }) if a == axis),
+                "{what}: expected NotAMaterial on {axis:?}, got {got:?}"
+            );
+        }
+
+        // THE DECLARED PRECEDENCE: a call that fails both ways at once reports the inadmissibility, because
+        // something that is not a material cannot ask for a wider carrier.
+        assert!(
+            matches!(
+                flexural_rigidity(Fixed::from_int(900), Fixed::from_ratio(6, 10), t),
+                Err(FlexureRefusal::NotAMaterial { .. })
+            ),
+            "NotAMaterial outranks a promotion request"
+        );
+        // And the admissible interior still answers.
+        assert!(flexural_rigidity(earth_e(), Fixed::from_ratio(-1, 2), t).is_ok());
+        assert!(flexural_rigidity(earth_e(), max_poisson_ratio_magnitude(), t).is_ok());
     }
 
     #[test]
@@ -2454,6 +3141,136 @@ mod tests {
             );
             x += 0.5;
         }
+    }
+
+    /// THE KELVIN TAIL BOUND IS A BOUND, checked against the function it bounds across the whole series
+    /// domain and past it.
+    ///
+    /// The claim is an INEQUALITY derived from the `K_0` integral representation, so the test is the
+    /// inequality itself rather than an agreement within a tolerance. It is checked against BOTH the
+    /// fixed-point `kelvin_kei` and an independent `f64` evaluation of the same A&S 9.9 series, because a
+    /// bound that only holds against the implementation it ships with is not evidence about the function.
+    #[test]
+    fn the_kelvin_tail_bound_really_bounds_the_kelvin_function() {
+        let gamma = 0.5772156649_f64;
+        let kei_f64 = |x: f64| -> f64 {
+            let xh = x / 2.0;
+            let xh4 = xh.powi(4);
+            let (mut b, mut c) = (1.0_f64, xh * xh);
+            let (mut ber, mut bei) = (b, c);
+            let mut h = 1.0_f64;
+            let mut bei_phi = c * h;
+            for k in 1..40 {
+                let mb = ((2 * k) * (2 * k - 1)) as f64;
+                b = -b * xh4 / (mb * mb);
+                ber += b;
+                let mc = ((2 * k + 1) * (2 * k)) as f64;
+                c = -c * xh4 / (mc * mc);
+                bei += c;
+                h += 1.0 / (2 * k) as f64 + 1.0 / (2 * k + 1) as f64;
+                bei_phi += c * h;
+            }
+            -(xh.ln() + gamma) * bei - std::f64::consts::FRAC_PI_4 * ber + bei_phi
+        };
+        let mut x = 0.25_f64;
+        while x <= 12.0 {
+            let arg = Fixed::from_ratio((x * 10_000.0) as i64, 10_000);
+            let bound = kelvin_kei_far_field_bound(arg).to_f64_lossy();
+            let fixed_point = kelvin_kei(arg).to_f64_lossy().abs();
+            let twin = kei_f64(x).abs();
+            assert!(
+                fixed_point <= bound,
+                "the bound must bound this build's kei: |kei({x})| = {fixed_point} against {bound}"
+            );
+            assert!(
+                twin <= bound,
+                "and the f64 twin of the same series: |kei({x})| = {twin} against {bound}"
+            );
+            x += 0.25;
+        }
+
+        // AT THE TRUNCATION RADIUS the certified envelope reads about `8.88e-5`.
+        let at_cut = kelvin_kei_far_field_bound(Fixed::from_int(KEI_SERIES_MAX)).to_f64_lossy();
+        assert!(
+            (at_cut - 8.884e-5).abs() < 1e-7,
+            "the envelope at the cut is sqrt(pi/(sqrt2 x)) e^(-x/sqrt2) ~ 8.884e-5, got {at_cut}"
+        );
+
+        // TIGHTNESS IS MEASURED AGAINST THE ENVELOPE, NOT AGAINST A POINT VALUE, and getting that wrong is
+        // easy enough that it is written down. `kei` OSCILLATES under a decaying envelope, with zeros near
+        // `sqrt(2) pi (n - 1/8)`, so the zero at `12.773` sits close to the cut and drags `|kei(12)|` down to
+        // about `3.88e-5`, well under half its own envelope. Comparing the bound against THAT value would
+        // read as slack when it is the function that is momentarily small. A review brief reached this module
+        // quoting `|kei(12)| ~ 7.5e-5`, which is the leading asymptotic ENVELOPE AMPLITUDE
+        // `sqrt(pi / (2x)) e^(-x/sqrt(2))` rather than the value, and the two differ by the sine.
+        //
+        // So the sharp statement is the ratio to that envelope, and it is exact algebra rather than a
+        // measurement: the certified bound divides the asymptotic envelope by `sqrt(2)` under the square
+        // root, so their ratio is `2^(1/4) = 1.1892` at EVERY radius. Nineteen per cent above the sharpest
+        // asymptotic envelope is as tight as a rigorous elementary bound on this function gets.
+        let quarter_root_two = 2.0_f64.powf(0.25);
+        for r in [6.0_f64, 9.0, 12.0, 20.0] {
+            let asymptotic_envelope =
+                (std::f64::consts::PI / (2.0 * r)).sqrt() * (-r / 2.0_f64.sqrt()).exp();
+            let certified =
+                kelvin_kei_far_field_bound(Fixed::from_ratio((r * 1000.0) as i64, 1000))
+                    .to_f64_lossy();
+            let ratio = certified / asymptotic_envelope;
+            assert!(
+                (ratio - quarter_root_two).abs() < 1e-3,
+                "the certified bound sits exactly 2^(1/4) above the asymptotic envelope at r = {r}: read \
+                 {ratio}"
+            );
+        }
+        // And it really does bound the function's own local peaks, which is the claim the envelope makes.
+        let mut peak_ratio: f64 = 0.0;
+        let mut probe = 8.0_f64;
+        while probe <= 12.0 {
+            let certified =
+                kelvin_kei_far_field_bound(Fixed::from_ratio((probe * 1000.0) as i64, 1000))
+                    .to_f64_lossy();
+            peak_ratio = peak_ratio.max(kei_f64(probe).abs() / certified);
+            probe += 0.05;
+        }
+        assert!(
+            (0.5..1.0).contains(&peak_ratio),
+            "over a full oscillation below the cut the function reaches most of its certified envelope \
+             without passing it: worst ratio {peak_ratio}"
+        );
+
+        // MONOTONE, so a bound taken at any radius also bounds everything beyond it, which is what lets a
+        // caller reason about a whole far field from one reading.
+        let floor = Fixed::EPSILON.to_f64_lossy();
+        let mut previous = f64::INFINITY;
+        for r in [12, 14, 18, 22, 30, 60, 200] {
+            let here = kelvin_kei_far_field_bound(Fixed::from_int(r)).to_f64_lossy();
+            assert!(
+                here <= previous,
+                "the envelope never grows: {here} at {r} against {previous}"
+            );
+            // NEVER ZERO. Past `e^-22` the exponential saturates and the envelope PLATEAUS at one
+            // representable unit, which is the honest reading: out there the true bound is under the last
+            // bit Q32.32 holds, so "at most one unit" is what can be said and "exactly none" would be false.
+            assert!(
+                here >= floor,
+                "the bound never claims exactly zero error: {here} at r = {r}"
+            );
+            // Strictly decreasing while it is still above that floor.
+            if previous.is_finite() && previous > floor {
+                assert!(
+                    here < previous,
+                    "the envelope decays while it is representable: {here} at {r} against {previous}"
+                );
+            }
+            previous = here;
+        }
+        assert_eq!(
+            kelvin_kei_far_field_bound(Fixed::from_int(200)),
+            Fixed::EPSILON,
+            "and it rests on the representation's own floor rather than falling through it"
+        );
+        // A non-positive radius has no decaying envelope and fails loud.
+        assert_eq!(kelvin_kei_far_field_bound(Fixed::ZERO), Fixed::MIN);
     }
 
     #[test]
@@ -2802,7 +3619,7 @@ mod tests {
             for t in [5, 10, 40, 100, 400, 739, MAX_ELASTIC_THICKNESS_KM] {
                 // A rigidity the caller's own unit cannot hold is the honest ceiling, not a failure; the
                 // corner matrix in `moment_equivalence` proves the INTERNAL rigidity exists at every corner.
-                let Some(d) = flexural_rigidity(e, nu, Fixed::from_int(t)) else {
+                let Ok(d) = flexural_rigidity(e, nu, Fixed::from_int(t)) else {
                     continue;
                 };
                 for (drho, g) in restoring {

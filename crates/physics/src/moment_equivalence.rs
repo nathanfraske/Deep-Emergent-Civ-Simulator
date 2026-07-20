@@ -963,7 +963,7 @@ pub enum MomentEquivalenceRefusal {
     /// edge, contradicting the monotonicity the interval-arithmetic license rests on. Never observed in the banked
     /// data or the adversarial sweep, and if it ever fires it is the license itself failing, which the ruling says
     /// is a stop rather than a swap. Carries both rigidities, IN INTERNAL UNITS so the violation is inspectable
-    /// even for a plate too stiff for `GPa km^3` (see [`MomentEquivalentPlate::rigidity_internal`]).
+    /// even for a plate too stiff for `GPa km^3` (see [`MomentEquivalentPlate::rigidity`]).
     BandRigidityUnordered {
         low_internal: Fixed,
         high_internal: Fixed,
@@ -1226,7 +1226,7 @@ pub fn line_load_curvature_at_first_zero_crossing(
     rigidity_gpa_km3: Fixed,
 ) -> Option<FibreCurvature> {
     let alpha_hat = crate::flexure::scaled::internal_length(alpha_km)?;
-    let d_hat = crate::flexure::scaled::internal_rigidity(rigidity_gpa_km3)?;
+    let d_hat = crate::flexure::scaled::internal_rigidity(rigidity_gpa_km3)?.internal();
     scaled_line_load_curvature_at_first_zero_crossing(v0, alpha_hat, d_hat)
 }
 
@@ -1297,7 +1297,12 @@ pub struct MomentEquivalentPlate {
     /// rule the bracket's ceiling already followed now governs the answer: IT EXISTS HERE OR IT DOES NOT EXIST.
     /// [`MomentEquivalentPlate::rigidity_gpa_km3`] is the dimensional readout and it is `Option`, because for
     /// some real worlds that number does not exist while the plate does.
-    pub rigidity_internal: Fixed,
+    ///
+    /// THE FIELD IS CRATE-PRIVATE AND THE READOUT IS TYPED. It was `pub`, which published a bare `Fixed` in
+    /// a unit whose `32768` scale is crate-private, so a downstream crate could neither build a correct one
+    /// nor tell a correct one from a wrong one. [`MomentEquivalentPlate::rigidity`] returns the typed
+    /// [`crate::flexure::InternalRigidity`] instead, which is the same capability without the hole.
+    pub(crate) rigidity_internal: Fixed,
     /// The curvature the equivalence was read at (the first zero crossing of the deflection).
     pub curvature: FibreCurvature,
     /// The neutral surface the moment was taken about (km).
@@ -1315,11 +1320,18 @@ pub struct MomentEquivalentPlate {
 
 impl MomentEquivalentPlate {
     /// THE DIMENSIONAL READOUT: the rigidity in the caller's `GPa km^3`, or `None` where that unit cannot hold
-    /// it. See [`MomentEquivalentPlate::rigidity_internal`] for why this is fallible and the internal carrier is
+    /// it. See [`MomentEquivalentPlate::rigidity`] for why this is fallible and the internal carrier is
     /// not: a `None` here is a REPRESENTATION limit of the output unit and never a failed solve, so a caller
     /// that only wants to compare or to go on computing should read the internal value and stay in it.
     pub fn rigidity_gpa_km3(&self) -> Option<Fixed> {
         crate::flexure::scaled::external_rigidity(self.rigidity_internal)
+    }
+
+    /// THE INTERNAL RIGIDITY, TYPED: the carrier that exists for every solved plate, including the ones
+    /// [`Self::rigidity_gpa_km3`] cannot express. This is what a caller that wants to compare plates, or to
+    /// go on computing with one, reads instead of the fallible dimensional readout.
+    pub fn rigidity(&self) -> crate::flexure::InternalRigidity {
+        crate::flexure::InternalRigidity::from_internal(self.rigidity_internal)
     }
 
     /// `T_e` (km) at a DECLARED modulus pair. A display statistic; see [`elastic_thickness_km`].
@@ -1780,7 +1792,7 @@ pub fn point_load_curvature_at_first_zero_crossing(
     if rigidity_gpa_km3 <= ZERO {
         return None;
     }
-    let d_hat = crate::flexure::scaled::internal_rigidity(rigidity_gpa_km3)?;
+    let d_hat = crate::flexure::scaled::internal_rigidity(rigidity_gpa_km3)?.internal();
     scaled_point_load_curvature(p, d_hat, point_load_moment_operator(poisson_ratio)?)
 }
 
@@ -1854,7 +1866,7 @@ pub fn point_load_reported_curvature_at_first_zero_crossing(
         return None;
     }
     let ker_x0 = point_load_reported_curvature_coefficient();
-    let d_hat = crate::flexure::scaled::internal_rigidity(rigidity_gpa_km3)?;
+    let d_hat = crate::flexure::scaled::internal_rigidity(rigidity_gpa_km3)?.internal();
     // K = -(P / 2 pi D) ker(x0), downward-positive convention.
     scaled_point_load_curvature(p, d_hat, ker_x0)
 }
@@ -2006,9 +2018,10 @@ impl RigidityBand {
         youngs_modulus_gpa: Fixed,
         poisson_ratio: Fixed,
     ) -> Option<Self> {
-        let d_lo = crate::flexure::flexural_rigidity(youngs_modulus_gpa, poisson_ratio, te_low_km)?;
-        let d_hi =
-            crate::flexure::flexural_rigidity(youngs_modulus_gpa, poisson_ratio, te_high_km)?;
+        let d_lo =
+            crate::flexure::flexural_rigidity(youngs_modulus_gpa, poisson_ratio, te_low_km).ok()?;
+        let d_hi = crate::flexure::flexural_rigidity(youngs_modulus_gpa, poisson_ratio, te_high_km)
+            .ok()?;
         RigidityBand::new(d_lo, d_hi)
     }
 
@@ -2091,7 +2104,7 @@ impl BandedMomentEquivalentPlate {
     /// FALLIBLE, and the refusal is a real one rather than a representation nuisance. [`RigidityBand`] exists to
     /// compare the engine's plate against PUBLISHED hindcast rows, which are quoted in `GPa km^3` through their
     /// own modulus pair, so the band is meaningfully dimensional and stays so. A world whose plate does not fit
-    /// in that unit (see [`MomentEquivalentPlate::rigidity_internal`]) cannot be set beside that literature in
+    /// in that unit (see [`MomentEquivalentPlate::rigidity`]) cannot be set beside that literature in
     /// it, and saying `None` is the honest answer rather than a comparison quietly made in the wrong currency.
     /// The plate itself is unaffected and its internal rigidity is exact; only this comparison declines.
     pub fn rigidity_band(&self) -> Option<RigidityBand> {
@@ -3028,7 +3041,10 @@ impl LidColumn<'_> {
             self.rayleigh,
             self.rayleigh_critical,
         )?;
+        // `.ok()` because this composes with the lid-base refusal above and reports through one `Option`.
+        // A caller that needs the typed reason calls `crate::flexure::flexural_rigidity` directly.
         crate::flexure::flexural_rigidity(youngs_modulus_gpa, poisson_ratio, lid_base.depth_km())
+            .ok()
     }
 }
 
@@ -4936,7 +4952,7 @@ mod tests {
         // In the CALLER's units that plate does not exist: its rigidity is 4.31e9 against a Fixed::MAX of
         // 2.147e9, exactly 2.0x over, and this is the refusal that used to sink the whole solve.
         assert!(
-            crate::flexure::flexural_rigidity(e, nu, thick).is_none(),
+            crate::flexure::flexural_rigidity(e, nu, thick).is_err(),
             "the 739 km domain's fully-elastic rigidity must be unrepresentable in GPa km^3, or the clamp \
              had nothing to clamp"
         );
@@ -5187,7 +5203,7 @@ mod tests {
         let (e, nu) = (Fixed::from_int(120), Fixed::from_ratio(25, 100));
         let domain = Fixed::from_ratio(7394, 10);
         assert!(
-            crate::flexure::flexural_rigidity(e, nu, domain).is_none(),
+            crate::flexure::flexural_rigidity(e, nu, domain).is_err(),
             "the 739.4 km fully elastic trial must not fit GPa km^3, or the clamp had nothing to clamp"
         );
 
@@ -5392,33 +5408,55 @@ mod tests {
             "and it must include corners whose RIGIDITY does not fit the caller's own unit, which is the \
              honest limit that remains"
         );
-        // OUTSIDE the envelope the kernel refuses rather than answering off its own table.
+        // OUTSIDE the envelope the kernel refuses rather than answering off its own table, AND IT SAYS
+        // WHICH KIND OF REFUSAL IT IS. A modulus or a thickness past the envelope is a real plate the range
+        // proof does not reach; a Poisson ratio of 0.6 is a negative bulk modulus and no plate at all. These
+        // three assertions read `.is_none()` on one undifferentiated channel until the refusal was split.
         assert!(
-            crate::flexure::flexural_rigidity(
-                Fixed::from_int(crate::flexure::MAX_YOUNGS_MODULUS_GPA + 1),
-                Fixed::from_ratio(1, 4),
-                Fixed::from_int(40)
-            )
-            .is_none(),
-            "a modulus past the declared envelope refuses"
+            matches!(
+                crate::flexure::flexural_rigidity(
+                    Fixed::from_int(crate::flexure::MAX_YOUNGS_MODULUS_GPA + 1),
+                    Fixed::from_ratio(1, 4),
+                    Fixed::from_int(40)
+                ),
+                Err(
+                    crate::flexure::FlexureRefusal::RepresentationPromotionRequired {
+                        axis: crate::flexure::ElasticAxis::YoungsModulus,
+                        ..
+                    }
+                )
+            ),
+            "a modulus past the declared envelope asks for a wider carrier"
         );
         assert!(
-            crate::flexure::flexural_rigidity(
-                Fixed::from_int(70),
-                Fixed::from_ratio(6, 10),
-                Fixed::from_int(40)
-            )
-            .is_none(),
-            "a Poisson ratio past the declared envelope refuses"
+            matches!(
+                crate::flexure::flexural_rigidity(
+                    Fixed::from_int(70),
+                    Fixed::from_ratio(6, 10),
+                    Fixed::from_int(40)
+                ),
+                Err(crate::flexure::FlexureRefusal::NotAMaterial {
+                    axis: crate::flexure::ElasticAxis::PoissonRatio,
+                    ..
+                })
+            ),
+            "a Poisson ratio above one half is a negative bulk modulus, which is not a material"
         );
         assert!(
-            crate::flexure::flexural_rigidity(
-                Fixed::from_int(70),
-                Fixed::from_ratio(1, 4),
-                Fixed::from_int(crate::flexure::MAX_ELASTIC_THICKNESS_KM + 1)
-            )
-            .is_none(),
-            "a thickness past the declared envelope refuses"
+            matches!(
+                crate::flexure::flexural_rigidity(
+                    Fixed::from_int(70),
+                    Fixed::from_ratio(1, 4),
+                    Fixed::from_int(crate::flexure::MAX_ELASTIC_THICKNESS_KM + 1)
+                ),
+                Err(
+                    crate::flexure::FlexureRefusal::RepresentationPromotionRequired {
+                        axis: crate::flexure::ElasticAxis::ElasticThickness,
+                        ..
+                    }
+                )
+            ),
+            "a thickness past the declared envelope asks for a wider carrier"
         );
         let d40 = crate::flexure::flexural_rigidity(
             Fixed::from_int(70),

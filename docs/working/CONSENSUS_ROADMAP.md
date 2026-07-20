@@ -8,7 +8,7 @@ The retired long-form board is `docs/working/CONSENSUS_ROADMAP_HISTORY.md`, pres
 
 ## Active arcs
 
-- 2026-07-20  #215 review remediation: numeric-core edges landed; pressure gate was dead on every rocky mantle, Gap-Law branches open -> `HANDOFFS.md`
+- 2026-07-20  #215 review remediation: numeric-core, geodynamics, conductivity, deep-time, thermoelastic landed; flexure in flight, pins to re-verify -> `HANDOFFS.md`
 - 2026-07-20  Moon tidal-heating kernel -> `claude/moon-tidal-heating` (off main, carries #193's survival filter; doc-review round done). `moons::tidal_heating_power_log10`, dormant; witness `henning_2009_tidal_heating` in `sources/registry.toml`. Detail in `HANDOFFS.md`.
 - 2026-07-19  Mountains / mid-band (increment 3) -> #205 merged; wire waits on the thermoelastic ladder (`crates/physics/src/thermoelastic.rs`, rung 3 needs 3 anchors). Detail in `HANDOFFS.md`.
 - 2026-07-19  Seam D kernel built, flexural relief has a forebulge; producer-side wiring next -> `crates/physics/src/flexural_relief.rs`, `HANDOFFS.md`

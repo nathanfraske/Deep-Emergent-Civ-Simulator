@@ -31,10 +31,13 @@ crates/materials/src/band_gap.rs	eigenvalue_provenance	grandfathered	predates th
 crates/materials/src/band_gap.rs	gap_eigenvalue_provenance	grandfathered	predates the derives-coverage gate; unclassified
 crates/materials/src/band_gap.rs	ln_thermal_carrier_activation	grandfathered	predates the derives-coverage gate; unclassified
 crates/materials/src/band_gap.rs	two_kb_ev_per_k	grandfathered	predates the derives-coverage gate; unclassified
+crates/materials/src/conductivity.rs	ambient_frame_pressure_slack_bar	accessor	returns the tolerated offset from the anchors' measured pressure frame; zero while the reserved value conductivity.ambient_frame_pressure_slack_bar is unset, which is the absence of a tolerance rather than a derived one
 crates/materials/src/conductivity.rs	bruggeman_residual	helper	the Bruggeman residual function the bisection solves; pure arithmetic with no world quantity of its own
 crates/materials/src/conductivity.rs	estimator_anchor_298	grandfathered	predates the derives-coverage gate; unclassified
 crates/materials/src/conductivity.rs	fmt	helper	a Display impl
+crates/materials/src/conductivity.rs	hofmeister_reference_pressure_bar	accessor	returns the sources' own measured reference pressure, the 1 bar frame the cited kappa_298 rows and the banked Grueneisen rows both declare
 crates/materials/src/conductivity.rs	hofmeister_reference_temperature_k	grandfathered	predates the derives-coverage gate; unclassified
+crates/materials/src/conductivity.rs	lattice_exponent_class	accessor	reads where the cited calibration set places a cell count and with what exponent; returns the cited 0.33 for the complex class and names which gap it fell in otherwise, a read of a cited set rather than a derivation
 crates/materials/src/conductivity.rs	lattice_exponent_for_cell	grandfathered	predates the derives-coverage gate; unclassified
 crates/materials/src/conductivity.rs	rung_disagreement_ratio	grandfathered	predates the derives-coverage gate; unclassified
 crates/materials/src/conductivity.rs	solve_bruggeman	helper	the fixed-point bisection that finds the residual's root; the numerical method, not the quantity
@@ -184,6 +187,7 @@ crates/materials/src/metallic.rs	rose_ratio	grandfathered	predates the derives-c
 crates/materials/src/mie_gruneisen_debye.rs	debye_integral	helper	Simpson quadrature of the dimensionless Debye integral; interval count bounds the step, not the count
 crates/materials/src/mie_gruneisen_debye.rs	debye_integrand	helper	the dimensionless integrand x^3/(e^x-1), series-continued through its removable singularity at the origin
 crates/materials/src/mie_gruneisen_debye.rs	from_banked	constructor	assembles the six MGD anchors from one source fit, refusing a mixed-provenance or systematics-graded set
+crates/materials/src/mie_gruneisen_debye.rs	volume	accessor	returns the volume held by either ExpansionEdge variant so the bracket can read it without matching; the spinodal itself is derived in expansion_edge, this only hands it back
 crates/materials/src/nucleation.rs	avrami_grain_size	grandfathered	predates the derives-coverage gate; unclassified
 crates/materials/src/nucleation.rs	critical_atom_count	grandfathered	predates the derives-coverage gate; unclassified
 crates/materials/src/nucleation.rs	critical_radius_over_spacing	grandfathered	predates the derives-coverage gate; unclassified
@@ -310,6 +314,7 @@ crates/materials/src/thermoelastic.rs	fmt	helper	Display formatter for ThermoRef
 crates/materials/src/thermoelastic.rs	kelvin	accessor	the elastic Debye temperature's kelvin value; one-way by design, no Fixed goes back in
 crates/materials/src/thermoelastic.rs	key_of	helper	delegates to mineral_moduli::canonical_phase_key; a name lookup, not a derivation
 crates/materials/src/thermoelastic.rs	mie_gruneisen_debye_readiness	predicate	reports which rung-3 anchors are banked; answers a question about the DATA, derives no world quantity
+crates/materials/src/thermoelastic.rs	response_hull	accessor	reports the min/max envelope over branches already computed; a REPORTING ENVELOPE and never a distribution, since its interior holds no model, so it derives no world quantity
 crates/materials/src/verdict.rs	band	grandfathered	predates the derives-coverage gate; unclassified
 crates/materials/src/verdict.rs	candidates	grandfathered	predates the derives-coverage gate; unclassified
 crates/materials/src/verdict.rs	content_key	grandfathered	predates the derives-coverage gate; unclassified
@@ -453,10 +458,21 @@ crates/physics/src/ewald.rs	scale	grandfathered	predates the derives-coverage ga
 crates/physics/src/flexure.rs	strip_primitive	helper	the odd dimensionless antiderivative of the symmetric line-load shape; pure quadrature, derives no world quantity
 crates/physics/src/flexure.rs	within_envelope	predicate	total two-sided envelope comparison that forms no negation, so it cannot panic at Fixed::MIN the way the abs form did
 crates/physics/src/flexure.rs	uniform_strip_load_admissible	predicate	envelope check; derives the strip bound from MAX_LINE_LOAD_GPA_KM via V0 = q(2a) rather than authoring a ceiling
+crates/physics/src/flexure.rs	classify_elastic_constants	predicate	classifies a modulus pair as physically inadmissible, outside the declared proof envelope, or admissible; reads the envelope constants and the isotropic stability bounds, derives no world quantity
+crates/physics/src/flexure.rs	classify_elastic_thickness	predicate	the thickness arm of the same two-class split: non-positive is not a plate, past MAX_ELASTIC_THICKNESS_KM is a plate the range proof does not reach
+crates/physics/src/flexure.rs	from_gpa_km3	constructor	unit conversion: GPa km^3 into the typed InternalRigidity
+crates/physics/src/flexure.rs	from_internal	constructor	wraps a raw internal number as InternalRigidity; crate-private so only the conversions and the solve may mint one
+crates/physics/src/flexure.rs	internal	accessor	unwraps InternalRigidity to its Fixed for this crate's own arithmetic; the type exists so the unwrap cannot happen outside it
+crates/physics/src/flexure.rs	min_poisson_ratio_physical	accessor	the isotropic stability bound on Poisson's ratio, minus one; where the material stops existing rather than where this kernel stops proving
+crates/physics/src/flexure.rs	to_gpa_km3	constructor	unit conversion: the typed InternalRigidity back into GPa km^3, fallible because some real plates do not fit that unit
+crates/physics/src/moment_equivalence.rs	rigidity	accessor	returns the solved plate's internal rigidity, typed; the carrier that exists for every solved plate including those rigidity_gpa_km3 cannot express
 crates/physics/src/flexural_relief.rs	km	accessor	unwraps ElevationKm to its Fixed; the typed boundary exists so a downward deflection cannot be stored as an elevation, and this is the deliberate exit
 crates/physics/src/flexural_relief.rs	axisymmetric_length_km	accessor	unit readout of the axisymmetric length derived once in from_internal_rigidity
 crates/physics/src/flexural_relief.rs	flexural_parameter_km	accessor	unit readout of the line-load flexural parameter derived once in from_internal_rigidity
 crates/physics/src/flexural_relief.rs	rigidity_internal	accessor	returns the stored internal rigidity the plate was built from; no conversion and no derivation
+crates/physics/src/flexural_relief.rs	periodic_deflection_km	derives	the periodic spectral deflection profile over a closed row, from the per-cell load field, the plate rigidity and the restoring modulus
+crates/physics/src/flexural_relief.rs	periodic_elevation_km	derives	the periodic elevation profile: the periodic deflection through the ElevationKm boundary
+crates/physics/src/flexural_relief.rs	point_coefficient_and_argument	helper	the shared point-load coefficient and Kelvin argument the deflection and its truncation band both read; one home so a band cannot be computed from a different coefficient than the value it bands
 crates/physics/src/flexure.rs	deflection_at	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/flexure.rs	elastic_constants_admissible	predicate	whether a modulus pair sits inside the declared validation envelope
 crates/physics/src/flexure.rs	euler_gamma	grandfathered	predates the derives-coverage gate; unclassified
@@ -1175,3 +1191,5 @@ crates/physics/src/convection_scaling.rs	combine	helper	applies the family's own
 crates/physics/src/convection_scaling.rs	ln_nusselt_at	helper	one row at one coefficient through laws::ln_stagnant_lid_nusselt, which carries the @derives marker for the law itself
 crates/physics/src/convection_scaling.rs	citation	accessor	reads one row's cited provenance string, the human-readable half a determination's selected row points at
 crates/physics/src/convection_scaling.rs	one_of	helper	returns the single element of an iterator or the reason there is not exactly one; the guard against a silent first-match
+crates/physics/src/thermoelastic_anchors.rs	caveats	accessor	returns the riders a scope verdict already carries, either way; a caveat never blocks and nothing is computed here
+crates/physics/src/thermoelastic_anchors.rs	in_scope	predicate	answers whether a scope verdict convicted the row; a question about the DATA's own declared reach, deriving no world quantity
