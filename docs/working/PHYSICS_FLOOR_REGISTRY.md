@@ -37,9 +37,9 @@ The 110 deriving subsystems below live OUTSIDE the authored floor. Each produces
 - lattice thermal conductivity k(T) at the anchor's own ambient pressure frame <- a measured kappa_298 anchor + the banked Grueneisen parameter + the caller's expansivity integral (measured rung) (`crates/materials/src/conductivity.rs:208`)
 - the radiative conductivity an Fe2+-bearing phase gains at high T, on a fit SCOPED to Terran silicates <- temperature (`crates/materials/src/conductivity.rs:280`)
 - a phase's conductivity at a temperature <- its ladder rung's anchor, band and exponent (`crates/materials/src/conductivity.rs:562`)
-- a phase's ladder inputs <- the banked crystallographic, Grueneisen and phase-registry columns + charge balance (`crates/materials/src/conductivity.rs:1021`)
-- a rock's effective thermal conductivity at the anchors' ambient pressure frame <- the per-phase conductivity ladder + the world's own mineral census (Bruggeman self-consistent EMT) (`crates/materials/src/conductivity.rs:1111`)
-- a rock's effective thermal conductivity in a checked pressure frame <- the per-phase conductivity ladder + the world's own mineral census + the anchors' measured frame (Bruggeman self-consistent EMT) (`crates/materials/src/conductivity.rs:1149`)
+- a phase's ladder inputs <- the banked crystallographic, Grueneisen and phase-registry columns + charge balance (`crates/materials/src/conductivity.rs:1027`)
+- a rock's effective thermal conductivity at the anchors' ambient pressure frame <- the per-phase conductivity ladder + the world's own mineral census (Bruggeman self-consistent EMT) (`crates/materials/src/conductivity.rs:1117`)
+- a rock's effective thermal conductivity in a checked pressure frame <- the per-phase conductivity ladder + the world's own mineral census + the anchors' measured frame (Bruggeman self-consistent EMT) (`crates/materials/src/conductivity.rs:1155`)
 ### `crates/materials/src/freezer.rs`
 
 - the bulk sound speed <- bulk modulus + density (`crates/materials/src/freezer.rs:176`)
