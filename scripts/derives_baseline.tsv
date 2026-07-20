@@ -1155,3 +1155,19 @@ crates/physics/src/young_thermal.rs	slr_family_temperature_rise	grandfathered	pr
 crates/physics/src/young_thermal.rs	solar_system_slr_family	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/young_thermal.rs	young_thermal_verdict	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/convection_scaling.rs	stagnant_lid_convention	accessor	reads one cited (alpha, gamma, beta) row from the vendored column; the derivation is laws::ln_stagnant_lid_nusselt, which carries the @derives marker
+crates/physics/src/convection_scaling.rs	rayleigh_projection	constructor	builds a Rayleigh number tagged with a definition the column itself declares; refuses a key no banked row uses, which is the guard rather than a quantity
+crates/physics/src/convection_scaling.rs	theta_projection	constructor	the sibling constructor on the Frank-Kamenetskii axis
+crates/physics/src/convection_scaling.rs	definition	accessor	reads the definition key a projection was built with
+crates/physics/src/convection_scaling.rs	ln_rayleigh	accessor	reads the log-domain Rayleigh number a projection carries
+crates/physics/src/convection_scaling.rs	theta	accessor	reads the Frank-Kamenetskii parameter a projection carries
+crates/physics/src/convection_scaling.rs	ln_nusselt_hull	accessor	reports the envelope over determinations already computed by the marked stagnant_lid_determinations; a reporting hull, never a distribution
+crates/physics/src/convection_scaling.rs	permits_sensitivity_evaluation	predicate	answers whether a convicted row could still be evaluated at all
+crates/physics/src/convection_scaling.rs	is_stagnant_lid	predicate	answers whether a row carries both exponents, so is readable as a suppression law
+crates/physics/src/convection_scaling.rs	parse	loader	parses a family's declared selection rule string into the implemented rule, refusing an unimplemented one
+crates/physics/src/convection_scaling.rs	stagnant_lid_families	helper	groups the stagnant-lid rows into the families their data declares, in file order
+crates/physics/src/convection_scaling.rs	preflight_row	helper	runs one row's scope tests and its own evaluation; the derivation is the marked stagnant_lid_determinations above it
+crates/physics/src/convection_scaling.rs	evaluate_family	helper	checks one family's declaration and applies its rule to the preflighted members; part of the marked stagnant_lid_determinations
+crates/physics/src/convection_scaling.rs	combine	helper	applies the family's own selection rule to members already evaluated; part of the marked stagnant_lid_determinations
+crates/physics/src/convection_scaling.rs	ln_nusselt_at	helper	one row at one coefficient through laws::ln_stagnant_lid_nusselt, which carries the @derives marker for the law itself
+crates/physics/src/convection_scaling.rs	citation	accessor	reads one row's cited provenance string, the human-readable half a determination's selected row points at
+crates/physics/src/convection_scaling.rs	one_of	helper	returns the single element of an iterator or the reason there is not exactly one; the guard against a silent first-match

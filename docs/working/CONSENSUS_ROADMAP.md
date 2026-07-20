@@ -10,7 +10,7 @@ The retired long-form board is `docs/working/CONSENSUS_ROADMAP_HISTORY.md`, pres
 
 - 2026-07-19  Mountains / mid-band (increment 3) -> fixture cluster retired, deep-time runs on derived physics; Seams C/D next -> `claude/fixture-cluster-prep`, `HANDOFFS.md`
 - 2026-07-19  Lane A flexure unit-system migration, Mars solves end to end -> `docs/working/FLEXURE_REPRESENTATION_DESIGN.md`
-- 2026-07-19  Lane B stagnant-lid Nusselt kernel, coefficient reserved -> `crates/physics/src/convection_scaling.rs`
+- 2026-07-19  Lane B stagnant-lid: max(C1,C2) combinator + typed scope preflight built; production returns the typed refusal, run-path wiring unbuilt -> `crates/physics/src/convection_scaling.rs`
 - 2026-07-19  Lane C(i) global residual body count derived; per-target allocation is the open lever -> `crates/sim/src/smallbody.rs`
 - 2026-07-19  Lane D crust/mantle areal-mass ledger, growth is a transaction -> `crates/sim/src/deeptime.rs`
 - 2026-07-19  FLAGGED `Fixed::powf` rails silently at the representability edge, 85 call sites -> `crates/core/src/fixed.rs`
