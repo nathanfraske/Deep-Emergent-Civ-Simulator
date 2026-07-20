@@ -69,6 +69,7 @@ pub mod conviction_experience;
 pub mod conviction_percept;
 pub mod cpd_composition;
 pub mod cpd_profile;
+pub mod cpd_satellites;
 pub mod cpd_temperature;
 pub mod cpd_thermal;
 pub mod cpd_transport;
