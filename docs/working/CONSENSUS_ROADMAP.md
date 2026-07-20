@@ -9,7 +9,7 @@ The retired long-form board is `docs/working/CONSENSUS_ROADMAP_HISTORY.md`, pres
 ## Active arcs
 
 - 2026-07-20  #215 review remediation: 6 slices landed, pins bit-exact; viewer, column heat capacity and creep gate in flight -> `HANDOFFS.md`
-- 2026-07-20  BLOCKED: province field refuses, spinel has no measured kappa_298 so Slack's rung has no band -> `crates/physics/data/phase_conductivity/manifest.toml`, `calibration/reserved.toml`
+- 2026-07-20  BLOCKED: province field refuses, spinel needs a stoichiometric MgAl2O4 kappa_298; Slack 1962 ruled OUT as closer (3 off-composition spinels); hematite banked -> `crates/physics/data/phase_conductivity/manifest.toml`
 - 2026-07-20  Moon tidal-heating kernel -> `claude/moon-tidal-heating` (off main, carries #193's survival filter; doc-review round done). `moons::tidal_heating_power_log10`, dormant; witness `henning_2009_tidal_heating` in `sources/registry.toml`. Detail in `HANDOFFS.md`.
 - 2026-07-19  Mountains / mid-band (increment 3) -> #205 merged; wire waits on the thermoelastic ladder (`crates/physics/src/thermoelastic.rs`, rung 3 needs 3 anchors). Detail in `HANDOFFS.md`.
 - 2026-07-19  Seam D kernel built, flexural relief has a forebulge; producer-side wiring next -> `crates/physics/src/flexural_relief.rs`, `HANDOFFS.md`
@@ -83,7 +83,7 @@ The retired long-form board is `docs/working/CONSENSUS_ROADMAP_HISTORY.md`, pres
 - 2026-07-19  DONE  #201 merged to main (`402e00d`): disk slice 2 run-path wire, Mdot_0 derived, the L_bol hold dissolved -> `git log 402e00d`.
 - 2026-07-19  DONE  #203 merged to main (`b1b9ed0`): two crates, five live-fired gates, 225 files, pins held -> `git log b1b9ed0`.
 - 2026-07-19  DONE  Local/CI command parity: the check list is PARSED from the workflow, not copied (six classes had never run locally) -> `scripts/ci_local.sh`.
-- 2026-07-19  DONE  Phase-conductivity column fetched (8 phases, cell counts as reconstructions + kappa_298 x5) -> `crates/physics/data/phase_conductivity.toml`.
+- 2026-07-19  DONE  Phase-conductivity column fetched (8 phases, cell counts as reconstructions + kappa_298 x7) -> `crates/physics/data/phase_conductivity.toml`.
 - 2026-07-19  DONE  Crate layering un-inverted: `calibration`+`decision` bio -> foundation; foundation drops its bio lib dep -> `crates/foundation`.
 - 2026-07-19  DONE  Language cycle cut: `PlaceId` lifted to a leaf, 7-module cluster -> 3 -> `crates/foundation/src/located.rs`.
 - 2026-07-19  DONE  World ejecta docs: 7 stale claims, one pointing at a route ruled out in PR #177 -> `crates/world`.

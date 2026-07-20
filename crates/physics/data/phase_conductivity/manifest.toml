@@ -8,7 +8,9 @@
 # every source under two ids, which is the duplication defect the pipeline plan records as D8 and which
 # already caused a licence finding to miss its twin. So the SOURCES for this fetch are registered once,
 # in sources/registry.toml (ids nsrds_nbs8, usgs_ofr88690, cod_phase_crystallography,
-# touloukian_1966_oxides, msa_structure_determinations, mixing_henke2016), and this file carries the
+# touloukian_1966_oxides, msa_structure_determinations, mixing_henke2016, and from the 2026-07-20
+# hematite fetch akiyama_1992_isij_iron_oxides, akiyama_1991_tetsu_dense_iron_oxides and
+# tprc_vol2_nonmetallic_solids), and this file carries the
 # CLAIMS, which is the shape docs/working/FETCH_PIPELINE_PLAN.md section 2 designed for exactly this:
 # "Claims live beside their values in the per-directory manifests, not in the central registry, because
 # a claim is about a value and the value's file is where a reader looks."
@@ -21,6 +23,16 @@
 #   nsrds_nbs8_SLIM.pdf     9 pages cut from NSRDS-NBS 8, the recommended-value table and its accuracies
 #   diment_pratt_1988.pdf   USGS Open-File Report 88-690 whole, the cross-check and the context values
 #   cod/*.cif               11 Crystallography Open Database records, each public domain by its own header
+#
+# NO BYTES ARE HELD FOR THE THREE SOURCES ADDED ON 2026-07-20, and the reason is a licence conflict rather
+# than a paywall. Both Akiyama papers carry CC BY-NC-ND 4.0, which permits non-commercial redistribution;
+# this repository ships under Apache-2.0, which grants commercial use, and sources/licences.toml already
+# records that exact clash for its MIT OpenCourseWare file and calls shipping such a file under a blanket
+# Apache-2.0 statement an overclaim. Repeating a convicted defect to gain a local copy is a bad trade, so
+# both are citation-plus-witness against Wayback captures re-fetched and confirmed BYTE-IDENTICAL to the
+# publisher fetch. The NoDerivatives term separately forbids the slim a held copy would have been cut to,
+# so the choice was whole-or-nothing. TPRC Volume 2 is withheld on the Purdue Research Foundation
+# copyright the touloukian_1966_oxides entry already established, and at 85 MB it would dwarf the tree.
 #
 # THE ONE METHOD FINDING WORTH CARRYING TO THE NEXT FETCH: on BOTH scanned compilations the text layer
 # corrupts digits, and on both the corruption is silent and plausible. The USGS scan renders quartz as
@@ -111,7 +123,7 @@ channel = "TF"
 scope = "ambient orthoenstatite MgSiO3; NOT the P2(1)/c clinoenstatite, Pbcn protoenstatite or Pbnm bridgmanite polymorphs of the same formula"
 
 # =====================================================================================================
-# CLAIMS: Column 2, kappa_298 (six of eight phases)
+# CLAIMS: Column 2, kappa_298 (seven of eight phases)
 # =====================================================================================================
 
 [[claim]]
@@ -168,26 +180,77 @@ anchor = "Henke et al. 2016 Table 2, row 'enstatite MgSiO3, A 100.39, rho 3.20, 
 channel = "TF"
 scope = "ambient pure end-member orthoenstatite MgSiO3"
 
+[[claim]]
+id = "conductivity.kappa_298.hematite"
+quantity = "18.20 W/(m*K) at 298 K, no band"
+primary = ["akiyama_1992_isij_iron_oxides", "akiyama_1991_tetsu_dense_iron_oxides"]
+single_witness_reason = "ONE DETERMINATION PUBLISHED TWICE, and both papers are named as primary rather than one being promoted to secondary, which would claim an independence that does not exist. Akiyama et al. 1991 (Tetsu-to-Hagane 77, 231) made the measurement; Akiyama et al. 1992 (ISIJ International 32, 829) is the same group, the same samples and the same apparatus, and is where the least-squares fit is printed in English. The 1992 paper cites the 1991 paper as its own reference 4) for these values. The 1991 paper's body, tables and figure annotations are in Japanese and set in Adobe-Japan1 fonts that neither extract nor render here, so it contributes the lineage and a re-fetchable witness rather than a second reading of the number. No independent determination of DENSE hematite at 300 K was retrieved: the Touloukian single-crystal pair at 300 K is asterisked as extrapolated, and the Diment and Pratt values are natural and in one case 22 percent porous, so both are recorded as context in the data file and neither is a second witness."
+anchor = "Akiyama et al. 1992, ISIJ International 32(7), 829-837, equation (2), printed page 831, read from a 300 dpi render: under the printed heading 'Fe2O3;', 'k = 1/(1.844 * 10^-4 T)' with the stated 'Temperature range in K' of '298 < T < 912'. At the lower bound, 1 / (1.844e-4 * 298) = 18.198 W/(m*K), rounded to the source coefficient's four significant figures as 18.20. THE VALUE IS THE SOURCE'S OWN FIT AT ITS OWN STATED ENDPOINT, which is the pattern the forsterite, fayalite and enstatite rows already use on Henke's equations (8) and (9) evaluated at their end-member compositions, rather than an extrapolation past a stated range or a point digitised off a figure. THE COMPOUND HEADINGS ARE THE GUARD: the block immediately below reads 'Fe3O4;', 'k = 1/(1.693 * 10^-4 T)', '298 < T < 906', which would give 19.82, so each branch was taken under its printed heading and not by position on the page. SPECIMEN, Table 1 printed page 830: density 5.20 x 10^3 kg/m^3, purity 99.9 percent, impurities 'Al 200, Co 20, Cr 40, Mn 400, Ni 100, Si 100' ppm; formed by Hot Isostatic Pressing from 1 micrometre powder at 1173 K, 150 MPa, 7.2 ks in argon, with the paper stating 'The porosity of samples was found to be less than 0.1 %'. NO BAND: the paper states no measurement accuracy, and with no independent in-frame determination to set a gap against there is no width to derive, so none is carried. A SOURCE DISCREPANCY, recorded rather than smoothed: porosity below 0.1 percent does not sit with that same table's 5.20 g/cm3 against the crystallographic 5.271 this manifest derives for hematite in Column 1, a 1.3 percent gap the paper does not reconcile."
+channel = "TF"
+scope = "ambient alpha-Fe2O3 as a DENSE POLYCRYSTAL: hot isostatically pressed, 99.9 percent pure, stated porosity below 0.1 percent, carrying 400 ppm Mn and 200 ppm Al. Not a single crystal, so grain-boundary and impurity phonon scattering are inside this number, the same qualification the corundum and periclase rows carry. Stated at 298 K, which is the lower bound of the fit's own range, rather than at the 300 K the other six rows use."
+
 # =====================================================================================================
-# THE TWO PHASES WITH NO ANCHOR, and what was retrieved for them
+# THE ONE PHASE WITH NO ANCHOR, and what was retrieved for it
 # =====================================================================================================
 #
-# HEMATITE is an unresolved dispute rather than a missing fetch. The values retrieved span a factor of
-# 2.3: 10.46, 12.09 and 14.69 W/(m*K) from USGS OFR 88-690 printed page 9 (the first of which is on a
-# sample whose measured density 4.1 is 22 percent below the theoretical 5.274, so it is a porous
-# aggregate), against roughly 19.9 and 24.4 W/(m*K) from Touloukian 1966 Table I-26 for a Brazil
-# single crystal at 300 K where BOTH entries are asterisked as EXTRAPOLATED, the nearest measured points
-# being 350 and 400 K. Choosing a centre inside a 2.3x spread would be authoring, so the row carries no
-# anchor and falls to Slack's rung. Closing it needs a modern single-crystal or dense-polycrystal
-# measurement at 300 K that is not an extrapolation.
+# HEMATITE IS CLOSED as of 2026-07-20 and its claim is above. It closed against the criterion this file
+# wrote for it in the previous fetch, "a modern single-crystal or dense-polycrystal measurement at 300 K
+# that is not an extrapolation", which the Akiyama HIP-densified laser-flash determination is. The old
+# 2.3x spread dissolves once the specimens are separated rather than pooled: 10.46, 12.09 and 14.69
+# W/(m*K) from USGS OFR 88-690 are natural samples and the lowest is 22 percent porous; 19.9 and 24.4
+# W/(m*K) from Touloukian 1966 Table I-26 are a Brazil single crystal whose 300 K entries are BOTH
+# asterisked as extrapolated from measured points at 350 and 400 K; and 18.20 is a dense polycrystal,
+# which is where a dense polycrystal belongs relative to those two. Those were never one quantity with
+# scatter, and reading them as one is what made the row look unresolvable.
 #
-# SPINEL has no pure-phase determination in anything retrieved openly. USGS OFR 88-690 gives 33, 26 and
-# 28 mcal on artificial specimens at 35, 68 and 70 C, cited at third hand (Clark 1966 after McCarthy and
-# Ballard 1951 and after Tuchschmidt 1883), which is a 1951 measurement reached through two
-# intermediaries at a temperature 37 K above the anchor point. The named follow-up is Slack, G.A., 1962,
-# Thermal Conductivity of MgO, Al2O3, MgAl2O4, and Fe3O4 Crystals from 3 to 300 K, Physical Review 126,
-# 427-441, which measures all three oxides this column wants to 300 K and is the same Slack whose
-# estimator is the ladder's second rung; it is behind the APS paywall and was not retrieved.
+# SPINEL REMAINS UNANCHORED, and the 2026-07-20 fetch changed the reason rather than closing it. THIS
+# FILE'S OWN PREVIOUS ENTRY IS THE THING BEING CORRECTED: it named Slack, G.A., 1962, Thermal Conductivity
+# of MgO, Al2O3, MgAl2O4, and Fe3O4 Crystals from 3 to 300 K, Physical Review 126, 427-441, as the
+# follow-up that would close spinel once someone got past the APS paywall. It would not have. TPRC Volume
+# 2 (source id tprc_vol2_nonmetallic_solids) transcribes Slack's specimens with their compositions, and
+# every spinel he measured is off-composition:
+#   Specification and Data Table 58, printed pages 287-288, headed "MAGNESIUM ALUMINATE  MgO . 3.5 Al2O3":
+#     Curve 1, Ref. 300, Method L, 1962, 3.6-301 K, "Synthetic Spinel R-53", a single Verneuil crystal from
+#     Linde Air Products with "lattice constant 7.979 A". At T = 300.67 K, k = 0.133 Watt cm^-1 K^-1, so
+#     13.3 W/(m*K). The lattice constant is the internal check on the non-stoichiometry: 7.979 A against
+#     the 8.084 A that Column 1 cites for stoichiometric spinel from COD 9001364, and excess Al2O3
+#     contracting the cell is the expected direction and rough size.
+#   Specification and Data Table 282, printed pages 849-850, headed "SPINEL": seven curves, no pure phase.
+#     Curves 6 and 7 are Ref. 300 again, natural IRON-BEARING pleonastes from Queensland,
+#     "(Ti0.02Mg0.75Fe0.41Al1.85)O4" (a = 8.128 A) and "(Ti0.01Mg0.13Fe0.33Al1.93)O4" (a = 8.117 A),
+#     reading 0.059 and 0.064 Watt cm^-1 K^-1 at 300 K, so 5.9 and 6.4 W/(m*K). Curves 2 to 5 (Ref. 463,
+#     1961) are powder beds of bulk density 1.51, 1.2 and 0.92 g cm^-3 and one pressed-and-fired compact at
+#     1.79 g cm^-3, all far below the 3.58 g cm^-3 of the solid. Curve 1 (Ref. 407, 1949) is recorded in
+#     the source itself as "No details reported."
+#   The numbered reference list gives "300  Slack, G.A., Phys. Rev., 126(2), 427-41, 1962", which is what
+#   ties curves 58/1, 282/6 and 282/7 to Slack rather than leaving the attribution to a year match.
+# So the honest position is that spinel needs a determination on STOICHIOMETRIC MgAl2O4, and no source
+# reached in either fetch has one. The earlier USGS reading stands as recorded: OFR 88-690's 33, 26 and 28
+# mcal are on artificial specimens at 35, 68 and 70 C at third hand (Clark 1966 after McCarthy and Ballard
+# 1951 and after Tuchschmidt 1883).
+#
+# ROUTES EXHAUSTED FOR SPINEL ON 2026-07-20, listed so the next fetch starts past them rather than
+# repeating them. NSRDS-NBS 8 was re-fetched WHOLE (10,801,927 bytes, sha256 06ea47b0..., matching the
+# receipt already in the registry) and grepped across all 180 pages: zero occurrences of spinel,
+# aluminate, MgAl, hematite, Fe2O3 or ferric, so the compilation behind three of this column's rows
+# carries neither phase. Its companion NSRDS-NBS 16, "Thermal Conductivity of Selected Materials Part 2"
+# (Ho, Powell and Liley, issued February 1968, and so also pre-dating the Standard Reference Data Act the
+# NBS 8 licence finding turns on), was fetched and read: its preface states it covers twelve metallic
+# elements, five graphites and three fluids, and no oxide at all. TPRC Volume 2's SINGLE OXIDES group
+# (tables 15 to 42) contains Fe3O4 but no Fe2O3, and its MINERALS group (tables 264 to 285) has no
+# hematite, so that volume holds nothing for hematite either. Three closed-access candidates were checked
+# at OpenAlex and all three report is_oa false with no open location: Hofmeister 2014 (Phys. Chem.
+# Minerals 41, 361), Burghartz and Schulz 1994 (J. Nucl. Mater. 212-215, 1065, whose INIS record quotes
+# only a 100 K value), and Kryuchkov et al. 2020 (J. Eng. Phys. Thermophys., the transparent-spinel
+# ceramic paper whose abstract quotes 17 to 18 W/(m*K)). Open-access sweeps over OpenAlex (four queries)
+# and DOAJ returned refractories, nanofluids, composites and first-principles computations, none of them a
+# measured determination on the dense stoichiometric phase. ORNL/CP-98583 (Hazelton, Rice, Snead and
+# Zinkle, DOE, unlimited distribution) does measure room-temperature laser-flash diffusivity on a
+# polycrystalline spinel, and was rejected on reading: its Table 1 reports only a derived thermal-shock
+# resistance factor whose K is footnoted "estimated using Composite Technology Development (CTD) test data
+# and literature data", and the specimen is named only as "Spinel" with no composition or density. DTIC
+# rate-limited three attempts (HTTP 429), so the MCIC ceramics handbooks were not read and remain the one
+# untried route worth a later attempt.
 #
 # NOT RETRIEVED, stated plainly rather than paraphrased from memory, so the next fetch does not repeat
 # the search:

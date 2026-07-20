@@ -12,9 +12,33 @@ Custody is one of three. `in_repo`: bytes held in-tree, checksum verifiable with
 witness. `external`: bytes in local custody outside the repo, checksum plus archive snapshot.
 The licence decides which is permitted; see `docs/working/FETCH_PIPELINE_PLAN.md` section 3.
 
-**42 sources** (11 registry, 31 mirrored).
+**45 sources** (14 registry, 31 mirrored).
 
 ## Registry (hand-maintained)
+
+### `akiyama_1991_tetsu_dense_iron_oxides`
+
+Akiyama, T., Ogura, G., Ohota, H., Takahashi, R., Waseda, Y. & Yagi, J., 1991, Thermal Conductivities of Dense Iron Oxides, Tetsu-to-Hagane 77(2), 231. The Iron and Steel Institute of Japan. Received 25 May 1990.
+
+- sha256: `66aa4d79478d7f760bc24f0d6e094b8567989c87c5b0ac3e4e213b1af6f63538`
+- archived: https://web.archive.org/web/20251127152019/https://www.jstage.jst.go.jp/article/tetsutohagane1955/77/2/77_2_231/_pdf
+- scope: Thermal conductivity of dense pure hematite, magnetite, wustite and iron by the laser flash method from room temperature to 1553 K. Same samples, same apparatus and same authors as akiyama_1992_isij_iron_oxides. Registered so the measurement lineage behind the banked hematite value is traceable to the paper that made the measurement, rather than stopping at the paper that fitted it.
+- custody: witness
+- licence (**NOT redistributable**): CC BY-NC-ND 4.0, read from the article page: 'This is an open access article under the terms of the Creative Commons [Attribution-NonCommercial-NoDerivatives 4.0 International] license', linking creativecommons.org/licenses/by-nc-nd/4.0. Bytes are not held for the same reason as its sibling: the NC term is incompatible with this repository's blanket Apache-2.0 grant, and the ND term forbids a slim.
+- licence evidence: https://www.jstage.jst.go.jp/article/tetsutohagane1955/77/2/77_2_231/_article (CC BY-NC-ND 4.0 statement and licence link, read from the raw page).
+- free route (publisher-open): https://www.jstage.jst.go.jp/article/tetsutohagane1955/77/2/77_2_231/_pdf
+
+### `akiyama_1992_isij_iron_oxides`
+
+Akiyama, T., Ohta, H., Takahashi, R., Waseda, Y. & Yagi, J., 1992, Measurement and Modeling of Thermal Conductivity for Dense Iron Oxide and Porous Iron Ore Agglomerates in Stepwise Reduction, ISIJ International 32(7), 829-837, DOI 10.2355/isijinternational.32.829. The Iron and Steel Institute of Japan.
+
+- sha256: `717ea04ab464c61eb06031c2b13541962218f2bd0eab12fa17664cfde877acd2`
+- archived: https://web.archive.org/web/20251129124947/https://www.jstage.jst.go.jp/article/isijinternational1989/32/7/32_7_829/_pdf
+- scope: Thermal conductivity of DENSE pure iron oxides and iron over room temperature to 1553 K at 50 K intervals, on disk compacts hot-isostatically pressed from 1 micrometre powder at 1173 K and 150 MPa, with the paper stating the porosity 'was found to be less than 0.1%'. The value read here is the Fe2O3 branch at its stated lower bound, 298 K. SCOPE LIMIT that governs use: this is a dense POLYCRYSTAL of 99.9 percent purity carrying 400 ppm Mn and 200 ppm Al, so it is a phase property only to the extent that grain boundaries and that impurity load are negligible; it is not a single crystal. The paper's porous iron-ore agglomerate values are a different question entirely and are not read.
+- custody: witness
+- licence (**NOT redistributable**): CC BY-NC-ND 4.0, read from the article page rather than inferred from free-to-read status: the page states 'This is an open access article under the terms of the Creative Commons Attribution-NonCommercial-NoDerivs license' and links creativecommons.org/licenses/by-nc-nd/4.0, under '(c) The Iron and Steel Institute of Japan'. THE LICENCE PERMITS REDISTRIBUTION AND THIS REPOSITORY STILL MAY NOT HOLD THE BYTES, which is the finding worth carrying. The NC term forbids commercial use; this repo ships under Apache-2.0, which grants it. sources/licences.toml records the identical conflict for its MIT OpenCourseWare file and calls shipping such a file under a blanket Apache-2.0 statement an overclaim. Holding these bytes would repeat a convicted defect, so none are held. The ND term separately forbids a slim, so the choice was whole-or-nothing and nothing is correct here. The values themselves are facts and are uncopyrightable, so reading and citing them is safe either way.
+- licence evidence: https://www.jstage.jst.go.jp/article/isijinternational1989/32/7/32_7_829/_article (the CC BY-NC-ND 4.0 statement and licence link, read from the raw page rather than from a summariser); LICENSE and Cargo.toml in this repo for the Apache-2.0 side of the conflict; sources/licences.toml for the precedent.
+- free route (publisher-open): https://www.jstage.jst.go.jp/article/isijinternational1989/32/7/32_7_829/_pdf
 
 ### `bstar2006_lanz_hubeny`
 
@@ -135,6 +159,18 @@ Touloukian, Y.S. (ed.), 1966, Recommended Values of the Thermophysical Propertie
 - licence (**NOT redistributable**): NOT ESTABLISHED AS REDISTRIBUTABLE, so no bytes are held. The document is openly served by NASA's Technical Reports Server and carries a DTIC Distribution Statement A on its sibling volume, but it was prepared by Purdue's Thermophysical Properties Research Center under contract, and the SIBLING TPRC volume prints an explicit 'Copyright 1970, Purdue Research Foundation'. A copyright asserted by the same preparing institution over the same data series is enough to withhold the bytes rather than assume the absence of a notice in this volume settles it. The values themselves are facts and are uncopyrightable, so reading and citing them is safe either way, which is what is done here.
 - licence evidence: the printed 'Copyright 1970, Purdue Research Foundation' notice in the sibling volume TPRC Data Series Volume 2 (DTIC ADA951936), read at line 395 of its extracted text
 - free route (gov-work): https://ntrs.nasa.gov/api/citations/19660014513/downloads/19660014513.pdf
+
+### `tprc_vol2_nonmetallic_solids`
+
+Touloukian, Y.S., Powell, R.W., Ho, C.Y. & Klemens, P.G., 1970, Thermophysical Properties of Matter, The TPRC Data Series, Volume 2: Thermal Conductivity, Nonmetallic Solids. Thermophysical Properties Research Center, Purdue University; IFI/Plenum, New York-Washington. Held publicly as DTIC AD-A951936, Distribution Statement A.
+
+- sha256: `7ef2fdaf9e2711e4dede65cd6ca717003ef983e7f3f3b4e19fde501c1d03e154`
+- archived: https://web.archive.org/web/20250202023422/https://apps.dtic.mil/sti/tr/pdf/ADA951936.pdf
+- scope: Thermal conductivity of nonmetallic solids: single oxides, mixtures, minerals and miscellaneous compounds, each as a figure, a specification table describing every specimen, and a data table of the digitised curve. Read here ONLY for the spinel question, and the scope limit is the whole point of the entry: TPRC's spinel coverage is a set of SPECIMENS, and their compositions are what disqualify them from standing for the stoichiometric phase.
+- custody: witness
+- licence (**NOT redistributable**): NOT REDISTRIBUTABLE, and the finding is inherited rather than newly made: the sibling TPRC volume prints 'Copyright 1970, Purdue Research Foundation', and this repository's touloukian_1966_oxides entry already withholds bytes on exactly that ground. Distribution Statement A governs onward distribution by the Government, not a grant of copyright licence to this project. The numeric values are facts and are uncopyrightable, so reading and citing them is safe, which is what is done here. At 85 MB it would in any case be the largest artifact in the tree by an order of magnitude.
+- licence evidence: the printed 'Copyright 1970, Purdue Research Foundation' notice in the TPRC Data Series (recorded at line 395 of the extracted text of DTIC ADA951936 by the earlier phase-conductivity fetch, and carried forward here rather than re-derived).
+- free route (gov-work): https://web.archive.org/web/20250202023422/https://apps.dtic.mil/sti/tr/pdf/ADA951936.pdf
 
 ### `usgs_ofr88690`
 

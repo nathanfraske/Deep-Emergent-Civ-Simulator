@@ -590,12 +590,18 @@ impl PhaseConductivity {
             Some(k) if k > ZERO => {
                 // The measured rung: an ADDITIVE half-width, walked by addition. A measured row with no stated
                 // band contributes no width, which is a weaker claim than the estimator case below and is left
-                // as it stands: an absent measured band means the source did not band that row, and today
-                // EVERY row carrying a kappa_298 anchor in the cited column carries a band with it (the loader
-                // takes the wider of the explicit band and the stated relative uncertainty), so this branch is
-                // reachable only from a hand-built row. The estimator case is different in kind, which is why
-                // it refuses: there the absence is of a band nobody has, on a magnitude known to be off by
-                // several fold.
+                // as it stands: an absent measured band means the source did not band that row.
+                //
+                // HEMATITE IS THE FIRST ROW TO REACH THIS BRANCH FROM THE CITED COLUMN, and the note here used
+                // to say the branch was reachable only from a hand-built row because every banked anchor
+                // carried a band. That stopped being true when hematite landed: Akiyama's laser-flash fit
+                // states no measurement accuracy anywhere, and with no independent in-frame determination to
+                // set a gap against there is no width to derive, so the row carries none rather than carrying
+                // an invented one. The behaviour is unchanged and correct, since a source that did not band
+                // its own number cannot have that number banded on its behalf here.
+                //
+                // The estimator case is different in kind, which is why it refuses instead: there the absence
+                // is of a band nobody has, on a magnitude known to be off by several fold.
                 let a = match (anchor_shift, self.kappa_298_band) {
                     (0, _) | (_, None) => k,
                     (s, Some(b)) if s > 0 => k.checked_add(b).unwrap_or(k),

@@ -39,11 +39,19 @@
 //! differently (Mg2Si2O6 against MgSiO3), agreeing on 80 atoms, which is why the atoms per formula unit
 //! is carried beside `Z` rather than `Z` alone.
 //!
-//! THE MEASURED ANCHOR IS OPTIONAL AND THE ABSENCE IS LOAD-BEARING. Six of the eight phases carry a
-//! cited `kappa_298`; hematite and spinel do not, because no retrieved source gives a pure-phase value
-//! in the ambient frame (the hematite evidence spans a factor of 2.3 across sources, and choosing a
-//! centre inside that would be authoring). A phase with no anchor is NOT defaulted: it resolves through
-//! Slack's estimator rung and the aggregate reports how much of its census was measured.
+//! THE MEASURED ANCHOR IS OPTIONAL AND THE ABSENCE IS LOAD-BEARING. Seven of the eight phases carry a
+//! cited `kappa_298`; SPINEL does not, because no retrieved source measures the stoichiometric phase.
+//! Every spinel specimen in the literature reached is off-composition: Slack's 1962 crystal is the
+//! alumina-rich Verneuil `MgO . 3.5 Al2O3`, and his two natural pleonastes are iron-bearing, so even
+//! retrieving that paywalled paper would give a value for a composition the registry does not carry.
+//! A phase with no anchor is NOT defaulted: it resolves through Slack's estimator rung and the aggregate
+//! reports how much of its census was measured.
+//!
+//! HEMATITE'S ROW IS THE ONE ANCHOR WITH NO BAND, and that is a property of its source rather than an
+//! omission. Akiyama et al. 1992 state no measurement accuracy, and no independent determination of
+//! dense hematite at 300 K exists in what was retrieved to set a gap against, so the row carries a value
+//! and no width. A measured row without a band contributes no width to an aggregate, which is a weaker
+//! claim than the six banded rows make and is visible as such rather than filled in.
 //!
 //! HONEST LIMITS. The `kappa_298` rows are ambient-frame (300 K, 1 bar) and the ladder carries no
 //! pressure dependence, so an aggregate built from them is an ambient-pressure quantity and a caller at
@@ -294,7 +302,7 @@ impl PhaseConductivityTable {
             };
             // The anchor is either an isotropic scalar, or a pair of principal values the loader
             // reduces by the declared Hill convention. A row supplying neither has no anchor, which is
-            // a real loaded state: hematite and spinel are the cited instances.
+            // a real loaded state: spinel is the cited instance.
             let scalar = num("kappa_298_w_per_m_k")?;
             let parallel = num("kappa_298_parallel_c")?;
             let perpendicular = num("kappa_298_perpendicular_c")?;
@@ -579,25 +587,61 @@ mod tests {
         assert_eq!(t.kappa_298("forsterite").expect("cited").0, dec("5.158"));
         assert_eq!(t.kappa_298("fayalite").expect("cited").0, dec("3.161"));
         assert_eq!(t.kappa_298("enstatite").expect("cited").0, dec("4.961"));
+        // Akiyama et al. 1992 ISIJ Int. 32, 829, equation (2), the Fe2O3 branch `k = 1/(1.844e-4 T)`
+        // evaluated at the 298 K lower bound of its own stated range. The ADJACENT branch in that paper
+        // is `k = 1/(1.693e-4 T)` for Fe3O4, which would give 19.82, so this assertion is also the guard
+        // against having read the magnetite row by position instead of the hematite row by its heading.
+        assert_eq!(t.kappa_298("hematite").expect("cited").0, dec("18.20"));
     }
 
-    /// AN ABSENT ANCHOR IS A REAL LOADED STATE, NOT A ZERO. Hematite and spinel deliberately carry no
-    /// measured value, so they resolve through Slack's estimator rung and the aggregate reports a
-    /// measured weight fraction below one. A default here would author a rock's heat transport.
+    /// THE ONE ANCHOR WITH NO BAND, asserted so the absence stays deliberate. Every other cited row
+    /// carries a width, from a stated accuracy or from the gap to a second determination. Akiyama et al.
+    /// state no accuracy for the laser-flash measurement and no independent determination of dense
+    /// hematite at 300 K was retrieved, so there is nothing to derive a width from and none is invented.
     #[test]
-    fn the_two_phases_with_no_cited_anchor_load_but_report_no_measurement() {
+    fn the_hematite_anchor_carries_a_value_and_no_band() {
         let t = PhaseConductivityTable::standard().expect("loads");
-        for phase in ["hematite", "spinel"] {
+        let (k, band) = t.kappa_298("hematite").expect("cited");
+        assert_eq!(k, dec("18.20"));
+        assert!(
+            band.is_none(),
+            "the source states no accuracy and no second in-frame determination exists, so the row \
+             carries no width rather than a fabricated one"
+        );
+        // And it is the ONLY anchored row without one, so a later bandless row is a change, not a habit.
+        for phase in [
+            "quartz",
+            "corundum",
+            "periclase",
+            "forsterite",
+            "fayalite",
+            "enstatite",
+        ] {
             assert!(
-                t.row(phase).is_some(),
-                "{phase} is a cited row: its crystallography is known"
-            );
-            assert!(
-                t.kappa_298(phase).is_none(),
-                "{phase} deliberately carries no measured anchor, so none is reported"
+                t.kappa_298(phase).expect("cited").1.is_some(),
+                "{phase} carries a band"
             );
         }
-        // And the six that do carry one are exactly the six.
+    }
+
+    /// AN ABSENT ANCHOR IS A REAL LOADED STATE, NOT A ZERO. Spinel deliberately carries no measured
+    /// value, so it resolves through Slack's estimator rung and the aggregate reports a measured weight
+    /// fraction below one. A default here would author a rock's heat transport. The absence survived the
+    /// 2026-07-20 fetch for a sharper reason than before: Slack's own 1962 spinel crystals are the
+    /// alumina-rich `MgO . 3.5 Al2O3` and two iron-bearing natural pleonastes, so the paper long named as
+    /// the follow-up would not have closed this row.
+    #[test]
+    fn the_one_phase_with_no_cited_anchor_loads_but_reports_no_measurement() {
+        let t = PhaseConductivityTable::standard().expect("loads");
+        assert!(
+            t.row("spinel").is_some(),
+            "spinel is a cited row: its crystallography is known"
+        );
+        assert!(
+            t.kappa_298("spinel").is_none(),
+            "spinel deliberately carries no measured anchor, so none is reported"
+        );
+        // And the seven that do carry one are exactly the seven.
         let with = [
             "quartz",
             "corundum",
@@ -605,6 +649,7 @@ mod tests {
             "forsterite",
             "fayalite",
             "enstatite",
+            "hematite",
         ];
         for phase in with {
             assert!(t.kappa_298(phase).is_some(), "{phase} carries an anchor");
