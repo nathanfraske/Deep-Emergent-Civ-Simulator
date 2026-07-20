@@ -3042,3 +3042,43 @@ unit = "kelvin"
 source = "astro::shu_inside_out_collapse_accretion_rate_msun_myr; docs/working/DISK_SLICE2_WIRE_DESIGN.md section 10, Ruling 4"
 category = "per_world"
 provenance = "contingency"
+
+# --- Thermal-conductivity ladder (crates/materials/src/conductivity.rs) ---
+#
+# Three values the ladder needs and does not have. Each was previously supplied by the code itself: two as
+# silent defaults that read as certainty (a zero-width band, a point pressure frame) and one as an
+# unattributed number inside a classifier. All three now refuse until set, which is the fail-loud sentinel
+# in the form this crate can carry: civsim-materials does not depend on civsim-foundation, so it cannot read
+# this manifest, and the in-code expression of "reserved and unset" is a named refusal rather than a loader
+# error.
+
+[[reserved]]
+id = "conductivity.slack_estimator_band_factor"
+basis = "the multiplicative width of Slack's estimator rung, AND its shape (symmetric, or a one-sided upper bound), per cell class. The two cited figures it must sit between, both held in this repo: Slack's own declared roughly 3x on SIMPLE cells, which the form claims as its validity band and which is roughly symmetric; and the single COMPLEX-cell exhibit, rutile predicted at ~43 against a measured ~9, a factor of 4.8 that is one-sided HIGH because the single-scattering form overstates a cell with many optical branches by construction. The complex class is the one a silicate mantle sits in and it has exactly ONE exhibit, so setting the complex factor from that alone generalizes from a sample of one, which is the honest limit on any number chosen today. THE MEASUREMENT THAT RETIRES THIS VALUE IS ALREADY BUILT: rung_disagreement_ratio computes estimator-over-measured for every phase carrying BOTH a measured kappa_298 and Slack's banked columns, and the distribution of those ratios BY CELL CLASS is the band, derived from observation rather than declared. Periclase is the only such phase banked today (the ladder's overlap sentinel), so the fetch that retires this is more measured kappa_298 rows on phases whose Slack columns also resolve. Until it is set, a phase resolving through the estimator rung is refused by name (ConductivityRefusal::NoEstimatorBand) rather than aggregated at zero width, which is what the previous Option<Fixed> default did: it reported a several-fold one-sided estimate with the band of a measurement."
+status = "reserved"
+value = ""
+unit = "factor"
+source = "crates/materials/src/conductivity.rs EstimatorBand, PhaseConductivity::estimator_band; crates/materials/src/properties.rs lattice_thermal_conductivity_w_per_m_k"
+category = "derivable"
+provenance = "estimator"
+
+[[reserved]]
+id = "conductivity.simple_class_temperature_exponent"
+basis = "Hofmeister's temperature exponent a in kappa_lat ~ (298/T)^a for the SIMPLE lattice class (n <= 2 atoms per primitive cell). The cited set brackets this class and pins nothing inside it: ice at 612/T (a ~ 1) and MgO at a = 0.9 are two independent determinations that DISAGREE, and the complex-silicate a = 0.33 is a separate determination that says nothing about this class. The code carried 0.95, the arithmetic midpoint of the bracketing pair, attributed to neither and sitting inside a classifier that refuses its neighbouring 2 < n < 6 band for exactly that reason. The hidden width is real rather than cosmetic: across the bracketing pair the lattice conductivity at 1600 K moves by roughly 18 percent, reported as a point value with no band. Setting it means deciding which determination governs a class, or declaring the class itself banded and letting the width travel. RETIREMENT, and it is the better outcome than setting this: a per-phase cited exponent column, read through PhaseConductivity::measured_exponent_a, at which point the class value is never consulted for a phase that carries its own. MgO's a = 0.9 is the first row such a fetch would hold, and banking it restores the ladder's only overlap sentinel (periclase is the sole simple-class phase in the registry) without anyone choosing a class number at all."
+status = "reserved"
+value = ""
+unit = "exponent"
+source = "crates/materials/src/conductivity.rs lattice_exponent_class, ExponentClass::SimpleReserved; crates/physics/data/phase_conductivity/manifest.toml (periclase, the only n <= 2 phase banked)"
+category = "per_world"
+provenance = "unverified_measurement_candidate"
+
+[[reserved]]
+id = "conductivity.ambient_frame_pressure_slack_bar"
+basis = "how far from the anchors' own measured 1 bar frame the lattice conductivity may be read before it refuses. ZERO until set, and zero here is the ABSENCE of a tolerance rather than a chosen one: the Hofmeister lattice form carries no pressure term of any kind, so it is valid at exactly the pressure its kappa_298 anchors were measured at, and any nonzero slack is a positive assertion about how far the neglected term stays tolerable. THE BASIS FOR SETTING IT IS A COMPARISON THE ENGINE CAN COMPUTE rather than a taste: the pressure offset at which the omitted pressure factor, Hofmeister's (1 + (K_0'/K_0) P), moves the aggregate by more than the aggregate's OWN reported band (AssemblageConductivity::band_up and band_down). That criterion needs K_0' banked beside K_0 for the census phases, which the moduli column does not yet carry. RETIREMENT: bank K_0' and carry the pressure factor in the lattice form itself, at which point there is no frame to leave and this entry is DELETED rather than set. Until then a caller at depth is refused by name (ConductivityRefusal::OutsidePressureFrame) instead of reading an ambient conductivity at interior pressure, which is the defect the thermoelastic ladder already refuses one layer over and which this module declared in a comment while answering anyway."
+status = "reserved"
+value = ""
+unit = "bar"
+source = "crates/materials/src/conductivity.rs ambient_frame_pressure_slack_bar, assemblage_conductivity_at; crates/materials/src/thermoelastic.rs response_at (the sibling frame refusal)"
+category = "derivable"
+provenance = "derived"
+derived_from = ["Hofmeister lattice form pressure factor (1 + (K_0'/K_0) P), needing per-phase K_0' beside the banked K_0 in crates/physics/data/mineral_moduli.toml", "AssemblageConductivity::band_up and band_down, the aggregate's own reported uncertainty, crates/materials/src/conductivity.rs"]
