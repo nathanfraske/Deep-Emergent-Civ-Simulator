@@ -71,13 +71,13 @@ The 82 deriving subsystems below live OUTSIDE the authored floor. Each produces 
 - one uniform strip load's plate deflection <- the load pressure and footprint, the flexural parameter and restoring modulus (`crates/physics/src/flexural_relief.rs:382`)
 ### `crates/physics/src/flexure.rs`
 
-- the flexural rigidity in internal units <- Youngs modulus, Poisson ratio and the elastic thickness (`crates/physics/src/flexure.rs:370`)
-- the line-load flexural length scale in internal units <- the rigidity and the restoring modulus (`crates/physics/src/flexure.rs:403`)
-- the axisymmetric flexural length in internal units <- the rigidity and the restoring modulus (`crates/physics/src/flexure.rs:419`)
-- the line-load flexural amplitude in internal units <- the load intensity, flexural parameter and rigidity (`crates/physics/src/flexure.rs:449`)
-- a uniform strip load's internal deflection <- its pressure and footprint, the flexural parameter and the restoring modulus (`crates/physics/src/flexure.rs:477`)
-- the line-load flexural amplitude <- the load intensity, flexural parameter and rigidity (`crates/physics/src/flexure.rs:659`)
-- a uniform strip load's flexural deflection <- its pressure and footprint, the flexural parameter and the restoring term (`crates/physics/src/flexure.rs:755`)
+- the flexural rigidity in internal units <- Youngs modulus, Poisson ratio and the elastic thickness (`crates/physics/src/flexure.rs:419`)
+- the line-load flexural length scale in internal units <- the rigidity and the restoring modulus (`crates/physics/src/flexure.rs:452`)
+- the axisymmetric flexural length in internal units <- the rigidity and the restoring modulus (`crates/physics/src/flexure.rs:468`)
+- the line-load flexural amplitude in internal units <- the load intensity, flexural parameter and rigidity (`crates/physics/src/flexure.rs:498`)
+- a uniform strip load's internal deflection <- its pressure and footprint, the flexural parameter and the restoring modulus (`crates/physics/src/flexure.rs:526`)
+- the line-load flexural amplitude <- the load intensity, flexural parameter and rigidity (`crates/physics/src/flexure.rs:708`)
+- a uniform strip load's flexural deflection <- its pressure and footprint, the flexural parameter and the restoring term (`crates/physics/src/flexure.rs:804`)
 ### `crates/physics/src/geodynamics.rs`
 
 - a crustal column's flexural load <- its density contrast against the mantle, its thickness, the surface gravity and its own footprint (`crates/physics/src/geodynamics.rs:142`)

@@ -164,18 +164,47 @@ const KEI_MAX_TERMS: i32 = 40;
 ///
 /// A DECLARED VALIDATION ENVELOPE, NEVER A PHYSICAL CONSTANT. The design's range proof needs a bound on the
 /// elastic constants to be a proof at all (`E T_hat^3` is what has to fit, and `T_hat^3` alone reaches
-/// 15625), and it states the contract it proved: `E <= 512 GPa`, `|nu| <= 0.5`. Both are generous against
-/// any real material (diamond is about 1050 GPa and is not a lithosphere; olivine is near 200), and 512 is a
-/// power of two so the bound itself lands exactly on the grid. Outside it this kernel REFUSES rather than
-/// returning a number the range table does not cover, which is the difference between a proof and a hope.
+/// 15625), and it states the contract it proved: `E <= 512 GPa`, `|nu| <= 0.5`. 512 is a power of two so the
+/// bound itself lands exactly on the grid. Outside it this kernel REFUSES rather than returning a number the
+/// range table does not cover, which is the difference between a proof and a hope.
+///
+/// # IT DOES NOT COVER THE WHOLE FLOOR, AND THAT GAP IS STATED HERE RATHER THAN DISCOVERED
+///
+/// The floor's own `mat.elastic_modulus` axis admits `1 .. 1_200_000 MPa`, so `1200 GPa`
+/// (`crates/physics/data/mechanical_floor.toml`, cited to the Ashby modulus chart and the ASM Metals
+/// Handbook). This envelope covers 512 of that. A material the floor legitimately admits between 512 and
+/// 1200 GPa is therefore REFUSED here, and the refusal is honest rather than a bug: the range proof does not
+/// reach it. What would be a defect is the two numbers sitting in one repository with nothing connecting
+/// them, which is how a caller meets an unexplained stop.
+///
+/// This doc claimed "diamond is about 1050 GPa" until an audit read it beside the floor. That figure was
+/// UNCITED and disagreed with the repository's own cited one; the floor's `~1200 GPa` is the number with a
+/// source behind it and is used here. Diamond is not a lithosphere either way, and olivine near 200 GPa sits
+/// comfortably inside the envelope, which is why 512 has never bound a real plate.
+///
+/// PROVENANCE: this is an `[A]` authored bound under the seven-tag register (`docs/PROVENANCE_LEDGER.md`), a
+/// property of the PROOF rather than of any world. It carries no tag in a manifest because it is a Rust
+/// constant, and neither `provenance_gate.py` (which reads `calibration/reserved.toml`) nor
+/// `floor_provenance_gate.py` (which reads the floor manifests) can see a Rust-side envelope constant at
+/// all. That gap is the structural half of the finding and is larger than this file.
 pub const MAX_YOUNGS_MODULUS_GPA: i32 = 512;
 
 /// The largest `|nu|` the range table is proven over, `0.5`.
 ///
-/// It coincides with the physical incompressible limit for an isotropic elastic solid, so the declared
-/// validation envelope and the physics agree here rather than the bound being a numerical convenience: an
-/// isotropic material with `nu > 0.5` has a negative bulk modulus. It also subsumes the older `|nu| < 1`
-/// guard, since `|nu| <= 0.5` gives `1 - nu^2 >= 0.75`.
+/// The UPPER limit is physical and derived: an isotropic elastic solid with `nu > 0.5` has a negative bulk
+/// modulus, so `0.5` is where the material stops existing rather than where this kernel stops proving. It
+/// also subsumes the older `|nu| < 1` guard, since `|nu| <= 0.5` gives `1 - nu^2 >= 0.75`.
+///
+/// THE SYMMETRY IS NOT, and an audit was right to separate them. Applying the same `0.5` to the NEGATIVE
+/// side is a numerical envelope wearing a physical justification: thermodynamic stability for an isotropic
+/// solid bounds `nu` at `-1`, not at `-0.5`, so a real auxetic material between `-1` and `-0.5` is refused
+/// here for a reason the cited incompressible limit does not supply. Nothing in the world data reaches that
+/// range today, so this is a coverage statement rather than a live defect, and the honest form is to say
+/// which half is physics and which half is the proof.
+///
+/// PROVENANCE under the seven-tag register: the upper limit is `[D]` derived (the incompressible bound),
+/// the lower is `[A]` authored (a proof envelope). One constant carrying two provenances is itself the
+/// argument for splitting it when a world needs the auxetic range.
 pub fn max_poisson_ratio_magnitude() -> Fixed {
     Fixed::from_ratio(1, 2)
 }
@@ -231,13 +260,33 @@ fn elastic_constants_admissible(e: Fixed, nu: Fixed) -> bool {
 
 /// Whether a LINE-load intensity sits inside the declared validation envelope ([`MAX_LINE_LOAD_GPA_KM`]).
 pub(crate) fn line_load_admissible(magnitude: Fixed) -> bool {
-    magnitude.abs() <= Fixed::from_int(MAX_LINE_LOAD_GPA_KM)
+    within_envelope(magnitude, MAX_LINE_LOAD_GPA_KM)
 }
 
 /// Whether a POINT-load magnitude sits inside the declared validation envelope
 /// ([`MAX_POINT_LOAD_GPA_KM2`]).
 pub(crate) fn point_load_admissible(magnitude: Fixed) -> bool {
-    magnitude.abs() <= Fixed::from_int(MAX_POINT_LOAD_GPA_KM2)
+    within_envelope(magnitude, MAX_POINT_LOAD_GPA_KM2)
+}
+
+/// `|magnitude| <= limit`, WITHOUT forming `|magnitude|`.
+///
+/// Both admissibility predicates used to read `magnitude.abs() <= limit`, and `Fixed::abs` says in its own
+/// doc that it "panics on `Fixed::MIN` under overflow checks, as `i64` does": `i64::MIN` has no positive
+/// counterpart. So the one input most likely to arrive from a corrupted or adversarial load list CRASHED a
+/// function whose whole job is to return `false` for it. Found by an independent audit.
+///
+/// The two-sided comparison is exactly equivalent for every other input and cannot overflow, because it
+/// forms no negation at all. A predicate that decides admissibility must be TOTAL, or the refusal it exists
+/// to produce is unreachable for the worst case.
+fn within_envelope(magnitude: Fixed, limit: i32) -> bool {
+    let hi = Fixed::from_int(limit);
+    let lo = Fixed::ZERO.checked_sub(hi);
+    match lo {
+        Some(lo) => magnitude >= lo && magnitude <= hi,
+        // An unnegatable limit is a broken envelope, so nothing is admissible against it.
+        None => false,
+    }
 }
 
 /// Whether a UNIFORM-STRIP pressure and half-width sit inside the line-load envelope after integration.
@@ -1475,6 +1524,25 @@ mod tests {
     /// test makes is the one that matters: over the declared envelope and beyond it, the scaled kernel is at
     /// least as close to the formula as the arithmetic it replaces, and it answers where that arithmetic
     /// cannot.
+    #[test]
+    fn the_admissibility_predicates_are_total_at_the_representable_edge() {
+        // THE WORST INPUT MUST REFUSE RATHER THAN CRASH. `Fixed::MIN` has no positive counterpart, so the
+        // previous `magnitude.abs() <= limit` panicked on exactly the value a corrupted or adversarial load
+        // list is most likely to carry, in a predicate whose entire purpose is to return `false` for it.
+        assert!(!line_load_admissible(Fixed::MIN));
+        assert!(!point_load_admissible(Fixed::MIN));
+        assert!(!uniform_strip_load_admissible(Fixed::MIN, Fixed::ONE));
+        // And the ordinary cases are unchanged, including both signs at the boundary.
+        let hi = Fixed::from_int(MAX_LINE_LOAD_GPA_KM);
+        assert!(line_load_admissible(hi));
+        assert!(line_load_admissible(
+            Fixed::ZERO.checked_sub(hi).expect("negatable")
+        ));
+        assert!(!line_load_admissible(
+            hi.checked_add(Fixed::ONE).expect("past the edge")
+        ));
+    }
+
     #[test]
     fn the_scaled_kernels_reproduce_the_external_arithmetic_where_both_run() {
         // The linear external forms, written out here rather than called: these are the arithmetic the
