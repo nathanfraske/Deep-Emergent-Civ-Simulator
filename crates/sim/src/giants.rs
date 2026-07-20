@@ -482,16 +482,19 @@ pub struct TruncationGasLedger {
 }
 
 // @derives: the disk-truncation gas/angular-momentum residual ledger <- the static viscous-similarity gas profile partitioned at the resonant truncation radius R_t=f*R_L, the retained budget and the removed residual an interpretation-neutral conservation account for the binarity cap
-/// Partition the birth disk's gas content at the truncation radius. One midpoint-quadrature pass over
-/// `[inner_au, birth_r1_au]` (the same ring math as [`disk_gas_content`], so the `total` here reconstructs
-/// `disk_gas_content(disk, inner_au, birth_r1_au, steps)` to the ring), apportioning each ring at `R_t`: a ring
-/// fully inside `truncation_radius_au` is retained, fully outside is removed, and the single STRADDLING ring is
-/// SPLIT by the radial fraction of its width inside `R_t`, so a coarse step count cannot report a straddling ring
-/// wholly retained or wholly removed. The split conserves per ring, so `retained + removed = total` exactly. A wide
-/// or absent companion (`truncation_radius_au >= birth_r1_au`) leaves every ring retained, the untruncated identity.
-/// `None` on a non-positive or inverted domain, `truncation_radius_au <= inner_au` (a degenerate empty retained
-/// region), a zero or overflowing (`> i32::MAX`) step count, a `dr` underflowed to zero, a disk-edge miss, or an
-/// overflow. The fixed-point ring sum loses up to half an ulp per ring, the quadrature's inherent floor.
+/// Partition the birth disk's gas content at the truncation radius. A midpoint-quadrature pass over
+/// `[inner_au, birth_r1_au]`, apportioning each ring at `R_t`: a ring fully inside `truncation_radius_au` is
+/// retained, fully outside is removed, and the STRADDLING ring is split at `R_t` into two SUB-RINGS, each
+/// integrated at its OWN midpoint. The sub-ring split (rather than scaling one midpoint value by a radial fraction)
+/// is what keeps the proxy angular momentum correct: `L = m * sqrt(r)` weights radius non-linearly, so a fractional
+/// split would corrupt the `L` partition even where the mass partition is nearly right. Both ends are valid limits:
+/// a wide or absent companion (`truncation_radius_au >= birth_r1_au`) leaves every ring retained (the untruncated
+/// identity), and `truncation_radius_au <= inner_au` leaves every ring removed (the fully-stripped disc), symmetric.
+/// `total` is `retained + removed` by construction; it approximates `disk_gas_content` to within the straddling
+/// ring's own-midpoint refinement. `None` on a non-positive or inverted domain, a non-positive `truncation_radius_au`,
+/// a zero or overflowing (`> i32::MAX`) step count, a `dr` underflowed to zero, a disk-edge miss, or an overflow. The
+/// fixed-point ring sum loses up to half an ulp per ring, and `dr = span / steps` truncates, so at a very fine step
+/// count the last ring may fall short of `R_1` by up to `steps` ulps; both are the quadrature's inherent floor.
 pub fn truncation_gas_ledger(
     disk: &SolidDisk,
     inner_au: Fixed,
@@ -501,9 +504,7 @@ pub fn truncation_gas_ledger(
 ) -> Option<TruncationGasLedger> {
     if inner_au <= Fixed::ZERO
         || birth_r1_au <= inner_au
-        // R_t AT OR INSIDE the disc inner edge is degenerate: the retained region [inner, R_t] is empty, so there is
-        // no partition to report (a wide or absent companion, R_t >= R_1, is the other end and stays valid).
-        || truncation_radius_au <= inner_au
+        || truncation_radius_au <= Fixed::ZERO
         || steps == 0
         // the ring index is formed through Fixed::from_int(i32); a larger step count would wrap i as i32 to negative.
         || steps > i32::MAX as u32
@@ -515,45 +516,51 @@ pub fn truncation_gas_ledger(
     if dr <= Fixed::ZERO {
         return None; // steps too fine for the span's fixed-point resolution: dr underflowed to zero
     }
-    let half_dr = dr.checked_div(Fixed::from_int(2))?;
     let two_pi = Fixed::PI.checked_add(Fixed::PI)?;
+    // The gas mass and proxy angular momentum of a sub-ring `[lo, hi]`, each evaluated at the sub-ring's OWN
+    // midpoint. Splitting a straddling ring this way (rather than scaling one midpoint value by a radial fraction)
+    // is what keeps the proxy angular momentum correct: `L = m * sqrt(r)` weights radius by `sqrt(r)`, which is not
+    // constant across a ring, so a single-midpoint fractional split corrupts the L partition even though it leaves
+    // the mass partition nearly right. `2*pi*mid*width` is ordered mid*width first so the intermediate stays bounded
+    // (the wide-dense-disc overflow the audit caught). Returns `(0, 0)` for an empty sub-ring.
+    let subring = |lo: Fixed, hi: Fixed| -> Option<(Fixed, Fixed)> {
+        let width = hi.checked_sub(lo)?;
+        if width <= Fixed::ZERO {
+            return Some((Fixed::ZERO, Fixed::ZERO));
+        }
+        let mid = lo.checked_add(hi)?.checked_div(Fixed::from_int(2))?;
+        let sigma_gas = gas_surface_density_kg_m2(disk, mid)?;
+        let ring = mid
+            .checked_mul(width)?
+            .checked_mul(two_pi)?
+            .checked_mul(sigma_gas)?;
+        let mass = crate::astro::feeding_zone_mass_earth(ring)?;
+        let proxy_l = mass.checked_mul(mid.sqrt())?;
+        Some((mass, proxy_l))
+    };
     let mut retained_mass_earth = Fixed::ZERO;
     let mut retained_proxy_l = Fixed::ZERO;
     let mut removed_mass_earth = Fixed::ZERO;
     let mut removed_proxy_l = Fixed::ZERO;
     for i in 0..steps {
         let r_lo = inner_au.checked_add(dr.checked_mul(Fixed::from_int(i as i32))?)?;
-        let r = r_lo.checked_add(half_dr)?;
         let r_hi = r_lo.checked_add(dr)?;
-        let sigma_gas = gas_surface_density_kg_m2(disk, r)?;
-        // r*dr first: the 2*pi*r*Sigma intermediate alone overflows a wide, dense-disc ring (r ~ 100 AU,
-        // Sigma ~ 1e6) whose FINAL 2*pi*r*Sigma*dr is small and representable, so this ordering keeps the
-        // intermediate bounded rather than refusing a representable ring (the order-of-operations defect).
-        let ring = r
-            .checked_mul(dr)?
-            .checked_mul(two_pi)?
-            .checked_mul(sigma_gas)?;
-        let ring_mass = crate::astro::feeding_zone_mass_earth(ring)?;
-        let ring_proxy_l = ring_mass.checked_mul(r.sqrt())?;
-        // SPLIT the ring at R_t rather than classify it by its midpoint: the ring that STRADDLES R_t apportions its
-        // mass by the radial fraction inside R_t, so a coarse step count cannot report a straddling ring wholly
-        // retained or wholly removed (the midpoint-classification error the audit caught). Per-ring the split
-        // conserves exactly (retained + removed = ring_mass), so the ledger's retained + removed = total holds.
-        let inside_frac = if r_hi <= truncation_radius_au {
-            Fixed::ONE
-        } else if r_lo >= truncation_radius_au {
-            Fixed::ZERO
+        // The boundary WITHIN this ring: retained is `[r_lo, cut]`, removed is `[cut, r_hi]`, where `cut` is R_t
+        // clamped to the ring. A ring fully inside R_t has an empty removed part, fully outside an empty retained
+        // part, and the straddling ring splits at R_t into two sub-rings, each integrated at its own midpoint.
+        let cut = if truncation_radius_au < r_lo {
+            r_lo
+        } else if truncation_radius_au > r_hi {
+            r_hi
         } else {
-            truncation_radius_au.checked_sub(r_lo)?.checked_div(dr)?
+            truncation_radius_au
         };
-        let retained_ring_mass = ring_mass.checked_mul(inside_frac)?;
-        let retained_ring_l = ring_proxy_l.checked_mul(inside_frac)?;
-        retained_mass_earth = retained_mass_earth.checked_add(retained_ring_mass)?;
-        retained_proxy_l = retained_proxy_l.checked_add(retained_ring_l)?;
-        removed_mass_earth =
-            removed_mass_earth.checked_add(ring_mass.checked_sub(retained_ring_mass)?)?;
-        removed_proxy_l =
-            removed_proxy_l.checked_add(ring_proxy_l.checked_sub(retained_ring_l)?)?;
+        let (ret_mass, ret_l) = subring(r_lo, cut)?;
+        let (rem_mass, rem_l) = subring(cut, r_hi)?;
+        retained_mass_earth = retained_mass_earth.checked_add(ret_mass)?;
+        retained_proxy_l = retained_proxy_l.checked_add(ret_l)?;
+        removed_mass_earth = removed_mass_earth.checked_add(rem_mass)?;
+        removed_proxy_l = removed_proxy_l.checked_add(rem_l)?;
     }
     let total_mass_earth = retained_mass_earth.checked_add(removed_mass_earth)?;
     let total_proxy_l = retained_proxy_l.checked_add(removed_proxy_l)?;
@@ -658,10 +665,11 @@ pub enum TruncationResidualRefusal {
         /// The system budget under the dynamic reading (Earth masses): the full birth total.
         dynamic_budget_earth: Fixed,
     },
-    /// The ledger's partition is inconsistent: `retained + removed` does not equal `total` (for mass or proxy
-    /// angular momentum), so it is a broken or hand-forged account and no reading can dispose it. A well-formed
-    /// [`truncation_gas_ledger`] never triggers this; the check guards against a forged ledger reaching a consumer
-    /// as though conserved.
+    /// The ledger's partition is inconsistent: a component is NEGATIVE (you cannot retain or remove negative gas),
+    /// or `retained + removed` does not equal `total` (for mass or proxy angular momentum). Either way it is a broken
+    /// or hand-forged account and no reading can dispose it. A well-formed [`truncation_gas_ledger`] never triggers
+    /// this; the check guards against a forged ledger, including a BALANCED one whose parts sum but go negative,
+    /// reaching a consumer as though conserved.
     InconsistentLedger,
 }
 
@@ -681,16 +689,24 @@ pub fn dispose_truncation_residual(
     ledger: &TruncationGasLedger,
     reading: TruncationResidualReading,
 ) -> Result<TruncationResidualDisposition, TruncationResidualRefusal> {
-    // The conservation invariant, CHECKED rather than assumed: the retained and removed parts must sum to the whole,
-    // for both mass and proxy angular momentum. An inconsistent ledger refuses; this is what makes
-    // `residual_conserved` a real statement instead of the tautology a create-then-destroy to a zero net reports.
+    // The conservation invariant, CHECKED rather than assumed, on both mass and proxy angular momentum: every
+    // component is NON-NEGATIVE (you cannot retain or remove negative gas, so a negative part is a forged or broken
+    // account), AND the retained and removed parts sum to the whole. Both are required: the sum alone accepts a
+    // BALANCED negative forgery (retained 10, removed -5, total 5 sums but removes negative gas). This is what makes
+    // `residual_conserved` a real statement rather than the tautology a create-then-destroy to a zero net reports.
+    let non_negative = ledger.retained_mass_earth >= Fixed::ZERO
+        && ledger.removed_mass_earth >= Fixed::ZERO
+        && ledger.total_mass_earth >= Fixed::ZERO
+        && ledger.retained_proxy_l >= Fixed::ZERO
+        && ledger.removed_proxy_l >= Fixed::ZERO
+        && ledger.total_proxy_l >= Fixed::ZERO;
     let mass_closes = ledger
         .retained_mass_earth
         .checked_add(ledger.removed_mass_earth)
         == Some(ledger.total_mass_earth);
     let proxy_closes =
         ledger.retained_proxy_l.checked_add(ledger.removed_proxy_l) == Some(ledger.total_proxy_l);
-    if !mass_closes || !proxy_closes {
+    if !non_negative || !mass_closes || !proxy_closes {
         return Err(TruncationResidualRefusal::InconsistentLedger);
     }
     match reading {
@@ -1214,8 +1230,10 @@ pub fn giant_formation(
     })
 }
 
-/// The giant-formation verdict across a whole EMBRYO FIELD: [`giant_formation`] applied to each embryo, dropping
-/// any that fail soft. A convenience for running the branch over
+/// The giant-formation verdict across a whole EMBRYO FIELD: [`giant_formation`] applied to each embryo, ONE entry
+/// per embryo IN ORDER. A `None` entry is an embryo whose verdict refused (a soft failure), PRESERVED in place
+/// rather than silently dropped, so flattening the field is an explicit choice and a refusal count is recoverable
+/// (`iter().filter(Option::is_none).count()`). A convenience for running the branch over
 /// [`crate::planetary_system::oligarchic_embryo_field`] output.
 pub fn giant_formation_field(
     embryos: &[Embryo],
@@ -1223,10 +1241,10 @@ pub fn giant_formation_field(
     star_mass_ratio: Fixed,
     gas: &GiantGasParams,
     kh: &GiantKhParams,
-) -> Vec<GiantVerdict> {
+) -> Vec<Option<GiantVerdict>> {
     embryos
         .iter()
-        .filter_map(|embryo| giant_formation(embryo, disk, star_mass_ratio, gas, kh))
+        .map(|embryo| giant_formation(embryo, disk, star_mass_ratio, gas, kh))
         .collect()
 }
 
@@ -1800,17 +1818,21 @@ mod tests {
         assert_eq!(
             verdicts.len(),
             field.len(),
-            "every embryo resolves a verdict"
+            "one entry per embryo, in order"
+        );
+        assert!(
+            verdicts.iter().all(Option::is_some),
+            "every embryo resolves a verdict; none refused (a None would be preserved, not dropped)"
         );
         // The innermost embryo (a small core) is terrestrial; the outermost (the largest core) is a giant.
-        let inner = verdicts.first().unwrap();
+        let inner = verdicts.first().unwrap().as_ref().unwrap();
         assert_eq!(
             inner.outcome,
             GiantOutcome::Terrestrial,
             "the innermost embryo (core {}) stays terrestrial",
             inner.core_mass_earth.to_f64_lossy()
         );
-        let outer = verdicts.last().unwrap();
+        let outer = verdicts.last().unwrap().as_ref().unwrap();
         assert!(
             matches!(outer.outcome, GiantOutcome::Giant { .. }),
             "the outermost embryo (core {}) crosses to a giant",
@@ -1819,6 +1841,7 @@ mod tests {
         // Both classes appear from one disk: at least one terrestrial and at least one giant.
         let giants = verdicts
             .iter()
+            .flatten()
             .filter(|v| matches!(v.outcome, GiantOutcome::Giant { .. }))
             .count();
         let terrestrials = verdicts.len() - giants;
@@ -2584,8 +2607,13 @@ mod tests {
         assert!(ledger.retained_mass_earth > Fixed::ZERO);
     }
 
-    /// The `total` the ledger reports is the same object [`disk_gas_content`] integrates over `[inner, R_1]` with the
-    /// same step count: the ledger only re-buckets that sum, so their totals agree ring for ring.
+    /// The `total` the ledger reports is the gas content of `[inner, R_1]` at the same step count as
+    /// [`disk_gas_content`], and agrees with it to better than one part in a million. It is NO LONGER bit-identical:
+    /// the ledger splits the one ring that straddles `R_t` into two sub-rings at their own midpoints (the refinement
+    /// that keeps the proxy angular-momentum partition honest), so that single ring is a marginally finer quadrature
+    /// than the coarse single-midpoint ring `disk_gas_content` integrates. The residual is a second-order refinement
+    /// on one ring out of `steps`; a dropped or double-counted ring, off by order `1/steps` (about a percent here),
+    /// would exceed this tolerance ten-thousand-fold.
     #[test]
     fn the_ledger_total_matches_the_unpartitioned_gas_content() {
         let disk = mirror_disk(Fixed::ONE);
@@ -2595,8 +2623,18 @@ mod tests {
         let ledger =
             truncation_gas_ledger(&disk, inner, birth_r1, Fixed::from_int(12), steps).unwrap();
         let (mass, proxy_l) = disk_gas_content(&disk, inner, birth_r1, steps).unwrap();
-        assert_eq!(ledger.total_mass_earth, mass);
-        assert_eq!(ledger.total_proxy_l, proxy_l);
+        // Agreement to 1e-6 relative: the only difference is the straddling ring's two-submidpoint refinement.
+        let tol = Fixed::from_ratio(1, 1_000_000);
+        let mass_diff = (ledger.total_mass_earth - mass).abs();
+        assert!(
+            mass_diff <= mass.checked_mul(tol).unwrap(),
+            "ledger total mass agrees with the unpartitioned content to 1e-6 (diff {mass_diff}, total {mass})"
+        );
+        let proxy_diff = (ledger.total_proxy_l - proxy_l).abs();
+        assert!(
+            proxy_diff <= proxy_l.checked_mul(tol).unwrap(),
+            "ledger total proxy_L agrees with the unpartitioned content to 1e-6 (diff {proxy_diff}, total {proxy_l})"
+        );
     }
 
     /// A wide or absent companion (`R_t >= R_1`) leaves everything retained and nothing removed: the untruncated
@@ -2719,84 +2757,176 @@ mod tests {
         );
     }
 
-    /// A FORGED ledger whose parts do not sum to its whole is REFUSED, not disposed to a plausible budget. This is
-    /// the fix for the tautology the prior create-then-destroy reported: conservation is now the checked
-    /// `retained + removed == total` invariant, so an inconsistent account cannot pass as conserved.
+    /// A FORGED ledger is REFUSED, in BOTH shapes a real ledger can never be: the UNBALANCED one (parts do not sum
+    /// to the whole), and the sharper BALANCED one whose parts sum but include a NEGATIVE removed mass. You cannot
+    /// remove negative gas, and the sum check alone would accept the balanced forgery, so the invariant needs
+    /// non-negativity too. Testing only the unbalanced case (as an earlier version did) locks in the weaker check.
     #[test]
     fn the_disposition_refuses_a_forged_ledger() {
-        let forged = TruncationGasLedger {
+        let unbalanced = TruncationGasLedger {
             retained_mass_earth: Fixed::from_int(10),
             retained_proxy_l: Fixed::from_int(10),
-            removed_mass_earth: Fixed::from_int(-5),
-            removed_proxy_l: Fixed::from_int(-5),
-            total_mass_earth: Fixed::from_int(999), // 10 + (-5) != 999
+            removed_mass_earth: Fixed::from_int(5),
+            removed_proxy_l: Fixed::from_int(5),
+            total_mass_earth: Fixed::from_int(999), // 10 + 5 != 999
             total_proxy_l: Fixed::from_int(999),
         };
-        for reading in [
-            TruncationResidualReading::InitialCondition,
-            TruncationResidualReading::DynamicOutflow {
-                sink: TruncationSink::CompanionAccretion,
-            },
-        ] {
-            assert!(
-                matches!(
-                    dispose_truncation_residual(&forged, reading),
-                    Err(TruncationResidualRefusal::InconsistentLedger)
-                ),
-                "a ledger whose retained + removed != total refuses as inconsistent"
-            );
+        let balanced_negative = TruncationGasLedger {
+            retained_mass_earth: Fixed::from_int(10),
+            retained_proxy_l: Fixed::from_int(10),
+            removed_mass_earth: Fixed::from_int(-5), // removing negative gas is physically meaningless
+            removed_proxy_l: Fixed::from_int(-5),
+            total_mass_earth: Fixed::from_int(5), // 10 + (-5) == 5: it SUMS, but it is forged
+            total_proxy_l: Fixed::from_int(5),
+        };
+        for forged in [unbalanced, balanced_negative] {
+            for reading in [
+                TruncationResidualReading::InitialCondition,
+                TruncationResidualReading::DynamicOutflow {
+                    sink: TruncationSink::CompanionAccretion,
+                },
+            ] {
+                assert!(
+                    matches!(
+                        dispose_truncation_residual(&forged, reading),
+                        Err(TruncationResidualRefusal::InconsistentLedger)
+                    ),
+                    "a forged ledger (unbalanced, or balanced with negative removed gas) refuses as inconsistent"
+                );
+            }
         }
     }
 
-    /// A WIDE, DENSE disc integrates without a spurious refusal: the per-ring `2*pi*r*Sigma*dr` is ordered so the
-    /// intermediate stays bounded, so a ring whose FINAL mass is representable is not rejected by an overflowing
-    /// `2*pi*r*Sigma` product (the order-of-operations defect the audit caught). Exercises the reordered path.
+    /// A LOW-VISCOSITY disc whose surface density makes the OLD `2*pi*r*Sigma` intermediate overflow the fixed-point
+    /// ceiling even though the completed `2*pi*r*Sigma*dr` is representable. The test first CONFIRMS the old ordering
+    /// would have overflowed (so the fixture actually exercises the defect, unlike a fixture ~1000x below the
+    /// ceiling), then checks the reordered integral resolves. Revert the reorder and this refuses.
     #[test]
-    fn a_wide_dense_disc_gas_integral_resolves_on_a_representable_total() {
-        let dense = mirror_disk(Fixed::from_int(200)); // a much denser disc than the solar Mirror
-        let (mass, proxy_l) = disk_gas_content(&dense, r(1, 10), Fixed::from_int(40), 2048)
-            .expect("a wide, dense disc integrates without refusing on a representable total");
+    fn a_low_alpha_disc_gas_integral_survives_the_intermediate_overflow() {
+        let thermal = DiskThermalParams {
+            accretion_rate_msun_myr: r(1, 100).checked_mul(Fixed::from_int(1000)).unwrap(),
+            star_mass_ratio: Fixed::ONE,
+            mass_luminosity_exponent: r(35, 10),
+            reprocessing_factor: r(5, 100),
+            inner_boundary_factor: Fixed::from_int(4),
+            t_max: Fixed::from_int(2_000_000),
+        };
+        let low_alpha = SolidDisk::derive(
+            thermal,
+            r(1, 100_000), // alpha = 1e-5, so Sigma ~ Mdot/alpha is high enough to overflow 2*pi*r*Sigma
+            r(234, 100),
+            r(134, 10_000),
+            r(1, 2),
+            Fixed::from_int(182),
+            Fixed::ONE,
+            Fixed::from_int(40),
+        )
+        .expect("the low-alpha disc derives");
+        // CONFIRM the pre-fix ordering would overflow here: 2*pi*r*Sigma at a wide ring exceeds the ceiling.
+        let two_pi = Fixed::PI.checked_add(Fixed::PI).unwrap();
+        let r_probe = Fixed::from_int(20);
+        let sigma = gas_surface_density_kg_m2(&low_alpha, r_probe).unwrap();
+        assert!(
+            two_pi
+                .checked_mul(r_probe)
+                .and_then(|x| x.checked_mul(sigma))
+                .is_none(),
+            "the fixture must exercise the defect: the old 2*pi*r*Sigma intermediate overflows here"
+        );
+        // The reordered integral (r*dr first) keeps the intermediate bounded and resolves on the representable total.
+        // Integrated over a NARROW band around the probe (so the dense inner rings, whose completed product would
+        // itself overflow at this extreme density, are not involved): every ring here has the overflowing 2*pi*r*Sigma
+        // intermediate but a small, representable 2*pi*r*Sigma*dr.
+        let (mass, proxy_l) = disk_gas_content(&low_alpha, r(199, 10), r(201, 10), 2048).expect(
+            "the reordered integral survives the intermediate overflow on a representable total",
+        );
         assert!(mass > Fixed::ZERO && proxy_l > Fixed::ZERO);
     }
 
-    /// The truncation ledger SPLITS the ring straddling R_t rather than classifying it by its midpoint, and its
-    /// degenerate inputs refuse. At steps = 1 the single ring over [0.1, 30] AU with R_t = 12 reports the radial
-    /// fraction inside R_t as retained ((12 - 0.1) / (30 - 0.1) = 0.398), not zero (the midpoint-classification
-    /// error), and retained + removed = total holds exactly.
+    /// BLOCKER A: the straddling ring must partition mass AND proxy angular momentum EACH correctly. Because
+    /// `L = m * sqrt(r)` weights radius non-linearly, the removed gas (at larger r) carries a DISPROPORTIONATE share
+    /// of L, so the retained PROXY fraction is strictly BELOW the retained MASS fraction. The earlier code split
+    /// proxy by the mass fraction, making them equal. Checked against an INDEPENDENT fine integral computed here (in
+    /// f64), never against the implementation, so it cannot lock in the shortcut it is meant to catch.
     #[test]
-    fn the_truncation_ledger_splits_the_straddling_ring_and_guards_degenerate_inputs() {
+    fn the_truncation_ledger_partitions_mass_and_angular_momentum_separately() {
         let disk = mirror_disk(Fixed::ONE);
+        let inner = r(1, 10);
+        let r1 = Fixed::from_int(30);
+        let rt = Fixed::from_int(12);
+        // Independent reference: a fine midpoint integral of mass (2*pi*r*Sigma*dr) and proxy (mass*sqrt(r)) over an
+        // interval, accumulated in f64 here, not by the ledger.
+        let reference = |lo: Fixed, hi: Fixed| -> (f64, f64) {
+            let (lo, hi) = (lo.to_f64_lossy(), hi.to_f64_lossy());
+            let n = 4000i64;
+            let w = (hi - lo) / n as f64;
+            let (mut mass, mut proxy) = (0.0f64, 0.0f64);
+            for k in 0..n {
+                let mid = lo + (k as f64 + 0.5) * w;
+                let mid_fixed = Fixed::from_ratio((mid * 1_000_000.0) as i64, 1_000_000);
+                let sigma = gas_surface_density_kg_m2(&disk, mid_fixed)
+                    .unwrap()
+                    .to_f64_lossy();
+                let dm = 2.0 * std::f64::consts::PI * mid * sigma * w;
+                mass += dm;
+                proxy += dm * mid.sqrt();
+            }
+            (mass, proxy)
+        };
+        let (ret_m, ret_l) = reference(inner, rt);
+        let (rem_m, rem_l) = reference(rt, r1);
+        let ref_mass_frac = ret_m / (ret_m + rem_m);
+        let ref_proxy_frac = ret_l / (ret_l + rem_l);
+        assert!(
+            ref_proxy_frac < ref_mass_frac - 0.05,
+            "reference: the proxy fraction ({ref_proxy_frac}) sits well below the mass fraction ({ref_mass_frac})"
+        );
+        // A FINE ledger must match the independent reference on BOTH fractions, not just mass.
         let led =
-            truncation_gas_ledger(&disk, r(1, 10), Fixed::from_int(30), Fixed::from_int(12), 1)
-                .expect("the single-ring ledger builds");
-        let frac = led.retained_mass_earth.to_f64_lossy() / led.total_mass_earth.to_f64_lossy();
+            truncation_gas_ledger(&disk, inner, r1, rt, 2048).expect("the fine ledger builds");
+        let mass_frac =
+            led.retained_mass_earth.to_f64_lossy() / led.total_mass_earth.to_f64_lossy();
+        let proxy_frac = led.retained_proxy_l.to_f64_lossy() / led.total_proxy_l.to_f64_lossy();
         assert!(
-            (frac - 0.3980).abs() < 1e-3,
-            "the straddling ring splits to ~0.398 retained, not zero; got {frac}"
+            (mass_frac - ref_mass_frac).abs() < 0.01,
+            "ledger mass fraction {mass_frac} matches the reference {ref_mass_frac}"
         );
-        assert!(led.retained_mass_earth > Fixed::ZERO);
+        assert!(
+            (proxy_frac - ref_proxy_frac).abs() < 0.01,
+            "ledger proxy fraction {proxy_frac} matches the reference {ref_proxy_frac}, NOT the mass fraction"
+        );
+    }
+
+    /// The truncation ledger's LIMITS and guards: R_t beyond R_1 is all retained, R_t inside the inner edge is all
+    /// removed (symmetric, both valid, neither refuses), retained + removed = total exactly, and the i32-overflow
+    /// step count refuses rather than wrapping.
+    #[test]
+    fn the_truncation_ledger_limits_and_guards() {
+        let disk = mirror_disk(Fixed::ONE);
+        let inner = r(1, 10);
+        let r1 = Fixed::from_int(30);
+        // R_t >= R_1: the untruncated identity, all retained, nothing removed.
+        let wide = truncation_gas_ledger(&disk, inner, r1, Fixed::from_int(40), 256).unwrap();
+        assert_eq!(wide.removed_mass_earth, Fixed::ZERO);
+        assert_eq!(wide.retained_mass_earth, wide.total_mass_earth);
+        // R_t <= inner: the fully-stripped disc, all removed, nothing retained (symmetric with the wide case, not a
+        // refusal). This is the limit the earlier version wrongly rejected.
+        let stripped = truncation_gas_ledger(&disk, inner, r1, r(1, 20), 256)
+            .expect("R_t inside the inner edge is a valid all-removed partition, not a refusal");
+        assert_eq!(stripped.retained_mass_earth, Fixed::ZERO);
+        assert_eq!(stripped.removed_mass_earth, stripped.total_mass_earth);
+        // A mid partition conserves exactly on both quantities.
+        let mid = truncation_gas_ledger(&disk, inner, r1, Fixed::from_int(12), 256).unwrap();
         assert_eq!(
-            led.retained_mass_earth.checked_add(led.removed_mass_earth),
-            Some(led.total_mass_earth),
-            "the split conserves: retained + removed = total exactly"
+            mid.retained_mass_earth.checked_add(mid.removed_mass_earth),
+            Some(mid.total_mass_earth)
         );
-        // R_t at or inside the disc inner edge is degenerate (empty retained region): refuse.
-        assert!(
-            truncation_gas_ledger(&disk, r(1, 10), Fixed::from_int(30), r(1, 20), 128).is_none(),
-            "R_t inside the inner edge refuses"
+        assert_eq!(
+            mid.retained_proxy_l.checked_add(mid.removed_proxy_l),
+            Some(mid.total_proxy_l)
         );
-        // An overflowing step count (index formed through i32) refuses rather than wrapping.
-        assert!(
-            truncation_gas_ledger(
-                &disk,
-                r(1, 10),
-                Fixed::from_int(30),
-                Fixed::from_int(12),
-                u32::MAX
-            )
-            .is_none(),
-            "a step count past i32::MAX refuses"
-        );
+        // A step count past i32::MAX refuses rather than wrapping the index.
+        assert!(truncation_gas_ledger(&disk, inner, r1, Fixed::from_int(12), u32::MAX).is_none());
     }
 
     /// The UN-SELECTED reading REFUSES to collapse to a single budget and carries both candidates, the "name the

@@ -2657,8 +2657,9 @@ pub fn nlte_departed_ionizing_spectrum(
 /// solar-log-g-4 value; the full `(Z, log g)`-interpolated lookup over the whole BSTAR2006 grid is a NAMED
 /// data-and-interpolation rung, not built here.
 ///
-/// INTERPOLATION: monotonic and rising with `T_eff`, but NOT a single linear slope. The local slope runs from about
-/// 0.054 to 0.19 dex per 1000 K across the range (the average, about 0.14, must NOT be read as the local rate). The
+/// INTERPOLATION: monotonic and rising with `T_eff`, but NOT a single linear slope. The local slope rises from about
+/// 0.054 dex per 1000 K (15 to 16 kK) to a peak of about 0.188 (25 to 26 kK), then eases to about 0.171 by 29 to 30 kK
+/// (the average, about 0.14, must NOT be read as the local rate, and the peak is mid-range, not at the top). The
 /// grid interpolates LINEARLY in `log10` departure between adjacent points, an authored piecewise-linear model whose
 /// error is the deviation of the true curve from each chord; a stated error band on that interpolation is a later rung.
 ///

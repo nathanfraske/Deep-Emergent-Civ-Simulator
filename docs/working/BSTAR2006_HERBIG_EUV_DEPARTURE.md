@@ -1,10 +1,10 @@
-# BSTAR2006 Herbig-regime EUV departure: verified derivation, vendoring pending
+# BSTAR2006 Herbig-regime EUV departure: verified derivation, vendored and wired
 
-This working note holds a load-bearing number derived from real data in an ephemeral
-scratchpad, preserved here so it is not lost before the vendoring can be finished. It is NOT
-yet wired into the code and NOT yet a gate-passing source entry: the archived witness step is
-blocked in the session that produced it (see "Vendoring status"). Read this before wiring the
-number or completing the vendoring.
+This working note holds the derivation of a load-bearing number from real data. The number is
+now WIRED into the code (`astro::HerbigEuvDepartureGrid::bstar2006_svo`) and the source entry
+`svo_tlusty_bstar2006` passes the sources gate, with all 16 grid points byte-verified as Wayback
+witnesses (see "Vendoring status"). Read this before extending the grid off its single
+(solar Z, log g 4.0) slice or restating the derivation.
 
 ## What this is
 
@@ -54,7 +54,7 @@ Teff   FID  bytes    sha256
 
 ## Method
 
-nu_L = 3.2898e15 Hz (lambda_L = 911.28 A), the same threshold the P0-A code uses.
+nu_L = 3.2898e15 Hz (lambda_L = 911.28 A, i.e. 13.606 eV). The P0-A code's edge is T_ion = 157821 K = 13.6 eV = 911.65 A, so the derivation threshold and the code's differ by about 0.04 percent, a small systematic named below alongside the Wien-versus-Planck one.
 
 - Model ionizing photon rate: `N_model = integral over lambda < lambda_L of F_lambda * lambda / (h c) d_lambda`, with lambda in cm (lambda_A times 1e-8). Units: photons cm^-2 s^-1, surface.
 - Blackbody reference: `N_bb = pi * integral over nu > nu_L of B_nu(Teff) / (h nu) d_nu`, the physical surface flux (F_nu = pi B_nu).
@@ -85,7 +85,7 @@ Teff    log10(departure)
 
 - Full 15 to 30 kK: log10 departure in [-2.689, -0.654] (departure in [2.05e-3, 0.222]).
 - Cool 15 to 25 kK (the region below the Sternberg anchor): log10 departure in [-2.689, -1.549] (departure in [2.05e-3, 2.83e-2]).
-- Monotonic in Teff, but NOT a single linear slope. The local slope runs from about 0.054 dex per 1000 K (15 to 16 kK) to about 0.19 dex per 1000 K (29 to 30 kK); the average of about 0.14 is NOT the local rate and must not be read as one. The mapping spans two decades, so `[departure_lo, departure_hi]` is NOT a flat clamp: departure(Teff) is interpolated LINEARLY in log10 space between grid points, an authored piecewise-linear model whose error is the deviation of the true curve from each chord (a stated error band on that interpolation is a later rung).
+- Monotonic in Teff, but NOT a single linear slope. The local slope rises from about 0.054 dex per 1000 K (15 to 16 kK) to a maximum of about 0.188 dex per 1000 K (25 to 26 kK), then eases to about 0.171 by 29 to 30 kK; the average of about 0.14 is NOT the local rate and must not be read as one. (The peak is at 25 to 26 kK, not at the top of the range; an earlier draft placed the maximum at 29 to 30 kK, which is 0.171, not the peak.) The mapping spans two decades, so `[departure_lo, departure_hi]` is NOT a flat clamp: departure(Teff) is interpolated LINEARLY in log10 space between grid points, an authored piecewise-linear model whose error is the deviation of the true curve from each chord (a stated error band on that interpolation is a later rung).
 
 ## Independent verification and the caught error
 
@@ -108,7 +108,7 @@ in, the Herbig EUV photoevaporation would have been suppressed by 10^8, a qualit
 
 - WINDLESS. These are plane-parallel hydrostatic NLTE atmospheres with no wind. The far-Wien Lyman continuum is exactly where winds matter, which is why Sternberg (WM-Basic, windy) is the >25 kK anchor. So BSTAR2006 above 25 kK will NOT match the Sternberg value, and the two must NOT be stitched into one continuous interval: they are sibling grounded intervals for different regimes (windless cool-B versus windy hot-B), the same disjoint-evidence discipline P0-B enforces on the EUV fit domain. The value of this grid is the 15 to 25 kK region, where no windy grid reaches and where Herbig Be winds are weak, so the windless model is the appropriate one.
 - Fixed (log g = 4.0, solar Z). The band is specific to these. Herbig Be stars sit near log g 3.5 to 4.5; a log g or sub-solar Z sensitivity run is a separate fixed-other-params run, and every FID is in the SVO SSAP index above.
-- Threshold: lambda_L = 911.28 A (nu_L = 3.2898e15 Hz), i.e. 13.606 eV, was used, matching the code's value. NIST hydrogen ionization is 13.5984 eV = 911.75 A; the 911.28 versus 911.75 A choice is about 0.05 percent in the threshold. CORRECTION: an earlier draft claimed 13.6057 eV corresponds to 911.75 A, which is false (13.6057 eV = 911.27 A; 911.75 A is 13.598 eV). Two more small systematics, named plainly: the departure's blackbody reference here uses the FULL Planck denominator, while the P0-A `blackbody_ionizing_fraction` uses the one-term WIEN tail, differing about 0.216 percent at 30 kK; and `IonizingSpectrumEvaluation` does not carry its own threshold, so the fixed table must only be applied to a blackbody built with the matching T_ion. Together these are of order 0.25 to 0.29 percent, small against the two-decade departure but real, so the wired result is not exact to better than a fraction of a percent.
+- Threshold: lambda_L = 911.28 A (nu_L = 3.2898e15 Hz), i.e. 13.606 eV, was used in this derivation. The P0-A code's edge is 13.6 eV (T_ion = 157821 K = 13.6 eV / k_B), which is 911.65 A, so the derivation and the code differ by about 0.04 percent in the threshold; the two are NOT identical, and this is one of the small named systematics, not a match. NIST hydrogen ionization is 13.5984 eV = 911.75 A; the 911.28 versus 911.75 A choice is about 0.05 percent in the threshold. CORRECTION: an earlier draft claimed 13.6057 eV corresponds to 911.75 A, which is false (13.6057 eV = 911.27 A; 911.75 A is 13.598 eV). Two more small systematics, named plainly: the departure's blackbody reference here uses the FULL Planck denominator, while the P0-A `blackbody_ionizing_fraction` uses the one-term WIEN tail, differing about 0.216 percent at 30 kK; and `IonizingSpectrumEvaluation` does not carry its own threshold, so the fixed table must only be applied to a blackbody built with the matching T_ion. Together these are of order 0.25 to 0.29 percent, small against the two-decade departure but real, so the wired result is not exact to better than a fraction of a percent.
 
 ## Archive witnesses (coordinator, 2026-07-19)
 

@@ -1395,6 +1395,7 @@ mod tests {
             &kh_params(),
         )
         .iter()
+        .flatten()
         .filter(|v| matches!(v.outcome, GiantOutcome::Giant { .. }))
         .count();
         let system = assemble_system_with_giants(
