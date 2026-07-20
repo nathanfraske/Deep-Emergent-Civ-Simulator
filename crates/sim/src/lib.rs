@@ -67,6 +67,7 @@ pub mod contact_wound;
 pub mod controller;
 pub mod conviction_experience;
 pub mod conviction_percept;
+pub mod cpd_thermal;
 pub mod dawn_harness;
 pub mod deeptime;
 pub mod demography;
