@@ -702,10 +702,21 @@ impl Fixed {
     ///
     /// # THE RAILS ARE READ ON THE ARGUMENT, NOT SNIFFED FROM THE VALUE
     ///
-    /// [`Fixed::exp`] returns `Fixed::MAX` above 22 and `Fixed::ZERO` below -22 by its own construction, so
-    /// the classification is a comparison on `y ln x` before evaluating rather than an equality test on
-    /// something that may legitimately BE those values. A true result landing exactly on `Fixed::MAX` used to
-    /// be refused as a false positive; it is `Finite` now, because the argument test can tell them apart.
+    /// [`Fixed::exp`] saturates rather than wrapping, so the classification is a comparison on `y ln x`
+    /// before evaluating rather than an equality test on something that may legitimately BE a rail. A true
+    /// result landing exactly on `Fixed::MAX` used to be refused as a false positive; it is `Finite` now,
+    /// because the argument test can tell them apart.
+    ///
+    /// # THE EDGE IS DERIVED, AND THE AUTHORED 22 WAS THE SECOND HALF OF THE SAME DEFECT
+    ///
+    /// The first version of this test read `arg > 22`, copied from [`Fixed::exp`]'s own saturation guard. 22
+    /// is not the representable edge: `exp` reaches `Fixed::MAX` at [`Self::exp_max_argument`],
+    /// `ln(Fixed::MAX) = 21.4875626`. Across the whole band `(21.4875626, 22]` the argument test called the
+    /// result `Finite` while [`Fixed::exp`]'s `scale_pow2` had already saturated it to `Fixed::MAX`, so a
+    /// railed value was returned as an answer. That is the laundering this function exists to stop,
+    /// reintroduced one layer up by an authored constant standing where a derived one belongs. The mass
+    /// luminosity `M^3.5` lands in that band at 464 solar masses (`3.5 ln 464 = 21.4896`), which is how it
+    /// surfaced.
     // @derives: a classified fixed-point power <- the base, the exponent and the representable window
     pub fn powf_outcome(self, y: Fixed) -> ExpOutcome {
         if self <= Fixed::ZERO {
@@ -721,20 +732,32 @@ impl Fixed {
                 ExpOutcome::Underflow
             };
         };
-        if arg > Fixed::from_int(22) {
-            return ExpOutcome::Overflow;
-        }
-        if arg < Fixed::from_int(-22) {
-            return ExpOutcome::Underflow;
-        }
-        ExpOutcome::Finite(arg.exp())
+        arg.exp_outcome()
+    }
+
+    /// The largest argument whose exponential is representable, DERIVED from the representation rather than
+    /// authored: `exp(x)` exceeds [`Fixed::MAX`] exactly when `x` exceeds `ln(Fixed::MAX)`.
+    ///
+    /// Measured against what [`Fixed::exp`] actually does rather than trusted from the algebra: the last
+    /// argument whose exponential lands below the rail is `21.487560871` and the first that reaches it is
+    /// `21.487563870`, so this derived edge falls inside the measured crossover. Within the `1.5e-6` sliver
+    /// below it the series rails about `2e-6` early in relative terms, which is the accuracy the top of the
+    /// range carries anyway.
+    // @derives: the representable exponential edge <- the natural log of the representation's ceiling
+    pub fn exp_max_argument() -> Fixed {
+        Fixed::MAX.ln()
     }
 
     /// [`Fixed::exp`] WITH ITS FAILURE CLASSIFIED, the sibling of [`Self::powf_outcome`] for a caller that
     /// already holds the exponent.
+    ///
+    /// The underflow edge stays at `-22`, which is [`Fixed::exp`]'s own floor rather than the
+    /// representation's: the smallest positive `Fixed` is `2^-32`, whose log is `-22.1807`. Between the two
+    /// the true value is under one ulp, so zero is very nearly right and `Underflow` is the honest report.
+    /// The overflow edge is the derived one, because there the gap is the whole distance to the rail.
     // @derives: a classified fixed-point exponential <- the argument and the representable window
     pub fn exp_outcome(self) -> ExpOutcome {
-        if self > Fixed::from_int(22) {
+        if self > Fixed::exp_max_argument() {
             return ExpOutcome::Overflow;
         }
         if self < Fixed::from_int(-22) {
@@ -1239,6 +1262,79 @@ mod tests {
         assert_eq!(
             Fixed::ONE.exp_outcome().finite().map(|v| v.to_bits()),
             Some(Fixed::ONE.exp().to_bits())
+        );
+    }
+
+    /// THE EDGE IS THE REPRESENTATION'S, NOT AN AUTHORED 22, pinned by measurement at the crossover.
+    ///
+    /// The first classified form tested `arg > 22`, copied from [`Fixed::exp`]'s own saturation guard.
+    /// `exp` reaches the rail at `ln(Fixed::MAX) = 21.4875626`, so across `(21.4875626, 22]` the argument
+    /// test called a saturated `Fixed::MAX` a finite answer. This pins the derived edge, the band that was
+    /// laundering, and the fact that `exp` saturates rather than wrapping (which is what makes a comparison
+    /// on the argument sound in the first place).
+    #[test]
+    fn the_representable_edge_is_derived_and_the_authored_band_no_longer_launders() {
+        let edge = Fixed::exp_max_argument();
+
+        // The edge is where the algebra says, and the measurement agrees: the last argument below the rail
+        // is 21.487560871 and the first at it is 21.487563870, so the derived edge falls between them.
+        assert!(
+            edge > Fixed::from_ratio(21_487_560, 1_000_000)
+                && edge < Fixed::from_ratio(21_487_564, 1_000_000),
+            "the derived edge {} must land inside the measured crossover",
+            edge.to_f64_lossy()
+        );
+
+        // EVERY ARGUMENT IN THE OLD BAND RAILS, and every one of them is now named an overflow rather than
+        // returned as a value. Walking it is what proves the band is closed rather than its endpoints moved.
+        let mut arg = edge + Fixed::from_ratio(1, 1_000_000);
+        let stop = Fixed::from_int(22);
+        let step = (stop - edge).div(Fixed::from_int(64));
+        while arg <= stop {
+            assert_eq!(
+                arg.exp().to_bits(),
+                Fixed::MAX.to_bits(),
+                "exp({}) is a saturated rail",
+                arg.to_f64_lossy()
+            );
+            assert_eq!(
+                arg.exp_outcome(),
+                ExpOutcome::Overflow,
+                "a saturated rail at {} must be named, not returned",
+                arg.to_f64_lossy()
+            );
+            arg += step;
+        }
+
+        // BELOW THE EDGE IT STILL ANSWERS, so this closed a hole rather than narrowing the window.
+        let inside = edge - Fixed::from_ratio(1, 1000);
+        assert!(
+            inside.exp() < Fixed::MAX,
+            "just inside the edge the exponential is below the rail"
+        );
+        assert!(
+            matches!(inside.exp_outcome(), ExpOutcome::Finite(_)),
+            "just inside the edge the answer is finite"
+        );
+
+        // THE CASE THAT SURFACED IT: the mass-luminosity power at the production exponent. 463 solar masses
+        // resolves and 464 refuses, and 464 is inside the old authored band rather than past 22.
+        let alpha = Fixed::from_ratio(35, 10);
+        let at_463 = Fixed::from_int(463).powf_outcome(alpha);
+        let at_464 = Fixed::from_int(464).powf_outcome(alpha);
+        assert!(
+            matches!(at_463, ExpOutcome::Finite(_)),
+            "463 solar masses is the last representable mass"
+        );
+        assert_eq!(
+            at_464,
+            ExpOutcome::Overflow,
+            "464 solar masses rails and must be named, not returned as the rail"
+        );
+        let arg_464 = alpha.mul(Fixed::from_int(464).ln());
+        assert!(
+            arg_464 > edge && arg_464 < Fixed::from_int(22),
+            "464 lands inside the band the authored 22 was letting through"
         );
     }
 }

@@ -17,12 +17,13 @@ The lists below are GENERATED from `crates/physics/data/*.toml`, `crates/physics
 
 ## Deriving substrates (check here BEFORE authoring: what the world derives, and where)
 
-The 89 deriving subsystems below live OUTSIDE the authored floor. Each produces a world quantity from the floor and the situation, so its output must never be authored: if the value you need appears here, read or extend the subsystem, do not set a number. This is the list that stops `1 year = 365 days` from being authored when orbital mechanics already derives it. Generated from the `// @derives:` markers in the code; a subsystem missing its marker is a gap in this map, so mark every derivation entry point.
+The 90 deriving subsystems below live OUTSIDE the authored floor. Each produces a world quantity from the floor and the situation, so its output must never be authored: if the value you need appears here, read or extend the subsystem, do not set a number. This is the list that stops `1 year = 365 days` from being authored when orbital mechanics already derives it. Generated from the `// @derives:` markers in the code; a subsystem missing its marker is a gap in this map, so mark every derivation entry point.
 
 ### `crates/core/src/fixed.rs`
 
-- a classified fixed-point power <- the base, the exponent and the representable window (`crates/core/src/fixed.rs:709`)
-- a classified fixed-point exponential <- the argument and the representable window (`crates/core/src/fixed.rs:735`)
+- a classified fixed-point power <- the base, the exponent and the representable window (`crates/core/src/fixed.rs:720`)
+- the representable exponential edge <- the natural log of the representation's ceiling (`crates/core/src/fixed.rs:746`)
+- a classified fixed-point exponential <- the argument and the representable window (`crates/core/src/fixed.rs:758`)
 ### `crates/foundation/src/clock.rs`
 
 - a world's year/day/season in TICKS, and the cell area in metres <- the world's orbit (world-seconds) divided by the base tick (1 tick = 1 world-second, reserved). The calendar is NOT a hardcoded 365 days; it falls out of the orbit and the tick. The cell edge derives as a reference creature's real ground speed (m/s) x 1 s/tick (see locomotion base_speed), cross-checked by NPP density x cell area = standing crop. (`crates/foundation/src/clock.rs:81`)
