@@ -229,7 +229,7 @@ mod tests {
         // guess about it, and it fails immediately if the load list is built with an off-by-one centre or if the
         // Green's function is evaluated with a signed rather than an absolute distance.
         let profile = flexural_relief_profile_km(
-            &vec![Fixed::from_int(30); 11],
+            &[Fixed::from_int(30); 11],
             Fixed::from_ratio(29, 10),
             Fixed::from_ratio(33, 10),
             Fixed::from_ratio(98, 10_000),

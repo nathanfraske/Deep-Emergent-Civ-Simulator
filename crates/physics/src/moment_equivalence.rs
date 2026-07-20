@@ -3062,7 +3062,7 @@ mod tests {
     /// than at fifty call sites. The column that does NOT fit is the subject of
     /// `the_sluggish_lid_solves_where_its_own_ceiling_used_to_overflow`, which reads the internal rigidity on
     /// purpose and is the reason the accessor is fallible at all.
-    fn d_ext(p: &MomentEquivalentPlate) -> Fixed {
+    fn d_ext(p: MomentEquivalentPlate) -> Fixed {
         p.rigidity_gpa_km3()
             .expect("this fixture's plate fits in the caller's GPa km^3")
     }
@@ -5201,7 +5201,7 @@ mod tests {
             let plate = mars_solve(yield_mpa).unwrap_or_else(|e| {
                 panic!("the {yield_mpa} MPa Mars column must solve, got {e:?}")
             });
-            let d = f64_of(d_ext(&plate));
+            let d = f64_of(d_ext(plate));
             assert!(
                 (low..=high).contains(&d),
                 "the {yield_mpa} MPa Mars column converges near {low}, read {d}"
@@ -5260,12 +5260,7 @@ mod tests {
         // IT CONVERGED TO THE CEILING ITSELF, which is the check that this is the unyielded plate rather than
         // merely some representable number: an envelope the load never yields returns the fully elastic
         // rigidity the bracket opened at.
-        let ceiling = fully_elastic_internal_rigidity(
-            &mars_thick_lid_profile(50),
-            Fixed::from_int(120),
-            Fixed::from_ratio(25, 100),
-        )
-        .expect("the ceiling is representable internally");
+
         let mut gaps: Vec<f64> = Vec::new();
         for steps in [300u32, 600, 1200, 2400] {
             let prof = EnvelopeProfile::sample(
@@ -5689,20 +5684,20 @@ mod tests {
         // THE FIXED POINT IS A FIXED POINT: re-entering the converged rigidity reproduces it, which is the
         // property the loop claims rather than merely the number it stopped at.
         let alpha = crate::flexure::flexural_parameter(
-            d_ext(&plate),
+            d_ext(plate),
             Fixed::from_ratio(33, 10),
             Fixed::from_ratio(98, 10000),
         )
         .unwrap();
-        let k = line_load_curvature_at_first_zero_crossing(load, alpha, d_ext(&plate)).unwrap();
+        let k = line_load_curvature_at_first_zero_crossing(load, alpha, d_ext(plate)).unwrap();
         let z_n = neutral_surface_depth_km(&profile, k, lit_e(), lit_nu()).unwrap();
         let m = bending_moment(&profile, k, z_n, lit_e(), lit_nu()).unwrap();
         let d_again = equivalent_rigidity(m.moment, k).unwrap();
         assert!(
-            (f64_of(d_again) - f64_of(d_ext(&plate))).abs() < f64_of(d_ext(&plate)) * 1e-6,
+            (f64_of(d_again) - f64_of(d_ext(plate))).abs() < f64_of(d_ext(plate)) * 1e-6,
             "re-entering the converged rigidity reproduces it: {} against {}",
             f64_of(d_again),
-            f64_of(d_ext(&plate))
+            f64_of(d_ext(plate))
         );
 
         // The curvature it settled at is concave-down (a downward load read at its first zero crossing), and the
@@ -5714,14 +5709,14 @@ mod tests {
         let elastic_ceiling =
             crate::flexure::flexural_rigidity(lit_e(), lit_nu(), Fixed::from_int(40)).unwrap();
         assert!(
-            d_ext(&plate) > ZERO,
+            d_ext(plate) > ZERO,
             "a converged plate has a positive rigidity, got {}",
-            f64_of(d_ext(&plate))
+            f64_of(d_ext(plate))
         );
         assert!(
-            f64_of(d_ext(&plate)) < f64_of(elastic_ceiling) * 0.9,
+            f64_of(d_ext(plate)) < f64_of(elastic_ceiling) * 0.9,
             "this load really does yield the plate: {} against the unyielded ceiling {}",
-            f64_of(d_ext(&plate)),
+            f64_of(d_ext(plate)),
             f64_of(elastic_ceiling)
         );
 
@@ -5739,10 +5734,10 @@ mod tests {
         )
         .expect("a gentle load converges");
         assert!(
-            (f64_of(d_ext(&gentle)) - f64_of(elastic_ceiling)).abs()
+            (f64_of(d_ext(gentle)) - f64_of(elastic_ceiling)).abs()
                 < f64_of(elastic_ceiling) * 1e-4,
             "a load too gentle to yield reads the unyielded column: {} against {}",
-            f64_of(d_ext(&gentle)),
+            f64_of(d_ext(gentle)),
             f64_of(elastic_ceiling)
         );
 
@@ -5984,11 +5979,11 @@ mod tests {
         // curvature, so `M / kappa_eff` is load-free up to the trapezoid's and the neutral-surface bisection's
         // own last-bit rounding (a few parts in 1e6), not a physical load dependence.
         assert!(
-            (f64_of(d_ext(&elastic)) - f64_of(d_ext(&elastic_big))).abs()
-                < f64_of(d_ext(&elastic)) * 1e-4,
+            (f64_of(d_ext(elastic)) - f64_of(d_ext(elastic_big))).abs()
+                < f64_of(d_ext(elastic)) * 1e-4,
             "the elastic limit is independent of the load magnitude: {} against {}",
-            f64_of(d_ext(&elastic)),
-            f64_of(d_ext(&elastic_big))
+            f64_of(d_ext(elastic)),
+            f64_of(d_ext(elastic_big))
         );
 
         // YIELDING: a large point load bends the 500 MPa / 40 km plate into its own yielding, so the rigidity
@@ -6003,9 +5998,9 @@ mod tests {
         let ceiling =
             crate::flexure::flexural_rigidity(lit_e(), lit_nu(), Fixed::from_int(40)).unwrap();
         assert!(
-            f64_of(d_ext(&plate)) < f64_of(ceiling) * 0.95,
+            f64_of(d_ext(plate)) < f64_of(ceiling) * 0.95,
             "this point load yields the plate: {} against the unyielded ceiling {}",
-            f64_of(d_ext(&plate)),
+            f64_of(d_ext(plate)),
             f64_of(ceiling)
         );
         assert!(
@@ -6014,15 +6009,15 @@ mod tests {
         );
         // The fixed point re-enters: recompute the curvature at the converged rigidity and re-solve; the rigidity
         // reproduces, which is the property the loop claims rather than the number it stopped at.
-        let k = point_load_curvature_at_first_zero_crossing(load, d_ext(&plate), lit_nu()).unwrap();
+        let k = point_load_curvature_at_first_zero_crossing(load, d_ext(plate), lit_nu()).unwrap();
         let z_n = neutral_surface_depth_km(&profile, k, lit_e(), lit_nu()).unwrap();
         let m = bending_moment(&profile, k, z_n, lit_e(), lit_nu()).unwrap();
         let d_again = equivalent_rigidity(m.moment, k).unwrap();
         assert!(
-            (f64_of(d_again) - f64_of(d_ext(&plate))).abs() < f64_of(d_ext(&plate)) * 1e-6,
+            (f64_of(d_again) - f64_of(d_ext(plate))).abs() < f64_of(d_ext(plate)) * 1e-6,
             "re-entering the converged rigidity reproduces it: {} against {}",
             f64_of(d_again),
-            f64_of(d_ext(&plate))
+            f64_of(d_ext(plate))
         );
         // The chord rides with the answer.
         assert_eq!(plate.chord.class, LoadClassId(1));
@@ -6520,10 +6515,10 @@ mod tests {
         // BOTH EDGES ARE FIXED POINTS: re-entering each converged rigidity reproduces it, which is the property
         // the solve claims rather than the number it stopped at.
         for plate in [banded.low_edge(), banded.high_edge()] {
-            let alpha = crate::flexure::flexural_parameter(d_ext(&plate), dr, g).unwrap();
-            let k = line_load_curvature_at_first_zero_crossing(load, alpha, d_ext(&plate)).unwrap();
+            let alpha = crate::flexure::flexural_parameter(d_ext(*plate), dr, g).unwrap();
+            let k = line_load_curvature_at_first_zero_crossing(load, alpha, d_ext(*plate)).unwrap();
             // Each edge owns its OWN profile; re-derive it to re-enter the fixed point at that edge.
-            let end = if d_ext(&plate) == d_ext(banded.low_edge()) {
+            let end = if d_ext(*plate) == d_ext(*banded.low_edge()) {
                 VolumeEnd::Low
             } else {
                 VolumeEnd::High
@@ -6538,9 +6533,9 @@ mod tests {
             let m = bending_moment(&profile, k, z_n, lit_e(), lit_nu()).unwrap();
             let d_again = equivalent_rigidity(m.moment, k).unwrap();
             assert!(
-                (f64_of(d_again) - f64_of(d_ext(&plate))).abs() < f64_of(d_ext(&plate)) * 1e-6,
+                (f64_of(d_again) - f64_of(d_ext(*plate))).abs() < f64_of(d_ext(*plate)) * 1e-6,
                 "each edge is a fixed point: re-entering {} reproduces it, got {}",
-                f64_of(d_ext(&plate)),
+                f64_of(d_ext(*plate)),
                 f64_of(d_again)
             );
         }
@@ -6976,8 +6971,8 @@ mod tests {
             )
         );
         assert_eq!(
-            d_ext(banded.low_edge()),
-            d_ext(banded.high_edge()),
+            d_ext(*banded.low_edge()),
+            d_ext(*banded.high_edge()),
             "the two edges agree to the bit where the span cannot move the answer"
         );
     }
