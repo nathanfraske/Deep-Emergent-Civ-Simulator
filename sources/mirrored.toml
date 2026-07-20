@@ -8,7 +8,7 @@
 # A NEW fetch does not land here. It lands in sources/registry.toml, which is hand-maintained.
 # The gate and the bibliography read both files as one namespace.
 #
-# Entries: 29
+# Entries: 31
 
 [[source]]
 id = "bhac15"
@@ -29,6 +29,22 @@ sha256 = "995adf14a816e517bd037936d45fa4237e312c0aa1f278781525bd6b202d2306"
 md5 = "cced4f8db5ee5a9e78c0459f0b5f0b3e"
 pages = 10
 recipe = "GET https://earthquake.usgs.gov/static/lfs/research/rockphysics/Friction_of_rocks.pdf (open USGS copy)"
+
+[[source]]
+id = "convection_scaling.batra_foley_2021"
+mirrors = "crates/physics/data/convection_scaling/manifest.toml"
+custody = "witness"
+citation = "Batra, K., Foley, B.J. (2021), Scaling laws for stagnant-lid convection with a buoyant crust, Geophys. J. Int. 228(1), 631-663, doi 10.1093/gji/ggab366. Volume, issue, pages and date verified at Crossref rather than assumed from the manuscript."
+url = "https://par.nsf.gov/servlets/purl/10389156"
+archived_url = "https://web.archive.org/web/20260719225200/https://par.nsf.gov/biblio/10389156"
+sha256 = "858dda2aa7fbef10f93f72a7fb77624f893171d405a0b8fea4975ced408965ab"
+bytes = 1544392
+pages = 77
+recipe = "GET https://par.nsf.gov/servlets/purl/10389156 (HTTP 200, application/pdf, 1544392 bytes)"
+grade = "theory"
+scope = "2-D Cartesian, free-slip top and bottom, periodic sides, temperature fixed at the top and bottom so the models are BOTTOM-HEATED with no internal heating. Frank-Kamenetskii LINEARIZED viscosity (eq. 5), so temperature-dependent, NEWTONIAN, and with NO activation volume and NO pressure dependence. theta was sampled at two values only, 13.82 and 16.12 (viscosity contrasts 1e6 and 1e7), over reference Rayleigh numbers 1e6 to 1e8."
+anchor = "eq. (5) the Frank-Kamenetskii viscosity mu = exp(theta (1 - T)); eq. (6) theta = E_v delta_T / (R (T_s + delta_T)^2); eq. (8) the one-parameter family Nu = C* theta^-(1+beta) Ra_i^beta; eq. (9) Nu = C2 theta^(-6/5) Ra_i^(1/5) for STEADY convection; eq. (10) Nu = C1 theta^(-4/3) Ra_i^(1/3) for TIME-DEPENDENT convection; section 4.2 'we find C1 = 0.48 and C2 = 2.95, nearly identical to the scaling laws from Dumoulin et al. (1999)', restated in the Table 2 variable list as 'C1 = 0.48' against eq. (10) and 'C2 = 2.95' against eq. (9) and drawn on the Figure 10 fit lines as 0.48 Ra_i^(1/3) theta^(-4/3) and 2.95 Ra_i^(1/5) theta^(-6/5), a three-channel read; eq. (11) Nu = max(eq. 9, eq. 10), with the transition at their crossing; section 5 'C1 is nearly unchanged: we find C1 ~ 0.48 for our bottom heated models, while Solomatov & Moresi (2000) and Korenaga (2009) find C1 ~ 0.5 - 0.55 for their purely internally heated models', which is the band's high edge and is a REPORT inside this witness rather than a reading at those primaries; section 5 the internally heated conventions Ra_i = rho g alpha (T_i - T_s) d^3 / (kappa mu(T_i)) and theta = E_v (T_i - T_s) / (R T_i^2)."
+extract = "Section 4.2, verbatim: 'We fit our numerical models where a steady-state convection pattern develops to Eq. (9), and our models where convection is time-dependent to Eq. (10). From this, we find C1 = 0.48 and C2 = 2.95, nearly identical to the scaling laws from Dumoulin et al. (1999).' The two equations those coefficients belong to, verbatim: eq. (9) 'Nu = C2 theta^(-6/5) Ra_i^(1/5)' and eq. (10) 'Nu = C1 theta^(-4/3) Ra_i^(1/3)', both instances of eq. (8) 'Nu = C* theta^-(1+beta) Ra_i^beta' where 'C* is a constant found empirically, beta is the Nu-Ra scaling law exponent, Ra_i = Ra_0 / mu_i is the internal Rayleigh number, and mu_i is the average mantle interior viscosity, just beneath the stagnant lid'. The band's high edge, verbatim from section 5: 'Even the constant C1 is nearly unchanged: we find C1 ~ 0.48 for our bottom heated models, while Solomatov & Moresi (2000) and Korenaga (2009) find C1 ~ 0.5 - 0.55 for their purely internally heated models.' The internally heated definitions, verbatim from the same section: 'The internal Rayleigh number, Ra_i, is therefore defined as rho g alpha (T_i - T_s) d^3 / (kappa mu(T_i)), and theta = E_v (T_i - T_s) / (R T_i^2).'"
 
 [[source]]
 id = "convection_scaling.bodenschatz_pesch_ahlers_2000"
@@ -52,7 +68,7 @@ sha256 = "f1fb792cd79357d0fb7ada8c1891ebbebd0ea6d4fcc8617c0ea1dad7862e0861"
 bytes = 6685571
 recipe = "GET https://arxiv.org/pdf/1410.7652"
 grade = "theory"
-anchor = "Nusselt prefactor C1 of order 0.1 and boundary-layer thickness prefactor C2 ~ 2-3 (delta_l = d C2 Ra_eff^(-1/3)), citing Turcotte & Schubert 2002 and Solomatov 1995; supports nu_ra_bare_coefficient_C band."
+anchor = "Nusselt prefactor C1 of order 0.1 and boundary-layer thickness prefactor C2 ~ 2-3 (delta_l = d C2 Ra_eff^(-1/3)), citing Turcotte & Schubert 2002 and Solomatov 1995; supports nu_ra_bare_coefficient_C band. ALSO section 4.1, re-read 2026-07-19 for the stagnant-lid rows: the rheological temperature scale delta_T_rh = delta_T a_rh / theta after Solomatov 1995, with a_rh ~ 2 attributed to Solomatov & Moresi 2000 and Korenaga 2009; the lid thickness delta_l = d C3 (theta / a_rh)^(4/3) Ra_eff^(-1/3) (eq. 27), which is the (theta^-4/3, Ra^1/3) structure the nu_stag_time_dependent_C1 row carries; and the source's own statement of the disagreement, that steady-state boundary-layer theory gives delta_l ~ theta Ra_eff^(1/5) (Morris & Canright 1984; Reese et al. 1998) while eq. 27 is the correct scaling for time-dependent convection (Solomatov & Moresi 2000; Korenaga 2009). Its C3 = 4.24 and a_rh = 1.3 are fitted to ITS grain-damage models, so no coefficient is read from it into a stagnant-lid row; it witnesses the STRUCTURE and the disagreement, not a number."
 
 [[source]]
 id = "convection_scaling.glomski_johnson_2012"
@@ -89,6 +105,22 @@ bytes = 205464
 recipe = "GET the open ENS-Lyon course note PDF"
 grade = "theory"
 anchor = "k = pi/sqrt(2), Rac = (27/4) pi^4 ~ 657 for free-slip boundaries; convection cell of aspect ratio sqrt(2); supports ra_crit_free_free."
+
+[[source]]
+id = "convection_scaling.schulz_tosi_plesa_breuer_2020"
+mirrors = "crates/physics/data/convection_scaling/manifest.toml"
+custody = "witness"
+citation = "Schulz, F., Tosi, N., Plesa, A.-C., Breuer, D. (2020), Stagnant-lid convection with diffusion and dislocation creep rheology: Influence of a non-evolving grain size, Geophys. J. Int. 220(1), 18-36, doi 10.1093/gji/ggz417 (advance access 2019 September 17). Volume, issue, pages and date verified at Crossref."
+url = "https://elib.dlr.de/130183/1/ggz417.pdf"
+archived_url = "https://web.archive.org/web/20260719224847/https://elib.dlr.de/130183/1/ggz417.pdf"
+sha256 = "a7e8f41dcc02733b24b8c39d47e8c529e534b58e25d7c228aee83f198077e28e"
+bytes = 6655621
+pages = 19
+recipe = "GET https://elib.dlr.de/130183/1/ggz417.pdf (HTTP 200, application/pdf, 6655621 bytes)"
+grade = "theory"
+scope = "2-D Cartesian box of aspect ratio one, free-slip, reflective side walls, isothermal top and bottom so the models are BOTTOM-HEATED with no internal heating, 200 x 200 uniform grid, Mars-like parameters. eqs. (34) and (35) are fitted over the DIFFUSION-CREEP and reduced-activation-enthalpy runs in the one-convection-cell regime, so they are NEWTONIAN fits, and the source states its own limit: 'since the scaling parameters are predicted as functions of the lid shape (flat versus steep) and dislocation creep is different in this respect from the simulations used to derive eqs (34)-(35), care should be taken upon using these relations for dislocation creep'. The source also states that the fit 'is only valid for the specific parameters given in Table 1'."
+anchor = "eq. (11) the creep law eps_dot_i = A_i sigma^n_i d^-m_i exp(-(E_i + P V_i)/(R T)), which is the engine's own admitted Hirth & Kohlstedt form; Table 1 (printed page 21) the dry-olivine parameters after Hirth & Kohlstedt 2003, dislocation E = 530 kJ/mol, V = 17e-6 m^3/mol, n = 3.5, m = 0 and diffusion E = 375 kJ/mol, V = 8.2e-6 m^3/mol, n = 1, m = 3, with delta_T = 2000 K, D = 1700 km, g = 3.7 m/s^2, rho = 3500 kg/m^3, T_0 = 250 K; eq. (21) the effective viscosity, whose Arrhenius term is divided by the stress exponent, exp(-(E_i + z V_i) / (n_i (T + T_0))); eq. (28) Nu = alpha theta^gamma Ra_i^beta; eq. (29) (printed page 23, read by text extraction AND by a 300 dpi render) theta = |delta_T d(ln eta)/dT| = delta_T (E + P_i V) / (R T_i^2) - P_i V / (R T_i), with P_i the pressure at the base of the top thermal boundary layer and T_i the internal mantle temperature; eq. (34) Nu = 0.278 theta^-0.4 Ra_i^0.203, maximal deviation 6.7 per cent and standard deviation 0.093; eq. (35) Nu = 0.219 theta^-0.581 Ra_har^0.262, maximal deviation 4.2 per cent and standard deviation 0.06; eq. (36) Nu = 0.370 L^-0.666 Ra_har^0.071, the lid-thickness form; section 4.5.2 the dislocation worked example Ra_har,dis = 2.89e6 and theta_dis = 12.73 giving Nu_predicted = 2.499 against a measured 2.507; section 4.5.1 the reported theta ranges, 24.2 to 27.6 for the diffusion-creep runs, 6.89 to 11.07 for the reduced-activation-enthalpy runs, 11.4 to 12.8 for the dislocation runs."
+extract = "The two fitted conventions, verbatim: eq. (34) 'Nu = 0.278 theta^-0.4 Ra_i^0.203' with 'The maximal deviation of the calculated Nusselt numbers compared to the measured ones is 6.7 per cent where the standard deviation is 0.093', and eq. (35) 'Nu = 0.219 theta^-0.581 Ra_har^0.262' with a maximal deviation of 4.2 per cent and a standard deviation of 0.06. The theta definition, eq. (29) verbatim (read by text extraction and confirmed against a 300 dpi render of printed page 23): 'theta = |delta_T d(ln eta)/dT| = delta_T (E + P_i V) / (R T_i^2) - P_i V / (R T_i), where P_i is the pressure at the base of the top thermal boundary layer and T_i the internal mantle temperature'. Table 1 (printed page 21) cells, verbatim: 'Activation energy (dislocation) E2 530 kJ mol-1', 'Activation volume (dislocation) V2 17 x 10-6 m3 mol-1', 'Stress exponent (dislocation) n2 3.5', 'Activation energy (diffusion) E1 375 kJ mol-1', 'Activation volume (diffusion) V1 8.2 x 10-6 m3 mol-1', 'Stress exponent (diffusion) n1 1.0', 'Mantle thickness D 1700 km', 'Gravitational acceleration g 3.7 m s-2', 'Temperature drop across the mantle delta_T 2000 K', 'Surface temperature T0 250 K', 'Reference density rho 3.5 x 10^3 kg m-3'. The worked example, section 4.5.2 verbatim: 'the effective Rayleigh is Rahar,dis = 2.89 x 10^6 and the generalized Frank-Kamenetskii parameter is theta_dis = 12.73. Using the above values for example into eq. (35) yields Nu_dis,predicted = 2.499, which compares well with the value of 2.507 obtained from the numerical dislocation creep simulation.' The reported theta ranges, section 4.5.1 and 4.5.2 verbatim: 'varies only slightly between theta = 24.2 and theta = 27.6 for the diffusion creep simulations ... and between theta = 6.89 and theta = 11.07 for the models with reduced activation enthalpy', and 'We calculated the Frank-Kamentskii parameter based on the activation parameters of dislocation creep ... We found theta to be in the range of 11.4-12.8.' The prior-consensus exponents this study departs from, verbatim: 'both the above studies predicted beta to be 1/5 ... Both theory and numerical models have so far predicted a value for gamma of -1, while we found a considerably smaller gamma = -0.4, which is likely due to the fact that, in contrast to previous studies, we also took into account the pressure dependence of the viscosity.'"
 
 [[source]]
 id = "fan_2019"

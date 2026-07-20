@@ -38,6 +38,32 @@
 //! basal-heated favourite and run every interior 2.5x too cold); the day a core-flux term lands, the dispatch is
 //! already shaped. The bare coefficient `C = 0.294` of the un-normalized `Nu = C Ra^(1/3)` is a DIFFERENT
 //! normalization and is carried as its own row so it can never be read into the `a` slot.
+//!
+//! # THE STAGNANT-LID FAMILY, A SECOND FORM RATHER THAN A SECOND VALUE
+//!
+//! Everything above is the MOBILE-LID instance, and most modelled bodies are not that. Where a
+//! temperature-dependent viscosity locks a cold lid (Mars-class, Venus-class, one-plate worlds), only a thin warm
+//! sublayer convects, and the heat loss is suppressed by a power of the Frank-Kamenetskii parameter `theta`, the
+//! ratio of the layer's temperature drop to the drop over which the viscosity changes by about `e`. The form is
+//! `Nu = alpha theta^gamma Ra^beta`, and its three numbers are ONE convention: `alpha` means nothing apart from
+//! the `gamma` and `beta` it was fitted with, or apart from the `theta` and Rayleigh-number DEFINITIONS it was
+//! fitted against. So a stagnant-lid row is read as a whole [`StagnantLidConvention`] or not at all, and a row
+//! missing either exponent is not one (which is what keeps the mobile-lid rows above, whose `beta` field is
+//! documentation, out of this reader).
+//!
+//! FOUR ARE BANKED AND NONE IS THE DEFAULT, because the literature disagrees along two real axes and the choice
+//! belongs to the world's own state. Batra and Foley 2021 fit the linearized Frank-Kamenetskii family on their own
+//! models and split it by convection pattern: `nu_stag_steady_C2` when the pattern is steady, and
+//! `nu_stag_time_dependent_C1` when it is time-dependent, which is the branch a purely internally heated interior
+//! takes. Schulz et al. 2020 ran a full Arrhenius viscosity WITH an activation volume on this engine's own creep
+//! bank and got a visibly shallower `theta` exponent, banked as `nu_stag_arrhenius_internal_ra` and
+//! `nu_stag_arrhenius_harmonic_ra` (which differ in the viscosity average their Rayleigh number is formed on, so
+//! reading one against the other's `Ra` is the same class of normalization error the bare `C` guards against).
+//! The kernel that consumes a convention is [`crate::laws::ln_stagnant_lid_nusselt`], and the `theta` it takes is
+//! [`crate::laws::stagnant_lid_rheological_theta`].
+//!
+//! NO ROW HERE IS FITTED AT THIS ENGINE'S OWN STRESS EXPONENT. That gap is real, it is recorded at the kernel, and
+//! it is why nothing here is promoted to a default.
 
 use std::path::Path;
 
@@ -60,6 +86,14 @@ struct ConstantRaw {
     band_hi: Option<String>,
     #[serde(default)]
     citation: Option<String>,
+    /// The `gamma` of a stagnant-lid `Nu = alpha theta^gamma Ra^beta` row. Deliberately NOT named `gamma` or
+    /// reusing the mobile-lid rows' documentation-only `beta` field: a row is readable as a stagnant-lid
+    /// convention exactly when it carries BOTH of these, so the naming is the guard.
+    #[serde(default)]
+    theta_exponent: Option<String>,
+    /// The `beta` of a stagnant-lid row, under a name the mobile-lid rows do not use.
+    #[serde(default)]
+    rayleigh_exponent: Option<String>,
 }
 
 /// The mechanical boundary condition a critical Rayleigh number is conditioned on.
@@ -91,6 +125,32 @@ pub struct ScalingConstant {
     /// The low edge of the band (the honest uncertainty), where one exists.
     pub band_lo: Option<Fixed>,
     /// The high edge of the band.
+    pub band_hi: Option<Fixed>,
+}
+
+/// One cited STAGNANT-LID scaling convention, read as a whole: `Nu = coefficient * theta^theta_exponent *
+/// Ra^rayleigh_exponent`.
+///
+/// THE THREE NUMBERS TRAVEL TOGETHER because none of them means anything alone. The coefficient was fitted
+/// against those exponents, and both were fitted against a particular `theta` definition and a particular
+/// Rayleigh-number definition (an internal viscosity, a harmonic mean, a reference state), which the row's own
+/// `theta_definition` and `rayleigh_definition` fields record in prose. Handing a consumer a bare coefficient
+/// would let it be multiplied by the wrong Rayleigh number, which is the error the sibling bare `C` row exists
+/// to prevent in the mobile-lid family.
+///
+/// Consumed by [`crate::laws::ln_stagnant_lid_nusselt`]. The band, where a row carries one, is the honest
+/// spread across the studies the row's citation names, never a tolerance.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct StagnantLidConvention {
+    /// `alpha`, the fitted prefactor. Positive.
+    pub coefficient: Fixed,
+    /// `gamma`, the Frank-Kamenetskii exponent. Negative in every banked row: a stiffer lid suppresses heat loss.
+    pub theta_exponent: Fixed,
+    /// `beta`, the Rayleigh exponent. Positive: a more vigorous interior loses more heat.
+    pub rayleigh_exponent: Fixed,
+    /// The low edge of the coefficient's band, where the row carries one.
+    pub band_lo: Option<Fixed>,
+    /// The high edge of the coefficient's band.
     pub band_hi: Option<Fixed>,
 }
 
@@ -127,10 +187,19 @@ impl std::fmt::Display for ScalingError {
 
 impl std::error::Error for ScalingError {}
 
+/// One parsed row: the constant every consumer reads, plus the two exponents only a stagnant-lid row carries.
+#[derive(Clone, Debug)]
+struct Row {
+    name: String,
+    constant: ScalingConstant,
+    theta_exponent: Option<Fixed>,
+    rayleigh_exponent: Option<Fixed>,
+}
+
 /// The cited parameterized-convection scaling constants, keyed by name.
 #[derive(Clone, Debug)]
 pub struct ConvectionScaling {
-    constants: Vec<(String, ScalingConstant)>,
+    constants: Vec<Row>,
 }
 
 fn parse_decimal(name: &str, s: &str) -> Result<Fixed, ScalingError> {
@@ -169,14 +238,24 @@ impl ConvectionScaling {
                 Some(s) => Some(parse_decimal(&c.name, s)?),
                 None => None,
             };
-            constants.push((
-                c.name.trim().to_string(),
-                ScalingConstant {
+            let theta_exponent = match &c.theta_exponent {
+                Some(s) => Some(parse_decimal(&c.name, s)?),
+                None => None,
+            };
+            let rayleigh_exponent = match &c.rayleigh_exponent {
+                Some(s) => Some(parse_decimal(&c.name, s)?),
+                None => None,
+            };
+            constants.push(Row {
+                name: c.name.trim().to_string(),
+                constant: ScalingConstant {
                     value,
                     band_lo,
                     band_hi,
                 },
-            ));
+                theta_exponent,
+                rayleigh_exponent,
+            });
         }
         Ok(ConvectionScaling { constants })
     }
@@ -197,8 +276,32 @@ impl ConvectionScaling {
     pub fn constant(&self, name: &str) -> Option<ScalingConstant> {
         self.constants
             .iter()
-            .find(|(n, _)| n == name)
-            .map(|(_, c)| *c)
+            .find(|r| r.name == name)
+            .map(|r| r.constant)
+    }
+
+    /// A STAGNANT-LID convention by row name, or `None` when the row is absent or is not one.
+    ///
+    /// A row qualifies only when it carries BOTH exponents, so the mobile-lid rows can never be read here: the
+    /// prefactor `a` row's `beta` field is documentation under a different key, and it has no `theta_exponent`
+    /// at all, so it refuses rather than arriving as a convention with a silently missing suppression term.
+    ///
+    /// THE NAME IS THE CALLER'S, DELIBERATELY. There is no `stagnant_lid_default()`, because the four banked
+    /// conventions differ by convection pattern (steady against time-dependent) and by rheology (a linearized
+    /// Frank-Kamenetskii viscosity against a full Arrhenius one carrying pressure), and which applies is a
+    /// property of the world being modelled. A default would make that choice invisible at the call site, which
+    /// is the residue rule's failure mode. The four row names are `nu_stag_time_dependent_C1`,
+    /// `nu_stag_steady_C2`, `nu_stag_arrhenius_internal_ra` and `nu_stag_arrhenius_harmonic_ra`; each row's own
+    /// `regime`, `theta_definition` and `rayleigh_definition` fields in the column state what it is scoped to.
+    pub fn stagnant_lid_convention(&self, name: &str) -> Option<StagnantLidConvention> {
+        let row = self.constants.iter().find(|r| r.name == name)?;
+        Some(StagnantLidConvention {
+            coefficient: row.constant.value,
+            theta_exponent: row.theta_exponent?,
+            rayleigh_exponent: row.rayleigh_exponent?,
+            band_lo: row.constant.band_lo,
+            band_hi: row.constant.band_hi,
+        })
     }
 
     /// The Nusselt PREFACTOR `a` band for `Nu = a (Ra/Ra_crit)^(1/3)`, its value the single-boundary-layer basal
@@ -337,6 +440,112 @@ mod tests {
             .expect("C row present");
         assert!(close(c.value, 0.294, 0.001));
         assert_ne!(c.value, scaling().nusselt_prefactor().unwrap().value);
+    }
+
+    #[test]
+    fn the_four_stagnant_lid_conventions_load_with_their_cited_triples() {
+        let s = scaling();
+        let c1 = s
+            .stagnant_lid_convention("nu_stag_time_dependent_C1")
+            .expect("the time-dependent row is present");
+        // Batra & Foley 2021 eq. (10): Nu = 0.48 theta^(-4/3) Ra_i^(1/3).
+        assert!(close(c1.coefficient, 0.48, 1e-9));
+        assert!(close(c1.theta_exponent, -4.0 / 3.0, 1e-9));
+        assert!(close(c1.rayleigh_exponent, 1.0 / 3.0, 1e-9));
+        // The band runs from their own bottom-heated fit to the internally heated value they report.
+        assert!(close(c1.band_lo.expect("band_lo"), 0.48, 1e-9));
+        assert!(close(c1.band_hi.expect("band_hi"), 0.55, 1e-9));
+
+        // Batra & Foley 2021 eq. (9): Nu = 2.95 theta^(-6/5) Ra_i^(1/5).
+        let c2 = s
+            .stagnant_lid_convention("nu_stag_steady_C2")
+            .expect("the steady row is present");
+        assert!(close(c2.coefficient, 2.95, 1e-9));
+        assert!(close(c2.theta_exponent, -1.2, 1e-9));
+        assert!(close(c2.rayleigh_exponent, 0.2, 1e-9));
+
+        // Schulz et al. 2020 eq. (34) and eq. (35), the Arrhenius-with-pressure fits.
+        let internal = s
+            .stagnant_lid_convention("nu_stag_arrhenius_internal_ra")
+            .expect("the Arrhenius internal-Ra row is present");
+        assert!(close(internal.coefficient, 0.278, 1e-9));
+        assert!(close(internal.theta_exponent, -0.4, 1e-9));
+        assert!(close(internal.rayleigh_exponent, 0.203, 1e-9));
+        let harmonic = s
+            .stagnant_lid_convention("nu_stag_arrhenius_harmonic_ra")
+            .expect("the Arrhenius harmonic-Ra row is present");
+        assert!(close(harmonic.coefficient, 0.219, 1e-9));
+        assert!(close(harmonic.theta_exponent, -0.581, 1e-9));
+        assert!(close(harmonic.rayleigh_exponent, 0.262, 1e-9));
+    }
+
+    #[test]
+    fn the_linearized_rows_satisfy_the_sources_own_one_parameter_family() {
+        // Batra & Foley eq. (8) states the family as Nu = C* theta^-(1+beta) Ra_i^beta, so gamma and beta are
+        // NOT independent. Checking gamma = -(1 + beta) on both rows is a transcription check that a slipped
+        // digit in either exponent fails, and it is the source's own relation rather than an imposed one. It
+        // is asserted only on the two rows that come from that family: the Arrhenius fits are free fits and
+        // do not obey it (0.203 would demand -1.203, not -0.4), which is itself the point of banking them apart.
+        let s = scaling();
+        for name in ["nu_stag_time_dependent_C1", "nu_stag_steady_C2"] {
+            let c = s.stagnant_lid_convention(name).expect("row present");
+            let expected = Fixed::ZERO - (Fixed::ONE + c.rayleigh_exponent);
+            assert!(
+                (c.theta_exponent - expected).abs() < Fixed::from_ratio(1, 1_000_000),
+                "{name}: gamma {} must equal -(1 + beta) = {}",
+                c.theta_exponent.to_f64_lossy(),
+                expected.to_f64_lossy()
+            );
+        }
+    }
+
+    #[test]
+    fn a_mobile_lid_row_can_never_be_read_as_a_stagnant_lid_convention() {
+        // The prefactor `a` row carries a `beta` field, but under a key the stagnant-lid reader does not read,
+        // and it carries no theta exponent at all. If it could be read here it would arrive as a suppression
+        // law with no suppression, which is the mobile-lid law wearing the stagnant-lid name.
+        let s = scaling();
+        assert!(s.stagnant_lid_convention("nu_ra_prefactor_a").is_none());
+        assert!(s
+            .stagnant_lid_convention("nu_ra_bare_coefficient_C")
+            .is_none());
+        assert!(s.stagnant_lid_convention("ra_crit_rigid_free").is_none());
+        assert!(s.stagnant_lid_convention("no_such_row").is_none());
+        // And the reverse direction still works: a stagnant row is still readable as a plain constant, but its
+        // value is the coefficient of a DIFFERENT form, which is why it is named apart from `a`.
+        let plain = s
+            .constant("nu_stag_time_dependent_C1")
+            .expect("readable as a constant too");
+        assert_ne!(plain.value, s.nusselt_prefactor().unwrap().value);
+    }
+
+    #[test]
+    fn the_two_linearized_branches_cross_inside_the_sources_own_rayleigh_range() {
+        // Batra & Foley eq. (11) takes the LARGER of the two branches and says the steady-to-time-dependent
+        // transition falls where they cross. Setting the two equal gives Ra_cross = (C2/C1)^(15/2) theta, so
+        // the crossing is COMPUTED from the four banked numbers rather than asserted. Their models were run at
+        // reference Rayleigh numbers 1e6 to 1e8 with theta of 13.82 and 16.12, so a correct transcription of
+        // all four must put the crossing inside that box. A slipped digit in any one of them moves it out.
+        //
+        // The arithmetic is f64 DELIBERATELY, and this is a test rather than a kernel. Re-deriving the crossing
+        // with the same fixed-point path the reader uses would check the reader against itself; an independent
+        // evaluation checks the COLUMN. The canonical integer-only path is the kernel in laws.rs, which the
+        // steering gate scans and which carries no float at all.
+        let s = scaling();
+        let c1 = s
+            .stagnant_lid_convention("nu_stag_time_dependent_C1")
+            .unwrap();
+        let c2 = s.stagnant_lid_convention("nu_stag_steady_C2").unwrap();
+        let ratio = c2.coefficient.to_f64_lossy() / c1.coefficient.to_f64_lossy();
+        let exponent_gap =
+            c1.rayleigh_exponent.to_f64_lossy() - c2.rayleigh_exponent.to_f64_lossy();
+        for theta in [13.82_f64, 16.12_f64] {
+            let ra_cross = ratio.powf(1.0 / exponent_gap) * theta;
+            assert!(
+                (1e6..1e8).contains(&ra_cross),
+                "the branches cross at Ra = {ra_cross:.3e} for theta = {theta}, outside the source's own 1e6 to 1e8 range"
+            );
+        }
     }
 
     #[test]

@@ -353,6 +353,7 @@ crates/physics/src/convection_scaling.rs	nusselt_prefactor	grandfathered	predate
 crates/physics/src/convection_scaling.rs	nusselt_prefactor_at_internal_fraction	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/convection_scaling.rs	parse_decimal	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/convection_scaling.rs	row_name	grandfathered	predates the derives-coverage gate; unclassified
+crates/physics/src/convection_scaling.rs	stagnant_lid_convention	accessor	reads one cited (alpha, gamma, beta) row from the vendored column; the derivation is laws::ln_stagnant_lid_nusselt, which carries the @derives marker
 crates/physics/src/convection_scaling.rs	standard	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/convective_viscosity.rs	effective_viscosity_band	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/convective_viscosity.rs	ln_boundary_layer	grandfathered	predates the derives-coverage gate; unclassified

@@ -204,3 +204,30 @@ free_route = "https://web.archive.org/web/20221029182918/https://www.homepages.u
 free_route_kind = "author-posting-plus-archive"
 reviewed = "2026-07-19"
 caveat = "The publisher's own free-to-read PDF at academic.oup.com/gji/article-pdf/184/3/1180/27638878/184-3-1180.pdf returns HTTP 403 to a crawler, and the Wayback captures of that publisher URL are all 302 redirects rather than bytes, so the archived author copy is the only retrievable route. It was re-fetched and hashed byte-identical to the receipt rather than assumed to be the same document."
+
+# The two STAGNANT-LID witnesses (fetched 2026-07-19). Both are Geophysical Journal International, so both take
+# the same finding the three GJI entries above already carry, and for the same reason. Neither is bronze open
+# access at the publisher: Crossref reports the OUP STANDARD PUBLICATION MODEL for both, the subscription route,
+# so each was read through a third-party deposit rather than a free publisher copy. Free to read by that route
+# is not free to redistribute, which is the whole test this file applies. No bytes are tracked in the repo for
+# either, so no removal is required.
+
+[[licence]]
+id = "convection_scaling.batra_foley_2021"
+licence = "Geophysical Journal International (Royal Astronomical Society, Oxford University Press), all rights reserved. NOT open access: Crossref reports the licence URL as the OUP standard-publication-model page, the subscription model, with no Creative Commons or other reuse grant attached. The copy read is the AUTHOR ACCEPTED MANUSCRIPT deposited in the NSF Public Access Repository under the NSF public-access policy, which makes the manuscript publicly readable and grants no redistribution right, so the bytes are not held."
+redistributable = false
+licence_evidence = "https://academic.oup.com/journals/pages/access_purchase/rights_and_permissions"
+free_route = "https://par.nsf.gov/servlets/purl/10389156"
+free_route_kind = "funder-repository-accepted-manuscript"
+reviewed = "2026-07-19"
+caveat = "THE FREE ROUTE IS NOT ARCHIVABLE, which is why the entry's archived_url points at the NSF-PAR record page rather than at the PDF. Save Page Now was issued three times against the purl on 19 July 2026; each returned a capture id whose replay is HTTP 404, and the Wayback availability API reports no snapshot for that URL. The record-page capture was retrieved and verified to return HTTP 200 carrying the title and the DOI, so the document's identity is archived while its bytes are not. The values read from it are also ACCEPTED-MANUSCRIPT readings rather than the version of record; the volume, issue, page range and date were verified at Crossref instead of being taken from the manuscript."
+
+[[licence]]
+id = "convection_scaling.schulz_tosi_plesa_breuer_2020"
+licence = "Geophysical Journal International (Royal Astronomical Society, Oxford University Press), all rights reserved. NOT open access: Crossref reports the same OUP standard-publication-model licence URL, the subscription model, with no reuse grant. The copy read is the PUBLISHER'S VERSION OF RECORD as deposited in the German Aerospace Center's eLib institutional repository, and the document's own page furniture records it as a subscriber download ('Downloaded from https://academic.oup.com/gji/article-abstract/220/1/18/5571091 by Deutsches Zentrum fuer Luft- und Raumfahrt (DLR); Bibliotheks- und Informationswesen user on 05 November 2019'). An institutional deposit of a subscriber copy is not a licensed redistribution, so the bytes are not held."
+redistributable = false
+licence_evidence = "https://academic.oup.com/journals/pages/access_purchase/rights_and_permissions"
+free_route = "https://web.archive.org/web/20260719224847/https://elib.dlr.de/130183/1/ggz417.pdf"
+free_route_kind = "institutional-repository-plus-archive"
+reviewed = "2026-07-19"
+caveat = "The archived snapshot was re-fetched with --compressed and hashed BYTE-IDENTICAL to the fetch receipt, so the archive is corroborated rather than assumed. The subscriber watermark is recorded here because it is the evidence for the finding: a deposit that carries one is a copy made under a subscription, not under a licence to redistribute."

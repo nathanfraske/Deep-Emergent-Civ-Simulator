@@ -873,10 +873,28 @@ pub fn conduction(
 /// TERMS-DROPPED (owner ruling 2026-07-18, the Terran audit): this is the MOBILE-LID / single-lid isoviscous
 /// instance, valid where the surface participates in the overturn. A stagnant-lid body (the catalog MAJORITY:
 /// Mars-class, Venus-class, most one-plate worlds) has a temperature-dependent viscosity that locks the cold lid,
-/// and its heat loss is SUPPRESSED through the rheological temperature scale `RT^2 / E*` (`E*` the banked creep
-/// activation energy). That branch is DERIVABLE from rows already in the tree, keyed to the `tectonic_regime`
-/// dispatch, and is a FLAGGED follow-on (the debts ledger), not built here. Clamped to `flux_max`; a non-positive
-/// boundary layer reads back the conductive flux. Deterministic fixed-point.
+/// and its heat loss is SUPPRESSED by a power of the rheological temperature scale. That branch now exists as
+/// [`stagnant_lid_rheological_theta`] and [`ln_stagnant_lid_nusselt`], reading a cited convention from
+/// [`crate::convection_scaling::StagnantLidConvention`]. Clamped to `flux_max`; a non-positive boundary layer
+/// reads back the conductive flux. Deterministic fixed-point.
+///
+/// THIS COMMENT PREVIOUSLY CARRIED TWO FALSE CLAIMS, retired 2026-07-19 rather than edited around, because a
+/// stale comment is a claim the reader has no reason to doubt.
+///
+/// It said the suppression was "DERIVABLE from rows already in the tree". Only partly. The activation energy
+/// and the activation-volume bracket are banked ([`crate::creep_rows`]), and they are enough for the
+/// rheological temperature scale. The SCALING COEFFICIENT AND CONVENTION were not in the tree at all and had to
+/// be fetched and cited; they now live in `data/convection_scaling.toml`. The scale itself was also stated as
+/// `RT^2 / E*`, which is the zero-pressure Newtonian form and is NOT consistent with the viscosity this engine
+/// runs: the admitted creep row carries `E* + P V*` in its exponent, and the creep INVERSION divides that
+/// enthalpy by the stress exponent, so the scale the engine's own `ln_viscosity` implies carries both terms.
+/// [`stagnant_lid_rheological_theta`] takes all of them.
+///
+/// It also said the branch would be "keyed to the `tectonic_regime` dispatch". That architecture is rejected by
+/// the module it names: `civsim_foundation::tectonic_regime` states that regime labels are observer-only and
+/// NEVER causal, so a law may not branch on one. Selecting the branch is a separate, still-open question that
+/// belongs to a continuous causal quantity (convective stress against lid yield strength), and no such input
+/// reaches this consumer today. Nothing here dispatches, and neither kernel below is wired into the run path.
 pub fn mantle_convective_heat_flux(
     conductive_flux: Fixed,
     layer_depth: Fixed,
@@ -899,6 +917,192 @@ pub fn mantle_convective_heat_flux(
         Some(q) => q.min(flux_max),
         None => flux_max,
     }
+}
+
+/// THE FRANK-KAMENETSKII PARAMETER `theta`, the reciprocal of the stagnant lid's RHEOLOGICAL TEMPERATURE SCALE.
+///
+/// Where a temperature-dependent viscosity locks a cold lid, the layer's full temperature drop is not what drives
+/// the flow. Only the warm sublayer beneath the lid, over which the viscosity changes by about `e`, participates,
+/// so the driving drop is `delta_T_rh` and the suppression the heat loss suffers is a power of the ratio
+/// `theta = delta_T / delta_T_rh`. This returns that ratio. Its consumer is [`ln_stagnant_lid_nusselt`].
+///
+/// # THE DEFINITION IS THE SOURCE'S, AND IT IS A DERIVATIVE RATHER THAN A GUESS
+///
+/// `theta = |delta_T * d(ln eta)/dT|` (Schulz, Tosi, Plesa and Breuer 2020, Geophys. J. Int. 220, 18-36,
+/// eq. 29, attributed there to Reese et al. 1999). Carried out on an Arrhenius viscosity whose exponent is
+/// `(E* + P V*) / (n R T)`, and taken along the thermal path so the pressure co-varies with the temperature, it
+/// gives what this computes:
+///
+/// ```text
+///   theta = [ (delta_T / T_i) * (E* + P V*) - P V* ] / (n R T_i)
+/// ```
+///
+/// At `n = 1` this is eq. (29) as printed. The published form carries the two energy terms and no stress
+/// exponent, which is the Newtonian instance; the general `n` is not a liberty taken with it but the same
+/// source's own effective viscosity, eq. (21), whose Arrhenius term is divided by `n_i`, put through the same
+/// definition. TWO INDEPENDENT CHECKS HOLD THAT READING UP, both in the tests below. Evaluated at that paper's
+/// own Table 1 diffusion-creep row (`n = 1`, `E* = 375 kJ/mol`, `V* = 8.2 cm^3/mol`) and its own Mars-like
+/// constants, this expression reproduces the `theta` range of 24.2 to 27.6 the paper reports for those runs, at
+/// an interior temperature near 1900 K. Evaluated at its dislocation row (`n = 3.5`, `E* = 530 kJ/mol`,
+/// `V* = 17 cm^3/mol`) it lands in the 11.4 to 12.8 the paper reports for those runs; dropping the `n` gives
+/// roughly forty, about three times the top of the paper's own stated range.
+///
+/// # WHY IT IS KEYED THIS WAY AND NOT THE FAMILIAR `R T^2 / E*`
+///
+/// The textbook scale is `R T_i^2 / E*`, whose `theta` is `E* delta_T / (R T_i^2)`. That form is a SPECIAL CASE,
+/// and it is not this engine's case, in two ways that both matter.
+///
+/// PRESSURE. The admitted creep rows put `E* + P V*` in the Arrhenius exponent, never `E*` alone, so a `theta`
+/// built on `E*` would describe a viscosity the engine does not have. The activation volume stiffens the rock
+/// with depth, opposing the softening from heat, and the second term above is that opposition: the net effect of
+/// pressure on `theta` is `P V* (delta_T - T_i) / (n R T_i^2)`, so it RAISES `theta` while the layer's
+/// temperature drop exceeds its interior temperature and LOWERS it once the interior is the hotter of the two.
+/// The sign is not free, and neither is its being carried.
+///
+/// STRESS EXPONENT. The production creep row is non-Newtonian (`n = 3.5`), and this is where the familiar form
+/// is most misleading. A power-law rock at a fixed strain rate carries stress `sigma ~ eps_dot^(1/n)`, so the
+/// effective viscosity's activation enthalpy is `(E* + P V*) / n`, not `E* + P V*`. That division is not a
+/// modelling choice made here; it is what the engine already computes, in
+/// [`crate::creep_rows::ductile_strength_mpa`], whose single-row inverse divides the log-space rate residual
+/// (`ln eps_dot` less the row's intercept, which is where `-(E* + P V*) / (R T)` sits) by the row's stress
+/// exponent, and in [`crate::convective_viscosity`], which forms `eta = sigma / (2 eps_dot)` from that stress.
+/// So `n` is in this signature because it is already in `ln_viscosity`, and a `theta` without it would be
+/// inconsistent with the very number the Rayleigh number was formed from. At `n = 3.5` the difference is a
+/// factor of 3.5 in `theta`, which the suppression then raises to its own exponent. A composite of several
+/// admitted rows carries a rate-weighted blend rather than one row's exponent, so `n` is the caller's to supply
+/// and is never assumed here; today the production viscosity solve offers the composite a single candidate, the
+/// dry dislocation row, so that composite reduces to its 3.5.
+///
+/// # UNITS, AND WHY THE SI PAIRING IS THE ONE THAT DOES NOT WORK
+///
+/// `E*` and the product `P V*` must be the same energy per mole, and `R` must be that unit per kelvin.
+/// Temperatures in kelvin. The pressure and volume are taken as MEGAPASCALS and CUBIC CENTIMETRES PER MOLE,
+/// whose product is joules per mole exactly, which is the creep bank's own pairing: `ln_rate_intercept` in
+/// [`crate::creep_rows`] forms its Arrhenius numerator from precisely those two units, so a caller carrying a
+/// [`crate::creep_rows::CreepConditions`] multiplies its `pressure_gpa` by 1000 and passes the row's volume
+/// through unchanged.
+///
+/// THE ARITHMETICALLY IDENTICAL SI PAIRING (`Pa` and `m^3/mol`) IS UNUSABLE HERE, and this is a representability
+/// limit rather than a preference. Q32.32 tops out near `2.147e9`, and a lid-base pressure on a Mars-class body
+/// is already `3.2e9 Pa`; a terrestrial lower-mantle pressure is `1e11 Pa`. The pressure argument would not
+/// survive construction, let alone the multiply. In megapascals the same state is `3237`, with the whole
+/// planetary range comfortably inside the window, and `P V*` lands at the same joules per mole either way. This
+/// is the same residency argument [`ln_stokes_velocity`] and the creep module's log-space strain rate make.
+///
+/// `R` is a parameter rather than a module constant, per this module's contract that a kernel bakes no value:
+/// pass the CODATA-derived `R = N_A k_B` the creep bank derives from the registered fundamentals, never a
+/// hand-typed decimal.
+///
+/// Returns `None` on a non-positive interior temperature, stress exponent or gas constant, on an unrepresentable
+/// intermediate, and on a non-positive `theta`. That last is a refusal rather than a clamp: a non-positive
+/// `theta` means the pressure stiffening has overwhelmed the thermal softening along the path, so there is no
+/// rheological temperature scale to suppress anything and the stagnant-lid form does not apply. Deterministic
+/// fixed-point.
+// @derives: the stagnant lid's Frank-Kamenetskii parameter <- the interior temperature and layer temperature drop, the admitted creep row's activation energy, activation volume and stress exponent, and the pressure
+pub fn stagnant_lid_rheological_theta(
+    internal_temperature_k: Fixed,
+    temperature_drop_k: Fixed,
+    activation_energy_j_per_mol: Fixed,
+    pressure_mpa: Fixed,
+    activation_volume_cm3_per_mol: Fixed,
+    stress_exponent: Fixed,
+    molar_gas_constant_j_per_mol_k: Fixed,
+) -> Option<Fixed> {
+    if internal_temperature_k <= ZERO
+        || stress_exponent <= ZERO
+        || molar_gas_constant_j_per_mol_k <= ZERO
+    {
+        return None;
+    }
+    // MPa * cm^3/mol is J/mol exactly (1e6 Pa * 1e-6 m^3/mol), the creep bank's own conversion boundary.
+    let pressure_work = pressure_mpa.checked_mul(activation_volume_cm3_per_mol)?;
+    let enthalpy = activation_energy_j_per_mol.checked_add(pressure_work)?;
+    // Reassociated so no `delta_T * (E* + P V*)` product forms: at mantle values that numerator is ~1e9 and
+    // sits against the Q32.32 ceiling, while the same quantity divided by T_i first is ~1e6 and has room.
+    let drop_ratio = temperature_drop_k.checked_div(internal_temperature_k)?;
+    let numerator = drop_ratio
+        .checked_mul(enthalpy)?
+        .checked_sub(pressure_work)?;
+    let denominator = stress_exponent
+        .checked_mul(molar_gas_constant_j_per_mol_k)?
+        .checked_mul(internal_temperature_k)?;
+    let theta = numerator.checked_div(denominator)?;
+    if theta <= ZERO {
+        return None;
+    }
+    Some(theta)
+}
+
+/// THE STAGNANT-LID NUSSELT NUMBER in log domain: `ln Nu = ln alpha + gamma ln theta + beta ln Ra`, the
+/// suppressed sibling of the mobile-lid [`mantle_convective_heat_flux`].
+///
+/// A stagnant lid loses heat more slowly than a mobile one at the same vigour, because the cold lid conducts
+/// rather than overturns and only the warm sublayer beneath it convects. The suppression enters as a negative
+/// power of the Frank-Kamenetskii parameter ([`stagnant_lid_rheological_theta`]), so the whole law is
+/// `Nu = alpha theta^gamma Ra^beta` with `gamma` negative.
+///
+/// # THE CONVENTION IS THE CALLER'S, AND IT IS THREE NUMBERS OR NONE
+///
+/// `alpha`, `gamma` and `beta` come from a cited [`crate::convection_scaling::StagnantLidConvention`], and they
+/// are read together because none is meaningful alone: each was fitted against the others AND against a
+/// particular definition of `theta` and of the Rayleigh number. Four are banked and none is a default. The
+/// classical linearized family (Batra and Foley 2021, Geophys. J. Int. 228, 631-663, their eq. 8) is one
+/// parameter deep, `gamma = -(1 + beta)`, and splits by convection pattern: `(0.48, -4/3, 1/3)` when the pattern
+/// is time-dependent, which is the branch a purely internally heated interior takes, and `(2.95, -6/5, 1/5)`
+/// when it is steady. The Arrhenius family (Schulz et al. 2020, their eqs. 34 and 35) fitted a full
+/// pressure-carrying viscosity and got a much shallower `theta` exponent, which its authors attribute to that
+/// pressure dependence.
+///
+/// # `Nu >= 1` IS THE DEFINITION, HERE AS THERE
+///
+/// Convection never transports less than conduction, so `ln Nu` is clamped at zero. This is the same definition
+/// the mobile-lid law states, and it is load-bearing in this form: the parameterized law is a high-`Ra`
+/// asymptotic, and a lid stiff enough (a large `theta`) drives the raw expression below one, where the honest
+/// answer is that the body conducts. Clamping at the conductive limit is that answer; it is never an authored
+/// floor.
+///
+/// # WHAT IS RESERVED, AND ON WHAT BASIS
+///
+/// NO BANKED COEFFICIENT WAS FITTED AT THIS ENGINE'S OWN RHEOLOGY. The linearized rows are Newtonian by
+/// construction and carry no pressure at all. The Arrhenius rows carry pressure and were run on this engine's
+/// own creep bank (Hirth and Kohlstedt 2003 dry olivine, the same `E* = 530 kJ/mol` and `n = 3.5` the admitted
+/// row holds), but their published fits span that study's diffusion-creep and reduced-enthalpy runs, which are
+/// Newtonian, and the authors warn in their own words that care should be taken applying them to dislocation
+/// creep. The non-Newtonian primaries that would settle it (Reese, Solomatov and Moresi 1998 and 1999) are
+/// paywalled with no free copy found, so nothing was transcribed from them and no row stands in for them.
+///
+/// A coefficient for a non-Newtonian, pressure-carrying stagnant lid is therefore RESERVED. Its basis, so the
+/// choice is informed rather than arbitrary: `alpha` is set by the MARGINAL STABILITY of the sublayer that
+/// convects beneath the lid, which is the same kind of quantity this column already banks for the whole layer
+/// as `ra_crit_*`. Batra and Foley say so in their own terms: with Solomatov's stagnant-lid critical Rayleigh
+/// number `Ra_c = 20.9 theta^4`, their eq. (10) reads `Nu ~ (Ra_i / Ra_c)^beta`, so `alpha` is absorbing a
+/// critical Rayleigh number raised to `-beta`. The owner sets it either by adopting one banked row with its
+/// scope declared at the call site, or by calibrating against the Mars-class surface heat flux the deep-time
+/// model is already compared to, or by commissioning the missing non-Newtonian primary. Until then the honest
+/// reading is that the four banked rows BRACKET the answer and that none of them is it.
+///
+/// Returns `None` on a non-positive `theta` or `alpha` (neither has a logarithm, and a non-positive coefficient
+/// is not a scaling law) or on an unrepresentable intermediate. `ln_rayleigh` is the log-domain Rayleigh number
+/// [`ln_rayleigh_number`] already produces, so no linear `Ra` has to form. Deterministic fixed-point.
+// @derives: the stagnant lid's log-domain Nusselt enhancement <- the log Rayleigh number, the Frank-Kamenetskii parameter, and a cited scaling convention's coefficient and two exponents
+pub fn ln_stagnant_lid_nusselt(
+    ln_rayleigh: Fixed,
+    theta: Fixed,
+    coefficient: Fixed,
+    theta_exponent: Fixed,
+    rayleigh_exponent: Fixed,
+) -> Option<Fixed> {
+    if theta <= ZERO || coefficient <= ZERO {
+        return None;
+    }
+    let suppression = theta.ln().checked_mul(theta_exponent)?;
+    let vigour = ln_rayleigh.checked_mul(rayleigh_exponent)?;
+    let ln_nusselt = coefficient
+        .ln()
+        .checked_add(suppression)?
+        .checked_add(vigour)?;
+    // Nu >= 1 is the definition of a convective enhancement, so ln Nu >= 0.
+    Some(ln_nusselt.max(ZERO))
 }
 
 /// The sensible-heat energy to effect a temperature change: `m c dT`.
@@ -4897,6 +5101,373 @@ mod tests {
             q_cond,
             "Nu is clamped to 1"
         );
+    }
+
+    /// `R = N_A k_B`, derived through the SAME registered fundamentals `creep_rows` derives it from, so these
+    /// tests feed the kernel the constant the production path would and never a hand-typed 8.314.
+    fn derived_molar_gas_constant() -> Fixed {
+        let n_a = civsim_units::bignum::BigRat::from_decimal_str(
+            civsim_units::fundamentals::fundamental("N_A")
+                .expect("Avogadro is a registered fundamental")
+                .value,
+        )
+        .expect("Avogadro parses");
+        let k_b = civsim_units::bignum::BigRat::from_decimal_str(
+            civsim_units::fundamentals::fundamental("k_B")
+                .expect("Boltzmann is a registered fundamental")
+                .value,
+        )
+        .expect("Boltzmann parses");
+        Fixed::from_bits_i128(
+            n_a.mul(&k_b)
+                .round_to_scale(Fixed::FRAC_BITS)
+                .expect("R fits Q32.32"),
+        )
+        .expect("R projects to Fixed")
+    }
+
+    /// Schulz et al. 2020 Table 1: Mars-like, `rho = 3500 kg/m^3`, `g = 3.7 m/s^2`, `delta_T = 2000 K`. The
+    /// pressure at the base of the top thermal boundary layer is hydrostatic at the lid depth, `rho g z`,
+    /// reported in MEGAPASCALS because the same number in pascals (3.2e9 at a 250 km lid) is past the Q32.32
+    /// ceiling: the kernel's unit note is load-bearing and this helper is where it first bites.
+    fn schulz_lid_pressure_mpa(lid_depth_km: i32) -> Fixed {
+        // rho g z / 1e6, formed as (3500 * 3.7 * 1000 * km) / 1e6 = 3.7 * 3.5 * km.
+        Fixed::from_ratio(37, 10)
+            .mul(Fixed::from_ratio(35, 10))
+            .mul(Fixed::from_int(lid_depth_km))
+    }
+
+    #[test]
+    fn the_rheological_theta_reproduces_the_sources_own_newtonian_range() {
+        // TRANSCRIPTION REFEREE, against the primary's own reported numbers rather than against itself.
+        // Schulz et al. 2020 report theta between 24.2 and 27.6 for their DIFFUSION-CREEP runs, whose Table 1
+        // row is Newtonian: E* = 375 kJ/mol, V* = 8.2 cm^3/mol, n = 1. Their interior temperature is not
+        // printed, so the check is that the kernel lands inside their stated band at a plausible interior for a
+        // box whose contrast is 2000 K over a 250 km lid, which it does between 1850 and 1900 K. The band is
+        // narrow (a 14 per cent window) and theta runs as 1/T_i^2, so a wrong pressure term or a wrong
+        // reassociation would not sit inside it.
+        let r = derived_molar_gas_constant();
+        let p = schulz_lid_pressure_mpa(250);
+        let e_star = Fixed::from_int(375_000);
+        let v_star = Fixed::from_ratio(82, 10); // 8.2 cm^3/mol
+        let mut previous: Option<Fixed> = None;
+        for t_i in [1850, 1900] {
+            let theta = stagnant_lid_rheological_theta(
+                Fixed::from_int(t_i),
+                Fixed::from_int(2000),
+                e_star,
+                p,
+                v_star,
+                ONE,
+                r,
+            )
+            .expect("a Newtonian olivine lid has a rheological scale");
+            assert!(
+                theta > Fixed::from_ratio(242, 10) && theta < Fixed::from_ratio(276, 10),
+                "at T_i = {t_i} K theta is {}, outside the source's own 24.2 to 27.6",
+                theta
+            );
+            if let Some(prev) = previous {
+                assert!(
+                    theta < prev,
+                    "a hotter interior must soften and lower theta"
+                );
+            }
+            previous = Some(theta);
+        }
+    }
+
+    #[test]
+    fn the_rheological_theta_divides_by_the_stress_exponent_the_viscosity_divides_by() {
+        // THE NON-NEWTONIAN CATCH, and the reason `n` is in the signature at all. Schulz et al. report theta
+        // between 11.4 and 12.8 for their DISLOCATION runs, whose Table 1 row is the engine's own admitted row:
+        // E* = 530 kJ/mol, V* = 17e-6 m^3/mol, n = 3.5. The n = 1 reading of their printed eq. (29) gives about
+        // 40 at the same inputs, three times outside their own stated range; dividing by the stress exponent,
+        // as their effective viscosity eq. (21) does and as this engine's creep inversion already does, lands
+        // inside it. The two are checked against each other so the factor cannot be silently dropped.
+        let r = derived_molar_gas_constant();
+        let p = schulz_lid_pressure_mpa(200);
+        let e_star = Fixed::from_int(530_000);
+        let v_star = Fixed::from_int(17); // 17 cm^3/mol
+        let n = Fixed::from_ratio(35, 10);
+        let t_i = Fixed::from_int(1750);
+        let drop = Fixed::from_int(2000);
+        let non_newtonian = stagnant_lid_rheological_theta(t_i, drop, e_star, p, v_star, n, r)
+            .expect("theta exists");
+        let newtonian_reading =
+            stagnant_lid_rheological_theta(t_i, drop, e_star, p, v_star, ONE, r)
+                .expect("theta exists");
+        assert!(
+            non_newtonian > Fixed::from_ratio(114, 10)
+                && non_newtonian < Fixed::from_ratio(128, 10),
+            "the n = 3.5 theta is {}, outside the source's own 11.4 to 12.8 for its dislocation runs",
+            non_newtonian
+        );
+        assert!(
+            newtonian_reading > Fixed::from_int(35),
+            "dropping n gives {}, which is the reading this test exists to reject",
+            newtonian_reading
+        );
+        // And the relation is exactly a division, not an approximation: theta(n) = theta(1) / n.
+        let scaled = newtonian_reading.checked_div(n).expect("representable");
+        assert!(
+            (scaled - non_newtonian).abs() < Fixed::from_ratio(1, 100_000),
+            "theta must scale as 1/n exactly"
+        );
+    }
+
+    #[test]
+    fn the_rheological_theta_recovers_the_textbook_pressure_free_form() {
+        // LIMITING CASE. At V* = 0 and n = 1 the kernel must collapse to the familiar theta = E* dT / (R T_i^2),
+        // which is the form Batra & Foley 2021 use for an internally heated body (their section 5). The
+        // expectation is COMPUTED from that closed form rather than reasoned to.
+        let r = derived_molar_gas_constant();
+        let e_star = Fixed::from_int(300_000);
+        let t_i = Fixed::from_int(1600);
+        let drop = Fixed::from_int(1350);
+        let theta = stagnant_lid_rheological_theta(t_i, drop, e_star, ZERO, ZERO, ONE, r)
+            .expect("theta exists");
+        let closed_form = e_star
+            .mul(drop)
+            .checked_div(r.mul(t_i).mul(t_i))
+            .expect("E* dT / (R T^2) is representable");
+        assert!(
+            (theta - closed_form).abs() < Fixed::from_ratio(1, 10_000),
+            "the pressure-free Newtonian limit is {} against the closed form {}",
+            theta,
+            closed_form
+        );
+        // And the pressure term's sign is the one the doc states: it RAISES theta while dT > T_i and LOWERS it
+        // once T_i is the larger, because the two terms carry opposite signs and their sum is P V* (dT - T_i).
+        let v_star = Fixed::from_int(17); // 17 cm^3/mol
+        let p = Fixed::from_int(3000); // 3 GPa, in the megapascals the kernel takes
+        let hot_interior = stagnant_lid_rheological_theta(t_i, drop, e_star, p, v_star, ONE, r)
+            .expect("theta exists");
+        assert!(
+            hot_interior < theta,
+            "with dT ({}) below T_i ({}) the pressure term must lower theta",
+            drop,
+            t_i
+        );
+        let big_drop = Fixed::from_int(2400);
+        let cold_pressure_free =
+            stagnant_lid_rheological_theta(t_i, big_drop, e_star, ZERO, ZERO, ONE, r).unwrap();
+        let cold_with_pressure =
+            stagnant_lid_rheological_theta(t_i, big_drop, e_star, p, v_star, ONE, r).unwrap();
+        assert!(
+            cold_with_pressure > cold_pressure_free,
+            "with dT above T_i the pressure term must raise theta"
+        );
+    }
+
+    #[test]
+    fn the_rheological_theta_refuses_rather_than_returning_a_meaningless_scale() {
+        let r = derived_molar_gas_constant();
+        let e = Fixed::from_int(300_000);
+        assert!(
+            stagnant_lid_rheological_theta(ZERO, Fixed::from_int(1000), e, ZERO, ZERO, ONE, r)
+                .is_none(),
+            "no interior temperature, no scale"
+        );
+        assert!(
+            stagnant_lid_rheological_theta(
+                Fixed::from_int(1600),
+                Fixed::from_int(1000),
+                e,
+                ZERO,
+                ZERO,
+                ZERO,
+                r
+            )
+            .is_none(),
+            "a zero stress exponent is not a creep law"
+        );
+        // Pressure stiffening that overwhelms the thermal softening leaves no rheological temperature scale:
+        // the kernel refuses rather than reporting a negative or zero theta a logarithm would then swallow.
+        // A deep, hot, nearly isothermal layer is the real case: at T_i = 1600 K with only a 100 K drop across
+        // it, the sign flips once P V* passes E* dT / (T_i - dT) = 20 kJ/mol, which 5 GPa on a 17 cm^3/mol
+        // activation volume (85 kJ/mol) is well past. The boundary is COMPUTED here, not chosen.
+        let v_star = Fixed::from_int(17);
+        let boundary_pv = e
+            .mul(Fixed::from_int(100))
+            .checked_div(Fixed::from_int(1600 - 100))
+            .expect("representable");
+        let deep_pressure = Fixed::from_int(5000); // 5 GPa in MPa
+        assert!(
+            deep_pressure.mul(v_star) > boundary_pv,
+            "the test's pressure must be past the sign flip it is checking"
+        );
+        assert!(
+            stagnant_lid_rheological_theta(
+                Fixed::from_int(1600),
+                Fixed::from_int(100),
+                e,
+                deep_pressure,
+                v_star,
+                ONE,
+                r
+            )
+            .is_none(),
+            "a non-positive theta is a refusal, never a clamped one"
+        );
+    }
+
+    #[test]
+    fn the_worked_example_referees_the_nusselt_kernel_against_the_sources_own_number() {
+        // MAGNITUDE REFEREE against a printed prediction. Schulz et al. 2020 section 4.5.2 run their own
+        // eq. (35) at Ra_har = 2.89e6 and theta = 12.73 and report Nu = 2.499, against a measured 2.507.
+        // Evaluating the printed formula at the printed inputs gives 2.462, about 1.5 per cent under their
+        // printed prediction, which is a spread inside the source itself and is recorded on the row rather than
+        // smoothed. So the kernel is held to the formula exactly and to the paper's two numbers within 2 per
+        // cent, which is the source's own honest width and not a tolerance chosen to make this pass.
+        let convection = crate::convection_scaling::ConvectionScaling::standard()
+            .expect("the vendored column loads");
+        let c = convection
+            .stagnant_lid_convention("nu_stag_arrhenius_harmonic_ra")
+            .expect("the harmonic-Ra row is present");
+        let theta = Fixed::from_ratio(1273, 100);
+        let ln_ra = Fixed::from_ratio(289, 100)
+            .mul(Fixed::from_int(1_000_000))
+            .ln();
+        let ln_nu = ln_stagnant_lid_nusselt(
+            ln_ra,
+            theta,
+            c.coefficient,
+            c.theta_exponent,
+            c.rayleigh_exponent,
+        )
+        .expect("a stagnant lid at Ra ~ 3e6 convects");
+        let nu = ln_nu.exp();
+        assert!(
+            (nu - Fixed::from_ratio(2499, 1000)).abs() < Fixed::from_ratio(5, 100),
+            "the kernel gives Nu = {}, more than 2 per cent from the source's predicted 2.499",
+            nu
+        );
+        assert!(
+            (nu - Fixed::from_ratio(2507, 1000)).abs() < Fixed::from_ratio(5, 100),
+            "the kernel gives Nu = {}, more than 2 per cent from the source's measured 2.507",
+            nu
+        );
+    }
+
+    #[test]
+    fn the_stagnant_lid_loses_less_heat_than_the_mobile_lid_at_the_same_vigour() {
+        // THE WHOLE POINT OF THE BRANCH, computed rather than asserted. At one Rayleigh number, the mobile-lid
+        // law the engine runs today and the stagnant-lid law are evaluated side by side and the suppression is
+        // read off. Ra = 1e7 with the planetary rigid-free Ra_crit and the internal-heating prefactor 2^(-4/3)
+        // against the time-dependent stagnant convention at theta = 25, an Arrhenius olivine mantle's value.
+        let convection = crate::convection_scaling::ConvectionScaling::standard()
+            .expect("the vendored column loads");
+        let ra = Fixed::from_int(10_000_000);
+        let ra_crit = convection
+            .critical_rayleigh(crate::convection_scaling::BoundaryCondition::RigidFree)
+            .expect("the planetary eigenvalue is present");
+        let a = convection
+            .nusselt_prefactor_at_internal_fraction(ONE)
+            .expect("the internal-heating prefactor derives");
+        let mobile = a.mul(
+            ra.checked_div(ra_crit)
+                .unwrap()
+                .powf(Fixed::from_ratio(1, 3)),
+        );
+        let c = convection
+            .stagnant_lid_convention("nu_stag_time_dependent_C1")
+            .expect("the time-dependent row is present");
+        let stagnant = ln_stagnant_lid_nusselt(
+            ra.ln(),
+            Fixed::from_int(25),
+            c.coefficient,
+            c.theta_exponent,
+            c.rayleigh_exponent,
+        )
+        .expect("a stiff lid still convects at Ra = 1e7")
+        .exp();
+        assert!(
+            stagnant < mobile,
+            "the stagnant lid must lose less than the mobile lid: Nu_stag {} against Nu_mobile {}",
+            stagnant,
+            mobile
+        );
+        // The suppression is a factor of several, not a rounding: theta^(-4/3) at theta = 25 is about 1/73.
+        assert!(
+            stagnant.mul(Fixed::from_int(3)) < mobile,
+            "at theta = 25 the suppression is at least threefold, measured {} against {}",
+            stagnant,
+            mobile
+        );
+        // And a stiffer lid suppresses harder: theta is the only thing that moves between these two.
+        let stiffer = ln_stagnant_lid_nusselt(
+            ra.ln(),
+            Fixed::from_int(40),
+            c.coefficient,
+            c.theta_exponent,
+            c.rayleigh_exponent,
+        )
+        .expect("still representable")
+        .exp();
+        assert!(stiffer < stagnant, "a larger theta must suppress more");
+        // While a more vigorous interior loses more: Ra is the only thing that moves between these two.
+        let hotter = ln_stagnant_lid_nusselt(
+            Fixed::from_int(100_000_000).ln(),
+            Fixed::from_int(25),
+            c.coefficient,
+            c.theta_exponent,
+            c.rayleigh_exponent,
+        )
+        .expect("still representable")
+        .exp();
+        assert!(hotter > stagnant, "a larger Rayleigh number must lose more");
+    }
+
+    #[test]
+    fn the_stagnant_lid_nusselt_floors_at_the_conductive_limit_and_refuses_the_rest() {
+        let convection = crate::convection_scaling::ConvectionScaling::standard()
+            .expect("the vendored column loads");
+        let c = convection
+            .stagnant_lid_convention("nu_stag_time_dependent_C1")
+            .expect("the time-dependent row is present");
+        // A lid stiff enough drives the raw expression below one, where the honest answer is that the body
+        // conducts. Nu >= 1 is the definition of a convective enhancement, so ln Nu floors at exactly zero and
+        // never below it. At theta = 400 and Ra = 1e6 the unclamped form is far under unity.
+        let ln_nu = ln_stagnant_lid_nusselt(
+            Fixed::from_int(1_000_000).ln(),
+            Fixed::from_int(400),
+            c.coefficient,
+            c.theta_exponent,
+            c.rayleigh_exponent,
+        )
+        .expect("representable");
+        assert_eq!(ln_nu, ZERO, "the conductive limit is ln Nu = 0, exactly");
+        // The clamp is a floor and not a pin: a vigorous, soft interior still reports its enhancement.
+        assert!(
+            ln_stagnant_lid_nusselt(
+                Fixed::from_int(100_000_000).ln(),
+                Fixed::from_int(10),
+                c.coefficient,
+                c.theta_exponent,
+                c.rayleigh_exponent,
+            )
+            .expect("representable")
+                > ZERO
+        );
+        // Neither a non-positive theta nor a non-positive coefficient has a logarithm, and a zero coefficient
+        // is not a scaling law. Both refuse rather than returning the ln sentinel dressed as an answer.
+        assert!(ln_stagnant_lid_nusselt(
+            Fixed::from_int(10),
+            ZERO,
+            c.coefficient,
+            c.theta_exponent,
+            c.rayleigh_exponent
+        )
+        .is_none());
+        assert!(ln_stagnant_lid_nusselt(
+            Fixed::from_int(10),
+            Fixed::from_int(20),
+            ZERO,
+            c.theta_exponent,
+            c.rayleigh_exponent
+        )
+        .is_none());
     }
 
     #[test]

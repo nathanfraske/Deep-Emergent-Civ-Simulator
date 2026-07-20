@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 # ANALYTIC VERIFICATION + TRANSCRIPTION, NOT VALIDATION.
 #
-# The 27 pi^4 / 4, pi / sqrt(2) and 2^(-4/3) computations are genuine analytic verification. The fingerprint d
-# ictionary is transcription. Neither proves empirical Nusselt-Rayleigh accuracy.
+# The 27 pi^4 / 4, pi / sqrt(2) and 2^(-4/3) computations are genuine analytic verification, and so is the
+# stagnant-lid family relation gamma = -(1 + beta), which is the source's own eq. (8) re-derived against the
+# committed exponents. The fingerprint dictionary is transcription. Neither proves empirical Nusselt-Rayleigh
+# accuracy, and NOTHING here proves any banked stagnant-lid coefficient applies to a NON-NEWTONIAN lid: none was
+# fitted at one, which is recorded on the rows and at the kernel rather than checked here.
 #
 # WHY THE LABEL IS HERE. An audit found this battery described uniformly as one that reconstructs each
 # fetch from its recipe and asserts byte-equality, for all eight tests. That was true of some and false
@@ -110,7 +113,89 @@ FINGERPRINTS = {
     "ra_crit_free_free": [("value", 657.511, 1e-2), ("critical_wavenumber", 2.2214, 1e-2)],
     "ra_crit_rigid_rigid": [("value", 1707.762, 1e-2), ("critical_wavenumber", 3.117, 1e-2)],
     "ra_crit_rigid_free": [("value", 1100.65, 1e-2), ("critical_wavenumber", 2.682, 1e-2)],
+    # The stagnant-lid conventions. Each is a TRIPLE and all three fields are fingerprinted, because a
+    # coefficient checked without its exponents is not a checked convention.
+    "nu_stag_time_dependent_C1": [
+        ("value", 0.48, TOL),
+        ("band_lo", 0.48, TOL),
+        ("band_hi", 0.55, TOL),
+        ("theta_exponent", -4.0 / 3.0, TOL),
+        ("rayleigh_exponent", 1.0 / 3.0, TOL),
+    ],
+    "nu_stag_steady_C2": [
+        ("value", 2.95, TOL),
+        ("theta_exponent", -1.2, TOL),
+        ("rayleigh_exponent", 0.2, TOL),
+    ],
+    "nu_stag_arrhenius_internal_ra": [
+        ("value", 0.278, TOL),
+        ("theta_exponent", -0.4, TOL),
+        ("rayleigh_exponent", 0.203, TOL),
+    ],
+    "nu_stag_arrhenius_harmonic_ra": [
+        ("value", 0.219, TOL),
+        ("theta_exponent", -0.581, TOL),
+        ("rayleigh_exponent", 0.262, TOL),
+    ],
 }
+
+# Batra & Foley 2021 eq. (8) states their stagnant-lid family as Nu = C* theta^-(1+beta) Ra_i^beta, so on those
+# two rows gamma is NOT free: it is fixed by beta. Checking it is a relation ANALYTIC VERIFICATION of the
+# transcription, the same standing as recomputing 27 pi^4 / 4, and it catches a slipped digit in either exponent
+# that the per-field fingerprints above would only catch if the slip were in the field they name. The Schulz
+# rows are deliberately NOT in this list: they are free fits and do not obey the relation (0.203 would demand
+# -1.203, not -0.4), which is exactly why the two families are banked as separate rows.
+ONE_PARAMETER_FAMILY_ROWS = ["nu_stag_time_dependent_C1", "nu_stag_steady_C2"]
+
+
+def check_family_relation(rows):
+    failures = 0
+    for name in ONE_PARAMETER_FAMILY_ROWS:
+        row = rows.get(name)
+        if not row:
+            print("CONVECTION MISSING ROW", name)
+            failures += 1
+            continue
+        beta = float(row["rayleigh_exponent"])
+        gamma = float(row["theta_exponent"])
+        if abs(gamma - (-(1.0 + beta))) > TOL:
+            print(
+                f"CONVECTION FAMILY DRIFT {name}: eq. (8) demands gamma = -(1 + beta) = {-(1.0 + beta):.6f}, column has {gamma}"
+            )
+            failures += 1
+    if not failures:
+        print(f"convection family relation OK: {len(ONE_PARAMETER_FAMILY_ROWS)} linearized rows satisfy gamma = -(1 + beta)")
+    return failures
+
+
+def check_stagnant_lid_shape(rows):
+    """A stagnant-lid row is a suppression law or it is not one. Every row whose name marks it as stagnant must
+    carry BOTH exponents, with a NEGATIVE theta exponent (a stiffer lid loses less heat) and a POSITIVE Rayleigh
+    exponent (a more vigorous interior loses more). A sign slip here would invert the physics silently, and the
+    Rust reader keys off the presence of these two fields, so an absent one would make a row quietly unreadable
+    rather than loudly wrong."""
+    failures = 0
+    n = 0
+    for name, row in rows.items():
+        if not name.startswith("nu_stag_"):
+            continue
+        n += 1
+        for field in ("theta_exponent", "rayleigh_exponent"):
+            if field not in row:
+                print(f"CONVECTION STAGNANT ROW {name} IS MISSING {field}: the Rust reader would refuse it")
+                failures += 1
+        if "theta_exponent" in row and float(row["theta_exponent"]) >= 0:
+            print(f"CONVECTION SIGN {name}: theta exponent must be negative (suppression), got {row['theta_exponent']}")
+            failures += 1
+        if "rayleigh_exponent" in row and float(row["rayleigh_exponent"]) <= 0:
+            print(f"CONVECTION SIGN {name}: Rayleigh exponent must be positive, got {row['rayleigh_exponent']}")
+            failures += 1
+    if not n:
+        print("CONVECTION NO STAGNANT-LID ROWS: the suppression family is gone from the column")
+        failures += 1
+    elif not failures:
+        print(f"convection stagnant-lid shape OK: {n} rows carry a complete, correctly signed (alpha, gamma, beta)")
+    return failures
 
 
 def check_fingerprints(rows):
@@ -143,6 +228,8 @@ WITNESS_SIGNATURES = {
     "komacek_abbot_2016_arxiv_1609.04786.pdf": ["Racrit"],
     "foley_bercovici_2014_arxiv_1410.7652.pdf": ["Solomatov"],
     "glomski_johnson_2012_ams.pdf": ["1100.65"],
+    "batra_foley_2021_gji228_ggab366_nsfpar_accepted_manuscript.pdf": ["0.48", "2.95"],
+    "schulz_tosi_plesa_breuer_2020_gji220_ggz417.pdf": ["0.278", "0.219", "12.73"],
 }
 
 
@@ -176,6 +263,8 @@ def main():
     failures = check_receipts()
     failures += check_closed_forms(rows)
     failures += check_fingerprints(rows)
+    failures += check_family_relation(rows)
+    failures += check_stagnant_lid_shape(rows)
     failures += check_witness_text()
     if failures:
         print(f"\nCONVECTION-SCALING PROVENANCE FAILED ({failures})")

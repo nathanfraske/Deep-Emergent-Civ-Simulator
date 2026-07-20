@@ -12,7 +12,7 @@ Custody is one of three. `in_repo`: bytes held in-tree, checksum verifiable with
 witness. `external`: bytes in local custody outside the repo, checksum plus archive snapshot.
 The licence decides which is permitted; see `docs/working/FETCH_PIPELINE_PLAN.md` section 3.
 
-**37 sources** (8 registry, 29 mirrored).
+**39 sources** (8 registry, 31 mirrored).
 
 ## Registry (hand-maintained)
 
@@ -136,6 +136,19 @@ Byerlee, J., 1978, Friction of rocks, Pure and Applied Geophysics 116, 615-626, 
 - free route (gov-work): https://earthquake.usgs.gov/static/lfs/research/rockphysics/Friction_of_rocks.pdf
 - authority: `crates/physics/data/byerlee_1978/manifest.toml`
 
+### `convection_scaling.batra_foley_2021`
+
+Batra, K., Foley, B.J. (2021), Scaling laws for stagnant-lid convection with a buoyant crust, Geophys. J. Int. 228(1), 631-663, doi 10.1093/gji/ggab366. Volume, issue, pages and date verified at Crossref rather than assumed from the manuscript.
+
+- sha256: `858dda2aa7fbef10f93f72a7fb77624f893171d405a0b8fea4975ced408965ab`
+- archived: https://web.archive.org/web/20260719225200/https://par.nsf.gov/biblio/10389156
+- scope: 2-D Cartesian, free-slip top and bottom, periodic sides, temperature fixed at the top and bottom so the models are BOTTOM-HEATED with no internal heating. Frank-Kamenetskii LINEARIZED viscosity (eq. 5), so temperature-dependent, NEWTONIAN, and with NO activation volume and NO pressure dependence. theta was sampled at two values only, 13.82 and 16.12 (viscosity contrasts 1e6 and 1e7), over reference Rayleigh numbers 1e6 to 1e8.
+- custody: witness
+- licence (**NOT redistributable**): Geophysical Journal International (Royal Astronomical Society, Oxford University Press), all rights reserved. NOT open access: Crossref reports the licence URL as the OUP standard-publication-model page, the subscription model, with no Creative Commons or other reuse grant attached. The copy read is the AUTHOR ACCEPTED MANUSCRIPT deposited in the NSF Public Access Repository under the NSF public-access policy, which makes the manuscript publicly readable and grants no redistribution right, so the bytes are not held.
+- licence evidence: https://academic.oup.com/journals/pages/access_purchase/rights_and_permissions
+- free route (funder-repository-accepted-manuscript): https://par.nsf.gov/servlets/purl/10389156
+- authority: `crates/physics/data/convection_scaling/manifest.toml`
+
 ### `convection_scaling.bodenschatz_pesch_ahlers_2000`
 
 Bodenschatz, E., Pesch, W., Ahlers, G. (2000), Recent developments in Rayleigh-Benard convection, Annu. Rev. Fluid Mech. 32, 709-778.
@@ -174,6 +187,19 @@ Ricard, Y., Physics of mantle convection, course notes, ENS de Lyon (section 4.5
 
 - sha256: `3a732fb76a67a21877c7a7538d258fe3d0c91c18fe89c70cb9bdb061560fdda6`
 - archived: http://web.archive.org/web/20260718143529/https://perso.ens-lyon.fr/yanick.ricard/note-convection
+- authority: `crates/physics/data/convection_scaling/manifest.toml`
+
+### `convection_scaling.schulz_tosi_plesa_breuer_2020`
+
+Schulz, F., Tosi, N., Plesa, A.-C., Breuer, D. (2020), Stagnant-lid convection with diffusion and dislocation creep rheology: Influence of a non-evolving grain size, Geophys. J. Int. 220(1), 18-36, doi 10.1093/gji/ggz417 (advance access 2019 September 17). Volume, issue, pages and date verified at Crossref.
+
+- sha256: `a7e8f41dcc02733b24b8c39d47e8c529e534b58e25d7c228aee83f198077e28e`
+- archived: https://web.archive.org/web/20260719224847/https://elib.dlr.de/130183/1/ggz417.pdf
+- scope: 2-D Cartesian box of aspect ratio one, free-slip, reflective side walls, isothermal top and bottom so the models are BOTTOM-HEATED with no internal heating, 200 x 200 uniform grid, Mars-like parameters. eqs. (34) and (35) are fitted over the DIFFUSION-CREEP and reduced-activation-enthalpy runs in the one-convection-cell regime, so they are NEWTONIAN fits, and the source states its own limit: 'since the scaling parameters are predicted as functions of the lid shape (flat versus steep) and dislocation creep is different in this respect from the simulations used to derive eqs (34)-(35), care should be taken upon using these relations for dislocation creep'. The source also states that the fit 'is only valid for the specific parameters given in Table 1'.
+- custody: witness
+- licence (**NOT redistributable**): Geophysical Journal International (Royal Astronomical Society, Oxford University Press), all rights reserved. NOT open access: Crossref reports the same OUP standard-publication-model licence URL, the subscription model, with no reuse grant. The copy read is the PUBLISHER'S VERSION OF RECORD as deposited in the German Aerospace Center's eLib institutional repository, and the document's own page furniture records it as a subscriber download ('Downloaded from https://academic.oup.com/gji/article-abstract/220/1/18/5571091 by Deutsches Zentrum fuer Luft- und Raumfahrt (DLR); Bibliotheks- und Informationswesen user on 05 November 2019'). An institutional deposit of a subscriber copy is not a licensed redistribution, so the bytes are not held.
+- licence evidence: https://academic.oup.com/journals/pages/access_purchase/rights_and_permissions
+- free route (institutional-repository-plus-archive): https://web.archive.org/web/20260719224847/https://elib.dlr.de/130183/1/ggz417.pdf
 - authority: `crates/physics/data/convection_scaling/manifest.toml`
 
 ### `fan_2019`
