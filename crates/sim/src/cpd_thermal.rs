@@ -68,6 +68,7 @@ use crate::astro::kepler_orbital_period_seconds;
 /// The result is a base-10 log because the flux spans a wide range and `Omega_K^2` with a large `Mdot` would not be
 /// representable directly; it is a weighted sum of logs with no exponentiation. `None` on a non-positive input, if
 /// the reused Kepler period does not resolve, or on an overflow.
+// @sources: schneeberger_mousis_2025_cpd_thermal
 pub fn viscous_heating_flux_log10(
     geometry_factor: Fixed,
     log10_mdot_kg_s: Fixed,

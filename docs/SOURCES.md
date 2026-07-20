@@ -12,7 +12,7 @@ Custody is one of three. `in_repo`: bytes held in-tree, checksum verifiable with
 witness. `external`: bytes in local custody outside the repo, checksum plus archive snapshot.
 The licence decides which is permitted; see `docs/working/FETCH_PIPELINE_PLAN.md` section 3.
 
-**38 sources** (11 registry, 27 mirrored).
+**39 sources** (12 registry, 27 mirrored).
 
 ## Registry (hand-maintained)
 
@@ -113,6 +113,18 @@ Powell, R.W., Ho, C.Y. & Liley, P.E., 1966, Thermal Conductivity of Selected Mat
 - licence evidence: the document's own front matter (issue date, GPO imprint, no copyright notice); Public Law 90-396, 11 July 1968, for the date comparison
 - free route (gov-work): https://nvlpubs.nist.gov/nistpubs/Legacy/NSRDS/nbsnsrds8.pdf
 - holding: `crates/physics/data/phase_conductivity/nsrds_nbs8_SLIM.pdf`
+
+### `schneeberger_mousis_2025_cpd_thermal`
+
+Schneeberger, A. & Mousis, O., 2025, Impact of Jupiter's Heating and Self-shadowing on the Jovian Circumplanetary Disk Structure, The Planetary Science Journal 6:23, DOI 10.3847/PSJ/ad9de1, preprint arXiv:2411.13351 (v2, astro-ph.EP). It reproduces in full the gas-starved circumplanetary-disk model of Canup, R. M. & Ward, W. R., 2002, Formation of the Galilean Satellites: Conditions of Accretion, Astronomical Journal 124, 3404-3423, DOI 10.1086/344684, with the semi-analytical thermal structure of Makalkin, A. B. & Dorofeeva, V. A., 1995 and 2014 (Solar System Research), and the Pollack et al. 1994 opacity regimes.
+
+- sha256: `18c07e5f35efdf804a6ba15ccce8225958e07fa9c119994cb1bd093048b8fb0d`
+- archived: https://web.archive.org/web/20241121054247/http://arxiv.org/pdf/2411.13351
+- scope: The gas-starved, hydrostatic circumplanetary-disk thermal-structure equations, read from the held v2 PDF. Consumed by code: Equation 19, the viscous heating flux F_vis = (3/(8 pi)) (Lambda/l) Mdot Omega_K^2 (crates/sim/src/cpd_thermal.rs viscous_heating_flux_log10). Scoped for the wider sub-arc: Eq. 1 (surface density), Eq. 3 (sound speed), Eq. 12 (optical depth), Eq. 18 (surface temperature), Eq. 20 and 21 (accretion and planet-irradiation fluxes), Eq. 24 (the radiative-transfer moment equation whose JFNK solve sets the midplane temperature). TWO RECORDED SOURCE CONFLICTS (audit-the-input): first, the printed Shakura-Sunyaev viscosity Eq. 2, nu = alpha c_s / Omega_K, is dimensionally a LENGTH not a viscosity, so the dimensionally-correct form nu = alpha c_s H = alpha c_s^2 / Omega_K (with the paper's own scale height H = c_s / Omega_K) is used and the printed Eq. 2 is held as a PublishedEquationConflict; second, the gas-flux geometry factor Lambda/l (Eqs. 4 to 6) is DISCONTINUOUS at the centrifugal radius R_c as printed (a sqrt-against-linear branch mismatch, about 0.13 jump at Jovian scales), so it is a FLAGGED research question, not built, and F_vis takes Lambda/l as a caller input pending the primary equations. Windless, gas-starved regime; the self-shadowing and formation-luminosity dependence the paper develops is carried as model uncertainty (midplane T from about 100 K cold traps to about 4500 K in the optically-thick inner disc).
+- custody: witness
+- licence (redistributable): Creative Commons Attribution 4.0 International (CC BY 4.0), read from the arXiv abstract page for this submission on 2026-07-20: the page displays a CC-BY icon linking to http://creativecommons.org/licenses/by/4.0/. CC BY permits redistribution with attribution, so the held bytes ARE redistributable; they are kept as a witness (no bytes in-tree) to match the registry's handling of open preprints, and the model equations are in any case uncopyrightable analytic facts safe to read and cite. The published venue (PSJ, IOP) is open access.
+- licence evidence: https://arxiv.org/abs/2411.13351 displays a Creative Commons Attribution 4.0 (CC BY 4.0) license icon linking to http://creativecommons.org/licenses/by/4.0/.
+- free route (preprint-server): https://arxiv.org/abs/2411.13351
 
 ### `svo_tlusty_bstar2006`
 
