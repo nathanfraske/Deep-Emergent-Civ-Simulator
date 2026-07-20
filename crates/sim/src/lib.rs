@@ -77,6 +77,7 @@ pub mod edibility;
 pub mod environ;
 pub mod epoch;
 pub mod evolve;
+pub mod flexural_field;
 pub mod forward_model;
 pub mod genesis;
 pub mod geodynamics;

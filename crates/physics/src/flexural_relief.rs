@@ -91,6 +91,27 @@ impl FlexedPlate {
         Self::from_internal_rigidity(plate.rigidity_internal, delta_rho, gravity_km_s2)
     }
 
+    /// Build from a DIMENSIONAL rigidity in the caller's `GPa km^3`.
+    ///
+    /// This is the constructor a caller OUTSIDE this crate wants. [`Self::from_internal_rigidity`] takes the
+    /// internal representation, and `crate::flexure::scaled` is crate-private on purpose, so without this a
+    /// downstream crate holding an ordinary `D` had no way in and the internal unit system leaked into its API.
+    ///
+    /// It is fallible for the usual reason plus one more: a rigidity too large for `GPa km^3` cannot be PASSED
+    /// in that unit in the first place, so a caller holding a sluggish world's plate must come through
+    /// [`Self::from_moment_equivalent`], which carries it internally end to end. See
+    /// [`crate::moment_equivalence::MomentEquivalentPlate::rigidity_internal`].
+    // @derives: a loadable flexed plate <- a dimensional rigidity and the world's restoring term
+    pub fn from_rigidity_gpa_km3(
+        rigidity_gpa_km3: Fixed,
+        delta_rho: Fixed,
+        gravity_km_s2: Fixed,
+    ) -> Result<Self, ReliefRefusal> {
+        let internal =
+            scaled::internal_rigidity(rigidity_gpa_km3).ok_or(ReliefRefusal::NotRepresentable)?;
+        Self::from_internal_rigidity(internal, delta_rho, gravity_km_s2)
+    }
+
     /// Build from an internal rigidity directly, for a caller holding one from somewhere other than the
     /// moment-equivalence solve (a hindcast row converted inward, or a test's synthetic plate).
     // @derives: a loadable flexed plate <- an internal rigidity and the world's restoring term
@@ -169,6 +190,46 @@ impl FlexedPlate {
         qx_km: Fixed,
         qy_km: Fixed,
     ) -> Result<Fixed, ReliefRefusal> {
+        // ADMISSIBILITY IS SETTLED OVER THE WHOLE LIST BEFORE ANY SUM, and by a declared precedence, because
+        // returning on the FIRST bad load makes the REFUSAL order-dependent even though the VALUE is not. A list
+        // holding one over-envelope load and one zero-footprint load reported `LoadOutsideEnvelope` or
+        // `FootprintNotPositive` according to which the caller happened to list first, so two runs that
+        // discovered the same loads in different orders disagreed about why the world refused. The sum was
+        // always order-independent; this makes the stop order-independent too (Principle 3, Principle 10).
+        //
+        // The precedence is stated rather than emergent: a non-positive footprint is not a load geometry at all,
+        // so it outranks a magnitude that is merely outside the declared envelope. Found by an independent
+        // audit of this substrate.
+        let mut footprint_refused = false;
+        let mut envelope_refused = false;
+        for load in loads {
+            match load.kind {
+                LoadKind::LineY => {
+                    if !line_load_admissible(load.magnitude) {
+                        envelope_refused = true;
+                    }
+                }
+                LoadKind::Point => {
+                    if !point_load_admissible(load.magnitude) {
+                        envelope_refused = true;
+                    }
+                }
+                LoadKind::UniformStripY { half_width } => {
+                    if half_width <= Fixed::ZERO {
+                        footprint_refused = true;
+                    } else if !uniform_strip_load_admissible(load.magnitude, half_width) {
+                        envelope_refused = true;
+                    }
+                }
+            }
+        }
+        if footprint_refused {
+            return Err(ReliefRefusal::FootprintNotPositive);
+        }
+        if envelope_refused {
+            return Err(ReliefRefusal::LoadOutsideEnvelope);
+        }
+
         let mut total_hat_bits = 0_i128;
         for load in loads {
             let contribution = match load.kind {
@@ -479,6 +540,43 @@ mod tests {
             forward.to_bits(),
             reversed.to_bits(),
             "the superposition is order-independent to the bit"
+        );
+    }
+
+    #[test]
+    fn the_refusal_does_not_depend_on_the_order_the_loads_are_listed_in() {
+        // THE STOP IS PART OF THE ANSWER. The deflection was already order-independent to the bit, but the
+        // REFUSAL was not: returning on the first bad load meant a list holding one over-envelope load and one
+        // zero-footprint load reported whichever the caller listed first, so two runs discovering the same loads
+        // in different orders disagreed about why the world refused. Found by an independent audit.
+        let plate = sluggish_plate();
+        let bad_footprint = Load {
+            kind: LoadKind::UniformStripY {
+                half_width: Fixed::ZERO,
+            },
+            magnitude: Fixed::ONE,
+            x: Fixed::ZERO,
+            y: Fixed::ZERO,
+        };
+        let bad_envelope = Load {
+            kind: LoadKind::LineY,
+            magnitude: Fixed::from_int(crate::flexure::MAX_LINE_LOAD_GPA_KM)
+                .checked_mul(Fixed::from_int(4))
+                .expect("past the envelope"),
+            x: Fixed::ZERO,
+            y: Fixed::ZERO,
+        };
+        let forward = plate.deflection_km(&[bad_footprint, bad_envelope], Fixed::ZERO, Fixed::ZERO);
+        let reversed =
+            plate.deflection_km(&[bad_envelope, bad_footprint], Fixed::ZERO, Fixed::ZERO);
+        assert_eq!(
+            forward, reversed,
+            "the same load set must refuse for the same reason in either order"
+        );
+        assert_eq!(
+            forward,
+            Err(ReliefRefusal::FootprintNotPositive),
+            "and the declared precedence stands: a load with no footprint is not a geometry at all"
         );
     }
 
