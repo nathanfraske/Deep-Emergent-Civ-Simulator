@@ -77,6 +77,21 @@
 //! derive-first floor and needs none. It is a term SEPARATE from [`step_deep_time`], applied by the caller after
 //! it, so a run that does not collapse replays bit-for-bit.
 //!
+//! THE MASS LEDGER slice (this): the crust is a STOCK moved by a TRANSACTION, never a thickness that appears.
+//! Before this the crust only grew, toward the equilibrium its melt column supports, and that growth was an
+//! equilibrium CLAMP rather than a transfer: it subtracted nothing from anything, so the "finite fusible source"
+//! the saturation was named for was a description with no reservoir behind it, and crust DESTRUCTION was not
+//! merely unimplemented but unrepresentable, because there were no stocks to move mass between. The state now
+//! carries two AREAL-MASS stocks per lateral cell ([`DeepTimeState::crust_areal_mass`] and
+//! [`DeepTimeState::source_areal_mass`]), and melt extraction DEBITS the source and CREDITS the crust by one and
+//! the same fixed-point value, so their sum is invariant to the bit. The thickness the isostasy floats is the
+//! crust stock's own geometric READOUT (`mass / density`), recomputed wherever the stock moves rather than
+//! accumulated beside it, so the geometry cannot drift from the ledger and no second copy of the crust exists.
+//! What this slice deliberately does NOT add is a foundering or recycling RATE: the isostatic sign establishes
+//! that a dense column is unstable, never how much of it founders per tick, and a rate written without a source
+//! would be fabricated. The ledger is the state change that lets a sourced rate land later without redesigning
+//! the state again.
+//!
 //! Determinism (Principle 3, Principle 10): [`convection_step_si`] is a pure function and the columns are walked in
 //! index order, so the tick is a pure function of the state and the parameters, worker-invariant. Dormant: no
 //! scenario or viewer drives it yet (the time control is the next slice), so it is byte-neutral over the run
@@ -127,11 +142,32 @@ pub struct CraterRow {
 pub struct DeepTimeState {
     /// The interior mantle columns, one per lateral cell, each evolving by its own convection over deep time.
     pub columns: Vec<ColumnState>,
-    /// The crust each column has BUILT (kilometres), one per lateral cell, accumulated from the melt its
-    /// interior has delivered over the run so far. This is the DERIVED crustal thickness (the seam-6
-    /// adiabatic-melt column integrated over the deep-time history), the field that retires the authored 30 km
-    /// crustal-thickness fixture: a hot, long-lived column builds thick crust, a cold one thin, the provinces.
+    /// The crust each column has BUILT (kilometres), one per lateral cell, the DERIVED crustal thickness that
+    /// retires the authored 30 km crustal-thickness fixture: a hot, long-lived column builds thick crust, a cold
+    /// one thin, the provinces.
+    ///
+    /// It is the crust STOCK's geometric READOUT, never a second accumulator: it is
+    /// [`DeepTimeState::crust_areal_mass`] divided by the emplaced-crust density
+    /// ([`thickness_km_from_areal_mass`]), recomputed wherever the stock moves. The mass is what the ledger
+    /// conserves and the thickness is what the isostasy floats, and keeping the thickness a function of the mass
+    /// is what stops the two representations of one crust from drifting apart tick by tick.
     pub crust_thickness_km: Vec<Fixed>,
+    /// THE CRUST STOCK: the areal mass of crust each column has emplaced, one per lateral cell, in MEGAGRAMS PER
+    /// SQUARE METRE ([`areal_mass_mg_per_m2`]). A fresh planet carries none; every megagram here was DEBITED from
+    /// [`DeepTimeState::source_areal_mass`] by the melt transaction, so the crust is mass that moved rather than
+    /// mass that appeared.
+    pub crust_areal_mass: Vec<Fixed>,
+    /// THE SOURCE STOCK: the areal mass of unmelted mantle source remaining under each column, one per lateral
+    /// cell, in the same megagrams per square metre. Melt extraction debits it and credits the crust by the same
+    /// value, so `crust_areal_mass[i] + source_areal_mass[i]` is invariant to the bit under the transaction
+    /// ([`step_deep_time`]). The initial stock is the caller's DERIVED convecting-mantle areal mass (the
+    /// convecting depth times the mantle density), never an authored reservoir.
+    ///
+    /// The honest limit: the source is treated as uniformly fertile, with no fertile-versus-depleted split and no
+    /// composition carried, so what a column has already yielded changes the stock's SIZE and not its
+    /// meltability. A compositional source (the residue that melting leaves behind, feeding back into solidus and
+    /// density) is the named follow-on the ledger makes reachable.
+    pub source_areal_mass: Vec<Fixed>,
     /// The geological time elapsed (megayears), the clock the provinces are written against.
     pub elapsed_myr: Fixed,
     /// The accumulated LARGE-BASIN bombardment relief (metres), one per lateral cell, the province-scale
@@ -209,6 +245,18 @@ impl DeepTimeState {
         for t in &self.crust_thickness_km {
             h.write_fixed(*t);
         }
+        // THE MASS LEDGER, both stocks, in cell order. The thickness above is the crust stock's readout, so on
+        // the melt path these move together; they are folded separately anyway, because a state whose stocks and
+        // thickness disagree is a different (and broken) world from one where they agree, and a receipt that
+        // could not tell them apart would hide exactly that.
+        h.write_u64(self.crust_areal_mass.len() as u64);
+        for m in &self.crust_areal_mass {
+            h.write_fixed(*m);
+        }
+        h.write_u64(self.source_areal_mass.len() as u64);
+        for m in &self.source_areal_mass {
+            h.write_fixed(*m);
+        }
         // The province-scale bombardment relief.
         h.write_u64(self.impact_relief_m.len() as u64);
         for r in &self.impact_relief_m {
@@ -237,7 +285,13 @@ impl DeepTimeState {
     /// handoff (the world's own derived solidus plus the phi_c superheat, so the columns start super-solidus and
     /// the melt engages), and for a NEVER-MELTED or MARGINAL world the sub-solidus cold peak. This retires the
     /// fixed 1588 K Earth-MORB anchor as the melted-world initial condition; the caller supplies the derived value.
-    pub fn young(n_cells: usize, initial_temperature: Fixed) -> Self {
+    ///
+    /// `source_areal_mass` is the melt SOURCE stock every column begins with (megagrams per square metre,
+    /// [`areal_mass_mg_per_m2`]), the caller's DERIVED convecting-mantle areal mass: the convecting-mantle depth
+    /// times the mantle density, both of which the caller already derives from the planet's interior structure.
+    /// It is uniform for the same reason the columns are: a fresh planet has no lateral history to have spent one
+    /// column's source further than another's.
+    pub fn young(n_cells: usize, initial_temperature: Fixed, source_areal_mass: Fixed) -> Self {
         DeepTimeState {
             columns: vec![
                 ColumnState {
@@ -247,6 +301,10 @@ impl DeepTimeState {
                 n_cells
             ],
             crust_thickness_km: vec![Fixed::ZERO; n_cells],
+            // A fresh planet has emplaced no crust, so the crust stock is empty and the whole ledger sits in the
+            // source. Every megagram the crust later holds is one this stock lost.
+            crust_areal_mass: vec![Fixed::ZERO; n_cells],
+            source_areal_mass: vec![source_areal_mass; n_cells],
             elapsed_myr: Fixed::ZERO,
             impact_relief_m: vec![Fixed::ZERO; n_cells],
             craters: Vec::new(),
@@ -279,6 +337,40 @@ impl DeepTimeState {
     }
 }
 
+/// THE LEDGER'S UNIT BRIDGE: the areal mass (megagrams per square metre) a layer of `thickness_km` at
+/// `density_kg_per_m3` carries. The conversion is EXACT and factor-free, which is why the unit was chosen: a
+/// thickness in kilometres times a density in kilograms per cubic metre IS an areal mass in megagrams per square
+/// metre, because the `1000 m/km` that scales the thickness up and the `1000 kg/Mg` that scales the mass down
+/// cancel. A unit conversion, never a world-content value (Principle 11).
+///
+/// WHY NOT KILOGRAMS PER SQUARE METRE, the obvious SI choice: a planetary mantle column does not fit. A
+/// Mars-class convecting mantle (about 1500 km at 3300 kg per cubic metre) is `5.0e9 kg/m^2` and an Earth-class
+/// one is past `1e10`, both above the `2.147e9` ceiling of Q32.32, so the SOURCE STOCK could not be held at all.
+/// The same column in megagrams per square metre is `5.0e6`, and a 30 km crust is `8.7e4`, both far inside the
+/// window with the fixed point's sub-nanogram resolution still under them. `None` on a non-positive input or an
+/// overflow, so a degenerate layer refuses rather than returning a fabricated mass.
+pub fn areal_mass_mg_per_m2(thickness_km: Fixed, density_kg_per_m3: Fixed) -> Option<Fixed> {
+    if thickness_km < Fixed::ZERO || density_kg_per_m3 <= Fixed::ZERO {
+        return None;
+    }
+    thickness_km.checked_mul(density_kg_per_m3)
+}
+
+/// The inverse of [`areal_mass_mg_per_m2`]: the THICKNESS (kilometres) an areal mass of `areal_mass_mg_per_m2`
+/// megagrams per square metre stands as at `density_kg_per_m3`. This is the crust stock's geometric readout, the
+/// one place [`DeepTimeState::crust_thickness_km`] comes from, so the isostasy floats a thickness that is a
+/// function of the ledger rather than a parallel accumulation of it. `None` on a non-positive density or an
+/// overflow.
+pub fn thickness_km_from_areal_mass(
+    areal_mass_mg_per_m2: Fixed,
+    density_kg_per_m3: Fixed,
+) -> Option<Fixed> {
+    if density_kg_per_m3 <= Fixed::ZERO {
+        return None;
+    }
+    areal_mass_mg_per_m2.checked_div(density_kg_per_m3)
+}
+
 /// The per-world melt-and-crust parameters the deep-time volcanism reads: the seam-6 adiabatic-melt-column
 /// closure's inputs (the solidus surface value and slope, the adiabat slope, the melt productivity, the source
 /// density, and gravity), plus the mantle PROCESSING TIME over which one melt column's worth of crust is
@@ -306,6 +398,23 @@ pub struct MeltParams {
     pub productivity_per_gpa: Fixed,
     /// The melt source density (kg per cubic metre).
     pub source_density_kg_per_m3: Fixed,
+    /// The EMPLACED-CRUST density (kg per cubic metre), the density the extracted melt stands as crust at, and so
+    /// the ledger's own conversion: the mass the transaction debits from the source is the mass the crust HAS
+    /// (`thickness * this`), and the thickness the isostasy floats is the crust stock divided by it again
+    /// ([`areal_mass_mg_per_m2`], [`thickness_km_from_areal_mass`]). It is the SAME derived crust density the
+    /// Airy flotation reads ([`SupportBoundParams`] carries it in grams per cubic centimetre), and a caller feeds
+    /// both from one derived home, as it already feeds one derived gravity into this struct, the crater target,
+    /// and the ballistic forces.
+    ///
+    /// A NAMED INCONSISTENCY it inherits rather than creates, recorded because the ledger is the first thing that
+    /// makes it visible: [`adiabatic_melt_column`] forms its crust thickness as a melt VOLUME per unit area
+    /// integrated at the SOURCE density (`dz = dP / (rho_source * g)`), and everything downstream then floats
+    /// that same thickness at the CRUST density. So the mass this ledger moves is the mass the crust has and the
+    /// mass the isostasy weighs, and it differs from the melt mass the melt column's own volume integral implies
+    /// by the density ratio (about 14 percent for a mafic crust off a peridotite source). Reconciling the two is
+    /// a change to the melt closure in `civsim_physics::melting`, not to the ledger, so it is flagged here rather
+    /// than settled by picking whichever density made the numbers agree.
+    pub crust_density_kg_per_m3: Fixed,
     /// Gravity (m per second squared).
     pub gravity_m_per_s2: Fixed,
     /// The mantle processing time (megayears), the overturn timescale one melt column's crust is delivered over.
@@ -376,7 +485,18 @@ pub fn crust_growth(
 /// the BOUNDED melt history, hot columns building thicker crust (the provinces, and the derived thickness that
 /// retires the 30 km fixture) without an unbounded runaway. Returns the next state. Deterministic and
 /// worker-invariant (a pure per-column map in index order). `None` if `column_params` is empty (nothing to step
-/// against), fail-loud rather than a silent no-op.
+/// against), or if the ledger's stocks are not one entry per column (a caller mismatch the ledger cannot balance
+/// over), fail-loud rather than a silent no-op.
+///
+/// THE MELT TRANSACTION. The crust increment is no longer an addition to a thickness: it is a TRANSFER between
+/// the two stocks the state now carries. The tick converts the increment [`crust_growth`] asks for into an areal
+/// mass at the emplaced-crust density, CAPS it at what the column's source stock still holds (the finite source
+/// made real, where the equilibrium saturation alone was a description with no reservoir behind it), then debits
+/// the source and credits the crust by ONE AND THE SAME fixed-point value, so
+/// `crust_areal_mass[i] + source_areal_mass[i]` is invariant to the bit. The thickness is then re-read off the
+/// crust stock ([`thickness_km_from_areal_mass`]) rather than accumulated beside it, so the geometry the isostasy
+/// floats stays a function of the ledger and the two cannot drift apart. A conversion that overflows or a column
+/// with no source left HOLDS that column (no transfer, no crust), never a fabricated one.
 pub fn step_deep_time(
     state: &DeepTimeState,
     column_params: &[SiColumnParams],
@@ -384,6 +504,15 @@ pub fn step_deep_time(
     dt_myr: Fixed,
 ) -> Option<DeepTimeState> {
     if column_params.is_empty() {
+        return None;
+    }
+    // The ledger must cover every column, else the transaction has no stock to balance over for some cell. A
+    // caller mismatch is refused loud rather than partly-transacted.
+    let n = state.columns.len();
+    if state.crust_thickness_km.len() != n
+        || state.crust_areal_mass.len() != n
+        || state.source_areal_mass.len() != n
+    {
         return None;
     }
     let per_column = column_params.len() == state.columns.len();
@@ -403,19 +532,49 @@ pub fn step_deep_time(
             convection_step_si(col, p).unwrap_or(*col)
         })
         .collect();
-    // The volcanism: each column's stepped interior temperature delivers crust over the tick, relaxing the crust
-    // it has already built toward the equilibrium the column supports (a made crust stays and does not un-form when
-    // the mantle cools, and the finite source saturates it at the equilibrium). The bounded thickness is the
-    // derived crust, laterally varying by each column's own melt history.
-    let crust_thickness_km: Vec<Fixed> = state
-        .crust_thickness_km
-        .iter()
-        .zip(columns.iter())
-        .map(|(prev, col)| prev.saturating_add(crust_growth(col.temperature, *prev, melt, dt_myr)))
-        .collect();
+    // THE VOLCANISM, AS A TRANSACTION. Each column's stepped interior temperature asks for a crust increment
+    // (relaxing toward the equilibrium the column supports, so a made crust stays and does not un-form when the
+    // mantle cools). That increment is then PAID FOR out of the column's own source stock: converted to an areal
+    // mass, capped at what the source still holds, and moved. Mass is what conserves; the thickness follows.
+    let mut crust_thickness_km = Vec::with_capacity(n);
+    let mut crust_areal_mass = Vec::with_capacity(n);
+    let mut source_areal_mass = Vec::with_capacity(n);
+    for (i, col) in columns.iter().enumerate() {
+        let prev_thickness = state.crust_thickness_km[i];
+        let prev_crust = state.crust_areal_mass[i];
+        let prev_source = state.source_areal_mass[i];
+        // What the melt column asks for this tick, in thickness, then in the mass that thickness costs.
+        let asked_km = crust_growth(col.temperature, prev_thickness, melt, dt_myr);
+        let asked_mass = areal_mass_mg_per_m2(asked_km, melt.crust_density_kg_per_m3);
+        // What the source can pay. A source already spent pays nothing, which is the finite-source limit as a
+        // reservoir rather than as a clamp. An unrepresentable conversion HOLDS the column at no transfer.
+        let moved = match asked_mass {
+            Some(m) if m > Fixed::ZERO && prev_source > Fixed::ZERO => m.min(prev_source),
+            _ => Fixed::ZERO,
+        };
+        // THE TRANSFER, the same value out of one stock and into the other, so the pair's sum is invariant to the
+        // bit. `checked_*` on both legs and a HOLD on either failing keeps the two sides from ever moving apart:
+        // a credit that overflowed while its debit landed would be mass created out of a rounding boundary.
+        let (next_crust, next_source) = match (
+            prev_crust.checked_add(moved),
+            prev_source.checked_sub(moved),
+        ) {
+            (Some(c), Some(s)) => (c, s),
+            _ => (prev_crust, prev_source),
+        };
+        // The thickness is the crust stock's READOUT, re-read each tick rather than accumulated beside it. A
+        // refusal holds the previous thickness rather than reporting a crust the stock does not back.
+        let next_thickness = thickness_km_from_areal_mass(next_crust, melt.crust_density_kg_per_m3)
+            .unwrap_or(prev_thickness);
+        crust_thickness_km.push(next_thickness);
+        crust_areal_mass.push(next_crust);
+        source_areal_mass.push(next_source);
+    }
     Some(DeepTimeState {
         columns,
         crust_thickness_km,
+        crust_areal_mass,
+        source_areal_mass,
         elapsed_myr: state.elapsed_myr.saturating_add(dt_myr),
         // The bombardment is a SEPARATE step term ([`bombard_tick`]), applied by the caller after this one, so the
         // interior tick carries the impact record forward unchanged and stays byte-identical for a run that does
@@ -683,10 +842,21 @@ const PA_PER_GPA: Fixed = Fixed::from_int(1_000_000_000);
 /// world, is a different set of numbers through the SAME wiring, never a new code path (admit-the-alien).
 #[derive(Clone, Copy, Debug)]
 pub struct SupportBoundParams {
-    /// The DERIVED crust density (grams per cubic centimetre): the load density `rho` in the support bound AND
-    /// the Airy flotation density the relief floats at, one value, never authored here.
+    /// The DERIVED crust density (KILOGRAMS PER CUBIC METRE): the load density `rho` in the support bound, the
+    /// Airy flotation density the relief floats at, and the density this collapse converts its thickness cap into
+    /// a MASS cap through, one value, never authored here.
+    ///
+    /// It was in grams per cubic centimetre until the ledger landed, and the unit moved for a reason worth
+    /// recording: the melt transaction converts through the same physical density in kilograms per cubic metre
+    /// ([`MeltParams::crust_density_kg_per_m3`]), and a caller feeding `2.9` here and `2900` there was feeding
+    /// two numbers that are equal in physics and NOT equal in fixed point, because `from_ratio(29, 10)` times a
+    /// thousand is not exactly `2900`. The crust's thickness would then have been its stock's readout at one
+    /// density after growth and at a slightly different one after a collapse, which is the drift a ledger exists
+    /// to make impossible. On one unit there is one number. The Airy law is unaffected either way: it reads the
+    /// dimensionless ratio `(rho_m - rho_c) / rho_m`, so the unit cancels out of it.
     pub crust_density: Fixed,
-    /// The DERIVED mantle density (grams per cubic centimetre) the crust floats on, the Airy reference.
+    /// The DERIVED mantle density (kilograms per cubic metre) the crust floats on, the Airy reference, in the
+    /// same unit as the crust density above and for the same reason.
     pub mantle_density: Fixed,
     /// The crust's OWN DERIVED shear modulus `G` (gigapascals), read from the crust's composition upstream (the
     /// ionic/metal bulk-modulus tier times the reserved-with-basis Pugh ratio). The operative yield strength
@@ -726,11 +896,19 @@ fn derived_crust_yield_pa(shear_modulus_gpa: Fixed, knockdown: Fixed) -> Option<
 /// literal), `rho` the derived crust density, and `g` the derived surface gravity. Because the Airy elevation is
 /// linear in the crust thickness (`elevation = k * thickness`, `k = (rho_m - rho_c) / rho_m` the buoyant
 /// fraction), the bound maps to a single THICKNESS CAP `T_cap = (bound + datum) / k`: a column thicker than the
-/// cap holds unsupportable topography. The excess thickness of every over-cap column FLOWS to the columns below
-/// the cap (the accommodation space), apportioned by each low's available room, through the built conservative
+/// cap holds unsupportable topography. The excess of every over-cap column FLOWS to the columns below the cap
+/// (the accommodation space), apportioned by each low's available room, through the built conservative
 /// redistribution ([`redistribute`]), so the crust bit-sum is invariant (mass is moved, never created or lost),
-/// the datum is unchanged (the mean thickness is conserved), and every column ends at or below the cap, so all
-/// relief ends at or below the bound.
+/// the datum is unchanged (the mean is conserved), and every column ends at or below the cap, so all relief ends
+/// at or below the bound.
+///
+/// IT MOVES THE LEDGER, not the thickness. The conserved quantity is [`DeepTimeState::crust_areal_mass`], so the
+/// thickness cap is converted to a MASS cap at the emplaced-crust density and the redistribution runs on the
+/// stock; each moved column's thickness is then re-read off its moved stock
+/// ([`thickness_km_from_areal_mass`]). Running it on the thickness instead would leave a column holding less
+/// topography and the same mass, which is the incoherence a ledger exists to make impossible. The source stock is
+/// untouched: this is a LATERAL transfer of crust that already exists, never an extraction or a return, so the
+/// ledger's crust-plus-source total is invariant across it as well.
 ///
 /// This is the INSTANTANEOUS-COLLAPSE idealization: within the tick the whole over-bound excess flows to the
 /// bound. A viscous flow RATE (a partial collapse per tick) would be a reserved value, so the instantaneous limit
@@ -744,7 +922,9 @@ fn derived_crust_yield_pa(shear_modulus_gpa: Fixed, knockdown: Fixed) -> Option<
 /// Deterministic and worker-invariant (a pure function of the state and the parameters).
 pub fn relax_to_support_bound(state: &DeepTimeState, params: &SupportBoundParams) -> DeepTimeState {
     let n = state.crust_thickness_km.len();
-    if n == 0 {
+    // The collapse moves the LEDGER, so it needs a crust stock covering every column; a mismatch is left
+    // unchanged rather than partly moved.
+    if n == 0 || state.crust_areal_mass.len() != n {
         return state.clone();
     }
     // The Airy buoyant fraction k = (rho_m - rho_c) / rho_m, the elevation a unit of crust thickness stands at.
@@ -768,15 +948,14 @@ pub fn relax_to_support_bound(state: &DeepTimeState, params: &SupportBoundParams
             Some(s) => s,
             None => return state.clone(),
         };
-    // The support bound sigma_y / (rho * g): rho in kg/m^3 (the crust density in g/cm^3 times 1000), g in m/s^2,
-    // the bound in metres, converted to the kilometres the crust thickness and relief carry.
+    // The support bound sigma_y / (rho * g): rho already in kg/m^3, g in m/s^2, the bound in metres, converted
+    // to the kilometres the crust thickness and relief carry.
     if params.gravity_m_per_s2 <= Fixed::ZERO {
         return state.clone();
     }
     let bound_km = match params
         .crust_density
-        .checked_mul(Fixed::from_int(1000))
-        .and_then(|rho_kg| rho_kg.checked_mul(params.gravity_m_per_s2))
+        .checked_mul(params.gravity_m_per_s2)
         .filter(|rho_g| *rho_g > Fixed::ZERO)
         .and_then(|rho_g| sigma_y_pa.checked_div(rho_g))
         .and_then(|bound_m| bound_m.checked_div(Fixed::from_int(1000)))
@@ -808,13 +987,23 @@ pub fn relax_to_support_bound(state: &DeepTimeState, params: &SupportBoundParams
         None => return state.clone(),
     };
 
+    // THE CAP IN MASS. The conserved quantity is the crust stock, so the thickness cap is converted once to the
+    // areal mass a column of that thickness carries, and the whole redistribution runs on the stock. The density
+    // is read straight off the params, in the same kilograms per cubic metre the melt transaction emplaces at, so
+    // the two conversions are the same number and not two roundings of one.
+    let rho_kg = params.crust_density;
+    let m_cap = match areal_mass_mg_per_m2(t_cap, rho_kg) {
+        Some(m) => m,
+        None => return state.clone(),
+    };
+
     // The destinations: every under-cap column, weighted by its available room (the deficit to the cap) in raw
     // field bits, so the shed crust flows preferentially into the deepest lows and no receiver overshoots the cap
     // (each receiver's share of the excess is at most its room, since the total excess is strictly below the
     // total room for a mean-centred relief field). The weight ratios are what redistribute reads.
     let mut dests: Vec<Weighted> = Vec::new();
-    for (i, t) in state.crust_thickness_km.iter().enumerate() {
-        if let Some(deficit) = t_cap.checked_sub(*t) {
+    for (i, m) in state.crust_areal_mass.iter().enumerate() {
+        if let Some(deficit) = m_cap.checked_sub(*m) {
             let bits = deficit.to_bits();
             if deficit > Fixed::ZERO && bits > 0 {
                 dests.push(Weighted {
@@ -824,11 +1013,11 @@ pub fn relax_to_support_bound(state: &DeepTimeState, params: &SupportBoundParams
             }
         }
     }
-    // The sources: every over-cap column sheds its excess thickness (in raw field bits) across the shared
+    // The sources: every over-cap column sheds its excess crust MASS (in raw field bits) across the shared
     // accommodation-space destinations. INSTANTANEOUS collapse: the whole excess moves this tick.
     let mut moves: Vec<Redistribution> = Vec::new();
-    for (i, t) in state.crust_thickness_km.iter().enumerate() {
-        if let Some(excess) = t.checked_sub(t_cap) {
+    for (i, m) in state.crust_areal_mass.iter().enumerate() {
+        if let Some(excess) = m.checked_sub(m_cap) {
             let bits = excess.to_bits();
             if excess > Fixed::ZERO && bits > 0 {
                 moves.push(Redistribution {
@@ -853,12 +1042,20 @@ pub fn relax_to_support_bound(state: &DeepTimeState, params: &SupportBoundParams
     let mut next = state.clone();
     for (i, d) in delta.iter().enumerate() {
         if *d != 0 {
-            // The bit-space move: the crust thickness is nudged by the conservative delta in its own raw bits, the
+            // The bit-space move: the crust STOCK is nudged by the conservative delta in its own raw bits, the
             // same bit-arithmetic redistribution the bombardment applies. The delta sums to zero, so the crust
-            // bit-sum is invariant (mass conserved to the bit); the magnitudes are far inside i64, so the
-            // saturating add never saturates and the conservation is exact.
-            next.crust_thickness_km[i] =
-                Fixed::from_bits(next.crust_thickness_km[i].to_bits().saturating_add(*d));
+            // mass bit-sum is invariant (mass moved, never created or lost). The saturating add cannot saturate
+            // here, and the reason is the cap rather than the magnitudes: every receiver's share is at most its
+            // own room to the cap and every source only sheds, so no column leaves the range `[0, m_cap]`, whose
+            // upper end is a representable `Fixed` by construction. The conservation is therefore exact.
+            next.crust_areal_mass[i] =
+                Fixed::from_bits(next.crust_areal_mass[i].to_bits().saturating_add(*d));
+            // And the geometry follows the ledger: the thickness is re-read off the moved stock, never moved
+            // independently of it. A refusal holds the previous thickness rather than reporting relief the stock
+            // does not back.
+            if let Some(t) = thickness_km_from_areal_mass(next.crust_areal_mass[i], rho_kg) {
+                next.crust_thickness_km[i] = t;
+            }
         }
     }
     next
@@ -1100,6 +1297,33 @@ pub fn province_column_params(
 mod tests {
     use super::*;
 
+    /// The emplaced-crust density (kg per cubic metre) for the scaffolds, a representative mafic crust. It lives
+    /// ONCE here because the melt transaction and the support-bound collapse both convert through it (in kg/m^3
+    /// and in g/cm^3 respectively), and a scaffold that stated it twice could pass while disagreeing with itself
+    /// about what a kilometre of crust weighs, which is the one thing the ledger exists to make impossible.
+    const CRUST_DENSITY_KG_M3: i32 = 2900;
+    /// The mantle density (kg per cubic metre) the crust floats on and the melt source is drawn from.
+    const MANTLE_DENSITY_KG_M3: i32 = 3300;
+    /// The convecting-mantle depth (kilometres) the scaffold's source stock is derived over, Mars-class.
+    const CONVECTING_DEPTH_KM: i32 = 1500;
+
+    /// The scaffold's initial SOURCE STOCK, through the ledger's own unit bridge: a Mars-class convecting mantle
+    /// (1500 km at 3300 kg per cubic metre) is `4.95e6` megagrams per square metre. Derived here rather than
+    /// written down, so the scaffold starts where the caller's derived interior structure would put it.
+    fn source_stock() -> Fixed {
+        areal_mass_mg_per_m2(
+            Fixed::from_int(CONVECTING_DEPTH_KM),
+            Fixed::from_int(MANTLE_DENSITY_KG_M3),
+        )
+        .expect("a Mars-class mantle column is representable in megagrams per square metre")
+    }
+
+    /// A fresh planet for the scaffolds: `n` uniform columns at `temperature_k`, no crust, and the derived source
+    /// stock above under every column.
+    fn young_state(n: usize, temperature_k: i32) -> DeepTimeState {
+        DeepTimeState::young(n, Fixed::from_int(temperature_k), source_stock())
+    }
+
     /// A representative DERIVED thermal cluster for the deep-time scaffolds, at the magnitudes a
     /// Mars-class forsterite column actually derives. Constructed rather than derived because these tests
     /// vary ONE input (the radiogenic budget) and should not carry a full assemblage minimization.
@@ -1124,14 +1348,14 @@ mod tests {
     /// seeded draw (the same seed through the same measure realizes the same world).
     #[test]
     fn the_realization_digest_reproduces_on_an_identical_state() {
-        let a = DeepTimeState::young(6, Fixed::from_int(1600));
-        let b = DeepTimeState::young(6, Fixed::from_int(1600));
+        let a = young_state(6, 1600);
+        let b = young_state(6, 1600);
         assert_eq!(
             a.realization_digest(),
             b.realization_digest(),
             "an identical realized state must fold to an identical receipt"
         );
-        let other = DeepTimeState::young(6, Fixed::from_int(1601));
+        let other = young_state(6, 1601);
         assert_ne!(
             a.realization_digest(),
             other.realization_digest(),
@@ -1145,7 +1369,7 @@ mod tests {
     /// being folded into the digest fails here, which is the point.
     #[test]
     fn the_realization_digest_covers_every_field_it_claims_to() {
-        let base = DeepTimeState::young(4, Fixed::from_int(1600));
+        let base = young_state(4, 1600);
         let d0 = base.realization_digest();
 
         let mut s = base.clone();
@@ -1209,6 +1433,22 @@ mod tests {
             s.realization_digest(),
             "the crater rows are not covered"
         );
+
+        let mut s = base.clone();
+        s.crust_areal_mass[2] = Fixed::from_int(87_000);
+        assert_ne!(
+            d0,
+            s.realization_digest(),
+            "the crust areal-mass stock is not covered"
+        );
+
+        let mut s = base.clone();
+        s.source_areal_mass[1] = Fixed::from_int(1_000_000);
+        assert_ne!(
+            d0,
+            s.realization_digest(),
+            "the source areal-mass stock is not covered"
+        );
     }
 
     /// The vectors are POSITIONAL, one entry per lateral cell, so the receipt must distinguish two worlds that
@@ -1216,8 +1456,8 @@ mod tests {
     /// call a hot pole and a hot equator the same planet.
     #[test]
     fn the_realization_digest_is_positional_not_a_multiset() {
-        let mut a = DeepTimeState::young(4, Fixed::from_int(1600));
-        let mut b = DeepTimeState::young(4, Fixed::from_int(1600));
+        let mut a = young_state(4, 1600);
+        let mut b = young_state(4, 1600);
         a.crust_thickness_km[0] = Fixed::from_int(40);
         b.crust_thickness_km[3] = Fixed::from_int(40);
         assert_ne!(
@@ -1276,7 +1516,8 @@ mod tests {
             solidus_slope_k_per_gpa: Fixed::from_int(130),
             adiabat_slope_k_per_gpa: Fixed::from_ratio(155, 10),
             productivity_per_gpa: Fixed::from_ratio(12, 100),
-            source_density_kg_per_m3: Fixed::from_int(3300),
+            source_density_kg_per_m3: Fixed::from_int(MANTLE_DENSITY_KG_M3),
+            crust_density_kg_per_m3: Fixed::from_int(CRUST_DENSITY_KG_M3),
             gravity_m_per_s2: Fixed::from_int(10),
             processing_time_myr: Fixed::from_int(100),
         }
@@ -1400,7 +1641,7 @@ mod tests {
         // and its luminosity climbs, the drive that warms the surface over the run.
         let star = aging_params(Fixed::ONE, Fixed::ONE);
         let params = [mantle_params(5)];
-        let mut state = DeepTimeState::young(2, Fixed::from_int(2000));
+        let mut state = young_state(2, 2000);
         let l0 = state
             .stellar_luminosity_ratio(&star)
             .expect("on the main sequence at the start");
@@ -1434,7 +1675,7 @@ mod tests {
         // The per-run start age: a run beginning mid-life carries the star's prior age, so at the same elapsed time
         // its star is further up the brightening curve than a run around a zero-age star.
         let star = aging_params(Fixed::ONE, Fixed::ONE);
-        let fresh = DeepTimeState::young(1, Fixed::from_int(1800));
+        let fresh = young_state(1, 1800);
         let aged = fresh.clone().with_star_start_age(Fixed::from_int(5000));
         assert_eq!(
             aged.star_age_myr(),
@@ -1473,7 +1714,7 @@ mod tests {
     fn the_interior_evolves_over_deep_time() {
         // A hot young mantle relaxes toward its conductive steady state over successive ticks: the temperature
         // MOVES (the world is not static), and the clock accumulates.
-        let start = DeepTimeState::young(4, Fixed::from_int(2000));
+        let start = young_state(4, 2000);
         let params = [mantle_params(5)];
         let mut state = start.clone();
         for _ in 0..5 {
@@ -1500,7 +1741,7 @@ mod tests {
         // The provinces: two columns start identical but carry different radiogenic budgets, so after deep time
         // they hold different temperatures. The lateral variation is the WRITTEN record of each column's history,
         // never an authored map (the field started uniform).
-        let start = DeepTimeState::young(2, Fixed::from_int(2000));
+        let start = young_state(2, 2000);
         assert_eq!(
             start.columns[0], start.columns[1],
             "a fresh planet starts laterally uniform"
@@ -1528,7 +1769,7 @@ mod tests {
         // The volcanism: a hot mantle builds crust over deep time (the accumulated derived thickness that retires
         // the 30 km fixture), and a hotter, more-radiogenic column builds THICKER crust than its cooler neighbour,
         // so the crust field is the written record of the interior's melt history, the provinces in relief.
-        let start = DeepTimeState::young(2, Fixed::from_int(2000));
+        let start = young_state(2, 2000);
         assert_eq!(
             start.crust_thickness_km[0],
             Fixed::ZERO,
@@ -1630,9 +1871,218 @@ mod tests {
         );
     }
 
+    // --- the mass ledger slice ---
+
+    #[test]
+    fn the_areal_mass_unit_bridge_round_trips_and_the_ceiling_it_was_chosen_for_is_real() {
+        // THE UNIT, computed rather than asserted from memory. A kilometre of crust at 2900 kg per cubic metre
+        // carries 2900 megagrams per square metre, because the 1000 m/km scaling the thickness up and the
+        // 1000 kg/Mg scaling the mass down cancel exactly.
+        let rho = Fixed::from_int(CRUST_DENSITY_KG_M3);
+        let thirty_km = Fixed::from_int(30);
+        let mass = areal_mass_mg_per_m2(thirty_km, rho).expect("representable");
+        let expected = 30.0 * f64::from(CRUST_DENSITY_KG_M3);
+        assert!(
+            (mass.to_f64_lossy() - expected).abs() < 1e-6,
+            "30 km of crust at {CRUST_DENSITY_KG_M3} kg/m^3 is {expected} Mg/m^2, got {}",
+            mass.to_f64_lossy()
+        );
+        // And it round-trips exactly at these magnitudes, which is what lets the thickness be the stock's readout
+        // rather than a second accumulator.
+        assert_eq!(
+            thickness_km_from_areal_mass(mass, rho),
+            Some(thirty_km),
+            "the areal mass reads back as the thickness that made it"
+        );
+
+        // THE CEILING THE UNIT WAS CHOSEN FOR, measured against the real Fixed::MAX rather than recalled. The
+        // scaffold's own convecting mantle in kilograms per square metre is past the fixed-point ceiling, so the
+        // source stock could not be held in SI at all; in megagrams per square metre it fits with room to spare.
+        let kg_per_m2 = f64::from(CONVECTING_DEPTH_KM) * 1000.0 * f64::from(MANTLE_DENSITY_KG_M3);
+        let ceiling = Fixed::MAX.to_f64_lossy();
+        assert!(
+            kg_per_m2 > ceiling,
+            "the premise for the unit choice must hold: {kg_per_m2} kg/m^2 should exceed the {ceiling} ceiling"
+        );
+        let stock = source_stock();
+        assert!(
+            stock.to_f64_lossy() < ceiling / 100.0,
+            "and the same column in Mg/m^2 ({}) sits far inside it",
+            stock.to_f64_lossy()
+        );
+        // A degenerate layer refuses rather than returning a fabricated mass.
+        assert!(areal_mass_mg_per_m2(thirty_km, Fixed::ZERO).is_none());
+        assert!(thickness_km_from_areal_mass(mass, Fixed::ZERO).is_none());
+    }
+
+    #[test]
+    fn the_melt_transaction_conserves_the_ledger_to_the_bit() {
+        // THE INVARIANT. Crust is no longer a thickness that appears: every megagram of it was debited from the
+        // column's own source, so `crust + source` is unchanged, EXACTLY, in raw fixed-point bits, at every
+        // column and at every tick of a long run. This is the property that makes recycling representable: there
+        // are two stocks, and mass only ever moves between them.
+        let n = 6usize;
+        let start = young_state(n, 2000);
+        let params = [
+            mantle_params(5),
+            mantle_params(120),
+            mantle_params(300),
+            mantle_params(600),
+            mantle_params(50),
+            mantle_params(900),
+        ];
+        let totals_before: Vec<i128> = (0..n)
+            .map(|i| {
+                start.crust_areal_mass[i].to_bits() as i128
+                    + start.source_areal_mass[i].to_bits() as i128
+            })
+            .collect();
+        let mut state = start.clone();
+        for tick in 0..40 {
+            state = step_deep_time(&state, &params, &melt_params(), Fixed::from_int(50))
+                .expect("steps");
+            for (i, opening) in totals_before.iter().enumerate() {
+                let now = state.crust_areal_mass[i].to_bits() as i128
+                    + state.source_areal_mass[i].to_bits() as i128;
+                assert_eq!(
+                    now, *opening,
+                    "column {i}'s ledger moved at tick {tick}: crust plus source must be invariant to the bit"
+                );
+                assert!(
+                    state.source_areal_mass[i] >= Fixed::ZERO,
+                    "column {i} spent more source than it held at tick {tick}"
+                );
+            }
+        }
+        // The run must have MOVED mass, else the invariant above is the invariant of a field that did nothing.
+        assert!(
+            state.crust_areal_mass.iter().any(|m| *m > Fixed::ZERO),
+            "the transaction has to have moved mass for its conservation to mean anything"
+        );
+        assert!(
+            state
+                .source_areal_mass
+                .iter()
+                .zip(start.source_areal_mass.iter())
+                .any(|(now, before)| now < before),
+            "and the source has to have paid for it"
+        );
+    }
+
+    #[test]
+    fn the_thickness_is_the_crust_stocks_readout_not_a_second_accumulator() {
+        // The crust exists ONCE, as a mass. The thickness the isostasy floats is that mass divided by the
+        // emplaced-crust density, re-read wherever the stock moves, so the two representations cannot drift
+        // apart tick by tick. This is a structural gate: it fails the moment a path moves the thickness without
+        // moving the stock behind it.
+        let melt = melt_params();
+        let params = [mantle_params(5), mantle_params(400), mantle_params(900)];
+        let mut state = young_state(3, 2000);
+        for _ in 0..30 {
+            state = step_deep_time(&state, &params, &melt, Fixed::from_int(50)).expect("steps");
+        }
+        for (i, m) in state.crust_areal_mass.iter().enumerate() {
+            assert_eq!(
+                state.crust_thickness_km[i],
+                thickness_km_from_areal_mass(*m, melt.crust_density_kg_per_m3).expect("reads back"),
+                "column {i}'s thickness is not the readout of its crust stock"
+            );
+        }
+        assert!(
+            state.crust_thickness_km.iter().any(|t| *t > Fixed::ZERO),
+            "and the run built crust, so the identity is over a field that moved"
+        );
+    }
+
+    #[test]
+    fn a_spent_source_stops_the_crust_and_never_goes_negative() {
+        // THE FINITE SOURCE, as a reservoir rather than as a clamp. Given a source stock far smaller than the
+        // crust the column's melt column would support, the transaction can only pay out what the source holds:
+        // the source empties exactly, the crust holds exactly what the source lost, and neither stock goes
+        // negative or is topped up from nowhere. Before the ledger this limit was unrepresentable, because the
+        // saturation was a comparison against an equilibrium and nothing was being spent.
+        let melt = melt_params();
+        // A deliberately tiny source: one kilometre of crust's worth of mass, against a hot column whose melt
+        // column supports far more.
+        let tiny = areal_mass_mg_per_m2(Fixed::ONE, melt.crust_density_kg_per_m3).expect("small");
+        let mut state = DeepTimeState::young(1, Fixed::from_int(2000), tiny);
+        let params = [mantle_params(900)];
+        for _ in 0..60 {
+            state = step_deep_time(&state, &params, &melt, Fixed::from_int(50)).expect("steps");
+            assert!(
+                state.source_areal_mass[0] >= Fixed::ZERO,
+                "the source never goes negative"
+            );
+            assert_eq!(
+                state.crust_areal_mass[0].to_bits() as i128
+                    + state.source_areal_mass[0].to_bits() as i128,
+                tiny.to_bits() as i128,
+                "and the pair still sums to what the column began with"
+            );
+        }
+        assert_eq!(
+            state.source_areal_mass[0],
+            Fixed::ZERO,
+            "a hot column against a tiny source spends it to exactly zero"
+        );
+        assert_eq!(
+            state.crust_areal_mass[0], tiny,
+            "and the crust holds exactly the mass the source lost, no more"
+        );
+        // The crust it stands as is the one kilometre that mass buys, which is the cap BITING: the melt column
+        // for this column supports far more than a kilometre, so without the source stock it would have grown on.
+        let unbounded_equilibrium = adiabatic_melt_column(
+            state.columns[0].temperature,
+            melt.solidus_surface_k,
+            melt.solidus_slope_k_per_gpa,
+            melt.adiabat_slope_k_per_gpa,
+            melt.productivity_per_gpa,
+            melt.source_density_kg_per_m3,
+            melt.gravity_m_per_s2,
+        )
+        .expect("a super-solidus column has a melt column")
+        .crust_thickness_km;
+        assert!(
+            unbounded_equilibrium > state.crust_thickness_km[0],
+            "the melt column supports {} km, so the {} km the source could pay for is the source binding",
+            unbounded_equilibrium.to_f64_lossy(),
+            state.crust_thickness_km[0].to_f64_lossy()
+        );
+    }
+
+    #[test]
+    fn a_ledger_that_does_not_cover_every_column_fails_loud() {
+        // The transaction needs a stock per column to balance over. A caller whose ledger is short is refused
+        // rather than partly transacted, which would be mass appearing in the columns that had no stock.
+        let mut state = young_state(4, 1800);
+        state.source_areal_mass.pop();
+        assert!(
+            step_deep_time(
+                &state,
+                &[mantle_params(50)],
+                &melt_params(),
+                Fixed::from_int(50)
+            )
+            .is_none(),
+            "a short source stock fails loud"
+        );
+        let mut state = young_state(4, 1800);
+        state.crust_areal_mass.pop();
+        assert!(
+            step_deep_time(
+                &state,
+                &[mantle_params(50)],
+                &melt_params(),
+                Fixed::from_int(50)
+            )
+            .is_none(),
+            "a short crust stock fails loud"
+        );
+    }
+
     #[test]
     fn the_tick_is_deterministic() {
-        let start = DeepTimeState::young(6, Fixed::from_int(1800));
+        let start = young_state(6, 1800);
         let params = [mantle_params(50)];
         let a = step_deep_time(&start, &params, &melt_params(), Fixed::from_int(100)).expect("a");
         let b = step_deep_time(&start, &params, &melt_params(), Fixed::from_int(100)).expect("b");
@@ -1644,7 +2094,7 @@ mod tests {
 
     #[test]
     fn an_empty_parameter_set_fails_loud() {
-        let start = DeepTimeState::young(3, Fixed::from_int(1500));
+        let start = young_state(3, 1500);
         assert!(
             step_deep_time(&start, &[], &melt_params(), Fixed::from_int(100)).is_none(),
             "no parameters to step against fails loud, never a silent no-op"
@@ -1815,7 +2265,7 @@ mod tests {
         let n = w * h;
         let flux = flux_params(30, 100, 64);
         let params = [mantle_params(50)];
-        let mut state = DeepTimeState::young(n, Fixed::from_int(2000));
+        let mut state = young_state(n, 2000);
         for tick in 0..20u64 {
             state = step_deep_time(&state, &params, &melt_params(), Fixed::from_int(50))
                 .expect("steps");
@@ -1856,7 +2306,7 @@ mod tests {
         // Cap high so it does not bind; the decline is the accretion tail's own, tau = 100 Myr over a 1 Gyr run.
         let flux = flux_params(24, 100, 100);
         let params = [mantle_params(50)];
-        let mut state = DeepTimeState::young(n, Fixed::from_int(1600));
+        let mut state = young_state(n, 1600);
         let (mut early, mut late) = (0u64, 0u64);
         for tick in 0..20u64 {
             let before = state.impact_count;
@@ -1884,7 +2334,7 @@ mod tests {
         let n = w * h;
         let flux = flux_params(30, 100, 64);
         let params = [mantle_params(50)];
-        let base = DeepTimeState::young(n, Fixed::from_int(1800));
+        let base = young_state(n, 1800);
         let run = |seed: u64| {
             let mut s = base.clone();
             for tick in 0..10u64 {
@@ -1918,7 +2368,7 @@ mod tests {
         let n = w * h;
         let flux = flux_params(30, 100, 64);
         let params = [mantle_params(50)];
-        let base = DeepTimeState::young(n, Fixed::from_int(1800));
+        let base = young_state(n, 1800);
         // Without bombardment: pure interior-and-volcanism evolution.
         let mut quiet = base.clone();
         for _ in 0..10 {
@@ -1963,7 +2413,7 @@ mod tests {
         let n = w * h;
         let flux = flux_params(1000, 100, 5); // a huge reservoir against a tiny per-tick cap
         let params = [mantle_params(50)];
-        let mut state = DeepTimeState::young(n, Fixed::from_int(1800));
+        let mut state = young_state(n, 1800);
         state =
             step_deep_time(&state, &params, &melt_params(), Fixed::from_int(50)).expect("steps");
         let struck = bombard_tick(&state, w, h, &flux, 0x1, 0, Fixed::from_int(50));
@@ -1997,7 +2447,7 @@ mod tests {
         let run = |cell_size: Fixed| -> DeepTimeState {
             let mut flux = flux_params(30, 100, 64);
             flux.forces.cell_size = cell_size;
-            let mut state = DeepTimeState::young(n, Fixed::from_int(1800));
+            let mut state = young_state(n, 1800);
             for tick in 0..10u64 {
                 state = step_deep_time(&state, &params, &melt_params(), Fixed::from_int(50))
                     .expect("steps");
@@ -2054,12 +2504,33 @@ mod tests {
     // order the ~8 to 10 km class-grade value the reserved 1e8 gave, now from the crust's OWN strength.
     fn support_bound_params() -> SupportBoundParams {
         SupportBoundParams {
-            crust_density: Fixed::from_ratio(29, 10), // 2.9 g/cm^3, mafic crust
-            mantle_density: Fixed::from_ratio(33, 10), // 3.3 g/cm^3
+            // The SAME crust and mantle densities the melt transaction reads, in this struct's grams per cubic
+            // centimetre, off the one constant, so the collapse and the ledger cannot disagree about what a
+            // kilometre of crust weighs.
+            crust_density: Fixed::from_int(CRUST_DENSITY_KG_M3),
+            mantle_density: Fixed::from_int(MANTLE_DENSITY_KG_M3),
             crust_shear_modulus_gpa: Fixed::from_int(44), // ~44 GPa (illustrative crustal shear modulus)
             strength_knockdown: Fixed::from_ratio(15, 1000), // ~0.015 (illustrative reserved-with-basis stand-in)
             gravity_m_per_s2: Fixed::from_ratio(37, 10),     // 3.7 m/s^2, Mars-class
         }
+    }
+
+    /// Give a scaffold state a crust field by THICKNESS, through the ledger rather than around it: the crust
+    /// stock is the areal mass those thicknesses carry and the thickness field is read back off the stock, so the
+    /// state a collapse test starts from is one the melt transaction could have produced. Writing
+    /// `crust_thickness_km` alone would leave the stock at zero, and the collapse (which moves the stock) would
+    /// then have nothing to move, so the test would pass while proving nothing.
+    fn with_crust_thickness_km(state: &mut DeepTimeState, thickness_km: &[Fixed]) {
+        let rho = Fixed::from_int(CRUST_DENSITY_KG_M3);
+        state.crust_areal_mass = thickness_km
+            .iter()
+            .map(|t| areal_mass_mg_per_m2(*t, rho).expect("a scaffold crust is representable"))
+            .collect();
+        state.crust_thickness_km = state
+            .crust_areal_mass
+            .iter()
+            .map(|m| thickness_km_from_areal_mass(*m, rho).expect("and reads back"))
+            .collect();
     }
 
     // Each column's Airy isostatic relief (elevation above the field datum, kilometres): (max relief, min relief,
@@ -2091,9 +2562,7 @@ mod tests {
         let sigma_y_pa = derived_crust_yield_pa(p.crust_shear_modulus_gpa, p.strength_knockdown)
             .expect("the crust yield derives")
             .to_f64_lossy();
-        sigma_y_pa
-            / (p.crust_density.to_f64_lossy() * 1000.0 * p.gravity_m_per_s2.to_f64_lossy())
-            / 1000.0
+        sigma_y_pa / (p.crust_density.to_f64_lossy() * p.gravity_m_per_s2.to_f64_lossy()) / 1000.0
     }
 
     #[test]
@@ -2144,8 +2613,8 @@ mod tests {
         let n = 25usize;
         let mut thicknesses = vec![Fixed::from_int(30); n]; // 30 km baseline crust
         thicknesses[12] = Fixed::from_int(200); // a 200 km province, unsupportably tall
-        let mut state = DeepTimeState::young(n, Fixed::from_int(1800));
-        state.crust_thickness_km = thicknesses;
+        let mut state = young_state(n, 1800);
+        with_crust_thickness_km(&mut state, &thicknesses);
 
         let (max_before, _min_before, amp_before) = relief_stats(&state, &params);
         assert!(
@@ -2153,11 +2622,12 @@ mod tests {
             "the tall province starts OVER the support bound ({max_before:.2} km relief vs {bound_km:.2} km bound)"
         );
 
-        // The conserved crust bit-sum before the collapse.
+        // The conserved crust MASS bit-sum before the collapse. The stock is what the ledger conserves, so it is
+        // what the invariant is asserted on; the thickness is its readout.
         let sum_before: i128 = state
-            .crust_thickness_km
+            .crust_areal_mass
             .iter()
-            .map(|t| t.to_bits() as i128)
+            .map(|m| m.to_bits() as i128)
             .sum();
 
         let relaxed = relax_to_support_bound(&state, &params);
@@ -2165,14 +2635,30 @@ mod tests {
         // MASS conserved to the bit: the redistribution moves crust between columns, never creating or destroying
         // it (the same discipline the bombardment delta uses, the bit-sum invariant).
         let sum_after: i128 = relaxed
-            .crust_thickness_km
+            .crust_areal_mass
             .iter()
-            .map(|t| t.to_bits() as i128)
+            .map(|m| m.to_bits() as i128)
             .sum();
         assert_eq!(
             sum_before, sum_after,
-            "the support-bound collapse conserves the crust bit-sum exactly (mass moved, never created or lost)"
+            "the support-bound collapse conserves the crust mass bit-sum exactly (mass moved, never created or lost)"
         );
+        // And it is a LATERAL move within the crust: the source stock is not touched, so the ledger's whole
+        // crust-plus-source total is invariant across the collapse as well as within it.
+        assert_eq!(
+            state.source_areal_mass, relaxed.source_areal_mass,
+            "the collapse moves crust that already exists; it neither extracts from nor returns to the source"
+        );
+        // The GEOMETRY FOLLOWED THE LEDGER, which is the property that stops a column from holding less
+        // topography and the same mass. Every moved column's thickness is its moved stock's own readout.
+        let rho = Fixed::from_int(CRUST_DENSITY_KG_M3);
+        for (i, m) in relaxed.crust_areal_mass.iter().enumerate() {
+            assert_eq!(
+                relaxed.crust_thickness_km[i],
+                thickness_km_from_areal_mass(*m, rho).expect("reads back"),
+                "column {i}'s thickness is not the readout of its crust stock"
+            );
+        }
 
         // The relief is now WITHIN the support bound: the over-bound province collapsed to the bound (to within
         // the sub-nanometre apportionment residual), the tall topography relaxed by lower-crustal flow.
@@ -2196,16 +2682,24 @@ mod tests {
     #[test]
     fn the_collapse_is_deterministic() {
         let params = support_bound_params();
-        let mut state = DeepTimeState::young(16, Fixed::from_int(1800));
+        let mut state = young_state(16, 1800);
         let mut th = vec![Fixed::from_int(25); 16];
         th[3] = Fixed::from_int(180);
         th[10] = Fixed::from_int(150);
-        state.crust_thickness_km = th;
+        with_crust_thickness_km(&mut state, &th);
         let a = relax_to_support_bound(&state, &params);
         let b = relax_to_support_bound(&state, &params);
         assert_eq!(
-            a.crust_thickness_km, b.crust_thickness_km,
+            a.crust_areal_mass, b.crust_areal_mass,
             "the collapse is a pure function of the state and parameters, replaying bit-for-bit"
+        );
+        assert_eq!(
+            a.crust_thickness_km, b.crust_thickness_km,
+            "and its thickness readout replays with it"
+        );
+        assert_ne!(
+            a.crust_areal_mass, state.crust_areal_mass,
+            "the scaffold is over the bound, so this test is comparing two real collapses"
         );
     }
 
@@ -2214,24 +2708,22 @@ mod tests {
         // A gently varying crust whose isostatic relief is already below the support bound: no column collapses,
         // so the field returns unchanged (dormant), never a fabricated move.
         let params = support_bound_params();
-        let mut state = DeepTimeState::young(9, Fixed::from_int(1800));
-        state.crust_thickness_km = vec![
-            Fixed::from_int(30),
-            Fixed::from_int(32),
-            Fixed::from_int(31),
-            Fixed::from_int(29),
-            Fixed::from_int(33),
-            Fixed::from_int(30),
-            Fixed::from_int(31),
-            Fixed::from_int(32),
-            Fixed::from_int(30),
-        ];
+        let mut state = young_state(9, 1800);
+        let gentle: Vec<Fixed> = [30, 32, 31, 29, 33, 30, 31, 32, 30]
+            .iter()
+            .map(|k| Fixed::from_int(*k))
+            .collect();
+        with_crust_thickness_km(&mut state, &gentle);
         let (max_before, _, _) = relief_stats(&state, &params);
         assert!(
             max_before < support_bound_km(&params),
             "the field starts within the support bound"
         );
         let relaxed = relax_to_support_bound(&state, &params);
+        assert_eq!(
+            relaxed.crust_areal_mass, state.crust_areal_mass,
+            "a supportable relief moves no crust"
+        );
         assert_eq!(
             relaxed.crust_thickness_km, state.crust_thickness_km,
             "a supportable relief is left unchanged"
@@ -2243,14 +2735,14 @@ mod tests {
         // A crust denser than the mantle (k <= 0) FOUNDERS rather than standing as topography: the tall-relief
         // collapse does not apply (delamination is a separate regime), so the field is returned unchanged.
         let mut params = support_bound_params();
-        params.crust_density = Fixed::from_ratio(36, 10); // 3.6 > 3.3 mantle: founders
-        let mut state = DeepTimeState::young(9, Fixed::from_int(1800));
+        params.crust_density = Fixed::from_int(3600); // 3600 > 3300 kg/m^3 mantle: founders
+        let mut state = young_state(9, 1800);
         let mut th = vec![Fixed::from_int(30); 9];
         th[4] = Fixed::from_int(200);
-        state.crust_thickness_km = th;
+        with_crust_thickness_km(&mut state, &th);
         let relaxed = relax_to_support_bound(&state, &params);
         assert_eq!(
-            relaxed.crust_thickness_km, state.crust_thickness_km,
+            relaxed.crust_areal_mass, state.crust_areal_mass,
             "a foundering crust is not collapsed as topography"
         );
     }
@@ -2258,18 +2750,18 @@ mod tests {
     #[test]
     fn the_collapse_is_soft_on_a_degenerate_yield_or_gravity() {
         let base = support_bound_params();
-        let mut state = DeepTimeState::young(9, Fixed::from_int(1800));
+        let mut state = young_state(9, 1800);
         let mut th = vec![Fixed::from_int(30); 9];
         th[4] = Fixed::from_int(200);
-        state.crust_thickness_km = th;
+        with_crust_thickness_km(&mut state, &th);
         // A zero shear modulus: no derived yield, so no bound, so no collapse (soft, unchanged).
         let no_strength = SupportBoundParams {
             crust_shear_modulus_gpa: Fixed::ZERO,
             ..base
         };
         assert_eq!(
-            relax_to_support_bound(&state, &no_strength).crust_thickness_km,
-            state.crust_thickness_km,
+            relax_to_support_bound(&state, &no_strength).crust_areal_mass,
+            state.crust_areal_mass,
             "a crust with no derived strength is left unchanged (fail-soft, no fabricated bound)"
         );
         // A non-positive gravity: no gravitational load, no bound, unchanged.
@@ -2278,9 +2770,16 @@ mod tests {
             ..base
         };
         assert_eq!(
-            relax_to_support_bound(&state, &no_g).crust_thickness_km,
-            state.crust_thickness_km,
+            relax_to_support_bound(&state, &no_g).crust_areal_mass,
+            state.crust_areal_mass,
             "a non-positive gravity is left unchanged"
+        );
+        // The scaffold IS over the bound at the real parameters, so the two soft refusals above are refusals and
+        // not a field that had nothing to collapse either way.
+        assert_ne!(
+            relax_to_support_bound(&state, &base).crust_areal_mass,
+            state.crust_areal_mass,
+            "at the real parameters this scaffold does collapse, so the refusals above are discriminating"
         );
     }
 }

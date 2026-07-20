@@ -1394,6 +1394,25 @@ const MASS_BAND_HALF_WIDTH_FRACTION: Fixed = Fixed::from_int(3).div(Fixed::from_
 /// validity read, not canon).
 const CRUST_YIELD_STRENGTH_PA: f64 = 1.0e8;
 
+/// RESERVED AND UNSET, held at the fail-loud sentinel `None`: the crust's per-bonding-class strength KNOCKDOWN
+/// (dimensionless, in `(0, 1]`), the ratio of a material's operative (measured yield or flow) shear strength to
+/// the ideal Frenkel strength `G / (2*pi)`, which mobile dislocations put a material far below
+/// (`civsim_materials::properties::operative_shear_strength_gpa`).
+///
+/// BASIS for the owner's decision: the measured yield or flow shear strength of the crust's bonding class against
+/// its ideal Frenkel strength, which the materials floor spans from about `1e-2` for a soft annealed metal to
+/// about `0.7` for a covalent solid, so the crust's own class places it inside that range. It is the LAST input
+/// the support-bound relief collapse needs ([`derive_support_bound_params`]): the crust and mantle densities, the
+/// surface gravity, and the crust's aggregate shear modulus are all derived from this world already.
+///
+/// WHY IT IS NOT SET HERE, which is the whole reason it is a sentinel and not a number. The one value it could be
+/// read off is [`CRUST_YIELD_STRENGTH_PA`] above, by back-solving `knockdown = sigma_y / (G / (2*pi))`. That
+/// would be laundering, not deriving: it would put the reserved 1e8 Pa literal back onto the exact path the
+/// derived-yield chain was built to retire, and because the shear modulus appears on both sides it would cancel
+/// out, leaving the collapse driven by the authored constant wearing a derivation's shape. So the term is wired
+/// and HELD, and the readout says so, until the owner sets this from the basis above.
+const CRUST_STRENGTH_KNOCKDOWN: Option<Fixed> = None;
+
 /// RESERVED-with-basis: the mass (Earth masses) at and above which giant impacts are class-generic, the MELTED
 /// giant-impact gate. Basis: the Earth-mass terrestrial-embryo-merger regime where the assembly statistics
 /// guarantee ~two dozen giant impacts per system (Izidoro et al. 2017/2021 break-the-chains ensembles). A
@@ -1931,6 +1950,22 @@ struct DeepTimeProvinces {
     /// The stable per-world seed the bombardment draws are keyed on (a hash of the star mass and orbit that DEFINE
     /// this derived planet), so the same world renders the same craters every run (Principle 3, Principle 10).
     world_seed: u64,
+    /// The mass ledger's opening SOURCE STOCK per column (megagrams per square metre), the DERIVED convecting-mantle
+    /// areal mass. Stored so a rewind to the fresh young state ([`age_provinces_from_young`]) restores the ledger
+    /// as well as the temperature: a rewind that reset the columns and left the stocks spent would replay a
+    /// different world from the one the run began with.
+    source_areal_mass: Fixed,
+    /// The crust's DERIVED aggregate shear modulus `G` (gigapascals), Voigt-Reuss-Hill over the cited mineral
+    /// moduli of the crust's own stable assemblage ([`derive_crust_shear_modulus_gpa`]), or `None` if a crust
+    /// phase carries no cited moduli. Carried so the readout can show the collapse is one unset reserved value
+    /// away from engaging rather than merely absent.
+    crust_shear_modulus_gpa: Option<Fixed>,
+    /// The crust MECHANICAL-STRENGTH parameters the support-bound relief collapse
+    /// ([`civsim_sim::deeptime::relax_to_support_bound`]) reads, or `None` while it cannot be formed WITHOUT
+    /// FABRICATING one of its inputs, which is the state today. See [`derive_support_bound_params`] for which
+    /// input is missing and what would supply it. The collapse call in [`step_provinces`] is real and gated on
+    /// this, so the term engages the moment the input lands rather than waiting on another wiring pass.
+    support_bound: Option<civsim_sim::deeptime::SupportBoundParams>,
 }
 
 /// A deterministic per-province symmetry-breaking perturbation in `[-1, 1)`, hashed from the world identity
@@ -1996,6 +2031,7 @@ fn build_deep_time_provinces(
     formation_melt_fraction: Option<Fixed>,
     young_potential_temperature_k: Fixed,
     mantle_composition: &[(String, Fixed)],
+    crust_shear_modulus_gpa: Option<Fixed>,
 ) -> Option<DeepTimeProvinces> {
     // The convecting-mantle DEPTH from the interior structure (SI metres), and its megametre form for the
     // representable-scaled convection kernel (retiring the depth = 1 fixture).
@@ -2019,15 +2055,31 @@ fn build_deep_time_provinces(
     // mantle density in kg/m^3) and gravity (the planet's surface gravity), and the reserved interior-thermostat
     // adiabat/productivity and the derive-down processing time.
     let source_density = mantle_density.checked_mul(Fixed::from_int(1000))?;
+    // The DERIVED emplaced-crust density in kilograms per cubic metre, the ONE density the mass ledger converts
+    // through: the melt transaction debits the source by the mass the crust has (`thickness * this`) and the
+    // thickness the isostasy floats is that stock divided by it again. It is the same derived `crust_density`
+    // this scene floats the relief at, in the kg/m^3 the ledger and the support bound both read, so the two can
+    // never be two roundings of one number.
+    let crust_density_kg_m3 = crust_density.checked_mul(Fixed::from_int(1000))?;
     let melt = MeltParams {
         solidus_surface_k,
         solidus_slope_k_per_gpa,
         adiabat_slope_k_per_gpa: MANTLE_ADIABAT_SLOPE_K_PER_GPA,
         productivity_per_gpa: MELT_PRODUCTIVITY_PER_GPA,
         source_density_kg_per_m3: source_density,
+        crust_density_kg_per_m3: crust_density_kg_m3,
         gravity_m_per_s2: surface_gravity_m_s2,
         processing_time_myr: MANTLE_PROCESSING_TIME_MYR,
     };
+
+    // THE LEDGER'S OPENING SOURCE STOCK, DERIVED: the areal mass of the convecting mantle each column draws its
+    // melt from, the convecting-mantle depth (in kilometres) times the mantle density (in kg/m^3), which is
+    // megagrams per square metre through the ledger's own exact unit bridge. Nothing is authored: both factors
+    // are this scene's own derived interior structure, and a bigger or denser mantle is simply a bigger stock.
+    let source_areal_mass = civsim_sim::deeptime::areal_mass_mg_per_m2(
+        depth_m.checked_div(Fixed::from_int(1000))?,
+        source_density,
+    )?;
 
     // The interior-thermostat BASE radiogenic budget: set so a mean-seed province's conductive steady-state
     // temperature sits at the world's OWN DERIVED solidus (the observed mantle self-regulation near its solidus).
@@ -2182,8 +2234,9 @@ fn build_deep_time_provinces(
     // The columns start laterally UNIFORM at the YOUNG POTENTIAL TEMPERATURE (the R-YOUNG-TEMPERATURE magma-ocean
     // lock-up handoff for a melted world, super-solidus so the melt engages, else the cold peak): a fresh planet
     // has no thermal history, and the provinces are what the run writes. This retires the fixed 1588 K anchor as
-    // the young initial condition for a melted world.
-    let state = DeepTimeState::young(n, young_potential_temperature_k);
+    // the young initial condition for a melted world. The ledger starts with the whole derived source stock under
+    // every column and no crust: the crust this run shows is mass that MOVED, never mass that appeared.
+    let state = DeepTimeState::young(n, young_potential_temperature_k, source_areal_mass);
 
     // THE BOMBARDMENT flux, constructed DERIVE-FIRST from this scene's own numbers. The impact CLOSING SPEED is the
     // escape velocity `v_esc = sqrt(2 g R)`, the least speed a body falling from rest strikes at (the derive-first
@@ -2264,6 +2317,97 @@ fn build_deep_time_provinces(
         sea_level: Fixed::ZERO,
         flux,
         world_seed,
+        source_areal_mass,
+        crust_shear_modulus_gpa,
+        support_bound: derive_support_bound_params(
+            crust_density_kg_m3,
+            source_density,
+            surface_gravity_m_s2,
+            crust_shear_modulus_gpa,
+        ),
+    })
+}
+
+/// The crust's OWN aggregate SHEAR MODULUS `G` (gigapascals), DERIVED from this scene's crust composition: the
+/// composition minimizes to its stable phase assemblage (`petrology::stable_assemblage`, the same solve the crust
+/// density already runs) and the assemblage's phases carry CITED measured moduli on the mineral floor, which
+/// `materials_oracle::assemblage_bulk_shear_moduli` aggregates by Voigt-Reuss-Hill over the volume fractions.
+///
+/// This retires a piece that was built, documented, and unread: that function's own note said "no consumer reads
+/// this yet". It reserves nothing. Its refusal NAMES the phase that has no registry row or no cited moduli, so a
+/// world whose crust condenses an exotic phase produces a fetch list rather than a silent zero, which is why the
+/// refusal is logged rather than swallowed. `None` on any refusal, so the support bound then holds rather than
+/// running on a crust strength this world did not derive.
+///
+/// TWO THINGS IT DROPS, named rather than hidden. The aggregate arrives with an uncertainty BAND (the
+/// Voigt-Reuss half-gap over the rock's unknown grain geometry, plus the measurement spread) and this reads only
+/// the central value, because the support bound takes a scalar; carrying the band through to a banded relief
+/// bound is a later refinement. And the cited moduli are the intact crack-free frame at their rows' own pressure
+/// and temperature, so a real crust's cracks, pores, and depth chord move the true aggregate off this one, which
+/// the aggregation's own documentation names as separate future terms.
+fn derive_crust_shear_modulus_gpa(
+    crust_composition: &[(String, Fixed)],
+    surface_t: Fixed,
+    surface_p: Fixed,
+    registry: &civsim_physics::petrology_data::PhaseRegistry,
+) -> Option<Fixed> {
+    let moduli = civsim_physics::mineral_moduli::MineralModuli::standard().ok()?;
+    let assemblage = civsim_physics::petrology::stable_assemblage(
+        crust_composition,
+        surface_t,
+        surface_p,
+        registry,
+    )?;
+    match civsim_physics::materials_oracle::assemblage_bulk_shear_moduli(
+        &assemblage,
+        &moduli,
+        registry,
+    ) {
+        Ok(aggregate) => Some(aggregate.shear.value),
+        Err(refusal) => {
+            eprintln!("DIAG crust shear modulus refusal: {refusal}");
+            None
+        }
+    }
+}
+
+/// The crust MECHANICAL-STRENGTH parameters for the support-bound relief collapse, or `None` when they cannot be
+/// formed without fabricating one. TODAY IT IS ALWAYS `None`, and the reason is the point of this function.
+///
+/// FOUR of the five inputs this scene derives: the crust and mantle densities (from the crust and mantle
+/// compositions), the surface gravity (`g = G M / R^2`), and now the crust's own aggregate shear modulus
+/// ([`derive_crust_shear_modulus_gpa`], Voigt-Reuss-Hill over the cited mineral moduli of the crust's stable
+/// assemblage). The fifth does not exist to be read:
+///
+/// `strength_knockdown`, the per-bonding-class ratio of a material's operative (measured yield or flow) shear
+/// strength to the ideal Frenkel strength `G / (2*pi)`, spanning about `1e-2` for a soft annealed metal to about
+/// `0.7` for a covalent solid. It is RESERVED-with-basis and UNSET: no substrate derives it, `calibration/reserved.toml`
+/// carries no entry for it, and it is the owner's to set for the crust's bonding class. It must NOT be
+/// back-solved from [`CRUST_YIELD_STRENGTH_PA`] to make the chain reproduce that value. That would launder the
+/// reserved 1e8 Pa literal back onto the very path the derived-yield chain was built to retire, and the crust's
+/// derived shear modulus would cancel straight out of the answer, leaving a derivation-shaped wrapper around the
+/// authored constant.
+///
+/// MEASURED, so the stake is known rather than assumed: on this scene the collapse would be a NO-OP even fully
+/// wired, and not merely at one knockdown but across every value the materials floor admits. The derived
+/// isostatic relief saturates near 0.07 km. The derived bound is `(G / (2*pi)) * knockdown / (rho * g)`, and this
+/// world's measured `rho * g` near 1.25e4 with the derived `G` of about 90 GPa puts that bound at about 11 km at
+/// the floor's soft end (`1e-2`) and about 800 km at its stiff end (`0.7`). The relief would have to exceed the
+/// bound for anything to flow, which needs a knockdown below about `6e-5`, two orders under the softest material
+/// the floor describes. So the wiring matters for a world whose relief does approach its bound, and for the mass
+/// ledger staying coherent when it does, rather than for this one.
+fn derive_support_bound_params(
+    crust_density_kg_m3: Fixed,
+    mantle_density_kg_m3: Fixed,
+    surface_gravity_m_s2: Fixed,
+    crust_shear_modulus_gpa: Option<Fixed>,
+) -> Option<civsim_sim::deeptime::SupportBoundParams> {
+    Some(civsim_sim::deeptime::SupportBoundParams {
+        crust_density: crust_density_kg_m3,
+        mantle_density: mantle_density_kg_m3,
+        crust_shear_modulus_gpa: crust_shear_modulus_gpa?,
+        strength_knockdown: CRUST_STRENGTH_KNOCKDOWN?,
+        gravity_m_per_s2: surface_gravity_m_s2,
     })
 }
 
@@ -2286,7 +2430,11 @@ fn impact_world_seed(star_mass: Fixed, orbit_au: Fixed) -> u64 {
 /// observer's playback). Deterministic.
 fn age_provinces_from_young(prov: &mut DeepTimeProvinces, total_steps: usize) {
     let n = prov.column_params.len();
-    prov.state = DeepTimeState::young(n, prov.young_potential_temperature_k);
+    prov.state = DeepTimeState::young(
+        n,
+        prov.young_potential_temperature_k,
+        prov.source_areal_mass,
+    );
     step_provinces(prov, total_steps);
 }
 
@@ -2329,6 +2477,19 @@ fn step_provinces(prov: &mut DeepTimeProvinces, steps: usize) {
             tick_index,
             DEEP_TIME_MYR_PER_TICK,
         );
+        // THE SUPPORT-BOUND COLLAPSE, the third and last step term, applied after the interior/volcanism step and
+        // the bombardment exactly as `deeptime` documents (each term is separate so a run that does not use one
+        // replays bit-for-bit without it). A crustal column can hold only so much topography above the datum
+        // before its own weight overcomes its deviatoric strength and it flows, and this relaxes the over-bound
+        // relief to that ceiling by moving the excess crust MASS to the lows, conservatively.
+        //
+        // It is gated because its yield strength needs an input this scene cannot derive without fabricating it
+        // ([`derive_support_bound_params`] names which and why). The call is here, on the run path, so the term
+        // engages on the tick after that input lands. On this scene it would be a no-op regardless: the derived
+        // relief saturates two orders below the derived bound.
+        if let Some(bound) = prov.support_bound.as_ref() {
+            prov.state = civsim_sim::deeptime::relax_to_support_bound(&prov.state, bound);
+        }
     }
 }
 
@@ -2353,6 +2514,7 @@ fn deep_time_saturation_tick(prov: &DeepTimeProvinces) -> usize {
     probe.state = DeepTimeState::young(
         probe.column_params.len(),
         probe.young_potential_temperature_k,
+        probe.source_areal_mass,
     );
     let mut prev = display_quantized_surface(&probe);
     for tick in 1..=SATURATION_SEARCH_BOUND {
@@ -3197,6 +3359,10 @@ fn build_derived_scene_with_composition(
         &registry,
         &table,
     );
+    // The crust's OWN aggregate shear modulus, derived off the SAME composition and surface state the density
+    // above minimizes at, so the two read one crust rather than two.
+    let crust_shear_modulus_gpa =
+        derive_crust_shear_modulus_gpa(&crust_composition, surface_t, surface_p, &registry);
     let core_structure = derive_core_fraction_and_metal_density(&abundances, &table, &eos);
     // The world's OWN derived mantle solidus (surface value and slope) from the surface-composition melt wiring
     // on this scene; the province path builds only when it resolved (else fail-soft to uniform crust, never an
@@ -3232,6 +3398,7 @@ fn build_derived_scene_with_composition(
                 sc.max_melt_fraction,
                 young_potential_temperature_k,
                 &mantle_composition,
+                crust_shear_modulus_gpa,
             )
         }
         _ => None,
@@ -3501,6 +3668,44 @@ fn print_derived_readout(scene: &DerivedScene) {
         eprintln!(
             "  relief heterogeneity-engaged indicator: {:.3}%  (a normalized roughness ratio: is the melt-driven texture ON, not a relief magnitude; a UNIFORM field reads exactly 0, measured, so any nonzero value is engaged texture)",
             indicator * 100.0
+        );
+    }
+    // THE CRUST MASS LEDGER, read out so the transaction is visible rather than merely asserted in a test: the
+    // crust on this surface is mass the mantle source PAID FOR, and the two stocks are reported with the fraction
+    // of the source that has been spent. The support-bound collapse's own state is reported beside it, because a
+    // step term that is present but held on a reserved value should say so where the observer can see it rather
+    // than look like a term that ran.
+    if let Some(p) = scene.provinces.as_ref() {
+        let crust: f64 = p
+            .state
+            .crust_areal_mass
+            .iter()
+            .map(|m| m.to_f64_lossy())
+            .sum();
+        let source: f64 = p
+            .state
+            .source_areal_mass
+            .iter()
+            .map(|m| m.to_f64_lossy())
+            .sum();
+        let total = crust + source;
+        let spent = if total > 0.0 { crust / total } else { 0.0 };
+        let collapse = match p.support_bound {
+            Some(_) => "the support-bound collapse is ENGAGED".to_string(),
+            None => format!(
+                "the support-bound collapse is WIRED AND HELD on ONE unset reserved value, the crust's per-class \
+                 strength knockdown (its other four inputs are derived, including the crust's own aggregate shear \
+                 modulus {}); on this world it would be a no-op regardless, the relief saturating far inside the \
+                 bound",
+                match p.crust_shear_modulus_gpa {
+                    Some(g) => format!("{:.1} GPa", g.to_f64_lossy()),
+                    None => "(a crust phase carries no cited moduli)".to_string(),
+                }
+            ),
+        };
+        eprintln!(
+            "  crust mass ledger: {crust:.4e} Mg/m^2 emplaced against {source:.4e} Mg/m^2 of source remaining ({:.4}% of the source spent); every megagram of crust was DEBITED from the source, so crust + source is invariant to the bit. {collapse}",
+            spent * 100.0
         );
     }
     // THE DEEP-TIME BOMBARDMENT record: the discrete crater ROWS the accretion-tail flux drew over the run so far,
@@ -5752,6 +5957,9 @@ mod province_tests {
             formation_melt_fraction,
             young_t,
             &test_mantle_composition(),
+            // No crust shear modulus for this scaffold: it exercises the melt-and-province chain, and the support
+            // bound is held on its unset reserved knockdown regardless of what is passed here.
+            None,
         )
         .expect("the Mars-class interior resolves a province field")
     }
@@ -5907,8 +6115,31 @@ mod province_tests {
     // scene build): the densities and melt params are representative, only the thickness field varies.
     fn provinces_with(thicknesses: Vec<Fixed>, pcols: usize) -> DeepTimeProvinces {
         let n = thicknesses.len();
-        let mut state = DeepTimeState::young(n, Fixed::from_int(1588));
-        state.crust_thickness_km = thicknesses;
+        // The scaffold's crust is seeded THROUGH the ledger: the stock is the areal mass those thicknesses
+        // carry and the thickness field is read back off the stock, so the scaffold is a state the melt
+        // transaction could have produced rather than a thickness field with no mass behind it.
+        let scaffold_crust_density = Fixed::from_int(3000); // kg/m^3, matching `crust_density` below
+        let source_areal_mass = civsim_sim::deeptime::areal_mass_mg_per_m2(
+            Fixed::from_int(1500),
+            Fixed::from_int(3300),
+        )
+        .expect("a Mars-class mantle column is representable");
+        let mut state = DeepTimeState::young(n, Fixed::from_int(1588), source_areal_mass);
+        state.crust_areal_mass = thicknesses
+            .iter()
+            .map(|t| {
+                civsim_sim::deeptime::areal_mass_mg_per_m2(*t, scaffold_crust_density)
+                    .expect("a scaffold crust is representable")
+            })
+            .collect();
+        state.crust_thickness_km = state
+            .crust_areal_mass
+            .iter()
+            .map(|m| {
+                civsim_sim::deeptime::thickness_km_from_areal_mass(*m, scaffold_crust_density)
+                    .expect("and reads back")
+            })
+            .collect();
         DeepTimeProvinces {
             state,
             young_potential_temperature_k: Fixed::from_int(1588),
@@ -5933,6 +6164,7 @@ mod province_tests {
                 adiabat_slope_k_per_gpa: MANTLE_ADIABAT_SLOPE_K_PER_GPA,
                 productivity_per_gpa: MELT_PRODUCTIVITY_PER_GPA,
                 source_density_kg_per_m3: Fixed::from_int(3300),
+                crust_density_kg_per_m3: scaffold_crust_density,
                 gravity_m_per_s2: Fixed::from_int(10),
                 processing_time_myr: MANTLE_PROCESSING_TIME_MYR,
             },
@@ -5944,6 +6176,11 @@ mod province_tests {
             crust_density: Fixed::from_ratio(30, 10),
             mantle_density: Fixed::from_ratio(35, 10),
             sea_level: Fixed::ZERO,
+            source_areal_mass,
+            crust_shear_modulus_gpa: None,
+            // The scaffold carries no support-bound params for the same reason production does not: the reserved
+            // strength knockdown is unset, so the collapse would have to fabricate a yield to run.
+            support_bound: None,
             // A flux built from the reserved-with-basis constants plus plausible test-scaffold derived values (this
             // helper's tests read the crust field and do not step the bombardment, so impact_relief_m stays zero).
             flux: ImpactFluxParams {
@@ -6420,10 +6657,17 @@ mod province_tests {
             "the bombardment composed relief onto the crust ({composed_amplitude_km:.2} km composed vs {amplitude_km:.2} km isostatic)"
         );
         // THE SUPPORT-BOUND CHECK runs and REPORTS (never asserts the direction away): the derived amplitude is
-        // reported against yield/(rho*g), any excess flagged. Today the deep-time crust growth accumulates an
-        // unphysically large relief over the aged span, so the check FLAGS it (a surfaced follow-on in the sim
-        // deep-time crust-growth model, outside this slice's scope, which the km amplitude + support bound exposed
-        // where the normalized roughness indicator had hidden it). The check firing is the honest behaviour.
+        // reported against yield/(rho*g), any excess flagged.
+        //
+        // THIS COMMENT CARRIED A STALE CLAIM, corrected rather than quietly swapped because it was a statement
+        // about CURRENT BEHAVIOUR that the measurement refutes. It said "today the deep-time crust growth
+        // accumulates an unphysically large relief over the aged span, so the check FLAGS it", and called the
+        // firing the honest behaviour. The check does not fire and has not for some time: the measured relief is
+        // 0.07 km against an 8.01 km bound, two orders INSIDE it, so the flag branch below is dead on this world.
+        // The claim was presumably true before crust growth became a bounded relaxation toward the melt column's
+        // equilibrium, which is exactly the change that would retire an over-growth without retiring the sentence
+        // describing it. The branch stays, because a world whose relief does exceed its bound should still be
+        // flagged; what is corrected is the assertion about which branch runs.
         let bound_km = scene.provinces.as_ref().and_then(|p| {
             supportable_relief_km(
                 CRUST_YIELD_STRENGTH_PA,
@@ -6445,6 +6689,67 @@ mod province_tests {
             amplitude_km,
             bound_note,
             indicator * 100.0
+        );
+
+        // THE MASS LEDGER, gated on the PRODUCTION path rather than only on a scaffold. This scene was built and
+        // aged through the real wiring, so the crust standing on it is crust the source PAID FOR, and that has to
+        // hold column by column in raw fixed-point bits. It rides this test rather than building its own scene
+        // because a second `build_derived_scene` would cost another minute and a half for the same world.
+        let p = scene
+            .provinces
+            .as_ref()
+            .expect("the province field resolved");
+        let opening = p.source_areal_mass;
+        let mut spent_any = false;
+        for i in 0..p.state.crust_areal_mass.len() {
+            let total = p.state.crust_areal_mass[i].to_bits() as i128
+                + p.state.source_areal_mass[i].to_bits() as i128;
+            assert_eq!(
+                total,
+                opening.to_bits() as i128,
+                "column {i}'s ledger does not balance: crust plus source must still be the opening source stock"
+            );
+            assert!(
+                p.state.source_areal_mass[i] >= Fixed::ZERO,
+                "column {i} spent more source than it held"
+            );
+            if p.state.crust_areal_mass[i] > Fixed::ZERO {
+                spent_any = true;
+            }
+            // The geometry the isostasy floats is the stock's own readout, so a province cannot show relief its
+            // ledger does not back.
+            assert_eq!(
+                p.state.crust_thickness_km[i],
+                civsim_sim::deeptime::thickness_km_from_areal_mass(
+                    p.state.crust_areal_mass[i],
+                    p.melt.crust_density_kg_per_m3
+                )
+                .expect("the thickness reads back off the stock"),
+                "province {i}'s thickness is not the readout of its crust stock"
+            );
+        }
+        assert!(
+            spent_any,
+            "the aged world built crust, so the conservation above is over a ledger that moved"
+        );
+        // The source is far larger than the crust it made, so the finite-source cap does NOT bind on this world:
+        // the crust is bounded by the melt column's equilibrium, as it was before the ledger. Asserted so that a
+        // future change which makes the source bind is a visible event rather than a silent one.
+        let crust_total: f64 = p
+            .state
+            .crust_areal_mass
+            .iter()
+            .map(|m| m.to_f64_lossy())
+            .sum();
+        let source_total: f64 = p
+            .state
+            .source_areal_mass
+            .iter()
+            .map(|m| m.to_f64_lossy())
+            .sum();
+        assert!(
+            crust_total < source_total / 10.0,
+            "the derived source ({source_total:.4e} Mg/m^2) should still dwarf the crust it made ({crust_total:.4e} Mg/m^2); if it no longer does, the source cap has started to bind and the crust is no longer melt-column bounded"
         );
     }
 

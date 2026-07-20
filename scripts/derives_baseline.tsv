@@ -181,6 +181,9 @@ crates/materials/src/metallic.rs	cohesive_energy_at_volume	grandfathered	predate
 crates/materials/src/metallic.rs	metallic_energy	grandfathered	predates the derives-coverage gate; unclassified
 crates/materials/src/metallic.rs	new	grandfathered	predates the derives-coverage gate; unclassified
 crates/materials/src/metallic.rs	rose_ratio	grandfathered	predates the derives-coverage gate; unclassified
+crates/materials/src/mie_gruneisen_debye.rs	debye_integral	helper	Simpson quadrature of the dimensionless Debye integral; interval count bounds the step, not the count
+crates/materials/src/mie_gruneisen_debye.rs	debye_integrand	helper	the dimensionless integrand x^3/(e^x-1), series-continued through its removable singularity at the origin
+crates/materials/src/mie_gruneisen_debye.rs	from_banked	constructor	assembles the six MGD anchors from one source fit, refusing a mixed-provenance or systematics-graded set
 crates/materials/src/nucleation.rs	avrami_grain_size	grandfathered	predates the derives-coverage gate; unclassified
 crates/materials/src/nucleation.rs	critical_atom_count	grandfathered	predates the derives-coverage gate; unclassified
 crates/materials/src/nucleation.rs	critical_radius_over_spacing	grandfathered	predates the derives-coverage gate; unclassified
@@ -302,6 +305,11 @@ crates/materials/src/thermochemical/proposer.rs	prune_lazy	grandfathered	predate
 crates/materials/src/thermochemical/proposer.rs	shell_kind	grandfathered	predates the derives-coverage gate; unclassified
 crates/materials/src/thermochemical/proposer.rs	unconstrained	grandfathered	predates the derives-coverage gate; unclassified
 crates/materials/src/thermochemical/proposer.rs	with_states	grandfathered	predates the derives-coverage gate; unclassified
+crates/materials/src/thermoelastic.rs	abs_diff	helper	absolute difference of two Fixed values; arithmetic, derives nothing
+crates/materials/src/thermoelastic.rs	fmt	helper	Display formatter for ThermoRefusal; renders a refusal
+crates/materials/src/thermoelastic.rs	kelvin	accessor	the elastic Debye temperature's kelvin value; one-way by design, no Fixed goes back in
+crates/materials/src/thermoelastic.rs	key_of	helper	delegates to mineral_moduli::canonical_phase_key; a name lookup, not a derivation
+crates/materials/src/thermoelastic.rs	mie_gruneisen_debye_readiness	predicate	reports which rung-3 anchors are banked; answers a question about the DATA, derives no world quantity
 crates/materials/src/verdict.rs	band	grandfathered	predates the derives-coverage gate; unclassified
 crates/materials/src/verdict.rs	candidates	grandfathered	predates the derives-coverage gate; unclassified
 crates/materials/src/verdict.rs	content_key	grandfathered	predates the derives-coverage gate; unclassified
@@ -353,7 +361,6 @@ crates/physics/src/convection_scaling.rs	nusselt_prefactor	grandfathered	predate
 crates/physics/src/convection_scaling.rs	nusselt_prefactor_at_internal_fraction	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/convection_scaling.rs	parse_decimal	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/convection_scaling.rs	row_name	grandfathered	predates the derives-coverage gate; unclassified
-crates/physics/src/convection_scaling.rs	stagnant_lid_convention	accessor	reads one cited (alpha, gamma, beta) row from the vendored column; the derivation is laws::ln_stagnant_lid_nusselt, which carries the @derives marker
 crates/physics/src/convection_scaling.rs	standard	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/convective_viscosity.rs	effective_viscosity_band	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/convective_viscosity.rs	ln_boundary_layer	grandfathered	predates the derives-coverage gate; unclassified
@@ -444,19 +451,32 @@ crates/physics/src/ewald.rs	ewald_potential_matrix	grandfathered	predates the de
 crates/physics/src/ewald.rs	madelung_constant	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/ewald.rs	scale	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/flexure.rs	deflection_at	grandfathered	predates the derives-coverage gate; unclassified
+crates/physics/src/flexure.rs	elastic_constants_admissible	predicate	whether a modulus pair sits inside the declared validation envelope
 crates/physics/src/flexure.rs	euler_gamma	grandfathered	predates the derives-coverage gate; unclassified
+crates/physics/src/flexure.rs	external_curvature	constructor	unit conversion: internal curvatures back into 1/km
+crates/physics/src/flexure.rs	external_length	constructor	unit conversion: internal lengths back into km
+crates/physics/src/flexure.rs	external_rigidity	constructor	unit conversion: internal rigidities back into GPa km^3
 crates/physics/src/flexure.rs	flexural_length_axisymmetric	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/flexure.rs	flexural_length_axisymmetric_from_alpha	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/flexure.rs	flexural_parameter	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/flexure.rs	flexural_response_ratio	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/flexure.rs	flexural_rigidity	grandfathered	predates the derives-coverage gate; unclassified
+crates/physics/src/flexure.rs	internal_force	constructor	unit conversion: GPa km^2 into internal forces
+crates/physics/src/flexure.rs	internal_gravity	constructor	unit conversion: km/s^2 into internal accelerations
+crates/physics/src/flexure.rs	internal_length	constructor	unit conversion: km into internal lengths (a division by 32)
+crates/physics/src/flexure.rs	internal_line_load	constructor	unit conversion: GPa km into internal line loads
+crates/physics/src/flexure.rs	internal_rigidity	constructor	unit conversion: GPa km^3 into internal rigidities
 crates/physics/src/flexure.rs	kelvin_kei	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/flexure.rs	kelvin_kei_prime	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/flexure.rs	kelvin_ker	grandfathered	predates the derives-coverage gate; unclassified
+crates/physics/src/flexure.rs	line_load_admissible	predicate	whether a line-load intensity sits inside the declared validation envelope
 crates/physics/src/flexure.rs	line_load_deflection	grandfathered	predates the derives-coverage gate; unclassified
+crates/physics/src/flexure.rs	max_poisson_ratio_magnitude	accessor	the declared validation envelope's Poisson bound, one half
 crates/physics/src/flexure.rs	parameter	grandfathered	predates the derives-coverage gate; unclassified
+crates/physics/src/flexure.rs	point_load_admissible	predicate	whether a point-load magnitude sits inside the declared validation envelope
 crates/physics/src/flexure.rs	point_load_deflection	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/flexure.rs	rigidity	grandfathered	predates the derives-coverage gate; unclassified
+crates/physics/src/flexure.rs	scaled_rigidity_over_restoring	helper	the shared D/(delta_rho g) quotient both flexural lengths are quarter powers of
 crates/physics/src/floor_provenance.rs	authoring_surface	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/floor_provenance.rs	derive_first_defects	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/floor_provenance.rs	embedded	grandfathered	predates the derives-coverage gate; unclassified
@@ -835,6 +855,7 @@ crates/physics/src/moment_equivalence.rs	from_upward_deflection	grandfathered	pr
 crates/physics/src/moment_equivalence.rs	high	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/moment_equivalence.rs	high	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/moment_equivalence.rs	high_edge	grandfathered	predates the derives-coverage gate; unclassified
+crates/physics/src/moment_equivalence.rs	internal_rigidity_three_quarter_power	helper	D^(3/4) from an internal rigidity, without ever forming D
 crates/physics/src/moment_equivalence.rs	is_degenerate	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/moment_equivalence.rs	is_degenerate	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/moment_equivalence.rs	lid_referee	grandfathered	predates the derives-coverage gate; unclassified
@@ -1090,10 +1111,18 @@ crates/physics/src/term_values.rs	len	grandfathered	predates the derives-coverag
 crates/physics/src/term_values.rs	sp3_hybrid_energy	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/term_values.rs	standard	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/term_values.rs	term_value	grandfathered	predates the derives-coverage gate; unclassified
-crates/materials/src/thermoelastic.rs	abs_diff	helper	absolute difference of two Fixed values; arithmetic, derives nothing
-crates/materials/src/thermoelastic.rs	fmt	helper	Display formatter for ThermoRefusal; renders a refusal
-crates/materials/src/thermoelastic.rs	key_of	helper	delegates to mineral_moduli::canonical_phase_key; a name lookup, not a derivation
-crates/materials/src/thermoelastic.rs	mie_gruneisen_debye_readiness	predicate	reports which rung-3 anchors are banked; answers a question about the DATA, derives no world quantity
+crates/physics/src/thermoelastic_anchors.rs	agrees	predicate	whether two source inversions agree; single-channel is NOT agreement, it is unchecked
+crates/physics/src/thermoelastic_anchors.rs	all_cells_fit	predicate	whether every cell a row needs was fit rather than estimated from systematics
+crates/physics/src/thermoelastic_anchors.rs	fmt	accessor	Display for the effective Debye temperature, naming which average it is
+crates/physics/src/thermoelastic_anchors.rs	fmt	accessor	Display for the parse-failure enum
+crates/physics/src/thermoelastic_anchors.rs	from_toml_str	loader	parses the [[anchor]] blocks; line-anchored split so header prose naming the marker cannot manufacture a row
+crates/physics/src/thermoelastic_anchors.rs	kelvin	accessor	the effective Debye temperature's kelvin value; one-way by design, no Fixed goes back in
+crates/physics/src/thermoelastic_anchors.rs	pairs_with_banked_gamma	predicate	whether the row's own fit reproduces the banked gamma_0, so the MGD set comes from one inversion
+crates/physics/src/thermoelastic_anchors.rs	parse	helper	vocabulary parse for the cell-grade / channel-agreement / gamma-pairing enums; fatal on an unrecognised member rather than defaulting
+crates/physics/src/thermoelastic_anchors.rs	phases	accessor	iterates the loaded phase keys in deterministic order
+crates/physics/src/thermoelastic_anchors.rs	row	accessor	one phase's loaded anchor row, or None; no default is ever supplied
+crates/physics/src/thermoelastic_anchors.rs	standard	loader	loads the vendored thermoelastic_anchors.toml column
+crates/physics/src/thermoelastic_anchors.rs	usable_as_anchor	predicate	whether a cell's grade permits reading it as an anchor (fit yes, systematics no)
 crates/physics/src/tm_oxide_lattice_energy.rs	composition_key	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/tm_oxide_lattice_energy.rs	fmt	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/tm_oxide_lattice_energy.rs	from_toml_str	grandfathered	predates the derives-coverage gate; unclassified
@@ -1120,21 +1149,4 @@ crates/physics/src/young_thermal.rs	peak_temperature_at	grandfathered	predates t
 crates/physics/src/young_thermal.rs	slr_family_temperature_rise	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/young_thermal.rs	solar_system_slr_family	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/young_thermal.rs	young_thermal_verdict	grandfathered	predates the derives-coverage gate; unclassified
-crates/physics/src/thermoelastic_anchors.rs	parse	helper	vocabulary parse for the cell-grade / channel-agreement / gamma-pairing enums; fatal on an unrecognised member rather than defaulting
-crates/physics/src/thermoelastic_anchors.rs	phases	accessor	iterates the loaded phase keys in deterministic order
-crates/physics/src/thermoelastic_anchors.rs	row	accessor	one phase's loaded anchor row, or None; no default is ever supplied
-crates/physics/src/thermoelastic_anchors.rs	standard	loader	loads the vendored thermoelastic_anchors.toml column
-crates/physics/src/thermoelastic_anchors.rs	usable_as_anchor	predicate	whether a cell's grade permits reading it as an anchor (fit yes, systematics no)
-crates/materials/src/thermoelastic.rs	kelvin	accessor	the elastic Debye temperature's kelvin value; one-way by design, no Fixed goes back in
-crates/physics/src/thermoelastic_anchors.rs	kelvin	accessor	the effective Debye temperature's kelvin value; one-way by design, no Fixed goes back in
-crates/physics/src/thermoelastic_anchors.rs	agrees	predicate	whether two source inversions agree; single-channel is NOT agreement, it is unchecked
-crates/physics/src/thermoelastic_anchors.rs	all_cells_fit	predicate	whether every cell a row needs was fit rather than estimated from systematics
-crates/physics/src/thermoelastic_anchors.rs	fmt	accessor	Display for the effective Debye temperature, naming which average it is
-crates/physics/src/thermoelastic_anchors.rs	fmt	accessor	Display for the parse-failure enum
-crates/physics/src/thermoelastic_anchors.rs	from_toml_str	loader	parses the [[anchor]] blocks; line-anchored split so header prose naming the marker cannot manufacture a row
-crates/physics/src/thermoelastic_anchors.rs	pairs_with_banked_gamma	predicate	whether the row's own fit reproduces the banked gamma_0, so the MGD set comes from one inversion
-crates/materials/src/mie_gruneisen_debye.rs	debye_integral	helper	Simpson quadrature of the dimensionless Debye integral; interval count bounds the step, not the count
-crates/materials/src/mie_gruneisen_debye.rs	debye_integrand	helper	the dimensionless integrand x^3/(e^x-1), series-continued through its removable singularity at the origin
-crates/materials/src/mie_gruneisen_debye.rs	from_banked	constructor	assembles the six MGD anchors from one source fit, refusing a mixed-provenance or systematics-graded set
-crates/physics/src/moment_equivalence.rs	initial_trial_rigidity	helper	the fixed point's starting trial, clamped to the rigidity kernel's own computable ceiling; reports whether the clamp bound
-crates/physics/src/moment_equivalence.rs	solve_line_load_from_trial	helper	the line-load fixed point from an explicit start, so its start-dependence is testable rather than assumed
+crates/physics/src/convection_scaling.rs	stagnant_lid_convention	accessor	reads one cited (alpha, gamma, beta) row from the vendored column; the derivation is laws::ln_stagnant_lid_nusselt, which carries the @derives marker
