@@ -68,7 +68,7 @@ The 82 deriving subsystems below live OUTSIDE the authored floor. Each produces 
 - the flexural deflection at a point <- the plate's rigidity, its flexural lengths and the load list (`crates/physics/src/flexural_relief.rs:186`)
 - one line load's plate deflection <- the load intensity, the flexural parameter and the rigidity (`crates/physics/src/flexural_relief.rs:292`)
 - one point load's plate deflection <- the load magnitude, the axisymmetric length and the rigidity (`crates/physics/src/flexural_relief.rs:337`)
-- one uniform strip load's plate deflection <- the load pressure and footprint, the flexural parameter and restoring modulus (`crates/physics/src/flexural_relief.rs:366`)
+- one uniform strip load's plate deflection <- the load pressure and footprint, the flexural parameter and restoring modulus (`crates/physics/src/flexural_relief.rs:382`)
 ### `crates/physics/src/flexure.rs`
 
 - the flexural rigidity in internal units <- Youngs modulus, Poisson ratio and the elastic thickness (`crates/physics/src/flexure.rs:370`)

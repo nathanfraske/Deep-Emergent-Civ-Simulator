@@ -353,8 +353,24 @@ impl FlexedPlate {
         let arg = r_hat
             .checked_div(l_hat)
             .ok_or(ReliefRefusal::NotRepresentable)?;
-        coef_hat
+        let raw = coef_hat
             .checked_mul(kelvin_kei(arg))
+            .ok_or(ReliefRefusal::NotRepresentable)?;
+        // THE SIGN NORMALIZATION, and it belongs HERE rather than in the kernel. The two Green's functions agree
+        // that a positive magnitude is a downward load and DISAGREE on how to report the resulting deflection:
+        // `line_load_deflection` calls the depression positive and its forebulge "the upward forebulge"
+        // (negative), while `point_load_deflection` returns `kei(0) = -pi/4` and calls THAT the central
+        // depression. Each is faithful to its own primary (Turcotte and Schubert for the beam, Brotchie and
+        // Silvester for the axisymmetric plate), so neither kernel is wrong on its own terms and neither is
+        // edited: what was wrong is SUPERPOSING them, which had a ridge and a volcano of the same physical sense
+        // pulling the plate in opposite directions. Found by an independent audit of this substrate.
+        //
+        // This layer declares ONE convention and converts into it, which is what a composition layer is for: the
+        // kernels stay checkable against their papers and the sum becomes meaningful. The convention is the
+        // line's, because it is the one the strip inherits by integration and the one the isostasy consumer
+        // reads, and it is pinned by `every_load_kind_deflects_the_same_way_for_the_same_signed_magnitude`.
+        Fixed::ZERO
+            .checked_sub(raw)
             .ok_or(ReliefRefusal::NotRepresentable)
     }
 
@@ -577,6 +593,60 @@ mod tests {
             forward,
             Err(ReliefRefusal::FootprintNotPositive),
             "and the declared precedence stands: a load with no footprint is not a geometry at all"
+        );
+    }
+
+    #[test]
+    fn every_load_kind_deflects_the_same_way_for_the_same_signed_magnitude() {
+        // THE SUPERPOSITION INVARIANT, and the one this substrate was missing. A sum over load kinds is only
+        // meaningful if the kinds agree on what a sign MEANS. They did not: the same-signed magnitude gave
+        // +0.2234 km from a line and -0.0084 km from a point, so a ridge and a volcano of the same physical
+        // sense fought each other inside the sum, and a load list's answer depended on which kinds happened to
+        // be in it. The kernels are each faithful to their own primary and are unedited; this layer converts.
+        let plate = sluggish_plate();
+        let line = Load {
+            kind: LoadKind::LineY,
+            magnitude: Fixed::from_ratio(54, 10),
+            x: Fixed::ZERO,
+            y: Fixed::ZERO,
+        };
+        let strip = Load {
+            kind: LoadKind::UniformStripY {
+                half_width: Fixed::from_int(100),
+            },
+            magnitude: Fixed::from_ratio(1, 100),
+            x: Fixed::ZERO,
+            y: Fixed::ZERO,
+        };
+        let point = Load {
+            kind: LoadKind::Point,
+            magnitude: Fixed::from_int(400),
+            x: Fixed::ZERO,
+            y: Fixed::ZERO,
+        };
+        let at = |l: Load| {
+            f64_of(
+                plate
+                    .deflection_km(&[l], Fixed::ZERO, Fixed::ZERO)
+                    .expect("evaluates"),
+            )
+        };
+        let (wl, ws, wp) = (at(line), at(strip), at(point));
+        assert!(
+            wl > 0.0 && ws > 0.0 && wp > 0.0,
+            "every kind must deflect the same way under the same-signed magnitude: line {wl}, strip {ws}, point {wp}"
+        );
+        // AND THE SUM MUST NOT CANCEL. Before the normalization the line and point contributions subtracted,
+        // so a list holding both read LOWER than the line alone, which is the defect in the form a consumer
+        // would have met it.
+        let both = f64_of(
+            plate
+                .deflection_km(&[line, point], Fixed::ZERO, Fixed::ZERO)
+                .expect("evaluates"),
+        );
+        assert!(
+            both > wl,
+            "two loads of the same sense must add rather than cancel: {both} against {wl} for the line alone"
         );
     }
 
