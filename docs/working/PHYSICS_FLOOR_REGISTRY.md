@@ -17,7 +17,7 @@ The lists below are GENERATED from `crates/physics/data/*.toml`, `crates/physics
 
 ## Deriving substrates (check here BEFORE authoring: what the world derives, and where)
 
-The 82 deriving subsystems below live OUTSIDE the authored floor. Each produces a world quantity from the floor and the situation, so its output must never be authored: if the value you need appears here, read or extend the subsystem, do not set a number. This is the list that stops `1 year = 365 days` from being authored when orbital mechanics already derives it. Generated from the `// @derives:` markers in the code; a subsystem missing its marker is a gap in this map, so mark every derivation entry point.
+The 83 deriving subsystems below live OUTSIDE the authored floor. Each produces a world quantity from the floor and the situation, so its output must never be authored: if the value you need appears here, read or extend the subsystem, do not set a number. This is the list that stops `1 year = 365 days` from being authored when orbital mechanics already derives it. Generated from the `// @derives:` markers in the code; a subsystem missing its marker is a gap in this map, so mark every derivation entry point.
 
 ### `crates/foundation/src/clock.rs`
 
@@ -62,13 +62,14 @@ The 82 deriving subsystems below live OUTSIDE the authored floor. Each produces 
 - the in-scope stagnant-lid log-domain Nusselt determinations and their reporting envelope <- the world's stress exponent and its tagged Rayleigh and Frank-Kamenetskii projections, each cited row's coefficient and two exponents, and each row's own declared fitting scope (`crates/physics/src/convection_scaling.rs:909`)
 ### `crates/physics/src/flexural_relief.rs`
 
-- a loadable flexed plate <- the converged moment-equivalent rigidity and the world's restoring term (`crates/physics/src/flexural_relief.rs:85`)
-- a loadable flexed plate <- a dimensional rigidity and the world's restoring term (`crates/physics/src/flexural_relief.rs:104`)
-- a loadable flexed plate <- an internal rigidity and the world's restoring term (`crates/physics/src/flexural_relief.rs:117`)
-- the flexural deflection at a point <- the plate's rigidity, its flexural lengths and the load list (`crates/physics/src/flexural_relief.rs:186`)
-- one line load's plate deflection <- the load intensity, the flexural parameter and the rigidity (`crates/physics/src/flexural_relief.rs:292`)
-- one point load's plate deflection <- the load magnitude, the axisymmetric length and the rigidity (`crates/physics/src/flexural_relief.rs:337`)
-- one uniform strip load's plate deflection <- the load pressure and footprint, the flexural parameter and restoring modulus (`crates/physics/src/flexural_relief.rs:382`)
+- a loadable flexed plate <- the converged moment-equivalent rigidity and the world's restoring term (`crates/physics/src/flexural_relief.rs:109`)
+- a loadable flexed plate <- a dimensional rigidity and the world's restoring term (`crates/physics/src/flexural_relief.rs:128`)
+- a loadable flexed plate <- an internal rigidity and the world's restoring term (`crates/physics/src/flexural_relief.rs:141`)
+- the surface elevation at a point <- the plate's downward deflection under the load list (`crates/physics/src/flexural_relief.rs:202`)
+- the flexural deflection at a point <- the plate's rigidity, its flexural lengths and the load list (`crates/physics/src/flexural_relief.rs:230`)
+- one line load's plate deflection <- the load intensity, the flexural parameter and the rigidity (`crates/physics/src/flexural_relief.rs:336`)
+- one point load's plate deflection <- the load magnitude, the axisymmetric length and the rigidity (`crates/physics/src/flexural_relief.rs:381`)
+- one uniform strip load's plate deflection <- the load pressure and footprint, the flexural parameter and restoring modulus (`crates/physics/src/flexural_relief.rs:426`)
 ### `crates/physics/src/flexure.rs`
 
 - the flexural rigidity in internal units <- Youngs modulus, Poisson ratio and the elastic thickness (`crates/physics/src/flexure.rs:419`)
@@ -130,7 +131,7 @@ The 82 deriving subsystems below live OUTSIDE the authored floor. Each produces 
 - per-cell carbon-fixation rate / net primary productivity <- the photosynthesis light-response (`crates/sim/src/environ.rs:2334`)
 ### `crates/sim/src/flexural_field.rs`
 
-- the flexural relief profile over a column row <- each column's buoyancy load, the plate rigidity and the grid spacing (`crates/sim/src/flexural_field.rs:71`)
+- the flexural relief profile over a column row <- each column's buoyancy load, the plate rigidity and the grid spacing (`crates/sim/src/flexural_field.rs:88`)
 ### `crates/sim/src/geodynamics.rs`
 
 - the buoyant parcel radius <- the column's own layer depth + its critical wavenumber (cell half-wavelength) (`crates/sim/src/geodynamics.rs:252`)

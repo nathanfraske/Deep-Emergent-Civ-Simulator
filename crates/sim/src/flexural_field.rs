@@ -32,11 +32,28 @@
 //! closed for 1-D and nothing has closed for 2-D. Building the field on strips would be a modelling error
 //! carried in code, so it is named here and left unbuilt.
 //!
+//! # THIS API IS DIAGNOSTIC AND NON-CAUSAL UNTIL IT IS PERIODIC
+//!
+//! The row is evaluated as a FINITE line of columns while the Green's functions are the INFINITE-plate ones.
+//! On a globe a province row closes on itself, so the physical domain is periodic and the correct solve sums
+//! the periodic images (or works spectrally). Truncating the source list instead leaves every column short of
+//! the neighbours beyond the ends, and the shortfall is largest at the ends and smallest in the middle.
+//!
+//! That truncation has a visible consequence which this module got WRONG at first and a review corrected: a
+//! row of IDENTICAL columns does not come out flat here. On a translationally invariant infinite or periodic
+//! plate a uniform load has a uniform response, necessarily, so the variation is a boundary artifact of the
+//! truncation and NOT a derived free-edge condition or a property of the kernel. The first version of the
+//! uniform-row test recorded that variation as though it were physics.
+//!
+//! So this profile is a DIAGNOSTIC: it is correct for the interior of a row long against the flexural
+//! parameter, and it must not be read as a causal elevation field for a closed row until the periodic solve
+//! lands. Nothing consumes it on a pinned path.
+//!
 //! DORMANT: nothing on a pinned run path calls this, so both byte pins hold bit-exact. Deterministic fixed
 //! point in index order (Principle 3).
 
 use civsim_core::Fixed;
-use civsim_physics::flexural_relief::{FlexedPlate, ReliefRefusal};
+use civsim_physics::flexural_relief::{ElevationKm, FlexedPlate, ReliefRefusal};
 use civsim_physics::geodynamics::column_buoyancy_load;
 
 /// Why a profile could not be built. Every arm is a stop; nothing falls back to a per-column Airy answer,
@@ -76,7 +93,7 @@ pub fn flexural_relief_profile_km(
     gravity_km_s2: Fixed,
     cell_width_km: Fixed,
     plate: &FlexedPlate,
-) -> Result<Vec<Fixed>, ProfileRefusal> {
+) -> Result<Vec<ElevationKm>, ProfileRefusal> {
     if thickness_km.is_empty() {
         return Err(ProfileRefusal::EmptyRow);
     }
@@ -111,10 +128,13 @@ pub fn flexural_relief_profile_km(
         let centre = Fixed::from_int(i32::try_from(i).map_err(|_| ProfileRefusal::EmptyRow)?)
             .checked_mul(cell_width_km)
             .ok_or(ProfileRefusal::NonPhysicalColumn)?;
-        let w = plate
-            .deflection_km(&loads, centre, Fixed::ZERO)
+        // ELEVATION, through the typed boundary. This pushed the raw DOWNWARD deflection while documenting
+        // and testing itself as height above the compensation reference, so its peak was a hole wearing the
+        // word mountain until a review caught it.
+        let e = plate
+            .elevation_km(&loads, centre, Fixed::ZERO)
             .map_err(ProfileRefusal::Relief)?;
-        profile.push(w);
+        profile.push(e);
     }
     Ok(profile)
 }
@@ -126,6 +146,10 @@ mod tests {
 
     fn f64_of(x: Fixed) -> f64 {
         x.to_f64_lossy()
+    }
+
+    fn f64_of_e(x: ElevationKm) -> f64 {
+        x.km().to_f64_lossy()
     }
 
     fn earthlike_plate() -> FlexedPlate {
@@ -167,35 +191,38 @@ mod tests {
         )
         .expect("the row has a profile");
         assert_eq!(profile.len(), 11);
-        let peak = f64_of(profile[5]);
+        let peak = f64_of_e(profile[5]);
         for (i, v) in profile.iter().enumerate() {
             if i != 5 {
                 assert!(
-                    f64_of(*v) < peak,
+                    f64_of(v.km()) < peak,
                     "the thick column stands highest: index {i} at {} against {peak}",
-                    f64_of(*v)
+                    f64_of(v.km())
                 );
             }
         }
         // The lift DECAYS outward from the range on both sides.
-        assert!(f64_of(profile[4]) > f64_of(profile[3]));
-        assert!(f64_of(profile[3]) > f64_of(profile[2]));
-        assert!(f64_of(profile[6]) > f64_of(profile[7]));
-        assert!(f64_of(profile[7]) > f64_of(profile[8]));
+        assert!(f64_of_e(profile[4]) > f64_of_e(profile[3]));
+        assert!(f64_of_e(profile[3]) > f64_of_e(profile[2]));
+        assert!(f64_of_e(profile[6]) > f64_of_e(profile[7]));
+        assert!(f64_of_e(profile[7]) > f64_of_e(profile[8]));
         eprintln!(
             "ridge profile (km): {:?}",
-            profile.iter().map(|v| f64_of(*v)).collect::<Vec<_>>()
+            profile.iter().map(|v| f64_of(v.km())).collect::<Vec<_>>()
         );
     }
 
     #[test]
     fn a_uniform_row_is_symmetric_which_is_what_makes_the_lift_a_neighbour_effect() {
-        // THE CONTROL, and it is NOT flatness. This test asserted a flat interior first, from the intuition that
-        // identical columns must stand at identical heights, and it was wrong: the strip Green's function goes
-        // NEGATIVE beyond `z = 3 pi / 4`, so at a 60 km spacing against an 83.8 km flexural parameter every
-        // neighbour past about 197 km pulls DOWN rather than up. Each column therefore sees a different mixture
-        // of lifting and pulling neighbours, and a finite unwrapped row of identical columns is genuinely not
-        // flat. Measured rather than assumed: index 4 sits above index 5 by about 1.0e5 raw units.
+        // THE CONTROL, and what it is NOT. This test first asserted a flat interior, from the intuition that
+        // identical columns stand at identical heights. That failed, and the second version explained the
+        // failure by the strip kernel going negative past `z = 3 pi / 4`. A review corrected BOTH: on a
+        // translationally invariant infinite or periodic plate a uniform load has a uniform response,
+        // necessarily, so the non-flat result is a BOUNDARY ARTIFACT of truncating the source list while still
+        // using infinite-plate Green's functions. It is not a kernel property and not a derived free edge.
+        //
+        // On a globe the row is periodic and the correct answer IS flat. Recording the artifact as physics is
+        // what the second version did, so this asserts only the invariant that survives truncation.
         //
         // The invariant that DOES hold is SYMMETRY. A uniform row is its own mirror image, so column `i` and
         // column `n - 1 - i` must agree to the bit. That is a real property of the superposition rather than a
@@ -213,18 +240,18 @@ mod tests {
         let n = profile.len();
         for i in 0..n {
             assert_eq!(
-                profile[i].to_bits(),
-                profile[n - 1 - i].to_bits(),
+                profile[i].km().to_bits(),
+                profile[n - 1 - i].km().to_bits(),
                 "a uniform row is its own mirror: index {i} against {}",
                 n - 1 - i
             );
         }
         // And the ends sit LOWEST, missing the neighbours beyond the row that would have lifted them.
         assert!(
-            f64_of(profile[0]) < f64_of(profile[5]),
-            "the unwrapped end is short of its missing neighbours: {} against {}",
-            f64_of(profile[0]),
-            f64_of(profile[5])
+            f64_of_e(profile[0]) < f64_of_e(profile[5]),
+            "the truncated end is short of the neighbours a periodic row would give it: {} against {}",
+            f64_of_e(profile[0]),
+            f64_of_e(profile[5])
         );
     }
 

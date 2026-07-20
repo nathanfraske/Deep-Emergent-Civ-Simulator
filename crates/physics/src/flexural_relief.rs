@@ -43,6 +43,30 @@ use crate::flexure::{
 };
 use crate::moment_equivalence::MomentEquivalentPlate;
 
+/// AN ELEVATION IN THE SURFACE'S OWN SENSE: kilometres ABOVE the compensation reference, positive UP.
+///
+/// # WHY THIS IS A TYPE AND NOT A DOCUMENTED CONVENTION
+///
+/// [`FlexedPlate::deflection_km`] returns a DOWNWARD-positive deflection, which is the Turcotte and Schubert
+/// convention the line and strip Green's functions are written in. The surface's elevation axis is positive
+/// UP. Those are opposite senses, and a consumer that stored one as the other produced a mountain that was a
+/// hole: the run-path profile was documented and tested as "above the compensation reference" while holding
+/// raw downward deflections, so its peak was a downward displacement wearing the word height. A review caught
+/// it; a comment saying which way is up had not been enough, because both quantities are a `Fixed` in
+/// kilometres and nothing stops one being assigned to the other.
+///
+/// So the conversion is a TYPE BOUNDARY that has to be crossed on purpose, once, at the point where a
+/// deflection becomes an elevation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct ElevationKm(Fixed);
+
+impl ElevationKm {
+    /// The elevation in kilometres above the compensation reference, positive up.
+    pub fn km(self) -> Fixed {
+        self.0
+    }
+}
+
 /// A CONVERGED PLATE READY TO BE LOADED: the moment-equivalent rigidity plus the two flexural lengths the
 /// Green's functions need, each derived once so a query point costs no root.
 ///
@@ -167,6 +191,26 @@ impl FlexedPlate {
     /// The internal rigidity this plate was built from.
     pub fn rigidity_internal(&self) -> Fixed {
         self.rigidity_internal
+    }
+
+    /// THE ELEVATION AT A QUERY POINT, positive UP, which is what a surface consumer wants.
+    ///
+    /// The one explicit conversion out of the Green's functions' downward-positive sense
+    /// ([`Self::deflection_km`]) into the surface's own upward-positive one, returned as [`ElevationKm`] so it
+    /// cannot be confused with a deflection again. A load pressing the plate DOWN therefore yields a NEGATIVE
+    /// elevation here, and a buoyant column, which is a negative downward load, stands up.
+    // @derives: the surface elevation at a point <- the plate's downward deflection under the load list
+    pub fn elevation_km(
+        &self,
+        loads: &[Load],
+        qx_km: Fixed,
+        qy_km: Fixed,
+    ) -> Result<ElevationKm, ReliefRefusal> {
+        let down = self.deflection_km(loads, qx_km, qy_km)?;
+        Fixed::ZERO
+            .checked_sub(down)
+            .map(ElevationKm)
+            .ok_or(ReliefRefusal::NotRepresentable)
     }
 
     /// THE DEFLECTION AT A QUERY POINT, in kilometres, summed over the whole load list.

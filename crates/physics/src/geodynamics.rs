@@ -153,14 +153,22 @@ pub fn column_buoyancy_load(
         return None;
     }
     let contrast = mantle_density.checked_sub(crustal_density)?;
-    let pressure = contrast
+    // THE LOAD IS DOWNWARD-POSITIVE, because that is the sense the Green's functions are written in
+    // (`FlexedPlate::deflection_km`). A crust LIGHTER than the mantle has a positive buoyancy contrast and
+    // therefore a NEGATIVE downward load: it pushes the plate up, and it must, or a continent sinks.
+    //
+    // This carried the buoyancy contrast straight through as a positive magnitude until a review caught it,
+    // which made light crust load the plate downward and turned the resulting relief upside down. The sign is
+    // the physics here rather than a convention: `(rho_m - rho_c)` positive means buoyant means up.
+    let downward = contrast
         .checked_mul(crustal_thickness_km)?
-        .checked_mul(gravity_km_s2)?;
+        .checked_mul(gravity_km_s2)
+        .and_then(|up| Fixed::ZERO.checked_sub(up))?;
     Some(crate::flexure::Load {
         kind: crate::flexure::LoadKind::UniformStripY {
             half_width: half_width_km,
         },
-        magnitude: pressure,
+        magnitude: downward,
         x: centre_km,
         y: Fixed::ZERO,
     })
@@ -316,11 +324,14 @@ mod flexural_bridge_tests {
             )
             .expect("the mafic province loads"),
         ];
+        // READ AS ELEVATION, positive UP, which is the whole point of the typed boundary: these tests
+        // compared raw DOWNWARD deflections against Airy elevations until a review caught the inversion.
         let at = |x: i32| {
             f64_of(
                 plate
-                    .deflection_km(&loads, Fixed::from_int(x), Fixed::ZERO)
-                    .expect("the boundary evaluates"),
+                    .elevation_km(&loads, Fixed::from_int(x), Fixed::ZERO)
+                    .expect("the boundary evaluates")
+                    .km(),
             )
         };
 
@@ -371,17 +382,18 @@ mod flexural_bridge_tests {
         )
         .expect("a foundering column is still a load");
         assert!(
-            load.magnitude < Fixed::ZERO,
-            "a denser-than-mantle column loads the plate downward, got {}",
+            load.magnitude > Fixed::ZERO,
+            "a denser-than-mantle column is a POSITIVE downward load, got {}",
             f64_of(load.magnitude)
         );
-        let w = earthlike_plate()
-            .deflection_km(&[load], Fixed::ZERO, Fixed::ZERO)
-            .expect("it evaluates");
+        let e = earthlike_plate()
+            .elevation_km(&[load], Fixed::ZERO, Fixed::ZERO)
+            .expect("it evaluates")
+            .km();
         assert!(
-            w < Fixed::ZERO,
-            "and it founders rather than being clamped at zero, got {}",
-            f64_of(w)
+            e < Fixed::ZERO,
+            "and it founders rather than being clamped at zero, got elevation {}",
+            f64_of(e)
         );
     }
 
