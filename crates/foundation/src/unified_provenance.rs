@@ -377,17 +377,23 @@ mod tests {
         let floor = real_floor();
         let joined =
             JoinedRegister::build(&cal, &floor).expect("the fold succeeds, no id collision");
-        // 229 calibration entries + 243 floor grades, no calibration/floor id collision.
+        // 232 calibration entries + 243 floor grades, no calibration/floor id collision.
+        //
+        // The calibration count moved 229 -> 232 when the conductivity ladder surfaced three values it had
+        // been supplying itself: the Slack estimator's band, the simple-class temperature exponent, and the
+        // ambient-frame pressure slack. Each is reserved and UNSET, so the count rising is the honest
+        // direction. This assertion is a ratchet on the manifest's size rather than a fact about the world,
+        // and it moves whenever a value stops being silently supplied.
         assert_eq!(
             cal.iter().count(),
-            229,
-            "the calibration manifest has 229 entries"
+            232,
+            "the calibration manifest has 232 entries"
         );
         assert_eq!(floor.grades.len(), 243, "the floor register has 243 grades");
         assert_eq!(
             joined.len(),
-            472,
-            "the joined register is the two node sets with no id collision (229 + 243)"
+            475,
+            "the joined register is the two node sets with no id collision (232 + 243)"
         );
     }
 
