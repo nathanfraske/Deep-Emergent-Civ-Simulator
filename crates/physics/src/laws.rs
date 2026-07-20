@@ -3720,6 +3720,33 @@ pub fn thermal_density_anomaly(
     sat_sub(ZERO, magnitude)
 }
 
+/// Whether a buoyancy contrast DRIVES convection or SUPPRESSES it, which its magnitude cannot say.
+///
+/// The layer is unstable exactly when the interior parcel is LIGHTER than its reference, so it rises:
+/// `delta_rho < 0`. That one test covers every case, including the ones an absolute value erases:
+///
+/// - ordinary expansion, interior hotter (`alpha > 0`, `dT > 0`): `delta_rho < 0`, unstable. Heated from
+///   below, it overturns.
+/// - ordinary expansion, interior COLDER (`alpha > 0`, `dT < 0`): `delta_rho > 0`, stable. Heated from
+///   above, it does not overturn at ANY magnitude.
+/// - NEGATIVE thermal expansion, interior hotter (`alpha < 0`, `dT > 0`): `delta_rho > 0`, stable. Heating
+///   makes the parcel denser, so the buoyancy that would drive convection instead pins the layer.
+/// - negative expansion, interior colder (`alpha < 0`, `dT < 0`): `delta_rho < 0`, unstable.
+///
+/// The two middle rows are why this exists. [`rayleigh_number`] and [`ln_rayleigh_number`] both take
+/// `|delta_rho|`, which is correct for the RATIO they compute (a Rayleigh number is a positive
+/// dimensionless group and a logarithm has no negative branch) and silent about the regime. A consumer that
+/// compares `Ra` against `Ra_crit` without this predicate declares a stably stratified layer to be
+/// convecting, and the MORE stable it is, the more vigorously it appears to convect.
+///
+/// A negative-expansion material is a data row rather than a special case here: the sign arrives already
+/// composed by [`thermal_density_anomaly`], which forms `-(rho alpha dT)`, so nothing keys on the material
+/// being alien. It is the same test in all four rows.
+// @derives: the convective stability sense <- the sign of the buoyancy contrast
+pub fn buoyancy_drives_convection(density_anomaly: Fixed) -> bool {
+    density_anomaly < ZERO
+}
+
 /// Rayleigh number, the convection ONSET control parameter: `Ra = |delta_rho| * g * d^3 / (eta * kappa)`,
 /// the dimensionless ratio of buoyant advection to thermal diffusion across a fluid layer. Convection
 /// begins when `Ra` crosses the critical Rayleigh number, so a runner pairs this with [`threshold_latch`]
