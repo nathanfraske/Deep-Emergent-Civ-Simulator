@@ -377,23 +377,23 @@ mod tests {
         let floor = real_floor();
         let joined =
             JoinedRegister::build(&cal, &floor).expect("the fold succeeds, no id collision");
-        // 232 calibration entries + 243 floor grades, no calibration/floor id collision.
+        // 233 calibration entries + 243 floor grades, no calibration/floor id collision.
         //
-        // The calibration count moved 229 -> 232 when the conductivity ladder surfaced three values it had
+        // The calibration count moved 229 -> 233: three from the conductivity ladder, which surfaced values it had
         // been supplying itself: the Slack estimator's band, the simple-class temperature exponent, and the
         // ambient-frame pressure slack. Each is reserved and UNSET, so the count rising is the honest
         // direction. This assertion is a ratchet on the manifest's size rather than a fact about the world,
         // and it moves whenever a value stops being silently supplied.
         assert_eq!(
             cal.iter().count(),
-            232,
-            "the calibration manifest has 232 entries"
+            233,
+            "the calibration manifest has 233 entries"
         );
         assert_eq!(floor.grades.len(), 243, "the floor register has 243 grades");
         assert_eq!(
             joined.len(),
-            475,
-            "the joined register is the two node sets with no id collision (232 + 243)"
+            476,
+            "the joined register is the two node sets with no id collision (233 + 243)"
         );
     }
 
@@ -421,18 +421,18 @@ mod tests {
             .map(str::to_string)
             .collect();
 
-        // The floor surface is the 6 reserved bio/chem couplings; the calibration surface is the Phase-1 205.
+        // The floor surface is the 6 reserved bio/chem couplings; the calibration surface is the Phase-1 206.
         assert_eq!(floor_surface.len(), 6, "the floor authoring surface is 6");
         assert_eq!(
             cal_surface.len(),
-            205,
-            "the calibration authoring surface is 205"
+            206,
+            "the calibration authoring surface is 206"
         );
 
         // The join adds NO cross-register flip: the unified surface is exactly the disjoint union of the two,
         // because no value in either register derives from an authoring-surface value in the other (verified at
         // source: the one live cross-register edge lands on measured floor axes). The count is a query, and it
-        // is 205 + 6 = 211.
+        // is 206 + 6 = 212.
         let expected: BTreeSet<String> = cal_surface.union(&floor_surface).cloned().collect();
         assert_eq!(
             unified, expected,
@@ -445,8 +445,8 @@ mod tests {
         );
         assert_eq!(
             unified.len(),
-            211,
-            "the unified honesty number is 211 (205 + 6)"
+            212,
+            "the unified honesty number is 212 (206 + 6)"
         );
     }
 

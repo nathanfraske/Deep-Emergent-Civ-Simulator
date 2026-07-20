@@ -2001,17 +2001,24 @@ fn province_seed_perturbation(star_mass: Fixed, orbit_au: Fixed, index: usize) -
 /// derivation: the convecting-mantle DEPTH from the planet's interior structure ([`convecting_mantle_depth_m`],
 /// retiring the depth fixture), the province COUNT from that depth and the planet circumference over the
 /// eigenvalue-derived convective cell aspect ([`provinces_across`]), the per-province radiogenic budget as the
-/// thermostat base (set so the mean province's steady state sits at its DERIVED solidus, the mantle-thermostat
-/// closure) times one-plus the PER-SYSTEM-derived heterogeneity times the deterministic seed, the volcanism
+/// thermostat base (set so the mean province's CONDUCTIVE-LIMIT steady state sits at its DERIVED solidus, the
+/// mantle-thermostat closure, which a convecting province settles below by its own Nusselt factor: see the
+/// closure's own note at the `base_heat` site and its register entry
+/// `interior.thermostat_set_point_solidus_fraction`) times one-plus the PER-SYSTEM-derived heterogeneity times
+/// the deterministic seed, the volcanism
 /// source density and gravity DERIVED (the mantle density and the planet's surface gravity), and the columns
 /// started laterally uniform at the mantle potential temperature (a fresh planet has no thermal history; the
 /// provinces are what the run produces).
 ///
 /// `solidus_surface_k` and `solidus_slope_k_per_gpa` are the world's OWN derived mantle solidus, threaded from
 /// the surface-composition melt wiring on this same scene (never an authored peridotite value). The melt is
-/// driven against each column's OWN evolving interior temperature (the kernel steps it: hotter early from the
-/// radiogenic budget, cooling as the sources decay), so relief emerges where-and-when a hot mantle crosses its
-/// own solidus and stops as it cools. `formation_melt_fraction` is the world's own formation-era partial-melt
+/// driven against each column's OWN evolving interior temperature, so relief emerges where-and-when a hot mantle
+/// crosses its own solidus and stops as it cools. WHY IT COOLS, corrected: the columns start at the young
+/// potential temperature and RELAX toward the thermostat's steady state, which for a convecting province lies
+/// below its own solidus. The radiogenic budget itself is CONSTANT for the whole run here (one
+/// [`province_column_params`] set is built and never rebuilt), so the sources do not spend down; the decaying
+/// reservoir that would do that is built and unread in [`civsim_sim::geodynamics::secular_history`], and wiring
+/// it is the same work that retires the thermostat closure. `formation_melt_fraction` is the world's own formation-era partial-melt
 /// fraction F (`None` on a sub-solidus formation that sorted no incompatibles), from which the radiogenic
 /// heterogeneity AMPLITUDE derives per-system (the Shaw batch-melting enrichment over F and the heat-producers'
 /// partition, [`heterogeneity_amplitude`]), retiring the former Earth 0.3 spread.
@@ -2081,17 +2088,35 @@ fn build_deep_time_provinces(
         source_density,
     )?;
 
-    // The interior-thermostat BASE radiogenic budget: set so a mean-seed province's conductive steady-state
-    // temperature sits at the world's OWN DERIVED solidus (the observed mantle self-regulation near its solidus).
-    // At the scaled operating point the steady state is T_ref + heat_production / loss_coeff with loss_coeff =
-    // conductivity / (density * depth^2) (the convection kernel's conductive balance), so the base that lands
-    // T_ss on the solidus is loss_coeff * (solidus - reference). This is a CLOSURE (the thermostat), not an
-    // authored value: it derives the base from the DERIVED solidus and the operating point, so the mean budget is
-    // per-system (it targets the world's own solidus). A deeper absolute derivation from the disk U/Th/K
-    // abundances times per-isotope heat production is blocked by a data gap (the AGSS09 abundance table stops at
-    // Z=42, so U and Th are absent, and no per-isotope specific-heat-production column is vendored); both are
-    // flagged as cited [M] columns to source, and until they land the self-regulation closure is the per-system
-    // mean.
+    // The interior-thermostat BASE radiogenic budget, a CLOSURE that is now REGISTERED rather than declared only
+    // in prose: `interior.thermostat_set_point_solidus_fraction` in `calibration/reserved.toml`, and a line in the
+    // Layer 3c Interior group of `docs/PROVENANCE_LEDGER.md`. It is BACK-SOLVED from a target steady state rather
+    // than derived from an isotope abundance times a per-isotope heat production. The kernel's per-tick conductive
+    // loss per kelvin of contrast is `k dt / (rho d^2)` (`SiColumnParams::conductive_loss_energy_per_kelvin`), so
+    // the budget that balances a contrast of `solidus - reference` is `loss_coeff * (solidus - reference)`.
+    //
+    // WHICH STEADY STATE IT TARGETS, stated exactly, because the previous wording named one the code does not
+    // reach. The balance above is the CONDUCTIVE-LIMIT one. The kernel's loss carries the boundary-layer Nusselt
+    // factor (`convection_step_si`: `loss = conductive_loss_energy_per_kelvin * delta_t * nusselt`), so equating
+    // production to loss gives `T_ss = T_ref + (solidus - T_ref) / Nu`. A NON-CONVECTING column (`Nu == 1`)
+    // settles on the solidus; every convecting province settles BELOW its own solidus by the factor `Nu`. Since
+    // `adiabatic_melt_column` returns a zero column below the surface solidus, a convecting province makes no melt
+    // at its steady state, so where this scene grows crust it is the young super-solidus transient relaxing rather
+    // than a steady-state balance.
+    //
+    // DERIVING A CLOSURE'S TARGET AND COEFFICIENT DOES NOT TAKE IT OFF THE AUTHORING SURFACE, which is why the
+    // former "not an authored value" claim is gone. The SET POINT (which steady state is chosen as the target) is
+    // the free knob, and it is reserved with its basis rather than settled here. What the derivation buys is that
+    // the knob is per-system and dimensionless, a fraction of the world's OWN derived solidus, so no Terran
+    // interior temperature is written down.
+    //
+    // THE RETIREMENT IS A WIRING RATHER THAN A FETCH, correcting the blocker this comment used to state. The
+    // per-isotope heat-production column IS vendored: `crates/physics/data/geology_floor.toml` carries
+    // `law.radiogenic_heat` with cited `geo.specific_heat_production` and `geo.decay_constant` rows for u238,
+    // u235, th232 and k40, and `civsim_sim::geodynamics::secular_history` already feeds decay into heat into the
+    // convection step. The one input still missing is the per-world isotope CONCENTRATION: the AGSS09 abundance
+    // table stops at Z=42 (`crates/physics/data/solar_abundances_agss09.toml`, 42 entries), so U and Th have no
+    // abundance to multiply.
     //
     // THE SECOND COPY IS RETIRED HERE. This site used to restate the kernel's `conductivity` and `density` as
     // its own `kernel_conductivity = 2` and `kernel_density = 1`, independent of the pair inside
@@ -2184,6 +2209,13 @@ fn build_deep_time_provinces(
     // tick length is the geological one rather than the dimensionless `1` the fixture kernel took. Those
     // were two different clocks in one stepper: the convection advanced by an abstract tick while the
     // crust advanced by 20 Myr, and nothing compared them.
+    //
+    // THE CLOSURE ITSELF IS REGISTERED at `interior.thermostat_set_point_solidus_fraction`
+    // (`calibration/reserved.toml`, Layer 3c Interior in `docs/PROVENANCE_LEDGER.md`). The `base_heat` below
+    // balances the CONDUCTIVE-LIMIT loss against a `solidus - reference` contrast; the kernel's own loss is that
+    // coefficient times the contrast times the Nusselt factor, so a convecting province's steady state is
+    // `reference + (solidus - reference) / Nu`, below the solidus. The full statement is on the block above
+    // `reference_temperature`.
     let thermostat_column = province_column_params(
         depth_mm,
         surface_gravity_m_s2,
