@@ -450,6 +450,9 @@ crates/physics/src/ewald.rs	ewald_energy	grandfathered	predates the derives-cove
 crates/physics/src/ewald.rs	ewald_potential_matrix	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/ewald.rs	madelung_constant	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/ewald.rs	scale	grandfathered	predates the derives-coverage gate; unclassified
+crates/physics/src/flexural_relief.rs	axisymmetric_length_km	accessor	unit readout of the axisymmetric length derived once in from_internal_rigidity
+crates/physics/src/flexural_relief.rs	flexural_parameter_km	accessor	unit readout of the line-load flexural parameter derived once in from_internal_rigidity
+crates/physics/src/flexural_relief.rs	rigidity_internal	accessor	returns the stored internal rigidity the plate was built from; no conversion and no derivation
 crates/physics/src/flexure.rs	deflection_at	grandfathered	predates the derives-coverage gate; unclassified
 crates/physics/src/flexure.rs	elastic_constants_admissible	predicate	whether a modulus pair sits inside the declared validation envelope
 crates/physics/src/flexure.rs	euler_gamma	grandfathered	predates the derives-coverage gate; unclassified

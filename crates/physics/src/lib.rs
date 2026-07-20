@@ -47,6 +47,7 @@ pub mod crystal_field;
 pub mod d_state_radius;
 pub mod elastic_thickness_rows;
 pub mod ewald;
+pub mod flexural_relief;
 pub mod flexure;
 pub mod floor_provenance;
 pub mod force_constant;
