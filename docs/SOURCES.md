@@ -12,9 +12,21 @@ Custody is one of three. `in_repo`: bytes held in-tree, checksum verifiable with
 witness. `external`: bytes in local custody outside the repo, checksum plus archive snapshot.
 The licence decides which is permitted; see `docs/working/FETCH_PIPELINE_PLAN.md` section 3.
 
-**39 sources** (8 registry, 31 mirrored).
+**42 sources** (11 registry, 31 mirrored).
 
 ## Registry (hand-maintained)
+
+### `bstar2006_lanz_hubeny`
+
+Lanz, T. and Hubeny, I., 2007, A Grid of NLTE Line-Blanketed Model Atmospheres of Early B-Type Stars (BSTAR2006), ApJS 169, 83-104, DOI 10.1086/511270 (verified at the primary: doi.org/10.1086/511270 resolves to this title at IOP; the earlier 10.1086/511268 was WRONG, it resolves to an unrelated silicate-obscuration paper). arXiv astro-ph/0611891.
+
+- sha256: `e5435bab670315a6611c2e7b252de9b8c6f88f12ce8a26d1c1c28906c0e24e10`
+- archived: https://web.archive.org/web/20260719182515/https://arxiv.org/pdf/astro-ph/0611891
+- scope: NLTE, plane-parallel, hydrostatic B-star model atmospheres over Teff 15,000 to 30,000 K (1000 K steps, 16 values), log g 1.75 to 4.75, six compositions from twice to one-tenth solar plus metal-free; the emergent model.flux spans the soft X-ray to the far-infrared, so the Lyman continuum (>13.6 eV) IS computed. This grid extends the Sternberg/OSTAR2002 O and early-B coverage DOWN into the Herbig regime (below the Sternberg 25 kK floor), the regime the radiative-envelope EUV wind (astro::nlte_departed_ionizing_spectrum) currently leaves unconstrained. SCOPE LIMIT that governs use: the paper's Fig. 6 EUV statement is an NLTE-versus-LTE(Kurucz) comparison, NOT the model-versus-blackbody departure the EUV code consumes, so it does NOT supply that departure; the model-versus-blackbody Herbig departure is DERIVABLE from the grid's model.flux SEDs (a data fetch), a named deeper rung, and must not be conflated with the Fig. 6 factor.
+- custody: witness
+- licence (**NOT redistributable**): NOT ESTABLISHED AS REDISTRIBUTABLE, so no bytes are held. This is the author's arXiv preprint of an AAS-copyright ApJS paper; the arXiv non-exclusive distribution licence grants arXiv the right to distribute but does not by itself grant third-party redistribution, and no CC licence is stated on the record, so redistribution is unconfirmed. The byte-identical Wayback snapshot stands as the held witness behind the receipt. The values read (a grid's parameter ranges and a figure's qualitative direction) are facts and are citable either way, which is what is done here.
+- licence evidence: arXiv default non-exclusive distribution licence (grants arXiv, not third parties); AAS copyright on the ApJS version of record; no CC statement found on the arXiv record
+- free route (preprint): https://arxiv.org/pdf/astro-ph/0611891
 
 ### `cod_phase_crystallography`
 
@@ -39,6 +51,18 @@ Jha, S., Harry, D. L. and Schutt, D. L., 2017, Toolbox for Analysis of Flexural 
 - custody: external
 - licence (redistribution unconfirmed): Gold open access (GSA Geosphere). The specific licence instrument is NOT stated in the source entry and has not been verified, so redistribution is unconfirmed and `redistributable` is deliberately absent rather than assumed from open-access status. Free-to-read is not free-to-redistribute.
 - free route (author-copy): https://derekschutt.wordpress.com/wp-content/uploads/2018/01/flexural_modeling_geosphere_2017.pdf
+
+### `henning_2009_tidal_heating`
+
+Henning, W.G., O'Connell, R.J. & Sasselov, D.D., 2009, Tidally Heated Terrestrial Exoplanets: Viscoelastic Response Models, Astrophysical Journal 707, 1000-1015, DOI 10.1088/0004-637X/707/2/1000, arXiv:0912.1907. Their Equation (1) is the standard fixed-Q synchronous-eccentric tidal heating rate, derived in Murray, C.D. & Dermott, S.F., 1999, Solar System Dynamics, Cambridge University Press, ISBN 978-0-521-57597-4, chapter 4, and Peale, S.J. & Cassen, P., 1978, Contribution of tidal dissipation to lunar thermal history, Icarus 36, 245-269, DOI 10.1016/0019-1035(78)90109-4, with the Io application in Peale, Cassen & Reynolds 1979, Science 203, 892-894, DOI 10.1126/science.203.4383.892.
+
+- sha256: `3db06bf4fd28826472b5a12d1135618e043e91a57497550cc7b520c24321d9bc`
+- archived: https://web.archive.org/web/20240430060355/https://arxiv.org/pdf/0912.1907
+- scope: The degree-2, fixed-Q, homogeneous, spin-synchronous, small-eccentricity leading-term tidal heat production rate E_dot = (21/2)(k2/Q) G M_pri^2 R_sec^5 n e^2 / a^6 (watts), with k2, Q and R the tidally deformed SECONDARY's (the moon's) and M_pri the PRIMARY's (the planet's). Holds for a moon at or near synchronous rotation and small eccentricity; the frequency- and temperature-dependent viscoelastic regime this paper develops PAST Equation (1) is out of scope for this leading analytic form.
+- custody: witness
+- licence (**NOT redistributable**): arXiv non-exclusive distribution licence (arxiv.org/licenses/nonexclusive-distrib/1.0), read from the abstract page for this submission on 2026-07-20: it grants arXiv the right to distribute and does NOT grant this project third-party redistribution rights, so no bytes are held in-tree. redistributable = false is the conservative and correct reading. The equation itself is an uncopyrightable analytic fact, so reading and citing it is safe independently of the redistribution question, which is why it is held as citation-plus-witness against the durable public archive rather than in-repo.
+- licence evidence: https://arxiv.org/abs/0912.1907 displays a 'view license' link to http://arxiv.org/licenses/nonexclusive-distrib/1.0/ (the arXiv non-exclusive distribution licence); no alternative Creative Commons licence is shown for this submission.
+- free route (preprint-server): https://arxiv.org/abs/0912.1907
 
 ### `janaf`
 
@@ -89,6 +113,16 @@ Powell, R.W., Ho, C.Y. & Liley, P.E., 1966, Thermal Conductivity of Selected Mat
 - licence evidence: the document's own front matter (issue date, GPO imprint, no copyright notice); Public Law 90-396, 11 July 1968, for the date comparison
 - free route (gov-work): https://nvlpubs.nist.gov/nistpubs/Legacy/NSRDS/nbsnsrds8.pdf
 - holding: `crates/physics/data/phase_conductivity/nsrds_nbs8_SLIM.pdf`
+
+### `svo_tlusty_bstar2006`
+
+Lanz, T. and Hubeny, I., 2007, A Grid of NLTE Line-blanketed Model Atmospheres of Early B-type Stars, ApJS 169, 83 (2007ApJS..169...83L), served as the BSTAR2006 grid through the Spanish Virtual Observatory Theoretical Spectra service (Data Archive Unit, Center of Astrobiology). Underlying code: TLUSTY, Hubeny, I. and Lanz, T., 1995, ApJ 439, 875 (1995ApJ...439..875H).
+
+- sha256: `e8d2b13abefd0b233104650f9fd3c66c00338b10ffcae542fdd4356176004078`
+- archived: https://web.archive.org/web/20260719195502/http://svo2.cab.inta-csic.es/theory/newov2/ssap.php?model=tlusty_bstarbin
+- scope: The 16 models at solar Z (z=1.0) and log g 4.0, Teff 15000 to 30000 K in 1000 K steps, held FIXED: (Z, log g) are model COORDINATES, and the wired lookup REFUSES a star off this slice rather than applying the solar-log-g-4 value (the full (Z, log g)-interpolated lookup over BSTAR2006's six compositions and thirteen gravities is a named later rung). Used ONLY for the model-over-blackbody EUV departure below the 911.28 A Lyman edge: derived as log10 departure in [-2.69, -0.65] over 15 to 30 kK, monotonic but NOT a single slope (the local slope rises from about 0.054 dex per 1000 K to a mid-range peak of about 0.188 at 25 to 26 kK and eases to about 0.171 by 29 to 30 kK; the average 0.14 is not the local rate). Full 16-point table, method, and cross-checks in docs/working/BSTAR2006_HERBIG_EUV_DEPARTURE.md. WINDLESS by construction: the grid carries no wind, so above 25 kK it does NOT match the wind-affected Sternberg WM-Basic anchor and must stay a SIBLING grounded interval, never merged with it (the disjoint-evidence discipline P0-B enforces); its value is the 15 to 25 kK region where no windy grid reaches. All 16 points are now byte-verified Wayback witnesses (the coordinator's SAVE-retry closed the earlier 23-24 kK archive_pending gap), so the earlier interpolation prohibition is lifted.
+- custody: witness
+- licence (**NOT redistributable**): No rights, licence, or copyright field is present on the SVO service pages checked or anywhere in the VOTable Curation metadata (the only Curation fields are Publisher, PublisherDID, PublisherID, Reference, and Contact; verified in-session against a held VOTable and independently by the coordinator). An earlier draft of this entry asserted an acknowledgement-and-cite expectation that was NOT read from any page (it was inherited from a fetch summary), and it has been removed rather than kept as an unconfirmed receipt. redistributable is set false as the conservative reading, which is the operative provenance decision. Held as citation-plus-witness: the SED values are treated as citable facts (computed model data, not authored expression), the same handling this registry applies to its other data entries, so reading and citing them is safe independently of the redistribution question, and no bytes are held.
 
 ### `touloukian_1966_oxides`
 

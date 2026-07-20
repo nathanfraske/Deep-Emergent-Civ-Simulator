@@ -203,6 +203,32 @@ pub fn stellar_effective_temperature(
     Some(if t_eff > t_max { t_max } else { t_eff })
 }
 
+/// The BLACK, ISOTHERMAL SPHERE REDISTRIBUTION FACTOR, DERIVED from geometry rather than reserved: a body that
+/// absorbs starlight on its circular cross-section `pi r^2` and re-emits isotropically over its full sphere
+/// `4 pi r^2` reprocesses `pi r^2 / (4 pi r^2)` of the incident flux per unit emitting area. The `pi` and `r^2`
+/// cancel analytically, so the factor is the EXACT rational `1/4`, the cross-section-to-sphere ratio that
+/// reproduces a body's blackbody equilibrium temperature (the ~278 K at 1 AU anchor). ADMITS THE ALIEN: it is pure
+/// geometry, independent of the body's composition or the star's spectrum.
+///
+/// SCOPE, stated so it is never over-read: this is the BLACK (zero-albedo) case, so the 278 K anchor is the airless
+/// blackbody value a real body's albedo reduces (Earth's ~255 K is 278 K times `(1-A)^(1/4)`); and it is the
+/// ISOTHERMAL / FULL-REDISTRIBUTION case, the `1/4` assuming the absorbed flux spreads uniformly over the whole
+/// sphere (a fast rotator or a high thermal-inertia body), where a slow rotator radiating mostly from its dayside
+/// carries a larger factor. A CALLER supplies its own albedo and redistribution when the body departs from black
+/// and isothermal.
+///
+/// NOT THE DISK DEFAULT. This is a SPHERICAL-BODY redistribution factor, NOT the passive-disk reprocessing
+/// solution. A passive FLARED DISK intercepts starlight at a shallow grazing angle and radiates from two faces, so
+/// its reprocessing factor is the grazing-and-flaring geometry (of order a few percent, a much SMALLER number),
+/// which needs a disk vertical-structure (scale-height flaring) substrate the engine does not yet carry. The
+/// canonical disk therefore passes its OWN flared factor to [`irradiated_disk_temperature`] and
+/// [`disk_effective_temperature`] (the derived-disk tests use about `0.05`); this `1/4` must never be wired in as
+/// the disk default, and is exercised only for a spherical grain or a fast-rotating body's equilibrium temperature.
+pub fn spherical_reprocessing_factor() -> Fixed {
+    // pi r^2 (absorbing cross-section) over 4 pi r^2 (isotropic emitting sphere): pi and r^2 cancel to the exact 1/4.
+    Fixed::from_ratio(1, 4)
+}
+
 /// The IRRADIATED-DISK (surface-equilibrium) TEMPERATURE `T_irr(r)` (K) at an orbital distance, DERIVED from
 /// irradiation balance: the disk annulus at distance `r` intercepts the stellar flux `F(r) = L/(4*pi*r^2)`
 /// ([`stellar_flux`], the same flux a world at that orbit receives), absorbs a geometry-set fraction of it, and
@@ -217,12 +243,12 @@ pub fn stellar_effective_temperature(
 ///
 /// Every per-world input is a scenario-set ARGUMENT (the admit-the-alien test): `mass_ratio`, `luminosity_exponent`
 /// (the star's mass and its mass-luminosity residue, together fixing `L`), `distance_au` (the orbit), and
-/// `reprocessing_factor`. The reprocessing factor is the reserved closure-residue of the disk's absorb-to-reradiate
-/// GEOMETRY: `1/4` for a body that absorbs on its cross-section and re-emits isotropically (the fast-rotator /
-/// spherical-grain equilibrium, the value that reproduces a planet's blackbody equilibrium temperature), a
-/// grazing-and-flaring factor for a passive flared disk that intercepts starlight at a shallow angle and radiates
-/// from two faces. Its basis is the disk (or grain) geometry of the world's regime, so a different disk structure
-/// is a data row, never a rewrite. `t_max` is the representable ceiling the fourth-root read caps at (an engine
+/// `reprocessing_factor`. The reprocessing factor is the disk's absorb-to-reradiate GEOMETRY, DERIVED not reserved:
+/// the spherical-grain / fast-rotator case is [`spherical_reprocessing_factor`], the exact cross-section-to-sphere
+/// `1/4` that reproduces a planet's blackbody equilibrium temperature; a passive flared disk that intercepts
+/// starlight at a shallow angle and radiates from two faces takes the grazing-and-flaring factor instead, keyed on
+/// the disk's own flaring (a derive-later data row when the vertical-structure substrate lands). Its basis is the
+/// disk (or grain) geometry of the world's regime, so a different disk structure is a data row, never a rewrite. `t_max` is the representable ceiling the fourth-root read caps at (an engine
 /// bound). At Earth's orbit (`mass_ratio = 1`, `distance_au = 1`, `reprocessing_factor = 1/4`) this derives the
 /// ~278 K blackbody equilibrium temperature from `L_sun`, the AU, and the derived `sigma` alone, the derive-not-fit
 /// anchor. `None` on a non-positive distance or a flux past the representable range.
@@ -1282,6 +1308,121 @@ pub fn cloud_core_coupled_temperatures(
     })
 }
 
+/// The VISUAL EXTINCTION `A_V` (magnitudes) to a cloud-core center, DERIVED from the core's own hydrogen column
+/// density and the cited gas-to-extinction ratio: `A_V = N_H / (N_H/A_V)`. The column (order `1e22` per cm^2) and
+/// the ratio (order `1e21` per cm^2 per mag) both overflow fixed point, so the caller passes their base-10
+/// LOGARITHMS and the division is a subtraction in the log domain, `log10(A_V) = log10(N_H) - log10(N_H/A_V)`, then
+/// exponentiated to the representable `A_V` (order 1 to 100 for a core). DERIVED, no authored value: `log10_column`
+/// is the core's own column (a drawn or derived environment quantity) and `log10_gas_to_extinction_ratio` is the
+/// cited Bohlin, Savage and Drake 1978 / Guver and Ozel 2009 constant (`N_H/A_V ~ 1.87e21` to `2.21e21`, vendored in
+/// `disk_arc_literature`). ADMITS THE ALIEN: keyed on the core's own column against a cited dust law, so a
+/// different dust-to-gas world is a data row. `None` if the log-domain result overflows the representable range.
+// @derives: the visual extinction A_V to a cloud-core center <- the core's hydrogen column density over the cited gas-to-extinction ratio (Bohlin 1978 / Guver-Ozel 2009)
+pub fn visual_extinction_magnitudes(
+    log10_column_h_cm2: Fixed,
+    log10_gas_to_extinction_ratio_cm2_per_mag: Fixed,
+) -> Option<Fixed> {
+    let ln10 = Fixed::from_int(10).ln();
+    let log10_a_v = log10_column_h_cm2.checked_sub(log10_gas_to_extinction_ratio_cm2_per_mag)?;
+    let ln_ceiling = Fixed::from_int(31).checked_mul(Fixed::from_int(2).ln())?;
+    let ln_a_v = log10_a_v.checked_mul(ln10)?;
+    if ln_a_v >= ln_ceiling {
+        return None;
+    }
+    Some(ln_a_v.exp())
+}
+
+/// The BROADBAND DUST-HEATING ATTENUATION ESTIMATOR: the effective attenuation efficiency `k` per magnitude of
+/// visual extinction, held as a BAND `[k_lo, k_hi]` rather than a single value because it is `A_V`-dependent and no
+/// single constant is the physical model. Zucconi, Walmsley and Galli 2001 (vendored) give a per-frequency
+/// radiative-transfer solution whose EFFECTIVE broadband `k` runs about `0.05` (deep cores, where the penetrating
+/// far-IR takes over) to about `0.13` (shallow cores). This model carries that range so the estimator it feeds
+/// returns a band, never a laundered point.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct ExtinctionChiEstimator {
+    /// The shallow-attenuation edge (per magnitude), the smaller `k` toward which deep cores flatten.
+    pub k_lo: Fixed,
+    /// The steep-attenuation edge (per magnitude), the larger `k` of shallow cores.
+    pub k_hi: Fixed,
+}
+
+impl ExtinctionChiEstimator {
+    /// Zucconi, Walmsley and Galli 2001's broadband dust-heating range, `k` about `0.05` to `0.13` per magnitude
+    /// (vendored receipt in `disk_arc_literature`). NOT the V-band `0.4`: the V-band flux attenuation
+    /// `10^(-A_V/2.5)` grossly over-attenuates the DUST-HEATING field, which is broadband (optical-NIR, far-IR,
+    /// mid-IR, the cosmic background) and penetrates a dark core from frequencies where the optical depth is of
+    /// order one, far shallower than the V band.
+    pub fn zucconi_2001() -> Self {
+        Self {
+            k_lo: Fixed::from_ratio(5, 100),
+            k_hi: Fixed::from_ratio(13, 100),
+        }
+    }
+}
+
+/// A banded log-domain radiation-field scaling `chi`, the [`ExtinctionChiEstimator`] output. Held as `log10(chi)`
+/// so a deep core (a `chi` far below the fixed-point floor) stays REPRESENTABLE rather than underflowing to a
+/// false zero or a refusal: the linear value is recovered only on demand, and only that recovery can fail.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct ChiEstimateBand {
+    /// `log10(chi)` at the deepest attenuation (the larger `k`), the band's lower `chi` edge.
+    pub log10_chi_lo: Fixed,
+    /// `log10(chi)` at the shallowest attenuation (the smaller `k`), the band's upper `chi` edge.
+    pub log10_chi_hi: Fixed,
+}
+
+impl ChiEstimateBand {
+    /// The linear `chi` upper edge, `10^(log10_chi_hi)`. `None` if it overflows the representable range.
+    pub fn linear_hi(&self) -> Option<Fixed> {
+        let ln10 = Fixed::from_int(10).ln();
+        let ln_val = self.log10_chi_hi.checked_mul(ln10)?;
+        let ln_ceiling = Fixed::from_int(31).checked_mul(Fixed::from_int(2).ln())?;
+        if ln_val >= ln_ceiling {
+            return None;
+        }
+        Some(ln_val.exp())
+    }
+
+    /// The linear `chi` lower edge, `10^(log10_chi_lo)`. `None` if a deep core drives it below the fixed-point
+    /// floor: the honest limit of a LINEAR carrier, surfaced here rather than swallowed, since the log edges above
+    /// stay live for a consumer that carries `log10(chi)` through the thermal balance.
+    pub fn linear_lo(&self) -> Option<Fixed> {
+        let ln10 = Fixed::from_int(10).ln();
+        let chi = self.log10_chi_lo.checked_mul(ln10)?.exp();
+        (chi > Fixed::ZERO).then_some(chi)
+    }
+}
+
+/// A LAYER-3 ESTIMATE of the radiation-field scaling `chi` from the visual extinction, NOT a derivation and NOT a
+/// retirement of the reserved `chi` the coupled cloud-core temperature solve ([`cloud_core_coupled_temperatures`])
+/// reads. The interstellar field that heats core dust is attenuated by the core's extinction, modelled here to
+/// FIRST ORDER as `chi = 10^(-A_V * k)` over the [`ExtinctionChiEstimator`] band. This is a coordinate change on a
+/// single effective `k`, a stand-in for Zucconi's per-frequency `exp(-tau_nu)` radiative transfer, so it is graded
+/// an estimator: the true `chi(A_V)` is spectral (the far-IR takes over as the core deepens, flattening `k`), and
+/// deriving it needs the broadband dust-heating integral over the external SED, the dust opacity, the column, and
+/// the geometry, a substrate this does not build. The band `[k_lo, k_hi]` is carried through so the output is an
+/// interval, and it is returned in the LOG domain ([`ChiEstimateBand`]) so a deep core does not vanish into a false
+/// zero: the representation-liveness rule says a large extinction convicts a linear carrier, not the core's
+/// existence. `None` only on a negative extinction or an inverted `k` band.
+pub fn radiation_field_chi_estimate_from_extinction(
+    a_v_magnitudes: Fixed,
+    estimator: &ExtinctionChiEstimator,
+) -> Option<ChiEstimateBand> {
+    if a_v_magnitudes < Fixed::ZERO
+        || estimator.k_lo <= Fixed::ZERO
+        || estimator.k_hi < estimator.k_lo
+    {
+        return None;
+    }
+    // log10(chi) = -A_V * k. The steeper k (k_hi) gives the deeper attenuation, so it forms the lower chi edge.
+    let log10_chi_lo = Fixed::ZERO.checked_sub(a_v_magnitudes.checked_mul(estimator.k_hi)?)?;
+    let log10_chi_hi = Fixed::ZERO.checked_sub(a_v_magnitudes.checked_mul(estimator.k_lo)?)?;
+    Some(ChiEstimateBand {
+        log10_chi_lo,
+        log10_chi_hi,
+    })
+}
+
 /// The DISK ACCRETION-RATE CLOCK (the disk-evolution arc, slice 1): the Lynden-Bell-Pringle self-similar decline
 /// (Hartmann et al. 1998), `Mdot(t) = Mdot_0 * (1 + t / t_visc) ^ (-p)` with the decline exponent
 /// `p = (5/2 - gamma) / (2 - gamma)` set by the viscous-spreading exponent `gamma` (the same `gamma ~ 1` gate-G
@@ -1555,16 +1696,15 @@ pub fn derive_viscous_time_myr(
 /// volume radius: `R_L/a = c_num * q^(2/3) / (c_log * q^(2/3) + ln(1 + q^(1/3)))`, `q = M_host/M_companion`,
 /// accurate to about one percent over all `q`.
 ///
-/// MODALITY: this is the HARD UPPER EDGE on the disk's outer radius, NOT the expected truncation radius (an
-/// intrinsic bound, not a trusted central value: the bound-as-estimate defect class). A circumstellar disk
-/// tidally truncates INSIDE its Roche lobe, at the outermost non-overlapping Lindblad resonance (Paczynski 1977,
-/// Papaloizou and Pringle 1977, Artymowicz and Lubow 1994), at `R_t = f * R_L` with the resonance-truncation
-/// FRACTION `f` (~0.3 to 0.9, conditioned on mass ratio, eccentricity, and viscosity) a FETCH TARGET, not
-/// authored here. So this ships as the DECLARED UPPER EDGE of a one-sided bracket: [`tidally_capped_scale_radius_au`]
-/// caps `R_1` at it, the CONSERVATIVE (least-truncating, disk-too-large, `tau_disk`-biased-long) bound, until the
-/// fraction lands and tightens the cap to `f * R_L`, at which point `t_visc` and `tau_disk` inherit the roughly
-/// `sqrt(f)` band (a ten-to-twenty percent class effect) through [`derive_viscous_time_myr`] (`t_visc ~
-/// sqrt(R_1)`), the machinery already built rather than a new path.
+/// MODALITY: this is the HARD UPPER EDGE on the disk's outer radius, NOT the expected truncation radius. A
+/// circumstellar disk tidally truncates INSIDE its Roche lobe, at the outermost non-overlapping Lindblad resonance
+/// (Paczynski 1977, Papaloizou and Pringle 1977, Artymowicz and Lubow 1994), at `R_t = f * R_L` with the
+/// resonance-truncation FRACTION `f` now VENDORED ([`resonant_truncation_fraction`], the Pichardo 2005 fit
+/// `f = 0.733 (1 - e)^1.20 q^0.07`, `q` the companion mass fraction), so [`tidally_capped_scale_radius_au`] caps
+/// `R_1` at the expected `f * R_L`
+/// rather than this conservative edge. `t_visc` and `tau_disk` inherit the resulting `sqrt(f)` band (a class effect,
+/// wider at high eccentricity) through [`derive_viscous_time_myr`] (`t_visc ~ sqrt(R_1)`), the machinery already
+/// built rather than a new path. This Roche-lobe radius stays the outer bound of that band.
 ///
 /// SEPARATION CONVENTION: `separation_au` is the SEMI-MAJOR AXIS `a`, so this is the Roche lobe at the mean
 /// separation. In an eccentric binary the tide is strongest at periastron, where the instantaneous lobe is
@@ -1603,24 +1743,230 @@ pub fn roche_lobe_radius_au(
     separation_au.checked_mul(fraction)
 }
 
-/// Cap a disk's birth scale radius `R_1` at the companion's [`roche_lobe_radius_au`]: the effective `R_1`,
-/// `min(birth, roche_lobe)`. A disk inside its Roche lobe is untouched (a wide or absent companion leaves the
-/// birth radius); a disk that would spill past it is truncated to the lobe. The result feeds
-/// [`derive_viscous_time_myr`] as `scale_radius_au` unchanged, so binarity shortens `tau_disk` with no new path.
+/// The RESONANT DISK-TRUNCATION FRACTION `f = R_t / R_L`: the fraction of the host's Roche-lobe radius at which a
+/// circumstellar disk truncates under the companion's resonant torques, the cited closed fit
+/// `f = c (1 - e)^p_e q^p_f` (Pichardo, Sparke and Aguilar 2005, Eq. 6, VERIFIED source-verbatim against the held
+/// scan p.524: `R_d ~ R_d,Egg * 0.733 (1 - e)^1.20 q^0.07`). The symbol `q` is the COMPANION MASS FRACTION
+/// `M_2 / (M_1 + M_2)` (Pichardo Eq. 5 and Figs 3 to 4), NOT a mass ratio, over `q in [0.01, 0.99]`, `e in [0, 0.9]`,
+/// to about 6.5 percent. The disk edge sits INSIDE the Roche lobe: `f` runs from about 0.53 (a low mass fraction) to
+/// 0.73 (a companion-dominated split), weakly increasing with the mass fraction (the exponent is 0.07, about 17
+/// percent per decade of `q`, weak but NOT negligible), and tightening sharply with eccentricity (`f ~ 0.32` at
+/// `e = 0.5`, about `0.046` at `e = 0.9`, at the high-mass-fraction end) as the companion's closest approach carves
+/// the disk back.
 ///
-/// MODALITY: the Roche lobe is the HARD UPPER EDGE, not the expected truncation radius (the disk truncates inside
-/// it at `f * R_L`, the fraction fetch-pending, see [`roche_lobe_radius_au`]), so this returns the UPPER BOUND on
-/// the capped `R_1`, hence the upper bound on `t_visc` and the longest `tau_disk`. When the resonance-truncation
-/// fraction lands the cap tightens to `f * R_L` and the bound becomes a band; today it is the conservative edge.
-/// `None` on a non-positive input.
-pub fn tidally_capped_scale_radius_au(birth_r1_au: Fixed, roche_lobe_au: Fixed) -> Option<Fixed> {
-    if birth_r1_au <= Fixed::ZERO || roche_lobe_au <= Fixed::ZERO {
+/// CORRECTION OF RECORD: the `q` exponent is 0.07, not the 0.01 an earlier OCR text-layer read reported (a
+/// superscript misread, caught in the derive-first audit and corrected against the held page image). The coefficients
+/// are CITED data (Principle 11), carried by [`DiskTruncationFit`]; the mechanism is fixed Rust. ADMITS THE ALIEN:
+/// keyed on the binary's own eccentricity and mass fraction.
+///
+/// THIS IS ONE RUNG, NOT THE UNIVERSAL EDGE. Pichardo is the COPLANAR, DISSIPATIONLESS invariant-loop determination
+/// (an estimator ceiling, no viscosity). Two SEPARATE rungs stay distinct and are NOT folded into these
+/// coefficients: the Artymowicz and Lubow 1994 SPH edge sits LOWER and moves OUTWARD with disk viscosity (the edge
+/// is the outermost resonance the viscous torque cannot overflow), and the Manara / Papaloizou-Pringle
+/// viscous-torque fit (a distinct `h mu^k` form that consumes `alpha_viscosity` and `H/r` through a Reynolds state)
+/// is its own type, built only when a consumer needs the viscosity-conditioned edge. A viscous disk's true
+/// truncation is a band between the SPH edge and this dissipationless bound. The fit's OWN validity travels with
+/// its coefficients (the [`ConvectiveTurnoverFit`] precedent): the source fitted `e in [0, 0.90]` and `q in
+/// [0.01, 0.99]` to about 6.5 percent, so an evaluation outside that box REFUSES rather than extrapolating the fit.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct DiskTruncationFit {
+    /// The fit coefficient `c` (the `q -> 1` circular-orbit limit of `f`). Cited (Pichardo 2005 Eq. 6, 0.733).
+    pub circular_fraction: Fixed,
+    /// The exponent on `(1 - e)`, the eccentricity tightening. Cited (1.20).
+    pub eccentricity_exponent: Fixed,
+    /// The exponent on the companion mass fraction `q = M_2/(M_1+M_2)`, weakly positive. Cited (0.07, NOT the 0.01
+    /// an OCR text layer misread; corrected against the held scan p.524).
+    pub mass_fraction_exponent: Fixed,
+    /// The fractional fit accuracy, carried so the fraction ships as a BAND `f * (1 +/- this)` rather than a point.
+    /// Cited (Pichardo 2005 p.524, `+/- 6.5 percent`).
+    pub fit_error_fraction: Fixed,
+    /// The highest eccentricity the fit was measured over (Pichardo p.524, `0.90`); above it the evaluation refuses.
+    pub valid_ecc_max: Fixed,
+    /// The lowest companion mass fraction the fit was measured over (Pichardo p.524, `0.01`).
+    pub valid_mass_fraction_min: Fixed,
+    /// The highest companion mass fraction the fit was measured over (Pichardo p.524, `0.99`).
+    pub valid_mass_fraction_max: Fixed,
+}
+
+impl DiskTruncationFit {
+    /// The Pichardo, Sparke and Aguilar 2005 invariant-loop fit (MNRAS 359, 521, Eq. 6, held-scan p.524), as cited
+    /// data: `f = 0.733 (1 - e)^1.20 q^0.07`, `q` the companion mass fraction, fitted over `e in [0, 0.90]` and
+    /// `q in [0.01, 0.99]` to `+/- 6.5 percent`. Vendored in `disk_arc_literature` (`pichardo_2005`).
+    pub fn pichardo_2005() -> Self {
+        DiskTruncationFit {
+            circular_fraction: Fixed::from_ratio(733, 1000), // 0.733
+            eccentricity_exponent: Fixed::from_ratio(120, 100), // 1.20
+            mass_fraction_exponent: Fixed::from_ratio(7, 100), // 0.07 (verified p.524, not the OCR-misread 0.01)
+            fit_error_fraction: Fixed::from_ratio(65, 1000),   // +/- 6.5 percent (p.524)
+            valid_ecc_max: Fixed::from_ratio(90, 100),         // e in [0, 0.90]
+            valid_mass_fraction_min: Fixed::from_ratio(1, 100), // q in [0.01, ...]
+            valid_mass_fraction_max: Fixed::from_ratio(99, 100), // q in [..., 0.99]
+        }
+    }
+}
+
+/// Which circumstellar disc a truncation radius describes. Pichardo Eq. 6 (the invariant-loop fit) is the disc
+/// around the PRIMARY (the accretor hosting the modelled disc); the paper's separate secondary-disc rule
+/// (`0.4 +/- 0.03` of the Lagrange radius times `(1 - e)`, p.526) is a DIFFERENT relation. Keying the evaluation on
+/// the component stops the two from being silently swapped, the ambiguity equal-mass tests cannot expose.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum CircumstellarComponent {
+    /// The disc around the primary (host) star, the regime Pichardo Eq. 6 fits.
+    Primary,
+    /// The disc around the secondary (companion) star, governed by the distinct secondary-disc rule.
+    Secondary,
+}
+
+/// The physical MODALITY a truncation radius is drawn from: these are SEPARATE rungs, not one number. The
+/// dissipationless invariant-loop UPPER bound (Pichardo 2005) sits above the viscous SPH resonant edge
+/// (Artymowicz-Lubow 1994), which sits below the tidal-torque-balance radius (Papaloizou-Pringle 1977, the
+/// near-Roche-lobe high-viscosity limit). A consumer that needs the viscous edge reads a different rung, not this
+/// one relabelled.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum TruncationModality {
+    /// Pichardo 2005 coplanar dissipationless invariant-loop determination: an UPPER bound (no viscosity).
+    InvariantLoopUpperBound,
+    /// Artymowicz-Lubow 1994 viscous SPH resonant edge: LOWER, moves outward with disk viscosity.
+    ViscousSphResonant,
+    /// Papaloizou-Pringle 1977 tidal-torque-balance radius: the near-Roche-lobe high-viscosity limit.
+    TidalTorqueBalance,
+}
+
+/// A banded truncation FRACTION `f = R_t / R_L` (dimensionless), the Pichardo central value widened by its stated
+/// fit error. `lo <= hi`, both in `(0, 1]` for a physical truncation inside the Roche lobe.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct TruncationFractionBand {
+    /// The lower fraction edge, `f_central * (1 - fit_error_fraction)`.
+    pub lo: Fixed,
+    /// The upper fraction edge, `f_central * (1 + fit_error_fraction)`.
+    pub hi: Fixed,
+}
+
+impl TruncationFractionBand {
+    /// The central fraction, the midpoint of the symmetric band (a readout, not the consumed value).
+    pub fn central(&self) -> Option<Fixed> {
+        self.lo
+            .checked_add(self.hi)?
+            .checked_div(Fixed::from_int(2))
+    }
+}
+
+/// A banded truncation RADIUS (AU), the fraction band scaled by the Roche-lobe radius.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct TruncationRadiusBand {
+    /// The lower radius edge (AU).
+    pub lo_au: Fixed,
+    /// The upper radius edge (AU).
+    pub hi_au: Fixed,
+}
+
+impl TruncationRadiusBand {
+    /// The central radius (AU), the midpoint of the band (a readout for a consumer that wants a single value).
+    pub fn central(&self) -> Option<Fixed> {
+        self.lo_au
+            .checked_add(self.hi_au)?
+            .checked_div(Fixed::from_int(2))
+    }
+}
+
+/// The TYPED truncation evaluation: the banded fraction and radius, tagged with the modality it was drawn from and
+/// the circumstellar component it describes, so a scalar Pichardo output can never be mistaken for the canonical
+/// disk state. Built by [`pichardo_truncation_evaluation`]; consumed by [`tidally_capped_scale_radius_au`].
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct TruncationEvaluation {
+    /// The truncation fraction band `f = R_t / R_L`.
+    pub fraction: TruncationFractionBand,
+    /// The truncation radius band `R_t = f * R_L` (AU).
+    pub radius_au: TruncationRadiusBand,
+    /// Which model rung this radius is drawn from (Pichardo: the invariant-loop upper bound).
+    pub modality: TruncationModality,
+    /// Which disc this radius describes (Pichardo Eq. 6: the circumprimary disc).
+    pub component: CircumstellarComponent,
+}
+
+/// Derive the [`DiskTruncationFit`] fraction BAND `f = c (1 - e)^p_e q^p_f`, widened by the fit's stated accuracy,
+/// at a binary's eccentricity and companion mass fraction `q = M_2/(M_1+M_2)`. The band is the point fraction times
+/// `(1 -/+ fit_error_fraction)`, so no downstream consumer reads a laundered point. The fit's OWN measured domain is
+/// enforced (Pichardo `e in [0, 0.90]`, `q in [0.01, 0.99]`): outside it the function REFUSES rather than
+/// extrapolating an invariant-loop fit into a regime it never covered. `None` if `e` is negative or above the fit's
+/// `valid_ecc_max`, or the mass fraction is outside `[valid_mass_fraction_min, valid_mass_fraction_max]`.
+pub fn resonant_truncation_fraction(
+    eccentricity: Fixed,
+    companion_mass_fraction: Fixed,
+    fit: &DiskTruncationFit,
+) -> Option<TruncationFractionBand> {
+    if eccentricity < Fixed::ZERO
+        || eccentricity > fit.valid_ecc_max
+        || companion_mass_fraction < fit.valid_mass_fraction_min
+        || companion_mass_fraction > fit.valid_mass_fraction_max
+    {
         return None;
     }
-    Some(if birth_r1_au < roche_lobe_au {
-        birth_r1_au
-    } else {
-        roche_lobe_au
+    let one_minus_e = Fixed::ONE.checked_sub(eccentricity)?;
+    let ecc_term = one_minus_e.powf(fit.eccentricity_exponent);
+    let q_term = companion_mass_fraction.powf(fit.mass_fraction_exponent);
+    let central = fit
+        .circular_fraction
+        .checked_mul(ecc_term)?
+        .checked_mul(q_term)?;
+    let lo = central.checked_mul(Fixed::ONE.checked_sub(fit.fit_error_fraction)?)?;
+    let hi = central.checked_mul(Fixed::ONE.checked_add(fit.fit_error_fraction)?)?;
+    Some(TruncationFractionBand { lo, hi })
+}
+
+/// Compose the Pichardo [`TruncationEvaluation`]: the banded fraction from [`resonant_truncation_fraction`] scaled
+/// to a radius band by the Roche-lobe radius, tagged [`TruncationModality::InvariantLoopUpperBound`] and
+/// [`CircumstellarComponent::Primary`] (Pichardo Eq. 6 is the circumprimary dissipationless upper bound). This is
+/// the typed object the cap consumes, so the modality and component travel with the number rather than being
+/// implied. `None` on a non-positive Roche lobe or a domain refusal from the fraction.
+pub fn pichardo_truncation_evaluation(
+    eccentricity: Fixed,
+    companion_mass_fraction: Fixed,
+    roche_lobe_au: Fixed,
+    fit: &DiskTruncationFit,
+) -> Option<TruncationEvaluation> {
+    if roche_lobe_au <= Fixed::ZERO {
+        return None;
+    }
+    let fraction = resonant_truncation_fraction(eccentricity, companion_mass_fraction, fit)?;
+    Some(TruncationEvaluation {
+        radius_au: TruncationRadiusBand {
+            lo_au: roche_lobe_au.checked_mul(fraction.lo)?,
+            hi_au: roche_lobe_au.checked_mul(fraction.hi)?,
+        },
+        fraction,
+        modality: TruncationModality::InvariantLoopUpperBound,
+        component: CircumstellarComponent::Primary,
+    })
+}
+
+/// Cap a disk's birth scale radius `R_1` at the companion's resonant TRUNCATION radius band, returning the effective
+/// `R_1` as a BAND `[min(birth, R_t_lo), min(birth, R_t_hi)]`. A disk inside its truncation radius is untouched (a
+/// wide or absent companion leaves the birth radius on both edges); a disk that would spill past it is truncated,
+/// and the fit's 6.5 percent band propagates to `t_visc` and `tau_disk` rather than collapsing to one conservative
+/// point. The cap consumes the TYPED [`TruncationEvaluation`], not an arbitrary scalar fraction, and REFUSES a
+/// non-physical fraction (a truncation radius cannot exceed the Roche lobe, so `f > 1` is rejected). `None` on a
+/// non-positive birth radius or an unphysical fraction band.
+pub fn tidally_capped_scale_radius_au(
+    birth_r1_au: Fixed,
+    evaluation: &TruncationEvaluation,
+) -> Option<TruncationRadiusBand> {
+    if birth_r1_au <= Fixed::ZERO
+        || evaluation.fraction.lo <= Fixed::ZERO
+        || evaluation.fraction.hi > Fixed::ONE
+    {
+        return None;
+    }
+    let cap = |r_t: Fixed| -> Fixed {
+        if birth_r1_au < r_t {
+            birth_r1_au
+        } else {
+            r_t
+        }
+    };
+    Some(TruncationRadiusBand {
+        lo_au: cap(evaluation.radius_au.lo_au),
+        hi_au: cap(evaluation.radius_au.hi_au),
     })
 }
 
@@ -1774,15 +2120,99 @@ pub fn stellar_envelope_structure(
     })
 }
 
+/// The Kraft band's METALLICITY CONDITIONING, a SUM TYPE so a consumer can never read one meaning for another. A
+/// plain zero shift conflates three distinct states (no slope claimed, a measured zero slope, a solar-reference
+/// offset of zero), and a bare signed scalar would admit a NEGATIVE slope the data forbid. The break shifts UP in
+/// `T_eff` with rising `[Fe/H]` (a metal-rich star sustains surface convection to higher mass, Amard and Matt
+/// 2020), so the sign is fixed POSITIVE; the magnitude is under-constrained by the present data.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum KraftMetallicityConditioning {
+    /// No conditioning: the band sits at its solar-reference placement. Distinct from a measured-zero slope, this is
+    /// the state before any metallicity-dependent determination is consulted at all.
+    SolarReference,
+    /// The SIGN is known (positive) but no magnitude is applied, because the data fix the direction (Amard and Matt
+    /// 2020's break-mass shift) without a `T_eff`-per-dex slope, and Avallone et al. 2022 find the near-break
+    /// rotation-metallicity correlation below detection. A consumer may dispatch on the known direction; the edges do
+    /// not move, and no value is fabricated. This is the current honest default of the ratified band.
+    SignOnly,
+    /// A BANDED `K`-per-dex slope, applied once a metallicity-dependent Kraft determination is fetched. Both bounds
+    /// are non-negative (the fixed positive sign), and an uncertain slope WIDENS the near-degenerate band rather than
+    /// asserting a point shift. Built through [`KraftMetallicityConditioning::banded_slope`].
+    BandedSlope {
+        /// The shallow slope edge (K per dex), non-negative.
+        lo_k_per_dex: Fixed,
+        /// The steep slope edge (K per dex), at least the shallow edge.
+        hi_k_per_dex: Fixed,
+    },
+    /// The shift DERIVED from the star's own convective-envelope structure (a future structure-first route) rather
+    /// than an empirical slope: a single non-negative `K`-per-dex. Built through
+    /// [`KraftMetallicityConditioning::structure_derived`].
+    StructureDerived {
+        /// The derived slope (K per dex), non-negative.
+        k_per_dex: Fixed,
+    },
+}
+
+impl KraftMetallicityConditioning {
+    /// A banded positive slope. `None` unless `0 <= lo <= hi` (the sign is fixed positive, and the band is ordered).
+    pub fn banded_slope(lo_k_per_dex: Fixed, hi_k_per_dex: Fixed) -> Option<Self> {
+        (lo_k_per_dex >= Fixed::ZERO && hi_k_per_dex >= lo_k_per_dex).then_some(Self::BandedSlope {
+            lo_k_per_dex,
+            hi_k_per_dex,
+        })
+    }
+
+    /// A structure-derived positive slope. `None` if the slope is negative (the sign is fixed positive).
+    pub fn structure_derived(k_per_dex: Fixed) -> Option<Self> {
+        (k_per_dex >= Fixed::ZERO).then_some(Self::StructureDerived { k_per_dex })
+    }
+
+    /// The shift (K) applied to the band's LOWER edge at a metallicity `offset`. The no-magnitude states apply zero;
+    /// a point slope shifts rigidly; a banded slope takes the shift that pushes the lower edge furthest DOWN, so an
+    /// uncertain slope WIDENS the near-degenerate zone rather than asserting it narrower.
+    fn lower_edge_shift(self, offset: Fixed) -> Option<Fixed> {
+        match self {
+            Self::SolarReference | Self::SignOnly => Some(Fixed::ZERO),
+            Self::StructureDerived { k_per_dex } => k_per_dex.checked_mul(offset),
+            Self::BandedSlope {
+                lo_k_per_dex,
+                hi_k_per_dex,
+            } => {
+                let a = lo_k_per_dex.checked_mul(offset)?;
+                let b = hi_k_per_dex.checked_mul(offset)?;
+                Some(if a < b { a } else { b })
+            }
+        }
+    }
+
+    /// The shift (K) applied to the band's UPPER edge at a metallicity `offset`; the banded slope takes the shift
+    /// that pushes the upper edge furthest UP (the mirror of [`Self::lower_edge_shift`]).
+    fn upper_edge_shift(self, offset: Fixed) -> Option<Fixed> {
+        match self {
+            Self::SolarReference | Self::SignOnly => Some(Fixed::ZERO),
+            Self::StructureDerived { k_per_dex } => k_per_dex.checked_mul(offset),
+            Self::BandedSlope {
+                lo_k_per_dex,
+                hi_k_per_dex,
+            } => {
+                let a = lo_k_per_dex.checked_mul(offset)?;
+                let b = hi_k_per_dex.checked_mul(offset)?;
+                Some(if a > b { a } else { b })
+            }
+        }
+    }
+}
+
 /// THE KRAFT-BREAK BAND: the envelope-structure boundary as a BAND rather than a point, per the ratified ruling.
 /// The classic primary-read Kraft break (`classic_edge_k`, the LOWER edge) and the modern determination
 /// (`modern_center_k` plus or minus `modern_halfwidth_k`, whose upper reach is the band's UPPER edge) disagree by
 /// a few hundred K, and that disagreement is a real dispatch ambiguity, not a value to average away: below the
 /// lower edge a surface convection zone certainly operates (the dynamo branch), above the upper edge the
 /// photosphere is certainly radiative (the EUV branch), and between them lies the NEAR-DEGENERATE zone the Gap
-/// Law carries rather than asserts. `metallicity_shift_k_per_dex` moves the whole band with composition (the
-/// hydrogen and helium ionization boundary depends on the metal-line opacity), a FLAGGED conditioning field
-/// defaulting to zero shift until a metallicity-dependent Kraft determination is fetched.
+/// Law carries rather than asserts. `conditioning` moves the whole band with composition (the hydrogen and helium
+/// ionization boundary depends on the metal-line opacity), a typed [`KraftMetallicityConditioning`] state rather
+/// than a bare scalar, so the pre-fetch honest state (sign known, magnitude under-constrained) is distinct from a
+/// measured zero and a negative slope is unrepresentable.
 ///
 /// The edges are RESERVED-with-basis data (Principle 11): the mechanism (a three-zone dispatch on `T_eff`) is
 /// fixed Rust; the edge temperatures and the Z-shift are data the caller supplies. ADMITS THE ALIEN: the band is
@@ -1798,30 +2228,35 @@ pub struct KraftBreakBand {
     /// The modern determination's half-width (K): `modern_center_k + modern_halfwidth_k` is the band's UPPER edge,
     /// above which the radiative EUV branch is certain. RESERVED-with-basis (~200 K).
     pub modern_halfwidth_k: Fixed,
-    /// The band's shift in K per dex of metallicity relative to the sampled composition. A FLAGGED conditioning
-    /// field, reserved-with-basis, DEFAULTING TO ZERO (no shift, the band at its solar-composition placement)
-    /// until a metallicity-dependent Kraft determination is fetched; its sign and size are unauthored here.
-    pub metallicity_shift_k_per_dex: Fixed,
+    /// The band's METALLICITY CONDITIONING, a typed [`KraftMetallicityConditioning`] rather than a bare K-per-dex
+    /// scalar. The literature fixes the SIGN but not the magnitude: the break shifts UP in `T_eff` with rising
+    /// [Fe/H], since a metal-rich star bears a deeper surface convection zone and sustains it to higher mass (Amard
+    /// and Matt 2020, the break mass falling from ~1.3 to ~1.0 M_sun from [Fe/H] 0.0 to -1.0, ~+0.3 M_sun per dex;
+    /// vendored). No source gives a `T_eff` break versus [Fe/H] slope in K per dex, and Avallone et al. 2022 find
+    /// the near-break rotation-metallicity correlation below detection in a hot main-sequence sample (an empirical
+    /// upper bound; vendored). So the honest pre-fetch state is [`KraftMetallicityConditioning::SignOnly`] (the sign
+    /// carried, no magnitude applied), distinct from a measured zero and unable to hold a negative slope.
+    pub conditioning: KraftMetallicityConditioning,
 }
 
 impl KraftBreakBand {
     /// The band's effective LOWER edge (K) at a metallicity `metallicity_log10_offset` dex from the sampled
-    /// composition: `classic_edge_k + metallicity_shift_k_per_dex * offset`. `None` if the shift or an overflow
+    /// composition: `classic_edge_k` plus the conditioning's lower-edge shift. `None` if the shift or an overflow
     /// drives the edge non-positive (a non-physical band).
     pub fn lower_edge_k(self, metallicity_log10_offset: Fixed) -> Option<Fixed> {
         let shifted = self.classic_edge_k.checked_add(
-            self.metallicity_shift_k_per_dex
-                .checked_mul(metallicity_log10_offset)?,
+            self.conditioning
+                .lower_edge_shift(metallicity_log10_offset)?,
         )?;
         (shifted > Fixed::ZERO).then_some(shifted)
     }
-    /// The band's effective UPPER edge (K): `modern_center_k + modern_halfwidth_k`, shifted the same way. `None`
-    /// on overflow or a non-positive result.
+    /// The band's effective UPPER edge (K): `modern_center_k + modern_halfwidth_k` plus the conditioning's
+    /// upper-edge shift. `None` on overflow or a non-positive result.
     pub fn upper_edge_k(self, metallicity_log10_offset: Fixed) -> Option<Fixed> {
         let base = self.modern_center_k.checked_add(self.modern_halfwidth_k)?;
         let shifted = base.checked_add(
-            self.metallicity_shift_k_per_dex
-                .checked_mul(metallicity_log10_offset)?,
+            self.conditioning
+                .upper_edge_shift(metallicity_log10_offset)?,
         )?;
         (shifted > Fixed::ZERO).then_some(shifted)
     }
@@ -1974,37 +2409,56 @@ pub fn stellar_structural_state(
     Some(StellarStructuralState { envelope, phase })
 }
 
-/// A LUMINOSITY BRACKET (`L_sun`), the RIDER 2 output form for a quantity whose model uncertainty spans orders of
-/// magnitude: the branch ships the RANGE, not a point, so a consumer cannot read a decade-wide ignorance as a
-/// value. `[lo, hi]` in `L_sun`, unconstrained-by-source by construction (a bracket is not a scalar), with
-/// [`EuvLuminosityBracket::width_dex`] making the width machine-readable before any consumer reads the bounds.
+/// A LOG10 BAND `[lo, hi]` (both already `log10` of the underlying quantity), the RIDER 2 output form for a value
+/// whose model uncertainty spans orders of magnitude: carrying the range in the log domain keeps a quantity that
+/// sits outside the fixed-point window (an ionizing photon rate of order `1e45` per second, an ionizing luminosity
+/// of order `1e33` erg/s) representable, and makes the width a subtraction. A point value is `lo == hi`.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub struct EuvLuminosityBracket {
-    lo_lsun: Fixed,
-    hi_lsun: Fixed,
+pub struct Log10Band {
+    /// The lower bound (`log10` of the quantity).
+    pub lo: Fixed,
+    /// The upper bound (`log10` of the quantity).
+    pub hi: Fixed,
 }
 
-impl EuvLuminosityBracket {
-    /// The lower bound (`L_sun`).
-    pub fn lo_lsun(self) -> Fixed {
-        self.lo_lsun
-    }
-    /// The upper bound (`L_sun`).
-    pub fn hi_lsun(self) -> Fixed {
-        self.hi_lsun
-    }
-    /// The bracket WIDTH in dex (`log10(hi/lo)`), the stated width RIDER 2 requires be readable before a consumer
-    /// reads the bounds. `None` on a degenerate bracket (a non-positive bound).
+impl Log10Band {
+    /// The band WIDTH in dex (`hi - lo`), readable before any consumer reads the bounds (RIDER 2). `None` only if
+    /// the subtraction leaves the representable range.
     pub fn width_dex(self) -> Option<Fixed> {
-        if self.lo_lsun <= Fixed::ZERO || self.hi_lsun <= Fixed::ZERO {
-            return None;
-        }
-        let ln10 = Fixed::from_int(10).ln();
-        self.hi_lsun
-            .checked_div(self.lo_lsun)?
-            .ln()
-            .checked_div(ln10)
+        self.hi.checked_sub(self.lo)
     }
+}
+
+/// Which spectral model an ionizing evaluation came from, carried so a consumer never mistakes the LTE estimator
+/// for a real atmosphere.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum AtmosphereBranch {
+    /// The LTE blackbody Wien-tail integral: a self-consistent ESTIMATOR and upper bound (a real hot atmosphere's
+    /// line blanketing and ionization edges suppress the ionizing flux below it).
+    Blackbody,
+    /// An NLTE line-blanketed atmosphere grid (Sternberg, Hoffmann and Pauldrach 2003): the photon-number departure
+    /// applied to the blackbody photon rate IN PHOTON SPACE, never an energy departure divided by a mean energy.
+    NlteLineBlanketed,
+}
+
+/// ONE IONIZING-SPECTRUM EVALUATION, the same-spectrum-correct object the EUV wind consumes: the hydrogen-ionizing
+/// photon rate `Q_H` (photons/s, `log10`) with the ionizing luminosity `L_ion` and the mean ionizing photon energy
+/// `<E>` from the SAME spectral branch when that branch supplies them, so `L_ion / Q_H = <E>` holds within one
+/// spectrum. This is the fix for the same-spectrum violation: the wind reads `Q_H` directly, never an NLTE-adjusted
+/// energy bracket divided by an LTE blackbody mean energy (three correlated errors, since line blanketing changes
+/// spectral shape so the departures in integrated energy, photon number, and mean energy are not the same number).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct IonizingSpectrumEvaluation {
+    /// `log10(Q_H)` in photons per second, the quantity the EUV wind law consumes.
+    pub photon_rate_log10_s: Log10Band,
+    /// `log10(L_ion)` in erg/s, present only when the branch supplies it self-consistently (the blackbody branch).
+    pub ionizing_luminosity_log10_erg_s: Option<Log10Band>,
+    /// `log10(<E>)` in erg, the mean ionizing photon energy, present only from the same branch as `L_ion`.
+    pub mean_photon_energy_log10_erg: Option<Log10Band>,
+    /// Which spectral model produced this evaluation.
+    pub branch: AtmosphereBranch,
+    /// The effective temperature the evaluation was formed at (the minimal atmosphere-state anchor).
+    pub t_eff_k: Fixed,
 }
 
 /// The BLACKBODY IONIZING FRACTION `f_BB(T_eff)`: the fraction of a blackbody's radiant exitance emitted above the
@@ -2051,33 +2505,270 @@ pub fn blackbody_ionizing_fraction(
     c.checked_mul(tail)
 }
 
-/// The RADIATIVE-ENVELOPE EUV luminosity BRACKET (`L_sun`): the ionizing luminosity that drives photoevaporation
-/// for a dynamo-dark [`EnvelopeStructure::Radiative`] star, DERIVED from `T_eff` and `L_bol` as `L_bol *
-/// f_BB(T_eff)` (the blackbody ionizing baseline, [`blackbody_ionizing_fraction`]) times an ATMOSPHERE-MODEL
-/// DEPARTURE BAND `[departure_lo, departure_hi]` that spans orders of magnitude: line blanketing, NLTE, and wind
-/// blanketing lift the real EUV off the LTE baseline by decades, and the departure IS the quantity, not a
-/// correction. Per RIDER 2 the branch ships the BRACKET and its width is readable through
-/// [`EuvLuminosityBracket::width_dex`] before a consumer reads the bounds: a decade-wide ignorance that reaches
-/// the dispersal race as a single value is the exact defect the bracket prevents. The departure band is
-/// reserved-with-basis and unconstrained-by-source until a hot-star atmosphere-model grid is fetched. `None` on a
-/// non-positive input or an inverted band.
-pub fn radiative_euv_luminosity_bracket(
+/// The MEAN IONIZING PHOTON ENERGY as a multiple of the hydrogen edge energy, DERIVED from the star's `T_eff`: the
+/// energy-weighted mean energy of a photon above the 13.6 eV ionization edge, `<E> / E_edge`. This is what converts
+/// the ionizing LUMINOSITY (energy per second) into the ionizing photon RATE `Q_H` (photons per second) inside the
+/// same-branch [`blackbody_ionizing_spectrum`], and it is DERIVED rather than reserved: it falls out of
+/// the same Wien-tail integral as [`blackbody_ionizing_fraction`]. The mean energy above the edge is the energy flux
+/// over the photon-number flux, `<E> = kT * Gamma(4,x) / Gamma(3,x)` with `x = T_ion/T_eff`, which reduces (using
+/// `kT = E_edge/x`) to `<E>/E_edge = (x^3 + 3x^2 + 6x + 6) / (x (x^2 + 2x + 2))`. The numerator is the SAME
+/// `Gamma(4,x)` polynomial the ionizing fraction carries (the energy integral); the denominator adds the
+/// `Gamma(3,x) = x^2 + 2x + 2` number integral. The ratio is 1 at the cold limit (every ionizing photon sits just
+/// above the edge) and rises as the photosphere heats and the tail hardens (about 1.11 at `x = 10`, 1.28 at `x = 5`).
+///
+/// DERIVED, NO reserved value: it keys ONLY on the star's own `T_eff` against the derived edge, so a hot star of any
+/// composition converts its own luminosity to its own photon rate (ADMITS THE ALIEN). HONEST LIMIT: this is the LTE
+/// BLACKBODY mean, the same baseline the EUV luminosity bracket departs from; a real atmosphere-model spectrum
+/// hardens the tail further, and that departure is carried by the luminosity bracket's band rather than a second
+/// number here. `None` above the Wien-tail validity edge (`x < wien_x_min`, the full-Planck regime) or on a non-star
+/// input, the same domain door the ionizing fraction guards.
+pub fn mean_ionizing_photon_energy_over_edge(
+    t_eff_k: Fixed,
+    t_ion_k: Fixed,
+    wien_x_min: Fixed,
+) -> Option<Fixed> {
+    if t_eff_k <= Fixed::ZERO || t_ion_k <= Fixed::ZERO || wien_x_min <= Fixed::ZERO {
+        return None;
+    }
+    let x = t_ion_k.checked_div(t_eff_k)?;
+    if x < wien_x_min {
+        return None; // above the Wien-tail validity T_eff, the full-Planck regime, the shared domain door
+    }
+    let x2 = x.checked_mul(x)?;
+    let x3 = x2.checked_mul(x)?;
+    // Gamma(4,x) = x^3 + 3x^2 + 6x + 6, the energy integral (the ionizing-fraction numerator).
+    let gamma4 = x3
+        .checked_add(Fixed::from_int(3).checked_mul(x2)?)?
+        .checked_add(Fixed::from_int(6).checked_mul(x)?)?
+        .checked_add(Fixed::from_int(6))?;
+    // Gamma(3,x) = x^2 + 2x + 2, the photon-number integral.
+    let gamma3 = x2
+        .checked_add(Fixed::from_int(2).checked_mul(x)?)?
+        .checked_add(Fixed::from_int(2))?;
+    // <E>/E_edge = Gamma(4,x) / (x * Gamma(3,x)).
+    gamma4.checked_div(x.checked_mul(gamma3)?)
+}
+
+/// The BLACKBODY IONIZING SPECTRUM: `L_ion`, `Q_H`, and `<E>` for a radiative-envelope star's photosphere, all
+/// three from the SAME LTE Wien-tail integral so they are self-consistent (`L_ion / Q_H = <E>` by construction).
+/// The ionizing luminosity is `L_ion = L_bol * f_BB(T_eff)` ([`blackbody_ionizing_fraction`]); the mean ionizing
+/// photon energy is `<E> = (<E>/E_edge) * k_B * T_ion` ([`mean_ionizing_photon_energy_over_edge`] times the edge
+/// energy, both floor); the photon rate is the ONE division `Q_H = L_ion / <E>`, done here in the log domain (the
+/// erg-scale photon energy of order `3e-11` sits below fixed-point resolution and `Q_H ~ 1e45` above its range, so
+/// everything is `log10`). This is the LTE ESTIMATOR and UPPER BOUND (branch [`AtmosphereBranch::Blackbody`]); a
+/// real atmosphere departs below it, and that departure is applied in PHOTON space by
+/// [`nlte_departed_ionizing_spectrum`], never as an energy multiplier divided by this mean energy. `None` on a
+/// non-positive `L_bol`, a `T_eff` past the Wien-tail edge (the shared domain door), or an intermediate overflow.
+pub fn blackbody_ionizing_spectrum(
     t_eff_k: Fixed,
     l_bol_lsun: Fixed,
     t_ion_k: Fixed,
     wien_x_min: Fixed,
-    departure_lo: Fixed,
-    departure_hi: Fixed,
-) -> Option<EuvLuminosityBracket> {
-    if l_bol_lsun <= Fixed::ZERO || departure_lo <= Fixed::ZERO || departure_hi < departure_lo {
+) -> Option<IonizingSpectrumEvaluation> {
+    if l_bol_lsun <= Fixed::ZERO {
         return None;
     }
+    let ln10 = Fixed::from_int(10).ln();
+    let log10 = |x: Fixed| -> Option<Fixed> { x.ln().checked_div(ln10) };
     let f_bb = blackbody_ionizing_fraction(t_eff_k, t_ion_k, wien_x_min)?;
-    let base = l_bol_lsun.checked_mul(f_bb)?;
-    Some(EuvLuminosityBracket {
-        lo_lsun: base.checked_mul(departure_lo)?,
-        hi_lsun: base.checked_mul(departure_hi)?,
+    // log10(L_ion in erg/s) = log10(L_bol/L_sun) + log10(f_BB) + log10(L_sun in erg/s).
+    let log10_lsun_erg_s = civsim_physics::saha::ln_of_decimal(SOLAR_LUMINOSITY_W)?
+        .checked_div(ln10)?
+        .checked_add(Fixed::from_int(7))?; // W to erg/s
+    let log10_l_ion = log10(l_bol_lsun)?
+        .checked_add(log10(f_bb)?)?
+        .checked_add(log10_lsun_erg_s)?;
+    // log10(<E> in erg) = log10(<E>/E_edge) + log10(k_B in erg/K) + log10(T_ion).
+    let photon_over_edge = mean_ionizing_photon_energy_over_edge(t_eff_k, t_ion_k, wien_x_min)?;
+    let log10_kb_erg = civsim_physics::saha::ln_of_decimal("1.380649e-16")?.checked_div(ln10)?;
+    let log10_mean_e = log10(photon_over_edge)?
+        .checked_add(log10_kb_erg)?
+        .checked_add(log10(t_ion_k)?)?;
+    // The ONE division, self-consistent: log10(Q_H) = log10(L_ion) - log10(<E>).
+    let log10_q_h = log10_l_ion.checked_sub(log10_mean_e)?;
+    Some(IonizingSpectrumEvaluation {
+        photon_rate_log10_s: Log10Band {
+            lo: log10_q_h,
+            hi: log10_q_h,
+        },
+        ionizing_luminosity_log10_erg_s: Some(Log10Band {
+            lo: log10_l_ion,
+            hi: log10_l_ion,
+        }),
+        mean_photon_energy_log10_erg: Some(Log10Band {
+            lo: log10_mean_e,
+            hi: log10_mean_e,
+        }),
+        branch: AtmosphereBranch::Blackbody,
+        t_eff_k,
     })
+}
+
+/// The NLTE-DEPARTED IONIZING SPECTRUM: the real hot atmosphere's photon rate, formed by applying a PHOTON-NUMBER
+/// departure band `[departure_lo, departure_hi]` to the blackbody `Q_H` IN PHOTON SPACE, `log10(Q_H) =
+/// log10(Q_H,BB) + log10(departure)`. This is the same-spectrum-correct placement of the atmosphere-model band: the
+/// Sternberg, Hoffmann and Pauldrach 2003 grid tabulates `q_H` as a photon flux, so its departure below the
+/// same-`T_eff` blackbody is a photon-number suppression (within about 0.1 to 0.2 dex above 45000 K, of order 1 dex
+/// at the 26000 to 30000 K edge). Below 25000 K, the Herbig regime, the departure is now SUPPLIED by the windless
+/// [`HerbigEuvDepartureGrid`] (applied through [`windless_herbig_departed_spectrum`]), derived by integrating the
+/// BSTAR2006 emergent SEDs (`svo_tlusty_bstar2006`, the SEDs; `bstar2006_lanz_hubeny`, the paper) over the Lyman
+/// continuum against the same-`T_eff` blackbody: `log10` departure from about -2.69 at 15000 K to -0.65 at 30000 K.
+/// That grid is a WINDLESS sibling of the Sternberg windy anchor, never merged with it. A caution the derivation
+/// records: the paper's own Fig. 6 EUV factor is NLTE-versus-LTE(Kurucz), a DIFFERENT comparison, and must not be
+/// conflated with the model-versus-blackbody departure this branch consumes (the spot-check-certifies-a-mapping trap).
+/// The departure is NOT applied to an energy and then divided by a mean energy: that would cross an NLTE energy with
+/// an LTE mean. `L_ion` and `<E>` are left absent because this branch does not reconstruct the NLTE energy integral,
+/// so no self-consistent energy pair is claimed. `None` if the input is not a blackbody evaluation, on a
+/// non-positive or inverted departure, or an overflow.
+pub fn nlte_departed_ionizing_spectrum(
+    blackbody: &IonizingSpectrumEvaluation,
+    departure_lo: Fixed,
+    departure_hi: Fixed,
+) -> Option<IonizingSpectrumEvaluation> {
+    if blackbody.branch != AtmosphereBranch::Blackbody
+        || departure_lo <= Fixed::ZERO
+        || departure_hi < departure_lo
+    {
+        return None;
+    }
+    let ln10 = Fixed::from_int(10).ln();
+    let log10 = |x: Fixed| -> Option<Fixed> { x.ln().checked_div(ln10) };
+    // The departure suppresses in PHOTON space: the lower departure gives the lower photon rate.
+    let lo = blackbody
+        .photon_rate_log10_s
+        .lo
+        .checked_add(log10(departure_lo)?)?;
+    let hi = blackbody
+        .photon_rate_log10_s
+        .hi
+        .checked_add(log10(departure_hi)?)?;
+    Some(IonizingSpectrumEvaluation {
+        photon_rate_log10_s: Log10Band { lo, hi },
+        ionizing_luminosity_log10_erg_s: None,
+        mean_photon_energy_log10_erg: None,
+        branch: AtmosphereBranch::NlteLineBlanketed,
+        t_eff_k: blackbody.t_eff_k,
+    })
+}
+
+// @derives: the windless Herbig-regime EUV model-over-blackbody departure grid <- the BSTAR2006 emergent NLTE SEDs (svo_tlusty_bstar2006) integrated over the Lyman continuum against the same-Teff blackbody photon rate, 16 points at ONE coordinate slice (solar Z, log g 4.0) over Teff 15000 to 30000 K, log-space interpolated in Teff and applicable only at that slice
+/// The WINDLESS HERBIG-REGIME EUV DEPARTURE GRID: the model-over-blackbody Lyman-continuum photon-rate departure as a
+/// function of `T_eff` AT ONE COORDINATE SLICE, DERIVED by integrating the BSTAR2006 emergent NLTE SEDs (Lanz and
+/// Hubeny 2007, served by the SVO Theoretical Spectra service; `svo_tlusty_bstar2006` and the paper
+/// `bstar2006_lanz_hubeny` in `sources/registry.toml`) over the Lyman continuum and dividing by the same-`T_eff`
+/// blackbody photon rate. The 16 points and the full derivation live in `docs/working/BSTAR2006_HERBIG_EUV_DEPARTURE.md`.
+///
+/// COORDINATES, load-bearing: the grid is computed at a SINGLE metallicity and gravity (`metallicity_z_solar` and
+/// `log_g_cgs`, here solar Z and log g 4.0), so the departure is a function of `T_eff` ONLY at that slice. A 20000 K
+/// star that is metal-free, twice-solar, or at log g 2 has a DIFFERENT ionizing departure; BSTAR2006 itself ships six
+/// compositions and thirteen gravities, which is what makes `(Z, log g)` model COORDINATES, not metadata. The lookup
+/// [`windless_herbig_departed_spectrum`] therefore REFUSES a star off this slice rather than silently applying the
+/// solar-log-g-4 value; the full `(Z, log g)`-interpolated lookup over the whole BSTAR2006 grid is a NAMED
+/// data-and-interpolation rung, not built here.
+///
+/// INTERPOLATION: monotonic and rising with `T_eff`, but NOT a single linear slope. The local slope rises from about
+/// 0.054 dex per 1000 K (15 to 16 kK) to a peak of about 0.188 (25 to 26 kK), then eases to about 0.171 by 29 to 30 kK
+/// (the average, about 0.14, must NOT be read as the local rate, and the peak is mid-range, not at the top). The
+/// grid interpolates LINEARLY in `log10` departure between adjacent points, an authored piecewise-linear model whose
+/// error is the deviation of the true curve from each chord; a stated error band on that interpolation is a later rung.
+///
+/// WINDLESS, and a SIBLING of the Sternberg windy anchor, NEVER merged with it. These are plane-parallel hydrostatic
+/// atmospheres with no wind, so above 25000 K they do not describe the wind-affected EUV of a luminous early B star,
+/// where the Sternberg, Hoffmann and Pauldrach 2003 grid (with winds) is the anchor. This grid's value is the 15000
+/// to 25000 K region. The choice of WHICH sibling applies in the 25000 to 30000 K overlap keys on whether the star
+/// has a significant wind, a stellar-physics property that should be DERIVED (luminosity, mass-loss), not authored;
+/// that wind-regime selector is a NAMED derivation gap. This grid supplies only the windless branch.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct HerbigEuvDepartureGrid {
+    /// The 16 `(T_eff in K, log10 departure)` points, ascending in `T_eff`.
+    points: [(Fixed, Fixed); 16],
+    /// The metallicity (multiples of solar) the grid was computed at: the lookup refuses a star off this value.
+    metallicity_z_solar: Fixed,
+    /// The surface gravity `log g` (cgs) the grid was computed at: the lookup refuses a star off this value.
+    log_g_cgs: Fixed,
+}
+
+impl HerbigEuvDepartureGrid {
+    /// The BSTAR2006 grid served by SVO, the 16 verified points at solar Z (z = 1.0) and log g 4.0. The `log10`
+    /// departures are the derived data (`docs/working/BSTAR2006_HERBIG_EUV_DEPARTURE.md`), each a suppression.
+    pub fn bstar2006_svo() -> Self {
+        HerbigEuvDepartureGrid {
+            points: [
+                (Fixed::from_int(15000), Fixed::from_ratio(-26892, 10000)),
+                (Fixed::from_int(16000), Fixed::from_ratio(-26355, 10000)),
+                (Fixed::from_int(17000), Fixed::from_ratio(-25674, 10000)),
+                (Fixed::from_int(18000), Fixed::from_ratio(-24842, 10000)),
+                (Fixed::from_int(19000), Fixed::from_ratio(-23877, 10000)),
+                (Fixed::from_int(20000), Fixed::from_ratio(-22815, 10000)),
+                (Fixed::from_int(21000), Fixed::from_ratio(-21655, 10000)),
+                (Fixed::from_int(22000), Fixed::from_ratio(-20403, 10000)),
+                (Fixed::from_int(23000), Fixed::from_ratio(-18986, 10000)),
+                (Fixed::from_int(24000), Fixed::from_ratio(-17352, 10000)),
+                (Fixed::from_int(25000), Fixed::from_ratio(-15489, 10000)),
+                (Fixed::from_int(26000), Fixed::from_ratio(-13605, 10000)),
+                (Fixed::from_int(27000), Fixed::from_ratio(-11815, 10000)),
+                (Fixed::from_int(28000), Fixed::from_ratio(-10046, 10000)),
+                (Fixed::from_int(29000), Fixed::from_ratio(-8248, 10000)),
+                (Fixed::from_int(30000), Fixed::from_ratio(-6541, 10000)),
+            ],
+            metallicity_z_solar: Fixed::ONE,
+            log_g_cgs: Fixed::from_int(4),
+        }
+    }
+
+    /// The windless departure `log10` at a `T_eff` by log-space interpolation between the two bracketing grid points.
+    /// `None` below 15000 K (the EUV is negligible and off-grid) or above 30000 K (the windy-Sternberg door). This
+    /// does NOT check `(Z, log g)`; that coordinate gate lives in [`windless_herbig_departed_spectrum`], the only
+    /// path that knows the star's coordinates.
+    pub fn departure_log10_at(&self, t_eff_k: Fixed) -> Option<Fixed> {
+        let first = self.points[0].0;
+        let last = self.points[self.points.len() - 1].0;
+        if t_eff_k < first || t_eff_k > last {
+            return None;
+        }
+        for w in 0..self.points.len() - 1 {
+            let (t0, d0) = self.points[w];
+            let (t1, d1) = self.points[w + 1];
+            if t_eff_k >= t0 && t_eff_k <= t1 {
+                let span = t1.checked_sub(t0)?;
+                let frac = if span == Fixed::ZERO {
+                    Fixed::ZERO
+                } else {
+                    t_eff_k.checked_sub(t0)?.checked_div(span)?
+                };
+                return d0.checked_add(frac.checked_mul(d1.checked_sub(d0)?)?);
+            }
+        }
+        None
+    }
+}
+
+/// Apply the WINDLESS Herbig departure grid to a blackbody ionizing spectrum, the Herbig-branch supplier of the
+/// atmosphere-model band [`nlte_departed_ionizing_spectrum`] left caller-provided. It reads the blackbody's own
+/// `T_eff`, REFUSES a star whose `(Z, log g)` are off the grid's single slice (so the solar-log-g-4 departure is
+/// never applied to a metal-free or low-gravity star), looks up the windless departure, and applies it in PHOTON
+/// space through [`nlte_departed_ionizing_spectrum`] (reused, not reinvented). The departure enters as a POINT
+/// (`departure_lo = departure_hi`): the grid gives one value per `T_eff`. `None` if the input is not a blackbody
+/// evaluation, if the star is off the grid's `(Z, log g)` slice, if the `T_eff` is off the grid (below 15000 K or
+/// above 30000 K, the windy-Sternberg door), or on an overflow.
+pub fn windless_herbig_departed_spectrum(
+    blackbody: &IonizingSpectrumEvaluation,
+    grid: &HerbigEuvDepartureGrid,
+    star_metallicity_z_solar: Fixed,
+    star_log_g_cgs: Fixed,
+) -> Option<IonizingSpectrumEvaluation> {
+    if blackbody.branch != AtmosphereBranch::Blackbody {
+        return None;
+    }
+    // The grid is a single-(Z, log g) slice; refuse a star off it rather than applying the wrong-coordinate value.
+    if star_metallicity_z_solar != grid.metallicity_z_solar || star_log_g_cgs != grid.log_g_cgs {
+        return None;
+    }
+    let log10_departure = grid.departure_log10_at(blackbody.t_eff_k)?;
+    // The grid carries log10(departure); the departure application takes the linear departure, so 10^(log10 dep).
+    let ln10 = Fixed::from_int(10).ln();
+    let departure = log10_departure.checked_mul(ln10)?.exp();
+    nlte_departed_ionizing_spectrum(blackbody, departure, departure)
 }
 
 /// The PRE-MAIN-SEQUENCE LUMINOSITY `L_bol / L_sun` at a stellar age, the disk-era bolometric luminosity the L_X
@@ -3109,6 +3800,318 @@ pub fn photoevaporative_wind_rate_msun_myr(
     Some(ln_rate.exp())
 }
 
+/// A PHOTOEVAPORATION RATE BRACKET (solar masses per Myr), the RIDER 2 output form for the radiative-envelope wind
+/// rate. The ionizing photon rate that drives it is itself a band (the hot-photosphere atmosphere-model departure
+/// spans decades, the [`IonizingSpectrumEvaluation`] photon-rate band), so the rate it produces is a bracket, never
+/// a point: a consumer cannot read a decade-wide ignorance as a definite mass-loss rate. `[lo, hi]` in solar masses
+/// per Myr, with
+/// [`PhotoevaporationRateBracket::width_dex`] making the width machine-readable before any consumer reads the bounds.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct PhotoevaporationRateBracket {
+    lo_msun_myr: Fixed,
+    hi_msun_myr: Fixed,
+}
+
+impl PhotoevaporationRateBracket {
+    /// The lower bound (solar masses per Myr).
+    pub fn lo_msun_myr(self) -> Fixed {
+        self.lo_msun_myr
+    }
+    /// The upper bound (solar masses per Myr).
+    pub fn hi_msun_myr(self) -> Fixed {
+        self.hi_msun_myr
+    }
+    /// The bracket WIDTH in dex (`log10(hi/lo)`), the stated width RIDER 2 requires be readable before a consumer
+    /// reads the bounds. `None` on a degenerate bracket (a non-positive bound).
+    pub fn width_dex(self) -> Option<Fixed> {
+        if self.lo_msun_myr <= Fixed::ZERO || self.hi_msun_myr <= Fixed::ZERO {
+            return None;
+        }
+        let ln10 = Fixed::from_int(10).ln();
+        self.hi_msun_myr
+            .checked_div(self.lo_msun_myr)?
+            .ln()
+            .checked_div(ln10)
+    }
+}
+
+/// A CLOSED STELLAR-MASS INTERVAL `[lo, hi]` in solar masses, the unit a fit's typed domain is built from.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct MassInterval {
+    /// Lower edge (solar masses), inclusive.
+    pub lo_solar: Fixed,
+    /// Upper edge (solar masses), inclusive.
+    pub hi_solar: Fixed,
+}
+
+impl MassInterval {
+    /// Whether a stellar mass falls inside the closed interval.
+    pub fn contains(&self, mass_solar: Fixed) -> bool {
+        mass_solar >= self.lo_solar && mass_solar <= self.hi_solar
+    }
+}
+
+/// The GRADE of an [`EuvWindFit`] evaluation at a given stellar mass, so a consumer can never mistake an
+/// extrapolation into an unmeasured regime for an empirically grounded rate. This is the fix for the disjoint-
+/// evidence defect: a single `[mass_min, mass_max]` pair turned the Herbig validation gap (about 2 to 15 solar
+/// masses, between the low-mass T Tauri grounding and the massive-star numerical grounding) into ordinary in-domain
+/// success. The grade travels with the rate instead.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum FitReach {
+    /// The mass sits inside the fit's empirically grounded interval: the rate carries the fit's own grade.
+    Grounded,
+    /// The mass sits in the analytic-extrapolation interval (the fit's power law reaching beyond where it was
+    /// measured, principally the Herbig gap): ESTIMATOR grade. The carried value is the DERIVED extrapolation
+    /// distance, `decades_beyond_grounded`, the base-10 magnitude in stellar mass from the nearest grounded edge,
+    /// a monotone trust-decay proxy the consumer reads. It is NOT a rate-error band in dex: the rate uncertainty of
+    /// bridging the unmeasured Herbig regime is not itself measured (the honest gap, pending a Herbig-regime grid),
+    /// so no such width is fabricated here.
+    AnalyticExtrapolation { decades_beyond_grounded: Fixed },
+}
+
+/// The TYPED DOMAIN of an EUV wind fit: the interval where its coefficients were empirically grounded, and the
+/// adjacent interval its power law only reaches by analytic extrapolation, at estimator grade. Queried at a stellar
+/// mass, it returns the graded [`FitReach`] or `None` (outside both intervals, a refusal). This replaces the old
+/// `[mass_min, mass_max]` pair, which could not represent the disjoint support of the cited channels.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct EuvFitDomain {
+    /// The empirically grounded interval (the channel's own measured or modelled masses).
+    pub grounded: MassInterval,
+    /// The analytic-extrapolation interval, adjacent to the grounded one, where the same scaling is extended into an
+    /// unmeasured regime at estimator grade.
+    pub extrapolation: MassInterval,
+}
+
+impl EuvFitDomain {
+    /// The graded reach at a stellar mass: grounded wins where the intervals touch, then extrapolation, else `None`.
+    /// The extrapolation distance is DERIVED as `|log10(mass) - log10(nearest grounded edge)|`, the decades of
+    /// stellar mass past the grounded interval, so an ungrounded evaluation carries how far out on the limb it sits.
+    pub fn reach_at(&self, mass_solar: Fixed) -> Option<FitReach> {
+        if mass_solar <= Fixed::ZERO {
+            return None;
+        }
+        if self.grounded.contains(mass_solar) {
+            return Some(FitReach::Grounded);
+        }
+        if self.extrapolation.contains(mass_solar) {
+            let ln10 = Fixed::from_int(10).ln();
+            let log10_m = mass_solar.ln().checked_div(ln10)?;
+            // The nearest grounded edge: the low edge if the mass sits below the grounded interval, else the high.
+            let edge = if mass_solar < self.grounded.lo_solar {
+                self.grounded.lo_solar
+            } else {
+                self.grounded.hi_solar
+            };
+            let log10_edge = edge.ln().checked_div(ln10)?;
+            let decades = log10_m.checked_sub(log10_edge)?.abs();
+            return Some(FitReach::AnalyticExtrapolation {
+                decades_beyond_grounded: decades,
+            });
+        }
+        None
+    }
+}
+
+/// A GRADED EUV wind-rate evaluation: the rate bracket paired with the [`FitReach`] grade at the evaluated mass, so
+/// a Herbig-gap extrapolation reaches the consumer tagged as estimator provenance rather than as a grounded point.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct PhotoevaporationRateEvaluation {
+    /// The mass-loss rate bracket (solar masses per Myr), the atmosphere-model band propagated through the wind law.
+    pub rate: PhotoevaporationRateBracket,
+    /// The grounded-or-extrapolated grade of this evaluation, from the fit's typed domain. Named `fit_reach`, not
+    /// `reach`, so it does not read as the physics `laws::reach()` distance (a homonym: this is a fit-domain grade,
+    /// not a runout reach), per the diamond gate's rename-when-not-one discharge.
+    pub fit_reach: FitReach,
+}
+
+/// The EUV PHOTOEVAPORATION WIND-RATE FIT: the reserved-with-basis coefficients of the radiative-envelope branch's
+/// mass-loss rate `Mdot = C (Phi/Phi_ref)^p (M_star/M_sun)^q` (solar masses per YEAR), where `Phi` is the star's own
+/// ionizing (Lyman-continuum) photon rate in photons per second. The mechanism (the power law) is fixed Rust
+/// (Principle 11); the coefficient, the reference photon rate, and the two exponents are cited data a constructor
+/// supplies, one per literature channel, the way [`XrayWindFit`] carries the X-ray branch's rows. A consumer forms
+/// the MODEL BAND by evaluating two channels, the analytic ceiling ([`EuvWindFit::hollenbach_1994`] or
+/// [`EuvWindFit::alexander_2006`]) and the hydrodynamic floor ([`EuvWindFit::font_2004_hydrodynamic`]), the
+/// analytic-versus-hydrodynamic sibling of the Owen-versus-Sellek band the X-ray branch forms. That model band is
+/// ORTHOGONAL to the atmosphere-model band the EUV luminosity itself carries; both ship as brackets.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct EuvWindFit {
+    /// `log10` of the wind-rate coefficient (solar masses per YEAR) at the reference photon rate and one solar mass.
+    pub log10_coefficient_msun_yr: Fixed,
+    /// `log10` of the reference ionizing photon rate (photons/s) the coefficient normalizes to (41 for the `1e41`
+    /// per second T Tauri normalization the low-mass channels use).
+    pub log10_phi_reference_per_s: Fixed,
+    /// The exponent on `(Phi/Phi_ref)` (`1/2`: the rate scales as the square root of the ionizing photon rate).
+    pub phi_exponent: Fixed,
+    /// The exponent on `(M_star/M_sun)` (`1/2`: the rate scales as the square root of stellar mass).
+    pub mass_exponent: Fixed,
+    /// The TYPED mass domain: the grounded interval where this channel was measured, and the adjacent analytic-
+    /// extrapolation interval it reaches at estimator grade. Replaces the old `[mass_min, mass_max]` pair, which
+    /// could not represent that the Herbig regime (about 2 to 15 solar masses) is a validation gap, not in-domain.
+    pub domain: EuvFitDomain,
+}
+
+impl EuvWindFit {
+    /// The Hollenbach, Johnstone, Lizano and Shu 1994 analytic WEAK-WIND rate, the TRUE ORIGIN of the EUV
+    /// photoevaporation normalization, as cited data: Eq. 3.14 `Mdot = 1.3e-5 Phi_49^(1/2) M_1^(1/2)` M_sun/yr,
+    /// rescaled to the T Tauri normalization `4.1e-10 (Phi/1e41 s^-1)^(1/2) (M_star/M_sun)^(1/2)` M_sun/yr. This is
+    /// the ANALYTIC rate (launch velocity `v = c_s`), a UPPER edge of the model band. Validity per the primary: the
+    /// 1e4 K photoionized diffuse-field weak wind; the numerical models span 15 to 65 M_sun, the low-mass reach is
+    /// the analytic scaling extended by Font 2004 and Alexander 2006. The coefficient is stored as `log10(4.1e-10)`.
+    /// Vendored in `disk_arc_literature` (`hollenbach_1994`).
+    pub fn hollenbach_1994() -> Self {
+        EuvWindFit {
+            log10_coefficient_msun_yr: Fixed::from_ratio(-938722, 100_000), // log10(4.1e-10)
+            log10_phi_reference_per_s: Fixed::from_int(41),                 // Phi_ref = 1e41 s^-1
+            phi_exponent: Fixed::from_ratio(1, 2),                          // 1/2
+            mass_exponent: Fixed::from_ratio(1, 2),                         // 1/2
+            // GROUNDED on the massive-star numerical models (about 15 to 65 solar masses, the primary's own grid);
+            // the analytic scaling reaches DOWN to the T Tauri regime at estimator grade.
+            domain: EuvFitDomain {
+                grounded: MassInterval {
+                    lo_solar: Fixed::from_int(15),
+                    hi_solar: Fixed::from_int(65),
+                },
+                extrapolation: MassInterval {
+                    lo_solar: Fixed::from_ratio(1, 10),
+                    hi_solar: Fixed::from_int(15),
+                },
+            },
+        }
+    }
+
+    /// The Alexander, Clarke and Pringle 2006 restatement of the HJLS94 rate, the CROSS-REFERENCE channel and the
+    /// analytic ceiling, as cited data: Eq. 2 `Mdot = 4.4e-10 (Phi/1e41 s^-1)^(1/2) (M_star/M_sun)^(1/2)` M_sun/yr,
+    /// attributed to Hollenbach et al. 1994. The 4.4e-10 sits about 7 percent above the HJLS94 rescaled 4.1e-10 (the
+    /// exact analytic prefactor versus the numerically-fitted Eq. 3.14); the exponents agree exactly across both
+    /// channels. The coefficient is stored as `log10(4.4e-10)`. Vendored in `disk_arc_literature` (`alexander_2006_ii`).
+    pub fn alexander_2006() -> Self {
+        EuvWindFit {
+            log10_coefficient_msun_yr: Fixed::from_ratio(-935655, 100_000), // log10(4.4e-10)
+            log10_phi_reference_per_s: Fixed::from_int(41),                 // Phi_ref = 1e41 s^-1
+            phi_exponent: Fixed::from_ratio(1, 2),                          // 1/2
+            mass_exponent: Fixed::from_ratio(1, 2),                         // 1/2
+            // GROUNDED on the low-mass T Tauri regime (about 0.1 to 2 solar masses, where this restatement is
+            // applied); the same scaling reaches UP through the Herbig gap to the massive-star edge at estimator grade.
+            domain: EuvFitDomain {
+                grounded: MassInterval {
+                    lo_solar: Fixed::from_ratio(1, 10),
+                    hi_solar: Fixed::from_int(2),
+                },
+                extrapolation: MassInterval {
+                    lo_solar: Fixed::from_int(2),
+                    hi_solar: Fixed::from_int(65),
+                },
+            },
+        }
+    }
+
+    /// The Font, McCarthy, Johnstone and Ballantyne 2004 HYDRODYNAMIC correction, the LOW edge of the model band, as
+    /// cited data: the 2D radiation-hydrodynamic simulations find the total mass-loss rate LOWER than the HJLS94
+    /// analytic value by a factor of about 2.7, because the wind launches off the disk at about 0.3 to 0.4 `c_s`
+    /// rather than the analytic `v = c_s` (a check at `v = c_s` recovers the analytic rate to within 10 percent).
+    /// The correction is to the launch velocity, not the density normalization or the scaling, so the exponents and
+    /// reference are unchanged and only the coefficient moves: the HJLS94 4.1e-10 reduced by 2.7, stored as
+    /// `log10(4.1e-10 / 2.7) = log10(1.52e-10)`. Vendored in `disk_arc_literature` (`font_2004`).
+    pub fn font_2004_hydrodynamic() -> Self {
+        EuvWindFit {
+            log10_coefficient_msun_yr: Fixed::from_ratio(-981860, 100_000), // log10(4.1e-10/2.7) = log10(1.52e-10)
+            log10_phi_reference_per_s: Fixed::from_int(41),                 // Phi_ref = 1e41 s^-1
+            phi_exponent: Fixed::from_ratio(1, 2),                          // 1/2
+            mass_exponent: Fixed::from_ratio(1, 2),                         // 1/2
+            // GROUNDED on the low-mass T Tauri regime (about 0.1 to 2 solar masses, the 2D radiation-hydrodynamic
+            // simulations); the same scaling reaches UP through the Herbig gap at estimator grade.
+            domain: EuvFitDomain {
+                grounded: MassInterval {
+                    lo_solar: Fixed::from_ratio(1, 10),
+                    hi_solar: Fixed::from_int(2),
+                },
+                extrapolation: MassInterval {
+                    lo_solar: Fixed::from_int(2),
+                    hi_solar: Fixed::from_int(65),
+                },
+            },
+        }
+    }
+}
+
+/// The RADIATIVE-ENVELOPE EUV PHOTOEVAPORATION WIND RATE (solar masses per Myr), the Herbig-branch sibling of the
+/// X-ray [`photoevaporative_wind_rate_msun_myr`]: the mass-loss rate a radiative-envelope star's ionizing luminosity
+/// drives off its disk. A hot photosphere has no corona but is intrinsically EUV-bright, so the wind is EUV-driven
+/// rather than X-ray-driven, and the rate is `Mdot = C (Phi/Phi_ref)^(1/2) (M_star/M_sun)^(1/2)` on the star's
+/// ionizing photon rate `Phi` (Hollenbach et al. 1994 Eq. 3.14, cross-confirmed by Alexander et al. 2006 and Font
+/// et al. 2004, all vendored), read from the [`EuvWindFit`] the caller supplies.
+///
+/// A BRACKET IN, A BRACKET OUT (RIDER 2). The input is the [`IonizingSpectrumEvaluation`] the radiative-envelope
+/// branch derives, whose photon-rate band width is the hot-star atmosphere-model departure from the LTE baseline
+/// (an NLTE evaluation) or zero (a blackbody evaluation). That band propagates through the square root to the rate,
+/// so the output is a [`PhotoevaporationRateBracket`] whose width (halved in dex by the `1/2` exponent) is stated
+/// before any consumer reads it. The analytic-versus-hydrodynamic MODEL band (which [`EuvWindFit`] the caller
+/// passes) is the orthogonal second axis, a band the consumer forms from two fits.
+///
+/// THE SAME-SPECTRUM RULE. The wind consumes the photon rate `Q_H` DIRECTLY from the spectrum
+/// (`photon_rate_log10_s`), never an ionizing luminosity divided here by a mean photon energy. The one
+/// luminosity-to-photon-rate division lives inside [`blackbody_ionizing_spectrum`], self-consistent within the LTE
+/// blackbody, and any NLTE departure is applied in PHOTON space by [`nlte_departed_ionizing_spectrum`]. So an
+/// NLTE-adjusted energy is never crossed with an LTE mean energy: the three correlated departures (integrated
+/// energy, photon number, mean energy) stay inside one branch. The photon rate (order `1e45` per second) and the
+/// mass-loss rate (order `1e-10` solar masses per year) both sit outside the fixed-point range, so the whole rate
+/// is carried as `log10` and exponentiated once at the end.
+///
+/// ADMITS THE ALIEN: the rate keys on the star's OWN ionizing photon rate and mass, so a hot star of any
+/// composition photoevaporates its disk through its own spectrum, never a Terran template. SCOPE: the EUV
+/// (hydrogen-ionizing) diffuse-field weak wind at 1e4 K, not the X-ray or FUV wind; the direct-field rate (about
+/// 8.8 times higher, which dominates once the inner disk drains and turns optically thin) is a flagged later-phase
+/// sibling this rate does not carry. The Herbig regime (about 2 to 15 M_sun), where the radiative-envelope dispatch
+/// mostly lives, is a validation GAP bridged by the analytic scaling: the result is GRADED, so a mass in that gap
+/// returns a [`PhotoevaporationRateEvaluation`] tagged [`FitReach::AnalyticExtrapolation`] (estimator provenance)
+/// rather than the same rate a grounded mass would, and a mass outside the fit's whole reach REFUSES. `None` on a
+/// non-star mass, a mass outside the fit's typed domain, or an intermediate past the representable range.
+pub fn radiative_euv_photoevaporation_wind_rate_msun_myr(
+    spectrum: &IonizingSpectrumEvaluation,
+    star_mass_ratio: Fixed,
+    fit: &EuvWindFit,
+) -> Option<PhotoevaporationRateEvaluation> {
+    if star_mass_ratio <= Fixed::ZERO {
+        return None;
+    }
+    // The typed domain grades the mass: grounded, analytic-extrapolation (estimator), or outside (refusal).
+    let reach = fit.domain.reach_at(star_mass_ratio)?;
+    let ln10 = Fixed::from_int(10).ln();
+    let log10 = |x: Fixed| -> Option<Fixed> { x.ln().checked_div(ln10) };
+    let log10_m = log10(star_mass_ratio)?;
+    let ln_ceiling = Fixed::from_int(31).checked_mul(Fixed::from_int(2).ln())?;
+    // The wind law on the photon rate Q_H read straight from the spectrum: no luminosity-to-photon division here.
+    let rate_for = |log10_phi: Fixed| -> Option<Fixed> {
+        // log10(Mdot in M_sun/yr) = log10(C) + p*(log10(Phi) - log10(Phi_ref)) + q*log10(M).
+        let phi_term = fit
+            .phi_exponent
+            .checked_mul(log10_phi.checked_sub(fit.log10_phi_reference_per_s)?)?;
+        let mass_term = fit.mass_exponent.checked_mul(log10_m)?;
+        let log10_rate_yr = fit
+            .log10_coefficient_msun_yr
+            .checked_add(phi_term)?
+            .checked_add(mass_term)?;
+        // Per-year to per-Myr: add log10(1e6) = 6.
+        let log10_rate_myr = log10_rate_yr.checked_add(Fixed::from_int(6))?;
+        let ln_rate = log10_rate_myr.checked_mul(ln10)?;
+        // Fail loud past the representable exp ceiling rather than saturate (the surface-density precedent).
+        if ln_rate >= ln_ceiling {
+            return None;
+        }
+        Some(ln_rate.exp())
+    };
+    // The photon-rate band propagates monotonically: the lower Q_H gives the lower rate, the higher the higher.
+    let lo = rate_for(spectrum.photon_rate_log10_s.lo)?;
+    let hi = rate_for(spectrum.photon_rate_log10_s.hi)?;
+    Some(PhotoevaporationRateEvaluation {
+        rate: PhotoevaporationRateBracket {
+            lo_msun_myr: lo,
+            hi_msun_myr: hi,
+        },
+        fit_reach: reach,
+    })
+}
+
 /// THE COMPOSED DISK CLOCK (Myr), CONVECTIVE (X-ray-driven) BRANCH: the disk lifetime `tau_disk` DERIVED end to
 /// end from a disk-hosting star's own state, the payoff the whole arc built toward, turning `tau_disk` from a
 /// consulted constant into a derived output. It chains the built pieces:
@@ -3119,7 +4122,7 @@ pub fn photoevaporative_wind_rate_msun_myr(
 /// ([`photoevaporative_wind_rate_msun_myr`]) -> the accretion-versus-wind dispersal race
 /// ([`derive_disk_lifetime_myr`]). This is the CONVECTIVE branch, a T Tauri star with a rotation-driven dynamo;
 /// a radiative-envelope (Herbig) star has no dynamo and takes the EUV branch instead
-/// ([`radiative_euv_luminosity_bracket`]), dispatched on the star's envelope structure at the Kraft break, its
+/// ([`blackbody_ionizing_spectrum`]), dispatched on the star's envelope structure at the Kraft break, its
 /// sibling.
 ///
 /// DORMANT: no run-path caller yet; the consumer wire that feeds this `tau_disk` into the #73 giant gate and the
@@ -4012,13 +5015,19 @@ mod tests {
         // reaches sigma*T^4 = F/4 with F ~1361 W/m^2, so T = (1361/(4 sigma))^(1/4) ~278 K, Earth's textbook
         // blackbody equilibrium temperature (the ~255 K real value is 278 K reduced by the ~0.3 albedo, which the
         // atmosphere arc supplies later; here the airless blackbody value is the DERIVED anchor). Nothing tuned:
-        // it falls out of L_sun, the AU, and the CODATA-derived sigma.
+        // it falls out of L_sun, the AU, and the CODATA-derived sigma. The reprocessing factor is DERIVED geometry
+        // (cross-section over sphere), the exact 1/4, not an authored constant.
+        assert_eq!(
+            spherical_reprocessing_factor(),
+            Fixed::from_ratio(1, 4),
+            "the cross-section-to-sphere geometry is the exact 1/4"
+        );
         let t_max = Fixed::from_int(100_000);
         let t = irradiated_disk_temperature(
             Fixed::ONE,
             Fixed::from_ratio(35, 10),
             Fixed::ONE,
-            Fixed::from_ratio(1, 4),
+            spherical_reprocessing_factor(),
             t_max,
         )
         .expect("the disk temperature derives");
@@ -4967,21 +5976,158 @@ mod tests {
     }
 
     #[test]
-    fn the_cap_bounds_a_large_disk_at_the_roche_lobe() {
-        // min(birth, roche_lobe): a disk larger than its Roche lobe is bounded to the lobe (the upper edge, the
-        // actual truncation being inside), a smaller one untouched.
-        let lobe = Fixed::from_ratio(76, 10); // 7.6 AU Roche-lobe upper bound
+    fn the_truncation_fraction_tightens_the_disk_inside_the_roche_lobe() {
+        // The Pichardo fit f = 0.733 (1-e)^1.20 q^0.07, q the companion mass fraction M_2/(M_1+M_2). At an equal-mass
+        // circular binary (q=0.5) the disk truncates near 0.70 R_L; the 0.733 coefficient is the q->1 limit.
+        let fit = DiskTruncationFit::pichardo_2005();
+        let f_eq = resonant_truncation_fraction(Fixed::ZERO, Fixed::from_ratio(1, 2), &fit)
+            .unwrap()
+            .central()
+            .unwrap();
+        assert!(
+            (f_eq.to_f64_lossy() - 0.699).abs() < 0.01,
+            "an equal-mass circular binary truncates the disk near 0.70 R_L (got {})",
+            f_eq.to_f64_lossy()
+        );
+        // Eccentricity tightens the disk sharply: at q=0.5, e=0.5 gives ~0.30, e=0.9 gives ~0.044.
+        let f_half =
+            resonant_truncation_fraction(Fixed::from_ratio(1, 2), Fixed::from_ratio(1, 2), &fit)
+                .unwrap()
+                .central()
+                .unwrap();
+        let f_high =
+            resonant_truncation_fraction(Fixed::from_ratio(9, 10), Fixed::from_ratio(1, 2), &fit)
+                .unwrap()
+                .central()
+                .unwrap();
+        assert!(
+            f_high < f_half && f_half < f_eq,
+            "higher eccentricity tightens the disk"
+        );
+        assert!(
+            (f_half.to_f64_lossy() - 0.304).abs() < 0.02,
+            "e=0.5 truncates near 0.30 R_L at equal mass (got {})",
+            f_half.to_f64_lossy()
+        );
+        // The fraction ships as a BAND at the fit's stated +/- 6.5 percent, not a point.
+        let band =
+            resonant_truncation_fraction(Fixed::ZERO, Fixed::from_ratio(1, 2), &fit).unwrap();
+        assert!(
+            (band.hi.to_f64_lossy() / band.lo.to_f64_lossy() - 1.065 / 0.935).abs() < 0.001,
+            "the fraction band spans the +/- 6.5 percent Pichardo fit accuracy"
+        );
+        // The mass-fraction dependence is WEAK BUT REAL (q^0.07, ~17.5 percent per decade), not negligible: a tenfold
+        // mass fraction (0.05 -> 0.5) raises f by ~17.5 percent, the exact 0.07-versus-0.01 exponent the audit fixed.
+        let f_low_q = resonant_truncation_fraction(Fixed::ZERO, Fixed::from_ratio(5, 100), &fit)
+            .unwrap()
+            .central()
+            .unwrap();
+        let f_hi_q = resonant_truncation_fraction(Fixed::ZERO, Fixed::from_ratio(5, 10), &fit)
+            .unwrap()
+            .central()
+            .unwrap();
+        let decade_ratio = f_hi_q.to_f64_lossy() / f_low_q.to_f64_lossy();
+        assert!(
+            (decade_ratio - 1.175).abs() < 0.01,
+            "a tenfold mass fraction moves f by ~17.5 percent (10^0.07), got {decade_ratio}"
+        );
+        // Fail-loud on the SOURCE domain (Pichardo e in [0, 0.90], q in [0.01, 0.99]), not an extrapolation: an
+        // eccentricity above 0.90 (even below the unbound-orbit 1.0) and a mass fraction outside [0.01, 0.99] refuse.
+        assert!(
+            resonant_truncation_fraction(Fixed::from_ratio(95, 100), Fixed::from_ratio(1, 2), &fit)
+                .is_none(),
+            "e = 0.95 is above the fit's measured e <= 0.90, so it refuses rather than extrapolating"
+        );
+        assert!(resonant_truncation_fraction(Fixed::ONE, Fixed::from_ratio(1, 2), &fit).is_none());
+        assert!(
+            resonant_truncation_fraction(Fixed::ZERO, Fixed::from_ratio(5, 1000), &fit).is_none(),
+            "q = 0.005 is below the fit's measured q >= 0.01"
+        );
+        assert!(resonant_truncation_fraction(Fixed::ZERO, Fixed::ONE, &fit).is_none());
+    }
+
+    #[test]
+    fn the_truncation_fit_fingerprints_the_pichardo_coefficients() {
+        // Source-fingerprint (the audit's requirement): the exact Pichardo 2005 Eq. 6 coefficients, verified against
+        // the held scan p.524 (f = 0.733 (1-e)^1.20 q^0.07). This pins them so no future edit can silently swap in a
+        // different model family's coefficient (the Manara / Papaloizou-Pringle viscous-torque fit's 0.01, say, a
+        // distinct type with its own validity frame). If this fails, the fit has crossed a model family.
+        let fit = DiskTruncationFit::pichardo_2005();
         assert_eq!(
-            tidally_capped_scale_radius_au(Fixed::from_int(30), lobe),
-            Some(lobe),
-            "a 30 AU disk in a tight binary is bounded at the Roche-lobe upper edge"
+            fit.circular_fraction,
+            Fixed::from_ratio(733, 1000),
+            "coefficient 0.733"
         );
         assert_eq!(
-            tidally_capped_scale_radius_au(Fixed::from_int(3), lobe),
-            Some(Fixed::from_int(3)),
-            "a 3 AU disk inside its lobe is untouched"
+            fit.eccentricity_exponent,
+            Fixed::from_ratio(120, 100),
+            "eccentricity exponent 1.20"
         );
-        assert!(tidally_capped_scale_radius_au(Fixed::ZERO, lobe).is_none());
+        assert_eq!(
+            fit.mass_fraction_exponent,
+            Fixed::from_ratio(7, 100),
+            "mass-fraction exponent 0.07 (NOT the OCR-misread 0.01)"
+        );
+        // The fit's own validity and accuracy travel with it (Pichardo p.524): the +/- 6.5 percent band and the
+        // measured e in [0, 0.90], q in [0.01, 0.99] box, so a consumer cannot extrapolate the fit silently.
+        assert_eq!(
+            fit.fit_error_fraction,
+            Fixed::from_ratio(65, 1000),
+            "+/- 6.5 percent"
+        );
+        assert_eq!(fit.valid_ecc_max, Fixed::from_ratio(90, 100), "e <= 0.90");
+        assert_eq!(
+            fit.valid_mass_fraction_min,
+            Fixed::from_ratio(1, 100),
+            "q >= 0.01"
+        );
+        assert_eq!(
+            fit.valid_mass_fraction_max,
+            Fixed::from_ratio(99, 100),
+            "q <= 0.99"
+        );
+    }
+
+    #[test]
+    fn the_cap_bounds_a_large_disk_at_the_truncation_radius() {
+        // min(birth, f * roche_lobe): a disk larger than its resonant truncation radius is bounded to it, a smaller
+        // one untouched. At a circular orbit the Pichardo fraction is ~0.733, so the 7.6 AU lobe truncates at ~5.6 AU.
+        let lobe = Fixed::from_ratio(76, 10); // 7.6 AU Roche-lobe radius
+        let eval = pichardo_truncation_evaluation(
+            Fixed::ZERO,
+            Fixed::from_ratio(1, 2),
+            lobe,
+            &DiskTruncationFit::pichardo_2005(),
+        )
+        .unwrap();
+        // The evaluation is typed: the circumprimary invariant-loop upper bound, a band, not a bare scalar.
+        assert_eq!(eval.component, CircumstellarComponent::Primary);
+        assert_eq!(eval.modality, TruncationModality::InvariantLoopUpperBound);
+        // A large disk is bounded to the truncation band (both edges are the truncation radius, birth is larger).
+        let capped_large = tidally_capped_scale_radius_au(Fixed::from_int(30), &eval).unwrap();
+        assert_eq!(
+            capped_large, eval.radius_au,
+            "a 30 AU disk in a tight binary is bounded at the resonant truncation band f * R_L"
+        );
+        // A small disk inside its truncation radius is untouched on BOTH edges (birth is below either bound).
+        let capped_small = tidally_capped_scale_radius_au(Fixed::from_int(3), &eval).unwrap();
+        assert_eq!(capped_small.lo_au, Fixed::from_int(3));
+        assert_eq!(capped_small.hi_au, Fixed::from_int(3));
+        assert!(tidally_capped_scale_radius_au(Fixed::ZERO, &eval).is_none());
+        // A non-physical fraction (f > 1, a truncation radius beyond the Roche lobe) is refused.
+        let bad_eval = TruncationEvaluation {
+            fraction: TruncationFractionBand {
+                lo: Fixed::from_ratio(9, 10),
+                hi: Fixed::from_ratio(11, 10),
+            },
+            radius_au: TruncationRadiusBand {
+                lo_au: Fixed::from_int(7),
+                hi_au: Fixed::from_int(9),
+            },
+            modality: TruncationModality::InvariantLoopUpperBound,
+            component: CircumstellarComponent::Primary,
+        };
+        assert!(tidally_capped_scale_radius_au(Fixed::from_int(30), &bad_eval).is_none());
         let (c_num, c_log) = eggleton();
         assert!(roche_lobe_radius_au(Fixed::ZERO, Fixed::ONE, c_num, c_log).is_none());
         assert!(roche_lobe_radius_au(Fixed::from_int(20), Fixed::ZERO, c_num, c_log).is_none());
@@ -5002,10 +6148,20 @@ mod tests {
         );
         let birth = Fixed::from_int(30);
         let lobe = roche_lobe_radius_au(Fixed::from_int(20), Fixed::ONE, c_num, c_log).unwrap();
-        let capped = tidally_capped_scale_radius_au(birth, lobe).unwrap();
+        let eval = pichardo_truncation_evaluation(
+            Fixed::ZERO,
+            Fixed::from_ratio(1, 2),
+            lobe,
+            &DiskTruncationFit::pichardo_2005(),
+        )
+        .unwrap();
+        let capped_band = tidally_capped_scale_radius_au(birth, &eval).unwrap();
+        // Read the central of the capped band as the single radius the (still point-wise) viscous clock consumes.
+        let capped = capped_band.central().unwrap();
+        let r_t = eval.radius_au.central().unwrap();
         assert_eq!(
-            capped, lobe,
-            "the 30 AU disk is bounded at the Roche-lobe upper edge"
+            capped, r_t,
+            "the 30 AU disk is bounded at the resonant truncation radius f * R_L"
         );
         let t_birth = derive_viscous_time_myr(birth, m, t, alpha, mu).unwrap();
         let t_capped = derive_viscous_time_myr(capped, m, t, alpha, mu).unwrap();
@@ -5015,12 +6171,12 @@ mod tests {
             t_capped.to_f64_lossy(),
             t_birth.to_f64_lossy()
         );
-        // t_visc ~ sqrt(R_1), so the ratio tracks sqrt(lobe/birth).
+        // t_visc ~ sqrt(R_1), so the ratio tracks sqrt(R_trunc/birth).
         let ratio = t_capped.to_f64_lossy() / t_birth.to_f64_lossy();
-        let expected = (lobe.to_f64_lossy() / birth.to_f64_lossy()).sqrt();
+        let expected = (r_t.to_f64_lossy() / birth.to_f64_lossy()).sqrt();
         assert!(
             (ratio - expected).abs() < 0.02,
-            "the viscous-time ratio tracks sqrt(R_trunc/R_1), got {ratio} vs {expected}"
+            "the viscous-time ratio tracks sqrt(R_trunc/birth), got {ratio} vs {expected}"
         );
     }
 
@@ -5196,12 +6352,13 @@ mod tests {
 
     fn kraft_band() -> KraftBreakBand {
         // The ratified Kraft band as reserved-with-basis fixtures: the classic 6200 K lower edge, the modern
-        // 6550 +/- 200 K determination (a 6750 K upper edge), no metallicity shift (the flagged field, default 0).
+        // 6550 +/- 200 K determination (a 6750 K upper edge), and the honest pre-fetch conditioning (sign known
+        // positive, no magnitude), distinct from a measured-zero slope.
         KraftBreakBand {
             classic_edge_k: Fixed::from_int(6200),
             modern_center_k: Fixed::from_int(6550),
             modern_halfwidth_k: Fixed::from_int(200),
-            metallicity_shift_k_per_dex: Fixed::ZERO,
+            conditioning: KraftMetallicityConditioning::SignOnly,
         }
     }
 
@@ -5244,28 +6401,64 @@ mod tests {
 
     #[test]
     fn the_kraft_band_shifts_with_metallicity() {
-        // The Z-shift conditioning field moves the WHOLE band with composition (the ionization boundary depends on
-        // the metal-line opacity). With a nonzero shift, a star that was in-band at solar composition falls to a
-        // certain branch at a metallicity offset, so the field is load-bearing and wired, not decorative. The SIGN
-        // is unauthored (the field defaults to zero); this asserts only that a nonzero coefficient moves the edges.
+        // A STRUCTURE-DERIVED point slope moves the WHOLE band with composition (the ionization boundary depends on
+        // the metal-line opacity). At +1 dex a 300 K/dex slope shifts the edges up to [6500, 7050], so a 6400 K star
+        // that read NearDegenerate at solar sits BELOW the shifted lower edge and reads Convective. The sign is
+        // fixed positive by the type; the magnitude here is a probe, not a fetched value.
         let mut band = kraft_band();
-        // A probe coefficient, not a fetched value: at +1 dex the edges shift up by 300 K to [6500, 7050], so a
-        // 6400 K star that read NearDegenerate at solar now sits BELOW the shifted lower edge and reads Convective.
-        band.metallicity_shift_k_per_dex = Fixed::from_int(300);
+        band.conditioning =
+            KraftMetallicityConditioning::structure_derived(Fixed::from_int(300)).unwrap();
         assert_eq!(
             kraft_band_dispatch(Fixed::from_int(6400), band, Fixed::ONE),
             Some(KraftVerdict::Convective),
             "a +1 dex shift lifts the band above a 6400 K star"
         );
-        // The unshifted band still calls the same star NearDegenerate: the shift, not the star, moved the verdict.
+        // At solar composition the same band leaves the star NearDegenerate: the shift, not the star, moved it.
         assert_eq!(
             kraft_band_dispatch(Fixed::from_int(6400), band, Fixed::ZERO),
             Some(KraftVerdict::NearDegenerate),
             "with no offset the band is unmoved"
         );
-        // The effective edges track the shift exactly.
+        // The effective edges track the point shift exactly.
         assert_eq!(band.lower_edge_k(Fixed::ONE), Some(Fixed::from_int(6500)));
         assert_eq!(band.upper_edge_k(Fixed::ONE), Some(Fixed::from_int(7050)));
+        // The SIGN is fixed positive by the type: a negative slope is unrepresentable, not a runtime check.
+        assert!(KraftMetallicityConditioning::structure_derived(Fixed::from_int(-1)).is_none());
+        // The default conditioning (SignOnly) applies no magnitude, so the band does not move with metallicity, and
+        // that is DISTINCT from a measured-zero slope: the sign is carried even though the edges stay put.
+        let default_band = kraft_band();
+        assert_eq!(
+            default_band.lower_edge_k(Fixed::ONE),
+            Some(Fixed::from_int(6200))
+        );
+        assert_eq!(
+            default_band.conditioning,
+            KraftMetallicityConditioning::SignOnly
+        );
+    }
+
+    #[test]
+    fn the_kraft_banded_slope_widens_the_near_degenerate_zone() {
+        // A BANDED slope (uncertain magnitude) widens the near-degenerate band rather than asserting a point shift:
+        // at +1 dex a [100, 300] K/dex slope pushes the lower edge up by the SHALLOW 100 (to 6300) and the upper by
+        // the STEEP 300 (to 7050), so the ambiguous zone grows with the slope uncertainty.
+        let mut band = kraft_band();
+        band.conditioning =
+            KraftMetallicityConditioning::banded_slope(Fixed::from_int(100), Fixed::from_int(300))
+                .unwrap();
+        assert_eq!(band.lower_edge_k(Fixed::ONE), Some(Fixed::from_int(6300)));
+        assert_eq!(band.upper_edge_k(Fixed::ONE), Some(Fixed::from_int(7050)));
+        // The banded constructor enforces the ordering and the fixed positive sign.
+        assert!(
+            KraftMetallicityConditioning::banded_slope(Fixed::from_int(300), Fixed::from_int(100))
+                .is_none(),
+            "an out-of-order band is rejected"
+        );
+        assert!(
+            KraftMetallicityConditioning::banded_slope(Fixed::from_int(-1), Fixed::from_int(100))
+                .is_none(),
+            "a negative slope edge is rejected"
+        );
     }
 
     #[test]
@@ -5280,7 +6473,8 @@ mod tests {
         assert_eq!(kraft_band_dispatch(Fixed::ZERO, band, Fixed::ZERO), None);
         // A shift large enough to drive an edge non-positive refuses (the band ceases to be physical).
         let mut sunk = kraft_band();
-        sunk.metallicity_shift_k_per_dex = Fixed::from_int(10_000);
+        sunk.conditioning =
+            KraftMetallicityConditioning::structure_derived(Fixed::from_int(10_000)).unwrap();
         assert_eq!(sunk.lower_edge_k(Fixed::from_int(-1)), None); // 6200 - 10000 < 0
         assert_eq!(
             kraft_band_dispatch(Fixed::from_int(5000), sunk, Fixed::from_int(-1)),
@@ -5288,12 +6482,12 @@ mod tests {
             "a shift that sinks an edge below zero is not a band"
         );
         // A CROSSED band (the classic lower edge above the modern upper reach) is malformed base data, not a shift
-        // artifact (the shift moves both edges equally and cannot invert them): the lower-above-upper guard refuses.
+        // artifact (the point shift moves both edges equally and cannot invert them): the lower-above-upper guard refuses.
         let crossed = KraftBreakBand {
             classic_edge_k: Fixed::from_int(9000),
             modern_center_k: Fixed::from_int(6550),
             modern_halfwidth_k: Fixed::from_int(200),
-            metallicity_shift_k_per_dex: Fixed::ZERO,
+            conditioning: KraftMetallicityConditioning::SignOnly,
         };
         assert_eq!(
             kraft_band_dispatch(Fixed::from_int(7000), crossed, Fixed::ZERO),
@@ -5527,78 +6721,225 @@ mod tests {
     }
 
     #[test]
-    fn the_euv_branch_ships_a_bracket_with_its_width_stated() {
-        // RIDER 2: the branch's output is a BRACKET whose width is readable before a consumer reads the bounds.
-        // A departure band of [1, 100] (two dex, the atmosphere-model ensemble spread) makes the bracket two dex
-        // wide, and width_dex reports exactly that. The width is the departure band's, independent of the
-        // blackbody baseline.
-        let b = radiative_euv_luminosity_bracket(
+    fn the_blackbody_spectrum_is_same_spectrum_self_consistent() {
+        // THE SAME-SPECTRUM IDENTITY (the audit's required test): all three quantities come from ONE blackbody
+        // integral, so L_ion / Q_H = <E> exactly, i.e. log10(L_ion) - log10(Q_H) = log10(<E>). No NLTE energy is
+        // ever crossed with an LTE mean energy because there is one branch here.
+        let bb = blackbody_ionizing_spectrum(
             Fixed::from_int(15000),
             Fixed::from_int(100), // L_bol ~ 100 L_sun, a Herbig
             t_ion(),
             wien_x_min(),
-            Fixed::ONE,           // departure_lo
-            Fixed::from_int(100), // departure_hi (two dex)
         )
         .unwrap();
-        assert!(b.hi_lsun() > b.lo_lsun(), "the bracket brackets");
-        let width = b.width_dex().unwrap().to_f64_lossy();
+        assert_eq!(bb.branch, AtmosphereBranch::Blackbody);
+        let l_ion = bb.ionizing_luminosity_log10_erg_s.unwrap().lo;
+        let q_h = bb.photon_rate_log10_s.lo;
+        let mean_e = bb.mean_photon_energy_log10_erg.unwrap().lo;
+        assert!(
+            (l_ion.checked_sub(q_h).unwrap().to_f64_lossy() - mean_e.to_f64_lossy()).abs() < 1e-6,
+            "L_ion / Q_H = <E> holds within the one blackbody branch"
+        );
+        // The blackbody is a POINT spectrum: zero-width photon-rate band.
+        assert_eq!(bb.photon_rate_log10_s.width_dex(), Some(Fixed::ZERO));
+    }
+
+    #[test]
+    fn the_nlte_departure_applies_in_photon_space_with_its_width_stated() {
+        // RIDER 2: the NLTE branch's photon rate is a BAND whose width is readable before a consumer reads it. A
+        // photon-number departure of [0.01, 1] (two dex of suppression below the blackbody, the atmosphere-model
+        // ensemble spread) makes the Q_H band two dex wide, applied IN PHOTON SPACE, and width_dex reports it.
+        let bb = blackbody_ionizing_spectrum(
+            Fixed::from_int(15000),
+            Fixed::from_int(100),
+            t_ion(),
+            wien_x_min(),
+        )
+        .unwrap();
+        let nlte = nlte_departed_ionizing_spectrum(
+            &bb,
+            Fixed::from_ratio(1, 100), // 0.01, deep suppression edge
+            Fixed::ONE,                // 1.0, the blackbody edge
+        )
+        .unwrap();
+        assert_eq!(nlte.branch, AtmosphereBranch::NlteLineBlanketed);
+        // The suppressed edge is below the blackbody photon rate; the unsuppressed edge equals it.
+        assert!(nlte.photon_rate_log10_s.lo < bb.photon_rate_log10_s.lo);
+        assert_eq!(nlte.photon_rate_log10_s.hi, bb.photon_rate_log10_s.hi);
+        let width = nlte.photon_rate_log10_s.width_dex().unwrap().to_f64_lossy();
         assert!(
             (width - 2.0).abs() < 0.01,
-            "the stated width is the departure band's two dex, got {width}"
+            "the photon-rate band is the departure's two dex, got {width}"
+        );
+        // The NLTE branch does not claim a self-consistent energy pair it did not reconstruct.
+        assert!(nlte.ionizing_luminosity_log10_erg_s.is_none());
+        assert!(nlte.mean_photon_energy_log10_erg.is_none());
+    }
+
+    #[test]
+    fn the_windless_herbig_grid_reproduces_its_points_and_rises_with_temperature() {
+        let grid = HerbigEuvDepartureGrid::bstar2006_svo();
+        // Exact grid points return their tabulated log10 departure (the derived data).
+        let at15 = grid.departure_log10_at(Fixed::from_int(15000)).unwrap();
+        let at30 = grid.departure_log10_at(Fixed::from_int(30000)).unwrap();
+        assert!((at15.to_f64_lossy() - (-2.6892)).abs() < 1e-4);
+        assert!((at30.to_f64_lossy() - (-0.6541)).abs() < 1e-4);
+        // Monotone: the departure (a suppression, negative) RISES with T_eff, so a hotter Herbig B star is less
+        // suppressed and photoevaporates harder, the physical direction.
+        let mut prev = f64::NEG_INFINITY;
+        for t in (15000..=30000).step_by(1000) {
+            let d = grid
+                .departure_log10_at(Fixed::from_int(t))
+                .unwrap()
+                .to_f64_lossy();
+            assert!(d > prev, "departure rises with T_eff at {t}");
+            prev = d;
+        }
+    }
+
+    #[test]
+    fn the_windless_grid_interpolates_in_log_space_between_points() {
+        let grid = HerbigEuvDepartureGrid::bstar2006_svo();
+        let lo = grid
+            .departure_log10_at(Fixed::from_int(20000))
+            .unwrap()
+            .to_f64_lossy();
+        let hi = grid
+            .departure_log10_at(Fixed::from_int(21000))
+            .unwrap()
+            .to_f64_lossy();
+        let m = grid
+            .departure_log10_at(Fixed::from_int(20500))
+            .unwrap()
+            .to_f64_lossy();
+        assert!(
+            lo < m && m < hi,
+            "20500 K interpolates between the 20000 and 21000 K points"
+        );
+        // Halfway in T_eff is halfway in log10 departure (the grid interpolates linearly in log space).
+        assert!(
+            (m - 0.5 * (lo + hi)).abs() < 1e-3,
+            "log-space linear interpolation at the segment midpoint"
         );
     }
 
     #[test]
-    fn the_bracket_scales_with_luminosity_and_holds_its_width() {
-        // Doubling L_bol doubles both bounds (the ionizing luminosity is linear in L_bol) and leaves the width
-        // unchanged (the width is the model band, not the star's brightness).
-        let one = radiative_euv_luminosity_bracket(
+    fn the_windless_spectrum_refuses_a_star_off_the_grid_coordinate_slice() {
+        // The grid is a single (solar Z, log g 4.0) slice; a star off that slice must REFUSE, not silently receive
+        // the solar-log-g-4 departure. This is the fix for applying the departure without its model coordinates.
+        let grid = HerbigEuvDepartureGrid::bstar2006_svo();
+        let bb = blackbody_ionizing_spectrum(
+            Fixed::from_int(20000),
+            Fixed::from_int(100),
+            t_ion(),
+            wien_x_min(),
+        )
+        .unwrap();
+        // On the slice (solar Z, log g 4): resolves.
+        assert!(
+            windless_herbig_departed_spectrum(&bb, &grid, Fixed::ONE, Fixed::from_int(4)).is_some()
+        );
+        // Metal-free, twice-solar, and low-gravity stars all refuse: the departure is not theirs.
+        assert!(
+            windless_herbig_departed_spectrum(&bb, &grid, Fixed::ZERO, Fixed::from_int(4))
+                .is_none()
+        );
+        assert!(windless_herbig_departed_spectrum(
+            &bb,
+            &grid,
+            Fixed::from_int(2),
+            Fixed::from_int(4)
+        )
+        .is_none());
+        assert!(
+            windless_herbig_departed_spectrum(&bb, &grid, Fixed::ONE, Fixed::from_int(2)).is_none()
+        );
+    }
+
+    #[test]
+    fn the_windless_grid_refuses_off_domain() {
+        let grid = HerbigEuvDepartureGrid::bstar2006_svo();
+        assert!(
+            grid.departure_log10_at(Fixed::from_int(14000)).is_none(),
+            "below 15000 K the EUV is negligible and off the windless grid"
+        );
+        assert!(
+            grid.departure_log10_at(Fixed::from_int(31000)).is_none(),
+            "above 30000 K is the windy-Sternberg door, not the windless sibling"
+        );
+    }
+
+    #[test]
+    fn the_windless_herbig_spectrum_suppresses_below_the_blackbody() {
+        let grid = HerbigEuvDepartureGrid::bstar2006_svo();
+        let bb = blackbody_ionizing_spectrum(
+            Fixed::from_int(20000),
+            Fixed::from_int(100), // L_bol ~ 100 L_sun, a Herbig
+            t_ion(),
+            wien_x_min(),
+        )
+        .unwrap();
+        let w =
+            windless_herbig_departed_spectrum(&bb, &grid, Fixed::ONE, Fixed::from_int(4)).unwrap();
+        assert_eq!(w.branch, AtmosphereBranch::NlteLineBlanketed);
+        // The windless model suppresses the ionizing photon rate below the blackbody by the grid's own departure
+        // (about 2.28 dex at 20000 K), applied in photon space.
+        let applied =
+            bb.photon_rate_log10_s.lo.to_f64_lossy() - w.photon_rate_log10_s.lo.to_f64_lossy();
+        assert!(
+            (applied - 2.2815).abs() < 0.01,
+            "20000 K windless suppression ~ 2.28 dex, got {applied}"
+        );
+        // A 40000 K star sits in the windy-Sternberg regime: the windless sibling refuses on T_eff, not extrapolating.
+        if let Some(hot_bb) = blackbody_ionizing_spectrum(
+            Fixed::from_int(40000),
+            Fixed::from_int(100),
+            t_ion(),
+            wien_x_min(),
+        ) {
+            assert!(
+                windless_herbig_departed_spectrum(&hot_bb, &grid, Fixed::ONE, Fixed::from_int(4))
+                    .is_none(),
+                "40000 K is off the windless grid: refuse, do not extrapolate into the windy regime"
+            );
+        }
+    }
+
+    #[test]
+    fn the_blackbody_photon_rate_scales_with_luminosity() {
+        // Doubling L_bol doubles Q_H (the ionizing luminosity is linear in L_bol, and the one division by the
+        // same-T_eff mean energy is unchanged), so log10(Q_H) rises by log10(2).
+        let one = blackbody_ionizing_spectrum(
             Fixed::from_int(20000),
             Fixed::from_int(50),
             t_ion(),
             wien_x_min(),
-            Fixed::ONE,
-            Fixed::from_int(30),
         )
         .unwrap();
-        let two = radiative_euv_luminosity_bracket(
+        let two = blackbody_ionizing_spectrum(
             Fixed::from_int(20000),
             Fixed::from_int(100),
             t_ion(),
             wien_x_min(),
-            Fixed::ONE,
-            Fixed::from_int(30),
         )
         .unwrap();
-        let ratio = two.hi_lsun().to_f64_lossy() / one.hi_lsun().to_f64_lossy();
+        let ratio = 10.0_f64.powf(
+            two.photon_rate_log10_s.lo.to_f64_lossy() - one.photon_rate_log10_s.lo.to_f64_lossy(),
+        );
         assert!(
             (ratio - 2.0).abs() < 0.001,
-            "twice the L_bol, twice the bound"
+            "twice the L_bol, twice the photon rate, got {ratio}"
         );
-        let (w1, w2) = (one.width_dex().unwrap(), two.width_dex().unwrap());
-        assert_eq!(w1, w2, "the width is the model band, invariant under L_bol");
     }
 
     #[test]
-    fn the_euv_bracket_refuses_bad_inputs() {
-        // A non-positive luminosity, an inverted band, and a non-positive temperature are errors, never brackets.
-        assert!(radiative_euv_luminosity_bracket(
+    fn the_ionizing_spectrum_refuses_bad_inputs() {
+        // A non-positive luminosity is an error, never a spectrum.
+        assert!(blackbody_ionizing_spectrum(
             Fixed::from_int(15000),
             Fixed::ZERO,
             t_ion(),
-            wien_x_min(),
-            Fixed::ONE,
-            Fixed::from_int(100)
-        )
-        .is_none());
-        assert!(radiative_euv_luminosity_bracket(
-            Fixed::from_int(15000),
-            Fixed::from_int(100),
-            t_ion(),
-            wien_x_min(),
-            Fixed::from_int(100),
-            Fixed::ONE // hi < lo, inverted
+            wien_x_min()
         )
         .is_none());
         assert!(blackbody_ionizing_fraction(Fixed::from_int(-1), t_ion(), wien_x_min()).is_none());
@@ -5608,37 +6949,266 @@ mod tests {
             blackbody_ionizing_fraction(Fixed::from_int(60000), t_ion(), wien_x_min()).is_none(),
             "a 60000 K photosphere is past the Wien-tail validity edge: refuse, do not extrapolate"
         );
+        assert!(blackbody_ionizing_spectrum(
+            Fixed::from_int(60000),
+            Fixed::from_int(100),
+            t_ion(),
+            wien_x_min()
+        )
+        .is_none());
         // The audit's checked-arithmetic fix: a sub-122 K photosphere (x > ~1290) would overflow the polynomial
-        // `x^3`; the checked multiply REFUSES with None (the total-kernel contract) rather than wrapping to
-        // garbage. Non-stellar, but the guard now enforces it instead of trusting the caller.
+        // `x^3`; the checked multiply REFUSES with None (the total-kernel contract) rather than wrapping to garbage.
         assert!(
             blackbody_ionizing_fraction(Fixed::from_int(100), t_ion(), wien_x_min()).is_none(),
             "a 100 K photosphere overflows x^3: refuse (checked), never a wrapped value"
         );
-        assert!(radiative_euv_luminosity_bracket(
-            Fixed::from_int(60000),
-            Fixed::from_int(100),
-            t_ion(),
-            wien_x_min(),
-            Fixed::ONE,
-            Fixed::from_int(100)
-        )
-        .is_none());
-        // A degenerate band [d, d] is a valid point bracket of zero width.
-        let point = radiative_euv_luminosity_bracket(
+        // The NLTE departure refuses an inverted band and a non-blackbody input.
+        let bb = blackbody_ionizing_spectrum(
             Fixed::from_int(15000),
             Fixed::from_int(100),
             t_ion(),
             wien_x_min(),
-            Fixed::from_int(5),
-            Fixed::from_int(5),
         )
         .unwrap();
-        assert_eq!(
-            point.width_dex(),
-            Some(Fixed::ZERO),
-            "a point band has zero width"
+        assert!(
+            nlte_departed_ionizing_spectrum(&bb, Fixed::ONE, Fixed::from_ratio(1, 100)).is_none(),
+            "an inverted departure band (hi < lo) refuses"
         );
+        let already_nlte =
+            nlte_departed_ionizing_spectrum(&bb, Fixed::from_ratio(1, 10), Fixed::ONE).unwrap();
+        assert!(
+            nlte_departed_ionizing_spectrum(&already_nlte, Fixed::from_ratio(1, 10), Fixed::ONE)
+                .is_none(),
+            "the departure only applies to a blackbody evaluation, never a re-departed one"
+        );
+        // A degenerate departure [d, d] is a valid point band of zero width.
+        let point =
+            nlte_departed_ionizing_spectrum(&bb, Fixed::from_ratio(1, 2), Fixed::from_ratio(1, 2))
+                .unwrap();
+        assert_eq!(
+            point.photon_rate_log10_s.width_dex(),
+            Some(Fixed::ZERO),
+            "a point departure has zero width"
+        );
+    }
+
+    #[test]
+    fn the_mean_ionizing_photon_energy_derives_from_the_wien_tail() {
+        // <E>/E_edge = Gamma(4,x)/(x Gamma(3,x)), x = T_ion/T_eff. At a 15000 K photosphere (x ~ 10.5) the ratio is
+        // about 1.11 (the mean ionizing photon carries about 15 eV), DERIVED from T_eff with no reserved value.
+        let ratio =
+            mean_ionizing_photon_energy_over_edge(Fixed::from_int(15000), t_ion(), wien_x_min())
+                .unwrap()
+                .to_f64_lossy();
+        let x = 157821.0_f64 / 15000.0;
+        let oracle = (x * x * x + 3.0 * x * x + 6.0 * x + 6.0) / (x * (x * x + 2.0 * x + 2.0));
+        assert!(
+            (ratio / oracle - 1.0).abs() < 0.001,
+            "the derived ratio matches the Wien-tail oracle: got {ratio}, oracle {oracle}"
+        );
+        // A hotter photosphere hardens the tail: the mean energy rises above the cold-limit edge value, and the
+        // mean is always above the edge itself (the ratio exceeds 1).
+        let hot =
+            mean_ionizing_photon_energy_over_edge(Fixed::from_int(30000), t_ion(), wien_x_min())
+                .unwrap();
+        let cool =
+            mean_ionizing_photon_energy_over_edge(Fixed::from_int(10000), t_ion(), wien_x_min())
+                .unwrap();
+        assert!(
+            hot > cool,
+            "a hotter photosphere has a harder mean ionizing photon"
+        );
+        assert!(
+            cool > Fixed::ONE,
+            "the mean is always above the edge energy"
+        );
+        // Past the Wien-tail validity edge (T_eff > T_ion/wien_x_min ~ 52600 K) it refuses, not extrapolates.
+        assert!(mean_ionizing_photon_energy_over_edge(
+            Fixed::from_int(60000),
+            t_ion(),
+            wien_x_min()
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn the_euv_wind_rate_matches_the_hollenbach_normalization_oracle() {
+        // END-TO-END oracle (the audit's requirement: begin at a grid state, not an arbitrary ionizing luminosity):
+        // start from (T_eff, L_bol), build the blackbody spectrum (L_ion, Q_H, <E> from one integral), feed Q_H to
+        // the wind law, and match an independent f64 chain L_bol -> f_BB -> L_ion -> Q_H = L_ion/<E> -> Mdot.
+        let bb = blackbody_ionizing_spectrum(
+            Fixed::from_int(15000),
+            Fixed::from_int(100), // L_bol ~ 100 L_sun, a Herbig
+            t_ion(),
+            wien_x_min(),
+        )
+        .unwrap();
+        let out = radiative_euv_photoevaporation_wind_rate_msun_myr(
+            &bb,
+            Fixed::ONE,
+            &EuvWindFit::hollenbach_1994(),
+        )
+        .unwrap();
+        // The f64 oracle, computed OUTSIDE the code, replicates the same one-branch chain.
+        let l_sun_erg_s = 3.828e26_f64 * 1e7; // solar luminosity in erg/s
+        let (t_ion_f, k_b_erg) = (157821.0_f64, 1.380649e-16_f64);
+        let x = t_ion_f / 15000.0;
+        let poly = x * x * x + 3.0 * x * x + 6.0 * x + 6.0;
+        let f_bb = (15.0 / std::f64::consts::PI.powi(4)) * (-x).exp() * poly;
+        let l_ion_erg_s = 100.0 * f_bb * l_sun_erg_s;
+        let e_photon_erg = k_b_erg * t_ion_f * poly / (x * (x * x + 2.0 * x + 2.0));
+        let phi = l_ion_erg_s / e_photon_erg; // Q_H
+        let mdot_myr = 4.1e-10 * (phi / 1e41).powf(0.5) * 1.0_f64.powf(0.5) * 1e6;
+        let got = out.rate.lo_msun_myr().to_f64_lossy();
+        assert!(
+            (got / mdot_myr - 1.0).abs() < 0.03,
+            "the end-to-end EUV wind rate matches the Hollenbach oracle: got {got}, oracle {mdot_myr}"
+        );
+        // A blackbody (point) spectrum gives a point rate: zero-width bracket.
+        assert_eq!(
+            out.rate.width_dex(),
+            Some(Fixed::ZERO),
+            "a point spectrum has zero rate width"
+        );
+        // One solar mass sits BELOW Hollenbach's grounded 15-to-65 massive-star grid, so the rate is graded an
+        // analytic extrapolation (estimator), not a grounded point: the disjoint-evidence fix in action.
+        assert!(
+            matches!(out.fit_reach, FitReach::AnalyticExtrapolation { .. }),
+            "a solar mass is an extrapolation for the Hollenbach massive-star grid"
+        );
+    }
+
+    #[test]
+    fn the_euv_wind_rate_scales_as_the_square_root_of_the_photon_rate() {
+        // Mdot ~ Q_H^(1/2), so a hundredfold photon-rate band (two dex, an NLTE departure applied in photon space)
+        // gives a tenfold rate band, and the rate bracket's width is HALF the photon band's in dex (RIDER 2).
+        let bb = blackbody_ionizing_spectrum(
+            Fixed::from_int(15000),
+            Fixed::from_int(100),
+            t_ion(),
+            wien_x_min(),
+        )
+        .unwrap();
+        // A [0.01, 1] photon-number departure is a two-dex Q_H band.
+        let nlte =
+            nlte_departed_ionizing_spectrum(&bb, Fixed::from_ratio(1, 100), Fixed::ONE).unwrap();
+        let out = radiative_euv_photoevaporation_wind_rate_msun_myr(
+            &nlte,
+            Fixed::ONE,
+            &EuvWindFit::hollenbach_1994(),
+        )
+        .unwrap();
+        let ratio = out.rate.hi_msun_myr().to_f64_lossy() / out.rate.lo_msun_myr().to_f64_lossy();
+        assert!(
+            (ratio - 10.0).abs() < 0.1,
+            "a 100x photon-rate band gives a 10x (sqrt) rate band, got {ratio}"
+        );
+        let width = out.rate.width_dex().unwrap().to_f64_lossy();
+        assert!(
+            (width - 1.0).abs() < 0.01,
+            "the rate bracket is 1 dex, half the photon band's 2 dex, got {width}"
+        );
+    }
+
+    #[test]
+    fn the_euv_wind_rate_orders_the_analytic_and_hydrodynamic_channels() {
+        // The three cited channels form the model band: the Font hydrodynamic floor (1.52e-10) below the Hollenbach
+        // analytic (4.1e-10) below the Alexander analytic ceiling (4.4e-10), at identical inputs. This is the band a
+        // consumer forms, the analytic-versus-hydrodynamic sibling of the X-ray Owen-versus-Sellek band.
+        let bb = blackbody_ionizing_spectrum(
+            Fixed::from_int(15000),
+            Fixed::from_int(100),
+            t_ion(),
+            wien_x_min(),
+        )
+        .unwrap();
+        let rate = |fit: &EuvWindFit| {
+            radiative_euv_photoevaporation_wind_rate_msun_myr(&bb, Fixed::ONE, fit)
+                .unwrap()
+                .rate
+                .lo_msun_myr()
+        };
+        let font = rate(&EuvWindFit::font_2004_hydrodynamic());
+        let hollenbach = rate(&EuvWindFit::hollenbach_1994());
+        let alexander = rate(&EuvWindFit::alexander_2006());
+        assert!(
+            font < hollenbach && hollenbach < alexander,
+            "the model band orders floor < analytic < ceiling: {} < {} < {}",
+            font.to_f64_lossy(),
+            hollenbach.to_f64_lossy(),
+            alexander.to_f64_lossy()
+        );
+    }
+
+    #[test]
+    fn the_euv_wind_rate_guards_its_domain() {
+        // Fail-loud: a mass outside the fit's whole reach refuses, and a photosphere past the Wien-tail validity edge
+        // refuses at the spectrum, so no wind rate can be built from it.
+        let bb = blackbody_ionizing_spectrum(
+            Fixed::from_int(15000),
+            Fixed::from_int(100),
+            t_ion(),
+            wien_x_min(),
+        )
+        .unwrap();
+        let fit = EuvWindFit::hollenbach_1994();
+        // Below the 0.1 M_sun extrapolation floor and above the 65 M_sun grounded ceiling: outside the whole reach.
+        assert!(radiative_euv_photoevaporation_wind_rate_msun_myr(
+            &bb,
+            Fixed::from_ratio(5, 100),
+            &fit
+        )
+        .is_none());
+        assert!(
+            radiative_euv_photoevaporation_wind_rate_msun_myr(&bb, Fixed::from_int(100), &fit)
+                .is_none()
+        );
+        // A 60000 K photosphere is past the Wien-tail validity edge (x = T_ion/T_eff < wien_x_min ~ 3), so the
+        // SPECTRUM refuses to form, and there is no laundered rate downstream: the shared domain door moved up front.
+        assert!(blackbody_ionizing_spectrum(
+            Fixed::from_int(60000),
+            Fixed::from_int(100),
+            t_ion(),
+            wien_x_min()
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn the_euv_fit_domain_grades_each_channels_disjoint_support() {
+        // The disjoint-evidence fix: each channel grades a mass by ITS OWN grounded support, so the Herbig gap is
+        // never laundered into in-domain success. A single [mass_min, mass_max] pair could not tell these apart.
+        let hollenbach = EuvWindFit::hollenbach_1994();
+        let font = EuvWindFit::font_2004_hydrodynamic();
+        // Hollenbach is grounded on the 15-to-65 massive-star grid; a 30 M_sun star is in-domain.
+        assert_eq!(
+            hollenbach.domain.reach_at(Fixed::from_int(30)),
+            Some(FitReach::Grounded)
+        );
+        // The same fit at 1 M_sun is an analytic extrapolation (about 1.18 decades below the 15 M_sun edge).
+        match hollenbach.domain.reach_at(Fixed::ONE) {
+            Some(FitReach::AnalyticExtrapolation {
+                decades_beyond_grounded,
+            }) => assert!(
+                (decades_beyond_grounded.to_f64_lossy() - 15.0_f64.log10()).abs() < 0.02,
+                "the extrapolation distance is log10(15) decades below the grounded edge"
+            ),
+            other => panic!("a solar mass is a Hollenbach extrapolation, got {other:?}"),
+        }
+        // Font is grounded on the low-mass T Tauri regime; a solar-mass T Tauri star is in-domain for it, and the
+        // SAME 8 M_sun Herbig-gap star is an extrapolation for Font but never grounded by any channel.
+        assert_eq!(font.domain.reach_at(Fixed::ONE), Some(FitReach::Grounded));
+        assert!(matches!(
+            font.domain.reach_at(Fixed::from_int(8)),
+            Some(FitReach::AnalyticExtrapolation { .. })
+        ));
+        assert!(matches!(
+            hollenbach.domain.reach_at(Fixed::from_int(8)),
+            Some(FitReach::AnalyticExtrapolation { .. })
+        ));
+        // Outside every interval is a refusal, not a silent extrapolation.
+        assert_eq!(hollenbach.domain.reach_at(Fixed::from_int(80)), None);
+        assert_eq!(font.domain.reach_at(Fixed::from_ratio(5, 100)), None);
     }
 
     #[test]
@@ -6550,6 +8120,78 @@ mod tests {
             t_hi
         )
         .is_none());
+    }
+
+    #[test]
+    fn the_radiation_field_chi_estimator_is_a_banded_log_domain_stand_in() {
+        // The extinction-to-chi map is graded an ESTIMATOR, not a derivation, so this test exercises its own
+        // contract (a band, monotone in A_V, live in the log domain at deep extinction) and does NOT validate a
+        // single chi against the Goldsmith dark-core value: selecting k to reproduce that value and then checking
+        // against it would be the circular target reuse the audit flagged.
+        let est = ExtinctionChiEstimator::zucconi_2001();
+        // The A_V axis derives from the core column exactly as before (that step IS a derivation, the Bohlin ratio).
+        let log10_ratio = Fixed::from_ratio(2127, 100); // log10(1.87e21) ~ 21.27, the cited Bohlin ratio
+        let log10_column = Fixed::from_ratio(2297, 100); // log10(9.4e22) ~ 22.97, a factor ~50 over the ratio
+        let a_v = visual_extinction_magnitudes(log10_column, log10_ratio).unwrap();
+        assert!(
+            (a_v.to_f64_lossy() - 50.0).abs() < 1.5,
+            "the column over the ratio is ~50 mag of extinction (got {})",
+            a_v.to_f64_lossy()
+        );
+        // The estimate is a BAND: the steep-k edge attenuates deeper (lower chi) than the shallow-k edge.
+        let band = radiation_field_chi_estimate_from_extinction(a_v, &est).unwrap();
+        assert!(
+            band.log10_chi_lo < band.log10_chi_hi,
+            "the steep-k edge is the lower chi ({} < {})",
+            band.log10_chi_lo.to_f64_lossy(),
+            band.log10_chi_hi.to_f64_lossy()
+        );
+        // At A_V ~ 50 the band spans about 10^(-50*0.13) to 10^(-50*0.05), i.e. log10(chi) in about -6.5 to -2.5,
+        // straddling the observed dark-core regime WITHOUT being pinned to any one target inside it.
+        assert!(
+            band.log10_chi_hi.to_f64_lossy() > -3.0 && band.log10_chi_hi.to_f64_lossy() < -2.0,
+            "the shallow-k edge log10(chi) ~ -2.5 (got {})",
+            band.log10_chi_hi.to_f64_lossy()
+        );
+        assert!(
+            band.log10_chi_lo.to_f64_lossy() > -7.0 && band.log10_chi_lo.to_f64_lossy() < -6.0,
+            "the steep-k edge log10(chi) ~ -6.5 (got {})",
+            band.log10_chi_lo.to_f64_lossy()
+        );
+        // No extinction leaves the field unattenuated: log10(chi) = 0 on both edges, chi = 1.
+        let bare = radiation_field_chi_estimate_from_extinction(Fixed::ZERO, &est).unwrap();
+        assert_eq!(bare.log10_chi_lo, Fixed::ZERO);
+        assert_eq!(bare.log10_chi_hi, Fixed::ZERO);
+        assert!((bare.linear_hi().unwrap().to_f64_lossy() - 1.0).abs() < 1e-6);
+        // Monotone: less extinction is a brighter field on the matched edge.
+        let thin = radiation_field_chi_estimate_from_extinction(Fixed::from_int(5), &est).unwrap();
+        assert!(
+            thin.log10_chi_hi > band.log10_chi_hi,
+            "less extinction is brighter"
+        );
+        // REPRESENTATION LIVENESS: a deep core past the linear fixed-point floor stays live in the LOG domain (the
+        // band is a valid, very negative log10(chi)); only the LINEAR recovery refuses, which convicts the carrier
+        // and not the core's existence. This is the alien-general behaviour the A_V=200 refusal test lacked.
+        let deep =
+            radiation_field_chi_estimate_from_extinction(Fixed::from_int(200), &est).unwrap();
+        assert!(
+            deep.log10_chi_lo.to_f64_lossy() < -20.0,
+            "a deep core has a live, very negative log10(chi) (got {})",
+            deep.log10_chi_lo.to_f64_lossy()
+        );
+        assert!(
+            deep.linear_lo().is_none(),
+            "the linear recovery is the carrier that refuses, not the estimator"
+        );
+        // Fail-loud on a negative extinction or an inverted k band.
+        assert!(radiation_field_chi_estimate_from_extinction(Fixed::from_int(-1), &est).is_none());
+        let inverted = ExtinctionChiEstimator {
+            k_lo: Fixed::from_ratio(13, 100),
+            k_hi: Fixed::from_ratio(5, 100),
+        };
+        assert!(
+            radiation_field_chi_estimate_from_extinction(Fixed::from_int(10), &inverted).is_none()
+        );
     }
 
     #[test]

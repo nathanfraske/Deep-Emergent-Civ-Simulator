@@ -158,6 +158,12 @@ fn retrograde_circular_fraction() -> Fixed {
 /// retrograde one, so a retrograde moon is stable to roughly twice the prograde reach (the standard
 /// prograde/retrograde asymmetry; a retrograde captured moon like Triton can sit far out). These are cited
 /// literature constants for zero eccentricity; [`stable_orbit_fraction_ecc`] carries the eccentricity terms.
+///
+/// This is a CITED FIT BY DESIGN, not a value awaiting an in-engine derivation. The satellite stability boundary is
+/// a chaotic-dynamics result (Lyapunov-sensitive), so under the Chaos Protocol (the assembly ruling: chaos is
+/// SAMPLED from a derived measure, never integrated as a fixed-point path integral of a chaotic trajectory, which is
+/// a byte-neutrality landmine) the legal rung is the published N-body fit, not a trajectory integration here. A
+/// future derive-first sweep should read this fit as the derived measure, not flag it as an authored constant.
 pub fn stable_orbit_fraction(prograde: bool) -> Fixed {
     if prograde {
         prograde_circular_fraction()
@@ -293,6 +299,198 @@ pub fn tidal_recession_rate(
         return None;
     }
     Some(ln_rate.exp())
+}
+
+// @sources: henning_2009_tidal_heating
+/// The TIDAL HEATING POWER dissipated INSIDE a synchronously rotating moon on an eccentric orbit, returned as
+/// `log10(E_dot / watt)`. The heat production rate is
+/// `E_dot = (21/2) (k2/Q) (G M_planet^2 R_moon^5 n e^2) / a^6` (Murray & Dermott 1999/2005 chapter 4; Peale &
+/// Cassen 1978, Icarus 36, 245; the Io application Peale, Cassen & Reynolds 1979, Science 203, 892; the form read
+/// dual-channel from Henning, O'Connell & Sasselov 2009, ApJ 707, 1000, arXiv:0912.1907v1 Eq. (1), witness sha256
+/// `3db06bf4...` byte-identical to Wayback `20240430060355`, recorded in `PIPELINE_FETCHES.md` section 8b).
+///
+/// This is the SIBLING of [`tidal_recession_rate`] and its OPPOSITE face: recession raises the tide on the PLANET
+/// and reads the PLANET's `k2`/`Q`/`R`; heating dissipates in the MOON and reads the MOON's `k2`/`Q`/`R`. So the
+/// two consume different bodies' parameters, and a caller must not cross them.
+///
+/// UNITS and log-domain. Unlike the recession rate, tidal heating is NOT a dimensionless ratio: it produces watts,
+/// so the caller supplies SI. Io-class heating is ~1e14 W and `R_moon^5` is ~1e31, both far past the Q32.32
+/// ceiling, so the four DIMENSIONAL inputs enter as their base-10 logs (`log10_m_planet_kg`, `log10_r_moon_m`,
+/// `log10_a_m`, `log10_mean_motion` for `n` in rad/s) and the result is `log10(E_dot / W)`, assembled as a weighted
+/// SUM of logs with NO exponentiation, so nothing unrepresentable ever forms (the same log-carry discipline the
+/// wide-magnitude quantities in [`crate::astro`] and [`crate::giants`] use). The three dimensionless inputs (`k2`,
+/// `q_factor`, `eccentricity`) are order-unity and enter linearly.
+///
+/// THE KEPLER FOLD, why the code and the cited Eq. 1 look different but are the same expression. Kepler's third law
+/// with the moon mass negligible against the planet, `n^2 a^3 = G M_planet`, substituted into Eq. 1 does four
+/// things at once: it eliminates `G`, drops `M_planet` from the square to the first power, raises `n` from the
+/// first power to the third, and halves the `a` exponent from `-6` to `-3`. So the evaluated form is the G-free
+/// `E_dot = (21/2) (k2/Q) M_planet R_moon^5 n^3 e^2 / a^3`, IDENTICAL to Eq. 1 to <1e-9 on a numeric cross-check.
+/// The four apparent disagreements between the code and the cited extract (no `G`, `M` against `M^2`, `n^3` against
+/// `n`, `a^-3` against `a^-6`) are that one fold, not a defect. This is G-free in the same spirit as the recession
+/// rate, which also takes `n` rather than reconstructing it from `G`.
+///
+/// THE PREMISE THE FOLD CARRIES, and the caller contract. Because the fold leaves NO `G` and NO second `M_planet`
+/// in the code, nothing downstream can catch an inconsistent frequency, so `log10_mean_motion` MUST be the
+/// KEPLERIAN mean motion for the `a` and `M_planet` also passed, `n = sqrt(G M_planet / a^3)`, with the moon mass
+/// negligible against the planet. A caller that passes an observed or perturbed mean motion, or a moon massive
+/// enough that `n^2 a^3 = G(M_planet + m_moon)` binds, gets a silently wrong heat with no refusal. Derive `n` from
+/// the same `a` and `M_planet` (through the Keplerian period), never from an independent measurement.
+///
+/// The `21/2` is the standard algebra of the small-eccentricity, degree-2, constant-Q expansion (the counterpart
+/// of the `3` in the recession form), cited, not authored. Everything else is the moon's or the orbit's own datum:
+/// `k2`/`Q` are the MOON's reserved-with-basis material response supplied at the call site (a stiff rock moon, a
+/// dissipative icy moon, and a magma-ocean moon differ only in these two numbers), never authored here.
+///
+/// SCOPE: the fixed-Q, homogeneous, spin-synchronous, small-eccentricity LEADING term. A body far from synchronous
+/// rotation, at high eccentricity, or with a strongly frequency- or temperature-dependent `Q` (the viscoelastic
+/// regime) departs from this baseline, a named follow-on rung. This returns the heat PRODUCTION rate only; coupling
+/// it to the moon's thermal state, surface flux, or habitability needs a moon thermal substrate, a further rung.
+/// ADMITS THE ALIEN: every input is a per-body datum on the argument list, so an exotic moon is a data row, never a
+/// new path. `None` on a non-positive `k2`, `q_factor`, or `eccentricity` (a circular orbit raises no eccentricity
+/// tide, so the leading-order heat is zero and its `log10` is undefined), or on an overflow. DORMANT: no pinned run
+/// path calls this, so the run pins hold bit-exact.
+pub fn tidal_heating_power_log10(
+    k2: Fixed,
+    q_factor: Fixed,
+    eccentricity: Fixed,
+    log10_m_planet_kg: Fixed,
+    log10_r_moon_m: Fixed,
+    log10_a_m: Fixed,
+    log10_mean_motion: Fixed,
+) -> Option<Fixed> {
+    if k2 <= Fixed::ZERO || q_factor <= Fixed::ZERO || eccentricity <= Fixed::ZERO {
+        return None;
+    }
+    // log10(E_dot/W) = log10(21/2) + log10(k2) - log10(Q) + 2 log10(e)
+    //                  + log10(M_planet) + 5 log10(R_moon) + 3 log10(n) - 3 log10(a).
+    // The dimensionless factors (21/2, k2, Q, e) are converted to base-10 via ln/ln10; the four dimensional
+    // factors already arrive as base-10 logs. Nothing is exponentiated, so the ~10^15 W ceiling never bites.
+    let ln10 = Fixed::from_int(10).ln();
+    let log10 = |x: Fixed| -> Option<Fixed> { x.ln().checked_div(ln10) };
+    let two = Fixed::from_int(2);
+    let three = Fixed::from_int(3);
+    let five = Fixed::from_int(5);
+    let acc = log10(Fixed::from_ratio(21, 2))?
+        .checked_add(log10(k2)?)?
+        .checked_sub(log10(q_factor)?)?
+        .checked_add(two.checked_mul(log10(eccentricity)?)?)?
+        .checked_add(log10_m_planet_kg)?
+        .checked_add(five.checked_mul(log10_r_moon_m)?)?
+        .checked_add(three.checked_mul(log10_mean_motion)?)?
+        .checked_sub(three.checked_mul(log10_a_m)?)?;
+    Some(acc)
+}
+
+/// The TIDAL-SURVIVAL verdict for a candidate moon over the system age, the shared post-condition every branch
+/// of the moon dispatch closes on (circumplanetary-disk, giant-impact, capture). A moon is [`Retained`] only if
+/// it forms in the stable band (above the Roche disruption floor, below the Domingos stable Hill fraction) and
+/// stays there as its orbit tidally evolves over the age.
+///
+/// [`Retained`]: MoonSurvival::Retained
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum MoonSurvival {
+    /// The moon forms in the stable band and stays there over the age: a real satellite.
+    Retained,
+    /// The moon forms at or inside the Roche limit and is sheared apart at formation (a ring, not a moon).
+    DisruptedAtFormation,
+    /// The moon forms at or beyond the stable Hill fraction and is stripped by the star at formation.
+    UnstableAtFormation,
+    /// The moon starts outside corotation and its orbit recedes past the stable Hill fraction within the age
+    /// (tidal outspiral to instability, the far-future fate of a receding moon).
+    RecedesToInstability,
+    /// The moon starts inside corotation and its orbit decays to the Roche limit within the age (tidal inspiral
+    /// to disruption, the Phobos fate).
+    DecaysToDisruption,
+}
+
+/// The TIDAL-SURVIVAL FILTER: evolve a candidate moon's orbit over the system age and return whether it is
+/// [`MoonSurvival::Retained`] (see the enum for the failure modes). This is the geometry-and-evolution close of
+/// the moon dispatch, built on the module's primitives; the branch that produces the candidate (the
+/// circumplanetary disk, the giant impact, a capture) supplies the moon and the planet, and every branch runs
+/// its candidate through this same filter.
+///
+/// All lengths (`moon_orbit`, `roche_limit`, `stable_axis`, `corotation_radius`) are in ONE consistent unit the
+/// caller chooses, and `recession_rate` (the tidal `da/dt` magnitude at `moon_orbit`, from
+/// [`tidal_recession_rate`]) and `system_age` share ONE time unit (pick the unit so the age is representable,
+/// megayears for a Gyr-age system, since bare years overflow the Q32.32 range). Keying off the caller's
+/// pre-computed bounds keeps this kernel unit-agnostic and free of `G` (the corotation radius, derived from the
+/// planet's spin, is a per-world datum the caller supplies, reserved-with-basis at the call site, as `k2` and
+/// `Q` are for [`tidal_recession_rate`]).
+///
+/// The static band is checked first (a moon at or inside the Roche limit is `DisruptedAtFormation`, at or beyond
+/// the stable fraction is `UnstableAtFormation`). Then the orbit evolves under the closed-form tidal solution of
+/// `da/dt = C * a^(-11/2)`: `a(t) = a0 * (1 +- X)^(2/13)` with `X = (13/2) * (rate/a0) * age`, the sign positive
+/// outside corotation (recession) and negative inside it (decay). `X` is assembled in LOG-SPACE and exponentiated
+/// once, because `rate/a0` is ~1e-10 for a Moon-like case (below the Q32.32 floor in a direct product), the same
+/// discipline the recession rate itself uses. A decaying orbit whose `(1 - X)` term reaches zero within the age
+/// has spiralled into the planet, so it is `DecaysToDisruption`. `None` on a non-positive input or a value past
+/// the representable range (fail-soft, never a fabricated verdict).
+pub fn tidal_survival(
+    moon_orbit: Fixed,
+    roche_limit: Fixed,
+    stable_axis: Fixed,
+    corotation_radius: Fixed,
+    recession_rate: Fixed,
+    system_age: Fixed,
+) -> Option<MoonSurvival> {
+    if moon_orbit <= Fixed::ZERO
+        || roche_limit <= Fixed::ZERO
+        || stable_axis <= Fixed::ZERO
+        || corotation_radius <= Fixed::ZERO
+        || recession_rate <= Fixed::ZERO
+        || system_age <= Fixed::ZERO
+    {
+        return None;
+    }
+    // The static band: disrupted at or inside the Roche floor, stripped at or beyond the stable Hill fraction.
+    if moon_orbit <= roche_limit {
+        return Some(MoonSurvival::DisruptedAtFormation);
+    }
+    if moon_orbit >= stable_axis {
+        return Some(MoonSurvival::UnstableAtFormation);
+    }
+    // X = (13/2) * (rate/a0) * age, assembled in log-space (rate/a0 ~1e-10 underflows a direct product):
+    // ln X = ln(13/2) + ln(rate) - ln(a0) + ln(age). The (13/2) is the standard algebra of the a^(-11/2) tidal
+    // integral (integrating a^(11/2) da gives (2/13) a^(13/2)), not an authored parameter.
+    let thirteen_halves = Fixed::from_ratio(13, 2);
+    let ln_x = thirteen_halves
+        .ln()
+        .checked_add(recession_rate.ln())?
+        .checked_sub(moon_orbit.ln())?
+        .checked_add(system_age.ln())?;
+    let ln_ceiling = Fixed::from_int(31).checked_mul(Fixed::from_int(2).ln())?;
+    if ln_x >= ln_ceiling {
+        return None; // the evolution term is past the representable range; fail soft
+    }
+    let x = ln_x.exp();
+    // The exponent 2/13 of the closed-form tidal solution a(t) = a0 * (1 +- X)^(2/13).
+    let two_thirteenths = Fixed::from_ratio(2, 13);
+    if moon_orbit > corotation_radius {
+        // Recession: a grows. a_final = a0 * (1 + X)^(2/13). Past the stable bound within the age is instability.
+        let factor = Fixed::ONE.checked_add(x)?.powf(two_thirteenths);
+        let a_final = moon_orbit.checked_mul(factor)?;
+        if a_final >= stable_axis {
+            Some(MoonSurvival::RecedesToInstability)
+        } else {
+            Some(MoonSurvival::Retained)
+        }
+    } else if moon_orbit < corotation_radius {
+        // Decay: a shrinks. If (1 - X) has reached zero the moon has spiralled into the planet within the age.
+        let inner = Fixed::ONE.checked_sub(x)?;
+        if inner <= Fixed::ZERO {
+            return Some(MoonSurvival::DecaysToDisruption);
+        }
+        let a_final = moon_orbit.checked_mul(inner.powf(two_thirteenths))?;
+        if a_final <= roche_limit {
+            Some(MoonSurvival::DecaysToDisruption)
+        } else {
+            Some(MoonSurvival::Retained)
+        }
+    } else {
+        // Exactly at corotation: no tidal torque, the orbit is locked, so it stays in the band it formed in.
+        Some(MoonSurvival::Retained)
+    }
 }
 
 #[cfg(test)]
@@ -558,5 +756,259 @@ mod tests {
         assert!((retrograde_e_planet_coeff().to_f64_lossy() - 1.0764).abs() < 1e-4);
         assert!((retrograde_e_sat_coeff().to_f64_lossy() - 0.9812).abs() < 1e-4);
         assert!((fluid_roche_coefficient().to_f64_lossy() - 2.44).abs() < 1e-4);
+    }
+
+    // The Earth-Moon survival inputs, all lengths in metres and the rate/age in the megayear time unit (so the
+    // 4.5 Gyr age is representable). The bounds are composed from the module's own primitives, so the test
+    // exercises the whole filter end to end. The Hill radius is passed in metres (~0.0098 AU) directly rather
+    // than converted through the AU constant, which exceeds the Q32.32 range.
+    fn earth_moon_case() -> (Fixed, Fixed, Fixed, Fixed, Fixed, Fixed) {
+        let r_planet = Fixed::from_int(6_371_000); // R_Earth, metres
+        let a = Fixed::from_int(384_400_000); // Earth-Moon distance, metres
+        let roche = roche_limit(Fixed::from_int(3344), Fixed::from_int(5514), r_planet).unwrap();
+        let r_hill_m = Fixed::from_int(1_466_000_000); // Earth Hill radius ~0.0098 AU, in metres
+        let stable = stable_semimajor_axis(r_hill_m, true, Fixed::ZERO, Fixed::ZERO).unwrap();
+        // The recession rate in metres per megayear (mean motion in radians per megayear: 84 rad/yr * 1e6).
+        let rate = tidal_recession_rate(
+            r(30, 100),
+            Fixed::from_int(12),
+            r(123, 10000),
+            Fixed::ONE,
+            r_planet,
+            a,
+            Fixed::from_int(84_000_000),
+        )
+        .unwrap();
+        let corotation = Fixed::from_int(20_000_000); // fast early-Earth synchronous radius, well inside the Moon
+        let age = Fixed::from_int(4500); // 4.5 Gyr in Myr
+        (a, roche, stable, corotation, rate, age)
+    }
+
+    /// The Earth-Moon system is RETAINED: the Moon forms above the Roche limit and below the stable Hill
+    /// fraction, and over 4.5 Gyr its outward tidal recession does not carry it past the stable bound. The whole
+    /// filter is composed from the module's own primitives (Roche, the Domingos band, the recession rate).
+    #[test]
+    fn the_earth_moon_survives_the_tidal_filter() {
+        let (a, roche, stable, corotation, rate, age) = earth_moon_case();
+        assert_eq!(
+            tidal_survival(a, roche, stable, corotation, rate, age).unwrap(),
+            MoonSurvival::Retained,
+            "the Moon survives 4.5 Gyr in the stable band"
+        );
+    }
+
+    /// The static band rejects the two formation-time failures: a moon at or inside the Roche limit is disrupted
+    /// into a ring, and a moon at or beyond the stable Hill fraction is stripped by the star.
+    #[test]
+    fn a_moon_outside_the_static_band_does_not_survive() {
+        let (_a, roche, stable, corotation, rate, age) = earth_moon_case();
+        // Inside the Roche limit: disrupted at formation.
+        let inside_roche = Fixed::from_int(5_000_000); // < ~9.48e6 m Roche
+        assert_eq!(
+            tidal_survival(inside_roche, roche, stable, corotation, rate, age).unwrap(),
+            MoonSurvival::DisruptedAtFormation
+        );
+        // Beyond the stable Hill fraction: stripped at formation.
+        let beyond_stable = Fixed::from_int(800_000_000); // > ~7.18e8 m stable bound
+        assert_eq!(
+            tidal_survival(beyond_stable, roche, stable, corotation, rate, age).unwrap(),
+            MoonSurvival::UnstableAtFormation
+        );
+    }
+
+    /// A close-in moon inside corotation decays: its orbit spirals inward under the tide and reaches the Roche
+    /// limit within the age (the Phobos fate), so it does not survive.
+    #[test]
+    fn a_close_moon_inside_corotation_decays_to_disruption() {
+        // A moon just above the Roche floor, inside a wide corotation radius, with enough tidal decay over the
+        // age that the (1 - X) term drives it inward to disruption.
+        let roche = Fixed::from_int(9_480_000);
+        let stable = Fixed::from_int(700_000_000);
+        let corotation = Fixed::from_int(100_000_000); // the moon at 1.2e7 m sits well inside corotation
+        let moon = Fixed::from_int(12_000_000);
+        let rate = Fixed::from_int(1000); // metres per megayear
+        let age = Fixed::from_int(4500);
+        assert_eq!(
+            tidal_survival(moon, roche, stable, corotation, rate, age).unwrap(),
+            MoonSurvival::DecaysToDisruption
+        );
+    }
+
+    /// Determinism (Principle 3) and fail-soft: the same inputs give the same verdict, and a non-positive input
+    /// returns `None` rather than a fabricated verdict.
+    #[test]
+    fn the_survival_filter_is_deterministic_and_fails_soft() {
+        let (a, roche, stable, corotation, rate, age) = earth_moon_case();
+        assert_eq!(
+            tidal_survival(a, roche, stable, corotation, rate, age),
+            tidal_survival(a, roche, stable, corotation, rate, age)
+        );
+        assert!(tidal_survival(Fixed::ZERO, roche, stable, corotation, rate, age).is_none());
+        assert!(tidal_survival(a, roche, stable, corotation, rate, Fixed::ZERO).is_none());
+    }
+
+    /// An INDEPENDENT f64 reference for the heating rate, computed from the witness's ORIGINAL Equation (1) form
+    /// `E_dot = (21/2)(k2/Q) G M^2 R^5 n e^2 / a^6` (Henning et al. 2009 Eq. 1), NOT the kernel's G-free
+    /// rearrangement. Agreement between the two therefore convicts the kernel of matching the vendored equation,
+    /// not merely of matching itself. Returns `(log10(E_dot), log10 M, log10 R, log10 a, log10 n)` in SI.
+    fn eq1_reference(
+        m_planet_kg: f64,
+        r_moon_m: f64,
+        a_m: f64,
+        e: f64,
+        k2: f64,
+        q: f64,
+    ) -> (f64, f64, f64, f64, f64) {
+        let g = 6.674e-11_f64;
+        let n = (g * m_planet_kg / a_m.powi(3)).sqrt();
+        let e_dot =
+            (21.0 / 2.0) * (k2 / q) * g * m_planet_kg.powi(2) * r_moon_m.powi(5) * n * e * e
+                / a_m.powi(6);
+        (
+            e_dot.log10(),
+            m_planet_kg.log10(),
+            r_moon_m.log10(),
+            a_m.log10(),
+            n.log10(),
+        )
+    }
+
+    /// Io around Jupiter reproduces the tidal heat production rate of the witness's Equation (1) to fixed-point
+    /// tolerance, cross-checked against the independent f64 reference in its original (non-G-free) form. With a
+    /// fiducial `k2/Q ~ 3e-4` the rate is `~1.9e12` W (`log10 ~ 12.27`), the physical order of magnitude for Io.
+    #[test]
+    fn io_reproduces_the_witness_heating_rate() {
+        let (log10_e_ref, log10_m, log10_r, log10_a, log10_n) =
+            eq1_reference(1.898e27, 1.822e6, 4.217e8, 0.0041, 0.03, 100.0);
+        // Pass the SI magnitudes as base-10 logs (their linear SI values overflow Q32.32); k2/Q/e are order-unity.
+        let got = tidal_heating_power_log10(
+            r(3, 100),            // k2 = 0.03
+            Fixed::from_int(100), // Q = 100
+            r(41, 10000),         // e = 0.0041
+            r((log10_m * 1e6) as i64, 1_000_000),
+            r((log10_r * 1e6) as i64, 1_000_000),
+            r((log10_a * 1e6) as i64, 1_000_000),
+            r((log10_n * 1e6) as i64, 1_000_000),
+        )
+        .expect("Io heating evaluates");
+        assert!(
+            (got.to_f64_lossy() - log10_e_ref).abs() < 1e-3,
+            "kernel log10(E_dot)={} vs independent Eq.1 reference log10={}",
+            got.to_f64_lossy(),
+            log10_e_ref
+        );
+        // Physical anchor: Io-class heating is in the terawatt-to-hundred-terawatt decade (log10 ~ 12 to 14).
+        assert!(
+            got.to_f64_lossy() > 11.0 && got.to_f64_lossy() < 15.0,
+            "Io heating sits in the expected 10^12 to 10^14 W band, got 10^{}",
+            got.to_f64_lossy()
+        );
+    }
+
+    /// ADMITS THE ALIEN: a different moon (denser, icier, higher eccentricity, its own k2/Q) around an Earth-mass
+    /// planet is just a different set of numbers through the same law, and it too matches the independent reference.
+    #[test]
+    fn an_alien_moon_is_a_data_row_not_a_new_path() {
+        let (log10_e_ref, log10_m, log10_r, log10_a, log10_n) =
+            eq1_reference(5.972e24, 2.5e6, 1.0e9, 0.02, 0.015, 40.0);
+        let got = tidal_heating_power_log10(
+            r(15, 1000), // k2 = 0.015
+            Fixed::from_int(40),
+            r(2, 100), // e = 0.02
+            r((log10_m * 1e6) as i64, 1_000_000),
+            r((log10_r * 1e6) as i64, 1_000_000),
+            r((log10_a * 1e6) as i64, 1_000_000),
+            r((log10_n * 1e6) as i64, 1_000_000),
+        )
+        .expect("alien-moon heating evaluates");
+        assert!(
+            (got.to_f64_lossy() - log10_e_ref).abs() < 1e-3,
+            "alien kernel log10={} vs reference log10={}",
+            got.to_f64_lossy(),
+            log10_e_ref
+        );
+    }
+
+    /// The eccentricity dependence is exactly `e^2`: doubling the eccentricity raises `log10(E_dot)` by
+    /// `2*log10(2) ~ 0.602`, the signature of the small-e leading term, and heating rises monotonically with `e`.
+    #[test]
+    fn heating_scales_as_eccentricity_squared() {
+        let base = tidal_heating_power_log10(
+            r(3, 100),
+            Fixed::from_int(100),
+            r(41, 10000),
+            r(27_278_300, 1_000_000),
+            r(6_260_550, 1_000_000),
+            r(8_625_000, 1_000_000),
+            r(-4_386_160, 1_000_000),
+        )
+        .unwrap();
+        let doubled_e = tidal_heating_power_log10(
+            r(3, 100),
+            Fixed::from_int(100),
+            r(82, 10000), // e doubled
+            r(27_278_300, 1_000_000),
+            r(6_260_550, 1_000_000),
+            r(8_625_000, 1_000_000),
+            r(-4_386_160, 1_000_000),
+        )
+        .unwrap();
+        let delta = doubled_e.to_f64_lossy() - base.to_f64_lossy();
+        let two_log10_2 = 2.0 * 2.0_f64.log10();
+        assert!(
+            (delta - two_log10_2).abs() < 1e-3,
+            "doubling e adds 2*log10(2)={two_log10_2} to log10(E_dot), got {delta}"
+        );
+        assert!(doubled_e > base, "heating rises with eccentricity");
+    }
+
+    /// Determinism (Principle 3) and fail-soft: identical inputs give the identical `log10`, and a non-positive
+    /// `k2`, `Q`, or `eccentricity` (a circular orbit raises no eccentricity tide) returns `None`, never a
+    /// fabricated value.
+    #[test]
+    fn heating_is_deterministic_and_fails_soft() {
+        let args = (
+            r(3, 100),
+            Fixed::from_int(100),
+            r(41, 10000),
+            r(27_278_300, 1_000_000),
+            r(6_260_550, 1_000_000),
+            r(8_625_000, 1_000_000),
+            r(-4_386_160, 1_000_000),
+        );
+        assert_eq!(
+            tidal_heating_power_log10(args.0, args.1, args.2, args.3, args.4, args.5, args.6),
+            tidal_heating_power_log10(args.0, args.1, args.2, args.3, args.4, args.5, args.6)
+        );
+        assert!(tidal_heating_power_log10(
+            Fixed::ZERO,
+            args.1,
+            args.2,
+            args.3,
+            args.4,
+            args.5,
+            args.6
+        )
+        .is_none());
+        assert!(tidal_heating_power_log10(
+            args.0,
+            Fixed::ZERO,
+            args.2,
+            args.3,
+            args.4,
+            args.5,
+            args.6
+        )
+        .is_none());
+        assert!(tidal_heating_power_log10(
+            args.0,
+            args.1,
+            Fixed::ZERO,
+            args.3,
+            args.4,
+            args.5,
+            args.6
+        )
+        .is_none());
     }
 }

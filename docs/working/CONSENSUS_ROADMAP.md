@@ -8,13 +8,14 @@ The retired long-form board is `docs/working/CONSENSUS_ROADMAP_HISTORY.md`, pres
 
 ## Active arcs
 
+- 2026-07-20  Moon tidal-heating kernel -> `claude/moon-tidal-heating` (off main, carries #193's survival filter; doc-review round done). `moons::tidal_heating_power_log10`, dormant; witness `henning_2009_tidal_heating` in `sources/registry.toml`. Detail in `HANDOFFS.md`.
+- 2026-07-19  Mountains / mid-band (increment 3) -> #205 merged; wire waits on the thermoelastic ladder (`crates/physics/src/thermoelastic.rs`, rung 3 needs 3 anchors). Detail in `HANDOFFS.md`.
 - 2026-07-19  Seam D kernel built, flexural relief has a forebulge; producer-side wiring next -> `crates/physics/src/flexural_relief.rs`, `HANDOFFS.md`
 - 2026-07-19  Lane A flexure unit-system migration, Mars solves end to end -> `docs/working/FLEXURE_REPRESENTATION_DESIGN.md`
 - 2026-07-19  Lane B stagnant-lid: max(C1,C2) combinator + typed scope preflight built; production returns the typed refusal, run-path wiring unbuilt -> `crates/physics/src/convection_scaling.rs`
 - 2026-07-19  Lane C(i) global residual body count derived; per-target allocation is the open lever -> `crates/sim/src/smallbody.rs`
 - 2026-07-19  Lane D crust/mantle areal-mass ledger, growth is a transaction -> `crates/sim/src/deeptime.rs`
 - 2026-07-19  `Fixed::powf` audit done, 43 production sites, 2 railing defects fixed -> `docs/working/POWF_CALL_SITE_AUDIT.md`
-- 2026-07-19  #213 moon tidal kernel: gated, one finding (undocumented Kepler fold, unstated premise) -> PR #213 review
 - 2026-07-19  Codex lane: distributed strip load, D cancels so the D->0 Airy limit is finite -> `crates/physics/src/flexural_relief.rs`
 - 2026-07-19  Lane integration order: kernels parallel, run-path serialized on deeptime.rs + main.rs -> `docs/working/GEODYNAMICS_LANE_MAP.md`
 - 2026-07-18  Remote agent #201 (disk-evolution wire) lands large and often -> rebase-onto-main integration, keep viewer/physics lanes disjoint.
@@ -74,6 +75,7 @@ The retired long-form board is `docs/working/CONSENSUS_ROADMAP_HISTORY.md`, pres
 
 ## Recent landings (tombstoned; prune when old)
 
+- 2026-07-20  DONE  #213 merged (`e27ac14`): moon tidal-heating kernel, dormant; the Kepler-fold documentation was the gate's one finding -> `crates/sim/src/moons.rs`.
 - 2026-07-19  DONE  #212 merged: truncation-residual disposition + windless Herbig grid; body corrected, two capabilities withdrawn -> `docs/working/PR212_INTEGRATION_SCOPE.md`.
 - 2026-07-19  DONE  #207 merged to main (`0de27ab`): derive-first abiogenesis research spec + closure-formalism addendum -> `docs/working/ABIOGENESIS_*.md`.
 - 2026-07-19  DONE  #201 merged to main (`402e00d`): disk slice 2 run-path wire, Mdot_0 derived, the L_bol hold dissolved -> `git log 402e00d`.
@@ -127,10 +129,6 @@ The retired long-form board is `docs/working/CONSENSUS_ROADMAP_HISTORY.md`, pres
 - Interior recycling (crust is monotonic; no subduction, no overturn).
 
 - 2026-07-18 LANDED disk-gas mean molecular weight derives per world -> crates/sim/src/astro.rs
-- 2026-07-16 DONE pipeline literature-fetch values gathered -> docs/working/PIPELINE_FETCHES.md
-- 2026-07-16 LANDED post-main-sequence stellar track (#77) -> crates/sim/src/stellar_evolution.rs
-- 2026-07-16 LANDED composition-draw generator links 0 to 2 -> crates/materials/src/disk_composition.rs
-- 2026-07-16 DONE R-UNITS-PIN Tier-2 representation, merged #130 -> docs/working/UNITS_TIER2_SLICE_PLAN.md
 - 2026-07-15 FIXED massive-star T_eff on both inversion paths (#76) -> crates/sim/src/astro.rs
 - 2026-07-15 PROVENANCE FIX AGSS09 abundances re-declared a cross-checker -> crates/physics/src/solar_abundances.rs
 - 2026-07-15 DONE capstone seam 2, the iron dark-crust optics -> viewer and materials
