@@ -14,7 +14,8 @@ The retired long-form board is `docs/working/CONSENSUS_ROADMAP_HISTORY.md`, pres
 - 2026-07-19  Lane C(i) global residual body count derived; per-target allocation is the open lever -> `crates/sim/src/smallbody.rs`
 - 2026-07-19  Lane D crust/mantle areal-mass ledger, growth is a transaction -> `crates/sim/src/deeptime.rs`
 - 2026-07-19  `Fixed::powf` audit done, 43 production sites, 2 railing defects fixed -> `docs/working/POWF_CALL_SITE_AUDIT.md`
-- 2026-07-19  #212 verified merge-safe but BLOCKED by permission classifier, needs owner; PR body stale -> `docs/working/PR212_INTEGRATION_SCOPE.md`
+- 2026-07-19  #213 moon tidal kernel: gated, one finding (undocumented Kepler fold, unstated premise) -> PR #213 review
+- 2026-07-19  Codex lane: distributed strip load, D cancels so the D->0 Airy limit is finite -> `crates/physics/src/flexural_relief.rs`
 - 2026-07-19  Lane integration order: kernels parallel, run-path serialized on deeptime.rs + main.rs -> `docs/working/GEODYNAMICS_LANE_MAP.md`
 - 2026-07-18  Remote agent #201 (disk-evolution wire) lands large and often -> rebase-onto-main integration, keep viewer/physics lanes disjoint.
 - 2026-07-18  Arc AFTER the crust (perpetual dynamics, atmosphere keystone, hydrosphere) -> plan in `PHYSICS_SUBSTRATE_ROADMAP.md`.
@@ -73,6 +74,7 @@ The retired long-form board is `docs/working/CONSENSUS_ROADMAP_HISTORY.md`, pres
 
 ## Recent landings (tombstoned; prune when old)
 
+- 2026-07-19  DONE  #212 merged: truncation-residual disposition + windless Herbig grid; body corrected, two capabilities withdrawn -> `docs/working/PR212_INTEGRATION_SCOPE.md`.
 - 2026-07-19  DONE  #207 merged to main (`0de27ab`): derive-first abiogenesis research spec + closure-formalism addendum -> `docs/working/ABIOGENESIS_*.md`.
 - 2026-07-19  DONE  #201 merged to main (`402e00d`): disk slice 2 run-path wire, Mdot_0 derived, the L_bol hold dissolved -> `git log 402e00d`.
 - 2026-07-19  DONE  #203 merged to main (`b1b9ed0`): two crates, five live-fired gates, 225 files, pins held -> `git log b1b9ed0`.

@@ -17,7 +17,7 @@ The lists below are GENERATED from `crates/physics/data/*.toml`, `crates/physics
 
 ## Deriving substrates (check here BEFORE authoring: what the world derives, and where)
 
-The 76 deriving subsystems below live OUTSIDE the authored floor. Each produces a world quantity from the floor and the situation, so its output must never be authored: if the value you need appears here, read or extend the subsystem, do not set a number. This is the list that stops `1 year = 365 days` from being authored when orbital mechanics already derives it. Generated from the `// @derives:` markers in the code; a subsystem missing its marker is a gap in this map, so mark every derivation entry point.
+The 79 deriving subsystems below live OUTSIDE the authored floor. Each produces a world quantity from the floor and the situation, so its output must never be authored: if the value you need appears here, read or extend the subsystem, do not set a number. This is the list that stops `1 year = 365 days` from being authored when orbital mechanics already derives it. Generated from the `// @derives:` markers in the code; a subsystem missing its marker is a gap in this map, so mark every derivation entry point.
 
 ### `crates/foundation/src/clock.rs`
 
@@ -62,18 +62,21 @@ The 76 deriving subsystems below live OUTSIDE the authored floor. Each produces 
 - the in-scope stagnant-lid log-domain Nusselt determinations and their reporting envelope <- the world's stress exponent and its tagged Rayleigh and Frank-Kamenetskii projections, each cited row's coefficient and two exponents, and each row's own declared fitting scope (`crates/physics/src/convection_scaling.rs:909`)
 ### `crates/physics/src/flexural_relief.rs`
 
-- a loadable flexed plate <- the converged moment-equivalent rigidity and the world's restoring term (`crates/physics/src/flexural_relief.rs:81`)
-- a loadable flexed plate <- an internal rigidity and the world's restoring term (`crates/physics/src/flexural_relief.rs:92`)
-- the flexural deflection at a point <- the plate's rigidity, its flexural lengths and the load list (`crates/physics/src/flexural_relief.rs:156`)
-- one line load's plate deflection <- the load intensity, the flexural parameter and the rigidity (`crates/physics/src/flexural_relief.rs:206`)
-- one point load's plate deflection <- the load magnitude, the axisymmetric length and the rigidity (`crates/physics/src/flexural_relief.rs:251`)
+- a loadable flexed plate <- the converged moment-equivalent rigidity and the world's restoring term (`crates/physics/src/flexural_relief.rs:85`)
+- a loadable flexed plate <- an internal rigidity and the world's restoring term (`crates/physics/src/flexural_relief.rs:96`)
+- the flexural deflection at a point <- the plate's rigidity, its flexural lengths and the load list (`crates/physics/src/flexural_relief.rs:164`)
+- one line load's plate deflection <- the load intensity, the flexural parameter and the rigidity (`crates/physics/src/flexural_relief.rs:226`)
+- one point load's plate deflection <- the load magnitude, the axisymmetric length and the rigidity (`crates/physics/src/flexural_relief.rs:271`)
+- one uniform strip load's plate deflection <- the load pressure and footprint, the flexural parameter and restoring modulus (`crates/physics/src/flexural_relief.rs:300`)
 ### `crates/physics/src/flexure.rs`
 
-- the flexural rigidity in internal units <- Youngs modulus, Poisson ratio and the elastic thickness (`crates/physics/src/flexure.rs:340`)
-- the line-load flexural length scale in internal units <- the rigidity and the restoring modulus (`crates/physics/src/flexure.rs:373`)
-- the axisymmetric flexural length in internal units <- the rigidity and the restoring modulus (`crates/physics/src/flexure.rs:389`)
-- the line-load flexural amplitude in internal units <- the load intensity, flexural parameter and rigidity (`crates/physics/src/flexure.rs:419`)
-- the line-load flexural amplitude <- the load intensity, flexural parameter and rigidity (`crates/physics/src/flexure.rs:576`)
+- the flexural rigidity in internal units <- Youngs modulus, Poisson ratio and the elastic thickness (`crates/physics/src/flexure.rs:363`)
+- the line-load flexural length scale in internal units <- the rigidity and the restoring modulus (`crates/physics/src/flexure.rs:396`)
+- the axisymmetric flexural length in internal units <- the rigidity and the restoring modulus (`crates/physics/src/flexure.rs:412`)
+- the line-load flexural amplitude in internal units <- the load intensity, flexural parameter and rigidity (`crates/physics/src/flexure.rs:442`)
+- a uniform strip load's internal deflection <- its pressure and footprint, the flexural parameter and the restoring modulus (`crates/physics/src/flexure.rs:470`)
+- the line-load flexural amplitude <- the load intensity, flexural parameter and rigidity (`crates/physics/src/flexure.rs:652`)
+- a uniform strip load's flexural deflection <- its pressure and footprint, the flexural parameter and the restoring term (`crates/physics/src/flexure.rs:748`)
 ### `crates/physics/src/gruneisen.rs`
 
 - a rock's Gruneisen parameter <- the cited per-phase gamma table + the world's own mineral census (`crates/physics/src/gruneisen.rs:358`)

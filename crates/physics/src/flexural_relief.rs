@@ -38,7 +38,8 @@
 use civsim_core::Fixed;
 
 use crate::flexure::{
-    kelvin_kei, line_load_admissible, point_load_admissible, scaled, Load, LoadKind,
+    kelvin_kei, line_load_admissible, point_load_admissible, scaled, uniform_strip_load_admissible,
+    Load, LoadKind,
 };
 use crate::moment_equivalence::MomentEquivalentPlate;
 
@@ -53,6 +54,7 @@ use crate::moment_equivalence::MomentEquivalentPlate;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FlexedPlate {
     rigidity_internal: Fixed,
+    restoring_internal: Fixed,
     alpha_internal: Fixed,
     axisymmetric_length_internal: Fixed,
 }
@@ -67,6 +69,8 @@ pub enum ReliefRefusal {
     RigidityNotPositive,
     /// A load's magnitude is outside the declared envelope [`crate::flexure`] states for its kind.
     LoadOutsideEnvelope,
+    /// A distributed load's half-width is non-positive, so it has no finite footprint to integrate.
+    FootprintNotPositive,
     /// A fixed-point intermediate left the representable window. Never a fabricated deflection.
     NotRepresentable,
 }
@@ -103,6 +107,9 @@ impl FlexedPlate {
         }
         let g_hat =
             scaled::internal_gravity(gravity_km_s2).ok_or(ReliefRefusal::NotRepresentable)?;
+        let restoring_internal = delta_rho
+            .checked_mul(g_hat)
+            .ok_or(ReliefRefusal::NotRepresentable)?;
         let alpha_internal = scaled::scaled_flexural_parameter(rigidity_internal, delta_rho, g_hat)
             .ok_or(ReliefRefusal::NotRepresentable)?;
         let axisymmetric_length_internal =
@@ -113,6 +120,7 @@ impl FlexedPlate {
         }
         Ok(FlexedPlate {
             rigidity_internal,
+            restoring_internal,
             alpha_internal,
             axisymmetric_length_internal,
         })
@@ -143,16 +151,17 @@ impl FlexedPlate {
     /// THE DEFLECTION AT A QUERY POINT, in kilometres, summed over the whole load list.
     ///
     /// `qx_km` and `qy_km` are the query point and the load positions are the caller's own, in the same plane
-    /// and the same kilometres. A downward deflection (a load pressing the plate into its substrate) is
-    /// NEGATIVE, matching the Green's functions' own sign convention, so a caller adding this to an elevation
-    /// gets a basin under the load and a forebulge beyond it without inverting anything.
+    /// and the same kilometres. A positive load gives a POSITIVE downward deflection in the Turcotte and
+    /// Schubert convention used by the line and strip Green's functions. A caller whose elevation axis is
+    /// positive upward applies that coordinate conversion at the boundary.
     ///
     /// An empty list, or a list of zero-magnitude loads, gives zero rather than refusing: no load is a
     /// legitimate state and its relief is flat.
     ///
     /// THE SUM IS ORDER-INDEPENDENT because `Fixed` addition is exact and associative, which is the
     /// determinism contract (Principle 3) rather than a nicety: two runs that discover the same loads in
-    /// different orders must produce the same world.
+    /// different orders must produce the same world. Raw contribution bits accumulate in `i128` before one
+    /// final Q32.32 range check, so opposite-signed partial sums cannot make a refusal depend on listing order.
     // @derives: the flexural deflection at a point <- the plate's rigidity, its flexural lengths and the load list
     pub fn deflection_km(
         &self,
@@ -160,7 +169,7 @@ impl FlexedPlate {
         qx_km: Fixed,
         qy_km: Fixed,
     ) -> Result<Fixed, ReliefRefusal> {
-        let mut total_hat = Fixed::ZERO;
+        let mut total_hat_bits = 0_i128;
         for load in loads {
             let contribution = match load.kind {
                 LoadKind::LineY => {
@@ -189,11 +198,27 @@ impl FlexedPlate {
                         .sqrt();
                     self.point_contribution_hat(load.magnitude, r)?
                 }
+                LoadKind::UniformStripY { half_width } => {
+                    if half_width <= Fixed::ZERO {
+                        return Err(ReliefRefusal::FootprintNotPositive);
+                    }
+                    if !uniform_strip_load_admissible(load.magnitude, half_width) {
+                        return Err(ReliefRefusal::LoadOutsideEnvelope);
+                    }
+                    let perp = qx_km
+                        .checked_sub(load.x)
+                        .ok_or(ReliefRefusal::NotRepresentable)?;
+                    self.uniform_strip_contribution_hat(load.magnitude, half_width, perp)?
+                }
             };
-            total_hat = total_hat
-                .checked_add(contribution)
+            total_hat_bits = total_hat_bits
+                .checked_add(i128::from(contribution.to_bits()))
                 .ok_or(ReliefRefusal::NotRepresentable)?;
         }
+        if total_hat_bits < i128::from(i64::MIN) || total_hat_bits > i128::from(i64::MAX) {
+            return Err(ReliefRefusal::NotRepresentable);
+        }
+        let total_hat = Fixed::from_bits(total_hat_bits as i64);
         scaled::external_length(total_hat).ok_or(ReliefRefusal::NotRepresentable)
     }
 
@@ -271,11 +296,38 @@ impl FlexedPlate {
             .checked_mul(kelvin_kei(arg))
             .ok_or(ReliefRefusal::NotRepresentable)
     }
+
+    /// One uniform strip load's contribution, in INTERNAL length.
+    ///
+    /// The strip's pressure is integrated across its caller-supplied half-width through the closed form in
+    /// [`crate::flexure::scaled::scaled_uniform_strip_load_deflection`]. Pressure needs no boundary conversion:
+    /// the internal stress unit is one GPa, the same unit the external coherent flexure system uses.
+    // @derives: one uniform strip load's plate deflection <- the load pressure and footprint, the flexural parameter and restoring modulus
+    fn uniform_strip_contribution_hat(
+        &self,
+        pressure: Fixed,
+        half_width_km: Fixed,
+        perp_km: Fixed,
+    ) -> Result<Fixed, ReliefRefusal> {
+        let half_width_hat =
+            scaled::internal_length(half_width_km).ok_or(ReliefRefusal::NotRepresentable)?;
+        let perp_hat = scaled::internal_length(perp_km).ok_or(ReliefRefusal::NotRepresentable)?;
+        scaled::scaled_uniform_strip_load_deflection(
+            pressure,
+            half_width_hat,
+            perp_hat,
+            self.alpha_internal,
+            self.restoring_internal,
+        )
+        .ok_or(ReliefRefusal::NotRepresentable)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::flexure::{flexural_rigidity, MAX_LINE_LOAD_GPA_KM};
+    use crate::geodynamics::airy_isostatic_elevation;
 
     fn f64_of(x: Fixed) -> f64 {
         x.to_f64_lossy()
@@ -302,6 +354,15 @@ mod tests {
         Load {
             kind: LoadKind::LineY,
             magnitude: v0,
+            x,
+            y: Fixed::ZERO,
+        }
+    }
+
+    fn uniform_strip_load(pressure: Fixed, x: Fixed, half_width: Fixed) -> Load {
+        Load {
+            kind: LoadKind::UniformStripY { half_width },
+            magnitude: pressure,
             x,
             y: Fixed::ZERO,
         }
@@ -484,6 +545,131 @@ mod tests {
         assert!(
             stiff_w < soft_w,
             "and it bends less under the same load: {stiff_w} against {soft_w}"
+        );
+    }
+
+    #[test]
+    fn a_uniform_strip_converges_numerically_to_the_same_columns_airy_elevation() {
+        // INDEPENDENT COLUMN INPUTS, never back-solved from the target. The density and thickness are the felsic
+        // column already anchored by `geodynamics::a_lighter_crust_floats_higher_than_a_denser_one`, and gravity
+        // is the Earth-like flexure fixture. Its load pressure is derived separately as (rho_m - rho_c) g h.
+        // The full strip width is the 1000 km coarse-province scale this flexure substrate already declares in
+        // its module contract, supplied as load data rather than a kernel value.
+        let rho_m = Fixed::from_ratio(33, 10);
+        let rho_c = Fixed::from_ratio(265, 100);
+        let gravity = Fixed::from_ratio(98, 10_000);
+        let thickness_km = Fixed::from_int(35);
+        let half_width_km = Fixed::from_int(500);
+        let pressure = rho_m
+            .checked_sub(rho_c)
+            .and_then(|contrast| contrast.checked_mul(thickness_km))
+            .and_then(|column_contrast| column_contrast.checked_mul(gravity))
+            .expect("the column derives a load pressure");
+        let airy_km = airy_isostatic_elevation(rho_c, rho_m, Fixed::from_int(35_000))
+            .and_then(|metres| metres.checked_div(Fixed::from_int(1_000)))
+            .expect("the same column has an Airy elevation");
+        let load = uniform_strip_load(pressure, Fixed::ZERO, half_width_km);
+
+        // The rigidity values derive from the same E and nu at decreasing elastic thicknesses across the
+        // kernel's declared 5 to 800 km validation envelope. No D is selected from the Airy answer or from a
+        // desired residual.
+        let mut previous_d = None;
+        let mut previous_residual = None;
+        for elastic_thickness_km in [40, 20, 10, 5] {
+            let d = flexural_rigidity(
+                Fixed::from_int(70),
+                Fixed::from_ratio(1, 4),
+                Fixed::from_int(elastic_thickness_km),
+            )
+            .expect("the test plate derives a rigidity");
+            let d_internal = scaled::internal_rigidity(d).expect("the rigidity converts inward");
+            let plate = FlexedPlate::from_internal_rigidity(d_internal, rho_m, gravity)
+                .expect("the distributed load has a plate");
+            let flexural_km = plate
+                .deflection_km(&[load], Fixed::ZERO, Fixed::ZERO)
+                .expect("the distributed load evaluates");
+            let residual = flexural_km
+                .checked_sub(airy_km)
+                .expect("the residual is representable")
+                .abs();
+            eprintln!(
+                "Airy sweep: D={:.12} GPa km^3, alpha={:.12} km, w={:.12} km, Airy={:.12} km, residual={:.12} km",
+                d.to_f64_lossy(),
+                plate.flexural_parameter_km().expect("alpha").to_f64_lossy(),
+                flexural_km.to_f64_lossy(),
+                airy_km.to_f64_lossy(),
+                residual.to_f64_lossy(),
+            );
+            if let Some(prior) = previous_d {
+                assert!(d < prior, "the derived rigidity sweep must decrease");
+            }
+            if let Some(prior) = previous_residual {
+                assert!(
+                    residual < prior,
+                    "the Airy residual must shrink as D decreases: {} against {}",
+                    residual.to_f64_lossy(),
+                    prior.to_f64_lossy()
+                );
+            }
+            previous_d = Some(d);
+            previous_residual = Some(residual);
+        }
+    }
+
+    #[test]
+    fn distributed_loads_superpose_order_independently_to_the_bit() {
+        let plate = sluggish_plate();
+        let strip = uniform_strip_load(
+            Fixed::from_ratio(1, 100),
+            Fixed::from_int(-100),
+            Fixed::from_int(200),
+        );
+        let line = line_load(Fixed::from_ratio(21, 10), Fixed::from_int(700));
+        let point = Load {
+            kind: LoadKind::Point,
+            magnitude: Fixed::from_int(400),
+            x: Fixed::from_int(-300),
+            y: Fixed::from_int(150),
+        };
+        let q = (Fixed::from_int(120), Fixed::from_int(60));
+        let forward = plate
+            .deflection_km(&[strip, line, point], q.0, q.1)
+            .expect("forward");
+        let reversed = plate
+            .deflection_km(&[point, line, strip], q.0, q.1)
+            .expect("reversed");
+        assert_eq!(
+            forward.to_bits(),
+            reversed.to_bits(),
+            "distributed-load superposition is order-independent to the bit"
+        );
+    }
+
+    #[test]
+    fn a_distributed_load_refuses_no_footprint_or_force_past_the_proven_envelope() {
+        let plate = sluggish_plate();
+        let no_footprint = uniform_strip_load(Fixed::ONE, Fixed::ZERO, Fixed::ZERO);
+        assert_eq!(
+            plate.deflection_km(&[no_footprint], Fixed::ZERO, Fixed::ZERO),
+            Err(ReliefRefusal::FootprintNotPositive)
+        );
+
+        // At a one-kilometre half-width, MAX_LINE_LOAD / 2 is exactly the pressure whose integrated line load
+        // reaches the existing envelope. One fixed-point step above it must refuse.
+        let pressure_past_envelope = Fixed::from_ratio(i64::from(MAX_LINE_LOAD_GPA_KM), 2)
+            .checked_add(Fixed::EPSILON)
+            .expect("the boundary probe is representable");
+        let too_large = uniform_strip_load(pressure_past_envelope, Fixed::ZERO, Fixed::ONE);
+        assert_eq!(
+            plate.deflection_km(&[too_large], Fixed::ZERO, Fixed::ZERO),
+            Err(ReliefRefusal::LoadOutsideEnvelope)
+        );
+
+        let minimum_pressure = uniform_strip_load(Fixed::MIN, Fixed::ZERO, Fixed::ONE);
+        assert_eq!(
+            plate.deflection_km(&[minimum_pressure], Fixed::ZERO, Fixed::ZERO),
+            Err(ReliefRefusal::LoadOutsideEnvelope),
+            "the magnitude guard refuses Fixed::MIN without taking its unrepresentable absolute value"
         );
     }
 }

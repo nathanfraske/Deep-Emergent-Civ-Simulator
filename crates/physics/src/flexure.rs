@@ -73,6 +73,11 @@
 //!   flexural moat then the forebulge (the zero crossing at `x0 = 3 pi alpha / 4`, the forebulge peak about
 //!   4.3 percent of the central depression). This uses only exp/cos/sin, which the fixed-point library carries
 //!   exactly, so it is the PROVEN core.
+//! - UNIFORM STRIP LOAD: a pressure `q` over `|x - x_c| <= a`, infinite parallel to y. Linearity makes this
+//!   the convolution of the T&S eq. 3-130 line-load Green's function over the caller-supplied width. Integrating
+//!   `e^(-|u|/alpha) (cos(|u|/alpha) + sin(|u|/alpha))` gives the closed form in
+//!   [`uniform_strip_load_deflection`]. This route introduces no quadrature spacing and retains a finite Airy
+//!   limit as rigidity tends to zero at every point inside the footprint.
 //! - POINT LOAD (axisymmetric, infinite plate), Brotchie & Silvester 1969 / TAFI eq. 6: for a point load `Q0`
 //!   at the origin, `w(r) = Q0 (l^2 / (2 pi D)) kei(r/l)`, where `kei` is the zeroth-order Kelvin function, `r`
 //!   the radial distance, and `l = (D / (delta_rho g))^(1/4) = alpha / sqrt(2)` the AXISYMMETRIC flexural
@@ -233,6 +238,27 @@ pub(crate) fn line_load_admissible(magnitude: Fixed) -> bool {
 /// ([`MAX_POINT_LOAD_GPA_KM2`]).
 pub(crate) fn point_load_admissible(magnitude: Fixed) -> bool {
     magnitude.abs() <= Fixed::from_int(MAX_POINT_LOAD_GPA_KM2)
+}
+
+/// Whether a UNIFORM-STRIP pressure and half-width sit inside the line-load envelope after integration.
+///
+/// A strip of pressure `q` and full width `2a` carries the same total force per unit y-length as a line load
+/// `V0 = q (2a)`. Reusing [`MAX_LINE_LOAD_GPA_KM`] therefore derives the strip bound from the range proof already
+/// carried by the Green's function. No pressure ceiling or footprint width is authored here.
+pub(crate) fn uniform_strip_load_admissible(pressure: Fixed, half_width: Fixed) -> bool {
+    if half_width <= Fixed::ZERO {
+        return false;
+    }
+    if pressure == Fixed::ZERO {
+        return true;
+    }
+    if pressure == Fixed::MIN {
+        return false;
+    }
+    Fixed::from_int(2)
+        .checked_mul(half_width)
+        .and_then(|width| width.checked_mul(pressure.abs()))
+        .is_some_and(line_load_admissible)
 }
 
 /// THE INTERNAL UNIT SYSTEM AND THE SCALED KERNELS, private to the crate.
@@ -430,6 +456,59 @@ pub(crate) mod scaled {
             .and_then(|a2| a2.checked_mul(alpha_hat))?;
         let eight_d = Fixed::from_int(8).checked_mul(d_hat)?;
         v_hat.checked_mul(a3).and_then(|x| x.checked_div(eight_d))
+    }
+
+    /// A UNIFORM STRIP load's deflection in INTERNAL lengths.
+    ///
+    /// Convolving the line-load Green's function over `xi in [-a, a]` gives
+    ///
+    /// `w_hat(x) = q_hat / (2 R_hat) [F((x + a) / alpha) - F((x - a) / alpha)]`,
+    ///
+    /// where `R_hat = delta_rho g_hat` and
+    /// `F(z) = sign(z) [1 - exp(-|z|) cos(|z|)]`. This follows because
+    /// `d[1 - exp(-z) cos(z)]/dz = exp(-z) [cos(z) + sin(z)]` for `z >= 0`, and because
+    /// `alpha^4 = 4 D / R`. The cancellation of `D` from the coefficient is algebraic, while its effect remains
+    /// in `alpha`. It keeps the `D -> 0` limit representable: inside the strip the bracket tends to two, so
+    /// `w -> q / R`.
+    // @derives: a uniform strip load's internal deflection <- its pressure and footprint, the flexural parameter and the restoring modulus
+    pub(crate) fn scaled_uniform_strip_load_deflection(
+        pressure_hat: Fixed,
+        half_width_hat: Fixed,
+        perp_hat: Fixed,
+        alpha_hat: Fixed,
+        restoring_hat: Fixed,
+    ) -> Option<Fixed> {
+        if half_width_hat <= Fixed::ZERO || alpha_hat <= Fixed::ZERO || restoring_hat <= Fixed::ZERO
+        {
+            return None;
+        }
+        if pressure_hat == Fixed::ZERO {
+            return Some(Fixed::ZERO);
+        }
+        let right = perp_hat.checked_add(half_width_hat)?;
+        let left = perp_hat.checked_sub(half_width_hat)?;
+        let shape =
+            strip_primitive(right, alpha_hat)?.checked_sub(strip_primitive(left, alpha_hat)?)?;
+        let twice_restoring = Fixed::from_int(2).checked_mul(restoring_hat)?;
+        pressure_hat
+            .checked_div(twice_restoring)?
+            .checked_mul(shape)
+    }
+
+    /// The odd dimensionless primitive of the symmetric line-load shape.
+    fn strip_primitive(offset_hat: Fixed, alpha_hat: Fixed) -> Option<Fixed> {
+        if offset_hat == Fixed::ZERO {
+            return Some(Fixed::ZERO);
+        }
+        let z = offset_hat.abs().checked_div(alpha_hat)?;
+        let decay = Fixed::ZERO.checked_sub(z)?.exp();
+        let tail = decay.checked_mul(z.cos())?;
+        let magnitude = Fixed::ONE.checked_sub(tail)?;
+        if offset_hat < Fixed::ZERO {
+            Fixed::ZERO.checked_sub(magnitude)
+        } else {
+            Some(magnitude)
+        }
     }
 }
 
@@ -647,6 +726,56 @@ pub fn line_load_deflection(v0: Fixed, alpha: Fixed, d: Fixed, perp_dist: Fixed)
     } else {
         magnitude
     };
+    scaled::external_length(w_hat)
+}
+
+/// The UNIFORM-STRIP deflection from pressure `q` over `|x - x_c| <= a`, with the strip infinite parallel to
+/// y. `pressure` is force per unit area, `half_width` is `a`, and `perp_dist = x - x_c`; all use the caller's
+/// coherent unit system. The returned deflection uses the same positive-downward convention as
+/// [`line_load_deflection`].
+///
+/// This is the closed-form Green's-function convolution of Turcotte and Schubert (2014), *Geodynamics*, third
+/// edition, chapter 3, equation 3-130. Each strip element `d xi` carries line load `dV = q d xi`. Integrating
+/// equation 3-130 across the caller-supplied footprint gives
+///
+/// `w(x) = q / (2 delta_rho g) [F((x + a)/alpha) - F((x - a)/alpha)]`,
+///
+/// with `F(z) = sign(z) [1 - exp(-|z|) cos(|z|)]`. The coefficient follows from
+/// `alpha^4 = 4 D / (delta_rho g)`. The closed form avoids a quadrature spacing, so the footprint remains world
+/// data and no smoothing length enters the mechanism. Inside a fixed footprint, `alpha -> 0` makes the bracket
+/// tend to two and the response tend to the local isostatic value `q / (delta_rho g)`.
+///
+/// The integrated load `q (2a)` must fit [`MAX_LINE_LOAD_GPA_KM`], the existing proof envelope for the line
+/// Green's function. Fails loud on a non-positive half-width, flexural parameter, density contrast, or gravity,
+/// or on an out-of-range intermediate. Deterministic.
+// @derives: a uniform strip load's flexural deflection <- its pressure and footprint, the flexural parameter and the restoring term
+pub fn uniform_strip_load_deflection(
+    pressure: Fixed,
+    half_width: Fixed,
+    alpha: Fixed,
+    density_contrast: Fixed,
+    gravity: Fixed,
+    perp_dist: Fixed,
+) -> Option<Fixed> {
+    if alpha <= Fixed::ZERO
+        || density_contrast <= Fixed::ZERO
+        || gravity <= Fixed::ZERO
+        || !uniform_strip_load_admissible(pressure, half_width)
+    {
+        return None;
+    }
+    let half_width_hat = scaled::internal_length(half_width)?;
+    let perp_hat = scaled::internal_length(perp_dist)?;
+    let alpha_hat = scaled::internal_length(alpha)?;
+    let g_hat = scaled::internal_gravity(gravity)?;
+    let restoring_hat = density_contrast.checked_mul(g_hat)?;
+    let w_hat = scaled::scaled_uniform_strip_load_deflection(
+        pressure,
+        half_width_hat,
+        perp_hat,
+        alpha_hat,
+        restoring_hat,
+    )?;
     scaled::external_length(w_hat)
 }
 
@@ -1082,22 +1211,28 @@ pub enum LoadKind {
     /// A POINT load at `(Load::x, Load::y)` (a volcanic construct, a large crater basin). Its deflection is the
     /// axisymmetric [`point_load_deflection`] in the radial distance to the query point.
     Point,
+    /// A UNIFORM pressure strip parallel to the y-axis, centred on `x = Load::x`, with caller-supplied
+    /// `half_width`. Its pressure is convolved over the finite x footprint by
+    /// [`uniform_strip_load_deflection`]; `Load::y` is unused. The supported analytic kernel is fixed physics,
+    /// while the footprint width, pressure, and position are world data rather than a closed catalogue of
+    /// province kinds.
+    UniformStripY { half_width: Fixed },
 }
 
 /// One load in the caller's load list: a kind, a magnitude, and a position. For a [`LoadKind::LineY`] the
 /// magnitude is the line-load intensity `V0` (force per unit length) and only `x` is read; for a
-/// [`LoadKind::Point`] it is the point-load magnitude `Q0` and both `x` and `y` are read. All in the caller's
-/// coherent unit system.
+/// [`LoadKind::Point`] it is the point-load magnitude `Q0` and both `x` and `y` are read; for a
+/// [`LoadKind::UniformStripY`] it is pressure (force per unit area), `x` is the strip centre, and the variant
+/// carries the half-width. All in the caller's coherent unit system.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Load {
-    /// Whether this load contributes the line or the point Green's function.
+    /// Which analytic Green's-function contribution this load uses.
     pub kind: LoadKind,
-    /// The load magnitude (`V0` for a line load, `Q0` for a point load).
+    /// The load magnitude (`V0` for a line load, `Q0` for a point load, pressure for a uniform strip).
     pub magnitude: Fixed,
-    /// The load position's x coordinate (the line's x for [`LoadKind::LineY`], the point's x for
-    /// [`LoadKind::Point`]).
+    /// The load position's x coordinate: line position, point position, or uniform-strip centre.
     pub x: Fixed,
-    /// The load position's y coordinate (unused for [`LoadKind::LineY`], the point's y for [`LoadKind::Point`]).
+    /// The load position's y coordinate, used by [`LoadKind::Point`] and unused by both y-parallel kinds.
     pub y: Fixed,
 }
 
@@ -1106,13 +1241,15 @@ pub struct Load {
 /// (each in its own distance to the query), and returns the signed deflection in the caller's length unit.
 ///
 /// The sum is over `Fixed` values, whose addition is exact and associative, so the result is INDEPENDENT of the
-/// order the loads are listed in (the determinism contract). An empty list, or a list of zero-magnitude loads,
-/// gives zero. Fails loud (`None`) if the rigidity or parameter is degenerate, or if any load contribution or the
-/// running sum leaves the Q32.32 window, never a fabricated deflection. Deterministic (Principle 3).
+/// order the loads are listed in (the determinism contract). Contribution bits accumulate exactly in `i128`
+/// before one final Q32.32 range check, so even large opposite-signed partial sums cannot make refusal depend on
+/// listing order. An empty list, or a list of zero-magnitude loads, gives zero. Fails loud (`None`) if the
+/// rigidity or parameter is degenerate, or if any contribution or the final sum leaves the representable
+/// window, never a fabricated deflection. Deterministic (Principle 3).
 pub fn deflection_at(inputs: &PlateInputs, loads: &[Load], qx: Fixed, qy: Fixed) -> Option<Fixed> {
     let d = inputs.rigidity()?;
     let alpha = flexural_parameter(d, inputs.density_contrast, inputs.gravity)?;
-    let mut total = Fixed::ZERO;
+    let mut total_bits = 0_i128;
     for load in loads {
         let contribution = match load.kind {
             LoadKind::LineY => {
@@ -1127,10 +1264,24 @@ pub fn deflection_at(inputs: &PlateInputs, loads: &[Load], qx: Fixed, qy: Fixed)
                 let r = dx2.checked_add(dy2)?.sqrt();
                 point_load_deflection(load.magnitude, alpha, d, r)?
             }
+            LoadKind::UniformStripY { half_width } => {
+                let perp = qx.checked_sub(load.x)?;
+                uniform_strip_load_deflection(
+                    load.magnitude,
+                    half_width,
+                    alpha,
+                    inputs.density_contrast,
+                    inputs.gravity,
+                    perp,
+                )?
+            }
         };
-        total = total.checked_add(contribution)?;
+        total_bits = total_bits.checked_add(i128::from(contribution.to_bits()))?;
     }
-    Some(total)
+    if total_bits < i128::from(i64::MIN) || total_bits > i128::from(i64::MAX) {
+        return None;
+    }
+    Some(Fixed::from_bits(total_bits as i64))
 }
 
 /// THE GOLDEN-VECTOR HARNESS shared by this module's tests and `crate::moment_equivalence`'s, so the
