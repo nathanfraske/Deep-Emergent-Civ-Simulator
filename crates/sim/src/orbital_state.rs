@@ -7,7 +7,7 @@
 //! protoplanetary [`crate::astro::kepler_orbital_period_seconds`] forms `orbit_au^3` in LINEAR Q32.32 before its
 //! square root, which underflows to zero for a radius near a planetary body (a circumplanetary orbit at one
 //! planetary radius is `orbit_au ~ 5e-4`, and its cube `~1e-10` falls below the Q32.32 resolution `~2.3e-10`),
-//! and [`crate::astro::viscous_dissipation_flux`] recomputes `ln Omega` inline. This state is the single
+//! and `astro::viscous_dissipation_flux` recomputes `ln Omega` inline. This state is the single
 //! representable carrier: it holds `Omega_K`, `P`, and `h` as their base-ten logarithms, formed by the same
 //! `ln Omega = (1/2)(ln G + ln M - 3 ln r)` identity the protoplanetary surface density already uses, so the
 //! cube never forms and the state is live from a planetary surface out past the Oort cloud.
