@@ -94,6 +94,7 @@ pub mod lod;
 pub mod material_percept;
 pub mod medium;
 pub mod moons;
+pub mod moons_cpd;
 pub mod morphogen;
 pub mod nonlocal_coupling;
 pub mod perceivable_feature;
