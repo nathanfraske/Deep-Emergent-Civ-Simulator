@@ -602,16 +602,46 @@ pub fn derive_column_thermal_properties(
         .checked_mul(Fixed::from_int(1000))
         .ok_or_else(|| missing("density"))?;
 
-    // Specific heat: Dulong-Petit over the assemblage's own mean atomic mass.
+    // Specific heat: THE ONE THE LADDER COMPUTED ON ITS WAY TO THE EXPANSIVITY, with Dulong-Petit kept as
+    // the fallback for a census the ladder could not answer for.
+    //
+    // THE BUNDLE HELD TWO HEAT CAPACITIES FOR ONE ROCK, and this is the second half of removing that. The
+    // ladder solves a Debye `C_V` at the requested state to get `alpha`, and that value used to be dropped
+    // at the function boundary while `3R/M`, the classical high-temperature LIMIT of the same quantity,
+    // was stored under the name `c_p` beside it. The limit is temperature-blind by construction, so it
+    // runs far high where the Debye capacity has not saturated and lands within a few percent at mantle
+    // temperature: agreement by CANCELLATION at one temperature, which is verbatim the defect the
+    // thermoelastic ladder was written to end one quantity over.
+    //
+    // AND THE NAME WAS WRONG TOO. `3R/M` is a `C_V` limit, and it was stored and consumed as `c_p` with no
+    // conversion, at the one call site where the expansivity and the modulus needed to make it are both in
+    // hand. The pass converts per phase now (`C_p = C_V + T V alpha^2 K_T`), so the field's name and its
+    // contents finally agree.
+    //
+    // THE DIVISION IS BY THE DENSITY THIS SAME PASS PRODUCED, which is what keeps the two molar bases from
+    // being crossed: the pass's capacity is per unit of the assemblage's own volume, so dividing by mass
+    // per unit of that same volume gives J/(kg K) with no molar bookkeeping in between. The scale factor
+    // is the cm^3-to-m^3 one and nothing else. Divided BEFORE the scaling, per this file's standing
+    // reassociation discipline.
+    //
+    // The mean atomic mass is derived unconditionally rather than inside the fallback arm, so the
+    // Dulong-Petit path stays EXERCISED on every derivation. A fallback that only runs when the primary
+    // fails is a fallback nobody finds out is broken.
     let mean_atomic_mass = civsim_physics::petrology::assemblage_mean_atomic_mass_kg_per_mol(
         &assemblage,
         tables.registry,
         tables.periodic,
     )
     .ok_or_else(|| missing("mean_atomic_mass"))?;
-    let specific_heat_j_kg_k =
-        civsim_physics::young_thermal::dulong_petit_specific_heat(mean_atomic_mass)
-            .ok_or_else(|| missing("specific_heat"))?;
+    let dulong_petit = civsim_physics::young_thermal::dulong_petit_specific_heat(mean_atomic_mass)
+        .ok_or_else(|| missing("specific_heat"))?;
+    let specific_heat_j_kg_k = match pass.as_ref().and_then(|p| p.c_p_j_per_cm3_k) {
+        Some(c_p_per_cm3) => c_p_per_cm3
+            .checked_div(density_kg_m3)
+            .and_then(|per_kg| per_kg.checked_mul(Fixed::from_int(1_000_000)))
+            .ok_or_else(|| missing("specific_heat_at_state"))?,
+        None => dulong_petit,
+    };
 
     // Conductivity: the volume census through the two-rung ladder.
     // THE EXPANSIVITY IS DERIVED BEFORE THE CONDUCTIVITY because the conductivity ladder CONSUMES it.
@@ -629,19 +659,34 @@ pub fn derive_column_thermal_properties(
         tables,
         pass.as_ref(),
     )?;
-    // The integral of a CONSTANT expansivity over the anchor-to-evaluation range. Constant-alpha is the
-    // honest limit here and is stated rather than hidden: the banked gamma, bulk modulus and molar volume
-    // are ambient-frame values, so the expansivity they produce carries no temperature dependence of its
-    // own, and integrating it as a constant claims exactly that and no more.
+    // The integral of the expansivity from the conductivity form's 298 K anchor to the column's own
+    // temperature, EXACT where one rung spans both ends and constant-alpha where it does not.
+    //
+    // The constant-alpha form was declared here as an honest limit, and it was avoidable rather than
+    // fundamental: at fixed pressure the integral IS `ln[V(P,T)/V(P,298)]`, and the ladder returns a molar
+    // volume at any state it can answer at. So the anchor state is asked for through the same pass, over
+    // the same census, at the same pressure, and the two compressions differ by exactly that ratio. The
+    // second pass is skipped outright when the first refused, since the fallback is then the only
+    // available answer and running the ladder again would buy nothing.
     let anchor_k = civsim_materials::conductivity::hofmeister_reference_temperature_k();
-    let expansivity_integral = if temperature_k > anchor_k {
-        thermal_expansion_ppm_per_k
-            .checked_div(Fixed::from_int(1_000_000))
-            .and_then(|per_k| per_k.checked_mul(temperature_k - anchor_k))
-            .ok_or_else(|| missing("expansivity_integral"))?
-    } else {
-        Fixed::ZERO
-    };
+    let anchor_pass = pass.as_ref().and_then(|_| {
+        ladder_pass_over_census(
+            &volume_census,
+            civsim_materials::thermoelastic::ThermoState {
+                temperature_k: anchor_k,
+                pressure_bar,
+            },
+            tables,
+        )
+    });
+    let expansivity_integral = expansivity_integral_from_anchor(
+        pass.as_ref(),
+        anchor_pass.as_ref(),
+        thermal_expansion_ppm_per_k,
+        temperature_k,
+        anchor_k,
+    )
+    .ok_or_else(|| missing("expansivity_integral"))?;
 
     // THE CONDUCTIVITY MIXES THE STATE CENSUS, NOT THE AMBIENT ONE. Bruggeman is a VOLUME-fraction mix, so
     // it has to read the phases in the proportions they occupy at this state. The phases do not compress
@@ -722,7 +767,11 @@ pub fn derive_column_thermal_properties(
         });
     }
 
+    // THE CENSUS GOES IN, which is what lets the rheology know what rock it is describing. The same
+    // state-resolved mixture the conductivity averages over, so the phase the creep law is selected for is
+    // the phase that occupies the most of the column AT DEPTH rather than at the registry's ambient frame.
     let viscosity = derive_column_viscosity(
+        mixing_census,
         density_kg_m3,
         thermal_conductivity_w_m_k,
         specific_heat_j_kg_k,
@@ -885,6 +934,38 @@ struct LadderPass {
     /// `sum(phi_i * V_i(P,T) / V_0i)`, the census-weighted compression factor. Multiply an ambient molar
     /// volume by this to get the state-resolved one; divide an ambient density by it for the same state.
     compression: Fixed,
+    /// The assemblage's ISOBARIC heat capacity per unit of its own volume AT THIS STATE (J/(cm^3 K)),
+    /// `None` when any phase's rung computed no capacity.
+    ///
+    /// THIS IS THE CAPACITY THE EXPANSIVITY WAS DERIVED FROM, which is the whole reason it is here. The
+    /// ladder computes a Debye `C_V` on the way to `alpha` and used to drop it at the function boundary,
+    /// so the column reached for the Dulong-Petit `3R/M` classical limit instead and the bundle held TWO
+    /// heat capacities for one rock. Measured on the flagship forsterite column at its own solved
+    /// pressure, `3R/M` reads 1241 J/(kg K) against 999 at 400 K (24 percent HIGH, the Debye capacity
+    /// nowhere near its ceiling) and against 1267 at 1600 K (2 percent LOW, because a `C_V` limit is
+    /// standing in for a `C_p`). The near-agreement at mantle temperature is CANCELLATION between those
+    /// two errors, which is the defect the thermoelastic ladder exists to end rather than a tolerable
+    /// approximation.
+    ///
+    /// PER VOLUME rather than per mole, and that pairing is deliberate. A capacity per mole needs a molar
+    /// mass on the SAME molar basis to reach J/(kg K), and the ladder's `c_v_j_per_mol_k` is per mole of
+    /// FORMULA UNITS while the assemblage's banked mean atomic mass is per mole of ATOMS; dividing one by
+    /// the other is a silent factor of the atoms per formula unit (seven, for forsterite). Per unit volume
+    /// it pairs with the density this same pass produces, so the specific heat is one division by a number
+    /// the bundle already carries and no second mass accounting exists to drift.
+    ///
+    /// `None` rather than a partial aggregate when any phase's rung reports no capacity, for the same
+    /// reason the whole pass refuses on partial coverage: renormalising over the phases that answered
+    /// would substitute their capacity for the rock's.
+    c_p_j_per_cm3_k: Option<Fixed>,
+    /// The rung EVERY phase answered on, or `None` when they did not all answer on the same one.
+    ///
+    /// Carried so a consumer comparing two states can tell whether it is comparing one model to itself.
+    /// A quantity formed as a ratio between two states is that model's own answer only when both states
+    /// resolved through it; across a model transition the ratio is two models' answers divided, which is
+    /// nobody's. [`expansivity_integral_from_anchor`] is the consumer, and it falls back rather than
+    /// crossing a rung boundary.
+    rung: Option<civsim_materials::thermoelastic::ThermoRung>,
     /// The census RE-WEIGHTED to the requested state and renormalised to one:
     /// `phi_i(P,T) = phi_i0 f_i / sum_j(phi_j0 f_j)` with `f_i = V_i(P,T)/V_i0`.
     ///
@@ -921,6 +1002,26 @@ fn ladder_pass_over_census(
     let mut alpha_weighted = Fixed::ZERO;
     let mut state_total = Fixed::ZERO;
     let mut covered = Fixed::ZERO;
+    // The isobaric capacity per unit STATE volume, accumulated as `sum(weight_i C_p_i / V_i(P,T))` and
+    // divided by the state total below.
+    //
+    // THE WEIGHT FOR A MOLAR QUANTITY IS THE MOLE FRACTION, NOT THE VOLUME FRACTION, and the two are not
+    // the same number. An expansivity is a per-volume quantity and mixes by volume, which is what the
+    // `alpha_weighted` line above does. A capacity in J/(mol K) is per MOLE: the rock's total capacity is
+    // `sum(n_i C_i)`, so mixing it by volume fraction would report joules per mole of a fictitious
+    // volume-weighted mole with no mass basis to divide by.
+    //
+    // `weight_i / V_i(P,T)` IS the mole weight. Substituting `weight_i = phi_i0 f_i` and
+    // `V_i(P,T) = f_i V_0i` cancels the `f_i` outright, leaving `phi_i0 / V_0i`, which is proportional to
+    // the moles of phase i present. That cancellation is the physical statement that compression moves
+    // VOLUME and not MOLES, so the state and ambient mole fractions are the same census while the state
+    // and ambient VOLUME fractions are two different mixtures.
+    //
+    // `None` from here on the first phase whose rung computed no capacity, propagated through the option
+    // rather than skipped.
+    let mut cp_weighted = Some(Fixed::ZERO);
+    let mut rung: Option<civsim_materials::thermoelastic::ThermoRung> = None;
+    let mut one_rung = true;
     let mut state_weights: Vec<(String, Fixed)> = Vec::with_capacity(volume_census.len());
     for (name, fraction) in volume_census {
         let r = civsim_materials::thermoelastic::response_at(
@@ -942,6 +1043,16 @@ fn ladder_pass_over_census(
         // The phase's share of the STATE volume, before renormalising: `phi_i0 f_i`.
         let weight = f.checked_mul(*fraction)?;
         alpha_weighted = alpha_weighted.checked_add(r.alpha_per_k.checked_mul(weight)?)?;
+        cp_weighted = cp_weighted.and_then(|acc| {
+            let c_p = isobaric_capacity_j_per_mol_k(&r, state.temperature_k)?;
+            let per_volume = c_p.checked_div(r.molar_volume_cm3)?;
+            acc.checked_add(per_volume.checked_mul(weight)?)
+        });
+        match rung {
+            None => rung = Some(r.rung),
+            Some(seen) if seen != r.rung => one_rung = false,
+            Some(_) => {}
+        }
         state_total = state_total.checked_add(weight)?;
         covered = covered.checked_add(*fraction)?;
         state_weights.push((name.clone(), weight));
@@ -960,8 +1071,111 @@ fn ladder_pass_over_census(
         // The compression is the ratio of state volume to ambient volume, so this denominator is the
         // AMBIENT total and stays as it was. The two divisors differ on purpose.
         compression: state_total.checked_div(covered)?,
+        // The same STATE total as the expansivity, because the accumulator above is per unit of state
+        // volume and `state_total` is the volume the ambient census expands to.
+        c_p_j_per_cm3_k: cp_weighted.and_then(|c| c.checked_div(state_total)),
+        rung: if one_rung { rung } else { None },
         state_census,
     })
+}
+
+/// One phase's ISOBARIC heat capacity (J/(mol K)) at the state its own response describes.
+///
+/// `C_p = C_V + T V alpha^2 K_T`, the exact thermodynamic relation, which is the same statement as the
+/// `C_p = C_V (1 + alpha gamma T)` form written with `gamma = alpha K_T V / C_V` substituted in. It is
+/// written this way for two reasons: it needs no Grueneisen parameter, which the response does not carry,
+/// and it does not divide by a capacity that could be near zero at low temperature.
+///
+/// EVERY INPUT COMES FROM ONE `ThermoResponse`, so the four quantities describe one state by construction.
+/// That matters here more than usual: the conversion is exactly where a capacity solved at depth could be
+/// married to an expansivity or a modulus from somewhere else, and the argument is a single borrow so
+/// there is no second place to reach for one.
+///
+/// THE ORDER IS LOAD-BEARING, not stylistic. Formed as `alpha^2` first, a mantle expansivity of `26e-6`
+/// squares to `6.8e-10` against Q32.32's resolution of `2.33e-10`: under three ulp, so a truncating
+/// multiply can drop up to a third of the value before the other three factors are even applied.
+/// Multiplying `alpha` into `K_T` and into `T` separately keeps both intermediates at order `1e-3` and
+/// above, where the type has room.
+///
+/// THE UNIT BRIDGE: `K_T` arrives in GPa and the volume in cm^3/mol, and `1 GPa = 1000 J/cm^3`, so the
+/// thousand converts the modulus into the volume's own energy density exactly rather than by a fudge.
+///
+/// `None` when the rung computed no capacity (the ambient rung reports none, because the `3nR` it forms
+/// internally is the classical limit rather than the capacity at a state) or when a step leaves the
+/// representable window.
+// @derives: a phase's isobaric heat capacity <- its own isochoric capacity, expansivity, bulk modulus and molar volume at one state
+fn isobaric_capacity_j_per_mol_k(
+    response: &civsim_materials::thermoelastic::ThermoResponse,
+    temperature_k: Fixed,
+) -> Option<Fixed> {
+    let c_v = response.c_v_j_per_mol_k?;
+    // `alpha K_T` is a pressure per kelvin, so the thousand takes it from GPa into the volume's own
+    // J/cm^3 and the molar volume then carries it to J/(mol K).
+    let stiffness = response
+        .alpha_per_k
+        .checked_mul(response.bulk_modulus_gpa)?
+        .checked_mul(Fixed::from_int(1000))?
+        .checked_mul(response.molar_volume_cm3)?;
+    // `alpha T`, dimensionless, which is the second alpha the relation is quadratic in.
+    let dilation = response.alpha_per_k.checked_mul(temperature_k)?;
+    c_v.checked_add(stiffness.checked_mul(dilation)?)
+}
+
+/// The integral of the volumetric expansivity from the conductivity form's own 298 K anchor up to the
+/// column's temperature, AT THE COLUMN'S OWN PRESSURE.
+///
+/// # The constant-alpha assumption was unnecessary, which is what this closes
+///
+/// The integral was `alpha(P,T) * (T - 298)`, alpha held constant across thirteen hundred kelvin. The
+/// limit was declared at the site rather than hidden, so it was honest; it was also avoidable. At fixed
+/// pressure `alpha = (1/V) dV/dT` by definition, so `integral(alpha dT)` from the anchor to the state is
+/// exactly `ln[V(P,T) / V(P,298)]`, and the ladder already returns a molar volume at any state it can
+/// answer at. Nothing new is needed: a second pass of the SAME census at the SAME pressure and the anchor
+/// temperature supplies the denominator, and the assemblage's census-weighted compression is the volume
+/// ratio the two passes differ by.
+///
+/// # Both endpoints must be one model's answer
+///
+/// The exact form is a RATIO between two states, and a ratio is a given model's own answer only when both
+/// states resolved through that model. A column at 1 bar is the live case: 298 K lands inside the ambient
+/// measured row's declared frame while 1600 K is far outside it and falls to Mie-Grueneisen-Debye, so the
+/// ratio would divide one rung's volume by another's and call the difference thermal expansion. Where the
+/// endpoints disagree on the rung, or either pass refused, the constant-alpha form is returned instead,
+/// which is the honest answer for a state where no single model spans the interval.
+///
+/// The fallback keeps its own clamp at the anchor, unchanged: below 298 K it reports no correction rather
+/// than extrapolating the state's alpha backwards. The exact branch needs no clamp, because a volume
+/// smaller than the anchor's gives a negative logarithm on its own and that sign is the physics (a lattice
+/// conducts better as it cools).
+///
+/// `None` only when the fallback's own arithmetic leaves the representable window.
+// @derives: the anchor-to-state expansivity integral <- the census's own molar volumes at the two states, or its constant expansivity where one model does not span them
+fn expansivity_integral_from_anchor(
+    state_pass: Option<&LadderPass>,
+    anchor_pass: Option<&LadderPass>,
+    thermal_expansion_ppm_per_k: Fixed,
+    temperature_k: Fixed,
+    anchor_k: Fixed,
+) -> Option<Fixed> {
+    if let (Some(hot), Some(cold)) = (state_pass, anchor_pass) {
+        // Both compressions are measured against the SAME ambient census, so the ambient volume divides
+        // out of the ratio and what remains is `V(P,T) / V(P,298)` for the assemblage.
+        let one_model = matches!((hot.rung, cold.rung), (Some(a), Some(b)) if a == b);
+        if one_model && hot.compression > Fixed::ZERO && cold.compression > Fixed::ZERO {
+            if let Some(ratio) = hot.compression.checked_div(cold.compression) {
+                if ratio > Fixed::ZERO {
+                    return Some(ratio.ln());
+                }
+            }
+        }
+    }
+    if temperature_k > anchor_k {
+        thermal_expansion_ppm_per_k
+            .checked_div(Fixed::from_int(1_000_000))
+            .and_then(|per_k| per_k.checked_mul(temperature_k - anchor_k))
+    } else {
+        Some(Fixed::ZERO)
+    }
 }
 
 /// The assemblage's volumetric expansivity in ppm/K at the requested state.
@@ -1000,14 +1214,120 @@ fn derive_assemblage_expansivity_ppm_per_k(
         })
 }
 
+/// ONE BANKED CREEP STUDY and the registry phases the study's own samples are.
+///
+/// # What this exists to make impossible
+///
+/// The candidate set was a one-element array holding the dry olivine row, built with no reference to the
+/// rock. The rheology therefore had no way to learn what it was describing, and an iron, ice, salt,
+/// carbide, metallic or molecular interior received olivine creep with no signal that it had. A pathway
+/// that assumes one chemistry where a world's rock could differ is the alien-feasibility defect, and a
+/// docstring saying "the admitted set is one row" documented it rather than gating it.
+///
+/// # Why this is a refusal gate and NOT row selection
+///
+/// The whole bank is olivine. `civsim_physics::creep_rows` banks five rows and all five are Hirth and
+/// Kohlstedt 2003, which is a study of olivine aggregates, so there is no non-olivine row to select and
+/// authoring one would be inventing a flow law. What a rock with no banked study gets is a REFUSAL NAMING
+/// ITSELF, which is a work list. The mechanism is fixed Rust and the membership is data: banking a cited
+/// study for another phase is one entry here plus its rows, and no consumer changes.
+///
+/// # The phase the source measured, and the endmember the registry carries
+///
+/// H&K's samples are San Carlos olivine, a magnesium-rich member of the `(Mg,Fe)2SiO4` solid solution near
+/// Fo90, and the registry carries the two endmembers separately. `forsterite` (the Mg endmember) is the
+/// nearest one and is listed. `fayalite` (the Fe endmember) is deliberately NOT listed: iron content
+/// changes olivine creep strength, and the source's samples are not the iron endmember, so listing it
+/// would extend a citation past what it measured. A Fe-endmember column therefore refuses by name, which
+/// is the honest state of the bank rather than a gap in this table.
+struct CreepStudy {
+    /// The study, named in the refusal so a reader learns which citation covers what.
+    source: &'static str,
+    /// The registry phase names this study's samples are.
+    phases: &'static [&'static str],
+    /// The study's candidate rows, each with the activation-volume determinations matched to it. A
+    /// function rather than a constant because the volume sets are constructed rather than static, and
+    /// owned because `CreepCandidate` borrows the volumes it brackets.
+    rows: fn() -> Vec<(
+        civsim_physics::creep_rows::CreepRow,
+        Vec<civsim_physics::creep_rows::ActivationVolume>,
+    )>,
+}
+
+/// Every creep study this engine banks, keyed by the phases its samples are.
+///
+/// ONE ENTRY TODAY, and the single entry is the finding rather than a placeholder: every banked row comes
+/// from one olivine study, so every rock that is not olivine-dominated has no rheology here at all. The
+/// list grows by citation, never by analogy.
+const BANKED_CREEP_STUDIES: &[CreepStudy] = &[CreepStudy {
+    source: "Hirth and Kohlstedt 2003 (olivine aggregates)",
+    phases: &["forsterite"],
+    rows: olivine_creep_candidates,
+}];
+
+/// The olivine study's ADMITTED rows with their matched activation volumes.
+///
+/// One row, and its four siblings' absence is theirs rather than this function's. H&K Table 1 banks five;
+/// three are WET and no water fugacity or content is derived anywhere in this engine, and the
+/// grain-boundary-sliding row needs a grain size that is derived nowhere either. `admit_candidate` refuses
+/// those on engine capability, so listing them here would only move the refusal. Dry dislocation creep is
+/// what the engine can feed, and the others retire into this set the day their substrates land.
+///
+/// The volume set is the DISLOCATION-ONLY one: `hk_dry_dislocation_activation_volumes` excludes the Si
+/// self-diffusion determination, whose chord covers exactly the deep-interior pressures where feeding it
+/// to a dislocation column would drag the primary by more than an order of magnitude.
+fn olivine_creep_candidates() -> Vec<(
+    civsim_physics::creep_rows::CreepRow,
+    Vec<civsim_physics::creep_rows::ActivationVolume>,
+)> {
+    vec![(
+        civsim_physics::creep_rows::hk_dry_dislocation(),
+        civsim_physics::creep_rows::hk_dry_dislocation_activation_volumes().to_vec(),
+    )]
+}
+
+/// The phase occupying the most of the column, by the census's own fractions.
+///
+/// THE TIE IS BROKEN BY NAME, and it is stated rather than left to slice order. The comparison is strictly
+/// greater, so the first phase in the census's canonical name order wins an exact tie; `assemble` sorts the
+/// phases by name, so that order is a property of the assemblage rather than of how a caller happened to
+/// build the census (Principle 3).
+///
+/// `None` for an empty census, which is a refusal for the caller to name rather than a phase to guess.
+fn dominant_phase(census: &[(String, Fixed)]) -> Option<(&str, Fixed)> {
+    let mut best: Option<(&str, Fixed)> = None;
+    for (name, fraction) in census {
+        match best {
+            Some((_, top)) if *fraction <= top => {}
+            _ => best = Some((name.as_str(), *fraction)),
+        }
+    }
+    best
+}
+
 /// The column's effective viscosity as a log-space BAND.
 ///
-/// THE ADMITTED CREEP SET IS ONE ROW, and that is a capability statement rather than a simplification.
-/// Hirth and Kohlstedt 2003 Table 1 banks five rows; three are WET and refuse because no water fugacity or
-/// content is derived anywhere in this engine, and the grain-boundary-sliding row refuses because no grain
-/// size is. Dry dislocation creep is what remains, and it is admitted because its grain-size exponent is zero
-/// and it needs no water. Those refusals are the rows' own, carried rather than worked around: the wet rows
-/// retire into the set the day a water substrate lands.
+/// THE ROCK'S IDENTITY REACHES THE RHEOLOGY, which it structurally could not before. This function took no
+/// assemblage and no census, so `derive_column_thermal_properties` held a full volume census and passed
+/// only scalars, and the candidate set was a hardcoded array holding the olivine row. Every interior, of
+/// any composition a world could produce, silently received olivine creep. The census goes in now, the
+/// candidates are generated from the phase that occupies the most of it, and a rock no banked study covers
+/// refuses by name.
+///
+/// THE ADMITTED CREEP SET IS ONE ROW OF ONE STUDY, and that is a capability statement rather than a
+/// simplification. Hirth and Kohlstedt 2003 Table 1 banks five rows; three are WET and refuse because no
+/// water fugacity or content is derived anywhere in this engine, and the grain-boundary-sliding row refuses
+/// because no grain size is. Dry dislocation creep is what remains, and it is admitted because its
+/// grain-size exponent is zero and it needs no water. Those refusals are the rows' own, carried rather than
+/// worked around: the wet rows retire into the set the day a water substrate lands.
+///
+/// THE DOMINANT PHASE CARRIES THE COLUMN, which is the honest limit of keying on one phase. A rock's
+/// effective viscosity is set by its load-bearing framework, and for an assemblage one phase dominates by
+/// volume that phase is the framework. Where no phase dominates, the framework question has a real answer
+/// this engine does not derive (it needs the interconnection threshold of the weak phase), and the
+/// argmax-of-volume rule silently answers it with the largest share. That limit is stated rather than
+/// papered over with a dominance threshold, because a threshold here would be a fabricated number: the
+/// value it wants is a percolation fraction, and none is banked to read.
 ///
 /// THE MID-LAYER PRESSURE is composed here as `rho g d / 2`, the lithostatic pressure at half the layer
 /// depth, which is the chord the creep ladder declares it wants. It is formed from the column's OWN derived
@@ -1018,6 +1338,7 @@ fn derive_assemblage_expansivity_ppm_per_k(
 /// and the density anomaly all read one density. Refuses rather than defaulting on any unrepresentable step.
 #[allow(clippy::too_many_arguments)]
 fn derive_column_viscosity(
+    census: &[(String, Fixed)],
     density_kg_m3: Fixed,
     thermal_conductivity_w_m_k: Fixed,
     specific_heat_j_kg_k: Fixed,
@@ -1026,14 +1347,31 @@ fn derive_column_viscosity(
     geometry: &ColumnGeometry,
 ) -> Result<civsim_physics::convective_viscosity::ViscosityBand, ColumnDerivationRefusal> {
     use civsim_physics::convective_viscosity::{effective_viscosity_band, ViscosityInputs};
-    use civsim_physics::creep_rows::{
-        hk_dry_dislocation, hk_dry_dislocation_activation_volumes, select_activation_volume,
-        CreepCandidate, VolumeConstraint,
-    };
+    use civsim_physics::creep_rows::{select_activation_volume, CreepCandidate, VolumeConstraint};
 
     let unrepresentable = |what: &str| ColumnDerivationRefusal::NoQuantity {
         quantity: what.to_string(),
     };
+    // THE RHEOLOGY GATE, run before any arithmetic so a rock with no banked flow law refuses NAMING
+    // ITSELF rather than being handed olivine's.
+    let (dominant, dominant_fraction) = dominant_phase(census).ok_or_else(|| {
+        ColumnDerivationRefusal::Viscosity(
+            "the volume census is empty, so there is no rock to select a creep law for".to_string(),
+        )
+    })?;
+    let study = BANKED_CREEP_STUDIES
+        .iter()
+        .find(|s| s.phases.contains(&dominant))
+        .ok_or_else(|| {
+            ColumnDerivationRefusal::Viscosity(format!(
+                "no banked creep study describes {dominant}, which occupies {:.0} percent of this \
+                 column and so carries it; the whole creep bank is Hirth and Kohlstedt 2003 on olivine \
+                 aggregates, and there is no non-olivine row to select. Closing this needs a CITED flow \
+                 law for {dominant}, never olivine's applied to it",
+                dominant_fraction.to_f64_lossy() * 100.0
+            ))
+        })?;
+    let rows = (study.rows)();
     // kappa = k / (rho c_p), computed here from the same three facts the struct exposes it from, so the
     // viscosity cannot run on a different diffusivity than the one the kernel reads.
     let thermal_diffusivity_m2_s = density_kg_m3
@@ -1080,40 +1418,46 @@ fn derive_column_viscosity(
         .and_then(|x| x.checked_mul(geometry.gravity_m_s2))
         .ok_or_else(|| unrepresentable("eval_pressure_gpa"))?;
 
-    // THE DISLOCATION-ONLY determinations, NOT the whole of Table 2. The ninth row of that table is a Si
-    // SELF-DIFFUSION measurement (`V* = -2 cm^3/mol`, Bejina et al. 1997), a different mechanism, and its
-    // chord covers 5 to 10 GPa. Feeding it to a dislocation column contaminates the bracket exactly where a
-    // deep interior sits: at 10 GPa it drags the primary from `ln(eta) 51.2` to `47.9`, a viscosity 27 times
-    // too low, and further down it is worse. `hk_dry_dislocation_activation_volumes` exists for this and its
-    // docstring says so; this consumer failed to inherit the exclusion until an audit caught it.
-    let volumes = hk_dry_dislocation_activation_volumes();
-    // THE COVERAGE GATE. `select_activation_volume` reports whether any determination's pressure chord
-    // actually COVERS the requested pressure, and when none does it falls back to the table's own extremes
-    // and labels the result `UnconstrainedBySource`. That label is produced and then dropped: the solve
-    // returns a `ViscosityBand` carrying only numbers, so a caller receives a viscosity with no signal that
-    // the source constrains nothing there. Every dry-dislocation chord ends by 15 GPa, and an Earth-like
-    // column derives about 47 GPa, so this is not a hypothetical: the previous version returned a confident
+    // THE COVERAGE GATE, run over EVERY candidate the study supplies rather than over one hardcoded volume
+    // set. `select_activation_volume` reports whether any determination's pressure chord COVERS the
+    // requested pressure at all, and when none does it falls back to the table's own extremes and labels the
+    // result `UnconstrainedBySource`. That label is produced and then dropped: the solve returns a
+    // `ViscosityBand` carrying only numbers, so a caller receives a viscosity with no signal that the
+    // source constrains nothing there. Every dry-dislocation chord ends by 15 GPa, and an Earth-like column
+    // derives about 47 GPa, so this is not a hypothetical: the previous version returned a confident
     // deep-mantle viscosity extrapolated past every measurement behind it. It refuses instead, which is the
     // same discipline the frame gate applies to the ambient thermoelastic rows.
-    match select_activation_volume(&volumes, eval_pressure_gpa) {
-        Some(bracket) if bracket.constraint() == VolumeConstraint::CoveredBySource => {}
-        Some(_) => {
-            return Err(ColumnDerivationRefusal::Viscosity(format!(
-                "no activation-volume determination covers {:.1} GPa; the dry-dislocation chords end by \
-                 15 GPa, so a viscosity here would be extrapolated past every measurement behind it",
+    //
+    // The volume sets are each row's OWN, matched by the study. For the olivine row that is the
+    // dislocation-only set: the ninth determination of H&K Table 2 is a Si SELF-DIFFUSION measurement
+    // (`V* = -2 cm^3/mol`, Bejina et al. 1997), a different mechanism whose chord covers 5 to 10 GPa, and
+    // feeding it to a dislocation column at 10 GPa drags the primary from `ln(eta) 51.2` to `47.9`, a
+    // viscosity 27 times too low. Keying the volumes to the row rather than to this call site is what makes
+    // that exclusion inherited rather than rediscovered.
+    for (_, volumes) in &rows {
+        match select_activation_volume(volumes, eval_pressure_gpa) {
+            Some(bracket) if bracket.constraint() == VolumeConstraint::CoveredBySource => {}
+            Some(_) => {
+                return Err(ColumnDerivationRefusal::Viscosity(format!(
+                "no activation-volume determination in {} covers {:.1} GPa; its chords end well \
+                     short of it, so a viscosity here would be extrapolated past every measurement \
+                     behind it",
+                study.source,
                 eval_pressure_gpa.to_f64_lossy()
             )))
-        }
-        None => {
-            return Err(ColumnDerivationRefusal::Viscosity(
-                "the activation-volume bracket did not resolve".to_string(),
-            ))
+            }
+            None => {
+                return Err(ColumnDerivationRefusal::Viscosity(format!(
+                    "the activation-volume bracket did not resolve for {}",
+                    study.source
+                )))
+            }
         }
     }
-    let candidates = [CreepCandidate {
-        row: hk_dry_dislocation(),
-        volumes: &volumes,
-    }];
+    let candidates: Vec<CreepCandidate<'_>> = rows
+        .iter()
+        .map(|(row, volumes)| CreepCandidate { row: *row, volumes })
+        .collect();
     let inputs = ViscosityInputs {
         density_anomaly_kg_m3,
         gravity_m_s2: geometry.gravity_m_s2,
@@ -1356,6 +1700,14 @@ impl SiColumnParams {
 /// [`laws::heat_advection`]: a buoyant PARCEL settling at Stokes velocity, carrying the full interior
 /// contrast across the full depth. On the fixture cluster nobody could tell whether that was right, because
 /// there was no real magnitude to check it against. On the DERIVED values it is measurably wrong.
+///
+/// THE TUPLE BELOW IS A SNAPSHOT OF THAT MEASUREMENT AND THE CLUSTER HAS MOVED SINCE, which is worth
+/// naming so a reader does not take it for a live read. The same flagship column now derives `rho =
+/// 3383.5`, `k = 2.543`, `c_p = 1267.3` and `alpha = 24.75 ppm/K` at its own solved 11.267 GPa: the
+/// density and expansivity drifted before this note was written, and the conductivity and capacity moved
+/// when the expansivity integral became exact and the heat capacity became the ladder's own. The ratio the
+/// finding turns on is a factor of 121, so a few percent on any of these does not touch it, and it has
+/// NOT been re-measured here.
 ///
 /// Measured on a Mars-class column (`rho = 3354.5`, `k = 2.461`, `c_p = 1241`, `alpha = 25.9 ppm/K`,
 /// `ln eta = 54.66`, `d = 1.8e6 m`, `dT = 1300 K`), the Stokes-advection form gives `12.7 K/Myr` of
@@ -2040,6 +2392,540 @@ mod tests {
         );
     }
 
+    /// The banked tables and the Mars-class geometry every column test below reads, loaded once per test
+    /// rather than restated, so no test can be measuring a different bank from its neighbour.
+    fn banked() -> (
+        civsim_physics::petrology_data::PhaseRegistry,
+        civsim_physics::periodic::PeriodicTable,
+        civsim_physics::phase_conductivity::PhaseConductivityTable,
+        civsim_physics::gruneisen::GruneisenTable,
+        civsim_physics::mineral_moduli::MineralModuli,
+        civsim_physics::thermoelastic_anchors::ThermoelasticAnchors,
+    ) {
+        (
+            civsim_physics::petrology_data::PhaseRegistry::standard().expect("the registry loads"),
+            civsim_physics::periodic::PeriodicTable::standard().expect("the periodic table loads"),
+            civsim_physics::phase_conductivity::PhaseConductivityTable::standard()
+                .expect("the cited conductivity column loads"),
+            civsim_physics::gruneisen::GruneisenTable::standard()
+                .expect("the Grueneisen table loads"),
+            civsim_physics::mineral_moduli::MineralModuli::standard().expect("the moduli load"),
+            civsim_physics::thermoelastic_anchors::ThermoelasticAnchors::standard()
+                .expect("the anchors load"),
+        )
+    }
+
+    /// The Mars-class convecting layer the flagship column runs in.
+    fn mars_geometry() -> ColumnGeometry {
+        ColumnGeometry {
+            layer_depth_m: Fixed::from_int(1_800_000),
+            gravity_m_s2: Fixed::from_ratio(37, 10),
+            temperature_contrast_k: Fixed::from_int(1300),
+            ln_rayleigh_critical: crate::deeptime::RIGID_RIGID_RA_CRIT.ln(),
+        }
+    }
+
+    /// A pure forsterite bulk composition.
+    fn forsterite_composition() -> Vec<(String, Fixed)> {
+        vec![
+            ("Mg".to_string(), Fixed::from_int(2)),
+            ("Si".to_string(), Fixed::ONE),
+            ("O".to_string(), Fixed::from_int(4)),
+        ]
+    }
+
+    /// THE BUNDLE CARRIES ONE HEAT CAPACITY AND IT TRACES TO THE LADDER PASS THE EXPANSIVITY CAME FROM.
+    ///
+    /// It carried two. The ladder solves a Debye `C_V` at the column's own state on the way to `alpha` and
+    /// dropped it at the function boundary, and the field named `c_p` held `3R/M` instead: the classical
+    /// high-temperature LIMIT of that same capacity, on a different molar basis, with no `C_p` conversion
+    /// applied at the one call site where the expansivity and the modulus needed to make it were both in
+    /// hand. Two numbers for one property of one rock, which is the redundant-parameter defect this file
+    /// has a standing ruling about.
+    ///
+    /// THE CHECK IS AN INDEPENDENT RECOMPUTATION, not a read-back of the same field. The test asks the
+    /// ladder for forsterite's response at the solved state itself, converts with `C_p = C_V + T V alpha^2
+    /// K_T` in floating point (different arithmetic, different order, different type from the fixed-point
+    /// path under test), and divides by the molar mass the periodic table gives. Reading the pass's own
+    /// stored capacity back out would prove only that a field round-trips.
+    ///
+    /// AND IT CONVICTS THE SUBSTITUTION at both ends of the range. Dulong-Petit is 2.1 percent LOW at
+    /// mantle temperature and 24 percent HIGH at 400 K against the same rock's real capacity, so a bundle
+    /// that quietly returned to `3R/M` would pass a mantle-only tolerance and fail here.
+    #[test]
+    fn the_column_stores_one_heat_capacity_and_it_is_the_one_alpha_was_derived_from() {
+        let (registry, periodic, conductivity, gruneisen, moduli, anchors) = banked();
+        let tables = BankedTables {
+            registry: &registry,
+            periodic: &periodic,
+            conductivity: &conductivity,
+            gruneisen: &gruneisen,
+            moduli: &moduli,
+            anchors: &anchors,
+        };
+        let composition = forsterite_composition();
+        let geometry = mars_geometry();
+        let temperature = Fixed::from_int(1600);
+        let (solved_bar, deep) =
+            solve_column_at_depth(&composition, temperature, &geometry, &tables)
+                .expect("the flagship column derives");
+
+        // The ladder's own answer for this rock at this state, recomputed here in floating point.
+        let state = civsim_materials::thermoelastic::ThermoState {
+            temperature_k: temperature,
+            pressure_bar: solved_bar,
+        };
+        let r = civsim_materials::thermoelastic::response_at(
+            "forsterite",
+            state,
+            &registry,
+            &moduli,
+            &gruneisen,
+            &anchors,
+        )
+        .expect("forsterite answers at the solved state");
+        let c_v = r
+            .c_v_j_per_mol_k
+            .expect("the state-resolved rung carries a capacity")
+            .to_f64_lossy();
+        let alpha = r.alpha_per_k.to_f64_lossy();
+        let k_t = r.bulk_modulus_gpa.to_f64_lossy();
+        let v_m = r.molar_volume_cm3.to_f64_lossy();
+        // `C_p - C_V = T V alpha^2 K_T`, with the GPa-to-J/cm^3 factor of a thousand.
+        let c_p = c_v + 1000.0 * alpha * alpha * k_t * v_m * temperature.to_f64_lossy();
+        let molar_mass_kg = civsim_physics::petrology::phase_molar_mass(
+            registry.phase("forsterite").expect("forsterite is banked"),
+            &periodic,
+        )
+        .expect("its molar mass resolves")
+        .to_f64_lossy()
+            / 1000.0;
+        let expected = c_p / molar_mass_kg;
+
+        let stored = deep.specific_heat_j_kg_k.to_f64_lossy();
+        assert!(
+            (stored - expected).abs() / expected < 0.002,
+            "the stored specific heat {stored:.2} J/(kg K) must be the ladder's own capacity at this \
+             state, {expected:.2}; a gap here means the bundle is carrying a second capacity again"
+        );
+
+        // AND IT IS NOT DULONG-PETIT, which is the substitution being removed rather than a second
+        // opinion. The two agree to a couple of percent at mantle temperature and that near-agreement is
+        // the hazard: it is cancellation between a capacity below its classical ceiling and a `C_V` limit
+        // standing in for a `C_p`, not physics.
+        let mean_atomic_mass = civsim_physics::petrology::assemblage_mean_atomic_mass_kg_per_mol(
+            &civsim_physics::petrology::stable_assemblage(
+                &composition,
+                temperature,
+                solved_bar,
+                &registry,
+            )
+            .expect("the assemblage minimizes"),
+            &registry,
+            &periodic,
+        )
+        .expect("its mean atomic mass resolves");
+        let dulong_petit =
+            civsim_physics::young_thermal::dulong_petit_specific_heat(mean_atomic_mass)
+                .expect("Dulong-Petit is representable")
+                .to_f64_lossy();
+        assert!(
+            (stored - dulong_petit).abs() / dulong_petit > 0.01,
+            "the stored capacity {stored:.2} must differ from the Dulong-Petit {dulong_petit:.2} it \
+             replaced; reading them equal means the substitution came back"
+        );
+
+        // THE 400 K CASE, where the Debye capacity is nowhere near its classical ceiling and the
+        // substitution stops being a few percent. The whole column refuses at 400 K (the creep solve
+        // reports an unrepresentable stress for a mantle that cold), so the capacity is measured where the
+        // column forms it: the ladder pass over the same census, divided by the density the same pass
+        // implies, which is the production expression with its two inputs written out.
+        let cold_state = civsim_materials::thermoelastic::ThermoState {
+            temperature_k: Fixed::from_int(400),
+            pressure_bar: solved_bar,
+        };
+        let assemblage = civsim_physics::petrology::stable_assemblage(
+            &composition,
+            Fixed::from_int(400),
+            solved_bar,
+            &registry,
+        )
+        .expect("the assemblage minimizes at 400 K");
+        let census = civsim_physics::petrology::assemblage_volume_fractions(&assemblage, &registry)
+            .expect("its census resolves");
+        let cold_pass = ladder_pass_over_census(&census, cold_state, &tables)
+            .expect("the ladder answers at 400 K and depth");
+        let cold_density =
+            civsim_physics::petrology::assemblage_density(&assemblage, &registry, &periodic)
+                .expect("its ambient density resolves")
+                .to_f64_lossy()
+                * 1000.0
+                / cold_pass.compression.to_f64_lossy();
+        let cold_specific = cold_pass
+            .c_p_j_per_cm3_k
+            .expect("the pass carries a capacity")
+            .to_f64_lossy()
+            * 1.0e6
+            / cold_density;
+        assert!(
+            cold_specific < dulong_petit * 0.9,
+            "at 400 K the Debye capacity is far below its classical ceiling, so the column's own \
+             specific heat {cold_specific:.1} J/(kg K) must sit well under the Dulong-Petit \
+             {dulong_petit:.1}; reading them close means `3R/M` is being stored again"
+        );
+    }
+
+    /// A MOLAR QUANTITY IS MIXED BY MOLES, and this is the test a single-phase census cannot run.
+    ///
+    /// The pass weights the expansivity by VOLUME, correctly, because an expansivity is a per-volume
+    /// property. A heat capacity in J/(mol K) is per MOLE, and mixing it by the volume fractions sitting
+    /// right there in the same loop would report joules per mole of a volume-weighted mole with no mass
+    /// basis to divide by. The two weightings are indistinguishable on the flagship fixture, which is pure
+    /// forsterite, so the error would have shipped invisibly. This census is not: forsterite and periclase
+    /// have molar volumes near 43.6 and 11.2 cm^3/mol, so a two-thirds volume share of forsterite is a
+    /// one-third MOLE share, and weighting by the wrong one moves the answer by tens of percent.
+    ///
+    /// The reference route reads the assemblage's OWN minimized molar amounts, `sum(n C_p) / sum(n M)`,
+    /// which never passes through a volume fraction at all. So the two routes share no arithmetic beyond
+    /// the ladder response itself.
+    #[test]
+    fn the_molar_capacity_is_mixed_by_moles_and_not_by_volume() {
+        let (registry, periodic, conductivity, gruneisen, moduli, anchors) = banked();
+        let tables = BankedTables {
+            registry: &registry,
+            periodic: &periodic,
+            conductivity: &conductivity,
+            gruneisen: &gruneisen,
+            moduli: &moduli,
+            anchors: &anchors,
+        };
+        // Magnesium in excess of the forsterite stoichiometry, so the rock minimizes to forsterite plus
+        // periclase rather than to one phase.
+        let composition = vec![
+            ("Mg".to_string(), Fixed::from_int(4)),
+            ("Si".to_string(), Fixed::ONE),
+            ("O".to_string(), Fixed::from_int(6)),
+        ];
+        let temperature = Fixed::from_int(1600);
+        let pressure_bar = Fixed::from_int(112_670);
+        let assemblage = civsim_physics::petrology::stable_assemblage(
+            &composition,
+            temperature,
+            pressure_bar,
+            &registry,
+        )
+        .expect("the two-phase assemblage minimizes");
+        assert!(
+            assemblage.phases.len() > 1,
+            "this test is worthless on a single-phase census, since every weighting collapses there; \
+             read {:?}",
+            assemblage.phases
+        );
+        let census = civsim_physics::petrology::assemblage_volume_fractions(&assemblage, &registry)
+            .expect("its census resolves");
+        let state = civsim_materials::thermoelastic::ThermoState {
+            temperature_k: temperature,
+            pressure_bar,
+        };
+        let pass = ladder_pass_over_census(&census, state, &tables)
+            .expect("the ladder answers the whole two-phase census");
+
+        // The route under test: the pass's capacity per unit of the assemblage's own volume, over the
+        // density the same pass implies, exactly as the derivation forms it.
+        let density =
+            civsim_physics::petrology::assemblage_density(&assemblage, &registry, &periodic)
+                .expect("its ambient density resolves")
+                .to_f64_lossy()
+                * 1000.0
+                / pass.compression.to_f64_lossy();
+        let from_pass = pass
+            .c_p_j_per_cm3_k
+            .expect("the pass carries a capacity")
+            .to_f64_lossy()
+            * 1.0e6
+            / density;
+
+        // The reference route: the assemblage's own molar amounts, never touching a volume fraction.
+        let mut capacity = 0.0;
+        let mut mass = 0.0;
+        for (name, amount) in &assemblage.phases {
+            let r = civsim_materials::thermoelastic::response_at(
+                name, state, &registry, &moduli, &gruneisen, &anchors,
+            )
+            .expect("each phase answers at this state");
+            let c_v = r
+                .c_v_j_per_mol_k
+                .expect("on a capacity-carrying rung")
+                .to_f64_lossy();
+            let alpha = r.alpha_per_k.to_f64_lossy();
+            let c_p = c_v
+                + 1000.0
+                    * alpha
+                    * alpha
+                    * r.bulk_modulus_gpa.to_f64_lossy()
+                    * r.molar_volume_cm3.to_f64_lossy()
+                    * temperature.to_f64_lossy();
+            let n = amount.to_f64_lossy();
+            capacity += n * c_p;
+            mass += n * civsim_physics::petrology::phase_molar_mass(
+                registry.phase(name).expect("the phase is banked"),
+                &periodic,
+            )
+            .expect("its molar mass resolves")
+            .to_f64_lossy()
+                / 1000.0;
+        }
+        let by_moles = capacity / mass;
+
+        assert!(
+            (from_pass - by_moles).abs() / by_moles < 0.005,
+            "the pass's specific heat {from_pass:.2} J/(kg K) must equal the mole-weighted \
+             {by_moles:.2}; a volume-weighted molar capacity would land somewhere else entirely"
+        );
+
+        // AND THE TWO WEIGHTINGS REALLY DO DIFFER HERE, so the agreement above is evidence rather than a
+        // coincidence of a census where every weighting is the same census.
+        let mut volume_weighted_molar = 0.0;
+        for (name, fraction) in &census {
+            let r = civsim_materials::thermoelastic::response_at(
+                name, state, &registry, &moduli, &gruneisen, &anchors,
+            )
+            .expect("each phase answers");
+            volume_weighted_molar +=
+                fraction.to_f64_lossy() * r.c_v_j_per_mol_k.expect("a capacity").to_f64_lossy();
+        }
+        let mole_weighted_molar = capacity
+            / assemblage
+                .phases
+                .iter()
+                .map(|(_, n)| n.to_f64_lossy())
+                .sum::<f64>();
+        assert!(
+            (volume_weighted_molar - mole_weighted_molar).abs() / mole_weighted_molar > 0.10,
+            "this census must separate the two weightings in fact, else the test proves nothing; \
+             volume-weighted {volume_weighted_molar:.1} against mole-weighted {mole_weighted_molar:.1} \
+             J/(mol K)"
+        );
+    }
+
+    /// THE EXPANSIVITY INTEGRAL IS THE REAL ONE WHERE ONE RUNG SPANS BOTH ENDPOINTS.
+    ///
+    /// It was `alpha(P,T) * (T - 298)` with the expansivity held constant over thirteen hundred kelvin.
+    /// That limit was declared at the site rather than hidden, and it was also unnecessary: at fixed
+    /// pressure the integral IS `ln[V(P,T)/V(P,298)]`, and the ladder already returns a molar volume at
+    /// any state it answers at. Measured on the flagship column the two differ by sixteen percent of the
+    /// integral, which moves the Hofmeister lattice conductivity by about two and a half percent, so this
+    /// is a real quantity rather than a rounding.
+    ///
+    /// THE BRANCH IS PRESERVED AND TESTED, which is the other half. A ratio between two states is one
+    /// model's answer only when both states resolved through that model, and at 1 bar they do not: 298 K
+    /// lands inside the ambient measured row's own frame while 1600 K is far outside it and falls to
+    /// Mie-Grueneisen-Debye. Dividing one rung's volume by another's and calling the difference thermal
+    /// expansion is exactly the kind of quantity substitution this ladder exists to refuse, so the helper
+    /// returns the constant-alpha form there.
+    #[test]
+    fn the_expansivity_integral_is_exact_where_one_rung_spans_both_endpoints() {
+        let (registry, periodic, conductivity, gruneisen, moduli, anchors) = banked();
+        let tables = BankedTables {
+            registry: &registry,
+            periodic: &periodic,
+            conductivity: &conductivity,
+            gruneisen: &gruneisen,
+            moduli: &moduli,
+            anchors: &anchors,
+        };
+        let composition = forsterite_composition();
+        let temperature = Fixed::from_int(1600);
+        let anchor_k = civsim_materials::conductivity::hofmeister_reference_temperature_k();
+        // The pressure the flagship geometry's own mass implies, so this is the column's real operating
+        // point rather than a chosen one.
+        let (solved_bar, deep) =
+            solve_column_at_depth(&composition, temperature, &mars_geometry(), &tables)
+                .expect("the flagship column derives");
+        let assemblage = civsim_physics::petrology::stable_assemblage(
+            &composition,
+            temperature,
+            solved_bar,
+            &registry,
+        )
+        .expect("the assemblage minimizes");
+        let census = civsim_physics::petrology::assemblage_volume_fractions(&assemblage, &registry)
+            .expect("its census resolves");
+        let at = |t: Fixed, p: Fixed| {
+            ladder_pass_over_census(
+                &census,
+                civsim_materials::thermoelastic::ThermoState {
+                    temperature_k: t,
+                    pressure_bar: p,
+                },
+                &tables,
+            )
+        };
+
+        let hot = at(temperature, solved_bar).expect("the ladder answers at the column's state");
+        let cold = at(anchor_k, solved_bar).expect("and at the anchor temperature, same pressure");
+        assert_eq!(
+            hot.rung, cold.rung,
+            "this test needs both endpoints on ONE rung; that is the case it is about"
+        );
+        let exact = expansivity_integral_from_anchor(
+            Some(&hot),
+            Some(&cold),
+            deep.thermal_expansion_ppm_per_k,
+            temperature,
+            anchor_k,
+        )
+        .expect("the exact branch is representable")
+        .to_f64_lossy();
+        let constant = deep.thermal_expansion_ppm_per_k.to_f64_lossy() / 1.0e6
+            * (temperature.to_f64_lossy() - anchor_k.to_f64_lossy());
+        assert!(
+            (exact - constant).abs() / constant > 0.05,
+            "holding alpha constant across 298 K to 1600 K is a real approximation, so the exact \
+             integral {exact:.5} must depart from {constant:.5} by more than rounding; reading them \
+             equal means the exact branch never fired"
+        );
+
+        // AND THE EXACT VALUE IS THE VOLUME RATIO, recomputed here from two independent ladder queries
+        // rather than from the passes the helper read.
+        let v = |t: Fixed| {
+            civsim_materials::thermoelastic::response_at(
+                "forsterite",
+                civsim_materials::thermoelastic::ThermoState {
+                    temperature_k: t,
+                    pressure_bar: solved_bar,
+                },
+                &registry,
+                &moduli,
+                &gruneisen,
+                &anchors,
+            )
+            .expect("forsterite answers")
+            .molar_volume_cm3
+            .to_f64_lossy()
+        };
+        let by_volume = (v(temperature) / v(anchor_k)).ln();
+        assert!(
+            (exact - by_volume).abs() < 1.0e-4,
+            "the integral {exact:.6} must be ln of the phase's own volume ratio {by_volume:.6}, since \
+             that identity is the whole reason the constant-alpha limit was unnecessary"
+        );
+
+        // THE BRANCH: at 1 bar the two endpoints resolve through different rungs, and the helper falls
+        // back rather than dividing one model's volume by another's.
+        let hot_1bar = at(temperature, Fixed::ONE).expect("the ladder answers at 1 bar and 1600 K");
+        let cold_1bar = at(anchor_k, Fixed::ONE).expect("and at 1 bar and 298 K");
+        assert_ne!(
+            hot_1bar.rung, cold_1bar.rung,
+            "at 1 bar the anchor is inside the ambient row's frame and the hot end is not; that \
+             straddle is the case the branch exists for"
+        );
+        let fallback = expansivity_integral_from_anchor(
+            Some(&hot_1bar),
+            Some(&cold_1bar),
+            deep.thermal_expansion_ppm_per_k,
+            temperature,
+            anchor_k,
+        )
+        .expect("the fallback is representable");
+        assert_eq!(
+            fallback.to_f64_lossy(),
+            constant,
+            "across a rung transition the helper must return the constant-alpha form exactly, since \
+             the exact ratio is then nobody's answer"
+        );
+    }
+
+    /// THE RHEOLOGY REFUSES A ROCK NO BANKED CREEP STUDY DESCRIBES, rather than handing it olivine's.
+    ///
+    /// `derive_column_viscosity` received no assemblage and no census, so the rock's identity was
+    /// STRUCTURALLY unavailable to it and the candidate set was a hardcoded array holding the dry olivine
+    /// row. An iron, ice, salt, carbide, metallic or molecular interior received olivine creep with no
+    /// signal that it had, which is the alien-feasibility line: a pathway that assumes one chemistry where
+    /// a world's rock could differ is a defect, and a docstring disclosing it is not a gate.
+    ///
+    /// WHAT THE FIX IS NOT is row selection. Every row in the bank is Hirth and Kohlstedt 2003, an olivine
+    /// study, so there is no non-olivine row to select and authoring one would be inventing a flow law.
+    /// The honest output for a rock outside the bank is a refusal that NAMES it, which is a work list.
+    #[test]
+    fn the_rheology_refuses_a_rock_no_banked_creep_study_describes() {
+        let geometry = mars_geometry();
+        // The flagship column's own derived numbers, so only the rock's identity varies between cases.
+        let viscosity_of = |phase: &str| {
+            derive_column_viscosity(
+                &[(phase.to_string(), Fixed::ONE)],
+                Fixed::from_ratio(33835, 10),
+                Fixed::from_ratio(25429, 10000),
+                Fixed::from_ratio(12673, 10),
+                Fixed::from_ratio(2475, 100),
+                Fixed::from_int(1600),
+                &geometry,
+            )
+        };
+
+        // Olivine still answers, so the refusals below are the gate rather than a broken wire.
+        let olivine = viscosity_of("forsterite").expect("the olivine column still derives");
+        assert!(
+            olivine.ln_viscosity_primary > Fixed::ZERO,
+            "and its band is a real one"
+        );
+
+        // A rock outside the bank refuses BY NAME. `periclase` is the sharp case: it is a registry phase
+        // this engine can minimize a real mantle to, so it is a rock a world produces rather than a
+        // hypothetical, and no creep study in the bank measured it.
+        for phase in ["ice-Ih", "iron", "periclase", "quartz"] {
+            match viscosity_of(phase) {
+                Ok(band) => panic!(
+                    "{phase} has no banked creep study, so a viscosity here is olivine's applied to \
+                     something that is not olivine; read ln(eta) = {}",
+                    band.ln_viscosity_primary.to_f64_lossy()
+                ),
+                Err(refusal) => {
+                    let message = refusal.to_string();
+                    assert!(
+                        message.contains(phase),
+                        "the refusal must NAME the rock it cannot describe, so it reads as a work \
+                         list; read {message}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// THE DOMINANT PHASE IS THE ONE THE CENSUS SAYS IT IS, and a tie is broken deterministically.
+    ///
+    /// The rheology keys on the phase occupying the most of the column, so the selection has to be a pure
+    /// function of the census rather than of the order a caller built it in (Principle 3). The comparison
+    /// is strictly greater, so the first phase in the census's own order wins an exact tie, and `assemble`
+    /// sorts phases by name before any of this.
+    #[test]
+    fn the_dominant_phase_is_deterministic_under_reordering_and_ties() {
+        let a = vec![
+            ("enstatite".to_string(), Fixed::from_ratio(3, 10)),
+            ("forsterite".to_string(), Fixed::from_ratio(5, 10)),
+            ("spinel".to_string(), Fixed::from_ratio(2, 10)),
+        ];
+        let (name, share) = dominant_phase(&a).expect("a non-empty census has a dominant phase");
+        assert_eq!(name, "forsterite");
+        assert_eq!(share, Fixed::from_ratio(5, 10));
+
+        // An exact tie resolves to the first in the census's canonical order, every time.
+        let tied = vec![
+            ("enstatite".to_string(), Fixed::from_ratio(5, 10)),
+            ("forsterite".to_string(), Fixed::from_ratio(5, 10)),
+        ];
+        assert_eq!(
+            dominant_phase(&tied).map(|(n, _)| n),
+            Some("enstatite"),
+            "a tie must resolve the same way on every run, and the census's name order is what \
+             supplies that"
+        );
+        assert!(
+            dominant_phase(&[]).is_none(),
+            "an empty census has no dominant phase to guess at"
+        );
+    }
+
     /// THE COHERENCE GATE IS LIVE AT PLANETARY SCALE, which is the property that was missing rather than
     /// the comparison itself.
     ///
@@ -2095,6 +2981,15 @@ mod tests {
     }
 
     /// A Mars-class SI column built from the DERIVED cluster, the operating point every SI test uses.
+    ///
+    /// A TRANSCRIBED SNAPSHOT rather than a live read, and the difference is measurable: the flagship
+    /// column now derives `rho = 3383.5`, `k = 2.543`, `c_p = 1267.3` and `alpha = 24.75 ppm/K` against
+    /// the `3354.5`, `2.461`, `1241` and `25.9` below. The density and expansivity had already drifted;
+    /// the conductivity and capacity moved when the expansivity integral became exact and the heat
+    /// capacity became the ladder's own rather than Dulong-Petit. The gap is a few percent on each and
+    /// these tests assert representation and ordering properties that no percent-scale shift reaches, so
+    /// the snapshot is left as it is rather than re-baselined here, where re-baselining would move a dozen
+    /// assertion bands for a reason none of them is about.
     fn mars_si_column() -> SiColumnParams {
         let d = Fixed::from_int(1_800_000);
         SiColumnParams {
