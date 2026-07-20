@@ -68,6 +68,7 @@ pub mod controller;
 pub mod conviction_experience;
 pub mod conviction_percept;
 pub mod cpd_composition;
+pub mod cpd_population;
 pub mod cpd_profile;
 pub mod cpd_satellites;
 pub mod cpd_temperature;
