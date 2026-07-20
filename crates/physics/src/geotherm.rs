@@ -420,4 +420,65 @@ mod tests {
         let neg = (ZERO - Fixed::ONE).erf();
         assert!((neg + want1).abs() < tol, "erf(-1) = -erf(1), got {neg:?}");
     }
+
+    /// THE GEOTHERM STAYS BETWEEN ITS OWN TWO TEMPERATURES, at every representable age and depth.
+    ///
+    /// This is the consumer half of a `Fixed::erfc` defect found by review. `erfc` formed `self *
+    /// self` with the WRAPPING multiply, so past `sqrt(Fixed::MAX) = 46340.95` the square wrapped
+    /// negative, `exp` saturated, and the polynomial multiplied that rail back into a plausible
+    /// finite number. `eta = z / (2 sqrt(kappa t))` is an unbounded ratio, so a young age at ordinary
+    /// depth reached it: at `kappa = 1e-6`, an age of one hour and a depth of 100 km returned
+    /// `-2,603,600 K` against a true 1600. Every guard passed, because `1300 * 36042` fits
+    /// comfortably; the number was wrong rather than unrepresentable.
+    ///
+    /// The failure was NON-MONOTONE in eta (one minute right, one hour catastrophic, one year right
+    /// again), so an endpoint test could not have bracketed it. This asserts the physical statement
+    /// the module's own documentation makes, across a geometric sweep that crosses the old wrap band.
+    #[test]
+    fn the_geotherm_never_leaves_the_band_between_surface_and_interior() {
+        let surface = Fixed::from_int(300);
+        let interior = Fixed::from_int(1600);
+        // The module's own SI test constant.
+        let kappa = Fixed::from_ratio(1, 1_000_000);
+
+        // Ages spanning a minute to a gigayear in seconds, and depths spanning a metre to 1000 km.
+        // The short ages are what drive eta past the old wrap; the long ones return it to sanity,
+        // which is the non-monotonicity that makes a sweep necessary.
+        let ages = [60i32, 3_600, 86_400, 31_557_600, 1_000_000_000];
+        let depths = [1i32, 1_000, 100_000, 1_000_000];
+
+        for age_s in ages {
+            for depth_m in depths {
+                let age = Fixed::from_int(age_s);
+                let depth = Fixed::from_int(depth_m);
+                let Some(t) = halfspace_geotherm(surface, interior, kappa, age, depth) else {
+                    continue;
+                };
+                assert!(
+                    t >= surface && t <= interior,
+                    "age {age_s}s depth {depth_m}m gives {} K, outside [{}, {}]",
+                    t.to_f64_lossy(),
+                    surface.to_f64_lossy(),
+                    interior.to_f64_lossy()
+                );
+            }
+        }
+
+        // THE EXACT CASE THAT WAS WRONG, pinned by name so a regression is legible.
+        let one_hour = Fixed::from_int(3_600);
+        let hundred_km = Fixed::from_int(100_000);
+        let t = halfspace_geotherm(surface, interior, kappa, one_hour, hundred_km)
+            .expect("an hour-old half-space resolves at 100 km");
+        assert!(
+            t >= surface && t <= interior,
+            "the hour-old lid at 100 km reads {} K, and it used to read -2603600",
+            t.to_f64_lossy()
+        );
+        // Deep and young means the cooling front has not arrived, so the rock is still at its
+        // INTERIOR temperature. `erf` saturates to one and the profile reads `T_s + (T_i - T_s)`.
+        assert_eq!(
+            t, interior,
+            "at eta far past the error function's reach the heat has not arrived, so it reads interior"
+        );
+    }
 }

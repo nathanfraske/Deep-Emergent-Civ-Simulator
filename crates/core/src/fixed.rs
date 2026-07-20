@@ -779,7 +779,35 @@ impl Fixed {
     /// numeric type rather than a fact about any one domain. Two consumers need it and must not
     /// drift apart: Ewald's real-space sum (where the argument `alpha r` is always non-negative) and
     /// the half-space cooling geotherm (`erf(z / (2 sqrt(kappa t)))`, the lid profile).
+    ///
+    /// # THE SQUARE IS BOUNDED BEFORE IT IS TAKEN, WHICH IS WHAT MAKES IT SOUND
+    ///
+    /// `self * self` is the WRAPPING multiply, and it is a cast rather than an arithmetic overflow,
+    /// so the workspace's `overflow-checks` never saw it. Past `sqrt(Fixed::MAX) = 46340.95` the
+    /// square wrapped negative, `Fixed::ZERO - it` became large positive, `exp` saturated to
+    /// `Fixed::MAX`, and the tiny polynomial multiplied that rail back down into a plausible finite
+    /// number: `erfc(46341)` returned `36042.5` against a true `0`, and `erf` inherited it as
+    /// `-36041.5` against a true `1`. The guard below bounds `self` before the square is formed, so
+    /// the wrap is unreachable by construction rather than by caller discipline.
+    ///
+    /// The edge is DERIVED rather than authored, from [`Fixed::exp`]'s own floor: `exp(-x^2)` falls
+    /// below that floor once `x^2` exceeds 22, and zero is the correctly rounded answer there
+    /// (`erfc(4.69) = 3.3e-11`, about 0.14 ulp). Between that edge and the wrap the old code already
+    /// returned exactly zero by the same underflow, so this moves no bit that was ever right.
+    ///
+    /// Measured, the guard is comfortably conservative: `erfc` quantizes to zero at `4.48` (the last
+    /// nonzero argument is `4.47`, at exactly one ulp), while the guard sits at `4.6904`. Every
+    /// argument it turns away was already returning zero, so no resolvable value is truncated.
     pub fn erfc(self) -> Fixed {
+        // TESTED BEFORE THE REFLECTION on purpose: the reflection negates, and `Fixed::ZERO - MIN`
+        // overflows. Reaching the edge first means the negation only ever runs on a bounded argument.
+        let edge = Fixed::erfc_zero_argument();
+        if self > edge {
+            return Fixed::ZERO;
+        }
+        if self < Fixed::ZERO - edge {
+            return Fixed::from_int(2);
+        }
         if self < Fixed::ZERO {
             return Fixed::from_int(2) - (Fixed::ZERO - self).erfc();
         }
@@ -793,6 +821,18 @@ impl Fixed {
         // Horner: t * (a1 + t*(a2 + t*(a3 + t*(a4 + t*a5)))).
         let poly = t * (a1 + t * (a2 + t * (a3 + t * (a4 + t * a5))));
         poly * (Fixed::ZERO - self * self).exp()
+    }
+
+    /// The argument at which [`Fixed::erfc`] is zero to the representation, DERIVED from
+    /// [`Fixed::exp`]'s floor rather than authored: `erfc` carries a factor `exp(-x^2)`, that factor
+    /// falls below the floor once `x^2` exceeds 22, and `sqrt(22) = 4.6904`. At the edge the true
+    /// value is `3.3e-11`, about 0.14 ulp, so zero is the correctly rounded answer beyond it.
+    ///
+    /// Bounding the argument here is also what makes `erfc`'s unchecked square sound, so this is a
+    /// soundness boundary as well as an accuracy one.
+    // @derives: the argument beyond which erfc is zero <- the exponential's representable floor
+    pub fn erfc_zero_argument() -> Fixed {
+        Fixed::from_int(22).sqrt()
     }
 
     /// The ERROR FUNCTION `erf(x) = 1 - erfc(x)`, composed from the pinned [`Fixed::erfc`] so the
@@ -1335,6 +1375,121 @@ mod tests {
         assert!(
             arg_464 > edge && arg_464 < Fixed::from_int(22),
             "464 lands inside the band the authored 22 was letting through"
+        );
+    }
+
+    /// ERFC IS BOUNDED, MONOTONE, AND ZERO PAST ITS EDGE, which the wrapping square broke.
+    ///
+    /// `self * self` is a wrapping multiply through a cast, so `overflow-checks` never saw it. Past
+    /// `sqrt(Fixed::MAX) = 46340.95` the square wrapped negative, `exp` saturated, and the tiny
+    /// polynomial multiplied the rail back into a plausible finite answer: `erfc(46341)` returned
+    /// `36042.5` against a true `0`. The range sweep is the assertion that convicts it, by five
+    /// orders of magnitude. Monotonicity is asserted separately because the failure was NON-monotone
+    /// in the argument, so endpoint testing could not have bracketed it.
+    #[test]
+    fn erfc_stays_inside_its_range_and_falls_monotonically_past_the_wrap() {
+        // A&S 7.1.26 carries a stated maximum error of 1.5e-7, so the range check allows exactly it.
+        let fit_error = Fixed::from_ratio(15, 100_000_000);
+        let one = Fixed::ONE + fit_error;
+
+        // THE SWEEP THAT CONVICTS, geometric so it reaches the wrap band in few steps. 46341 is the
+        // first argument whose square wrapped; the decade beyond it was equally wrong.
+        let mut probes = vec![
+            Fixed::ZERO,
+            Fixed::from_ratio(1, 2),
+            Fixed::ONE,
+            Fixed::from_int(2),
+            Fixed::from_int(4),
+            Fixed::erfc_zero_argument(),
+        ];
+        for m in [5i32, 10, 100, 1_000, 46_340, 46_341, 50_000, 1_000_000] {
+            probes.push(Fixed::from_int(m));
+        }
+
+        let mut previous = Fixed::from_int(2);
+        for x in probes {
+            let v = x.erfc();
+            assert!(
+                v >= Fixed::ZERO && v <= one,
+                "erfc({}) = {} left [0, 1]",
+                x.to_f64_lossy(),
+                v.to_f64_lossy()
+            );
+            assert!(
+                v <= previous,
+                "erfc must not rise: erfc({}) = {} against a previous {}",
+                x.to_f64_lossy(),
+                v.to_f64_lossy(),
+                previous.to_f64_lossy()
+            );
+            previous = v;
+
+            // erf inherits the range through `1 - erfc`, and inherited the defect too.
+            let e = x.erf();
+            assert!(
+                e >= Fixed::ZERO - fit_error && e <= one,
+                "erf({}) = {} left [0, 1]",
+                x.to_f64_lossy(),
+                e.to_f64_lossy()
+            );
+        }
+
+        // THE NEGATIVE SIDE REFLECTS AND DOES NOT PANIC. `Fixed::MIN` is the case the reflection
+        // could not survive, because `Fixed::ZERO - Fixed::MIN` overflows; the edge test runs first.
+        assert_eq!(Fixed::MIN.erfc(), Fixed::from_int(2));
+        assert_eq!(
+            (Fixed::ZERO - Fixed::from_int(1_000_000)).erfc(),
+            Fixed::from_int(2)
+        );
+        // erfc(0) = 1 to the fit's own error, which anchors the top of the range.
+        let at_zero = Fixed::ZERO.erfc();
+        assert!(
+            at_zero <= one && at_zero >= Fixed::ONE - fit_error,
+            "erfc(0) = {} must sit on 1 to the fit's stated 1.5e-7",
+            at_zero.to_f64_lossy()
+        );
+
+        // THE EDGE IS WHERE THE EXPONENTIAL FLOOR PUTS IT, and just inside it the answer is nonzero,
+        // so this closed a hole rather than truncating the function early.
+        let edge = Fixed::erfc_zero_argument();
+        let expected_edge = Fixed::from_ratio(46_904, 10_000);
+        let edge_gap = if edge > expected_edge {
+            edge - expected_edge
+        } else {
+            expected_edge - edge
+        };
+        assert!(
+            edge_gap < Fixed::from_ratio(1, 1000),
+            "the derived edge is sqrt(22) = 4.6904, got {}",
+            edge.to_f64_lossy()
+        );
+        assert_eq!(
+            (edge + Fixed::from_ratio(1, 100)).erfc(),
+            Fixed::ZERO,
+            "past the edge erfc is zero to the representation"
+        );
+
+        // THE GUARD SITS BEYOND THE RESOLUTION EDGE, which is what makes it byte-neutral rather than
+        // merely safe. Measured: erfc quantizes to zero at 4.48 (the last nonzero argument is 4.47,
+        // at exactly 1 ulp), while the derived guard is 4.6904. So every argument the guard turns
+        // away was already returning zero through the exponential's own underflow, and no resolvable
+        // value is truncated by it. Asserted rather than asserted-about, by finding the crossover.
+        let mut first_zero = Fixed::ZERO;
+        let mut probe = Fixed::from_int(4);
+        while probe < edge {
+            if probe.erfc() == Fixed::ZERO {
+                first_zero = probe;
+                break;
+            }
+            probe += Fixed::from_ratio(1, 100);
+        }
+        assert!(
+            first_zero > Fixed::ZERO && first_zero < edge,
+            "erfc must reach zero before the guard, so the guard truncates nothing resolvable"
+        );
+        assert!(
+            Fixed::from_int(4).erfc() > Fixed::ZERO,
+            "well inside the edge erfc is comfortably resolvable"
         );
     }
 }
