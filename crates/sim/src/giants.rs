@@ -352,7 +352,11 @@ fn feeding_zone_gas_mass_earth(
     feeding_zone_hill_widths: Fixed,
     steps: u32,
 ) -> Option<Fixed> {
-    if orbit_au <= Fixed::ZERO || feeding_zone_hill_widths <= Fixed::ZERO || steps == 0 {
+    if orbit_au <= Fixed::ZERO
+        || feeding_zone_hill_widths <= Fixed::ZERO
+        || steps == 0
+        || steps > i32::MAX as u32
+    {
         return None;
     }
     let hill = hill_radius_au(orbit_au, core_mass_earth, star_mass_ratio)?;
@@ -366,6 +370,9 @@ fn feeding_zone_gas_mass_earth(
     }
     let span = outer_au.checked_sub(inner_au)?;
     let dr = span.checked_div(Fixed::from_int(steps as i32))?;
+    if dr <= Fixed::ZERO {
+        return None; // steps too fine for the span's fixed-point resolution: dr underflowed to zero
+    }
     let half_dr = dr.checked_div(Fixed::from_int(2))?;
     let two_pi = Fixed::PI.checked_add(Fixed::PI)?;
     let mut integral = Fixed::ZERO;
@@ -401,11 +408,14 @@ pub fn disk_gas_content(
     outer_au: Fixed,
     steps: u32,
 ) -> Option<(Fixed, Fixed)> {
-    if inner_au <= Fixed::ZERO || outer_au <= inner_au || steps == 0 {
+    if inner_au <= Fixed::ZERO || outer_au <= inner_au || steps == 0 || steps > i32::MAX as u32 {
         return None;
     }
     let span = outer_au.checked_sub(inner_au)?;
     let dr = span.checked_div(Fixed::from_int(steps as i32))?;
+    if dr <= Fixed::ZERO {
+        return None; // steps too fine for the span's fixed-point resolution: dr underflowed to zero
+    }
     let half_dr = dr.checked_div(Fixed::from_int(2))?;
     let two_pi = Fixed::PI.checked_add(Fixed::PI)?;
     let mut mass = Fixed::ZERO;
@@ -474,10 +484,14 @@ pub struct TruncationGasLedger {
 // @derives: the disk-truncation gas/angular-momentum residual ledger <- the static viscous-similarity gas profile partitioned at the resonant truncation radius R_t=f*R_L, the retained budget and the removed residual an interpretation-neutral conservation account for the binarity cap
 /// Partition the birth disk's gas content at the truncation radius. One midpoint-quadrature pass over
 /// `[inner_au, birth_r1_au]` (the same ring math as [`disk_gas_content`], so the `total` here reconstructs
-/// `disk_gas_content(disk, inner_au, birth_r1_au, steps)` to the ring), bucketing each ring by whether its midpoint
-/// falls inside `truncation_radius_au`. A wide or absent companion (`truncation_radius_au >= birth_r1_au`) leaves
-/// every ring retained and `removed` zero, the untruncated identity. `None` on a non-positive or inverted domain,
-/// a zero step count, a disk-edge miss, or an overflow.
+/// `disk_gas_content(disk, inner_au, birth_r1_au, steps)` to the ring), apportioning each ring at `R_t`: a ring
+/// fully inside `truncation_radius_au` is retained, fully outside is removed, and the single STRADDLING ring is
+/// SPLIT by the radial fraction of its width inside `R_t`, so a coarse step count cannot report a straddling ring
+/// wholly retained or wholly removed. The split conserves per ring, so `retained + removed = total` exactly. A wide
+/// or absent companion (`truncation_radius_au >= birth_r1_au`) leaves every ring retained, the untruncated identity.
+/// `None` on a non-positive or inverted domain, `truncation_radius_au <= inner_au` (a degenerate empty retained
+/// region), a zero or overflowing (`> i32::MAX`) step count, a `dr` underflowed to zero, a disk-edge miss, or an
+/// overflow. The fixed-point ring sum loses up to half an ulp per ring, the quadrature's inherent floor.
 pub fn truncation_gas_ledger(
     disk: &SolidDisk,
     inner_au: Fixed,
@@ -487,13 +501,20 @@ pub fn truncation_gas_ledger(
 ) -> Option<TruncationGasLedger> {
     if inner_au <= Fixed::ZERO
         || birth_r1_au <= inner_au
-        || truncation_radius_au <= Fixed::ZERO
+        // R_t AT OR INSIDE the disc inner edge is degenerate: the retained region [inner, R_t] is empty, so there is
+        // no partition to report (a wide or absent companion, R_t >= R_1, is the other end and stays valid).
+        || truncation_radius_au <= inner_au
         || steps == 0
+        // the ring index is formed through Fixed::from_int(i32); a larger step count would wrap i as i32 to negative.
+        || steps > i32::MAX as u32
     {
         return None;
     }
     let span = birth_r1_au.checked_sub(inner_au)?;
     let dr = span.checked_div(Fixed::from_int(steps as i32))?;
+    if dr <= Fixed::ZERO {
+        return None; // steps too fine for the span's fixed-point resolution: dr underflowed to zero
+    }
     let half_dr = dr.checked_div(Fixed::from_int(2))?;
     let two_pi = Fixed::PI.checked_add(Fixed::PI)?;
     let mut retained_mass_earth = Fixed::ZERO;
@@ -501,9 +522,9 @@ pub fn truncation_gas_ledger(
     let mut removed_mass_earth = Fixed::ZERO;
     let mut removed_proxy_l = Fixed::ZERO;
     for i in 0..steps {
-        let r = inner_au
-            .checked_add(dr.checked_mul(Fixed::from_int(i as i32))?)?
-            .checked_add(half_dr)?;
+        let r_lo = inner_au.checked_add(dr.checked_mul(Fixed::from_int(i as i32))?)?;
+        let r = r_lo.checked_add(half_dr)?;
+        let r_hi = r_lo.checked_add(dr)?;
         let sigma_gas = gas_surface_density_kg_m2(disk, r)?;
         // r*dr first: the 2*pi*r*Sigma intermediate alone overflows a wide, dense-disc ring (r ~ 100 AU,
         // Sigma ~ 1e6) whose FINAL 2*pi*r*Sigma*dr is small and representable, so this ordering keeps the
@@ -514,13 +535,25 @@ pub fn truncation_gas_ledger(
             .checked_mul(sigma_gas)?;
         let ring_mass = crate::astro::feeding_zone_mass_earth(ring)?;
         let ring_proxy_l = ring_mass.checked_mul(r.sqrt())?;
-        if r < truncation_radius_au {
-            retained_mass_earth = retained_mass_earth.checked_add(ring_mass)?;
-            retained_proxy_l = retained_proxy_l.checked_add(ring_proxy_l)?;
+        // SPLIT the ring at R_t rather than classify it by its midpoint: the ring that STRADDLES R_t apportions its
+        // mass by the radial fraction inside R_t, so a coarse step count cannot report a straddling ring wholly
+        // retained or wholly removed (the midpoint-classification error the audit caught). Per-ring the split
+        // conserves exactly (retained + removed = ring_mass), so the ledger's retained + removed = total holds.
+        let inside_frac = if r_hi <= truncation_radius_au {
+            Fixed::ONE
+        } else if r_lo >= truncation_radius_au {
+            Fixed::ZERO
         } else {
-            removed_mass_earth = removed_mass_earth.checked_add(ring_mass)?;
-            removed_proxy_l = removed_proxy_l.checked_add(ring_proxy_l)?;
-        }
+            truncation_radius_au.checked_sub(r_lo)?.checked_div(dr)?
+        };
+        let retained_ring_mass = ring_mass.checked_mul(inside_frac)?;
+        let retained_ring_l = ring_proxy_l.checked_mul(inside_frac)?;
+        retained_mass_earth = retained_mass_earth.checked_add(retained_ring_mass)?;
+        retained_proxy_l = retained_proxy_l.checked_add(retained_ring_l)?;
+        removed_mass_earth =
+            removed_mass_earth.checked_add(ring_mass.checked_sub(retained_ring_mass)?)?;
+        removed_proxy_l =
+            removed_proxy_l.checked_add(ring_proxy_l.checked_sub(retained_ring_l)?)?;
     }
     let total_mass_earth = retained_mass_earth.checked_add(removed_mass_earth)?;
     let total_proxy_l = retained_proxy_l.checked_add(removed_proxy_l)?;
@@ -2724,6 +2757,46 @@ mod tests {
         let (mass, proxy_l) = disk_gas_content(&dense, r(1, 10), Fixed::from_int(40), 2048)
             .expect("a wide, dense disc integrates without refusing on a representable total");
         assert!(mass > Fixed::ZERO && proxy_l > Fixed::ZERO);
+    }
+
+    /// The truncation ledger SPLITS the ring straddling R_t rather than classifying it by its midpoint, and its
+    /// degenerate inputs refuse. At steps = 1 the single ring over [0.1, 30] AU with R_t = 12 reports the radial
+    /// fraction inside R_t as retained ((12 - 0.1) / (30 - 0.1) = 0.398), not zero (the midpoint-classification
+    /// error), and retained + removed = total holds exactly.
+    #[test]
+    fn the_truncation_ledger_splits_the_straddling_ring_and_guards_degenerate_inputs() {
+        let disk = mirror_disk(Fixed::ONE);
+        let led =
+            truncation_gas_ledger(&disk, r(1, 10), Fixed::from_int(30), Fixed::from_int(12), 1)
+                .expect("the single-ring ledger builds");
+        let frac = led.retained_mass_earth.to_f64_lossy() / led.total_mass_earth.to_f64_lossy();
+        assert!(
+            (frac - 0.3980).abs() < 1e-3,
+            "the straddling ring splits to ~0.398 retained, not zero; got {frac}"
+        );
+        assert!(led.retained_mass_earth > Fixed::ZERO);
+        assert_eq!(
+            led.retained_mass_earth.checked_add(led.removed_mass_earth),
+            Some(led.total_mass_earth),
+            "the split conserves: retained + removed = total exactly"
+        );
+        // R_t at or inside the disc inner edge is degenerate (empty retained region): refuse.
+        assert!(
+            truncation_gas_ledger(&disk, r(1, 10), Fixed::from_int(30), r(1, 20), 128).is_none(),
+            "R_t inside the inner edge refuses"
+        );
+        // An overflowing step count (index formed through i32) refuses rather than wrapping.
+        assert!(
+            truncation_gas_ledger(
+                &disk,
+                r(1, 10),
+                Fixed::from_int(30),
+                Fixed::from_int(12),
+                u32::MAX
+            )
+            .is_none(),
+            "a step count past i32::MAX refuses"
+        );
     }
 
     /// The UN-SELECTED reading REFUSES to collapse to a single budget and carries both candidates, the "name the
