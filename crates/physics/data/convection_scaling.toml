@@ -153,6 +153,24 @@ critical_wavenumber = "2.682"
 citation = "Chandrasekhar 1961, Hydrodynamic and Hydromagnetic Stability, Oxford, Chapter II (the rigid-free case; Ra=1100.65, a=2.682); high-precision recomputation Glomski & Johnson 2012, Appl. Math. Sci. 6, 5097-5108 (Rc=1100.6496068877..., kc=2.6823217577...). Held witness: the Glomski & Johnson PDF."
 
 # ---------------------------------------------------------------------------------------------------------
+# DERIVE-FIRST WAS TESTED ON `alpha` AND IT FAILED, recorded so the next reader does not re-run it.
+#
+# The idea is tempting and nearly right: Batra and Foley's eq. (10) reads `Nu ~ (Ra_i/Ra_c)^beta`, and with
+# Solomatov's stagnant-lid `Ra_c = 20.9 theta^4` that expands to `Nu = 20.9^-beta theta^(-4 beta) Ra_i^beta`.
+# So `alpha` looks like it should DERIVE from a critical Rayleigh number, which is a quantity this very file
+# already banks three of. At `beta = 1/3` the derivation gives `alpha = 20.9^(-1/3) = 0.363`.
+#
+# Their own fit at the same exponents is `C1 = 0.48`, twenty-four percent away. The gap is not an error in
+# either: `Ra_c` is a MARGINAL-STABILITY criterion, the point at which the sublayer starts convecting, while
+# `C1` is fitted to the heat actually transported once it is convecting. Onset and transport are different
+# questions, and the ratio between them is exactly what a fit measures and a stability analysis does not.
+#
+# The second reason is the one this file already states above and it is the stronger one: the three numbers
+# travel together as one convention. An `alpha` computed from `Ra_c` and then paired with a fitted `gamma` and
+# `beta` would be a value from one determination wearing another's exponents, which is the joint-fit defect
+# this repository spent a day on in the Debye/Grueneisen column. So the reserved coefficient stays reserved,
+# and it is reserved as a TESTED conclusion rather than an assumption.
+#
 # THE STAGNANT-LID CONVENTIONS. A DIFFERENT SCALING FORM from every row above: Nu = alpha theta^gamma Ra^beta,
 # where theta is the Frank-Kamenetskii parameter. Each row's three numbers are ONE convention and are read
 # together; the theta_exponent and rayleigh_exponent fields are what make a row readable as one.
