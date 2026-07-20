@@ -17,7 +17,7 @@ The lists below are GENERATED from `crates/physics/data/*.toml`, `crates/physics
 
 ## Deriving substrates (check here BEFORE authoring: what the world derives, and where)
 
-The 41 deriving subsystems below live OUTSIDE the authored floor. Each produces a world quantity from the floor and the situation, so its output must never be authored: if the value you need appears here, read or extend the subsystem, do not set a number. This is the list that stops `1 year = 365 days` from being authored when orbital mechanics already derives it. Generated from the `// @derives:` markers in the code; a subsystem missing its marker is a gap in this map, so mark every derivation entry point.
+The 43 deriving subsystems below live OUTSIDE the authored floor. Each produces a world quantity from the floor and the situation, so its output must never be authored: if the value you need appears here, read or extend the subsystem, do not set a number. This is the list that stops `1 year = 365 days` from being authored when orbital mechanics already derives it. Generated from the `// @derives:` markers in the code; a subsystem missing its marker is a gap in this map, so mark every derivation entry point.
 
 ### `crates/foundation/src/clock.rs`
 
@@ -69,7 +69,8 @@ The 41 deriving subsystems below live OUTSIDE the authored floor. Each produces 
 - the molecular cloud-core gas temperature T_core <- the Goldsmith thermal balance of cosmic-ray heating against gas-dust coupling and molecular line cooling, over the ionization rate, density, dust temperature, line-cooling fit, and the CMB floor (`crates/sim/src/astro.rs:1066`)
 - the coupled cloud-core gas and dust temperatures <- the Goldsmith gas-plus-dust thermal balance over the ionization rate, density, radiation-field chi, line-cooling fit, and CMB floor (`crates/sim/src/astro.rs:1186`)
 - the visual extinction A_V to a cloud-core center <- the core's hydrogen column density over the cited gas-to-extinction ratio (Bohlin 1978 / Guver-Ozel 2009) (`crates/sim/src/astro.rs:1311`)
-- the stellar rotation period at a target age Omega_star(t) <- the gyrochronological spin-down P_ref*(t/t_ref)^n aged forward from a reference epoch, over the cited braking exponent, valid only after the disk-release onset (`crates/sim/src/astro.rs:2925`)
+- the windless Herbig-regime EUV model-over-blackbody departure grid <- the BSTAR2006 emergent NLTE SEDs (svo_tlusty_bstar2006) integrated over the Lyman continuum against the same-Teff blackbody photon rate, 16 points at ONE coordinate slice (solar Z, log g 4.0) over Teff 15000 to 30000 K, log-space interpolated in Teff and applicable only at that slice (`crates/sim/src/astro.rs:2645`)
+- the stellar rotation period at a target age Omega_star(t) <- the gyrochronological spin-down P_ref*(t/t_ref)^n aged forward from a reference epoch, over the cited braking exponent, valid only after the disk-release onset (`crates/sim/src/astro.rs:3051`)
 ### `crates/sim/src/environ.rs`
 
 - local water presence, rainfall, evaporation, runoff <- Clausius-Clapeyron saturation(local temperature) + Dalton evaporation + condensation where moisture exceeds saturation + downhill routing to the lowest neighbour. Water is NOT authored per cell; it falls out of temperature and terrain. (`crates/sim/src/environ.rs:1552`)
@@ -86,8 +87,9 @@ The 41 deriving subsystems below live OUTSIDE the authored floor. Each produces 
 - the interior column's secular thermal history <- radiogenic_decay (the isotope reservoir spending down over the world clock) feeding radiogenic_heat (the falling heat production) into the convection step, so the interior warms under radiogenic heating and cools as the sources decay; no authored cooling knob, the source history is the decaying reservoir (`crates/sim/src/geodynamics.rs:989`)
 ### `crates/sim/src/giants.rs`
 
-- the disk-truncation gas/angular-momentum residual ledger <- the static viscous-similarity gas profile partitioned at the resonant truncation radius R_t=f*R_L, the retained budget and the removed residual an interpretation-neutral conservation account for the binarity cap (`crates/sim/src/giants.rs:463`)
-- the giant-planet gap-opening mass M_gap <- the Crida 2006 thermal-viscous gap criterion P(q)=(3/4)(H/R_H)+50/(qR)=1 solved for the mass ratio, over the disk aspect ratio and Reynolds number, the accretion-termination scale (`crates/sim/src/giants.rs:593`)
+- the disk-truncation gas/angular-momentum residual ledger <- the static viscous-similarity gas profile partitioned at the resonant truncation radius R_t=f*R_L, the retained budget and the removed residual an interpretation-neutral conservation account for the binarity cap (`crates/sim/src/giants.rs:484`)
+- the truncation-residual system gas budget and its named sink label <- the interpretation-neutral truncation gas ledger under a selected physical reading, the removed residual accounted by the checked retained-plus-removed-equals-total conservation invariant and tagged with a named sink label under the dynamic reading (`crates/sim/src/giants.rs:676`)
+- the giant-planet gap-opening mass M_gap <- the Crida 2006 thermal-viscous gap criterion P(q)=(3/4)(H/R_H)+50/(qR)=1 solved for the mass ratio, over the disk aspect ratio and Reynolds number, the accretion-termination scale (`crates/sim/src/giants.rs:806`)
 ### `crates/sim/src/locomotion.rs`
 
 - movement speed in tiles/tick, and (inverted) the cell edge in metres <- a real ground speed (about 1.4 m/s) / the tile edge, at the 1 s/tick base. The cell size is NOT free: it is fixed by one real creature's speed x the tick. Body-side, a being's own speed derives from its size (morphology), not a plant/animal tag. (`crates/sim/src/locomotion.rs:89`)
