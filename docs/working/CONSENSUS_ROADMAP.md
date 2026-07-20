@@ -8,7 +8,8 @@ The retired long-form board is `docs/working/CONSENSUS_ROADMAP_HISTORY.md`, pres
 
 ## Active arcs
 
-- 2026-07-20  Moon tidal-heating kernel -> `claude/moon-tidal-heating` (off main, carries #193's survival filter; doc-review round done). `moons::tidal_heating_power_log10`, dormant; witness `henning_2009_tidal_heating` in `sources/registry.toml`. Detail in `HANDOFFS.md`.
+- 2026-07-20  Moon Branch A (CPD co-accretion) -> `claude/moon-cpd-coaccretion` (rebased onto main post-#212+#213), DORMANT. Mass budget (`moons_cpd::regular_satellite_mass_budget_earth`) + `cpd_thermal::viscous_heating_flux_log10` (F_vis). Blocking review: branch held dormant, pins fixed; next is the conservation-derived CPD transport state, not another free-standing heat flux. Geometry-factor seam flagged in `CPD_THERMAL_STRUCTURE_SCOPE.md`. Detail in `HANDOFFS.md`.
+- 2026-07-20  Moon tidal-heating kernel -> #213 MERGED to main (`e27ac145`). `moons::tidal_heating_power_log10`, dormant; witness `henning_2009_tidal_heating` in `sources/registry.toml`. Detail in `HANDOFFS.md`.
 - 2026-07-20  Disk-evolution -> #212 MERGED to main (`15302912`): truncation-residual disposition + windless Herbig EUV departure. Detail in `HANDOFFS.md`.
 - 2026-07-19  Mountains / mid-band (increment 3) -> #205 merged; wire waits on the thermoelastic ladder (`crates/physics/src/thermoelastic.rs`, rung 3 needs 3 anchors). Detail in `HANDOFFS.md`.
 - 2026-07-18  Remote agent #201 (disk-evolution wire) lands large and often -> rebase-onto-main integration, keep viewer/physics lanes disjoint.

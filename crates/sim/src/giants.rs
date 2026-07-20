@@ -1555,6 +1555,47 @@ pub fn giant_formation_on_derived_clock_banded(
     giant_formation_banded(embryo, disk, star.mass_ratio, gas, kh, tau_lo?, tau_hi?)
 }
 
+/// The FORMATION ACCRETION LUMINOSITY `L_acc = G M_p Mdot / R_p` (watts) of a giant during runaway gas accretion,
+/// returned as `log10(L_acc / W)`. This is the gravitational energy the infalling gas releases as it lands on the
+/// planet of mass `M_p` and radius `R_p` at rate `Mdot`, the dominant luminosity of a young giant and the source
+/// of the planet-irradiation flux heating its circumplanetary disc
+/// ([`crate::cpd_thermal::planet_irradiation_flux_log10`]).
+///
+/// `planet_mass_solar` is the planet mass in solar masses; `log10_mdot_kg_s` the gas accretion rate as
+/// `log10(Mdot / (kg s^-1))`; `planet_radius_au` the planet's (contracted) radius in AU during formation. All are
+/// the giant's own derived properties, so an alien giant is a data row. Computed in the log domain (the wide
+/// `G M_p Mdot` overflows Q32.32). `None` on a non-positive input or an overflow. This is the accretion-luminosity
+/// floor; a young giant's total luminosity also carries the slower Kelvin-Helmholtz contraction term, a named
+/// deeper rung not folded in here.
+pub fn formation_accretion_luminosity_log10_watts(
+    planet_mass_solar: Fixed,
+    log10_mdot_kg_s: Fixed,
+    planet_radius_au: Fixed,
+) -> Option<Fixed> {
+    if planet_mass_solar <= Fixed::ZERO || planet_radius_au <= Fixed::ZERO {
+        return None;
+    }
+    let ln10 = Fixed::from_int(10).ln();
+    let log10 = |v: Fixed| -> Option<Fixed> {
+        if v <= Fixed::ZERO {
+            return None;
+        }
+        v.ln().checked_div(ln10)
+    };
+    let log10_decimal =
+        |s: &str| -> Option<Fixed> { civsim_physics::saha::ln_of_decimal(s)?.checked_div(ln10) };
+    // log10(L_acc) = log10(G) + log10(M_sun) + log10(M_p/M_sun) + log10(Mdot) - log10(AU) - log10(R_p/AU).
+    let log10_g = log10_decimal(civsim_units::fundamentals::GRAVITATIONAL_CONSTANT.value)?;
+    let log10_m_sun = log10_decimal(SOLAR_MASS_KG)?;
+    let log10_au = log10_decimal(ASTRONOMICAL_UNIT_M)?;
+    log10_g
+        .checked_add(log10_m_sun)?
+        .checked_add(log10(planet_mass_solar)?)?
+        .checked_add(log10_mdot_kg_s)?
+        .checked_sub(log10_au)?
+        .checked_sub(log10(planet_radius_au)?)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2948,5 +2989,43 @@ mod tests {
             }
             other => panic!("an unresolved reading must refuse, got {other:?}"),
         }
+    }
+
+    // The formation accretion luminosity matches an independent f64 reference L_acc = G M_p Mdot / R_p, and lands
+    // at the young-Jupiter scale (~1e-4 to 1e-3 L_sun for a runaway-accreting giant).
+    #[test]
+    fn the_formation_accretion_luminosity_matches_a_reference() {
+        let m_solar = 9.54e-4_f64; // ~1 M_Jup
+        let mdot = 1e15_f64; // runaway gas accretion, kg/s
+        let r_p_au = 0.001_f64; // a puffy young giant, a few R_Jup
+        let g = 6.674e-11_f64;
+        let m_sun = 1.989e30_f64;
+        let au = 1.495_978_707e11_f64;
+        let l_ref = g * (m_solar * m_sun) * mdot / (r_p_au * au);
+        let got = formation_accretion_luminosity_log10_watts(
+            Fixed::from_ratio(954, 1_000_000),
+            Fixed::from_ratio((mdot.log10() * 1e6) as i64, 1_000_000),
+            Fixed::from_ratio(1, 1_000),
+        )
+        .expect("the accretion luminosity resolves");
+        assert!(
+            (got.to_f64_lossy() - l_ref.log10()).abs() < 1e-2,
+            "L_acc log10 {} vs reference {}",
+            got.to_f64_lossy(),
+            l_ref.log10()
+        );
+        // Fail-soft on a non-positive mass or radius.
+        assert!(formation_accretion_luminosity_log10_watts(
+            Fixed::ZERO,
+            Fixed::from_int(15),
+            Fixed::from_ratio(1, 1_000)
+        )
+        .is_none());
+        assert!(formation_accretion_luminosity_log10_watts(
+            Fixed::from_ratio(954, 1_000_000),
+            Fixed::from_int(15),
+            Fixed::ZERO
+        )
+        .is_none());
     }
 }
